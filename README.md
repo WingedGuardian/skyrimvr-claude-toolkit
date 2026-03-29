@@ -4,7 +4,7 @@ Turn your Skyrim VR install into an AI-assisted modding workshop. Claude Code be
 
 Built from hundreds of hours of hands-on Skyrim VR mod development.
 
-> **This isn't just a guide -- it's a complete environment with all the setup prework already done.**
+> **This isn't just a guide -- it's a complete environment with all the setup prework already done.** You just need to install, and begin building the mod of your dreams!
 
 ---
 
