@@ -8,7 +8,7 @@ Built from hundreds of hours of hands-on Skyrim VR mod development.
 
 ## What Is Claude Code?
 
-[Claude Code](https://claude.ai/code) is an AI assistant by Anthropic that runs directly on your computer. Unlike ChatGPT or regular Claude chat, it can **read your files, run commands, edit configs, execute scripts--and lieterally build mods FOR you** -- all with your permission. Think of it as having a modding expert sitting next to you who can actually touch your files.
+[Claude Code](https://claude.ai/code) is an AI assistant by Anthropic that runs directly on your computer. Unlike ChatGPT or regular Claude chat, it can **read your files, run commands, edit configs, execute scripts--and literally build mods FOR you** -- all with your permission. Think of it as having a modding expert sitting next to you who can actually touch your files.
 
 This toolkit teaches Claude Code everything it needs to know about Skyrim VR modding, and adds safety rails so it can't accidentally break your install.
 
@@ -16,10 +16,22 @@ This toolkit teaches Claude Code everything it needs to know about Skyrim VR mod
 
 ## What You Get
 
-- **600+ lines of Skyrim VR modding knowledge** -- Papyrus quirks, VR vs SSE differences, xEdit pitfalls, engine bugs, VRIK controller input, and more
-- **Safety hooks** -- Claude asks permission before editing any game file, can't touch ESP/ESM files directly, and automatically backs up everything it modifies
-- **Confidence system** -- Claude rates its confidence (0-100%) before proposing any change. No guessing.
-- **ESP scripting tools** -- Programmatic ESP inspection, diffing, and creation via [xeditlib](https://github.com/WingedGuardian/xeditlib)
+This isn't a guide that tells you what to install and configure yourself. It's a **complete, ready-to-run modding environment** -- every tool pre-calibrated, every known Skyrim VR quirk already documented, every footgun already identified and protected against. Extract it into your game folder, paste one prompt, and you're working.
+
+### A Toolset Built and Tested for Skyrim VR
+
+Standard modding tools don't just work for VR out of the box. Mods crash. Scripts behave differently. SKSE addresses don't match. The physics run at the wrong framerate. Tools written for SSE silently fail. This toolkit is calibrated specifically for **Skyrim VR** -- every piece of knowledge, every hook, every script was built and verified against a live VR install.
+
+The clearest example: **xeditlib**. XEditLib.dll is the engine inside SSEEdit/xEdit -- the most powerful ESP editing tool in the Skyrim modding ecosystem. Getting it working from Node.js (so Claude Code could actually read and write ESP files) required cracking open the Delphi FFI layer and fixing a cascade of subtle bugs: strings encoded as UCS-2 instead of UTF-8, `InitXEdit()` silently corrupting the call stack when declared wrong, booleans that are actually 2-byte integers, a non-obvious two-step string-return pattern. None of this is documented anywhere. We debugged it, fixed it, and published the working wrapper as [xeditlib](https://github.com/WingedGuardian/xeditlib) on npm so you never have to deal with any of it. Claude Code can now read any ESP file and write new ones -- something that wouldn't work at all before this toolkit.
+
+### Everything Included
+
+- **600+ lines of Skyrim VR modding knowledge** -- Papyrus quirks, VR vs SSE differences, xEdit pitfalls, engine bugs, VRIK controller input, and more. Loaded into every Claude session automatically.
+- **Safety hooks** -- Claude asks permission before editing any game file, can't touch ESP/ESM files directly, and automatically backs up everything it modifies with a full audit trail.
+- **Confidence system** -- Claude rates its confidence (0-100%) and lists its assumptions before proposing any change. No guessing, no "this should work."
+- **ESP scripting via xeditlib** -- Programmatic ESP inspection, diffing, and creation. The hard FFI work is already done. ([xeditlib on GitHub](https://github.com/WingedGuardian/xeditlib))
+- **Dry-run workflow** -- All ESP changes go through a read-only preview pass first. Claude shows you exactly what it will do before touching anything.
+- **Auto-setup** -- One prompt installs prerequisites, configures paths, sets up hooks, and optionally installs modding tools (Champollion, Caprica, Spriggit). No manual configuration.
 
 ---
 
