@@ -1,6 +1,6 @@
 # Skyrim VR Claude Code Modding Toolkit
 
-Turn your Skyrim VR install into an AI-assisted modding workshop. Claude Code becomes a knowledgeable assistant that understands Papyrus scripting, VR-specific quirks, ESP editing, and protects your game files from accidental damage.
+Turn your Skyrim VR install into an AI-assisted modding workshop. Claude Code becomes an automated mod expert who can build you nearly any mod you want! It naturally understands Papyrus scripting, VR-specific quirks, ESP editing, and protects your game files from accidental damage.
 
 Built from hundreds of hours of hands-on Skyrim VR mod development.
 
@@ -8,7 +8,7 @@ Built from hundreds of hours of hands-on Skyrim VR mod development.
 
 ## What Is Claude Code?
 
-[Claude Code](https://claude.ai/code) is an AI assistant by Anthropic that runs directly on your computer. Unlike ChatGPT or regular Claude chat, it can **read your files, run commands, edit configs, and execute scripts** -- all with your permission. Think of it as having a modding expert sitting next to you who can actually touch your files.
+[Claude Code](https://claude.ai/code) is an AI assistant by Anthropic that runs directly on your computer. Unlike ChatGPT or regular Claude chat, it can **read your files, run commands, edit configs, execute scripts--and lieterally build mods FOR you** -- all with your permission. Think of it as having a modding expert sitting next to you who can actually touch your files.
 
 This toolkit teaches Claude Code everything it needs to know about Skyrim VR modding, and adds safety rails so it can't accidentally break your install.
 
