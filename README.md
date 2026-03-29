@@ -4,13 +4,15 @@ Turn your Skyrim VR install into an AI-assisted modding workshop. Claude Code be
 
 Built from hundreds of hours of hands-on Skyrim VR mod development.
 
+> **This isn't just a guide -- it's a complete environment with all the setup prework already done.**
+
 ---
 
 ## What Is Claude Code?
 
 [Claude Code](https://claude.ai/code) is an AI assistant by Anthropic that runs directly on your computer. Unlike ChatGPT or regular Claude chat, it can **read your files, run commands, edit configs, execute scripts--and literally build mods FOR you** -- all with your permission. Think of it as having a modding expert sitting next to you who can actually touch your files.
 
-This toolkit teaches Claude Code everything it needs to know about Skyrim VR modding, and adds safety rails so it can't accidentally break your install.
+Most people who try to use Claude Code for modding spend days figuring out tool integrations, fighting weird Delphi DLL quirks, learning what Claude needs to know to be useful, and building safety guardrails so it doesn't break anything. This toolkit ships with all of that already solved. You get a working environment on day one.
 
 ---
 
@@ -36,6 +38,8 @@ The clearest example: **xeditlib**. XEditLib.dll is the engine inside SSEEdit/xE
 ---
 
 ## Setup (4 Steps)
+
+Setup is this short because the environment is already built. There's no configuration to figure out, no tools to manually wire up, no documentation to read before you start. Everything is pre-configured -- you just point it at your game folder and go.
 
 ### Step 1: Install Claude Code
 
@@ -94,7 +98,7 @@ Claude handles the rest. It will configure paths, install dependencies, set up t
 
 ## Using It
 
-From now on, whenever you open Claude Code in your Skyrim VR folder, the toolkit loads automatically. Just start talking:
+From now on, whenever you open Claude Code in your Skyrim VR folder, the full environment loads automatically -- knowledge base, safety hooks, tool integrations, everything. No setup required each session. Just start talking:
 
 **Investigating mods:**
 - *"What does the mod at nexusmods.com/skyrimspecialedition/mods/12345 do?"*
@@ -120,7 +124,7 @@ From now on, whenever you open Claude Code in your Skyrim VR folder, the toolkit
 
 ## What's in the Knowledgebase?
 
-The toolkit includes `KNOWLEDGEBASE.md` -- 600+ lines of documented knowledge:
+Other AI modding setups make you feed Claude information manually or re-explain the same quirks every session. This toolkit ships with a pre-loaded `KNOWLEDGEBASE.md` -- 600+ lines of documented knowledge that Claude reads automatically at the start of every session:
 
 | Topic | What's Covered |
 |-------|---------------|
@@ -131,11 +135,13 @@ The toolkit includes `KNOWLEDGEBASE.md` -- 600+ lines of documented knowledge:
 | **VR Controllers** | Why SKSE Input API fails in VR, VRIK API as the correct method, code examples |
 | **Debugging** | Debug.Notification limitations, Debug.Trace patterns, concurrent script handling |
 
-This knowledge grows over time -- Claude adds new discoveries as you work together.
+All of this is pre-loaded and ready to go. And it grows over time -- Claude adds new discoveries as you work together, so the environment gets smarter the more you use it.
 
 ---
 
 ## Safety Features
+
+These aren't things you configure -- they're already wired in. Every session, before Claude touches anything, these run automatically:
 
 | Protection | What It Does |
 |-----------|-------------|
