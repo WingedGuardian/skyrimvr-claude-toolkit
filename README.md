@@ -89,7 +89,9 @@ Copy this entire line and paste it into Claude Code:
 ```
 I just installed the Skyrim VR Claude Code Modding Toolkit into this folder. Run "bash setup.sh" to set
   everything up. Install any missing prerequisites (jq, Node.js) for me. After setup, ask me which optional modding
-  tools I'd like (xeditlib, Champollion, Caprica, Spriggit) and install the ones I pick. Be sure ti tailor the enviornment specifically to my Skyrim version and install (may or may not be VR). Explain everything in plain English and ask me any questions you may need to.
+  tools I'd like (xeditlib, Champollion, Caprica, Spriggit) and install the ones I pick. Be sure to tailor the enviornment
+  specifically to my Skyrim version and install (may or may not be VR). Explain everything in plain English and ask me any
+  questions you may need to.
 ```
 
 Claude handles the rest. It will configure paths, install dependencies, set up the safety hooks, and walk you through optional tool installation. Just answer any questions it asks.
