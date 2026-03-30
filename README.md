@@ -29,7 +29,7 @@ The clearest example: **xeditlib**. XEditLib.dll is the engine inside SSEEdit/xE
 ### Everything Included
 
 - **600+ lines of Skyrim VR modding knowledge** -- Papyrus quirks, VR vs SSE differences, xEdit pitfalls, engine bugs, VRIK controller input, and more. Loaded into every Claude session automatically.
-- **Safety hooks** -- Claude asks permission before editing any game file, can't touch ESP/ESM files directly, and automatically backs up everything it modifies with a full audit trail.
+- **Safety hooks** -- Claude asks permission before editing any game file, won't touch ESP/ESM files directly, and automatically backs up everything it modifies with a full audit trail.
 - **Confidence system** -- Claude rates its confidence (0-100%) and lists its assumptions before proposing any change. No guessing, no "this should work."
 - **ESP scripting via xeditlib** -- Programmatic ESP inspection, diffing, and creation. The hard FFI work is already done. ([xeditlib on GitHub](https://github.com/WingedGuardian/xeditlib))
 - **Dry-run workflow** -- All ESP changes go through a read-only preview pass first. Claude shows you exactly what it will do before touching anything.
