@@ -257,7 +257,6 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim VR moddi
 - Off: fixes some UI problems but creates visible darker/lighter seam between eyes
 - On: fixes visual seam but breaks UI in some configurations
 - Core tension between VR visual requirements and UI rendering
-- Community Shaders has known broken UI issues in VR
 
 ### Weather
 
