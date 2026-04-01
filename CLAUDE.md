@@ -105,6 +105,25 @@ All ESP modifications via xelib scripts must follow this two-pass workflow:
 
 This prevents accidental ESP corruption. The hook system blocks direct ESP writes, but xelib operates through Bash and can write via `SaveFile()`.
 
+## Spriggit ESP Workflow (Preferred for Editing)
+
+For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit serializes ESP files to human-readable YAML that Claude can edit directly with its native Edit tool — no FFI, no scripting layer, and the YAML diffs cleanly in git.
+
+### Workflow
+1. **Serialize**: `spriggit serialize --InputPath "Data/MyMod.esp" --OutputPath "/tmp/mymod-yaml" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "0.40.0"`
+2. **Edit**: Read and modify the YAML files directly (Claude's Edit tool works natively on these)
+3. **Review**: User reviews the YAML changes (human-readable diffs)
+4. **Deserialize**: `spriggit deserialize --InputPath "/tmp/mymod-yaml" --OutputPath "Data/MyMod.esp"`
+
+### When to Use Which
+- **Spriggit**: Creating new ESPs, editing existing records, any task where you're modifying specific fields. Simpler, no setup beyond `dotnet tool install`.
+- **xeditlib**: Bulk inspection, programmatic traversal (e.g., "find all spells with mismatched casting types"), diffing two ESPs, analysis scripts. Better for read-heavy operations across many records.
+
+### Spriggit Notes
+- `spriggit-meta.json` is required in the YAML root for deserialization
+- ESP header version must be 1.7 for SSE/VR (not 1.0)
+- `--GameRelease` is only for serialize, NOT deserialize
+
 ## Safety Rules
 
 Hooks in `.claude/settings.json` enforce these automatically:

@@ -31,8 +31,10 @@ The clearest example: **xeditlib**. XEditLib.dll is the engine inside SSEEdit/xE
 - **600+ lines of Skyrim VR modding knowledge** -- Papyrus quirks, VR vs SSE differences, xEdit pitfalls, engine bugs, VRIK controller input, and more. Loaded into every Claude session automatically.
 - **Safety hooks** -- Claude asks permission before editing any game file, won't touch ESP/ESM files directly, and automatically backs up everything it modifies with a full audit trail.
 - **Confidence system** -- Claude rates its confidence (0-100%) and lists its assumptions before proposing any change. No guessing, no "this should work."
-- **ESP scripting via xeditlib** -- Programmatic ESP inspection, diffing, and creation. The hard FFI work is already done. ([xeditlib on GitHub](https://github.com/WingedGuardian/xeditlib))
+- **ESP editing via Spriggit** -- Serialize any ESP to human-readable YAML, edit it directly, deserialize back. Claude's native file editing works on YAML out of the box — no FFI layer, no scripting, and changes diff cleanly in git.
+- **ESP analysis via xeditlib** -- Programmatic inspection, diffing, and bulk queries across records. The hard Delphi FFI work is already done. ([xeditlib on GitHub](https://github.com/WingedGuardian/xeditlib))
 - **Dry-run workflow** -- All ESP changes go through a read-only preview pass first. Claude shows you exactly what it will do before touching anything.
+- **Claude Code skills** -- Slash commands like `/inspect-esp MyMod.esp` and `/port-to-vr` that trigger guided workflows. Auto-loading context that injects critical Skyrim gotchas when Claude works with game files.
 - **Auto-setup** -- One prompt installs prerequisites, configures paths, sets up hooks, and optionally installs modding tools (Champollion, Caprica, Spriggit). No manual configuration.
 
 ---
@@ -202,4 +204,6 @@ MIT -- see [LICENSE](LICENSE).
 
 - [xeditlib](https://github.com/WingedGuardian/xeditlib) -- Node.js wrapper for XEditLib.dll
 - [zEdit](https://github.com/z-edit/zedit) -- Source of XEditLib.dll
+- [Spriggit](https://github.com/Mutagen-Modding/Spriggit) -- ESP to YAML serialization by Mutagen
+- [Spooky's AutoMod Toolkit](https://github.com/SpookyPirate/spookys-automod-toolkit) -- Inspiration for expanded CLI capabilities
 - [Claude Code](https://claude.ai/code) by Anthropic
