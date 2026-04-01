@@ -1,7 +1,6 @@
 ---
 name: inspect-esp
 description: Inspect an ESP/ESM plugin file and show a summary of all records
-disable-model-invocation: true
 argument-hint: <PluginName.esp>
 ---
 

@@ -1,7 +1,6 @@
 ---
 name: port-to-vr
 description: Guided checklist for porting an SSE-only mod to Skyrim VR
-disable-model-invocation: true
 argument-hint: "[mod name or path]"
 ---
 
