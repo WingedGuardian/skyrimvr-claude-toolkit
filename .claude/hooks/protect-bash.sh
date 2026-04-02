@@ -33,4 +33,14 @@ echo "$COMMAND" | grep -qiE 'sed\s+-i.*(Skyrim|/Data/|/My Games/Skyrim)' && ask 
 echo "$COMMAND" | grep -qiE '\.(esp|esm|esl|bsa|ba2)\b' && ask "Command references plugin/archive files -- confirm: $COMMAND"
 echo "$COMMAND" | grep -qiE '(loadorder\.txt|plugins\.txt)' && ask "Command references load order -- confirm: $COMMAND"
 
+# === CONFIRM -- AutoMod CLI write commands (require confirmation unless --dry-run) ===
+# ESP write commands
+if echo "$COMMAND" | grep -qiE '(automod|SpookysAutomod).*\b(add-weapon|add-spell|add-armor|add-npc|add-quest|add-perk|add-book|add-global|add-faction|add-leveled-item|add-form-list|add-encounter-zone|add-location|add-outfit|attach-script|set-property|auto-fill|merge|generate-seq)\b'; then
+    echo "$COMMAND" | grep -qiE '\-\-dry-run' || ask "AutoMod ESP write command without --dry-run -- confirm: $COMMAND"
+fi
+# NIF write commands (always confirm -- these modify mesh files)
+echo "$COMMAND" | grep -qiE '(automod|SpookysAutomod).*\b(replace-textures|rename-strings|fix-eyes|scale)\b' && ask "AutoMod NIF write command -- confirm: $COMMAND"
+# Archive write commands (always confirm)
+echo "$COMMAND" | grep -qiE '(automod|SpookysAutomod).*\b(archive\s+(create|add-files|remove-files|replace-files|update-file|merge|optimize))\b' && ask "AutoMod archive write command -- confirm: $COMMAND"
+
 exit 0

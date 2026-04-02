@@ -33,8 +33,12 @@ The clearest example: **xeditlib**. XEditLib.dll is the engine inside SSEEdit/xE
 - **Confidence system** -- Claude rates its confidence (0-100%) and lists its assumptions before proposing any change. No guessing, no "this should work."
 - **ESP editing via Spriggit** -- Serialize any ESP to human-readable YAML, edit it directly, deserialize back. Claude's native file editing works on YAML out of the box — no FFI layer, no scripting, and changes diff cleanly in git.
 - **ESP analysis via xeditlib** -- Programmatic inspection, diffing, and bulk queries across records. The hard Delphi FFI work is already done. ([xeditlib on GitHub](https://github.com/WingedGuardian/xeditlib))
-- **Dry-run workflow** -- All ESP changes go through a read-only preview pass first. Claude shows you exactly what it will do before touching anything.
-- **Claude Code skills** -- Slash commands like `/inspect-esp MyMod.esp` and `/port-to-vr` that trigger guided workflows. Auto-loading context that injects critical Skyrim gotchas when Claude works with game files.
+- **NIF mesh tools** -- Inspect, retexture, scale, fix eye-ghosting, and verify mesh files. Detect VR-breaking skeleton nodes.
+- **BSA archive tools** -- Full read/write/merge/diff on BSA archives. Extract individual files, create new archives, update contents.
+- **Audio processing** -- Extract, convert, and create Skyrim voice files (FUZ/XWM/WAV).
+- **MCM menu generation** -- Programmatically create SkyUI mod configuration menus with toggles, sliders, and pages.
+- **Dry-run workflow** -- All ESP and asset changes go through a preview pass first. Claude shows you exactly what it will do before touching anything.
+- **Claude Code skills** -- Slash commands like `/inspect-esp MyMod.esp`, `/port-to-vr`, and `/create-mod` that trigger guided workflows. Auto-loading context that injects critical Skyrim gotchas when Claude works with game files.
 - **Auto-setup** -- One prompt installs prerequisites, configures paths, sets up hooks, and optionally installs modding tools (Champollion, Caprica, Spriggit). No manual configuration.
 
 ---
@@ -91,7 +95,8 @@ Copy this entire line and paste it into Claude Code:
 ```
 I just installed the Skyrim VR Claude Code Modding Toolkit into this folder. Run "bash setup.sh" to set
   everything up. Install any missing prerequisites (jq, Node.js) for me. After setup, ask me which optional modding
-  tools I'd like (xeditlib, Champollion, Caprica, Spriggit) and install the ones I pick. Be sure to tailor the enviornment
+  tools I'd like (xeditlib, Champollion, Caprica, Spriggit, AutoMod CLI) and install the ones I pick. AutoMod CLI adds
+  NIF mesh editing, BSA archive tools, audio processing, and MCM menu generation. Be sure to tailor the environment
   specifically to my Skyrim version and install (may or may not be VR). Explain everything in plain English and ask me any
   questions you may need to.
 ```

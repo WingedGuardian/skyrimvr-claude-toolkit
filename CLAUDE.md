@@ -24,8 +24,32 @@ All under `tools/`:
 | **Caprica** | Compile Papyrus `.psc` → `.pex` | `tools/Caprica/Caprica.exe --game skyrim --import "Data/Scripts/Source" input.psc` |
 | **XEditLib.dll** | Programmatic ESP/ESM reading via FFI | Load with koffi in Node.js (see below) |
 | **Spriggit** | ESP ↔ YAML/JSON conversion (.NET) | `dotnet tool run spriggit serialize ...` |
+| **AutoMod CLI** | NIF meshes, BSA archives, audio, MCM, ESP one-liners | `bash tools/automod-cli.sh <module> <command> --json` |
 
-> **Note**: Install tools you need into a `tools/` folder in your game directory. See the [xeditlib](https://github.com/WingedGuardian/xeditlib) repo for XEditLib setup.
+> **Note**: Install tools you need into a `tools/` folder in your game directory. See the [xeditlib](https://github.com/WingedGuardian/xeditlib) repo for XEditLib setup. AutoMod CLI is installed via the setup prompt (clones and builds [SpookyPirate's AutoMod Toolkit](https://github.com/SpookyPirate/spookys-automod-toolkit)).
+
+## AutoMod CLI
+
+A .NET CLI at `tools/automod/` for NIF meshes, BSA archives, audio, MCM menus, and quick ESP record creation. Call via wrapper:
+```bash
+bash tools/automod-cli.sh <module> <command> [args] --json
+```
+
+**Always use `--json`** for parseable output. **Always use `--dry-run` first** for any write command.
+
+| Module | Key Commands | Use For |
+|--------|-------------|---------|
+| **nif** | `info`, `list-textures`, `replace-textures`, `fix-eyes`, `scale`, `verify` | Mesh inspection and editing |
+| **archive** | `info`, `list`, `extract`, `create`, `add-files`, `diff`, `merge` | BSA/BA2 full CRUD |
+| **audio** | `info`, `extract-fuz`, `create-fuz`, `wav-to-xwm` | Voice files (FUZ/XWM/WAV) |
+| **mcm** | `create`, `add-toggle`, `add-slider`, `validate` | SkyUI MCM menus |
+| **esp** | `add-weapon`, `add-spell`, `add-armor`, `add-npc`, `add-quest`, etc. | Quick one-liner record creation |
+
+### When to Use Which Tool
+- **AutoMod `esp`**: Quick one-liner additions. Best for simple records.
+- **Spriggit**: Complex multi-field editing via YAML. Best for detailed work.
+- **xeditlib**: Programmatic traversal and diffing. Best for analysis.
+- **AutoMod `nif`/`archive`/`audio`/`mcm`**: Only tools available for these operations.
 
 ## XEditLib.dll API (Critical Notes)
 
