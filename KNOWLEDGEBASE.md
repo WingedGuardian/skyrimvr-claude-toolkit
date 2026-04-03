@@ -605,6 +605,45 @@ This gives the horizontal direction from body center to sword hand — accurate 
 
 ---
 
+## Save File Analysis
+
+### .ess Save Format
+
+SSE, AE, and VR saves all use the same `.ess` format with LZ4 compression. The compressed block is preceded by a `(decompressedSize, compressedSize)` uint32 pair. Typical decompressed sizes are 20-60MB.
+
+**Decompressed structure:**
+- **Bytes 0-5**: Preamble
+- **Byte 5**: Regular plugin count (uint8), followed by length-prefixed UTF-8 plugin names
+- **After regular plugins**: Light plugin count (uint16), followed by length-prefixed names
+- **~100KB-22MB**: Global data tables, ChangeForms (binary, mostly non-ASCII)
+- **~22MB+**: Papyrus string table (script names, variable names, type annotations)
+- **End**: FormID reference tables (dense FormID arrays)
+
+### What Can Be Done
+
+- **Binary search** for any FormID (as LE uint32), string, or byte pattern
+- **Count occurrences** to detect accumulation or duplication bugs
+- **Read context** around any match (hex + ASCII dump)
+- **Extract plugin lists** (both regular and light/ESL plugins)
+- **String search** for script names, variable names, EditorIDs
+
+### What Cannot Be Done (Without Full Parser)
+
+- Parse structured Papyrus instance data (variable values, active effect state)
+- Edit and write back a valid save (requires full format understanding)
+- Browse by record type (use ReSaver for that — Java GUI)
+
+### Common Debugging Use Cases
+
+- **Orphaned scripts**: Search for a removed mod's script names. If still present, the save has orphaned instances.
+- **Effect accumulation**: Search for a spell's FormID and count matches. More than expected = stacking bug.
+- **Mod footprint**: Search for a mod's EditorID prefix to see how many references it left.
+- **Save bloat tracking**: Compare decompressed sizes across saves.
+
+*Tool: `scripts/read-save.py` — requires Python + `lz4` package (`pip install lz4`)*
+
+---
+
 ## Hook Candidates
 
 A living list of potential safety hooks identified during work. Evaluated but not necessarily implemented.

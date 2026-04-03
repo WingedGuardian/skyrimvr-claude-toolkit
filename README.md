@@ -164,6 +164,7 @@ Other AI modding setups make you feed Claude information manually or re-explain 
 | **Engine Quirks** | Ability spells, vanilla bugs, SKSE plugin compatibility warnings |
 | **VR Controller Input** | SKSE Input API limitations in VR, VRIK API as the correct method, code examples (VR section) |
 | **Debugging** | Debug.Notification limitations, Debug.Trace patterns, concurrent script handling |
+| **Save File Analysis** | .ess format (LZ4 decompression), binary search for FormIDs/strings, plugin list extraction, orphaned script detection |
 
 All of this is pre-loaded and ready to go. And it grows over time -- Claude adds new discoveries as you work together, so the environment gets smarter the more you use it.
 
