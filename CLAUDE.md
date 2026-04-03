@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A modded Skyrim VR installation managed by Vortex.
+A modded Skyrim installation managed by Vortex. (Adapt paths and version-specific notes to your Skyrim version: SE, AE, VR, or LE.)
 
 ## Key Paths
 

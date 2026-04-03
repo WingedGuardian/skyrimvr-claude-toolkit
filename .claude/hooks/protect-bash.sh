@@ -1,5 +1,5 @@
 #!/bin/bash
-# Protect against destructive or file-modifying bash commands in Skyrim VR modding environment
+# Protect against destructive or file-modifying bash commands in Skyrim modding environment
 #
 # SETUP: Update the JQ variable below to point to your jq installation.
 #   Install jq: winget install jqlang.jq
@@ -17,7 +17,7 @@ ask()  { "$JQ" -n --arg r "$1" '{hookSpecificOutput:{hookEventName:"PreToolUse",
 # Prevent deleting the game installation directory
 echo "$COMMAND" | grep -qiE 'rm\s+(-[a-z]*f[a-z]*\s+)?["'"'"']?(C:/|/c/).*Skyrim' && deny "BLOCKED: Cannot delete the game installation directory."
 # Prevent deleting Skyrim config directory
-echo "$COMMAND" | grep -qiE 'rm\s+(-[a-z]*f[a-z]*\s+)?["'"'"']?(C:/|/c/).*Documents/My Games/Skyrim' && deny "BLOCKED: Cannot delete the Skyrim VR config directory."
+echo "$COMMAND" | grep -qiE 'rm\s+(-[a-z]*f[a-z]*\s+)?["'"'"']?(C:/|/c/).*Documents/My Games/Skyrim' && deny "BLOCKED: Cannot delete the Skyrim config directory."
 # Prevent deleting Bethesda registry keys
 echo "$COMMAND" | grep -qiE '(reg\s+delete|Remove-ItemProperty.*Bethesda)' && deny "BLOCKED: Cannot delete Bethesda registry keys."
 

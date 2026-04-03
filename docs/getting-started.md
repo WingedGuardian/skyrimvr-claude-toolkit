@@ -6,9 +6,9 @@ This is the extended version of the setup instructions. If the README was enough
 
 ## What You're Setting Up
 
-You're giving Claude Code (an AI assistant) a "brain upgrade" for Skyrim VR modding. After setup, you can talk to it in plain English and it will:
+You're giving Claude Code (an AI assistant) a "brain upgrade" for Skyrim modding. After setup, you can talk to it in plain English and it will:
 
-- Know 600+ Skyrim VR quirks, pitfalls, and workarounds
+- Know 600+ Skyrim quirks, pitfalls, and workarounds (including VR-specific sections)
 - Protect your game files from accidental damage
 - Decompile and analyze Papyrus scripts
 - Inspect ESP/ESM mod files
@@ -60,15 +60,15 @@ Claude Code is made by Anthropic (the company behind Claude AI). It's like ChatG
 
 ---
 
-## Step 2: Find Your Skyrim VR Folder
+## Step 2: Find Your Skyrim Folder
 
 1. Open **Steam**
 2. Click **Library** (at the top)
-3. Find **The Elder Scrolls V: Skyrim VR** in your game list
+3. Find **Skyrim VR** (or **Skyrim Special Edition**) in your game list
 4. Right-click it > **Properties**
 5. Click **Installed Files** (on the left side)
 6. Click **Browse...**
-7. A Windows Explorer window opens -- **this is your Skyrim VR folder**
+7. A Windows Explorer window opens -- **this is your Skyrim folder**
 8. Click the **address bar** at the top of that window (where it shows the folder path)
 9. The path turns into selectable text -- **copy it** (Ctrl+C)
 
@@ -87,14 +87,14 @@ Common paths look like:
 2. Find the downloaded `.zip` file (usually in your Downloads folder)
 3. Right-click the zip file
 4. Click **Extract All...**
-5. In the "Extract to" box, **paste your Skyrim VR folder path** from Step 2
+5. In the "Extract to" box, **paste your Skyrim folder path** from Step 2
 6. Click **Extract**
 
 The toolkit files blend in alongside your existing game files. Nothing is overwritten -- the toolkit only adds new files (CLAUDE.md, KNOWLEDGEBASE.md, setup.sh, and the .claude/ folder).
 
 ---
 
-## Step 4: Open Claude Code in Your Skyrim VR Folder
+## Step 4: Open Claude Code in Your Skyrim Folder
 
 ### Desktop App:
 
@@ -125,7 +125,7 @@ You should see Claude Code's interface -- a text area where you can type message
 Copy this entire block and paste it into Claude Code:
 
 ```
-I just installed the Skyrim VR Claude Code Modding Toolkit into this folder. Run "bash setup.sh" to set everything up. Install any missing prerequisites (jq, Node.js) for me. After setup, ask me which optional modding tools I'd like (xeditlib, Champollion, Caprica, Spriggit) and install the ones I pick. Explain everything in plain English -- I may be new to command-line tools.
+I just installed the Skyrim Claude Code Modding Toolkit into this folder. Run "bash setup.sh" to set everything up. Install any missing prerequisites (jq, Node.js) for me. After setup, ask me which optional modding tools I'd like (xeditlib, Champollion, Caprica, Spriggit, AutoMod CLI) and install the ones I pick. Be sure to tailor the environment specifically to my Skyrim version and install (may or may not be VR). Explain everything in plain English and ask me any questions you may need to.
 ```
 
 Press Enter. Claude will:
@@ -148,7 +148,7 @@ Just answer its questions as they come up. If something fails, it will explain t
 
 From now on, to use the toolkit:
 1. Open Claude Code
-2. Navigate to your Skyrim VR folder (`cd "your path"`)
+2. Navigate to your Skyrim folder (`cd "your path"`)
 3. Start talking
 
 The toolkit loads automatically every time. No re-setup needed.
@@ -166,7 +166,7 @@ The toolkit loads automatically every time. No re-setup needed.
 - Close and reopen Claude Code
 
 **"setup.sh not found"**
-- Make sure you extracted the toolkit into your Skyrim VR folder (Step 3)
+- Make sure you extracted the toolkit into your Skyrim folder (Step 3)
 - Make sure Claude Code is running in that folder (Step 4)
 
 **Something else?**

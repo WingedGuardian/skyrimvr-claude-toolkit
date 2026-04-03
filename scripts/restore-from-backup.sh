@@ -8,7 +8,7 @@ BACKUP_DIR="${GAME_DIR:-.}/.claude/backups"
 
 if [ ! -d "$BACKUP_DIR" ]; then
     echo "No backup directory found at $BACKUP_DIR"
-    echo "Set GAME_DIR to your Skyrim VR install path, or run from the game directory."
+    echo "Set GAME_DIR to your Skyrim install path, or run from the game directory."
     exit 1
 fi
 

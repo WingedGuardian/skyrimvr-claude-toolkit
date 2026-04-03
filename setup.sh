@@ -1,7 +1,7 @@
 #!/bin/bash
-# Skyrim VR Claude Code Toolkit -- Setup Script
+# Skyrim Claude Code Toolkit -- Setup Script
 #
-# This script is designed to be run FROM your Skyrim VR folder, after
+# This script is designed to be run FROM your Skyrim folder, after
 # extracting the toolkit zip into it. It configures everything in-place.
 #
 # Usage: bash setup.sh
@@ -12,7 +12,7 @@ GAME_DIR="$(pwd)"
 USERNAME="$(whoami)"
 
 echo "============================================"
-echo " Skyrim VR Claude Code Toolkit -- Setup"
+echo " Skyrim Claude Code Toolkit -- Setup"
 echo "============================================"
 echo ""
 echo "Game directory: $GAME_DIR"
@@ -21,7 +21,7 @@ echo ""
 # --- Verify this looks like a Skyrim install ---
 if [ ! -f "$GAME_DIR/SkyrimVR.exe" ] && [ ! -f "$GAME_DIR/SkyrimSE.exe" ]; then
     echo "WARNING: No SkyrimVR.exe or SkyrimSE.exe found here."
-    echo "This script should be run from your Skyrim VR installation folder."
+    echo "This script should be run from your Skyrim installation folder."
     echo ""
     echo "Are you sure this is the right directory?"
     read -p "Continue anyway? (y/n) " CONTINUE
@@ -31,7 +31,7 @@ fi
 # --- Verify toolkit files are present ---
 if [ ! -f "$GAME_DIR/KNOWLEDGEBASE.md" ] || [ ! -f "$GAME_DIR/.claude/hooks/protect-bash.sh" ]; then
     echo "ERROR: Toolkit files not found in this directory."
-    echo "Make sure you extracted the toolkit zip into your Skyrim VR folder first."
+    echo "Make sure you extracted the toolkit zip into your Skyrim folder first."
     exit 1
 fi
 
@@ -70,10 +70,10 @@ echo "  Found jq: $JQ_PATH"
 # --- Detect user paths ---
 DOCUMENTS_DIR="C:/Users/$USERNAME/Documents"
 echo ""
-if [ -d "$DOCUMENTS_DIR/My Games/Skyrim VR" ]; then
-    echo "  Found Skyrim VR configs: $DOCUMENTS_DIR/My Games/Skyrim VR/"
+if [ -d "$DOCUMENTS_DIR/My Games/Skyrim VR" ] || [ -d "$DOCUMENTS_DIR/My Games/Skyrim Special Edition" ]; then
+    echo "  Found Skyrim configs in: $DOCUMENTS_DIR/My Games/"
 else
-    echo "  WARNING: Skyrim VR config not found at $DOCUMENTS_DIR/My Games/Skyrim VR"
+    echo "  WARNING: Skyrim config not found at $DOCUMENTS_DIR/My Games/"
     echo "  You may need to update paths in CLAUDE.md manually."
 fi
 
@@ -117,7 +117,7 @@ echo "============================================"
 echo ""
 echo "Installed and configured:"
 echo "  CLAUDE.md                        -- Project instructions (paths filled in)"
-echo "  KNOWLEDGEBASE.md                 -- 600+ lines of Skyrim VR modding knowledge"
+echo "  KNOWLEDGEBASE.md                 -- 600+ lines of Skyrim modding knowledge"
 echo "  .claude/settings.json            -- Hook configuration"
 echo "  .claude/hooks/protect-bash.sh    -- Guards dangerous commands"
 echo "  .claude/hooks/protect-files.sh   -- Guards file edits"

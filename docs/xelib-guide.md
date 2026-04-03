@@ -1,4 +1,4 @@
-# xelib Guide for Skyrim VR Modding
+# xelib Guide for Skyrim Modding
 
 ## What is xelib?
 
@@ -19,7 +19,7 @@ This installs:
 
 ## Critical Setup: Registry Key
 
-XEditLib reads your game path from the Windows registry. For Skyrim VR, you need the **SSE registry key** (not VR):
+XEditLib reads your game path from the Windows registry. You need the **SSE registry key** (even for VR):
 
 ```
 HKLM\SOFTWARE\WOW6432Node\Bethesda Softworks\Skyrim Special Edition

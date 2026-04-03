@@ -2,7 +2,7 @@
 
 ## Why Safety Matters in Skyrim Modding
 
-A modded Skyrim VR installation with hundreds of plugins is a complex, interdependent system. Small changes can have cascading effects:
+A modded Skyrim installation with hundreds of plugins is a complex, interdependent system. Small changes can have cascading effects:
 
 - A bad ESP edit can corrupt save files permanently
 - An incorrect INI setting can cause crashes with no obvious error

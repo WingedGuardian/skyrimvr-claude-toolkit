@@ -1,6 +1,6 @@
-# Skyrim VR Modding Knowledgebase
+# Skyrim Modding Knowledgebase
 
-A living document of quirks, gotchas, and hard-won lessons about Skyrim VR modding. Everything here was either discovered through debugging or verified via web research. Always consult this before making changes.
+A living document of quirks, gotchas, and hard-won lessons about Skyrim modding. Originally built on a Skyrim VR install, but most content applies to all versions (SE, AE, VR, LE). VR-specific items are marked with **(VR)** inline. Everything here was either discovered through debugging or verified via web research. Always consult this before making changes.
 
 ---
 
@@ -79,7 +79,7 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim VR moddi
 - `@UNAPPLYSPELL` removes the applied effect. Equivalent to `RemoveSpell()` — NOT `DispelSpell()`, since PI primarily uses this for ability-type spells which DispelSpell excludes.
 - `Spell.Cast()` CAN stack effects if called multiple times. `AddSpell()` for abilities CANNOT stack.
 
-### PlayIdle() and Animations in VR
+### PlayIdle() and Animations
 
 - `PlayIdle()` on the player is unreliable in VR. VRIK overrides the upper-body skeleton via IK from controllers.
 - Even if the idle fires, VRIK fights the pose on head and arms in real-time.
@@ -187,7 +187,9 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim VR moddi
 
 ---
 
-## VR vs SSE Differences
+## Version-Specific Differences
+
+> This section documents known behavioral differences across Skyrim versions. Most was discovered on VR but the patterns are useful when porting between any versions.
 
 ### Engine Foundation
 
@@ -229,7 +231,7 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim VR moddi
 - Standard SE `PlayerCamera` interactions may not function identically
 - `Game.ShakeCamera()` adds noise to the third-person camera node — in VR this is mostly inert (minor artifacts at best, nauseating at worst). Generally safe to leave in.
 
-### Player Control Functions in VR
+### Player Control Functions
 
 **CORRECTED + VERIFIED from reference VR mod (`JudgementCutEnd.esp`):**
 
@@ -278,18 +280,6 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim VR moddi
 - Locomotion: teleport vs smooth (VR-specific)
 - Hand-based item interaction (picking up, holding, throwing via HIGGS)
 - Motion archery and melee (hand gestures trigger attacks)
-
-### VR Playroom
-
-- Scripts running in VR playroom cause incompatibilities
-- Papyrus Tweaks NG pauses non-VR-playroom scripts until player exits
-
-### OpenComposite / OpenXR
-
-- Skyrim VR ships with OpenVR (SteamVR) support
-- OpenComposite bypasses SteamVR → directly to OpenXR
-- Significant performance gains, reduced CPU/GPU load
-- Especially beneficial for Quest 3 via Virtual Desktop
 
 ### Mod Framework VR Status
 
@@ -470,19 +460,10 @@ This applies to `getValue`, `setValue`, `setFloatValue` — all path-based funct
 - `abPreventEquip` flag in `UnequipItem` doesn't work on NPCs
 - `ForceThirdPerson`/`ForceFirstPerson` can't determine current camera mode
 - Forcing view change causes immediate revert
-- Bashing costs no stamina in vanilla Skyrim VR (infinite stagger exploit)
 
 ### SKSE Plugin Version Compatibility
 
-**PapyrusTweaks NG v4.1.1 (Oct 2025) breaks NPC dialogue in VR.** The newer version's `ValidationSignaturesHook` and `AttemptFunctionCallHook` cause NPC dialogue options to never appear — NPC speaks their greeting but the player choice menu doesn't show. **Use the stable 2023 version instead.** Symptom: NPC speaks but dialogue menu never opens; Papyrus log shows many `Unbound native function` and `does not match existing signature` errors at load time.
-
-**po3_PapyrusExtender updates can break backward compatibility.** The March 2025 update changed function signatures for `PO3_SKSEFunctions`, causing mods compiled against older versions to fail with "does not match existing signature" errors. Functions like `GetSkinColor`, `GetHairColor`, `GetAllSpellsInMod`, `ToggleChildNode`, `ResetActor3D` all affected.
-
-### Engine Fixes Available
-
-- **Engine Fixes VR**: tree LOD visibility, BSFadeNode offset corrections, volume settings persistence
-- **Poached Bugs VR**: ports Scrambled Bugs fixes to VR (spellcasting, texture, weapon issues)
-- **Papyrus Tweaks NG**: script execution fixes, VR playroom script pausing — **use 2023 version, NOT v4.1.1** (see above)
+SKSE plugin updates can break backward compatibility. When troubleshooting, check for `does not match existing signature` errors in Papyrus logs — this usually means a mod was compiled against a different SKSE plugin version than what's installed. Rolling back to the previous version of the SKSE plugin often resolves the issue.
 
 ---
 
@@ -510,7 +491,7 @@ This applies to `getValue`, `setValue`, `setFloatValue` — all path-based funct
 
 ---
 
-## VR Controller Input Detection
+## VR Controller Input Detection (VR Only)
 
 ### SKSE Input API — DOES NOT WORK for VR Controllers
 - `Input.GetMappedKey("Right Attack/Block")` returns **-1** in VR — VR controllers are not mapped through DirectInput keycodes
@@ -522,7 +503,7 @@ This applies to `getValue`, `setValue`, `setFloatValue` — all path-based funct
 ### VRIK API — THE Correct Method for VR Input
 All functions are native globals on the `VRIK` scriptname (`Data/Scripts/VRIK.psc`).
 
-**Button Press Detection (all confirmed working on Quest 3 via Virtual Desktop + OpenComposite):**
+**Button Press Detection (confirmed working in VR):**
 - `VRIK.VrikIsTriggerPressed(Bool onLeft)` — **WORKS** clean press/release, zero false positives
 - `VRIK.VrikIsGripPressed(Bool onLeft)` — **WORKS**
 - `VRIK.VrikIsThumbstickPressed(Bool onLeft)` — **WORKS**
@@ -531,7 +512,7 @@ All functions are native globals on the `VRIK` scriptname (`Data/Scripts/VRIK.ps
 - Pass `false` for right hand, `true` for left hand
 
 **Touch Detection (capacitive):**
-- `VRIK.VrikIsTriggerTouched(false)` returns **TRUE at rest** on Quest 3 — finger resting on capacitive trigger. Use `Pressed` not `Touched` for intentional input.
+- `VRIK.VrikIsTriggerTouched(false)` may return **TRUE at rest** on some headsets — finger resting on capacitive trigger. Use `Pressed` not `Touched` for intentional input.
 
 **Position Tracking (confirmed working):**
 - `VRIK.VrikGetHandX/Y/Z(Bool onLeft)` — world-space hand position, updates in real-time
@@ -539,7 +520,7 @@ All functions are native globals on the `VRIK` scriptname (`Data/Scripts/VRIK.ps
 - Positions are real tracking data; change when player moves
 
 **Controller Info:**
-- `VRIK.VrikGetControllerType()` — Quest 3 reports as **0 (Rift/Oculus)**
+- `VRIK.VrikGetControllerType()` — returns controller type enum (0 = Rift/Oculus, etc.)
 
 **Axis Values:**
 - `VRIK.VrikGetAxisX/Y(Bool onLeft)` — thumbstick X/Y positions
@@ -595,7 +576,7 @@ This gives the horizontal direction from body center to sword hand — accurate 
 
 ---
 
-## Papyrus Debugging in VR
+## Papyrus Debugging
 
 ### Debug.Notification() Limitations
 - Skyrim displays **one notification at a time** with ~5 second delay before the next in queue
@@ -604,7 +585,7 @@ This gives the horizontal direction from body center to sword hand — accurate 
 - `Debug.MessageBox()` is **non-blocking** in Papyrus — fires and script continues immediately, does NOT wait for OK
 
 ### Debug.Trace() — The Correct Logging Method
-- Writes directly to `Documents/My Games/Skyrim VR/Logs/Script/Papyrus.0.log`
+- Writes directly to `Documents/My Games/Skyrim VR/Logs/Script/Papyrus.0.log` (or `Skyrim Special Edition` for SE/AE)
 - No queue delay — logged at time of execution
 - Use `[TAG]` prefixes for easy grepping: `Debug.Trace("[MYMOD] message")`
 - Use `Utility.GetCurrentRealTime()` for timing measurements
