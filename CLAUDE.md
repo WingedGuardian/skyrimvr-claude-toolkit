@@ -26,7 +26,7 @@ All under `tools/`:
 | **Spriggit** | ESP ↔ YAML/JSON conversion (.NET) | `dotnet tool run spriggit serialize ...` |
 | **AutoMod CLI** | NIF meshes, BSA archives, audio, MCM, ESP one-liners | `bash tools/automod-cli.sh <module> <command> --json` |
 
-> **Note**: Install tools you need into a `tools/` folder in your game directory. See the [xeditlib](https://github.com/WingedGuardian/xeditlib) repo for XEditLib setup. AutoMod CLI is installed via the setup prompt (clones and builds [SpookyPirate's AutoMod Toolkit](https://github.com/SpookyPirate/spookys-automod-toolkit)).
+> **Note**: Install tools you need into a `tools/` folder in your game directory. See the [xeditlib](https://github.com/WingedGuardian/xeditlib) repo for XEditLib setup. AutoMod CLI is installed via the setup prompt.
 
 ## AutoMod CLI
 
