@@ -2,7 +2,7 @@
 // waitForLoader only reports getExceptionMessage() (empty in our case); this also dumps
 // the loader message log, exception stack, and globals, polling status the whole time.
 const path = require('path');
-const xelib = require('./xelib');
+const xelib = require('xelib');
 
 function dumpAll(tag) {
     console.log(`\n----- ${tag} -----`);

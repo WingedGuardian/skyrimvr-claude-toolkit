@@ -15,7 +15,7 @@
  */
 const path = require('path');
 process.chdir(path.join(__dirname, 'xelib'));      // xelib needs its own dir as cwd (DLL + *.Hardcoded.dat)
-const xelib = require('./xelib');
+const xelib = require('./xelib/node_modules/xelib');
 const GAME_PATH = process.env.GAME_ROOT || path.resolve(__dirname, '..');  // game root = parent of tools/
 const GM_SSE = 4;
 

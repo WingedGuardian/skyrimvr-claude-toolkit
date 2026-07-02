@@ -8,7 +8,7 @@
 // explicitly fixes it, and never goes stale even when a mod manager rewrites plugins.txt.
 //
 // Usage:
-//   const xelib = require('./xelib');
+//   const xelib = require('xelib');
 //   const { loadActive } = require('./active-plugins');
 //   xelib.init(); xelib.setLanguage('English');
 //   xelib.setGamePath(process.env.GAME_ROOT || 'C:\\path\\to\\your\\Skyrim\\');
