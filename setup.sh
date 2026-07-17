@@ -119,8 +119,21 @@ else
 fi
 
 # --- Detect user paths ---
-DOCUMENTS_DIR="C:/Users/$USERNAME/Documents"
+# Query Windows for the actual Documents folder instead of assuming the default location --
+# it may be redirected (OneDrive "Back up your folders", a manual Properties > Location move,
+# or a GPO folder redirect all update the same Known Folder, none of which live under
+# C:/Users/$USERNAME/Documents in that case).
+DOCUMENTS_DIR=$(powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')" 2>/dev/null | tr -d '\r')
+[ -z "$DOCUMENTS_DIR" ] && DOCUMENTS_DIR="C:/Users/$USERNAME/Documents"
+# Normalize backslashes to forward slashes -- via tr, not bash's ${var//\\//}, which was
+# unreliable across the bash builds we tested (Cygwin bash silently no-ops on it).
+# $LOCALAPPDATA is backslash-delimited on every Windows install, and feeding a raw backslash
+# path straight into sed's replacement text lets GNU sed interpret \U, \a, etc. as escapes,
+# corrupting the substituted path -- this bit LOCALAPPDATA_DIR specifically, but we normalize
+# DOCUMENTS_DIR here too for consistency.
+DOCUMENTS_DIR=$(printf '%s' "$DOCUMENTS_DIR" | tr '\134' '/')
 LOCALAPPDATA_DIR="${LOCALAPPDATA:-C:/Users/$USERNAME/AppData/Local}"
+LOCALAPPDATA_DIR=$(printf '%s' "$LOCALAPPDATA_DIR" | tr '\134' '/')
 # Which Skyrim variant's config folder exists? (VR vs SE) -- default to Skyrim VR.
 if [ -d "$DOCUMENTS_DIR/My Games/Skyrim Special Edition" ] && [ ! -d "$DOCUMENTS_DIR/My Games/Skyrim VR" ]; then
     SKYRIM_FOLDER="Skyrim Special Edition"
