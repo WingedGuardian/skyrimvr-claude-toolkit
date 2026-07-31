@@ -296,6 +296,24 @@ else
     echo "  Already configured."
 fi
 
+# --- Configure the devcontainer (optional; only if the user has .devcontainer/) ---
+if [ -f "$GAME_DIR/.devcontainer/devcontainer.json" ] && grep -q '{{DEVCONTAINER_MODS_MOUNT}}' "$GAME_DIR/.devcontainer/devcontainer.json"; then
+    echo ""
+    echo "Configuring .devcontainer/ (Docker dev environment for the container-side tools)..."
+    if [ -n "$MO2_INSTANCE" ]; then
+        DC_MODS="$MO2_MODS"; DC_PROFILE="$MO2_PROFILE_DIR"; DC_OVERWRITE="$MO2_OVERWRITE"
+    else
+        # Stock/Vortex: Data/ already IS the merged view, and there's no separate profile folder
+        # or overwrite catcher -- point all three at what actually exists.
+        DC_MODS="$GAME_ROOT_WIN/Data"; DC_PROFILE="$CONFIG_DIR"; DC_OVERWRITE="$GAME_ROOT_WIN/Data"
+    fi
+    sed -i "s|{{DEVCONTAINER_MODS_MOUNT}}|$DC_MODS|g" "$GAME_DIR/.devcontainer/devcontainer.json"
+    sed -i "s|{{DEVCONTAINER_PROFILE_MOUNT}}|$DC_PROFILE|g" "$GAME_DIR/.devcontainer/devcontainer.json"
+    sed -i "s|{{DEVCONTAINER_OVERWRITE_MOUNT}}|$DC_OVERWRITE|g" "$GAME_DIR/.devcontainer/devcontainer.json"
+    echo "  Configured .devcontainer/devcontainer.json with your mod paths."
+    echo "  Run ./devshell-docker.sh (Docker only) or ./devshell.sh (needs the devcontainer CLI)."
+fi
+
 # --- Ensure backup directory exists ---
 mkdir -p "$GAME_DIR/.claude/backups"
 

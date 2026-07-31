@@ -180,6 +180,14 @@ each one is for — but it helps to know what's there.
 | `nexus.sh` | Nexus API wrapper for mod version / changelog lookups. Never prints your key. |
 | `xelib/` | The xelib helpers, including the load-order loader. |
 
+## Optional: a reproducible dev container
+
+If you'd rather not install Python/Node/.NET/JDK onto your own machine, `bash devshell-docker.sh`
+(Docker Desktop only) builds a container with all of them pre-wired and drops you into a shell — for
+the tools that don't need Windows or an active MO2 session (ESP inspection/diffing, FOMOD generation,
+unit tests, ReSaver CLI). `setup.sh` already pointed its mounts at your real mod files when you ran
+it. See `docs/container-vs-windows.md` for what belongs there versus what still needs Windows.
+
 ## Troubleshooting
 
 **"Claude Code won't start"**

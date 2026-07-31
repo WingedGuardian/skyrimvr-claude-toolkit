@@ -227,6 +227,33 @@ Reserve manual testing for the final confirmation gate. See KNOWLEDGEBASE.md for
 (`game save` deadlock, paused-state semantics, heavy console commands) — read them before your first
 live session.
 
+## Optional Devcontainer (`.devcontainer/`, `devshell.sh`, `devshell-docker.sh`)
+
+Credit: this devcontainer and its MO2-mount design originated in
+[@aaronputty](https://github.com/aaronputty)'s fork of this toolkit.
+
+A reproducible Linux container (Python 3.11, Node 20, .NET 9, JDK 17) for the tools that don't need
+Windows or an active MO2 session: Spriggit ESP inspection/diffing, FOMOD/JSON generation, unit-testing
+mod logic, ReSaver CLI. See `docs/container-vs-windows.md` for the full routing guide — xelib and
+anything load-order-dependent still needs Windows (and MO2's executables list, on an MO2 install).
+
+- **`bash devshell-docker.sh`** — builds the image on first run and drops you into a shell. Only
+  needs Docker Desktop. Reads its mount sources straight out of `.devcontainer/devcontainer.json`
+  (which `setup.sh` fills in with your real mod paths), so it never hardcodes them.
+- **`bash devshell.sh`** — same thing via the `@devcontainers/cli` (`npm install -g
+  @devcontainers/cli`), for editor integration (VS Code's Dev Containers extension uses the same
+  `devcontainer.json`).
+- `setup.sh` fills in `.devcontainer/devcontainer.json`'s mount paths automatically: on an MO2
+  install, from the detected instance's mods/profile/overwrite folders; on stock/Vortex, from `Data/`
+  and the INI config folder.
+- Confirmed working end-to-end: a real third-party ESP with records serializes and inspects
+  correctly via `examples/inspect-esp.py`. **One confirmed limitation:** a plugin using localized
+  strings (the `Localized` flag) fails to serialize in the container — see
+  `docs/container-vs-windows.md`.
+- The SKSE-plugin cross-compile toolchain (LLVM/xwin/xmake) from the source fork is **not** part of
+  this default image — it roughly doubles the build for a capability that's still a single
+  unvalidated experiment. See `docs/skse-cross-compile.md` if you want to add it yourself.
+
 ## ESP Cross-Reference Integrity (`tools/esp-verify-wrapper.sh`)
 
 Guards against the silent re-mastering / dropped-reference corruption class during bulk ESP operations (mod splits, plugin renames, master-list edits, YAML find-replace). Tool-agnostic; snapshots stored outside the game dir so it never trips the edit hooks.

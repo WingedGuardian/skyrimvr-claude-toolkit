@@ -18,6 +18,25 @@ It's not perfect, and it will require some trial and error — especially for co
 
 ---
 
+## New in v3.5: A Reproducible Dev Container
+
+Every install so far has meant "run `setup.sh`, install prerequisites onto this machine, hope."
+v3.5 adds an alternative: a Docker container with Python, Node, .NET, and a JDK already wired up —
+built and verified end-to-end (Spriggit really does serialize a real mod's ESP inside it) — for the
+parts of the workflow that don't need Windows or an active MO2 session: ESP inspection and diffing,
+FOMOD/JSON generation, unit-testing mod logic, ReSaver CLI save analysis.
+
+`bash devshell-docker.sh` builds the image and drops you into a shell — Docker Desktop is the only
+prerequisite. `setup.sh` wires its mounts to your real mod files automatically: on MO2, straight from
+your detected instance; on stock/Vortex, from `Data/`. `docs/container-vs-windows.md` is the routing
+guide for what belongs in the container versus what still needs Windows (xelib, load-order-dependent
+edits, Papyrus compilation, NIF authoring, live in-game testing).
+
+Credit: the devcontainer and its MO2-mount design come from
+[@aaronputty](https://github.com/aaronputty)'s fork of this toolkit.
+
+---
+
 ## New in v3.4: Mod Organizer 2 Support
 
 If you use MO2, previous versions quietly pointed Claude at the wrong folders. **MO2 has no real
@@ -349,4 +368,5 @@ MIT -- see [LICENSE](LICENSE).
 - [Blender](https://www.blender.org/) and [NifSkope](https://github.com/niftools/nifskope) -- mesh repair and independent render verification
 - [FallrimTools / ReSaver](https://www.nexusmods.com/skyrimspecialedition/mods/5031) -- save-file (.ess) parsing library driven headlessly by the ReSaver CLI
 - [DevBench](https://www.nexusmods.com/skyrimspecialedition/mods/181326) by alandtse ([source](https://github.com/alandtse/devbench)) -- the live in-game REST/MCP channel the `devbench-cli.sh` wrapper drives
+- [@aaronputty](https://github.com/aaronputty) ([fork](https://github.com/aaronputty/putty-skyrim-claude-toolkit)) -- the MO2 path-detection insight that shaped v3.4, and the devcontainer + `docs/container-vs-windows.md` foundation for v3.5
 - [Claude Code](https://claude.ai/code) by Anthropic

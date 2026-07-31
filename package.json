@@ -1,0 +1,17 @@
+{
+  "name": "skyrimvr-claude-toolkit",
+  "version": "1.0.0",
+  "description": "Skyrim Claude Code Modding Toolkit -- Node.js tooling for FOMOD generation and ESP validation",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "fast-xml-parser": "^4.3.6",
+    "zod": "^3.23.8"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

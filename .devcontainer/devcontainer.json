@@ -1,0 +1,63 @@
+{
+    "name": "Skyrim Claude Code Toolkit",
+
+    "build": { "dockerfile": "Dockerfile" },
+
+    // On an MO2 install, MO2 has no real merged Data/ folder -- it builds one at launch by
+    // overlaying the stock game, each enabled mod's folder, and overwrite/ (see
+    // KNOWLEDGEBASE.md's "Mod Manager Layout" section). These mounts give container scripts
+    // read-only access to the real per-mod files without MO2 needing to be running.
+    //
+    // setup.sh fills in these paths automatically when it detects an MO2 instance. On a
+    // stock/Vortex install (no MO2), it instead mounts the game's Data/ directly at the same
+    // target paths, so scripts can use SKYRIM_MODS_DIR either way without caring which layout
+    // is underneath.
+    //
+    // NOTE: Docker Desktop's file sharing must include the drive/folder these paths live under.
+    "mounts": [
+        {
+            "source": "{{DEVCONTAINER_MODS_MOUNT}}",
+            "target": "/skyrim/mods",
+            "type": "bind",
+            "readonly": true
+        },
+        {
+            "source": "{{DEVCONTAINER_PROFILE_MOUNT}}",
+            "target": "/skyrim/profile",
+            "type": "bind",
+            "readonly": true
+        },
+        {
+            "source": "{{DEVCONTAINER_OVERWRITE_MOUNT}}",
+            "target": "/skyrim/overwrite",
+            "type": "bind",
+            "readonly": true
+        }
+    ],
+
+    "postCreateCommand": "pip install -r requirements.txt && npm install && dotnet tool restore",
+
+    "remoteEnv": {
+        "SKYRIM_MODS_DIR": "/skyrim/mods",
+        "SKYRIM_PROFILE_DIR": "/skyrim/profile",
+        "SKYRIM_OVERWRITE_DIR": "/skyrim/overwrite"
+    },
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.pylance",
+                "charliermarsh.ruff",
+                "ms-dotnettools.csdevkit"
+            ],
+            "settings": {
+                "python.defaultInterpreterPath": "/usr/local/bin/python",
+                "editor.formatOnSave": true,
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff"
+                }
+            }
+        }
+    }
+}

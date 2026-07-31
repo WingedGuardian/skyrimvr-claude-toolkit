@@ -1,5 +1,67 @@
 # Changelog
 
+## v3.5 — 2026-08-01
+
+### New Capabilities
+
+- **Optional devcontainer** for the tools that don't need Windows or an active MO2 session:
+  Spriggit ESP inspection/diffing, FOMOD/JSON generation, unit-testing mod logic, ReSaver CLI.
+  Credit: this originated in [@aaronputty](https://github.com/aaronputty)'s fork of this toolkit
+  ([putty-skyrim-claude-toolkit](https://github.com/aaronputty/putty-skyrim-claude-toolkit)), who
+  gave the go-ahead to bring it upstream after they weren't able to get back to their own 9-commits-
+  ahead branch. Not copied verbatim — rebuilt and re-verified for this toolkit's shape, credited
+  throughout.
+
+  - `.devcontainer/Dockerfile`: Python 3.11 + Node 20 + .NET 9 + JDK 17 (ReSaver's floor), on Debian
+    **bookworm** rather than the source fork's bullseye (bullseye's LTS window ends 2026-08-31;
+    bookworm also means JDK installs as a plain `apt-get` instead of a manual fetch). Build and every
+    toolchain component verified inside a real container: Python 3.11.15, Node 20.20.2, JDK 17.0.20,
+    .NET SDK 9.0.316, and `dotnet tool restore` successfully restoring `spriggit.cli`.
+  - `devshell-docker.sh` / `devshell.sh`: build-and-shell wrappers (Docker-only, or via the
+    `@devcontainers/cli`). `devshell-docker.sh` reads its mount sources straight out of
+    `.devcontainer/devcontainer.json` rather than hardcoding them, so it can't drift from what
+    `setup.sh` resolved.
+  - **`setup.sh` now also fills in `.devcontainer/devcontainer.json`'s mount paths** — from the
+    detected MO2 instance's mods/profile/overwrite folders on an MO2 install, or from `Data/` and the
+    INI config folder on stock/Vortex. Verified end-to-end: the real `devshell-docker.sh` (not a
+    manual reconstruction) building the image, mounting a real game `Data/` folder read-only,
+    restoring `dotnet` tools, and — checked directly via `docker inspect` and a live write
+    attempt — enforcing that read-only mount (`touch` on the mounted path fails with "Read-only file
+    system").
+  - **`examples/inspect-esp.py`** verified against a real third-party mod plugin with actual records
+    (correctly listed its MagicEffects/Quests/Spells groups). The source fork's version imported a
+    Python `esplugin` package that doesn't exist on PyPI (esplugin is a Rust crate) and would have
+    failed on line one — rewritten to use only the Spriggit path, which is what actually works, and
+    corrected to this toolkit's own Spriggit convention (`Spriggit.Yaml` + a required
+    `--PackageVersion`, not `Spriggit.Yaml.Skyrim` with no version).
+  - **One confirmed limitation, found while verifying:** a plugin using localized strings (the
+    `Localized` flag — common in vanilla ESMs) fails to serialize via Spriggit inside the container
+    with a Mutagen exception, because its BSA/load-order resolution has no default path on Linux.
+    Documented in `docs/container-vs-windows.md` rather than silently shipped as if it worked
+    universally.
+  - Toolchain pins: `package.json`, `requirements.txt` (container-side Python deps),
+    `requirements-windows.txt` (Windows-only, e.g. `pywin32` — doesn't build on Linux),
+    `.config/dotnet-tools.json` (Spriggit CLI), `.node-version`, `.python-version`.
+  - **A real bug caught and fixed during verification, not shipped:** `devshell-docker.sh`'s `jq`
+    calls and its `docker run` mount targets all reference bare `/skyrim/...`-style paths — under Git
+    Bash on Windows, any such bare-slash argument gets silently rewritten to a Windows path
+    (`/skyrim/mods` → `C:/Program Files/Git/skyrim/mods`) before reaching `jq` or `docker.exe`. Fixed
+    with `MSYS_NO_PATHCONV=1` and resolving `SCRIPT_DIR` via `pwd -W`. Also fixed: `jq` can't parse
+    the JSONC `//` comments that VS Code and the devcontainer CLI both allow in `devcontainer.json` —
+    `devshell-docker.sh` now strips whole-line comments before parsing.
+
+- **`docs/container-vs-windows.md`** — the tool-routing decision table (container vs. Windows vs.
+  MO2's executables list), adapted from the source fork and cross-referenced with this toolkit's own
+  MO2 documentation.
+
+- **`docs/skse-cross-compile.md`** — the source fork's SKSE-plugin cross-compilation recipe
+  (LLVM/xwin/xmake), documented as an opt-in addendum rather than built into the default image. It
+  roughly doubles the container (LLVM 17 + a ~700MB Windows SDK/CRT splat) for a capability the
+  source author themselves called unvalidated beyond one experiment (a pre-pivot build of the SKSE
+  plugin Mora) — kept out of the default so that cost doesn't land on every user's container build.
+
+---
+
 ## v3.4 — 2026-07-27
 
 ### New Capabilities

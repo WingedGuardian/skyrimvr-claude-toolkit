@@ -1,0 +1,8 @@
+# Windows-only dependencies. Do NOT install these inside the devcontainer -- pywin32 doesn't
+# build on Linux, and the toolkit's actual xEdit access is XEditLib.dll via the Node-based
+# tools/xelib helpers, not a Python binding. Install with: pip install -r requirements-windows.txt
+#
+# On an MO2 install, anything that needs the load-order-aware VFS must run through MO2's
+# executable list rather than a bare Windows shell -- see docs/container-vs-windows.md.
+
+pywin32==306
