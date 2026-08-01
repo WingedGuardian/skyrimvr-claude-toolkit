@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.5.3 — 2026-07-31
+
+### Changed
+
+- **Promoted the "don't hand-install a mod into `Data/`" rule from `KNOWLEDGEBASE.md` into
+  `CLAUDE.md`'s Safety Rules.** v3.5.2 removed the bad instruction from the setup prompt and wrote up
+  the reasoning in the knowledgebase — but the knowledgebase is *consulted*, while `CLAUDE.md` is
+  *always loaded*. A rule whose whole job is to stop an action at the moment you're about to take it
+  is useless in a file you have to remember to open. The KB entry stays as the long-form explanation;
+  the Safety Rules now carry the rule itself.
+- Scoped precisely: it covers installing **someone else's** packaged mod (SKSE plugin DLLs included).
+  Writing your own in-development mod's files into `Data/` is normal work and explicitly unaffected.
+
 ## v3.5.2 — 2026-07-31
 
 ### Changed

@@ -417,6 +417,13 @@ Hooks in `.claude/settings.json` enforce these automatically:
 - **Always review changes before applying** -- modded installs are delicate
 - Never modify ESP/ESM files directly -- use xelib programmatically or Spriggit
 - Vortex manages load order -- direct edits to loadorder.txt/plugins.txt may be overwritten
+- **Never hand-install a third-party mod into `Data/` -- that is the mod manager's job.** Downloading
+  someone's mod and copying its files in bypasses Vortex/MO2: the files are untracked, a later deploy
+  or purge can clobber or orphan them, and under MO2 they don't appear in the virtual filesystem's
+  conflict view at all. They're also invisible in the user's own record of what's installed, which is
+  the state that makes a broken install undebuggable later. **This includes SKSE plugin DLLs** --
+  DevBench among them. If a mod is needed, tell the user and let them install it with their manager.
+  (Writing the user's **own** in-development mod files into `Data/` is a different thing and is fine.)
 
 ### Safety improvement loop
 After every session, near-miss, or unexpected outcome, evaluate whether a new hook, expanded protection, or knowledgebase entry could have prevented or caught the issue. Propose new hooks when a pattern of risk emerges -- proactively when you notice a gap. Document proposed hooks in the "Hook Candidates" section of `KNOWLEDGEBASE.md`.
