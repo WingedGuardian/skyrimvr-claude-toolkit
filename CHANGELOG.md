@@ -46,6 +46,10 @@ and the old approach has a hole worth naming.
 - `KNOWLEDGEBASE.md`'s "liveness ≠ ping" entry rewrote its now-outdated advice (the two-read frame
   diff) into the four-state table, plus the status-code semantics.
 - The `game save` deadlock entry notes that `health` — not `inspect` — is how you watch for it.
+- **`README.md`'s copy of the setup prompt was stale** — it never mentioned DevBench, so anyone who
+  pasted the prompt from the README (the most visible copy, and the one the Nexus page points at)
+  was never offered DevBench during setup. It is now byte-identical to the canonical
+  `SETUP_PROMPT.txt`, which `docs/getting-started.md` already matched.
 
 ## v3.5 — 2026-07-31
 
