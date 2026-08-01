@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.5.2 — 2026-07-31
+
+### Changed
+
+- **The setup prompt no longer offers to install DevBench.** It listed DevBench alongside the
+  `tools/` utilities and instructed Claude to "install it to `Data/SKSE/Plugins/devbench.dll`" — but
+  DevBench is the one optional item that isn't a dev tool. Everything else installs under `tools/`
+  and never touches the game; DevBench is an **SKSE plugin**, i.e. a mod. Hand-copying a DLL into
+  `Data/` bypasses Vortex/MO2, leaves the file untracked, and on a managed install a later deploy or
+  purge can clobber it — the opposite of what the rest of this toolkit's safety design stands for.
+  The prompt now *tells* the user DevBench exists and what it unlocks, and says explicitly that it's
+  a mod they install through their own mod manager, and that Claude must not copy files into `Data/`
+  itself. The bundled `tools/devbench-cli.sh` wrapper works the moment DevBench is present.
+- The same correction applied to `README.md`, `CLAUDE.md`, and `setup.sh`'s closing tool summary,
+  which all carried the "download it into `Data/SKSE/Plugins/devbench.dll`" phrasing.
+- All three copies of the setup prompt (`SETUP_PROMPT.txt`, `README.md`, `docs/getting-started.md`)
+  remain byte-identical, now verified programmatically rather than by eye.
+
+### Docs
+
+- `KNOWLEDGEBASE.md`: new "Never hand-install a mod into `Data/` on a managed install" note under Mod
+  Manager Layout — why a dev tool and a mod aren't the same thing, and what hand-placing a file
+  actually breaks under Vortex vs MO2.
+
 ## v3.5.1 — 2026-07-31
 
 Tracks DevBench **1.12.0** upstream. The liveness check the toolkit shipped in v3.3 was the best

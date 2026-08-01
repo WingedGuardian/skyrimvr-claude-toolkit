@@ -1570,6 +1570,23 @@ the override chain, conflict resolution, or the full load order.
 The same logic applies to any tool that resolves the game path from the registry rather than from an
 explicit file path.
 
+### Never hand-install a mod into `Data/` on a managed install
+
+A dev tool and a mod are different things, and the line matters here. Dev tools (Spriggit, xelib,
+Champollion, ReSaver, …) live outside the game and can be installed freely. **A mod — anything that
+ends up under `Data/`, including SKSE plugin DLLs — belongs to the mod manager**, and copying files
+in by hand is the wrong move on any Vortex or MO2 install:
+
+- **Vortex** tracks deployed files; a hand-placed file is untracked, and a later deploy or purge can
+  clobber or orphan it.
+- **MO2** builds `Data/` virtually at launch. A file written to the real `Data/` isn't part of any
+  mod, doesn't appear in the conflict view, and won't behave like the rest of the load order.
+- Either way it's invisible to the user's own record of what's installed — which is exactly the state
+  that makes a broken install impossible to debug later.
+
+So: install it through the mod manager, or tell the user to. "It's just one DLL" is how an install
+becomes unreproducible.
+
 ---
 
 ## Papyrus: a recompiled `.pex` only loads at game STARTUP

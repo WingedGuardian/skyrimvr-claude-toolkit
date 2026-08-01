@@ -190,8 +190,15 @@ runs a **localhost REST + MCP server inside the running game**, so Claude can in
 console commands *and read their output*, call Papyrus functions and get the return value, dismiss
 modals, and drive scripted scenarios — directly, while the user just keeps playing.
 
-**NOT bundled** (GPL-3.0-or-later; the toolkit ships only the wrapper). Install it from Nexus into
-`Data/SKSE/Plugins/devbench.dll`. It changes no gameplay and writes no save data.
+**NOT bundled** (GPL-3.0-or-later; the toolkit ships only the wrapper). It changes no gameplay and
+writes no save data.
+
+**It is a mod, not one of the `tools/` dev utilities — so do NOT install it for the user.** Every
+other optional tool lives in `tools/` and never touches the game; DevBench is an SKSE plugin that ends
+up in `Data/SKSE/Plugins/`. Hand-copying a DLL there bypasses Vortex/MO2, leaves the file untracked,
+and on a managed install a later deploy or purge can clobber it. If the user wants DevBench, they
+install it through their own mod manager like any other SKSE plugin; the wrapper below works the
+moment it's present.
 
 ```bash
 bash tools/devbench-cli.sh alive                       # is the GAME running, paused, hung, or not loaded?
