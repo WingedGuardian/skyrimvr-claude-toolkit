@@ -1444,9 +1444,30 @@ before your first live session — several of these cost a force-killed game to 
 ### The server is not the game (liveness ≠ ping)
 - The HTTP server runs on a **separate thread from the game**. A deadlocked, hung, or paused game
   still answers `ping` with `{"ok":true}`. **`ping` is not proof the game is alive.**
-- The real liveness test is whether `inspect {"kind":"state"}`'s **`frame` counter advances** between
-  two reads. Static frame = paused (in a menu) or hung. `tools/devbench-cli.sh alive` does exactly
-  this and exits 2 on a stuck frame.
+- Worse, you cannot diagnose a hang with an ordinary tool call: every tool (`inspect`, `console`,
+  `papyrus`, …) is dispatched onto the **main thread** and throws **504 after 5 s** if that thread is
+  stuck. The probe fails in exactly the case it exists to detect.
+- **Use `GET /api/health`** (DevBench **1.11.0+**; answered off the main thread since **1.12.0**, and
+  `inspect kind=health` is the MCP-reachable twin). It is the only endpoint that keeps replying
+  through a stall, and returns liveness *and* identity in one shot:
+  `{ ok, lastLifecycle, frame, lastTaskFrame, pendingTasks, pid, port, exe, vr }`.
+- Read it as **four** states, not two — `tools/devbench-cli.sh alive` samples it twice and does this:
+
+  | Signal | State | Exit |
+  |---|---|---|
+  | `frame` advancing | running | 0 |
+  | `frame` frozen, `pendingTasks` 0 | **paused / console open / loading — NOT a hang** | 2 |
+  | `frame` frozen, `pendingTasks` > 0, `lastTaskFrame` frozen | main-thread queue starved = **hung** | 2 |
+  | `frame` < 0 | server up, no save loaded (main menu) | 3 |
+
+  A frozen frame **alone is not proof of a hang** — the old two-read frame diff cried wolf every time
+  the user opened a menu. The task queue is the discriminator.
+- `pid`/`port`/`exe`/`vr` identify **which instance answered**. If you ever run two Skyrims (SE on
+  8920, VR on 8921), a client pinned to the wrong port silently returns real-looking results from the
+  wrong game; this catches it in one call.
+- Status codes are meaningful — don't treat any JSON body as success: **504** = main thread busy or
+  stuck (server fine), **400** = bad argument type (since 1.11.0; it used to be a 500), **connection
+  refused** = game closed. Collapsing these into "it failed" sends you debugging the wrong layer.
 
 ### ⚠ `game save` can deadlock the game (observed on v1.8.2)
 - Driving `game {action:"save"}` mid-session hung the game's main thread: a 0-byte `<name>.ess.tmp`
@@ -1458,6 +1479,9 @@ before your first live session — several of these cost a force-killed game to 
   `game` actions are documented as fire-and-forget with `lifecycle` events for completion. Whether
   the deadlock persists on current versions is **untested here** — treat `game save` as suspect and
   prefer the user-driven load until you have verified otherwise on your version.
+- If you do try it on a newer build, watch it with `alive` / `GET /api/health` (see above) rather than
+  `inspect` — a tool call is dispatched onto the very main thread the deadlock freezes, so it 504s
+  and tells you nothing, while `health` keeps answering and shows `pendingTasks` piling up.
 
 ### Paused-game semantics (in a menu)
 - **READ tools work while paused** — `inspect state/vm/scene/player/effects/refs` are fine, which

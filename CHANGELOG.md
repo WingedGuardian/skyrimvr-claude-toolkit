@@ -1,6 +1,53 @@
 # Changelog
 
-## v3.5 — 2026-08-01
+## v3.5.1 — 2026-07-31
+
+Tracks DevBench **1.12.0** upstream. The liveness check the toolkit shipped in v3.3 was the best
+available at the time; DevBench has since added a purpose-built endpoint that does the job properly,
+and the old approach has a hole worth naming.
+
+### Fixed
+
+- **`devbench-cli.sh alive` could not detect the thing it existed to detect.** It diffed the `frame`
+  counter across two `inspect {kind:state}` calls — but *every* DevBench tool call is dispatched onto
+  the game's **main thread** and throws 504 after 5 s if that thread is stuck. So on a genuine hang
+  the probe itself hung: you got a timeout indistinguishable from a closed game, precisely when you
+  needed a diagnosis. It now uses **`GET /api/health`** (DevBench 1.11.0+, answered *off* the main
+  thread since 1.12.0), the one endpoint that keeps replying through a stall.
+- **A frozen frame was reported as "paused or hung" — one verdict for two very different problems.**
+  `alive` now separates four states using `pendingTasks`/`lastTaskFrame` as the discriminator:
+  running (0) · paused/console-open/loading, queue draining normally (2) · genuinely **hung**, tasks
+  queued but not completing (2) · server up but **no save loaded**, `frame < 0` (3). A frozen frame
+  alone is not evidence of a hang; the old check cried wolf every time you opened a menu.
+- **HTTP status was ignored — any JSON body counted as success.** A `504` (main thread busy) or a
+  `400` (bad argument type; 1.11.0 reclassified these from 500) was printed as if the call had
+  worked. Each now reports what actually went wrong and returns a distinct exit code, so a busy game,
+  a malformed call, and a closed game stop looking identical.
+- `jget`'s jq path used `// empty`, which swallowed a legitimate `false` — `vr` on an SE install read
+  as missing rather than false.
+
+### New
+
+- **`devbench-cli.sh health`** — the raw off-thread probe: `{ ok, lastLifecycle, frame,
+  lastTaskFrame, pendingTasks, pid, port, exe, vr }`.
+- **Instance identity in `alive` output** (`pid`/`exe`/`vr`/`port`). If you have both SE and VR open,
+  a client pinned to the wrong port returns real-looking results from the wrong game; this surfaces
+  the misattach in one call. MCP clients get the same signal via `inspect kind=health`.
+
+### Compatibility
+
+- **Older DevBench still works.** On a build without `/api/health` (pre-1.11.0) the wrapper detects
+  the 404, falls back to the legacy frame diff, and says so on stderr rather than failing.
+- Every path above was exercised against a mock server reproducing each scenario — running, paused,
+  hung, not-in-game, legacy-404, 504, 400, and a dead port — with and without `jq` on PATH.
+
+### Docs
+
+- `KNOWLEDGEBASE.md`'s "liveness ≠ ping" entry rewrote its now-outdated advice (the two-read frame
+  diff) into the four-state table, plus the status-code semantics.
+- The `game save` deadlock entry notes that `health` — not `inspect` — is how you watch for it.
+
+## v3.5 — 2026-07-31
 
 ### New Capabilities
 

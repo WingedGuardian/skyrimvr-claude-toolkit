@@ -76,6 +76,10 @@ Claude can then:
   without a single game restart.
 - **Narrate tests on your HUD** while you're in the headset, and dismiss modal popups for you.
 - **Run scripted scenarios** with real event waits instead of guessed sleeps.
+- **Tell a hung game from a paused one.** `devbench-cli.sh alive` reads DevBench's off-thread health
+  probe, so it still answers when the game is stuck — and it distinguishes *running* from *paused in a
+  menu* from *actually hung* from *no save loaded yet*, instead of guessing from a frozen frame
+  counter. (Needs DevBench 1.11.0+; older builds fall back automatically.)
 
 In practice, tuning a value stops being "edit, recompile, reload, ask you to try it" and becomes
 another call into the running game. You just keep playing. The toolkit ships the wrapper

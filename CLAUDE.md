@@ -32,7 +32,7 @@ All under `tools/`:
 | **PyNifly** | NIF read/write incl. **BSTriShape (SSE)** + **animation/controller authoring** (Python, prebuilt DLL) | See PyNifly section below |
 | **ReSaver CLI** | Headless `.ess` save parse / query / cross-reference / clean / changeform-level diagnostics | `bash tools/resaver-cli.sh <op> <save.ess>` — read ops: `info\|dump\|find\|find-refs\|worries\|recon\|changeform\|extradata-scan\|changeform-diff\|freeze-report\|globaldata\|globaldata-diff`; write ops (dry-run unless `--apply`, always a NEW file): `set-global\|set-var\|clean\|reset-havok\|cleanse-formlists\|remove-created`; `verify-roundtrip` self-test. Every `--apply` is verify-gated (re-read==model or delete+fail). Resolve FormID→EditorID via `tools/resaver-resolve-names.js`. Needs JDK 17+ + ReSaver's jar (see install section). |
 | **cosave-info** | READ-ONLY structural survey of an SKSE `.skse` co-save → JSON (which mods stashed co-save data + how much) | `bash tools/cosave-cli.sh <cosave.skse>` (Python 3; the cosave sits next to its `.ess`) |
-| **DevBench** | **LIVE in-game** inspect / console / Papyrus / scenario via a localhost REST+MCP server — only while the game is actually running | `bash tools/devbench-cli.sh <ping\|alive\|state\|inspect\|exec\|call\|describe\|notify\|tool>` — see DevBench section below |
+| **DevBench** | **LIVE in-game** inspect / console / Papyrus / scenario via a localhost REST+MCP server — only while the game is actually running | `bash tools/devbench-cli.sh <alive\|health\|ping\|state\|inspect\|exec\|call\|describe\|notify\|tool>` — see DevBench section below |
 
 > **Note**: Install the tools you need into a `tools/` folder in your game directory; the setup prompt walks through this. See the [xeditlib](https://github.com/WingedGuardian/xeditlib) repo for XEditLib setup. NifSkope and Blender (used for NIF render-verification and mesh repair — see below) are large external GUI apps installed separately, not bundled.
 
@@ -194,8 +194,9 @@ modals, and drive scripted scenarios — directly, while the user just keeps pla
 `Data/SKSE/Plugins/devbench.dll`. It changes no gameplay and writes no save data.
 
 ```bash
-bash tools/devbench-cli.sh ping                        # is the server up?
-bash tools/devbench-cli.sh alive                       # is the GAME running, or hung/paused?
+bash tools/devbench-cli.sh alive                       # is the GAME running, paused, hung, or not loaded?
+bash tools/devbench-cli.sh health                      # raw off-thread liveness + instance identity
+bash tools/devbench-cli.sh ping                        # server self-test only -- NOT proof of liveness
 bash tools/devbench-cli.sh state                       # {plugin,version,vr,playerLoaded,frame}
 bash tools/devbench-cli.sh inspect vm                  # Papyrus VM health — freeze diagnosis
 bash tools/devbench-cli.sh exec "player.getav health"  # console exec + capture + read output
@@ -214,10 +215,21 @@ and writes the bound port to `Data/SKSE/Plugins/devbench/runtime.json`, which th
 Override with `DEVBENCH_PORT`. MCP clients can point at `http://127.0.0.1:<port>/mcp`; the REST path
 the wrapper uses works any time the server is up, with no reconnect.
 
-**Tools:** `ping` · `console` (exec/read) · `inspect` (`state|vm|scene|mods|player|inventory|quests|
-effects|refs`) · `papyrus` (list/describe/**call**) · `menu` (list/describe/**accept**/open/close) ·
+**Tools:** `ping` · `console` (exec/read) · `inspect` (`state|health|vm|scene|mods|player|inventory|
+quests|effects|refs`) · `papyrus` (list/describe/**call**) · `menu` (list/describe/**accept**/open/close) ·
 `game` (save/load/list) · `scenario` (timed steps with `waitFor`/`waitUntil`, not guessed sleeps) ·
 `camera` · `record`/`replay`.
+
+**Check `alive` first, and believe it over `ping`.** Every tool call above runs *on the game's main
+thread* and 504s after 5s if that thread is stuck — so tool calls fail in exactly the situation you
+most need diagnosed. `GET /api/health` (DevBench **1.11.0+**, answered off-thread since **1.12.0**) is
+the one endpoint that always replies; `alive` samples it twice and separates the four states that a
+raw `ping` flattens into one: **running** · **paused/loading** (frame frozen, task queue draining —
+not a hang) · **hung** (frame frozen *and* `pendingTasks` piling up while `lastTaskFrame` stalls) ·
+**not in game** (`frame < 0`, no save loaded). It also prints the answering instance's
+`pid`/`exe`/`vr`, so if you have two Skyrims open you catch a wrong-port misattach in one call instead
+of chasing phantom results. On older DevBench the wrapper falls back to the legacy frame diff and says
+so. MCP clients get the same signal as `inspect kind=health`.
 
 **Standing practice — automate the test, don't delegate it.** On any in-game problem, ask "how do I
 test this myself instead of asking the user to?" Build a *parameterized* harness (a global Papyrus
