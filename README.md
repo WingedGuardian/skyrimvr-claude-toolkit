@@ -162,7 +162,7 @@ None of these are bundled; setup walks you through any you pick.
 - **Champollion / Caprica** -- Papyrus decompile / compile (GitHub releases)
 - **Spriggit** -- ESP ↔ YAML editing (`dotnet tool install Spriggit.CLI`)
 - **AutoMod CLI** -- NIF / BSA / audio / MCM / ESP. **Must be cloned and built**: clone https://github.com/SpookyPirate/spookys-automod-toolkit into `tools/automod` and build the Cli project (not the WPF Setup project) — then run via `tools/automod-cli.sh`.
-- **PyFFI** -- LE-format NIF geometry (Python 3.10, `pip install pyffi`)
+- **PyFFI** -- LE-format NIF geometry (any modern Python + setuptools, `pip install pyffi setuptools`)
 - **PyNifly** -- SSE BSTriShape + animation authoring (download `io_scene_nifly.zip` from the GitHub **releases**, not a git clone — the compiled DLL ships only in the release zip; no build)
 - **Blender (headless) / NifSkope** -- NIF mesh repair + render verification (large external apps)
 - **ReSaver CLI** -- headless `.ess` save parse / cross-reference / clean / changeform-level diagnostics (download ReSaver from **Nexus mod 5031** / FallrimTools into `tools/resaver-cli/`; requires **JDK 17+**, JDK 21 LTS recommended)

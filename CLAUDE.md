@@ -28,7 +28,7 @@ All under `tools/`:
 | **XEditLib.dll** | Programmatic ESP/ESM reading via FFI | Load with koffi in Node.js (see below) |
 | **Spriggit** | ESP ↔ YAML/JSON conversion (.NET) | `spriggit serialize ...` |
 | **AutoMod CLI** | NIF meshes, BSA archives, audio, MCM, ESP one-liners | `bash tools/automod-cli.sh <module> <command> --json` |
-| **PyFFI** | NIF geometry edit — **NiTriShape (LE-format) ONLY** (Python 3.10) | See PyFFI section below |
+| **PyFFI** | NIF geometry edit — **NiTriShape (LE-format) ONLY** (any modern Python with setuptools) | See PyFFI section below |
 | **PyNifly** | NIF read/write incl. **BSTriShape (SSE)** + **animation/controller authoring** (Python, prebuilt DLL) | See PyNifly section below |
 | **ReSaver CLI** | Headless `.ess` save parse / query / cross-reference / clean / changeform-level diagnostics | `bash tools/resaver-cli.sh <op> <save.ess>` — read ops: `info\|dump\|find\|find-refs\|worries\|recon\|changeform\|extradata-scan\|changeform-diff\|freeze-report\|globaldata\|globaldata-diff`; write ops (dry-run unless `--apply`, always a NEW file): `set-global\|set-var\|clean\|reset-havok\|cleanse-formlists\|remove-created`; `verify-roundtrip` self-test. Every `--apply` is verify-gated (re-read==model or delete+fail). Resolve FormID→EditorID via `tools/resaver-resolve-names.js`. Needs JDK 17+ + ReSaver's jar (see install section). |
 | **cosave-info** | READ-ONLY structural survey of an SKSE `.skse` co-save → JSON (which mods stashed co-save data + how much) | `bash tools/cosave-cli.sh <cosave.skse>` (Python 3; the cosave sits next to its `.ess`) |
@@ -64,9 +64,9 @@ None of the modding tools are bundled — install only the ones you need. Per to
   - Run via the wrapper: `bash tools/automod-cli.sh <module> <command> --json`; pass `--rebuild` to rebuild the DLL.
   - Verify: `bash tools/automod-cli.sh esp --help --json`.
 - **PyFFI** — LE-format NiTriShape geometry edits.
-  - Requires **Python 3.10** specifically (not 3.12). If you don't have 3.10, get it from python.org and install it to a **non-default path** — do NOT set it as the system default (it would shadow your existing Python). Then install PyFFI against that interpreter explicitly: `C:\path\to\python310\python.exe -m pip install pyffi`. Record that interpreter path so all PyFFI scripts invoke it directly.
-  - Scripts need the `time.clock = time.perf_counter` monkey-patch.
-  - Verify with that same interpreter: `C:\path\to\python310\python.exe -c "import pyffi; print(pyffi.__version__)"`.
+  - **Works on any modern Python (verified through 3.14) as long as `setuptools` is installed in that same environment** — no dedicated Python 3.10 needed. PyFFI 2.2.3's real (and only) Python-version blocker is a single unconditional `from distutils.cmd import Command` in `pyffi/utils/__init__.py` (used only by an unused, `# pragma: no cover` doc-building helper class) — `distutils` was removed from the stdlib in Python 3.12 (PEP 632). `pip install pyffi setuptools` fixes it: setuptools ships its own vendored `distutils` plus a compatibility shim that transparently satisfies that import, which is the officially-sanctioned PEP 632 migration path, not a fragile workaround. Confirmed end-to-end on Python 3.14.6: imported cleanly, read a real 735-block Skyrim skeleton NIF spanning ~15 block types (NiNode, several bhk\* physics types, controllers, etc.), modified it, wrote it back out, and re-read the result — all clean. The upstream [niftools/pyffi](https://github.com/niftools/pyffi) repo itself has had no real commits since **January 2020** (only a stray dependabot branch since), so this is the practical path forward rather than expecting an upstream fix there.
+  - The `time.clock = time.perf_counter` monkey-patch below is still required (`time.clock` was removed in Python 3.8 — the only OTHER Python-version issue, also the only one ever reported upstream, still open/unfixed as [GitHub issue #80](https://github.com/niftools/pyffi/issues/80)).
+  - Verify with that same interpreter: `python -c "import pyffi; print(pyffi.__version__)"`.
 - **PyNifly** — SSE BSTriShape read/write + animation/controller authoring + the independent parse gate.
   - Acquire: download `io_scene_nifly.zip` from the latest release at https://github.com/BadDogSkyrim/PyNifly/releases and extract it into `tools/pynifly/` so the prebuilt DLL lands at `tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll`. No build step. (A `git clone` of the repo does NOT contain the compiled DLL — it only ships in the release zip.)
   - Verify: load the DLL per the PyNifly section below.
@@ -118,7 +118,7 @@ bash tools/automod-cli.sh <module> <command> [args] --json
 
 ## PyFFI (NIF geometry edits — LE-format NiTriShape only)
 
-**Requires Python 3.10** (not 3.12) and a `time.clock = time.perf_counter` monkey-patch.
+**Works on any modern Python (verified through 3.14) as long as `setuptools` is installed alongside it** — see the Installing section above for why. Still needs the `time.clock = time.perf_counter` monkey-patch (a separate, still-open upstream issue, unrelated to the distutils/3.12 one).
 
 > **HARD LIMITS:**
 > 1. PyFFI **cannot read BSTriShape at all** (`Unknown block type 'BSTriShape'`) — i.e. any SSE-format (user_version_2=100) NIF. Use PyNifly.
@@ -128,7 +128,7 @@ bash tools/automod-cli.sh <module> <command> [args] --json
 > PyFFI remains the right tool for LE-format NiTriShape geometry edits (blade split/subdivision, bound spheres, vertex shifts).
 
 ```python
-# run with your Python 3.10 interpreter
+# run with any modern Python that has setuptools installed alongside pyffi
 import time; time.clock = time.perf_counter
 from pyffi.formats.nif import NifFormat
 

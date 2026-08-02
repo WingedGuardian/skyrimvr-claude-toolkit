@@ -379,7 +379,7 @@ echo "                  git clone https://github.com/SpookyPirate/spookys-automo
 echo "                  pin SDK 8.0.x via tools/automod/global.json (rollForward: latestFeature),"
 echo "                  build the Cli project ONLY (dotnet build tools/automod/src/SpookysAutomod.Cli -c Release)"
 echo "                  -- never build the WPF Setup project headless -- then use tools/automod-cli.sh"
-echo "  PyFFI        -- LE NiTriShape geometry (Python 3.10):  pip install pyffi"
+echo "  PyFFI        -- LE NiTriShape geometry (any modern Python + setuptools):  pip install pyffi setuptools"
 echo "  PyNifly      -- SSE BSTriShape + animation authoring:"
 echo "                  download io_scene_nifly.zip from github.com/BadDogSkyrim/PyNifly/releases,"
 echo "                  extract into tools/pynifly/ (DLL -> tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll; no build)."

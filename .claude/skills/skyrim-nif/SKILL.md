@@ -38,7 +38,7 @@ bash tools/automod-cli.sh nif <command> [args] --json
 
 AutoMod handles textures/strings/shaders/scale but NOT geometry rewrites or animation. For those:
 
-- **PyFFI (Python 3.10)** — LE-format `NiTriShape` geometry edits: vertex shifts, bounds, collision/
+- **PyFFI (any modern Python + setuptools)** — LE-format `NiTriShape` geometry edits: vertex shifts, bounds, collision/
   shader tweaks, and mesh split/subdivision. `tools/pyffi-geometry-split.py` splits one shape into two
   so each half can carry its own shader (e.g. partial-mesh glow without UV overlap).
   **Limits**: cannot read SSE `BSTriShape`; never author animation controllers with PyFFI — the
