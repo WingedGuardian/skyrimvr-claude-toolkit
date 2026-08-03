@@ -170,14 +170,20 @@ ini_get() { # $1=file $2=section $3=key  -> value, QSettings-unescaped, forward-
             eq = index($0, "="); if (eq == 0) next
             v = substr($0, eq + 1); sub(/^[ \t]+/, "", v); sub(/[ \t\r]+$/, "", v)
             gsub(/^"|"$/, "", v); print v; exit
-        }' "$1" 2>/dev/null | sed 's/\\\\/\\/g' | tr '\134' '/'
+        }' "$1" 2>/dev/null | sed 's/\\\\/\\/g' | tr '\134' '/' \
+      | sed 's/^@ByteArray(\(.*\))$/\1/'
+    # QSettings writes any value it considers binary as @ByteArray(...) -- MO2 does this routinely
+    # for gamePath and selected_profile. Unwrap it, or every comparison below is against a wrapper.
 }
 
 find_mo2_instance() {
     local ini gp
     # Global instances live one folder deep under %LOCALAPPDATA%\ModOrganizer\<InstanceName>\.
     # A portable instance keeps its ini in the MO2 install folder -- point MO2_INSTANCE_INI at it.
-    for ini in "${MO2_INSTANCE_INI:-}" "$LOCALAPPDATA_DIR/ModOrganizer"/*/ModOrganizer.ini; do
+    # Also probe the game root's siblings: a Nolvus/Wabbajack-style install parks the portable MO2
+    # next to the game folder (<instance>/MO2/ModOrganizer.ini beside <instance>/STOCK GAME/).
+    for ini in "${MO2_INSTANCE_INI:-}" "$LOCALAPPDATA_DIR/ModOrganizer"/*/ModOrganizer.ini \
+               "$GAME_DIR"/../*/ModOrganizer.ini; do
         [ -f "$ini" ] || continue
         gp="$(ini_get "$ini" General gamePath)"
         [ -n "$gp" ] || continue
@@ -191,6 +197,9 @@ find_mo2_instance() {
 
 if MO2_INI="$(find_mo2_instance)"; then
     MO2_INSTANCE="$(dirname "$MO2_INI")"
+    # Normalize to a real Windows-style path -- the sibling probe above resolves through `..`, and
+    # a `STOCK GAME/../MO2` instance path written into CLAUDE.md is correct but unreadable.
+    MO2_INSTANCE="$(cd "$MO2_INSTANCE" 2>/dev/null && pwd -W 2>/dev/null || echo "$MO2_INSTANCE")"
     # base_directory is optional. It can also be written as the literal %BASE_DIR% token, which is
     # self-referential -- in both cases the base IS the instance folder.
     MO2_BASE="$(ini_get "$MO2_INI" Settings base_directory)"
