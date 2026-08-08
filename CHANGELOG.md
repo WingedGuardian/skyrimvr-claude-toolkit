@@ -1,5 +1,47 @@
 # Changelog
 
+## v3.5.4 — 2026-08-07
+
+Two community-reported fixes, both verified independently here before merging.
+
+### Fixed
+
+- **Portable MO2 instances (Nolvus / Wabbajack layouts) were never detected.** Reported and fixed by
+  [@Leit-motif](https://github.com/Leit-motif) (#5). On a portable instance, detection fell through
+  to the stock/Vortex branch and wrote `Documents\My Games\...` plus `%LOCALAPPDATA%\...` for the INI
+  and load-order paths — paths that exist but that no MO2 profile uses. Confidently wrong, which is
+  precisely the failure MO2 support was added to prevent. Three independent causes, each of which
+  alone was enough to break it:
+  - `ini_get` didn't unwrap QSettings' `@ByteArray(...)` form, which MO2 writes routinely for
+    `gamePath` and `selected_profile`. **This also broke the `MO2_INSTANCE_INI` escape hatch that
+    v3.4 documented for portable instances** — so the documented workaround didn't work either.
+  - Only global instances under `%LOCALAPPDATA%\ModOrganizer\` were probed. Nolvus/Wabbajack park the
+    portable instance beside the game folder, so the game root's siblings are now probed too.
+  - The sibling probe resolves through `..`, which would have written an unreadable
+    `STOCK GAME/../MO2` instance path into `CLAUDE.md`. Normalized with `pwd -W`.
+
+  Verified by rebuilding the reported layout and running the real `setup.sh` against it: portable
+  instance detected with correct profile/mods/overwrite paths; a decoy sibling instance pointing at a
+  *different* game correctly ignored (the `gamePath` equality gate holds); global instances with
+  plain non-`@ByteArray` values still detected; non-MO2 installs still take the stock branch.
+
+- **PyFFI does not need a dedicated Python 3.10 install.** Reported and fixed by
+  [@awesmdiver](https://github.com/awesmdiver) (#4). Every mention of PyFFI told you to install a
+  separate 3.10 to avoid breaking on 3.12+. That extra install is unnecessary: PyFFI 2.2.3's only
+  version blocker is a single `from distutils.cmd import Command` in `pyffi/utils/__init__.py`, used
+  by an unused doc-building helper, and `distutils` left the stdlib in 3.12 (PEP 632).
+  `pip install pyffi setuptools` resolves it — setuptools vendors its own `distutils` plus an import
+  shim, the sanctioned PEP 632 migration path.
+
+  Verified here on 3.12 (the reporter verified 3.14.6, which between them brackets the range that
+  matters): reproduced the failure on a bare venv, confirmed the shim resolves through
+  `setuptools/_distutils`, then read → mutated → wrote → re-read a real game NIF successfully. The
+  separate `time.clock` monkey-patch is unrelated (removed in 3.8) and still required.
+
+  Worth knowing *why* this became common: **since Python 3.12, `venv` no longer installs setuptools
+  by default** — a fresh 3.12 venv ships pip only. The breakage is a newly-missing dependency, not a
+  newly-broken library.
+
 ## v3.5.3 — 2026-07-31
 
 ### Changed
