@@ -507,6 +507,8 @@ The ESP remains as a hollow shell. Only suggest removing ESPs when the user is s
 
 **po3_PapyrusExtender updates can break backward compatibility.** The March 2025 update changed function signatures for `PO3_SKSEFunctions`, causing mods compiled against older versions to fail with "does not match existing signature" errors. Functions like `GetSkinColor`, `GetHairColor`, `GetAllSpellsInMod`, `ToggleChildNode`, `ResetActor3D` all affected.
 
+**The DLL on disk is the source of truth for "what version is actually installed" — not the mod manager.** For any SKSE plugin, read the embedded File/Product version of `Data/SKSE/Plugins/*.dll` directly (e.g. the stable PapyrusTweaks build reports `4.1.0.x`). A manually-installed or hand-reverted plugin is invisible to Vortex/MO2, so the manager's reported version can disagree with what the game actually loads. Because these are DLLs with no save data, reverting one is safe mid-playthrough — the problem disappears on an existing save. Keep a personal "do-not-update-past" list; a plugin that is silently broken in VR while fine on SE/AE is easy to misattribute and easy to reinstall months later.
+
 ### Engine Fixes Available
 
 - **Engine Fixes VR**: tree LOD visibility, BSFadeNode offset corrections, volume settings persistence

@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v3.5.4)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # The zip is what users actually extract into their Skyrim folder, so it
+      # must contain the dotfiles (.claude/) and nothing from git.
+      - name: Build the install zip
+        run: |
+          set -euo pipefail
+          NAME="skyrimvr-claude-toolkit-${{ steps.tag.outputs.version }}"
+          mkdir -p "/tmp/$NAME"
+          rsync -a --exclude '.git' --exclude '.github' ./ "/tmp/$NAME/"
+          test -d "/tmp/$NAME/.claude/hooks" || { echo "::error::.claude/ missing from payload"; exit 1; }
+          (cd /tmp && zip -qr "$NAME.zip" "$NAME")
+          mv "/tmp/$NAME.zip" .
+          unzip -l "$NAME.zip" | tail -5
+          echo "ZIP=$NAME.zip" >> "$GITHUB_ENV"
+
+      - name: Extract this version's changelog section
+        run: |
+          python - <<'PY' > RELEASE_NOTES.md
+          import re, os
+          tag = os.environ['TAG']
+          version = tag.lstrip('v')
+          text = open('CHANGELOG.md', encoding='utf-8').read()
+          # Grab from the heading naming this version up to the next heading of
+          # the same level. Falls back to a pointer if the section is absent.
+          pattern = rf'^(#{{1,3}})\s*\[?v?{re.escape(version)}\]?.*?$(.*?)(?=^\1\s|\Z)'
+          m = re.search(pattern, text, re.S | re.M)
+          print(m.group(2).strip() if m else f'See CHANGELOG.md for {tag}.')
+          PY
+          echo "--- notes ---"; cat RELEASE_NOTES.md
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --title "${{ steps.tag.outputs.tag }}" \
+            --notes-file RELEASE_NOTES.md \
+            "$ZIP"
