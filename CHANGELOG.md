@@ -1,5 +1,42 @@
 # Changelog
 
+## v3.6 — 2026-08-23
+
+### Added
+
+- **Continuous integration (GitHub Actions).** Every push and pull request now runs five jobs:
+  shell (`bash -n`, shebangs, `shellcheck`), Python (`py_compile`, `ruff`), Node (`node --check`,
+  `npm test`), Claude Code config validation, and a `setup.sh` smoke test that installs the toolkit
+  into a stubbed game directory and runs it twice.
+
+  Two of those checks exist because their failure modes are **completely silent at runtime**, which
+  is the worst possible bug in a toolkit whose entire value is safety rails:
+
+  - Every hook `command` in `.claude/settings.json` must point at a file that exists. A hook with a
+    wrong path does not error — it simply never fires, and the protections you think you have are
+    gone.
+  - Every `SKILL.md` must carry `name` and `description` frontmatter, with `name` matching its
+    directory. A malformed skill is ignored by Claude Code with no message.
+
+  Relative Markdown links, `devcontainer.json` (parsed as JSONC — it has comments), and the
+  settings/`package.json`/`dotnet-tools.json` files are validated too. `ruff` gates only on
+  genuine-bug rules so pre-existing style findings do not redden the build.
+
+- **Release automation.** Tagging `v*` builds the install zip (asserting `.claude/` actually made it
+  into the payload), extracts that version's section from this changelog, and publishes a GitHub
+  Release with the zip attached.
+
+- **`.gitattributes`** pinning scripts to LF. Preventive: all tracked scripts are stored correctly
+  today, but the repo ships a Linux devcontainer, and a Windows author with `core.autocrlf=true`
+  committing CRLF into a shell script would break it at exec time with `bad interpreter: /bin/bash^M`.
+
+### Knowledgebase
+
+- **The DLL on disk is the source of truth for an SKSE plugin's installed version, not the mod
+  manager.** Read the embedded File/Product version of `Data/SKSE/Plugins/*.dll` directly. A
+  manually-installed or hand-reverted plugin is invisible to Vortex/MO2, so the manager's reported
+  version can disagree with what the game actually loads.
+
 ## v3.5.4 — 2026-08-07
 
 Two community-reported fixes, both verified independently here before merging.
