@@ -1,0 +1,29 @@
+# Line endings.
+#
+# This repo is authored on Windows but its scripts must run on Linux too -- the
+# shipped .devcontainer, WSL, and CI runners all execute them. A shell script
+# committed with CRLF fails at exec time with "bad interpreter: /bin/bash^M",
+# so these types are pinned to LF in the repository regardless of the author's
+# core.autocrlf setting.
+*.sh    text eol=lf
+*.py    text eol=lf
+*.js    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+
+# Windows-side helpers stay CRLF.
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+
+# Never touch binaries.
+*.png   binary
+*.jpg   binary
+*.dll   binary
+*.exe   binary
+*.bsa   binary
+*.esp   binary
+*.esm   binary
+*.esl   binary
+*.nif   binary
+*.xwm   binary

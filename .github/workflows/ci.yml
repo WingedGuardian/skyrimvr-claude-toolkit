@@ -1,0 +1,222 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    name: Shell (16 scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Syntax and shebangs
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            head -n1 "$f" | grep -qE '^#!' || { echo "::error file=$f::missing shebang"; fail=1; }
+            bash -n "$f" || { echo "::error file=$f::bash syntax error"; fail=1; }
+          done < <(git ls-files '*.sh')
+          exit $fail
+
+      # Hard gate on real errors only. Style-level warnings are reported but do
+      # not fail the build -- the scripts predate this workflow and are clean at
+      # error severity today.
+      - name: shellcheck (errors block, warnings advisory)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          mapfile -t files < <(git ls-files '*.sh')
+          shellcheck --severity=error "${files[@]}"
+          echo "--- advisory (non-blocking) ---"
+          shellcheck --severity=warning "${files[@]}" || true
+
+  python:
+    name: Python (6 files)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+
+      - name: Compile
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            python -m py_compile "$f" || { echo "::error file=$f::syntax error"; fail=1; }
+          done < <(git ls-files '*.py')
+          exit $fail
+
+      # ruff is already a declared dev dependency in requirements.txt. Only the
+      # genuine-bug rules gate the build (undefined names, syntax); the full
+      # ruleset currently reports 18 style findings and runs advisory-only.
+      - name: ruff
+        run: |
+          pip install --quiet ruff
+          mapfile -t files < <(git ls-files '*.py')
+          ruff check --select=E9,F63,F7,F82 "${files[@]}"
+          echo "--- advisory (non-blocking) ---"
+          ruff check "${files[@]}" || true
+
+  node:
+    name: Node (6 files)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+
+      # No package-lock.json is committed, so `npm ci` cannot be used here.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            node --check "$f" || { echo "::error file=$f::syntax error"; fail=1; }
+          done < <(git ls-files '*.js')
+          exit $fail
+
+      - name: npm test
+        run: npm test
+
+  toolkit:
+    name: Claude Code config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+
+      - name: settings JSON parses
+        run: |
+          fail=0
+          for f in .claude/settings.json .claude/settings.local.json.example .config/dotnet-tools.json package.json; do
+            [ -f "$f" ] || continue
+            python -c "import json,sys; json.load(open(sys.argv[1]))" "$f" \
+              || { echo "::error file=$f::invalid JSON"; fail=1; }
+          done
+          exit $fail
+
+      - name: devcontainer.json parses
+        run: |
+          python - <<'PY'
+          import json, re, sys, os
+          f = '.devcontainer/devcontainer.json'
+          if not os.path.exists(f):
+              print('no devcontainer, skipping'); sys.exit(0)
+          s = open(f, encoding='utf-8').read()
+          # devcontainer.json is JSONC: strip comments and trailing commas first.
+          s = re.sub(r'/\*.*?\*/', '', s, flags=re.S)
+          s = re.sub(r'(^|\s)//[^\n]*', '', s)
+          s = re.sub(r',(\s*[}\]])', r'\1', s)
+          try:
+              json.loads(s)
+          except json.JSONDecodeError as e:
+              print(f'::error file={f}::invalid JSONC: {e}'); sys.exit(1)
+          print('devcontainer.json OK')
+          PY
+
+      # A hook whose script path is wrong does not error at runtime -- it silently
+      # never fires. For a safety toolkit that is the worst failure mode there is.
+      - name: Every hook command points at a file that exists
+        run: |
+          python - <<'PY'
+          import json, re, sys, os
+          cfg = json.load(open('.claude/settings.json'))
+          missing, checked = [], 0
+          for event, matchers in cfg.get('hooks', {}).items():
+              for m in matchers:
+                  for h in m.get('hooks', []):
+                      for path in re.findall(r'\$CLAUDE_PROJECT_DIR/([^"\']+)', h.get('command', '')):
+                          checked += 1
+                          if not os.path.isfile(path):
+                              missing.append(f'{event}: {path}')
+          for m in missing:
+              print(f'::error::hook script not found -> {m}')
+          print(f'checked {checked} hook paths')
+          sys.exit(1 if missing else 0)
+          PY
+
+      # A SKILL.md without name+description frontmatter is silently ignored, and a
+      # name that does not match its directory never resolves.
+      - name: Skill frontmatter is well-formed
+        run: |
+          python - <<'PY'
+          import glob, os, re, sys
+          fail = False
+          files = sorted(glob.glob('.claude/skills/*/SKILL.md'))
+          if not files:
+              print('::error::no skills found'); sys.exit(1)
+          for f in files:
+              m = re.match(r'^---\r?\n(.*?)\r?\n---', open(f, encoding='utf-8').read(), re.S)
+              if not m:
+                  print(f'::error file={f}::missing YAML frontmatter'); fail = True; continue
+              name = re.search(r'^name:\s*(\S+)', m.group(1), re.M)
+              desc = re.search(r'^description:\s*(\S.*)', m.group(1), re.M)
+              if not name:
+                  print(f'::error file={f}::frontmatter missing "name"'); fail = True
+              if not desc:
+                  print(f'::error file={f}::frontmatter missing "description"'); fail = True
+              if name:
+                  want = os.path.basename(os.path.dirname(f))
+                  if name.group(1) != want:
+                      print(f'::error file={f}::name "{name.group(1)}" != directory "{want}"')
+                      fail = True
+          print(f'checked {len(files)} skills')
+          sys.exit(1 if fail else 0)
+          PY
+
+      - name: Relative links in Markdown resolve
+        run: |
+          python - <<'PY'
+          import glob, os, re, sys
+          fail = False
+          for f in glob.glob('**/*.md', recursive=True):
+              base = os.path.dirname(f)
+              for text, target in re.findall(r'\[([^\]]*)\]\(([^)\s]+)\)',
+                                             open(f, encoding='utf-8').read()):
+                  if re.match(r'^(https?:|mailto:|#)', target):
+                      continue
+                  path = os.path.normpath(os.path.join(base, target.split('#')[0]))
+                  if path and not os.path.exists(path):
+                      print(f'::error file={f}::broken link [{text}]({target})')
+                      fail = True
+          sys.exit(1 if fail else 0)
+          PY
+
+  setup-smoke:
+    name: setup.sh runs clean
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install into a fake game directory
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq rsync
+          GAME=/tmp/fake-skyrim
+          mkdir -p "$GAME"
+          # setup.sh prompts interactively if it cannot find the exe, so stub it.
+          touch "$GAME/SkyrimVR.exe"
+          rsync -a --exclude '.git' ./ "$GAME/"
+          cd "$GAME"
+          bash setup.sh < /dev/null
+          test -f .claude/settings.json || { echo "::error::settings.json missing after setup"; exit 1; }
+          jq empty .claude/settings.json
+
+      - name: Running setup twice is safe
+        run: |
+          set -euo pipefail
+          cd /tmp/fake-skyrim
+          bash setup.sh < /dev/null
+          jq empty .claude/settings.json
