@@ -220,3 +220,76 @@ jobs:
           cd /tmp/fake-skyrim
           bash setup.sh < /dev/null
           jq empty .claude/settings.json
+
+      # Running setup.sh and only checking that settings.json parses is close to
+      # a false green: every path bug this toolkit has shipped would pass it.
+      # These assert on what setup.sh actually WROTE. Deeper coverage lives in
+      # the `behavior` job below; this keeps the smoke test honest on its own.
+      - name: setup.sh wrote usable paths, not just valid JSON
+        run: |
+          set -euo pipefail
+          cd /tmp/fake-skyrim
+          leftover=$(grep -nE '\{\{[A-Z_]+\}\}' CLAUDE.md || true)
+          if [ -n "$leftover" ]; then
+            echo "::error::unsubstituted placeholders remain in CLAUDE.md"
+            echo "$leftover"
+            exit 1
+          fi
+          grep -q '^- \*\*Game root\*\*' CLAUDE.md \
+            || { echo "::error::no Game root line written"; exit 1; }
+          grep -q '^- \*\*Mod manager\*\*' CLAUDE.md \
+            || { echo "::error::no Mod manager line written"; exit 1; }
+          for h in .claude/hooks/*.sh; do
+            if grep -q '{{JQ_PATH}}' "$h"; then
+              echo "::error file=$h::jq placeholder was never substituted"; exit 1
+            fi
+          done
+
+  behavior:
+    name: Behavioral tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # The Windows leg is ADVISORY for v3.6.1 only. setup.sh has never run on a
+    # Windows runner before, so this ships non-blocking for one release to see
+    # it pass in the wild. PROMOTE TO BLOCKING IN v3.6.2 -- an advisory gate is
+    # a gate that cannot fail, which is the exact defect this job exists to
+    # eliminate. Tracked in CHANGELOG under v3.6.1.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+
+      # jq must resolve, or setup.sh reaches its `winget install` branch -- a
+      # slow, network-dependent step that can hang the runner.
+      - name: Ensure jq is on PATH
+        run: |
+          if command -v jq >/dev/null 2>&1; then jq --version; exit 0; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            choco install jq -y --no-progress
+          else
+            sudo apt-get update -qq && sudo apt-get install -y -qq jq
+          fi
+          command -v jq >/dev/null 2>&1 || { echo "::error::jq still missing"; exit 1; }
+
+      - name: Install pytest
+        run: python -m pip install --quiet --disable-pip-version-check pytest==8.0.0
+
+      - name: Advisory notice
+        if: runner.os == 'Windows'
+        run: echo "::warning::Windows leg is ADVISORY for v3.6.1 -- promote to blocking in v3.6.2."
+
+      - name: Behavioral suite
+        run: python -m pytest tests/ -v --durations=10

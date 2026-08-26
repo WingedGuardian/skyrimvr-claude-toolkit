@@ -35,7 +35,15 @@ jobs:
           set -euo pipefail
           NAME="skyrimvr-claude-toolkit-${{ steps.tag.outputs.version }}"
           mkdir -p "/tmp/$NAME"
-          rsync -a --exclude '.git' --exclude '.github' ./ "/tmp/$NAME/"
+          # tests/ is dev-only: it runs in CI from the repo and has no business
+          # in the folder users extract into their Skyrim install. Note this is
+          # an rsync exclude and NOT .gitattributes export-ignore -- the zip is
+          # built by rsync+zip rather than `git archive`, so export-ignore would
+          # be silently inert here.
+          rsync -a --exclude '.git' --exclude '.github' --exclude 'tests' \
+                --exclude '.venv' --exclude '__pycache__' --exclude '.pytest_cache' \
+                ./ "/tmp/$NAME/"
+          test ! -d "/tmp/$NAME/tests" || { echo "::error::tests/ leaked into the release payload"; exit 1; }
           test -d "/tmp/$NAME/.claude/hooks" || { echo "::error::.claude/ missing from payload"; exit 1; }
           (cd /tmp && zip -qr "$NAME.zip" "$NAME")
           mv "/tmp/$NAME.zip" .
