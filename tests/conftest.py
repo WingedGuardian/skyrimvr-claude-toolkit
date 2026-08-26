@@ -25,6 +25,44 @@ REPO = Path(__file__).resolve().parent.parent
 BIN = Path(__file__).resolve().parent / "bin"
 BS = chr(92)  # backslash, spelled this way to keep escapes out of this file
 
+
+def _resolve_bash() -> str:
+    """Find a bash that actually works.
+
+    `bash` on PATH is not necessarily a usable one. On a GitHub Windows runner
+    it resolves to C:\\Windows\\System32\\bash.exe -- the WSL launcher -- which
+    exits 1 when no distro is installed. A workflow's `shell: bash` fixes the
+    step's own shell but not what subprocess finds, so every test that spawned
+    bash failed there with a bare non-zero exit and no useful message.
+
+    Candidates are probed rather than assumed: whichever first answers a
+    trivial command wins.
+    """
+    candidates = [
+        os.environ.get("TOOLKIT_BASH"),
+        shutil.which("bash"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+        "/bin/bash",
+        "/usr/bin/bash",
+    ]
+    tried = []
+    for candidate in candidates:
+        if not candidate or not Path(candidate).exists():
+            continue
+        tried.append(candidate)
+        try:
+            probe = subprocess.run([candidate, "-c", "echo toolkit-ok"],
+                                   capture_output=True, text=True, timeout=60)
+        except OSError:
+            continue
+        if probe.returncode == 0 and "toolkit-ok" in probe.stdout:
+            return candidate
+    raise RuntimeError(f"no working bash found; tried: {tried}")
+
+
+BASH = _resolve_bash()
+
 # setup.sh shells out to `winget install` when it cannot find jq, which would be
 # a slow, network-dependent step that can hang a CI run. Every invocation is
 # capped so a stuck install fails the test instead of the job.
@@ -60,7 +98,7 @@ def game_root_win(game: Path) -> str:
     """The path setup.sh computes for itself -- `pwd -W` on Windows, `pwd`
     elsewhere. Fixtures must agree with it or MO2 detection can never match."""
     r = subprocess.run(
-        ["bash", "-c", "pwd -W 2>/dev/null || pwd"],
+        [BASH, "-c", "pwd -W 2>/dev/null || pwd"],
         cwd=str(game), capture_output=True, text=True, check=True,
     )
     return r.stdout.strip()
@@ -80,7 +118,7 @@ def run_setup(cwd: Path, env_overrides: dict | None = None, shim_path: bool = Fa
     if env_overrides:
         env.update({k: str(v) for k, v in env_overrides.items()})
     return subprocess.run(
-        ["bash", "setup.sh"],
+        [BASH, "setup.sh"],
         cwd=str(cwd), env=env,
         stdin=subprocess.DEVNULL,
         capture_output=True, text=True, timeout=SETUP_TIMEOUT,

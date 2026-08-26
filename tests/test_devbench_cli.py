@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO
+from conftest import BASH, REPO
 
 CLI = REPO / "tools" / "devbench-cli.sh"
 MOCK = Path(__file__).resolve().parent / "mock_devbench.py"
@@ -118,12 +118,12 @@ def run_cli(*args, port: int, mask_jq: bool = False):
         # Prove the mask worked. If jq were still reachable this test would run
         # the jq path and pass while claiming to cover the fallback -- a test
         # that examines nothing must never report success.
-        probe = subprocess.run(["bash", "-c", "command -v jq"], env=env,
+        probe = subprocess.run([BASH, "-c", "command -v jq"], env=env,
                                capture_output=True, text=True)
         assert probe.returncode != 0, (
             f"jq still resolvable after masking: {probe.stdout.strip()!r}")
     return subprocess.run(
-        ["bash", str(CLI), *args],
+        [BASH, str(CLI), *args],
         cwd=str(REPO), env=env, capture_output=True, text=True, timeout=120,
     )
 
