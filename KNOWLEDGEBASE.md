@@ -1699,3 +1699,32 @@ the knob, and it is not.
   actors outward. For a directional fling the centre must be offset from the target.
 - For simple visible knockback, the engine-native `PushActorAway(target, magnitude)` (roughly 1-5 =
   stagger through ragdoll) is usually a better tool than an explosion at all.
+
+## Windows paths in `sed` replacement text get eaten
+
+Feeding a backslash-separated Windows path straight into `sed`'s *replacement*
+half silently destroys it. GNU sed reads backslash sequences there as escapes:
+`\U` switches on upper-casing, `\L` on lower-casing, `\t` becomes a literal tab,
+and every other backslash is simply dropped. Measured on this toolkit's own
+`setup.sh`:
+
+```
+supplied  C:\Users\testuser\AppData\Local\Microsoft\WinGet\Links\jq.exe
+produced  C:SERS<TAB>ESTUSERAPPDATAocalmicrosoftwingetinksjq.exe
+```
+
+There is no error and no non-zero exit -- the substitution "succeeds" and writes
+garbage. When the value is a path to a tool, whatever consumes it fails open.
+
+**Rule: normalize before substituting.** `path=$(printf '%s' "$path" | tr '\134' '/')`
+Skyrim tooling accepts forward slashes everywhere, so this costs nothing.
+
+**Normalize at the point where the branches converge, not at each assignment.**
+This toolkit shipped the bug twice for that reason: the v3.2.1 fix normalized
+two variables and missed a third, and that third had *three* assignment sites
+(a `which` result, a known-locations loop, and a post-install re-detect), so a
+fix attached to any one of them would still have missed the others.
+
+The same trap exists in Python -- `"C:\Users\..."` in a non-raw string is a
+`\UXXXXXXXX` escape error, and `\t` in a double-quoted string is a tab. Use raw
+strings, or build the separator with `chr(92)`.

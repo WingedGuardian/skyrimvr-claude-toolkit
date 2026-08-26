@@ -357,6 +357,27 @@ A: Download the new version from Nexus and extract over the old one. Your knowle
 
 Found a new Skyrim quirk? PRs welcome on [GitHub](https://github.com/WingedGuardian/skyrimvr-claude-toolkit) -- especially additions to `KNOWLEDGEBASE.md`.
 
+### Running the tests
+
+The suite is dev-only and is not in the release zip. From a clone:
+
+```bash
+python -m venv .venv && .venv/Scripts/python -m pip install pytest==8.0.0
+.venv/Scripts/python -m pytest tests/ -v      # behavioral suite
+npm test                                       # Node unit tests
+```
+
+`tests/` runs the **real** `setup.sh` against generated MO2 and stock layouts and
+asserts on the paths it *wrote* -- not on what it printed. `tools/devbench-cli.sh`
+is exercised against a mock DevBench server covering every liveness state.
+
+**`tests/test_mutations.py` is the one to understand before adding a test.** A
+regression test written after its bug was fixed passes on the first run, which
+proves nothing. The mutation gate reverts each fix on a throwaway copy and
+asserts the guarding test *fails*. If you add a regression test, add its
+mutation too -- otherwise you have coverage you cannot trust. It has already
+caught two of its own guards asserting nothing.
+
 ## License
 
 MIT -- see [LICENSE](LICENSE).

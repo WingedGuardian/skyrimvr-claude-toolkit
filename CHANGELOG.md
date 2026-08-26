@@ -1,5 +1,104 @@
 # Changelog
 
+## v3.6.1 — 2026-08-26
+
+v3.6 added CI that checks the toolkit's *structure*. This adds the layer that
+checks its *behavior* — and closes two gates that were reporting success while
+examining nothing.
+
+### Fixed
+
+- **`setup.sh` could silently corrupt every safety hook.** `JQ_PATH` was
+  substituted into all four hooks via `sed`, and GNU sed reads backslash
+  sequences in replacement text as escapes. A Windows-style jq path was not
+  merely wrong, it was destroyed — measured:
+
+  ```
+  supplied  C:\Users\testuser\AppData\Local\Microsoft\WinGet\Links\jq.exe
+  produced  JQ="C:SERS<TAB>ESTUSERAPPDATAocalmicrosoftwingetinksjq.exe"
+  ```
+
+  `\U` switched on upper-casing, `\t` became a literal tab, `\L` switched on
+  lower-casing, and every backslash was eaten. The hooks then point at a jq that
+  does not exist and fail open, silently, on a toolkit whose whole purpose is
+  safety rails.
+
+  This is the same defect fixed for `LOCALAPPDATA` and the Documents path in
+  v3.2.1. That fix normalized two variables; an audit of every variable reaching
+  `sed` found `JQ_PATH` as the one it missed. Normalized after all three of its
+  assignment branches converge, so the `which` result, the known-locations loop
+  and the post-`winget` re-detect are all covered.
+
+  **Reachability is unconfirmed** — every fallback path in `setup.sh` is already
+  forward-slashed, so `which jq` returning a Windows path is the only trigger and
+  it has not been observed in the wild. This is a defensive fix against a
+  proven-catastrophic outcome, not a confirmed live bug.
+
+- **`npm test` was a gate that could not fail.** It runs `node --test`, which
+  with zero test files printed nothing and exited 0 — so the CI Node job reported
+  success having examined nothing at all. There are now six real Node tests
+  covering the pure-JS half of `active-plugins.js`, plus a guard asserting the
+  run actually reports passing tests.
+
+- **`setup-smoke` asserted almost nothing.** It ran `setup.sh` and then only
+  checked that `settings.json` parsed — every path bug this toolkit has shipped
+  would have passed it. It now also checks that no `{{PLACEHOLDER}}` survived,
+  that the Game root and Mod manager lines were written, and that the jq
+  placeholder was substituted in every hook.
+
+- **Extensionless test shims checked out as CRLF.** `.gitattributes` pinned
+  `*.sh` to LF but not `tests/bin/*`, so a fresh clone produced a shim with CRLF
+  line endings, which dies on Linux with `bad interpreter: /bin/bash^M`.
+
+### Added
+
+- **A behavioral test suite** (`tests/`, pytest) that runs the *real* `setup.sh`
+  against generated MO2 and stock layouts and asserts on the paths it **wrote**,
+  not on what it printed. Every test is anchored to a bug this toolkit actually
+  shipped: the v3.2.1 `sed` corruption and MSYS game root, and the v3.5.4
+  portable-MO2 detection, `@ByteArray` unwrapping and `..` normalization.
+
+- **`tools/devbench-cli.sh` coverage** against a mock DevBench server: all four
+  liveness states (running / paused / hung / no-save-loaded), the pre-1.11.0
+  fallback, a dead port, 504 and 400 — asserting **exit codes**, which are the
+  contract. The whole matrix runs again with `jq` masked off `PATH`, because
+  `jget`'s no-jq branch is hand-rolled `sed` and the least-exercised code there.
+
+- **A mutation gate** (`tests/test_mutations.py`, modelled on the X4 toolkit's
+  `mutation_probe`). A regression test written after its bug was fixed passes on
+  the first run, which proves nothing; the gate reverts each fix on a throwaway
+  copy and asserts the guarding test *fails*. Nine mutations, and it earned its
+  place immediately by catching two guards that asserted nothing:
+
+  - `test_byte_array_wrapping_is_unwrapped` passed with the unwrap reverted.
+    Without it, detection falls through to the stock branch, so no MO2 block is
+    written (nothing containing `@ByteArray` to find) and the profile name still
+    appears because it is part of the game directory path. Both assertions were
+    true for entirely the wrong reason.
+  - The `npm test` vacuity guard passed against its own mutation. Asserting a
+    non-zero pass count is not enough: a file that registers no tests is itself
+    counted as one passing test, so `pass 1` looks healthy.
+
+- **Windows CI coverage** (`behavior` job, ubuntu + windows matrix). All four
+  historical path bugs were Windows-specific, so an ubuntu-only run would have
+  caught none of them. **The Windows leg is advisory for this release only** —
+  `setup.sh` has never run on a Windows runner before. It is marked
+  `continue-on-error` for v3.6.1 and **must be promoted to blocking in v3.6.2**;
+  an advisory gate is a gate that cannot fail, which is the defect this whole
+  release exists to eliminate.
+
+### Notes
+
+- `tests/` is excluded from the release zip, via an **rsync exclude** rather than
+  `.gitattributes export-ignore` — the zip is built with `rsync`+`zip`, not
+  `git archive`, so `export-ignore` would have been silently inert.
+- The Node test ships, because it sits next to the module it tests in `tools/`.
+  Excluding it would recreate the vacuous `npm test` for anyone installing from
+  the zip, which is the exact thing this release fixes.
+- `KNOWLEDGEBASE.md` gains an entry on the `sed` backslash trap, including the
+  rule that cost this toolkit two releases: normalize where the branches
+  converge, not at each assignment.
+
 ## v3.6 — 2026-08-23
 
 ### Added
