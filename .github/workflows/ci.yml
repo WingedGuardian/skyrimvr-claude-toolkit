@@ -252,12 +252,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # The Windows leg is ADVISORY for v3.6.1 only. setup.sh has never run on a
-    # Windows runner before, so this ships non-blocking for one release to see
-    # it pass in the wild. PROMOTE TO BLOCKING IN v3.6.2 -- an advisory gate is
-    # a gate that cannot fail, which is the exact defect this job exists to
-    # eliminate. Tracked in CHANGELOG under v3.6.1.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    # Both legs block. Windows is the platform this toolkit actually targets and
+    # every path bug it has shipped was Windows-specific, so a non-blocking
+    # Windows leg would be a gate that cannot fail -- the exact defect this job
+    # exists to eliminate.
     defaults:
       run:
         shell: bash
@@ -291,10 +289,6 @@ jobs:
 
       - name: Install pytest
         run: python -m pip install --quiet --disable-pip-version-check pytest==8.0.0
-
-      - name: Advisory notice
-        if: runner.os == 'Windows'
-        run: echo "::warning::Windows leg is ADVISORY for v3.6.1 -- promote to blocking in v3.6.2."
 
       - name: Behavioral suite
         run: python -m pytest tests/ -v --durations=10

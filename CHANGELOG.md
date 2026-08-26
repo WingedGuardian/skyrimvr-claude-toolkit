@@ -1,6 +1,6 @@
 # Changelog
 
-## v3.6.1 — 2026-08-26
+## v3.7 — 2026-08-26
 
 v3.6 added CI that checks the toolkit's *structure*. This adds the layer that
 checks its *behavior* — and closes two gates that were reporting success while
@@ -79,13 +79,16 @@ examining nothing.
     non-zero pass count is not enough: a file that registers no tests is itself
     counted as one passing test, so `pass 1` looks healthy.
 
-- **Windows CI coverage** (`behavior` job, ubuntu + windows matrix). All four
-  historical path bugs were Windows-specific, so an ubuntu-only run would have
-  caught none of them. **The Windows leg is advisory for this release only** —
-  `setup.sh` has never run on a Windows runner before. It is marked
-  `continue-on-error` for v3.6.1 and **must be promoted to blocking in v3.6.2**;
-  an advisory gate is a gate that cannot fail, which is the defect this whole
-  release exists to eliminate.
+- **Windows CI coverage** (`behavior` job, ubuntu + windows matrix, **both
+  blocking**). All four historical path bugs were Windows-specific, so an
+  ubuntu-only run would have caught none of them.
+
+  The Windows leg earned its place on its first real run. It exposed that `bash`
+  on a GitHub Windows runner resolves to `C:\Windows\System32\bash.exe` — the WSL
+  launcher, which exits 1 with no distro installed — and that a workflow's
+  `shell: bash` does not change what Python's `subprocess` finds. Every test that
+  spawned a shell failed there with a bare exit 1 and no message. The suite now
+  probes for a working `bash` rather than trusting `PATH`.
 
 ### Notes
 
