@@ -27,3 +27,9 @@
 *.esl   binary
 *.nif   binary
 *.xwm   binary
+
+# Extensionless test shims are shell scripts too. Without this they inherit the
+# author's core.autocrlf and check out as CRLF, which dies on a Linux runner with
+# "bad interpreter: /bin/bash^M" -- the exact failure the block above prevents
+# for *.sh. Caught by a fresh-clone check, not in CI.
+tests/bin/* text eol=lf
