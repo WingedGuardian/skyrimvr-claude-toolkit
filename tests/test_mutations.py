@@ -63,6 +63,32 @@ MUTATIONS = [
         "tests/test_setup_paths.py::test_paths_are_not_backslash_corrupted",
         id="localappdata-normalization",
     ),
+    # --- tools/devbench-cli.sh -------------------------------------------
+    pytest.param(
+        "tools/devbench-cli.sh",
+        'if [ "${pend:-0}" -gt 0 ] 2>/dev/null && [ "$t1" = "$t2" ]; then',
+        "if false; then",
+        "tests/test_devbench_cli.py::test_starved_main_thread_is_reported_as_hung",
+        id="hang-vs-pause-discrimination",
+    ),
+    pytest.param(
+        "tools/devbench-cli.sh",
+        'case "$f2" in -*)',
+        'case "$f2" in __never_matches__)',
+        "tests/test_devbench_cli.py::test_no_save_loaded_is_its_own_state",
+        id="no-save-loaded-detection",
+    ),
+    pytest.param(
+        # Reproduce the actual pre-v3.5.1 bug: every HTTP status counted as
+        # success, so a 504 printed as though the call had worked. Perturbing
+        # only the `504)` arm is not enough -- it falls through to the generic
+        # error arm, which still reports failure and still mentions 504.
+        "tools/devbench-cli.sh",
+        "        2*) return 0 ;;",
+        "        *) return 0 ;;",
+        "tests/test_devbench_cli.py::test_504_is_reported_as_a_busy_main_thread",
+        id="http-status-is-honored",
+    ),
 ]
 
 
