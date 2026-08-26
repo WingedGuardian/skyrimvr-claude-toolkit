@@ -14,9 +14,11 @@ releases.
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -26,6 +28,43 @@ from conftest import REPO
 
 CLI = REPO / "tools" / "devbench-cli.sh"
 MOCK = Path(__file__).resolve().parent / "mock_devbench.py"
+
+
+# Everything devbench-cli.sh shells out to, minus jq. `bash` is here because
+# the test itself execs it.
+NEEDED = ["bash", "curl", "sed", "head", "tr", "cat", "sleep", "env"]
+
+_nojq_dir: Path | None = None
+
+
+def _path_without_jq() -> str:
+    """A PATH with everything the script needs except jq.
+
+    Dropping whole PATH entries that contain jq works on Windows, where jq sits
+    in its own WinGet/choco directory. It is wrong on Linux: jq lives in
+    /usr/bin alongside bash, curl and coreutils, so dropping that directory
+    takes the interpreter with it and the run dies with
+    "No such file or directory: 'bash'" having tested nothing.
+    """
+    if os.name == "nt":
+        keep = []
+        for entry in os.environ.get("PATH", "").split(os.pathsep):
+            if not entry:
+                continue
+            d = Path(entry)
+            if (d / "jq").exists() or (d / "jq.exe").exists():
+                continue
+            keep.append(entry)
+        return os.pathsep.join(keep)
+
+    global _nojq_dir
+    if _nojq_dir is None:
+        _nojq_dir = Path(tempfile.mkdtemp(prefix="toolkit-nojq-"))
+        for name in NEEDED:
+            real = shutil.which(name)
+            if real:
+                (_nojq_dir / name).symlink_to(real)
+    return str(_nojq_dir)
 
 
 def _free_port() -> int:
@@ -75,19 +114,7 @@ def run_cli(*args, port: int, mask_jq: bool = False):
     env = dict(os.environ)
     env["DEVBENCH_PORT"] = str(port)
     if mask_jq:
-        # Force jget's hand-rolled sed fallback -- the least-exercised code in
-        # the script. Drop only the PATH entries that actually contain jq:
-        # replacing PATH wholesale also removes curl, and the script then exits
-        # early with "curl not found" having tested nothing.
-        keep = []
-        for entry in env.get("PATH", "").split(os.pathsep):
-            if not entry:
-                continue
-            d = Path(entry)
-            if (d / "jq").exists() or (d / "jq.exe").exists():
-                continue
-            keep.append(entry)
-        env["PATH"] = os.pathsep.join(keep)
+        env["PATH"] = _path_without_jq()
         # Prove the mask worked. If jq were still reachable this test would run
         # the jq path and pass while claiming to cover the fallback -- a test
         # that examines nothing must never report success.
