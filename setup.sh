@@ -206,7 +206,12 @@ if MO2_INI="$(find_mo2_instance)"; then
     MO2_INSTANCE="$(dirname "$MO2_INI")"
     # Normalize to a real Windows-style path -- the sibling probe above resolves through `..`, and
     # a `STOCK GAME/../MO2` instance path written into CLAUDE.md is correct but unreadable.
-    MO2_INSTANCE="$(cd "$MO2_INSTANCE" 2>/dev/null && pwd -W 2>/dev/null || echo "$MO2_INSTANCE")"
+    # `pwd -W` gives the Windows form but does not exist off MSYS, so fall back to
+    # plain `pwd` (matching line 17) before giving up on the raw value. Without
+    # that fallback the `..` survives everywhere `pwd -W` is unavailable -- which
+    # now includes the shipped Linux devcontainer -- and CLAUDE.md gets an
+    # instance path like `STOCK GAME/../MO2`: correct, but unreadable.
+    MO2_INSTANCE="$( { cd "$MO2_INSTANCE" 2>/dev/null && { pwd -W 2>/dev/null || pwd; } ; } || echo "$MO2_INSTANCE")"
     # base_directory is optional. It can also be written as the literal %BASE_DIR% token, which is
     # self-referential -- in both cases the base IS the instance folder.
     MO2_BASE="$(ini_get "$MO2_INI" Settings base_directory)"

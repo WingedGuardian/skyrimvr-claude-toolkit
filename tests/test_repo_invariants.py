@@ -54,13 +54,18 @@ def test_npm_test_actually_runs_tests():
     and exits 0 -- so the CI node job passed while testing literally nothing.
     A gate that cannot fail is worse than no gate, because it reads as coverage.
     """
+    # The reporter is pinned to TAP. node --test picks its reporter based on
+    # whether stdout is a TTY, so the format differs between a local run and
+    # CI -- and the orphan check below is format-sensitive. It silently matched
+    # nothing on the CI runner while passing locally, which made this guard
+    # itself a false green on exactly the machine that matters.
     result = subprocess.run(
-        ["node", "--test"], cwd=str(REPO),
+        ["node", "--test", "--test-reporter=tap"], cwd=str(REPO),
         capture_output=True, text=True, timeout=300,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
-    match = re.search(r"^.*?pass\s+(\d+)", result.stdout, re.M)
+    match = re.search(r"^#\s*pass\s+(\d+)", result.stdout, re.M)
     assert match, f"could not read a pass count from node --test:\n{result.stdout}"
     assert int(match.group(1)) > 0, (
         "node --test reported zero passing tests, so `npm test` is a gate that "
@@ -73,7 +78,7 @@ def test_npm_test_actually_runs_tests():
     # In that case the reported test NAME is the filename, which is the signal
     # worth checking. Found by the mutation gate: neutering the test file left
     # the pass-count check above green, so it was guarding nothing.
-    orphans = re.findall(r"(\S+\.test\.js)\s+\(", result.stdout)
+    orphans = re.findall(r"^ok\s+\d+\s+-\s+(\S+\.test\.js)\s*$", result.stdout, re.M)
     assert not orphans, (
         f"these files ran but registered no tests, so they count as passes "
         f"while asserting nothing: {sorted(set(orphans))}"
