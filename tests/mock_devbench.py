@@ -89,4 +89,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    # Bind first, then announce the port we actually got. Passing 0 lets the OS
+    # choose, which removes the race in "find a free port, close it, hope it is
+    # still free when the server binds it".
+    server = HTTPServer(("127.0.0.1", PORT), Handler)
+    print(f"PORT={server.server_address[1]}", flush=True)
+    server.serve_forever()

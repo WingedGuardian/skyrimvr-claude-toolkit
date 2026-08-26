@@ -362,10 +362,15 @@ Found a new Skyrim quirk? PRs welcome on [GitHub](https://github.com/WingedGuard
 The suite is dev-only and is not in the release zip. From a clone:
 
 ```bash
-python -m venv .venv && .venv/Scripts/python -m pip install pytest==8.0.0
+python -m venv .venv
+# Windows:            .venv/Scripts/python
+# Linux / macOS:      .venv/bin/python
+.venv/Scripts/python -m pip install pytest==8.0.0
 .venv/Scripts/python -m pytest tests/ -v      # behavioral suite
 npm test                                       # Node unit tests
 ```
+
+The suite runs on both Windows and Linux in CI, so it should pass on either.
 
 `tests/` runs the **real** `setup.sh` against generated MO2 and stock layouts and
 asserts on the paths it *wrote* -- not on what it printed. `tools/devbench-cli.sh`
