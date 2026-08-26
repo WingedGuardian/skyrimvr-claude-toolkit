@@ -16,3 +16,8 @@ Desktop.ini
 tools/.nexus_api_key
 .nexus_api_key
 *.nexus_api_key
+
+# Python virtualenv + test caches (dev only)
+.venv/
+__pycache__/
+.pytest_cache/

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Test shim. Lets a test control what `which jq` returns, so JQ_PATH handling can
+# be exercised regardless of how jq happens to be installed on the machine
+# running the suite. Delegates to the real `which` for everything else.
+if [ "$1" = "jq" ] && [ -n "${FAKE_WHICH_JQ:-}" ]; then
+    printf '%s\n' "$FAKE_WHICH_JQ"
+    exit 0
+fi
+if [ -x /usr/bin/which ]; then
+    exec /usr/bin/which "$@"
+fi
+command -v "$1"
