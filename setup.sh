@@ -71,6 +71,13 @@ if [ -z "$JQ_PATH" ]; then
     # Re-detect after install
     JQ_PATH=$(which jq 2>/dev/null || echo "/c/Users/$USERNAME/AppData/Local/Microsoft/WinGet/Links/jq.exe")
 fi
+# JQ_PATH is substituted into every hook via sed, and GNU sed reads backslash
+# sequences in replacement text as escapes -- \U upper-cases the rest,
+# \t becomes a literal tab -- so a Windows-style path silently corrupts all
+# four safety hooks and they fail open. Same defect fixed for LOCALAPPDATA and
+# Documents in v3.2.1; this is the one path that fix missed. Normalized here,
+# after all three assignment branches above have converged.
+JQ_PATH=$(printf '%s' "$JQ_PATH" | tr '\134' '/')
 echo "  Found jq: $JQ_PATH"
 
 # --- Detect Node.js (needed for xeditlib; auto-install) ---
