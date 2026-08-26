@@ -89,6 +89,26 @@ MUTATIONS = [
         "tests/test_devbench_cli.py::test_504_is_reported_as_a_busy_main_thread",
         id="http-status-is-honored",
     ),
+    # --- repo invariants ---------------------------------------------------
+    pytest.param(
+        # Reproduce the real drift: README's copy of the setup prompt loses the
+        # DevBench sentence while the canonical copy keeps it.
+        "README.md",
+        "Separately, TELL me about DevBench but do NOT install it:",
+        "",
+        "tests/test_repo_invariants.py::test_setup_prompt_is_identical_everywhere",
+        id="setup-prompt-drift",
+    ),
+    pytest.param(
+        # Neuter the node tests without deleting the file: node --test still
+        # finds and runs it, but it registers nothing, so the run reports
+        # "pass 0" -- the vacuous-green state the guard exists to catch.
+        "tools/xelib/active-plugins.test.js",
+        "const test = require('node:test');",
+        "const test = () => {};",
+        "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests",
+        id="npm-test-vacuity",
+    ),
 ]
 
 
