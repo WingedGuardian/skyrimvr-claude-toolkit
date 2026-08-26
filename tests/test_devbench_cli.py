@@ -67,10 +67,17 @@ def _path_without_jq() -> str:
     return str(_nojq_dir)
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+def held_dead_port():
+    """A port guaranteed to refuse connections, held open for the caller.
+
+    Binding without listening is what makes this reliable: the port cannot be
+    grabbed by another process while the test runs, and a connect attempt is
+    refused rather than accepted. The old "bind port 0, close it, assume it
+    stays free" approach was a race that would surface as a spurious failure.
+    """
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    return s, s.getsockname()[1]
 
 
 def _wait_until_listening(port: int, timeout: float = 10.0) -> bool:
@@ -86,11 +93,18 @@ def _wait_until_listening(port: int, timeout: float = 10.0) -> bool:
 
 class Server:
     def __init__(self, mode: str):
-        self.port = _free_port()
+        # Port 0: the server binds, then tells us which port it got. Choosing a
+        # port here and hoping it is still free when the child binds it is a
+        # race that shows up as an intermittent "never started listening".
         self.proc = subprocess.Popen(
-            [sys.executable, str(MOCK), str(self.port), mode],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            [sys.executable, str(MOCK), "0", mode],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
         )
+        line = self.proc.stdout.readline().strip()
+        if not line.startswith("PORT="):
+            self.stop()
+            raise RuntimeError(f"mock server ({mode}) did not announce a port: {line!r}")
+        self.port = int(line.split("=", 1)[1])
         if not _wait_until_listening(self.port):
             self.stop()
             raise RuntimeError(f"mock server ({mode}) never started listening")
@@ -176,7 +190,11 @@ def test_pre_1_11_devbench_falls_back_and_says_so(server):
 
 def test_dead_port_is_distinguishable_from_a_hang():
     """No server at all: exit 1, with the closed-game message."""
-    r = run_cli("alive", port=_free_port())
+    sock, port = held_dead_port()
+    try:
+        r = run_cli("alive", port=port)
+    finally:
+        sock.close()
     assert r.returncode == 1
     assert "no response" in (r.stdout + r.stderr).lower()
 
