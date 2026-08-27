@@ -16,7 +16,14 @@
 const path = require('path');
 const xelib = require('xeditlib');
 process.chdir(path.dirname(require.resolve('xeditlib')));   // cwd = the xeditlib package dir (DLL + *.Hardcoded.dat)
-const GAME_PATH = process.env.GAME_ROOT || path.resolve(__dirname, '..');  // game root = parent of tools/
+const GAME_ROOT_RAW = process.env.GAME_ROOT || path.resolve(__dirname, '..');  // game root = parent of tools/
+// XEditLib wants a TRAILING SEPARATOR on the game path. Measured 2026-08-27:
+// without one, a setGamePath() called BEFORE setGameMode() makes setGameMode
+// throw "SetGameMode failed". This file happens to call them the other way
+// round and so survives an unterminated path -- but that is call-order luck,
+// not correctness, and the next edit that reorders them would break it.
+const GAME_PATH = (GAME_ROOT_RAW.endsWith(path.win32.sep) || GAME_ROOT_RAW.endsWith(path.posix.sep))
+    ? GAME_ROOT_RAW : GAME_ROOT_RAW + path.sep;
 const GM_SSE = 4;
 
 const safe = (h, p) => { try { return xelib.getValue(h, p); } catch (e) { return ''; } };

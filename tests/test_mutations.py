@@ -109,6 +109,134 @@ MUTATIONS = [
         "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests",
         id="npm-test-vacuity",
     ),
+    # --- plugins.txt ambiguity (found live 2026-08-27) ----------------------
+    # All three run the node suite, which test_npm_test_actually_runs_tests
+    # gates on returncode 0, so a failing node test fails that pytest test.
+    pytest.param(
+        # Stop reporting the rival candidates. findPluginsTxt then looks
+        # correct -- it still picks the right file -- but the caller can no
+        # longer tell that a second, possibly stale, plugins.txt exists.
+        "tools/xelib/active-plugins.js",
+        "return { chosen: existing[0], others: existing.slice(1) };",
+        "return { chosen: existing[0], others: [] };",
+        "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests",
+        id="plugins-txt-rivals-hidden",
+    ),
+    pytest.param(
+        # Keep the detection, drop the warning: the exact silent-pick bug.
+        "tools/xelib/active-plugins.js",
+        "    if (others.length) {",
+        "    if (false) {",
+        "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests",
+        id="plugins-txt-warning-silenced",
+    ),
+    pytest.param(
+        # The other direction, and the reason it is here: "an unambiguous
+        # choice stays silent" passed BEFORE the feature existed, when nothing
+        # warned at all. Warning unconditionally must break it, or that test is
+        # still vacuous and only looks like coverage.
+        "tools/xelib/active-plugins.js",
+        "    if (others.length) {",
+        "    if (true) {",
+        "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests",
+        id="plugins-txt-warning-always-fires",
+    ),
+
+    # --- skyrim-winner (node; gated via the node suite) ---------------------
+    pytest.param(
+        # Put back the sanitising parse. "Shinso.esp/000843" then reduces to
+        # "esp000843", which is valid hex and a real, different record -- so the
+        # tool answers a question nobody asked and prints RESULT: OK.
+        "tools/skyrim-winner.js",
+        "    if (!/^[0-9a-fA-F]{1,8}$/.test(hex)) {",
+        "    if (false) {",
+        "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests",
+        id="formid-sanitised-instead-of-rejected",
+    ),
+    pytest.param(
+        "tools/skyrim-winner.js",
+        "    return (last === path.posix.sep || last === path.win32.sep) ? dir : dir + path.sep;",
+        "    return dir;",
+        "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests",
+        id="game-path-trailing-separator-dropped",
+    ),
+
+    # --- papyrus-triage -----------------------------------------------------
+    pytest.param(
+        # Case-sensitive severity matching. The same log spells it `warning:`
+        # (99) and `WARNING:` (662); this loses 87% of them silently.
+        "tools/papyrus-triage.py",
+        r'SEVERITY_RE = re.compile(r"^(error|warning)\s*:\s*(.*)$", re.I)',
+        r'SEVERITY_RE = re.compile(r"^(error|warning)\s*:\s*(.*)$")',
+        "tests/test_triage.py::test_papyrus_counts_both_spellings_of_warning",
+        id="papyrus-severity-case-sensitive",
+    ),
+    pytest.param(
+        # Stop counting what actually bucketed. This is the independent counter
+        # that replaced the tautological `total - shown`; if it stops being
+        # independent, the accounting check goes back to being x == x.
+        "tools/papyrus-triage.py",
+        "            bucketed += 1",
+        "            pass",
+        "tests/test_triage.py::test_papyrus_accounting_balances_and_reports_ok",
+        id="papyrus-accounting-counter-neutered",
+    ),
+
+    # --- crash-triage -------------------------------------------------------
+    pytest.param(
+        # Drop the knowledgebase lookup: every crash reads as a new finding,
+        # including the one already ruled ACCEPTED three investigations ago.
+        "tools/crash-triage.py",
+        '        status, note = KNOWN.get(r["offset"], ("UNKNOWN", ""))',
+        '        status, note = ("UNKNOWN", "")',
+        "tests/test_triage.py::test_crash_labels_an_accepted_signature_from_the_knowledgebase",
+        id="crash-known-signatures-ignored",
+    ),
+    pytest.param(
+        # Count only the logs that parsed. A log with no exception line then
+        # vanishes from the denominator, and the report claims full coverage.
+        "tools/crash-triage.py",
+        "    accounted = len(parsed) + len(no_exception) + len(unreadable)",
+        "    accounted = len(parsed)",
+        "tests/test_triage.py::test_crash_counts_a_log_with_no_exception_line_rather_than_dropping_it",
+        id="crash-unparsed-logs-dropped-from-denominator",
+    ),
+
+    pytest.param(
+        # Go back to matching only `.txt`. On a modern install CrashLoggerSSE
+        # writes `.LOG`, so the tool reports a complete-looking total built
+        # entirely from years-old logs -- the failure mode with no error.
+        "tools/crash-triage.py",
+        'CRASH_NAME_RE = re.compile(r"^crash-.+' + BS + '.(txt|log)$", re.I)',
+        'CRASH_NAME_RE = re.compile(r"^crash-.+' + BS + '.txt$")',
+        "tests/test_triage.py::test_crash_finds_dot_log_files_not_only_dot_txt",
+        id="crash-log-extension-half-matched",
+    ),
+    pytest.param(
+        # Match any `.log` in the folder, not just `crash-` dumps. Every SKSE
+        # plugin's own log then becomes a phantom crash in the denominator.
+        "tools/crash-triage.py",
+        'CRASH_NAME_RE = re.compile(r"^crash-.+' + BS + '.(txt|log)$", re.I)',
+        'CRASH_NAME_RE = re.compile(r".+' + BS + '.(txt|log)$", re.I)',
+        "tests/test_triage.py::test_crash_ignores_the_crashlogger_plugin_log",
+        id="crash-prefix-not-required",
+    ),
+
+    # --- skyrim_paths -------------------------------------------------------
+    pytest.param(
+        "tools/skyrim_paths.py",
+        "    return existing[0], existing[1:]",
+        "    return existing[0], []",
+        "tests/test_skyrim_paths.py::test_every_rival_candidate_is_reported",
+        id="game-dir-rivals-hidden",
+    ),
+    pytest.param(
+        "tools/skyrim_paths.py",
+        "    if others:",
+        "    if False:",
+        "tests/test_skyrim_paths.py::test_ambiguity_warns_naming_winner_loser_and_the_override",
+        id="game-dir-warning-silenced",
+    ),
 ]
 
 

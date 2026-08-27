@@ -1671,6 +1671,15 @@ Recent CrashLogger versions write crash logs as **`.LOG`** into `Documents/My Ga
 open the newest one in Notepad. If you are looking for `crash-*.txt` and finding nothing, that is why.
 Sort that folder by modified time after a CTD.
 
+**The dangerous case is not finding nothing — it is finding some.** Both extensions coexist in
+that one folder, so a `crash-*.txt` glob does not fail, it reports a confident total built from
+whichever half it matched. Measured 2026-08-27 on the dev install: **8 `.txt` (all June 2025)
+beside 20 `.log` (2026)**, and the first version of `crash-triage.py` cheerfully reported
+"8 log(s)" — a full year out of date, with an accounting check that balanced perfectly, because
+a denominator can only account for what it was given. Match `crash-*.(txt|log)`
+case-insensitively, and keep the `crash-` prefix so the plugin's own `CrashLogger.log` is not
+counted as a crash.
+
 ---
 
 ## AutoMod BSA extract/repack needs `bsarch.exe`
@@ -1728,3 +1737,59 @@ fix attached to any one of them would still have missed the others.
 The same trap exists in Python -- `"C:\Users\..."` in a non-raw string is a
 `\UXXXXXXXX` escape error, and `\t` in a double-quoted string is a tab. Use raw
 strings, or build the separator with `chr(92)`.
+
+---
+
+## `setGamePath` needs a trailing separator — and only tells you later, in `setGameMode`
+
+Measured 2026-08-27. XEditLib wants the game path terminated with a separator. Give it
+`C:/GOG Games/The Elder Scrolls V Skyrim VR` and the **next** call fails:
+
+```
+SetGameMode failed
+```
+
+The error names the wrong function. `setGamePath` returns success; the path is only validated
+when the mode is set, so the failure surfaces one call later with a message pointing at a call
+that is fine. Worse, the trap is **call-order dependent**: it only bites when `setGamePath`
+runs *before* `setGameMode`. Scripts that set the mode first never see it, which is why the
+same bad path can look harmless in one script and fatal in another.
+
+**Rule: terminate the game path before handing it to xelib.** Deriving the path (rather than
+hardcoding it) makes this easy to get wrong, because `path.resolve()` never returns a trailing
+separator:
+
+```js
+const last = dir.slice(-1);
+return (last === path.posix.sep || last === path.win32.sep) ? dir : dir + path.sep;
+```
+
+Check **both** separator styles, not `path.sep` alone — game paths are Windows paths even when
+the CI runner testing them is Linux, where `path.sep === '/'` and a backslash-terminated path
+would be "fixed" by appending a second separator.
+
+---
+
+## More than one `plugins.txt` (and more than one `My Games` folder) — the wrong one reads perfectly
+
+A machine that has ever had more than one Skyrim installed carries several copies of the same
+per-game state, and **nothing errors when the wrong one is read**:
+
+- `%LOCALAPPDATA%\Skyrim VR\plugins.txt`, `...\Skyrim Special Edition\plugins.txt`,
+  `...\Skyrim\plugins.txt` — the active load order.
+- `Documents\My Games\Skyrim VR\`, `...\Skyrim Special Edition\`, `...\Skyrim\` — INIs,
+  `Logs\Script\Papyrus.*.log`, and the `SKSE\` folder with the crash dumps.
+
+Measured on the dev machine (a VR-only install): the **SSE** `plugins.txt` exists, holds 659
+plugins, and is **18 days stale**. It disagrees with the VR file about which plugins are
+active. A stale-but-valid file does not fail a loader — it produces a complete, plausible,
+**wrong** load order, and every conflict answer computed from it is confidently wrong.
+
+Note this contradicts the older advice that the SSE `plugins.txt` "does not exist on a VR
+install". It may well exist. Don't assume its absence.
+
+**Rule: pick deliberately, report the rivals, and offer an override.** The bundled tools probe
+`Skyrim VR → Skyrim Special Edition → Skyrim`, print every candidate they ignored to stderr,
+and honour `$PLUGINS_TXT`, `$PAPYRUS_LOG_DIR`, `$SKSE_CRASH_DIR`. Silently picking the first
+hit is the same class of bug as reading the wrong half of the crash logs (above): a confident
+answer about an install you are not modding.

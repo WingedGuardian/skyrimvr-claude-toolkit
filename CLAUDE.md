@@ -32,6 +32,9 @@ All under `tools/`:
 | **PyNifly** | NIF read/write incl. **BSTriShape (SSE)** + **animation/controller authoring** (Python, prebuilt DLL) | See PyNifly section below |
 | **ReSaver CLI** | Headless `.ess` save parse / query / cross-reference / clean / changeform-level diagnostics | `bash tools/resaver-cli.sh <op> <save.ess>` — read ops: `info\|dump\|find\|find-refs\|worries\|recon\|changeform\|extradata-scan\|changeform-diff\|freeze-report\|globaldata\|globaldata-diff`; write ops (dry-run unless `--apply`, always a NEW file): `set-global\|set-var\|clean\|reset-havok\|cleanse-formlists\|remove-created`; `verify-roundtrip` self-test. Every `--apply` is verify-gated (re-read==model or delete+fail). Resolve FormID→EditorID via `tools/resaver-resolve-names.js`. Needs JDK 17+ + ReSaver's jar (see install section). |
 | **cosave-info** | READ-ONLY structural survey of an SKSE `.skse` co-save → JSON (which mods stashed co-save data + how much) | `bash tools/cosave-cli.sh <cosave.skse>` (Python 3; the cosave sits next to its `.ess`) |
+| **skyrim-winner** | **"Which plugin actually wins this record?"** Loads the FULL active load order and asks xEdit. No index, no cache -- xEdit is the authority. | `bash tools/skyrim-winner.sh <winner\|chain> <formid> [plugin]` · `... conflicts <plugin>` -- needs **xeditlib**; see below |
+| **papyrus-triage** | Turns `Papyrus.N.log` into bucketed, attributed counts. Rows **sum to the entry count**; the not-shown row prints even at zero. | `python tools/papyrus-triage.py [logfile] [--top N] [--all]` -- bundled, Python 3, no install |
+| **crash-triage** | Reduces CrashLogger dumps (~5.5k lines each) to ranked signatures and labels the ones your knowledgebase already ruled on. | `python tools/crash-triage.py [dir\|file] [--frames N] [--all]` -- bundled, Python 3, no install |
 | **DevBench** | **LIVE in-game** inspect / console / Papyrus / scenario via a localhost REST+MCP server — only while the game is actually running | `bash tools/devbench-cli.sh <alive\|health\|ping\|state\|inspect\|exec\|call\|describe\|notify\|tool>` — see DevBench section below |
 
 > **Note**: Install the tools you need into a `tools/` folder in your game directory; the setup prompt walks through this. See the [xeditlib](https://github.com/WingedGuardian/xeditlib) repo for XEditLib setup. NifSkope and Blender (used for NIF render-verification and mesh repair — see below) are large external GUI apps installed separately, not bundled.
@@ -89,7 +92,7 @@ None of the modding tools are bundled — install only the ones you need. Per to
 
 1. **AutoMod** — `tools/automod-cli.sh` invokes the **prebuilt `spookys-automod.dll`** directly rather than `dotnet run`. This fixes the per-call recompile / MSB1025 failures that the old `dotnet run` form produced; rebuild once with `--rebuild` after changing AutoMod source.
 2. **Spriggit** — deep/nested output paths throw `UnauthorizedAccessException`. Use `tools/spriggit-cli.sh`, which runs in a shallow workspace and copies the result back. It **preserves the exact ESP basename** (= the Spriggit ModKey) so FormKey master references aren't corrupted.
-3. **xelib** — in `GM_SSE` mode the loader reads the **SSE** `plugins.txt`, which may be **absent** on a VR install → the load fails silently. Use `tools/xelib/active-plugins.js` `loadActive()` to read and load the real active order explicitly, and always run xelib via a `.js` **file** (`node script.js`), never `node -e '...'` (inline eval deterministically breaks `SetGameMode`).
+3. **xelib** — in `GM_SSE` mode the loader reads the **SSE** `plugins.txt`, which may be **absent** on a VR install → the load fails silently. It may also be **present and stale**, which is worse: measured on the dev machine (VR-only), the SSE file holds 659 plugins, is 18 days old, and disagrees with the VR file about which plugins are active — a complete, plausible, wrong load order that nothing rejects. `loadActive()` prefers the VR file, names every rival it ignored, and honours `$PLUGINS_TXT`. Use `tools/xelib/active-plugins.js` `loadActive()` to read and load the real active order explicitly, and always run xelib via a `.js` **file** (`node script.js`), never `node -e '...'` (inline eval deterministically breaks `SetGameMode`).
 
 ## AutoMod CLI
 
@@ -180,6 +183,103 @@ A crash-to-desktop must be caught in tooling, not in the headset. Use the right 
 | **Blender (headless)** | Mesh **repair** + **render-to-PNG** verification (uses the same nifly lib as PyNifly — good for repair, NOT an independent parser) |
 
 **Gates before any in-game test:** (1) author with valid-by-construction tools (PyNifly, not hand-rolled controller blocks); (2) cross-validate with an independent, stricter parser; (3) diff against a known-good structure. Render a PNG (Blender headless) so a mesh/VFX fix is confirmed in chat before a game launch.
+
+## skyrim-winner — which plugin actually wins a record
+
+```bash
+bash tools/skyrim-winner.sh winner    0x0003418E            # who wins
+bash tools/skyrim-winner.sh chain     0x0003418E            # full override chain, in order
+bash tools/skyrim-winner.sh winner    "SomeMod.esp:000871"  # scoped: local id inside a plugin
+bash tools/skyrim-winner.sh conflicts "SomeMod.esp"         # records this plugin LOSES
+```
+
+Requires **xeditlib** (see the optional-tools section). The game root is derived from the
+script's own location (`tools/` sits in the game folder); override with `$GAME_ROOT`.
+
+**It deliberately has no index and no cache.** xEdit already computes conflict resolution
+correctly, and the load order is explicit and total, so this asks xEdit through xelib and
+prints the answer — one source of truth, and it is not this script. A full 659-plugin load
+costs **~4 seconds** on the dev install, which is why a cache — and therefore a freshness
+contract to get wrong — is unnecessary.
+
+**Prefer it over hand-rolling another override script.** The common shortcut is to load a
+hand-picked subset of plugins "that could plausibly be involved". A who-wins answer computed
+against a guessed subset is only as complete as the guess: a plugin outside the list can win
+and the script never sees it. Worse, a short list can silently load **nothing** and still
+resolve, producing a confident answer from an empty tree.
+
+**Judge by the wrapper's exit code, not node's.** `node tools/skyrim-winner.js` exits **127
+on complete success** (koffi/stdio shutdown, see the XEditLib notes) — `skyrim-winner.sh`
+parses the `RESULT:` line and gives a real exit code (0 ok / 2 error / 3 did-not-finish).
+
+⚠ **A `refs` subcommand is deliberately absent.** `getReferencedBy` returns 0 without
+`buildRefs`, and `buildRefs: true` makes the loader fail outright on a real 659-plugin order
+(reproduced twice, empty exception message). A subcommand that always answers "nothing
+references this" is worse than no subcommand.
+
+## papyrus-triage — what the engine actually complained about
+
+```bash
+python tools/papyrus-triage.py                    # newest Papyrus log
+python tools/papyrus-triage.py <logfile> --all
+```
+
+A hand-rolled `grep | sort | uniq -c` has no way to notice it dropped a shape. Two properties
+are asserted here, not assumed: **rows sum to the input**, and **the not-shown row prints even
+when it is zero**.
+
+**The unit of accounting is the ENTRY, not the line.** A Papyrus entry is multi-line — the dev
+install's `Papyrus.1.log` has 8426 lines but only 5292 timestamped entries, the rest being
+`stack:` continuations. A line-based sum is ~37% wrong.
+
+**Severity is spelled two ways.** The same log contains both `warning:` (99) and `WARNING:`
+(662); a case-sensitive grep silently loses 87% of them.
+
+Known-benign vanilla shapes are **labelled, never dropped** — ranking attention is the job;
+deciding what the reader may see is not.
+
+## crash-triage — which crashes are new, and which are already answered
+
+```bash
+python tools/crash-triage.py                 # every crash dump in the SKSE folder
+python tools/crash-triage.py <one.log>
+```
+
+A CrashLogger dump is ~5,500 lines, ~4,600 of which are the raw `STACK` block. The identifying
+part is the exception line plus the top of `PROBABLE CALL STACK`. This groups dumps by
+`module+offset` and cross-references a `KNOWN` dict of signatures you have already ruled on —
+so a settled crash prints as `[ACCEPTED - do not re-investigate]` instead of being chased a
+fourth time. **Add your own rulings to that dict** as you make them; it ships with the three
+from the dev install and is meant to be edited.
+
+**It matches `crash-*.txt` AND `crash-*.log`, case-insensitively**, because CrashLoggerSSE
+changed extension. Matching one of them does not fail — it prints a confident, complete-looking
+total built from whichever half it happened to catch. Measured on the dev install: 8 `.txt`
+(all June 2025) sitting beside 20 `.log` (2026).
+
+Same invariants as `papyrus-triage`: denominator first, rows summing to independently counted
+totals, and the not-shown row printing at zero. Both are mutation-tested — dropping logs during
+parsing produces `ACCOUNTING MISMATCH` and exit 1.
+
+## Where these tools look, and what happens when there is more than one install
+
+`papyrus-triage` and `crash-triage` discover their folders through `tools/skyrim_paths.py`
+rather than hardcoding a path. A machine can easily carry `Documents/My Games/Skyrim`,
+`.../Skyrim Special Edition` **and** `.../Skyrim VR` at once, and the wrong one **reads
+perfectly** — you get a complete report about an install you are not modding.
+
+So the picker prefers **Skyrim VR → Skyrim Special Edition → Skyrim**, and whenever more than
+one candidate exists it prints every rival it ignored, to stderr, naming the override:
+
+```
+[skyrim_paths] more than one candidate exists; using:
+  C:\Users\you\Documents\My Games\Skyrim VR\SKSE
+  ignoring: C:\Users\you\Documents\My Games\Skyrim Special Edition\SKSE
+  ...  If this picked wrong, set SKSE_CRASH_DIR.
+```
+
+Overrides: `$PAPYRUS_LOG_DIR`, `$SKSE_CRASH_DIR`, and `$PLUGINS_TXT` (for the xelib load-order
+reader, which faces the same hazard under `%LOCALAPPDATA%`).
 
 ## DevBench — the live in-game test channel (`tools/devbench-cli.sh`)
 

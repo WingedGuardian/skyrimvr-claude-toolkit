@@ -1,5 +1,115 @@
 # Changelog
 
+## v3.8 — 2026-08-27
+
+Three tools ported in from the dev install, each of which answers a question you
+would otherwise settle by squinting at a wall of text. Every accounting guard in
+them is mutation-tested, and building them turned up two ways a tool can be
+confidently, silently wrong about which files it is even reading.
+
+### Added
+
+- **`tools/skyrim-winner.sh`** — "which plugin actually wins this record?" Loads
+  the **full** active load order and asks xEdit, then prints the winner
+  (`winner`), the complete override chain in order (`chain`), or every record a
+  plugin loses (`conflicts`). Accepts a bare FormID or a plugin-scoped local id
+  (`SomeMod.esp:000871`).
+
+  No index and no cache. xEdit already computes conflict resolution correctly
+  and the load order is explicit and total, so this asks it and prints the
+  answer — one source of truth, and it is not this script. A full 659-plugin
+  load costs ~4 seconds, which is why there is no cache and therefore no
+  freshness contract to get wrong.
+
+  The alternative — a script that loads the handful of plugins that look
+  relevant — gives an answer only as complete as the guess. A plugin outside the
+  list can win, and the script never sees it. A too-short list can also load
+  **nothing** and still resolve, producing a confident answer from an empty tree.
+
+  Requires **xeditlib**. Judge success by the wrapper's exit code (0 ok / 2 error
+  / 3 did-not-finish), never node's: the underlying script exits **127 on
+  complete success** because Node's stdio flush fails while koffi still holds
+  `XEditLib.dll`.
+
+- **`tools/papyrus-triage.py`** — buckets `Papyrus.N.log` by normalized message
+  shape and attributes each bucket to the script or plugin that produced it.
+  Bundled, pure standard library, no install.
+
+  The unit of accounting is the **entry, not the line**: a Papyrus entry is
+  multi-line, and the dev install's log has 8426 lines but only 5292 timestamped
+  entries. A line-based sum is ~37% wrong. Severity is also spelled **both**
+  `warning:` (99) and `WARNING:` (662) in the same file; a case-sensitive match
+  loses 87% of them.
+
+- **`tools/crash-triage.py`** — reduces CrashLogger dumps (~5,500 lines each,
+  ~4,600 of it raw stack) to ranked `module+offset` signatures, and labels the
+  ones your knowledgebase has already ruled on, so a settled crash prints as
+  `[ACCEPTED - do not re-investigate]` instead of being chased again. The `KNOWN`
+  dict ships with three rulings from the dev install and is meant to be edited.
+
+- **`tools/skyrim_paths.py`** — shared, deliberate discovery of the per-game
+  folders, replacing the hardcoded dev paths the tools arrived with.
+
+### Fixed
+
+- **`crash-triage` matched only half the crash logs.** CrashLoggerSSE writes
+  `crash-*.log`; older builds write `crash-*.txt`. Both extensions coexist in the
+  same folder, so globbing one of them does not fail — it reports a confident,
+  complete-looking total built from whichever half it caught. Measured on the dev
+  install: **8 `.txt` (all June 2025) beside 20 `.log` (2026)**, and the tool
+  reported "8 log(s)" with its accounting check balancing perfectly, because a
+  denominator can only account for what it was handed. Now matches
+  `crash-*.(txt|log)` case-insensitively, while still excluding the plugin's own
+  `CrashLogger.log`.
+
+- **The tools no longer guess which Skyrim install they are reading.** A machine
+  that has ever had more than one Skyrim carries several copies of the same state
+  — `%LOCALAPPDATA%\Skyrim VR|Skyrim Special Edition|Skyrim\plugins.txt`, and
+  `Documents\My Games\<game>\` with its INIs, Papyrus logs and SKSE crash dumps.
+  The wrong one **reads perfectly**. Measured on the dev machine, a VR-only
+  install: the SSE `plugins.txt` exists, holds 659 plugins, is 18 days stale, and
+  disagrees with the VR file about which plugins are active — a complete,
+  plausible, wrong load order that no loader would reject. The tools now probe
+  `Skyrim VR → Skyrim Special Edition → Skyrim`, print every candidate they
+  ignored to stderr, and honour `$PLUGINS_TXT`, `$PAPYRUS_LOG_DIR`,
+  `$SKSE_CRASH_DIR`.
+
+  This also corrects the toolkit's own long-standing note that the SSE
+  `plugins.txt` "does not exist on a VR install". It may well exist.
+
+- **`skyrim-winner` resolved a plugin-scoped FormID against the wrong space.**
+  `SomeMod.esp:000871` passed a **local** id where xelib's `getRecord()` wants a
+  full FormID, so real records came back as "no record found". It now matches on
+  the low three bytes within the named plugin.
+
+- **A malformed FormID is rejected, not sanitised.** Input like `000871!` or
+  `Shinso.esp/000843` previously had its stray characters stripped and was
+  looked up anyway — the one failure mode worse than an error, because it
+  answers about a **different, real** record.
+
+- **`skyrim-winner` and `resaver-resolve-names` terminate the game path.**
+  XEditLib requires a trailing separator, but only reports it one call later as
+  `SetGameMode failed`, and only when `setGamePath` runs before `setGameMode`.
+  Both scripts now derive the game root from their own location — no hardcoded
+  path, `$GAME_ROOT` to override.
+
+### Testing
+
+- 16 behavioural tests for the two triage tools, against hand-authored fixture
+  logs (real logs carry usernames and are not committed), and 10 for
+  `skyrim-winner`'s FormID parsing and path handling.
+- 4 new mutations, bringing the gate to **22**. Each reverts one shipped fix on a
+  throwaway copy of the repo and asserts the guarding test goes red — including
+  the two new crash-glob guards.
+- The mutation gate caught one of its own anchors going stale during this
+  release, which is the whole point of it.
+- **The Node tests now run on Windows too.** They cover path separators and
+  file discovery, and the `node` job runs on Linux only — where `path.sep` is
+  `/` and a Windows-separator bug cannot surface. They are now part of the
+  behavioural job, which blocks on both legs.
+- Job names no longer claim a file count (`Shell (16 scripts)`), which was
+  already wrong and would go wrong again on every file added.
+
 ## v3.7 — 2026-08-26
 
 v3.6 added CI that checks the toolkit's *structure*. This adds the layer that

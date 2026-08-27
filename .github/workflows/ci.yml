@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   shell:
-    name: Shell (16 scripts)
+    name: Shell
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -37,7 +37,7 @@ jobs:
           shellcheck --severity=warning "${files[@]}" || true
 
   python:
-    name: Python (6 files)
+    name: Python
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -65,7 +65,7 @@ jobs:
           ruff check "${files[@]}" || true
 
   node:
-    name: Node (6 files)
+    name: Node
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -292,3 +292,11 @@ jobs:
 
       - name: Behavioral suite
         run: python -m pytest tests/ -v --durations=10
+
+      # The Node tests cover path handling (game-root separators, plugins.txt
+      # discovery), and the `node` job runs on Linux only -- where `path.sep`
+      # is '/' and a Windows-separator bug cannot surface. Windows is the
+      # platform this toolkit targets, so they run on both legs here too.
+      # No `npm install` step: these tests use only the Node standard library.
+      - name: Node tests
+        run: npm test

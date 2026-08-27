@@ -18,6 +18,36 @@ It's not perfect, and it will require some trial and error — especially for co
 
 ---
 
+## New in v3.8: Three Tools That Answer With Their Denominator First
+
+The three additions in v3.8 all replace an answer you would otherwise get by squinting at a wall
+of text — and each one is built so that if it misses something, it says so.
+
+**`skyrim-winner`** answers *"which plugin actually wins this record?"* It loads your **full**
+active load order and asks xEdit, then prints the winner, the whole override chain in order, or
+every record a given plugin loses. The usual shortcut — a script that loads the handful of plugins
+that seem relevant — gives an answer only as complete as the guess, and a plugin outside the list
+can win without the script ever seeing it. No index and no cache here: a full 659-plugin load takes
+about four seconds, so there is nothing to keep fresh and nothing to get stale.
+
+**`papyrus-triage`** buckets a `Papyrus.N.log` by normalized message shape and attributes each
+bucket to the script or plugin that produced it. **`crash-triage`** reduces CrashLogger dumps —
+~5,500 lines each, most of it raw stack — to ranked `module+offset` signatures, and labels the ones
+your knowledgebase has already ruled on, so a settled crash prints as
+`[ACCEPTED - do not re-investigate]` rather than being investigated a fourth time.
+
+Both print the denominator before any finding, sum their rows against **independently counted**
+totals, and print the not-shown remainder **even when it is zero** — the failure mode for a triage
+tool is not crashing, it is confidently reporting a complete-looking total that is missing a shape.
+Every one of those guards is mutation-tested: CI puts the bug back and fails if the test that is
+supposed to catch it doesn't.
+
+That is not a hypothetical. Building `crash-triage` for this release, it reported "8 logs" on the
+dev install and looked right — while silently skipping 20 more, because CrashLoggerSSE switched
+from `crash-*.txt` to `crash-*.log` and the tool matched only one of them.
+
+---
+
 ## New in v3.5: A Reproducible Dev Container
 
 Every install so far has meant "run `setup.sh`, install prerequisites onto this machine, hope."
@@ -150,6 +180,8 @@ The clearest example: **xeditlib**. XEditLib.dll is the engine inside SSEEdit/xE
 - **Audio processing** -- Extract, convert, and create Skyrim voice and sound files (FUZ/XWM/WAV).
 - **MCM menu generation** -- Programmatically create SkyUI mod configuration menus with toggles, sliders, and pages.
 - **Save file analysis** -- Decompress and binary-scan .ess saves. Search for orphaned scripts, count effect accumulation, check mod footprint, detect save bloat.
+- **Conflict resolution answered by xEdit, not guessed** -- `skyrim-winner` loads your **full** active load order and asks xEdit which plugin actually wins a record, prints the whole override chain, or lists every record a plugin loses. No index and no cache, so there is nothing to go stale.
+- **Log triage that cannot quietly drop rows** -- `papyrus-triage` buckets and attributes a Papyrus log; `crash-triage` reduces ~5,500-line CrashLogger dumps to ranked signatures and labels the ones your knowledgebase already ruled on. Both print the denominator first, sum their rows against independently counted totals, and print the not-shown row even when it is zero -- and both are mutation-tested, so a check that stopped biting fails CI.
 - **Dry-run workflow** -- All ESP and asset changes go through a preview pass first. Claude shows you exactly what it will do before touching anything.
 - **Claude Code skills** -- Slash commands like `/inspect-esp MyMod.esp`, `/port-to-vr`, and `/create-mod` that trigger guided workflows. Auto-loading context that injects critical Skyrim gotchas when Claude works with game files.
 - **Auto-setup** -- One prompt installs prerequisites, configures paths, sets up hooks, and optionally installs modding tools. No manual configuration.
@@ -167,6 +199,8 @@ None of these are bundled; setup walks you through any you pick.
 - **Blender (headless) / NifSkope** -- NIF mesh repair + render verification (large external apps)
 - **ReSaver CLI** -- headless `.ess` save parse / cross-reference / clean / changeform-level diagnostics (download ReSaver from **Nexus mod 5031** / FallrimTools into `tools/resaver-cli/`; requires **JDK 17+**, JDK 21 LTS recommended)
 - **DevBench** -- LIVE in-game inspect / console / Papyrus while the game runs (**Nexus mod 181326** / alandtse; GPL-3.0, dev-only, no gameplay change and no save data). Unlike everything else here it's a **mod, not a `tools/` utility** -- install it with your own mod manager like any other SKSE plugin, rather than letting Claude drop the DLL into `Data/`. The toolkit bundles the wrapper `tools/devbench-cli.sh`, which works as soon as DevBench is installed.
+- **papyrus-triage / crash-triage** -- Papyrus log and CrashLogger dump triage. No install beyond Python 3; bundled (`tools/papyrus-triage.py`, `tools/crash-triage.py`).
+- **skyrim-winner** -- which plugin wins a record, per the full load order. Bundled (`tools/skyrim-winner.sh`) but needs **xeditlib** installed to do anything.
 - **cosave-info** -- read-only structural survey of an SKSE `.skse` co-save → JSON (which mods stashed co-save data + how much). No install beyond Python 3; bundled (`tools/cosave-cli.sh`).
 
 ---
