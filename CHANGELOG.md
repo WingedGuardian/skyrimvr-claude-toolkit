@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.8.1 — 2026-08-27
+
+### Fixed
+
+- **`skyrim-winner` now says how to fix the one error every new user hits.**
+  Without xeditlib installed it reported `cannot load xelib` followed by two
+  full Node require stacks — accurate, unreadable, and silent on the one
+  thing that resolves it. It now names the install command and the fact that
+  it must be run from the toolkit root, and trims the require-stack noise off
+  the resolver errors it still reports.
+
+  Found by running the shipped v3.8 zip from a fresh extraction rather than
+  from the dev install, where xeditlib is always present and this path never
+  executes.
+
 ## v3.8 — 2026-08-27
 
 Three tools ported in from the dev install, each of which answers a question you

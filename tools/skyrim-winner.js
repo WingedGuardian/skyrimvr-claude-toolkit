@@ -71,7 +71,16 @@ function loadXelib() {
     for (const spec of attempts) {
         try { xelib = require(spec); break; } catch (e) { errors.push(spec + ': ' + e.message); }
     }
-    if (!xelib) die('cannot load xelib -- ' + errors.join(' | '));
+    // die() flattens newlines -- the RESULT marker has to stay one line -- so
+    // this is one actionable sentence, with Node's require-stack noise trimmed
+    // off the resolver errors. Those still distinguish "not installed" from
+    // "installed somewhere Node will not look".
+    if (!xelib) {
+        const brief = errors.map(e => e.split('Require stack')[0].trim()).join(' | ');
+        die('xeditlib is not installed -- run "npm install github:WingedGuardian/xeditlib" '
+            + 'from the toolkit ROOT (every bundled script finds it by upward lookup). '
+            + 'Tried: ' + brief);
+    }
     ({ loadActive } = require(path.join(__dirname, 'xelib', 'active-plugins')));
 }
 
