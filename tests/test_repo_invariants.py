@@ -85,16 +85,36 @@ def test_npm_test_actually_runs_tests():
     )
 
 
-def test_help_banners_do_not_leak_source_lines():
-    """`--help` here prints a fixed LINE RANGE of the script's own comment header.
-    That silently rots: add four lines of documentation and the banner starts
-    printing `set -uo pipefail` and variable assignments at the reader. Measured
-    2026-09-06 -- it was doing exactly that, and nothing noticed, because a banner
-    that prints too much still looks like a banner."""
+def test_help_banner_range_stays_inside_the_comment_header():
+    """`--help` prints a fixed LINE RANGE of the script's own comment header, and
+    that range rots: add four lines of documentation and the banner starts printing
+    `set -uo pipefail` and variable assignments at the reader.
+
+    This reads the range out of the source and compares it to where the header
+    actually ends, rather than running the script and looking for leaked lines. The
+    first version of this test did the latter, and it was VACUOUS on any machine
+    without spriggit installed -- the banner renders one line, there is nothing to
+    find, and the assertion passes in both the fixed and the broken state. The
+    mutation gate caught it; a green local run had not.
+    """
     script = REPO / "tools" / "esp-verify-wrapper.sh"
-    r = subprocess.run([BASH, str(script), "--help"],
-                       capture_output=True, text=True)
-    leaked = [l for l in r.stdout.splitlines()
-              if l.startswith(("set -", "SPRIGGIT=", "SNAPDIR=", "GAME_RELEASE=",
-                               "PKG=", "PKGVER=", "mkdir "))]
-    assert not leaked, f"--help leaked source lines: {leaked}"
+    lines = script.read_text(encoding="utf-8").splitlines()
+
+    m = re.search(r"sed -n '2,(\d+)p' \"\$0\"", "\n".join(lines))
+    assert m, "no --help line-range found; this test is asserting nothing"
+    claimed_end = int(m.group(1))
+
+    # Where the leading comment block actually ends: the last line, before any code,
+    # that is a comment or blank.
+    header_end = 0
+    for i, line in enumerate(lines[1:], start=2):     # skip the shebang
+        if line.startswith("#") or not line.strip():
+            header_end = i
+        else:
+            break
+
+    assert claimed_end <= header_end, (
+        f"--help prints lines 2-{claimed_end} but the comment header ends at "
+        f"{header_end}; lines {header_end + 1}-{claimed_end} are source code: "
+        f"{lines[header_end:claimed_end][:3]}"
+    )

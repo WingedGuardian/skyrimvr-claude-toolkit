@@ -324,7 +324,7 @@ MUTATIONS = [
         "tools/esp-verify-wrapper.sh",
         "    sed -n '2,40p' \"$0\"",
         "    sed -n '2,44p' \"$0\"",
-        "tests/test_repo_invariants.py::test_help_banners_do_not_leak_source_lines",
+        "tests/test_repo_invariants.py::test_help_banner_range_stays_inside_the_comment_header",
         id="help-banner-leaks-source",
     ),
 
