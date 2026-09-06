@@ -199,7 +199,7 @@ None of these are bundled; setup walks you through any you pick.
 
 - **xeditlib** -- programmatic ESP read/write (`npm install github:WingedGuardian/xeditlib`)
 - **Champollion / Caprica** -- Papyrus decompile / compile (GitHub releases)
-- **Spriggit** -- ESP ↔ YAML editing (`dotnet tool install Spriggit.CLI`); **requires the .NET 9 runtime** (`winget install Microsoft.DotNet.SDK.9`). It installs fine without it and then fails to start, which also disables the cross-reference integrity guard.
+- **Spriggit** -- ESP ↔ YAML editing (`dotnet tool install Spriggit.CLI`); **requires the .NET 9 SDK**, not just the runtime (`winget install Microsoft.DotNet.SDK.9`). Spriggit fetches its serializer at runtime as a dotnet tool, and only a matching SDK can install one — with the runtime alone it starts, prints a version, and still cannot serialize. That also disables the cross-reference integrity guard, which drives it.
 - **AutoMod CLI** -- NIF / BSA / audio / MCM / ESP. **Must be cloned and built**: clone https://github.com/SpookyPirate/spookys-automod-toolkit into `tools/automod` and build the Cli project (not the WPF Setup project) — then run via `tools/automod-cli.sh`.
 - **PyFFI** -- LE-format NIF geometry (any modern Python + setuptools, `pip install pyffi setuptools`)
 - **PyNifly** -- SSE BSTriShape + animation authoring (download `io_scene_nifly.zip` from the GitHub **releases**, not a git clone — the compiled DLL ships only in the release zip; no build)

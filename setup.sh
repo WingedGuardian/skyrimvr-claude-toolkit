@@ -125,12 +125,24 @@ echo ""
 echo "Checking for .NET..."
 if which dotnet >/dev/null 2>&1; then
     echo "  Found .NET SDK: $(dotnet --version 2>/dev/null)"
-    if dotnet --list-runtimes 2>/dev/null | grep -q "^Microsoft.NETCore.App 9\."; then
-        echo "  .NET 9 runtime present -- Spriggit can run."
+    # SDK, not runtime. MEASURED 2026-09-06, and v3.8.2 shipped this check asking the
+    # WRONG question: with only the .NET 9 RUNTIME installed, spriggit starts and
+    # prints its version -- and still cannot serialize anything. It resolves its
+    # serializer at runtime via `dotnet tool install Spriggit.Yaml.Skyrim`, whose
+    # tool assets live under tools/net9.0/, and an SDK can only install a tool whose
+    # TFM it supports. With SDK 8 that fails with a misleading "DotnetToolSettings.xml
+    # was not found in the package" -- the file is there, under a framework the SDK
+    # will not select. Control: dotnetsay (net8.0 assets) installs fine.
+    #
+    # So a runtime check passes in a state where Spriggit is unusable. Ask for the SDK.
+    if dotnet --list-sdks 2>/dev/null | grep -qE "^(9|1[0-9])\."; then
+        echo "  .NET 9+ SDK present -- Spriggit can run AND fetch its serializer."
     else
-        echo "  !! .NET 9 runtime NOT found."
-        echo "     Spriggit (ESP <-> YAML) targets net9.0. It will INSTALL fine and then"
-        echo "     fail to start, and that also disables tools/esp-verify-wrapper.sh."
+        echo "  !! .NET 9 SDK NOT found."
+        echo "     Spriggit (ESP <-> YAML) targets net9.0 and installs its serializer as a"
+        echo "     dotnet tool, which needs a matching SDK -- the RUNTIME alone is not"
+        echo "     enough. Without it spriggit starts, prints a version, and cannot"
+        echo "     serialize, which also disables tools/esp-verify-wrapper.sh."
         echo "     Install:  winget install Microsoft.DotNet.SDK.9"
         echo "     (AutoMod needs an 8.0.x SDK specifically -- it pins one via global.json"
         echo "      with rollForward: latestFeature, which does not roll 8 -> 9.)"

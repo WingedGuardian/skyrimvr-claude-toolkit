@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **The .NET check added in v3.8.2 asked the wrong question.** It verified the .NET 9
+  **runtime**, and a runtime-only install passes it while Spriggit remains unusable:
+  spriggit starts and prints its version, then fails to serialize because it resolves
+  its serializer at runtime via `dotnet tool install`, and only a matching **SDK** can
+  install a tool whose assets target `net9.0`. Measured on a machine in exactly that
+  state — the check said OK, `esp-verify-wrapper.sh` was still dead. The failure mode
+  is also misreported by .NET itself as "DotnetToolSettings.xml was not found in the
+  package"; the file is present, under a framework the SDK will not select (control:
+  `dotnetsay`, whose assets are `net8.0`, installs without complaint). setup.sh and
+  the README now ask for the SDK.
+
+
 ## v3.8.2 — 2026-09-06
 
 ### Fixed
