@@ -227,10 +227,21 @@ MUTATIONS = [
         # state CrashLoggerSSE 1.23.1 produced -- 1 of 7 dumps read, RESULT: OK --
         # where the evidence was on screen and nothing called it a problem.
         "tools/crash-triage.py",
-        "    parse_degraded = unparsed >= 2 and unparsed_pct > 25.0",
-        "    parse_degraded = False",
+        "    parse_degraded = (total_break",
+        "    parse_degraded = False and (total_break",
         "tests/test_triage.py::test_crash_flags_a_degraded_parser_rather_than_reporting_ok",
         id="crash-degraded-parser-not-flagged",
+    ),
+
+    pytest.param(
+        # Lower the floor so a single unparsed dump trips the guard. A healthy VR
+        # install has exactly one (a crash inside no loaded module, which can never
+        # parse), so this is the false positive that would get the guard ignored.
+        "tools/crash-triage.py",
+        "                      or (unparsed >= 2 and unparsed_pct > 25.0)",
+        "                      or (unparsed >= 1 and unparsed_pct > 5.0)",
+        "tests/test_triage.py::test_crash_does_not_flag_one_legitimate_unparsed_dump",
+        id="crash-degraded-threshold-too-eager",
     ),
 
     # --- skyrim_paths -------------------------------------------------------

@@ -136,7 +136,11 @@ if which dotnet >/dev/null 2>&1; then
     fi
 else
     echo "  .NET not found. Spriggit (ESP <-> YAML) and AutoMod CLI need it."
-    echo "    Install when you want those tools:  winget install Microsoft.DotNet.SDK.9"
+    echo "    Spriggit needs SDK 9:   winget install Microsoft.DotNet.SDK.9"
+    echo "    AutoMod ALSO needs 8:   winget install Microsoft.DotNet.SDK.8"
+    echo "    (AutoMod pins SDK 8.0.x via tools/automod/global.json with"
+    echo "     rollForward: latestFeature, which does not roll 8 -> 9. Installing"
+    echo "     only 9 leaves its build failing on SDK resolution.)"
 fi
 
 # --- Detect a JDK (needed for ReSaver CLI; do NOT auto-install) ---

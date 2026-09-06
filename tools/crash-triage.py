@@ -109,7 +109,11 @@ def parse(path: Path):
         pass
 
     cpp = {}
-    for i, line in enumerate(lines[:80]):
+    # 200, not 80: MEASURED on 28 real dumps, the pre-stack preamble already
+    # reaches line 79 in one of them. One line of headroom is not a margin, and
+    # overrunning it silently blanks cpp_info -- which collapses every C++ crash
+    # back onto the shared throw site, the exact merge this parsing prevents.
+    for i, line in enumerate(lines[:200]):
         if line.strip().startswith("C++ EXCEPTION"):
             for sub in lines[i + 1:i + 8]:
                 fm = CPP_FIELD_RE.match(sub)
@@ -192,14 +196,35 @@ def main() -> int:
     # least 2 unparsed keeps the legitimate case quiet and a real format break loud.
     unparsed = len(no_exception) + len(unreadable)
     unparsed_pct = (100.0 * unparsed / len(files)) if files else 0.0
-    parse_degraded = unparsed >= 2 and unparsed_pct > 25.0
+    # Nothing parsed at all is the WORST break, and it used to be the one case
+    # that printed OK: the `if not parsed:` early return below decided the verdict
+    # from `ok` alone and never consulted this flag. 6-of-7 unparsed reported
+    # DEGRADED while 7-of-7 reported OK -- the worse the break, the cleaner the
+    # report. It also freed single-file mode, where `unparsed >= 2` can never hold.
+    total_break = unparsed > 0 and not parsed
+
+    # FRAMES COVERAGE. `unparsed` only counts dumps whose EXCEPTION LINE failed.
+    # Of the three 1.2x format changes, only one produces that; a changed stack
+    # header or frame-marker syntax leaves every dump 'parsed' with zero frames
+    # and no complaint. One dump legitimately lacking frames is ordinary; EVERY
+    # parsed dump lacking them is the header having moved.
+    frameless = sum(1 for r in parsed if not r["frames"])
+    frames_broken = bool(parsed) and frameless == len(parsed)
+
+    parse_degraded = (total_break
+                      or (unparsed >= 2 and unparsed_pct > 25.0)
+                      or frames_broken)
 
     print(f"logs found      : {len(files)}")
     print(f"  parsed        : {len(parsed)}")
     print(f"  no exception  : {len(no_exception)}")
     print(f"  unreadable    : {len(unreadable)}")
+    # Annotate only when the UNPARSED count is itself the problem. A frames-only
+    # break leaves this at 0 and would otherwise read "0/3 (0%) <-- not
+    # understanding these dumps", which is a contradiction on one line.
     print(f"  unparsed      : {unparsed}/{len(files)} ({unparsed_pct:.0f}%)"
-          + ("   <-- the parser is not understanding these dumps" if parse_degraded else ""))
+          + ("   <-- the parser is not understanding these dumps"
+             if (total_break or (unparsed >= 2 and unparsed_pct > 25.0)) else ""))
     accounted = len(parsed) + len(no_exception) + len(unreadable)
     ok = accounted == len(files)
     print(f"  {'-' * 14}")
@@ -207,6 +232,12 @@ def main() -> int:
     for name, err in unreadable:
         print(f"    !! {name}: {err}")
     print()
+    if parse_degraded and not parsed:
+        print(f"\nRESULT: PARSER DEGRADED -- none of the {len(files)} dump(s) could be "
+              f"parsed at all. This is a total format break, not an absence of crashes. "
+              f"Compare a dump against EXC_RE.")
+        return 1
+
     if not parsed:
         print("RESULT: OK" if ok else "RESULT: ACCOUNTING MISMATCH")
         return 0 if ok else 1
@@ -261,11 +292,16 @@ def main() -> int:
     print(f"  UNKNOWN        : {unknown}   <-- the ones worth looking at")
 
     all_ok = ok and sig_ok and not parse_degraded
-    if parse_degraded:
+    if parse_degraded and frames_broken and unparsed_pct <= 25.0:
+        print(f"\nRESULT: PARSER DEGRADED -- all {len(parsed)} parsed dump(s) yielded "
+              f"ZERO stack frames. The exception line still parses, so this is the "
+              f"stack header or frame syntax having changed; compare a dump against "
+              f"FRAME_RE and the CALL STACK header match.")
+    elif parse_degraded:
         print(f"\nRESULT: PARSER DEGRADED -- {unparsed} of {len(files)} dumps "
-              f"({unparsed_pct:.0f}%) could not be parsed. The signatures above are a "
-              f"report on the minority that could be. This usually means CrashLogger's "
-              f"format changed; compare a failing dump against EXC_RE and FRAME_RE.")
+              f"({unparsed_pct:.0f}%) could not be parsed. The signatures above cover only "
+              f"the {len(parsed)} that could be. This usually means CrashLogger's format "
+              f"changed; compare a failing dump against EXC_RE and FRAME_RE.")
     else:
         print("\nRESULT: OK" if all_ok else "\nRESULT: ACCOUNTING MISMATCH")
     return 0 if all_ok else 1

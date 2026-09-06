@@ -318,8 +318,29 @@ def test_crash_flags_a_degraded_parser_rather_than_reporting_ok(tmp_path):
     assert r.returncode == 1
 
 
-def test_crash_does_not_flag_one_legitimate_unparsed_dump(crash_dir):
+def test_crash_does_not_flag_one_legitimate_unparsed_dump(tmp_path):
     """Priced against real data: a healthy VR install has 1 unparsed dump in 28.
-    A guard that fires on that gets ignored, so it must stay quiet here."""
-    r = run(CRASH, str(crash_dir))
+    A guard that fires on that gets ignored, so it must stay quiet here.
+
+    The first version of this test took the `crash_dir` fixture, which contains
+    three VALID logs and no unparsed dump at all -- it never built the case it
+    names, and passed with the threshold mutated in both directions. It now
+    constructs the real shape: one dump whose exception line carries no
+    MODULE+OFFSET (a jump into no loaded module -- CrashLogger has nothing to
+    attribute, so this dump can never parse and is not a defect), among nine
+    that parse cleanly.
+    """
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    for n in range(1, 10):
+        (d / f"crash-2026-08-26-{n:02d}.txt").write_text(
+            crash_log("0B84F05", "hkpContactSolver"), encoding="utf-8")
+    (d / "crash-2026-08-26-99.txt").write_text(
+        "Skyrim VR v1.4.15\n"
+        'Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x000000000001\n',
+        encoding="utf-8")
+
+    r = run(CRASH, str(d))
+    assert "unparsed      : 1/10 (10%)" in r.stdout, r.stdout
     assert "RESULT: PARSER DEGRADED" not in r.stdout, r.stdout
+    assert r.returncode == 0

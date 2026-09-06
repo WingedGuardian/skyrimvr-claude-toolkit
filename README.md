@@ -18,6 +18,13 @@ It's not perfect, and it will require some trial and error — especially for co
 
 ---
 
+## New in v3.8.2: The Denominator Tools Learn To Doubt Themselves
+
+v3.8.2 turns `crash-triage`'s report on itself. It now reports the share of dumps
+it could not parse and refuses to print `RESULT: OK` when that share says the
+format has moved out from under it — the failure a contributor hit on
+CrashLoggerSSE 1.2x, where it read 1 of 7 dumps and said nothing was wrong.
+
 ## New in v3.8: Three Tools That Answer With Their Denominator First
 
 The three additions in v3.8 all replace an answer you would otherwise get by squinting at a wall

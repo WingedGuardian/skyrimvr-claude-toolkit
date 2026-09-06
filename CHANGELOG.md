@@ -1,5 +1,52 @@
 # Changelog
 
+## v3.8.2 — 2026-09-06
+
+### Fixed
+
+- **`crash-triage` read 1 of 7 dumps on CrashLoggerSSE 1.2x and reported them as
+  "no exception".** Four format differences, reported and fixed by
+  [@yurar123](https://github.com/yurar123) in #8: the exception-type pattern
+  excluded `C++ Exception` (the `+` and lowercase fall outside `[A-Z_]+`), the stack
+  header changed from `PROBABLE CALL STACK` to `CALL STACK ([P]robable / [S]tack
+  scan):`, frame lines gained `[P]`/`[S]` markers, and every C++ throw collapsed
+  onto its shared throw site instead of being distinguished by its `Info` string.
+  Both formats are supported; verified against 28 real Skyrim VR dumps on
+  CrashLoggerSSE v1-15-0-0 with byte-identical output.
+
+- **`setup.sh` told you to install the .NET SDK that cannot run Spriggit.** It
+  recommended SDK 8 and then printed `Found .NET SDK: 8.0.424`, which reads as
+  success — but Spriggit.CLI targets `net9.0`, so `dotnet tool install Spriggit.CLI`
+  succeeded and every invocation afterwards died with "You must install or update
+  .NET". Because `esp-verify-wrapper.sh` drives spriggit, the cross-reference
+  integrity guard was silently unusable too. Setup now checks whether the .NET 9
+  **runtime** is present rather than reporting whichever SDK it found, and names
+  both SDKs when neither is installed (AutoMod pins SDK 8.0.x via `global.json`
+  with `rollForward: latestFeature`, which does not roll 8 → 9).
+
+### Added
+
+- **`crash-triage` now says when it has stopped understanding its input.** The
+  accounting line cannot: every file lands in exactly one bucket by construction,
+  so it balances identically and says nothing about whether the parser still works.
+  Two format-agnostic guards now gate the verdict:
+  - **unparsed ratio** — the share of dumps whose exception line failed. Priced
+    against real data: a healthy install has 1 unparsed in 28 (4%, a crash inside
+    no loaded module that can never parse); the 1.2x break was 86%. Fires when
+    nothing parses at all, or when both >25% and at least 2 dumps fail.
+  - **frames coverage** — a changed stack header leaves every dump "parsed" with
+    zero frames and no complaint, so the unparsed count alone would have missed two
+    of the three 1.2x changes. Every parsed dump yielding zero frames is reported.
+
+### Changed
+
+- ⚠ **`crash-triage` has a new non-zero exit.** A run that previously printed
+  `RESULT: OK` and exited 0 can now print `RESULT: PARSER DEGRADED` and exit **1**
+  when the guards above trip. If you gate a script on its exit code, note that 1
+  now also means "the report above covers only the dumps that parsed". Exit 2
+  (could not check) and the OK path are unchanged.
+
+
 ## v3.8.1 — 2026-08-27
 
 ### Fixed
