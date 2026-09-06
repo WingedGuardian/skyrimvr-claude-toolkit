@@ -111,14 +111,32 @@ if [ -z "$PY_FOUND" ]; then
     echo "  Install it from python.org (or 'winget install Python.Python.3.12') and re-run — the bundled tools try 'py -3', 'python', then 'python3'."
 fi
 
-# --- Detect .NET SDK (needed for Spriggit / AutoMod; do NOT auto-install) ---
+# --- Detect .NET (needed for Spriggit / AutoMod; do NOT auto-install) ---
+#
+# This checks whether the RUNTIME Spriggit needs is present, not merely that some
+# dotnet exists. MEASURED 2026-09-06 on the dev machine: this block previously
+# recommended SDK 8 and then printed "Found .NET SDK: 8.0.424", which reads as
+# success. `dotnet tool install Spriggit.CLI` also succeeded. But Spriggit.CLI
+# 0.40.x targets net9.0, so every invocation died with "You must install or update
+# .NET" -- and because tools/esp-verify-wrapper.sh drives spriggit, the ESP
+# cross-reference guard was silently unusable too. Reporting presence when the
+# question is capability is how an install ends up broken while looking configured.
 echo ""
-echo "Checking for the .NET SDK..."
+echo "Checking for .NET..."
 if which dotnet >/dev/null 2>&1; then
     echo "  Found .NET SDK: $(dotnet --version 2>/dev/null)"
+    if dotnet --list-runtimes 2>/dev/null | grep -q "^Microsoft.NETCore.App 9\."; then
+        echo "  .NET 9 runtime present -- Spriggit can run."
+    else
+        echo "  !! .NET 9 runtime NOT found."
+        echo "     Spriggit (ESP <-> YAML) targets net9.0. It will INSTALL fine and then"
+        echo "     fail to start, and that also disables tools/esp-verify-wrapper.sh."
+        echo "     Install:  winget install Microsoft.DotNet.SDK.9"
+        echo "     (AutoMod CLI builds fine against an older SDK; only Spriggit needs 9.)"
+    fi
 else
-    echo "  .NET SDK not found. Spriggit (ESP <-> YAML) and AutoMod CLI need it."
-    echo "    Install when you want those tools:  winget install Microsoft.DotNet.SDK.8"
+    echo "  .NET not found. Spriggit (ESP <-> YAML) and AutoMod CLI need it."
+    echo "    Install when you want those tools:  winget install Microsoft.DotNet.SDK.9"
 fi
 
 # --- Detect a JDK (needed for ReSaver CLI; do NOT auto-install) ---
@@ -393,7 +411,7 @@ echo "  xeditlib     -- programmatic ESP read/write:  npm install github:WingedG
 echo "                  (run from THIS toolkit root so the bundled tools/ + examples/ scripts resolve it)"
 echo "  Champollion  -- Papyrus .pex -> .psc:         github.com/Orvid/Champollion/releases"
 echo "  Caprica      -- Papyrus .psc -> .pex:         github.com/Orvid/Caprica/releases"
-echo "  Spriggit     -- ESP <-> YAML editing:         dotnet tool install Spriggit.CLI"
+echo "  Spriggit     -- ESP <-> YAML editing:         dotnet tool install Spriggit.CLI   (needs the .NET 9 runtime)"
 echo "                  (deep output paths: use tools/spriggit-cli.sh)"
 echo "  AutoMod CLI  -- NIF / BSA / audio / MCM / ESP:"
 echo "                  git clone https://github.com/SpookyPirate/spookys-automod-toolkit into tools/automod"
