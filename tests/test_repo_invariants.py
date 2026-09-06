@@ -118,3 +118,64 @@ def test_help_banner_range_stays_inside_the_comment_header():
         f"{header_end}; lines {header_end + 1}-{claimed_end} are source code: "
         f"{lines[header_end:claimed_end][:3]}"
     )
+
+
+# --------------------------------------------------------------------------
+# The hooks, as TEXT
+#
+# tests/test_hooks.py exercises the decision logic, but it structurally cannot
+# catch the defect that actually shipped: a suite pipes stdin, so `/dev/stdin`
+# resolves fine there and an inert hook passes every behavioural case. These two
+# checks are properties of the file, so they hold without a runtime.
+# --------------------------------------------------------------------------
+
+HOOK_DIR = REPO / ".claude" / "hooks"
+
+
+def test_no_shipped_hook_reads_stdin_through_dev_stdin():
+    """`INPUT=$(cat /dev/stdin)` returns ZERO BYTES in the Claude Code hook
+    environment, while a bare `cat` returns the payload (MEASURED: X4 toolkit
+    2026-08-29, reproduced on a second machine 2026-09-06 -- seven probes, 0 bytes
+    via /dev/stdin, 641-2840 via bare cat).
+
+    Every hook in this toolkit used it, so every hook was inert: it fired, read
+    nothing, fell through its first guard and exited 0 -- byte-identical to
+    deciding "this is fine". The audit log carried an empty command field in 2,454
+    of 2,454 entries and nothing looked wrong.
+
+    The behavioural suite CANNOT see this, which is exactly why the check lives
+    here instead. It matches the command substitution, not the string, so the
+    comments explaining the defect do not trip it.
+    """
+    hooks = sorted(HOOK_DIR.glob("*.sh"))
+    assert hooks, "no hooks found -- this test would pass vacuously"
+    offenders = []
+    for h in hooks:
+        for n, line in enumerate(h.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if "$(cat /dev/stdin)" in line or "< /dev/stdin" in line:
+                offenders.append(f"{h.name}:{n}: {line.strip()}")
+    assert not offenders, (
+        "these hooks read stdin through /dev/stdin and are INERT in the hook "
+        "environment; use a bare `cat`:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_every_hook_writes_a_heartbeat_and_handles_an_empty_payload():
+    """The two properties that make a hook's death detectable at all.
+
+    Without the heartbeat, `tools/hook-canary.sh` has nothing to read and an inert
+    hook is indistinguishable from a quiet one. Without the empty-payload branch,
+    a hook that sees nothing exits 0 and that silence reads as approval.
+    """
+    hooks = sorted(HOOK_DIR.glob("*.sh"))
+    assert hooks, "no hooks found -- this test would pass vacuously"
+    missing = []
+    for h in hooks:
+        text = h.read_text(encoding="utf-8")
+        if "hook-heartbeat" not in text:
+            missing.append(f"{h.name}: writes no liveness heartbeat")
+        if 'if [ -n "$INPUT" ]' not in text and 'if [ -z "$INPUT" ]' not in text:
+            missing.append(f"{h.name}: does not branch on an empty payload")
+    assert not missing, "\n  " + "\n  ".join(missing)

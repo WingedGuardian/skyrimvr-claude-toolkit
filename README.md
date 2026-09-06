@@ -177,7 +177,7 @@ The clearest example: **xeditlib**. XEditLib.dll is the engine inside SSEEdit/xE
 - **1,300+ lines of Skyrim modding knowledge** -- Papyrus quirks, version-specific differences, xEdit pitfalls, engine bugs, NIF/animation authoring, VR hit-detection, and more (including VR-specific sections). Loaded into every Claude session automatically.
 - **NIF authoring & animation** -- Author self-animating meshes (self-spinning, telescoping, keyframed motion) with PyNifly, edit LE geometry with PyFFI, and verify everything with a headless render before you load the game.
 - **Render-verification loop** -- Headless Blender renders any NIF to a PNG so fixes are confirmed in chat; NifSkope and PyNifly act as independent render/parse gates so bad files are caught in tooling.
-- **Safety hooks** -- Claude asks permission before editing any game file, won't touch ESP/ESM files directly, and automatically backs up everything it modifies with a full audit trail.
+- **Safety hooks** -- Claude is refused outright on the things that are never correct (writing into an ESP/ESM/BSA, deleting the game or config directory, deleting Bethesda registry keys), and is warned -- without interrupting you -- on the things that are consequential but legitimate. Everything it modifies is backed up with a full audit trail. Only one action asks *you* to decide: a ReSaver command that mutates a save file. Run `bash tools/hook-canary.sh` any time to confirm the hooks are alive and receiving their input.
 - **Confidence system** -- Claude rates its confidence (0-100%) and lists its assumptions before proposing any change. No guessing, no "this should work."
 - **ESP editing via Spriggit** -- Serialize any ESP to human-readable YAML, edit it directly, deserialize back. Claude's native file editing works on YAML out of the box — no FFI layer, no scripting, and changes diff cleanly in git.
 - **ESP analysis via xeditlib** -- Programmatic inspection, diffing, and bulk queries across records. The hard Delphi FFI work is already done. ([xeditlib on GitHub](https://github.com/WingedGuardian/xeditlib))
@@ -381,7 +381,7 @@ These aren't things you configure -- they're already wired in. Every session, be
 A: Yes! The knowledgebase covers both. VR-specific sections only apply to VR. Safety hooks and workflow work for either. Just tell Claude Code to adapt your environment to your specific Skyrim version.
 
 **Q: Can Claude break my mods or save files?**
-A: The safety hooks prevent this. Claude can't edit ESP/ESM files directly, must ask permission for any edit, and backs everything up. But always keep your own backups too.
+A: The safety hooks make the destructive cases impossible rather than merely discouraged: Claude cannot write into an ESP/ESM/BSA, cannot delete your game or config directory, and cannot delete Bethesda's registry keys -- those are refused, not confirmed. Ordinary edits proceed with a warning in Claude's context rather than a prompt at you, and every file it touches is copied to `.claude/backups/` first with an audit-log entry. Verify the hooks are actually live with `bash tools/hook-canary.sh` -- and keep your own backups regardless.
 
 **Q: Do I need Blender or NifSkope?**
 A: Only for the optional headless render-verification loop. The core NIF authoring/editing (PyFFI, PyNifly) works without them. If you want Claude to render a mesh to a PNG and show it to you in chat, install Blender; NifSkope adds an independent visual gate. Setup will walk you through it.

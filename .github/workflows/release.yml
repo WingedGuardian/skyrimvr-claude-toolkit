@@ -45,6 +45,33 @@ jobs:
                 ./ "/tmp/$NAME/"
           test ! -d "/tmp/$NAME/tests" || { echo "::error::tests/ leaked into the release payload"; exit 1; }
           test -d "/tmp/$NAME/.claude/hooks" || { echo "::error::.claude/ missing from payload"; exit 1; }
+
+          # THE SHIPPED HOOKS MUST NOT BE INERT.
+          #
+          # `INPUT=$(cat /dev/stdin)` returns ZERO BYTES in the Claude Code hook
+          # environment, while a bare `cat` returns the payload. Every hook in this
+          # bundle used it and was therefore decoration for months: fired, read
+          # nothing, fell through its first guard, exited 0 -- byte-identical to
+          # deciding "this is fine".
+          #
+          # No test suite can catch this, because a suite pipes stdin and
+          # /dev/stdin resolves fine there. It shipped twice. It is checked HERE,
+          # against the actual payload, because that is the artifact users run --
+          # the repo passing is not the same claim.
+          #
+          # Matches the command substitution, not the string, so the comments
+          # explaining the defect do not trip it.
+          nhooks=$(find "/tmp/$NAME/.claude/hooks" -name '*.sh' | wc -l)
+          test "$nhooks" -ge 4 || { echo "::error::only $nhooks hook(s) in the payload; this check would be vacuous"; exit 1; }
+          if grep -rn --include='*.sh' -E '\$\(cat /dev/stdin\)|< */dev/stdin' "/tmp/$NAME/.claude/hooks" | grep -vE ':[[:space:]]*#'; then
+            echo "::error::a shipped hook reads stdin through /dev/stdin and is INERT in the hook environment; use a bare cat"
+            exit 1
+          fi
+          # And each must still be able to report its own death.
+          for h in "/tmp/$NAME/.claude/hooks"/*.sh; do
+            grep -q 'hook-heartbeat' "$h" || { echo "::error::$(basename "$h") writes no liveness heartbeat"; exit 1; }
+          done
+          echo "hooks: $nhooks shipped, none inert, all writing a heartbeat"
           (cd /tmp && zip -qr "$NAME.zip" "$NAME")
           mv "/tmp/$NAME.zip" .
           unzip -l "$NAME.zip" | tail -5

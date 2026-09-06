@@ -2,6 +2,54 @@
 
 ## v3.8.3 — 2026-09-06
 
+### 🔒 Security / safety — read this one
+
+- **Every safety hook in this toolkit was INERT, and is now fixed.** They fired on
+  every call, read **zero bytes**, fell through their first guard and exited 0 —
+  which is byte-identical to deciding "this is fine". If you have been running this
+  toolkit, **none of the protections in the README have actually been in force**:
+  not the ESP write block, not the game-directory delete block, not the automatic
+  backups. `AUDIT_LOG.txt` recording an empty command field is the fingerprint.
+
+  The cause is one idiom: `INPUT=$(cat /dev/stdin)` returns nothing in the Claude
+  Code hook environment, while a bare `cat` returns the payload. MEASURED across two
+  machines — seven consecutive probes, 0 bytes via `/dev/stdin`, 641–2840 bytes via
+  bare `cat`, PreToolUse and PostToolUse alike.
+
+  **No test suite could have caught it**, which is why it lasted: a suite pipes stdin
+  explicitly, so `/dev/stdin` resolves fine under test. Green in the harness, dead in
+  production. It is now checked three ways that do not depend on a runtime — a
+  text-level repo invariant, a mutation that puts the defect back, and a gate in the
+  release workflow that inspects **the built payload** rather than the repo.
+
+  **After updating, run `bash tools/hook-canary.sh`.** It reads heartbeats written
+  from inside real invocations and reports ALIVE / BLIND per hook — the only evidence
+  that survives the gap between a piped harness and the real hook environment.
+
+- **Hooks no longer prompt you for routine work.** The policy is now: `deny` for what
+  is never correct, `advise` (a note to the assistant, no prompt, call proceeds) for
+  what is consequential but legitimate, and `ask` for what is genuinely your decision
+  — used for exactly one rule, a ReSaver `--apply` that mutates a save. Previously
+  ordinary modding work raised confirmation prompts, and a guard that prompts on
+  routine work gets approved by reflex and then protects nothing: the X4 toolkit
+  measured 40 such prompts across 13,282 commands, every one noise.
+
+- **Path guards now match both separators.** A guard written with only forward
+  slashes matched `C:/Games/Skyrim` and missed `C:\Games\Skyrim`, while `cmd.exe`
+  and `powershell` are both callable — so the backslash spelling was the one that got
+  through. Six guards fixed, verified in both directions with controls that must not
+  fire.
+
+- **A hook that cannot see its input now refuses instead of passing silently.**
+  Silence *is* allow, and that silence is what hid the outage above. The two blocking
+  hooks deny with `GUARD INERT` and say the rules were never evaluated; the two
+  recording hooks cannot block, so they write `BLIND` to the audit log rather than
+  implying a backup exists.
+
+- **Hooks are no longer tied to one machine's paths.** They resolve the project root
+  from `CLAUDE_PROJECT_DIR`, falling back to their own location, so backups, audit
+  log and snapshots land in the right place on any install.
+
 ### ⚠ Breaking
 
 - **`cosave-info` / `cosave-cli.sh` now use exit codes.** Previously *every* path
@@ -36,6 +84,16 @@
 
 ### Changed
 
+- **The release workflow now inspects the built payload, not just the repo.** It
+  already asserted that `tests/` had not leaked and `.claude/` was present; it now
+  also refuses to publish a bundle whose hooks read stdin through `/dev/stdin` or
+  have lost their liveness heartbeat. This is checked against the artifact because
+  the artifact is what users run — "the repo passes" is a different claim, and the
+  divergence between the two has shipped a defect here before. The check was proven
+  red before being trusted: green on the real payload, red with the defect
+  reinstated, red with a heartbeat removed, and no false positive on the comments
+  that explain the defect.
+
 - **The mutation gate now requires a test *failure*, not merely a non-zero exit.**
   pytest exits 1 when a test fails but 2 on a collection error, 4 on a usage error
   and 5 when nothing is collected, so a mutation naming a test that had since been
@@ -45,6 +103,13 @@
   is demonstrated rather than hypothetical. Audited at the same time: all 38
   mutations named a collectable test, so nothing was actually rotten — the gate
   simply could not have told us if it were.
+
+- **And it now requires each mutation anchor to match exactly once.** `str.replace`
+  rewrites every occurrence, so an anchor matching two sites silently reverted two
+  independent fixes while crediting the kill to one. That is the other half of the
+  same pair: one check catches an anchor whose partner *test* went stale, the other
+  catches an anchor that grew to match *too much*. One anchor had become ambiguous
+  two commits earlier and was narrowed.
 
 ### Fixed
 

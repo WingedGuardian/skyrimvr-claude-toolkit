@@ -435,6 +435,38 @@ MUTATIONS = [
         id="help-banner-leaks-source",
     ),
 
+    pytest.param(
+        # Put the defect back: a hook reading through /dev/stdin. This is the one
+        # that shipped, stayed green for months, and made every guard in the bundle
+        # decoration. The behavioural suite passes with it in place -- only the
+        # text-level check goes red, which is the entire point of having it.
+        ".claude/hooks/protect-bash.sh",
+        "INPUT=$(cat)",
+        "INPUT=$(cat /dev/stdin)",
+        "tests/test_repo_invariants.py::test_no_shipped_hook_reads_stdin_through_dev_stdin",
+        id="hook-reads-dev-stdin-and-is-inert",
+    ),
+
+    pytest.param(
+        # Remove a hook's liveness heartbeat. hook-canary then has nothing to read,
+        # and the only detector that survives the harness/production gap is gone.
+        ".claude/hooks/protect-files.sh",
+        'HB_DIR="$BACKUP_DIR/.hook-heartbeat"',
+        'HB_DIR="$BACKUP_DIR/.disabled"',
+        "tests/test_repo_invariants.py::test_every_hook_writes_a_heartbeat_and_handles_an_empty_payload",
+        id="hook-heartbeat-removed",
+    ),
+
+    pytest.param(
+        # Let a blocking hook fall through when it cannot see its input -- exit 0,
+        # which is indistinguishable from deciding the call is fine.
+        ".claude/hooks/protect-files.sh",
+        'if [ -z "$FILE_PATH" ]; then',
+        'if false; then',
+        "tests/test_hooks.py::test_a_blocking_hook_refuses_when_it_cannot_see_its_input",
+        id="blocking-hook-silent-when-blind",
+    ),
+
     # --- skyrim_paths -------------------------------------------------------
     pytest.param(
         "tools/skyrim_paths.py",

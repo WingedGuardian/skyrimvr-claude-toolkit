@@ -497,21 +497,40 @@ For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit se
 
 ## Safety Rules
 
-Hooks in `.claude/settings.json` enforce these automatically:
+Hooks in `.claude/hooks/`, wired up by `.claude/settings.json`, enforce these
+automatically. **A hook exists to stop ME, not to interrupt the user** -- so the
+rules are graded, and only the first list actually refuses.
 
-### Hard blocked (cannot proceed)
-- Deleting the game installation directory or config directory
+### DENIED -- refused outright, cannot proceed
+- Deleting the game installation directory or the config directory
 - Deleting Bethesda registry keys
-- Directly writing to ESP/ESM/ESL/BSA/BA2 files (use xelib or modding tools)
+- Directly writing to ESP/ESM/ESL/BSA/BA2 files (use xelib, Spriggit or AutoMod)
+- Tool output aimed straight at an existing `.psc`, and Champollion against a `.pex`
+  inside `Data/Scripts/` -- both have destroyed irreplaceable sources here
 
-### Requires user confirmation
-- **Any edit to ANY file** in the game directory or config directory (catch-all)
-- Papyrus scripts (`.psc`, `.pex`)
-- Skyrim INI files (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)
-- SKSE plugin configs (`Data/SKSE/Plugins/*.ini`)
-- Load order files (loadorder.txt, plugins.txt)
-- Any `rm`, `mv`, `cp`, redirect, or `sed -i` touching game/config directories
+### ADVISED -- the call proceeds, I get a note, the user is never prompted
+- Skyrim INI files (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini) -- last file wins
+- SKSE plugin configs (`Data/SKSE/Plugins/*.ini`) -- not captured by any snapshot
+- Papyrus scripts (`.psc`, `.pex`) -- a `.pex` loads at game startup ONLY
+- Load order files -- the mod manager owns them and may overwrite a direct edit
+- `rm`, `mv`, `cp`, redirects and `sed -i` touching game/config directories
 - Any bash command referencing plugin/archive files
+- AutoMod write commands without `--dry-run`
+
+### ASKS THE USER -- exactly one rule
+- A ReSaver `reset-havok` / `cleanse-formlists` / `remove-created` with `--apply`,
+  which mutates a `.ess` save through ReSaver's write path
+
+**Why so few prompts.** A guard that prompts on routine work gets approved by reflex
+and then protects nothing -- the X4 toolkit measured 40 such prompts across 13,282
+commands, every one of them noise. Deny is likewise a short list: "the mod manager
+owns it" or "this is risky" is a reason to advise, not to refuse, because a guard
+that blocks legitimate work is a guard that gets deleted.
+
+**Verify the hooks are actually alive: `bash tools/hook-canary.sh`.** Every hook here
+was INERT for months -- fired, read zero bytes, exited 0, which is byte-identical to
+approving. A test suite cannot detect that (a suite pipes stdin), so the canary reads
+heartbeats written from inside real invocations instead.
 
 ### General rules
 - **Always review changes before applying** -- modded installs are delicate
