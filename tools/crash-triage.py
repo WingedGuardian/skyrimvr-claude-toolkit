@@ -224,10 +224,12 @@ def main() -> int:
     # A high unparsed share is the format-agnostic symptom of exactly that: it
     # would have flagged the 1.2x change without anyone knowing what changed, and
     # it flags the next one too. Threshold picked against real data rather than
-    # taste: a Skyrim VR install with 28 genuine dumps has 1 unparsed (3.6%) -- a
-    # crash at an address inside no loaded module, so there is no MODULE+OFFSET to
-    # report and never will be. The 1.2x case was 86%. Requiring BOTH >25% and at
-    # least 2 unparsed keeps the legitimate case quiet and a real format break loud.
+    # taste: the CrashLoggerSSE 1.2x break was 86% unparsed, while a healthy install
+    # sits at 0-4%. Requiring BOTH >25% and at least 2 unparsed keeps an isolated
+    # oddity quiet and a real format break loud. (The original example for the floor
+    # -- a crash inside no loaded module -- now PARSES as `(no module)+ADDR`, so it is
+    # no longer an example of anything. The floor still earns its place: a single
+    # unparsed dump is not evidence of a format change.)
     unparsed = len(no_exception) + len(unreadable)
     unparsed_pct = (100.0 * unparsed / len(files)) if files else 0.0
     # Nothing parsed at all is the WORST break, and it used to be the one case
@@ -244,7 +246,15 @@ def main() -> int:
     # parsed dump lacking them is the header having moved.
     complete = [r for r in parsed if r["complete"]]
     frameless = sum(1 for r in complete if not r["frames"])
-    frames_broken = bool(complete) and frameless == len(complete)
+    # The >= 2 floor its sibling guard already has, and for the same reason: a
+    # SINGLE dump proves nothing about frame syntax. MEASURED -- a real dump
+    # (crash-2026-06-28-14-50-36) is a complete 1,753-line write with a CALL STACK
+    # header, REGISTERS, and a genuinely EMPTY stack section, because there is no
+    # return chain to walk for a jump to 0x1. Triaged alone it reported that the
+    # stack header had changed and told the reader to go edit FRAME_RE, which is
+    # exactly wrong. Pre-arc that dump did not parse and never reached this guard;
+    # making it parse created the single case, so the floor has to come with it.
+    frames_broken = len(complete) >= 2 and frameless == len(complete)
 
     parse_degraded = (total_break
                       or (unparsed >= 2 and unparsed_pct > 25.0)
@@ -278,9 +288,8 @@ def main() -> int:
     if parse_degraded and not parsed:
         print(f"\nRESULT: PARSER DEGRADED -- none of the {len(files)} dump(s) could be "
               f"parsed, so nothing above is a report on their contents. Either the "
-              f"format moved (compare one against EXC_RE), or these are dumps with no "
-              f"module attribution -- an exception line ending at the address, which "
-              f"cannot be keyed on and never will be.")
+              f"format moved -- compare one against EXC_RE -- or these files are not "
+              f"crash dumps at all.")
         return 1
 
     if not parsed:

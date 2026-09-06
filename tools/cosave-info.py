@@ -86,7 +86,14 @@ def survey(path):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(json.dumps({"ok": False, "error": "usage: cosave-info.py <cosave.skse>"})); sys.exit(2)
-    _r = survey(sys.argv[1])
+    # survey() raises on a missing file and on anything too short to unpack, and
+    # the 0/1/2 contract below was written on top of a function that throws: a
+    # traceback exits 1, which this contract defines as "parsed but degraded".
+    try:
+        _r = survey(sys.argv[1])
+    except Exception as e:
+        print(json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"}))
+        sys.exit(2)
     print(json.dumps(_r, indent=2))
     # Three outcomes, not two. Every path used to fall off the end at exit 0, so a
     # caller gating on $? alone saw "success" for a file that is not a cosave at all.
@@ -95,8 +102,13 @@ if __name__ == "__main__":
     #   2 = not a cosave / usage error
     if not _r.get("ok"):
         sys.exit(2)
-    if _r.get("resyncs", 0) and _r.get("coveragePct", 100) < 90:
-        print(json.dumps({"warning": "low coverage with resyncs -- the chunk inventory "
+    # NOT gated on resyncs. When the chunk walk finds nothing it breaks out without
+    # ever incrementing resyncs, so requiring resyncs>0 suppressed this guard on
+    # exactly the input that needs it. MEASURED on 60 real cosaves: resyncs 1-3 and
+    # coverage 99.9-100% on all 60, so the conjunct contributed nothing on healthy
+    # input and disabled the check on a degenerate file.
+    if _r.get("coveragePct", 0) < 90 or _r.get("chunkCount", 0) == 0:
+        print(json.dumps({"warning": "low coverage or no chunks parsed -- the inventory "
                           "above is a partial view, not a complete one"}), file=sys.stderr)
         sys.exit(1)
     sys.exit(0)

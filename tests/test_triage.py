@@ -529,3 +529,53 @@ def test_papyrus_does_not_second_guess_an_explicitly_named_log(tmp_path, monkeyp
     os.utime(log, (old, old))
     r = run(PAPYRUS, str(log))
     assert "log age" not in r.stdout, r.stdout
+
+
+def crash_log_empty_stack(offset: str) -> str:
+    """A COMPLETE dump whose stack section is genuinely empty.
+
+    Real shape, not invented: a jump to an address inside no loaded module has no
+    return chain for CrashLogger to walk, so it writes the CALL STACK header and
+    REGISTERS with nothing between them. One of the 28 dumps on the dev install is
+    exactly this (crash-2026-06-28-14-50-36, 1,753 lines).
+    """
+    return "\n".join([
+        "Skyrim VR v1.4.15",
+        "CrashLoggerSSE v1-15-0-0",
+        "",
+        f'Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x{offset}',
+        "",
+        "PROBABLE CALL STACK:",
+        "",
+        "REGISTERS:",
+        "\tRAX 0x0",
+    ])
+
+
+def test_crash_does_not_call_one_frameless_dump_a_format_change(tmp_path):
+    """A SINGLE dump proves nothing about frame syntax. Before the floor, this dump
+    alone reported that the stack header had changed and told the reader to go edit
+    FRAME_RE -- a prescription that would break real parsing. The unparsed guard has
+    a >= 2 floor for the same reason; this one needed it too."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    (d / "crash-2026-06-28-14-50-36.log").write_text(
+        crash_log_empty_stack("000000000001"), encoding="utf-8")
+    r = run(CRASH, str(d))
+    assert "ZERO stack frames" not in r.stdout, r.stdout
+    assert "RESULT: OK" in r.stdout, r.stdout
+    assert r.returncode == 0
+
+
+def test_crash_still_flags_a_format_change_across_several_dumps(tmp_path):
+    """The control for the floor above: two or more frameless COMPLETE dumps is a
+    format change and must still fire. A floor that silenced the guard entirely
+    would look identical in the test above."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    for n, off in enumerate(("0B84F05", "1234567", "0AAAAAA"), start=1):
+        (d / f"crash-2026-08-26-{n:02d}.log").write_text(
+            crash_log_stack_header_moved(off), encoding="utf-8")
+    r = run(CRASH, str(d))
+    assert "ZERO stack frames" in r.stdout, r.stdout
+    assert r.returncode == 1

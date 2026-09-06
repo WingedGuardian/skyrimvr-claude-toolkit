@@ -1,20 +1,64 @@
 # Changelog
 
-## Unreleased
+## v3.8.3 — 2026-09-06
+
+### ⚠ Breaking
+
+- **`cosave-info` / `cosave-cli.sh` now use exit codes.** Previously *every* path
+  exited **0**, including for a file that is not a co-save at all, so any script
+  gating on `$?` treated garbage as success. Now: **0** parsed and trustworthy ·
+  **1** parsed but degraded (no chunks read, or coverage below 90%) · **2** not a
+  co-save, unreadable, or a usage error. If you gate on this tool's exit code,
+  re-check what you expect.
+
+- **`crash-triage` and `spriggit-cli.sh` gained new non-zero exits.** `crash-triage`
+  now exits 1 on `RESULT: INPUT SET INCOMPLETE` (a file that looks like a dump but
+  did not match the pattern) as well as the `PARSER DEGRADED` states added in v3.8.2.
+  `spriggit-cli.sh` exits 1 when spriggit exits 0 having written no output, which it
+  previously reported as success.
+
+### Added
+
+- **`crash-triage` reports its INPUT SET, not just its arithmetic.** It now prints
+  how many files are in the folder, how many matched, and — the part that matters —
+  how many are *near misses*: files whose name carries the `crash-` prefix but which
+  the extension pattern did not match. This is the failure that produced a confident
+  "8 log(s) [OK]" while twenty newer dumps sat unread in the same folder. An
+  accounting check cannot see it, because a denominator can only account for what it
+  was handed. Priced against a real 341-file folder: 28 matched, 0 near misses, and
+  ordinary mod logs like `LeveledListCrashPrevention.log` correctly ignored.
+
+- **`papyrus-triage` reports the age of the log it chose.** Triaging a months-old log
+  as though it were the current session is an answer about a world that has moved on,
+  and it reads exactly like a good answer. Logs older than 7 days are marked STALE.
+  Only applies to the auto-selected newest log — naming a file explicitly is a
+  deliberate act and is not second-guessed.
 
 ### Fixed
 
-- **The .NET check added in v3.8.2 asked the wrong question.** It verified the .NET 9
-  **runtime**, and a runtime-only install passes it while Spriggit remains unusable:
-  spriggit starts and prints its version, then fails to serialize because it resolves
-  its serializer at runtime via `dotnet tool install`, and only a matching **SDK** can
-  install a tool whose assets target `net9.0`. Measured on a machine in exactly that
-  state — the check said OK, `esp-verify-wrapper.sh` was still dead. The failure mode
-  is also misreported by .NET itself as "DotnetToolSettings.xml was not found in the
-  package"; the file is present, under a framework the SDK will not select (control:
-  `dotnetsay`, whose assets are `net8.0`, installs without complaint). setup.sh and
-  the README now ask for the SDK.
+- **`crash-triage` counted a crash with no module attribution as "no exception".**
+  A jump to an address inside no loaded module leaves CrashLogger nothing to
+  attribute, so the line ends after the address. `MODULE+OFFSET` was mandatory, so
+  such a dump could never parse — a dump we read, reported as one we did not. It now
+  keys as `(no module)+ADDR`. On the dev install this took a healthy folder from 27
+  of 28 parsed to 28 of 28.
 
+- **The .NET check added in v3.8.2 asked the wrong question.** It verified the .NET 9
+  **runtime**, and a runtime-only install passes that while Spriggit remains
+  unusable: it starts, prints a version, and cannot serialize, because it fetches its
+  serializer at runtime via `dotnet tool install` and only a matching **SDK** can
+  install a tool whose assets target `net9.0`. Measured on a machine in exactly that
+  state — the check said the requirement was met while `esp-verify-wrapper.sh`, which
+  drives spriggit, was still dead. .NET's own error misleads here too: it reports
+  `DotnetToolSettings.xml was not found in the package` when the file is present,
+  under a framework the SDK will not select. `setup.sh` and the README now ask for
+  the SDK, and name the separate SDK 8 that AutoMod pins via `global.json`.
+
+- **`esp-verify-wrapper.sh --help` printed source code.** The banner renders a fixed
+  line range of the script's own comment header, and the range had drifted past the
+  end of it. Now bounded, with a test that reads the range out of the source rather
+  than running the script — the first version of that test was vacuous on any machine
+  without spriggit installed.
 
 ## v3.8.2 — 2026-09-06
 

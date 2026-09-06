@@ -249,7 +249,7 @@ MUTATIONS = [
         # of the CrashLoggerSSE 1.2x break the unparsed count cannot see: the
         # exception line still parses, so nothing else complains.
         "tools/crash-triage.py",
-        "    frames_broken = bool(complete) and frameless == len(complete)",
+        "    frames_broken = len(complete) >= 2 and frameless == len(complete)",
         "    frames_broken = False",
         "tests/test_triage.py::test_crash_flags_a_stack_header_change_that_leaves_dumps_nominally_parsed",
         id="crash-frames-break-not-flagged",
@@ -296,6 +296,38 @@ MUTATIONS = [
         'CRASH_PREFIX_RE = re.compile(r"crash", re.I)',
         "tests/test_triage.py::test_crash_does_not_flag_ordinary_mod_logs_as_near_misses",
         id="crash-near-miss-detector-too-broad",
+    ),
+
+    pytest.param(
+        # Remove the population floor from the frames guard. A single complete dump
+        # with an empty stack section -- a real shape, a jump with no return chain --
+        # then reports that the stack format changed.
+        "tools/crash-triage.py",
+        "    frames_broken = len(complete) >= 2 and frameless == len(complete)",
+        "    frames_broken = bool(complete) and frameless == len(complete)",
+        "tests/test_triage.py::test_crash_does_not_call_one_frameless_dump_a_format_change",
+        id="crash-frames-floor-removed",
+    ),
+
+    pytest.param(
+        # Gate the coverage check on resyncs again. The chunk walk breaks out without
+        # incrementing resyncs when it finds nothing, so this suppressed the guard on
+        # exactly the degenerate input it exists for.
+        "tools/cosave-info.py",
+        '    if _r.get("coveragePct", 0) < 90 or _r.get("chunkCount", 0) == 0:',
+        '    if _r.get("resyncs", 0) and _r.get("coveragePct", 100) < 90:',
+        "tests/test_cosave.py::test_cosave_degrades_on_a_stub_that_parses_no_chunks",
+        id="cosave-coverage-guard-self-suppressing",
+    ),
+
+    pytest.param(
+        # Drop the try/except around survey(). A missing file then exits 1, which this
+        # tool's own contract defines as "parsed but degraded".
+        "tools/cosave-info.py",
+        "    except Exception as e:",
+        "    except ZeroDivisionError as e:",
+        "tests/test_cosave.py::test_cosave_refuses_a_missing_file",
+        id="cosave-survey-exceptions-unhandled",
     ),
 
     pytest.param(

@@ -113,7 +113,7 @@ fi
 
 # --- Detect .NET (needed for Spriggit / AutoMod; do NOT auto-install) ---
 #
-# This checks whether the RUNTIME Spriggit needs is present, not merely that some
+# This checks whether the SDK Spriggit needs is present, not merely that some
 # dotnet exists. MEASURED 2026-09-06 on the dev machine: this block previously
 # recommended SDK 8 and then printed "Found .NET SDK: 8.0.424", which reads as
 # success. `dotnet tool install Spriggit.CLI` also succeeded. But Spriggit.CLI
