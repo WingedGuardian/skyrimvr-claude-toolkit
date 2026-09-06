@@ -174,10 +174,32 @@ def main() -> int:
     print("=" * 78)
     print(f"CRASH TRIAGE  --  {len(files)} log(s) in {target if target.is_dir() else target.parent}")
     print("=" * 78)
+    # UNPARSED RATIO.
+    #
+    # The accounting line below balances by construction -- every file lands in
+    # exactly one bucket -- so it cannot tell you the parser has stopped
+    # understanding its input. That is not hypothetical: on CrashLoggerSSE 1.23.1
+    # this tool read 1 of 7 real dumps and still printed RESULT: OK. The evidence
+    # was on screen the whole time ("parsed: 1, no exception: 6") and nothing
+    # treated it as a finding.
+    #
+    # A high unparsed share is the format-agnostic symptom of exactly that: it
+    # would have flagged the 1.2x change without anyone knowing what changed, and
+    # it flags the next one too. Threshold picked against real data rather than
+    # taste: a Skyrim VR install with 28 genuine dumps has 1 unparsed (3.6%) -- a
+    # crash at an address inside no loaded module, so there is no MODULE+OFFSET to
+    # report and never will be. The 1.2x case was 86%. Requiring BOTH >25% and at
+    # least 2 unparsed keeps the legitimate case quiet and a real format break loud.
+    unparsed = len(no_exception) + len(unreadable)
+    unparsed_pct = (100.0 * unparsed / len(files)) if files else 0.0
+    parse_degraded = unparsed >= 2 and unparsed_pct > 25.0
+
     print(f"logs found      : {len(files)}")
     print(f"  parsed        : {len(parsed)}")
     print(f"  no exception  : {len(no_exception)}")
     print(f"  unreadable    : {len(unreadable)}")
+    print(f"  unparsed      : {unparsed}/{len(files)} ({unparsed_pct:.0f}%)"
+          + ("   <-- the parser is not understanding these dumps" if parse_degraded else ""))
     accounted = len(parsed) + len(no_exception) + len(unreadable)
     ok = accounted == len(files)
     print(f"  {'-' * 14}")
@@ -238,8 +260,14 @@ def main() -> int:
     print(f"\n  known/accepted : {len(parsed) - unknown}")
     print(f"  UNKNOWN        : {unknown}   <-- the ones worth looking at")
 
-    all_ok = ok and sig_ok
-    print("\nRESULT: OK" if all_ok else "\nRESULT: ACCOUNTING MISMATCH")
+    all_ok = ok and sig_ok and not parse_degraded
+    if parse_degraded:
+        print(f"\nRESULT: PARSER DEGRADED -- {unparsed} of {len(files)} dumps "
+              f"({unparsed_pct:.0f}%) could not be parsed. The signatures above are a "
+              f"report on the minority that could be. This usually means CrashLogger's "
+              f"format changed; compare a failing dump against EXC_RE and FRAME_RE.")
+    else:
+        print("\nRESULT: OK" if all_ok else "\nRESULT: ACCOUNTING MISMATCH")
     return 0 if all_ok else 1
 
 

@@ -293,3 +293,33 @@ def test_crash_drops_stack_scan_frames_and_keeps_probable_ones(cpp_crash_dir):
     r = run(CRASH, str(cpp_crash_dir))
     assert "SkyrimSE.exe+0000001" in r.stdout, r.stdout   # the [P] frame is kept
     assert "ScannedOnly.dll" not in r.stdout, r.stdout    # the [S] one is not
+
+
+def test_crash_flags_a_degraded_parser_rather_than_reporting_ok(tmp_path):
+    """The failure this exists for: CrashLoggerSSE 1.23.1 changed format and the
+    tool read 1 of 7 dumps while printing RESULT: OK. The share of unparsed dumps
+    is the format-agnostic symptom, so it is the thing that must go red."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    (d / "crash-2026-01-01-00-00-01.log").write_text(
+        "Skyrim SSE v1.6.1170\n"
+        'Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x1 SkyrimSE.exe+0000001\tmov\n',
+        encoding="utf-8")
+    for n in range(2, 6):
+        # An exception line with no MODULE+OFFSET: a real shape (a jump to an
+        # address inside no loaded module), and one the parser cannot key on.
+        (d / f"crash-2026-01-01-00-00-0{n}.log").write_text(
+            "Skyrim SSE v1.6.1170\n"
+            'Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x000000000001\n',
+            encoding="utf-8")
+    r = run(CRASH, str(d))
+    assert "unparsed      : 4/5 (80%)" in r.stdout, r.stdout
+    assert "RESULT: PARSER DEGRADED" in r.stdout, r.stdout
+    assert r.returncode == 1
+
+
+def test_crash_does_not_flag_one_legitimate_unparsed_dump(crash_dir):
+    """Priced against real data: a healthy VR install has 1 unparsed dump in 28.
+    A guard that fires on that gets ignored, so it must stay quiet here."""
+    r = run(CRASH, str(crash_dir))
+    assert "RESULT: PARSER DEGRADED" not in r.stdout, r.stdout

@@ -222,6 +222,17 @@ MUTATIONS = [
         id="crash-prefix-not-required",
     ),
 
+    pytest.param(
+        # Stop treating a mostly-unparsed folder as a finding. This is the exact
+        # state CrashLoggerSSE 1.23.1 produced -- 1 of 7 dumps read, RESULT: OK --
+        # where the evidence was on screen and nothing called it a problem.
+        "tools/crash-triage.py",
+        "    parse_degraded = unparsed >= 2 and unparsed_pct > 25.0",
+        "    parse_degraded = False",
+        "tests/test_triage.py::test_crash_flags_a_degraded_parser_rather_than_reporting_ok",
+        id="crash-degraded-parser-not-flagged",
+    ),
+
     # --- skyrim_paths -------------------------------------------------------
     pytest.param(
         "tools/skyrim_paths.py",
