@@ -201,3 +201,95 @@ def test_crash_rejects_a_directory_with_no_logs(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     assert run(CRASH, str(empty)).returncode == 2
+
+
+# --------------------------------------------------------------------------
+# crash-triage -- CrashLoggerSSE 1.2x format
+#
+# The fixtures above are the 1-0-0 shape. 1.2x changed three things in the part
+# of the dump the parser reads, and a C++ throw exercises all of them at once.
+# --------------------------------------------------------------------------
+
+def crash_log_cpp(info: str) -> str:
+    """A C++ throw as CrashLoggerSSE 1.2x writes it.
+
+    The exception line reports the THROW SITE, which is the same KERNELBASE
+    address for every C++ crash on a machine -- so `info` is the only thing
+    that distinguishes one of these from another.
+    """
+    return "\n".join([
+        "Skyrim SSE v1.6.1170",
+        "CrashLoggerSSE v1-23-1-0",
+        "",
+        'Unhandled exception "C++ Exception" at 0x7FFF55741000 '
+        "KERNELBASE.dll+00C1000\tnop [rax+rax*1], eax",
+        "",
+        "C++ EXCEPTION:",
+        "\tType: (std::invalid_argument*)",
+        f"\tInfo: {info}",
+        "\tThrow Location: MSVCP140.dll+0044E92",
+        "",
+        "CALL STACK ([P]robable / [S]tack scan):",
+        "\t[ 0][P] 0x7FFF55741000    KERNELBASE.dll+00C1000\tnop [rax+rax*1], eax",
+        "\t[ 1][P] 0x7FF700000001    SkyrimSE.exe+0000001\tmov rdi, rax",
+        "\t[ 2][S] 0x7FF700000002    ScannedOnly.dll+0000002\tcmp ebx, eax",
+        "",
+        "REGISTERS:",
+        "\tRAX 0x0",
+    ])
+
+
+@pytest.fixture
+def cpp_crash_dir(tmp_path) -> Path:
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    (d / "crash-2026-09-05-21-55-53.log").write_text(
+        crash_log_cpp("invalid stoull argument"), encoding="utf-8")
+    (d / "crash-2026-09-05-22-09-04.log").write_text(
+        crash_log_cpp("invalid stoull argument"), encoding="utf-8")
+    (d / "crash-2026-09-05-22-55-51.log").write_text(
+        crash_log_cpp("bad allocation"), encoding="utf-8")
+    return d
+
+
+def test_crash_parses_a_cpp_exception_rather_than_calling_it_no_exception(cpp_crash_dir):
+    """`C++ Exception` has a `+` and lowercase letters in the type. A parser
+    that assumes `[A-Z_]+` reads a heavy modlist's most common crash class as
+    "no exception" -- a clean report of a log you do not have."""
+    r = run(CRASH, str(cpp_crash_dir))
+    assert "no exception  : 0" in r.stdout, r.stdout
+    assert "accounted     : 3   [OK vs 3 found]" in r.stdout, r.stdout
+
+
+def test_crash_separates_cpp_throws_by_their_info_not_the_throw_site(cpp_crash_dir):
+    """All three share one throw site. Keying on module+offset alone would
+    merge two unrelated crashes into one ranked row."""
+    r = run(CRASH, str(cpp_crash_dir))
+    assert "2 distinct" in r.stdout, r.stdout
+    assert "2 x  KERNELBASE.dll+00C1000  invalid stoull argument" in r.stdout, r.stdout
+    assert "1 x  KERNELBASE.dll+00C1000  bad allocation" in r.stdout, r.stdout
+
+
+def test_crash_reports_the_cpp_exception_block(cpp_crash_dir):
+    """Type and throw location are what a reader needs; the exception line
+    alone says only that something threw."""
+    r = run(CRASH, str(cpp_crash_dir))
+    assert "(std::invalid_argument*)" in r.stdout, r.stdout
+    assert "MSVCP140.dll+0044E92" in r.stdout, r.stdout
+
+
+def test_crash_reads_frames_from_the_1_2x_stack_header(cpp_crash_dir):
+    """1.2x heads the stack `CALL STACK ([P]robable / [S]tack scan):`. Matching
+    only `PROBABLE CALL STACK` leaves every signature frameless without saying so."""
+    r = run(CRASH, str(cpp_crash_dir))
+    assert "top 4 frames" in r.stdout, r.stdout
+    assert "KERNELBASE.dll+00C1000" in r.stdout, r.stdout
+    assert "SkyrimSE.exe+0000001" in r.stdout, r.stdout
+
+
+def test_crash_drops_stack_scan_frames_and_keeps_probable_ones(cpp_crash_dir):
+    """An [S] frame is a stack scan, not a call. It is not solid enough to key
+    a signature on, and printing it as one invites a wrong conclusion."""
+    r = run(CRASH, str(cpp_crash_dir))
+    assert "SkyrimSE.exe+0000001" in r.stdout, r.stdout   # the [P] frame is kept
+    assert "ScannedOnly.dll" not in r.stdout, r.stdout    # the [S] one is not
