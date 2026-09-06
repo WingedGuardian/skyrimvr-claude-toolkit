@@ -85,5 +85,18 @@ def survey(path):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print(json.dumps({"ok": False, "error": "usage: cosave-info.py <cosave.skse>"})); sys.exit(0)
-    print(json.dumps(survey(sys.argv[1]), indent=2))
+        print(json.dumps({"ok": False, "error": "usage: cosave-info.py <cosave.skse>"})); sys.exit(2)
+    _r = survey(sys.argv[1])
+    print(json.dumps(_r, indent=2))
+    # Three outcomes, not two. Every path used to fall off the end at exit 0, so a
+    # caller gating on $? alone saw "success" for a file that is not a cosave at all.
+    #   0 = parsed, coverage high enough to trust
+    #   1 = parsed, but the flat walk desynced badly -- totals are indicative only
+    #   2 = not a cosave / usage error
+    if not _r.get("ok"):
+        sys.exit(2)
+    if _r.get("resyncs", 0) and _r.get("coveragePct", 100) < 90:
+        print(json.dumps({"warning": "low coverage with resyncs -- the chunk inventory "
+                          "above is a partial view, not a complete one"}), file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)

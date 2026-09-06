@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import subprocess
 
-from conftest import REPO
+from conftest import BASH, REPO
 
 PROMPT_START = "I just installed the Skyrim Claude Code Modding Toolkit"
 
@@ -83,3 +83,18 @@ def test_npm_test_actually_runs_tests():
         f"these files ran but registered no tests, so they count as passes "
         f"while asserting nothing: {sorted(set(orphans))}"
     )
+
+
+def test_help_banners_do_not_leak_source_lines():
+    """`--help` here prints a fixed LINE RANGE of the script's own comment header.
+    That silently rots: add four lines of documentation and the banner starts
+    printing `set -uo pipefail` and variable assignments at the reader. Measured
+    2026-09-06 -- it was doing exactly that, and nothing noticed, because a banner
+    that prints too much still looks like a banner."""
+    script = REPO / "tools" / "esp-verify-wrapper.sh"
+    r = subprocess.run([BASH, str(script), "--help"],
+                       capture_output=True, text=True)
+    leaked = [l for l in r.stdout.splitlines()
+              if l.startswith(("set -", "SPRIGGIT=", "SNAPDIR=", "GAME_RELEASE=",
+                               "PKG=", "PKGVER=", "mkdir "))]
+    assert not leaked, f"--help leaked source lines: {leaked}"

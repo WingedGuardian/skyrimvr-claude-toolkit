@@ -55,6 +55,12 @@ FRAME_RE = re.compile(
 # Measured on the dev install: 8 `.txt` (June 2025) beside 20 `.log` (2026).
 # `CrashLogger.log` is the plugin's OWN log and is excluded by the `crash-` prefix.
 CRASH_NAME_RE = re.compile(r"^crash-.+\.(txt|log)$", re.I)
+# Near-miss detector. Keys on the `crash-` PREFIX, not the word "crash" anywhere
+# in the name: the looser form fires on ordinary mod logs like
+# LeveledListCrashPrevention.log and CrashLogger.log, and a guard that trips on
+# healthy input gets ignored. Scoped to the shape that actually failed -- a real
+# dump whose EXTENSION drifted out of the pattern above.
+CRASH_PREFIX_RE = re.compile(r"^crash[-_]", re.I)
 
 VERSION_RE = re.compile(r"^(Skyrim ?VR|Skyrim Special Edition)\s+v?(?P<ver>[\d.]+)", re.I)
 
@@ -177,6 +183,22 @@ def main() -> int:
         print(f"No crash-*.txt or crash-*.log found in {target}", file=sys.stderr)
         return 2
 
+    # THE INPUT SET, checked against the actual population.
+    #
+    # The other two guards ask whether the parser understood what it read. This one
+    # asks whether it read everything it should have -- a different failure, and the
+    # one that produced "8 log(s) [OK]" while 20 newer dumps sat unexamined in the
+    # same folder, because only one extension matched. An accounting check cannot see
+    # it: a denominator can only account for what it was handed.
+    near_misses = []
+    if target.is_dir():
+        population = [q for q in target.iterdir() if q.is_file()]
+        matched = {q.name for q in files}
+        near_misses = [q.name for q in population
+                       if q.name not in matched and CRASH_PREFIX_RE.match(q.name)]
+    else:
+        population = files
+
     parsed, unreadable, no_exception = [], [], []
     for f in files:
         try:
@@ -228,6 +250,14 @@ def main() -> int:
                       or (unparsed >= 2 and unparsed_pct > 25.0)
                       or frames_broken)
 
+    if target.is_dir():
+        print(f"files in folder : {len(population)}")
+        print(f"  matched       : {len(files)}   (crash-*.txt / crash-*.log)")
+        print(f"  near misses   : {len(near_misses)}"
+              + ("   <-- LOOK: named like a dump, not matched by the pattern"
+                 if near_misses else ""))
+        for nm in near_misses:
+            print(f"    !! {nm}")
     print(f"logs found      : {len(files)}")
     print(f"  parsed        : {len(parsed)}")
     print(f"  no exception  : {len(no_exception)}")
@@ -306,7 +336,7 @@ def main() -> int:
     print(f"\n  known/accepted : {len(parsed) - unknown}")
     print(f"  UNKNOWN        : {unknown}   <-- the ones worth looking at")
 
-    all_ok = ok and sig_ok and not parse_degraded
+    all_ok = ok and sig_ok and not parse_degraded and not near_misses
     unparsed_clause = unparsed >= 2 and unparsed_pct > 25.0
     if parse_degraded and frames_broken and not unparsed_clause:
         print(f"\nRESULT: PARSER DEGRADED -- all {len(parsed)} parsed dump(s) yielded "
@@ -318,6 +348,13 @@ def main() -> int:
               f"({unparsed_pct:.0f}%) could not be parsed. The signatures above cover only "
               f"the {len(parsed)} that could be. This usually means CrashLogger's format "
               f"changed; compare a failing dump against EXC_RE and FRAME_RE.")
+    elif near_misses:
+        # Distinct from ACCOUNTING MISMATCH: the arithmetic is fine, the input set is
+        # not. Calling it "accounting" sends the reader to the wrong place.
+        print(f"\nRESULT: INPUT SET INCOMPLETE -- {len(near_misses)} file(s) look like "
+              f"crash dumps but did not match the pattern. Widen CRASH_NAME_RE (or "
+              f"narrow CRASH_PREFIX_RE if these are not dumps); do not trust the totals "
+              f"above until then.")
     else:
         print("\nRESULT: OK" if all_ok else "\nRESULT: ACCOUNTING MISMATCH")
     return 0 if all_ok else 1

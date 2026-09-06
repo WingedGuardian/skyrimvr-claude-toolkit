@@ -187,7 +187,7 @@ case "${1:-}" in
   verify)   shift; cmd_verify   "$@" ;;
   guard)    shift; cmd_guard    "$@" ;;
   ""|-h|--help)
-    sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
     ;;
   *) die "unknown subcommand '${1}' — use snapshot | verify | guard" ;;
 esac

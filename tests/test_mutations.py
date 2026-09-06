@@ -277,6 +277,57 @@ MUTATIONS = [
         id="crash-requires-module-attribution",
     ),
 
+    pytest.param(
+        # Stop noticing dumps the pattern missed. This is the "8 log(s) [OK]" failure:
+        # a confident, internally consistent total built from whichever half of the
+        # folder happened to match.
+        "tools/crash-triage.py",
+        "    all_ok = ok and sig_ok and not parse_degraded and not near_misses",
+        "    all_ok = ok and sig_ok and not parse_degraded",
+        "tests/test_triage.py::test_crash_flags_a_dump_the_pattern_did_not_match",
+        id="crash-near-misses-not-gated",
+    ),
+
+    pytest.param(
+        # Widen the near-miss detector back to "crash" anywhere in the name, which
+        # fires on ordinary mod logs that sit beside real dumps on every install.
+        "tools/crash-triage.py",
+        'CRASH_PREFIX_RE = re.compile(r"^crash[-_]", re.I)',
+        'CRASH_PREFIX_RE = re.compile(r"crash", re.I)',
+        "tests/test_triage.py::test_crash_does_not_flag_ordinary_mod_logs_as_near_misses",
+        id="crash-near-miss-detector-too-broad",
+    ),
+
+    pytest.param(
+        # Stop reporting how old the auto-selected log is. A months-old log then
+        # reads exactly like the current session -- an answer about a world that has
+        # moved on, presented as an answer.
+        "tools/papyrus-triage.py",
+        "    STALE_DAYS = 7",
+        "    STALE_DAYS = 99999",
+        "tests/test_triage.py::test_papyrus_reports_the_age_of_an_auto_selected_log",
+        id="papyrus-staleness-never-fires",
+    ),
+
+    pytest.param(
+        # Go back to exiting 0 for a file that is not a cosave at all.
+        "tools/cosave-info.py",
+        "        sys.exit(2)",
+        "        sys.exit(0)",
+        "tests/test_cosave.py::test_cosave_refuses_a_file_that_is_not_a_cosave",
+        id="cosave-non-cosave-exits-zero",
+    ),
+
+    pytest.param(
+        # Widen the --help line range back over the code. A banner that prints too
+        # much still looks like a banner, which is why this rotted unnoticed.
+        "tools/esp-verify-wrapper.sh",
+        "    sed -n '2,40p' \"$0\"",
+        "    sed -n '2,44p' \"$0\"",
+        "tests/test_repo_invariants.py::test_help_banners_do_not_leak_source_lines",
+        id="help-banner-leaks-source",
+    ),
+
     # --- skyrim_paths -------------------------------------------------------
     pytest.param(
         "tools/skyrim_paths.py",

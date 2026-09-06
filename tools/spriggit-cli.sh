@@ -56,4 +56,11 @@ if [ -n "$REAL_OUT" ] && [ -e "$NEW_OUT" ]; then
     cp "$NEW_OUT" "$REAL_OUT"
   fi
   echo "[spriggit-cli] result -> $REAL_OUT" >&2
+elif [ -n "$REAL_OUT" ]; then
+  # spriggit exited 0 but wrote nothing to the workspace. Without this branch the
+  # unmatched `if` returns 0, so a silent no-op was reported as success -- the caller
+  # then copies back nothing and believes the operation completed.
+  echo "[spriggit-cli] ERROR: spriggit exited 0 but produced no output at $NEW_OUT" >&2
+  echo "[spriggit-cli] Nothing was copied to $REAL_OUT. Treating this as a failure." >&2
+  exit 1
 fi

@@ -177,6 +177,7 @@ def main() -> int:
     ap.add_argument("--all", action="store_true", help="show every row")
     args = ap.parse_args()
 
+    auto_selected = not args.logfile
     if args.logfile:
         path = Path(args.logfile)
     else:
@@ -192,6 +193,12 @@ def main() -> int:
         print(f"Not a file: {path}", file=sys.stderr)
         return 2
 
+    STALE_DAYS = 7
+    age_days = None
+    if auto_selected:
+        import time
+        age_days = (time.time() - path.stat().st_mtime) / 86400.0
+
     entries, total_lines, undated = parse(path)
 
     # --- denominator FIRST, before any finding -------------------------------
@@ -202,6 +209,11 @@ def main() -> int:
     print(f"timestamped entries  : {len(entries)}")
     print(f"continuation lines   : {undated}   (stack traces, attached to the entry above)")
     print()
+
+    if age_days is not None:
+        marker = "   <-- STALE: older than %d days" % STALE_DAYS if age_days > STALE_DAYS else ""
+        print("log age        : %.1f days%s" % (age_days, marker))
+        print()
 
     by_sev = Counter(sev for sev, _, _ in entries)
     unexpected = {s: n for s, n in by_sev.items() if s not in SEVERITIES}
@@ -217,8 +229,15 @@ def main() -> int:
         print(f"  {sev:<9}: {n}   <-- severity outside the expected set")
     print(f"  {'-' * 9}  {'-' * 6}")
     sev_ok = printed_total == len(entries)
+    # NOTE: sev_ok cannot fail by construction. SEVERITY_RE only ever yields
+    # error/warning, and everything else defaults to info, so `unexpected` is always
+    # empty and the rows always sum to the entry count. Kept as a cheap internal
+    # assertion and labelled as such -- the REAL guards here are the bucket()
+    # accounting below (which can genuinely go red) and the staleness check above.
     print(f"  {'TOTAL':<9}: {printed_total}   "
           f"[{'OK' if sev_ok else 'MISMATCH'} vs {len(entries)} entries]")
+    print("             (internal only: SEVERITY_RE yields error/warning and everything")
+    print("              else defaults to info, so these rows always sum. Cannot go red.)")
     if not sev_ok:
         print("  !! the printed severity rows do not sum to the entry count")
     print()

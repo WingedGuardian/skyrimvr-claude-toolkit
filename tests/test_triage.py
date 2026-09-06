@@ -445,3 +445,87 @@ def test_crash_still_reads_the_module_when_there_is_one(crash_dir):
     r = run(CRASH, str(crash_dir))
     assert "SkyrimVR.exe+0B84F05" in r.stdout, r.stdout
     assert "(no module)" not in r.stdout, r.stdout
+
+
+def test_crash_flags_a_dump_the_pattern_did_not_match(crash_dir):
+    """The input-set failure, distinct from a parsing failure: a real dump whose
+    EXTENSION drifted out of CRASH_NAME_RE is silently outside the denominator. This
+    is what produced "8 log(s) [OK]" while 20 newer dumps sat unread in the same
+    folder."""
+    (crash_dir / "crash-2027-01-01-00-00-00.dmp").write_text(
+        crash_log("0B84F05", "hkpContactSolver"), encoding="utf-8")
+    r = run(CRASH, str(crash_dir))
+    assert "near misses   : 1" in r.stdout, r.stdout
+    assert "crash-2027-01-01-00-00-00.dmp" in r.stdout, r.stdout
+    assert "RESULT: INPUT SET INCOMPLETE" in r.stdout, r.stdout
+    assert r.returncode == 1
+
+
+def test_crash_does_not_flag_ordinary_mod_logs_as_near_misses(crash_dir):
+    """Priced against real input. The first version of this guard keyed on the word
+    "crash" anywhere in the filename and fired on LeveledListCrashPrevention.log and
+    CrashLogger.log -- ordinary mod logs that sit in the same folder on every
+    install. A guard that trips on healthy input gets ignored."""
+    (crash_dir / "LeveledListCrashPrevention.log").write_text("mod log", encoding="utf-8")
+    (crash_dir / "CrashLogger.log").write_text("the plugin's own log", encoding="utf-8")
+    r = run(CRASH, str(crash_dir))
+    assert "near misses   : 0" in r.stdout, r.stdout
+    assert "RESULT: INPUT SET INCOMPLETE" not in r.stdout, r.stdout
+    assert r.returncode == 0
+
+
+# --------------------------------------------------------------------------
+# papyrus-triage -- staleness
+#
+# Three outcomes, not two: an answer, a non-answer, and an answer about a world
+# that has moved on. Triaging a months-old log as if it were the current session
+# is the third, and it reads exactly like the first.
+# --------------------------------------------------------------------------
+
+def _papyrus_log() -> str:
+    return "\n".join([
+        "[01/01/2026 - 12:00:00AM] Papyrus log opened",
+        "[01/01/2026 - 12:00:01AM] error: Cannot call Foo() on a None object",
+        "[01/01/2026 - 12:00:02AM] warning: Property Bar has no value",
+    ])
+
+
+def test_papyrus_reports_the_age_of_an_auto_selected_log(tmp_path, monkeypatch):
+    """The log's age has to be on screen. It is the difference between a report on
+    this session and a confident report on one from months ago."""
+    import os, time
+    d = tmp_path / "Logs" / "Script"
+    d.mkdir(parents=True)
+    log = d / "Papyrus.0.log"
+    log.write_text(_papyrus_log(), encoding="utf-8")
+    old = time.time() - 60 * 86400
+    os.utime(log, (old, old))
+    monkeypatch.setenv("PAPYRUS_LOG_DIR", str(d))
+    r = run(PAPYRUS)
+    assert "log age" in r.stdout, r.stdout
+    assert "STALE" in r.stdout, r.stdout
+
+
+def test_papyrus_does_not_call_a_fresh_log_stale(tmp_path, monkeypatch):
+    """The control. A guard that calls every log stale says nothing."""
+    d = tmp_path / "Logs" / "Script"
+    d.mkdir(parents=True)
+    (d / "Papyrus.0.log").write_text(_papyrus_log(), encoding="utf-8")
+    monkeypatch.setenv("PAPYRUS_LOG_DIR", str(d))
+    r = run(PAPYRUS)
+    assert "log age" in r.stdout, r.stdout
+    assert "STALE" not in r.stdout, r.stdout
+
+
+def test_papyrus_does_not_second_guess_an_explicitly_named_log(tmp_path, monkeypatch):
+    """Staleness applies only to the log the tool CHOSE. Naming a file is a
+    deliberate act and must not be argued with."""
+    import os, time
+    d = tmp_path / "Logs" / "Script"
+    d.mkdir(parents=True)
+    log = d / "Papyrus.0.log"
+    log.write_text(_papyrus_log(), encoding="utf-8")
+    old = time.time() - 60 * 86400
+    os.utime(log, (old, old))
+    r = run(PAPYRUS, str(log))
+    assert "log age" not in r.stdout, r.stdout
