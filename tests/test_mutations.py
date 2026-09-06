@@ -324,8 +324,8 @@ MUTATIONS = [
         # Drop the near-miss clause from the degraded verdict. Both problems are
         # present, only one is named, and they are fixed in different places.
         "tools/crash-triage.py",
-        'f"changed; compare a failing dump against EXC_RE and FRAME_RE.{also_near}")',
-        'f"changed; compare a failing dump against EXC_RE and FRAME_RE.")',
+        'f"{also_frames}{also_near}")',
+        'f"{also_frames}")',
         "tests/test_triage.py::test_crash_verdict_names_the_short_input_set_as_well_as_the_parser",
         id="crash-degraded-verdict-hides-near-misses",
     ),
@@ -338,6 +338,47 @@ MUTATIONS = [
         "        if False:",
         "tests/test_triage.py::test_crash_says_none_matched_rather_than_none_found",
         id="crash-none-found-hides-near-misses",
+    ),
+
+    pytest.param(
+        # Stop printing the frames denominator. `frameless` then has no output at all
+        # under any condition, and a lone dump with a changed stack header reads as an
+        # ordinary UNKNOWN crash with RESULT: OK.
+        "tools/crash-triage.py",
+        '    print(f"  with frames   : {len(complete) - frameless}/{len(complete)} complete dump(s)"',
+        '    print(f"" if True else f"  with frames   : {len(complete) - frameless}"',
+        "tests/test_triage.py::test_crash_prints_the_frames_denominator_even_when_the_guard_stays_quiet",
+        id="crash-frames-denominator-not-printed",
+    ),
+
+    pytest.param(
+        # Go back to naming the count clause unconditionally. At 4 unparsed of 20 the
+        # message then blames a floor that is satisfied, while the ratio is the cause.
+        "tools/crash-triage.py",
+        '        why = ("too few to call a format change" if unparsed < 2',
+        '        why = ("too few to call a format change" if True',
+        "tests/test_triage.py::test_crash_unparsed_note_names_the_clause_that_actually_held",
+        id="crash-unparsed-note-blames-the-wrong-clause",
+    ),
+
+    pytest.param(
+        # Drop the frames clause from the unparsed verdict. Both formats moved, only
+        # one is named, and the reader trusts signatures that carry no call stacks.
+        "tools/crash-triage.py",
+        'f"{also_frames}{also_near}")',
+        'f"{also_near}")',
+        "tests/test_triage.py::test_crash_verdict_names_a_simultaneous_frames_break",
+        id="crash-degraded-verdict-hides-frames-break",
+    ),
+
+    pytest.param(
+        # Remove the listing cap. A folder with a broken extension pattern prints one
+        # line per file; the dev install holds 341.
+        "tools/crash-triage.py",
+        "LIST_CAP = 10",
+        "LIST_CAP = 10_000",
+        "tests/test_triage.py::test_crash_caps_a_runaway_near_miss_listing",
+        id="crash-near-miss-listing-uncapped",
     ),
 
     pytest.param(
@@ -373,10 +414,13 @@ MUTATIONS = [
     ),
 
     pytest.param(
-        # Go back to exiting 0 for a file that is not a cosave at all.
+        # Remove the not-ok refusal entirely, so a file that is not a cosave stops
+        # being reported as one. (Anchored on the `if`, not on `sys.exit(2)` --
+        # that line appears twice and str.replace would revert the survey()
+        # try/except as well, crediting one mutation with two reverted fixes.)
         "tools/cosave-info.py",
-        "        sys.exit(2)",
-        "        sys.exit(0)",
+        '    if not _r.get("ok"):',
+        "    if False:",
         "tests/test_cosave.py::test_cosave_refuses_a_file_that_is_not_a_cosave",
         id="cosave-non-cosave-exits-zero",
     ),
@@ -417,9 +461,32 @@ def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:
     # 3.13+, and line endings must be preserved or the mutation rewrites the
     # whole file and masks what it changed.
     text = io.open(target, encoding="utf-8", newline="").read()
-    assert find in text, (
-        f"mutation anchor not found in {relpath} -- the code moved and this "
-        f"gate is now testing nothing:\n  {find!r}"
+    # EXACTLY ONCE, not merely present.
+    #
+    # `str.replace` rewrites EVERY occurrence, so an anchor matching two sites
+    # silently mutates both -- reverting two independent fixes while the mutation
+    # claims, and the kill is attributed to, only one. It is the other half of the
+    # pair from the exit-code check below: that one catches an anchor whose partner
+    # TEST went stale, this one catches an anchor that grew to match TOO MUCH.
+    #
+    # MEASURED when this went in: `        sys.exit(2)` in tools/cosave-info.py had
+    # been unique when its mutation was written and became ambiguous two commits
+    # later, in the very fix commit a review round produced. Nothing was falsely
+    # green -- the kill still came through the intended site -- but the gate could
+    # not have told us, which is the whole complaint.
+    n = text.count(find)
+    assert n == 1, (
+        f"mutation anchor must appear EXACTLY ONCE in {relpath}; found {n}.\n"
+        + ("The code moved and this gate is now testing nothing.\n"
+           + ("HINT: this anchor spans lines, and the target file uses CRLF. "
+              "_mutate preserves line endings deliberately, so a '\\n' in the "
+              "anchor cannot match. Use a single unique line instead.\n"
+              if ("\n" in find and "\r\n" in text) else "")
+           if n == 0 else
+           "str.replace would mutate every occurrence, so this reverts more than "
+           "the one fix it names. Narrow the anchor (include a neighbouring line) "
+           "until it is unique.\n")
+        + f"  {find!r}"
     )
     io.open(target, "w", encoding="utf-8", newline="").write(text.replace(find, replace))
     return work

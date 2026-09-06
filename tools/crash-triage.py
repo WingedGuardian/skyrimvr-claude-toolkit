@@ -61,6 +61,9 @@ CRASH_NAME_RE = re.compile(r"^crash-.+\.(txt|log)$", re.I)
 # healthy input gets ignored. Scoped to the shape that actually failed -- a real
 # dump whose EXTENSION drifted out of the pattern above.
 CRASH_PREFIX_RE = re.compile(r"^crash[-_]", re.I)
+# A folder whose extension pattern broke would otherwise print one line per file,
+# and the dev install holds 341. The COUNT is the finding; the names are a sample.
+LIST_CAP = 10
 
 VERSION_RE = re.compile(r"^(Skyrim ?VR|Skyrim Special Edition)\s+v?(?P<ver>[\d.]+)", re.I)
 
@@ -190,11 +193,13 @@ def main() -> int:
                   if target.is_dir() else [])
         print(f"No crash-*.txt or crash-*.log found in {target}", file=sys.stderr)
         if missed:
-            print(f"  but {len(missed)} file(s) there carry the crash- prefix and did "
+            print(f"  but {len(missed)} file(s) there carry the crash-/crash_ prefix and did "
                   f"NOT match the extension pattern -- widen CRASH_NAME_RE if these "
                   f"are dumps:", file=sys.stderr)
-            for nm in missed:
+            for nm in missed[:LIST_CAP]:
                 print(f"    !! {nm}", file=sys.stderr)
+            if len(missed) > LIST_CAP:
+                print(f"    ... and {len(missed) - LIST_CAP} more", file=sys.stderr)
         return 2
 
     # THE INPUT SET, checked against the actual population.
@@ -280,8 +285,10 @@ def main() -> int:
         print(f"  near misses   : {len(near_misses)}"
               + ("   <-- LOOK: named like a dump, not matched by the pattern"
                  if near_misses else ""))
-        for nm in near_misses:
+        for nm in near_misses[:LIST_CAP]:
             print(f"    !! {nm}")
+        if len(near_misses) > LIST_CAP:
+            print(f"    ... and {len(near_misses) - LIST_CAP} more")
     print(f"logs found      : {len(files)}")
     print(f"  parsed        : {len(parsed)}")
     print(f"  no exception  : {len(no_exception)}")
@@ -301,12 +308,46 @@ def main() -> int:
     if total_break or (unparsed >= 2 and unparsed_pct > 25.0):
         unparsed_note = "   <-- the parser is not understanding these dumps"
     elif unparsed:
-        unparsed_note = ("   <-- NOT read; too few to call a format change, so the "
+        # Name the clause that ACTUALLY held it back. The gate is a conjunction
+        # (>= 2 AND > 25%), and the first version of this message said "too few"
+        # unconditionally -- so at 4 unparsed of 20 it told the reader the count
+        # was the reason when the count clause was satisfied and the RATIO was
+        # doing the suppressing. A reader trusting that sentence goes and lowers a
+        # floor that is not the cause.
+        why = ("too few to call a format change" if unparsed < 2
+               else f"only {unparsed_pct:.0f}% of the set, under the 25% mark")
+        unparsed_note = (f"   <-- NOT read; {why}, so the "
                          "signatures below cover only the parsed ones")
     else:
         unparsed_note = ""
     print(f"  unparsed      : {unparsed}/{len(files)} ({unparsed_pct:.0f}%)"
           + unparsed_note)
+    # THE FRAMES DENOMINATOR.
+    #
+    # `frameless` is the sibling of `unparsed` and was never printed at all, under
+    # any condition -- so a single complete dump whose stack header this parser no
+    # longer knows was reported as an UNKNOWN crash "worth looking at", with no
+    # frames, no explanation, RESULT: OK and exit 0. The word "frame" did not
+    # appear anywhere in that output.
+    #
+    # The >= 2 floor above it is correct and stays -- one frameless dump is not
+    # evidence of a format change, and a real one on this install
+    # (crash-2026-06-28-14-50-36) is simply a jump with no return chain to walk.
+    # But the floor decides the VERDICT; it was never a licence to omit the fact.
+    # This file's own rule is that the denominator comes before any finding.
+    if frames_broken:
+        frames_note = ("   <-- NOT ONE of them did; the stack header or frame "
+                       "syntax has changed")
+    elif frameless and len(complete) < 2:
+        frames_note = ("   <-- too few complete dumps to call a format change; a "
+                       "jump with no return chain looks exactly like this")
+    elif frameless:
+        frames_note = ("   <-- the rest did, so this is not a format change; those "
+                       "dumps contribute no stack to the signatures below")
+    else:
+        frames_note = ""
+    print(f"  with frames   : {len(complete) - frameless}/{len(complete)} complete dump(s)"
+          + frames_note)
     accounted = len(parsed) + len(no_exception) + len(unreadable)
     ok = accounted == len(files)
     print(f"  {'-' * 14}")
@@ -314,14 +355,27 @@ def main() -> int:
     for name, err in unreadable:
         print(f"    !! {name}: {err}")
     print()
+    # When two problems are present the verdict must name both. The verdict line is
+    # the part people read, and a reader pointed at a parser problem has no reason
+    # to suspect the input set was ALSO short -- they are fixed in different
+    # places. Defined once here rather than repeated as a literal at each of the
+    # three degraded verdicts, so the copies cannot drift apart.
+    also_near = (f" ALSO: {len(near_misses)} file(s) carry the crash-/crash_ prefix "
+                 f"but did not match the pattern, so the input set is short too -- "
+                 f"see the near-miss list above." if near_misses else "")
+    # Same shape, same reason, for the OTHER pair. When the exception line and the
+    # stack header both move -- which is exactly what CrashLoggerSSE 1.2x did --
+    # the unparsed branch wins the if/elif and the reader is told the surviving
+    # dumps carry usable signatures. They do not.
+    also_frames = (" ALSO: every dump that DID parse yielded zero stack frames, so "
+                   "the stack header or frame syntax has moved as well -- the "
+                   "signatures above carry no call stacks." if frames_broken else "")
+
     if parse_degraded and not parsed:
         print(f"\nRESULT: PARSER DEGRADED -- none of the {len(files)} dump(s) could be "
               f"parsed, so nothing above is a report on their contents. Either the "
               f"format moved -- compare one against EXC_RE -- or these files are not "
-              f"crash dumps at all."
-              + (f" ALSO: {len(near_misses)} file(s) carry the crash- prefix but did "
-                 f"not match the pattern, so the input set is short too -- see the "
-                 f"near-miss list above." if near_misses else ""))
+              f"crash dumps at all.{also_near}")
         return 1
 
     if not parsed:
@@ -379,14 +433,6 @@ def main() -> int:
 
     all_ok = ok and sig_ok and not parse_degraded and not near_misses
     unparsed_clause = unparsed >= 2 and unparsed_pct > 25.0
-    # When BOTH conditions hold, only the degraded branch used to print, and the
-    # verdict line is the part people read. The near-miss count was in the header,
-    # so nothing was hidden -- but a reader pointed at a parser problem has no
-    # reason to suspect the input set was also short, and those are fixed in
-    # different places. Exit was 1 either way; the direction was the defect.
-    also_near = (f" ALSO: {len(near_misses)} file(s) carry the crash- prefix but did "
-                 f"not match the pattern, so the input set is short too -- see the "
-                 f"near-miss list above." if near_misses else "")
     if parse_degraded and frames_broken and not unparsed_clause:
         print(f"\nRESULT: PARSER DEGRADED -- all {len(parsed)} parsed dump(s) yielded "
               f"ZERO stack frames. The exception line still parses, so this is the "
@@ -396,7 +442,8 @@ def main() -> int:
         print(f"\nRESULT: PARSER DEGRADED -- {unparsed} of {len(files)} dumps "
               f"({unparsed_pct:.0f}%) could not be parsed. The signatures above cover only "
               f"the {len(parsed)} that could be. This usually means CrashLogger's format "
-              f"changed; compare a failing dump against EXC_RE and FRAME_RE.{also_near}")
+              f"changed; compare a failing dump against EXC_RE and FRAME_RE."
+              f"{also_frames}{also_near}")
     elif near_misses:
         # Distinct from ACCOUNTING MISMATCH: the arithmetic is fine, the input set is
         # not. Calling it "accounting" sends the reader to the wrong place.

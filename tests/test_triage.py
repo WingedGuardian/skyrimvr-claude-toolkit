@@ -611,7 +611,7 @@ def test_crash_leaves_a_clean_unparsed_line_unannotated(crash_dir):
     indistinguishable from one that works, and an arrow on "0/3 (0%)" would be a
     contradiction on one line."""
     r = run(CRASH, str(crash_dir))
-    line = [l for l in r.stdout.splitlines() if "unparsed" in l]
+    line = [l for l in r.stdout.splitlines() if l.startswith("  unparsed")]
     assert len(line) == 1, r.stdout
     assert "0/3 (0%)" in line[0], line[0]
     assert "<--" not in line[0], line[0]
@@ -666,6 +666,107 @@ def test_crash_says_none_matched_rather_than_none_found(tmp_path):
     assert r.returncode == 2, r.stdout + r.stderr
     both = r.stdout + r.stderr
     assert "crash-2026-01-01.md" in both, both
-    assert "crash- prefix" in both, both
+    assert "crash-/crash_ prefix" in both, both
     # The ordinary log must NOT be dragged in: the prefix is the whole point.
     assert "ordinary.log" not in both, both
+
+
+def test_crash_prints_the_frames_denominator_even_when_the_guard_stays_quiet(tmp_path):
+    """`frameless` is the sibling of `unparsed` and was printed under NO condition at
+    all. So a single complete dump whose stack header this parser no longer knows was
+    reported as an UNKNOWN crash "worth looking at", with no frames, no explanation,
+    RESULT: OK and exit 0 -- the word "frame" appearing nowhere in the output. The
+    >= 2 floor decides the VERDICT; it was never a licence to omit the fact."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    (d / "crash-a.log").write_text(crash_log_stack_header_moved("7654321"), encoding="utf-8")
+    r = run(CRASH, str(d))
+    assert "with frames   : 0/1" in r.stdout, r.stdout
+    assert "too few complete dumps" in r.stdout, r.stdout
+    # The floor is untouched: this is an annotation, not an escalation.
+    assert "RESULT: OK" in r.stdout, r.stdout
+    assert r.returncode == 0
+
+
+def test_crash_frames_denominator_is_unannotated_when_every_dump_has_frames(crash_dir):
+    """The control. An annotation that always fires cannot be told apart from one that
+    works, and "3/3 complete dumps <-- the rest did" would be nonsense."""
+    r = run(CRASH, str(crash_dir))
+    line = [l for l in r.stdout.splitlines() if l.startswith("  with frames")]
+    assert len(line) == 1, r.stdout
+    assert "3/3" in line[0], line[0]
+    assert "<--" not in line[0], line[0]
+
+
+def test_crash_unparsed_note_names_the_clause_that_actually_held(tmp_path):
+    """The gate is a conjunction -- >= 2 AND > 25% -- and the first version of this
+    message said "too few" unconditionally. At 4 unparsed of 20 the count clause is
+    SATISFIED and the ratio is what keeps the guard quiet, so the sentence named the
+    wrong cause and would send a reader to lower a floor that is not responsible."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    for i in range(16):
+        (d / f"crash-ok-{i:02d}.log").write_text(crash_log(f"{i:07d}", "Foo"), encoding="utf-8")
+    for i in range(4):
+        (d / f"crash-bad-{i}.log").write_text(crash_log_unreadable_shape(), encoding="utf-8")
+    r = run(CRASH, str(d))
+    line = [l for l in r.stdout.splitlines() if l.startswith("  unparsed")][0]
+    assert "4/20 (20%)" in line, line
+    assert "too few" not in line, line
+    assert "under the 25% mark" in line, line
+    assert r.returncode == 0
+
+
+def test_crash_unparsed_note_still_says_too_few_when_that_is_the_reason(tmp_path):
+    """The control for the wording above: at 1 of 2 the count clause IS the reason."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    (d / "crash-a.log").write_text(crash_log("0B84F05", "hkpContactSolver"), encoding="utf-8")
+    (d / "crash-b.log").write_text(crash_log_unreadable_shape(), encoding="utf-8")
+    r = run(CRASH, str(d))
+    line = [l for l in r.stdout.splitlines() if l.startswith("  unparsed")][0]
+    assert "too few" in line, line
+
+
+def test_crash_verdict_names_a_simultaneous_frames_break(tmp_path):
+    """CrashLoggerSSE 1.2x changed the exception line AND the stack header at once, so
+    both guards fire. The unparsed branch wins the if/elif and told the reader the
+    surviving dumps carried usable signatures -- they carry no call stacks at all."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    for i in range(4):
+        (d / f"crash-junk-{i}.log").write_text(crash_log_unreadable_shape(), encoding="utf-8")
+    for i, off in enumerate(("1111111", "2222222")):
+        (d / f"crash-moved-{i}.log").write_text(crash_log_stack_header_moved(off), encoding="utf-8")
+    r = run(CRASH, str(d))
+    verdict = r.stdout.split("RESULT:")[-1]
+    assert "PARSER DEGRADED" in verdict, r.stdout
+    assert "zero stack frames" in verdict.lower(), verdict
+    assert r.returncode == 1
+
+
+def test_crash_verdict_makes_no_frames_claim_when_frames_are_fine(tmp_path):
+    """The control: dumps that parse and DO yield frames must not attract the clause."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    for i in range(4):
+        (d / f"crash-junk-{i}.log").write_text(crash_log_unreadable_shape(), encoding="utf-8")
+    for i, off in enumerate(("3333333", "4444444")):
+        (d / f"crash-ok-{i}.log").write_text(crash_log(off, "Foo"), encoding="utf-8")
+    r = run(CRASH, str(d))
+    verdict = r.stdout.split("RESULT:")[-1]
+    assert "PARSER DEGRADED" in verdict, r.stdout
+    assert "zero stack frames" not in verdict.lower(), verdict
+
+
+def test_crash_caps_a_runaway_near_miss_listing(tmp_path):
+    """A folder whose extension pattern broke would print one line per file, and the
+    dev install holds 341. The COUNT is the finding; the names are a sample."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    for i in range(25):
+        (d / f"crash-{i:03d}.md").write_text("x\n", encoding="utf-8")
+    r = run(CRASH, str(d))
+    both = r.stdout + r.stderr
+    assert both.count("    !! ") == 10, both
+    assert "and 15 more" in both, both
