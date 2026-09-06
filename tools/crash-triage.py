@@ -31,13 +31,19 @@ import skyrim_paths  # noqa: E402
 
 # "Unhandled exception "TYPE" at 0xADDR MODULE+OFFSET<TAB>instruction |  symbol)"
 EXC_RE = re.compile(
-    r'^Unhandled exception "(?P<type>[A-Z_]+)"'
+    r'^Unhandled exception "(?P<type>[^"]+)"'
     r'(?:\s+at\s+0x(?P<addr>[0-9A-Fa-f]+))?'
     r'\s+(?P<module>[^\s+]+)\+(?P<offset>[0-9A-Fa-f]+)'
     r'\s*(?P<instr>[^|]*)'
     r'(?:\|\s*(?P<symbol>.*?)\)?\s*)?$'
 )
-FRAME_RE = re.compile(r"^\s*\[\s*\d+\]\s+0x[0-9A-Fa-f]+\s+(?P<mod>[^\s+]+)\+(?P<off>[0-9A-Fa-f]+)")
+# CrashLoggerSSE 1.2x marks each frame [P]robable or [S]tack-scan; older builds
+# emit no marker at all. Accept both shapes.
+FRAME_RE = re.compile(
+    r"^\s*\[\s*\d+\]"
+    r"(?:\[(?P<kind>[PS])\])?"
+    r"\s+0x[0-9A-Fa-f]+\s+(?P<mod>[^\s+]+)\+(?P<off>[0-9A-Fa-f]+)"
+)
 # CrashLoggerSSE writes `.LOG`; older builds (and Crash Log Toolkit) write `.txt`.
 # Both live in the same folder, so matching only one extension does not fail --
 # it reports a confident total made of whichever half it happened to match.
@@ -46,6 +52,11 @@ FRAME_RE = re.compile(r"^\s*\[\s*\d+\]\s+0x[0-9A-Fa-f]+\s+(?P<mod>[^\s+]+)\+(?P<
 CRASH_NAME_RE = re.compile(r"^crash-.+\.(txt|log)$", re.I)
 
 VERSION_RE = re.compile(r"^(Skyrim ?VR|Skyrim Special Edition)\s+v?(?P<ver>[\d.]+)", re.I)
+
+# A C++ throw reports the THROW SITE on the exception line -- the same
+# KERNELBASE address for every C++ crash on the machine. What actually
+# distinguishes them lives in the `C++ EXCEPTION:` block, so parse it.
+CPP_FIELD_RE = re.compile(r"^\s*(?P<field>Type|Info|Throw Location)\s*:\s*(?P<value>.+?)\s*$")
 
 # Signatures the knowledgebase has already ruled on. The status text is quoted
 # from it: a crash marked ACCEPTED must not quietly read as a new finding.
@@ -80,16 +91,33 @@ def parse(path: Path):
             game_ver = vm.group("ver")
             break
 
+    # CrashLoggerSSE 1.2x heads the stack "CALL STACK ([P]robable / [S]tack scan):";
+    # older builds wrote "PROBABLE CALL STACK". Match both. When frames are marked,
+    # keep only [P] -- an [S] frame is a stack scan and is not solid enough to key on.
     frames = []
     try:
-        start = next(i for i, l in enumerate(lines) if l.startswith("PROBABLE CALL STACK"))
+        start = next(i for i, l in enumerate(lines)
+                     if l.startswith("PROBABLE CALL STACK") or l.startswith("CALL STACK"))
         for line in lines[start + 1:]:
             fm = FRAME_RE.match(line)
             if not fm:
                 break
+            if fm.group("kind") == "S":
+                continue
             frames.append(f"{fm.group('mod')}+{fm.group('off')}")
     except StopIteration:
         pass
+
+    cpp = {}
+    for i, line in enumerate(lines[:80]):
+        if line.strip().startswith("C++ EXCEPTION"):
+            for sub in lines[i + 1:i + 8]:
+                fm = CPP_FIELD_RE.match(sub)
+                if fm:
+                    cpp[fm.group("field")] = fm.group("value")
+                elif sub.strip():
+                    break
+            break
 
     return {
         "file": path.name,
@@ -100,6 +128,9 @@ def parse(path: Path):
         "symbol": (exc.group("symbol") or "").strip().rstrip(")"),
         "game": game_ver,
         "frames": frames,
+        "cpp_type": cpp.get("Type", ""),
+        "cpp_info": cpp.get("Info", ""),
+        "cpp_throw": cpp.get("Throw Location", ""),
     }
 
 
@@ -164,9 +195,11 @@ def main() -> int:
     dates: defaultdict[str, list] = defaultdict(list)
     for r in parsed:
         key = f"{r['module']}+{r['offset']}"
+        if r.get("cpp_info"):
+            key += f"  {r['cpp_info']}"
         sigs[key] += 1
         detail.setdefault(key, r)
-        dates[key].append(r["file"].replace("crash-", "").replace(".txt", ""))
+        dates[key].append(r["file"].replace("crash-", "").replace(".txt", "").replace(".log", ""))
 
     print(f"SIGNATURES  ({len(parsed)} crashes, {len(sigs)} distinct)")
     rows = sigs.most_common() if args.all else sigs.most_common(15)
@@ -179,6 +212,10 @@ def main() -> int:
                "KNOWN": "[known]"}.get(status, "[** UNKNOWN **]")
         print(f"\n  {count} x  {key}   {tag}")
         print(f"        {r['type']}  {r['instr']}")
+        if r.get("cpp_type") or r.get("cpp_info"):
+            print(f"        C++    : {r.get('cpp_type', '')} {r.get('cpp_info', '')}".rstrip())
+            if r.get("cpp_throw"):
+                print(f"        throw  : {r['cpp_throw']}")
         if r["symbol"]:
             print(f"        symbol : {r['symbol']}")
         if note:
