@@ -344,3 +344,73 @@ def test_crash_does_not_flag_one_legitimate_unparsed_dump(tmp_path):
     assert "unparsed      : 1/10 (10%)" in r.stdout, r.stdout
     assert "RESULT: PARSER DEGRADED" not in r.stdout, r.stdout
     assert r.returncode == 0
+
+
+# --------------------------------------------------------------------------
+# crash-triage -- frames coverage
+#
+# The unparsed count only sees dumps whose EXCEPTION LINE failed. A changed
+# stack header leaves every dump nominally "parsed" with zero frames and no
+# complaint, which is two of the three CrashLoggerSSE 1.2x changes.
+# --------------------------------------------------------------------------
+
+def crash_log_no_stack(offset: str) -> str:
+    """A TRUNCATED dump: CrashLoggerSSE stopped writing before the stack.
+
+    Measured on a real install: 5 of 28 dumps look like this -- 46-74 lines, no
+    CALL STACK and no REGISTERS. They have no stack section to read, so they are
+    not evidence about frame syntax and must not trip the frames guard.
+    """
+    return "\n".join([
+        "Skyrim VR v1.4.15",
+        "CrashLoggerSSE v1-24-0-0",
+        "",
+        f'Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x1 SkyrimVR.exe+{offset}\tmov rax, rcx',
+        "",
+    ])
+
+
+def crash_log_stack_header_moved(offset: str) -> str:
+    """A COMPLETE dump whose stack header this parser does not recognise."""
+    return "\n".join([
+        "Skyrim VR v1.4.15",
+        "CrashLoggerSSE v9-99-9-9",
+        "",
+        f'Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x1 SkyrimVR.exe+{offset}\tmov rax, rcx',
+        "",
+        "BACKTRACE (probable / scan):",
+        f"\t[ 0] 0x7FF700000001    SkyrimVR.exe+{offset}\tmov rax, rcx",
+        "",
+        "REGISTERS:",
+        "\tRAX 0x0",
+    ])
+
+
+def test_crash_flags_a_stack_header_change_that_leaves_dumps_nominally_parsed(tmp_path):
+    """The blind spot the unparsed count cannot see: every dump parses, every dump
+    yields zero frames. One dump lacking frames is ordinary; all of them lacking
+    them is the header having moved."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    for n, off in enumerate(("0B84F05", "1234567", "0AAAAAA"), start=1):
+        (d / f"crash-2026-08-26-{n:02d}.log").write_text(
+            crash_log_stack_header_moved(off), encoding="utf-8")
+    r = run(CRASH, str(d))
+    assert "unparsed      : 0/3 (0%)" in r.stdout, r.stdout
+    assert "ZERO stack frames" in r.stdout, r.stdout
+    assert r.returncode == 1
+
+
+def test_crash_does_not_flag_truncated_dumps_as_a_format_change(tmp_path):
+    """The false positive this guard shipped with: 5 of 28 real dumps are truncated
+    writes with no stack section at all. Triaged alone they reported that the format
+    had changed. A guard that fires on healthy input gets ignored."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    for n, off in enumerate(("0B84F05", "1234567"), start=1):
+        (d / f"crash-2026-08-26-{n:02d}.log").write_text(
+            crash_log_no_stack(off), encoding="utf-8")
+    r = run(CRASH, str(d))
+    assert "ZERO stack frames" not in r.stdout, r.stdout
+    assert "RESULT: OK" in r.stdout, r.stdout
+    assert r.returncode == 0

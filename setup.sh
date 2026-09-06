@@ -132,7 +132,8 @@ if which dotnet >/dev/null 2>&1; then
         echo "     Spriggit (ESP <-> YAML) targets net9.0. It will INSTALL fine and then"
         echo "     fail to start, and that also disables tools/esp-verify-wrapper.sh."
         echo "     Install:  winget install Microsoft.DotNet.SDK.9"
-        echo "     (AutoMod CLI builds fine against an older SDK; only Spriggit needs 9.)"
+        echo "     (AutoMod needs an 8.0.x SDK specifically -- it pins one via global.json"
+        echo "      with rollForward: latestFeature, which does not roll 8 -> 9.)"
     fi
 else
     echo "  .NET not found. Spriggit (ESP <-> YAML) and AutoMod CLI need it."

@@ -11,8 +11,9 @@
   header changed from `PROBABLE CALL STACK` to `CALL STACK ([P]robable / [S]tack
   scan):`, frame lines gained `[P]`/`[S]` markers, and every C++ throw collapsed
   onto its shared throw site instead of being distinguished by its `Info` string.
-  Both formats are supported; verified against 28 real Skyrim VR dumps on
-  CrashLoggerSSE v1-15-0-0 with byte-identical output.
+  Both formats are supported; verified against 28 real Skyrim VR dumps spanning
+  three CrashLogger versions (18x v1-15-0-0, 4x v1-22-0-0, 6x v1-24-0-0) with
+  byte-identical output.
 
 - **`setup.sh` told you to install the .NET SDK that cannot run Spriggit.** It
   recommended SDK 8 and then printed `Found .NET SDK: 8.0.424`, which reads as
@@ -36,7 +37,11 @@
     nothing parses at all, or when both >25% and at least 2 dumps fail.
   - **frames coverage** — a changed stack header leaves every dump "parsed" with
     zero frames and no complaint, so the unparsed count alone would have missed two
-    of the three 1.2x changes. Every parsed dump yielding zero frames is reported.
+    of the three 1.2x changes. Every *complete* dump yielding zero frames is
+    reported. Truncated dumps (no stack section written at all — 5 of 28 on the
+    dev install) are excluded, since they are not evidence about frame syntax.
+    Note this is a per-run signal: a folder mixing old and new formats still has
+    dumps with frames, so it reports OK. It catches the changeover, not a mixture.
 
 ### Changed
 

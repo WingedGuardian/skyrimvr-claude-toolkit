@@ -244,6 +244,28 @@ MUTATIONS = [
         id="crash-degraded-threshold-too-eager",
     ),
 
+    pytest.param(
+        # Stop noticing that every parsed dump yielded zero frames. This is the half
+        # of the CrashLoggerSSE 1.2x break the unparsed count cannot see: the
+        # exception line still parses, so nothing else complains.
+        "tools/crash-triage.py",
+        "    frames_broken = bool(complete) and frameless == len(complete)",
+        "    frames_broken = False",
+        "tests/test_triage.py::test_crash_flags_a_stack_header_change_that_leaves_dumps_nominally_parsed",
+        id="crash-frames-break-not-flagged",
+    ),
+
+    pytest.param(
+        # Count truncated dumps as evidence about frame syntax. They have no stack
+        # section at all, so this turns 5 of 28 real dumps into a format-break verdict
+        # -- the false positive the guard shipped with.
+        "tools/crash-triage.py",
+        "    complete = [r for r in parsed if r[\"complete\"]]",
+        "    complete = list(parsed)",
+        "tests/test_triage.py::test_crash_does_not_flag_truncated_dumps_as_a_format_change",
+        id="crash-frames-counts-truncated-dumps",
+    ),
+
     # --- skyrim_paths -------------------------------------------------------
     pytest.param(
         "tools/skyrim_paths.py",

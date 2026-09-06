@@ -132,6 +132,11 @@ def parse(path: Path):
         "symbol": (exc.group("symbol") or "").strip().rstrip(")"),
         "game": game_ver,
         "frames": frames,
+        # MEASURED: 5 of 28 real dumps here are truncated CrashLoggerSSE writes --
+        # 46-74 lines, no CALL STACK and no REGISTERS. They have no stack section
+        # to read, so counting them as "frames missing" turned healthy input into a
+        # format-break verdict. REGISTERS is the marker that the dump got that far.
+        "complete": any(l.startswith("REGISTERS") for l in lines),
         "cpp_type": cpp.get("Type", ""),
         "cpp_info": cpp.get("Info", ""),
         "cpp_throw": cpp.get("Throw Location", ""),
@@ -208,8 +213,9 @@ def main() -> int:
     # header or frame-marker syntax leaves every dump 'parsed' with zero frames
     # and no complaint. One dump legitimately lacking frames is ordinary; EVERY
     # parsed dump lacking them is the header having moved.
-    frameless = sum(1 for r in parsed if not r["frames"])
-    frames_broken = bool(parsed) and frameless == len(parsed)
+    complete = [r for r in parsed if r["complete"]]
+    frameless = sum(1 for r in complete if not r["frames"])
+    frames_broken = bool(complete) and frameless == len(complete)
 
     parse_degraded = (total_break
                       or (unparsed >= 2 and unparsed_pct > 25.0)
@@ -234,8 +240,10 @@ def main() -> int:
     print()
     if parse_degraded and not parsed:
         print(f"\nRESULT: PARSER DEGRADED -- none of the {len(files)} dump(s) could be "
-              f"parsed at all. This is a total format break, not an absence of crashes. "
-              f"Compare a dump against EXC_RE.")
+              f"parsed, so nothing above is a report on their contents. Either the "
+              f"format moved (compare one against EXC_RE), or these are dumps with no "
+              f"module attribution -- an exception line ending at the address, which "
+              f"cannot be keyed on and never will be.")
         return 1
 
     if not parsed:
@@ -292,7 +300,8 @@ def main() -> int:
     print(f"  UNKNOWN        : {unknown}   <-- the ones worth looking at")
 
     all_ok = ok and sig_ok and not parse_degraded
-    if parse_degraded and frames_broken and unparsed_pct <= 25.0:
+    unparsed_clause = unparsed >= 2 and unparsed_pct > 25.0
+    if parse_degraded and frames_broken and not unparsed_clause:
         print(f"\nRESULT: PARSER DEGRADED -- all {len(parsed)} parsed dump(s) yielded "
               f"ZERO stack frames. The exception line still parses, so this is the "
               f"stack header or frame syntax having changed; compare a dump against "
