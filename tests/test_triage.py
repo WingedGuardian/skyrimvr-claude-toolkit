@@ -579,3 +579,93 @@ def test_crash_still_flags_a_format_change_across_several_dumps(tmp_path):
     r = run(CRASH, str(d))
     assert "ZERO stack frames" in r.stdout, r.stdout
     assert r.returncode == 1
+
+
+def crash_log_unreadable_shape() -> str:
+    """A file the exception matcher cannot key on at all."""
+    return "this file is named like a dump but carries no exception line\n" * 5
+
+
+def test_crash_annotates_an_unparsed_dump_below_the_format_change_floor(tmp_path):
+    """1 unparsed of 2 is 50% -- over the ratio, under the >= 2 floor -- and so
+    printed a bare "1/2 (50%)" above RESULT: OK with nothing saying those bytes
+    went unread. The floor is right and stays: one unparsed dump is not evidence
+    of a format change, and lowering it re-introduces the false positive that
+    fired on 5 of 28 real dumps. But "not a format change" is not "nothing to
+    see". The count must never be silent."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    (d / "crash-a.log").write_text(crash_log("0B84F05", "hkpContactSolver"), encoding="utf-8")
+    (d / "crash-b.log").write_text(crash_log_unreadable_shape(), encoding="utf-8")
+    r = run(CRASH, str(d))
+    assert "unparsed      : 1/2 (50%)" in r.stdout, r.stdout
+    assert "NOT read" in r.stdout, r.stdout
+    # The verdict gate is deliberately untouched -- this is an annotation, not an
+    # escalation.
+    assert "RESULT: OK" in r.stdout, r.stdout
+    assert r.returncode == 0
+
+
+def test_crash_leaves_a_clean_unparsed_line_unannotated(crash_dir):
+    """The control for the annotation above. A guard that fires on everything is
+    indistinguishable from one that works, and an arrow on "0/3 (0%)" would be a
+    contradiction on one line."""
+    r = run(CRASH, str(crash_dir))
+    line = [l for l in r.stdout.splitlines() if "unparsed" in l]
+    assert len(line) == 1, r.stdout
+    assert "0/3 (0%)" in line[0], line[0]
+    assert "<--" not in line[0], line[0]
+    assert r.returncode == 0
+
+
+def test_crash_verdict_names_the_short_input_set_as_well_as_the_parser(tmp_path):
+    """Both conditions firing used to print only the parser verdict. Nothing was
+    hidden -- the near-miss count is in the header -- but the verdict line is the
+    part people read, and a reader pointed at a parser problem has no reason to
+    suspect the input set was also short. The two are fixed in different places."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    for i in range(3):
+        (d / f"crash-junk-{i}.log").write_text(crash_log_unreadable_shape(), encoding="utf-8")
+    (d / "crash-ok.log").write_text(crash_log("1234567", "Foo"), encoding="utf-8")
+    (d / "crash-report.md").write_text("prefix matches, extension does not\n", encoding="utf-8")
+    r = run(CRASH, str(d))
+    verdict = r.stdout.split("RESULT:")[-1]
+    assert "PARSER DEGRADED" in verdict, r.stdout
+    assert "ALSO" in verdict, verdict
+    assert "did not match the pattern" in verdict, verdict
+    assert r.returncode == 1
+
+
+def test_crash_degraded_verdict_stays_quiet_when_the_input_set_is_complete(tmp_path):
+    """The control: no near misses, no ALSO clause. Without this, a verdict that
+    always appended the clause would pass the test above."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    for i in range(3):
+        (d / f"crash-junk-{i}.log").write_text(crash_log_unreadable_shape(), encoding="utf-8")
+    (d / "crash-ok.log").write_text(crash_log("1234567", "Foo"), encoding="utf-8")
+    r = run(CRASH, str(d))
+    verdict = r.stdout.split("RESULT:")[-1]
+    assert "PARSER DEGRADED" in verdict, r.stdout
+    assert "ALSO" not in verdict, verdict
+    assert r.returncode == 1
+
+
+def test_crash_says_none_matched_rather_than_none_found(tmp_path):
+    """"No dumps found" and "no dumps MATCHED" are different answers, and the tool
+    printed the first when the second was true -- the near-miss failure in its
+    purest form, telling the reader a folder is empty of dumps while dumps sit in
+    it under an unmatched extension. Exit 2 was never the problem; the sentence
+    was."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    (d / "crash-2026-01-01.md").write_text("a dump under an extension we do not match\n", encoding="utf-8")
+    (d / "ordinary.log").write_text("not a dump at all\n", encoding="utf-8")
+    r = run(CRASH, str(d))
+    assert r.returncode == 2, r.stdout + r.stderr
+    both = r.stdout + r.stderr
+    assert "crash-2026-01-01.md" in both, both
+    assert "crash- prefix" in both, both
+    # The ordinary log must NOT be dragged in: the prefix is the whole point.
+    assert "ordinary.log" not in both, both

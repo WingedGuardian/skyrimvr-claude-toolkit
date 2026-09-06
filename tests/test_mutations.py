@@ -310,6 +310,37 @@ MUTATIONS = [
     ),
 
     pytest.param(
+        # Annotate only when the verdict gate fires. A non-zero unparsed count
+        # below the floor then prints bare above RESULT: OK, which is the silence
+        # the two-tier annotation exists to remove.
+        "tools/crash-triage.py",
+        "    elif unparsed:",
+        "    elif False:",
+        "tests/test_triage.py::test_crash_annotates_an_unparsed_dump_below_the_format_change_floor",
+        id="crash-unparsed-annotation-silent-below-floor",
+    ),
+
+    pytest.param(
+        # Drop the near-miss clause from the degraded verdict. Both problems are
+        # present, only one is named, and they are fixed in different places.
+        "tools/crash-triage.py",
+        'f"changed; compare a failing dump against EXC_RE and FRAME_RE.{also_near}")',
+        'f"changed; compare a failing dump against EXC_RE and FRAME_RE.")',
+        "tests/test_triage.py::test_crash_verdict_names_the_short_input_set_as_well_as_the_parser",
+        id="crash-degraded-verdict-hides-near-misses",
+    ),
+
+    pytest.param(
+        # Go back to "No crash-*.txt or crash-*.log found" with nothing else --
+        # a folder holding unmatched dumps then reads as a folder holding none.
+        "tools/crash-triage.py",
+        "        if missed:",
+        "        if False:",
+        "tests/test_triage.py::test_crash_says_none_matched_rather_than_none_found",
+        id="crash-none-found-hides-near-misses",
+    ),
+
+    pytest.param(
         # Gate the coverage check on resyncs again. The chunk walk breaks out without
         # incrementing resyncs when it finds nothing, so this suppressed the guard on
         # exactly the degenerate input it exists for.
@@ -402,9 +433,26 @@ def test_guard_actually_bites(tmp_path, relpath, find, replace, test_id):
         [sys.executable, "-m", "pytest", test_id, "-q", "--no-header", "-p", "no:cacheprovider"],
         cwd=str(work), capture_output=True, text=True, timeout=600,
     )
-    assert result.returncode != 0, (
-        f"{test_id} still PASSED with the fix reverted -- it does not actually "
-        f"guard this bug and must be rewritten.\n"
-        f"--- mutation ---\n{find!r} -> {replace!r}\n"
+    # EXIT 1 SPECIFICALLY, not merely non-zero.
+    #
+    # pytest exits 1 for "a test failed", but 2 for a collection error, 4 for a
+    # usage error and 5 for "no tests collected". A mutation naming a test that was
+    # since renamed or deleted therefore satisfied `!= 0` and passed forever while
+    # proving nothing -- the stale-ANCHOR problem on the other side of the pair,
+    # and only the anchor half was asserted. Two anchors went stale during one
+    # release arc, so this is a demonstrated shape here, not a hypothetical.
+    #
+    # MEASURED at the time this went in: all 38 mutations named a collectable
+    # test, so nothing was actually rotten -- the gate simply could not have told
+    # us if it were.
+    assert result.returncode == 1, (
+        f"expected {test_id} to FAIL (pytest exit 1) with the fix reverted, got "
+        f"exit {result.returncode}.\n"
+        + ("The test still PASSED -- it does not guard this bug and must be "
+           "rewritten.\n" if result.returncode == 0 else
+           "That is not a test failure: 2 = collection error, 4 = usage error, "
+           "5 = nothing collected. Most likely the test was renamed or removed "
+           "and this mutation now proves nothing.\n")
+        + f"--- mutation ---\n{find!r} -> {replace!r}\n"
         f"--- pytest output ---\n{result.stdout[-2000:]}"
     )

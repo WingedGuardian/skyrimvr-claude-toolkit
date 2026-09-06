@@ -34,7 +34,44 @@
   Only applies to the auto-selected newest log — naming a file explicitly is a
   deliberate act and is not second-guessed.
 
+### Changed
+
+- **The mutation gate now requires a test *failure*, not merely a non-zero exit.**
+  pytest exits 1 when a test fails but 2 on a collection error, 4 on a usage error
+  and 5 when nothing is collected, so a mutation naming a test that had since been
+  renamed or deleted satisfied the old `!= 0` check and passed forever while proving
+  nothing — the stale-anchor problem on the other side of the pair, with only the
+  anchor half asserted. Two anchors went stale during this release arc, so the shape
+  is demonstrated rather than hypothetical. Audited at the same time: all 38
+  mutations named a collectable test, so nothing was actually rotten — the gate
+  simply could not have told us if it were.
+
 ### Fixed
+
+- **`crash-triage` said nothing about dumps it did not read.** One unparsed file out
+  of two is 50% — over the ratio, under the two-dump floor — and printed a bare
+  `unparsed : 1/2 (50%)` above `RESULT: OK`, exit 0, with nothing indicating those
+  bytes went unread. The floor stays where it is: a single unparsed dump is not
+  evidence of a format change, and lowering it re-introduces the false positive that
+  fired on 5 of 28 real dumps. But *"not a format change"* is not the same claim as
+  *"nothing to see"*. The count is now annotated whenever it is non-zero, in two
+  tiers, while the verdict gate is untouched. A clean run still prints `0/28 (0%)`
+  with no arrow — an annotation that always fires is not distinguishable from one
+  that works.
+
+- **A degraded verdict named one of two problems.** When the parser was degraded *and*
+  the input set was short, only `RESULT: PARSER DEGRADED` printed. The near-miss count
+  was in the header, so nothing was hidden, and the exit code was 1 either way — but
+  the verdict line is the part people read, and a reader pointed at a parser problem
+  has no reason to suspect the file list was also incomplete. They are fixed in
+  different places. The verdict now names both when both are present.
+
+- **"No crash dumps found" was printed for a folder that had them.** With zero files
+  matching the extension pattern, the tool refused with *"No crash-\*.txt or
+  crash-\*.log found"* — the near-miss failure in its purest form, telling the reader
+  a folder is empty of dumps while dumps sit in it under an extension the pattern does
+  not cover. Exit 2 was never the problem; the sentence was. It now names the files
+  carrying the `crash-` prefix that it declined to match.
 
 - **`crash-triage` counted a crash with no module attribution as "no exception".**
   A jump to an address inside no loaded module leaves CrashLogger nothing to
