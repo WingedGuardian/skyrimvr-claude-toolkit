@@ -295,6 +295,16 @@ def test_crash_drops_stack_scan_frames_and_keeps_probable_ones(cpp_crash_dir):
     assert "ScannedOnly.dll" not in r.stdout, r.stdout    # the [S] one is not
 
 
+def crash_log_truncated_before_exception() -> str:
+    """A dump CrashLogger never finished: header written, then nothing.
+
+    This is the shape that genuinely cannot parse. The no-MODULE+OFFSET line used
+    to serve this role in these fixtures, but it now parses as `(no module)+ADDR`,
+    so tests that need an unparseable dump had to stop borrowing it.
+    """
+    return "Skyrim VR v1.4.15\nCrashLoggerSSE v1-15-0-0\n\n"
+
+
 def test_crash_flags_a_degraded_parser_rather_than_reporting_ok(tmp_path):
     """The failure this exists for: CrashLoggerSSE 1.23.1 changed format and the
     tool read 1 of 7 dumps while printing RESULT: OK. The share of unparsed dumps
@@ -306,12 +316,8 @@ def test_crash_flags_a_degraded_parser_rather_than_reporting_ok(tmp_path):
         'Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x1 SkyrimSE.exe+0000001\tmov\n',
         encoding="utf-8")
     for n in range(2, 6):
-        # An exception line with no MODULE+OFFSET: a real shape (a jump to an
-        # address inside no loaded module), and one the parser cannot key on.
         (d / f"crash-2026-01-01-00-00-0{n}.log").write_text(
-            "Skyrim SSE v1.6.1170\n"
-            'Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x000000000001\n',
-            encoding="utf-8")
+            crash_log_truncated_before_exception(), encoding="utf-8")
     r = run(CRASH, str(d))
     assert "unparsed      : 4/5 (80%)" in r.stdout, r.stdout
     assert "RESULT: PARSER DEGRADED" in r.stdout, r.stdout
@@ -325,10 +331,10 @@ def test_crash_does_not_flag_one_legitimate_unparsed_dump(tmp_path):
     The first version of this test took the `crash_dir` fixture, which contains
     three VALID logs and no unparsed dump at all -- it never built the case it
     names, and passed with the threshold mutated in both directions. It now
-    constructs the real shape: one dump whose exception line carries no
-    MODULE+OFFSET (a jump into no loaded module -- CrashLogger has nothing to
-    attribute, so this dump can never parse and is not a defect), among nine
-    that parse cleanly.
+    constructs the real shape: one dump CrashLogger truncated before it wrote an
+    exception line at all, among nine that parse cleanly. (It used to use a dump
+    with no MODULE+OFFSET; that shape now parses as `(no module)+ADDR`, so it is
+    no longer an example of anything unparseable.)
     """
     d = tmp_path / "SKSE"
     d.mkdir()
@@ -336,9 +342,7 @@ def test_crash_does_not_flag_one_legitimate_unparsed_dump(tmp_path):
         (d / f"crash-2026-08-26-{n:02d}.txt").write_text(
             crash_log("0B84F05", "hkpContactSolver"), encoding="utf-8")
     (d / "crash-2026-08-26-99.txt").write_text(
-        "Skyrim VR v1.4.15\n"
-        'Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x000000000001\n',
-        encoding="utf-8")
+        crash_log_truncated_before_exception(), encoding="utf-8")
 
     r = run(CRASH, str(d))
     assert "unparsed      : 1/10 (10%)" in r.stdout, r.stdout
@@ -414,3 +418,30 @@ def test_crash_does_not_flag_truncated_dumps_as_a_format_change(tmp_path):
     assert "ZERO stack frames" not in r.stdout, r.stdout
     assert "RESULT: OK" in r.stdout, r.stdout
     assert r.returncode == 0
+
+
+def test_crash_parses_an_exception_with_no_module_attribution(tmp_path):
+    """A jump to an address inside no loaded module leaves CrashLogger nothing to
+    attribute, and the line ends after the address. Requiring MODULE+OFFSET made
+    such a dump unparseable forever and counted it as "no exception" -- reporting a
+    crash we DID read as one we did not. Found in 1 of 28 real dumps."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    (d / "crash-2026-06-28-14-50-36.log").write_text(
+        "Skyrim VR v1.4.15\n"
+        "CrashLoggerSSE v1-15-0-0\n"
+        "\n"
+        'Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x000000000001\n',
+        encoding="utf-8")
+    r = run(CRASH, str(d))
+    assert "no exception  : 0" in r.stdout, r.stdout
+    assert "(no module)+000000000001" in r.stdout, r.stdout
+
+
+def test_crash_still_reads_the_module_when_there_is_one(crash_dir):
+    """The control for the case above: making MODULE+OFFSET optional must not stop
+    it being captured when present. Without this, 'optional' could silently become
+    'ignored' and every signature would collapse to (no module)."""
+    r = run(CRASH, str(crash_dir))
+    assert "SkyrimVR.exe+0B84F05" in r.stdout, r.stdout
+    assert "(no module)" not in r.stdout, r.stdout

@@ -33,7 +33,12 @@ import skyrim_paths  # noqa: E402
 EXC_RE = re.compile(
     r'^Unhandled exception "(?P<type>[^"]+)"'
     r'(?:\s+at\s+0x(?P<addr>[0-9A-Fa-f]+))?'
-    r'\s+(?P<module>[^\s+]+)\+(?P<offset>[0-9A-Fa-f]+)'
+    # MODULE+OFFSET is OPTIONAL. A jump to an address inside no loaded module
+    # leaves CrashLogger nothing to attribute, and the line simply ends after the
+    # address: `Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x000000000001`.
+    # Requiring the group made that dump unparseable forever, and it was counted
+    # as "no exception" -- reporting a crash we did read as one we did not.
+    r'(?:\s+(?P<module>[^\s+]+)\+(?P<offset>[0-9A-Fa-f]+))?'
     r'\s*(?P<instr>[^|]*)'
     r'(?:\|\s*(?P<symbol>.*?)\)?\s*)?$'
 )
@@ -126,8 +131,10 @@ def parse(path: Path):
     return {
         "file": path.name,
         "type": exc.group("type"),
-        "module": exc.group("module"),
-        "offset": exc.group("offset").upper(),
+        # No module means the address is all we have. Naming it that way keeps
+        # these grouped together and readable, instead of pretending to a module.
+        "module": exc.group("module") or "(no module)",
+        "offset": (exc.group("offset") or exc.group("addr") or "?").upper(),
         "instr": (exc.group("instr") or "").strip(),
         "symbol": (exc.group("symbol") or "").strip().rstrip(")"),
         "game": game_ver,

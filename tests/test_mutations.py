@@ -266,6 +266,17 @@ MUTATIONS = [
         id="crash-frames-counts-truncated-dumps",
     ),
 
+    pytest.param(
+        # Require MODULE+OFFSET again. A crash at an address inside no loaded module
+        # then becomes permanently unparseable and is counted as "no exception" --
+        # a dump we read, reported as one we did not.
+        "tools/crash-triage.py",
+        "    r'(?:\\s+(?P<module>[^\\s+]+)\\+(?P<offset>[0-9A-Fa-f]+))?'",
+        "    r'\\s+(?P<module>[^\\s+]+)\\+(?P<offset>[0-9A-Fa-f]+)'",
+        "tests/test_triage.py::test_crash_parses_an_exception_with_no_module_attribution",
+        id="crash-requires-module-attribution",
+    ),
+
     # --- skyrim_paths -------------------------------------------------------
     pytest.param(
         "tools/skyrim_paths.py",
