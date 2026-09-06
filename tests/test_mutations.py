@@ -437,9 +437,10 @@ MUTATIONS = [
 
     pytest.param(
         # Put the defect back: a hook reading through /dev/stdin. This is the one
-        # that shipped, stayed green for months, and made every guard in the bundle
-        # decoration. The behavioural suite passes with it in place -- only the
-        # text-level check goes red, which is the entire point of having it.
+        # that shipped and made every guard in the bundle decoration. Aimed at the
+        # TEXT-level check because that one is platform-independent -- the
+        # behavioural suite catches this on Windows but not on Linux, so pointing
+        # the mutation there would make the gate itself platform-dependent.
         ".claude/hooks/protect-bash.sh",
         "INPUT=$(cat)",
         "INPUT=$(cat /dev/stdin)",
@@ -465,6 +466,36 @@ MUTATIONS = [
         'if false; then',
         "tests/test_hooks.py::test_a_blocking_hook_refuses_when_it_cannot_see_its_input",
         id="blocking-hook-silent-when-blind",
+    ),
+
+    pytest.param(
+        # Go back to anchoring the game-directory deny on one spelling of rm. Eleven
+        # other spellings then reach the install, while the README says they cannot.
+        ".claude/hooks/protect-bash.sh",
+        'if echo "$COMMAND" | grep -qiE "$DESTROYER"; then',
+        'if echo "$COMMAND" | grep -qiE \'rm\\s+(-[a-z]*f[a-z]*\\s+)?\'; then',
+        "tests/test_hooks.py::test_the_install_cannot_be_deleted_however_it_is_spelled",
+        id="delete-guard-anchored-on-one-spelling-of-rm",
+    ),
+
+    pytest.param(
+        # Remove the jq fallback from protect-bash. Without jq, deny() cannot emit
+        # its refusal, the hook prints nothing, and nothing is read as allow.
+        ".claude/hooks/protect-bash.sh",
+        'if ! "$JQ" --version >/dev/null 2>&1; then',
+        'if false; then',
+        "tests/test_hooks.py::test_a_blocking_hook_refuses_when_jq_is_unusable",
+        id="blocking-hook-allows-when-jq-is-missing",
+    ),
+
+    pytest.param(
+        # Put the bare `Skyrim` back in the catch-all. Every edit to a checkout of
+        # this toolkit is then annotated as an edit inside a live game install.
+        ".claude/hooks/protect-files.sh",
+        'grep -qiE "(^|[/' + BS * 4 + '])Data[/' + BS * 4 + ']|My Games[/' + BS * 4 + ']Skyrim"',
+        'grep -qiE "([/' + BS * 4 + ']Data[/' + BS * 4 + ']|Skyrim|My Games[/' + BS * 4 + ']Skyrim)"',
+        "tests/test_hooks.py::test_editing_this_toolkits_own_checkout_is_not_editing_a_game_install",
+        id="catch-all-matches-a-bare-skyrim",
     ),
 
     # --- skyrim_paths -------------------------------------------------------

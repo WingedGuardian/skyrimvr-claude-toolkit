@@ -18,6 +18,7 @@
 # a reason to advise, not to refuse: there are legitimate uses for nearly everything
 # here, and a guard that blocks legitimate work is a guard that gets deleted.
 
+HOOK_NAME="protect-files"
 JQ="{{JQ_PATH}}"
 
 # MEASURED (X4 toolkit 2026-08-29, reproduced on a second machine 2026-09-06):
@@ -28,8 +29,14 @@ JQ="{{JQ_PATH}}"
 # A hook that reads nothing falls through its first guard and exits 0, which is
 # BYTE-IDENTICAL to deciding "this is fine". Every hook here was inert that way for
 # months while the audit log recorded an empty command field in 2,454 of 2,454
-# entries. A TEST SUITE CANNOT CATCH IT: a suite pipes stdin, so /dev/stdin resolves
-# fine there. Green in the harness, dead in production.
+# entries.
+#
+# WHY NO TEST CAUGHT IT, precisely. /dev/stdin is a symlink to /proc/self/fd/0:
+# it resolves when fd 0 is a real file or an MSYS-shell pipe, and FAILS when fd 0
+# is a Win32 pipe from a non-MSYS parent -- which is how Claude Code (Node) spawns
+# a hook. Python's subprocess does the same, so tests/test_hooks.py DOES detect
+# this on Windows and does NOT on Linux. The real reason it survived is simpler:
+# nothing ran the hooks as processes at all.
 INPUT=$(cat)
 
 # Hooks live at <project>/.claude/hooks/, so this file's own location is a reliable
@@ -45,6 +52,16 @@ HB_DIR="$BACKUP_DIR/.hook-heartbeat"
 # has to be written from inside a real invocation precisely because a suite cannot
 # reproduce the condition that breaks it.
 mkdir -p "$HB_DIR" 2>/dev/null
+
+# jq is how this hook SPEAKS. If it is missing, unset, or still the literal
+# {{JQ_PATH}} placeholder (the user extracted the zip and never ran setup.sh), then
+# deny() and the inert-guard below both emit nothing -- and nothing is read as
+# ALLOW. So the one refusal that must not depend on jq is printed with printf.
+if ! "$JQ" --version >/dev/null 2>&1; then
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"GUARD INERT: %s cannot run jq (%s), so it evaluated NO rules and cannot report a decision. Allowing silently would be indistinguishable from approving. Install jq (winget install jqlang.jq) and run setup.sh to configure its path."}}\n' \
+        "$HOOK_NAME" "$JQ"
+    exit 0
+fi
 if [ -n "$INPUT" ]; then
     printf '%s payload_bytes=%s\n' "$(date +%Y%m%d_%H%M%S)" "${#INPUT}" > "$HB_DIR/protect-files" 2>/dev/null
 else
@@ -74,10 +91,10 @@ advise() { hooklog ADVISE "$1"; ADVICE="${ADVICE:+$ADVICE | }$1"; }
 # === HARD BLOCK -- binary plugin/archive files ===
 # The only deny here. A text write into a binary plugin corrupts it, and there is a
 # correct tool for every legitimate case (xelib, Spriggit, AutoMod).
-echo "$FILE_PATH" | grep -qiE '\.(esp|esm|esl|bsa|ba2)$' && deny "BLOCKED: Cannot directly write to plugin/archive files. Use xelib, Spriggit or AutoMod."
+echo "$FILE_PATH" | grep -qiE '\.(esp|esm|esl|bsa|ba2)[[:space:].]*$' && deny "BLOCKED: Cannot directly write to plugin/archive files. Use xelib, Spriggit or AutoMod."
 
 # === WHITELIST -- our own workspace (silent, no note) ===
-echo "$FILE_PATH" | grep -qiE '[/\\]\.claude[/\\](hooks|plans|backups|memory|projects)[/\\]' && exit 0
+echo "$FILE_PATH" | grep -qiE '(^|[/\\])\.claude[/\\](hooks|plans|backups|memory|projects)[/\\]' && exit 0
 echo "$FILE_PATH" | grep -qiE '[/\\]node_modules[/\\]' && exit 0
 
 # === ADVISE -- legitimate but consequential ===
@@ -92,7 +109,11 @@ echo "$FILE_PATH" | grep -qiE '\.(pex|psc)$' \
 
 # === ADVISE -- catch-all, only if nothing more specific already fired ===
 if [ -z "$ADVICE" ]; then
-    echo "$FILE_PATH" | grep -qiE "([/\\\\]Data[/\\\\]|Skyrim|My Games[/\\\\]Skyrim)" \
+    # Deliberately NOT a bare `Skyrim`: that matched every file in a checkout of
+    # this toolkit (its own directory name contains it), annotating routine edits
+    # with a statement that was simply false. Require the shape of a real install --
+    # a Data/ directory, or the config path under My Games.
+    echo "$FILE_PATH" | grep -qiE "(^|[/\\\\])Data[/\\\\]|My Games[/\\\\]Skyrim" \
         && advise "Editing inside the live game/config install: $FILE_PATH"
 fi
 

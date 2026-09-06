@@ -12,14 +12,22 @@ hook environment while a bare `cat` returns the payload (MEASURED: X4 toolkit
 2026-08-29, reproduced on a second machine 2026-09-06 -- seven consecutive probes,
 0 bytes via /dev/stdin, 641-2840 via bare cat).
 
-**A test suite cannot reproduce that condition.** A suite pipes stdin explicitly, so
-`/dev/stdin` resolves fine here and a hook using it would pass every case below.
-Green in the harness, dead in production. So this file does what a suite CAN do --
-prove the decision logic is right, in both directions -- and two other things carry
-the part it cannot:
+**This file DOES catch that defect -- but only on Windows.** `/dev/stdin` is a
+symlink to `/proc/self/fd/0`: it resolves when fd 0 is a real file or a pipe made
+by an MSYS shell, and fails when fd 0 is a Win32 pipe from a non-MSYS parent.
+Python's `subprocess` hands bash a Win32 pipe, exactly as Claude Code's Node
+process does -- so reinstating `cat /dev/stdin` here gives **18 failed, 16 passed**
+(measured). On Linux `/dev/stdin` resolves for any pipe and every case below
+passes with the defect in place.
 
-  * `tests/test_repo_invariants.py` asserts no shipped hook USES `$(cat /dev/stdin)`,
-    which is a property of the text and needs no runtime.
+So this suite is a real detector on one platform and blind on the other, and the
+honest reason the defect survived in the first place is neither: **nothing ran the
+hooks as processes at all.** Two platform-independent checks carry what this
+cannot:
+
+  * `tests/test_repo_invariants.py` asserts no shipped hook USES `$(cat /dev/stdin)`.
+    That is a property of the text, so it holds on every platform and in CI's Linux
+    leg, where the behavioural check above is blind.
   * `tools/hook-canary.sh` reads heartbeats written from inside REAL invocations,
     which is the only evidence that survives the harness/production gap.
 
@@ -222,3 +230,118 @@ def test_every_hook_writes_a_liveness_heartbeat(project):
         if not f.name.endswith(".blind"):
             assert "payload_bytes=" in f.read_text(encoding="utf-8")
             assert "payload_bytes=0" not in f.read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
+# Deleting the install: every spelling a review found reaching it unrefused
+#
+# The old rule was `rm\s+(-[a-z]*f[a-z]*\s+)?<path>` -- exactly ONE flag token,
+# which had to contain an `f`. The README meanwhile promised the game directory
+# "cannot" be deleted. Each row below was MEASURED reaching the directory before
+# the rule was re-anchored on (destroyer AND qualified path) instead of on one
+# spelling of rm.
+# --------------------------------------------------------------------------
+
+GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAMEW = GAME.replace("/", BS)
+
+
+@pytest.mark.parametrize("command,why", [
+    (f'rm -rf "{GAME}"', "the spelling that was already caught"),
+    (f'rm -f -r "{GAME}"', "two flag tokens"),
+    (f'rm -r -f "{GAME}"', "two flag tokens, reversed"),
+    (f'rm --recursive --force "{GAME}"', "long flags"),
+    (f'rm -rf -- "{GAME}"', "the end-of-options marker"),
+    (f'cd "{GAME}" && rm -rf .', "the path is in the cd, not the rm"),
+    (f'G="{GAME}"; rm -rf "$G"', "the path is in a variable"),
+    (f'rmdir /s /q "{GAMEW}"', "rmdir, not rm"),
+    (f'del /f /s /q "{GAMEW}"', "del, not rm"),
+    (f'powershell -c "Remove-Item -Recurse -Force \'{GAMEW}\'"',
+     "Remove-Item -- and powershell is allow-listed"),
+    (f'find "{GAME}" -delete', "find -delete"),
+    (f'python -c "import shutil; shutil.rmtree(r\'{GAME}\')"', "shutil.rmtree"),
+    ('rm -rf "C:/Users/Moona/Documents/My Games/Skyrim VR"', "the config directory"),
+    ('reg.exe delete "HKLM' + BS + 'SOFTWARE' + BS + 'Bethesda Softworks" /f',
+     "reg.exe -- the old pattern needed whitespace straight after `reg`"),
+])
+def test_the_install_cannot_be_deleted_however_it_is_spelled(project, command, why):
+    got, _ = fire(project, "protect-bash.sh", cmd(command))
+    assert got == "deny", f"{why}: {command}"
+
+
+@pytest.mark.parametrize("command,expected,why", [
+    # The controls that keep the rule above from being a blanket refusal.
+    ("rm -rf node_modules", "allow", "an rm with no game path"),
+    ("rm -rf /tmp/scratch", "allow", "an rm somewhere else entirely"),
+    ('grep -rn "rm" README.md', "allow", "the WORD rm inside a quoted argument"),
+    ("python -m pytest tests/ -q", "allow", "running the suite"),
+    (f'cat "{GAME}/Data/x.esp"', "advise", "READING a game path is not deleting one"),
+    (f'cp "{GAME}/Data/x.nif" /tmp/', "advise", "copying OUT is not deleting"),
+    (f'ls "{GAME}/Data/Scripts"', "allow", "listing is not writing"),
+])
+def test_the_delete_rule_does_not_swallow_ordinary_work(project, command, expected, why):
+    got, _ = fire(project, "protect-bash.sh", cmd(command))
+    assert got == expected, f"{why}: {command}"
+
+
+def test_a_redirect_elsewhere_is_not_called_a_redirect_into_the_game(project):
+    """`[^"']*` spanned the whole command, so any redirect plus a later mention of
+    Data or Skyrim produced "redirecting output into the game/config directory" --
+    naming a redirect that goes to /tmp. A warning that misdescribes what it saw
+    teaches the reader to stop reading warnings."""
+    got, ctx = fire(project, "protect-bash.sh",
+                    cmd("grep foo bar.txt > /tmp/o.txt && ls Data/Scripts"))
+    assert "Redirecting output into the game" not in ctx, ctx
+
+
+def test_editing_this_toolkits_own_checkout_is_not_editing_a_game_install(project):
+    """The catch-all matched a bare `Skyrim`, and this repository's directory name
+    contains it -- so every edit to CHANGELOG.md or tools/*.py was annotated
+    "Editing inside the live game/config install", which is simply false."""
+    for path in ("C:/Users/x/Projects/skyrimvr-claude-toolkit/CHANGELOG.md",
+                 "C:/Users/x/Projects/skyrimvr-claude-toolkit/tools/crash-triage.py"):
+        got, ctx = fire(project, "protect-files.sh", fpath(path))
+        assert got == "allow", f"{path} -> {got}: {ctx}"
+
+
+def test_a_plugin_path_with_a_trailing_space_is_still_denied(project):
+    r"""The deny was anchored `\.(esp|...)$`, so a trailing space slipped past it --
+    and Win32 strips the trailing space, so the write lands on the plugin anyway."""
+    got, _ = fire(project, "protect-files.sh", fpath("C:/Games/Skyrim VR/Data/M.esp "))
+    assert got == "deny"
+
+
+# --------------------------------------------------------------------------
+# jq is how a hook SPEAKS
+# --------------------------------------------------------------------------
+
+def _hook_with_jq(project, tmp_path, name, jq_value):
+    src = (HOOKS / name).read_text(encoding="utf-8").replace("{{JQ_PATH}}", jq_value)
+    d = tmp_path / "hooks_jq" / ".claude" / "hooks"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(src, encoding="utf-8", newline="\n")
+    return d.parent.parent
+
+
+@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh"])
+@pytest.mark.parametrize("jq_value,why", [
+    ("/c/nonexistent/jq.exe", "jq uninstalled after setup"),
+    ("{{JQ_PATH}}", "the zip was extracted and setup.sh never run"),
+])
+def test_a_blocking_hook_refuses_when_jq_is_unusable(tmp_path, name, jq_value, why):
+    """deny() emits its JSON THROUGH jq, so without jq the refusal itself vanishes
+    and the hook produces nothing -- which the runtime reads as ALLOW. That is a
+    second live route to the inert state, by another door, and it needs no jq to
+    close: the one refusal that must not depend on jq is printed with printf."""
+    root = _hook_with_jq(None, tmp_path, name, jq_value)
+    payload = (cmd('rm -rf "C:/Games/Skyrim VR"') if name == "protect-bash.sh"
+               else fpath("C:/Games/Skyrim VR/Data/M.esp"))
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    r = subprocess.run([_bash(), str(root / ".claude" / "hooks" / name)],
+                       input=json.dumps(payload), capture_output=True, text=True,
+                       env=env, timeout=60)
+    assert r.stdout.strip(), f"{why}: hook emitted NOTHING, which reads as allow"
+    j = json.loads(r.stdout)
+    h = j["hookSpecificOutput"]
+    assert h["permissionDecision"] == "deny", why
+    assert "GUARD INERT" in h["permissionDecisionReason"]

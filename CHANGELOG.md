@@ -16,11 +16,16 @@
   machines — seven consecutive probes, 0 bytes via `/dev/stdin`, 641–2840 bytes via
   bare `cat`, PreToolUse and PostToolUse alike.
 
-  **No test suite could have caught it**, which is why it lasted: a suite pipes stdin
-  explicitly, so `/dev/stdin` resolves fine under test. Green in the harness, dead in
-  production. It is now checked three ways that do not depend on a runtime — a
-  text-level repo invariant, a mutation that puts the defect back, and a gate in the
-  release workflow that inspects **the built payload** rather than the repo.
+  **Why it lasted: nothing ran the hooks as processes at all.** `/dev/stdin` is a
+  symlink to `/proc/self/fd/0` — it resolves when stdin is a real file or an
+  MSYS-shell pipe, and fails when stdin is a Win32 pipe from a non-MSYS parent,
+  which is how Claude Code (a Node process) spawns a hook. A behavioural test does
+  reproduce it on Windows, because Python's `subprocess` hands bash a Win32 pipe
+  too; on Linux `/dev/stdin` resolves for any pipe and the same test passes with the
+  defect in place. So it is now checked three ways: a behavioural suite that runs
+  each hook as a process, a text-level repo invariant that holds on every platform,
+  and a gate in the release workflow that inspects **the built payload** rather than
+  the repo.
 
   **After updating, run `bash tools/hook-canary.sh`.** It reads heartbeats written
   from inside real invocations and reports ALIVE / BLIND per hook — the only evidence
@@ -34,11 +39,20 @@
   routine work gets approved by reflex and then protects nothing: the X4 toolkit
   measured 40 such prompts across 13,282 commands, every one noise.
 
+- **New: `tools/hook-canary.sh` and `tools/toolchain-check.sh`.** The canary reports
+  ALIVE / BLIND / NOT-EXERCISED per hook by reading heartbeats written from inside
+  real invocations — the check that answers "are my hooks working *here*", which
+  neither a test suite nor a release gate can answer for your install. `toolchain-check`
+  asks whether every documented tool can actually start, after Spriggit spent an
+  unknown period unable to run while the docs still called it the preferred workflow.
+  Both existed only in the author's install until now — the same private-fix,
+  public-reference gap as the hooks themselves.
+
 - **Path guards now match both separators.** A guard written with only forward
   slashes matched `C:/Games/Skyrim` and missed `C:\Games\Skyrim`, while `cmd.exe`
   and `powershell` are both callable — so the backslash spelling was the one that got
-  through. Six guards fixed, verified in both directions with controls that must not
-  fire.
+  through. **Ten** existing guards converted plus four new rules, verified in both
+  directions with controls that must not fire.
 
 - **A hook that cannot see its input now refuses instead of passing silently.**
   Silence *is* allow, and that silence is what hid the outage above. The two blocking

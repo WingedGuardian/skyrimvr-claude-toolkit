@@ -7,6 +7,7 @@
 # This hook never blocks. It is the record that makes a bad edit recoverable, so a
 # failure here must be LOUD in the audit log rather than a silent no-op.
 
+HOOK_NAME="backup-before-edit"
 JQ="{{JQ_PATH}}"
 
 # MEASURED (X4 toolkit 2026-08-29, reproduced on a second machine 2026-09-06):
@@ -14,8 +15,14 @@ JQ="{{JQ_PATH}}"
 # bare `cat` returns the payload. This hook is the reason it mattered most: reading
 # nothing meant FILE_PATH was empty, the guard below exited 0, and nothing was ever
 # backed up -- while AUDIT_LOG.txt filled with 2,454 entries whose command field was
-# blank and nothing looked wrong. A test suite CANNOT catch it: a suite pipes stdin,
-# so /dev/stdin resolves fine there.
+# blank and nothing looked wrong.
+#
+# WHY NO TEST CAUGHT IT, precisely. /dev/stdin is a symlink to /proc/self/fd/0:
+# it resolves when fd 0 is a real file or an MSYS-shell pipe, and FAILS when fd 0
+# is a Win32 pipe from a non-MSYS parent -- which is how Claude Code (Node) spawns
+# a hook. Python's subprocess does the same, so tests/test_hooks.py DOES detect
+# this on Windows and does NOT on Linux. The real reason it survived is simpler:
+# nothing ran the hooks as processes at all.
 INPUT=$(cat)
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)}"
@@ -24,6 +31,14 @@ AUDIT_LOG="$BACKUP_DIR/AUDIT_LOG.txt"
 HB_DIR="$BACKUP_DIR/.hook-heartbeat"
 
 mkdir -p "$HB_DIR" 2>/dev/null
+
+# Without jq this hook cannot parse the payload. It must not block -- that is not
+# its job -- but it must not imply it did its work either.
+if ! "$JQ" --version >/dev/null 2>&1; then
+    printf '[%s] %s FAILED: jq not runnable (%s) -- NO backup/snapshot was taken\n' \
+        "$(date +%Y%m%d_%H%M%S)" "$HOOK_NAME" "$JQ" >> "$AUDIT_LOG" 2>/dev/null
+    exit 0
+fi
 if [ -n "$INPUT" ]; then
     printf '%s payload_bytes=%s\n' "$(date +%Y%m%d_%H%M%S)" "${#INPUT}" > "$HB_DIR/backup-before-edit" 2>/dev/null
 else

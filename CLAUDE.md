@@ -502,7 +502,10 @@ automatically. **A hook exists to stop ME, not to interrupt the user** -- so the
 rules are graded, and only the first list actually refuses.
 
 ### DENIED -- refused outright, cannot proceed
-- Deleting the game installation directory or the config directory
+- Deleting the game installation directory or the config directory -- anchored on any
+  destroyer (`rm`, `rmdir`, `del`, `Remove-Item`, `shutil.rmtree`, `find -delete`)
+  named alongside a qualified path inside the install, in either slash direction.
+  It is pattern matching, not a sandbox; treat it as a guard against accidents.
 - Deleting Bethesda registry keys
 - Directly writing to ESP/ESM/ESL/BSA/BA2 files (use xelib, Spriggit or AutoMod)
 - Tool output aimed straight at an existing `.psc`, and Champollion against a `.pex`
@@ -529,8 +532,10 @@ that blocks legitimate work is a guard that gets deleted.
 
 **Verify the hooks are actually alive: `bash tools/hook-canary.sh`.** Every hook here
 was INERT for months -- fired, read zero bytes, exited 0, which is byte-identical to
-approving. A test suite cannot detect that (a suite pipes stdin), so the canary reads
-heartbeats written from inside real invocations instead.
+approving. `/dev/stdin` fails when stdin is a Win32 pipe from a non-MSYS parent,
+which is how Claude Code spawns a hook; the suite reproduces that on Windows but not
+on Linux, and neither tells you about YOUR install. The canary reads heartbeats
+written from inside real invocations, which does.
 
 ### General rules
 - **Always review changes before applying** -- modded installs are delicate

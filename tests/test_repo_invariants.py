@@ -123,10 +123,12 @@ def test_help_banner_range_stays_inside_the_comment_header():
 # --------------------------------------------------------------------------
 # The hooks, as TEXT
 #
-# tests/test_hooks.py exercises the decision logic, but it structurally cannot
-# catch the defect that actually shipped: a suite pipes stdin, so `/dev/stdin`
-# resolves fine there and an inert hook passes every behavioural case. These two
-# checks are properties of the file, so they hold without a runtime.
+# tests/test_hooks.py exercises the decision logic and DOES catch the inert-hook
+# defect -- but only on Windows, where Python's subprocess hands bash a Win32 pipe
+# that /dev/stdin cannot resolve. On Linux /dev/stdin resolves for any pipe and the
+# whole behavioural suite passes with the defect in place, which is precisely the
+# leg CI would be relying on. These two checks are properties of the FILE, so they
+# hold on every platform and need no runtime at all.
 # --------------------------------------------------------------------------
 
 HOOK_DIR = REPO / ".claude" / "hooks"
@@ -143,9 +145,10 @@ def test_no_shipped_hook_reads_stdin_through_dev_stdin():
     deciding "this is fine". The audit log carried an empty command field in 2,454
     of 2,454 entries and nothing looked wrong.
 
-    The behavioural suite CANNOT see this, which is exactly why the check lives
-    here instead. It matches the command substitution, not the string, so the
-    comments explaining the defect do not trip it.
+    The behavioural suite sees this on Windows and not on Linux (see the note
+    above), which is exactly why the check also lives here, where platform does
+    not enter into it. It matches the command substitution, not the bare string,
+    so the comments explaining the defect do not trip it.
     """
     hooks = sorted(HOOK_DIR.glob("*.sh"))
     assert hooks, "no hooks found -- this test would pass vacuously"

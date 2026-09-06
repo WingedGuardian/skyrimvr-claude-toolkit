@@ -13,13 +13,20 @@
 # judgement that already failed once, so this does not attempt it. Scripts are
 # small, the copy is fast, and a rate limit keeps bursts cheap.
 
+HOOK_NAME="snapshot-before-tool"
 JQ="{{JQ_PATH}}"
 
 # MEASURED (X4 toolkit 2026-08-29, reproduced on a second machine 2026-09-06):
 # `cat /dev/stdin` returns ZERO BYTES in the Claude Code hook environment, while a
 # bare `cat` returns the payload. A hook that reads nothing falls through its first
-# guard and exits 0 -- byte-identical to deciding "this is fine". A test suite
-# CANNOT catch it: a suite pipes stdin, so /dev/stdin resolves fine there.
+# guard and exits 0 -- byte-identical to deciding "this is fine".
+#
+# WHY NO TEST CAUGHT IT, precisely. /dev/stdin is a symlink to /proc/self/fd/0:
+# it resolves when fd 0 is a real file or an MSYS-shell pipe, and FAILS when fd 0
+# is a Win32 pipe from a non-MSYS parent -- which is how Claude Code (Node) spawns
+# a hook. Python's subprocess does the same, so tests/test_hooks.py DOES detect
+# this on Windows and does NOT on Linux. The real reason it survived is simpler:
+# nothing ran the hooks as processes at all.
 INPUT=$(cat)
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)}"
@@ -28,6 +35,14 @@ AUDIT_LOG="$BACKUP_DIR/AUDIT_LOG.txt"
 HB_DIR="$BACKUP_DIR/.hook-heartbeat"
 
 mkdir -p "$HB_DIR" 2>/dev/null
+
+# Without jq this hook cannot parse the payload. It must not block -- that is not
+# its job -- but it must not imply it did its work either.
+if ! "$JQ" --version >/dev/null 2>&1; then
+    printf '[%s] %s FAILED: jq not runnable (%s) -- NO backup/snapshot was taken\n' \
+        "$(date +%Y%m%d_%H%M%S)" "$HOOK_NAME" "$JQ" >> "$AUDIT_LOG" 2>/dev/null
+    exit 0
+fi
 if [ -n "$INPUT" ]; then
     printf '%s payload_bytes=%s\n' "$(date +%Y%m%d_%H%M%S)" "${#INPUT}" > "$HB_DIR/snapshot-before-tool" 2>/dev/null
 else
@@ -101,6 +116,9 @@ printf '[%s] AUTO-SNAPSHOT (psc:%s pex:%s) before: %s\n' \
 
 # Prune AFTER the new snapshot is on disk, never before -- a prune that runs first
 # can delete the last good copy and then fail to make a new one.
-find "$SNAPSHOT_BASE" -maxdepth 1 -type d -mtime +14 -exec rm -rf {} \; 2>/dev/null
+# -mindepth 1: the start directory is at depth 0 and matches `-type d`, so without
+# it an aged base would delete ITSELF and every snapshot in it. Unreachable today
+# (the mkdir above refreshes the base mtime first) but one word to make it so.
+find "$SNAPSHOT_BASE" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} \; 2>/dev/null
 
 exit 0

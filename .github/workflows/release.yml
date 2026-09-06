@@ -61,17 +61,27 @@ jobs:
           #
           # Matches the command substitution, not the string, so the comments
           # explaining the defect do not trip it.
+          # ASSERT WHAT MUST BE TRUE, do not forbid one spelling of what must not.
+          # A blocklist here passed for `cat  /dev/stdin` (two spaces), `cat /dev/fd/0`,
+          # and a hook that read stdin not at all -- three more ways to be inert. The
+          # positive form has no such gaps: every hook must contain the exact line that
+          # works. Same for the heartbeat, which a mere `grep -q` satisfied from a
+          # COMMENT mentioning it.
           nhooks=$(find "/tmp/$NAME/.claude/hooks" -name '*.sh' | wc -l)
           test "$nhooks" -ge 4 || { echo "::error::only $nhooks hook(s) in the payload; this check would be vacuous"; exit 1; }
-          if grep -rn --include='*.sh' -E '\$\(cat /dev/stdin\)|< */dev/stdin' "/tmp/$NAME/.claude/hooks" | grep -vE ':[[:space:]]*#'; then
-            echo "::error::a shipped hook reads stdin through /dev/stdin and is INERT in the hook environment; use a bare cat"
-            exit 1
-          fi
-          # And each must still be able to report its own death.
-          for h in "/tmp/$NAME/.claude/hooks"/*.sh; do
-            grep -q 'hook-heartbeat' "$h" || { echo "::error::$(basename "$h") writes no liveness heartbeat"; exit 1; }
-          done
-          echo "hooks: $nhooks shipped, none inert, all writing a heartbeat"
+          # find, not a glob: `for h in dir/*.sh` is non-recursive and would skip a
+          # hook in a subdirectory that `nhooks` had already counted.
+          while IFS= read -r h; do
+            grep -qxF 'INPUT=$(cat)' "$h" \
+              || { echo "::error::$(basename "$h") does not read stdin with a bare \`cat\`. /dev/stdin returns nothing when Claude Code spawns a hook, so the hook would be INERT: it fires, reads zero bytes, falls through its first guard and exits 0 -- indistinguishable from approving."; exit 1; }
+            grep -qE '^[^#]*hook-heartbeat' "$h" \
+              || { echo "::error::$(basename "$h") writes no liveness heartbeat outside a comment; tools/hook-canary.sh would have nothing to read"; exit 1; }
+          done < <(find "/tmp/$NAME/.claude/hooks" -name '*.sh')
+          # The canary is the only thing that can answer "are the hooks alive on THIS
+          # install", and every doc surface tells the user to run it. Shipping the
+          # references without the file is how this class of defect got here.
+          test -f "/tmp/$NAME/tools/hook-canary.sh" || { echo "::error::tools/hook-canary.sh missing from the payload, but the docs tell users to run it"; exit 1; }
+          echo "hooks: $nhooks shipped, all reading stdin correctly, all with a heartbeat, canary present"
           (cd /tmp && zip -qr "$NAME.zip" "$NAME")
           mv "/tmp/$NAME.zip" .
           unzip -l "$NAME.zip" | tail -5

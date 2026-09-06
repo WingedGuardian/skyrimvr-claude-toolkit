@@ -8,13 +8,20 @@
 # advise for what is consequential but legitimate, ask only for what is genuinely
 # the user's decision (exactly one rule here uses it).
 
+HOOK_NAME="protect-bash"
 JQ="{{JQ_PATH}}"
 
 # MEASURED (X4 toolkit 2026-08-29, reproduced on a second machine 2026-09-06):
 # `cat /dev/stdin` returns ZERO BYTES in the Claude Code hook environment, while a
 # bare `cat` returns the payload. A hook that reads nothing falls through its first
-# guard and exits 0 -- byte-identical to deciding "this is fine". A test suite
-# CANNOT catch it: a suite pipes stdin, so /dev/stdin resolves fine there.
+# guard and exits 0 -- byte-identical to deciding "this is fine".
+#
+# WHY NO TEST CAUGHT IT, precisely. /dev/stdin is a symlink to /proc/self/fd/0:
+# it resolves when fd 0 is a real file or an MSYS-shell pipe, and FAILS when fd 0
+# is a Win32 pipe from a non-MSYS parent -- which is how Claude Code (Node) spawns
+# a hook. Python's subprocess does the same, so tests/test_hooks.py DOES detect
+# this on Windows and does NOT on Linux. The real reason it survived is simpler:
+# nothing ran the hooks as processes at all.
 INPUT=$(cat)
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)}"
@@ -23,6 +30,16 @@ AUDIT_LOG="$BACKUP_DIR/AUDIT_LOG.txt"
 HB_DIR="$BACKUP_DIR/.hook-heartbeat"
 
 mkdir -p "$HB_DIR" 2>/dev/null
+
+# jq is how this hook SPEAKS. If it is missing, unset, or still the literal
+# {{JQ_PATH}} placeholder (the user extracted the zip and never ran setup.sh), then
+# deny() and the inert-guard below both emit nothing -- and nothing is read as
+# ALLOW. So the one refusal that must not depend on jq is printed with printf.
+if ! "$JQ" --version >/dev/null 2>&1; then
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"GUARD INERT: %s cannot run jq (%s), so it evaluated NO rules and cannot report a decision. Allowing silently would be indistinguishable from approving. Install jq (winget install jqlang.jq) and run setup.sh to configure its path."}}\n' \
+        "$HOOK_NAME" "$JQ"
+    exit 0
+fi
 if [ -n "$INPUT" ]; then
     printf '%s payload_bytes=%s\n' "$(date +%Y%m%d_%H%M%S)" "${#INPUT}" > "$HB_DIR/protect-bash" 2>/dev/null
 else
@@ -49,16 +66,46 @@ advise() { hooklog ADVISE "$1"; ADVICE="${ADVICE:+$ADVICE | }$1"; }
 # rules for why.
 
 # === HARD BLOCK ===
-# These are v3.8.2's patterns with ONE change: both separators are accepted. The
-# matching is deliberately broad -- an rm naming a Skyrim path is refused outright
-# -- because the cost of a false positive is one rephrased command and the cost of
-# a false negative is the install. A guard written with only forward slashes matched
-# C:/Games/Skyrim and missed C:\Games\Skyrim, while cmd.exe and powershell are both
-# callable, so the backslash form was the one that got through. Do not tighten these
-# without a matrix of real commands in BOTH directions.
-echo "$COMMAND" | grep -qiE 'rm\s+(-[a-z]*f[a-z]*\s+)?["'"'"']?([A-Za-z]:|[/\\][a-z])[/\\].*Skyrim' && deny "BLOCKED: Cannot delete the game installation directory."
-echo "$COMMAND" | grep -qiE 'rm\s+(-[a-z]*f[a-z]*\s+)?["'"'"']?([A-Za-z]:|[/\\][a-z])[/\\].*Documents[/\\]My Games[/\\]Skyrim' && deny "BLOCKED: Cannot delete the Skyrim config directory."
-echo "$COMMAND" | grep -qiE '(reg\s+delete|Remove-ItemProperty.*Bethesda)' && deny "BLOCKED: Cannot delete Bethesda registry keys."
+#
+# ANCHOR ON THE PATH AND THE INTENT, NOT ON ONE SPELLING OF `rm`.
+#
+# The previous rule was `rm\s+(-[a-z]*f[a-z]*\s+)?<path>`: exactly one flag token,
+# which had to contain an `f`. MEASURED -- every one of these reached the game
+# directory unrefused while the README promised they could not:
+#
+#   rm -f -r <game>              two flag tokens
+#   rm -r -f <game>              same
+#   rm --recursive --force <game>  long flags
+#   rm -rf -- <game>             the end-of-options marker
+#   cd <game> && rm -rf .        the path is in the cd, not the rm
+#   G=<game>; rm -rf "$G"        the path is in a variable
+#   rmdir /s /q <game>           not rm at all
+#   del /f /s /q <game>          nor this
+#   Remove-Item -Recurse <game>  nor this, and powershell is allow-listed
+#   find <game> -delete          nor this
+#   python -c "shutil.rmtree(...)"  nor this
+#
+# So the test is now a CONJUNCTION of two independent things: does the command name
+# a destroyer at all, and does it name a qualified path inside a Skyrim install.
+# Neither half alone denies.
+#
+# The cost is honest and deliberate: a compound command that deletes something in
+# /tmp while merely MENTIONING a game path is refused too. That is one rephrase into
+# two commands, against a claim in the README that the game directory cannot be
+# deleted -- and a claim like that has to be true or it should not be made. See
+# tests/test_hooks.py, which pins both the catches and the accepted false positive.
+DESTROYER='(^|[;&|(`]|[[:space:]])(rm|rmdir|del|erase)[[:space:]]|Remove-Item|shutil\.rmtree|rmtree[[:space:]]*\(|[[:space:]]-delete([[:space:]]|$)|Remove-ItemProperty'
+GAME_PATH='([A-Za-z]:|[/\\][a-z])[/\\][^"'"'"']*Skyrim'
+CONFIG_PATH='Documents[/\\]My Games[/\\]Skyrim'
+
+if echo "$COMMAND" | grep -qiE "$DESTROYER"; then
+    echo "$COMMAND" | grep -qiE "$CONFIG_PATH" && deny "BLOCKED: this command would delete inside the Skyrim config directory (Documents/My Games/Skyrim). Your INIs and controlmap live there and are not recoverable from a mod manager."
+    echo "$COMMAND" | grep -qiE "$GAME_PATH" && deny "BLOCKED: this command names both a deletion and a path inside the Skyrim install. If you meant to delete something elsewhere, run it as a separate command that does not also mention the game directory."
+fi
+
+# `reg.exe delete` is the same command as `reg delete`; the old pattern required
+# whitespace immediately after `reg` and missed the .exe form entirely.
+echo "$COMMAND" | grep -qiE '(reg(\.exe)?[[:space:]]+delete|Remove-ItemProperty.*Bethesda)' && deny "BLOCKED: Cannot delete Bethesda registry keys."
 
 # === HARD BLOCK -- tool output aimed straight at a .psc source file ===
 # .psc sources are irreplaceable. Decompilers have been observed to leave the output
@@ -83,7 +130,7 @@ fi
 # exercised with.
 echo "$COMMAND" | grep -qiE 'rm\s.*(\bData[/\\]|Skyrim)' && advise "Deleting files inside the live game install: $COMMAND. Deleting the game ROOT is denied outright; this is a delete further in, which a mod manager can usually redeploy but your own mod files cannot be. Check the path is what you meant."
 echo "$COMMAND" | grep -qiE '(mv|cp|move|copy)\s.*(\bData[/\\]|Skyrim|My Games[/\\]Skyrim)' && advise "Moving/copying inside the live game install: $COMMAND. A stray overwrite here is silent -- confirm the destination before relying on it."
-echo "$COMMAND" | grep -qiE '>\s*["'"'"']?([A-Za-z]:)?[/\\]?[^"'"'"']*(Skyrim|\bData[/\\])' && advise "Redirecting output into the game/config directory: $COMMAND. A redirect TRUNCATES its target before anything is written."
+echo "$COMMAND" | grep -qiE '>\s*["'"'"']?[^"'"'"'[:space:]]*(Skyrim|[/\\]Data[/\\])' && advise "Redirecting output into the game/config directory: $COMMAND. A redirect TRUNCATES its target before anything is written."
 echo "$COMMAND" | grep -qiE 'sed\s+-i.*(\bData[/\\]|Skyrim|My Games[/\\]Skyrim)' && advise "In-place sed edit in the game directory: $COMMAND. A Windows path in sed's REPLACEMENT is destroyed by escape handling -- normalise the path first."
 
 # === ADVISE -- plugin/archive/load order references ===
