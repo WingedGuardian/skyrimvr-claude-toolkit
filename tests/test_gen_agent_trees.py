@@ -139,3 +139,12 @@ def test_every_real_skill_keeps_frontmatter_first():
         assert text.startswith("---\n"), f
         fm_end = text.index("\n---\n", 3) + len("\n---\n")
         assert text[fm_end:].startswith("<!-- GENERATED"), f
+
+
+def test_binaries_under_generated_dirs_are_never_treated_as_text():
+    """A text eol rule on agent/** or .claude/** overrides `*.png binary` and strips CRLF bytes from images."""
+    out = subprocess.run(["git", "check-attr", "text", "--", "agent/skills/x/pic.png", ".claude/skills/x/pic.png",
+                          "agent/skills/x/tex.dds", ".claude/skills/x/clip.wav"],
+                         cwd=REPO, capture_output=True, text=True, check=True).stdout
+    forced = [line for line in out.splitlines() if line.endswith(": text: set")]
+    assert not forced, "binary forced to text:\n" + "\n".join(forced)
