@@ -56,6 +56,12 @@ toolkit to itself.
 | E14 | **Vortex hardlinks:** in the author's install, 140 of 911 plugins and archives in `Data/` are multi-link. The vanilla masters and archives are all single-link and writable. | MEASURED | `os.stat().st_nlink` |
 | E15 | OpenCode: reads `AGENTS.md`, skills from `.agents/skills` and `.claude/skills`, has path-glob permissions, and blocks through plugins by throwing. Open risks: subagent hook coverage, the after-hook firing, WSL advised on Windows. **Not installed here.** | READ-DOCS (X4 research, 2026-09-30) | X4 spec §2 |
 | E16 | Today's guard false-positived on a read-only `grep` whose *pattern* contained deletion words while naming the install path. | MEASURED | this session |
+| E17 | Confirmed on **codex-cli 0.159.2** by the X4 session. Beyond `ask` and exit 2, these ALSO fail open: **exit 1, malformed JSON, a hook timeout, and a missing hook script**. Only a JSON deny blocks. | MEASURED (X4 session) | x4-claude-toolkit `docs/superpowers/measurements/2026-09-30-codex-spike.md` |
+| E18 | Codex hook approval is stored in the user's `~/.codex/config.toml` as `[hooks.state.'<abs hooks.json>:<event>:<i>:<j>'] trusted_hash`, and **the hash covers the hook DEFINITION only**. Editing the called script kept the hook active; changing a definition field (timeout 5→6) made it **silently inert**; restoring the definition byte-for-byte reactivated it. | MEASURED (X4 session) | same |
+| E19 | Codex `.rules`: `prefix_rule decision="forbidden"` **blocked even while the hooks were unreviewed**, matching inside the `pwsh -Command` wrapper. `decision="prompt"` asked the user in the TUI and was **rejected** under `codex exec` with approval=never. That makes it **fail-closed both ways: the only real "ask" on Codex**, and prefix-only. | MEASURED (X4 session) | same |
+| E20 | A launch-time env switch (`X4_GUARD=off`) **cannot be flipped from inside the session**: an agent setting it in-session left every hook still seeing the launch value, under both Codex and `claude -p`. | MEASURED (X4 session) | same |
+| E21 | **Today's guard does NOT block shell writes to plugins/archives; it only advises**: `echo x > Foo.esp`, `Set-Content Foo.esp` (as `Bash` or `PowerShell`), and `Copy-Item … Foo.esp -Force`. `Out-File` into an SKSE `.ini` gives no message at all. The "hard blocked" claim in README/CLAUDE.md holds only for the Edit/Write tools, **under Claude Code as well**. | MEASURED | spike harness, toolkit `protect-bash.sh` @ `aff1857` |
+| E22 | An inherited `icacls <root> /deny <user>:(OI)(CI)(DE,DC)` blocked 8/8 delete primitives and left writes working; a DE deny on the file alone did not hold. Codex's built-in policy rejected `Remove-Item -Force` under approval=never before any hook ran. | MEASURED (X4 session) | same |
 
 ## 3. The layered model
 
@@ -112,6 +118,14 @@ scripts/gen-agent-trees.py    writes every per-agent file
   *and* on `curl … :8920|:8921/api/tool/console`. Save-overwrite via `game save` is ask (deny on Codex).
 - **The E16 false positive:** a deletion word inside a *quoted argument of a read-only command*
   (`grep`, `rg`, `Select-String`) does not count as a deletion.
+- **Shell writes to plugins/archives (closes E21, for Claude as well).** Corrupting write primitives into
+  `*.esp|esm|esl|bsa|ba2` are **deny**: `>`/`>>`, `tee`, `Set-Content`, `Add-Content`, `Out-File`,
+  `[IO.File]::Write*`. Copy/move *onto* such a file (`cp`, `mv`, `Copy-Item`, `Move-Item`) is **ask**,
+  because deploying our own mod's freshly built ESP into `Data/` is a legitimate workflow. Tools that write
+  plugins through a proper library (`node … xelib`, `spriggit-cli.sh`, `automod-cli.sh`) are not matched.
+  The README and core-instruction claim is corrected to match whatever the engine actually enforces.
+  This is an **intentional strengthening**: the equivalence gate (§7.2) lists it as an expected
+  difference, row by row.
 
 **Contract** (versioned; JSON on stdin, JSON on stdout):
 ```
@@ -125,7 +139,18 @@ verdict: {v:1, decision: allow|ask|deny, reason, context, log[]}
 - Map the agent's own payload to a request. Codex patch paths are extracted by **one shared engine helper**.
 - Map the verdict back. Claude passes through. **Codex receives only deny-JSON or `additionalContext`.**
   `ask` becomes deny with "needs your confirmation — run it yourself if intended". **Never exit 2, never `ask`**
-  (E1).
+  (E1, E17).
+- **Codex second line: generated `.codex/rules/skyrim.rules`.** Every rule that can be expressed as a command
+  prefix is also emitted there: denies as `decision="forbidden"`, asks as `decision="prompt"`. This gives
+  Codex a real, fail-closed ask for prefix-matchable cases (ReSaver `--apply` modes, DevBench console
+  `curl`), and **a block that holds even while the hooks are unreviewed** (E19, mitigating E2). Path-based
+  rules cannot be expressed as prefixes and stay hook-only.
+- **The hook definitions in `.codex/hooks.json` are frozen across releases** (E18). A definition change
+  silently disarms every user's approved hook. All behaviour lives in the scripts the definitions call. A CI
+  gate fails if a definition differs from the last tagged release, unless the CHANGELOG carries a
+  "re-approve your Codex hooks" entry.
+- **A timeout fails open on Codex (E17)**, and the wrapper cannot catch it. The Codex hook timeout is 60 s,
+  and the latency gate (§7.5) is the protection.
 - Declare the agent's context limit.
 - Write a heartbeat per invocation (feeds `hook-canary` and `skydoctor`).
 - The wrapper **denies by itself** if the engine is missing, crashes, or prints nothing parseable.
@@ -159,6 +184,9 @@ no interpreter, an unparseable payload or command, an install root that can't be
   hardlinked copy is never locked (E14). MO2's `mods/` is never locked.
 - **Mechanism:** the read-only attribute (`attrib +R`). It needs no admin and one command reverses it. A
   refused write names the unlock command.
+  - *Considered and rejected for `Data/`:* X4's inherited deny-delete ACL (E22). It stops deletes but not
+    overwrites (the vanilla risk), and an inherited deny on `Data/` would break Vortex's purge, which
+    deletes its hardlinks.
 - **Recovery for everything else:** rate-limited snapshots of `plugins.txt`/`loadorder.txt`, the INIs and the
   save folder before risky commands (the same mechanism as today's `.psc` snapshot), plus
   `scripts/restore-from-backup.sh`.
@@ -201,13 +229,17 @@ Shipped `CLAUDE.md` is 53,772 bytes. These sections move out; none is deleted:
    hand-written from docs. The 2026-09-30 Codex captures are the first fixtures. The Claude `PowerShell` tool
    payload is captured as well.
 4. **Adapter mutants**, each of which must turn conformance red: drop paths; deny→allow; swallow engine
-   errors; emit `ask` to Codex; emit exit 2 to Codex.
+   errors; emit `ask` to Codex; emit exit 2 to Codex; emit malformed JSON; change a frozen `hooks.json`
+   definition field (E18).
 5. **Live end-to-end release gate** (run locally, not in CI): `claude -p` and `codex exec` against a scratch
    install copy, in Git Bash and PowerShell. It proves that these are blocked with the reason visible: a
    decoy `.esp` write, a delete in the install, a delete in MO2 `mods/`, and a DevBench `smp reset`. It
    proves backups and snapshots happen, session-start checks appear, untrusted Codex hooks are reported by
    `skydoctor`, and that a `guards off` → action → session-restart cycle relocks.
    **Hook latency is taken from the hook logs** (95th percentile ≤ 1 s).
+   Probes use **non-delete writes** wherever possible, because Codex's built-in policy can reject a
+   delete before the hook runs (E22), which would make the test pass for the wrong reason. Probes
+   also run once with the hooks unreviewed, to prove that the `.rules` forbidden rules still hold (E19).
 6. **Layer 2** gate M-L2 (§9).
 7. **CI** (existing workflows): generator drift, conformance for all adapters, the `AGENTS.md` byte budget, the
    neutrality gate, `setup.sh --agent` for each value, cold install, upgrade from 3.9.1, the toy agent (D7),
@@ -234,7 +266,7 @@ Shipped `CLAUDE.md` is 53,772 bytes. These sections move out; none is deleted:
 | # | Question | Blocks | If it fails |
 |---|---|---|---|
 | M1 | Capture real payloads: Claude `Bash`, `PowerShell`, `Edit`, `Write`, MCP; Codex Bash (pwsh), `apply_patch` add/update/delete, MCP, SessionStart startup/compact | 4, 6 | adapter built only from captures |
-| M2 | Can an in-session command change what the hooks see (env var, state file)? Per agent | 7 | §5.2 state-file integrity rule redesigned |
+| M2 | Can an agent forge `.skyguard/state.json` past the checksum rule, per agent? (The env-var half is answered by E20: launch env cannot be changed in-session.) | 7 | §5.2 state-file integrity rule redesigned |
 | **M-L2** | On a **scratch copy** of the vanilla files: (a) `skyguard lock`/`unlock` from inside a Claude **and** a Codex session, no admin; (b) xEdit loads the full order with locked masters, warning at most; clean-after-unlock and relock work; (c) Wrye Bash launches, scans, builds a Bashed Patch, and ghosting works against locked masters; (d) Git Bash `rm -f`, `Remove-Item -Force` and an xEdit save are stopped; (e) Steam "verify files" with the lock present | 7 | Layer 2 = recovery only (D5 option B) |
 | M4 | Hook latency in live sessions (E10 caveat) | release | investigate before release |
 
@@ -286,6 +318,11 @@ Written to the agent: *"you are an agent this toolkit does not support yet."*
 
 ## 13. Open questions (genuinely undecided)
 
-1. **Ship the `Bash|PowerShell` matcher fix (E12) as a v3.9.2 patch now, or only in v4.0.0?**
-   Today's toolkit users on Windows Claude Code with the PowerShell tool have no delete guard. A patch
-   release means a `release-review` cycle now, for a one-line change plus a test.
+1. **Ship a v3.9.2 patch now, or wait for v4.0.0?** It would contain two fixes to today's guards, each with
+   corpus tests:
+   - the `Bash|PowerShell` matcher (E12): Windows Claude Code users whose commands run through the
+     PowerShell tool have no delete guard;
+   - shell writes to plugins/archives become deny or ask (E21): today they only advise, contradicting the
+     "hard blocked" claim.
+
+   A patch release means a `release-review` cycle now. v4.0.0 is several phases away.
