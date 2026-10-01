@@ -148,3 +148,16 @@ def test_binaries_under_generated_dirs_are_never_treated_as_text():
                          cwd=REPO, capture_output=True, text=True, check=True).stdout
     forced = [line for line in out.splitlines() if line.endswith(": text: set")]
     assert not forced, "binary forced to text:\n" + "\n".join(forced)
+
+
+def test_write_refuses_an_installed_copy_and_leaves_it_untouched(tmp_path, capsys):
+    """Regenerating inside an install would reset setup.sh's filled placeholders, disarming every hook."""
+    g = _gen()
+    _scratch_source(tmp_path)
+    assert g.main(["--root", str(tmp_path)]) == 0
+    hook = tmp_path / ".claude" / "hooks" / "h.sh"
+    configured = hook.read_bytes().replace(b"{{JQ_PATH}}", b"C:/jq.exe")
+    hook.write_bytes(configured)
+    assert g.main(["--root", str(tmp_path)]) == 2
+    assert hook.read_bytes() == configured
+    assert "setup.sh" in capsys.readouterr().out

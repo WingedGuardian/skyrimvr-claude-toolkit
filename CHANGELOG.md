@@ -8,9 +8,14 @@
   `.claude/hooks/` and `.claude/settings.json` are written by `python scripts/gen_agent_trees.py` from
   the sources in `agent/`. Edit there, regenerate, and commit both. CI runs
   `gen_agent_trees.py --check` and fails on any difference, so a hand edit of a generated file
-  cannot land. Users are unaffected: the installed files are byte-identical apart from one
-  `GENERATED` header line each (JSON files have none). This is groundwork for Codex and other-agent
-  support (see `docs/superpowers/specs/2026-09-30-universal-agent-support-design.md`).
+  cannot land. Behaviour for users is unchanged: every installed file is byte-identical to before
+  apart from one `GENERATED` header line (JSON files have none). An install now also contains
+  `agent/` and the generator. Running the generator inside an install that `setup.sh` configured
+  is **refused** (exit 2, nothing written), because regenerating there would put the placeholders
+  back and leave every hook unconfigured. This is groundwork for Codex and other-agent support (see
+  `docs/superpowers/specs/2026-09-30-universal-agent-support-design.md`).
+- **Hook payload fixtures** captured from real Claude Code and Codex sessions
+  (`tests/fixtures/payloads/`), with the capture and scrub tools in `tools/payload-capture/`.
 
 ## v3.9.1 — 2026-09-09
 
