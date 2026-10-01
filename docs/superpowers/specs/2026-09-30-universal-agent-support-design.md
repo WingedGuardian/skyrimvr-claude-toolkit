@@ -272,7 +272,6 @@ Shipped `CLAUDE.md` is 53,772 bytes. These sections move out; none is deleted:
 
 ## 10. Phases
 
-0. **(Pending a user decision, §13)** The `Bash|PowerShell` matcher fix to v3.9.x.
 1. Measurements M1, M2.
 2. Neutral source + generator, **Claude target only**: generated `.claude/` byte-identical to today's apart
    from headers.
@@ -316,13 +315,7 @@ Written to the agent: *"you are an agent this toolkit does not support yet."*
 - **The read-only lock surprises a modder** cleaning masters. Mitigation: the error message names the unlock
   command, and the D6 lift flow makes it one step.
 
-## 13. Open questions (genuinely undecided)
+## 13. Resolved during review
 
-1. **Ship a v3.9.2 patch now, or wait for v4.0.0?** It would contain two fixes to today's guards, each with
-   corpus tests:
-   - the `Bash|PowerShell` matcher (E12): Windows Claude Code users whose commands run through the
-     PowerShell tool have no delete guard;
-   - shell writes to plugins/archives become deny or ask (E21): today they only advise, contradicting the
-     "hard blocked" claim.
-
-   A patch release means a `release-review` cycle now. v4.0.0 is several phases away.
+- **D13 (user, 2026-09-30): no v3.9.2 patch.** The E12 matcher fix and the E21 shell-write rules ship in
+  v4.0.0. The v4.0.0 CHANGELOG names both as security fixes to the 3.x guards.
