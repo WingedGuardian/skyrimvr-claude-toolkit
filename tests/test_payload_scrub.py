@@ -6,6 +6,7 @@ import subprocess
 
 from conftest import BASH, REPO
 
+BS = chr(92)  # backslash, spelled this way to keep escapes out of this file (as conftest does)
 HOME = "C:\\Users\\Moona"
 
 
@@ -66,3 +67,19 @@ def test_capture_hook_saves_the_payload_verbatim_and_never_speaks(tmp_path):
 def test_capture_hook_is_inert_without_a_capture_dir(tmp_path):
     r = _capture('{"a": 1}', None)
     assert r.returncode == 0 and r.stdout == ""
+
+
+def test_every_id_field_is_scrubbed_including_new_ones():
+    """Agents add id fields over time (Claude 2.1.287 added prompt_id); any *_id key is an id."""
+    s = _scrub()({**RAW, "prompt_id": "1742d334-dc53", "future_thing_id": "x"}, HOME)
+    assert s["prompt_id"] == "<id>" and s["future_thing_id"] == "<id>"
+
+
+def test_paths_under_the_session_cwd_lose_the_cwd():
+    """The capture project's own path (with the session id in it) must not survive inside file paths."""
+    cwd = "C:/Users/Moona/AppData/Local/Temp/claude/sess-123/capclaude".replace("/", BS)
+    raw = {**RAW, "cwd": cwd, "tool_name": "Write",
+           "tool_input": {"file_path": cwd + BS + "notes.txt", "content": "a"}}
+    s = _scrub()(raw, HOME)
+    assert s["tool_input"]["file_path"] == "<cwd>" + BS + "notes.txt"
+    assert "sess-123" not in json.dumps(s)

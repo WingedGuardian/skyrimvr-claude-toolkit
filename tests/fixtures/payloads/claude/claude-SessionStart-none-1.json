@@ -1,0 +1,7 @@
+{
+  "cwd": "<path>",
+  "hook_event_name": "SessionStart",
+  "session_id": "<id>",
+  "source": "startup",
+  "transcript_path": "<path>"
+}

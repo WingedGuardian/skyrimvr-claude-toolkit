@@ -1,0 +1,19 @@
+{
+  "cwd": "<path>",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "bypassPermissions",
+  "prompt_id": "<id>",
+  "session_id": "<id>",
+  "tool_input": {
+    "file_path": "<cwd>\\notes.txt",
+    "new_string": "b",
+    "old_string": "a",
+    "replace_all": false
+  },
+  "tool_name": "Edit",
+  "tool_use_id": "<id>",
+  "transcript_path": "<path>"
+}

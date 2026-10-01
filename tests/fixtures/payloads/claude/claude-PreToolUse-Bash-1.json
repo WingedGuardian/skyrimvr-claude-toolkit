@@ -1,0 +1,17 @@
+{
+  "cwd": "<path>",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "bypassPermissions",
+  "prompt_id": "<id>",
+  "session_id": "<id>",
+  "tool_input": {
+    "command": "echo hi",
+    "description": "Print hi"
+  },
+  "tool_name": "Bash",
+  "tool_use_id": "<id>",
+  "transcript_path": "<path>"
+}

@@ -1,0 +1,17 @@
+{
+  "cwd": "<path>",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "bypassPermissions",
+  "prompt_id": "<id>",
+  "session_id": "<id>",
+  "tool_input": {
+    "content": "a",
+    "file_path": "<cwd>\\notes.txt"
+  },
+  "tool_name": "Write",
+  "tool_use_id": "<id>",
+  "transcript_path": "<path>"
+}

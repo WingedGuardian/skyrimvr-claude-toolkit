@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Turn raw captured hook payloads into committed test fixtures.
 
-Replaces session/turn/tool-use ids with <id>, transcript_path and cwd with <path>, and the
-user's home folder -- in every spelling a payload can carry it -- with <HOME>. The shape and
-every other value are kept: fixtures exist to pin the agent's real payload format.
+Replaces every id field (any key ending in `_id`) with <id>, transcript_path and cwd with <path>,
+paths under the session's cwd with <cwd>, and the user's home folder with <HOME> -- each in every
+spelling a payload can carry it. The shape and every other value are kept: fixtures exist to pin
+the agent's real payload format.
 """
 from __future__ import annotations
 
@@ -13,39 +14,54 @@ import re
 import sys
 from pathlib import Path
 
-ID_KEYS = {"session_id", "turn_id", "tool_use_id"}
 PATH_KEYS = {"transcript_path", "cwd"}
+_ABS = re.compile(r"^(?:[A-Za-z]:[\\/]|/[A-Za-z]/)")
 
 
-def _home_pattern(home: str) -> re.Pattern:
-    h = home.replace("\\", "/").rstrip("/")            # C:/Users/Name
-    drive, rest = h[0], h[2:]                          # C, /Users/Name
+def _is_id_key(k: str) -> bool:
+    # Agents add id fields over time (Claude Code 2.1.287 added prompt_id), so match the shape.
+    return k == "id" or k.endswith("_id")
+
+
+def _path_pattern(path: str) -> re.Pattern:
+    """Match an absolute Windows path in any spelling: C:\\x, C:/x, a JSON-escaped C:\\\\x, /c/x."""
+    h = path.replace("\\", "/").rstrip("/")
+    if h.startswith("/") and len(h) > 2 and h[2] == "/":     # /c/Users/... (MSYS)
+        drive, rest = h[1], h[2:]
+    else:                                                    # C:/Users/...
+        drive, rest = h[0], h[2:]
     parts = [re.escape(p) for p in rest.strip("/").split("/")]
-    sep = r"(?:\\\\|\\|/)"                             # \\  \  /
+    sep = r"(?:\\\\|\\|/)"                                    # \\  \  /
     body = sep + sep.join(parts)
-    return re.compile(rf"(?:{drive}:|/{drive.lower()}|/{drive}){body}", re.IGNORECASE)
+    return re.compile(rf"(?:{drive}:|/{drive}){body}", re.IGNORECASE)
 
 
-def _walk(v, pat):
+def _walk(v, subs):
     if isinstance(v, dict):
-        return {k: _walk(x, pat) for k, x in v.items()}
+        return {k: _walk(x, subs) for k, x in v.items()}
     if isinstance(v, list):
-        return [_walk(x, pat) for x in v]
+        return [_walk(x, subs) for x in v]
     if isinstance(v, str):
-        return pat.sub("<HOME>", v).replace("<HOME>\\", "<HOME>/")
+        for pat, token in subs:
+            v = pat.sub(token, v)
+        return v.replace("<HOME>\\", "<HOME>/")
     return v
 
 
 def scrub(payload: dict, home: str) -> dict:
-    pat = _home_pattern(home)
+    subs = []
+    cwd = payload.get("cwd")
+    if isinstance(cwd, str) and _ABS.match(cwd):             # most specific first
+        subs.append((_path_pattern(cwd), "<cwd>"))
+    subs.append((_path_pattern(home), "<HOME>"))
     out = {}
     for k, v in payload.items():
-        if k in ID_KEYS:
+        if _is_id_key(k):
             out[k] = "<id>"
         elif k in PATH_KEYS:
             out[k] = "<path>"
         else:
-            out[k] = _walk(v, pat)
+            out[k] = _walk(v, subs)
     return out
 
 
