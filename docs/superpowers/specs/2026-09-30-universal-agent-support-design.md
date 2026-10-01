@@ -28,6 +28,9 @@ toolkit to itself.
 | D10 | **`KNOWLEDGEBASE.local.md` holds the user's facts AND instructions**: a fixed `## My preferences` section is read every session, and the rest is consulted before changes. |
 | D11 | **The full testing set** (§7), including the live end-to-end release gate. |
 | D12 | **Python engine (`skyguard`)**, confirmed by the latency spike (§2, E10). |
+| D14 | *(plan review, 2026-10-01)* **Surface policy for every agent, not just Codex.** The CLI is the must-have (Codex: interactive TUI + `codex exec`). Every other surface (desktop app, IDE extensions, other agents' GUIs) is claimed **only once a live probe proves its hooks fire**; more surfaces are better. A surface whose hooks don't fire is "Layers 0–2 only", and `skydoctor`/canary detect that per session from heartbeats rather than assuming it (E24). |
+| D15 | *(plan review)* **Preferences are injected.** Named agents get `KNOWLEDGEBASE.local.md` → `## My preferences` from the SessionStart hook (E5). The "read it" instruction stays as the fallback for unknown agents. |
+| D16 | *(plan review)* **Codex `failureMode: "block"`** ([openai/codex#41979](https://github.com/openai/codex/issues/41979)) is adopted once a live test proves a crashing hook blocks. That is a one-time change to the frozen definitions, with a CHANGELOG "re-approve" entry. **Not available on 0.159.3 (E25).** |
 
 ### Non-goals
 
@@ -62,6 +65,11 @@ toolkit to itself.
 | E20 | A launch-time env switch (`X4_GUARD=off`) **cannot be flipped from inside the session**: an agent setting it in-session left every hook still seeing the launch value, under both Codex and `claude -p`. | MEASURED (X4 session) | same |
 | E21 | **Today's guard does NOT block shell writes to plugins/archives; it only advises**: `echo x > Foo.esp`, `Set-Content Foo.esp` (as `Bash` or `PowerShell`), and `Copy-Item … Foo.esp -Force`. `Out-File` into an SKSE `.ini` gives no message at all. The "hard blocked" claim in README/CLAUDE.md holds only for the Edit/Write tools, **under Claude Code as well**. | MEASURED | spike harness, toolkit `protect-bash.sh` @ `aff1857` |
 | E22 | An inherited `icacls <root> /deny <user>:(OI)(CI)(DE,DC)` blocked 8/8 delete primitives and left writes working; a DE deny on the file alone did not hold. Codex's built-in policy rejected `Remove-Item -Force` under approval=never before any hook ran. | MEASURED (X4 session) | same |
+| E23 | Codex exit 2 failing to block is the **Windows-only** bug [openai/codex#48183](https://github.com/openai/codex/issues/48183): hooks run under `pwsh -Command`, which turns 2 into 1. JSON deny remains the only rule. | READ (issue) | |
+| E24 | [openai/codex#24453](https://github.com/openai/codex/issues/24453): some Windows Codex command executions emit **no PreToolUse at all**, even with matcher `"*"`. This is why D14 exists. | READ (issue) | |
+| E25 | A hook `failureMode: "block"` is **ignored silently on codex-cli 0.159.3**: a hook exiting 1 showed "Failed" and the command ran. | MEASURED | `docs/superpowers/measurements/2026-10-01-plan1-derisk.md` R8 |
+| E26 | `codex exec` 0.159.3 fires `PreToolUse` for shell (pwsh) and for all three `apply_patch` forms, plus `SessionStart`. | MEASURED | same, R7 |
+| E27 | `claude -p` (Claude Code 2.1.287) fires project `PreToolUse` hooks with matcher `"*"` for `Bash`, `PowerShell`, `Write` and `Edit`, plus `SessionStart`. | MEASURED | same, R6 |
 
 ## 3. The layered model
 
@@ -209,8 +217,10 @@ Shipped `CLAUDE.md` is 53,772 bytes. These sections move out; none is deleted:
   largest addendum exceeds 32,768, *Safety Rules* gives up its hook-internals subsection to `docs/safety-philosophy.md`.
 - **Gates:** generated `AGENTS.md` ≤ 32,768 bytes, and a **neutrality gate** fails if the core names a
   Claude-only tool or variable (`Edit`, `Write`, `CLAUDE_PROJECT_DIR`, `/hooks`, …).
-- **The core tells every agent:** read `KNOWLEDGEBASE.local.md` → `## My preferences` every session, and the
-  rest before changes (D10). This is plain text, not `@import` (Codex does not expand imports).
+- **Preferences reach the agent two ways (D10, D15):** for named agents the SessionStart hook injects
+  `KNOWLEDGEBASE.local.md` → `## My preferences`. As the fallback for unknown agents, the core also tells
+  every agent to read that section every session, and the rest of the file before changes. This is plain
+  text, not `@import` (Codex does not expand imports).
 - The prompt-audit fixes from 2026-09-30 that apply to the toolkit go into the core and skills during the split:
   the Caprica invocation, the Precision line in `port-to-vr`, the `skyrim-nif` "all mesh work" line, the
   `GetFormFromFile` own-plugin scoping, the AMR/SCAR lines, and the `inspect-esp` script path. Each is
