@@ -33,3 +33,12 @@
 # "bad interpreter: /bin/bash^M" -- the exact failure the block above prevents
 # for *.sh. Caught by a fresh-clone check, not in CI.
 tests/bin/* text eol=lf
+
+# Files owned by scripts/gen_agent_trees.py, and its source. The generator writes LF and
+# its drift gate compares bytes, so an autocrlf checkout must not rewrite these.
+CLAUDE.md          text eol=lf
+AGENTS.md          text eol=lf
+.claude/**         text eol=lf
+agent/**           text eol=lf
+*.md               text eol=lf
+*.env.example      text eol=lf
