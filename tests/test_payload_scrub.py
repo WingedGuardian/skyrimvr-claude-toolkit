@@ -83,3 +83,17 @@ def test_paths_under_the_session_cwd_lose_the_cwd():
     s = _scrub()(raw, HOME)
     assert s["tool_input"]["file_path"] == "<cwd>" + BS + "notes.txt"
     assert "sess-123" not in json.dumps(s)
+
+
+def test_posix_homes_are_scrubbed():
+    """Linux and macOS contributors capture too; their home must not survive either."""
+    linux = _scrub()({"tool_input": {"command": "cat /home/moona/.bashrc"}}, "/home/moona")
+    mac = _scrub()({"tool_input": {"command": "ls /Users/moona/x"}}, "/Users/moona")
+    assert linux["tool_input"]["command"] == "cat <HOME>/.bashrc"
+    assert mac["tool_input"]["command"] == "ls <HOME>/x"
+
+
+def test_posix_cwd_is_scrubbed_from_paths():
+    raw = {"cwd": "/home/moona/scratch/cap", "tool_input": {"file_path": "/home/moona/scratch/cap/notes.txt"}}
+    s = _scrub()(raw, "/home/moona")
+    assert s["tool_input"]["file_path"] == "<cwd>/notes.txt"

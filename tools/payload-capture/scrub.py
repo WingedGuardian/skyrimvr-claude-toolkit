@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 PATH_KEYS = {"transcript_path", "cwd"}
-_ABS = re.compile(r"^(?:[A-Za-z]:[\\/]|/[A-Za-z]/)")
+_ABS = re.compile(r"^(?:[A-Za-z]:[\\/]|/)")          # Windows drive, MSYS /c/..., or POSIX
 
 
 def _is_id_key(k: str) -> bool:
@@ -24,9 +24,14 @@ def _is_id_key(k: str) -> bool:
 
 
 def _path_pattern(path: str) -> re.Pattern:
-    """Match an absolute Windows path in any spelling: C:\\x, C:/x, a JSON-escaped C:\\\\x, /c/x."""
+    """Match an absolute path in any spelling it can take in a payload.
+
+    Windows (C:\\x, C:/x, a JSON-escaped C:\\\\x, MSYS /c/x) or POSIX (/home/u, /Users/u).
+    """
     h = path.replace("\\", "/").rstrip("/")
-    if h.startswith("/") and len(h) > 2 and h[2] == "/":     # /c/Users/... (MSYS)
+    if h.startswith("/") and not (len(h) > 2 and h[2] == "/"):  # POSIX: /home/u, /Users/u
+        return re.compile(re.escape(h))
+    if h.startswith("/"):                                    # /c/Users/... (MSYS)
         drive, rest = h[1], h[2:]
     else:                                                    # C:/Users/...
         drive, rest = h[0], h[2:]

@@ -1,5 +1,6 @@
 """Fixtures captured from REAL sessions (spec §7.3) -- never hand-written from docs."""
 import json
+from pathlib import Path
 
 from conftest import REPO
 
@@ -28,8 +29,11 @@ def test_codex_patches_cover_add_update_and_delete():
 
 
 def test_no_fixture_carries_the_capturing_users_home():
+    """Runs on whoever captures, so it checks THEIR user name, case-insensitively."""
+    user = Path.home().name.lower()
+    assert len(user) >= 3, f"user name {user!r} too short to search for meaningfully"
     for agent in REQUIRED:
         loaded = _load(agent)
         assert loaded, f"{agent}: no fixtures -- an empty set would pass this check vacuously"
         for name, p in loaded.items():
-            assert "Moona" not in json.dumps(p), name
+            assert user not in json.dumps(p).lower(), name
