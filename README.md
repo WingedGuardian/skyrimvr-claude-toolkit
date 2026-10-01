@@ -454,6 +454,12 @@ manual.
 
 Found a new Skyrim quirk? PRs welcome on [GitHub](https://github.com/WingedGuardian/skyrimvr-claude-toolkit) -- especially additions to `KNOWLEDGEBASE.md`.
 
+### Editing CLAUDE.md, skills, hooks or settings
+
+These are **generated**. Edit the source under `agent/` (see `agent/README.md` for the map), then run
+`python scripts/gen_agent_trees.py` and commit both. CI runs `--check` and rejects a hand edit of a
+generated file.
+
 ### Running the tests
 
 The suite is dev-only and is not in the release zip. From a clone:

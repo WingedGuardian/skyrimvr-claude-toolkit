@@ -68,4 +68,6 @@ The hook scripts are designed to be customized -- but ⚠ **they are shipped fil
 - **Add new patterns** to the bash guard for commands specific to your workflow
 - **Adjust the confirmation threshold** -- some users may want less friction for frequently-edited files
 
-Edit the scripts in `.claude/hooks/` to match your workflow.
+Edit the scripts in `.claude/hooks/` to match your workflow. (Contributing a change back? Edit
+`agent/guards/legacy-bash/` instead and regenerate. The `.claude/hooks/` copies in the repository are
+generated.)

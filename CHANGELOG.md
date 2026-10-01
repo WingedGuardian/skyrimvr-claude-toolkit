@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased (v4.0.0 in progress)
+
+### 🧰 For contributors
+
+- **Agent-facing files are now generated from `agent/`.** `CLAUDE.md`, `AGENTS.md`, `.claude/skills/`,
+  `.claude/hooks/` and `.claude/settings.json` are written by `python scripts/gen_agent_trees.py` from
+  the sources in `agent/`. Edit there, regenerate, and commit both. CI runs
+  `gen_agent_trees.py --check` and fails on any difference, so a hand edit of a generated file
+  cannot land. Users are unaffected: the installed files are byte-identical apart from one
+  `GENERATED` header line each (JSON files have none). This is groundwork for Codex and other-agent
+  support (see `docs/superpowers/specs/2026-09-30-universal-agent-support-design.md`).
+
 ## v3.9.1 — 2026-09-09
 
 ### 🔒 Security / safety
