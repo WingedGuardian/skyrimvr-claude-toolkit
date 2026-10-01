@@ -608,6 +608,15 @@ MUTATIONS = [
         "tests/test_repo_invariants.py::test_every_registered_hook_has_a_timeout_that_is_not_the_old_five_seconds",
         id="hook-timeouts-are-not-the-old-five-seconds",
     ),
+    # Hand-edit a generated file. agent/ is the only source; an edit made to the generated
+    # copy would be silently overwritten by the next regeneration, so CI must refuse it.
+    pytest.param(
+        ".claude/skills/skyrim-bsa/SKILL.md",
+        "# BSA/BA2 Archive Operations",
+        "# BSA/BA2 Archive Operations (hand-edited)",
+        "tests/test_gen_agent_trees.py::test_repo_is_in_sync",
+        id="generated-files-cannot-be-hand-edited",
+    ),
     # Pin the canary red forever again: report BLIND on the mere existence of a
     # marker, without asking whether a good payload arrived since. An instrument
     # that cannot go back to green gets ignored, which is the same end state as

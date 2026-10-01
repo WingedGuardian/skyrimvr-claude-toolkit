@@ -124,3 +124,18 @@ def test_crlf_target_file_generates_lf(tmp_path):
     src = _scratch_source(tmp_path)
     (src / "targets" / "claude" / "settings.local.json.example").write_bytes(b'{\r\n  "a": 1\r\n}\r\n')
     assert _gen().render("claude", src)[".claude/settings.local.json.example"] == b'{\n  "a": 1\n}\n'
+
+
+def test_repo_is_in_sync():
+    """The committed generated files equal what agent/ renders. Fails on a hand edit or a stale regen."""
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "gen_agent_trees.py"), "--check"],
+                       cwd=REPO, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_every_real_skill_keeps_frontmatter_first():
+    for f in sorted((REPO / ".claude" / "skills").glob("*/SKILL.md")):
+        text = f.read_text(encoding="utf-8")
+        assert text.startswith("---\n"), f
+        fm_end = text.index("\n---\n", 3) + len("\n---\n")
+        assert text[fm_end:].startswith("<!-- GENERATED"), f
