@@ -55,3 +55,12 @@ SSE/VR saves use LZ4 compression. General layout of the decompressed data:
 - **Read-only** — cannot edit or write back valid saves
 - **Binary search only** — cannot parse structured Papyrus instance data (variable values, active effect state)
 - For structured save editing, use [ReSaver](https://www.nexusmods.com/skyrimspecialedition/mods/5031) (Java GUI)
+
+## ReSaver CLI (headless, `tools/resaver-cli.sh`)
+
+`bash tools/resaver-cli.sh <op> <save.ess>` runs ReSaver's library without its GUI. Needs JDK 17+ and ReSaver's jar (see `docs/installing-tools.md`).
+
+- **Read ops:** `info|dump|find|find-refs|worries|recon|changeform|extradata-scan|changeform-diff|freeze-report|globaldata|globaldata-diff`. The op list with arguments is the header comment of `tools/resaver-cli.sh`.
+- **Write ops:** `set-global|set-var|clean|reset-havok|cleanse-formlists|remove-created`. Each is a dry run unless `--apply`, and always writes a NEW file.
+- `verify-roundtrip` is a self-test. Every `--apply` is verify-gated: the file is re-read and must equal the model, or the output is deleted and the op fails.
+- Resolve FormID to EditorID with `tools/resaver-resolve-names.js`.

@@ -21,6 +21,14 @@ Before making any change, Claude is instructed to check the knowledgebase for kn
 ### Layer 2: Confidence Levels
 Claude must explicitly rate its confidence (0-100%) before proposing any change and list assumptions. This forces investigation before action.
 
+#### Confidence scale
+| Range | Meaning | Action |
+|-------|---------|--------|
+| 95-100% | Verified via testing, docs, or authoritative source | Proceed with user confirmation |
+| 80-94% | Strong evidence but not fully verified | Proceed with caveats noted |
+| 60-79% | Reasonable assumption, some unknowns | Research more before proceeding |
+| < 60% | Speculative | Do NOT proceed -- investigate first |
+
 ### Layer 3: Hook Guards
 Five thin wrappers over the Python engine `tools/skyguard/` intercept Claude's tool calls:
 

@@ -30,7 +30,7 @@ All under `tools/`:
 | **AutoMod CLI** | NIF meshes, BSA archives, audio, MCM, ESP one-liners | `bash tools/automod-cli.sh <module> <command> --json` |
 | **PyFFI** | NIF geometry edit — **NiTriShape (LE-format) ONLY** (any modern Python with setuptools) | See PyFFI / PyNifly below; recipes in the skyrim-nif skill |
 | **PyNifly** | NIF read/write incl. **BSTriShape (SSE)** + **animation/controller authoring** (Python, prebuilt DLL) | See PyFFI / PyNifly below; recipes in the skyrim-nif skill |
-| **ReSaver CLI** | Headless `.ess` save parse / query / cross-reference / clean / changeform-level diagnostics | `bash tools/resaver-cli.sh <op> <save.ess>` — read ops: `info\|dump\|find\|find-refs\|worries\|recon\|changeform\|extradata-scan\|changeform-diff\|freeze-report\|globaldata\|globaldata-diff`; write ops (dry-run unless `--apply`, always a NEW file): `set-global\|set-var\|clean\|reset-havok\|cleanse-formlists\|remove-created`; `verify-roundtrip` self-test. Every `--apply` is verify-gated (re-read==model or delete+fail). Resolve FormID→EditorID via `tools/resaver-resolve-names.js`. Needs JDK 17+ + ReSaver's jar (see `docs/installing-tools.md`). |
+| **ReSaver CLI** | Headless `.ess` save parse / query / cross-reference / clean | `bash tools/resaver-cli.sh <op> <save.ess>` — op list and rules: skill `skyrim-save` (write ops are dry-run unless `--apply`, always a NEW file). Needs JDK 17+ + ReSaver's jar (see `docs/installing-tools.md`). |
 | **cosave-info** | READ-ONLY structural survey of an SKSE `.skse` co-save → JSON (which mods stashed co-save data + how much) | `bash tools/cosave-cli.sh <cosave.skse>` (Python 3; the cosave sits next to its `.ess`) |
 | **skyrim-winner** | **"Which plugin actually wins this record?"** Loads the FULL active load order and asks xEdit. No index, no cache -- xEdit is the authority. | `bash tools/skyrim-winner.sh <winner\|chain> <formid> [plugin]` · `... conflicts <plugin>` -- needs **xeditlib**; skill `triage-and-conflicts` |
 | **papyrus-triage** | Turns `Papyrus.N.log` into bucketed, attributed counts. Rows **sum to the entry count**; the not-shown row prints even at zero. | `python tools/papyrus-triage.py [logfile] [--top N] [--all]` -- bundled, Python 3, no install |
@@ -259,13 +259,7 @@ Mod development requires many experimental iterations. Without snapshots, revert
 4. **Target >= 90% confidence** before touching anything. If below 90%, document what's uncertain and what additional research would raise it.
 5. **Never assume Skyrim SE behavior = Skyrim VR behavior.** Always verify VR-specific differences.
 
-### Confidence scale
-| Range | Meaning | Action |
-|-------|---------|--------|
-| 95-100% | Verified via testing, docs, or authoritative source | Proceed with user confirmation |
-| 80-94% | Strong evidence but not fully verified | Proceed with caveats noted |
-| 60-79% | Reasonable assumption, some unknowns | Research more before proceeding |
-| < 60% | Speculative | Do NOT proceed -- investigate first |
+The confidence scale (95-100% verified, 80-94% strong, 60-79% research more, < 60% do not proceed) is in `docs/safety-philosophy.md`.
 
 ### Investigation checklist (before any change)
 - [ ] Consulted `KNOWLEDGEBASE.md` for known quirks
