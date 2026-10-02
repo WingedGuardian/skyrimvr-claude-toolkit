@@ -593,3 +593,66 @@ def test_nonblocking_wrapper_logs_without_python(tmp_path, name, what):
     assert r.returncode == 0 and r.stdout.strip() == ""
     log = (root / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8")
     assert f"{what} FAILED: Python not runnable" in log and "NO backup/snapshot was taken" in log
+
+
+# --------------------------------------------------------------------------
+# invoked the way settings.json invokes them
+# --------------------------------------------------------------------------
+# settings.json runs `bash "$CLAUDE_PROJECT_DIR/.claude/hooks/X.sh"`. On Windows that is a forward-slash
+# or MIXED path (`C:\Users\me\proj/.claude/hooks/X.sh`), never the all-backslash form a Python
+# `str(Path)` gives. The wrapper derives its own location from $BASH_SOURCE, so each spelling has to
+# resolve to the same install -- a normalisation slip there denied EVERY call in production while every
+# test (which passed a backslash-only path) stayed green.
+
+def _spellings(root):
+    fwd = root.as_posix()
+    mixed = str(root) + "/.claude/hooks/"
+    return [
+        ("forward-slash", lambda name: (f"{fwd}/.claude/hooks/{name}", None)),
+        ("mixed", lambda name: (mixed + name, None)),
+        ("relative", lambda name: (f".claude/hooks/{name}", root)),
+    ]
+
+
+def _invoke(root, name, payload, how):
+    path, cwd = dict((k, v) for k, v in _spellings(root))[how](name)
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    return subprocess.run([_bash(), path], input=json.dumps(payload), capture_output=True, text=True,
+                          env=env, cwd=str(cwd) if cwd else None, timeout=60)
+
+
+def _decision(r):
+    assert r.returncode == 0, r.stderr
+    h = (json.loads(r.stdout) if r.stdout.strip() else {}).get("hookSpecificOutput") or {}
+    return h.get("permissionDecision", "allow"), h.get("permissionDecisionReason", "")
+
+
+@pytest.mark.parametrize("how", ["forward-slash", "mixed", "relative"])
+def test_protect_bash_resolves_its_install_however_it_is_launched(project, how):
+    ok = _decision(_invoke(project, "protect-bash.sh", {"tool_name": "Bash", "tool_input": {"command": "ls"}}, how))
+    assert ok[0] == "allow", f"{how}: an `ls` was not allowed: {ok}"
+    rm = {"tool_name": "Bash", "tool_input": {"command": f'rm -rf "{project.as_posix()}"'}}
+    got = _decision(_invoke(project, "protect-bash.sh", rm, how))
+    assert got[0] == "deny" and got[1].startswith("BLOCKED"), f"{how}: deleting the install was not refused: {got}"
+
+
+@pytest.mark.parametrize("how", ["forward-slash", "mixed", "relative"])
+def test_protect_files_works_however_it_is_launched(project, how):
+    esp = {"tool_name": "Write", "tool_input": {"file_path": "C:/Games/Skyrim VR/Data/M.esp"}}
+    got = _decision(_invoke(project, "protect-files.sh", esp, how))
+    assert got[0] == "deny" and got[1].startswith("BLOCKED"), f"{how}: {got}"
+    ok = _decision(_invoke(project, "protect-files.sh",
+                           {"tool_name": "Write", "tool_input": {"file_path": "C:/work/notes.md"}}, how))
+    assert ok[0] == "allow", f"{how}: {ok}"
+
+
+@pytest.mark.parametrize("how", ["forward-slash", "mixed", "relative"])
+def test_nonblocking_hooks_find_their_engine_however_launched(project, how):
+    """The engine failing to start would be logged as FAILED; a good launch logs nothing of the kind."""
+    log = project / ".claude" / "backups" / "AUDIT_LOG.txt"
+    before = log.read_text(encoding="utf-8") if log.is_file() else ""
+    for name in ("backup-before-edit.sh", "snapshot-before-tool.sh"):
+        r = _invoke(project, name, {"tool_name": "Write", "tool_input": {"file_path": "C:/work/a.txt"}}, how)
+        assert r.returncode == 0 and r.stdout.strip() == ""
+    after = log.read_text(encoding="utf-8") if log.is_file() else ""
+    assert "FAILED" not in after[len(before):], after[len(before):]

@@ -100,7 +100,9 @@ def fire(install: Path, hook: str, payload) -> dict:
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(install))
     for k in ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR"):
         env.pop(k, None)
-    r = subprocess.run([bash(), str(install / ".claude" / "hooks" / hook)], input=stdin.encode("utf-8"),
+    # as_posix(): production runs `bash "$CLAUDE_PROJECT_DIR/.claude/hooks/X.sh"`, i.e. a forward-slash
+    # (or mixed) path; a backslash-only path hides defects in how the wrapper derives its own location.
+    r = subprocess.run([bash(), (install / ".claude" / "hooks" / hook).as_posix()], input=stdin.encode("utf-8"),
                        capture_output=True, env=env, timeout=120)
     if r.returncode != 0:
         raise RuntimeError(f"{hook} exited {r.returncode}: {r.stderr[:300]!r}")

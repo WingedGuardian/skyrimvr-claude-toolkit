@@ -154,6 +154,49 @@ MUTATIONS = [
         "tests/test_hooks.py::test_nonblocking_wrapper_logs_without_python",
         id="nonblocking-wrapper-hides-a-missing-python",
     ),
+    # Put the single-backslash `_SELF` back. In bash `${v//\/}` DELETES every `/` rather than turning
+    # `\` into `/`, so a hook launched as settings.json launches it (forward or mixed slashes) resolved
+    # the wrong install root and every blocking hook denied every call -- while the suite, which passed
+    # all-backslash paths, stayed green.
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        '_SELF="${BASH_SOURCE[0]//' + BS * 2 + '//}"',
+        '_SELF="${BASH_SOURCE[0]//' + BS + '//}"',
+        "tests/test_hooks.py::test_protect_bash_resolves_its_install_however_it_is_launched",
+        id="wrapper-self-path-normalisation-deletes-slashes",
+    ),
+    pytest.param(
+        ".claude/hooks/backup-before-edit.sh",
+        '_SELF="${BASH_SOURCE[0]//' + BS * 2 + '//}"',
+        '_SELF="${BASH_SOURCE[0]//' + BS + '//}"',
+        "tests/test_hooks.py::test_nonblocking_hooks_find_their_engine_however_launched",
+        id="nonblocking-wrapper-self-path-normalisation",
+    ),
+    # A re-run of setup.sh must repair a hook configured for an interpreter that has since moved.
+    pytest.param(
+        "setup.sh",
+        'elif [ -n "$PYTHON_PATH" ] && ! grep -qxF',
+        'elif false && ! grep -qxF',
+        "tests/test_python_path.py::test_rerunning_setup_repairs_a_stale_interpreter_path",
+        id="setup-rerun-repairs-a-stale-interpreter",
+    ),
+    # Stop escaping sed's replacement metacharacters in the interpreter path.
+    pytest.param(
+        "setup.sh",
+        "PY_SED=$(printf '%s' " + '"$PYTHON_PATH"' + " | sed -e 's/[" + BS * 2 + "|&]/" + BS * 2 + "&/g')",
+        'PY_SED=$PYTHON_PATH',
+        "tests/test_python_path.py::test_a_path_containing_an_ampersand_is_not_mangled_by_sed",
+        id="setup-escapes-sed-replacement-metacharacters",
+    ),
+    # An alarm from tools/kb-guard.sh must reach the session as TEXT. If the engine instead fails on a
+    # non-zero guard status, the wrapper reports NOT RUN and the alarm itself is lost.
+    pytest.param(
+        "tools/skyguard/session.py",
+        '    raw = r.stdout.rstrip(b"' + BS + 'n")',
+        '    r.check_returncode()' + "\n" + '    raw = r.stdout.rstrip(b"' + BS + 'n")',
+        "tests/test_kb_guard.py::test_the_hook_never_fails_the_session_even_when_the_guard_alarms",
+        id="kb-guard-alarm-status-must-not-fail-the-engine",
+    ),
     # --- repo invariants ---------------------------------------------------
     # Drop the release gate that keeps the USER's knowledgebase out of the payload.
     # Everything still looks right -- CLAUDE.md still says where to write, .gitignore

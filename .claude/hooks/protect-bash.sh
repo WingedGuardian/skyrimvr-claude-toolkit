@@ -12,7 +12,7 @@ HOOK_NAME="protect-bash"
 PY="{{PYTHON_PATH}}"
 INPUT=$(cat)
 
-_SELF="${BASH_SOURCE[0]//\//}"
+_SELF="${BASH_SOURCE[0]//\\//}"
 HOOK_DIR="$(cd "$(dirname "$_SELF")" 2>/dev/null && pwd)"
 ROOT="$(cd "$HOOK_DIR/../.." 2>/dev/null && pwd)"
 ROOT_WIN="$(cd "$HOOK_DIR/../.." 2>/dev/null && pwd -W 2>/dev/null)"

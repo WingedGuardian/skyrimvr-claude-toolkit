@@ -94,6 +94,9 @@ PYTHON_PATH=""
 if [ -n "$PY_FOUND" ]; then
     PYTHON_PATH=$($PY_FOUND -c 'import sys; print(sys.executable)' 2>/dev/null | tr -d '\r' | tr '\134' '/') || PYTHON_PATH=""
 fi
+# The form that goes into sed's REPLACEMENT: `&` (the whole match), `|` (our delimiter) and a backslash
+# are all special there, and a Windows folder name may legally contain `&`.
+PY_SED=$(printf '%s' "$PYTHON_PATH" | sed -e 's/[\\|&]/\\&/g')
 if [ -z "$PYTHON_PATH" ]; then
     echo ""
     echo "  WARNING: the safety hooks need Python 3 and will REFUSE every command until it is installed"
@@ -298,11 +301,17 @@ for hook in protect-bash.sh protect-files.sh backup-before-edit.sh snapshot-befo
         HOOKS_MISSING=$((HOOKS_MISSING + 1))
     elif grep -q '{{PYTHON_PATH}}' "$GAME_DIR/.claude/hooks/$hook"; then
         if [ -n "$PYTHON_PATH" ]; then
-            sed -i "s|{{PYTHON_PATH}}|$PYTHON_PATH|g" "$GAME_DIR/.claude/hooks/$hook"
+            sed -i "s|{{PYTHON_PATH}}|$PY_SED|g" "$GAME_DIR/.claude/hooks/$hook"
             echo "  Configured: .claude/hooks/$hook"
         else
             echo "  NOT CONFIGURED: .claude/hooks/$hook -- no Python 3 found, so this hook will refuse until setup.sh is re-run"
         fi
+    elif [ -n "$PYTHON_PATH" ] && ! grep -qxF "PY=\"$PYTHON_PATH\"" "$GAME_DIR/.claude/hooks/$hook"; then
+        # Already configured, but for a different interpreter (Python upgraded or moved). Left alone,
+        # the hook would refuse every command while this script said "Already configured".
+        OLD_PY=$(grep -m1 '^PY=' "$GAME_DIR/.claude/hooks/$hook" || true)
+        sed -i "s|^PY=.*|PY=\"$PY_SED\"|" "$GAME_DIR/.claude/hooks/$hook"
+        echo "  Updated interpreter: .claude/hooks/$hook ($OLD_PY -> PY=\"$PYTHON_PATH\")"
     else
         echo "  Already configured: .claude/hooks/$hook"
     fi

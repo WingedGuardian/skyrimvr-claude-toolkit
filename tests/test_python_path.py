@@ -61,6 +61,50 @@ def test_the_real_interpreter_is_what_gets_written(game_dir):
         assert probe.stdout.strip() == "1", f"{hook}: {path} is not a runnable interpreter"
 
 
+def test_a_path_containing_an_ampersand_is_not_mangled_by_sed(game_dir):
+    """`&` in sed's replacement means "the whole match" -- `C:/R&D/python.exe` would come out with the
+    placeholder spliced into it. A folder name may legally contain `&`."""
+    path = "C:/R&D/Python & Co/python.exe"
+    result = run_setup(game_dir, env_overrides={"FAKE_PYTHON_EXE": path}, shim_path=True)
+    assert result.returncode == 0, result.stderr
+    lines = hook_python_lines(game_dir)
+    assert len(lines) == 5
+    for hook, line in lines.items():
+        assert line == f'PY="{path}"', f"{hook}: {line}"
+
+
+def test_rerunning_setup_repairs_a_stale_interpreter_path(game_dir):
+    """After a Python upgrade the stored path points at nothing and the hooks refuse every command.
+    "Already configured" must not hide that: re-running setup has to put the current interpreter back."""
+    import json
+    import subprocess
+
+    from conftest import BASH
+
+    assert run_setup(game_dir).returncode == 0
+    good = hook_python_lines(game_dir)["protect-bash.sh"]
+    assert good.startswith('PY="') and "{{" not in good
+    hooks = game_dir / ".claude" / "hooks"
+    for h in hooks.glob("*.sh"):
+        text = h.read_text(encoding="utf-8").replace(good, 'PY="C:/Python312-gone/python.exe"')
+        h.write_text(text, encoding="utf-8", newline="\n")
+
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}})
+    stale = subprocess.run([BASH, (hooks / "protect-bash.sh").as_posix()], input=payload,
+                           capture_output=True, text=True, timeout=60)
+    assert "GUARD INERT" in stale.stdout, "the stale path should make the hook refuse"
+
+    result = run_setup(game_dir)
+    assert result.returncode == 0
+    assert "Updated interpreter" in result.stdout, result.stdout[-1500:]
+    assert hook_python_lines(game_dir)["protect-bash.sh"] == good
+    fixed = subprocess.run([BASH, (hooks / "protect-bash.sh").as_posix()], input=payload,
+                           capture_output=True, text=True, timeout=60)
+    assert fixed.stdout.strip() in ("", "{}"), fixed.stdout
+    # and a third run, with nothing changed, says so
+    assert "Updated interpreter" not in run_setup(game_dir).stdout
+
+
 def test_setup_warns_loudly_when_no_python_exists(game_dir, tmp_path):
     """No Python 3 anywhere on PATH: setup must say the hooks will refuse, and must not pretend it
     configured them. It must still finish (the rest of setup is independent of Python)."""
