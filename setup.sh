@@ -90,9 +90,31 @@ fi
 # text as escapes (\U upper-cases the rest, \t becomes a tab), so a backslash path silently corrupts every
 # hook -- the defect fixed for LOCALAPPDATA/Documents in v3.2.1 and for jq after it. Normalized to
 # forward slashes (and CR stripped) here, where every branch has converged.
+#
+# Which interpreter: a REGULAR install beats the Microsoft Store alias (...\WindowsApps\...). Every hook
+# call starts Python, and the alias costs ~135 ms more per start (MEASURED 2026-10-02: `python -c pass`
+# median 156 ms via the alias vs 21 ms for a python.org install) -- on every Bash, Write and Edit call.
+# `py -3` can resolve to the alias even when a regular install exists, so ask every candidate and take
+# the first that is not the alias; the alias is used only when nothing else runs.
 PYTHON_PATH=""
+PY_STORE=""
 if [ -n "$PY_FOUND" ]; then
-    PYTHON_PATH=$($PY_FOUND -c 'import sys; print(sys.executable)' 2>/dev/null | tr -d '\r' | tr '\134' '/') || PYTHON_PATH=""
+    for c in "py -3" "python" "python3"; do
+        $c -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1 || continue
+        exe=$($c -c 'import sys; print(sys.executable)' 2>/dev/null | tr -d '\r' | tr '\134' '/') || exe=""
+        [ -n "$exe" ] || continue
+        case "$exe" in
+            */[Ww]indows[Aa]pps/*) if [ -z "$PY_STORE" ]; then PY_STORE="$exe"; fi ;;
+            *) PYTHON_PATH="$exe"; break ;;
+        esac
+    done
+    if [ -z "$PYTHON_PATH" ] && [ -n "$PY_STORE" ]; then
+        PYTHON_PATH="$PY_STORE"
+        echo "  Hooks will use the Microsoft Store Python ($PY_STORE). It works, but each hook call starts"
+        echo "  ~0.1 s slower than a python.org install would; install one and re-run setup.sh to switch."
+    elif [ -n "$PYTHON_PATH" ]; then
+        echo "  Hooks will use: $PYTHON_PATH"
+    fi
 fi
 # The form that goes into sed's REPLACEMENT: `&` (the whole match), `|` (our delimiter) and a backslash
 # are all special there, and a Windows folder name may legally contain `&`.

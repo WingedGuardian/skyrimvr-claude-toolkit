@@ -8,7 +8,9 @@ afterwards -- it never looks at a single path setup.sh wrote.
 
 from __future__ import annotations
 
-from conftest import claude_md, game_root_win, key_path, run_setup, write_mo2_ini
+import pytest
+
+from conftest import claude_md, game_root_win, hook_python_lines, key_path, run_setup, write_mo2_ini
 
 
 # ---------------------------------------------------------------- stock/Vortex
@@ -236,3 +238,33 @@ def test_setup_writes_a_usable_paths_file_for_the_hooks(game_dir):
     for key in ("SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR"):
         assert key in body, f"{key} missing from the paths file"
     assert "{{" not in body, f"an unsubstituted placeholder reached the paths file:\n{body}"
+
+
+# ---------------------------------------------------------------- which Python the hooks get
+
+# The Store alias starts ~135 ms slower than a regular install (MEASURED 2026-10-02), on every hook call.
+STORE = "C:" + "\\".join(["", "Users", "testuser", "AppData", "Local", "Microsoft", "WindowsApps",
+                         "PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0", "python.exe"])
+REGULAR = "C:" + "\\".join(["", "Users", "testuser", "AppData", "Local", "Programs", "Python", "Python310",
+                           "python.exe"])
+OTHER = "C:/Python313/python.exe"
+
+
+def _fwd(p):
+    return p.replace(chr(92), "/")
+
+
+@pytest.mark.parametrize("py,python,python3,expected,why", [
+    (STORE, REGULAR, STORE, REGULAR, "`py -3` resolves to the Store alias; a regular `python` exists"),
+    ("NONE", STORE, REGULAR, REGULAR, "no launcher; the regular install is only `python3`"),
+    (REGULAR, OTHER, STORE, REGULAR, "first regular candidate wins when there are several"),
+    (STORE, STORE, "NONE", STORE, "only the Store alias exists: it is still used, not refused"),
+])
+def test_hooks_prefer_a_regular_python_over_the_store_alias(game_dir, py, python, python3, expected, why):
+    r = run_setup(game_dir, shim_path=True, env_overrides={
+        "FAKE_PYTHON_EXE_py": py, "FAKE_PYTHON_EXE_python": python, "FAKE_PYTHON_EXE_python3": python3})
+    assert r.returncode == 0, r.stdout + r.stderr
+    lines = hook_python_lines(game_dir)
+    assert len(lines) == 5, sorted(lines)
+    for hook, line in lines.items():
+        assert line == f'PY="{_fwd(expected)}"', f"{why}: {hook}: {line}"
