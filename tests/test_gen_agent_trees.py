@@ -176,12 +176,30 @@ def test_budget_accepts_a_small_core(tmp_path):
     assert _gen().budget_problems(_with_core(tmp_path, 1000)) == []
 
 
+CODEX_LIMIT = 32768   # spec E7/D9, LITERAL on purpose: a test sized by the constant scales with any lift
+
+
+def _core_installing_to(g, total):
+    """Core length whose worst-case INSTALLED size (header + core + both reserves) is exactly `total`."""
+    header = len(g._headed("agent/instructions/core.md + codex.md", b"", ".md"))
+    return total - header - g.CODEX_ADDENDUM_RESERVE - g.INSTALL_EXPANSION_RESERVE
+
+
 def test_budget_rejects_an_oversize_core(tmp_path):
-    """Sized by the LITERAL Codex limit (spec E7/D9), never by the constant: a test that scales with
-    INSTRUCTION_BUDGET still passes when someone lifts it to 10**9 (caught by the mutation gate)."""
+    """One byte over the literal limit must fail -- so lifting INSTRUCTION_BUDGET even slightly goes red."""
     g = _gen()
-    problems = g.budget_problems(_with_core(tmp_path, 32768))
+    src = _with_core(tmp_path, _core_installing_to(g, CODEX_LIMIT + 1))
+    assert g.instruction_sizes(src)["codex.md (reserved)"] == CODEX_LIMIT + 1
+    problems = g.budget_problems(src)
     assert problems and "Codex silently truncates" in problems[0]
+
+
+def test_budget_accepts_a_core_exactly_at_the_limit(tmp_path):
+    """The twin: exactly 32,768 installed bytes is allowed, so the limit is not quietly lowered either."""
+    g = _gen()
+    src = _with_core(tmp_path, _core_installing_to(g, CODEX_LIMIT))
+    assert g.instruction_sizes(src)["codex.md (reserved)"] == CODEX_LIMIT
+    assert g.budget_problems(src) == []
 
 
 def test_budget_counts_the_header(tmp_path):

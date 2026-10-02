@@ -833,6 +833,10 @@ MUTATIONS = [
     pytest.param("scripts/gen_agent_trees.py", "INSTRUCTION_BUDGET = 32768", "INSTRUCTION_BUDGET = 10 ** 9",
                  "tests/test_gen_agent_trees.py::test_budget_rejects_an_oversize_core",
                  id="instruction-budget-is-enforced"),
+    # Lift it a LITTLE: a test that only checks a grossly oversize core misses a limit nudged to 33000.
+    pytest.param("scripts/gen_agent_trees.py", "INSTRUCTION_BUDGET = 32768", "INSTRUCTION_BUDGET = 33000",
+                 "tests/test_gen_agent_trees.py::test_budget_rejects_an_oversize_core",
+                 id="instruction-budget-is-exactly-the-codex-limit"),
     # Stop holding room for the Codex addendum: Plan 4 would land over budget on day one.
     pytest.param("scripts/gen_agent_trees.py", "CODEX_ADDENDUM_RESERVE = 2048", "CODEX_ADDENDUM_RESERVE = 0",
                  "tests/test_gen_agent_trees.py::test_budget_holds_room_for_the_codex_addendum",
