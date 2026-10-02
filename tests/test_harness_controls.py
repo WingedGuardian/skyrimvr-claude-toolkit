@@ -272,7 +272,7 @@ def test_held_lock_error_names_crash_debris(tmp_path):
     assert target.read_text() == "old"
 
 
-@pytest.mark.skipif(os.remove not in os.supports_dir_fd, reason="COULD NOT CHECK: platform has no dir_fd removal")
+@pytest.mark.skipif(os.unlink not in os.supports_dir_fd, reason="COULD NOT CHECK: platform has no dir_fd removal")
 def test_barrier_resolves_dir_fd_relative_removal(tmp_path):
     """POSIX rmtree removes relative names under dir_fd: fixture cleanup must work, and the
     same relative name under a directory OUTSIDE the fixture must still be refused."""
@@ -284,6 +284,6 @@ def test_barrier_resolves_dir_fd_relative_removal(tmp_path):
     fd = os.open(REPO, os.O_RDONLY)
     try:
         with pytest.raises(PermissionError, match="outside test fixture"):
-            os.remove("HARNESS-NONEXISTENT-DECOY", dir_fd=fd)
+            os.unlink("HARNESS-NONEXISTENT-DECOY", dir_fd=fd)
     finally:
         os.close(fd)
