@@ -23,7 +23,8 @@ does not duplicate `CLAUDE.md`, so the two cannot drift apart.
 **Claude Code specific — you do not get these:**
 
 - `.claude/settings.json` and `.claude/hooks/` — the safety layer. These hooks are what block direct
-  writes to ESP/ESM/BSA files, advise on edits in the game and config directories, and auto-back-up every file before it is modified, with an audit trail.
+  writes to ESP/ESM/BSA files, advise on edits in the game and config directories, and auto-back-up
+  every file before it is modified, with an audit trail.
 - `.claude/skills/<name>/SKILL.md` — plain Markdown. **Read them directly**: `CLAUDE.md` points into them by
   name (`devbench`, `triage-and-conflicts`, `xelib`, …).
 
@@ -38,7 +39,8 @@ If you are not running under Claude Code, compensate deliberately:
 2. **Never write directly to `.esp` / `.esm` / `.esl` / `.bsa` / `.ba2`.** Use Spriggit (serialize to
    YAML, edit the YAML, deserialize) or xelib. A hand-edited plugin binary is a corrupted plugin.
 3. **Show the user the change before applying it**, especially for INIs, load order files, and
-   anything under the game directory. The hooks normally force this pause; without them it is on you.
+   anything under the game directory. Under Claude Code the guards only advise here, they do not force a
+   pause; without them it is entirely on you.
 4. **Snapshot `.psc` sources before experimenting.** They ARE covered by `snapshot-before-tool.sh` (before every Bash command) and by `backup-before-edit.sh` (Edit/Write, no extension filter) -- an earlier version of this line said neither covered them, which was wrong. Snapshot anyway for a named rollback point, because an automatic copy you cannot identify later is not a rollback plan.
 
 ## Ground rules that apply regardless of agent
