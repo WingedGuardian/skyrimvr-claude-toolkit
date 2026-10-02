@@ -41,44 +41,17 @@ if [ ! -f "$GAME_DIR/KNOWLEDGEBASE.md" ] || [ ! -f "$GAME_DIR/.claude/hooks/prot
     exit 1
 fi
 
-# --- Detect jq ---
-echo "Checking for jq..."
-JQ_PATH=$(which jq 2>/dev/null || echo "")
-if [ -z "$JQ_PATH" ]; then
-    # Try common Windows locations
-    for p in \
-        "/c/Users/$USERNAME/AppData/Local/Microsoft/WinGet/Links/jq.exe" \
-        "/c/ProgramData/chocolatey/bin/jq.exe" \
-        "/usr/bin/jq"; do
-        if [ -f "$p" ]; then
-            JQ_PATH="$p"
-            break
-        fi
-    done
+# --- jq is optional ---
+#
+# The safety hooks no longer use jq (they run on Python -- see below). The only shipped tools that
+# still call it are tools/devbench-cli.sh and tools/nexus.sh, for pretty-printing, and both fall
+# back to plain output without it. So this is informational: no install, no failure.
+echo "Checking for jq (optional)..."
+if which jq >/dev/null 2>&1; then
+    echo "  Found jq: $(which jq) -- used for pretty output by devbench-cli.sh and nexus.sh"
+else
+    echo "  jq not found. That is fine: it is optional (devbench-cli.sh and nexus.sh print plain output without it)."
 fi
-
-if [ -z "$JQ_PATH" ]; then
-    echo ""
-    echo "jq not found. It's needed for the safety hooks."
-    echo "Installing jq via winget..."
-    winget install jqlang.jq --accept-source-agreements --accept-package-agreements 2>/dev/null || {
-        echo ""
-        echo "ERROR: Could not auto-install jq."
-        echo "Please install it manually: winget install jqlang.jq"
-        echo "Then re-run: bash setup.sh"
-        exit 1
-    }
-    # Re-detect after install
-    JQ_PATH=$(which jq 2>/dev/null || echo "/c/Users/$USERNAME/AppData/Local/Microsoft/WinGet/Links/jq.exe")
-fi
-# JQ_PATH is substituted into every hook via sed, and GNU sed reads backslash
-# sequences in replacement text as escapes -- \U upper-cases the rest,
-# \t becomes a literal tab -- so a Windows-style path silently corrupts all
-# four safety hooks and they fail open. Same defect fixed for LOCALAPPDATA and
-# Documents in v3.2.1; this is the one path that fix missed. Normalized here,
-# after all three assignment branches above have converged.
-JQ_PATH=$(printf '%s' "$JQ_PATH" | tr '\134' '/')
-echo "  Found jq: $JQ_PATH"
 
 # --- Detect Node.js (needed for xeditlib; auto-install) ---
 echo ""
@@ -109,6 +82,23 @@ done
 if [ -z "$PY_FOUND" ]; then
     echo "  Python 3 not found. It's needed for cosave-info and the save-analysis scripts (and PyFFI/PyNifly if you use them)."
     echo "  Install it from python.org (or 'winget install Python.Python.3.12') and re-run — the bundled tools try 'py -3', 'python', then 'python3'."
+fi
+
+# The safety hooks run on this interpreter. Record the ABSOLUTE path of the one just found, so a hook
+# does not depend on PATH (Claude Code launches hooks with whatever PATH it happens to have).
+# sys.executable is a native Windows path under `py -3`; GNU sed reads backslash sequences in replacement
+# text as escapes (\U upper-cases the rest, \t becomes a tab), so a backslash path silently corrupts every
+# hook -- the defect fixed for LOCALAPPDATA/Documents in v3.2.1 and for jq after it. Normalized to
+# forward slashes (and CR stripped) here, where every branch has converged.
+PYTHON_PATH=""
+if [ -n "$PY_FOUND" ]; then
+    PYTHON_PATH=$($PY_FOUND -c 'import sys; print(sys.executable)' 2>/dev/null | tr -d '\r' | tr '\134' '/') || PYTHON_PATH=""
+fi
+if [ -z "$PYTHON_PATH" ]; then
+    echo ""
+    echo "  WARNING: the safety hooks need Python 3 and will REFUSE every command until it is installed"
+    echo "  and setup.sh is re-run. (They fail closed on purpose: a guard that cannot run must not allow.)"
+    echo "  Install Python 3 from python.org (or 'winget install Python.Python.3.12'), then: bash setup.sh"
 fi
 
 # --- Detect .NET (needed for Spriggit / AutoMod; do NOT auto-install) ---
@@ -295,7 +285,7 @@ else
     echo "  You may need to update paths in CLAUDE.md manually."
 fi
 
-# --- Configure hook scripts (replace jq placeholder) ---
+# --- Configure hook scripts (replace the Python placeholder) ---
 echo ""
 echo "Configuring safety hooks..."
 HOOKS_MISSING=0
@@ -306,9 +296,13 @@ for hook in protect-bash.sh protect-files.sh backup-before-edit.sh snapshot-befo
     if [ ! -f "$GAME_DIR/.claude/hooks/$hook" ]; then
         echo "  MISSING: .claude/hooks/$hook -- this hook is NOT installed and will never run"
         HOOKS_MISSING=$((HOOKS_MISSING + 1))
-    elif grep -q '{{JQ_PATH}}' "$GAME_DIR/.claude/hooks/$hook"; then
-        sed -i "s|{{JQ_PATH}}|$JQ_PATH|g" "$GAME_DIR/.claude/hooks/$hook"
-        echo "  Configured: .claude/hooks/$hook"
+    elif grep -q '{{PYTHON_PATH}}' "$GAME_DIR/.claude/hooks/$hook"; then
+        if [ -n "$PYTHON_PATH" ]; then
+            sed -i "s|{{PYTHON_PATH}}|$PYTHON_PATH|g" "$GAME_DIR/.claude/hooks/$hook"
+            echo "  Configured: .claude/hooks/$hook"
+        else
+            echo "  NOT CONFIGURED: .claude/hooks/$hook -- no Python 3 found, so this hook will refuse until setup.sh is re-run"
+        fi
     else
         echo "  Already configured: .claude/hooks/$hook"
     fi

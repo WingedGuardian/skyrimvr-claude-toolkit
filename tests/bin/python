@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Test shim, installed as `py`, `python` and `python3`. When FAKE_PYTHON_EXE is set it answers the two
+# questions setup.sh asks of an interpreter (is it Python 3? what is sys.executable?) so that a test can
+# make the "detected" interpreter report a Windows-style backslash path regardless of what is installed.
+# Otherwise it delegates to the real interpreter, found with this directory removed from PATH.
+if [ -n "${FAKE_PYTHON_EXE:-}" ]; then
+    case "$*" in
+        *sys.executable*) printf '%s\r\n' "$FAKE_PYTHON_EXE"; exit 0 ;;
+        *version_info*)   exit 0 ;;
+        *--version*)      echo "Python 3.99.0 (shim)"; exit 0 ;;
+    esac
+fi
+_self="$(cd "$(dirname "$0")" && pwd)"
+_name="$(basename "$0")"
+_path=":$PATH:"; _path="${_path//:$_self:/:}"; _path="${_path#:}"; _path="${_path%:}"
+_real="$(PATH="$_path" command -v "$_name" 2>/dev/null)"
+[ -n "$_real" ] && exec "$_real" "$@"
+exit 127
