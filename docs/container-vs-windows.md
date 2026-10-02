@@ -7,6 +7,11 @@ Credit: this file's core insight — and the devcontainer this toolkit ships —
 Default to the container for any task. Only cross to Windows when the task genuinely requires the
 Windows DLL or an active MO2 virtual filesystem.
 
+The workspace and all game/profile bind mounts are read-only, including workspace aliases.
+Write generated output in container-local scratch and publish deliberately through Windows.
+Dependency failure stops startup. See [integration safety](harness-integrations.md) for locks,
+mount contracts, disposable sentinel checks and the COULD NOT CHECK status.
+
 ## Decision Table
 
 | Task | Where | Tool |

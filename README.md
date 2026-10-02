@@ -469,12 +469,17 @@ The suite is dev-only and is not in the release zip. From a clone:
 python -m venv .venv
 # Windows:            .venv/Scripts/python
 # Linux / macOS:      .venv/bin/python
-.venv/Scripts/python -m pip install pytest==8.0.0
-.venv/Scripts/python -m pytest tests/ -v      # behavioral suite
-npm test                                       # Node unit tests
+.venv/Scripts/python -m pip install --only-binary=:all: --require-hashes -r requirements.lock
+.venv/Scripts/python -B tests/run_harness_tests.py tests/ -v  # contained behavioral suite
+node --test                                                # Node unit tests
 ```
 
 The suite runs on both Windows and Linux in CI, so it should pass on either.
+
+Use the contained launcher above for local tests: bare pytest still inherits the host
+environment until the fixture integration is completed after Plan 2 certification.
+See [integration safety and dependency locks](docs/harness-integrations.md) for Spriggit
+publication, read-only container mounts, MO2 load-order selection and explicit unavailable checks.
 
 `tests/` runs the **real** `setup.sh` against generated MO2 and stock layouts and
 asserts on the paths it *wrote* -- not on what it printed. `tools/devbench-cli.sh`
