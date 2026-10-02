@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 
@@ -84,8 +85,8 @@ def test_spriggit_overlapping_paths_rejected(tmp_path):
 def test_docker_dependency_failure_propagates(tmp_path):
     (tmp_path / ".devcontainer").mkdir()
     template = (REPO / ".devcontainer/devcontainer.json").read_text()
-    for key in ("MODS", "PROFILE", "OVERWRITE"):
-        template = template.replace("{{DEVCONTAINER_" + key + "_MOUNT}}", tmp_path.as_posix())
+    # Match the source whether it is still a placeholder or setup.sh already filled it in.
+    template = re.sub(r'source=[^,"]*,target=/skyrim/', lambda m: "source=" + tmp_path.as_posix() + ",target=/skyrim/", template)
     (tmp_path / ".devcontainer/devcontainer.json").write_text(template)
     install = REPO / ".devcontainer/install-dependencies.sh"
     if install.exists():
@@ -111,8 +112,8 @@ exit 0
 def test_docker_helper_mount_arguments_close_workspace_alias(tmp_path, fail_start):
     (tmp_path / ".devcontainer").mkdir()
     template = (REPO / ".devcontainer/devcontainer.json").read_text()
-    for key in ("MODS", "PROFILE", "OVERWRITE"):
-        template = template.replace("{{DEVCONTAINER_" + key + "_MOUNT}}", tmp_path.as_posix())
+    # Match the source whether it is still a placeholder or setup.sh already filled it in.
+    template = re.sub(r'source=[^,"]*,target=/skyrim/', lambda m: "source=" + tmp_path.as_posix() + ",target=/skyrim/", template)
     (tmp_path / ".devcontainer/devcontainer.json").write_text(template)
     (tmp_path / ".devcontainer/install-dependencies.sh").write_bytes(
         (REPO / ".devcontainer/install-dependencies.sh").read_bytes())

@@ -26,6 +26,26 @@ def install():
             value = "\\\\" + value[8:] if value[4:].startswith("UNC\\") else value[4:]
         return Path(value).resolve().is_relative_to(root)
 
+    def dir_fds(event, args):
+        # POSIX shutil.rmtree is fd-based: it removes RELATIVE names with dir_fd=<open dir>.
+        # Resolving those against the cwd (the repository) wrongly refuses fixture cleanup.
+        if event in ("os.rename", "os.link"):
+            return [args[2], args[3]]
+        if event == "os.symlink":
+            return [None, args[2]]
+        if event == "os.mkdir":
+            return [args[2]]
+        return [args[1]]
+
+    def anchored(value, fd):
+        if fd is None or isinstance(value, int) or os.path.isabs(os.fsdecode(value)):
+            return value
+        try:
+            base = os.readlink("/proc/self/fd/" + str(fd))
+        except OSError:
+            return value  # unresolvable: judged against the cwd, i.e. refused unless contained
+        return os.path.join(base, os.fsdecode(value))
+
     def audit(event, args):
         if event == "open":
             filename, mode, flags = args
@@ -35,7 +55,8 @@ def install():
                 raise PermissionError("outside test fixture: " + str(filename))
         elif event in ("os.mkdir", "os.remove", "os.rmdir", "os.rename", "os.symlink", "os.link"):
             count = 2 if event in ("os.rename", "os.symlink", "os.link") else 1
-            if any(not contained(p) for p in args[:count]):
+            paths = [anchored(p, fd) for p, fd in zip(args[:count], dir_fds(event, args))]
+            if any(not contained(p) for p in paths):
                 raise PermissionError("outside test fixture: " + repr(args[:count]))
         elif event == "subprocess.Popen":
             executable, argv, _, env = args

@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -203,8 +204,10 @@ def test_live_cold_start_mounts_without_node_modules(tmp_path):
         sources[key].mkdir()
         (sources[key] / "sentinel").write_text(key)
     template = (REPO / ".devcontainer/devcontainer.json").read_text()
-    for key, path in sources.items():
-        template = template.replace("{{DEVCONTAINER_" + key + "_MOUNT}}", path.as_posix())
+    for key, path in sources.items():  # placeholder or an already-filled source
+        template = re.sub(r'source=[^,"]*,target=/skyrim/' + key.lower() + ',',
+                          lambda m, path=path, key=key: "source=" + path.as_posix() + ",target=/skyrim/" + key.lower() + ",",
+                          template)
     (work / ".devcontainer/devcontainer.json").write_text(template)
     (work / "devshell-docker.sh").write_bytes((REPO / "devshell-docker.sh").read_bytes())
     (work / "package.json").write_text("{}")
@@ -279,3 +282,20 @@ def test_held_lock_error_names_crash_debris(tmp_path):
     assert str(debris) in str(error.value)
     assert "\n" not in str(error.value)
     assert target.read_text() == "old"
+
+
+@pytest.mark.skipif(os.remove not in os.supports_dir_fd, reason="COULD NOT CHECK: platform has no dir_fd removal")
+def test_barrier_resolves_dir_fd_relative_removal(tmp_path):
+    """POSIX rmtree removes relative names under dir_fd: fixture cleanup must work, and the
+    same relative name under a directory OUTSIDE the fixture must still be refused."""
+    inside = tmp_path / "tree"
+    (inside / "sub").mkdir(parents=True)
+    (inside / "sub" / "f").write_text("x")
+    shutil.rmtree(inside)
+    assert not inside.exists()
+    fd = os.open(REPO, os.O_RDONLY)
+    try:
+        with pytest.raises(PermissionError, match="outside test fixture"):
+            os.remove("HARNESS-NONEXISTENT-DECOY", dir_fd=fd)
+    finally:
+        os.close(fd)
