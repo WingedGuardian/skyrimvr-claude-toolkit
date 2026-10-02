@@ -80,14 +80,18 @@ def needs_missing_jq(hooks_src: Path) -> bool:
 
 
 def classify(out: str) -> dict:
+    # Windows jq renders an embedded newline of $COMMAND as CRLF in its output; Linux jq does not. The
+    # recorded text must not depend on the recording OS, or the corpus fails on CI's Linux leg
+    # (Task 3 fix-round ruling). Decisions are unaffected.
     out = out.strip()
     if not out:
         return {"decision": "allow", "text": ""}
     h = json.loads(out).get("hookSpecificOutput", {})
     if "permissionDecision" in h:
-        return {"decision": h["permissionDecision"], "text": h.get("permissionDecisionReason", "")}
+        return {"decision": h["permissionDecision"],
+                "text": h.get("permissionDecisionReason", "").replace("\r\n", "\n")}
     if "additionalContext" in h:
-        return {"decision": "advise", "text": h["additionalContext"]}
+        return {"decision": "advise", "text": h["additionalContext"].replace("\r\n", "\n")}
     return {"decision": "allow", "text": ""}
 
 
@@ -219,6 +223,20 @@ def inputs() -> list[dict]:
         "unicode-benign": "echo 'Ébène'",
         "compound-tmp": f'rm -rf /tmp/x && ls "{GAME}"',
     }
+    # Unicode probes: GNU grep (bash) is ASCII-only for [[:space:]], \b and case folding; the port compiles
+    # with re.ASCII. (The \b-next-to-a-non-ASCII-letter residue is accepted and tested separately.)
+    ws = {"nbsp": "\u00a0", "fs": "\x1c", "nel": "\x85", "emsp": "\u2003", "lsep": "\u2028", "ideo": "\u3000"}
+    for k, ch in ws.items():
+        shell_rules[f"unicode-ws-rm-{k}"] = f'rm{ch}-rf "{GAME}"'
+    shell_rules["unicode-ws-psc"] = "Champollion -o\u00a0out.psc"
+    shell_rules["unicode-ws-archive"] = "automod archive\u00a0create a"
+    shell_rules["unicode-ws-cp"] = f'cp\u00a0a "{GAME}"'
+    shell_rules["unicode-ws-redirect"] = f'echo x >\u00a0"{GAME}"'
+    shell_rules["unicode-fold-kelvin"] = 'rm "C:/Users/u/Documents/My Games/S\u212Ayrim VR/a.ini"'
+    shell_rules["unicode-fold-dotless"] = f'rmd\u0131r "{GAME}"'
+    shell_rules["unicode-fold-longs-sed"] = f'\u017Fed -i s/a/b/ {GAME}/x'
+    shell_rules["unicode-fold-longs-esp"] = "cat My.e\u017Fp"
+    shell_rules["unicode-lead-eacute"] = f'\u00e9automod -o "{GAME}/x"'
     for name, c in shell_rules.items():
         add(f"shell-{name}", "declared", "protect-bash.sh", _bash_payload(c))
         add(f"shell-{name}@config", "config", "protect-bash.sh", _bash_payload(c))

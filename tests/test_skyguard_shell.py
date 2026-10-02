@@ -195,32 +195,41 @@ def test_audit_lines_logged(tmp_path):
     assert "protect-bash DENY: " + msg(253) in log
 
 
+LAYOUT_ENV = {
+    "declared": {"SKYRIM_GAME_ROOT": GAME},
+    "config": {"SKYRIM_GAME_ROOT": GAME, "SKYRIM_CONFIG_DIR": "D:/Profiles/MO2/profiles/Default"},
+}
+
+
 def _corpus_rows():
     rows = []
-    for line in (REPO / "tests" / "guard_corpus" / "expected.jsonl").read_text(encoding="utf-8").splitlines():
+    for line in (REPO / "tests" / "guard_corpus" / "expected.jsonl").read_text(encoding="utf-8").split("\n"):
         if not line.strip():
             continue
         r = json.loads(line)
         p = r["payload"]
-        if (r["hook"] != "protect-bash.sh" or r["layout"] != "declared" or r.get("payload_note")
+        if (r["hook"] != "protect-bash.sh" or r["layout"] not in LAYOUT_ENV or r.get("payload_note")
                 or r["id"].startswith(("root-", "payload-")) or not isinstance(p, dict)):
             continue
         cmd = (p.get("tool_input") or {}).get("command")
         if isinstance(cmd, str):
-            rows.append((r["id"], cmd, r["decision"], r["text"]))
+            rows.append((r["id"], r["layout"], cmd, r["decision"], r["text"]))
     return rows
 
 
 CORPUS = _corpus_rows()
 
 
-def test_corpus_has_rows():
-    assert len(CORPUS) >= 60, len(CORPUS)
+def test_corpus_has_rows_in_both_layouts():
+    assert len(CORPUS) >= 100, len(CORPUS)
+    assert {c[1] for c in CORPUS} == {"declared", "config"}
+    assert sum(c[0].startswith("shell-unicode-") for c in CORPUS) >= 30
 
 
-@pytest.mark.parametrize("cid,cmd,decision,text", CORPUS, ids=[c[0] for c in CORPUS])
-def test_port_matches_recorded_bash_verdict(tmp_path, cid, cmd, decision, text):
-    v = run(cmd, tmp_path)
+@pytest.mark.parametrize("cid,layout,cmd,decision,text", CORPUS, ids=[c[0] for c in CORPUS])
+def test_port_matches_recorded_bash_verdict(tmp_path, cid, layout, cmd, decision, text):
+    r = paths.roots("/x/install", "", LAYOUT_ENV[layout])
+    v = shell_rules.decide(cmd, r, audit.Audit(str(tmp_path)))
     if v.decision == "allow" and v.context:
         got = ("advise", v.context)
     elif v.decision == "allow":
@@ -228,3 +237,48 @@ def test_port_matches_recorded_bash_verdict(tmp_path, cid, cmd, decision, text):
     else:
         got = (v.decision, v.reason)
     assert got == (decision, text)
+
+
+# Accepted divergence (controller ruling, Task 3 fix round 1): next to a NON-ASCII letter, GNU grep in
+# a UTF-8 locale sees no word boundary while the port (re.ASCII) sees one. The port is therefore
+# STRICTER than bash here, never looser. Measured against the real hook on this machine: all four are allowed.
+RESIDUE = [
+    f'Champollioné "{GAME}/Data/Scripts/Foo.pex"',
+    "cat My.espé",
+    "cat a.esp b",  # bash on this Windows build sees U+2003 as a word char; UTF-8 Linux does not
+    "cat X.ESPİ",
+]
+STRICTNESS = {"allow": 0, "advise": 1, "ask": 2, "deny": 3}
+
+
+@pytest.mark.parametrize("cmd", RESIDUE)
+def test_unicode_word_boundary_residue_is_never_looser(tmp_path, cmd):
+    bash_decision = "allow"
+    v = run(cmd, tmp_path)
+    py = "advise" if v.decision == "allow" and v.context else v.decision
+    assert STRICTNESS[py] >= STRICTNESS[bash_decision]
+
+
+def test_every_message_constant_equals_the_bash_text():
+    expected = {
+        "NO_COMMAND_DENY": inert(59), "NO_ROOT_DENY": inert(216),
+        "NO_COMMAND_LOG": re.search(r'hooklog REFUSE "(.*)"', LINES[57]).group(1),
+        "NO_ROOT_LOG": re.search(r'hooklog REFUSE "(.*)"', LINES[214]).group(1),
+        "DENY_CONFIG": msg(252), "DENY_INSTALL": msg(253), "DENY_REGISTRY": msg(258), "DENY_PSC": msg(263),
+        "DENY_CHAMPOLLION": msg(271),
+        "ADV_DELETE": msg(281), "ADV_RELATIVE": msg(282), "ADV_MOVE": msg(283), "ADV_REDIRECT": msg(284),
+        "ADV_SED": msg(285), "ADV_PLUGIN": msg(288), "ADV_LOADORDER": msg(289), "ADV_AUTOMOD_ESP": msg(293),
+        "ADV_AUTOMOD_NIF": msg(295), "ADV_AUTOMOD_ARCHIVE": msg(296), "ASK_RESAVER": msg(303),
+        "ADV_EXTERNAL": msg(309),
+    }
+    for name, text in expected.items():
+        assert getattr(shell_rules, name) == text.replace("$COMMAND", "{c}"), name
+    consts = {n for n in dir(shell_rules) if n.startswith(("DENY_", "ADV_", "ASK_", "NO_"))}
+    assert consts == set(expected), consts ^ set(expected)
+
+
+def test_ask_path_writes_the_ask_audit_line(tmp_path):
+    cmd = "bash tools/resaver-cli.sh reset-havok s.ess --apply"
+    run(cmd, tmp_path)
+    log = (tmp_path / ".claude/backups/AUDIT_LOG.txt").read_text(encoding="utf-8")
+    assert "protect-bash ASK: " + sub(303, cmd) in log

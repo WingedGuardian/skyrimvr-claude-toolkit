@@ -22,6 +22,16 @@ def test_grep_case_flag():
     assert not grep.grep(r"^\s*ls\s", "LS x", icase=False)
 
 
+def test_grep_is_ascii_only():
+    # GNU grep's [[:space:]], \b and case folding are ASCII; Python's Unicode defaults are not.
+    assert not grep.grep(r"rm\s+x", "rm x")
+    assert not grep.grep(r"rm\s+x", "rmx") and not grep.grep(r"rm\s+x", "rm　x")
+    assert grep.grep(r"rm\s+x", "rm	x")
+    assert not grep.grep("kelvin", "Kelvin")        # Kelvin sign does not fold to k
+    assert not grep.grep("sed", "ſed")              # long s does not fold to s
+    assert grep.grep("KELVIN", "kelvin")
+
+
 def test_path_regex_windows_dialects_all_match():
     rx = paths.path_to_regex("C:/GOG Games/Skyrim VR")
     for s in ["C:/GOG Games/Skyrim VR", "C:" + BS + "GOG Games" + BS + "Skyrim VR", "/c/GOG Games/Skyrim VR",

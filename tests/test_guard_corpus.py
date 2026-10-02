@@ -22,7 +22,7 @@ def _rec():
     return m
 
 
-ROWS = [json.loads(line) for line in EXPECTED.read_text(encoding="utf-8").splitlines() if line.strip()]
+ROWS = [json.loads(line) for line in EXPECTED.read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
 @pytest.fixture(scope="module")
