@@ -118,18 +118,6 @@ def test_committed_publication_cleanup_failure_is_warning(tmp_path, monkeypatch,
     assert "cleanup" in capsys.readouterr().err.lower()
 
 
-def test_bare_pytest_skips_unsafe_controls(tmp_path):
-    env = dict(os.environ)
-    for key in ("PYTHONPATH", "PYTEST_PLUGINS", "HARNESS_FIXTURE_ROOT"):
-        env.pop(key, None)
-    result = subprocess.run([sys.executable, "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                             "tests/test_harness_controls.py", "tests/test_harness_integrations.py"],
-                            cwd=REPO, env=env, capture_output=True, text=True, timeout=40)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "skipped" in result.stdout
-    assert " passed" not in result.stdout
-
-
 def test_lock_refresh_merges_target_reports_and_rejects_missing_extras():
     spec = importlib.util.spec_from_file_location("locker", REPO / "scripts/lock-python-dependencies.py")
     locker = importlib.util.module_from_spec(spec); spec.loader.exec_module(locker)

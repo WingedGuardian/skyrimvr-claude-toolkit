@@ -1,6 +1,9 @@
 """Read-only dependency/configuration gates also run under ordinary CI pytest."""
 import hashlib
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 from conftest import REPO
@@ -54,3 +57,32 @@ def test_no_mountpoint_nested_in_readonly_workspace():
     assert "SKYRIM_NODE_PREFIX" in install
     dockerfile = (REPO / ".devcontainer/Dockerfile").read_text()
     assert "NODE_PATH=" in dockerfile and "/workspace" not in dockerfile.split("NODE_PATH=")[1].split()[0]
+
+
+# Lives here, not in test_harness_controls.py: that module skips wholesale under plain
+# pytest, so this check of the skip itself never ran in the ordinary CI suite.
+def test_bare_pytest_skips_unsafe_controls(tmp_path):
+    env = dict(os.environ)
+    for key in ("PYTHONPATH", "PYTEST_PLUGINS", "HARNESS_FIXTURE_ROOT"):
+        env.pop(key, None)
+    result = subprocess.run([sys.executable, "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                             "tests/test_harness_controls.py", "tests/test_harness_integrations.py"],
+                            cwd=REPO, env=env, capture_output=True, text=True, timeout=40)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "skipped" in result.stdout
+    assert " passed" not in result.stdout
+
+
+def test_ci_workflow_parses_and_runs_harness_modules_on_both_legs():
+    """An unparseable workflow runs NOTHING. `--only-binary=:all: --require-hashes` in a plain
+    scalar is a YAML mapping error (": "), which silently disabled every CI job."""
+    yaml = pytest.importorskip("yaml")
+    workflow = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text())
+    behavior = workflow["jobs"]["behavior"]
+    assert set(behavior["strategy"]["matrix"]["os"]) >= {"ubuntu-latest", "windows-latest"}
+    harness = [step for step in behavior["steps"]
+               if "tests/run_harness_tests.py" in str(step.get("run", "")) and "if" not in step]
+    assert harness, "no unconditional harness-contained step in the behavior job"
+    command = harness[0]["run"]
+    for module in ("tests/test_harness_controls.py", "tests/test_harness_integrations.py"):
+        assert module in command
