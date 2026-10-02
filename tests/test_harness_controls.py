@@ -238,3 +238,44 @@ def test_live_cold_start_mounts_without_node_modules(tmp_path):
     assert not (work / "node_modules").exists()
     for key, path in sources.items():
         assert (path / "sentinel").read_text() == key
+
+
+def test_harness_evidence_falls_back_when_workspace_readonly(tmp_path):
+    """Inside the container /workspace is a read-only bind: evidence must go to scratch."""
+    spec = importlib.util.spec_from_file_location("launcher", REPO / "tests/run_harness_tests.py")
+    launcher = importlib.util.module_from_spec(spec); spec.loader.exec_module(launcher)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    assert launcher.evidence_root(repo) == repo / ".pytest_cache"
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    (blocked / ".pytest_cache").write_text("not a directory")  # mkdir fails like EROFS would
+    root = launcher.evidence_root(blocked)
+    assert not root.is_relative_to(blocked)
+    assert root.is_dir()
+
+
+def test_spriggit_unwritable_destination_fails_before_serializing(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("publisher", REPO / "tools/spriggit_publish.py")
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    source = tmp_path / "Mod.esp"
+    source.write_text("x")
+    monkeypatch.setattr(module.os, "access", lambda path, mode: False)
+    with pytest.raises(ValueError, match="not writable"):
+        module.check_paths(source, tmp_path / "out" / "yaml")
+
+
+def test_held_lock_error_names_crash_debris(tmp_path):
+    spec = importlib.util.spec_from_file_location("publisher", REPO / "tools/spriggit_publish.py")
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    source, target = tmp_path / "new.esp", tmp_path / "Mod.esp"
+    source.write_text("fresh"); target.write_text("old")
+    key = hashlib.sha256(os.path.normcase(str(target.resolve())).encode()).hexdigest()[:16]
+    (tmp_path / (".spriggit-lock-" + key)).mkdir()
+    debris = tmp_path / (".spriggit-previous-" + key + "-0123abcd")
+    debris.write_text("the previous plugin")
+    with pytest.raises(ValueError) as error:
+        module.publish(source, target)
+    assert str(debris) in str(error.value)
+    assert "\n" not in str(error.value)
+    assert target.read_text() == "old"

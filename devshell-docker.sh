@@ -95,4 +95,6 @@ echo "Installing dependencies inside the container..."
 docker exec "$CONTAINER_NAME" bash -c 'exec bash .devcontainer/install-dependencies.sh'
 
 echo "Done. Opening shell (exit to stop the container)..."
-docker exec -it "$CONTAINER_NAME" bash
+# Allocate a TTY only when there is one; piped stdin (scripted checks) would otherwise abort
+# with "the input device is not a TTY" after a successful startup.
+if [ -t 0 ]; then docker exec -it "$CONTAINER_NAME" bash; else docker exec -i "$CONTAINER_NAME" bash; fi

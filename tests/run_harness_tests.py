@@ -8,9 +8,32 @@ import sys
 import tempfile
 
 
+def evidence_root(repo):
+    """repo/.pytest_cache, or container-local scratch when the checkout is read-only.
+
+    Inside the dev container /workspace is a read-only bind, so creating the evidence
+    directory there raises EROFS. HARNESS_EVIDENCE_ROOT overrides both.
+    """
+    override = os.environ.get("HARNESS_EVIDENCE_ROOT")
+    candidates = [Path(override)] if override else [Path(repo) / ".pytest_cache"]
+    candidates.append(Path(tempfile.gettempdir()) / "skyrim-harness-evidence")
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = Path(tempfile.mkdtemp(prefix="probe-", dir=candidate))
+            probe.rmdir()
+            return candidate
+        except OSError:
+            continue
+    raise SystemExit("Could not check: no writable evidence directory")
+
+
 def main():
     repo = Path(__file__).resolve().parents[1]
-    work = Path(tempfile.mkdtemp(prefix="harness-", dir=repo / ".pytest_cache"))
+    root = evidence_root(repo)
+    if root != repo / ".pytest_cache":
+        print("Repository not writable; evidence goes to", root, flush=True)
+    work = Path(tempfile.mkdtemp(prefix="harness-", dir=root))
     binary = work / "bin"
     binary.mkdir()
     managers = "winget choco scoop apt apt-get dnf pacman brew npm pip pip3 dotnet".split()
@@ -87,5 +110,4 @@ def main():
 
 
 if __name__ == "__main__":
-    Path(__file__).resolve().parents[1].joinpath(".pytest_cache").mkdir(exist_ok=True)
     sys.exit(main())

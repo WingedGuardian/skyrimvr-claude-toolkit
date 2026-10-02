@@ -180,3 +180,77 @@ def test_mo2_config_and_explicit_override(tmp_path):
                             capture_output=True, text=True, timeout=20)
     assert result.returncode != 0
     assert "Malformed SKYRIM_LOADORDER_DIR" in result.stderr
+
+
+def store_stubs(tmp_path):
+    stubs = tmp_path / "Microsoft" / "WindowsApps"
+    stubs.mkdir(parents=True)
+    for name in ("python", "python3"):
+        executable(stubs / name, 'echo STUB-RAN; exit 9009\n')
+    return stubs
+
+
+def test_spriggit_skips_windows_store_python_stub(tmp_path):
+    stubs = store_stubs(tmp_path)
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    executable(binary / "spriggit", '''while [ "$#" -gt 0 ]; do
+ if [ "$1" = --OutputPath ]; then out="$2"; shift 2; else shift; fi
+done
+mkdir -p "$out"; printf 'ModKey: Example.esp\n' > "$out/Record.yaml"
+''')
+    source = tmp_path / "Example.esp"
+    source.write_text("FAKE INPUT")
+    target = tmp_path / "result"
+    env = dict(os.environ, PATH=os.pathsep.join([str(binary), str(stubs), os.environ["PATH"]]),
+               SPRIGGIT_WORK_ROOT=str(tmp_path / "scratch"))
+    env.pop("SKYRIM_PYTHON", None)
+    result = subprocess.run([BASH, "-c", 'export PATH="$STUBS:$PATH"; exec bash "$@"', "_",
+                             str(fixture_wrapper(tmp_path)), "serialize",
+                             "--InputPath", str(source), "--OutputPath", str(target)],
+                            env=dict(env, STUBS=stubs.as_posix()), cwd=tmp_path,
+                            text=True, capture_output=True, timeout=30)
+    assert "STUB-RAN" not in result.stdout + result.stderr
+    assert result.returncode == 0, result.stderr
+    assert (target / "Record.yaml").exists()
+
+
+def test_spriggit_only_store_stub_is_a_clear_error(tmp_path):
+    stubs = store_stubs(tmp_path)
+    wrapper = fixture_wrapper(tmp_path)
+    env = {k: v for k, v in os.environ.items() if k not in ("SKYRIM_PYTHON", "BASH_ENV")}
+    result = subprocess.run([BASH, "-c", 'S=$STUBS; if command -v cygpath >/dev/null; then S=$(cygpath -u "$S"); fi; '
+                             'PATH="$S"; . "$WRAPPER" serialize --InputPath a --OutputPath b',
+                             ], env=dict(env, STUBS=stubs.as_posix(), WRAPPER=wrapper.as_posix()),
+                            cwd=tmp_path, text=True, capture_output=True, timeout=30)
+    assert result.returncode != 0
+    assert "STUB-RAN" not in result.stdout + result.stderr
+    assert "Microsoft Store" in result.stderr, result.stderr
+
+
+def test_spriggit_refuses_destination_with_foreign_entries(tmp_path):
+    """The pre-repair wrapper merged with `cp -r` and deleted nothing; a whole-directory
+    replace would silently lose a git repository kept beside the YAML."""
+    target = tmp_path / "result"
+    (target / ".git").mkdir(parents=True)
+    (target / ".git" / "HEAD").write_text("ref: refs/heads/master\n")
+    (target / "Weapons").mkdir()
+    (target / "Weapons" / "Old.yaml").write_text("old")
+    (target / "spriggit-meta.json").write_text("{}")
+    result, target = spriggit_case(tmp_path, "yaml", existing=False)
+    assert result.returncode != 0
+    assert (target / ".git" / "HEAD").read_text() == "ref: refs/heads/master\n"
+    assert (target / "Weapons" / "Old.yaml").read_text() == "old"
+    message = [line for line in result.stderr.splitlines() if ".git" in line]
+    assert message and "Spriggit" in message[0], result.stderr
+
+
+def test_spriggit_replaces_spriggit_shaped_destination(tmp_path):
+    target = tmp_path / "result"
+    (target / "Weapons").mkdir(parents=True)
+    (target / "Weapons" / "Old.yaml").write_text("old")
+    (target / "spriggit-meta.json").write_text("{}")
+    (target / "RecordData.yaml").write_text("old")
+    result, target = spriggit_case(tmp_path, "yaml", existing=False)
+    assert result.returncode == 0, result.stderr
+    assert sorted(p.name for p in target.iterdir()) == ["Record.yaml"]

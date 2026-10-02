@@ -1,13 +1,32 @@
 #!/usr/bin/env bash
 # Preserve the Spriggit ModKey basename, validate artifacts, then replace output transactionally.
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PY=()
+# Pure-bash dirname (no external tools before Python is located); accepts either separator.
+case "${BASH_SOURCE[0]}" in *[/\\]*) SCRIPT_DIR="${BASH_SOURCE[0]%[/\\]*}";; *) SCRIPT_DIR=.;; esac
+SCRIPT_DIR="$(cd "$SCRIPT_DIR" && pwd)"
+# The Microsoft Store "App Execution Alias" (...\WindowsApps\python.exe) is not Python: it opens
+# the Store and exits 9009. It often precedes a real install on PATH, so skip it explicitly.
+PY=(); STORE_STUB=""
 if [ -n "${SKYRIM_PYTHON:-}" ]; then PY=("$SKYRIM_PYTHON")
-elif command -v python >/dev/null 2>&1; then PY=(python)
-elif command -v python3 >/dev/null 2>&1; then PY=(python3)
-elif command -v py >/dev/null 2>&1; then PY=(py -3)
-else echo '[spriggit-cli] Python 3 is required for validated publication' >&2; exit 1; fi
+else
+    for name in python python3; do
+        while IFS= read -r candidate; do
+            case "$candidate" in
+                *[/\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][Aa][Pp][Pp][Ss][/\\]*) STORE_STUB="$candidate";;
+                *) PY=("$candidate"); break 2;;
+            esac
+        done < <(type -aP "$name" 2>/dev/null || true)
+    done
+    if [ "${#PY[@]}" -eq 0 ] && type -P py >/dev/null 2>&1; then PY=(py -3); fi
+fi
+if [ "${#PY[@]}" -eq 0 ]; then
+    if [ -n "$STORE_STUB" ]; then
+        echo "[spriggit-cli] Python 3 is required for validated publication; the only python on PATH is the Microsoft Store stub ($STORE_STUB). Install Python 3 or set SKYRIM_PYTHON." >&2
+    else
+        echo '[spriggit-cli] Python 3 is required for validated publication' >&2
+    fi
+    exit 1
+fi
 REAL_IN=""; REAL_OUT=""; ARGS=(); argv=("$@"); i=0
 while [ "$i" -lt "${#argv[@]}" ]; do
     a="${argv[$i]}"
@@ -20,7 +39,12 @@ while [ "$i" -lt "${#argv[@]}" ]; do
         *) i=$((i+1));;
     esac
 done
-if [ -z "$REAL_IN" ] && [ -z "$REAL_OUT" ]; then exec spriggit "$@"; fi
+# A global tool install puts `spriggit` on PATH (Windows); the dev container restores it as a
+# LOCAL tool from .config/dotnet-tools.json, which is only reachable via `dotnet tool run`.
+if type -P spriggit >/dev/null 2>&1; then SPRIGGIT=(spriggit)
+elif type -P dotnet >/dev/null 2>&1; then SPRIGGIT=(dotnet tool run spriggit --)
+else echo '[spriggit-cli] spriggit not found: install the Spriggit.CLI dotnet tool' >&2; exit 1; fi
+if [ -z "$REAL_IN" ] && [ -z "$REAL_OUT" ]; then exec "${SPRIGGIT[@]}" "$@"; fi
 [ -n "$REAL_IN" ] && [ -n "$REAL_OUT" ] || { echo 'InputPath and OutputPath are both required' >&2; exit 1; }
 "${PY[@]}" "$SCRIPT_DIR/spriggit_publish.py" check "$REAL_IN" "$REAL_OUT"
 DEFAULT_ROOT="${TMPDIR:-/tmp}/spriggit-work"
@@ -42,6 +66,6 @@ while [ "$i" -lt "${#argv[@]}" ]; do
     esac
 done
 echo "[spriggit-cli] workspace: $WORK" >&2
-spriggit "${ARGS[@]}"
+"${SPRIGGIT[@]}" "${ARGS[@]}"
 "${PY[@]}" "$SCRIPT_DIR/spriggit_publish.py" publish "$NEW_OUT" "$REAL_OUT"
 echo "[spriggit-cli] result -> $REAL_OUT" >&2
