@@ -17,7 +17,7 @@ from skyguard import rules  # noqa: E402
 # The rules still carrying their pre-Plan-5 text (which echoes the command). It may only shrink.
 LEGACY_ALLOWED = {
     "S-INERT-NOCMD", "S-INERT-NOROOT", "S-DEL-CONFIG", "S-DEL-INSTALL", "S-REGISTRY", "S-PSC-OUT",
-    "S-CHAMPOLLION", "S-DEL-ADVISE", "S-RELATIVE-UNKNOWN", "S-MOVE-INSTALL", "S-WRITE-INSTALL",
+    "S-CHAMPOLLION", "S-DEL-ADVISE", "S-RELATIVE-UNKNOWN", "S-MOVE-INSTALL", "S-REDIRECT-INSTALL",
     "S-SED-WINPATH", "S-PLUGIN-REF", "S-LOADORDER-REF", "S-AUTOMOD-ESP", "S-AUTOMOD-NIF",
     "S-AUTOMOD-ARCHIVE", "S-RESAVER-APPLY", "S-EXTERNAL-OUT", "W-INERT-NOPATH", "W-PLUGIN", "W-INI",
     "W-SKSE-INI", "W-LOADORDER", "W-PAPYRUS", "W-INSTALL",
@@ -91,3 +91,27 @@ def test_legacy_rules_json_maps_every_legacy_template_to_its_id():
     m = json.loads((REPO / "tests" / "guard_corpus" / "legacy_rules.json").read_text(encoding="utf-8"))
     legacy = {i: r["template"] for i, r in rules.RULES.items() if r["legacy"]}
     assert m == {t: i for i, t in legacy.items()}
+
+
+def test_basename_splits_on_both_separators():
+    assert rules._basename("C:/a" + chr(92) + "b/x.esp") == "x.esp"
+    assert rules._basename("C:" + chr(92) + "a" + chr(92)) == "a"
+    assert rules._basename("x.esp") == "x.esp"
+
+
+def test_a_non_legacy_rule_renders_through_message(monkeypatch):
+    monkeypatch.setitem(rules.RULES, "T-TEMP", {
+        "decision": "advise", "hook": "protect-bash", "legacy": False, "prefixes": [],
+        "template": "Note: {op} touches {file} (save {save}, {n} more).",
+    })
+    out = rules.message("T-TEMP", file="C:/a" + chr(92) + "b/x.esp", op="cp", save="S1", n=2)
+    assert out == "Note: cp touches x.esp (save S1, 2 more)."
+
+
+def test_every_deny_template_formats_without_error():
+    """deny()/advise() call .format() on templates; a stray brace must not be able to crash the engine."""
+    for rid, r in rules.RULES.items():
+        if r["legacy"]:
+            rules.legacy_message(rid, c="cmd", p="path")
+        else:
+            _render(rid)

@@ -916,6 +916,14 @@ MUTATIONS = [
         "tests/test_skyguard_write.py::test_rule_trace_records_the_rule_id",
         id="rule-trace-records-id-write",
     ),
+    # Fix round 1: the basename splitter lost a backslash and raised re.error on every real message.
+    pytest.param(
+        "tools/skyguard/rules.py",
+        'r"[/' + BS*2 + ']+", str(value)',
+        'r"[/' + BS + ']+", str(value)',
+        "tests/test_rule_messages.py::test_a_non_legacy_rule_renders_through_message",
+        id="rule-basename-splits-on-backslash",
+    ),
 ]
 
 

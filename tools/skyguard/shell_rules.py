@@ -28,7 +28,7 @@ DENY_CHAMPOLLION = rules.RULES["S-CHAMPOLLION"]["template"]
 ADV_DELETE = rules.RULES["S-DEL-ADVISE"]["template"]
 ADV_RELATIVE = rules.RULES["S-RELATIVE-UNKNOWN"]["template"]
 ADV_MOVE = rules.RULES["S-MOVE-INSTALL"]["template"]
-ADV_REDIRECT = rules.RULES["S-WRITE-INSTALL"]["template"]
+ADV_REDIRECT = rules.RULES["S-REDIRECT-INSTALL"]["template"]
 ADV_SED = rules.RULES["S-SED-WINPATH"]["template"]
 ADV_PLUGIN = rules.RULES["S-PLUGIN-REF"]["template"]
 ADV_LOADORDER = rules.RULES["S-LOADORDER-REF"]["template"]
@@ -96,7 +96,7 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit) -> Verdict:
     if has(r"(^|[;&|(`]|\s)(mv|cp|move|copy)\s.*(" + a + ")"):
         advise("S-MOVE-INSTALL")
     if has(r""">\s*["']?(""" + g + "|" + c + ")"):
-        advise("S-WRITE-INSTALL")
+        advise("S-REDIRECT-INSTALL")
     if has(r"sed\s+-i.*(" + g + "|" + c + ")"):
         advise("S-SED-WINPATH")
     if has(r"\.(esp|esm|esl|bsa|ba2)\b"):

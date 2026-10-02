@@ -11,6 +11,8 @@ import re
 # Fields a non-legacy template may use. A file is always rendered as its basename.
 FIELDS = frozenset({"file", "op", "save", "n"})
 
+# S-DEL-ADVISE, S-PLUGIN-REF and S-LOADORDER-REF are placeholder ids for the legacy advice that later Plan 5
+# tasks remove or replace (R10, R11); they are not part of the final rule set.
 RULES = {
     'S-INERT-NOCMD': {
         "decision": 'deny',
@@ -120,7 +122,7 @@ RULES = {
         'here is silent -- confirm the destination before relying on it.'
     ),
     },
-    'S-WRITE-INSTALL': {
+    'S-REDIRECT-INSTALL': {
         "decision": 'advise',
         "hook": 'protect-bash',
         "legacy": True,
@@ -293,7 +295,7 @@ RULES = {
 
 
 def _basename(value) -> str:
-    return re.split(r"[/\]+", str(value).rstrip("/\\"))[-1]
+    return re.split(r"[/\\]+", str(value).rstrip("/\\"))[-1]
 
 
 def message(rule_id: str, **fields) -> str:

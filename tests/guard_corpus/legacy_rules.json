@@ -22,7 +22,7 @@
  "LOAD ORDER: {p}. Your mod manager owns these and may overwrite a direct edit on its next deploy, so make sure a direct edit is really what is wanted. Note the Special Edition copy under AppData is a DIFFERENT file from the VR one and is routinely stale.": "W-LOADORDER",
  "Moving/copying inside the live game install: {c}. A stray overwrite here is silent -- confirm the destination before relying on it.": "S-MOVE-INSTALL",
  "PAPYRUS SCRIPT: {p}. A .pex loads at game startup ONLY, so a running session will not see this change. Snapshot to .claude/backups/<name>/ before experimenting.": "W-PAPYRUS",
- "Redirecting output into the game/config directory: {c}. A redirect TRUNCATES its target before anything is written.": "S-WRITE-INSTALL",
+ "Redirecting output into the game/config directory: {c}. A redirect TRUNCATES its target before anything is written.": "S-REDIRECT-INSTALL",
  "SKSE PLUGIN CONFIG: {p}. Not captured by any snapshot hook -- copy it yourself before changing it.": "W-SKSE-INI",
  "SKYRIM CONFIG: {p}. Load order is Skyrim.ini then SkyrimVR.ini then SkyrimPrefs.ini (last wins), so a setting here can be overridden by a later file. Diff before and after rather than trusting the edit.": "W-INI"
 }
