@@ -179,6 +179,60 @@ MUTATIONS = [
         "tests/test_hooks.py::test_session_kb_guard_finds_its_engine_however_it_is_launched",
         id="session-wrapper-self-path-normalisation",
     ),
+    # The fork-free location block (latency fix). Drop a character from the textual /c/x -> C:/x
+    # conversion: python.exe is then handed `C:Users/...` (drive-relative) and cannot open the engine.
+    # Git Bash's own argument conversion would mask it, so the named test switches that off.
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        'ROOT_WIN="${ROOT_WIN^}:${ROOT:2}"',
+        'ROOT_WIN="${ROOT_WIN^}:${ROOT:3}"',
+        "tests/test_hooks.py::test_a_drive_root_is_converted_to_its_windows_spelling",
+        id="wrapper-drive-root-spelling",
+    ),
+    # Lose the `pwd -W` fallback for a root on an MSYS mount (/tmp/...), which has no textual spelling.
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        '    msys*:/*)          ROOT_WIN=',
+        '    msys*:/__never__)  ROOT_WIN=',
+        "tests/test_hooks.py::test_a_root_on_an_msys_mount_still_gets_its_windows_spelling",
+        id="wrapper-msys-mount-root-spelling",
+    ),
+    # The same block must be the same CODE in every hook, or the protect-bash tests above stop covering
+    # the other four.
+    pytest.param(
+        ".claude/hooks/snapshot-before-tool.sh",
+        '    msys*:/*)          ROOT_WIN=',
+        '    msys*:/__never__)  ROOT_WIN=',
+        "tests/test_repo_invariants.py::test_every_hook_locates_its_install_with_the_same_block",
+        id="wrapper-location-block-drift",
+    ),
+    # mkdir runs only when the heartbeat directory is missing; make it never run. A fresh install then
+    # gets no heartbeat and hook-canary reports a live hook as dead.
+    pytest.param(
+        ".claude/hooks/backup-before-edit.sh",
+        '[ -d "$HB_DIR" ] || mkdir -p "$HB_DIR"',
+        '[ -d "$PROJECT_DIR" ] || mkdir -p "$HB_DIR"',
+        "tests/test_hooks.py::test_a_fresh_install_gets_its_heartbeat_directory",
+        id="wrapper-heartbeat-dir-on-fresh-install",
+    ),
+    # setup.sh: stop recognising the Store alias, so `py -3` -> WindowsApps wins again and every hook
+    # call pays ~135 ms more interpreter start.
+    pytest.param(
+        "setup.sh",
+        '            */[Ww]indows[Aa]pps/*) if',
+        '            */__never__/*) if',
+        "tests/test_setup_paths.py::test_hooks_prefer_a_regular_python_over_the_store_alias",
+        id="setup-prefers-regular-python",
+    ),
+    # ...and the other clause: when the alias is ALL there is, it must still be written. Dropping the
+    # fallback leaves the hooks unconfigured, so they refuse every command.
+    pytest.param(
+        "setup.sh",
+        '        PYTHON_PATH="$PY_STORE"\n',
+        '        :\n',
+        "tests/test_setup_paths.py::test_hooks_prefer_a_regular_python_over_the_store_alias",
+        id="setup-falls-back-to-store-python",
+    ),
     # A re-run of setup.sh must repair a hook configured for an interpreter that has since moved.
     pytest.param(
         "setup.sh",

@@ -6,18 +6,36 @@
 #
 # A bare `cat`, never `cat /dev/stdin`: the latter returns ZERO BYTES when Claude Code (Node) spawns a
 # hook, which made every hook here inert for five weeks. tools/hook-canary.sh reads the heartbeat.
+#
+# Hot path = bash BUILTINS ONLY. Every `$(...)`, pipe stage or external command is a fork, and a fork
+# costs 10-70 ms on Git Bash: MEASURED 2026-10-02, the wrapper's own forks were ~390 ms of a 545 ms
+# median. So: parameter expansion, not dirname; `cd` in this shell, not in a subshell; printf's %()T,
+# not date; mkdir only when the directory is missing. The remaining forks are `$(cat)` and the engine.
 
 HOOK_NAME="protect-files"
 PY="{{PYTHON_PATH}}"
 INPUT=$(cat)
 
+# Where the install is: two levels above this file, however the hook was launched (forward, mixed,
+# backslash or relative). A failed cd leaves ROOT empty, and an engine handed no root refuses.
 _SELF="${BASH_SOURCE[0]//\\//}"
-HOOK_DIR="$(cd "$(dirname "$_SELF")" 2>/dev/null && pwd)"
-ROOT="$(cd "$HOOK_DIR/../.." 2>/dev/null && pwd)"
-ROOT_WIN="$(cd "$HOOK_DIR/../.." 2>/dev/null && pwd -W 2>/dev/null)"
+case "$_SELF" in */*) HOOK_DIR="${_SELF%/*}" ;; *) HOOK_DIR="." ;; esac
+_CWD="$PWD"
+ROOT=""
+CDPATH= cd -- "$HOOK_DIR/../.." >/dev/null 2>&1 && ROOT="$PWD"
+CDPATH= cd -- "$_CWD" >/dev/null 2>&1
+# The Windows spelling (`pwd -W`). A drive path converts textually; anything else (an MSYS mount such
+# as /tmp) asks `pwd -W`, which costs the one fork. Not Git Bash: no Windows spelling, as before.
+ROOT_WIN=""
+case "$OSTYPE:$ROOT" in
+    msys*:/[a-zA-Z]/*) ROOT_WIN="${ROOT:1:1}"; ROOT_WIN="${ROOT_WIN^}:${ROOT:2}" ;;
+    msys*:/[a-zA-Z])   ROOT_WIN="${ROOT:1:1}"; ROOT_WIN="${ROOT_WIN^}:/" ;;
+    msys*:/*)          ROOT_WIN="$(CDPATH= cd -- "$ROOT" 2>/dev/null && pwd -W 2>/dev/null)" ;;
+esac
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$ROOT}"
 HB_DIR="$PROJECT_DIR/.claude/backups/.hook-heartbeat"
-mkdir -p "$HB_DIR" 2>/dev/null
+[ -d "$HB_DIR" ] || mkdir -p "$HB_DIR" 2>/dev/null
+printf -v NOW '%(%Y%m%d_%H%M%S)T' -1
 
 inert() {
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"GUARD INERT: %s %s, so it evaluated NO rules and cannot report a decision. Allowing silently would be indistinguishable from approving."}}\n' \
@@ -32,9 +50,9 @@ inert() {
 command -v "$PY" >/dev/null 2>&1 || inert "cannot run Python ($(printf '%s' "$PY" | tr '\134' '/')) -- install Python 3 and run setup.sh to configure its path"
 
 if [ -n "$INPUT" ]; then
-    printf '%s payload_bytes=%s\n' "$(date +%Y%m%d_%H%M%S)" "${#INPUT}" > "$HB_DIR/$HOOK_NAME" 2>/dev/null
+    printf '%s payload_bytes=%s\n' "$NOW" "${#INPUT}" > "$HB_DIR/$HOOK_NAME" 2>/dev/null
 else
-    printf '%s NO PAYLOAD\n' "$(date +%Y%m%d_%H%M%S)" > "$HB_DIR/$HOOK_NAME.blind" 2>/dev/null
+    printf '%s NO PAYLOAD\n' "$NOW" > "$HB_DIR/$HOOK_NAME.blind" 2>/dev/null
 fi
 
 OUT=$(printf '%s' "$INPUT" | "$PY" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" claude "$HOOK_NAME" \

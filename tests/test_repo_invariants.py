@@ -187,6 +187,23 @@ def test_every_hook_writes_a_heartbeat_and_handles_an_empty_payload():
     assert not missing, "\n  " + "\n  ".join(missing)
 
 
+def test_every_hook_locates_its_install_with_the_same_block():
+    """The fork-free location block (`_SELF=` .. `PROJECT_DIR=`) is behaviour-tested through
+    protect-bash only: the drive-spelling and MSYS-mount tests in test_hooks.py. That covers the other
+    four hooks only if they carry the SAME code (comments aside), so a drift in one of them goes red here."""
+    hooks = sorted(HOOK_DIR.glob("*.sh"))
+    assert len(hooks) == 5, "expected five hooks -- this test is stale"
+    blocks = {}
+    for h in hooks:
+        text = h.read_text(encoding="utf-8")
+        start, end = text.find('_SELF="'), text.find("PROJECT_DIR=")
+        assert 0 <= start < end, f"{h.name}: location block not found"
+        blocks[h.name] = [ln for ln in text[start:end].splitlines() if not ln.lstrip().startswith("#")]
+    reference = blocks["protect-bash.sh"]
+    drifted = [name for name, b in blocks.items() if b != reference]
+    assert not drifted, f"location block differs from protect-bash.sh in: {drifted}"
+
+
 def test_every_hook_is_configured_by_setup_and_carries_one_placeholder():
     """setup.sh substitutes {{PYTHON_PATH}} into a HARDCODED LIST of hook filenames, with
     `sed ... /g`. Two things rot silently here:
