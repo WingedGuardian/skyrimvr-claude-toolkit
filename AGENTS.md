@@ -25,8 +25,8 @@ does not duplicate `CLAUDE.md`, so the two cannot drift apart.
 
 - `.claude/settings.json` and `.claude/hooks/` — the safety layer. These hooks are what block direct
   writes to ESP/ESM/BSA files, advise on edits in the game and config directories, and back up a file
-  before an Edit/Write tool call modifies it, with an audit trail. Files written by scripts are not backed
-  up; only the knowledgebase and instruction files are covered, by a snapshot at session start.
+  before an Edit/Write tool call modifies it, with an audit trail. Script writes are not backed up; only
+  `KNOWLEDGEBASE.md`, `KNOWLEDGEBASE.local.md` and `CLAUDE.md` are, by a snapshot at session start.
 - `.claude/skills/<name>/SKILL.md` — plain Markdown. **Read them directly**: `CLAUDE.md` points into them by
   name (`devbench`, `triage-and-conflicts`, `xelib`, …).
 
