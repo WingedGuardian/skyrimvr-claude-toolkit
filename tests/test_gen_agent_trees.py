@@ -161,3 +161,73 @@ def test_write_refuses_an_installed_copy_and_leaves_it_untouched(tmp_path, capsy
     assert g.main(["--root", str(tmp_path)]) == 2
     assert hook.read_bytes() == configured
     assert "setup.sh" in capsys.readouterr().out
+
+
+def _with_core(tmp_path, nbytes, addendum=b"", codex=None):
+    src = _scratch_source(tmp_path)
+    (src / "instructions" / "core.md").write_bytes(b"x" * nbytes)
+    (src / "instructions" / "claude.md").write_bytes(addendum)
+    if codex is not None:
+        (src / "instructions" / "codex.md").write_bytes(codex)
+    return src
+
+
+def test_budget_accepts_a_small_core(tmp_path):
+    assert _gen().budget_problems(_with_core(tmp_path, 1000)) == []
+
+
+def test_budget_rejects_an_oversize_core(tmp_path):
+    g = _gen()
+    problems = g.budget_problems(_with_core(tmp_path, g.INSTRUCTION_BUDGET))
+    assert problems and "Codex silently truncates" in problems[0]
+
+
+def test_budget_counts_the_header(tmp_path):
+    """The header is real bytes in the file Codex reads; a core sized to the raw limit must fail."""
+    g = _gen()
+    room = g.INSTRUCTION_BUDGET - g.CODEX_ADDENDUM_RESERVE - g.INSTALL_EXPANSION_RESERVE
+    assert g.budget_problems(_with_core(tmp_path, room))            # header pushes it over
+    assert not g.budget_problems(_with_core(tmp_path / "b", room - 400))
+
+
+def test_budget_holds_room_for_the_codex_addendum(tmp_path):
+    """Before codex.md exists, a core that fits only WITHOUT the addendum must already fail."""
+    g = _gen()
+    core = g.INSTRUCTION_BUDGET - g.INSTALL_EXPANSION_RESERVE - 300
+    sizes = g.instruction_sizes(_with_core(tmp_path, core))
+    assert sizes["codex.md (reserved)"] > g.INSTRUCTION_BUDGET
+
+
+def test_budget_uses_the_real_codex_addendum_once_it_exists(tmp_path):
+    g = _gen()
+    sizes = g.instruction_sizes(_with_core(tmp_path, 1000, codex=b"y" * 10))
+    assert "codex.md (reserved)" not in sizes and "codex.md" in sizes
+
+
+def test_budget_holds_room_for_install_expansion(tmp_path):
+    """setup.sh expands the paths and the MO2 block in the INSTALLED copy, which is what Codex reads."""
+    g = _gen()
+    core = g.INSTRUCTION_BUDGET - g.CODEX_ADDENDUM_RESERVE - 300
+    assert g.budget_problems(_with_core(tmp_path, core))
+
+
+def test_budget_measures_lf_not_crlf(tmp_path):
+    g = _gen()
+    lf = g.instruction_sizes(_with_core(tmp_path, 0, addendum=b"a\nb\n"))["claude.md"]
+    crlf = g.instruction_sizes(_with_core(tmp_path / "c", 0, addendum=b"a\r\nb\r\n"))["claude.md"]
+    assert lf == crlf
+
+
+def test_budget_ignores_the_pointer_and_counts_every_addendum(tmp_path):
+    g = _gen()
+    src = _with_core(tmp_path, 10)
+    (src / "instructions" / "agents-pointer.md").write_bytes(b"z" * 40000)
+    (src / "instructions" / "opencode.md").write_bytes(b"o")
+    assert set(g.instruction_sizes(src)) == {"claude.md", "opencode.md", "codex.md (reserved)"}
+
+
+def test_budget_cli_exits_1_and_names_the_file(tmp_path, capsys):
+    g = _gen()
+    _with_core(tmp_path, g.INSTRUCTION_BUDGET)
+    assert g.main(["--root", str(tmp_path), "--budget"]) == 1
+    assert "claude.md" in capsys.readouterr().out
