@@ -49,10 +49,15 @@ function findPluginsTxt(base = localAppData()) {
 }
 
 // Resolve the plugins.txt to read. Override with $PLUGINS_TXT; otherwise probe (see above).
-function defaultPluginsTxt(base = localAppData()) {
+// An EXPLICIT `base` means "probe this folder": it beats SKYRIM_LOADORDER_DIR and setup's
+// skyrim-paths.env, which only replace the default LOCALAPPDATA guess.
+function defaultPluginsTxt(base) {
     if (process.env.PLUGINS_TXT) return process.env.PLUGINS_TXT;
-    const configured = process.env.SKYRIM_LOADORDER_DIR || configuredLoadOrder();
-    if (configured) return path.join(configured, 'plugins.txt');
+    if (base === undefined) {
+        const configured = process.env.SKYRIM_LOADORDER_DIR || configuredLoadOrder();
+        if (configured) return path.join(configured, 'plugins.txt');
+        base = localAppData();
+    }
     const { chosen, others } = findPluginsTxt(base);
     if (others.length) {
         console.warn([
