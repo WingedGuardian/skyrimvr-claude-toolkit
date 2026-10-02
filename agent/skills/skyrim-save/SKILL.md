@@ -1,6 +1,6 @@
 ---
 name: skyrim-save
-description: Read and scan Skyrim save files (.ess). Use when debugging save issues, searching for orphaned scripts, checking mod footprint in saves, or investigating save bloat.
+description: Read, scan and clean Skyrim save files (.ess), including ReSaver CLI writes (reset-havok, cleanse-formlists, remove-created). Use when debugging save issues, searching for orphaned scripts, checking mod footprint in saves, investigating save bloat, or cleaning or repairing a save.
 paths: "**/*.ess"
 ---
 
@@ -51,7 +51,7 @@ SSE/VR saves use LZ4 compression. General layout of the decompressed data:
 
 ## Limitations
 
-- **Read-only** — cannot edit or write back valid saves
+- **The binary scanner is read-only** — it cannot write back valid saves (to change a save, use the ReSaver CLI below)
 - **Binary search only** — cannot parse structured Papyrus instance data (variable values, active effect state)
 - For structured save editing, use [ReSaver](https://www.nexusmods.com/skyrimspecialedition/mods/5031) (Java GUI)
 
