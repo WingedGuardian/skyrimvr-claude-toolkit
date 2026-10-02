@@ -24,9 +24,11 @@ does not duplicate `CLAUDE.md`, so the two cannot drift apart.
 **Claude Code specific — you do not get these:**
 
 - `.claude/settings.json` and `.claude/hooks/` — the safety layer. These hooks are what block direct
-  writes to ESP/ESM/BSA files, require confirmation before editing anything in the game or config
-  directories, and auto-back-up every file before it is modified, with an audit trail.
-- `.claude/skills/` — packaged workflows.
+  writes to ESP/ESM/BSA files, advise on edits in the game and config directories, and back up a file
+  before an Edit/Write tool call modifies it, with an audit trail. Script writes are not backed up; only
+  `KNOWLEDGEBASE.md`, `KNOWLEDGEBASE.local.md` and `CLAUDE.md` are, by a snapshot at session start.
+- `.claude/skills/<name>/SKILL.md` — plain Markdown. **Read them directly**: `CLAUDE.md` points into them by
+  name (`devbench`, `triage-and-conflicts`, `xelib`, …).
 
 **Read that second list carefully.** On another agent the guardrails are simply absent. Nothing will
 stop a bad `rm`, a direct binary write into a plugin, or an unreviewed edit to a live INI. The
@@ -39,12 +41,14 @@ If you are not running under Claude Code, compensate deliberately:
 2. **Never write directly to `.esp` / `.esm` / `.esl` / `.bsa` / `.ba2`.** Use Spriggit (serialize to
    YAML, edit the YAML, deserialize) or xelib. A hand-edited plugin binary is a corrupted plugin.
 3. **Show the user the change before applying it**, especially for INIs, load order files, and
-   anything under the game directory. The hooks normally force this pause; without them it is on you.
+   anything under the game directory. Under Claude Code the guards only advise here, they do not force a
+   pause; without them it is entirely on you.
 4. **Snapshot `.psc` sources before experimenting.** They ARE covered by `snapshot-before-tool.sh` (before every Bash command) and by `backup-before-edit.sh` (Edit/Write, no extension filter) -- an earlier version of this line said neither covered them, which was wrong. Snapshot anyway for a named rollback point, because an automatic copy you cannot identify later is not a rollback plan.
-   under Claude Code, and reconstructing a working script from memory is miserable.
 
 ## Ground rules that apply regardless of agent
 
+- **Read `KNOWLEDGEBASE.local.md` → `## My preferences` at the start of every session**: they are the
+  user's standing instructions.
 - **State a confidence level before proposing a change**, and investigate until it is high. Skyrim is
   full of undocumented quirks and version differences; things frequently do not work the way they
   read.

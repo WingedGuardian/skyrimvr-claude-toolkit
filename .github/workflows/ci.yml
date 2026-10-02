@@ -175,7 +175,7 @@ jobs:
           sys.exit(1 if fail else 0)
           PY
 
-      - name: Generated agent files match agent/ (edit agent/, then run scripts/gen_agent_trees.py)
+      - name: Generated agent files match agent/, and the instruction budget holds (edit agent/, then run scripts/gen_agent_trees.py)
         run: python scripts/gen_agent_trees.py --check
 
       - name: Relative links in Markdown resolve

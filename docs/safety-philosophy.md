@@ -21,8 +21,16 @@ Before making any change, Claude is instructed to check the knowledgebase for kn
 ### Layer 2: Confidence Levels
 Claude must explicitly rate its confidence (0-100%) before proposing any change and list assumptions. This forces investigation before action.
 
+#### Confidence scale
+| Range | Meaning | Action |
+|-------|---------|--------|
+| 95-100% | Verified via testing, docs, or authoritative source | Proceed with user confirmation |
+| 80-94% | Strong evidence but not fully verified | Proceed with caveats noted |
+| 60-79% | Reasonable assumption, some unknowns | Research more before proceeding |
+| < 60% | Speculative | Do NOT proceed -- investigate first |
+
 ### Layer 3: Hook Guards
-Five bash scripts intercept Claude's tool calls:
+Five thin wrappers over the Python engine `tools/skyguard/` intercept Claude's tool calls:
 
 - **protect-bash.sh** -- Blocks destructive commands; **advises** on file operations in the game directory (a note to Claude, not a prompt to you)
 - **protect-files.sh** -- Blocks writes to plugin/archive binaries through the Edit/Write tools; **advises** on all other edits in the install
@@ -75,3 +83,64 @@ record a heartbeat and hand the verdict back -- and need no editing to change a 
 change back? Rules: edit `tools/skyguard/`. Adapters: edit `agent/guards/adapters/claude/` and
 regenerate; the `.claude/hooks/` copies in the repository are generated.) The hooks need Python 3 and
 refuse every command if it is missing, so a broken engine can never read as "allowed".
+
+## How the guards resolve "the install"
+
+**"The install" is RESOLVED, not guessed from the word "Skyrim".** The guards derive
+their root from their own location -- for the Claude Code hooks, two directories above
+`.claude/hooks/` -- and add whatever
+`setup.sh` recorded in `.claude/skyrim-paths.env`. The previous rule matched *any*
+path containing "Skyrim", which meant the session scratchpad (its path contains
+`C--GOG-Games-...-Skyrim-VR`), a checkout of this toolkit, `C:/Temp/skyrim-notes.txt`
+and a GitHub URL were all refused as "deleting the game". MEASURED: 71 of 443
+refusals over 7,641 real commands were that false positive, and none of the 71 named
+the install.
+
+⚠ **If no root can be resolved, the guard DENIES.** A guard that evaluated nothing
+must not answer "fine" -- that conflation is what left every hook here inert for five
+weeks. ⚠ A broken `skyrim-paths.env` does NOT cost you refusals: the self-derived root always resolves, so the guard silently narrows to the install folder plus the generic config literal, and an MO2 profile directory stops being guarded with nothing reported. The fail-closed branch fires only when NO root resolves at all.
+
+⚠ **A relative path cannot be resolved** -- the hook is never told the caller's
+working directory -- so `rm Data/x.nif` gets an advisory, not a refusal. Prefer
+absolute paths when deleting.
+
+## Why so few prompts
+
+**Why so few prompts.** A guard that prompts on routine work gets approved by reflex
+and then protects nothing -- the X4 toolkit measured 40 such prompts across 13,282
+commands, every one of them noise. Deny is likewise a short list: "the mod manager
+owns it" or "this is risky" is a reason to advise, not to refuse, because a guard
+that blocks legitimate work is a guard that gets deleted.
+
+## Is the guard actually running?
+
+**Verify the hooks are actually alive: `bash tools/hook-canary.sh`.** Every hook here
+was INERT for months -- fired, read zero bytes, exited 0, which is byte-identical to
+approving. `/dev/stdin` fails when stdin is a Win32 pipe from a non-MSYS parent,
+which is how Claude Code spawns a hook; the suite reproduces that on Windows but not
+on Linux, and neither tells you about YOUR install. The canary reads heartbeats
+written from inside real invocations, which does.
+
+## The knowledgebase snapshot at session start
+
+The knowledgebase split (`KNOWLEDGEBASE.md` is shipped and replaced on update; `KNOWLEDGEBASE.local.md`
+is yours) protects what has not been written yet. An install whose notes are
+*already* in the shipped file is covered by one thing only: a copy taken before the
+extract. The Claude Code hook `.claude/hooks/session-kb-guard.sh` takes that copy at **SessionStart**,
+delegating to `tools/kb-guard.sh`, which snapshots `KNOWLEDGEBASE.md`,
+`KNOWLEDGEBASE.local.md` and `CLAUDE.md` into `.claude/backups/kb/<stamp>/` whenever
+the content changed, and raises an alarm when one of them vanishes, empties, or loses
+more than half its bytes. Run it by hand any time: `bash tools/kb-guard.sh --verbose`.
+
+- ⚠ **The snapshot is the protection; the alarm is a convenience.** An update that
+  replaces a 100 KB knowledgebase with a 140 KB shipped one is a total loss that
+  shrinks nothing and raises no alarm. Recovery is always the stored copy.
+- ⚠ **Rotation never prunes the oldest, the newest, or the largest copy of a watched
+  file.** Every session after an unnoticed loss snapshots the damaged file, so a plain
+  oldest-first rotation would walk the good copy off the end — a store that destroys
+  what it exists to protect while still looking like a store.
+- **Why a separate mechanism at all**, when `backup-before-edit.sh` already exists:
+  that hook fires on Edit/Write tool calls, and the knowledgebase is usually written
+  through a script run via Bash, which an Edit/Write hook structurally cannot see.
+  MEASURED on this install 2026-09-08: **zero** `KNOWLEDGEBASE.md` backups across
+  seven months, with the backup hook working correctly the whole time.

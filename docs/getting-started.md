@@ -188,6 +188,20 @@ the tools that don't need Windows or an active MO2 session (ESP inspection/diffi
 unit tests, ReSaver CLI). `setup.sh` already pointed its mounts at your real mod files when you ran
 it. See `docs/container-vs-windows.md` for what belongs there versus what still needs Windows.
 
+## Telling the agent your preferences
+
+Your standing instructions go in `KNOWLEDGEBASE.local.md` (in your Skyrim folder; create it if it is
+missing), under a `## My preferences` heading. The agent is told to read that section at the start of
+every session and follow it, and to add to it when you state a lasting preference. Updates never
+replace this file. For example:
+
+```markdown
+## My preferences
+- Always show me a dry run before writing to any plugin.
+- I play in VR; never suggest SSE-only mods.
+- Keep answers short; I know my way around xEdit.
+```
+
 ## Troubleshooting
 
 **"Claude Code won't start"**
