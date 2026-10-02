@@ -882,6 +882,24 @@ MUTATIONS = [
         "tests/test_repo_invariants.py::test_every_hook_is_registered_in_settings_json",
         id="every-hook-is-wired-into-settings-json",
     ),
+    # Read the declared env file from the POSIX --root again. Native Windows python only opens
+    # /c/... because Git Bash rewrites the argument; with conversion off the read fails silently and a
+    # declared game root outside the install drops out, so deleting it is allowed.
+    pytest.param(
+        "tools/skyguard/run.py",
+        "Path(a.root_win or a.root)",
+        "Path(a.root)",
+        "tests/test_hooks.py::test_a_declared_root_is_read_with_path_conversion_off",
+        id="engine-reads-declared-env-from-the-windows-root",
+    ),
+    # An env file that exists but cannot be read must refuse, not quietly drop the declared roots.
+    pytest.param(
+        "tools/skyguard/run.py",
+        "                env = None" + chr(10),
+        "                env = {}" + chr(10),
+        "tests/test_hooks.py::test_an_unreadable_declared_env_file_fails_closed",
+        id="unreadable-declared-env-fails-closed",
+    ),
 ]
 
 

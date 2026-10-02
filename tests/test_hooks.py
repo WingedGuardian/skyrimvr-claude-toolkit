@@ -766,3 +766,36 @@ def test_a_fresh_install_gets_its_heartbeat_directory(tmp_path, name):
     beat = hb / name[:-3]
     assert beat.is_file(), f"{name}: no heartbeat on a fresh install"
     assert "payload_bytes=" in beat.read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
+# the declared env file is read by the engine itself (fix pass, 2026-10-02)
+# --------------------------------------------------------------------------
+# run.py read `.claude/skyrim-paths.env` from `Path(--root)`, a POSIX spelling (/c/...). Native Windows
+# python only opened it because Git Bash converts the argument; with conversion off the read failed
+# silently and a DECLARED game root (outside the install) dropped out, so deleting it was allowed.
+_NO_CONV = [{"MSYS2_ARG_CONV_EXCL": "*"}, {"MSYS_NO_PATHCONV": "1"}]
+
+
+def _declared_fire(root, extra_env, command):
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root), **extra_env)
+    return _decision(subprocess.run([_bash(), str(root / ".claude" / "hooks" / "protect-bash.sh")],
+                                    input=json.dumps(_shell(command)), capture_output=True, text=True,
+                                    env=env, timeout=60))
+
+
+@pytest.mark.parametrize("extra", _NO_CONV, ids=["MSYS2_ARG_CONV_EXCL", "MSYS_NO_PATHCONV"])
+def test_a_declared_root_is_read_with_path_conversion_off(tmp_path, extra):
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
+    other = tmp_path / "declared game"
+    (root / ".claude" / "skyrim-paths.env").write_text(
+        f'SKYRIM_GAME_ROOT="{other.as_posix()}"\n', encoding="utf-8", newline="\n")
+    got = _declared_fire(root, extra, f'rm -rf "{other.as_posix()}/Data"')
+    assert got[0] == "deny", f"a declared game root was dropped when path conversion was off: {got}"
+
+
+def test_an_unreadable_declared_env_file_fails_closed(tmp_path):
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
+    (root / ".claude" / "skyrim-paths.env").write_bytes(b'SKYRIM_GAME_ROOT="\xff\xfe\x80"\n')
+    got = _declared_fire(root, {"MSYS2_ARG_CONV_EXCL": "*"}, "ls")
+    assert got[0] == "deny" and "GUARD INERT" in got[1], got
