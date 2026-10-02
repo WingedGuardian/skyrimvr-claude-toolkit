@@ -54,4 +54,3 @@ def install():
                 raise PermissionError("PACKAGE-MANAGER TRIPWIRE: " + repr(argv))
     sys.addaudithook(audit)
     _ACTIVE = True
-

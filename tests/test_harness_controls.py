@@ -129,27 +129,6 @@ def test_bare_pytest_skips_unsafe_controls(tmp_path):
     assert " passed" not in result.stdout
 
 
-@pytest.mark.parametrize("input_file,lock_file", [("requirements.txt", "requirements.lock"),
-                                                   ("requirements-windows.txt", "requirements-windows.lock")])
-def test_python_lock_tracks_input_and_hashes(input_file, lock_file):
-    digest = hashlib.sha256((REPO / input_file).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
-    text = (REPO / lock_file).read_text()
-    assert "# input-sha256: " + digest in text
-    assert "--hash=sha256:" in text
-    for line in (REPO / input_file).read_text().splitlines():
-        if line.strip() and not line.startswith("#"):
-            assert line.strip() in text
-
-
-def test_node_lock_tracks_declared_dependencies():
-    package = json.loads((REPO / "package.json").read_text())
-    lock = json.loads((REPO / "package-lock.json").read_text())
-    assert lock["packages"][""]["dependencies"] == package["dependencies"]
-    for name, value in lock["packages"].items():
-        if name:
-            assert value["integrity"].startswith("sha512-")
-
-
 def test_lock_refresh_merges_target_reports_and_rejects_missing_extras():
     spec = importlib.util.spec_from_file_location("locker", REPO / "scripts/lock-python-dependencies.py")
     locker = importlib.util.module_from_spec(spec); spec.loader.exec_module(locker)

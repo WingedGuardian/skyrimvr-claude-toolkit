@@ -57,7 +57,14 @@ if [[ "${1:-}" == "--rebuild" ]] || ! docker image inspect "$IMAGE_TAG" &>/dev/n
 fi
 
 # Never stop a different session's container. Remove only this invocation's container/volume.
-trap 'echo "Stopping container..."; docker rm -fv "$CONTAINER_NAME" &>/dev/null || true' EXIT
+CONTAINER_OWNED=0
+cleanup() {
+    if [ "$CONTAINER_OWNED" -eq 1 ]; then
+        echo "Stopping container..."
+        docker rm -fv "$CONTAINER_NAME" &>/dev/null || true
+    fi
+}
+trap cleanup EXIT
 
 # --- Start container detached (sleep infinity keeps it alive so we can exec into it) ---
 echo "Starting container..."
@@ -77,6 +84,7 @@ docker run -d \
     -e 'PYTEST_ADDOPTS=-o cache_dir=/tmp/skyrim-pytest-cache' \
     "$IMAGE_TAG" \
     sleep infinity
+CONTAINER_OWNED=1
 
 # --- postCreateCommand (only what's present -- a fresh checkout may not have all three yet) ---
 echo "Installing dependencies inside the container..."

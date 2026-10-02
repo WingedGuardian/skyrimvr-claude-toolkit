@@ -80,18 +80,6 @@ def test_spriggit_overlapping_paths_rejected(tmp_path):
     assert "overlap" in result.stderr.lower()
 
 
-def test_devcontainer_uses_readonly_mount_strings():
-    text = (REPO / ".devcontainer/devcontainer.json").read_text()
-    config = json.loads("\n".join(line for line in text.splitlines() if not line.lstrip().startswith("//")))
-    assert isinstance(config["workspaceMount"], str)
-    for mount in [config["workspaceMount"], *config["mounts"]]:
-        assert isinstance(mount, str)
-        if "type=bind" in mount:
-            assert "readonly" in mount.split(",")
-    assert "install-dependencies.sh" in config["postCreateCommand"]
-    assert "npm ci" in (REPO / ".devcontainer/install-dependencies.sh").read_text()
-
-
 @pytest.mark.tripwire_control
 def test_docker_dependency_failure_propagates(tmp_path):
     (tmp_path / ".devcontainer").mkdir()
@@ -119,6 +107,35 @@ exit 0
     assert "Done. Opening shell" not in result.stdout
 
 
+@pytest.mark.parametrize("fail_start", [False, True])
+def test_docker_helper_mount_arguments_close_workspace_alias(tmp_path, fail_start):
+    (tmp_path / ".devcontainer").mkdir()
+    template = (REPO / ".devcontainer/devcontainer.json").read_text()
+    for key in ("MODS", "PROFILE", "OVERWRITE"):
+        template = template.replace("{{DEVCONTAINER_" + key + "_MOUNT}}", tmp_path.as_posix())
+    (tmp_path / ".devcontainer/devcontainer.json").write_text(template)
+    (tmp_path / ".devcontainer/install-dependencies.sh").write_bytes(
+        (REPO / ".devcontainer/install-dependencies.sh").read_bytes())
+    (tmp_path / "devshell-docker.sh").write_bytes((REPO / "devshell-docker.sh").read_bytes())
+    binary = tmp_path / "bin"; binary.mkdir()
+    executable(binary / "docker", 'if [ "$1" = run ]; then printf "%s\\n" "$@" > "$MOUNT_LOG"; '
+               '[ "$FAIL_START" = 1 ] && exit 19; fi\n'
+               'if [ "$1" = rm ]; then echo "RM CALLED" >> "$MOUNT_LOG"; fi\nexit 0\n')
+    log = tmp_path / "mounts.log"
+    result = subprocess.run([BASH, str(tmp_path / "devshell-docker.sh")], cwd=tmp_path,
+                            env=dict(os.environ, PATH=str(binary) + os.pathsep + os.environ["PATH"],
+                                     MOUNT_LOG=str(log), FAIL_START="1" if fail_start else "0"),
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == (19 if fail_start else 0), result.stderr
+    args = log.read_text()
+    if fail_start:
+        assert "RM CALLED" not in args
+    assert ":/workspace:ro" in args
+    for target in ("mods", "profile", "overwrite"):
+        assert ":/skyrim/" + target + ":ro" in args
+    assert "type=volume,target=/workspace/node_modules" in args
+
+
 def test_mo2_config_and_explicit_override(tmp_path):
     root = tmp_path / "toolkit"
     (root / "tools/xelib").mkdir(parents=True)
@@ -126,13 +143,14 @@ def test_mo2_config_and_explicit_override(tmp_path):
     helper = REPO / "tools/xelib/active-plugins.js"
     for file in helper.parent.glob("*.js"):
         (root / "tools/xelib" / file.name).write_bytes(file.read_bytes())
-    profile = tmp_path / "MO2 profile"
+    profile = tmp_path / "MO2's profile"
     profile.mkdir()
     (profile / "plugins.txt").write_text("*Correct.esp\n")
     local = tmp_path / "local/Skyrim VR"
     local.mkdir(parents=True)
     (local / "plugins.txt").write_text("*Wrong.esp\n")
-    (root / ".claude/skyrim-paths.env").write_text("SKYRIM_LOADORDER_DIR='" + profile.as_posix() + "'\n")
+    config = root / ".claude/skyrim-paths.env"
+    config.write_text("SKYRIM_LOADORDER_DIR='" + profile.as_posix().replace("'", "'\\''") + "'\n")
     script = "console.log(JSON.stringify(require('./tools/xelib/active-plugins').readActivePlugins()))"
     env = dict(os.environ, LOCALAPPDATA=str(local.parent))
     env.pop("PLUGINS_TXT", None)
@@ -145,3 +163,14 @@ def test_mo2_config_and_explicit_override(tmp_path):
     result = subprocess.run(["node", "-e", script], cwd=root, env=env,
                             capture_output=True, text=True, timeout=20)
     assert json.loads(result.stdout) == ["Wrong.esp"]
+    env.pop("PLUGINS_TXT")
+    env["SKYRIM_LOADORDER_DIR"] = str(local)
+    result = subprocess.run(["node", "-e", script], cwd=root, env=env,
+                            capture_output=True, text=True, timeout=20)
+    assert json.loads(result.stdout) == ["Wrong.esp"]
+    env.pop("SKYRIM_LOADORDER_DIR")
+    config.write_text("SKYRIM_LOADORDER_DIR='unterminated\n")
+    result = subprocess.run(["node", "-e", script], cwd=root, env=env,
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode != 0
+    assert "Malformed SKYRIM_LOADORDER_DIR" in result.stderr
