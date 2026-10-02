@@ -7,6 +7,11 @@ Credit: this file's core insight — and the devcontainer this toolkit ships —
 Default to the container for any task. Only cross to Windows when the task genuinely requires the
 Windows DLL or an active MO2 virtual filesystem.
 
+The workspace and all game/profile bind mounts are read-only, including workspace aliases.
+Write generated output in container-local scratch and publish deliberately through Windows.
+Dependency failure stops startup. See [integration safety](harness-integrations.md) for locks,
+mount contracts, disposable sentinel checks and the COULD NOT CHECK status.
+
 ## Decision Table
 
 | Task | Where | Tool |
@@ -67,6 +72,21 @@ in the container** with a Mutagen `ArgumentNullException` deep in its BSA/load-o
 (`PluginListingsPathProvider.Get` has no default plugins.txt location on Linux, and passing
 `--DataFolder` doesn't change this). If Spriggit throws that way on a plugin that should be simple,
 check whether it has the Localized flag — if so, serialize it on Windows instead.
+
+## Writing from inside the container
+
+The workspace is a read-only bind, so every workflow that writes uses a container-local path.
+Measured 2026-10-02 on a fresh clone (no `node_modules/`, nothing pre-created):
+
+| Workflow | Where it writes | Notes |
+|---|---|---|
+| Node dependencies | `/opt/skyrim-node/node_modules` | `npm ci` from the lockfile; `NODE_PATH` serves `require()`, not ES-module `import` |
+| Spriggit serialize/deserialize | e.g. `/tmp/<name>` | `bash tools/spriggit-cli.sh` (uses the restored local tool); a `/workspace` destination is refused up front |
+| pytest | `/tmp/skyrim-pytest-cache` | set through `PYTEST_ADDOPTS` |
+| `tests/run_harness_tests.py` | `/tmp/skyrim-harness-evidence/` | automatic when the checkout is not writable; override with `HARNESS_EVIDENCE_ROOT` |
+
+To bring a result back to the host, publish it deliberately from Windows (or copy it out with
+`docker cp`); the container cannot modify the host workspace or the game/profile mounts.
 
 ## Spriggit vs. xelib
 

@@ -103,11 +103,18 @@ built and verified end-to-end (Spriggit really does serialize a real mod's ESP i
 parts of the workflow that don't need Windows or an active MO2 session: ESP inspection and diffing,
 FOMOD/JSON generation, unit-testing mod logic, ReSaver CLI save analysis.
 
-`bash devshell-docker.sh` builds the image and drops you into a shell — Docker Desktop is the only
-prerequisite. `setup.sh` wires its mounts to your real mod files automatically: on MO2, straight from
+`bash devshell-docker.sh` builds the image and drops you into a shell — Docker Desktop and host jq are
+prerequisites. `setup.sh` wires its mounts to your real mod files automatically: on MO2, straight from
 your detected instance; on stock/Vortex, from `Data/`. `docs/container-vs-windows.md` is the routing
 guide for what belongs in the container versus what still needs Windows (xelib, load-order-dependent
 edits, Papyrus compilation, NIF authoring, live in-game testing).
+
+The container mounts the checkout **read-only** at `/workspace`, so anything that writes goes to
+container-local paths instead: project Node modules are installed in `/opt/skyrim-node` (found through
+`NODE_PATH` by `require()`; ES-module `import` ignores `NODE_PATH`), Spriggit output belongs under
+`/tmp` (the wrapper refuses a read-only destination before serializing), and
+`tests/run_harness_tests.py` writes its evidence to the container's temp directory. A fresh clone
+starts with no `node_modules/` and no pre-created directories.
 
 Credit: the devcontainer and its MO2-mount design come from
 [@aaronputty](https://github.com/aaronputty)'s fork of this toolkit.
@@ -469,12 +476,17 @@ The suite is dev-only and is not in the release zip. From a clone:
 python -m venv .venv
 # Windows:            .venv/Scripts/python
 # Linux / macOS:      .venv/bin/python
-.venv/Scripts/python -m pip install pytest==8.0.0
-.venv/Scripts/python -m pytest tests/ -v      # behavioral suite
-npm test                                       # Node unit tests
+.venv/Scripts/python -m pip install --only-binary=:all: --require-hashes -r requirements.lock
+.venv/Scripts/python -B tests/run_harness_tests.py tests/ -v  # contained behavioral suite
+node --test                                                # Node unit tests
 ```
 
 The suite runs on both Windows and Linux in CI, so it should pass on either.
+
+Use the contained launcher above for local tests: bare pytest still inherits the host
+environment until the fixture integration is completed after Plan 2 certification.
+See [integration safety and dependency locks](docs/harness-integrations.md) for Spriggit
+publication, read-only container mounts, MO2 load-order selection and explicit unavailable checks.
 
 `tests/` runs the **real** `setup.sh` against generated MO2 and stock layouts and
 asserts on the paths it *wrote* -- not on what it printed. `tools/devbench-cli.sh`

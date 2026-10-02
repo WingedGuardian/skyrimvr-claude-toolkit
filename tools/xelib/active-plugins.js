@@ -49,8 +49,15 @@ function findPluginsTxt(base = localAppData()) {
 }
 
 // Resolve the plugins.txt to read. Override with $PLUGINS_TXT; otherwise probe (see above).
-function defaultPluginsTxt(base = localAppData()) {
+// An EXPLICIT `base` means "probe this folder": it beats SKYRIM_LOADORDER_DIR and setup's
+// skyrim-paths.env, which only replace the default LOCALAPPDATA guess.
+function defaultPluginsTxt(base) {
     if (process.env.PLUGINS_TXT) return process.env.PLUGINS_TXT;
+    if (base === undefined) {
+        const configured = process.env.SKYRIM_LOADORDER_DIR || configuredLoadOrder();
+        if (configured) return path.join(configured, 'plugins.txt');
+        base = localAppData();
+    }
     const { chosen, others } = findPluginsTxt(base);
     if (others.length) {
         console.warn([
@@ -63,6 +70,37 @@ function defaultPluginsTxt(base = localAppData()) {
         ].join('\n'));
     }
     return chosen;
+}
+
+// Read setup's assignments as DATA, never by spawning/sourcing a shell. Supports its
+// single-quoted values, including the '\'' spelling used for an embedded apostrophe.
+function configuredLoadOrder() {
+    const root = path.resolve(__dirname, '../..');
+    const candidates = process.env.SKYRIM_PATHS_FILE ? [process.env.SKYRIM_PATHS_FILE]
+        : [path.join(root, 'skyrim-paths.env'), path.join(root, '.claude', 'skyrim-paths.env')];
+    const file = candidates.find(p => fs.existsSync(p));
+    if (!file && process.env.SKYRIM_PATHS_FILE) throw new Error('Configured paths file is missing: ' + process.env.SKYRIM_PATHS_FILE);
+    if (!file) return '';
+    for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+        const match = line.match(/^\s*SKYRIM_LOADORDER_DIR\s*=(.*)$/);
+        if (!match) continue;
+        const raw = match[1].trim();
+        let result = '', i = 0;
+        while (i < raw.length) {
+            if (raw[i] === "'") {
+                const end = raw.indexOf("'", i + 1);
+                if (end < 0) throw new Error('Malformed SKYRIM_LOADORDER_DIR in ' + file);
+                result += raw.slice(i + 1, end); i = end + 1;
+            } else if (raw[i] === '\\' && i + 1 < raw.length) {
+                result += raw[i + 1]; i += 2;
+            } else {
+                throw new Error('Expected setup-generated quoted path in ' + file);
+            }
+        }
+        if (!result || !path.isAbsolute(result)) throw new Error('Invalid load-order root in ' + file);
+        return result;
+    }
+    return '';
 }
 
 function readActivePlugins(pluginsTxt = defaultPluginsTxt()) {

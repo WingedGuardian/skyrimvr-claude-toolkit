@@ -152,3 +152,35 @@ test('an unambiguous choice stays silent', () => {
   }
   assert.deepStrictEqual(warnings, []);
 });
+
+test('an explicit base wins over SKYRIM_LOADORDER_DIR and a paths file', () => {
+  // A caller that names the folder to probe must get that folder -- otherwise any machine
+  // with setup's skyrim-paths.env (or the variable exported) silently answers a different
+  // question, and the rival-warning tests above fail on it for reasons unrelated to them.
+  const base = fakeLocalAppData({
+    'Skyrim VR': '*Skyrim.esm\n',
+    'Skyrim Special Edition': '*Skyrim.esm\n',
+  });
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-loadorder-'));
+  const config = path.join(elsewhere, 'skyrim-paths.env');
+  fs.writeFileSync(config, "SKYRIM_LOADORDER_DIR='" + elsewhere.replace(/\\/g, '/') + "'\n");
+  const saved = {};
+  for (const k of ['PLUGINS_TXT', 'SKYRIM_LOADORDER_DIR', 'SKYRIM_PATHS_FILE']) saved[k] = process.env[k];
+  delete process.env.PLUGINS_TXT;
+  const realWarn = console.warn;
+  console.warn = () => {};
+  try {
+    process.env.SKYRIM_LOADORDER_DIR = elsewhere;
+    assert.strictEqual(defaultPluginsTxt(base), path.join(base, 'Skyrim VR', 'plugins.txt'));
+    delete process.env.SKYRIM_LOADORDER_DIR;
+    process.env.SKYRIM_PATHS_FILE = config;
+    assert.strictEqual(defaultPluginsTxt(base), path.join(base, 'Skyrim VR', 'plugins.txt'));
+    // ...while the no-argument default still honours the configuration.
+    assert.strictEqual(defaultPluginsTxt(), path.join(elsewhere, 'plugins.txt'));
+  } finally {
+    console.warn = realWarn;
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+});
