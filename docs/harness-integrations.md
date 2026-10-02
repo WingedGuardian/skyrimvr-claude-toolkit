@@ -35,6 +35,15 @@ The live sentinel test uses only disposable paths, never pulls an image, and req
 existing `busybox:1.37` image and running Linux Docker daemon. Otherwise it reports a skip
 with COULD NOT CHECK; fake-Docker tests do not certify actual filesystem enforcement.
 
+**Known cold-start defect, measured 2026-10-02:** a fresh checkout without `node_modules/`
+cannot start with the current nested volume. Docker cannot create its mountpoint through the
+read-only workspace bind. Creating an empty directory in a disposable fixture allowed the
+remaining live checks to run, but does not certify fresh-checkout startup. Keep the workspace
+read-only when repairing this; see the [live verification report](superpowers/handoffs/codex-live-verification.md).
+Failed `docker run` can also leave a newly created, stopped container and anonymous volume;
+the helper deliberately avoids removing a container unless startup succeeded. The live test
+inspected and removed only its own failed container by ID.
+
 ## Load-order configuration
 
 The xelib helper chooses `plugins.txt` in this order:

@@ -1,5 +1,11 @@
 # Codex integration repair handoff — 2026-10-02
 
+**Subsequent live verification:** [Docker and native Spriggit report](codex-live-verification.md)
+closes the native round-trip and Docker sentinel gaps. Native Spriggit passed byte-identically;
+the focused suite now passes all 23 tests without skips. Real Docker cold startup exposed a
+missing `node_modules` mountpoint defect, which remains a repair handoff. Historical results
+below describe the earlier verification and are preserved rather than relabeled.
+
 ## Ownership and scope
 
 Worktree: `C:/Users/Moona/Projects/skyrim-toolkit-code71271`.

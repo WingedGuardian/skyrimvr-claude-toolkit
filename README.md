@@ -103,11 +103,15 @@ built and verified end-to-end (Spriggit really does serialize a real mod's ESP i
 parts of the workflow that don't need Windows or an active MO2 session: ESP inspection and diffing,
 FOMOD/JSON generation, unit-testing mod logic, ReSaver CLI save analysis.
 
-`bash devshell-docker.sh` builds the image and drops you into a shell — Docker Desktop is the only
-prerequisite. `setup.sh` wires its mounts to your real mod files automatically: on MO2, straight from
+`bash devshell-docker.sh` builds the image and drops you into a shell — Docker Desktop and host jq are
+prerequisites. `setup.sh` wires its mounts to your real mod files automatically: on MO2, straight from
 your detected instance; on stock/Vortex, from `Data/`. `docs/container-vs-windows.md` is the routing
 guide for what belongs in the container versus what still needs Windows (xelib, load-order-dependent
 edits, Papyrus compilation, NIF authoring, live in-game testing).
+
+Current cold-start limitation: a fresh checkout lacking `node_modules/` fails to mount the nested
+volume through the read-only workspace. The [live verification report](docs/superpowers/handoffs/codex-live-verification.md)
+records the failure and the fixture-only workaround used to verify the remaining container behavior.
 
 Credit: the devcontainer and its MO2-mount design come from
 [@aaronputty](https://github.com/aaronputty)'s fork of this toolkit.

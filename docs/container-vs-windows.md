@@ -73,6 +73,15 @@ in the container** with a Mutagen `ArgumentNullException` deep in its BSA/load-o
 `--DataFolder` doesn't change this). If Spriggit throws that way on a plugin that should be simple,
 check whether it has the Localized flag — if so, serialize it on Windows instead.
 
+## Harness verification status (2026-10-02)
+
+Live Docker enforced the read-only workspace, game, profile and overwrite mounts. Locked
+Python/Node provisioning and real Spriggit inspection passed in a disposable workspace.
+**Fresh-checkout startup still fails if `node_modules/` is absent**, because Docker cannot
+create the nested volume mountpoint through the read-only bind. The successful provisioning
+run used a fixture-only empty directory. See the [verification and repair handoff](superpowers/handoffs/codex-live-verification.md);
+do not treat that workaround as a completed cold-start repair.
+
 ## Spriggit vs. xelib
 
 | Capability | Spriggit | xelib |
