@@ -900,6 +900,22 @@ MUTATIONS = [
         "tests/test_hooks.py::test_an_unreadable_declared_env_file_fails_closed",
         id="unreadable-declared-env-fails-closed",
     ),
+    # Rule trace (Plan 5 Task 1): the rule id is recorded where the verdict is made. Drop the audit.rule
+    # call in deny() and the log line survives (hook-canary stays green) while the trace goes silent.
+    pytest.param(
+        "tools/skyguard/shell_rules.py",
+        'audit.rule(HOOK, rule_id, "deny", reason)',
+        'audit.log(HOOK, "DENY", reason)',
+        "tests/test_skyguard_shell.py::test_rule_trace_records_the_rule_id",
+        id="rule-trace-records-id",
+    ),
+    pytest.param(
+        "tools/skyguard/write_rules.py",
+        'audit.rule(HOOK, "W-PLUGIN", "deny", DENY_PLUGIN)',
+        'audit.log(HOOK, "DENY", DENY_PLUGIN)',
+        "tests/test_skyguard_write.py::test_rule_trace_records_the_rule_id",
+        id="rule-trace-records-id-write",
+    ),
 ]
 
 

@@ -197,3 +197,10 @@ def test_port_matches_recorded_bash_verdict(tmp_path, cid, path, decision, text)
     else:
         got = (v.decision, v.reason)
     assert got == (decision, text)
+
+
+def test_rule_trace_records_the_rule_id(tmp_path):
+    a = audit.Audit(str(tmp_path))
+    write_rules.decide("C:/x/Data/My.esp", a)
+    write_rules.decide("C:/x/plugins.txt", a)
+    assert a.fired == [("W-PLUGIN", "deny"), ("W-LOADORDER", "advise")]

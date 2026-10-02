@@ -5,45 +5,31 @@ advisories (which accumulate), then the catch-all, which fires only if nothing m
 """
 from __future__ import annotations
 
+from . import rules
 from .grep import grep
 from .verdict import Advice, Verdict
 
 HOOK = "protect-files"
 
 NO_PATH_LOG = "no file_path in payload -- hook could not evaluate its rules"
-NO_PATH_DENY = (
-    "GUARD INERT: protect-files.sh received no file_path and therefore checked NOTHING. Allowing silently "
-    "would be indistinguishable from deciding this is fine. Investigate the hook payload before retrying."
-)
+NO_PATH_DENY = rules.RULES["W-INERT-NOPATH"]["template"]
 
-DENY_PLUGIN = "BLOCKED: Cannot directly write to plugin/archive files. Use xelib, Spriggit or AutoMod."
+DENY_PLUGIN = rules.RULES["W-PLUGIN"]["template"]
 
-ADV_SKYRIM_CONFIG = (
-    "SKYRIM CONFIG: {p}. Load order is Skyrim.ini then SkyrimVR.ini then SkyrimPrefs.ini (last wins), so a "
-    "setting here can be overridden by a later file. Diff before and after rather than trusting the edit."
-)
-ADV_SKSE_CONFIG = (
-    "SKSE PLUGIN CONFIG: {p}. Not captured by any snapshot hook -- copy it yourself before changing it."
-)
-ADV_LOADORDER = (
-    "LOAD ORDER: {p}. Your mod manager owns these and may overwrite a direct edit on its next deploy, so make "
-    "sure a direct edit is really what is wanted. Note the Special Edition copy under AppData is a DIFFERENT "
-    "file from the VR one and is routinely stale."
-)
-ADV_PAPYRUS = (
-    "PAPYRUS SCRIPT: {p}. A .pex loads at game startup ONLY, so a running session will not see this change. "
-    "Snapshot to .claude/backups/<name>/ before experimenting."
-)
-ADV_INSTALL = "Editing inside the live game/config install: {p}"
+ADV_SKYRIM_CONFIG = rules.RULES["W-INI"]["template"]
+ADV_SKSE_CONFIG = rules.RULES["W-SKSE-INI"]["template"]
+ADV_LOADORDER = rules.RULES["W-LOADORDER"]["template"]
+ADV_PAPYRUS = rules.RULES["W-PAPYRUS"]["template"]
+ADV_INSTALL = rules.RULES["W-INSTALL"]["template"]
 
 
 def decide(file_path: str, audit) -> Verdict:
     if file_path == "":
-        audit.log(HOOK, "REFUSE", NO_PATH_LOG)
+        audit.rule(HOOK, "W-INERT-NOPATH", "deny", NO_PATH_LOG, level="REFUSE")
         return Verdict("deny", NO_PATH_DENY)
 
     if grep(r"\.(esp|esm|esl|bsa|ba2)[\s.]*$", file_path):
-        audit.log(HOOK, "DENY", DENY_PLUGIN)
+        audit.rule(HOOK, "W-PLUGIN", "deny", DENY_PLUGIN)
         return Verdict("deny", DENY_PLUGIN)
 
     if grep(r"(^|[/\\]+)\.claude[/\\]+(hooks|plans|backups|memory|projects)[/\\]+", file_path):
@@ -53,21 +39,21 @@ def decide(file_path: str, audit) -> Verdict:
 
     advice = Advice()
 
-    def advise(template: str) -> None:
-        text = template.format(p=file_path)
-        audit.log(HOOK, "ADVISE", text)
+    def advise(rule_id: str) -> None:
+        text = rules.legacy_message(rule_id, p=file_path)
+        audit.rule(HOOK, rule_id, "advise", text)
         advice.add(text)
 
     if grep(r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)$", file_path):
-        advise(ADV_SKYRIM_CONFIG)
+        advise("W-INI")
     if grep(r"[/\\]+Data[/\\]+SKSE[/\\]+Plugins[/\\]+.*\.ini$", file_path):
-        advise(ADV_SKSE_CONFIG)
+        advise("W-SKSE-INI")
     if grep(r"(loadorder\.txt|plugins\.txt)$", file_path):
-        advise(ADV_LOADORDER)
+        advise("W-LOADORDER")
     if grep(r"\.(pex|psc)$", file_path):
-        advise(ADV_PAPYRUS)
+        advise("W-PAPYRUS")
 
     if not advice.items and grep(r"(^|[/\\]+)Data[/\\]+|My Games[/\\]+Skyrim", file_path):
-        advise(ADV_INSTALL)
+        advise("W-INSTALL")
 
     return Verdict("allow", "", advice.joined())

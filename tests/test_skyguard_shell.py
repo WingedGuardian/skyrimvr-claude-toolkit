@@ -283,3 +283,19 @@ def test_ask_path_writes_the_ask_audit_line(tmp_path):
     run(cmd, tmp_path)
     log = (tmp_path / ".claude/backups/AUDIT_LOG.txt").read_text(encoding="utf-8")
     assert "protect-bash ASK: " + sub(303, cmd) in log
+
+
+def test_rule_trace_records_the_rule_id(tmp_path):
+    a = audit.Audit(str(tmp_path))
+    r = paths.roots("/x/install", "", {"SKYRIM_GAME_ROOT": GAME})
+    shell_rules.decide(f'rm -rf "{GAME}/Data"', r, a)
+    assert a.fired == [("S-DEL-INSTALL", "deny")]
+    a = audit.Audit(str(tmp_path))
+    shell_rules.decide("cat plugins.txt", r, a)
+    assert a.fired == [("S-LOADORDER-REF", "advise")]
+    a = audit.Audit(str(tmp_path))
+    shell_rules.decide("bash tools/resaver-cli.sh reset-havok s.ess --apply", r, a)
+    assert a.fired == [("S-RESAVER-APPLY", "ask")]
+    a = audit.Audit(str(tmp_path))
+    shell_rules.decide("", r, a)
+    assert a.fired == [("S-INERT-NOCMD", "deny")]

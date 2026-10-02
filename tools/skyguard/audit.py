@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Union
+from typing import List, Optional, Tuple, Union
 
 
 class Audit:
@@ -11,6 +11,7 @@ class Audit:
         self.project = project
         self.backups = Path(project) / ".claude" / "backups"
         self.path = self.backups / "AUDIT_LOG.txt"
+        self.fired: List[Tuple[str, str]] = []            # (rule id, decision), in firing order; memory only
 
     @staticmethod
     def stamp() -> str:
@@ -27,3 +28,8 @@ class Audit:
 
     def log(self, hook: str, level: str, msg: str) -> None:
         self.raw("[{}] {} {}: {}\n".format(self.stamp(), hook, level, msg))
+
+    def rule(self, hook: str, rule_id: str, decision: str, msg: str, level: Optional[str] = None) -> None:
+        """Record that a rule fired. The log line is the same one log() writes (hook-canary and kb-guard read it)."""
+        self.fired.append((rule_id, decision))
+        self.log(hook, level or decision.upper(), msg)
