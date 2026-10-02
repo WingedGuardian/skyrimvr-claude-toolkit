@@ -907,3 +907,11 @@ All messages switch to the new templates; the legacy flag is cleared for each.
 Deferred by design: the Codex adapter, the `.rules` generator and the verdict `status` field (Plan 4);
 the read-only lock and shadow mode (Plan 6); the `skyrim-paths.env` move to the toolkit root (Plan 8/9);
 backporting R7 and the message contract to the author's install (a separate decision).
+
+## Controller rulings on the plan's open questions (2026-10-02)
+
+- **R7 back-port:** done in the install (`protect-bash.sh`, heredoc bodies fed to `bash`/`sh` are kept). Task 4 ports the install's current rule, including this.
+- **R16:** accepted. Backup manifests and nested-script snapshots are measured in Plan 5, implemented in Plan 6. The roadmap row moves with it.
+- **R15, R14:** defaults accepted (opaque advisory only at ≤0.2% of calls and ≥50% useful; DevBench deny-list = `smp reset`).
+- **Copy onto a plugin:** ADVISE, not ask, by default. The user's own ESP deploys into `Data/` are routine, and the user's standing directive is against approval fatigue. Upgrading it to an ask needs a priced case showing real misses.
+- **Uncommitted wrapper/setup changes on master** were Plan 2's latency fix in progress. Plan 5 branches from master after that fix and Plan 2's final review land.
