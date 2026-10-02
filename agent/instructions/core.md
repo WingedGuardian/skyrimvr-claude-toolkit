@@ -30,69 +30,14 @@ All under `tools/`:
 | **AutoMod CLI** | NIF meshes, BSA archives, audio, MCM, ESP one-liners | `bash tools/automod-cli.sh <module> <command> --json` |
 | **PyFFI** | NIF geometry edit — **NiTriShape (LE-format) ONLY** (any modern Python with setuptools) | See PyFFI / PyNifly below; recipes in the skyrim-nif skill |
 | **PyNifly** | NIF read/write incl. **BSTriShape (SSE)** + **animation/controller authoring** (Python, prebuilt DLL) | See PyFFI / PyNifly below; recipes in the skyrim-nif skill |
-| **ReSaver CLI** | Headless `.ess` save parse / query / cross-reference / clean / changeform-level diagnostics | `bash tools/resaver-cli.sh <op> <save.ess>` — read ops: `info\|dump\|find\|find-refs\|worries\|recon\|changeform\|extradata-scan\|changeform-diff\|freeze-report\|globaldata\|globaldata-diff`; write ops (dry-run unless `--apply`, always a NEW file): `set-global\|set-var\|clean\|reset-havok\|cleanse-formlists\|remove-created`; `verify-roundtrip` self-test. Every `--apply` is verify-gated (re-read==model or delete+fail). Resolve FormID→EditorID via `tools/resaver-resolve-names.js`. Needs JDK 17+ + ReSaver's jar (see install section). |
+| **ReSaver CLI** | Headless `.ess` save parse / query / cross-reference / clean / changeform-level diagnostics | `bash tools/resaver-cli.sh <op> <save.ess>` — read ops: `info\|dump\|find\|find-refs\|worries\|recon\|changeform\|extradata-scan\|changeform-diff\|freeze-report\|globaldata\|globaldata-diff`; write ops (dry-run unless `--apply`, always a NEW file): `set-global\|set-var\|clean\|reset-havok\|cleanse-formlists\|remove-created`; `verify-roundtrip` self-test. Every `--apply` is verify-gated (re-read==model or delete+fail). Resolve FormID→EditorID via `tools/resaver-resolve-names.js`. Needs JDK 17+ + ReSaver's jar (see `docs/installing-tools.md`). |
 | **cosave-info** | READ-ONLY structural survey of an SKSE `.skse` co-save → JSON (which mods stashed co-save data + how much) | `bash tools/cosave-cli.sh <cosave.skse>` (Python 3; the cosave sits next to its `.ess`) |
-| **skyrim-winner** | **"Which plugin actually wins this record?"** Loads the FULL active load order and asks xEdit. No index, no cache -- xEdit is the authority. | `bash tools/skyrim-winner.sh <winner\|chain> <formid> [plugin]` · `... conflicts <plugin>` -- needs **xeditlib**; see below |
+| **skyrim-winner** | **"Which plugin actually wins this record?"** Loads the FULL active load order and asks xEdit. No index, no cache -- xEdit is the authority. | `bash tools/skyrim-winner.sh <winner\|chain> <formid> [plugin]` · `... conflicts <plugin>` -- needs **xeditlib**; skill `triage-and-conflicts` |
 | **papyrus-triage** | Turns `Papyrus.N.log` into bucketed, attributed counts. Rows **sum to the entry count**; the not-shown row prints even at zero. | `python tools/papyrus-triage.py [logfile] [--top N] [--all]` -- bundled, Python 3, no install |
 | **crash-triage** | Reduces CrashLogger dumps (~5.5k lines each) to ranked signatures and labels the ones your knowledgebase already ruled on. | `python tools/crash-triage.py [dir\|file] [--frames N] [--all]` -- bundled, Python 3, no install |
-| **DevBench** | **LIVE in-game** inspect / console / Papyrus / scenario via a localhost REST+MCP server — only while the game is actually running | `bash tools/devbench-cli.sh <alive\|health\|ping\|state\|inspect\|exec\|call\|describe\|notify\|tool>` — see DevBench section below |
+| **DevBench** | **LIVE in-game** inspect / console / Papyrus / scenario via a localhost REST+MCP server — only while the game is actually running | `bash tools/devbench-cli.sh <alive\|health\|ping\|state\|inspect\|exec\|call\|describe\|notify\|tool>` — skill `devbench` |
 
-> **Note**: Install the tools you need into a `tools/` folder in your game directory; the setup prompt walks through this. See the [xeditlib](https://github.com/WingedGuardian/xeditlib) repo for XEditLib setup. NifSkope and Blender (used for NIF render-verification and mesh repair — see below) are large external GUI apps installed separately, not bundled.
-
-## Installing the Optional Tools
-
-None of the modding tools are bundled — install only the ones you need. Per tool: what it is, how to acquire it, and a quick verify.
-
-- **xeditlib** — Node.js wrapper around XEditLib.dll for programmatic ESP/ESM read/write.
-  - Acquire: run `npm install github:WingedGuardian/xeditlib` **from the toolkit root** (installs from GitHub; the bare `npm install xeditlib` works only once it's published to the npm registry). Installing at the root puts `node_modules/xeditlib` where Node's upward lookup finds it from every bundled script (`tools/xelib/*.js`, `tools/resaver-resolve-names.js`, `examples/*.js` all `require('xeditlib')`). The bundled `XEditLib.dll` + `*.Hardcoded.dat` load relative to the package folder, so the scripts are cwd-independent once installed.
-  - **Registry requirement**: XEditLib loads in `gmSSE` mode (game mode 4) even on VR, so it reads the game path from the **SSE** registry key. If `HKLM\SOFTWARE\WOW6432Node\Bethesda Softworks\Skyrim Special Edition` is missing (common on a VR-only install), ESP loads fail. Create it from an **admin** terminal: `reg add "HKLM\SOFTWARE\WOW6432Node\Bethesda Softworks\Skyrim Special Edition" /v "Installed Path" /t REG_SZ /d "<GAME_DIR>\" /f`.
-  - Verify: from the toolkit root, `node -e "require('xeditlib')"` exits clean.
-- **Champollion** — decompiles Papyrus `.pex` → `.psc`.
-  - Acquire: download a release from github.com/Orvid/Champollion/releases and unpack into `tools/Champollion/`.
-  - Verify: `tools/Champollion/Champollion.exe --help`.
-- **Caprica** — compiles Papyrus `.psc` → `.pex`.
-  - Acquire: download a release from github.com/Orvid/Caprica/releases and unpack into `tools/Caprica/`.
-  - Verify: `tools/Caprica/Caprica.exe --help`.
-- **Spriggit** — ESP ↔ YAML/JSON serialization.
-  - Acquire: `dotnet tool install Spriggit.CLI` (or `dotnet tool install --global Spriggit.CLI`).
-  - For deeply-nested output paths that trip `UnauthorizedAccessException`, call `tools/spriggit-cli.sh` (same args; it runs in a shallow workspace and copies the result back).
-  - Verify: `spriggit --help`.
-- **AutoMod CLI** — NIF / BSA / audio / MCM / ESP one-liners.
-  - Acquire: `git clone https://github.com/SpookyPirate/spookys-automod-toolkit` into `tools/automod`.
-  - Pin the SDK: create `tools/automod/global.json` selecting SDK `8.0.x` with `"rollForward": "latestFeature"`:
-    ```json
-    { "sdk": { "version": "8.0.100", "rollForward": "latestFeature" } }
-    ```
-  - Build the **Cli project only**: `dotnet build tools/automod/src/SpookysAutomod.Cli -c Release`. The WPF `Setup` project targets `net8.0-windows` — **never build it headless** (it will fail). The built artifact is `spookys-automod.dll`.
-  - Run via the wrapper: `bash tools/automod-cli.sh <module> <command> --json`; pass `--rebuild` to rebuild the DLL.
-  - Verify: `bash tools/automod-cli.sh esp --help --json`.
-- **PyFFI** — LE-format NiTriShape geometry edits.
-  - **Works on any modern Python (verified through 3.14) as long as `setuptools` is installed in that same environment** — no dedicated Python 3.10 needed. PyFFI 2.2.3's real (and only) Python-version blocker is a single unconditional `from distutils.cmd import Command` in `pyffi/utils/__init__.py` (used only by an unused, `# pragma: no cover` doc-building helper class) — `distutils` was removed from the stdlib in Python 3.12 (PEP 632). `pip install pyffi setuptools` fixes it: setuptools ships its own vendored `distutils` plus a compatibility shim that transparently satisfies that import, which is the officially-sanctioned PEP 632 migration path, not a fragile workaround. Confirmed end-to-end on Python 3.14.6: imported cleanly, read a real 735-block Skyrim skeleton NIF spanning ~15 block types (NiNode, several bhk\* physics types, controllers, etc.), modified it, wrote it back out, and re-read the result — all clean. The upstream [niftools/pyffi](https://github.com/niftools/pyffi) repo itself has had no real commits since **January 2020** (only a stray dependabot branch since), so this is the practical path forward rather than expecting an upstream fix there.
-  - The `time.clock = time.perf_counter` monkey-patch below is still required (`time.clock` was removed in Python 3.8 — the only OTHER Python-version issue, also the only one ever reported upstream, still open/unfixed as [GitHub issue #80](https://github.com/niftools/pyffi/issues/80)).
-  - Verify with that same interpreter: `python -c "import pyffi; print(pyffi.__version__)"`.
-- **PyNifly** — SSE BSTriShape read/write + animation/controller authoring + the independent parse gate.
-  - Acquire: download `io_scene_nifly.zip` from the latest release at https://github.com/BadDogSkyrim/PyNifly/releases and extract it into `tools/pynifly/` so the prebuilt DLL lands at `tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll`. No build step. (A `git clone` of the repo does NOT contain the compiled DLL — it only ships in the release zip.)
-  - Verify: load the DLL per the skyrim-nif skill.
-- **Blender (headless)** — NIF mesh repair + render-to-PNG verification.
-  - Acquire: download from blender.org; install the PyNifly Blender addon.
-  - Verify: `blender --background --version`.
-- **NifSkope** — independent visual NIF render gate (GUI).
-  - Acquire: download a release from github.com/niftools/nifskope/releases.
-  - Verify: launch it and open any NIF.
-- **ReSaver CLI** — headless `.ess` save parse / cross-reference / clean / changeform-level diagnostics.
-  - Acquire: download ReSaver from the FallrimTools page (Nexus mod 5031) and drop `ReSaver.jar` plus its `lib/` folder into `tools/resaver-cli/`; needs JDK 17+ (JDK 21 LTS recommended; e.g. `winget install Microsoft.OpenJDK.21`). The wrapper auto-compiles its small driver on first run.
-  - The read/diagnostic ops layer a small **analysis overlay** (modified ReSaver source, Apache-2.0 — see `tools/resaver-cli/analysis-overlay/NOTICE.md`) in front of your jar for extra changeform parse coverage; write ops always run the STOCK jar (corruption safety), and if the overlay can't compile against your ReSaver version the wrapper falls back to stock parsing automatically.
-  - Verify: `bash tools/resaver-cli.sh info <save.ess>` prints JSON.
-- **cosave-info** — READ-ONLY structural survey of an SKSE `.skse` co-save (which mods stashed co-save data + how much — the mod-state landscape the `.ess` never exposes). No install beyond Python 3.
-  - Verify: `bash tools/cosave-cli.sh <SaveN_...>.skse` prints JSON (the `.skse` sits next to its `.ess`).
-- **`tools/nexus.sh`** — built-in Nexus API helper (no install). Needs your Nexus key per the Nexus section below.
-  - Verify: `bash tools/nexus.sh mod <id>` prints a mod's name/version.
-
-### Reliability fixes (why these wrappers exist)
-
-1. **AutoMod** — `tools/automod-cli.sh` invokes the **prebuilt `spookys-automod.dll`** directly rather than `dotnet run`. This fixes the per-call recompile / MSB1025 failures that the old `dotnet run` form produced; rebuild once with `--rebuild` after changing AutoMod source.
-2. **Spriggit** — deep/nested output paths throw `UnauthorizedAccessException`. Use `tools/spriggit-cli.sh`, which runs in a shallow workspace and copies the result back. It **preserves the exact ESP basename** (= the Spriggit ModKey) so FormKey master references aren't corrupted.
-3. **xelib** — in `GM_SSE` mode the loader reads the **SSE** `plugins.txt`, which may be **absent** on a VR install → the load fails silently. It may also be **present and stale**, which is worse: measured on the dev machine (VR-only), the SSE file holds 659 plugins, is 18 days old, and disagrees with the VR file about which plugins are active — a complete, plausible, wrong load order that nothing rejects. `loadActive()` prefers the VR file, names every rival it ignored, and honours `$PLUGINS_TXT`. Use `tools/xelib/active-plugins.js` `loadActive()` to read and load the real active order explicitly, and always run xelib via a `.js` **file** (`node script.js`), never `node -e '...'` (inline eval deterministically breaks `SetGameMode`).
+> **Note**: none of these are bundled. How to install and verify each one: `docs/installing-tools.md`.
 
 ## AutoMod CLI
 
@@ -122,7 +67,7 @@ bash tools/automod-cli.sh <module> <command> [args] --json
 ## PyFFI / PyNifly (NIF geometry + animation authoring)
 
 **PyFFI works on any modern Python (verified through 3.14)** as long as `setuptools` is installed
-alongside it — see the Installing section above. It still needs the
+alongside it — see `docs/installing-tools.md`. It still needs the
 `time.clock = time.perf_counter` monkey-patch (a separate, still-open upstream issue).
 
 > **HARD LIMITS:**
@@ -314,33 +259,6 @@ Reserve manual testing for the final confirmation gate. See KNOWLEDGEBASE.md for
 (`game save` deadlock, paused-state semantics, heavy console commands) — read them before your first
 live session.
 
-## Optional Devcontainer (`.devcontainer/`, `devshell.sh`, `devshell-docker.sh`)
-
-Credit: this devcontainer and its MO2-mount design originated in
-[@aaronputty](https://github.com/aaronputty)'s fork of this toolkit.
-
-A reproducible Linux container (Python 3.11, Node 20, .NET 9, JDK 17) for the tools that don't need
-Windows or an active MO2 session: Spriggit ESP inspection/diffing, FOMOD/JSON generation, unit-testing
-mod logic, ReSaver CLI. See `docs/container-vs-windows.md` for the full routing guide — xelib and
-anything load-order-dependent still needs Windows (and MO2's executables list, on an MO2 install).
-
-- **`bash devshell-docker.sh`** — builds the image on first run and drops you into a shell. Only
-  needs Docker Desktop. Reads its mount sources straight out of `.devcontainer/devcontainer.json`
-  (which `setup.sh` fills in with your real mod paths), so it never hardcodes them.
-- **`bash devshell.sh`** — same thing via the `@devcontainers/cli` (`npm install -g
-  @devcontainers/cli`), for editor integration (VS Code's Dev Containers extension uses the same
-  `devcontainer.json`).
-- `setup.sh` fills in `.devcontainer/devcontainer.json`'s mount paths automatically: on an MO2
-  install, from the detected instance's mods/profile/overwrite folders; on stock/Vortex, from `Data/`
-  and the INI config folder.
-- Confirmed working end-to-end: a real third-party ESP with records serializes and inspects
-  correctly via `examples/inspect-esp.py`. **One confirmed limitation:** a plugin using localized
-  strings (the `Localized` flag) fails to serialize in the container — see
-  `docs/container-vs-windows.md`.
-- The SKSE-plugin cross-compile toolchain (LLVM/xwin/xmake) from the source fork is **not** part of
-  this default image — it roughly doubles the build for a capability that's still a single
-  unvalidated experiment. See `docs/skse-cross-compile.md` if you want to add it yourself.
-
 ## ESP Cross-Reference Integrity (`tools/esp-verify-wrapper.sh`)
 
 Guards against the silent re-mastering / dropped-reference corruption class during bulk ESP operations (mod splits, plugin renames, master-list edits, YAML find-replace). Tool-agnostic; snapshots stored outside the game dir so it never trips the edit hooks.
@@ -393,7 +311,7 @@ Settings load in this order (later overrides earlier):
 
 **Always search a mod's Nexus mod page before investigating it.** Check the description, tutorials/articles, comments, and bug reports before going in blind. This saves enormous time -- most issues have been seen and documented by other users.
 
-Nexus also offers a free REST+GraphQL API ([api-docs.nexusmods.com](https://api-docs.nexusmods.com/)) for mod **version, update dates, changelogs, file info, and dependencies** — useful for update detection and migration/triage. Supply your own free **Personal API Key** (nexusmods.com → Site preferences → API Access) and send it raw as the `apikey` request header. Skyrim SE/VR domain = `skyrimspecialedition`; endpoints take `game_domain_name` + `mod_id`. A personal key is for personal/local use only — never commit or log it, and a shared tool must have each user supply their own. In this toolkit the key is resolved **file-first, then env**: `tools/.nexus_api_key` (one line) if present, else `$NEXUS_API_KEY`. The key file is gitignored — never echo, log, or commit it. `tools/nexus.sh` wraps this (e.g. `bash tools/nexus.sh mod <id>`).
+Nexus also has a free API (versions, changelogs, dependencies). `bash tools/nexus.sh mod <id>` wraps it; key setup and the personal-use rules are in `docs/installing-tools.md`. Never echo, log or commit the key.
 
 ## Knowledgebase
 
@@ -423,26 +341,12 @@ is lost at the next update.
 
 ### The copy that covers the install you already have
 
-The split above protects what has not been written yet. An install whose notes are
-*already* in the shipped file is covered by one thing only: a copy taken before the
-extract. `.claude/hooks/session-kb-guard.sh` takes that copy at **SessionStart**,
-delegating to `tools/kb-guard.sh`, which snapshots `KNOWLEDGEBASE.md`,
-`KNOWLEDGEBASE.local.md` and `CLAUDE.md` into `.claude/backups/kb/<stamp>/` whenever
-the content changed, and raises an alarm when one of them vanishes, empties, or loses
-more than half its bytes. Run it by hand any time: `bash tools/kb-guard.sh --verbose`.
-
-- ⚠ **The snapshot is the protection; the alarm is a convenience.** An update that
-  replaces a 100 KB knowledgebase with a 140 KB shipped one is a total loss that
-  shrinks nothing and raises no alarm. Recovery is always the stored copy.
-- ⚠ **Rotation never prunes the oldest, the newest, or the largest copy of a watched
-  file.** Every session after an unnoticed loss snapshots the damaged file, so a plain
-  oldest-first rotation would walk the good copy off the end — a store that destroys
-  what it exists to protect while still looking like a store.
-- **Why a separate mechanism at all**, when `backup-before-edit.sh` already exists:
-  that hook fires on Edit/Write tool calls, and the knowledgebase is usually written
-  through a script run via Bash, which an Edit/Write hook structurally cannot see.
-  MEASURED on this install 2026-09-08: **zero** `KNOWLEDGEBASE.md` backups across
-  seven months, with the backup hook working correctly the whole time.
+At every session start the guards run `tools/kb-guard.sh`. It snapshots the knowledgebase files and
+the generated instruction file into `.claude/backups/kb/<stamp>/` when they change, and alarms if one
+vanishes, empties or loses more than half its bytes. No session hooks on your agent? Run
+`bash tools/kb-guard.sh --verbose` yourself at the start of a session. ⚠ The snapshot is the
+protection and the alarm is a convenience: an update that REPLACES a file with a bigger one raises
+no alarm. Details: `docs/safety-philosophy.md`.
 
 ## Top Gotchas (Always In Context)
 
@@ -522,22 +426,10 @@ rules are graded, and only the first list actually refuses.
   either path dialect. It is pattern matching, not a sandbox; treat it as a guard
   against accidents.
 
-  **"The install" is RESOLVED, not guessed from the word "Skyrim".** The hooks derive
-  their root from their own location -- two directories above `.claude/hooks/` -- and add whatever
-  `setup.sh` recorded in `.claude/skyrim-paths.env`. The previous rule matched *any*
-  path containing "Skyrim", which meant the session scratchpad (its path contains
-  `C--GOG-Games-...-Skyrim-VR`), a checkout of this toolkit, `C:/Temp/skyrim-notes.txt`
-  and a GitHub URL were all refused as "deleting the game". MEASURED: 71 of 443
-  refusals over 7,641 real commands were that false positive, and none of the 71 named
-  the install.
-
-  ⚠ **If no root can be resolved, the guard DENIES.** A guard that evaluated nothing
-  must not answer "fine" -- that conflation is what left every hook here inert for five
-  weeks. ⚠ A broken `skyrim-paths.env` does NOT cost you refusals: the self-derived root always resolves, so the guard silently narrows to the install folder plus the generic config literal, and an MO2 profile directory stops being guarded with nothing reported. The fail-closed branch fires only when NO root resolves at all.
-
-  ⚠ **A relative path cannot be resolved** -- the hook is never told the caller's
-  working directory -- so `rm Data/x.nif` gets an advisory, not a refusal. Prefer
-  absolute paths when deleting.
+  The install is **resolved** (from the guard's own location plus `skyrim-paths.env`), never guessed
+  from the word "Skyrim". ⚠ If no root resolves, the guard DENIES. ⚠ A relative path cannot be resolved,
+  so `rm Data/x.nif` is only advised. Use absolute paths when deleting. Why, with measurements:
+  `docs/safety-philosophy.md`.
 - Deleting Bethesda registry keys
 - Directly writing to ESP/ESM/ESL/BSA/BA2 files (use xelib, Spriggit or AutoMod)
 - Tool output aimed straight at an existing `.psc`, and Champollion against a `.pex`
@@ -556,18 +448,8 @@ rules are graded, and only the first list actually refuses.
 - A ReSaver `reset-havok` / `cleanse-formlists` / `remove-created` with `--apply`,
   which mutates a `.ess` save through ReSaver's write path
 
-**Why so few prompts.** A guard that prompts on routine work gets approved by reflex
-and then protects nothing -- the X4 toolkit measured 40 such prompts across 13,282
-commands, every one of them noise. Deny is likewise a short list: "the mod manager
-owns it" or "this is risky" is a reason to advise, not to refuse, because a guard
-that blocks legitimate work is a guard that gets deleted.
-
-**Verify the hooks are actually alive: `bash tools/hook-canary.sh`.** Every hook here
-was INERT for months -- fired, read zero bytes, exited 0, which is byte-identical to
-approving. `/dev/stdin` fails when stdin is a Win32 pipe from a non-MSYS parent,
-which is how Claude Code spawns a hook; the suite reproduces that on Windows but not
-on Linux, and neither tells you about YOUR install. The canary reads heartbeats
-written from inside real invocations, which does.
+Few prompts by design: a guard that prompts on routine work gets approved by reflex
+(`docs/safety-philosophy.md`). **Check the guards are alive: `bash tools/hook-canary.sh`.**
 
 ### General rules
 - **Always review changes before applying** -- modded installs are delicate
