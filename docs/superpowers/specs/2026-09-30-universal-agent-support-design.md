@@ -30,6 +30,7 @@ toolkit to itself.
 | D12 | **Python engine (`skyguard`)**, confirmed by the latency spike (§2, E10). |
 | D14 | *(plan review, 2026-10-01)* **Surface policy for every agent, not just Codex.** The CLI is the must-have (Codex: interactive TUI + `codex exec`). Every other surface (desktop app, IDE extensions, other agents' GUIs) is claimed **only once a live probe proves its hooks fire**; more surfaces are better. A surface whose hooks don't fire is "Layers 0–2 only", and `skydoctor`/canary detect that per session from heartbeats rather than assuming it (E24). |
 | D15 | *(plan review)* **Preferences are injected.** Named agents get `KNOWLEDGEBASE.local.md` → `## My preferences` from the SessionStart hook (E5). The "read it" instruction stays as the fallback for unknown agents. |
+| D17 | *(Plan 2 review, 2026-10-01)* **Python is REQUIRED for the safety hooks; `jq` no longer is.** Without Python the blocking hooks fail closed (deny every command), as today's do without `jq`. `setup.sh` records a concrete interpreter path through a `{{PYTHON_PATH}}` placeholder, warns loudly when Python is missing, and never auto-installs it. |
 | D16 | *(plan review)* **Codex `failureMode: "block"`** ([openai/codex#41979](https://github.com/openai/codex/issues/41979)) is adopted once a live test proves a crashing hook blocks. That is a one-time change to the frozen definitions, with a CHANGELOG "re-approve" entry. **Not available on 0.159.3 (E25).** |
 
 ### Non-goals

@@ -22,7 +22,7 @@ wrapper denies by itself. Plan 2 changes nothing for Codex; Plan 4 adds that ada
 
 ## Decision to confirm at plan review
 
-**D17 (proposed): Python becomes REQUIRED for the safety hooks, and `jq` stops being required.**
+**D17 (CONFIRMED by the user 2026-10-01): Python becomes REQUIRED for the safety hooks, and `jq` stops being required.**
 Today `setup.sh` treats Python as optional and *requires* `jq` (it tries `winget install jqlang.jq`
 and errors out without it). After this plan the hooks need Python and no longer use `jq`. Without
 Python, the blocking wrappers fail closed: they deny every command with `GUARD INERT … cannot run
