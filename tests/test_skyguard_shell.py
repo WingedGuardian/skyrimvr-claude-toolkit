@@ -11,7 +11,7 @@ from conftest import REPO
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, paths, shell_rules  # noqa: E402
 
-BASH = (REPO / "agent" / "guards" / "legacy-bash" / "protect-bash.sh").read_text(encoding="utf-8")
+BASH = (REPO / "tests" / "guard_corpus" / "reference" / "protect-bash.sh").read_text(encoding="utf-8")
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
 LINES = BASH.splitlines()
 

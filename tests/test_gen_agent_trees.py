@@ -35,9 +35,9 @@ def _scratch_source(root: Path) -> Path:
     sk.mkdir(parents=True)
     (sk / "SKILL.md").write_bytes(b"---\nname: demo\ndescription: d\n---\n\nBody.\n\n---\n\nAfter a rule.\n")
     (sk / "pic.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\xff")
-    hooks = src / "guards" / "legacy-bash"
+    hooks = src / "guards" / "adapters" / "claude"
     hooks.mkdir(parents=True)
-    (hooks / "h.sh").write_bytes(b'#!/bin/bash\nJQ="{{JQ_PATH}}"\nINPUT=$(cat)\n')
+    (hooks / "h.sh").write_bytes(b'#!/bin/bash\nPY="{{PYTHON_PATH}}"\nINPUT=$(cat)\n')
     tgt = src / "targets" / "claude"
     tgt.mkdir(parents=True)
     (tgt / "settings.json").write_bytes(b'{\n  "hooks": {}\n}\n')
@@ -60,7 +60,7 @@ def test_hook_header_goes_after_the_shebang_and_keeps_one_placeholder(tmp_path):
     text = _gen().render("claude", _scratch_source(tmp_path))[".claude/hooks/h.sh"].decode()
     lines = text.splitlines()
     assert lines[0] == "#!/bin/bash" and lines[1].startswith("# GENERATED")
-    assert text.count("{{JQ_PATH}}") == 1
+    assert text.count("{{PYTHON_PATH}}") == 1
 
 
 def test_binary_skill_file_passes_through(tmp_path):
@@ -115,7 +115,7 @@ def test_check_explains_an_installed_copy(tmp_path):
     out = g.render("claude", _scratch_source(tmp_path))
     g.write(out, tmp_path)
     h = tmp_path / ".claude" / "hooks" / "h.sh"
-    h.write_bytes(h.read_bytes().replace(b"{{JQ_PATH}}", b"C:/jq.exe"))
+    h.write_bytes(h.read_bytes().replace(b"{{PYTHON_PATH}}", b"C:/python.exe"))
     assert any("setup.sh" in p for p in g.check(out, tmp_path))
 
 
@@ -156,7 +156,7 @@ def test_write_refuses_an_installed_copy_and_leaves_it_untouched(tmp_path, capsy
     _scratch_source(tmp_path)
     assert g.main(["--root", str(tmp_path)]) == 0
     hook = tmp_path / ".claude" / "hooks" / "h.sh"
-    configured = hook.read_bytes().replace(b"{{JQ_PATH}}", b"C:/jq.exe")
+    configured = hook.read_bytes().replace(b"{{PYTHON_PATH}}", b"C:/python.exe")
     hook.write_bytes(configured)
     assert g.main(["--root", str(tmp_path)]) == 2
     assert hook.read_bytes() == configured

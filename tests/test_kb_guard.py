@@ -20,12 +20,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
-from conftest import BASH, REPO
+from conftest import BASH, REPO, install_hooks
 
 TOOL = REPO / "tools" / "kb-guard.sh"
-HOOK = REPO / ".claude" / "hooks" / "session-kb-guard.sh"
 KB = "KNOWLEDGEBASE.md"
 
 
@@ -241,14 +239,9 @@ def test_the_hook_never_fails_the_session_even_when_the_guard_alarms(tmp_path):
     """SessionStart output is injected into Claude's context and a non-zero exit
     is visible to the user. The guard is allowed to be loud; it is not allowed to
     turn a lost knowledgebase into a session that will not start."""
-    jq = shutil.which("jq")
-    if not jq:
-        pytest.skip("jq not installed")
     root = make_install(tmp_path)
+    install_hooks(root, names={"session-kb-guard.sh"})
     hooks = root / ".claude" / "hooks"
-    hooks.mkdir(parents=True)
-    text = HOOK.read_text(encoding="utf-8").replace("{{JQ_PATH}}", jq.replace(chr(92), "/"))
-    (hooks / "session-kb-guard.sh").write_text(text, encoding="utf-8", newline="\n")
 
     write(root, KB, "y" * 4000)
     run_guard(root)
@@ -285,15 +278,10 @@ def test_the_hook_says_so_when_the_tool_it_delegates_to_is_missing(tmp_path):
     """A thin hook shipped without its tool must report NOT RUN. The failure it
     must never produce is the quiet one: a hook that fires, does nothing, and
     leaves the session looking checked."""
-    jq = shutil.which("jq")
-    if not jq:
-        pytest.skip("jq not installed")
     root = make_install(tmp_path)
     (root / "tools" / "kb-guard.sh").unlink()
+    install_hooks(root, names={"session-kb-guard.sh"})
     hooks = root / ".claude" / "hooks"
-    hooks.mkdir(parents=True)
-    text = HOOK.read_text(encoding="utf-8").replace("{{JQ_PATH}}", jq.replace(chr(92), "/"))
-    (hooks / "session-kb-guard.sh").write_text(text, encoding="utf-8", newline="\n")
 
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
     r = subprocess.run(

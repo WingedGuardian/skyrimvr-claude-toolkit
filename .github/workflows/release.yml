@@ -99,7 +99,10 @@ jobs:
           # Ship the hook without the tool and every session prints "NOT RUN" -- which
           # is honest, and still means nobody's knowledgebase is being snapshotted.
           test -f "/tmp/$NAME/tools/kb-guard.sh" || { echo "::error::tools/kb-guard.sh missing from the payload; session-kb-guard.sh would report NOT RUN in every session"; exit 1; }
-          echo "hooks: $nhooks shipped, all reading stdin correctly, all with a heartbeat, canary present"
+          # The hooks are thin wrappers over the skyguard engine. Ship them without it and every
+          # blocking hook denies every call with "engine failed" -- honest, and unusable.
+          test -f "/tmp/$NAME/tools/skyguard/run.py" || { echo "::error::tools/skyguard/run.py missing from the payload; every hook would report the engine failed"; exit 1; }
+          echo "hooks: $nhooks shipped, all reading stdin correctly, all with a heartbeat, canary and skyguard engine present"
           (cd /tmp && zip -qr "$NAME.zip" "$NAME")
           mv "/tmp/$NAME.zip" .
           unzip -l "$NAME.zip" | tail -5

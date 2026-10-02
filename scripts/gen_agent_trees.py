@@ -60,8 +60,8 @@ def _render_claude(src: Path) -> dict[str, bytes]:
         if f.is_file():
             rel = f.relative_to(src / "skills").as_posix()
             out[f".claude/skills/{rel}"] = _headed(f"agent/skills/{rel}", f.read_bytes(), f.suffix)
-    for f in sorted((src / "guards" / "legacy-bash").glob("*.sh")):
-        out[f".claude/hooks/{f.name}"] = _headed(f"agent/guards/legacy-bash/{f.name}", f.read_bytes(), ".sh")
+    for f in sorted((src / "guards" / "adapters" / "claude").glob("*.sh")):
+        out[f".claude/hooks/{f.name}"] = _headed(f"agent/guards/adapters/claude/{f.name}", f.read_bytes(), ".sh")
     for f in sorted((src / "targets" / "claude").iterdir()):
         if f.is_file():
             out[f".claude/{f.name}"] = _lf(f.read_bytes())

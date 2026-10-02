@@ -41,9 +41,9 @@ MUTATIONS = [
     # as "deleting the game". The named row below must go red, or nothing stops that
     # rule quietly returning.
     pytest.param(
-        ".claude/hooks/protect-bash.sh",
-        'add_root GAME_PATH "$INSTALL_ROOT"',
-        "GAME_PATH='([A-Za-z]:|[/" + BS + BS + "][a-z])[/" + BS + BS + "][^\"']*Skyrim'",
+        "tools/skyguard/paths.py",
+        "    _add(game, root_posix)\n    _add(game, root_win)\n",
+        "    game.append(" + 'r"[A-Za-z]:[/' + BS * 2 + '].*Skyrim")' + "\n",
         "tests/test_hooks.py::test_the_delete_rule_does_not_swallow_ordinary_work",
         id="install-root-resolved-not-substring-matched",
     ),
@@ -51,9 +51,9 @@ MUTATIONS = [
     # is must REFUSE, not shrug. Deleting the fail-closed branch has to break the rows
     # that prove the install still cannot be deleted.
     pytest.param(
-        ".claude/hooks/protect-bash.sh",
-        'if [ -z "$GAME_PATH" ]; then',
-        'if false; then',
+        "tools/skyguard/shell_rules.py",
+        'if g == "":',
+        'if False:',
         "tests/test_hooks.py::test_the_delete_guard_refuses_when_it_cannot_locate_the_install",
         id="delete-guard-fails-closed-when-no-root-resolves",
     ),
@@ -69,10 +69,10 @@ MUTATIONS = [
     ),
     pytest.param(
         "setup.sh",
-        "JQ_PATH=$(printf '%s' " + '"$JQ_PATH"' + " | tr '" + BS + "134' '/')",
-        "",
-        "tests/test_jq_path.py",
-        id="jq-path-normalization",
+        "| tr -d '" + BS + "r' | tr '" + BS + "134' '/')",
+        "| tr -d '" + BS + "r')",
+        "tests/test_python_path.py::test_backslash_python_path_reaches_hooks_intact",
+        id="python-path-normalization",
     ),
     pytest.param(
         "setup.sh",
@@ -120,6 +120,39 @@ MUTATIONS = [
         "        *) return 0 ;;",
         "tests/test_devbench_cli.py::test_504_is_reported_as_a_busy_main_thread",
         id="http-status-is-honored",
+    ),
+    # --- the thin Claude wrappers ------------------------------------------
+    # Pass ANY engine output through as the verdict. An engine that exits 0 with a stray line on
+    # stdout then reaches the runtime as "no decision" -- an allow -- instead of being refused.
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        '    "{"*) [ "$RC" -eq 0 ]',
+        '    *) [ "$RC" -eq 0 ]',
+        "tests/test_hooks.py::test_wrapper_denies_on_non_json_output",
+        id="wrapper-passes-non-json-engine-output-through",
+    ),
+    # Trust JSON on stdout even when the engine exited non-zero (it crashed after printing).
+    pytest.param(
+        ".claude/hooks/protect-files.sh",
+        '    "{"*) [ "$RC" -eq 0 ] &&',
+        '    "{"*) true &&',
+        "tests/test_hooks.py::test_wrapper_denies_when_engine_prints_a_verdict_but_exits_nonzero",
+        id="wrapper-ignores-the-engine-exit-status",
+    ),
+    # A non-blocking hook that swallows an engine crash leaves an audit log implying a backup exists.
+    pytest.param(
+        ".claude/hooks/backup-before-edit.sh",
+        'if [ "$RC" -ne 0 ]; then',
+        'if false; then',
+        "tests/test_hooks.py::test_nonblocking_wrapper_logs_when_engine_crashes",
+        id="nonblocking-wrapper-hides-an-engine-crash",
+    ),
+    pytest.param(
+        ".claude/hooks/snapshot-before-tool.sh",
+        'if ! command -v "$PY" >/dev/null 2>&1; then',
+        'if false; then',
+        "tests/test_hooks.py::test_nonblocking_wrapper_logs_without_python",
+        id="nonblocking-wrapper-hides-a-missing-python",
     ),
     # --- repo invariants ---------------------------------------------------
     # Drop the release gate that keeps the USER's knowledgebase out of the payload.
@@ -495,28 +528,28 @@ MUTATIONS = [
         # Remove a hook's liveness heartbeat. hook-canary then has nothing to read,
         # and the only detector that survives the harness/production gap is gone.
         ".claude/hooks/protect-files.sh",
-        'HB_DIR="$BACKUP_DIR/.hook-heartbeat"',
-        'HB_DIR="$BACKUP_DIR/.disabled"',
+        'HB_DIR="$PROJECT_DIR/.claude/backups/.hook-heartbeat"',
+        'HB_DIR="$PROJECT_DIR/.claude/backups/.disabled"',
         "tests/test_repo_invariants.py::test_every_hook_writes_a_heartbeat_and_handles_an_empty_payload",
         id="hook-heartbeat-removed",
     ),
 
     pytest.param(
-        # A second {{JQ_PATH}} in a hook. setup.sh rewrites every occurrence, so the
+        # A second {{PYTHON_PATH}} in a hook. setup.sh rewrites every occurrence, so the
         # one-per-hook property that makes an UNconfigured hook detectable is lost.
         ".claude/hooks/protect-bash.sh",
-        "# unsubstituted JQ placeholder",
-        "# {{JQ_PATH}} placeholder",
+        "# SETUP: setup.sh fills in the Python path below",
+        "# SETUP: setup.sh fills in {{PYTHON_PATH}} below",
         "tests/test_repo_invariants.py::test_every_hook_is_configured_by_setup_and_carries_one_placeholder",
-        id="hook-carries-a-second-jq-placeholder",
+        id="hook-carries-a-second-python-placeholder",
     ),
 
     pytest.param(
         # Let a blocking hook fall through when it cannot see its input -- exit 0,
         # which is indistinguishable from deciding the call is fine.
-        ".claude/hooks/protect-files.sh",
-        'if [ -z "$FILE_PATH" ]; then',
-        'if false; then',
+        "tools/skyguard/write_rules.py",
+        'if file_path == "":',
+        'if False:',
         "tests/test_hooks.py::test_a_blocking_hook_refuses_when_it_cannot_see_its_input",
         id="blocking-hook-silent-when-blind",
     ),
@@ -524,29 +557,29 @@ MUTATIONS = [
     pytest.param(
         # Go back to anchoring the game-directory deny on one spelling of rm. Eleven
         # other spellings then reach the install, while the README says they cannot.
-        ".claude/hooks/protect-bash.sh",
-        'if echo "$COMMAND" | grep -qiE "$DESTROYER"; then',
-        'if echo "$COMMAND" | grep -qiE \'rm\\s+(-[a-z]*f[a-z]*\\s+)?\'; then',
+        "tools/skyguard/shell_rules.py",
+        "    if has(DESTROYER):",
+        '    if has(r"rm' + BS + 's+(-[a-z]*f[a-z]*' + BS + 's+)?"):',
         "tests/test_hooks.py::test_the_install_cannot_be_deleted_however_it_is_spelled",
         id="delete-guard-anchored-on-one-spelling-of-rm",
     ),
 
     pytest.param(
-        # Remove the jq fallback from protect-bash. Without jq, deny() cannot emit
-        # its refusal, the hook prints nothing, and nothing is read as allow.
+        # Remove the "no Python" refusal from protect-bash. The wrapper then falls through to the
+        # engine call, which cannot start, and the refusal no longer says WHY.
         ".claude/hooks/protect-bash.sh",
-        'if ! "$JQ" --version >/dev/null 2>&1; then',
-        'if false; then',
-        "tests/test_hooks.py::test_a_blocking_hook_refuses_when_jq_is_unusable",
-        id="blocking-hook-allows-when-jq-is-missing",
+        'command -v "$PY" >/dev/null 2>&1 || inert',
+        'true || inert',
+        "tests/test_hooks.py::test_a_blocking_hook_refuses_when_python_is_unusable",
+        id="blocking-hook-silent-when-python-is-missing",
     ),
 
     pytest.param(
         # Put the bare `Skyrim` back in the catch-all. Every edit to a checkout of
         # this toolkit is then annotated as an edit inside a live game install.
-        ".claude/hooks/protect-files.sh",
-        'grep -qiE "(^|[/' + BS * 4 + ']+)Data[/' + BS * 4 + ']+|My Games[/' + BS * 4 + ']+Skyrim"',
-        'grep -qiE "([/' + BS * 4 + ']Data[/' + BS * 4 + ']|Skyrim|My Games[/' + BS * 4 + ']Skyrim)"',
+        "tools/skyguard/write_rules.py",
+        'Data[/' + BS * 2 + ']+|My Games[/' + BS * 2 + ']+Skyrim"',
+        'Data[/' + BS * 2 + ']+|Skyrim|My Games[/' + BS * 2 + ']+Skyrim"',
         "tests/test_hooks.py::test_editing_this_toolkits_own_checkout_is_not_editing_a_game_install",
         id="catch-all-matches-a-bare-skyrim",
     ),
@@ -572,9 +605,9 @@ MUTATIONS = [
     # directory and are the canonical Python/PowerShell spelling, and every one of them
     # walked past the guard with NO output -- which the runtime reads as allow.
     pytest.param(
-        ".claude/hooks/protect-bash.sh",
-        '            /)   out="${out}[/' + BS + BS + BS + BS + ']+" ;;',
-        '            /)   out="${out}[/' + BS + BS + BS + BS + ']" ;;',
+        "tools/skyguard/paths.py",
+        'SEP = r"[/' + BS * 2 + ']+"',
+        'SEP = r"[/' + BS * 2 + ']"',
         "tests/test_hooks.py::test_the_install_cannot_be_deleted_however_it_is_spelled",
         id="separator-class-accepts-doubled-paths",
     ),
@@ -583,9 +616,9 @@ MUTATIONS = [
     # group that simply never matches the actual directory -- inert, with GAME_PATH
     # still non-empty so the fail-closed branch does not save it.
     pytest.param(
-        ".claude/hooks/protect-bash.sh",
-        """            '['|']'|'*'|'+'|'?'|'^'|'$'|'('|')'|'{'|'}'|'|'|'.'|'""" + BS + """') out="$out""" + BS + BS + """$c" ;;""",
-        '            # escaping removed by the mutation gate',
+        "tools/skyguard/paths.py",
+        '("' + BS * 2 + '" + c if c in _META else c)',
+        "c",
         "tests/test_hooks.py::test_an_install_path_containing_regex_metacharacters_is_still_guarded",
         id="path-to-ere-escapes-regex-metacharacters",
     ),
@@ -593,9 +626,9 @@ MUTATIONS = [
     # instance profile, outside Documents/My Games, so for those users this arm is the
     # only thing guarding their config -- and it had no test at all.
     pytest.param(
-        ".claude/hooks/protect-bash.sh",
-        'add_root CONFIG_PATH "${SKYRIM_CONFIG_DIR:-}"',
-        ':',
+        "tools/skyguard/paths.py",
+        '    _add(config, env.get("SKYRIM_CONFIG_DIR", ""))',
+        "    pass",
         "tests/test_hooks.py::test_a_configured_config_directory_outside_documents_is_guarded",
         id="configured-config-directory-is-guarded",
     ),
@@ -719,8 +752,8 @@ MUTATIONS = [
     # the guard is allowed to be loud, not to break the thing it guards.
     pytest.param(
         ".claude/hooks/session-kb-guard.sh",
-        'OUTPUT=$(bash "$TOOL" 2>&1)',
-        'OUTPUT=$(bash "$TOOL" 2>&1) || exit 1',
+        '[ -n "$OUT" ] && printf ' + "'%s" + BS + "n' " + '"$OUT"',
+        '[ -n "$OUT" ] && { printf ' + "'%s" + BS + "n' " + '"$OUT"; exit 1; }',
         "tests/test_kb_guard.py::test_the_hook_never_fails_the_session_even_when_the_guard_alarms",
         id="kb-guard-hook-never-fails-the-session",
     ),

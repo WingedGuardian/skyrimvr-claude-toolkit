@@ -131,7 +131,7 @@ if [ "$blind_count" -gt 0 ]; then
   echo "RESULT: BLIND HOOK(S) -- a guard is running and seeing nothing, which is"
   echo "        indistinguishable from allowing. Check how the hook reads stdin:"
   echo "        \`INPUT=\$(cat /dev/stdin)\` returns zero bytes when Claude Code spawns"
-  echo "        the hook; \`INPUT=\$(cat)\` works. Also check that jq is installed and"
+  echo "        the hook; \`INPUT=\$(cat)\` works. Also check that Python 3 is installed and"
   echo "        that setup.sh has filled in its path."
   exit 1
 fi

@@ -243,8 +243,8 @@ jobs:
           grep -q '^- \*\*Mod manager\*\*' CLAUDE.md \
             || { echo "::error::no Mod manager line written"; exit 1; }
           for h in .claude/hooks/*.sh; do
-            if grep -q '{{JQ_PATH}}' "$h"; then
-              echo "::error file=$h::jq placeholder was never substituted"; exit 1
+            if grep -q '{{PYTHON_PATH}}' "$h"; then
+              echo "::error file=$h::python placeholder was never substituted"; exit 1
             fi
           done
 
@@ -278,8 +278,8 @@ jobs:
         with:
           node-version-file: .node-version
 
-      # jq must resolve, or setup.sh reaches its `winget install` branch -- a
-      # slow, network-dependent step that can hang the runner.
+      # The shipped hooks no longer use jq, but the frozen bash reference hooks under
+      # tests/guard_corpus/reference/ do, and the side-effect equivalence tests run them.
       - name: Ensure jq is on PATH
         run: |
           if command -v jq >/dev/null 2>&1; then jq --version; exit 0; fi

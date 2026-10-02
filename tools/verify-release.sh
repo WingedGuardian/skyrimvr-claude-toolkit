@@ -93,6 +93,7 @@ done < <(find "$ROOT/.claude/hooks" -name '*.sh' 2>/dev/null)
 [ "$miss" -eq 0 ] && ok "every hook reads stdin bare AND writes a heartbeat" || bad "hook stdin/heartbeat" "see above"
 [ -f "$ROOT/tools/hook-canary.sh" ] && ok "hook-canary.sh shipped" || bad "hook-canary.sh" "MISSING but referenced in the docs"
 [ -f "$ROOT/tools/kb-guard.sh" ] && ok "kb-guard.sh shipped" || bad "kb-guard.sh" "MISSING; session-kb-guard.sh would print NOT RUN every session"
+[ -f "$ROOT/tools/skyguard/run.py" ] && ok "skyguard engine shipped" || bad "tools/skyguard/run.py" "MISSING; every hook would deny with 'engine failed'"
 [ -f "$ROOT/setup.sh" ] && ok "setup.sh shipped" || bad "setup.sh" "MISSING but every doc tells the user to run it"
 # The user's own knowledgebase must not be IN the bundle, and ours must be.
 [ -e "$ROOT/KNOWLEDGEBASE.local.md" ] && bad "KNOWLEDGEBASE.local.md excluded" "PRESENT -- this zip would overwrite the user's notes" \

@@ -68,6 +68,10 @@ The hook scripts are designed to be customized -- but ⚠ **they are shipped fil
 - **Add new patterns** to the bash guard for commands specific to your workflow
 - **Adjust the confirmation threshold** -- some users may want less friction for frequently-edited files
 
-Edit the scripts in `.claude/hooks/` to match your workflow. (Contributing a change back? Edit
-`agent/guards/legacy-bash/` instead and regenerate. The `.claude/hooks/` copies in the repository are
-generated.)
+The rules live in Python, in `tools/skyguard/`: the shell guard's patterns and messages in
+`shell_rules.py`, the file guard's in `write_rules.py`, and which directories count as "the install"
+in `paths.py`. The scripts in `.claude/hooks/` are thin adapters -- they read Claude Code's payload,
+record a heartbeat and hand the verdict back -- and need no editing to change a rule. (Contributing a
+change back? Rules: edit `tools/skyguard/`. Adapters: edit `agent/guards/adapters/claude/` and
+regenerate; the `.claude/hooks/` copies in the repository are generated.) The hooks need Python 3 and
+refuse every command if it is missing, so a broken engine can never read as "allowed".

@@ -8,7 +8,7 @@ both the source and the regenerated files. CI runs `--check` and fails on any di
 | `instructions/core.md` + `instructions/claude.md` | `CLAUDE.md` |
 | `instructions/agents-pointer.md` | `AGENTS.md` |
 | `skills/<name>/` | `.claude/skills/<name>/` |
-| `guards/legacy-bash/*.sh` | `.claude/hooks/*.sh` |
+| `guards/adapters/claude/*.sh` (thin wrappers; the rules live in `tools/skyguard/`) | `.claude/hooks/*.sh` |
 | `targets/claude/*` | `.claude/*` (no header: JSON and `.example` files have no comment syntax) |
 
 `--check` is for this repository. In an installed copy, `setup.sh` fills placeholders in the

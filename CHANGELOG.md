@@ -2,6 +2,24 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### 🔒 Safety hooks now run on a Python engine (no verdict changes)
+
+- **The five hooks are now thin wrappers over `tools/skyguard/`**, a Python engine holding every rule,
+  message and side effect. Zero verdicts change: a corpus of 278 recorded inputs (every payload the old
+  hook tests used, plus each rule's positive and negative case, path dialects, multi-line, CRLF and
+  non-ASCII inputs) was captured from the bash hooks before the port and every decision and every
+  reason is reproduced byte for byte by the new wrappers. The old bash hooks are kept as the frozen
+  reference under `tests/guard_corpus/reference/`.
+- **Python 3 is now required** for the hooks (it was already required for several tools). `setup.sh`
+  records the interpreter's absolute path in each hook. Without Python the blocking hooks REFUSE every
+  command (`GUARD INERT ... cannot run Python`) and `setup.sh` says so loudly; the non-blocking hooks
+  log `FAILED` to the audit log. An engine that crashes or prints something that is not a verdict is
+  refused too, never allowed.
+- **`jq` is now optional.** The hooks no longer use it; `setup.sh` only reports whether it is present
+  and no longer tries to `winget install` it. `tools/devbench-cli.sh` and `tools/nexus.sh` use it for
+  pretty output and fall back to plain output.
+- **Customising rules moves** from the hook scripts to `tools/skyguard/*_rules.py`.
+
 ### 🧰 For contributors
 
 - **Agent-facing files are now generated from `agent/`.** `CLAUDE.md`, `AGENTS.md`, `.claude/skills/`,

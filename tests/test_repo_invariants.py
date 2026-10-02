@@ -178,7 +178,9 @@ def test_every_hook_writes_a_heartbeat_and_handles_an_empty_payload():
     missing = []
     for h in hooks:
         text = h.read_text(encoding="utf-8")
-        if "hook-heartbeat" not in text:
+        # Outside a comment: the release gates require that too, and a comment naming the file
+        # satisfied the bare substring test without any code writing a heartbeat.
+        if not re.search(r"^[^#\n]*hook-heartbeat", text, re.M):
             missing.append(f"{h.name}: writes no liveness heartbeat")
         if 'if [ -n "$INPUT" ]' not in text and 'if [ -z "$INPUT" ]' not in text:
             missing.append(f"{h.name}: does not branch on an empty payload")
@@ -186,13 +188,13 @@ def test_every_hook_writes_a_heartbeat_and_handles_an_empty_payload():
 
 
 def test_every_hook_is_configured_by_setup_and_carries_one_placeholder():
-    """setup.sh substitutes {{JQ_PATH}} into a HARDCODED LIST of hook filenames, with
+    """setup.sh substitutes {{PYTHON_PATH}} into a HARDCODED LIST of hook filenames, with
     `sed ... /g`. Two things rot silently here:
 
     1. A hook added later is never named in that list, so it ships with the literal
-       placeholder. Since a blocking hook now REFUSES when jq is unrunnable, an
+       placeholder. Since a blocking hook now REFUSES when Python is unrunnable, an
        unsubstituted hook denies every call -- loud, but only after install.
-    2. A second `{{JQ_PATH}}` anywhere in a hook (a comment mentioning it, say) is
+    2. A second `{{PYTHON_PATH}}` anywhere in a hook (a comment mentioning it, say) is
        rewritten too, so "the unsubstituted placeholder" turns into a sentence
        claiming a real path is a placeholder. Harmless at runtime, but it destroys
        the property that makes case 1 detectable: exactly one occurrence per hook.
@@ -208,7 +210,7 @@ def test_every_hook_is_configured_by_setup_and_carries_one_placeholder():
     problems = []
     for h in hooks:
         text = h.read_text(encoding="utf-8")
-        n = text.count("{{JQ_PATH}}")
+        n = text.count("{{PYTHON_PATH}}")
         if n != 1:
             problems.append(f"{h.name}: {n} occurrences of the placeholder, expected exactly 1")
         # Assert membership of the SUBSTITUTION LOOP, not of the file. Every hook is

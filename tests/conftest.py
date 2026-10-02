@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -63,7 +64,7 @@ def _resolve_bash() -> str:
 
 BASH = _resolve_bash()
 
-# setup.sh shells out to `winget install` when it cannot find jq, which would be
+# setup.sh may shell out to `winget install` (Node.js), which would be
 # a slow, network-dependent step that can hang a CI run. Every invocation is
 # capped so a stuck install fails the test instead of the job.
 SETUP_TIMEOUT = 240
@@ -133,15 +134,36 @@ def claude_md(game: Path) -> str:
     return (game / "CLAUDE.md").read_text(encoding="utf-8")
 
 
-def hook_jq_lines(game: Path) -> dict[str, str]:
-    """The `JQ="..."` line from every hook setup.sh configures."""
+def hook_python_lines(game: Path) -> dict[str, str]:
+    """The `PY="..."` line from every hook setup.sh configures."""
     found: dict[str, str] = {}
     for hook in sorted((game / ".claude" / "hooks").glob("*.sh")):
         for line in hook.read_text(encoding="utf-8").splitlines():
-            if line.startswith("JQ="):
+            if line.startswith("PY="):
                 found[hook.name] = line.strip()
                 break
     return found
+
+
+def install_hooks(root: Path, names=None, python: str | None = None, with_engine: bool = True) -> Path:
+    """Put the shipped hook wrappers into `root/.claude/hooks`, configured the way setup.sh leaves them.
+
+    `{{PYTHON_PATH}}` becomes this interpreter (forward slashes) unless `python` says otherwise, and
+    `tools/skyguard` is copied beside them -- the wrappers are thin, so without the engine they can
+    only report that they cannot decide. Returns `root`.
+    """
+    py = sys.executable.replace(BS, "/") if python is None else python
+    hooks = root / ".claude" / "hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    for f in (REPO / ".claude" / "hooks").glob("*.sh"):
+        if names is not None and f.name not in names:
+            continue
+        text = f.read_text(encoding="utf-8").replace("{{PYTHON_PATH}}", py)
+        (hooks / f.name).write_text(text, encoding="utf-8", newline="\n")
+    if with_engine:
+        shutil.copytree(REPO / "tools" / "skyguard", root / "tools" / "skyguard",
+                        ignore=shutil.ignore_patterns("__pycache__"), dirs_exist_ok=True)
+    return root
 
 
 def key_path(game: Path, label: str) -> str:

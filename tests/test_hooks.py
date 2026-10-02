@@ -41,12 +41,11 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, install_hooks
 
 HOOKS = REPO / ".claude" / "hooks"
 BS = chr(92)
@@ -81,15 +80,9 @@ def _bash() -> str:
 @pytest.fixture(scope="module")
 def project(tmp_path_factory):
     """A throwaway install with the hooks configured, as setup.sh would leave them."""
-    jq = shutil.which("jq")
-    if not jq:
-        pytest.skip("jq not installed")
     root = tmp_path_factory.mktemp("install") / "Skyrim VR"
-    (root / ".claude" / "hooks").mkdir(parents=True)
     (root / "Data" / "Scripts" / "Source").mkdir(parents=True)
-    for f in HOOKS.glob("*.sh"):
-        text = f.read_text(encoding="utf-8").replace("{{JQ_PATH}}", jq.replace(BS, "/"))
-        (root / ".claude" / "hooks" / f.name).write_text(text, encoding="utf-8", newline="\n")
+    install_hooks(root)
     # DECLARE THE INSTALL THE ASSERTIONS TALK ABOUT.
     #
     # protect-bash.sh no longer decides "is this the game" by looking for the word
@@ -211,17 +204,13 @@ def test_protect_bash_decides(project, command, expected, why):
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh"])
-def test_a_windows_jq_path_still_produces_parseable_json(tmp_path, name):
-    r"""The hook header tells the user to paste the output of `where jq`, which is
-    `C:\Users\...\jq.exe`. That went into a JSON string via printf, and `\U` is not
-    a valid JSON escape -- so the one refusal deliberately built to survive a broken
-    jq was itself unparseable, i.e. an allow. The branch had an off switch shaped
-    exactly like the thing it was guarding against."""
-    root = tmp_path / "install"
-    (root / ".claude" / "hooks").mkdir(parents=True)
-    text = (HOOKS / name).read_text(encoding="utf-8").replace(
-        "{{JQ_PATH}}", "C:" + BS + "Users" + BS + "me" + BS + "AppData" + BS + "jq.exe")
-    (root / ".claude" / "hooks" / name).write_text(text, encoding="utf-8", newline="\n")
+def test_a_windows_python_path_still_produces_parseable_json(tmp_path, name):
+    r"""A backslash path (`C:\Users\...\python.exe`) is what a hand-edit or a careless
+    paste puts in the hook. It is echoed into a JSON string via printf, and `\U` is not a
+    valid JSON escape -- so the refusal built to survive a broken interpreter would itself
+    be unparseable, i.e. an allow. The wrapper normalises the separators it prints."""
+    root = install_hooks(tmp_path / "install",
+                         python="C:" + BS + "Users" + BS + "me" + BS + "AppData" + BS + "python.exe")
     payload = (cmd('rm -rf "C:/x"') if name == "protect-bash.sh"
                else fpath("C:/Games/Skyrim VR/Data/M.esp"))
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
@@ -230,6 +219,7 @@ def test_a_windows_jq_path_still_produces_parseable_json(tmp_path, name):
                        env=env, timeout=60)
     j = json.loads(r.stdout)          # the assertion IS that this does not raise
     assert j["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "C:/Users/me/AppData/python.exe" in j["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 @pytest.mark.parametrize("hook,field", [
@@ -406,16 +396,8 @@ def test_a_plugin_path_with_a_trailing_space_is_still_denied(project):
 
 
 # --------------------------------------------------------------------------
-# jq is how a hook SPEAKS
+# the wrapper is how a hook SPEAKS
 # --------------------------------------------------------------------------
-
-def _hook_with_jq(project, tmp_path, name, jq_value):
-    src = (HOOKS / name).read_text(encoding="utf-8").replace("{{JQ_PATH}}", jq_value)
-    d = tmp_path / "hooks_jq" / ".claude" / "hooks"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / name).write_text(src, encoding="utf-8", newline="\n")
-    return d.parent.parent
-
 
 def test_the_delete_guard_refuses_when_it_cannot_locate_the_install(tmp_path):
     """A guard that cannot work out WHICH directory the install is has evaluated
@@ -426,31 +408,21 @@ def test_the_delete_guard_refuses_when_it_cannot_locate_the_install(tmp_path):
     cannot be derived, the rules match nothing and every deletion sails through -- the
     inert-hook state again, by a fourth door.
 
-    The branch is otherwise unreachable from the suite (INSTALL_ROOT is `cd ... && pwd`,
-    which always yields an absolute path), so it is exercised the way the jq-unusable
+    The branch is otherwise unreachable from the suite (the wrapper's ROOT is `cd ... && pwd`,
+    which always yields an absolute path), so it is exercised the way the Python-unusable
     case is: on a DOCTORED COPY with the resolution knocked out. Written because the
     mutation gate reported the fail-closed branch could be deleted with nothing going
     red -- i.e. it was shipped, load-bearing, and untested.
     """
-    jq = shutil.which("jq")
-    if not jq:
-        pytest.skip("jq not installed")
-    root = tmp_path / "install"
-    (root / ".claude" / "hooks").mkdir(parents=True)
-    text = (HOOKS / "protect-bash.sh").read_text(encoding="utf-8")
-    text = text.replace("{{JQ_PATH}}", jq.replace(BS, "/"))
-    # BOTH derived roots must be knocked out. The hook resolves the install twice --
-    # the MSYS spelling from `pwd` and the Windows spelling from `pwd -W` -- because
-    # `pwd` can return a mount alias (/tmp/...) that shares no prefix with the
-    # drive-letter form a command actually names. Blanking only one leaves GAME_PATH
-    # non-empty, so the fail-closed branch never fires and this test would be
-    # asserting nothing. It caught exactly that when the second root was added.
-    markers = ['INSTALL_ROOT="$(cd ', 'INSTALL_ROOT_WIN="$(cd ']
-    for marker in markers:
-        assert text.count(marker) == 1, f"{marker} moved; this test is stale"
-        line = next(l for l in text.splitlines() if l.startswith(marker))
-        text = text.replace(line, marker.split('=')[0] + '=""')
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
     hook = root / ".claude" / "hooks" / "protect-bash.sh"
+    text = hook.read_text(encoding="utf-8")
+    # BOTH roots must be handed to the engine blank. The wrapper passes the install twice -- the MSYS
+    # spelling from `pwd` and the Windows spelling from `pwd -W` -- and the engine also reads the
+    # declared env file from --root, so blanking the flags knocks out every route to a root.
+    marker = '--root "$ROOT" --root-win "$ROOT_WIN"'
+    assert text.count(marker) == 1, f"{marker} moved; this test is stale"
+    text = text.replace(marker, '--root "" --root-win ""')
     hook.write_text(text, encoding="utf-8", newline="\n")
 
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
@@ -466,15 +438,7 @@ def test_the_delete_guard_refuses_when_it_cannot_locate_the_install(tmp_path):
 def _hook_at(tmp_path, root_name, paths_env=""):
     """A throwaway install whose ROOT NAME is chosen by the test, so the rules are
     built from that path rather than from a fixture constant."""
-    jq = shutil.which("jq")
-    if not jq:
-        pytest.skip("jq not installed")
-    root = tmp_path / root_name
-    (root / ".claude" / "hooks").mkdir(parents=True)
-    text = (HOOKS / "protect-bash.sh").read_text(encoding="utf-8")
-    text = text.replace("{{JQ_PATH}}", jq.replace(BS, "/"))
-    (root / ".claude" / "hooks" / "protect-bash.sh").write_text(
-        text, encoding="utf-8", newline="\n")
+    root = install_hooks(tmp_path / root_name, names={"protect-bash.sh"})
     if paths_env:
         (root / ".claude" / "skyrim-paths.env").write_text(
             paths_env, encoding="utf-8", newline="\n")
@@ -487,9 +451,10 @@ def _decide(root, command):
         [_bash(), str(root / ".claude" / "hooks" / "protect-bash.sh")],
         input=json.dumps(cmd(command)),
         capture_output=True, text=True, env=env, timeout=60)
-    if not r.stdout.strip():
-        return "allow"
-    return json.loads(r.stdout)["hookSpecificOutput"].get("permissionDecision", "advise")
+    h = json.loads(r.stdout).get("hookSpecificOutput") if r.stdout.strip() else None
+    if not h:
+        return "allow"            # the engine says `{}` for a silent allow
+    return h.get("permissionDecision", "advise")
 
 
 def test_an_install_path_containing_regex_metacharacters_is_still_guarded(tmp_path):
@@ -524,16 +489,15 @@ def test_a_configured_config_directory_outside_documents_is_guarded(tmp_path):
 
 
 @pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh"])
-@pytest.mark.parametrize("jq_value,why", [
-    ("/c/nonexistent/jq.exe", "jq uninstalled after setup"),
-    ("{{JQ_PATH}}", "the zip was extracted and setup.sh never run"),
+@pytest.mark.parametrize("python,why", [
+    ("/c/nonexistent/python.exe", "Python uninstalled after setup"),
+    ("{{PYTHON_PATH}}", "the zip was extracted and setup.sh never run"),
 ])
-def test_a_blocking_hook_refuses_when_jq_is_unusable(tmp_path, name, jq_value, why):
-    """deny() emits its JSON THROUGH jq, so without jq the refusal itself vanishes
-    and the hook produces nothing -- which the runtime reads as ALLOW. That is a
-    second live route to the inert state, by another door, and it needs no jq to
-    close: the one refusal that must not depend on jq is printed with printf."""
-    root = _hook_with_jq(None, tmp_path, name, jq_value)
+def test_a_blocking_hook_refuses_when_python_is_unusable(tmp_path, name, python, why):
+    """With no interpreter the engine cannot run, and a hook that prints nothing reads as ALLOW.
+    That is a live route to the inert state, so the wrapper itself -- needing nothing but bash and
+    printf -- says so."""
+    root = install_hooks(tmp_path / "install", names={name}, python=python)
     payload = (cmd('rm -rf "C:/Games/Skyrim VR"') if name == "protect-bash.sh"
                else fpath("C:/Games/Skyrim VR/Data/M.esp"))
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
@@ -541,7 +505,91 @@ def test_a_blocking_hook_refuses_when_jq_is_unusable(tmp_path, name, jq_value, w
                        input=json.dumps(payload), capture_output=True, text=True,
                        env=env, timeout=60)
     assert r.stdout.strip(), f"{why}: hook emitted NOTHING, which reads as allow"
-    j = json.loads(r.stdout)
-    h = j["hookSpecificOutput"]
+    h = json.loads(r.stdout)["hookSpecificOutput"]
     assert h["permissionDecision"] == "deny", why
     assert "GUARD INERT" in h["permissionDecisionReason"]
+    assert "cannot run Python" in h["permissionDecisionReason"]
+
+
+# --------------------------------------------------------------------------
+# the wrapper must not turn a broken engine into an allow
+# --------------------------------------------------------------------------
+
+def _with_engine(tmp_path, name, run_py_source):
+    """An install whose engine entry point is replaced by `run_py_source`."""
+    root = install_hooks(tmp_path / "install", names={name})
+    (root / "tools" / "skyguard" / "run.py").write_text(run_py_source, encoding="utf-8", newline="\n")
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    return root, env
+
+
+def _run_wrapper(root, env, name, payload):
+    return subprocess.run([_bash(), str(root / ".claude" / "hooks" / name)],
+                          input=json.dumps(payload), capture_output=True, text=True,
+                          env=env, timeout=60)
+
+
+BLOCKING = [
+    ("protect-bash.sh", {"tool_name": "Bash", "tool_input": {"command": "ls"}}),
+    ("protect-files.sh", {"tool_name": "Write", "tool_input": {"file_path": "C:/work/notes.md"}}),
+]
+NONBLOCKING = [
+    ("backup-before-edit.sh", "backup-before-edit"),
+    ("snapshot-before-tool.sh", "snapshot-before-tool"),
+]
+EDIT = {"tool_name": "Write", "tool_input": {"file_path": "C:/work/a.txt"}}
+
+
+@pytest.mark.parametrize("name,payload", BLOCKING)
+def test_wrapper_denies_when_engine_crashes(tmp_path, name, payload):
+    """An engine that dies prints nothing and exits non-zero -- exactly what an ALLOW looks like.
+    The wrapper must refuse, naming the exit code."""
+    root, env = _with_engine(tmp_path, name, "raise SystemExit(3)\n")
+    r = _run_wrapper(root, env, name, payload)
+    h = json.loads(r.stdout)["hookSpecificOutput"]
+    assert h["permissionDecision"] == "deny"
+    assert "GUARD INERT" in h["permissionDecisionReason"]
+    assert "engine failed (exit 3)" in h["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("name,payload", BLOCKING)
+def test_wrapper_denies_on_non_json_output(tmp_path, name, payload):
+    """An engine that exits 0 but prints something that is not a JSON verdict (a stray debug line)
+    must not be passed through: the runtime would read it as no decision, i.e. allow."""
+    root, env = _with_engine(tmp_path, name, 'print("hi")\n')
+    r = _run_wrapper(root, env, name, payload)
+    h = json.loads(r.stdout)["hookSpecificOutput"]
+    assert h["permissionDecision"] == "deny"
+    assert "engine failed (exit 0)" in h["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("name,payload", BLOCKING)
+def test_wrapper_denies_when_engine_prints_a_verdict_but_exits_nonzero(tmp_path, name, payload):
+    """An engine that crashed AFTER printing a verdict (an allow, say) has not decided anything it can
+    vouch for. Only a clean exit makes the output a verdict."""
+    root, env = _with_engine(tmp_path, name, 'print("{}")\nraise SystemExit(3)\n')
+    r = _run_wrapper(root, env, name, payload)
+    h = json.loads(r.stdout)["hookSpecificOutput"]
+    assert h["permissionDecision"] == "deny"
+    assert "engine failed (exit 3)" in h["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("name,what", NONBLOCKING)
+def test_nonblocking_wrapper_logs_when_engine_crashes(tmp_path, name, what):
+    """These hooks may not block, but a crash must be on the record: silence would leave an audit log
+    that implies a backup exists."""
+    root, env = _with_engine(tmp_path, name, "raise SystemExit(3)\n")
+    r = _run_wrapper(root, env, name, EDIT)
+    assert r.returncode == 0 and r.stdout.strip() == ""
+    log = (root / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8")
+    assert f"{what} FAILED: engine error (exit 3) -- NO backup/snapshot was taken" in log
+
+
+@pytest.mark.parametrize("name,what", NONBLOCKING)
+def test_nonblocking_wrapper_logs_without_python(tmp_path, name, what):
+    root = install_hooks(tmp_path / "install", names={name}, python="{{PYTHON_PATH}}")
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    r = _run_wrapper(root, env, name, EDIT)
+    assert r.returncode == 0 and r.stdout.strip() == ""
+    log = (root / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8")
+    assert f"{what} FAILED: Python not runnable" in log and "NO backup/snapshot was taken" in log

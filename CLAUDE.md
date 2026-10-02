@@ -510,7 +510,10 @@ For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit se
 ## Safety Rules
 
 Hooks in `.claude/hooks/`, wired up by `.claude/settings.json`, enforce these
-automatically. **A hook exists to stop ME, not to interrupt the user** -- so the
+automatically. The hooks are thin adapters; the rules live in the Python engine
+`tools/skyguard/` (`shell_rules.py`, `write_rules.py`, `paths.py`), which needs Python 3 --
+`setup.sh` records its path in each hook, and a hook that cannot start it REFUSES rather than
+allows. **A hook exists to stop ME, not to interrupt the user** -- so the
 rules are graded, and only the first list actually refuses.
 
 ### DENIED -- refused outright, cannot proceed

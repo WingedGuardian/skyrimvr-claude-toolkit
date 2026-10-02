@@ -1,0 +1,46 @@
+#!/bin/bash
+# Claude Code adapter for skyguard's shell guard. The rules live in tools/skyguard/ (Python);
+# this wrapper only reads the payload, records the heartbeat and passes the verdict through.
+#
+# SETUP: setup.sh fills in the Python path below (it writes sys.executable of the Python it found).
+#
+# A bare `cat`, never `cat /dev/stdin`: the latter returns ZERO BYTES when Claude Code (Node) spawns a
+# hook, which made every hook here inert for five weeks. tools/hook-canary.sh reads the heartbeat.
+
+HOOK_NAME="protect-bash"
+PY="{{PYTHON_PATH}}"
+INPUT=$(cat)
+
+_SELF="${BASH_SOURCE[0]//\//}"
+HOOK_DIR="$(cd "$(dirname "$_SELF")" 2>/dev/null && pwd)"
+ROOT="$(cd "$HOOK_DIR/../.." 2>/dev/null && pwd)"
+ROOT_WIN="$(cd "$HOOK_DIR/../.." 2>/dev/null && pwd -W 2>/dev/null)"
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$ROOT}"
+HB_DIR="$PROJECT_DIR/.claude/backups/.hook-heartbeat"
+mkdir -p "$HB_DIR" 2>/dev/null
+
+inert() {
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"GUARD INERT: %s %s, so it evaluated NO rules and cannot report a decision. Allowing silently would be indistinguishable from approving."}}\n' \
+        "$HOOK_NAME" "$1"
+    exit 0
+}
+
+# The engine is addressed by its Windows spelling when there is one: a native python.exe cannot open an
+# MSYS /tmp/... path, and Git Bash only converts such an argument when it looks like a plain path.
+# `command -v` is a builtin: no extra interpreter start per call. An unsubstituted placeholder or a
+# missing path fails here; a present-but-broken Python fails below as "engine failed".
+command -v "$PY" >/dev/null 2>&1 || inert "cannot run Python ($(printf '%s' "$PY" | tr '\134' '/')) -- install Python 3 and run setup.sh to configure its path"
+
+if [ -n "$INPUT" ]; then
+    printf '%s payload_bytes=%s\n' "$(date +%Y%m%d_%H%M%S)" "${#INPUT}" > "$HB_DIR/$HOOK_NAME" 2>/dev/null
+else
+    printf '%s NO PAYLOAD\n' "$(date +%Y%m%d_%H%M%S)" > "$HB_DIR/$HOOK_NAME.blind" 2>/dev/null
+fi
+
+OUT=$(printf '%s' "$INPUT" | "$PY" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" claude "$HOOK_NAME" \
+      --root "$ROOT" --root-win "$ROOT_WIN" --project "$PROJECT_DIR" 2>/dev/null)
+RC=$?
+case "$OUT" in
+    "{"*) [ "$RC" -eq 0 ] && { printf '%s\n' "$OUT"; exit 0; } ;;
+esac
+inert "engine failed (exit $RC) -- run: bash tools/hook-canary.sh"

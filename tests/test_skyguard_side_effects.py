@@ -19,7 +19,7 @@ record = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(record)
 
 DAY = 86400
-HOOKS = REPO / ".claude" / "hooks"
+HOOKS = REPO / "tests" / "guard_corpus" / "reference"
 EACUTE = "\u00e9"
 
 
