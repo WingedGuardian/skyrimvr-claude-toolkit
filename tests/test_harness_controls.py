@@ -174,3 +174,67 @@ def test_live_container_readonly_sentinels(tmp_path):
     assert result.returncode == 0, result.stderr
     assert (data / "sentinel").read_text() == "game"
     assert (profile / "sentinel").read_text() == "profile"
+
+
+def _live_docker():
+    docker = shutil.which("docker")
+    if not docker:
+        pytest.skip("COULD NOT CHECK: Docker executable unavailable in test runtime")
+    try:
+        probe = subprocess.run([docker, "info"], capture_output=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        pytest.skip("COULD NOT CHECK: Docker daemon timeout")
+    if probe.returncode:
+        pytest.skip("COULD NOT CHECK: Docker daemon unavailable")
+    if subprocess.run([docker, "image", "inspect", "busybox:1.37"], capture_output=True, timeout=10).returncode:
+        pytest.skip("COULD NOT CHECK: existing busybox:1.37 image unavailable; test never pulls")
+    return docker
+
+
+def test_live_cold_start_mounts_without_node_modules(tmp_path):
+    """Replay the helper's REAL mount arguments against real Docker on a fresh workspace
+    that has no node_modules/ -- the directory is deliberately NOT pre-created."""
+    docker = _live_docker()
+    work = tmp_path / "checkout"
+    (work / ".devcontainer").mkdir(parents=True)
+    sources = {}
+    for key in ("MODS", "PROFILE", "OVERWRITE"):
+        sources[key] = tmp_path / key.lower()
+        sources[key].mkdir()
+        (sources[key] / "sentinel").write_text(key)
+    template = (REPO / ".devcontainer/devcontainer.json").read_text()
+    for key, path in sources.items():
+        template = template.replace("{{DEVCONTAINER_" + key + "_MOUNT}}", path.as_posix())
+    (work / ".devcontainer/devcontainer.json").write_text(template)
+    (work / "devshell-docker.sh").write_bytes((REPO / "devshell-docker.sh").read_bytes())
+    (work / "package.json").write_text("{}")
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "docker").write_text('#!/bin/bash\nif [ "$1" = run ]; then printf "%s\n" "$@" > "$RUN_LOG"; exit 0; fi\n'
+                                 'if [ "$1" = exec ]; then exit 0; fi\nexit 0\n', newline="\n")
+    (fake / "docker").chmod(0o755)
+    log = tmp_path / "run.log"
+    result = subprocess.run([BASH, str(work / "devshell-docker.sh")], cwd=work, capture_output=True, text=True,
+                            env=dict(os.environ, PATH=str(fake) + os.pathsep + os.environ["PATH"], RUN_LOG=str(log)),
+                            timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (work / "node_modules").exists()
+    args = log.read_text().splitlines()[1:]
+    image = args.index("skyrim-toolkit")
+    replay, i = [], 0
+    while i < image:
+        if args[i] == "-d":
+            i += 1
+        elif args[i] == "--name":
+            i += 2
+        else:
+            replay.append(args[i]); i += 1
+    probe = ('set -eu; test -r /workspace/package.json; test -r /skyrim/mods/sentinel; '
+             'for p in /workspace/package.json /skyrim/mods/sentinel /skyrim/profile/sentinel '
+             '/skyrim/overwrite/sentinel; do if echo changed > "$p"; then exit 42; fi; done')
+    live = subprocess.run([docker, "run", "--rm", "--pull=never", "--network=none", *replay,
+                           "busybox:1.37", "sh", "-c", probe], capture_output=True, text=True, timeout=60)
+    assert live.returncode == 0, live.stderr
+    assert not (work / "node_modules").exists()
+    for key, path in sources.items():
+        assert (path / "sentinel").read_text() == key

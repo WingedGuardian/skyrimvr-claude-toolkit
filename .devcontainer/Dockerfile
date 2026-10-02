@@ -31,3 +31,9 @@ RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
 
 ENV DOTNET_ROOT=/usr/local/dotnet
 ENV PATH="$PATH:/usr/local/dotnet"
+
+# Project Node modules live OUTSIDE the read-only /workspace bind (install-dependencies.sh runs
+# `npm ci` in this prefix). A volume nested under /workspace cannot be mounted on a fresh checkout:
+# Docker cannot create its mountpoint through the read-only bind. CommonJS require() finds them
+# via NODE_PATH; ES-module `import` ignores NODE_PATH, so use require() or createRequire().
+ENV NODE_PATH=/opt/skyrim-node/node_modules

@@ -67,12 +67,15 @@ cleanup() {
 trap cleanup EXIT
 
 # --- Start container detached (sleep infinity keeps it alive so we can exec into it) ---
+# No mount may be nested under /workspace: it is a read-only bind, and a fresh checkout lacks
+# the gitignored directories, so Docker could not create the mountpoint. Node modules are
+# installed into the container-local /opt/skyrim-node instead (NODE_PATH also set here, so an
+# image built before that ENV existed still resolves them).
 echo "Starting container..."
 docker run -d \
     --name "$CONTAINER_NAME" \
     --user 0:0 \
     -v "$SCRIPT_DIR:/workspace:ro" \
-    --mount type=volume,target=/workspace/node_modules \
     -w /workspace \
     -v "$MODS_SRC:/skyrim/mods:ro" \
     -v "$PROFILE_SRC:/skyrim/profile:ro" \
@@ -80,6 +83,7 @@ docker run -d \
     -e SKYRIM_MODS_DIR=/skyrim/mods \
     -e SKYRIM_PROFILE_DIR=/skyrim/profile \
     -e SKYRIM_OVERWRITE_DIR=/skyrim/overwrite \
+    -e NODE_PATH=/opt/skyrim-node/node_modules \
     -e PYTHONDONTWRITEBYTECODE=1 \
     -e 'PYTEST_ADDOPTS=-o cache_dir=/tmp/skyrim-pytest-cache' \
     "$IMAGE_TAG" \

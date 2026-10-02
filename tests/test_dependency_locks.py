@@ -37,3 +37,20 @@ def test_devcontainer_uses_readonly_mount_strings():
             assert "readonly" in mount.split(",")
     assert "install-dependencies.sh" in config["postCreateCommand"]
     assert "npm ci" in (REPO / ".devcontainer/install-dependencies.sh").read_text()
+
+
+def test_no_mountpoint_nested_in_readonly_workspace():
+    """A fresh checkout has no gitignored node_modules/; Docker cannot create a nested
+    mountpoint through the read-only workspace bind, so startup would fail."""
+    text = (REPO / ".devcontainer/devcontainer.json").read_text()
+    config = json.loads("\n".join(line for line in text.splitlines() if not line.lstrip().startswith("//")))
+    workspace = config["workspaceFolder"].rstrip("/") + "/"
+    for mount in config["mounts"]:
+        target = dict(part.split("=", 1) for part in mount.split(",") if "=" in part)["target"]
+        assert not target.startswith(workspace), mount
+    helper = (REPO / "devshell-docker.sh").read_text()
+    assert "target=/workspace/" not in helper and ":/workspace/" not in helper
+    install = (REPO / ".devcontainer/install-dependencies.sh").read_text()
+    assert "SKYRIM_NODE_PREFIX" in install
+    dockerfile = (REPO / ".devcontainer/Dockerfile").read_text()
+    assert "NODE_PATH=" in dockerfile and "/workspace" not in dockerfile.split("NODE_PATH=")[1].split()[0]

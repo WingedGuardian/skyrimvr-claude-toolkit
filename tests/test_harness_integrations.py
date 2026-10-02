@@ -133,7 +133,13 @@ def test_docker_helper_mount_arguments_close_workspace_alias(tmp_path, fail_star
     assert ":/workspace:ro" in args
     for target in ("mods", "profile", "overwrite"):
         assert ":/skyrim/" + target + ":ro" in args
-    assert "type=volume,target=/workspace/node_modules" in args
+    # A mountpoint nested in the read-only workspace bind cannot be created on a fresh
+    # checkout (node_modules is gitignored), so startup would fail before provisioning.
+    lines = args.splitlines()
+    specs = [lines[i + 1] for i, flag in enumerate(lines[:-1]) if flag in ("-v", "--volume", "--mount")]
+    assert len(specs) == 4, specs
+    nested = [spec for spec in specs if "target=/workspace/" in spec or ":/workspace/" in spec]
+    assert not nested, nested
 
 
 def test_mo2_config_and_explicit_override(tmp_path):
