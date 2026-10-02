@@ -924,6 +924,15 @@ MUTATIONS = [
         "tests/test_rule_messages.py::test_a_non_legacy_rule_renders_through_message",
         id="rule-basename-splits-on-backslash",
     ),
+    # Plan 5 Task 2: attribute every newly-fired rule to the first rule the item fires. Counts still
+    # total correctly; the per-rule table lies, which is the one thing the pricing tool is for.
+    pytest.param(
+        "scripts/guard-corpus/price.py",
+        'out.append((rid, "newly-" + dec))',
+        'out.append((new_fired[0][0], "newly-" + dec))',
+        "tests/test_price_tool.py::test_a_broadened_rule_moves_only_that_rule",
+        id="price-attribution-per-rule",
+    ),
 ]
 
 
