@@ -25,7 +25,7 @@ All under `tools/`:
 | Tool | Purpose | Usage |
 |------|---------|-------|
 | **Champollion** | Decompile Papyrus `.pex` → `.psc` | `tools/Champollion/Champollion.exe input.pex` |
-| **Caprica** | Compile Papyrus `.psc` → `.pex` | from `Data/Scripts/Source`, with a BARE filename (a path makes Caprica fail with a namespacing Fatal Error): `"<game root>/tools/Caprica/Caprica.exe" --game skyrim -f TESV_Papyrus_Flags.flg -i . -i "<base-game .psc sources>" -o "<game root>/Data/Scripts" MyScript.psc`. The second `-i` is REQUIRED whenever the base-game sources are not in the current folder (e.g. `<game root>/Data/Source/Scripts`): without it any script extending a vanilla type fails with "Unable to resolve type". One `-i` per further import folder |
+| **Caprica** | Compile Papyrus `.psc` → `.pex` | from `Data/Scripts/Source`, with a BARE filename (a path fails with a namespacing Fatal Error): `"<game root>/tools/Caprica/Caprica.exe" --game skyrim -f TESV_Papyrus_Flags.flg -i . -i "<base-game .psc sources>" -o "<game root>/Data/Scripts" MyScript.psc`. The second `-i` is REQUIRED whenever the base-game sources are not in the current folder (e.g. `<game root>/Data/Source/Scripts`): without it any script extending a vanilla type fails with "Unable to resolve type". One `-i` per further import folder |
 | **XEditLib.dll** | Programmatic ESP/ESM reading via FFI | Load with koffi in Node.js (skill `xelib`) |
 | **Spriggit** | ESP ↔ YAML/JSON conversion (.NET) | `spriggit serialize ...` |
 | **AutoMod CLI** | NIF meshes, BSA archives, audio, MCM, ESP one-liners | `bash tools/automod-cli.sh <module> <command> --json` |
@@ -158,7 +158,7 @@ This prevents accidental ESP corruption. The guards block direct ESP writes, but
 For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit serializes ESP files to human-readable YAML that you can edit directly as text — no FFI, no scripting layer, and the YAML diffs cleanly in git.
 
 ### Workflow
-1. **Serialize**: `bash tools/spriggit-cli.sh serialize --InputPath "Data/MyMod.esp" --OutputPath "<output-yaml-dir>" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "<installed-version>"` (use the wrapper — scratch/output paths are usually deeply nested and raw `spriggit` throws `UnauthorizedAccessException` on them; for `<installed-version>` see the "Don't hardcode `--PackageVersion`" bullet in *Spriggit Notes* below)
+1. **Serialize**: `bash tools/spriggit-cli.sh serialize --InputPath "Data/MyMod.esp" --OutputPath "<output-yaml-dir>" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "<installed-version>"` (use the wrapper — scratch/output paths are usually deeply nested and raw `spriggit` throws `UnauthorizedAccessException` on them; `<installed-version>`: see "Don't hardcode `--PackageVersion`" below)
 2. **Edit**: Read and modify the YAML files directly
 3. **Review**: User reviews the YAML changes (human-readable diffs)
 4. **Deserialize**: `bash tools/spriggit-cli.sh deserialize --InputPath "<output-yaml-dir>" --OutputPath "Data/MyMod.esp"`
