@@ -58,33 +58,11 @@ any agent can read one directly. Read the skill BEFORE the work:
 
 ## PyFFI / PyNifly (NIF geometry + animation authoring)
 
-**PyFFI works on any modern Python (verified through 3.14)** as long as `setuptools` is installed
-alongside it — see `docs/installing-tools.md`. It still needs the
-`time.clock = time.perf_counter` monkey-patch (a separate, still-open upstream issue).
-
-> **HARD LIMITS:**
-> 1. PyFFI **cannot read BSTriShape at all** (`Unknown block type 'BSTriShape'`) — i.e. any SSE-format (user_version_2=100) NIF. Use PyNifly.
-> 2. PyFFI can construct controller blocks, but an **authored NiControllerManager/NiControllerSequence CTDs the engine** despite passing PyFFI's own readback — it omits header string-table registrations the engine requires. **Never author animations with PyFFI — use PyNifly.**
-> 3. Building from a fresh `NifFormat.Data()` corrupts the header string table on write. Always **load an existing valid NIF and restructure it** instead.
-> 4. **PyNifly is the validation gate** — cross-read any authored/edited NIF with it before in-game testing, and check the *specific* crashable subsystem (e.g. the controller): a geometry-only read can pass while the animation stack is malformed.
->
-> PyFFI remains the right tool for LE-format NiTriShape geometry edits (blade split/subdivision, bound spheres, vertex shifts).
-
-★ **The working recipes live in skill `skyrim-nif` — read it before any mesh work**: the PyFFI
-read/mutate/write block, the PyNifly import, and why PyFFI beats binary patching or NifSkope re-saves.
-
-## NIF Validation & Render Verification
-
-A crash-to-desktop must be caught in tooling, not in the headset. Use the right tool for each role:
-
-| Tool | Role |
-|------|------|
-| **PyFFI** | LE-format NiTriShape geometry edits |
-| **PyNifly** | BSTriShape (SSE) + animation/controller authoring + **independent parse-validation gate** |
-| **NifSkope** | Independent **render gate** (GUI) — visual confirmation a NIF renders |
-| **Blender (headless)** | Mesh **repair** + **render-to-PNG** verification (uses the same nifly lib as PyNifly — good for repair, NOT an independent parser) |
-
-**Gates before any in-game test:** (1) author with valid-by-construction tools (PyNifly, not hand-rolled controller blocks); (2) cross-validate with an independent, stricter parser; (3) diff against a known-good structure. Render a PNG (Blender headless) so a mesh/VFX fix is confirmed in chat before a game launch.
+> **HARD LIMITS** — recipes, install notes and the validation gates: skill `skyrim-nif`.
+> 1. PyFFI **cannot read BSTriShape** (any SSE-format NIF) — use PyNifly. PyFFI is for LE-format NiTriShape geometry edits.
+> 2. **Never author animations with PyFFI** — its controller blocks pass its own readback and CTD the engine. Use PyNifly.
+> 3. Never build from a fresh `NifFormat.Data()` (it corrupts the header string table); load an existing valid NIF and restructure it.
+> 4. **Validate before any in-game test** with an independent parser (PyNifly), checking the specific crashable subsystem, and render a PNG (Blender headless) for a visual fix. Same-tool readback proves nothing.
 
 ## INI Config Hierarchy
 

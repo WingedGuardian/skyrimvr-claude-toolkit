@@ -433,7 +433,7 @@ A: The safety hooks run on Python 3 and refuse everything when they cannot start
 **Q: How do I update the toolkit?**
 A: Download the new version from Nexus and extract over the old one, then re-run `bash setup.sh`.
 
-**Anything the toolkit ships is REPLACED by that extract, including `KNOWLEDGEBASE.md` and `CLAUDE.md`.** Earlier versions of this answer claimed your knowledgebase additions were preserved. They were not — the shipped file overwrote yours, which is exactly when a reassurance is worth least. Your own notes belong in **`KNOWLEDGEBASE.local.md`**, which the toolkit never ships and the release build refuses to contain; Claude is instructed to read both files and write only to that one. If you have notes sitting in `KNOWLEDGEBASE.md` from an older version, move them across before you update. `.claude/backups/`, `.claude/skyrim-paths.env` and `.claude/settings.local.json` are likewise not in the zip and survive.
+**Anything the toolkit ships is REPLACED by that extract, including `KNOWLEDGEBASE.md` and `CLAUDE.md`.** Earlier versions of this answer claimed your knowledgebase additions were preserved. They were not — the shipped file overwrote yours, which is exactly when a reassurance is worth least. Your own notes belong in **`KNOWLEDGEBASE.local.md`**, which the toolkit never ships and the release build refuses to contain; the agent is instructed to read both files and write only to that one. Its `## My preferences` section is for your standing instructions to the agent ("always…", "never…"); every agent is told to read it at the start of each session. If you have notes sitting in `KNOWLEDGEBASE.md` from an older version, move them across before you update. `.claude/backups/`, `.claude/skyrim-paths.env` and `.claude/settings.local.json` are likewise not in the zip and survive.
 
 Since v3.9 a SessionStart hook also copies `KNOWLEDGEBASE.md`, `KNOWLEDGEBASE.local.md` and `CLAUDE.md` into `.claude/backups/kb/` whenever they change, and says so loudly at the start of the next session if one of them vanished, emptied, or lost more than half its bytes — which is what extracting an update over your install looks like from the inside. Run it yourself any time with `bash tools/kb-guard.sh --verbose`. Note the honest limit: an update that replaces your 100 KB knowledgebase with a 140 KB shipped one shrinks nothing and raises no alarm. The stored copy is the protection; the alarm is a convenience on top of it.
 
@@ -459,7 +459,13 @@ Found a new Skyrim quirk? PRs welcome on [GitHub](https://github.com/WingedGuard
 
 These are **generated**. Edit the source under `agent/` (see `agent/README.md` for the map; the safety rules themselves live in `tools/skyguard/*_rules.py`), then run
 `python scripts/gen_agent_trees.py` and commit both. CI runs `--check` and rejects a hand edit of a
-generated file.
+generated file. `--check` also enforces the **instruction budget**: the installed instruction file
+(header + `agent/instructions/core.md` + an addendum, plus room for `setup.sh`'s path expansion) must
+stay at or under 32,768 bytes, because Codex silently truncates past that. Check it with
+`python scripts/gen_agent_trees.py --budget`; when over, move bulk into a skill or `docs/`. The core
+and the `devbench`, `triage-and-conflicts` and `xelib` skills must also stay **agent-neutral**
+(no Claude-only tool names, variables, slash commands or config paths; Claude specifics go in
+`agent/instructions/claude.md`), enforced by `tests/test_instruction_neutrality.py`.
 
 ### Running the tests
 

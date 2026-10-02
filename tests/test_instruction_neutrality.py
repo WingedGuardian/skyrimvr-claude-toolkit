@@ -105,3 +105,28 @@ def test_ordinary_wording_is_not_flagged(text):
 def test_frontmatter_is_exempt_but_body_is_not():
     skill = "---\nname: x\ndescription: d\nargument-hint: $ARGUMENTS\n---\nUse the Edit tool.\n"
     assert [(n, r) for n, r, _ in violations(skill)] == [(6, "named-tool")]
+
+
+def test_gate_reads_the_real_files():
+    for rel in NEUTRAL_FILES:
+        p = REPO / rel
+        assert p.is_file() and p.stat().st_size > 500, f"{rel} missing or near-empty -- gate would be vacuous"
+
+
+def test_core_is_agent_neutral():
+    hits = violations((REPO / "agent/instructions/core.md").read_text(encoding="utf-8"))
+    assert not hits, "\n".join(f"core.md:{n} [{r}] {l}" for n, r, l in hits)
+
+
+def test_new_skills_are_agent_neutral():
+    hits = []
+    for rel in NEUTRAL_FILES[1:]:
+        hits += [f"{rel}:{n} [{r}] {l}" for n, r, l in violations((REPO / rel).read_text(encoding="utf-8"))]
+    assert not hits, "\n".join(hits)
+
+
+def test_core_tells_every_agent_to_read_my_preferences():
+    """The fallback for agents without session hooks (D15): the instruction itself must be in the core."""
+    core = " ".join((REPO / "agent/instructions/core.md").read_text(encoding="utf-8").split())
+    assert "## My preferences" in core
+    assert "read it at the start of every session and follow it" in core   # whitespace-normalised: it wraps

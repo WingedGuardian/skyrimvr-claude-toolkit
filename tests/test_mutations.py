@@ -828,6 +828,41 @@ MUTATIONS = [
         "tests/test_repo_invariants.py::test_every_hook_is_registered_in_settings_json",
         id="every-hook-is-wired-into-settings-json",
     ),
+    # --- instruction budget and neutrality (Plan 3) ------------------------
+    # Lift the limit: an AGENTS.md that Codex silently truncates would pass.
+    pytest.param("scripts/gen_agent_trees.py", "INSTRUCTION_BUDGET = 32768", "INSTRUCTION_BUDGET = 10 ** 9",
+                 "tests/test_gen_agent_trees.py::test_budget_rejects_an_oversize_core",
+                 id="instruction-budget-is-enforced"),
+    # Stop holding room for the Codex addendum: Plan 4 would land over budget on day one.
+    pytest.param("scripts/gen_agent_trees.py", "CODEX_ADDENDUM_RESERVE = 2048", "CODEX_ADDENDUM_RESERVE = 0",
+                 "tests/test_gen_agent_trees.py::test_budget_holds_room_for_the_codex_addendum",
+                 id="budget-reserves-the-codex-addendum"),
+    # Measure the repo file instead of the installed one.
+    pytest.param("scripts/gen_agent_trees.py", "INSTALL_EXPANSION_RESERVE = 2560", "INSTALL_EXPANSION_RESERVE = 0",
+                 "tests/test_gen_agent_trees.py::test_budget_holds_room_for_install_expansion",
+                 id="budget-measures-the-installed-size"),
+    # Unwire the budget from --check: every test of budget_problems() stays green, CI stops enforcing it.
+    pytest.param("scripts/gen_agent_trees.py", '        problems += budget_problems(a.root / "agent")',
+                 "        pass",
+                 "tests/test_gen_agent_trees.py::test_check_reports_an_over_budget_core",
+                 id="check-enforces-the-budget"),
+    # Grow the real core past the limit.
+    pytest.param("agent/instructions/core.md", "## INI Config Hierarchy", "## INI Config Hierarchy\n\n" + "x" * 9000,
+                 "tests/test_instruction_budget.py::test_repo_instructions_fit_the_budget",
+                 id="real-core-is-within-budget"),
+    # Put a Claude-only construct back into the shared core.
+    pytest.param("agent/instructions/core.md", "## INI Config Hierarchy",
+                 "## INI Config Hierarchy (edit them with the Edit tool)",
+                 "tests/test_instruction_neutrality.py::test_core_is_agent_neutral",
+                 id="core-stays-agent-neutral"),
+    pytest.param("agent/skills/devbench/SKILL.md", "# DevBench — the live in-game test channel",
+                 "# DevBench — the live in-game test channel ($CLAUDE_PROJECT_DIR)",
+                 "tests/test_instruction_neutrality.py::test_new_skills_are_agent_neutral",
+                 id="new-skills-stay-agent-neutral"),
+    # Drop the fallback instruction: an agent with no session hook never sees the user's preferences.
+    pytest.param("agent/instructions/core.md", "session and follow it**.", "session**.",
+                 "tests/test_instruction_neutrality.py::test_core_tells_every_agent_to_read_my_preferences",
+                 id="core-keeps-the-preferences-fallback"),
 ]
 
 

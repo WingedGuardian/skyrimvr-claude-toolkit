@@ -71,6 +71,9 @@ A crash-to-desktop must be caught in tooling, not the headset. Run these gates i
    blender.exe --background --python tools/blender-nif-render.py -- <path.nif> <out.png>
    ```
 3. **NifSkope (GUI)** — the independent visual validator for anything the headless render can't show.
+4. **Diff against a known-good structure** — compare the block layout with a NIF that is known to work
+   in game before trusting a new one. Author with valid-by-construction tools (PyNifly), not
+   hand-rolled controller blocks.
 
 > Blender shares the nifly library, so it is NOT an independent *parser* — use it for repair and
 > rendering, and PyNifly/NifSkope for validation. PyFFI's own readback is NOT a valid gate (same tool

@@ -170,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     outputs = render(a.target, a.root / "agent")
     if a.check:
         problems = check(outputs, a.root)
+        problems += budget_problems(a.root / "agent")
         print("\n".join(problems) if problems else f"in sync: {len(outputs)} generated files ({a.target})")
         return 1 if problems else 0
     configured = configured_by_setup(outputs, a.root)

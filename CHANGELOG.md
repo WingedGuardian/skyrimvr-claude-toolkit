@@ -2,6 +2,42 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### 📚 Instructions split
+
+- **`CLAUDE.md` shrinks from 53,578 to 28,171 bytes** (the shared core from 53,367 to 26,301), so the
+  instruction file Codex will read stays under its silent 32,768-byte truncation limit. Nothing was deleted:
+  every moved line was checked against its new home.
+- **Three new skills hold what used to be core bulk:** `devbench` (the live in-game test channel),
+  `triage-and-conflicts` (skyrim-winner, Papyrus and crash-log triage, ESP cross-reference snapshots, how the
+  tools pick a folder) and `xelib` (XEditLib API quirks, loading the real active order, judging success by
+  stdout).
+- **Install notes move to `docs/installing-tools.md`** (the optional tools, why some have wrappers, the Nexus
+  API key). The devcontainer guide joins `docs/container-vs-windows.md`; the guards' internals join
+  `docs/safety-philosophy.md`.
+- **The AutoMod CLI section folds into its skills**; `skyrim-nif` gains the Havok-collision limit and the
+  "diff against a known-good structure" gate, `create-mod` gains `add-quest` / `set-property`.
+- **The core is agent-neutral.** Claude Code specifics (skills loading, hook wiring, `/hooks`, the backup
+  hook's blind spot) move to an addendum generated into `CLAUDE.md` only.
+- **`KNOWLEDGEBASE.local.md` → `## My preferences`:** every agent is told to read your standing instructions
+  there at the start of each session, and to add to them when you state a lasting preference.
+- **`AGENTS.md` corrected:** skills are plain Markdown any agent can read; the stale "require confirmation"
+  claim and an orphaned sentence fragment are gone.
+- For contributors: `gen_agent_trees.py --check` now fails when the worst-case installed instruction file
+  exceeds 32,768 bytes (`--budget` prints it), and `tests/test_instruction_neutrality.py` bans Claude-only
+  constructs from the shared core and the three new skills. Both are mutation-tested.
+
+### 🐛 Prompt-audit fixes
+
+- Caprica: the documented command now runs from `Data/Scripts/Source` with a bare filename, `-f` flags and `-o ..` (the old form wrote the `.pex` into the game root, and a path argument fails with a namespacing error).
+- port-to-vr: "Precision doesn't exist for VR" replaced with how VR melee hit detection is layered and what to check.
+- port-to-vr: the unsourced Animation Motion Revolution VR claim replaced with "check its Nexus page".
+- port-to-vr: "SCAR → VR port exists (BFCO)" corrected; BFCO is a separate framework, not a SCAR port.
+- skyrim-nif: "AutoMod for all mesh work" scoped to texture, string and shader work.
+- `GetFormFromFile()` advice now says your OWN plugin's forms only, and to check for `None` (four places).
+- Own Your Records: vanilla records can be overridden by other plugins too; copy any whose behaviour you rely on.
+- inspect-esp: uses `tools/spriggit-cli.sh`, a scratch output folder and the installed Spriggit version instead of a hardcoded `0.40.0` and `/tmp`.
+- inspect-esp: the xeditlib check now tests that `require('xeditlib')` resolves, not that `tools/xelib/` exists.
+
 ### 🔒 Safety hooks now run on a Python engine (no verdict changes)
 
 - **The five hooks are now thin wrappers over `tools/skyguard/`**, a Python engine holding every rule,

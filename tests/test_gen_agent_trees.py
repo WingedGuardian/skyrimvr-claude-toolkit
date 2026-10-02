@@ -177,8 +177,10 @@ def test_budget_accepts_a_small_core(tmp_path):
 
 
 def test_budget_rejects_an_oversize_core(tmp_path):
+    """Sized by the LITERAL Codex limit (spec E7/D9), never by the constant: a test that scales with
+    INSTRUCTION_BUDGET still passes when someone lifts it to 10**9 (caught by the mutation gate)."""
     g = _gen()
-    problems = g.budget_problems(_with_core(tmp_path, g.INSTRUCTION_BUDGET))
+    problems = g.budget_problems(_with_core(tmp_path, 32768))
     assert problems and "Codex silently truncates" in problems[0]
 
 
@@ -231,3 +233,11 @@ def test_budget_cli_exits_1_and_names_the_file(tmp_path, capsys):
     _with_core(tmp_path, g.INSTRUCTION_BUDGET)
     assert g.main(["--root", str(tmp_path), "--budget"]) == 1
     assert "claude.md" in capsys.readouterr().out
+
+
+def test_check_reports_an_over_budget_core(tmp_path, capsys):
+    g = _gen()
+    _with_core(tmp_path, g.INSTRUCTION_BUDGET)
+    assert g.main(["--root", str(tmp_path)]) == 0          # generate it in sync first
+    assert g.main(["--root", str(tmp_path), "--check"]) == 1
+    assert "Codex silently truncates" in capsys.readouterr().out
