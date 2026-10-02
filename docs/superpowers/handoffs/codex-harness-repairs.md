@@ -1,5 +1,6 @@
 # Codex integration repair handoff — 2026-10-02
 
+**Claude takeover (2026-10-02):** cold start and review findings repaired; see the last section.
 **Subsequent live verification:** [Docker and native Spriggit report](codex-live-verification.md)
 closes the native round-trip and Docker sentinel gaps. Native Spriggit passed byte-identically;
 the focused suite now passes all 23 tests without skips. Real Docker cold startup exposed a
@@ -147,3 +148,64 @@ Final scope check: no diff from `fd71271` under `tools/skyguard`, `agent`, `.cla
 `tests/conftest.py`, `tests/guard_corpus`, `scripts/gen_agent_trees.py`, `setup.sh` or
 `tools/hook-canary.sh`. Final branch receives only the commits listed above plus this
 documentation/whitespace completion commit; Claude retains merge and release ownership.
+
+## Claude takeover 2026-10-02
+
+Claude took over the branch to fix the review findings. Commits `88ac8e8..cc3468b` on
+`codex/harness-repairs-fd71271`; nothing merged or pushed. Do-not-touch paths still show zero
+diff from `fd71271`. Each fix has a test that was observed failing first.
+
+| # | Finding | Status | Commit |
+|---|---|---|---|
+| 1 | Fresh checkout cannot start Docker (nested `node_modules` volume under read-only bind) | **Fixed.** `npm ci` runs in container-local `/opt/skyrim-node`, which still checks lockfile integrity; `NODE_PATH` set in the Dockerfile and the helper; nested volume removed from both entry points | `88ac8e8` |
+| 2 | Publication replaced the whole destination; old wrapper deleted nothing | **Fixed (refuse).** Destination directories may contain only what a real serialize writes (`spriggit-meta.json`, `*.yaml`/`*.json`, record-group folders of those). Anything else, e.g. `.git`, is refused with a one-line message before serializing and again under the lock | `b521cb1` |
+| 3 | Harness modules skipped in CI | **Fixed.** The behavior job runs `run_harness_tests.py` on both legs, and the Linux leg pre-pulls the digest-pinned busybox. The bare-skip test moved to `test_dependency_locks.py`. **Also found:** the branch's `ci.yml` was invalid YAML (`--only-binary=:all: ` in a plain scalar), so no CI job could run. Repaired, and a parse gate was added | `4826a01` |
+| 4 | Read-only workspace breaks Spriggit output and the harness | **Fixed + documented.** Harness evidence falls back to container temp. Spriggit refuses an unwritable destination before serializing. The wrapper falls back to `dotnet tool run spriggit` (measured: bare `spriggit` was never on the container PATH, exit 127). README and container-vs-windows have a table of write locations | `b521cb1`, `f46fddc` |
+| 5 | Explicit `base` must beat configured load order | **Fixed.** Measured with `SKYRIM_LOADORDER_DIR` set: the previous revision fails "ambiguous choice WARNS" and this revision passes 12/12. The three plugins-txt mutation probes pass | `cc74bbd` |
+| 6 | Microsoft Store python stub | **Fixed.** `type -aP` candidates under `\WindowsApps\` are skipped. If the stub is the only Python, the wrapper gives a clear error | `b521cb1` |
+| 7 | Crash debris not named | **Fixed.** Debris names carry the destination key. A held lock lists `.spriggit-previous-<key>-*` (the OLD output) and `.spriggit-stage-<key>-*` | `b521cb1` |
+
+Also fixed: on POSIX the harness barrier judged `shutil.rmtree`'s dir_fd-relative names
+against the cwd, so `test_publication_failure_rolls_back` failed on Linux. That failure would
+have hit the new ubuntu CI step. Now fixed (`35c9538`, `cc3468b`), with a refusal control that
+was red on the previous barrier in the Linux container. The helper now allocates a TTY only
+when stdin has one.
+
+### Evidence
+
+- **Real cold start:** fresh `git clone` of the branch into the session scratchpad, with no
+  `node_modules/` and nothing pre-created. The real `devshell-docker.sh` was run against disposable
+  sentinel mounts, and only its image tag was changed (`skyrim-toolkit-claude-88ac8e8`). The last
+  run used `--rebuild` at `f46fddc`. Python lock, `npm ci` and the dotnet tool restore all ran;
+  the shell opened. `require()` of ajv/fast-xml-parser/zod worked through
+  `/opt/skyrim-node/node_modules`, and `/workspace/node_modules` was absent. Writes to
+  `/workspace` and to the mods/profile/overwrite mounts were refused. `pip check` was clean.
+  An in-container Spriggit serialize to deserialize round trip of a disposable
+  `BoundDaggerFix.esp` was byte-identical (`6ce67b41...58da` both sides). A `.git` in the
+  destination was refused and kept, and a `/workspace` destination was refused up front.
+  Container and volume were removed on exit, and the sentinel hashes were unchanged.
+- **Red control:** the same replay test hit the exact `mkdirat ... read-only file system` error
+  against the pre-fix configuration.
+- **Focused suite, Windows:** 33 passed, 1 skipped. The skip is the POSIX-only dir_fd control.
+  Both live-Docker tests ran.
+- **Focused suite, Linux (inside the container, fresh clone at `cc3468b`):** 32 passed,
+  2 skipped (no Docker inside the container).
+- **Node:** 22/22. **Bare pytest gates:** 7 passed.
+
+### What remains
+
+- **Dev Containers CLI:** not installed on this machine, so the `devcontainer up` lifecycle was
+  **not run**. `devcontainer.json` is covered only by the static gate and by sharing the Dockerfile.
+- **Failed-start cleanup:** a failed `docker run` can still leave a created container. The
+  `docker create` + `docker start` ownership design (live-verification item 2) is not done.
+- **CI not executed:** I checked the YAML parse and the step contents, and ran the same commands
+  locally. Neither the ubuntu leg's live-Docker run nor the Windows runner was observed.
+- **"Spriggit-produced" is measured on one plugin** (WEAP records, Spriggit.Yaml). A user's own
+  top-level `*.yaml`/`*.json` would count as Spriggit output and be replaced. Other packages or
+  record layouts with non-yaml/json files would be refused, which fails safe.
+- **`NODE_PATH`** serves CommonJS `require()` only (documented). No tracked code imports these
+  dependencies today.
+- Canonical conftest wiring, deferred guard work and release certification are unchanged from
+  the list above. The full suite was not run here; the controller runs it.
+- Left running or retained: Docker Desktop (started for this work); local image
+  `skyrim-toolkit-claude-88ac8e8`; scratchpad clones.
