@@ -3,7 +3,7 @@
 
 The output, tests/guard_corpus/expected.jsonl, is the yardstick for the skyguard port: the new hooks
 must reproduce every decision and every reason byte for byte. Rows are generated from:
-  * every cmd()/fpath() payload in tests/test_hooks.py, extracted by AST, not retyped;
+  * every cmd()/fpath() payload in tests/test_hooks.py (literal calls AND parametrize rows), by AST;
   * every rule in the bash hooks, each with a positive and a negative input;
   * path dialects, multi-line, CRLF and non-ASCII variants (Plan 2 Review Focus);
   * the empty, invalid and non-object payloads.
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import shutil
@@ -103,19 +104,49 @@ def fire(install: Path, hook: str, payload) -> dict:
 
 
 def _from_test_hooks() -> list[tuple[str, str]]:
-    """Every literal cmd(...)/fpath(...) argument in tests/test_hooks.py, f-strings evaluated."""
+    """Every payload tests/test_hooks.py feeds to cmd()/fpath(), evaluated rather than retyped.
+
+    Two sources, both by AST: (1) a cmd(...)/fpath(...) call whose argument is a literal or f-string;
+    (2) a `@pytest.mark.parametrize` row, for a parameter the decorated test passes straight to
+    cmd()/fpath(). Expected-decision columns are ignored: the corpus records what the hook does.
+    """
     tree = ast.parse((REPO / "tests" / "test_hooks.py").read_text(encoding="utf-8"))
     ns = {"GAME": GAME, "GAMEW": GAMEW, "BS": BS}
-    found = []
+
+    def ev(node):
+        try:
+            return eval(compile(ast.Expression(node), "<arg>", "eval"), {}, dict(ns))
+        except Exception:
+            return None
+
+    found = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "id", None) in ("cmd", "fpath") and node.args:
-            try:
-                value = eval(compile(ast.Expression(node.args[0]), "<arg>", "eval"), {}, dict(ns))
-            except Exception:
-                continue
+            value = ev(node.args[0])
             if isinstance(value, str):
-                found.append((node.func.id, value))
-    return sorted(set(found))
+                found.add((node.func.id, value))
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        for dec in fn.decorator_list:
+            if not (isinstance(dec, ast.Call) and getattr(dec.func, "attr", None) == "parametrize"
+                    and len(dec.args) >= 2):
+                continue
+            names = ev(dec.args[0])
+            names = [n.strip() for n in names.split(",")] if isinstance(names, str) else None
+            if not names or not isinstance(dec.args[1], (ast.List, ast.Tuple)):
+                continue
+            for call in ast.walk(fn):
+                if not (isinstance(call, ast.Call) and getattr(call.func, "id", None) in ("cmd", "fpath")
+                        and call.args and isinstance(call.args[0], ast.Name) and call.args[0].id in names):
+                    continue
+                idx = names.index(call.args[0].id)
+                for row in dec.args[1].elts:
+                    cell = row.elts[idx] if isinstance(row, (ast.Tuple, ast.List)) and len(names) > 1 else row
+                    value = ev(cell)
+                    if isinstance(value, str):
+                        found.add((call.func.id, value))
+    return sorted(found)
 
 
 def _bash_payload(c):
@@ -132,10 +163,11 @@ def inputs() -> list[dict]:
     def add(rid, layout, hook, payload):
         rows.append({"id": rid, "layout": layout, "hook": hook, "payload": payload})
 
-    for i, (kind, value) in enumerate(_from_test_hooks()):
+    for kind, value in _from_test_hooks():
+        i = hashlib.sha1(f"{kind}\0{value}".encode("utf-8")).hexdigest()[:10]
         hook = "protect-bash.sh" if kind == "cmd" else "protect-files.sh"
         payload = _bash_payload(value) if kind == "cmd" else _write_payload(value)
-        add(f"testhooks-{i:03d}", "declared", hook, payload)
+        add(f"testhooks-{i}", "declared", hook, payload)
 
     spellings = {
         "fwd": GAME, "back": GAMEW, "msys": "/c/GOG Games/The Elder Scrolls V Skyrim VR",
@@ -190,6 +222,11 @@ def inputs() -> list[dict]:
     for name, c in shell_rules.items():
         add(f"shell-{name}", "declared", "protect-bash.sh", _bash_payload(c))
         add(f"shell-{name}@config", "config", "protect-bash.sh", _bash_payload(c))
+    # Attribution twins: the verdict must come from the hook's own logic, not from the env file.
+    add("shell-config-dir-nolayout", "declared", "protect-bash.sh",
+        _bash_payload('rm -rf "D:/Profiles/MO2/profiles/Default/SkyrimPrefs.ini"'))
+    add("shell-gamepath-destroyer-undeclared", "undeclared", "protect-bash.sh",
+        _bash_payload(f'rm -rf "{GAME}/Data"'))
     add("shell-config-dir-declared", "config", "protect-bash.sh",
         _bash_payload('rm -rf "D:/Profiles/MO2/profiles/Default/SkyrimPrefs.ini"'))
 
@@ -217,6 +254,9 @@ def inputs() -> list[dict]:
 
 
 def record(hooks_src: Path, out: Path) -> int:
+    if needs_missing_jq(hooks_src):
+        raise SystemExit("refusing to record: the reference hooks need jq and it is not installed "
+                         "(every row would come back GUARD INERT)")
     rows = inputs()
     with tempfile.TemporaryDirectory() as td:
         installs = {name: make_install(Path(td), hooks_src, name) for name in LAYOUTS}
@@ -229,6 +269,8 @@ def record(hooks_src: Path, out: Path) -> int:
                 r = dict(r, payload=_bash_payload('rm -rf "<install>/Data"'), payload_note="install-relative")
                 payload = install_relative(r["payload"], install)
             res = fire(install, r["hook"], payload)
+            if "GUARD INERT" in res["text"] and not r["id"].startswith("payload-"):
+                raise SystemExit(f"refusing to record: row {r['id']} came back GUARD INERT: {res['text'][:120]}")
             lines.append(json.dumps({**r, **res}, ensure_ascii=False, sort_keys=True))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")

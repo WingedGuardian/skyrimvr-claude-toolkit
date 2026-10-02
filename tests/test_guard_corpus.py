@@ -39,6 +39,13 @@ def test_corpus_is_not_trivially_small():
     assert {r["decision"] for r in ROWS} >= {"allow", "advise", "ask", "deny"}
 
 
+def test_corpus_inputs_are_exactly_what_the_recorder_generates():
+    """Dropping, adding or altering a row (id, layout, hook, payload) must fail, not just shrink coverage."""
+    want = [(r["id"], r["layout"], r["hook"], r["payload"]) for r in _rec().inputs()]
+    got = [(r["id"], r["layout"], r["hook"], None if r.get("payload_note") else r["payload"]) for r in ROWS]
+    assert got == want
+
+
 @pytest.mark.parametrize("row", ROWS, ids=[r["id"] for r in ROWS])
 def test_hook_reproduces_the_recorded_verdict(installs, row):
     rec, inst = installs

@@ -40,3 +40,4 @@ tests/bin/* text eol=lf
 # `agent/** text` line would override `*.png binary` and strip bytes from any image in a skill.
 *.md               text eol=lf
 *.example          text eol=lf
+*.jsonl            text eol=lf
