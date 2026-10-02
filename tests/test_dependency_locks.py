@@ -37,5 +37,3 @@ def test_devcontainer_uses_readonly_mount_strings():
             assert "readonly" in mount.split(",")
     assert "install-dependencies.sh" in config["postCreateCommand"]
     assert "npm ci" in (REPO / ".devcontainer/install-dependencies.sh").read_text()
-
-
