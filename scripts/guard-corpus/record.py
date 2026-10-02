@@ -218,6 +218,7 @@ def inputs() -> list[dict]:
         "multiline-destroyer-split": f'rm\n"{GAME}"',
         "multiline-two-cmds": f'echo start\nrm -rf "{GAME}"',
         "crlf": f'rm -rf "{GAME}"\r\n',
+        "cr-line-end": f'cat "{GAME}/Data/x.txt"\r',
         "trailing-newlines": "git status\n\n\n",
         "unicode-path": f'rm "{GAME}/Data/Ëlven Ármor.esp"',
         "unicode-benign": "echo 'Ébène'",
@@ -257,6 +258,8 @@ def inputs() -> list[dict]:
         "data-other": f"{GAME}/Data/meshes/x.nif", "relative-data": "Data/x.txt",
         "outside": "C:/Users/u/Projects/notes.md", "toolkit-checkout": "C:/Users/u/Projects/skyrimvr-claude-toolkit/README.md",
         "unicode": f"{GAME}/Data/Ëlven.txt",
+        "cr-plugins": "C:/Users/u/AppData/Local/Skyrim VR/plugins.txt\r",
+        "cr-ini": "C:/Users/u/Documents/My Games/Skyrim VR/Skyrim.ini\r",
     }
     for name, p in write_rules.items():
         add(f"write-{name}", "declared", "protect-files.sh", _write_payload(p))

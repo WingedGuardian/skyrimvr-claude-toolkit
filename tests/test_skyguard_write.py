@@ -128,7 +128,7 @@ def test_rule8_not_fired_when_specific_advice_present(tmp_path):
 
 
 def test_advice_joined_in_rule_order(tmp_path):
-    # .psc under Data/SKSE/Plugins? rule 5 needs .ini, so use plugins.txt-ending ini impossible; combine 4+... :
+    # Only rules 4 and 5 can both fire on one path: a Skyrim*.ini under Data/SKSE/Plugins.
     p = "C:/g/Data/SKSE/Plugins/Skyrim.ini"
     assert advice(p, tmp_path) == sub(106, p) + " | " + sub(108, p)
 
@@ -155,22 +155,31 @@ def test_every_message_constant_equals_the_bash_text():
 
 
 def _corpus_rows():
-    rows = []
+    rows, dropped = [], []
     for line in (REPO / "tests" / "guard_corpus" / "expected.jsonl").read_text(encoding="utf-8").split("\n"):
         if not line.strip():
             continue
         r = json.loads(line)
         p = r["payload"]
-        if r["hook"] != "protect-files.sh" or not isinstance(p, dict):
+        if r["hook"] != "protect-files.sh":
             continue
-        ti = p.get("tool_input")
+        ti = p.get("tool_input") if isinstance(p, dict) else None
         fp = ti.get("file_path") if isinstance(ti, dict) else None
         if isinstance(fp, str):
             rows.append((r["id"], fp, r["decision"], r["text"]))
-    return rows
+        else:
+            dropped.append(r["id"])
+    return rows, dropped
 
 
-CORPUS = _corpus_rows()
+CORPUS, DROPPED = _corpus_rows()
+
+
+def test_corpus_filter_drops_only_the_payload_shape_rows():
+    assert sorted(DROPPED) == [
+        "payload-array-protect-files.sh", "payload-empty-protect-files.sh",
+        "payload-invalid-protect-files.sh", "payload-notool-protect-files.sh",
+    ], DROPPED
 
 
 def test_corpus_subset_is_non_empty_and_varied():

@@ -87,3 +87,13 @@ def test_advice_joins_with_pipes():
 def test_engine_parses_on_python_3_8():
     for f in sorted((REPO / "tools" / "skyguard").rglob("*.py")):
         ast.parse(f.read_text(encoding="utf-8"), filename=str(f), feature_version=(3, 8))
+
+
+def test_grep_drops_trailing_cr_per_line():
+    # MEASURED on Windows Git Bash (the reference): `printf 'plugins.txt\r\n' | grep -qiE 'txt$'` and the
+    # two- and three-CR forms all exit 0; a CR followed by more text does not. Linux GNU grep disagrees.
+    assert grep.grep(r"txt$", "plugins.txt\r")
+    assert grep.grep(r"txt$", "plugins.txt\r\r")
+    assert grep.grep(r"txt$", "a\nplugins.txt\r\r\r\nb")
+    assert not grep.grep(r"txt$", "plugins.txt\rx")
+    assert not grep.grep(r"txt$", "plugins.txt\rx\ny")

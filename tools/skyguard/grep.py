@@ -20,4 +20,8 @@ def _compile(pattern: str, icase: bool):
 
 def grep(pattern: str, text: str, icase: bool = True) -> bool:
     rx = _compile(pattern, icase)
-    return any(rx.search(line) for line in text.split("\n"))
+    # Controller ruling (Task 4 fix round 1): Windows Git-Bash grep is the reference. It treats CR before
+    # LF as part of the line ending; MEASURED there, `$` matches after one, two or three trailing CRs
+    # (`printf 'a.txt\r\r\n' | grep -qiE 'txt$'` exits 0) but not a CR followed by more text. Linux GNU grep
+    # does not do this. So every trailing CR is dropped from each line before matching.
+    return any(rx.search(line.rstrip("\r")) for line in text.split("\n"))
