@@ -1,6 +1,6 @@
-# CLAUDE.md
+# Skyrim modding — agent instructions
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for AI coding agents working in this Skyrim install. Agent-specific notes are at the end of this file.
 
 ## What This Is
 
@@ -69,11 +69,8 @@ alongside it — see `docs/installing-tools.md`. It still needs the
 >
 > PyFFI remains the right tool for LE-format NiTriShape geometry edits (blade split/subdivision, bound spheres, vertex shifts).
 
-★ **The working recipes live in the `skyrim-nif` skill — INVOKE IT** (`Skill: skyrim-nif`) for the
-PyFFI read/mutate/write block, the PyNifly import incantation, why PyFFI beats binary patching /
-NifSkope re-saves, and the key block-editing operations. It is path-scoped to
-`**/*.nif,Data/meshes/**`, so it is listed automatically when you touch a mesh — but listing is not
-loading: you must invoke it.
+★ **The working recipes live in skill `skyrim-nif` — read it before any mesh work**: the PyFFI
+read/mutate/write block, the PyNifly import, and why PyFFI beats binary patching or NifSkope re-saves.
 
 ## NIF Validation & Render Verification
 
@@ -110,12 +107,21 @@ Nexus also has a free API (versions, changelogs, dependencies). `bash tools/nexu
 | file | owner | shipped in the zip? |
 |---|---|---|
 | `KNOWLEDGEBASE.md` | the toolkit | **yes** — replaced on every update |
-| `KNOWLEDGEBASE.local.md` | **you** | **never** — the release refuses to contain it |
+| `KNOWLEDGEBASE.local.md` | **you**: your facts AND your instructions | **never** — the release refuses to contain it |
 
 **Standing instruction**: after every debugging session, mod investigation, or web
 research, extract any new facts (engine quirks, VR vs SSE differences, API gotchas,
 tool limitations) and append them to **`KNOWLEDGEBASE.local.md`**, creating it if it
 does not exist. Read both files; write only to the local one.
+
+### Your preferences: `## My preferences`, read every session
+
+`KNOWLEDGEBASE.local.md` holds the user's facts AND their standing instructions. Its
+`## My preferences` section is the user's instructions to you: **read it at the start of every
+session and follow it**. On agents with session hooks the guards print it at session start; that is
+the same text. Read the rest of the file before making changes. When the user states a lasting
+preference ("always…", "never…", "from now on…"), add it to that section. When you create the
+file, start it with an empty `## My preferences` section.
 
 **Why the split, and it is not bookkeeping.** The upgrade path is "extract the new zip
 over your install", so any file the toolkit ships is *replaced* on update. A file that
@@ -166,11 +172,11 @@ All ESP modifications via xelib scripts must follow this two-pass workflow:
 2. **User reviews** the proposed changes
 3. **Write pass**: only after user approval, run again with `SaveFile()` enabled
 
-This prevents accidental ESP corruption. The hook system blocks direct ESP writes, but xelib operates through Bash and can write via `SaveFile()`.
+This prevents accidental ESP corruption. The guards block direct ESP writes, but xelib runs as an ordinary script and can write through `SaveFile()`, which no guard sees.
 
 ## Spriggit ESP Workflow (Preferred for Editing)
 
-For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit serializes ESP files to human-readable YAML that Claude can edit directly with its native Edit tool — no FFI, no scripting layer, and the YAML diffs cleanly in git.
+For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit serializes ESP files to human-readable YAML that you can edit directly as text — no FFI, no scripting layer, and the YAML diffs cleanly in git.
 
 ### Workflow
 1. **Serialize**: `bash tools/spriggit-cli.sh serialize --InputPath "Data/MyMod.esp" --OutputPath "<output-yaml-dir>" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "<installed-version>"` (use the wrapper — scratch/output paths are usually deeply nested and raw `spriggit` throws `UnauthorizedAccessException` on them; see Fix note below for `<installed-version>`)
@@ -201,12 +207,11 @@ For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit se
 
 ## Safety Rules
 
-Hooks in `.claude/hooks/`, wired up by `.claude/settings.json`, enforce these
-automatically. The hooks are thin adapters; the rules live in the Python engine
-`tools/skyguard/` (`shell_rules.py`, `write_rules.py`, `paths.py`), which needs Python 3 --
-`setup.sh` records its path in each hook, and a hook that cannot start it REFUSES rather than
-allows. **A hook exists to stop ME, not to interrupt the user** -- so the
-rules are graded, and only the first list actually refuses.
+**The guards** enforce these automatically on agents with hook support (your agent's notes at the end say
+how). The rules live in the Python engine `tools/skyguard/` (`shell_rules.py`, `write_rules.py`,
+`paths.py`), which needs Python 3; a guard that cannot start it REFUSES rather than allows. **A guard
+exists to stop the agent, not to interrupt the user**, so the rules are graded and only the first list
+refuses.
 
 ### DENIED -- refused outright, cannot proceed
 - Deleting the game installation directory or the config directory -- anchored on any
@@ -253,16 +258,16 @@ Few prompts by design: a guard that prompts on routine work gets approved by ref
   (Writing the user's **own** in-development mod files into `Data/` is a different thing and is fine.)
 
 ### Safety improvement loop
-After every session, near-miss, or unexpected outcome, evaluate whether a new hook, expanded protection, or knowledgebase entry could have prevented or caught the issue. Propose new hooks when a pattern of risk emerges -- proactively when you notice a gap. Document proposed hooks in a "Hook Candidates" section of `KNOWLEDGEBASE.local.md`.
+After every session, near-miss, or unexpected outcome, evaluate whether a new guard rule, expanded protection, or knowledgebase entry could have prevented or caught the issue. Propose new guard rules when a pattern of risk emerges -- proactively when you notice a gap. Document proposed rules in a "Hook Candidates" section of `KNOWLEDGEBASE.local.md`.
 
 ### Audit trail
-- Every file edit **made through the Edit/Write tools** is auto-backed up to `.claude/backups/` with a timestamp. ⚠ A file written by a script run through Bash is not seen by that hook at all -- see the knowledgebase-guard note below.
+- Files edited through the agent's own file-edit tool are backed up to `.claude/backups/` first, on agents with hooks. ⚠ A file written by a script is not seen by that backup at all (see the knowledgebase note above).
 - An audit log at `.claude/backups/AUDIT_LOG.txt` records every file touched, when, and by which tool
 
 ### Iteration snapshots (standing process — do not skip)
 Mod development requires many experimental iterations. Without snapshots, reverting to a known-good state means reconstructing code from memory or entangled transcript turns.
 1. **Before any experimental change**, copy the current `.psc` source files to `.claude/backups/<descriptive-name>/` (e.g. `known-good-pre-stagger/`). This is the rollback point.
-2. **The auto-backup hook has no extension filter** -- it copies any file Claude edits through Edit/Write, `.psc` included, and `snapshot-before-tool.sh` additionally snapshots `.psc`/`.pex` before every Bash command. (This line previously claimed it covered INIs only, which was false in both directions.) What neither covers is a file written by a script through Bash -- `session-kb-guard.sh` exists for exactly that channel. — it does NOT capture `.psc`/`.pex`. Spriggit auto-backups capture the ESP on every deserialize, but not scripts.
+2. **Automatic copies are not rollback points.** On agents with hooks, edits are backed up and `.psc`/`.pex` are snapshotted before shell commands. A copy you cannot identify later is not a plan, so snapshot by name anyway. Spriggit backs up the ESP on every deserialize, but not scripts.
 3. **After confirming a state works in-game**, snapshot both scripts and a Spriggit export to a dated `known-good/` folder, named descriptively (what works, not just the date).
 4. **"Restore from transcript" is a trap** — past-turn code is entangled with the bugs being fixed that same turn. Read it for reference; don't paste it forward blindly.
 
@@ -290,7 +295,7 @@ Mod development requires many experimental iterations. Without snapshots, revert
 - [ ] Checked if VR differs from SSE for this feature
 - [ ] Web-searched for known issues with this approach
 - [ ] Considered rollback path if the change breaks something
-- [ ] Evaluated whether this task reveals a gap in current hook coverage
+- [ ] Evaluated whether this task reveals a gap in current guard coverage
 
 ---
 
