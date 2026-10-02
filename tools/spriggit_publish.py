@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 import uuid
 
@@ -53,7 +54,10 @@ def publish(source, target):
     try:
         _publish_locked(source, target)
     finally:
-        lock.rmdir()
+        try:
+            lock.rmdir()
+        except OSError as error:
+            print("[spriggit-cli] cleanup warning; inspect retained lock " + str(lock) + ": " + str(error), file=sys.stderr)
 
 
 def _publish_locked(source, target):
@@ -78,12 +82,19 @@ def _publish_locked(source, target):
                 moved = False
             raise
         if moved:
-            if backup.is_dir():
-                shutil.rmtree(backup)
-            else:
-                backup.unlink()
+            try:
+                if backup.is_dir():
+                    shutil.rmtree(backup)
+                else:
+                    backup.unlink()
+            except OSError as error:
+                print("[spriggit-cli] cleanup warning; publication committed, retained " +
+                      str(backup) + ": " + str(error), file=sys.stderr)
     finally:
-        shutil.rmtree(holder)
+        try:
+            shutil.rmtree(holder)
+        except OSError as error:
+            print("[spriggit-cli] cleanup warning; retained staging " + str(holder) + ": " + str(error), file=sys.stderr)
 
 
 if __name__ == "__main__":

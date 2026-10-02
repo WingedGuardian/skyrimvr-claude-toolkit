@@ -6,6 +6,9 @@ import subprocess
 import pytest
 
 from conftest import BASH, REPO
+from harness_isolation import active
+
+pytestmark = pytest.mark.skipif(not active(), reason="COULD NOT CHECK: run tests/run_harness_tests.py for contained fixtures")
 
 
 def executable(path, text):

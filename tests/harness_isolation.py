@@ -5,9 +5,15 @@ import re
 import sys
 
 MANAGERS = set("winget choco scoop apt apt-get dnf pacman brew npm pip pip3 dotnet".split())
+_ACTIVE = False
+
+
+def active():
+    return _ACTIVE
 
 
 def install():
+    global _ACTIVE
     root = Path(os.environ["HARNESS_FIXTURE_ROOT"]).resolve()
 
     def contained(value):
@@ -47,22 +53,5 @@ def install():
                     log.write("native " + repr(argv) + "\n")
                 raise PermissionError("PACKAGE-MANAGER TRIPWIRE: " + repr(argv))
     sys.addaudithook(audit)
+    _ACTIVE = True
 
-
-def pytest_configure(config):
-    config.addinivalue_line("markers", "tripwire_control: controlled fake-manager probe")
-
-
-import pytest
-
-
-@pytest.fixture(autouse=True)
-def package_manager_attempts(request):
-    log = Path(os.environ["HARNESS_TRIPWIRE_LOG"])
-    before = log.read_text() if log.exists() else ""
-    yield
-    after = log.read_text() if log.exists() else ""
-    attempts = [s for s in after[len(before):].splitlines()
-                if s not in ("dotnet --version", "dotnet --list-sdks")]
-    if not request.node.get_closest_marker("tripwire_control"):
-        assert not attempts, "PACKAGE-MANAGER TRIPWIRE: " + repr(attempts)

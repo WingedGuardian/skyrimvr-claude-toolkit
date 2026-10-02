@@ -13,6 +13,8 @@ staging directory beside the destination, validated, then renamed into place. An
 destination is renamed aside first and restored if publication fails. Old YAML never overlays
 the new result. A process crash between renames can leave `.spriggit-previous-*`; preserve it
 and inspect before recovery. Concurrent publication to the same destination is rejected.
+Post-commit cleanup failures are warnings naming retained artifacts, not failed publication.
+After a crash, inspect a retained `.spriggit-lock-*` before removing it; no stale lock is stolen.
 
 ## Container isolation
 
@@ -73,6 +75,12 @@ python -m pip install --dry-run --ignore-installed --only-binary=:all: --report 
 python scripts/lock-python-dependencies.py --report report.json --input requirements.txt --output requirements.lock
 ```
 
+Pass repeated `--report` arguments to merge resolutions from supported target environments.
+For the common lock include Windows/Python 3.10 resolution (it contains pytest's Windows and
+older-Python conditional dependencies), alongside Linux/Python 3.11 evidence. Missing conditional
+dependencies or conflicting resolved versions stop generation; they are never silently omitted.
+The checked-in lock was generated from the Windows 3.10 superset and its Linux 3.11 wheels were
+verified by hash-required dry-run, not a real Linux installation.
 Repeat with the Windows input/output files on Windows. The generator rejects withdrawn
 wheels and performs no installation. The reports and PyPI metadata define the frozen result;
 subsequent installs do not resolve fresh versions. Input checksums normalize line endings.

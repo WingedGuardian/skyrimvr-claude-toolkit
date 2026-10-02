@@ -9,6 +9,9 @@ import sys
 
 import pytest
 from conftest import BASH, REPO
+from harness_isolation import active
+
+pytestmark = pytest.mark.skipif(not active(), reason="COULD NOT CHECK: test isolation barrier not installed")
 
 
 @pytest.mark.tripwire_control
@@ -94,6 +97,38 @@ def test_concurrent_publication_rejected(tmp_path):
     assert (target / "original.yaml").read_text() == "old"
 
 
+def test_committed_publication_cleanup_failure_is_warning(tmp_path, monkeypatch, capsys):
+    spec = importlib.util.spec_from_file_location("publisher", REPO / "tools/spriggit_publish.py")
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    source, target = tmp_path / "new", tmp_path / "old"
+    source.mkdir(); target.mkdir()
+    (source / "fresh.yaml").write_text("fresh"); (target / "old.yaml").write_text("old")
+    remove = module.shutil.rmtree
+
+    def failure(path, *args, **kwargs):
+        if Path(path).name.startswith(".spriggit-previous-"):
+            raise PermissionError("controlled readonly backup")
+        return remove(path, *args, **kwargs)
+
+    monkeypatch.setattr(module.shutil, "rmtree", failure)
+    module.publish(source, target)
+    assert (target / "fresh.yaml").read_text() == "fresh"
+    assert len(list(tmp_path.glob(".spriggit-previous-*"))) == 1
+    assert "cleanup" in capsys.readouterr().err.lower()
+
+
+def test_bare_pytest_skips_unsafe_controls(tmp_path):
+    env = dict(os.environ)
+    for key in ("PYTHONPATH", "PYTEST_PLUGINS", "HARNESS_FIXTURE_ROOT"):
+        env.pop(key, None)
+    result = subprocess.run([sys.executable, "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                             "tests/test_harness_controls.py", "tests/test_harness_integrations.py"],
+                            cwd=REPO, env=env, capture_output=True, text=True, timeout=40)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "skipped" in result.stdout
+    assert " passed" not in result.stdout
+
+
 @pytest.mark.parametrize("input_file,lock_file", [("requirements.txt", "requirements.lock"),
                                                    ("requirements-windows.txt", "requirements-windows.lock")])
 def test_python_lock_tracks_input_and_hashes(input_file, lock_file):
@@ -113,6 +148,22 @@ def test_node_lock_tracks_declared_dependencies():
     for name, value in lock["packages"].items():
         if name:
             assert value["integrity"].startswith("sha512-")
+
+
+def test_lock_refresh_merges_target_reports_and_rejects_missing_extras():
+    spec = importlib.util.spec_from_file_location("locker", REPO / "scripts/lock-python-dependencies.py")
+    locker = importlib.util.module_from_spec(spec); spec.loader.exec_module(locker)
+    def report(names):
+        return {"install": [{"metadata": {"name": name, "version": version}} for name, version in names]}
+    linux = report([("pytest", "8.0.0")])
+    windows310 = report([("pytest", "8.0.0"), ("colorama", "0.4.6"),
+                         ("exceptiongroup", "1.3.1"), ("tomli", "2.4.1")])
+    with pytest.raises(ValueError, match="target"):
+        locker.merge_reports([linux])
+    merged = locker.merge_reports([linux, windows310])
+    assert len(merged["install"]) == 4
+    with pytest.raises(ValueError, match="conflicting"):
+        locker.merge_reports([windows310, report([("tomli", "2.0.0")])])
 
 
 def test_live_container_readonly_sentinels(tmp_path):
