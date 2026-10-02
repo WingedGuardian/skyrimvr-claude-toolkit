@@ -35,7 +35,7 @@ Always preview with `--dry-run` first, then remove it after user approves.
 
 1. Write the `.psc` source file
 2. Compile: `bash tools/automod-cli.sh papyrus compile <source> --output Data/Scripts --headers tools/automod/skyrim-script-headers --json`
-   (Or use Caprica: from `Data/Scripts/Source`, with a BARE filename (a path makes Caprica fail with a namespacing Fatal Error): `"<game root>/tools/Caprica/Caprica.exe" --game skyrim -f TESV_Papyrus_Flags.flg -i . -o .. MyScript.psc`. Add `-i <dir>` for each further import folder (e.g. `<game root>/Data/Source/Scripts`, where vanilla sources live on some installs).)
+   (Or use Caprica: from `Data/Scripts/Source`, with a BARE filename (a path makes Caprica fail with a namespacing Fatal Error): `"<game root>/tools/Caprica/Caprica.exe" --game skyrim -f TESV_Papyrus_Flags.flg -i . -i "<base-game .psc sources>" -o "<game root>/Data/Scripts" MyScript.psc`. The second `-i` is REQUIRED whenever the base-game sources are not in the current folder (e.g. `<game root>/Data/Source/Scripts`): without it any script extending a vanilla type fails with "Unable to resolve type". One `-i` per further import folder.)
 3. Attach to quest: `bash tools/automod-cli.sh esp attach-script <esp> --quest <editorId> --script <name> --json`
 4. Auto-fill properties: `bash tools/automod-cli.sh esp auto-fill <esp> --quest <editorId> --script <name> --script-dir Data/Scripts/Source --data-folder Data --json`
 

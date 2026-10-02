@@ -25,7 +25,7 @@ All under `tools/`:
 | Tool | Purpose | Usage |
 |------|---------|-------|
 | **Champollion** | Decompile Papyrus `.pex` → `.psc` | `tools/Champollion/Champollion.exe input.pex` |
-| **Caprica** | Compile Papyrus `.psc` → `.pex` | from `Data/Scripts/Source`, with a BARE filename (a path makes Caprica fail with a namespacing Fatal Error): `"<game root>/tools/Caprica/Caprica.exe" --game skyrim -f TESV_Papyrus_Flags.flg -i . -o .. MyScript.psc`. Add `-i <dir>` for each further import folder (e.g. `<game root>/Data/Source/Scripts`, where vanilla sources live on some installs) |
+| **Caprica** | Compile Papyrus `.psc` → `.pex` | from `Data/Scripts/Source`, with a BARE filename (a path makes Caprica fail with a namespacing Fatal Error): `"<game root>/tools/Caprica/Caprica.exe" --game skyrim -f TESV_Papyrus_Flags.flg -i . -i "<base-game .psc sources>" -o "<game root>/Data/Scripts" MyScript.psc`. The second `-i` is REQUIRED whenever the base-game sources are not in the current folder (e.g. `<game root>/Data/Source/Scripts`): without it any script extending a vanilla type fails with "Unable to resolve type". One `-i` per further import folder |
 | **XEditLib.dll** | Programmatic ESP/ESM reading via FFI | Load with koffi in Node.js (skill `xelib`) |
 | **Spriggit** | ESP ↔ YAML/JSON conversion (.NET) | `spriggit serialize ...` |
 | **AutoMod CLI** | NIF meshes, BSA archives, audio, MCM, ESP one-liners | `bash tools/automod-cli.sh <module> <command> --json` |
