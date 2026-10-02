@@ -19,6 +19,13 @@ from skyguard.verdict import Verdict  # noqa: E402
 ADAPTERS = {"claude": claude}
 
 
+ENV_UNREADABLE = (
+    "GUARD INERT: protect-bash.sh found .claude/skyrim-paths.env but could not read it, so it cannot tell "
+    "which directories are the Skyrim install. Refusing rather than guarding the wrong set. "
+    "Fix or delete that file (re-run setup.sh)."
+)
+
+
 def _emit(text: str) -> None:
     """One write of UTF-8 bytes, so a console code page cannot raise and no partial output can escape."""
     sys.stdout.buffer.write(text.encode("utf-8", "replace"))
@@ -43,8 +50,14 @@ def main(argv=None) -> int:
         if not p["command"]:
             v = shell_rules.decide("", paths.Roots("", ""), audit)
         else:
-            env = paths.read_env(Path(a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))
-            v = shell_rules.decide(p["command"], paths.roots(a.root, a.root_win, env), audit)
+            try:
+                env = paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))
+            except (OSError, ValueError):
+                env = None
+            if env is None:
+                v = Verdict("deny", ENV_UNREADABLE)
+            else:
+                v = shell_rules.decide(p["command"], paths.roots(a.root, a.root_win, env), audit)
     elif a.role == "protect-files":
         v = write_rules.decide(p["file_path"], audit)
     elif a.role == "backup-before-edit":

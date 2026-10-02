@@ -58,7 +58,7 @@ jobs:
       # ruleset currently reports 18 style findings and runs advisory-only.
       - name: ruff
         run: |
-          pip install --quiet ruff
+          python -m pip install --only-binary=:all: --require-hashes -r requirements.lock
           mapfile -t files < <(git ls-files '*.py')
           ruff check --select=E9,F63,F7,F82 "${files[@]}"
           echo "--- advisory (non-blocking) ---"
@@ -73,9 +73,8 @@ jobs:
         with:
           node-version-file: .node-version
 
-      # No package-lock.json is committed, so `npm ci` cannot be used here.
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Syntax
         run: |
@@ -291,10 +290,27 @@ jobs:
           command -v jq >/dev/null 2>&1 || { echo "::error::jq still missing"; exit 1; }
 
       - name: Install pytest
-        run: python -m pip install --quiet --disable-pip-version-check pytest==8.0.0
+        # Block scalar: in a plain scalar, ':all: ' is a YAML mapping error that invalidates
+        # the whole workflow file.
+        run: |
+          python -m pip install --quiet --disable-pip-version-check --only-binary=:all: --require-hashes -r requirements.lock
 
       - name: Behavioral suite
         run: python -m pytest tests/ -v --durations=10
+
+      # test_harness_controls.py and test_harness_integrations.py skip WHOLE MODULES under the
+      # plain pytest above: they need the package-manager barrier that only the contained
+      # launcher installs. Without this step their behavioral tests never run in CI.
+      # The live-Docker controls never pull; give the Linux leg (which has a daemon) the exact
+      # sentinel image, pinned by digest, so they run there instead of reporting COULD NOT CHECK.
+      - name: Live-Docker sentinel image (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          docker pull busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+          docker tag busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e busybox:1.37
+
+      - name: Harness-contained behavioral tests
+        run: python -B tests/run_harness_tests.py tests/test_harness_controls.py tests/test_harness_integrations.py tests/test_dependency_locks.py -v -rs
 
       # The Node tests cover path handling (game-root separators, plugins.txt
       # discovery), and the `node` job runs on Linux only -- where `path.sep`

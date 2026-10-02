@@ -692,3 +692,110 @@ def test_session_kb_guard_finds_its_engine_however_it_is_launched(tmp_path, how)
     text = log.read_text(encoding="utf-8") if log.is_file() else ""
     assert "FAILED" not in text and "NOT RUN" not in text, text
     assert any((root / ".claude" / "backups" / "kb").rglob("KNOWLEDGEBASE.md")), "no snapshot was taken"
+
+
+# --------------------------------------------------------------------------
+# the fork-free location block (latency fix, 2026-10-02)
+# --------------------------------------------------------------------------
+# The wrappers used to find their install with `$(cd "$(dirname ...)" && pwd)` and `pwd -W` in
+# subshells; each fork costs 10-70 ms on Git Bash. They now `cd` in their own shell and convert a
+# drive path (`/c/x` -> `C:/x`) TEXTUALLY, asking `pwd -W` only for an MSYS mount such as /tmp.
+#
+# Git Bash ALSO converts a plain-path argument to a native python.exe on its own, which masks a wrong
+# ROOT_WIN in every other test here. MSYS2_ARG_CONV_EXCL=* switches that conversion off, so these
+# tests see the wrapper's own spelling and nothing else.
+
+# Payloads here are built by _shell/_write, NOT cmd()/fpath(): scripts/guard-corpus/record.py harvests every
+# cmd()/fpath() call in this file into the frozen equivalence corpus, and these rows test the wrapper, not rules.
+def _shell(c):
+    return {"tool_name": "Bash", "tool_input": {"command": c}}
+
+
+def _write(p):
+    return {"tool_name": "Write", "tool_input": {"file_path": p}}
+
+
+def _fire_at(launch: str, root: Path, payload) -> tuple:
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root), MSYS2_ARG_CONV_EXCL="*")
+    return _decision(subprocess.run([_bash(), launch], input=json.dumps(payload), capture_output=True,
+                                    text=True, env=env, timeout=60))
+
+
+def _check_root_spelling(root: Path, launch: str):
+    ok = _fire_at(launch, root, _shell("ls"))
+    assert ok[0] == "allow", f"an `ls` was not allowed -- the engine path was misspelled: {ok}"
+    got = _fire_at(launch, root, _shell(f'rm -rf "{root.as_posix()}"'))
+    assert got[0] == "deny" and got[1].startswith("BLOCKED"), f"deleting the install was not refused: {got}"
+
+
+def test_a_drive_root_is_converted_to_its_windows_spelling(tmp_path):
+    """`/c/Users/...` must reach the engine as `C:/Users/...`, built without a `pwd -W` fork."""
+    root = install_hooks(tmp_path / "Skyrim VR", names={"protect-bash.sh"})
+    win = root.as_posix()
+    if os.name != "nt" or len(win) < 3 or win[1:3] != ":/":
+        pytest.skip(f"not a Windows drive path: {win!r}")
+    # Launched by its drive spelling explicitly: pytest's tmp dir is usually also reachable as /tmp.
+    _check_root_spelling(root, f"/{win[0].lower()}{win[2:]}/.claude/hooks/protect-bash.sh")
+
+
+def test_a_root_on_an_msys_mount_still_gets_its_windows_spelling(tmp_path):
+    """An install reached through an MSYS mount (`/tmp/...`) has no textual Windows spelling; the
+    wrapper must fall back to `pwd -W` there rather than hand python.exe a path it cannot open."""
+    tmp_win = subprocess.run([_bash(), "-c", "cd /tmp 2>/dev/null && pwd -W"],
+                             capture_output=True, text=True, timeout=60).stdout.strip()
+    root = install_hooks(tmp_path / "Skyrim VR", names={"protect-bash.sh"})
+    here = root.as_posix()
+    if not tmp_win or not here.lower().startswith(tmp_win.lower() + "/"):
+        pytest.skip(f"{here} is not under the /tmp mount ({tmp_win!r})")
+    _check_root_spelling(root, "/tmp" + here[len(tmp_win):] + "/.claude/hooks/protect-bash.sh")
+
+
+@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh", "backup-before-edit.sh",
+                                  "snapshot-before-tool.sh", "session-kb-guard.sh"])
+def test_a_fresh_install_gets_its_heartbeat_directory(tmp_path, name):
+    """mkdir now runs only when the directory is missing. On a fresh install it IS missing, and a
+    hook that skips it writes no heartbeat -- hook-canary then reports a live hook as dead."""
+    root = install_hooks(tmp_path / "install", names={name})
+    payload = ({"hook_event_name": "SessionStart", "source": "compact"} if name == "session-kb-guard.sh"
+               else _shell("ls") if name in ("protect-bash.sh", "snapshot-before-tool.sh")
+               else _write("C:/work/notes.md"))
+    hb = root / ".claude" / "backups" / ".hook-heartbeat"
+    assert not hb.exists()
+    r = _run_wrapper(root, dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), name, payload)
+    assert r.returncode == 0, r.stderr
+    beat = hb / name[:-3]
+    assert beat.is_file(), f"{name}: no heartbeat on a fresh install"
+    assert "payload_bytes=" in beat.read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
+# the declared env file is read by the engine itself (fix pass, 2026-10-02)
+# --------------------------------------------------------------------------
+# run.py read `.claude/skyrim-paths.env` from `Path(--root)`, a POSIX spelling (/c/...). Native Windows
+# python only opened it because Git Bash converts the argument; with conversion off the read failed
+# silently and a DECLARED game root (outside the install) dropped out, so deleting it was allowed.
+_NO_CONV = [{"MSYS2_ARG_CONV_EXCL": "*"}, {"MSYS_NO_PATHCONV": "1"}]
+
+
+def _declared_fire(root, extra_env, command):
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root), **extra_env)
+    return _decision(subprocess.run([_bash(), str(root / ".claude" / "hooks" / "protect-bash.sh")],
+                                    input=json.dumps(_shell(command)), capture_output=True, text=True,
+                                    env=env, timeout=60))
+
+
+@pytest.mark.parametrize("extra", _NO_CONV, ids=["MSYS2_ARG_CONV_EXCL", "MSYS_NO_PATHCONV"])
+def test_a_declared_root_is_read_with_path_conversion_off(tmp_path, extra):
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
+    other = tmp_path / "declared game"
+    (root / ".claude" / "skyrim-paths.env").write_text(
+        f'SKYRIM_GAME_ROOT="{other.as_posix()}"\n', encoding="utf-8", newline="\n")
+    got = _declared_fire(root, extra, f'rm -rf "{other.as_posix()}/Data"')
+    assert got[0] == "deny", f"a declared game root was dropped when path conversion was off: {got}"
+
+
+def test_an_unreadable_declared_env_file_fails_closed(tmp_path):
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
+    (root / ".claude" / "skyrim-paths.env").write_bytes(b'SKYRIM_GAME_ROOT="\xff\xfe\x80"\n')
+    got = _declared_fire(root, {"MSYS2_ARG_CONV_EXCL": "*"}, "ls")
+    assert got[0] == "deny" and "GUARD INERT" in got[1], got

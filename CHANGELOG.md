@@ -38,15 +38,18 @@
 - inspect-esp: uses `tools/spriggit-cli.sh`, a scratch output folder and the installed Spriggit version instead of a hardcoded `0.40.0` and `/tmp`.
 - inspect-esp: the xeditlib check now tests that `require('xeditlib')` resolves, not that `tools/xelib/` exists.
 
-### 🔒 Safety hooks now run on a Python engine (no verdict changes)
+### 🔒 Safety hooks now run on a Python engine (no verdict loosened)
 
 - **The five hooks are now thin wrappers over `tools/skyguard/`**, a Python engine holding every rule,
-  message and side effect. Zero verdicts change: a corpus of 278 recorded inputs (every payload the old
+  message and side effect. Verdicts were compared on 53,445 real commands from the audit history: 0 verdicts loosened, 2 became
+  stricter advisories on non-ASCII spellings (reviewed and ruled intended), and 2 differ in message text
+  only. A corpus of 278 recorded inputs (every payload the old
   hook tests used, plus each rule's positive and negative case, path dialects, multi-line, CRLF and
-  non-ASCII inputs) was captured from the bash hooks before the port and every decision and every
-  reason is reproduced byte for byte by the new wrappers. The old bash hooks are kept as the frozen
+  non-ASCII inputs) was captured from the bash hooks before the port and is reproduced decision for
+  decision by the new wrappers. The old bash hooks are kept as the frozen
   reference under `tests/guard_corpus/reference/`.
-- **Python 3 is now required** for the hooks (it was already required for several tools). `setup.sh`
+- **Python 3.8 or newer is now required** for the hooks (the engine is stdlib-only and written to 3.8 syntax;
+  it parses clean under the 3.7 and 3.8 grammars, but it has only been run here on 3.10; Python was already required for several tools). `setup.sh`
   records the interpreter's absolute path in each hook. Without Python the blocking hooks REFUSE every
   command (`GUARD INERT ... cannot run Python`) and `setup.sh` says so loudly; the non-blocking hooks
   log `FAILED` to the audit log. An engine that crashes or prints something that is not a verdict is

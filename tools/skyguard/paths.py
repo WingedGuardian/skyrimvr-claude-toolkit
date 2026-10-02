@@ -33,10 +33,9 @@ def path_to_regex(path: str) -> Optional[str]:
 def read_env(path: Path, environ: Dict[str, str]) -> Dict[str, str]:
     """Bash `[ -f env ] && . env`: the environment's values, then the file's assignments over them."""
     env = {k: environ[k] for k in ENV_KEYS if environ.get(k)}
-    try:
-        text = Path(path).read_text(encoding="utf-8")
-    except OSError:
+    if not Path(path).is_file():            # bash's `[ -f env ]`: absent means nothing was declared
         return env
+    text = Path(path).read_text(encoding="utf-8")   # present but unreadable/undecodable RAISES: the caller fails closed
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:

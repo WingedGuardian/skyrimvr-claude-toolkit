@@ -7,6 +7,11 @@ Credit: this file's core insight — and the devcontainer this toolkit ships —
 Default to the container for any task. Only cross to Windows when the task genuinely requires the
 Windows DLL or an active MO2 virtual filesystem.
 
+The workspace and all game/profile bind mounts are read-only, including workspace aliases.
+Write generated output in container-local scratch and publish deliberately through Windows.
+Dependency failure stops startup. See [integration safety](harness-integrations.md) for locks,
+mount contracts, disposable sentinel checks and the COULD NOT CHECK status.
+
 ## Decision Table
 
 | Task | Where | Tool |
@@ -68,6 +73,21 @@ in the container** with a Mutagen `ArgumentNullException` deep in its BSA/load-o
 `--DataFolder` doesn't change this). If Spriggit throws that way on a plugin that should be simple,
 check whether it has the Localized flag — if so, serialize it on Windows instead.
 
+## Writing from inside the container
+
+The workspace is a read-only bind, so every workflow that writes uses a container-local path.
+Measured 2026-10-02 on a fresh clone (no `node_modules/`, nothing pre-created):
+
+| Workflow | Where it writes | Notes |
+|---|---|---|
+| Node dependencies | `/opt/skyrim-node/node_modules` | `npm ci` from the lockfile; `NODE_PATH` serves `require()`, not ES-module `import` |
+| Spriggit serialize/deserialize | e.g. `/tmp/<name>` | `bash tools/spriggit-cli.sh` (uses the restored local tool); a `/workspace` destination is refused up front |
+| pytest | `/tmp/skyrim-pytest-cache` | set through `PYTEST_ADDOPTS` |
+| `tests/run_harness_tests.py` | `/tmp/skyrim-harness-evidence/` | automatic when the checkout is not writable; override with `HARNESS_EVIDENCE_ROOT` |
+
+To bring a result back to the host, publish it deliberately from Windows (or copy it out with
+`docker cp`); the container cannot modify the host workspace or the game/profile mounts.
+
 ## Spriggit vs. xelib
 
 | Capability | Spriggit | xelib |
@@ -81,17 +101,17 @@ check whether it has the Localized flag — if so, serialize it on Windows inste
 
 Files: `.devcontainer/`, `devshell.sh`, `devshell-docker.sh`.
 
-Credit: this devcontainer and its MO2-mount design originated in
-[@aaronputty](https://github.com/aaronputty)'s fork of this toolkit.
-
 A reproducible Linux container (Python 3.11, Node 20, .NET 9, JDK 17) for the tools that don't need
 Windows or an active MO2 session: Spriggit ESP inspection/diffing, FOMOD/JSON generation, unit-testing
 mod logic, ReSaver CLI. xelib and
 anything load-order-dependent still needs Windows (and MO2's executables list, on an MO2 install).
+The checkout is mounted read-only; where each workflow writes instead is in
+*Writing from inside the container* above.
 
-- **`bash devshell-docker.sh`** — builds the image on first run and drops you into a shell. Only
-  needs Docker Desktop. Reads its mount sources straight out of `.devcontainer/devcontainer.json`
-  (which `setup.sh` fills in with your real mod paths), so it never hardcodes them.
+- **`bash devshell-docker.sh`** — builds the image on first run and drops you into a shell. Needs
+  Docker Desktop and `jq` on the host (it refuses to start without it). Reads its mount sources
+  straight out of `.devcontainer/devcontainer.json` (which `setup.sh` fills in with your real mod
+  paths), so it never hardcodes them.
 - **`bash devshell.sh`** — same thing via the `@devcontainers/cli` (`npm install -g
   @devcontainers/cli`), for editor integration (VS Code's Dev Containers extension uses the same
   `devcontainer.json`).

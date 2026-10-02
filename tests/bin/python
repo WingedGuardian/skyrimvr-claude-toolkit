@@ -3,6 +3,11 @@
 # questions setup.sh asks of an interpreter (is it Python 3? what is sys.executable?) so that a test can
 # make the "detected" interpreter report a Windows-style backslash path regardless of what is installed.
 # Otherwise it delegates to the real interpreter, found with this directory removed from PATH.
+# FAKE_PYTHON_EXE_<name> (py / python / python3) overrides it for ONE name, so a test can make the
+# candidates disagree; the value NONE makes that name unrunnable.
+_one="FAKE_PYTHON_EXE_${0##*/}"; _one="${!_one:-}"
+[ "$_one" = "NONE" ] && exit 127
+FAKE_PYTHON_EXE="${_one:-${FAKE_PYTHON_EXE:-}}"
 if [ -n "${FAKE_PYTHON_EXE:-}" ]; then
     case "$*" in
         *sys.executable*) printf '%s\r\n' "$FAKE_PYTHON_EXE"; exit 0 ;;

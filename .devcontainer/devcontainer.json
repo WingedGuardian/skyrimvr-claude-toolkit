@@ -14,33 +14,24 @@
     // is underneath.
     //
     // NOTE: Docker Desktop's file sharing must include the drive/folder these paths live under.
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,readonly",
+    "workspaceFolder": "/workspace",
+    "containerUser": "root",
+    "remoteUser": "root",
     "mounts": [
-        {
-            "source": "{{DEVCONTAINER_MODS_MOUNT}}",
-            "target": "/skyrim/mods",
-            "type": "bind",
-            "readonly": true
-        },
-        {
-            "source": "{{DEVCONTAINER_PROFILE_MOUNT}}",
-            "target": "/skyrim/profile",
-            "type": "bind",
-            "readonly": true
-        },
-        {
-            "source": "{{DEVCONTAINER_OVERWRITE_MOUNT}}",
-            "target": "/skyrim/overwrite",
-            "type": "bind",
-            "readonly": true
-        }
+        "source={{DEVCONTAINER_MODS_MOUNT}},target=/skyrim/mods,type=bind,readonly",
+        "source={{DEVCONTAINER_PROFILE_MOUNT}},target=/skyrim/profile,type=bind,readonly",
+        "source={{DEVCONTAINER_OVERWRITE_MOUNT}},target=/skyrim/overwrite,type=bind,readonly"
     ],
 
-    "postCreateCommand": "pip install -r requirements.txt && npm install && dotnet tool restore",
+    "postCreateCommand": "bash .devcontainer/install-dependencies.sh",
 
     "remoteEnv": {
         "SKYRIM_MODS_DIR": "/skyrim/mods",
         "SKYRIM_PROFILE_DIR": "/skyrim/profile",
-        "SKYRIM_OVERWRITE_DIR": "/skyrim/overwrite"
+        "SKYRIM_OVERWRITE_DIR": "/skyrim/overwrite",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTEST_ADDOPTS": "-o cache_dir=/tmp/skyrim-pytest-cache"
     },
 
     "customizations": {
