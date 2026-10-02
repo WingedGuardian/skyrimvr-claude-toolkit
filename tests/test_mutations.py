@@ -939,6 +939,30 @@ MUTATIONS = [
     pytest.param("agent/instructions/core.md", "session and follow it**.", "session**.",
                  "tests/test_instruction_neutrality.py::test_core_tells_every_agent_to_read_my_preferences",
                  id="core-keeps-the-preferences-fallback"),
+    # --- preferences injection (Plan 3, D15) --------------------------------
+    pytest.param("tools/skyguard/prefs.py", "        elif not in_fence and _HEADING.match(line):",
+                 "        elif _HEADING.match(line):",
+                 "tests/test_skyguard_prefs.py::test_heading_inside_a_code_fence_is_not_the_section",
+                 id="prefs-ignore-a-fenced-heading"),
+    pytest.param("tools/skyguard/prefs.py", "    if len(data) > CAP:", "    if False:",
+                 "tests/test_skyguard_prefs.py::test_long_section_is_capped_on_a_character_boundary",
+                 id="prefs-are-capped"),
+    pytest.param("tools/skyguard/session.py",
+                 '        return _with_prefs("", project, audit)   # no snapshot on compact, but preferences survive it (R4)',
+                 '        return ""',
+                 "tests/test_skyguard_prefs.py::test_compact_still_injects_preferences_but_takes_no_snapshot",
+                 id="prefs-survive-compaction"),
+    pytest.param("tools/skyguard/session.py", '    return _with_prefs("\\n".join(lines), project, audit)',
+                 '    return "\\n".join(lines)',
+                 "tests/test_skyguard_prefs.py::test_preferences_follow_a_clean_kb_guard_run",
+                 id="session-start-injects-preferences-after-a-kb-guard-run"),
+    # One twin per return site: each site shadows the others, so one mutation proves only one site.
+    # (The message is bound to `missing` first so this mutation is still a valid program: cutting
+    # `, project, audit)` off a one-line call would be a SyntaxError -- a kill for the wrong reason.)
+    pytest.param("tools/skyguard/session.py", "        return _with_prefs(missing, project, audit)",
+                 "        return missing",
+                 "tests/test_skyguard_prefs.py::test_the_real_hook_delivers_preferences",
+                 id="session-start-injects-preferences-when-kb-guard-is-missing"),
 ]
 
 

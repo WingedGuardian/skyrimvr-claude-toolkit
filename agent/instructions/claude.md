@@ -10,7 +10,7 @@ Generated into `CLAUDE.md` only. Everything above is shared with every agent.
   file (`skyrim-nif` is scoped to `**/*.nif,Data/meshes/**`). Listing is not loading: invoke it.
 - **The guards** are `.claude/hooks/*.sh`, thin adapters over `tools/skyguard/`, wired up in
   `.claude/settings.json`: `Bash` → `protect-bash` + `snapshot-before-tool`; `Edit|Write` →
-  `protect-files` + `backup-before-edit`; SessionStart → `session-kb-guard`. `setup.sh` records the
+  `protect-files` + `backup-before-edit`; SessionStart → `session-kb-guard` (knowledgebase snapshot, then your `## My preferences`). `setup.sh` records the
   Python path in each hook. The user lists or disables them with `/hooks`. The PowerShell tool is not
   matched yet.
 - **What the backup hook cannot see.** `backup-before-edit.sh` fires on Edit/Write tool calls only, with no

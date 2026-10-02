@@ -26,6 +26,15 @@
   exceeds 32,768 bytes (`--budget` prints it), and `tests/test_instruction_neutrality.py` bans Claude-only
   constructs from the shared core and the three new skills. Both are mutation-tested.
 
+### ✨ Your preferences reach the agent at every session start
+
+- The SessionStart hook now prints the `## My preferences` section of `KNOWLEDGEBASE.local.md` into the
+  session, after the knowledgebase snapshot report.
+- The injected section is capped at 4,096 bytes (cut on a character boundary, with a note saying where the
+  rest is); a file that exists but cannot be read is said so out loud and never fails the session.
+- It is injected again after a compaction (which drops earlier context); the snapshot is still skipped then.
+- Agents without session hooks get the same section through the instruction to read it at session start.
+
 ### 🐛 Prompt-audit fixes
 
 - Caprica: the documented command now runs from `Data/Scripts/Source` with a bare filename, `-f` flags and `-o ..` (the old form wrote the `.pex` into the game root, and a path argument fails with a namespacing error).
