@@ -33,12 +33,33 @@ def test_command_trailing_newlines_are_stripped():
     assert p["command"] == "ls"
 
 
-@pytest.mark.parametrize("text", ["not json", "[1,2]", '{"tool_input": "x"}', "", "   "])
+@pytest.mark.parametrize("text", ["not json", "[1,2]", '{"tool_input": "x"}', "", "   ", "\n", "\n\n", "\r\n",
+                                  "\x00"])
 def test_malformed_gives_empty_fields(text):
     p = claude.extract(text)
     assert p["command"] == "" and p["file_path"] == "" and p["source"] == ""
     assert p["tool_name"] == "unknown"
-    assert p["empty"] == (text == "")
+    assert p["empty"] == (text.replace("\x00", "").rstrip("\r\n") == "")
+
+
+@pytest.mark.parametrize("text", ["", "\n", "\n\n", "\r\n", "\x00"])
+def test_blank_payloads_are_empty(text):
+    assert claude.extract(text)["empty"] is True
+
+
+def test_whitespace_only_is_not_empty():
+    assert claude.extract("   ")["empty"] is False
+
+
+def test_nul_inside_json_string_is_joined():
+    p = claude.extract('{"tool_input": {"file_path": "a\x00b"}}')
+    assert p["file_path"] == "ab"
+
+
+def test_tool_name_empty_string_stays_empty():
+    assert claude.extract('{"tool_name": ""}')["tool_name"] == ""
+    assert claude.extract('{"tool_name": null}')["tool_name"] == "unknown"
+    assert claude.extract("{}")["tool_name"] == "unknown"
 
 
 def test_numeric_command_is_its_json_text():
@@ -74,7 +95,7 @@ def _run(role, payload, tmp_path, env_extra=None, args=None):
 
 def test_run_protect_bash(tmp_path):
     r = _run("protect-bash", json.dumps({"tool_input": {"command": "echo hi"}}), tmp_path)
-    assert r.returncode == 0 and json.loads(r.stdout) is not None
+    assert r.returncode == 0 and json.loads(r.stdout) == {}
     r = _run("protect-bash", "", tmp_path)
     assert r.returncode == 0 and json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
@@ -121,25 +142,26 @@ def test_run_nonascii_reason_roundtrips_as_utf8(tmp_path):
     r.stdout.decode("utf-8")
 
 
+def test_raw_invalid_utf8_byte_is_replaced_not_fatal(tmp_path):
+    payload = b'{"tool_input":{"file_path":"C:/x/a\xff.psc"}}'
+    r = subprocess.run([sys.executable, RUN, "claude", "protect-files", "--project", str(tmp_path)],
+                       input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout.decode("utf-8"))
+    assert "PAPYRUS SCRIPT" in out["hookSpecificOutput"]["additionalContext"]
+
+
 def test_internal_error_exits_1_with_empty_stdout(tmp_path):
-    code = ("import sys\n"
-            "sys.path.insert(0, %r)\n"
-            "from skyguard import run, shell_rules\n"
-            "def boom(*a, **k):\n    raise RuntimeError('x')\n"
-            "shell_rules.decide = boom\n"
-            "try:\n    sys.exit(run.main(['claude','protect-bash','--root','C:/x','--project',%r]))\n"
-            "except SystemExit:\n    raise\n"
-            "except BaseException:\n    sys.exit(1)\n") % (str(REPO / "tools"), str(tmp_path))
-    r = subprocess.run([sys.executable, "-c", code],
-                       input=json.dumps({"tool_input": {"command": "ls"}}).encode(),
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    import shutil
+    pkg = tmp_path / "skyguard"
+    shutil.copytree(REPO / "tools" / "skyguard", pkg, ignore=shutil.ignore_patterns("__pycache__"))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    cmd = [sys.executable, str(pkg / "run.py"), "claude", "protect-bash", "--root", "C:/x", "--project", str(proj)]
+    payload = json.dumps({"tool_input": {"command": "ls"}}).encode()
+    control = subprocess.run(cmd, input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert control.returncode == 0 and control.stdout        # the copy works before it is broken
+    with open(pkg / "shell_rules.py", "a", encoding="utf-8", newline="\n") as f:
+        f.write("\n\ndef decide(*a, **k):\n    raise RuntimeError('forced')\n")
+    r = subprocess.run(cmd, input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert r.returncode == 1 and r.stdout == b""
-
-
-def test_internal_error_via_script_entry(tmp_path):
-    # a project path that cannot be a directory -> failure must still leave stdout empty
-    r = subprocess.run([sys.executable, RUN, "claude", "protect-bash", "--root", "C:/x", "--project", str(tmp_path)],
-                       input=b"\xff\xfe not json", stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    assert r.returncode in (0, 1)
-    if r.returncode == 1:
-        assert r.stdout == b""

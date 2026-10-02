@@ -21,11 +21,7 @@ ADAPTERS = {"claude": claude}
 
 def _emit(text: str) -> None:
     """One write of UTF-8 bytes, so a console code page cannot raise and no partial output can escape."""
-    try:
-        data = text.encode("utf-8", "surrogateescape")
-    except UnicodeEncodeError:
-        data = text.encode("utf-8", "replace")
-    sys.stdout.buffer.write(data)
+    sys.stdout.buffer.write(text.encode("utf-8", "replace"))
     sys.stdout.buffer.flush()
 
 
@@ -40,7 +36,7 @@ def main(argv=None) -> int:
     ap.add_argument("--bash", default="bash")
     a = ap.parse_args(argv)
     adapter = ADAPTERS[a.agent]
-    raw = sys.stdin.buffer.read().decode("utf-8", "surrogateescape")
+    raw = sys.stdin.buffer.read().decode("utf-8", "replace")
     p = adapter.extract(raw)
     audit = Audit(a.project)
     if a.role == "protect-bash":
