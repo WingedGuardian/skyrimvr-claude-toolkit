@@ -26,7 +26,7 @@ All under `tools/`:
 |------|---------|-------|
 | **Champollion** | Decompile Papyrus `.pex` → `.psc` | `tools/Champollion/Champollion.exe input.pex` |
 | **Caprica** | Compile Papyrus `.psc` → `.pex` | `tools/Caprica/Caprica.exe --game skyrim --import "Data/Scripts/Source" input.psc` |
-| **XEditLib.dll** | Programmatic ESP/ESM reading via FFI | Load with koffi in Node.js (see below) |
+| **XEditLib.dll** | Programmatic ESP/ESM reading via FFI | Load with koffi in Node.js (skill `xelib`) |
 | **Spriggit** | ESP ↔ YAML/JSON conversion (.NET) | `spriggit serialize ...` |
 | **AutoMod CLI** | NIF meshes, BSA archives, audio, MCM, ESP one-liners | `bash tools/automod-cli.sh <module> <command> --json` |
 | **PyFFI** | NIF geometry edit — **NiTriShape (LE-format) ONLY** (any modern Python with setuptools) | See PyFFI / PyNifly below; recipes in the skyrim-nif skill |
@@ -40,30 +40,21 @@ All under `tools/`:
 
 > **Note**: none of these are bundled. How to install and verify each one: `docs/installing-tools.md`.
 
-## AutoMod CLI
+## Where the rest lives
 
-A .NET CLI at `tools/automod/` for NIF meshes, BSA archives, audio, MCM menus, and quick ESP record creation. Call via wrapper:
-```bash
-bash tools/automod-cli.sh <module> <command> [args] --json
-```
+Skills are plain Markdown (`<name>/SKILL.md` in your agent's skills folder — see the end of this file);
+any agent can read one directly. Read the skill BEFORE the work:
 
-**Always use `--json`** for parseable output. **Always use `--dry-run` first** for any write command.
-
-| Module | Key Commands | Use For |
-|--------|-------------|---------|
-| **nif** | `info`, `list-textures`, `replace-textures`, `fix-eyes`, `scale`, `verify` | Mesh inspection and editing. **VR: check for PreWEAPON/PreSHIELD nodes.** |
-| **archive** | `info`, `list`, `extract`, `create`, `add-files`, `diff`, `merge` | BSA/BA2 full CRUD |
-| **audio** | `info`, `extract-fuz`, `create-fuz`, `wav-to-xwm` | Voice files (FUZ/XWM/WAV) |
-| **mcm** | `create`, `add-toggle`, `add-slider`, `validate` | SkyUI MCM menus. **VR: requires SkyUI VR fork.** |
-| **esp** | `add-weapon`, `add-spell`, `add-armor`, `add-npc`, `add-quest`, `attach-script`, `set-property`, etc. | Quick one-liner record creation |
-
-### When to Use Which Tool
-- **AutoMod `esp`**: Quick one-liner additions. Best for simple records.
-- **Spriggit**: Complex multi-field editing via YAML. Best for detailed work.
-- **xeditlib**: Programmatic traversal and diffing. Best for analysis/read-heavy operations.
-- **AutoMod `nif`/`archive`/`audio`/`mcm`**: Often the only tools available for these operations.
-- **PyFFI / PyNifly**: NIF geometry and animation authoring (see below).
-- **AutoMod `nif` cannot inspect Havok collision (`bhk*`) blocks** — it handles textures/strings/shaders only. Use NifSkope or a purpose-built parser for collision.
+| When you are about to… | Read |
+|---|---|
+| use the running game (inspect, console, Papyrus calls, scenarios) | skill `devbench` |
+| ask which plugin wins a record, triage Papyrus or crash logs, or bulk-edit ESPs | skill `triage-and-conflicts` |
+| write or run an xelib / XEditLib script | skill `xelib` |
+| touch a mesh (`.nif`) | skill `skyrim-nif` |
+| work with archives, audio, MCM menus or saves | skills `skyrim-bsa`, `skyrim-audio`, `skyrim-mcm`, `skyrim-save` |
+| install or verify an optional tool, or set up the Nexus API key | `docs/installing-tools.md` |
+| use the Linux devcontainer | `docs/container-vs-windows.md` |
+| understand why the guards behave as they do | `docs/safety-philosophy.md` |
 
 ## PyFFI / PyNifly (NIF geometry + animation authoring)
 
@@ -97,209 +88,6 @@ A crash-to-desktop must be caught in tooling, not in the headset. Use the right 
 | **Blender (headless)** | Mesh **repair** + **render-to-PNG** verification (uses the same nifly lib as PyNifly — good for repair, NOT an independent parser) |
 
 **Gates before any in-game test:** (1) author with valid-by-construction tools (PyNifly, not hand-rolled controller blocks); (2) cross-validate with an independent, stricter parser; (3) diff against a known-good structure. Render a PNG (Blender headless) so a mesh/VFX fix is confirmed in chat before a game launch.
-
-## skyrim-winner — which plugin actually wins a record
-
-```bash
-bash tools/skyrim-winner.sh winner    0x0003418E            # who wins
-bash tools/skyrim-winner.sh chain     0x0003418E            # full override chain, in order
-bash tools/skyrim-winner.sh winner    "SomeMod.esp:000871"  # scoped: local id inside a plugin
-bash tools/skyrim-winner.sh conflicts "SomeMod.esp"         # records this plugin LOSES
-```
-
-Requires **xeditlib** (see the optional-tools section). The game root is derived from the
-script's own location (`tools/` sits in the game folder); override with `$GAME_ROOT`.
-
-**It deliberately has no index and no cache.** xEdit already computes conflict resolution
-correctly, and the load order is explicit and total, so this asks xEdit through xelib and
-prints the answer — one source of truth, and it is not this script. A full 659-plugin load
-costs **~4 seconds** on the dev install, which is why a cache — and therefore a freshness
-contract to get wrong — is unnecessary.
-
-**Prefer it over hand-rolling another override script.** The common shortcut is to load a
-hand-picked subset of plugins "that could plausibly be involved". A who-wins answer computed
-against a guessed subset is only as complete as the guess: a plugin outside the list can win
-and the script never sees it. Worse, a short list can silently load **nothing** and still
-resolve, producing a confident answer from an empty tree.
-
-**Judge by the wrapper's exit code, not node's.** `node tools/skyrim-winner.js` exits **127
-on complete success** (koffi/stdio shutdown, see the XEditLib notes) — `skyrim-winner.sh`
-parses the `RESULT:` line and gives a real exit code (0 ok / 2 error / 3 did-not-finish).
-
-⚠ **A `refs` subcommand is deliberately absent.** `getReferencedBy` returns 0 without
-`buildRefs`, and `buildRefs: true` makes the loader fail outright on a real 659-plugin order
-(reproduced twice, empty exception message). A subcommand that always answers "nothing
-references this" is worse than no subcommand.
-
-## papyrus-triage — what the engine actually complained about
-
-```bash
-python tools/papyrus-triage.py                    # newest Papyrus log
-python tools/papyrus-triage.py <logfile> --all
-```
-
-A hand-rolled `grep | sort | uniq -c` has no way to notice it dropped a shape. Two properties
-are asserted here, not assumed: **rows sum to the input**, and **the not-shown row prints even
-when it is zero**.
-
-**The unit of accounting is the ENTRY, not the line.** A Papyrus entry is multi-line — the dev
-install's `Papyrus.1.log` has 8426 lines but only 5292 timestamped entries, the rest being
-`stack:` continuations. A line-based sum is ~37% wrong.
-
-**Severity is spelled two ways.** The same log contains both `warning:` (99) and `WARNING:`
-(662); a case-sensitive grep silently loses 87% of them.
-
-Known-benign vanilla shapes are **labelled, never dropped** — ranking attention is the job;
-deciding what the reader may see is not.
-
-## crash-triage — which crashes are new, and which are already answered
-
-```bash
-python tools/crash-triage.py                 # every crash dump in the SKSE folder
-python tools/crash-triage.py <one.log>
-```
-
-A CrashLogger dump is ~5,500 lines, ~4,600 of which are the raw `STACK` block. The identifying
-part is the exception line plus the top of `PROBABLE CALL STACK`. This groups dumps by
-`module+offset` and cross-references a `KNOWN` dict of signatures you have already ruled on —
-so a settled crash prints as `[ACCEPTED - do not re-investigate]` instead of being chased a
-fourth time. **Add your own rulings to that dict** as you make them; it ships with the three
-from the dev install and is meant to be edited.
-
-**It matches `crash-*.txt` AND `crash-*.log`, case-insensitively**, because CrashLoggerSSE
-changed extension. Matching one of them does not fail — it prints a confident, complete-looking
-total built from whichever half it happened to catch. Measured on the dev install: 8 `.txt`
-(all June 2025) sitting beside 20 `.log` (2026).
-
-Same invariants as `papyrus-triage`: denominator first, rows summing to independently counted
-totals, and the not-shown row printing at zero. Both are mutation-tested — dropping logs during
-parsing produces `ACCOUNTING MISMATCH` and exit 1.
-
-## Where these tools look, and what happens when there is more than one install
-
-`papyrus-triage` and `crash-triage` discover their folders through `tools/skyrim_paths.py`
-rather than hardcoding a path. A machine can easily carry `Documents/My Games/Skyrim`,
-`.../Skyrim Special Edition` **and** `.../Skyrim VR` at once, and the wrong one **reads
-perfectly** — you get a complete report about an install you are not modding.
-
-So the picker prefers **Skyrim VR → Skyrim Special Edition → Skyrim**, and whenever more than
-one candidate exists it prints every rival it ignored, to stderr, naming the override:
-
-```
-[skyrim_paths] more than one candidate exists; using:
-  C:\Users\you\Documents\My Games\Skyrim VR\SKSE
-  ignoring: C:\Users\you\Documents\My Games\Skyrim Special Edition\SKSE
-  ...  If this picked wrong, set SKSE_CRASH_DIR.
-```
-
-Overrides: `$PAPYRUS_LOG_DIR`, `$SKSE_CRASH_DIR`, and `$PLUGINS_TXT` (for the xelib load-order
-reader, which faces the same hazard under `%LOCALAPPDATA%`).
-
-## DevBench — the live in-game test channel (`tools/devbench-cli.sh`)
-
-**The single biggest time sink in modding is the in-game test loop:** change something, ask the user to
-launch the game, have them trigger it, wait, hear "it didn't work", guess again. DevBench breaks that
-loop. It is a dev-only SKSE plugin (alandtse, Nexus SE **181326** — same author as Engine Fixes VR) that
-runs a **localhost REST + MCP server inside the running game**, so Claude can inspect live state, run
-console commands *and read their output*, call Papyrus functions and get the return value, dismiss
-modals, and drive scripted scenarios — directly, while the user just keeps playing.
-
-**NOT bundled** (GPL-3.0-or-later; the toolkit ships only the wrapper). It changes no gameplay and
-writes no save data.
-
-**It is a mod, not one of the `tools/` dev utilities — so do NOT install it for the user.** Every
-other optional tool lives in `tools/` and never touches the game; DevBench is an SKSE plugin that ends
-up in `Data/SKSE/Plugins/`. Hand-copying a DLL there bypasses Vortex/MO2, leaves the file untracked,
-and on a managed install a later deploy or purge can clobber it. If the user wants DevBench, they
-install it through their own mod manager like any other SKSE plugin; the wrapper below works the
-moment it's present.
-
-```bash
-bash tools/devbench-cli.sh alive                       # is the GAME running, paused, hung, or not loaded?
-bash tools/devbench-cli.sh health                      # raw off-thread liveness + instance identity
-bash tools/devbench-cli.sh ping                        # server self-test only -- NOT proof of liveness
-bash tools/devbench-cli.sh state                       # {plugin,version,vr,playerLoaded,frame}
-bash tools/devbench-cli.sh inspect vm                  # Papyrus VM health — freeze diagnosis
-bash tools/devbench-cli.sh exec "player.getav health"  # console exec + capture + read output
-bash tools/devbench-cli.sh call Actor IsInCombat '[]' '{"form":"0x14"}'
-bash tools/devbench-cli.sh notify "Test 3 of 5: swing now"   # HUD narration
-bash tools/devbench-cli.sh tool menu '{"action":"accept"}'   # raw: any tool, any JSON
-```
-
-**Hard requirement — this is NOT headless.** The server only exists while the game is genuinely
-running with a save loaded. In VR that means the headset is on (Skyrim VR errors at VR-init without
-it). When the game is closed the port is dead — fall back to the offline tools (xelib, Spriggit,
-ReSaver, PyNifly).
-
-**Port is deterministic per runtime: SE/AE `8920`, VR `8921`** (DevBench iterates if the port is busy
-and writes the bound port to `Data/SKSE/Plugins/devbench/runtime.json`, which the wrapper reads).
-Override with `DEVBENCH_PORT`. MCP clients can point at `http://127.0.0.1:<port>/mcp`; the REST path
-the wrapper uses works any time the server is up, with no reconnect.
-
-**Tools:** `ping` · `console` (exec/read) · `inspect` (`state|health|vm|scene|mods|player|inventory|
-quests|effects|refs`) · `papyrus` (list/describe/**call**) · `menu` (list/describe/**accept**/open/close) ·
-`game` (save/load/list) · `scenario` (timed steps with `waitFor`/`waitUntil`, not guessed sleeps) ·
-`camera` · `record`/`replay`.
-
-**Check `alive` first, and believe it over `ping`.** Every tool call above runs *on the game's main
-thread* and 504s after 5s if that thread is stuck — so tool calls fail in exactly the situation you
-most need diagnosed. `GET /api/health` (DevBench **1.11.0+**, answered off-thread since **1.12.0**) is
-the one endpoint that always replies; `alive` samples it twice and separates the four states that a
-raw `ping` flattens into one: **running** · **paused/loading** (frame frozen, task queue draining —
-not a hang) · **hung** (frame frozen *and* `pendingTasks` piling up while `lastTaskFrame` stalls) ·
-**not in game** (`frame < 0`, no save loaded). It also prints the answering instance's
-`pid`/`exe`/`vr`, so if you have two Skyrims open you catch a wrong-port misattach in one call instead
-of chasing phantom results. On older DevBench the wrapper falls back to the legacy frame diff and says
-so. MCP clients get the same signal as `inspect kind=health`.
-
-**Standing practice — automate the test, don't delegate it.** On any in-game problem, ask "how do I
-test this myself instead of asking the user to?" Build a *parameterized* harness (a global Papyrus
-function callable via `call`, logging to a file you read off disk) rather than a one-shot, so sweeping
-a value or swapping a mechanism is another DevBench call — not another edit → recompile → user reload.
-Reserve manual testing for the final confirmation gate. See KNOWLEDGEBASE.md for the hazards
-(`game save` deadlock, paused-state semantics, heavy console commands) — read them before your first
-live session.
-
-## ESP Cross-Reference Integrity (`tools/esp-verify-wrapper.sh`)
-
-Guards against the silent re-mastering / dropped-reference corruption class during bulk ESP operations (mod splits, plugin renames, master-list edits, YAML find-replace). Tool-agnostic; snapshots stored outside the game dir so it never trips the edit hooks.
-- `bash tools/esp-verify-wrapper.sh snapshot Data/Mod.esp [...]` — before a risky op
-- `bash tools/esp-verify-wrapper.sh verify   Data/Mod.esp [...]` — after; exits 1 + loud report on any reference whose target master changed or vanished
-- `bash tools/esp-verify-wrapper.sh guard Data/Mod.esp [...] -- <command...>` — snapshot → run → verify, one shot
-
-**Standing practice**: snapshot before, verify after, ANY bulk ESP operation. If a change is intended, re-run `snapshot` to accept it as the new baseline.
-
-## XEditLib.dll API (Critical Notes)
-
-The DLL is Delphi-compiled. These quirks caused hours of debugging:
-
-1. **All strings are UCS-2/UTF-16LE** (Delphi `PWideChar`), never UTF-8:
-   ```js
-   function wcb(s) { const b = Buffer.alloc((s.length+1)*2,0); b.write(s,0,'ucs2'); return b; }
-   ```
-
-2. **`InitXEdit()` and `CloseXEdit()` are VOID**, not bool. Declaring them as bool corrupts the call stack.
-
-3. **`WordBool` = `uint16`** (2 bytes), not bool/uint8.
-
-4. **String return pattern**: Functions don't return strings directly. They write a length to a `PInteger` param, then you call `GetResultString(buffer, len)` to retrieve the actual value:
-   ```js
-   function getString(fn) {
-       const lenBuf = Buffer.alloc(4, 0);
-       fn(lenBuf);
-       const len = lenBuf.readInt32LE(0);
-       if (len < 1) return '';
-       const strBuf = Buffer.alloc(len * 2, 0);
-       GetResultString(strBuf, len);
-       return strBuf.toString('utf16le', 0, len * 2);
-   }
-   ```
-
-5. **Game mode enum**: gmFNV=0, gmFO3=1, gmTES4=2, gmTES5=3, **gmSSE=4** (use this for Skyrim VR), gmFO4=5
-
-6. **Registry requirement**: XEditLib reads game path from `HKLM\SOFTWARE\WOW6432Node\Bethesda Softworks\Skyrim Special Edition` (the SSE key, not the VR key, because game mode 4 = SSE).
-
-7. **xelib.js wrapper**: See [xeditlib on GitHub](https://github.com/WingedGuardian/xeditlib) for the full wrapper with all 163 functions.
 
 ## INI Config Hierarchy
 
@@ -393,6 +181,7 @@ For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit se
 
 ### When to Use Which
 - **Spriggit**: Creating new ESPs, editing existing records, any task where you're modifying specific fields.
+- **AutoMod `esp`**: one-liner additions of simple records. AutoMod's `nif`/`archive`/`audio`/`mcm` modules are often the only tools for those formats (their skills: see *Where the rest lives*).
 - **xeditlib**: Bulk inspection, programmatic traversal, diffing two ESPs, analysis scripts.
 
 ### Spriggit Notes
@@ -553,6 +342,7 @@ Approaches disconnected from how the engine actually works lead to silent failur
 
 - This does **NOT** mean cut corners, and does **NOT** mean skip steps where the user is genuinely needed (e.g. in-game VR testing only they can do).
 - It means: verify formats, read the actual files, research the established technique (web + Nexus), confirm tool capabilities, and de-risk uncertain steps with a cheap spike — *then* make the change.
+- On any in-game problem, test it yourself through DevBench before asking the user (skill `devbench`).
 - **Catch CTD-class failures in tooling, not the headset** — cross-validate authored assets with an independent parser; don't trust same-tool readback.
 
 Every in-game test cycle costs the user real time. Burn your own tokens on verification so theirs aren't wasted on avoidable trial-and-error.

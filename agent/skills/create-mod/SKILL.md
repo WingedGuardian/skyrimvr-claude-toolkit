@@ -25,6 +25,7 @@ Use the appropriate `esp add-*` command for each record:
 - Books: `esp add-book <esp> <editorId> --name "<name>" --text "<content>" --dry-run --json`
 - Perks: `esp add-perk <esp> <editorId> --name "<name>" --effect <preset> --dry-run --json`
 - Globals: `esp add-global <esp> <editorId> --type float --value <n> --dry-run --json`
+- Also available: `esp add-quest` and `esp set-property` (arguments: `bash tools/automod-cli.sh esp --help --json`)
 
 **Important**: Weapons and armor REQUIRE `--model` or they'll be invisible. Spells REQUIRE `--effect` or they'll do nothing.
 

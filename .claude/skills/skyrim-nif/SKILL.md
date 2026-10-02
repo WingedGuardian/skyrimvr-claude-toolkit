@@ -21,6 +21,9 @@ bash tools/automod-cli.sh nif <command> [args] --json
 - `nif shader-info <path>` — shader property details
 - `nif verify <path>` — integrity check
 
+**AutoMod `nif` cannot inspect Havok collision (`bhk*`) blocks** — it handles textures/strings/shaders only.
+Use NifSkope or a purpose-built parser (PyFFI, below) for collision.
+
 ## Write Commands (always confirm with user first)
 
 - `nif replace-textures <path> --old <str> --new <str> [--dry-run] [--backup]` — batch retexture
