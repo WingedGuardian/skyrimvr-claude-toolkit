@@ -15,12 +15,25 @@ the new result. A process crash between renames can leave `.spriggit-previous-*`
 and inspect before recovery. Concurrent publication to the same destination is rejected.
 Post-commit cleanup failures are warnings naming retained artifacts, not failed publication.
 After a crash, inspect a retained `.spriggit-lock-*` before removing it; no stale lock is stolen.
+The held-lock error names this destination's debris (`.spriggit-previous-<key>-*` holds the OLD
+output -- for a deserialize, the previous plugin).
+
+A destination directory is replaced only if everything in it looks like Spriggit output (what a
+real serialize writes: `spriggit-meta.json`, `RecordData.yaml` and record-group folders of
+`.yaml`/`.json` files). Anything else -- `.git`, notes, a README -- makes the wrapper refuse
+before serializing, because the pre-repair wrapper merged and never deleted those. A destination
+whose parent is not writable (the container's `/workspace`) is also refused up front.
+The wrapper skips the Microsoft Store `python` alias (`...\WindowsApps\python.exe`) and says so
+when it is the only Python; inside the container it runs the restored local tool through
+`dotnet tool run spriggit`.
 
 ## Container isolation
 
 The workspace and game/profile/overwrite bind mounts are read-only. This includes
 `/workspace/Data`, which was previously a writable alias of a read-only game mount.
-`node_modules` uses a container volume; dependency caches and installed Python/.NET tools
+Node modules are installed to the container-local `/opt/skyrim-node` (`NODE_PATH` points
+`require()` there); no mount is nested under the read-only workspace, because Docker cannot
+create such a mountpoint on a fresh checkout. Dependency caches and installed Python/.NET tools
 stay inside the container. Copy files to container-local scratch space when writable input
 is required. The editor cannot modify the host workspace through this container.
 
@@ -35,14 +48,13 @@ The live sentinel test uses only disposable paths, never pulls an image, and req
 existing `busybox:1.37` image and running Linux Docker daemon. Otherwise it reports a skip
 with COULD NOT CHECK; fake-Docker tests do not certify actual filesystem enforcement.
 
-**Known cold-start defect, measured 2026-10-02:** a fresh checkout without `node_modules/`
-cannot start with the current nested volume. Docker cannot create its mountpoint through the
-read-only workspace bind. Creating an empty directory in a disposable fixture allowed the
-remaining live checks to run, but does not certify fresh-checkout startup. Keep the workspace
-read-only when repairing this; see the [live verification report](superpowers/handoffs/codex-live-verification.md).
-Failed `docker run` can also leave a newly created, stopped container and anonymous volume;
-the helper deliberately avoids removing a container unless startup succeeded. The live test
-inspected and removed only its own failed container by ID.
+**Cold start (repaired 2026-10-02):** the original nested `node_modules` volume could not be
+mounted on a fresh checkout (Docker cannot create the mountpoint through the read-only bind).
+`tests/test_harness_controls.py::test_live_cold_start_mounts_without_node_modules` replays the
+helper's real mount arguments against Docker on a workspace that never had `node_modules/`, and
+`tests/test_dependency_locks.py` refuses any mount target under `workspaceFolder`.
+Failed `docker run` can still leave a newly created, stopped container and anonymous volume;
+the helper deliberately avoids removing a container unless startup succeeded.
 
 ## Load-order configuration
 

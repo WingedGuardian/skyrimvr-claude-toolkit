@@ -109,9 +109,12 @@ your detected instance; on stock/Vortex, from `Data/`. `docs/container-vs-window
 guide for what belongs in the container versus what still needs Windows (xelib, load-order-dependent
 edits, Papyrus compilation, NIF authoring, live in-game testing).
 
-Current cold-start limitation: a fresh checkout lacking `node_modules/` fails to mount the nested
-volume through the read-only workspace. The [live verification report](docs/superpowers/handoffs/codex-live-verification.md)
-records the failure and the fixture-only workaround used to verify the remaining container behavior.
+The container mounts the checkout **read-only** at `/workspace`, so anything that writes goes to
+container-local paths instead: project Node modules are installed in `/opt/skyrim-node` (found through
+`NODE_PATH` by `require()`; ES-module `import` ignores `NODE_PATH`), Spriggit output belongs under
+`/tmp` (the wrapper refuses a read-only destination before serializing), and
+`tests/run_harness_tests.py` writes its evidence to the container's temp directory. A fresh clone
+starts with no `node_modules/` and no pre-created directories.
 
 Credit: the devcontainer and its MO2-mount design come from
 [@aaronputty](https://github.com/aaronputty)'s fork of this toolkit.
