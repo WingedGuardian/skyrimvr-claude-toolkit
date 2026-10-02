@@ -2,6 +2,8 @@
 import importlib.util
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 
@@ -59,7 +61,7 @@ def test_backup_name_flattening_matches_sed_for_windows_paths():
 
 
 @pytest.mark.parametrize("sub", [".claude/backups", ".claude/hooks", ".claude/plans", "node_modules",
-                                 "A/node_modules"])
+                                 "A/node_modules", ".CLAUDE/Backups", "NODE_MODULES"])
 def test_backup_skips_own_workspace_and_node_modules(tmp_path, sub):
     d = tmp_path / sub
     d.mkdir(parents=True)
@@ -115,7 +117,7 @@ def snap(tmp_path, command, now=None):
     snapshot.run(str(tmp_path), command, False, audit_mod.Audit(str(tmp_path)), now)
 
 
-@pytest.mark.parametrize("cmd", ["ls x", "git status", "ls x\nls y", "  cat f", "git config --get a"])
+@pytest.mark.parametrize("cmd", ["ls x", "git status", "ls x\nls y", "make\nls y", "  cat f", "git config --get a"])
 def test_snapshot_skips_read_only(tmp_path, cmd):
     (install(tmp_path) / "a.psc").write_text("x")
     snap(tmp_path, cmd)
@@ -213,11 +215,15 @@ def test_snapshot_prunes_old_dirs_and_keeps_new(tmp_path):
     old, young = base / "20200101_000000", base / "20200102_000000"
     old.mkdir(parents=True)
     young.mkdir()
+    edge = base / "20200103_000000"
+    edge.mkdir()
     age(old, 15)
     age(young, 13)
+    age(edge, 14)                                   # 14.0007 days: floor 14, not > 14 -> kept
     snap(tmp_path, "make")
     names = [p.name for p in snaps(tmp_path)]
-    assert "20200101_000000" not in names and "20200102_000000" in names and len(names) == 2
+    assert "20200101_000000" not in names and "20200102_000000" in names and "20200103_000000" in names
+    assert len(names) == 3
 
 
 def test_snapshot_audit_line_carries_first_120_bytes(tmp_path):
@@ -334,9 +340,101 @@ def test_snapshot_equivalent_to_real_bash(tmp_path, command):
     assert rb[0] and rb == rp
 
 
+
+
 @needs_jq
-def test_snapshot_skip_equivalent_to_real_bash(tmp_path):
+@pytest.mark.parametrize("command", ["ls x", "make\nls y", "git status", "LS x"])
+def test_snapshot_skip_equivalent_to_real_bash(tmp_path, command):
     inst_b = record.make_install(tmp_path / "bash", HOOKS, "declared")
-    (inst_b / "Data" / "Scripts" / "Source" / "a.psc").write_text("x")
-    record.fire(inst_b, "snapshot-before-tool.sh", {"tool_name": "Bash", "tool_input": {"command": "ls x"}})
-    assert log_text(inst_b) == ""
+    py = tmp_path / "py"
+    (py / "Data" / "Scripts" / "Source").mkdir(parents=True)
+    for root in (inst_b, py):
+        (root / "Data" / "Scripts" / "Source" / "a.psc").write_text("x")
+    record.fire(inst_b, "snapshot-before-tool.sh", {"tool_name": "Bash", "tool_input": {"command": command}})
+    snapshot.run(str(py), command, False, audit_mod.Audit(str(py)))
+    assert strip_ts(log_text(inst_b)) == strip_ts(log_text(py))
+    assert len(snaps(inst_b)) == len(snaps(py))
+
+
+@needs_jq
+def test_session_equivalent_to_real_bash(tmp_path):
+    inst_b = record.make_install(tmp_path / "bash", HOOKS, "declared")
+    py = tmp_path / "py"
+    py.mkdir()
+    for root in (inst_b, py):
+        stub(root, "echo first\necho second\nexit 2\n")
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(inst_b))
+    r = subprocess.run([record.bash(), str(inst_b / ".claude" / "hooks" / "session-kb-guard.sh")],
+                       input=b'{"source":"startup"}', capture_output=True, env=env, timeout=120)
+    assert r.returncode == 0
+    want = r.stdout.decode("utf-8").replace("\r\n", "\n")
+    got = session.run(str(py), "startup", record.bash(), audit_mod.Audit(str(py))) + "\n"
+    assert got == want and "KB GUARD: the above" in want
+    assert strip_ts(log_text(inst_b)) == strip_ts(log_text(py)) != ""
+
+
+def test_snapshot_one_failed_copy_does_not_abort(tmp_path, monkeypatch):
+    src = install(tmp_path)
+    (src / "bad.psc").write_text("b")
+    (src / "good.psc").write_text("g")
+    real = snapshot.shutil.copyfile
+
+    def flaky(a, b, *k, **kw):
+        if str(a).endswith("bad.psc"):
+            raise OSError("locked")
+        return real(a, b, *k, **kw)
+
+    monkeypatch.setattr(snapshot.shutil, "copyfile", flaky)
+    snap(tmp_path, "make")
+    (s,) = snaps(tmp_path)
+    assert os.listdir(str(s / "source")) == ["good.psc"]
+    assert re.fullmatch(r"\[\d{8}_\d{6}\] AUTO-SNAPSHOT \(psc:1 pex:0\) before: make\n", log_text(tmp_path))
+    assert (tmp_path / ".claude" / "backups" / "auto_snapshots" / ".last_snapshot").is_file()
+
+
+def test_snapshot_rate_limit_window_is_60_seconds(tmp_path):
+    (install(tmp_path) / "a.psc").write_text("x")
+    now = time.time()
+    base = tmp_path / ".claude" / "backups" / "auto_snapshots"
+
+    def go(at):
+        for d in snaps(tmp_path):                  # same-second dir names would merge; not what is tested
+            shutil.rmtree(str(d))
+        snap(tmp_path, "make", at)
+        return len(log_text(tmp_path).splitlines())
+
+    assert go(now) == 1
+    assert go(now + 59) == 1          # inside the window, nothing newer -> skipped
+    assert go(now + 60) == 2          # boundary: 60 is not < 60 -> taken
+    assert go(now + 60 + 61) == 3     # 61 s after the previous snapshot -> taken
+    assert (base / ".last_snapshot").is_file()
+
+
+def test_backup_mkdir_failure_logs_failed(tmp_path):
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "backups").write_text("i am a file")
+    f = tmp_path / "x.txt"
+    f.write_text("x")
+    calls = []
+
+    class A:
+        @staticmethod
+        def stamp():
+            return "20260101_000000"
+
+        def log(self, *a):
+            calls.append(a)
+
+        def raw(self, *a):
+            calls.append(("raw",) + a)
+
+    backup.run(str(tmp_path), "Edit", str(f), False, A())
+    assert len(calls) == 1 and calls[0][1] == "FAILED" and "NO BACKUP EXISTS" in calls[0][2]
+
+
+def test_session_invalid_utf8_is_written_raw_and_stdin_is_closed(tmp_path):
+    stub(tmp_path, "printf '\\377\\376 ok\\n'\ncat >/dev/null\nexit 0\n")
+    out = session.run(str(tmp_path), "startup", record.bash(), audit_mod.Audit(str(tmp_path)))
+    assert out == "�� ok"
+    raw = (tmp_path / ".claude" / "backups" / "AUDIT_LOG.txt").read_bytes()
+    assert raw.endswith(b" rc=0 \xff\xfe ok\n")

@@ -14,12 +14,13 @@ def run(project, source, bash, audit):
     if not Path(tool).is_file():
         audit.raw("[{}] {} NOT RUN: tools/kb-guard.sh missing\n".format(audit.stamp(), HOOK))
         return "KB GUARD: NOT RUN -- {} is missing, so your knowledgebase was NOT snapshotted this session.".format(tool)
-    r = subprocess.run([bash, tool], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    output = r.stdout.decode("utf-8", "replace").rstrip("\n")
+    r = subprocess.run([bash, tool], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    raw = r.stdout.rstrip(b"\n")
+    output = raw.decode("utf-8", "replace")
     lines = [output] if output else []
     if r.returncode == 2:
         lines.append("KB GUARD: the above means NOTHING was snapshotted this session -- unchecked, not clean.")
-    flat = output.replace("\n", " ").encode("utf-8")[:200]          # bash: tr '\n' ' ' | head -c 200
+    flat = raw.replace(b"\n", b" ")[:200]        # bash: tr '\n' ' ' | head -c 200
     audit.raw(b"[" + audit.stamp().encode() + b"] " + HOOK.encode() + b" rc=" + str(r.returncode).encode()
               + b" " + flat + b"\n")
     return "\n".join(lines)

@@ -41,7 +41,10 @@ def run(project, command, payload_empty, audit, now=None):
     root = Path(project)
     base = root / ".claude" / "backups" / "auto_snapshots"
     src, dep, rl = root / "Data" / "Scripts" / "Source", root / "Data" / "Scripts", base / ".last_snapshot"
-    base.mkdir(parents=True, exist_ok=True)
+    try:
+        base.mkdir(parents=True, exist_ok=True)         # bash: mkdir -p ... 2>/dev/null
+    except OSError:
+        pass
     if not src.is_dir() and not dep.is_dir():
         return
     if rl.is_file():
@@ -50,26 +53,37 @@ def run(project, command, payload_empty, audit, now=None):
         except (OSError, ValueError):
             last = 0
         if int(now) - last < 60:
-            rl_mtime = rl.stat().st_mtime
-            if not any(f.stat().st_mtime > rl_mtime for f in _files(src, ".psc")):
+            rl_mtime = rl.stat().st_mtime_ns
+            if not any(f.stat().st_mtime_ns > rl_mtime for f in _files(src, ".psc")):
                 return
     snap = base / ts
-    (snap / "source").mkdir(parents=True, exist_ok=True)
-    (snap / "deploy").mkdir(parents=True, exist_ok=True)
-    for f in _files(src, ".psc"):
-        if _age_days(f, now) < 7:
-            shutil.copyfile(str(f), str(snap / "source" / f.name))
-    for f in _files(dep, ".pex"):
-        if _age_days(f, now) < 7:
-            shutil.copyfile(str(f), str(snap / "deploy" / f.name))
+    for sub in ("source", "deploy"):
+        try:
+            (snap / sub).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+    # bash: each cp runs under `find -exec ... 2>/dev/null`, so one failed copy is ignored
+    for d, suffix, out in ((src, ".psc", "source"), (dep, ".pex", "deploy")):
+        for f in _files(d, suffix):
+            if _age_days(f, now) < 7:
+                try:
+                    shutil.copyfile(str(f), str(snap / out / f.name))
+                except OSError:
+                    pass
     psc, pex = _visible_count(snap / "source"), _visible_count(snap / "deploy")
     if psc == 0 and pex == 0:
         shutil.rmtree(str(snap), ignore_errors=True)
         return
-    rl.write_bytes("{}\n".format(int(now)).encode("ascii"))     # bash: date +%s > file (LF, not CRLF)
+    try:
+        rl.write_bytes("{}\n".format(int(now)).encode("ascii"))     # bash: date +%s > file (LF, not CRLF)
+    except OSError:
+        pass
     short = (command + "\n").encode("utf-8")[:120].rstrip(b"\n")  # $(...) strips trailing newlines
     audit.raw(b"[" + ts.encode() + b"] AUTO-SNAPSHOT (psc:" + str(psc).encode() + b" pex:" + str(pex).encode()
               + b") before: " + short + b"\n")
-    for d in base.iterdir():
-        if d.is_dir() and _age_days(d, now) > 14:
-            shutil.rmtree(str(d), ignore_errors=True)
+    try:
+        for d in base.iterdir():
+            if d.is_dir() and _age_days(d, now) > 14:
+                shutil.rmtree(str(d), ignore_errors=True)
+    except OSError:
+        pass                                            # bash: find ... 2>/dev/null

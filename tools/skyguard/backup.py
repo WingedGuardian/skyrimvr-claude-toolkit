@@ -21,11 +21,11 @@ def run(project, tool_name, file_path, payload_empty, audit):
     if any(grep(p, file_path) for p in SKIP):
         return
     backups = Path(project) / ".claude" / "backups"
-    backups.mkdir(parents=True, exist_ok=True)
     ts = audit.stamp()
     # bash: sed 's|[/\\:]|_|g' | sed 's|^_*||'
     safe = re.sub(r"[/\\:]", "_", file_path).lstrip("_")
     try:
+        backups.mkdir(parents=True, exist_ok=True)      # bash: mkdir -p 2>/dev/null, then cp fails -> FAILED
         shutil.copyfile(file_path, str(backups / "{}__{}".format(ts, safe)))
     except OSError:
         audit.log(HOOK, "FAILED", "could not copy {} -- NO BACKUP EXISTS for this edit".format(file_path))
