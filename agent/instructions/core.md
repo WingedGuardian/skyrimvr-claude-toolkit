@@ -24,7 +24,7 @@ All under `tools/`:
 | Tool | Purpose | Usage |
 |------|---------|-------|
 | **Champollion** | Decompile Papyrus `.pex` → `.psc` | `tools/Champollion/Champollion.exe input.pex` |
-| **Caprica** | Compile Papyrus `.psc` → `.pex` | `cd Data/Scripts/Source && ../../../tools/Caprica/Caprica.exe --game skyrim -f TESV_Papyrus_Flags.flg -i . -o .. MyScript.psc`, run from the source folder with a BARE filename (a path makes Caprica fail with a namespacing Fatal Error). Add `-i <dir>` for each further import folder (e.g. `../../Source/Scripts` where vanilla sources live there) |
+| **Caprica** | Compile Papyrus `.psc` → `.pex` | from `Data/Scripts/Source`, with a BARE filename (a path makes Caprica fail with a namespacing Fatal Error): `"<game root>/tools/Caprica/Caprica.exe" --game skyrim -f TESV_Papyrus_Flags.flg -i . -o .. MyScript.psc`. Add `-i <dir>` for each further import folder (e.g. `<game root>/Data/Source/Scripts`, where vanilla sources live on some installs) |
 | **XEditLib.dll** | Programmatic ESP/ESM reading via FFI | Load with koffi in Node.js (skill `xelib`) |
 | **Spriggit** | ESP ↔ YAML/JSON conversion (.NET) | `spriggit serialize ...` |
 | **AutoMod CLI** | NIF meshes, BSA archives, audio, MCM, ESP one-liners | `bash tools/automod-cli.sh <module> <command> --json` |
