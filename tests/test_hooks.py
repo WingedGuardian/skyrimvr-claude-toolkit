@@ -648,11 +648,47 @@ def test_protect_files_works_however_it_is_launched(project, how):
 
 @pytest.mark.parametrize("how", ["forward-slash", "mixed", "relative"])
 def test_nonblocking_hooks_find_their_engine_however_launched(project, how):
-    """The engine failing to start would be logged as FAILED; a good launch logs nothing of the kind."""
-    log = project / ".claude" / "backups" / "AUDIT_LOG.txt"
+    """A launch that cannot find its engine logs FAILED and does NOTHING. So assert the work happened:
+    a backup file lands for an existing file, and a snapshot is taken for a fresh .psc."""
+    backups = project / ".claude" / "backups"
+    log = backups / "AUDIT_LOG.txt"
     before = log.read_text(encoding="utf-8") if log.is_file() else ""
-    for name in ("backup-before-edit.sh", "snapshot-before-tool.sh"):
-        r = _invoke(project, name, {"tool_name": "Write", "tool_input": {"file_path": "C:/work/a.txt"}}, how)
-        assert r.returncode == 0 and r.stdout.strip() == ""
-    after = log.read_text(encoding="utf-8") if log.is_file() else ""
-    assert "FAILED" not in after[len(before):], after[len(before):]
+
+    target = project / "Data" / f"launch-{how}.txt"
+    target.write_text("keep me", encoding="utf-8")
+    r = _invoke(project, "backup-before-edit.sh",
+                {"tool_name": "Write", "tool_input": {"file_path": target.as_posix()}}, how)
+    assert r.returncode == 0 and r.stdout.strip() == ""
+    made = [p for p in backups.iterdir() if p.is_file() and p.name.endswith(f"launch-{how}.txt")]
+    assert made, f"{how}: no backup of {target.name} was taken; audit: {log.read_text(encoding='utf-8')[len(before):]}"
+    assert made[0].read_text(encoding="utf-8") == "keep me"
+
+    (project / "Data" / "Scripts" / "Source" / f"Fresh_{how.replace('-', '_')}.psc").write_text(
+        "ScriptName Fresh\n", encoding="utf-8")
+    r = _invoke(project, "snapshot-before-tool.sh",
+                {"tool_name": "Bash", "tool_input": {"command": "some-tool run"}}, how)
+    assert r.returncode == 0 and r.stdout.strip() == ""
+    after = log.read_text(encoding="utf-8")[len(before):]
+    assert "AUTO-SNAPSHOT" in after, f"{how}: no snapshot was taken: {after}"
+    assert "FAILED" not in after, after
+
+
+@pytest.mark.parametrize("how", ["forward-slash", "mixed", "relative"])
+def test_session_kb_guard_finds_its_engine_however_it_is_launched(tmp_path, how):
+    """session-kb-guard once broke on forward-slash launches while every test passed an all-backslash
+    path. Assert it really RAN the guard (a KB GUARD report that is not NOT RUN) and logged no failure."""
+    root = install_hooks(tmp_path / "install", names={"session-kb-guard.sh"})
+    (root / "tools").mkdir(exist_ok=True)
+    shutil.copy2(REPO / "tools" / "kb-guard.sh", root / "tools" / "kb-guard.sh")
+    (root / "KNOWLEDGEBASE.md").write_text("notes " * 200, encoding="utf-8")
+    path, cwd = dict(_spellings(root))[how]("session-kb-guard.sh")
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    r = subprocess.run([_bash(), path], input=json.dumps({"hook_event_name": "SessionStart", "source": "startup"}),
+                       capture_output=True, text=True, env=env, cwd=str(cwd) if cwd else None, timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert "KB GUARD:" in r.stdout, f"{how}: the guard printed no report: {r.stdout!r}"
+    assert "NOT RUN" not in r.stdout, f"{how}: {r.stdout}"
+    log = root / ".claude" / "backups" / "AUDIT_LOG.txt"
+    text = log.read_text(encoding="utf-8") if log.is_file() else ""
+    assert "FAILED" not in text and "NOT RUN" not in text, text
+    assert any((root / ".claude" / "backups" / "kb").rglob("KNOWLEDGEBASE.md")), "no snapshot was taken"

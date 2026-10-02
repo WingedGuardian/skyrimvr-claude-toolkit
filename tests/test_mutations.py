@@ -172,6 +172,13 @@ MUTATIONS = [
         "tests/test_hooks.py::test_nonblocking_hooks_find_their_engine_however_launched",
         id="nonblocking-wrapper-self-path-normalisation",
     ),
+    pytest.param(
+        ".claude/hooks/session-kb-guard.sh",
+        '_SELF="${BASH_SOURCE[0]//' + BS * 2 + '//}"',
+        '_SELF="${BASH_SOURCE[0]//' + BS + '//}"',
+        "tests/test_hooks.py::test_session_kb_guard_finds_its_engine_however_it_is_launched",
+        id="session-wrapper-self-path-normalisation",
+    ),
     # A re-run of setup.sh must repair a hook configured for an interpreter that has since moved.
     pytest.param(
         "setup.sh",
