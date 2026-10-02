@@ -2149,3 +2149,9 @@ Subagent-driven (roadmap cadence for guard/engine work): a fresh implementer and
 with Tasks 0 and 14 run by the orchestrating session because they need the user's terminal. Tasks 1–5 are
 engine-side and can land before any Codex file exists; Tasks 6–11 depend on Task 0's measurements; 12–14
 need everything before them.
+
+## Controller rulings (2026-10-02)
+
+- **R16 confirmed:** MO2 helper precedence (harness-repairs item d) is Plan 5's; Plan 5 rules on it.
+- **Desktop app / IDE extensions:** not probed in Plan 4. Probe them after Task 14, per D14; claim nothing until a probe passes.
+- **Latency:** if every rung of Task 0's ladder misses p95 <= 1 s, stop and bring the measured split to the user. Do not raise the gate.
