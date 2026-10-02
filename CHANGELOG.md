@@ -4,7 +4,7 @@
 
 ### 📚 Instructions split
 
-- **`CLAUDE.md` shrinks from 53,578 to 28,171 bytes** (the shared core from 53,367 to 26,301), so the
+- **`CLAUDE.md` shrinks from 53,578 to 28,174 bytes** (the shared core from 53,367 to 26,304), so the
   instruction file Codex will read stays under its silent 32,768-byte truncation limit. Nothing was deleted:
   every moved line was checked against its new home.
 - **Three new skills hold what used to be core bulk:** `devbench` (the live in-game test channel),
