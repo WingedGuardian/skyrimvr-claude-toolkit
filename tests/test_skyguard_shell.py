@@ -242,21 +242,22 @@ def test_port_matches_recorded_bash_verdict(tmp_path, cid, layout, cmd, decision
 # Accepted divergence (controller ruling, Task 3 fix round 1): next to a NON-ASCII letter, GNU grep in
 # a UTF-8 locale sees no word boundary while the port (re.ASCII) sees one. The port is therefore
 # STRICTER than bash here, never looser. Measured against the real hook on this machine: all four are allowed.
-RESIDUE = [
-    f'Champollioné "{GAME}/Data/Scripts/Foo.pex"',
-    "cat My.espé",
-    "cat a.esp b",  # bash on this Windows build sees U+2003 as a word char; UTF-8 Linux does not
-    "cat X.ESPİ",
-]
+RESIDUE = {   # input -> the decision the port gives today (bash allows every one of them)
+    f'Champollioné "{GAME}/Data/Scripts/Foo.pex"': "deny",
+    "cat My.espé": "advise",
+    "cat a.esp b": "advise",  # bash on this Windows build sees U+2003 as a word char; UTF-8 Linux does not
+    "cat X.ESPİ": "advise",
+}
 STRICTNESS = {"allow": 0, "advise": 1, "ask": 2, "deny": 3}
 
 
-@pytest.mark.parametrize("cmd", RESIDUE)
-def test_unicode_word_boundary_residue_is_never_looser(tmp_path, cmd):
-    bash_decision = "allow"
+@pytest.mark.parametrize("cmd,expected", sorted(RESIDUE.items()))
+def test_unicode_word_boundary_residue_is_never_looser(tmp_path, cmd, expected):
+    """Pins the port's actual decision; bash allows all of these, so the port may only be stricter."""
     v = run(cmd, tmp_path)
     py = "advise" if v.decision == "allow" and v.context else v.decision
-    assert STRICTNESS[py] >= STRICTNESS[bash_decision]
+    assert py == expected
+    assert STRICTNESS[py] > STRICTNESS["allow"]
 
 
 def test_every_message_constant_equals_the_bash_text():
