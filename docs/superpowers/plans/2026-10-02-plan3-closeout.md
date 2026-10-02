@@ -1,0 +1,40 @@
+# Plan 3 close-out: rulings and deferred minors
+
+Plan 3 merged to master as bfe1902 (2026-10-02). Full suite on plan3 47be490: 1126 passed, 27 skipped; post-merge focused 324 passed. Extracted from the execution ledger before its worktree was removed.
+
+## Rulings
+
+- Setup: Ruling: execute in worktree ../skyrimvr-toolkit-plan3 on branch plan3 (base c740d97), merged to master after Plan 2's final review — parallel with Plan 2 per user's "do it in parallel" — cost if wrong: one merge.
+- Setup: Ruling: lighter cadence (user asked for speed): one implementer runs Tasks 1-7, one opus review of the range, fix pass. Task 8 (session injection) waits for Plan 2 to land; Task 9 after merge — cost if wrong: less per-task review on docs-only work.
+- Setup: Ruling: core's "Skyrim.esm FormIDs are fine" exception is replaced by the install's newer rule (vanilla records can be overridden; copy any whose behaviour you rely on; bare refs OK only for markers/anchors) — the user already adopted that rule; generic → toolkit — cost if wrong: one paragraph.
+- Task 1: Ruling: full-suite runs execute in fresh local clones of the worktree at each task's commit (scratchpad/suite-<sha>), in parallel — the suite takes >30 min here (another run's suite competes for the machine) and the project forbids editing the tree while it runs — cost if wrong: a clone lacks an untracked file the worktree has; baseline c740d97 is measured the same way, so any such skip/failure shows in the baseline too.
+- Task 3: Ruling: two dangling references re-pointed beyond the plan's edit list: installing-tools "monkey-patch below" -> "(recipe: the skyrim-nif skill)", safety-philosophy "The split above" -> names the KB split — both pointed at text that stayed in core — cost if wrong: wording only.
+- Task 3: Ruling: the old core tools note (xeditlib link, NifSkope/Blender are external GUI apps) moved into the installing-tools.md intro rather than being dropped — nothing is deleted (spec §6) — cost if wrong: one paragraph.
+- Task 3: Ruling: devcontainer heading is "## Using the devcontainer" + a "Files:" line keeping the old heading's file list; the Localized-limit pointer now names the in-file section — self-reference after the move — cost if wrong: wording only.
+- Task 3: Ruling (pre-existing, not fixed): CI "Relative links in Markdown resolve" is red at base c740d97 on two plan docs (plan2 regex text parsed as a link; plan3's own [skse-cross-compile.md](skse-cross-compile.md) example). Not introduced by Tasks 1-7 — cost if wrong: CI link step stays red until someone fixes the two plan docs.
+- Task 4: Ruling: create-mod gains one line for `esp add-quest` / `esp set-property` (in the core AutoMod table, nowhere in the skills); arguments deferred to `esp --help` because AutoMod is not installed in this tree to verify them — cost if wrong: one line.
+- Task 4: Ruling: the core's "AutoMod nif/archive/audio/mcm are often the only tools" fact folded into the new core When-to-Use bullet (plan's bullet text + one sentence) — the inventory found no other home — cost if wrong: ~100 bytes of core.
+- Task 4: Ruling: tools-table "Load with koffi in Node.js (see below)" -> "(skill `xelib`)" — the section it pointed at moved — cost if wrong: nil.
+- Task 5: Ruling: claude.md addendum also carries the skyrim-nif path-scope glob and "setup.sh records the Python path in each hook" — both were in moved core text and had no other home (conservation) — cost if wrong: ~120 bytes in CLAUDE.md only.
+- Task 5: Ruling: Safety-improvement loop: "Propose new hooks"/"Document proposed hooks" also -> guard rules (plan named only "new hook"); the KB section name "Hook Candidates" kept because KNOWLEDGEBASE.md uses it — cost if wrong: wording only.
+- Task 6: Ruling: Precision line does not name WeaponCollision (plan's wording did): Nexus API for Precision (72347) says "Supports SE/AE" only and WeaponCollision's VR status was not verified here, so per R11 the text states only what the page says and asks for a VR-build check — cost if wrong: the skill names one fewer example mod.
+- Task 6: Ruling: Setup ruling applied — Own Your Records' "Skyrim.esm FormIDs are fine" replaced by the vanilla-records-can-be-overridden rule (bare refs only for markers/anchors/match keywords) — cost if wrong: one paragraph.
+- Task 7: Ruling: fallback cut (1) applied (core 27,953 -> 26,301); skyrim-nif gained gate "(3) diff against a known-good structure", the only fact of the cut sections the skill lacked — cost if wrong: if the user wants the full PyFFI section in core, cut (2)/(3) must replace it.
+- Task 7: Ruling: test_budget_rejects_an_oversize_core sizes the core by the LITERAL 32768, not g.INSTRUCTION_BUDGET — as planned, the instruction-budget-is-enforced mutation SURVIVED (the test scaled with the lifted constant); with the literal it is killed — cost if wrong: if D9's limit ever changes, this test changes with it on purpose.
+- Task 7: Ruling: no long_mo2 fixture added — portable_mo2's root measured 112 chars (>= 80, the plan's trigger); expansion 2,111 of 2,560 — cost if wrong: an install root over ~175 chars may exceed the reserve (raised as a concern).
+- Task 7: Ruling: extra commit 79074bb fixes AGENTS.md item 3 "The hooks normally force this pause" — same stale claim R6 removed elsewhere — cost if wrong: one sentence.
+- Task 6: Ruling: Task 6's Caprica text ('../../../tools/Caprica/...', '../../Source/Scripts') put '/../' into CLAUDE.md and turned test_setup_paths::test_portable_mo2_instance_path_is_normalized red (Task 6 full suite: 1 failed, 1057 passed). Fixed in 80d5d96 by naming '<game root>/tools/Caprica/Caprica.exe' (re-verified in scratch: exit 0, .pex written) — no amend; Task 6's own commit stays red in history — cost if wrong: wording only.
+- Task 7: Ruling: suites for dc0237e and 79074bb were stopped (they carried the same Caprica text); c14e621 (sizes updated after the fix) is the authoritative Task 7 run — cost if wrong: none, the tip includes every Task 7 change.
+- Ruling: plan3 merges to master only after Task 8 lands — the core promises the injection — cost if wrong: a false claim ships
+- Fix round 1: Ruling: core grew to 26,534 (> 26,500 target) — 4cc26b2: same content in fewer words -> 26,487 — cost if wrong: wording only.
+- Task 8: Ruling: the missing-tool return site binds its message to `missing` before `return _with_prefs(missing, project, audit)`, instead of the plan's one-line call -- the plan's mutation (cut `, project, audit)`) would leave an unclosed paren, so it would be killed by a SyntaxError, not by the missing preferences; mutation is now `return missing` -- cost if wrong: one extra line in session.py.
+- Task 8: Ruling: added test_an_unreadable_paths_env_does_not_stop_preferences (wrapper-level) -- Plan 2's final review made an unreadable skyrim-paths.env fail closed for protect-bash; SessionStart must not inherit that -- cost if wrong: one test.
+- Task 8: Ruling: no live claude -p run in Task 8 (the plan places it in Task 9) -- cost if wrong: none; wrapper-level test covers the real entry point.
+- Task 9: Ruling: installed CLAUDE.md measured 31,092 B on an MO2 fixture with a 183-char root (gate 30,720; 372 over; Steam 210-char root 28,803 was fine) — applied plan fallback cuts (2) ReSaver row -> pointer (full op list moved verbatim into skill skyrim-save) and (3) Confidence scale table -> docs/safety-philosophy.md, one-line summary kept in core; after (2) alone 30,721 (1 over); after both 30,450 MO2 / 28,161 Steam. core 26,487 -> 25,845 — nothing deleted — cost if wrong: wording only; roots over ~150 chars on MO2 are still close to the reserve (~8 B per root char).
+
+## Deferred minors
+
+- Final: minor (deferred): prefs.py unclosed code fence swallows later sections up to the cap.
+- Final: minor (deferred): variant '## My Preferences (…)' heading injects nothing, no audit line.
+- Final: minor (deferred): prefs read_bytes unbounded (cap read at ~1 MB).
+- Final: minor (deferred): installed CLAUDE.md headroom on long MO2 roots ~34 chars.
