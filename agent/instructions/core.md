@@ -24,7 +24,7 @@ All under `tools/`:
 | Tool | Purpose | Usage |
 |------|---------|-------|
 | **Champollion** | Decompile Papyrus `.pex` → `.psc` | `tools/Champollion/Champollion.exe input.pex` |
-| **Caprica** | Compile Papyrus `.psc` → `.pex` | `tools/Caprica/Caprica.exe --game skyrim --import "Data/Scripts/Source" input.psc` |
+| **Caprica** | Compile Papyrus `.psc` → `.pex` | `cd Data/Scripts/Source && ../../../tools/Caprica/Caprica.exe --game skyrim -f TESV_Papyrus_Flags.flg -i . -o .. MyScript.psc`, run from the source folder with a BARE filename (a path makes Caprica fail with a namespacing Fatal Error). Add `-i <dir>` for each further import folder (e.g. `../../Source/Scripts` where vanilla sources live there) |
 | **XEditLib.dll** | Programmatic ESP/ESM reading via FFI | Load with koffi in Node.js (skill `xelib`) |
 | **Spriggit** | ESP ↔ YAML/JSON conversion (.NET) | `spriggit serialize ...` |
 | **AutoMod CLI** | NIF meshes, BSA archives, audio, MCM, ESP one-liners | `bash tools/automod-cli.sh <module> <command> --json` |
@@ -148,7 +148,7 @@ These are the most dangerous/common pitfalls. Consult `KNOWLEDGEBASE.md` for ful
 
 1. **RemoveSpell doesn't fire OnEffectFinish** -- use `DispelSpell` when cleanup logic exists (but `DispelSpell` excludes ability-type spells)
 2. **All effects on a spell must have the same casting type** -- mismatches cause silent failure
-3. **VMAD editing is fragile** -- use `GetFormFromFile()` to minimize properties; xEdit can't add scripts to VMAD
+3. **VMAD editing is fragile** -- use `GetFormFromFile()` on your OWN plugin's forms to minimize properties (never another mod's — see *Own Your Records*), and check the result for `None`; xEdit can't add scripts to VMAD
 4. **PlayIdle fails in VR** -- VRIK overrides skeleton IK; bypass with timed Papyrus scripts
 5. **Wait() unreliable under 100ms** -- merge sub-100ms gaps; use `RegisterForSingleUpdate` when possible
 6. **SSE != VR** for: camera, skeleton, collision, UI, input, SKSE addresses, physics (60Hz->90Hz)
@@ -203,7 +203,7 @@ For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit se
 **Rule**: Any record your mod needs must live in the ESP you're building. Copy the record (SNDR, SPEL, MGEF, WEAP, etc.) into your own plugin rather than referencing another mod's.
 - **Hard master dependencies** (MAST records): acceptable when overriding or extending a specific mod's content.
 - **Soft `GetFormFromFile()` dependencies on other mods**: almost always avoidable. Copy the asset, create your own record.
-- **Safe exception**: `Skyrim.esm` and the base game masters are always loaded — referencing their FormIDs is fine.
+- **Even vanilla records can be overridden by other plugins.** `Skyrim.esm` is always loaded, but any plugin later in the load order may change a vanilla record your mod references, silently changing your mod's behaviour. Copy any vanilla record whose specific behaviour your mod relies on (a magic effect's archetype, a sound descriptor, a spell) into your own plugin and reference your copy. Bare vanilla FormID references are fine only for markers/anchors (e.g. `XMarker`) and keywords used purely for matching.
 
 ## Safety Rules
 

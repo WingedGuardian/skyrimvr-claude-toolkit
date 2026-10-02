@@ -7,7 +7,7 @@ paths: "**/*.nif,Data/meshes/**"
 
 # NIF Mesh Operations
 
-Use the AutoMod CLI for all mesh work. Always use `--json` for output.
+Use the AutoMod CLI for texture, string and shader work (always with `--json`); PyFFI and PyNifly (below) cover geometry and animation.
 
 ```bash
 bash tools/automod-cli.sh nif <command> [args] --json

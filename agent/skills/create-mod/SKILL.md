@@ -35,7 +35,7 @@ Always preview with `--dry-run` first, then remove it after user approves.
 
 1. Write the `.psc` source file
 2. Compile: `bash tools/automod-cli.sh papyrus compile <source> --output Data/Scripts --headers tools/automod/skyrim-script-headers --json`
-   (Or use our existing Caprica: `tools/Caprica/Caprica.exe --game skyrim --import "Data/Scripts/Source" --flags "TESV_Papyrus_Flags.flg" --output "Data/Scripts" "script.psc"`)
+   (Or use Caprica: `cd Data/Scripts/Source && ../../../tools/Caprica/Caprica.exe --game skyrim -f TESV_Papyrus_Flags.flg -i . -o .. MyScript.psc`, run from the source folder with a BARE filename (a path makes Caprica fail with a namespacing Fatal Error). Add `-i <dir>` for each further import folder (e.g. `../../Source/Scripts` where vanilla sources live there).)
 3. Attach to quest: `bash tools/automod-cli.sh esp attach-script <esp> --quest <editorId> --script <name> --json`
 4. Auto-fill properties: `bash tools/automod-cli.sh esp auto-fill <esp> --quest <editorId> --script <name> --script-dir Data/Scripts/Source --data-folder Data --json`
 
@@ -57,5 +57,5 @@ Review the record counts and verify everything was added correctly.
 
 - All effects on a spell must have the same casting type
 - ESL FormIDs must be in xx000800-xx000FFF range
-- Use `GetFormFromFile()` in scripts to avoid complex VMAD properties
+- In scripts, use `GetFormFromFile()` on your OWN plugin's forms to minimize properties (never another mod's — see *Own Your Records*), and check the result for `None`, to avoid complex VMAD properties
 - Test in-game before distributing

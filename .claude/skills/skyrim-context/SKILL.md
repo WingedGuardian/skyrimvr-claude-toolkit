@@ -14,7 +14,7 @@ You are working in a modded Skyrim installation with a full modding toolkit. Con
 
 1. **RemoveSpell doesn't fire OnEffectFinish** — use `DispelSpell` when cleanup logic exists (but DispelSpell excludes abilities)
 2. **All effects on a spell must have the same casting type** — mismatches cause silent failure
-3. **VMAD editing is fragile** — use `GetFormFromFile()` to minimize properties; xEdit can't add scripts to VMAD
+3. **VMAD editing is fragile** — use `GetFormFromFile()` on your OWN plugin's forms to minimize properties (never another mod's — see *Own Your Records*), and check the result for `None`; xEdit can't add scripts to VMAD
 4. **PlayIdle fails in VR** — VRIK overrides skeleton IK; bypass with timed Papyrus scripts
 5. **Wait() unreliable under 100ms** — merge sub-100ms gaps; use `RegisterForSingleUpdate` when possible
 6. **SSE != VR** for: camera, skeleton, collision, UI, input, SKSE addresses, physics (60Hz→90Hz)

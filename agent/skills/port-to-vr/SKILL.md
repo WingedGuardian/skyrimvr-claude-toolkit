@@ -36,8 +36,8 @@ Decompile all `.pex` files and check for:
 
 - [ ] Havok physics tuned for 60Hz? → VR runs at 90Hz, needs `fMaxTime` INI adjustment
 - [ ] Player collision assumptions → VR uses capsule vs ragdoll (not capsule vs capsule)
-- [ ] Melee hit detection → Precision doesn't exist for VR; HIGGS/VRIK handle this
-- [ ] Weapon reach values → formula changes without Precision
+- [ ] Melee hit detection → in VR it is layered (HIGGS, optional collision mods, then vanilla). An SSE collision mod such as Precision lists SE/AE support on its Nexus page; check for a VR build before assuming it applies. Find out which layer the mod assumes and test against the user's actual stack.
+- [ ] Weapon reach values → verify against the VR hit-detection stack, not SSE numbers
 
 ## Step 5: UI and Menus
 
@@ -49,8 +49,8 @@ Decompile all `.pex` files and check for:
 ## Step 6: Animation System
 
 - [ ] OAR/DAR animations → OAR has native VR support; DAR needs VR fix or OAR conversion
-- [ ] Animation Motion Revolution → VR-compatible (CTD was fixed in update)
-- [ ] SCAR → dedicated VR port exists (BFCO)
+- [ ] Animation Motion Revolution → check its Nexus page for current VR support and the minimum version the mod needs
+- [ ] SCAR → check its VR status and version; BFCO is a separate mod, not a VR port of SCAR
 - [ ] Animation priorities → must be higher than MCO/ADXP for proper playback
 
 ## Step 7: ESP Record Check
@@ -59,7 +59,7 @@ Serialize with Spriggit and check:
 - [ ] Casting type consistency on all spells (all effects must match)
 - [ ] ONAM subrecords if ESM-flagged
 - [ ] ESL FormID range (xx000800-xx000FFF)
-- [ ] VMAD script properties → prefer `GetFormFromFile()` to minimize properties
+- [ ] VMAD script properties → use `GetFormFromFile()` on your OWN plugin's forms to minimize properties (never another mod's — see *Own Your Records*), and check the result for `None`
 
 ## Step 8: Create VR Patch
 
