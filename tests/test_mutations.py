@@ -951,6 +951,21 @@ MUTATIONS = [
         "tests/test_guard_corpus.py::test_a_stale_supersession_is_caught",
         id="corpus-supersession-must-be-live",
     ),
+    # Plan 5 Task 4 (controller ruling): a supersession may not weaken a verdict unless it declares and explains it.
+    pytest.param(
+        "scripts/guard-corpus/record.py",
+        'if STRENGTH[row["decision"]] < STRENGTH[old["decision"]] and not (',
+        'if False and not (',
+        "tests/test_guard_corpus.py::test_a_supersession_that_loosens_the_decision_needs_loosens_and_a_reason",
+        id="corpus-supersession-no-silent-loosening",
+    ),
+    pytest.param(
+        "scripts/guard-corpus/record.py",
+        'if row["supersedes"] in seen:',
+        'if False:',
+        "tests/test_guard_corpus.py::test_a_legacy_row_is_superseded_by_at_most_one_intended_row",
+        id="corpus-supersession-unique",
+    ),
     # Compare decisions and rule ids only: an intended row whose `text` is wrong stays green, and the exact
     # wording the spec fixes is no longer held by anything.
     pytest.param(

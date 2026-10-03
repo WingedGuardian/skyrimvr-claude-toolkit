@@ -175,3 +175,57 @@ def test_a_supersession_must_name_a_real_row_with_the_identical_case(installs):
     other = _legacy_twin(legacy, payload={"tool_name": "Bash", "tool_input": {"command": "echo hi"}})
     assert "not a legacy row" in rec.supersession_problems([ghost], ROWS, TEMPLATES, cur)[0]
     assert "differs" in rec.supersession_problems([other], ROWS, TEMPLATES, cur)[0]
+
+
+def _legacy(i, decision):
+    return {"id": i, "layout": "declared", "hook": "protect-bash.sh", "payload": {"c": i}, "decision": decision,
+            "text": ""}
+
+
+def _supersede(old, new_id, decision, **over):
+    return dict({"id": new_id, "layout": old["layout"], "hook": old["hook"], "payload": old["payload"],
+                 "decision": decision, "rules": [], "text": "x", "supersedes": old["id"], "task": "T4",
+                 "why": "w"}, **over)
+
+
+def _always_changed(row):
+    return {"decision": "x", "rules": {"R"}}
+
+
+def test_a_supersession_that_loosens_the_decision_needs_loosens_and_a_reason():
+    rec = _rec()
+    old = _legacy("old1", "deny")
+    for new in ("ask", "advise", "allow"):
+        bare = _supersede(old, "n-" + new, new)
+        got = rec.supersession_problems([bare], [old], {}, _always_changed)
+        assert len(got) == 1 and "loosens" in got[0], (new, got)
+    flag_only = _supersede(old, "n1", "allow", loosens=True)
+    no_flag = _supersede(old, "n2", "allow", reason="because")
+    blank = _supersede(old, "n3", "allow", loosens=True, reason="  ")
+    for row in (flag_only, no_flag, blank):
+        assert rec.supersession_problems([row], [old], {}, _always_changed), row["id"]
+    ok = _supersede(old, "n4", "allow", loosens=True, reason="the legacy ask fired on embedded text")
+    assert rec.supersession_problems([ok], [old], {}, _always_changed) == []
+
+
+def test_a_supersession_that_keeps_or_tightens_the_decision_needs_no_flag():
+    rec = _rec()
+    old = _legacy("old2", "ask")
+    for new in ("ask", "deny"):
+        assert rec.supersession_problems([_supersede(old, "n-" + new, new)], [old], {}, _always_changed) == []
+
+
+def test_a_legacy_row_is_superseded_by_at_most_one_intended_row():
+    rec = _rec()
+    old = _legacy("old3", "ask")
+    a, b = _supersede(old, "a", "deny"), _supersede(old, "b", "deny")
+    got = rec.supersession_problems([a, b], [old], {}, _always_changed)
+    assert len(got) == 1 and "exactly one" in got[0], got
+    assert rec.supersession_problems([a], [old], {}, _always_changed) == []
+
+
+def test_intended_supersessions_are_unique_and_loosenings_declared():
+    """The real file, no engine needed: the static halves of the supersession rules."""
+    rec = _rec()
+    problems = rec.supersession_problems(INTENDED_ROWS, ROWS, TEMPLATES, _always_changed)
+    assert [p for p in problems if "loosens" in p or "exactly one" in p] == []

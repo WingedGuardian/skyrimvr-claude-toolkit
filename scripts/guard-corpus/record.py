@@ -227,11 +227,21 @@ def intended_row_problems(row: dict) -> list[str]:
     return out
 
 
+STRENGTH = {"allow": 0, "advise": 1, "ask": 2, "deny": 3}
+
+
 def supersession_problems(intended: list[dict], legacy: list[dict], templates: dict, current) -> list[str]:
     """Every `supersedes` must name a real legacy row with the identical case and a verdict the new engine
     really changes. `current(row)` -> {"decision", "rules"} for the intended row as the engine runs it now."""
     by_id = {r["id"]: r for r in legacy}
     out = []
+    seen = {}
+    for row in intended:
+        if row.get("supersedes"):
+            if row["supersedes"] in seen:
+                out.append(f"{row['id']}: supersedes {row['supersedes']}, which {seen[row['supersedes']]} already "
+                           f"supersedes; a legacy row is re-specified by exactly one intended row")
+            seen.setdefault(row["supersedes"], row["id"])
     for row in intended:
         target = row.get("supersedes")
         if not target:
@@ -243,6 +253,11 @@ def supersession_problems(intended: list[dict], legacy: list[dict], templates: d
         if (old["payload"], old["hook"], old["layout"], old.get("payload_note")) != \
                 (row["payload"], row["hook"], row["layout"], row.get("payload_note")):
             out.append(f"{row['id']}: payload, hook or layout differs from the legacy row {target}")
+            continue
+        if STRENGTH[row["decision"]] < STRENGTH[old["decision"]] and not (
+                row.get("loosens") is True and str(row.get("reason") or "").strip()):
+            out.append(f"{row['id']}: loosens {target} from {old['decision']} to {row['decision']} without "
+                       f'"loosens": true and a non-empty reason; a silently loosened rule must be impossible')
             continue
         now = current(row)
         was = (old["decision"], legacy_rule_ids(old["text"], templates))
