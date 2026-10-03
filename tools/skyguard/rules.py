@@ -37,6 +37,16 @@ RULES = {
         'setup.sh from your Skyrim folder.'
     ),
     },
+    'S-INERT-CONFIG': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'GUARD INERT: {file} has an unreadable value for {op}, so a protected folder is unknown.\n'
+        'Re-run setup.sh to rewrite it.'
+    ),
+    },
     'S-DEL-CONFIG': {
         "decision": 'deny',
         "hook": 'protect-bash',

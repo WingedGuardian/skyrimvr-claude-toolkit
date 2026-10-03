@@ -2,6 +2,8 @@
 import ast
 import sys
 
+import pytest
+
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
@@ -51,12 +53,120 @@ def test_path_regex_rejects_relative_and_bare_drive():
     assert paths.path_to_regex("/home/u") == paths.LEAD + "home" + SEP + "u"
 
 
-def test_env_file_overrides_environment_and_parses_both_quote_styles(tmp_path):
+def test_env_and_file_are_a_union_and_both_quote_styles_parse(tmp_path):
+    """R3: a guard never loses a root because another source shadows it. The file used to override the
+    environment (bash's `. env`), so an exported SKYRIM_GAME_ROOT was dropped whenever the file also set one."""
     f = tmp_path / "skyrim-paths.env"
     f.write_text("SKYRIM_GAME_ROOT='C:/A $B'\nSKYRIM_CONFIG_DIR=\"D:/P\"\n# comment\nbad line\n", encoding="utf-8")
-    env = paths.read_env(f, {"SKYRIM_GAME_ROOT": "X", "SKYRIM_LOADORDER_DIR": "L"})
-    assert env["SKYRIM_GAME_ROOT"] == "C:/A $B" and env["SKYRIM_CONFIG_DIR"] == "D:/P"
-    assert env["SKYRIM_LOADORDER_DIR"] == "L"
+    cfg = paths.read_config(f, {"SKYRIM_GAME_ROOT": "E:/Env/Skyrim", "SKYRIM_LOADORDER_DIR": "L"})
+    assert cfg.values("SKYRIM_GAME_ROOT") == ["E:/Env/Skyrim", "C:/A $B"]
+    assert cfg.values("SKYRIM_CONFIG_DIR") == ["D:/P"] and cfg.malformed == ()
+    r = paths.roots("", "", cfg)
+    assert r.install_dirs == ("e:/Env/Skyrim", "c:/A $B")
+    assert grep.grep(r.game, "rm -rf E:/Env/Skyrim/Data") and grep.grep(r.game, "rm -rf C:/A $B/Data")
+    # ...while TOOL lookup keeps the Codex precedence: the environment wins.
+    assert cfg.first("SKYRIM_GAME_ROOT") == "E:/Env/Skyrim" and cfg.first("SKYRIM_LOADORDER_DIR") == "L"
+
+
+def test_mo2_keys_become_mo2_dirs(tmp_path):
+    f = tmp_path / "skyrim-paths.env"
+    f.write_text("SKYRIM_MO2_MODS='D:/MO2/mods'\nSKYRIM_MO2_OVERWRITE='D:/MO2/overwrite'\n", encoding="utf-8")
+    r = paths.roots("C:/G", "", paths.read_config(f, {"SKYRIM_MO2_MODS": "E:/Other/mods"}))
+    assert r.mo2_dirs == ("e:/Other/mods", "d:/MO2/mods", "d:/MO2/overwrite")
+
+
+def test_empty_values_declare_nothing_and_are_not_malformed(tmp_path):
+    """setup.sh writes SKYRIM_MO2_MODS='' on a non-MO2 install."""
+    f = tmp_path / "skyrim-paths.env"
+    f.write_text("SKYRIM_MO2_MODS=''\nSKYRIM_MO2_OVERWRITE=\n", encoding="utf-8")
+    cfg = paths.read_config(f, {})
+    assert cfg.malformed == () and cfg.values("SKYRIM_MO2_MODS") == []
+
+
+SQ_FORMS = [
+    # (file text after `KEY=`, the value bash assigns) -- setup.sh's sq() output and the hand-written spellings
+    ("'C:/GOG Games/Skyrim VR'", "C:/GOG Games/Skyrim VR"),
+    ("'C:/Bob'\\''s Games/Skyrim'", "C:/Bob's Games/Skyrim"),
+    ("'C:/a'\\'''\\''b'", "C:/a''b"),
+    ("'C:/My$Stuff/Sky`rim'", "C:/My$Stuff/Sky`rim"),
+    ("\"C:/GOG Games/Skyrim VR\"", "C:/GOG Games/Skyrim VR"),
+    ("\"C:\\Users\\me\\Skyrim\"", "C:\\Users\\me\\Skyrim"),
+    ("\"C:/a\\\"b\"", "C:/a\"b"),
+    ("C:/plain/path", "C:/plain/path"),
+    ("C:/a\\ b", "C:/a b"),
+    ("'C:/x'  # trailing comment", "C:/x"),
+    ("/c/msys/path", "/c/msys/path"),
+]
+
+
+@pytest.mark.parametrize("raw,want", SQ_FORMS)
+def test_value_grammar_reads_what_bash_reads(raw, want, tmp_path):
+    assert paths.parse_value(raw) == want
+    f = tmp_path / "skyrim-paths.env"
+    f.write_text("SKYRIM_GAME_ROOT=" + raw + "\n", encoding="utf-8", newline="\n")
+    cfg = paths.read_config(f, {})
+    assert cfg.malformed == () and cfg.values("SKYRIM_GAME_ROOT") == [want]
+    # The independent oracle: bash itself, sourcing the same bytes.
+    from conftest import BASH
+    import subprocess
+    got = subprocess.run([BASH, "-c", '. "$1"; printf %s "$SKYRIM_GAME_ROOT"', "x", f.as_posix()],
+                         capture_output=True, timeout=60)
+    assert got.stdout.decode("utf-8") == want
+
+
+@pytest.mark.parametrize("line,key", [
+    ('SKYRIM_GAME_ROOT="C:/GOG $X/Skyrim"', "SKYRIM_GAME_ROOT"),       # bash expands $X: the guard cannot know it
+    ("SKYRIM_GAME_ROOT=\"C:/`x`/Skyrim\"", "SKYRIM_GAME_ROOT"),
+    ("SKYRIM_CONFIG_DIR=C:/My Games/Skyrim", "SKYRIM_CONFIG_DIR"),     # unquoted space: bash runs `Games/Skyrim`
+    ("SKYRIM_MO2_MODS='D:/MO2/mods", "SKYRIM_MO2_MODS"),               # unterminated quote
+    ("SKYRIM_MO2_OVERWRITE=$HOME/ow", "SKYRIM_MO2_OVERWRITE"),
+    ("SKYRIM_GAME_ROOT='relative/dir'", "SKYRIM_GAME_ROOT"),           # a relative root protects nothing
+    ("SKYRIM_GAME_ROOT=C:\\GOG\\Skyrim", "SKYRIM_GAME_ROOT"),           # bash reads C:GOGSkyrim (drive-relative)
+    ("SKYRIM_GAME_ROOT ='C:/x'", "SKYRIM_GAME_ROOT"),                  # not an assignment in bash
+    ("SKYRIM_CONFIG_DIR", "SKYRIM_CONFIG_DIR"),
+    ("SKYRIM_GAME_ROOT=~/Skyrim", "SKYRIM_GAME_ROOT"),
+])
+def test_a_malformed_protection_value_is_reported_by_key_not_skipped(line, key, tmp_path):
+    f = tmp_path / "skyrim-paths.env"
+    f.write_text("SKYRIM_LOADORDER_DIR='C:/L'\n" + line + "\n", encoding="utf-8")
+    cfg = paths.read_config(f, {})
+    assert cfg.malformed == (("skyrim-paths.env", key),)
+    assert cfg.values(key) == []
+    assert paths.roots("C:/G", "", cfg).malformed == (("skyrim-paths.env", key),)
+
+
+def test_a_malformed_value_denies_naming_the_key(tmp_path):
+    from skyguard import shell_rules
+    f = tmp_path / "skyrim-paths.env"
+    f.write_text('SKYRIM_GAME_ROOT="C:/GOG $X/Skyrim"\n', encoding="utf-8")
+    r = paths.roots("C:/G", "", paths.read_config(f, {}))
+    a = audit.Audit(str(tmp_path))
+    v = shell_rules.decide("ls", r, a)
+    assert v.decision == "deny"
+    assert v.reason == ("GUARD INERT: skyrim-paths.env has an unreadable value for SKYRIM_GAME_ROOT, so a "
+                        "protected folder is unknown.\nRe-run setup.sh to rewrite it.")
+    assert ("S-INERT-CONFIG", "deny") in a.fired
+
+
+def test_a_malformed_non_protection_key_is_not_a_guard_failure(tmp_path):
+    f = tmp_path / "skyrim-paths.env"
+    f.write_text("SKYRIM_LOADORDER_DIR=\"C:/$X\"\nOTHER=a b c\n", encoding="utf-8")
+    assert paths.read_config(f, {}).malformed == ()
+
+
+def test_an_absent_file_declares_nothing_and_an_undecodable_one_raises(tmp_path):
+    assert paths.read_config(tmp_path / "none.env", {"SKYRIM_GAME_ROOT": "C:/G"}).values("SKYRIM_GAME_ROOT") == ["C:/G"]
+    f = tmp_path / "skyrim-paths.env"
+    f.write_bytes(b"SKYRIM_GAME_ROOT='\xff\xfe'\n")
+    with pytest.raises(ValueError):
+        paths.read_config(f, {})
+
+
+def test_crlf_file_parses(tmp_path):
+    f = tmp_path / "skyrim-paths.env"
+    f.write_bytes(b"SKYRIM_GAME_ROOT='C:/G'\r\nSKYRIM_MO2_MODS='D:/m'\r\n")
+    cfg = paths.read_config(f, {})
+    assert cfg.malformed == () and cfg.values("SKYRIM_MO2_MODS") == ["D:/m"]
 
 
 def test_roots_dedupe_identical_spellings_only_like_bash():

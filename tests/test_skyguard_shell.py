@@ -183,7 +183,8 @@ def test_rule16_ask_drops_earlier_advice(tmp_path):
 def _t4_rows():
     path = REPO / "tests" / "guard_corpus" / "intended.jsonl"
     rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
-    return [r for r in rows if r["task"] == "T4"]
+    # T4's rows plus Task 6's ReSaver rows (the forms the parser re-base closed).
+    return [r for r in rows if r["task"] == "T4" or r["id"].startswith("t06-resaver-")]
 
 
 @pytest.mark.parametrize("row", _t4_rows(), ids=[r["id"] for r in _t4_rows()])
@@ -191,7 +192,8 @@ def test_resaver_rows(tmp_path, row):
     """Every T4 intended row, in-process: decision, rule trace and exact text. Mutations name a row id here."""
     r = paths.roots("/x/install", "", {"SKYRIM_GAME_ROOT": GAME})
     a = audit.Audit(str(tmp_path))
-    v = shell_rules.decide(row["payload"]["tool_input"]["command"], r, a)
+    shell = {"Bash": "bash", "PowerShell": "powershell"}.get(row["payload"].get("tool_name"), "")
+    v = shell_rules.decide(row["payload"]["tool_input"]["command"], r, a, shell=shell)
     assert v.decision == ("ask" if row["decision"] == "ask" else "allow")
     assert v.reason == row["text"]
     assert {rid for rid, _ in a.fired if rid == "S-RESAVER-APPLY"} == set(row["rules"])

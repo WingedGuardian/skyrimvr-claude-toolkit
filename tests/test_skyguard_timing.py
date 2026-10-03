@@ -431,3 +431,65 @@ def test_the_registry_rule_is_linear():
     """The registry property rule, `.*` inside an alternation, was not split and was quadratic (0.5 s at 80 KB)."""
     assert_linear("Remove-ItemProperty run",
                   lambda n: (lambda: shell_rules.decide("Remove-ItemProperty " * (n // 20), ROOTS, _QuietAudit())))
+
+
+# Plan 5 Task 6: targets.resolve / zone and the paths-file value grammar run on every operand and every hook call.
+def _target_shapes(N):
+    return {
+        "dotdot-run": ("../" * (N // 3), "bash"),
+        "slash-run": ("/" * N, "bash"),
+        "backslash-run": (BS * N, "powershell"),
+        "component-run": ("a/" * (N // 2), "bash"),
+        "dot-space-run": ("a. /" * (N // 4), "cmd"),
+        "home-var-run": ("$HOME" * (N // 5), "bash"),
+        "ps-env-run": ("$env:USERPROFILE" * (N // 16), "powershell"),
+        "cmd-var-run": ("%USERPROFILE%" * (N // 13), "cmd"),
+        "dollar-run": ("$" * N, "bash"),
+        "percent-run": ("%" * N, "cmd"),
+        "glob-run": ("*/" * (N // 2), "bash"),
+        "unc-run": ("//s/h" + "/x" * (N // 2), "bash"),
+        "msys-run": ("/c" * (N // 2), "bash"),
+        "provider-run": ("FileSystem::" * (N // 12), "powershell"),
+    }
+
+
+@pytest.mark.parametrize("name", sorted(_target_shapes(SMALL)))
+def test_targets_stay_fast_on_adversarial_words(name):
+    from skyguard import targets
+    env = {"HOME": "/c/Users/me", "USERPROFILE": "C:/Users/me"}
+
+    def make(n):
+        word, dialect = _target_shapes(n)[name]
+
+        def run():
+            p = targets.resolve(word, GAME, dialect, env)
+            targets.zone(p or ("c:/" + word), ROOTS)
+        return run
+    assert_linear(name, make)
+
+
+def _value_shapes(N):
+    return {
+        "sq-escape-run": "'a'" + (BS + "''") * (N // 4),
+        "dq-long": '"' + "a" * N + '"',
+        "dq-escape-run": '"' + (BS + '"') * (N // 2) + '"',
+        "bare-escape-run": (BS + " ") * (N // 2),
+        "space-run-then-text": "a" + " " * N + "b",
+        "space-run-then-comment": "'a'" + " " * N + "# c",
+        "unterminated-sq": "'" + "a" * N,
+        "quote-alternation": "'a'\"b\"" * (N // 6),
+    }
+
+
+@pytest.mark.parametrize("name", sorted(_value_shapes(SMALL)))
+def test_paths_value_grammar_is_linear(name):
+    assert_linear(name, lambda n: (lambda: paths.parse_value(_value_shapes(n)[name])))
+
+
+def test_paths_file_read_is_linear(tmp_path):
+    def make(n):
+        f = tmp_path / ("p%d.env" % n)
+        f.write_text("SKYRIM_GAME_ROOT=" + "'a'" * (n // 3) + "\n" + " " * n + "!\n" + "export " * (n // 7) + "\n",
+                     encoding="utf-8")
+        return lambda: paths.read_config(f, {})
+    assert_linear("paths-file", make)

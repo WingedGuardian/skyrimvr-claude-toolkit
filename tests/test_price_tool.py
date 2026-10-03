@@ -119,10 +119,11 @@ def test_only_rule_filters_the_report(tmp_path, history):
 def test_the_driver_hands_the_item_cwd_to_an_engine_that_accepts_it(tmp_path, history):
     new = _scratch_engine(tmp_path, "scratch", [(
         "shell_rules.py",
-        "def decide(command: str, roots: paths.Roots, audit: _audit.Audit) -> Verdict:\n",
-        "def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = \"\") -> Verdict:\n"
+        # The engine takes cwd since Plan 5 Task 6; the sentinel proves the driver hands it the item's cwd.
+        "    if command == \"\":\n        audit.rule(HOOK, \"S-INERT-NOCMD\"",
         "    if cwd == \"C:/sentinel\":\n"
-        "        audit.rule(HOOK, \"S-LOADORDER-REF\", \"advise\", \"cwd seen\")\n")])
+        "        audit.rule(HOOK, \"S-LOADORDER-REF\", \"advise\", \"cwd seen\")\n"
+        "    if command == \"\":\n        audit.rule(HOOK, \"S-INERT-NOCMD\"")])
     s, _ = _run(tmp_path, SKYGUARD, new, history)
     # Only the one `ls` that ran in C:/sentinel; the old engine, which has no cwd parameter, still priced.
     assert s["rules"] == {"S-LOADORDER-REF": {"newly-advise": 1}}
@@ -174,7 +175,8 @@ def test_parse_failures_are_reported_per_tool_when_the_engine_has_the_parser(tmp
     lines = [_line("Bash", {"command": "ls"}), _line("Bash", {"command": "echo 'oops"}),
              _line("PowerShell", {"command": "Get-Item 'oops"}), _line("PowerShell", {"command": "Get-Item a"})]
     (h / "s.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    old = _scratch_engine(tmp_path, "old", [])
+    # An engine from before the parser: no shellparse.py and (since Task 6) no rule importing it.
+    old = _scratch_engine(tmp_path, "old", [("shell_rules.py", "from . import shellparse\n", "")])
     (old / "shellparse.py").unlink()
     s, _ = _run(tmp_path, old, SKYGUARD, h)
     assert s["parse_failures"] == {"old": 0, "new": 2}

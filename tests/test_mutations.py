@@ -731,7 +731,7 @@ MUTATIONS = [
     # only thing guarding their config -- and it had no test at all.
     pytest.param(
         "tools/skyguard/paths.py",
-        '    _add(config, env.get("SKYRIM_CONFIG_DIR", ""))',
+        "        _add(config, v)",
         "    pass",
         "tests/test_hooks.py::test_a_configured_config_directory_outside_documents_is_guarded",
         id="configured-config-directory-is-guarded",
@@ -951,56 +951,6 @@ MUTATIONS = [
         "tests/test_guard_corpus.py::test_a_stale_supersession_is_caught",
         id="corpus-supersession-must-be-live",
     ),
-    # Plan 5 Task 4: S-RESAVER-APPLY, one mutation per clause. Each names the ROW that must go red.
-    pytest.param(   # drop the command-position anchor: any text that mentions resaver-cli matches
-        "tools/skyguard/shell_rules.py",
-        r'    RESAVER_ANCHOR + r"\s*(?:" + RESAVER_ASSIGN',
-        r'    r"" + r"\s*(?:" + RESAVER_ASSIGN',
-        "tests/test_skyguard_shell.py::test_resaver_rows[t04-echo]",
-        id="rule-S-RESAVER-APPLY-anchor",
-    ),
-    pytest.param(   # look for --apply in the whole command, not the ReSaver segment
-        "tools/skyguard/shell_rules.py",
-        "if RESAVER_APPLY.search(seg):",
-        "if RESAVER_APPLY.search(command):",
-        "tests/test_skyguard_shell.py::test_resaver_rows[t04-apply-elsewhere]",
-        id="rule-S-RESAVER-APPLY-apply-same-cmd",
-    ),
-    pytest.param(   # keep every heredoc body, text or not
-        "tools/skyguard/shell_rules.py",
-        'strip, term = m.group(1) == "-", m.group(2)',
-        "pass",
-        "tests/test_skyguard_shell.py::test_resaver_rows[t04-heredoc-py]",
-        id="rule-S-RESAVER-APPLY-heredoc-drop",
-    ),
-    pytest.param(   # drop every heredoc body, including one fed to a shell
-        "tools/skyguard/shell_rules.py",
-        "if RESAVER_SHELL_FED.search(line) or",
-        "if False or",
-        "tests/test_skyguard_shell.py::test_resaver_rows[t04-bash-heredoc]",
-        id="rule-S-RESAVER-APPLY-shell-heredoc-kept",
-    ),
-    pytest.param(   # forget the direct java -jar form
-        "tools/skyguard/shell_rules.py",
-        'r"(?:" + RESAVER_JAVA +',
-        'r"(?:(?!)" + RESAVER_JAVA +',
-        "tests/test_skyguard_shell.py::test_resaver_rows[t04-java]",
-        id="rule-S-RESAVER-APPLY-java",
-    ),
-    pytest.param(   # drop one operation from the list
-        "tools/skyguard/shell_rules.py",
-        r'|cleanse-formlists|remove-created"',
-        r'|cleanse-formlists"',
-        "tests/test_skyguard_shell.py::test_resaver_rows[t04-apply-chain]",
-        id="rule-S-RESAVER-APPLY-op-list",
-    ),
-    pytest.param(   # treat a here-string (<<<) as a heredoc: it swallows the next command
-        "tools/skyguard/shell_rules.py",
-        "(?<!<)<<(?!<)(-?)",
-        "<<(-?)",
-        "tests/test_skyguard_shell.py::test_resaver_rows[t04-herestring]",
-        id="rule-S-RESAVER-APPLY-herestring",
-    ),
     # Plan 5 Task 4 (controller ruling): a supersession may not weaken a verdict unless it declares and explains it.
     pytest.param(
         "scripts/guard-corpus/record.py",
@@ -1028,57 +978,53 @@ MUTATIONS = [
 ]
 
 
-# Plan 5 Task 4, fix round 1: one mutation per new S-RESAVER-APPLY clause, each naming the row it must turn red.
-# (id suffix, text to find, replacement, row). Anchors are raw so a regex backslash survives.
 _SR = "tools/skyguard/shell_rules.py"
-_SR_ALT = r"(?:do|then|else|elif|\{|!)"
-_SR_WRAP = r"(?:time|nohup|exec|sudo|source|command|\.)"
+# Plan 5 Task 6: S-RESAVER-APPLY re-based on shellparse. The Task 4 regex mutations went with the regexes (the
+# wrappers, -c strings, heredoc consumers, continuations and quoting they covered are now parser branches, each with
+# its own shellparse-* mutation). One mutation per clause of the parser rule; each names the ROW that must go red.
+# (id suffix, find, replace, row in test_resaver_rows)
 _SR_CLAUSES = [
-    ("continuation", 'RESAVER_CONTINUATION.sub("", command)', "command", "t04-cont-op"),
-    ("quoted-path", r'RESAVER_QPATH = r"(?:\"[^\"]{0,260}|', r'RESAVER_QPATH = r"(?:(?!)|', "t04-quoted-spaces"),
-    ("java-exe", r"java(?:\.exe)?[", "java[", "t04-java-exe-fullpath"),
-    ("resavercli-exe", r"ResaverCLI(?:\.exe)?)", "ResaverCLI)", "t04-resavercli-exe"),
-    ("java-cp", "|ResaverCLI)", "|(?!))", "t04-java-cp"),
-    ("kw-do", _SR_ALT, r"(?:then|else|elif|\{|!)", "t04-do"),
-    ("kw-then", _SR_ALT, r"(?:do|else|elif|\{|!)", "t04-then"),
-    ("kw-else", _SR_ALT, r"(?:do|then|elif|\{|!)", "t04-else"),
-    ("kw-elif", _SR_ALT, r"(?:do|then|else|\{|!)", "t04-elif"),
-    ("kw-brace", _SR_ALT, r"(?:do|then|else|elif|!)", "t04-brace"),
-    ("kw-bang", _SR_ALT, r"(?:do|then|else|elif|\{)", "t04-bang"),
-    ("wrap-time", _SR_WRAP, r"(?:nohup|exec|sudo|source|command|\.)", "t04-time"),
-    ("wrap-nohup", _SR_WRAP, r"(?:time|exec|sudo|source|command|\.)", "t04-nohup"),
-    ("wrap-exec", _SR_WRAP, r"(?:time|nohup|sudo|source|command|\.)", "t04-exec"),
-    ("wrap-sudo", _SR_WRAP, r"(?:time|nohup|exec|source|command|\.)", "t04-sudo"),
-    ("wrap-source", _SR_WRAP, r"(?:time|nohup|exec|sudo|command|\.)", "t04-source"),
-    ("wrap-dot", _SR_WRAP, r"(?:time|nohup|exec|sudo|source|command)", "t04-dot"),
-    ("wrap-env", 'RESAVER_WRAP_ENV = r"env', 'RESAVER_WRAP_ENV = r"(?!)env', "t04-env"),
-    ("wrap-xargs", 'RESAVER_WRAP_XARGS = r"xargs', 'RESAVER_WRAP_XARGS = r"(?!)xargs', "t04-xargs"),
-    ("wrap-timeout", 'RESAVER_WRAP_TIMEOUT = r"timeout', 'RESAVER_WRAP_TIMEOUT = r"(?!)timeout', "t04-timeout"),
-    ("wrap-chain", '+ r")*"', '+ r")?"', "t04-wrap-chain"),
-    ("shell-c", "for m in RESAVER_SHELL_C.finditer(line):", "for m in []:", "t04-zsh-c"),
-    ("eval", r'r"|eval)\s+', r'r"|(?!))\s+', "t04-eval"),
-    ("shell-c-anchor", '    RESAVER_PREFIX + r"(?:(?:', '    r"(?:^|\\s)" + r"(?:(?:', "t04-echo-bash-c"),
-    ("bin-bash-heredoc", r"([^\s;&|]{0,260}[/\\])?(bash|sh|zsh)(\.exe)?([ \t]+", r"(bash|sh|zsh)(\.exe)?([ \t]+", "t04-bin-bash-heredoc"),
-    ("piped-to-shell", "or _piped_to_shell(line)", "or False", "t04-cat-pipe-bash"),
-    ("op-set-global", '"set-global|set-var|clean|reset-havok', '"set-var|clean|reset-havok', "t04-set-global"),
-    ("op-set-var", '"set-global|set-var|clean|reset-havok', '"set-global|clean|reset-havok', "t04-set-var"),
-    ("op-clean", '"set-global|set-var|clean|reset-havok', '"set-global|set-var|reset-havok', "t04-clean"),
-    ("heredoc-dash-delim", r"<>;&|()]+)", r"<>;&|()-]+)", "t04-heredoc-dash-delim"),
-    ("heredoc-in-comment", 'or re.search(r"(?:^|\\s)#", line[:m.start()])', "or False", "t04-heredoc-in-comment"),
-    ("whole-word-op", "found = RESAVER_OP.search(seg)", 'found = re.search("(" + RESAVER_OPS + ")", seg, re.I)', "t04-op-in-filename"),
-    # fix round 2: more wrappers
-    ("wrap-find", 'RESAVER_WRAP_FIND = r"find', 'RESAVER_WRAP_FIND = r"(?!)find', "t04-find-exec"),
-    ("wrap-execdir", r"-exec(?:dir)?", "-exec", "t04-find-execdir"),
-    ("wrap-command", "source|command|", "source|", "t04-command"),
-    ("wrap-nice", 'RESAVER_WRAP_NICE = r"nice', 'RESAVER_WRAP_NICE = r"(?!)nice', "t04-nice"),
-    ("wrap-xargs-option-arg", r"-[IndPLsE]\s+[^\s-]\S*|", "", "t04-xargs-stdin"),
+    ("program", "    if e.program in RESAVER_PROGRAMS:", "    if False:", "t04-apply"),
+    ("java", 'return e.program == "java" and any(', 'return False and any(', "t04-java"),
+    ("apply-same-cmd", "    if RESAVER_APPLY not in words:", "    if False:", "t04-apply-elsewhere"),
+    ("whole-word-op", 'return next((a for a in words if a in RESAVER_OPS), "")',
+     'return next((o for a in words for o in RESAVER_OPS if o in a), "")', "t04-op-in-filename"),
+    ("op-set-global", '("set-global", "set-var", "clean",', '("set-var", "clean",', "t04-set-global"),
+    ("op-set-var", '("set-global", "set-var", "clean",', '("set-global", "clean",', "t04-set-var"),
+    ("op-clean", '("set-global", "set-var", "clean",', '("set-global", "set-var",', "t04-clean"),
+    ("op-reset-havok", '"reset-havok", "cleanse-formlists",', '"cleanse-formlists",', "t04-apply"),
+    ("op-cleanse-formlists", '"reset-havok", "cleanse-formlists",', '"reset-havok",', "t04-apply-env"),
+    ("op-list", '"cleanse-formlists", "remove-created")', '"cleanse-formlists")', "t04-apply-chain"),
+    ("save-from-segment", 'or (lambda m: m.group(0) if m else "")(RESAVER_TEXT_SAVE.search(e.segment))', 'or ""',
+     "t04-find-exec"),
+    ("opaque-is-unresolved", "    if not parsed.ok or opaque:", "    if not parsed.ok:", "t06-resaver-variable-program"),
+    ("parse-fail-falls-back", "    if not parsed.ok or opaque:", "    if opaque:", "t06-resaver-parse-fail"),
+    ("fallback-needs-apply", 'if "resaver" not in low or RESAVER_APPLY not in low:', 'if "resaver" not in low:',
+     "t06-resaver-variable-dry"),
+    ("fallback-op-lookbehind", "re.compile(r\"(?<![^\\s\\\"'])(\" + \"|\".join(RESAVER_OPS)",
+     "re.compile(r\"(\" + \"|\".join(RESAVER_OPS)", "t06-resaver-variable-op-suffix"),
+    ("fallback-op-lookahead", "+ r\")(?![^\\s\\\"'])\", re.ASCII", "+ r\")\", re.ASCII",
+     "t06-resaver-variable-op-in-filename"),
+    ("dialect", "    resaver = resaver_apply(command, shell)", "    resaver = resaver_apply(command)", "t04-heredoc-py"),
 ]
-# Task 4 fix round 2: a hook that answers after its timeout is dropped, so each cause of superlinear matching is
+MUTATIONS += [
+    pytest.param(_SR, find, rep, "tests/test_skyguard_shell.py::test_resaver_rows[" + row + "]",
+                 id="rule-S-RESAVER-APPLY-" + suffix)
+    for suffix, find, rep, row in _SR_CLAUSES
+]
+MUTATIONS += [
+    # R7 now lives in the parser: a heredoc body fed to a shell is commands. Treat every body as data and the
+    # ReSaver run inside `bash <<'EOF'` must stop asking (the Task 5 entry names the parser test; this one the rule).
+    pytest.param("tools/skyguard/shellparse.py", "if self.bodies and program in ALL_SHELLS and self.recurse:",
+                 "if False:", "tests/test_skyguard_shell.py::test_resaver_rows[t04-bash-heredoc]",
+                 id="rule-S-RESAVER-APPLY-heredoc-consumer"),
+]
+# Task 4 fix rounds 2-3: a hook that answers after its timeout is dropped, so each cause of superlinear matching is
 # put back and the timing test must go red. (id suffix, file, find, replace, timing shape that must fail)
+# Task 6 removed the entries whose regexes no longer exist (env-ambiguity, unbounded-path, java/find lazy bounds) and
+# the resaver-prefilter one: the parser rejects or finishes every adversarial shape in milliseconds (measured: 80 KB
+# of `(` 3 ms, 40,000 words 6 ms), so the early return is an optimisation no longer guarding a timeout.
 _SR_TIMING = [
-    ("timing-env-ambiguity", _SR, r'RESAVER_WRAP_ENV = r"env\s+(?:-\S+\s+)*"',
-     r'RESAVER_WRAP_ENV = r"env(?:\s+-\S+|\s+[A-Za-z_][A-Za-z0-9_]*=\S*)*\s+"', "env-assign-resaver"),
-    ("timing-unbounded-path", _SR, '{0,160})"   # a program path', '*)"   # a program path', "parens"),
     ("timing-dotstar-scan", "tools/skyguard/grep.py", "parts = split_dotstar(pattern)", "parts = None", "rm-repeat"),
     # fix round 3: a separator run must start a match only at its first character, in the install-path regex
     # (shared by every delete/move/sed/redirect rule), and the relative-Data rule must not rescan a run.
@@ -1087,10 +1033,6 @@ _SR_TIMING = [
     ("timing-lead-lookbehind-sed", "tools/skyguard/paths.py", r'LEAD = r"(?<![/\\])[/\\]+"', r'LEAD = r"[/\\]+"',
      "sed-backslash-run"),
     ("timing-relative-data-run", _SR, r"(\S*[/\\])?Data[/\\]+", r"(\S*[/\\]+)?Data[/\\]+", "rm-r-data-slash-run"),
-    ("timing-java-lazy-bound", _SR, r"""[\"']?\s+[^;&|]{0,260}?""", r"""[\"']?\s+[^;&|]*?""", "java-subst-repeat"),
-    ("timing-find-lazy-bound", _SR, r"find\s+[^;&|]{0,260}?", r"find\s+[^;&|]*?", "find-subst-repeat"),
-    ("timing-resaver-prefilter", _SR, 'if "resaver" not in command.lower():', "if False:",
-     "tests/test_skyguard_timing.py::test_resaver_prefilter_skips_unrelated_commands"),
     ("timing-registry-split", _SR,
      'has(r"reg(\\.exe)?\\s+delete") or has(r"Remove-ItemProperty.*Bethesda")',
      'has(r"(reg(\\.exe)?\\s+delete|Remove-ItemProperty.*Bethesda)")',
@@ -1105,6 +1047,72 @@ MUTATIONS += [
                  id="rule-S-RESAVER-APPLY-" + suffix if f == _SR else "guard-" + suffix)
     for suffix, f, find, rep, shape in _SR_TIMING
 ]
+# Plan 5 Task 6: targets (operand resolution, zones) and skyrim-paths.env read as data.
+_TG = "tools/skyguard/targets.py"
+_PA = "tools/skyguard/paths.py"
+MUTATIONS += [
+    pytest.param(_TG, "    base = normalise_cwd(cwd)\n    try:", "    base = None\n    try:",
+                 "tests/test_targets.py::test_relative_word_resolves_against_the_payload_cwd",
+                 id="targets-cwd-used"),
+    pytest.param(_PA, 'return posixpath.normpath("/" + "/".join(parts).lstrip("/")).lstrip("/")',
+                 'return "/".join(parts).lstrip("/")',
+                 "tests/test_targets.py::test_absolute_spellings_bash", id="targets-dotdot"),
+    pytest.param(_PA, "        m = _MSYS_DRIVE.match(p)", "        m = None",
+                 "tests/test_targets.py::test_absolute_spellings_bash", id="targets-msys"),
+    pytest.param(_TG, "    if any(_has_glob(c, dialect) for c in comps[:-1]):", "    if False:",
+                 "tests/test_targets.py::test_unresolvable_is_none", id="targets-glob-dir-unresolvable"),
+    pytest.param(_TG, '        raise _Unresolvable(word)                        # $(...), $1, ${x:-y}, a stray backtick',
+                 "        pass", "tests/test_targets.py::test_unresolvable_is_none", id="targets-unknown-var-unresolvable"),
+    pytest.param(_TG, '            return "scratch"', '            return "install"',
+                 "tests/test_targets.py::test_zone", id="targets-scratch-allowlist"),
+    pytest.param(_TG, "if _under(p, dl.rstrip(\"/\") or dl) and len(dl) > best_len:",
+                 "if _under(p, dl.rstrip(\"/\") or dl) and len(dl) >= 0:",
+                 "tests/test_targets.py::test_mo2_nested_inside_the_install_wins", id="targets-most-specific-wins"),
+    pytest.param(_TG, '            return paths.norm_abs(s, msys=True)          # /c/x (Git Bash drive), /tmp/x (POSIX)',
+                 "            return None", "tests/test_targets.py::test_absolute_spellings_bash",
+                 id="targets-bash-posix-absolute"),
+    pytest.param(_PA, "        for v in ([self.env[key]] if self.env.get(key) else []) + list(self.file.get(key, ())):",
+                 "        for v in (list(self.file.get(key, ())) or ([self.env[key]] if self.env.get(key) else [])):",
+                 "tests/test_skyguard_core.py::test_env_and_file_are_a_union_and_both_quote_styles_parse",
+                 id="paths-union"),
+    pytest.param(_PA, "                    bad.append((path.name, key))", "                    pass",
+                 "tests/test_skyguard_core.py::test_a_malformed_protection_value_is_reported_by_key_not_skipped",
+                 id="paths-malformed-visible"),
+    pytest.param(_PA, "                if c in \"$`\":", "                if False:",
+                 "tests/test_skyguard_core.py::test_a_malformed_protection_value_is_reported_by_key_not_skipped",
+                 id="paths-strict-dq-expansion"),
+    pytest.param(_PA, "                value = None                                          # a relative root protects nothing",
+                 "                pass",
+                 "tests/test_skyguard_core.py::test_a_malformed_protection_value_is_reported_by_key_not_skipped",
+                 id="paths-strict-relative-root"),
+    pytest.param(_PA, "            value = None if m.group(2) else parse_value(m.group(3))",
+                 "            value = parse_value(m.group(3))",
+                 "tests/test_skyguard_core.py::test_a_malformed_protection_value_is_reported_by_key_not_skipped",
+                 id="paths-strict-space-before-equals"),
+    pytest.param(_PA, "            if rest == \"\" or rest.startswith(\"#\"):\n                break\n            return None",
+                 "            break",
+                 "tests/test_skyguard_core.py::test_a_malformed_protection_value_is_reported_by_key_not_skipped",
+                 id="paths-strict-unquoted-space"),
+    pytest.param(_PA, "    bad = env.malformed if isinstance(env, PathsConfig) else ()", "    bad = ()",
+                 "tests/test_skyguard_core.py::test_a_malformed_value_denies_naming_the_key",
+                 id="rule-S-INERT-CONFIG-roots-carry"),
+    pytest.param(_SR, "    if roots.malformed:", "    if False:",
+                 "tests/test_skyguard_core.py::test_a_malformed_value_denies_naming_the_key",
+                 id="rule-S-INERT-CONFIG-deny"),
+    pytest.param(_PA, "    if environ.get(\"PLUGINS_TXT\"):", "    if False:",
+                 "tests/test_paths_precedence.py::test_python_lookup", id="paths-plugins-txt-wins"),
+    pytest.param("tools/xelib/active-plugins.js", "    if (process.env.PLUGINS_TXT) return process.env.PLUGINS_TXT;",
+                 "", "tests/test_paths_precedence.py::test_node_agrees_with_python", id="paths-js-plugins-txt-wins"),
+    pytest.param("tools/skyguard/run.py", '                                       cwd=p.get("cwd", ""), shell=p.get("shell", ""))',
+                 '                                       cwd=p.get("cwd", ""))',
+                 "tests/test_skyguard_claude_adapter.py::test_run_passes_the_shell_dialect", id="run-passes-shell"),
+    pytest.param("tools/skyguard/adapters/claude.py", '        "cwd": cwd.replace("\\x00", "") if isinstance(cwd, str) else "",',
+                 '        "cwd": "",', "tests/test_skyguard_claude_adapter.py::test_cwd_is_passed_raw",
+                 id="adapter-extracts-cwd"),
+    pytest.param("setup.sh", "    printf 'SKYRIM_MO2_MODS=%s" + BS + "n' \"$(sq \"$MO2_MODS\")\"", "",
+                 "tests/test_setup_paths.py::test_setup_writes_the_mo2_roots_the_guard_reads",
+                 id="setup-writes-mo2-keys"),
+]
 for _suffix, _find, _rep in [
     ("claude", r'r"(^|(?<![/\\])[/\\]+)\.claude', r'r"(^|[/\\]+)\.claude'),
     ("node-modules", r'r"(?<![/\\])[/\\]+node_modules', r'r"[/\\]+node_modules'),
@@ -1116,11 +1124,6 @@ for _suffix, _find, _rep in [
         "tests/test_skyguard_timing.py::test_write_rules_stay_fast_on_adversarial_paths[separator-run]",
         id="guard-timing-separator-run-lookbehind-" + _suffix,
     ))
-MUTATIONS += [
-    pytest.param(_SR, find, rep, "tests/test_skyguard_shell.py::test_resaver_rows[" + row + "]",
-                 id="rule-S-RESAVER-APPLY-" + suffix)
-    for suffix, find, rep, row in _SR_CLAUSES
-]
 # Plan 5 Task 5: shellparse. A misparse is a silent allow once rules sit on the parser, so every executed-code
 # branch is deleted here and the named test must go red. (id suffix, find, replace, test in tests/test_shellparse.py)
 _SP = "tools/skyguard/shellparse.py"

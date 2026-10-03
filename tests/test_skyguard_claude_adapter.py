@@ -165,3 +165,62 @@ def test_internal_error_exits_1_with_empty_stdout(tmp_path):
         f.write("\n\ndef decide(*a, **k):\n    raise RuntimeError('forced')\n")
     r = subprocess.run(cmd, input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert r.returncode == 1 and r.stdout == b""
+
+
+# ---------------------------------------------------------------- Plan 5 Task 6: cwd, shell, mcp_input, command_type
+
+@pytest.mark.parametrize("f", sorted(FIX.glob("*.json")), ids=lambda p: p.name)
+def test_fixtures_carry_cwd_shell_and_mcp_input(f):
+    d = json.loads(f.read_text(encoding="utf-8"))
+    p = claude.extract(f.read_text(encoding="utf-8"))
+    assert p["cwd"] == (d["cwd"] if isinstance(d.get("cwd"), str) else "")
+    assert p["shell"] == {"Bash": "bash", "PowerShell": "powershell"}.get(d.get("tool_name"), "")
+    if str(d.get("tool_name", "")).startswith("mcp__"):
+        assert p["mcp_input"] == d["tool_input"] and p["mcp_input"]
+    else:
+        assert p["mcp_input"] == {}
+
+
+@pytest.mark.parametrize("cwd", ["/c/Users/x", "C:" + chr(92) + "x", "C:/x"])
+def test_cwd_is_passed_raw(cwd):
+    assert claude.extract(json.dumps({"tool_name": "Bash", "cwd": cwd}))["cwd"] == cwd
+
+
+@pytest.mark.parametrize("cwd", [None, 12, ["C:/x"], {"a": 1}])
+def test_a_non_string_cwd_is_empty(cwd):
+    assert claude.extract(json.dumps({"tool_name": "Bash", "cwd": cwd}))["cwd"] == ""
+
+
+@pytest.mark.parametrize("ti,want", [
+    ({"command": "ls"}, "string"), ({"command": ""}, "string"), ({"command": 12}, "number"),
+    ({"command": True}, "boolean"), ({"command": None}, "null"), ({"command": ["ls"]}, "array"),
+    ({"command": {"a": 1}}, "object"), ({}, "missing"),
+])
+def test_command_type(ti, want):
+    assert claude.extract(json.dumps({"tool_name": "Bash", "tool_input": ti}))["command_type"] == want
+
+
+def test_run_passes_the_shell_dialect(tmp_path):
+    """Wiring proof: a python heredoc that only MENTIONS a ReSaver write is allowed when the engine is told the
+    dialect is bash, but asks under the unknown dialect (bash AND PowerShell, where the PowerShell reading cannot
+    parse it and the R4 text fallback applies). run.py must therefore be passing shell."""
+    cmd = "python - <<'EOF'\nprint('resaver-cli.sh reset-havok x.ess --apply')\nEOF"
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import shell_rules
+    assert shell_rules.resaver_apply(cmd, "") and not shell_rules.resaver_apply(cmd, "bash")
+    r = _run("protect-bash", json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}), tmp_path)
+    assert r.returncode == 0 and json.loads(r.stdout) == {}
+
+
+def test_run_reports_a_malformed_paths_file_by_key(tmp_path):
+    root = tmp_path / "Skyrim"
+    (root / ".claude").mkdir(parents=True)
+    (root / ".claude" / "skyrim-paths.env").write_text('SKYRIM_CONFIG_DIR="C:/Users/$X/My Games"\n', encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("SKYRIM_")}
+    r = subprocess.run(
+        [sys.executable, RUN, "claude", "protect-bash", "--root", root.as_posix(), "--root-win", str(root),
+         "--project", str(tmp_path)],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}).encode("utf-8"),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    out = json.loads(r.stdout)["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "SKYRIM_CONFIG_DIR" in out["permissionDecisionReason"]

@@ -51,13 +51,15 @@ def main(argv=None) -> int:
             v = shell_rules.decide("", paths.Roots("", ""), audit)
         else:
             try:
-                env = paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))
+                env = paths.read_config(Path(a.root_win or a.root) / ".claude" / paths.PATHS_FILE, dict(os.environ))
             except (OSError, ValueError):
                 env = None
             if env is None:
                 v = Verdict("deny", ENV_UNREADABLE)
             else:
-                v = shell_rules.decide(p["command"], paths.roots(a.root, a.root_win, env), audit)
+                # Plan 4 merge point: its adapter registry supplies cwd/shell for Codex (shell="powershell", E3).
+                v = shell_rules.decide(p["command"], paths.roots(a.root, a.root_win, env), audit,
+                                       cwd=p.get("cwd", ""), shell=p.get("shell", ""))
     elif a.role == "protect-files":
         v = write_rules.decide(p["file_path"], audit)
     elif a.role == "backup-before-edit":

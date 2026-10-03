@@ -268,3 +268,38 @@ def test_hooks_prefer_a_regular_python_over_the_store_alias(game_dir, py, python
     assert len(lines) == 5, sorted(lines)
     for hook, line in lines.items():
         assert line == f'PY="{_fwd(expected)}"', f"{why}: {hook}: {line}"
+
+
+# ---------------------------------------------------------------- MO2 roots for the guard (Plan 5 Task 6)
+
+def _read_paths_config(game):
+    import sys
+    from conftest import REPO
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import paths
+    return paths, paths.read_config(game / ".claude" / "skyrim-paths.env", {})
+
+
+def test_setup_writes_the_mo2_roots_the_guard_reads(portable_mo2):
+    """MO2 keeps every mod's real files in mods/ and overwrite/, OUTSIDE the install, so the delete guard can
+    protect them only if setup records them. Read back the way the guard reads it (as data), not by grepping."""
+    game, inst, mods = portable_mo2
+    r = run_setup(game)
+    assert r.returncode == 0, r.stdout + r.stderr
+    paths, cfg = _read_paths_config(game)
+    assert cfg.malformed == ()
+    got_mods = [v.replace("\\", "/") for v in cfg.values("SKYRIM_MO2_MODS")]
+    got_ow = [v.replace("\\", "/") for v in cfg.values("SKYRIM_MO2_OVERWRITE")]
+    assert len(got_mods) == 1 and got_mods[0].endswith("MODS/mods"), got_mods
+    assert len(got_ow) == 1 and got_ow[0].endswith("MODS/overwrite"), got_ow
+    roots = paths.roots("", "", cfg)
+    assert len(roots.mo2_dirs) == 2
+
+
+def test_setup_writes_empty_mo2_roots_on_a_stock_install(game_dir):
+    r = run_setup(game_dir)
+    assert r.returncode == 0, r.stdout + r.stderr
+    body = (game_dir / ".claude" / "skyrim-paths.env").read_text(encoding="utf-8")
+    assert "SKYRIM_MO2_MODS=''" in body and "SKYRIM_MO2_OVERWRITE=''" in body
+    _, cfg = _read_paths_config(game_dir)
+    assert cfg.malformed == () and cfg.values("SKYRIM_MO2_MODS") == []

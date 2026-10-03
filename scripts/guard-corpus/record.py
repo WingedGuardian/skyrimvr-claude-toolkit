@@ -31,12 +31,16 @@ REPO = Path(__file__).resolve().parents[2]
 BS = chr(92)
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
 GAMEW = GAME.replace("/", BS)
+# Every environment variable the engine reads as a root; a recording must not inherit the recorder's own.
+ENV_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR", "SKYRIM_MO2_MODS", "SKYRIM_MO2_OVERWRITE")
 LAYOUTS = {
     # name: (install dir name, skyrim-paths.env text)
     "declared": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\n'),
     "undeclared": ("Skyrim VR", ""),
     "metachar": ("Skyrim (VR) [x]$", ""),
     "config": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_CONFIG_DIR="D:/Profiles/MO2/profiles/Default"\n'),
+    # Plan 5 Task 6: bash would expand $X here, so the guard cannot know the folder -> S-INERT-CONFIG.
+    "malformed": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2 $X/mods"\n'),
 }
 
 
@@ -103,7 +107,7 @@ def classify(out: str) -> dict:
 def fire(install: Path, hook: str, payload) -> dict:
     stdin = "" if payload is None else (payload if isinstance(payload, str) else json.dumps(payload))
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(install))
-    for k in ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR"):
+    for k in ENV_KEYS:
         env.pop(k, None)
     # as_posix(): production runs `bash "$CLAUDE_PROJECT_DIR/.claude/hooks/X.sh"`, i.e. a forward-slash
     # (or mixed) path; a backslash-only path hides defects in how the wrapper derives its own location.
@@ -172,10 +176,10 @@ def engine_verdict(install: Path, hook: str, payload) -> dict:
         if not p["command"]:
             v = ee.call(shell_rules.decide, ("", paths.Roots("", ""), audit), cwd=cwd)
         else:
-            environ = {k: val for k, val in os.environ.items()
-                       if k not in ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR")}
-            env = paths.read_env(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
-            v = ee.call(shell_rules.decide, (p["command"], paths.roots(root, root_win, env), audit), cwd=cwd)
+            environ = {k: val for k, val in os.environ.items() if k not in ENV_KEYS}
+            env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
+            v = ee.call(shell_rules.decide, (p["command"], paths.roots(root, root_win, env), audit), cwd=cwd,
+                        shell=p.get("shell", ""))
     else:
         v = ee.call(write_rules.decide, (p["file_path"], audit), cwd=cwd)
     if v.decision in ("deny", "ask"):

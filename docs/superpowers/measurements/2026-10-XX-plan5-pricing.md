@@ -122,3 +122,46 @@ Re-priced 2026-10-03 (`--base c3f32ef`), N = 60,804. No verdict moved (S-RESAVER
 0 engine errors. **Parse failures: 63 of 55,879 = 0.113%** (Bash 61 of 54,298 = 0.112%; PowerShell 2 of 1,581 =
 0.127%). Compared item by item with fix round 1: **no command newly fails, none stopped failing.** The new input
 cap (256 KB) touches nothing real: the largest of the real shell commands is 50,452 characters.
+
+## Task 6: targets + config as data + cwd plumbing; S-RESAVER-APPLY re-based on shellparse
+
+Run 2026-10-03. Two runs over the same history: `--base 4f13eef` (Task 5 head: isolates this task) and
+`--base c3f32ef` (cumulative). New engine = a frozen copy of the working tree's `tools/skyguard`.
+
+**Task 6 alone (`--base 4f13eef`), N = 60,962.** 0 engine errors. Parse failures unchanged: 63 old / 63 new,
+0 reasons moved (Bash 61 of 54,437 = 0.112%; PowerShell 2 of 1,581 = 0.127%).
+Matrix: allow>allow 58,142; advise>advise 2,353; deny>deny 455; ask>ask 5; **allow>ask 5; advise>ask 1;
+ask>allow 1.** Only S-RESAVER-APPLY moved: **newly-ask 6, no-longer-ask 1.** No other rule moved (deny, advise:
+0 in every direction), as expected: no rule reads `cwd` or the new directory roots yet.
+
+All 7 read by hand:
+- newly-ask, **5 true positives** (PowerShell tool, k=16094, 16113, 16118, 16119, 16120): a script defines
+  `function J($a){ & java ... -cp $cp $cli @a }` with `$cp` = `...\ReSaver.jar;...` and `$cli` = `ResaverCLI.java`,
+  then calls `J @("clean"|"set-global"|"set-var", $in, ..., "--apply")`. Each one really runs a ReSaver write
+  (on a save copy in a scratchpad). The parser does not expand functions (a Task 5 known limit), so these are caught
+  by the R4/opaque text fallback (the script also holds an opaque `& $jq ...` program). The old regex rule did not
+  read PowerShell at all. The prompt names the first `.ess` in the text (`*.ess`, from `-Filter *.ess`).
+- newly-ask, **1 false positive** (Bash, k=10700): a hand-run hook test harness,
+  `t(){ ... printf '{"tool_input":{"command":%s}}' "$(printf '%s' "$2" | "$JQ" -R .)" | bash "$H" ...; }` then
+  `t "..." 'bash tools/resaver-cli.sh reset-havok save.ess out.ess --apply'`. The ReSaver command is DATA piped into
+  the hook; the opaque `"$JQ"` program elsewhere in the command triggers the text fallback.
+- no-longer-ask, **1 false positive removed** (Bash, k=9139): `python -c "...for c in ['bash tools/resaver-cli.sh
+  reset-havok \"x.ess\" --apply', ...]: parse(c)"` -- Python code that only mentions the command.
+
+**Ruling (Task 6):** the opaque/parse-failure fallback scans the WHOLE command text (resaver + `--apply` + a
+whole-word operation), not only the opaque exec's own statement. Why: statement scope would lose all 5 true
+positives above (their opaque exec is a different statement from the `J @(... "--apply")` call) to remove 1 false
+positive. Cost if wrong: an over-ask on a command that both mentions a ReSaver write and runs an unrelated opaque
+program -- 1 in 60,962 items here.
+
+**Cumulative (`--base c3f32ef`), N = 60,965.** S-RESAVER-APPLY newly-ask 10, no-longer-ask 23; the 21-item
+S-REDIRECT-INSTALL/S-WRITE-INSTALL id rename (Task 1). Nothing else. 0 engine errors.
+
+**S-INERT-CONFIG over this machine's real paths files (Step 3).** The strict parser was run over every
+`skyrim-paths.env` found (install `.claude/skyrim-paths.env`; no toolkit checkout has one, only the
+`.example` files, which also parse): **0 malformed of 1 real file** (and 0 of the 6 `.example` copies). The
+replay above cannot see this rule (the driver passes no paths file), so this is its whole pricing.
+
+**Re-based rows.** All 63 `t04-*` rows pass unchanged on the parser. 12 `t06-*` rows added; against the Task 5
+engine 4 of them differ (RED): `cmd /c`, the `--ap""ply` quote split, the variable-held program, and the malformed
+paths file. The `pwsh -Command` and PowerShell `&` rows already asked under the regex rule and are pins.

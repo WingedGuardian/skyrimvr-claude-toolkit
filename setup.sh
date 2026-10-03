@@ -369,6 +369,10 @@ sq() {
     printf 'SKYRIM_GAME_ROOT=%s\n' "$(sq "$GAME_ROOT_WIN")"
     printf 'SKYRIM_CONFIG_DIR=%s\n' "$(sq "$CONFIG_DIR")"
     printf 'SKYRIM_LOADORDER_DIR=%s\n' "$(sq "$LOADORDER_DIR")"
+    # MO2 keeps every mod's real files in mods/ and overwrite/, outside the install, so the guard can only
+    # protect them if it is told where they are. Empty ('') on a non-MO2 install: declares nothing.
+    printf 'SKYRIM_MO2_MODS=%s\n' "$(sq "$MO2_MODS")"
+    printf 'SKYRIM_MO2_OVERWRITE=%s\n' "$(sq "$MO2_OVERWRITE")"
 } > "$GAME_DIR/.claude/skyrim-paths.env"
 
 # It must SOURCE, or the hooks silently fall back to the self-derived root alone. A
@@ -378,9 +382,10 @@ sq() {
 # still says what we wrote. The previous version of this check asked only the first
 # question, so a path whose `$` had been expanded away passed it and printed success.
 # Read the values back and compare them.
-_want=$(printf '%s\n%s\n%s\n' "$GAME_ROOT_WIN" "$CONFIG_DIR" "$LOADORDER_DIR")
+_want=$(printf '%s\n%s\n%s\n%s\n%s\n' "$GAME_ROOT_WIN" "$CONFIG_DIR" "$LOADORDER_DIR" "$MO2_MODS" "$MO2_OVERWRITE")
 _got=$( set -a; . "$GAME_DIR/.claude/skyrim-paths.env" 2>/dev/null
-        printf '%s\n%s\n%s\n' "${SKYRIM_GAME_ROOT:-}" "${SKYRIM_CONFIG_DIR:-}" "${SKYRIM_LOADORDER_DIR:-}" )
+        printf '%s\n%s\n%s\n%s\n%s\n' "${SKYRIM_GAME_ROOT:-}" "${SKYRIM_CONFIG_DIR:-}" "${SKYRIM_LOADORDER_DIR:-}" \
+            "${SKYRIM_MO2_MODS:-}" "${SKYRIM_MO2_OVERWRITE:-}" )
 if [ "$_want" = "$_got" ]; then
     echo "  Wrote: .claude/skyrim-paths.env"
 else
