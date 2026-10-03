@@ -1561,6 +1561,30 @@ MUTATIONS = [
          "tests/test_codex_trust.py::test_a_root_the_hooks_cannot_run_from_is_never_reported_as_protected",
          "codex-trust-unrunnable-root-unflagged"),
     ]
+] + [
+    # Plan 4 Task 9: the Codex .rules file. A prefix broader than its hook deny refuses work the hooks
+    # allow; a wrong or missing spelling leaves the command unguarded while the hooks are unapproved; an
+    # unclassified verdict is one nobody decided about.
+    pytest.param(*m[:4], id=m[4])
+    for m in [
+        ("tools/skyguard/codex_rules.py", '"pattern": ["reg", "delete"]', '"pattern": ["reg"]',
+         "tests/test_codex_rules.py::test_every_prefix_rule_is_a_subset_of_its_hook_deny",
+         "codex-rules-prefix-widened"),
+        ("tools/skyguard/codex_rules.py", '"pattern": ["reg.exe", "delete"], "decision": "forbidden"',
+         '"pattern": ["reg.exe", "delete"], "decision": "prompt"',
+         "tests/test_codex_rules.py::test_buckets_sum", "codex-rules-decision-drifts-from-bucket"),
+        ("tools/skyguard/codex_rules.py", '    "shell.DENY_REGISTRY": (\n        "forbidden",',
+         '    "shell.DENY_REGISTRY": (\n        "hook_only",',
+         "tests/test_codex_rules.py::test_buckets_sum", "codex-rules-forbidden-bucket-without-rule"),
+        ("tools/skyguard/codex_rules.py",
+         '    "shell.NO_ROOT_DENY": ("hook_only", "analysis failure, not a command"),\n', "",
+         "tests/test_codex_rules.py::test_every_shell_verdict_is_classified", "codex-rules-verdict-unclassified"),
+        ("tools/skyguard/codex_rules.py",
+         '        out.append("    not_match = {},".format(_s(r["not_match"])))\n', "",
+         "tests/test_codex_rules.py::test_render_shape", "codex-rules-render-drops-not-match"),
+        ("tools/skyguard/codex_rules.py", 'format(_s(r["decision"]))', 'format(_s("prompt"))',
+         "tests/test_codex_rules.py::test_rules_file_passes_codex_execpolicy", "codex-rules-render-wrong-decision"),
+    ]
 ]
 
 
