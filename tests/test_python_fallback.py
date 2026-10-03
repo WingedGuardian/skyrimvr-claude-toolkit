@@ -242,18 +242,36 @@ def test_a_hanging_probe_is_cut_off_and_the_chain_moves_on(tmp_path):
     assert time.time() - t < 25, "a hanging probe held the hook past its budget"
 
 
-def test_a_hanging_engine_ends_in_a_deny_before_the_agents_timeout(tmp_path):
-    """The agent's own 30 s hook timeout DISCARDS a late deny and runs the command (measured), so the
-    wrapper must give up first."""
+def test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget(tmp_path):
+    """The normal path has no `timeout` fork: run.py's own watchdog must end a call stuck in C code that
+    holds the GIL (a catastrophic regex), and the wrapper must turn that into the ordinary deny. The agent
+    DISCARDS a deny that arrives after its own 30 s timeout (measured), so ending first is the whole point."""
     import time
-    hang = _shim(tmp_path / "hang", "python", "sleep 12\n")
-    root = _install(tmp_path, hang.as_posix())
+    root = _install(tmp_path, REAL_PY)
+    run_py = root / "tools" / "skyguard" / "run.py"
+    src = run_py.read_text(encoding="utf-8")
+    needle = "    raw = sys.stdin.buffer.read()"
+    assert needle in src
+    run_py.write_text(src.replace(needle, "    import re; re.match(r'(a+)+$', 'a' * 30 + 'b')\n" + needle, 1),
+                      encoding="utf-8", newline="\n")
     t = time.time()
-    env_budget = {"SKYGUARD_ENGINE_TIMEOUT": "2"}
-    r = _fire(root, [], "protect-files.sh", _esp_write(root), env_budget)
+    r = _fire(root, [], "protect-files.sh", _esp_write(root), {"SKYGUARD_ENGINE_TIMEOUT": "2"})
+    assert "GUARD INERT" in _reason(r) and "engine failed" in _reason(r), r.stdout
+    assert r.stdout.strip().startswith("{") and "Traceback" not in r.stdout and "Thread" not in r.stdout
+    assert time.time() - t < 12, "the watchdog did not end the call at its budget"
+
+
+def test_a_hanging_fallback_engine_is_cut_off_by_timeout(tmp_path):
+    """On the fallback path the wrapper bounds the engine with coreutils `timeout`."""
+    import time
+    root = _install(tmp_path, MISSING)
+    _shim(tmp_path / "shims", "python",
+          f'case "$*" in *--selftest*|*version_info*) exec "{REAL_PY}" "$@" ;; esac\nexec sleep 40\n')
+    t = time.time()
+    r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root), {"SKYGUARD_ENGINE_TIMEOUT": "2"})
     assert "GUARD INERT" in _reason(r) and "engine failed" in _reason(r), r.stdout
     assert "exit 124" in _failed(root, "protect-files"), _failed(root, "protect-files")
-    assert time.time() - t < 8, "the engine call was not cut off at its budget"
+    assert time.time() - t < 25, "the fallback engine call was not cut off at its budget"
 
 
 def test_known_locations_are_tried_newest_version_first(tmp_path):

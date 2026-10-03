@@ -5,6 +5,7 @@ from "the engine broke" -- the second must never read as allow (spec section 5.1
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import os
 import sys
 from pathlib import Path
@@ -43,6 +44,14 @@ def _telemetry(a, v) -> None:
         health.trim_latency(a.telemetry, a.role)
 
 
+def _engine_budget() -> float:
+    try:
+        b = float(os.environ.get("SKYGUARD_ENGINE_TIMEOUT", "20"))
+    except ValueError:
+        return 20.0
+    return b if b > 0 else 20.0
+
+
 def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
     if len(args) == 2 and args[0] == "--selftest":
@@ -52,6 +61,14 @@ def main(argv=None) -> int:
             return 1
         _emit("skyguard-selftest:{}\n".format(args[1]))
         return 0
+    # Hard time limit, armed before anything can run long. faulthandler's watchdog is a C thread that does
+    # not need the GIL, so it fires even inside a catastrophic regex; exit=True ends the process with
+    # status 1 (the wrapper's "engine failed" deny) and the traceback goes to stderr, which the wrapper
+    # discards -- never stdout. The agent discards a deny that arrives after ITS timeout, so we must end first.
+    try:
+        faulthandler.dump_traceback_later(_engine_budget(), exit=True)
+    except (OSError, ValueError, AttributeError, RuntimeError):
+        pass   # no usable stderr: run unwatched rather than not at all (the wrapper's timeout still bounds a fallback)
     ap = argparse.ArgumentParser()
     ap.add_argument("agent", choices=sorted(ADAPTERS))
     ap.add_argument("role", choices=["protect-bash", "protect-files", "backup-before-edit",

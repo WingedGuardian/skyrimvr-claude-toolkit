@@ -1160,8 +1160,15 @@ MUTATIONS = [
         "agent/guards/adapters/claude/protect-files.sh",
         'TM=(); command -v timeout >/dev/null 2>&1 && TM=(timeout -k 2 "$t")',
         'TM=()',
-        "tests/test_python_fallback.py::test_a_hanging_engine_ends_in_a_deny_before_the_agents_timeout",
-        id="engine-call-has-no-time-limit",
+        "tests/test_python_fallback.py::test_a_hanging_fallback_engine_is_cut_off_by_timeout",
+        id="fallback-engine-call-has-no-time-limit",
+    ),
+    pytest.param(
+        "tools/skyguard/run.py",
+        "faulthandler.dump_traceback_later(_engine_budget(), exit=True)",
+        "pass",
+        "tests/test_python_fallback.py::test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget",
+        id="engine-watchdog-disarmed",
     ),
     pytest.param(
         "agent/guards/adapters/claude/protect-files.sh",

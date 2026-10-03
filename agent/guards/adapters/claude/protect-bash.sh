@@ -86,12 +86,16 @@ fi
 # are word-split, never eval'd. A fallback that is taken writes a `failed` record BEFORE the engine runs,
 # so the health report says DEGRADED until a call through the configured interpreter completes again.
 # Time limits: the agent DISCARDS a deny that arrives after its own 30 s hook timeout (measured) and runs
-# the command, so every probe and the engine call itself are bounded by coreutils `timeout` -- 3 s per
-# probe, no probing after 8 s, the engine capped so the whole call ends by ~28 s. A timed-out engine exits
-# non-zero and lands in the ordinary "engine failed" deny. Without `timeout` on PATH the calls run
-# unbounded (Git Bash ships it; nothing else is possible from builtins).
+# the command, so everything is bounded. Probes and a FALLBACK engine run use coreutils `timeout` (3 s per
+# probe, no probing after 8 s, the engine capped so the whole call ends by ~28 s); without `timeout` on
+# PATH they run unbounded. The NORMAL path (configured PY works) has no `timeout` -- it is one more fork,
+# ~20-30 ms on every call -- and relies on run.py's in-process watchdog (faulthandler, a C thread that fires
+# even while a regex holds the GIL; SKYGUARD_ENGINE_TIMEOUT s, default 20) which exits 1 into the ordinary
+# "engine failed" deny. NOT covered: a hung interpreter START (before run.py's main) on the configured PY
+# -- rare, and setup.sh verified that PY.
 PYC=("$PY")
 TM=()
+FB=""
 PTMO=(); command -v timeout >/dev/null 2>&1 && PTMO=(timeout -k 1 "${SKYGUARD_PROBE_TIMEOUT:-3}")
 _elapsed() { local n="${EPOCHREALTIME:-}"; [ -n "$n" ] || printf -v n '%(%s)T' -1; EL=$(( ${n%%[.,]*} - ${T0%%.*} )); }
 _budget() {
@@ -108,7 +112,7 @@ py_good() {
     o=$("${PTMO[@]}" "$@" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" --selftest "$n" 2>/dev/null)
     [ "${o%$'\r'}" = "skyguard-selftest:$n" ]
 }
-py_use() { PYC=("$@"); _fail python "configured $PY unusable; used $* -- re-run setup.sh"; return 0; }
+py_use() { PYC=("$@"); FB=1; _fail python "configured $PY unusable; used $* -- re-run setup.sh"; return 0; }
 py_fallback() {
     local c p d m PY_ALIAS="" bases=()
     for c in "py -3" python python3; do
@@ -149,7 +153,7 @@ inert() {
 # missing path fails here; a present-but-broken Python fails below as "engine failed".
 command -v "$PY" >/dev/null 2>&1 || py_fallback || inert python "cannot run Python ($(printf '%s' "$PY" | tr '\134' '/')) -- install Python 3 and run setup.sh to configure its path" "cannot run Python"
 
-run_engine() { _budget; printf '%s' "$INPUT" | "${TM[@]}" "${PYC[@]}" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" claude "$HOOK_NAME" \
+run_engine() { [ -z "$FB" ] || _budget; printf '%s' "$INPUT" | "${TM[@]}" "${PYC[@]}" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" claude "$HOOK_NAME" \
       --root "$ROOT" --root-win "$ROOT_WIN" --project "$PROJECT_DIR" --invocation "$INV" --telemetry "$HB_DIR" 2>/dev/null; }
 OUT=$(run_engine)
 RC=$?

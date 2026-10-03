@@ -15,10 +15,12 @@
 - **An extracted zip that never ran `setup.sh`** (the `{{PYTHON_PATH}}` placeholder still in the hooks) now takes
   the same route: the hooks fall back to a Python they can find and still decide, reported as DEGRADED. They used
   to refuse every command. With no usable Python at all they still refuse (GUARD INERT).
-- **Nothing can hang past the agent's timeout.** Probes get 3 s each and the engine call a hard budget (20 s,
-  ending by ~28 s overall; `SKYGUARD_ENGINE_TIMEOUT` seconds) via coreutils `timeout`, so a hung interpreter ends
-  in the ordinary GUARD INERT deny instead of a late answer the agent discards (which would allow the command).
-  Without `timeout` on PATH the calls run unbounded.
+- **Nothing can hang past the agent's timeout.** On the normal path the engine arms an in-process watchdog
+  (`faulthandler`, a C thread that fires even inside a catastrophic regex) that ends it after 20 s
+  (`SKYGUARD_ENGINE_TIMEOUT` seconds) into the ordinary GUARD INERT deny; the traceback goes to stderr, which
+  the wrapper discards. Fallback probes (3 s each) and a fallback engine run use coreutils `timeout` (without it
+  on PATH they run unbounded). **Not covered:** a hung interpreter *start* (before the engine's `main`) on the
+  configured Python, which `setup.sh` verified; that would need a `timeout` fork on every call (~20-30 ms).
 - **`setup.sh` requires Python 3.8+** (a 3.6 used to pass and then deny everything) and writes the path into the
   hooks in single quotes, so a `$` or backtick in a folder name is no longer expanded on every hook call.
 
