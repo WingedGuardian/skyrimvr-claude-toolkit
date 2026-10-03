@@ -44,7 +44,8 @@ MUTATIONS = [
         "tools/skyguard/paths.py",
         "    _add(game, root_posix)\n    _add(game, root_win)\n",
         "    game.append(" + 'r"[A-Za-z]:[/' + BS * 2 + '].*Skyrim")' + "\n",
-        "tests/test_hooks.py::test_the_delete_rule_does_not_swallow_ordinary_work",
+        # Task 7: a resolved delete operand no longer uses this regex; clause (b)'s root MENTION test still does.
+        "tests/test_skyguard_deletes.py::test_a_path_that_merely_contains_skyrim_is_not_a_root_mention",
         id="install-root-resolved-not-substring-matched",
     ),
     # And the other direction: a guard that cannot work out which directory the install
@@ -661,9 +662,10 @@ MUTATIONS = [
     pytest.param(
         # Go back to anchoring the game-directory deny on one spelling of rm. Eleven
         # other spellings then reach the install, while the README says they cannot.
-        "tools/skyguard/shell_rules.py",
-        "    if has(DESTROYER):",
-        '    if has(r"rm' + BS + 's+(-[a-z]*f[a-z]*' + BS + 's+)?"):',
+        # (Task 7: the deny now keys on the executed program, so the one spelling is the program list.)
+        "tools/skyguard/deletes.py",
+        'DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "rimraf"))',
+        'DELETE_PROGRAMS = frozenset(("rm",))',
         "tests/test_hooks.py::test_the_install_cannot_be_deleted_however_it_is_spelled",
         id="delete-guard-anchored-on-one-spelling-of-rm",
     ),
@@ -712,7 +714,8 @@ MUTATIONS = [
         "tools/skyguard/paths.py",
         'SEP = r"[/' + BS * 2 + ']+"',
         'SEP = r"[/' + BS * 2 + ']"',
-        "tests/test_hooks.py::test_the_install_cannot_be_deleted_however_it_is_spelled",
+        # Task 7: a resolved delete operand no longer uses this regex; clause (b)'s root MENTION test still does.
+        "tests/test_skyguard_deletes.py::test_mention_with_doubled_separators_still_names_the_root",
         id="separator-class-accepts-doubled-paths",
     ),
     # Stop escaping regex metacharacters in the resolved root. `C:/Program Files (x86)/`
@@ -723,7 +726,8 @@ MUTATIONS = [
         "tools/skyguard/paths.py",
         '("' + BS * 2 + '" + c if c in _META else c)',
         "c",
-        "tests/test_hooks.py::test_an_install_path_containing_regex_metacharacters_is_still_guarded",
+        # Task 7: a resolved delete operand no longer uses this regex; clause (b)'s root MENTION test still does.
+        "tests/test_skyguard_deletes.py::test_mention_of_a_root_with_regex_metacharacters_still_names_it",
         id="path-to-ere-escapes-regex-metacharacters",
     ),
     # Stop honouring the CONFIGURED config directory. MO2/Wabbajack put the INIs in the
@@ -904,7 +908,7 @@ MUTATIONS = [
     # call in deny() and the log line survives (hook-canary stays green) while the trace goes silent.
     pytest.param(
         "tools/skyguard/shell_rules.py",
-        'audit.rule(HOOK, rule_id, "deny", reason)',
+        'audit.rule(HOOK, rid, "deny", reason)',          # Task 7: the delete deny records its own id
         'audit.log(HOOK, "DENY", reason)',
         "tests/test_skyguard_shell.py::test_rule_trace_records_the_rule_id",
         id="rule-trace-records-id",
@@ -1005,7 +1009,9 @@ _SR_CLAUSES = [
      "re.compile(r\"(\" + \"|\".join(RESAVER_OPS)", "t06-resaver-variable-op-suffix"),
     ("fallback-op-lookahead", "+ r\")(?![^\\s\\\"'])\", re.ASCII", "+ r\")\", re.ASCII",
      "t06-resaver-variable-op-in-filename"),
-    ("dialect", "    resaver = resaver_apply(command, shell)", "    resaver = resaver_apply(command)", "t04-heredoc-py"),
+    # Task 7: decide() parses once (with the dialect) and hands the parse to the ReSaver rule.
+    ("dialect", "    parsed = shellparse.parse(command, shell)\n    dels", "    parsed = shellparse.parse(command)\n    dels",
+     "t04-heredoc-py"),
 ]
 MUTATIONS += [
     pytest.param(_SR, find, rep, "tests/test_skyguard_shell.py::test_resaver_rows[" + row + "]",
@@ -1025,14 +1031,15 @@ MUTATIONS += [
 # the resaver-prefilter one: the parser rejects or finishes every adversarial shape in milliseconds (measured: 80 KB
 # of `(` 3 ms, 40,000 words 6 ms), so the early return is an optimisation no longer guarding a timeout.
 _SR_TIMING = [
-    ("timing-dotstar-scan", "tools/skyguard/grep.py", "parts = split_dotstar(pattern)", "parts = None", "rm-repeat"),
+    # Task 7: the `rm ... .*root` advice is gone (R10); the mv/cp move advice still relies on the split.
+    ("timing-dotstar-scan", "tools/skyguard/grep.py", "parts = split_dotstar(pattern)", "parts = None", "mv-repeat"),
     # fix round 3: a separator run must start a match only at its first character, in the install-path regex
     # (shared by every delete/move/sed/redirect rule), and the relative-Data rule must not rescan a run.
     ("timing-lead-lookbehind-rm", "tools/skyguard/paths.py", r'LEAD = r"(?<![/\\])[/\\]+"', r'LEAD = r"[/\\]+"',
      "rm-slash-run"),
     ("timing-lead-lookbehind-sed", "tools/skyguard/paths.py", r'LEAD = r"(?<![/\\])[/\\]+"', r'LEAD = r"[/\\]+"',
      "sed-backslash-run"),
-    ("timing-relative-data-run", _SR, r"(\S*[/\\])?Data[/\\]+", r"(\S*[/\\]+)?Data[/\\]+", "rm-r-data-slash-run"),
+    # (Task 7 removed timing-relative-data-run: RELATIVE_DATA_DELETE is gone; relative deletes resolve from cwd.)
     ("timing-registry-split", _SR,
      'has(r"reg(\\.exe)?\\s+delete") or has(r"Remove-ItemProperty.*Bethesda")',
      'has(r"(reg(\\.exe)?\\s+delete|Remove-ItemProperty.*Bethesda)")',
@@ -1383,6 +1390,90 @@ MUTATIONS += [
     pytest.param(_TT, "spent = (time.process_time() - t0) * 1000", "spent = (time.perf_counter() - w0) * 1000",
                  _TT + "::test_cpu_time_ignores_time_spent_waiting", id="timing-harness-cpu-not-wall"),
 ]
+# ---- Plan 5 Task 7: delete rules on the parser (one twin per clause; each names the t07 row it must turn red,
+# fired in-process by tests/test_skyguard_deletes.py::test_t07_row).
+_DL = "tools/skyguard/deletes.py"
+
+
+def _t07(row):
+    return "tests/test_skyguard_deletes.py::test_t07_row[t07-" + row + "]"
+
+
+_DEL_CLAUSES = [
+    # (id, file, find, replace, t07 row that must go red)
+    # clause (a): an operand that RESOLVES into a protected zone
+    ("rule-S-DEL-INSTALL-resolved", _DL, "                if kind and resolved is None:\n",
+     "                if False:\n", "rel-rm-data"),
+    ("rule-S-DEL-INSTALL-scratch", "tools/skyguard/paths.py",
+     'SCRATCH_GLOBS = ("**/__pycache__/**", "**/node_modules/**", "**/.pytest_cache/**")', "SCRATCH_GLOBS = ()",
+     "pycache"),
+    ("rule-S-DEL-INSTALL-covers-ancestor", _DL, "    return _covers_kind(abs_path, roots)", '    return ""',
+     "abs-ancestor"),
+    ("rule-S-DEL-CONFIG-zone", _DL,
+     'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG", "mo2": "S-DEL-MO2"}',
+     'RULE_OF = {"install": "S-DEL-INSTALL", "mo2": "S-DEL-MO2"}', "config-pwsh"),
+    ("rule-S-DEL-MO2-zone", _DL,
+     'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG", "mo2": "S-DEL-MO2"}',
+     'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG"}', "mo2-bash"),
+    ("rule-S-DEL-INSTALL-interpreter-code", _DL,
+     "        if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code)):",
+     "        if False:", "python-rmtree"),
+    ("rule-S-DEL-INSTALL-interpreter-api", _DL,
+     "(has(DESTROYER, code) or has(INTERP_DELETE, code))", "(has(DESTROYER, code))", "node-rmsync"),
+    # clause (b): an UNRESOLVED operand
+    ("rule-S-DEL-UNRESOLVED-needs-root-mention", _DL, "    if unresolved_any and names_root(command, roots, has):",
+     "    if unresolved_any:", "tmp-var"),
+    ("rule-S-DEL-UNRESOLVED-needs-unresolved", _DL, "    if unresolved_any and names_root(command, roots, has):",
+     "    if names_root(command, roots, has):", "grep-control"),
+    ("rule-S-DEL-UNRESOLVED-raw-glob", _DL,
+     "            if raw_reaches(w, ecwd, e.dialect, roots) and unresolved_reach is None:",
+     "            if False:", "glob-middle"),
+    ("rule-S-DEL-UNRESOLVED-short-name", _DL,
+     '    return bool(m) and re.sub(r"[\\s.]", "", comp).startswith(m.group(1))', "    return False", "short-name"),
+    ("rule-S-DEL-UNRESOLVED-pipe-input", _DL,
+     '    if not words and e.stdin_from == "pipe":', "    if False:", "pipe-remove-item"),
+    # clause (c): the parser could not be sure
+    ("rule-S-DEL-FALLBACK-on-parse-fail", _DL,
+     "    if not parsed.ok and has(DESTROYER, command) and names_root(command, roots, has):", "    if False:",
+     "parse-fail"),
+    ("rule-S-DEL-FALLBACK-opaque", _DL,
+     "    if opaque and any(_loose_hit(e, roots, has) for e in parsed.execs):", "    if False:", "opaque-printf-sh"),
+    ("rule-S-DEL-FALLBACK-opaque-per-exec", _DL,
+     "    if opaque and any(_loose_hit(e, roots, has) for e in parsed.execs):",
+     "    if opaque and has(DESTROYER_LOOSE, command) and names_root(command, roots, has):", "opaque-elsewhere"),
+    # R9: no cwd -> advice, never a guess
+    ("rule-S-RELATIVE-UNKNOWN-advises", _DL, "            if nocwd and not relative and _is_data_word(w) and",
+     "            if False and", "relative-unknown"),
+    # primitives
+    ("pwsh-remove-item-alias", _DL,
+     'DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "rimraf"))',
+     'DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "rimraf"))', "rel-pwsh-ri"),
+    ("git-clean-cwd", _DL, "if specs else [root]", "if specs else []", "git-clean"),
+    ("git-clean-dry-run", _DL, '            if "n" in (cluster if e < 0 else cluster[:e]):',
+     '            if "Q" in (cluster if e < 0 else cluster[:e]):', "git-clean-dry-run"),
+    ("git-rm", _DL, 'argv[k] not in ("clean", "rm")', 'argv[k] not in ("clean",)', "git-rm"),
+    ("git-rm-cached", _DL, 'w in ("--dry-run", "--cached")', 'w in ("--dry-run",)', "git-rm-cached"),
+    ("find-delete", _DL, '    if p == "find.delete":\n        return list(e.argv)',
+     '    if p == "find.delete":\n        return None', "rel-find-delete"),
+    ("iodirectory-delete", _DL, '    if p in ("io.file.delete", "io.directory.delete"):', "    if False:", "iodir-delete"),
+    ("robocopy-mir", _DL, '    if flags & {"MIR", "PURGE"} and len(pos) > 1:', "    if False:", "robocopy-mir"),
+    ("rimraf-via-npx", _DL, "    if p in NPX or p in PKG_RUNNERS:", "    if False:", "rimraf"),
+    ("pwsh-valued-param-not-operand", _DL,
+     "                k += 1                                    # its value is a pattern / option, not a path",
+     "                pass", "pwsh-include-not-operand"),
+    ("option-skip", _DL, '        if opts and w.startswith("-") and len(w) > 1:\n            continue',
+     '        if False:\n            continue', "compound-tmp"),
+]
+MUTATIONS += [
+    pytest.param(f, find, rep, _t07(row), id="deletes-" + i if not i.startswith("rule-") else i)
+    for i, f, find, rep, row in _DEL_CLAUSES
+]
+MUTATIONS.append(pytest.param(   # a quoted `[x]` in the install's own name is literal, not a glob: still the install
+    _DL, '                kind = protected_kind(lit, roots) if lit else ""', '                kind = ""',
+    "tests/test_guard_corpus.py::test_hook_reproduces_the_recorded_decision_and_rules[root-metachar-self]",
+    id="rule-S-DEL-INSTALL-literal-quoted-glob",
+))
+
 MUTATIONS.append(pytest.param(   # the pricing driver stops asking the parser: the R4 gate would read 0 forever
     "scripts/guard-corpus/engine_eval.py", "parse_ok = parse_ok and p.ok", "parse_ok = parse_ok",
     "tests/test_price_tool.py::test_parse_failures_are_reported_per_tool_when_the_engine_has_the_parser",

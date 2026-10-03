@@ -175,9 +175,14 @@ def test_parse_failures_are_reported_per_tool_when_the_engine_has_the_parser(tmp
     lines = [_line("Bash", {"command": "ls"}), _line("Bash", {"command": "echo 'oops"}),
              _line("PowerShell", {"command": "Get-Item 'oops"}), _line("PowerShell", {"command": "Get-Item a"})]
     (h / "s.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    # An engine from before the parser: no shellparse.py and (since Task 6) no rule importing it.
-    old = _scratch_engine(tmp_path, "old", [("shell_rules.py", "from . import shellparse\n", "")])
+    # An engine from before the parser: no shellparse.py, and (since Tasks 6-7, where the ReSaver and delete rules
+    # moved onto the parser) a shell rule table that does not use one.
+    old = _scratch_engine(tmp_path, "old", [])
     (old / "shellparse.py").unlink()
+    (old / "deletes.py").unlink()
+    (old / "shell_rules.py").write_text(
+        "from .verdict import Verdict\n\n\ndef decide(command, roots, audit, cwd='', shell=''):\n    return Verdict()\n",
+        encoding="utf-8")
     s, _ = _run(tmp_path, old, SKYGUARD, h)
     assert s["parse_failures"] == {"old": 0, "new": 2}
     assert s["parse_failures_new_per_tool"] == {"Bash": 1, "PowerShell": 1}

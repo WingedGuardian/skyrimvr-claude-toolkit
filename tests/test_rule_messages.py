@@ -16,8 +16,8 @@ from skyguard import rules  # noqa: E402
 
 # The rules still carrying their pre-Plan-5 text (which echoes the command). It may only shrink.
 LEGACY_ALLOWED = {
-    "S-INERT-NOCMD", "S-INERT-NOROOT", "S-DEL-CONFIG", "S-DEL-INSTALL", "S-REGISTRY", "S-PSC-OUT",
-    "S-CHAMPOLLION", "S-DEL-ADVISE", "S-RELATIVE-UNKNOWN", "S-MOVE-INSTALL", "S-REDIRECT-INSTALL",
+    "S-INERT-NOCMD", "S-INERT-NOROOT", "S-REGISTRY", "S-PSC-OUT",
+    "S-CHAMPOLLION", "S-MOVE-INSTALL", "S-REDIRECT-INSTALL",
     "S-SED-WINPATH", "S-PLUGIN-REF", "S-LOADORDER-REF", "S-AUTOMOD-ESP", "S-AUTOMOD-NIF",
     "S-AUTOMOD-ARCHIVE", "S-EXTERNAL-OUT", "W-INERT-NOPATH", "W-PLUGIN", "W-INI",
     "W-SKSE-INI", "W-LOADORDER", "W-PAPYRUS", "W-INSTALL",
@@ -74,9 +74,9 @@ def test_every_rule_has_a_mutation():
 
 def test_message_rejects_unsupported_fields_and_legacy_ids():
     with pytest.raises(ValueError):
-        rules.message("S-DEL-CONFIG")                     # legacy: must go through legacy_message
+        rules.message("S-REGISTRY")                       # legacy: must go through legacy_message
     with pytest.raises(ValueError):
-        rules.message("S-DEL-CONFIG", c="x")
+        rules.message("S-DEL-CONFIG", c="x")              # a non-legacy rule rejects a field outside FIELDS
 
 
 def test_registry_entries_are_well_formed():
@@ -95,7 +95,17 @@ def test_legacy_rules_json_maps_every_legacy_template_to_its_id():
     assert {t: i for i, t in legacy.items()}.items() <= m.items()
     extra = {t: i for t, i in m.items() if t not in legacy.values()}
     for t, i in extra.items():
+        if i in rules.REMOVED:
+            assert i not in rules.RULES, (i, "a removed id is back in the registry")
+            continue
         assert i in rules.RULES and not rules.RULES[i]["legacy"], (i, "a frozen extra entry must be a REWRITTEN rule")
+
+
+def test_removed_ids_are_frozen_legacy_ids():
+    """REMOVED names only ids the frozen corpus knows (no typo can hide a live rule), and none is in RULES."""
+    m = json.loads((REPO / "tests" / "guard_corpus" / "legacy_rules.json").read_text(encoding="utf-8"))
+    assert rules.REMOVED <= set(m.values())
+    assert not rules.REMOVED & set(rules.RULES)
 
 
 def test_basename_splits_on_both_separators():

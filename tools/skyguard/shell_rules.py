@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from . import audit as _audit
+from . import deletes
 from . import paths
 from . import rules
 from . import shellparse
@@ -22,14 +23,10 @@ NO_COMMAND_DENY = rules.RULES["S-INERT-NOCMD"]["template"]
 NO_ROOT_LOG = "could not derive the install root -- the delete guard evaluated NOTHING"
 NO_ROOT_DENY = rules.RULES["S-INERT-NOROOT"]["template"]
 
-DENY_CONFIG = rules.RULES["S-DEL-CONFIG"]["template"]
-DENY_INSTALL = rules.RULES["S-DEL-INSTALL"]["template"]
 DENY_REGISTRY = rules.RULES["S-REGISTRY"]["template"]
 DENY_PSC = rules.RULES["S-PSC-OUT"]["template"]
 DENY_CHAMPOLLION = rules.RULES["S-CHAMPOLLION"]["template"]
 
-ADV_DELETE = rules.RULES["S-DEL-ADVISE"]["template"]
-ADV_RELATIVE = rules.RULES["S-RELATIVE-UNKNOWN"]["template"]
 ADV_MOVE = rules.RULES["S-MOVE-INSTALL"]["template"]
 ADV_REDIRECT = rules.RULES["S-REDIRECT-INSTALL"]["template"]
 ADV_SED = rules.RULES["S-SED-WINPATH"]["template"]
@@ -40,11 +37,7 @@ ADV_AUTOMOD_NIF = rules.RULES["S-AUTOMOD-NIF"]["template"]
 ADV_AUTOMOD_ARCHIVE = rules.RULES["S-AUTOMOD-ARCHIVE"]["template"]
 ADV_EXTERNAL = rules.RULES["S-EXTERNAL-OUT"]["template"]
 
-DESTROYER = (
-    r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)\s|Remove-Item|shutil\.rmtree|rmtree\s*\(|\s-delete(\s|$)"
-    r"|Remove-ItemProperty"
-)
-RELATIVE_DATA_DELETE = r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)(\s+-\S*)*\s+(\S*[/\\])?Data[/\\]+"  # one separator before Data: `\S*` already spans a run, so `[/\\]+` was quadratic
+DESTROYER = deletes.DESTROYER   # legacy delete-word regex; now used only by S-DEL-FALLBACK and on interpreter code
 AUTOMOD_ESP_WRITE = (
     r"(automod|SpookysAutomod).*\b(add-weapon|add-spell|add-armor|add-npc|add-quest|add-perk|add-book"
     r"|add-global|add-faction|add-leveled-item|add-form-list|add-encounter-zone|add-location|add-outfit"
@@ -104,11 +97,11 @@ def _text_fallback(command: str):
     return m.group(1).lower(), (s.group(0) if s else "")
 
 
-def resaver_apply(command: str, shell: str = ""):
+def resaver_apply(command: str, shell: str = "", parsed=None):
     """(operation, save basename or "") when ReSaver is executed with --apply and a write operation."""
     if "resaver" not in command.lower():        # every form names resaver; skip the parse entirely
         return None
-    parsed = shellparse.parse(command, shell)
+    parsed = shellparse.parse(command, shell) if parsed is None else parsed
     opaque = False
     for e in parsed.execs:
         if e.program == "?":
@@ -125,10 +118,11 @@ def resaver_apply(command: str, shell: str = ""):
     return None
 
 
-def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "", shell: str = "") -> Verdict:
+def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "", shell: str = "",
+           env=None) -> Verdict:
     """cwd: the payload's working directory, RAW (any spelling; targets normalises it). shell: "bash",
     "powershell", "cmd", or "" for unknown (parsed as bash AND PowerShell, R5). Both default so every existing
-    caller stays valid (Plan 4 handshake); no rule reads cwd yet -- Task 7's delete rules are its first user."""
+    caller stays valid (Plan 4 handshake). env: where `~`, $HOME and %USERPROFILE% resolve from (os.environ)."""
     if command == "":
         audit.rule(HOOK, "S-INERT-NOCMD", "deny", NO_COMMAND_LOG, level="REFUSE")
         return Verdict("deny", NO_COMMAND_DENY)
@@ -158,11 +152,14 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         return grep(pattern, command)
 
     # --- hard blocks
-    if has(DESTROYER):
-        if has(c):
-            return deny("S-DEL-CONFIG")
-        if has(g):
-            return deny("S-DEL-INSTALL")
+    # Deletes (Task 7): decided on the commands that RUN and where their operands RESOLVE (deletes.py, E16).
+    parsed = shellparse.parse(command, shell)
+    dels = deletes.scan(command, parsed, roots, cwd, env)
+    if dels.hit:
+        rid, file = dels.hit
+        reason = rules.message(rid, file=file) if "{file}" in rules.RULES[rid]["template"] else rules.message(rid)
+        audit.rule(HOOK, rid, "deny", reason)
+        return Verdict("deny", reason)
     # Two greps, not one alternation: a `.*` inside a group is not split (grep.split_dotstar) and was quadratic.
     if has(r"reg(\.exe)?\s+delete") or has(r"Remove-ItemProperty.*Bethesda"):
         return deny("S-REGISTRY")
@@ -173,10 +170,10 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
             return deny("S-CHAMPOLLION")
 
     # --- advise
-    if has(r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)\s.*(" + a + ")"):
-        advise("S-DEL-ADVISE")
-    if has(RELATIVE_DATA_DELETE):
-        advise("S-RELATIVE-UNKNOWN")
+    if dels.relative_unknown:
+        msg = rules.message("S-RELATIVE-UNKNOWN", file=dels.relative_unknown)
+        audit.rule(HOOK, "S-RELATIVE-UNKNOWN", "advise", msg)
+        advice.add(msg)
     if has(r"(^|[;&|(`]|\s)(mv|cp|move|copy)\s.*(" + a + ")"):
         advise("S-MOVE-INSTALL")
     if has(r""">\s*["']?(""" + g + "|" + c + ")"):
@@ -197,7 +194,7 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         advise("S-AUTOMOD-ARCHIVE")
 
     # --- ask (drops accumulated advice, as the bash exit does)
-    resaver = resaver_apply(command, shell)
+    resaver = resaver_apply(command, shell, parsed)
     if resaver:
         op, save = resaver
         reason = rules.message("S-RESAVER-APPLY", op=op, save=save or "the save")

@@ -41,6 +41,9 @@ LAYOUTS = {
     "config": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_CONFIG_DIR="D:/Profiles/MO2/profiles/Default"\n'),
     # Plan 5 Task 6: bash would expand $X here, so the guard cannot know the folder -> S-INERT-CONFIG.
     "malformed": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2 $X/mods"\n'),
+    # Plan 5 Task 7: a Mod Organizer setup, so S-DEL-MO2 has roots to protect.
+    "mo2": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2/mods"\n'
+                         'SKYRIM_MO2_OVERWRITE="D:/MO2/overwrite"\n'),
 }
 
 

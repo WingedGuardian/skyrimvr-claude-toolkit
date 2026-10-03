@@ -633,7 +633,7 @@ def test_protect_bash_resolves_its_install_however_it_is_launched(project, how):
     assert ok[0] == "allow", f"{how}: an `ls` was not allowed: {ok}"
     rm = {"tool_name": "Bash", "tool_input": {"command": f'rm -rf "{project.as_posix()}"'}}
     got = _decision(_invoke(project, "protect-bash.sh", rm, how))
-    assert got[0] == "deny" and got[1].startswith("BLOCKED"), f"{how}: deleting the install was not refused: {got}"
+    assert got[0] == "deny" and got[1].startswith("Blocked: this deletes"), f"{how}: deleting the install was not refused: {got}"
 
 
 @pytest.mark.parametrize("how", ["forward-slash", "mixed", "relative"])
@@ -725,7 +725,7 @@ def _check_root_spelling(root: Path, launch: str):
     ok = _fire_at(launch, root, _shell("ls"))
     assert ok[0] == "allow", f"an `ls` was not allowed -- the engine path was misspelled: {ok}"
     got = _fire_at(launch, root, _shell(f'rm -rf "{root.as_posix()}"'))
-    assert got[0] == "deny" and got[1].startswith("BLOCKED"), f"deleting the install was not refused: {got}"
+    assert got[0] == "deny" and got[1].startswith("Blocked: this deletes"), f"deleting the install was not refused: {got}"
 
 
 def test_a_drive_root_is_converted_to_its_windows_spelling(tmp_path):

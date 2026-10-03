@@ -173,6 +173,76 @@ def test_shell_rules_stay_fast_on_adversarial_input(name):
     assert_linear(name, make)
 
 
+# Plan 5 Task 7: the delete rules resolve EVERY operand of every delete primitive against the cwd, glob- and
+# short-name-match unresolved words against the roots, scan interpreter code and each opaque exec's words. Shapes
+# aimed at each of those, fired with a cwd inside the install (so relative words really resolve) in bash and
+# PowerShell.
+def _delete_shapes(N):
+    # The parser gives up past 2,000 tokens (MAX_TOKENS: the legacy text rules decide then), so a shape of 40,000
+    # one-letter words would measure only that fallback. Repeated units are therefore LONG words (F = 60, W = 200,
+    # X = 400 characters), keeping every shape at ~1,100-1,400 tokens at 80 KB so the per-operand code really runs
+    # on every word (test_the_delete_shapes_reach_the_delete_code checks it).
+    F, W, X = "f" * 60, "w" * 200, "x" * 400
+    return {
+        "rm-many-operands": "rm " + (F + " ") * (N // 61),
+        "rm-many-data-operands": "rm -rf " + ("Data/" + F + " ") * (N // 66),
+        "rm-many-glob-operands": "rm -rf " + ("/c/*/" + F + " ") * (N // 66),
+        "rm-many-short-operands": "rm " + ("C:/GOGGAM~1/" + F + " ") * (N // 73),
+        "rm-var-operands": 'ls "' + GAME + '"; rm ' + ('"$X' + F + '" ') * (N // 65),
+        "rm-option-run": "rm " + ("-" + F + " ") * (N // 62) + "x",
+        "rm-deep-relative": "rm " + "a/" * (N // 2) + "x",
+        "rm-dotdot-run": "rm " + "../" * (N // 3) + "x",
+        "rm-glob-middle-run": "rm /c/" + "*/" * (N // 2) + "x",
+        "rm-short-name-run": "rm C:/" + "AB~1/" * (N // 5) + "x",
+        "git-clean-specs": "git clean -fd -- " + (F + " ") * (N // 61),
+        "git-global-opts": "git " + ("-c a=" + W + " ") * (N // 206) + "clean -f",
+        "git-rm-specs": "git rm -r " + (F + " ") * (N // 61),
+        "robocopy-flags": "robocopy a b " + ("/MIR:" + F + " ") * (N // 66),
+        "npx-flags": "npx " + ("-" + F + " ") * (N // 62) + "rimraf x",
+        "python-code-long": 'python -c "' + "os.remove(x); " * (N // 14) + '" "' + GAME + '"',
+        "interp-unlink-run": 'python -c "' + "unlink " * (N // 7) + '"',
+        "node-rmsync-run": 'node -e "' + ".rmSync(" * (N // 8) + '"',
+        "remove-item-params": "Remove-Item " + ("-Include " + W + " ") * (N // 210),
+        "remove-item-many": "Remove-Item " + (W + ", ") * (N // 202) + "b",
+        "printf-sh-opaque": "printf '" + "rm -rf x " * (N // 9) + "' | sh",
+        "opaque-many": ("$R " + W + "; ") * (N // 206) + 'ls "' + GAME + '"',
+        "xargs-rm-many": ("ls " + X + " | xargs rm; ") * (N // 417) + 'ls "' + GAME + '"',
+        "find-delete-starts": "find " + (F + " ") * (N // 61) + "-delete",
+        "parse-fail-destroyer": 'rm -rf "' + "x" * N,
+    }
+
+
+PARSE_FAIL_SHAPES = {"parse-fail-destroyer"}
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_the_delete_shapes_reach_the_delete_code(shell):
+    """A shape the parser refuses measures only the fallback regex. Every delete shape but the deliberate parse
+    failure must parse at 80 KB and yield execs, and the operand shapes must yield operands."""
+    from skyguard import deletes, shellparse
+    for name, cmd in _delete_shapes(LARGE).items():
+        p = shellparse.parse(cmd, shell)
+        if name in PARSE_FAIL_SHAPES:
+            assert not p.ok, name
+            continue
+        assert p.ok and p.execs, (name, shell, p.why)
+        if name.startswith(("rm-", "git-clean", "git-rm", "remove-item-many", "robocopy", "npx")) or (
+                name.startswith("find-") and shell == "bash"):           # PowerShell's `find` is find.exe
+            assert any(deletes.operands(e) for e in p.execs), (name, shell)
+
+
+DELETE_SHAPES = sorted(_delete_shapes(SMALL))
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("name", DELETE_SHAPES)
+def test_delete_rules_stay_fast(name, shell):
+    def make(n):
+        cmd = _delete_shapes(n)[name]
+        return lambda: shell_rules.decide(cmd, ROOTS, _QuietAudit(), cwd="/x/install", shell=shell)
+    assert_linear(name + "/" + shell, make)
+
+
 # Plan 5 Task 5: the parser sees every command too, so it gets every shell shape above PLUS shapes aimed at its
 # own structure: deep nesting of ( $( { ` (must fail closed at depth 9, never recurse), long and unterminated
 # quotes and heredocs, 10k `;`, long \-newline chains, PowerShell backtick runs and cmd ^ runs.

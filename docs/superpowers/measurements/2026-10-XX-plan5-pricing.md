@@ -180,3 +180,96 @@ Re-priced 2026-10-03, new engine = a frozen copy of the fix-round tree.
     rows or docs CONTAINING a ReSaver `--apply` line as data. Both were read, and both are correct allows.
 - **S-INERT-CONFIG with the BOM fix and the declare forms:** 0 malformed in the install's real `skyrim-paths.env`
   (1 real file), and 0 in the 3 checked `.example` copies (plan5, master, plan4).
+
+## Task 7: delete rules on the parser (E16, relative deletes, PowerShell forms, MO2)
+
+Run 2026-10-03. New engine = a frozen copy of the working tree. Raw items stay in the session scratchpad.
+
+**Task 7 alone (`--base a07c164`), N = 61,683** (Bash 55,071; PowerShell 1,598; Write 3,445; Edit 1,564; MCP 5).
+0 engine errors. **Parse failures 63 → 63** (Bash 61 of 55,071 = 0.111%; PowerShell 2 of 1,598 = 0.125%; R4 gate
+< 0.5%). 0 shell items carry an empty `cwd` (the R9 empty-cwd path costs nothing on this history).
+
+Decision matrix (old > new): allow>allow 58,853; advise>advise 2,351; ask>ask 11; deny>deny 343;
+**allow>deny 2; deny>advise 90; deny>allow 23; advise>allow 10.** Per rule (a rule "newly fires" when its id is
+new on that item, so a deny that only changed rule counts on both sides):
+
+| rule | newly-deny | no-longer-deny | other |
+|---|---|---|---|
+| S-DEL-INSTALL | 3 | 278 | |
+| S-DEL-CONFIG | 0 | 28 | |
+| S-DEL-UNRESOLVED | 190 | 0 | |
+| S-DEL-FALLBACK | 2 | 0 | |
+| S-REGISTRY | 1 | 1 | |
+| S-RELATIVE-UNKNOWN | | | no-longer-advise 12 |
+| S-PLUGIN-REF / S-EXTERNAL-OUT / S-REDIRECT / S-MOVE / S-LOADORDER | | | newly-advise 87 / 3 / 2 / 1 / 1 (advice a removed deny used to pre-empt) |
+
+Old-rule → new-rule movement: S-DEL-INSTALL→S-DEL-UNRESOLVED 166, S-DEL-CONFIG→S-DEL-UNRESOLVED 24,
+S-DEL-INSTALL→advise 88, S-DEL-INSTALL→allow 21, S-DEL-CONFIG→advise/allow 3, S-DEL-CONFIG→S-DEL-INSTALL 1,
+S-DEL-INSTALL→S-DEL-FALLBACK 1, S-DEL-INSTALL→S-REGISTRY 1, S-REGISTRY→S-DEL-FALLBACK 1, S-RELATIVE-UNKNOWN→none 12,
+allow→S-DEL-INSTALL 2.
+
+**Newly denied items (decision moved to deny): 2. Cap (200) not approached.** Both read:
+- `cd .claude/backups/.hook-heartbeat && rm -f protect-bash.blind ...` (cwd = install): deletes hook heartbeat
+  markers under `.claude/`. True positive BY R8 (`.claude/` stays protected); cost 1 item.
+- `cd _CLAUDE_OUTPUT/nexus-v3.9 && rm -f <two stale notes>` (cwd = install): deletes the user's own deliverables
+  folder inside the install. **Ruling:** not added to `SCRATCH_GLOBS` -- it holds files the user reads, so
+  deleting there is the user's call; cost 1 item.
+
+**No-longer-denied items (deny → advise/allow): 113, every one read** (operands resolved and listed per item):
+- 96 items whose delete operands (136 operands in all) ALL resolve OUTSIDE every protected root: `/tmp/*`,
+  the user's Temp/scratchpad, `C:/Temp/*`, `C:/GOG modding tools/_*`, `C:/GOG Games/spriggit-tmp/*` and
+  `C:/GOG Games/zgin/*` (siblings of the install), `~/.plans`, a toolkit checkout. Each was denied only because
+  the same command also named the install (`cd <install> && ...`). **FP removed.**
+- 17 with no executed delete at all: grep / git log / git commit messages, python heredocs that edit a document or
+  write a script TEXT containing `rm`, hook test harnesses that pass a delete command as data, and 3 `git rm
+  --cached` (index only). **FP removed.**
+- **True positives lost: 0.** (A first pass found one class -- `git rm` without `--cached` deletes working files
+  and was caught only by the text rule -- and `git rm` was added as a delete primitive before this run.)
+- advise → allow (S-RELATIVE-UNKNOWN, 12): absolute operands outside the install, variables holding scratch paths,
+  echo/commit text. All correct (the cwd is known on every item, so relative words resolve).
+
+**Rule moves that stay deny (read by class, not changing a decision):**
+- S-DEL-UNRESOLVED 190 = deny→deny. A variable operand (`rm -rf "$SCRATCH/x"`) in a command that also names the
+  install. Classified by substituting each command's own literal assignments (analysis only): **20 true positives**
+  (the variable holds a path in the install: `.claude/backups/...`, `_CLAUDE_OUTPUT/...`, `Data/...`), **100 false
+  positives** (scratchpad / Temp / `/tmp`), **70 unknown** (loop variables, values built from other variables,
+  `mktemp`). These were denied before too (by S-DEL-INSTALL's text test); the new message says what to do ("Write
+  the full path"). Not narrowed here: tracking same-command assignments is a parser feature with its own misread
+  risk (a silent allow) -- carried as a follow-up with this count.
+- S-DEL-FALLBACK 2 = deny→deny: hook test harnesses whose single exec carries a delete command and the install
+  path as data next to an opaque `"$JQ"` / `bash .claude/hooks/$1`. Retained FPs.
+- **Ruling (opaque clause):** an opaque program triggers the fallback only when ONE exec's own words carry both a
+  delete word and a protected root. A first version applied the legacy whole-command test to any command with an
+  opaque exec: it re-denied 13 commands of the shape `SP=<spriggit.exe>; rm -rf /tmp/x; "$SP" serialize
+  <install>/Data/...` (13 of 13 read: false positives) and newly denied 1 more (an `echo '{"command":"rm -rf
+  /tmp/x"}' | "$JQ"` probe beside a `cd <install>`). Per exec, both are gone and `printf 'rm -rf <install>' | sh`
+  still denies.
+
+**Cumulative (`--base c3f32ef`), N = 61,683:** the Task 7 figures above, plus S-RESAVER-APPLY newly-ask 10 /
+no-longer-ask 25 (Tasks 4-6) and the 21-item S-REDIRECT-INSTALL/S-WRITE-INSTALL rename (Task 1). 0 errors.
+
+**Rulings ledgered in this task** (each pinned by a t07 row and a mutation):
+- Delete primitives beyond the brief: `git rm` (not `--cached`, not `-n`), `rimraf` (direct and via
+  npx/pnpx/bunx/`pnpm|yarn|bun dlx`), `robocopy` with `/MIR` or `/PURGE` (deletes in the destination) or `/MOV`
+  / `/MOVE` (deletes the source), `[IO.File]::Delete` / `[IO.Directory]::Delete`. A `git -c alias.x=!...` is
+  opaque. Interpreter code (R7(b)) is checked with the legacy delete regex PLUS a short list of delete APIs
+  (`os.remove/unlink/rmdir/removedirs`, `.unlink(`, `.rmdir(`, `.rm(Sync)(`, `remove_tree(`, perl `unlink`): 0 newly
+  denied items from it.
+- `git clean -n` / `--dry-run` deletes nothing; a PowerShell `-WhatIf` is NOT honoured (stricter; 0 items seen).
+- Empty cwd (branch 1 of R9 with no cwd in the payload): a relative operand is unresolved, so it denies under
+  clause (b) when the command names a protected root, and otherwise advises (S-RELATIVE-UNKNOWN) when it names
+  `Data`. 0 history items have an empty cwd.
+- Unknown dialect (R5) with no cwd: PowerShell's reading of `/tmp/x` is the current drive's root, which cannot be
+  placed, so `rm -rf /tmp/x && ls <install>` denies under `shell=""`. Pinned by a test; Claude always sends the
+  dialect.
+- A QUOTED word whose literal reading is a protected path is that path (an install named `Skyrim (VR) [x]$`).
+- Tightening: `rm ".../My Games/S<KELVIN SIGN>yrim VR/a.ini"` now denies (Python's lower() folds the Kelvin sign;
+  NTFS would not): two legacy allow rows superseded as deny.
+
+**Latency (Step 4).** `scripts/guard-latency.py` on a setup.sh-configured copy, 50 runs, three runs under 4-16 %
+sampled CPU load with other sessions active. protect-bash p95 905 / 471 / 372 ms (Plan 2: 358 ms under load).
+The gate (every wrapper p95 <= 1 s) FAILED on each run on wrappers this task does not touch (protect-files p95
+1,105 / 1,667 / 360 ms; session-kb-guard 838 / 1,011 / 2,113 ms) -- the load-dominated tail Plan 2's E2E
+measurement documented. Engine alone, in-process over all 56,669 shell items of the history: median 0.094 → 0.173
+ms, p95 0.663 → 0.675 ms, p99 1.278 → 1.109 ms, max 13.3 → 10.7 ms (old = `a07c164`). The delete rules add no
+measurable tail; an idle-machine gate run is still owed (Task 17).

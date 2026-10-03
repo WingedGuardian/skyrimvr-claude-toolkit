@@ -11,8 +11,12 @@ import re
 # Fields a non-legacy template may use. A file is always rendered as its basename.
 FIELDS = frozenset({"file", "op", "save", "n"})
 
-# S-DEL-ADVISE, S-PLUGIN-REF and S-LOADORDER-REF are placeholder ids for the legacy advice that later Plan 5
-# tasks remove or replace (R10, R11); they are not part of the final rule set.
+# S-PLUGIN-REF and S-LOADORDER-REF are placeholder ids for the legacy advice that later Plan 5 tasks remove or
+# replace (R11); they are not part of the final rule set. S-DEL-ADVISE was removed in Task 7 (R10).
+# Ids that existed and were deleted (their frozen legacy text stays in tests/guard_corpus/legacy_rules.json so the
+# frozen corpus still maps). Never reused for a new rule.
+REMOVED = frozenset({"S-DEL-ADVISE"})     # R10, Task 7: 0 hits in replay; any delete into the install denies
+
 RULES = {
     'S-INERT-NOCMD': {
         "decision": 'deny',
@@ -50,23 +54,51 @@ RULES = {
     'S-DEL-CONFIG': {
         "decision": 'deny',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'BLOCKED: this command would delete inside the Skyrim config directory '
-        '(Documents/My Games/Skyrim). Your INIs and controlmap live there and '
-        'are not recoverable from a mod manager.'
+        'Blocked: this deletes {file} in the Skyrim settings folder.\n'
+        'Your INIs and controlmap there cannot be restored by a mod manager.'
     ),
     },
     'S-DEL-INSTALL': {
         "decision": 'deny',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'BLOCKED: this command names both a deletion and a path inside the '
-        'Skyrim install. If you meant to delete something elsewhere, run it as '
-        'a separate command that does not also mention the game directory.'
+        'Blocked: this deletes {file} inside the Skyrim install.\n'
+        'A mod manager cannot restore your own files there; if you mean it, run it yourself.'
+    ),
+    },
+    'S-DEL-MO2': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        "Blocked: this deletes {file} inside Mod Organizer's mods or overwrite folder.\n"
+        'If you mean it, remove the mod in MO2 or run it yourself.'
+    ),
+    },
+    'S-DEL-UNRESOLVED': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: this deletes a path the guard cannot work out, in a command that names a protected Skyrim folder.\n'
+        'Write the full path, or run it yourself.'
+    ),
+    },
+    'S-DEL-FALLBACK': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: the guard could not read this command, and it contains a deletion and a protected Skyrim folder.\n'
+        'Split it into simpler commands, or run it yourself.'
     ),
     },
     'S-REGISTRY': {
@@ -99,27 +131,13 @@ RULES = {
         'Champollion there.'
     ),
     },
-    'S-DEL-ADVISE': {
-        "decision": 'advise',
-        "hook": 'protect-bash',
-        "legacy": True,
-        "prefixes": [],
-        "template": (
-        'Deleting files inside the live game install: {c}. Deleting the game '
-        'ROOT is denied outright; this is a delete further in, which a mod '
-        'manager can usually redeploy but your own mod files cannot be. Check '
-        'the path is what you meant.'
-    ),
-    },
     'S-RELATIVE-UNKNOWN': {
         "decision": 'advise',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'Deleting inside Data/ by a RELATIVE path: {c}. The hook is never told '
-        "the caller's working directory, so it cannot tell whether this "
-        'resolves into the live install -- check the path is what you meant.'
+        'Note: this deletes {file} by a relative path, and the guard was not told the working folder.'
     ),
     },
     'S-MOVE-INSTALL': {

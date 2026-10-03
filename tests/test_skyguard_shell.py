@@ -26,8 +26,9 @@ def inert(line_no):
 
 
 def run(cmd, tmp_path, game=GAME):
+    # shell="bash": these pin the bash hook's behaviour (the Bash tool). Unknown dialect (R5) is tested on its own.
     r = paths.roots("/x/install", "", {"SKYRIM_GAME_ROOT": game})
-    return shell_rules.decide(cmd, r, audit.Audit(str(tmp_path)))
+    return shell_rules.decide(cmd, r, audit.Audit(str(tmp_path)), shell="bash")
 
 
 def advice(cmd, tmp_path):
@@ -38,6 +39,10 @@ def advice(cmd, tmp_path):
 
 def sub(line_no, cmd):
     return msg(line_no).replace("$COMMAND", cmd)
+
+
+def del_install(f):
+    return rules.message("S-DEL-INSTALL", file=f)
 
 
 def test_rule0_empty_command(tmp_path):
@@ -60,8 +65,10 @@ def test_rule0_checked_before_0b(tmp_path):
 
 
 def test_rule1_config_delete_denied(tmp_path):
+    # Task 7: the delete rules are rewritten (non-legacy text, decided on the executed rm and its resolved operand).
     cmd = 'rm "C:/Users/x/Documents/My Games/Skyrim VR/SkyrimPrefs.ini"'
-    assert (run(cmd, tmp_path).decision, run(cmd, tmp_path).reason) == ("deny", msg(252))
+    v = run(cmd, tmp_path)
+    assert (v.decision, v.reason) == ("deny", rules.message("S-DEL-CONFIG", file="SkyrimPrefs.ini"))
 
 
 def test_rule1_no_destroyer_no_fire(tmp_path):
@@ -70,16 +77,23 @@ def test_rule1_no_destroyer_no_fire(tmp_path):
 
 def test_rule2_install_delete_denied_with_exact_text(tmp_path):
     v = run(f'rm -rf "{GAME}"', tmp_path)
-    assert (v.decision, v.reason) == ("deny", msg(253))
+    assert (v.decision, v.reason) == ("deny", del_install("The Elder Scrolls V Skyrim VR"))
 
 
 def test_rule2_destroyer_elsewhere_allowed(tmp_path):
     assert run("rm -rf /tmp/scratch", tmp_path) == ("allow", "", "")
 
 
-def test_rule2_conjunction_is_per_grep_not_per_line(tmp_path):
+def test_rule2_unresolved_operand_with_the_root_named_still_denies(tmp_path):
+    # No cwd in the payload: `x` cannot be placed, and the command names the install -> S-DEL-UNRESOLVED (Task 7).
     v = run(f"rm x\nls {GAME}", tmp_path)
-    assert v.decision == "deny" and v.reason == msg(253)
+    assert v.decision == "deny" and v.reason == rules.message("S-DEL-UNRESOLVED")
+
+
+def test_rule2_mention_alone_is_not_a_delete(tmp_path):
+    # E16: the old rule denied any text holding a delete word and the install path.
+    assert run(f'grep -rn "rm -rf" "{GAME}/tools"', tmp_path) == ("allow", "", "")
+    assert run(f'rm -rf /tmp/x && ls "{GAME}"', tmp_path) == ("allow", "", "")
 
 
 def test_rule3_registry(tmp_path):
@@ -100,18 +114,27 @@ def test_rule5_champollion_pex_in_scripts(tmp_path):
     assert run(f'Champollion.exe "C:/Temp/Foo.pex" "{GAME}"', tmp_path).decision == "allow"
 
 
-def test_rule6_delete_advice(tmp_path):
-    # Dead in the bash too: its prefix is DESTROYER's first alternative, so any command it matches was
-    # already denied by rule 2/1. Pinned as the deny it really is.
+def test_rule6_delete_advice_is_gone(tmp_path):
+    # R10 (Task 7): S-DEL-ADVISE is deleted; a delete inside the install denies.
     v = run("rm /x/install/Data/a.dds", tmp_path)
-    assert (v.decision, v.reason) == ("deny", msg(253))
+    assert (v.decision, v.reason) == ("deny", del_install("a.dds"))
     assert advice("ls /x/install", tmp_path) == ""
+    assert "S-DEL-ADVISE" not in rules.RULES and "S-DEL-ADVISE" in rules.REMOVED
 
 
 def test_rule7_relative_data_delete(tmp_path):
+    # No cwd: R9 keeps a relative Data delete as advice (S-RELATIVE-UNKNOWN, rewritten in Task 7).
     cmd = "rm -rf Data/Textures/x.dds"
-    assert advice(cmd, tmp_path) == sub(282, cmd)
+    assert advice(cmd, tmp_path) == rules.message("S-RELATIVE-UNKNOWN", file="x.dds")
     assert advice("rm mydata/cache.bin", tmp_path) == ""
+
+
+def test_rule7_relative_delete_resolves_from_the_payload_cwd(tmp_path):
+    r = paths.roots("/x/install", "", {"SKYRIM_GAME_ROOT": GAME})
+    v = shell_rules.decide("rm -rf Data", r, audit.Audit(str(tmp_path)), cwd="/x/install", shell="bash")
+    assert (v.decision, v.reason) == ("deny", del_install("Data"))
+    v = shell_rules.decide("rm -rf Data", r, audit.Audit(str(tmp_path)), cwd="C:/Users/u/proj", shell="bash")
+    assert v == ("allow", "", "")
 
 
 def test_rule8_move_copy(tmp_path):
@@ -217,7 +240,7 @@ def test_rule17_external_tool_output_into_game(tmp_path):
 
 def test_advice_joined_in_rule_order(tmp_path):
     cmd = "rm Data/a.esp"
-    assert advice(cmd, tmp_path) == sub(282, cmd) + " | " + sub(288, cmd)
+    assert advice(cmd, tmp_path) == rules.message("S-RELATIVE-UNKNOWN", file="a.esp") + " | " + sub(288, cmd)
 
 
 def test_audit_lines_logged(tmp_path):
@@ -225,7 +248,7 @@ def test_audit_lines_logged(tmp_path):
     run(f'rm -rf "{GAME}"', tmp_path)
     log = (tmp_path / ".claude/backups/AUDIT_LOG.txt").read_text(encoding="utf-8")
     assert "protect-bash ADVISE: " + sub(289, "cat plugins.txt") in log
-    assert "protect-bash DENY: " + msg(253) in log
+    assert "protect-bash DENY: " + del_install("The Elder Scrolls V Skyrim VR") in log
 
 
 LAYOUT_ENV = {
@@ -251,6 +274,8 @@ def _corpus_rows():
 
 
 CORPUS = _corpus_rows()
+SUPERSEDED = {r.get("supersedes") for r in (json.loads(x) for x in (REPO / "tests" / "guard_corpus" / "intended.jsonl")
+              .read_text(encoding="utf-8").split("\n") if x.strip())}
 
 
 def test_corpus_has_rows_in_both_layouts():
@@ -262,16 +287,18 @@ def test_corpus_has_rows_in_both_layouts():
 @pytest.mark.parametrize("cid,layout,cmd,decision,text", CORPUS, ids=[c[0] for c in CORPUS])
 def test_port_matches_recorded_bash_verdict(tmp_path, cid, layout, cmd, decision, text):
     r = paths.roots("/x/install", "", LAYOUT_ENV[layout])
-    v = shell_rules.decide(cmd, r, audit.Audit(str(tmp_path)))
+    v = shell_rules.decide(cmd, r, audit.Audit(str(tmp_path)), shell="bash")      # every row is a Bash tool payload
     if v.decision == "allow" and v.context:
         got = ("advise", v.context)
     elif v.decision == "allow":
         got = ("allow", "")
     else:
         got = (v.decision, v.reason)
-    # A rule a later Plan 5 task REWROTE (no longer legacy) keeps its frozen row's decision, not its text.
+    if cid in SUPERSEDED:
+        pytest.skip("deliberately re-specified by an intended row (tests/guard_corpus/intended.jsonl)")
+    # A rule a later Plan 5 task REWROTE or REMOVED keeps its frozen row's decision, not its text.
     frozen = json.loads((REPO / "tests" / "guard_corpus" / "legacy_rules.json").read_text(encoding="utf-8"))
-    rewritten = [t for t, rid in frozen.items() if not rules.RULES[rid]["legacy"]]
+    rewritten = [t for t, rid in frozen.items() if rid in rules.REMOVED or not rules.RULES[rid]["legacy"]]
     if text and any(text == t.replace("{c}", cmd) for t in rewritten):
         assert got[0] == decision
         return
@@ -304,9 +331,9 @@ def test_every_message_constant_equals_the_bash_text():
         "NO_COMMAND_DENY": inert(59), "NO_ROOT_DENY": inert(216),
         "NO_COMMAND_LOG": re.search(r'hooklog REFUSE "(.*)"', LINES[57]).group(1),
         "NO_ROOT_LOG": re.search(r'hooklog REFUSE "(.*)"', LINES[214]).group(1),
-        "DENY_CONFIG": msg(252), "DENY_INSTALL": msg(253), "DENY_REGISTRY": msg(258), "DENY_PSC": msg(263),
+        "DENY_REGISTRY": msg(258), "DENY_PSC": msg(263),
         "DENY_CHAMPOLLION": msg(271),
-        "ADV_DELETE": msg(281), "ADV_RELATIVE": msg(282), "ADV_MOVE": msg(283), "ADV_REDIRECT": msg(284),
+        "ADV_MOVE": msg(283), "ADV_REDIRECT": msg(284),
         "ADV_SED": msg(285), "ADV_PLUGIN": msg(288), "ADV_LOADORDER": msg(289), "ADV_AUTOMOD_ESP": msg(293),
         "ADV_AUTOMOD_NIF": msg(295), "ADV_AUTOMOD_ARCHIVE": msg(296),
         "ADV_EXTERNAL": msg(309),
