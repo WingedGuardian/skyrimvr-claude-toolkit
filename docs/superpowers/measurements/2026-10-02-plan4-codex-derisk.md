@@ -211,3 +211,22 @@ R6 (left out, D16 open), R7 (field left out; adapter caps below the token thresh
 recorded), R2 (the `||` empty-stdin rerun), Task 7 (empty-stdin fault row), Task 8 (hash scheme confirmed
 11/11; `failureMode` not hashed; key spelling still from Step 6), Task 13 (code-mode rollout; count
 `item_completed` items), Assumed base (`codex.md` ≤ 4,153 bytes), Risk 2 (measured bare-entry split).
+
+## Step 6 — TUI probe result (user-run, 2026-10-02, codex-cli 0.160.0)
+
+**PASS.** Evidence: the probe's hook log and raw payloads, and Codex's own session record
+(`originator=codex-tui`, `source=vscode` — run in VS Code's integrated terminal; still the TUI).
+
+| Check | Result |
+|---|---|
+| SessionStart (startup) fires, context reaches the model | yes |
+| PreToolUse fires for an agent shell call (`tool_name` "Bash" on PowerShell) | yes |
+| JSON deny holds in the TUI | yes — "Command blocked by PreToolUse hook … probe json deny (DENYME)"; `DENYME.flag` not created |
+| A harmless call is allowed | yes (`Get-Date` ran) |
+| `!` user-shell command | **no PreToolUse fired** — user-typed commands bypass hooks (user-initiated; not an agent path) |
+| SessionStart after `/compact` (`source=compact`) | fired; the model recalled the tail sentinel `SESSIONTAIL-8812` |
+| `/hooks` approval hashes | stored hashes equal the X4-scheme predictions for both definitions |
+
+Notes: the "approve anything before the block?" answer was given by Codex (the user had Codex run
+`collect.py`), and Codex cannot see TUI approval prompts; the record shows none. Do not infer the
+surface from the rollout `source` field (`vscode` here for the TUI).
