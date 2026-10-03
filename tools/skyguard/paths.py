@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
 
 SEP = r"[/\\]+"
+LEAD = r"(?<![/\\])[/\\]+"
 _META = set("[]*+?^$(){}|.\\")
 CONFIG_LITERAL = r"Documents[/\\]+My Games[/\\]+Skyrim"
 ENV_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR")
@@ -27,7 +28,9 @@ def path_to_regex(path: str) -> Optional[str]:
     if not tail:
         return None
     out = "".join(SEP if c == "/" else ("\\" + c if c in _META else c) for c in tail)
-    return "({d}:|{s}{d}){s}{o}".format(d=drive, s=SEP, o=out) if drive else SEP + out
+    # LEAD: a separator run starts a match only at its first character (an unanchored `[/\]+` is quadratic on
+    # a long run, and a hook past its timeout fails open). Equivalent: a match from mid-run is one from its start.
+    return "({d}:|{l}{d}){s}{o}".format(d=drive, s=SEP, l=LEAD, o=out) if drive else LEAD + out
 
 
 def read_env(path: Path, environ: Dict[str, str]) -> Dict[str, str]:

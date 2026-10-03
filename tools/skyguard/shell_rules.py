@@ -43,7 +43,7 @@ DESTROYER = (
     r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)\s|Remove-Item|shutil\.rmtree|rmtree\s*\(|\s-delete(\s|$)"
     r"|Remove-ItemProperty"
 )
-RELATIVE_DATA_DELETE = r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)(\s+-\S*)*\s+(\S*[/\\]+)?Data[/\\]+"
+RELATIVE_DATA_DELETE = r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)(\s+-\S*)*\s+(\S*[/\\])?Data[/\\]+"  # one separator before Data: `\S*` already spans a run, so `[/\\]+` was quadratic
 AUTOMOD_ESP_WRITE = (
     r"(automod|SpookysAutomod).*\b(add-weapon|add-spell|add-armor|add-npc|add-quest|add-perk|add-book"
     r"|add-global|add-faction|add-leveled-item|add-form-list|add-encounter-zone|add-location|add-outfit"
@@ -200,7 +200,8 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit) -> Verdict:
             return deny("S-DEL-CONFIG")
         if has(g):
             return deny("S-DEL-INSTALL")
-    if has(r"(reg(\.exe)?\s+delete|Remove-ItemProperty.*Bethesda)"):
+    # Two greps, not one alternation: a `.*` inside a group is not split (grep.split_dotstar) and was quadratic.
+    if has(r"reg(\.exe)?\s+delete") or has(r"Remove-ItemProperty.*Bethesda"):
         return deny("S-REGISTRY")
     if has(r"""-(o|-output|-OutputPath)\s+["']?[^"' ]*\.psc(\b|"|')"""):
         return deny("S-PSC-OUT")

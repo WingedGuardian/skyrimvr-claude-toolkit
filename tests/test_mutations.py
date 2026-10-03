@@ -1080,9 +1080,28 @@ _SR_TIMING = [
      r'RESAVER_WRAP_ENV = r"env(?:\s+-\S+|\s+[A-Za-z_][A-Za-z0-9_]*=\S*)*\s+"', "env-assign-resaver"),
     ("timing-unbounded-path", _SR, '{0,160})"   # a program path', '*)"   # a program path', "parens"),
     ("timing-dotstar-scan", "tools/skyguard/grep.py", "parts = split_dotstar(pattern)", "parts = None", "rm-repeat"),
+    # fix round 3: a separator run must start a match only at its first character, in the install-path regex
+    # (shared by every delete/move/sed/redirect rule), and the relative-Data rule must not rescan a run.
+    ("timing-lead-lookbehind-rm", "tools/skyguard/paths.py", r'LEAD = r"(?<![/\\])[/\\]+"', r'LEAD = r"[/\\]+"',
+     "rm-slash-run"),
+    ("timing-lead-lookbehind-sed", "tools/skyguard/paths.py", r'LEAD = r"(?<![/\\])[/\\]+"', r'LEAD = r"[/\\]+"',
+     "sed-backslash-run@80k"),
+    ("timing-relative-data-run", _SR, r"(\S*[/\\])?Data[/\\]+", r"(\S*[/\\]+)?Data[/\\]+", "rm-r-data-slash-run"),
+    ("timing-java-lazy-bound", _SR, r"""[\"']?\s+[^;&|]{0,260}?""", r"""[\"']?\s+[^;&|]*?""", "java-subst-repeat"),
+    ("timing-find-lazy-bound", _SR, r"find\s+[^;&|]{0,260}?", r"find\s+[^;&|]*?", "find-subst-repeat"),
+    ("timing-resaver-prefilter", _SR, 'if "resaver" not in command.lower():', "if False:",
+     "tests/test_skyguard_timing.py::test_resaver_prefilter_skips_unrelated_commands"),
+    ("timing-registry-split", _SR,
+     'has(r"reg(\\.exe)?\\s+delete") or has(r"Remove-ItemProperty.*Bethesda")',
+     'has(r"(reg(\\.exe)?\\s+delete|Remove-ItemProperty.*Bethesda)")',
+     "tests/test_skyguard_timing.py::test_the_registry_rule_is_linear"),
+    ("split-safe-list", "tools/skyguard/grep.py", "or pattern[:cut] not in SPLIT_SAFE_FIRST", "",
+     "tests/test_skyguard_timing.py::test_split_dotstar_refuses_what_it_cannot_prove_equivalent"),
 ]
 MUTATIONS += [
-    pytest.param(f, find, rep, "tests/test_skyguard_timing.py::test_shell_rules_stay_fast_on_adversarial_input[" + shape + "]",
+    pytest.param(f, find, rep,
+                 shape if shape.startswith("tests/") else
+                 "tests/test_skyguard_timing.py::test_shell_rules_stay_fast_on_adversarial_input[" + shape + "]",
                  id="rule-S-RESAVER-APPLY-" + suffix if f == _SR else "guard-" + suffix)
     for suffix, f, find, rep, shape in _SR_TIMING
 ]

@@ -48,7 +48,7 @@ def test_path_regex_escapes_metacharacters():
 def test_path_regex_rejects_relative_and_bare_drive():
     assert paths.path_to_regex("Data/x") is None
     assert paths.path_to_regex("C:/") is None
-    assert paths.path_to_regex("/home/u") == SEP + "home" + SEP + "u"
+    assert paths.path_to_regex("/home/u") == paths.LEAD + "home" + SEP + "u"
 
 
 def test_env_file_overrides_environment_and_parses_both_quote_styles(tmp_path):

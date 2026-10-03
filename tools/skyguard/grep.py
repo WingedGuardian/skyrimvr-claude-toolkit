@@ -18,13 +18,30 @@ def _compile(pattern: str, icase: bool):
     return re.compile(pattern, re.ASCII | (re.IGNORECASE if icase else 0))
 
 
+# The only `A` prefixes the split is applied to. Splitting `A.*B` into "A matches, then B matches after A's FIRST
+# end" is equivalent ONLY when no later A-match can end earlier, and that is not true of regexes in general
+# (`a+.*a` on `aa`, `(abc|a).*b` on `abc`). It is equivalent for these patterns (measured: every real call in
+# the history corpus and 76k fuzzed lines agree with the unsplit regex), so they are listed, not inferred.
+SPLIT_SAFE_FIRST = frozenset([
+    r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)\s",
+    r"(^|[;&|(`]|\s)(mv|cp|move|copy)\s",
+    r"sed\s+-i",
+    r"(automod|SpookysAutomod)",
+    r"Remove-ItemProperty",
+    r"(?<![/\\])[/\\]+Data[/\\]+SKSE[/\\]+Plugins[/\\]+",
+])
+
+
 def split_dotstar(pattern: str):
-    """(first, then) when `pattern` is `first.*then` with ONE top-level `.*` and no top-level `|`, else None.
+    """(first, then) when `pattern` is `first.*then` for a first in SPLIT_SAFE_FIRST, else None (use the full regex).
 
     `A.*B` tried from every A start is quadratic on a line full of A's (`rm rm rm ...`, 6666 starts x 20 KB
-    measured at 2.8 s), and a hook that answers after its timeout has its refusal dropped. It is equivalent to
-    "A matches, then B matches at or after A's first end", which is linear (see grep).
+    measured at 2.8 s), and a hook that answers after its timeout has its refusal dropped. The structural
+    checks below are a second line of defence: a lazy or possessive quantifier, a backreference, an inline flag
+    or lookahead, a second `.*` anywhere, a top-level `|`, or the `.*` inside a group all refuse.
     """
+    if re.search(r"\.\*[?+]|\\[1-9]|\(\?(?!:|<![/\\\[])", pattern) or pattern.count(".*") != 1:
+        return None
     depth, cls, i, cut = 0, False, 0, -1
     while i < len(pattern):
         ch = pattern[i]
@@ -43,11 +60,9 @@ def split_dotstar(pattern: str):
             if ch == "|":
                 return None
             if ch == "." and pattern[i + 1:i + 2] == "*":
-                if cut >= 0:
-                    return None
                 cut = i
         i += 1
-    if cut <= 0 or cut + 2 >= len(pattern):
+    if cut <= 0 or cut + 2 >= len(pattern) or pattern[:cut] not in SPLIT_SAFE_FIRST:
         return None
     return pattern[:cut], pattern[cut + 2:]
 
