@@ -13,11 +13,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from skyguard import backup, codes, engine, health, paths, session, snapshot  # noqa: E402
-from skyguard.adapters import claude  # noqa: E402
+from skyguard.adapters import claude, codex  # noqa: E402
 from skyguard.audit import Audit  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
 
-ADAPTERS = {"claude": claude}
+ADAPTERS = {"claude": claude, "codex": codex}
+CODEX_ROLES = ("pre-tool", "session-start")
 
 
 ENV_UNREADABLE = (
@@ -52,6 +53,37 @@ def _engine_budget() -> float:
     return b if b > 0 else 20.0
 
 
+def _declared_env(a):
+    """The install's declared roots (.claude/skyrim-paths.env), or None when it exists but cannot be read."""
+    try:
+        return paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))
+    except (OSError, ValueError):
+        return None
+
+
+def _codex(a, raw: str) -> int:
+    """Codex roles. Output is SKYGUARD-OK + body: the wrapper tells "decided" (marker present) from "broke"
+    (exit 1, nothing on stdout) -- only a JSON deny blocks on Codex, so the wrapper owns the failure deny."""
+    audit = Audit(a.project)
+    req = codex.to_request(raw)
+    if a.role == "session-start":
+        out, status, code = session.run_status(a.project, req.source, a.bash, audit)
+        _telemetry(a, Verdict("allow", "", "", status, code))
+        _emit("SKYGUARD-OK\n" + codex.BANNER + ("\n" + out if out else ""))
+        return 0
+
+    def roots_fn():
+        env = _declared_env(a)
+        if env is None:
+            raise engine.RootsUnavailable(ENV_UNREADABLE)
+        return paths.roots(a.root, a.root_win, env)
+
+    v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit))
+    _telemetry(a, v)
+    _emit("SKYGUARD-OK\n" + codex.render(v))
+    return 0
+
+
 def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
     if len(args) == 2 and args[0] == "--selftest":
@@ -72,7 +104,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("agent", choices=sorted(ADAPTERS))
     ap.add_argument("role", choices=["protect-bash", "protect-files", "backup-before-edit",
-                                     "snapshot-before-tool", "session-kb-guard"])
+                                     "snapshot-before-tool", "session-kb-guard"] + list(CODEX_ROLES))
     ap.add_argument("--root", default="")
     ap.add_argument("--root-win", default="")
     ap.add_argument("--project", required=True)
@@ -81,8 +113,12 @@ def main(argv=None) -> int:
     ap.add_argument("--telemetry", default="")
     a = ap.parse_args(argv)
     _ARGS.append(a)
+    if (a.agent == "codex") != (a.role in CODEX_ROLES):
+        return 1      # a role the agent does not have: broken wiring, never a decision
     adapter = ADAPTERS[a.agent]
     raw = sys.stdin.buffer.read().decode("utf-8", "replace")
+    if a.agent == "codex":
+        return _codex(a, raw)
     p = adapter.extract(raw)
     audit = Audit(a.project)
     if a.role == "protect-bash":
@@ -90,10 +126,7 @@ def main(argv=None) -> int:
         if not p["command"]:
             v = engine.evaluate_shell(req, paths.Roots("", ""), audit)
         else:
-            try:
-                env = paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))
-            except (OSError, ValueError):
-                env = None
+            env = _declared_env(a)
             if env is None:
                 v = Verdict("deny", ENV_UNREADABLE, status="failed", code="run.ENV_UNREADABLE")
             else:
