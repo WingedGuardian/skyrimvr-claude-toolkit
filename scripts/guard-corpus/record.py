@@ -255,7 +255,7 @@ def supersession_problems(intended: list[dict], legacy: list[dict], templates: d
             out.append(f"{row['id']}: payload, hook or layout differs from the legacy row {target}")
             continue
         if STRENGTH[row["decision"]] < STRENGTH[old["decision"]] and not (
-                row.get("loosens") is True and str(row.get("reason") or "").strip()):
+                row.get("loosens") is True and isinstance(row.get("reason"), str) and row["reason"].strip()):
             out.append(f"{row['id']}: loosens {target} from {old['decision']} to {row['decision']} without "
                        f'"loosens": true and a non-empty reason; a silently loosened rule must be impossible')
             continue

@@ -93,7 +93,9 @@ def test_legacy_rules_json_maps_every_legacy_template_to_its_id():
     # legacy_rules.json is FROZEN: it keeps the old text of a rule a later task rewrote (the frozen corpus rows
     # still need it), so it may hold MORE than the still-legacy templates, but never fewer or a dead id.
     assert {t: i for i, t in legacy.items()}.items() <= m.items()
-    assert set(m.values()) <= set(rules.RULES)
+    extra = {t: i for t, i in m.items() if t not in legacy.values()}
+    for t, i in extra.items():
+        assert i in rules.RULES and not rules.RULES[i]["legacy"], (i, "a frozen extra entry must be a REWRITTEN rule")
 
 
 def test_basename_splits_on_both_separators():

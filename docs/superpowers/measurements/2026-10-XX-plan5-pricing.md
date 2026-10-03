@@ -48,3 +48,17 @@ outside the repo; counts only here.
   deliberate extensions: `t04-java` (`java -jar ...ReSaver.jar --apply`: install allows, intended ask) and
   `t04-herestring` (`cat <<< x` followed by a ReSaver write: the install's awk takes `<<<` for a heredoc and
   swallows the next command; install allows, intended ask).
+
+### Task 4, fix round 1 (widened rule)
+
+Re-priced 2026-10-02 (`--base c3f32ef --only-rule S-RESAVER-APPLY`), N = 58,947. Matrix: allow>allow 56,138;
+advise>advise 2,341; deny>deny 447; **allow>ask 5; ask>advise 5; ask>allow 11**. S-RESAVER-APPLY:
+**newly-ask 5, no-longer-ask 16**, all else 0; 0 errors, 0 parse failures.
+
+- **newly-ask 5: all read, all REAL saves written.** Each is `bash tools/resaver-cli.sh clean "$IN" "$OUT"
+  --undefined --unattached --apply` against a real `Save*.ess` under `Documents/My Games/Skyrim VR/Saves`.
+  The old text rule never asked about `clean` (not in its op list), so these writes went through unasked; the
+  ask is correct. (The message names "the save" because the path is a shell variable.)
+- **no-longer-ask 16** (9 before, +7 from this arc's own sessions): all 16 re-read; every one is text, a test
+  script, a heredoc, a quoted harness argument or a documentation edit. Zero real executions.
+- `ask>advise` 5: the old ask had swallowed advice on the same command; same reading as before.

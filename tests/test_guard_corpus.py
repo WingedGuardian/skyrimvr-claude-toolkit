@@ -229,3 +229,11 @@ def test_intended_supersessions_are_unique_and_loosenings_declared():
     rec = _rec()
     problems = rec.supersession_problems(INTENDED_ROWS, ROWS, TEMPLATES, _always_changed)
     assert [p for p in problems if "loosens" in p or "exactly one" in p] == []
+
+
+def test_loosens_reason_must_be_a_non_empty_string():
+    rec = _rec()
+    old = _legacy("old4", "deny")
+    for bad in (["because"], 5, {"a": 1}, True):
+        row = _supersede(old, "n", "allow", loosens=True, reason=bad)
+        assert rec.supersession_problems([row], [old], {}, _always_changed), bad

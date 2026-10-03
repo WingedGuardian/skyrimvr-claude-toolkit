@@ -52,43 +52,87 @@ AUTOMOD_ESP_WRITE = (
 
 
 # --- S-RESAVER-APPLY: ReSaver is the program RUN, with --apply in the same command (port of install 4a429bd
-# and 1540b99). Text that merely contains the words (a heredoc to python, grep, echo) is not a save write.
-RESAVER_HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*[\"']?([A-Za-z_][A-Za-z0-9_]*)")
-# A heredoc fed to a shell (bash <<EOF, sh -s <<EOF) is commands, not text: its body is kept.
-RESAVER_SHELL_FED = re.compile(r"(^|[;&|( \t])(bash|sh)([ \t]+-[A-Za-z]+)*[ \t]*<<")
-RESAVER_PROGRAM = (
-    r"(?:java(?:\.exe)?[ \t]+(?:-[^\s;&|]+[ \t]+)*[^\s;&|]*resaver[^\s;&|]*\.jar"
-    r"|(?:(?:bash|sh)\s+)?[^\s;&|]*(?:resaver-cli(?:\.sh)?|ResaverCLI))"
+# and 1540b99, widened in Task 4 fix round 1). Text that merely contains the words (a heredoc to python, grep,
+# echo) is not a save write. Every operation below writes a save when given --apply (tools/resaver-cli.sh).
+RESAVER_OPS = "set-global|set-var|clean|reset-havok|cleanse-formlists|remove-created"
+# A heredoc delimiter is any word; a `<<` is not a heredoc after a `#` comment starts, and `<<<` never is.
+RESAVER_HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*[\"']?([^\s\"'<>;&|()]+)")
+# A heredoc FED TO A SHELL is commands, not text: its body is kept. (a) `bash <<EOF`, `/bin/bash -s <<EOF`;
+RESAVER_SHELL_FED = re.compile(
+    r"(^|[;&|( \t])([^\s;&|]*[/\\])?(bash|sh|zsh)(\.exe)?([ \t]+-[A-Za-z]+)*[ \t]*<<", re.ASCII | re.IGNORECASE)
+# (b) `cat <<EOF | bash`.
+RESAVER_PIPED_TO_SHELL = re.compile(
+    r"<<.*\|\s*([^\s;&|]*[/\\])?(bash|sh|zsh)(\.exe)?(\s+-[A-Za-z]+)*\s*($|[;&|)])", re.ASCII | re.IGNORECASE)
+RESAVER_QPATH = r"(?:\"[^\"]*|'[^']*|[^\s;&|\"']*)"          # a program path, quoted (spaces allowed) or not
+RESAVER_NAME = r"(?:resaver-cli(?:\.sh)?|ResaverCLI(?:\.exe)?)[\"']?"
+RESAVER_SHELL = r"(?:(?:[^\s;&|\"']*[/\\])?(?:bash|sh)(?:\.exe)?(?:\s+-[A-Za-z]+)*\s+)?"
+RESAVER_JAVA = (
+    r"(?:\"[^\"]*[/\\]|[^\s;&|\"']*[/\\])?java(?:\.exe)?[\"']?\s+[^;&|]*?"
+    r"(?:" + RESAVER_QPATH + r"resaver[^\s;&|\"']*\.jar|ResaverCLI)[\"']?"
 )
-RESAVER_EXEC = re.compile(
-    r"(?:^|[;&|(]|\$\()\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*" + RESAVER_PROGRAM + r"(?:\s[^;&|]*)?",
-    re.ASCII | re.IGNORECASE)
+RESAVER_PROGRAM = r"(?:" + RESAVER_JAVA + r"|" + RESAVER_SHELL + RESAVER_QPATH + RESAVER_NAME + r")"
+# Where a command can start: line start, ; & | ( ` $( or after a shell keyword.
+RESAVER_ANCHOR = r"(?:^|[;&|(`]|\$\(|(?<![^\s])(?:do|then|else|elif|\{|!)(?=\s))"
+RESAVER_ASSIGN = r"[A-Za-z_][A-Za-z0-9_]*=\S*\s+"
+RESAVER_WRAP_SIMPLE = r"(?:time|nohup|exec|sudo|source|\.)(?:\s+-\S+)*\s+"
+RESAVER_WRAP_ENV = r"env(?:\s+-\S+|\s+[A-Za-z_][A-Za-z0-9_]*=\S*)*\s+"
+RESAVER_WRAP_XARGS = r"xargs(?:\s+(?:-[IndPLsE]\s+\S+|-\S+))*\s+"
+RESAVER_WRAP_TIMEOUT = r"timeout(?:\s+(?:-[sk]\s+\S+|-\S+))*\s+\d+[smhd]?\s+"
+RESAVER_PREFIX = (
+    RESAVER_ANCHOR + r"\s*(?:" + RESAVER_ASSIGN + "|" + RESAVER_WRAP_SIMPLE + "|" + RESAVER_WRAP_ENV + "|"
+    + RESAVER_WRAP_XARGS + "|" + RESAVER_WRAP_TIMEOUT + r")*"
+)
+RESAVER_EXEC = re.compile(RESAVER_PREFIX + RESAVER_PROGRAM + r"(?:\s[^;&|]*)?", re.ASCII | re.IGNORECASE)
+# `bash -c "..."`, `sh -c '...'`, `eval "..."`: the quoted string is itself a command line.
+RESAVER_SHELL_C = re.compile(
+    RESAVER_PREFIX + r"(?:(?:[^\s;&|\"']*[/\\])?(?:bash|sh|zsh)(?:\.exe)?(?:\s+-[A-Za-z]+)*\s+-[A-Za-z]*c[A-Za-z]*"
+    r"|eval)\s+(\"(?:[^\"\\]|\\.)*\"|'[^']*')", re.ASCII | re.IGNORECASE)
 RESAVER_APPLY = re.compile(r"--apply", re.ASCII | re.IGNORECASE)
-RESAVER_OP = re.compile(r"\b(reset-havok|cleanse-formlists|remove-created)\b", re.ASCII | re.IGNORECASE)
+# A whole word: `reset-havok.ess` is a file name, not the operation.
+RESAVER_OP = re.compile(r"(?<![^\s\"'])(" + RESAVER_OPS + r")(?![^\s\"'])", re.ASCII | re.IGNORECASE)
 RESAVER_SAVE = re.compile(r"\"[^\"]*\.ess\"|'[^']*\.ess'|[^\s\"']+\.ess", re.ASCII | re.IGNORECASE)
+RESAVER_CONTINUATION = re.compile(r"\\\r?\n")
 
 
 def drop_heredoc_bodies(command: str) -> list:
     """The command's lines without the bodies of heredocs that are text (not fed to a shell)."""
     out, term, strip = [], "", False
-    for line in command.split("\n"):
+    for line in RESAVER_CONTINUATION.sub("", command).split("\n"):
         line = line.rstrip("\r")
         if term:
             if (line.lstrip("\t") if strip else line) == term:
                 term = ""
             continue
         out.append(line)
-        if RESAVER_SHELL_FED.search(line):
-            continue
         m = RESAVER_HEREDOC.search(line)
-        if m:
-            strip, term = m.group(1) == "-", m.group(2)
+        if not m or re.search(r"(?:^|\s)#", line[:m.start()]):
+            continue
+        if RESAVER_SHELL_FED.search(line) or RESAVER_PIPED_TO_SHELL.search(line):
+            continue
+        strip, term = m.group(1) == "-", m.group(2)
+    return out
+
+
+def _quoted_commands(lines: list) -> list:
+    """`lines` plus the command lines hidden inside `bash -c "..."` / `eval '...'` (nested up to three deep)."""
+    out, todo = list(lines), list(lines)
+    for _ in range(3):
+        found = []
+        for line in todo:
+            for m in RESAVER_SHELL_C.finditer(line):
+                body = m.group(1)[1:-1]
+                if m.group(1)[0] == '"':
+                    body = re.sub(r"\\([\"\\$`])", r"\1", body)
+                found += body.split("\n")
+        out += found
+        todo = found
     return out
 
 
 def resaver_apply(command: str):
     """(operation, save basename or "") when ReSaver is executed with --apply and a write operation."""
-    executed = [m.group(0) for line in drop_heredoc_bodies(command) for m in RESAVER_EXEC.finditer(line)]
+    lines = _quoted_commands(drop_heredoc_bodies(command))
+    executed = [m.group(0) for line in lines for m in RESAVER_EXEC.finditer(line)]
     op = ""
     for seg in executed:
         if RESAVER_APPLY.search(seg):

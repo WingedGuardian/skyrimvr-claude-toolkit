@@ -954,8 +954,8 @@ MUTATIONS = [
     # Plan 5 Task 4: S-RESAVER-APPLY, one mutation per clause. Each names the ROW that must go red.
     pytest.param(   # drop the command-position anchor: any text that mentions resaver-cli matches
         "tools/skyguard/shell_rules.py",
-        r'r"(?:^|[;&|(]|\$\()\s*(?:[A-Za-z_]',
-        r'r"(?:[A-Za-z_]',
+        r'    RESAVER_ANCHOR + r"\s*(?:" + RESAVER_ASSIGN',
+        r'    r"" + r"\s*(?:" + RESAVER_ASSIGN',
         "tests/test_skyguard_shell.py::test_resaver_rows[t04-echo]",
         id="rule-S-RESAVER-APPLY-anchor",
     ),
@@ -975,22 +975,22 @@ MUTATIONS = [
     ),
     pytest.param(   # drop every heredoc body, including one fed to a shell
         "tools/skyguard/shell_rules.py",
-        "if RESAVER_SHELL_FED.search(line):",
-        "if False:",
+        "if RESAVER_SHELL_FED.search(line) or",
+        "if False or",
         "tests/test_skyguard_shell.py::test_resaver_rows[t04-bash-heredoc]",
         id="rule-S-RESAVER-APPLY-shell-heredoc-kept",
     ),
     pytest.param(   # forget the direct java -jar form
         "tools/skyguard/shell_rules.py",
-        "(?:java(?:",
-        "(?:(?!)java(?:",
+        'r"(?:" + RESAVER_JAVA +',
+        'r"(?:(?!)" + RESAVER_JAVA +',
         "tests/test_skyguard_shell.py::test_resaver_rows[t04-java]",
         id="rule-S-RESAVER-APPLY-java",
     ),
     pytest.param(   # drop one operation from the list
         "tools/skyguard/shell_rules.py",
-        r'r"\b(reset-havok|cleanse-formlists|remove-created)\b"',
-        r'r"\b(reset-havok|cleanse-formlists)\b"',
+        r'|cleanse-formlists|remove-created"',
+        r'|cleanse-formlists"',
         "tests/test_skyguard_shell.py::test_resaver_rows[t04-apply-chain]",
         id="rule-S-RESAVER-APPLY-op-list",
     ),
@@ -1026,6 +1026,59 @@ MUTATIONS = [
         id="corpus-intended-text-exact",
     ),
 ]
+
+
+# Plan 5 Task 4, fix round 1: one mutation per new S-RESAVER-APPLY clause, each naming the row it must turn red.
+# (id suffix, text to find, replacement, row). Anchors are raw so a regex backslash survives.
+_SR = "tools/skyguard/shell_rules.py"
+_SR_ALT = r"(?:do|then|else|elif|\{|!)"
+_SR_WRAP = r"(?:time|nohup|exec|sudo|source|\.)"
+_SR_CLAUSES = [
+    ("continuation", 'RESAVER_CONTINUATION.sub("", command)', "command", "t04-cont-op"),
+    ("quoted-path", r'RESAVER_QPATH = r"(?:\"[^\"]*|', r'RESAVER_QPATH = r"(?:(?!)|', "t04-quoted-spaces"),
+    ("java-exe", r"java(?:\.exe)?[", "java[", "t04-java-exe-fullpath"),
+    ("resavercli-exe", r"ResaverCLI(?:\.exe)?)", "ResaverCLI)", "t04-resavercli-exe"),
+    ("java-cp", "|ResaverCLI)", "|(?!))", "t04-java-cp"),
+    ("kw-do", _SR_ALT, r"(?:then|else|elif|\{|!)", "t04-do"),
+    ("kw-then", _SR_ALT, r"(?:do|else|elif|\{|!)", "t04-then"),
+    ("kw-else", _SR_ALT, r"(?:do|then|elif|\{|!)", "t04-else"),
+    ("kw-elif", _SR_ALT, r"(?:do|then|else|\{|!)", "t04-elif"),
+    ("kw-brace", _SR_ALT, r"(?:do|then|else|elif|!)", "t04-brace"),
+    ("kw-bang", _SR_ALT, r"(?:do|then|else|elif|\{)", "t04-bang"),
+    ("wrap-time", _SR_WRAP, r"(?:nohup|exec|sudo|source|\.)", "t04-time"),
+    ("wrap-nohup", _SR_WRAP, r"(?:time|exec|sudo|source|\.)", "t04-nohup"),
+    ("wrap-exec", _SR_WRAP, r"(?:time|nohup|sudo|source|\.)", "t04-exec"),
+    ("wrap-sudo", _SR_WRAP, r"(?:time|nohup|exec|source|\.)", "t04-sudo"),
+    ("wrap-source", _SR_WRAP, r"(?:time|nohup|exec|sudo|\.)", "t04-source"),
+    ("wrap-dot", _SR_WRAP, r"(?:time|nohup|exec|sudo|source)", "t04-dot"),
+    ("wrap-env", 'RESAVER_WRAP_ENV = r"env(?:', 'RESAVER_WRAP_ENV = r"(?!)env(?:', "t04-env"),
+    ("wrap-xargs", 'RESAVER_WRAP_XARGS = r"xargs(?:', 'RESAVER_WRAP_XARGS = r"(?!)xargs(?:', "t04-xargs"),
+    ("wrap-timeout", 'RESAVER_WRAP_TIMEOUT = r"timeout(?:', 'RESAVER_WRAP_TIMEOUT = r"(?!)timeout(?:', "t04-timeout"),
+    ("wrap-chain", '+ r")*"', '+ r")?"', "t04-wrap-chain"),
+    ("shell-c", "for m in RESAVER_SHELL_C.finditer(line):", "for m in []:", "t04-zsh-c"),
+    ("eval", r'r"|eval)\s+', r'r"|(?!))\s+', "t04-eval"),
+    ("shell-c-anchor", '    RESAVER_PREFIX + r"(?:(?:', '    r"(?:^|\\s)" + r"(?:(?:', "t04-echo-bash-c"),
+    ("bin-bash-heredoc", r"([^\s;&|]*[/\\])?(bash|sh|zsh)(\.exe)?([ \t]+", r"(bash|sh|zsh)(\.exe)?([ \t]+", "t04-bin-bash-heredoc"),
+    ("piped-to-shell", "or RESAVER_PIPED_TO_SHELL.search(line)", "or False", "t04-cat-pipe-bash"),
+    ("op-set-global", '"set-global|set-var|clean|reset-havok', '"set-var|clean|reset-havok', "t04-set-global"),
+    ("op-set-var", '"set-global|set-var|clean|reset-havok', '"set-global|clean|reset-havok', "t04-set-var"),
+    ("op-clean", '"set-global|set-var|clean|reset-havok', '"set-global|set-var|reset-havok', "t04-clean"),
+    ("heredoc-dash-delim", r"<>;&|()]+)", r"<>;&|()-]+)", "t04-heredoc-dash-delim"),
+    ("heredoc-in-comment", 'or re.search(r"(?:^|\\s)#", line[:m.start()])', "or False", "t04-heredoc-in-comment"),
+    ("whole-word-op", "found = RESAVER_OP.search(seg)", 'found = re.search("(" + RESAVER_OPS + ")", seg, re.I)', "t04-op-in-filename"),
+]
+MUTATIONS += [
+    pytest.param(_SR, find, rep, "tests/test_skyguard_shell.py::test_resaver_rows[" + row + "]",
+                 id="rule-S-RESAVER-APPLY-" + suffix)
+    for suffix, find, rep, row in _SR_CLAUSES
+]
+MUTATIONS.append(pytest.param(
+    "scripts/guard-corpus/record.py",
+    'isinstance(row.get("reason"), str) and row["reason"].strip()',
+    'str(row.get("reason") or "").strip()',
+    "tests/test_guard_corpus.py::test_loosens_reason_must_be_a_non_empty_string",
+    id="corpus-supersession-reason-is-a-string",
+))
 
 
 def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:
