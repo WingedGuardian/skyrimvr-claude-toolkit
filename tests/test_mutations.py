@@ -1032,10 +1032,10 @@ MUTATIONS = [
 # (id suffix, text to find, replacement, row). Anchors are raw so a regex backslash survives.
 _SR = "tools/skyguard/shell_rules.py"
 _SR_ALT = r"(?:do|then|else|elif|\{|!)"
-_SR_WRAP = r"(?:time|nohup|exec|sudo|source|\.)"
+_SR_WRAP = r"(?:time|nohup|exec|sudo|source|command|\.)"
 _SR_CLAUSES = [
     ("continuation", 'RESAVER_CONTINUATION.sub("", command)', "command", "t04-cont-op"),
-    ("quoted-path", r'RESAVER_QPATH = r"(?:\"[^\"]*|', r'RESAVER_QPATH = r"(?:(?!)|', "t04-quoted-spaces"),
+    ("quoted-path", r'RESAVER_QPATH = r"(?:\"[^\"]{0,260}|', r'RESAVER_QPATH = r"(?:(?!)|', "t04-quoted-spaces"),
     ("java-exe", r"java(?:\.exe)?[", "java[", "t04-java-exe-fullpath"),
     ("resavercli-exe", r"ResaverCLI(?:\.exe)?)", "ResaverCLI)", "t04-resavercli-exe"),
     ("java-cp", "|ResaverCLI)", "|(?!))", "t04-java-cp"),
@@ -1045,28 +1045,58 @@ _SR_CLAUSES = [
     ("kw-elif", _SR_ALT, r"(?:do|then|else|\{|!)", "t04-elif"),
     ("kw-brace", _SR_ALT, r"(?:do|then|else|elif|!)", "t04-brace"),
     ("kw-bang", _SR_ALT, r"(?:do|then|else|elif|\{)", "t04-bang"),
-    ("wrap-time", _SR_WRAP, r"(?:nohup|exec|sudo|source|\.)", "t04-time"),
-    ("wrap-nohup", _SR_WRAP, r"(?:time|exec|sudo|source|\.)", "t04-nohup"),
-    ("wrap-exec", _SR_WRAP, r"(?:time|nohup|sudo|source|\.)", "t04-exec"),
-    ("wrap-sudo", _SR_WRAP, r"(?:time|nohup|exec|source|\.)", "t04-sudo"),
-    ("wrap-source", _SR_WRAP, r"(?:time|nohup|exec|sudo|\.)", "t04-source"),
-    ("wrap-dot", _SR_WRAP, r"(?:time|nohup|exec|sudo|source)", "t04-dot"),
-    ("wrap-env", 'RESAVER_WRAP_ENV = r"env(?:', 'RESAVER_WRAP_ENV = r"(?!)env(?:', "t04-env"),
-    ("wrap-xargs", 'RESAVER_WRAP_XARGS = r"xargs(?:', 'RESAVER_WRAP_XARGS = r"(?!)xargs(?:', "t04-xargs"),
-    ("wrap-timeout", 'RESAVER_WRAP_TIMEOUT = r"timeout(?:', 'RESAVER_WRAP_TIMEOUT = r"(?!)timeout(?:', "t04-timeout"),
+    ("wrap-time", _SR_WRAP, r"(?:nohup|exec|sudo|source|command|\.)", "t04-time"),
+    ("wrap-nohup", _SR_WRAP, r"(?:time|exec|sudo|source|command|\.)", "t04-nohup"),
+    ("wrap-exec", _SR_WRAP, r"(?:time|nohup|sudo|source|command|\.)", "t04-exec"),
+    ("wrap-sudo", _SR_WRAP, r"(?:time|nohup|exec|source|command|\.)", "t04-sudo"),
+    ("wrap-source", _SR_WRAP, r"(?:time|nohup|exec|sudo|command|\.)", "t04-source"),
+    ("wrap-dot", _SR_WRAP, r"(?:time|nohup|exec|sudo|source|command)", "t04-dot"),
+    ("wrap-env", 'RESAVER_WRAP_ENV = r"env', 'RESAVER_WRAP_ENV = r"(?!)env', "t04-env"),
+    ("wrap-xargs", 'RESAVER_WRAP_XARGS = r"xargs', 'RESAVER_WRAP_XARGS = r"(?!)xargs', "t04-xargs"),
+    ("wrap-timeout", 'RESAVER_WRAP_TIMEOUT = r"timeout', 'RESAVER_WRAP_TIMEOUT = r"(?!)timeout', "t04-timeout"),
     ("wrap-chain", '+ r")*"', '+ r")?"', "t04-wrap-chain"),
     ("shell-c", "for m in RESAVER_SHELL_C.finditer(line):", "for m in []:", "t04-zsh-c"),
     ("eval", r'r"|eval)\s+', r'r"|(?!))\s+', "t04-eval"),
     ("shell-c-anchor", '    RESAVER_PREFIX + r"(?:(?:', '    r"(?:^|\\s)" + r"(?:(?:', "t04-echo-bash-c"),
-    ("bin-bash-heredoc", r"([^\s;&|]*[/\\])?(bash|sh|zsh)(\.exe)?([ \t]+", r"(bash|sh|zsh)(\.exe)?([ \t]+", "t04-bin-bash-heredoc"),
-    ("piped-to-shell", "or RESAVER_PIPED_TO_SHELL.search(line)", "or False", "t04-cat-pipe-bash"),
+    ("bin-bash-heredoc", r"([^\s;&|]{0,260}[/\\])?(bash|sh|zsh)(\.exe)?([ \t]+", r"(bash|sh|zsh)(\.exe)?([ \t]+", "t04-bin-bash-heredoc"),
+    ("piped-to-shell", "or _piped_to_shell(line)", "or False", "t04-cat-pipe-bash"),
     ("op-set-global", '"set-global|set-var|clean|reset-havok', '"set-var|clean|reset-havok', "t04-set-global"),
     ("op-set-var", '"set-global|set-var|clean|reset-havok', '"set-global|clean|reset-havok', "t04-set-var"),
     ("op-clean", '"set-global|set-var|clean|reset-havok', '"set-global|set-var|reset-havok', "t04-clean"),
     ("heredoc-dash-delim", r"<>;&|()]+)", r"<>;&|()-]+)", "t04-heredoc-dash-delim"),
     ("heredoc-in-comment", 'or re.search(r"(?:^|\\s)#", line[:m.start()])', "or False", "t04-heredoc-in-comment"),
     ("whole-word-op", "found = RESAVER_OP.search(seg)", 'found = re.search("(" + RESAVER_OPS + ")", seg, re.I)', "t04-op-in-filename"),
+    # fix round 2: more wrappers
+    ("wrap-find", 'RESAVER_WRAP_FIND = r"find', 'RESAVER_WRAP_FIND = r"(?!)find', "t04-find-exec"),
+    ("wrap-execdir", r"-exec(?:dir)?", "-exec", "t04-find-execdir"),
+    ("wrap-command", "source|command|", "source|", "t04-command"),
+    ("wrap-nice", 'RESAVER_WRAP_NICE = r"nice', 'RESAVER_WRAP_NICE = r"(?!)nice', "t04-nice"),
+    ("wrap-xargs-option-arg", r"-[IndPLsE]\s+[^\s-]\S*|", "", "t04-xargs-stdin"),
 ]
+# Task 4 fix round 2: a hook that answers after its timeout is dropped, so each cause of superlinear matching is
+# put back and the timing test must go red. (id suffix, file, find, replace, timing shape that must fail)
+_SR_TIMING = [
+    ("timing-env-ambiguity", _SR, r'RESAVER_WRAP_ENV = r"env\s+(?:-\S+\s+)*"',
+     r'RESAVER_WRAP_ENV = r"env(?:\s+-\S+|\s+[A-Za-z_][A-Za-z0-9_]*=\S*)*\s+"', "env-assign-resaver"),
+    ("timing-unbounded-path", _SR, '{0,160})"   # a program path', '*)"   # a program path', "parens"),
+    ("timing-dotstar-scan", "tools/skyguard/grep.py", "parts = split_dotstar(pattern)", "parts = None", "rm-repeat"),
+]
+MUTATIONS += [
+    pytest.param(f, find, rep, "tests/test_skyguard_timing.py::test_shell_rules_stay_fast_on_adversarial_input[" + shape + "]",
+                 id="rule-S-RESAVER-APPLY-" + suffix if f == _SR else "guard-" + suffix)
+    for suffix, f, find, rep, shape in _SR_TIMING
+]
+for _suffix, _find, _rep in [
+    ("claude", r'r"(^|(?<![/\\])[/\\]+)\.claude', r'r"(^|[/\\]+)\.claude'),
+    ("node-modules", r'r"(?<![/\\])[/\\]+node_modules', r'r"[/\\]+node_modules'),
+    ("skse-ini", r'r"(?<![/\\])[/\\]+Data[/\\]+SKSE', r'r"[/\\]+Data[/\\]+SKSE'),
+    ("install", r'r"(^|(?<![/\\])[/\\]+)Data', r'r"(^|[/\\]+)Data'),
+]:
+    MUTATIONS.append(pytest.param(
+        "tools/skyguard/write_rules.py", _find, _rep,
+        "tests/test_skyguard_timing.py::test_write_rules_stay_fast_on_adversarial_paths[separator-run]",
+        id="guard-timing-separator-run-lookbehind-" + _suffix,
+    ))
 MUTATIONS += [
     pytest.param(_SR, find, rep, "tests/test_skyguard_shell.py::test_resaver_rows[" + row + "]",
                  id="rule-S-RESAVER-APPLY-" + suffix)

@@ -32,9 +32,9 @@ def decide(file_path: str, audit) -> Verdict:
         audit.rule(HOOK, "W-PLUGIN", "deny", DENY_PLUGIN)
         return Verdict("deny", DENY_PLUGIN)
 
-    if grep(r"(^|[/\\]+)\.claude[/\\]+(hooks|plans|backups|memory|projects)[/\\]+", file_path):
+    if grep(r"(^|(?<![/\\])[/\\]+)\.claude[/\\]+(hooks|plans|backups|memory|projects)[/\\]+", file_path):
         return Verdict()
-    if grep(r"[/\\]+node_modules[/\\]+", file_path):
+    if grep(r"(?<![/\\])[/\\]+node_modules[/\\]+", file_path):
         return Verdict()
 
     advice = Advice()
@@ -46,14 +46,14 @@ def decide(file_path: str, audit) -> Verdict:
 
     if grep(r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)$", file_path):
         advise("W-INI")
-    if grep(r"[/\\]+Data[/\\]+SKSE[/\\]+Plugins[/\\]+.*\.ini$", file_path):
+    if grep(r"(?<![/\\])[/\\]+Data[/\\]+SKSE[/\\]+Plugins[/\\]+.*\.ini$", file_path):
         advise("W-SKSE-INI")
     if grep(r"(loadorder\.txt|plugins\.txt)$", file_path):
         advise("W-LOADORDER")
     if grep(r"\.(pex|psc)$", file_path):
         advise("W-PAPYRUS")
 
-    if not advice.items and grep(r"(^|[/\\]+)Data[/\\]+|My Games[/\\]+Skyrim", file_path):
+    if not advice.items and grep(r"(^|(?<![/\\])[/\\]+)Data[/\\]+|My Games[/\\]+Skyrim", file_path):
         advise("W-INSTALL")
 
     return Verdict("allow", "", advice.joined())

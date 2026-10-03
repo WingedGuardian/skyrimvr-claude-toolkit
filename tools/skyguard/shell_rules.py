@@ -52,46 +52,63 @@ AUTOMOD_ESP_WRITE = (
 
 
 # --- S-RESAVER-APPLY: ReSaver is the program RUN, with --apply in the same command (port of install 4a429bd
-# and 1540b99, widened in Task 4 fix round 1). Text that merely contains the words (a heredoc to python, grep,
-# echo) is not a save write. Every operation below writes a save when given --apply (tools/resaver-cli.sh).
+# and 1540b99, widened in Task 4 fix rounds 1 and 2). Text that merely contains the words (a heredoc to python,
+# grep, echo) is not a save write. Every operation below writes a save when given --apply (tools/resaver-cli.sh).
+#
+# KNOWN LIMITS (unreachable by a static text rule; Minor): a program or operation held in a variable
+# (`$R reset-havok ...`); a token split by quoting (`--ap""ply`, `--'apply'`); process substitution; and the
+# PowerShell / cmd dialects (`pwsh -c`, `cmd /c`), which Task 6's shellparse owns.
+#
+# TIMING (a hook that answers after its timeout has its answer DROPPED, so a slow regex fails open): every
+# quantifier that can run over an unbounded run of text is bounded ({0,260} for a path, {0,2000} for a quoted
+# command), and every repetition is unambiguous (each token ends in its own \s+, no two alternatives start
+# alike), so no input makes matching superlinear. tests/test_skyguard_timing.py holds this.
 RESAVER_OPS = "set-global|set-var|clean|reset-havok|cleanse-formlists|remove-created"
 # A heredoc delimiter is any word; a `<<` is not a heredoc after a `#` comment starts, and `<<<` never is.
 RESAVER_HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*[\"']?([^\s\"'<>;&|()]+)")
 # A heredoc FED TO A SHELL is commands, not text: its body is kept. (a) `bash <<EOF`, `/bin/bash -s <<EOF`;
 RESAVER_SHELL_FED = re.compile(
-    r"(^|[;&|( \t])([^\s;&|]*[/\\])?(bash|sh|zsh)(\.exe)?([ \t]+-[A-Za-z]+)*[ \t]*<<", re.ASCII | re.IGNORECASE)
-# (b) `cat <<EOF | bash`.
+    r"(^|[;&|( \t])([^\s;&|]{0,260}[/\\])?(bash|sh|zsh)(\.exe)?([ \t]+-[A-Za-z]+)*[ \t]*<<", re.ASCII | re.IGNORECASE)
+# (b) `cat <<EOF | bash` (searched after the first `<<`, so it is linear).
 RESAVER_PIPED_TO_SHELL = re.compile(
-    r"<<.*\|\s*([^\s;&|]*[/\\])?(bash|sh|zsh)(\.exe)?(\s+-[A-Za-z]+)*\s*($|[;&|)])", re.ASCII | re.IGNORECASE)
-RESAVER_QPATH = r"(?:\"[^\"]*|'[^']*|[^\s;&|\"']*)"          # a program path, quoted (spaces allowed) or not
+    r"\|\s*([^\s;&|]{0,260}[/\\])?(bash|sh|zsh)(\.exe)?(\s+-[A-Za-z]+)*\s*($|[;&|)])", re.ASCII | re.IGNORECASE)
+RESAVER_QPATH = r"(?:\"[^\"]{0,260}|'[^']{0,260}|[^\s;&|\"']{0,160})"   # a program path, quoted (spaces ok) or not
 RESAVER_NAME = r"(?:resaver-cli(?:\.sh)?|ResaverCLI(?:\.exe)?)[\"']?"
-RESAVER_SHELL = r"(?:(?:[^\s;&|\"']*[/\\])?(?:bash|sh)(?:\.exe)?(?:\s+-[A-Za-z]+)*\s+)?"
+RESAVER_SHELL = r"(?:(?:[^\s;&|\"']{0,160}[/\\])?(?:bash|sh)(?:\.exe)?(?:\s+-[A-Za-z]+)*\s+)?"
 RESAVER_JAVA = (
-    r"(?:\"[^\"]*[/\\]|[^\s;&|\"']*[/\\])?java(?:\.exe)?[\"']?\s+[^;&|]*?"
-    r"(?:" + RESAVER_QPATH + r"resaver[^\s;&|\"']*\.jar|ResaverCLI)[\"']?"
+    r"(?:\"[^\"]{0,260}[/\\]|[^\s;&|\"']{0,160}[/\\])?java(?:\.exe)?[\"']?\s+[^;&|]{0,260}?"
+    r"(?:" + RESAVER_QPATH + r"resaver[^\s;&|\"']{0,200}\.jar|ResaverCLI)[\"']?"
 )
 RESAVER_PROGRAM = r"(?:" + RESAVER_JAVA + r"|" + RESAVER_SHELL + RESAVER_QPATH + RESAVER_NAME + r")"
 # Where a command can start: line start, ; & | ( ` $( or after a shell keyword.
 RESAVER_ANCHOR = r"(?:^|[;&|(`]|\$\(|(?<![^\s])(?:do|then|else|elif|\{|!)(?=\s))"
 RESAVER_ASSIGN = r"[A-Za-z_][A-Za-z0-9_]*=\S*\s+"
-RESAVER_WRAP_SIMPLE = r"(?:time|nohup|exec|sudo|source|\.)(?:\s+-\S+)*\s+"
-RESAVER_WRAP_ENV = r"env(?:\s+-\S+|\s+[A-Za-z_][A-Za-z0-9_]*=\S*)*\s+"
-RESAVER_WRAP_XARGS = r"xargs(?:\s+(?:-[IndPLsE]\s+\S+|-\S+))*\s+"
-RESAVER_WRAP_TIMEOUT = r"timeout(?:\s+(?:-[sk]\s+\S+|-\S+))*\s+\d+[smhd]?\s+"
+RESAVER_WRAP_SIMPLE = r"(?:time|nohup|exec|sudo|source|command|\.)\s+(?:-\S+\s+)*"
+RESAVER_WRAP_ENV = r"env\s+(?:-\S+\s+)*"                     # its VAR=x words are RESAVER_ASSIGN, in the loop
+RESAVER_WRAP_XARGS = r"xargs\s+(?:(?:-[IndPLsE]\s+[^\s-]\S*|-\S+)\s+)*"
+RESAVER_WRAP_TIMEOUT = r"timeout\s+(?:(?:-[sk]\s+[^\s-]\S*|-\S+)\s+)*\d+[smhd]?\s+"
+RESAVER_WRAP_NICE = r"nice\s+(?:(?:-n\s+-?\d+|-\d+)\s+)?"
+RESAVER_WRAP_FIND = r"find\s+[^;&|]{0,260}?\s-exec(?:dir)?\s+"  # find ... -exec <prog> ... \;
 RESAVER_PREFIX = (
     RESAVER_ANCHOR + r"\s*(?:" + RESAVER_ASSIGN + "|" + RESAVER_WRAP_SIMPLE + "|" + RESAVER_WRAP_ENV + "|"
-    + RESAVER_WRAP_XARGS + "|" + RESAVER_WRAP_TIMEOUT + r")*"
+    + RESAVER_WRAP_XARGS + "|" + RESAVER_WRAP_TIMEOUT + "|" + RESAVER_WRAP_NICE + "|" + RESAVER_WRAP_FIND + r")*"
 )
 RESAVER_EXEC = re.compile(RESAVER_PREFIX + RESAVER_PROGRAM + r"(?:\s[^;&|]*)?", re.ASCII | re.IGNORECASE)
 # `bash -c "..."`, `sh -c '...'`, `eval "..."`: the quoted string is itself a command line.
 RESAVER_SHELL_C = re.compile(
-    RESAVER_PREFIX + r"(?:(?:[^\s;&|\"']*[/\\])?(?:bash|sh|zsh)(?:\.exe)?(?:\s+-[A-Za-z]+)*\s+-[A-Za-z]*c[A-Za-z]*"
-    r"|eval)\s+(\"(?:[^\"\\]|\\.)*\"|'[^']*')", re.ASCII | re.IGNORECASE)
+    RESAVER_PREFIX + r"(?:(?:[^\s;&|\"']{0,160}[/\\])?(?:bash|sh|zsh)(?:\.exe)?(?:\s+-[A-Za-z]+)*\s+-[A-Za-z]*c[A-Za-z]*"
+    r"|eval)\s+(\"(?:[^\"\\]|\\.){0,2000}\"|'[^']{0,2000}')", re.ASCII | re.IGNORECASE)
 RESAVER_APPLY = re.compile(r"--apply", re.ASCII | re.IGNORECASE)
 # A whole word: `reset-havok.ess` is a file name, not the operation.
 RESAVER_OP = re.compile(r"(?<![^\s\"'])(" + RESAVER_OPS + r")(?![^\s\"'])", re.ASCII | re.IGNORECASE)
-RESAVER_SAVE = re.compile(r"\"[^\"]*\.ess\"|'[^']*\.ess'|[^\s\"']+\.ess", re.ASCII | re.IGNORECASE)
+RESAVER_SAVE = re.compile(
+    r"\"[^\"]{0,300}\.ess\"|'[^']{0,300}\.ess'|(?<![^\s\"'])[^\s\"']{1,300}\.ess", re.ASCII | re.IGNORECASE)
 RESAVER_CONTINUATION = re.compile(r"\\\r?\n")
+
+
+def _piped_to_shell(line: str) -> bool:
+    at = line.find("<<")
+    return at >= 0 and RESAVER_PIPED_TO_SHELL.search(line, at) is not None
 
 
 def drop_heredoc_bodies(command: str) -> list:
@@ -107,7 +124,7 @@ def drop_heredoc_bodies(command: str) -> list:
         m = RESAVER_HEREDOC.search(line)
         if not m or re.search(r"(?:^|\s)#", line[:m.start()]):
             continue
-        if RESAVER_SHELL_FED.search(line) or RESAVER_PIPED_TO_SHELL.search(line):
+        if RESAVER_SHELL_FED.search(line) or _piped_to_shell(line):
             continue
         strip, term = m.group(1) == "-", m.group(2)
     return out
@@ -131,6 +148,8 @@ def _quoted_commands(lines: list) -> list:
 
 def resaver_apply(command: str):
     """(operation, save basename or "") when ReSaver is executed with --apply and a write operation."""
+    if "resaver" not in command.lower():        # every form below names resaver; skip the regexes entirely
+        return None
     lines = _quoted_commands(drop_heredoc_bodies(command))
     executed = [m.group(0) for line in lines for m in RESAVER_EXEC.finditer(line)]
     op = ""
