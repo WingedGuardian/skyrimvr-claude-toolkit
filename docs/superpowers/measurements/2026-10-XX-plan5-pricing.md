@@ -165,3 +165,18 @@ replay above cannot see this rule (the driver passes no paths file), so this is 
 **Re-based rows.** All 63 `t04-*` rows pass unchanged on the parser. 12 `t06-*` rows added; against the Task 5
 engine 4 of them differ (RED): `cmd /c`, the `--ap""ply` quote split, the variable-held program, and the malformed
 paths file. The `pwsh -Command` and PowerShell `&` rows already asked under the regex rule and are pins.
+
+### Task 6, fix round 1 (adversarial review: covers_protected, 8.3 names, admin shares, BOM, scratch ruling)
+
+Re-priced 2026-10-03, new engine = a frozen copy of the fix-round tree.
+- `--base 4f13eef`, **N = 61,149**. 0 engine errors. Parse failures 63 → 63, 0 reasons moved.
+  - The verdict changes are the same as before the round, item for item (compared by command): S-RESAVER-APPLY
+    **newly-ask 6** (the same 5 TP + 1 FP) and **no-longer-ask 1** (the same FP removed).
+  - Nothing else moved. `covers_protected`, the 8.3/admin-share/stream handling and the narrowed scratch list have
+    no rule caller until Task 7, so this round cannot move a verdict; Task 7 prices them.
+- `--base c3f32ef` (cumulative), **N = 61,152**: S-RESAVER-APPLY newly-ask 10, no-longer-ask 25, plus the
+  21-item rename.
+  - The 2 extra no-longer-asks (25 vs 23) are new history items: this session's own commands that write corpus
+    rows or docs CONTAINING a ReSaver `--apply` line as data. Both were read, and both are correct allows.
+- **S-INERT-CONFIG with the BOM fix and the declare forms:** 0 malformed in the install's real `skyrim-paths.env`
+  (1 real file), and 0 in the 3 checked `.example` copies (plan5, master, plan4).

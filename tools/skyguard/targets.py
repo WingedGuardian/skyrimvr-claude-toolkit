@@ -2,6 +2,7 @@ r"""targets: where a command's operand actually resolves, and which protection z
 
     resolve(word, cwd, dialect, env) -> "c:/x/y" | "//server/share/x" | "/posix/x" | None
     zone(abs_path, roots)            -> "install" | "config" | "mo2" | "scratch" | "outside"
+    covers_protected(abs_path, roots) -> True when deleting abs_path reaches a protected root
     exec_cwd(e, cwd, env)            -> the directory an Exec runs in (payload cwd + its cd_before), or None
     resolve_operand(e, word, cwd, env)
 
@@ -23,14 +24,25 @@ UNRESOLVABLE (None) -- a rule must treat None as "could be anywhere", never as s
     zone of its parent is still known);
   - "-" (stdin / `cd -`), an empty word;
   - a drive-relative `C:foo` (it depends on that drive's own cwd) and a non-filesystem PowerShell drive (`HKLM:`);
-  - a relative word with no usable cwd.
+  - a relative word with no usable cwd;
+  - an 8.3 short name (any component with `~<digit>`: the install's own is C:\GOGGAM~1\THEELD~1) -- expanding one
+    needs the filesystem, so the word (or a cwd holding one) is unresolved, never "outside";
+  - another host's admin share (`\\other\c$`). A LOOPBACK admin share (`\\localhost\c$`, `\\127.0.0.1\C$`,
+    `\\?\UNC\localhost\c$`, `\\<COMPUTERNAME>\c$`) is mapped to its drive.
+NTFS stream suffixes (`x.esp:s`, `dir::$INDEX_ALLOCATION`) are cut from each component.
+
+COVERS (fix round 1). zone() says where a path IS; a delete also destroys everything BELOW it. covers_protected()
+says whether a protected root lies at or under the path, matching glob and bash-brace components against the
+root's own names (`C:/GOG Games`, `C:/`, `C:/GOG*`, `*` run from the install's parent all cover the install).
 
 DIALECTS. bash: `~` and $VAR/${VAR}; `/c/x` is drive c: (Git Bash); `/tmp/x` stays a POSIX path (outside).
 PowerShell: `~`, $env:VAR / ${env:VAR}, $HOME, $PWD; `FileSystem::` provider prefixes dropped; `/x` and `\x` are
 the root of the cwd's drive. cmd: %VAR%; `~` is a literal name; `\x` is the root of the cwd's drive.
 
-KNOWN LIMITS: 8.3 short names (PROGRA~1), junctions/symlinks and subst drives are not followed (that would need the
-filesystem); a word whose quoting made `$`/`~` literal is still expanded (argv does not record which PART was quoted).
+KNOWN LIMITS: junctions, symlinks, subst drives and mapped network drives are not followed (that would need the
+filesystem), and PowerShell 5's Remove-Item -Recurse FOLLOWS a junction; a word whose quoting made `$`/`~` literal
+is still expanded (argv does not record which PART was quoted); no option stripping -- the caller skips options up
+to `--` before resolving operands.
 """
 from __future__ import annotations
 
@@ -42,6 +54,9 @@ from . import paths
 HOME_FAMILY = ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH")
 _BASH_VAR = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
 _PS_VAR = re.compile(r"\$(?:\{(env:)?([A-Za-z_][A-Za-z0-9_]*)\}|(env:)?([A-Za-z_][A-Za-z0-9_]*))", re.IGNORECASE)
+# A `$` that still expands: before a name, digit, `{`, `(` or a special parameter. `c$` (an admin share) and a
+# `$` before a separator or at the end are literal in both bash and PowerShell.
+_LIVE_DOLLAR = re.compile(r"\$[A-Za-z0-9_{(?!#*@$-]")
 _CMD_VAR = re.compile(r"%([A-Za-z_][A-Za-z0-9_]*)%")
 _PS_PROVIDER = re.compile(r"(?:Microsoft\.PowerShell\.Core\\)?FileSystem::", re.IGNORECASE)
 _PS_DRIVE = re.compile(r"[A-Za-z][A-Za-z0-9_]+:")      # HKLM:, Env:, Cert: -- not the filesystem
@@ -111,7 +126,7 @@ def _expand(word: str, dialect: str, env: Mapping[str, str], cwd: Optional[str])
         out = _PS_VAR.sub(ps, word)
     else:
         out = _BASH_VAR.sub(lambda m: _var(m.group(1) or m.group(2), env, cwd), word)
-    if "$" in out or "`" in out:
+    if _LIVE_DOLLAR.search(out) or "`" in out:
         raise _Unresolvable(word)                        # $(...), $1, ${x:-y}, a stray backtick
     return out
 
@@ -133,12 +148,37 @@ def _drive_root(cwd: Optional[str]) -> Optional[str]:
     return None
 
 
+_SHORT_NAME = re.compile(r"~[0-9]")
+# Hosts that are THIS machine: an admin share `\\<host>\c$\x` there is drive c: (fix round 1, review item 2).
+_LOOPBACK = re.compile(r"(?:localhost|127(?:\.[0-9]{1,3}){3}|\[?::1\]?|0:0:0:0:0:0:0:1|\.|\?)", re.IGNORECASE)
+_ADMIN_SHARE = re.compile(r"([A-Za-z])\$")
+
+
+def _final(p: Optional[str], env: Mapping[str, str]) -> Optional[str]:
+    """Last checks on a normalised path: an 8.3 short name cannot be expanded without the filesystem (None, the
+    stricter answer); a loopback admin share is its drive; another host's admin share is unknowable (None)."""
+    if p is None:
+        return None
+    if _SHORT_NAME.search(p):
+        return None
+    if p.startswith("//"):
+        bits = p[2:].split("/", 2)
+        if len(bits) >= 2 and _ADMIN_SHARE.fullmatch(bits[1]):
+            host = bits[0]
+            me = (env.get("COMPUTERNAME") or "").lower()
+            if _LOOPBACK.fullmatch(host) or (me and host.lower() == me):
+                return paths.norm_abs(bits[1][0] + ":/" + (bits[2] if len(bits) > 2 else ""))
+            return None
+    return p
+
+
 def normalise_cwd(cwd: str) -> Optional[str]:
     """The payload cwd (any spelling) as a normalised absolute path, or None."""
-    return paths.norm_abs(cwd.strip(), msys=True) if cwd else None
+    p = paths.norm_abs(cwd.strip(), msys=True) if cwd else None
+    return None if p is None or _SHORT_NAME.search(p) else p
 
 
-def resolve(word: str, cwd: str, dialect: str, env: Mapping[str, str]) -> Optional[str]:
+def _resolve(word: str, cwd: str, dialect: str, env: Mapping[str, str]) -> Optional[str]:
     if not word or word == "-":
         return None
     base = normalise_cwd(cwd)
@@ -171,6 +211,10 @@ def resolve(word: str, cwd: str, dialect: str, env: Mapping[str, str]) -> Option
     return paths.norm_abs(paths._join(base, s))
 
 
+def resolve(word: str, cwd: str, dialect: str, env: Mapping[str, str]) -> Optional[str]:
+    return _final(_resolve(word, cwd, dialect, env), env)
+
+
 def exec_cwd(e, cwd: str, env: Mapping[str, str]) -> Optional[str]:
     """The directory an Exec runs in: the payload cwd moved by its cd_before. None when unknowable."""
     base = normalise_cwd(cwd)
@@ -194,7 +238,7 @@ def _under(path: str, root: str) -> bool:
 def zone(abs_path: str, roots) -> str:
     """The protection zone of a normalised absolute path; the most specific (longest) matching root wins, ties
     going to mo2, then config, then install. Case-insensitive. `scratch` is an install path with a SCRATCH_GLOBS
-    component (R8). The config zone also covers any `Documents/My Games/Skyrim*` folder (the legacy literal)."""
+    component (R8), except under the install's tools/ or Data/ (paths.SCRATCH_EXCLUDED_TOP: tool runtime and game). The config zone also covers any `Documents/My Games/Skyrim*` folder (the legacy literal)."""
     p = (abs_path or "").lower().rstrip("/") or "/"
     best, best_len, best_root = "outside", -1, ""
     for kind, dirs in (("mo2", roots.mo2_dirs), ("config", roots.config_dirs), ("install", roots.install_dirs)):
@@ -206,7 +250,144 @@ def zone(abs_path: str, roots) -> str:
     if m and (p[m.end():m.end() + 1] in ("", "/")) and m.end() > best_len:
         best, best_len, best_root = "config", m.end(), p[:m.end()]
     if best == "install":
-        rel = p[len(best_root):].strip("/")
-        if rel and any(c in paths.SCRATCH_NAMES for c in rel.split("/")):
+        rel = p[len(best_root):].strip("/").split("/")
+        if rel[0] and rel[0] not in paths.SCRATCH_EXCLUDED_TOP and any(c in paths.SCRATCH_NAMES for c in rel):
             return "scratch"
     return best
+
+
+# --------------------------------------------------------------------------------------------- covers_protected
+# Fix round 1 (CRITICAL): zone() answers "where is this path". A delete also destroys everything BELOW its operand,
+# so `rm -rf C:/GOG Games`, `rm -rf C:/`, `rm -rf C:/GOG*` and bash `rm -rf *` run from the install's parent all
+# delete the install while zone() says "outside". covers_protected() answers "does deleting this path reach a
+# protected root": a root lies at or under it, or its glob components match the root's components.
+_GLOB_CHARS = frozenset("*?[{")
+MAX_BRACE_ALTS = 64
+MAX_GLOB_COMPONENT = 1024
+
+
+def _braces(comp: str) -> list:
+    """`a{b,c}d` -> [abd, acd] for non-nested groups; capped (an over-cap group set becomes `*`). Linear: the next
+    `}` and `{` after every position are found in one backward pass, and pieces are joined once at the end."""
+    n = len(comp)
+    next_close, next_open = [n] * (n + 1), [n] * (n + 1)
+    for i in range(n - 1, -1, -1):
+        next_close[i] = i if comp[i] == "}" else next_close[i + 1]
+        next_open[i] = i if comp[i] == "{" else next_open[i + 1]
+    groups = []                     # list of alternatives lists; a literal run is a one-element list
+    i, start, count = 0, 0, 1
+    while i < n:
+        if comp[i] == "{":
+            j = next_close[i + 1]
+            if j < n and next_open[i + 1] > j and "," in comp[i + 1:j]:
+                alts = comp[i + 1:j].split(",")
+                count *= len(alts)
+                if count > MAX_BRACE_ALTS:
+                    return ["*"]
+                groups.append([comp[start:i]])
+                groups.append(alts)
+                i = start = j + 1
+                continue
+        i += 1
+    groups.append([comp[start:]])
+    out = [[]]
+    for g in groups:
+        out = [o + [a] for o in out for a in g]
+    return ["".join(o) for o in out]
+
+
+def _class_end(pat: str, i: int) -> int:
+    """Index after the `[...]` starting at i, or -1 when unterminated (then `[` is literal)."""
+    j = i + 1
+    if j < len(pat) and pat[j] in "!^":
+        j += 1
+    if j < len(pat) and pat[j] == "]":
+        j += 1
+    k = pat.find("]", j)
+    return k + 1 if k >= 0 else -1
+
+
+def _class_match(cls: str, ch: str) -> bool:
+    neg = cls[:1] in ("!", "^")
+    body = cls[1:] if neg else cls
+    hit, i = False, 0
+    while i < len(body):
+        if i + 2 < len(body) and body[i + 1] == "-":
+            hit = hit or body[i] <= ch <= body[i + 2]
+            i += 3
+        else:
+            hit = hit or body[i] == ch
+            i += 1
+    return hit != neg
+
+
+def _glob_match(pat: str, s: str) -> bool:
+    """fnmatch for one component (`*`, `?`, `[...]`), iterative with one backtrack point: O(len(pat) * len(s)),
+    never exponential. Both are already lower-cased."""
+    pi = si = 0
+    star_pi, star_si = -1, 0
+    while si < len(s):
+        if pi < len(pat):
+            c = pat[pi]
+            if c == "*":
+                star_pi, star_si = pi, si
+                pi += 1
+                continue
+            if c == "?":
+                pi += 1
+                si += 1
+                continue
+            if c == "[":
+                e = _class_end(pat, pi)
+                if e > 0:
+                    if _class_match(pat[pi + 1:e - 1], s[si]):
+                        pi, si = e, si + 1
+                        continue
+                elif s[si] == "[":
+                    pi += 1
+                    si += 1
+                    continue
+            elif c == s[si]:
+                pi += 1
+                si += 1
+                continue
+        if star_pi < 0:
+            return False
+        pi, star_si = star_pi + 1, star_si + 1
+        si = star_si
+    while pi < len(pat) and pat[pi] == "*":
+        pi += 1
+    return pi == len(pat)
+
+
+def _comp_matches(pat: str, comp: str) -> bool:
+    if not (_GLOB_CHARS & set(pat)):
+        return pat == comp
+    if len(pat) > MAX_GLOB_COMPONENT:
+        return True             # no real name is this long (NTFS: 255); a glob this long is treated as `*` (stricter)
+    return any(_glob_match(alt, comp) if (_GLOB_CHARS & set(alt)) else alt == comp for alt in _braces(pat))
+
+
+def _split(p: str) -> list:
+    if p.startswith("//"):
+        bits = p[2:].split("/")
+        return ["//" + "/".join(bits[:2])] + [b for b in bits[2:] if b]
+    head, _, rest = p.partition("/")
+    return [head] + [b for b in rest.split("/") if b]
+
+
+def covers_protected(abs_path: Optional[str], roots) -> bool:
+    """True when deleting abs_path (globs and bash braces in ANY component expanded against the root's own
+    names) reaches a protected root: install, config or MO2 at or below it. Also true for a `Documents` or
+    `Documents/My Games` folder, which holds the legacy `My Games/Skyrim*` config. Case-insensitive.
+    None is not a path: the caller treats it as unresolved, so this returns False for it."""
+    if not abs_path:
+        return False
+    pc = _split(abs_path.lower().rstrip("/") or "/")
+    for root in tuple(roots.install_dirs) + tuple(roots.config_dirs) + tuple(roots.mo2_dirs):
+        rc = _split(root.lower().rstrip("/") or root.lower())
+        if len(pc) <= len(rc) and all(_comp_matches(a, b) for a, b in zip(pc, rc)):
+            return True
+    if len(pc) >= 2 and pc[-1] == "documents":
+        return True
+    return len(pc) >= 3 and pc[-1] == "my games" and pc[-2] == "documents"

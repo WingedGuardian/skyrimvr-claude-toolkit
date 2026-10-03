@@ -96,7 +96,61 @@ SQ_FORMS = [
     ("C:/a\\ b", "C:/a b"),
     ("'C:/x'  # trailing comment", "C:/x"),
     ("/c/msys/path", "/c/msys/path"),
+    ("'C:/x'#c", "C:/x#c"),                       # fix round 1: `#` mid-word is literal, not a comment
+    ("C:/a#b", "C:/a#b"),
 ]
+
+
+@pytest.mark.parametrize("line,want", [
+    ("declare -x SKYRIM_GAME_ROOT='C:/x'", "C:/x"),
+    ("declare SKYRIM_GAME_ROOT='C:/x'", "C:/x"),
+    ("typeset -x SKYRIM_GAME_ROOT='C:/x'", "C:/x"),
+    ("readonly SKYRIM_GAME_ROOT='C:/x'", "C:/x"),
+    ("declare -rx SKYRIM_GAME_ROOT='C:/x'", "C:/x"),
+    ("export\tSKYRIM_GAME_ROOT='C:/x'", "C:/x"),
+])
+def test_declare_forms_are_read_like_bash(line, want, tmp_path):
+    """Fix round 1: `declare -x KEY=` used to be ignored silently. Oracle: bash sourcing the same bytes."""
+    f = tmp_path / "skyrim-paths.env"
+    f.write_text(line + "\n", encoding="utf-8", newline="\n")
+    cfg = paths.read_config(f, {})
+    assert cfg.malformed == () and cfg.values("SKYRIM_GAME_ROOT") == [want]
+    from conftest import BASH
+    import subprocess
+    got = subprocess.run([BASH, "-c", '. "$1"; printf %s "$SKYRIM_GAME_ROOT"', "x", f.as_posix()],
+                         capture_output=True, timeout=60)
+    assert got.stdout.decode("utf-8") == want
+
+
+@pytest.mark.parametrize("line", ["declare -i SKYRIM_GAME_ROOT='C:/x'", "declare -l SKYRIM_CONFIG_DIR='C:/X'",
+                                  "local SKYRIM_GAME_ROOT='C:/x'"])
+def test_a_declare_that_changes_the_value_is_malformed(line, tmp_path):
+    f = tmp_path / "skyrim-paths.env"
+    f.write_text(line + "\n", encoding="utf-8")
+    assert len(paths.read_config(f, {}).malformed) == 1
+
+
+def test_a_bom_does_not_hide_the_first_key(tmp_path):
+    """Fix round 1: a UTF-8 BOM glued itself to the first key, which was then dropped silently -- even a
+    MALFORMED protection key, so S-INERT-CONFIG never fired."""
+    f = tmp_path / "skyrim-paths.env"
+    f.write_bytes(b"\xef\xbb\xbfSKYRIM_GAME_ROOT='C:/G'\n")
+    assert paths.read_config(f, {}).values("SKYRIM_GAME_ROOT") == ["C:/G"]
+    f.write_bytes(b"\xef\xbb\xbfSKYRIM_GAME_ROOT=relative/x\n")
+    assert paths.read_config(f, {}).malformed == (("skyrim-paths.env", "SKYRIM_GAME_ROOT"),)
+
+
+def test_a_lone_cr_does_not_split_a_line(tmp_path):
+    """bash does not split on CR, so `KEY='C:/x'<CR>OTHER=...` is one line and KEY is not assigned."""
+    f = tmp_path / "skyrim-paths.env"
+    f.write_bytes(b"SKYRIM_GAME_ROOT='C:/x'\rSKYRIM_CONFIG_DIR='C:/y'\r")
+    assert paths.read_config(f, {}).malformed == (("skyrim-paths.env", "SKYRIM_GAME_ROOT"),)
+
+
+def test_a_malformed_key_is_reported_once(tmp_path):
+    f = tmp_path / "skyrim-paths.env"
+    f.write_text("SKYRIM_GAME_ROOT\nSKYRIM_GAME_ROOT\n", encoding="utf-8")
+    assert paths.read_config(f, {}).malformed == (("skyrim-paths.env", "SKYRIM_GAME_ROOT"),)
 
 
 @pytest.mark.parametrize("raw,want", SQ_FORMS)

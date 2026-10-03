@@ -39,6 +39,9 @@ PATHS_FILE = "skyrim-paths.env"
 # false positives (each extension with its count). Only the `**/<name>/**` shape is supported (checked at import):
 # it matches a path with a component <name> anywhere under the install root, the directory itself included.
 SCRATCH_GLOBS = ("**/__pycache__/**", "**/node_modules/**", "**/.pytest_cache/**")
+# Fix round 1 ruling: nothing under these top-level install folders is scratch. tools/ holds tool RUNTIME
+# (tools/zedit/app_src/node_modules, tools/xelib/node_modules with koffi), and Data/ is the game itself.
+SCRATCH_EXCLUDED_TOP = ("tools", "data")
 _SCRATCH_SHAPE = re.compile(r"\*\*/([^*?\[\]/\\]+)/\*\*")
 
 
@@ -77,7 +80,7 @@ def path_to_regex(path: str) -> Optional[str]:
 # Normalised absolute paths
 # ---------------------------------------------------------------------------------------------------------
 _DRIVE_ABS = re.compile(r"([A-Za-z]):/")
-_MSYS_DRIVE = re.compile(r"/(?:cygdrive/|mnt/)?([A-Za-z])(?:/|$)")
+_MSYS_DRIVE = re.compile(r"/(?:proc/cygdrive/|cygdrive/|mnt/)?([A-Za-z])(?:/|$)")
 
 
 def _fold(tail: str) -> str:
@@ -85,6 +88,9 @@ def _fold(tail: str) -> str:
     trailing dots and spaces Windows strips from a component removed (stricter: `Data.` IS `Data` there)."""
     parts = []
     for c in tail.split("/"):
+        if ":" in c:                                    # NTFS stream: x.esp:s, dir::$INDEX_ALLOCATION, d:$I30:$..
+            s = c.split(":", 1)[0]
+            c = s if s else c
         if c not in (".", ".."):
             s = c.rstrip(" .")
             c = s if s else c
@@ -132,9 +138,15 @@ def _join(base: str, rel: str) -> str:
 # ---------------------------------------------------------------------------------------------------------
 # skyrim-paths.env, read as data
 # ---------------------------------------------------------------------------------------------------------
-_ASSIGN = re.compile(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)(\s*)=(.*)")
-_KEY_WORD = re.compile(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\b")
-_BARE = re.compile(r"[A-Za-z0-9_./:,+@%=-]+")
+# `export KEY=`, `declare -x KEY=`, `typeset`, `readonly`: each assigns KEY in a sourced file (fix round 1: a
+# `declare -x` line used to be ignored silently). A declare flag other than x/r/g changes the value (-i evaluates it
+# as arithmetic, -l/-u fold its case), so such a line is malformed for a protection key.
+_DECL = r"\s*(?:(export|declare|typeset|readonly)((?:\s+-[A-Za-z]+)*)\s+)?"
+_ASSIGN = re.compile(_DECL + r"([A-Za-z_][A-Za-z0-9_]*)(\s*)=(.*)")
+_PROT_MENTION = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(PROTECTION_KEYS) + r")(?![A-Za-z0-9_])")
+_SAFE_FLAGS = re.compile(r"[\s\-xrg]*")
+# `#` is literal inside a word (`'C:/x'#c` is C:/x#c); it starts a comment only after whitespace.
+_BARE = re.compile(r"[A-Za-z0-9_./:,+@%=#-]+")
 
 
 def parse_value(raw: str) -> Optional[str]:
@@ -218,21 +230,26 @@ def read_config(path: Path, environ: Mapping[str, str]) -> PathsConfig:
     bad: List[Tuple[str, str]] = []
     path = Path(path)
     if path.is_file():
-        text = path.read_text(encoding="utf-8")
+        # utf-8-sig: a BOM would otherwise glue itself to the first key and drop it silently (fix round 1). Bytes,
+        # not read_text: universal newlines would split a lone CR, which bash does not.
+        text = path.read_bytes().decode("utf-8-sig")
         for line in text.split("\n"):
-            line = line.rstrip("\r")
+            line = line[:-1] if line.endswith("\r") else line
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
             m = _ASSIGN.fullmatch(line)
-            key = m.group(1) if m else ""
+            key = m.group(3) if m else ""
             if not m:
-                k = _KEY_WORD.match(line)
-                if k and k.group(1) in PROTECTION_KEYS and (k.group(1), path.name) not in bad:
-                    bad.append((path.name, k.group(1)))     # names a protection key but assigns nothing bash reads
+                # Names a protection key but assigns nothing bash reads (`KEY`, `local KEY=x`, `KEY+=x`, ...).
+                k = _PROT_MENTION.search(line)
+                if k and (path.name, k.group(1)) not in bad:
+                    bad.append((path.name, k.group(1)))
                 continue
             if key not in ENV_KEYS:
                 continue
-            value = None if m.group(2) else parse_value(m.group(3))   # `KEY ='x'` is a command, not an assignment
+            flags_ok = m.group(1) in (None, "export") or _SAFE_FLAGS.fullmatch(m.group(2) or "")
+            # `KEY ='x'` is a command, not an assignment; `declare -i KEY=` evaluates the value
+            value = None if (m.group(4) or not flags_ok) else parse_value(m.group(5))
             if value is not None and value != "" and norm_abs(value) is None:
                 value = None                                          # a relative root protects nothing
             if value is None:

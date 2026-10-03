@@ -493,3 +493,53 @@ def test_paths_file_read_is_linear(tmp_path):
                      encoding="utf-8")
         return lambda: paths.read_config(f, {})
     assert_linear("paths-file", make)
+
+
+# Fix round 1: an adversarial payload cwd (normalised on every operand) and covers_protected over long globs.
+def _cwd_shapes(N):
+    return {
+        "cwd-dotdot": "C:/" + "../" * (N // 3),
+        "cwd-slashes": "/c" + "/" * N,
+        "cwd-components": "C:/" + "a/" * (N // 2),
+        "cwd-tilde-digit": "C:/" + "a~1/" * (N // 4),
+        "cwd-streams": "C:/" + "a:b/" * (N // 4),
+        "cwd-unc": "//localhost/c$" + "/x" * (N // 2),
+    }
+
+
+@pytest.mark.parametrize("name", sorted(_cwd_shapes(SMALL)))
+def test_targets_stay_fast_on_an_adversarial_cwd(name):
+    from skyguard import targets
+
+    def make(n):
+        cwd = _cwd_shapes(n)[name]
+        return lambda: targets.resolve("Data/x", cwd, "bash", {})
+    assert_linear(name, make)
+
+
+def _covers_shapes(N):
+    return {
+        "star-run": "c:/" + "*" * N,
+        "star-a-run": "c:/" + "*a" * (N // 2) + "b",
+        "question-run": "c:/" + "?" * N,
+        "class-run": "c:/" + "[a]" * (N // 3),
+        "open-class-run": "c:/" + "[" * N,
+        "brace-run": "c:/" + "{a,b}" * (N // 5),
+        "brace-open-run": "c:/" + "{" * N,
+        "deep-path": "c:/" + "*/" * (N // 2),
+    }
+
+
+@pytest.mark.parametrize("name", sorted(_covers_shapes(SMALL)))
+def test_covers_protected_stays_fast(name):
+    from skyguard import targets
+    assert_linear(name, lambda n: (lambda: targets.covers_protected(_covers_shapes(n)[name], ROOTS)))
+
+
+@pytest.mark.parametrize("shape", ["open", "open-a", "closed-no-comma"])
+def test_brace_expansion_is_linear(shape):
+    """covers_protected caps a component at MAX_GLOB_COMPONENT, but _braces itself must not be quadratic either."""
+    from skyguard import targets
+    make_text = {"open": lambda n: "{" * n, "open-a": lambda n: "{a" * (n // 2),
+                 "closed-no-comma": lambda n: "{a}" * (n // 3)}[shape]
+    assert_linear(shape, lambda n: (lambda: targets._braces(make_text(n))))

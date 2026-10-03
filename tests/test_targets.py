@@ -41,6 +41,7 @@ def w(s):
     ("C:", None),
     ("/cygdrive/d/x", "d:/x"),
     ("/mnt/c/x", "c:/x"),
+    ("/proc/cygdrive/c/x", "c:/x"),
     ("/tmp/x", "/tmp/x"),
     ("C:/Data./x", "c:/Data/x"),          # Windows drops a component's trailing dots and spaces
 ])
@@ -171,8 +172,9 @@ ROOTS = paths.roots(GAME, "", {"SKYRIM_GAME_ROOT": GAME, "SKYRIM_CONFIG_DIR": "D
     ("d:/mo2/overwrite", "mo2"),
     ("/tmp/x", "outside"),
     ("//server/share/x", "outside"),
-    (GAMEN + "/tools/__pycache__/x.pyc", "scratch"),
-    (GAMEN + "/tools/__pycache__", "scratch"),
+    (GAMEN + "/scripts/__pycache__/x.pyc", "scratch"),
+    (GAMEN + "/scripts/__pycache__", "scratch"),
+    (GAMEN + "/tools/__pycache__", "install"),                            # fix round 1: tools/ is never scratch
     (GAMEN + "/node_modules/a/b", "scratch"),
     (GAMEN + "/.pytest_cache", "scratch"),
     (GAMEN + "/.claude/backups", "install"),                              # R8: .claude stays protected
@@ -207,3 +209,142 @@ def test_scratch_globs_are_validated_data():
 def test_roots_dirs_are_normalised_and_deduped():
     r = paths.roots("/c/GOG Games/The Elder Scrolls V Skyrim VR", CWD_WIN, {"SKYRIM_GAME_ROOT": GAME + "/"})
     assert r.install_dirs == (GAMEN,)
+
+
+# ------------------------------------------------------------------------------------------------ fix round 1
+# Adversarial review of Task 6 (plan5-t6-review/adv.py, adv2.py, cfg.py): every wrong row is a test here.
+PARENT = "C:/GOG Games"
+
+
+@pytest.mark.parametrize("word,cwd,dialect", [
+    ("C:/GOG Games", GAME, "bash"),
+    ("C:/GOG Games/", GAME, "powershell"),
+    ("C:/", GAME, "cmd"),
+    ("/c", GAME, "bash"),
+    ("/c/", GAME, "bash"),
+    (".", PARENT, "bash"),
+    ("..", GAME, "powershell"),
+    ("C:/GOG Games/*", GAME, "bash"),
+    ("C:/GOG*", GAME, "bash"),
+    ("C:/GOG Games/The Elder*", GAME, "powershell"),
+    ("C:/GOG Games/The Elder Scrolls V Skyrim V?", GAME, "cmd"),
+    ("C:/GOG Games/[T]he Elder Scrolls V Skyrim VR", GAME, "bash"),
+    ("C:/GOG Games/{The Elder Scrolls V Skyrim VR,x}", GAME, "bash"),
+    ("C:/GOG Games/{TES,The Elder Scrolls V Skyrim VR}", GAME, "bash"),
+    ("*", PARENT, "bash"),
+    ("The*", PARENT, "powershell"),
+    ("D:/MO2", GAME, "bash"),
+    ("D:/*", GAME, "bash"),
+    ("d:/profiles", GAME, "cmd"),
+])
+def test_a_path_that_contains_or_globs_a_protected_root_covers_it(word, cwd, dialect):
+    """CRITICAL (review item 1): deleting an ANCESTOR of the install, or a glob that matches it, deletes the
+    install. zone() alone says "outside" for these, so Task 7 needs covers_protected()."""
+    p = targets.resolve(word, cwd, dialect, ENV)
+    assert p is not None, word
+    assert targets.covers_protected(p, ROOTS), (word, p)
+
+
+@pytest.mark.parametrize("word,cwd", [
+    ("C:/GOG Games/Other", GAME), ("C:/GOG Games/Th?", GAME), ("C:/GOG Games/[X]he Elder Scrolls V Skyrim VR", GAME),
+    ("C:/GOG Games/{a,b}", GAME), ("C:/Temp/*", GAME), ("x*", PARENT), ("D:/MO2/other", GAME), ("/tmp/*", GAME),
+    ("//srv/share", GAME), (GAME + "/Data/x", GAME),
+])
+def test_a_path_that_does_not_reach_a_protected_root_does_not_cover_it(word, cwd):
+    assert not targets.covers_protected(targets.resolve(word, cwd, "bash", ENV), ROOTS), word
+
+
+def test_covers_protected_includes_the_root_itself_and_documents_ancestors():
+    assert targets.covers_protected(GAMEN, ROOTS)
+    assert targets.covers_protected("c:/Users/me/Documents", ROOTS)          # holds My Games/Skyrim*
+    assert targets.covers_protected("c:/Users/me/Documents/My Games", ROOTS)
+    assert not targets.covers_protected("c:/Users/me/Documents/x", ROOTS)
+
+
+def test_covers_protected_is_linear_on_a_long_glob():
+    import time
+    t0 = time.process_time()
+    targets.covers_protected("c:/" + "*a" * 20000 + "b", ROOTS)
+    assert time.process_time() - t0 < 1.0
+
+
+@pytest.mark.parametrize("word", [
+    "C:/GOGGAM~1/THEELD~1/Data", "C:/GOGGAM~1/THEELD~1", "C:/GOG Games/THEELD~1", "c:/progra~2/x",
+])
+def test_an_8dot3_short_name_is_unresolvable(word):
+    """IMPORTANT (item 2): the install's real short name is C:/GOGGAM~1/THEELD~1. It cannot be expanded without the
+    filesystem, so it is unresolved (stricter), never "outside"."""
+    for d in ("bash", "powershell", "cmd"):
+        assert targets.resolve(word, GAME, d, ENV) is None, (word, d)
+
+
+def test_a_short_name_cwd_makes_relative_words_unresolvable():
+    assert targets.resolve("Data/x", w("C:/GOGGAM~1/THEELD~1"), "powershell", ENV) is None
+    assert targets.exec_cwd(_exec("rm x")[0], w("C:/GOGGAM~1/THEELD~1"), ENV) is None
+
+
+@pytest.mark.parametrize("word", [
+    w("//localhost/c$/GOG Games/The Elder Scrolls V Skyrim VR/Data"),
+    w("//127.0.0.1/C$/GOG Games/The Elder Scrolls V Skyrim VR"),
+    w("//?/UNC/localhost/c$/GOG Games/The Elder Scrolls V Skyrim VR"),
+    w("//BILLY/c$/GOG Games/The Elder Scrolls V Skyrim VR"),
+    w("Microsoft.PowerShell.Core/FileSystem:://localhost/c$/GOG Games/The Elder Scrolls V Skyrim VR"),
+])
+def test_a_loopback_admin_share_is_the_drive(word):
+    env = dict(ENV, COMPUTERNAME="BILLY")
+    for d in ("powershell", "cmd"):
+        p = targets.resolve(word, GAME, d, env)
+        assert p is not None and targets.zone(p, ROOTS) == "install", (word, d, p)
+
+
+def test_an_ipv6_loopback_admin_share_is_the_drive_in_cmd_and_unresolvable_in_powershell():
+    """`[` is a PowerShell wildcard in a directory component, so there it is unresolved (stricter)."""
+    word = w("//[::1]/c$/GOG Games/The Elder Scrolls V Skyrim VR")
+    assert targets.zone(targets.resolve(word, GAME, "cmd", ENV), ROOTS) == "install"
+    assert targets.resolve(word, GAME, "powershell", ENV) is None
+
+
+def test_another_hosts_admin_share_is_unresolvable_and_a_plain_share_is_outside():
+    assert targets.resolve(w("//other/c$/x"), GAME, "cmd", dict(ENV, COMPUTERNAME="BILLY")) is None
+    assert targets.resolve(w("//srv/share/x"), GAME, "cmd", ENV) == "//srv/share/x"
+    assert targets.resolve(w("//./c$"), GAME, "cmd", ENV) is None
+
+
+@pytest.mark.parametrize("word", [
+    GAME + "::$INDEX_ALLOCATION", GAME + ":$I30:$INDEX_ALLOCATION/Data", GAME + "/Data/x.esp:stream",
+    GAME + "/Data/x.esp::$DATA",
+])
+def test_an_ntfs_stream_suffix_is_stripped(word):
+    p = targets.resolve(word, GAME, "cmd", ENV)
+    assert p is not None and targets.zone(p, ROOTS) == "install" and ":" not in p[2:], (word, p)
+
+
+@pytest.mark.parametrize("p,want", [
+    (GAMEN + "/tools/zedit/app_src/node_modules/x", "install"),     # tool RUNTIME (zEdit), not scratch
+    (GAMEN + "/tools/xelib/node_modules/koffi", "install"),
+    (GAMEN + "/TOOLS/__pycache__", "install"),
+    (GAMEN + "/Data/__pycache__", "install"),
+    (GAMEN + "/Data/scripts/node_modules", "install"),
+    (GAMEN + "/node_modules/x", "scratch"),
+    (GAMEN + "/scripts/__pycache__/a.pyc", "scratch"),
+    (GAMEN + "/tests/.pytest_cache", "scratch"),
+])
+def test_scratch_never_covers_tools_or_data(p, want):
+    """RULING (item 4, R8): node_modules and caches under the install's tools/ are tool runtime (zEdit
+    app_src/node_modules, tools/xelib/node_modules with koffi); Data/ is the game. Neither is scratch."""
+    assert targets.zone(p, ROOTS) == want
+
+
+@pytest.mark.parametrize("pat,name,want", [
+    ("*", "anything", True), ("the*", "the elder", True), ("*vr", "skyrim vr", True), ("t?e", "the", True),
+    ("[st]he", "the", True), ("[!t]he", "the", False), ("[^t]he", "she", True), ("[a-u]he", "the", True),
+    ("[x-z]he", "the", False), ("[the", "[the", True), ("{a,the}", "the", True), ("x{a,b}", "the", False),
+    ("{a,{b,the}}", "the", False), ("*e*e*", "the elder", True), ("*z*", "the elder", False), ("", "", True),
+])
+def test_component_glob_matcher(pat, name, want):
+    assert targets._comp_matches(pat, name) == want
+
+
+def test_an_overlong_glob_component_is_treated_as_star():
+    assert targets._comp_matches("*" * 2000 + "x", "the")
+    assert not targets._comp_matches("y" * 2000, "the")             # no glob char: plain comparison
