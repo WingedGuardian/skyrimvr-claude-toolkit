@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from skyguard import backup, codes, paths, session, shell_rules, snapshot, write_rules  # noqa: E402
+from skyguard import backup, codes, engine, paths, session, snapshot  # noqa: E402
 from skyguard.adapters import claude  # noqa: E402
 from skyguard.audit import Audit  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
@@ -47,8 +47,9 @@ def main(argv=None) -> int:
     p = adapter.extract(raw)
     audit = Audit(a.project)
     if a.role == "protect-bash":
+        req = adapter.to_request(p, "shell")
         if not p["command"]:
-            v = shell_rules.decide("", paths.Roots("", ""), audit)
+            v = engine.evaluate_shell(req, paths.Roots("", ""), audit)
         else:
             try:
                 env = paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))
@@ -57,9 +58,9 @@ def main(argv=None) -> int:
             if env is None:
                 v = Verdict("deny", ENV_UNREADABLE, status="failed", code="run.ENV_UNREADABLE")
             else:
-                v = shell_rules.decide(p["command"], paths.roots(a.root, a.root_win, env), audit)
+                v = engine.evaluate_shell(req, paths.roots(a.root, a.root_win, env), audit)
     elif a.role == "protect-files":
-        v = write_rules.decide(p["file_path"], audit)
+        v = engine.evaluate_write(p["file_path"], audit)
     elif a.role == "backup-before-edit":
         backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit)
         v = Verdict()

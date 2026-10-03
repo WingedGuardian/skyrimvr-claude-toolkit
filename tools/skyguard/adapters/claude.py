@@ -37,6 +37,8 @@ def extract(payload_text: str) -> dict:
         "command": _sub(ti.get("command")),
         "file_path": _sub(ti.get("file_path")),
         "source": _sub(d.get("source")),
+        "cwd": _sub(d.get("cwd")),
+        "session_id": _sub(d.get("session_id")),
     }
 
 
@@ -49,3 +51,12 @@ def render(v) -> str:
     else:
         out = {}
     return json.dumps(out, ensure_ascii=False)
+
+
+def to_request(p: dict, kind: str):
+    """`p` is extract()'s dict. The payload cwd is the shell's real cwd for Bash and PowerShell (Plan 5 T0)."""
+    from ..request import Request
+    return Request(agent="claude", event="pre_tool", kind=kind, shell="bash" if kind == "shell" else None,
+                   command=p["command"], paths=(p["file_path"],) if p["file_path"] else (),
+                   cwd=p.get("cwd", ""), session_id=p.get("session_id", ""),
+                   tool_name=p["tool_name"], empty=p["empty"])
