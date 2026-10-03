@@ -104,3 +104,14 @@ tree's `skyguard.shellparse` whether it can read every Bash/PowerShell item (`pa
   Every failure is a command its own shell would reject or misread; none is a parser gap found so far.
 - Parser gaps found and FIXED while measuring (before the gate): `name(){ ... }` with no space (was 500 of the
   first run's 557 failures), and `time ( ... )`.
+
+### Task 5, fix round 1 (adversarial review: deletes returned ok=True but not as executed)
+
+Re-priced 2026-10-03 (`--base c3f32ef`), N = 60,355. **No verdict moved** (same per-rule figures as above:
+S-RESAVER-APPLY 5/19, the 21-item id rename); 0 engine errors.
+- **Parse failures: 63 of 55,467 shell items = 0.114%** (Bash 61 of 53,905 = 0.113%; PowerShell 2 of 1,562 =
+  0.128%). Before the round: 63 of 55,001 = 0.115%. **Delta: no new failure.**
+- An intermediate run of this round read 68 (0.123%). The 5 extra were MY regressions, both fixed and pinned by
+  tests: `wsl` re-joined its words into a string (a `)` inside a quoted vhdx path became syntax; `--import` was read
+  as a command) -- 2 PowerShell + 1 Bash; and a `$(( ))` holding a `$( )` was fed whole to the command parser
+  (`$(( ($(date +%s%N)-s)/1000000 ))`) -- 2 Bash. Only the substitutions inside a skipped span are parsed now.

@@ -374,7 +374,8 @@ def test_pwsh_redirects():
 def test_pwsh_expressions_and_here_strings_are_not_commands():
     assert progs("'rm -rf x' | Out-File a", "powershell") == ["out-file"]
     assert progs("@'\nRemove-Item x\n'@ | Out-File a", "powershell") == ["out-file"]
-    assert progs("$x = 'a'; $y.Delete()", "powershell") == []
+    assert progs("$x = 'a'; $y.Substring(1)", "powershell") == []
+    assert progs("$y.Delete()", "powershell") == ["?"]                 # fix round 1: opaque, not nothing
     assert progs("$h = @{ rm = 1 }", "powershell") == []
     assert progs("<# Remove-Item x #> ls # ri y", "powershell") == ["get-childitem"]
 
@@ -401,6 +402,9 @@ def test_pwsh_calls_bash_and_cmd_in_their_dialect():
     ("@echo off", ["echo"]),
     ("if exist x (del x) else (del y)", ["del", "del"]),
     ("if not exist x del y", ["del"]),
+    ("if a==b del y", ["del"]),
+    ('if "%x%"=="" rd /s /q y', ["rmdir"]),
+    ("if /i not a==b del y", ["del"]),
     ("for %f in (a b) do del %f", ["del"]),
     ("rem del x\ndir", ["dir"]),
     ("call del x", ["del"]),
@@ -554,3 +558,176 @@ def test_t04_rows_come_out_as_executed_commands(row):
 def test_t04_rows_parse():
     for row in _t4_rows():
         assert parse(row["payload"]["tool_input"]["command"], "bash").ok, row["id"]
+
+
+# ------------------------------------------------------------------------------------------------ fix round 1
+# The review's rule: when the parser cannot be sure what runs, it says so (ok=False, or an opaque "?" exec) --
+# never ok=True with the executed command missing. Every row below was ok=True with the delete missing.
+DELETES = {"rm", "rmdir", "del", "remove-item", "find.delete", "io.file.delete", "io.directory.delete"}
+
+
+def deletes_x(cmd, shell):
+    """ok=True and a delete whose LAST argument is X, or ok=False (said so)."""
+    p = parse(cmd, shell)
+    if not p.ok:
+        return "unsure"
+    return any(e.program in DELETES and e.argv and e.argv[-1].rstrip("/") == "X" for e in p.execs)
+
+
+def opaque(cmd, shell):
+    p = parse(cmd, shell)
+    return (not p.ok) or "?" in [e.program for e in p.execs]
+
+
+@pytest.mark.parametrize("cmd", [
+    "if a==b rd /s /q X", 'if "%x%"=="" rd /s /q X', "if %x%==1 del /q X", "if not a==b rd /s /q X",
+    "if /i a==a rd /s /q X", "if a == b rd /s /q X", "if exist X rd /s /q X", "if not exist Y rd /s /q X",
+    "if defined FOO rd /s /q X", "if errorlevel 1 rd /s /q X", "if a equ b rd /s /q X",
+    "if 1==1 (rd /s /q X) else (echo)",
+])
+def test_r1_cmd_if_condition_is_not_the_program(cmd):
+    assert deletes_x(cmd, "cmd") is True
+
+
+@pytest.mark.parametrize("cmd", [
+    "rd/s/q X", "del/f/q X", "rd/q X", "del.  /q X", "rmdir/s/q X",
+    "for %i in (X) do rd /s /q X", "for %i in (X) do (rd /s /q X)", "for %i in (X) do @rd /s /q X",
+    "for /f %i in ('rd /s /q X') do echo", "for /f \"usebackq\" %i in (`rd /s /q X`) do echo",
+    "rem x & rd /s /q X", ":: c & rd /s /q X", "echo hi & rem & rd /s /q X",
+    "%COMSPEC% /c del X", "%SystemRoot%\\System32\\cmd.exe /c rd /s /q X",
+])
+def test_r1_cmd_forms(cmd):
+    assert deletes_x(cmd, "cmd") is True
+
+
+@pytest.mark.parametrize("cmd", [
+    "time { rm -rf X; }", "time -p { rm -rf X; }", "time ( rm -rf X )", "time rm -rf X", "time -p rm -rf X",
+    "coproc { rm -rf X; }", "coproc foo { rm -rf X; }", "coproc foo ( rm -rf X )", "coproc rm -rf X",
+])
+def test_r1_bash_time_and_coproc(cmd):
+    assert deletes_x(cmd, "bash") is True
+
+
+@pytest.mark.parametrize("cmd", [
+    "files=( $(rm -rf X) )", 'files=("$(rm -rf X)")', "x+=( $(rm -rf X) )", "x=(`rm -rf X`)",
+    "declare -a x=( $(rm -rf X) )", "x=( a $(rm -rf X) )", "shopt -s extglob; ls @(a|$(rm -rf X))",
+])
+def test_r1_array_literals_are_scanned_for_substitutions(cmd):
+    assert deletes_x(cmd, "bash") is True
+
+
+@pytest.mark.parametrize("cmd", [
+    "echo ${x:-$(rm -rf X)}", "echo ${x:-`rm -rf X`}", 'echo "${x:-$(rm -rf X)}"', "echo $(( $(rm -rf X) + 1 ))",
+    "(( $(rm -rf X) ))", "echo $(( `rm -rf X` ))",
+])
+def test_r1_skipped_spans_with_substitutions_are_parsed(cmd):
+    assert deletes_x(cmd, "bash") in (True, "unsure")
+    assert deletes_x(cmd, "bash") is True
+
+
+@pytest.mark.parametrize("cmd", ["((rm -rf X))", "(((rm -rf X)))", "( (( (rm -rf X) )) )", "$((rm -rf X))"])
+def test_r1_double_paren_that_reads_as_a_command_is_unsure(cmd):
+    assert not parse(cmd, "bash").ok
+
+
+@pytest.mark.parametrize("cmd", ["(( i++ ))", "(( a > b ))", "(( x -= 1 ))", "echo $(( n % 2 ))", "((count++))",
+                                 "(( a && b ))", "echo $((16#ff))"])
+def test_r1_real_arithmetic_still_parses(cmd):
+    assert parse(cmd, "bash").ok
+
+
+def test_r1_pwsh_here_string_with_a_subexpression_is_unsure():
+    assert not parse('Write-Output @"\n$(Remove-Item X)\n"@', "powershell").ok
+    assert parse("Write-Output @'\n$(Remove-Item X)\n'@", "powershell").ok       # single-quoted: literal
+
+
+@pytest.mark.parametrize("cmd", [
+    "Start-Process cmd -ArgumentList '/c rd /s /q X'",
+    "Start-Process -FilePath cmd -ArgumentList '/c','rd /s /q X'",
+    "Start-Process cmd -Args '/c rd /s /q X'",
+    "Start-Process cmd -Arg '/c','rd','/s','/q','X'",
+    "saps cmd '/c rd /s /q X'",
+    "Start-Process -FilePath 'cmd.exe' -ArgumentList '/c rd /s /q X' -Wait",
+    "Start-Process powershell -ArgumentList '-c Remove-Item X'",
+    'Start-Process powershell -ArgumentList "-Command","Remove-Item X"',
+    "Start-Process pwsh -ArgumentList '-NoProfile','-Command','Remove-Item X'",
+])
+def test_r1_start_process_runs_its_argument_list(cmd):
+    assert deletes_x(cmd, "powershell") is True
+
+
+@pytest.mark.parametrize("shell,cmd", [
+    ("powershell", "& $env:ComSpec /c del X"), ("powershell", "cmd --% /c rd /s /q X"),
+    ("bash", "env -S 'rm -rf X'"), ("bash", "env --split-string='rm -rf X'"), ("bash", "env -S'rm -rf X'"),
+    ("bash", "wsl rm -rf X"), ("bash", "wsl -d Ubuntu -u root -- rm -rf X"), ("bash", "wsl -e rm -rf X"),
+    ("powershell", "wsl rm -rf X"), ("bash", "busybox rm -rf X"), ("bash", "su -c 'rm -rf X'"),
+    ("bash", "su root -c 'rm -rf X'"), ("bash", "trap 'rm -rf X' EXIT"), ("bash", "trap -- 'rm -rf X' EXIT"),
+    ("bash", "ionice -c3 rm -rf X"), ("bash", "ionice -c 3 -n 7 rm -rf X"), ("bash", "chroot / rm -rf X"),
+    ("bash", "strace -o log rm -rf X"), ("bash", "flock /tmp/l rm -rf X"), ("bash", "flock /tmp/l -c 'rm -rf X'"),
+    ("bash", "unbuffer rm -rf X"), ("bash", "watch -n 5 rm -rf X"), ("bash", "script -q -c 'rm -rf X'"),
+    ("bash", "alias ll='rm -rf X'; ll"), ("bash", "parallel rm -rf ::: X"), ("bash", "setsid rm -rf X"),
+    ("bash", "taskset 0x1 rm -rf X"),
+])
+def test_r1_more_wrappers(shell, cmd):
+    assert deletes_x(cmd, shell) is True
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "cmd"])
+def test_r1_wsl_and_watch_run_their_words_as_bash(shell):
+    """From PowerShell, `wsl rm -rf X` runs Linux rm -- not the PowerShell alias rm = Remove-Item."""
+    assert find("wsl rm -rf X", "rm", shell).dialect == "bash"
+    assert find('watch -n 5 "rm -rf X"', "rm", shell).argv == ("-rf", "X")
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_r1_wsl_management_and_quoted_words(shell):
+    """Found re-pricing fix round 1: wsl's words keep their quoting (never re-joined), and a management flag runs
+    nothing in Linux."""
+    vhdx = '"C:/GOG Games/Mods/1)Distro-1/ext4.vhdx"'
+    for cmd in ("wsl --import D C:/x " + vhdx + " 2>&1", "wsl --import-in-place D " + vhdx, "wsl --shutdown"):
+        p = parse(cmd, shell)
+        assert p.ok and [e.program for e in p.execs] == ["wsl"], (cmd, p)
+    p = parse('wsl -d D -- sh -c "(mount -o ro /dev/sdc /m 2>&1; echo x) && (ls /m)"', shell)
+    assert p.ok and {"mount", "echo", "ls"} <= {e.program for e in p.execs}
+
+
+def test_r1_arithmetic_with_a_substitution_parses_only_the_substitution():
+    """Found re-pricing fix round 1: `$(( ($(date +%s%N)-s)/1000000 ))` is an expression around a command."""
+    p = parse("e=$(( ($(date +%s%N)-s)/1000000 )); echo $e", "bash")
+    assert p.ok and [e.program for e in p.execs] == ["date", "echo"]
+
+
+@pytest.mark.parametrize("cmd", [
+    "Remove-Item \u2013Recurse X", "Remove-Item —Recurse X", "Remove-Item –Path X",
+])
+def test_r1_pwsh_dash_variants_are_parameters(cmd):
+    e = find(cmd, "remove-item", "powershell")
+    assert sp.ps_param(e, "Path", 0) == ("X",)
+
+
+@pytest.mark.parametrize("cmd", ["echo 'rm -rf X' | bash -", "echo 'rm -rf X' | bash - arg1",
+                                 "echo 'rm -rf X' | sh -s -",
+                                 "echo 'Remove-Item X' | pwsh -", "pwsh -Co 'Remove-Item X'"])
+def test_r1_stdin_dash_and_command_prefix(cmd):
+    assert deletes_x(cmd, "bash") is True
+
+
+@pytest.mark.parametrize("shell,cmd", [
+    ("bash", "cat s.sh | bash"), ("bash", "curl -s http://x | sh"), ("bash", "sh < s.sh"),
+    ("bash", "sh < <(echo 'rm -rf X')"), ("bash", "bash <(echo rm -rf X)"), ("bash", "source <(echo rm -rf X)"),
+    ("bash", "x=rm; $x -rf X"), ("bash", "parallel < cmds.txt"),
+    ("powershell", "(Get-Item X).Delete()"), ("powershell", "gci X -r | % { $_.Delete() }"),
+    ("powershell", "[System.IO.DirectoryInfo]::new('X').Delete($true)"), ("powershell", "iex $cmd"),
+    ("powershell", "Invoke-Expression ('Remove-Item ' + 'X')"),
+    ("powershell", "[scriptblock]::Create('Remove-Item X').Invoke()"),
+    ("cmd", "%X% /s /q X"),
+])
+def test_r1_unknown_execution_is_opaque_not_missing(shell, cmd):
+    assert opaque(cmd, shell)
+
+
+def test_r1_known_text_into_a_shell_is_not_opaque():
+    p = parse("echo 'ls' | bash", "bash")
+    assert p.ok and "?" not in [e.program for e in p.execs]
+    p = parse("cat <<EOF | bash\nls\nEOF", "bash")
+    assert p.ok and "?" not in [e.program for e in p.execs]
