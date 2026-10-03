@@ -49,3 +49,7 @@ Plan 2 (skyguard engine) completed 2026-10-02; full suite on a87ce27: 1052 passe
 - Final: minor (deferred): setup.sh accepts any Python 3.x (3.6 → every hook denies 'engine failed' with no setup warning); require >=3.8.
 - Final: minor (deferred): setup.sh writes PY in double quotes ($/backtick in a path expand; fails closed).
 - Final: minor (deferred): pre-existing hook-timeout class (engine hang >60s → answer dropped).
+
+## Found after close-out
+
+- **2026-10-02, Plan 5 Task 4:** several legacy rules ported in Plan 2 backtrack quadratically on long input (20 KB: `(`-runs 10.5 s, repeated rm/mv/cp 2.7 s, write-rule separator runs 2.7 s). The bash hooks used GNU grep (linear), so this is a Plan 2 regression the equivalence replay could not see (it compares verdicts, not time). A hook past its timeout has its answer dropped, so this is fail-open on hostile input. Fixed on branch plan5 (`fa4d0e1`, `80a2a37`) with a timing guard test; master stays affected until Plan 5 merges. Not pushed anywhere.
