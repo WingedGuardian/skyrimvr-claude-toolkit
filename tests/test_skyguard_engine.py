@@ -60,3 +60,8 @@ def test_claude_to_request_carries_cwd_and_kind():
     p = claude.extract('{"tool_name":"Bash","cwd":"C:/x","session_id":"s1","tool_input":{"command":"ls"}}')
     r = claude.to_request(p, "shell")
     assert (r.kind, r.shell, r.command, r.cwd, r.session_id) == ("shell", "bash", "ls", "C:/x", "s1")
+
+
+def test_combine_of_nothing_is_a_failed_deny_not_an_allow():
+    v = engine.combine([])
+    assert (v.decision, v.status, v.code) == ("deny", "failed", "engine.EMPTY_COMBINE")

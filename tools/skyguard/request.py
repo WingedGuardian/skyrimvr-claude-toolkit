@@ -20,7 +20,7 @@ class Request(NamedTuple):
     ops: Tuple[str, ...] = ()         # parallel to paths: add|update|delete|move_from|move_to|write|edit
     mcp_tool: str = ""
     mcp_args: str = ""
-    cwd: str = ""
+    cwd: str = ""                     # the agent's cwd string, RAW: never normalized (may be /c/x or C:\x)
     tool_name: str = ""
     session_id: str = ""
     transcript_path: str = ""

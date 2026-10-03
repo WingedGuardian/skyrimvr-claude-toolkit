@@ -3,6 +3,8 @@ import inspect
 import re
 import sys
 
+import pytest
+
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
@@ -26,10 +28,11 @@ def test_evaluate_shell_signature():
     assert list(inspect.signature(engine.evaluate_shell).parameters) == ["req", "roots", "audit"]
 
 
-def test_shell_rules_decide_has_exactly_one_call_site():
+@pytest.mark.parametrize("call", ["shell_rules", "write_rules"])
+def test_rules_decide_has_exactly_one_call_site(call):
     hits = []
     for f in sorted((REPO / "tools" / "skyguard").rglob("*.py")):
-        n = len(re.findall(r"shell_rules\.decide\(", f.read_text(encoding="utf-8")))
+        n = len(re.findall(call + r"\.decide\(", f.read_text(encoding="utf-8")))
         if n:
             hits.append((f.name, n))
     assert hits == [("engine.py", 1)], hits

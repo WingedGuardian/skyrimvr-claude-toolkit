@@ -981,6 +981,14 @@ MUTATIONS = [
         "tests/test_skyguard_codes.py::test_unreadable_env_refusal_is_failed_and_coded",
         id="env-unreadable-refusal-is-status-failed",
     ),
+    # Folding zero verdicts must not read as "allow": it means nothing was evaluated.
+    pytest.param(
+        "tools/skyguard/engine.py",
+        "    if not vs:   # nothing was evaluated; an empty fold must never read as \"allow\"",
+        "    if False:",
+        "tests/test_skyguard_engine.py::test_combine_of_nothing_is_a_failed_deny_not_an_allow",
+        id="combine-of-nothing-is-not-an-allow",
+    ),
 ]
 
 

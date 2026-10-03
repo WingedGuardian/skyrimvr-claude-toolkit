@@ -13,6 +13,7 @@ from .verdict import Advice, Verdict
 _RANK = {"evaluated": 0, "partial": 1, "failed": 2}
 NO_PATHS = ("GUARD INERT: a write request named no file, so the write rules checked NOTHING. Allowing "
             "silently would be indistinguishable from deciding this is fine.")
+NO_VERDICTS = "GUARD INERT: the engine combined zero verdicts, so nothing was checked."
 
 
 def evaluate_shell(req, roots, audit) -> Verdict:
@@ -25,6 +26,8 @@ def evaluate_write(path: str, audit) -> Verdict:
 
 def combine(verdicts: Iterable[Verdict]) -> Verdict:
     vs = list(verdicts)
+    if not vs:   # nothing was evaluated; an empty fold must never read as "allow"
+        return Verdict("deny", NO_VERDICTS, status="failed", code="engine.EMPTY_COMBINE")
     worst = max((v.status for v in vs), key=lambda s: _RANK.get(s, 2), default="evaluated")
     for want in ("deny", "ask"):
         for v in vs:
