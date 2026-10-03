@@ -83,6 +83,13 @@ def _rules(req, roots_fn, audit) -> Verdict:
     return Verdict()
 
 
+def _unhooked(req) -> bool:
+    """A call no Codex rule guards by name: record it (never for a call already refused)."""
+    if req.failure or req.event != "pre_tool":
+        return False
+    return req.kind in ("mcp", "other") or (req.kind == "shell" and req.tool_name != "Bash")
+
+
 def side_effects(req, project, audit, v) -> Verdict:
     """Snapshot and backups, whatever the decision (as on Claude, where those hooks run beside the guard).
     Each step has its own try: one failing never skips the next and never changes the decision."""
@@ -102,7 +109,7 @@ def side_effects(req, project, audit, v) -> Verdict:
             except Exception:
                 partial = True
                 audit.log("backup-before-edit", "FAILED", "backup of {} raised -- NO BACKUP EXISTS".format(p))
-    if req.kind in ("mcp", "other"):
+    if _unhooked(req):
         try:
             d = Path(project) / ".claude" / "backups"
             d.mkdir(parents=True, exist_ok=True)

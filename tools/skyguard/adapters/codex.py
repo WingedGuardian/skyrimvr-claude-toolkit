@@ -27,6 +27,11 @@ ASK_PREFIX = ("NEEDS YOUR CONFIRMATION -- Codex cannot ask, so the toolkit refus
               "(In the Codex prompt they can type ! followed by the command.) ")
 BANNER = "SKYGUARD: Codex hooks live (definitions v1)."
 _NOTE = " [truncated by the toolkit at {n} bytes]"
+_PREFS_MARK = "USER PREFERENCES ("
+ENV_UNREADABLE = (
+    "GUARD INERT: the Codex hook found .claude/skyrim-paths.env but could not read it, so it cannot tell "
+    "which directories are the Skyrim install. Refusing rather than guarding the wrong set. "
+    "Fix or delete that file (re-run setup.sh).")
 
 
 def _s(v) -> str:
@@ -42,6 +47,25 @@ def _cap(text: str) -> str:
     return data[:keep].decode("utf-8", "ignore") + note
 
 
+def session_body(out: str) -> str:
+    """BANNER + the SessionStart text, within CONTEXT_LIMIT bytes. Over the limit the kb-guard detail is cut
+    first (the banner and the user's preferences are kept whole when they fit), and the cut is marked."""
+    head = BANNER + "\n"
+    if not out:
+        return BANNER
+    if len((head + out).encode("utf-8", "replace")) <= CONTEXT_LIMIT:
+        return head + out
+    i = out.find(_PREFS_MARK)
+    detail, prefs = (out, "") if i < 0 else (out[:i].rstrip("\n"), out[i:])
+    note = _NOTE.format(n=CONTEXT_LIMIT)
+    fixed = len((head + note + ("\n" + prefs if prefs else "")).encode("utf-8", "replace"))
+    room = CONTEXT_LIMIT - fixed
+    if room < 0:                      # the preferences alone do not fit: cut them, drop the detail
+        return _cap(head + prefs)
+    kept = detail.encode("utf-8", "replace")[:room].decode("utf-8", "ignore")
+    return head + kept + note + ("\n" + prefs if prefs else "")
+
+
 def _resolve(path: str, cwd: str, cd_dir, platform: str) -> str:
     mod = ntpath if platform.startswith("win") else posixpath
     base = cwd
@@ -55,6 +79,8 @@ def _resolve(path: str, cwd: str, cd_dir, platform: str) -> str:
 
 def to_request(raw: str, platform: str = sys.platform) -> Request:
     text = raw.replace("\x00", "")
+    if text.startswith("\ufeff"):
+        text = text[1:]
     if not text.strip():
         return Request(agent=AGENT, event="pre_tool", empty=True, failure="empty payload")
     try:
@@ -95,6 +121,11 @@ def to_request(raw: str, platform: str = sys.platform) -> Request:
                            ops=tuple(o for o, _ in ops), **common)
     except patch_paths.PatchParseError as e:
         return Request(event="pre_tool", failure="unreadable patch: {}".format(e), **common)
+    if not name.startswith("mcp__") and isinstance(cmd, str):
+        # An unknown tool carrying a command string: guard it as a shell call, in case a future Codex renames
+        # its shell tool. The engine still records it as unhooked.
+        shell = "powershell" if platform.startswith("win") else "bash"
+        return Request(event="pre_tool", kind="shell", shell=shell, command=cmd, **common)
     kind = "mcp" if name.startswith("mcp__") else "other"     # MEASURED Task 0: mcp__<server>__<tool>
     return Request(event="pre_tool", kind=kind, mcp_tool=name if kind == "mcp" else "",
                    mcp_args=json.dumps(ti, sort_keys=True) if kind == "mcp" else "", **common)

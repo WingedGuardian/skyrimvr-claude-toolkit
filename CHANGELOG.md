@@ -2,6 +2,13 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Codex adapter: known coverage gaps
+
+- **MCP tools are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the
+  hook as `mcp__<server>__<tool>`; the toolkit allows it and records one line in
+  `.claude/backups/codex-unhooked-tools.log`. Only the DevBench MCP is covered by rules (Plan 5 Task 11).
+  Unknown non-MCP tools that carry a command string are guarded with the shell rules (and logged).
+
 ### Hook interpreter fallback
 
 - **A moved or upgraded Python no longer takes every blocking hook down.** If the interpreter `setup.sh`

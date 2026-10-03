@@ -1264,7 +1264,7 @@ MUTATIONS = [
     ),
     pytest.param(
         'tools/skyguard/engine.py',
-        '    if req.kind in ("mcp", "other"):',
+        '    if _unhooked(req):',
         '    if False:',
         'tests/test_skyguard_codex_adapter.py::test_an_mcp_tool_is_allowed_and_recorded',
         id='codex-unhooked-tools-not-recorded',
@@ -1275,6 +1275,56 @@ MUTATIONS = [
         '    if False:',
         'tests/test_skyguard_codex_adapter.py::test_cli_codex_roles_are_refused_for_claude_and_vice_versa',
         id='codex-roles-accepted-for-the-wrong-agent',
+    ),
+    # --- Codex fix round 1 ---
+    pytest.param(
+        'tools/skyguard/run.py',
+        'codex.session_body(out)',
+        'codex.BANNER + (chr(10) + out if out else "")',
+        'tests/test_skyguard_codex_adapter.py::test_run_session_start_output_is_capped',
+        id='codex-session-body-uncapped',
+    ),
+    pytest.param(
+        'tools/skyguard/adapters/codex.py',
+        '    kept = detail.encode("utf-8", "replace")[:room]',
+        '    kept = detail.encode("utf-8", "replace")[:room + 10**6]',
+        'tests/test_skyguard_codex_adapter.py::test_session_body_is_capped_keeping_banner_and_preferences',
+        id='codex-session-cap-ignores-room',
+    ),
+    pytest.param(
+        'tools/skyguard/adapters/codex.py',
+        '    i = out.find(_PREFS_MARK)',
+        '    i = -1',
+        'tests/test_skyguard_codex_adapter.py::test_session_body_is_capped_keeping_banner_and_preferences',
+        id='codex-session-cap-drops-preferences-with-detail',
+    ),
+    pytest.param(
+        'tools/skyguard/adapters/codex.py',
+        '    if not name.startswith("mcp__") and isinstance(cmd, str):',
+        '    if False:',
+        'tests/test_skyguard_codex_adapter.py::test_an_unknown_tool_with_a_command_string_gets_the_shell_rules',
+        id='codex-unknown-tool-command-unguarded',
+    ),
+    pytest.param(
+        'tools/skyguard/engine.py',
+        '    if req.failure or req.event != "pre_tool":',
+        '    if False:',
+        'tests/test_skyguard_codex_adapter.py::test_a_refused_call_is_not_logged_as_an_unhooked_tool',
+        id='codex-refused-call-logged-as-unhooked',
+    ),
+    pytest.param(
+        'tools/skyguard/run.py',
+        'raise engine.RootsUnavailable(codex.ENV_UNREADABLE)',
+        'raise engine.RootsUnavailable(ENV_UNREADABLE)',
+        'tests/test_skyguard_codex_adapter.py::test_cli_env_unreadable_text_is_agent_neutral',
+        id='codex-env-refusal-names-the-claude-hook',
+    ),
+    pytest.param(
+        'tools/skyguard/adapters/codex.py',
+        '    if text.startswith("\\ufeff"):',
+        '    if False:',
+        'tests/test_skyguard_codex_adapter.py::test_a_leading_bom_is_ignored',
+        id='codex-leading-bom-not-stripped',
     ),
 ]
 

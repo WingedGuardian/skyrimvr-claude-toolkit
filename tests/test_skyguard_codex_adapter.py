@@ -303,3 +303,70 @@ def test_cli_codex_roles_are_refused_for_claude_and_vice_versa(tmp_path):
     for agent, role in (("claude", "pre-tool"), ("claude", "session-start"), ("codex", "protect-bash")):
         r = _cli(tmp_path, agent, role, "{}")
         assert r.returncode == 1 and r.stdout == b"", (agent, role)
+
+
+# ---- fix round 1 ----------------------------------------------------------------------------------
+
+def test_session_body_is_capped_keeping_banner_and_preferences():
+    prefs = "USER PREFERENCES (from KNOWLEDGEBASE.local.md, section `## My preferences`) -- follow these all session:\nbe terse"
+    out = codex.session_body("kb line\n" * 5000 + "\n" + prefs)
+    assert len(out.encode("utf-8")) <= codex.CONTEXT_LIMIT
+    assert out.startswith(codex.BANNER) and out.endswith("be terse") and "truncated" in out
+
+
+def test_a_short_session_body_is_untouched():
+    assert codex.session_body("hello") == codex.BANNER + "\nhello"
+    assert codex.session_body("") == codex.BANNER
+
+
+def test_an_oversized_preferences_block_is_still_capped():
+    out = codex.session_body("USER PREFERENCES (from x) -- y:\n" + "p" * 20000)
+    assert len(out.encode("utf-8")) <= codex.CONTEXT_LIMIT and out.startswith(codex.BANNER)
+
+
+def test_run_session_start_output_is_capped(tmp_path, monkeypatch, capsys):
+    from skyguard import run
+    monkeypatch.setattr(run.session, "run_status", lambda *a, **k: ("noise line\n" * 3000,"evaluated", "session"))
+    sent = []
+    monkeypatch.setattr(run, "_emit", sent.append)
+    a = run.argparse.Namespace(project=str(tmp_path), bash="bash", role="session-start", invocation="", telemetry="")
+    assert run._codex(a, json.dumps({"hook_event_name": "SessionStart", "source": "startup"})) == 0
+    assert sent[0].startswith("SKYGUARD-OK\n" + codex.BANNER)
+    assert len(sent[0].encode("utf-8")) <= codex.CONTEXT_LIMIT + len("SKYGUARD-OK\n")
+
+
+def test_an_unknown_tool_with_a_command_string_gets_the_shell_rules(tmp_path):
+    v = _run(tmp_path, _pre("exec_command", {"command": "rm -rf " + str(tmp_path).replace(chr(92), "/")}))
+    assert v.decision == "deny" and v.code.startswith("shell."), v
+    r = codex.to_request(_pre("exec_command", {"command": "Get-Date"}), "win32")
+    assert r.kind == "shell" and r.command == "Get-Date" and r.tool_name == "exec_command"
+    assert "exec_command" in (tmp_path / ".claude" / "backups" / "codex-unhooked-tools.log").read_text()
+
+
+def test_an_unknown_tool_without_a_command_stays_other():
+    assert codex.to_request(_pre("weird", {"x": 1})).kind == "other"
+    assert codex.to_request(_pre("mcp__s__t", {"command": "rm -rf /"})).kind == "mcp"
+
+
+def test_a_refused_call_is_not_logged_as_an_unhooked_tool(tmp_path):
+    _run(tmp_path, "not json")
+    _run(tmp_path, json.dumps({"hook_event_name": "Stop"}))
+    assert not (tmp_path / ".claude" / "backups" / "codex-unhooked-tools.log").exists()
+
+
+def test_the_unreadable_env_text_is_agent_neutral():
+    assert "protect-bash.sh" not in codex.ENV_UNREADABLE and "GUARD INERT" in codex.ENV_UNREADABLE
+
+
+def test_a_leading_bom_is_ignored():
+    r = codex.to_request("\ufeff" + _pre("Bash", {"command": "Get-Date"}), "win32")
+    assert not r.failure and r.command == "Get-Date"
+
+
+def test_cli_env_unreadable_text_is_agent_neutral(tmp_path):
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "skyrim-paths.env").write_bytes(b"\xff\xfe\x00bad")
+    r = _cli(tmp_path, "codex", "pre-tool", _pre("Bash", {"command": "Get-Date"}))
+    body = r.stdout.decode().split("\n", 1)[1]
+    reason = json.loads(body)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "GUARD INERT" in reason and "protect-bash.sh" not in reason

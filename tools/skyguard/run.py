@@ -69,13 +69,13 @@ def _codex(a, raw: str) -> int:
     if a.role == "session-start":
         out, status, code = session.run_status(a.project, req.source, a.bash, audit)
         _telemetry(a, Verdict("allow", "", "", status, code))
-        _emit("SKYGUARD-OK\n" + codex.BANNER + ("\n" + out if out else ""))
+        _emit("SKYGUARD-OK\n" + codex.session_body(out))
         return 0
 
     def roots_fn():
         env = _declared_env(a)
         if env is None:
-            raise engine.RootsUnavailable(ENV_UNREADABLE)
+            raise engine.RootsUnavailable(codex.ENV_UNREADABLE)
         return paths.roots(a.root, a.root_win, env)
 
     v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit))
