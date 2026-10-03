@@ -77,6 +77,35 @@ else
     printf '%s %s receipt NO PAYLOAD\n' "$T0" "$INV" > "$HB_DIR/$HOOK_NAME.failed" 2>/dev/null
 fi
 
+# PY-CHAIN-BEGIN
+# Interpreter fallback chain (identical in every wrapper). The configured $PY is the only thing the hot
+# path touches; everything below runs ONLY once it has failed, so it adds no fork to a healthy call.
+# Order: py -3 / python / python3 that resolve and are not a Store alias, then the usual install
+# locations, then a Store alias, last. Every candidate is capability-probed (Python >= 3.8, the engine's
+# floor). Multi-word candidates are arrays/word-split, never eval'd. A fallback that is taken writes a
+# `failed` record BEFORE the engine runs, so the health report says DEGRADED until a call through the
+# configured interpreter completes again.
+PYC=("$PY")
+py_ok() { "$@" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)' >/dev/null 2>&1; }
+py_use() { PYC=("$@"); _fail python "configured $PY unusable; used $* -- re-run setup.sh"; return 0; }
+py_fallback() {
+    local c p g PY_ALIAS=""
+    for c in "py -3" python python3; do
+        p=$(command -v ${c%% *} 2>/dev/null) || continue
+        case "$p" in
+            */[Ww]indows[Aa]pps/*) [ -z "$PY_ALIAS" ] && PY_ALIAS="$c"; continue ;;
+        esac
+        if py_ok $c; then py_use $c; return 0; fi
+    done
+    for g in "${LOCALAPPDATA//\\//}"/Programs/Python/Python3*/python.exe /c/Python3*/python.exe \
+             "${PROGRAMFILES//\\//}"/Python3*/python.exe /usr/bin/python3 /usr/local/bin/python3; do
+        if [ -x "$g" ] && py_ok "$g"; then py_use "$g"; return 0; fi
+    done
+    if [ -n "$PY_ALIAS" ] && py_ok $PY_ALIAS; then py_use $PY_ALIAS; return 0; fi
+    return 1
+}
+# PY-CHAIN-END
+
 inert() {
     _fail "$1" "${3:-$2}"
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"GUARD INERT: %s %s, so it evaluated NO rules and cannot report a decision. Allowing silently would be indistinguishable from approving."}}\n' \
@@ -88,11 +117,15 @@ inert() {
 # MSYS /tmp/... path, and Git Bash only converts such an argument when it looks like a plain path.
 # `command -v` is a builtin: no extra interpreter start per call. An unsubstituted placeholder or a
 # missing path fails here; a present-but-broken Python fails below as "engine failed".
-command -v "$PY" >/dev/null 2>&1 || inert python "cannot run Python ($(printf '%s' "$PY" | tr '\134' '/')) -- install Python 3 and run setup.sh to configure its path" "cannot run Python"
+command -v "$PY" >/dev/null 2>&1 || py_fallback || inert python "cannot run Python ($(printf '%s' "$PY" | tr '\134' '/')) -- install Python 3 and run setup.sh to configure its path" "cannot run Python"
 
-OUT=$(printf '%s' "$INPUT" | "$PY" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" claude "$HOOK_NAME" \
-      --root "$ROOT" --root-win "$ROOT_WIN" --project "$PROJECT_DIR" --invocation "$INV" --telemetry "$HB_DIR" 2>/dev/null)
+run_engine() { printf '%s' "$INPUT" | "${PYC[@]}" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" claude "$HOOK_NAME" \
+      --root "$ROOT" --root-win "$ROOT_WIN" --project "$PROJECT_DIR" --invocation "$INV" --telemetry "$HB_DIR" 2>/dev/null; }
+OUT=$(run_engine)
 RC=$?
+if [ "$RC" -ne 0 ] && ! py_ok "${PYC[@]}" && py_fallback; then
+    OUT=$(run_engine); RC=$?
+fi
 if [ "$RC" -ne 0 ]; then
     inert engine "engine failed (exit $RC) -- run: bash tools/hook-canary.sh" "exit $RC"
 fi

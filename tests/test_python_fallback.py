@@ -1,0 +1,196 @@
+"""The Python interpreter fallback chain in the five Claude hook wrappers (Plan 4, Task 5).
+
+A moved or upgraded Python used to make every blocking hook refuse everything until setup.sh was
+re-run: honest, but a full outage. The chain keeps the hooks deciding and REPORTS the degradation.
+It runs only once the configured interpreter has failed, so a healthy call costs nothing extra.
+
+Every test goes through the real wrapper, rendered from the SOURCE (`agent/guards/adapters/claude/`)
+by the generator, with controlled shims on PATH. The machine's own Pythons are kept out of the way
+(a filtered PATH, no LOCALAPPDATA / PROGRAMFILES), otherwise "nothing runnable" could never occur here.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from conftest import BASH, REPO, BS
+
+sys.path.insert(0, str(REPO / "scripts"))
+import gen_agent_trees  # noqa: E402
+
+REAL_PY = sys.executable.replace(BS, "/")
+MISSING = "C:/definitely/not/here/python.exe"
+CHAIN_BEGIN, CHAIN_END = "# PY-CHAIN-BEGIN", "# PY-CHAIN-END"
+
+
+def _install(tmp_path: Path, py: str) -> Path:
+    root = tmp_path / "install"
+    hooks = root / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    for rel, data in gen_agent_trees.render("claude", REPO / "agent").items():
+        if rel.startswith(".claude/hooks/") and rel.endswith(".sh"):
+            text = data.decode("utf-8").replace("{{PYTHON_PATH}}", py)
+            (root / rel).write_text(text, encoding="utf-8", newline="\n")
+    shutil.copytree(REPO / "tools" / "skyguard", root / "tools" / "skyguard",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    return root
+
+
+def _clean_path() -> str:
+    """The inherited PATH minus every directory that offers a python, so only shims can supply one."""
+    keep = []
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        if d and not any((Path(d) / n).exists() or (Path(d) / (n + ".exe")).exists()
+                         for n in ("python", "python3", "py")):
+            keep.append(d)
+    return os.pathsep.join(keep)
+
+
+def _shim(directory: Path, name: str, body: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    p = directory / name
+    p.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8", newline="\n")
+    return p
+
+
+def _working(directory: Path, name: str, log: Path | None = None) -> None:
+    rec = f'echo "{name} $*" >> "{log.as_posix()}"\n' if log else ""
+    _shim(directory, name, rec + f'exec "{REAL_PY}" "$@"\n')
+
+
+def _fire(root: Path, shim_dirs: list[Path], hook: str, payload: dict) -> subprocess.CompletedProcess:
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root), LOCALAPPDATA="", PROGRAMFILES="")
+    env["PATH"] = os.pathsep.join([str(d) for d in shim_dirs] + [_clean_path()])
+    return subprocess.run([BASH, str(root / ".claude" / "hooks" / hook)], input=json.dumps(payload),
+                          capture_output=True, text=True, env=env, timeout=60)
+
+
+def _esp_write(root: Path) -> dict:
+    return {"tool_name": "Write", "tool_input": {"file_path": f"{root.as_posix()}/Data/X.esp", "content": "x"}}
+
+
+def _rm_install(root: Path) -> dict:
+    return {"tool_name": "Bash", "tool_input": {"command": f'rm -rf "{root.as_posix()}"'}}
+
+
+def _reason(r: subprocess.CompletedProcess) -> str:
+    return json.loads(r.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def _failed(root: Path, hook: str) -> str:
+    p = root / ".claude" / "backups" / ".hook-heartbeat" / "claude" / f"{hook}.failed"
+    return p.read_text(encoding="utf-8") if p.is_file() else ""
+
+
+def test_a_missing_configured_python_falls_back_and_still_decides(tmp_path):
+    root = _install(tmp_path, MISSING)
+    _working(tmp_path / "shims", "python")
+    r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
+    reason = _reason(r)
+    assert "GUARD INERT" not in reason, reason
+    assert reason.startswith("BLOCKED: Cannot directly write to plugin/archive files"), reason
+    failed = _failed(root, "protect-files")
+    assert " python " in failed and "configured " + MISSING + " unusable" in failed, failed
+    assert "re-run setup.sh" in failed
+
+
+def test_a_python2_on_path_is_skipped(tmp_path):
+    root = _install(tmp_path, MISSING)
+    _shim(tmp_path / "shims", "python", "exit 1\n")          # fails the >= 3.8 probe, like a Python 2
+    _working(tmp_path / "shims", "python3")
+    r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
+    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert "used python3" in _failed(root, "protect-files")
+
+
+def test_an_old_python3_is_skipped_by_the_capability_probe_not_just_by_existing(tmp_path):
+    root = _install(tmp_path, MISSING)
+    # answers the probe like Python 3.6 (exit 1) and would otherwise run anything else
+    _shim(tmp_path / "shims", "python", f'case "$*" in *version_info*) exit 1 ;; esac\nexec "{REAL_PY}" "$@"\n')
+    r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
+    assert "GUARD INERT" in _reason(r), r.stdout
+
+
+def test_the_store_alias_is_used_only_last(tmp_path):
+    root = _install(tmp_path, MISSING)
+    alias_log = tmp_path / "alias.log"
+    _working(tmp_path / "WindowsApps", "python", alias_log)   # first on PATH, and it works
+    _working(tmp_path / "regular", "python3")
+    r = _fire(root, [tmp_path / "WindowsApps", tmp_path / "regular"], "protect-bash.sh", _rm_install(root))
+    assert _reason(r).startswith("BLOCKED"), r.stdout
+    assert not alias_log.exists(), "the Store alias ran although a regular python3 was available:\n" + (
+        alias_log.read_text(encoding="utf-8") if alias_log.exists() else "")
+    assert "used python3" in _failed(root, "protect-bash")
+
+
+def test_the_store_alias_is_still_used_when_it_is_all_there_is(tmp_path):
+    root = _install(tmp_path, MISSING)
+    _working(tmp_path / "WindowsApps", "python")
+    r = _fire(root, [tmp_path / "WindowsApps"], "protect-files.sh", _esp_write(root))
+    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+
+
+def test_nothing_runnable_still_refuses(tmp_path):
+    root = _install(tmp_path, MISSING)
+    r = _fire(root, [], "protect-files.sh", _esp_write(root))
+    reason = _reason(r)
+    assert "GUARD INERT" in reason and "cannot run Python" in reason, reason
+    assert "cannot run Python" in _failed(root, "protect-files")
+
+
+def test_a_healthy_configured_python_never_touches_the_chain(tmp_path):
+    root = _install(tmp_path, REAL_PY)
+    log = tmp_path / "probe.log"
+    _working(tmp_path / "shims", "python", log)
+    _working(tmp_path / "shims", "python3", log)
+    r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
+    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert not log.exists(), "a PATH candidate was probed although the configured interpreter works"
+    assert " python " not in _failed(root, "protect-files")
+
+
+def test_a_present_but_broken_configured_python_falls_back_after_the_engine_fails(tmp_path):
+    broken = _shim(tmp_path / "broken", "python", "exit 3\n")        # exists, runs, always fails
+    root = _install(tmp_path, broken.as_posix())
+    _working(tmp_path / "shims", "python3")
+    r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
+    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert "used python3" in _failed(root, "protect-files")
+
+
+def test_a_broken_python_with_no_fallback_is_an_engine_failure_deny(tmp_path):
+    broken = _shim(tmp_path / "broken", "python", "exit 3\n")
+    root = _install(tmp_path, broken.as_posix())
+    r = _fire(root, [], "protect-files.sh", _esp_write(root))
+    assert "GUARD INERT" in _reason(r) and "engine failed" in _reason(r), r.stdout
+
+
+@pytest.mark.parametrize("hook", ["backup-before-edit.sh", "snapshot-before-tool.sh", "session-kb-guard.sh"])
+def test_the_non_blocking_hooks_fall_back_too(tmp_path, hook):
+    root = _install(tmp_path, MISSING)
+    _working(tmp_path / "shims", "python")
+    payload = ({"hook_event_name": "SessionStart", "source": "startup"} if hook.startswith("session")
+               else {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+    r = _fire(root, [tmp_path / "shims"], hook, payload)
+    assert r.returncode == 0
+    # the engine RAN (the session guard may still report its own missing tools/kb-guard.sh here)
+    assert "Python is not runnable" not in r.stdout and "engine failed" not in r.stdout, r.stdout
+    assert "configured " + MISSING + " unusable" in _failed(root, hook[:-3])
+
+
+def test_every_wrapper_lists_the_same_chain():
+    chains = {}
+    for f in sorted((REPO / "agent" / "guards" / "adapters" / "claude").glob("*.sh")):
+        t = f.read_text(encoding="utf-8")
+        assert t.count(CHAIN_BEGIN) == 1 and t.count(CHAIN_END) == 1, f.name
+        chains[f.name] = t[t.index(CHAIN_BEGIN):t.index(CHAIN_END)]
+    assert len(chains) == 5, sorted(chains)
+    assert len(set(chains.values())) == 1, "the wrappers disagree about the fallback chain: " + ", ".join(
+        n for n, c in chains.items() if c != next(iter(chains.values())))

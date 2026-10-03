@@ -149,7 +149,7 @@ MUTATIONS = [
     ),
     pytest.param(
         ".claude/hooks/snapshot-before-tool.sh",
-        'if ! command -v "$PY" >/dev/null 2>&1; then',
+        'if ! command -v "$PY" >/dev/null 2>&1 && ! py_fallback; then',
         'if false; then',
         "tests/test_hooks.py::test_nonblocking_wrapper_logs_without_python",
         id="nonblocking-wrapper-hides-a-missing-python",
@@ -672,7 +672,7 @@ MUTATIONS = [
         # Remove the "no Python" refusal from protect-bash. The wrapper then falls through to the
         # engine call, which cannot start, and the refusal no longer says WHY.
         ".claude/hooks/protect-bash.sh",
-        'command -v "$PY" >/dev/null 2>&1 || inert',
+        'command -v "$PY" >/dev/null 2>&1 || py_fallback || inert',
         'true || inert',
         "tests/test_hooks.py::test_a_blocking_hook_refuses_when_python_is_unusable",
         id="blocking-hook-silent-when-python-is-missing",
@@ -1141,6 +1141,13 @@ MUTATIONS = [
         "tools/skyguard/patch_paths.py", "or (_QUOTED_POSITION.search(cmd) and _WRAPPER.search(cmd))", "",
         "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
         id="patch-run-inside-a-wrapped-shell-string",
+    ),
+    pytest.param(
+        "agent/guards/adapters/claude/protect-bash.sh",
+        '*/[Ww]indows[Aa]pps/*) [ -z "$PY_ALIAS" ] && PY_ALIAS="$c"; continue ;;',
+        '*/[Ww]indows[Aa]pps/*) ;;',
+        "tests/test_python_fallback.py::test_the_store_alias_is_used_only_last",
+        id="python-fallback-uses-the-store-alias-last",
     ),
 ]
 

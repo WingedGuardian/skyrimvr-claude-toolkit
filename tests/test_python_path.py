@@ -79,7 +79,7 @@ def test_rerunning_setup_repairs_a_stale_interpreter_path(game_dir):
     import json
     import subprocess
 
-    from conftest import BASH
+    from conftest import BASH, no_python_env
 
     assert run_setup(game_dir).returncode == 0
     good = hook_python_lines(game_dir)["protect-bash.sh"]
@@ -91,7 +91,7 @@ def test_rerunning_setup_repairs_a_stale_interpreter_path(game_dir):
 
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}})
     stale = subprocess.run([BASH, (hooks / "protect-bash.sh").as_posix()], input=payload,
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60, env=no_python_env())
     assert "GUARD INERT" in stale.stdout, "the stale path should make the hook refuse"
 
     result = run_setup(game_dir)

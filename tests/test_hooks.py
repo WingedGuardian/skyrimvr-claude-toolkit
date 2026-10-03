@@ -47,7 +47,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO, install_hooks
+from conftest import REPO, install_hooks, no_python_env
 
 HOOKS = REPO / ".claude" / "hooks"
 BS = chr(92)
@@ -215,7 +215,7 @@ def test_a_windows_python_path_still_produces_parseable_json(tmp_path, name):
                          python="C:" + BS + "Users" + BS + "me" + BS + "AppData" + BS + "python.exe")
     payload = (cmd('rm -rf "C:/x"') if name == "protect-bash.sh"
                else fpath("C:/Games/Skyrim VR/Data/M.esp"))
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    env = no_python_env(CLAUDE_PROJECT_DIR=str(root))
     r = subprocess.run([_bash(), str(root / ".claude" / "hooks" / name)],
                        input=json.dumps(payload), capture_output=True, text=True,
                        env=env, timeout=60)
@@ -507,7 +507,7 @@ def test_a_blocking_hook_refuses_when_python_is_unusable(tmp_path, name, python,
     root = install_hooks(tmp_path / "install", names={name}, python=python)
     payload = (cmd('rm -rf "C:/Games/Skyrim VR"') if name == "protect-bash.sh"
                else fpath("C:/Games/Skyrim VR/Data/M.esp"))
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    env = no_python_env(CLAUDE_PROJECT_DIR=str(root))
     r = subprocess.run([_bash(), str(root / ".claude" / "hooks" / name)],
                        input=json.dumps(payload), capture_output=True, text=True,
                        env=env, timeout=60)
@@ -595,7 +595,7 @@ def test_nonblocking_wrapper_logs_when_engine_crashes(tmp_path, name, what):
 @pytest.mark.parametrize("name,what", NONBLOCKING)
 def test_nonblocking_wrapper_logs_without_python(tmp_path, name, what):
     root = install_hooks(tmp_path / "install", names={name}, python="{{PYTHON_PATH}}")
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    env = no_python_env(CLAUDE_PROJECT_DIR=str(root))
     r = _run_wrapper(root, env, name, EDIT)
     assert r.returncode == 0 and r.stdout.strip() == ""
     log = (root / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8")
@@ -638,7 +638,7 @@ def test_non_json_output_is_an_emission_failure(tmp_path, name, payload):
 @pytest.mark.parametrize("name,payload", BLOCKING)
 def test_missing_python_is_a_python_failure(tmp_path, name, payload):
     root = install_hooks(tmp_path / "install", names={name}, python="{{PYTHON_PATH}}")
-    _run_wrapper(root, dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), name, payload)
+    _run_wrapper(root, no_python_env(CLAUDE_PROJECT_DIR=str(root)), name, payload)
     failed = _rec(root, name, "failed")
     assert failed and failed[2] == "python", failed
     assert _rec(root, name, "invoked") and _rec(root, name, "emitted") is None
@@ -652,7 +652,7 @@ def test_nonblocking_failures_leave_records_too(tmp_path, name, what):
     assert failed and failed[2] == "engine", failed
     assert _rec(root, name, "emitted") is None
     root2 = install_hooks(tmp_path / "install2", names={name}, python="{{PYTHON_PATH}}")
-    _run_wrapper(root2, dict(os.environ, CLAUDE_PROJECT_DIR=str(root2)), name, EDIT)
+    _run_wrapper(root2, no_python_env(CLAUDE_PROJECT_DIR=str(root2)), name, EDIT)
     assert _rec(root2, name, "failed")[2] == "python"
 
 
