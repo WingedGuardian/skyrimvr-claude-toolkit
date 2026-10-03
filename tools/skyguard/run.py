@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from skyguard import backup, paths, session, shell_rules, snapshot, write_rules  # noqa: E402
+from skyguard import backup, codes, paths, session, shell_rules, snapshot, write_rules  # noqa: E402
 from skyguard.adapters import claude  # noqa: E402
 from skyguard.audit import Audit  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
@@ -70,6 +70,7 @@ def main(argv=None) -> int:
         out = session.run(a.project, "" if p["empty"] else p["source"], a.bash, audit)
         _emit(out)
         return 0
+    v = codes.classify(v)
     _emit(adapter.render(v))
     return 0
 

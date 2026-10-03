@@ -963,6 +963,15 @@ MUTATIONS = [
                  "        return missing",
                  "tests/test_skyguard_prefs.py::test_the_real_hook_delivers_preferences",
                  id="session-start-injects-preferences-when-kb-guard-is-missing"),
+    # An INERT refusal must be recorded as "nothing was checked", not as a rule decision. Fold the
+    # status back into the decision and the telemetry would read a blind guard as a working one.
+    pytest.param(
+        "tools/skyguard/codes.py",
+        'status = "failed" if ".NO_" in code or code == "wrapper.INERT" else v.status',
+        "status = v.status",
+        "tests/test_skyguard_codes.py::test_inert_refusals_are_failed_not_evaluated",
+        id="inert-refusal-is-status-failed",
+    ),
 ]
 
 
