@@ -1589,7 +1589,7 @@ def render(v: Verdict) -> str:
 `latency` telemetry under `<root>/.claude/backups/.hook-heartbeat/codex/` (root = two levels above the
 script); find Python by the Task 5 chain (configured `{{PYTHON_PATH}}` first); run
 `run.py codex <role> --root <root> --project <root> --bash {{BASH_PATH}} --invocation <inv> --telemetry <dir>`
-with the payload on stdin **under an internal deadline** (pre-tool 45 s, session-start 105 s -- lowered from 50/110 in Task 8 item 0: the worst case measured ~5.5 s past the deadline plus the PowerShell start; both below the
+with the payload on stdin **under an internal deadline** (pre-tool 40 s, session-start 95 s -- lowered from 50/110 in Task 8 item 0 and fix round 1: ~5.5 s measured past the deadline plus two PowerShell starts via the `||` rerun; both below the
 definition timeouts 60/120 so the wrapper, not Codex, decides); require line 1 == `SKYGUARD-OK`; for
 pre-tool require the body to be empty or one JSON object whose only top-level key is `hookSpecificOutput`,
 whose keys are a subset of `hookEventName, permissionDecision, permissionDecisionReason, additionalContext`,
@@ -1711,7 +1711,7 @@ project_doc_max_bytes = 65536
   - `test_every_command_runs_the_entry_with_a_known_role`.
   - `test_definitions_carry_no_python_path_and_no_other_placeholder` (only `{{CODEX_ROOT}}`,
     `{{CODEX_ROOT_POSIX}}`; R3).
-  - `test_timeouts_exceed_the_wrappers_own_deadlines` (Task 8 item 0: deadlines 45/105, so 60 >= 45 + 15 and 120 >= 105 + 15; read the deadlines from
+  - `test_timeouts_exceed_the_wrappers_own_deadlines` (Task 8: deadlines 40/95, so 60 >= 40 + 20 and 120 >= 95 + 20; read the deadlines from
     the entry scripts).
   - `test_codex_hook_definitions_are_frozen`: the sha256 of the template's LF bytes equals the **last** line
     of `FROZEN.sha256` (`<sha> <label>`); if the file has more than one line, the CHANGELOG's top section
@@ -1901,9 +1901,16 @@ Generated into `AGENTS.md` only; everything above is shared. Other agents: this 
 
 ### Task 11: `setup.sh` configures Codex; kb-guard watches `AGENTS.md`; release gates know Codex
 
-> **Carried from Task 8 (must land here):** refuse, loudly, an install root containing `%` (cmd.exe expands
-> `%VAR%` inside the quoted `-File` path of `commandWindows` -> PowerShell prints usage, exits 0 -> fail-open;
-> `codex_trust.trust_report` already flags such a root as `root_problem`, exit 1). Fill `{{PYTHON_PATH}}` in the
+> **Carried from Task 8 (must land here):** render `.codex/hooks.json` ONLY through
+> `python tools/skyguard/codex_definitions.py render --template … --root-win … --root-posix … --out …` -- never
+> sed: the renderer is frozen with the definitions (`test_the_real_renderer_produces_the_measured_hashes`).
+> It refuses (exit 2, reason on stderr) a root containing `%` `!` `$` `` ` `` `"` (cmd.exe expands `%VAR%`/`!VAR!`
+> inside the quoted `-File` path; bash expands `$`/`` ` `` inside the quoted POSIX path -> the hook cannot
+> start -> fail-open); setup.sh must print that reason loudly and leave the Codex side unconfigured.
+> `codex_trust.trust_report` reports such a root as `overall: "unrunnable"`, exit 1.
+> **Document as unsupported (both fail open), and the canary must report "never invoked" for them:** a group
+> policy that forces `AllSigned` (the unsigned entry script cannot start) and WSL-hosted Codex (the Windows
+> install's `commandWindows` is not what a Linux Codex runs). Fill `{{PYTHON_PATH}}` in the
 > `.ps1` with PowerShell single-quote escaping (`'` -> `''`), never the bash `'\''` form. Task 10: `.codex/**` is
 > generated LF while `*.ps1` is pinned CRLF -- use the path rule `.codex/** text eol=lf` (not a global
 > `*.ps1 eol=lf`, which flips every Windows helper) plus a test; the source

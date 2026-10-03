@@ -485,8 +485,8 @@ def test_entry_deadlines_are_below_the_definition_timeouts():
     The definitions test (test_codex_definitions.py) checks the margin against hooks.json itself."""
     ps = (SRC / "skyguard-entry.ps1").read_text(encoding="ascii")
     sh = (SRC / "skyguard-entry.sh").read_text(encoding="ascii")
-    assert "$limit = 45" in ps and "{ $limit = 105 }" in ps
-    assert "LIMIT=45;" in sh and "&& LIMIT=105" in sh
+    assert "$limit = 40" in ps and "{ $limit = 95 }" in ps
+    assert "LIMIT=40;" in sh and "&& LIMIT=95" in sh
 
 
 CHAIN_BEGIN, CHAIN_END = "# PY-CHAIN-BEGIN", "# PY-CHAIN-END"

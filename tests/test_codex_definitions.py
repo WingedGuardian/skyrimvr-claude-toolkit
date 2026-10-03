@@ -14,10 +14,12 @@ import re
 import subprocess
 import sys
 
-from conftest import REPO
+import pytest
+
+from conftest import BS, REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import codex_trust  # noqa: E402
+from skyguard import codex_definitions, codex_trust  # noqa: E402
 
 TARGET = REPO / "agent" / "targets" / "codex"
 HOOKS_JSON = TARGET / "hooks.json"
@@ -28,10 +30,14 @@ REL = "agent/targets/codex/hooks.json"
 REAPPROVE = "re-approve your Codex hooks"
 PLACEHOLDERS = {"{{CODEX_ROOT}}", "{{CODEX_ROOT_POSIX}}"}
 ROLE_OF = {"SessionStart": "session-start", "PreToolUse": "pre-tool"}
-# How far below a definition's timeout each wrapper deadline must sit: a wrapper answered up to ~5.5 s
-# past its deadline (MEASURED, Task 7: taskkill wait + bounded drain), plus a PowerShell cold start (p95
-# up to ~1.6 s on a loaded machine, Task 0), roughly doubled.
-MARGIN_S = 15
+# How far below a definition's timeout each wrapper deadline must sit. One call can cost: TWO PowerShell
+# cold starts (pwsh, then the `||` rerun under 5.1 when pwsh ends non-zero; p95 up to ~1.6 s each on a
+# loaded machine, Task 0), the wrapper's own deadline, ~5.5 s past it (MEASURED, Task 7: taskkill wait +
+# bounded drain), and the 5.1 rerun's own answer. ~10 s on top of the deadline, doubled: Codex RUNS the
+# command when the hook outlives its timeout.
+MARGIN_S = 20
+V1_SHA = "3cc0c07ede4e2f5786bd6d55008cd1fbde25cea9226de7856f036bfeb6e9b8db"   # the v1 definitions, forever
+NEUTRAL_WIN, NEUTRAL_POSIX = "C:/SkyguardVectors/Skyrim Probe (x86)", "/c/SkyguardVectors/Skyrim Probe (x86)"
 
 
 def _hooks() -> dict:
@@ -128,9 +134,12 @@ def test_timeouts_exceed_the_wrappers_own_deadlines():
 def test_the_template_hashes_to_the_measured_vectors():
     """Rendered for the neutral root, the template's two hashes are vectors 1 and 4 -- the ones Codex
     0.160.0 itself listed (Task 0). A field Codex hashes differently would show here first."""
-    root, posix = "C:/SkyguardVectors/Skyrim Probe (x86)", "/c/SkyguardVectors/Skyrim Probe (x86)"
     text = HOOKS_JSON.read_text(encoding="utf-8")
-    hooks = json.loads(text.replace("{{CODEX_ROOT_POSIX}}", posix).replace("{{CODEX_ROOT}}", root))["hooks"]
+    _assert_vectors(text.replace("{{CODEX_ROOT_POSIX}}", NEUTRAL_POSIX).replace("{{CODEX_ROOT}}", NEUTRAL_WIN))
+
+
+def _assert_vectors(rendered: str) -> None:
+    hooks = json.loads(rendered)["hooks"]
     vectors = {v["label"]: v for v in json.loads(VECTORS.read_text(encoding="utf-8"))}
     for event, label in (("SessionStart", "v1 SessionStart (Task 8 template)"),
                          ("PreToolUse", "v1 PreToolUse (Task 8 template)")):
@@ -138,6 +147,48 @@ def test_the_template_hashes_to_the_measured_vectors():
         v = vectors[label]
         assert g["hooks"][0] == v["handler"] and {k: x for k, x in g.items() if k != "hooks"} == v["group"]
         assert codex_trust.hook_hash(codex_trust.snake(event), g, g["hooks"][0], True) == v["codex_hash"]
+
+
+@pytest.mark.parametrize("win,posix", [
+    (NEUTRAL_WIN, NEUTRAL_POSIX),
+    (NEUTRAL_WIN.replace("/", BS), NEUTRAL_POSIX),                       # as Windows spells it
+    (NEUTRAL_WIN + "/", NEUTRAL_POSIX + "/"),                            # a trailing slash
+    (NEUTRAL_WIN.replace("/", BS) + BS, NEUTRAL_POSIX + "//"),
+], ids=["forward", "backslashes", "trailing-slash", "backslash-trailing"])
+def test_the_real_renderer_produces_the_measured_hashes(tmp_path, win, posix):
+    """THE TASK 11 CONTRACT: setup.sh renders the definitions with tools/skyguard/codex_definitions.py, and
+    that renderer is frozen with them -- a change to slash, trailing-slash or case handling changes every
+    user's hash. Run through its CLI, as setup.sh will."""
+    out = tmp_path / "hooks.json"
+    r = subprocess.run([sys.executable, str(REPO / "tools" / "skyguard" / "codex_definitions.py"), "render",
+                        "--template", str(HOOKS_JSON), "--root-win", win, "--root-posix", posix, "--out", str(out)],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    _assert_vectors(out.read_text(encoding="utf-8"))
+
+
+def test_the_renderer_keeps_case():
+    """Codex hashes the text it reads; case is not ours to change."""
+    text = codex_definitions.render(HOOKS_JSON.read_text(encoding="utf-8"), "c:/skyguardvectors/x", "/c/x")
+    assert "c:/skyguardvectors/x/.codex" in text and "C:/" not in text
+
+
+@pytest.mark.parametrize("bad", list('%!$`"'))
+def test_the_renderer_refuses_a_root_the_hooks_cannot_run_from(tmp_path, bad):
+    out = tmp_path / "hooks.json"
+    for win, posix in ((NEUTRAL_WIN + bad, NEUTRAL_POSIX), (NEUTRAL_WIN, NEUTRAL_POSIX + bad)):
+        r = subprocess.run([sys.executable, str(REPO / "tools" / "skyguard" / "codex_definitions.py"), "render",
+                            "--template", str(HOOKS_JSON), "--root-win", win, "--root-posix", posix,
+                            "--out", str(out)], capture_output=True, text=True, timeout=60)
+        assert r.returncode == 2 and "NOT rendered" in r.stderr and repr(bad) in r.stderr, (bad, r.stderr)
+        assert not out.exists()
+
+
+@pytest.mark.parametrize("win,posix", [("SkyrimVR", "/c/x"), ("C:/x", "c/x"), ("C:/x", "/c/x" + BS + "y")],
+                         ids=["relative-win", "relative-posix", "posix-backslash"])
+def test_the_renderer_refuses_a_root_it_cannot_spell(win, posix):
+    with pytest.raises(codex_definitions.RootRefused):
+        codex_definitions.render(HOOKS_JSON.read_text(encoding="utf-8"), win, posix)
 
 
 def test_the_codex_target_is_lf_and_pinned_lf():
@@ -163,31 +214,44 @@ def _lf_sha(data: bytes) -> str:
     return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
 
 
-def _changelog_top() -> str:
-    text = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
-    heads = [m.start() for m in re.finditer(r"^## ", text, re.M)]
-    assert heads, "CHANGELOG.md has no section"
-    return text[heads[0]:heads[1] if len(heads) > 1 else len(text)]
+def _top_section(changelog: str) -> str:
+    heads = [m.start() for m in re.finditer(r"^## ", changelog, re.M)]
+    if not heads:
+        return ""
+    return changelog[heads[0]:heads[1] if len(heads) > 1 else len(changelog)]
 
 
 def _git(*args) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=str(REPO), capture_output=True)
 
 
-def freeze_problems(ledger_text: str, template: bytes, changelog_top: str, released) -> list:
+def freeze_problems(ledger_text: str, template: bytes, changelog: str, released, tags_seen: bool,
+                    v1: str = V1_SHA) -> list:
     """What is wrong with the freeze, as sentences (empty = fine).
 
-    `released` is (tag, template bytes) of the newest tag carrying the definitions, or None.
+    `released` is (tag, template bytes) of the newest tag carrying the definitions, or None; `tags_seen` says
+    whether this checkout has ANY tag (a shallow, tagless or git-less copy has none, and would otherwise pass
+    the release half vacuously).
+    - the ledger is append-only: its FIRST line is the v1 sha, hard-coded here, so a ledger rewritten to one
+      new line cannot hide a change;
     - the template's LF sha256 must be the ledger's LAST line;
     - a ledger with more than one line means a definition changed after v1: the CHANGELOG's top section must
       say REAPPROVE -- until a release carries that change (then the tag half below takes over, so a later
       Unreleased section is not forced to repeat it forever);
-    - a template that differs from the newest release carrying one also requires that line.
+    - a template that differs from the newest release carrying one also requires that line;
+    - a CHANGELOG that lists a released version in a checkout without tags cannot run the tag half: fail.
     """
     out = []
+    changelog_top = _top_section(changelog)
     ledger = [ln.split() for ln in ledger_text.splitlines() if ln.strip()]
     if not ledger or not all(len(x) == 2 and re.fullmatch(r"[0-9a-f]{64}", x[0]) for x in ledger):
         return ["FROZEN.sha256 is not '<sha256> <label>' lines: {!r}".format(ledger_text[:200])]
+    if ledger[0][0] != v1:
+        out.append("FROZEN.sha256 is append-only: its first line must stay the v1 definitions ({}).".format(v1))
+    if re.search(r"^## v[0-9]", changelog, re.M) and not tags_seen:
+        out.append("the CHANGELOG lists released versions but this checkout has no git tags (a shallow or "
+                   "tagless clone, or no git): the release half of the freeze gate cannot run. Fetch the tags "
+                   "(CI: actions/checkout with fetch-depth: 0).")
     now = _lf_sha(template)
     if now != ledger[-1][0]:
         out.append(
@@ -206,23 +270,24 @@ def freeze_problems(ledger_text: str, template: bytes, changelog_top: str, relea
 
 
 def _released():
-    """(tag, bytes) of the newest tag whose tree has the definitions; None if none (or no git here)."""
+    """((tag, bytes) of the newest tag whose tree has the definitions, or None; does any tag exist?)"""
     if not (REPO / ".git").exists():
-        print("freeze gate: no git checkout here -- the tag comparison did not run")
-        return None
+        return None, False
     tags = _git("tag", "--sort=-creatordate").stdout.decode().split()
     for tag in tags:
         blob = _git("show", "{}:{}".format(tag, REL))
         if blob.returncode == 0:
-            return tag, blob.stdout
-    print("freeze gate: no tag carries {} yet -- only the ledger half ran".format(REL))
-    return None
+            return (tag, blob.stdout), True
+    if tags:
+        print("freeze gate: no tag carries {} yet -- the ledger half decides".format(REL))
+    return None, bool(tags)
 
 
 def test_codex_hook_definitions_are_frozen():
     """Change a definition and every user's approved copy silently stops running (E18)."""
+    released, tags_seen = _released()
     problems = freeze_problems(LEDGER.read_text(encoding="utf-8"), HOOKS_JSON.read_bytes(),
-                               _changelog_top(), _released())
+                               (REPO / "CHANGELOG.md").read_text(encoding="utf-8"), released, tags_seen)
     assert not problems, "\n".join(problems)
 
 
@@ -232,17 +297,29 @@ def test_the_freeze_gate_can_fail():
     s1, s2 = _lf_sha(t1), _lf_sha(t2)
     v1 = s1 + " v1\n"
     v2 = v1 + s2 + " v2\n"
-    say, quiet = "## Unreleased\n- " + REAPPROVE + "\n", "## Unreleased\n- other\n"
-    assert freeze_problems(v1, t1, quiet, None) == []
-    assert freeze_problems(v1, t1.replace(b"\n", b"\r\n"), quiet, None) == []    # line endings do not count
-    assert freeze_problems("nonsense\n", t1, say, None)[0].startswith("FROZEN.sha256 is not")
+    old = "\n## v3.9.1\n- old\n"
+    say, quiet = "## Unreleased\n- " + REAPPROVE + "\n" + old, "## Unreleased\n- other\n" + old
+
+    def fp(ledger, tpl, changelog, rel, tags=True):
+        return freeze_problems(ledger, tpl, changelog, rel, tags, v1=s1)
+
+    assert fp(v1, t1, quiet, None) == []
+    assert fp(v1, t1.replace(b"\n", b"\r\n"), quiet, None) == []    # line endings do not count
+    assert fp("nonsense\n", t1, say, None)[0].startswith("FROZEN.sha256 is not")
+    # append-only: a one-line ledger rewritten to the new template's sha
+    rewritten = fp(s2 + " v1\n", t2, say, None)
+    assert len(rewritten) == 1 and "append-only" in rewritten[0], rewritten
     # the template changed, the ledger did not
-    assert "does not record it" in freeze_problems(v1, t2, say, None)[0]
+    assert "does not record it" in fp(v1, t2, say, None)[0]
     # the ledger grew (v2) but the CHANGELOG is silent: before any release, and when the release is older
-    assert "has 2 lines" in freeze_problems(v2, t2, quiet, None)[0]
-    assert any("has 2 lines" in p for p in freeze_problems(v2, t2, quiet, ("v4.0.0", t1)))
-    assert freeze_problems(v2, t2, say, ("v4.0.0", t1)) == []
+    assert "has 2 lines" in fp(v2, t2, quiet, None)[0]
+    assert any("has 2 lines" in p for p in fp(v2, t2, quiet, ("v4.0.0", t1)))
+    assert fp(v2, t2, say, ("v4.0.0", t1)) == []
     # once a release carries v2, a later Unreleased section need not repeat the line
-    assert freeze_problems(v2, t2, quiet, ("v4.1.0", t2)) == []
-    # the tag half alone: the template differs from the release (ledger rewritten to hide it)
-    assert "differs from release v4.0.0" in freeze_problems(s2 + " v1\n", t2, quiet, ("v4.0.0", t1))[0]
+    assert fp(v2, t2, quiet, ("v4.1.0", t2)) == []
+    # the tag half alone: the ledger and template agree, the newest release differs
+    assert fp(v1, t1, quiet, ("v4.0.0", t2)) == [
+        "hooks.json differs from release v4.0.0: the CHANGELOG's top section must say '{}'".format(REAPPROVE)]
+    # no tags where the CHANGELOG lists releases: the tag half would pass vacuously
+    assert "no git tags" in fp(v1, t1, quiet, None, tags=False)[0]
+    assert fp(v1, t1, "## Unreleased\n- first\n", None, tags=False) == []     # nothing released yet

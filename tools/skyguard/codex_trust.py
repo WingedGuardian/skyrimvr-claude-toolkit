@@ -4,8 +4,9 @@
     python tools/skyguard/codex_trust.py report --root <install> [--codex-config P] [--hooks-json P]
 
 Prints one JSON report. Exit 0 = every hook trusted, 1 = any hook is not (untrusted, modified, disabled)
-or the install root cannot run them, 2 = it cannot tell (unknown). It never reports a state it did not
-read: an unreadable file is "unknown", never "trusted". It only READS Codex's config, never writes it.
+or the install root cannot run them (overall "unrunnable"), 2 = it cannot tell (unknown). It never reports
+a state it did not read: an unreadable file is "unknown", never "trusted", and so is a key stored only
+under another letter case (whether Codex folds case is unmeasured). It only READS Codex's config.
 
 Why: Codex runs a project hook only when `[hooks.state.'<key>']` in its config.toml holds a `trusted_hash`
 equal to the definition's CURRENT hash and `enabled` is not false. An unapproved, changed ("modified") or
@@ -41,16 +42,16 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from skyguard import codex_definitions  # noqa: E402
+
 STATUSES = ("trusted", "untrusted", "modified", "disabled", "unknown")
 DEFAULT_TIMEOUT_S = 600
 DEFAULT_CONTEXT_LIMIT = 2500
 _SHORT_EVENTS = {"session_end": (1, 3), "interrupt": (1, 3)}   # (default, max) seconds, from X4's read
 
-# cmd.exe expands %NAME% even inside the quoted -File path of commandWindows, so a root containing `%`
-# makes the definition launch something else (PowerShell prints its usage and exits 0: Codex RUNS the
-# command). A trusted definition at such a root still protects nothing.
-ROOT_PERCENT = ("the install root contains '%', which cmd.exe expands inside the Codex hook command: "
-                "the hooks cannot run there. Move the toolkit to a folder without '%' and re-approve.")
+# A root the hooks cannot run from (% ! $ ` "; codex_definitions.root_problem) makes the report
+# "unrunnable": a trusted definition there still protects nothing.
 
 
 class Unreadable(ValueError):
@@ -218,11 +219,18 @@ def codex_home() -> Path:
 
 
 def trust_report(hooks_json: Path, codex_config: Path, project_root: Path, windows: bool = None) -> dict:
+    report = _trust_report(hooks_json, codex_config, project_root, windows)
+    report["root_problem"] = codex_definitions.root_problem(str(project_root))
+    if report["root_problem"]:
+        # approved or not, the hooks cannot start from this root: never "trusted", never "can't tell"
+        report["overall"] = "unrunnable"
+    return report
+
+
+def _trust_report(hooks_json: Path, codex_config: Path, project_root: Path, windows: bool = None) -> dict:
     report = {"hooks_json": str(hooks_json), "codex_config": str(codex_config), "hooks": [],
               "project_trust": None, "project_trusted": None, "root_problem": None,
               "overall": "unknown", "error": None}
-    if "%" in str(project_root):
-        report["root_problem"] = ROOT_PERCENT
     try:
         expected = expected_entries(hooks_json, windows)
         tables = read_tables(codex_config)
@@ -232,16 +240,22 @@ def trust_report(hooks_json: Path, codex_config: Path, project_root: Path, windo
     pt = _project_trust(tables, project_root)
     report["project_trust"], report["project_trusted"] = pt, pt in ("trusted", "ancestor")
     state = {k[len("hooks.state:"):]: v for k, v in tables.items() if k.startswith("hooks.state:")}
-    folded = {k.lower(): v for k, v in state.items()}
     rows = []
     for key, want in sorted(expected.items()):
-        ent, how = state.get(key), "exact"
-        if ent is None:
-            ent, how = folded.get(key.lower()), "casefold"
-        if ent is None:
+        variants = sorted(k for k in state if k.lower() == key.lower())
+        if not variants:
             rows.append({"key": key, "status": "untrusted", "matched": None, "expected_hash": want,
                          "stored_hash": None})
             continue
+        if variants != [key]:
+            # Only another case (or several case variants) is stored. Whether Codex matches keys case-
+            # insensitively is UNMEASURED, so this is never read as trusted -- and never collapsed into one.
+            rows.append({"key": key, "status": "unknown", "matched": "casefold", "expected_hash": want,
+                         "stored_hash": None, "variants": variants,
+                         "note": "stored under another case" if key not in variants
+                                 else "stored under several case variants"})
+            continue
+        ent, how = state[key], "exact"
         if ent.get("enabled") is False:
             st = "disabled"
         elif ent.get("trusted_hash") == want:
@@ -277,7 +291,7 @@ def trust_report(hooks_json: Path, codex_config: Path, project_root: Path, windo
 def exit_code(rep: dict) -> int:
     if rep["overall"] == "unknown":
         return 2
-    if rep["overall"] == "trusted" and not rep.get("root_problem"):
+    if rep["overall"] == "trusted":
         return 0
     return 1
 

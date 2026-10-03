@@ -14,8 +14,8 @@
 # Hot path = bash builtins, as in the Claude wrappers (a fork costs 10-70 ms on Git Bash); the remaining
 # forks are `$(cat)`, `timeout` and the engine. Never logs the environment (hooks inherit secrets).
 # SETUP: setup.sh fills in the two paths below.
-# Test-only knobs: SKYGUARD_WRAPPER_TIMEOUT_S (engine deadline; default 45 pre-tool, 105 session-start,
-# 15 s below the definition timeouts 60/120), SKYGUARD_NO_PYTHON_FALLBACK=1 (configured interpreter only).
+# Test-only knobs: SKYGUARD_WRAPPER_TIMEOUT_S (engine deadline; default 40 pre-tool, 95 session-start,
+# 20+ s below the definition timeouts 60/120), SKYGUARD_NO_PYTHON_FALLBACK=1 (configured interpreter only).
 
 ROLE="${1:-}"
 PY='{{PYTHON_PATH}}'
@@ -110,7 +110,7 @@ printf '%s %s bytes=%s\n' "$T0" "$INV" "${#INPUT}" > "$HB_DIR/$HOOK_NAME.receive
 
 RUNPY="${ROOT_WIN:-$ROOT}/tools/skyguard/run.py"
 [ -f "$ROOT/tools/skyguard/run.py" ] || deny engine "engine missing (tools/skyguard/run.py)"
-LIMIT=45; [ "$ROLE" = "session-start" ] && LIMIT=105
+LIMIT=40; [ "$ROLE" = "session-start" ] && LIMIT=95
 [ -z "${SKYGUARD_WRAPPER_TIMEOUT_S:-}" ] || LIMIT="$SKYGUARD_WRAPPER_TIMEOUT_S"
 case "$LIMIT" in ''|*[!0-9]*) deny wrapper "SKYGUARD_WRAPPER_TIMEOUT_S is not a whole number" ;; esac
 case "$BASH_EXE" in '{{'*) BASH_EXE="${BASH:-bash}" ;; esac

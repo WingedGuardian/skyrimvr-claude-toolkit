@@ -159,20 +159,42 @@ def test_unknown_on_an_unreadable_hooks_json(tmp_path):
     assert rep["overall"] == "unknown" and "hooks.json" in rep["error"], rep
 
 
-def test_a_key_in_another_case_still_matches(tmp_path):
+def test_a_key_stored_only_in_another_case_is_unknown_not_trusted(tmp_path):
+    """Whether Codex matches state keys case-insensitively is UNMEASURED: never err toward trusted."""
     root = _install(tmp_path)
     exp = _expected(root)
     rep = _report(tmp_path, root, _config(tmp_path, {k.lower(): {"trusted_hash": h} for k, h in exp.items()}))
-    assert rep["overall"] == "trusted" and {r["matched"] for r in rep["hooks"]} == {"casefold"}, rep
+    assert _statuses(rep) == ["unknown", "unknown"] and rep["overall"] == "unknown", rep
+    assert {r["matched"] for r in rep["hooks"]} == {"casefold"}
+    assert ct.exit_code(rep) == 2
 
 
-def test_a_root_with_percent_is_never_reported_as_protected(tmp_path):
-    """cmd.exe expands %NAME% inside the quoted -File path: the hooks cannot run there, approved or not."""
-    root = _install(tmp_path, "Skyrim %USERNAME% VR")
+def test_case_variant_duplicates_are_not_collapsed(tmp_path):
+    """The exact key AND a lower-case twin: which one Codex reads is unmeasured -- report both, decide nothing."""
+    root = _install(tmp_path)
+    (pre, h1), (ses, h2) = sorted(_expected(root).items())
+    rep = _report(tmp_path, root, _config(tmp_path, {pre: {"trusted_hash": h1},
+                                                     pre.lower(): {"trusted_hash": "sha256:" + "2" * 64},
+                                                     ses: {"trusted_hash": h2}}))
+    row = rep["hooks"][0]
+    assert row["status"] == "unknown" and sorted(row["variants"]) == sorted([pre, pre.lower()]), row
+    assert rep["hooks"][1]["status"] == "trusted"
+    assert rep["overall"] == "unknown"
+
+
+@pytest.mark.parametrize("ch", list("%!$`"))
+def test_a_root_the_hooks_cannot_run_from_is_never_reported_as_protected(tmp_path, ch):
+    """cmd.exe expands %NAME% (and !NAME! under delayed expansion) inside the quoted -File path; bash
+    expands $ and ` inside the quoted path: the hooks cannot run there, approved or not."""
+    root = _install(tmp_path, "Skyrim " + ch + "x VR")
     exp = _expected(root)
     rep = _report(tmp_path, root, _config(tmp_path, {k: {"trusted_hash": h} for k, h in exp.items()}))
-    assert rep["overall"] == "trusted" and rep["root_problem"] == ct.ROOT_PERCENT
+    assert _statuses(rep) == ["trusted", "trusted"]
+    assert rep["overall"] == "unrunnable" and repr(ch) in rep["root_problem"], rep
     assert ct.exit_code(rep) == 1
+    # also when Codex's config cannot be read: the root alone already decides it
+    rep = _report(tmp_path, root, tmp_path / "absent.toml")
+    assert rep["overall"] == "unrunnable" and ct.exit_code(rep) == 1
 
 
 # --------------------------------------------------------------------------------------------------

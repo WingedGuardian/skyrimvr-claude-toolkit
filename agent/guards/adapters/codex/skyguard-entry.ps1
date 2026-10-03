@@ -19,7 +19,7 @@
 # output is discarded. Never logs the environment: hooks inherit all of it, secrets included (MEASURED).
 #
 # SETUP: setup.sh fills in the two paths below.
-# Test-only knobs: SKYGUARD_WRAPPER_TIMEOUT_S (the engine deadline; default 45 pre-tool, 105 session-start,
+# Test-only knobs: SKYGUARD_WRAPPER_TIMEOUT_S (the engine deadline; default 40 pre-tool, 95 session-start,
 # both below the definition timeouts 60/120 so this file, not Codex, decides), SKYGUARD_NO_PYTHON_FALLBACK=1
 # (configured interpreter only, so a missing interpreter is really missing).
 
@@ -289,10 +289,11 @@ function Invoke-Main {
 
     if (-not [System.IO.File]::Exists($script:RunPy)) { Send-Failure 'engine' 'engine missing (tools/skyguard/run.py)'; return }
 
-    # 15 s under the definition timeouts (60/120): the worst case MEASURED past the deadline was ~5.5 s
-    # (taskkill wait + drain) plus the PowerShell start, and Codex RUNS the command once its timeout passes.
-    $limit = 45
-    if ($script:Role -ceq 'session-start') { $limit = 105 }
+    # 20+ s under the definition timeouts (60/120): ~5.5 s MEASURED past the deadline (taskkill wait +
+    # drain), two PowerShell starts (pwsh, then the `||` rerun under 5.1) and the rerun's own answer all
+    # fit before Codex gives up -- and Codex RUNS the command once its timeout passes.
+    $limit = 40
+    if ($script:Role -ceq 'session-start') { $limit = 95 }
     if ($env:SKYGUARD_WRAPPER_TIMEOUT_S) { $limit = [int]::Parse($env:SKYGUARD_WRAPPER_TIMEOUT_S, [System.Globalization.CultureInfo]::InvariantCulture) }
 
     $bashArg = $BASHEXE

@@ -262,7 +262,11 @@ jobs:
       run:
         shell: bash
     steps:
+      # Full history WITH tags: the Codex hook-definition freeze gate compares against the newest release
+      # tag, and fails (rather than passing vacuously) in a tagless shallow clone.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       # Deliberately NOT python-version-file here. .python-version pins an exact
       # patch (3.11.15) for the devcontainer, and that patch has no Windows x64
