@@ -76,6 +76,11 @@ from typing import List, NamedTuple, Optional, Tuple
 
 MAX_TOKENS = 2000
 MAX_DEPTH = 8
+# Every branch is linear, but "linear" is proven only up to the sizes the timing tests run (20/80 KB), and a
+# superlinear path small enough to stay under the ratio floor at 80 KB would cost seconds at megabytes. Above this
+# cap the parser does not try: ok=False, and the legacy rules (linear) decide. MEASURED 2026-10-03: the largest of
+# 55,467 real shell commands is 50,452 characters.
+MAX_INPUT_CHARS = 256 * 1024
 
 
 class Exec(NamedTuple):
@@ -226,12 +231,13 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
 # Shared scanner state
 # ----------------------------------------------------------------------------------------------------------
 class _Ctx:
-    __slots__ = ("tokens", "out", "frame_ids")
+    __slots__ = ("tokens", "out", "frame_ids", "via_xargs")
 
     def __init__(self):
         self.tokens = 0
         self.out: List[Exec] = []
         self.frame_ids = 0
+        self.via_xargs = set()          # ids of execs xargs runs: their stdin items arrive as ARGUMENTS
 
     def tick(self, k: int = 1) -> None:
         self.tokens += k
@@ -1005,7 +1011,7 @@ _PS_REDIR_OPS = (">>", ">&", ">", "<")
 _PS_FD = re.compile(r"[0-9*]")
 _IO_CALL = re.compile(r"\[(?:System\.)?IO\.(File|Directory)\]::([A-Za-z]{1,40})", re.IGNORECASE)
 _PS_ASSIGN_OPS = frozenset(("=", "+=", "-=", "*=", "/=", "%=", "??="))
-_PS_METHOD = re.compile(r"(?:\.|::)([A-Za-z]{1,40})$")
+_PS_METHOD = re.compile(r"(?:\.|::)([A-Za-z_][A-Za-z0-9_]{0,63})$")
 _PS_OPAQUE_METHODS = frozenset(("delete", "moveto", "copyto", "invoke", "invokereturnasis", "addscript", "start",
                                 "create"))
 _PS_DASHES = "–—―"                                 # PowerShell takes these as a parameter dash
@@ -1254,18 +1260,21 @@ class _Pwsh(_Scanner):
         i = self.i
         w = f.word
         io = ""
+        call = False
         if w is not None:
             m = _IO_CALL.fullmatch(self.t, w.start, i)
+            tail = _PS_METHOD.search(self.t, max(w.start, i - 80), i)   # bounded: linear
+            # Only `.Name(` and `::Name(` are method calls (their arguments are data). Anything else glued to a
+            # `(` -- `[void](`, `[int](`, `name(` -- is a cast or a group: its contents are a pipeline that RUNS.
+            call = bool(m or tail)
             if m:
                 io = _io_program(m.group(1), m.group(2))
-            else:
-                tail = _PS_METHOD.search(self.t, max(w.start, i - 64), i)   # bounded: linear
-                if tail and tail.group(1).lower() in _PS_OPAQUE_METHODS:
-                    # .Delete() / .MoveTo() / [scriptblock]::Create().Invoke(): something runs or is deleted,
-                    # and the parser cannot say what -- an opaque exec, never a silent nothing.
-                    self.synth.append((len(self.recs), Exec(
-                        "?", (tail.group(1),), (False,), (), "powershell", f.cd, "", self.t[w.start:i])))
-        g = self._push(f, "call" if w is not None else "paren", i, True)
+            elif tail and tail.group(1).lower() in _PS_OPAQUE_METHODS:
+                # .Delete() / .MoveTo() / [scriptblock]::Create().Invoke(): something runs or is deleted,
+                # and the parser cannot say what -- an opaque exec, never a silent nothing.
+                self.synth.append((len(self.recs), Exec(
+                    "?", (tail.group(1),), (False,), (), "powershell", f.cd, "", self.t[w.start:i])))
+        g = self._push(f, "call" if call else "paren", i, True)
         g.io = io
         self.i = i + 1
 
@@ -1492,6 +1501,15 @@ _PARALLEL_ARG = frozenset(("-j", "--jobs", "-n", "-N", "-S", "--sshlogin", "-a",
                            "--colsep", "-C", "--joblog", "--results", "--timeout", "-I", "--replace", "-E"))
 _SAPS_SWITCHES = ("wait", "passthru", "nonewwindow", "usenewenvironment", "loaduserprofile", "whatif", "confirm")
 _CMD_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}\.?")
+_CMD_PRE_SWITCH = re.compile(r"/{1,2}(?:[sqdau]|[efvt]:[A-Za-z0-9]{1,8})$", re.IGNORECASE)   # cmd switches before /c
+
+
+def _cmd_c_follows(v, j) -> bool:
+    """Whether v[j:] is cmd's switch list ending in /c or /k (`/s /q /d /e:on /v:off ... /c`)."""
+    while j < len(v) and _CMD_PRE_SWITCH.match(v[j]):
+        j += 1
+    return j < len(v) and v[j].lower().lstrip("/")[:1] in ("c", "k", "r") and v[j].startswith("/") and \
+        len(v[j].lstrip("/")) == 1
 _PS_VALUE_PARAMS = ("executionpolicy", "ep", "ex", "workingdirectory", "wd", "configurationname", "config",
                     "custompipename", "inputformat", "outputformat", "of", "windowstyle", "version",
                     "settingsfile", "encodedarguments", "psconsolefile")
@@ -1514,6 +1532,7 @@ class _Resolver:
         self.ctx = ctx
         self.recurse = recurse
         self.call = call
+        self.xargs = False
         self.made: List[Exec] = []
 
     def emit(self, program: str, k: int) -> Exec:
@@ -1525,6 +1544,10 @@ class _Resolver:
                  body)
         self.ctx.out.append(e)
         self.made.append(e)
+        if self.xargs:                      # `... | xargs bash`, `xargs python`: the code arrives from stdin as args
+            self.ctx.via_xargs.add(id(e))
+            if program in ALL_SHELLS or (consumer_kind(program) == "interpreter" and _reads_code(e.argv)):
+                self.opaque(k)
         if self.bodies and program in ALL_SHELLS and self.recurse:
             for b, _ in self.bodies:
                 _sub(b, _shell_dialect(program), self.depth + 1, self.cd, self.ctx)
@@ -1572,8 +1595,8 @@ class _Resolver:
                     self.y = list(self.y[:k]) + [False] * (1 + len(sw)) + list(self.y[k + 1:])
                     n = len(v)
             p = program_name(v[k], self.d, self.y[k])
-            if p == "?" and k + 1 < n and v[k + 1].lower() in ("/c", "/k", "/r", "//c", "//k"):
-                self.opaque(k)                                  # %COMSPEC% /c ..., & $env:ComSpec /c ...
+            if p == "?" and _cmd_c_follows(v, k + 1):
+                self.opaque(k)                                  # %COMSPEC% [/s /q ...] /c ..., & $env:ComSpec /c
                 return self._cmd_shell(k)
             if first and self.d == "powershell":
                 first = False
@@ -1606,6 +1629,24 @@ class _Resolver:
                         rest = v[k + 2:] if w in ("-S", "--split-string") else v[k + 1:]
                         self.reparse(" ".join([split] + list(rest)), "bash")
                         return self.made
+                    if len(w) > 2 and w[0] == "-" and w[1] != "-":  # clustered: -iS 'cmd', -iuFOO, -C/tmp
+                        idx = 1
+                        while idx < len(w) and w[idx] not in "uCS":
+                            idx += 1
+                        if idx >= len(w):
+                            k += 1
+                            continue
+                        val, own = w[idx + 1:], bool(w[idx + 1:])
+                        if not own:
+                            val = v[k + 1] if k + 1 < n else ""
+                        nxt = k + 1 if own else k + 2
+                        if w[idx] == "S":
+                            self.reparse(" ".join([val] + list(v[nxt:])), "bash")
+                            return self.made
+                        if w[idx] == "C":
+                            self.cd = _join_cd(self.cd, val)
+                        k = nxt
+                        continue
                     if w in ("-u", "--unset", "-C", "--chdir"):
                         if w in ("-C", "--chdir") and k + 1 < n:
                             self.cd = _join_cd(self.cd, v[k + 1])
@@ -1728,6 +1769,7 @@ class _Resolver:
             if p == "xargs":
                 k += 1
                 self.stdin = "pipe"
+                self.xargs = True
                 while k < n and v[k].startswith("-"):
                     k += 2 if v[k] in _XARGS_ARG else 1
                 if k >= n:
@@ -1826,6 +1868,8 @@ class _Resolver:
         if cflag:
             if j < n:
                 self.reparse(v[j], "bash")
+            else:
+                self.opaque(k)                      # `xargs -0 sh -c`: the command string comes from elsewhere
             return self.made
         if j < n and not sflag:
             self.emit(program_name(v[j], self.d, self.y[j]), j + 1)    # bash FILE args: FILE runs
@@ -1941,26 +1985,26 @@ class _Resolver:
         """Start-Process [-FilePath] F [-ArgumentList|-Args] a,b,...: F runs with every element joined by spaces
         (as Start-Process does), re-parsed as a Windows command line so `cmd /c` / `pwsh -c` inside it are seen."""
         e = self.emit(p, k + 1)
-        v, q = e.argv, e.quoted
+        v, q, y = e.argv, e.quoted, self.y[k + 1:]
         fp, args, pos, j = None, None, [], 0
         while j < len(v):
             w = v[j]
             if w.startswith("-") and len(w) > 1 and not q[j]:
                 name = w[1:].split(":", 1)[0].lower()
                 if name and ("filepath".startswith(name) or name in ("path", "pspath")):
-                    fp = v[j + 1] if j + 1 < len(v) else ""
+                    fp = (v[j + 1], y[j + 1]) if j + 1 < len(v) else ("", False)
                     j += 2
                     continue
                 if name and ("argumentlist".startswith(name) or name == "args"):
                     args = []
                     j += 1
                     while j < len(v) and not (v[j][:1] == "-" and len(v[j]) > 1 and not q[j]):
-                        args.append(v[j])                       # every comma-separated element
+                        args.append((v[j], y[j]))               # every comma-separated element
                         j += 1
                     continue
                 j += 1 if any(s.startswith(name) for s in _SAPS_SWITCHES) else 2
                 continue
-            pos.append(w)
+            pos.append((w, y[j]))
             j += 1
         if fp is None and pos:
             fp, pos = pos[0], pos[1:]
@@ -1968,11 +2012,35 @@ class _Resolver:
             args = pos[:1]
         if fp is None:
             return self.made
-        if "$" in fp or "(" in fp:
+        words = []
+        for a, dyn in args:
+            if a.startswith("@(") and a.endswith(")"):          # -ArgumentList @('/c', 'rd /s /q X')
+                elems = self._ps_array(a[2:-1])
+                if elems is None:
+                    self.opaque(k + 1)
+                    return self.made
+                words += elems
+            elif dyn:                                           # -ArgumentList $args: not known
+                self.opaque(k + 1)
+                return self.made
+            else:
+                words.append(a)
+        if fp[1] or "$" in fp[0] or "(" in fp[0]:
             self.opaque(k + 1)                                  # the program itself is not known
             return self.made
-        self.reparse('"' + fp.replace('"', "") + '" ' + " ".join(args), "cmd")
+        self.reparse('"' + fp[0].replace('"', "") + '" ' + " ".join(words), "cmd")
         return self.made
+
+    def _ps_array(self, inner: str) -> Optional[List[str]]:
+        """The elements of a literal PowerShell array `@( 'a', 'b' )`, or None if any element is not a literal."""
+        if self.depth + 1 > MAX_DEPTH:
+            raise ParseError("nesting deeper than %d" % MAX_DEPTH)
+        sc = _Pwsh(inner, self.depth + 1, self.cd, self.ctx)
+        sc.run()
+        words = [w for r in sc.recs for w in r.words]
+        if sc.synth or any(w.dyn for w in words) or any(r.redirs or r.heredocs for r in sc.recs):
+            return None
+        return ["".join(w.b) for w in words]
 
 
 def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
@@ -2014,26 +2082,51 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
         if len(items) < 2:
             continue
         for ci, (crec, cmade) in enumerate(items):
-            shells = [e for e in cmade if e.program in ALL_SHELLS and e.stdin_from == "pipe"]
-            if not shells or ci == 0:
+            if ci == 0:
                 continue
-            dial = _shell_dialect(shells[0].program)
-            known = True
+            readers = [e for e in cmade if e.stdin_from == "pipe" and id(e) not in ctx.via_xargs and (
+                e.program in ALL_SHELLS or (consumer_kind(e.program) == "interpreter" and _reads_code(e.argv)))]
+            if not readers:
+                continue
+            reader = readers[0]
+            texts, known = [], True                 # the upstream text, if it can be rebuilt statically
             for urec, umade in items[:ci]:
-                for h in urec.heredocs:
-                    _sub(h.body or "", dial, sc.depth + 1, crec.cd, ctx)
+                texts += [h.body or "" for h in urec.heredocs]
                 for e in umade:
-                    if e.program in _TEXT_SOURCES:
+                    if e.program in _TEXT_SOURCES and not (e.program == "echo" and e.argv and _ECHO_OPTS.match(e.argv[0])):
                         if e.argv:
-                            _sub(" ".join(e.argv), dial, sc.depth + 1, crec.cd, ctx)
-                    elif not urec.heredocs:
+                            texts.append(" ".join(e.argv))
+                    elif not urec.heredocs:          # printf, echo -e, cat FILE, curl ...: not reconstructable
                         known = False
-            if not known:                    # `cat s.sh | bash`, `curl ... | sh`: commands the parser never saw
-                ctx.out.append(shells[0]._replace(program="?", argv=(shells[0].program,), quoted=(False,)))
-            break        # only the FIRST shell reads the upstream text; a later one reads that shell's output
+            if not known:                    # `cat s.sh | bash`, `printf ... | sh`: code the parser never saw
+                ctx.out.append(reader._replace(program="?", argv=(reader.program,), quoted=(False,)))
+            elif reader.program in ALL_SHELLS:
+                for text in texts:
+                    _sub(text, _shell_dialect(reader.program), sc.depth + 1, crec.cd, ctx)
+            else:                            # literal code into python/node/...: R7(b), the legacy text rules
+                for j in range(len(ctx.out) - 1, -1, -1):
+                    if ctx.out[j] is reader:
+                        ctx.out[j] = reader._replace(stdin_body="\n".join(texts))
+                        break
+            break        # only the FIRST reader reads the upstream text; a later one reads that reader's output
 
 
-_TEXT_SOURCES = frozenset(("echo", "printf", "write-output", "write-host", ""))
+_TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))   # printf is NOT emulated
+_ECHO_OPTS = re.compile(r"-[neE]*[eE][neE]*$")                       # echo -e / -ne: escapes, not literal text
+_CODE_OPTS = frozenset(("-c", "-e", "-E", "-m", "-p", "-r", "--eval", "--print", "--command"))
+
+
+def _reads_code(argv) -> bool:
+    """Whether an interpreter takes its PROGRAM from stdin (`python`, `python -`, `node`), rather than from -c/-e
+    or a script file (then stdin is data)."""
+    for a in argv:
+        if a in _CODE_OPTS:
+            return False
+        if a == "-":
+            return True
+        if not a.startswith("-"):
+            return False
+    return True
 _SCANNERS = {"bash": _Bash, "powershell": _Pwsh, "cmd": _Cmdexe}
 
 
@@ -2062,6 +2155,8 @@ def parse(command: str, shell: str = "") -> Parsed:
     try:
         if not isinstance(command, str):
             return Parsed((), False, "the command is not a string")
+        if len(command) > MAX_INPUT_CHARS:      # input cap: the legacy rules (linear) take over
+            return Parsed((), False, "the command is larger than %d characters" % MAX_INPUT_CHARS)
         d = _dialect(shell)
         if d is not None:
             return _parse_one(command, d)

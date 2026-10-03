@@ -268,6 +268,15 @@ def _parse_shapes(N):
         "pipe-into-shell": "cat x | " * (N // 8) + "bash",
         "shell-reads-file": "sh < x; " * (N // 8),
         "comspec-run": "%COMSPEC% /c " * (N // 13),
+        # fix round 3 branches
+        "ps-cast-run": "[void](ri a); " * (N // 14),
+        "ps-method-tail-long": "$x." + "a" * N + "(1)",
+        "saps-array-run": "Start-Process cmd -ArgumentList @(" + "'a'," * (N // 4) + "'b')",
+        "printf-into-shell": "printf 'a' | " * (N // 13) + "bash",
+        "echo-into-python": "echo 'print(1)' | python; " * (N // 27),
+        "xargs-shell-run": "echo a | xargs bash; " * (N // 21),
+        "env-cluster-run": "env " + "-iuX " * (N // 5),
+        "comspec-switches": "%COMSPEC% " + "/s " * (N // 3) + "/c rd x",
     }
 
 

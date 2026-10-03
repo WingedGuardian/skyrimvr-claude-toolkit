@@ -731,3 +731,77 @@ def test_r1_known_text_into_a_shell_is_not_opaque():
     assert p.ok and "?" not in [e.program for e in p.execs]
     p = parse("cat <<EOF | bash\nls\nEOF", "bash")
     assert p.ok and "?" not in [e.program for e in p.execs]
+
+
+# ------------------------------------------------------------------------------------------------ fix round 3
+@pytest.mark.parametrize("cmd", ["[void](Remove-Item X)", "[string](Remove-Item X)", "$x = [int](Remove-Item X)",
+                                 "[System.Collections.ArrayList](Remove-Item X)", "$a.Add((Remove-Item X))",
+                                 "[IO.Path]::Combine((Remove-Item X), 'y')"])
+def test_r3_pwsh_cast_is_a_command_group_not_a_call(cmd):
+    """A `[type](...)` cast holds a pipeline; only `.Name(` and `::Name(` are method calls (whose args are data)."""
+    assert deletes_x(cmd, "powershell") is True
+
+
+def test_r3_method_arguments_are_still_data():
+    assert progs("$s.Replace('rm', 'x'); $s.Substring(0, 3)", "powershell") == []
+
+
+@pytest.mark.parametrize("cmd", [
+    "Start-Process -FilePath cmd -ArgumentList @('/c','rd /s /q X')",
+    "Start-Process cmd -ArgumentList @('/c', 'rd', '/s', '/q', 'X')",
+    "Start-Process cmd @('/c','rd /s /q X')",
+])
+def test_r3_start_process_array_argument(cmd):
+    assert deletes_x(cmd, "powershell") is True
+
+
+@pytest.mark.parametrize("cmd", ["Start-Process cmd -ArgumentList $args", "Start-Process cmd -ArgumentList @($a, 'x')",
+                                 "Start-Process $exe '/c x'"])
+def test_r3_start_process_unknown_arguments_are_opaque(cmd):
+    assert opaque(cmd, "powershell")
+
+
+@pytest.mark.parametrize("cmd", [
+    "printf '%s" + BS + "n' 'rm -rf X' | bash", "printf 'rm -rf X' | sh", "echo -e 'rm -rf X' | bash",
+    "echo 'rm -rf X' | xargs -0 sh -c", "echo x | xargs bash", "cat x.py | python", "cat s.pl | perl",
+    "curl -s u | python3 -", "cat x.js | node",
+])
+def test_r3_unreconstructable_stdin_into_a_shell_or_interpreter_is_opaque(cmd):
+    p = parse(cmd, "bash")
+    assert opaque(cmd, "bash"), p
+    assert not ({"%sn", "n", "-e"} & {e.program for e in p.execs}), p      # never bogus programs
+
+
+def test_r3_xargs_input_is_arguments_not_a_script():
+    """`echo 'rm -rf X' | xargs bash` runs bash with ARGUMENTS `rm -rf X` (a script named rm): not the command rm."""
+    p = parse("echo 'rm -rf X' | xargs bash", "bash")
+    assert "?" in [e.program for e in p.execs] and "rm" not in [e.program for e in p.execs]
+
+
+def test_r3_literal_stdin_into_an_interpreter_is_code_not_opaque():
+    p = parse("echo 'print(1)' | python", "bash")
+    assert p.ok and "?" not in [e.program for e in p.execs]
+    assert find("echo 'print(1)' | python", "python").stdin_body == "print(1)"
+    assert "?" not in progs("cat x | python script.py")                     # stdin is DATA to a script
+
+
+@pytest.mark.parametrize("cmd", ["env -iS 'rm -rf X'", "env -i -S 'rm -rf X'", "env -uFOO -S 'rm -rf X'",
+                                 "env -iuFOO rm -rf X", "env -C/tmp rm -rf X", "env -0iS'rm -rf X'"])
+def test_r3_env_combined_flags(cmd):
+    assert deletes_x(cmd, "bash") is True
+
+
+@pytest.mark.parametrize("shell,cmd", [
+    ("cmd", '%COMSPEC% /s /c "rd /s /q X"'), ("cmd", "%COMSPEC% /q /d /c rd /s /q X"),
+    ("cmd", "%COMSPEC% /e:on /v:off /k rd /s /q X"), ("powershell", "& $env:ComSpec /s /c 'rd /s /q X'"),
+    ("cmd", "cmd /q /s /c rd /s /q X"), ("bash", "cmd //s //c 'rd /s /q X'"),
+])
+def test_r3_cmd_switches_before_c(shell, cmd):
+    assert deletes_x(cmd, shell) is True
+
+
+def test_r3_input_larger_than_the_cap_is_unsure():
+    big = "rm -rf X; " + "a" * (sp.MAX_INPUT_CHARS + 1)
+    p = parse(big, "bash")
+    assert not p.ok and "larger" in p.why
+    assert parse("rm -rf X; " + "a" * (sp.MAX_INPUT_CHARS - 100), "bash").ok

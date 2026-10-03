@@ -115,3 +115,10 @@ S-RESAVER-APPLY 5/19, the 21-item id rename); 0 engine errors.
   tests: `wsl` re-joined its words into a string (a `)` inside a quoted vhdx path became syntax; `--import` was read
   as a command) -- 2 PowerShell + 1 Bash; and a `$(( ))` holding a `$( )` was fed whole to the command parser
   (`$(( ($(date +%s%N)-s)/1000000 ))`) -- 2 Bash. Only the substitutions inside a skipped span are parsed now.
+
+### Task 5, fix round 3 (casts, Start-Process arrays, stdin into shells/interpreters, env clusters, input cap)
+
+Re-priced 2026-10-03 (`--base c3f32ef`), N = 60,804. No verdict moved (S-RESAVER-APPLY 5/19, the 21-item rename);
+0 engine errors. **Parse failures: 63 of 55,879 = 0.113%** (Bash 61 of 54,298 = 0.112%; PowerShell 2 of 1,581 =
+0.127%). Compared item by item with fix round 1: **no command newly fails, none stopped failing.** The new input
+cap (256 KB) touches nothing real: the largest of the real shell commands is 50,452 characters.
