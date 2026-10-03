@@ -1456,6 +1456,78 @@ MUTATIONS = [
          "tests/test_codex_entry.py::test_a_nul_byte_in_the_engine_output_is_refused[pre-tool-bash]",
          "codex-sh-nul-truncates-to-allow"),
     ]
+] + [
+    # Plan 4 Task 8: the frozen Codex hook definitions, the freeze gate and the trust reader.
+    # Change one definition field (E18): Codex silently stops running every approved copy of this hook.
+    pytest.param(
+        "agent/targets/codex/hooks.json",
+        '"timeout": 60,',
+        '"timeout": 61,',
+        "tests/test_codex_definitions.py::test_codex_hook_definitions_are_frozen",
+        id="codex-definitions-are-frozen",
+    ),
+] + [
+    pytest.param(*m[:4], id=m[4])
+    for m in [
+        # R2: a leading quote / bash on Windows each fail to launch, and Codex then RUNS the command
+        ("agent/targets/codex/hooks.json",
+         r'''"command": "bash \"{{CODEX_ROOT_POSIX}}/.codex/hooks/skyguard-entry.sh\" pre-tool",''',
+         r'''"command": "\"bash\" \"{{CODEX_ROOT_POSIX}}/.codex/hooks/skyguard-entry.sh\" pre-tool",''',
+         "tests/test_codex_definitions.py::test_no_command_starts_with_a_quote", "codex-definition-leading-quote"),
+        ("agent/targets/codex/hooks.json",
+         "pre-tool || powershell", "pre-tool || bash",
+         "tests/test_codex_definitions.py::test_windows_commands_never_call_bash", "codex-definition-bash-on-windows"),
+        # a wrapper deadline too close to the definition timeout: Codex gives up first and RUNS the command
+        ("agent/guards/adapters/codex/skyguard-entry.sh",
+         'LIMIT=45; [ "$ROLE" = "session-start" ] && LIMIT=105', 'LIMIT=50; [ "$ROLE" = "session-start" ] && LIMIT=105',
+         "tests/test_codex_definitions.py::test_timeouts_exceed_the_wrappers_own_deadlines", "codex-deadline-too-close"),
+        # the freeze gate's CHANGELOG clauses
+        ("tests/test_codex_definitions.py",
+         "    if len(ledger) > 1 and unreleased_change and REAPPROVE not in changelog_top:", "    if False:",
+         "tests/test_codex_definitions.py::test_the_freeze_gate_can_fail", "codex-freeze-ledger-growth-unannounced"),
+        ("tests/test_codex_definitions.py",
+         "    if released is not None and _lf_sha(released[1]) != now and REAPPROVE not in changelog_top:",
+         "    if False:",
+         "tests/test_codex_definitions.py::test_the_freeze_gate_can_fail", "codex-freeze-release-diff-unannounced"),
+        # the hash scheme (each field Codex hashes)
+        ("tools/skyguard/codex_trust.py",
+         '    if windows and handler.get("commandWindows") is not None:', "    if False:",
+         "tests/test_codex_trust.py::test_every_measured_vector_reproduces", "codex-trust-ignores-command-windows"),
+        ("tools/skyguard/codex_trust.py",
+         '         "async": bool(handler.get("async", False))}', "         }",
+         "tests/test_codex_trust.py::test_every_measured_vector_reproduces", "codex-trust-drops-async"),
+        ("tools/skyguard/codex_trust.py",
+         "    if acl is not None and acl != DEFAULT_CONTEXT_LIMIT:", "    if acl is not None:",
+         "tests/test_codex_trust.py::test_every_measured_vector_reproduces", "codex-trust-hashes-default-context-limit"),
+        # the statuses: never a guess
+        ("tools/skyguard/codex_trust.py",
+         '            if r["status"] == "modified":', "            if False:",
+         "tests/test_codex_trust.py::test_unknown_when_no_stored_hash_matches", "codex-trust-guesses-modified"),
+        ("tools/skyguard/codex_trust.py",
+         '        if ent.get("enabled") is False:', "        if False:",
+         "tests/test_codex_trust.py::test_disabled_when_enabled_is_false", "codex-trust-disabled-reads-trusted"),
+        ("tools/skyguard/codex_trust.py",
+         '            ent, how = folded.get(key.lower()), "casefold"', '            ent, how = None, "casefold"',
+         "tests/test_codex_trust.py::test_a_key_in_another_case_still_matches", "codex-trust-case-sensitive-keys"),
+        ("tools/skyguard/codex_trust.py",
+         '            raise Unreadable("config.toml line {} is not understood".format(n))', "            continue",
+         "tests/test_codex_trust.py::test_narrow_reader_refuses_what_it_cannot_parse",
+         "codex-trust-narrow-reader-skips-unknown-lines"),
+        ("tools/skyguard/codex_trust.py",
+         """            if watched and re.match(r\"\"\"^(?:hooks|projects|state|["'])\"\"\", line):""",
+         "            if False:",
+         "tests/test_codex_trust.py::test_narrow_reader_refuses_a_dotted_root_key",
+         "codex-trust-narrow-reader-skips-dotted-keys"),
+        # a root with % cannot run the hooks at all (cmd.exe expands it): never "protected"
+        ("tools/skyguard/codex_trust.py",
+         '    if "%" in str(project_root):', "    if False:",
+         "tests/test_codex_trust.py::test_a_root_with_percent_is_never_reported_as_protected",
+         "codex-trust-percent-root-unflagged"),
+        ("tools/skyguard/codex_trust.py",
+         '    if rep["overall"] == "trusted" and not rep.get("root_problem"):', '    if rep["overall"] == "trusted":',
+         "tests/test_codex_trust.py::test_a_root_with_percent_is_never_reported_as_protected",
+         "codex-trust-percent-root-exits-ok"),
+    ]
 ]
 
 

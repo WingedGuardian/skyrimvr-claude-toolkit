@@ -1901,6 +1901,14 @@ Generated into `AGENTS.md` only; everything above is shared. Other agents: this 
 
 ### Task 11: `setup.sh` configures Codex; kb-guard watches `AGENTS.md`; release gates know Codex
 
+> **Carried from Task 8 (must land here):** refuse, loudly, an install root containing `%` (cmd.exe expands
+> `%VAR%` inside the quoted `-File` path of `commandWindows` -> PowerShell prints usage, exits 0 -> fail-open;
+> `codex_trust.trust_report` already flags such a root as `root_problem`, exit 1). Fill `{{PYTHON_PATH}}` in the
+> `.ps1` with PowerShell single-quote escaping (`'` -> `''`), never the bash `'\''` form. Task 10: `.codex/**` is
+> generated LF while `*.ps1` is pinned CRLF -- use the path rule `.codex/** text eol=lf` (not a global
+> `*.ps1 eol=lf`, which flips every Windows helper) plus a test; the source
+> `agent/guards/adapters/codex/skyguard-entry.ps1` is CRLF on disk today.
+
 **Files:**
 - Modify: `setup.sh`, `tools/kb-guard.sh`, `.github/workflows/release.yml`, `tools/verify-release.sh`,
   `.github/workflows/ci.yml` (the "Every hook command points at a file that exists" step also reads

@@ -41,3 +41,7 @@ tests/bin/* text eol=lf
 *.md               text eol=lf
 *.example          text eol=lf
 *.jsonl            text eol=lf
+
+# The frozen Codex hook definitions and their ledger (Plan 4 Task 8): the freeze gate hashes LF bytes, and
+# *.toml / *.sha256 are not pinned above. A path rule for one text-only folder, not an extension rule.
+agent/targets/codex/* text eol=lf

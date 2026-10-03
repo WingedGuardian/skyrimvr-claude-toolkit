@@ -1,0 +1,4 @@
+# Codex reads at most this many bytes of AGENTS.md in a TRUSTED project (spec D9, E7). It is margin
+# only: the toolkit's CI keeps AGENTS.md at or under 32,768 bytes as installed, which an untrusted
+# project still reads in full.
+project_doc_max_bytes = 65536
