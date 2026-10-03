@@ -167,7 +167,72 @@ def test_latency_percentiles_and_trim(tmp_path):
 
 
 def test_a_malformed_timestamp_with_enough_fields_is_unmeasurable(tmp_path):
-    """The twin of the truncated-record test: only the TIMESTAMP check can reject this one."""
+    """Only the TIMESTAMP pattern can reject this: float() reads the underscores as a plausible PAST time."""
     _complete(tmp_path, NOW - 5)
-    _w(tmp_path, "h", "failed", "20260909_15 2-2 engine exit 1")
+    _w(tmp_path, "h", "failed", "1_799_999_990 2-2 engine exit 1")
     assert health.hook_state(tmp_path, "h", NOW)[0] == "UNMEASURABLE"
+
+
+# ---- fix round 1: clock faults, sequence ordering, session status -----------------------------------
+def _complete_seq(d, t, seq, status="evaluated"):
+    _complete(d, t, inv="{}.9-9".format(seq), status=status)
+
+
+def test_a_completion_stamped_in_the_future_is_unmeasurable_not_fresh_forever(tmp_path):
+    _complete(tmp_path, NOW + 365 * 86400)
+    state, detail = health.hook_state(tmp_path, "h", NOW)
+    assert state == "UNMEASURABLE" and "clock skew" in detail
+
+
+def test_a_stamp_within_the_slack_is_fine(tmp_path):
+    _complete(tmp_path, NOW + 200)
+    assert health.hook_state(tmp_path, "h", NOW)[0] == "HEALTHY"
+
+
+def test_a_failure_stamped_in_the_future_is_unmeasurable(tmp_path):
+    _complete(tmp_path, NOW - 5)
+    _w(tmp_path, "h", "failed", "{} 2-2 engine exit 1".format(NOW + 99999))
+    assert health.hook_state(tmp_path, "h", NOW)[0] == "UNMEASURABLE"
+
+
+def test_a_clock_stepped_back_cannot_hide_a_failure(tmp_path):
+    """The failure is the LATER invocation (seq 5) but carries an OLDER stamp than the completion (seq 4)."""
+    _complete_seq(tmp_path, NOW - 5, 4)
+    _w(tmp_path, "h", "failed", "{} 5.9-9 engine exit 1".format(NOW - 60))
+    assert health.hook_state(tmp_path, "h", NOW)[0] == "DEGRADED"
+
+
+def test_a_later_sequence_clears_a_failure_whatever_the_stamps_say(tmp_path):
+    _w(tmp_path, "h", "failed", "{} 5.9-9 engine exit 1".format(NOW - 10))
+    _complete_seq(tmp_path, NOW - 100, 6)      # clock stepped back: older stamp, later invocation
+    state, detail = health.hook_state(tmp_path, "h", NOW)
+    assert state == "HEALTHY" and "recovered" in detail
+
+
+def test_the_same_sequence_proves_no_recovery(tmp_path):
+    _w(tmp_path, "h", "failed", "{} 5.9-9 receipt NO PAYLOAD".format(NOW - 1))
+    _complete_seq(tmp_path, NOW - 5, 5)
+    assert health.hook_state(tmp_path, "h", NOW)[0] == "DEGRADED"
+
+
+def _session(tmp_path, kb_guard_body):
+    from skyguard import audit as audit_mod, session
+    from conftest import BASH
+    (tmp_path / "tools").mkdir()
+    if kb_guard_body is not None:
+        (tmp_path / "tools" / "kb-guard.sh").write_text(kb_guard_body, encoding="utf-8", newline="\n")
+    return session.run_status(str(tmp_path), "startup", BASH, audit_mod.Audit(str(tmp_path)))
+
+
+def test_a_missing_kb_guard_is_a_failed_session_run(tmp_path):
+    text, status, code = _session(tmp_path, None)
+    assert "NOT RUN" in text and status == "failed" and code == "session.NOT_RUN"
+
+
+def test_a_kb_guard_that_snapshotted_nothing_is_partial(tmp_path):
+    text, status, code = _session(tmp_path, "echo cannot read the knowledgebase\nexit 2\n")
+    assert status == "partial" and code == "session.NOT_SNAPSHOTTED"
+
+
+def test_a_clean_kb_guard_is_evaluated(tmp_path):
+    assert _session(tmp_path, "exit 0\n")[1:] == ("evaluated", "session")

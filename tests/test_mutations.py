@@ -126,8 +126,8 @@ MUTATIONS = [
     # stdout then reaches the runtime as "no decision" -- an allow -- instead of being refused.
     pytest.param(
         ".claude/hooks/protect-bash.sh",
-        '    "{"*) _done;',
-        '    *) _done;',
+        '    "{"*) printf',
+        '    *) printf',
         "tests/test_hooks.py::test_wrapper_denies_on_non_json_output",
         id="wrapper-passes-non-json-engine-output-through",
     ),
@@ -758,7 +758,7 @@ MUTATIONS = [
     # that cannot go back to green gets ignored, which is the same end state as having no instrument.
     pytest.param(
         "tools/skyguard/health.py",
-        "    if failed and (done is None or done <= failed[0]):",
+        "    if failed and not cleared:",
         "    if failed:",
         "tests/test_skyguard_health.py::test_a_newer_completed_evaluation_clears_it_and_says_so",
         id="canary-can-go-back-to-green",
@@ -785,8 +785,8 @@ MUTATIONS = [
     # Same instant proves no ordering at all.
     pytest.param(
         "tools/skyguard/health.py",
-        "done <= failed[0]",
-        "done < failed[0]",
+        "else done > failed[0]",
+        "else done >= failed[0]",
         "tests/test_skyguard_health.py::test_equal_timestamps_prove_no_recovery",
         id="canary-a-tie-is-not-a-recovery",
     ),
@@ -807,6 +807,79 @@ MUTATIONS = [
         "if False and _never_finished(",
         "tests/test_skyguard_health.py::test_an_invocation_that_never_finished_is_degraded",
         id="health-reports-a-killed-invocation",
+    ),
+    # Order a failure against a completion by the wrapper's invocation SEQUENCE, not the wall clock alone.
+    # Compare stamps only and a clock stepped back makes a later failure look older than an earlier success.
+    pytest.param(
+        "tools/skyguard/health.py",
+        "cleared = ds > fs if (ds is not None and fs is not None) else done > failed[0]",
+        "cleared = done > failed[0]",
+        "tests/test_skyguard_health.py::test_a_clock_stepped_back_cannot_hide_a_failure",
+        id="health-orders-by-invocation-sequence",
+    ),
+    pytest.param(
+        "tools/skyguard/health.py",
+        "cleared = ds > fs if",
+        "cleared = ds >= fs if",
+        "tests/test_skyguard_health.py::test_the_same_sequence_proves_no_recovery",
+        id="health-same-sequence-is-not-recovery",
+    ),
+    # A stamp from the future outranks every real record: a completion stamped years ahead never goes stale.
+    pytest.param(
+        "tools/skyguard/health.py",
+        "        if rec[0] > now + SKEW_S:",
+        "        if False:",
+        "tests/test_skyguard_health.py::test_a_completion_stamped_in_the_future_is_unmeasurable_not_fresh_forever",
+        id="health-rejects-future-stamps",
+    ),
+    # SessionStart always reported `evaluated`, even when kb-guard.sh was missing and nothing was snapshotted.
+    pytest.param(
+        "tools/skyguard/run.py",
+        "_telemetry(a, Verdict(status=status, code=code))",
+        "_telemetry(a, Verdict(code=code))",
+        "tests/test_hooks.py::test_a_session_start_that_could_not_run_kb_guard_is_degraded",
+        id="session-status-reaches-the-canary",
+    ),
+    # Killed-run detection: the next call overwrites `invoked`, so without it a kill leaves no trace.
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        "[ $((T_S - O_S)) -gt 60 ]",
+        "[ $((T_S - O_S)) -gt 99999999 ]",
+        "tests/test_hooks.py::test_a_killed_run_is_reported_and_stays_degraded_until_a_newer_completion",
+        id="wrapper-reports-a-killed-run",
+    ),
+    # ... and its twin: with no grace period a parallel call still in flight is called killed.
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        "[ $((T_S - O_S)) -gt 60 ]",
+        "[ $((T_S - O_S)) -gt -1 ]",
+        "tests/test_hooks.py::test_a_run_still_inside_the_grace_period_is_not_called_killed",
+        id="wrapper-killed-run-has-a-grace-period",
+    ),
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        '[ "$OINV" != "$FINV" ] && ',
+        "",
+        "tests/test_hooks.py::test_a_failed_run_is_not_also_called_killed",
+        id="wrapper-does-not-double-report-a-failed-run",
+    ),
+    # A record rewritten by a Windows-native writer ends in CR; without stripping it every id looks different
+    # and an invocation that recorded its own failure is reported a second time as "killed".
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        "OINV=" + chr(34) + "${OINV%$" + chr(39) + chr(92) + "r" + chr(39) + "}" + chr(34),
+        "OINV=" + chr(34) + "$OINV" + chr(34),
+        "tests/test_hooks.py::test_a_failed_run_is_not_also_called_killed",
+        id="wrapper-strips-cr-from-previous-records",
+    ),
+    # A telemetry directory the hooks cannot write: every wrapper swallows the failure, so the report would
+    # show frozen records as HEALTHY, then STALE.
+    pytest.param(
+        "tools/skyguard/health.py",
+        "unwritable = d.is_dir() and not _writable(d)",
+        "unwritable = False",
+        "tests/test_hook_canary.py::test_a_telemetry_directory_hooks_cannot_write_to_is_unmeasurable",
+        id="canary-reports-an-unwritable-telemetry-dir",
     ),
     # A payload-less call is still evaluated and emitted by the engine. Drop the wrapper's trailing
     # failure record and that completed evaluation clears the very failure it accompanies.
@@ -981,8 +1054,8 @@ MUTATIONS = [
                  "tests/test_skyguard_prefs.py::test_long_section_is_capped_on_a_character_boundary",
                  id="prefs-are-capped"),
     pytest.param("tools/skyguard/session.py",
-                 '        return _with_prefs("", project, audit)   # no snapshot on compact, but preferences survive it (R4)',
-                 '        return ""',
+                 '        return _with_prefs("", project, audit), "evaluated", "session"',
+                 '        return "", "evaluated", "session"',
                  "tests/test_skyguard_prefs.py::test_compact_still_injects_preferences_but_takes_no_snapshot",
                  id="prefs-survive-compaction"),
     pytest.param("tools/skyguard/session.py", '    return _with_prefs("\\n".join(lines), project, audit)',

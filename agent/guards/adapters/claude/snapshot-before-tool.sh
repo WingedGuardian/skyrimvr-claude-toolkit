@@ -16,7 +16,6 @@
 HOOK_NAME="snapshot-before-tool"
 PY="{{PYTHON_PATH}}"
 T0="${EPOCHREALTIME:-}"; T0="${T0/,/.}"; [ -n "$T0" ] || printf -v T0 '%(%s)T' -1
-INV="$$-$RANDOM"
 NOPAY=""
 INPUT=$(cat)
 
@@ -50,6 +49,26 @@ _done() {
     printf '%s %s %s\n' "$INV" "$T0" "$T1" >> "$HB_DIR/$HOOK_NAME.latency" 2>/dev/null
     [ -z "$NOPAY" ] || _fail receipt "NO PAYLOAD"
 }
+# Invocation sequence and killed-run detection, from the PREVIOUS records, with the `read` builtin only.
+# The id is `<seq>.<pid>-<rand>`: health.py orders failures against completions by <seq>, so a clock that
+# steps back cannot hide a failure. A previous `invoked` that never emitted, never recorded a failure, and
+# is older than the grace below was killed (the agent's timeout); that is recorded under THIS id, so this
+# call's own completion is not "newer" and the report stays DEGRADED until the next one.
+OT=""; OINV=""; EINV=""; FINV=""
+[ -r "$HB_DIR/$HOOK_NAME.invoked" ] && read -r OT OINV < "$HB_DIR/$HOOK_NAME.invoked" 2>/dev/null
+[ -r "$HB_DIR/$HOOK_NAME.emitted" ] && read -r _ EINV _ < "$HB_DIR/$HOOK_NAME.emitted" 2>/dev/null
+[ -r "$HB_DIR/$HOOK_NAME.failed" ] && read -r _ FINV _ < "$HB_DIR/$HOOK_NAME.failed" 2>/dev/null
+# a record rewritten by a Windows-native writer may end in CR; a CR would make every id look different
+OINV="${OINV%$'\r'}"; EINV="${EINV%$'\r'}"; FINV="${FINV%$'\r'}"
+SEQ="${OINV%%.*}"; case "$SEQ" in ''|*[!0-9]*) SEQ=0 ;; esac
+INV="$((SEQ + 1)).$$-$RANDOM"
+O_S="${OT%%.*}"; T_S="${T0%%.*}"
+case "$O_S$T_S" in
+    ''|*[!0-9]*) ;;
+    *) if [ -n "$OINV" ] && [ "$OINV" != "$EINV" ] && [ "$OINV" != "$FINV" ] && [ $((T_S - O_S)) -gt 60 ]; then
+           _fail killed "run $OINV invoked at $OT never finished"
+       fi ;;
+esac
 printf '%s %s\n' "$T0" "$INV" > "$HB_DIR/$HOOK_NAME.invoked" 2>/dev/null
 if [ -n "$INPUT" ]; then
     printf '%s %s bytes=%s\n' "$T0" "$INV" "${#INPUT}" > "$HB_DIR/$HOOK_NAME.received" 2>/dev/null

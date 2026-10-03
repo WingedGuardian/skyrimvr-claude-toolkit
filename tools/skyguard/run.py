@@ -82,8 +82,8 @@ def main(argv=None) -> int:
         snapshot.run(a.project, p["command"], p["empty"], audit)
         v = Verdict()
     else:
-        out = session.run(a.project, "" if p["empty"] else p["source"], a.bash, audit)
-        _telemetry(a, Verdict(code="session"))
+        out, status, code = session.run_status(a.project, "" if p["empty"] else p["source"], a.bash, audit)
+        _telemetry(a, Verdict(status=status, code=code))
         _emit(out)
         return 0
     v = codes.classify(v)

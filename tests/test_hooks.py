@@ -673,6 +673,75 @@ def test_an_empty_payload_stays_failed_even_though_the_engine_then_evaluates(tmp
     assert health.hook_state(_hb_dir(root), name[:-3], time.time())[0] == "DEGRADED"
 
 
+def _health():
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import health
+    return health
+
+
+def _good_call(root, name="protect-bash.sh"):
+    payload = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
+    r = _run_wrapper(root, dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), name, payload)
+    assert r.returncode == 0, r.stderr
+
+
+def test_the_invocation_sequence_advances_on_every_call(tmp_path):
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
+    seqs = []
+    for _ in range(3):
+        _good_call(root)
+        seqs.append(int(_rec(root, "protect-bash.sh", "invoked")[1].split(".")[0]))
+    assert seqs == [1, 2, 3], seqs
+
+
+def test_a_killed_run_is_reported_and_stays_degraded_until_a_newer_completion(tmp_path):
+    """The agent's timeout kills a hook after `invoked`; the next call overwrites `invoked`, which used to
+    erase the only trace -- and then read HEALTHY."""
+    h = _health()
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
+    _good_call(root)
+    inv = _hb_dir(root) / "protect-bash.invoked"
+    inv.write_text("{:.6f} 9.1-1\n".format(time.time() - 200), encoding="utf-8")   # never emitted
+    _good_call(root)                       # this call itself completes fine ...
+    state, detail = h.hook_state(_hb_dir(root), "protect-bash", time.time())
+    assert state == "DEGRADED" and "killed" in detail and "9.1-1" in detail, (state, detail)   # ... and is NOT newer
+    _good_call(root)
+    state, detail = h.hook_state(_hb_dir(root), "protect-bash", time.time())
+    assert state == "HEALTHY" and "recovered" in detail and "killed" in detail, (state, detail)
+
+
+def test_a_run_still_inside_the_grace_period_is_not_called_killed(tmp_path):
+    """Parallel tool calls: another invocation that started a few seconds ago may simply still be running."""
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
+    _good_call(root)
+    (_hb_dir(root) / "protect-bash.invoked").write_text("{:.6f} 9.1-1\n".format(time.time() - 5), encoding="utf-8")
+    _good_call(root)
+    assert _rec(root, "protect-bash.sh", "failed") is None
+
+
+def test_a_failed_run_is_not_also_called_killed(tmp_path):
+    """An old invocation that recorded its own failure (and so never emitted) is not reported twice."""
+    root, env = _with_engine(tmp_path, "protect-bash.sh", "raise SystemExit(3)\n")
+    _run_wrapper(root, env, "protect-bash.sh", BLOCKING[0][1])
+    inv = _hb_dir(root) / "protect-bash.invoked"
+    old = inv.read_text(encoding="utf-8").split()
+    inv.write_text("{:.6f} {}\n".format(time.time() - 500, old[1]), encoding="utf-8")
+    (root / "tools" / "skyguard" / "run.py").write_bytes((REPO / "tools" / "skyguard" / "run.py").read_bytes())
+    _run_wrapper(root, env, "protect-bash.sh", BLOCKING[0][1])     # a healthy call: it must not rewrite the failure
+    assert "killed" not in " ".join(_rec(root, "protect-bash.sh", "failed")), _rec(root, "protect-bash.sh", "failed")
+
+
+def test_a_session_start_that_could_not_run_kb_guard_is_degraded(tmp_path):
+    """The wrapper emits the engine's text either way; the canary must still see that nothing was checked."""
+    h = _health()
+    root = install_hooks(tmp_path / "install", names={"session-kb-guard.sh"})
+    r = _run_wrapper(root, dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), "session-kb-guard.sh",
+                     {"hook_event_name": "SessionStart", "source": "startup"})
+    assert r.returncode == 0 and "NOT RUN" in r.stdout
+    state, detail = h.hook_state(_hb_dir(root), "session-kb-guard", time.time())
+    assert state == "DEGRADED" and "NOT_RUN" in detail, (state, detail)
+
+
 def test_telemetry_never_blocks_a_hook(tmp_path):
     """An unwritable telemetry directory is recorded nowhere and changes no decision."""
     root = install_hooks(tmp_path / "install", names={"protect-files.sh"})

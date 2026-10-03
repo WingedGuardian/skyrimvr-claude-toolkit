@@ -234,3 +234,20 @@ def test_the_wrapper_telemetry_round_trips_through_the_canary(tmp_path):
     assert _status(line) == "HEALTHY", out
     assert "snapshot-before-tool" in out and "HEALTHY" in next(
         ln for ln in out.splitlines() if "snapshot-before-tool" in ln)
+
+
+def test_a_telemetry_directory_hooks_cannot_write_to_is_unmeasurable(tmp_path):
+    """The wrappers swallow a failed write, so without this a frozen directory reads HEALTHY, then STALE."""
+    root = _install(tmp_path)
+    _complete(root, time.time() - 5)
+    (_hb(root) / ".canary-probe").mkdir()      # makes the probe write fail on every platform
+    rc, line, out = _run(root)
+    assert _status(line) == "UNMEASURABLE" and "not writable" in line, out
+    assert rc == 2
+
+
+def test_the_canary_probe_leaves_nothing_behind(tmp_path):
+    root = _install(tmp_path)
+    _complete(root, time.time() - 5)
+    _run(root)
+    assert not (_hb(root) / ".canary-probe").exists()

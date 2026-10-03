@@ -37,6 +37,7 @@ STAGES = ("invoked", "received", "evaluated", "emitted", "failed")
 STATUS_VALUES = ("evaluated", "partial", "failed")
 CLAUDE_HOOKS = ("protect-files", "protect-bash", "backup-before-edit", "snapshot-before-tool", "session-kb-guard")
 CODEX_HOOKS = ("pre-tool", "session-start")
+SKEW_S = 300           # a stamp further ahead of "now" than this is a clock fault, not a record
 LATENCY_MAX_BYTES = 256 * 1024
 LATENCY_KEEP_LINES = 2000
 MIN_LATENCY_SAMPLES = 5
@@ -58,7 +59,8 @@ def record(dirpath, hook, stage, inv, detail=""):
         line = "{:.6f} {}".format(time.time(), inv)
         if detail:
             line += " " + " ".join(str(detail).split())
-        (d / "{}.{}".format(hook, stage)).write_text(line + "\n", encoding="utf-8")
+        with open(str(d / "{}.{}".format(hook, stage)), "w", encoding="utf-8", newline="\n") as f:
+            f.write(line + "\n")
         return True
     except (OSError, ValueError):
         return False
@@ -80,6 +82,7 @@ def trim_latency(dirpath, hook):
 # reading
 # --------------------------------------------------------------------------------------------------
 _TIME = re.compile(r"[0-9]+(\.[0-9]+)?\Z")
+_SEQ = re.compile(r"([0-9]{1,15})\.")
 _MIN_FIELDS = {"invoked": 2, "received": 3, "evaluated": 5, "emitted": 3, "failed": 3}
 
 
@@ -124,6 +127,12 @@ def _never_finished(recs, now, kill_s):
     return bool(inv) and (not em or (em[1] != inv[1] and em[0] < inv[0])) and now - inv[0] > kill_s
 
 
+def _seq(inv):
+    """The invocation sequence number the wrapper embeds in the id (`<seq>.<pid>-<rand>`), else None."""
+    m = _SEQ.match(inv)
+    return int(m.group(1)) if m else None
+
+
 def _stamp(t):
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t))
 
@@ -141,6 +150,12 @@ def hook_state(d, hook, now, stale_s=7200, kill_s=150):
         # 2. a record that does not parse is never green (a truncated stamp once sorted low and cleared a failure)
         return "UNMEASURABLE", str(e)
 
+    # 2b. a stamp from the future is a clock fault (or a hand-written record): it would otherwise outrank every
+    #     real record and keep a hook "fresh" forever, or hide a failure
+    for stage, rec in recs.items():
+        if rec[0] > now + SKEW_S:
+            return "UNMEASURABLE", "clock skew: {} is stamped {} (now is {})".format(stage, _stamp(rec[0]), _stamp(now))
+
     # 1. nothing at all: the hook has proven nothing either way
     if not recs:
         return "NOT EXERCISED", "no telemetry yet -- proves nothing either way"
@@ -148,8 +163,14 @@ def hook_state(d, hook, now, stale_s=7200, kill_s=150):
     done = _completed(recs)
     failed = recs.get("failed")
 
-    # 3. a failure is current unless a completed evaluation is STRICTLY newer (equal stamps prove no order)
-    if failed and (done is None or done <= failed[0]):
+    # 3. a failure is current unless a completed evaluation is STRICTLY newer (equal stamps prove no order).
+    #    "Newer" is the wrapper's per-hook invocation sequence when both ids carry one (`<seq>.<pid>-<rand>`):
+    #    a clock stepped BACK cannot hide a failure that way. Ids without a sequence fall back to the stamps.
+    cleared = False
+    if failed and done is not None:
+        ds, fs = _seq(recs["evaluated"][1]), _seq(failed[1])
+        cleared = ds > fs if (ds is not None and fs is not None) else done > failed[0]
+    if failed and not cleared:
         stage = failed[2][0]
         text = " ".join(failed[2][1:])
         return "DEGRADED", "{} failed at {}{}".format(stage, _stamp(failed[0]), (": " + text) if text else "")
@@ -173,9 +194,9 @@ def hook_state(d, hook, now, stale_s=7200, kill_s=150):
         return "STALE", "last completed evaluation {} min ago".format(int((now - done) // 60))
 
     # 7. healthy; an older failure stays visible so intermittent trouble has somewhere to show up
-    detail = "last completed evaluation {} s ago".format(max(0, int(now - done)))
+    detail = "last completed evaluation {} s ago".format(int(now - done))
     if failed:
-        detail = "recovered; was DEGRADED at {} ({})".format(_stamp(failed[0]), detail)
+        detail = "recovered; was DEGRADED at {} by {} failure ({})".format(_stamp(failed[0]), failed[2][0], detail)
     return "HEALTHY", detail
 
 
@@ -216,6 +237,17 @@ def _installed(root):
     return out
 
 
+def _writable(d):
+    """Can a hook record here? Probed by writing, because os.access lies on Windows."""
+    probe = Path(d) / ".canary-probe"
+    try:
+        probe.write_text("x", encoding="utf-8")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def report(root, stale_min=120, as_json=False, now=None, out=None):
     """Print the report; return the exit code."""
     out = out or sys.stdout
@@ -232,9 +264,13 @@ def report(root, stale_min=120, as_json=False, now=None, out=None):
         unreadable = True
     for agent, hooks in installed.items():
         d = hb / agent
+        unwritable = d.is_dir() and not _writable(d)
         for h in hooks:
             if unreadable:
                 state, detail = "UNMEASURABLE", "telemetry directory is not readable"
+            elif unwritable:
+                # the wrappers swallow a failed write, so a frozen directory would read HEALTHY/STALE forever
+                state, detail = "UNMEASURABLE", "telemetry directory is not writable -- hooks cannot record here"
             else:
                 state, detail = hook_state(d, h, now, stale_s=stale_min * 60)
             n, p50, p95 = latency(d, h)
