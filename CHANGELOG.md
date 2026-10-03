@@ -2,6 +2,13 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Hook health telemetry
+
+- **`bash tools/hook-canary.sh` now reads staged records** (ran, received, evaluated, emitted, failed) instead of
+  one heartbeat, so it sees the failures that happen *after* a payload arrives: an engine crash, a hook the agent
+  killed, an output nobody could parse. States: HEALTHY, STALE, DEGRADED, NOT EXERCISED, UNMEASURABLE. A failure
+  clears only on a newer completed evaluation. Per-call latency (p50/p95) is recorded and shown.
+
 ### 📚 Instructions split
 
 - **`CLAUDE.md` shrinks from 53,578 to 28,174 bytes** (the shared core from 53,367 to 26,304), so the

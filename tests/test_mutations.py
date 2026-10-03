@@ -126,16 +126,16 @@ MUTATIONS = [
     # stdout then reaches the runtime as "no decision" -- an allow -- instead of being refused.
     pytest.param(
         ".claude/hooks/protect-bash.sh",
-        '    "{"*) [ "$RC" -eq 0 ]',
-        '    *) [ "$RC" -eq 0 ]',
+        '    "{"*) _done;',
+        '    *) _done;',
         "tests/test_hooks.py::test_wrapper_denies_on_non_json_output",
         id="wrapper-passes-non-json-engine-output-through",
     ),
     # Trust JSON on stdout even when the engine exited non-zero (it crashed after printing).
     pytest.param(
         ".claude/hooks/protect-files.sh",
-        '    "{"*) [ "$RC" -eq 0 ] &&',
-        '    "{"*) true &&',
+        'if [ "$RC" -ne 0 ]; then',
+        'if false; then',
         "tests/test_hooks.py::test_wrapper_denies_when_engine_prints_a_verdict_but_exits_nonzero",
         id="wrapper-ignores-the-engine-exit-status",
     ),
@@ -632,7 +632,7 @@ MUTATIONS = [
         # Remove a hook's liveness heartbeat. hook-canary then has nothing to read,
         # and the only detector that survives the harness/production gap is gone.
         ".claude/hooks/protect-files.sh",
-        'HB_DIR="$PROJECT_DIR/.claude/backups/.hook-heartbeat"',
+        'HB_DIR="$PROJECT_DIR/.claude/backups/.hook-heartbeat/claude"',
         'HB_DIR="$PROJECT_DIR/.claude/backups/.disabled"',
         "tests/test_repo_invariants.py::test_every_hook_writes_a_heartbeat_and_handles_an_empty_payload",
         id="hook-heartbeat-removed",
@@ -754,35 +754,68 @@ MUTATIONS = [
         "tests/test_gen_agent_trees.py::test_repo_is_in_sync",
         id="generated-files-cannot-be-hand-edited",
     ),
-    # Pin the canary red forever again: report BLIND on the mere existence of a
-    # marker, without asking whether a good payload arrived since. An instrument
-    # that cannot go back to green gets ignored, which is the same end state as
-    # having no instrument at all.
+    # Pin the canary red forever again: never let a completed evaluation clear a failure. An instrument
+    # that cannot go back to green gets ignored, which is the same end state as having no instrument.
     pytest.param(
-        "tools/hook-canary.sh",
-        'if [ -n "$good_ts" ] && [[ "$good_ts" > "$blind_ts" ]]; then blind_current=0; fi',
-        'if false; then blind_current=0; fi',
-        "tests/test_hook_canary.py::test_a_proven_recovery_reads_recovered_not_alive",
+        "tools/skyguard/health.py",
+        "    if failed and (done is None or done <= failed[0]):",
+        "    if failed:",
+        "tests/test_skyguard_health.py::test_a_newer_completed_evaluation_clears_it_and_says_so",
         id="canary-can-go-back-to-green",
     ),
-    # Swallow a truncated .blind marker instead of failing loud on it. The one
-    # signal this tool exists to give would then depend on the marker being
-    # well-formed at the moment the hook was starved.
+    # A malformed stamp must fail loud. Python's float() reads `20260909_15` (a 3.x stamp) as 2026090915.0,
+    # so without the strict pattern it parses as a time and decides recovery order by accident.
+    # (The twin carries enough fields that only the timestamp check can reject it.)
     pytest.param(
-        "tools/hook-canary.sh",
-        '      [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9])',
-        '      *)',
-        "tests/test_hook_canary.py::test_an_unproven_recovery_stays_blind",
-        id="canary-malformed-marker-cannot-clear",
+        "tools/skyguard/health.py",
+        "        if not _TIME.match(fields[0]):",
+        "        if False:",
+        "tests/test_skyguard_health.py::test_a_malformed_timestamp_with_enough_fields_is_unmeasurable",
+        id="canary-malformed-stamp-cannot-clear",
     ),
-    # Third clause: make the comparison non-strict, so EQUAL timestamps count as
-    # proof of recovery. Same second proves no ordering at all.
+    # And the field count: a record cut off mid-write must not parse.
     pytest.param(
-        "tools/hook-canary.sh",
-        '[[ "$good_ts" > "$blind_ts" ]]',
-        '[[ ! "$good_ts" < "$blind_ts" ]]',
-        "tests/test_hook_canary.py::test_an_unproven_recovery_stays_blind",
+        "tools/skyguard/health.py",
+        "    if len(fields) < _MIN_FIELDS[stage]:",
+        "    if False:",
+        "tests/test_skyguard_health.py::test_unparseable_records_are_unmeasurable",
+        id="canary-truncated-record-cannot-clear",
+    ),
+    # Third clause: make the comparison non-strict, so EQUAL timestamps count as proof of recovery.
+    # Same instant proves no ordering at all.
+    pytest.param(
+        "tools/skyguard/health.py",
+        "done <= failed[0]",
+        "done < failed[0]",
+        "tests/test_skyguard_health.py::test_equal_timestamps_prove_no_recovery",
         id="canary-a-tie-is-not-a-recovery",
+    ),
+    # Recovery must be proven by a COMPLETED evaluation. Accept a newer receipt instead and a guard whose
+    # engine crashes on every call reads HEALTHY as soon as the next payload arrives.
+    pytest.param(
+        "tools/skyguard/health.py",
+        '    if ev and em and ev[2][0] == "evaluated" and em[1] == ev[1]:\n        return ev[0]',
+        '    if recs.get("received"):\n        return recs["received"][0]',
+        "tests/test_skyguard_health.py::test_a_newer_receipt_does_not_clear_a_failure",
+        id="health-recovery-needs-a-completed-evaluation",
+    ),
+    # Forget the never-finished rule and a hook killed by the agent's timeout -- on Codex, a command
+    # that RAN unchecked -- leaves no trace in the report.
+    pytest.param(
+        "tools/skyguard/health.py",
+        "if _never_finished(",
+        "if False and _never_finished(",
+        "tests/test_skyguard_health.py::test_an_invocation_that_never_finished_is_degraded",
+        id="health-reports-a-killed-invocation",
+    ),
+    # A payload-less call is still evaluated and emitted by the engine. Drop the wrapper's trailing
+    # failure record and that completed evaluation clears the very failure it accompanies.
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        '    [ -z "$NOPAY" ] || _fail receipt "NO PAYLOAD"',
+        '    [ -z "$NOPAY" ] || :',
+        "tests/test_hooks.py::test_an_empty_payload_stays_failed_even_though_the_engine_then_evaluates",
+        id="wrapper-empty-payload-cannot-clear-itself",
     ),
     # Write the paths file double-quoted again: a `$` in a legal Windows folder name
     # then vanishes at source time and the install is silently unguarded.

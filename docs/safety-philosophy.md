@@ -121,6 +121,13 @@ which is how Claude Code spawns a hook; the suite reproduces that on Windows but
 on Linux, and neither tells you about YOUR install. The canary reads heartbeats
 written from inside real invocations, which does.
 
+Each invocation leaves four records in `.claude/backups/.hook-heartbeat/<agent>/`: the hook **ran**, it
+**received** a payload, the engine **evaluated** it, and the wrapper **emitted** the verdict. The canary reports
+each hook as HEALTHY, STALE, DEGRADED, NOT EXERCISED or UNMEASURABLE (exit 1 if any is DEGRADED, 2 if any is
+unmeasurable). A failure is cleared only by a *newer completed evaluation* -- a later payload proves nothing --
+and a hook that was invoked but never finished (killed by the agent's timeout) is DEGRADED too. The old 3.x
+heartbeat files are ignored.
+
 ## The knowledgebase snapshot at session start
 
 The knowledgebase split (`KNOWLEDGEBASE.md` is shipped and replaced on update; `KNOWLEDGEBASE.local.md`

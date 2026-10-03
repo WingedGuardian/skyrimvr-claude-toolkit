@@ -49,7 +49,7 @@ Every hook read stdin with `cat /dev/stdin`, which returns nothing when Claude C
 spawns it — so each hook fired, read zero bytes, fell through its first guard and
 exited 0, which is byte-identical to approving. No ESP write block, no
 game-directory delete block, no automatic backups, and nothing looked wrong. Update,
-then run `bash tools/hook-canary.sh`: it reports ALIVE or BLIND per hook by reading
+then run `bash tools/hook-canary.sh`: it reports HEALTHY, DEGRADED or UNMEASURABLE per hook by reading
 heartbeats written from inside real invocations, which is the only way to know.
 
 The same release re-anchors the delete guard (eleven spellings of "delete the game

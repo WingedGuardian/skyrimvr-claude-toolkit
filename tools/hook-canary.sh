@@ -22,125 +22,49 @@
 # hands bash a Win32 pipe too -- but it CANNOT catch it on Linux, where /dev/stdin
 # resolves for any pipe. So the suite is a real detector on one platform and blind on
 # the other, and neither tells you about the install in front of you. That is what
-# this script is for: each hook records a heartbeat when it parses a payload and a
-# `.blind` marker when it runs and sees nothing, both written from inside a REAL
-# invocation. This reads them back.
+# this script is for: each hook records, per invocation, that it ran, that it received a
+# payload, that the engine reached a verdict and that the wrapper delivered it -- all written from inside a REAL
+# invocation. This reads them back, through tools/skyguard/health.py (the states and the
+# recovery rule live there: a failure clears only on a NEWER COMPLETED evaluation, never on a
+# later payload). The old 3.x heartbeat files are ignored.
 #
-# Exit: 0 = every exercised hook is alive · 1 = at least one is BLIND · 2 = cannot check
+# Exit: 0 = nothing degraded, nothing unmeasurable · 1 = at least one hook is DEGRADED ·
+#       2 = cannot check (no Python, no hooks installed, unreadable or malformed telemetry)
 set -uo pipefail
 
 ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-HB="$ROOT/.claude/backups/.hook-heartbeat"
-# session-kb-guard fires ONCE, at SessionStart. It therefore reads ALIVE early in a
-# session and STALE later on, which is accurate rather than a fault: "last payload 140
-# min ago" is exactly what a once-per-session hook looks like two hours in.
-HOOKS="protect-files protect-bash backup-before-edit snapshot-before-tool session-kb-guard"
-STALE_MIN="${HOOK_CANARY_STALE_MIN:-120}"
 
-[ -d "$ROOT/.claude/hooks" ] || { echo "no .claude/hooks under $ROOT -- cannot check" >&2; exit 2; }
-
-echo "=============================================================="
-echo "HOOK CANARY -- did each guard fire AND see its payload?"
-echo "=============================================================="
-mkdir -p "$HB" 2>/dev/null
-
-now=$(date +%s)
-blind_count=0
-alive_count=0
-idle_count=0
-recovered_count=0
-
-for h in $HOOKS; do
-  blind_ts=""
-  [ -f "$HB/$h.blind" ] && blind_ts=$(cut -d' ' -f1 < "$HB/$h.blind")
-  good_ts=""
-  [ -f "$HB/$h" ] && good_ts=$(cut -d' ' -f1 < "$HB/$h")
-
-  # A blind marker is the loud case: the hook RAN and got nothing. That is the
-  # original defect, and it must never read as "fine".
-  #
-  # But it is only CURRENT if no good payload has arrived SINCE. Both markers are
-  # written as YYYYMMDD_HHMMSS, so a lexical compare is a chronological one -- no
-  # date parsing, no extra forks. MEASURED 2026-09-09: without this, two .blind
-  # markers left by an empty-payload test pinned protect-bash and protect-files to
-  # BLIND while their good heartbeats were 107 SECONDS NEWER and the hooks were
-  # demonstrably receiving 900+ byte payloads. A canary that cannot go back to
-  # green is a canary that gets ignored, which is the same end state as no canary.
-  # A blind marker is CURRENT unless a good heartbeat proves the hook recovered
-  # AFTER it. Three ways that proof can be absent, all MEASURED as false greens
-  # before this was tightened:
-  #   * the timestamps are EQUAL       -- same second proves no ordering
-  #   * the good one is OLDER          -- a clock stepped back must not read as recovery
-  #   * the marker will not parse      -- a truncated `20260909_15` sorts BELOW a real
-  #                                       stamp, so a lexical compare silently cleared it
-  # Only a well-formed marker with a STRICTLY newer good heartbeat clears. This
-  # matters most for backup-before-edit and snapshot-before-tool, which exit 0
-  # silently on an empty payload: for those two this report is the only detector.
-  blind_current=0
-  if [ -f "$HB/$h.blind" ]; then
-    blind_current=1
-    case "$blind_ts" in
-      [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9])
-        # well-formed: a strictly newer good heartbeat, and only that, clears it
-        if [ -n "$good_ts" ] && [[ "$good_ts" > "$blind_ts" ]]; then blind_current=0; fi
-        ;;
+# The interpreter the hooks were configured with (setup.sh writes it as `PY="..."`), else whatever runs.
+PYBIN=""
+if [ -f "$ROOT/.claude/hooks/protect-bash.sh" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      PY=\"*\") cand="${line#PY=\"}"; cand="${cand%\"}"
+                case "$cand" in *"{{"*) ;; *) command -v "$cand" >/dev/null 2>&1 && PYBIN="$cand" ;; esac
+                break ;;
     esac
-  fi
-  if [ "$blind_current" -eq 1 ]; then
-    printf '  %-22s BLIND        ran but received NO payload (%s)\n' "$h" "$blind_ts"
-    blind_count=$((blind_count + 1))
-    continue
-  fi
-  if [ ! -f "$HB/$h" ]; then
-    # NOT the same as broken, and not the same as fine: the Edit|Write hooks never
-    # fire in a Bash-only session. Saying "not exercised" rather than "OK" is the
-    # whole point -- a hook that has not run has proven nothing, and reporting that
-    # as healthy is the lie this tool exists to avoid telling.
-    printf '  %-22s NOT EXERCISED  no heartbeat yet -- proves nothing either way\n' "$h"
-    idle_count=$((idle_count + 1))
-    continue
-  fi
-  ts=$(cut -d' ' -f1 < "$HB/$h")
-  bytes=$(sed 's/.*payload_bytes=//' "$HB/$h")
-  age=$(( (now - $(date -d "$(echo "$ts" | sed 's/\(....\)\(..\)\(..\)_\(..\)\(..\)\(..\)/\1-\2-\3 \4:\5:\6/')" +%s 2>/dev/null || echo "$now")) / 60 ))
-  if [ "$bytes" = "0" ]; then
-    # A heartbeat recording zero bytes is a blind hook that wrote the wrong file.
-    printf '  %-22s BLIND          heartbeat records 0 bytes\n' "$h"
-    blind_count=$((blind_count + 1))
-  elif [ "$age" -gt "$STALE_MIN" ]; then
-    printf '  %-22s STALE          last payload %s min ago (%s bytes)\n' "$h" "$age" "$bytes"
-    idle_count=$((idle_count + 1))
-  else
-    if [ -n "$blind_ts" ]; then
-      # Not ALIVE: a hook that was starved once can be starved again, and this line is
-      # the only surface on which that would ever appear for the two hooks that exit 0
-      # silently. Exit stays 0 -- it IS working now.
-      printf '  %-22s RECOVERED      %s bytes, %s min ago -- but WAS BLIND at %s\n' "$h" "$bytes" "$age" "$blind_ts"
-      recovered_count=$((recovered_count + 1))
-    else
-      printf '  %-22s ALIVE          %s bytes, %s min ago\n' "$h" "$bytes" "$age"
-      alive_count=$((alive_count + 1))
+  done < "$ROOT/.claude/hooks/protect-bash.sh"
+fi
+PYCMD=()
+if [ -n "$PYBIN" ]; then
+  PYCMD=("$PYBIN")
+else
+  for cand in python3 python; do
+    if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1; then
+      PYCMD=("$cand"); break
     fi
+  done
+  if [ "${#PYCMD[@]}" -eq 0 ] && command -v py >/dev/null 2>&1 && py -3 -c 'pass' >/dev/null 2>&1; then
+    PYCMD=(py -3)
   fi
-done
+fi
+if [ "${#PYCMD[@]}" -eq 0 ]; then
+  echo "UNMEASURABLE: no Python 3 -- and without it every blocking hook is refusing every command (run setup.sh)"
+  exit 2
+fi
 
-echo "--------------------------------------------------------------"
-echo "alive: $alive_count   recovered-after-blind: $recovered_count   blind: $blind_count   not-exercised/stale: $idle_count"
-if [ "$blind_count" -gt 0 ]; then
-  echo
-  echo "RESULT: BLIND HOOK(S) -- a guard is running and seeing nothing, which is"
-  echo "        indistinguishable from allowing. Check how the hook reads stdin:"
-  echo "        \`INPUT=\$(cat /dev/stdin)\` returns zero bytes when Claude Code spawns"
-  echo "        the hook; \`INPUT=\$(cat)\` works. Also check that Python 3 is installed and"
-  echo "        that setup.sh has filled in its path."
-  exit 1
-fi
-if [ "$alive_count" -eq 0 ] && [ "$recovered_count" -eq 0 ]; then
-  echo
-  echo "RESULT: UNPROVEN -- no hook has recorded a payload yet. Trigger one tool call"
-  echo "        of each kind (a Bash command and a file edit) and re-run."
-  exit 0
-fi
-echo
-echo "RESULT: OK -- $alive_count hook(s) proven to receive their payload"
-exit 0
+HEALTH="$ROOT/tools/skyguard/health.py"
+[ -f "$HEALTH" ] || { echo "UNMEASURABLE: $HEALTH is missing -- cannot read the telemetry" >&2; exit 2; }
+if command -v cygpath >/dev/null 2>&1; then HEALTH="$(cygpath -m "$HEALTH")"; ROOT="$(cygpath -m "$ROOT")"; fi
+
+exec "${PYCMD[@]}" "$HEALTH" report --root "$ROOT" "$@"

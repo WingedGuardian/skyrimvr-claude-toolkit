@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from skyguard import backup, codes, engine, paths, session, snapshot  # noqa: E402
+from skyguard import backup, codes, engine, health, paths, session, snapshot  # noqa: E402
 from skyguard.adapters import claude  # noqa: E402
 from skyguard.audit import Audit  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
@@ -32,6 +32,17 @@ def _emit(text: str) -> None:
     sys.stdout.buffer.flush()
 
 
+_ARGS = []   # the parsed args, so the last-resort handler below can still name the hook that broke
+
+
+def _telemetry(a, v) -> None:
+    """Write the `evaluated` record. A telemetry failure never changes the verdict (health.record swallows it)."""
+    if a.invocation and a.telemetry:
+        health.record(a.telemetry, a.role, "evaluated", a.invocation,
+                      "{} {} {}".format(v.status, v.decision, v.code or "-"))
+        health.trim_latency(a.telemetry, a.role)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("agent", choices=sorted(ADAPTERS))
@@ -41,7 +52,10 @@ def main(argv=None) -> int:
     ap.add_argument("--root-win", default="")
     ap.add_argument("--project", required=True)
     ap.add_argument("--bash", default="bash")
+    ap.add_argument("--invocation", default="")
+    ap.add_argument("--telemetry", default="")
     a = ap.parse_args(argv)
+    _ARGS.append(a)
     adapter = ADAPTERS[a.agent]
     raw = sys.stdin.buffer.read().decode("utf-8", "replace")
     p = adapter.extract(raw)
@@ -69,9 +83,11 @@ def main(argv=None) -> int:
         v = Verdict()
     else:
         out = session.run(a.project, "" if p["empty"] else p["source"], a.bash, audit)
+        _telemetry(a, Verdict(code="session"))
         _emit(out)
         return 0
     v = codes.classify(v)
+    _telemetry(a, v)
     _emit(adapter.render(v))
     return 0
 
@@ -81,5 +97,8 @@ if __name__ == "__main__":
         sys.exit(main())
     except SystemExit:
         raise
-    except BaseException:
+    except BaseException as e:
+        if _ARGS and _ARGS[0].invocation and _ARGS[0].telemetry:
+            health.record(_ARGS[0].telemetry, _ARGS[0].role, "failed", _ARGS[0].invocation,
+                          "engine {}".format(e.__class__.__name__))
         sys.exit(1)
