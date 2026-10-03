@@ -19,5 +19,5 @@ Raw items stay outside the repo; counts only here.
   mcp__devbench-vr__capture 6, __console 1, __game 1.
 - **Decision matrix (old>new):** allow>allow 55,766; advise>advise 2,340; deny>deny 445; ask>ask 7.
   Every `newly-*` and `no-longer-*` direction is 0, `reason_moved` 0, parse failures 0 (old and new).
-- Note: the engine has no MCP or PowerShell-specific rules at P5-BASE, so MCP items price as allow and
+- Note: MCP items price as allow until `skyguard.mcp_rules` exists. The engine has no MCP or PowerShell-specific rules at P5-BASE, so MCP items price as allow and
   PowerShell commands go through the shell rules.

@@ -933,6 +933,15 @@ MUTATIONS = [
         "tests/test_price_tool.py::test_a_broadened_rule_moves_only_that_rule",
         id="price-attribution-per-rule",
     ),
+    # Fix round 1: compare only whether a rule id fired, never its decision. A promotion advise->deny on
+    # a rule firing in both engines then prices as nothing.
+    pytest.param(
+        "scripts/guard-corpus/price.py",
+        "if rid not in old_dec or old_dec[rid] != dec:",
+        "if rid not in old_dec:",
+        "tests/test_price_tool.py::test_a_decision_change_on_the_same_rule_is_priced",
+        id="price-decision-change-on-same-rule",
+    ),
 ]
 
 

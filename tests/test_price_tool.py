@@ -141,3 +141,48 @@ def test_cli_prices_the_working_tree_against_itself(tmp_path, history, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "N=6" in out and "'newly-deny': 0" in out
+
+
+def test_a_decision_change_on_the_same_rule_is_priced(tmp_path, history):
+    """advise -> deny on a rule that fires in both engines: same id, so only the decision differs."""
+    new = _scratch_engine(tmp_path, "scratch", [(
+        "shell_rules.py",
+        '        advise("S-PLUGIN-REF")\n',
+        '        return deny("S-PLUGIN-REF")\n')])
+    s, _ = _run(tmp_path, SKYGUARD, new, history)
+    assert s["rules"] == {"S-PLUGIN-REF": {"newly-deny": 1, "no-longer-advise": 1}}
+    assert s["totals"]["newly-deny"] == 1 and s["totals"]["no-longer-advise"] == 1
+    assert s["matrix"].get("advise>deny") == 1
+
+
+def test_a_crash_in_the_new_engine_is_flagged_not_clean(tmp_path, history):
+    new = _scratch_engine(tmp_path, "scratch", [(
+        "shell_rules.py",
+        '    a = g + "|" + c\n',
+        '    a = g + "|" + c\n    if command == "ls":\n        raise RuntimeError("boom")\n')])
+    s, _ = _run(tmp_path, SKYGUARD, new, history)
+    assert s["errors"] == {"old": 0, "new": 2}                      # the two `ls` items (cwd differs)
+    assert s["rules"] == {"<engine-error>": {"newly-error": 2}}
+    assert s["totals"]["newly-error"] == 2
+
+
+def test_two_engine_dirs_load_separately(tmp_path):
+    edits = [("shell_rules.py", "    advice = Advice()\n",
+              '    advice = Advice()\n    return Verdict("deny", __file__)\n')]
+    a = _scratch_engine(tmp_path, "engA", edits)
+    b = _scratch_engine(tmp_path, "engB", edits)
+    items = tmp_path / "items.jsonl"
+    items.write_text(json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": ""}) + "\n")
+    ra = price.run_engine(price.stage_tree(a, tmp_path / "ta"), items, tmp_path / "ra.jsonl", "C:/g", "C:/g")[0]
+    rb = price.run_engine(price.stage_tree(b, tmp_path / "tb"), items, tmp_path / "rb.jsonl", "C:/g", "C:/g")[0]
+    assert "ta" in Path(ra["text"]).parts and "tb" in Path(rb["text"]).parts
+    assert ra["text"] != rb["text"]
+
+
+def test_only_this_tools_stale_files_are_cleared(tmp_path, history):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "S-OLD__newly-deny.jsonl").write_text("stale")
+    (out / "mine__notes.jsonl").write_text("keep")
+    _run(tmp_path, SKYGUARD, SKYGUARD, history)
+    assert not (out / "S-OLD__newly-deny.jsonl").exists() and (out / "mine__notes.jsonl").exists()

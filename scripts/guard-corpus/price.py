@@ -34,7 +34,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-DIRECTIONS = ("newly-deny", "newly-ask", "newly-advise", "no-longer-deny", "no-longer-ask", "no-longer-advise")
+DIRECTIONS = ("newly-deny", "newly-ask", "newly-advise", "no-longer-deny", "no-longer-ask", "no-longer-advise",
+              "newly-error")
+ERROR_RULE = "<engine-error>"
 
 
 def _load(name: str):
@@ -85,13 +87,13 @@ def run_engine(tree: Path, items_path: Path, out_path: Path, root: str, root_win
 def moves(old: dict, new: dict) -> list[tuple[str, str]]:
     """(rule id, direction) for every rule whose firing differs between the two engines on one item."""
     old_fired, new_fired = _dedup(old["fired"]), _dedup(new["fired"])
-    old_ids, new_ids = {i for i, _ in old_fired}, {i for i, _ in new_fired}
+    old_dec, new_dec = dict(old_fired), dict(new_fired)
     out = []
     for rid, dec in new_fired:
-        if rid not in old_ids:
+        if rid not in old_dec or old_dec[rid] != dec:      # new, or the SAME rule at a different decision
             out.append((rid, "newly-" + dec))
     for rid, dec in old_fired:
-        if rid not in new_ids:
+        if rid not in new_dec or new_dec[rid] != dec:
             out.append((rid, "no-longer-" + dec))
     return out
 
@@ -125,18 +127,24 @@ def price(base_tree: Path, new_tree: Path, history: Path, out_dir: Path, only_ru
     matrix, per_tool = collections.Counter(), collections.Counter()
     unique_by_tool = collections.Counter(i["tool_name"] if not i["tool_name"].startswith("mcp__") else "mcp__*"
                                          for i in items)
-    reason_moved = parse_fail_old = parse_fail_new = 0
-    for old_dir in out_dir.glob("*__*.jsonl"):
-        old_dir.unlink()                                    # a stale hand-reading file would lie about this run
+    reason_moved = parse_fail_old = parse_fail_new = err_old = err_new = 0
+    for d in DIRECTIONS:                                    # only files this tool writes; a stale one would lie
+        for stale in out_dir.glob(f"*__{d}.jsonl"):
+            stale.unlink()
     files: dict[str, io.TextIOBase] = {}
     try:
         for item, o, n in zip(items, old, new):
             matrix[f"{o['decision']}>{n['decision']}"] += 1
             parse_fail_old += not o["parse_ok"]
             parse_fail_new += not n["parse_ok"]
+            err_old += o["decision"] == "error"
+            err_new += n["decision"] == "error"
             if o["decision"] == n["decision"] and {i for i, _ in o["fired"]} != {i for i, _ in n["fired"]}:
                 reason_moved += 1
-            for rid, direction in moves(o, n):
+            found = moves(o, n)
+            if n["decision"] == "error" and o["decision"] != "error":
+                found.append((ERROR_RULE, "newly-error"))     # a crash in the new engine must never read as clean
+            for rid, direction in found:
                 if only_rule and rid != only_rule:
                     continue
                 per_rule[rid][direction] += 1
@@ -152,6 +160,7 @@ def price(base_tree: Path, new_tree: Path, history: Path, out_dir: Path, only_ru
         "N": len(items), "N_per_tool": dict(unique_by_tool), "raw_tool_calls": raw_counts,
         "matrix": dict(sorted(matrix.items())), "reason_moved": reason_moved,
         "parse_failures": {"old": parse_fail_old, "new": parse_fail_new},
+        "errors": {"old": err_old, "new": err_new},
         "totals": totals,
         "rules": {rid: {d: c[d] for d in DIRECTIONS if c[d]} for rid, c in sorted(per_rule.items())},
     }
@@ -176,6 +185,7 @@ def main(argv=None) -> int:
         new_tree = stage_tree(a.new, td / "new")
         s = price(base_tree, new_tree, a.history, a.out_dir, a.only_rule)
     print(f"N={s['N']}  per tool: {s['N_per_tool']}  raw tool calls: {s['raw_tool_calls']}")
+    print(f"errors old={s['errors']['old']} new={s['errors']['new']}")
     print(f"parse failures old={s['parse_failures']['old']} new={s['parse_failures']['new']}  reason_moved={s['reason_moved']}")
     print("decision matrix (old>new):")
     for k, v in s["matrix"].items():
