@@ -72,3 +72,13 @@ same five real `clean ... --apply` writes as round 1 (re-read). The 3 extra no-l
 text-only sessions (re-read). The bounded quantifiers, the `A.*B` split in `grep.py` and the write-rule
 lookbehinds changed no other rule's verdict over 59k real calls (no other decision cell moved, `reason_moved`
 unchanged).
+
+### Task 4, fix round 3 (timing fixes, whole engine)
+
+Re-priced 2026-10-02 WITHOUT `--only-rule` (`--base c3f32ef`), N = 59,227. Matrix: allow>allow 56,410;
+advise>advise 2,342; deny>deny 451; allow>ask 5; ask>advise 5; ask>allow 14. Per rule: S-RESAVER-APPLY newly-ask 5 /
+no-longer-ask 19 (unchanged from round 2); S-REDIRECT-INSTALL newly-advise 21 and S-WRITE-INSTALL no-longer-advise
+21, which is the 21 `reason_moved` items of the earlier id rename (same decision). **No decision moved because of
+the timing fixes** (install-path lead lookbehind, relative-Data rewrite, the registry rule split in two greps, the
+`split_dotstar` whitelist): every deny/advise/allow cell is identical to round 2 apart from items added to the
+history since.
