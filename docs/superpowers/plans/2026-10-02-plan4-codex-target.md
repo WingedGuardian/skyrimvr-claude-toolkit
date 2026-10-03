@@ -1589,7 +1589,7 @@ def render(v: Verdict) -> str:
 `latency` telemetry under `<root>/.claude/backups/.hook-heartbeat/codex/` (root = two levels above the
 script); find Python by the Task 5 chain (configured `{{PYTHON_PATH}}` first); run
 `run.py codex <role> --root <root> --project <root> --bash {{BASH_PATH}} --invocation <inv> --telemetry <dir>`
-with the payload on stdin **under an internal deadline** (pre-tool 50 s, session-start 110 s; both below the
+with the payload on stdin **under an internal deadline** (pre-tool 45 s, session-start 105 s -- lowered from 50/110 in Task 8 item 0: the worst case measured ~5.5 s past the deadline plus the PowerShell start; both below the
 definition timeouts 60/120 so the wrapper, not Codex, decides); require line 1 == `SKYGUARD-OK`; for
 pre-tool require the body to be empty or one JSON object whose only top-level key is `hookSpecificOutput`,
 whose keys are a subset of `hookEventName, permissionDecision, permissionDecisionReason, additionalContext`,
@@ -1711,7 +1711,7 @@ project_doc_max_bytes = 65536
   - `test_every_command_runs_the_entry_with_a_known_role`.
   - `test_definitions_carry_no_python_path_and_no_other_placeholder` (only `{{CODEX_ROOT}}`,
     `{{CODEX_ROOT_POSIX}}`; R3).
-  - `test_timeouts_exceed_the_wrappers_own_deadlines` (60 > 50 + 5; 120 > 110 + 5; read the deadlines from
+  - `test_timeouts_exceed_the_wrappers_own_deadlines` (Task 8 item 0: deadlines 45/105, so 60 >= 45 + 15 and 120 >= 105 + 15; read the deadlines from
     the entry scripts).
   - `test_codex_hook_definitions_are_frozen`: the sha256 of the template's LF bytes equals the **last** line
     of `FROZEN.sha256` (`<sha> <label>`); if the file has more than one line, the CHANGELOG's top section

@@ -14,8 +14,8 @@
 # Hot path = bash builtins, as in the Claude wrappers (a fork costs 10-70 ms on Git Bash); the remaining
 # forks are `$(cat)`, `timeout` and the engine. Never logs the environment (hooks inherit secrets).
 # SETUP: setup.sh fills in the two paths below.
-# Test-only knobs: SKYGUARD_WRAPPER_TIMEOUT_S (engine deadline; default 50 pre-tool, 110 session-start,
-# below the definition timeouts 60/120), SKYGUARD_NO_PYTHON_FALLBACK=1 (configured interpreter only).
+# Test-only knobs: SKYGUARD_WRAPPER_TIMEOUT_S (engine deadline; default 45 pre-tool, 105 session-start,
+# 15 s below the definition timeouts 60/120), SKYGUARD_NO_PYTHON_FALLBACK=1 (configured interpreter only).
 
 ROLE="${1:-}"
 PY='{{PYTHON_PATH}}'
@@ -46,7 +46,22 @@ deny() {
     fi
     exit 0
 }
-_finally() { [ -n "$EMITTED" ] || deny wrapper "the wrapper ended without a verdict"; exit 0; }
+OUTF=""
+_finally() {
+    [ -n "$EMITTED" ] || deny wrapper "the wrapper ended without a verdict"
+    [ -z "$OUTF" ] || rm -f -- "$OUTF" 2>/dev/null
+    exit 0
+}
+# UTF-8 validity in builtins (byte-wise in the C locale): Codex decodes stdout as UTF-8, and a body it
+# cannot decode lets the command RUN. ASCII-only text (the usual case) returns at the first test.
+_utf8_ok() {
+    local LC_ALL=C
+    local hi=$'[\x80-\xff]' t=$'[\x80-\xbf]' u
+    [[ $1 =~ $hi ]] || return 0
+    u="^([^\x80-\xff]|[\xc2-\xdf]$t|\xe0[\xa0-\xbf]$t|[\xe1-\xec\xee\xef]$t$t|\xed[\x80-\x9f]$t|\xf0[\x90-\xbf]$t$t|[\xf1-\xf3]$t$t$t|\xf4[\x80-\x8f]$t$t)*\$"
+    printf -v u '%b' "$u"
+    [[ $1 =~ $u ]]
+}
 trap _finally EXIT
 
 INPUT=$(cat)
@@ -95,7 +110,7 @@ printf '%s %s bytes=%s\n' "$T0" "$INV" "${#INPUT}" > "$HB_DIR/$HOOK_NAME.receive
 
 RUNPY="${ROOT_WIN:-$ROOT}/tools/skyguard/run.py"
 [ -f "$ROOT/tools/skyguard/run.py" ] || deny engine "engine missing (tools/skyguard/run.py)"
-LIMIT=50; [ "$ROLE" = "session-start" ] && LIMIT=110
+LIMIT=45; [ "$ROLE" = "session-start" ] && LIMIT=105
 [ -z "${SKYGUARD_WRAPPER_TIMEOUT_S:-}" ] || LIMIT="$SKYGUARD_WRAPPER_TIMEOUT_S"
 case "$LIMIT" in ''|*[!0-9]*) deny wrapper "SKYGUARD_WRAPPER_TIMEOUT_S is not a whole number" ;; esac
 case "$BASH_EXE" in '{{'*) BASH_EXE="${BASH:-bash}" ;; esac
@@ -186,11 +201,19 @@ run_engine() {
 if ! command -v "$PY" >/dev/null 2>&1 || [ "${PY:0:2}" = "{{" ]; then
     [ "${SKYGUARD_NO_PYTHON_FALLBACK:-}" != 1 ] && py_fallback || deny python "cannot run Python -- install Python 3 and run setup.sh"
 fi
-OUT=$(run_engine)
+# The engine writes to a FILE, not into $(...): command substitution reads the pipe to EOF, i.e. until
+# every process that inherited it exits -- a grandchild holding it would keep this file past Codex's
+# timeout, and Codex then RUNS the command. A file is done when the engine (or `timeout`) exits.
+OUTF="$HB_DIR/.$HOOK_NAME.$INV.out"
+if ! { : > "$OUTF"; } 2>/dev/null; then
+    OUTF="${TMPDIR:-/tmp}/skyguard-$HOOK_NAME.$INV.out"
+    { : > "$OUTF"; } 2>/dev/null || { OUTF=""; deny wrapper "cannot create a file for the engine output"; }
+fi
+run_engine > "$OUTF"
 RC=$?
 if [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ] && [ "$RC" -ne 137 ] && [ -z "$FB" ] && [ "${SKYGUARD_NO_PYTHON_FALLBACK:-}" != 1 ] \
         && ! py_good "${PYC[@]}" && py_fallback; then
-    OUT=$(run_engine); RC=$?
+    run_engine > "$OUTF"; RC=$?
 fi
 case "$RC" in
     0) ;;
@@ -198,7 +221,12 @@ case "$RC" in
     *) deny engine "engine exited $RC" ;;
 esac
 
+# `read` (a builtin) succeeds only when it stops at a NUL byte, which no engine answer contains.
+OUT=""
+IFS= read -r -d '' OUT < "$OUTF" && deny emission "engine output has a NUL byte"
 OUT="${OUT//$'\r'/}"
+while [ "${OUT%$'\n'}" != "$OUT" ]; do OUT="${OUT%$'\n'}"; done
+_utf8_ok "$OUT" || deny emission "engine output is not valid UTF-8"
 case "$OUT" in
     SKYGUARD-OK) BODY="" ;;
     SKYGUARD-OK$'\n'*) BODY="${OUT#SKYGUARD-OK$'\n'}" ;;
@@ -220,8 +248,11 @@ elif [ -n "$BODY" ]; then
     RE="^[{]$W\"hookSpecificOutput\"$W:$W[{]$W($P($W,$W$P)*)$W[}]$W[}]\$"
     PAIR="^($S)$W:$W($S)$W,?$W(.*)\$"
     [[ $BODY =~ $RE ]] || deny emission "engine output is not a verdict JSON"
-    case "$BODY" in *'\u'[dD][89abAB]*) deny emission "engine output has a surrogate escape" ;; esac
     REST="${BASH_REMATCH[1]}"
+    # An escape starts at an ODD run of backslashes: `\\ud83d` is an escaped backslash and the text "ud83d".
+    # (After REST: a match here would overwrite BASH_REMATCH.)
+    SUR='(^|[^\\])(\\\\)*\\u[dD][89abAB]'
+    [[ $BODY =~ $SUR ]] && deny emission "engine output has a surrogate escape"
     SEEN=" "
     while [ -n "$REST" ]; do
         [[ $REST =~ $PAIR ]] || deny emission "engine output is not a verdict JSON"

@@ -19,7 +19,7 @@
 # output is discarded. Never logs the environment: hooks inherit all of it, secrets included (MEASURED).
 #
 # SETUP: setup.sh fills in the two paths below.
-# Test-only knobs: SKYGUARD_WRAPPER_TIMEOUT_S (the engine deadline; default 50 pre-tool, 110 session-start,
+# Test-only knobs: SKYGUARD_WRAPPER_TIMEOUT_S (the engine deadline; default 45 pre-tool, 105 session-start,
 # both below the definition timeouts 60/120 so this file, not Codex, decides), SKYGUARD_NO_PYTHON_FALLBACK=1
 # (configured interpreter only, so a missing interpreter is really missing).
 
@@ -223,7 +223,8 @@ $script:JKeys = @('"hookEventName"', '"permissionDecision"', '"permissionDecisio
 function Test-Body([string]$body) {
     $m = [regex]::Match($body, $script:JBody)
     if (-not $m.Success) { return 'engine output is not a verdict JSON' }
-    if ($body -match '\\u[dD][89abAB]') { return 'engine output has a surrogate escape' }
+    # An escape starts at an ODD run of backslashes: `\\ud83d` is an escaped backslash and the text "ud83d".
+    if ($body -match '(?<!\\)(?:\\\\)*\\u[dD][89abAB]') { return 'engine output has a surrogate escape' }
     $seen = @{}
     foreach ($p in [regex]::Matches($m.Groups[1].Value, '(' + $script:JStr + ')[ \t]*:[ \t]*(' + $script:JStr + ')')) {
         $k = $p.Groups[1].Value
@@ -288,8 +289,10 @@ function Invoke-Main {
 
     if (-not [System.IO.File]::Exists($script:RunPy)) { Send-Failure 'engine' 'engine missing (tools/skyguard/run.py)'; return }
 
-    $limit = 50
-    if ($script:Role -ceq 'session-start') { $limit = 110 }
+    # 15 s under the definition timeouts (60/120): the worst case MEASURED past the deadline was ~5.5 s
+    # (taskkill wait + drain) plus the PowerShell start, and Codex RUNS the command once its timeout passes.
+    $limit = 45
+    if ($script:Role -ceq 'session-start') { $limit = 105 }
     if ($env:SKYGUARD_WRAPPER_TIMEOUT_S) { $limit = [int]::Parse($env:SKYGUARD_WRAPPER_TIMEOUT_S, [System.Globalization.CultureInfo]::InvariantCulture) }
 
     $bashArg = $BASHEXE

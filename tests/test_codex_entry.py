@@ -129,6 +129,8 @@ def _prints(data: bytes) -> str:
     return "import sys\nsys.stdout.buffer.write({!r})\nsys.stdout.buffer.flush()\n".format(data)
 
 
+BSB = BS.encode("ascii")   # one backslash byte
+
 _GOOD_DENY = (b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", '
               b'"permissionDecisionReason": "r"}}')
 
@@ -172,6 +174,19 @@ MATRIX = {
     "no-python": ({"py": "{{PYTHON_PATH}}", "env": {"SKYGUARD_NO_PYTHON_FALLBACK": "1"}},
                   {"pre-tool": "cannot run Python -- install Python 3 and run setup.sh",
                    "session-start": "cannot run Python -- install Python 3 and run setup.sh"}),
+    # a body without hookEventName: Codex cannot tell which event it answers (Task 8 item 0)
+    "no-event": ({"run.py": _prints(b'SKYGUARD-OK\n{"hookSpecificOutput":{"permissionDecision":"deny",'
+                                    b'"permissionDecisionReason":"r"}}')},
+                 {"pre-tool": "engine output names no event", "session-start": BANNER_CAUSE}),
+    # a lone surrogate escape: PowerShell accepts it, Codex's parser rejects the body (= fail OPEN)
+    "surrogate": ({"run.py": _prints(b'SKYGUARD-OK\n{"hookSpecificOutput":{"hookEventName":"PreToolUse",'
+                                     b'"permissionDecision":"deny","permissionDecisionReason":"a' + BSB + b'ud83d"}}')},
+                  {"pre-tool": "engine output has a surrogate escape", "session-start": BANNER_CAUSE}),
+    # three backslashes = an escaped backslash, then a surrogate escape: still a surrogate
+    "surrogate-after-escape": ({"run.py": _prints(b'SKYGUARD-OK\n{"hookSpecificOutput":{"hookEventName":"PreToolUse",'
+                                                  b'"permissionDecision":"deny","permissionDecisionReason":"a'
+                                                  + BSB * 3 + b'ud83d"}}')},
+                               {"pre-tool": "engine output has a surrogate escape", "session-start": BANNER_CAUSE}),
     # Task 0 MEASURED: the `||` in the definition reruns the entry under 5.1 with an EMPTY stdin
     "empty-stdin": ({"stdin": b""},
                     {"pre-tool": "NO PAYLOAD on stdin", "session-start": "NO PAYLOAD on stdin"}),
@@ -362,6 +377,98 @@ def test_non_ascii_context_survives_byte_for_byte(tmp_path, entry):
     assert json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_an_escaped_backslash_before_u_is_not_a_surrogate(tmp_path, entry):
+    """`C:\\\\udata` in JSON is the text `C:\\udata`: an escaped backslash, then the letters `ud8...`.
+    Only an ODD run of backslashes before `u` starts an escape; denying the even case refuses a real
+    Windows path in a rule's own reason."""
+    root = _install(tmp_path)
+    for n in (2, 4):
+        body = (b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", '
+                b'"permissionDecisionReason": "C:' + BSB * n + b'ud83dfolder"}}')
+        _replace_run_py(root, _prints(b"SKYGUARD-OK\n" + body))
+        r = _run(entry, root, "pre-tool", _benign(root))
+        assert r.returncode == 0 and r.stdout == body + b"\n", (n, r.stdout)
+        assert json.loads(r.stdout)["hookSpecificOutput"]["permissionDecisionReason"].startswith("C:" + BS)
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+@pytest.mark.parametrize("role", ROLES)
+def test_invalid_utf8_from_the_engine_never_reaches_codex(tmp_path, entry, role):
+    """Codex parses the hook's stdout as UTF-8 JSON; a body it cannot decode lets the command RUN.
+    The POSIX entry refuses it; the PowerShell entry decodes with replacement, so what it emits is
+    valid UTF-8 by construction."""
+    root = _install(tmp_path)
+    if role == "pre-tool":
+        body = (b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", '
+                b'"permissionDecisionReason": "bad \xff\xfe byte"}}')
+    else:
+        body = b"SKYGUARD: Codex hooks live \xc3"
+    _replace_run_py(root, _prints(b"SKYGUARD-OK\n" + body))
+    r = _run(entry, root, role, _benign(root) if role == "pre-tool" else _session(root))
+    assert r.returncode == 0
+    r.stdout.decode("utf-8")   # never invalid
+    if entry == "bash":
+        assert r.stdout == _expected(role, "engine output is not valid UTF-8"), r.stdout
+    elif role == "pre-tool":
+        assert json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny", r.stdout
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+@pytest.mark.parametrize("role", ROLES)
+def test_a_nul_byte_in_the_engine_output_is_refused(tmp_path, entry, role):
+    """Everything after a NUL must not vanish: `SKYGUARD-OK` + NUL + an allow would otherwise read as
+    an empty body, i.e. ALLOW."""
+    root = _install(tmp_path)
+    _replace_run_py(root, _prints(b'SKYGUARD-OK\n\x00{"hookSpecificOutput":{"hookEventName":"PreToolUse",'
+                                  b'"permissionDecision":"allow"}}'))
+    r = _run(entry, root, role, _benign(root) if role == "pre-tool" else _session(root))
+    if entry == "bash":
+        cause = "engine output has a NUL byte"
+    else:
+        cause = "engine output is not a verdict JSON" if role == "pre-tool" else BANNER_CAUSE
+    assert r.returncode == 0 and r.stdout == _expected(role, cause), r.stdout
+
+
+def _kill_pid(pid: int) -> None:
+    if ON_WINDOWS:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
+    else:
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_a_grandchild_holding_stdout_does_not_outlast_the_deadline(tmp_path, entry):
+    """The engine answers and exits, but a process it started keeps the stdout pipe open. Reading to
+    EOF would wait for that grandchild -- past Codex's 60 s, which then RUNS the command. The entry
+    must end within its own deadline: the PowerShell one bounds its drain (and denies), the POSIX one
+    reads the engine's output from a file, so the engine's own answer arrives."""
+    root = _install(tmp_path)
+    pidfile = tmp_path / "grandchild.pid"
+    _replace_run_py(root, (
+        "import subprocess, sys\n"
+        "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(25)'], stdout=sys.stdout.fileno())\n"
+        "open({!r}, 'w').write(str(c.pid))\n"
+        "sys.stdout.buffer.write({!r})\n"
+        "sys.stdout.buffer.flush()\n").format(str(pidfile), b"SKYGUARD-OK\n" + _GOOD_DENY))
+    t = time.time()
+    try:
+        r = _run(entry, root, "pre-tool", _benign(root), {"SKYGUARD_WRAPPER_TIMEOUT_S": "3"}, timeout=60)
+        took = time.time() - t
+    finally:
+        if pidfile.is_file():
+            _kill_pid(int(pidfile.read_text()))
+    assert r.returncode == 0
+    assert took < 15, f"the entry waited for the grandchild ({took:.1f} s)"
+    if entry == "bash":
+        assert r.stdout == _GOOD_DENY + b"\n", r.stdout
+    else:
+        assert r.stdout == _expected("pre-tool", "engine did not answer within 3 s"), r.stdout
+
+
 # --------------------------------------------------------------------------------------------------
 # static properties
 # --------------------------------------------------------------------------------------------------
@@ -374,11 +481,12 @@ def test_entry_scripts_are_ascii():
 
 
 def test_entry_deadlines_are_below_the_definition_timeouts():
-    """Task 8 freezes timeouts 60 (pre-tool) and 120 (session-start); the wrapper must decide first."""
+    """Task 8 freezes timeouts 60 (pre-tool) and 120 (session-start); the wrapper must decide first.
+    The definitions test (test_codex_definitions.py) checks the margin against hooks.json itself."""
     ps = (SRC / "skyguard-entry.ps1").read_text(encoding="ascii")
     sh = (SRC / "skyguard-entry.sh").read_text(encoding="ascii")
-    assert "$limit = 50" in ps and "{ $limit = 110 }" in ps
-    assert "LIMIT=50;" in sh and "&& LIMIT=110" in sh
+    assert "$limit = 45" in ps and "{ $limit = 105 }" in ps
+    assert "LIMIT=45;" in sh and "&& LIMIT=105" in sh
 
 
 CHAIN_BEGIN, CHAIN_END = "# PY-CHAIN-BEGIN", "# PY-CHAIN-END"
