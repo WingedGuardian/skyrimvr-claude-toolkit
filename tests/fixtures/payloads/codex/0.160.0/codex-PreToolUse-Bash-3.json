@@ -1,0 +1,14 @@
+{
+  "cwd": "<path>",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "session_id": "<id>",
+  "tool_input": {
+    "command": "cd sub && Get-ChildItem"
+  },
+  "tool_name": "Bash",
+  "tool_use_id": "<id>",
+  "transcript_path": "<path>",
+  "turn_id": "<id>"
+}

@@ -55,7 +55,9 @@ Plan 4 starts on `master` **after all of**:
    `session.run`), so `gen_agent_trees.py` has `INSTRUCTION_BUDGET`, `CODEX_ADDENDUM_RESERVE`,
    `instruction_sizes()`, and the measured headroom for `codex.md` is known (Plan 3 measurements: the
    reserved row is 31,305 / 32,768, so **`codex.md` may be at most 2,048 + 1,463 = 3,511 bytes**;
-   this plan targets ≤ 3,000).
+   this plan targets ≤ 3,000). *Task 0 (2026-10-02, BASE `39d2c1c`): the reserved row now measures
+   30,663 / 32,768 (headroom 2,105), so the ceiling is 2,048 + 2,105 = 4,153 bytes; the ≤ 3,000 target
+   stands.*
 
 Plan 5 runs in parallel (own worktree). Plan 4 **does not edit** `tools/skyguard/shell_rules.py`,
 `write_rules.py`, `backup.py`, `snapshot.py`, `session.py`, `paths.py`, or `agent/targets/claude/settings.json`.
@@ -74,7 +76,12 @@ declared below.
   Program first, quoted path after; never a leading `"`; never `bash` on Windows. — *Why:* X4 measured a
   leading quote failing 3/3 and `bash` resolving to the WSL stub when Codex is launched from PowerShell;
   both are silent fail-opens. Task 0 re-measures both. — *Cost if wrong:* PowerShell cold start is paid on
-  every tool call (Risk 2, latency).
+  every tool call (Risk 2, latency). — **Task 0 (codex-cli 0.160.0, MEASURED):** leading quote → Failed,
+  hook never ran (1/1); `bash` with system32 first → Failed, script never ran (1/1; Git bash first →
+  Blocked); nonexistent first program → `powershell` 5.1 ran and Blocked (2/2). **New:** `||` also fires
+  when pwsh *starts and exits non-zero*, and the 5.1 rerun gets an **empty stdin**; if it then prints
+  nothing and exits 0, Codex shows `Completed` (allow) — 3/3. The wrapper never exits non-zero, so this
+  needs a pwsh crash or kill, and Task 7 covers it with an empty-stdin fault row.
 - **R3. The Python path lives in the entry script, never in a definition.** `setup.sh` fills
   `{{PYTHON_PATH}}` in `skyguard-entry.{ps1,sh}`. — *Why:* a definition change silently disarms the
   approved hook (E18); a Python upgrade must not do that. — *Cost if wrong:* none known.
@@ -94,12 +101,23 @@ declared below.
 - **R6. `failureMode: "block"` goes into the v1 definitions only if Task 0 proves it on the then-current
   Codex** (a hook exiting 1 must block). Otherwise it is left out and D16 stays open. — *Why:* no release
   has shipped Codex definitions yet, so adopting it now costs no re-approval; later it costs one. —
-  *Cost if wrong:* nil either way; the wrapper is fail-closed regardless.
+  *Cost if wrong:* nil either way; the wrapper is fail-closed regardless. — **Task 0 ruling: LEFT OUT.**
+  On 0.160.0 a hook with `"failureMode": "block"` that exits 1 still shows `Failed` and the command runs
+  (MEASURED 1/1); the key is tolerated (the hook still loads) but not hashed (app-server `currentHash`
+  equal with and without it) and absent from the binary (READ: no `failureMode` string;
+  `HookHandlerConfig::Command` has 6 fields). D16 stays open.
 - **R7. `additionalContextLimit` is decided in Task 0, before the freeze.** If the field is honoured and
   the default (2,500) truncates a realistic SessionStart (kb-guard output + up to 4,096 bytes of
   preferences, Plan 3 R5), the definition sets it to 8,000; otherwise the adapter caps its own output with
   a visible "truncated — read KNOWLEDGEBASE.local.md" notice. — *Why:* it is a hashed definition field.
-  — *Cost if wrong:* preferences silently cut on Codex.
+  — *Cost if wrong:* preferences silently cut on Codex. — **Task 0 ruling: LEFT OUT; the adapter caps.**
+  MEASURED on 0.160.0: the field is honoured and hashed; its unit is **tokens** (default 2,500); above it
+  Codex keeps head and tail and **cuts the middle** (`…N tokens truncated…`) and saves the full output to
+  `%TEMP%\hook_outputs\<thread>\<id>.txt` — for SessionStart and PreToolUse alike. 6,000 B (~1,500 tokens)
+  arrived whole without the field; 16,000 B (4,002 tokens) was cut without it and whole with `8000`. A
+  realistic SessionStart is INFERRED to stay under the default, so the definition omits the field and the
+  adapter caps its own `additionalContext` at **8,000 bytes** with the visible notice, which also prevents
+  the TEMP copy of preferences. A tail sentinel cannot detect this cut; tests must check the middle.
 - **R8. Reason codes are derived from constant names** (`shell.DENY_INSTALL`, `write.DENY_PLUGIN`, …) by
   matching the reason/context text against the rule modules' own template constants. No rule module is
   edited. Plan 5 may pass `code=` explicitly; derivation is the fallback. — *Why:* Plan 5 owns those
@@ -175,6 +193,12 @@ declared below.
 2. **Latency.** Every Codex tool call pays a PowerShell cold start plus Python. X4 measured its full chain
    at p50 1.1–2.1 s, p95 1.3–5.8 s on this machine; the spec gate is p95 ≤ 1 s. Task 0 measures the bare
    entry first, with a pre-committed fallback ladder and a user decision if all rungs fail.
+   *Task 0 (MEASURED, 3 interleaved runs of 30 on a shared machine at 24–45 % whole-machine CPU):* the R2
+   bare entry (`pwsh … || powershell …` → `python -c pass`) had p95 1.58 / 0.76 / 0.66 s; in the 1.58 s run
+   even bare Python missed (p95 0.93 s, p50 8× its other runs), so that run measured the machine. In the
+   clean runs PowerShell start costs ≈ 0.3–0.45 s p50 over Python; 5.1 is a little faster than 7;
+   `-NoLogo` does not help. The gate stays at 1 s; the engine has only ~0.25–0.35 s of p95 headroom left,
+   so Task 7's real-chain timing (with CPU load recorded) is the decisive number.
 3. **Hashed-definition choices made before evidence is complete.** `failureMode`, `additionalContextLimit`,
    the matcher, timeouts and the command text are frozen in Task 8; a wrong choice costs every user a
    re-approval later. Task 0 measures each before Task 8 commits the template.
@@ -1583,7 +1607,9 @@ before it goes into JSON (no hand escaping). ASCII only. Never log the environme
   `raise SystemExit(3)` · `print("hi")` · prints `SKYGUARD-OK` + two JSON lines · prints `SKYGUARD-OK` +
   `{"hookSpecificOutput":{"permissionDecision":"ask"}}` · prints `SKYGUARD-OK` + `{"x":1}` · sleeps past the
   deadline (set by a test-only env `SKYGUARD_WRAPPER_TIMEOUT_S=2`) · `run.py` deleted · `{{PYTHON_PATH}}`
-  unfilled and no Python on `PATH` (test-only `SKYGUARD_NO_PYTHON_FALLBACK=1`). Plus the controls: a benign
+  unfilled and no Python on `PATH` (test-only `SKYGUARD_NO_PYTHON_FALLBACK=1`) · **empty stdin** (Task 0
+  MEASURED: the `||` fallback reruns the entry under 5.1 with an empty stdin whenever pwsh exits non-zero;
+  `pre-tool` must print the INERT deny, `session-start` the NOT-LIVE line). Plus the controls: a benign
   `Get-Date` fixture → empty stdout, exit 0, `emitted` record; the captured `apply_patch` Add fixture
   rewritten to `Data/Decoy.esp` → deny `BLOCKED: Cannot directly write to plugin/archive files…`; a
   SessionStart fixture → stdout starts with `SKYGUARD: Codex hooks live`. Plus:
@@ -1634,7 +1660,9 @@ before it goes into JSON (no hand escaping). ASCII only. Never log the environme
 
 - [ ] **Step 1: Write the template** (R1, R2; add `"failureMode": "block"` per R6 and
   `"additionalContextLimit": 8000` per R7 **only if Task 0 proved them**, before the first commit — after
-  that, any change is a re-approval):
+  that, any change is a re-approval). *Task 0 ruled both OUT (R6, R7); the template below is final as
+  written. Its two hashes for the neutral root are vectors 1 and 4 of
+  `tests/fixtures/codex/0.160.0/trust_vectors.json`; X4's scheme reproduced all 11 vectors (MEASURED).*
 
 ```json
 {
@@ -1999,6 +2027,15 @@ the trust state from `~/.codex/config.toml`, and coverage by comparing a session
   it does not recognise. The Codex parser reads the surface and the tool-call items **exactly as Task 0
   Step 5 recorded them** (fields and item types are constants at the top of the module, each with a comment
   citing the measurement); the Claude parser counts `tool_use` blocks and reads `entrypoint`.
+  *Task 0 (0.160.0, MEASURED):* surface = line 1 `session_meta` `payload.originator` (`codex_exec` /
+  `payload.source` `exec` for exec; TUI value from Step 6). Codex runs tools in **code mode**: the raw
+  `response_item` is always `custom_tool_call` `name:"exec"` with JavaScript input, so count the typed
+  `event_msg` `item_completed` items instead — `CommandExecution` (shell; maps to hook `Bash`),
+  `FileChange` (apply_patch, including a patch run through the shell, which the hook saw as `Bash`),
+  `McpToolCall` (`server`, `tool` → hook `mcp__<server>__<tool>`). A hook-blocked call leaves no item; the
+  rollout records no hook runs at all. Fixtures: `tests/fixtures/codex/0.160.0/rollout-*.jsonl`. Claude
+  (`tests/fixtures/claude/transcript-p.jsonl`): `entrypoint:"sdk-cli"` for `claude -p`; hook runs appear as
+  `attachment.type` `hook_success` / `hook_additional_context`.
 - `health.coverage(project, agent, last=5) -> [(session, surface, hooked, called, state)]`, where `called`
   counts only tools the installed matchers cover (Claude: `Bash`, `Edit`, `Write` until Plan 5 adds
   `PowerShell`; Codex: every tool call, `write_stdin` excluded and listed as a known gap if Task 0
