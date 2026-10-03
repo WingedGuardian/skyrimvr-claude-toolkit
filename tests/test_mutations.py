@@ -1085,7 +1085,7 @@ _SR_TIMING = [
     ("timing-lead-lookbehind-rm", "tools/skyguard/paths.py", r'LEAD = r"(?<![/\\])[/\\]+"', r'LEAD = r"[/\\]+"',
      "rm-slash-run"),
     ("timing-lead-lookbehind-sed", "tools/skyguard/paths.py", r'LEAD = r"(?<![/\\])[/\\]+"', r'LEAD = r"[/\\]+"',
-     "sed-backslash-run@80k"),
+     "sed-backslash-run"),
     ("timing-relative-data-run", _SR, r"(\S*[/\\])?Data[/\\]+", r"(\S*[/\\]+)?Data[/\\]+", "rm-r-data-slash-run"),
     ("timing-java-lazy-bound", _SR, r"""[\"']?\s+[^;&|]{0,260}?""", r"""[\"']?\s+[^;&|]*?""", "java-subst-repeat"),
     ("timing-find-lazy-bound", _SR, r"find\s+[^;&|]{0,260}?", r"find\s+[^;&|]*?", "find-subst-repeat"),
@@ -1281,6 +1281,15 @@ _SP_CLAUSES = [
 MUTATIONS += [
     pytest.param(_SP, find, rep, "tests/test_shellparse.py::" + test, id="shellparse-" + suffix)
     for suffix, find, rep, test in _SP_CLAUSES
+]
+# Plan 5 Task 5 fix round 2: the timing harness itself. CPU (not wall) time, and the 80/20 linearity ratio.
+_TT = "tests/test_skyguard_timing.py"
+MUTATIONS += [
+    pytest.param(_TT, "if large >= RATIO_FLOOR_MS:", "if False:",
+                 _TT + "::test_the_ratio_clause_alone_catches_quadratic_work_under_the_ceilings",
+                 id="timing-harness-ratio-clause"),
+    pytest.param(_TT, "spent = (time.process_time() - t0) * 1000", "spent = (time.perf_counter() - w0) * 1000",
+                 _TT + "::test_cpu_time_ignores_time_spent_waiting", id="timing-harness-cpu-not-wall"),
 ]
 MUTATIONS.append(pytest.param(   # the pricing driver stops asking the parser: the R4 gate would read 0 forever
     "scripts/guard-corpus/engine_eval.py", "parse_ok = parse_ok and p.ok", "parse_ok = parse_ok",

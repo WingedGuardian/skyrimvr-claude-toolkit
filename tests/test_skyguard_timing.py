@@ -1,13 +1,24 @@
 """No input may make the guard slow.
 
 Claude Code DROPS the answer of a PreToolUse hook that runs past its timeout, so a command that makes one of
-our regexes backtrack badly does not just cost time: it makes the guard fail open. Each shape below is a 20 KB
+our regexes backtrack badly does not just cost time: it makes the guard fail open. Each shape below is an
 adversarial command (repeated wrapper words, repeated `A=1 `, repeated quotes and backslash-newlines, an
-unterminated quote, a long single token) fired at EVERY shell rule, and a long file path at every write rule.
+unterminated quote, a long single token) fired at EVERY shell rule and at the parser, and a long file path at
+every write rule.
 
-The bound is generous (CI noise) and the REAL numbers are what matter: Task 4 fix round 2 measured the worst
-shape at ~130 ms after the fix (was 10.5 s). The mutations in test_mutations.py put each cause back.
+WHAT IS MEASURED (Plan 5 Task 5 fix round 2): wall-clock bounds failed whenever the machine was busy, so a red
+meant "the machine was loaded" as often as "a rule went quadratic", and would have been ignored. Now:
+  - CPU time of THIS process (time.process_time), so other processes' load does not count;
+  - repeated until at least MIN_SAMPLE_MS of CPU has accumulated, because the Windows CPU clock ticks in ~15.6 ms
+    steps and a single fast call reads as 0 or 15.6;
+  - LINEARITY: each shape runs at 20 KB and 80 KB; cpu(80 KB) / cpu(20 KB) must stay under RATIO_MAX (linear is
+    ~4, quadratic ~16) whenever the 80 KB time is large enough to measure (>= RATIO_FLOOR_MS). This is independent
+    of machine speed;
+  - an absolute CEILING_MS of CPU at 80 KB, generous: it catches the catastrophic case, it does not tune;
+  - EARLY_MS at 20 KB: a shape already that slow at 20 KB fails at once instead of spending minutes at 80 KB.
+The mutations in test_mutations.py put each known cause back and require the named shape to go red.
 """
+import gc
 import sys
 import time
 
@@ -20,8 +31,64 @@ from skyguard import audit, paths, shell_rules, write_rules  # noqa: E402
 
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
 BS = chr(92)
-SIZES = (20000, 80000)
-BOUND_MS = 250          # at 20 KB; the bound scales with size, so a LINEAR rule passes at 80 KB and a quadratic fails
+SMALL, LARGE = 20000, 80000
+RATIO_MAX = 8.0          # cpu(80 KB) / cpu(20 KB): linear ~4, quadratic ~16
+RATIO_FLOOR_MS = 10.0    # below this at 80 KB the ratio is clock noise, and the shape is fast anyway
+CEILING_MS = 2000.0      # CPU per call at 80 KB
+EARLY_MS = 1000.0        # CPU per call at 20 KB: already catastrophic
+MIN_SAMPLE_MS = 80.0     # accumulate at least this much CPU per measurement (clock granularity ~15.6 ms)
+PRECISE_SAMPLE_MS = 400.0  # the re-measurement when a ratio reads >= RATIO_MAX
+MAX_REPS = 20000
+WALL_CAP_S = 5.0         # stop repeating after this much wall time (a call that waits rather than computes)
+
+
+class _QuietAudit(audit.Audit):
+    """An Audit that writes nothing: the measurement is the rules' CPU, not log-file I/O."""
+
+    def __init__(self):
+        super().__init__("")
+
+    def raw(self, line):
+        pass
+
+    def log(self, hook, level, msg):
+        pass
+
+    def rule(self, hook, rule_id, decision, msg, level=None):
+        pass
+
+
+def cpu_ms(fn, min_sample=MIN_SAMPLE_MS):
+    """CPU milliseconds of THIS process per call of fn(), averaged over enough calls to beat the clock tick."""
+    gc.collect()
+    reps = 0
+    t0, w0 = time.process_time(), time.perf_counter()
+    while True:
+        fn()
+        reps += 1
+        spent = (time.process_time() - t0) * 1000
+        if spent >= min_sample or reps >= MAX_REPS or spent >= EARLY_MS or time.perf_counter() - w0 > WALL_CAP_S:
+            return spent / reps
+
+
+def assert_linear(label, make):
+    """make(N) -> a zero-argument callable that runs the shape at size N."""
+    small = cpu_ms(make(SMALL))
+    assert small < EARLY_MS, f"{label}: {small:.0f} ms CPU per call at 20 KB (catastrophic; 80 KB not tried)"
+    large = cpu_ms(make(LARGE))
+    assert large < CEILING_MS, f"{label}: {large:.0f} ms CPU per call at 80 KB (ceiling {CEILING_MS:.0f})"
+    if large >= RATIO_FLOOR_MS:
+        ratio = large / max(small, 0.25)
+        if ratio >= RATIO_MAX:
+            # An 80 ms sample of a ~30 ms call is 3 calls on a 15.6 ms clock (+-17%). Before calling it
+            # superlinear, measure both sizes once more with a 5x sample (+-3%): a quadratic (~16) stays red.
+            small = cpu_ms(make(SMALL), PRECISE_SAMPLE_MS)
+            large = cpu_ms(make(LARGE), PRECISE_SAMPLE_MS)
+            ratio = large / max(small, 0.25)
+        assert ratio < RATIO_MAX, (
+            f"{label}: superlinear -- {small:.1f} ms CPU at 20 KB, {large:.1f} ms at 80 KB, ratio {ratio:.1f} "
+            f"(linear ~4, quadratic ~16, limit {RATIO_MAX:.0f})")
+    return small, large
 
 
 def _shapes(N):
@@ -94,29 +161,16 @@ def _shapes(N):
     return s
 
 
-SHAPES = {}
-for _n in SIZES:
-    for _k, _v in _shapes(_n).items():
-        SHAPES[_k if _n == SIZES[0] else _k + "@" + str(_n // 1000) + "k"] = _v
+SHAPE_NAMES = sorted(_shapes(SMALL))
+ROOTS = paths.roots("/x/install", "", {"SKYRIM_GAME_ROOT": GAME})
 
 
-def _bound(text):
-    return BOUND_MS * max(1.0, len(text) / 20000.0) * 1.2
-SHELL_RUN_MS = {}
-
-
-def _decide_shell(cmd, tmp_path):
-    r = paths.roots("/x/install", "", {"SKYRIM_GAME_ROOT": GAME})
-    start = time.perf_counter()
-    shell_rules.decide(cmd, r, audit.Audit(str(tmp_path)))
-    return (time.perf_counter() - start) * 1000
-
-
-@pytest.mark.parametrize("name", sorted(SHAPES))
-def test_shell_rules_stay_fast_on_adversarial_input(tmp_path, name):
-    ms = _decide_shell(SHAPES[name], tmp_path)
-    assert ms < _bound(SHAPES[name]), (
-        f"{name}: decide() took {ms:.0f} ms on {len(SHAPES[name])} chars (bound {_bound(SHAPES[name]):.0f} ms)")
+@pytest.mark.parametrize("name", SHAPE_NAMES)
+def test_shell_rules_stay_fast_on_adversarial_input(name):
+    def make(n):
+        cmd = _shapes(n)[name]
+        return lambda: shell_rules.decide(cmd, ROOTS, _QuietAudit())
+    assert_linear(name, make)
 
 
 # Plan 5 Task 5: the parser sees every command too, so it gets every shell shape above PLUS shapes aimed at its
@@ -217,24 +271,26 @@ def _parse_shapes(N):
     }
 
 
-PARSE_SHAPES = dict(SHAPES)
-for _n in SIZES:
-    for _k, _v in _parse_shapes(_n).items():
-        PARSE_SHAPES[_k if _n == SIZES[0] else _k + "@" + str(_n // 1000) + "k"] = _v
-PARSE_MS = {}
+def all_parse_shapes(N):
+    s = dict(_shapes(N))
+    s.update(_parse_shapes(N))
+    return s
+
+
+PARSE_NAMES = sorted(all_parse_shapes(SMALL))
 
 
 @pytest.mark.parametrize("shell", ["", "cmd"])          # "" is bash AND PowerShell (R5)
-@pytest.mark.parametrize("name", sorted(PARSE_SHAPES))
+@pytest.mark.parametrize("name", PARSE_NAMES)
 def test_shellparse_stays_fast_on_adversarial_input(name, shell):
     from skyguard import shellparse
-    text = PARSE_SHAPES[name]
-    start = time.perf_counter()
-    p = shellparse.parse(text, shell)
-    ms = (time.perf_counter() - start) * 1000
-    PARSE_MS[(name, shell)] = ms
-    assert not p.why.startswith("internal error"), p.why
-    assert ms < _bound(text), f"{name} [{shell or 'bash+pwsh'}]: parse() took {ms:.0f} ms on {len(text)} chars"
+
+    def make(n):
+        text = all_parse_shapes(n)[name]
+        p = shellparse.parse(text, shell)
+        assert not p.why.startswith("internal error"), p.why
+        return lambda: shellparse.parse(text, shell)
+    assert_linear(f"{name} [{shell or 'bash+pwsh'}]", make)
 
 
 def _write_shapes(N):
@@ -250,26 +306,42 @@ def _write_shapes(N):
     }
 
 
-WRITE_SHAPES = {}
-for _n in SIZES:
-    for _k, _v in _write_shapes(_n).items():
-        WRITE_SHAPES[_k if _n == SIZES[0] else _k + "@" + str(_n // 1000) + "k"] = _v
-
-
-@pytest.mark.parametrize("name", sorted(WRITE_SHAPES))
-def test_write_rules_stay_fast_on_adversarial_paths(tmp_path, name):
-    start = time.perf_counter()
-    write_rules.decide(WRITE_SHAPES[name], audit.Audit(str(tmp_path)))
-    ms = (time.perf_counter() - start) * 1000
-    assert ms < _bound(WRITE_SHAPES[name]), f"{name}: decide() took {ms:.0f} ms"
+@pytest.mark.parametrize("name", sorted(_write_shapes(SMALL)))
+def test_write_rules_stay_fast_on_adversarial_paths(name):
+    def make(n):
+        path = _write_shapes(n)[name]
+        return lambda: write_rules.decide(path, _QuietAudit())
+    assert_linear(name, make)
 
 
 def test_the_timing_shapes_can_fail():
     """A guard that cannot go red is decoration: the old `A.*B` scan really was quadratic on these shapes."""
     import re
-    t = time.perf_counter()
-    re.search(r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)\s.*(" + GAME + ")", "rm " * 20000, re.I | re.A)
-    assert (time.perf_counter() - t) * 1000 > BOUND_MS, "the unsplit rule is no longer slow here; the shape is stale"
+    rx = re.compile(r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)\s.*(" + GAME + ")", re.I | re.A)
+    with pytest.raises(AssertionError, match="catastrophic|ceiling|superlinear"):
+        assert_linear("unsplit rm .* rule", lambda n: (lambda: rx.search("rm " * (n // 3))))
+
+
+def test_the_ratio_clause_alone_catches_quadratic_work_under_the_ceilings():
+    """Quadratic but fast enough to pass EARLY_MS and CEILING_MS: only the 80/20 ratio can see it. Its linear twin
+    must pass, or the ratio clause is just noise."""
+    def quadratic(n):
+        k = n // 100                                   # 200 at 20 KB, 800 at 80 KB: k*k grows 16x
+        return lambda: sum(i ^ j for i in range(k) for j in range(k))
+
+    def linear(n):
+        k = n * 40                                     # grows 4x
+        return lambda: sum(range(k))
+    with pytest.raises(AssertionError, match="superlinear"):
+        assert_linear("synthetic quadratic", quadratic)
+    small, large = assert_linear("synthetic linear", linear)
+    assert large >= RATIO_FLOOR_MS, "the linear twin is too fast to reach the ratio check; it proves nothing"
+
+
+def test_cpu_time_ignores_time_spent_waiting():
+    """The point of process_time: time the process is not on the CPU (another process's load, a sleep) does not
+    count, so a busy machine cannot turn a timing test red."""
+    assert cpu_ms(lambda: time.sleep(0.05)) < 10
 
 
 def test_split_dotstar_matches_the_unsplit_regex_on_random_text():
@@ -342,16 +414,11 @@ def test_resaver_prefilter_skips_unrelated_commands():
     """Without the `resaver` early return every command pays for the ReSaver regexes (measured ~0.5 s at 80 KB of
     parentheses); with it an unrelated command costs a substring search."""
     text = "(" * 80000
-    start = time.perf_counter()
     assert shell_rules.resaver_apply(text) is None
-    assert (time.perf_counter() - start) * 1000 < 50
+    assert cpu_ms(lambda: shell_rules.resaver_apply(text)) < 50     # CPU: ~0.01 ms with it, ~500 ms without
 
 
 def test_the_registry_rule_is_linear():
     """The registry property rule, `.*` inside an alternation, was not split and was quadratic (0.5 s at 80 KB)."""
-    import tempfile
-    text = "Remove-ItemProperty " * 4000
-    r = paths.roots("/x/install", "", {"SKYRIM_GAME_ROOT": GAME})
-    start = time.perf_counter()
-    shell_rules.decide(text, r, audit.Audit(tempfile.mkdtemp()))
-    assert (time.perf_counter() - start) * 1000 < 250
+    assert_linear("Remove-ItemProperty run",
+                  lambda n: (lambda: shell_rules.decide("Remove-ItemProperty " * (n // 20), ROOTS, _QuietAudit())))
