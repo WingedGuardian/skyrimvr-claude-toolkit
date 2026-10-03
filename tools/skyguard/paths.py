@@ -41,7 +41,7 @@ PATHS_FILE = "skyrim-paths.env"
 SCRATCH_GLOBS = ("**/__pycache__/**", "**/node_modules/**", "**/.pytest_cache/**")
 # Fix round 1 ruling: nothing under these top-level install folders is scratch. tools/ holds tool RUNTIME
 # (tools/zedit/app_src/node_modules, tools/xelib/node_modules with koffi), and Data/ is the game itself.
-SCRATCH_EXCLUDED_TOP = ("tools", "data")
+SCRATCH_EXCLUDED_TOP = ("tools", "data", ".claude")   # .claude: hooks and backups are the safety net (R8)
 _SCRATCH_SHAPE = re.compile(r"\*\*/([^*?\[\]/\\]+)/\*\*")
 
 

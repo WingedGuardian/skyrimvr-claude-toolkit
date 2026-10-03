@@ -56,6 +56,7 @@ _BASH_VAR = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_
 _PS_VAR = re.compile(r"\$(?:\{(env:)?([A-Za-z_][A-Za-z0-9_]*)\}|(env:)?([A-Za-z_][A-Za-z0-9_]*))", re.IGNORECASE)
 # A `$` that still expands: before a name, digit, `{`, `(` or a special parameter. `c$` (an admin share) and a
 # `$` before a separator or at the end are literal in both bash and PowerShell.
+_BRACE_GROUP = re.compile(r"\{[^{}]*\}")       # one bash brace group, innermost; linear (no nested repetition)
 _LIVE_DOLLAR = re.compile(r"\$[A-Za-z0-9_{(?!#*@$-]")
 _CMD_VAR = re.compile(r"%([A-Za-z_][A-Za-z0-9_]*)%")
 _PS_PROVIDER = re.compile(r"(?:Microsoft\.PowerShell\.Core\\)?FileSystem::", re.IGNORECASE)
@@ -192,6 +193,8 @@ def _resolve(word: str, cwd: str, dialect: str, env: Mapping[str, str]) -> Optio
     if not w:
         return None
     s = w.replace("\\", "/")
+    if dialect == "bash" and any("," in g and "/" in g for g in _BRACE_GROUP.findall(s)):
+        return None             # fix round 2: `{C:/GOG*,x}` expands to an absolute path; read literally it is not
     comps = (s[4:] if s[:4] in ("//?/", "//./") else s).split("/")     # the \\?\ prefix is not a glob
     if any(_has_glob(c, dialect) for c in comps[:-1]):
         return None
@@ -361,8 +364,10 @@ def _glob_match(pat: str, s: str) -> bool:
 
 
 def _comp_matches(pat: str, comp: str) -> bool:
+    if pat == comp:
+        return True             # fix round 2: a root NAMED `Mods [MO2]` or `M{a,b}` matches itself literally
     if not (_GLOB_CHARS & set(pat)):
-        return pat == comp
+        return False
     if len(pat) > MAX_GLOB_COMPONENT:
         return True             # no real name is this long (NTFS: 255); a glob this long is treated as `*` (stricter)
     return any(_glob_match(alt, comp) if (_GLOB_CHARS & set(alt)) else alt == comp for alt in _braces(pat))

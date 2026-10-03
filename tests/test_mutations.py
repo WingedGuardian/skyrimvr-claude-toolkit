@@ -1157,6 +1157,13 @@ _T6R1 = [
     ("timing-braces-linear", _TG, "            j = next_close[i + 1]",
      "            j = comp.find('}', i + 1)\n            j = n if j < 0 else j",
      "tests/test_skyguard_timing.py::test_brace_expansion_is_linear"),
+    # fix round 2
+    ("targets-covers-literal-first", _TG, "    if pat == comp:\n        return True", "    if False:\n        return True",
+     "tests/test_targets.py::test_a_root_with_literal_glob_characters_covers_itself"),
+    ("targets-brace-separator-unresolvable", _TG, 'if dialect == "bash" and any("," in g and "/" in g',
+     'if False and any("," in g and "/" in g', "tests/test_targets.py::test_a_brace_group_holding_a_separator_is_unresolvable"),
+    ("targets-scratch-not-claude", _PA, '("tools", "data", ".claude")', '("tools", "data")',
+     "tests/test_targets.py::test_claude_dir_is_never_scratch"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T6R1]
 for _suffix, _find, _rep in [

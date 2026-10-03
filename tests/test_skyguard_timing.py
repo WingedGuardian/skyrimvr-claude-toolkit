@@ -450,6 +450,9 @@ def _target_shapes(N):
         "unc-run": ("//s/h" + "/x" * (N // 2), "bash"),
         "msys-run": ("/c" * (N // 2), "bash"),
         "provider-run": ("FileSystem::" * (N // 12), "powershell"),
+        "brace-sep-run": ("{a,/" * (N // 4), "bash"),
+        "brace-open-run": ("{" * N, "bash"),
+        "brace-group-run": ("{a,b/c}" * (N // 7), "bash"),
     }
 
 

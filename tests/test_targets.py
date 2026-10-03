@@ -348,3 +348,29 @@ def test_component_glob_matcher(pat, name, want):
 def test_an_overlong_glob_component_is_treated_as_star():
     assert targets._comp_matches("*" * 2000 + "x", "the")
     assert not targets._comp_matches("y" * 2000, "the")             # no glob char: plain comparison
+
+
+# ------------------------------------------------------------------------------------------------ fix round 2
+def test_a_root_with_literal_glob_characters_covers_itself():
+    """A protected root named `D:/Mods [MO2]/mods` or `E:/M{a,b}` must match ITSELF: literal equality is tested
+    before the component is read as a glob."""
+    r = paths.roots(GAME, "", {"SKYRIM_MO2_MODS": "D:/Mods [MO2]/mods", "SKYRIM_MO2_OVERWRITE": "E:/M{a,b}/ow"})
+    assert targets.covers_protected("d:/Mods [MO2]", r)
+    assert targets.covers_protected("d:/Mods [MO2]/mods", r)
+    assert targets.covers_protected("e:/M{a,b}", r)
+    assert targets.covers_protected("e:/M{a,b}/ow", r)
+
+
+@pytest.mark.parametrize("word", ["{C:/GOG*,x}", "{x,C:/GOG Games}", "a{b,c/d}e", "{x,/c/GOG Games}"])
+def test_a_brace_group_holding_a_separator_is_unresolvable(word):
+    """bash `{C:/GOG*,x}` expands to an ABSOLUTE path; read literally it looked relative (fix round 2)."""
+    assert targets.resolve(word, GAME, "bash", ENV) is None
+
+
+def test_a_brace_group_without_a_separator_still_resolves():
+    assert targets.resolve("{a,b}", GAME, "bash", ENV) == GAMEN + "/{a,b}"
+
+
+def test_claude_dir_is_never_scratch():
+    assert targets.zone(GAMEN + "/.claude/node_modules/x", ROOTS) == "install"
+    assert targets.zone(GAMEN + "/.claude/hooks/__pycache__", ROOTS) == "install"
