@@ -6,6 +6,8 @@ as the bash pipelines are (see grep.grep).
 """
 from __future__ import annotations
 
+import re
+
 from . import audit as _audit
 from . import paths
 from . import rules
@@ -35,7 +37,6 @@ ADV_LOADORDER = rules.RULES["S-LOADORDER-REF"]["template"]
 ADV_AUTOMOD_ESP = rules.RULES["S-AUTOMOD-ESP"]["template"]
 ADV_AUTOMOD_NIF = rules.RULES["S-AUTOMOD-NIF"]["template"]
 ADV_AUTOMOD_ARCHIVE = rules.RULES["S-AUTOMOD-ARCHIVE"]["template"]
-ASK_RESAVER = rules.RULES["S-RESAVER-APPLY"]["template"]
 ADV_EXTERNAL = rules.RULES["S-EXTERNAL-OUT"]["template"]
 
 DESTROYER = (
@@ -48,6 +49,62 @@ AUTOMOD_ESP_WRITE = (
     r"|add-global|add-faction|add-leveled-item|add-form-list|add-encounter-zone|add-location|add-outfit"
     r"|attach-script|set-property|auto-fill|merge|generate-seq)\b"
 )
+
+
+# --- S-RESAVER-APPLY: ReSaver is the program RUN, with --apply in the same command (port of install 4a429bd
+# and 1540b99). Text that merely contains the words (a heredoc to python, grep, echo) is not a save write.
+RESAVER_HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*[\"']?([A-Za-z_][A-Za-z0-9_]*)")
+# A heredoc fed to a shell (bash <<EOF, sh -s <<EOF) is commands, not text: its body is kept.
+RESAVER_SHELL_FED = re.compile(r"(^|[;&|( \t])(bash|sh)([ \t]+-[A-Za-z]+)*[ \t]*<<")
+RESAVER_PROGRAM = (
+    r"(?:java(?:\.exe)?[ \t]+(?:-[^\s;&|]+[ \t]+)*[^\s;&|]*resaver[^\s;&|]*\.jar"
+    r"|(?:(?:bash|sh)\s+)?[^\s;&|]*(?:resaver-cli(?:\.sh)?|ResaverCLI))"
+)
+RESAVER_EXEC = re.compile(
+    r"(?:^|[;&|(]|\$\()\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*" + RESAVER_PROGRAM + r"(?:\s[^;&|]*)?",
+    re.ASCII | re.IGNORECASE)
+RESAVER_APPLY = re.compile(r"--apply", re.ASCII | re.IGNORECASE)
+RESAVER_OP = re.compile(r"\b(reset-havok|cleanse-formlists|remove-created)\b", re.ASCII | re.IGNORECASE)
+RESAVER_SAVE = re.compile(r"\"[^\"]*\.ess\"|'[^']*\.ess'|[^\s\"']+\.ess", re.ASCII | re.IGNORECASE)
+
+
+def drop_heredoc_bodies(command: str) -> list:
+    """The command's lines without the bodies of heredocs that are text (not fed to a shell)."""
+    out, term, strip = [], "", False
+    for line in command.split("\n"):
+        line = line.rstrip("\r")
+        if term:
+            if (line.lstrip("\t") if strip else line) == term:
+                term = ""
+            continue
+        out.append(line)
+        if RESAVER_SHELL_FED.search(line):
+            continue
+        m = RESAVER_HEREDOC.search(line)
+        if m:
+            strip, term = m.group(1) == "-", m.group(2)
+    return out
+
+
+def resaver_apply(command: str):
+    """(operation, save basename or "") when ReSaver is executed with --apply and a write operation."""
+    executed = [m.group(0) for line in drop_heredoc_bodies(command) for m in RESAVER_EXEC.finditer(line)]
+    op = ""
+    for seg in executed:
+        if RESAVER_APPLY.search(seg):
+            found = RESAVER_OP.search(seg)
+            if found:
+                op = found.group(1)
+                break
+    if not op:
+        return None
+    save = ""
+    for seg in executed:
+        found = RESAVER_SAVE.search(seg)
+        if found:
+            save = re.split(r"[/\\]", found.group(0).replace('"', "").replace("'", ""))[-1]
+            break
+    return op, save
 
 
 def decide(command: str, roots: paths.Roots, audit: _audit.Audit) -> Verdict:
@@ -113,11 +170,12 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit) -> Verdict:
         advise("S-AUTOMOD-ARCHIVE")
 
     # --- ask (drops accumulated advice, as the bash exit does)
-    if has(r"(resaver-cli|ResaverCLI)\b.*\b(reset-havok|cleanse-formlists|remove-created)\b"):
-        if has(r"--apply"):
-            reason = rules.legacy_message("S-RESAVER-APPLY", c=command)
-            audit.rule(HOOK, "S-RESAVER-APPLY", "ask", reason)
-            return Verdict("ask", reason)
+    resaver = resaver_apply(command)
+    if resaver:
+        op, save = resaver
+        reason = rules.message("S-RESAVER-APPLY", op=op, save=save or "the save")
+        audit.rule(HOOK, "S-RESAVER-APPLY", "ask", reason)
+        return Verdict("ask", reason)
 
     if has(r"\b(automod|SpookysAutomod|spookys-automod|automod-cli|PapyrusAssembler|PapyrusCompiler"
            r"|Champollion|Caprica|spriggit)\b"):

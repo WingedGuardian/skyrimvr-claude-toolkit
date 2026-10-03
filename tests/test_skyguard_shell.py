@@ -9,7 +9,7 @@ import pytest
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import audit, paths, shell_rules  # noqa: E402
+from skyguard import audit, paths, rules, shell_rules  # noqa: E402
 
 BASH = (REPO / "tests" / "guard_corpus" / "reference" / "protect-bash.sh").read_text(encoding="utf-8")
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
@@ -163,17 +163,48 @@ def test_rule15_automod_archive_write(tmp_path):
     assert sub(296, cmd) not in advice("automod archive list a.bsa", tmp_path)
 
 
+NEW_RESAVER = ("ReSaver will MODIFY a save file (reset-havok on s.ess). "
+               "Approve only if you asked for this save to be changed.")
+
+
 def test_rule16_resaver_apply_asks(tmp_path):
     cmd = "bash tools/resaver-cli.sh reset-havok s.ess --apply"
     v = run(cmd, tmp_path)
-    assert (v.decision, v.reason, v.context) == ("ask", sub(303, cmd), "")
+    assert (v.decision, v.reason, v.context) == ("ask", NEW_RESAVER, "")
     assert run(cmd.replace(" --apply", ""), tmp_path) == ("allow", "", "")
 
 
 def test_rule16_ask_drops_earlier_advice(tmp_path):
     v = run("cat plugins.txt; bash tools/resaver-cli.sh reset-havok s.ess --apply", tmp_path)
     assert v.decision == "ask" and v.context == ""
-    assert v.reason == sub(303, "cat plugins.txt; bash tools/resaver-cli.sh reset-havok s.ess --apply")
+    assert v.reason == NEW_RESAVER
+
+
+def _t4_rows():
+    path = REPO / "tests" / "guard_corpus" / "intended.jsonl"
+    rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
+    return [r for r in rows if r["task"] == "T4"]
+
+
+@pytest.mark.parametrize("row", _t4_rows(), ids=[r["id"] for r in _t4_rows()])
+def test_resaver_rows(tmp_path, row):
+    """Every T4 intended row, in-process: decision, rule trace and exact text. Mutations name a row id here."""
+    r = paths.roots("/x/install", "", {"SKYRIM_GAME_ROOT": GAME})
+    a = audit.Audit(str(tmp_path))
+    v = shell_rules.decide(row["payload"]["tool_input"]["command"], r, a)
+    assert v.decision == ("ask" if row["decision"] == "ask" else "allow")
+    assert v.reason == row["text"]
+    assert {rid for rid, _ in a.fired if rid == "S-RESAVER-APPLY"} == set(row["rules"])
+
+
+def test_resaver_without_a_save_name_still_asks(tmp_path):
+    v = run("bash tools/resaver-cli.sh reset-havok --apply", tmp_path)
+    assert v.decision == "ask" and "(reset-havok on the save)" in v.reason
+
+
+def test_resaver_save_is_reduced_to_its_basename(tmp_path):
+    v = run("bash tools/resaver-cli.sh reset-havok 'C:/My Saves/Save 12.ess' --apply", tmp_path)
+    assert "(reset-havok on Save 12.ess)" in v.reason
 
 
 def test_rule17_external_tool_output_into_game(tmp_path):
@@ -236,6 +267,12 @@ def test_port_matches_recorded_bash_verdict(tmp_path, cid, layout, cmd, decision
         got = ("allow", "")
     else:
         got = (v.decision, v.reason)
+    # A rule a later Plan 5 task REWROTE (no longer legacy) keeps its frozen row's decision, not its text.
+    frozen = json.loads((REPO / "tests" / "guard_corpus" / "legacy_rules.json").read_text(encoding="utf-8"))
+    rewritten = [t for t, rid in frozen.items() if not rules.RULES[rid]["legacy"]]
+    if text and any(text == t.replace("{c}", cmd) for t in rewritten):
+        assert got[0] == decision
+        return
     assert got == (decision, text)
 
 
@@ -269,7 +306,7 @@ def test_every_message_constant_equals_the_bash_text():
         "DENY_CHAMPOLLION": msg(271),
         "ADV_DELETE": msg(281), "ADV_RELATIVE": msg(282), "ADV_MOVE": msg(283), "ADV_REDIRECT": msg(284),
         "ADV_SED": msg(285), "ADV_PLUGIN": msg(288), "ADV_LOADORDER": msg(289), "ADV_AUTOMOD_ESP": msg(293),
-        "ADV_AUTOMOD_NIF": msg(295), "ADV_AUTOMOD_ARCHIVE": msg(296), "ASK_RESAVER": msg(303),
+        "ADV_AUTOMOD_NIF": msg(295), "ADV_AUTOMOD_ARCHIVE": msg(296),
         "ADV_EXTERNAL": msg(309),
     }
     for name, text in expected.items():
@@ -282,7 +319,7 @@ def test_ask_path_writes_the_ask_audit_line(tmp_path):
     cmd = "bash tools/resaver-cli.sh reset-havok s.ess --apply"
     run(cmd, tmp_path)
     log = (tmp_path / ".claude/backups/AUDIT_LOG.txt").read_text(encoding="utf-8")
-    assert "protect-bash ASK: " + sub(303, cmd) in log
+    assert "protect-bash ASK: " + NEW_RESAVER in log
 
 
 def test_rule_trace_records_the_rule_id(tmp_path):

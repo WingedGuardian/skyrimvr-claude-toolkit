@@ -198,12 +198,11 @@ RULES = {
     'S-RESAVER-APPLY': {
         "decision": 'ask',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'DESTRUCTIVE ReSaver save-write with --apply '
-        '(reset-havok/cleanse-formlists/remove-created) MUTATES a .ess save and '
-        'is never part of normal work. Explicit approval required: {c}'
+        'ReSaver will MODIFY a save file ({op} on {save}). '
+        'Approve only if you asked for this save to be changed.'
     ),
     },
     'S-EXTERNAL-OUT': {

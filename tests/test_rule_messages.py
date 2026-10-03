@@ -19,7 +19,7 @@ LEGACY_ALLOWED = {
     "S-INERT-NOCMD", "S-INERT-NOROOT", "S-DEL-CONFIG", "S-DEL-INSTALL", "S-REGISTRY", "S-PSC-OUT",
     "S-CHAMPOLLION", "S-DEL-ADVISE", "S-RELATIVE-UNKNOWN", "S-MOVE-INSTALL", "S-REDIRECT-INSTALL",
     "S-SED-WINPATH", "S-PLUGIN-REF", "S-LOADORDER-REF", "S-AUTOMOD-ESP", "S-AUTOMOD-NIF",
-    "S-AUTOMOD-ARCHIVE", "S-RESAVER-APPLY", "S-EXTERNAL-OUT", "W-INERT-NOPATH", "W-PLUGIN", "W-INI",
+    "S-AUTOMOD-ARCHIVE", "S-EXTERNAL-OUT", "W-INERT-NOPATH", "W-PLUGIN", "W-INI",
     "W-SKSE-INI", "W-LOADORDER", "W-PAPYRUS", "W-INSTALL",
 }
 ECHO = ("{c}", "{p}", "{command}")
@@ -90,7 +90,10 @@ def test_registry_entries_are_well_formed():
 def test_legacy_rules_json_maps_every_legacy_template_to_its_id():
     m = json.loads((REPO / "tests" / "guard_corpus" / "legacy_rules.json").read_text(encoding="utf-8"))
     legacy = {i: r["template"] for i, r in rules.RULES.items() if r["legacy"]}
-    assert m == {t: i for i, t in legacy.items()}
+    # legacy_rules.json is FROZEN: it keeps the old text of a rule a later task rewrote (the frozen corpus rows
+    # still need it), so it may hold MORE than the still-legacy templates, but never fewer or a dead id.
+    assert {t: i for i, t in legacy.items()}.items() <= m.items()
+    assert set(m.values()) <= set(rules.RULES)
 
 
 def test_basename_splits_on_both_separators():

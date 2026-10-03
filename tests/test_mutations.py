@@ -951,6 +951,56 @@ MUTATIONS = [
         "tests/test_guard_corpus.py::test_a_stale_supersession_is_caught",
         id="corpus-supersession-must-be-live",
     ),
+    # Plan 5 Task 4: S-RESAVER-APPLY, one mutation per clause. Each names the ROW that must go red.
+    pytest.param(   # drop the command-position anchor: any text that mentions resaver-cli matches
+        "tools/skyguard/shell_rules.py",
+        r'r"(?:^|[;&|(]|\$\()\s*(?:[A-Za-z_]',
+        r'r"(?:[A-Za-z_]',
+        "tests/test_skyguard_shell.py::test_resaver_rows[t04-echo]",
+        id="rule-S-RESAVER-APPLY-anchor",
+    ),
+    pytest.param(   # look for --apply in the whole command, not the ReSaver segment
+        "tools/skyguard/shell_rules.py",
+        "if RESAVER_APPLY.search(seg):",
+        "if RESAVER_APPLY.search(command):",
+        "tests/test_skyguard_shell.py::test_resaver_rows[t04-apply-elsewhere]",
+        id="rule-S-RESAVER-APPLY-apply-same-cmd",
+    ),
+    pytest.param(   # keep every heredoc body, text or not
+        "tools/skyguard/shell_rules.py",
+        'strip, term = m.group(1) == "-", m.group(2)',
+        "pass",
+        "tests/test_skyguard_shell.py::test_resaver_rows[t04-heredoc-py]",
+        id="rule-S-RESAVER-APPLY-heredoc-drop",
+    ),
+    pytest.param(   # drop every heredoc body, including one fed to a shell
+        "tools/skyguard/shell_rules.py",
+        "if RESAVER_SHELL_FED.search(line):",
+        "if False:",
+        "tests/test_skyguard_shell.py::test_resaver_rows[t04-bash-heredoc]",
+        id="rule-S-RESAVER-APPLY-shell-heredoc-kept",
+    ),
+    pytest.param(   # forget the direct java -jar form
+        "tools/skyguard/shell_rules.py",
+        "(?:java(?:",
+        "(?:(?!)java(?:",
+        "tests/test_skyguard_shell.py::test_resaver_rows[t04-java]",
+        id="rule-S-RESAVER-APPLY-java",
+    ),
+    pytest.param(   # drop one operation from the list
+        "tools/skyguard/shell_rules.py",
+        r'r"\b(reset-havok|cleanse-formlists|remove-created)\b"',
+        r'r"\b(reset-havok|cleanse-formlists)\b"',
+        "tests/test_skyguard_shell.py::test_resaver_rows[t04-apply-chain]",
+        id="rule-S-RESAVER-APPLY-op-list",
+    ),
+    pytest.param(   # treat a here-string (<<<) as a heredoc: it swallows the next command
+        "tools/skyguard/shell_rules.py",
+        "(?<!<)<<(?!<)(-?)",
+        "<<(-?)",
+        "tests/test_skyguard_shell.py::test_resaver_rows[t04-herestring]",
+        id="rule-S-RESAVER-APPLY-herestring",
+    ),
     # Plan 5 Task 4 (controller ruling): a supersession may not weaken a verdict unless it declares and explains it.
     pytest.param(
         "scripts/guard-corpus/record.py",

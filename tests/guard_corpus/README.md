@@ -56,6 +56,9 @@ fix the row on the strength of the table, never by pasting what the engine print
   must be identical, so the row really re-specifies that case. The supersession must be **live**: the engine
   must differ from the legacy verdict (decision or rule set), or `test_supersessions_are_live` fails.
 - `why` and `task` are required and non-empty.
+- A legacy row may be superseded by **at most one** intended row. A supersession whose decision is WEAKER than
+  the legacy row's (deny > ask > advise > allow) is refused unless the intended row carries `"loosens": true`
+  and a non-empty `reason`; a loosened rule is then visible in the row and in `intent_diff.py`, never silent.
 - `payload_note: "install-relative"` stores `<install>` in place of the temp install's real path; every
   occurrence in the payload, `payload.cwd` included, is filled in at fire time (`record.row_payload`).
 
