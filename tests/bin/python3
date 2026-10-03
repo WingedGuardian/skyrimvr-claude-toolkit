@@ -11,6 +11,9 @@ FAKE_PYTHON_EXE="${_one:-${FAKE_PYTHON_EXE:-}}"
 if [ -n "${FAKE_PYTHON_EXE:-}" ]; then
     case "$*" in
         *sys.executable*) printf '%s\r\n' "$FAKE_PYTHON_EXE"; exit 0 ;;
+        # FAKE_PYTHON_OLD makes the shim a Python 3.6: it passes the old "is it 3?" probe and fails a
+        # ">= 3.8" probe (setup.sh's floor), so a test can tell the two apart.
+        *"(3,8)"*|*"(3, 8)"*) [ -n "${FAKE_PYTHON_OLD:-}" ] && exit 1; exit 0 ;;
         *version_info*)   exit 0 ;;
         *--version*)      echo "Python 3.99.0 (shim)"; exit 0 ;;
     esac

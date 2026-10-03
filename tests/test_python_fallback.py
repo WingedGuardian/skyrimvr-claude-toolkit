@@ -65,8 +65,10 @@ def _working(directory: Path, name: str, log: Path | None = None) -> None:
     _shim(directory, name, rec + f'exec "{REAL_PY}" "$@"\n')
 
 
-def _fire(root: Path, shim_dirs: list[Path], hook: str, payload: dict) -> subprocess.CompletedProcess:
+def _fire(root: Path, shim_dirs: list[Path], hook: str, payload: dict,
+          extra_env: dict | None = None) -> subprocess.CompletedProcess:
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root), LOCALAPPDATA="", PROGRAMFILES="")
+    env.update(extra_env or {})
     env["PATH"] = os.pathsep.join([str(d) for d in shim_dirs] + [_clean_path()])
     return subprocess.run([BASH, str(root / ".claude" / "hooks" / hook)], input=json.dumps(payload),
                           capture_output=True, text=True, env=env, timeout=60)
@@ -194,3 +196,84 @@ def test_every_wrapper_lists_the_same_chain():
     assert len(chains) == 5, sorted(chains)
     assert len(set(chains.values())) == 1, "the wrappers disagree about the fallback chain: " + ", ".join(
         n for n, c in chains.items() if c != next(iter(chains.values())))
+
+
+# --------------------------------------------------------------------------
+# fix round 1: the probe proves the ENGINE runs; nothing may hang; known locations by version
+# --------------------------------------------------------------------------
+
+def _run_py(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([REAL_PY, str(REPO / "tools" / "skyguard" / "run.py"), *args],
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_run_py_selftest_echoes_the_nonce_after_importing_the_engine():
+    r = _run_py("--selftest", "4242")
+    assert r.returncode == 0 and r.stdout.strip() == "skyguard-selftest:4242", (r.stdout, r.stderr)
+
+
+def test_a_fake_python_that_exits_zero_and_prints_an_empty_object_is_rejected(tmp_path):
+    """`C:/Python3*` is user-creatable. A stub that exits 0 and prints `{}` passes a version probe and
+    then reads as ALLOW for every command: the probe has to prove the ENGINE runs."""
+    root = _install(tmp_path, MISSING)
+    _shim(tmp_path / "shims", "python", "echo '{}'\nexit 0\n")
+    r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
+    assert "GUARD INERT" in _reason(r), r.stdout
+
+
+def test_a_candidate_that_echoes_a_stale_nonce_is_rejected_and_the_next_is_used(tmp_path):
+    root = _install(tmp_path, MISSING)
+    _shim(tmp_path / "shims", "python",
+          f'case "$*" in *--selftest*) echo "skyguard-selftest:1234"; exit 0 ;; esac\nexec "{REAL_PY}" "$@"\n')
+    _working(tmp_path / "shims", "python3")
+    r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
+    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert "used python3" in _failed(root, "protect-files")
+
+
+def test_a_hanging_probe_is_cut_off_and_the_chain_moves_on(tmp_path):
+    import time
+    root = _install(tmp_path, MISSING)
+    _shim(tmp_path / "shims", "python", "sleep 60\n")
+    _working(tmp_path / "shims", "python3")
+    t = time.time()
+    r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
+    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert time.time() - t < 25, "a hanging probe held the hook past its budget"
+
+
+def test_a_hanging_engine_ends_in_a_deny_before_the_agents_timeout(tmp_path):
+    """The agent's own 30 s hook timeout DISCARDS a late deny and runs the command (measured), so the
+    wrapper must give up first."""
+    import time
+    hang = _shim(tmp_path / "hang", "python", "sleep 12\n")
+    root = _install(tmp_path, hang.as_posix())
+    t = time.time()
+    env_budget = {"SKYGUARD_ENGINE_TIMEOUT": "2"}
+    r = _fire(root, [], "protect-files.sh", _esp_write(root), env_budget)
+    assert "GUARD INERT" in _reason(r) and "engine failed" in _reason(r), r.stdout
+    assert "exit 124" in _failed(root, "protect-files"), _failed(root, "protect-files")
+    assert time.time() - t < 8, "the engine call was not cut off at its budget"
+
+
+def test_known_locations_are_tried_newest_version_first(tmp_path):
+    lad = tmp_path / "lad"
+    log = tmp_path / "used.log"
+    for v in ("Python39", "Python312"):
+        _working(lad / "Programs" / "Python" / v, "python.exe", log)
+    root = _install(tmp_path, MISSING)
+    r = _fire(root, [], "protect-files.sh", _esp_write(root), {"LOCALAPPDATA": str(lad)})
+    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert "Python312/python.exe" in _failed(root, "protect-files"), _failed(root, "protect-files")
+
+
+def test_unset_location_variables_do_not_break_the_chain(tmp_path):
+    root = _install(tmp_path, MISSING)
+    _working(tmp_path / "shims", "python")
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    env.pop("LOCALAPPDATA", None)
+    env.pop("PROGRAMFILES", None)
+    env["PATH"] = os.pathsep.join([str(tmp_path / "shims"), _clean_path()])
+    r = subprocess.run([BASH, str(root / ".claude" / "hooks" / "protect-files.sh")],
+                       input=json.dumps(_esp_write(root)), capture_output=True, text=True, env=env, timeout=60)
+    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout

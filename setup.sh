@@ -75,12 +75,23 @@ echo ""
 echo "Checking for Python 3..."
 PY_FOUND=""
 for c in "py -3" "python" "python3"; do
-    if $c -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1; then
+    # >= 3.8 is the safety engine's floor: a 3.6 that passed a bare "is it 3?" probe made every hook
+    # deny "engine failed" with nothing saying why.
+    if $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,8) else 1)' >/dev/null 2>&1; then
         PY_FOUND="$c"; echo "  Found Python 3: '$c' -> $($c --version 2>&1)"; break
     fi
 done
 if [ -z "$PY_FOUND" ]; then
-    echo "  Python 3 not found. It's needed for cosave-info and the save-analysis scripts (and PyFFI/PyNifly if you use them)."
+    for c in "py -3" "python" "python3"; do
+        if $c -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1; then
+            echo "  Python 3 found ('$c' -> $($c --version 2>&1)) but it is too old: the safety hooks need Python 3.8 or newer."
+            echo "  Install a current Python (python.org, or 'winget install Python.Python.3.12') and re-run."
+            break
+        fi
+    done
+fi
+if [ -z "$PY_FOUND" ]; then
+    echo "  Python 3.8+ not found. It's needed for cosave-info and the save-analysis scripts (and PyFFI/PyNifly if you use them)."
     echo "  Install it from python.org (or 'winget install Python.Python.3.12') and re-run — the bundled tools try 'py -3', 'python', then 'python3'."
 fi
 
@@ -100,7 +111,7 @@ PYTHON_PATH=""
 PY_STORE=""
 if [ -n "$PY_FOUND" ]; then
     for c in "py -3" "python" "python3"; do
-        $c -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1 || continue
+        $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,8) else 1)' >/dev/null 2>&1 || continue
         exe=$($c -c 'import sys; print(sys.executable)' 2>/dev/null | tr -d '\r' | tr '\134' '/') || exe=""
         [ -n "$exe" ] || continue
         case "$exe" in
@@ -118,7 +129,10 @@ if [ -n "$PY_FOUND" ]; then
 fi
 # The form that goes into sed's REPLACEMENT: `&` (the whole match), `|` (our delimiter) and a backslash
 # are all special there, and a Windows folder name may legally contain `&`.
-PY_SED=$(printf '%s' "$PYTHON_PATH" | sed -e 's/[\\|&]/\\&/g')
+# The hooks hold it as PY='...' (single quotes: a `$` or backtick in a folder name must not expand at every
+# call), so a single quote inside the path is closed, escaped and reopened first: ' -> '\''
+PY_Q="${PYTHON_PATH//\'/\'\\\'\'}"
+PY_SED=$(printf '%s' "$PY_Q" | sed -e 's/[\\|&]/\\&/g')
 if [ -z "$PYTHON_PATH" ]; then
     echo ""
     echo "  WARNING: the safety hooks need Python 3 and will REFUSE every command until it is installed"
@@ -328,12 +342,12 @@ for hook in protect-bash.sh protect-files.sh backup-before-edit.sh snapshot-befo
         else
             echo "  NOT CONFIGURED: .claude/hooks/$hook -- no Python 3 found, so this hook will refuse until setup.sh is re-run"
         fi
-    elif [ -n "$PYTHON_PATH" ] && ! grep -qxF "PY=\"$PYTHON_PATH\"" "$GAME_DIR/.claude/hooks/$hook"; then
+    elif [ -n "$PYTHON_PATH" ] && ! grep -qxF "PY='$PY_Q'" "$GAME_DIR/.claude/hooks/$hook"; then
         # Already configured, but for a different interpreter (Python upgraded or moved). Left alone,
         # the hook would refuse every command while this script said "Already configured".
         OLD_PY=$(grep -m1 '^PY=' "$GAME_DIR/.claude/hooks/$hook" || true)
-        sed -i "s|^PY=.*|PY=\"$PY_SED\"|" "$GAME_DIR/.claude/hooks/$hook"
-        echo "  Updated interpreter: .claude/hooks/$hook ($OLD_PY -> PY=\"$PYTHON_PATH\")"
+        sed -i "s|^PY=.*|PY='$PY_SED'|" "$GAME_DIR/.claude/hooks/$hook"
+        echo "  Updated interpreter: .claude/hooks/$hook ($OLD_PY -> PY=$PYTHON_PATH)"
     else
         echo "  Already configured: .claude/hooks/$hook"
     fi

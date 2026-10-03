@@ -34,11 +34,14 @@ set -uo pipefail
 
 ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
-# The interpreter the hooks were configured with (setup.sh writes it as `PY="..."`), else whatever runs.
+# The interpreter the hooks were configured with (setup.sh writes it as `PY='...'`), else whatever runs.
 PYBIN=""
 if [ -f "$ROOT/.claude/hooks/protect-bash.sh" ]; then
   while IFS= read -r line; do
     case "$line" in
+      PY=\'*\') cand="${line#PY=\'}"; cand="${cand%\'}"; cand="${cand//\'\\\'\'/\'}"
+                case "$cand" in *"{{"*) ;; *) command -v "$cand" >/dev/null 2>&1 && PYBIN="$cand" ;; esac
+                break ;;
       PY=\"*\") cand="${line#PY=\"}"; cand="${cand%\"}"
                 case "$cand" in *"{{"*) ;; *) command -v "$cand" >/dev/null 2>&1 && PYBIN="$cand" ;; esac
                 break ;;

@@ -15,7 +15,7 @@
 # protect-bash.sh for the full note; the location/heartbeat block below is the same in every wrapper.
 
 HOOK_NAME="backup-before-edit"
-PY="{{PYTHON_PATH}}"
+PY='{{PYTHON_PATH}}'
 T0="${EPOCHREALTIME:-}"; T0="${T0/,/.}"; [ -n "$T0" ] || printf -v T0 '%(%s)T' -1
 NOPAY=""
 INPUT=$(cat)
@@ -80,29 +80,60 @@ fi
 
 # PY-CHAIN-BEGIN
 # Interpreter fallback chain (identical in every wrapper). The configured $PY is the only thing the hot
-# path touches; everything below runs ONLY once it has failed, so it adds no fork to a healthy call.
+# path touches; the probing below runs ONLY once it has failed, so it adds no fork to a healthy call.
 # Order: py -3 / python / python3 that resolve and are not a Store alias, then the usual install
-# locations, then a Store alias, last. Every candidate is capability-probed (Python >= 3.8, the engine's
-# floor). Multi-word candidates are arrays/word-split, never eval'd. A fallback that is taken writes a
-# `failed` record BEFORE the engine runs, so the health report says DEGRADED until a call through the
-# configured interpreter completes again.
+# locations (newest version first), then a Store alias, last. A candidate is accepted only if it is
+# Python >= 3.8 (the engine's floor) AND runs the engine's own `run.py --selftest <nonce>` and echoes the
+# nonce: a stub that merely exits 0 and prints `{}` would otherwise read as ALLOW. Multi-word candidates
+# are word-split, never eval'd. A fallback that is taken writes a `failed` record BEFORE the engine runs,
+# so the health report says DEGRADED until a call through the configured interpreter completes again.
+# Time limits: the agent DISCARDS a deny that arrives after its own 30 s hook timeout (measured) and runs
+# the command, so every probe and the engine call itself are bounded by coreutils `timeout` -- 3 s per
+# probe, no probing after 8 s, the engine capped so the whole call ends by ~28 s. A timed-out engine exits
+# non-zero and lands in the ordinary "engine failed" deny. Without `timeout` on PATH the calls run
+# unbounded (Git Bash ships it; nothing else is possible from builtins).
 PYC=("$PY")
-py_ok() { "$@" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)' >/dev/null 2>&1; }
+TM=()
+PTMO=(); command -v timeout >/dev/null 2>&1 && PTMO=(timeout -k 1 "${SKYGUARD_PROBE_TIMEOUT:-3}")
+_elapsed() { local n="${EPOCHREALTIME:-}"; [ -n "$n" ] || printf -v n '%(%s)T' -1; EL=$(( ${n%%[.,]*} - ${T0%%.*} )); }
+_budget() {
+    local t="${SKYGUARD_ENGINE_TIMEOUT:-20}"
+    _elapsed; [ $((EL + t)) -le 26 ] || t=$((26 - EL)); [ "$t" -ge 2 ] || t=2
+    TM=(); command -v timeout >/dev/null 2>&1 && TM=(timeout -k 2 "$t")
+}
+py_ok() { "${PTMO[@]}" "$@" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)' >/dev/null 2>&1; }
+py_good() {
+    local n o
+    _elapsed; [ "$EL" -le 8 ] || return 1
+    py_ok "$@" || return 1
+    n="$RANDOM$RANDOM"
+    o=$("${PTMO[@]}" "$@" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" --selftest "$n" 2>/dev/null)
+    [ "${o%$'\r'}" = "skyguard-selftest:$n" ]
+}
 py_use() { PYC=("$@"); _fail python "configured $PY unusable; used $* -- re-run setup.sh"; return 0; }
 py_fallback() {
-    local c p g PY_ALIAS=""
+    local c p d m PY_ALIAS="" bases=()
     for c in "py -3" python python3; do
         p=$(command -v ${c%% *} 2>/dev/null) || continue
         case "$p" in
             */[Ww]indows[Aa]pps/*) [ -z "$PY_ALIAS" ] && PY_ALIAS="$c"; continue ;;
         esac
-        if py_ok $c; then py_use $c; return 0; fi
+        if py_good $c; then py_use $c; return 0; fi
     done
-    for g in "${LOCALAPPDATA//\\//}"/Programs/Python/Python3*/python.exe /c/Python3*/python.exe \
-             "${PROGRAMFILES//\\//}"/Python3*/python.exe /usr/bin/python3 /usr/local/bin/python3; do
-        if [ -x "$g" ] && py_ok "$g"; then py_use "$g"; return 0; fi
+    [ -z "${LOCALAPPDATA:-}" ] || bases+=("${LOCALAPPDATA//\\//}/Programs/Python")
+    [ -z "${PROGRAMFILES:-}" ] || bases+=("${PROGRAMFILES//\\//}")
+    bases+=(/c)
+    for ((m = 30; m >= 8; m--)); do
+        for d in "${bases[@]}"; do
+            if [ -x "$d/Python3$m/python.exe" ] && py_good "$d/Python3$m/python.exe"; then
+                py_use "$d/Python3$m/python.exe"; return 0
+            fi
+        done
     done
-    if [ -n "$PY_ALIAS" ] && py_ok $PY_ALIAS; then py_use $PY_ALIAS; return 0; fi
+    for d in /usr/bin/python3 /usr/local/bin/python3; do
+        if [ -x "$d" ] && py_good "$d"; then py_use "$d"; return 0; fi
+    done
+    if [ -n "$PY_ALIAS" ] && py_good $PY_ALIAS; then py_use $PY_ALIAS; return 0; fi
     return 1
 }
 # PY-CHAIN-END
@@ -115,11 +146,11 @@ if ! command -v "$PY" >/dev/null 2>&1 && ! py_fallback; then
 fi
 
 
-run_engine() { printf '%s' "$INPUT" | "${PYC[@]}" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" claude "$HOOK_NAME" \
+run_engine() { _budget; printf '%s' "$INPUT" | "${TM[@]}" "${PYC[@]}" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" claude "$HOOK_NAME" \
     --root "$ROOT" --root-win "$ROOT_WIN" --project "$PROJECT_DIR" --invocation "$INV" --telemetry "$HB_DIR" >/dev/null 2>&1; }
 run_engine
 RC=$?
-if [ "$RC" -ne 0 ] && ! py_ok "${PYC[@]}" && py_fallback; then
+if [ "$RC" -ne 0 ] && ! py_good "${PYC[@]}" && py_fallback; then
     run_engine; RC=$?
 fi
 if [ "$RC" -ne 0 ]; then

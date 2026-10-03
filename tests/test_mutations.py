@@ -244,8 +244,8 @@ MUTATIONS = [
     # Stop escaping sed's replacement metacharacters in the interpreter path.
     pytest.param(
         "setup.sh",
-        "PY_SED=$(printf '%s' " + '"$PYTHON_PATH"' + " | sed -e 's/[" + BS * 2 + "|&]/" + BS * 2 + "&/g')",
-        'PY_SED=$PYTHON_PATH',
+        "PY_SED=$(printf '%s' " + '"$PY_Q"' + " | sed -e 's/[" + BS * 2 + "|&]/" + BS * 2 + "&/g')",
+        'PY_SED=$PY_Q',
         "tests/test_python_path.py::test_a_path_containing_an_ampersand_is_not_mangled_by_sed",
         id="setup-escapes-sed-replacement-metacharacters",
     ),
@@ -1148,6 +1148,48 @@ MUTATIONS = [
         '*/[Ww]indows[Aa]pps/*) ;;',
         "tests/test_python_fallback.py::test_the_store_alias_is_used_only_last",
         id="python-fallback-uses-the-store-alias-last",
+    ),
+    pytest.param(
+        "agent/guards/adapters/claude/protect-files.sh",
+        r'''[ "${o%$'\r'}" = "skyguard-selftest:$n" ]''',
+        'true',
+        "tests/test_python_fallback.py::test_a_candidate_that_echoes_a_stale_nonce_is_rejected_and_the_next_is_used",
+        id="python-fallback-accepts-a-candidate-without-the-engine-nonce",
+    ),
+    pytest.param(
+        "agent/guards/adapters/claude/protect-files.sh",
+        'TM=(); command -v timeout >/dev/null 2>&1 && TM=(timeout -k 2 "$t")',
+        'TM=()',
+        "tests/test_python_fallback.py::test_a_hanging_engine_ends_in_a_deny_before_the_agents_timeout",
+        id="engine-call-has-no-time-limit",
+    ),
+    pytest.param(
+        "agent/guards/adapters/claude/protect-files.sh",
+        'for ((m = 30; m >= 8; m--)); do',
+        'for ((m = 8; m <= 30; m++)); do',
+        "tests/test_python_fallback.py::test_known_locations_are_tried_newest_version_first",
+        id="python-fallback-known-locations-oldest-first",
+    ),
+    pytest.param(
+        "setup.sh",
+        r"""sys.version_info[:2]>=(3,8) else 1)' >/dev/null 2>&1; then""",
+        r"""sys.version_info[0]==3 else 1)' >/dev/null 2>&1; then""",
+        "tests/test_python_path.py::test_setup_refuses_a_python_older_than_3_8",
+        id="setup-accepts-python-older-than-3-8",
+    ),
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        "PY='{{PYTHON_PATH}}'",
+        'PY="{{PYTHON_PATH}}"',
+        "tests/test_python_path.py::test_a_path_with_shell_metacharacters_reaches_the_hook_verbatim",
+        id="hook-python-path-in-double-quotes",
+    ),
+    pytest.param(
+        "setup.sh",
+        r'''PY_Q="${PYTHON_PATH//\'/\'\\\'\'}"''',
+        'PY_Q="$PYTHON_PATH"',
+        "tests/test_python_path.py::test_a_path_with_a_single_quote_survives_the_quoting",
+        id="setup-does-not-escape-a-single-quote-in-the-python-path",
     ),
 ]
 

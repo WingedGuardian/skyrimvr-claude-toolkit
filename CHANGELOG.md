@@ -2,6 +2,26 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Hook interpreter fallback
+
+- **A moved or upgraded Python no longer takes every blocking hook down.** If the interpreter `setup.sh`
+  configured stops working, the hooks try `py -3`, `python`, `python3` (never a Microsoft Store alias while a
+  regular install exists), then the usual install folders (newest version first), then a Store alias, and keep
+  deciding. A candidate is accepted only if it is Python 3.8 or newer **and** runs the guard engine itself
+  (`run.py --selftest <nonce>`), so a stub that merely exits 0 cannot turn into "allow". The healthy path is
+  unchanged: nothing is probed unless the configured interpreter has failed.
+- **Reported, not hidden:** a fallback that is used shows as DEGRADED in `bash tools/hook-canary.sh` ("configured
+  ... unusable; used ...") until a call through the configured interpreter completes again. Re-run `setup.sh`.
+- **An extracted zip that never ran `setup.sh`** (the `{{PYTHON_PATH}}` placeholder still in the hooks) now takes
+  the same route: the hooks fall back to a Python they can find and still decide, reported as DEGRADED. They used
+  to refuse every command. With no usable Python at all they still refuse (GUARD INERT).
+- **Nothing can hang past the agent's timeout.** Probes get 3 s each and the engine call a hard budget (20 s,
+  ending by ~28 s overall; `SKYGUARD_ENGINE_TIMEOUT` seconds) via coreutils `timeout`, so a hung interpreter ends
+  in the ordinary GUARD INERT deny instead of a late answer the agent discards (which would allow the command).
+  Without `timeout` on PATH the calls run unbounded.
+- **`setup.sh` requires Python 3.8+** (a 3.6 used to pass and then deny everything) and writes the path into the
+  hooks in single quotes, so a `$` or backtick in a folder name is no longer expanded on every hook call.
+
 ### Hook health telemetry
 
 - **`bash tools/hook-canary.sh` now reads staged records** (ran, received, evaluated, emitted, failed) instead of
