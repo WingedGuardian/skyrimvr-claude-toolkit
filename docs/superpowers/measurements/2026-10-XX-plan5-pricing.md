@@ -62,3 +62,13 @@ advise>advise 2,341; deny>deny 447; **allow>ask 5; ask>advise 5; ask>allow 11**.
 - **no-longer-ask 16** (9 before, +7 from this arc's own sessions): all 16 re-read; every one is text, a test
   script, a heredoc, a quoted harness argument or a documentation edit. Zero real executions.
 - `ask>advise` 5: the old ask had swallowed advice on the same command; same reading as before.
+
+### Task 4, fix round 2 (timing, more wrappers)
+
+Re-priced 2026-10-02 (`--base c3f32ef --only-rule S-RESAVER-APPLY`), N = 59,079. Matrix: allow>allow 56,264;
+advise>advise 2,342; deny>deny 449; allow>ask 5; ask>advise 5; ask>allow 14. S-RESAVER-APPLY: **newly-ask 5,
+no-longer-ask 19**, all else 0, `reason_moved` still 21 (the id rename), 0 errors. The five newly-ask are the
+same five real `clean ... --apply` writes as round 1 (re-read). The 3 extra no-longer-ask are this arc's own
+text-only sessions (re-read). The bounded quantifiers, the `A.*B` split in `grep.py` and the write-rule
+lookbehinds changed no other rule's verdict over 59k real calls (no other decision cell moved, `reason_moved`
+unchanged).
