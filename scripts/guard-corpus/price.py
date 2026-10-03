@@ -128,6 +128,7 @@ def price(base_tree: Path, new_tree: Path, history: Path, out_dir: Path, only_ru
     unique_by_tool = collections.Counter(i["tool_name"] if not i["tool_name"].startswith("mcp__") else "mcp__*"
                                          for i in items)
     reason_moved = parse_fail_old = parse_fail_new = err_old = err_new = 0
+    parse_fail_tool = collections.Counter()            # new engine, per tool (the R4 gate: < 0.5% of items)
     for d in DIRECTIONS:                                    # only files this tool writes; a stale one would lie
         for stale in out_dir.glob(f"*__{d}.jsonl"):
             stale.unlink()
@@ -137,6 +138,8 @@ def price(base_tree: Path, new_tree: Path, history: Path, out_dir: Path, only_ru
             matrix[f"{o['decision']}>{n['decision']}"] += 1
             parse_fail_old += not o["parse_ok"]
             parse_fail_new += not n["parse_ok"]
+            if not n["parse_ok"]:
+                parse_fail_tool[item["tool_name"]] += 1
             err_old += o["decision"] == "error"
             err_new += n["decision"] == "error"
             if o["decision"] == n["decision"] and {i for i, _ in o["fired"]} != {i for i, _ in n["fired"]}:
@@ -160,6 +163,7 @@ def price(base_tree: Path, new_tree: Path, history: Path, out_dir: Path, only_ru
         "N": len(items), "N_per_tool": dict(unique_by_tool), "raw_tool_calls": raw_counts,
         "matrix": dict(sorted(matrix.items())), "reason_moved": reason_moved,
         "parse_failures": {"old": parse_fail_old, "new": parse_fail_new},
+        "parse_failures_new_per_tool": dict(parse_fail_tool),
         "errors": {"old": err_old, "new": err_new},
         "totals": totals,
         "rules": {rid: {d: c[d] for d in DIRECTIONS if c[d]} for rid, c in sorted(per_rule.items())},
@@ -187,6 +191,9 @@ def main(argv=None) -> int:
     print(f"N={s['N']}  per tool: {s['N_per_tool']}  raw tool calls: {s['raw_tool_calls']}")
     print(f"errors old={s['errors']['old']} new={s['errors']['new']}")
     print(f"parse failures old={s['parse_failures']['old']} new={s['parse_failures']['new']}  reason_moved={s['reason_moved']}")
+    for tool, bad in sorted(s["parse_failures_new_per_tool"].items()):
+        den = s["N_per_tool"].get(tool, 0)
+        print(f"  parse failures (new) {tool}: {bad} of {den} = {100.0 * bad / max(1, den):.3f}%")
     print("decision matrix (old>new):")
     for k, v in s["matrix"].items():
         print(f"  {k:<16}{v}")

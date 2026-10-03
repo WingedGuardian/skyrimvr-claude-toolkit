@@ -8,7 +8,9 @@ Per item the driver calls the engine's `decide` with whichever keyword arguments
 (`cwd`, `tool_name`, `tool_input`, `tool`, `shell`), so an older engine that does not know `cwd` is still
 priced. It uses a recording Audit that never touches the disk, and writes one JSONL result per item:
     {"k": index, "decision": allow|advise|ask|deny|error, "text": ..., "fired": [[id, decision], ...],
-     "parse_ok": bool}
+     "parse_ok": bool, "parse_why": str}
+parse_ok is False when a rule traced a PARSE fallback, or (for Bash/PowerShell items, when the engine tree has
+`skyguard.shellparse`) when the parser cannot read the command; parse_why is the parser's reason.
 """
 from __future__ import annotations
 
@@ -79,10 +81,11 @@ def main(argv=None) -> int:
     mods = {}
     for n in ("paths", "shell_rules", "write_rules"):
         mods[n] = importlib.import_module("skyguard." + n)
-    try:
-        mods["mcp_rules"] = importlib.import_module("skyguard.mcp_rules")
-    except ImportError:
-        pass
+    for opt in ("mcp_rules", "shellparse"):
+        try:
+            mods[opt] = importlib.import_module("skyguard." + opt)
+        except ImportError:
+            pass
     audit_cls = importlib.import_module("skyguard.audit").Audit
     with open(a.items, encoding="utf-8") as src, open(a.out, "w", encoding="utf-8", newline="\n") as out:
         for k, line in enumerate(src):
@@ -101,10 +104,20 @@ def main(argv=None) -> int:
                 else:
                     decision, text = "allow", ""
                 parse_ok = not any("PARSE" in rid for rid, _ in audit.trace)
+                parse_why = ""
+                sp = mods.get("shellparse")
+                if sp is not None and item.get("tool_name") in ("Bash", "PowerShell"):
+                    # Plan 5 Task 5: an engine that HAS the parser reports whether it can read the command, so the
+                    # parse-failure rate over real history is priced even before a rule depends on it (R4 gate).
+                    cmd = (item.get("tool_input") or {}).get("command", "")
+                    p = sp.parse(cmd if isinstance(cmd, str) else "",
+                                 "powershell" if item["tool_name"] == "PowerShell" else "bash")
+                    parse_ok = parse_ok and p.ok
+                    parse_why = p.why
             except Exception as e:  # a crash is a result, never a skip
-                decision, text, parse_ok = "error", f"{type(e).__name__}: {e}"[:400], False
+                decision, text, parse_ok, parse_why = "error", f"{type(e).__name__}: {e}"[:400], False, ""
             out.write(json.dumps({"k": k, "decision": decision, "text": text, "fired": audit.trace,
-                                  "parse_ok": parse_ok}, ensure_ascii=False) + "\n")
+                                  "parse_ok": parse_ok, "parse_why": parse_why}, ensure_ascii=False) + "\n")
     return 0
 
 

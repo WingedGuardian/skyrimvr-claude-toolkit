@@ -119,6 +119,93 @@ def test_shell_rules_stay_fast_on_adversarial_input(tmp_path, name):
         f"{name}: decide() took {ms:.0f} ms on {len(SHAPES[name])} chars (bound {_bound(SHAPES[name]):.0f} ms)")
 
 
+# Plan 5 Task 5: the parser sees every command too, so it gets every shell shape above PLUS shapes aimed at its
+# own structure: deep nesting of ( $( { ` (must fail closed at depth 9, never recurse), long and unterminated
+# quotes and heredocs, 10k `;`, long \-newline chains, PowerShell backtick runs and cmd ^ runs.
+def _parse_shapes(N):
+    return {
+        "nest-paren": "( " * (N // 2),
+        "nest-paren-closed": "( " * (N // 4) + ") " * (N // 4),
+        "nest-subst": "$(" * (N // 2),
+        "nest-dq-subst": '"$(' * (N // 3),
+        "nest-brace": "{ " * (N // 2),
+        "nest-backtick-escaped": "`" + (BS + "`") * (N // 2),
+        "backtick-pairs": "``" * (N // 2),
+        "backtick-words": "`a` " * (N // 4),
+        "long-dq": '"' + "a" * N + '"',
+        "long-sq": "'" + "a" * N + "'",
+        "unterminated-dq-vars": '"' + "a $x " * (N // 5),
+        "unterminated-heredoc": "cat <<EOF\n" + "line\n" * (N // 5),
+        "heredoc-many-lines": "cat <<EOF\n" + "line\n" * (N // 5) + "EOF\n",
+        "heredoc-many-on-a-line": "cat" + " <<E" * (N // 4) + "\n" + "E\n" * (N // 4),
+        "heredoc-body-substs": "cat <<EOF\n" + "$(a) " * (N // 5) + "\nEOF",
+        "heredoc-shell-body": "bash <<EOF\n" + "a; " * (N // 3) + "\nEOF",
+        "semis-10k": ";" * 10000,
+        "semis-spaced": "; " * (N // 2),
+        "backslash-newline-chain": (BS + "\n") * (N // 2),
+        "dollar-dparen": "$((" * (N // 3),
+        "arith-closed": "$((1)) " * (N // 7),
+        "dparen-cmd": "(( " * (N // 3),
+        "brace-param-open": "${" * (N // 2),
+        "brace-param-closed": "${a}" * (N // 4),
+        "ansi-open": "$'" + (BS + "n") * (N // 2),
+        "assign-array": "a=(" + "x " * (N // 2) + ")",
+        "extglob-run": "@(a)" * (N // 4),
+        "func-def-run": "f() " * (N // 4),
+        "long-func-name": "a" * N + "()",
+        "long-assign-paren": "a" * N + "=(",
+        "long-fd-digits": "1" * N + ">x",
+        "case-patterns": "case x in " + "a) b;; " * (N // 8) + "esac",
+        "dbracket-ops": "[[ " + "a && b || ( c ) < d " * (N // 20) + "]]",
+        "pipe-to-shell": "echo a | " * (N // 9) + "bash",
+        "bash-c-long": "bash -c '" + "a " * (N // 2) + "'",
+        "bash-c-nested": "bash -c " * (N // 8) + "x",
+        "find-exec-chain": "find . -exec " * (N // 13),
+        "xargs-chain": "xargs " * (N // 6),
+        "sudo-chain": "sudo " * (N // 5),
+        "cd-chain": "cd a; " * (N // 6),
+        "redirect-run": ">" * N,
+        "proc-subst-run": "<(" * (N // 2),
+        "ps-backtick-run": "`" * N,
+        "ps-backtick-pairs": "`a" * (N // 2),
+        "ps-here-open": "@'\n" + "x\n" * (N // 2),
+        "ps-io-nested": "[IO.File]::Delete(" * (N // 18),
+        "ps-io-run": "[IO.File]::Delete('a') " * (N // 23),
+        "ps-block-comment-open": "<#" + "x" * N,
+        "ps-hash-run": "@{a=1} " * (N // 7),
+        "ps-sq-doubled": "'" + "''" * (N // 2),
+        "ps-smart-quotes": "‘" * N,
+        "ps-commas": "ri " + "a," * (N // 2),
+        "ps-params": "ri " + "-Path a " * (N // 8),
+        "pwsh-command-long": "pwsh -Command " + "ri a; " * (N // 6),
+        "cmd-caret-run": "^" * N,
+        "cmd-caret-pairs": "^a" * (N // 2),
+        "cmd-percent-run": "%" * N,
+        "cmd-c-long": "cmd /c " + "del a & " * (N // 8),
+        "cmd-for-parens": "for %f in (" + "a " * (N // 2) + ") do del %f",
+    }
+
+
+PARSE_SHAPES = dict(SHAPES)
+for _n in SIZES:
+    for _k, _v in _parse_shapes(_n).items():
+        PARSE_SHAPES[_k if _n == SIZES[0] else _k + "@" + str(_n // 1000) + "k"] = _v
+PARSE_MS = {}
+
+
+@pytest.mark.parametrize("shell", ["", "cmd"])          # "" is bash AND PowerShell (R5)
+@pytest.mark.parametrize("name", sorted(PARSE_SHAPES))
+def test_shellparse_stays_fast_on_adversarial_input(name, shell):
+    from skyguard import shellparse
+    text = PARSE_SHAPES[name]
+    start = time.perf_counter()
+    p = shellparse.parse(text, shell)
+    ms = (time.perf_counter() - start) * 1000
+    PARSE_MS[(name, shell)] = ms
+    assert not p.why.startswith("internal error"), p.why
+    assert ms < _bound(text), f"{name} [{shell or 'bash+pwsh'}]: parse() took {ms:.0f} ms on {len(text)} chars"
+
+
 def _write_shapes(N):
     return {
         "separator-run": "/" * N + "x",

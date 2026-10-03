@@ -166,6 +166,22 @@ def test_a_crash_in_the_new_engine_is_flagged_not_clean(tmp_path, history):
     assert s["totals"]["newly-error"] == 2
 
 
+def test_parse_failures_are_reported_per_tool_when_the_engine_has_the_parser(tmp_path):
+    """Plan 5 Task 5 (R4 gate): the driver asks the NEW tree's shellparse whether it can read each command. An old
+    tree without shellparse reads 0; an unterminated quote in Bash and PowerShell each count once."""
+    h = tmp_path / "hist"
+    h.mkdir()
+    lines = [_line("Bash", {"command": "ls"}), _line("Bash", {"command": "echo 'oops"}),
+             _line("PowerShell", {"command": "Get-Item 'oops"}), _line("PowerShell", {"command": "Get-Item a"})]
+    (h / "s.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    old = _scratch_engine(tmp_path, "old", [])
+    (old / "shellparse.py").unlink()
+    s, _ = _run(tmp_path, old, SKYGUARD, h)
+    assert s["parse_failures"] == {"old": 0, "new": 2}
+    assert s["parse_failures_new_per_tool"] == {"Bash": 1, "PowerShell": 1}
+    assert s["totals"]["newly-error"] == 0
+
+
 def test_two_engine_dirs_load_separately(tmp_path):
     edits = [("shell_rules.py", "    advice = Advice()\n",
               '    advice = Advice()\n    return Verdict("deny", __file__)\n')]

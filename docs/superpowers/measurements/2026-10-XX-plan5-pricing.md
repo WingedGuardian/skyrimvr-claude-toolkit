@@ -82,3 +82,25 @@ no-longer-ask 19 (unchanged from round 2); S-REDIRECT-INSTALL newly-advise 21 an
 the timing fixes** (install-path lead lookbehind, relative-Data rewrite, the registry rule split in two greps, the
 `split_dotstar` whitelist): every deny/advise/allow cell is identical to round 2 apart from items added to the
 history since.
+
+## Task 5: `shellparse` (no rule uses it yet) -- the parse-failure gate (R4)
+
+Run 2026-10-02: `price.py --base c3f32ef` (whole engine) against the Task 5 tree. The driver now asks the NEW
+tree's `skyguard.shellparse` whether it can read every Bash/PowerShell item (`parse_ok`, `parse_why`;
+`tests/test_price_tool.py::test_parse_failures_are_reported_per_tool_when_the_engine_has_the_parser`).
+
+- **N = 59,785.** Matrix: allow>allow 56,966; advise>advise 2,342; deny>deny 452; ask>ask 1; allow>ask 5;
+  ask>advise 5; ask>allow 14. Per rule: exactly the Task 4 figures (S-RESAVER-APPLY newly-ask 5 / no-longer-ask 19;
+  the 21-item id rename). **No verdict moved** -- the parser is not wired to any rule. 0 engine errors.
+- **Parse failures (new engine): 63 of 55,001 shell items = 0.115%** (gate: < 0.5%).
+  Bash **61 of 53,443 = 0.114%**; PowerShell **2 of 1,558 = 0.128%**. Old engine 0 (it has no parser).
+- **By reason** (all read): `unterminated " quote` 49 -- **47** are a Windows path ending in `\"`
+  (`ls "C:\x\Data\"`), which bash itself reads as an escaped quote, so the real command failed too; the other 2
+  are genuine. `unterminated \` substitution` 3 (a PowerShell backtick inside a bash double-quoted `pwsh -Command`
+  string -- bash would run it as a substitution). `unterminated heredoc` 3 (two `<<'EOF'` on one line,
+  `python3 - <<'EOF' || python - <<'EOF'`: the second body is empty-and-unterminated in bash as well).
+  `unexpected (` 3, `unterminated ' quote` 2, `unbalanced )` 1 (a backtick-quoted `504)` inside a commit message).
+  PowerShell 2: bash heredoc syntax sent to the PowerShell tool, and a malformed `@{...}`.
+  Every failure is a command its own shell would reject or misread; none is a parser gap found so far.
+- Parser gaps found and FIXED while measuring (before the gate): `name(){ ... }` with no space (was 500 of the
+  first run's 557 failures), and `time ( ... )`.

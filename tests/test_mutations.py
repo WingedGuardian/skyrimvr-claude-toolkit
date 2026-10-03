@@ -1121,6 +1121,111 @@ MUTATIONS += [
                  id="rule-S-RESAVER-APPLY-" + suffix)
     for suffix, find, rep, row in _SR_CLAUSES
 ]
+# Plan 5 Task 5: shellparse. A misparse is a silent allow once rules sit on the parser, so every executed-code
+# branch is deleted here and the named test must go red. (id suffix, find, replace, test in tests/test_shellparse.py)
+_SP = "tools/skyguard/shellparse.py"
+_SP_CLAUSES = [
+    # the seven the plan names
+    ("subst-recursion", 'self._push(f, "subst", i, True)                     # bash $( ... ): commands, parsed in place',
+     'i = self._pairs()[i + 1] - 1; w.add("$(...)")', "test_bash_substitutions_are_parsed"),
+    ("heredoc-consumer", "if self.bodies and program in ALL_SHELLS and self.recurse:", "if False:",
+     "test_t04_rows_come_out_as_executed_commands[t04-bash-heredoc]"),
+    ("pwsh-alias", '"ri": "remove-item", "rm": "remove-item"', '"rm": "remove-item"', "test_pwsh_aliases"),
+    ("find-delete", 'if w == "-delete":', "if False:", "test_find_delete_is_a_delete_on_the_start_paths"),
+    ("bash-c", 'self.reparse(v[j], "bash")', "pass", "test_bash_shell_strings_reparsed_in_their_dialect"),
+    ("pwsh-command", 'self.reparse(" ".join(rest), "powershell")', "pass",
+     "test_bash_shell_strings_reparsed_in_their_dialect"),
+    ("never-raises", "raise ParseError(\"unterminated ' quote\")    # bash single quote",
+     "raise ValueError(\"unterminated ' quote\")", "test_never_raises_on_random_text_or_corpus_commands"),
+    # executed-code paths
+    ("backtick-recursion", '_sub("".join(parts), "bash", self.depth + 1, f.cd, self.ctx)', "pass",
+     "test_bash_substitutions_are_parsed"),
+    ("procsubst", 'self._push(f, "proc", i, True)', 'i = self._pairs()[i + 1] - 1; self._word(f).add("<(...)")',
+     "test_bash_substitutions_are_parsed"),
+    ("heredoc-pipe-to-shell", 'shells = [e for e in cmade if e.program in ALL_SHELLS and e.stdin_from == "pipe"]',
+     "shells = []", "test_heredoc_piped_into_a_shell_is_parsed"),
+    ("herestring", 'if op.endswith("<<<"):', "if False:", "test_heredoc_piped_into_a_shell_is_parsed"),
+    ("interpreter-kind", "if program in INTERPRETERS or _PYTHON.fullmatch(program):", "if False:",
+     "test_heredoc_to_an_interpreter_is_code_not_commands"),
+    ("find-exec", 'if w in ("-exec", "-execdir", "-ok", "-okdir"):', "if False:",
+     "test_find_exec_runs_its_command_on_the_start_paths"),
+    ("cmd-c", 'self.reparse(" ".join(rest), "cmd")', "pass", "test_bash_shell_strings_reparsed_in_their_dialect"),
+    ("eval", 'self.reparse(" ".join(v[k + 1:]), "bash")', "pass",
+     "test_bash_shell_strings_reparsed_in_their_dialect"),
+    ("iex", 'self.reparse(s, "powershell")', "pass", "test_pwsh_blocks_and_subexpressions_parsed"),
+    ("encoded-command", 'self.reparse(text, "powershell")', "pass", "test_pwsh_encoded_command_is_decoded"),
+    ("script-file", "self.emit(program_name(v[j], self.d, self.y[j]), j + 1)", "self.emit(p, k + 1)",
+     "test_bash_script_file_runs_the_script"),
+    ("wrap-sudo", 'if p in ("sudo", "doas"):', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-env", 'if p == "env" and self.d == "bash":', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-command", 'if p in ("command", "builtin") and self.d == "bash":', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-exec", 'if p == "exec" and self.d == "bash":', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-nohup-time", 'if p in ("nohup", "winpty", "chronic") or (p == "time" and self.d == "bash"):', "if False:",
+     "test_bash_wrappers_unwrapped"),
+    ("wrap-nice", 'if p == "nice":', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-timeout", 'if p == "timeout" and self.d == "bash":', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-xargs", 'if p == "xargs":', "if False:", "test_bash_xargs_runs_its_command_on_stdin"),
+    ("wrap-source", 'if p in ("source", ".") and self.d == "bash" or (p == "." and self.d == "powershell"):',
+     "if False:", "test_bash_script_file_runs_the_script"),
+    ("assign-skip", "ws = ws[k:]", "ws = ws[0:]", "test_bash_assignment_prefixes_skipped"),
+    ("r6-literal-reading", "if d == \"bash\" and any(w.bs for w in ws):", "if False:",
+     "test_unquoted_backslash_is_read_both_ways_r6"),
+    ("comment", 'if c == "#" and f.word is None:                     # bash comment', "if False:",
+     "test_comments_dropped"),
+    ("keyword-then", '_BASH_DROP = frozenset(("if", "then",', '_BASH_DROP = frozenset(("if",',
+     "test_bash_compound_commands"),
+    ("case", 'if v == "case":', "if False:", "test_bash_compound_commands"),
+    ("function-def", 'if j < self.n and t[j] == ")":                      # name() -- a function definition',
+     "if False:", "test_bash_compound_commands"),
+    ("pipe-stdin", 'stdin = "pipe" if rec.stage > 0 else ""', 'stdin = ""', "test_pipeline_stage_reads_the_pipe"),
+    # cd_before
+    ("cd-tracked", "                    self.track_cd(f, cmd)", "                    pass", "test_bash_cd_before"),
+    ("cd-not-from-a-pipeline", 'if sep not in ("|", "|&") and cmd.stage == 0:', "if True:", "test_bash_cd_before"),
+    ("cd-subshell-scope", '        self.frames.pop()\n        p = self.frames[-1]\n        if f.kind in ("subst", "proc"):',
+     '        self.frames.pop()\n        p = self.frames[-1]\n        p.cd = f.cd\n        if f.kind in ("subst", "proc"):',
+     "test_bash_cd_before"),
+    # fail closed (R4)
+    ("token-cap", "if self.tokens > MAX_TOKENS:", "if False:", "test_too_many_tokens_fails_closed"),
+    ("depth-cap-frames", "if len(self.frames) + self.depth > MAX_DEPTH:", "if False:",
+     "test_nesting_deeper_than_eight_fails_closed"),
+    ("depth-cap-reparse", "    if depth > MAX_DEPTH:", "    if False:", "test_nested_reparse_counts_toward_the_depth"),
+    ("unterminated-heredoc", "raise ParseError(\"unterminated heredoc (no line '%s')\" % h.delim[:40])",
+     "h.body = t[start:]; pos = n + 1; break", "test_unparseable_is_ok_false_with_a_reason"),
+    ("unterminated-dq", "raise ParseError('unterminated \" quote')            # bash double quote", "pass",
+     "test_unparseable_is_ok_false_with_a_reason"),
+    ("unbalanced-subst", 'raise ParseError("unbalanced ( or $( or <(")', "self.frames = self.frames[:1]",
+     "test_unparseable_is_ok_false_with_a_reason"),
+    ("stray-paren", 'raise ParseError("unbalanced )")', "self.i += 1; return",
+     "test_unparseable_is_ok_false_with_a_reason"),
+    # PowerShell
+    ("pwsh-block", 'self._push(f, "block", self.i, True)', 'self._push(f, "hash", self.i, True)',
+     "test_pwsh_blocks_and_subexpressions_parsed"),
+    ("pwsh-subexpression", 'self._push(f, "subst", i, True)                     # PowerShell $( ... ) subexpression',
+     'i = self._pairs()[i + 1] - 1; w.add("$(...)")', "test_pwsh_blocks_and_subexpressions_parsed"),
+    ("pwsh-io-file", "io = _io_program(m.group(1), m.group(2))", 'io = ""',
+     "test_pwsh_io_file_calls_are_synthetic_execs"),
+    ("pwsh-param-prefix", "if key and want.startswith(key):", "if key and want == key:",
+     "test_pwsh_named_parameters"),
+    ("pwsh-call-operator", "self._cmd(f, i).call = True                    # & call operator", "pass",
+     "test_pwsh_separators_and_call"),
+    ("pwsh-expression", 'if v[k][:1] == "{" or not self.call and (', "if False and (",
+     "test_pwsh_expressions_and_here_strings_are_not_commands"),
+    ("pwsh-hash-discarded", 'drop = set(id(r) for r in mine if f.kind == "hash" or',
+     "drop = set(id(r) for r in mine if False or", "test_pwsh_expressions_and_here_strings_are_not_commands"),
+    # cmd and R5
+    ("cmd-if", 'if p == "if":', "if False:", "test_cmd_commands"),
+    ("dialect-union", 'a, b = _parse_one(command, "bash"), _parse_one(command, "powershell")',
+     'a = b = _parse_one(command, "bash")', "test_unknown_dialect_unions_bash_and_powershell"),
+]
+MUTATIONS += [
+    pytest.param(_SP, find, rep, "tests/test_shellparse.py::" + test, id="shellparse-" + suffix)
+    for suffix, find, rep, test in _SP_CLAUSES
+]
+MUTATIONS.append(pytest.param(   # the pricing driver stops asking the parser: the R4 gate would read 0 forever
+    "scripts/guard-corpus/engine_eval.py", "parse_ok = parse_ok and p.ok", "parse_ok = parse_ok",
+    "tests/test_price_tool.py::test_parse_failures_are_reported_per_tool_when_the_engine_has_the_parser",
+    id="price-reports-parse-failures",
+))
 MUTATIONS.append(pytest.param(
     "scripts/guard-corpus/record.py",
     'isinstance(row.get("reason"), str) and row["reason"].strip()',
