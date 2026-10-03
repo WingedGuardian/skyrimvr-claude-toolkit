@@ -1,7 +1,12 @@
-"""Every hook verdict in tests/guard_corpus/expected.jsonl, re-checked against the shipped hooks.
+"""The guard corpus, in two files.
 
-Recorded from the bash hooks before the skyguard port (Plan 2, Task 1). After the port, the new
-wrappers must reproduce every decision AND every reason byte for byte (spec §7.2).
+expected.jsonl is FROZEN: what the bash hooks decided before the skyguard port (Plan 2, Task 1). Plan 5
+rewrites every message, so it is checked by decision and RULE ID (legacy_rules.json maps each frozen text to
+its id), not by text. A row whose verdict a later task deliberately changes is named by `supersedes` in
+intended.jsonl and is then skipped here.
+
+intended.jsonl is the spec for the new behaviour, authored by hand: decision, rule ids and exact text, fired
+through the real wrapper. It is never recorded from the engine (see tests/guard_corpus/README.md).
 """
 import importlib.util
 import json
@@ -13,6 +18,8 @@ import pytest
 from conftest import REPO
 
 EXPECTED = REPO / "tests" / "guard_corpus" / "expected.jsonl"
+INTENDED = REPO / "tests" / "guard_corpus" / "intended.jsonl"
+LEGACY_RULES = REPO / "tests" / "guard_corpus" / "legacy_rules.json"
 
 
 def _rec():
@@ -22,7 +29,15 @@ def _rec():
     return m
 
 
-ROWS = [json.loads(line) for line in EXPECTED.read_text(encoding="utf-8").split("\n") if line.strip()]
+def _load(path):
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
+
+
+ROWS = _load(EXPECTED)
+INTENDED_ROWS = _load(INTENDED)
+TEMPLATES = json.loads(LEGACY_RULES.read_text(encoding="utf-8"))
+SUPERSEDED = {r["supersedes"] for r in INTENDED_ROWS if r.get("supersedes")}
+LIVE = [r for r in ROWS if r["id"] not in SUPERSEDED]
 
 
 @pytest.fixture(scope="module")
@@ -46,12 +61,117 @@ def test_corpus_inputs_are_exactly_what_the_recorder_generates():
     assert got == want
 
 
-@pytest.mark.parametrize("row", ROWS, ids=[r["id"] for r in ROWS])
-def test_hook_reproduces_the_recorded_verdict(installs, row):
+@pytest.mark.parametrize("row", LIVE, ids=[r["id"] for r in LIVE])
+def test_hook_reproduces_the_recorded_decision_and_rules(installs, row):
+    """A legacy row that is not superseded: same decision, same rule-id set. Never the text."""
     rec, inst = installs
-    install = inst[row["layout"]]
-    payload = row["payload"]
-    if row.get("payload_note") == "install-relative":
-        payload = rec.install_relative(payload, install)
-    got = rec.fire(install, row["hook"], payload)
-    assert (got["decision"], got["text"]) == (row["decision"], row["text"])
+    got = rec.fire_full(inst[row["layout"]], row)
+    assert got["decision"] == row["decision"]
+    assert got["rules"] == rec.legacy_rule_ids(row["text"], TEMPLATES), (row["text"], got["rules"])
+
+
+def test_every_legacy_text_resolves_to_a_rule_set():
+    """The frozen text must map to ids, or the check above compares nothing: a non-allow row maps to at least
+    one rule, an allow row to none."""
+    rec = _rec()
+    for r in ROWS:
+        ids = rec.legacy_rule_ids(r["text"], TEMPLATES)
+        if r["decision"] == "allow":
+            assert not ids, r["id"]
+        elif not ids:
+            pytest.fail(f"{r['id']}: no rule id for text {r['text'][:80]!r}")
+
+
+def test_legacy_rule_ids_reads_a_joined_advise_text():
+    rec = _rec()
+    t = {"A one: {c}. tail": "S-A", "B two": "S-B", "C three": "S-C"}
+    assert rec.legacy_rule_ids("A one: x | y. tail | B two", t) == {"S-A", "S-B"}
+    assert rec.legacy_rule_ids("", t) == set()
+
+
+def test_payload_cwd_install_template_is_filled_in(tmp_path):
+    rec = _rec()
+    p = {"tool_name": "Bash", "cwd": "<install>/Data", "tool_input": {"command": "rm -rf x"}}
+    got = rec.row_payload({"payload": p, "payload_note": "install-relative"}, tmp_path)
+    assert got["cwd"] == tmp_path.as_posix() + "/Data"
+    assert rec.row_payload({"payload": p}, tmp_path) == p          # no note: left alone
+
+
+def test_intended_rows_are_well_formed():
+    rec = _rec()
+    ids = [r["id"] for r in INTENDED_ROWS]
+    assert len(ids) == len(set(ids)), "duplicate intended id"
+    assert not set(ids) & {r["id"] for r in ROWS}, "an intended id collides with a legacy id"
+    for r in INTENDED_ROWS:
+        assert rec.intended_row_problems(r) == [], r["id"]
+
+
+def test_an_intended_row_without_why_or_task_is_rejected():
+    rec = _rec()
+    row = {"id": "x", "layout": "declared", "hook": "protect-bash.sh", "payload": {}, "decision": "deny",
+           "rules": ["S-DEL-INSTALL"], "text": "t", "why": "reason", "task": "T3"}
+    assert rec.intended_row_problems(row) == []
+    assert rec.intended_row_problems(dict(row, why="  "))
+    assert rec.intended_row_problems(dict(row, task=""))
+    assert rec.intended_row_problems({k: v for k, v in row.items() if k != "why"})
+
+
+def test_intended_rows_reproduce(installs):
+    """Each hand-authored row: decision + rule ids + EXACT text, through the real wrapper."""
+    rec, inst = installs
+    # Self-check first: the comparison must be able to fail on each of its three parts. With intended.jsonl
+    # empty this is the only thing that proves the check is not decoration.
+    good = {"decision": "deny", "rules": ["S-DEL-INSTALL"], "text": "Blocked: exact."}
+    assert rec.intended_problems(good, dict(good, rules={"S-DEL-INSTALL"})) == []
+    assert rec.intended_problems(good, {"decision": "ask", "rules": {"S-DEL-INSTALL"}, "text": good["text"]})
+    assert rec.intended_problems(good, {"decision": "deny", "rules": {"S-REGISTRY"}, "text": good["text"]})
+    assert rec.intended_problems(good, {"decision": "deny", "rules": {"S-DEL-INSTALL"}, "text": "Blocked: exact"})
+    failures = []
+    for row in INTENDED_ROWS:
+        got = rec.fire_full(inst[row["layout"]], row)
+        failures += [f"{row['id']}: {p}" for p in rec.intended_problems(row, got)]
+    assert not failures, "\n".join(failures)
+
+
+def _current(rec, inst):
+    def current(row):
+        got = rec.fire_full(inst[row["layout"]], row)
+        return {"decision": got["decision"], "rules": got["rules"]}
+    return current
+
+
+def test_supersessions_are_live(installs):
+    """A supersession the engine no longer needs fails, so it cannot hide a later regression."""
+    rec, inst = installs
+    problems = rec.supersession_problems(INTENDED_ROWS, ROWS, TEMPLATES, _current(rec, inst))
+    assert problems == []
+
+
+def _a_denied_legacy_row():
+    return next(r for r in ROWS if r["decision"] == "deny" and r["layout"] == "declared"
+                and not r.get("payload_note"))
+
+
+def _legacy_twin(row, **over):
+    """An intended row that claims to supersede a legacy row, with the identical case."""
+    return dict({"id": "fake-" + row["id"], "layout": row["layout"], "hook": row["hook"],
+                 "payload": row["payload"], "decision": row["decision"], "rules": [], "text": "x",
+                 "supersedes": row["id"], "task": "T3", "why": "twin"}, **over)
+
+
+def test_a_stale_supersession_is_caught(installs):
+    """The twin of test_supersessions_are_live: the engine still gives the legacy verdict, so it must go red."""
+    rec, inst = installs
+    legacy = _a_denied_legacy_row()
+    problems = rec.supersession_problems([_legacy_twin(legacy)], ROWS, TEMPLATES, _current(rec, inst))
+    assert len(problems) == 1 and "stale" in problems[0], problems
+
+
+def test_a_supersession_must_name_a_real_row_with_the_identical_case(installs):
+    rec, inst = installs
+    legacy = _a_denied_legacy_row()
+    cur = _current(rec, inst)
+    ghost = _legacy_twin(legacy, supersedes="no-such-row")
+    other = _legacy_twin(legacy, payload={"tool_name": "Bash", "tool_input": {"command": "echo hi"}})
+    assert "not a legacy row" in rec.supersession_problems([ghost], ROWS, TEMPLATES, cur)[0]
+    assert "differs" in rec.supersession_problems([other], ROWS, TEMPLATES, cur)[0]

@@ -942,6 +942,24 @@ MUTATIONS = [
         "tests/test_price_tool.py::test_a_decision_change_on_the_same_rule_is_priced",
         id="price-decision-change-on-same-rule",
     ),
+    # Plan 5 Task 3: a supersession that never checks the engine still differs from the legacy verdict.
+    # A stale one then sits in intended.jsonl forever, hiding the regression that brings the old verdict back.
+    pytest.param(
+        "scripts/guard-corpus/record.py",
+        'if (now["decision"], set(now["rules"])) == was:',
+        "if False:",
+        "tests/test_guard_corpus.py::test_a_stale_supersession_is_caught",
+        id="corpus-supersession-must-be-live",
+    ),
+    # Compare decisions and rule ids only: an intended row whose `text` is wrong stays green, and the exact
+    # wording the spec fixes is no longer held by anything.
+    pytest.param(
+        "scripts/guard-corpus/record.py",
+        'if got["text"] != row["text"]:',
+        "if False:",
+        "tests/test_guard_corpus.py::test_intended_rows_reproduce",
+        id="corpus-intended-text-exact",
+    ),
 ]
 
 
