@@ -23,10 +23,17 @@ _EOF = "*** End of File"
 # patch run through the shell and reports it as a Bash call (X4 MEASURED, 0.160.0).
 _SHELL_FORM = re.compile(
     r"""^\s*(?:cd\s+(?P<dir>"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*)?(?:apply_patch|applypatch)(?=\s|$|<)""")
-# The same word at ANY command position: used to refuse what _SHELL_FORM cannot attribute.
-_ANY_POSITION = re.compile(r"(?:^|[;&|\n]|\$\()\s*(?:apply_patch|applypatch)(?=\s|$|<)")
+# The same word where a shell would RUN it: at a command position, after env assignments / sudo-style
+# wrappers / a path, with an optional .exe, or as the first word inside a quoted `bash -lc "..."` string.
+# A mere mention (`rg -n apply_patch`, `echo apply_patch`) is not a run.
+_NAME = r"(?:[^\s'\"`;&|()<>]*[/\\])?(?:apply_patch|applypatch)(?:\.exe)?(?=[\s;&|)<>'\"`]|$)"
+_CMD_POS = (r"(?:^|[;&|\n(`{]|\$\()\s*"
+            r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S*|sudo|env|exec|command|nohup|time|builtin)\s+)*")
+_ANY_POSITION = re.compile(_CMD_POS + _NAME)
+_QUOTED_POSITION = re.compile(r"[\"']\s*" + _NAME)
+_WRAPPER = re.compile(r"\b(?:ba|z|da|k)?sh\b|pwsh|powershell|\bcmd(?:\.exe)?\b|\beval\b|\s-l?c\b", re.I)
 _HEREDOC = re.compile(
-    r"<<-?\s*(['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n(?P<body>.*?)\n[ \t]*(?P=tag)[ \t]*(?:\n|$)", re.S)
+    r"<<-?\s*(['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)\1(?P<tail>[^\n]*)\n(?P<body>.*?)\n[ \t]*(?P=tag)[ \t]*(?:\n|$)", re.S)
 _QUOTED = re.compile(r"\s*(['\"])(?P<body>\*\*\* Begin Patch.*\*\*\* End Patch)\1\s*$", re.S)
 
 
@@ -46,8 +53,9 @@ def parse_patch(text: str) -> List[Tuple[str, str]]:
         raise PatchParseError("no '*** End Patch' line")
     out: List[Tuple[str, str]] = []
     prev_was_update_header = False
-    for line in lines[1:-1]:
-        if not line.startswith("*** "):
+    for raw in lines[1:-1]:
+        line = raw.strip()                        # Codex trims before matching headers (measured 0.160.0)
+        if not line.startswith("***"):
             prev_was_update_header = False
             continue
         for head, op in _HEADERS:
@@ -66,7 +74,7 @@ def parse_patch(text: str) -> List[Tuple[str, str]]:
                 out[-1] = ("move_from", out[-1][1])
                 out.append(("move_to", path))
                 prev_was_update_header = False
-            elif line.strip() == _EOF:
+            elif line == _EOF:
                 prev_was_update_header = False
             else:
                 raise PatchParseError("unknown patch header: " + line[:60])
@@ -75,15 +83,23 @@ def parse_patch(text: str) -> List[Tuple[str, str]]:
     return out
 
 
+def _runs_apply_patch(cmd: str) -> bool:
+    return bool(_ANY_POSITION.search(cmd) or (_QUOTED_POSITION.search(cmd) and _WRAPPER.search(cmd)))
+
+
 def shell_patch(cmd: str) -> Optional[Tuple[str, Optional[str]]]:
     m = _SHELL_FORM.match(cmd)
     if not m:
-        if _ANY_POSITION.search(cmd):
+        if _runs_apply_patch(cmd):
             raise PatchParseError("apply_patch at a shell position this parser cannot attribute")
         return None
     rest = cmd[m.end():]
     h = _HEREDOC.search(rest)
     if h:
+        # Nothing may precede the heredoc on the command line or follow its terminator: a second patch or
+        # any further command would run unseen.
+        if rest[:h.start()].strip() or h.group("tail").strip() or rest[h.end():].strip():
+            raise PatchParseError("text around the apply_patch heredoc that this parser does not inspect")
         body = h.group("body")
     else:
         q = _QUOTED.match(rest)

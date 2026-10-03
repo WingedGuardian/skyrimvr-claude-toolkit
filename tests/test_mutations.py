@@ -989,6 +989,53 @@ MUTATIONS = [
         "tests/test_skyguard_engine.py::test_combine_of_nothing_is_a_failed_deny_not_an_allow",
         id="combine-of-nothing-is-not-an-allow",
     ),
+    # --- apply_patch parser (Plan 4 Task 3 fix round): each clause has its own twin ---------------
+    pytest.param(
+        "tools/skyguard/patch_paths.py", "        line = raw.strip()", "        line = raw",
+        "tests/test_patch_paths.py::test_indented_headers_are_headers_like_codex_reads_them",
+        id="patch-headers-are-matched-on-the-trimmed-line",
+    ),
+    pytest.param(
+        "tools/skyguard/patch_paths.py", '        if not line.startswith("***"):', '        if not line.startswith("*** "):',
+        "tests/test_patch_paths.py::test_any_other_star_line_is_refused",
+        id="patch-any-star-line-is-refused",
+    ),
+    pytest.param(
+        "tools/skyguard/patch_paths.py", " or rest[h.end():].strip():", ":",
+        "tests/test_patch_paths.py::test_text_the_parser_does_not_inspect_is_refused",
+        id="patch-text-after-the-heredoc-terminator-is-refused",
+    ),
+    pytest.param(
+        "tools/skyguard/patch_paths.py", ' or h.group("tail").strip()', "",
+        "tests/test_patch_paths.py::test_text_the_parser_does_not_inspect_is_refused",
+        id="patch-text-after-the-heredoc-tag-is-refused",
+    ),
+    pytest.param(
+        "tools/skyguard/patch_paths.py", "if rest[:h.start()].strip()", "if False",
+        "tests/test_patch_paths.py::test_text_the_parser_does_not_inspect_is_refused",
+        id="patch-text-before-the-heredoc-is-refused",
+    ),
+    pytest.param(
+        "tools/skyguard/patch_paths.py",
+        "(?:[A-Za-z_][A-Za-z0-9_]*=\\S*|sudo|env|", "(?:sudo|env|",
+        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        id="patch-env-assignment-prefix-is-a-run",
+    ),
+    pytest.param(
+        "tools/skyguard/patch_paths.py", '_NAME = r"(?:[^\\s\'\\"`;&|()<>]*[/\\\\])?', '_NAME = r"',
+        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        id="patch-path-prefix-is-a-run",
+    ),
+    pytest.param(
+        "tools/skyguard/patch_paths.py", "(?:\\.exe)?(?=[\\s;", "(?=[\\s;",
+        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        id="patch-exe-suffix-is-a-run",
+    ),
+    pytest.param(
+        "tools/skyguard/patch_paths.py", "or (_QUOTED_POSITION.search(cmd) and _WRAPPER.search(cmd))", "",
+        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        id="patch-run-inside-a-wrapped-shell-string",
+    ),
 ]
 
 
