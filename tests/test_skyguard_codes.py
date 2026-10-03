@@ -74,3 +74,48 @@ def test_an_explicit_code_is_kept():
 
 def test_unknown_text_is_coded_unknown_never_guessed():
     assert codes.classify(Verdict("deny", "some text no rule wrote")).code == "unknown"
+
+
+def test_plain_allow_is_evaluated_and_coded_allow():
+    v = codes.classify(Verdict())
+    assert (v.decision, v.status, v.code) == ("allow", "evaluated", "allow")
+
+
+def test_unreadable_env_refusal_is_failed_and_coded(monkeypatch, tmp_path, capsys):
+    """run.py's own inert refusal never passes through a rule module; it must still read as 'nothing checked'."""
+    import io
+    from skyguard import paths, run
+
+    seen = []
+    real = codes.classify
+    monkeypatch.setattr(run.codes, "classify", lambda v: seen.append(real(v)) or seen[-1])
+
+    def boom(*a, **k):
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(paths, "read_env", boom)
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "rm -rf X"}}).encode()
+
+    class _In:
+        buffer = io.BytesIO(payload)
+
+    monkeypatch.setattr(run.sys, "stdin", _In)
+    run.main(["claude", "protect-bash", "--root", str(tmp_path), "--project", str(tmp_path)])
+    v = seen[-1]
+    assert (v.decision, v.status, v.code) == ("deny", "failed", "run.ENV_UNREADABLE")
+
+
+def test_no_deny_or_ask_is_built_outside_the_rule_modules_uncoded():
+    """Scan: any Verdict("deny"/"ask", ...) in a non-rule module must name its own code= or use a rule constant."""
+    import re
+
+    pat = re.compile(r"Verdict\(\s*[\"'](deny|ask)[\"']([^\n]*)")
+    bad = []
+    for f in (REPO / "tools" / "skyguard").rglob("*.py"):
+        if f.name in ("shell_rules.py", "write_rules.py", "codes.py", "verdict.py"):
+            continue
+        for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            m = pat.search(line)
+            if m and "code=" not in m.group(2):
+                bad.append("{}:{}".format(f.name, n))
+    assert bad == [], bad

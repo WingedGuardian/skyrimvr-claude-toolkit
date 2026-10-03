@@ -972,6 +972,15 @@ MUTATIONS = [
         "tests/test_skyguard_codes.py::test_inert_refusals_are_failed_not_evaluated",
         id="inert-refusal-is-status-failed",
     ),
+    # run.py's unreadable-env refusal bypasses the rule modules; classify cannot recover it, so the
+    # construction itself must say "nothing was checked".
+    pytest.param(
+        "tools/skyguard/run.py",
+        'v = Verdict("deny", ENV_UNREADABLE, status="failed", code="run.ENV_UNREADABLE")',
+        'v = Verdict("deny", ENV_UNREADABLE)',
+        "tests/test_skyguard_codes.py::test_unreadable_env_refusal_is_failed_and_coded",
+        id="env-unreadable-refusal-is-status-failed",
+    ),
 ]
 
 

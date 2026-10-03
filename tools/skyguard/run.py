@@ -55,7 +55,7 @@ def main(argv=None) -> int:
             except (OSError, ValueError):
                 env = None
             if env is None:
-                v = Verdict("deny", ENV_UNREADABLE)
+                v = Verdict("deny", ENV_UNREADABLE, status="failed", code="run.ENV_UNREADABLE")
             else:
                 v = shell_rules.decide(p["command"], paths.roots(a.root, a.root_win, env), audit)
     elif a.role == "protect-files":
