@@ -273,3 +273,17 @@ The gate (every wrapper p95 <= 1 s) FAILED on each run on wrappers this task doe
 measurement documented. Engine alone, in-process over all 56,669 shell items of the history: median 0.094 → 0.173
 ms, p95 0.663 → 0.675 ms, p99 1.278 → 1.109 ms, max 13.3 → 10.7 ms (old = `a07c164`). The delete rules add no
 measurable tail; an idle-machine gate run is still owed (Task 17).
+
+### Task 7, fix round 1 (review follow-ups)
+
+`--base 4777bd3`, **N = 61,935** (Bash 55,285; PowerShell 1,600). 0 engine errors; parse failures 63 → 63.
+Matrix: allow>advise 66, deny>advise 1, every other cell unchanged.
+- **S-DEL-UNRESOLVED-CWD newly-advise 75 = 0.132% of 56,885 shell items** (under the 0.2% noise budget, so it ships).
+  All 75 read: an unresolved delete operand (`$SP/...`, `$S/...`, `$SCRATCH/...`, `(Join-Path $base ...)`, pipe
+  input) run with the cwd inside the install. Substituting each command's own literal assignments (analysis only):
+  **57 resolve outside every root, 18 are built from other variables -- all 18 read, every one a Temp/scratchpad or
+  `C:/Temp` path. 0 of 75 would have deleted inside the install.** On this history the advice is noise; it stays
+  (one line, no echo) because it is the only signal for the silent-allow gap the review named.
+  A first version also advised when the cwd merely CONTAINED a root (`C:/`); the cwd test is now "inside" (zone).
+- **S-DEL-INSTALL no-longer-deny 1** (read): `rm -rf tools/__pycache__` from the install -- the R8 refinement
+  (Python regenerates it). With the deny gone, an S-PLUGIN-REF note on the same command surfaces (newly-advise 1).

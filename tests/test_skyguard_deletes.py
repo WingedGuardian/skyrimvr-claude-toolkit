@@ -265,3 +265,49 @@ def test_mention_of_a_root_with_regex_metacharacters_still_names_it():
 def test_a_path_that_merely_contains_skyrim_is_not_a_root_mention():
     scratch = "C:/Users/x/AppData/Local/Temp/claude/C--GOG-Games-The-Elder-Scrolls-V-Skyrim-VR/s/scratchpad"
     assert _unresolved_with_mention(INSTALL, scratch, env_root=GAME) == ("allow", set())
+
+
+# ------------------------------------------------------------------------------------------- fix round 1
+UNRES_CWD = "Note: this deletes a path the guard cannot work out, from inside a protected Skyrim folder; use a full path."
+
+
+@pytest.mark.parametrize("cmd,shell", [
+    ("ls | xargs rm", "bash"),
+    ('rm -rf "$X"', "bash"),
+    ("rm -rf $(cat list.txt)", "bash"),
+    ("Get-ChildItem *.bak | Remove-Item", "powershell"),
+    ("Remove-Item $p -Recurse", "powershell"),
+])
+def test_unresolved_delete_run_from_inside_the_install_advises(cmd, shell):
+    """Item 1: an operand the guard cannot place, deleted with the cwd INSIDE a protected root, used to pass
+    silently. It advises (not deny: most sessions start in the install), in one line that does not echo it."""
+    assert decide(cmd, cwd=INSTALL, shell=shell) == (("advise", UNRES_CWD), {"S-DEL-UNRESOLVED-CWD"})
+
+
+@pytest.mark.parametrize("cmd,cwd", [
+    ('rm -rf "$X"', "C:/Users/u/proj"),                   # cwd outside every root
+    ('rm -rf "$X"', INSTALL + "/__pycache__"),            # a scratch cwd is not protected (R8)
+    ('cd "$D" && rm -rf x', INSTALL),                     # the cwd itself is unknowable: no claim about it
+    ("rm -rf /tmp/x", INSTALL),                           # resolved, outside: nothing to say
+])
+def test_unresolved_cwd_advice_needs_a_protected_cwd_and_an_unresolved_operand(cmd, cwd):
+    assert decide(cmd, cwd=cwd) == (("allow", ""), set())
+
+
+def test_a_deny_still_wins_over_the_cwd_advice():
+    got, fired = decide('rm -rf "$X"; ls "' + GAME + '"', cwd=INSTALL)
+    assert got[0] == "deny" and fired == {"S-DEL-UNRESOLVED"}
+
+
+@pytest.mark.parametrize("p,kind", [
+    (INSTALL.lower().replace("c:/t7", "c:/t7") + "/tools/__pycache__", ""),          # ruling: scratch
+    ("c:/t7/Skyrim VR/tools/xelib/__pycache__/x.pyc", ""),
+    ("c:/t7/Skyrim VR/tools/xelib/node_modules/koffi", "install"),                    # tool runtime, protected
+])
+def test_tools_pycache_is_scratch_but_tools_node_modules_is_not(p, kind):
+    assert deletes.protected_kind(p, R) == kind
+
+
+def test_unresolved_cwd_advice_is_for_a_cwd_inside_not_above_the_root():
+    assert decide('rm -rf "$X"', cwd="C:/") == (("allow", ""), set())
+    assert decide('rm -rf "$X"', cwd="C:/t7") == (("allow", ""), set())

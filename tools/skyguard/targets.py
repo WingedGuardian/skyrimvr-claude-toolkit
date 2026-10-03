@@ -254,7 +254,9 @@ def zone(abs_path: str, roots) -> str:
         best, best_len, best_root = "config", m.end(), p[:m.end()]
     if best == "install":
         rel = p[len(best_root):].strip("/").split("/")
-        if rel[0] and rel[0] not in paths.SCRATCH_EXCLUDED_TOP and any(c in paths.SCRATCH_NAMES for c in rel):
+        tools_cache = rel[0] == "tools" and any(c in paths.SCRATCH_UNDER_TOOLS for c in rel[1:])   # fix round 1
+        if rel[0] and (tools_cache or
+                       rel[0] not in paths.SCRATCH_EXCLUDED_TOP and any(c in paths.SCRATCH_NAMES for c in rel)):
             return "scratch"
     return best
 

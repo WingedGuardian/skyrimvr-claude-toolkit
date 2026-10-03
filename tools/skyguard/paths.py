@@ -42,6 +42,9 @@ SCRATCH_GLOBS = ("**/__pycache__/**", "**/node_modules/**", "**/.pytest_cache/**
 # Fix round 1 ruling: nothing under these top-level install folders is scratch. tools/ holds tool RUNTIME
 # (tools/zedit/app_src/node_modules, tools/xelib/node_modules with koffi), and Data/ is the game itself.
 SCRATCH_EXCLUDED_TOP = ("tools", "data", ".claude")   # .claude: hooks and backups are the safety net (R8)
+# Task 7 fix round 1 ruling: under the install's tools/, a __pycache__ IS scratch (Python regenerates it);
+# node_modules (and anything else) under tools/ stays protected.
+SCRATCH_UNDER_TOOLS = ("__pycache__",)
 _SCRATCH_SHAPE = re.compile(r"\*\*/([^*?\[\]/\\]+)/\*\*")
 
 

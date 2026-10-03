@@ -174,7 +174,7 @@ ROOTS = paths.roots(GAME, "", {"SKYRIM_GAME_ROOT": GAME, "SKYRIM_CONFIG_DIR": "D
     ("//server/share/x", "outside"),
     (GAMEN + "/scripts/__pycache__/x.pyc", "scratch"),
     (GAMEN + "/scripts/__pycache__", "scratch"),
-    (GAMEN + "/tools/__pycache__", "install"),                            # fix round 1: tools/ is never scratch
+    (GAMEN + "/tools/__pycache__", "scratch"),                            # Task 7 fix round 1: Python regenerates it
     (GAMEN + "/node_modules/a/b", "scratch"),
     (GAMEN + "/.pytest_cache", "scratch"),
     (GAMEN + "/.claude/backups", "install"),                              # R8: .claude stays protected
@@ -322,7 +322,9 @@ def test_an_ntfs_stream_suffix_is_stripped(word):
 @pytest.mark.parametrize("p,want", [
     (GAMEN + "/tools/zedit/app_src/node_modules/x", "install"),     # tool RUNTIME (zEdit), not scratch
     (GAMEN + "/tools/xelib/node_modules/koffi", "install"),
-    (GAMEN + "/TOOLS/__pycache__", "install"),
+    (GAMEN + "/TOOLS/__pycache__", "scratch"),                      # Task 7 fix round 1 ruling
+    (GAMEN + "/tools/xelib/__pycache__/x.pyc", "scratch"),
+    (GAMEN + "/tools/x/.pytest_cache", "install"),                  # only __pycache__ under tools/
     (GAMEN + "/Data/__pycache__", "install"),
     (GAMEN + "/Data/scripts/node_modules", "install"),
     (GAMEN + "/node_modules/x", "scratch"),
@@ -330,8 +332,9 @@ def test_an_ntfs_stream_suffix_is_stripped(word):
     (GAMEN + "/tests/.pytest_cache", "scratch"),
 ])
 def test_scratch_never_covers_tools_or_data(p, want):
-    """RULING (item 4, R8): node_modules and caches under the install's tools/ are tool runtime (zEdit
-    app_src/node_modules, tools/xelib/node_modules with koffi); Data/ is the game. Neither is scratch."""
+    """RULING (item 4, R8): node_modules under the install's tools/ is tool runtime (zEdit app_src/node_modules,
+    tools/xelib/node_modules with koffi); Data/ is the game. Task 7 fix round 1 refines it: a __pycache__ under
+    tools/ IS scratch (Python regenerates it); nothing else under tools/ is."""
     assert targets.zone(p, ROOTS) == want
 
 

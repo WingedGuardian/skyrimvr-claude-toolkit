@@ -644,6 +644,14 @@ existing regex fields. The regex fields stay for S-DEL-FALLBACK and the legacy a
   - `git-clean-cwd`;
   - `find-delete`.
 - [ ] Commit (after pricing is recorded): `"skyguard: delete rules decide on executed commands and resolved paths (E16, relative, PowerShell, MO2)"`.
+- **Known limits (recorded in Task 7 fix round 1; `tools/skyguard/deletes.py` docstring):**
+  - interpreter code with RELATIVE paths (`python -c "shutil.rmtree('Data')"`, node/perl equivalents) is invisible
+    unless the code also names a protected root;
+  - `mv` out of the install with a relative source path gets no advice;
+  - `shred`, `rsync --delete`, `git checkout -- .`, `git reset --hard`, `git stash -u` are not delete primitives;
+  - per-install user folders such as `_CLAUDE_OUTPUT` are protected like the rest of the install; a configurable
+    allowlist is a follow-up idea, not built;
+  - `CMD="rm -rf <install>"; $CMD` (an assignment value is not an exec); PS5 `Remove-Item -Recurse` follows junctions.
 
 ### Task 8: Shell writes to plugins (E21) and the write-target advice; ADV_PLUGIN removed
 
