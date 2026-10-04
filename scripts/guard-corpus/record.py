@@ -198,7 +198,7 @@ def engine_verdict(install: Path, hook: str, payload) -> dict:
     environ = {k: val for k, val in os.environ.items() if k not in ENV_KEYS}
     environ.update(home_env(install))
     if hook == "protect-bash.sh":
-        if not p["command"]:
+        if p["command_type"] != "string":        # run.py (Task 12): a non-string command is refused as no command
             v = ee.call(shell_rules.decide, ("", paths.Roots("", ""), audit), cwd=cwd)
         else:
             env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)

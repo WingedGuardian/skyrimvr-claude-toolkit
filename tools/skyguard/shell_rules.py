@@ -119,7 +119,8 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     """cwd: the payload's working directory, RAW (any spelling; targets normalises it). shell: "bash",
     "powershell", "cmd", or "" for unknown (parsed as bash AND PowerShell, R5). Both default so every existing
     caller stays valid (Plan 4 handshake). env: where `~`, $HOME and %USERPROFILE% resolve from (os.environ)."""
-    if command == "":
+    # Task 12: a whitespace-only command is no command either.
+    if command.strip() == "":
         audit.rule(HOOK, "S-INERT-NOCMD", "deny", NO_COMMAND_LOG, level="REFUSE")
         return Verdict("deny", NO_COMMAND_DENY)
     if roots.game == "":

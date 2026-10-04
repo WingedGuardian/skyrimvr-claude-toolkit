@@ -61,7 +61,9 @@ def decide_item(mods, item, root, root_win, audit):
              "shell": "powershell" if name == "PowerShell" else "bash"}
     if name in ("Bash", "PowerShell"):
         roots = mods["paths"].roots(root, root_win, {})
-        return call(mods["shell_rules"].decide, (ti.get("command", ""), roots, audit), **cands)
+        cmd = ti.get("command", "")
+        # run.py refuses a non-string command (Task 12); decide() is only ever handed a string, so mirror that.
+        return call(mods["shell_rules"].decide, (cmd if isinstance(cmd, str) else "", roots, audit), **cands)
     if name in FILE_TOOLS:
         # Plan 5 Task 9: the write guard's zone notes need the roots; an engine that does not take them ignores it.
         return call(mods["write_rules"].decide, (ti.get("file_path", ""), audit),

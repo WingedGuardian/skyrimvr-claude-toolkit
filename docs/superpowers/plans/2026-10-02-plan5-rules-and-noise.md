@@ -200,7 +200,7 @@ The bash reference in `tests/guard_corpus/reference/` defines **the old behaviou
 | S-AUTOMOD-ARCHIVE | automod-cli `archive` write subcommand executed | advise | `Note: loose files override {file}; check for loose copies before trusting it.` |
 | S-EXTERNAL-OUT | an executed Papyrus/ESP tool's output flag resolves into the install/config | advise | `Note: {op} writes its output into the Skyrim install; check it landed where you meant.` |
 | S-RELATIVE-UNKNOWN | a relative delete naming `Data` while `cwd` is unknown or untrusted (R9) | advise | `Note: this deletes {file} by a relative path, and the guard was not told the working folder.` |
-| S-OPAQUE | **only if Task 12's pricing keeps it (R15):** an opaque program (`bash x.sh`, `python x.py`, `node x.js`, `eval`, `Invoke-Expression`) is given a protected path or plugin as an argument | advise | `Note: the guard cannot see what {op} does with {file}.` |
+| S-OPAQUE | **DROPPED by Task 12 pricing (R15: 41 hits = 0.062% but 1 of 41 useful; see the pricing doc). Was:** an opaque program (`bash x.sh`, `python x.py`, `node x.js`, `eval`, `Invoke-Expression`) is given a protected path or plugin as an argument | advise | `Note: the guard cannot see what {op} does with {file}.` |
 
 **Removed:** ADV_DELETE (R10), ADV_RELATIVE (→ cwd resolution / S-RELATIVE-UNKNOWN), ADV_PLUGIN (R11),
 ADV_LOADORDER-on-read and ADV_REDIRECT (→ the S-WRITE-* rules).

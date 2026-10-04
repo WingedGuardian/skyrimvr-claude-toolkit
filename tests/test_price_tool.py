@@ -121,10 +121,10 @@ def test_the_driver_hands_the_item_cwd_to_an_engine_that_accepts_it(tmp_path, hi
     new = _scratch_engine(tmp_path, "scratch", [(
         "shell_rules.py",
         # The engine takes cwd since Plan 5 Task 6; the sentinel proves the driver hands it the item's cwd.
-        "    if command == \"\":\n        audit.rule(HOOK, \"S-INERT-NOCMD\"",
+        "    if command.strip() == \"\":\n        audit.rule(HOOK, \"S-INERT-NOCMD\"",
         "    if cwd == \"C:/sentinel\":\n"
         "        audit.rule(HOOK, \"S-LOADORDER-REF\", \"advise\", \"cwd seen\")\n"
-        "    if command == \"\":\n        audit.rule(HOOK, \"S-INERT-NOCMD\"")])
+        "    if command.strip() == \"\":\n        audit.rule(HOOK, \"S-INERT-NOCMD\"")])
     s, _ = _run(tmp_path, SKYGUARD, new, history)
     # Only the one `ls` that ran in C:/sentinel; the old engine, which has no cwd parameter, still priced.
     assert s["rules"] == {"S-LOADORDER-REF": {"newly-advise": 1}}

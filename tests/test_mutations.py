@@ -2177,6 +2177,16 @@ _T11_R1 = [
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T11_R1]
 
 
+# --- Task 12: a blank or non-string command fails closed. One twin per clause; each names the test that must go red.
+_T12 = "tests/test_skyguard_t12.py::"
+MUTATIONS += [
+    pytest.param("tools/skyguard/run.py", 'if p["command_type"] != "string":', 'if not p["command"]:',
+                 _T12 + "test_run_denies_a_non_string_command", id="rule-S-INERT-NOCMD-nonstring"),
+    pytest.param("tools/skyguard/shell_rules.py", '    if command.strip() == "":', '    if command == "":',
+                 _T12 + "test_decide_denies_a_whitespace_only_command", id="rule-S-INERT-NOCMD-whitespace"),
+]
+
+
 def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:
     work = tmp_path / "mutated"
     shutil.copytree(REPO, work, ignore=MUTATION_IGNORE)

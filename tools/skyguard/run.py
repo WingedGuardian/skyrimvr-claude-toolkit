@@ -49,7 +49,10 @@ def main(argv=None) -> int:
     # The declared roots file, read from the WINDOWS root when there is one (native python cannot open /c/...).
     paths_file = Path(a.root_win or a.root) / ".claude" / paths.PATHS_FILE
     if a.role == "protect-bash":
-        if not p["command"]:
+        # Task 12: a command that is not a string (an array, number, object, boolean) is no command the guard can
+        # judge -- `command` renders it as JSON text, which the rules would then read as if the agent had typed it.
+        # (An empty or whitespace-only STRING is refused by shell_rules.decide itself.)
+        if p["command_type"] != "string":
             v = shell_rules.decide("", paths.Roots("", ""), audit)
         else:
             try:

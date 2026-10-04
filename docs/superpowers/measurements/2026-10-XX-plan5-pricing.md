@@ -563,3 +563,18 @@ or no usable name exists.
 environment (Documents resolves to `C:/Users/Moona/Documents/My Games/Skyrim VR/Saves`, 5,344 files). 0 errors; parse failures
 63 -> 63. Matrix: allow>deny 1, **allow>ask 0**, rest unchanged. The 1 deny is still the real `smp reset` curl. The four
 formerly-asked saves are allow (new names). The unreadable-body rule adds no new history hit.
+
+## Task 12: blank or non-string commands deny; S-OPAQUE priced and DROPPED (R15)
+
+`--base 4d0ab17`, N = 65,694 (Bash 58,590, PowerShell 1,640, Write 3,770, Edit 1,689, MCP 5). 0 errors; parse failures 63 -> 63.
+
+- **Denies (whitespace-only, non-string command): newly-deny 0.** History holds no blank or non-string command, so the change
+  costs nothing measurable; the gap it closes was real (the audit: a number or array was stringified and judged as text).
+- **S-OPAQUE (prototype: `bash|sh|python|node|ruby|perl <script> ... <arg that resolves into Data/config/MO2, or a plugin>`,
+  inline `-c/-m/-e` excluded, `tools/xelib/` excluded):** 41 hits = **0.062%** of 65,694, under the 0.2% ceiling. All 41 were
+  hand-read (fewer than the 50-sample floor exist). **Useful: 1 of 41 (2%)**: one in-place mesh patch (`nifpatch.py ... fragmentswhipL.nif`).
+  The other 40 were reads: pyffi/struct header dumps, `crash-triage.py` and `papyrus-triage.py` over the SKSE or Logs folders,
+  `skyrim-winner.js` / `resaver-resolve-names.js` lookups, `py_compile`, pytest runs, plus a few heredocs whose `Skyrim.esm:0CDD84`
+  FormID text was read as a plugin argument. Fails the 50% bar by a wide margin: **dropped** (module, rule, rows deleted).
+  Known limit, recorded: an interpreter script handed a protected path is not flagged; the user's own scratch scripts are the
+  common case and the notes would have been fatigue.
