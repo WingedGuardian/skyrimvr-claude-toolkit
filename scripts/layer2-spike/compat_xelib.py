@@ -40,7 +40,7 @@ def sha(p):
 
 def xe(mode):
     r = subprocess.run(["node", os.path.join(HERE, "xelib_probe.js"), mode], capture_output=True, text=True,
-                       timeout=900, cwd=HERE)
+                       timeout=900, cwd=ROOT)  # xelib writes xelib_log.txt into its cwd
     for ln in r.stdout.splitlines():
         if ln.startswith("RESULT: "):
             return json.loads(ln[8:])
