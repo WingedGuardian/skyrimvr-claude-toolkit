@@ -23,7 +23,13 @@ def _sub(v) -> str:
 
 
 # The shell tools Claude Code runs, and the dialect each one's command is written in.
+# `Monitor` (MEASURED, Claude Code 2.1.289) also runs a shell command, carried in tool_input.command like Bash, but its
+# payload names no dialect, so it is judged as the unknown dialect ("" = bash AND PowerShell, spec R5), never guessed.
 SHELLS = {"Bash": "bash", "PowerShell": "powershell"}
+
+# Tools that write a file but carry its path under another key (MEASURED 2.1.289: NotebookEdit sends `notebook_path`
+# and no `file_path`). A non-string value is no path: the engine then sees "" and refuses (W-INERT-NOPATH).
+PATH_KEYS = {"NotebookEdit": "notebook_path"}
 
 
 def _json_type(v, present: bool) -> str:
@@ -38,6 +44,27 @@ def _json_type(v, present: bool) -> str:
     if isinstance(v, str):
         return "string"
     return "array" if isinstance(v, list) else "object"
+
+
+def _file_path(tool_name: str, ti: dict) -> str:
+    key = PATH_KEYS.get(tool_name)
+    if key is None:
+        return _sub(ti.get("file_path"))
+    v = ti.get(key)
+    if isinstance(v, str) and v != "":
+        return _sub(v)
+    # notebook_path is the key the tool writes; a payload that lacks it but carries file_path is judged on that path
+    # rather than refused (the coordinator's cross-install finding: read file_path, then notebook_path).
+    fp = ti.get("file_path")
+    return _sub(fp) if isinstance(fp, str) else ""
+
+
+def _is_ws_monitor(tool_name: str, ti: dict) -> bool:
+    """Monitor's WebSocket form: tool_input {ws: {url}, description, timeout_ms} and NO `command` key (reported by the
+    coordinator from a second install; UNMEASURED here -- no fixture, the shape is built from that report). It runs no
+    shell command, so the shell rules have nothing to judge. Strict: ws must be an object and `command` must be absent
+    (ws beside an empty command, ws as a string, or neither key all stay on the fail-closed path)."""
+    return tool_name == "Monitor" and isinstance(ti.get("ws"), dict) and "command" not in ti
 
 
 def extract(payload_text: str) -> dict:
@@ -62,8 +89,9 @@ def extract(payload_text: str) -> dict:
         "empty": empty,
         "tool_name": tool_name,
         "command": _sub(ti.get("command")),
+        "ws_monitor": _is_ws_monitor(tool_name, ti),
         "command_type": _json_type(ti.get("command"), "command" in ti),
-        "file_path": _sub(ti.get("file_path")),
+        "file_path": _file_path(tool_name, ti),
         "source": _sub(d.get("source")),
         "cwd": cwd.replace("\x00", "") if isinstance(cwd, str) else "",
         "shell": SHELLS.get(tool_name, ""),

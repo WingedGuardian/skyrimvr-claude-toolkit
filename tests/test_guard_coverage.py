@@ -149,13 +149,14 @@ def test_inventory_has_the_routes_the_brief_names():
     assert any("code-execution" in r[2] for r in rows), "an MCP code-execution route must be listed (Plan 6 Phase A)"
 
 
-def test_measured_gaps_stay_uncovered_until_a_matcher_closes_them():
-    """NotebookEdit and Monitor were MEASURED outside every matcher; if a matcher now fires, the doc row must move."""
+def test_measured_gaps_are_closed_by_a_matcher_and_the_doc_says_so():
+    """NotebookEdit and Monitor were MEASURED outside every matcher (2026-10-04); Plan 5 Task 13b added both. Each must now
+    be fired on by a matcher AND marked guarded, so the doc cannot drift back to calling them open."""
     settings, text = load()
     rows = {r[0]: r for r in tables(text)["Routes"][1:]}
     for rid, tool in (("C7", "NotebookEdit"), ("C8", "Monitor")):
-        assert rows[rid][4] == "uncovered", rid
-        assert not any(fires(m, tool) for m in claude_matchers(settings)), tool
+        assert rows[rid][4] == "guarded", rid
+        assert any(fires(m, tool) for m in claude_matchers(settings)), tool
 
 
 # ---- mutations: one twin per clause, each must produce its own named problem ----
@@ -167,7 +168,7 @@ def _has(problems, code):
 def test_mutation_matcher_removed_makes_a_guarded_route_unmatched():
     settings, text = load()
     s = json.loads(json.dumps(settings))
-    s["hooks"]["PreToolUse"] = [e for e in s["hooks"]["PreToolUse"] if e["matcher"] != "Edit|Write"]
+    s["hooks"]["PreToolUse"] = [e for e in s["hooks"]["PreToolUse"] if e["matcher"] != "Edit|Write|NotebookEdit"]
     p = check(s, text)
     assert _has(p, "GUARDED-BUT-UNMATCHED"), p
     assert _has(p, "MATCHER-NOT-IN-SETTINGS"), p
@@ -176,24 +177,23 @@ def test_mutation_matcher_removed_makes_a_guarded_route_unmatched():
 def test_mutation_matcher_added_is_flagged_both_ways():
     settings, text = load()
     s = json.loads(json.dumps(settings))
-    s["hooks"]["PreToolUse"].append({"matcher": "NotebookEdit", "hooks": []})
+    s["hooks"]["PreToolUse"].append({"matcher": "EnterWorktree", "hooks": []})
     p = check(s, text)
-    assert _has(p, "UNCOVERED-BUT-MATCHED"), p      # the doc still calls NotebookEdit uncovered
+    assert _has(p, "UNCOVERED-BUT-MATCHED"), p      # the doc still calls EnterWorktree uncovered
     assert _has(p, "MATCHER-NOT-DOCUMENTED"), p
 
 
 def test_mutation_unlisted_tool_in_a_matcher():
     settings, text = load()
     s = json.loads(json.dumps(settings))
-    s["hooks"]["PreToolUse"][1]["matcher"] = "Edit|Write|MadeUpTool"
+    s["hooks"]["PreToolUse"][1]["matcher"] = "Edit|Write|NotebookEdit|MadeUpTool"
     p = check(s, text)
     assert _has(p, "MATCHER-NAMES-UNLISTED-ROUTE"), p
 
 
 def test_mutation_uncovered_route_relabelled_guarded():
     settings, text = load()
-    mutated = text.replace("| C8 | claude | Monitor tool (runs a shell command and streams it) | `Monitor` | uncovered |",
-                           "| C8 | claude | Monitor tool (runs a shell command and streams it) | `Monitor` | guarded |")
+    mutated = text.replace("| `EnterWorktree`, `ExitWorktree` | uncovered |", "| `EnterWorktree`, `ExitWorktree` | guarded |")
     assert mutated != text
     p = check(settings, mutated)
     assert _has(p, "GUARDED-BUT-UNMATCHED"), p
@@ -202,7 +202,7 @@ def test_mutation_uncovered_route_relabelled_guarded():
 
 def test_mutation_summary_count_wrong():
     settings, text = load()
-    mutated = text.replace("- guarded: 8", "- guarded: 9")
+    mutated = text.replace("- guarded: 10", "- guarded: 11")
     assert mutated != text
     assert _has(check(settings, mutated), "SUMMARY-COUNT")
 
@@ -220,4 +220,4 @@ def test_substring_search_would_have_been_wrong():
     """Why `fires` is a full match: the pattern `Edit|Write` is a substring of nothing here, but `Edit` is inside
     `NotebookEdit`, and the measured hook did not fire for it."""
     assert re.search("Edit|Write", "NotebookEdit") is not None
-    assert not fires("Edit|Write", "NotebookEdit")
+    assert not fires("Edit|Write", "NotebookEdit")     # why NotebookEdit needs its own entry in the matcher

@@ -32,8 +32,8 @@ Matchers are compared with a full match against the tool name (measured below: `
 
 | Matcher | Hooks |
 |---|---|
-| `Bash\|PowerShell` | protect-bash, snapshot-before-tool |
-| `Edit\|Write` | protect-files, backup-before-edit |
+| `Bash\|PowerShell\|Monitor` | protect-bash, snapshot-before-tool |
+| `Edit\|Write\|NotebookEdit` | protect-files, backup-before-edit |
 | `mcp__devbench.*` | protect-mcp |
 
 ## Routes
@@ -46,8 +46,8 @@ Matchers are compared with a full match against the tool name (measured below: `
 | C4 | claude | Edit tool | `Edit` | guarded | protect-files (W- rules) + backup-before-edit | READ: plugin/archive deny, notes for INI, load order, Papyrus, install. MEASURED: `Edit\|Write` fired for `Edit` (2 of 2 calls) |
 | C5 | claude | Write tool | `Write` | guarded | protect-files + backup-before-edit | MEASURED: `Edit\|Write` fired for `Write` (1 of 1) |
 | C6 | claude | MultiEdit tool | `MultiEdit` | absent | none needed today | MEASURED: the model reported `MultiEdit` does not exist in 2.1.289 (asked for it under `--tools Read,Edit,Write,MultiEdit,NotebookEdit`; it used Edit). The shipped matcher would not fire on it if it came back |
-| C7 | claude | NotebookEdit tool (rewrites `.ipynb` cells, any path) | `NotebookEdit` | uncovered | none | MEASURED 2026-10-04 (1 call): the `*` capture hook fired for `NotebookEdit`; the `Edit\|Write` hook did not. The notebook changed; no guard, no backup. Narrow in practice (only `.ipynb`), but it is a full file-write primitive on that extension |
-| C8 | claude | Monitor tool (runs a shell command and streams it) | `Monitor` | uncovered | none | MEASURED 2026-10-04 (1 call): the `*` hook fired for `Monitor`, the `Bash\|PowerShell` hook did not, and `echo mon > mon.txt` created the file. **A complete shell route outside protect-bash and the snapshot hook.** The largest gap found |
+| C7 | claude | NotebookEdit tool (rewrites `.ipynb` cells, any path) | `NotebookEdit` | guarded | protect-files (same W- rules, read from `notebook_path`) + backup-before-edit | MEASURED 2026-10-04, Claude Code 2.1.289 (Plan 5 Task 13b capture): payload `tool_input` is `{notebook_path, cell_id, new_source, edit_mode}`, no `file_path`; the adapter reads `notebook_path`, and a missing or non-string one is refused (W-INERT-NOPATH). Before 13b: the `*` hook fired and `Edit\|Write` did not, the notebook changed unguarded. Blind spots as C4/C5 |
+| C8 | claude | Monitor tool (runs a shell command and streams it) | `Monitor` | guarded | protect-bash + snapshot-before-tool, judged under the unknown dialect (bash and PowerShell) | MEASURED 2026-10-04, Claude Code 2.1.289 (Plan 5 Task 13b capture): payload `tool_input` is `{command, description, timeout_ms}`, no dialect field, so the engine judges both readings. Before 13b: the `*` hook fired and `Bash\|PowerShell` did not, and `echo mon > mon.txt` created the file. Limits as C1. The WebSocket form (`ws` object, no `command`; INFERRED from a report on another install, not captured here) runs no command and is allowed; `ws` beside any `command` key, `ws` that is not an object, or neither key is denied |
 | C9 | claude | EnterWorktree / ExitWorktree (create and remove a git worktree, then move the session into it) | `EnterWorktree`, `ExitWorktree` | uncovered | none | MEASURED (Enter, 1 call): created `.claude/worktrees/probewt`, no matcher fired. ExitWorktree removal is INFERRED from the tool's purpose. In a git install this makes a second copy of the install tree and moves the session's cwd into it (INFERRED: hook root resolves from the hook file location, so rules still bind the real install) |
 | C10 | claude | DevBench MCP (live game: `console`, `game`, `papyrus`, `inspect`, ...) | `mcp__devbench-vr__console`, `mcp__devbench-vr__game`, `mcp__devbench-vr__papyrus` | partial | protect-mcp (S-DEVBENCH-CRASH deny, S-DEVBENCH-SAVE ask) | MEASURED (Plan 5 M5b): payload `mcp__devbench-vr__console`. READ (`mcp_rules.py`): only bare `smp reset` and a save over an existing name are judged. The `papyrus` tool and console `bat` files can do either thing without being named; an unreadable body (`-d @file`) is allowed. Also reached by curl and `devbench-cli.sh` through C1 (same judge) |
 | C11 | claude | Any other MCP server's state-changing tools (Drive, Docs, Playwright navigation, ...) | `mcp__claude_ai_Google_Drive__authenticate`, `mcp__claude_ai_Claude_Docs__update` | uncovered | none (no matcher; stated by design) | READ: the settings carry no matcher for them. Mostly remote state, not the install |
@@ -72,20 +72,16 @@ Matchers are compared with a full match against the tool name (measured below: `
 
 Counts by status for the routes above (the test recomputes these and fails on a mismatch):
 
-- guarded: 8
+- guarded: 10
 - partial: 4
-- uncovered: 11
+- uncovered: 9
 - absent: 1
 - out-of-scope: 3
 
 Ranked by what an agent can do through the route, the uncovered routes to close first:
 
-1. **C8 Monitor**: a full shell route; fix by adding `Monitor` to the shell matcher and teaching the adapter its
-   payload (`command` key, measured).
-2. **C12 MCP code execution** and **C11 other MCP**: only a `*` matcher sees them; the cheapest safe step is a
+1. **C12 MCP code execution** and **C11 other MCP**: only a `*` matcher sees them; the cheapest safe step is a
    `mcp__.*` matcher that logs, then an allow-list of servers the user trusts. Until then the MCP surface is the
    widest hole, and the Layer 2 lock is the only backstop.
-3. **X6 Codex without active hooks** and **X4 Codex MCP**: no rule runs.
-4. **C7 NotebookEdit**: add to the `Edit|Write` matcher (its path key is INFERRED to be `notebook_path`, not `file_path`; check with a
-   capture probe first, since the adapter must read it or the hook will see "no path" and deny every call).
-5. **C9 worktree tools**, **C13** and **C17**: lower impact; record and watch.
+2. **X6 Codex without active hooks** and **X4 Codex MCP**: no rule runs.
+3. **C9 worktree tools**, **C13** and **C17**: lower impact; record and watch.

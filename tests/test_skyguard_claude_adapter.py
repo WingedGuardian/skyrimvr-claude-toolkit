@@ -24,7 +24,8 @@ def test_plan1_fixtures_extract(f):
     ti = d.get("tool_input") or {}
     assert not p["empty"]
     assert p["command"] == str(ti.get("command", "")).rstrip("\n")
-    assert p["file_path"] == str(ti.get("file_path", "")).rstrip("\n")
+    path_key = "notebook_path" if d.get("tool_name") == "NotebookEdit" else "file_path"     # Task 13b
+    assert p["file_path"] == str(ti.get(path_key, "")).rstrip("\n")
     assert p["tool_name"] == (d.get("tool_name") or "unknown")
 
 
@@ -225,3 +226,129 @@ def test_run_reports_a_malformed_paths_file_by_key(tmp_path):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     out = json.loads(r.stdout)["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny" and "SKYRIM_CONFIG_DIR" in out["permissionDecisionReason"]
+
+
+# ---------------------------------------------------------------- Plan 5 Task 13b: Monitor and NotebookEdit
+
+def _verdict(role, payload, tmp_path):
+    r = _run(role, json.dumps(payload), tmp_path)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def _decision(out):
+    return out.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+
+
+FAKE_ROOT = "C:/GOG Games/Fake"
+
+
+def test_monitor_fixture_command_is_extracted_with_the_unknown_dialect():
+    """MEASURED (Claude Code 2.1.289): Monitor carries its command in tool_input.command, like Bash. The payload does not
+    name a dialect, so the engine is given "" (unknown = judge as bash AND PowerShell), the conservative reading."""
+    text = (FIX / "claude-PreToolUse-Monitor-1.json").read_text(encoding="utf-8")
+    p = claude.extract(text)
+    assert p["tool_name"] == "Monitor" and p["command"] == "echo hi" and p["command_type"] == "string"
+    assert p["shell"] == ""
+
+
+def test_monitor_that_deletes_the_game_root_is_denied_like_bash(tmp_path):
+    cmd = 'rm -rf "%s"' % FAKE_ROOT
+    outs = {tool: _verdict("protect-bash", {"tool_name": tool, "tool_input": {"command": cmd}}, tmp_path)
+            for tool in ("Bash", "Monitor")}
+    assert _decision(outs["Bash"]) == "deny" and _decision(outs["Monitor"]) == "deny"
+    assert outs["Monitor"] == outs["Bash"]
+
+
+def test_monitor_benign_command_is_allowed(tmp_path):
+    assert _verdict("protect-bash", {"tool_name": "Monitor", "tool_input": {"command": "echo hi"}}, tmp_path) == {}
+
+
+@pytest.mark.parametrize("ti", [{}, {"command": 12}, {"command": ["rm", "x"]}, {"command": ""}, {"command": "   "}])
+def test_monitor_without_a_real_command_fails_closed(ti, tmp_path):
+    out = _verdict("protect-bash", {"tool_name": "Monitor", "tool_input": ti}, tmp_path)
+    assert _decision(out) == "deny"
+    assert len(out["hookSpecificOutput"]["permissionDecisionReason"].splitlines()) <= 2
+
+
+def test_notebook_fixture_path_comes_from_notebook_path():
+    """MEASURED (Claude Code 2.1.289): NotebookEdit carries `notebook_path`, with no `file_path` at all."""
+    text = (FIX / "claude-PreToolUse-NotebookEdit-1.json").read_text(encoding="utf-8")
+    d = json.loads(text)
+    assert "file_path" not in d["tool_input"]
+    assert claude.extract(text)["file_path"] == d["tool_input"]["notebook_path"]
+
+
+@pytest.mark.parametrize("path", [FAKE_ROOT + "/Data/a.esp", FAKE_ROOT + "/Data/SKSE/Plugins/x.ini",
+                                  FAKE_ROOT + "/Data/Scripts/Source/a.psc", "C:/scratch/nb.ipynb"])
+def test_notebook_edit_gets_the_same_verdict_as_write_on_that_path(path, tmp_path):
+    w = _verdict("protect-files", {"tool_name": "Write", "tool_input": {"file_path": path}}, tmp_path)
+    n = _verdict("protect-files", {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": path}}, tmp_path)
+    assert n == w
+
+
+def test_notebook_edit_on_a_protected_path_is_denied_and_in_scratch_allowed(tmp_path):
+    bad = _verdict("protect-files", {"tool_name": "NotebookEdit",
+                                     "tool_input": {"notebook_path": FAKE_ROOT + "/Data/a.esp"}}, tmp_path)
+    assert _decision(bad) == "deny"
+    ok = _verdict("protect-files", {"tool_name": "NotebookEdit",
+                                    "tool_input": {"notebook_path": "C:/scratch/nb.ipynb"}}, tmp_path)
+    assert ok == {}
+
+
+@pytest.mark.parametrize("ti", [{}, {"notebook_path": 12}, {"notebook_path": ["a"]}, {"notebook_path": ""},
+                                {"notebook_path": None, "file_path": 12}])
+def test_notebook_edit_without_a_string_path_fails_closed(ti, tmp_path):
+    out = _verdict("protect-files", {"tool_name": "NotebookEdit", "tool_input": ti}, tmp_path)
+    assert _decision(out) == "deny"
+    assert len(out["hookSpecificOutput"]["permissionDecisionReason"].splitlines()) <= 2
+
+
+def test_notebook_edit_is_backed_up_before_the_edit(tmp_path):
+    nb = tmp_path / "nb.ipynb"
+    nb.write_text("{}", encoding="utf-8")
+    r = _run("backup-before-edit", json.dumps({"tool_name": "NotebookEdit", "tool_input": {"notebook_path": str(nb)}}), tmp_path)
+    assert r.returncode == 0
+    assert len(list((tmp_path / ".claude" / "backups").glob("*nb.ipynb"))) == 1
+
+
+def test_notebook_edit_reads_notebook_path_first_then_file_path():
+    """notebook_path is what the tool writes, so it wins over a stray file_path; file_path is only the fallback."""
+    both = {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": "C:/a/nb.ipynb", "file_path": "C:/b/x.ipynb"}}
+    assert claude.extract(json.dumps(both))["file_path"] == "C:/a/nb.ipynb"
+    only_fp = {"tool_name": "NotebookEdit", "tool_input": {"file_path": "C:/b/x.ipynb"}}
+    assert claude.extract(json.dumps(only_fp))["file_path"] == "C:/b/x.ipynb"
+
+
+# ---- Monitor's WebSocket form: {ws: {url}, description, timeout_ms}, no `command` (coordinator report; UNMEASURED here)
+
+WS = {"url": "ws://127.0.0.1:8921/events"}
+
+
+def test_websocket_monitor_is_allowed(tmp_path):
+    ti = {"ws": WS, "description": "watch", "timeout_ms": 1000}
+    assert _verdict("protect-bash", {"tool_name": "Monitor", "tool_input": ti}, tmp_path) == {}
+
+
+@pytest.mark.parametrize("ti", [
+    {"description": "d"},                              # neither command nor ws
+    {"ws": "ws://x/y"},                                # ws as a string
+    {"ws": ["ws://x/y"]}, {"ws": None}, {"ws": 5},     # ws of any other type
+    {"ws": WS, "command": ""},                         # ws beside an empty command
+    {"ws": WS, "command": None},                       # ws beside a null command
+    {"ws": WS, "command": 12},                         # ws beside a non-string command
+])
+def test_monitor_ws_twins_still_deny(ti, tmp_path):
+    out = _verdict("protect-bash", {"tool_name": "Monitor", "tool_input": ti}, tmp_path)
+    assert _decision(out) == "deny"
+
+
+def test_monitor_ws_beside_a_real_command_judges_the_command(tmp_path):
+    ti = {"ws": WS, "command": 'rm -rf "%s"' % FAKE_ROOT}
+    assert _decision(_verdict("protect-bash", {"tool_name": "Monitor", "tool_input": ti}, tmp_path)) == "deny"
+
+
+def test_ws_form_only_exempts_monitor(tmp_path):
+    for tool in ("Bash", "PowerShell"):
+        out = _verdict("protect-bash", {"tool_name": tool, "tool_input": {"ws": WS}}, tmp_path)
+        assert _decision(out) == "deny", tool

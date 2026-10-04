@@ -1,0 +1,19 @@
+{
+  "cwd": "<path>",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "bypassPermissions",
+  "prompt_id": "<id>",
+  "session_id": "<id>",
+  "tool_input": {
+    "cell_id": "cell-0",
+    "edit_mode": "replace",
+    "new_source": "a=2",
+    "notebook_path": "<cwd>\\nb.ipynb"
+  },
+  "tool_name": "NotebookEdit",
+  "tool_use_id": "<id>",
+  "transcript_path": "<path>"
+}

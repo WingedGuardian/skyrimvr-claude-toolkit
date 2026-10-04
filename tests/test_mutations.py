@@ -1878,11 +1878,28 @@ MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test i
 _SNAP = "tools/skyguard/snapshot.py"
 _PSR = "tests/test_skyguard_side_effects.py::test_snapshot_skips_powershell_reads"
 MUTATIONS += [   # Task 10 (E12): the PowerShell tool is wired; its read-only verbs take no snapshot
-    pytest.param(".claude/settings.json", '"matcher": "Bash|PowerShell"', '"matcher": "Bash"',
+    pytest.param(".claude/settings.json", '"matcher": "Bash|PowerShell|Monitor"', '"matcher": "Bash|Monitor"',
                  "tests/test_repo_invariants.py::test_shell_matcher_covers_powershell", id="matcher-includes-powershell"),
-    pytest.param(".claude/settings.json", '"matcher": "Edit|Write"', '"matcher": "Edit|Write|PowerShell"',
+    pytest.param(".claude/settings.json", '"matcher": "Edit|Write|NotebookEdit"', '"matcher": "Edit|Write|NotebookEdit|PowerShell"',
                  "tests/test_repo_invariants.py::test_shell_matcher_covers_powershell",
                  id="matcher-file-hooks-stay-off-powershell"),
+    # Task 13b: Monitor and NotebookEdit were MEASURED outside every matcher (Claude Code 2.1.289); each matcher entry
+    # is pinned in both the live settings and the shipped target file.
+    pytest.param(".claude/settings.json", '"matcher": "Bash|PowerShell|Monitor"', '"matcher": "Bash|PowerShell"',
+                 "tests/test_repo_invariants.py::test_shell_matcher_covers_powershell", id="matcher-includes-monitor"),
+    pytest.param(".claude/settings.json", '"matcher": "Edit|Write|NotebookEdit"', '"matcher": "Edit|Write"',
+                 "tests/test_repo_invariants.py::test_shell_matcher_covers_powershell", id="matcher-includes-notebookedit"),
+    pytest.param("agent/targets/claude/settings.json", '"matcher": "Bash|PowerShell|Monitor"', '"matcher": "Bash|PowerShell"',
+                 "tests/test_guard_coverage.py::test_inventory_matches_the_shipped_matchers", id="target-matcher-includes-monitor"),
+    pytest.param("agent/targets/claude/settings.json", '"matcher": "Edit|Write|NotebookEdit"', '"matcher": "Edit|Write"',
+                 "tests/test_guard_coverage.py::test_inventory_matches_the_shipped_matchers", id="target-matcher-includes-notebookedit"),
+    pytest.param("tools/skyguard/adapters/claude.py", ' and "command" not in ti', "",
+                 "tests/test_skyguard_claude_adapter.py::test_monitor_ws_twins_still_deny", id="monitor-ws-needs-no-command-key"),
+    pytest.param("tools/skyguard/adapters/claude.py", 'isinstance(ti.get("ws"), dict)', 'ti.get("ws") is not None',
+                 "tests/test_skyguard_claude_adapter.py::test_monitor_ws_twins_still_deny", id="monitor-ws-must-be-an-object"),
+    pytest.param("tools/skyguard/adapters/claude.py", 'PATH_KEYS = {"NotebookEdit": "notebook_path"}', 'PATH_KEYS = {}',
+                 "tests/test_skyguard_claude_adapter.py::test_notebook_edit_on_a_protected_path_is_denied_and_in_scratch_allowed",
+                 id="adapter-reads-notebook-path"),
     pytest.param(_SNAP, " or grep(SKIP_POWERSHELL, command, icase=True)", "", _PSR + "[Get-ChildItem Data]",
                  id="snapshot-skips-pwsh-reads"),
     pytest.param(_SNAP, "get-[a-z]+|select-string|", "select-string|", _PSR + "[Get-Process]",

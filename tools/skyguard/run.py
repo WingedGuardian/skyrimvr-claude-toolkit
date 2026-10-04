@@ -52,7 +52,10 @@ def main(argv=None) -> int:
         # Task 12: a command that is not a string (an array, number, object, boolean) is no command the guard can
         # judge -- `command` renders it as JSON text, which the rules would then read as if the agent had typed it.
         # (An empty or whitespace-only STRING is refused by shell_rules.decide itself.)
-        if p["command_type"] != "string":
+        if p.get("ws_monitor"):
+            # Task 13b: a WebSocket Monitor runs no command (no `command` key at all), so there is nothing to judge.
+            v = Verdict()
+        elif p["command_type"] != "string":
             v = shell_rules.decide("", paths.Roots("", ""), audit)
         else:
             try:

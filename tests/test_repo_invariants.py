@@ -284,13 +284,15 @@ def test_shell_matcher_covers_powershell():
     for hook in ("protect-bash.sh", "snapshot-before-tool.sh"):
         assert hook in by_hook, f"{hook} is not registered under PreToolUse"
         rx = re.compile(by_hook[hook])
-        for tool in ("Bash", "PowerShell"):
+        for tool in ("Bash", "PowerShell", "Monitor"):     # Monitor: Plan 5 Task 13b (MEASURED outside both, 2.1.289)
             assert rx.fullmatch(tool), f"{hook}: matcher {by_hook[hook]!r} does not match {tool}"
-        for tool in ("Write", "Edit", "Read"):
+        for tool in ("Write", "Edit", "Read", "NotebookEdit"):
             assert not rx.fullmatch(tool), f"{hook}: matcher {by_hook[hook]!r} wrongly matches {tool}"
     for hook in ("protect-files.sh", "backup-before-edit.sh"):
         rx = re.compile(by_hook[hook])
-        assert not rx.fullmatch("PowerShell") and not rx.fullmatch("Bash"), f"{hook} must stay on the file tools"
+        assert not rx.fullmatch("PowerShell") and not rx.fullmatch("Bash") and not rx.fullmatch("Monitor"), \
+            f"{hook} must stay on the file tools"
+        assert rx.fullmatch("NotebookEdit"), f"{hook}: matcher {by_hook[hook]!r} does not match NotebookEdit"
 
 
 def test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks():
