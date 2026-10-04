@@ -636,3 +636,9 @@ ruling.
    install, and may prefer to skip it and ship Layer 2 as "pending Steam verify" or recovery-only.
 4. **Branch push for a CI POSIX leg before the real push** (T14/T21): default is "no push at all until the
    go-ahead", with POSIX covered by the Docker devshell; the user may allow a branch push.
+
+## Controller rulings on the draft's open questions (2026-10-04)
+
+- **Q1 `--agent` names:** `claude|codex|all|auto`, `both` kept as an alias; spec line updated in the release commit.
+- **Q4 branch push for CI:** no push before the user's go-ahead; POSIX covered by the Docker devshell.
+- **Q2 (ship without an unfinished Plan 6/7?) and Q3 (Steam verify on a real install):** the user decides these at the readiness report (T20), together with the final manual batch, not before.
