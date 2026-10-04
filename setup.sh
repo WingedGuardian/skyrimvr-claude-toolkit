@@ -444,6 +444,16 @@ echo "Configuring the Codex hooks (.codex/hooks.json)..."
 CODEX_DEFS="$GAME_DIR/.codex/hooks.json"
 CODEX_STATE="none"
 case "$GAME_ROOT_WIN" in [A-Za-z]:/*) CODEX_WIN=1 ;; *) CODEX_WIN="" ;; esac
+# "Is this the folder the definitions were rendered for?" Windows paths are case-insensitive and pwd keeps
+# the case the user typed, so the comparison folds case there (ASCII, via tr -- this Git Bash's grep -i
+# aborts with -F). Only the comparison: the rendered path above is never case-folded.
+codex_same_root() {
+    if [ -n "$CODEX_WIN" ]; then
+        tr 'A-Z' 'a-z' < "$CODEX_DEFS" | grep -qF "$(printf '%s' "$GAME_ROOT_WIN/.codex/hooks/skyguard-entry.ps1" | tr 'A-Z' 'a-z')"
+    else
+        grep -qF "$GAME_ROOT_WIN/.codex/hooks/skyguard-entry.ps1" "$CODEX_DEFS"
+    fi
+}
 if [ ! -f "$CODEX_DEFS" ]; then
     echo "  MISSING: .codex/hooks.json -- Codex has no toolkit hooks in this folder."
 elif grep -q '{{CODEX_ROOT' "$CODEX_DEFS"; then
@@ -472,7 +482,7 @@ elif grep -q '{{CODEX_ROOT' "$CODEX_DEFS"; then
             echo "  !! Claude Code is configured as usual; only the Codex side is affected."
         fi
     fi
-elif grep -qF "$GAME_ROOT_WIN/.codex/hooks/skyguard-entry.ps1" "$CODEX_DEFS"; then
+elif codex_same_root; then
     CODEX_STATE="configured"
     echo "  Already configured: .codex/hooks.json"
 else
@@ -491,6 +501,7 @@ if [ "$CODEX_STATE" = "configured" ]; then
     echo ""
     echo "Codex users: Codex runs these hooks only after you approve them. Open \`codex\` in this folder, type"
     echo "/hooks, and approve the 2 Skyrim toolkit hooks. Until then NOTHING is checked and Codex does not say so."
+    echo "Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you."
     echo "Check any time with: bash tools/hook-canary.sh"
 fi
 

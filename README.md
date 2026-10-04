@@ -434,6 +434,8 @@ and it skips unapproved ones **silently** -- no error, no warning, nothing check
 Skyrim folder, type `/hooks`, and approve the **2 Skyrim toolkit hooks**. Then check with
 `bash tools/hook-canary.sh`. When they run, each Codex session starts with `SKYGUARD: Codex hooks live`.
 
+Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you.
+
 Approve again when:
 
 - a toolkit update's CHANGELOG says **"re-approve your Codex hooks"** (Codex stops running an approved hook

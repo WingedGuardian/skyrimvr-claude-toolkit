@@ -5,6 +5,10 @@
 ### Codex support
 
 - **First Codex hook definitions (v1): approve them in /hooks.** Open `codex` in your Skyrim folder, type `/hooks`, approve the 2 Skyrim toolkit hooks; until then Codex runs none of them and does not say so.
+- **Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you.** (Measured: a non-git install, Codex started in `Data\Scripts`, 2 of 2 runs.)
+- The canary no longer counts a refused Codex call as guarded: a refusal leaves no transcript item, so one refusal used to hide one unguarded call (hooked 1 / called 1, HEALTHY).
+- A Codex tool call whose command is an argv list (not a string) is now guarded with the shell rules, and refused when an element is not a string; it used to be allowed unexamined.
+- `setup.sh` no longer warns that the install moved when you re-run it from a folder typed in a different letter case on Windows.
 - `setup.sh` configures Codex: it fills in `.codex/hooks.json` for your install folder and prints the approval step.
 - `setup.sh` fills your paths into `AGENTS.md`, the instruction file Codex reads, exactly as into `CLAUDE.md`.
 - `setup.sh` writes the Python path into the Codex hook scripts, and repairs it on a re-run after Python moves.

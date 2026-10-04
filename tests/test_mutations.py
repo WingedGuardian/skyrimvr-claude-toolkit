@@ -308,7 +308,7 @@ MUTATIONS = [
     # Definitions rendered for another folder must not pass as "Already configured".
     pytest.param(
         "setup.sh",
-        'elif grep -qF "$GAME_ROOT_WIN/.codex/hooks/skyguard-entry.ps1" "$CODEX_DEFS"; then',
+        "elif codex_same_root; then",
         "elif true; then",
         "tests/test_setup_paths.py::test_setup_warns_when_codex_definitions_point_elsewhere",
         id="setup-warns-when-codex-definitions-point-elsewhere",
@@ -1904,6 +1904,45 @@ MUTATIONS_TASK13 = [
 
 
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in MUTATIONS_TASK13]
+
+
+# Plan 4 final fix pass.
+_ADP = "tests/test_skyguard_codex_adapter.py::"
+MUTATIONS_FINAL = [
+    ("tools/skyguard/health.py", "            hooked = sum(max(0, n - refused.get(tool, 0)) for tool, n in hooked_by.items())",
+     "            hooked = sum(hooked_by.values())",
+     _COV + "test_coverage_excludes_refused_calls_from_hooked", "coverage-refused-calls-are-not-hooked"),
+    ("tools/skyguard/run.py", '    if v.decision != "allow":', "    if False:",
+     _COV + "test_the_engine_records_a_refusal_in_the_session_line_and_an_allow_does_not",
+     "engine-records-codex-refusals"),
+    ("tools/skyguard/adapters/codex.py", "            if isinstance(cmd, list):", "            if False:",
+     _ADP + "test_an_argv_list_command_is_guarded_as_a_shell_request", "codex-bash-argv-list-unjoined"),
+    ("tools/skyguard/adapters/codex.py", '    if not name.startswith("mcp__") and isinstance(cmd, list):',
+     "    if False:",
+     _ADP + "test_an_argv_list_command_gets_the_shell_rules", "codex-unknown-tool-argv-list-allowed"),
+    ("tools/skyguard/adapters/codex.py",
+     "    if not isinstance(cmd, list) or not cmd or not all(isinstance(x, str) for x in cmd):",
+     "    if not isinstance(cmd, list):",
+     _ADP + "test_an_argv_list_with_a_non_string_element_is_refused", "codex-argv-list-non-string-fails-open"),
+    ("tools/skyguard/adapters/codex.py", """    return "'" + arg.replace("'", "''") + "'\"""",
+     """    return "'" + arg + "'\"""",
+     _ADP + "test_an_argv_list_is_quoted_so_one_element_stays_one_argument", "codex-argv-quote-not-escaped"),
+    ("setup.sh", "        tr 'A-Z' 'a-z' < \"$CODEX_DEFS\" | grep -qF",
+     "        cat \"$CODEX_DEFS\" | grep -qF",
+     "tests/test_setup_paths.py::test_a_rerun_from_a_differently_cased_folder_is_not_a_moved_install",
+     "setup-moved-install-check-is-case-sensitive"),
+    ("setup.sh", '    echo "Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you."',
+     "    :", "tests/test_setup_paths.py::test_setup_tells_the_user_to_start_codex_in_the_game_folder",
+     "setup-omits-the-codex-subfolder-warning"),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in MUTATIONS_FINAL]
+# The PowerShell entry's last line. A non-zero exit after a printed verdict makes the hook command's `||`
+# rerun the other shell, which prints a SECOND JSON: Codex cannot parse it and RUNS the command.
+MUTATIONS.append(pytest.param(
+    "agent/guards/adapters/codex/skyguard-entry.ps1", "\r\nexit 0", "\r\nexit 1",
+    "tests/test_codex_entry.py::test_every_path_exits_zero[pwsh-pre-tool-hi]",
+    marks=pytest.mark.skipif(sys.platform != "win32", reason="the PowerShell entry is tested on Windows"),
+    id="codex-ps1-final-exit-not-zero"))
 
 
 def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:

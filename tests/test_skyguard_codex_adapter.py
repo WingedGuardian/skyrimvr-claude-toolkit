@@ -354,6 +354,31 @@ def test_a_refused_call_is_not_logged_as_an_unhooked_tool(tmp_path):
     assert not (tmp_path / ".claude" / "backups" / "codex-unhooked-tools.log").exists()
 
 
+def test_an_argv_list_command_is_guarded_as_a_shell_request():
+    r = codex.to_request(_pre("exec_command", {"command": ["git", "status"]}), "linux")
+    assert r.kind == "shell" and r.command == "git status" and r.shell == "bash"
+    r = codex.to_request(_pre("Bash", {"command": ["Get-Date", "-Format", "o"]}), "win32")
+    assert r.kind == "shell" and r.shell == "powershell" and r.command == "Get-Date -Format o"
+
+
+def test_an_argv_list_is_quoted_so_one_element_stays_one_argument():
+    bash = codex.to_request(_pre("Bash", {"command": ["echo", "a b;c"]}), "linux").command
+    assert bash == "echo 'a b;c'"
+    ps = codex.to_request(_pre("Bash", {"command": ["echo", "a b;c", "it's"]}), "win32").command
+    assert ps == "echo 'a b;c' 'it''s'"
+
+
+@pytest.mark.parametrize("cmd", [[], ["rm", 5], ["rm", None], [["rm"]], ["rm", {"a": 1}]])
+def test_an_argv_list_with_a_non_string_element_is_refused(cmd):
+    assert codex.to_request(_pre("exec_command", {"command": cmd}), "win32").failure
+    assert codex.to_request(_pre("Bash", {"command": cmd}), "win32").failure
+
+
+def test_an_argv_list_command_gets_the_shell_rules(tmp_path):
+    v = _run(tmp_path, _pre("exec_command", {"command": ["rm", "-rf", str(tmp_path).replace(chr(92), "/")]}))
+    assert v.decision == "deny" and v.code.startswith("shell."), v
+
+
 def test_the_unreadable_env_text_is_agent_neutral():
     assert "protect-bash.sh" not in codex.ENV_UNREADABLE and "GUARD INERT" in codex.ENV_UNREADABLE
 

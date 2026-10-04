@@ -45,7 +45,7 @@ def _telemetry(a, v) -> None:
         health.trim_latency(a.telemetry, a.role)
 
 
-def _session_line(a, session_id, tool="", source=None, transcript=None) -> None:
+def _session_line(a, session_id, tool="", source=None, transcript=None, hook=None) -> None:
     """Per-session record for the canary's coverage check (health.py). Written BEFORE the engine decides, so a
     call the engine denies still counts as seen. Never changes the verdict: any failure is swallowed."""
     try:
@@ -53,6 +53,8 @@ def _session_line(a, session_id, tool="", source=None, transcript=None) -> None:
             return
         if transcript is not None:
             health.session_record(a.telemetry, session_id, "start", source or "-", transcript)
+        elif hook:
+            health.session_record(a.telemetry, session_id, hook, tool or "-")
         elif a.role in health.COUNTING_HOOKS[a.agent]:
             health.session_record(a.telemetry, session_id, a.role, tool or "-")
     except Exception:  # noqa: BLE001 -- telemetry must never reach the decision path
@@ -97,6 +99,10 @@ def _codex(a, raw: str) -> int:
 
     v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit))
     _telemetry(a, v)
+    if v.decision != "allow":
+        # A refused call leaves no item in the agent's transcript, so the canary must not count its hook
+        # record as "hooked" (health._coverage_rows subtracts these).
+        _session_line(a, req.session_id, tool=req.tool_name, hook="refused")
     _emit("SKYGUARD-OK\n" + codex.render(v))
     return 0
 

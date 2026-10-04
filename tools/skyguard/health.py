@@ -22,6 +22,8 @@ Per-session records (Task 13), one file per agent session, `<agent>/sessions/<se
 
     <t> start <source> <transcript_path>     SessionStart (the transcript path is the REST of the line)
     <t> <hook> <tool_name>                   every guarded tool call, written before the engine decides
+    <t> refused <tool_name>                  Codex only: written after the engine REFUSED that call (a refused
+                                             call leaves no transcript item, so it is excluded from "hooked")
 
 `coverage()` compares them with the agent's own transcript (tools/skyguard/transcripts.py): a call that
 ran with no record is a call the hook never saw (E24: some Windows surfaces emit no PreToolUse at all).
@@ -342,7 +344,9 @@ def _coverage_rows(project, agent, last=5):
             hooked = sum(min(hooked_by.get(t, 0), counts.get(t, 0)) for t in tools)
         else:
             called = sum(counts.values())
-            hooked = sum(hooked_by.values())
+            # A refused call is recorded by the hook but leaves no transcript item: exclude it from both sides.
+            refused = per_hook.get("refused", {})
+            hooked = sum(max(0, n - refused.get(tool, 0)) for tool, n in hooked_by.items())
         short = hooked < called
         state = "NOT EXERCISED" if called == 0 else "DEGRADED" if short else "HEALTHY"
         rows.append((sid, surface, hooked, called, state, ""))

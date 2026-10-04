@@ -2203,6 +2203,10 @@ spec §7.5 "guards off → restart relocks" probe runs in Plan 6/8); `ADAPTING.m
 --agent`, the paths-file move, rename and the release → Plan 8; Codex desktop app / IDE extensions →
 unclaimed until a live probe (D14), offered to the user as an optional probe after Task 14.
 
+**Carry list for Plan 6 (agent self-protection):** an `apply_patch` or `Set-Content` that writes
+`.codex/**` or `tools/skyguard/**` -- the hook definitions, entries and the engine itself -- is a plain
+allow today, so the agent can disable its own guards. That is Layer 2's scope (found in Plan 4's final review).
+
 ## Execution method
 
 Subagent-driven (roadmap cadence for guard/engine work): a fresh implementer and a reviewer per task,

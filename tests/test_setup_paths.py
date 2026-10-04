@@ -445,3 +445,34 @@ def test_setup_prints_the_codex_approval_step(game_dir):
                  "/hooks, and approve the 2 Skyrim toolkit hooks. Until then NOTHING is checked",
                  "Check any time with: bash tools/hook-canary.sh"):
         assert part in r.stdout, part
+
+
+SUBFOLDER_LINE = ("Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, "
+                  "and Codex does not tell you.")
+
+
+def test_setup_tells_the_user_to_start_codex_in_the_game_folder(game_dir):
+    r = run_setup(game_dir)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Start Codex in the game folder itself, never a subfolder" in r.stdout, r.stdout
+    assert "from a subfolder no hook runs, and Codex does not tell you." in r.stdout
+
+
+@pytest.mark.parametrize("rel", ["README.md", "CHANGELOG.md", "agent/instructions/codex.md"])
+def test_the_codex_subfolder_warning_is_in_the_docs(rel):
+    text = " ".join((REPO / rel).read_text(encoding="utf-8").split())
+    assert SUBFOLDER_LINE in text, rel
+
+
+@windows_only
+def test_a_rerun_from_a_differently_cased_folder_is_not_a_moved_install(tmp_path):
+    """Windows paths are case-insensitive: re-running setup from a cwd typed in another case must not warn
+    that the install moved. The comparison is case-folded; the rendered path keeps its case."""
+    game = make_game(tmp_path, name="Skyrim VR")
+    assert run_setup(game).returncode == 0
+    first = game.joinpath(".codex", "hooks.json").read_bytes()
+    r = run_setup(type(game)(str(game).swapcase()))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "points at" not in r.stdout, r.stdout
+    assert "Already configured: .codex/hooks.json" in r.stdout, r.stdout
+    assert game.joinpath(".codex", "hooks.json").read_bytes() == first

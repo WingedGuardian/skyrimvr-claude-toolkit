@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import ntpath
 import posixpath
+import re
+import shlex
 import sys
 
 from .. import patch_paths
@@ -32,6 +34,27 @@ ENV_UNREADABLE = (
     "GUARD INERT: the Codex hook found .claude/skyrim-paths.env but could not read it, so it cannot tell "
     "which directories are the Skyrim install. Refusing rather than guarding the wrong set. "
     "Fix or delete that file (re-run setup.sh).")
+
+
+_SAFE_PS = re.compile(r"[A-Za-z0-9_@%+=:,./\-]+\Z")
+
+
+def _quote(arg: str, shell: str) -> str:
+    """One argv element as one shell word. Single quotes in both shells: bash closes and reopens around an
+    embedded quote, PowerShell doubles it."""
+    if arg and (shlex.quote(arg) == arg if shell == "bash" else _SAFE_PS.match(arg)):
+        return arg
+    if shell == "bash":
+        return shlex.quote(arg)
+    return "'" + arg.replace("'", "''") + "'"
+
+
+def _argv_text(cmd, shell: str):
+    """A command given as an argv LIST -> one shell request text, or None when it is not a non-empty list of
+    strings. Left as 'other' it would be allowed unexamined, so the caller fails closed on None."""
+    if not isinstance(cmd, list) or not cmd or not all(isinstance(x, str) for x in cmd):
+        return None
+    return " ".join(_quote(x, shell) for x in cmd)
 
 
 def _s(v) -> str:
@@ -108,6 +131,8 @@ def to_request(raw: str, platform: str = sys.platform) -> Request:
                            paths=tuple(_resolve(p, common["cwd"], None, platform) for _, p in ops),
                            ops=tuple(o for o, _ in ops), **common)
         if name == "Bash":
+            if isinstance(cmd, list):
+                cmd = _argv_text(cmd, "powershell" if platform.startswith("win") else "bash")
             if not isinstance(cmd, str):
                 return Request(event="pre_tool", failure="shell call without a command string", **common)
             shell = "powershell" if platform.startswith("win") else "bash"
@@ -121,6 +146,10 @@ def to_request(raw: str, platform: str = sys.platform) -> Request:
                            ops=tuple(o for o, _ in ops), **common)
     except patch_paths.PatchParseError as e:
         return Request(event="pre_tool", failure="unreadable patch: {}".format(e), **common)
+    if not name.startswith("mcp__") and isinstance(cmd, list):
+        cmd = _argv_text(cmd, "powershell" if platform.startswith("win") else "bash")
+        if cmd is None:
+            return Request(event="pre_tool", failure="shell call with an argv list that is not strings", **common)
     if not name.startswith("mcp__") and isinstance(cmd, str):
         # An unknown tool carrying a command string: guard it as a shell call, in case a future Codex renames
         # its shell tool. The engine still records it as unhooked.

@@ -336,6 +336,38 @@ def test_the_engine_records_a_codex_session_and_its_calls(tmp_path):
     assert [ln[1:] for ln in lines] == [["start", "startup", "C:/t/rollout.jsonl"], ["pre-tool", "Bash"]]
 
 
+def _append(f, line):
+    with open(f, "a", encoding="utf-8", newline="\n") as fh:
+        fh.write(line + "\n")
+
+
+def test_coverage_excludes_refused_calls_from_hooked(tmp_path):
+    """A refused call leaves no transcript item, so counting its hook record as 'hooked' let one refusal hide
+    one unguarded call: hooked 2 / called 2 HEALTHY. The refusal is recorded and subtracted."""
+    f = _session(tmp_path, "codex", SID, EXEC, ["Bash", "mcp__x"])
+    _append(f, "1800000009.0 refused mcp__x")
+    assert _cov(tmp_path, "codex") == [(SID, "exec", 1, 2, "DEGRADED")]
+
+
+def test_a_refusal_alone_does_not_make_a_session_degraded(tmp_path):
+    f = _session(tmp_path, "codex", SID, EXEC, ["Bash", "apply_patch", "Bash"])
+    _append(f, "1800000009.0 refused Bash")
+    assert _cov(tmp_path, "codex") == [(SID, "exec", 2, 2, "HEALTHY")]
+
+
+def test_the_engine_records_a_refusal_in_the_session_line_and_an_allow_does_not(tmp_path):
+    root = _codex_root(tmp_path)
+    base = {"session_id": SID, "transcript_path": "C:/t/r.jsonl", "cwd": str(root).replace(chr(92), "/"),
+            "hook_event_name": "PreToolUse", "tool_name": "Bash"}
+    _run_engine(root, ["codex", "pre-tool"], dict(base, tool_input={"command": "echo hi"}))
+    f = _sessions(root, "codex") / "sessions" / (SID + ".log")
+    assert "refused" not in f.read_text(encoding="utf-8")
+    _run_engine(root, ["codex", "pre-tool"], dict(base, tool_input={
+        "command": "reg delete HKLM\\SOFTWARE\\WOW6432Node\\Bethesda Softworks /f"}))
+    assert [ln.split()[1:] for ln in f.read_text(encoding="utf-8").splitlines()] == [
+        ["pre-tool", "Bash"], ["pre-tool", "Bash"], ["refused", "Bash"]]
+
+
 def test_a_denied_call_is_still_recorded_as_seen(tmp_path):
     root = _codex_root(tmp_path)
     p = {"session_id": SID, "transcript_path": "C:/t/r.jsonl", "cwd": str(root).replace(chr(92), "/"),
