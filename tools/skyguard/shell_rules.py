@@ -13,6 +13,7 @@ import re
 from . import anchored
 from . import audit as _audit
 from . import deletes
+from . import mcp_rules
 from . import paths
 from . import rules
 from . import shellparse
@@ -166,6 +167,12 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     champ = anchored.champollion(command, parsed, roots, cwd, env)
     if champ:
         return deny("S-CHAMPOLLION", champ)
+    # Task 11: the DevBench console reached by curl or devbench-cli.sh (mcp_rules.py judges the same calls as the MCP hook).
+    dev = mcp_rules.scan_shell(command, parsed, roots, env)
+    if dev and dev[0] == "S-DEVBENCH-CRASH":
+        reason = rules.message(dev[0], **dev[1])
+        audit.rule(HOOK, dev[0], "deny", reason)
+        return Verdict("deny", reason)
 
     # --- advise
     if dels.relative_unknown:
@@ -183,6 +190,11 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         op, save = resaver
         reason = rules.message("S-RESAVER-APPLY", op=op, save=save or "the save")
         audit.rule(HOOK, "S-RESAVER-APPLY", "ask", reason)
+        return Verdict("ask", reason)
+
+    if dev:                                                  # S-DEVBENCH-SAVE: the only other thing scan_shell returns
+        reason = rules.message(dev[0], **dev[1])
+        audit.rule(HOOK, dev[0], "ask", reason)
         return Verdict("ask", reason)
 
     tool = anchored.external_out(parsed, roots, cwd, env)

@@ -213,7 +213,9 @@ def test_protect_bash_decides(project, command, expected, why):
 # The defect itself
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh"])
+MCP_RESET = {"tool_name": "mcp__devbench-vr__console", "tool_input": {"command": "smp reset"}}     # protect-mcp (Task 11): a call the engine denies
+
+@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh", "protect-mcp.sh"])
 def test_a_windows_python_path_still_produces_parseable_json(tmp_path, name):
     r"""A backslash path (`C:\Users\...\python.exe`) is what a hand-edit or a careless
     paste puts in the hook. It is echoed into a JSON string via printf, and `\U` is not a
@@ -222,7 +224,7 @@ def test_a_windows_python_path_still_produces_parseable_json(tmp_path, name):
     root = install_hooks(tmp_path / "install",
                          python="C:" + BS + "Users" + BS + "me" + BS + "AppData" + BS + "python.exe")
     payload = (cmd('rm -rf "C:/x"') if name == "protect-bash.sh"
-               else fpath("C:/Games/Skyrim VR/Data/M.esp"))
+               else MCP_RESET if name == "protect-mcp.sh" else fpath("C:/Games/Skyrim VR/Data/M.esp"))
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
     r = subprocess.run([_bash(), str(root / ".claude" / "hooks" / name)],
                        input=json.dumps(payload), capture_output=True, text=True,
@@ -245,7 +247,14 @@ def test_a_blocking_hook_refuses_when_it_cannot_see_its_input(project, hook, fie
     assert "GUARD INERT" in reason, reason
 
 
-@pytest.mark.parametrize("hook", ["protect-files.sh", "protect-bash.sh"])
+def test_protect_mcp_refuses_when_it_cannot_see_the_tool_name(project):
+    """The same guarantee for the DevBench hook: a payload whose tool_name did not arrive is a call it cannot judge."""
+    got, reason = fire(project, "protect-mcp.sh", {"tool_input": {"command": "smp reset"}})
+    assert got == "deny", "protect-mcp allowed a call whose tool it could not read"
+    assert "GUARD INERT" in reason, reason
+
+
+@pytest.mark.parametrize("hook", ["protect-files.sh", "protect-bash.sh", "protect-mcp.sh"])
 def test_a_blocking_hook_refuses_on_genuinely_empty_stdin(project, hook):
     """The exact shape `cat /dev/stdin` produced on every invocation."""
     got, reason = fire(project, hook, None)
@@ -270,12 +279,13 @@ def test_every_hook_writes_a_liveness_heartbeat(project):
     hook that stops writing one has removed the sole detector for its own death."""
     for hook, payload in (("protect-files.sh", fpath("C:/work/x.md")),
                           ("protect-bash.sh", cmd("ls -la")),
+                          ("protect-mcp.sh", {"tool_name": "mcp__devbench-vr__console", "tool_input": {"command": "help"}}),
                           ("backup-before-edit.sh", fpath("C:/work/x.md")),
                           ("snapshot-before-tool.sh", cmd("ls -la"))):
         fire(project, hook, payload)
     hb = project / ".claude" / "backups" / ".hook-heartbeat"
     alive = {f.name for f in hb.iterdir() if not f.name.endswith(".blind")}
-    assert alive == {"protect-files", "protect-bash",
+    assert alive == {"protect-files", "protect-bash", "protect-mcp",
                      "backup-before-edit", "snapshot-before-tool"}, sorted(alive)
     for f in hb.iterdir():
         if not f.name.endswith(".blind"):
@@ -498,7 +508,7 @@ def test_a_configured_config_directory_outside_documents_is_guarded(tmp_path):
     assert _decide(root, f'rm -rf "{other}"') != "deny"
 
 
-@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh"])
+@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh", "protect-mcp.sh"])
 @pytest.mark.parametrize("python,why", [
     ("/c/nonexistent/python.exe", "Python uninstalled after setup"),
     ("{{PYTHON_PATH}}", "the zip was extracted and setup.sh never run"),
@@ -509,7 +519,7 @@ def test_a_blocking_hook_refuses_when_python_is_unusable(tmp_path, name, python,
     printf -- says so."""
     root = install_hooks(tmp_path / "install", names={name}, python=python)
     payload = (cmd('rm -rf "C:/Games/Skyrim VR"') if name == "protect-bash.sh"
-               else fpath("C:/Games/Skyrim VR/Data/M.esp"))
+               else MCP_RESET if name == "protect-mcp.sh" else fpath("C:/Games/Skyrim VR/Data/M.esp"))
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
     r = subprocess.run([_bash(), str(root / ".claude" / "hooks" / name)],
                        input=json.dumps(payload), capture_output=True, text=True,
@@ -542,6 +552,7 @@ def _run_wrapper(root, env, name, payload):
 BLOCKING = [
     ("protect-bash.sh", {"tool_name": "Bash", "tool_input": {"command": "ls"}}),
     ("protect-files.sh", {"tool_name": "Write", "tool_input": {"file_path": "C:/work/notes.md"}}),
+    ("protect-mcp.sh", {"tool_name": "mcp__devbench-vr__console", "tool_input": {"command": "help"}}),
 ]
 NONBLOCKING = [
     ("backup-before-edit.sh", "backup-before-edit"),
@@ -760,7 +771,7 @@ def test_a_root_on_an_msys_mount_still_gets_its_windows_spelling(tmp_path):
     _check_root_spelling(root, "/tmp" + here[len(tmp_win):] + "/.claude/hooks/protect-bash.sh")
 
 
-@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh", "backup-before-edit.sh",
+@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh", "protect-mcp.sh", "backup-before-edit.sh",
                                   "snapshot-before-tool.sh", "session-kb-guard.sh"])
 def test_a_fresh_install_gets_its_heartbeat_directory(tmp_path, name):
     """mkdir now runs only when the directory is missing. On a fresh install it IS missing, and a
@@ -768,7 +779,8 @@ def test_a_fresh_install_gets_its_heartbeat_directory(tmp_path, name):
     root = install_hooks(tmp_path / "install", names={name})
     payload = ({"hook_event_name": "SessionStart", "source": "compact"} if name == "session-kb-guard.sh"
                else _shell("ls") if name in ("protect-bash.sh", "snapshot-before-tool.sh")
-               else _write("C:/work/notes.md"))
+               else {"tool_name": "mcp__devbench-vr__console", "tool_input": {"command": "help"}}
+               if name == "protect-mcp.sh" else _write("C:/work/notes.md"))
     hb = root / ".claude" / "backups" / ".hook-heartbeat"
     assert not hb.exists()
     r = _run_wrapper(root, dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), name, payload)

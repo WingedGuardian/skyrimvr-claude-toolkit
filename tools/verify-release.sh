@@ -72,7 +72,7 @@ ROOT="$WORK/skyrimvr-claude-toolkit-$VER"
 # literal string "4 hook(s) proven".
 floor=$(sed -n 's/.*test "\$nhooks" -ge \([0-9][0-9]*\).*/\1/p' \
         "$ROOT/../.github/workflows/release.yml" 2>/dev/null | head -1)
-case "$floor" in ''|*[!0-9]*) floor=5 ;; esac
+case "$floor" in ''|*[!0-9]*) floor=6 ;; esac
 n=$(find "$ROOT/.claude/hooks" -name '*.sh' 2>/dev/null | wc -l)
 [ "$n" -ge "$floor" ] && ok "hook scripts in payload ($n, floor $floor)" \
                       || bad "hook scripts" "only $n, floor is $floor"

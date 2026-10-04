@@ -504,6 +504,40 @@ def test_anchored_rules_stay_fast(name, shell):
     assert_linear(name + "/" + shell, make)
 
 
+# Plan 5 Task 11: the DevBench scan reads curl bodies, a CLI line and (on a parse failure) the raw text.
+def _devbench_shapes(N):
+    U = "http://127.0.0.1:8921/api/tool/"
+    W = "w" * 180                                  # long words keep the shapes under the parser's token cap
+    return {
+        "devbench-curl-many-bodies": "curl " + U + "console " + ("-d '{\"command\":\"help " + W + "\"}' ") * (N // 210),
+        "devbench-curl-long-body": "curl " + U + "console -d '{\"command\":\"help" + "a" * N + "\"}'",
+        "devbench-curl-damaged-body": "curl " + U + "console -d '{\"command\":\"" + "a" * N + "'",
+        "devbench-curl-key-run": "curl " + U + "console -d '" + '{"command":"' * (N // 12) + "'",
+        "devbench-curl-many-calls": ("curl " + U + "game -d '{\"action\":\"save\",\"name\":\"" + W + "\"}'; ") * (N // 270),
+        "devbench-cli-long-exec": "bash tools/devbench-cli.sh exec " + "a" * N,
+        "devbench-cli-many-calls": ("bash tools/devbench-cli.sh exec help " + W + "; ") * (N // 440),
+        "devbench-text-fallback": "$C " + U + "console " + ("smp reset " + W + " ") * (N // 200) + "(",
+        "devbench-flag-word": "curl " + U + "console -" + "a" * N,
+    }
+
+
+def test_the_devbench_shapes_reach_the_devbench_code():
+    """Every shape but the text-fallback one must parse at 80 KB and yield execs, or it measures only the
+    parse-failure path. (The fallback shape is unterminated on purpose.)"""
+    from skyguard import shellparse
+    for name, cmd in _devbench_shapes(LARGE).items():
+        p = shellparse.parse(cmd, "bash")
+        assert p.ok != (name == "devbench-text-fallback") and (p.execs or not p.ok), (name, p.why)
+
+
+@pytest.mark.parametrize("name", sorted(_devbench_shapes(SMALL)))
+def test_devbench_rules_stay_fast(name):
+    def make(n):
+        cmd = _devbench_shapes(n)[name]
+        return lambda: shell_rules.decide(cmd, ROOTS, _QuietAudit(), cwd="/x/install", shell="bash")
+    assert_linear(name, make)
+
+
 # Plan 5 Task 7b: same-command literal assignments. The parser records them and expands each use; assign.py counts
 # every write over the whole command. Long values/words keep the shapes under the parser's token cap at 80 KB so the
 # recording and expansion code really runs (test_the_assignment_shapes_reach_the_resolver checks it).

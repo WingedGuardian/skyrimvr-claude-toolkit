@@ -265,7 +265,7 @@ def test_hooks_prefer_a_regular_python_over_the_store_alias(game_dir, py, python
         "FAKE_PYTHON_EXE_py": py, "FAKE_PYTHON_EXE_python": python, "FAKE_PYTHON_EXE_python3": python3})
     assert r.returncode == 0, r.stdout + r.stderr
     lines = hook_python_lines(game_dir)
-    assert len(lines) == 5, sorted(lines)
+    assert len(lines) == 6, sorted(lines)
     for hook, line in lines.items():
         assert line == f'PY="{_fwd(expected)}"', f"{why}: {hook}: {line}"
 

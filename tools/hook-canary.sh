@@ -34,7 +34,7 @@ HB="$ROOT/.claude/backups/.hook-heartbeat"
 # session-kb-guard fires ONCE, at SessionStart. It therefore reads ALIVE early in a
 # session and STALE later on, which is accurate rather than a fault: "last payload 140
 # min ago" is exactly what a once-per-session hook looks like two hours in.
-HOOKS="protect-files protect-bash backup-before-edit snapshot-before-tool session-kb-guard"
+HOOKS="protect-files protect-bash protect-mcp backup-before-edit snapshot-before-tool session-kb-guard"
 STALE_MIN="${HOOK_CANARY_STALE_MIN:-120}"
 
 [ -d "$ROOT/.claude/hooks" ] || { echo "no .claude/hooks under $ROOT -- cannot check" >&2; exit 2; }

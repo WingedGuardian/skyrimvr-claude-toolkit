@@ -42,6 +42,9 @@ LAYOUTS = {
     # Plan 5 Task 6: bash would expand $X here, so the guard cannot know the folder -> S-INERT-CONFIG.
     "malformed": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2 $X/mods"\n'),
     # Plan 5 Task 7: a Mod Organizer setup, so S-DEL-MO2 has roots to protect.
+    # Plan 5 Task 11: a config dir that holds a Saves folder with one save (cfg/Saves/Existing.ess), so the DevBench
+    # save-exists check has a filesystem to read. `<install>` is filled with the temp install's real path.
+    "saves": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_CONFIG_DIR="<install>/cfg"\n'),
     "mo2": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2/mods"\n'
                          'SKYRIM_MO2_OVERWRITE="D:/MO2/overwrite"\n'),
 }
@@ -75,8 +78,11 @@ def make_install(base: Path, hooks_src: Path, layout: str) -> Path:
     if (REPO / "tools" / "skyguard").is_dir():
         shutil.copytree(REPO / "tools" / "skyguard", root / "tools" / "skyguard",
                         ignore=shutil.ignore_patterns("__pycache__"))
+    if layout == "saves":
+        (root / "cfg" / "Saves").mkdir(parents=True)
+        (root / "cfg" / "Saves" / "Existing.ess").write_bytes(b"x")
     if env:
-        (root / ".claude" / "skyrim-paths.env").write_text(env, encoding="utf-8", newline="\n")
+        (root / ".claude" / "skyrim-paths.env").write_text(env.replace("<install>", root.as_posix()), encoding="utf-8", newline="\n")
     return root
 
 
@@ -164,7 +170,7 @@ def engine_verdict(install: Path, hook: str, payload) -> dict:
     tools = str(REPO / "tools")
     if tools not in sys.path:
         sys.path.insert(0, tools)
-    from skyguard import paths, shell_rules, write_rules
+    from skyguard import mcp_rules, paths, shell_rules, write_rules
     from skyguard.adapters import claude
     from skyguard.audit import Audit
     from skyguard.verdict import Verdict
@@ -183,6 +189,10 @@ def engine_verdict(install: Path, hook: str, payload) -> dict:
             env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
             v = ee.call(shell_rules.decide, (p["command"], paths.roots(root, root_win, env), audit), cwd=cwd,
                         shell=p.get("shell", ""))
+    elif hook == "protect-mcp.sh":
+        env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
+        v = ee.call(mcp_rules.decide, (p["tool_name"], p["mcp_input"], audit),
+                    roots=paths.roots(root, root_win, env))
     else:
         # Plan 5 Task 9: the write guard's zone notes need the roots, as run.py passes them.
         env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)

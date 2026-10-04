@@ -36,7 +36,8 @@ make a failing test pass; that erases the yardstick.
 
 Layouts (`declared`, `undeclared`, `metachar`, `config`) are built fresh in a temp dir by `make_install`.
 Intended rows may also use `malformed` (Task 6: an unreadable protection key) and `mo2` (Task 7: Mod Organizer
-`mods/` and `overwrite/` declared at `D:/MO2/...`).
+`mods/` and `overwrite/` declared at `D:/MO2/...`) and `saves` (Task 11: a declared config dir `<install>/cfg` whose
+`Saves/` holds one save, `Existing.ess`, so the DevBench save-exists check has a folder to read).
 
 ## `intended.jsonl` (hand-authored)
 

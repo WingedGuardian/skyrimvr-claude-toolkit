@@ -31,7 +31,7 @@ def test_backslash_python_path_reaches_hooks_intact(game_dir):
     assert result.returncode == 0, f"setup.sh failed:\n{result.stdout}\n{result.stderr}"
 
     lines = hook_python_lines(game_dir)
-    assert len(lines) == 5, f"setup.sh configured {sorted(lines)}, expected all five hooks"
+    assert len(lines) == 6, f"setup.sh configured {sorted(lines)}, expected all six hooks"
 
     for hook, line in lines.items():
         assert "{{PYTHON_PATH}}" not in line, f"{hook}: placeholder was never substituted"
@@ -52,7 +52,7 @@ def test_the_real_interpreter_is_what_gets_written(game_dir):
     result = run_setup(game_dir)
     assert result.returncode == 0, f"setup.sh failed:\n{result.stdout}\n{result.stderr}"
     lines = hook_python_lines(game_dir)
-    assert len(lines) == 5
+    assert len(lines) == 6
     for hook, line in lines.items():
         path = line[len('PY="'):-1]
         assert "{{" not in path and "\\" not in path, f"{hook}: {line}"
@@ -68,7 +68,7 @@ def test_a_path_containing_an_ampersand_is_not_mangled_by_sed(game_dir):
     result = run_setup(game_dir, env_overrides={"FAKE_PYTHON_EXE": path}, shim_path=True)
     assert result.returncode == 0, result.stderr
     lines = hook_python_lines(game_dir)
-    assert len(lines) == 5
+    assert len(lines) == 6
     for hook, line in lines.items():
         assert line == f'PY="{path}"', f"{hook}: {line}"
 

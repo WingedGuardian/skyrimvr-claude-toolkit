@@ -314,7 +314,7 @@ fi
 echo ""
 echo "Configuring safety hooks..."
 HOOKS_MISSING=0
-for hook in protect-bash.sh protect-files.sh backup-before-edit.sh snapshot-before-tool.sh session-kb-guard.sh; do
+for hook in protect-bash.sh protect-files.sh protect-mcp.sh backup-before-edit.sh snapshot-before-tool.sh session-kb-guard.sh; do
     # Check it EXISTS first. `grep -q` on a missing file exits 2, which is not 0, so
     # control fell to the else branch and a hook that had been quarantined by antivirus
     # or lost to a partial unzip was reported as "Already configured".

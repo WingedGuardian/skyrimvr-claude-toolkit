@@ -521,3 +521,31 @@ Re-priced `--base dc8c59b`, N = 64,742: 0 errors; parse failures 63 → 63. Matr
 - After the mutation gate showed the round-0 per-statement poison (parser `poisons()`) and the `${N:=}` / `printf -v`
   write-count forms to be fully shadowed by `assign.poisoned` (their 9 mutations survived), those mechanisms were
   removed (one mechanism per concern). Re-priced, N = 64,867: all four per-rule item sets identical (68 still lifted).
+
+## Task 11: the DevBench guard (S-DEVBENCH-CRASH deny, S-DEVBENCH-SAVE ask, protect-mcp)
+
+Change: a DevBench `console` call whose command is on the deny list (`smp reset`, no argument; R14) is denied; a
+`game save` (or console `save <name>`) of an existing save in a declared config dir's `Saves/` asks, and asks when the
+folder or the name cannot be resolved. Reached by MCP (`protect-mcp.sh`), curl / Invoke-RestMethod to
+`/api/tool/<tool>`, and `devbench-cli.sh exec|tool`.
+
+`--base 058b0e2`, N = 65,137 (Bash 58,116, PowerShell 1,623, Write 3,720, Edit 1,673, MCP 5). 0 errors; parse failures
+63 -> 63. Matrix: allow>deny 1, allow>ask 4, everything else unchanged (deny>deny 299, ask>ask 12, advise 210). A final re-run on the finished code (N = 65,360, history had grown) gave the identical 1 deny and 4 asks.
+
+| rule | direction | n | hand-read |
+|---|---|---|---|
+| S-DEVBENCH-CRASH | newly-deny | 1 | a real session `curl ... -d '{"action":"exec","command":"smp reset",...}'` (URL held in `B="http://localhost:8921/api/tool"`, `"$B/console"`): **the measured crash command, true positive** |
+| S-DEVBENCH-SAVE | newly-ask | 4 | 4 real saves (console `save DiagScrambleReload01` twice, `game save BloodEffectFrozen`, `game save DevMusicTest`). The pricing driver declares no config dir, so every save asks (unresolvable); with the real config dir read (`C:/Users/Moona/Documents/My Games/Skyrim VR`, 5,344 files in Saves/) **all 4 are allow**: none of the four names exists as an `.ess` (`DevMusicTest.ess.tmp` is the half-written file KB line 1482 describes) |
+
+The 5 MCP items in history (`capture` x3, `console help`, `game list`) all allow. Of 134 curl-to-console, 62
+`devbench-cli` and 14 curl-to-`game` items in history, one is a crash command and none is an overwrite of an existing save.
+
+**A text match on interpreter code was priced and dropped.** The first version also denied a python/node heredoc that
+held both `/api/tool/console`/`devbench` and `smp reset`: 4 newly-deny, 3 of them scripts written in this session to TEST
+this very rule (the words as strings, not a call), 0 a real post. Dropped (approval fatigue outweighs an unseen shape);
+the broad `devbench` word is also no longer a trigger for the unparsable-command text fallback (only
+`/api/tool/console`). Recorded as a known gap, not handled.
+
+Timing (80 KB): 9 shapes (many `-d` bodies, a 80 KB body, a body with no closing quote, a key repeated 6,600 times,
+296 save calls, a 80 KB CLI word, an unterminated command naming the endpoint) all linear, worst 12 ms; the Saves
+folder is listed once per scan (a Saves folder holds thousands of files).

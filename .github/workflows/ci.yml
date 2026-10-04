@@ -165,6 +165,9 @@ jobs:
               rx = re.compile(seen.get(name, '(?!)'))
               if rx.fullmatch('Bash') or rx.fullmatch('PowerShell') or not rx.fullmatch('Write'):
                   bad.append(name)
+          rx = re.compile(seen.get('protect-mcp.sh', '(?!)'))
+          if not rx.fullmatch('mcp__devbench-vr__console') or rx.fullmatch('Bash') or rx.fullmatch('Write'):
+              bad.append('protect-mcp.sh')
           for n in bad:
               print(f'::error::hook matcher wrong for {n}: {seen.get(n)!r}')
           print(f'checked {len(seen)} PreToolUse hook matchers')

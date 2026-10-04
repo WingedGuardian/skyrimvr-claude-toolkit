@@ -814,6 +814,19 @@ All messages switch to the new templates; the legacy flag is cleared for each.
   `rule-S-DEVBENCH-SAVE-exists` (ask on every save → the new-name row red); `-unresolvable-asks`.
 - [ ] Commit: `"skyguard: DevBench guard — crash-listed console commands denied, save-overwrite asks"`.
 
+**Task 11 as built.** `tools/skyguard/mcp_rules.py` judges one DevBench tool call once (`judge`), so the three routes cannot
+disagree: MCP (`protect-mcp.sh`, `decide`), curl / `Invoke-RestMethod` (`-d`, `--data*`, `--json`, `-Body`; the URL path
+`/api/tool/<tool>` on any host and port) and `devbench-cli.sh exec|tool`, both found by `scan_shell` inside protect-bash.
+The deny-list is `rules.DEVBENCH_DENY` (data). Console `save <name>` is judged like `game save` (DevBench routes it the
+same way). Message deviations from the table: S-DEVBENCH-CRASH's second line says "or run it yourself" (there is no
+devbench skill to point at); S-DEVBENCH-SAVE reads "will save as {save}, replacing it if it exists" because the ask also
+covers an unresolvable folder. New ids: S-DEVBENCH-CRASH, S-DEVBENCH-SAVE (hook protect-bash, prefixes empty: a console
+body cannot be prefix-matched) and S-INERT-NOINPUT (hook protect-mcp: empty payload or no tool name).
+Ledgered gaps: `-d @file` / `--data-binary @-` / a body in an unresolved variable (unreadable offline); interpreter code
+that posts to the console (a text match was priced and dropped: 3 hits, all scripts written to test the rule); the
+`papyrus` tool and console `bat` files; the `/mcp` HTTP endpoint. Not safe by default (R4): an unparsable or opaque
+command that names `/api/tool/console` and `smp reset` denies.
+
 ### Task 12: Analysis failures auto-deny; opaque-command advisory (priced, may be dropped)
 
 **Corpus first** (`t12-*`):

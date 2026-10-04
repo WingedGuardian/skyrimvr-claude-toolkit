@@ -21,6 +21,7 @@ ROWS = {  # wrapper -> corpus row ids
 SIMPLE = {
     "backup-before-edit": lambda g: {"tool_name": "Edit", "tool_input": {"file_path": f"{g}/Data/a.ini"}},
     "snapshot-before-tool": lambda g: {"tool_name": "Bash", "tool_input": {"command": "ls"}},
+    "protect-mcp": lambda g: {"tool_name": "mcp__devbench-vr__console", "tool_input": {"action": "exec", "command": "help"}},
     "session-kb-guard": lambda g: {"hook_event_name": "SessionStart", "source": "startup"},
 }
 
@@ -48,7 +49,7 @@ def main() -> int:
     bash = git_bash()
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(inst))
     results, worst = {}, 0.0
-    for hook in ["protect-bash", "protect-files", "backup-before-edit", "snapshot-before-tool", "session-kb-guard"]:
+    for hook in ["protect-bash", "protect-files", "protect-mcp", "backup-before-edit", "snapshot-before-tool", "session-kb-guard"]:
         payloads = ([json.dumps(corpus[i]["payload"]).replace(GAME, game) for i in ROWS[hook]]
                     if hook in ROWS else [json.dumps(SIMPLE[hook](game))])
         wrapper = (inst / ".claude" / "hooks" / f"{hook}.sh").as_posix()

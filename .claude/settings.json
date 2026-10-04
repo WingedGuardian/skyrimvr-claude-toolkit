@@ -34,6 +34,17 @@
             "statusMessage": "Backing up file..."
           }
         ]
+      },
+      {
+        "matcher": "mcp__devbench.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-mcp.sh\"",
+            "timeout": 60,
+            "statusMessage": "Checking DevBench call..."
+          }
+        ]
       }
     ],
     "SessionStart": [

@@ -21,6 +21,11 @@ REMOVED = frozenset({
     "S-MOVE-INSTALL",       # Task 9 fix round 1: 107 of 107 hits in history were the user's deliberate deploys
 })
 
+# DevBench console commands that are refused (Task 11, R14). DATA, compared on whitespace-split lower-case words, so the
+# entry is the WHOLE command: `smp reset` is listed, `smp reset <anything>` is not. The only command MEASURED to crash
+# this install (a full reset of a 700+ plugin order); add a command here only once it has been measured.
+DEVBENCH_DENY = (("smp", "reset"),)
+
 RULES = {
     'S-INERT-NOCMD': {
         "decision": 'deny',
@@ -251,6 +256,36 @@ RULES = {
         "prefixes": [],
         "template": (
         'Note: {op} writes its output into the Skyrim install; check it landed where you meant.'
+    ),
+    },
+    'S-DEVBENCH-CRASH': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        "Blocked: '{op}' crashes a large load order in the live game.\n"
+        'Use a targeted command instead, or run it yourself.'
+    ),
+    },
+    'S-DEVBENCH-SAVE': {
+        "decision": 'ask',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'DevBench will save as {save}, replacing it if it exists.\n'
+        'Yes replaces that save; the old one is not kept.'
+    ),
+    },
+    'S-INERT-NOINPUT': {
+        "decision": 'deny',
+        "hook": 'protect-mcp',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'GUARD INERT: the DevBench guard received no tool call, so it checked nothing.\n'
+        'Investigate the hook payload before retrying.'
     ),
     },
     'W-INERT-NOPATH': {

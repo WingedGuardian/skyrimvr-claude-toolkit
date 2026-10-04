@@ -69,7 +69,7 @@ def decide_item(mods, item, root, root_win, audit):
     if name.startswith("mcp__"):
         mcp = mods.get("mcp_rules")
         if mcp is not None and hasattr(mcp, "decide"):
-            return call(mcp.decide, (name, ti, audit), **cands)
+            return call(mcp.decide, (name, ti, audit), roots=mods["paths"].roots(root, root_win, {}), **cands)
     return None  # a tool this engine has no rule for: allow
 
 

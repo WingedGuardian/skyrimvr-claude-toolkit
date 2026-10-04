@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from skyguard import backup, paths, session, shell_rules, snapshot, write_rules  # noqa: E402
+from skyguard import backup, mcp_rules, paths, session, shell_rules, snapshot, write_rules  # noqa: E402
 from skyguard.adapters import claude  # noqa: E402
 from skyguard.audit import Audit  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
@@ -36,7 +36,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("agent", choices=sorted(ADAPTERS))
     ap.add_argument("role", choices=["protect-bash", "protect-files", "backup-before-edit",
-                                     "snapshot-before-tool", "session-kb-guard"])
+                                     "snapshot-before-tool", "session-kb-guard", "protect-mcp"])
     ap.add_argument("--root", default="")
     ap.add_argument("--root-win", default="")
     ap.add_argument("--project", required=True)
@@ -72,6 +72,15 @@ def main(argv=None) -> int:
             env = None
         roots = paths.roots(a.root, a.root_win, env if env is not None else {})
         v = write_rules.decide(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""))
+    elif a.role == "protect-mcp":
+        # Task 11: the DevBench MCP tools. Only the save-exists check reads the declared config dirs, so an unreadable
+        # paths file costs that one answer (it then asks); it is not a reason to refuse every call.
+        try:
+            env = paths.read_config(paths_file, dict(os.environ))
+        except (OSError, ValueError):
+            env = None
+        roots = paths.roots(a.root, a.root_win, env if env is not None else {})
+        v = mcp_rules.decide(p["tool_name"], p["mcp_input"], audit, roots=roots)
     elif a.role == "backup-before-edit":
         backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit)
         v = Verdict()
