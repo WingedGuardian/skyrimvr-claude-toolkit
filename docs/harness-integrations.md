@@ -114,7 +114,23 @@ and native Python subprocess barriers. Package-manager attempts fail the origina
 Controls remove the barrier only against a controlled fake outer command. Python writes are
 constrained to fixtures; this is not an OS sandbox for arbitrary native subprocesses.
 
-The existing `tests/conftest.py` and guard corpus are deliberately untouched during Plan 2
-certification. **Bare pytest is not protected by this opt-in launcher.** Claude must wire the
-barrier into the canonical test entry point after certification. Known Node auto-installation
-in setup remains deferred and is intercepted rather than executed in contained tests.
+The launcher is the canonical test entry point (Plan 5, Task 15). `tests/conftest.py` exposes
+`harness_active()`, and with `TOOLKIT_REQUIRE_HARNESS=1` a pytest session that does not have the
+barriers installed errors at `pytest_configure` instead of skipping the barrier-dependent
+modules and going green. CI runs the whole suite as
+`python -B tests/run_harness_tests.py tests/ -v --durations=10` with that variable set (the
+launcher forwards it), then `scripts/check_could_not_check.py` fails the job on any
+`COULD NOT CHECK` skip in the `-rs` output other than the Docker daemon (and, on Windows only,
+the POSIX-only `dir_fd` removal control). `setup.sh` no longer auto-installs Node; it prints how
+to install it, and a test with a tripwire `winget` on PATH proves it never runs one.
+
+## MO2 helper precedence
+
+With Mod Organizer 2, the profile's `plugins.txt` is the real load order and the Documents/LOCALAPPDATA
+copies are stale. The precedence above (explicit `PLUGINS_TXT`, then `SKYRIM_LOADORDER_DIR`, then setup's
+configuration file, then LOCALAPPDATA detection) is what makes the MO2 profile win:
+`tests/test_harness_integrations.py::test_mo2_config_and_explicit_override` shows a configured MO2 profile
+beating a rival LOCALAPPDATA list, and each explicit override beating that. The guard side of the same
+configuration is covered by `tests/test_setup_paths.py::test_setup_writes_the_mo2_roots_the_guard_reads`
+(setup records the MO2 `mods` and `overwrite` roots, read back as data the way the guard reads them).
+No code change was needed for Task 15; this section only records the behavior those tests pin.
