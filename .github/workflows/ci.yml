@@ -323,12 +323,10 @@ jobs:
         run: |
           python -m pip install --quiet --disable-pip-version-check --only-binary=:all: --require-hashes -r requirements.lock
 
-      - name: Behavioral suite
-        run: python -m pytest tests/ -v --durations=10
-
-      # test_harness_controls.py and test_harness_integrations.py skip WHOLE MODULES under the
-      # plain pytest above: they need the package-manager barrier that only the contained
-      # launcher installs. Without this step their behavioral tests never run in CI.
+      # test_harness_controls.py and test_harness_integrations.py skip WHOLE MODULES under a
+      # plain pytest: they need the package-manager barrier that only the contained launcher
+      # installs. So the WHOLE suite runs through the launcher, and TOOLKIT_REQUIRE_HARNESS=1
+      # makes a run without the barriers an error rather than a quiet green.
       # The live-Docker controls never pull; give the Linux leg (which has a daemon) the exact
       # sentinel image, pinned by digest, so they run there instead of reporting COULD NOT CHECK.
       - name: Live-Docker sentinel image (Linux)
@@ -337,8 +335,19 @@ jobs:
           docker pull busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
           docker tag busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e busybox:1.37
 
-      - name: Harness-contained behavioral tests
-        run: python -B tests/run_harness_tests.py tests/test_harness_controls.py tests/test_harness_integrations.py tests/test_dependency_locks.py -v -rs
+      - name: Behavioral suite (contained harness)
+        env:
+          TOOLKIT_REQUIRE_HARNESS: "1"
+        run: python -B tests/run_harness_tests.py tests/ -v --durations=10 -rs | tee behavioral.log
+
+      # A COULD NOT CHECK skip means a test did not run. The Docker daemon is the one expected
+      # absence (the Windows runner has no Linux daemon); the dir_fd skip is POSIX-only by
+      # definition (Windows has no dir_fd removal). Anything else going unchecked fails the job.
+      - name: No unexpected COULD NOT CHECK skips
+        run: |
+          allow=(--allow "Docker daemon")
+          if [ "$RUNNER_OS" = "Windows" ]; then allow+=(--allow "platform has no dir_fd removal"); fi
+          python scripts/check_could_not_check.py behavioral.log "${allow[@]}"
 
       # The Node tests cover path handling (game-root separators, plugins.txt
       # discovery), and the `node` job runs on Linux only -- where `path.sep`

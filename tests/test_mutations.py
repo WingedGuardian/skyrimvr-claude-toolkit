@@ -2256,6 +2256,12 @@ MUTATIONS += [
                  '"legacy": False,\n        "prefixes": [],\n        "template": (\n        \'Blocked: plugin',
                  '"legacy": True,\n        "prefixes": [],\n        "template": (\n        \'Blocked: plugin',
                  _RM + "test_no_legacy_messages", id="messages-legacy-returns"),
+
+    pytest.param("tests/conftest.py",
+                 'if os.environ.get("TOOLKIT_REQUIRE_HARNESS") == "1" and not harness_active():',
+                 'if False:',
+                 "tests/test_harness_required.py::test_requiring_the_harness_without_it_is_an_error",
+                 id="require-harness-without-harness-is-silent"),
 ]
 
 

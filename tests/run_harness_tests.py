@@ -86,7 +86,7 @@ def main():
         " os.write(2, b'PACKAGE-MANAGER TRIPWIRE: python -m pip\\n'); os._exit(97)\n"
         "from harness_isolation import install\ninstall()\n")
     env = {k: v for k, v in os.environ.items() if k.upper() in
-           ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT")}
+           ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TOOLKIT_REQUIRE_HARNESS")}
     for directory in ("home", "temp", "home/local", "home/roaming"):
         (work / directory).mkdir(parents=True, exist_ok=True)
     tripbin = binary.as_posix()
