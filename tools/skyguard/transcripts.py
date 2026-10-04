@@ -41,7 +41,8 @@ CODEX_PATCH_ITEM = "FileChange"             # apply_patch, or a patch run throug
 CODEX_MCP_ITEM = "McpToolCall"              # `server`, `tool` -> hook tool_name mcp__<server>__<tool>
 # Item types measured as not being tool calls. Any OTHER type is a shape this parser was not measured
 # against and could be a renamed tool call, so it is Unmeasurable rather than silently uncounted.
-CODEX_NON_TOOL_ITEMS = ("UserMessage", "AgentMessage")
+# Reasoning and ContextCompaction: MEASURED in the Task 0 TUI rollout and the Task 14 exec runs (codex-cli 0.160.0).
+CODEX_NON_TOOL_ITEMS = ("UserMessage", "AgentMessage", "Reasoning", "ContextCompaction")
 # Every measured rollout carries a UserMessage item and has >= 20 lines; a longer one with no recognised item at
 # all is a shape change, not a quiet session.
 CODEX_MIN_LINES_FOR_ITEMS = 10

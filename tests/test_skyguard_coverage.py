@@ -154,6 +154,14 @@ def test_an_unprobed_surface_is_reported_unclaimed(tmp_path, originator):
     assert surface == "unclaimed:" + originator
 
 
+@pytest.mark.parametrize("item", ["Reasoning", "ContextCompaction"])
+def test_measured_non_tool_items_are_recognised_not_unmeasurable(tmp_path, item):
+    """MEASURED (Task 0 TUI rollout, Task 14 exec runs): Codex writes Reasoning and ContextCompaction items. They are
+    not tool calls, so they must neither count as calls nor make a normal session unmeasurable."""
+    rollout = _rename_item(tmp_path, "AgentMessage", item)
+    assert transcripts.count_calls("codex", rollout) == ("exec", {"Bash": 1, "apply_patch": 1})
+
+
 def test_a_renamed_item_type_is_unmeasurable_not_zero_calls(tmp_path):
     with pytest.raises(transcripts.Unmeasurable):
         transcripts.count_calls("codex", _rename_item(tmp_path, "CommandExecution", "ShellRun"))
