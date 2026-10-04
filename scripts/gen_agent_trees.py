@@ -36,7 +36,7 @@ CODEX_ADDENDUM_RESERVE = 2048
 # setup.sh fills {{GAME_ROOT}} & co. and splices the MO2 block into the INSTALLED copy -- the file an
 # agent actually reads. Sized by tests/test_instruction_budget.py against the real setup.sh.
 INSTALL_EXPANSION_RESERVE = 2560
-NOT_ADDENDA = ("core.md", "agents-pointer.md")
+NOT_ADDENDA = ("core.md",)
 
 
 def _lf(data: bytes) -> bytes:

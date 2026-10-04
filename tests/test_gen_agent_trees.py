@@ -239,12 +239,13 @@ def test_budget_measures_lf_not_crlf(tmp_path):
     assert lf == crlf
 
 
-def test_budget_ignores_the_pointer_and_counts_every_addendum(tmp_path):
+def test_budget_counts_every_addendum_and_exempts_only_core(tmp_path):
+    # R12 deleted agents-pointer.md; a file of that name is now an addendum like any other (Task 10 review).
     g = _gen()
     src = _with_core(tmp_path, 10)
-    (src / "instructions" / "agents-pointer.md").write_bytes(b"z" * 40000)
+    (src / "instructions" / "agents-pointer.md").write_bytes(b"z")
     (src / "instructions" / "opencode.md").write_bytes(b"o")
-    assert set(g.instruction_sizes(src)) == {"claude.md", "opencode.md", "codex.md (reserved)"}
+    assert set(g.instruction_sizes(src)) == {"claude.md", "opencode.md", "agents-pointer.md", "codex.md (reserved)"}
 
 
 def test_budget_cli_exits_1_and_names_the_file(tmp_path, capsys):
