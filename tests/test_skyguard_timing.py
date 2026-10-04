@@ -504,6 +504,109 @@ def test_anchored_rules_stay_fast(name, shell):
     assert_linear(name + "/" + shell, make)
 
 
+# Plan 5 Task 7b: same-command literal assignments. The parser records them and expands each use; assign.py counts
+# every write over the whole command. Long values/words keep the shapes under the parser's token cap at 80 KB so the
+# recording and expansion code really runs (test_the_assignment_shapes_reach_the_resolver checks it).
+def _assign_shapes(N):
+    F, W = "f" * 60, "w" * 200
+    k = N // 230
+    return {
+        "assign-distinct-run": "".join("V%d=/tmp/%s; " % (i, W) for i in range(k)) + "rm -rf "
+        + " ".join('"$V%d/x"' % i for i in range(k)) + '; ls "' + GAME + '"',
+        "assign-same-name-run": ("D=/tmp/" + W + "; ") * (N // 209) + 'rm -rf "$D"; ls "' + GAME + '"',
+        "assign-and-chain": "D=/tmp/x" + (" && true " + W) * (N // 213) + ' && rm -rf "$D"',
+        "assign-keyword-run": ("if true " + W * 3 + "; then :; fi; ") * (N // 625) + 'D=/x; rm -rf "$D"',
+        "use-many-words": 'D=/tmp/x; rm -rf ' + ('"$D/' + F + '" ') * (N // 66) + '; ls "' + GAME + '"',
+        "use-one-long-word": 'D=/tmp/x; rm -rf "' + "$D/" * (N // 4) + '"',
+        "use-braced-run": 'D=/tmp/x; rm -rf ' + "${D}" * (N // 4),
+        "ps-assign-run": "".join("$v%d = 'C:%sTemp%s%s'; " % (i, BS, BS, W) for i in range(k)) + "Remove-Item "
+        + ", ".join("$v%d" % i for i in range(k)),
+        "ps-use-dq-run": "$p = 'C:" + BS + "x'; Remove-Item \"" + ("$p" + BS) * (N // 3) + "\"",
+    }
+
+
+_RESOLVING = {"assign-distinct-run": "bash", "assign-and-chain": "bash", "use-many-words": "bash",
+              "ps-assign-run": "powershell"}
+
+
+def test_the_assignment_shapes_reach_the_resolver():
+    """A shape the parser refuses measures only the fallback; these must parse at 80 KB AND resolve a variable."""
+    from skyguard import shellparse
+    for name, cmd in _assign_shapes(LARGE).items():
+        shell = "powershell" if name.startswith("ps-") else "bash"
+        p = shellparse.parse(cmd, shell)
+        assert p.ok and p.execs, (name, p.why)
+        if name in _RESOLVING:
+            assert any(e.subst for e in p.execs), name
+
+
+@pytest.mark.parametrize("name", sorted(_assign_shapes(SMALL)))
+def test_assignment_resolution_stays_fast(name):
+    shell = "powershell" if name.startswith("ps-") else "bash"
+
+    def make(n):
+        cmd = _assign_shapes(n)[name]
+        return lambda: shell_rules.decide(cmd, ROOTS, _QuietAudit(), cwd="/x/install", shell=shell)
+    assert_linear(name + "/" + shell, make)
+
+
+def _assign_text_shapes(N):
+    """Adversarial TEXT for assign.write_counts / bash_value / expand_word (no parser, no token cap)."""
+    return {
+        "ident-run": "a" * N,
+        "eq-run": "a=" * (N // 2),
+        "bracket-run": "D" + "[" * N,
+        "space-before-eq": "a" + " " * N + "=",
+        "inc-run": "D++" * (N // 3),
+        "dash-run": "-" * N,
+        "default-run": "${D:=" * (N // 5),
+        "dollar-run": "$" * N,
+        "dollar-brace-run": "${" * (N // 2),
+        "scope-run": "$a:" * (N // 3),
+        "read-piece": "read " + "x " * (N // 2),
+        "printf-piece": "printf " + "-v x " * (N // 5),
+        "foreach-piece": "foreach " + "$x " * (N // 3),
+        "plain-piece": "x " * (N // 2),
+        "kw-run": "for " * (N // 4),
+        "ref-run": "[ref]" * (N // 5),
+    }
+
+
+@pytest.mark.parametrize("name", sorted(_assign_text_shapes(SMALL)))
+def test_write_counts_is_linear(name):
+    from skyguard import assign
+
+    def make(n):
+        text = _assign_text_shapes(n)[name]
+        return lambda: assign.write_counts(text)
+    assert_linear("write_counts/" + name, make)
+
+
+def _word_shapes(N):
+    return {
+        "sq-run": "'" * N,
+        "dq-run": '"' * N,
+        "dq-dollar-run": '"' + "$D" * (N // 2) + '"',
+        "dq-escape-run": '"' + BS * N + '"',
+        "dollar-brace-unclosed": "${" + "D" * N,
+        "plain-run": "a" * N,
+        "ps-sq-doubled": "'" + "''" * (N // 2) + "'",
+    }
+
+
+@pytest.mark.parametrize("dialect", ["bash", "powershell"])
+@pytest.mark.parametrize("name", sorted(_word_shapes(SMALL)))
+def test_assignment_values_and_uses_are_linear(name, dialect):
+    from skyguard import assign
+    look = {"D": "/x"}.get
+
+    def make(n):
+        raw = _word_shapes(n)[name]
+        return lambda: (assign.expand_word(raw, dialect, look), assign.bash_value(raw),
+                        assign.ps_assignment("$p = " + raw))
+    assert_linear("%s/%s" % (name, dialect), make)
+
+
 @pytest.mark.parametrize("name", sorted(_write_shapes(SMALL)))
 def test_write_rules_stay_fast_on_adversarial_paths(name):
     def make(n):

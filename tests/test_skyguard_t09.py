@@ -107,17 +107,16 @@ def test_a_copy_from_the_null_device_is_a_write():
 R, D = "re" + "g", "del" + "ete"
 
 
-def test_assignments_bash_powershell_cmd_and_ambiguity():
-    a = anchored.assignments("K='x y'; L=\"z\"; M=w; $p = 'q'; set C=v w& echo; K2=1; K2=2")
-    assert a["K"] == "x y" and a["L"] == "z" and a["M"] == "w" and a["P"] == "q" and a["C"] == "v w"
-    assert a["K2"] is None                                  # assigned twice, differently: ambiguous
-
-
-def test_a_cmd_set_key_is_resolved():
+# (The assignment resolver moved to the parser + assign.py in Task 7b, shared with the delete rules; its tests are in
+# tests/test_skyguard_assign.py.)
+def test_a_cmd_set_key_is_never_resolved():
+    """Task 7b: cmd expands %K% when the LINE is read, before `set` runs, so `set K=...& reg delete "%K%"` deletes
+    whatever K held before. Task 9 resolved it from the text (and allowed an unrelated key); now it is unknown."""
     key = "HKLM" + BS + "SOFTWARE" + BS + "Bethesda Softworks"
     assert decide("set K=" + key + "& " + R + " " + D + ' "%K%" /f', cwd="C:/work", shell="cmd")[1] == {"S-REGISTRY"}
     other = "HKCU" + BS + "Software" + BS + "SomeTool"
-    assert decide("set K=" + other + "& " + R + " " + D + ' "%K%" /f', cwd="C:/work", shell="cmd")[1] == set()
+    assert decide("set K=" + other + "& " + R + " " + D + ' "%K%" /f', cwd="C:/work", shell="cmd")[1] == \
+        {"S-REGISTRY"}
 
 
 @pytest.mark.parametrize("code,want", [

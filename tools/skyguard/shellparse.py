@@ -56,6 +56,12 @@ AN EXEC:
   segment    the source text of this simple command (for the legacy fallback and messages' basenames only).
   stdin_body the heredoc / here-string body when stdin_from starts with "heredoc:" (an addition to the
              Task 5 interface: R7(b) needs the interpreter's code).
+  subst      ((argv word, the same word with its variables replaced), ...) for each word whose every $NAME /
+             ${NAME} certainly holds a same-command LITERAL assignment here (Task 7b; assign.py has the rules).
+             Words not listed stay as they are -- unresolved. Only the root command's top-level statement list
+             is tracked (track_vars / lookup): an assignment in a branch, loop, function, subshell, pipeline, `&`,
+             after `||`, written twice anywhere, or followed by source/eval/dot-source never resolves a use; cmd
+             never resolves (it expands %K% before `set` runs).
 
 KNOWN LIMITS -- each gives a partial answer, never a "safe" one:
   - a program held in a variable (`$R reset-havok`): program "?", argv kept; rules must treat "?" as opaque.
@@ -73,6 +79,8 @@ from __future__ import annotations
 import base64
 import re
 from typing import List, NamedTuple, Optional, Tuple
+
+from . import assign
 
 MAX_TOKENS = 2000
 MAX_DEPTH = 8
@@ -93,6 +101,7 @@ class Exec(NamedTuple):
     stdin_from: str
     segment: str
     stdin_body: str = ""
+    subst: Tuple[Tuple[str, str], ...] = ()
 
 
 class Parsed(NamedTuple):
@@ -231,13 +240,21 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
 # Shared scanner state
 # ----------------------------------------------------------------------------------------------------------
 class _Ctx:
-    __slots__ = ("tokens", "out", "frame_ids", "via_xargs")
+    __slots__ = ("tokens", "out", "frame_ids", "via_xargs", "root", "counts", "subst")
 
-    def __init__(self):
+    def __init__(self, root: str = ""):
         self.tokens = 0
         self.out: List[Exec] = []
         self.frame_ids = 0
         self.via_xargs = set()          # ids of execs xargs runs: their stdin items arrive as ARGUMENTS
+        self.root = root                # the whole command (Task 7b: assignments are counted over all of it)
+        self.counts: Optional[dict] = None
+        self.subst: Tuple[Tuple[str, str], ...] = ()     # the Exec.subst of the simple command being resolved
+
+    def writes(self, name: str) -> int:
+        if self.counts is None:
+            self.counts = assign.write_counts(self.root)
+        return self.counts.get(name.lower(), 0)
 
     def tick(self, k: int = 1) -> None:
         self.tokens += k
@@ -271,7 +288,7 @@ class _Here:
 
 class _Cmd:
     __slots__ = ("words", "redirs", "heredocs", "start", "end", "cd", "key", "stage", "skip", "redir_op",
-                 "drop_next", "call", "frame", "after_time", "coproc")
+                 "drop_next", "call", "frame", "after_time", "coproc", "kv", "lst", "seq", "valid", "poison", "dot")
 
     def __init__(self, f, start: int):
         self.words: List[_Word] = []
@@ -289,11 +306,15 @@ class _Cmd:
         self.frame = f.id
         self.after_time = False
         self.coproc = False
+        self.kv = self.lst = self.seq = 0       # Task 7b: where this command sits in the top-level statement list
+        self.valid = False
+        self.poison = True
+        self.dot = False
 
 
 class _Frame:
     __slots__ = ("kind", "cmd", "word", "mode", "cd", "pipe", "stage", "case", "dbr", "start", "id", "last_sep",
-                 "io", "rec_mark")
+                 "io", "rec_mark", "ctl", "kv", "lst", "seq", "chain_ok", "pend")
 
     def __init__(self, kind: str, cd: str, mode: str, fid: int, start: int = 0):
         self.kind = kind
@@ -310,6 +331,12 @@ class _Frame:
         self.last_sep = ""
         self.io = ""
         self.rec_mark = 0
+        self.ctl = 0                # if/while/until/for/select/{ depth (bash keywords: not frames)
+        self.kv = 0                 # Task 7b, top frame only: promotions so far,
+        self.lst = 0                # the current and-or list,
+        self.seq = 0                # the pipeline's position in it,
+        self.chain_ok = True        # every connector so far in it is &&,
+        self.pend: List[str] = []   # assignments FIRST in this list (they hold once it ends)
 
 
 _HOME_ONLY = re.compile(r"(?:\$HOME|\$\{HOME\}|\$USERPROFILE|\$\{USERPROFILE\}|\$env:USERPROFILE|\$env:HOME"
@@ -355,6 +382,8 @@ class _Scanner:
         self.pending: List[_Here] = []
         self.i = 0
         self._pmatch: Optional[dict] = None
+        self.vars: dict = {}            # Task 7b: name -> [value, known_ver, list, seq] (one literal assignment)
+        self.poisoned = False           # a source / eval / dot-source ran: any name may have changed
 
     def _frame(self, kind, cd, mode, start):
         self.ctx.frame_ids += 1
@@ -367,7 +396,9 @@ class _Scanner:
 
     def _cmd(self, f: _Frame, start: int) -> _Cmd:
         if f.cmd is None:
-            f.cmd = _Cmd(f, start)
+            c = f.cmd = _Cmd(f, start)
+            top = self.frames[0]
+            c.kv, c.lst, c.seq, c.valid, c.poison = top.kv, top.lst, top.seq, top.chain_ok, self.poisoned
         return f.cmd
 
     def _push(self, f: _Frame, kind: str, start: int, word: bool) -> _Frame:
@@ -426,6 +457,8 @@ class _Scanner:
                 self.recs.append(cmd)
                 if sep not in ("|", "|&") and cmd.stage == 0:
                     self.track_cd(f, cmd)
+        if self.depth == 0 and self.DIALECT in ("bash", "powershell"):
+            self.track_vars(f, cmd, sep)
         if sep in ("|", "|&"):
             f.stage += 1
         elif sep:
@@ -435,6 +468,59 @@ class _Scanner:
 
     def track_cd(self, f: _Frame, cmd: _Cmd) -> None:
         pass
+
+    # -- Task 7b: literal assignments in the ROOT command's top-level statement list (see assign.py)
+    def assignments(self, cmd: _Cmd) -> List[Tuple[str, str]]:
+        return []
+
+    def poisons(self, cmd: _Cmd) -> bool:
+        return False
+
+    def track_vars(self, f: _Frame, cmd: Optional[_Cmd], sep: str) -> None:
+        if cmd is not None and not cmd.skip and cmd.words and self.poisons(cmd):
+            self.poisoned = True
+        top = self.frames[0]
+        if f is not top or top.ctl != 0 or top.case or top.dbr:
+            return                                  # nested: neither records nor moves the statement list
+        # (An assignment after a `||`, or after a source/eval, is recorded too: lookup() refuses every use that
+        # could see it -- a later use in a broken chain, or any use created after the poison.)
+        if cmd is not None and not cmd.skip and cmd.stage == 0 and sep not in ("|", "|&"):
+            for name, value in self.assignments(cmd):
+                if self.ctx.writes(name) == 1:
+                    key = name if self.DIALECT == "bash" else name.lower()
+                    self.vars[key] = [value, None, cmd.lst, cmd.seq]
+                    if cmd.seq == 0:
+                        top.pend.append(key)        # first in its list: it always runs
+        if sep == "&&":
+            top.seq += 1
+        elif sep == "||":
+            top.seq += 1
+            top.chain_ok = False
+        elif sep in ("|", "|&"):
+            pass
+        else:
+            if top.pend and sep != "&":             # `A &` ran in a background subshell
+                top.kv += 1
+                for k in top.pend:
+                    self.vars[k][1] = top.kv
+            top.pend = []
+            top.lst += 1
+            top.seq = 0
+            top.chain_ok = True
+
+    def lookup(self, cmd: _Cmd, name: str) -> Optional[str]:
+        """The literal `name` certainly holds when `cmd` runs, or None."""
+        if cmd.poison:
+            return None
+        r = self.vars.get(name if self.DIALECT == "bash" else name.lower())
+        if r is None:
+            return None
+        value, kv, lst, seq = r
+        if kv is not None and kv <= cmd.kv:
+            return value                            # an earlier statement
+        if cmd.valid and lst == cmd.lst and seq < cmd.seq:
+            return value                            # earlier in the same pure && chain
+        return None
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -448,6 +534,8 @@ _VAR = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,255}|[0-9?$!#*@-]")
 _ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,255}(?:\[[^\]\n]{0,200}\])?\+?=")
 _BASH_BLANK = " \t\r\f\v"
 _BASH_DROP = frozenset(("if", "then", "else", "elif", "fi", "do", "done", "while", "until", "{", "}", "!"))
+_BASH_OPEN = frozenset(("if", "while", "until", "{"))          # Task 7b: a statement inside may not run
+_BASH_CLOSE = frozenset(("fi", "done", "}"))
 _VARNAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,255}")
 # `(( ... ))` / `$(( ... ))` whose body reads as `word -opt` or `word word`: bash takes it as arithmetic and runs
 # nothing, but another reading (or a typo) runs a command. The parser cannot be sure, so it says so.
@@ -503,11 +591,16 @@ class _Bash(_Scanner):
             cmd.coproc = True
             return True
         if v in _BASH_DROP:
+            if v in _BASH_OPEN:
+                f.ctl += 1
+            elif v in _BASH_CLOSE:
+                f.ctl -= 1
             return True
         if v == "function":
             cmd.drop_next = True
             return True
         if v in ("for", "select"):
+            f.ctl += 1                                          # closed by `done`
             cmd.skip = True
             return True
         if v == "case":
@@ -523,6 +616,27 @@ class _Bash(_Scanner):
             cmd.skip = True
             return True
         return False
+
+    def assignments(self, cmd):
+        out = []
+        for w in cmd.words:
+            m = _ASSIGN.match(w.raw)
+            if not m:
+                return []                                       # `K=v cmd`: K is set for cmd only
+            lhs = m.group()
+            if "[" in lhs or lhs.endswith("+="):
+                continue                                        # an element, or an append: not the whole value
+            value = assign.bash_value(w.raw[m.end():])
+            if value is not None:
+                out.append((_VARNAME.match(lhs).group(), value))
+        return out
+
+    def poisons(self, cmd):
+        ws = cmd.words
+        k = 0
+        while k < len(ws) and _ASSIGN.match(ws[k].raw):
+            k += 1
+        return k < len(ws) and not ws[k].quoted and not ws[k].dyn and "".join(ws[k].b) in ("source", ".", "eval")
 
     def track_cd(self, f, cmd):
         ws = cmd.words
@@ -1046,6 +1160,7 @@ class _Pwsh(_Scanner):
         v = "".join(w.b).lower()
         if v == "." and not cmd.call:
             cmd.call = True                                       # dot-source: the next word is the script
+            cmd.dot = True
             return True
         if v in _PS_DROP:
             return True
@@ -1053,6 +1168,16 @@ class _Pwsh(_Scanner):
             cmd.drop_next = True
             return True
         return False
+
+    def assignments(self, cmd):
+        a = assign.ps_assignment(self.t[cmd.start:cmd.end])
+        return [a] if a else []
+
+    def poisons(self, cmd):
+        if cmd.dot:
+            return True
+        w = cmd.words[0]
+        return not w.quoted and not w.dyn and "".join(w.b).lower() in ("iex", "invoke-expression")
 
     def track_cd(self, f, cmd):
         if not cmd.words or cmd.words[0].quoted or cmd.words[0].dyn:
@@ -1541,7 +1666,7 @@ class _Resolver:
             stdin = "heredoc:" + consumer_kind(program)
             body = self.bodies[-1][0]
         e = Exec(program, tuple(self.v[k:]), tuple(self.q[k:]), self.redirs, self.d, self.cd, stdin, self.seg,
-                 body)
+                 body, self.ctx.subst)
         self.ctx.out.append(e)
         self.made.append(e)
         if self.xargs:                      # `... | xargs bash`, `xargs python`: the code arrives from stdin as args
@@ -1557,7 +1682,8 @@ class _Resolver:
 
     def opaque(self, k: int) -> Exec:
         """Something runs and the parser cannot say what: an explicit "?" exec, never a silent nothing."""
-        e = Exec("?", tuple(self.v[k:]), tuple(self.q[k:]), self.redirs, self.d, self.cd, self.stdin, self.seg)
+        e = Exec("?", tuple(self.v[k:]), tuple(self.q[k:]), self.redirs, self.d, self.cd, self.stdin, self.seg,
+                 "", self.ctx.subst)
         self.ctx.out.append(e)
         self.made.append(e)
         return e
@@ -1952,7 +2078,7 @@ class _Resolver:
             w = v[j]
             if w == "-delete":
                 e = Exec("find.delete", tuple(starts), tuple(sq), self.redirs, self.d, self.cd, self.stdin,
-                         self.seg)
+                         self.seg, "", self.ctx.subst)
                 self.ctx.out.append(e)
                 self.made.append(e)
                 j += 1
@@ -2043,6 +2169,18 @@ class _Resolver:
         return ["".join(w.b) for w in words]
 
 
+def _subst(sc: _Scanner, rec: _Cmd, ws, vals) -> Tuple[Tuple[str, str], ...]:
+    """Exec.subst (Task 7b): (word as in argv, the same word with its variables replaced by the literal each one
+    certainly holds here). A word value spelled twice with different readings (`'$D'` and `$D`) is left out."""
+    got: dict = {}
+    for w, val in zip(ws, vals):
+        if "$" not in val:
+            continue
+        s = assign.expand_word(w.raw, sc.DIALECT, lambda name: sc.lookup(rec, name))
+        got[val] = s if got.get(val, s) == s else None
+    return tuple((k, v) for k, v in got.items() if v is not None and v != k)
+
+
 def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
     d, t, ctx = sc.DIALECT, sc.t, sc.ctx
     synth = sorted(sc.synth, key=lambda x: x[0])
@@ -2068,11 +2206,13 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
         bodies = [(h.body or "", h.quoted) for h in rec.heredocs]
         quoted = [w.quoted for w in ws]
         dyn = [w.dyn for w in ws]
+        saved, ctx.subst = ctx.subst, (_subst(sc, rec, ws, vals) if sc.vars else ())
         made = _Resolver(d, vals, quoted, dyn, rec.redirs, rec.cd, stdin, seg, bodies,
                          sc.depth, ctx, recurse, rec.call).run()
         if d == "bash" and any(w.bs for w in ws):                     # R6: the literal reading too
             made = made + _Resolver(d, ["".join(w.l) for w in ws], quoted, dyn, rec.redirs, rec.cd, stdin, seg,
                                     bodies, sc.depth, ctx, False, rec.call).run()
+        ctx.subst = saved
         groups.setdefault(rec.key, []).append((rec, made))
     for _, e in synth[si:]:
         ctx.out.append(e)
@@ -2140,7 +2280,7 @@ def _sub(text: str, dialect: str, depth: int, cd: str, ctx: _Ctx, mode: str = "n
 
 
 def _parse_one(command: str, dialect: str) -> Parsed:
-    ctx = _Ctx()
+    ctx = _Ctx(command)
     try:
         _sub(command, dialect, 0, "", ctx)
         return Parsed(tuple(ctx.out), True, "")

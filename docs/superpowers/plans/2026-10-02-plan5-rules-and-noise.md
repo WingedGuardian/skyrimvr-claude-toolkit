@@ -654,6 +654,30 @@ existing regex fields. The regex fields stay for S-DEL-FALLBACK and the legacy a
   - an unresolved delete operand run from inside a protected folder is not flagged (ruling, fix round 1: measured 75 occurrences, 0 real, in 61,935 items);
   - `CMD="rm -rf <install>"; $CMD` (an assignment value is not an exec); PS5 `Remove-Item -Recurse` follows junctions.
 
+### Task 7b (controller-added): same-command literal assignments resolve delete operands
+
+S-DEL-UNRESOLVED denied ~190 history items whose operand is a variable in a command naming a root (~100 measured FPs:
+scratch paths). The parser now records LITERAL assignments in the root command's top-level statement list and gives
+each Exec `subst` (word → expanded word) for every use the assignment certainly reaches; `deletes.scan` substitutes
+before clause (a), and S-REGISTRY uses the same resolver (its Task 9 regex resolver is removed). Text rules
+(`tools/skyguard/assign.py`): a name written more than once anywhere (any form: reassignment, `for`/`read`/`printf
+-v`/`export`/`local`/`unset`, `${N:=}`, `N++`, PowerShell scope writes, `foreach`, Set-Variable, -OutVariable,
+parameters, writes inside strings/heredocs) is never resolved; values must be plain literals. Flow rules
+(`shellparse.track_vars`/`lookup`): not inside `bash -c`/eval/backticks, `( )`, `$( )`, `{ }`, if/while/until/for/
+select/case, a function, a pipeline, `&`, after `||`; a use resolves in a later statement only when the assignment was
+first in its `&&` list, or later in the same pure `&&` chain; `source`/`.`/`eval`/dot-source/`Invoke-Expression`
+poison every later use; cmd never resolves (it expands `%K%` before `set` runs).
+
+- Corpus: 62 `t07b-*` rows (19 RED against dc8c59b, the rest pins); `t07-var-data` and `t07-legacy-var-only` now
+  S-DEL-INSTALL (the latter no longer supersedes `testhooks-00bbbc607b`: it gives the legacy verdict again).
+- Priced (dc8c59b, N = 63,637): S-DEL-UNRESOLVED 190 → 80; 88 lifted, all hand-read FPs, 0 TP lost; 22 deny→deny
+  rule moves (21 S-DEL-INSTALL naming the file, 1 S-WRITE-PLUGIN); 1 deny→ask (S-RESAVER-APPLY, a real `--apply`).
+- Tightenings: an unresolved delete run from inside the install with a variable that resolves into it now denies
+  (`D=Data/meshes; rm -rf "$D"`, cwd = install); S-REGISTRY no longer resolves an assignment in a branch, a
+  reassigned name, or cmd's `set K=... & reg delete "%K%"`.
+- Known limits: a value built from another variable (`Y="$SP/x"`) and a harmless second mention that reads like a
+  write (`echo "D=$D"`) stay unresolved; the write rules (S-WRITE-PLUGIN) do not read `Exec.subst`.
+
 ### Task 8: Shell writes to plugins (E21) and the write-target advice; ADV_PLUGIN removed
 
 **Corpus first** (`t08-*`).

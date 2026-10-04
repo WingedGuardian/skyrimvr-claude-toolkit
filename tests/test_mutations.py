@@ -1577,7 +1577,7 @@ _T9_CLAUSES = [
     ("rule-S-REGISTRY-opaque-pipe", _AN, "    if any(_legacy_registry(t) for t in _opaque_texts(parsed.execs)):",
      "    if any(_legacy_registry(t) for t in _opaque_texts([e for e in parsed.execs if e.stdin_from != 'pipe'])):",
      "reg-pipe-sh"),
-    ("rule-S-REGISTRY-unrelated-key", _AN, "if len(e.argv) < 2 or bethesda_key(e.argv[1], command, assigned):", "if True:",
+    ("rule-S-REGISTRY-unrelated-key", _AN, "if len(e.argv) < 2 or bethesda_key(e.argv[1], subst):", "if True:",
      "reg-other-key"),
     ("rule-S-REGISTRY-ancestor", _AN, "    return any(b.startswith(", "    return False and any(b.startswith(",
      "reg-ancestor"),
@@ -1607,25 +1607,27 @@ _T9_CLAUSES = [
      'champ = anchored.champollion(command, parsed, roots, "", env)', "champ-relative-outside"),
     # (S-MOVE-INSTALL removed in fix round 1; its rows are allow pins.)
     # S-REGISTRY fix round 1: unknown keys, same-command assignments, interpreter-code keys
-    ("rule-S-REGISTRY-unknown-key-denies", _AN, "        if word is None:\n            return True",
-     "        if word is None:\n            return False", "reg-var-unknown"),
-    ("rule-S-REGISTRY-assignment-resolved", _AN,
-     "        word = _substitute(word, assignments(command) if assigned is None else assigned)",
-     "        word = None", "reg-var-assigned-unrelated"),
-    ("rule-S-REGISTRY-assignment-bash", _AN, "    for rx in (_CMD_ASSIGN, _BASH_ASSIGN, _PS_ASSIGN):",
-     "    for rx in (_CMD_ASSIGN, _PS_ASSIGN):", "reg-var-assigned-unrelated"),
-    ("rule-S-REGISTRY-assignment-powershell", _AN, "    for rx in (_CMD_ASSIGN, _BASH_ASSIGN, _PS_ASSIGN):",
-     "    for rx in (_CMD_ASSIGN, _BASH_ASSIGN):", "reg-ps-var-unrelated"),
+    ("rule-S-REGISTRY-unknown-key-denies", _AN,
+     "        if word is None or _NONLITERAL.search(word):\n            return True",
+     "        if word is None or _NONLITERAL.search(word):\n            return False", "reg-var-unknown"),
+    # Task 7b: the key is resolved by the parser's Exec.subst (one resolver with the delete rules)
+    ("rule-S-REGISTRY-assignment-resolved", _AN, "        word = subst.get(word)", "        word = None",
+     "reg-var-assigned-unrelated"),
+    ("rule-S-REGISTRY-assignment-bash", "tools/skyguard/shellparse.py",
+     "                out.append((_VARNAME.match(lhs).group(), value))", "                pass",
+     "reg-var-assigned-unrelated"),
+    ("rule-S-REGISTRY-assignment-powershell", "tools/skyguard/shellparse.py",
+     "        a = assign.ps_assignment(self.t[cmd.start:cmd.end])", "        a = None", "reg-ps-var-unrelated"),
     ("rule-S-REGISTRY-ps-unknown-hive", _AN, "                        if names_hive:\n                            return True",
      "                        if False:\n                            return True", "reg-ps-unknown-hive"),
     ("rule-S-REGISTRY-ps-unknown-needs-hive", _AN, "                        if names_hive:\n",
      "                        if True:\n", "reg-ps-unknown-nohive"),
     ("rule-S-REGISTRY-code-key", _AN,
-     '        if (listed and not quoted) or not key or "{" in key or bethesda_key(key, code, {}):',
+     '        if (listed and not quoted) or not key or "{" in key or bethesda_key(key, {}):',
      '        if (listed and not quoted) or not key or "{" in key or "bethesda" in key.lower():',
      "reg-python-ancestor"),
     ("rule-S-REGISTRY-code-literal-unrelated", _AN,
-     '        if (listed and not quoted) or not key or "{" in key or bethesda_key(key, code, {}):',
+     '        if (listed and not quoted) or not key or "{" in key or bethesda_key(key, {}):',
      "        if True:", "reg-python-unrelated"),
     ("rule-S-REGISTRY-code-list-variable", _AN, '        if (listed and not quoted) or not key or',
      "        if not key or", "reg-python-list-var"),
@@ -1689,9 +1691,6 @@ MUTATIONS += [
          "tests/test_skyguard_write.py::test_rule6_load_order"),
         ("rule-S-AUTOMOD-ESP-dry-run", _AN, 'any(w.lower() == "--dry-run" for w in args)', "False",
          "tests/test_skyguard_writes.py::test_t08_row[t08-automod-dry]"),
-        ("rule-S-REGISTRY-assignment-cmd-span", _AN,
-         "            if rx is not _CMD_ASSIGN and any(a <= m.start(1) < b for a, b in spans):",
-         "            if False:", "tests/test_skyguard_t09.py::test_assignments_bash_powershell_cmd_and_ambiguity"),
         # timing: without the word-start lookbehind the sed path regex restarts inside every long word (quadratic)
         ("timing-sed-win-word-start", _WR, "(?<![A-Za-z0-9_])[A-Za-z0-9_]{2,}", "[A-Za-z0-9_]{2,}",
          "tests/test_skyguard_timing.py::test_anchored_rules_stay_fast[sed-long-word-bash]"),
@@ -1710,6 +1709,113 @@ MUTATIONS.append(pytest.param(
     "tests/test_guard_corpus.py::test_loosens_reason_must_be_a_non_empty_string",
     id="corpus-supersession-reason-is-a-string",
 ))
+
+# ---- Plan 5 Task 7b: same-command literal assignments resolve delete operands. One mutation per clause; each names
+# the t07b row (fired in-process by tests/test_skyguard_assign.py::test_t07b_row) or the single-purpose test it must
+# turn red. The flow clauses are in shellparse (track_vars / lookup), the text clauses in assign.py.
+_AS = "tools/skyguard/assign.py"
+_TA = "tests/test_skyguard_assign.py::"
+
+
+def _t07b(row):
+    return _TA + "test_t07b_row[t07b-" + row + "]"
+
+
+_GATE = "        if f is not top or top.ctl != 0 or top.case or top.dbr:"
+_REC = '        if cmd is not None and not cmd.skip and cmd.stage == 0 and sep not in ("|", "|&"):'
+_LOOK = '        r = self.vars.get(name if self.DIALECT == "bash" else name.lower())'
+_SAME = "        if cmd.valid and lst == cmd.lst and seq < cmd.seq:"
+_OPEN = '_BASH_OPEN = frozenset(("if", "while", "until", "{"))'
+_CLOSE = '_BASH_CLOSE = frozenset(("fi", "done", "}"))'
+_COUNT = "    for rx in (_W_PLAIN, _W_DOLLAR, _W_DEFAULT):"
+_T7B_CLAUSES = [
+    # (id, file, find, replace, test)
+    # where an assignment may be recorded: the ROOT command, its top-level statement list
+    ("t7b-root-only", _SP, '        if self.depth == 0 and self.DIALECT in ("bash", "powershell"):',
+     '        if self.DIALECT in ("bash", "powershell"):', _t07b("bash-c")),
+    ("t7b-top-frame", _SP, _GATE, "        if top.ctl != 0 or top.case or top.dbr:", _t07b("assign-in-subshell")),
+    ("t7b-control-depth", _SP, _GATE, "        if f is not top or top.case or top.dbr:", _t07b("assign-in-if")),
+    ("t7b-case-arm", _SP, _GATE, "        if f is not top or top.ctl != 0 or top.dbr:", _t07b("assign-in-case")),
+    ("t7b-dbr-separator", _SP, _GATE, "        if f is not top or top.ctl != 0 or top.case:",
+     _TA + "test_flow_dbr_separator_keeps_the_list"),
+    ("t7b-open-while", _SP, _OPEN, '_BASH_OPEN = frozenset(("if", "until", "{"))', _t07b("assign-in-while")),
+    ("t7b-open-brace", _SP, _OPEN, '_BASH_OPEN = frozenset(("if", "while", "until"))', _t07b("assign-in-braces")),
+    ("t7b-open-for", _SP, "            f.ctl += 1                                          # closed by `done`",
+     "            pass", _t07b("assign-in-for")),
+    ("t7b-close-fi", _SP, _CLOSE, '_BASH_CLOSE = frozenset(("done", "}"))',
+     _TA + "test_flow_closers_reset_control_depth[if y; then :; fi]"),
+    ("t7b-close-done", _SP, _CLOSE, '_BASH_CLOSE = frozenset(("fi", "}"))',
+     _TA + "test_flow_closers_reset_control_depth[while y; do :; done]"),
+    ("t7b-close-brace", _SP, _CLOSE, '_BASH_CLOSE = frozenset(("fi", "done"))',
+     _TA + "test_flow_closers_reset_control_depth[{ :; }]"),
+    ("t7b-pipeline-separator", _SP, _REC, "        if cmd is not None and not cmd.skip and cmd.stage == 0:",
+     _t07b("pipeline-head")),
+    ("t7b-pipeline-stage", _SP, _REC,
+     '        if cmd is not None and not cmd.skip and sep not in ("|", "|&"):', _t07b("pipeline-stage")),
+    ("t7b-written-once", _SP, "                if self.ctx.writes(name) == 1:",
+     "                if self.ctx.writes(name) >= 1:", _t07b("reassigned-later")),
+    ("t7b-ps-key-folded", _SP, '                    key = name if self.DIALECT == "bash" else name.lower()',
+     "                    key = name", _t07b("ps-case-insensitive")),
+    ("t7b-first-in-list", _SP, "                    if cmd.seq == 0:", "                    if True:",
+     _t07b("assign-after-and")),
+    ("t7b-and-moves-position", _SP, '        if sep == "&&":\n            top.seq += 1',
+     '        if sep == "&&":\n            pass', _t07b("assign-after-and")),
+    ("t7b-or-moves-position", _SP, '        elif sep == "||":\n            top.seq += 1\n',
+     '        elif sep == "||":\n', _t07b("assign-after-or")),
+    ("t7b-or-breaks-chain", _SP, "            top.chain_ok = False", "            pass", _t07b("or-chain")),
+    ("t7b-background", _SP, '            if top.pend and sep != "&":', "            if top.pend:",
+     _t07b("background")),
+    ("t7b-promotion", _SP, "                    self.vars[k][1] = top.kv", "                    pass",
+     _t07b("scratch-var")),
+    # which use an assignment reaches
+    ("t7b-poison-refuses", _SP, "        if cmd.poison:\n            return None",
+     "        if False:\n            return None", _t07b("source")),
+    ("t7b-bash-case-sensitive", _SP, _LOOK, "        r = self.vars.get(name.lower())", _t07b("case-differs")),
+    ("t7b-ps-case-insensitive", _SP, _LOOK, "        r = self.vars.get(name)", _t07b("ps-case-insensitive-use")),
+    ("t7b-earlier-statement", _SP, "        if kv is not None and kv <= cmd.kv:", "        if kv is not None:",
+     _t07b("use-before-assign")),
+    ("t7b-chain-valid", _SP, _SAME, "        if lst == cmd.lst and seq < cmd.seq:", _t07b("or-chain")),
+    ("t7b-chain-same-list", _SP, _SAME, "        if cmd.valid and seq < cmd.seq:",
+     _TA + "test_flow_cross_list_same_position"),
+    ("t7b-chain-order", _SP, _SAME, "        if cmd.valid and lst == cmd.lst:",
+     _TA + "test_flow_use_before_in_same_chain"),
+    # what is an assignment, and what resets every name
+    ("t7b-prefix-env", _SP, "                return []                                       # `K=v cmd`: K is set for cmd only",
+     "                continue", _t07b("prefix-env")),
+    ("t7b-append", _SP, '            if "[" in lhs or lhs.endswith("+="):', "            if False:", _t07b("append")),
+    ("t7b-bash-source-poisons", _SP, '"".join(ws[k].b) in ("source", ".", "eval")', '"".join(ws[k].b) in ()',
+     _t07b("source")),
+    ("t7b-ps-dot-source-poisons", _SP, "        if cmd.dot:\n            return True",
+     "        if False:\n            return True", _t07b("ps-dot-source")),
+    ("t7b-ps-iex-poisons", _SP, '"".join(w.b).lower() in ("iex", "invoke-expression")', '"".join(w.b).lower() in ()',
+     _t07b("ps-iex")),
+    # the substitution reaches the delete rules
+    ("t7b-subst-attached", _SP, "        saved, ctx.subst = ctx.subst, (_subst(sc, rec, ws, vals) if sc.vars else ())",
+     "        saved, ctx.subst = ctx.subst, ()", _t07b("scratch-var")),
+    ("t7b-two-readings", _SP, "        got[val] = s if got.get(val, s) == s else None", "        got[val] = s",
+     _TA + "test_two_readings_of_one_word_value_are_not_substituted"),
+    ("t7b-emit-carries", _SP, "                 body, self.ctx.subst)", "                 body)", _t07b("scratch-var")),
+    ("t7b-find-delete-carries", _SP, 'self.seg, "", self.ctx.subst)', 'self.seg, "", ())', _t07b("find-delete")),
+    ("t7b-deletes-wired", _DL, "        e = substituted(e)\n", "", _t07b("scratch-var")),
+    # assign.py: every form of a second write counts; values and uses are literal or nothing
+    ("t7b-count-plain", _AS, _COUNT, "    for rx in (_W_DOLLAR, _W_DEFAULT):", _t07b("reassigned-later")),
+    ("t7b-count-dollar", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DEFAULT):", _t07b("ps-reassigned-later")),
+    ("t7b-count-default", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DOLLAR):", _t07b("default-expansion")),
+    ("t7b-count-increment", _AS, "    for m in _W_INC.finditer(text):", '    for m in _W_INC.finditer(""):',
+     _TA + "test_increment_is_a_write"),
+    ("t7b-count-bash-keywords", _AS, "        elif _KW_BASH.search(piece) or (", "        elif False or (",
+     _t07b("for-variable")),
+    ("t7b-count-printf-v", _AS, "(_KW_BASH_V.search(piece) and _OPT_V.search(piece))", "False",
+     _t07b("printf-v")),
+    ("t7b-count-ps-keywords", _AS, "        if _KW_PS.search(piece):", "        if False:", _t07b("ps-foreach")),
+    ("t7b-count-dollar-is-a-read", _AS, '_BARE_IDENT = re.compile(r"(?<![\\w$])(?<!\\$\\{)(" + _IDENT + r")")',
+     '_BARE_IDENT = re.compile(r"(" + _IDENT + r")")', _TA + "test_for_list_dollar_is_a_read"),
+    ("t7b-value-tilde", _AS, '        elif c in "$`' + BS * 2 + '~(){}" or c.isspace():',
+     '        elif c in "$`' + BS * 2 + '(){}" or c.isspace():', _t07b("tilde-value")),
+    ("t7b-unquoted-split", _AS, '            if v is None or v == "" or _UNSAFE_UNQUOTED.search(v):',
+     "            if v is None:", _t07b("unquoted-space")),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T7B_CLAUSES]
 
 
 _SNAP = "tools/skyguard/snapshot.py"

@@ -13,9 +13,11 @@ S-REGISTRY (deny). `reg delete KEY` / `reg.exe delete KEY` run as a program (als
 wrappers), and PowerShell Remove-Item / Remove-ItemProperty / Remove-ItemPropertyValue / Clear-ItemProperty on a
 registry path (`HKLM:\`, `HKCU:\`, `Registry::`, `HKEY_...`), when KEY is a Bethesda key or an ANCESTOR of one
 (`HKLM\SOFTWARE\WOW6432Node` holds `Bethesda Softworks`), or KEY is not literal (`$K`, `%K%`, a backtick, `$(...)`).
-Fix round 1: a non-literal key is first resolved from a simple assignment in the same command (`K='...'; reg delete
-"$K"`, PowerShell `$k = '...'`, cmd `set K=...`) and the result judged like a literal; a key that still cannot be
-known DENIES (not safe by default -- this re-denies loops such as `for k in ...; do reg delete "HKCU\...\$k"`). A
+Fix round 1: a non-literal key is first resolved from a literal assignment in the same command (`K='...'; reg
+delete "$K"`, PowerShell `$k = '...'`) and the result judged like a literal. Task 7b: the resolver is the parser's
+flow-checked Exec.subst, shared with the delete rules -- an assignment in a branch, a loop, after a `||`, or written
+twice does not count, and cmd's `set K=... & reg delete "%K%"` never resolves (cmd expands %K% when the line is
+read, before `set` runs). A key that still cannot be known DENIES (not safe by default -- this re-denies loops such as `for k in ...; do reg delete "HKCU\...\$k"`). A
 PowerShell path that cannot be known denies when the command names a hive. A delete of an unrelated LITERAL key
 (`reg delete HKCU\Software\SomeTool`) is not this rule's business. Interpreter code (`python -c`, a heredoc to
 python, `node -e`; `os.system`, `subprocess.run(['reg', 'delete', ...])`, `execSync`) is read for the key that
@@ -95,50 +97,16 @@ def _reg_key(word: str) -> str:
 
 
 _NONLITERAL = re.compile(r"[$%`]")
-# Simple assignments earlier in the same command (fix round 1): bash `K='v'` / `K="v"` / `K=v`, PowerShell `$K = 'v'`,
-# cmd `set K=v`. A name assigned twice is ambiguous and stays unresolved. Linear: one finditer per form.
-_BASH_ASSIGN = re.compile(r"""(?:^|[\s;&|(])([A-Za-z_][A-Za-z0-9_]{0,63})=(?:'([^'\n]*)'|"([^"$`\n]*)"|([^\s;&|'"$`()]+))""")
-_PS_ASSIGN = re.compile(r"""\$([A-Za-z_][A-Za-z0-9_]{0,63})[ \t]*=[ \t]*(?:'([^'\n]*)'|"([^"$`\n]*)")""")
-_CMD_ASSIGN = re.compile(r"""(?i:\bset)[ \t]+"?([A-Za-z_][A-Za-z0-9_]{0,63})=([^&|"\r\n]*)""")
-_VAR_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)|%([A-Za-z_][A-Za-z0-9_]*)%")
 
 
-def assignments(command: str) -> dict:
-    """name (upper case) -> value for the simple assignments in `command`; an ambiguous name maps to None."""
-    out = {}
-    # cmd's `set K=v w` first: the bash form would also read `K=v` inside it, so matches inside a `set` are skipped.
-    spans = [m.span() for m in _CMD_ASSIGN.finditer(command)]
-    for rx in (_CMD_ASSIGN, _BASH_ASSIGN, _PS_ASSIGN):
-        for m in rx.finditer(command):
-            if rx is not _CMD_ASSIGN and any(a <= m.start(1) < b for a, b in spans):
-                continue
-            name = m.group(1).upper()
-            value = next((g for g in m.groups()[1:] if g is not None), "").rstrip()
-            out[name] = value if out.get(name, value) == value else None
-    return out
-
-
-def _substitute(word: str, assigned: dict) -> Optional[str]:
-    """`word` with each $NAME / ${NAME} / %NAME% replaced by its assignment; None when any cannot be."""
-    def one(m):
-        v = assigned.get((m.group(1) or m.group(2) or m.group(3)).upper())
-        if v is None:
-            raise KeyError
-        return v
-    try:
-        out = _VAR_REF.sub(one, word)
-    except KeyError:
-        return None
-    return None if _NONLITERAL.search(out) else out
-
-
-def bethesda_key(word: str, command: str, assigned: Optional[dict] = None) -> bool:
+def bethesda_key(word: str, subst: Mapping[str, str]) -> bool:
     """True when deleting `word` may delete a Bethesda key: it IS one or lies under one ("bethesda" in it), it is an
-    ANCESTOR of one, or it is not literal and cannot be resolved from a simple assignment in the same command
-    (fix round 1: an unknown key is not safe by default -- `reg delete "$KEY"` denies)."""
+    ANCESTOR of one, or it is not literal and cannot be resolved from a same-command literal assignment (`subst`:
+    the exec's Exec.subst, Task 7b -- the one resolver the delete rules use too) (fix round 1: an unknown key is not
+    safe by default -- `reg delete "$KEY"` denies)."""
     if _NONLITERAL.search(word):
-        word = _substitute(word, assignments(command) if assigned is None else assigned)
-        if word is None:
+        word = subst.get(word)
+        if word is None or _NONLITERAL.search(word):
             return True
     k = _reg_key(word)
     if not k:
@@ -169,7 +137,7 @@ def code_deletes_bethesda(code: str) -> bool:
     for m in _CODE_REG_DELETE.finditer(code):
         listed, quoted = "," in m.group(1), m.group(2) is not None
         key = m.group(3) if quoted else m.group(4)
-        if (listed and not quoted) or not key or "{" in key or bethesda_key(key, code, {}):
+        if (listed and not quoted) or not key or "{" in key or bethesda_key(key, {}):
             return True
     return False
 
@@ -193,22 +161,22 @@ def registry(command: str, parsed) -> bool:
     from .writes import _opaque_texts
     if any(_legacy_registry(t) for t in _opaque_texts(parsed.execs)):
         return True
-    assigned = assignments(command)
     names_hive = bool(_HIVE_WORD.search(command))
     for e in parsed.execs:
+        subst = dict(e.subst)
         if e.program == "reg" and e.argv and e.argv[0].lower() == "delete":
-            if len(e.argv) < 2 or bethesda_key(e.argv[1], command, assigned):
+            if len(e.argv) < 2 or bethesda_key(e.argv[1], subst):
                 return True
         elif e.program in PS_REG_PROGRAMS:
             for w in ps_param(e, "path", 0) + ps_param(e, "literalpath"):
                 if _NONLITERAL.search(w):
-                    v = _substitute(w, assigned)
-                    if v is None:
+                    v = subst.get(w)
+                    if v is None or _NONLITERAL.search(v):
                         if names_hive:
                             return True                       # an unknown path in a command that names a hive
                         continue
                     w = v
-                if _is_reg_path(w) and bethesda_key(w, command, assigned):
+                if _is_reg_path(w) and bethesda_key(w, subst):
                     return True
         else:
             code = interpreter_code(e)

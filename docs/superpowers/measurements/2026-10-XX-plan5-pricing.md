@@ -473,3 +473,30 @@ S-AUTOMOD-ARCHIVE 0.005%, S-WRITE-INI 0.005%, S-AUTOMOD-ESP 0.003%, S-WRITE-SKSE
 
 **Cumulative (`--base c3f32ef`):** 0 errors; S-MOVE-INSTALL no-longer-advise 154; S-REGISTRY no-longer-deny 17; the
 rest as in the Task 9 section.
+
+## Task 7b: same-command literal assignments resolve delete operands
+
+Change: a delete operand written with a variable (`D=/tmp/x; rm -rf "$D"`, `$p = 'C:\x'; Remove-Item $p`) is replaced
+by the literal the parser proves it holds, then judged like a written-out path (S-DEL-INSTALL/CONFIG/MO2, or nothing).
+Only a plain literal assigned once in the whole command, as its own statement in the ROOT command's top-level list,
+before the use (an earlier statement, or earlier in the same pure `&&` chain) counts; branches, loops, functions,
+subshells, pipelines, `&`, `||`, `source`/`eval`/dot-source/`Invoke-Expression` and any second write leave it
+unresolved (the deny it was). cmd never resolves. S-REGISTRY's Task 9 text resolver is replaced by the same one.
+
+`--base dc8c59b`, N = 63,637 (Bash 56,799, PowerShell 1,615, Write 3,598, Edit 1,620, MCP 5). 0 errors; parse
+failures 63 → 63. Matrix: deny>allow 87, deny>ask 1, deny>deny 278 (22 of them a rule move), nothing newly denied
+from allow/advise/ask.
+
+| rule | direction | n | hand-read |
+|---|---|---|---|
+| S-DEL-UNRESOLVED | no-longer-deny | 110 (190 → 80) | 88 lifted (87 allow, 1 ask) + 22 rule moves. **88 of 88 false positives**: every delete operand resolves to a scratchpad/Temp path, `/tmp`, `C:/Temp` or a sibling outside every root (one `__pycache__`, scratch by R8); each command read for the flow (assignment first in its list or earlier in the same `&&` chain, no second write). **0 true positives lost.** |
+| S-DEL-INSTALL | newly-deny | 21 | deny → deny: the variable now resolves INTO the install and the file is named (`$GAME/Data/ZZZGinSpike.esp`, `.claude/backups/<x>/*`, `Data/meshes/weapons/Fettered Fragments/*.bak`, `_CLAUDE_OUTPUT/...` zips and stages). These are the analysis-only "~20 true positives" of Task 7 |
+| S-WRITE-PLUGIN | newly-deny | 1 | deny → deny: the delete deny that pre-empted it is gone; the same command's `printf 'x' > _CLAUDE_OUTPUT/zzz_relock.esp` is a real plugin write probe |
+| S-RESAVER-APPLY | newly-ask | 1 | deny → ask: `rm -f "$OUT"` (scratch) no longer pre-empts the ask for the same command's real `reset-havok ... --apply` |
+
+PowerShell (Task 10's 8): 2 lifted (`$tmp`/`$pkg\__pycache__`, temp + scratch), 2 now S-DEL-INSTALL (`_CLAUDE_OUTPUT`
+zips), 4 still unresolved (pipeline input, values built from `$base`, `Join-Path`).
+
+The 80 that remain are values built from another variable (`OUT="$SP/x"`, `SP="$LOCALAPPDATA/..."`), `$(mktemp)`,
+loop variables, pipeline input, and `cd X && D=...; rm "$D"` (not first in its list: if `cd` fails the assignment never
+runs). Shell-rule CPU over the 63,637 items is unchanged in shape; worst new timing shape at 80 KB ~86 ms.

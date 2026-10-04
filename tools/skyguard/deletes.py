@@ -32,6 +32,14 @@ CLAUSES, in priority order (a deny from an earlier clause wins):
            a whole-command test on opaque commands only re-denied `"$SPRIGGIT" serialize ...; rm -rf /tmp/x` with
            the install named elsewhere (13 of 13 hand-read: false positives).
 
+SAME-COMMAND ASSIGNMENTS (Task 7b). Before any clause, each operand written with a variable that the parser proved
+holds a literal (Exec.subst: `D=/tmp/x; rm -rf "$D"`, `$p = 'C:\x'; Remove-Item $p`) is replaced by that literal and
+then judged exactly like a written-out path: into a protected root -> S-DEL-*; outside or scratch -> nothing. Anything
+less than certain (assign.py and shellparse list the cases) stays UNRESOLVED and reaches clause (b) as before. Priced
+(dc8c59b, N = 63,242): of 190 S-DEL-UNRESOLVED denies, 88 no longer deny -- all hand-read, every operand a scratch or
+temp path -- and 22 now name the protected file they delete (21 S-DEL-INSTALL, 1 S-WRITE-PLUGIN); 0 true positives
+lost.
+
 ADVICE (no deny): S-RELATIVE-UNKNOWN -- a relative `Data` operand with no cwd (R9).
 
 KNOWN LIMITS (fix round 1, recorded, not handled):
@@ -43,7 +51,10 @@ KNOWN LIMITS (fix round 1, recorded, not handled):
     allowlist (beside SCRATCH_GLOBS) is a follow-up idea, not built;
   - an unresolved delete operand run from inside a protected folder is not flagged (ruling, fix round 1:
     measured 75 occurrences, 0 real, in 61,935 items);
-  - `CMD="rm -rf <install>"; $CMD`: an assignment value is not an exec; PS5 Remove-Item -Recurse follows junctions.
+  - `CMD="rm -rf <install>"; $CMD`: an assignment value is not an exec; PS5 Remove-Item -Recurse follows junctions;
+  - (Task 7b) a variable built from another variable (`SP=...; Y="$SP/x"; rm -rf "$Y"`) stays unresolved -- only
+    a plain literal counts; so does any name the text writes twice, even harmlessly (`echo "D=$D"`). ~80 such
+    S-DEL-UNRESOLVED denies remain in the history.
 
 NOT A DELETE: a command that only MENTIONS one (grep, rg, Select-String, echo, git log --grep, a data heredoc).
 """
@@ -254,6 +265,15 @@ def interpreter_code(e) -> str:
     return "\n".join(code)
 
 
+def substituted(e):
+    """e with each argv word that uses a same-command LITERAL assignment replaced by its value (Task 7b; the parser
+    decides which assignment certainly reaches the word, see assign.py). Other words are unchanged."""
+    if not e.subst:
+        return e
+    sub = dict(e.subst)
+    return e._replace(argv=tuple(sub.get(w, w) for w in e.argv))
+
+
 def is_opaque(e) -> bool:
     """The parser cannot know what this runs: a dynamic program, or a git alias that runs a shell (`!...`)."""
     if e.program == "?":
@@ -366,6 +386,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     for e in parsed.execs:
         if is_opaque(e):
             opaque = True
+        e = substituted(e)
         code = interpreter_code(e)
         if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code)):
             for kind, rx in _root_regexes(roots):
