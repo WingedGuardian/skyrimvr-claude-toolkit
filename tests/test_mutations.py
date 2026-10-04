@@ -330,6 +330,14 @@ MUTATIONS = [
         "tests/test_setup_paths.py::test_agents_md_gets_the_same_paths_as_claude_md",
         id="setup-configures-agents-md",
     ),
+    # kb-guard must snapshot AGENTS.md: it carries the install's filled-in paths, and an update replaces it.
+    pytest.param(
+        "tools/kb-guard.sh",
+        'WATCHED="KNOWLEDGEBASE.md KNOWLEDGEBASE.local.md CLAUDE.md AGENTS.md"',
+        'WATCHED="KNOWLEDGEBASE.md KNOWLEDGEBASE.local.md CLAUDE.md"',
+        "tests/test_kb_guard.py::test_every_watched_file_is_actually_snapshotted",
+        id="kb-guard-watches-agents-md",
+    ),
     # An alarm from tools/kb-guard.sh must reach the session as TEXT. If the engine instead fails on a
     # non-zero guard status, the wrapper reports NOT RUN and the alarm itself is lost.
     pytest.param(
@@ -1033,7 +1041,7 @@ MUTATIONS = [
     # Shrink WATCHED to the one file every other test happens to create.
     pytest.param(
         "tools/kb-guard.sh",
-        'WATCHED="KNOWLEDGEBASE.md KNOWLEDGEBASE.local.md CLAUDE.md"',
+        'WATCHED="KNOWLEDGEBASE.md KNOWLEDGEBASE.local.md CLAUDE.md AGENTS.md"',
         'WATCHED="KNOWLEDGEBASE.md"',
         "tests/test_kb_guard.py::test_every_watched_file_is_actually_snapshotted",
         id="every-watched-file-is-snapshotted",

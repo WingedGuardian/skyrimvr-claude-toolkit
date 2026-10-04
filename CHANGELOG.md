@@ -2,6 +2,19 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Codex support
+
+- **First Codex hook definitions (v1): approve them in /hooks.** Open `codex` in your Skyrim folder, type `/hooks`, approve the 2 Skyrim toolkit hooks; until then Codex runs none of them and does not say so.
+- `setup.sh` configures Codex: it fills in `.codex/hooks.json` for your install folder and prints the approval step.
+- `setup.sh` fills your paths into `AGENTS.md`, the instruction file Codex reads, exactly as into `CLAUDE.md`.
+- `setup.sh` writes the Python path into the Codex hook scripts, and repairs it on a re-run after Python moves.
+- `setup.sh` refuses to configure the Codex hooks in a folder whose path contains `%`, `!`, `$`, `` ` `` or `"`, and says why (the hook could not start there, and Codex runs the command when a hook cannot start).
+- `setup.sh` warns, and changes nothing, when `.codex/hooks.json` was set up for a different folder: re-extract, re-run `setup.sh`, re-approve.
+- The session-start snapshot (`tools/kb-guard.sh`) now also keeps copies of `AGENTS.md`.
+- Release builds now check the Codex files: hook definitions present and parsing, every script they run present, the rules file, one Codex skill per Claude skill, `AGENTS.md` at most 32,768 bytes.
+- Unsupported, and both leave the hooks unable to start: a group policy forcing PowerShell's `AllSigned` execution policy, and Codex running inside WSL.
+- Commands you type with `!` in the Codex prompt bypass the hooks (measured); see "Using with Codex" in the README for the full list of what is not checked.
+
 ### Codex adapter: known coverage gaps
 
 - **MCP tools are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the

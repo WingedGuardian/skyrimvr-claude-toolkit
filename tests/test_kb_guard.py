@@ -168,6 +168,7 @@ def test_every_watched_file_is_actually_snapshotted(tmp_path):
         "KNOWLEDGEBASE.md": "shipped kb\n",
         "KNOWLEDGEBASE.local.md": "MY OWN NOTES, the file the release exists for\n",
         "CLAUDE.md": "install paths\n",
+        "AGENTS.md": "the same install paths, for Codex\n",   # Plan 4 Task 11
     }
     for name, body in bodies.items():
         write(root, name, body)

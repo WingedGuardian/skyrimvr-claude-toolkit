@@ -140,6 +140,19 @@ jobs:
                           checked += 1
                           if not os.path.isfile(path):
                               missing.append(f'{event}: {path}')
+          # Codex (Plan 4): the frozen definitions name their script after the install-root placeholder.
+          codex = json.load(open('.codex/hooks.json'))
+          for event, groups in codex.get('hooks', {}).items():
+              for g in groups:
+                  for h in g.get('hooks', []):
+                      for key in ('command', 'commandWindows'):
+                          paths = re.findall(r'\{\{CODEX_ROOT(?:_POSIX)?\}\}/([^"\\]+)', h.get(key, ''))
+                          if not paths:
+                              missing.append(f'codex {event} {key}: names no script')
+                          for path in paths:
+                              checked += 1
+                              if not os.path.isfile(path):
+                                  missing.append(f'codex {event}: {path}')
           for m in missing:
               print(f'::error::hook script not found -> {m}')
           print(f'checked {checked} hook paths')

@@ -37,7 +37,7 @@ Five thin wrappers over the Python engine `tools/skyguard/` intercept Claude's t
 - **backup-before-edit.sh** -- Copies a file before Claude modifies it **through the Edit/Write tools**. ⚠ Anything written by a script run through Bash is invisible to it -- that is a property of hooks, not a bug here. MEASURED: zero backups of a 177,459-byte `KNOWLEDGEBASE.md` across seven months, because it is written by a script. `session-kb-guard.sh` below covers that channel.
 - **snapshot-before-tool.sh** -- Snapshots active Papyrus source/compiled scripts before any Bash command
 - **session-kb-guard.sh** -- At SessionStart, copies the files nothing can rebuild
-  (`KNOWLEDGEBASE.md`, `KNOWLEDGEBASE.local.md`, `CLAUDE.md`) and raises an alarm if
+  (`KNOWLEDGEBASE.md`, `KNOWLEDGEBASE.local.md`, `CLAUDE.md`, `AGENTS.md`) and raises an alarm if
   one shrank. It exists because the first four all key on a *tool call*, and the
   knowledgebase is usually written by a script run through Bash -- invisible to an
   Edit/Write hook. Measured on the author's install: zero knowledgebase backups in
@@ -135,7 +135,7 @@ is yours) protects what has not been written yet. An install whose notes are
 *already* in the shipped file is covered by one thing only: a copy taken before the
 extract. The Claude Code hook `.claude/hooks/session-kb-guard.sh` takes that copy at **SessionStart**,
 delegating to `tools/kb-guard.sh`, which snapshots `KNOWLEDGEBASE.md`,
-`KNOWLEDGEBASE.local.md` and `CLAUDE.md` into `.claude/backups/kb/<stamp>/` whenever
+`KNOWLEDGEBASE.local.md`, `CLAUDE.md` and `AGENTS.md` into `.claude/backups/kb/<stamp>/` whenever
 the content changed, and raises an alarm when one of them vanishes, empties, or loses
 more than half its bytes. Run it by hand any time: `bash tools/kb-guard.sh --verbose`.
 

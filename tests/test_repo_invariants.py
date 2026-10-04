@@ -359,3 +359,91 @@ def test_the_users_knowledgebase_is_never_shipped_and_is_where_writes_go():
         local + " exists in the repo. It is the USER's file; if it is here it will be "
         "tracked and shipped, overwriting theirs on update")
 
+
+# ---------------------------------------------------------------- the Codex payload (Plan 4 Task 11)
+
+import shutil  # noqa: E402
+import sys  # noqa: E402
+
+import pytest  # noqa: E402
+
+from conftest import copy_repo  # noqa: E402
+
+CHECKER = REPO / "tools" / "check-codex-payload.py"
+
+
+def _check(root):
+    return subprocess.run([sys.executable, str(CHECKER), str(root)], capture_output=True, text=True, timeout=60)
+
+
+def _line(out, name):
+    return next((l for l in out.splitlines() if name in l), "")
+
+
+def _drop_one_codex_skill(root):
+    shutil.rmtree(next(p for p in sorted((root / ".agents" / "skills").iterdir()) if p.is_dir()))
+
+
+def _pad_agents_md(root):
+    p = root / "AGENTS.md"
+    p.write_bytes(p.read_bytes() + b"x" * (32769 - p.stat().st_size))
+
+
+def _render_hooks_json(root):
+    p = root / ".codex" / "hooks.json"
+    p.write_text(p.read_text(encoding="utf-8").replace("{{CODEX_ROOT_POSIX}}", "/c/Me/Skyrim")
+                 .replace("{{CODEX_ROOT}}", "C:/Me/Skyrim"), encoding="utf-8")
+
+
+BREAKS = {
+    "definitions-missing": (lambda r: (r / ".codex" / "hooks.json").unlink(), ".codex/hooks.json present"),
+    "definitions-unparseable": (lambda r: (r / ".codex" / "hooks.json").write_text("{", encoding="utf-8"),
+                                ".codex/hooks.json present"),
+    "definitions-rendered": (_render_hooks_json, "still unrendered"),
+    "entry-ps1-missing": (lambda r: (r / ".codex" / "hooks" / "skyguard-entry.ps1").unlink(), "script is in the payload"),
+    "entry-sh-missing": (lambda r: (r / ".codex" / "hooks" / "skyguard-entry.sh").unlink(), "script is in the payload"),
+    "rules-missing": (lambda r: (r / ".codex" / "rules" / "skyrim.rules").unlink(), "skyrim.rules present"),
+    "codex-skill-missing": (_drop_one_codex_skill, ".agents/skills matches"),
+    "agents-md-missing": (lambda r: (r / "AGENTS.md").unlink(), "AGENTS.md present"),
+    "agents-md-over-budget": (_pad_agents_md, "AGENTS.md present"),
+}
+
+
+@pytest.fixture(scope="module")
+def pristine_payload(tmp_path_factory):
+    return copy_repo(tmp_path_factory.mktemp("payload") / "toolkit")
+
+
+def test_the_codex_payload_check_passes_on_the_real_payload(pristine_payload):
+    r = _check(pristine_payload)
+    assert r.returncode == 0 and "CODEX PAYLOAD: OK" in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("brk", sorted(BREAKS))
+def test_every_codex_payload_check_can_fail(tmp_path, pristine_payload, brk):
+    """Each check is proven red on a payload missing its piece -- and red on ITS OWN line, not by luck."""
+    root = tmp_path / "toolkit"
+    shutil.copytree(pristine_payload, root)
+    damage, name = BREAKS[brk]
+    damage(root)
+    r = _check(root)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "!!" in _line(r.stdout, name), f"{brk}: the '{name}' check did not go red:\n{r.stdout}"
+
+
+def test_both_release_gates_run_the_codex_payload_check():
+    """The construct, not the name in a comment: an executable line in each gate runs the checker."""
+    for rel in (".github/workflows/release.yml", "tools/verify-release.sh"):
+        text = (REPO / rel).read_text(encoding="utf-8")
+        runs = [l for l in text.splitlines()
+                if not l.strip().startswith("#") and "python" in l and "check-codex-payload.py" in l]
+        assert runs, f"{rel} never runs tools/check-codex-payload.py"
+
+
+def test_the_codex_files_are_not_gitignored():
+    """A tracked-but-ignored pattern would drop them from the next contributor's commit, and from the zip."""
+    r = subprocess.run(["git", "check-ignore", ".codex/hooks.json", ".codex/hooks/skyguard-entry.ps1",
+                        ".codex/rules/skyrim.rules", ".agents/skills/x/SKILL.md", "AGENTS.md"],
+                       cwd=str(REPO), capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "", f"ignored: {r.stdout}"
+    assert r.returncode == 1, r.stderr   # 1 = none ignored; 128 = not a repo (the check proved nothing)

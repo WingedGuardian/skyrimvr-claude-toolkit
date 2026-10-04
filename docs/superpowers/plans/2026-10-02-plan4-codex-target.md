@@ -2022,6 +2022,14 @@ Check any time with: bash tools/hook-canary.sh
 
 ### Task 13: The canary reports Codex trust and per-surface hook coverage (D14)
 
+> **Carried from Task 11 (must land here):** README "Using with Codex" documents two unsupported setups that
+> fail OPEN because the entry never starts: a group policy forcing `AllSigned` (unsigned `.ps1`) and
+> WSL-hosted Codex (runs the Linux `command`, not this install's `commandWindows`). In both, no `invoked`
+> record is ever written, so the canary must report the Codex hooks as **"never invoked"** (not HEALTHY, not
+> silently NOT EXERCISED) when trust says approved but no heartbeat exists -- with a test for that state.
+> Also: `setup.sh` on a non-Windows host leaves `.codex/hooks.json` unrendered (Codex support is Windows-only);
+> `codex_trust.trust_report` should then say "unrunnable"/unconfigured, not "untrusted".
+
 **Why:** an unapproved, modified or disabled Codex hook is silent (E2, E18), and some Windows surfaces emit
 no `PreToolUse` at all (E24). Neither can be seen from inside the hook. Both can be seen from outside:
 the trust state from `~/.codex/config.toml`, and coverage by comparing a session's transcript (its

@@ -56,6 +56,9 @@ def _run(root: Path, stale_min=None, args=()):
         "CLAUDE_PROJECT_DIR": str(root).replace("\\", "/"),
         "PATH": os.environ.get("PATH", ""),
         "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+        # Without SystemDrive, py.exe / the python3 Store alias create a literal `%SystemDrive%/ProgramData/...`
+        # cache folder in the current directory -- the repo, under pytest (found in Plan 4 Task 11).
+        "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE", ""),
     }
     if stale_min is not None:
         env["HOOK_CANARY_STALE_MIN"] = str(stale_min)
@@ -211,7 +214,7 @@ def test_with_no_python_it_says_so_and_exits_2(tmp_path):
     bin_dir.mkdir()
     # a PATH holding only bash's own directory: no python3, python or py
     env = {"CLAUDE_PROJECT_DIR": str(root).replace("\\", "/"), "PATH": str(Path(BASH).parent),
-           "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
+           "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""), "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE", "")}
     p = subprocess.run([BASH, str(TOOL)], capture_output=True, text=True, env=env, timeout=120)
     if "UNMEASURABLE: no Python 3" not in p.stdout:
         pytest.skip("a Python 3 is reachable from bash's own directory on this machine")
