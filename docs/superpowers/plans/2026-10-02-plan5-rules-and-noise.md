@@ -679,6 +679,14 @@ poison every later use; cmd never resolves (it expands `%K%` before `set` runs).
   PowerShell automatic variables) are never resolved; a command that writes `IFS` refuses every unquoted
   expansion; `exec {D}>f`, Tee-Object -Variable, PowerShell `set`, PSVariable count as writes; `source`/`eval`
   anywhere in a statement (also behind `builtin`/`command`) and `InvokeScript` poison. Re-priced: identical.
+- Fix round 1 (adversarial review, 34 fail-open shapes; controller ruling): BROAD poisoning -- any poison
+  class anywhere in the normalized command (continuations joined, every word dequoted) turns all resolution
+  off: function definitions, trap/eval/source/`.`/read/readarray/mapfile/getopts/declare/typeset/local/
+  readonly/unset/let at command position, `export $..`, `printf -v`, `wait -p`, `((..=..))`, `${N:=}`, arrays,
+  `$N=`; PowerShell *-Variable cmdlets/aliases, `variable:`, -OutVariable/-PipelineVariable/... and their
+  prefixes, `.Value =`, `[ref]`, PSVariable/SessionState/InvokeScript, iex, `&`/`.` with a variable, quoted
+  command or scriptblock, `= {`, scope prefixes; a stray fi/done/`}`. Re-priced: 68 of the 88 FPs still lifted,
+  0 TP lost; 34 `t07b-r1-*` rows (all red on the round-0 engine), 38 mutations.
 - Known limits: a value built from another variable (`Y="$SP/x"`) and a harmless second mention that reads like a
   write (`echo "D=$D"`) stay unresolved; the write rules (S-WRITE-PLUGIN) do not read `Exec.subst`.
 

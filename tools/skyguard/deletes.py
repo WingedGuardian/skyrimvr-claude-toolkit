@@ -36,8 +36,8 @@ SAME-COMMAND ASSIGNMENTS (Task 7b). Before any clause, each operand written with
 holds a literal (Exec.subst: `D=/tmp/x; rm -rf "$D"`, `$p = 'C:\x'; Remove-Item $p`) is replaced by that literal and
 then judged exactly like a written-out path: into a protected root -> S-DEL-*; outside or scratch -> nothing. Anything
 less than certain (assign.py and shellparse list the cases) stays UNRESOLVED and reaches clause (b) as before. Priced
-(dc8c59b, N = 63,242): of 190 S-DEL-UNRESOLVED denies, 88 no longer deny -- all hand-read, every operand a scratch or
-temp path -- and 22 now name the protected file they delete (21 S-DEL-INSTALL, 1 S-WRITE-PLUGIN); 0 true positives
+(dc8c59b, N = 64,742, after fix round 1's broad poisoning): of 190 S-DEL-UNRESOLVED denies, 68 no longer deny --
+all hand-read, every operand a scratch or temp path -- and 22 now name the protected file they delete (21 S-DEL-INSTALL, 1 S-WRITE-PLUGIN); 0 true positives
 lost.
 
 ADVICE (no deny): S-RELATIVE-UNKNOWN -- a relative `Data` operand with no cwd (R9).

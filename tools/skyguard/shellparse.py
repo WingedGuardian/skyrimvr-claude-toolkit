@@ -240,21 +240,28 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
 # Shared scanner state
 # ----------------------------------------------------------------------------------------------------------
 class _Ctx:
-    __slots__ = ("tokens", "out", "frame_ids", "via_xargs", "root", "counts", "subst")
+    __slots__ = ("tokens", "out", "frame_ids", "via_xargs", "root", "counts", "subst", "dialect", "poison")
 
-    def __init__(self, root: str = ""):
+    def __init__(self, root: str = "", dialect: str = ""):
         self.tokens = 0
         self.out: List[Exec] = []
         self.frame_ids = 0
         self.via_xargs = set()          # ids of execs xargs runs: their stdin items arrive as ARGUMENTS
         self.root = root                # the whole command (Task 7b: assignments are counted over all of it)
+        self.dialect = dialect
+        self.poison: Optional[str] = None
         self.counts: Optional[dict] = None
         self.subst: Tuple[Tuple[str, str], ...] = ()     # the Exec.subst of the simple command being resolved
 
     def writes(self, name: str) -> int:
         if self.counts is None:
-            self.counts = assign.write_counts(self.root)
+            self.counts = assign.write_counts(assign.normalize(self.root))
         return self.counts.get(name.lower(), 0)
+
+    def poisoned(self) -> str:
+        if self.poison is None:
+            self.poison = assign.poisoned(self.root, self.dialect)
+        return self.poison
 
     def tick(self, k: int = 1) -> None:
         self.tokens += k
@@ -384,6 +391,7 @@ class _Scanner:
         self._pmatch: Optional[dict] = None
         self.vars: dict = {}            # Task 7b: name -> [value, known_ver, list, seq] (one literal assignment)
         self.poisoned = False           # a source / eval / dot-source ran: any name may have changed
+        self.unsure = False             # a closing keyword without its opener: the control depth is not known
 
     def _frame(self, kind, cd, mode, start):
         self.ctx.frame_ids += 1
@@ -595,6 +603,8 @@ class _Bash(_Scanner):
                 f.ctl += 1
             elif v in _BASH_CLOSE:
                 f.ctl -= 1
+                if f.ctl < 0:
+                    self.unsure = True              # a stray fi/done/}: resolution off (fix round 1)
             return True
         if v == "function":
             cmd.drop_next = True
@@ -2179,6 +2189,8 @@ class _Resolver:
 def _subst(sc: _Scanner, rec: _Cmd, ws, vals) -> Tuple[Tuple[str, str], ...]:
     """Exec.subst (Task 7b): (word as in argv, the same word with its variables replaced by the literal each one
     certainly holds here). A word value spelled twice with different readings (`'$D'` and `$D`) is left out."""
+    if sc.unsure or sc.ctx.poisoned():
+        return ()                                   # fix round 1: when in doubt, nothing in the command resolves
     got: dict = {}
     split_safe = sc.DIALECT != "bash" or sc.ctx.writes("IFS") == 0
     for w, val in zip(ws, vals):
@@ -2288,7 +2300,7 @@ def _sub(text: str, dialect: str, depth: int, cd: str, ctx: _Ctx, mode: str = "n
 
 
 def _parse_one(command: str, dialect: str) -> Parsed:
-    ctx = _Ctx(command)
+    ctx = _Ctx(command, dialect)
     try:
         _sub(command, dialect, 0, "", ctx)
         return Parsed(tuple(ctx.out), True, "")

@@ -194,7 +194,7 @@ def _subst(cmd, shell="bash", program="rm"):
     ('D=/x && x; rm "$D"', True),                         # first in its list: it always ran
     ('D=/x || x; rm "$D"', True),
     ('D=/x; if y; then rm "$D"; fi', True),
-    ('D=/x; f() { rm "$D"; }; f', True),
+    ('D=/x; f() { rm "$D"; }; f', False),            # fix round 1: a function definition poisons
     ('D=/x; echo "$(rm "$D")"', True),
     ('rm "$D"; D=/x', False),
     ('rm "$D" && D=/x', False),
@@ -312,3 +312,92 @@ def test_plain_assignment_is_counted():
 
 def test_dollar_assignment_is_counted():
     assert assign.write_counts("$p = 'x'; if ($y) { $p = 'z' }").get("p") == 2
+
+
+# ------------------------------------------------------------------------------------------- fix round 1: poisoning
+# Broad, conservative: any of these anywhere in the command turns ALL resolution off (controller ruling). One case
+# per poison class, with an explicit id so a mutation can name it.
+NL = chr(10)
+POISON = [
+    ("function-parens", "f() { :; }", "bash", "function"),
+    ("function-keyword", "function f { :; }", "bash", "function"),
+    ("default-assign", ": ${E:=y}", "bash", "default-assign"),
+    ("array-element", "A[0]=x", "bash", "array"),
+    ("array-list", "A=(a b)", "bash", "array"),
+    ("indirect-name", "$N=x", "bash", "indirect"),
+    ("arithmetic", "(( E = 1 ))", "bash", "arithmetic"),
+    ("dot", ". ./e.sh", "bash", "dot-source"),
+    ("dot-builtin-options", "builtin -- . ./e.sh", "bash", "dot-source"),
+    ("dot-command-p", "command -p . ./e.sh", "bash", "dot-source"),
+    ("dot-after-then", "if y; then . ./e.sh; fi", "bash", "dot-source"),
+    ("trap", "trap 'x' DEBUG", "bash", "trap"),
+    ("eval", "eval x", "bash", "eval"),
+    ("source", "source ./e.sh", "bash", "source"),
+    ("source-quoted", '"source" ./e.sh', "bash", "source"),
+    ("source-split-quotes", "so''urce ./e.sh", "bash", "source"),
+    ("source-backslash", BS + "source ./e.sh", "bash", "source"),
+    ("read", "read -r E < f", "bash", "read"),
+    ("read-continuation", "rea" + BS + NL + "d E < f", "bash", "read"),
+    ("read-after-assignment", "IFS=/ read -r E < f", "bash", "read"),
+    ("readarray", "readarray E < f", "bash", "readarray"),
+    ("mapfile", "mapfile E < f", "bash", "mapfile"),
+    ("getopts", "getopts ab E", "bash", "getopts"),
+    ("declare", "declare E=x", "bash", "declare"),
+    ("typeset", "typeset E=x", "bash", "typeset"),
+    ("local", "local E=x", "bash", "local"),
+    ("readonly", "readonly E=x", "bash", "readonly"),
+    ("unset", "unset E", "bash", "unset"),
+    ("let", "let E=1", "bash", "let"),
+    ("export-dollar", 'export "$N"', "bash", "export"),
+    ("printf-v", "printf -v E %s x", "bash", "printf-v"),
+    ("printf-v-attached", "printf -vE %s x", "bash", "printf-v"),
+    ("wait-p", "wait -n -p E", "bash", "wait-p"),
+    ("ps-set-variable", "Set-Variable -Name $n -Value x", "powershell", "variable-cmdlet"),
+    ("ps-sv", "sv $n x", "powershell", "variable-cmdlet"),
+    ("ps-gv-value", "(gv d).Value = 1", "powershell", "variable-cmdlet"),
+    ("ps-variable-drive", "Set-Item variable:d x", "powershell", "powershell-scope"),
+    ("ps-ref", "$r = [ref]$d", "powershell", "powershell-scope"),
+    ("ps-value-assign", "$x.Value = 1", "powershell", "powershell-scope"),
+    ("ps-psvariable", "$ExecutionContext.SessionState.PSVariable.Set('d', 1)", "powershell", "powershell-scope"),
+    ("ps-invokescript", "$ExecutionContext.InvokeCommand.InvokeScript('x')", "powershell", "powershell-scope"),
+    ("ps-iex", "iex $c", "powershell", "powershell-scope"),
+    ("ps-scope", "$script:d = 1", "powershell", "powershell-scope"),
+    ("ps-call-variable", "& $sb", "powershell", "powershell-scope"),
+    ("ps-call-block", ". { $d = 1 }", "powershell", "powershell-scope"),
+    ("ps-block-assigned", "$sb = { $d = 1 }", "powershell", "powershell-scope"),
+    ("ps-quoted-call", "& 'C:" + BS + "x.ps1'", "powershell", "quoted-call"),
+    ("ps-outvariable-prefix", "Get-Item x -outv d", "powershell", "variable-parameter"),
+    ("ps-ov-alias", "Get-Item x -ov d", "powershell", "variable-parameter"),
+    ("ps-pipelinevariable", "Get-Item x -PipelineVar d", "powershell", "variable-parameter"),
+    ("ps-dot-source", ". ./s.ps1", "powershell", "dot-source"),
+    ("cmd-never", "set D=x", "cmd", "cmd"),
+]
+CLEAN = [
+    ("bash-plain", 'D=/tmp/x; rm -rf "$D"; find . -name x; ls .', "bash"),
+    ("bash-export-static", "export PATH=/x; D=/tmp/x", "bash"),
+    ("bash-printf", "printf '%s' x", "bash"),
+    ("bash-time-not", "time D=/x; ! D=/y", "bash"),
+    ("ps-plain", "$p = 'C:" + BS + "x'; Remove-Item -Path $p -Recurse -Force -ErrorAction Stop -Include *.x",
+     "powershell"),
+    ("ps-if-block", "if (Test-Path $p) { Remove-Item $p }", "powershell"),
+]
+
+
+@pytest.mark.parametrize("text,dialect,want", [p[1:] for p in POISON], ids=[p[0] for p in POISON])
+def test_poison_class(text, dialect, want):
+    assert assign.poisoned(text, dialect) == want
+
+
+@pytest.mark.parametrize("text,dialect", [c[1:] for c in CLEAN], ids=[c[0] for c in CLEAN])
+def test_not_poisoned(text, dialect):
+    assert assign.poisoned(text, dialect) == ""
+
+
+def test_poison_turns_off_every_variable_in_the_command():
+    assert _subst('D=/x; E=/y; rm "$D" "$E"') == {"$D": "/x", "$E": "/y"}
+    assert _subst('D=/x; E=/y; rm "$D" "$E"; read -r Z < f') == {}
+
+
+def test_a_stray_closer_turns_resolution_off():
+    assert _subst('fi; if y; then D=/x; fi; rm "$D"') == {}
+    assert _subst('}; D=/x; rm "$D"') == {}

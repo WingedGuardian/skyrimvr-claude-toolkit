@@ -4,6 +4,8 @@ r"""assign: same-command LITERAL assignments, for operands written as a variable
     bash_value(raw)                    -> the literal value of a bash assignment's right-hand side, or None
     ps_assignment(segment)             -> (name, value) for `$name = 'literal'`, or None
     expand_word(raw, dialect, lookup)  -> the word with each $NAME / ${NAME} replaced, or None
+    normalize(text)                    -> text with backslash-newline joined and every quote/backslash removed
+    poisoned(text, dialect)            -> the poison class that turns ALL resolution in the command off, or ""
 
 Pure, stdlib only, Python 3.8. Linear: every regex is a bounded run or a single character class.
 
@@ -11,6 +13,28 @@ WHY. `D=/tmp/x; rm -rf "$D"` in a command that also names the install was denied
 of ~190 such denies in the history were scratch paths. A variable is resolved only when the answer is CERTAIN;
 anything less stays unresolved (the deny it was before). The FLOW half (which assignment reaches which use) is in
 shellparse, which knows the statement structure; this module holds the TEXT half.
+
+POLICY (Task 7b fix round 1, controller ruling): BROAD, CONSERVATIVE POISONING over precise modelling. Resolution is
+a convenience -- it lifts false positives; a wrong resolution is a fail-open. So when in doubt the WHOLE command's
+resolution is off (every variable operand unresolved, the deny it was). poisoned() reads the command after
+normalize() -- backslash-newline continuations joined, then every quote and backslash removed from every word,
+regardless of quoting (`"source"`, `so''urce`, `\source`, `rea\<newline>d` all read as the word) -- and poisons
+when any statement contains:
+  - bash: a function definition (`name()`, `function name`); at command position (after separators, `then`/`do`/
+    `else`/`!`/`time`/`if`/`while`/`until`, leading assignments, and `builtin`/`command`/`exec` with or without
+    options) `trap`, `eval`, `source`, `.`, `read`, `readarray`, `mapfile`, `getopts`, `declare`, `typeset`,
+    `local`, `readonly`, `unset`, `let`, or `export` with a `$`-word; `printf` with a `-v` option (also `-vNAME`);
+    `wait` with `-p`; `(( ... = ... ))` / `$(( ... = ... ))`; `${NAME:=...}` / `${NAME=...}`; an array assignment
+    (`N[i]=`, `N=(...)`); a name written through `$` (`$N=`);
+  - PowerShell: any `*-Variable` cmdlet or alias (`sv`, `nv`, `gv`, `clv`, `rv`, `set-variable`, ...); the
+    `variable:` drive anywhere (so Set-Item/New-Item/Set-Content/Add-Content/Clear-Item on it); any parameter that is
+    a prefix (2+ letters) of -OutVariable/-ErrorVariable/-WarningVariable/-InformationVariable/-PipelineVariable or
+    one of -ov/-ev/-wv/-iv/-pv; `.Value =`; `[ref]`; `PSVariable`, `SessionState`, `InvokeScript`; `iex` /
+    `Invoke-Expression`; `&` or `.` followed by a variable, a quoted command or a scriptblock; a scriptblock
+    assigned (`= {`); a scope prefix `$script:` / `$global:` / `$private:` / `$using:` / `$local:`;
+  - cmd: never resolves at all (it expands %K% when the line is read, before `set` runs), which covers delayed
+    expansion (`!VAR!`), `for /f ... set` and `call` a fortiori.
+shellparse also turns a scanner's resolution off when a closing keyword (`fi`/`done`/`}`) has no opener.
 
 WHAT COUNTS AS ONE LITERAL ASSIGNMENT. shellparse records `NAME=literal` (bash) or `$name = 'literal'`
 (PowerShell) only when ALL of these hold, else the name stays unresolved:
@@ -94,6 +118,105 @@ def write_counts(text: str) -> Dict[str, int]:
             for m in _BARE_IDENT.finditer(piece):                 # bash: `for x in "$SP"/*` writes x, reads SP
                 add(m.group(1))
     return out
+
+
+# ------------------------------------------------------------------------------------------------- poisoning
+_CONT = re.compile(r"[\\`]\r?\n")                       # bash / PowerShell line continuation
+_DEQUOTE = str.maketrans("", "", "'\"\\`\u2018\u2019\u201a\u201b\u201c\u201d\u201e")
+
+
+def normalize(text: str) -> str:
+    """Continuations joined, then every quote, backtick and backslash removed (regardless of quoting): `"source"`,
+    `so''urce`, `\\source` and `rea\\<newline>d` all read as the plain word."""
+    return _CONT.sub("", text).translate(_DEQUOTE)
+
+
+_STMT = re.compile(r"[^;&|\n(){}]+")
+_FUNC_DEF = re.compile(r"[\w.:+-]\s{0,64}\(\s{0,64}\)|(?:^|[\s;&|(){}])function\s")
+_DEFAULT_SET = re.compile(r"\$\{" + _IDENT + r":?=")
+_ARRAY_SET = re.compile(r"(?<![\w$])" + _IDENT + r"(?:\[[^\]\n]{0,200}\]\+?=|\+?=\()")
+_DOLLAR_NAME_SET = re.compile(r"\$\{?" + _IDENT + r"\}?\+?=(?!=)")
+_ASSIGN_WORD = re.compile(_IDENT + r"(?:\[[^\]]{0,200}\])?\+?=")
+_PREFIX_WORDS = frozenset(("then", "do", "else", "elif", "if", "while", "until", "!", "time", "coproc", "builtin",
+                           "command", "exec", "nohup", "sudo"))
+_OPTION_TAKERS = frozenset(("builtin", "command", "exec", "time"))
+_POISON_COMMANDS = frozenset(("trap", "eval", "source", ".", "read", "readarray", "mapfile", "getopts", "declare",
+                              "typeset", "local", "readonly", "unset", "let"))
+_PRINTF_V = re.compile(r"-[A-Za-z]{0,8}v")
+_WAIT_P = re.compile(r"-[A-Za-z]{0,8}p")
+_PS_VAR_CMDLET = re.compile(r"(?<![\w-])(?:set|new|get|clear|remove)-variable(?![\w-])|(?<![\w$-])(?:sv|nv|gv|clv|rv)"
+                            r"(?![\w-])", re.IGNORECASE)
+_PS_WORDS = re.compile(r"variable:|\[ref\]|psvariable|sessionstate|invokescript|\.value\s{0,64}=(?!=)"
+                       r"|(?<![\w-])(?:iex|invoke-expression)(?![\w-])|\$\{?(?:script|global|private|using|local):"
+                       r"|=\s{0,64}\{|(?:^|[\s;|(){}=])[&.]\s{0,64}[${]", re.IGNORECASE)
+_PS_QUOTED_CALL = re.compile("(?:^|[\\s;|(){}=])[&.]\\s{0,64}['\"\u2018\u2019\u201a\u201b\u201c\u201d\u201e]")
+_PS_PARAM = re.compile(r"(?<![\w-])-([A-Za-z]{2,32})(?![\w-])")
+_PS_VAR_PARAMS = ("outvariable", "errorvariable", "warningvariable", "informationvariable", "pipelinevariable")
+_PS_VAR_ALIASES = frozenset(("ov", "ev", "wv", "iv", "pv"))
+
+
+def _command_word(tokens):
+    """(the command word, the words after it) of one statement: leading keywords, prefix words, their options and
+    assignment words skipped."""
+    k, after_taker = 0, False
+    while k < len(tokens):
+        t = tokens[k]
+        if t in _PREFIX_WORDS:
+            after_taker = t in _OPTION_TAKERS
+        elif after_taker and t.startswith("-"):
+            pass
+        elif _ASSIGN_WORD.match(t):
+            after_taker = False
+        else:
+            break
+        k += 1
+    return (tokens[k], tokens[k + 1:]) if k < len(tokens) else ("", [])
+
+
+def poisoned(text: str, dialect: str) -> str:
+    """The first poison class found in the command (see POLICY), or "" when resolution may run. cmd: always."""
+    if dialect not in ("bash", "powershell"):
+        return "cmd"
+    t = normalize(text)
+    if dialect == "bash":
+        if _FUNC_DEF.search(t):
+            return "function"
+        for rx, why in ((_DEFAULT_SET, "default-assign"), (_ARRAY_SET, "array"), (_DOLLAR_NAME_SET, "indirect")):
+            if rx.search(t):
+                return why
+    else:
+        if _PS_VAR_CMDLET.search(t):
+            return "variable-cmdlet"
+        if _PS_WORDS.search(t):
+            return "powershell-scope"
+        if _PS_QUOTED_CALL.search(_CONT.sub("", text)):
+            return "quoted-call"
+        for m in _PS_PARAM.finditer(t):
+            p = m.group(1).lower()
+            if p in _PS_VAR_ALIASES or any(v.startswith(p) for v in _PS_VAR_PARAMS):
+                return "variable-parameter"
+    if dialect == "bash":
+        for p in _PIECE.finditer(t):
+            piece = p.group()
+            i = piece.find("((")
+            if i >= 0 and "=" in piece[i:]:
+                return "arithmetic"                         # (( D = 1 )), $(( D = 1 )), let-like
+    for s in _STMT.finditer(t):
+        word, rest = _command_word(s.group().split())
+        w = word.lower() if dialect == "powershell" else word
+        if w == ".":
+            return "dot-source"
+        if dialect != "bash":
+            continue
+        if w in _POISON_COMMANDS:
+            return w
+        if w == "export" and any("$" in r for r in rest):
+            return "export"
+        if w == "printf" and any(_PRINTF_V.match(r) for r in rest):
+            return "printf-v"
+        if w == "wait" and any(_WAIT_P.match(r) for r in rest):
+            return "wait-p"
+    return ""
 
 
 # ------------------------------------------------------------------------------------------------- values

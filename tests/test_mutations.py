@@ -1831,6 +1831,66 @@ _T7B_CLAUSES = [
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T7B_CLAUSES]
 
+# ---- Task 7b fix round 1: broad poisoning (controller ruling). One mutation per poison class, each naming the
+# class's unit case (tests/test_skyguard_assign.py::test_poison_class[<id>]) or the review row it must turn red.
+def _pc(case):
+    return _TA + "test_poison_class[" + case + "]"
+
+
+_PCMD1 = '_POISON_COMMANDS = frozenset(("trap", "eval", "source", ".", "read", "readarray", "mapfile", "getopts", "declare",'
+_PCMD2 = '                              "typeset", "local", "readonly", "unset", "let"))'
+_T7B_R1 = [
+    ("t7b-r1-continuation", _AS, '_CONT = re.compile(r"[' + BS * 2 + '`]' + BS + 'r?' + BS + 'n")',
+     '_CONT = re.compile(r"(?!)")', _pc("read-continuation")),
+    ("t7b-r1-dequote", _AS, '_DEQUOTE = str.maketrans("", "", ', '_DEQUOTE = {} and str.maketrans("", "", ',
+     _pc("source-quoted")),
+    ("t7b-r1-function", _AS, "_FUNC_DEF = re.compile(", '_FUNC_DEF = re.compile("(?!)") or re.compile(',
+     _pc("function-parens")),
+    ("t7b-r1-default-assign", _AS, '(_DEFAULT_SET, "default-assign"), ', "", _pc("default-assign")),
+    ("t7b-r1-array", _AS, '(_ARRAY_SET, "array"), ', "", _pc("array-element")),
+    ("t7b-r1-indirect", _AS, ', (_DOLLAR_NAME_SET, "indirect")', "", _pc("indirect-name")),
+    ("t7b-r1-ps-variable-cmdlet", _AS, "        if _PS_VAR_CMDLET.search(t):", "        if False:", _pc("ps-sv")),
+    ("t7b-r1-ps-scope", _AS, "        if _PS_WORDS.search(t):", "        if False:", _pc("ps-variable-drive")),
+    ("t7b-r1-ps-quoted-call", _AS, '        if _PS_QUOTED_CALL.search(_CONT.sub("", text)):', "        if False:",
+     _pc("ps-quoted-call")),
+    ("t7b-r1-ps-param-prefix", _AS, "any(v.startswith(p) for v in _PS_VAR_PARAMS)", "False",
+     _pc("ps-outvariable-prefix")),
+    ("t7b-r1-ps-param-alias", _AS, "p in _PS_VAR_ALIASES or ", "", _pc("ps-ov-alias")),
+    ("t7b-r1-arithmetic", _AS, '            if i >= 0 and "=" in piece[i:]:', "            if False:",
+     _pc("arithmetic")),
+    ("t7b-r1-dot", _AS, '        if w == ".":', "        if False:", _pc("dot")),
+    ("t7b-r1-export", _AS, '        if w == "export" and any("$" in r for r in rest):', "        if False:",
+     _pc("export-dollar")),
+    ("t7b-r1-printf-v", _AS, '        if w == "printf" and any(_PRINTF_V.match(r) for r in rest):', "        if False:",
+     _pc("printf-v-attached")),
+    ("t7b-r1-wait-p", _AS, '        if w == "wait" and any(_WAIT_P.match(r) for r in rest):', "        if False:",
+     _pc("wait-p")),
+    ("t7b-r1-taker-options", _AS, '        elif after_taker and t.startswith("-"):', "        elif False:",
+     _pc("dot-builtin-options")),
+    ("t7b-r1-prefix-then", _AS, '_PREFIX_WORDS = frozenset(("then", ', "_PREFIX_WORDS = frozenset((",
+     _pc("dot-after-then")),
+    ("t7b-r1-leading-assignment", _AS, "        elif _ASSIGN_WORD.match(t):", "        elif False:",
+     _pc("read-after-assignment")),
+    ("t7b-r1-cmd-never", _AS, '        return "cmd"', '        return ""', _pc("cmd-never")),
+    # wiring: the poison and the stray-closer flag turn the whole command's resolution off
+    ("t7b-r1-gate-poison", _SP, "    if sc.unsure or sc.ctx.poisoned():", "    if sc.unsure:",
+     _t07b("r1-source-quoted")),
+    ("t7b-r1-gate-unsure", _SP, "    if sc.unsure or sc.ctx.poisoned():", "    if sc.ctx.poisoned():",
+     _t07b("r1-stray-fi-then-if-body")),
+    ("t7b-r1-stray-closer", _SP, "                    self.unsure = True              # a stray fi/done/}",
+     "                    pass  # a stray fi/done/}", _t07b("r1-stray-done-then-while")),
+    ("t7b-r1-count-normalized", _SP, "            self.counts = assign.write_counts(assign.normalize(self.root))",
+     "            self.counts = assign.write_counts(self.root)", _t07b("r1-cont-d-nl")),
+    ("t7b-r1-dialect-passed", _SP, "    ctx = _Ctx(command, dialect)", "    ctx = _Ctx(command)",
+     _t07b("scratch-var")),
+]
+for _name in ("trap", "eval", "source", "read", "readarray", "mapfile", "getopts", "declare", "typeset", "local",
+              "readonly", "unset", "let"):
+    _line = _PCMD1 if ('"' + _name + '"') in _PCMD1 else _PCMD2
+    _T7B_R1.append(("t7b-r1-command-" + _name, _AS, _line, _line.replace('"' + _name + '"', '"' + _name + '-x"'),
+                    _pc(_name)))
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T7B_R1]
+
 
 _SNAP = "tools/skyguard/snapshot.py"
 _PSR = "tests/test_skyguard_side_effects.py::test_snapshot_skips_powershell_reads"

@@ -503,3 +503,18 @@ runs). Shell-rule CPU over the 63,637 items is unchanged in shape; worst new tim
 
 Self-review hardening (special names, IFS, more write forms, wider poison) re-priced: the four per-rule item
 sets are identical to the hand-read ones (compared by command text).
+
+### Task 7b, fix round 1 (adversarial review: 34 shapes where the literal was not the value at the delete)
+
+Controller ruling: broad, conservative poisoning over precise modelling -- any poison class anywhere in the command
+(after joining continuations and dequoting every word) turns ALL resolution in the command off; a closing keyword
+without its opener does the same (`assign.poisoned`, policy in its docstring).
+
+Re-priced `--base dc8c59b`, N = 64,742: 0 errors; parse failures 63 → 63. Matrix: deny>allow 67, deny>ask 1, deny>deny
+299. S-DEL-UNRESOLVED no-longer-deny 90 = **68 still lifted** (67 allow + 1 ask) + the same 22 rule moves.
+
+- **20 of the 88 lifted FPs return to deny** (old decision again), by poison class: function 11 (a `name()` in
+  embedded python/sed/echo text), read 3, export 2 (`export PATH="$PATH:..."`), dot-source 2, PowerShell scope 2.
+  Accepted by the ruling (resolution is a convenience).
+- **No item is newly lifted** (the 68 are a subset of the 88 hand-read FPs, compared by command text): **0 TP lost.**
+- S-DEL-INSTALL 21 / S-WRITE-PLUGIN 1 / S-RESAVER-APPLY 1: identical item sets.

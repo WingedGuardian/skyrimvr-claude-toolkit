@@ -582,6 +582,41 @@ def test_write_counts_is_linear(name):
     assert_linear("write_counts/" + name, make)
 
 
+def _poison_shapes(N):
+    """Adversarial text for assign.poisoned (Task 7b fix round 1): every regex and the per-statement word scan."""
+    return {
+        "func-paren-run": "f(" * (N // 2),
+        "func-space-run": "f" + " " * N + "(" + " " * N,
+        "arith-run": "((" * (N // 2),
+        "default-run": "${a" * (N // 3),
+        "array-bracket-run": "A[" + "[" * N,
+        "dollar-name-run": "$a" * (N // 2),
+        "prefix-word-run": "builtin " * (N // 8) + "x",
+        "taker-option-run": "command " + "-p " * (N // 3) + ". x",
+        "assign-word-run": "a=b " * (N // 4) + "x",
+        "statement-run": "x;" * (N // 2),
+        "printf-option-run": "printf " + "-a " * (N // 3),
+        "continuation-run": (BS + "\n") * (N // 2),
+        "quote-run": "'\"" * (N // 2),
+        "ps-param-run": "Get-Item " + "-Abcdefgh " * (N // 10),
+        "ps-amp-run": "& " * (N // 2),
+        "ps-scope-run": "${script" * (N // 8),
+        "ps-value-run": ".value " * (N // 7),
+        "ps-eq-run": "= " * (N // 2),
+    }
+
+
+@pytest.mark.parametrize("dialect", ["bash", "powershell"])
+@pytest.mark.parametrize("name", sorted(_poison_shapes(SMALL)))
+def test_poison_scan_is_linear(name, dialect):
+    from skyguard import assign
+
+    def make(n):
+        text = _poison_shapes(n)[name]
+        return lambda: assign.poisoned(text, dialect)
+    assert_linear("poisoned/%s/%s" % (name, dialect), make)
+
+
 def _word_shapes(N):
     return {
         "sq-run": "'" * N,
