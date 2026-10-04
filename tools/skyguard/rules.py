@@ -274,8 +274,8 @@ RULES = {
         "legacy": False,
         "prefixes": [],
         "template": (
-        'DevBench will save as {save}, replacing it if it exists.\n'
-        'Yes replaces that save; the old one is not kept.'
+        '{op}\n'
+        'Yes goes ahead; an overwritten save is not kept.'
     ),
     },
     'S-INERT-NOINPUT': {

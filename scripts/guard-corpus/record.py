@@ -45,6 +45,9 @@ LAYOUTS = {
     # Plan 5 Task 11: a config dir that holds a Saves folder with one save (cfg/Saves/Existing.ess), so the DevBench
     # save-exists check has a filesystem to read. `<install>` is filled with the temp install's real path.
     "saves": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_CONFIG_DIR="<install>/cfg"\n'),
+    # Fix round 1: no config dir declared, but the user's Documents (USERPROFILE is pointed at the install) holds
+    # My Games/Skyrim VR/Saves/Existing.ess: the fallback the DevBench save check reads.
+    "docs": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\n'),
     "mo2": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2/mods"\n'
                          'SKYRIM_MO2_OVERWRITE="D:/MO2/overwrite"\n'),
 }
@@ -81,6 +84,9 @@ def make_install(base: Path, hooks_src: Path, layout: str) -> Path:
     if layout == "saves":
         (root / "cfg" / "Saves").mkdir(parents=True)
         (root / "cfg" / "Saves" / "Existing.ess").write_bytes(b"x")
+    if layout == "docs":
+        (root / "Documents" / "My Games" / "Skyrim VR" / "Saves").mkdir(parents=True)
+        (root / "Documents" / "My Games" / "Skyrim VR" / "Saves" / "Existing.ess").write_bytes(b"x")
     if env:
         (root / ".claude" / "skyrim-paths.env").write_text(env.replace("<install>", root.as_posix()), encoding="utf-8", newline="\n")
     return root
@@ -113,11 +119,19 @@ def classify(out: str) -> dict:
     return {"decision": "allow", "text": ""}
 
 
+def home_env(install: Path) -> dict:
+    """Where `Documents` is for a recording: inside the install, never the recorder's own (the DevBench save check
+    reads <Documents>/My Games/<game>/Saves). OneDrive redirections are emptied."""
+    return {"USERPROFILE": str(install), "HOME": str(install), "OneDrive": "", "OneDriveConsumer": "",
+            "OneDriveCommercial": ""}
+
+
 def fire(install: Path, hook: str, payload) -> dict:
     stdin = "" if payload is None else (payload if isinstance(payload, str) else json.dumps(payload))
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(install))
     for k in ENV_KEYS:
         env.pop(k, None)
+    env.update(home_env(install))
     # as_posix(): production runs `bash "$CLAUDE_PROJECT_DIR/.claude/hooks/X.sh"`, i.e. a forward-slash
     # (or mixed) path; a backslash-only path hides defects in how the wrapper derives its own location.
     r = subprocess.run([bash(), (install / ".claude" / "hooks" / hook).as_posix()], input=stdin.encode("utf-8"),
@@ -182,17 +196,18 @@ def engine_verdict(install: Path, hook: str, payload) -> dict:
     root_win = root if os.name == "nt" else ""
     cwd = payload.get("cwd", "") if isinstance(payload, dict) and isinstance(payload.get("cwd"), str) else ""
     environ = {k: val for k, val in os.environ.items() if k not in ENV_KEYS}
+    environ.update(home_env(install))
     if hook == "protect-bash.sh":
         if not p["command"]:
             v = ee.call(shell_rules.decide, ("", paths.Roots("", ""), audit), cwd=cwd)
         else:
             env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
             v = ee.call(shell_rules.decide, (p["command"], paths.roots(root, root_win, env), audit), cwd=cwd,
-                        shell=p.get("shell", ""))
+                        shell=p.get("shell", ""), env=environ)
     elif hook == "protect-mcp.sh":
         env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
         v = ee.call(mcp_rules.decide, (p["tool_name"], p["mcp_input"], audit),
-                    roots=paths.roots(root, root_win, env))
+                    roots=paths.roots(root, root_win, env), env=environ)
     else:
         # Plan 5 Task 9: the write guard's zone notes need the roots, as run.py passes them.
         env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)

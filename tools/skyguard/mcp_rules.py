@@ -37,7 +37,7 @@ import os
 import re
 from typing import Optional, Tuple
 
-from . import deletes, rules
+from . import deletes, paths, rules
 from .verdict import Verdict
 
 HOOK = "protect-mcp"
@@ -53,6 +53,9 @@ _SHELL_WORDS = ("api/tool", "devbench")
 _TEXT_RESET = re.compile(r"\bsmp\s+reset\b", re.IGNORECASE)
 _TEXT_ENDPOINT = re.compile(r"/api/tool/console", re.IGNORECASE)
 _KEY_TEXT = r'"%s"\s*:\s*"((?:[^"\\]|\\.)*)"'
+# `smp reset` with nothing after it, as it reads in a body whose structure the guard cannot parse: it is followed by a
+# quote (plain, escaped or doubled), a bracket, a separator or the end.
+_TEXT_BARE_RESET = re.compile(r"""\bsmp\s+reset\s*(?:["'`)}\\\];,&|<>]|$)""", re.IGNORECASE)
 _BAD_NAME = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
 
 Hit = Tuple[str, dict]            # (rule id, message fields)
@@ -89,37 +92,60 @@ def _clean_name(name) -> Optional[str]:
     return n
 
 
-def save_exists(name: str, roots, memo: Optional[dict] = None) -> Optional[bool]:
-    """True when `<config dir>/Saves/<name>.ess` exists in a declared config dir (case-insensitive, as Windows);
-    False when at least one config dir has a Saves folder and none holds it; None when no Saves folder was found.
-    `memo` keeps each folder's listing for the length of one scan (a Saves folder holds thousands of files)."""
-    want = (name + ".ess").casefold()
+def _documents(env) -> list:
+    """Where `Documents` may be: under USERPROFILE / HOME, and a OneDrive-redirected Documents (OneDrive,
+    OneDriveConsumer, OneDriveCommercial). Environment only: nothing here asks the OS."""
+    out = []
+    for key in ("USERPROFILE", "HOME", "OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+        base = env.get(key, "")
+        if base:                                              # an empty value would make `Documents` cwd-relative
+            d = os.path.join(base, "Documents")
+            if d not in out:
+                out.append(d)
+    return out
+
+
+def saves_folder(roots, env) -> Optional[str]:
+    """The first existing Saves folder: each declared config dir, then <Documents>/My Games/<game>/ for every game
+    folder name (VR, SE, base). None when there is none."""
+    cands = [os.path.join(d, "Saves") for d in roots.config_dirs]
+    for docs in _documents(env):
+        cands += [os.path.join(docs, "My Games", g, "Saves") for g in paths.GAME_FOLDERS]
+    return next((c for c in cands if os.path.isdir(c)), None)
+
+
+def save_exists(name: str, roots, env=None, memo: Optional[dict] = None) -> Optional[bool]:
+    """True when the first existing Saves folder holds `<name>.ess` (case-insensitive, as Windows); False when it
+    does not; None when there is no Saves folder to read. `memo` keeps the folder and its listing for one scan (a
+    Saves folder holds thousands of files)."""
     memo = {} if memo is None else memo
-    seen = False
-    for d in getattr(roots, "config_dirs", ()):
-        folder = os.path.join(d, "Saves")
-        if folder not in memo:
-            try:
-                memo[folder] = frozenset(n.casefold() for n in os.listdir(folder)) if os.path.isdir(folder) else None
-            except OSError:
-                memo[folder] = None
-        if memo[folder] is None:
-            continue
-        seen = True
-        if want in memo[folder]:
-            return True
-    return False if seen else None
+    folder = saves_folder(roots, os.environ if env is None else env)
+    if folder is None:
+        return None
+    if folder not in memo:
+        try:
+            memo[folder] = frozenset(n.casefold() for n in os.listdir(folder))
+        except OSError:
+            memo[folder] = None
+    if memo[folder] is None:
+        return None
+    return (name + ".ess").casefold() in memo[folder]
 
 
-def _save_hit(name, roots, memo=None) -> Hit:
+def _save_hit(name, roots, env=None, memo=None) -> Hit:
     """The ask for a save named `name` (raw, may be unusable), or an empty hit when it is a new save."""
     clean = _clean_name(name)
-    if clean is not None and save_exists(clean, roots, memo) is False:
+    if clean is None:
+        return ("S-DEVBENCH-SAVE", {"op": "Cannot tell which save this overwrites."})
+    exists = save_exists(clean, roots, env, memo)
+    if exists is False:
         return ("", {})
-    return ("S-DEVBENCH-SAVE", {"save": clean if clean is not None else "the save"})
+    if exists is None:
+        return ("S-DEVBENCH-SAVE", {"op": f"Cannot tell if save {clean} exists."})
+    return ("S-DEVBENCH-SAVE", {"op": f"Overwrites save {clean}."})
 
 
-def judge(tool: str, args: dict, roots, memo: Optional[dict] = None) -> Optional[Hit]:
+def judge(tool: str, args: dict, roots, memo: Optional[dict] = None, env=None) -> Optional[Hit]:
     """The decision for one DevBench tool call (args: a dict), as (rule id, fields), or None for allow."""
     tool = tool.lower()
     if tool == "console":
@@ -131,18 +157,18 @@ def judge(tool: str, args: dict, roots, memo: Optional[dict] = None) -> Optional
             return ("S-DEVBENCH-CRASH", {"op": op})
         name = _console_save_name(cmd)
         if name is not None:
-            hit = _save_hit(name, roots, memo)
+            hit = _save_hit(name, roots, env, memo)
             return hit if hit[0] else None
     elif tool == "game":
         action = args.get("action")
         if isinstance(action, str) and action.strip().lower() == "save":
-            hit = _save_hit(args.get("name"), roots, memo)
+            hit = _save_hit(args.get("name"), roots, env, memo)
             return hit if hit[0] else None
     return None
 
 
 # ------------------------------------------------------------------------------------------------------ MCP route
-def decide(name: str, args, audit, roots=None) -> Verdict:
+def decide(name: str, args, audit, roots=None, env=None) -> Verdict:
     """protect-mcp: the verdict for one `mcp__<server>__<tool>` call. Only DevBench servers are judged here."""
     if name == "" or name == "unknown":
         audit.rule(HOOK, "S-INERT-NOINPUT", "deny", "no tool call in payload -- the DevBench guard checked nothing",
@@ -151,7 +177,7 @@ def decide(name: str, args, audit, roots=None) -> Verdict:
     parts = name.split("__")
     if len(parts) < 3 or parts[0] != "mcp" or not parts[1].startswith("devbench"):
         return Verdict()
-    hit = judge(parts[-1], args, roots) if isinstance(args, dict) else None
+    hit = judge(parts[-1], args, roots, None, env) if isinstance(args, dict) else None
     if hit is None:
         return Verdict()
     rid, fields = hit
@@ -194,7 +220,7 @@ def _curl_bodies(argv) -> list:
     return out
 
 
-def _web_call(e) -> list:
+def _web_call(e, text: str) -> list:
     """(tool, args) pairs for each DevBench REST call this curl / Invoke-RestMethod exec makes; unreadable bodies
     (`@file`, a variable) yield nothing."""
     tool = ""
@@ -213,12 +239,21 @@ def _web_call(e) -> list:
     out = []
     for b in bodies:
         args = _args_from_body(b)                             # `@file` is no JSON, so a body file yields None
-        if args is not None:
+        if args is not None and (tool.lower() != "console" or isinstance(args.get("command"), str)):
             out.append((tool, args))
+        elif tool.lower() == "console" and _unreadable_names_reset(text):
+            out.append(("console", {"command": "smp reset"}))
     return out
 
 
-def _cli_call(e) -> list:
+def _unreadable_names_reset(text) -> bool:
+    """A console call whose body gave no definite command (`-d command=smp reset`, `-Body (@{...} | ConvertTo-Json)`,
+    `-Body $b`, a PowerShell-escaped `\\"` body) but whose command text (the WHOLE command: the body is often built in an earlier statement) names `smp reset` bare: the same as the opaque
+    branch, it denies. A body file or a variable that does not name it stays allowed (the ledgered gap)."""
+    return bool(_TEXT_BARE_RESET.search(text))
+
+
+def _cli_call(e, text: str) -> list:
     argv = e.argv
     if not argv:
         return []
@@ -226,7 +261,11 @@ def _cli_call(e) -> list:
         return [("console", {"action": "exec", "command": " ".join(argv[1:])})]
     if argv[0] == "tool" and len(argv) > 2:
         args = _args_from_body(argv[2])
-        return [(argv[1], args)] if args is not None else []
+        if args is not None and (argv[1].lower() != "console" or isinstance(args.get("command"), str)):
+            return [(argv[1], args)]
+        if argv[1].lower() == "console" and _unreadable_names_reset(text):
+            return [("console", {"command": "smp reset"})]
+        return []
     return []
 
 
@@ -247,11 +286,11 @@ def scan_shell(command: str, parsed, roots, env=None) -> Optional[Hit]:
         e = deletes.substituted(e)
         calls = []
         if e.program in _WEB_PROGRAMS:
-            calls = _web_call(e)
+            calls = _web_call(e, command)
         elif e.program == "devbench-cli":
-            calls = _cli_call(e)
+            calls = _cli_call(e, command)
         for tool, args in calls:
-            hit = judge(tool, args, roots, memo)
+            hit = judge(tool, args, roots, memo, env)
             if hit is None:
                 continue
             if hit[0] == "S-DEVBENCH-CRASH":

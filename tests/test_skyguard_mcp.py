@@ -8,6 +8,7 @@ Two halves, as in test_skyguard_t09:
 import json
 import os
 import sys
+import tempfile
 
 import pytest
 
@@ -28,6 +29,19 @@ def _rows():
 
 
 ROWS = _rows()
+
+
+# Documents lives under USERPROFILE: every test points it at an EMPTY folder (never the machine's own) unless it builds one.
+NOHOME = tempfile.mkdtemp(prefix="t11-nohome-")
+ENV0 = {"USERPROFILE": NOHOME}
+
+
+def _home(base, game="Skyrim VR"):
+    """A USERPROFILE whose Documents/My Games/<game>/Saves holds Existing.ess; returns the env mapping."""
+    d = base / "Documents" / "My Games" / game / "Saves"
+    d.mkdir(parents=True)
+    (d / "Existing.ess").write_bytes(b"x")
+    return {"USERPROFILE": str(base)}
 
 
 @pytest.fixture(scope="module")
@@ -58,16 +72,17 @@ def _got(v):
     return (v.decision, v.reason)
 
 
-def mcp(tool_name, tool_input, roots=None):
+def mcp(tool_name, tool_input, roots=None, env=None):
     a = _audit()
-    v = mcp_rules.decide(tool_name, tool_input, a, roots=roots or paths.roots("C:/t11/Skyrim VR", "", {}))
+    v = mcp_rules.decide(tool_name, tool_input, a, roots=roots or paths.roots("C:/t11/Skyrim VR", "", {}),
+                         env=ENV0 if env is None else env)
     return _got(v), {rid for rid, _ in a.fired}
 
 
-def shell(command, roots=None, shell_name="bash"):
+def shell(command, roots=None, shell_name="bash", env=None):
     a = _audit()
     r = roots or paths.roots("C:/t11/Skyrim VR", "", {"SKYRIM_GAME_ROOT": GAME})
-    v = shell_rules.decide(command, r, a, shell=shell_name, env=os.environ)
+    v = shell_rules.decide(command, r, a, shell=shell_name, env=ENV0 if env is None else env)
     return _got(v), {rid for rid, _ in a.fired}
 
 
@@ -77,12 +92,13 @@ def test_there_are_t11_rows():
 
 
 @pytest.mark.parametrize("row", ROWS, ids=[r["id"] for r in ROWS])
-def test_t11_row(row, cfg):
+def test_t11_row(row, cfg, tmp_path):
     p, roots = row["payload"], _roots(row["layout"], cfg)
+    env = _home(tmp_path) if row["layout"] == "docs" else None
     if row["hook"] == "protect-mcp.sh":
-        got, fired = mcp(p["tool_name"], p["tool_input"], roots)
+        got, fired = mcp(p["tool_name"], p["tool_input"], roots, env)
     else:
-        got, fired = shell(p["tool_input"]["command"], roots, SHELL[p["tool_name"]])
+        got, fired = shell(p["tool_input"]["command"], roots, SHELL[p["tool_name"]], env)
     assert got == (row["decision"], row["text"])
     assert fired == set(row["rules"])
 
@@ -152,22 +168,22 @@ def test_a_non_string_console_command_is_not_judged():
 # ------------------------------------------------------------------------------------------------------ the saves
 def test_save_exists_reads_the_saves_folder_case_insensitively(cfg):
     r = _roots("saves", cfg)
-    assert mcp_rules.save_exists("Existing", r) is True
-    assert mcp_rules.save_exists("EXISTING", r) is True
-    assert mcp_rules.save_exists("Fresh", r) is False
+    assert mcp_rules.save_exists("Existing", r, ENV0) is True
+    assert mcp_rules.save_exists("EXISTING", r, ENV0) is True
+    assert mcp_rules.save_exists("Fresh", r, ENV0) is False
 
 
 def test_save_exists_is_unknown_without_a_saves_folder(tmp_path):
     r = paths.roots("C:/t11/x", "", {"SKYRIM_CONFIG_DIR": tmp_path.as_posix()})
-    assert mcp_rules.save_exists("Existing", r) is None
-    assert mcp_rules.save_exists("Existing", paths.roots("C:/t11/x", "", {})) is None
+    assert mcp_rules.save_exists("Existing", r, ENV0) is None
+    assert mcp_rules.save_exists("Existing", paths.roots("C:/t11/x", "", {}), ENV0) is None
 
 
 def test_an_unreadable_saves_folder_is_unknown_not_a_crash(cfg, monkeypatch):
     def boom(_):
         raise OSError("denied")
     monkeypatch.setattr(os, "listdir", boom)
-    assert mcp_rules.save_exists("Existing", _roots("saves", cfg)) is None
+    assert mcp_rules.save_exists("Existing", _roots("saves", cfg), ENV0) is None
 
 
 def test_a_scan_lists_each_saves_folder_once(cfg, monkeypatch):
@@ -178,17 +194,54 @@ def test_a_scan_lists_each_saves_folder_once(cfg, monkeypatch):
     body = "'{\"action\":\"save\",\"name\":\"N%d\"}'"
     command = "; ".join(f"curl http://127.0.0.1:8921/api/tool/game -d {body % i}" for i in range(40))
     r = _roots("saves", cfg)
-    mcp_rules.scan_shell(command, shellparse.parse(command, "bash"), r)
+    mcp_rules.scan_shell(command, shellparse.parse(command, "bash"), r, ENV0)
     assert len(calls) == 1
 
 
-def test_a_second_config_dir_is_also_searched(tmp_path, cfg):
+def test_the_first_existing_saves_folder_wins(tmp_path, cfg):
+    """A declared config dir with no Saves folder is skipped; the first one that HAS a Saves folder is the only one read."""
     empty = tmp_path / "other"
     (empty / "Saves").mkdir(parents=True)
     r = paths.roots("C:/t11/x", "", {"SKYRIM_CONFIG_DIR": empty.as_posix()})
-    assert mcp_rules.save_exists("Existing", r) is False
-    r = r._replace(config_dirs=r.config_dirs + (cfg,))
-    assert mcp_rules.save_exists("Existing", r) is True
+    assert mcp_rules.save_exists("Existing", r, ENV0) is False
+    r = r._replace(config_dirs=(tmp_path.as_posix() + "/none",) + r.config_dirs + (cfg,))
+    assert mcp_rules.save_exists("Existing", r, ENV0) is False               # `other` has a Saves folder: it wins
+    r = r._replace(config_dirs=(tmp_path.as_posix() + "/none", cfg, empty.as_posix()))
+    assert mcp_rules.save_exists("Existing", r, ENV0) is True                # `none` skipped, `cfg` wins
+
+
+def test_documents_is_the_fallback_when_no_config_dir_has_saves(tmp_path):
+    env = _home(tmp_path)
+    r = paths.roots("C:/t11/x", "", {})
+    assert mcp_rules.save_exists("Existing", r, env) is True
+    assert mcp_rules.save_exists("Fresh", r, env) is False
+    assert mcp_rules.save_exists("Existing", r, ENV0) is None
+
+
+def test_a_declared_config_dir_outranks_documents(tmp_path, cfg):
+    env = _home(tmp_path)
+    other = tmp_path / "cfg2" / "Saves"
+    other.mkdir(parents=True)
+    r = paths.roots("C:/t11/x", "", {"SKYRIM_CONFIG_DIR": (tmp_path / "cfg2").as_posix()})
+    assert mcp_rules.save_exists("Existing", r, env) is False
+
+
+@pytest.mark.parametrize("game", ["Skyrim VR", "Skyrim Special Edition", "Skyrim"])
+def test_every_game_folder_name_is_searched(tmp_path, game):
+    assert mcp_rules.save_exists("Existing", paths.roots("C:/t11/x", "", {}), _home(tmp_path, game)) is True
+
+
+def test_vr_outranks_the_other_game_folders(tmp_path):
+    env = _home(tmp_path, "Skyrim")
+    (tmp_path / "Documents" / "My Games" / "Skyrim VR" / "Saves").mkdir(parents=True)
+    assert mcp_rules.save_exists("Existing", paths.roots("C:/t11/x", "", {}), env) is False
+
+
+@pytest.mark.parametrize("key", ["HOME", "OneDrive", "OneDriveConsumer", "OneDriveCommercial"])
+def test_a_redirected_documents_is_found(tmp_path, key):
+    env = _home(tmp_path)
+    env = {key: env["USERPROFILE"]}
+    assert mcp_rules.save_exists("Existing", paths.roots("C:/t11/x", "", {}), env) is True
 
 
 @pytest.mark.parametrize("args", [{"action": "SAVE", "name": "Existing"}, {"action": " save ", "name": "Existing.ess"}])
@@ -207,7 +260,7 @@ def test_other_game_actions_never_ask(action, cfg):
                               "number", "star", "qmark", "quote", "angle", "angle2", "pipe", "control"])
 def test_an_unusable_save_name_asks(name, cfg):
     got, fired = mcp("mcp__devbench-vr__game", {"action": "save", "name": name}, _roots("saves", cfg))
-    assert fired == {"S-DEVBENCH-SAVE"} and "the save" in got[1]
+    assert fired == {"S-DEVBENCH-SAVE"} and got[1].startswith("Cannot tell which save this overwrites.")
 
 
 def test_the_ask_is_two_plain_lines_and_does_not_echo_the_call(cfg):
@@ -261,7 +314,7 @@ SENDS = {
     "json-flag": f"curl {CONSOLE} --json {RESET_BODY}",
     "short-cluster": f"curl -sd {RESET_BODY} {CONSOLE}",                 # short flags ending in d
     "attached-body": f"curl {CONSOLE} -d'{{\"command\":\"smp reset\"}}'",      # the body attached to the flag
-    "two-bodies": f"curl -X POST -H 'Content-Type: application/json' {CONSOLE} -d '{{\"x\":1}}' -d {RESET_BODY}",
+    "two-bodies": f"curl -X POST -H 'Content-Type: application/json' {CONSOLE} -d '{{\"command\":\"help\"}}' -d {RESET_BODY}",
     "query-string": f"curl {CONSOLE}?x=1 -d {RESET_BODY}",
     "trailing-slash": f"curl {CONSOLE}/ -d {RESET_BODY}",
     "other-host-port": f"curl http://localhost:9000/api/tool/console -d {RESET_BODY}",
@@ -290,7 +343,7 @@ PASSES = {
     "papyrus-tool": f"curl http://127.0.0.1:8921/api/tool/papyrus -d {RESET_BODY}",           # not the console tool
     "health-url": f"curl -d {RESET_BODY} http://127.0.0.1:8921/api/health",
     "other-api": f"curl -d {RESET_BODY} http://example.com/api/other",
-    "body-written-to-a-file": f"echo '{{\"command\":\"smp reset\"}}' > body.txt; curl {CONSOLE} -d @body.txt",   # the gap
+    "body-file-unnamed": f"echo hi > body.txt; curl {CONSOLE} -d @body.txt",                                    # the gap
     "wget": f"wget -qO- {CONSOLE}",
 }
 
@@ -300,11 +353,12 @@ def test_curl_forms_that_do_not_send_it(command):
     assert shell(command)[0] == ("allow", ""), command
 
 
-def test_a_damaged_json_body_is_still_read_for_the_command():
-    """PowerShell and shells that eat quotes leave `{command:smp reset}`-like text; a doubled-quote body is damaged
-    JSON too. The command key is pulled out by pattern when the body is not valid JSON."""
-    got, fired = shell(f"curl {CONSOLE} -d '{{\"command\":\"smp reset\",}}'")      # trailing comma: invalid JSON
-    assert fired == {"S-DEVBENCH-CRASH"}
+def test_a_damaged_json_body_is_still_read_for_the_action_and_name(cfg):
+    """A trailing comma makes the body invalid JSON; the action and name are still pulled out by pattern, so a save
+    through it is still judged (a bare reset in it is caught by the unreadable-body rule, tested below)."""
+    body = "'{\"action\":\"save\",\"name\":\"Existing\",}'"
+    got, fired = shell(f"curl http://127.0.0.1:8921/api/tool/game -d {body}", _roots("saves", cfg))
+    assert fired == {"S-DEVBENCH-SAVE"} and got[1].startswith("Overwrites save Existing.")
 
 
 def test_a_damaged_body_with_a_bad_escape_does_not_crash():
@@ -312,7 +366,7 @@ def test_a_damaged_body_with_a_bad_escape_does_not_crash():
 
 
 def test_a_json_body_that_is_not_an_object_is_not_a_call():
-    assert shell(f"curl {CONSOLE} -d '[\"smp reset\"]'")[0] == ("allow", "")
+    assert shell(f"curl {CONSOLE} -d '[\"help\"]'")[0] == ("allow", "")
     assert shell("bash tools/devbench-cli.sh tool console '[1]'")[0] == ("allow", "")
 
 
@@ -399,3 +453,60 @@ def test_a_resaver_ask_outranks_a_devbench_ask(cfg):
     cmd = ("bash tools/resaver-cli.sh clean x.ess --apply; "
            "bash tools/devbench-cli.sh tool game '{\"action\":\"save\",\"name\":\"Existing\"}'")
     assert shell(cmd, r)[1] == {"S-RESAVER-APPLY"}
+
+
+# ------------------------------------------------------------------ fix round 1: a body with no definite command
+@pytest.mark.parametrize("tail", ['smp reset"', "smp reset", "smp reset)", "smp reset;", "smp reset > x", "smp reset'",
+                                  "smp reset" + chr(92) + '"', "smp reset|", "smp reset]", "smp reset`", "smp reset&", "SMP  RESET",
+                                  "smp reset}", "smp reset<x", "smp reset  "],
+                         ids=["quote", "end", "paren", "semicolon", "redirect", "squote", "escaped-quote", "pipe",
+                              "bracket", "backtick", "amp", "case", "brace", "input", "trailing-space"])
+def test_an_unreadable_console_body_naming_a_bare_reset_denies(tail):
+    """What follows `smp reset` in a body the guard cannot parse decides whether it is the bare command. Tested on the
+    recogniser itself: a whole command with a stray quote would be denied by the parse-failure fallback instead."""
+    assert mcp_rules._unreadable_names_reset("x " + tail), tail
+
+
+def test_a_bare_reset_in_an_unreadable_body_denies_end_to_end():
+    assert shell(f"curl -s {CONSOLE} -d 'command=smp reset'")[1] == {"S-DEVBENCH-CRASH"}
+
+
+@pytest.mark.parametrize("text", ["smp reset 0x14", "smp resetx", "xsmp reset", "smp list"])
+def test_an_unreadable_console_body_naming_something_else_is_allowed(text):
+    assert shell(f"curl -s {CONSOLE} -d 'command={text}'")[0] == ("allow", "")
+
+
+def test_a_body_whose_command_is_not_a_string_is_unreadable_not_ignored():
+    got = shell(f"curl -s {CONSOLE} -d '{{\"action\":\"exec\",\"command\":[\"smp reset\"]}}'")
+    assert got[1] == {"S-DEVBENCH-CRASH"}
+
+
+def test_an_unreadable_body_is_only_judged_for_the_console_tool():
+    assert shell("curl -s http://127.0.0.1:8921/api/tool/papyrus -d 'command=smp reset'")[0] == ("allow", "")
+    assert shell("bash tools/devbench-cli.sh tool papyrus 'command=smp reset'")[0] == ("allow", "")
+
+
+def test_the_cli_tool_console_with_an_unreadable_body_naming_a_reset_denies():
+    assert shell("bash tools/devbench-cli.sh tool console 'command=smp reset'")[1] == {"S-DEVBENCH-CRASH"}
+    assert shell("bash tools/devbench-cli.sh tool console 'command=help'")[0] == ("allow", "")
+    assert shell("bash tools/devbench-cli.sh tool CONSOLE 'command=smp reset'")[1] == {"S-DEVBENCH-CRASH"}
+
+
+def test_the_whole_command_is_read_for_the_reset_not_just_the_exec():
+    assert shell(f"B=$(printf 'smp reset'); curl -s {CONSOLE} -d \"$B\"")[1] == {"S-DEVBENCH-CRASH"}
+
+
+def test_a_readable_body_is_not_second_guessed_by_the_text():
+    """A body that parses to a definite, harmless command stays allowed even if the rest of the command mentions it."""
+    assert shell(f"echo 'smp reset is blocked'; curl -s {CONSOLE} -d '{{\"command\":\"help\"}}'")[0] == ("allow", "")
+
+
+def test_the_console_tool_name_is_case_insensitive_on_the_wire():
+    assert shell("curl -s http://127.0.0.1:8921/api/tool/Console -d 'command=smp reset'")[1] == {"S-DEVBENCH-CRASH"}
+
+
+def test_an_empty_documents_variable_is_not_read_relative_to_the_cwd(tmp_path, monkeypatch):
+    _home(tmp_path)                                           # Documents/My Games/Skyrim VR/Saves under tmp_path
+    monkeypatch.chdir(tmp_path)
+    env = {"USERPROFILE": "", "OneDrive": ""}
+    assert mcp_rules.save_exists("Existing", paths.roots("C:/t11/x", "", {}), env) is None

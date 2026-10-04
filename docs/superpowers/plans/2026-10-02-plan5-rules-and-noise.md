@@ -827,6 +827,16 @@ that posts to the console (a text match was priced and dropped: 3 hits, all scri
 `papyrus` tool and console `bat` files; the `/mcp` HTTP endpoint. Not safe by default (R4): an unparsable or opaque
 command that names `/api/tool/console` and `smp reset` denies.
 
+**Task 11 fix round 1.** (1) A console body with no definite command denies when the whole command text names a bare `smp reset`
+(same as the opaque-program branch). (2) The save check falls back from the declared config dirs to
+`<Documents>/My Games/<game>/Saves` (first existing Saves folder wins); a known folder without the name is allow. The ask text is
+now `Overwrites save X.` (existing) / `Cannot tell if save X exists.` / `Cannot tell which save this overwrites.`, all with the
+second line `Yes goes ahead; an overwritten save is not kept.` (one rule id; the first line is the `{op}` field). After the Plan 4
+merge (agent/skills/devbench/SKILL.md ships on master) the S-DEVBENCH-CRASH message can cite that skill instead of "run it
+yourself"; not edited here. Known limit kept: DevBench's batch / multi-command body shapes are not documented in this repo, so
+`command` as a list, a `commands` key or a batch tool are not judged recursively (a list command in a body that names a bare
+`smp reset` does deny through (1)); Documents redirected only through the Windows known-folder registry is not seen.
+
 ### Task 12: Analysis failures auto-deny; opaque-command advisory (priced, may be dropped)
 
 **Corpus first** (`t12-*`):

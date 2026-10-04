@@ -549,3 +549,17 @@ the broad `devbench` word is also no longer a trigger for the unparsable-command
 Timing (80 KB): 9 shapes (many `-d` bodies, a 80 KB body, a body with no closing quote, a key repeated 6,600 times,
 296 save calls, a 80 KB CLI word, an unterminated command naming the endpoint) all linear, worst 12 ms; the Saves
 folder is listed once per scan (a Saves folder holds thousands of files).
+
+### Task 11, fix round 1
+
+Two changes: (1) a DevBench console call whose body gives no definite command (`-d command=smp reset`, `--data-urlencode`,
+PowerShell `-Body (@{...} | ConvertTo-Json)` / `-Body $b`, `curl.exe -d "{\"command\":...}"` under PowerShell, a body file written in
+the same command) now denies when the command text names a bare `smp reset`; (2) the save check reads the first existing Saves
+folder among the declared config dirs, then `<Documents>/My Games/<Skyrim VR | Skyrim Special Edition | Skyrim>/Saves` (Documents
+from USERPROFILE, HOME, OneDrive, OneDriveConsumer, OneDriveCommercial), and asks only for an existing name, or when no folder
+or no usable name exists.
+
+`--base 058b0e2`, N = 65,534 (Bash 58,450, PowerShell 1,628, Write 3,766, Edit 1,685, MCP 5), driver run with the real
+environment (Documents resolves to `C:/Users/Moona/Documents/My Games/Skyrim VR/Saves`, 5,344 files). 0 errors; parse failures
+63 -> 63. Matrix: allow>deny 1, **allow>ask 0**, rest unchanged. The 1 deny is still the real `smp reset` curl. The four
+formerly-asked saves are allow (new names). The unreadable-body rule adds no new history hit.

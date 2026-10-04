@@ -496,6 +496,7 @@ echo "  KNOWLEDGEBASE.md                 -- 1,300+ lines of Skyrim modding knowl
 echo "  .claude/settings.json            -- Hook configuration"
 echo "  .claude/hooks/protect-bash.sh    -- Guards dangerous commands"
 echo "  .claude/hooks/protect-files.sh   -- Guards file edits"
+echo "  .claude/hooks/protect-mcp.sh     -- Guards the DevBench MCP tools (smp reset denied, save overwrites asked)"
 echo "  .claude/hooks/backup-before-edit.sh -- Auto-backups (Edit/Write) with audit trail"
 echo "  .claude/hooks/snapshot-before-tool.sh -- Auto-snapshots .psc/.pex before Bash commands"
 echo "  .claude/hooks/session-kb-guard.sh -- Snapshots KNOWLEDGEBASE/CLAUDE.md once per session"
