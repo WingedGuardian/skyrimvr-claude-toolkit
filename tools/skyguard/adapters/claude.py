@@ -39,6 +39,7 @@ def extract(payload_text: str) -> dict:
         "source": _sub(d.get("source")),
         "cwd": _sub(d.get("cwd")),
         "session_id": _sub(d.get("session_id")),
+        "transcript_path": _sub(d.get("transcript_path")),
     }
 
 

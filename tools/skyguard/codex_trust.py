@@ -220,11 +220,25 @@ def codex_home() -> Path:
 
 def trust_report(hooks_json: Path, codex_config: Path, project_root: Path, windows: bool = None) -> dict:
     report = _trust_report(hooks_json, codex_config, project_root, windows)
+    report["unrendered"] = _unrendered(hooks_json)
     report["root_problem"] = codex_definitions.root_problem(str(project_root))
+    if report["unrendered"]:
+        # setup.sh renders the template only on Windows (Codex support is Windows-only): a hooks.json that still
+        # holds {{CODEX_ROOT}} was never configured. That is "not set up", not "set up but unapproved".
+        report["root_problem"] = ("hooks.json is not rendered (it still holds {{CODEX_ROOT}} placeholders): "
+                                  "run setup.sh on Windows. Codex support is Windows-only.")
     if report["root_problem"]:
         # approved or not, the hooks cannot start from this root: never "trusted", never "can't tell"
         report["overall"] = "unrunnable"
     return report
+
+
+def _unrendered(hooks_json: Path) -> bool:
+    try:
+        text = Path(hooks_json).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(p in text for p in codex_definitions.PLACEHOLDERS)
 
 
 def _trust_report(hooks_json: Path, codex_config: Path, project_root: Path, windows: bool = None) -> dict:

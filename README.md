@@ -137,7 +137,8 @@ setups are unaffected and get a stock-layout note instead.
 
 Also new: an **`AGENTS.md`** so agents that follow that convention can pick the toolkit up. The
 knowledge and every tool are agent-neutral already; the safety hooks are the Claude-specific part, and
-`AGENTS.md` is explicit that other agents don't get them.
+`AGENTS.md` was explicit that other agents don't get them. *(Historical, v3.4: since v4 that is no longer true
+of Codex, which has the same guards -- see "Using with Codex" below. Any other agent still has none.)*
 
 ---
 
@@ -452,11 +453,14 @@ holds even before you approve the hooks.
 - **Anything, until you approve the hooks** (above). Registry deletes are the one exception.
 - **Commands you type with `!`** in the Codex prompt -- they run in your own shell and bypass hooks
   (measured on codex-cli 0.160.0).
-- **Input sent to a program that is already running** (Codex's `write_stdin`): it carries no command for the
-  guards to read. (Not re-measured on 0.160.0.)
+- **Input sent to a program that is already running** (Codex's `write_stdin`): probably not guarded -- it carries
+  no command for the guards to read. This is **unmeasured** on 0.160.0 (an older, different-toolkit observation,
+  not re-run here), so treat it as a possible gap.
 - **MCP tools**, DevBench included: logged, not guarded, until a later release adds rules for them.
-- **A shell call's own working directory** (`workdir`) is not part of what the hook sees; relative paths
-  are judged against the session folder. Use absolute paths for anything in the game folder.
+- **A shell call's own working directory** (`workdir`): the toolkit's reading of the hook payload takes the
+  `cwd` field and does not read a `workdir` tool argument, so a call that sets one may have its relative
+  paths judged against the session folder instead. Whether Codex puts `workdir` in the payload is
+  **unmeasured**. Use absolute paths for anything in the game folder.
 - **A hook that cannot start lets the command run.** That is how Codex treats a failed hook, so the toolkit's
   entry scripts never fail on their own -- but a hook that never starts cannot help. Two setups where it
   never starts are **not supported**: a Windows group policy that forces the PowerShell execution policy to

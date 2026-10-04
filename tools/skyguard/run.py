@@ -45,6 +45,20 @@ def _telemetry(a, v) -> None:
         health.trim_latency(a.telemetry, a.role)
 
 
+def _session_line(a, session_id, tool="", source=None, transcript=None) -> None:
+    """Per-session record for the canary's coverage check (health.py). Written BEFORE the engine decides, so a
+    call the engine denies still counts as seen. Never changes the verdict: any failure is swallowed."""
+    try:
+        if not a.telemetry:
+            return
+        if transcript is not None:
+            health.session_record(a.telemetry, session_id, "start", source or "-", transcript)
+        elif a.role in health.COUNTING_HOOKS[a.agent]:
+            health.session_record(a.telemetry, session_id, a.role, tool or "-")
+    except Exception:  # noqa: BLE001 -- telemetry must never reach the decision path
+        pass
+
+
 def _engine_budget() -> float:
     try:
         b = float(os.environ.get("SKYGUARD_ENGINE_TIMEOUT", "20"))
@@ -67,10 +81,13 @@ def _codex(a, raw: str) -> int:
     audit = Audit(a.project)
     req = codex.to_request(raw)
     if a.role == "session-start":
+        _session_line(a, req.session_id, source=req.source, transcript=req.transcript_path)
         out, status, code = session.run_status(a.project, req.source, a.bash, audit)
         _telemetry(a, Verdict("allow", "", "", status, code))
         _emit("SKYGUARD-OK\n" + codex.session_body(out))
         return 0
+
+    _session_line(a, req.session_id, tool=req.tool_name)
 
     def roots_fn():
         env = _declared_env(a)
@@ -120,6 +137,10 @@ def main(argv=None) -> int:
     if a.agent == "codex":
         return _codex(a, raw)
     p = adapter.extract(raw)
+    if a.role == "session-kb-guard":
+        _session_line(a, p["session_id"], source=p["source"], transcript=p["transcript_path"])
+    else:
+        _session_line(a, p["session_id"], tool=p["tool_name"])
     audit = Audit(a.project)
     if a.role == "protect-bash":
         req = adapter.to_request(p, "shell")

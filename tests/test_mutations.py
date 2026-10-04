@@ -1800,6 +1800,93 @@ MUTATIONS = [
 ]
 
 
+# Plan 4 Task 13: the canary's Codex trust report and per-surface coverage. One entry per clause that decides
+# whether an unguarded session can read as fine.
+_COV = "tests/test_skyguard_coverage.py::"
+_EXIT_ANCHOR = 'if counts["DEGRADED"] or counts["NEVER INVOKED"] or cov_counts["DEGRADED"] or trust_bad:'
+MUTATIONS_TASK13 = [
+    # Approved-but-never-run read as quiet NOT EXERCISED (the AllSigned / WSL fail-open shape).
+    ("tools/skyguard/health.py", "                        and not any(_has_records(d, x) for x in hooks)):",
+     "                        and False):", _COV + "test_approved_but_never_invoked_is_reported_and_exits_1",
+     "canary-never-invoked-is-reported"),
+    # ... and the trust gate on it: an UNAPPROVED install must read NOT RUNNING, not never-invoked.
+    ("tools/skyguard/health.py", '                if (agent == "codex" and state == "NOT EXERCISED" and trust["overall"] == "trusted"\n',
+     '                if (agent == "codex" and state == "NOT EXERCISED"\n',
+     _COV + "test_an_untrusted_install_is_never_reported_never_invoked", "canary-never-invoked-needs-trust"),
+    ("tools/skyguard/health.py", _EXIT_ANCHOR,
+     'if counts["DEGRADED"] or cov_counts["DEGRADED"] or trust_bad:',
+     _COV + "test_approved_but_never_invoked_is_reported_and_exits_1", "canary-never-invoked-fails-the-exit-code"),
+    ("tools/skyguard/health.py", _EXIT_ANCHOR,
+     'if counts["DEGRADED"] or counts["NEVER INVOKED"] or trust_bad:',
+     _COV + "test_degraded_coverage_folds_into_exit_1", "canary-degraded-coverage-fails-the-exit-code"),
+    ("tools/skyguard/health.py", _EXIT_ANCHOR,
+     'if counts["DEGRADED"] or counts["NEVER INVOKED"] or cov_counts["DEGRADED"]:',
+     _COV + "test_an_untrusted_install_says_codex_hooks_are_not_running_and_exits_1",
+     "canary-untrusted-hook-fails-the-exit-code"),
+    ("tools/skyguard/health.py",
+     '                                 or (trust["overall"] == "unrunnable" and not trust.get("unrendered")))',
+     '                                 )',
+     _COV + "test_a_root_the_hooks_cannot_start_from_fails_the_canary_even_when_approved",
+     "canary-unrunnable-root-fails-the-exit-code"),
+    ("tools/skyguard/health.py", 'trust["overall"] == "unrunnable" and not trust.get("unrendered")',
+     'trust["overall"] == "unrunnable"',
+     _COV + "test_an_unrendered_install_is_not_configured_never_untrusted",
+     "canary-unrendered-install-is-not-a-failure"),
+    ("tools/skyguard/health.py", '    trust_unknown = bool(trust) and trust["overall"] == "unknown"',
+     "    trust_unknown = False", _COV + "test_an_unreadable_codex_config_is_unknown_and_exits_2",
+     "canary-unknown-trust-exits-2"),
+    # Coverage rules.
+    ("tools/skyguard/health.py", "        short = hooked < called\n", "        short = False\n",
+     _COV + "test_coverage_is_degraded_when_one_call_has_no_line", "coverage-degraded-when-a-call-had-no-hook"),
+    ("tools/skyguard/health.py", "            hooked = sum(min(hooked_by.get(t, 0), counts.get(t, 0)) for t in tools)",
+     "            hooked = sum(hooked_by.get(t, 0) for t in tools)",
+     _COV + "test_claude_coverage_is_judged_per_covered_tool", "coverage-claude-is-judged-per-tool"),
+    ("tools/skyguard/health.py",
+     'COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files"), "codex": ("pre-tool",)}',
+     'COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files", "backup-before-edit"), '
+     '"codex": ("pre-tool", "session-start")}',
+     _COV + "test_only_the_pre_tool_guard_counts_as_seeing_a_codex_call", "coverage-counts-only-the-guard-hooks"),
+    ("tools/skyguard/health.py", "            if not transcript:\n", "            if False:\n",
+     _COV + "test_coverage_is_unmeasurable_without_a_start_line", "coverage-needs-a-recorded-transcript"),
+    ("tools/skyguard/health.py", 'rows.append((sid, "?", 0, 0, "UNMEASURABLE", str(e)))',
+     'rows.append((sid, "?", 0, 0, "NOT EXERCISED", str(e)))',
+     _COV + "test_coverage_is_unmeasurable_on_an_unknown_transcript_shape", "coverage-unmeasurable-is-not-quiet"),
+    # Session records.
+    ("tools/skyguard/health.py", "        if not isinstance(session_id, str) or not _SESSION_ID.match(session_id):",
+     "        if not isinstance(session_id, str):",
+     _COV + "test_a_session_id_that_is_not_a_plain_name_writes_nothing", "session-id-cannot-escape-the-sessions-dir"),
+    ("tools/skyguard/health.py", "        for p in files[keep:]:", "        for p in files[keep + 100:]:",
+     _COV + "test_only_the_twenty_newest_session_files_are_kept", "session-files-are-pruned"),
+    ("tools/skyguard/run.py", "    _session_line(a, req.session_id, tool=req.tool_name)\n", "",
+     _COV + "test_the_engine_records_a_codex_session_and_its_calls", "engine-records-codex-calls"),
+    ("tools/skyguard/run.py",
+     "        _session_line(a, req.session_id, source=req.source, transcript=req.transcript_path)\n", "",
+     _COV + "test_the_engine_records_a_codex_session_and_its_calls", "engine-records-codex-session-start"),
+    ("tools/skyguard/run.py", "        elif a.role in health.COUNTING_HOOKS[a.agent]:\n", "        else:\n",
+     _COV + "test_the_engine_records_a_claude_guard_call_but_not_a_backup_call", "engine-records-only-guard-calls"),
+    # Transcript parsers.
+    ("tools/skyguard/transcripts.py",
+     '        else:\n            raise Unmeasurable("unrecognised item type {!r}".format(t[:40]))',
+     "        else:\n            continue",
+     _COV + "test_a_renamed_item_type_is_unmeasurable_not_zero_calls", "transcript-unknown-item-is-unmeasurable"),
+    ("tools/skyguard/transcripts.py", "    orig = pl.get(CODEX_SURFACE_FIELD)\n",
+     '    orig = "codex-tui" if pl.get("source") == "vscode" else pl.get(CODEX_SURFACE_FIELD)\n',
+     _COV + "test_the_surface_is_never_inferred_from_the_source_field", "transcript-surface-never-from-source"),
+    ("tools/skyguard/transcripts.py", 'CODEX_SURFACES.get(orig, "unclaimed:" + orig)',
+     'CODEX_SURFACES.get(orig, "exec")',
+     _COV + "test_an_unprobed_surface_is_reported_unclaimed", "transcript-unprobed-surface-is-unclaimed"),
+    ("tools/skyguard/transcripts.py", "                if isinstance(bid, str) and bid in seen:",
+     "                if False:",
+     _COV + "test_a_streamed_claude_tool_use_is_counted_once", "transcript-claude-dedupes-streamed-blocks"),
+    # codex_trust: an unrendered template is not configured.
+    ("tools/skyguard/codex_trust.py", '    if report["unrendered"]:\n', "    if False:\n", _COV + "test_an_unrendered_install_is_not_configured_never_untrusted",
+     "trust-unrendered-install-is-unrunnable"),
+]
+
+
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in MUTATIONS_TASK13]
+
+
 def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:
     work = tmp_path / "mutated"
     shutil.copytree(REPO, work, ignore=MUTATION_IGNORE)
