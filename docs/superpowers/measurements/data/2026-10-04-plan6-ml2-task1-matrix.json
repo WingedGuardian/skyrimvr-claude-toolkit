@@ -1,0 +1,5372 @@
+[
+ {
+  "mech": "M-A",
+  "row": "P1",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "/usr/bin/bash: line 1: C:/Temp/skyguard-ml2/probe/M-A/P1/target.esm: Permission denied",
+   "secs": 0.25,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P2",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "/usr/bin/bash: line 1: C:/Temp/skyguard-ml2/probe/M-A/P2/target.esm: Permission denied",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P3",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "cp: cannot create regular file 'C:/Temp/skyguard-ml2/probe/M-A/P3/target.esm': Permission denied",
+   "secs": 0.05,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P4",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P5",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "tee: 'C:/Temp/skyguard-ml2/probe/M-A/P5/target.esm': Permission denied",
+   "secs": 0.1,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.06,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P6",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "dd: failed to open 'C:/Temp/skyguard-ml2/probe/M-A/P6/target.esm': Permission denied",
+   "secs": 0.33,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.06,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P7",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.06,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P8",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P9.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mSet-Content: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-A\\P9.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.28,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P10.pwsh7",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P11.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mOut-File: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-A\\P11.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.55,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P12.pwsh7",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P13.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mAdd-Content: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-A\\P13.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.29,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P14.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mCopy-Item: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-A\\P14.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.54,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.25,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P15.pwsh7",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.48,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.25,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P16.pwsh7",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P17.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mMethodInvocationException: \u001b[31;1mException calling \"WriteAllBytes\" with \"2\" argument(s): \"Access to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-A\\P17.pwsh7\\target.esm' is denied.\"\u001b[0m",
+   "secs": 0.5,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.2,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "D2.pwsh7",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.32,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "D3.pwsh7",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mRemove-Item: \u001b[31;1mYou do not have sufficient access rights to perform this operation or the item is hidden, system, or read only.\u001b[0m",
+   "secs": 0.28,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "R2.pwsh7",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.23,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P9.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "obe\\M-A\\P9.ps51\\targ ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [Set-Content], UnauthorizedAccessException\n    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.SetContentCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P10.ps51",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P11.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "alPath 'C:\\Temp\\skyguard-ml2\\probe\\M-A\\P11.ps51\\ ...\n+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : OpenError: (:) [Out-File], UnauthorizedAccessException\n    + FullyQualifiedErrorId : FileOpenFailure,Microsoft.PowerShell.Commands.OutFileCommand",
+   "secs": 0.23,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.19,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P12.ps51",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.19,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P13.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (C:\\Temp\\skyguar...ps51\\target.esm:String) [Add-Content], Unauthorized \n   AccessException\n    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.AddContentCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P14.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (C:\\Temp\\skyguar....ps51\\src_t.bin:FileInfo) [Copy-Item], Unauthorized \n   AccessException\n    + FullyQualifiedErrorId : CopyFileInfoItemUnauthorizedAccessError,Microsoft.PowerShell.Commands.CopyItemCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P15.ps51",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P16.ps51",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.16,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P17.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "At line:1 char:1\n+ [IO.File]::WriteAllBytes('C:\\Temp\\skyguard-ml2\\probe\\M-A\\P17.ps51\\tar ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException\n    + FullyQualifiedErrorId : UnauthorizedAccessException",
+   "secs": 0.19,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.16,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "D2.ps51",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.3,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "D3.ps51",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (C:\\Temp\\skyguar...ps51\\target.esm:FileInfo) [Remove-Item], IOExceptio \n   n\n    + FullyQualifiedErrorId : RemoveFileSystemItemUnAuthorizedAccess,Microsoft.PowerShell.Commands.RemoveItemCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "R2.ps51",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.23,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.25,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P19",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-A/P19/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P20",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-A/P20/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P21",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-A/P21/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P22",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "ceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\shutil.py\", line 256, in copyfile\n    with open(dst, 'wb') as fdst:\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-A/P22/target.esm'",
+   "secs": 0.06,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P23",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": " 434, in copy2\n    copyfile(src, dst, follow_symlinks=follow_symlinks)\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\shutil.py\", line 256, in copyfile\n    with open(dst, 'wb') as fdst:\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-A/P23/target.esm'",
+   "secs": 0.26,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P24",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [WinError 5] Access is denied: 'C:/Temp/skyguard-ml2/probe/M-A/P24/src_t.bin' -> 'C:/Temp/skyguard-ml2/probe/M-A/P24/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P25",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "h self.open(mode='wb') as f:\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nPermissionError: [Errno 13] Permission denied: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-A\\\\P25\\\\target.esm'",
+   "secs": 0.04,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P26",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-A/P26/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.24,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P27",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "0 file(s) copied.\nAccess is denied.",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "1 file(s) copied.",
+   "secs": 0.02,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P28",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Access is denied.",
+   "secs": 0.02,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.24,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P33a",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "  at evalFunction (node:internal/process/execution:283:30)\n    at evalTypeScript (node:internal/process/execution:295:3)\n    at node:internal/main/eval_string:71:3 {\n  errno: -4048,\n  code: 'EPERM',\n  syscall: 'open',\n  path: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-A\\\\P33a\\\\target.esm'\n}\n\nNode.js v24.19.0",
+   "secs": 0.05,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "P33b",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": " evalTypeScript (node:internal/process/execution:295:3)\n    at node:internal/main/eval_string:71:3 {\n  errno: -4048,\n  code: 'EPERM',\n  syscall: 'rename',\n  path: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-A\\\\P33b\\\\src_t.bin',\n  dest: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-A\\\\P33b\\\\target.esm'\n}\n\nNode.js v24.19.0",
+   "secs": 0.04,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "D1",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "D4",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [WinError 5] Access is denied: 'C:/Temp/skyguard-ml2/probe/M-A/D4/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "D5",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.02,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "D7",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": false,
+   "changed": true,
+   "debris": [
+    "target.esm.bak"
+   ]
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.26,
+   "exists": false,
+   "changed": true,
+   "debris": [
+    "control.esm.bak"
+   ]
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "T1",
+  "kind": "meta",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "mtime_changed": true,
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "mtime_changed": true,
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "T2",
+  "kind": "stat",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "33",
+   "secs": 0.02,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "33",
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "32",
+   "secs": 0.25,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "32",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "R1",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-A",
+  "row": "R3",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "1048576",
+   "secs": 0.04,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "1048576",
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "1048576",
+   "secs": 0.25,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "1048576",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P1",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "/usr/bin/bash: line 1: C:/Temp/skyguard-ml2/probe/M-B/P1/target.esm: Permission denied",
+   "secs": 0.04,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P2",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "/usr/bin/bash: line 1: C:/Temp/skyguard-ml2/probe/M-B/P2/target.esm: Permission denied",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P3",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "cp: cannot create regular file 'C:/Temp/skyguard-ml2/probe/M-B/P3/target.esm': Permission denied",
+   "secs": 0.28,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.28,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P4",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.06,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P5",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "tee: 'C:/Temp/skyguard-ml2/probe/M-B/P5/target.esm': Permission denied",
+   "secs": 0.31,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.31,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P6",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "dd: failed to open 'C:/Temp/skyguard-ml2/probe/M-B/P6/target.esm': Permission denied",
+   "secs": 0.07,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.31,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P7",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P8",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.26,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.06,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P9.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mSet-Content: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-B\\P9.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.52,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P10.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mSet-Content: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-B\\P10.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.34,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.44,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P11.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mOut-File: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-B\\P11.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.33,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P12.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mOut-File: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-B\\P12.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.32,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.46,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P13.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mAdd-Content: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-B\\P13.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.31,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.24,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P14.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mCopy-Item: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-B\\P14.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.31,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P15.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mCopy-Item: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-B\\P15.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.32,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P16.pwsh7",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P17.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mMethodInvocationException: \u001b[31;1mException calling \"WriteAllBytes\" with \"2\" argument(s): \"Access to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-B\\P17.pwsh7\\target.esm' is denied.\"\u001b[0m",
+   "secs": 0.29,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "D2.pwsh7",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.24,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "D3.pwsh7",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.25,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "R2.pwsh7",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.23,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.23,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P9.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "obe\\M-B\\P9.ps51\\targ ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [Set-Content], UnauthorizedAccessException\n    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.SetContentCommand",
+   "secs": 0.44,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P10.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "obe\\M-B\\P10.ps51\\tar ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [Set-Content], UnauthorizedAccessException\n    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.SetContentCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P11.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "alPath 'C:\\Temp\\skyguard-ml2\\probe\\M-B\\P11.ps51\\ ...\n+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : OpenError: (:) [Out-File], UnauthorizedAccessException\n    + FullyQualifiedErrorId : FileOpenFailure,Microsoft.PowerShell.Commands.OutFileCommand",
+   "secs": 0.22,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.19,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P12.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "alPath 'C:\\Temp\\skyguard-ml2\\probe\\M-B\\P12.ps51\\ ...\n+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : OpenError: (:) [Out-File], UnauthorizedAccessException\n    + FullyQualifiedErrorId : FileOpenFailure,Microsoft.PowerShell.Commands.OutFileCommand",
+   "secs": 0.22,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P13.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (C:\\Temp\\skyguar...ps51\\target.esm:String) [Add-Content], Unauthorized \n   AccessException\n    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.AddContentCommand",
+   "secs": 0.23,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P14.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (C:\\Temp\\skyguar....ps51\\src_t.bin:FileInfo) [Copy-Item], Unauthorized \n   AccessException\n    + FullyQualifiedErrorId : CopyFileInfoItemUnauthorizedAccessError,Microsoft.PowerShell.Commands.CopyItemCommand",
+   "secs": 0.22,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P15.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "probe\\M-B\\P15.ps51\\src_t ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [Copy-Item], UnauthorizedAccessException\n    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.CopyItemCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P16.ps51",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.4,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P17.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "At line:1 char:1\n+ [IO.File]::WriteAllBytes('C:\\Temp\\skyguard-ml2\\probe\\M-B\\P17.ps51\\tar ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException\n    + FullyQualifiedErrorId : UnauthorizedAccessException",
+   "secs": 0.43,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.16,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "D2.ps51",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.41,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.31,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "D3.ps51",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "R2.ps51",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P19",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-B/P19/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P20",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-B/P20/target.esm'",
+   "secs": 0.26,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P21",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-B/P21/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.24,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P22",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "ceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\shutil.py\", line 256, in copyfile\n    with open(dst, 'wb') as fdst:\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-B/P22/target.esm'",
+   "secs": 0.04,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P23",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": " 434, in copy2\n    copyfile(src, dst, follow_symlinks=follow_symlinks)\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\shutil.py\", line 256, in copyfile\n    with open(dst, 'wb') as fdst:\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-B/P23/target.esm'",
+   "secs": 0.04,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P24",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P25",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "h self.open(mode='wb') as f:\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nPermissionError: [Errno 13] Permission denied: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-B\\\\P25\\\\target.esm'",
+   "secs": 0.26,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P26",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-B/P26/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.26,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P27",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "0 file(s) copied.\nAccess is denied.",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "1 file(s) copied.",
+   "secs": 0.24,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P28",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Access is denied.",
+   "secs": 0.02,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.01,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P33a",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "  at evalFunction (node:internal/process/execution:283:30)\n    at evalTypeScript (node:internal/process/execution:295:3)\n    at node:internal/main/eval_string:71:3 {\n  errno: -4048,\n  code: 'EPERM',\n  syscall: 'open',\n  path: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-B\\\\P33a\\\\target.esm'\n}\n\nNode.js v24.19.0",
+   "secs": 0.27,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.25,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "P33b",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "D1",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.25,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "D4",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.24,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "D5",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.24,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.01,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "D7",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": false,
+   "changed": true,
+   "debris": [
+    "target.esm.bak"
+   ]
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.28,
+   "exists": false,
+   "changed": true,
+   "debris": [
+    "control.esm.bak"
+   ]
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "T1",
+  "kind": "meta",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "mtime_changed": true,
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "mtime_changed": true,
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "T2",
+  "kind": "stat",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "32",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "32",
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "32",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "32",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "R1",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.25,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.26,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-B",
+  "row": "R3",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "1048576",
+   "secs": 0.25,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "1048576",
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "1048576",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "1048576",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P1",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "/usr/bin/bash: line 1: C:/Temp/skyguard-ml2/probe/M-C/P1/target.esm: Permission denied",
+   "secs": 0.26,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.26,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P2",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "/usr/bin/bash: line 1: C:/Temp/skyguard-ml2/probe/M-C/P2/target.esm: Permission denied",
+   "secs": 0.25,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P3",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "cp: cannot create regular file 'C:/Temp/skyguard-ml2/probe/M-C/P3/target.esm': Permission denied",
+   "secs": 0.49,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.5,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P4",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.28,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P5",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "tee: 'C:/Temp/skyguard-ml2/probe/M-C/P5/target.esm': Permission denied",
+   "secs": 0.52,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.98,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P6",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "dd: failed to open 'C:/Temp/skyguard-ml2/probe/M-C/P6/target.esm': Permission denied",
+   "secs": 0.75,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.75,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P7",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P8",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P9.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mSet-Content: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-C\\P9.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.29,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P10.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mSet-Content: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-C\\P10.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.29,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P11.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mOut-File: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-C\\P11.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.3,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P12.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mOut-File: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-C\\P12.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.3,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.2,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P13.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mAdd-Content: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-C\\P13.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.29,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.2,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P14.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mCopy-Item: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-C\\P14.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.52,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P15.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mCopy-Item: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-C\\P15.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.52,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.45,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P16.pwsh7",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P17.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mMethodInvocationException: \u001b[31;1mException calling \"WriteAllBytes\" with \"2\" argument(s): \"Access to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-C\\P17.pwsh7\\target.esm' is denied.\"\u001b[0m",
+   "secs": 0.5,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.2,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "D2.pwsh7",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.43,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.25,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "D3.pwsh7",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mRemove-Item: \u001b[31;1mYou do not have sufficient access rights to perform this operation or the item is hidden, system, or read only.\u001b[0m",
+   "secs": 0.3,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.2,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "R2.pwsh7",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.43,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.43,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P9.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "obe\\M-C\\P9.ps51\\targ ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [Set-Content], UnauthorizedAccessException\n    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.SetContentCommand",
+   "secs": 0.42,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P10.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "obe\\M-C\\P10.ps51\\tar ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [Set-Content], UnauthorizedAccessException\n    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.SetContentCommand",
+   "secs": 0.44,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.4,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P11.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "alPath 'C:\\Temp\\skyguard-ml2\\probe\\M-C\\P11.ps51\\ ...\n+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : OpenError: (:) [Out-File], UnauthorizedAccessException\n    + FullyQualifiedErrorId : FileOpenFailure,Microsoft.PowerShell.Commands.OutFileCommand",
+   "secs": 0.44,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.19,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P12.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "alPath 'C:\\Temp\\skyguard-ml2\\probe\\M-C\\P12.ps51\\ ...\n+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : OpenError: (:) [Out-File], UnauthorizedAccessException\n    + FullyQualifiedErrorId : FileOpenFailure,Microsoft.PowerShell.Commands.OutFileCommand",
+   "secs": 0.45,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P13.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (C:\\Temp\\skyguar...ps51\\target.esm:String) [Add-Content], Unauthorized \n   AccessException\n    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.AddContentCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P14.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (C:\\Temp\\skyguar....ps51\\src_t.bin:FileInfo) [Copy-Item], Unauthorized \n   AccessException\n    + FullyQualifiedErrorId : CopyFileInfoItemUnauthorizedAccessError,Microsoft.PowerShell.Commands.CopyItemCommand",
+   "secs": 0.46,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P15.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "probe\\M-C\\P15.ps51\\src_t ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [Copy-Item], UnauthorizedAccessException\n    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.CopyItemCommand",
+   "secs": 0.22,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.2,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P16.ps51",
+  "kind": "write",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.39,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P17.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "At line:1 char:1\n+ [IO.File]::WriteAllBytes('C:\\Temp\\skyguard-ml2\\probe\\M-C\\P17.ps51\\tar ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException\n    + FullyQualifiedErrorId : UnauthorizedAccessException",
+   "secs": 0.2,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.16,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "D2.ps51",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.32,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "D3.ps51",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (C:\\Temp\\skyguar...ps51\\target.esm:FileInfo) [Remove-Item], IOExceptio \n   n\n    + FullyQualifiedErrorId : RemoveFileSystemItemUnAuthorizedAccess,Microsoft.PowerShell.Commands.RemoveItemCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "R2.ps51",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.23,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P19",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-C/P19/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P20",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-C/P20/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P21",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-C/P21/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.02,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P22",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "ceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\shutil.py\", line 256, in copyfile\n    with open(dst, 'wb') as fdst:\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-C/P22/target.esm'",
+   "secs": 0.04,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P23",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": " 434, in copy2\n    copyfile(src, dst, follow_symlinks=follow_symlinks)\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\shutil.py\", line 256, in copyfile\n    with open(dst, 'wb') as fdst:\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-C/P23/target.esm'",
+   "secs": 0.26,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P24",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [WinError 5] Access is denied: 'C:/Temp/skyguard-ml2/probe/M-C/P24/src_t.bin' -> 'C:/Temp/skyguard-ml2/probe/M-C/P24/target.esm'",
+   "secs": 0.02,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P25",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "h self.open(mode='wb') as f:\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nPermissionError: [Errno 13] Permission denied: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-C\\\\P25\\\\target.esm'",
+   "secs": 0.05,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P26",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-C/P26/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P27",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "0 file(s) copied.\nAccess is denied.",
+   "secs": 0.02,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "1 file(s) copied.",
+   "secs": 0.02,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P28",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Access is denied.",
+   "secs": 0.02,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P33a",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "  at evalFunction (node:internal/process/execution:283:30)\n    at evalTypeScript (node:internal/process/execution:295:3)\n    at node:internal/main/eval_string:71:3 {\n  errno: -4048,\n  code: 'EPERM',\n  syscall: 'open',\n  path: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-C\\\\P33a\\\\target.esm'\n}\n\nNode.js v24.19.0",
+   "secs": 0.04,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "P33b",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": " evalTypeScript (node:internal/process/execution:295:3)\n    at node:internal/main/eval_string:71:3 {\n  errno: -4048,\n  code: 'EPERM',\n  syscall: 'rename',\n  path: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-C\\\\P33b\\\\src_t.bin',\n  dest: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-C\\\\P33b\\\\target.esm'\n}\n\nNode.js v24.19.0",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "D1",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "D4",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [WinError 5] Access is denied: 'C:/Temp/skyguard-ml2/probe/M-C/D4/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "D5",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.01,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "D7",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": false,
+   "changed": true,
+   "debris": [
+    "target.esm.bak"
+   ]
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": false,
+   "changed": true,
+   "debris": [
+    "control.esm.bak"
+   ]
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "T1",
+  "kind": "meta",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "mtime_changed": true,
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "mtime_changed": true,
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "T2",
+  "kind": "stat",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "33",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "33",
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "32",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "32",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "R1",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-C",
+  "row": "R3",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "1048576",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "1048576",
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "1048576",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "1048576",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P1",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "/usr/bin/bash: line 1: C:/Temp/skyguard-ml2/probe/M-D/P1/target.esm: Permission denied",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P2",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "/usr/bin/bash: line 1: C:/Temp/skyguard-ml2/probe/M-D/P2/target.esm: Permission denied",
+   "secs": 0.25,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P3",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "cp: cannot create regular file 'C:/Temp/skyguard-ml2/probe/M-D/P3/target.esm': Permission denied",
+   "secs": 0.07,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.29,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P4",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "cp: cannot remove 'C:/Temp/skyguard-ml2/probe/M-D/P4/target.esm': Permission denied",
+   "secs": 0.28,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P5",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "tee: 'C:/Temp/skyguard-ml2/probe/M-D/P5/target.esm': Permission denied",
+   "secs": 0.3,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.29,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P6",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "dd: failed to open 'C:/Temp/skyguard-ml2/probe/M-D/P6/target.esm': Permission denied",
+   "secs": 0.31,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.1,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 4,
+   "out": "sed: cannot rename C:/Temp/skyguard-ml2/probe/M-D/P7/sedJQ14dQ: Permission denied",
+   "secs": 0.06,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P8",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "mv: cannot move 'C:/Temp/skyguard-ml2/probe/M-D/P8/src_t.bin' to 'C:/Temp/skyguard-ml2/probe/M-D/P8/target.esm': Permission denied",
+   "secs": 0.05,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.27,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P9.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mSet-Content: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-D\\P9.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.29,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P10.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mSet-Content: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-D\\P10.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.32,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P11.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mOut-File: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-D\\P11.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.33,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P12.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mOut-File: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-D\\P12.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.3,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P13.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mAdd-Content: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-D\\P13.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.29,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P14.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mCopy-Item: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-D\\P14.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.52,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P15.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mCopy-Item: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-D\\P15.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.32,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P16.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mMove-Item: \u001b[31;1mCannot create a file when that file already exists.\u001b[0m",
+   "secs": 0.3,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P17.pwsh7",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mMethodInvocationException: \u001b[31;1mException calling \"WriteAllBytes\" with \"2\" argument(s): \"Access to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-D\\P17.pwsh7\\target.esm' is denied.\"\u001b[0m",
+   "secs": 0.51,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.21,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "D2.pwsh7",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mRemove-Item: \u001b[31;1mAccess to the path 'C:\\Temp\\skyguard-ml2\\probe\\M-D\\D2.pwsh7\\target.esm' is denied.\u001b[0m",
+   "secs": 0.3,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "D3.pwsh7",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "\u001b[31;1mRemove-Item: \u001b[31;1mYou do not have sufficient access rights to perform this operation or the item is hidden, system, or read only.\u001b[0m",
+   "secs": 0.29,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.22,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "R2.pwsh7",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.23,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.23,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P9.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "obe\\M-D\\P9.ps51\\targ ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [Set-Content], UnauthorizedAccessException\n    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.SetContentCommand",
+   "secs": 0.22,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P10.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "obe\\M-D\\P10.ps51\\tar ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [Set-Content], UnauthorizedAccessException\n    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.SetContentCommand",
+   "secs": 0.22,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.19,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P11.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "alPath 'C:\\Temp\\skyguard-ml2\\probe\\M-D\\P11.ps51\\ ...\n+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : OpenError: (:) [Out-File], UnauthorizedAccessException\n    + FullyQualifiedErrorId : FileOpenFailure,Microsoft.PowerShell.Commands.OutFileCommand",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.19,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P12.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "ile -LiteralPath 'C:\\Temp\\skyguard-ml2\\probe\\M-D\\P12.ps51\\ ...\n+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : OpenError: (:) [Out-File], ArgumentException\n    + FullyQualifiedErrorId : FileOpenFailure,Microsoft.PowerShell.Commands.OutFileCommand",
+   "secs": 0.44,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.19,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P13.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (C:\\Temp\\skyguar...ps51\\target.esm:String) [Add-Content], Unauthorized \n   AccessException\n    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.AddContentCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P14.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (C:\\Temp\\skyguar....ps51\\src_t.bin:FileInfo) [Copy-Item], Unauthorized \n   AccessException\n    + FullyQualifiedErrorId : CopyFileInfoItemUnauthorizedAccessError,Microsoft.PowerShell.Commands.CopyItemCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P15.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "probe\\M-D\\P15.ps51\\src_t ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [Copy-Item], UnauthorizedAccessException\n    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.CopyItemCommand",
+   "secs": 0.22,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P16.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "6.ps51\\src_t ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : WriteError: (C:\\Temp\\skyguar...ps51\\target.esm:FileInfo) [Move-Item], IOException\n    + FullyQualifiedErrorId : MoveFileInfoItemIOError,Microsoft.PowerShell.Commands.MoveItemCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P17.ps51",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "At line:1 char:1\n+ [IO.File]::WriteAllBytes('C:\\Temp\\skyguard-ml2\\probe\\M-D\\P17.ps51\\tar ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException\n    + FullyQualifiedErrorId : UnauthorizedAccessException",
+   "secs": 0.2,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.14,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "D2.ps51",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : InvalidArgument: (C:\\Temp\\skyguar...ps51\\target.esm:FileInfo) [Remove-Item], ArgumentExc \n   eption\n    + FullyQualifiedErrorId : RemoveFileSystemItemArgumentError,Microsoft.PowerShell.Commands.RemoveItemCommand",
+   "secs": 0.2,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.18,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "D3.ps51",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (C:\\Temp\\skyguar...ps51\\target.esm:FileInfo) [Remove-Item], IOExceptio \n   n\n    + FullyQualifiedErrorId : RemoveFileSystemItemUnAuthorizedAccess,Microsoft.PowerShell.Commands.RemoveItemCommand",
+   "secs": 0.21,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.17,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "R2.ps51",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.46,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P19",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-D/P19/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P20",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-D/P20/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P21",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-D/P21/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.26,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P22",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "ceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\shutil.py\", line 256, in copyfile\n    with open(dst, 'wb') as fdst:\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-D/P22/target.esm'",
+   "secs": 0.05,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.29,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P23",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": " 434, in copy2\n    copyfile(src, dst, follow_symlinks=follow_symlinks)\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\shutil.py\", line 256, in copyfile\n    with open(dst, 'wb') as fdst:\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-D/P23/target.esm'",
+   "secs": 0.05,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P24",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [WinError 5] Access is denied: 'C:/Temp/skyguard-ml2/probe/M-D/P24/src_t.bin' -> 'C:/Temp/skyguard-ml2/probe/M-D/P24/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.25,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P25",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "h self.open(mode='wb') as f:\n  File \"C:\\Users\\Moona\\AppData\\Local\\Programs\\Python\\Python310\\lib\\pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nPermissionError: [Errno 13] Permission denied: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-D\\\\P25\\\\target.esm'",
+   "secs": 0.05,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.26,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P26",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: 'C:/Temp/skyguard-ml2/probe/M-D/P26/target.esm'",
+   "secs": 0.02,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P27",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "0 file(s) copied.\nAccess is denied.",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "1 file(s) copied.",
+   "secs": 0.03,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P28",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Access is denied.",
+   "secs": 0.23,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P33a",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "  at evalFunction (node:internal/process/execution:283:30)\n    at evalTypeScript (node:internal/process/execution:295:3)\n    at node:internal/main/eval_string:71:3 {\n  errno: -4048,\n  code: 'EPERM',\n  syscall: 'open',\n  path: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-D\\\\P33a\\\\target.esm'\n}\n\nNode.js v24.19.0",
+   "secs": 0.04,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "P33b",
+  "kind": "write",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": " evalTypeScript (node:internal/process/execution:295:3)\n    at node:internal/main/eval_string:71:3 {\n  errno: -4048,\n  code: 'EPERM',\n  syscall: 'rename',\n  path: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-D\\\\P33b\\\\src_t.bin',\n  dest: 'C:\\\\Temp\\\\skyguard-ml2\\\\probe\\\\M-D\\\\P33b\\\\target.esm'\n}\n\nNode.js v24.19.0",
+   "secs": 0.04,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.25,
+   "exists": true,
+   "changed": true,
+   "debris": [],
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "D1",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "rm: cannot remove 'C:/Temp/skyguard-ml2/probe/M-D/D1/target.esm': Permission denied",
+   "secs": 0.27,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.04,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "D4",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [WinError 5] Access is denied: 'C:/Temp/skyguard-ml2/probe/M-D/D4/target.esm'",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.25,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "D5",
+  "kind": "delete",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Access is denied.",
+   "secs": 0.02,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.23,
+   "exists": false,
+   "changed": true,
+   "debris": []
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "D7",
+  "kind": "delete",
+  "verdict": "NOT BLOCKED",
+  "target": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.05,
+   "exists": false,
+   "changed": true,
+   "debris": [
+    "target.esm.bak"
+   ]
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.26,
+   "exists": false,
+   "changed": true,
+   "debris": [
+    "control.esm.bak"
+   ]
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "T1",
+  "kind": "meta",
+  "verdict": "BLOCKED",
+  "target": {
+   "rc": 1,
+   "out": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nPermissionError: [WinError 5] Access is denied: 'C:/Temp/skyguard-ml2/probe/M-D/T1/target.esm'",
+   "secs": 0.25,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "mtime_changed": false,
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "mtime_changed": true,
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "T2",
+  "kind": "stat",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "33",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "33",
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "32",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "32",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "R1",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.02,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "2097152",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "2097152",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ },
+ {
+  "mech": "M-D",
+  "row": "R3",
+  "kind": "read",
+  "verdict": "READ OK",
+  "target": {
+   "rc": 0,
+   "out": "1048576",
+   "secs": 0.24,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "1048576",
+   "after_readonly": true,
+   "after_deny": true
+  },
+  "control": {
+   "rc": 0,
+   "out": "1048576",
+   "secs": 0.03,
+   "exists": true,
+   "changed": false,
+   "debris": [],
+   "stdout": "1048576",
+   "after_readonly": false,
+   "after_deny": false
+  }
+ }
+]
