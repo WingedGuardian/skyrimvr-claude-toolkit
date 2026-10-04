@@ -303,3 +303,12 @@ def test_increment_is_a_write():
 
 def test_for_list_dollar_is_a_read():
     assert assign.write_counts('for f in "$SP"/* "${SP}"; do :; done').get("sp", 0) == 0
+
+
+def test_plain_assignment_is_counted():
+    # without this form the recorded assignment itself reads as unwritten (count 0) and nothing ever resolves
+    assert assign.write_counts("D=/x; if y; then D=/z; fi").get("d") == 2
+
+
+def test_dollar_assignment_is_counted():
+    assert assign.write_counts("$p = 'x'; if ($y) { $p = 'z' }").get("p") == 2

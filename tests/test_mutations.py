@@ -1805,8 +1805,10 @@ _T7B_CLAUSES = [
     ("t7b-find-delete-carries", _SP, 'self.seg, "", self.ctx.subst)', 'self.seg, "", ())', _t07b("find-delete")),
     ("t7b-deletes-wired", _DL, "        e = substituted(e)\n", "", _t07b("scratch-var")),
     # assign.py: every form of a second write counts; values and uses are literal or nothing
-    ("t7b-count-plain", _AS, _COUNT, "    for rx in (_W_DOLLAR, _W_DEFAULT, _W_FD):", _t07b("reassigned-in-branch")),
-    ("t7b-count-dollar", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DEFAULT, _W_FD):", _t07b("ps-reassigned-in-block")),
+    ("t7b-count-plain", _AS, _COUNT, "    for rx in (_W_DOLLAR, _W_DEFAULT, _W_FD):",
+     _TA + "test_plain_assignment_is_counted"),
+    ("t7b-count-dollar", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DEFAULT, _W_FD):",
+     _TA + "test_dollar_assignment_is_counted"),
     ("t7b-count-default", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DOLLAR, _W_FD):", _t07b("default-expansion")),
     ("t7b-count-fd", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DOLLAR, _W_DEFAULT):", _t07b("fd-alloc")),
     ("t7b-count-ps-tee", _AS, "tee-object|-variable|", "", _t07b("ps-tee-variable")),
