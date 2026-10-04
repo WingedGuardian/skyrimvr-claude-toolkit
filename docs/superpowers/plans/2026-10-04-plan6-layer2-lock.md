@@ -917,3 +917,50 @@ stand-in Steam app. **None of them touches `C:/GOG Games`**, except the explicit
 
 Deferred by design: OpenCode (Plan 10), `setup.sh --agent` and the paths-env move (Plan 8), POSIX lock
 (R11), and adopting v4 in the author's install (a separate decision, spec non-goal).
+
+---
+
+## Decision record (Task 5, 2026-10-04)
+
+Evidence: `docs/superpowers/measurements/2026-10-04-plan6-ml2.md` and `…-plan6-m2.md`; spec E28–E35.
+
+- **Real install:** `baseline.py verify` → 0 of 9 real files changed (proved able to go red). No
+  attribute or ACL was ever applied outside `C:/Temp/skyguard-ml2/`; every scratch file is unlocked
+  (0 deny ACEs over 1,981 files, 0 read-only over 1,726).
+- **Table A → M-D** (bit + file deny `(WD,AD,WA,WEA)`): M-A ineligible (U3), M-B ineligible (MIN-BAR
+  P30); M-C 36/42 REQUIRED, M-D 41/42 (only P32 open).
+- **Spec gate M-L2 → NOT passed as written**, for every candidate: (d) an xEdit/xelib save is not
+  stopped (rename-to-backup, E29); (a) Codex's `workspace-write` sandbox cannot lift M-B/C/D (E31).
+  Table A has no C8 row — a gap in the pre-committed table, reported and not patched.
+- **USER RULING REQUIRED before Task 8** (Tasks 6–7, 9–17 do not depend on it): (i) D5 option B, no
+  lock; (ii) re-scope M-L2 and ship M-D default-off per R3; (iii) ship M-A with U3 re-scoped. Measured
+  trade-offs in the ml2 doc, Task 5.
+- **Table M → row 1, provisional** (re-checked when Task 7's S-tests flip and Task 9's SHADOW lands);
+  put SHADOW emission in `engine.pre_tool` after combine regardless.
+- **Phase B constraints learned:** apply/remove in-process (E33); bit before ACE, ACE removed before
+  bit; tag a pre-existing read-only target with `(WD,AD,WA)` (E34); call `System32\whoami.exe` or read
+  the SID in-process (Git's `whoami` crashed inside Codex's sandbox); sweep `zEdit Backups/` and
+  `*.vortex_backup` when unlocking (the lock travels with a renamed file); `assert_lockable` refuses a
+  multi-link file (Vortex collision, measured) — report, never relock.
+
+### Final Manual Batch changes from Phase A (Task 19 appends them; never asked mid-plan)
+
+- **B1 correction (safety):** launch Wrye Bash with every user path redirected into scratch, or it
+  reads and may rewrite the user's real `AppData/Local/Skyrim VR/plugins.txt` and `My Games`:
+  `"C:\Temp\skyguard-ml2\tools\wryebash-x\Mopy\Wrye Bash.exe" --oblivionPath "C:\Temp\skyguard-ml2\game" --personalPath "C:\Temp\skyguard-ml2\wb\personal" --localAppDataPath "C:\Temp\skyguard-ml2\wb\local" --userPath "C:\Temp\skyguard-ml2\wb\user"`
+  (flags READ from Wrye Bash 315's Advanced Readme; that they redirect every write is INFERRED — the
+  collector must diff the real `AppData/Local/Skyrim VR` and `My Games/Skyrim VR` before/after). The
+  exe is at `tools/wryebash-x/Mopy/`, not `tools/wryebash/`. Wrye Bash 315 standalone was fetched with
+  its GitHub digest verified (`sha256:96c4051d…c6f3c`). B1 also measures T1 (`utime`), which M-D blocks.
+- **B5 (C7) xEdit:** run `xedit_probe.py Update.esm`'s command line by hand (32-bit `xTESEdit.exe`; the
+  64-bit one adds a modal "64bit version" prompt), click **Close** on "A message from the developer"
+  (tick "Don't show again for a while"), let QuickAutoClean finish, once locked and once unlocked.
+  Predicted from E29: the locked run is NOT refused.
+- **B5 (C6) MO2:** steps in `scripts/layer2-spike/mo2_probe.md`. MO2 publishes no checksum for any
+  release, so it was not downloaded; getting it is the user's call.
+- **B4 addition:** also note whether a SessionStart `systemMessage` shows in the interactive TUI (in
+  `claude -p` it produced no user-facing notice, E35).
+- **B7 additions (read-only findings; never edited):** `~/.codex/config.toml` gained
+  `[projects.'c:\temp\skyguard-ml2\m2\skyrimprobe'] trust_level = "trusted"`; `~/.codex/cap_sid` gained
+  six `skyguard-ml2/...` workspace entries (`agent-codex/m-{a,b,c,d}-workspace-write`,
+  `agent-codex-unlock/m-a-workspace-write`, `m2/skyrimprobe`).

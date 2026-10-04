@@ -71,6 +71,14 @@ toolkit to itself.
 | E25 | A hook `failureMode: "block"` is **ignored silently on codex-cli 0.159.3**: a hook exiting 1 showed "Failed" and the command ran. | MEASURED | `docs/superpowers/measurements/2026-10-01-plan1-derisk.md` R8 |
 | E26 | `codex exec` 0.159.3 fires `PreToolUse` for shell (pwsh) and for all three `apply_patch` forms, plus `SessionStart`. | MEASURED | same, R7 |
 | E27 | `claude -p` (Claude Code 2.1.287) fires project `PreToolUse` hooks with matcher `"*"` for `Bash`, `PowerShell`, `Write` and `Edit`, plus `SessionStart`. | MEASURED | same, R6 |
+| E28 | Layer 2 primitive matrix, 38 overwrite cells (Git Bash, pwsh 7, PS 5.1, Python, cmd, Node), each with an unlocked control. Blocked: **M-A** read-only bit 27/38; **M-B** file deny `(WD,AD)` 31/38; **M-C** = A+B 33/38; **M-D** = A + deny `(WD,AD,WA,WEA)` **38/38**. Rename-over and unlink-then-create (`mv`, `cp -f`, `sed -i`, `os.replace`, `Move-Item -Force`) pass anything that has no read-only bit the actor cannot clear; `-Force` clears the bit unless `WA` is denied. Reads (incl. `mmap`) work under all four. | MEASURED | `docs/superpowers/measurements/2026-10-04-plan6-ml2.md` Task 1 |
+| E29 | **Rename-away is open under every file-level mechanism** (`mv f f.bak`): it needs only DELETE on the file. **xelib's `SaveFile` of a locked master uses exactly that**: the locked original moves to `Data/zEdit Backups/<name>.<stamp>.bak` and a new file takes its name. No candidate stops a deliberate xEdit/xelib save. | MEASURED | same, Task 3 C3/P32 |
+| E30 | Claude Code's `Write`/`Edit` write a temp file and rename it over the target (`EPERM … rename '…tmp.<pid>.<hex>' -> '…'` under a lock). So they behave like rename-over: open under M-B, blocked under M-A/C/D. Codex `apply_patch` Update is blocked by all four; Delete only by M-D. | MEASURED | same, Task 2 |
+| E31 | **Inside Codex's `workspace-write` sandbox, `icacls` cannot change any DACL** (Access denied, even on a file Codex created); `attrib` works. So M-B/C/D cannot be lifted in a sandboxed Codex session (M-D not even its bit). Under `danger-full-access`, and under Claude, all four lock and unlock in-session with no elevation. | MEASURED | same, Task 2 C8 |
+| E32 | Vortex (READ from `app.asar`): game-file collision = rename the original to `.vortex_backup`, link the mod's copy, purge = unlink + rename back; on EPERM it offers an elevated **allow** ACE. Replayed through Node `fs` on a locked bed: all steps succeed under all four mechanisms; the lock travels with the renamed file and comes back on purge. | READ + MEASURED | same, Task 3 C5 |
+| E33 | Applying/removing any mechanism over the 26 VR target names: **≤ 25 ms in-process** (ctypes `SetFileAttributesW` + `SetEntriesInAclW`/`SetNamedSecurityInfoW`), 1.3–10.7 s with one `attrib`/`icacls` process per file under load. | MEASURED | same, Task 3 C10 |
+| E34 | Without a manifest, the read-only bit the toolkit set and one the user set are indistinguishable (M-A fails U3). ACE mechanisms can carry the distinction in the filesystem itself via a whitelisted mask variant. A Python-free unlock (`cmd` + `attrib` + `icacls`, `PATH=System32`) works for all four. | MEASURED | same, Task 3 U2/U3 |
+| E35 | In `claude -p` stream-json, a **PreToolUse** hook's `systemMessage` arrives as a user-facing `system/informational` notice and is **not** in the model's context; a **SessionStart** `systemMessage` produced no such notice. `additionalContext` reaches the model on both. An in-session `export SKYGUARD_GUARDS=off` never reached a hook (re-confirms E20 for this toolkit). | MEASURED | `2026-10-04-plan6-m2.md` |
 
 ## 3. The layered model
 
@@ -179,6 +187,13 @@ no interpreter, an unparseable payload or command, an install root that can't be
 - **Lifts expire at the next session start:** relock and guards on, with a banner if anything was left lifted.
 - **State lives in `.skyguard/state.json`.** It is written only by these commands, with a checksum. The engine
   treats any state it did not write as **guards on** and logs it (M2 confirms this is sufficient per agent).
+  - *Amended 2026-10-04 (Plan 6 R6, M2):* same-user code can always recompute the checksum, so the checksum
+    catches naive and accidental edits only. What forgery cannot buy is **silence or persistence**: a lift
+    is honoured only in the **session that made it** (`session_id` equal, created after that session's
+    start record) and never past `expires_at` (clamped to 8 h); every honoured lift emits a `SHADOW` audit
+    line and model context **on every call**, emitted on the decision path itself; every session start
+    reports and clears all lifts. M2 measured that every write route on which a hook runs is visible to
+    that hook; the routes no hook sees (Codex with unapproved hooks) enforce nothing either (E2).
 - **Last resort, documented:** each agent's own hook switch (`/hooks`; Codex `[features] hooks = false`).
   `skydoctor` reports that state as "Layer 3 absent".
 - **False positive:** the user runs the command themselves (e.g. `!` in Claude Code); the case joins the
@@ -193,6 +208,19 @@ no interpreter, an unparseable payload or command, an install root that can't be
   hardlinked copy is never locked (E14). MO2's `mods/` is never locked.
 - **Mechanism:** the read-only attribute (`attrib +R`). It needs no admin and one command reverses it. A
   refused write names the unlock command.
+  - *Amended 2026-10-04 (Plan 6 Task 5, M-L2 measurements E28–E34):* pre-committed Table A selects
+    **M-D: the read-only bit plus a file-level, non-inherited deny `(WD,AD,WA,WEA)` for the user's own
+    SID** (bit first, then the ACE; removal in reverse). It blocks 38/38 overwrite primitives plus the
+    agents' own tools; M-A (bit only) misses 11 including every `-Force`. Implementation constraints
+    measured: apply in-process, never one process per file (E33); a pre-existing read-only target is
+    tagged with the mask variant `(WD,AD,WA)` so a manifest-less unlock leaves the user's bit alone (E34).
+    **Not stopped by M-D or any candidate:** a deliberate xEdit/xelib save (rename-to-backup, E29), and
+    rename-away generally. **Not liftable from Codex's sandbox** (E31). Spec gate M-L2 is therefore **not
+    passed as written** — see §9; whether the lock ships is a user ruling (D5).
+  - *Correction (Plan 6 R13):* **a refused write cannot name the unlock command.** The bit and the ACE have
+    no text channel; the OS says only "access denied". Instead: Layer 3 (`S-WRITE-PLUGIN`) names it for
+    named agents; the core instructions say "access denied on a vanilla master or archive = the toolkit's
+    lock; `tools/skyguard lock unlock <file>`"; `skydoctor` lists the locked set.
   - *Considered and rejected for `Data/`:* X4's inherited deny-delete ACL (E22). It stops deletes but not
     overwrites (the vanilla risk), and an inherited deny on `Data/` would break Vortex's purge, which
     deletes its hardlinks.
@@ -280,6 +308,15 @@ Shipped `CLAUDE.md` is 53,772 bytes. These sections move out; none is deleted:
 | M2 | Can an agent forge `.skyguard/state.json` past the checksum rule, per agent? (The env-var half is answered by E20: launch env cannot be changed in-session.) | 7 | §5.2 state-file integrity rule redesigned |
 | **M-L2** | On a **scratch copy** of the vanilla files: (a) `skyguard lock`/`unlock` from inside a Claude **and** a Codex session, no admin; (b) xEdit loads the full order with locked masters, warning at most; clean-after-unlock and relock work; (c) Wrye Bash launches, scans, builds a Bashed Patch, and ghosting works against locked masters; (d) Git Bash `rm -f`, `Remove-Item -Force` and an xEdit save are stopped; (e) Steam "verify files" with the lock present | 7 | Layer 2 = recovery only (D5 option B) |
 | M4 | Hook latency in live sessions (E10 caveat) | release | investigate before release |
+
+*M-L2 status, 2026-10-04 (Plan 6 Phase A; `2026-10-04-plan6-ml2.md`):* (a) Claude: pass for all
+mechanisms; Codex `workspace-write` sandbox: **fail** for M-B/C/D, pass for M-A (E31). (b) xelib loads
+the order with masters locked, own-plugin saves work, unlock → save → relock works (C1, C2, C4); the
+xEdit exe headless run stops on modal dialogs → batch B5. (c) Wrye Bash → batch B1. (d) `rm -f` and
+`Remove-Item -Force`: stopped by M-D; **an xEdit/xelib save: not stopped by any candidate (E29)**.
+(e) Steam verify → batch B2; whether the lock defaults on is decided by Plan 6 Table B after the batch,
+never by momentum (R3). **Gate result as written: not passed ((a)-Codex, (d)); user ruling required
+before the lock is built (Plan 6 Task 8).**
 
 ## 10. Phases
 
