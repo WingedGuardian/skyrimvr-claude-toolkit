@@ -37,7 +37,38 @@ Every `*_id` field becomes `<id>`. `transcript_path` and `cwd` become `<path>`. 
 cwd become `<cwd>`. The user's home folder, in any spelling, becomes `<HOME>`. Everything else is kept
 verbatim, including fields an agent added recently (Claude Code 2.1.287 sends `effort` and `prompt_id`).
 
+## Codex 0.160.0 recapture (`codex/0.160.0/`, Plan 4 Task 0)
+
+- **Date:** 2026-10-02, Windows 11, `codex --version` → `codex-cli 0.160.0` (model `gpt-6.1-sol`).
+- **How:** a probe hook (`probe-hook.py`, scratch only; it saves each raw payload exactly as
+  `capture-hook.sh` does, then answers by a marker in the command) behind the Plan 4 **R2** launch form
+  (`pwsh … -File "<scratch>/sp ace/probe.ps1" || powershell …`), in a throwaway scratch git repo, driven by
+  `codex exec --dangerously-bypass-hook-trust -s workspace-write`. One payload per shape was picked from
+  the raw set and passed through `scrub.py --agent codex`. Measurements and prompts:
+  `docs/superpowers/measurements/2026-10-02-plan4-codex-derisk.md`.
+- **Files** (scrub.py numbers them in capture-pick order):
+
+| File | What it is |
+|---|---|
+| `codex-SessionStart-none-1.json` | SessionStart, `source: "startup"`, session at the project root |
+| `codex-SessionStart-none-2.json` | SessionStart from `codex exec -C sub/deep` (the raw `cwd` was the subdirectory) |
+| `codex-PreToolUse-Bash-1.json` | `New-Item -ItemType File DENYME.flag` (the hook answered a JSON deny; Codex showed `Blocked`) |
+| `codex-PreToolUse-Bash-2.json` | `apply_patch <<'PATCH' …` run **through the shell**: arrives as `Bash`, no `apply_patch` event, and the patch applied |
+| `codex-PreToolUse-Bash-3.json` | `cd sub && Get-ChildItem` |
+| `codex-PreToolUse-Bash-4.json` | `Get-Location .` from a `-C sub/deep` session (raw `cwd` = the subdirectory, not the project root) |
+| `codex-PreToolUse-apply_patch-1..5.json` | Add · Update · Update + `*** Move to:` · one patch with two Add headers · Delete |
+| `codex-PreToolUse-mcp__probe__echo-1.json` | an MCP tool call (toy stdio server `probe`, tool `echo`, registered with `-c mcp_servers.probe…`, never in config.toml). The call itself was then refused by Codex's approval policy; the hook fired first |
+
+- **Prompts:** one exec run per marker or shape; the exact prompt is the first line of each run's log,
+  summarised in the measurements doc.
+- **Not captured here:** the interactive TUI and `SessionStart` with `source: "compact"` (Task 0 Step 6,
+  a user step: `docs/superpowers/measurements/2026-10-02-plan4-tui-probe-instructions.md`), Claude MCP
+  payloads (Plan 5), non-CLI Codex surfaces (D14, unclaimed).
+- Transcript excerpts for Task 13 are in `tests/fixtures/codex/0.160.0/rollout-*.jsonl` and
+  `tests/fixtures/claude/transcript-p.jsonl`; trust-hash vectors in
+  `tests/fixtures/codex/0.160.0/trust_vectors.json`.
+
 ## Not captured yet
 
-MCP tool payloads (both agents), Codex `SessionStart` with `source: compact`, the interactive Codex TUI,
-and non-CLI surfaces. Owned by Plans 4–5 (see the spec, D14).
+Claude MCP tool payloads, Codex `SessionStart` with `source: compact` and the interactive Codex TUI
+(pending the Task 0 Step 6 user probe), and non-CLI surfaces. Owned by Plans 4–5 (see the spec, D14).

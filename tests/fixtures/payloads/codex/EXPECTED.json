@@ -1,0 +1,20 @@
+{
+  "_comment": "Verdict each captured payload must get from the configured Codex entry in a fixture install. verdict: allow | advise | deny; code: the engine's reason code (telemetry). Keys are paths under this folder. Plain allow rows carry code allow; SessionStart rows carry the session status code (the fixture install holds none of the watched KB files).",
+  "codex-PreToolUse-Bash-1.json": {"verdict": "allow", "code": "allow"},
+  "codex-PreToolUse-apply_patch-1.json": {"verdict": "allow", "code": "allow"},
+  "codex-PreToolUse-apply_patch-2.json": {"verdict": "allow", "code": "allow"},
+  "codex-PreToolUse-apply_patch-3.json": {"verdict": "allow", "code": "allow"},
+  "codex-SessionStart-none-1.json": {"verdict": "allow", "code": "session.NOT_SNAPSHOTTED"},
+  "0.160.0/codex-PreToolUse-Bash-1.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-PreToolUse-Bash-2.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-PreToolUse-Bash-3.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-PreToolUse-Bash-4.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-PreToolUse-apply_patch-1.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-PreToolUse-apply_patch-2.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-PreToolUse-apply_patch-3.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-PreToolUse-apply_patch-4.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-PreToolUse-apply_patch-5.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-PreToolUse-mcp__probe__echo-1.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-SessionStart-none-1.json": {"verdict": "allow", "code": "session.NOT_SNAPSHOTTED"},
+  "0.160.0/codex-SessionStart-none-2.json": {"verdict": "allow", "code": "session.NOT_SNAPSHOTTED"}
+}

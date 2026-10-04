@@ -1,0 +1,289 @@
+[
+  {
+    "label": "v1 SessionStart (Task 8 template)",
+    "event_key": "session_start",
+    "group": {},
+    "handler": {
+      "type": "command",
+      "command": "bash \"/c/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.sh\" session-start",
+      "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" session-start || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" session-start",
+      "timeout": 120,
+      "statusMessage": "Skyrim toolkit: session checks"
+    },
+    "windows": true,
+    "codex_hash": "sha256:8f92eda79b18513e031ade48d10505328da5d7dea9151f200019b7e2fa790d72",
+    "listed": {
+      "key": "C:\\<session-flags>\\config.toml:session_start:0:0",
+      "matcher": null,
+      "timeoutSec": 120,
+      "statusMessage": "Skyrim toolkit: session checks",
+      "additionalContextLimit": null,
+      "trustStatus": "untrusted",
+      "source": "sessionFlags"
+    },
+    "oracle": "codex-cli 0.160.0 app-server hooks/list currentHash, 2026-10-02"
+  },
+  {
+    "label": "v1 SessionStart + failureMode block + additionalContextLimit 8000",
+    "event_key": "session_start",
+    "group": {},
+    "handler": {
+      "type": "command",
+      "command": "bash \"/c/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.sh\" session-start",
+      "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" session-start || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" session-start",
+      "timeout": 120,
+      "statusMessage": "Skyrim toolkit: session checks",
+      "failureMode": "block",
+      "additionalContextLimit": 8000
+    },
+    "windows": true,
+    "codex_hash": "sha256:68453acc9b7b3e1fd681c17697f8e473d1bbf5cf1f85bf586530d4e8d1354396",
+    "listed": {
+      "key": "C:\\<session-flags>\\config.toml:session_start:1:0",
+      "matcher": null,
+      "timeoutSec": 120,
+      "statusMessage": "Skyrim toolkit: session checks",
+      "additionalContextLimit": 8000,
+      "trustStatus": "untrusted",
+      "source": "sessionFlags"
+    },
+    "oracle": "codex-cli 0.160.0 app-server hooks/list currentHash, 2026-10-02"
+  },
+  {
+    "label": "v1 SessionStart + additionalContextLimit 8000 only",
+    "event_key": "session_start",
+    "group": {},
+    "handler": {
+      "type": "command",
+      "command": "bash \"/c/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.sh\" session-start",
+      "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" session-start || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" session-start",
+      "timeout": 120,
+      "statusMessage": "Skyrim toolkit: session checks",
+      "additionalContextLimit": 8000
+    },
+    "windows": true,
+    "codex_hash": "sha256:68453acc9b7b3e1fd681c17697f8e473d1bbf5cf1f85bf586530d4e8d1354396",
+    "listed": {
+      "key": "C:\\<session-flags>\\config.toml:session_start:2:0",
+      "matcher": null,
+      "timeoutSec": 120,
+      "statusMessage": "Skyrim toolkit: session checks",
+      "additionalContextLimit": 8000,
+      "trustStatus": "untrusted",
+      "source": "sessionFlags"
+    },
+    "oracle": "codex-cli 0.160.0 app-server hooks/list currentHash, 2026-10-02"
+  },
+  {
+    "label": "v1 PreToolUse (Task 8 template)",
+    "event_key": "pre_tool_use",
+    "group": {
+      "matcher": ".*"
+    },
+    "handler": {
+      "type": "command",
+      "command": "bash \"/c/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.sh\" pre-tool",
+      "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool",
+      "timeout": 60,
+      "statusMessage": "Skyrim toolkit: checking"
+    },
+    "windows": true,
+    "codex_hash": "sha256:0ff47e57beb773b59ab17f559a5797168f3173d4c38fefbb69e67d6b28614693",
+    "listed": {
+      "key": "C:\\<session-flags>\\config.toml:pre_tool_use:0:0",
+      "matcher": ".*",
+      "timeoutSec": 60,
+      "statusMessage": "Skyrim toolkit: checking",
+      "additionalContextLimit": null,
+      "trustStatus": "untrusted",
+      "source": "sessionFlags"
+    },
+    "oracle": "codex-cli 0.160.0 app-server hooks/list currentHash, 2026-10-02"
+  },
+  {
+    "label": "v1 PreToolUse + failureMode block + additionalContextLimit 8000",
+    "event_key": "pre_tool_use",
+    "group": {
+      "matcher": ".*"
+    },
+    "handler": {
+      "type": "command",
+      "command": "bash \"/c/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.sh\" pre-tool",
+      "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool",
+      "timeout": 60,
+      "statusMessage": "Skyrim toolkit: checking",
+      "failureMode": "block",
+      "additionalContextLimit": 8000
+    },
+    "windows": true,
+    "codex_hash": "sha256:2b57dc3d2565e7d1f3a7d199635037da7789637bb2effa82cc9d5ef96f28e1f5",
+    "listed": {
+      "key": "C:\\<session-flags>\\config.toml:pre_tool_use:1:0",
+      "matcher": ".*",
+      "timeoutSec": 60,
+      "statusMessage": "Skyrim toolkit: checking",
+      "additionalContextLimit": 8000,
+      "trustStatus": "untrusted",
+      "source": "sessionFlags"
+    },
+    "oracle": "codex-cli 0.160.0 app-server hooks/list currentHash, 2026-10-02"
+  },
+  {
+    "label": "v1 PreToolUse + failureMode block only",
+    "event_key": "pre_tool_use",
+    "group": {
+      "matcher": ".*"
+    },
+    "handler": {
+      "type": "command",
+      "command": "bash \"/c/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.sh\" pre-tool",
+      "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool",
+      "timeout": 60,
+      "statusMessage": "Skyrim toolkit: checking",
+      "failureMode": "block"
+    },
+    "windows": true,
+    "codex_hash": "sha256:0ff47e57beb773b59ab17f559a5797168f3173d4c38fefbb69e67d6b28614693",
+    "listed": {
+      "key": "C:\\<session-flags>\\config.toml:pre_tool_use:2:0",
+      "matcher": ".*",
+      "timeoutSec": 60,
+      "statusMessage": "Skyrim toolkit: checking",
+      "additionalContextLimit": null,
+      "trustStatus": "untrusted",
+      "source": "sessionFlags"
+    },
+    "oracle": "codex-cli 0.160.0 app-server hooks/list currentHash, 2026-10-02"
+  },
+  {
+    "label": "v1 PreToolUse + additionalContextLimit 8000 only",
+    "event_key": "pre_tool_use",
+    "group": {
+      "matcher": ".*"
+    },
+    "handler": {
+      "type": "command",
+      "command": "bash \"/c/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.sh\" pre-tool",
+      "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool",
+      "timeout": 60,
+      "statusMessage": "Skyrim toolkit: checking",
+      "additionalContextLimit": 8000
+    },
+    "windows": true,
+    "codex_hash": "sha256:2b57dc3d2565e7d1f3a7d199635037da7789637bb2effa82cc9d5ef96f28e1f5",
+    "listed": {
+      "key": "C:\\<session-flags>\\config.toml:pre_tool_use:3:0",
+      "matcher": ".*",
+      "timeoutSec": 60,
+      "statusMessage": "Skyrim toolkit: checking",
+      "additionalContextLimit": 8000,
+      "trustStatus": "untrusted",
+      "source": "sessionFlags"
+    },
+    "oracle": "codex-cli 0.160.0 app-server hooks/list currentHash, 2026-10-02"
+  },
+  {
+    "label": "v1 PreToolUse + additionalContextLimit 2500 (the default, explicit)",
+    "event_key": "pre_tool_use",
+    "group": {
+      "matcher": ".*"
+    },
+    "handler": {
+      "type": "command",
+      "command": "bash \"/c/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.sh\" pre-tool",
+      "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool",
+      "timeout": 60,
+      "statusMessage": "Skyrim toolkit: checking",
+      "additionalContextLimit": 2500
+    },
+    "windows": true,
+    "codex_hash": "sha256:0ff47e57beb773b59ab17f559a5797168f3173d4c38fefbb69e67d6b28614693",
+    "listed": {
+      "key": "C:\\<session-flags>\\config.toml:pre_tool_use:4:0",
+      "matcher": ".*",
+      "timeoutSec": 60,
+      "statusMessage": "Skyrim toolkit: checking",
+      "additionalContextLimit": 2500,
+      "trustStatus": "untrusted",
+      "source": "sessionFlags"
+    },
+    "oracle": "codex-cli 0.160.0 app-server hooks/list currentHash, 2026-10-02"
+  },
+  {
+    "label": "neutral: PreToolUse timeout 61",
+    "event_key": "pre_tool_use",
+    "group": {
+      "matcher": ".*"
+    },
+    "handler": {
+      "type": "command",
+      "command": "bash \"/c/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.sh\" pre-tool",
+      "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool",
+      "timeout": 61,
+      "statusMessage": "Skyrim toolkit: checking"
+    },
+    "windows": true,
+    "codex_hash": "sha256:4601b45bd6aeb5aee7f69e8f8c69d01d1ed580061e8980416eac5df4c3ed1363",
+    "listed": {
+      "key": "C:\\<session-flags>\\config.toml:pre_tool_use:5:0",
+      "matcher": ".*",
+      "timeoutSec": 61,
+      "statusMessage": "Skyrim toolkit: checking",
+      "additionalContextLimit": null,
+      "trustStatus": "untrusted",
+      "source": "sessionFlags"
+    },
+    "oracle": "codex-cli 0.160.0 app-server hooks/list currentHash, 2026-10-02"
+  },
+  {
+    "label": "neutral: PreToolUse matcher ^Bash$",
+    "event_key": "pre_tool_use",
+    "group": {
+      "matcher": "^Bash$"
+    },
+    "handler": {
+      "type": "command",
+      "command": "bash \"/c/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.sh\" pre-tool",
+      "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool",
+      "timeout": 60,
+      "statusMessage": "Skyrim toolkit: checking"
+    },
+    "windows": true,
+    "codex_hash": "sha256:5d3416e682bb27812d9de0bceffda6597bb46b04b20a9eda79ca12ce20a491ba",
+    "listed": {
+      "key": "C:\\<session-flags>\\config.toml:pre_tool_use:6:0",
+      "matcher": "^Bash$",
+      "timeoutSec": 60,
+      "statusMessage": "Skyrim toolkit: checking",
+      "additionalContextLimit": null,
+      "trustStatus": "untrusted",
+      "source": "sessionFlags"
+    },
+    "oracle": "codex-cli 0.160.0 app-server hooks/list currentHash, 2026-10-02"
+  },
+  {
+    "label": "neutral: PreToolUse without statusMessage",
+    "event_key": "pre_tool_use",
+    "group": {
+      "matcher": ".*"
+    },
+    "handler": {
+      "type": "command",
+      "command": "bash \"/c/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.sh\" pre-tool",
+      "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:/SkyguardVectors/Skyrim Probe (x86)/.codex/hooks/skyguard-entry.ps1\" pre-tool",
+      "timeout": 60
+    },
+    "windows": true,
+    "codex_hash": "sha256:cc11c93e5d40f347379d25d5e01987081ad3c089c89fe25785b3cb7cd24edd52",
+    "listed": {
+      "key": "C:\\<session-flags>\\config.toml:pre_tool_use:7:0",
+      "matcher": ".*",
+      "timeoutSec": 60,
+      "statusMessage": null,
+      "additionalContextLimit": null,
+      "trustStatus": "untrusted",
+      "source": "sessionFlags"
+    },
+    "oracle": "codex-cli 0.160.0 app-server hooks/list currentHash, 2026-10-02"
+  }
+]

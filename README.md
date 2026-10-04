@@ -49,7 +49,7 @@ Every hook read stdin with `cat /dev/stdin`, which returns nothing when Claude C
 spawns it — so each hook fired, read zero bytes, fell through its first guard and
 exited 0, which is byte-identical to approving. No ESP write block, no
 game-directory delete block, no automatic backups, and nothing looked wrong. Update,
-then run `bash tools/hook-canary.sh`: it reports ALIVE or BLIND per hook by reading
+then run `bash tools/hook-canary.sh`: it reports HEALTHY, STALE, DEGRADED, NOT EXERCISED or UNMEASURABLE per hook by reading
 heartbeats written from inside real invocations, which is the only way to know.
 
 The same release re-anchors the delete guard (eleven spellings of "delete the game
@@ -137,7 +137,8 @@ setups are unaffected and get a stock-layout note instead.
 
 Also new: an **`AGENTS.md`** so agents that follow that convention can pick the toolkit up. The
 knowledge and every tool are agent-neutral already; the safety hooks are the Claude-specific part, and
-`AGENTS.md` is explicit that other agents don't get them.
+`AGENTS.md` was explicit that other agents don't get them. *(Historical, v3.4: since v4 that is no longer true
+of Codex, which has the same guards -- see "Using with Codex" below. Any other agent still has none.)*
 
 ---
 
@@ -423,6 +424,64 @@ These aren't things you configure -- they're already wired in. Every session, be
 
 ---
 
+## Using with Codex
+
+The same install works with OpenAI's Codex CLI on Windows. `setup.sh` configures it alongside Claude Code:
+`AGENTS.md` gets your paths, the skills are in `.agents/skills/`, and the safety hooks in `.codex/`.
+
+**One step only you can do: approve the hooks.** Codex runs a project's hooks only after you approve them,
+and it skips unapproved ones **silently** -- no error, no warning, nothing checked. Open `codex` in your
+Skyrim folder, type `/hooks`, and approve the **2 Skyrim toolkit hooks**. Then check with
+`bash tools/hook-canary.sh`. When they run, each Codex session starts with `SKYGUARD: Codex hooks live`.
+
+Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you.
+
+Approve again when:
+
+- a toolkit update's CHANGELOG says **"re-approve your Codex hooks"** (Codex stops running an approved hook
+  the moment its definition changes, again silently);
+- you move the toolkit to another folder. The approval covers the definition as rendered, install path
+  included (inferred from how Codex hashes it, not measured). `setup.sh` warns when the definitions point
+  at another folder: re-extract the zip there, run `bash setup.sh`, approve again.
+
+**What is checked:** every shell command and every `apply_patch` the agent runs, including a patch run
+through the shell -- the same rules as Claude Code. **A confirmation becomes a refusal on Codex**: a hook
+there cannot ask you, so anything that would need your OK is refused with `NEEDS YOUR CONFIRMATION`, and
+you run it yourself if you agree. Registry deletes are also refused by `.codex/rules/skyrim.rules`, which
+holds even before you approve the hooks.
+
+**What is not checked:**
+
+- **Anything, until you approve the hooks** (above). Registry deletes are the one exception.
+- **Commands you type with `!`** in the Codex prompt -- they run in your own shell and bypass hooks
+  (measured on codex-cli 0.160.0).
+- **Input sent to a program that is already running** (Codex's `write_stdin`): probably not guarded -- it carries
+  no command for the guards to read. This is **unmeasured** on 0.160.0 (an older, different-toolkit observation,
+  not re-run here), so treat it as a possible gap.
+- **MCP tools**, DevBench included: logged, not guarded, until a later release adds rules for them.
+- **A shell call's own working directory** (`workdir`): the toolkit's reading of the hook payload takes the
+  `cwd` field and does not read a `workdir` tool argument, so a call that sets one may have its relative
+  paths judged against the session folder instead. Whether Codex puts `workdir` in the payload is
+  **unmeasured**. Use absolute paths for anything in the game folder.
+- **A hook that cannot start lets the command run.** That is how Codex treats a failed hook, so the toolkit's
+  entry scripts never fail on their own -- but a hook that never starts cannot help. Two setups where it
+  never starts are **not supported**: a Windows group policy that forces the PowerShell execution policy to
+  `AllSigned` (the entry script is unsigned, and `-ExecutionPolicy Bypass` cannot override a group policy),
+  and **Codex running inside WSL** (it runs the Linux command, not the Windows one this install is set up
+  for). `setup.sh` also refuses an install folder whose path contains `%`, `!`, `$`, `` ` `` or `"`, which
+  would cut the hook's own path; Claude Code still works there.
+
+**Surfaces.** Claimed: the Codex **CLI** -- the interactive TUI and `codex exec`. The Codex desktop app and
+IDE extensions are not claimed: some Windows Codex surfaces emit no hook calls at all for some commands
+([openai/codex#24453](https://github.com/openai/codex/issues/24453)). There, treat the install as
+"Layers 0-2 only": just the protections that need no hook (the instructions and
+`.codex/rules/skyrim.rules`). `bash tools/hook-canary.sh` shows which hooks actually ran. It also lists Codex's trust state and, per surface, how many tool calls a session's transcript shows
+against how many the hooks recorded. That coverage covers **only sessions in which a hook fired**: a surface
+whose hooks never fire leaves no record at all, so it cannot appear as a gap. That is why only the surfaces
+probed live (`codex exec` and the TUI) are claimed, and why the desktop app and IDE extensions are not.
+
+---
+
 ## FAQ
 
 **Q: Does this work with flat Skyrim SE (non-VR)?**
@@ -442,7 +501,7 @@ A: Download the new version from Nexus and extract over the old one, then re-run
 
 **Anything the toolkit ships is REPLACED by that extract, including `KNOWLEDGEBASE.md` and `CLAUDE.md`.** Earlier versions of this answer claimed your knowledgebase additions were preserved. They were not — the shipped file overwrote yours, which is exactly when a reassurance is worth least. Your own notes belong in **`KNOWLEDGEBASE.local.md`**, which the toolkit never ships and the release build refuses to contain; the agent is instructed to read both files and write only to that one. Its `## My preferences` section is for your standing instructions to the agent ("always…", "never…"); every agent is told to read it at the start of each session, and in Claude Code the session-start hook also puts it straight into the session (again after a compaction; the first 4 KB). If you have notes sitting in `KNOWLEDGEBASE.md` from an older version, move them across before you update. `.claude/backups/`, `.claude/skyrim-paths.env` and `.claude/settings.local.json` are likewise not in the zip and survive.
 
-Since v3.9 a SessionStart hook also copies `KNOWLEDGEBASE.md`, `KNOWLEDGEBASE.local.md` and `CLAUDE.md` into `.claude/backups/kb/` whenever they change, and says so loudly at the start of the next session if one of them vanished, emptied, or lost more than half its bytes — which is what extracting an update over your install looks like from the inside. Run it yourself any time with `bash tools/kb-guard.sh --verbose`. Note the honest limit: an update that replaces your 100 KB knowledgebase with a 140 KB shipped one shrinks nothing and raises no alarm. The stored copy is the protection; the alarm is a convenience on top of it.
+Since v3.9 a SessionStart hook also copies `KNOWLEDGEBASE.md`, `KNOWLEDGEBASE.local.md`, `CLAUDE.md` and `AGENTS.md` into `.claude/backups/kb/` whenever they change, and says so loudly at the start of the next session if one of them vanished, emptied, or lost more than half its bytes — which is what extracting an update over your install looks like from the inside. Run it yourself any time with `bash tools/kb-guard.sh --verbose`. Note the honest limit: an update that replaces your 100 KB knowledgebase with a 140 KB shipped one shrinks nothing and raises no alarm. The stored copy is the protection; the alarm is a convenience on top of it.
 
 ---
 

@@ -2,6 +2,59 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Codex support
+
+- **First Codex hook definitions (v1): approve them in /hooks.** Open `codex` in your Skyrim folder, type `/hooks`, approve the 2 Skyrim toolkit hooks; until then Codex runs none of them and does not say so.
+- **Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you.** (Measured: a non-git install, Codex started in `Data\Scripts`, 2 of 2 runs.)
+- The canary no longer counts a refused Codex call as guarded: a refusal leaves no transcript item, so one refusal used to hide one unguarded call (hooked 1 / called 1, HEALTHY).
+- A Codex tool call whose command is an argv list (not a string) is now guarded with the shell rules, and refused when an element is not a string; it used to be allowed unexamined.
+- `setup.sh` no longer warns that the install moved when you re-run it from a folder typed in a different letter case on Windows.
+- `setup.sh` configures Codex: it fills in `.codex/hooks.json` for your install folder and prints the approval step.
+- `setup.sh` fills your paths into `AGENTS.md`, the instruction file Codex reads, exactly as into `CLAUDE.md`.
+- `setup.sh` writes the Python path into the Codex hook scripts, and repairs it on a re-run after Python moves.
+- `setup.sh` refuses to configure the Codex hooks in a folder whose path contains `%`, `!`, `$`, `` ` `` or `"`, and says why (the hook could not start there, and Codex runs the command when a hook cannot start).
+- `setup.sh` warns, and changes nothing, when `.codex/hooks.json` was set up for a different folder: re-extract, re-run `setup.sh`, re-approve.
+- The session-start snapshot (`tools/kb-guard.sh`) now also keeps copies of `AGENTS.md`.
+- Release builds now check the Codex files: hook definitions present and parsing, every script they run present, the rules file, one Codex skill per Claude skill, `AGENTS.md` at most 32,768 bytes.
+- Unsupported, and both leave the hooks unable to start: a group policy forcing PowerShell's `AllSigned` execution policy, and Codex running inside WSL.
+- Commands you type with `!` in the Codex prompt bypass the hooks (measured); see "Using with Codex" in the README for the full list of what is not checked.
+
+### Codex adapter: known coverage gaps
+
+- **MCP tools are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the
+  hook as `mcp__<server>__<tool>`; the toolkit allows it and records one line in
+  `.claude/backups/codex-unhooked-tools.log`. Only the DevBench MCP is covered by rules (Plan 5 Task 11).
+  Unknown non-MCP tools that carry a command string are guarded with the shell rules (and logged).
+
+### Hook interpreter fallback
+
+- **A moved or upgraded Python no longer takes every blocking hook down.** If the interpreter `setup.sh`
+  configured stops working, the hooks try `py -3`, `python`, `python3` (never a Microsoft Store alias while a
+  regular install exists), then the usual install folders (newest version first), then a Store alias, and keep
+  deciding. A candidate is accepted only if it is Python 3.8 or newer **and** runs the guard engine itself
+  (`run.py --selftest <nonce>`), so a stub that merely exits 0 cannot turn into "allow". The healthy path is
+  unchanged: nothing is probed unless the configured interpreter has failed.
+- **Reported, not hidden:** a fallback that is used shows as DEGRADED in `bash tools/hook-canary.sh` ("configured
+  ... unusable; used ...") until a call through the configured interpreter completes again. Re-run `setup.sh`.
+- **An extracted zip that never ran `setup.sh`** (the `{{PYTHON_PATH}}` placeholder still in the hooks) now takes
+  the same route: the hooks fall back to a Python they can find and still decide, reported as DEGRADED. They used
+  to refuse every command. With no usable Python at all they still refuse (GUARD INERT).
+- **Nothing can hang past the agent's timeout.** On the normal path the engine arms an in-process watchdog
+  (`faulthandler`, a C thread that fires even inside a catastrophic regex) that ends it after 20 s
+  (`SKYGUARD_ENGINE_TIMEOUT` seconds) into the ordinary GUARD INERT deny; the traceback goes to stderr, which
+  the wrapper discards. Fallback probes (3 s each) and a fallback engine run use coreutils `timeout` (without it
+  on PATH they run unbounded). **Not covered:** a hung interpreter *start* (before the engine's `main`) on the
+  configured Python, which `setup.sh` verified; that would need a `timeout` fork on every call (~20-30 ms).
+- **`setup.sh` requires Python 3.8+** (a 3.6 used to pass and then deny everything) and writes the path into the
+  hooks in single quotes, so a `$` or backtick in a folder name is no longer expanded on every hook call.
+
+### Hook health telemetry
+
+- **`bash tools/hook-canary.sh` now reads staged records** (ran, received, evaluated, emitted, failed) instead of
+  one heartbeat, so it sees the failures that happen *after* a payload arrives: an engine crash, a hook the agent
+  killed, an output nobody could parse. States: HEALTHY, STALE, DEGRADED, NOT EXERCISED, UNMEASURABLE. A failure
+  clears only on a newer completed evaluation. Per-call latency (p50/p95) is recorded and shown.
+
 ### 📚 Instructions split
 
 - **`CLAUDE.md` shrinks from 53,578 to 28,174 bytes** (the shared core from 53,367 to 26,304), so the

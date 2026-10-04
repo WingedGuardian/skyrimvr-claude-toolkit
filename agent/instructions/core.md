@@ -114,7 +114,7 @@ is lost at the next update.
 ### The copy that covers the install you already have
 
 At every session start the guards run `tools/kb-guard.sh`. It snapshots the knowledgebase files and
-the generated instruction file into `.claude/backups/kb/<stamp>/` when they change, and alarms if one
+the generated instruction files into `.claude/backups/kb/<stamp>/` when they change, and alarms if one
 vanishes, empties or loses more than half its bytes. No session hooks on your agent? Run
 `bash tools/kb-guard.sh --verbose` yourself at the start of a session. ⚠ The snapshot is the
 protection and the alarm is a convenience: an update that REPLACES a file with a bigger one raises

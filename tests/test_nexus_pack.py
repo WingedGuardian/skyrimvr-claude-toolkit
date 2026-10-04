@@ -43,6 +43,9 @@ def _run(root: Path, *args):
         "NEXUS_PACK_ROOT": str(root).replace("\\", "/"),
         "PATH": subprocess.os.environ.get("PATH", ""),
         "SYSTEMROOT": subprocess.os.environ.get("SYSTEMROOT", ""),
+        # Without SystemDrive, py.exe / the python3 Store alias create a literal `%SystemDrive%/ProgramData/...`
+        # cache folder in the current directory -- the repo, under pytest (found in Plan 4 Task 11).
+        "SYSTEMDRIVE": subprocess.os.environ.get("SYSTEMDRIVE", ""),
     }
     return subprocess.run([BASH, str(SCRIPT), *args], capture_output=True,
                           text=True, env=env, timeout=180)
@@ -102,7 +105,8 @@ def test_it_refuses_rather_than_guessing_a_home(tmp_path):
         capture_output=True, text=True, timeout=180,
         env={"NEXUS_PACK_ROOT": str(tmp_path / "does-not-exist").replace("\\", "/"),
              "PATH": subprocess.os.environ.get("PATH", ""),
-             "SYSTEMROOT": subprocess.os.environ.get("SYSTEMROOT", "")},
+             "SYSTEMROOT": subprocess.os.environ.get("SYSTEMROOT", ""),
+             "SYSTEMDRIVE": subprocess.os.environ.get("SYSTEMDRIVE", "")},
     )
     assert p.returncode == 1
     assert "does not exist" in (p.stdout + p.stderr)

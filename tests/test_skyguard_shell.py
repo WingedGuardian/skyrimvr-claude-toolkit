@@ -74,7 +74,7 @@ def test_rule2_install_delete_denied_with_exact_text(tmp_path):
 
 
 def test_rule2_destroyer_elsewhere_allowed(tmp_path):
-    assert run("rm -rf /tmp/scratch", tmp_path) == ("allow", "", "")
+    assert run("rm -rf /tmp/scratch", tmp_path)[:3] == ("allow", "", "")
 
 
 def test_rule2_conjunction_is_per_grep_not_per_line(tmp_path):
@@ -167,7 +167,7 @@ def test_rule16_resaver_apply_asks(tmp_path):
     cmd = "bash tools/resaver-cli.sh reset-havok s.ess --apply"
     v = run(cmd, tmp_path)
     assert (v.decision, v.reason, v.context) == ("ask", sub(303, cmd), "")
-    assert run(cmd.replace(" --apply", ""), tmp_path) == ("allow", "", "")
+    assert run(cmd.replace(" --apply", ""), tmp_path)[:3] == ("allow", "", "")
 
 
 def test_rule16_ask_drops_earlier_advice(tmp_path):

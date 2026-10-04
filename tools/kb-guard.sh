@@ -34,7 +34,8 @@ STORE="$ROOT/.claude/backups/kb"
 # The irreplaceable set: files a user writes into that this toolkit also ships.
 # Anything the toolkit can regenerate (skyrim-paths.env, settings.json) is NOT here --
 # a store full of reproducible files makes the copies that matter harder to find.
-WATCHED="KNOWLEDGEBASE.md KNOWLEDGEBASE.local.md CLAUDE.md"
+# AGENTS.md (Plan 4): the same installed instructions, with the same filled-in paths, for Codex.
+WATCHED="KNOWLEDGEBASE.md KNOWLEDGEBASE.local.md CLAUDE.md AGENTS.md"
 
 KEEP="${KB_GUARD_KEEP:-30}"
 # A non-numeric KEEP used to kill the script inside the rotation arithmetic under

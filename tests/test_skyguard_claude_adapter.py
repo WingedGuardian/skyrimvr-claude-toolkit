@@ -165,3 +165,10 @@ def test_internal_error_exits_1_with_empty_stdout(tmp_path):
         f.write("\n\ndef decide(*a, **k):\n    raise RuntimeError('forced')\n")
     r = subprocess.run(cmd, input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert r.returncode == 1 and r.stdout == b""
+
+
+@pytest.mark.parametrize("cwd", ["/c/Users/x", "C:\\x"])
+def test_to_request_carries_cwd_raw(cwd):
+    """Request.cwd is the agent's cwd string, unnormalized: MSYS and backslash forms pass through."""
+    p = claude.extract(json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": cwd}))
+    assert claude.to_request(p, "shell").cwd == cwd
