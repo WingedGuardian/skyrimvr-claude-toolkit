@@ -46,12 +46,14 @@ def main(argv=None) -> int:
     raw = sys.stdin.buffer.read().decode("utf-8", "replace")
     p = adapter.extract(raw)
     audit = Audit(a.project)
+    # The declared roots file, read from the WINDOWS root when there is one (native python cannot open /c/...).
+    paths_file = Path(a.root_win or a.root) / ".claude" / paths.PATHS_FILE
     if a.role == "protect-bash":
         if not p["command"]:
             v = shell_rules.decide("", paths.Roots("", ""), audit)
         else:
             try:
-                env = paths.read_config(Path(a.root_win or a.root) / ".claude" / paths.PATHS_FILE, dict(os.environ))
+                env = paths.read_config(paths_file, dict(os.environ))
             except (OSError, ValueError):
                 env = None
             if env is None:
@@ -61,7 +63,15 @@ def main(argv=None) -> int:
                 v = shell_rules.decide(p["command"], paths.roots(a.root, a.root_win, env), audit,
                                        cwd=p.get("cwd", ""), shell=p.get("shell", ""))
     elif a.role == "protect-files":
-        v = write_rules.decide(p["file_path"], audit)
+        # Task 9: W-PAPYRUS and W-INSTALL decide on where the file RESOLVES, so this role needs the roots too. Its
+        # rules are notes plus a name-based deny, so an unreadable paths file costs only the declared roots (the
+        # install this hook runs from is still known); it is not a reason to refuse an edit.
+        try:
+            env = paths.read_config(paths_file, dict(os.environ))
+        except (OSError, ValueError):
+            env = None
+        roots = paths.roots(a.root, a.root_win, env if env is not None else {})
+        v = write_rules.decide(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""))
     elif a.role == "backup-before-edit":
         backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit)
         v = Verdict()

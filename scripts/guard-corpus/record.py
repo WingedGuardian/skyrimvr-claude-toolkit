@@ -175,16 +175,18 @@ def engine_verdict(install: Path, hook: str, payload) -> dict:
     root = install.as_posix()
     root_win = root if os.name == "nt" else ""
     cwd = payload.get("cwd", "") if isinstance(payload, dict) and isinstance(payload.get("cwd"), str) else ""
+    environ = {k: val for k, val in os.environ.items() if k not in ENV_KEYS}
     if hook == "protect-bash.sh":
         if not p["command"]:
             v = ee.call(shell_rules.decide, ("", paths.Roots("", ""), audit), cwd=cwd)
         else:
-            environ = {k: val for k, val in os.environ.items() if k not in ENV_KEYS}
             env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
             v = ee.call(shell_rules.decide, (p["command"], paths.roots(root, root_win, env), audit), cwd=cwd,
                         shell=p.get("shell", ""))
     else:
-        v = ee.call(write_rules.decide, (p["file_path"], audit), cwd=cwd)
+        # Plan 5 Task 9: the write guard's zone notes need the roots, as run.py passes them.
+        env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
+        v = ee.call(write_rules.decide, (p["file_path"], audit), cwd=cwd, roots=paths.roots(root, root_win, env))
     if v.decision in ("deny", "ask"):
         decision, text = v.decision, v.reason
     elif v.context:

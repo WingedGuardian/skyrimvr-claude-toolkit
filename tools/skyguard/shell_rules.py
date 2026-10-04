@@ -1,20 +1,22 @@
-"""The shell guard: protect-bash.sh's rules, ported one for one (verdicts and texts unchanged).
+"""The shell guard: protect-bash.sh's rules, now decided on what a command EXECUTES (Plan 5).
 
 Rule order is the bash file's order and is load-bearing: the first deny wins, advice accumulates, and an
-ask drops whatever advice came before it. Each grep is evaluated separately over all lines, exactly
-as the bash pipelines are (see grep.grep).
+ask drops whatever advice came before it. Deletes (deletes.py), writes and copies (writes.py) and the registry,
+.psc-output, Champollion, AutoMod and external-tool rules (anchored.py) ask about the program that runs and where
+its operands resolve; none of them matches the command's text except as the parse-failure fallback (R4).
 """
 from __future__ import annotations
 
+import os
 import re
 
+from . import anchored
 from . import audit as _audit
 from . import deletes
 from . import paths
 from . import rules
 from . import shellparse
 from . import writes
-from .grep import grep
 from .verdict import Advice, Verdict
 
 HOOK = "protect-bash"
@@ -37,11 +39,6 @@ ADV_AUTOMOD_ARCHIVE = rules.RULES["S-AUTOMOD-ARCHIVE"]["template"]
 ADV_EXTERNAL = rules.RULES["S-EXTERNAL-OUT"]["template"]
 
 DESTROYER = deletes.DESTROYER   # legacy delete-word regex; now used only by S-DEL-FALLBACK and on interpreter code
-AUTOMOD_ESP_WRITE = (
-    r"(automod|SpookysAutomod).*\b(add-weapon|add-spell|add-armor|add-npc|add-quest|add-perk|add-book"
-    r"|add-global|add-faction|add-leveled-item|add-form-list|add-encounter-zone|add-location|add-outfit"
-    r"|attach-script|set-property|auto-fill|merge|generate-seq)\b"
-)
 
 
 # --- S-RESAVER-APPLY: ReSaver is the PROGRAM RUN, with --apply and a save-writing operation among ITS OWN arguments
@@ -125,8 +122,7 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     if command == "":
         audit.rule(HOOK, "S-INERT-NOCMD", "deny", NO_COMMAND_LOG, level="REFUSE")
         return Verdict("deny", NO_COMMAND_DENY)
-    g, c = roots.game, roots.config
-    if g == "":
+    if roots.game == "":
         audit.rule(HOOK, "S-INERT-NOROOT", "deny", NO_ROOT_LOG, level="REFUSE")
         return Verdict("deny", NO_ROOT_DENY)
     if roots.malformed:
@@ -134,21 +130,18 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         reason = rules.message("S-INERT-CONFIG", file=file, op=key)
         audit.rule(HOOK, "S-INERT-CONFIG", "deny", reason, level="REFUSE")
         return Verdict("deny", reason)
-    a = g + "|" + c
     advice = Advice()
+    env = os.environ if env is None else env
 
-    def deny(rule_id: str) -> Verdict:
-        reason = rules.legacy_message(rule_id, c=command)
+    def deny(rule_id: str, file: str = "") -> Verdict:
+        reason = rules.message(rule_id, file=file) if file else rules.message(rule_id)
         audit.rule(HOOK, rule_id, "deny", reason)
         return Verdict("deny", reason)
 
-    def advise(rule_id: str) -> None:
-        msg = rules.legacy_message(rule_id, c=command)
+    def advise(rule_id: str, **fields) -> None:
+        msg = rules.message(rule_id, **fields)
         audit.rule(HOOK, rule_id, "advise", msg)
         advice.add(msg)
-
-    def has(pattern: str) -> bool:
-        return grep(pattern, command)
 
     # --- hard blocks
     # Deletes (Task 7): decided on the commands that RUN and where their operands RESOLVE (deletes.py, E16).
@@ -159,43 +152,31 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         reason = rules.message(rid, file=file) if "{file}" in rules.RULES[rid]["template"] else rules.message(rid)
         audit.rule(HOOK, rid, "deny", reason)
         return Verdict("deny", reason)
-    # Two greps, not one alternation: a `.*` inside a group is not split (grep.split_dotstar) and was quadratic.
-    if has(r"reg(\.exe)?\s+delete") or has(r"Remove-ItemProperty.*Bethesda"):
+    # Task 9: the registry, .psc-output and Champollion denies ask about the program that RUNS (anchored.py).
+    if anchored.registry(command, parsed):
         return deny("S-REGISTRY")
-    if has(r"""-(o|-output|-OutputPath)\s+["']?[^"' ]*\.psc(\b|"|')"""):
-        return deny("S-PSC-OUT")
+    psc = anchored.psc_out(command, parsed)
+    if psc:
+        return deny("S-PSC-OUT", psc)
     # Shell writes (Task 8, E21): decided on the program that WRITES and the file it targets (writes.py).
     wr = writes.scan(command, parsed, roots, cwd, env)
     if wr.deny:
         reason = rules.message("S-WRITE-PLUGIN", file=wr.deny)
         audit.rule(HOOK, "S-WRITE-PLUGIN", "deny", reason)
         return Verdict("deny", reason)
-    if has(r"Champollion\b"):
-        if has(r"(" + g + r")[/\\]+Data[/\\]+Scripts[/\\]+[^\"' /\\]+[.]pex"):
-            return deny("S-CHAMPOLLION")
+    champ = anchored.champollion(command, parsed, roots, cwd, env)
+    if champ:
+        return deny("S-CHAMPOLLION", champ)
 
     # --- advise
     if dels.relative_unknown:
         msg = rules.message("S-RELATIVE-UNKNOWN", file=dels.relative_unknown)
         audit.rule(HOOK, "S-RELATIVE-UNKNOWN", "advise", msg)
         advice.add(msg)
-    copy_plugin = any(rid == "S-COPY-PLUGIN" for rid, _ in wr.advice)
-    if not copy_plugin and has(r"(^|[;&|(`]|\s)(mv|cp|move|copy)\s.*(" + a + ")"):
-        advise("S-MOVE-INSTALL")          # legacy text rule (Task 9); a copy onto a plugin has its own note
-    for rid, file in wr.advice:
-        msg = rules.message(rid, file=file)
-        audit.rule(HOOK, rid, "advise", msg)
-        advice.add(msg)
-    if has(r"sed\s+-i.*(" + g + "|" + c + ")"):
-        advise("S-SED-WINPATH")
-    if has(AUTOMOD_ESP_WRITE):
-        if not has(r"--dry-run"):
-            advise("S-AUTOMOD-ESP")
-    if has(r"(automod|SpookysAutomod).*\b(replace-textures|rename-strings|fix-eyes|scale)\b"):
-        advise("S-AUTOMOD-NIF")
-    if has(r"(automod|SpookysAutomod).*\b(archive\s+(create|add-files|remove-files|replace-files"
-           r"|update-file|merge|optimize))\b"):
-        advise("S-AUTOMOD-ARCHIVE")
+    # writes.py: copies and moves into the install (S-MOVE-INSTALL, destination only), sed -i with a backslash path
+    # (S-SED-WINPATH), and the write-target notes. anchored.py: AutoMod writes, on AutoMod's own arguments.
+    for rid, file in list(wr.advice) + anchored.automod(parsed):
+        advise(rid, file=file)
 
     # --- ask (drops accumulated advice, as the bash exit does)
     resaver = resaver_apply(command, shell, parsed)
@@ -205,10 +186,9 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         audit.rule(HOOK, "S-RESAVER-APPLY", "ask", reason)
         return Verdict("ask", reason)
 
-    if has(r"\b(automod|SpookysAutomod|spookys-automod|automod-cli|PapyrusAssembler|PapyrusCompiler"
-           r"|Champollion|Caprica|spriggit)\b"):
-        if has(r"""-(o|-output|-OutputPath|-p|-psc|-asm|-a)\s+["']?(""" + g + "|" + c + ")"):
-            advise("S-EXTERNAL-OUT")
+    tool = anchored.external_out(parsed, roots, cwd, env)
+    if tool:
+        advise("S-EXTERNAL-OUT", op=tool)
 
     if advice.items:
         return Verdict("allow", "", advice.joined())

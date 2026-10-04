@@ -139,6 +139,8 @@ def _shapes(N):
         "external-out": "Caprica " + "-o x " * (N // 5),
         "psc-output": "-o " + "x" * N,
         "registry-words": "Remove-ItemProperty " * (N // 20),
+        # Task 9: the registry text test runs only on a parse failure (or an opaque program) -- reach it that way.
+        "registry-parse-fail-words": 'reg "' + "Remove-ItemProperty " * (N // 20),
         "plugins": ".esp " * (N // 5),
         "game-path-repeat": (GAME + " ") * (N // 50),
         "win-path": "C:" + BS + "x" * N,
@@ -443,6 +445,60 @@ def _write_shapes(N):
 
 
 @pytest.mark.parametrize("name", sorted(_write_shapes(SMALL)))
+def test_write_rules_with_roots_stay_fast_on_adversarial_paths(name):
+    """Plan 5 Task 9: W-PAPYRUS / W-INSTALL resolve the path against the roots and the cwd."""
+    def make(n):
+        path = _write_shapes(n)[name]
+        return lambda: write_rules.decide(path, _QuietAudit(), roots=ROOTS, cwd="/x/install")
+    assert_linear(name + "/roots", make)
+
+
+# Plan 5 Task 9: the anchored rules (anchored.py) and the sed replacement scan (writes.py) read every exec's own
+# arguments: registry keys and PowerShell paths, output flags, Champollion operands, AutoMod words, sed scripts.
+def _anchored_shapes(N):
+    F, W = "f" * 60, "w" * 200          # W keeps two-token units under the parser's 2,000-token cap at 80 KB
+    R, D = "re" + "g", "del" + "ete"
+    return {
+        "reg-many-keys": R + " " + D + " " + ("HKLM" + BS + F + " ") * (N // 66),
+        "reg-key-backslash-run": R + " " + D + " HKLM" + BS * N,
+        "reg-ps-paths": "Remove-Item " + ("'HKLM:" + BS + F + "', ") * (N // 69) + "x",
+        "reg-opaque-pipe": "printf '" + (R + " " + D + " " + F + " ") * (N // 72) + "' | sh",
+        "psc-flags": "tool " + ("-o " + W + ".psc ") * (N // 208),
+        "psc-eq-flags": "tool " + ("--output=" + F + " ") * (N // 70),
+        "champollion-many": "Champollion " + ("Data/Scripts/" + F + ".pex ") * (N // 78),
+        "champollion-unresolved": "Champollion " + ('"$X/Data/Scripts/' + F + '.pex" ') * (N // 83),
+        "automod-many": "automod esp add-weapon " + (F + ".esp ") * (N // 65),
+        "automod-dotnet-flags": "dotnet " + ("-" + F + " ") * (N // 62) + "spookys-automod.dll esp add-npc x",
+        "decompile-out-flags": "Champollion x.pex " + ("-p Data/" + W + " ") * (N // 209),
+        "sed-s-run": "sed -i '" + "s/a/b/" * (N // 6) + "' Data/a.txt",
+        "sed-unterminated": "sed -i 's#" + "a" * N + "' Data/a.txt",
+        "sed-escape-run": "sed -i 's/x/" + (BS + "a") * (N // 2) + "/' Data/a.txt",
+        "sed-word-escape-run": "sed -i 's/x/" + ("ab" + BS) * (N // 3) + "/' Data/a.txt",
+        "sed-long-word": "sed -i 's/x/C" + "a" * N + "/' Data/a.txt",
+        "sed-path-chars-run": "sed -i 's/x/ab" + BS + "c" + "d ." * (N // 3) + "/' Data/a.txt",
+        "sed-many-e": "sed -i " + ("-e s/" + W + "/b/ ") * (N // 208) + "Data/a.txt",
+    }
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_the_anchored_shapes_reach_the_anchored_code(shell):
+    """Every shape must parse at 80 KB and yield execs, or it measures only the parse-failure path."""
+    from skyguard import shellparse
+    for name, cmd in _anchored_shapes(LARGE).items():
+        p = shellparse.parse(cmd, shell)
+        assert p.ok and p.execs, (name, shell, p.why)
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("name", sorted(_anchored_shapes(SMALL)))
+def test_anchored_rules_stay_fast(name, shell):
+    def make(n):
+        cmd = _anchored_shapes(n)[name]
+        return lambda: shell_rules.decide(cmd, ROOTS, _QuietAudit(), cwd="/x/install", shell=shell)
+    assert_linear(name + "/" + shell, make)
+
+
+@pytest.mark.parametrize("name", sorted(_write_shapes(SMALL)))
 def test_write_rules_stay_fast_on_adversarial_paths(name):
     def make(n):
         path = _write_shapes(n)[name]
@@ -555,9 +611,13 @@ def test_resaver_prefilter_skips_unrelated_commands():
 
 
 def test_the_registry_rule_is_linear():
-    """The registry property rule, `.*` inside an alternation, was not split and was quadratic (0.5 s at 80 KB)."""
+    """The registry property rule, `.*` inside an alternation, was not split and was quadratic (0.5 s at 80 KB). Task 9:
+    the text test is now the parse-failure fallback, so the shape is an unterminated quote."""
+    from skyguard import shellparse
+    cmd = lambda n: 'reg "' + "Remove-ItemProperty " * (n // 20)      # noqa: E731
+    assert not shellparse.parse(cmd(LARGE), "bash").ok
     assert_linear("Remove-ItemProperty run",
-                  lambda n: (lambda: shell_rules.decide("Remove-ItemProperty " * (n // 20), ROOTS, _QuietAudit())))
+                  lambda n: (lambda: shell_rules.decide(cmd(n), ROOTS, _QuietAudit(), shell="bash")))
 
 
 # Plan 5 Task 6: targets.resolve / zone and the paths-file value grammar run on every operand and every hook call.

@@ -143,12 +143,13 @@ def test_run_nonascii_reason_roundtrips_as_utf8(tmp_path):
 
 
 def test_raw_invalid_utf8_byte_is_replaced_not_fatal(tmp_path):
-    payload = b'{"tool_input":{"file_path":"C:/x/a\xff.psc"}}'
-    r = subprocess.run([sys.executable, RUN, "claude", "protect-files", "--project", str(tmp_path)],
+    # Task 9: W-PAPYRUS fires on a script under the install's Data/Scripts, so the hook is given an install root.
+    payload = b'{"tool_input":{"file_path":"C:/x/Data/Scripts/a\xff.psc"}}'
+    r = subprocess.run([sys.executable, RUN, "claude", "protect-files", "--root", "C:/x", "--project", str(tmp_path)],
                        input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert r.returncode == 0, r.stderr
     out = json.loads(r.stdout.decode("utf-8"))
-    assert "PAPYRUS SCRIPT" in out["hookSpecificOutput"]["additionalContext"]
+    assert "a script change in a\ufffd.psc" in out["hookSpecificOutput"]["additionalContext"]
 
 
 def test_internal_error_exits_1_with_empty_stdout(tmp_path):

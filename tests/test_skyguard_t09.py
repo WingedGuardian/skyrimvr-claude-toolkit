@@ -14,7 +14,7 @@ import pytest
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import audit, paths, shell_rules, shellparse, write_rules, writes  # noqa: E402
+from skyguard import anchored, audit, paths, shell_rules, shellparse, write_rules, writes  # noqa: E402
 
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
 INSTALL = "C:/t7/Skyrim VR"           # stands in for the corpus's temp install (`<install>`)

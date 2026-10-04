@@ -148,15 +148,25 @@ def fpath(p):
     ("C:" + BS + "Games" + BS + "Skyrim VR" + BS + "Data" + BS + "M.esp", "deny", "same, backslashes"),
     ("/c/games/skyrim/Data/x.BSA", "deny", "archives too, and case-insensitively"),
     # Controls. Each must NOT deny.
-    ("C:/Games/Skyrim VR/Data/Textures/x.dds", "advise", "an ordinary asset is a note"),
+    ("C:/Games/Skyrim VR/Data/Textures/x.dds", "allow", "not the declared install: the note is by resolved zone (Plan 5 Task 9)"),
     ("C:/Games/Skyrim VR/.claude/hooks/x.sh", "allow", "our own workspace is silent"),
     ("C:/work/notes.md", "allow", "nothing to do with the install"),
     ("C:/Users/x/Documents/My Games/Skyrim VR/SkyrimVR.ini", "advise", "config is consequential"),
-    ("C:/Games/Skyrim VR/Data/Scripts/Source/A.psc", "advise", "a .pex loads at startup only"),
+    ("C:/Games/Skyrim VR/Data/Scripts/Source/A.psc", "allow", "not the declared install's Data/Scripts (Plan 5 Task 9)"),
 ])
 def test_protect_files_decides(project, path, expected, why):
     got, _ = fire(project, "protect-files.sh", fpath(path))
     assert got == expected, f"{why}: {path}"
+
+
+def test_protect_files_notes_inside_the_declared_install(project):
+    """Plan 5 Task 9: W-INSTALL / W-PAPYRUS are decided on where the path resolves, so the hook must hand the engine
+    its roots. A dict built here, not fpath(): the corpus recorder harvests fpath() literals (record.inputs)."""
+    for path, want in ((GAME + "/Data/Textures/x.dds", "Note: editing x.dds inside the live Skyrim install."),
+                       (GAME + "/Data/Scripts/Source/A.psc", "Note: a script change in A.psc reaches the game only "
+                                                            "at its next start; snapshot it first.")):
+        got, text = fire(project, "protect-files.sh", {"tool_name": "Write", "tool_input": {"file_path": path}})
+        assert (got, text) == ("advise", want), path
 
 
 # --------------------------------------------------------------------------
@@ -329,7 +339,7 @@ def test_the_install_cannot_be_deleted_however_it_is_spelled(project, command, w
     ('grep -rn "rm" README.md', "allow", "the WORD rm inside a quoted argument"),
     ("python -m pytest tests/ -q", "allow", "running the suite"),
     (f'cat "{GAME}/Data/x.esp"', "allow", "READING a game path is not deleting one (and is silent, R11)"),
-    (f'cp "{GAME}/Data/x.nif" /tmp/', "advise", "copying OUT is not deleting"),
+    (f'cp "{GAME}/Data/x.nif" /tmp/', "allow", "copying OUT is not deleting, and the install is only the source"),
     (f'ls "{GAME}/Data/Scripts"', "allow", "listing is not writing"),
 
     # ---- paths that merely CONTAIN the word Skyrim, and are not the install ----

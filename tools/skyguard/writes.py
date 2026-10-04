@@ -111,6 +111,90 @@ def _sed_files(argv) -> List[str]:
     return words if script_given else words[1:]
 
 
+def _sed_scripts(argv) -> List[str]:
+    """The sed scripts given: every -e / --expression value, else the first operand (a -f file is not read)."""
+    scripts, given, k = [], False, 0
+    while k < len(argv):
+        w = argv[k]
+        if w in ("-e", "--expression") and k + 1 < len(argv):
+            scripts.append(argv[k + 1])
+            given = True
+            k += 2
+            continue
+        if w in ("-f", "--file"):
+            given = True
+            k += 2
+            continue
+        if w in _SED_VALUED:
+            k += 2
+            continue
+        if w.startswith("--expression="):
+            scripts.append(w.split("=", 1)[1])
+            given = True
+        elif w.startswith("--file=") or (w.startswith("-f") and len(w) > 2):
+            given = True
+        elif w.startswith("-e") and len(w) > 2:
+            scripts.append(w[2:])
+            given = True
+        elif not (w.startswith("-") and len(w) > 1) and not given:
+            return [w]
+        k += 1
+    return scripts
+
+
+def _sed_part(s: str, i: int, d: str) -> int:
+    """Index of the next unescaped delimiter d at or after i, or -1."""
+    while i < len(s):
+        if s[i] == "\\":
+            i += 2
+            continue
+        if s[i] == d:
+            return i
+        i += 1
+    return -1
+
+
+def sed_replacements(script: str) -> List[str]:
+    """The replacement of every `s<d>pattern<d>replacement<d>` command in a sed script. Linear: each command is
+    consumed once, and an unterminated one ends the scan."""
+    out, i, n = [], 0, len(script)
+    while i < n - 1:
+        if script[i] == "s" and (i == 0 or not (script[i - 1].isalpha() or script[i - 1] == "\\")):
+            d = script[i + 1]
+            if d not in "\\\n" and not d.isalnum() and not d.isspace():
+                j = _sed_part(script, i + 2, d)
+                k = _sed_part(script, j + 1, d) if j >= 0 else -1
+                if k < 0:
+                    break
+                out.append(script[j + 1:k])
+                i = k + 1
+                continue
+        i += 1
+    return out
+
+
+# A backslash PATH as sed receives it: a drive path (`C:\x`) or two backslash separators between names
+# (`Data\Scripts\x`). Each backslash is SINGLE: sed reads `\\` as a literal backslash (correct), and `\G`, `\U`, `\x..`
+# as escapes (the mangling). Matched on a shape where each single-backslash escape is \x00 and `\\` is `/`.
+_SED_WIN = re.compile(r"[A-Za-z]:\x00|(?<![A-Za-z0-9_])[A-Za-z0-9_]{2,}\x00[A-Za-z0-9_][A-Za-z0-9_ .-]*\x00[A-Za-z0-9_]")
+SED_ZONES = ("install", "config", "mo2")
+
+
+def sed_win_replacement(script: str) -> bool:
+    for r in sed_replacements(script):
+        shape, i = [], 0
+        while i < len(r):
+            if r[i] == "\\" and i + 1 < len(r):
+                shape.append("/" if r[i + 1] == "\\" else "\x00" + r[i + 1])
+                i += 2
+                continue
+            shape.append(r[i])
+            i += 1
+        if _SED_WIN.search("".join(shape)):
+            return True
+    return False
+
+
 def write_targets(e) -> List[str]:
     """The files this exec writes in place (redirects included)."""
     out = _redirect_targets(e)
@@ -260,7 +344,8 @@ class Scan(NamedTuple):
     advice: Tuple[Tuple[str, str], ...]     # (rule id, file phrase) in rule order, one per rule
 
 
-ADVICE_ORDER = ("S-COPY-PLUGIN", "S-WRITE-LOADORDER", "S-WRITE-INI", "S-WRITE-SKSE-INI", "S-WRITE-INSTALL")
+ADVICE_ORDER = ("S-MOVE-INSTALL", "S-COPY-PLUGIN", "S-WRITE-LOADORDER", "S-WRITE-INI", "S-WRITE-SKSE-INI",
+                "S-WRITE-INSTALL", "S-SED-WINPATH")
 
 
 def _phrase(names: List[str]) -> str:
@@ -298,18 +383,27 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     notes = {k: [] for k in ADVICE_ORDER}
 
     for e in parsed.execs:
+        sed_files = set(_sed_files(e.argv)) if e.program == "sed" else set()
+        winpath = bool(sed_files) and any(sed_win_replacement(s) for s in _sed_scripts(e.argv))
         for w in write_targets(e):
             a = targets.resolve_operand(e, w, cwd, env)
             kind = file_class(w, a or "")
             if kind == "plugin":
                 plugin.append(_name(w))
-            elif kind:
+                continue
+            # S-SED-WINPATH (Task 9): sed -i on an install/config/MO2 file whose replacement holds a backslash path.
+            # It REPLACES the S-WRITE-INSTALL note for that file (one note per write, not two).
+            sed_note = winpath and w in sed_files and a is not None and targets.zone(a, roots) in SED_ZONES
+            if sed_note:
+                notes["S-SED-WINPATH"].append(_name(w))
+            if kind:
                 notes[RULE_OF_CLASS[kind]].append(_name(w))
-            elif a is not None and in_install_area(a, roots):
+            elif not sed_note and a is not None and in_install_area(a, roots):
                 notes["S-WRITE-INSTALL"].append(_name(w))
         for dst, srcs in copy_targets(e):
             # The destination as written AND where it resolves (`cp a.ini x.ini` run inside Data/SKSE/Plugins).
-            kind = file_class(dst, targets.resolve_operand(e, dst, cwd, env) or "")
+            a_dst = targets.resolve_operand(e, dst, cwd, env)
+            kind = file_class(dst, a_dst or "")
             if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):
                 plugin.append(_name(dst))                           # cp /dev/null X.esp truncates it: a write
                 continue
@@ -321,13 +415,20 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             elif _looks_like_dir(dst):
                 hit = next((s for s in srcs if file_class(s) == "plugin"), None)
                 if hit is None:
+                    # S-MOVE-INSTALL (Task 9): the DESTINATION folder is in the install's Data/, config or MO2.
+                    if a_dst is not None and in_install_area(a_dst, roots):
+                        notes["S-MOVE-INSTALL"] += [_name(s) for s in srcs] or [_name(dst)]
                     continue
                 cand, name = dst.rstrip("/\\") + "/" + _name(hit), _name(hit)
             else:
+                if a_dst is not None and in_install_area(a_dst, roots):
+                    notes["S-MOVE-INSTALL"].append(_name(dst))      # a non-plugin file destination there
                 continue
             a = targets.resolve_operand(e, cand, cwd, env)
             if (a is not None and game_loads(a, roots)) or (a is None and _DATA_CHILD.search(cand)):
                 notes["S-COPY-PLUGIN"].append(name)
+            elif a is not None and in_install_area(a, roots):
+                notes["S-MOVE-INSTALL"].append(name)                 # a plugin copied BELOW Data/ (not loaded)
 
     texts = [command] if not parsed.ok else _opaque_texts(parsed.execs)
     for t in texts:

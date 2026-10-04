@@ -384,3 +384,56 @@ LOADORDER 4, S-WRITE-INI 3, S-WRITE-SKSE-INI 1. 0 errors; parse failures 0 → 6
 Decision matrix unchanged (advise 607, allow 61,433, ask 11, deny 355). The three shapes do not occur in this
 machine's history; each is pinned by a `t09-*` row and a mutation. tee keeps ALL its operands as targets (not just
 the first word): `tee a.log X.esp` really writes X.esp, so "first word only" would be a miss, not a fix.
+
+### Task 9, main change (every advice anchored; registry/.psc/Champollion denies anchored; write-guard notes by zone)
+
+`--base dffda1a`, N = 62,551 (Bash 55,819, PowerShell 1,604, Write 3,531, Edit 1,592, MCP 5); shell calls 57,423,
+file-tool calls 5,123. 0 errors; parse failures 63 → 63 (0.109% Bash, 0.125% PowerShell). Matrix: allow>allow
+61,494; advise>advise 245; advise>allow 363; allow>advise 61; allow>deny 20; deny>allow 16; deny>deny 341; ask>ask 11.
+
+| rule | direction | n | hand-read | verdict |
+|---|---|---|---|---|
+| S-CHAMPOLLION | newly-deny | 20 | **all 20:** every one RUNS `tools/Champollion/Champollion.exe "Data/Scripts/X.pex"` after `cd` into the install (a relative operand; 1 is `"Data/Scripts/$s.pex"` in a for loop) -- the exact shape the rule exists for (Champollion writes .psc into Data/Scripts/Source whatever the flags; two items then read the generated `Data/Scripts/Source/X.psc`). The text rule missed them because it needed the absolute path. | TP by rule (the plan's tightening) |
+| S-CHAMPOLLION | no-longer-deny | 1 | read: Champollion on `"$SCR/HiggsVR.pex"` after a `cp` of the install's .pex to a scratch folder -- the remedy the deny prescribes; the text rule saw the install path in the `cp`. | FP removed |
+| S-REGISTRY | no-longer-deny | 15 | **all 15:** 12 TEXT -- heredocs/python edits whose code mentions the words (this plan's own edits, twice), `codex execpolicy check ... <reg-words>` (reg is an ARGUMENT there), a printf to progress.md, a grep, a test-row file; 3 REAL deletes of `HKCU\Software\X4ToolkitTests\...` keys from X4 sessions -- not a Bethesda key (outside the rule's scope; the text rule denied ANY such delete). 0 Bethesda-key deletes lost. | 12 FP removed; 3 out of scope (Ruling below) |
+| S-EXTERNAL-OUT | no-longer-advise | 248 | categorised all 248: 197 Caprica compiling into `Data/Scripts` (`-o ..`, `--output "Data/Scripts"`, absolute), 51 Spriggit `deserialize --OutputPath Data/X.esp`; 0 decompiles. | noise removed (Ruling below) |
+| S-MOVE-INSTALL | no-longer-advise | 103 | categorised all 103: 60 backups INTO `.claude/backups`, 7 backups to `~/.claude/backups`, 30 to an unresolved `$VAR` destination (each read: scratch, snapshot, stash and diag folders; 0 into Data/), 5 syncs into the install's `tools/`, 1 text in a printf. The install was the SOURCE, or the destination was outside Data/, in every one. | noise removed (destination only) |
+| S-MOVE-INSTALL | newly-advise | 66 | **all 66:** real `cp`/`mv` onto files in `Data/` given RELATIVE (after `cd`): mesh/script/audio deploys and reverts from `.claude/backups`, `.fuz`/`.xwm` placement, music-folder moves, 2 `.bak` copies inside `Data/`. 0 FP by the rule's definition (each really overwrites in Data/); each is the user's deliberate deploy. | TP by rule; see the report's concern |
+| S-AUTOMOD-NIF | no-longer-advise | 5 | all 5: a plan-file heredoc, a `--dry-run` rename-strings, a 7z extract of the AutoMod zip, a grep loop, one of this session's python one-liners. 0 executed NIF writes. | FP removed |
+| S-AUTOMOD-ESP | no-longer-advise | 1 | read: a grep over `tools/automod` sources for command names. | FP removed |
+| S-SED-WINPATH | no-longer-advise | 3 | all 3: `sed -i` on scratch files outside the install with no backslash in the replacement; one is a `curl | python` with no sed write at all. | FP removed |
+| W-PAPYRUS | no-longer-advise | 10 | all 10: Edits of decompiled `.psc` in `%TEMP%\pex_decompile\`. | FP removed |
+| S-EXTERNAL-OUT, W-INSTALL, S-SED-WINPATH, S-AUTOMOD-ARCHIVE | newly-* | 0 | -- | -- |
+
+newly-ask 0, no-longer-ask 0. Newly-deny 20 (cap 200).
+
+**Advise noise.** Shell calls carrying any advice: **451 → 159 (0.79% → 0.28%)**; file-tool calls: 157 → 147
+(3.06% → 2.87%). Per rule, % of shell calls (old → new): S-EXTERNAL-OUT 0.432% → 0; S-MOVE-INSTALL 0.251% → 0.186%;
+S-AUTOMOD-NIF 0.021% → 0.012%; S-AUTOMOD-ESP 0.005% → 0.003%; S-SED-WINPATH 0.005% → 0; S-AUTOMOD-ARCHIVE 0.005%
+unchanged. Every shell advise rule is now ≤ 0.2%. Write guard (% of file-tool calls): W-PAPYRUS 2.62% → 2.42% (124
+hits = 0.20% of ALL calls; all 124 are Edits/Writes of `.psc` in the install's `Data/Scripts/Source`, 65 distinct
+files -- the snapshot-before-experimenting case the note exists for); W-INSTALL 0.23% unchanged; W-SKSE-INI 0.20%.
+
+**Rulings.**
+- **S-EXTERNAL-OUT covers decompilers only** (Champollion -p/-a/-o; AutoMod `papyrus decompile`). Of the 501 hits
+  the plan-table rule (any Papyrus/ESP tool's output flag into the install, cwd-resolved) produced in the first
+  draft, 369 were Caprica compiling into Data/Scripts and 127 Spriggit deserializing the user's plugin into Data/ --
+  the tool writing its product where it belongs, every time; 0 were decompiles. That is the "always noise" class
+  the user's directive removes. Cost if wrong: a compiler or Spriggit writing to an unintended install folder is
+  silent (the legacy text rule's 248 hits held no such case either). Supersessions `t09-ext-tool-out(-config)`.
+- **S-REGISTRY covers Bethesda keys and their ancestors** (the plan table: "on a Bethesda key"), plus an
+  unresolved key when the command names Bethesda. The 3 real X4 test-key deletes above become silent. Cost if
+  wrong: a delete of an unrelated key is not this guard's to stop.
+- **On a parse failure the advise rules are not attempted** (as S-WRITE-INSTALL in Task 8: a deviation from R4 for
+  advice only). The deny rules (registry, .psc output, Champollion) keep the legacy text fallback.
+- **S-MOVE-INSTALL covers the install's Data/, the config folder and MO2** (the S-WRITE-INSTALL area): 65 of the 103
+  removed hits were copies into `.claude/backups` and `tools/`.
+
+**Cumulative (`--base c3f32ef`), N = 62,566:** 0 errors; parse failures 0 → 63 (the old engine has no parser).
+Matrix: allow>allow 59,618; advise>allow 2,120; deny>allow 125; allow>deny 22; ask>allow 25; allow>ask 9;
+allow>advise 58; advise>advise 244; advise>deny 6; deny>advise 4; advise>ask 1; ask>ask 1. Task 9's rows as above
+(S-EXTERNAL-OUT no-longer 245, S-MOVE-INSTALL newly 66 / no-longer 113 -- 10 of them taken over by S-COPY-PLUGIN in
+Task 8), Tasks 4-8 unchanged.
+
+**Timing.** 18 anchored-rule shapes x 2 dialects (`test_anchored_rules_stay_fast`) and the write guard's 8 path
+shapes with roots, all linear; a mutation removing the sed path regex's word-start lookbehind is caught.

@@ -97,20 +97,23 @@ def test_rule2_mention_alone_is_not_a_delete(tmp_path):
 
 
 def test_rule3_registry(tmp_path):
+    # Task 9: decided on the EXECUTED program (reg delete / the PowerShell registry cmdlets) and its key.
     v = run("reg.exe delete HKLM\\SOFTWARE\\Bethesda /f", tmp_path)
-    assert (v.decision, v.reason) == ("deny", msg(258))
+    assert (v.decision, v.reason) == ("deny", rules.message("S-REGISTRY"))
     assert run("reg query HKLM\\SOFTWARE", tmp_path).decision == "allow"
+    assert run("printf 'reg delete HKLM\\SOFTWARE\\Bethesda' >> notes.md", tmp_path).decision == "allow"
 
 
 def test_rule4_psc_output(tmp_path):
     v = run("Champollion.exe a.pex -o out/Foo.psc", tmp_path)
-    assert (v.decision, v.reason) == ("deny", msg(263))
+    assert (v.decision, v.reason) == ("deny", rules.message("S-PSC-OUT", file="Foo.psc"))
+    assert run('echo "Champollion.exe a.pex -o out/Foo.psc"', tmp_path).decision == "allow"
     assert run("Champollion.exe a.pex -o out/dir", tmp_path).decision == "allow"
 
 
 def test_rule5_champollion_pex_in_scripts(tmp_path):
     v = run(f'Champollion.exe "{GAME}/Data/Scripts/Foo.pex"', tmp_path)
-    assert (v.decision, v.reason) == ("deny", msg(271))
+    assert (v.decision, v.reason) == ("deny", rules.message("S-CHAMPOLLION", file="Foo.pex"))
     assert run(f'Champollion.exe "C:/Temp/Foo.pex" "{GAME}"', tmp_path).decision == "allow"
 
 
@@ -138,9 +141,11 @@ def test_rule7_relative_delete_resolves_from_the_payload_cwd(tmp_path):
 
 
 def test_rule8_move_copy(tmp_path):
+    # Task 9: the DESTINATION resolves into the install's Data/ (or config, MO2); the source does not count.
     cmd = "cp a.txt /x/install/Data/a.txt"
-    assert advice(cmd, tmp_path) == sub(283, cmd)
+    assert advice(cmd, tmp_path) == rules.message("S-MOVE-INSTALL", file="a.txt")
     assert advice("cp a.txt b.txt", tmp_path) == ""
+    assert advice("cp /x/install/Data/a.txt /tmp/a.txt", tmp_path) == ""
 
 
 def test_rule9_redirect(tmp_path):
@@ -153,8 +158,10 @@ def test_rule9_redirect(tmp_path):
 
 
 def test_rule10_sed(tmp_path):
-    cmd = f"sed -i s/a/b/ {GAME}/x.txt"
-    assert advice(cmd, tmp_path) == sub(285, cmd)
+    # Task 9: only a backslash path in the REPLACEMENT, on an install/config file; it replaces S-WRITE-INSTALL.
+    cmd = f"sed -i 's/a/C:\\x\\y/' \"{GAME}/Data/x.txt\""
+    assert advice(cmd, tmp_path) == rules.message("S-SED-WINPATH")
+    assert advice(f'sed -i s/a/b/ "{GAME}/Data/x.txt"', tmp_path) == rules.message("S-WRITE-INSTALL", file="x.txt")
     assert advice("sed -i s/a/b/ /tmp/x.txt", tmp_path) == ""
 
 
@@ -176,21 +183,22 @@ def test_rule12_load_order(tmp_path):
 
 def test_rule13_automod_esp_write(tmp_path):
     cmd = "automod esp add-weapon My.esp x"
-    assert sub(293, cmd) in advice(cmd, tmp_path)
-    assert sub(293, cmd) not in advice(cmd + " --dry-run", tmp_path)
+    assert advice(cmd, tmp_path) == rules.message("S-AUTOMOD-ESP", file="My.esp")
+    assert advice(cmd + " --dry-run", tmp_path) == ""
     assert advice("automod esp info x", tmp_path) == ""
+    assert advice("grep add-weapon docs/automod.md", tmp_path) == ""
 
 
 def test_rule14_automod_nif_write(tmp_path):
     cmd = "automod nif scale a.nif 2"
-    assert advice(cmd, tmp_path) == sub(295, cmd)
+    assert advice(cmd, tmp_path) == rules.message("S-AUTOMOD-NIF", file="a.nif")
     assert advice("automod nif info a.nif", tmp_path) == ""
 
 
 def test_rule15_automod_archive_write(tmp_path):
     cmd = "automod archive create a.bsa dir"
-    assert advice(cmd, tmp_path).endswith(sub(296, cmd))
-    assert sub(296, cmd) not in advice("automod archive list a.bsa", tmp_path)
+    assert advice(cmd, tmp_path) == rules.message("S-AUTOMOD-ARCHIVE", file="a.bsa")
+    assert advice("automod archive list a.bsa", tmp_path) == ""
 
 
 NEW_RESAVER = ("ReSaver will MODIFY a save file (reset-havok on s.ess). "
@@ -240,9 +248,11 @@ def test_resaver_save_is_reduced_to_its_basename(tmp_path):
 
 
 def test_rule17_external_tool_output_into_game(tmp_path):
-    cmd = f'Caprica.exe -o "{GAME}/Data/Scripts" in.psc'
-    assert advice(cmd, tmp_path) == sub(309, cmd)
-    assert advice("Caprica.exe -o C:/Temp/out in.psc", tmp_path) == ""
+    # Task 9: decompilers only; a compiler writing .pex into Data/Scripts is its job (priced Ruling).
+    cmd = f'Champollion.exe C:/Temp/a.pex -p "{GAME}/Data/Scripts/Source"'
+    assert advice(cmd, tmp_path) == rules.message("S-EXTERNAL-OUT", op="Champollion")
+    assert advice(f'Caprica.exe -o "{GAME}/Data/Scripts" in.psc', tmp_path) == ""
+    assert advice("Champollion.exe C:/Temp/a.pex -p C:/Temp/out", tmp_path) == ""
 
 
 def test_advice_joined_in_rule_order(tmp_path):
@@ -317,7 +327,6 @@ def test_port_matches_recorded_bash_verdict(tmp_path, cid, layout, cmd, decision
 # a UTF-8 locale sees no word boundary while the port (re.ASCII) sees one. The port is therefore
 # STRICTER than bash here, never looser. Measured against the real hook on this machine: all four are allowed.
 RESIDUE = {   # input -> the decision the port gives today (bash allows every one of them)
-    f'Champollioné "{GAME}/Data/Scripts/Foo.pex"': "deny",
 }
 # Task 8 (R11): the plugin-reference note that made these three stricter than bash is gone; a READ is silent,
 # so the port now agrees with bash on them.
@@ -325,6 +334,7 @@ RESIDUE_RESOLVED = (
     "cat My.espé",
     "cat a.esp b",
     "cat X.ESPİ",
+    f'Champollioné "{GAME}/Data/Scripts/Foo.pex"',   # Task 9: not Champollion
 )
 STRICTNESS = {"allow": 0, "advise": 1, "ask": 2, "deny": 3}
 
@@ -334,13 +344,14 @@ def test_unicode_residue_on_a_plugin_read_now_matches_bash(tmp_path, cmd):
     assert run(cmd, tmp_path) == ("allow", "", "")
 
 
-@pytest.mark.parametrize("cmd,expected", sorted(RESIDUE.items()))
-def test_unicode_word_boundary_residue_is_never_looser(tmp_path, cmd, expected):
-    """Pins the port's actual decision; bash allows all of these, so the port may only be stricter."""
-    v = run(cmd, tmp_path)
-    py = "advise" if v.decision == "allow" and v.context else v.decision
-    assert py == expected
-    assert STRICTNESS[py] > STRICTNESS["allow"]
+def test_unicode_word_boundary_residue_is_never_looser(tmp_path):
+    """Pins the port's actual decision; bash allows all of these, so the port may only be stricter. Task 9 emptied
+    the set (every residue now agrees with bash); the check stays so a new residue is pinned, not silent."""
+    for cmd, expected in sorted(RESIDUE.items()):
+        v = run(cmd, tmp_path)
+        py = "advise" if v.decision == "allow" and v.context else v.decision
+        assert py == expected
+        assert STRICTNESS[py] > STRICTNESS["allow"]
 
 
 def test_every_message_constant_equals_the_bash_text():
@@ -348,18 +359,20 @@ def test_every_message_constant_equals_the_bash_text():
         "NO_COMMAND_DENY": inert(59), "NO_ROOT_DENY": inert(216),
         "NO_COMMAND_LOG": re.search(r'hooklog REFUSE "(.*)"', LINES[57]).group(1),
         "NO_ROOT_LOG": re.search(r'hooklog REFUSE "(.*)"', LINES[214]).group(1),
-        "DENY_REGISTRY": msg(258), "DENY_PSC": msg(263),
-        "DENY_CHAMPOLLION": msg(271),
-        "ADV_MOVE": msg(283),
-        "ADV_SED": msg(285), "ADV_AUTOMOD_ESP": msg(293),
-        "ADV_AUTOMOD_NIF": msg(295), "ADV_AUTOMOD_ARCHIVE": msg(296),
-        "ADV_EXTERNAL": msg(309),
     }
     for name, text in expected.items():
         assert getattr(shell_rules, name) == text.replace("$COMMAND", "{c}"), name
     # Constants added by Plan 5 have no bash original; each is its registry template (Plan 4's Codex trip-wire keys
     # on these names, so a new deny is visible at the merge).
-    plan5 = {"DENY_WRITE_PLUGIN": rules.RULES["S-WRITE-PLUGIN"]["template"]}
+    # Task 9 rewrote the registry, .psc-output and Champollion denies and every advise: same names, registry text.
+    plan5 = {"DENY_WRITE_PLUGIN": rules.RULES["S-WRITE-PLUGIN"]["template"],
+             "DENY_REGISTRY": rules.RULES["S-REGISTRY"]["template"], "DENY_PSC": rules.RULES["S-PSC-OUT"]["template"],
+             "DENY_CHAMPOLLION": rules.RULES["S-CHAMPOLLION"]["template"],
+             "ADV_MOVE": rules.RULES["S-MOVE-INSTALL"]["template"], "ADV_SED": rules.RULES["S-SED-WINPATH"]["template"],
+             "ADV_AUTOMOD_ESP": rules.RULES["S-AUTOMOD-ESP"]["template"],
+             "ADV_AUTOMOD_NIF": rules.RULES["S-AUTOMOD-NIF"]["template"],
+             "ADV_AUTOMOD_ARCHIVE": rules.RULES["S-AUTOMOD-ARCHIVE"]["template"],
+             "ADV_EXTERNAL": rules.RULES["S-EXTERNAL-OUT"]["template"]}
     for name, text in plan5.items():
         assert getattr(shell_rules, name) == text, name
     consts = {n for n in dir(shell_rules) if n.startswith(("DENY_", "ADV_", "ASK_", "NO_"))}

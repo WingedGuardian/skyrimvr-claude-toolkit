@@ -149,8 +149,8 @@ def test_a_decision_change_on_the_same_rule_is_priced(tmp_path, history):
     """advise -> deny on a rule that fires in both engines: same id, so only the decision differs."""
     new = _scratch_engine(tmp_path, "scratch", [(
         "shell_rules.py",
-        '    for rid, file in wr.advice:\n',
-        '    for rid, file in wr.advice:\n'
+        '    for rid, file in list(wr.advice) + anchored.automod(parsed):\n',
+        '    for rid, file in list(wr.advice) + anchored.automod(parsed):\n'
         '        if rid == "S-WRITE-LOADORDER" and file == "loadorder.txt":\n'
         '            audit.rule(HOOK, rid, "deny", "x")\n'
         '            return Verdict("deny", "x")\n')])
@@ -163,8 +163,8 @@ def test_a_decision_change_on_the_same_rule_is_priced(tmp_path, history):
 def test_a_crash_in_the_new_engine_is_flagged_not_clean(tmp_path, history):
     new = _scratch_engine(tmp_path, "scratch", [(
         "shell_rules.py",
-        '    a = g + "|" + c\n',
-        '    a = g + "|" + c\n    if command == "ls":\n        raise RuntimeError("boom")\n')])
+        '    advice = Advice()\n',
+        '    advice = Advice()\n    if command == "ls":\n        raise RuntimeError("boom")\n')])
     s, _ = _run(tmp_path, SKYGUARD, new, history)
     assert s["errors"] == {"old": 0, "new": 2}                      # the two `ls` items (cwd differs)
     assert s["rules"] == {"<engine-error>": {"newly-error": 2}}

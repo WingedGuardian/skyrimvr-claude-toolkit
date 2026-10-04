@@ -53,7 +53,7 @@ MUTATIONS = [
     # that prove the install still cannot be deleted.
     pytest.param(
         "tools/skyguard/shell_rules.py",
-        'if g == "":',
+        'if roots.game == "":',
         'if False:',
         "tests/test_hooks.py::test_the_delete_guard_refuses_when_it_cannot_locate_the_install",
         id="delete-guard-fails-closed-when-no-root-resolves",
@@ -682,10 +682,11 @@ MUTATIONS = [
 
     pytest.param(
         # Put the bare `Skyrim` back in the catch-all. Every edit to a checkout of
-        # this toolkit is then annotated as an edit inside a live game install.
+        # this toolkit is then annotated as an edit inside a live game install. (Plan 5 Task 9: the
+        # catch-all is decided on the resolved zone, so the bare word goes back in THERE.)
         "tools/skyguard/write_rules.py",
-        'Data[/' + BS * 2 + ']+|My Games[/' + BS * 2 + ']+Skyrim"',
-        'Data[/' + BS * 2 + ']+|Skyrim|My Games[/' + BS * 2 + ']+Skyrim"',
+        "        install = a is not None and in_install_area(a, roots)",
+        '        install = a is not None and (in_install_area(a, roots) or "skyrim" in a.lower())',
         "tests/test_hooks.py::test_editing_this_toolkits_own_checkout_is_not_editing_a_game_install",
         id="catch-all-matches-a-bare-skyrim",
     ),
@@ -1032,17 +1033,21 @@ MUTATIONS += [
 # of `(` 3 ms, 40,000 words 6 ms), so the early return is an optimisation no longer guarding a timeout.
 _SR_TIMING = [
     # Task 7: the `rm ... .*root` advice is gone (R10); the mv/cp move advice still relies on the split.
-    ("timing-dotstar-scan", "tools/skyguard/grep.py", "parts = split_dotstar(pattern)", "parts = None", "mv-repeat"),
+    # Task 9: the mv/cp text note is gone; the registry text fallback (`Remove-ItemProperty.*Bethesda`) still splits.
+    ("timing-dotstar-scan", "tools/skyguard/grep.py", "parts = split_dotstar(pattern)", "parts = None",
+     "registry-parse-fail-words"),
     # fix round 3: a separator run must start a match only at its first character, in the install-path regex
     # (shared by every delete/move/sed/redirect rule), and the relative-Data rule must not rescan a run.
     ("timing-lead-lookbehind-rm", "tools/skyguard/paths.py", r'LEAD = r"(?<![/\\])[/\\]+"', r'LEAD = r"[/\\]+"',
      "rm-slash-run"),
+    # Task 9: the sed note no longer reads the install-path regex; its backslash-run twin is the delete fallback.
     ("timing-lead-lookbehind-sed", "tools/skyguard/paths.py", r'LEAD = r"(?<![/\\])[/\\]+"', r'LEAD = r"[/\\]+"',
-     "sed-backslash-run"),
+     "rm-backslash-run"),
     # (Task 7 removed timing-relative-data-run: RELATIVE_DATA_DELETE is gone; relative deletes resolve from cwd.)
-    ("timing-registry-split", _SR,
-     'has(r"reg(\\.exe)?\\s+delete") or has(r"Remove-ItemProperty.*Bethesda")',
-     'has(r"(reg(\\.exe)?\\s+delete|Remove-ItemProperty.*Bethesda)")',
+    # Task 9: the registry text test lives on as anchored.py's fallback; still two greps, never one alternation.
+    ("timing-registry-split", "tools/skyguard/anchored.py",
+     "    return grep(REG_DELETE_TEXT, text) or grep(REG_PROPERTY_TEXT, text)",
+     '    return grep("(" + REG_DELETE_TEXT + "|" + REG_PROPERTY_TEXT + ")", text)',
      "tests/test_skyguard_timing.py::test_the_registry_rule_is_linear"),
     ("split-safe-list", "tools/skyguard/grep.py", "or pattern[:cut] not in SPLIT_SAFE_FIRST", "",
      "tests/test_skyguard_timing.py::test_split_dotstar_refuses_what_it_cannot_prove_equivalent"),
@@ -1521,8 +1526,11 @@ _WRITE_CLAUSES = [
      "cp-into-data-dir"),
     ("rule-S-COPY-PLUGIN-unresolved-data", _WR, "(a is None and _DATA_CHILD.search(cand))", "(a is None and False)",
      "cp-var-data"),
-    ("rule-S-COPY-PLUGIN-replaces-move-note", "tools/skyguard/shell_rules.py", "if not copy_plugin and has(",
-     "if has(", "cp-onto-data-esp"),
+    # Task 9: S-MOVE-INSTALL moved into writes.py; a plugin copy that notes S-COPY-PLUGIN must not ALSO note a move.
+    ("rule-S-COPY-PLUGIN-replaces-move-note", _WR,
+     '                notes["S-COPY-PLUGIN"].append(name)\n            elif a is not None and in_install_area(a, roots):',
+     '                notes["S-COPY-PLUGIN"].append(name)\n            if a is not None and in_install_area(a, roots):',
+     "cp-onto-data-esp"),
     # the class notes
     ("rule-S-WRITE-SKSE-INI-class", _TGT, ', ("skse-ini", SKSE_INI, "S-WRITE-SKSE-INI"))', ")",
      "out-file-skse-ini"),
@@ -1533,7 +1541,8 @@ _WRITE_CLAUSES = [
      "cp-onto-plugins-txt"),
     ("rule-S-WRITE-INSTALL-zone", _WR, '    return bool(rel) and rel[0] == "data"', "    return bool(rel)",
      "redirect-install-root"),
-    ("rule-S-WRITE-INSTALL-resolved", _WR, "            elif a is not None and in_install_area(a, roots):",
+    ("rule-S-WRITE-INSTALL-resolved", _WR,
+     "            elif not sed_note and a is not None and in_install_area(a, roots):",
      "            elif False:", "redirect-data-file"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, _t08(row), id=i) for i, f, find, rep, row in _WRITE_CLAUSES]
@@ -1543,6 +1552,10 @@ MUTATIONS += [pytest.param(f, find, rep, _t08(row), id=i) for i, f, find, rep, r
 # in-process by tests/test_skyguard_t09.py::test_t09_row.
 def _t09(row):
     return "tests/test_skyguard_t09.py::test_t09_row[t09-" + row + "]"
+
+
+_AN = "tools/skyguard/anchored.py"
+_WRR = "tools/skyguard/write_rules.py"
 
 
 _T9_CLAUSES = [
@@ -1557,11 +1570,120 @@ _T9_CLAUSES = [
     ("rule-S-WRITE-PLUGIN-copy-null", _WR,
      '            if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):',
      "            if False:", "cp-devnull-esp"),
-    ("rule-S-WRITE-SKSE-INI-copy-resolved", _WR,
-     '            kind = file_class(dst, targets.resolve_operand(e, dst, cwd, env) or "")',
+    ("rule-S-WRITE-SKSE-INI-copy-resolved", _WR, '            kind = file_class(dst, a_dst or "")',
      "            kind = file_class(dst)", "cp-skse-ini-resolved"),
+    # S-REGISTRY (deny): the executed reg / registry cmdlet, a Bethesda key or an ancestor
+    ("rule-S-REGISTRY-anchor", _AN, "    if not parsed.ok:\n        return _legacy_registry(command)",
+     "    if True:\n        return _legacy_registry(command)", "reg-printf-note"),
+    ("rule-S-REGISTRY-parse-fail", _AN, "        return _legacy_registry(command)\n", "        return False\n",
+     "reg-parse-fail"),
+    ("rule-S-REGISTRY-opaque", _AN, "    if any(_legacy_registry(t) for t in _opaque_texts(parsed.execs)):",
+     "    if False:", "reg-opaque-cmd"),
+    ("rule-S-REGISTRY-opaque-pipe", _AN, "    if any(_legacy_registry(t) for t in _opaque_texts(parsed.execs)):",
+     "    if any(_legacy_registry(t) for t in _opaque_texts([e for e in parsed.execs if e.stdin_from != 'pipe'])):",
+     "reg-pipe-sh"),
+    ("rule-S-REGISTRY-unrelated-key", _AN, "if len(e.argv) < 2 or bethesda_key(e.argv[1], command):", "if True:",
+     "reg-other-key"),
+    ("rule-S-REGISTRY-ancestor", _AN, "    return any(b.startswith(", "    return False and any(b.startswith(",
+     "reg-ancestor"),
+    ("rule-S-REGISTRY-powershell", _AN, "        elif e.program in PS_REG_PROGRAMS:", "        elif False:",
+     "reg-ps-remove-item"),
+    ("rule-S-REGISTRY-registry-path", _AN, '(_is_reg_path(w) or "$" in w)', "True", "reg-file-bethesda-folder"),
+    ("rule-S-REGISTRY-interpreter", _AN, "if code and grep(REG_DELETE_TEXT, code)",
+     "if False and code and grep(REG_DELETE_TEXT, code)", "reg-python-code"),
+    ("rule-S-REGISTRY-prefilter", _AN, '_REG_WORDS = ("reg", "hklm", "hkcu", "hkey_")', '_REG_WORDS = ("reg",)',
+     "reg-ps-remove-item"),
+    # S-PSC-OUT (deny)
+    ("rule-S-PSC-OUT-anchor", _AN, "    if not parsed.ok:\n        m = re.search(", "    if True:\n        m = re.search(",
+     "psc-echo"),
+    ("rule-S-PSC-OUT-text-programs", _AN, "        if e.program in TEXT_PROGRAMS:\n            continue\n", "",
+     "psc-grep-o"),
+    ("rule-S-PSC-OUT-eq-form", _AN, 'elif "=" in lw and lw.split("=", 1)[0] in flags:', "elif False:",
+     "psc-output-eq"),
+    # S-CHAMPOLLION (deny, cwd-resolved)
+    ("rule-S-CHAMPOLLION-anchor", _AN, "    if not parsed.ok:\n        return text_hit(command)",
+     "    if True:\n        return text_hit(command)", "champ-echo"),
+    ("rule-S-CHAMPOLLION-cwd", _AN, "            a = targets.resolve_operand(e, w, cwd, env)",
+     '            a = targets.resolve_operand(e, w, "", env)', "champ-relative-outside"),
+    ("rule-S-CHAMPOLLION-data-scripts", _AN, 'return rel[2:] if rel[:2] == ["data", "scripts"] else None',
+     "return rel", "champ-install-not-scripts"),
+    ("rule-S-CHAMPOLLION-wired-cwd", "tools/skyguard/shell_rules.py",
+     "champ = anchored.champollion(command, parsed, roots, cwd, env)",
+     'champ = anchored.champollion(command, parsed, roots, "", env)', "champ-relative-outside"),
+    # S-MOVE-INSTALL (advise, destination only)
+    ("rule-S-MOVE-INSTALL-zone", _WR,
+     "                if a_dst is not None and in_install_area(a_dst, roots):\n"
+     '                    notes["S-MOVE-INSTALL"].append(_name(dst))',
+     "                if True:\n"
+     '                    notes["S-MOVE-INSTALL"].append(_name(dst))', "cp-relative-outside"),
+    ("rule-S-MOVE-INSTALL-destination-only", _WR,
+     "                    if a_dst is not None and in_install_area(a_dst, roots):\n",
+     "                    if any(in_install_area(targets.resolve_operand(e, s, cwd, env) or '', roots)"
+     " for s in srcs):\n", "cp-from-install"),
+    ("rule-S-MOVE-INSTALL-dir-destination", _WR,
+     '                        notes["S-MOVE-INSTALL"] += [_name(s) for s in srcs] or [_name(dst)]',
+     "                        pass", "copy-item-into-dir"),
+    # S-SED-WINPATH (advise): a backslash path in the replacement, on an install/config file; replaces S-WRITE-INSTALL
+    ("rule-S-SED-WINPATH-anchor", _WR,
+     "winpath = bool(sed_files) and any(sed_win_replacement(s) for s in _sed_scripts(e.argv))",
+     "winpath = bool(sed_files)", "sed-doubled"),
+    ("rule-S-SED-WINPATH-single-backslash", _WR, '                shape.append("/" if r[i + 1] ==',
+     '                shape.append("' + BS + 'x00" + r[i + 1] if r[i + 1] ==', "sed-doubled"),
+    ("rule-S-SED-WINPATH-zone", _WR, " and targets.zone(a, roots) in SED_ZONES", "", "sed-winpath-outside"),
+    ("rule-S-SED-WINPATH-replaces-install-note", _WR, "            elif not sed_note and a is not None",
+     "            elif a is not None", "sed-winpath"),
+    ("rule-S-SED-WINPATH-script-option", _WR, '        if w in ("-e", "--expression") and k + 1 < len(argv):',
+     "        if False:", "sed-winpath-e"),
+    # S-AUTOMOD-* (advise): AutoMod RUNS, module + command among its own arguments
+    ("rule-S-AUTOMOD-ESP-anchor", _AN, "    if e.program in AUTOMOD_PROGRAMS:\n        return e.argv",
+     "    if True:\n        return e.argv", "automod-echo"),
+    ("rule-S-AUTOMOD-ESP-module", _AN, 'if module == "esp" and cmd in ESP_WRITES:', "if cmd in ESP_WRITES:",
+     "automod-archive-merge"),
+    ("rule-S-AUTOMOD-ESP-dotnet", _AN, '    if e.program == "dotnet":\n        for i, w in enumerate(e.argv):',
+     '    if False:\n        for i, w in enumerate(e.argv):', "automod-dotnet"),
+    ("rule-S-AUTOMOD-NIF-branch", _AN, 'elif module == "nif" and cmd in NIF_WRITES:', "elif False:",
+     "automod-nif-scale"),
+    ("rule-S-AUTOMOD-ARCHIVE-branch", _AN, 'elif module == "archive" and cmd in ARCHIVE_WRITES:', "elif False:",
+     "automod-archive-merge"),
+    # S-EXTERNAL-OUT (advise): a DECOMPILER's own output flag into the install
+    ("rule-S-EXTERNAL-OUT-anchor", _AN, '    if e.program == "champollion":\n        return "Champollion"',
+     '    if True:\n        return "Champollion"', "external-echo"),
+    ("rule-S-EXTERNAL-OUT-decompilers-only", _AN, '    if e.program == "champollion":\n        return "Champollion"',
+     '    if e.program in ("champollion", "caprica"):\n        return "Champollion"', "ext-tool-out"),
+    ("rule-S-EXTERNAL-OUT-zone", _AN, "            if a is not None and in_install_area(a, roots):\n                return name",
+     "            if a is not None:\n                return name", "external-champollion-outside"),
+    ("rule-S-EXTERNAL-OUT-automod-decompile", _AN, 'if words[:2] == ["papyrus", "decompile"]:', "if False:",
+     "external-automod-decompile"),
+    # W-PAPYRUS / W-INSTALL (the write guard, by resolved zone)
+    ("rule-W-PAPYRUS-zone", _WRR, "        papyrus = a is not None and papyrus_zone(a, roots)", "        papyrus = True",
+     "papyrus-toolkit"),
+    ("rule-W-PAPYRUS-mo2", _WRR, '    if z == "mo2":\n        return True\n    rel = _rel(',
+     '    if False:\n        return True\n    rel = _rel(', "papyrus-mo2"),
+    ("rule-W-INSTALL-zone", _WRR, "        install = a is not None and in_install_area(a, roots)",
+     "        install = grep(LEGACY_INSTALL_TEXT, file_path)", "install-relative-outside"),
+    ("rule-W-INSTALL-cwd", _WRR, 'a = targets.resolve(file_path, cwd, "bash"', 'a = targets.resolve(file_path, "", "bash"',
+     "install-relative-inside"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, _t09(row), id=i) for i, f, find, rep, row in _T9_CLAUSES]
+MUTATIONS += [
+    pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in (
+        # the hook must hand the write guard its roots, or the zone notes fall back to the text tests
+        ("rule-W-INSTALL-wired", "tools/skyguard/run.py",
+         'v = write_rules.decide(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""))',
+         'v = write_rules.decide(p["file_path"], audit)', "tests/test_guard_corpus.py::test_intended_rows_reproduce"),
+        ("rule-W-INI-class", _WRR, '    if grep(targets.SKYRIM_INI, file_path):', "    if False:",
+         "tests/test_skyguard_write.py::test_rule4_skyrim_ini"),
+        ("rule-W-SKSE-INI-class", _WRR, '    if grep(targets.SKSE_INI, file_path):', "    if False:",
+         "tests/test_skyguard_write.py::test_rule5_skse_plugin_ini"),
+        ("rule-W-LOADORDER-class", _WRR, '    if grep(targets.LOADORDER, file_path):', "    if False:",
+         "tests/test_skyguard_write.py::test_rule6_load_order"),
+        ("rule-S-AUTOMOD-ESP-dry-run", _AN, 'any(w.lower() == "--dry-run" for w in args)', "False",
+         "tests/test_skyguard_writes.py::test_t08_row[t08-automod-dry]"),
+        # timing: without the word-start lookbehind the sed path regex restarts inside every long word (quadratic)
+        ("timing-sed-win-word-start", _WR, "(?<![A-Za-z0-9_])[A-Za-z0-9_]{2,}", "[A-Za-z0-9_]{2,}",
+         "tests/test_skyguard_timing.py::test_anchored_rules_stay_fast[sed-long-word-bash]"),
+    )
+]
 
 MUTATIONS.append(pytest.param(   # the pricing driver stops asking the parser: the R4 gate would read 0 forever
     "scripts/guard-corpus/engine_eval.py", "parse_ok = parse_ok and p.ok", "parse_ok = parse_ok",

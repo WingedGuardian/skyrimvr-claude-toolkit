@@ -16,11 +16,7 @@ from skyguard import rules  # noqa: E402
 
 # The rules still carrying their pre-Plan-5 text (which echoes the command). It may only shrink.
 LEGACY_ALLOWED = {
-    "S-INERT-NOCMD", "S-INERT-NOROOT", "S-REGISTRY", "S-PSC-OUT",
-    "S-CHAMPOLLION", "S-MOVE-INSTALL",
-    "S-SED-WINPATH", "S-AUTOMOD-ESP", "S-AUTOMOD-NIF",
-    "S-AUTOMOD-ARCHIVE", "S-EXTERNAL-OUT", "W-INERT-NOPATH", "W-PLUGIN", "W-INI",
-    "W-SKSE-INI", "W-LOADORDER", "W-PAPYRUS", "W-INSTALL",
+    "S-INERT-NOCMD", "S-INERT-NOROOT", "W-INERT-NOPATH", "W-PLUGIN",
 }
 ECHO = ("{c}", "{p}", "{command}")
 LONG_NAME = "x" * 60 + ".esp"
@@ -40,11 +36,15 @@ def test_no_template_echoes_the_command():
         assert not any(e in t for e in ECHO), rid
 
 
-def test_the_echo_check_would_catch_a_legacy_template():
-    """A check must be able to fail: legacy templates do echo, and every one that does is exempted by id."""
+def test_the_echo_check_would_catch_a_legacy_template(monkeypatch):
+    """A check must be able to fail. Task 9 rewrote the last templates that echoed the command, so none does now; a
+    planted echoing template must be caught by the same test the real ones pass."""
     echoing = {i for i, r in rules.RULES.items() if any(e in r["template"] for e in ECHO)}
-    assert echoing, "no legacy template echoes the command; the exemption set is stale"
     assert echoing <= LEGACY_ALLOWED
+    monkeypatch.setitem(rules.RULES, "S-PLANTED", {"decision": "advise", "hook": "protect-bash", "legacy": False,
+                                                  "prefixes": [], "template": "Note: {c} did something."})
+    with pytest.raises(AssertionError):
+        test_no_template_echoes_the_command()
 
 
 def test_message_shape():
@@ -74,7 +74,7 @@ def test_every_rule_has_a_mutation():
 
 def test_message_rejects_unsupported_fields_and_legacy_ids():
     with pytest.raises(ValueError):
-        rules.message("S-REGISTRY")                       # legacy: must go through legacy_message
+        rules.message("W-PLUGIN")                         # legacy: must go through legacy_message
     with pytest.raises(ValueError):
         rules.message("S-DEL-CONFIG", c="x")              # a non-legacy rule rejects a field outside FIELDS
 

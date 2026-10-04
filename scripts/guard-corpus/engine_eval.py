@@ -5,8 +5,8 @@ The engine under test is whichever `skyguard` package is first on PYTHONPATH, so
 base and the new tree side by side without importing both into one interpreter.
 
 Per item the driver calls the engine's `decide` with whichever keyword arguments its signature accepts
-(`cwd`, `tool_name`, `tool_input`, `tool`, `shell`), so an older engine that does not know `cwd` is still
-priced. It uses a recording Audit that never touches the disk, and writes one JSONL result per item:
+(`cwd`, `tool_name`, `tool_input`, `tool`, `shell`, and `roots` for the write guard), so an older engine that
+does not know `cwd` is still priced. It uses a recording Audit that never touches the disk, and writes one JSONL result per item:
     {"k": index, "decision": allow|advise|ask|deny|error, "text": ..., "fired": [[id, decision], ...],
      "parse_ok": bool, "parse_why": str}
 parse_ok is False when a rule traced a PARSE fallback, or (for Bash/PowerShell items, when the engine tree has
@@ -63,7 +63,9 @@ def decide_item(mods, item, root, root_win, audit):
         roots = mods["paths"].roots(root, root_win, {})
         return call(mods["shell_rules"].decide, (ti.get("command", ""), roots, audit), **cands)
     if name in FILE_TOOLS:
-        return call(mods["write_rules"].decide, (ti.get("file_path", ""), audit), **cands)
+        # Plan 5 Task 9: the write guard's zone notes need the roots; an engine that does not take them ignores it.
+        return call(mods["write_rules"].decide, (ti.get("file_path", ""), audit),
+                    roots=mods["paths"].roots(root, root_win, {}), **cands)
     if name.startswith("mcp__"):
         mcp = mods.get("mcp_rules")
         if mcp is not None and hasattr(mcp, "decide"):

@@ -107,31 +107,30 @@ RULES = {
     'S-REGISTRY': {
         "decision": 'deny',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'BLOCKED: Cannot delete Bethesda registry keys.'
+        'Blocked: this deletes Bethesda registry keys, which the game and tools use to find the install.'
     ),
     },
     'S-PSC-OUT': {
         "decision": 'deny',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'BLOCKED: Tool output cannot target a .psc file directly. Use a '
-        'separate output directory.'
+        'Blocked: this tool would write its output straight over {file}.\n'
+        'Send output to a separate folder and copy back what you want.'
     ),
     },
     'S-CHAMPOLLION': {
         "decision": 'deny',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'BLOCKED: Champollion against a PEX in Data/Scripts/ has destroyed a '
-        '.psc twice. Copy the .pex to a temp directory first, then run '
-        'Champollion there.'
+        'Blocked: Champollion on {file} inside Data/Scripts has destroyed .psc sources before.\n'
+        'Copy the .pex to a temp folder and run it there.'
     ),
     },
     'S-RELATIVE-UNKNOWN': {
@@ -146,11 +145,10 @@ RULES = {
     'S-MOVE-INSTALL': {
         "decision": 'advise',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'Moving/copying inside the live game install: {c}. A stray overwrite '
-        'here is silent -- confirm the destination before relying on it.'
+        'Note: this copies or moves onto {file} in the Skyrim install; an overwrite there is silent.'
     ),
     },
     'S-WRITE-PLUGIN': {
@@ -211,43 +209,37 @@ RULES = {
     'S-SED-WINPATH': {
         "decision": 'advise',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        "In-place sed edit in the game directory: {c}. A Windows path in sed's "
-        'REPLACEMENT is destroyed by escape handling -- normalise the path '
-        'first.'
+        "Note: sed's replacement contains a backslash path, which sed mangles; use forward slashes."
     ),
     },
     'S-AUTOMOD-ESP': {
         "decision": 'advise',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'AutoMod ESP write WITHOUT --dry-run: {c}. The standing rule is dry-run '
-        'first, review, then write.'
+        'Note: AutoMod is writing {file} without --dry-run; the rule is dry-run first.'
     ),
     },
     'S-AUTOMOD-NIF': {
         "decision": 'advise',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'AutoMod NIF write: {c}. Cross-read the result with an independent '
-        'parser before handing it to the engine -- same-tool readback misses '
-        'malformed files.'
+        'Note: cross-read {file} with an independent parser before testing it in game.'
     ),
     },
     'S-AUTOMOD-ARCHIVE': {
         "decision": 'advise',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'AutoMod archive write: {c}. Loose files always override a BSA, so '
-        'check for loose copies before assuming this took effect.'
+        'Note: loose files override {file}; check for loose copies before trusting it.'
     ),
     },
     'S-RESAVER-APPLY': {
@@ -263,12 +255,10 @@ RULES = {
     'S-EXTERNAL-OUT': {
         "decision": 'advise',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'External Papyrus/ESP tool writing into the game/data directory: {c}. '
-        'Verify the output landed where you intended -- several of these have '
-        'destructive defaults.'
+        'Note: {op} writes its output into the Skyrim install; check it landed where you meant.'
     ),
     },
     'W-INERT-NOPATH': {
@@ -295,54 +285,46 @@ RULES = {
     'W-INI': {
         "decision": 'advise',
         "hook": 'protect-files',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'SKYRIM CONFIG: {p}. Load order is Skyrim.ini then SkyrimVR.ini then '
-        'SkyrimPrefs.ini (last wins), so a setting here can be overridden by a '
-        'later file. Diff before and after rather than trusting the edit.'
+        'Note: a later INI in the load chain can override {file}; diff before and after.'
     ),
     },
     'W-SKSE-INI': {
         "decision": 'advise',
         "hook": 'protect-files',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'SKSE PLUGIN CONFIG: {p}. Not captured by any snapshot hook -- copy it '
-        'yourself before changing it.'
+        'Note: no snapshot covers {file}; copy it before changing it.'
     ),
     },
     'W-LOADORDER': {
         "decision": 'advise',
         "hook": 'protect-files',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'LOAD ORDER: {p}. Your mod manager owns these and may overwrite a '
-        'direct edit on its next deploy, so make sure a direct edit is really '
-        'what is wanted. Note the Special Edition copy under AppData is a '
-        'DIFFERENT file from the VR one and is routinely stale.'
+        'Note: your mod manager owns {file} and may undo a direct edit.'
     ),
     },
     'W-PAPYRUS': {
         "decision": 'advise',
         "hook": 'protect-files',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'PAPYRUS SCRIPT: {p}. A .pex loads at game startup ONLY, so a running '
-        'session will not see this change. Snapshot to .claude/backups/<name>/ '
-        'before experimenting.'
+        'Note: a script change in {file} reaches the game only at its next start; snapshot it first.'
     ),
     },
     'W-INSTALL': {
         "decision": 'advise',
         "hook": 'protect-files',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'Editing inside the live game/config install: {p}'
+        'Note: editing {file} inside the live Skyrim install.'
     ),
     },
 }
