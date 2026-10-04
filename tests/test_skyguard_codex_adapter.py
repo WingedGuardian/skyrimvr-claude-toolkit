@@ -15,7 +15,7 @@ from skyguard.audit import Audit  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
 
 RUN = REPO / "tools" / "skyguard" / "run.py"
-FIXTURES = sorted((REPO / "tests" / "fixtures" / "payloads" / "codex").rglob("*.json"))
+FIXTURES = sorted(p for p in (REPO / "tests" / "fixtures" / "payloads" / "codex").rglob("*.json") if p.name != "EXPECTED.json")
 
 
 def _pre(name, tool_input, cwd="C:/G"):

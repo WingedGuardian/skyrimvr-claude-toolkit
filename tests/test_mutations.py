@@ -1707,6 +1707,96 @@ MUTATIONS = [
         ("tools/skyguard/codex_rules.py", 'format(_s(r["decision"]))', 'format(_s("prompt"))',
          "tests/test_codex_rules.py::test_rules_file_passes_codex_execpolicy", "codex-rules-render-wrong-decision"),
     ]
+] + [
+    # Plan 4 Task 12 (spec 7.4): conformance from captured payloads, and the adapter / wrapper clauses that
+    # decide whether a Codex command RUNS. Each id names the real defect it stands for.
+    pytest.param(*m[:4], id=m[4])
+    for m in [
+        # A delete patch stops being read: `apply_patch` deleting a plugin parses as an unknown header (or,
+        # worse, as nothing) and the plugin rule never sees the path. Killed through a DERIVED variant: the
+        # captured Delete shape with only its path replaced by Data/Decoy.esp.
+        ("tools/skyguard/patch_paths.py",
+         ''', ("*** Delete File:", "delete"))''', ")",
+         "tests/test_codex_conformance.py::test_conformance[derived:codex-PreToolUse-apply_patch-3:Data/Decoy.esp]",
+         "codex-adapter-drops-delete-paths"),
+        # The adapter emits an ALLOW where the rule said deny. The wrapper refuses a non-deny decision (an
+        # INERT deny), so the test must assert the RULE's text, not merely "deny".
+        ("tools/skyguard/adapters/codex.py",
+         '"permissionDecision": "deny",', '"permissionDecision": "allow",',
+         "tests/test_codex_entry.py::test_plugin_write_is_denied", "codex-deny-becomes-allow"),
+        # The adapter hands Codex the engine's own decision: an `ask` reaches Codex, which RUNS the command.
+        ("tools/skyguard/adapters/codex.py",
+         '"permissionDecision": "deny",', '"permissionDecision": v.decision,',
+         "tests/test_skyguard_codex_adapter.py::test_ask_never_reaches_codex", "codex-adapter-emits-ask"),
+        # The adapter's JSON loses its last brace: Codex cannot parse the body and the command RUNS.
+        ("tools/skyguard/adapters/codex.py",
+         'return json.dumps({"hookSpecificOutput": body}, ensure_ascii=False)',
+         'return json.dumps({"hookSpecificOutput": body}, ensure_ascii=False)[:-1]',
+         "tests/test_codex_entry.py::test_plugin_write_is_denied", "codex-adapter-malformed-json"),
+        # A patch run THROUGH the shell (a Bash call) is no longer parsed: the plugin it writes goes unseen.
+        ("tools/skyguard/adapters/codex.py",
+         "sp = patch_paths.shell_patch(cmd)", "sp = None",
+         "tests/test_skyguard_codex_adapter.py::test_a_patch_through_the_shell_carries_its_paths",
+         "codex-shell-patch-not-parsed"),
+        # A relative patch path is judged as written, not against the session's cwd: `../x.esp` escapes.
+        ("tools/skyguard/adapters/codex.py",
+         "if not mod.isabs(p) and base:", "if False:",
+         "tests/test_skyguard_codex_adapter.py::test_a_relative_patch_path_resolves_against_the_session_cwd",
+         "codex-relative-path-not-resolved"),
+        # A shell verdict nobody classified for the Codex .rules file (the trip-wire Plan 5 relies on).
+        ("tools/skyguard/codex_rules.py",
+         '    "shell.DENY_REGISTRY": (\n        "forbidden",\n        "the hook denies every `reg delete`; '
+         '`reg delete` / `reg.exe delete` prefixes are a strict subset"),\n', "",
+         "tests/test_codex_rules.py::test_every_shell_verdict_is_classified", "codex-unclassified-shell-verdict"),
+        # The conformance harness itself: an `ask` would pass as a deny if the shape gate stopped checking.
+        ("tests/test_codex_conformance.py",
+         '        assert body["permissionDecision"] == "deny", (where, "only deny blocks on Codex", body)',
+         "        pass",
+         "tests/test_codex_conformance.py::test_the_shape_check_can_fail", "codex-conformance-shape-gate-passes-ask"),
+        # The plugin rule stops covering .esm: a patch heredoc onto Data/Skyrim.esm (a Bash call carrying a
+        # patch) runs. Killed by the shell-patch DERIVED variant of the captured heredoc shape.
+        ("tools/skyguard/write_rules.py",
+         r'''grep(r"\.(esp|esm|esl|bsa|ba2)[\s.]*$", file_path)''',
+         r'''grep(r"\.(esp|esl|bsa|ba2)[\s.]*$", file_path)''',
+         "tests/test_codex_conformance.py::test_conformance[derived:0.160.0/codex-PreToolUse-Bash-2:Data/Skyrim.esm]",
+         "codex-plugin-rule-misses-esm"),
+        # An `ask` loses the text that tells the model the user must run it themselves.
+        ("tools/skyguard/adapters/codex.py",
+         'ASK_PREFIX = ("NEEDS YOUR CONFIRMATION -- Codex cannot ask',
+         'ASK_PREFIX = ("Codex cannot ask',
+         "tests/test_codex_conformance.py::test_conformance[derived:codex-PreToolUse-Bash-1:resaver-apply]",
+         "codex-ask-prefix-dropped"),
+        # An Update patch is no longer backed up before it lands (the advise row also demands a backup file).
+        ("tools/skyguard/engine.py",
+         '_BACKUP_OPS = ("update", "delete", "move_from")', '_BACKUP_OPS = ("delete", "move_from")',
+         "tests/test_codex_conformance.py::test_conformance[derived:0.160.0/codex-PreToolUse-apply_patch-2:Data/SKSE/Plugins/x.ini]",
+         "codex-update-patch-not-backed-up"),
+        # A tool nothing guards by name stops being recorded: the allow becomes invisible.
+        ("tools/skyguard/engine.py",
+         '    return req.kind in ("mcp", "other") or (req.kind == "shell" and req.tool_name != "Bash")',
+         "    return False",
+         "tests/test_codex_conformance.py::test_captured_payload[0.160.0/codex-PreToolUse-mcp__probe__echo-1]",
+         "codex-mcp-call-not-recorded"),
+    ]
+] + [
+    # The same wrapper clauses, on the PowerShell entry (the Windows entry; its tests run only on Windows).
+    pytest.param(
+        "agent/guards/adapters/codex/skyguard-entry.ps1", *m[:3],
+        marks=pytest.mark.skipif(sys.platform != "win32", reason="the PowerShell entry is tested on Windows"),
+        id=m[3])
+    for m in [
+        # A non-zero engine exit is swallowed into an empty answer: on Codex an empty answer is ALLOW.
+        (r'''    if ($r.Code -ne 0) { Send-Failure 'engine' ('engine exited ' + $r.Code); return }''',
+         r'''    if ($r.Code -ne 0) { Send-Text ''; return }''',
+         "tests/test_codex_entry.py::test_engine_crash_is_a_deny", "codex-wrapper-swallows-engine-errors"),
+        # Exit 2 on the way out: Codex reads exit 2 as a hook failure and lets the command RUN (MEASURED).
+        ("\r\nexit 0", "\r\nexit 2",
+         "tests/test_codex_entry.py::test_every_path_exits_zero", "codex-wrapper-exits-2-on-deny"),
+        # No deadline: a hung engine outlives Codex's own timeout, which then RUNS the command.
+        (r'''        if (-not $proc.WaitForExit($left)) { $timedOut = $true }''',
+         r'''        [void]$proc.WaitForExit()''',
+         "tests/test_codex_entry.py::test_a_hung_engine_is_a_deny", "codex-wrapper-has-no-deadline"),
+    ]
 ]
 
 
