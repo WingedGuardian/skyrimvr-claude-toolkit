@@ -89,7 +89,7 @@ Works on any modern Python with `setuptools` installed alongside `pyffi`. The
 stdlib in 3.8; unrelated to the distutils issue).
 
 > **HARD LIMITS — repeated here deliberately, because this file may be read without the root
-> CLAUDE.md in context:**
+> instruction file in context:**
 > 1. PyFFI **cannot read BSTriShape** (`Unknown block type 'BSTriShape'`) — any SSE-format
 >    (`user_version_2=100`) NIF. Use PyNifly.
 > 2. **NEVER author animations with PyFFI.** It can construct controller blocks and its own

@@ -754,6 +754,39 @@ MUTATIONS = [
         "tests/test_gen_agent_trees.py::test_repo_is_in_sync",
         id="generated-files-cannot-be-hand-edited",
     ),
+    # The same, for the Codex tree: the project_doc_max_bytes margin is the easiest line to "tidy" by hand.
+    pytest.param(
+        ".codex/config.toml",
+        "project_doc_max_bytes = 65536",
+        "project_doc_max_bytes = 32768",
+        "tests/test_gen_agent_trees.py::test_repo_is_in_sync",
+        id="generated-codex-files-cannot-be-hand-edited",
+    ),
+    # Two targets owning one path would let the later silently overwrite the earlier.
+    pytest.param(
+        "scripts/gen_agent_trees.py",
+        "            if rel in out:",
+        "            if False:",
+        "tests/test_gen_agent_trees.py::test_no_path_is_owned_by_two_targets",
+        id="two-targets-cannot-own-one-path",
+    ),
+    # `*.ps1` is pinned CRLF; without the path rule the generated entry script would check out CRLF and the
+    # byte-compare drift gate would go red on every Windows checkout.
+    pytest.param(
+        ".gitattributes",
+        ".codex/** text eol=lf",
+        ".codex/** text",
+        "tests/test_gen_agent_trees.py::test_codex_tree_lf_pin_is_a_path_rule_that_comes_after_the_ps1_rule",
+        id="codex-tree-is-pinned-lf",
+    ),
+    # The skill sources feed .agents/skills/ too, so a Claude-only construct in ANY of them is a defect.
+    pytest.param(
+        "agent/skills/skyrim-bsa/SKILL.md",
+        "# BSA/BA2 Archive Operations",
+        "# BSA/BA2 Archive Operations -- ask Claude to run $ARGUMENTS",
+        "tests/test_instruction_neutrality.py::test_every_skill_body_is_neutral",
+        id="every-skill-body-is-neutral",
+    ),
     # Pin the canary red forever again: never let a completed evaluation clear a failure. An instrument
     # that cannot go back to green gets ignored, which is the same end state as having no instrument.
     pytest.param(

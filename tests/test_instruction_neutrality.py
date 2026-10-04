@@ -79,9 +79,15 @@ def _body(text: str) -> str:
     return text
 
 
+# The ONE sanctioned spelling of a Claude-only substitution in a skill body (spec 4): the neutral phrase
+# first, the Claude Code detail in a parenthesis. A bare `$ARGUMENTS` is still flagged.
+SANCTIONED = "(`$ARGUMENTS` in Claude Code)"
+
+
 def violations(text: str):
     found = []
     for i, line in enumerate(_body(text.replace("\r\n", "\n")).split("\n"), 1):
+        line = line.replace(SANCTIONED, "")
         for rule, pattern in BANNED.items():
             if re.search(pattern, line):
                 found.append((i, rule, line.strip()))
@@ -130,3 +136,19 @@ def test_core_tells_every_agent_to_read_my_preferences():
     core = " ".join((REPO / "agent/instructions/core.md").read_text(encoding="utf-8").split())
     assert "## My preferences" in core
     assert "read it at the start of every session and follow it" in core   # whitespace-normalised: it wraps
+
+
+def test_only_the_sanctioned_arguments_spelling_is_exempt():
+    assert violations("Check the mod the user named " + SANCTIONED + " now.") == []
+    assert [r for _, r, _ in violations("Check the mod named by `$ARGUMENTS` now.")] == ["arguments-var"]
+    assert violations("Check the mod the user named " + SANCTIONED + " and ask Claude")   # not a blanket pass
+
+
+def test_every_skill_body_is_neutral():
+    """Codex reads every skill (.agents/skills/), so every body is judged, not just the shared three."""
+    files = sorted((REPO / "agent" / "skills").glob("*/SKILL.md"))
+    assert len(files) >= 12, "skill sources not found -- the gate would be vacuous"
+    hits = []
+    for f in files:
+        hits += [f"{f.parent.name}:{n} [{r}] {l}" for n, r, l in violations(f.read_text(encoding="utf-8"))]
+    assert not hits, "\n".join(hits)

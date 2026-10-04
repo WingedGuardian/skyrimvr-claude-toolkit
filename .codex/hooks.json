@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"{{CODEX_ROOT_POSIX}}/.codex/hooks/skyguard-entry.sh\" session-start",
+            "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{{CODEX_ROOT}}/.codex/hooks/skyguard-entry.ps1\" session-start || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{{CODEX_ROOT}}/.codex/hooks/skyguard-entry.ps1\" session-start",
+            "timeout": 120,
+            "statusMessage": "Skyrim toolkit: session checks"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"{{CODEX_ROOT_POSIX}}/.codex/hooks/skyguard-entry.sh\" pre-tool",
+            "commandWindows": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{{CODEX_ROOT}}/.codex/hooks/skyguard-entry.ps1\" pre-tool || powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{{CODEX_ROOT}}/.codex/hooks/skyguard-entry.ps1\" pre-tool",
+            "timeout": 60,
+            "statusMessage": "Skyrim toolkit: checking"
+          }
+        ]
+      }
+    ]
+  }
+}

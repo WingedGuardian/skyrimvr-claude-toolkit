@@ -45,3 +45,10 @@ tests/bin/* text eol=lf
 # The frozen Codex hook definitions and their ledger (Plan 4 Task 8): the freeze gate hashes LF bytes, and
 # *.toml / *.sha256 are not pinned above. A path rule for one text-only folder, not an extension rule.
 agent/targets/codex/* text eol=lf
+
+# Generated Codex tree (Plan 4 Task 10). The generator writes LF and its drift gate compares bytes, but
+# `*.ps1` is pinned CRLF above and `*.toml` / `*.rules` are pinned nowhere. A PATH rule, placed after
+# `*.ps1` so it wins, for a folder that holds only text (no images): not a global `*.ps1 eol=lf`, which
+# would flip every Windows helper. .agents/ holds skills, which may carry images, so it is pinned by
+# extension only (`*.md` above), never by directory.
+.codex/** text eol=lf

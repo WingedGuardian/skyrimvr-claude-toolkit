@@ -7,7 +7,7 @@ argument-hint: "[mod name or path]"
 
 # Port SSE Mod to VR
 
-Systematically check the mod specified by `$ARGUMENTS` against every known VR incompatibility. Consult `KNOWLEDGEBASE.md` for full details on each item.
+Systematically check the mod the user named (`$ARGUMENTS` in Claude Code) against every known VR incompatibility. Consult `KNOWLEDGEBASE.md` for full details on each item.
 
 ## Step 1: SKSE Dependency Check
 
