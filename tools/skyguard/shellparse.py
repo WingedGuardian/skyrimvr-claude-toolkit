@@ -480,13 +480,13 @@ class _Scanner:
         if cmd is not None and not cmd.skip and cmd.words and self.poisons(cmd):
             self.poisoned = True
         top = self.frames[0]
-        if f is not top or top.ctl != 0 or top.case or top.dbr:
+        if f is not top or top.ctl != 0 or top.case:
             return                                  # nested: neither records nor moves the statement list
         # (An assignment after a `||`, or after a source/eval, is recorded too: lookup() refuses every use that
         # could see it -- a later use in a broken chain, or any use created after the poison.)
         if cmd is not None and not cmd.skip and cmd.stage == 0 and sep not in ("|", "|&"):
             for name, value in self.assignments(cmd):
-                if self.ctx.writes(name) == 1:
+                if self.ctx.writes(name) == 1 and name.lower() not in assign.SPECIAL:
                     key = name if self.DIALECT == "bash" else name.lower()
                     self.vars[key] = [value, None, cmd.lst, cmd.seq]
                     if cmd.seq == 0:
@@ -636,7 +636,13 @@ class _Bash(_Scanner):
         k = 0
         while k < len(ws) and _ASSIGN.match(ws[k].raw):
             k += 1
-        return k < len(ws) and not ws[k].quoted and not ws[k].dyn and "".join(ws[k].b) in ("source", ".", "eval")
+        plain = ["".join(w.b) if not w.quoted and not w.dyn else "" for w in ws[k:]]
+        if any(p in ("source", "eval") for p in plain):
+            return True                                         # also `builtin source`, `command eval`, `sudo eval`
+        j = 0
+        while j < len(plain) and plain[j] in ("builtin", "command"):
+            j += 1
+        return j < len(plain) and plain[j] == "."
 
     def track_cd(self, f, cmd):
         ws = cmd.words
@@ -1176,8 +1182,9 @@ class _Pwsh(_Scanner):
     def poisons(self, cmd):
         if cmd.dot:
             return True
-        w = cmd.words[0]
-        return not w.quoted and not w.dyn and "".join(w.b).lower() in ("iex", "invoke-expression")
+        if any(not w.quoted and not w.dyn and "".join(w.b).lower() in ("iex", "invoke-expression") for w in cmd.words):
+            return True
+        return "invokescript" in self.t[cmd.start:cmd.end].lower()   # $ExecutionContext...InvokeScript(...)
 
     def track_cd(self, f, cmd):
         if not cmd.words or cmd.words[0].quoted or cmd.words[0].dyn:
@@ -2173,10 +2180,11 @@ def _subst(sc: _Scanner, rec: _Cmd, ws, vals) -> Tuple[Tuple[str, str], ...]:
     """Exec.subst (Task 7b): (word as in argv, the same word with its variables replaced by the literal each one
     certainly holds here). A word value spelled twice with different readings (`'$D'` and `$D`) is left out."""
     got: dict = {}
+    split_safe = sc.DIALECT != "bash" or sc.ctx.writes("IFS") == 0
     for w, val in zip(ws, vals):
         if "$" not in val:
             continue
-        s = assign.expand_word(w.raw, sc.DIALECT, lambda name: sc.lookup(rec, name))
+        s = assign.expand_word(w.raw, sc.DIALECT, lambda name: sc.lookup(rec, name), split_safe)
         got[val] = s if got.get(val, s) == s else None
     return tuple((k, v) for k, v in got.items() if v is not None and v != k)
 

@@ -500,3 +500,6 @@ zips), 4 still unresolved (pipeline input, values built from `$base`, `Join-Path
 The 80 that remain are values built from another variable (`OUT="$SP/x"`, `SP="$LOCALAPPDATA/..."`), `$(mktemp)`,
 loop variables, pipeline input, and `cd X && D=...; rm "$D"` (not first in its list: if `cd` fails the assignment never
 runs). Shell-rule CPU over the 63,637 items is unchanged in shape; worst new timing shape at 80 KB ~86 ms.
+
+Self-review hardening (special names, IFS, more write forms, wider poison) re-priced: the four per-rule item
+sets are identical to the hand-read ones (compared by command text).

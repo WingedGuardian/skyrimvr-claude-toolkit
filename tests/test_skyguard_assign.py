@@ -88,6 +88,9 @@ def test_t07b_row(row):
     ("Set-Variable -Name p -Value x", "p", 1),
     ("Get-Item x -OutVariable p", "p", 1),
     ("function f($p) { }", "p", 1),
+    ("exec {D}>/dev/null", "d", 1),                      # fd allocation stores a number in D
+    ("Get-Item x | Tee-Object -Variable p", "p", 1),
+    ("set p x", "p", 1),                                 # PowerShell's `set` is Set-Variable
 ])
 def test_write_counts(text, name, n):
     """n = 0: never counted as a write; n >= 1: counted at least n times (over-counting is safe, under is not)."""

@@ -668,13 +668,17 @@ select/case, a function, a pipeline, `&`, after `||`; a use resolves in a later 
 first in its `&&` list, or later in the same pure `&&` chain; `source`/`.`/`eval`/dot-source/`Invoke-Expression`
 poison every later use; cmd never resolves (it expands `%K%` before `set` runs).
 
-- Corpus: 62 `t07b-*` rows (19 RED against dc8c59b, the rest pins); `t07-var-data` and `t07-legacy-var-only` now
+- Corpus: 74 `t07b-*` rows (20 RED against dc8c59b, the rest pins); `t07-var-data` and `t07-legacy-var-only` now
   S-DEL-INSTALL (the latter no longer supersedes `testhooks-00bbbc607b`: it gives the legacy verdict again).
 - Priced (dc8c59b, N = 63,637): S-DEL-UNRESOLVED 190 → 80; 88 lifted, all hand-read FPs, 0 TP lost; 22 deny→deny
   rule moves (21 S-DEL-INSTALL naming the file, 1 S-WRITE-PLUGIN); 1 deny→ask (S-RESAVER-APPLY, a real `--apply`).
 - Tightenings: an unresolved delete run from inside the install with a variable that resolves into it now denies
   (`D=Data/meshes; rm -rf "$D"`, cwd = install); S-REGISTRY no longer resolves an assignment in a branch, a
   reassigned name, or cmd's `set K=... & reg delete "%K%"`.
+- Self-review hardening (before review): names the shell sets or refuses (`PWD`, `OLDPWD`, `HOME`, `IFS`, `_`,
+  PowerShell automatic variables) are never resolved; a command that writes `IFS` refuses every unquoted
+  expansion; `exec {D}>f`, Tee-Object -Variable, PowerShell `set`, PSVariable count as writes; `source`/`eval`
+  anywhere in a statement (also behind `builtin`/`command`) and `InvokeScript` poison. Re-priced: identical.
 - Known limits: a value built from another variable (`Y="$SP/x"`) and a harmless second mention that reads like a
   write (`echo "D=$D"`) stay unresolved; the write rules (S-WRITE-PLUGIN) do not read `Exec.subst`.
 

@@ -1721,23 +1721,22 @@ def _t07b(row):
     return _TA + "test_t07b_row[t07b-" + row + "]"
 
 
-_GATE = "        if f is not top or top.ctl != 0 or top.case or top.dbr:"
+_GATE = "        if f is not top or top.ctl != 0 or top.case:"
 _REC = '        if cmd is not None and not cmd.skip and cmd.stage == 0 and sep not in ("|", "|&"):'
 _LOOK = '        r = self.vars.get(name if self.DIALECT == "bash" else name.lower())'
 _SAME = "        if cmd.valid and lst == cmd.lst and seq < cmd.seq:"
 _OPEN = '_BASH_OPEN = frozenset(("if", "while", "until", "{"))'
 _CLOSE = '_BASH_CLOSE = frozenset(("fi", "done", "}"))'
-_COUNT = "    for rx in (_W_PLAIN, _W_DOLLAR, _W_DEFAULT):"
+_COUNT = "    for rx in (_W_PLAIN, _W_DOLLAR, _W_DEFAULT, _W_FD):"
+_ONCE = "                if self.ctx.writes(name) == 1 and name.lower() not in assign.SPECIAL:"
 _T7B_CLAUSES = [
     # (id, file, find, replace, test)
     # where an assignment may be recorded: the ROOT command, its top-level statement list
     ("t7b-root-only", _SP, '        if self.depth == 0 and self.DIALECT in ("bash", "powershell"):',
      '        if self.DIALECT in ("bash", "powershell"):', _t07b("bash-c")),
-    ("t7b-top-frame", _SP, _GATE, "        if top.ctl != 0 or top.case or top.dbr:", _t07b("assign-in-subshell")),
-    ("t7b-control-depth", _SP, _GATE, "        if f is not top or top.case or top.dbr:", _t07b("assign-in-if")),
-    ("t7b-case-arm", _SP, _GATE, "        if f is not top or top.ctl != 0 or top.dbr:", _t07b("assign-in-case")),
-    ("t7b-dbr-separator", _SP, _GATE, "        if f is not top or top.ctl != 0 or top.case:",
-     _TA + "test_flow_dbr_separator_keeps_the_list"),
+    ("t7b-top-frame", _SP, _GATE, "        if top.ctl != 0 or top.case:", _t07b("assign-in-subshell")),
+    ("t7b-control-depth", _SP, _GATE, "        if f is not top or top.case:", _t07b("assign-in-if")),
+    ("t7b-case-arm", _SP, _GATE, "        if f is not top or top.ctl != 0:", _t07b("assign-in-case")),
     ("t7b-open-while", _SP, _OPEN, '_BASH_OPEN = frozenset(("if", "until", "{"))', _t07b("assign-in-while")),
     ("t7b-open-brace", _SP, _OPEN, '_BASH_OPEN = frozenset(("if", "while", "until"))', _t07b("assign-in-braces")),
     ("t7b-open-for", _SP, "            f.ctl += 1                                          # closed by `done`",
@@ -1752,8 +1751,9 @@ _T7B_CLAUSES = [
      _t07b("pipeline-head")),
     ("t7b-pipeline-stage", _SP, _REC,
      '        if cmd is not None and not cmd.skip and sep not in ("|", "|&"):', _t07b("pipeline-stage")),
-    ("t7b-written-once", _SP, "                if self.ctx.writes(name) == 1:",
-     "                if self.ctx.writes(name) >= 1:", _t07b("reassigned-later")),
+    ("t7b-written-once", _SP, _ONCE, "                if self.ctx.writes(name) >= 1 and name.lower() not in "
+     "assign.SPECIAL:", _t07b("reassigned-in-branch")),
+    ("t7b-special-names", _SP, _ONCE, "                if self.ctx.writes(name) == 1:", _t07b("pwd-after-cd")),
     ("t7b-ps-key-folded", _SP, '                    key = name if self.DIALECT == "bash" else name.lower()',
      "                    key = name", _t07b("ps-case-insensitive")),
     ("t7b-first-in-list", _SP, "                    if cmd.seq == 0:", "                    if True:",
@@ -1783,8 +1783,15 @@ _T7B_CLAUSES = [
     ("t7b-prefix-env", _SP, "                return []                                       # `K=v cmd`: K is set for cmd only",
      "                continue", _t07b("prefix-env")),
     ("t7b-append", _SP, '            if "[" in lhs or lhs.endswith("+="):', "            if False:", _t07b("append")),
-    ("t7b-bash-source-poisons", _SP, '"".join(ws[k].b) in ("source", ".", "eval")', '"".join(ws[k].b) in ()',
-     _t07b("source")),
+    ("t7b-bash-source-poisons", _SP, '        if any(p in ("source", "eval") for p in plain):',
+     "        if False:", _t07b("builtin-source")),
+    ("t7b-bash-dot-poisons", _SP, '        return j < len(plain) and plain[j] == "."', "        return False",
+     _t07b("source-dot")),
+    ("t7b-bash-builtin-dot", _SP, '        while j < len(plain) and plain[j] in ("builtin", "command"):',
+     "        while False:", _t07b("builtin-dot")),
+    ("t7b-ps-invokescript-poisons", _SP,
+     '        return "invokescript" in self.t[cmd.start:cmd.end].lower()   # $ExecutionContext...InvokeScript(...)',
+     "        return False", _t07b("ps-invokescript")),
     ("t7b-ps-dot-source-poisons", _SP, "        if cmd.dot:\n            return True",
      "        if False:\n            return True", _t07b("ps-dot-source")),
     ("t7b-ps-iex-poisons", _SP, '"".join(w.b).lower() in ("iex", "invoke-expression")', '"".join(w.b).lower() in ()',
@@ -1798,9 +1805,11 @@ _T7B_CLAUSES = [
     ("t7b-find-delete-carries", _SP, 'self.seg, "", self.ctx.subst)', 'self.seg, "", ())', _t07b("find-delete")),
     ("t7b-deletes-wired", _DL, "        e = substituted(e)\n", "", _t07b("scratch-var")),
     # assign.py: every form of a second write counts; values and uses are literal or nothing
-    ("t7b-count-plain", _AS, _COUNT, "    for rx in (_W_DOLLAR, _W_DEFAULT):", _t07b("reassigned-later")),
-    ("t7b-count-dollar", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DEFAULT):", _t07b("ps-reassigned-later")),
-    ("t7b-count-default", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DOLLAR):", _t07b("default-expansion")),
+    ("t7b-count-plain", _AS, _COUNT, "    for rx in (_W_DOLLAR, _W_DEFAULT, _W_FD):", _t07b("reassigned-in-branch")),
+    ("t7b-count-dollar", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DEFAULT, _W_FD):", _t07b("ps-reassigned-in-block")),
+    ("t7b-count-default", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DOLLAR, _W_FD):", _t07b("default-expansion")),
+    ("t7b-count-fd", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DOLLAR, _W_DEFAULT):", _t07b("fd-alloc")),
+    ("t7b-count-ps-tee", _AS, "tee-object|-variable|", "", _t07b("ps-tee-variable")),
     ("t7b-count-increment", _AS, "    for m in _W_INC.finditer(text):", '    for m in _W_INC.finditer(""):',
      _TA + "test_increment_is_a_write"),
     ("t7b-count-bash-keywords", _AS, "        elif _KW_BASH.search(piece) or (", "        elif False or (",
@@ -1812,8 +1821,11 @@ _T7B_CLAUSES = [
      '_BARE_IDENT = re.compile(r"(" + _IDENT + r")")', _TA + "test_for_list_dollar_is_a_read"),
     ("t7b-value-tilde", _AS, '        elif c in "$`' + BS * 2 + '~(){}" or c.isspace():',
      '        elif c in "$`' + BS * 2 + '(){}" or c.isspace():', _t07b("tilde-value")),
-    ("t7b-unquoted-split", _AS, '            if v is None or v == "" or _UNSAFE_UNQUOTED.search(v):',
-     "            if v is None:", _t07b("unquoted-space")),
+    ("t7b-unquoted-split", _AS,
+     '            if v is None or v == "" or _UNSAFE_UNQUOTED.search(v) or not split_safe:',
+     "            if v is None or not split_safe:", _t07b("unquoted-space")),
+    ("t7b-ifs-split", _SP, '    split_safe = sc.DIALECT != "bash" or sc.ctx.writes("IFS") == 0',
+     "    split_safe = True", _t07b("ifs-split")),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T7B_CLAUSES]
 

@@ -40,6 +40,7 @@ _W_PLAIN = re.compile(r"(?<![\w$])(" + _IDENT + r")(?:\[[^\]\n]{0,200}\])?[ \t]{
 # PowerShell `$n =`, `$script:n +=`, `${n} =`
 _W_DOLLAR = re.compile(r"\$\{?(?:[A-Za-z]{1,32}:)?(" + _IDENT + r")\}?[ \t]{0,64}(?:[-+*/%]|\?\?)?=")
 _W_DEFAULT = re.compile(r"\$\{(" + _IDENT + r"):?=")                      # ${N:=x} / ${N=x}
+_W_FD = re.compile(r"\{(" + _IDENT + r")\}[<>]")                            # exec {N}>f allocates an fd into N
 _W_INC = re.compile(r"(?<![\w])(" + _IDENT + r")(?:\+\+|--)|(?:\+\+|--)\$?(" + _IDENT + r")")
 _PIECE = re.compile(r"[^;&|\n]+")
 # A statement that names one of these may write ANY name it mentions.
@@ -49,10 +50,26 @@ _KW_BASH = re.compile(r"(?<![\w$-])(?:read|readarray|mapfile|getopts|unset|decla
 _KW_BASH_V = re.compile(r"(?<![\w$-])(?:printf|wait)(?![\w-])")
 _OPT_V = re.compile(r"(?<![\w-])-[A-Za-z]{0,8}[vp](?![\w-])")
 _KW_PS = re.compile(r"(?<![\w$-])(?:set-variable|new-variable|clear-variable|remove-variable|sv|nv|clv|rv|"
-                    r"foreach|param|function|filter|variable:|\[ref\]|-outvariable|-ov|-errorvariable|-ev|"
+                    r"foreach|param|function|filter|variable:|\[ref\]|psvariable|set|tee-object|-variable|-bindingvariable|"
+                    r"-outvariable|-ov|-errorvariable|-ev|"
                     r"-warningvariable|-wv|-informationvariable|-iv|-pipelinevariable|-pv)(?![\w-])", re.IGNORECASE)
 _ANY_IDENT = re.compile(_IDENT)
 _BARE_IDENT = re.compile(r"(?<![\w$])(?<!\$\{)(" + _IDENT + r")")
+
+
+# Names the shell sets itself, or refuses to assign: `PWD=/tmp; cd Data; rm "$PWD/x"` deletes Data/x (cd rewrote
+# PWD), and PowerShell's `$HOME = 'x'` fails (read-only), leaving the real home. Never resolved, either dialect.
+SPECIAL = frozenset((
+    "pwd", "oldpwd", "home", "ifs", "path", "cdpath", "random", "srandom", "seconds", "lineno", "bashpid",
+    "epochseconds", "epochrealtime", "uid", "euid", "ppid", "groups", "funcname", "bash_source", "bash_lineno",
+    "bash_argv", "bash_argc", "bash_command", "dirstack", "pipestatus", "histcmd", "shlvl", "reply", "optind",
+    "optarg", "opterr", "_",
+    "args", "consolefilename", "error", "event", "eventargs", "eventsubscriber", "executioncontext", "false",
+    "foreach", "host", "input", "iscoreclr", "islinux", "ismacos", "iswindows", "lastexitcode", "matches",
+    "myinvocation", "nestedpromptlevel", "null", "pid", "profile", "psboundparameters", "pscmdlet",
+    "pscommandpath", "psculture", "psdebugcontext", "psedition", "pshome", "psitem", "psscriptroot",
+    "pssenderinfo", "psuiculture", "psversiontable", "sender", "shellid", "stacktrace", "switch", "this", "true",
+    "userprofile", "homedrive", "homepath"))
 
 
 def write_counts(text: str) -> Dict[str, int]:
@@ -63,7 +80,7 @@ def write_counts(text: str) -> Dict[str, int]:
     def add(name: str) -> None:
         k = name.lower()
         out[k] = out.get(k, 0) + 1
-    for rx in (_W_PLAIN, _W_DOLLAR, _W_DEFAULT):
+    for rx in (_W_PLAIN, _W_DOLLAR, _W_DEFAULT, _W_FD):
         for m in rx.finditer(text):
             add(m.group(1))
     for m in _W_INC.finditer(text):
@@ -153,7 +170,7 @@ def _var_at(raw: str, i: int) -> Tuple[Optional[str], int]:
     return None, i
 
 
-def _bash_word(raw: str, lookup: Callable[[str], Optional[str]]) -> Optional[str]:
+def _bash_word(raw: str, lookup: Callable[[str], Optional[str]], split_safe: bool) -> Optional[str]:
     out, i, n = [], 0, len(raw)
     while i < n:
         c = raw[i]
@@ -192,7 +209,7 @@ def _bash_word(raw: str, lookup: Callable[[str], Optional[str]]) -> Optional[str
         elif c == "$":
             name, k = _var_at(raw, i)
             v = lookup(name) if name else None
-            if v is None or v == "" or _UNSAFE_UNQUOTED.search(v):
+            if v is None or v == "" or _UNSAFE_UNQUOTED.search(v) or not split_safe:
                 return None                                     # split or globbed: not the one path it reads as
             out.append(v)
             i = k
@@ -261,11 +278,12 @@ def _ps_word(raw: str, lookup: Callable[[str], Optional[str]]) -> Optional[str]:
     return "".join(out)
 
 
-def expand_word(raw: str, dialect: str, lookup: Callable[[str], Optional[str]]) -> Optional[str]:
+def expand_word(raw: str, dialect: str, lookup: Callable[[str], Optional[str]], split_safe: bool = True) -> Optional[str]:
     """`raw` (a word's source text) with every $NAME / ${NAME} replaced by lookup(NAME); None when any expansion
-    is not a plain resolvable name, or the dialect never resolves (cmd)."""
+    is not a plain resolvable name, or the dialect never resolves (cmd). split_safe=False (bash: the command
+    writes IFS) refuses every UNQUOTED expansion, whose word splitting the guard can no longer predict."""
     if dialect == "bash":
-        return _bash_word(raw, lookup)
+        return _bash_word(raw, lookup, split_safe)
     if dialect == "powershell":
         return _ps_word(raw, lookup)
     return None
