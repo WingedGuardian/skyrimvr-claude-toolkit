@@ -578,3 +578,90 @@ formerly-asked saves are allow (new names). The unreadable-body rule adds no new
   FormID text was read as a plugin argument. Fails the 50% bar by a wide margin: **dropped** (module, rule, rows deleted).
   Known limit, recorded: an interpreter script handed a protected path is not flagged; the user's own scratch scripts are the
   common case and the notes would have been fatigue.
+
+## Inputs for the side-effects plan (Task 16, R16 -- MEASURE ONLY; no behaviour changed)
+
+Measured 2026-10-04 on `plan5` (a4135f6 + this task). **Read-only** on the real install (`C:/GOG Games/The Elder Scrolls V Skyrim VR`:
+directory walks, `stat`, file reads; nothing written there). The timings ran `tools/skyguard/snapshot.run` against **scratch copies**
+of the script folders. Raw output stays outside the repo (`.../scratchpad/plan5-t16/`: `scripts-census.json`, `timing.json`,
+`backups-census.txt`). Tier key: MEASURED (count and denominator given), READ (code), INFERRED.
+**For Plan 6 Task 6: read these numbers from this section**; the scripts that produced them are the method ("the same method").
+
+### 1. Script census (MEASURED, 2026-10-04, mtime vs now, "older" = `(now - mtime) // 86400 >= 7`, the snapshot hook's own test)
+
+| Folder | Level | Ext | Files | Bytes | Older than 7 d |
+|---|---|---|---|---|---|
+| `Data/Scripts` | top-level | `.pex` | 6,336 | 17,643,511 | 6,268 (98.9%) |
+| `Data/Scripts` | top-level | `.psc` | 7 | 255,215 | 7 (100%) |
+| `Data/Scripts` | nested (not `Source/`) | `.pex` | 17 | 83,749 | 17 (100%) |
+| `Data/Scripts/Source` | top-level | `.psc` | 2,134 | 8,889,198 | 2,134 (100%) |
+| `Data/Scripts/Source` | nested | `.psc` | 82 | 203,387 | 82 (100%) |
+| `Data/Source/Scripts` | top-level | `.psc` | 3,322 | 9,651,169 | 3,265 (98.3%) |
+| `Data/Source/Scripts` | nested | `.psc` | 0 | 0 | -- |
+| **All of the above** | | | **11,898** | **36,726,229** | |
+
+(`Data/Scripts` as a whole holds 2,216 nested `.psc`, which is exactly `Source/` 2,134 + 82; the table counts them once.)
+
+What the per-call snapshot (READ: `snapshot.py`, same logic as the old bash hook) looks at: top-level `.psc` in
+`Data/Scripts/Source` and top-level `.pex` in `Data/Scripts` = **8,470 files, 26.5 MB**, and it copies only those **younger than 7
+days**. So, in this install:
+
+- **Not seen at all:** 3,428 files (`Data/Source/Scripts` 3,322; nested `Source` 82; nested `.pex` 17; top-level `.psc` in `Data/Scripts` 7).
+  That is 29% of the 11,898, and every script under the second source folder.
+- **Seen but never copied:** the 2,134 `.psc` in `Source` are all older than 7 days, so the copy loop takes **0 `.psc` per snapshot**
+  (MEASURED on a scratch copy: `psc:0 pex:68` in every snapshot). The test is applied to the file BEFORE the command runs, so a command
+  that rewrites an old `.psc` has its pre-image skipped: the snapshot guards the files that are *already* recent and misses the one the
+  command is about to change. Only the Edit/Write backup channel covers a script edited by the Edit tool.
+
+### 2. Per-call snapshot time (MEASURED, scratch copy of the real `Data/Scripts`: 8,477 files; `snapshot.run` only, in-process)
+
+Excludes the hook wrapper (bash start + python start), which `tools/skyguard` latency work records elsewhere.
+
+| Scenario | Calls | Time per call |
+|---|---|---|
+| Real mtimes (68 recent `.pex`, 2.6 MB copied), snapshot taken | 5 (rate limit cleared each time) | first 690 ms (cold), then 313-320 ms (median 318) |
+| Same, inside the 60 s rate limit and nothing newer | 5 | **72-74 ms** (it still stats the 2,134 `.psc`) |
+| Worst case: every file fresh (a deploy, a checkout, `touch`), 8,470 files / 26.5 MB per snapshot | 5 | first **48.6 s** (cold), then 3.1-3.2 s |
+| Fresh toolkit install (no `Data/Scripts`) | 5 | 0.18-0.34 ms (returns before touching anything) |
+| Read-only command (`ls Data`, skip list) | 1 | 0.013 ms |
+
+A fresh toolkit install (a checkout; `git ls-files` has 0 `.psc`/`.pex`) costs nothing. A user install with the same shape as this one
+pays 72 ms on most calls (the 60 s window) and about 0.3 s on the first call after a minute; a bulk touch costs seconds.
+
+### 3. Backups in `.claude/backups/` (MEASURED, 2026-10-04)
+
+| Item | Count | Bytes |
+|---|---|---|
+| top-level per-edit backups (`<stamp>__<mangled path>`) | 863 | -- |
+| top-level files in total (the 863 + `AUDIT_LOG.txt` + 10 hand-made `.nif/.wav/.esp`) | 874 | 28,145,558 |
+| `auto_snapshots/` | 1,109 snapshot dirs, 72,360 files | **2,816,281,782 (2.82 GB)** |
+| `AUDIT_LOG.txt` | 9,965 lines | |
+
+- **Per-edit backups with no recoverable original path: 1 of 863** (862 names appear as `(backup: <name>)` in `AUDIT_LOG.txt`, which
+  records the full original path; the 1 survives only as a name). Separately, every name is lossy: `/`, `\` and `:` all become `_`
+  (READ: `backup.py`), so a name with an underscore in the original cannot be decoded back unambiguously. The audit log is the
+  only key, and 0 of its 862 backup names point at a file that is gone.
+- **Edits with no backup at all:** the audit log holds **14 `FAILED`** lines ("NO BACKUP EXISTS for this edit") and 3 `BLIND` lines, against 862 recorded backups.
+- **Snapshots are almost all the same bytes.** Hashed (SHA-1) every file in `auto_snapshots`: 72,359 files, 2,816,281,771 bytes,
+  **89 distinct contents totalling 2,764,874 bytes (0.098%)**. Median 68 files / 2.65 MB per snapshot; snapshot age median 1.7 d, max
+  13.9 d, 0 older than 14 d, so the 14-day prune works and 2.8 GB is the steady state of the *current* rate (about 3,500 snapshots logged).
+  That is the same 68 recently-modified `.pex` copied 1,109 times.
+
+### 4. Recommendation (for Plan 6; INFERRED from the numbers above, not built)
+
+Keep the hook non-blocking and keep its trigger; change what it stores.
+
+1. **Manifest plus content-addressed objects, incremental on `(size, mtime_ns)`.** One object store (`objects/<sha256>`) and one small
+   manifest per snapshot (`path -> sha256, size, mtime`). Compare against the previous manifest by stat; hash and copy only files that
+   changed. Measured headroom: the 2.82 GB collapses to about 2.8 MB of distinct content (99.9%). Hardlinks would also work on NTFS
+   but need a same-volume link per file per snapshot (8,470 links per call) and break on a cross-volume or non-NTFS target; the object
+   store has no such failure mode.
+2. **Drop the 7-day filter.** It skips the exact files that matter (section 1). With the incremental store the first call writes a
+   one-time baseline (36.7 MB for all 11,898 files), and every later call writes only what changed. This also removes the
+   "bulk touch costs 3 s / 48 s cold" case after the baseline, since an unchanged-content `touch` hashes but copies nothing.
+3. **Walk nested folders and both source roots** (`Data/Scripts/**`, `Data/Scripts/Source/**`, `Data/Source/Scripts/**`): 3,428 files are invisible today.
+4. **Keep the 60 s rate limit** (72 ms floor is the stat pass over about 8.5 k files); a "changed since last manifest" check must stay a stat, not a hash.
+5. **Edit/Write backups:** write the full original path into the backup's own sidecar (or a manifest entry) so recovery does not depend on the audit log or on decoding `_`; record a loud, countable failure (the 14 `FAILED` lines) in the canary.
+6. **Prune by manifest reachability**, not by directory age, so a snapshot's objects outlive it only while a manifest names them.
+
+Not recommended: "keep" as is. At 1,109 snapshots the current design spends 2.82 GB to hold 2.8 MB, and misses the files it was built for.
