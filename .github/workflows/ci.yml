@@ -146,6 +146,31 @@ jobs:
           sys.exit(1 if missing else 0)
           PY
 
+      # The PowerShell tool is a second way to run any command (E12). A shell hook whose matcher is plain
+      # `Bash` never fires for it, silently. The file-tool hooks must stay off the shells.
+      - name: Shell hooks cover the PowerShell tool
+        run: |
+          python - <<'PY'
+          import json, re, sys
+          cfg = json.load(open('.claude/settings.json'))
+          seen, bad = {}, []
+          for m in cfg['hooks'].get('PreToolUse', []):
+              for h in m.get('hooks', []):
+                  seen[h['command'].rsplit('/', 1)[-1].rstrip('"')] = m.get('matcher', '')
+          for name in ('protect-bash.sh', 'snapshot-before-tool.sh'):
+              rx = re.compile(seen.get(name, '(?!)'))
+              if not (rx.fullmatch('Bash') and rx.fullmatch('PowerShell')) or rx.fullmatch('Write'):
+                  bad.append(name)
+          for name in ('protect-files.sh', 'backup-before-edit.sh'):
+              rx = re.compile(seen.get(name, '(?!)'))
+              if rx.fullmatch('Bash') or rx.fullmatch('PowerShell') or not rx.fullmatch('Write'):
+                  bad.append(name)
+          for n in bad:
+              print(f'::error::hook matcher wrong for {n}: {seen.get(n)!r}')
+          print(f'checked {len(seen)} PreToolUse hook matchers')
+          sys.exit(1 if bad else 0)
+          PY
+
       # A SKILL.md without name+description frontmatter is silently ignored, and a
       # name that does not match its directory never resolves.
       - name: Skill frontmatter is well-formed

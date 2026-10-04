@@ -269,6 +269,30 @@ def test_every_hook_is_registered_in_settings_json():
         + ", ".join(unwired))
 
 
+def test_shell_matcher_covers_powershell():
+    """Claude Code's PowerShell tool is a second way to run any command. A matcher of plain `Bash` leaves
+    it unguarded and unsnapshotted, and nothing errors: the hooks just never fire for it (E12).
+
+    Both shell hooks (the command guard and the .psc snapshot) must sit under a matcher that, compiled as a
+    regex the way Claude Code does (the whole tool name), matches `Bash` and `PowerShell` and not the file
+    tools. The Edit|Write hooks must NOT widen to the shells: they read `file_path`, which a shell tool lacks."""
+    settings = json.loads((REPO / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    by_hook = {}
+    for matcher in settings["hooks"]["PreToolUse"]:
+        for entry in matcher.get("hooks", []):
+            by_hook[entry["command"].rsplit("/", 1)[-1].rstrip('"')] = matcher.get("matcher", "")
+    for hook in ("protect-bash.sh", "snapshot-before-tool.sh"):
+        assert hook in by_hook, f"{hook} is not registered under PreToolUse"
+        rx = re.compile(by_hook[hook])
+        for tool in ("Bash", "PowerShell"):
+            assert rx.fullmatch(tool), f"{hook}: matcher {by_hook[hook]!r} does not match {tool}"
+        for tool in ("Write", "Edit", "Read"):
+            assert not rx.fullmatch(tool), f"{hook}: matcher {by_hook[hook]!r} wrongly matches {tool}"
+    for hook in ("protect-files.sh", "backup-before-edit.sh"):
+        rx = re.compile(by_hook[hook])
+        assert not rx.fullmatch("PowerShell") and not rx.fullmatch("Bash"), f"{hook} must stay on the file tools"
+
+
 def test_every_registered_hook_has_a_timeout_that_is_not_the_old_five_seconds():
     """A PreToolUse hook whose answer arrives after its `timeout` has that refusal
     DISCARDED and the command runs -- measured, and undocumented. `protect-bash.sh`

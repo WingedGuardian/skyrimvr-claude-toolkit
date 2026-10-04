@@ -1712,6 +1712,35 @@ MUTATIONS.append(pytest.param(
 ))
 
 
+_SNAP = "tools/skyguard/snapshot.py"
+_PSR = "tests/test_skyguard_side_effects.py::test_snapshot_skips_powershell_reads"
+MUTATIONS += [   # Task 10 (E12): the PowerShell tool is wired; its read-only verbs take no snapshot
+    pytest.param(".claude/settings.json", '"matcher": "Bash|PowerShell"', '"matcher": "Bash"',
+                 "tests/test_repo_invariants.py::test_shell_matcher_covers_powershell", id="matcher-includes-powershell"),
+    pytest.param(".claude/settings.json", '"matcher": "Edit|Write"', '"matcher": "Edit|Write|PowerShell"',
+                 "tests/test_repo_invariants.py::test_shell_matcher_covers_powershell",
+                 id="matcher-file-hooks-stay-off-powershell"),
+    pytest.param(_SNAP, " or grep(SKIP_POWERSHELL, command, icase=True)", "", _PSR + "[Get-ChildItem Data]",
+                 id="snapshot-skips-pwsh-reads"),
+    pytest.param(_SNAP, "get-[a-z]+|select-string|", "select-string|", _PSR + "[Get-Process]",
+                 id="snapshot-skips-pwsh-get-verbs"),
+    pytest.param(_SNAP, "|select-string|test-path|", "|test-path|", _PSR + "[Select-String -Path a.txt -Pattern x]",
+                 id="snapshot-skips-pwsh-select-string"),
+    pytest.param(_SNAP, "|test-path|resolve-path|", "|resolve-path|", _PSR + "[Test-Path Data]",
+                 id="snapshot-skips-pwsh-test-path"),
+    pytest.param(_SNAP, "|resolve-path|measure-object)", "|measure-object)", _PSR + "[Resolve-Path .]",
+                 id="snapshot-skips-pwsh-resolve-path"),
+    pytest.param(_SNAP, "|resolve-path|measure-object)", "|resolve-path)", _PSR + "[Measure-Object -Line a.txt]",
+                 id="snapshot-skips-pwsh-measure-object"),
+    pytest.param(_SNAP, "grep(SKIP_POWERSHELL, command, icase=True)", "grep(SKIP_POWERSHELL, command, icase=False)",
+                 _PSR + "[GET-CONTENT a]", id="snapshot-pwsh-verbs-are-case-insensitive"),
+    pytest.param(_SNAP, "(\\s|$)\"", "(\\s)\"", _PSR + "[Get-Date]", id="snapshot-pwsh-verb-may-end-the-line"),
+    pytest.param(_SNAP, "(\\s|$)\"", "\"",
+                 "tests/test_skyguard_side_effects.py::test_snapshot_does_not_skip_powershell_writes[Test-PathX]",
+                 id="snapshot-pwsh-verb-must-end-at-a-boundary"),
+]
+
+
 def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:
     work = tmp_path / "mutated"
     shutil.copytree(REPO, work, ignore=MUTATION_IGNORE)
