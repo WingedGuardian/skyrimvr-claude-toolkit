@@ -297,7 +297,10 @@ def test_notebook_edit_on_a_protected_path_is_denied_and_in_scratch_allowed(tmp_
 
 
 @pytest.mark.parametrize("ti", [{}, {"notebook_path": 12}, {"notebook_path": ["a"]}, {"notebook_path": ""},
-                                {"notebook_path": None, "file_path": 12}])
+                                {"notebook_path": None, "file_path": 12},
+                                {"notebook_path": "", "file_path": "C:/scratch/nb.ipynb"},      # present-but-bad: no fallback
+                                {"notebook_path": 12, "file_path": "C:/scratch/nb.ipynb"},
+                                {"notebook_path": None, "file_path": "C:/scratch/nb.ipynb"}])
 def test_notebook_edit_without_a_string_path_fails_closed(ti, tmp_path):
     out = _verdict("protect-files", {"tool_name": "NotebookEdit", "tool_input": ti}, tmp_path)
     assert _decision(out) == "deny"
@@ -316,6 +319,8 @@ def test_notebook_edit_reads_notebook_path_first_then_file_path():
     """notebook_path is what the tool writes, so it wins over a stray file_path; file_path is only the fallback."""
     both = {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": "C:/a/nb.ipynb", "file_path": "C:/b/x.ipynb"}}
     assert claude.extract(json.dumps(both))["file_path"] == "C:/a/nb.ipynb"
+    absent = {"tool_name": "NotebookEdit", "tool_input": {"file_path": "C:/b/x.ipynb"}}
+    assert claude.extract(json.dumps(absent))["file_path"] == "C:/b/x.ipynb"
     only_fp = {"tool_name": "NotebookEdit", "tool_input": {"file_path": "C:/b/x.ipynb"}}
     assert claude.extract(json.dumps(only_fp))["file_path"] == "C:/b/x.ipynb"
 
@@ -337,6 +342,7 @@ def test_websocket_monitor_is_allowed(tmp_path):
     {"ws": WS, "command": ""},                         # ws beside an empty command
     {"ws": WS, "command": None},                       # ws beside a null command
     {"ws": WS, "command": 12},                         # ws beside a non-string command
+    {"ws": {}}, {"ws": {"url": ""}}, {"ws": {"url": 5}}, {"ws": {"protocols": ["x"]}},   # ws object without a real url
 ])
 def test_monitor_ws_twins_still_deny(ti, tmp_path):
     out = _verdict("protect-bash", {"tool_name": "Monitor", "tool_input": ti}, tmp_path)

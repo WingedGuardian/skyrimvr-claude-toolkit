@@ -31,8 +31,9 @@ not the agent. Recapture when an agent upgrades its hook protocol.
   `timeout_ms`. No dialect field.
 - **NotebookEdit** (`claude-PreToolUse-NotebookEdit-1.json`): the path is `tool_input.notebook_path` (absolute); there
   is NO `file_path`. Siblings `cell_id`, `new_source`, `edit_mode`.
-- **Monitor WebSocket form** (`tool_input {ws: {url}, description, timeout_ms}`, no `command`): UNMEASURED here -- reported
-  from another install, no fixture. The adapter's handling is built from that report.
+- **Monitor WebSocket form** (`tool_input {ws: {url}, description, timeout_ms}`, no `command`): UNMEASURED here, no
+  fixture. Evidence is the documented Monitor schema (`ws {url, protocols}`, cannot be combined with `command`; a command
+  Monitor "runs in the same shell environment as Bash") plus a report from another install.
 
 ## Recapture
 

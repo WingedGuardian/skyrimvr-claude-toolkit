@@ -50,21 +50,26 @@ def _file_path(tool_name: str, ti: dict) -> str:
     key = PATH_KEYS.get(tool_name)
     if key is None:
         return _sub(ti.get("file_path"))
-    v = ti.get(key)
-    if isinstance(v, str) and v != "":
-        return _sub(v)
-    # notebook_path is the key the tool writes; a payload that lacks it but carries file_path is judged on that path
-    # rather than refused (the coordinator's cross-install finding: read file_path, then notebook_path).
+    if key in ti:
+        # notebook_path is the key the tool writes. Present but empty / not a string -> "" -> refused; it never falls
+        # back to file_path (that could judge a path the tool does not write).
+        v = ti[key]
+        return _sub(v) if isinstance(v, str) and v != "" else ""
+    # Absent: fall back to file_path (the coordinator's cross-install finding: read file_path, then notebook_path).
     fp = ti.get("file_path")
     return _sub(fp) if isinstance(fp, str) else ""
 
 
 def _is_ws_monitor(tool_name: str, ti: dict) -> bool:
-    """Monitor's WebSocket form: tool_input {ws: {url}, description, timeout_ms} and NO `command` key (reported by the
-    coordinator from a second install; UNMEASURED here -- no fixture, the shape is built from that report). It runs no
-    shell command, so the shell rules have nothing to judge. Strict: ws must be an object and `command` must be absent
-    (ws beside an empty command, ws as a string, or neither key all stay on the fail-closed path)."""
-    return tool_name == "Monitor" and isinstance(ti.get("ws"), dict) and "command" not in ti
+    """Monitor's WebSocket form: tool_input {ws: {url, protocols}, description, timeout_ms} and NO `command` key.
+    Evidence: the DOCUMENTED Monitor tool schema (ws {url, protocols}; it cannot be combined with command; a command
+    Monitor "runs in the same shell environment as Bash"), plus the coordinator's report from a second install.
+    UNMEASURED here -- no captured fixture. A ws Monitor runs no shell command, so the shell rules have nothing to judge.
+    Strict: ws must be an object with a non-empty string `url`, and `command` must be absent (ws beside any command key,
+    ws as a string, ws without a url, or neither key all stay on the fail-closed path)."""
+    ws = ti.get("ws")
+    return (tool_name == "Monitor" and isinstance(ws, dict) and isinstance(ws.get("url"), str) and ws["url"] != ""
+            and "command" not in ti)
 
 
 def extract(payload_text: str) -> dict:
