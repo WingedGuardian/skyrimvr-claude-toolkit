@@ -1538,6 +1538,31 @@ _WRITE_CLAUSES = [
 ]
 MUTATIONS += [pytest.param(f, find, rep, _t08(row), id=i) for i, f, find, rep, row in _WRITE_CLAUSES]
 
+
+# ---- Plan 5 Task 9: every advice anchored to the executed program. Each names the t09 row it must turn red, fired
+# in-process by tests/test_skyguard_t09.py::test_t09_row.
+def _t09(row):
+    return "tests/test_skyguard_t09.py::test_t09_row[t09-" + row + "]"
+
+
+_T9_CLAUSES = [
+    # item 0 (Task 8 review minors)
+    ("rule-S-WRITE-PLUGIN-fallback-first-word", _WR,
+     'words += [m.group(1) or m.group(2) or m.group(3) or "" for m in _REDIRECT_TARGET.finditer(seg)]',
+     'words += _words(seg[seg.index(">") + 1:])', "fallback-interp-gt"),
+    ("rule-S-WRITE-PLUGIN-fallback-arrow", _WR, r'''_REDIRECT_TARGET = re.compile(r"""[0-9&*]?(?<![=\-])>''',
+     r'''_REDIRECT_TARGET = re.compile(r"""[0-9&*]?>''', "fallback-arrow"),
+    ("rule-S-WRITE-PLUGIN-fallback-quoted", _WR, '''(?:"([^"\\n]*)"|'([^'\\n]*)'|''',
+     '''(?:"()"|'()'|''', "fallback-redirect-esp"),
+    ("rule-S-WRITE-PLUGIN-copy-null", _WR,
+     '            if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):',
+     "            if False:", "cp-devnull-esp"),
+    ("rule-S-WRITE-SKSE-INI-copy-resolved", _WR,
+     '            kind = file_class(dst, targets.resolve_operand(e, dst, cwd, env) or "")',
+     "            kind = file_class(dst)", "cp-skse-ini-resolved"),
+]
+MUTATIONS += [pytest.param(f, find, rep, _t09(row), id=i) for i, f, find, rep, row in _T9_CLAUSES]
+
 MUTATIONS.append(pytest.param(   # the pricing driver stops asking the parser: the R4 gate would read 0 forever
     "scripts/guard-corpus/engine_eval.py", "parse_ok = parse_ok and p.ok", "parse_ok = parse_ok",
     "tests/test_price_tool.py::test_parse_failures_are_reported_per_tool_when_the_engine_has_the_parser",

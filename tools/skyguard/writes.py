@@ -18,8 +18,10 @@ WRITE PRIMITIVES (the target is overwritten or appended to in place):
   - [IO.File]::Write* / Append* / Create / OpenWrite (shellparse's io.file.write / io.file.append);
   - `sed -i` (also `-i.bak`, `--in-place`, clusters such as `-Ei`): its file operands;
   - `dd of=FILE`.
+  - a copy FROM a null device (`cp /dev/null X.esp`, `Copy-Item NUL X.esp`): it truncates the destination.
 COPY PRIMITIVES (the destination is replaced by another file): cp, mv, rsync, Copy-Item, Move-Item, cmd
-copy / move / xcopy, robocopy (its file arguments), [IO.File]::Copy / Move / Replace.
+copy / move / xcopy, robocopy (its file arguments), [IO.File]::Copy / Move / Replace. A destination is classified
+as written AND where it resolves (`cp a.ini x.ini` run inside Data/SKSE/Plugins writes an SKSE config).
 
 RULES:
   - S-WRITE-PLUGIN (deny): a write primitive whose target is a plugin or archive, ANY location (like W-PLUGIN).
@@ -35,7 +37,9 @@ RULES:
 READING a plugin or plugins.txt is silent (R11).
 
 NOT SAFE BY DEFAULT. If the parser could not read the command (ok=False, R4) the whole text is checked per
-statement segment instead: a write word followed by a plugin target denies, and the class notes apply. If an
+statement segment instead: a write word followed by a plugin target denies, and the class notes apply. A redirect's
+target is the ONE word right after it (`a>b ... 'x.esp'` in interpreter code is a comparison; `=>`/`->` are arrows);
+tee's targets are all its non-option words; the other write words take every word after them. If an
 exec's program is opaque, its own words get the same segment check, and so -- when it reads a pipe -- do the words
 of the nearest upstream program that is not a shell (`printf 'echo x > X.esp' | sh`). Not every exec's words: a
 hook-test harness passing a write as DATA to a function beside an opaque `bash "$H"` is not a write (priced: 2).
@@ -43,7 +47,10 @@ hook-test harness passing a write as DATA to a function beside an opaque `bash "
 KNOWN LIMITS (recorded, not handled): `perl -i`, interpreter code (`python -c "open('X.esp','w')"`) and opaque
 scripts that write a plugin get no message (R11: the Write-tool deny remains, and Plan 6's read-only lock is the
 backstop); a copy whose unresolved destination does not name a Data folder gets no note (`"$D/My.esp"`);
-`touch` and `truncate` are not write primitives; on a parse failure the S-WRITE-INSTALL note is not attempted.
+`touch` and `truncate` are not write primitives; on a parse failure the S-WRITE-INSTALL note is not attempted;
+a redirect onto a variable assigned in the same command (`P=X.esp; echo x > "$P"`) is unresolved, so it gets no
+deny (the parser does not track assignments); `install` (`install -m644 a X.esp`) and `ln -sf a X.esp` are not
+copy primitives.
 """
 from __future__ import annotations
 
@@ -209,22 +216,38 @@ def _name(word: str) -> str:
 
 
 # ------------------------------------------------------------------------------------------- fallback (R4, opaque)
-_WRITE_WORD = (r">|\btee\b|Set-Content|Add-Content|Out-File|Clear-Content|Tee-Object|::(Write|Append)All"
+# A redirect's target is the ONE word right after it (Task 9 item 0: `"$PY" -c "print(1 if a>b else 'x.esp')"` is a
+# comparison in interpreter code, not a write onto x.esp; `=>` and `->` are arrows). A quoted target keeps its spaces. Non-overlapping finditer,
+# and each alternative stops at its own delimiter, so the scan is linear.
+_REDIRECT_TARGET = re.compile(r"""[0-9&*]?(?<![=\-])>[>|]?[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|([^\s"'<>|;&()]+))""")
+# tee writes EVERY operand it is given (`tee a.log X.esp`), so its words after the options are all targets.
+_TEE = re.compile(r"\btee\b", re.IGNORECASE)
+# The other write words name their target somewhere after them (`Set-Content -Value 1 -Path X.esp`, `sed -i s/a/b/ F`).
+_WRITE_WORD = (r"Set-Content|Add-Content|Out-File|Clear-Content|Tee-Object|::(Write|Append)All"
                r"|\bsed\s+-[A-Za-z]*i|\bsed\s+--in-place|\bof=")
 _SEGMENT = re.compile(r"[\n;&|]")
 
 
+def _words(rest: str) -> List[str]:
+    return rest.replace('"', " ").replace("'", " ").replace(",", " ").replace(")", " ").split()
+
+
 def _segment_hits(text: str) -> List[Tuple[str, str]]:
-    """(kind, word) for each statement segment holding a write word with a classified target AFTER it. Linear:
-    one search for the write word, then one per class, from where the write word ends."""
+    """(kind, word) for each classified write target in each statement segment. Linear: one finditer for redirects,
+    one search each for tee and the other write words, then one pass over the rest of the segment."""
     out = []
     ww = _compile(_WRITE_WORD, True)
     for seg in _SEGMENT.split(text):
+        words = []
+        if ">" in seg:
+            words += [m.group(1) or m.group(2) or m.group(3) or "" for m in _REDIRECT_TARGET.finditer(seg)]
+        m = _TEE.search(seg)
+        if m:
+            words += [w for w in _words(seg[m.end():]) if not w.startswith("-")]
         m = ww.search(seg)
-        if not m:
-            continue
-        rest = seg[m.end():]
-        for word in rest.replace('"', " ").replace("'", " ").replace(",", " ").replace(")", " ").split():
+        if m:
+            words += _words(seg[m.end():])
+        for word in words:
             kind = file_class(word)
             if kind:
                 out.append((kind, word))
@@ -285,7 +308,11 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             elif a is not None and in_install_area(a, roots):
                 notes["S-WRITE-INSTALL"].append(_name(w))
         for dst, srcs in copy_targets(e):
-            kind = file_class(dst)
+            # The destination as written AND where it resolves (`cp a.ini x.ini` run inside Data/SKSE/Plugins).
+            kind = file_class(dst, targets.resolve_operand(e, dst, cwd, env) or "")
+            if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):
+                plugin.append(_name(dst))                           # cp /dev/null X.esp truncates it: a write
+                continue
             if kind and kind != "plugin":
                 notes[RULE_OF_CLASS[kind]].append(_name(dst))      # cp x plugins.txt: a write of the load order
                 continue

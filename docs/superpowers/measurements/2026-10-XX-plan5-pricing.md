@@ -367,3 +367,20 @@ LOADORDER 4, S-WRITE-INI 3, S-WRITE-SKSE-INI 1. 0 errors; parse failures 0 → 6
 
 **Timing.** 16 new shapes x 2 dialects (`test_write_shell_rules_stay_fast`), all linear; worst at 80 KB 109 ms CPU
 (`fallback-write-words`, the parse-failure segment scan), next 36 ms.
+
+## Task 9: every advice anchored to the executed program; 2-line messages; write-guard notes by zone
+
+### Task 9, item 0 (Task 8 review minors)
+
+`--base dffda1a`, N = 62,406 (Bash 55,697, PowerShell 1,604, Write 3,514, Edit 1,586, MCP 5); shell calls 57,301.
+0 errors; parse failures 63 → 63.
+
+| change | newly-deny | newly-ask | newly-advise | no-longer-deny | no-longer-ask | no-longer-advise |
+|---|---|---|---|---|---|---|
+| fallback: one target word after `>` (not the rest of the segment); `=>`/`->` are arrows | 0 | 0 | 0 | 0 | 0 | 0 |
+| a copy's destination classified by its RESOLVED path too | 0 | 0 | 0 | 0 | 0 | 0 |
+| `cp /dev/null X.esp` (a copy from a null device) is a write | 0 | 0 | 0 | 0 | 0 | 0 |
+
+Decision matrix unchanged (advise 607, allow 61,433, ask 11, deny 355). The three shapes do not occur in this
+machine's history; each is pinned by a `t09-*` row and a mutation. tee keeps ALL its operands as targets (not just
+the first word): `tee a.log X.esp` really writes X.esp, so "first word only" would be a miss, not a fix.

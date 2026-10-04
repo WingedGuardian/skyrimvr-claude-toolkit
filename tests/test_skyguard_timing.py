@@ -265,7 +265,15 @@ def _shell_write_shapes(N_):
         "fallback-write-words": 'echo "' + "> " * (N_ // 2),
         "opaque-pipe-text": "printf '" + ("echo > " + F + ".esp ") * (N_ // 72) + "' | sh",
         "opaque-many-pipes": ("printf " + W + " | $X; ") * (N_ // 211),
+        # Task 9 item 0: the fallback's redirect target (one word, quoted or not) and tee's operand list.
+        "opaque-gt-run": '"$X" -c "' + "a>b " * (N_ // 4) + '"',
+        "opaque-gt-quote-run": "\"$X\" -c '" + '>"' * (N_ // 2) + "'",
+        "opaque-tee-options": '"$X" -c "tee ' + ("-" + F + " ") * (N_ // 62) + 'x.esp"',
+        "fallback-gt-quote-run": 'echo "' + "> '" * (N_ // 3),
     }
+
+
+BASH_OPAQUE = {"opaque-gt-run", "opaque-gt-quote-run", "opaque-tee-options"}
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
@@ -276,6 +284,9 @@ def test_the_write_shapes_reach_the_write_code(shell):
         p = shellparse.parse(cmd, shell)
         if name.startswith("fallback-"):
             assert not p.ok, (name, shell)
+            continue
+        if shell == "powershell" and name in BASH_OPAQUE:
+            assert p.ok, (name, shell, p.why)       # `"$X" -c ...` is a string expression in PowerShell, not an exec
             continue
         assert p.ok and p.execs, (name, shell, p.why)
 
