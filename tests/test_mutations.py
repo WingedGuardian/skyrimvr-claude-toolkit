@@ -610,8 +610,8 @@ MUTATIONS = [
         # Widen the --help line range back over the code. A banner that prints too
         # much still looks like a banner, which is why this rotted unnoticed.
         "tools/esp-verify-wrapper.sh",
-        "    sed -n '2,40p' \"$0\"",
-        "    sed -n '2,44p' \"$0\"",
+        "    sed -n '2,42p' \"$0\"",
+        "    sed -n '2,46p' \"$0\"",
         "tests/test_repo_invariants.py::test_help_banner_range_stays_inside_the_comment_header",
         id="help-banner-leaks-source",
     ),
@@ -2264,12 +2264,22 @@ MUTATIONS += [
                  id="require-harness-without-harness-is-silent"),
 
     pytest.param("setup.sh",
-                 '    echo "  Setup does not install it. When you need xeditlib, install it yourself:"
-',
-                 '    winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements 2>/dev/null || true
-',
+                 '    echo "  Setup does not install it. When you need xeditlib, install it yourself:"\n',
+                 '    winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements 2>/dev/null || true\n',
                  "tests/test_setup_paths.py::test_setup_without_node_prints_instructions_and_never_runs_a_package_manager",
                  id="setup-no-node-autoinstall"),
+
+    pytest.param("tools/esp-verify-wrapper.sh",
+                 'if [ "$allow_empty" -eq 0 ] && { [ ! -s "$snap" ] || [ ! -s "$after" ]; }; then',
+                 'if false; then',
+                 "tests/test_esp_verify.py::test_two_empty_inventories_are_not_a_pass",
+                 id="esp-verify-empty-inventory-fails"),
+
+    pytest.param("tools/esp-verify-wrapper.sh",
+                 '  if [ -z "$(find "$tmp" -name \'*.yaml\' -print -quit)" ]; then',
+                 '  if false; then',
+                 "tests/test_esp_verify.py::test_snapshot_dies_when_the_serializer_yields_no_yaml",
+                 id="esp-verify-no-yaml-dies"),
 ]
 
 

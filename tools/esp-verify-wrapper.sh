@@ -24,11 +24,13 @@
 #   tools/esp-verify-wrapper.sh snapshot <plugin> [<plugin> ...]
 #       Record the current cross-reference inventory of each plugin.
 #
-#   tools/esp-verify-wrapper.sh verify   <plugin> [<plugin> ...]
+#   tools/esp-verify-wrapper.sh verify   [--allow-empty] <plugin> [<plugin> ...]
 #       Re-inventory and diff against the stored snapshot. Exit 1 on any
-#       master change or dropped reference.
+#       master change or dropped reference. Also exit 1 (REFUSING PASS) when the
+#       snapshot or the new inventory holds zero cross-references, unless
+#       --allow-empty says the plugin genuinely has none.
 #
-#   tools/esp-verify-wrapper.sh guard <plugin> [<plugin> ...] -- <command...>
+#   tools/esp-verify-wrapper.sh guard [--allow-empty] <plugin> [<plugin> ...] -- <command...>
 #       snapshot -> run <command> -> verify, in one shot.
 #
 # Snapshots are stored OUTSIDE the game directory ($HOME/.esp-verify-snapshots)
@@ -63,6 +65,13 @@ build_inventory() {
     rm -rf "$tmp"
     die "spriggit serialize failed for $plugin"
   fi
+  # A serializer that exits 0 yet wrote no YAML (missing runtime, wrong package version) would
+  # otherwise yield an empty inventory, and empty-vs-empty reads as "no changes": a PASS from a
+  # check that looked at nothing.
+  if [ -z "$(find "$tmp" -name '*.yaml' -print -quit)" ]; then
+    rm -rf "$tmp"
+    die "spriggit serialize produced no YAML for $plugin -- nothing to inventory"
+  fi
   : > "$out"
   find "$tmp" -name '*.yaml' | while IFS= read -r f; do
     local base rec
@@ -90,6 +99,12 @@ cmd_snapshot() {
 compare_inventory() {
   local name="$1" before="$2" after="$3" rc=0
   local removed added
+  if [ ! -s "$before" ]; then   # only reachable under --allow-empty; awk below needs a non-empty first file
+    comm -13 "$before" "$after" | awk -F'	' '{ printf "  + reference added (info)  %-22s %s
+", $1, $2 }'
+    echo "  ✓ $name — only reference additions (no masters changed, none dropped)"
+    return 0
+  fi
   removed="$(comm -23 "$before" "$after")"
   added="$(comm -13 "$before" "$after")"
 
@@ -138,7 +153,16 @@ compare_inventory() {
   return $rc
 }
 
+# which_empty <snapshot> <after> -> a phrase naming the empty inventory(ies)
+which_empty() {
+  if [ ! -s "$1" ] && [ ! -s "$2" ]; then echo "both the snapshot and the new inventory"
+  elif [ ! -s "$1" ]; then echo "the snapshot inventory"
+  else echo "the new inventory"; fi
+}
+
 cmd_verify() {
+  local allow_empty=0
+  if [ "${1:-}" = "--allow-empty" ]; then allow_empty=1; shift; fi
   [ "$#" -ge 1 ] || die "verify needs at least one plugin path"
   local p name snap after overall=0
   echo "=============================================="
@@ -150,6 +174,12 @@ cmd_verify() {
     [ -f "$snap" ] || die "no snapshot for $name — run 'snapshot $name' before the operation"
     after="$(mktemp)"
     build_inventory "$p" "$after"
+    if [ "$allow_empty" -eq 0 ] && { [ ! -s "$snap" ] || [ ! -s "$after" ]; }; then
+      echo "  ✗ $name — REFUSING PASS: $(which_empty "$snap" "$after") holds 0 cross-references; pass --allow-empty if that is genuinely so"
+      overall=1
+      rm -f "$after"
+      continue
+    fi
     compare_inventory "$name" "$snap" "$after" || overall=1
     rm -f "$after"
   done
@@ -165,7 +195,8 @@ cmd_verify() {
 }
 
 cmd_guard() {
-  local plugins=() sawsep=0
+  local plugins=() sawsep=0 vflag=()
+  if [ "${1:-}" = "--allow-empty" ]; then vflag=(--allow-empty); shift; fi
   while [ "$#" -gt 0 ]; do
     if [ "$1" = "--" ]; then sawsep=1; shift; break; fi
     plugins+=("$1"); shift
@@ -178,7 +209,7 @@ cmd_guard() {
   echo "esp-verify: running guarded command: $*"
   "$@"; local cmdrc=$?
   echo "esp-verify: command exited with code $cmdrc"
-  cmd_verify "${plugins[@]}"; local vrc=$?
+  cmd_verify ${vflag[@]+"${vflag[@]}"} "${plugins[@]}"; local vrc=$?
   [ "$cmdrc" -eq 0 ] && [ "$vrc" -eq 0 ]
 }
 
@@ -187,7 +218,7 @@ case "${1:-}" in
   verify)   shift; cmd_verify   "$@" ;;
   guard)    shift; cmd_guard    "$@" ;;
   ""|-h|--help)
-    sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'
     ;;
   *) die "unknown subcommand '${1}' — use snapshot | verify | guard" ;;
 esac
