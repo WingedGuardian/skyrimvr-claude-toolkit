@@ -47,21 +47,21 @@ def del_install(f):
 
 def test_rule0_empty_command(tmp_path):
     v = run("", tmp_path)
-    assert (v.decision, v.reason) == ("deny", inert(59))
+    assert (v.decision, v.reason) == ("deny", rules.RULES["S-INERT-NOCMD"]["template"])
     log = (tmp_path / ".claude/backups/AUDIT_LOG.txt").read_text(encoding="utf-8")
     assert "protect-bash REFUSE: " + re.search(r'hooklog REFUSE "(.*)"', LINES[57]).group(1) in log
 
 
 def test_rule0b_no_root(tmp_path):
     v = shell_rules.decide("ls", paths.Roots("", "x"), audit.Audit(str(tmp_path)))
-    assert (v.decision, v.reason) == ("deny", inert(216))
+    assert (v.decision, v.reason) == ("deny", rules.RULES["S-INERT-NOROOT"]["template"])
     log = (tmp_path / ".claude/backups/AUDIT_LOG.txt").read_text(encoding="utf-8")
     assert "protect-bash REFUSE: " + re.search(r'hooklog REFUSE "(.*)"', LINES[214]).group(1) in log
 
 
 def test_rule0_checked_before_0b(tmp_path):
     v = shell_rules.decide("", paths.Roots("", ""), audit.Audit(str(tmp_path)))
-    assert v.reason == inert(59)
+    assert v.reason == rules.RULES["S-INERT-NOCMD"]["template"]
 
 
 def test_rule1_config_delete_denied(tmp_path):
@@ -355,7 +355,8 @@ def test_unicode_word_boundary_residue_is_never_looser(tmp_path):
 
 def test_every_message_constant_equals_the_bash_text():
     expected = {
-        "NO_COMMAND_DENY": inert(59), "NO_ROOT_DENY": inert(216),
+        "NO_COMMAND_DENY": rules.RULES["S-INERT-NOCMD"]["template"],
+        "NO_ROOT_DENY": rules.RULES["S-INERT-NOROOT"]["template"],
         "NO_COMMAND_LOG": re.search(r'hooklog REFUSE "(.*)"', LINES[57]).group(1),
         "NO_ROOT_LOG": re.search(r'hooklog REFUSE "(.*)"', LINES[214]).group(1),
     }

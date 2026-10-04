@@ -55,14 +55,14 @@ def advice(path, tmp_path, cwd=""):
 
 def test_rule0_empty_path(tmp_path):
     v = run("", tmp_path)
-    assert (v.decision, v.reason, v.context) == ("deny", inert(84), "")
+    assert (v.decision, v.reason, v.context) == ("deny", rules.RULES["W-INERT-NOPATH"]["template"], "")
     assert "protect-files REFUSE: " + re.search(r'hooklog REFUSE "(.*)"', LINES[82]).group(1) in log_text(tmp_path)
 
 
 def test_rule1_plugin_write_denied(tmp_path):
     for ext in ("esp", "esm", "esl", "bsa", "ba2", "ESP"):
         v = run("C:/x/Data/My." + ext, tmp_path)
-        assert (v.decision, v.reason) == ("deny", msg(98)), ext
+        assert (v.decision, v.reason) == ("deny", rules.RULES["W-PLUGIN"]["template"]), ext
     # trailing dots/space still count; a longer extension or a bare word does not
     assert run("C:/x/Data/My.esp. ", tmp_path).decision == "deny"
     assert run("C:/x/notes/My.espx", tmp_path) == ("allow", "", "")
@@ -164,15 +164,15 @@ def test_audit_lines(tmp_path):
     run("C:/x/Data/My.esp", tmp_path)
     run("C:/x/plugins.txt", tmp_path)
     log = log_text(tmp_path)
-    assert "protect-files DENY: " + msg(98) in log
+    assert "protect-files DENY: " + rules.RULES["W-PLUGIN"]["template"] in log
     assert "protect-files ADVISE: " + note("W-LOADORDER", "plugins.txt") in log
 
 
 def test_every_message_constant_equals_the_bash_text():
     expected = {
-        "NO_PATH_DENY": inert(84),
+        "NO_PATH_DENY": rules.RULES["W-INERT-NOPATH"]["template"],
         "NO_PATH_LOG": re.search(r'hooklog REFUSE "(.*)"', LINES[82]).group(1),
-        "DENY_PLUGIN": msg(98),
+        "DENY_PLUGIN": rules.RULES["W-PLUGIN"]["template"],
     }
     for name, text in expected.items():
         assert getattr(write_rules, name) == text, name
@@ -235,7 +235,9 @@ def test_port_matches_recorded_bash_verdict(tmp_path, cid, path, decision, text)
         got = (v.decision, v.reason)
     assert got[0] == decision
     if decision == "deny":
-        assert got[1] == text
+        # Task 13 rewrote the one text a protect-files deny carries; the frozen text only identifies the rule.
+        assert "plugin/archive" in text, text
+        assert got[1] == rules.RULES["W-PLUGIN"]["template"]
 
 
 def test_rule_trace_records_the_rule_id(tmp_path):

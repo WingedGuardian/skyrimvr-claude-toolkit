@@ -30,24 +30,21 @@ RULES = {
     'S-INERT-NOCMD': {
         "decision": 'deny',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'GUARD INERT: protect-bash.sh received no command and therefore checked '
-        'NOTHING. Allowing silently would be indistinguishable from deciding '
-        'this is fine. Investigate the hook payload before retrying.'
+        'GUARD INERT: protect-bash.sh received no command, so it checked nothing.\n'
+        'Investigate the hook payload before retrying.'
     ),
     },
     'S-INERT-NOROOT': {
         "decision": 'deny',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'GUARD INERT: protect-bash.sh could not work out which directory is the '
-        'Skyrim install, so its delete rules checked NOTHING. Allowing silently '
-        'would be indistinguishable from having no guard at all. Re-run '
-        'setup.sh from your Skyrim folder.'
+        'GUARD INERT: protect-bash.sh cannot tell which folder is the Skyrim install, so its delete rules checked nothing.\n'
+        'Re-run setup.sh from your Skyrim folder.'
     ),
     },
     'S-INERT-CONFIG': {
@@ -291,22 +288,21 @@ RULES = {
     'W-INERT-NOPATH': {
         "decision": 'deny',
         "hook": 'protect-files',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'GUARD INERT: protect-files.sh received no file_path and therefore '
-        'checked NOTHING. Allowing silently would be indistinguishable from '
-        'deciding this is fine. Investigate the hook payload before retrying.'
+        'GUARD INERT: protect-files.sh received no file path, so it checked nothing.\n'
+        'Investigate the hook payload before retrying.'
     ),
     },
     'W-PLUGIN': {
         "decision": 'deny',
         "hook": 'protect-files',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'BLOCKED: Cannot directly write to plugin/archive files. Use xelib, '
-        'Spriggit or AutoMod.'
+        'Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly.\n'
+        'Use xelib, Spriggit or AutoMod to change them instead.'
     ),
     },
     'W-INI': {

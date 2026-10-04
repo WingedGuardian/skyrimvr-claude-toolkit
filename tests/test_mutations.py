@@ -2187,6 +2187,50 @@ MUTATIONS += [
 ]
 
 
+# --- Task 13: the strict message contract and the registry rules it emptied of legacy text. One twin per clause.
+_RM = "tests/test_rule_messages.py::"
+_USE = "'Use xelib, Spriggit or AutoMod to change them instead.'"
+_USE3 = "'Use xelib, Spriggit or AutoMod to change them instead.\\nThird line.'"
+MUTATIONS += [
+    pytest.param("tools/skyguard/shell_rules.py", '    if roots.game == "":', '    if roots.game == None:',
+                 "tests/test_skyguard_shell.py::test_rule0b_no_root", id="rule-S-INERT-NOROOT-empty-root"),
+    pytest.param("tools/skyguard/write_rules.py", '    if file_path == "":', '    if file_path == None:',
+                 "tests/test_skyguard_write.py::test_rule0_empty_path", id="rule-W-INERT-NOPATH-empty-path"),
+    pytest.param("tools/skyguard/write_rules.py", '    if grep(targets.PLUGIN_FILE, file_path):', '    if False:',
+                 "tests/test_skyguard_write.py::test_rule1_plugin_write_denied", id="rule-W-PLUGIN-plugin-file"),
+    # messages-no-echo: the command is appended to a live message; only the corpus-wide check can see that.
+    pytest.param("tools/skyguard/shell_rules.py",
+                 'reason = rules.message("S-RESAVER-APPLY", op=op, save=save or "the save")',
+                 'reason = rules.message("S-RESAVER-APPLY", op=op, save=save or "the save") + " " + command',
+                 _RM + "test_no_message_echoes_its_command", id="messages-no-echo"),
+    # ... and the static twin: a template that carries a command placeholder.
+    pytest.param("tools/skyguard/rules.py", _USE, "'Use xelib, Spriggit or AutoMod to change them instead of {c}.'",
+                 _RM + "test_no_template_echoes_the_command", id="messages-no-echo-template"),
+    # messages-two-lines: a third line, seen by the corpus-wide check and by the per-template check.
+    pytest.param("tools/skyguard/rules.py", _USE, _USE3, _RM + "test_no_message_echoes_its_command",
+                 id="messages-two-lines"),
+    pytest.param("tools/skyguard/rules.py", _USE, _USE3, _RM + "test_message_shape", id="messages-two-lines-shape"),
+    # the R13 exemption must stay narrow: only a payload-* row ...
+    pytest.param("tests/test_rule_messages.py",
+                 'return row_id.startswith("payload-") and bool(WRAPPER_INERT.match(text))',
+                 'return bool(WRAPPER_INERT.match(text))',
+                 _RM + "test_the_wrapper_exemption_does_not_widen", id="messages-exemption-any-row"),
+    # ... only that exact text (the end anchor) ...
+    pytest.param("tests/test_rule_messages.py", 'indistinguishable from approving\\.$")',
+                 'indistinguishable from approving\\.")',
+                 _RM + "test_the_wrapper_exemption_does_not_widen", id="messages-exemption-any-suffix"),
+    # ... and it may skip the shape check, never the echo check.
+    pytest.param("tests/test_rule_messages.py", "    run = echoed_run(text, payload)\n    if run:",
+                 "    run = None if _wrapper_exempt(row_id, text) else echoed_run(text, payload)\n    if run:",
+                 _RM + "test_the_wrapper_exemption_does_not_widen", id="messages-exemption-skips-echo"),
+    # a legacy message coming back
+    pytest.param("tools/skyguard/rules.py",
+                 '"legacy": False,\n        "prefixes": [],\n        "template": (\n        \'Blocked: plugin',
+                 '"legacy": True,\n        "prefixes": [],\n        "template": (\n        \'Blocked: plugin',
+                 _RM + "test_no_legacy_messages", id="messages-legacy-returns"),
+]
+
+
 def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:
     work = tmp_path / "mutated"
     shutil.copytree(REPO, work, ignore=MUTATION_IGNORE)

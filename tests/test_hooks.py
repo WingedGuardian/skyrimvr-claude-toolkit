@@ -661,7 +661,7 @@ def test_protect_bash_resolves_its_install_however_it_is_launched(project, how):
 def test_protect_files_works_however_it_is_launched(project, how):
     esp = {"tool_name": "Write", "tool_input": {"file_path": "C:/Games/Skyrim VR/Data/M.esp"}}
     got = _decision(_invoke(project, "protect-files.sh", esp, how))
-    assert got[0] == "deny" and got[1].startswith("BLOCKED"), f"{how}: {got}"
+    assert got[0] == "deny" and got[1].startswith("Blocked"), f"{how}: {got}"
     ok = _decision(_invoke(project, "protect-files.sh",
                            {"tool_name": "Write", "tool_input": {"file_path": "C:/work/notes.md"}}, how))
     assert ok[0] == "allow", f"{how}: {ok}"
