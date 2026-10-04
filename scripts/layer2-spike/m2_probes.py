@@ -102,8 +102,9 @@ def claude(root, out, only=None):
 
 
 def codex(root, out, trusted=False):
-    """Master ships no Codex hooks (Plan 4 is unmerged), so every Codex route here is the
-    'hooks absent/unapproved' case (F6 shape). F5 (approved hooks) goes to batch B3."""
+    """Master carries Plan 4's Codex hooks (merged as e20bb07). Without trust they are skipped
+    (F6/F7); `codex-trusted` adds --dangerously-bypass-hook-trust, the automatable equivalent of
+    approved hooks (F5/F7')."""
     res = {}
     st, ctl = os.path.join(root, ".skyguard", "state.json"), os.path.join(root, ".skyguard", "control.json")
     routes = {
