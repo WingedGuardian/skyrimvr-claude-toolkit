@@ -5,7 +5,7 @@ advisories (which accumulate), then the catch-all, which fires only if nothing m
 """
 from __future__ import annotations
 
-from . import rules
+from . import rules, targets
 from .grep import grep
 from .verdict import Advice, Verdict
 
@@ -28,7 +28,7 @@ def decide(file_path: str, audit) -> Verdict:
         audit.rule(HOOK, "W-INERT-NOPATH", "deny", NO_PATH_LOG, level="REFUSE")
         return Verdict("deny", NO_PATH_DENY)
 
-    if grep(r"\.(esp|esm|esl|bsa|ba2)[\s.]*$", file_path):
+    if grep(targets.PLUGIN_FILE, file_path):
         audit.rule(HOOK, "W-PLUGIN", "deny", DENY_PLUGIN)
         return Verdict("deny", DENY_PLUGIN)
 
@@ -44,11 +44,11 @@ def decide(file_path: str, audit) -> Verdict:
         audit.rule(HOOK, rule_id, "advise", text)
         advice.add(text)
 
-    if grep(r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)$", file_path):
+    if grep(targets.SKYRIM_INI, file_path):
         advise("W-INI")
-    if grep(r"(?<![/\\])[/\\]+Data[/\\]+SKSE[/\\]+Plugins[/\\]+.*\.ini$", file_path):
+    if grep(targets.SKSE_INI, file_path):
         advise("W-SKSE-INI")
-    if grep(r"(loadorder\.txt|plugins\.txt)$", file_path):
+    if grep(targets.LOADORDER, file_path):
         advise("W-LOADORDER")
     if grep(r"\.(pex|psc)$", file_path):
         advise("W-PAPYRUS")

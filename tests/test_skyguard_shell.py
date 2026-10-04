@@ -144,9 +144,12 @@ def test_rule8_move_copy(tmp_path):
 
 
 def test_rule9_redirect(tmp_path):
-    cmd = f'echo hi > "{GAME}/notes.txt"'
-    assert advice(cmd, tmp_path) == sub(284, cmd)
+    # Task 8: the text-matched redirect note (S-REDIRECT-INSTALL) is gone; a redirect into the install's Data/ folder
+    # is S-WRITE-INSTALL, decided on the redirect's resolved target.
+    assert advice(f'echo hi > "{GAME}/Data/notes.txt"', tmp_path) == rules.message("S-WRITE-INSTALL", file="notes.txt")
+    assert advice(f'echo hi > "{GAME}/notes.txt"', tmp_path) == ""         # the install root is not Data/
     assert advice("echo hi > /tmp/n.txt", tmp_path) == ""
+    assert "S-REDIRECT-INSTALL" in rules.REMOVED
 
 
 def test_rule10_sed(tmp_path):
@@ -156,15 +159,19 @@ def test_rule10_sed(tmp_path):
 
 
 def test_rule11_plugin_files(tmp_path):
-    cmd = "cat My.esp"
-    assert advice(cmd, tmp_path) == sub(288, cmd)
-    assert advice("cat espresso.txt", tmp_path) == ""
+    # R11 (Task 8): reading a plugin is silent; writing one by a shell primitive is S-WRITE-PLUGIN (deny).
+    assert advice("cat My.esp", tmp_path) == ""
+    v = run("echo x > My.esp", tmp_path)
+    assert (v.decision, v.reason) == ("deny", rules.message("S-WRITE-PLUGIN", file="My.esp"))
+    assert "S-PLUGIN-REF" in rules.REMOVED
 
 
 def test_rule12_load_order(tmp_path):
-    cmd = "cat plugins.txt"
-    assert advice(cmd, tmp_path) == sub(289, cmd)
-    assert advice("cat plugins.json", tmp_path) == ""
+    # Task 8: reading plugins.txt is silent; a write is S-WRITE-LOADORDER.
+    assert advice("cat plugins.txt", tmp_path) == ""
+    assert advice("echo x >> plugins.txt", tmp_path) == rules.message("S-WRITE-LOADORDER", file="plugins.txt")
+    assert advice("echo x >> plugins.json", tmp_path) == ""
+    assert "S-LOADORDER-REF" in rules.REMOVED
 
 
 def test_rule13_automod_esp_write(tmp_path):
@@ -198,7 +205,7 @@ def test_rule16_resaver_apply_asks(tmp_path):
 
 
 def test_rule16_ask_drops_earlier_advice(tmp_path):
-    v = run("cat plugins.txt; bash tools/resaver-cli.sh reset-havok s.ess --apply", tmp_path)
+    v = run("echo x >> plugins.txt; bash tools/resaver-cli.sh reset-havok s.ess --apply", tmp_path)
     assert v.decision == "ask" and v.context == ""
     assert v.reason == NEW_RESAVER
 
@@ -239,15 +246,16 @@ def test_rule17_external_tool_output_into_game(tmp_path):
 
 
 def test_advice_joined_in_rule_order(tmp_path):
-    cmd = "rm Data/a.esp"
-    assert advice(cmd, tmp_path) == rules.message("S-RELATIVE-UNKNOWN", file="a.esp") + " | " + sub(288, cmd)
+    cmd = "rm Data/a.esp; echo x >> plugins.txt"
+    assert advice(cmd, tmp_path) == (rules.message("S-RELATIVE-UNKNOWN", file="a.esp") + " | "
+                                     + rules.message("S-WRITE-LOADORDER", file="plugins.txt"))
 
 
 def test_audit_lines_logged(tmp_path):
-    run("cat plugins.txt", tmp_path)
+    run("echo x >> plugins.txt", tmp_path)
     run(f'rm -rf "{GAME}"', tmp_path)
     log = (tmp_path / ".claude/backups/AUDIT_LOG.txt").read_text(encoding="utf-8")
-    assert "protect-bash ADVISE: " + sub(289, "cat plugins.txt") in log
+    assert "protect-bash ADVISE: " + rules.message("S-WRITE-LOADORDER", file="plugins.txt") in log
     assert "protect-bash DENY: " + del_install("The Elder Scrolls V Skyrim VR") in log
 
 
@@ -310,11 +318,20 @@ def test_port_matches_recorded_bash_verdict(tmp_path, cid, layout, cmd, decision
 # STRICTER than bash here, never looser. Measured against the real hook on this machine: all four are allowed.
 RESIDUE = {   # input -> the decision the port gives today (bash allows every one of them)
     f'Champollioné "{GAME}/Data/Scripts/Foo.pex"': "deny",
-    "cat My.espé": "advise",
-    "cat a.esp b": "advise",  # bash on this Windows build sees U+2003 as a word char; UTF-8 Linux does not
-    "cat X.ESPİ": "advise",
 }
+# Task 8 (R11): the plugin-reference note that made these three stricter than bash is gone; a READ is silent,
+# so the port now agrees with bash on them.
+RESIDUE_RESOLVED = (
+    "cat My.espé",
+    "cat a.esp b",
+    "cat X.ESPİ",
+)
 STRICTNESS = {"allow": 0, "advise": 1, "ask": 2, "deny": 3}
+
+
+@pytest.mark.parametrize("cmd", RESIDUE_RESOLVED)
+def test_unicode_residue_on_a_plugin_read_now_matches_bash(tmp_path, cmd):
+    assert run(cmd, tmp_path) == ("allow", "", "")
 
 
 @pytest.mark.parametrize("cmd,expected", sorted(RESIDUE.items()))
@@ -333,15 +350,20 @@ def test_every_message_constant_equals_the_bash_text():
         "NO_ROOT_LOG": re.search(r'hooklog REFUSE "(.*)"', LINES[214]).group(1),
         "DENY_REGISTRY": msg(258), "DENY_PSC": msg(263),
         "DENY_CHAMPOLLION": msg(271),
-        "ADV_MOVE": msg(283), "ADV_REDIRECT": msg(284),
-        "ADV_SED": msg(285), "ADV_PLUGIN": msg(288), "ADV_LOADORDER": msg(289), "ADV_AUTOMOD_ESP": msg(293),
+        "ADV_MOVE": msg(283),
+        "ADV_SED": msg(285), "ADV_AUTOMOD_ESP": msg(293),
         "ADV_AUTOMOD_NIF": msg(295), "ADV_AUTOMOD_ARCHIVE": msg(296),
         "ADV_EXTERNAL": msg(309),
     }
     for name, text in expected.items():
         assert getattr(shell_rules, name) == text.replace("$COMMAND", "{c}"), name
+    # Constants added by Plan 5 have no bash original; each is its registry template (Plan 4's Codex trip-wire keys
+    # on these names, so a new deny is visible at the merge).
+    plan5 = {"DENY_WRITE_PLUGIN": rules.RULES["S-WRITE-PLUGIN"]["template"]}
+    for name, text in plan5.items():
+        assert getattr(shell_rules, name) == text, name
     consts = {n for n in dir(shell_rules) if n.startswith(("DENY_", "ADV_", "ASK_", "NO_"))}
-    assert consts == set(expected), consts ^ set(expected)
+    assert consts == set(expected) | set(plan5), consts ^ (set(expected) | set(plan5))
 
 
 def test_ask_path_writes_the_ask_audit_line(tmp_path):
@@ -357,8 +379,8 @@ def test_rule_trace_records_the_rule_id(tmp_path):
     shell_rules.decide(f'rm -rf "{GAME}/Data"', r, a)
     assert a.fired == [("S-DEL-INSTALL", "deny")]
     a = audit.Audit(str(tmp_path))
-    shell_rules.decide("cat plugins.txt", r, a)
-    assert a.fired == [("S-LOADORDER-REF", "advise")]
+    shell_rules.decide("echo x >> plugins.txt", r, a)
+    assert a.fired == [("S-WRITE-LOADORDER", "advise")]
     a = audit.Audit(str(tmp_path))
     shell_rules.decide("bash tools/resaver-cli.sh reset-havok s.ess --apply", r, a)
     assert a.fired == [("S-RESAVER-APPLY", "ask")]

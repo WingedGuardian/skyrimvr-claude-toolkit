@@ -1180,7 +1180,8 @@ for _suffix, _find, _rep in [
     ("install", r'r"(^|(?<![/\\])[/\\]+)Data', r'r"(^|[/\\]+)Data'),
 ]:
     MUTATIONS.append(pytest.param(
-        "tools/skyguard/write_rules.py", _find, _rep,
+        # Task 8: the SKSE-ini pattern moved to targets.py (one classifier for both guards)
+        "tools/skyguard/targets.py" if _suffix == "skse-ini" else "tools/skyguard/write_rules.py", _find, _rep,
         "tests/test_skyguard_timing.py::test_write_rules_stay_fast_on_adversarial_paths[separator-run]",
         id="guard-timing-separator-run-lookbehind-" + _suffix,
     ))
@@ -1479,6 +1480,63 @@ MUTATIONS.append(pytest.param(   # a quoted `[x]` in the install's own name is l
     "tests/test_guard_corpus.py::test_hook_reproduces_the_recorded_decision_and_rules[root-metachar-self]",
     id="rule-S-DEL-INSTALL-literal-quoted-glob",
 ))
+
+# ---- Plan 5 Task 8: shell writes (E21). One twin per primitive class and per clause; each names the t08 row it must
+# turn red, fired in-process by tests/test_skyguard_writes.py::test_t08_row.
+_WR = "tools/skyguard/writes.py"
+_TGT = "tools/skyguard/targets.py"
+
+
+def _t08(row):
+    return "tests/test_skyguard_writes.py::test_t08_row[t08-" + row + "]"
+
+
+_WRITE_CLAUSES = [
+    # (id, file, find, replace, t08 row that must go red)
+    ("rule-S-WRITE-PLUGIN-redirect", _WR, "    out = _redirect_targets(e)\n", "    out = []\n", "redirect-esp"),
+    ("rule-S-WRITE-PLUGIN-tee", _WR, '    if p == "tee":', "    if False:", "tee-esm"),
+    ("rule-S-WRITE-PLUGIN-set-content", _WR, '("set-content", "add-content", "clear-content", "new-item")',
+     '("add-content", "clear-content", "new-item")', "set-content-pwsh"),
+    ("rule-S-WRITE-PLUGIN-out-file", _WR, '("tee-object", "out-file")', '("tee-object",)', "out-file-esl"),
+    ("rule-S-WRITE-PLUGIN-iofile", _WR, '("io.file.write", "io.file.append")', '("io.file.append",)', "iofile-esp"),
+    ("rule-S-WRITE-PLUGIN-sed-i", _WR, "        out += _sed_files(e.argv)", "        out += []", "sed-i-esp"),
+    ("rule-S-WRITE-PLUGIN-dd", _WR, 'w.startswith("of=")]', 'w.startswith("xx=")]', "dd-of-esp"),
+    ("rule-S-WRITE-PLUGIN-wired", "tools/skyguard/shell_rules.py", "    if wr.deny:", "    if False:", "redirect-esp"),
+    ("rule-S-WRITE-PLUGIN-parse-fail", _WR, "texts = [command] if not parsed.ok else", "texts = [] if not parsed.ok else",
+     "parse-fail-esp"),
+    ("rule-S-WRITE-PLUGIN-opaque-upstream", _WR, '        if e.stdin_from == "pipe":', "        if False:",
+     "opaque-pipe-esp"),
+    ("rule-S-WRITE-PLUGIN-opaque-not-whole-command", _WR,
+     "texts = [command] if not parsed.ok else _opaque_texts(parsed.execs)",
+     'texts = [command] if not parsed.ok or any(e.program == "?" for e in parsed.execs) else []',
+     "harness-data-esp"),
+    # S-COPY-PLUGIN (advise)
+    ("rule-S-COPY-PLUGIN-destination-only", _WR, "            a = targets.resolve_operand(e, cand, cwd, env)",
+     "            a = targets.resolve_operand(e, srcs[0] if srcs else cand, cwd, env)", "cp-source-only"),
+    ("rule-S-COPY-PLUGIN-zone", _WR, "if (a is not None and game_loads(a, roots))", "if (a is not None)",
+     "cp-outside"),
+    ("rule-S-COPY-PLUGIN-data-root-only", _WR, 'len(rel) == 2 and rel[0] == "data"', "len(rel) >= 1",
+     "cp-to-backups"),
+    ("rule-S-COPY-PLUGIN-dir-destination", _WR, "            elif _looks_like_dir(dst):", "            elif False:",
+     "cp-into-data-dir"),
+    ("rule-S-COPY-PLUGIN-unresolved-data", _WR, "(a is None and _DATA_CHILD.search(cand))", "(a is None and False)",
+     "cp-var-data"),
+    ("rule-S-COPY-PLUGIN-replaces-move-note", "tools/skyguard/shell_rules.py", "if not copy_plugin and has(",
+     "if has(", "cp-onto-data-esp"),
+    # the class notes
+    ("rule-S-WRITE-SKSE-INI-class", _TGT, ', ("skse-ini", SKSE_INI, "S-WRITE-SKSE-INI"))', ")",
+     "out-file-skse-ini"),
+    ("rule-S-WRITE-INI-class", _TGT, '("ini", SKYRIM_INI, "S-WRITE-INI"), ', "", "sed-i-skyrim-ini"),
+    ("rule-S-WRITE-LOADORDER-write-only", _WR, "        for w in write_targets(e):",
+     "        for w in write_targets(e) + list(e.argv):", "loadorder-read"),
+    ("rule-S-WRITE-LOADORDER-copy", _WR, '            if kind and kind != "plugin":', "            if False:",
+     "cp-onto-plugins-txt"),
+    ("rule-S-WRITE-INSTALL-zone", _WR, '    return bool(rel) and rel[0] == "data"', "    return bool(rel)",
+     "redirect-install-root"),
+    ("rule-S-WRITE-INSTALL-resolved", _WR, "            elif a is not None and in_install_area(a, roots):",
+     "            elif False:", "redirect-data-file"),
+]
+MUTATIONS += [pytest.param(f, find, rep, _t08(row), id=i) for i, f, find, rep, row in _WRITE_CLAUSES]
 
 MUTATIONS.append(pytest.param(   # the pricing driver stops asking the parser: the R4 gate would read 0 forever
     "scripts/guard-corpus/engine_eval.py", "parse_ok = parse_ok and p.ok", "parse_ok = parse_ok",

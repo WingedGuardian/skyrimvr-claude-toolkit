@@ -5,6 +5,7 @@ r"""targets: where a command's operand actually resolves, and which protection z
     covers_protected(abs_path, roots) -> True when deleting abs_path reaches a protected root
     exec_cwd(e, cwd, env)            -> the directory an Exec runs in (payload cwd + its cd_before), or None
     resolve_operand(e, word, cwd, env)
+    file_class(*spellings)            -> "plugin" | "loadorder" | "ini" | "skse-ini" | "" (shared by both guards)
 
 Pure (no filesystem), stdlib only, Python 3.8. Plan 5 Task 6.
 
@@ -50,6 +51,7 @@ import re
 from typing import Mapping, Optional
 
 from . import paths
+from .grep import grep
 
 HOME_FAMILY = ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH")
 _BASH_VAR = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
@@ -398,3 +400,24 @@ def covers_protected(abs_path: Optional[str], roots) -> bool:
     if len(pc) >= 2 and pc[-1] == "documents":
         return True
     return len(pc) >= 3 and pc[-1] == "my games" and pc[-2] == "documents"
+
+
+# --------------------------------------------------------------------------------------------- file classes (Task 8)
+# One classifier for both guards: write_rules (Edit/Write) and this module (shell) test a path with these same
+# patterns, through grep (line-based, case-insensitive, trailing CRs dropped).
+PLUGIN_FILE = r"\.(esp|esm|esl|bsa|ba2)[\s.]*$"
+SKYRIM_INI = r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)$"
+SKSE_INI = r"(?<![/\\])[/\\]+Data[/\\]+SKSE[/\\]+Plugins[/\\]+.*\.ini$"
+LOADORDER = r"(loadorder\.txt|plugins\.txt)$"
+
+CLASS_RULE = (("plugin", PLUGIN_FILE, "S-WRITE-PLUGIN"), ("loadorder", LOADORDER, "S-WRITE-LOADORDER"),
+              ("ini", SKYRIM_INI, "S-WRITE-INI"), ("skse-ini", SKSE_INI, "S-WRITE-SKSE-INI"))
+
+
+def file_class(*spellings: str) -> str:
+    """plugin | loadorder | ini | skse-ini | "" -- the first class any spelling of one file (the word as written,
+    its resolved path) matches."""
+    for kind, rx, _ in CLASS_RULE:
+        if any(s and grep(rx, s) for s in spellings):
+            return kind
+    return ""

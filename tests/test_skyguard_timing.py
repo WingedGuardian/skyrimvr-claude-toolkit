@@ -243,6 +243,52 @@ def test_delete_rules_stay_fast(name, shell):
     assert_linear(name + "/" + shell, make)
 
 
+# Plan 5 Task 8: the write rules classify every redirect / tee / Set-Content / sed / dd target and every copy
+# destination (resolving it against the cwd), and on a parse failure or an opaque program scan the text per segment.
+# Long repeated words keep each shape under the parser's token cap so the per-target code really runs.
+def _shell_write_shapes(N_):
+    F, W = "f" * 60, "w" * 200
+    return {
+        "redirect-many": "echo x" + (" > " + W) * (N_ // 203),
+        "redirect-many-esp": "echo x" + (" >> " + W + ".txt") * (N_ // 208),
+        "tee-many": "tee " + (F + " ") * (N_ // 61),
+        "set-content-params": "Set-Content " + ("-Encoding " + W + " ") * (N_ // 211) + "x",
+        "sed-i-many": "sed -i s/a/b/ " + (F + " ") * (N_ // 61),
+        "dd-many": "dd " + ("of=" + F + " ") * (N_ // 64),
+        "cp-many-esp": "cp " + (F + ".esp ") * (N_ // 65) + "Data/",
+        "cp-t-many": "cp -t Data " + (F + ".esp ") * (N_ // 65),
+        "robocopy-files": "robocopy a Data " + (F + ".esp ") * (N_ // 65),
+        "copy-item-many": "Copy-Item " + (W + ", ") * (N_ // 202) + "b",
+        "skse-path-run": "echo x > " + "Data/SKSE/Plugins/" * (N_ // 18) + "x.ini",
+        "dots-run": "echo x > " + "." * N_ + "esp",
+        "fallback-parse-fail": 'echo "' + ("> " + F + ".esp ") * (N_ // 67),
+        "fallback-write-words": 'echo "' + "> " * (N_ // 2),
+        "opaque-pipe-text": "printf '" + ("echo > " + F + ".esp ") * (N_ // 72) + "' | sh",
+        "opaque-many-pipes": ("printf " + W + " | $X; ") * (N_ // 211),
+    }
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_the_write_shapes_reach_the_write_code(shell):
+    """Every shape but the deliberate parse failures must parse at 80 KB and yield execs."""
+    from skyguard import shellparse
+    for name, cmd in _shell_write_shapes(LARGE).items():
+        p = shellparse.parse(cmd, shell)
+        if name.startswith("fallback-"):
+            assert not p.ok, (name, shell)
+            continue
+        assert p.ok and p.execs, (name, shell, p.why)
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("name", sorted(_shell_write_shapes(SMALL)))
+def test_write_shell_rules_stay_fast(name, shell):
+    def make(n):
+        cmd = _shell_write_shapes(n)[name]
+        return lambda: shell_rules.decide(cmd, ROOTS, _QuietAudit(), cwd="/x/install", shell=shell)
+    assert_linear(name + "/" + shell, make)
+
+
 # Plan 5 Task 5: the parser sees every command too, so it gets every shell shape above PLUS shapes aimed at its
 # own structure: deep nesting of ( $( { ` (must fail closed at depth 9, never recurse), long and unterminated
 # quotes and heredocs, 10k `;`, long \-newline chains, PowerShell backtick runs and cmd ^ runs.

@@ -11,11 +11,14 @@ import re
 # Fields a non-legacy template may use. A file is always rendered as its basename.
 FIELDS = frozenset({"file", "op", "save", "n"})
 
-# S-PLUGIN-REF and S-LOADORDER-REF are placeholder ids for the legacy advice that later Plan 5 tasks remove or
-# replace (R11); they are not part of the final rule set. S-DEL-ADVISE was removed in Task 7 (R10).
 # Ids that existed and were deleted (their frozen legacy text stays in tests/guard_corpus/legacy_rules.json so the
 # frozen corpus still maps). Never reused for a new rule.
-REMOVED = frozenset({"S-DEL-ADVISE"})     # R10, Task 7: 0 hits in replay; any delete into the install denies
+REMOVED = frozenset({
+    "S-DEL-ADVISE",         # R10, Task 7: 0 hits in replay; any delete into the install denies
+    "S-PLUGIN-REF",         # R11, Task 8: a text match on plugin extensions, 3.3% of calls, nearly all reads
+    "S-LOADORDER-REF",      # Task 8: fired on READS of plugins.txt; a write is S-WRITE-LOADORDER
+    "S-REDIRECT-INSTALL",   # Task 8: replaced by the S-WRITE-* rules, which fire on the program that writes
+})
 
 RULES = {
     'S-INERT-NOCMD': {
@@ -150,14 +153,59 @@ RULES = {
         'here is silent -- confirm the destination before relying on it.'
     ),
     },
-    'S-REDIRECT-INSTALL': {
-        "decision": 'advise',
+    'S-WRITE-PLUGIN': {
+        "decision": 'deny',
         "hook": 'protect-bash',
-        "legacy": True,
+        "legacy": False,
         "prefixes": [],
         "template": (
-        'Redirecting output into the game/config directory: {c}. A redirect '
-        'TRUNCATES its target before anything is written.'
+        'Blocked: this writes {file} as raw text, which corrupts a plugin or archive.\n'
+        'Use xelib, Spriggit or AutoMod to change it.'
+    ),
+    },
+    'S-COPY-PLUGIN': {
+        "decision": 'advise',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Note: this copies onto {file} where the game loads it; a copy already there is replaced, not kept.'
+    ),
+    },
+    'S-WRITE-INSTALL': {
+        "decision": 'advise',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Note: this writes {file} in the Skyrim install; a > redirect empties it first.'
+    ),
+    },
+    'S-WRITE-LOADORDER': {
+        "decision": 'advise',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Note: this writes {file}; your mod manager owns it and may undo the change.'
+    ),
+    },
+    'S-WRITE-INI': {
+        "decision": 'advise',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Note: this writes {file}; a later INI in the load chain can override it.'
+    ),
+    },
+    'S-WRITE-SKSE-INI': {
+        "decision": 'advise',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Note: this writes {file}; no snapshot covers SKSE configs, so copy it first.'
     ),
     },
     'S-SED-WINPATH': {
@@ -169,27 +217,6 @@ RULES = {
         "In-place sed edit in the game directory: {c}. A Windows path in sed's "
         'REPLACEMENT is destroyed by escape handling -- normalise the path '
         'first.'
-    ),
-    },
-    'S-PLUGIN-REF': {
-        "decision": 'advise',
-        "hook": 'protect-bash',
-        "legacy": True,
-        "prefixes": [],
-        "template": (
-        'Command references plugin/archive files: {c}. Reading one is fine; '
-        'writing one directly corrupts it -- use xelib, Spriggit or AutoMod.'
-    ),
-    },
-    'S-LOADORDER-REF': {
-        "decision": 'advise',
-        "hook": 'protect-bash',
-        "legacy": True,
-        "prefixes": [],
-        "template": (
-        'Command references load order: {c}. Your mod manager owns these files, '
-        'and the Special Edition copy under AppData is a DIFFERENT file from '
-        'the VR one and is routinely stale.'
     ),
     },
     'S-AUTOMOD-ESP': {

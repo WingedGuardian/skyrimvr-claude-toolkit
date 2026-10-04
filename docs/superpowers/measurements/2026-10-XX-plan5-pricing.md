@@ -292,3 +292,78 @@ Matrix: allow>advise 66, deny>advise 1, every other cell unchanged.
   folder is not flagged. Re-priced `--base 4777bd3`, **N = 62,018**: newly-advise 1 (S-PLUGIN-REF) and
   no-longer-deny 1 (S-DEL-INSTALL) -- both the same item, `rm -rf tools/__pycache__` (item 2). Nothing else moved;
   0 errors; parse failures 63 → 63.
+
+## Task 8: shell writes to plugins (E21), the write-target notes, ADV_PLUGIN removed
+
+Run 2026-10-03. New engine = a frozen copy of the working tree. Raw items stay in the session scratchpad.
+
+**Task 8 alone (`--base 99bfc4b`), N = 62,181** (Bash 55,505; PowerShell 1,601; Write 3,491; Edit 1,579; MCP 5;
+**shell calls 57,106**). 0 engine errors. Parse failures 63 → 63 (Bash 0.110%, PowerShell 0.125%).
+
+Decision matrix (old > new): allow>allow 59,375; advise>advise 604; ask>ask 11; deny>deny 347;
+**advise>allow 1,834; advise>deny 7; allow>advise 3.**
+
+| rule | direction | items | % of shell calls | hand-read verdict |
+|---|---|---|---|---|
+| S-WRITE-PLUGIN | newly-deny | 7 | 0.012% | all 7 read: every one really writes a file named `.esp` by a redirect (`echo v>victim.esp`, `printf 'canary' > probe-abs.esp`, `> _CLAUDE_OUTPUT/zzz_relock2.esp`, ...). All 7 are probes from the sessions that MEASURED E21 itself. True positives by the rule (any location, like W-PLUGIN). |
+| S-COPY-PLUGIN | newly-advise | 36 | 0.063% | all 36 read: every one copies or moves a file onto a live plugin directly in `Data/` (spriggit-built ESP deployed over `Data/Shinso.esp`, `.esp.save` sidecars promoted, reverts from `.claude/backups`, `ZZZGin*` spike plugins). 36 of 36 accurate; all are the user's own intended deploys. |
+| S-WRITE-INSTALL | newly-advise | 5 | 0.009% | all read: README written into `Data/Sound/FX/...`, `sed > *.psc` and `sed -i` on `Data/Scripts/Source/*.psc`, a stub `.psc`. 5 of 5 real writes in `Data/`. |
+| S-WRITE-LOADORDER | newly-advise | 4 | 0.007% | all read: 3 `printf > .../loadorder.txt` building MO2/Nolvus test fixtures in a scratchpad; 1 `cp` of the VR plugins.txt over the **SSE** plugins.txt (the gotcha-#10 file). 4 of 4 real writes. |
+| S-WRITE-INI | newly-advise | 3 | 0.005% | the same 3 fixture scripts (`printf > .../Skyrim.ini`). Real writes; to scratch fixtures. |
+| S-WRITE-SKSE-INI | newly-advise | 1 | 0.002% | `cp ... "$GAME/Data/SKSE/Plugins/SkyPatcher/npc/IchimaruGinVoice.ini"`: real. |
+| S-PLUGIN-REF (ADV_PLUGIN) | no-longer-advise | 1,851 | 3.24% | see below |
+| S-LOADORDER-REF | no-longer-advise | 176 | 0.31% | see below |
+| S-REDIRECT-INSTALL | no-longer-advise | 23 | | all 23 read (below) |
+| S-MOVE-INSTALL | no-longer-advise | 11 | | all 11 read: the same command now carries S-COPY-PLUGIN, and the legacy text note is not added on top (by design). |
+
+**Advise noise.** New notes: 49 items = **0.086% of shell calls**; every rule is under the 0.2% budget (largest:
+S-COPY-PLUGIN, 0.063%). Removed: 2,061 rule firings, net **1,834 advise items become silent** (3.21% of shell
+calls), against 3 allow → advise.
+
+**No-longer ADV_PLUGIN (1,851): seeded sample of 100 (seed 8) read by hand: 0 shell-primitive writes to a plugin
+missed.** The sample is reads (cat, automod `view-record`/`info`/`archive list`, spriggit `serialize`, xelib
+scripts, grep/strings), copies FROM `Data/*.esp` into `.claude/backups` or staging (correctly silent), and ~10
+`spriggit deserialize --OutputPath Data/X.esp` (the sanctioned writer; S-EXTERNAL-OUT is Task 9's). Two copies onto
+`Data/` plugins in the sample now carry S-COPY-PLUGIN.
+Beyond the sample, **every one of the 1,851** was screened for a write word and a plugin extension in one statement
+segment (245 hits) and each hit read:
+- 147 "redirect/other" segments: redirects of a READ's output into a log/json, `cat > ..._X.esp.yaml` (Spriggit
+  YAML, not a plugin), `sed` on scripts and YAML, `--OutputPath` of spriggit, python/js test DATA strings. The only
+  real redirects onto `.esp` names are the 7 now denied.
+- 1 python `open(...,"w")`: a test history file.
+- 163 copy segments: 31 now noted (S-COPY-PLUGIN). Of the 132 silent: copies FROM Data into backups/staging, and
+  **17 deploys whose destination is a variable** (`cp "$SCRATCH/build/X.esp" "$GAME/Data/X.esp"`, `mv -f
+  "$GAME/Data/X.esp.save" "$GAME/Data/X.esp"`). That was a miss in the first draft; fixed (an unresolved
+  destination whose own words put the plugin directly in a `Data` folder notes) and re-priced: S-COPY-PLUGIN
+  26 → 36 items (the 10 new ones read: all real deploys onto `$GAME/Data/*.esp`). Remaining silent: 6
+  `cp "$S/X.esp" "$D/X.esp"` (SkyrimNet manual deploy; `$D` names no Data folder) -- KNOWN LIMIT.
+
+**No-longer S-LOADORDER-REF (176): screened all for a write word next to `plugins.txt`/`loadorder.txt` (11 hits),
+each read.** One real miss in the first draft -- `cp ".../Skyrim VR/plugins.txt" "$SSEDIR/plugins.txt"` (a COPY
+onto a load-order file) -- fixed (a copy onto a classified file notes as a write of it) and re-priced: S-WRITE-
+LOADORDER newly-advise 3 → 4. Remaining: 1 `fs.writeFileSync(..., 'plugins.txt')` in node code (interpreter code,
+KNOWN LIMIT, R11) and test-data strings. The other 165 are reads.
+
+**No-longer S-REDIRECT-INSTALL (23), all read:** 1 moved to S-WRITE-INSTALL (`cat > Data/Sound/.../README.txt`),
+2 moved to S-WRITE-PLUGIN (probe.esp), and 20 are writes to the install OUTSIDE `Data/`: 16 xelib/tool scripts
+`cat > tools/xelib/*.js`, `tools/snapshot-stack.sh`, an append to `KNOWLEDGEBASE.md`, 2 `_CLAUDE_OUTPUT/*.txt`
+notes. **Ruling:** S-WRITE-INSTALL covers `Data/`, the config folder and MO2 only -- the rest of the install is the
+user's own working tree (scripts, notes, docs); a note there is noise (0 of 20 a game file). Cost if wrong: an
+overwrite of a non-game install file (KNOWLEDGEBASE.md) is silent; the session KB guard snapshots that file.
+
+**First draft vs final.** The first draft (run 1) newly denied 9: the 7 above plus 2 hook-test harnesses that pass
+`printf 'x' > "$SP/Data/Test.esp"` as DATA to a `run()` function beside an opaque `bash "$H"`. The opaque fallback
+now checks only the opaque program's own words and the nearest upstream program feeding its pipe; both FPs are
+gone and `printf 'echo x > a.esp' | sh` still denies (pinned: `t08-harness-data-esp`, `t08-opaque-pipe-esp`).
+
+**Ask stop rule.** Not triggered: S-COPY-PLUGIN ships as ADVISE (controller ruling). All 36 items are the user's
+own deploys -- as an ask that would be 36 prompts (> 20, the stop line), and none is a miss an ask would have
+prevented, so there is no priced case for upgrading it.
+
+**Cumulative (`--base c3f32ef`), N = 62,218:** the Task 7 figures plus Task 8's: S-WRITE-PLUGIN newly-deny 7,
+S-COPY-PLUGIN newly-advise 36, S-PLUGIN-REF no-longer-advise 1,763 (Task 7 had already exposed 88 of the 1,851),
+S-LOADORDER-REF 176, S-WRITE-INSTALL newly 4 / no-longer 20 (the c3f32ef id of the legacy redirect note), S-WRITE-
+LOADORDER 4, S-WRITE-INI 3, S-WRITE-SKSE-INI 1. 0 errors; parse failures 0 → 63 (the old engine has no parser).
+
+**Timing.** 16 new shapes x 2 dialects (`test_write_shell_rules_stay_fast`), all linear; worst at 80 KB 109 ms CPU
+(`fallback-write-words`, the parse-failure segment scan), next 36 ms.

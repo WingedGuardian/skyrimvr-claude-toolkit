@@ -38,8 +38,9 @@ def history(tmp_path):
         _line("Bash", {"command": "ls"}),
         _line("Bash", {"command": "ls"}),                                  # exact duplicate: deduplicated
         _line("Bash", {"command": "ls"}, cwd="C:/sentinel"),               # same command, other cwd: kept
-        _line("Bash", {"command": "cat foo.esp notes.md"}),                # old: PLUGIN-REF; broadened: + LOADORDER-REF
-        _line("PowerShell", {"command": "Get-Content plugins.txt"}),
+        # old: WRITE-LOADORDER; broadened: + WRITE-INI, which fires AFTER it (so first-rule attribution is wrong)
+        _line("Bash", {"command": "echo x >> plugins.txt 2> notes.md"}),
+        _line("PowerShell", {"command": "Add-Content loadorder.txt x"}),   # WRITE-LOADORDER
         _line("Edit", {"file_path": "C:/work/a.py"}),
         _line("mcp__devbench-vr__console", {"action": "exec", "command": "help"}),
         _line("Read", {"file_path": "C:/work/a.py"}),                      # not a priced tool
@@ -91,28 +92,28 @@ def test_identical_engines_price_to_all_zeros(tmp_path, history):
 
 def test_a_broadened_rule_moves_only_that_rule(tmp_path, history):
     new = _scratch_engine(tmp_path, "scratch", [
-        ("shell_rules.py", r"(loadorder\.txt|plugins\.txt)", r"(loadorder\.txt|plugins\.txt|notes\.md)")])
+        ("targets.py", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)$", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini|notes\.md)$")])
     s, out = _run(tmp_path, SKYGUARD, new, history)
-    # "cat foo.esp notes.md" newly fires LOADORDER-REF while PLUGIN-REF fires in both: attribution must
-    # name the rule that is new, not the first rule the item fires.
-    assert s["rules"] == {"S-LOADORDER-REF": {"newly-advise": 1}}
+    # The plugins.txt/notes.md write newly fires WRITE-INI while WRITE-LOADORDER (fired first) fires in both:
+    # attribution must name the rule that is new, not the first rule the item fires.
+    assert s["rules"] == {"S-WRITE-INI": {"newly-advise": 1}}
     assert s["totals"]["newly-advise"] == 1 and s["matrix"].get("advise>advise", 0) >= 1
-    rows = [json.loads(x) for x in (out / "S-LOADORDER-REF__newly-advise.jsonl").read_text("utf-8").splitlines()]
-    assert [r["item"]["tool_input"]["command"] for r in rows] == ["cat foo.esp notes.md"]
+    rows = [json.loads(x) for x in (out / "S-WRITE-INI__newly-advise.jsonl").read_text("utf-8").splitlines()]
+    assert [r["item"]["tool_input"]["command"] for r in rows] == ["echo x >> plugins.txt 2> notes.md"]
 
 
 def test_a_rule_that_stops_firing_reads_no_longer(tmp_path, history):
     new = _scratch_engine(tmp_path, "scratch", [
-        ("shell_rules.py", r"(loadorder\.txt|plugins\.txt)", r"(loadorder\.txt)")])
+        ("targets.py", r"(loadorder\.txt|plugins\.txt)$", r"(plugins\.txt)$")])
     s, _ = _run(tmp_path, SKYGUARD, new, history)
-    assert s["rules"] == {"S-LOADORDER-REF": {"no-longer-advise": 1}}      # the PowerShell plugins.txt read
+    assert s["rules"] == {"S-WRITE-LOADORDER": {"no-longer-advise": 1}}    # the PowerShell loadorder.txt write
     assert s["matrix"].get("advise>allow") == 1
 
 
 def test_only_rule_filters_the_report(tmp_path, history):
     new = _scratch_engine(tmp_path, "scratch", [
-        ("shell_rules.py", r"(loadorder\.txt|plugins\.txt)", r"(loadorder\.txt|plugins\.txt|notes\.md)")])
-    s, _ = _run(tmp_path, SKYGUARD, new, history, only_rule="S-PLUGIN-REF")
+        ("targets.py", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)$", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini|notes\.md)$")])
+    s, _ = _run(tmp_path, SKYGUARD, new, history, only_rule="S-WRITE-LOADORDER")
     assert s["rules"] == {}
 
 
@@ -148,10 +149,13 @@ def test_a_decision_change_on_the_same_rule_is_priced(tmp_path, history):
     """advise -> deny on a rule that fires in both engines: same id, so only the decision differs."""
     new = _scratch_engine(tmp_path, "scratch", [(
         "shell_rules.py",
-        '        advise("S-PLUGIN-REF")\n',
-        '        return deny("S-PLUGIN-REF")\n')])
+        '    for rid, file in wr.advice:\n',
+        '    for rid, file in wr.advice:\n'
+        '        if rid == "S-WRITE-LOADORDER" and file == "loadorder.txt":\n'
+        '            audit.rule(HOOK, rid, "deny", "x")\n'
+        '            return Verdict("deny", "x")\n')])
     s, _ = _run(tmp_path, SKYGUARD, new, history)
-    assert s["rules"] == {"S-PLUGIN-REF": {"newly-deny": 1, "no-longer-advise": 1}}
+    assert s["rules"] == {"S-WRITE-LOADORDER": {"newly-deny": 1, "no-longer-advise": 1}}
     assert s["totals"]["newly-deny"] == 1 and s["totals"]["no-longer-advise"] == 1
     assert s["matrix"].get("advise>deny") == 1
 

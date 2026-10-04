@@ -13,6 +13,7 @@ from . import deletes
 from . import paths
 from . import rules
 from . import shellparse
+from . import writes
 from .grep import grep
 from .verdict import Advice, Verdict
 
@@ -26,12 +27,10 @@ NO_ROOT_DENY = rules.RULES["S-INERT-NOROOT"]["template"]
 DENY_REGISTRY = rules.RULES["S-REGISTRY"]["template"]
 DENY_PSC = rules.RULES["S-PSC-OUT"]["template"]
 DENY_CHAMPOLLION = rules.RULES["S-CHAMPOLLION"]["template"]
+DENY_WRITE_PLUGIN = rules.RULES["S-WRITE-PLUGIN"]["template"]     # Task 8 (E21); rendered with {file}
 
 ADV_MOVE = rules.RULES["S-MOVE-INSTALL"]["template"]
-ADV_REDIRECT = rules.RULES["S-REDIRECT-INSTALL"]["template"]
 ADV_SED = rules.RULES["S-SED-WINPATH"]["template"]
-ADV_PLUGIN = rules.RULES["S-PLUGIN-REF"]["template"]
-ADV_LOADORDER = rules.RULES["S-LOADORDER-REF"]["template"]
 ADV_AUTOMOD_ESP = rules.RULES["S-AUTOMOD-ESP"]["template"]
 ADV_AUTOMOD_NIF = rules.RULES["S-AUTOMOD-NIF"]["template"]
 ADV_AUTOMOD_ARCHIVE = rules.RULES["S-AUTOMOD-ARCHIVE"]["template"]
@@ -165,6 +164,12 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         return deny("S-REGISTRY")
     if has(r"""-(o|-output|-OutputPath)\s+["']?[^"' ]*\.psc(\b|"|')"""):
         return deny("S-PSC-OUT")
+    # Shell writes (Task 8, E21): decided on the program that WRITES and the file it targets (writes.py).
+    wr = writes.scan(command, parsed, roots, cwd, env)
+    if wr.deny:
+        reason = rules.message("S-WRITE-PLUGIN", file=wr.deny)
+        audit.rule(HOOK, "S-WRITE-PLUGIN", "deny", reason)
+        return Verdict("deny", reason)
     if has(r"Champollion\b"):
         if has(r"(" + g + r")[/\\]+Data[/\\]+Scripts[/\\]+[^\"' /\\]+[.]pex"):
             return deny("S-CHAMPOLLION")
@@ -174,16 +179,15 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         msg = rules.message("S-RELATIVE-UNKNOWN", file=dels.relative_unknown)
         audit.rule(HOOK, "S-RELATIVE-UNKNOWN", "advise", msg)
         advice.add(msg)
-    if has(r"(^|[;&|(`]|\s)(mv|cp|move|copy)\s.*(" + a + ")"):
-        advise("S-MOVE-INSTALL")
-    if has(r""">\s*["']?(""" + g + "|" + c + ")"):
-        advise("S-REDIRECT-INSTALL")
+    copy_plugin = any(rid == "S-COPY-PLUGIN" for rid, _ in wr.advice)
+    if not copy_plugin and has(r"(^|[;&|(`]|\s)(mv|cp|move|copy)\s.*(" + a + ")"):
+        advise("S-MOVE-INSTALL")          # legacy text rule (Task 9); a copy onto a plugin has its own note
+    for rid, file in wr.advice:
+        msg = rules.message(rid, file=file)
+        audit.rule(HOOK, rid, "advise", msg)
+        advice.add(msg)
     if has(r"sed\s+-i.*(" + g + "|" + c + ")"):
         advise("S-SED-WINPATH")
-    if has(r"\.(esp|esm|esl|bsa|ba2)\b"):
-        advise("S-PLUGIN-REF")
-    if has(r"(loadorder\.txt|plugins\.txt)"):
-        advise("S-LOADORDER-REF")
     if has(AUTOMOD_ESP_WRITE):
         if not has(r"--dry-run"):
             advise("S-AUTOMOD-ESP")

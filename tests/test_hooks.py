@@ -185,10 +185,10 @@ def test_protect_files_decides(project, path, expected, why):
     ('Champollion.exe "C:/tmp/A.pex" -p C:/tmp', "allow", "Champollion somewhere safe"),
     ("rm mydata/cache.bin", "allow", "the word boundary: mydata is not Data"),
     # Advisories.
-    ('cat "C:/Games/Skyrim VR/Data/x.esp"', "advise", "reading a plugin is fine"),
+    ('cat "C:/Games/Skyrim VR/Data/x.esp"', "allow", "reading a plugin is silent (R11, Plan 5 Task 8)"),
     ("rm Data/Textures/x.dds", "advise", "a relative delete inside Data"),
     ("rm ./Data/x.dds", "advise", "dot-relative too"),
-    ("cat loadorder.txt", "advise", "the mod manager owns load order"),
+    ("cat loadorder.txt", "allow", "reading the load order is silent; a write notes (Plan 5 Task 8)"),
     # The single ask -- genuinely the user's decision.
     ("bash tools/resaver-cli.sh reset-havok save.ess --apply", "ask",
      "--apply MUTATES a save through ReSaver's write path"),
@@ -328,7 +328,7 @@ def test_the_install_cannot_be_deleted_however_it_is_spelled(project, command, w
     ("rm -rf /tmp/scratch", "allow", "an rm somewhere else entirely"),
     ('grep -rn "rm" README.md', "allow", "the WORD rm inside a quoted argument"),
     ("python -m pytest tests/ -q", "allow", "running the suite"),
-    (f'cat "{GAME}/Data/x.esp"', "advise", "READING a game path is not deleting one"),
+    (f'cat "{GAME}/Data/x.esp"', "allow", "READING a game path is not deleting one (and is silent, R11)"),
     (f'cp "{GAME}/Data/x.nif" /tmp/', "advise", "copying OUT is not deleting"),
     (f'ls "{GAME}/Data/Scripts"', "allow", "listing is not writing"),
 

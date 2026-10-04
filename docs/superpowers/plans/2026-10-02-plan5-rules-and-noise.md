@@ -698,6 +698,15 @@ existing regex fields. The regex fields stay for S-DEL-FALLBACK and the legacy a
   - `rule-S-WRITE-SKSE-INI`;
   - `rule-S-WRITE-LOADORDER-write-only` (fire on reads → the `cat plugins.txt` row red).
 - [ ] Commit: `"skyguard: shell writes to plugins are blocked (E21); write advice fires only on writes"`.
+- **Rulings and known limits (recorded in Task 8; `tools/skyguard/writes.py` docstring):**
+  - S-COPY-PLUGIN ships as ADVISE (controller ruling): priced 36 items, all the user's own deploys, 0 misses;
+  - S-WRITE-INSTALL covers the install's `Data/`, the config folder and MO2 only (20 of 23 legacy redirect notes
+    were the user's own scripts/notes elsewhere in the install);
+  - the opaque-program fallback reads the opaque program's own words and the nearest upstream program feeding its
+    pipe, not every exec in the command (2 hook-harness FPs removed);
+  - not handled: `perl -i`, interpreter code and opaque scripts writing a plugin (R11), an unresolved copy
+    destination that names no Data folder (`"$D/X.esp"`), `touch`/`truncate`;
+  - S-REGISTRY is still a text match (the live printf FP, 2026-10-03): Task 9 anchors it to the executed program.
 
 ### Task 9: Anchor and shorten every remaining advise; narrow the write-guard advice
 

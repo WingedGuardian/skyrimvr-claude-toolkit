@@ -17,8 +17,8 @@ from skyguard import rules  # noqa: E402
 # The rules still carrying their pre-Plan-5 text (which echoes the command). It may only shrink.
 LEGACY_ALLOWED = {
     "S-INERT-NOCMD", "S-INERT-NOROOT", "S-REGISTRY", "S-PSC-OUT",
-    "S-CHAMPOLLION", "S-MOVE-INSTALL", "S-REDIRECT-INSTALL",
-    "S-SED-WINPATH", "S-PLUGIN-REF", "S-LOADORDER-REF", "S-AUTOMOD-ESP", "S-AUTOMOD-NIF",
+    "S-CHAMPOLLION", "S-MOVE-INSTALL",
+    "S-SED-WINPATH", "S-AUTOMOD-ESP", "S-AUTOMOD-NIF",
     "S-AUTOMOD-ARCHIVE", "S-EXTERNAL-OUT", "W-INERT-NOPATH", "W-PLUGIN", "W-INI",
     "W-SKSE-INI", "W-LOADORDER", "W-PAPYRUS", "W-INSTALL",
 }
