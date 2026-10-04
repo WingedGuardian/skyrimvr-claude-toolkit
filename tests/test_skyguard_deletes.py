@@ -268,9 +268,6 @@ def test_a_path_that_merely_contains_skyrim_is_not_a_root_mention():
 
 
 # ------------------------------------------------------------------------------------------- fix round 1
-UNRES_CWD = "Note: this deletes a path the guard cannot work out, from inside a protected Skyrim folder; use a full path."
-
-
 @pytest.mark.parametrize("cmd,shell", [
     ("ls | xargs rm", "bash"),
     ('rm -rf "$X"', "bash"),
@@ -278,10 +275,10 @@ UNRES_CWD = "Note: this deletes a path the guard cannot work out, from inside a 
     ("Get-ChildItem *.bak | Remove-Item", "powershell"),
     ("Remove-Item $p -Recurse", "powershell"),
 ])
-def test_unresolved_delete_run_from_inside_the_install_advises(cmd, shell):
-    """Item 1: an operand the guard cannot place, deleted with the cwd INSIDE a protected root, used to pass
-    silently. It advises (not deny: most sessions start in the install), in one line that does not echo it."""
-    assert decide(cmd, cwd=INSTALL, shell=shell) == (("advise", UNRES_CWD), {"S-DEL-UNRESOLVED-CWD"})
+def test_known_limit_unresolved_delete_from_inside_the_install_is_not_flagged(cmd, shell):
+    """KNOWN LIMIT (fix round 1 ruling): an advisory here priced at 75 occurrences, 0 real, in 61,935 items, so it
+    was removed as noise. Pinned so a change is deliberate."""
+    assert decide(cmd, cwd=INSTALL, shell=shell) == (("allow", ""), set())
 
 
 @pytest.mark.parametrize("cmd,cwd", [
@@ -290,7 +287,7 @@ def test_unresolved_delete_run_from_inside_the_install_advises(cmd, shell):
     ('cd "$D" && rm -rf x', INSTALL),                     # the cwd itself is unknowable: no claim about it
     ("rm -rf /tmp/x", INSTALL),                           # resolved, outside: nothing to say
 ])
-def test_unresolved_cwd_advice_needs_a_protected_cwd_and_an_unresolved_operand(cmd, cwd):
+def test_unresolved_operand_with_no_root_named_is_silent(cmd, cwd):
     assert decide(cmd, cwd=cwd) == (("allow", ""), set())
 
 
@@ -308,6 +305,6 @@ def test_tools_pycache_is_scratch_but_tools_node_modules_is_not(p, kind):
     assert deletes.protected_kind(p, R) == kind
 
 
-def test_unresolved_cwd_advice_is_for_a_cwd_inside_not_above_the_root():
+def test_unresolved_operand_from_above_the_root_is_silent():
     assert decide('rm -rf "$X"', cwd="C:/") == (("allow", ""), set())
     assert decide('rm -rf "$X"', cwd="C:/t7") == (("allow", ""), set())

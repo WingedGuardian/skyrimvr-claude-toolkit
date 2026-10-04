@@ -287,3 +287,8 @@ Matrix: allow>advise 66, deny>advise 1, every other cell unchanged.
   A first version also advised when the cwd merely CONTAINED a root (`C:/`); the cwd test is now "inside" (zone).
 - **S-DEL-INSTALL no-longer-deny 1** (read): `rm -rf tools/__pycache__` from the install -- the R8 refinement
   (Python regenerates it). With the deny gone, an S-PLUGIN-REF note on the same command surfaces (newly-advise 1).
+- **Controller ruling: S-DEL-UNRESOLVED-CWD removed** (75 advisories, 0 real -- pure noise; the standing directive
+  is against advice fatigue). It is now a KNOWN LIMIT: an unresolved delete operand run from inside a protected
+  folder is not flagged. Re-priced `--base 4777bd3`, **N = 62,018**: newly-advise 1 (S-PLUGIN-REF) and
+  no-longer-deny 1 (S-DEL-INSTALL) -- both the same item, `rm -rf tools/__pycache__` (item 2). Nothing else moved;
+  0 errors; parse failures 63 → 63.

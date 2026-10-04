@@ -101,15 +101,6 @@ RULES = {
         'Split it into simpler commands, or run it yourself.'
     ),
     },
-    'S-DEL-UNRESOLVED-CWD': {
-        "decision": 'advise',
-        "hook": 'protect-bash',
-        "legacy": False,
-        "prefixes": [],
-        "template": (
-        'Note: this deletes a path the guard cannot work out, from inside a protected Skyrim folder; use a full path.'
-    ),
-    },
     'S-REGISTRY': {
         "decision": 'deny',
         "hook": 'protect-bash',

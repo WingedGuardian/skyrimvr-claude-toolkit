@@ -174,10 +174,6 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         msg = rules.message("S-RELATIVE-UNKNOWN", file=dels.relative_unknown)
         audit.rule(HOOK, "S-RELATIVE-UNKNOWN", "advise", msg)
         advice.add(msg)
-    if dels.unresolved_in_protected_cwd:
-        msg = rules.message("S-DEL-UNRESOLVED-CWD")
-        audit.rule(HOOK, "S-DEL-UNRESOLVED-CWD", "advise", msg)
-        advice.add(msg)
     if has(r"(^|[;&|(`]|\s)(mv|cp|move|copy)\s.*(" + a + ")"):
         advise("S-MOVE-INSTALL")
     if has(r""">\s*["']?(""" + g + "|" + c + ")"):

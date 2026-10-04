@@ -32,9 +32,7 @@ CLAUSES, in priority order (a deny from an earlier clause wins):
            a whole-command test on opaque commands only re-denied `"$SPRIGGIT" serialize ...; rm -rf /tmp/x` with
            the install named elsewhere (13 of 13 hand-read: false positives).
 
-ADVICE (no deny): S-RELATIVE-UNKNOWN -- a relative `Data` operand with no cwd (R9); S-DEL-UNRESOLVED-CWD (fix
-round 1) -- an unresolved operand deleted with the cwd inside a protected root (most sessions start in the install,
-so it advises).
+ADVICE (no deny): S-RELATIVE-UNKNOWN -- a relative `Data` operand with no cwd (R9).
 
 KNOWN LIMITS (fix round 1, recorded, not handled):
   - interpreter code with RELATIVE paths (`python -c "shutil.rmtree('Data')"`, node/perl equivalents) is invisible
@@ -43,6 +41,8 @@ KNOWN LIMITS (fix round 1, recorded, not handled):
   - shred, `rsync --delete`, `git checkout -- .`, `git reset --hard`, `git stash -u` are not delete primitives;
   - a per-install user folder such as `_CLAUDE_OUTPUT` is protected like the rest of the install; a configurable
     allowlist (beside SCRATCH_GLOBS) is a follow-up idea, not built;
+  - an unresolved delete operand run from inside a protected folder is not flagged (ruling, fix round 1:
+    measured 75 occurrences, 0 real, in 61,935 items);
   - `CMD="rm -rf <install>"; $CMD`: an assignment value is not an exec; PS5 Remove-Item -Recurse follows junctions.
 
 NOT A DELETE: a command that only MENTIONS one (grep, rg, Select-String, echo, git log --grep, a data heredoc).
@@ -350,7 +350,6 @@ def raw_reaches(word: str, base: Optional[str], dialect: str, roots) -> bool:
 class Scan(NamedTuple):
     hit: Optional[Hit]
     relative_unknown: str           # basename for S-RELATIVE-UNKNOWN advice ("" for none)
-    unresolved_in_protected_cwd: bool = False   # S-DEL-UNRESOLVED-CWD advice (fix round 1)
 
 
 def _is_data_word(word: str) -> bool:
@@ -364,7 +363,6 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     unresolved_any = False
     relative = ""
     opaque = False
-    cwd_note = False
     for e in parsed.execs:
         if is_opaque(e):
             opaque = True
@@ -396,11 +394,6 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                         resolved = Hit(RULE_OF[kind], posixpath.basename(lit.rstrip("/")) or lit)
                     continue
             unresolved_any = True
-            # Fix round 1: an operand the guard cannot place, deleted FROM INSIDE a protected root (`ls | xargs
-            # rm`, `rm "$X"`) used to pass silently. Advice, not deny: most sessions start in the install.
-            # INSIDE only (zone): a cwd of `C:/` or `C:/GOG Games` merely contains the install.
-            if ecwd is not None and targets.zone(ecwd, roots) in RULE_OF:
-                cwd_note = True
             if w is UNRESOLVED:
                 continue
             if raw_reaches(w, ecwd, e.dialect, roots) and unresolved_reach is None:
@@ -418,7 +411,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         return Scan(Hit("S-DEL-FALLBACK", ""), relative)
     if opaque and any(_loose_hit(e, roots, has) for e in parsed.execs):
         return Scan(Hit("S-DEL-FALLBACK", ""), relative)
-    return Scan(None, relative, cwd_note)
+    return Scan(None, relative)
 
 
 def _loose_hit(e, roots, has) -> bool:

@@ -651,6 +651,7 @@ existing regex fields. The regex fields stay for S-DEL-FALLBACK and the legacy a
   - `shred`, `rsync --delete`, `git checkout -- .`, `git reset --hard`, `git stash -u` are not delete primitives;
   - per-install user folders such as `_CLAUDE_OUTPUT` are protected like the rest of the install; a configurable
     allowlist is a follow-up idea, not built;
+  - an unresolved delete operand run from inside a protected folder is not flagged (ruling, fix round 1: measured 75 occurrences, 0 real, in 61,935 items);
   - `CMD="rm -rf <install>"; $CMD` (an assignment value is not an exec); PS5 `Remove-Item -Recurse` follows junctions.
 
 ### Task 8: Shell writes to plugins (E21) and the write-target advice; ADV_PLUGIN removed
