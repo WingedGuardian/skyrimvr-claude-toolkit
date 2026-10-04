@@ -473,7 +473,10 @@ holds even before you approve the hooks.
 IDE extensions are not claimed: some Windows Codex surfaces emit no hook calls at all for some commands
 ([openai/codex#24453](https://github.com/openai/codex/issues/24453)). There, treat the install as
 "Layers 0-2 only": just the protections that need no hook (the instructions and
-`.codex/rules/skyrim.rules`). `bash tools/hook-canary.sh` shows which hooks actually ran.
+`.codex/rules/skyrim.rules`). `bash tools/hook-canary.sh` shows which hooks actually ran. It also lists Codex's trust state and, per surface, how many tool calls a session's transcript shows
+against how many the hooks recorded. That coverage covers **only sessions in which a hook fired**: a surface
+whose hooks never fire leaves no record at all, so it cannot appear as a gap. That is why only the surfaces
+probed live (`codex exec` and the TUI) are claimed, and why the desktop app and IDE extensions are not.
 
 ---
 

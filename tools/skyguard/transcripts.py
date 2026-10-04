@@ -42,6 +42,9 @@ CODEX_MCP_ITEM = "McpToolCall"              # `server`, `tool` -> hook tool_name
 # Item types measured as not being tool calls. Any OTHER type is a shape this parser was not measured
 # against and could be a renamed tool call, so it is Unmeasurable rather than silently uncounted.
 CODEX_NON_TOOL_ITEMS = ("UserMessage", "AgentMessage")
+# Every measured rollout carries a UserMessage item and has >= 20 lines; a longer one with no recognised item at
+# all is a shape change, not a quiet session.
+CODEX_MIN_LINES_FOR_ITEMS = 10
 
 # ---- Claude transcript constants ---------------------------------------------------------------------
 CLAUDE_SURFACE_FIELD = "entrypoint"
@@ -80,7 +83,7 @@ def _codex(path):
     if not isinstance(orig, str) or not orig:
         raise Unmeasurable("session_meta has no {}".format(CODEX_SURFACE_FIELD))
     surface = CODEX_SURFACES.get(orig, "unclaimed:" + orig)
-    counts = {}
+    counts, recognised = {}, 0
     for d in rows[1:]:
         if d.get("type") != CODEX_ITEM_EVENT:
             continue
@@ -100,10 +103,16 @@ def _codex(path):
                 raise Unmeasurable("an McpToolCall item has no server/tool")
             name = "mcp__{}__{}".format(item["server"], item["tool"])
         elif t in CODEX_NON_TOOL_ITEMS:
+            recognised += 1
             continue
         else:
             raise Unmeasurable("unrecognised item type {!r}".format(t[:40]))
+        recognised += 1
         counts[name] = counts.get(name, 0) + 1
+    if len(rows) > CODEX_MIN_LINES_FOR_ITEMS and recognised == 0:
+        # A rollout with real content and not one recognised item: the item event itself was renamed or
+        # moved (an unmeasured surface). Reading that as zero calls would read as NOT EXERCISED.
+        raise Unmeasurable("{} lines but no recognised {} item".format(len(rows), CODEX_ITEM_DONE))
     return surface, counts
 
 

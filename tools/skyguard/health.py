@@ -453,7 +453,7 @@ def report(root, stale_min=120, as_json=False, now=None, out=None, codex_config=
     trust_unknown = bool(trust) and trust["overall"] == "unknown"
     if counts["DEGRADED"] or counts["NEVER INVOKED"] or cov_counts["DEGRADED"] or trust_bad:
         code = 1
-    elif counts["UNMEASURABLE"] or unreadable or trust_unknown:
+    elif counts["UNMEASURABLE"] or cov_counts["UNMEASURABLE"] or unreadable or trust_unknown:
         code = 2
     else:
         code = 0
@@ -493,14 +493,47 @@ def report(root, stale_min=120, as_json=False, now=None, out=None, codex_config=
         print("RESULT: DEGRADED COVERAGE -- a session ran tool calls that no hook recorded (a surface that "
               "emits no PreToolUse).", file=out)
     elif code == 2:
-        print("RESULT: UNMEASURABLE -- a telemetry record is unreadable or malformed, or Codex trust cannot be "
-              "read; nothing can be proven.", file=out)
-    elif counts["HEALTHY"] == 0:
-        print("RESULT: UNPROVEN -- no hook has completed an evaluation yet. Trigger one tool call of each", file=out)
-        print("        kind (a shell command and a file edit) and re-run.", file=out)
+        print("RESULT: UNMEASURABLE -- nothing can be proven for: {}".format("; ".join(_caveats(
+            rows, coverage_rows, trust, unreadable, trust_unknown, unmeasurable_only=True)) or "see above"),
+            file=out)
     else:
-        print("RESULT: OK -- {} hook(s) proven to receive, evaluate and deliver".format(counts["HEALTHY"]), file=out)
+        cav = _caveats(rows, coverage_rows, trust, unreadable, trust_unknown)
+        if cav:
+            print("RESULT: UNPROVEN -- not proven healthy: {}".format("; ".join(cav)), file=out)
+        else:
+            print("RESULT: OK -- {} hook(s) proven to receive, evaluate and deliver".format(counts["HEALTHY"]),
+                  file=out)
     return code
+
+
+def _caveats(rows, coverage_rows, trust, unreadable, trust_unknown, unmeasurable_only=False):
+    """Every reason the report cannot say plain OK, by name. Empty only when nothing is left unproven."""
+    out = []
+    um = ["{} {}".format(r["agent"], r["hook"]) for r in rows if r["state"] == "UNMEASURABLE"]
+    um += ["{} session {}".format(a, r["session"][:13]) for a, rs in coverage_rows.items() for r in rs
+           if r["state"] == "UNMEASURABLE"]
+    if unreadable:
+        um.append("the telemetry directory")
+    if trust_unknown:
+        um.append("Codex trust")
+    if um:
+        out.append("UNMEASURABLE: " + ", ".join(um))
+    if unmeasurable_only:
+        return out
+    stale = ["{} {}".format(r["agent"], r["hook"]) for r in rows if r["state"] == "STALE"]
+    if stale:
+        out.append("STALE (no recent completed evaluation): " + ", ".join(stale))
+    codex_on = trust is not None and not trust.get("unrendered")
+    if trust is not None and trust.get("unrendered"):
+        out.append("Codex not configured (hooks.json is not rendered; Codex support is Windows-only)")
+    if codex_on and not any(r["agent"] == "codex" and r["hook"] == "pre-tool" and r["state"] == "HEALTHY"
+                            for r in rows):
+        out.append("Codex pre-tool has not completed an evaluation, so nothing proves the Codex guard runs "
+                   "(session-start alone does not): run one Codex tool call and re-run")
+    if not out and not any(r["state"] == "HEALTHY" for r in rows):
+        out.append("no hook has completed an evaluation yet: trigger one shell command and one file edit "
+                   "and re-run")
+    return out
 
 
 def _print_trust(trust, rows, out):
@@ -538,7 +571,8 @@ def _print_coverage(agent, rs, out):
             r["session"][:13], r["surface"], r["hooked"], r["called"], r["state"], extra), file=out)
     if agent == "codex":
         print("  claimed surfaces: exec, tui (a surface is claimed only after a live probe; the desktop app and "
-              "IDE extensions are not)", file=out)
+              "IDE extensions are not). Coverage lists only sessions the hook SAW: a surface whose hooks never "
+              "fire leaves no record here.", file=out)
         print("  not counted: " + "; ".join(CODEX_KNOWN_GAPS), file=out)
 
 

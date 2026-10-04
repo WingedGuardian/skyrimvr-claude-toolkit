@@ -405,13 +405,13 @@ def test_degraded_coverage_folds_into_exit_1(tmp_path):
     assert code == 1 and "DEGRADED" in text and "DEGRADED COVERAGE" in text
 
 
-def test_unmeasurable_coverage_is_printed_but_does_not_fail_the_canary(tmp_path):
+def test_unmeasurable_coverage_is_printed_and_cannot_prove_ok(tmp_path):
     root = _codex_root(tmp_path)
     for h in health.CODEX_HOOKS:
         _complete(root, "codex", h)
     _session(root, "codex", SID, tmp_path / "deleted.jsonl", ["Bash"])
     code, text = _report(root, _config(tmp_path, root, trusted=True))
-    assert code == 0 and "UNMEASURABLE" in text
+    assert code == 2 and "UNMEASURABLE" in text
 
 
 def test_an_unreadable_codex_config_is_unknown_and_exits_2(tmp_path):
@@ -489,3 +489,61 @@ def test_a_streamed_claude_tool_use_is_counted_once(tmp_path):
     out = tmp_path / "dup.jsonl"
     out.write_text("\n".join(json.dumps(r) for r in rows + dup) + "\n", encoding="utf-8")
     assert transcripts.count_calls("claude", out)[1] == {"Bash": 1}
+
+
+# --------------------------------------------------------------------------------------------------
+# fix round 1: false-green paths
+# --------------------------------------------------------------------------------------------------
+def test_a_rollout_with_content_but_no_recognised_item_is_unmeasurable(tmp_path):
+    """A TUI that renames item_completed would otherwise read as zero calls = NOT EXERCISED."""
+    def fn(rows):
+        for r in rows:
+            if r.get("type") == "event_msg" and r["payload"].get("type") == "item_completed":
+                r["payload"]["type"] = "item_done"
+    with pytest.raises(transcripts.Unmeasurable):
+        transcripts.count_calls("codex", _rewrite(EXEC, tmp_path / "evt.jsonl", fn))
+
+
+def test_a_tiny_rollout_with_no_items_is_just_a_quiet_session(tmp_path):
+    f = tmp_path / "tiny.jsonl"
+    rows = [json.loads(line) for line in EXEC.read_text(encoding="utf-8").splitlines() if line.strip()][:3]
+    f.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    assert transcripts.count_calls("codex", f) == ("exec", {})
+
+
+def test_session_start_alone_does_not_prove_the_codex_guard_runs(tmp_path):
+    root = _codex_root(tmp_path)
+    _complete(root, "codex", "session-start")
+    code, text = _report(root, _config(tmp_path, root, trusted=True))
+    assert "RESULT: OK --" not in text and "pre-tool has not completed an evaluation" in text
+    assert code == 0
+
+
+def test_stale_hooks_do_not_read_as_ok(tmp_path):
+    root = _codex_root(tmp_path)
+    for h in health.CODEX_HOOKS:
+        _complete(root, "codex", h, t=NOW - 10 * 86400)
+    code, text = _report(root, _config(tmp_path, root, trusted=True))
+    assert "RESULT: OK --" not in text and "STALE (no recent completed evaluation): codex pre-tool" in text
+
+
+def test_unmeasurable_coverage_exits_2_and_the_result_names_it(tmp_path):
+    root = _codex_root(tmp_path)
+    for h in health.CODEX_HOOKS:
+        _complete(root, "codex", h)
+    _session(root, "codex", SID, tmp_path / "deleted.jsonl", ["Bash"])
+    code, text = _report(root, _config(tmp_path, root, trusted=True))
+    result = text.split("RESULT:")[1]
+    assert code == 2 and "UNMEASURABLE" in result and "codex session " + SID[:13] in result
+
+
+def test_an_unrendered_codex_keeps_exit_0_but_the_result_says_not_configured(tmp_path):
+    root = tmp_path / "claude-only"
+    (root / ".codex").mkdir(parents=True)
+    (root / ".codex" / "hooks.json").write_text(TEMPLATE, encoding="utf-8", newline="\n")
+    (root / ".claude" / "hooks").mkdir(parents=True)
+    (root / ".claude" / "hooks" / "protect-bash.sh").write_text("#", encoding="utf-8")
+    _complete(root, "claude", "protect-bash")
+    code, text = _report(root, tmp_path / "none.toml")
+    result = text.split("RESULT:")[1]
+    assert code == 0 and "Codex not configured" in result and not result.strip().startswith("OK")
