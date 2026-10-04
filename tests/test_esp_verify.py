@@ -26,7 +26,7 @@ exit 0
 """
 
 
-def _run(tmp_path, mode, *args):
+def _run(tmp_path, mode, *args, after_plugin=()):
     fake = tmp_path / "fake-spriggit"
     if not fake.exists():
         fake.write_text(FAKE, newline="\n")
@@ -36,7 +36,7 @@ def _run(tmp_path, mode, *args):
     import os
     env = dict(os.environ, SPRIGGIT=fake.as_posix(), ESP_VERIFY_SNAPDIR=(tmp_path / "snaps").as_posix(),
                FAKE_SPRIGGIT_MODE=mode)
-    return subprocess.run([BASH, WRAPPER, args[0], *args[1:], plugin.as_posix()],
+    return subprocess.run([BASH, WRAPPER, args[0], *args[1:], plugin.as_posix(), *after_plugin],
                           capture_output=True, text=True, env=env, timeout=120)
 
 
@@ -74,6 +74,35 @@ def test_a_populated_inventory_still_passes_without_the_flag(tmp_path):
     r = _run(tmp_path, "refs", "verify")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "PASS" in r.stdout
+
+
+def test_allow_empty_still_lists_the_references_that_appeared(tmp_path):
+    """Empty snapshot, populated after, under --allow-empty: the additions must be PRINTED. The
+    branch for this once carried a literal newline inside an awk string, an awk syntax error that
+    swallowed the list and still said PASS."""
+    assert _run(tmp_path, "noref", "snapshot").returncode == 0
+    r = _run(tmp_path, "refs", "verify", "--allow-empty")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "reference added" in r.stdout and "013794:Skyrim.esm" in r.stdout, r.stdout + r.stderr
+    assert "syntax error" not in r.stderr
+
+
+def test_allow_empty_is_accepted_after_the_plugin_too(tmp_path):
+    assert _run(tmp_path, "noref", "snapshot").returncode == 0
+    r = _run(tmp_path, "noref", "verify", after_plugin=("--allow-empty",))
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_an_unknown_option_is_a_usage_error_not_a_plugin_path(tmp_path):
+    assert _run(tmp_path, "refs", "snapshot").returncode == 0
+    r = _run(tmp_path, "refs", "verify", after_plugin=("--bogus",))
+    assert r.returncode == 2 and "unknown option" in r.stderr, r.stdout + r.stderr
+
+
+def test_the_refusal_message_is_grammatical(tmp_path):
+    assert _run(tmp_path, "noref", "snapshot").returncode == 0
+    r = _run(tmp_path, "noref", "verify")
+    assert "both the snapshot and the new inventory hold 0" in r.stdout, r.stdout
 
 
 def test_references_vanishing_to_empty_still_fails_with_the_flag(tmp_path):

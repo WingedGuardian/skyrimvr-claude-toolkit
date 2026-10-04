@@ -100,8 +100,7 @@ compare_inventory() {
   local name="$1" before="$2" after="$3" rc=0
   local removed added
   if [ ! -s "$before" ]; then   # only reachable under --allow-empty; awk below needs a non-empty first file
-    comm -13 "$before" "$after" | awk -F'	' '{ printf "  + reference added (info)  %-22s %s
-", $1, $2 }'
+    comm -13 "$before" "$after" | awk -F'\t' '{ printf "  + reference added (info)  %-22s %s\n", $1, $2 }'
     echo "  ✓ $name — only reference additions (no masters changed, none dropped)"
     return 0
   fi
@@ -155,15 +154,22 @@ compare_inventory() {
 
 # which_empty <snapshot> <after> -> a phrase naming the empty inventory(ies)
 which_empty() {
-  if [ ! -s "$1" ] && [ ! -s "$2" ]; then echo "both the snapshot and the new inventory"
-  elif [ ! -s "$1" ]; then echo "the snapshot inventory"
-  else echo "the new inventory"; fi
+  if [ ! -s "$1" ] && [ ! -s "$2" ]; then echo "both the snapshot and the new inventory hold"
+  elif [ ! -s "$1" ]; then echo "the snapshot inventory holds"
+  else echo "the new inventory holds"; fi
 }
 
 cmd_verify() {
-  local allow_empty=0
-  if [ "${1:-}" = "--allow-empty" ]; then allow_empty=1; shift; fi
-  [ "$#" -ge 1 ] || die "verify needs at least one plugin path"
+  local allow_empty=0 plugins=() a
+  for a in "$@"; do   # the flag is accepted in either position; any other option is an error
+    case "$a" in
+      --allow-empty) allow_empty=1 ;;
+      -*) die "verify: unknown option '$a' (the only option is --allow-empty)" ;;
+      *) plugins+=("$a") ;;
+    esac
+  done
+  [ "${#plugins[@]}" -ge 1 ] || die "verify needs at least one plugin path"
+  set -- "${plugins[@]}"
   local p name snap after overall=0
   echo "=============================================="
   echo " esp-verify — cross-reference integrity check"
@@ -175,7 +181,7 @@ cmd_verify() {
     after="$(mktemp)"
     build_inventory "$p" "$after"
     if [ "$allow_empty" -eq 0 ] && { [ ! -s "$snap" ] || [ ! -s "$after" ]; }; then
-      echo "  ✗ $name — REFUSING PASS: $(which_empty "$snap" "$after") holds 0 cross-references; pass --allow-empty if that is genuinely so"
+      echo "  ✗ $name — REFUSING PASS: $(which_empty "$snap" "$after") 0 cross-references; pass --allow-empty if that is genuinely so"
       overall=1
       rm -f "$after"
       continue
@@ -196,9 +202,9 @@ cmd_verify() {
 
 cmd_guard() {
   local plugins=() sawsep=0 vflag=()
-  if [ "${1:-}" = "--allow-empty" ]; then vflag=(--allow-empty); shift; fi
   while [ "$#" -gt 0 ]; do
     if [ "$1" = "--" ]; then sawsep=1; shift; break; fi
+    if [ "$1" = "--allow-empty" ]; then vflag=(--allow-empty); shift; continue; fi
     plugins+=("$1"); shift
   done
   [ "$sawsep" -eq 1 ] || die "guard requires:  guard <plugin>... -- <command...>"

@@ -83,9 +83,8 @@ def pytest_configure(config):
             "TOOLKIT_REQUIRE_HARNESS=1 but the package-manager barriers are not active; "
             "run through: python -B tests/run_harness_tests.py tests/")
 
-# setup.sh may shell out to `winget install` (Node.js), which would be
-# a slow, network-dependent step that can hang a CI run. Every invocation is
-# capped so a stuck install fails the test instead of the job.
+# setup.sh no longer installs anything, but it still shells out to which/python/powershell
+# probes. Every invocation is capped so a stuck probe fails the test instead of hanging the job.
 SETUP_TIMEOUT = 240
 
 IGNORE = shutil.ignore_patterns(

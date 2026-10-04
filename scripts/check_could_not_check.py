@@ -7,7 +7,8 @@ A COULD NOT CHECK skip means a test did not run, and a green run with one is a c
 the suite did not earn. The only expected one is the Docker daemon being absent; every
 other one must be named with --allow, in the CI step, where a reviewer sees it.
 
-Exit 0 clean / 1 an unallowed skip / 2 the log has no pytest summary (nothing was checked).
+Exit 0 clean / 1 an unallowed skip / 2 nothing could be checked (no pytest summary, or skips
+counted but no -rs section to read them from).
 """
 import re
 import sys
@@ -30,6 +31,11 @@ def main(argv):
         lines = handle.read().splitlines()
     if not any(re.search(r"\b\d+ (passed|failed|skipped|error)", line) for line in lines):
         print("COULD NOT CHECK: no pytest summary line in " + path)
+        return 2
+    skipped = sum(int(m.group(1)) for line in lines for m in [re.search(r"(\d+) skipped", line)] if m)
+    if skipped and not any("short test summary info" in line for line in lines):
+        print("COULD NOT CHECK: %d skip(s) counted but there is no 'short test summary' section "
+              "-- run pytest with -rs so they can be read" % skipped)
         return 2
     bad = [line for line in lines
            if line.startswith("SKIPPED") and "COULD NOT CHECK" in line

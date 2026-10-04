@@ -2275,6 +2275,24 @@ MUTATIONS += [
                  "tests/test_esp_verify.py::test_two_empty_inventories_are_not_a_pass",
                  id="esp-verify-empty-inventory-fails"),
 
+    pytest.param("tests/run_harness_tests.py",
+                 '"PATHEXT", "TOOLKIT_REQUIRE_HARNESS")',
+                 '"PATHEXT")',
+                 "tests/test_harness_required.py::test_the_launcher_forwards_the_require_flag_to_pytest",
+                 id="launcher-drops-require-harness-flag"),
+
+    pytest.param("tools/esp-verify-wrapper.sh",
+                 "    comm -13 \"$before\" \"$after\" | awk -F'\\t'",
+                 "    : | awk -F'\\t'",
+                 "tests/test_esp_verify.py::test_allow_empty_still_lists_the_references_that_appeared",
+                 id="esp-verify-allow-empty-hides-additions"),
+
+    pytest.param("scripts/check_could_not_check.py",
+                 'if skipped and not any("short test summary info" in line for line in lines):',
+                 'if False:',
+                 "tests/test_could_not_check.py::test_counted_skips_without_a_short_summary_section_cannot_pass",
+                 id="could-not-check-passes-without-rs"),
+
     pytest.param("tools/esp-verify-wrapper.sh",
                  '  if [ -z "$(find "$tmp" -name \'*.yaml\' -print -quit)" ]; then',
                  '  if false; then',

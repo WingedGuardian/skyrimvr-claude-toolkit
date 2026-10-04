@@ -118,10 +118,12 @@ The launcher is the canonical test entry point (Plan 5, Task 15). `tests/conftes
 `harness_active()`, and with `TOOLKIT_REQUIRE_HARNESS=1` a pytest session that does not have the
 barriers installed errors at `pytest_configure` instead of skipping the barrier-dependent
 modules and going green. CI runs the whole suite as
-`python -B tests/run_harness_tests.py tests/ -v --durations=10` with that variable set (the
+`python -B tests/run_harness_tests.py tests/ -v --durations=10 -rfEs` with that variable set (the
 launcher forwards it), then `scripts/check_could_not_check.py` fails the job on any
-`COULD NOT CHECK` skip in the `-rs` output other than the Docker daemon (and, on Windows only,
-the POSIX-only `dir_fd` removal control). `setup.sh` no longer auto-installs Node; it prints how
+`COULD NOT CHECK` skip in the output. Linux allows none (it has a daemon and the sentinel
+image); Windows allows only the Docker daemon and the POSIX-only `dir_fd` removal control.
+pytest's basetemp is placed in system temp (`RUNNER_TEMP`), outside the checkout, because repo
+tools refuse an `--out-dir` inside it. `setup.sh` no longer auto-installs Node; it prints how
 to install it, and a test with a tripwire `winget` on PATH proves it never runs one.
 
 ## MO2 helper precedence

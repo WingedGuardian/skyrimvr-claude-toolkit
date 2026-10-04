@@ -338,15 +338,18 @@ jobs:
       - name: Behavioral suite (contained harness)
         env:
           TOOLKIT_REQUIRE_HARNESS: "1"
-        run: python -B tests/run_harness_tests.py tests/ -v --durations=10 -rs | tee behavioral.log
+        run: python -B tests/run_harness_tests.py tests/ -v --durations=10 -rfEs | tee behavioral.log
 
-      # A COULD NOT CHECK skip means a test did not run. The Docker daemon is the one expected
-      # absence (the Windows runner has no Linux daemon); the dir_fd skip is POSIX-only by
-      # definition (Windows has no dir_fd removal). Anything else going unchecked fails the job.
+      # A COULD NOT CHECK skip means a test did not run. Linux has a daemon and the sentinel image,
+      # so NOTHING may be unchecked there. On Windows the Docker daemon is the one expected absence
+      # (no Linux daemon on the runner) and the dir_fd skip is POSIX-only by definition. Anything
+      # else going unchecked fails the job. -rfEs names failures and errors as well as skips.
       - name: No unexpected COULD NOT CHECK skips
         run: |
-          allow=(--allow "Docker daemon")
-          if [ "$RUNNER_OS" = "Windows" ]; then allow+=(--allow "platform has no dir_fd removal"); fi
+          allow=()
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            allow+=(--allow "Docker daemon" --allow "platform has no dir_fd removal")
+          fi
           python scripts/check_could_not_check.py behavioral.log "${allow[@]}"
 
       # The Node tests cover path handling (game-root separators, plugins.txt
