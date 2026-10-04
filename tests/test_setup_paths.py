@@ -303,3 +303,23 @@ def test_setup_writes_empty_mo2_roots_on_a_stock_install(game_dir):
     assert "SKYRIM_MO2_MODS=''" in body and "SKYRIM_MO2_OVERWRITE=''" in body
     _, cfg = _read_paths_config(game_dir)
     assert cfg.malformed == () and cfg.values("SKYRIM_MO2_MODS") == []
+
+
+def test_setup_without_node_prints_instructions_and_never_runs_a_package_manager(game_dir, tmp_path):
+    """setup.sh used to `winget install` Node when it was missing: a package install nobody asked
+    for, from a script whose job is to write config. A tripwire `winget` on PATH logs any call."""
+    import os
+    from conftest import BIN
+    trip = tmp_path / "tripbin"
+    trip.mkdir()
+    log = tmp_path / "winget.log"
+    stub = trip / "winget"
+    stub.write_text('#!/bin/bash\necho "winget $*" >> "' + log.as_posix() + '"\nexit 97\n',
+                    newline="\n")
+    stub.chmod(0o755)
+    path = os.pathsep.join([str(trip), str(BIN), os.environ["PATH"]])
+    r = run_setup(game_dir, env_overrides={"PATH": path, "FAKE_WHICH_MISSING": "node"})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Node.js not found" in r.stdout, r.stdout
+    assert "winget install OpenJS.NodeJS.LTS" in r.stdout   # printed as instructions
+    assert not log.exists() or log.read_text() == "", "setup.sh ran a package manager: " + log.read_text()

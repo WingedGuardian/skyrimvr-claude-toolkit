@@ -2262,6 +2262,14 @@ MUTATIONS += [
                  'if False:',
                  "tests/test_harness_required.py::test_requiring_the_harness_without_it_is_an_error",
                  id="require-harness-without-harness-is-silent"),
+
+    pytest.param("setup.sh",
+                 '    echo "  Setup does not install it. When you need xeditlib, install it yourself:"
+',
+                 '    winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements 2>/dev/null || true
+',
+                 "tests/test_setup_paths.py::test_setup_without_node_prints_instructions_and_never_runs_a_package_manager",
+                 id="setup-no-node-autoinstall"),
 ]
 
 

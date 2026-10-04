@@ -53,21 +53,19 @@ else
     echo "  jq not found. That is fine: it is optional (devbench-cli.sh and nexus.sh print plain output without it)."
 fi
 
-# --- Detect Node.js (needed for xeditlib; auto-install) ---
+# --- Detect Node.js (needed for xeditlib; NOT auto-installed) ---
+#
+# Setup writes configuration. It does not run a package manager: installing software the user did
+# not ask for from a config script is a side effect this toolkit refuses (the contained test harness
+# blocks winget/npm/pip for the same reason). So a missing Node is reported with how to get it.
 echo ""
 echo "Checking for Node.js..."
 if which node >/dev/null 2>&1; then
     echo "  Found Node.js: $(node --version 2>/dev/null)"
 else
     echo "  Node.js not found. It's needed for xeditlib (ESP read/write via XEditLib.dll)."
-    echo "  Installing Node.js LTS via winget..."
-    winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements 2>/dev/null || {
-        echo "  Could not auto-install Node.js. Install it manually when you need xeditlib:"
-        echo "    winget install OpenJS.NodeJS.LTS   (or download from nodejs.org)"
-    }
-    if which node >/dev/null 2>&1; then
-        echo "  Node.js installed: $(node --version 2>/dev/null)"
-    fi
+    echo "  Setup does not install it. When you need xeditlib, install it yourself:"
+    echo "    winget install OpenJS.NodeJS.LTS   (or download from nodejs.org)"
 fi
 
 # --- Detect Python 3 (needed for cosave-info, save analysis, PyFFI/PyNifly; do NOT auto-install) ---

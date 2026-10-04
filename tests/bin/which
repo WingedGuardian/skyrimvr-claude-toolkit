@@ -6,6 +6,12 @@ if [ "$1" = "jq" ] && [ -n "${FAKE_WHICH_JQ:-}" ]; then
     printf '%s\n' "$FAKE_WHICH_JQ"
     exit 0
 fi
+# FAKE_WHICH_MISSING="node jq": pretend these commands are not installed.
+for missing in ${FAKE_WHICH_MISSING:-}; do
+    if [ "$1" = "$missing" ]; then
+        exit 1
+    fi
+done
 if [ -x /usr/bin/which ]; then
     exec /usr/bin/which "$@"
 fi
