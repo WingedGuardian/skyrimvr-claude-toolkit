@@ -437,3 +437,39 @@ Task 8), Tasks 4-8 unchanged.
 
 **Timing.** 18 anchored-rule shapes x 2 dialects (`test_anchored_rules_stay_fast`) and the write guard's 8 path
 shapes with roots, all linear; a mutation removing the sed path regex's word-start lookbehind is caught.
+
+### Task 9, fix round 1 (review: registry keys that are not written out; interpreter-code keys; S-MOVE-INSTALL removed)
+
+Changes: (1) a registry key that is not written out (`$K`, `%K%`, a backtick, `$(...)`) is resolved from a simple
+same-command assignment (bash `K=...`, PowerShell `$k = '...'`, cmd `set K=...`) and judged like a literal; a key that
+still cannot be known DENIES; a PowerShell path that cannot be known denies when the command names a hive. (2) In
+interpreter code the key after `reg delete` is extracted (string form, `subprocess` list form, `execSync`) and judged
+the same way (parents count); a key joined on from a variable (`+`, `%`, `.format`, an f-string `{k}`, a bare name in
+an argument list) denies. (3)/(4) docstring: the opaque-program-word limit (`R=reg; $R delete ...`), piped and
+location-relative PowerShell, `reg import`, `regedit /s`, `winreg.DeleteKey` recorded as known limits. (5) Controller
+ruling: **S-MOVE-INSTALL removed** -- copies/moves onto ordinary Data/ files get no note (107 of 107 hits in history
+were the user's deliberate deploys); its rows are allow pins, the 4 legacy `shell-cp/mv-inside` rows superseded.
+
+Re-priced, N = 62,799 (Bash 56,033, PowerShell 1,607, Write 3,555, Edit 1,599, MCP 5); shell calls 57,640. 0 errors;
+parse failures 63 → 63.
+
+| base | rule | direction | n | hand-read |
+|---|---|---|---|---|
+| 4f1789b (Task 9) | S-REGISTRY | newly-deny | 1 | the X4 cleanup loop `for k in ...; do reg delete "HKCU\...\X4ToolkitTests\$k" /f; done` -- the key holds a loop variable, so it is unknown; re-denied by ruling (accepted) |
+| 4f1789b | S-REGISTRY | no-longer-deny | 1 | a python heredoc editing a timing test whose source holds the TEXT `"reg delete " * (N // 11)` -- no key follows, it was text (the old Task 9 code denied any code naming both words and Bethesda) |
+| 4f1789b | S-MOVE-INSTALL | no-longer-advise | 107 | the 107 deploys read in Task 9 (66 relative + 41 absolute into Data/) |
+| dffda1a | S-REGISTRY | no-longer-deny | 17 | 15 text (this plan's and Plan 4's heredocs, printf, grep, `codex execpolicy` arguments, test-row files); 2 real deletes of literal `HKCU\Software\X4ToolkitTests\...` keys (not Bethesda: out of scope). 0 Bethesda deletes lost |
+| dffda1a | S-CHAMPOLLION | newly-deny / no-longer-deny | 20 / 1 | unchanged from Task 9 |
+| dffda1a | S-MOVE-INSTALL | no-longer-advise | 144 | all of the legacy rule's hits (Task 9 read and categorised both halves) |
+
+A first draft of (2) newly denied a Plan 4 python heredoc whose code holds a comment "leaves `reg.exe delete`
+unguarded" and a pattern list `["reg", "delete"]`; the fallback that denied any code naming the words with no key
+after them was replaced by the explicit joined-key forms, and the shape is pinned allow (`t09-reg-python-comment`).
+
+**Advise noise.** Shell calls carrying any advice, dffda1a → now: **451 → 57 (0.78% → 0.10% of 57,640)**. Per rule
+(% of shell calls): S-COPY-PLUGIN 0.062%, S-AUTOMOD-NIF 0.012%, S-WRITE-INSTALL 0.009%, S-WRITE-LOADORDER 0.007%,
+S-AUTOMOD-ARCHIVE 0.005%, S-WRITE-INI 0.005%, S-AUTOMOD-ESP 0.003%, S-WRITE-SKSE-INI 0.002%. File-tool calls: 157 →
+147 (3.05% → 2.85% of 5,154; W-PAPYRUS 2.41%, W-INSTALL 0.23%, W-SKSE-INI 0.19%, W-INI 0.02%).
+
+**Cumulative (`--base c3f32ef`):** 0 errors; S-MOVE-INSTALL no-longer-advise 154; S-REGISTRY no-longer-deny 17; the
+rest as in the Task 9 section.

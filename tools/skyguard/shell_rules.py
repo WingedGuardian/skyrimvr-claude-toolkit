@@ -31,7 +31,6 @@ DENY_PSC = rules.RULES["S-PSC-OUT"]["template"]
 DENY_CHAMPOLLION = rules.RULES["S-CHAMPOLLION"]["template"]
 DENY_WRITE_PLUGIN = rules.RULES["S-WRITE-PLUGIN"]["template"]     # Task 8 (E21); rendered with {file}
 
-ADV_MOVE = rules.RULES["S-MOVE-INSTALL"]["template"]
 ADV_SED = rules.RULES["S-SED-WINPATH"]["template"]
 ADV_AUTOMOD_ESP = rules.RULES["S-AUTOMOD-ESP"]["template"]
 ADV_AUTOMOD_NIF = rules.RULES["S-AUTOMOD-NIF"]["template"]
@@ -173,8 +172,8 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         msg = rules.message("S-RELATIVE-UNKNOWN", file=dels.relative_unknown)
         audit.rule(HOOK, "S-RELATIVE-UNKNOWN", "advise", msg)
         advice.add(msg)
-    # writes.py: copies and moves into the install (S-MOVE-INSTALL, destination only), sed -i with a backslash path
-    # (S-SED-WINPATH), and the write-target notes. anchored.py: AutoMod writes, on AutoMod's own arguments.
+    # writes.py: the copy-onto-a-plugin and write-target notes, and sed -i with a backslash path (S-SED-WINPATH).
+    # anchored.py: AutoMod writes, on AutoMod's own arguments.
     for rid, file in list(wr.advice) + anchored.automod(parsed):
         advise(rid, file=file)
 

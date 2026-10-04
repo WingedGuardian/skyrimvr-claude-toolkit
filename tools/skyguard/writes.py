@@ -47,7 +47,9 @@ hook-test harness passing a write as DATA to a function beside an opaque `bash "
 KNOWN LIMITS (recorded, not handled): `perl -i`, interpreter code (`python -c "open('X.esp','w')"`) and opaque
 scripts that write a plugin get no message (R11: the Write-tool deny remains, and Plan 6's read-only lock is the
 backstop); a copy whose unresolved destination does not name a Data folder gets no note (`"$D/My.esp"`);
-`touch` and `truncate` are not write primitives; on a parse failure the S-WRITE-INSTALL note is not attempted;
+`touch` and `truncate` are not write primitives; a copy or move onto an ordinary (non-plugin, non-config) file in
+Data/ gets no note (S-MOVE-INSTALL was removed in Task 9 fix round 1: 107 of 107 hits in history were the user's
+deliberate deploys); on a parse failure the S-WRITE-INSTALL note is not attempted;
 a redirect onto a variable assigned in the same command (`P=X.esp; echo x > "$P"`) is unresolved, so it gets no
 deny (the parser does not track assignments); `install` (`install -m644 a X.esp`) and `ln -sf a X.esp` are not
 copy primitives.
@@ -344,8 +346,8 @@ class Scan(NamedTuple):
     advice: Tuple[Tuple[str, str], ...]     # (rule id, file phrase) in rule order, one per rule
 
 
-ADVICE_ORDER = ("S-MOVE-INSTALL", "S-COPY-PLUGIN", "S-WRITE-LOADORDER", "S-WRITE-INI", "S-WRITE-SKSE-INI",
-                "S-WRITE-INSTALL", "S-SED-WINPATH")
+ADVICE_ORDER = ("S-COPY-PLUGIN", "S-WRITE-LOADORDER", "S-WRITE-INI", "S-WRITE-SKSE-INI", "S-WRITE-INSTALL",
+                "S-SED-WINPATH")
 
 
 def _phrase(names: List[str]) -> str:
@@ -415,20 +417,13 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             elif _looks_like_dir(dst):
                 hit = next((s for s in srcs if file_class(s) == "plugin"), None)
                 if hit is None:
-                    # S-MOVE-INSTALL (Task 9): the DESTINATION folder is in the install's Data/, config or MO2.
-                    if a_dst is not None and in_install_area(a_dst, roots):
-                        notes["S-MOVE-INSTALL"] += [_name(s) for s in srcs] or [_name(dst)]
                     continue
                 cand, name = dst.rstrip("/\\") + "/" + _name(hit), _name(hit)
             else:
-                if a_dst is not None and in_install_area(a_dst, roots):
-                    notes["S-MOVE-INSTALL"].append(_name(dst))      # a non-plugin file destination there
                 continue
             a = targets.resolve_operand(e, cand, cwd, env)
             if (a is not None and game_loads(a, roots)) or (a is None and _DATA_CHILD.search(cand)):
                 notes["S-COPY-PLUGIN"].append(name)
-            elif a is not None and in_install_area(a, roots):
-                notes["S-MOVE-INSTALL"].append(name)                 # a plugin copied BELOW Data/ (not loaded)
 
     texts = [command] if not parsed.ok else _opaque_texts(parsed.execs)
     for t in texts:

@@ -12,10 +12,14 @@ one session, 2026-10-03). Here each asks about an Exec from shellparse: its prog
 S-REGISTRY (deny). `reg delete KEY` / `reg.exe delete KEY` run as a program (also via `cmd /c`, `pwsh -Command`,
 wrappers), and PowerShell Remove-Item / Remove-ItemProperty / Remove-ItemPropertyValue / Clear-ItemProperty on a
 registry path (`HKLM:\`, `HKCU:\`, `Registry::`, `HKEY_...`), when KEY is a Bethesda key or an ANCESTOR of one
-(`HKLM\SOFTWARE\WOW6432Node` holds `Bethesda Softworks`), or KEY is not literal (`$K`, `%K%`) and the command names
-Bethesda. A delete of an unrelated key (`reg delete HKCU\Software\SomeTool`) is not this rule's business. Interpreter
-code (`python -c "os.system('reg delete ...Bethesda...')"`) is checked with the legacy text regex plus the word
-Bethesda.
+(`HKLM\SOFTWARE\WOW6432Node` holds `Bethesda Softworks`), or KEY is not literal (`$K`, `%K%`, a backtick, `$(...)`).
+Fix round 1: a non-literal key is first resolved from a simple assignment in the same command (`K='...'; reg delete
+"$K"`, PowerShell `$k = '...'`, cmd `set K=...`) and the result judged like a literal; a key that still cannot be
+known DENIES (not safe by default -- this re-denies loops such as `for k in ...; do reg delete "HKCU\...\$k"`). A
+PowerShell path that cannot be known denies when the command names a hive. A delete of an unrelated LITERAL key
+(`reg delete HKCU\Software\SomeTool`) is not this rule's business. Interpreter code (`python -c`, a heredoc to
+python, `node -e`; `os.system`, `subprocess.run(['reg', 'delete', ...])`, `execSync`) is read for the key that
+follows `reg delete` and judged the same way; a key it does not spell out (a variable, a concatenation) denies.
 
 S-PSC-OUT (deny). An executed program whose OWN arguments aim `-o` / `--output` / `-OutputPath` (also `--output=X`)
 at a `.psc`: the output would replace a source. Programs that only print or search text are not writers (`echo`,
@@ -37,14 +41,21 @@ config folder or MO2 (the area of S-WRITE-INSTALL): decompiled .psc written ther
 Compilers (Caprica, PapyrusCompiler) and Spriggit deserialize are NOT noted (Ruling, priced: 496 of 501 hits were
 those tools writing their product where it belongs; the legacy text rule's 248 were the same).
 
-NOT SAFE BY DEFAULT (R4). On a parse failure, or for an opaque program ("?": `$R delete ...`), the two text-matched
-DENY rules (registry, psc) fall back to the legacy regexes over that text, and Champollion to the legacy
-co-occurrence test. The advise rules are NOT attempted on a parse failure (as S-WRITE-INSTALL in Task 8): a note
-there would be the same text-match noise this task removes.
+NOT SAFE BY DEFAULT (R4). On a parse failure the two text-matched DENY rules (registry, psc) fall back to the legacy
+regexes over the whole text, and Champollion to the legacy co-occurrence test. For an opaque program ("?") the
+legacy regexes read its own ARGUMENTS and, when it reads a pipe, the words of the program feeding it (`"$X" reg delete
+KEY`, `printf 'reg delete KEY' | sh`). The advise rules are NOT attempted on a parse failure (as S-WRITE-INSTALL in
+Task 8): a note there would be the same text-match noise this task removes.
 
-KNOWN LIMITS: a key or output path held in a variable assigned earlier in the same command is unresolved (registry:
-denied only if the command names Bethesda); AutoMod run through an opaque script gets no note; a Caprica output
-folder given only by its project file (`.ppj`) is not read.
+KNOWN LIMITS (recorded, not handled):
+  - an opaque program WORD (`R=reg; $R delete KEY`): its arguments do not hold the word `reg`, so the legacy regex
+    cannot match either;
+  - PowerShell keys reached without a -Path: piped (`Get-Item HKLM:\...\Bethesda Softworks | Remove-Item`) or relative
+    to a registry location (`Set-Location HKLM:\SOFTWARE\WOW6432Node; Remove-Item 'Bethesda Softworks'`);
+  - `reg import x.reg` and `regedit /s x.reg` (the .reg file's contents decide; it is not read), and interpreter
+    registry APIs (`winreg.DeleteKey`, `Microsoft.Win32.Registry` calls);
+  - an output path held in a variable; AutoMod run through an opaque script gets no note; a Caprica output folder
+    given only by its project file (`.ppj`) is not read.
 """
 from __future__ import annotations
 
@@ -65,6 +76,7 @@ _HIVES = (("hkey_local_machine", "hklm"), ("hkey_current_user", "hkcu"))
 # Every registry form names one of these (reg / reg.exe, a hive, or the Registry:: provider): a cheap prefilter.
 _REG_WORDS = ("reg", "hklm", "hkcu", "hkey_")
 PS_REG_PROGRAMS = frozenset(("remove-item", "remove-itemproperty", "remove-itempropertyvalue", "clear-itemproperty"))
+_HIVE_WORD = re.compile(r"\b(?:hklm|hkcu|hkey_local_machine|hkey_current_user)\b|registry::", re.IGNORECASE)
 _REG_ROOT = re.compile(r"(?:registry::)?(hklm|hkcu|hkey_local_machine|hkey_current_user)(?::|\\|$)", re.IGNORECASE)
 
 
@@ -82,17 +94,84 @@ def _reg_key(word: str) -> str:
     return re.sub(r"\\+", r"\\", k)
 
 
-def bethesda_key(word: str, command: str) -> bool:
-    """True when deleting `word` deletes a Bethesda key: it IS one or lies under one ("bethesda" in it), it is an
-    ancestor of one, or it is not literal and the command names Bethesda."""
-    if "$" in word or "%" in word or "`" in word:
-        return "bethesda" in command.lower()
+_NONLITERAL = re.compile(r"[$%`]")
+# Simple assignments earlier in the same command (fix round 1): bash `K='v'` / `K="v"` / `K=v`, PowerShell `$K = 'v'`,
+# cmd `set K=v`. A name assigned twice is ambiguous and stays unresolved. Linear: one finditer per form.
+_BASH_ASSIGN = re.compile(r"""(?:^|[\s;&|(])([A-Za-z_][A-Za-z0-9_]{0,63})=(?:'([^'\n]*)'|"([^"$`\n]*)"|([^\s;&|'"$`()]+))""")
+_PS_ASSIGN = re.compile(r"""\$([A-Za-z_][A-Za-z0-9_]{0,63})[ \t]*=[ \t]*(?:'([^'\n]*)'|"([^"$`\n]*)")""")
+_CMD_ASSIGN = re.compile(r"""(?i:\bset)[ \t]+"?([A-Za-z_][A-Za-z0-9_]{0,63})=([^&|"\r\n]*)""")
+_VAR_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)|%([A-Za-z_][A-Za-z0-9_]*)%")
+
+
+def assignments(command: str) -> dict:
+    """name (upper case) -> value for the simple assignments in `command`; an ambiguous name maps to None."""
+    out = {}
+    # cmd's `set K=v w` first: the bash form would also read `K=v` inside it, so matches inside a `set` are skipped.
+    spans = [m.span() for m in _CMD_ASSIGN.finditer(command)]
+    for rx in (_CMD_ASSIGN, _BASH_ASSIGN, _PS_ASSIGN):
+        for m in rx.finditer(command):
+            if rx is not _CMD_ASSIGN and any(a <= m.start(1) < b for a, b in spans):
+                continue
+            name = m.group(1).upper()
+            value = next((g for g in m.groups()[1:] if g is not None), "").rstrip()
+            out[name] = value if out.get(name, value) == value else None
+    return out
+
+
+def _substitute(word: str, assigned: dict) -> Optional[str]:
+    """`word` with each $NAME / ${NAME} / %NAME% replaced by its assignment; None when any cannot be."""
+    def one(m):
+        v = assigned.get((m.group(1) or m.group(2) or m.group(3)).upper())
+        if v is None:
+            raise KeyError
+        return v
+    try:
+        out = _VAR_REF.sub(one, word)
+    except KeyError:
+        return None
+    return None if _NONLITERAL.search(out) else out
+
+
+def bethesda_key(word: str, command: str, assigned: Optional[dict] = None) -> bool:
+    """True when deleting `word` may delete a Bethesda key: it IS one or lies under one ("bethesda" in it), it is an
+    ANCESTOR of one, or it is not literal and cannot be resolved from a simple assignment in the same command
+    (fix round 1: an unknown key is not safe by default -- `reg delete "$KEY"` denies)."""
+    if _NONLITERAL.search(word):
+        word = _substitute(word, assignments(command) if assigned is None else assigned)
+        if word is None:
+            return True
     k = _reg_key(word)
     if not k:
         return False
     if "bethesda" in k:
         return True
     return any(b.startswith(k + "\\") for b in BETHESDA_KEYS)
+
+
+# The key that follows `reg delete` in INTERPRETER code (fix round 1): `os.system('reg delete KEY /f')`,
+# `subprocess.run(['reg', 'delete', r'KEY', '/f'])`, `execSync("reg.exe delete \"KEY\"")`. A quoted key keeps its
+# spaces; anything else (a variable, a concatenation, an f-string) is not literal.
+_CODE_REG_DELETE = re.compile(
+    r"""\breg(?:\.exe)?\b['"]?(?:\s*,\s*|\s+)[rbu]?['"]?delete\b['"]?(\s*,\s*|\s+)"""
+    r"""(?:[rbu]?\\?(['"])([^'"\n]{0,512})\2|([^\s'",)\]]{1,512}))""", re.IGNORECASE)
+# `'reg delete ' + key`, `"reg delete " % key`, `"reg delete ".format(key)`: the string ENDS at delete and the key is
+# joined on from a variable.
+_CODE_REG_DELETE_JOINED = re.compile(r"""\breg(?:\.exe)?\s+delete\s*['"]\s*(?:\+|%|\.format\b)""", re.IGNORECASE)
+
+
+def code_deletes_bethesda(code: str) -> bool:
+    """Interpreter code that runs `reg delete` on a Bethesda key, an ancestor of one, or a key it does not spell out:
+    a key joined on from a variable, an f-string `{key}`, `%s`, or -- in an argument LIST (`['reg', 'delete', key]`)
+    -- a bare name, which is a variable there. Words after `reg delete` inside a string are the key as written, so
+    `print('reg delete is blocked')` names the key `is` and is not a Bethesda delete."""
+    if _CODE_REG_DELETE_JOINED.search(code):
+        return True
+    for m in _CODE_REG_DELETE.finditer(code):
+        listed, quoted = "," in m.group(1), m.group(2) is not None
+        key = m.group(3) if quoted else m.group(4)
+        if (listed and not quoted) or not key or "{" in key or bethesda_key(key, code, {}):
+            return True
+    return False
 
 
 def _is_reg_path(word: str) -> bool:
@@ -114,17 +193,26 @@ def registry(command: str, parsed) -> bool:
     from .writes import _opaque_texts
     if any(_legacy_registry(t) for t in _opaque_texts(parsed.execs)):
         return True
+    assigned = assignments(command)
+    names_hive = bool(_HIVE_WORD.search(command))
     for e in parsed.execs:
         if e.program == "reg" and e.argv and e.argv[0].lower() == "delete":
-            if len(e.argv) < 2 or bethesda_key(e.argv[1], command):
+            if len(e.argv) < 2 or bethesda_key(e.argv[1], command, assigned):
                 return True
         elif e.program in PS_REG_PROGRAMS:
             for w in ps_param(e, "path", 0) + ps_param(e, "literalpath"):
-                if (_is_reg_path(w) or "$" in w) and bethesda_key(w, command):
+                if _NONLITERAL.search(w):
+                    v = _substitute(w, assigned)
+                    if v is None:
+                        if names_hive:
+                            return True                       # an unknown path in a command that names a hive
+                        continue
+                    w = v
+                if _is_reg_path(w) and bethesda_key(w, command, assigned):
                     return True
         else:
             code = interpreter_code(e)
-            if code and grep(REG_DELETE_TEXT, code) and "bethesda" in code.lower():
+            if code and code_deletes_bethesda(code):
                 return True
     return False
 

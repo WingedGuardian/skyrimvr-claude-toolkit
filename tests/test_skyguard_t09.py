@@ -101,3 +101,33 @@ def test_a_copy_from_the_null_device_is_a_write():
     assert writes.copy_targets(e) == [("Data/X.esp", ("/dev/null",))]
     assert decide("cp /dev/null Data/X.esp", cwd="C:/work")[1] == {"S-WRITE-PLUGIN"}
     assert decide("Copy-Item NUL X.esp", cwd="C:/work", shell="powershell")[1] == {"S-WRITE-PLUGIN"}
+
+
+# ------------------------------------------------------------------------------------------- fix round 1: registry keys
+R, D = "re" + "g", "del" + "ete"
+
+
+def test_assignments_bash_powershell_cmd_and_ambiguity():
+    a = anchored.assignments("K='x y'; L=\"z\"; M=w; $p = 'q'; set C=v w& echo; K2=1; K2=2")
+    assert a["K"] == "x y" and a["L"] == "z" and a["M"] == "w" and a["P"] == "q" and a["C"] == "v w"
+    assert a["K2"] is None                                  # assigned twice, differently: ambiguous
+
+
+def test_a_cmd_set_key_is_resolved():
+    key = "HKLM" + BS + "SOFTWARE" + BS + "Bethesda Softworks"
+    assert decide("set K=" + key + "& " + R + " " + D + ' "%K%" /f', cwd="C:/work", shell="cmd")[1] == {"S-REGISTRY"}
+    other = "HKCU" + BS + "Software" + BS + "SomeTool"
+    assert decide("set K=" + other + "& " + R + " " + D + ' "%K%" /f', cwd="C:/work", shell="cmd")[1] == set()
+
+
+@pytest.mark.parametrize("code,want", [
+    ("os.system('" + R + " " + D + " HKLM" + BS * 2 + "SOFTWARE /f')", True),                 # an ancestor
+    ("subprocess.run(['" + R + "', '" + D + "', r'HKCU" + BS + "Software" + BS + "X'])", False),
+    ("execSync(\"" + R + ".exe " + D + " " + BS + "\"HKCU" + BS * 2 + "Software" + BS * 2 + "Bethesda Softworks" + BS
+     + "\" /f\")", True),
+    ("os.system(f'" + R + " " + D + " {key} /f')", True),                                       # an f-string key
+    ("os.system('" + R + " " + D + " ' + k)", True),                                            # a concatenation
+    ("print('" + R + " " + D + " is blocked')", False),
+])
+def test_interpreter_code_keys(code, want):
+    assert anchored.code_deletes_bethesda(code) is want

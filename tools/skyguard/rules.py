@@ -18,6 +18,7 @@ REMOVED = frozenset({
     "S-PLUGIN-REF",         # R11, Task 8: a text match on plugin extensions, 3.3% of calls, nearly all reads
     "S-LOADORDER-REF",      # Task 8: fired on READS of plugins.txt; a write is S-WRITE-LOADORDER
     "S-REDIRECT-INSTALL",   # Task 8: replaced by the S-WRITE-* rules, which fire on the program that writes
+    "S-MOVE-INSTALL",       # Task 9 fix round 1: 107 of 107 hits in history were the user's deliberate deploys
 })
 
 RULES = {
@@ -140,15 +141,6 @@ RULES = {
         "prefixes": [],
         "template": (
         'Note: this deletes {file} by a relative path, and the guard was not told the working folder.'
-    ),
-    },
-    'S-MOVE-INSTALL': {
-        "decision": 'advise',
-        "hook": 'protect-bash',
-        "legacy": False,
-        "prefixes": [],
-        "template": (
-        'Note: this copies or moves onto {file} in the Skyrim install; an overwrite there is silent.'
     ),
     },
     'S-WRITE-PLUGIN': {

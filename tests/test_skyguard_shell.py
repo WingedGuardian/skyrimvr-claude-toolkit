@@ -140,12 +140,11 @@ def test_rule7_relative_delete_resolves_from_the_payload_cwd(tmp_path):
     assert v == ("allow", "", "")
 
 
-def test_rule8_move_copy(tmp_path):
-    # Task 9: the DESTINATION resolves into the install's Data/ (or config, MO2); the source does not count.
-    cmd = "cp a.txt /x/install/Data/a.txt"
-    assert advice(cmd, tmp_path) == rules.message("S-MOVE-INSTALL", file="a.txt")
-    assert advice("cp a.txt b.txt", tmp_path) == ""
+def test_rule8_move_copy_note_is_gone(tmp_path):
+    # Task 9 fix round 1: S-MOVE-INSTALL removed (107 of 107 hits were the user's deliberate deploys).
+    assert advice("cp a.txt /x/install/Data/a.txt", tmp_path) == ""
     assert advice("cp /x/install/Data/a.txt /tmp/a.txt", tmp_path) == ""
+    assert "S-MOVE-INSTALL" not in rules.RULES and "S-MOVE-INSTALL" in rules.REMOVED
 
 
 def test_rule9_redirect(tmp_path):
@@ -368,7 +367,7 @@ def test_every_message_constant_equals_the_bash_text():
     plan5 = {"DENY_WRITE_PLUGIN": rules.RULES["S-WRITE-PLUGIN"]["template"],
              "DENY_REGISTRY": rules.RULES["S-REGISTRY"]["template"], "DENY_PSC": rules.RULES["S-PSC-OUT"]["template"],
              "DENY_CHAMPOLLION": rules.RULES["S-CHAMPOLLION"]["template"],
-             "ADV_MOVE": rules.RULES["S-MOVE-INSTALL"]["template"], "ADV_SED": rules.RULES["S-SED-WINPATH"]["template"],
+             "ADV_SED": rules.RULES["S-SED-WINPATH"]["template"],
              "ADV_AUTOMOD_ESP": rules.RULES["S-AUTOMOD-ESP"]["template"],
              "ADV_AUTOMOD_NIF": rules.RULES["S-AUTOMOD-NIF"]["template"],
              "ADV_AUTOMOD_ARCHIVE": rules.RULES["S-AUTOMOD-ARCHIVE"]["template"],
