@@ -1727,7 +1727,7 @@ _LOOK = '        r = self.vars.get(name if self.DIALECT == "bash" else name.lowe
 _SAME = "        if cmd.valid and lst == cmd.lst and seq < cmd.seq:"
 _OPEN = '_BASH_OPEN = frozenset(("if", "while", "until", "{"))'
 _CLOSE = '_BASH_CLOSE = frozenset(("fi", "done", "}"))'
-_COUNT = "    for rx in (_W_PLAIN, _W_DOLLAR, _W_DEFAULT, _W_FD):"
+_COUNT = "    for rx in (_W_PLAIN, _W_DOLLAR, _W_FD):"
 _ONCE = "                if self.ctx.writes(name) == 1 and name.lower() not in assign.SPECIAL:"
 _T7B_CLAUSES = [
     # (id, file, find, replace, test)
@@ -1737,10 +1737,12 @@ _T7B_CLAUSES = [
     ("t7b-top-frame", _SP, _GATE, "        if top.ctl != 0 or top.case:", _t07b("assign-in-subshell")),
     ("t7b-control-depth", _SP, _GATE, "        if f is not top or top.case:", _t07b("assign-in-if")),
     ("t7b-case-arm", _SP, _GATE, "        if f is not top or top.ctl != 0:", _t07b("assign-in-case")),
-    ("t7b-open-while", _SP, _OPEN, '_BASH_OPEN = frozenset(("if", "until", "{"))', _t07b("assign-in-while")),
-    ("t7b-open-brace", _SP, _OPEN, '_BASH_OPEN = frozenset(("if", "while", "until"))', _t07b("assign-in-braces")),
+    ("t7b-open-while", _SP, _OPEN, '_BASH_OPEN = frozenset(("if", "until", "{"))',
+     _TA + "test_flow_closers_reset_control_depth[while y; do :; done]"),
+    ("t7b-open-brace", _SP, _OPEN, '_BASH_OPEN = frozenset(("if", "while", "until"))',
+     _TA + "test_flow_closers_reset_control_depth[{ :; }]"),
     ("t7b-open-for", _SP, "            f.ctl += 1                                          # closed by `done`",
-     "            pass", _t07b("assign-in-for")),
+     "            pass", _TA + "test_flow_closers_reset_control_depth[for i in 1; do :; done]"),
     ("t7b-close-fi", _SP, _CLOSE, '_BASH_CLOSE = frozenset(("done", "}"))',
      _TA + "test_flow_closers_reset_control_depth[if y; then :; fi]"),
     ("t7b-close-done", _SP, _CLOSE, '_BASH_CLOSE = frozenset(("fi", "}"))',
@@ -1768,8 +1770,6 @@ _T7B_CLAUSES = [
     ("t7b-promotion", _SP, "                    self.vars[k][1] = top.kv", "                    pass",
      _t07b("scratch-var")),
     # which use an assignment reaches
-    ("t7b-poison-refuses", _SP, "        if cmd.poison:\n            return None",
-     "        if False:\n            return None", _t07b("source")),
     ("t7b-bash-case-sensitive", _SP, _LOOK, "        r = self.vars.get(name.lower())", _t07b("case-differs")),
     ("t7b-ps-case-insensitive", _SP, _LOOK, "        r = self.vars.get(name)", _t07b("ps-case-insensitive-use")),
     ("t7b-earlier-statement", _SP, "        if kv is not None and kv <= cmd.kv:", "        if kv is not None:",
@@ -1783,20 +1783,6 @@ _T7B_CLAUSES = [
     ("t7b-prefix-env", _SP, "                return []                                       # `K=v cmd`: K is set for cmd only",
      "                continue", _t07b("prefix-env")),
     ("t7b-append", _SP, '            if "[" in lhs or lhs.endswith("+="):', "            if False:", _t07b("append")),
-    ("t7b-bash-source-poisons", _SP, '        if any(p in ("source", "eval") for p in plain):',
-     "        if False:", _t07b("builtin-source")),
-    ("t7b-bash-dot-poisons", _SP, '        return j < len(plain) and plain[j] == "."', "        return False",
-     _t07b("source-dot")),
-    ("t7b-bash-builtin-dot", _SP, '        while j < len(plain) and plain[j] in ("builtin", "command"):',
-     "        while False:", _t07b("builtin-dot")),
-    ("t7b-ps-invokescript-poisons", _SP,
-     '        return "invokescript" in self.t[cmd.start:cmd.end].lower()   # $ExecutionContext...InvokeScript(...)',
-     "        return False", _t07b("ps-invokescript")),
-    ("t7b-ps-dot-source-poisons", _SP, "        if cmd.dot:\n            return True",
-     "        if False:\n            return True", _t07b("ps-dot-source")),
-    ("t7b-ps-iex-poisons", _SP, '"".join(w.b).lower() in ("iex", "invoke-expression")', '"".join(w.b).lower() in ()',
-     _t07b("ps-iex")),
-    # the substitution reaches the delete rules
     ("t7b-subst-attached", _SP, "        saved, ctx.subst = ctx.subst, (_subst(sc, rec, ws, vals) if sc.vars else ())",
      "        saved, ctx.subst = ctx.subst, ()", _t07b("scratch-var")),
     ("t7b-two-readings", _SP, "        got[val] = s if got.get(val, s) == s else None", "        got[val] = s",
@@ -1805,19 +1791,16 @@ _T7B_CLAUSES = [
     ("t7b-find-delete-carries", _SP, 'self.seg, "", self.ctx.subst)', 'self.seg, "", ())', _t07b("find-delete")),
     ("t7b-deletes-wired", _DL, "        e = substituted(e)\n", "", _t07b("scratch-var")),
     # assign.py: every form of a second write counts; values and uses are literal or nothing
-    ("t7b-count-plain", _AS, _COUNT, "    for rx in (_W_DOLLAR, _W_DEFAULT, _W_FD):",
+    ("t7b-count-plain", _AS, _COUNT, "    for rx in (_W_DOLLAR, _W_FD):",
      _TA + "test_plain_assignment_is_counted"),
-    ("t7b-count-dollar", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DEFAULT, _W_FD):",
+    ("t7b-count-dollar", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_FD):",
      _TA + "test_dollar_assignment_is_counted"),
-    ("t7b-count-default", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DOLLAR, _W_FD):", _t07b("default-expansion")),
-    ("t7b-count-fd", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DOLLAR, _W_DEFAULT):", _t07b("fd-alloc")),
+    ("t7b-count-fd", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DOLLAR):", _t07b("fd-alloc")),
     ("t7b-count-ps-tee", _AS, "tee-object|-variable|", "", _t07b("ps-tee-variable")),
     ("t7b-count-increment", _AS, "    for m in _W_INC.finditer(text):", '    for m in _W_INC.finditer(""):',
      _TA + "test_increment_is_a_write"),
-    ("t7b-count-bash-keywords", _AS, "        elif _KW_BASH.search(piece) or (", "        elif False or (",
+    ("t7b-count-bash-keywords", _AS, "        elif _KW_BASH.search(piece):", "        elif False:",
      _t07b("for-variable")),
-    ("t7b-count-printf-v", _AS, "(_KW_BASH_V.search(piece) and _OPT_V.search(piece))", "False",
-     _t07b("printf-v")),
     ("t7b-count-ps-keywords", _AS, "        if _KW_PS.search(piece):", "        if False:", _t07b("ps-foreach")),
     ("t7b-count-dollar-is-a-read", _AS, '_BARE_IDENT = re.compile(r"(?<![\\w$])(?<!\\$\\{)(" + _IDENT + r")")',
      '_BARE_IDENT = re.compile(r"(" + _IDENT + r")")', _TA + "test_for_list_dollar_is_a_read"),

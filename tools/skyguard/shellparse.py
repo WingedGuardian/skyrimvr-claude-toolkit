@@ -295,7 +295,7 @@ class _Here:
 
 class _Cmd:
     __slots__ = ("words", "redirs", "heredocs", "start", "end", "cd", "key", "stage", "skip", "redir_op",
-                 "drop_next", "call", "frame", "after_time", "coproc", "kv", "lst", "seq", "valid", "poison", "dot")
+                 "drop_next", "call", "frame", "after_time", "coproc", "kv", "lst", "seq", "valid")
 
     def __init__(self, f, start: int):
         self.words: List[_Word] = []
@@ -315,8 +315,6 @@ class _Cmd:
         self.coproc = False
         self.kv = self.lst = self.seq = 0       # Task 7b: where this command sits in the top-level statement list
         self.valid = False
-        self.poison = True
-        self.dot = False
 
 
 class _Frame:
@@ -390,7 +388,6 @@ class _Scanner:
         self.i = 0
         self._pmatch: Optional[dict] = None
         self.vars: dict = {}            # Task 7b: name -> [value, known_ver, list, seq] (one literal assignment)
-        self.poisoned = False           # a source / eval / dot-source ran: any name may have changed
         self.unsure = False             # a closing keyword without its opener: the control depth is not known
 
     def _frame(self, kind, cd, mode, start):
@@ -406,7 +403,7 @@ class _Scanner:
         if f.cmd is None:
             c = f.cmd = _Cmd(f, start)
             top = self.frames[0]
-            c.kv, c.lst, c.seq, c.valid, c.poison = top.kv, top.lst, top.seq, top.chain_ok, self.poisoned
+            c.kv, c.lst, c.seq, c.valid = top.kv, top.lst, top.seq, top.chain_ok
         return f.cmd
 
     def _push(self, f: _Frame, kind: str, start: int, word: bool) -> _Frame:
@@ -481,17 +478,12 @@ class _Scanner:
     def assignments(self, cmd: _Cmd) -> List[Tuple[str, str]]:
         return []
 
-    def poisons(self, cmd: _Cmd) -> bool:
-        return False
-
     def track_vars(self, f: _Frame, cmd: Optional[_Cmd], sep: str) -> None:
-        if cmd is not None and not cmd.skip and cmd.words and self.poisons(cmd):
-            self.poisoned = True
         top = self.frames[0]
         if f is not top or top.ctl != 0 or top.case:
             return                                  # nested: neither records nor moves the statement list
-        # (An assignment after a `||`, or after a source/eval, is recorded too: lookup() refuses every use that
-        # could see it -- a later use in a broken chain, or any use created after the poison.)
+        # (An assignment after a `||` is recorded too: lookup() refuses every later use in that broken chain, and
+        # it is never first in its list. source/eval/dot-source poison the whole command: assign.poisoned.)
         if cmd is not None and not cmd.skip and cmd.stage == 0 and sep not in ("|", "|&"):
             for name, value in self.assignments(cmd):
                 if self.ctx.writes(name) == 1 and name.lower() not in assign.SPECIAL:
@@ -518,8 +510,6 @@ class _Scanner:
 
     def lookup(self, cmd: _Cmd, name: str) -> Optional[str]:
         """The literal `name` certainly holds when `cmd` runs, or None."""
-        if cmd.poison:
-            return None
         r = self.vars.get(name if self.DIALECT == "bash" else name.lower())
         if r is None:
             return None
@@ -640,19 +630,6 @@ class _Bash(_Scanner):
             if value is not None:
                 out.append((_VARNAME.match(lhs).group(), value))
         return out
-
-    def poisons(self, cmd):
-        ws = cmd.words
-        k = 0
-        while k < len(ws) and _ASSIGN.match(ws[k].raw):
-            k += 1
-        plain = ["".join(w.b) if not w.quoted and not w.dyn else "" for w in ws[k:]]
-        if any(p in ("source", "eval") for p in plain):
-            return True                                         # also `builtin source`, `command eval`, `sudo eval`
-        j = 0
-        while j < len(plain) and plain[j] in ("builtin", "command"):
-            j += 1
-        return j < len(plain) and plain[j] == "."
 
     def track_cd(self, f, cmd):
         ws = cmd.words
@@ -1176,7 +1153,6 @@ class _Pwsh(_Scanner):
         v = "".join(w.b).lower()
         if v == "." and not cmd.call:
             cmd.call = True                                       # dot-source: the next word is the script
-            cmd.dot = True
             return True
         if v in _PS_DROP:
             return True
@@ -1188,13 +1164,6 @@ class _Pwsh(_Scanner):
     def assignments(self, cmd):
         a = assign.ps_assignment(self.t[cmd.start:cmd.end])
         return [a] if a else []
-
-    def poisons(self, cmd):
-        if cmd.dot:
-            return True
-        if any(not w.quoted and not w.dyn and "".join(w.b).lower() in ("iex", "invoke-expression") for w in cmd.words):
-            return True
-        return "invokescript" in self.t[cmd.start:cmd.end].lower()   # $ExecutionContext...InvokeScript(...)
 
     def track_cd(self, f, cmd):
         if not cmd.words or cmd.words[0].quoted or cmd.words[0].dyn:

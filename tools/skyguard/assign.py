@@ -40,14 +40,15 @@ WHAT COUNTS AS ONE LITERAL ASSIGNMENT. shellparse records `NAME=literal` (bash) 
 (PowerShell) only when ALL of these hold, else the name stays unresolved:
   - write_counts(<the whole command>) says the name is written exactly ONCE (case-insensitively) -- any second
     write anywhere (a reassignment before or after the use, a `for`/`read`/`foreach` variable, `export`, `local`,
-    `declare`, `unset`, `printf -v`, `${N:=x}`, `N+=x`, `N++`, PowerShell `$script:n =`, Set-Variable, -OutVariable,
-    a function parameter, a write inside a string or heredoc body) makes it unresolved: over-counting is safe;
+    `declare`, `unset`, `N+=x`, `N++`, `exec {N}>`, PowerShell `$n =`, Set-Variable, -OutVariable, a function
+    parameter, a write inside a string or heredoc body) makes it unresolved: over-counting is safe (the forms
+    POLICY lists poison the whole command anyway);
   - the value is a plain literal: no `$`, backtick, command substitution, unquoted `~` or backslash; PowerShell:
     a single- or double-quoted string with no `$` and no backtick;
   - it is a statement of its own in the ROOT command (not inside `bash -c`, eval, a backtick or a heredoc), in
     the top-level statement list (not inside `( )`, `$( )`, `{ }`, if/while/until/for/select/case or a
     function body), not in a pipeline, not backgrounded with `&`, and not after a `||`;
-  - no `source` / `.` / `eval` (bash) or dot-source / Invoke-Expression (PowerShell) runs before the use.
+  - poisoned() finds nothing in the whole command (POLICY above), and no closing keyword lacks its opener.
 A use resolves when it comes after the assignment: in a later statement (the assignment was FIRST in its own
 `&&` list, so it always ran), or later in the same pure `&&` chain. cmd.exe never resolves: `set K=v & rd %K%`
 expands %K% when the LINE is read, before `set` runs.
@@ -63,16 +64,12 @@ _IDENT = r"[A-Za-z_][A-Za-z0-9_]{0,63}"
 _W_PLAIN = re.compile(r"(?<![\w$])(" + _IDENT + r")(?:\[[^\]\n]{0,200}\])?[ \t]{0,64}(?:[-+*/%&|^]|<<|>>|\?\?)?=")
 # PowerShell `$n =`, `$script:n +=`, `${n} =`
 _W_DOLLAR = re.compile(r"\$\{?(?:[A-Za-z]{1,32}:)?(" + _IDENT + r")\}?[ \t]{0,64}(?:[-+*/%]|\?\?)?=")
-_W_DEFAULT = re.compile(r"\$\{(" + _IDENT + r"):?=")                      # ${N:=x} / ${N=x}
 _W_FD = re.compile(r"\{(" + _IDENT + r")\}[<>]")                            # exec {N}>f allocates an fd into N
 _W_INC = re.compile(r"(?<![\w])(" + _IDENT + r")(?:\+\+|--)|(?:\+\+|--)\$?(" + _IDENT + r")")
 _PIECE = re.compile(r"[^;&|\n]+")
 # A statement that names one of these may write ANY name it mentions.
 _KW_BASH = re.compile(r"(?<![\w$-])(?:read|readarray|mapfile|getopts|unset|declare|typeset|local|export|readonly|"
                       r"let|for|select|coproc)(?![\w-])")
-# `printf -v NAME` / `wait -p NAME` (bash 5.1): the program and such an option anywhere in the same statement.
-_KW_BASH_V = re.compile(r"(?<![\w$-])(?:printf|wait)(?![\w-])")
-_OPT_V = re.compile(r"(?<![\w-])-[A-Za-z]{0,8}[vp](?![\w-])")
 _KW_PS = re.compile(r"(?<![\w$-])(?:set-variable|new-variable|clear-variable|remove-variable|sv|nv|clv|rv|"
                     r"foreach|param|function|filter|variable:|\[ref\]|psvariable|set|tee-object|-variable|-bindingvariable|"
                     r"-outvariable|-ov|-errorvariable|-ev|"
@@ -104,7 +101,7 @@ def write_counts(text: str) -> Dict[str, int]:
     def add(name: str) -> None:
         k = name.lower()
         out[k] = out.get(k, 0) + 1
-    for rx in (_W_PLAIN, _W_DOLLAR, _W_DEFAULT, _W_FD):
+    for rx in (_W_PLAIN, _W_DOLLAR, _W_FD):
         for m in rx.finditer(text):
             add(m.group(1))
     for m in _W_INC.finditer(text):
@@ -114,7 +111,7 @@ def write_counts(text: str) -> Dict[str, int]:
         if _KW_PS.search(piece):
             for m in _ANY_IDENT.finditer(piece):                  # PowerShell: `foreach ($x in ...)` writes $x
                 add(m.group())
-        elif _KW_BASH.search(piece) or (_KW_BASH_V.search(piece) and _OPT_V.search(piece)):
+        elif _KW_BASH.search(piece):
             for m in _BARE_IDENT.finditer(piece):                 # bash: `for x in "$SP"/*` writes x, reads SP
                 add(m.group(1))
     return out

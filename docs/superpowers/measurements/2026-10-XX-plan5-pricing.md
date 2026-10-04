@@ -518,3 +518,6 @@ Re-priced `--base dc8c59b`, N = 64,742: 0 errors; parse failures 63 → 63. Matr
   Accepted by the ruling (resolution is a convenience).
 - **No item is newly lifted** (the 68 are a subset of the 88 hand-read FPs, compared by command text): **0 TP lost.**
 - S-DEL-INSTALL 21 / S-WRITE-PLUGIN 1 / S-RESAVER-APPLY 1: identical item sets.
+- After the mutation gate showed the round-0 per-statement poison (parser `poisons()`) and the `${N:=}` / `printf -v`
+  write-count forms to be fully shadowed by `assign.poisoned` (their 9 mutations survived), those mechanisms were
+  removed (one mechanism per concern). Re-priced, N = 64,867: all four per-rule item sets identical (68 still lifted).

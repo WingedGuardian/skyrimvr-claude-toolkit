@@ -69,7 +69,7 @@ def test_t07b_row(row):
     ("$p = 'x'", "p", 1),                                # ... and PowerShell's assignment form
     ("$script:p = 'x'", "p", 1),
     ("${p} += 1", "p", 1),
-    (": ${D:=x}", "d", 1),
+    (": ${D:=x}", "d", 0),                              # not counted: poisoned() (default-assign)
     (": ${D=x}", "d", 1),
     (": ${D:-x}", "d", 0),                               # a default that does not assign
     ("((D++))", "d", 1),
@@ -81,9 +81,9 @@ def test_t07b_row(row):
     ("unset D", "d", 1),
     ("local D", "d", 1),
     ("declare -n R=D", "d", 1),
-    ("printf -v D '%s' x", "d", 1),
+    ("printf -v D '%s' x", "d", 0),                      # not counted: poisoned() (printf-v)
     ("printf '%s' D", "d", 0),                           # printf without -v writes nothing
-    ("wait -n -p D", "d", 1),
+    ("wait -n -p D", "d", 0),                            # not counted: poisoned() (wait-p)
     ("foreach ($p in $a) { }", "p", 1),
     ("Set-Variable -Name p -Value x", "p", 1),
     ("Get-Item x -OutVariable p", "p", 1),
@@ -291,7 +291,7 @@ def test_flow_use_before_in_same_chain():
     assert "$D" not in _subst('rm "$D" && D=/x')
 
 
-@pytest.mark.parametrize("opener", ["if y; then :; fi", "while y; do :; done", "{ :; }"])
+@pytest.mark.parametrize("opener", ["if y; then :; fi", "while y; do :; done", "{ :; }", "for i in 1; do :; done"])
 def test_flow_closers_reset_control_depth(opener):
     assert _subst(opener + '; D=/x; rm "$D"').get("$D") == "/x"
 
