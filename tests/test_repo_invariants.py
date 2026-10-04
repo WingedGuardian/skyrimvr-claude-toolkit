@@ -218,9 +218,10 @@ def test_every_hook_is_configured_by_setup_and_carries_one_placeholder():
 
     Both were live: two hooks carried the literal in an explanatory comment.
     """
-    hooks = sorted(HOOK_DIR.glob("*.sh"))
-    assert hooks, "no hooks found -- this test would pass vacuously"
-    setup = (REPO / "setup.sh").read_text(encoding="utf-8")
+    # Plan 4: the Codex entries take the same interpreter, from the same loop.
+    hooks = sorted(HOOK_DIR.glob("*.sh")) + sorted((REPO / ".codex" / "hooks").glob("skyguard-entry.*"))
+    assert len(hooks) >= 7, "hooks not found -- this test would pass vacuously"
+    setup = (REPO / "setup.sh").read_text(encoding="utf-8").replace(chr(92) + "\n", " ")   # join continuations
     loop = next((l for l in setup.splitlines() if l.startswith("for hook in ")), "")
     assert loop, "setup.sh has no `for hook in ...` substitution loop; this test is stale"
 
@@ -357,3 +358,4 @@ def test_the_users_knowledgebase_is_never_shipped_and_is_where_writes_go():
     assert not (REPO / local).exists(), (
         local + " exists in the repo. It is the USER's file; if it is here it will be "
         "tracked and shipped, overwriting theirs on update")
+

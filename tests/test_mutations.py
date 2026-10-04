@@ -249,6 +249,87 @@ MUTATIONS = [
         "tests/test_python_path.py::test_a_path_containing_an_ampersand_is_not_mangled_by_sed",
         id="setup-escapes-sed-replacement-metacharacters",
     ),
+    # Plan 4 Task 11: setup.sh configures Codex. One mutant per safety-relevant clause.
+    # PowerShell escapes a quote in '...' by doubling it. The bash '\'' form ends the string: the entry
+    # cannot parse, and a Codex hook that cannot start lets the command RUN.
+    pytest.param(
+        "setup.sh",
+        'PY_PS="${PYTHON_PATH//' + BS + "'/" + BS + "'" + BS + "'}" + '"',
+        'PY_PS="${PYTHON_PATH//' + BS + "'/" + BS + "'" + BS * 2 + BS + "'" + BS + "'}" + '"',
+        "tests/test_setup_paths.py::test_setup_configures_the_codex_entry_scripts",
+        marks=pytest.mark.skipif(not (shutil.which("pwsh") or shutil.which("powershell")),
+                                 reason="needs PowerShell to parse the entry"),
+        id="setup-ps1-python-path-uses-powershell-quoting",
+    ),
+    # The Codex entries must get the interpreter at all (else every Codex call is the INERT deny).
+    pytest.param(
+        "setup.sh",
+        "            .codex/hooks/skyguard-entry.ps1 .codex/hooks/skyguard-entry.sh; do",
+        "            ; do",
+        "tests/test_setup_paths.py::test_setup_configures_the_codex_entry_scripts",
+        id="setup-configures-the-codex-entries-interpreter",
+    ),
+    # ...and a re-run must repair a moved interpreter in the .ps1 too ($PY = '...', not PY='...').
+    pytest.param(
+        "setup.sh",
+        "H_RE='^[$]PY = '",
+        "H_RE='^PY='",
+        "tests/test_setup_paths.py::test_rerunning_setup_repairs_the_codex_entries_interpreter",
+        id="setup-rerun-repairs-the-ps1-interpreter",
+    ),
+    # The PowerShell entry hands the engine a bash; an MSYS /usr/bin/bash is not one it can start.
+    pytest.param(
+        "setup.sh",
+        "if command -v cygpath >/dev/null 2>&1; then",
+        "if false; then",
+        "tests/test_setup_paths.py::test_setup_configures_the_codex_entry_scripts",
+        marks=pytest.mark.skipif(sys.platform != "win32", reason="cygpath exists on Git Bash only"),
+        id="setup-codex-bash-path-is-a-windows-path",
+    ),
+    # Git Bash rewrites a /c/... argument to C:/... for a native python: the POSIX root changes, so the
+    # renderer refuses it and Codex is left unconfigured on every Windows install.
+    pytest.param(
+        "setup.sh",
+        "CODEX_ERR=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND",
+        "CODEX_ERR=$($PY_FOUND",
+        "tests/test_setup_paths.py::test_setup_fills_the_codex_definitions_with_the_install_root",
+        marks=pytest.mark.skipif(sys.platform != "win32", reason="Codex definitions are rendered on Windows"),
+        id="setup-codex-render-keeps-the-posix-root",
+    ),
+    # A refused root must say WHY, loudly: otherwise Codex runs unguarded and setup looks clean.
+    pytest.param(
+        "setup.sh",
+        '            echo "  !! ${CODEX_ERR:-the renderer failed (exit $CODEX_RC)}"',
+        "            :",
+        "tests/test_setup_paths.py::test_setup_refuses_a_root_it_cannot_put_in_json",
+        marks=pytest.mark.skipif(sys.platform != "win32", reason="Codex definitions are rendered on Windows"),
+        id="setup-says-why-codex-is-unconfigured",
+    ),
+    # Definitions rendered for another folder must not pass as "Already configured".
+    pytest.param(
+        "setup.sh",
+        'elif grep -qF "$GAME_ROOT_WIN/.codex/hooks/skyguard-entry.ps1" "$CODEX_DEFS"; then',
+        "elif true; then",
+        "tests/test_setup_paths.py::test_setup_warns_when_codex_definitions_point_elsewhere",
+        id="setup-warns-when-codex-definitions-point-elsewhere",
+    ),
+    # The approval step is the one thing that makes the Codex hooks run at all.
+    pytest.param(
+        "setup.sh",
+        'if [ "$CODEX_STATE" = "configured" ]; then',
+        "if false; then",
+        "tests/test_setup_paths.py::test_setup_prints_the_codex_approval_step",
+        marks=pytest.mark.skipif(sys.platform != "win32", reason="Codex definitions are rendered on Windows"),
+        id="setup-prints-the-codex-approval-step",
+    ),
+    # AGENTS.md is what Codex reads: unconfigured, it names {{GAME_ROOT}} instead of the install.
+    pytest.param(
+        "setup.sh",
+        "for DOC in CLAUDE.md AGENTS.md; do",
+        "for DOC in CLAUDE.md; do",
+        "tests/test_setup_paths.py::test_agents_md_gets_the_same_paths_as_claude_md",
+        id="setup-configures-agents-md",
+    ),
     # An alarm from tools/kb-guard.sh must reach the session as TEXT. If the engine instead fails on a
     # non-zero guard status, the wrapper reports NOT RUN and the alarm itself is lost.
     pytest.param(
