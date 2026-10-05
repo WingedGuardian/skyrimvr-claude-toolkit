@@ -3469,3 +3469,43 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _MERGE + "test_skyguard_coverage.py::test_claude_coverage_counts_every_tool_the_installed_matchers_cover[mcp__devbench-vr__console-protect-mcp]",
      "merge-coverage-per-tool-list-is-static"),
 ]]
+
+
+# Plan 6 Task 7: the lift state reader and `honoured`. One mutation per clause; each names the test that must go red.
+# (relpath, find, replace, test, id). The reader's clauses are l2-state-sum / -size / -reparse / -version / -shape;
+# `honoured`'s are -session / -start / -future / -expiry / -clamp / -unknown-start; `write`'s are -atomic / -write-sum.
+_ST = "tools/skyguard/state.py"
+_STT = "tests/test_skyguard_state.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_ST, '        if not isinstance(got, str) or not hmac.compare_digest(got.encode("ascii", "replace"), want.encode("ascii")):',
+     "        if False:", _STT + "test_s1_hand_edit_with_a_wrong_checksum_reads_as_guards_on", "l2-state-sum"),
+    (_ST, "MAX_BYTES = 64 * 1024  ", "MAX_BYTES = 64 * 1024 * 1024  ",
+     _STT + "test_s5_unreadable_shapes_read_as_guards_on_without_raising[oversized]", "l2-state-size"),
+    (_ST, "        if _is_reparse(os.lstat(str(path.parent))) or _is_reparse(st):", "        if False:",
+     _STT + "test_a_valid_state_reached_through_a_junction_is_still_rejected", "l2-state-reparse"),
+    (_ST, '        if type(data.get("v")) is not int or data["v"] != VERSION:', '        if data.get("v") != VERSION and False:',
+     _STT + "test_s5_unreadable_shapes_read_as_guards_on_without_raising[unknown_version]", "l2-state-version"),
+    (_ST, '        if type(data.get("v")) is not int or data["v"] != VERSION:', '        if data.get("v") != VERSION:',
+     _STT + "test_a_bool_is_not_the_version_one", "l2-state-version-bool"),
+    (_ST, "        if not isinstance(lifts, list) or not all(_valid_lift(x) for x in lifts) or not isinstance(persistent, dict):",
+     "        if not isinstance(lifts, list) or not isinstance(persistent, dict):",
+     _STT + "test_a_malformed_lift_rejects_the_whole_state[bad0]", "l2-state-shape"),
+    (_ST, '        if lift["session_id"] != session_id:', "        if False:",
+     _STT + "test_s3_another_session_id_is_ignored", "l2-state-session"),
+    (_ST, '        if lift["created"] < session_start:', "        if False:",
+     _STT + "test_s8_a_lift_dated_before_the_session_start_is_ignored", "l2-state-start"),
+    (_ST, '        if lift["created"] > now + CLOCK_SKEW_SECONDS:', "        if False:",
+     _STT + "test_a_lift_dated_in_the_future_is_ignored", "l2-state-future"),
+    (_ST, '        if not now < min(lift["expires_at"], lift["created"] + MAX_LIFT_SECONDS):',
+     '        if not now < lift["created"] + MAX_LIFT_SECONDS:',
+     _STT + "test_s4_past_expires_at_is_ignored", "l2-state-expiry"),
+    (_ST, '        if not now < min(lift["expires_at"], lift["created"] + MAX_LIFT_SECONDS):',
+     '        if not now < lift["expires_at"]:',
+     _STT + "test_s7_expires_at_beyond_8h_is_clamped", "l2-state-clamp"),
+    (_ST, "    if session_start is None or not isinstance(session_id, str):", "    if not isinstance(session_id, str):",
+     _STT + "test_an_unknown_session_start_honours_nothing", "l2-state-unknown-start"),
+    (_ST, "        os.replace(tmp, str(path))", '        open(str(path), "wb").write(payload)',
+     _STT + "test_a_failed_write_leaves_the_old_state_and_no_temp_file", "l2-state-atomic"),
+    (_ST, '    body["sum"] = canonical_sum(body)', '    body["sum"] = data.get("sum", "0")',
+     _STT + "test_write_computes_the_sum_itself_and_ignores_a_caller_supplied_one", "l2-state-write-sum"),
+]]
