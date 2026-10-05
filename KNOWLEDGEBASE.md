@@ -531,6 +531,11 @@ The ESP remains as a hollow shell. Only suggest removing ESPs when the user is s
 - Serialize: `spriggit serialize --InputPath "Data/Mod.esp" --OutputPath "/tmp/output" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "0.40.0"`
 - Deserialize: `spriggit deserialize --InputPath "/tmp/yaml_dir" --OutputPath "Data/Mod.esp"` (reads meta from spriggit-meta.json)
 - `--GameRelease` is only for serialize, NOT deserialize
+- **Install pinned: `dotnet tool install Spriggit.CLI --version 0.40.0`** (2026-10-05 drift audit).
+  0.40.0 targets net9.0; 0.41.0 (2026-07-02) ships only `tools/net10.0`, and per the audit
+  a `dotnet tool update` on an SDK 6/8/9 machine failed with "DotnetToolSettings.xml was not
+  found". 0.40.1 is untested. `tools/toolchain-check.sh` compares `spriggit --version` with the
+  pin in `.config/dotnet-tools.json` and requires SDK 10+ for 0.41+, SDK 9+ before that.
 - **Use `-u` / `--ErrorOnUnknown` on serialize.** It makes Spriggit throw on unknown
   fields/records instead of dropping them silently — directly mitigates the silent-drop
   issue below. Make it the default for our workflow.

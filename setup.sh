@@ -175,6 +175,8 @@ if which dotnet >/dev/null 2>&1; then
         echo "     enough. Without it spriggit starts, prints a version, and cannot"
         echo "     serialize, which also disables tools/esp-verify-wrapper.sh."
         echo "     Install:  winget install Microsoft.DotNet.SDK.9"
+        echo "     then:     dotnet tool install --global Spriggit.CLI --version 0.40.0"
+        echo "     (pin it: an unpinned install pulls 0.41+, which targets net10.0)"
         echo "     (AutoMod needs an 8.0.x SDK specifically -- it pins one via global.json"
         echo "      with rollForward: latestFeature, which does not roll 8 -> 9.)"
     fi
@@ -639,7 +641,8 @@ echo "  xeditlib     -- programmatic ESP read/write:  npm install github:WingedG
 echo "                  (run from THIS toolkit root so the bundled tools/ + examples/ scripts resolve it)"
 echo "  Champollion  -- Papyrus .pex -> .psc:         github.com/Orvid/Champollion/releases"
 echo "  Caprica      -- Papyrus .psc -> .pex:         github.com/Orvid/Caprica/releases"
-echo "  Spriggit     -- ESP <-> YAML editing:         dotnet tool install Spriggit.CLI   (needs the .NET 9 runtime)"
+echo "  Spriggit     -- ESP <-> YAML editing:         dotnet tool install --global Spriggit.CLI --version 0.40.0   (needs the .NET 9 SDK; pin matches .config/dotnet-tools.json)"
+echo "                  (do NOT install unpinned: 0.41+ targets net10.0 and breaks on an SDK-9 machine)"
 echo "                  (deep output paths: use tools/spriggit-cli.sh)"
 echo "  AutoMod CLI  -- NIF / BSA / audio / MCM / ESP:"
 echo "                  git clone https://github.com/SpookyPirate/spookys-automod-toolkit into tools/automod"

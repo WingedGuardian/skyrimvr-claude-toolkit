@@ -15,7 +15,7 @@ Install them into the `tools/` folder in your game directory; the setup prompt w
   - Acquire: download a release from github.com/Orvid/Caprica/releases and unpack into `tools/Caprica/`.
   - Verify: `tools/Caprica/Caprica.exe --help`.
 - **Spriggit** — ESP ↔ YAML/JSON serialization.
-  - Acquire: `dotnet tool install Spriggit.CLI` (or `dotnet tool install --global Spriggit.CLI`).
+  - Acquire, **pinned to 0.40.0** (the version every serialize/deserialize command here was written against; needs the .NET 9 SDK): `dotnet tool install Spriggit.CLI --version 0.40.0` (local, uses the repo's `.config/dotnet-tools.json`, also 0.40.0) or `dotnet tool install --global Spriggit.CLI --version 0.40.0`. **Never install it unpinned**: 0.41.0 ships only a `net10.0` tool, and on an SDK-9 machine it starts, prints a version, and cannot serialize. `bash tools/toolchain-check.sh` reports DEGRADED when the installed version differs from the pin or its target SDK is missing.
   - For deeply-nested output paths that trip `UnauthorizedAccessException`, call `tools/spriggit-cli.sh` (same args; it runs in a shallow workspace and copies the result back).
   - Verify: `spriggit --help`.
 - **AutoMod CLI** — NIF / BSA / audio / MCM / ESP one-liners.
