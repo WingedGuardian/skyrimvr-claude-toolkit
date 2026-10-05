@@ -162,6 +162,9 @@ _bounded() {
     shift 2
     OUT=""; RC=124; NUL=""; WD=""
     [ $(( end - MS )) -ge 200 ] || return 0
+    # bash < 4.4 has no {fd} redirection / wait on a process substitution: an unbounded child is not an
+    # option, so that is a failure (126) -- and `exec {fd}<` there would REPLACE this shell, never run it
+    (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )) || { RC=126; return 0; }
     if [ "$in" = in ] && [ -n "$INPUT" ]; then
         exec {fd}< <(exec "$@" 2>/dev/null <<<"$INPUT") || { RC=126; return 0; }
     else
