@@ -4081,3 +4081,16 @@ MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep
     ("cmdq-special-char-strips", " and not (set(inner) & _CMD_QUOTE_SPECIAL) and", " and", _P5S + "test_cmd_c_quote_rule"),
     ("cmdq-no-whitespace-strips", 'and re.search(r"\\s", inner):', "and True:", _P5S + "test_cmd_c_quote_rule"),
 ]]
+MUTATIONS += [pytest.param("tools/skyguard/targets.py", find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # M5 (coordinator ruling): a drive-relative word resolves only when it provably can
+    ("m5-drive-relative-modelled", "            return _drive_relative(s, base, dialect)",
+     "            return paths.norm_abs(s)", _p5a("m5-pwsh-drive-relative-operand")),
+    ("m5-bash-bare-drive-is-root", '        return None if rest else drive + "/"', "        return None",
+     _p5a("m5-bash-cd-drive")),
+    ("m5-other-drive-unknown", "    if not base or base[:2].lower() != drive:", "    if not base:",
+     _P5T + "test_m5_drive_relative_words"),
+    ("m5-name-joined-on-cwd", "    return paths.norm_abs(paths._join(base, rest)) if rest else base",
+     "    return None if rest else base", _p5a("m5-pwsh-drive-relative-operand")),
+    ("m5-bare-drive-is-cwd", "    return paths.norm_abs(paths._join(base, rest)) if rest else base",
+     "    return paths.norm_abs(paths._join(base, rest)) if rest else None", _p5a("m5-pwsh-set-location-drive")),
+]]

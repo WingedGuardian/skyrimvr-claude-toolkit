@@ -38,7 +38,7 @@ def w(s):
     (w("//?/C:/x"), "c:/x"),
     (w("//?/UNC/srv/share/x"), "//srv/share/x"),
     ("C:foo", None),
-    ("C:", None),
+    ("C:", "c:/"),                       # M5, MEASURED in Git Bash: `cd C:` -> /c
     ("/cygdrive/d/x", "d:/x"),
     ("/mnt/c/x", "c:/x"),
     ("/proc/cygdrive/c/x", "c:/x"),
@@ -52,7 +52,7 @@ def test_absolute_spellings_bash(word, want):
 @pytest.mark.parametrize("dialect", ["bash", "powershell", "cmd"])
 def test_absolute_windows_path_is_dialect_independent(dialect):
     assert targets.resolve(w("C:/a/b"), "", dialect, ENV) == "c:/a/b"
-    assert targets.resolve("C:foo", CWD_WIN, dialect, ENV) is None
+    assert targets.resolve("C:foo", "D:/elsewhere", dialect, ENV) is None      # another drive's own cwd: unknown
 
 
 @pytest.mark.parametrize("word,dialect,want", [
@@ -404,3 +404,27 @@ def test_a_brace_group_without_a_separator_still_resolves():
 def test_claude_dir_is_never_scratch():
     assert targets.zone(GAMEN + "/.claude/node_modules/x", ROOTS) == "install"
     assert targets.zone(GAMEN + "/.claude/hooks/__pycache__", ROOTS) == "install"
+
+
+# Final review M5 (coordinator ruling): a drive-relative word resolves only when it provably can, never "outside".
+@pytest.mark.parametrize("word,cwd,dialect,want", [
+    ("C:foo", "C:/w", "powershell", "c:/w/foo"),
+    ("C:foo", w("C:/w"), "cmd", "c:/w/foo"),
+    ("c:foo/bar", "C:/w", "powershell", "c:/w/foo/bar"),
+    ("C:", "C:/w", "powershell", "c:/w"),
+    ("C:foo", "D:/w", "powershell", None),
+    ("C:foo", "", "powershell", None),
+    ("C:foo", "//srv/share/w", "cmd", None),
+    ("C:foo", "C:/w", "bash", None),
+    ("C:", "D:/w", "bash", "c:/"),
+])
+def test_m5_drive_relative_words(word, cwd, dialect, want):
+    assert targets.resolve(word, cwd, dialect, ENV) == want
+
+
+def test_m5_set_location_to_the_cwd_drive_keeps_the_cwd():
+    e = _exec("Set-Location C:; Remove-Item -Recurse Data", "powershell")[0]
+    assert targets.exec_cwd(e, GAME, ENV) == GAMEN
+    assert targets.exec_cwd(e, "D:/w", ENV) is None
+    e = _exec("cd C:; rm -rf x")[0]
+    assert targets.exec_cwd(e, "D:/w", ENV) == "c:/"

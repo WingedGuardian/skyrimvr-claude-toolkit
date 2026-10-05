@@ -24,7 +24,10 @@ UNRESOLVABLE (None) -- a rule must treat None as "could be anywhere", never as s
   - a glob (`*`, `?`, `[`, bash `{a,b}`) in a DIRECTORY component (a glob in the last component is kept: the
     zone of its parent is still known);
   - "-" (stdin / `cd -`), an empty word;
-  - a drive-relative `C:foo` (it depends on that drive's own cwd) and a non-filesystem PowerShell drive (`HKLM:`);
+  - a drive-relative `C:foo` / `C:` whose drive is not the cwd's (it depends on that drive's own cwd), and bash's
+    `C:foo` (Git Bash finds no such file); on the cwd's own drive PowerShell and cmd resolve it against the cwd, and
+    bash's bare `C:` is the drive root (final review M5, _drive_relative);
+  - a non-filesystem PowerShell drive (`HKLM:`);
   - a relative word with no usable cwd;
   - an 8.3 short name (any component with `~<digit>`: the install's own is C:\GOGGAM~1\THEELD~1) -- expanding one
     needs the filesystem, so the word (or a cwd holding one) is unresolved, never "outside";
@@ -202,6 +205,20 @@ def normalise_cwd(cwd: str) -> Optional[str]:
     return None if p is None or _SHORT_NAME.search(p) else p
 
 
+def _drive_relative(s: str, base: Optional[str], dialect: str) -> Optional[str]:
+    """Final review M5 (coordinator ruling: fail closed, never resolved-outside). A drive-relative `C:name` / `C:`.
+    PowerShell and cmd resolve it against that drive's own current directory, which is the process cwd when the cwd is
+    on that drive (MEASURED: `Get-Item C:x` and `Set-Location C:` from C:\\Temp both give C:\\Temp); on another drive, or
+    with no cwd, it is unknown (None). Git Bash reads a bare `C:` as the drive root (MEASURED: `cd C:` -> /c) and finds
+    no `C:name` at all (None)."""
+    drive, rest = s[0].lower() + ":", s[2:]
+    if dialect == "bash":
+        return None if rest else drive + "/"
+    if not base or base[:2].lower() != drive:
+        return None
+    return paths.norm_abs(paths._join(base, rest)) if rest else base
+
+
 def _resolve(word: str, cwd: str, dialect: str, env: Mapping[str, str]) -> Optional[str]:
     if not word or word == "-":
         return None
@@ -228,7 +245,9 @@ def _resolve(word: str, cwd: str, dialect: str, env: Mapping[str, str]) -> Optio
     if s.startswith("//"):
         return paths.norm_abs(s)
     if re.match(r"[A-Za-z]:", s):
-        return paths.norm_abs(s)                         # C:/x -> absolute; C:foo / C: -> None
+        if not re.match(r"[A-Za-z]:/", s):
+            return _drive_relative(s, base, dialect)
+        return paths.norm_abs(s)                         # C:/x -> absolute
     if dialect == "powershell" and _PS_DRIVE.match(s):
         return None                                      # HKLM:\..., Env:\... -- not a file
     if s.startswith("/"):
