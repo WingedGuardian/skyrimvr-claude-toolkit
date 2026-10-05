@@ -3576,3 +3576,106 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _MERGE + "test_skyguard_coverage.py::test_claude_coverage_counts_every_tool_the_installed_matchers_cover[mcp__devbench-vr__console-protect-mcp]",
      "merge-coverage-per-tool-list-is-static"),
 ]]
+
+
+# Plan 7 final review (2026-10-05): one mutation per gating or validation clause the fix pass added. Each reverts
+# that clause alone, and the test named for it must go red.
+_AC, _INV, _T = "tools/adapter_conformance.py", "tools/inventory-runtimes.py", "tests/"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # I1: the agent's hook timeout must clear the adapter's deadline plus the margin, unless a failed hook blocks.
+    (_AC, "lambda v: _is_seconds(v) and v >= ADAPTER_TIMEOUT_S + HOOK_TIMEOUT_MARGIN_S)", "lambda v: True)",
+     _T + "test_capability_report.py::test_a_hook_timeout_without_margin_over_the_adapter_deadline_demotes_when_a_failed_hook_allows[5]",
+     "p7final-report-ignores-hook-timeout"),
+    (_AC, "v >= ADAPTER_TIMEOUT_S + HOOK_TIMEOUT_MARGIN_S)", "v >= ADAPTER_TIMEOUT_S)",
+     _T + "test_capability_report.py::test_a_hook_timeout_without_margin_over_the_adapter_deadline_demotes_when_a_failed_hook_allows[25]",
+     "p7final-report-timeout-has-no-margin"),
+    (_AC, '            if leaf == TIMEOUT_GATE and not _is_seconds(value.get("value")):', "            if False:",
+     _T + "test_capability_report.py::test_a_hook_timeout_that_is_not_a_positive_number_is_a_problem_and_demotes[banana]",
+     "p7final-report-accepts-a-non-numeric-timeout"),
+    # I2: the every-tool-mapped leaf gates; every listed tool needs its own decoy; a decoy names a listed tool.
+    (_AC, '                           ("pre_tool_hook.every_write_and_shell_tool_mapped", lambda v: v is True)):',
+     "                           ):",
+     _T + "test_capability_report.py::test_the_every_tool_mapped_leaf_gates_the_status[leaf0]",
+     "p7final-report-ignores-tool-mapping"),
+    (_AC, "            if tool not in covered:", "            if False:",
+     _T + "test_adapter_template.py::test_every_listed_write_tool_needs_its_own_decoy_case",
+     "p7final-conformance-one-decoy-covers-every-tool"),
+    (_AC, "            elif tool not in profile[key]:", "            elif False:",
+     _T + "test_adapter_template.py::test_a_decoy_case_must_name_a_listed_tool_and_expect_block",
+     "p7final-conformance-decoy-tool-not-checked"),
+    (_AC, '        if not p["write_tools"]:', "        if False:",
+     _T + "test_adapter_template.py::test_the_profile_tool_lists_are_validated[bad0-write_tools]",
+     "p7final-profile-empty-write-tools"),
+    (_AC, '        if set(p["write_tools"]) & set(p["shell_tools"]):', "        if False:",
+     _T + "test_adapter_template.py::test_the_profile_tool_lists_are_validated[bad4-both]",
+     "p7final-profile-tool-in-both-lists"),
+    # I3: the live shell canary is part of the proof.
+    (_AC, 'all(proof.get(p.split(".")[1]) is True for p in PROOF_BOOLS)',
+     'all(proof.get(p.split(".")[1]) is True for p in PROOF_BOOLS[:2])',
+     _T + "test_capability_report.py::test_the_live_shell_canary_gates_the_status[False]",
+     "p7final-report-ignores-shell-canary"),
+    ("ADAPTING.md", "run `echo x > Data/Canary.esp` through your shell tool", "use your shell tool",
+     _T + "test_adapting_claims.py::test_the_live_proof_covers_the_shell_tool_and_a_broken_hook_the_live_session_runs",
+     "p7final-doc-drops-shell-canary"),
+    ("ADAPTING.md", "**copy's**", "**real install's**",
+     _T + "test_adapting_claims.py::test_the_live_proof_covers_the_shell_tool_and_a_broken_hook_the_live_session_runs",
+     "p7final-doc-broken-hook-not-live"),
+    # I4: the adapter argv is a list; a command must be an argv list.
+    (_AC, '        return [sys.executable, str(Path(adapter_dir) / "adapter.py")]',
+     '        return (sys.executable + " " + str(Path(adapter_dir) / "adapter.py")).split()',
+     _T + "test_adapter_template.py::test_a_temp_or_interpreter_path_with_a_space_or_apostrophe_still_conforms[has space]",
+     "p7final-conformance-splits-the-argv"),
+    (_AC, "    if command is not None and not (isinstance(command, list) and command",
+     "    if False and not (isinstance(command, list) and command",
+     _T + "test_adapter_template.py::test_a_command_must_be_an_argv_list_never_a_string_to_split[command1]",
+     "p7final-conformance-accepts-a-non-list-command"),
+    # M8: duplicate case ids.
+    (_AC, "            for i in sorted({i for i in ids if ids.count(i) > 1}, key=str)]", "            for i in []]",
+     _T + "test_adapter_template.py::test_duplicate_case_ids_are_a_failed_row_not_a_silent_shadow",
+     "p7final-conformance-duplicate-ids-shadow"),
+    # I5: the winget allowlist, in the parser and where the command is built; the whole text only.
+    (_INV, "            problem = id_problem(im.group(1), im.group(2), im.group(3))", "            problem = None",
+     _T + "test_inventory_runtimes.py::test_an_id_outside_the_runtimes_allowlist_authorizes_nothing[node=Contoso.Backdoor==1.0]",
+     "p7final-inventory-any-id-authorizes"),
+    (_INV, " and not id_problem(runtime, *authorization[runtime]):", ":",
+     _T + "test_inventory_runtimes.py::test_the_plan_refuses_an_unlisted_id_even_if_handed_one_directly",
+     "p7final-inventory-plan-builds-any-id"),
+    (_INV, "        if not m or int(m.group(1)) < PYTHON_FLOOR[1]:", "        if not m:",
+     _T + "test_inventory_runtimes.py::test_an_id_outside_the_runtimes_allowlist_authorizes_nothing[python=Python.Python.3.7==3.7.9]",
+     "p7final-inventory-python-below-floor"),
+    (_INV, '        if version.split(".")[:2] != ["3", m.group(1)]:', "        if False:",
+     _T + "test_inventory_runtimes.py::test_an_id_outside_the_runtimes_allowlist_authorizes_nothing[python=Python.Python.3.12==3.11.4]",
+     "p7final-inventory-version-not-bound-to-id"),
+    (_INV, '    pl.add_argument("--auth-file", help=', '    pl.add_argument("--auth-text")\n    pl.add_argument("--auth-file", help=',
+     _T + "test_inventory_runtimes.py::test_the_cli_takes_the_whole_task_text_never_a_chosen_sentence",
+     "p7final-inventory-takes-a-chosen-sentence"),
+    # M6: a non-DevBench MCP call is labelled unjudged, not evaluated.
+    ("tools/skyguard/neutral.py",
+     '        if req.mcp_tool not in ("", "unknown") and not mcp_rules.judged_server(req.mcp_tool):', "        if False:",
+     _T + "test_skyguard_neutral.py::test_an_mcp_call_the_rules_do_not_judge_is_labelled_unjudged_not_evaluated[mcp__other__thing]",
+     "p7final-neutral-unjudged-mcp-reads-evaluated"),
+    # M1: the release gate's line continuation.
+    (".github/workflows/release.yml", 'check-adapter-payload.py "/tmp/$NAME" ' + BS + "\n            || { echo",
+     'check-adapter-payload.py "/tmp/$NAME"             || { echo',
+     _T + "test_adapter_payload.py::test_the_release_gates_parse_and_lost_no_line_continuation",
+     "p7final-release-loses-line-continuation"),
+    # M2: the payload check lists what ADAPTING.md names.
+    ("tools/check-adapter-payload.py", '    "tools/adapting/examples/json_deny.slots.py",\n', "",
+     _T + "test_adapter_payload.py::test_every_file_adapting_md_names_or_cites_is_checked",
+     "p7final-payload-drops-a-worked-example"),
+    # M3: the prose under the prompt.
+    ("README.md", "It does not install Python, Git, Node or any other system software",
+     "It will install dependencies: Python, Git, Node or any other system software",
+     _T + "test_setup_prompt.py::test_the_prose_after_each_embedded_prompt_does_not_contradict_it",
+     "p7final-readme-promises-installs"),
+    # M4: no promised lock, no clashing layer numbers.
+    ("docs/safety-philosophy.md", "### Defense 1: Knowledge", "### Layer 1: Knowledge",
+     _T + "test_adapting_claims.py::test_the_layer_2_lock_is_not_promised", "p7final-layer-numbers-clash"),
+    # M7: the tripwire scans the texts an agent reads.
+    ("tests/test_no_host_installs_in_new_files.py", '    "ADAPTING.md",\n    "SETUP_PROMPT.txt",\n', "",
+     _T + "test_no_host_installs_in_new_files.py::test_the_scan_covers_every_text_an_agent_reads_as_instructions",
+     "p7final-tripwire-skips-the-instructions"),
+    # M9: what `python` means off Windows.
+    ("ADAPTING.md", "On Linux and macOS that is usually `python3`; on", "On",
+     _T + "test_adapting_claims.py::test_the_doc_says_what_python_means_off_windows", "p7final-doc-python-only"),
+]]
