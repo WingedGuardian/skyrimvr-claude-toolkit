@@ -62,6 +62,10 @@ def guards_main(argv, out) -> int:
         print("Pass --project <the install root> (the folder the hooks run with); nothing was changed.", file=out)
         return 2
     session = a.session or os.environ.get(lock.ENV_SESSION) or None
+    if lock.reserved_session(session):
+        for line in lock.RESERVED_LINES:
+            print(line, file=out)
+        return 2
     now = time.time()
     try:
         if a.action == "status":

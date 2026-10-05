@@ -24,13 +24,19 @@ def _with_prefs(text, project, audit):
 # the state file carries (a reason, a file name) reaches one unsanitised.
 
 _LINE = 190
-TRUSTED_DISABLE = "user-tty"       # lock.USER_SESSION: the only disable source a start will honour
 GUARD_MANIFEST = "GUARD-FILES.sha256"
+# R12 hashing budget: a guard-file check must never stall a session start. Module constants so a test can shrink them.
+FILE_CAP = 32 * 1024 * 1024        # a file over this is "too large to check", never "differs"
+TOTAL_CAP = 200 * 1024 * 1024      # bytes hashed in total
+TIME_CAP = 5.0                     # wall seconds in total
+_SAFE = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ._-")
 
 
-def _clean(s, n=60):
-    """One printable line, at most n characters: a state-file string is data, never layout."""
-    t = "".join(c if c.isprintable() else " " for c in str(s))
+def _clean(s, n=80):
+    """EVERY string that flows from state.json, lock.json or GUARD-FILES.sha256 into a banner passes through here: only
+    [A-Za-z0-9 ._-] survive (anything else, colons and quotes included, becomes '?'), whitespace collapses, length is
+    capped. A recorded string is data, never an instruction the model should follow."""
+    t = "".join(c if c in _SAFE else "?" for c in str(s))
     t = " ".join(t.split())
     return t if len(t) <= n else t[: n - 3] + "..."
 
@@ -52,17 +58,6 @@ def _covers(lifts, name):
     return False
 
 
-def _disable_trust(st):
-    """-> (trusted, since). A persistent disable is the user's to make (R7): it is honoured only when it carries the
-    terminal source `lock disable` stamps when a person types it. A claim written by an agent session, or with no
-    session at all, buys nothing: it is dropped and reported. A forger who writes the terminal source still wins
-    persistence (same-user code can write anything), which is why the banner is shown at EVERY session."""
-    dis = st.lock_disabled
-    if not dis:
-        return False, None
-    return dis.get("by_session") == TRUSTED_DISABLE, dis.get("since")
-
-
 def _inside(root, target):
     try:
         return os.path.commonpath([root, target]) == root
@@ -70,15 +65,36 @@ def _inside(root, target):
         return False
 
 
+def _hash_capped(path, size, budget):
+    """sha256 of a file read in chunks, charging `budget["bytes"]`. -> hex, or None when the file is over FILE_CAP,
+    or the total byte or wall-time budget ran out (the caller reports it as unchecked)."""
+    if size > FILE_CAP or budget["bytes"] + size > TOTAL_CAP:
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while True:
+            if time.monotonic() > budget["deadline"]:
+                return None
+            chunk = fh.read(1024 * 1024)
+            if not chunk:
+                break
+            budget["bytes"] += len(chunk)
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _guard_drift(project):
-    """R12: (release, [basenames that differ]) against the shipped GUARD-FILES.sha256, or None when there is no
-    manifest. Format: an optional `# release <ver>` line, then `<sha256>  <relative path>` per file."""
+    """R12: None when there is no manifest, else (release, differ, missing, unchecked). `differ` names only files
+    that EXIST inside the project; `missing` is a count (a manifest line is untrusted text and names nothing that is
+    not on disk); `unchecked` names files too large for the budget, which are never reported as "differs".
+    Format: an optional `# release <ver>` line, then `<sha256>  <relative path>` per file."""
     try:
         text = (Path(project) / GUARD_MANIFEST).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
     root = os.path.realpath(str(project))
-    release, bad = "?", []
+    budget = {"bytes": 0, "deadline": time.monotonic() + TIME_CAP}
+    release, differ, unchecked, missing = "?", [], [], 0
     for line in text.splitlines()[:5000]:
         line = line.strip()
         if line.startswith("# release "):
@@ -92,13 +108,22 @@ def _guard_drift(project):
         if os.path.isabs(rel) or not _inside(root, target):
             continue                                    # a path that leaves the project is never read
         try:
-            with open(target, "rb") as fh:
-                got = hashlib.sha256(fh.read(32 * 1024 * 1024)).hexdigest()
+            st = os.stat(target)
+            if not os.path.isfile(target):
+                raise OSError("not a file")
         except OSError:
-            got = ""
-        if got != parts[0].lower():
-            bad.append(os.path.basename(rel))
-    return release, bad
+            missing += 1
+            continue
+        try:
+            got = _hash_capped(target, st.st_size, budget)
+        except OSError:
+            missing += 1
+            continue
+        if got is None:
+            unchecked.append(os.path.basename(rel))
+        elif got != parts[0].lower():
+            differ.append(os.path.basename(rel))
+    return release, differ, missing, unchecked
 
 
 def _engaged(root):
@@ -146,31 +171,31 @@ def _relock(root):
 
 def layer2_start(project, source="startup"):
     """The Layer 2 half of SessionStart -> banner strings (one or two lines each). Never raises: a failure is
-    itself a banner. `compact` (R9) changes nothing and reports only the standing persistent-disable notice."""
+    itself a banner. `compact` (R9) changes nothing and reports only the standing persistent-disable notice.
+    A persistent disable is honoured whatever its source (spec R7: the visibility, not a gate, is the control):
+    it is shown at EVERY session start for as long as it lasts."""
     from . import lock, state
     banners = []
     try:
         root = str(project)
         sf = Path(root) / ".skyguard" / "state.json"
         st = state.read(str(sf))
-        trusted, since = _disable_trust(st)
         disabled = None
-        if trusted:
+        if st.lock_disabled:
             try:
-                when = time.strftime("%Y-%m-%d", time.localtime(since))
+                when = time.strftime("%Y-%m-%d", time.localtime(st.lock_disabled["since"]))
             except (OverflowError, OSError, ValueError):
                 when = "an unknown date"
             disabled = "Vanilla-file lock DISABLED since %s. tools/skyguard lock enable turns it back on." % when
         if source == "compact":
             return [disabled] if disabled else []
-        untrusted = bool(st.lock_disabled) and not trusted
-        engaged = _engaged(root) and not trusted
+        engaged = _engaged(root) and not disabled
         lifted, drift = _scan(root, st.lifts) if engaged else ([], [])
-        # step 2: clear every lift and drop an untrusted disable claim; THEN relock; THEN report
-        if not st.rejected and (st.lifts or untrusted):
+        # step 2: clear every lift (the persistent disable stays); THEN relock; THEN report
+        if not st.rejected and st.lifts:
             try:
                 lock._assert_sandbox(sf)
-                persistent = {"lock_disabled": dict(st.lock_disabled)} if trusted else {}
+                persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
                 state.write(str(sf), {"v": 1, "lifts": [], "persistent": persistent})
             except (ValueError, OSError):
                 pass                                    # lifts stay, but each is session-bound and expires (R6)
@@ -178,21 +203,31 @@ def layer2_start(project, source="startup"):
         # step 3: the banners, in the order the brief lists them
         guards = [x for x in st.lifts if x["kind"] == "guards"]
         if guards:
-            banners.append("Guards were left OFF by an earlier session (%s); they are back ON." % _clean(guards[0]["reason"]))
+            banners.append('Guards were left OFF by an earlier session (recorded reason, untrusted: "%s"); they are back ON.'
+                           % _clean(guards[0]["reason"]))
         if lifted:
             banners.append("%d vanilla files were left unlocked; relocked." % len(lifted))
         if drift:
             banners.append(_clip("%d vanilla files were unlocked outside skyguard (%s); relocked." % (len(drift), _names(drift))))
+        mine = [x for x in st.lifts if x["kind"] == "lock" and x["session_id"] == lock.USER_SESSION]
+        if mine:
+            every = any(x.get("files") is None for x in mine)
+            what = "all vanilla files" if every else _names([f for x in mine for f in x["files"]])
+            banners.append(_clip("This start also revoked your own terminal unlock of %s; unlock again if you still need it." % what))
         if failure:
             banners.append(failure)
         if disabled:
             banners.append(disabled)
-        elif untrusted:
-            banners.append("A lock disable that was not made at a terminal was ignored; the lock is back ON.\n"
-                           "Run `tools/skyguard lock disable` yourself at a terminal to keep it off.")
         gd = _guard_drift(root)
-        if gd and gd[1]:
-            banners.append(_clip("%d guard files differ from release %s (%s)." % (len(gd[1]), gd[0], _names(gd[1]))))
+        if gd:
+            release, differ, missing, unchecked = gd
+            if differ or missing:
+                tail = (" (%s)" % _names(differ)) if differ else ""
+                tail += ("; %d missing" % missing) if missing else ""
+                banners.append(_clip("%d guard files differ from release %s%s." % (len(differ) + missing, release, tail)))
+            if unchecked:
+                banners.append(_clip("%d guard files were too large to check within the time limit (%s)."
+                                     % (len(unchecked), _names(unchecked))))
         if st.rejected:
             banners.append("STATE-REJECTED: the guard state file was unreadable or altered; treated as guards on.")
         return banners
@@ -210,12 +245,21 @@ def export_env(session_id, agent, env_file=None):
     shell file. Returns True when written."""
     from . import health
     path = os.environ.get("CLAUDE_ENV_FILE", "") if env_file is None else env_file
+    from . import lock
     if not path or not isinstance(session_id, str) or not health._SESSION_ID.match(session_id) \
-            or agent not in ("claude", "codex"):
+            or lock.reserved_session(session_id) or agent not in ("claude", "codex"):
         return False
+    lines = ["export SKYGUARD_SESSION_ID='%s'" % session_id, "export SKYGUARD_AGENT='%s'" % agent]
     try:
-        with open(path, "a", encoding="utf-8", newline="\n") as fh:
-            fh.write("export SKYGUARD_SESSION_ID='%s'\nexport SKYGUARD_AGENT='%s'\n" % (session_id, agent))
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                have = fh.read().splitlines()
+        except FileNotFoundError:
+            have = []
+        todo = [x for x in lines if x not in have]      # a resume or a second start must not stack duplicates
+        if todo:
+            with open(path, "a", encoding="utf-8", newline="\n") as fh:
+                fh.write("".join(x + "\n" for x in todo))
         return True
     except OSError:
         return False

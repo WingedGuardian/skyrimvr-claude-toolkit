@@ -742,6 +742,16 @@ def _interactive() -> bool:
         return False
 
 
+RESERVED_LINES = ("The session id `user-tty` is reserved for a person typing at a terminal; it cannot be passed or exported.",
+                  "Use the real session id, or run the command yourself in a terminal; nothing was changed.")
+
+
+def reserved_session(s) -> bool:
+    """`user-tty` is minted only by main() from a console (stdin and stdout both ttys). Passing it as --session or
+    SKYGUARD_SESSION_ID would let a piped agent shell write a lift that looks like the user's own."""
+    return isinstance(s, str) and s.strip().lower() == USER_SESSION
+
+
 def _valid_session(s):
     from . import health
     return isinstance(s, str) and bool(health._SESSION_ID.match(s))
@@ -945,9 +955,6 @@ def disable(root, session=None) -> Result:
         return _res(2, str(e))
     except (ValueError, OSError) as e:
         return _res(2, "Could not record the disable (%s)." % e.__class__.__name__)
-    if session != USER_SESSION:
-        return _res(0, "Recorded, but a session start honours a disable only when it was made at a terminal.",
-                    "Run `tools/skyguard lock disable` yourself in a terminal to keep the lock off across sessions.")
     return _res(0, "The lock is persistently disabled; every session start will say so until `lock enable`.")
 
 
@@ -991,7 +998,12 @@ def main(argv=None, out=None) -> int:
         print("usage: lock <lock|unlock [file...]|status [--json]|disable|enable> [--root R] [--session S]", file=out)
         return 2
     root = a.root or default_root()
-    session = a.session or os.environ.get(ENV_SESSION) or (USER_SESSION if _interactive() else None)
+    explicit = a.session or os.environ.get(ENV_SESSION)
+    if reserved_session(explicit):
+        for line in RESERVED_LINES:
+            print(line, file=out)
+        return 2
+    session = explicit or (USER_SESSION if _interactive() else None)     # user-tty is minted HERE, from a terminal only
     try:
         if a.cmd == "lock":
             res = lock_all(root)

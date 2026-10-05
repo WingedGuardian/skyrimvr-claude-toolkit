@@ -3603,7 +3603,7 @@ _SST = "tests/test_skyguard_session_start.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SS, '        if source == "compact":\n            return [disabled] if disabled else []', '        if False:\n            return []',
      _SST + "test_compact_does_not_clear_or_report_lifts", "l2-sess-compact-shortcut"),
-    (_SS, "        if not st.rejected and (st.lifts or untrusted):", "        if False:",
+    (_SS, "        if not st.rejected and st.lifts:", "        if False:",
      _SST + "test_a_guards_lift_is_reported_and_cleared_at_start", "l2-sess-clear"),
     (_SS, '        failure = _relock(root) if engaged else ""', '        failure = ""',
      _SST + "test_relock_happens_before_the_report_and_names_the_lifted_files", "l2-sess-relock"),
@@ -3611,17 +3611,15 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SST + "test_relock_happens_before_the_report_and_names_the_lifted_files", "l2-sess-scan"),
     (_SS, "        elif p.name in manifest:", "        elif False:",
      _SST + "test_drift_is_a_file_unlocked_with_no_lift_record", "l2-sess-drift"),
-    (_SS, '    return dis.get("by_session") == TRUSTED_DISABLE, dis.get("since")', '    return True, dis.get("since")',
-     _SST + "test_a_disable_not_made_at_a_terminal_buys_no_persistence", "l2-sess-disabled-trust"),
     (_SS, "            banners.append(disabled)", "            pass",
      _SST + "test_a_terminal_disable_is_honoured_and_shown_every_session", "l2-sess-disabled-banner"),
-    (_SS, "        engaged = _engaged(root) and not trusted", "        engaged = _engaged(root)",
+    (_SS, "        engaged = _engaged(root) and not disabled", "        engaged = _engaged(root)",
      _SST + "test_a_terminal_disable_is_honoured_and_shown_every_session", "l2-sess-disabled-honoured"),
     (_SS, '.is_file()\n', ' or True\n',
      _SST + "test_the_lock_is_not_applied_when_it_was_never_engaged", "l2-sess-engaged"),
     (_SS, "        if st.rejected:\n            banners.append", "        if False:\n            banners.append",
      _SST + "test_a_rejected_state_is_reported_and_the_lock_is_enforced", "l2-sess-rejected"),
-    (_SS, '    t = "".join(c if c.isprintable() else " " for c in str(s))', "    t = str(s)",
+    (_SS, '    t = "".join(c if c in _SAFE else "?" for c in str(s))', "    t = str(s)",
      _SST + "test_a_hostile_reason_cannot_add_lines_or_overrun", "l2-sess-sanitize"),
     (_SS, "        if os.path.isabs(rel) or not _inside(root, target):", "        if os.path.isabs(rel):",
      _SST + "test_a_manifest_path_cannot_reach_outside_the_project", "l2-sess-guardfile-path"),
@@ -3648,4 +3646,58 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SH + "test_a_state_rejection_is_logged_once_per_reason_not_once_per_call", "l2-shadow-reject-once"),
     (_CL, "        if st0.rejected:", "        if False:",
      _SH + "test_guards_on_over_an_unverifiable_state_says_so_in_two_lines", "l2-guards-on-says-rejected"),
+]]
+
+
+# Plan 6 Task 10 fix round 1: reserved user-tty id, untrusted-string banners, guard-file budget, revoke notice, env dedupe,
+# relock-before-banner ordering.
+_RELOCK_LINE = '        failure = _relock(root) if engaged else ""\n'
+_STEP3 = ('        # step 3: the banners, in the order the brief lists them\n'
+          '        guards = [x for x in st.lifts if x["kind"] == "guards"]\n'
+          '        if guards:\n'
+          '            banners.append(\'Guards were left OFF by an earlier session (recorded reason, untrusted: "%s"); '
+          'they are back ON.\'\n'
+          '                           % _clean(guards[0]["reason"]))\n'
+          '        if lifted:\n'
+          '            banners.append("%d vanilla files were left unlocked; relocked." % len(lifted))\n')
+_TO_DRIFT = ('        if drift:\n'
+             '            banners.append(_clip("%d vanilla files were unlocked outside skyguard (%s); relocked." '
+             '% (len(drift), _names(drift))))\n')
+_SKL = "tools/skyguard/lock.py"
+_RSV = "test_the_reserved_id_passed_as_an_argument_is_refused_and_changes_nothing"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_SKL, "    if reserved_session(explicit):", "    if False:",
+     _SST + _RSV + "[cmd0]", "l2-sess-reserved-arg"),
+    (_SKL, "    return isinstance(s, str) and s.strip().lower() == USER_SESSION", "    return isinstance(s, str) and s == USER_SESSION + 'x'",
+     _SST + "test_the_reserved_id_is_refused_by_guards_too", "l2-sess-reserved-match"),
+    (_SKL, "    session = explicit or (USER_SESSION if _interactive() else None)", "    session = explicit or USER_SESSION",
+     _SST + "test_a_piped_shell_with_no_session_never_gets_the_reserved_id", "l2-sess-mint-console-only"),
+    ("tools/skyguard/cli.py", "    if lock.reserved_session(session):", "    if False:",
+     _SST + "test_the_reserved_id_is_refused_by_guards_too", "l2-sess-reserved-guards"),
+    (_SS, 'recorded reason, untrusted: ', 'reason: ', _SST + "test_a_recorded_reason_is_framed_restricted_and_cannot_carry_an_instruction",
+     "l2-sess-frame"),
+    (_SS, "def _clean(s, n=80):", "def _clean(s, n=8000):",
+     _SST + "test_a_long_reason_is_capped", "l2-sess-clean-cap"),
+    (_SS, "    if size > FILE_CAP or ", "    if ",
+     _SST + "test_a_file_over_the_per_file_cap_is_too_large_never_differs", "l2-sess-file-cap"),
+    (_SS, "or budget[\"bytes\"] + size > TOTAL_CAP", "",
+     _SST + "test_the_total_byte_budget_stops_the_hashing", "l2-sess-total-cap"),
+    (_SS, "            if time.monotonic() > budget[\"deadline\"]:\n                return None\n            chunk",
+     "            chunk",
+     _SST + "test_the_wall_time_budget_stops_the_hashing", "l2-sess-time-cap"),
+    (_SS, "            missing += 1\n            continue\n        try:\n            got =", "            differ.append('x')\n            continue\n        try:\n            got =",
+     _SST + "test_a_manifest_naming_only_a_missing_file_names_nothing", "l2-sess-missing-count"),
+    (_SS, "        mine = [x for x in st.lifts if x[\"kind\"] == \"lock\" and x[\"session_id\"] == lock.USER_SESSION]",
+     "        mine = []", _SST + "test_the_start_says_it_revoked_your_own_terminal_unlock", "l2-sess-revoke-notice"),
+    (_SS, "        mine = [x for x in st.lifts if x[\"kind\"] == \"lock\" and x[\"session_id\"] == lock.USER_SESSION]",
+     "        mine = [x for x in st.lifts if x[\"kind\"] == \"lock\"]", _SST + "test_an_agent_lift_gets_no_revoke_notice",
+     "l2-sess-revoke-user-only"),
+    (_SS, "        todo = [x for x in lines if x not in have]", "        todo = lines",
+     _SST + "test_the_env_file_gets_the_lines_once_across_starts", "l2-sess-env-dedupe"),
+    (_SS, "            or lock.reserved_session(session_id) or agent", "            or agent",
+     _SST + "test_an_agent_session_cannot_be_exported_as_the_reserved_id", "l2-sess-env-reserved"),
+    # Review Focus 4: move the relock to AFTER the drift banner is written. The test reads file attributes inside the
+    # banner's own call, so a relock that happens later leaves the file open at that moment and it goes red.
+    (_SS, _RELOCK_LINE + _STEP3 + _TO_DRIFT, _STEP3 + _TO_DRIFT + _RELOCK_LINE,
+     _SST + "test_the_files_are_already_relocked_when_the_banner_is_written", "l2-sess-relock-after-banner"),
 ]]
