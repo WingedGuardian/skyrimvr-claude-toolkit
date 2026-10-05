@@ -1,0 +1,19 @@
+#!/bin/bash
+# skydoctor -- what is live on this install, layer by layer:  bash tools/skydoctor [--root R] [--json] [--no-toolchain]
+# (tools/skydoctor.cmd is the cmd twin.) Exit 0 every line live, 1 any line not live, 2 any line unknown.
+# Python: $SKYGUARD_PYTHON, else the first of python3 / python / py -3 that really runs (a Store alias does not).
+src="${BASH_SOURCE[0]//\\//}"          # a Windows caller may pass C:\...\tools\skydoctor
+here="${src%/*}"
+[ "$here" = "$src" ] && here="."
+# Layer 0 runs tools/toolchain-check.sh with THIS bash (on Windows a bare `bash` can be WSL's launcher).
+export SKYDOCTOR_BASH="${SKYDOCTOR_BASH:-$BASH}"
+for cand in "${SKYGUARD_PYTHON:-}" python3 python "py -3"; do
+    [ -n "$cand" ] || continue
+    # shellcheck disable=SC2086
+    if $cand -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)' >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        exec $cand -B "$here/skyguard/doctor.py" "$@"
+    fi
+done
+echo "skydoctor: no working Python 3.8+ found, so nothing could be checked; for the lock, run tools/skyguard-unlock.cmd" >&2
+exit 2
