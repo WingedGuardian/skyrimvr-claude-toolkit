@@ -457,16 +457,16 @@ you run it yourself if you agree. Deleting the Bethesda registry keys (`reg dele
   lists it, is the one exception.
 - **Commands you type with `!`** in the Codex prompt -- they run in your own shell and bypass hooks
   (measured on codex-cli 0.160.0).
-- **Input sent to a program that is already running** (Codex's `write_stdin`): probably not guarded -- it carries
-  no command for the guards to read. This is **unmeasured** on 0.160.0 (an older, different-toolkit observation,
-  not re-run here), so treat it as a possible gap.
+- **Input sent to a program that is already running** (Codex's `write_stdin`): the keystrokes are judged as a
+  shell command when the hook sees them, but whether Codex 0.160.0 fires a hook for `write_stdin` at all is
+  **unmeasured**, and keystrokes that only finish a command typed earlier are not put back together. Treat it
+  as a possible gap.
 - **MCP tools other than DevBench's**: logged in `.claude/backups/codex-unhooked-tools.log`, not guarded. DevBench's own tools
-  (`mcp__devbench*`) get the same judge as on Claude for its refusals: `smp reset` is refused. Its one confirmation (a save
-  over an existing save) is not refused on Codex, which cannot ask; Codex passes the model a note instead.
-- **A shell call's own working directory** (`workdir`): the toolkit's reading of the hook payload takes the
-  `cwd` field and does not read a `workdir` tool argument, so a call that sets one may have its relative
-  paths judged against the session folder instead. Whether Codex puts `workdir` in the payload is
-  **unmeasured**. Use absolute paths for anything in the game folder.
+  (any server whose name contains `devbench`) get the same judge as on Claude: `smp reset` is refused, and a save over an
+  existing save is refused with `NEEDS YOUR CONFIRMATION`, like every other confirmation on Codex.
+- **A shell call's own working directory** (`workdir`): read when the hook payload carries one, so relative
+  paths land there; whether Codex puts `workdir` in the payload is **unmeasured**. Use absolute paths for
+  anything in the game folder.
 - **A hook that cannot start lets the command run.** That is how Codex treats a failed hook, so the toolkit's
   entry scripts never fail on their own -- but a hook that never starts cannot help. Two setups where it
   never starts are **not supported**: a Windows group policy that forces the PowerShell execution policy to

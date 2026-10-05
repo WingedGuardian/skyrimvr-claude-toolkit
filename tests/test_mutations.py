@@ -1361,22 +1361,22 @@ MUTATIONS = [
     pytest.param(
         "tools/skyguard/patch_paths.py",
         "(?:[A-Za-z_][A-Za-z0-9_]*=\\S*|sudo|env|", "(?:sudo|env|",
-        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        "tests/test_patch_paths.py::test_every_way_to_run_it_from_a_file_is_refused",
         id="patch-env-assignment-prefix-is-a-run",
     ),
     pytest.param(
         "tools/skyguard/patch_paths.py", '_NAME = r"(?:[^\\s\'\\"`;&|()<>]*[/\\\\])?', '_NAME = r"',
-        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        "tests/test_patch_paths.py::test_every_way_to_run_it_from_a_file_is_refused",
         id="patch-path-prefix-is-a-run",
     ),
     pytest.param(
         "tools/skyguard/patch_paths.py", "(?:\\.exe)?(?=[\\s;", "(?=[\\s;",
-        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        "tests/test_patch_paths.py::test_every_way_to_run_it_from_a_file_is_refused",
         id="patch-exe-suffix-is-a-run",
     ),
     pytest.param(
         "tools/skyguard/patch_paths.py", "or (_QUOTED_POSITION.search(cmd) and _WRAPPER.search(cmd))", "",
-        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        "tests/test_patch_paths.py::test_every_way_to_run_it_from_a_file_is_refused",
         id="patch-run-inside-a-wrapped-shell-string",
     ),
     pytest.param(
@@ -1459,8 +1459,8 @@ MUTATIONS = [
     ),
     pytest.param(
         'tools/skyguard/adapters/codex.py',
-        '            sp = patch_paths.shell_patch(cmd)',
-        '            sp = None',
+        '        sp = patch_paths.shell_patch(cmd)',
+        '        sp = None',
         'tests/test_skyguard_codex_adapter.py::test_a_patch_through_the_shell_carries_its_paths',
         id='codex-shell-patch-paths-dropped',
     ),
@@ -1537,8 +1537,9 @@ MUTATIONS = [
     ),
     pytest.param(
         'tools/skyguard/adapters/codex.py',
-        '    if not name.startswith("mcp__") and isinstance(cmd, str):',
-        '    if False:',
+        # rt-fix-b: the command keys are read for every non-MCP tool; reading them for Bash only reverts it.
+        '        key = next((k for k in _COMMAND_KEYS if k in ti), None)',
+        '        key = next((k for k in _COMMAND_KEYS if k in ti), None) if name == "Bash" else None',
         'tests/test_skyguard_codex_adapter.py::test_an_unknown_tool_with_a_command_string_gets_the_shell_rules',
         id='codex-unknown-tool-command-unguarded',
     ),
@@ -2441,7 +2442,8 @@ def _t08(row):
 
 _WRITE_CLAUSES = [
     # (id, file, find, replace, t08 row that must go red)
-    ("rule-S-WRITE-PLUGIN-redirect", _WR, "    out = _redirect_targets(e)\n", "    out = []\n", "redirect-esp"),
+    ("rule-S-WRITE-PLUGIN-redirect", _WR, "    out = _redirect_targets(e) + list(tool_write_targets(e))\n",
+     "    out = list(tool_write_targets(e))\n", "redirect-esp"),
     ("rule-S-WRITE-PLUGIN-tee", _WR, '    if p == "tee":', "    if False:", "tee-esm"),
     ("rule-S-WRITE-PLUGIN-set-content", _WR, '("set-content", "add-content", "clear-content", "new-item")',
      '("add-content", "clear-content", "new-item")', "set-content-pwsh"),
@@ -2892,7 +2894,7 @@ def _t11curl(case):
 _T11_CLAUSES = [
     # (id, file, find, replace, test that must go red)
     # S-DEVBENCH-CRASH: one mutation per route, then per clause
-    ("rule-S-DEVBENCH-CRASH-mcp", _MC, "    hit = judge(parts[-1], args, roots, None, env) if isinstance(args, dict) else None",
+    ("rule-S-DEVBENCH-CRASH-mcp", _MC, "    hit = judge(parts[-1], args, roots, None, env)",
      "    hit = None", _t11row("t11-mcp-smp-reset")),
     ("rule-S-DEVBENCH-CRASH-curl", _MC, "            calls = _web_call(e, command)", "            calls = []",
      _t11row("t11-curl-smp-reset")),
@@ -2909,19 +2911,22 @@ _T11_CLAUSES = [
     ("rule-S-DEVBENCH-CRASH-data-list", _MC, "        for denied in rules.DEVBENCH_DENY:",
      '        for denied in (("smp", "reset"),):',
      _T11 + "test_a_command_added_to_the_data_list_is_denied_with_no_code_change"),
+    # rt-fix-b: a deny-listed line anywhere in a DevBench call denies (the papyrus-tool ruling moved to SENDS); the
+    # console tool's own clause now only decides which strings are console SAVE lines.
     ("rule-S-DEVBENCH-CRASH-console-tool", _MC, '    if tool == "console":', "    if True:",
-     _T11 + "test_curl_forms_that_do_not_send_it[papyrus-tool]"),
-    ("rule-S-DEVBENCH-CRASH-string-command", _MC, "        if not isinstance(cmd, str):\n            return None\n        op =",
-     "        op =", _T11 + "test_a_non_string_console_command_is_not_judged"),
-    ("rule-S-DEVBENCH-CRASH-dict-input", _MC, "if isinstance(args, dict) else None", "if True else None",
-     _T11 + "test_a_non_dict_tool_input_is_not_judged"),
-    ("rule-S-DEVBENCH-CRASH-devbench-only", _MC, ' and parts[1].startswith("devbench")', "",
+     "tests/test_skyguard_rtb.py::test_rtb_row[rtb-mcp-papyrus-save-line]"),
+    ("rule-S-DEVBENCH-CRASH-string-command", _MC, "    elif isinstance(obj, (list, tuple)):", "    elif False:",
+     "tests/test_skyguard_rtb.py::test_rtb_row[rtb-mcp-command-list]"),
+    ("rule-S-DEVBENCH-CRASH-dict-input", _MC, "    for s in _strings(args):",
+     "    for s in (_strings(args) if isinstance(args, dict) else ()):",
+     _T11 + "test_a_non_dict_tool_input_is_judged_on_its_strings"),
+    ("rule-S-DEVBENCH-CRASH-devbench-only", _MC, 'or not is_devbench_server(parts[1]):', ":",
      _T11 + "test_only_devbench_servers_are_judged[mcp__other__console]"),
     ("rule-S-DEVBENCH-CRASH-mcp-prefix", _MC, ' and parts[0] == "mcp"', "",
      _T11 + "test_only_devbench_servers_are_judged[xmcp__devbench-vr__console]"),
     ("rule-S-DEVBENCH-CRASH-short-name", _MC, "len(parts) >= 3 and ", "",
      _T11 + "test_only_devbench_servers_are_judged[mcp]"),
-    ("rule-S-DEVBENCH-CRASH-server-name", _MC, 'parts[1].startswith("devbench")', 'parts[1].startswith("devbench-vr")',
+    ("rule-S-DEVBENCH-CRASH-server-name", _MC, 'not is_devbench_server(parts[1])', 'not parts[1].startswith("devbench-vr")',
      _T11 + "test_any_devbench_server_name_is_judged[devbench]"),
     # the curl route, per clause
     ("rule-S-DEVBENCH-CRASH-curl-json-flag", _MC, '"--data-urlencode", "--json")', '"--data-urlencode")', _t11curl("json-flag")),
@@ -2951,8 +2956,8 @@ _T11_CLAUSES = [
      _T11 + "test_a_json_body_that_is_not_an_object_is_not_a_call"),
     ("rule-S-DEVBENCH-CRASH-powershell", _MC, '    if e.program in _PS_PROGRAMS:', "    if False:",
      _T11 + "test_the_powershell_cmdlets_are_read"),
-    ("rule-S-DEVBENCH-CRASH-powershell-programs", _MC, '_WEB_PROGRAMS = frozenset(("curl", "invoke-restmethod", "irm", "invoke-webrequest", "iwr"))',
-     '_WEB_PROGRAMS = frozenset(("curl",))', _T11 + "test_the_powershell_cmdlets_are_read"),
+    ("rule-S-DEVBENCH-CRASH-powershell-programs", _MC, '_WEB_PROGRAMS = frozenset(("curl", "wget", "invoke-restmethod", "irm", "invoke-webrequest", "iwr"))',
+     '_WEB_PROGRAMS = frozenset(("curl", "wget"))', _T11 + "test_the_powershell_cmdlets_are_read"),
     # the CLI route, per clause
     ("rule-S-DEVBENCH-CRASH-cli-join", _MC, '" ".join(argv[1:])', "argv[1]", _t11row("t11-cli-exec-split-words")),
     ("rule-S-DEVBENCH-CRASH-cli-tool", _MC, '    if argv[0] == "tool" and len(argv) > 2:', "    if False:",
@@ -2962,16 +2967,16 @@ _T11_CLAUSES = [
     ("rule-S-DEVBENCH-CRASH-cli-program", _MC, '        elif e.program == "devbench-cli":', '        elif e.program == "devbench":',
      _t11row("t11-cli-exec-smp-reset")),
     # not safe by default (R4), per clause
-    ("rule-S-DEVBENCH-CRASH-unparsable", _MC, "    if (not parsed.ok or opaque) and", "    if False and",
+    ("rule-S-DEVBENCH-CRASH-unparsable", _MC, "    textual = not parsed.ok or opaque or bool(", "    textual = False and bool(",
      _t11row("t11-curl-unparsable")),
-    ("rule-S-DEVBENCH-CRASH-unparsable-only", _MC, "    if (not parsed.ok or opaque) and", "    if (opaque) and",
+    ("rule-S-DEVBENCH-CRASH-unparsable-only", _MC, "    textual = not parsed.ok or opaque or bool(", "    textual = opaque or bool(",
      _t11row("t11-curl-unparsable")),
-    ("rule-S-DEVBENCH-CRASH-opaque", _MC, "    if (not parsed.ok or opaque) and", "    if (not parsed.ok) and",
+    ("rule-S-DEVBENCH-CRASH-opaque", _MC, "    textual = not parsed.ok or opaque or bool(", "    textual = not parsed.ok or bool(",
      _T11 + "test_an_opaque_program_next_to_the_endpoint_and_the_denied_command_denies"),
-    ("rule-S-DEVBENCH-CRASH-text-needs-reset", _MC, " and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(command):",
-     " and _TEXT_ENDPOINT.search(command):",
+    ("rule-S-DEVBENCH-CRASH-text-needs-reset", _MC, " and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(unquote(command)):",
+     " and _TEXT_ENDPOINT.search(unquote(command)):",
      _T11 + "test_an_unreadable_command_that_only_names_one_of_them_does_not"),
-    ("rule-S-DEVBENCH-CRASH-text-needs-endpoint", _MC, " and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(command):",
+    ("rule-S-DEVBENCH-CRASH-text-needs-endpoint", _MC, " and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(unquote(command)):",
      " and _TEXT_RESET.search(command):", _T11 + "test_an_unreadable_command_that_only_names_one_of_them_does_not"),
     ("rule-S-DEVBENCH-CRASH-prefilter", _MC, "    if not any(w in low for w in _SHELL_WORDS):\n        return None", "    pass",
      _T11 + "test_a_command_that_names_neither_is_not_scanned"),
@@ -2989,13 +2994,15 @@ _T11_CLAUSES = [
     ("rule-S-DEVBENCH-SAVE-name-wildcards", _MC, ":*?" + '"<>|', ':"<>|', _T11 + "test_an_unusable_save_name_asks[star]"),
     ("rule-S-DEVBENCH-SAVE-name-brackets", _MC, '"<>|' + BS + "x00", BS + "x00", _T11 + "test_an_unusable_save_name_asks[angle]"),
     ("rule-S-DEVBENCH-SAVE-name-control", _MC, BS + "x00-" + BS + "x1f]", "]", _T11 + "test_an_unusable_save_name_asks[control]"),
-    ("rule-S-DEVBENCH-SAVE-name-dotdot", _MC, '    if not n or n in (".", "..") or', "    if not n or",
+    # rt-fix-b: `.` and `..` are now emptied by the trailing-dot strip (Windows drops trailing dots), so their own
+    # clause was dead and is gone; the strip is what the [dot] / [dotdot] cases now guard.
+    ("rule-S-DEVBENCH-SAVE-name-dotdot", _MC, '    n = name.strip().rstrip(" .")', '    n = name.strip().rstrip(" ")',
      _T11 + "test_an_unusable_save_name_asks[dotdot]"),
-    ("rule-S-DEVBENCH-SAVE-name-dot", _MC, '    if not n or n in (".", "..") or', '    if not n or n in ("..",) or',
+    ("rule-S-DEVBENCH-SAVE-name-dot", _MC, '    n = name.strip().rstrip(" .")', '    n = name.strip()',
      _T11 + "test_an_unusable_save_name_asks[dot]"),
     ("rule-S-DEVBENCH-SAVE-name-string", _MC, "    if not isinstance(name, str):\n        return None\n    n = name.strip()",
      "    n = str(name).strip()", _T11 + "test_an_unusable_save_name_asks[number]"),
-    ("rule-S-DEVBENCH-SAVE-name-strip", _MC, "    n = name.strip()", "    n = name", _T11 + "test_an_unusable_save_name_asks[blank]"),
+    ("rule-S-DEVBENCH-SAVE-name-strip", _MC, "    n = name.strip()", "    n = name", _T11 + "test_a_save_name_is_read_trimmed"),
     ("rule-S-DEVBENCH-SAVE-ess-suffix", _MC, '    if n.lower().endswith(".ess"):\n        n = n[:-4]', "    if False:\n        n = n[:-4]",
      _t11row("t11-mcp-save-existing-case")),
     ("rule-S-DEVBENCH-SAVE-case-insensitive", _MC, "frozenset(n.casefold() for n in os.listdir(folder))",
@@ -3008,12 +3015,12 @@ _T11_CLAUSES = [
      _T11 + "test_the_save_action_is_read_leniently[args1]"),
     ("rule-S-DEVBENCH-SAVE-action-string", _MC, '        if isinstance(action, str) and action.strip()', "        if action.strip()",
      _T11 + "test_other_game_actions_never_ask[7]"),
-    ("rule-S-DEVBENCH-SAVE-console", _MC, "        name = _console_save_name(cmd)\n        if name is not None:",
-     "        name = None\n        if name is not None:", _t11row("t11-mcp-console-save-existing")),
-    ("rule-S-DEVBENCH-SAVE-console-case", _MC, '        if words and words[0].lower() == "save":', '        if words and words[0] == "save":',
-     _T11 + "test_the_console_save_word_is_case_insensitive"),
-    ("rule-S-DEVBENCH-SAVE-console-whole-word", _MC, '        if words and words[0].lower() == "save":',
-     '        if words and words[0].lower().startswith("save"):', _T11 + "test_the_console_save_word_is_case_insensitive"),
+    ("rule-S-DEVBENCH-SAVE-console", _MC, "        name = _console_save_name(line)",
+     "        name = None", _t11row("t11-mcp-console-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-console-case", _MC, '        if words and words[0].lower() in SAVE_COMMANDS:',
+     '        if words and words[0] in SAVE_COMMANDS:', _T11 + "test_the_console_save_word_is_case_insensitive"),
+    ("rule-S-DEVBENCH-SAVE-console-whole-word", _MC, '        if words and words[0].lower() in SAVE_COMMANDS:',
+     '        if words and words[0].lower().startswith(SAVE_COMMANDS):', _T11 + "test_the_console_save_word_is_case_insensitive"),
     ("rule-S-DEVBENCH-SAVE-wired", _SHR, "    if dev:                                                  # S-DEVBENCH-SAVE",
      "    if False:                                                # S-DEVBENCH-SAVE", _t11row("t11-cli-tool-save-existing")),
     ("rule-S-DEVBENCH-SAVE-roots", "tools/skyguard/run.py", 'v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)',
@@ -3143,7 +3150,7 @@ _T11_R1 = [
      "    if memo[folder] is None:\n        return False", _T11 + "test_an_unreadable_saves_folder_is_unknown_not_a_crash"),
     ("rule-S-DEVBENCH-SAVE-listing-memo", _MC, "    if folder not in memo:\n        try:", "    if True:\n        try:",
      _T11 + "test_a_scan_lists_each_saves_folder_once"),
-    ("rule-S-DEVBENCH-SAVE-env-wired", _MC, "hit = judge(parts[-1], args, roots, None, env) if", "hit = judge(parts[-1], args, roots) if",
+    ("rule-S-DEVBENCH-SAVE-env-wired", _MC, "hit = judge(parts[-1], args, roots, None, env)", "hit = judge(parts[-1], args, roots)",
      _t11row("t11-mcp-save-docs-existing")),
     ("rule-S-DEVBENCH-SAVE-env-wired-shell", _MC, "hit = judge(tool, args, roots, memo, env)", "hit = judge(tool, args, roots, memo)",
      _t11row("t11-curl-save-docs-existing")),
@@ -3363,10 +3370,10 @@ MUTATIONS_FINAL = [
     ("tools/skyguard/run.py", '    if v.decision != "allow":', "    if False:",
      _COV + "test_the_engine_records_a_refusal_in_the_session_line_and_an_allow_does_not",
      "engine-records-codex-refusals"),
-    ("tools/skyguard/adapters/codex.py", "            if isinstance(cmd, list):", "            if False:",
+    # rt-fix-b: Bash and every other command-carrying tool now share one branch; the argv join is that branch's.
+    ("tools/skyguard/adapters/codex.py", "        if isinstance(cmd, list):", "        if False:",
      _ADP + "test_an_argv_list_command_is_guarded_as_a_shell_request", "codex-bash-argv-list-unjoined"),
-    ("tools/skyguard/adapters/codex.py", '    if not name.startswith("mcp__") and isinstance(cmd, list):',
-     "    if False:",
+    ("tools/skyguard/adapters/codex.py", "        if isinstance(cmd, list):", '        if isinstance(cmd, list) and name == "Bash":',
      _ADP + "test_an_argv_list_command_gets_the_shell_rules", "codex-unknown-tool-argv-list-allowed"),
     ("tools/skyguard/adapters/codex.py",
      "    if not isinstance(cmd, list) or not cmd or not all(isinstance(x, str) for x in cmd):",
@@ -3486,8 +3493,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "merge-codex-rules-prefix-broader-than-hook"),
     # Codex adapter: a scalar non-string command is refused before any rule (Plan 5 Task 12 on Codex).
     ("tools/skyguard/adapters/codex.py",
-     '    if not name.startswith("mcp__") and "command" in ti and not isinstance(cmd, (str, list)):',
-     "    if False:",
+     "        if not isinstance(cmd, str):\n            # Merge of Plans 4+5",
+     "        if False:\n            # Merge of Plans 4+5",
      _MERGE + "test_skyguard_codex_adapter.py::test_a_scalar_non_string_command_is_refused_before_the_rules[exec_command-int]",
      "merge-codex-scalar-command-allowed"),
     # engine: Plan 5's cwd and dialect must reach the rules through the Plan 4 engine.
@@ -3518,37 +3525,35 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 
 
 
-# Task 17 (gap X4): the DevBench judge on Codex, deny-class outcomes only. One mutation per clause, each naming the test
-# that must go red.
+# Task 17 (gap X4): the DevBench judge on Codex. One mutation per clause, each naming the test that must go red.
+# Merge of rt-fix-b (2026-10-05): the route is rt-fix-b's (`if req.kind == "mcp":` in engine._rules), which keeps an ask
+# an ask (the Codex render refuses it) and fails closed on unreadable arguments; Task 17's ask-to-advice downgrade is
+# gone, so its three downgrade mutations became one that puts the downgrade back.
 _T17 = "tests/test_skyguard_codex_adapter.py::"
 _T17_ROUTE = '    if req.kind == "mcp" and mcp_rules.is_devbench(req.mcp_tool):\n        return '
+_T17_JUDGE = '        return evaluate_mcp(req.mcp_tool, args, audit, roots=_soft_roots(roots_fn) or _paths.Roots("", ""))'
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # Codex stops routing DevBench MCP calls to the judge: smp reset is allowed again.
-    ("tools/skyguard/engine.py", _T17_ROUTE + "_codex_devbench", "    if False:\n        return _codex_devbench",
+    ("tools/skyguard/engine.py", '    if req.kind == "mcp":\n        # rt-fix-b', '    if False:\n        # rt-fix-b',
      _T17 + "test_a_devbench_smp_reset_is_denied_on_codex[mcp__devbench-vr__console]", "t17-codex-devbench-not-routed"),
-    # An ask outcome reaches Codex as a refusal (a NEW refusal: Codex would have failed it open).
-    ("tools/skyguard/engine.py", '    if v.decision == "ask":\n        return v._replace(decision="allow"',
-     '    if False:\n        return v._replace(decision="allow"',
-     _T17 + "test_a_devbench_ask_stays_an_allow_with_the_advice_on_codex", "t17-codex-devbench-ask-not-downgraded"),
-    # The downgraded ask loses its text: the model is no longer told why.
-    ("tools/skyguard/engine.py", 'reason="", context=v.reason)', 'reason="", context="")',
-     _T17 + "test_a_devbench_ask_stays_an_allow_with_the_advice_on_codex", "t17-codex-devbench-ask-advice-dropped"),
-    # A downgraded ask keeps its reason (a stale refusal text next to an allow).
-    ("tools/skyguard/engine.py", 'return v._replace(decision="allow", reason="", context=v.reason)',
-     'return v._replace(decision="allow", context=v.reason)',
-     _T17 + "test_a_devbench_ask_stays_an_allow_with_the_advice_on_codex", "t17-codex-devbench-ask-keeps-reason"),
-    # Unreadable arguments become a crash instead of the judge's own answer.
-    ("tools/skyguard/engine.py", "    except ValueError:\n        args = None\n    v = evaluate_mcp",
-     "    except ValueError:\n        raise\n    v = evaluate_mcp",
-     _T17 + "test_unreadable_devbench_arguments_are_not_a_refusal_on_codex", "t17-codex-devbench-bad-args-crash"),
+    # An ask outcome is quietly downgraded to an allow on Codex: the overwrite of an existing save runs unconfirmed.
+    ("tools/skyguard/engine.py", _T17_JUDGE,
+     _T17_JUDGE.replace("        return evaluate_mcp(", "        v = evaluate_mcp(")
+     + '\n        return v._replace(decision="allow", reason="", context=v.reason) if v.decision == "ask" else v',
+     _T17 + "test_a_devbench_ask_is_refused_with_the_confirmation_on_codex", "t17-codex-devbench-ask-downgraded"),
+    # Unreadable arguments are judged as no arguments (an allow) instead of the INERT refusal.
+    ("tools/skyguard/engine.py", '            return _failed(INERT_TRANSLATE.format("unreadable MCP arguments"), "codex.TRANSLATE")',
+     "            args = {}",
+     _T17 + "test_unreadable_devbench_arguments_are_refused_as_inert_on_codex", "t17-codex-devbench-bad-args-allowed"),
     # The judged call is logged as unhooked again (the log would claim nothing guarded it).
     ("tools/skyguard/engine.py", _T17_ROUTE + "False", "    if False:\n        return False",
      _T17 + "test_a_judged_devbench_call_is_not_logged_as_unhooked", "t17-codex-devbench-logged-as-unhooked"),
-    # Every MCP server is judged, not only DevBench's.
-    ("tools/skyguard/mcp_rules.py", ' and parts[1].startswith("devbench")\n\n\ndef decide', "\n\n\ndef decide",
+    # Every MCP server counts as DevBench for the unhooked log, not only DevBench's.
+    ("tools/skyguard/mcp_rules.py", 'parts[0] == "mcp" and is_devbench_server(parts[1])', 'parts[0] == "mcp"',
      _T17 + "test_only_devbench_servers_are_judged_on_codex", "t17-is-devbench-matches-every-server"),
     # The underscore spelling of the server name is no longer recognised.
-    ("tools/skyguard/mcp_rules.py", 'parts[1].startswith("devbench")', 'parts[1].startswith("devbench-")',
+    ("tools/skyguard/mcp_rules.py", '    return "devbench" in re.sub(r"[-_.\\s]", "", server.lower())',
+     '    return server.lower().startswith("devbench-")',
      _T17 + "test_a_devbench_smp_reset_is_denied_on_codex[mcp__devbench_vr__console]", "t17-is-devbench-needs-a-hyphen"),
 ]]
 
@@ -3571,4 +3576,259 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # decide() must reuse the parse it is handed: dropping the argument parses twice and can disagree.
     ("tools/skyguard/engine.py", "shell=shell, parsed=parsed))", "shell=shell))",
      _T17E + "test_decide_reuses_the_parse_it_is_handed", "t17-decide-reparses"),
+]]
+
+
+# rt-fix-b (routes red team, 2026-10-04). One mutation per guard clause the branch added; each names the row or test
+# that must go red. RTB rows fire in-process from tests/test_skyguard_rtb.py; Codex rows from test_skyguard_codex_routes.
+def _rtb(row):
+    return "tests/test_skyguard_rtb.py::test_rtb_row[rtb-" + row + "]"
+
+
+def _cxr(row):
+    return "tests/test_skyguard_codex_routes.py::test_codex_route_rows[rt-codex-" + row + "]"
+
+
+_CXT = "tests/test_skyguard_codex_routes.py::"
+_RTT = "tests/test_skyguard_routes.py::"
+_CX = "tools/skyguard/adapters/codex.py"
+_EN = "tools/skyguard/engine.py"
+_PP = "tools/skyguard/patch_paths.py"
+_RTB_CLAUSES = [
+    # (id, file, find, replace, test that must go red)
+    # --- S-WRITE-PLUGIN: non-text writers onto a plugin or archive name (writes.tool_write_targets)
+    ("rule-S-WRITE-PLUGIN-tool-writers-wired", _WR, "    out = _redirect_targets(e) + list(tool_write_targets(e))\n",
+     "    out = _redirect_targets(e)\n", _rtb("curl-o")),
+    ("rule-S-WRITE-PLUGIN-curl-output", _WR, '        out = _opt_values(argv, ("--output",), ("-o",))', "        out = []",
+     _rtb("curl-output")),
+    ("rule-S-WRITE-PLUGIN-short-cluster-value", _WR, "                if w.endswith(c) and k + 1 < len(argv):",
+     "                if False:", _rtb("curl-cluster")),
+    ("rule-S-WRITE-PLUGIN-curl-remote-name", _WR,
+     '        if _has_flag(argv, ("--remote-name", "--remote-name-all"), "O", _CURL_VALUED):', "        if False:",
+     _rtb("curl-remote-name")),
+    ("rule-S-WRITE-PLUGIN-curl-valued-letters", _WR, '_CURL_VALUED = "XHdubceAFTwxmrEKoCYyzQPtUD"', '_CURL_VALUED = ""',
+     _rtb("curl-xpost")),
+    ("rule-S-WRITE-PLUGIN-wget-output", _WR, '        out = _opt_values(argv, ("--output-document",), ("-O",))',
+     "        out = []", _rtb("wget-O")),
+    ("rule-S-WRITE-PLUGIN-wget-output-wins", _WR, '        if out:\n            return [w for w in out if w != "-"]',
+     "        if False:\n            return []", _rtb("wget-stdout")),
+    ("rule-S-WRITE-PLUGIN-wget-url-name", _WR, '        return _download_names(argv, ("--directory-prefix",), ("-P",))',
+     "        return []", _rtb("wget-url-name")),
+    ("rule-S-WRITE-PLUGIN-web-cmdlets", _WR, "    if p in WEB_GET or (", "    if p in () or (", _rtb("iwr-outfile")),
+    ("rule-S-WRITE-PLUGIN-bits-transfer", _WR, '    if p == "start-bitstransfer":', "    if False:", _rtb("bits-transfer")),
+    ("rule-S-WRITE-PLUGIN-certutil", _WR, '    if p == "certutil" and', "    if False and", _rtb("certutil-urlcache")),
+    ("rule-S-WRITE-PLUGIN-bitsadmin", _WR, '    if p == "bitsadmin" and', "    if False and", _rtb("bitsadmin")),
+    ("rule-S-WRITE-PLUGIN-truncate", _WR, '    if p == "truncate":', "    if False:", _rtb("truncate")),
+    ("rule-S-WRITE-PLUGIN-perl-inplace", _WR, '    if p == "perl" and', "    if False and", _rtb("perl-inplace")),
+    ("rule-S-WRITE-PLUGIN-perl-cluster", _WR, 're.fullmatch(r"-[a-hj-zA-Z]*i', 're.fullmatch(r"-i', _rtb("perl-pi")),
+    ("rule-S-WRITE-PLUGIN-fsutil", _WR, '    if p == "fsutil" and', "    if False and", _rtb("fsutil-zero")),
+    ("rule-S-WRITE-PLUGIN-openssl", _WR, '    if p == "openssl":', "    if False:", _rtb("openssl-out")),
+    ("rule-S-WRITE-PLUGIN-7z", _WR, '    if p in ("7z", "7za", "7zr", "7z.exe") and', "    if False and", _rtb("7z-add")),
+    ("rule-S-WRITE-PLUGIN-zip", _WR, '    if p == "zip":', "    if False:", _rtb("zip")),
+    ("rule-S-WRITE-PLUGIN-tar", _WR, '    if p == "tar" and _tar_creates(argv):', "    if False:", _rtb("tar-create")),
+    ("rule-S-WRITE-PLUGIN-tar-creates-only", _WR, '    if p == "tar" and _tar_creates(argv):', '    if p == "tar":',
+     _rtb("tar-extract")),
+    ("rule-S-WRITE-PLUGIN-tar-bundled", _WR, '        return bool(set(first) & set("cruA"))', "        return False",
+     _rtb("tar-bundled")),
+    ("rule-S-WRITE-PLUGIN-export-cmdlets", _WR, '    if p in ("export-csv", "export-clixml"):', "    if False:",
+     _rtb("export-csv")),
+    ("rule-S-WRITE-PLUGIN-ps-method-calls", _WR, "    lit = text_write_targets_ps(command)", "    lit = []",
+     _rtb("ps-downloadfile")),
+    ("rule-S-WRITE-PLUGIN-interpreter-literals", _WR, "            lit += text_write_targets(code)", "            pass",
+     _rtb("python-open-write")),
+    ("rule-S-WRITE-PLUGIN-open-write-mode", _WR, "[rbt]*[wax+]\"\"\", re.IGNORECASE)", "?\"\"\", re.IGNORECASE)",
+     _rtb("python-open-read")),
+    ("rule-S-WRITE-PLUGIN-pathlib", _WR, 're.compile(r"' + BS + "bPath" + BS + '(', 're.compile(r"' + BS + "bNoPath" + BS + '(',
+     _rtb("python-pathlib")),
+    ("rule-S-WRITE-PLUGIN-node-writefile", _WR, "(?:writeFile|appendFile|", "(?:appendFile|", _rtb("node-writefile")),
+    # --- S-WRITE-SAVE: a write, copy or move onto a save in the settings folder
+    ("rule-S-WRITE-SAVE-wired", _SHR, "    if wr.save:", "    if False:", _rtb("save-redirect")),
+    ("rule-S-WRITE-SAVE-write", _WR, "            if is_save(a, roots):", "            if False:", _rtb("save-redirect")),
+    ("rule-S-WRITE-SAVE-copy-onto", _WR, "            if is_save(a_dst, roots):", "            if False:", _rtb("save-cp")),
+    ("rule-S-WRITE-SAVE-copy-into-folder", _WR, "                if hit is not None and is_save(",
+     "                if False and is_save(", _rtb("save-cp-into-folder")),
+    ("rule-S-WRITE-SAVE-interpreter-literal", _WR, '        elif is_save(targets.resolve(word, cwd, "cmd", env), roots):',
+     "        elif False:", _rtb("save-python")),
+    ("rule-S-WRITE-SAVE-cosave", _WR, 'SAVE_EXTS = (".ess", ".skse")', 'SAVE_EXTS = (".ess",)', _rtb("save-cosave")),
+    ("rule-S-WRITE-SAVE-settings-folder-only", _WR, '.endswith(SAVE_EXTS) and targets.zone(abs_path, roots) == "config"',
+     ".endswith(SAVE_EXTS)", _rtb("write-save-outside")),
+    # --- S-MOVE-ROOT: moving the install or its folders away
+    # Merge (2026-10-05): a root moved OUT of its zone now reaches S-MOVE-ROOT through the delete branch too, so this
+    # clause is pinned by a move that stays in its zone (no delete hit): Saves renamed beside itself.
+    ("rule-S-MOVE-ROOT-wired", _SHR, "    if wr.move_root:                                         # rt-fix-b",
+     "    if False:                                         # rt-fix-b", _rtb("move-saves")),
+    ("rule-S-MOVE-ROOT-protected-roots", _WR, "    if targets.covers_protected(abs_path, roots):", "    if False:",
+     _rtb("move-install")),
+    ("rule-S-MOVE-ROOT-data-folder", _WR, '    if _rel(abs_path, roots.install_dirs) == ["data"] and', "    if False and",
+     _rtb("move-data-relative")),
+    ("rule-S-MOVE-ROOT-saves-folder", _WR, '    return _rel(abs_path, roots.config_dirs) == ["saves"] or', "    return False or",
+     _rtb("move-saves")),
+    ("rule-S-MOVE-ROOT-mv", _WR, 'MOVE_PROGRAMS = frozenset(("mv", "move-item"))', 'MOVE_PROGRAMS = frozenset(("move-item",))',
+     _rtb("move-install")),
+    ("rule-S-MOVE-ROOT-move-item", _WR, 'MOVE_PROGRAMS = frozenset(("mv", "move-item"))', 'MOVE_PROGRAMS = frozenset(("mv",))',
+     _rtb("move-item")),
+    # Merge (2026-10-05): writes.move_sources' own rename-item branch duplicated rt-fix-a's parser (every Rename-Item
+    # with a -NewName is also a move-item exec) and was removed; the clause that carries it is the parser's.
+    ("rule-S-MOVE-ROOT-rename-item", "tools/skyguard/shellparse.py",
+     '            if p == "rename-item" and self.d == "powershell" or p == "rename" and self.d == "cmd":',
+     '            if p == "rename" and self.d == "cmd":', _rtb("rename-item")),
+    # --- S-GIT-DISCARD: git overwriting a protected working tree
+    ("rule-S-GIT-DISCARD-wired", _SHR, "    git = anchored.git_discard(parsed, roots, cwd, env)", '    git = ""',
+     _rtb("git-reset-hard")),
+    ("rule-S-GIT-DISCARD-checkout-pathspec", _AN,
+     '        if "--" in args or any(a in ("-f", "--force") for a in opts):',
+     '        if any(a in ("-f", "--force") for a in opts):', _rtb("git-checkout-stash-dir")),
+    ("rule-S-GIT-DISCARD-checkout-force", _AN,
+     '        if "--" in args or any(a in ("-f", "--force") for a in opts):', '        if "--" in args:',
+     _rtb("git-checkout-force")),
+    ("rule-S-GIT-DISCARD-new-branch-is-no-path", _AN, '        if any(a in ("-b", "-B", "--orphan") for a in opts):',
+     "        if False:", _rtb("git-checkout-new-branch-dotted")),
+    ("rule-S-GIT-DISCARD-checkout-pathy", _AN,
+     '        return any(_PATHY.search(a) for a in args if not a.startswith("-"))', "        return False",
+     _rtb("git-checkout-dot")),
+    ("rule-S-GIT-DISCARD-restore-staged-only", _AN, "        return worktree or not staged", "        return True",
+     _rtb("git-restore-staged")),
+    ("rule-S-GIT-DISCARD-restore-worktree", _AN, "        return worktree or not staged", "        return not staged",
+     _rtb("git-restore-both")),
+    ("rule-S-GIT-DISCARD-restore-cluster", _AN, 'a.startswith("-") and not a.startswith("--") and "W" in a[1:] for a in opts)',
+     "False for a in opts)", _rtb("git-restore-cluster")),
+    ("rule-S-GIT-DISCARD-reset-hard", _AN, '        return "--hard" in opts', "        return False", _rtb("git-reset-hard")),
+    ("rule-S-GIT-DISCARD-reset-hard-only", _AN, '        return "--hard" in opts', "        return True", _rtb("git-reset-soft")),
+    ("rule-S-GIT-DISCARD-switch", _AN, '        return any(a in ("-f", "--force", "--discard-changes") for a in opts)',
+     "        return False", _rtb("git-switch-discard")),
+    ("rule-S-GIT-DISCARD-checkout-index-cluster", _AN,
+     '(a.startswith("-") and not a.startswith("--") and "f" in a[1:])', "False", _rtb("git-checkout-index")),
+    ("rule-S-GIT-DISCARD-read-tree", _AN, '        return "-u" in opts and "--reset" in opts', "        return False",
+     _rtb("git-read-tree")),
+    ("rule-S-GIT-DISCARD-dash-C", _AN, '        if w in ("-C", "--work-tree") and k + 1 < len(argv):', "        if False:",
+     _rtb("git-dash-C")),
+    ("rule-S-GIT-DISCARD-work-tree-equals", _AN, '        if w.startswith("--work-tree="):', "        if False:",
+     _rtb("git-work-tree")),
+    ("rule-S-GIT-DISCARD-cd", _AN, "        where = targets.exec_cwd(e, cwd, env)", "        where = targets.normalise_cwd(cwd)",
+     _rtb("git-cd")),
+    ("rule-S-GIT-DISCARD-config-zone", _AN, 'targets.zone(where, roots) in ("install", "config", "mo2"):',
+     'targets.zone(where, roots) in ("install", "mo2"):', _rtb("git-config-dir")),
+    ("rule-S-GIT-DISCARD-protected-zones-only", _AN, 'targets.zone(where, roots) in ("install", "config", "mo2"):',
+     "True:", _rtb("git-reset-hard-elsewhere")),
+    # --- W-SAVE: Edit/Write onto a save
+    ("rule-W-SAVE-wired", _WRR, "        if is_save(a, roots):", "        if False:", _rtb("write-save")),
+    ("rule-W-SAVE-cosave", _WR, 'SAVE_EXTS = (".ess", ".skse")', 'SAVE_EXTS = (".ess",)', _rtb("write-cosave")),
+    ("rule-W-SAVE-settings-folder-only", _WR, '.endswith(SAVE_EXTS) and targets.zone(abs_path, roots) == "config"',
+     ".endswith(SAVE_EXTS)", _rtb("write-save-outside")),
+    # --- Claude Write with a non-string file_path is no path (W-INERT-NOPATH)
+    ("rule-W-INERT-NOPATH-non-string-file-path", "tools/skyguard/adapters/claude.py",
+     '        return _sub(fp) if isinstance(fp, str) else ""', "        return _sub(fp)", _rtb("write-path-list")),
+    # --- DevBench: what the console actually runs, and where a console line can sit
+    ("rule-S-DEVBENCH-CRASH-nul-ends-the-line", _MC, 'command.split("' + BS + 'x00", 1)[0])', "command)", _rtb("mcp-nul")),
+    ("rule-S-DEVBENCH-CRASH-invisible-characters", _MC, '    return _INVISIBLE.sub("", command.split(',
+     '    return (lambda _p, s: s)("", command.split(', _rtb("mcp-zero-width")),
+    ("rule-S-DEVBENCH-CRASH-quoted-statement", _MC, "            s = s[1:-1]", "            pass", _rtb("mcp-quoted")),
+    ("rule-S-DEVBENCH-CRASH-any-key", _MC, "    for s in _strings(args):",
+     '    for s in ([args.get("command")] if isinstance(args, dict) and isinstance(args.get("command"), str) else []):',
+     _rtb("mcp-unknown-key")),
+    ("rule-S-DEVBENCH-CRASH-nested-object", _MC, "    elif isinstance(obj, dict):", "    elif False:", _rtb("mcp-nested")),
+    ("rule-S-DEVBENCH-SAVE-papyrus-console-functions", _MC, "        if fn in _CONSOLE_FUNCTIONS:", "        if False:",
+     _rtb("mcp-papyrus-executecommand-save")),
+    ("rule-S-DEVBENCH-SAVE-papyrus-savegame", _MC, '        elif fn == "savegame":', "        elif False:",
+     _rtb("mcp-papyrus-savegame")),
+    ("rule-S-DEVBENCH-SAVE-console-savegame", _MC, 'SAVE_COMMANDS = ("save", "savegame")', 'SAVE_COMMANDS = ("save",)',
+     _rtb("mcp-console-savegame")),
+    ("rule-S-DEVBENCH-SAVE-scenario-steps", _MC, "        for stool, sargs in _steps(args):", "        for stool, sargs in ():",
+     _rtb("mcp-scenario-step-save")),
+    ("rule-S-DEVBENCH-SAVE-scenario-console-step", _MC, '        if isinstance(step.get("console"), str):', "        if False:",
+     _rtb("mcp-scenario-console-save")),
+    ("rule-S-DEVBENCH-SAVE-trailing-dot", _MC, '    n = name.strip().rstrip(" .")', "    n = name.strip()",
+     _rtb("mcp-save-trailing-dot")),
+    ("rule-S-DEVBENCH-SAVE-short-name", _MC, ' or re.search(r"~[0-9]", n):', ":", _rtb("mcp-save-short-name")),
+    ("rule-S-DEVBENCH-CRASH-server-separators", _MC, 're.sub(r"[-_.' + BS + 's]", "", server.lower())', "server.lower()",
+     _T11 + "test_any_devbench_server_name_is_judged[dev-bench]"),
+    ("rule-S-DEVBENCH-CRASH-server-case", _MC, '"", server.lower())', '"", server)',
+     _T11 + "test_any_devbench_server_name_is_judged[DevBench-vr]"),
+    ("rule-S-DEVBENCH-CRASH-percent-encoded-url", _MC, "        u = unquote(w)", "        u = w", _rtb("curl-percent-encoded")),
+    ("rule-S-DEVBENCH-CRASH-query-string", _MC, "    out = [(tool, query)] if query else []", "    out = []",
+     _rtb("curl-query-string")),
+    ("rule-S-DEVBENCH-CRASH-mcp-endpoint", _MC, "        if _MCP_ENDPOINT.search(u):", "        if False:",
+     _rtb("curl-mcp-jsonrpc")),
+    ("rule-S-DEVBENCH-SAVE-mcp-jsonrpc-params", _MC, "        if rpc and isinstance(args, dict):", "        if False:",
+     _rtb("curl-mcp-jsonrpc-save")),
+    ("rule-S-DEVBENCH-CRASH-mcp-prefilter", _MC, '_SHELL_WORDS = ("api/tool", "devbench", "/mcp")',
+     '_SHELL_WORDS = ("api/tool", "devbench")', _rtb("curl-mcp-body")),
+    ("rule-S-DEVBENCH-CRASH-wget-program", _MC, '_WEB_PROGRAMS = frozenset(("curl", "wget", ', '_WEB_PROGRAMS = frozenset(("curl", ',
+     _rtb("wget-post-data")),
+    ("rule-S-DEVBENCH-CRASH-wget-body", _MC, '    elif e.program == "wget":', "    elif False:", _rtb("wget-post-data")),
+    ("rule-S-DEVBENCH-CRASH-dotnet-web-call", _MC, "    textual = not parsed.ok or opaque or bool(_DOTNET_WEB.search(command))",
+     "    textual = not parsed.ok or opaque", _rtb("ps-uploadstring")),
+    ("rule-S-DEVBENCH-CRASH-cli-call", _MC, '    if argv[0] == "call" and len(argv) > 2:', "    if False:",
+     _rtb("cli-call-executecommand")),
+    # --- Codex: apply_patch Delete / Move judged as deletes (engine)
+    ("codex-patch-delete-judged", _EN, "        if op in DELETE_OPS and roots is not None:", "        if False:",
+     _cxr("patch-delete-install")),
+    ("codex-patch-move-out-is-a-delete", _EN, 'DELETE_OPS = ("delete", "move_from")', 'DELETE_OPS = ("delete",)',
+     _cxr("patch-move-out")),
+    ("codex-patch-move-inside-is-a-rename", _EN,
+     "            if b is not None and targets.zone(b, roots) == targets.zone(a, roots):", "            if False:",
+     _CXT + "test_a_move_inside_the_same_folder_is_a_rename_not_a_delete"),
+    ("codex-patch-delete-unresolved", _EN,
+     '        if deletes.raw_reaches(path, targets.normalise_cwd(cwd), "cmd", roots):', "        if False:",
+     _cxr("patch-delete-unresolved")),
+    ("codex-patch-delete-strict-roots", _EN, "    if not any(op in DELETE_OPS for op in req.ops):", "    if True:",
+     _CXT + "test_a_patch_delete_refuses_when_the_paths_file_is_unreadable"),
+    ("codex-patch-delete-malformed-roots", _EN, "    if roots.malformed:", "    if False:",
+     _CXT + "test_a_patch_delete_refuses_when_the_paths_file_has_an_unreadable_value"),
+    ("codex-patch-delete-code", "tools/skyguard/codes.py", '    return found[0] if found else "unknown"',
+     '    return "unknown"', "tests/test_codex_conformance.py::test_conformance"),
+    # --- Codex: MCP routed to the DevBench judge
+    ("codex-mcp-devbench-judged", _EN, '    if req.kind == "mcp":', "    if False:", _cxr("mcp-crash")),
+    ("codex-mcp-arguments-as-sent", _CX, "mcp_args=json.dumps({} if raw_ti is None else raw_ti, sort_keys=True)",
+     "mcp_args=json.dumps(ti, sort_keys=True)", _cxr("mcp-list-input")),
+    # --- Codex adapter shapes
+    ("codex-deep-nesting-named", _CX, "    except RecursionError:", "    except ZeroDivisionError:",
+     _CXT + "test_deep_nesting_is_refused_by_name_not_by_a_crash"),
+    ("codex-no-cwd-refused", _CX, '    if not isinstance(d.get("cwd"), str) or not d["cwd"].strip():', "    if False:",
+     _CXT + "test_a_malformed_codex_payload_is_refused_with_its_reason"),
+    ("codex-non-object-tool-input-refused", _CX,
+     "    if raw_ti is not None and not isinstance(raw_ti, dict) and not is_mcp:", "    if False:",
+     _CXT + "test_a_malformed_codex_payload_is_refused_with_its_reason"),
+    ("codex-workdir-read", _CX, '    if not is_mcp and isinstance(ti.get("workdir"), str) and ti["workdir"].strip():',
+     "    if False:", _cxr("workdir")),
+    ("codex-patch-tool-case", _CX, 'if name.lower() in ("apply_patch", "applypatch"):', 'if name in ("apply_patch", "applypatch"):',
+     _cxr("patch-case")),
+    ("codex-unified-exec-cmd-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars")', '_COMMAND_KEYS = ("command", "chars")',
+     _cxr("unknown-cmd-key")),
+    ("codex-write-stdin-chars-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars")', '_COMMAND_KEYS = ("command", "cmd")',
+     _cxr("write-stdin")),
+    ("codex-patch-under-unknown-key", _CX, "            if body is not None:", "            if False:",
+     _cxr("unknown-patch-key")),
+    ("codex-write-stdin-poll-is-no-command", _CX, '        if key == "chars" and not cmd.strip():', "        if False:",
+     _cxr("write-stdin-poll")),
+    # --- shell spellings of apply_patch (patch_paths)
+    ("codex-shell-patch-case-insensitive", _PP, '(?=' + BS + 's|$|<)""", re.I)', '(?=' + BS + 's|$|<)""")',
+     _cxr("shell-patch-upper")),
+    ("codex-shell-patch-quoted-program", _PP, "(?P<q>['\"]?)", "(?P<q>)", _cxr("shell-patch-quoted")),
+    ("codex-shell-patch-body-beside-program", _PP, "        if _BODY_LINE.search(cmd) and _PROGRAM_WORD.search(cmd):",
+     "        if False:", _cxr("shell-patch-variable")),
+    # --- linked-worktree install protection (paths, run)
+    ("worktree-main-tree-is-a-game-root", _PA, "    _add(game, main)\n", "",
+     _RTT + "test_hooks_run_from_a_worktree_name_the_main_install_as_a_root"),
+    ("worktree-main-tree-is-an-install-dir", _PA, "    for v in [root_posix, root_win, main] +", "    for v in [root_posix, root_win] +",
+     _RTT + "test_hooks_run_from_a_worktree_still_guard_the_main_install"),
+    ("worktree-only-a-linked-worktree", _PA,
+     '    if os.path.basename(worktrees).lower() != "worktrees" or os.path.basename(git_dir).lower() != ".git":',
+     "    if False:", _RTT + "test_a_dot_git_file_that_is_not_a_linked_worktree_adds_nothing"),
+    ("worktree-main-paths-file-read", "tools/skyguard/run.py", "        if main:", "        if False:",
+     _RTT + "test_hooks_run_from_a_worktree_read_the_main_trees_paths_file"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _RTB_CLAUSES]
+
+
+# Merge of rt-fix-a + rt-fix-b into plan5 (2026-10-05). One mutation per clause the merge itself decided.
+_MDEL = "tests/test_skyguard_deletes.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # rt-fix-a's move-as-delete: a file moved out of the install is no longer refused.
+    ("tools/skyguard/deletes.py", "        if e.program in MOVE_PROGRAMS and resolved is None:", "        if False:",
+     _MDEL + "test_moving_a_file_out_of_the_install_is_a_delete[mv]", "merge-rt-move-out-is-a-delete"),
+    # The merge's precedence: a root moved away reads as a delete again (S-DEL-INSTALL's "deletes X inside the install").
+    ("tools/skyguard/shell_rules.py", "        if wr.move_root:\n            return deny(\"S-MOVE-ROOT\", wr.move_root)\n        rid, file",
+     "        rid, file",
+     _MDEL + "test_moving_a_root_folder_away_names_the_move_not_a_delete[mv-install]", "merge-rt-move-root-wins-over-delete"),
 ]]

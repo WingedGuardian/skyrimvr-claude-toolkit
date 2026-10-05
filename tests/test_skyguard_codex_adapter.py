@@ -485,15 +485,18 @@ def _run_with_saves(tmp_path, raw):
     return v, audit
 
 
-def test_a_devbench_ask_stays_an_allow_with_the_advice_on_codex(tmp_path):
-    """Codex fails an ask open anyway: no new refusal, and the model still reads why."""
+def test_a_devbench_ask_is_refused_with_the_confirmation_on_codex(tmp_path):
+    """Merge of rt-fix-b (2026-10-05): Codex cannot ask, so -- as for every other ask on Codex (W-SAVE, ReSaver --apply)
+    -- the render refuses and names the confirmation the user must give; the model still reads why. (Task 17 had
+    downgraded this ask to an allow with the text as advice; the merge kept rt-fix-b's stricter route.)"""
     v, audit = _run_with_saves(tmp_path, _pre("mcp__devbench-vr__game", {"action": "save", "name": "Existing"}))
-    assert (v.decision, v.reason) == ("allow", "")
-    assert "Existing" in v.context and v.context.count("\n") <= 1
+    assert v.decision == "ask"
+    assert "Existing" in v.reason and v.reason.count("\n") <= 1
     assert v.code == "shell.S-DEVBENCH-SAVE"
     assert ("S-DEVBENCH-SAVE", "ask") in audit.fired
     out = json.loads(codex.render(v))["hookSpecificOutput"]
-    assert "permissionDecision" not in out and out["additionalContext"] == v.context
+    assert out["permissionDecision"] == "deny"
+    assert out["permissionDecisionReason"] == codex.ASK_PREFIX + v.reason
 
 
 def test_a_devbench_save_to_a_new_name_is_silent_on_codex(tmp_path):
@@ -508,8 +511,11 @@ def test_cli_a_devbench_reset_is_denied_through_the_real_entry(tmp_path):
     assert json.loads(body)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
-def test_unreadable_devbench_arguments_are_not_a_refusal_on_codex(tmp_path):
+def test_unreadable_devbench_arguments_are_refused_as_inert_on_codex(tmp_path):
+    """Merge of rt-fix-b: arguments the engine cannot read (the adapter always sends JSON, so only a broken Request gets
+    here) are an INERT refusal -- the guard checked nothing -- not an allow (Task 17's first cut allowed them)."""
     req = codex.to_request(_pre("mcp__devbench-vr__console", {"command": "smp reset"}), "win32")
     req = req._replace(mcp_args="{not json")
     v = engine.pre_tool(req, str(tmp_path), lambda: paths.roots(str(tmp_path), "", {}), Audit(str(tmp_path)))
-    assert (v.decision, v.status) == ("allow", "evaluated")
+    assert (v.decision, v.status, v.code) == ("deny", "failed", "codex.TRANSLATE")
+    assert "unreadable MCP arguments" in v.reason

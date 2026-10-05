@@ -72,7 +72,13 @@ def _engine_budget() -> float:
 def _declared_env(a):
     """The install's declared roots (.claude/skyrim-paths.env), or None when it exists but cannot be read."""
     try:
-        return paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))
+        cfg = paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))
+        # rt-fix-b: hooks run from a git worktree's copy: the main tree's paths file (untracked, so absent from the
+        # worktree) declares the config and MO2 folders too. Union, as R3 does for every root.
+        main = paths.main_worktree(a.root_win or a.root)
+        if main:
+            cfg = paths.merge_configs(cfg, paths.read_env(Path(main) / ".claude" / "skyrim-paths.env", {}))
+        return cfg
     except (OSError, ValueError):
         return None
 

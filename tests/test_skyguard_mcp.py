@@ -154,8 +154,18 @@ def test_the_console_save_word_is_case_insensitive(cfg):
     assert mcp("mcp__devbench-vr__console", {"command": "saveall Existing"}, _roots("saves", cfg))[0] == ("allow", "")
 
 
-def test_a_non_dict_tool_input_is_not_judged():
-    assert mcp("mcp__devbench-vr__console", ["smp reset"])[0] == ("allow", "")
+def test_a_save_name_is_read_trimmed(cfg):
+    # rt-fix-b: the trailing-dot strip trims only the right; a leading space is still the same save.
+    got = mcp("mcp__devbench-vr__game", {"action": "save", "name": "  Existing"}, _roots("saves", cfg))
+    assert got == (("ask", "Overwrites save Existing.\nYes goes ahead; an overwritten save is not kept."),
+                   {"S-DEVBENCH-SAVE"})
+
+
+def test_a_non_dict_tool_input_is_judged_on_its_strings():
+    # rt-fix-b (routes s75): superseded the Task 11 ruling "a non-dict tool_input is not judged". A deny-listed console
+    # line is the same command wherever in the call it sits; nothing else in a non-dict input is judged.
+    assert mcp("mcp__devbench-vr__console", ["smp reset"])[1] == {"S-DEVBENCH-CRASH"}
+    assert mcp("mcp__devbench-vr__console", ["help"])[0] == ("allow", "")
     assert mcp("mcp__devbench-vr__console", None)[0] == ("allow", "")
 
 
@@ -281,7 +291,9 @@ def test_only_devbench_servers_are_judged(tool):
     assert mcp(tool, {"command": "smp reset"})[0] == ("allow", "")
 
 
-@pytest.mark.parametrize("server", ["devbench-vr", "devbench", "devbench-se"])
+@pytest.mark.parametrize("server", ["devbench-vr", "devbench", "devbench-se",
+                                    # rt-fix-b (routes s106-s111): any case and any separator inside the name
+                                    "DevBench-vr", "dev-bench", "dev_bench.vr", "skyrim-devbench", "plugin_devbench_x"])
 def test_any_devbench_server_name_is_judged(server):
     assert mcp(f"mcp__{server}__console", {"command": "smp reset"})[1] == {"S-DEVBENCH-CRASH"}
 
@@ -325,6 +337,8 @@ SENDS = {
     "bash-c": f"bash -c \"curl {CONSOLE} -d '{{\\\"command\\\":\\\"smp reset\\\"}}'\"",
     "after-and": f"echo hi && curl {CONSOLE} -d {RESET_BODY}",
     "full-body": f"curl {CONSOLE} -d '{{\"action\":\"exec\",\"command\":\"smp reset\",\"capture\":true}}'",
+    # rt-fix-b: superseded the Task 11 ruling "not the console tool" (was PASSES[papyrus-tool]); see the note there.
+    "papyrus-tool": f"curl http://127.0.0.1:8921/api/tool/papyrus -d {RESET_BODY}",
 }
 
 
@@ -340,7 +354,9 @@ PASSES = {
     "targeted-reset": f"curl {CONSOLE} -d '{{\"command\":\"smp reset 0x14\"}}'",
     "ordinary-command": f"curl {CONSOLE} -d '{{\"command\":\"help\"}}'",
     "no-body": f"curl {CONSOLE}",
-    "papyrus-tool": f"curl http://127.0.0.1:8921/api/tool/papyrus -d {RESET_BODY}",           # not the console tool
+    # rt-fix-b: `papyrus-tool` (a reset body posted to the papyrus tool) moved to SENDS. The guard does not model which
+    # keys each DevBench tool reads (a papyrus call runs console lines through ExecuteCommand-style functions), so a
+    # deny-listed line anywhere in a DevBench call denies. Corpus row rtb-curl-papyrus-any-key records the ruling.
     "health-url": f"curl -d {RESET_BODY} http://127.0.0.1:8921/api/health",
     "other-api": f"curl -d {RESET_BODY} http://example.com/api/other",
     "body-file-unnamed": f"echo hi > body.txt; curl {CONSOLE} -d @body.txt",                                    # the gap
@@ -478,6 +494,10 @@ def test_an_unreadable_console_body_naming_something_else_is_allowed(text):
 
 def test_a_body_whose_command_is_not_a_string_is_unreadable_not_ignored():
     got = shell(f"curl -s {CONSOLE} -d '{{\"action\":\"exec\",\"command\":[\"smp reset\"]}}'")
+    assert got[1] == {"S-DEVBENCH-CRASH"}
+    # rt-fix-b: a list element that is the whole line is judged as a string anyway, so the case this test guards is a
+    # readable body whose command is no string while the command text names a bare reset elsewhere.
+    got = shell(f"curl -s {CONSOLE} -d '{{\"action\":\"exec\",\"command\":1}}' -H 'X-Note: smp reset'")
     assert got[1] == {"S-DEVBENCH-CRASH"}
 
 

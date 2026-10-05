@@ -37,6 +37,10 @@ ENV_UNREADABLE = (
 
 
 _SAFE_PS = re.compile(r"[A-Za-z0-9_@%+=:,./\-]+\Z")
+# Where a non-MCP tool carries shell text: `command` (Codex 0.160.0 normalises its shell to Bash {command}, MEASURED),
+# `cmd` (the unified-exec argument name, ASSUMED from the Codex schema), `chars` (write_stdin: keystrokes into a
+# running process, possibly a shell; whether Codex fires PreToolUse for it is UNMEASURED on 0.160.0).
+_COMMAND_KEYS = ("command", "cmd", "chars")
 
 
 def _quote(arg: str, shell: str) -> str:
@@ -110,6 +114,8 @@ def to_request(raw: str, platform: str = sys.platform) -> Request:
         d = json.loads(text)
     except ValueError:
         return Request(agent=AGENT, event="pre_tool", failure="payload is not JSON")
+    except RecursionError:          # Codex red team F8: say why, rather than refusing by an engine crash
+        return Request(agent=AGENT, event="pre_tool", failure="payload nested too deeply")
     if not isinstance(d, dict):
         return Request(agent=AGENT, event="pre_tool", failure="payload is not a JSON object")
     common = dict(agent=AGENT, cwd=_s(d.get("cwd")), session_id=_s(d.get("session_id")),
@@ -119,50 +125,71 @@ def to_request(raw: str, platform: str = sys.platform) -> Request:
         return Request(event="session_start", kind="none", source=_s(d.get("source")), **common)
     if event != "PreToolUse":
         return Request(event="other", kind="other", **common)
-    ti = d.get("tool_input") if isinstance(d.get("tool_input"), dict) else {}
-    cmd = ti.get("command")
+    if not isinstance(d.get("cwd"), str) or not d["cwd"].strip():
+        # routes / Codex red team F4: every captured Codex PreToolUse carries cwd (12 of 12 fixtures). Without one,
+        # no relative path resolves, so a relative delete would pass as an advice: a malformed payload, refused.
+        return Request(event="pre_tool", failure="payload has no cwd", **common)
     name = common["tool_name"]
+    is_mcp = name.startswith("mcp__")
+    raw_ti = d.get("tool_input")
+    if raw_ti is not None and not isinstance(raw_ti, dict) and not is_mcp:
+        # Codex red team F3b (m25): a bare-string or list tool_input carries a call the guard cannot place.
+        return Request(event="pre_tool", failure="tool_input is not an object", **common)
+    ti = raw_ti if isinstance(raw_ti, dict) else {}
+    if not is_mcp and isinstance(ti.get("workdir"), str) and ti["workdir"].strip():
+        # routes red team (s132-s144): a shell call's own working directory, when the payload carries one, is where
+        # its relative paths land (README: `workdir` is unmeasured; read it when present, never assume it absent).
+        common["cwd"] = _resolve(ti["workdir"], common["cwd"], None, platform)
+    shell = "powershell" if platform.startswith("win") else "bash"
     try:
-        if name == "apply_patch":
+        if name.lower() in ("apply_patch", "applypatch"):        # m35: `Apply_Patch` is still a patch
+            cmd = ti.get("command")
             if not isinstance(cmd, str) or not cmd:
                 return Request(event="pre_tool", failure="apply_patch without patch text", **common)
-            ops = patch_paths.parse_patch(cmd)
-            return Request(event="pre_tool", kind="write", command=cmd,
-                           paths=tuple(_resolve(p, common["cwd"], None, platform) for _, p in ops),
-                           ops=tuple(o for o, _ in ops), **common)
-        if name == "Bash":
-            if isinstance(cmd, list):
-                cmd = _argv_text(cmd, "powershell" if platform.startswith("win") else "bash")
-            if not isinstance(cmd, str):
-                return Request(event="pre_tool", failure="shell call without a command string", **common)
-            shell = "powershell" if platform.startswith("win") else "bash"
-            sp = patch_paths.shell_patch(cmd)
-            if sp is None:
-                return Request(event="pre_tool", kind="shell", shell=shell, command=cmd, **common)
-            body, cd_dir = sp
-            ops = patch_paths.parse_patch(body)
-            return Request(event="pre_tool", kind="shell", shell=shell, command=cmd,
-                           paths=tuple(_resolve(p, common["cwd"], cd_dir, platform) for _, p in ops),
-                           ops=tuple(o for o, _ in ops), **common)
+            return _patch_request(cmd, common, platform)
+        if is_mcp:                                             # MEASURED Task 0: mcp__<server>__<tool>
+            # The arguments as sent (a list or a string too): the DevBench judge reads every string in them.
+            return Request(event="pre_tool", kind="mcp", mcp_tool=name,
+                           mcp_args=json.dumps({} if raw_ti is None else raw_ti, sort_keys=True), **common)
+        key = next((k for k in _COMMAND_KEYS if k in ti), None)
+        if key is None:
+            body = next((v for v in ti.values() if isinstance(v, str) and patch_paths.has_patch_body(v)), None)
+            if body is not None:                               # a patch under a key no tool here is known to use
+                return _patch_request(body, common, platform)
+            return Request(event="pre_tool", kind="other", **common)
+        cmd = ti[key]
+        if isinstance(cmd, list):
+            cmd = _argv_text(cmd, shell)
+            if cmd is None:
+                return Request(event="pre_tool", failure="shell call with an argv list that is not strings",
+                               **common)
+        if not isinstance(cmd, str):
+            # Merge of Plans 4+5 (Plan 5 Task 12): a PRESENT command that is a number, boolean, null or object is no
+            # command the guard can judge; as kind 'other' it would be allowed unexamined. Refused before any rule.
+            return Request(event="pre_tool", failure="tool call whose command is not a string or an argv list",
+                           **common)
+        if key == "chars" and not cmd.strip():
+            # write_stdin with nothing but Enter (or nothing: Codex polls a running process this way) types no command.
+            return Request(event="pre_tool", kind="other", **common)
+        # Bash, and any other tool carrying a command (`exec_command {cmd}`, write_stdin `chars` typed into a live
+        # shell, a future renamed shell tool): the shell rules, and a patch run through it is a patch.
+        sp = patch_paths.shell_patch(cmd)
+        if sp is None:
+            return Request(event="pre_tool", kind="shell", shell=shell, command=cmd, **common)
+        body, cd_dir = sp
+        ops = patch_paths.parse_patch(body)
+        return Request(event="pre_tool", kind="shell", shell=shell, command=cmd,
+                       paths=tuple(_resolve(p, common["cwd"], cd_dir, platform) for _, p in ops),
+                       ops=tuple(o for o, _ in ops), **common)
     except patch_paths.PatchParseError as e:
         return Request(event="pre_tool", failure="unreadable patch: {}".format(e), **common)
-    if not name.startswith("mcp__") and "command" in ti and not isinstance(cmd, (str, list)):
-        # Merge of Plans 4+5 (Plan 5 Task 12): a PRESENT command that is a number, boolean, null or object is no
-        # command the guard can judge; as kind 'other' it would be allowed unexamined. Refused before any rule.
-        return Request(event="pre_tool", failure="tool call whose command is not a string or an argv list",
-                       **common)
-    if not name.startswith("mcp__") and isinstance(cmd, list):
-        cmd = _argv_text(cmd, "powershell" if platform.startswith("win") else "bash")
-        if cmd is None:
-            return Request(event="pre_tool", failure="shell call with an argv list that is not strings", **common)
-    if not name.startswith("mcp__") and isinstance(cmd, str):
-        # An unknown tool carrying a command string: guard it as a shell call, in case a future Codex renames
-        # its shell tool. The engine still records it as unhooked.
-        shell = "powershell" if platform.startswith("win") else "bash"
-        return Request(event="pre_tool", kind="shell", shell=shell, command=cmd, **common)
-    kind = "mcp" if name.startswith("mcp__") else "other"     # MEASURED Task 0: mcp__<server>__<tool>
-    return Request(event="pre_tool", kind=kind, mcp_tool=name if kind == "mcp" else "",
-                   mcp_args=json.dumps(ti, sort_keys=True) if kind == "mcp" else "", **common)
+
+
+def _patch_request(text: str, common: dict, platform: str) -> Request:
+    ops = patch_paths.parse_patch(text)
+    return Request(event="pre_tool", kind="write", command=text,
+                   paths=tuple(_resolve(p, common["cwd"], None, platform) for _, p in ops),
+                   ops=tuple(o for o, _ in ops), **common)
 
 
 def render(v: Verdict) -> str:

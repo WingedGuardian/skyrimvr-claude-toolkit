@@ -367,3 +367,25 @@ def test_g2_wrapper_with_delete_and_root_denies(cmd, shell):
 def test_g2_wrapper_without_a_delete_is_not_refused(cmd, shell):
     (decision, _), fired = decide(cmd, shell=shell)
     assert decision != "deny", (cmd, fired)
+
+
+# ---- Merge of rt-fix-a + rt-fix-b (2026-10-05): a move out of a protected folder is a delete of the source (rt-fix-a);
+# a move that takes a protected ROOT folder away is S-MOVE-ROOT (rt-fix-b), whose text says what happens.
+@pytest.mark.parametrize("cmd,shell", [
+    (f'mv "{INSTALL}/Data/meshes/a.nif" C:/Temp/a.nif', "bash"),
+    (f'Move-Item "{INSTALL}/Data/meshes/a.nif" C:/Temp/a.nif', "powershell"),
+], ids=["mv", "move-item"])
+def test_moving_a_file_out_of_the_install_is_a_delete(cmd, shell):
+    (decision, reason), fired = decide(cmd, shell=shell)
+    assert (decision, fired) == ("deny", {"S-DEL-INSTALL"}), (cmd, reason, fired)
+    assert "a.nif" in reason
+
+
+@pytest.mark.parametrize("cmd,shell", [
+    (f'mv "{INSTALL}" C:/Temp/Game.old', "bash"),
+    (f'Move-Item "{INSTALL}/Data" C:/Temp/Data.old', "powershell"),
+], ids=["mv-install", "move-item-data"])
+def test_moving_a_root_folder_away_names_the_move_not_a_delete(cmd, shell):
+    (decision, reason), fired = decide(cmd, shell=shell)
+    assert (decision, fired) == ("deny", {"S-MOVE-ROOT"}), (cmd, reason, fired)
+    assert "moves" in reason and "deletes" not in reason

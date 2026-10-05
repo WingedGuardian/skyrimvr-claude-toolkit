@@ -14,6 +14,17 @@
 - Deletes are judged on the program that runs and where its operand resolves (relative paths against the working directory
   Claude reports), also for Mod Organizer's `mods/` and `overwrite/`. `grep -rn "rm -rf" <install>` is no longer refused.
 - New: DevBench `smp reset` is refused (MCP tool, `curl`, `devbench-cli.sh`, and on Codex); a DevBench save over an existing save asks.
+- **Red-team fixes (routes and shell):** a Codex `apply_patch` Delete, or a Move out of the folder, inside the game,
+  settings or Mod Organizer folders is now judged as a delete and refused (it was judged only as a write). Plugin and
+  archive writes by non-text tools (`curl -o`, `wget -O`, `-OutFile`, `bitsadmin`, `certutil`, `tar`/`zip`, `fsutil`,
+  `truncate`, inline `python -c` / `node -e` with a literal name) refuse like a redirect. New confirmations: replacing a save file (shell or patch), and a git command
+  that throws away uncommitted changes in the install. New refusals: moving a file out of where the game looks for it;
+  running decoded text (`base64 -d | sh`, `iex` of a decoded string); `rm -rf *` in a folder the guard cannot place;
+  interpreter code that launches a delete (`os.system`, `child_process`) and command-running wrappers (`schtasks`,
+  `Start-Process`, `docker`, `psexec`) whose own words delete in a protected folder. DevBench calls are read anywhere in
+  their arguments, including scenario steps and `wget`; NTFS stream suffixes (`x.esp:stream`) no longer hide a plugin
+  name. Hooks run from a git worktree of the install also protect the main install. Priced over ~68,000 real tool calls:
+  9 newly refused or advised, all scratch test scripts; no routine modding call changed.
 - **Noise cut, measured on 66,773 real tool calls:** advice notes 2,437 to 211 (the P2 baseline was 2,028; 0.316% of calls
   against 3.79%); asks 26 to 12, 11 of them an executed ReSaver `--apply`; 205 wrong denies removed, none a real action.
   Verdicts now carry `status: partial` when the parser could not read a command completely.
@@ -40,9 +51,9 @@
 
 - **MCP tools other than DevBench's are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the
   hook as `mcp__<server>__<tool>`; the toolkit allows it and records one line in
-  `.claude/backups/codex-unhooked-tools.log`. DevBench's tools (`mcp__devbench*`) get the same judge as on Claude
-  for its refusals: `smp reset` is refused on Codex too. A save over an existing save is not refused there (Codex
-  cannot ask); the model gets a note instead. No hook definition changed, so no re-approval is needed.
+  `.claude/backups/codex-unhooked-tools.log`. DevBench's tools (any server whose name contains `devbench`) get the
+  same judge as on Claude: `smp reset` is refused on Codex too, and a save over an existing save is refused with
+  `NEEDS YOUR CONFIRMATION` (Codex cannot ask). No hook definition changed, so no re-approval is needed.
   Unknown non-MCP tools that carry a command string are guarded with the shell rules (and logged).
 
 ### Hook interpreter fallback
