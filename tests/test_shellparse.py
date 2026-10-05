@@ -818,3 +818,41 @@ def test_r3_input_larger_than_the_cap_is_unsure():
     p = parse(big, "bash")
     assert not p.ok and "larger" in p.why
     assert parse("rm -rf X; " + "a" * (sp.MAX_INPUT_CHARS - 100), "bash").ok
+
+
+# ------------------------------------------------------------------------- Plan 5 final review, lane A (fix pass)
+# Each finding was a parse that returned ok=True with the executed command, or its directory, dropped.
+_OPTION_VALUES = {"pipefail", "errexit", "posix", "extglob", "nounset"}
+
+
+@pytest.mark.parametrize("cmd", [
+    "bash -eo pipefail -c 'rm -rf X'", "bash -euo pipefail -c 'rm -rf X'", "sh -o errexit -c 'rm -rf X'",
+    "bash +o posix -c 'rm -rf X'", "bash -O extglob -c 'rm -rf X'", "bash -oO pipefail extglob -c 'rm -rf X'",
+    "bash -c -o pipefail 'rm -rf X'", "bash -ec -o pipefail 'rm -rf X'", "dash -eo errexit -c 'rm -rf X'",
+    "bash -eo pipefail +O extglob -c 'rm -rf X'", "zsh -oerrexit -c 'rm -rf X'", "zsh -eo errexit -c 'rm -rf X'",
+    "bash +c 'rm -rf X'",                       # MEASURED in Git Bash: `bash +c 'echo x'` runs the string
+])
+def test_c1_a_shell_option_value_is_not_the_command(cmd):
+    """C1: `-eo pipefail` took `pipefail` as the script FILE and never reached the -c string."""
+    assert deletes_x(cmd, "bash") is True
+    assert not _OPTION_VALUES & set(progs(cmd))
+
+
+@pytest.mark.parametrize("cmd", ["echo 'rm -rf X' | bash -eo pipefail", "echo 'rm -rf X' | sh -euo nounset",
+                                 "cat <<'EOF' | bash -o pipefail -e\nrm -rf X\nEOF"])
+def test_c1_a_shell_with_option_values_still_reads_the_pipe(cmd):
+    assert deletes_x(cmd, "bash") is True
+
+
+def test_c1_a_script_after_option_values_is_the_script():
+    assert progs("bash -eo pipefail scripts/build.sh a") == ["build"]
+    assert progs("zsh -oerrexit scripts/build.sh") == ["build"]
+    assert progs("zsh -oshwordsplit scripts/build.sh") == ["build"]     # zsh: the value is the rest of the word
+
+
+@pytest.mark.parametrize("cmd", ["bash /dev/stdin <<'EOF'\nrm -rf X\nEOF", "sh /proc/self/fd/0 <<< 'rm -rf X'",
+                                 "source /dev/stdin <<'EOF'\nrm -rf X\nEOF", "echo 'rm -rf X' | bash /dev/stdin"])
+def test_m4_a_script_that_is_stdin_reads_the_heredoc_or_pipe(cmd):
+    assert deletes_x(cmd, "bash") is True
+
+

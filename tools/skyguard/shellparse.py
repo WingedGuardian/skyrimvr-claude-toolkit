@@ -2145,6 +2145,8 @@ class _Resolver:
                 if k >= n:
                     self.emit(p, k)
                     return self.made
+                if self.d == "bash" and v[k] in _STDIN_SCRIPTS:
+                    return self._posix_shell("bash", k - 1)    # M4: `source /dev/stdin <<EOF`: the body runs
                 self.emit(program_name(v[k], self.d, self.y[k]), k + 1)
                 self._procsub(v[k])                             # RT-A: source <(echo ...) runs the echoed text
                 return self.made
@@ -2249,13 +2251,26 @@ class _Resolver:
                 j += 2 if w in ("--rcfile", "--init-file") else 1
                 continue
             if len(w) > 1 and w[0] in "-+":
-                if w[0] == "-" and "c" in w[1:]:
+                # Final review C1: every `o` / `O` in a cluster takes the NEXT word as its value, wherever it sits in
+                # the cluster (bash and dash read `-euo pipefail`, `-oo a b` that way); zsh alone takes the rest of the
+                # word when the `o` is not last (`-oerrexit`). `c` anywhere in a cluster, `-` or `+`, selects the first
+                # operand after ALL the option words as the command string (bash and dash ignore the sign for c).
+                opts = w[1:]
+                if p == "zsh":
+                    o = opts.find("o")
+                    takes = 0 if o < 0 else 1 if o == len(opts) - 1 else 0
+                    opts = opts if o < 0 else opts[:o]
+                else:
+                    takes = opts.count("o") + opts.count("O")
+                if "c" in opts:
                     cflag = True
-                if "s" in w[1:]:
+                if "s" in opts:
                     sflag = True
-                j += 2 if w in ("-o", "+o", "-O", "+O") else 1
+                j += 1 + takes
                 continue
             break
+        if not cflag and j < n and v[j] in _STDIN_SCRIPTS:
+            sflag, j = True, j + 1                              # M4: `bash /dev/stdin`: commands from stdin
         if cflag:
             if j < n:
                 self.ctx.codes.append((p, v[j]))
@@ -2542,6 +2557,7 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
 
 
 _TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))   # printf is NOT emulated
+_STDIN_SCRIPTS = frozenset(("/dev/stdin", "/proc/self/fd/0", "/dev/fd/0"))   # M4: a script file that IS stdin
 _ECHO_OPTS = re.compile(r"-[neE]*[eE][neE]*$")                       # echo -e / -ne: escapes, not literal text
 _CODE_OPTS = frozenset(("-c", "-e", "-E", "-m", "-p", "-r", "--eval", "--print", "--command"))
 

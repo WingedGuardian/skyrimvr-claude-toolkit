@@ -3966,3 +3966,31 @@ MUTATIONS += [
                  "tests/test_toolchain_check.py::test_newer_spriggit_on_sdk_9_is_degraded",
                  id="toolchain-check-spriggit-version-sets-needed-sdk"),
 ]
+
+
+# Plan 5 final review, lane A (parser and path layer) fix pass. One twin per new clause; each names the test that
+# must go red. P5A rows fire in-process from tests/test_skyguard_p5_final_a.py.
+def _p5a(row):
+    return "tests/test_skyguard_p5_final_a.py::test_p5a_row[p5a-" + row + "]"
+
+
+_P5S = "tests/test_shellparse.py::"
+_P5T = "tests/test_targets.py::"
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # C1: option values in a cluster
+    ("c1-o-takes-a-value", '                    takes = opts.count("o") + opts.count("O")', "                    takes = 0",
+     _p5a("c1-eo-pipefail-c")),
+    ("c1-O-takes-a-value", '                    takes = opts.count("o") + opts.count("O")',
+     '                    takes = opts.count("o")', _P5S + "test_c1_a_shell_option_value_is_not_the_command"),
+    ("c1-zsh-attached-value", "                    takes = 0 if o < 0 else 1 if o == len(opts) - 1 else 0",
+     "                    takes = 0 if o < 0 else 1", _P5S + "test_c1_a_shell_option_value_is_not_the_command"),
+    ("c1-zsh-value-is-not-options", "                    opts = opts if o < 0 else opts[:o]", "                    opts = opts",
+     _P5S + "test_c1_a_script_after_option_values_is_the_script"),
+    ("c1-plus-c", '                if "c" in opts:', '                if w[0] == "-" and "c" in opts:',
+     _P5S + "test_c1_a_shell_option_value_is_not_the_command"),
+    # M4: a script that is stdin
+    ("m4-shell-stdin-script", "        if not cflag and j < n and v[j] in _STDIN_SCRIPTS:", "        if False:",
+     _p5a("m4-bash-dev-stdin")),
+    ("m4-source-stdin-script", '                if self.d == "bash" and v[k] in _STDIN_SCRIPTS:', "                if False:",
+     _P5S + "test_m4_a_script_that_is_stdin_reads_the_heredoc_or_pipe"),
+]]
