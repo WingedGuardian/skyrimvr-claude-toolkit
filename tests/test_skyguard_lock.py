@@ -757,7 +757,8 @@ def test_cli_runs_as_a_directory_and_maps_exit_codes(bed):
 
 def test_cli_dispatches_guards_and_doctor(tmp_path, capsys):
     from skyguard import cli
-    assert cli.main(["guards", "status"]) == 3         # shadow mode ships with Task 9
+    assert cli.main(["guards", "status", "--root", str(tmp_path)]) == 0     # Task 9: shadow mode, read-only here
+    assert cli.main(["guards"]) == 2
     assert cli.main(["nonsense"]) == 2
     assert cli.main([]) == 2
 

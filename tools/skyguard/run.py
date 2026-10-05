@@ -97,7 +97,7 @@ def _codex(a, raw: str) -> int:
             raise engine.RootsUnavailable(codex.ENV_UNREADABLE)
         return paths.roots(a.root, a.root_win, env)
 
-    v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit))
+    v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit, telemetry=a.telemetry))
     _telemetry(a, v)
     if v.decision != "allow":
         # A refused call leaves no item in the agent's transcript, so the canary must not count its hook
@@ -190,7 +190,7 @@ def main(argv=None) -> int:
         _telemetry(a, Verdict(status=status, code=code))
         _emit(out)
         return 0
-    v = codes.classify(v)
+    v = codes.classify(engine.shadow(v, a.project, p["session_id"], a.telemetry, audit))   # R8: the one exit
     _telemetry(a, v)
     _emit(adapter.render(v))
     return 0

@@ -5,10 +5,11 @@ in one place. Rule modules are called, never edited, from this file.
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Iterable
 
-from . import backup, codes, mcp_rules, paths as _paths, shell_rules, snapshot, write_rules
+from . import backup, codes, mcp_rules, paths as _paths, shell_rules, snapshot, state as _state, write_rules
 from .verdict import Advice, Verdict
 
 _RANK = {"evaluated": 0, "partial": 1, "failed": 2}
@@ -142,8 +143,48 @@ def side_effects(req, project, audit, v) -> Verdict:
     return v._replace(status="partial") if partial and v.status == "evaluated" else v
 
 
-def pre_tool(req, project, roots_fn, audit) -> Verdict:
-    """All Codex PreToolUse work: the rules, then the side effects."""
+SHADOW_HEAD = "Guards OFF: this would have been denied ({})."
+_LINE_MAX = 190
+
+
+def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
+    """R8, shadow mode: the ONE place a refusal can be turned into an allow. Called on the finished verdict
+    (after combine, after the side effects) by every agent's decision path.
+
+    A deny/ask becomes `allow` + a two-line context naming the rule only when an HONOURED `guards` lift exists for
+    THIS session (state.honoured: session-bound, after that session's latest start, unexpired). Never converted:
+      * a GUARD INERT refusal (status "failed", or an INERT/NO_ rule code) -- a broken engine cannot read the state
+        it would need to honour;
+      * a refusal no rule claims (code "unknown");
+      * anything when the state is unreadable or forged (the reader returns guards-on and a reason, logged here);
+      * anything when this function itself fails (the original refusal stands).
+    Every conversion writes `SHADOW <rule>` to the audit log. The lock and Codex `.rules` are outside the engine."""
+    if v.decision not in ("deny", "ask"):
+        return v
+    try:
+        v = codes.classify(v)
+        if v.status == "failed" or codes._inert(v.code) or v.code == "unknown":
+            return v
+        st = _state.read(str(Path(project) / ".skyguard" / "state.json"))
+        if st.rejected:
+            audit.log("skyguard", "STATE-REJECTED", st.reason)
+            return v
+        if not st.lifts:
+            return v
+        start = _state.session_start(telemetry, session_id) if telemetry else None
+        now = time.time() if now is None else now
+        if not [x for x in _state.honoured(st, session_id, now, start) if x["kind"] == "guards"]:
+            return v
+        first = (v.reason.split("\n", 1)[0] if v.reason else "")[:_LINE_MAX]
+        context = SHADOW_HEAD.format(v.code) + ("\n" + first if first else "")
+        audit.log("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))
+        return Verdict("allow", "", context, v.status, v.code)
+    except Exception:  # noqa: BLE001 -- shadow mode must never be able to break or loosen a decision by failing
+        return v
+
+
+def pre_tool(req, project, roots_fn, audit, telemetry="", now=None) -> Verdict:
+    """All Codex PreToolUse work: the rules, then the side effects, then shadow mode on the finished verdict."""
     if req.failure:
         audit.log("codex-pre-tool", "REFUSE", req.failure)
         v = _failed(INERT_TRANSLATE.format(req.failure), "codex.TRANSLATE")
@@ -151,4 +192,5 @@ def pre_tool(req, project, roots_fn, audit) -> Verdict:
         v = _failed(INERT_TRANSLATE.format("unexpected event {!r}".format(req.event)), "codex.TRANSLATE")
     else:
         v = _rules(req, roots_fn, audit)
-    return side_effects(req, project, audit, v)
+    v = side_effects(req, project, audit, v)
+    return shadow(v, project, req.session_id, telemetry, audit, now=now)

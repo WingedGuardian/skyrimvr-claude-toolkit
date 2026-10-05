@@ -3545,3 +3545,34 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_ST, "    if len(payload) > MAX_BYTES:\n        raise ValueError", "    if False:\n        raise ValueError",
      _STT + "test_write_refuses_what_read_would_reject", "l2-state-write-validates-size"),
 ]]
+
+
+# Plan 6 Task 9: engine shadow mode (R8). One mutation per clause of engine.shadow plus the two wirings (Claude exit, Codex).
+_EN = "tools/skyguard/engine.py"
+_SH = "tests/test_skyguard_shadow.py::"
+_INERT_IF = '        if v.status == "failed" or codes._inert(v.code) or v.code == "unknown":'
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_EN, _INERT_IF, '        if codes._inert(v.code) or v.code == "unknown":',
+     _SH + "test_a_failed_status_stays_a_deny_even_with_an_honoured_lift", "l2-shadow-inert-still-denies"),
+    (_EN, _INERT_IF, '        if v.status == "failed" or v.code == "unknown":',
+     _SH + "test_an_inert_rule_code_stays_a_deny_even_when_the_status_reads_evaluated", "l2-shadow-inert-code-still-denies"),
+    (_EN, _INERT_IF, '        if v.status == "failed" or codes._inert(v.code):',
+     _SH + "test_an_unclassifiable_refusal_is_not_converted", "l2-shadow-unknown-converted"),
+    (_EN, '        audit.log("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))\n', "        pass\n",
+     _SH + "test_every_converted_verdict_writes_a_shadow_audit_line_naming_the_rule", "l2-shadow-logs"),
+    (_EN, "    v = side_effects(req, project, audit, v)\n    return shadow(", "    v = v\n    return shadow(",
+     _SH + "test_the_backup_of_a_shadowed_delete_is_still_taken", "l2-shadow-side-effects-run"),
+    (_EN, "_state.honoured(st, session_id, now, start)", "st.lifts",
+     _SH + "test_another_sessions_lift_is_not_honoured", "l2-shadow-session-bound"),
+    (_EN, 'if x["kind"] == "guards"]', "if True]",
+     _SH + "test_a_lock_lift_does_not_switch_the_guards_off", "l2-shadow-kind"),
+    (_EN, '            audit.log("skyguard", "STATE-REJECTED", st.reason)\n', "            pass\n",
+     _SH + "test_an_unverifiable_state_reads_as_guards_on_with_a_log_line", "l2-shadow-rejected-logs"),
+    (_EN, "    except Exception:  # noqa: BLE001 -- shadow mode", "    except OSError:  # noqa: BLE001 -- shadow mode",
+     _SH + "test_a_failure_inside_shadow_mode_keeps_the_original_deny", "l2-shadow-fails-closed"),
+    ("tools/skyguard/run.py", "codes.classify(engine.shadow(v, a.project, p[\"session_id\"], a.telemetry, audit))",
+     "codes.classify(v)", _SH + "test_every_denied_or_asked_corpus_row_is_shadowed_except_the_inert_ones",
+     "l2-shadow-claude-exit"),
+    ("tools/skyguard/run.py", "audit, telemetry=a.telemetry))", "audit))",
+     _SH + "test_the_codex_hook_entry_point_honours_the_lift", "l2-shadow-codex-wired"),
+]]
