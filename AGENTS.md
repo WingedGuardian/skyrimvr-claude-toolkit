@@ -361,6 +361,6 @@ Generated into `AGENTS.md` only; everything above is shared. Other agents: this 
   backed up to `.claude/backups/` first, and recent `.psc`/`.pex` are snapshotted before shell commands.
   A file written by a script you run is not backed up.
 - **Not checked:** commands the user types with `!` in the Codex TUI (they bypass hooks), and MCP tools
-  (DevBench included).
+  other than DevBench. A DevBench call that would crash the game or overwrite a save is refused.
 - **Skills** are in `.agents/skills/<name>/SKILL.md`: read the file when `core.md` points at it by name.
 - `bash tools/hook-canary.sh` shows whether each hook ran, saw its input and finished, per surface.
