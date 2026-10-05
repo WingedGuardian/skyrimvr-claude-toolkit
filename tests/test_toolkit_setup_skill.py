@@ -79,8 +79,24 @@ def test_skill_item_form_matches_the_parser_and_cites_no_spec():
     assert "python|git|node =" not in text
     assert not re.search(r"\bE\d+\b", text) and "spec evidence" not in text
     tool = _tool()
-    assert tool.parse_authorization("Host-software installs: AUTHORIZED python=Some.Id==1.2.3.")[0] == {
-        "python": ("Some.Id", "1.2.3")}
+    assert tool.parse_authorization("Host-software installs: AUTHORIZED python=Python.Python.3.12==3.12.8.")[0] == {
+        "python": ("Python.Python.3.12", "3.12.8")}
+
+
+def test_skill_names_exactly_the_ids_the_parser_allows():
+    """Final review I5: the parser binds each runtime to its winget ids; the skill must list the same ones."""
+    text = SKILL.read_text(encoding="utf-8")
+    for runtime, ids in _tool().ALLOWED_IDS.items():
+        for pkg in ids:
+            assert "`{}`".format(pkg) in text, (runtime, pkg)
+
+
+def test_skill_passes_the_whole_task_text_never_a_chosen_sentence():
+    """Final review I5: '--auth-text \"<the sentence>\"' let the agent pick which sentence the parser saw, so a
+    denial elsewhere in the user's text could not void an injected AUTHORIZED one."""
+    text = SKILL.read_text(encoding="utf-8")
+    assert "--auth-text" not in text and "<the sentence>" not in text
+    assert "--auth-file" in text and "whole" in text
 
 
 INSTALLERS = [

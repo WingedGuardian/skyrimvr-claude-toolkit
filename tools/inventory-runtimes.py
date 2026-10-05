@@ -10,7 +10,10 @@ one is often a Windows Store alias that answers with a Store message instead of 
 
 Usage:
     python tools/inventory-runtimes.py inventory
-    python tools/inventory-runtimes.py plan [--auth-text "<sentence>" | --auth-file F] [--json]
+    python tools/inventory-runtimes.py plan [--auth-file F] [--json]
+
+F holds the user's WHOLE task text, never a sentence picked out of it: a denial anywhere in that text voids
+every authorization, which only works when the parser sees all of it.
 
 Exit code: 0 always (reporting is the job); 2 on a usage error.
 """
@@ -34,6 +37,12 @@ AUTH_MARKER = "Host-software installs:"
 LOOSE_MARKER_RE = re.compile(r"host[\W_]*software[\W_]*installs", re.I)
 ITEM_RE =re.compile(r"(python|git|node)=([A-Za-z0-9][A-Za-z0-9.+-]*)==([0-9]+(?:\.[0-9]+){1,3})")
 VERSION_RE = re.compile(r"([0-9]+)\.([0-9]+)(?:\.([0-9]+))?")
+# The only winget ids each runtime may be installed as (exact, case-sensitive: winget --exact matches case). Without
+# this, "node=Contoso.Backdoor==1.0" was a valid item and the plan printed that id as the node install.
+# Python's id carries its minor version; the minor must meet PYTHON_FLOOR and the version must be that minor's.
+ALLOWED_IDS = {"python": ("Python.Python.3.<minor>",), "git": ("Git.Git",),
+               "node": ("OpenJS.NodeJS", "OpenJS.NodeJS.LTS")}
+_PYTHON_ID_RE = re.compile(r"Python\.Python\.3\.([0-9]+)")
 
 # Worst first: something that exists but is wrong must be reported before anything is installed over it.
 _SEVERITY = ["too-old", "broken", "timeout", "store-alias", "missing"]
@@ -143,6 +152,21 @@ def inventory(candidates=None, timeout=LAUNCH_TIMEOUT):
     return result
 
 
+def id_problem(runtime, pkg_id, version):
+    """None when `pkg_id` at `version` is an allow-listed install of `runtime`; else why it is not."""
+    if runtime == "python":
+        m = _PYTHON_ID_RE.fullmatch(pkg_id)
+        if not m or int(m.group(1)) < PYTHON_FLOOR[1]:
+            return "%s is not on the allowlist for python (Python.Python.3.<minor>, 3.%d or newer)" % (
+                pkg_id, PYTHON_FLOOR[1])
+        if version.split(".")[:2] != ["3", m.group(1)]:
+            return "version %s is not a version of %s, so it is not on the allowlist" % (version, pkg_id)
+        return None
+    if pkg_id not in ALLOWED_IDS.get(runtime, ()):
+        return "%s is not on the allowlist for %s (%s)" % (pkg_id, runtime, ", ".join(ALLOWED_IDS.get(runtime, ())))
+    return None
+
+
 def _classify_occurrence(rest):
     """Classify the text after ONE marker as exactly one of: auth, template, denial, void.
 
@@ -167,6 +191,9 @@ def _classify_occurrence(rest):
             im = ITEM_RE.fullmatch(item)
             if not im or im.group(1) in authorized:
                 return "void", {}, "bad or repeated item: " + item
+            problem = id_problem(im.group(1), im.group(2), im.group(3))
+            if problem:
+                return "void", {}, problem
             authorized[im.group(1)] = (im.group(2), im.group(3))
         return "auth", authorized, None
     return "void", {}, "unrecognised wording: " + body  # unclassified-is-void
@@ -230,7 +257,8 @@ def plan(inv, authorization=None, platform=None, winget_ok=None):
             row.update(action="report", steps=(
                 "It is present but %s. Do NOT upgrade, repair, reinstall or remove it yourself; tell the user "
                 "and wait. Manual steps: %s" % (status, MANUAL_STEPS[runtime])))
-        elif runtime in authorization and platform == "win32":
+        elif runtime in authorization and platform == "win32" and not id_problem(runtime, *authorization[runtime]):
+            # id_problem again HERE, where the command is built: a caller that skips the parser inherits the check.
             if winget_ok is None:
                 winget_ok = _winget_present()
             if winget_ok:
@@ -266,15 +294,13 @@ def main(argv=None):
     sub.add_parser("inventory")
     pl = sub.add_parser("plan")
     pl.add_argument("--json", action="store_true")
-    grp = pl.add_mutually_exclusive_group()
-    grp.add_argument("--auth-text")
-    grp.add_argument("--auth-file")
+    pl.add_argument("--auth-file", help="a file holding the user's WHOLE task text (never one chosen sentence)")
     args = ap.parse_args(argv)
     inv = inventory()
     if args.cmd == "inventory":
         print(json.dumps(inv, indent=2))
         return 0
-    text = args.auth_text or ""
+    text = ""
     if args.auth_file:
         try:
             with open(args.auth_file, encoding="utf-8", errors="replace") as fh:

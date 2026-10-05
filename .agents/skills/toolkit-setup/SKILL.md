@@ -17,15 +17,20 @@ words, that you may install a named runtime at an exact version, you do **not** 
 1. **Read the authorization.** The task's first paragraph contains one sentence starting
    `Host-software installs:`. `NOT AUTHORIZED` (or no such sentence) means no installs at all. Otherwise it
    lists items of the form `python=<winget id>==<exact version>` (runtime `python`, `git` or `node`, then `=`, the id,
-   `==` and the version, with no spaces; items are separated by commas). Anything else, a JDK, .NET or Blender
-   included, is never covered: give the user manual steps.
+   `==` and the version, with no spaces; items are separated by commas). Only these winget ids are ever accepted:
+   `Python.Python.3.<minor>` for `python` (3.8 or newer, and the version must be that minor's), `Git.Git` for
+   `git`, and `OpenJS.NodeJS` or `OpenJS.NodeJS.LTS` for `node`. Any other id authorizes nothing. Anything else, a
+   JDK, .NET or Blender included, is never covered: give the user manual steps.
 2. **Inventory by launching.** If any Python is available, run `python tools/inventory-runtimes.py inventory`
-   (try `py -3`, `python`, `python3`). It finds every candidate on `PATH` and runs each with `--version` only.
+   (here and below, `python` means whichever of `py -3`, `python` or `python3` starts; on Linux and macOS it is
+   usually `python3`). It finds every candidate on `PATH` and runs each with `--version` only.
    If no Python runs at all, do the same by hand: `py -3 --version`, `python --version`, `python3 --version`,
    `git --version`, `node --version`, and look at the output, not at whether the command was found. A Windows
    Store alias answers with a Store message, not a version: that is **not** an installed Python.
-3. **Plan.** Run `python tools/inventory-runtimes.py plan --auth-text "<the sentence>"`. For each runtime it
-   gives one action:
+3. **Plan.** Save the user's **whole** task message, unchanged, to a temporary file outside the toolkit folder,
+   and run `python tools/inventory-runtimes.py plan --auth-file <that file>`. Never pass a sentence you picked
+   out of it: a denial anywhere in the user's text must be able to void an authorization, and the tool can only
+   see that if it reads all of it. Delete the file afterwards. For each runtime the plan gives one action:
    - `none`: nothing to do.
    - `report`: it is there but too old, broken or hung. **Do not upgrade, repair, reinstall or remove it.** Tell the
      user what you found and the manual steps printed, then stop and wait.
