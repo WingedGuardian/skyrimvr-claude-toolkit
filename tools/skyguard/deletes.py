@@ -523,6 +523,8 @@ def _move_pairs(e) -> List[Tuple[str, str]]:
         from .shellparse import ps_param
         src = list(ps_param(e, "Path", 0)) + list(ps_param(e, "LiteralPath"))
         dst = ps_param(e, "Destination", 1)
+        if not src and e.stdin_from == "pipe":
+            src = [UNRESOLVED]                            # B-I1: `Get-Item X | Move-Item -Destination D`
         return [(s, dst[0] if dst else ".") for s in src]
     if p == "move" and e.dialect == "cmd":
         words = [w for w in argv if not re.fullmatch(r"/[A-Za-z?\-]+(:\S*)?", w)]
@@ -545,9 +547,16 @@ def _move_pairs(e) -> List[Tuple[str, str]]:
                 words.append(w)
             k += 1
         if target is not None:
+            if not words and e.stdin_from == "pipe":
+                words = [UNRESOLVED]                      # B-I1: `... | xargs mv -t D`
             return [(s, target) for s in words]
         return [(s, words[-1]) for s in words[:-1]]
     return []
+
+
+def _expands(word: str) -> bool:
+    """The word holds an expansion the guard did not prove (`$X`, `$env:X`, `%X%`, a backtick)."""
+    return bool(targets._LIVE_DOLLAR.search(word)) or "`" in word or bool(re.search(r"%[A-Za-z_]\w*%", word))
 
 
 def _everything(word: str) -> bool:
@@ -583,6 +592,17 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         b = _through(a, links) if links else a
         return protected_kind(b, roots), b
 
+    def piped_reach(i: int) -> bool:
+        """The input execs[i] reads from the pipe reaches a protected root: a word of an earlier stage is a protected
+        root or an ancestor of one, resolved or raw."""
+        for up in _upstream(parsed.execs, i):
+            for uw in up.argv:
+                ua = targets.resolve_operand(up, uw, cwd, env)
+                if (ua is not None and targets.covers_protected(place(ua)[1], roots)) or (
+                        ua is None and raw_reaches(uw, None, up.dialect, roots)):
+                    return True
+        return False
+
     for i, e in enumerate(parsed.execs):
         if is_opaque(e):
             opaque = True
@@ -596,14 +616,35 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                     break
         if e.program in MOVE_PROGRAMS and resolved is None:
             # RT-A: a move whose source is protected and whose destination is NOT in that same protected area
-            # takes the files out of it -- a delete of the source. An unresolved destination proves nothing.
+            # takes the files out of it -- a delete of the source.
+            # B-I1 (final review): an UNRESOLVED source (pipeline input, `xargs mv`, a variable) gets the unresolved
+            # delete operand's tests -- the pipeline's upstream words, the raw word -- unless it lands in a protected
+            # area (a move into or within one is not a delete; cp/mv into Data is silent by ruling). A protected
+            # source sent to a VARIABLE destination (`$env:TEMP`, "$TMP") leaves, unless that destination's own words
+            # reach a protected root; a relative destination with no cwd still proves nothing.
+            mcwd = targets.exec_cwd(e, cwd, env)
             for src, dst in _move_pairs(e):
-                a = targets.resolve_operand(e, src, cwd, env)
-                kind, b = place(a) if a else ("", "")
                 d = targets.resolve_operand(e, dst, cwd, env)
+                dz = targets.zone(place(d)[1], roots) if d is not None else ""
+                a = None if src is UNRESOLVED else targets.resolve_operand(e, src, cwd, env)
+                if a is None:
+                    if dz in RULE_OF:
+                        continue
+                    unresolved_any = True                     # with a protected root named: S-DEL-UNRESOLVED
+                    if unresolved_reach is not None:
+                        continue
+                    if (src is UNRESOLVED or e.stdin_from == "pipe") and piped_reach(i):
+                        unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
+                    elif src is not UNRESOLVED and raw_reaches(src, mcwd, e.dialect, roots):
+                        unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
+                    continue
+                kind, b = place(a)
                 z = targets.zone(b, roots)
-                stays = z in RULE_OF and d is not None and targets.zone(place(d)[1], roots) == z
-                if kind and d is not None and not stays:
+                if d is None:
+                    leaves = _expands(dst) and not raw_reaches(dst, mcwd, e.dialect, roots)
+                else:
+                    leaves = not (z in RULE_OF and dz == z)
+                if kind and leaves:
                     resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
                     break
         ops = operands(e)
@@ -636,15 +677,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 # is whatever the earlier stages list: it reaches a root when one of THEIR words is a protected root
                 # or an ancestor of one. A listing INSIDE one (`ls *.bak | xargs rm` run in the install) is the
                 # fix-round-1 known limit: priced 75 occurrences, 0 real.
-                for up in _upstream(parsed.execs, i):
-                    for uw in up.argv:
-                        ua = targets.resolve_operand(up, uw, cwd, env)
-                        if (ua is not None and targets.covers_protected(place(ua)[1], roots)) or (
-                                ua is None and raw_reaches(uw, None, up.dialect, roots)):
-                            unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
-                            break
-                    if unresolved_reach:
-                        break
+                if piped_reach(i):
+                    unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
             if w is UNRESOLVED:
                 continue
             if raw_reaches(w, lit_base, e.dialect, roots) and unresolved_reach is None:

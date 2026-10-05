@@ -426,3 +426,30 @@ def test_recycle_bin_delete_with_a_double_quoted_path_resolves():
     (decision, reason), fired = decide(_VB + 'DeleteFile("' + INSTALL + '/Data/a.esp"' + _RB, shell="powershell",
                                        cwd="C:/Temp")
     assert (decision, fired) == ("deny", {"S-DEL-INSTALL"}) and "a.esp" in reason, (decision, fired, reason)
+
+
+# ---- Plan 5 final review B-I1: moves with pipeline / unresolved sources and variable destinations.
+def test_a_protected_file_moved_to_a_variable_destination_that_reaches_a_root_may_stay():
+    got = decide('mv Data/a.esp "$SKYRIM_GAME_ROOT/Data/b.esp"', cwd=INSTALL, env={})
+    assert got[0][0] != "deny", got
+
+
+def test_xargs_mv_with_a_target_reads_its_sources_from_the_pipe():
+    got = decide('ls "' + INSTALL + '/Data" | xargs mv -t /tmp', cwd="C:/work")
+    assert got[1] == {"S-DEL-UNRESOLVED"}, got
+
+
+def test_an_unresolved_move_into_a_protected_folder_is_not_a_delete():
+    got = decide('ls x | xargs mv -t "' + INSTALL + '/Data"', cwd="C:/work")
+    assert got[0][0] != "deny", got
+
+
+def test_pipeline_move_of_an_ancestor_of_the_install_is_unresolved():
+    got = decide("Get-ChildItem 'C:/t7' | Move-Item -Destination C:/Temp", shell="powershell", cwd="C:/work")
+    assert got[1] == {"S-DEL-UNRESOLVED"}, got
+
+
+@pytest.mark.parametrize("word,expands", [("$TMP", True), ("$env:TEMP", True), ("%TEMP%/x", True),
+                                          ("`pwd`/x", True), ("C:/Temp", False), ("50%", False)])
+def test_expands(word, expands):
+    assert deletes._expands(word) is expands
