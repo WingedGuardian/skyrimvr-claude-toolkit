@@ -440,6 +440,20 @@ is skipped and reported, never modified.
   intact); Codex's `workspace-write` sandbox cannot lift the lock, so run the `.cmd` yourself; a mod manager's
   hardlinked copy is never locked and is reported; Linux/Proton is unsupported (exit 3).
 
+### Shadow mode: `guards off`
+
+`python tools/skyguard guards off --session <id>` switches the guards to **shadow mode** for that one session, for
+an hour: every rule still runs, but a refusal becomes an allow plus a warning (`Guards OFF: this would have been
+denied (<rule>)`), and every call is logged as `SHADOW` in `.claude/backups/AUDIT_LOG.txt`. `guards on` ends it;
+`guards status` shows it. Backups and snapshots still run. A broken guard (`GUARD INERT`), Codex's `.rules` and the
+Layer 2 lock are not affected.
+
+- **It also lets through the deletions the guard could not read.** The "could not read this command" and "path the
+  guard cannot work out" deletes (`S-DEL-FALLBACK`, `S-DEL-UNRESOLVED`) are ordinary refusals, so shadow mode allows them.
+- **Deletes inside the install have no backup.** The toolkit does not copy files before a shell delete, so with
+  guards off an install delete (`S-DEL-INSTALL`) is neither blocked nor recoverable from the toolkit.
+- The lift is recorded only if the session's start is visible to the hooks, and is honoured only inside that session.
+
 ---
 
 ## Using with Codex

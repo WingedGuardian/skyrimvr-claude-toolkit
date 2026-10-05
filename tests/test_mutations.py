@@ -3532,7 +3532,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_ST, "    if not _num(now) or not _num(session_start) or not isinstance(session_id, str):",
      "    if not _num(now) or session_start is None or not isinstance(session_id, str):",
      _STT + "test_a_non_finite_now_or_start_honours_nothing[1800000000.0-nan]", "l2-state-honoured-finite"),
-    (_ST, '            last = f[0]', '            last = last or f[0]',
+    (_ST, "        if best is None or t > best:", "        if best is None:",
      _STT + "test_the_session_start_is_the_last_start_line", "l2-state-last-start"),
     (_ST, "        os.replace(tmp, str(path))", '        open(str(path), "wb").write(payload)',
      _STT + "test_a_failed_write_leaves_the_old_state_and_no_temp_file", "l2-state-atomic"),
@@ -3558,7 +3558,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SH + "test_an_inert_rule_code_stays_a_deny_even_when_the_status_reads_evaluated", "l2-shadow-inert-code-still-denies"),
     (_EN, _INERT_IF, '        if v.status == "failed" or codes._inert(v.code):',
      _SH + "test_an_unclassifiable_refusal_is_not_converted", "l2-shadow-unknown-converted"),
-    (_EN, '        audit.log("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))\n', "        pass\n",
+    (_EN, '        audit.log_strict("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))', "        pass",
      _SH + "test_every_converted_verdict_writes_a_shadow_audit_line_naming_the_rule", "l2-shadow-logs"),
     (_EN, "    v = side_effects(req, project, audit, v)\n    return shadow(", "    v = v\n    return shadow(",
      _SH + "test_the_backup_of_a_shadowed_delete_is_still_taken", "l2-shadow-side-effects-run"),
@@ -3570,8 +3570,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SH + "test_an_unverifiable_state_reads_as_guards_on_with_a_log_line", "l2-shadow-rejected-logs"),
     (_EN, "    except Exception:  # noqa: BLE001 -- shadow mode", "    except OSError:  # noqa: BLE001 -- shadow mode",
      _SH + "test_a_failure_inside_shadow_mode_keeps_the_original_deny", "l2-shadow-fails-closed"),
-    ("tools/skyguard/run.py", "codes.classify(engine.shadow(v, a.project, p[\"session_id\"], a.telemetry, audit))",
-     "codes.classify(v)", _SH + "test_every_denied_or_asked_corpus_row_is_shadowed_except_the_inert_ones",
+    ("tools/skyguard/run.py", "        v = engine.shadow(v, a.project, p[\"session_id\"], a.telemetry, audit)",
+     "        pass", _SH + "test_every_denied_or_asked_corpus_row_is_shadowed_except_the_inert_ones",
      "l2-shadow-claude-exit"),
     ("tools/skyguard/run.py", "audit, telemetry=a.telemetry))", "audit))",
      _SH + "test_the_codex_hook_entry_point_honours_the_lift", "l2-shadow-codex-wired"),
@@ -3581,9 +3581,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 # Plan 6 Task 9 round 2: SHADOW on every call; guards off writes where the engine reads and only when honourable.
 _CL = "tools/skyguard/cli.py"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
-    (_EN, '            audit.log("skyguard", "SHADOW", "allow")', "            pass",
+    (_EN, '            audit.log_strict("skyguard", "SHADOW", "allow")', "            pass",
      _SH + "test_an_allowed_call_is_returned_untouched_but_logged_while_a_lift_is_honoured", "l2-shadow-every-call"),
-    (_EN, '            audit.log("skyguard", "SHADOW", "{} kept ({})".format(v.code, v.decision))', "            pass",
+    (_EN, '            audit.log_strict("skyguard", "SHADOW", "{} kept ({})".format(v.code, v.decision))', "            pass",
      _SH + "test_a_kept_inert_refusal_is_still_logged_while_a_lift_is_honoured", "l2-shadow-kept-logs"),
     (_CL, "        if not seen:", "        if False:",
      _SH + "test_guards_off_without_a_visible_session_start_writes_nothing_and_says_so", "l2-guards-start-visible"),
@@ -3632,4 +3632,20 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SST + "test_banners_come_before_the_kb_guard_text_and_never_on_compact", "l2-sess-order"),
     ("tools/skyguard/run.py", '        session.export_env(p["session_id"], "claude")', "        pass",
      _SST + "test_the_claude_session_start_exports_the_id", "l2-sess-env-wired"),
+]]
+
+
+# Plan 6 Task 9 review fix round.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_EN, '        audit.log_strict("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))',
+     '        audit.log("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))',
+     _SH + "test_a_refusal_is_not_converted_when_its_shadow_line_cannot_be_written", "l2-shadow-line-must-land"),
+    (_ST, "        if best is None or t > best:", "        if True:",
+     _SH + "test_a_forged_early_start_line_cannot_revive_a_pre_resume_lift", "l2-state-start-max"),
+    ("tools/skyguard/run.py", "    if a.role in DECISION_ROLES:", "    if True:",
+     _SH + "test_a_tool_call_logs_one_shadow_line_not_one_per_hook", "l2-shadow-decision-roles-only"),
+    (_EN, "        if _state_reject_is_new(project, st.reason):", "        if True:",
+     _SH + "test_a_state_rejection_is_logged_once_per_reason_not_once_per_call", "l2-shadow-reject-once"),
+    (_CL, "        if st0.rejected:", "        if False:",
+     _SH + "test_guards_on_over_an_unverifiable_state_says_so_in_two_lines", "l2-guards-on-says-rejected"),
 ]]

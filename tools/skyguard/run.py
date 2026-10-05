@@ -19,6 +19,7 @@ from skyguard.verdict import Verdict  # noqa: E402
 
 ADAPTERS = {"claude": claude, "codex": codex}
 CODEX_ROLES = ("pre-tool", "session-start")
+DECISION_ROLES = ("protect-bash", "protect-files", "protect-mcp")
 
 
 ENV_UNREADABLE = (
@@ -191,7 +192,9 @@ def main(argv=None) -> int:
         session.export_env(p["session_id"], "claude")   # later Bash calls get SKYGUARD_SESSION_ID (Task 10)
         _emit(out)
         return 0
-    v = codes.classify(engine.shadow(v, a.project, p["session_id"], a.telemetry, audit))   # R8: the one exit
+    if a.role in DECISION_ROLES:     # one SHADOW line per tool call: backup / snapshot hooks make no decision
+        v = engine.shadow(v, a.project, p["session_id"], a.telemetry, audit)   # R8: the one exit
+    v = codes.classify(v)
     _telemetry(a, v)
     _emit(adapter.render(v))
     return 0
