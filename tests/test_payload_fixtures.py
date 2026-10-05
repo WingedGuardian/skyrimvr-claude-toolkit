@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from conftest import REPO
 
 FIX = REPO / "tests" / "fixtures" / "payloads"
@@ -44,13 +46,26 @@ def test_no_fixture_carries_the_capturing_users_home():
 def test_no_file_under_fixtures_carries_the_capturing_users_home():
     """Final review (privacy): the check above read only the captured payloads, and the routes harness committed
     beside them carried the author's name and home paths. Every file under tests/fixtures/ is read, as bytes, in
-    UTF-8 and UTF-16 spellings, so no fixture of any kind ships the home of whoever runs this."""
-    user = Path.home().name.lower()
-    assert len(user) >= 3, f"user name {user!r} too short to search for meaningfully"
+    UTF-8 and UTF-16 spellings, so no fixture of any kind ships the home of whoever runs this.
+
+    Which name: the harness launcher points HOME at a fake `home` folder and drops USERNAME, so the names come from
+    the login variables, the home folder when it is not that fake, and the user folder this checkout sits in
+    (`C:/Users/<name>/...`, `/home/<name>/...`)."""
+    import os
+    import re
+    names = {os.environ.get(k, "") for k in ("USERNAME", "USER", "LOGNAME")}
+    if Path.home().name.lower() != "home":
+        names.add(Path.home().name)
+    m = re.search(r"(?:^|/)(?:Users|home)/([^/]+)/", REPO.resolve().as_posix(), re.IGNORECASE)
+    if m:
+        names.add(m.group(1))
+    names = {n.lower() for n in names if len(n) >= 3}
+    if not names:
+        pytest.skip("no user name to search for: no login variable, and the checkout is not under a user folder")
     root = REPO / "tests" / "fixtures"
     files = [f for f in sorted(root.rglob("*")) if f.is_file() and "__pycache__" not in f.parts]
     assert len(files) > 10, f"only {len(files)} fixture files -- the scan would be near-vacuous"
-    needles = (user.encode("utf-8"), user.encode("utf-16-le"))
+    needles = [n.encode(e) for n in sorted(names) for e in ("utf-8", "utf-16-le")]
     hits = [f.relative_to(root).as_posix() for f in files
             if any(n in f.read_bytes().lower() for n in needles)]
     assert hits == [], hits
