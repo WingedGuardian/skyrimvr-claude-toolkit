@@ -4053,3 +4053,16 @@ MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep
     ("i7-delete-deletes-its-receiver", '            if tail.group(1).lower() == "delete":', "            if False:",
      _p5a("i7-delete-method")),
 ]]
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # M1, M2
+    ("m1-encodedcommand-any-prefix", '                if name == "ec" or (name and "encodedcommand".startswith(name)):',
+     '                if name in ("e", "ec") or (len(name) >= 3 and "encodedcommand".startswith(name)):',
+     _p5a("m1-en-prefix")),
+    ("m2-nice-attached-n", 'r"-[0-9]{1,3}|-n.+"', 'r"-[0-9]{1,3}"', _p5a("m2-nice-attached-n")),
+    ("m2-nice-adjustment-takes-a-value", '                if k < n and v[k] in ("-n", "--adjustment"):',
+     '                if k < n and v[k] == "-n":', _P5S + "test_m2_nice_value_spellings"),
+    ("m2-nice-double-dash", "                    k += 1                                      # M2: `-n10` carries its value\n"
+     '                if k < n and v[k] == "--":\n                    k += 1\n',
+     "                    k += 1                                      # M2: `-n10` carries its value\n",
+     _P5S + "test_m2_nice_value_spellings"),
+]]

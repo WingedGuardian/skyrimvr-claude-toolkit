@@ -2087,9 +2087,11 @@ class _Resolver:
                 continue
             if p == "nice":
                 k += 1
-                if k < n and v[k] == "-n":
+                if k < n and v[k] in ("-n", "--adjustment"):
                     k += 2
-                elif k < n and (re.fullmatch(r"-[0-9]{1,3}", v[k]) or v[k].startswith("--adjustment")):
+                elif k < n and (re.fullmatch(r"-[0-9]{1,3}|-n.+", v[k]) or v[k].startswith("--adjustment=")):
+                    k += 1                                      # M2: `-n10` carries its value
+                if k < n and v[k] == "--":
                     k += 1
                 continue
             if p in _WRAPPERS:
@@ -2371,7 +2373,7 @@ class _Resolver:
                         self.reparse(_join_words(rest, "powershell"), "powershell")
                         self._carry(p, k + 1)
                     return self.made
-                if name in ("e", "ec") or (len(name) >= 3 and "encodedcommand".startswith(name)):
+                if name == "ec" or (name and "encodedcommand".startswith(name)):    # M1: -e -en -enc ... -ec
                     if j + 1 < n:
                         try:
                             text = base64.b64decode(v[j + 1], validate=True).decode("utf-16-le")

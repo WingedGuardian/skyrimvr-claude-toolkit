@@ -948,3 +948,13 @@ def test_i7_an_opaque_method_keeps_its_receiver_and_arguments():
     assert "io.directory.delete" not in progs("$f.MoveTo('Y')", "powershell")
 
 
+def test_m1_any_prefix_of_encodedcommand_is_decoded():
+    enc = base64.b64encode("Remove-Item X".encode("utf-16-le")).decode()
+    for flag in ("-e", "-en", "-enc", "-encoded", "-ec", "/en"):
+        assert deletes_x("powershell " + flag + " " + enc, "powershell") is True, flag
+
+
+@pytest.mark.parametrize("cmd", ["nice -n10 rm -rf X", "nice -n 10 rm -rf X", "nice --adjustment 5 rm -rf X",
+                                 "nice --adjustment=5 rm -rf X", "nice -5 rm -rf X", "nice -- rm -rf X"])
+def test_m2_nice_value_spellings(cmd):
+    assert deletes_x(cmd, "bash") is True
