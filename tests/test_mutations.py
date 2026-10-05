@@ -4026,3 +4026,9 @@ MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep
     ("i2-unknown-glued-switch", '                if lead.lower() != "/d":', "                if False:",
      _P5S + "test_i2_cmd_cd_takes_the_rest_of_the_line"),
 ]]
+MUTATIONS += [pytest.param("tools/skyguard/targets.py", find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    ("i3-glob-in-cd-target-is-unknown", "    if r is not None and any(_has_glob(c, e.dialect)",
+     "    if False and any(_has_glob(c, e.dialect)", _p5a("i3-bash-cd-glob")),
+    ("i5-splat-is-unresolvable", '    if dialect == "powershell" and _PS_SPLAT.match(word):', "    if False:",
+     _p5a("i5-hashtable-splat")),
+]]

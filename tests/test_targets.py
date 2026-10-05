@@ -152,6 +152,33 @@ def test_no_cd_uses_the_payload_cwd():
     assert targets.exec_cwd(e, CWD_WIN, ENV) == GAMEN
 
 
+@pytest.mark.parametrize("cmd,dialect", [
+    ("cd /c/GOG*/The*Skyrim*; rm -rf Data", "bash"),
+    ("cd '" + GAME[:-3] + "'*; rm -rf Data", "bash"),
+    ("cd '" + GAME[:-3] + "'?R; rm -rf Data", "bash"),
+    ("Set-Location '" + w(GAME[:-3]) + "*'; Remove-Item -Recurse Data", "powershell"),
+])
+def test_i3_a_glob_in_the_cd_target_makes_the_directory_unknown(cmd, dialect):
+    """I3: resolve() keeps a glob in the LAST component; a relative word joined onto it read as resolved+outside."""
+    e = _exec(cmd, dialect)[0]
+    assert targets.exec_cwd(e, "C:/work", ENV) is None
+    assert targets.resolve_operand(e, "Data", "C:/work", ENV) is None
+
+
+def test_i3_a_literal_cd_still_resolves():
+    e = _exec("cd '" + GAME + "'; rm -rf Data")[0]
+    assert targets.exec_cwd(e, "C:/work", ENV) == GAMEN
+
+
+@pytest.mark.parametrize("word", ["@p", "@args", "@splat_1"])
+def test_i5_a_powershell_splat_is_unresolvable(word):
+    assert targets.resolve(word, GAME, "powershell", ENV) is None
+
+
+def test_i5_an_at_word_in_bash_is_a_file_name():
+    assert targets.resolve("@p", GAME, "bash", ENV) == GAMEN + "/@p"
+
+
 # ------------------------------------------------------------------------------------------------ zones
 MO2 = "D:/MO2/mods"
 ROOTS = paths.roots(GAME, "", {"SKYRIM_GAME_ROOT": GAME, "SKYRIM_CONFIG_DIR": "D:/Profiles/Default",

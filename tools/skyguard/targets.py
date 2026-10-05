@@ -63,6 +63,7 @@ _LIVE_DOLLAR = re.compile(r"\$[A-Za-z0-9_{(?!#*@$-]")
 _CMD_VAR = re.compile(r"%([A-Za-z_][A-Za-z0-9_]*)%")
 _PS_PROVIDER = re.compile(r"(?:Microsoft\.PowerShell\.Core\\)?FileSystem::", re.IGNORECASE)
 _PS_DRIVE = re.compile(r"[A-Za-z][A-Za-z0-9_]+:")      # HKLM:, Env:, Cert: -- not the filesystem
+_PS_SPLAT = re.compile(r"@[A-Za-z_?$^]")                # `@name`: PowerShell splatting, a variable's value
 _CONFIG_LITERAL = re.compile(r"/documents/my games/skyrim[^/]*")
 
 
@@ -206,6 +207,8 @@ def _resolve(word: str, cwd: str, dialect: str, env: Mapping[str, str]) -> Optio
         return None
     if dialect == "powershell" and word.startswith(("(", "@(")):
         return None             # RT-A: `('C:\x')` is an expression whose VALUE is the path, never a file named `(...)`
+    if dialect == "powershell" and _PS_SPLAT.match(word):
+        return None             # final review I5: `Remove-Item @p` splats $p; the word is never a file named `@p`
     base = normalise_cwd(cwd)
     try:
         w = word
@@ -249,7 +252,13 @@ def exec_cwd(e, cwd: str, env: Mapping[str, str]) -> Optional[str]:
         return None
     if not e.cd_before:
         return base
-    return resolve(e.cd_before, base or "", e.dialect, env)
+    r = resolve(e.cd_before, base or "", e.dialect, env)
+    if r is not None and any(_has_glob(c, e.dialect) for c in (r[4:] if r[:4] in ("//?/", "//./") else r).split("/")):
+        # Final review I3: `cd C:/x/Sky*` keeps its glob in the LAST component (resolve() does, by design), and a
+        # relative word joined onto it would read as a resolved path "outside" every root. The directory is not known;
+        # deletes.raw_reaches reads the literal cd (lit_base) instead.
+        return None
+    return r
 
 
 def resolve_operand(e, word: str, cwd: str, env: Mapping[str, str]) -> Optional[str]:

@@ -913,3 +913,11 @@ def test_i4_a_string_in_command_position_is_still_an_expression():
     assert find("S`et-Location C:/x; Remove-Item a", "remove-item", "powershell").cd_before == "C:/x"
 
 
+def test_i5_a_splat_is_a_dynamic_word_not_a_file_name():
+    p = parse("$p = @{Path='X'}; Remove-Item @p", "powershell")
+    assert p.ok
+    e = [x for x in p.execs if x.program == "remove-item"][0]
+    assert e.argv == ("@p",)
+    assert progs("git clone git@github.com:a/b", "powershell") == ["git"]       # mid-word `@` is literal
+
+
