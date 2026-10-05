@@ -529,3 +529,119 @@ def test_the_cmd_twin_runs(bed):
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=300)
     assert r.returncode == 2, (r.stdout[-2000:], r.stderr[-2000:])
     assert "Update.esm | live | " in r.stdout and "RESULT:" in r.stdout
+
+
+# ---- fix round 1 (task-16-review.md) -----------------------------------------------------------------------------
+
+@needs_windows
+@pytest.mark.parametrize("text", ["", "# release 9\ngarbage line\nnot-a-hash  .claude/hooks/protect-bash.sh\n",
+                                  "# release 9\n" + "a" * 64 + "  ../outside.sh\n"], ids=["empty", "garbage", "outside"])
+def test_i1_integrity_is_never_live_on_an_empty_set(bed, text):
+    (bed.root / "GUARD-FILES.sha256").write_text(text, encoding="utf-8")
+    r = bed.row("guard files")
+    assert r.status == "unknown" and "no guard file was compared" in r.reason, r
+
+
+@needs_windows
+def test_i2_a_lock_with_nothing_present_is_not_live(bed):
+    for n in VR_FILES:
+        _scrub_one(bed, n)
+        bed.path(n).unlink()
+    (bed.root / ".skyguard" / "lock.json").write_text('{"v": 1, "files": {}}', encoding="utf-8")
+    r = bed.row("lock")
+    assert r.status == "not live" and "no target file is present" in r.reason, r
+
+
+@needs_windows
+def test_m1_the_lock_is_not_live_while_a_disable_cannot_be_read(bed):
+    (bed.root / ".skyguard" / "state.json").write_text("junk", encoding="utf-8")
+    assert bed.row("persistent disable").status == "unknown"
+    r = bed.row("lock")
+    assert r.status == "unknown" and "cannot be read" in r.reason, r
+
+
+@needs_windows
+def test_i3_a_state_file_that_cannot_be_rewritten_reads_unknown_not_a_crash(bed):
+    sf = bed.root / ".skyguard" / "state.json"
+    bed.state_write([_lift("lock", bed.now - 7200, bed.now - 3600, files=["Update.esm"])])
+    subprocess.run([str(SYS32 / "attrib.exe"), "+R", str(sf)], capture_output=True, check=True)
+    try:
+        rows, cleared = bed.collect()
+    finally:
+        subprocess.run([str(SYS32 / "attrib.exe"), "-R", str(sf)], capture_output=True)
+    assert cleared == []
+    r = [x for x in rows if x.item == "expired lifts"]
+    assert len(r) == 1 and r[0].status == "unknown" and "PermissionError" in r[0].reason, r
+    assert _doctor().exit_code(rows) == 2 or any(x.status == "not live" and x.counted for x in rows)
+    assert not list(sf.parent.glob(".state-*.tmp"))
+
+
+@needs_windows
+def test_i3_one_failing_layer_reads_unknown_and_hides_no_other(bed, monkeypatch):
+    from skyguard import doctor
+
+    def boom(*a, **k):
+        raise OSError("disk went away")
+    monkeypatch.setattr(doctor.health, "_coverage_rows", boom)
+    rows = bed.rows()
+    codex = [x for x in rows if x.section == "Layer 3 codex"]
+    assert [x.status for x in codex if x.item == "check"] == ["unknown"]
+    assert any("OSError" in x.reason for x in codex)
+    assert bed.row("Update.esm").status == "live" and bed.row("guard files").status == "live"
+    assert _doctor().exit_code(rows) == 2
+
+
+@needs_windows
+def test_i3_main_turns_an_unexpected_exception_into_exit_2(bed, monkeypatch):
+    from skyguard import doctor
+
+    def boom(*a, **k):
+        raise RuntimeError("unexpected")
+    monkeypatch.setattr(doctor, "collect", boom)
+    out = io.StringIO()
+    assert doctor.main(["--root", str(bed.root), "--no-toolchain"], out=out) == 2
+    assert "RuntimeError" in out.getvalue()
+
+
+@needs_windows
+@pytest.mark.parametrize("cmd", ["bash .claude/hooks/{h}.sh", 'bash ".claude/hooks/{h}.sh"'], ids=["bare", "quoted"])
+def test_m2_a_relative_hook_command_is_wired(bed, cmd):
+    sp = bed.root / ".claude" / "settings.json"
+    data = json.loads(sp.read_text(encoding="utf-8"))
+    for groups in data["hooks"].values():
+        for g in groups:
+            for h in g["hooks"]:
+                if "protect-mcp.sh" in h["command"]:
+                    h["command"] = cmd.format(h="protect-mcp")
+    sp.write_text(json.dumps(data), encoding="utf-8")
+    assert "wired" in bed.row("protect-mcp").reason and bed.row("protect-mcp").status == "live"
+
+
+def _alive(pid):
+    out = subprocess.run([str(SYS32 / "tasklist.exe"), "/FI", "PID eq %d" % pid, "/NH"], capture_output=True,
+                         text=True).stdout
+    return str(pid) in out
+
+
+@needs_windows
+def test_m3_a_toolchain_timeout_kills_the_whole_tree_by_pid(tmp_path, monkeypatch):
+    from skyguard import doctor
+    root = tmp_path / "inst"
+    (root / "tools").mkdir(parents=True)
+    pidf = tmp_path / "child.pid"
+    py = sys.executable.replace(chr(92), "/")
+    (root / "tools" / "toolchain-check.sh").write_text(
+        '"%s" -c "import os,time; open(r\'%s\',\'w\').write(str(os.getpid())); time.sleep(120)" &\nwait\n'
+        % (py, str(pidf)), encoding="utf-8", newline="\n")
+    monkeypatch.setattr(doctor, "TOOLCHAIN_TIMEOUT_S", 4)
+    monkeypatch.setenv("SKYDOCTOR_BASH", BASH)
+    t0 = time.time()
+    rc, out = doctor.run_toolchain(str(root))
+    pid = int(pidf.read_text())
+    try:
+        assert rc is None and "timed out" in out
+        assert time.time() - t0 < 60
+        time.sleep(0.5)
+        assert not _alive(pid), "the grandchild outlived the timeout"
+    finally:
+        subprocess.run([str(SYS32 / "taskkill.exe"), "/F", "/PID", str(pid)], capture_output=True)

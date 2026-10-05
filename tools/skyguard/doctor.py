@@ -147,11 +147,39 @@ def run_toolchain(root):
         return None, "no bash found to run tools/toolchain-check.sh"
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
     try:
-        r = subprocess.run([bash, str(script)], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL,
-                           timeout=TOOLCHAIN_TIMEOUT_S, errors="replace")
+        p = subprocess.Popen([bash, str(script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+                             stdin=subprocess.DEVNULL, errors="replace", start_new_session=(os.name != "nt"))
     except (OSError, subprocess.SubprocessError) as e:
         return None, "tools/toolchain-check.sh did not run (%s)" % e.__class__.__name__
-    return r.returncode, r.stdout
+    try:
+        out, _err = p.communicate(timeout=TOOLCHAIN_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        _kill_tree(p)
+        try:
+            p.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass                                    # a survivor still holds the pipe; give up on its output
+        return None, "tools/toolchain-check.sh timed out after %d s; its process tree was killed" % TOOLCHAIN_TIMEOUT_S
+    return p.returncode, out
+
+
+def _kill_tree(p):
+    """Kill the child AND everything it started, by the child's own PID (M3): `taskkill /F /T /PID` on Windows, the
+    child's process group elsewhere. Never by image name. The child itself is killed last as a fallback."""
+    try:
+        if os.name == "nt":
+            sysroot = os.environ.get("SystemRoot", r"C:\Windows")
+            subprocess.run([os.path.join(sysroot, "System32", "taskkill.exe"), "/F", "/T", "/PID", str(p.pid)],
+                           capture_output=True, timeout=30)
+        else:
+            import signal
+            os.killpg(p.pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        p.kill()
+    except OSError:
+        pass
 
 
 def _layer0(root, toolchain):
@@ -284,8 +312,17 @@ def _layer2(root, st, now, cleared):
         per.append(Row(S, os.path.relpath(str(p), str(data_dir)), NOT_LIVE, "a locked file moved into a backup "
                        "(xEdit save or Vortex collision); its mark travelled with it", label="moved"))
     locked_n = sum(1 for r in per if r.label == "locked")
-    whole = Row(S, "lock", LIVE if (locked_n == len(per) and not st.lock_disabled) else NOT_LIVE,
-                "%d of %d targets locked; %s%s" % (locked_n, len(per), head, absent))
+    said = "%d of %d targets locked; %s%s" % (locked_n, len(per), head, absent)
+    if not per:                                               # I2: a lock over nothing is not live
+        whole = Row(S, "lock", NOT_LIVE, "nothing is locked: no target file is present in Data/ (%d edition name(s) "
+                    "absent); %s" % (len(missing), head))
+    elif locked_n < len(per) or st.lock_disabled:
+        whole = Row(S, "lock", NOT_LIVE, said)
+    elif st.rejected:                                         # M1: a disable may be recorded and cannot be read
+        whole = Row(S, "lock", UNKNOWN, "every target is locked, but the state file cannot be read, so a persistent "
+                    "disable cannot be ruled out; " + said)
+    else:
+        whole = Row(S, "lock", LIVE, said)
     return [whole] + rows + per + _gaps()
 
 
@@ -352,7 +389,8 @@ def _layer3_claude(root, now, home):
             rows.append(Row(S, h, UNKNOWN, ".claude/settings.json is %s, so the wiring cannot be read" %
                             (problem or "missing")))
             continue
-        wire = re.compile(r"/\.claude/hooks/" + re.escape(h) + r"\.sh(?=[\"'\s]|\Z)")
+        # absolute ("$CLAUDE_PROJECT_DIR/.claude/hooks/x.sh") or relative ("bash .claude/hooks/x.sh", M2)
+        wire = re.compile(r"(?:^|[/\"'\s])\.claude/hooks/" + re.escape(h) + r"\.sh(?=[\"'\s]|\Z)")
         if not any(wire.search(c) for c in cmds):
             rows.append(Row(S, h, NOT_LIVE, "not wired in .claude/settings.json: Claude never runs it"))
             continue
@@ -423,12 +461,36 @@ def _guards(st, sf_exists, now):
     return rows
 
 
+def _manifest_entries(root) -> int:
+    """How many lines of GUARD-FILES.sha256 session._guard_drift would act on: `<64 hex>  <relative path>` with the
+    path inside the install (the same shape and containment rules, read the same way)."""
+    try:
+        text = (Path(root) / session.GUARD_MANIFEST).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 0
+    base = os.path.realpath(str(root))
+    n = 0
+    for line in text.splitlines()[:5000]:
+        line = line.strip()
+        parts = line.split(None, 1)
+        if not line or line.startswith("#") or len(parts) != 2 or len(parts[0]) != 64:
+            continue
+        rel = parts[1].strip().lstrip("*")
+        if not os.path.isabs(rel) and session._inside(base, os.path.realpath(os.path.join(base, rel))):
+            n += 1
+    return n
+
+
 def _integrity(root):
     gd = session._guard_drift(root)
     if gd is None:
         return [Row("Integrity", "guard files", UNKNOWN, "no readable %s: nothing to compare against" %
                     session.GUARD_MANIFEST)]
     release, differ, missing, unchecked = gd
+    compared = _manifest_entries(root) - missing - len(unchecked)
+    if compared <= 0 and not (differ or missing):              # I1: never live on an empty set
+        return [Row("Integrity", "guard files", UNKNOWN, "no guard file was compared: %s holds no usable hash line "
+                    "(an empty, garbled or out-of-tree manifest proves nothing)" % session.GUARD_MANIFEST)]
     if differ or missing:
         tail = (" (%s)" % session._names(differ, 4)) if differ else ""
         tail += ("; %d missing" % missing) if missing else ""
@@ -448,19 +510,37 @@ def collect(root, now=None, toolchain=None, codex_config=None, home=None):
     root = str(root)
     now = time.time() if now is None else now
     home = str(Path.home()) if home is None else str(home)
-    cleared = clear_expired(root, now)
+    clear_row = None
+    try:
+        cleared = clear_expired(root, now)
+    except Exception as e:  # noqa: BLE001 -- the one write failing is a report line, never a crash (I3)
+        cleared = []
+        clear_row = Row("Layer 2", "expired lifts", UNKNOWN, "could not clear the expired lift(s) (%s): %s" % (
+            e.__class__.__name__, _txt(e, 100)))
     sf = Path(root) / ".skyguard" / "state.json"
     st = state.read(str(sf))
-    rows = _layer0(root, toolchain) + _layer1(root)
-    if cleared:
+    rows = _guarded("Layer 0", _layer0, root, toolchain) + _guarded("Layer 1", _layer1, root)
+    if clear_row:
+        rows.append(clear_row)
+    elif cleared:
         rows.append(Row("Layer 2", "expired lifts", LIVE, "cleared %d expired lift(s) from .skyguard/state.json (R9); "
                         "logged in .claude/backups/AUDIT_LOG.txt" % len(cleared)))
-    rows += _layer2(root, st, now, cleared)
-    rows += _layer3_claude(root, now, home)
-    rows += _layer3_codex(root, codex_config)
-    rows += _guards(st, os.path.lexists(str(sf)), now)
-    rows += _integrity(root)
+    rows += _guarded("Layer 2", _layer2, root, st, now, cleared)
+    rows += _guarded("Layer 3 claude", _layer3_claude, root, now, home)
+    rows += _guarded("Layer 3 codex", _layer3_codex, root, codex_config)
+    rows += _guarded("Guards", _guards, st, os.path.lexists(str(sf)), now)
+    rows += _guarded("Integrity", _integrity, root)
     return rows, cleared
+
+
+def _guarded(section, fn, *args):
+    """One layer's rows; an unexpected exception becomes ONE unknown row for that layer, so it hides no other (I3).
+    SandboxViolation is a BaseException and still stops the run."""
+    try:
+        return fn(*args)
+    except Exception as e:  # noqa: BLE001
+        return [Row(section, "check", UNKNOWN, "this layer could not be checked (%s): %s" % (
+            e.__class__.__name__, _txt(e, 100) or "no message"))]
 
 
 def exit_code(rows) -> int:
@@ -511,6 +591,9 @@ def main(argv=None, out=None) -> int:
         rows, _cleared = collect(root, toolchain=False if a.no_toolchain else None, codex_config=a.codex_config)
     except lock.SandboxViolation as e:
         print("REFUSED (sandbox): " + session._clean(e, 150), file=out)
+        return 2
+    except Exception as e:  # noqa: BLE001 -- unknown (2), never a traceback that exits 1 like "not live"
+        print("skydoctor: the report could not be completed (%s): %s" % (e.__class__.__name__, _txt(e, 120)), file=out)
         return 2
     code = exit_code(rows)
     if a.json:
