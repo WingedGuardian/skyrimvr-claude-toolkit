@@ -175,6 +175,28 @@ def test_shell_rules_stay_fast_on_adversarial_input(name):
     assert_linear(name, make)
 
 
+# Plan 6 Task 12 re-review (N1, N2): the lift rules' PowerShell construct reader splits the text into statements
+# (continuation-aware) and tracks the variables that feed the unlock. Each shape aims at one of those loops.
+def _lift_shapes(N):
+    ro = "$x.IsReadOnly = $false"
+    return {
+        "lift-blank-lines": ro + "\n" * N + "Get-Item C:/Temp/a",                       # N1: a run of blank lines
+        "lift-blank-then-pipe": ro + " " + "\n " * (N // 2) + "| Out-Null",            # N1: continuation look-ahead
+        "lift-many-vars": ro + " " + " ".join("$v%d" % i for i in range(N // 7)),     # N2: distinct variables
+        "lift-many-statements": "$a = 1; " * (N // 8) + "$a.IsReadOnly = $false",       # feeder lookup per statement
+        "lift-many-constructs": (ro + "; ") * (N // 24),                                # one reading per statement
+        "lift-many-fed-constructs": ("$x = Get-Item C:/T/a; " + ro + "; ") * (N // 46),  # the per-statement path
+    }
+
+
+@pytest.mark.parametrize("name", sorted(_lift_shapes(SMALL)))
+def test_lift_rules_stay_fast_on_adversarial_powershell(name):
+    def make(n):
+        cmd = _lift_shapes(n)[name]
+        return lambda: shell_rules.decide(cmd, ROOTS, _QuietAudit(), cwd=GAME, shell="powershell")
+    assert_linear(name, make)
+
+
 # Plan 5 Task 7: the delete rules resolve EVERY operand of every delete primitive against the cwd, glob- and
 # short-name-match unresolved words against the roots, scan interpreter code and each opaque exec's words. Shapes
 # aimed at each of those, fired with a cwd inside the install (so relative words really resolve) in bash and

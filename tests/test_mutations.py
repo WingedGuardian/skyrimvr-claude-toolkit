@@ -1257,8 +1257,8 @@ MUTATIONS = [
                  "tests/test_skyguard_prefs.py::test_long_section_is_capped_on_a_character_boundary",
                  id="prefs-are-capped"),
     pytest.param("tools/skyguard/session.py",
-                 '        return _with_prefs("", project, audit), "evaluated", "session"',
-                 '        return "", "evaluated", "session"',
+                 '        return _with_prefs(banners, project, audit), "evaluated", "session"',
+                 '        return banners, "evaluated", "session"',
                  "tests/test_skyguard_prefs.py::test_compact_still_injects_preferences_but_takes_no_snapshot",
                  id="prefs-survive-compaction"),
     pytest.param("tools/skyguard/session.py", '    return _with_prefs("\\n".join(lines), project, audit)',
@@ -1268,8 +1268,9 @@ MUTATIONS = [
     # One twin per return site: each site shadows the others, so one mutation proves only one site.
     # (The message is bound to `missing` first so this mutation is still a valid program: cutting
     # `, project, audit)` off a one-line call would be a SyntaxError -- a kill for the wrong reason.)
-    pytest.param("tools/skyguard/session.py", "        return _with_prefs(missing, project, audit)",
-                 "        return missing",
+    pytest.param("tools/skyguard/session.py",
+                 '        return _with_prefs("\\n".join(t for t in (banners, missing) if t), project, audit), "failed"',
+                 '        return "\\n".join(t for t in (banners, missing) if t), "failed"',
                  "tests/test_skyguard_prefs.py::test_the_real_hook_delivers_preferences",
                  id="session-start-injects-preferences-when-kb-guard-is-missing"),
     # An INERT refusal must be recorded as "nothing was checked", not as a rule decision. Fold the
@@ -2570,7 +2571,7 @@ _T9_CLAUSES = [
      '    if False:\n        return True\n    rel = _rel(', "papyrus-mo2"),
     ("rule-W-INSTALL-zone", _WRR, "        install = a is not None and in_install_area(a, roots)",
      "        install = grep(LEGACY_INSTALL_TEXT, file_path)", "install-relative-outside"),
-    ("rule-W-INSTALL-cwd", _WRR, 'a = targets.resolve(file_path, cwd, "bash"', 'a = targets.resolve(file_path, "", "bash"',
+    ("rule-W-INSTALL-cwd", _WRR, 'a = targets.resolve(file_path, cwd, "bash", os.environ', 'a = targets.resolve(file_path, "", "bash", os.environ',
      "install-relative-inside"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, _t09(row), id=i) for i, f, find, rep, row in _T9_CLAUSES]
@@ -3685,7 +3686,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SS, "            if time.monotonic() > budget[\"deadline\"]:\n                return None\n            chunk",
      "            chunk",
      _SST + "test_the_wall_time_budget_stops_the_hashing", "l2-sess-time-cap"),
-    (_SS, "            missing += 1\n            continue\n        try:\n            got =", "            differ.append('x')\n            continue\n        try:\n            got =",
+    (_SS, "            missing += 1\n            continue\n        key = rel.replace(", "            differ.append('x')\n            continue\n        key = rel.replace(",
      _SST + "test_a_manifest_naming_only_a_missing_file_names_nothing", "l2-sess-missing-count"),
     (_SS, "        mine = [x for x in st.lifts if x[\"kind\"] == \"lock\" and x[\"session_id\"] == lock.USER_SESSION]",
      "        mine = []", _SST + "test_the_start_says_it_revoked_your_own_terminal_unlock", "l2-sess-revoke-notice"),
@@ -3770,11 +3771,12 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # Task 11 review fixes: upstream-only peers, statement-scoped constructs, Data listings, cc globs.
     (_LR, "for x in _upstream(parsed, me) if", "for x in parsed.execs if x is not me and", _p6row("allow-scratch-sip-then-dir"),
      "rule-S-LIFT-RAW-peers-upstream-only"),
-    (_LR, '        stmt = "' + BS + 'n".join(text[spans[j][0]:spans[j][1]] for j in sorted(chosen))', "        stmt = text",
+    (_LR, '        stmt = "' + BS + 'n".join(text[spans[j][0]:spans[j][1]] for j in chosen)', "        stmt = text",
      _p6row("allow-scratch-ro-then-hash"), "rule-S-LIFT-RAW-construct-statement"),
-    (_LR, "        chosen = [k] + _feeders(text, spans, k)", "        chosen = [k]", _p6row("raw-var-foreach-isreadonly"),
-     "rule-S-LIFT-RAW-construct-feeders"),
-    (_LR, "                if assign.match(text[spans[i][0]:spans[i][1]]):", "                if True:",
+    (_LR, "        chosen = sorted([k] + _feeders(text, spans, k, assigners))", "        chosen = [k]",
+     _p6row("r1-allow-scratch-var"), "rule-S-LIFT-RAW-construct-feeders"),
+    # Any earlier statement counts as the feeder, assignment or not.
+    (_LR, "            at = assigners.get(name, ())", "            at = list(range(j))",
      _p6row("allow-var-scratch-hash-between"), "rule-S-LIFT-RAW-construct-feeder-assigns"),
     # Task 12 (Task 11 Rulings): cacls, takeown, interpreter code, a variable-only cmdlet path.
     (_LR, '        elif e.program == "cacls":', "        elif False:", _p6row("raw-cacls-grant"), "rule-S-LIFT-RAW-cacls"),
@@ -4009,17 +4011,26 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 # Plan 6 Task 12 review, I2/I3 (statement scoping): one twin per clause. A feeder shape that goes unrecognised falls
 # back to the whole text (fail closed) and still refuses, so those clauses are pinned by their ALLOW rows instead.
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
-    (_LR, '    if j >= 0 and text[j] in "|`":', '    if j >= 0 and text[j] in "`":', _p6row("r1-pipe-newline"),
-     "l2-r1-continue-trailing-pipe"),
-    (_LR, '    if j >= 0 and text[j] in "|`":', '    if j >= 0 and text[j] in "|":', _p6row("r1-backtick-args"),
-     "l2-r1-continue-backtick"),
-    (_LR, '    return j < stop and text[j] == "|"', "    return False", _p6row("r1-leading-pipe"),
-     "l2-r1-continue-leading-pipe"),
+    (_LR, '            if last in ("|", "`") or nxt[i + 1] == "|":', '            if last in ("`",) or nxt[i + 1] == "|":',
+     _p6row("r1-pipe-newline"), "l2-r1-continue-trailing-pipe"),
+    (_LR, '            if last in ("|", "`") or nxt[i + 1] == "|":', '            if last in ("|",) or nxt[i + 1] == "|":',
+     _p6row("r1-backtick-args"), "l2-r1-continue-backtick"),
+    (_LR, '            if last in ("|", "`") or nxt[i + 1] == "|":', '            if last in ("|", "`"):',
+     _p6row("r1-leading-pipe"), "l2-r1-continue-leading-pipe"),
     (_LR, r"(?:\[[^\]\n]{1,200}\]\s*)*", "", _p6row("r1-allow-cast-scratch"), "l2-r1-feeder-cast"),
-    (_LR, r'(?:(?:global|script|local|private):)?" + n + r"\}?\s*(?:[+\-*/]?=)(?!=)"',
-     r'" + n + r"\}?\s*(?:[+\-*/]?=)(?!=)"', _p6row("r1-allow-global-scratch"), "l2-r1-feeder-scope"),
-    (_LR, r"|\s*(?:set|new)-variable", r"|\s*(?:set|new)-variableX", _p6row("r1-allow-setvar-scratch"),
+    (_LR, r'_ASSIGN_SRC = (r"(?:\[[^\]\n]{1,200}\]\s*)*\$\{?(?:(?:global|script|local|private):)?',
+     r'_ASSIGN_SRC = (r"(?:\[[^\]\n]{1,200}\]\s*)*\$\{?', _p6row("r1-allow-global-scratch"), "l2-r1-feeder-scope"),
+    (_LR, r'r"|(?:set|new)-variable\s+', r'r"|(?:set|new)-variableX\s+', _p6row("r1-allow-setvar-scratch"),
      "l2-r1-feeder-set-variable"),
+    # Re-review timing: the fail-closed whole-text reading done once per statement instead of once per command.
+    (_LR, "            if whole is None:", "            if True:",
+     "tests/test_skyguard_timing.py::test_lift_rules_stay_fast_on_adversarial_powershell[lift-many-constructs]",
+     "l2-r1-whole-text-read-once"),
+    # ... and the assignment table rebuilt for every statement.
+    (_LR, "        if assigners is None:\n            assigners = _assigners(text, spans)",
+     "        if True:\n            assigners = _assigners(text, spans)",
+     "tests/test_skyguard_timing.py::test_lift_rules_stay_fast_on_adversarial_powershell[lift-many-fed-constructs]",
+     "l2-r1-assigners-built-once"),
     (_LR, "        if _unfed(text, spans, chosen):", "        if False:", _p6row("r1-unfed"), "l2-r1-unfed-fails-closed"),
     (_LR, '_AUTOMATIC = {"_", "psitem",', '_AUTOMATIC = {"psitem",', _p6row("r1-allow-automatic"),
      "l2-r1-automatic-underscore"),

@@ -29,7 +29,7 @@ the next session start whoever made it).
 """
 from __future__ import annotations
 
-import functools
+import bisect
 import re
 from typing import List, Mapping, Optional, Tuple
 
@@ -319,27 +319,33 @@ def _text_hit(text: str, parsed, cwd, env, roots) -> str:
     return ""
 
 
-def _continues(text: str, i: int) -> bool:
-    """The newline at i does not end a PowerShell statement: the line before it ends in `|` or a backtick, or the
-    next non-blank line starts with `|` (Task 12 review I2: a split there cut a pipeline from its upstream)."""
-    j = i - 1
-    while j >= 0 and text[j] in " \t\r":
-        j -= 1
-    if j >= 0 and text[j] in "|`":
-        return True
-    j, stop = i + 1, min(len(text), i + 4096)        # bounded: a run of blank lines cannot make this quadratic
-    while j < stop and text[j] in " \t\r\n":
-        j += 1
-    return j < stop and text[j] == "|"
+def _next_solid(text: str) -> List[str]:
+    """For each index, the first character at or after it that is not blank (" \\t\\r\\n"), or "" -- one backward
+    pass, so the continuation test below is O(1) per newline (Task 12 re-review N1: a per-newline forward scan was
+    quadratic in a run of blank lines)."""
+    out, nxt = [""] * (len(text) + 1), ""
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] not in " \t\r\n":
+            nxt = text[i]
+        out[i] = nxt
+    return out
 
 
 def _statements(text: str) -> List[Tuple[int, int]]:
     """(start, end) of each top-level statement: split on `;`, newline, `&&` and `||` outside quotes and outside
-    ( ) / { } -- a `|` pipeline stays one statement (also across a line continuation), and so does a
-    `% { ... ; ... }` block. Linear, one pass."""
+    ( ) / { } -- a `|` pipeline stays one statement, and so does a `% { ... ; ... }` block. A newline does not end
+    a statement when the line before it ends in `|` or a backtick, or the next non-blank line starts with `|`
+    (Task 12 review I2: a split there cut a pipeline from its upstream). Linear, one pass."""
     spans, start, depth, quote, i, n = [], 0, 0, "", 0, len(text)
+    nxt, last = _next_solid(text), ""                  # last: the latest non-blank character outside a quote
     while i < n:
         c = text[i]
+        if c == "\n" and not quote and depth == 0:
+            if last in ("|", "`") or nxt[i + 1] == "|":
+                i += 1
+                continue
+        elif c not in " \t\r" and not quote:
+            last = c
         if quote:
             if c == quote:
                 quote = ""
@@ -351,7 +357,8 @@ def _statements(text: str) -> List[Tuple[int, int]]:
             depth += 1
         elif c in ")}":
             depth = max(0, depth - 1)
-        elif depth == 0 and (c == ";" or (c == "\n" and not _continues(text, i)) or text[i:i + 2] in ("&&", "||")):
+        elif depth == 0 and (c in ";\n" or text[i:i + 2] in ("&&", "||")):
+            last = ""
             spans.append((start, i))
             i += 1 if c in ";\n" else 2
             start = i
@@ -367,52 +374,60 @@ _AUTOMATIC = {"_", "psitem", "true", "false", "null", "args", "input", "this", "
               "error", "matches", "lastexitcode", "pscmdlet", "psscriptroot", "pscommandpath", "myinvocation"}
 
 
-@functools.lru_cache(maxsize=256)
-def _assigns(name: str) -> "re.Pattern":
-    """A statement that assigns $name: `$name =`, `[type]$name =`, `$scope:name =`, `$name +=`, or
-    `Set-Variable`/`New-Variable [-Name] name` (Task 12 review I2: only a bare `$name =` was recognised)."""
-    n = re.escape(name)
-    return re.compile(
-        r"\s*(?:\[[^\]\n]{1,200}\]\s*)*\$\{?(?:(?:global|script|local|private):)?" + n + r"\}?\s*(?:[+\-*/]?=)(?!=)"
-        r"|\s*(?:set|new)-variable\s+(?:-name\s+)?['\"]?(?:(?:global|script|local|private):)?" + n + r"['\"]?(?![\w])",
-        re.IGNORECASE)
+# An assignment of a variable: `$v =`, `[type]$v =`, `$scope:v =`, `$v op=`, `Set-Variable`/`New-Variable [-Name] v`
+# (Task 12 review I2: only a bare `$v =` was recognised), and -- for _BINDS only -- a `foreach ($v in ...)` heading.
+# Group 1 or 2 is the name. One pattern for every name, so a statement is scanned once however many variables it
+# reads (Task 12 re-review N2: a pattern per name was quadratic in the variable count).
+_ASSIGN_SRC = (r"(?:\[[^\]\n]{1,200}\]\s*)*\$\{?(?:(?:global|script|local|private):)?([A-Za-z_][A-Za-z0-9_]*)\}?"
+               r"\s*(?:[+\-*/]?=)(?!=)"
+               r"|(?:set|new)-variable\s+(?:-name\s+)?['\"]?(?:(?:global|script|local|private):)?"
+               r"([A-Za-z_][A-Za-z0-9_]*)['\"]?(?![\w])")
+_ASSIGN_AT_START = re.compile(r"\s*(?:" + _ASSIGN_SRC + r")", re.IGNORECASE)
+_BINDS = re.compile(_ASSIGN_SRC + r"|foreach\s*\(\s*\$([A-Za-z_][A-Za-z0-9_]*)\s+in\b", re.IGNORECASE)
 
 
-def _bound_inside(text: str, name: str) -> bool:
-    """$name gets its value inside the statement itself: a `foreach ($name in ...)` heading or an assignment."""
-    n = re.escape(name)
-    return bool(re.search(r"foreach\s*\(\s*\$" + n + r"\s+in\b", text, re.IGNORECASE)
-                or any(_assigns(name).match(text, m.start()) for m in re.finditer(r"[\[$]|(?i:set|new)-", text)))
+def _assigned_at_start(stmt: str) -> str:
+    """The variable a statement assigns, when it opens with an assignment; else ""."""
+    m = _ASSIGN_AT_START.match(stmt)
+    return (m.group(1) or m.group(2)).lower() if m else ""
 
 
 def _unfed(text: str, spans, chosen) -> bool:
     """Fail closed (Task 12 review I2): the construct's statements read a variable that nothing in the command is
     seen to assign -- its value came from a shape this reader does not know, so the statement scope cannot be trusted."""
     body = "\n".join(text[spans[j][0]:spans[j][1]] for j in chosen)
-    for name in {v.lower() for v in _VAR.findall(body)} - _AUTOMATIC:
-        if not _bound_inside(body, name):
-            return True
-    return False
+    bound = {next(g for g in m.groups() if g).lower() for m in _BINDS.finditer(body)}
+    return bool({v.lower() for v in _VAR.findall(body)} - _AUTOMATIC - bound)
 
 
-def _feeders(text: str, spans, k: int) -> List[int]:
+def _assigners(text: str, spans) -> dict:
+    """name -> the statements that open with its assignment, ascending. Built once per command."""
+    out: dict = {}
+    for i, (a, b) in enumerate(spans):
+        name = _assigned_at_start(text[a:b])
+        if name:
+            out.setdefault(name, []).append(i)
+    return out
+
+
+def _feeders(text: str, spans, k: int, assigners=None) -> List[int]:
     """The earlier statements that feed statement k through a variable: for every `$var` statement k (or a feeder)
     reads, the LATEST earlier statement that assigns it (`$var = ...`, or `foreach ($var in ...)` heading one).
     Transitive (`$files = gci <master>; foreach ($f in $files) { $f.IsReadOnly = $false }`), each statement taken
     once, so it is bounded by the statement count. A statement that assigns nothing the construct reads is not its
     target (Task 11 review: `Copy-Item <master> C:/Temp/x/;` before it, `; Get-FileHash <master>` after it)."""
+    if assigners is None:
+        assigners = _assigners(text, spans)
     out, todo, seen = [], [k], set()
     while todo:
         j = todo.pop()
         for name in {v.lower() for v in _VAR.findall(text[spans[j][0]:spans[j][1]])} - seen:
             seen.add(name)
-            assign = _assigns(name)
-            for i in range(j - 1, -1, -1):
-                if assign.match(text[spans[i][0]:spans[i][1]]):
-                    if i not in out:
-                        out.append(i)
-                        todo.append(i)
-                    break
+            at = assigners.get(name, ())
+            i = bisect.bisect_left(at, j) - 1          # the LATEST assigner before statement j
+            if i >= 0 and at[i] not in out:
+                out.append(at[i])
+                todo.append(at[i])
     return out
 
 
@@ -420,14 +435,21 @@ def _construct_hit(text: str, parsed, cwd, env, roots) -> str:
     """A PowerShell unlock construct's target, read from the STATEMENT that holds it (Task 11 review: a statement
     before or after it -- `Copy-Item <master> C:/Temp/x/;` or `; Get-FileHash <master>` -- is not its target). A
     `$var.IsReadOnly = $false` receiver also reads the latest earlier statement that assigns `$var`."""
-    spans = _statements(text)
+    spans, done = _statements(text), set()
+    starts, assigners, whole = [a for a, _ in spans], None, None
     for m in PS_CONSTRUCT.finditer(text):
-        k = next((j for j, (a, b) in enumerate(spans) if a <= m.start() < b), len(spans) - 1)
-        chosen = sorted([k] + _feeders(text, spans, k))
+        k = max(0, bisect.bisect_right(starts, m.start()) - 1)  # the statement holding the construct
+        if k in done:                                           # one reading per statement, however many constructs
+            continue
+        done.add(k)
+        if assigners is None:
+            assigners = _assigners(text, spans)
+        chosen = sorted([k] + _feeders(text, spans, k, assigners))
         if _unfed(text, spans, chosen):
-            t = _text_hit(text, parsed, cwd, env, roots)        # the base's whole-text reading
-            if t:
-                return t
+            if whole is None:                                   # the base's whole-text reading: the same for every
+                whole = _text_hit(text, parsed, cwd, env, roots)    # statement, so read once (re-review timing)
+            if whole:
+                return whole
             continue
         stmt = "\n".join(text[spans[j][0]:spans[j][1]] for j in chosen)
         mine = tuple(x for x in parsed.execs if x.segment.strip() and x.segment.strip() in stmt)
