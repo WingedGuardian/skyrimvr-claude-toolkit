@@ -878,6 +878,30 @@ def test_i1_bash_pipeline_and_subshell_cd_still_do_not_carry():
     assert find("(cd /c/x); rm a", "rm").cd_before == ""
 
 
+@pytest.mark.parametrize("cmd,cd", [
+    ("cd C:" + BS + "t7" + BS + "Skyrim VR && rd /s /q Data", "C:" + BS + "t7" + BS + "Skyrim VR"),
+    ("cd /d C:" + BS + "a b" + BS + "c d & rd Data", "C:" + BS + "a b" + BS + "c d"),
+    ("chdir C:" + BS + "a b & rd Data", "C:" + BS + "a b"),
+    ('cd/d "C:' + BS + 't7' + BS + 'Skyrim VR" && rd /s /q Data', "C:" + BS + "t7" + BS + "Skyrim VR"),
+    ("cd/D C:" + BS + "x && rd Data", "C:" + BS + "x"),
+    ("cd" + BS + "t7" + BS + "Skyrim VR && rd /s /q Data", BS + "t7" + BS + "Skyrim VR"),
+    ("cd.. && rd Data", ".."),
+    ("cd C:" + BS + "a  b && rd Data", "?"),
+    ("pushd C:" + BS + "a b && rd Data", "?"),
+    ("cd C:" + BS + "a %X% && rd Data", "?"),
+    ("cd/x C:" + BS + "a && rd Data", "?"),
+    ('cd "C:' + BS + 'a b" && rd Data', "C:" + BS + "a b"),
+])
+def test_i2_cmd_cd_takes_the_rest_of_the_line(cmd, cd):
+    """I2: with extensions on, cmd's cd does not split on spaces; `cd/d` and `cd\\x` are cd too."""
+    assert find(cmd, "rmdir", "cmd").cd_before == cd
+
+
+def test_i2_cmd_cd_inside_cmd_c_from_bash():
+    e = find('cmd /c "cd /d C:' + BS + 't7' + BS + 'Skyrim VR && rd /s /q Data"', "rmdir")
+    assert e.cd_before == "C:" + BS + "t7" + BS + "Skyrim VR"
+
+
 @pytest.mark.parametrize("cmd", ["Re`move-Item -Recurse X", "R`e`m`o`v`e-Item X", "r`i -r X"])
 def test_i4_a_backtick_in_a_command_name_is_still_a_command(cmd):
     assert deletes_x(cmd, "powershell") is True

@@ -4010,3 +4010,19 @@ MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep
     ("i4-here-string-is-a-string", '    return r[:1] in _SQ + _DQ or (r[:1] == "@" and r[1:2] in _SQ + _DQ)',
      "    return r[:1] in _SQ + _DQ", _P5S + "test_pwsh_expressions_and_here_strings_are_not_commands"),
 ]]
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # I2: cmd cd takes the rest of the line
+    ("i2-cd-joins-the-rest", '                new = " ".join(s for s, _ in parts)', "                new = parts[0][0]",
+     _p5a("i2-cmd-cd-unquoted-space")),
+    ("i2-cd-glued-switch", "        glued = None if w0.quoted else _CMD_CD_GLUED.fullmatch(first)", "        glued = None",
+     _p5a("i2-cmd-cd-glued-switch")),
+    ("i2-pushd-not-joined", '            elif p == "pushd" or any(w.dyn for _, w in parts) or any(',
+     "            elif False or any(w.dyn for _, w in parts) or any(", _P5S + "test_i2_cmd_cd_takes_the_rest_of_the_line"),
+    ("i2-variable-not-joined", '            elif p == "pushd" or any(w.dyn for _, w in parts) or any(',
+     '            elif p == "pushd" or any(False for _, w in parts) or any(',
+     _P5S + "test_i2_cmd_cd_takes_the_rest_of_the_line"),
+    ("i2-gap-not-one-space", '                    self.t[a[1].start + len(a[1].raw):b[1].start] != " " for a, b in',
+     "                    False for a, b in", _P5S + "test_i2_cmd_cd_takes_the_rest_of_the_line"),
+    ("i2-unknown-glued-switch", '                if lead.lower() != "/d":', "                if False:",
+     _P5S + "test_i2_cmd_cd_takes_the_rest_of_the_line"),
+]]

@@ -51,7 +51,10 @@ AN EXEC:
   dialect    "bash" | "powershell" | "cmd".
   cd_before  the directory an earlier `cd`/`pushd`/`Set-Location` in the same statement chain moved to
              ("" if none, "?" if it cannot be known: `cd -`, `cd $X`, `popd`). Relative cds are joined with "/".
-             A cd inside a pipeline stage or a subshell does not carry out of it.
+             bash: a cd inside a pipeline stage or a subshell does not carry out of it. PowerShell: the location
+             is session-wide, so a pipeline stage's Set-Location carries, and one inside a block or ( ) makes
+             the caller's directory "?" (whether the block ran is not known). cmd: `cd` takes the rest of the
+             line as one path, spaces included.
   stdin_from "pipe" | "heredoc:shell" | "heredoc:interpreter" | "heredoc:data" | "".
   segment    the source text of this simple command (for the legacy fallback and messages' basenames only).
   stdin_body the heredoc / here-string body when stdin_from starts with "heredoc:" (an addition to the
@@ -1504,6 +1507,7 @@ _CMD_REM = re.compile(r"(?:rem(?=[ \t\r\n]|$)|::)", re.IGNORECASE)
 _CMD_REDIR_OPS = (">>", ">&", "<&", ">", "<")
 _CMD_REM_END = re.compile(r"[&|\n]")
 _CMD_CMP = frozenset(("equ", "neq", "lss", "leq", "gtr", "geq"))
+_CMD_CD_GLUED = re.compile(r"@?(cd|chdir|pushd)([\\/.].*)", re.IGNORECASE | re.DOTALL)
 
 
 class _Cmdexe(_Scanner):
@@ -1512,10 +1516,35 @@ class _Cmdexe(_Scanner):
     def track_cd(self, f, cmd):
         if not cmd.words:
             return
-        p = program_name("".join(cmd.words[0].b), "cmd")
+        w0 = cmd.words[0]
+        first = "".join(w0.b)
+        glued = None if w0.quoted else _CMD_CD_GLUED.fullmatch(first)
+        lead = ""
+        if glued:                                           # I2: `cd/d X`, `cd\x`, `cd..`: cmd ends the name there
+            p, lead = CMD_ALIASES.get(glued.group(1).lower(), glued.group(1).lower()), glued.group(2)
+        else:
+            p = program_name(first, "cmd")
         if p in ("cd", "pushd"):
-            args = [w for w in cmd.words[1:] if "".join(w.b).lower() != "/d"]
-            f.cd = _join_cd(f.cd, _cd_value(args[0], False) if args else "?")
+            if lead.startswith("/"):
+                if lead.lower() != "/d":
+                    f.cd = "?"                              # `cd/x`: not a spelling this models
+                    return
+                lead = ""
+            parts = ([(lead, w0)] if lead else []) + [("".join(w.b), w) for w in cmd.words[1:]
+                                                      if "".join(w.b).lower() != "/d"]
+            if not parts:
+                f.cd = _join_cd(f.cd, "?")
+                return
+            if len(parts) == 1:
+                new = parts[0][0] if parts[0][1] is w0 else _cd_value(parts[0][1], False)
+            elif p == "pushd" or any(w.dyn for _, w in parts) or any(
+                    self.t[a[1].start + len(a[1].raw):b[1].start] != " " for a, b in zip(parts, parts[1:])):
+                new = "?"       # pushd's own split, a variable, or a gap that is not one space: not rebuilt
+            else:
+                # I2: with extensions on (the default) cd/chdir take the WHOLE rest of the line as the path, spaces
+                # included: `cd C:\GOG Games\x` is one path, not `C:\GOG` and an extra word.
+                new = " ".join(s for s, _ in parts)
+            f.cd = _join_cd(f.cd, new)
         elif p == "popd":
             f.cd = "?"
 
