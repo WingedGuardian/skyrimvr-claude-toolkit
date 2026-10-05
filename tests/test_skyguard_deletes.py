@@ -308,3 +308,62 @@ def test_tools_pycache_is_scratch_but_tools_node_modules_is_not(p, kind):
 def test_unresolved_operand_from_above_the_root_is_silent():
     assert decide('rm -rf "$X"', cwd="C:/") == (("allow", ""), set())
     assert decide('rm -rf "$X"', cwd="C:/t7") == (("allow", ""), set())
+
+
+# ---- G1 (RT-A): interpreter inline code that launches a process / removes, naming a protected root -> deny
+_ROOT_IN_CODE = INSTALL + "/Data"
+
+
+@pytest.mark.parametrize("cmd", [
+    f"python -c \"import os; os.system('del /s /q \\\"{_ROOT_IN_CODE}\\\"')\"",
+    f"python -c \"import subprocess; subprocess.run(['cmd','/c','rd','/s','/q','{_ROOT_IN_CODE}'])\"",
+    f"python -Bc \"import shutil; shutil.rmtree('{_ROOT_IN_CODE}')\"",
+    f"node -e \"require('child_process').execSync('rd /s /q \\\"{_ROOT_IN_CODE}\\\"')\"",
+    f"node -pe \"require('fs').rmSync('{_ROOT_IN_CODE}',{{recursive:true}})\"",
+    f"php -r \"system('rd /s /q \\\"{_ROOT_IN_CODE}\\\"');\"",
+    f"ruby -e \"require 'fileutils'; FileUtils.rm_rf('{_ROOT_IN_CODE}')\"",
+], ids=["py-os-system", "py-subprocess", "py-Bc-rmtree", "node-execSync", "node-pe-rmSync", "php-system",
+        "ruby-fileutils"])
+def test_g1_interpreter_code_naming_a_root_denies(cmd):
+    (decision, _), fired = decide(cmd)
+    assert decision == "deny", (cmd, decision, fired)
+
+
+@pytest.mark.parametrize("cmd", [
+    "python -c \"import os; print(os.listdir('C:/Temp'))\"",
+    f"python -c \"print(open('{_ROOT_IN_CODE}/x.txt').read())\"",
+    "node -e \"console.log(1)\"",
+    "python -c \"import subprocess; subprocess.run(['git','status'])\"",
+    f"python -Bc \"import os; os.system('dir C:/Temp')\"",
+    # priced false positive (6 history items): a read-only tool run per archive while naming the install
+    f"python -c \"import subprocess,glob; [subprocess.run(['bash','tools/automod-cli.sh','archive','list',b,'--json'])"
+    f" for b in glob.glob('{_ROOT_IN_CODE}/*.bsa')]\"",
+], ids=["py-listdir-scratch", "py-read-in-install", "node-log", "py-subprocess-no-root", "py-Bc-system-no-root",
+        "py-subprocess-readonly-tool-in-install"])
+def test_g1_ordinary_interpreter_code_is_not_refused(cmd):
+    (decision, _), fired = decide(cmd)
+    assert decision != "deny", (cmd, fired)
+
+
+# ---- G2 (RT-A): command-running wrappers are opaque; delete word + protected root in their own words -> deny
+@pytest.mark.parametrize("cmd,shell", [
+    (f"schtasks /create /tn x /sc once /st 00:00 /tr \"cmd /c rd /s /q \\\"{_ROOT_IN_CODE}\\\"\"", "bash"),
+    (f"wmic process call create \"cmd /c rd /s /q \\\"{_ROOT_IN_CODE}\\\"\"", "bash"),
+    (f"docker run --rm -v \"{INSTALL}:/g\" alpine rm -rf /g/Data \"{INSTALL}\"", "bash"),
+    (f"Start-Process cmd -ArgumentList '/c rd /s /q \"{_ROOT_IN_CODE}\"'", "powershell"),
+    (f"Invoke-Command -ScriptBlock {{ Remove-Item -Recurse '{_ROOT_IN_CODE}' }}", "powershell"),
+], ids=["schtasks-rd", "wmic-rd", "docker-rm", "start-process-rd", "invoke-command-remove-item"])
+def test_g2_wrapper_with_delete_and_root_denies(cmd, shell):
+    (decision, _), fired = decide(cmd, shell=shell)
+    assert decision == "deny", (cmd, decision, fired)
+
+
+@pytest.mark.parametrize("cmd,shell", [
+    ("docker run hello-world", "bash"),
+    (f"docker run --rm -v \"{INSTALL}:/g\" alpine ls /g/Data", "bash"),
+    ("schtasks /query /fo LIST", "bash"),
+    ("Start-Process notepad", "powershell"),
+], ids=["docker-hello", "docker-ls-install", "schtasks-query", "start-process-notepad"])
+def test_g2_wrapper_without_a_delete_is_not_refused(cmd, shell):
+    (decision, _), fired = decide(cmd, shell=shell)
+    assert decision != "deny", (cmd, fired)

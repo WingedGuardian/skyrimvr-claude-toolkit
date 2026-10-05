@@ -81,7 +81,17 @@ DESTROYER_LOOSE = (
 INTERP_DELETE = (
     r"\bos\.(remove|unlink|rmdir|removedirs)\s*\(|\.(rm|rmdir|unlink)(Sync)?\s*\(|\bremove_tree\s*\("
     r"|\bunlink\s*[('\"$]"
+    # G1 (RT-A): .NET / Ruby / Deno removal calls.
+    r"|\bFileUtils\.(rm|remove)\w*|\bDeno\.remove\w*\s*\(|\b(File|Directory)\]?::Delete\s*\(|\.Delete\s*\("
 )
+# G1 (RT-A): code that LAUNCHES a process is judged like a delete only when the launched text also carries a delete
+# word, quoted or space-bounded (`os.system('rd /s /q X')`, `subprocess.run(['cmd','/c','rd',X])`). Priced: launch +
+# root alone denied 6 of 68,475 history items, all read-only analysis scripts (`automod archive list`, cosave reads).
+INTERP_LAUNCH = (
+    r"\bos\.(system|popen|exec\w*|spawn\w*)\s*\(|\bsubprocess\.|\bchild_process\b|\b(exec|spawn)(File)?Sync\s*\("
+    r"|\b(system|shell_exec|passthru|proc_open)\s*\("
+)
+LAUNCH_DELETE_WORD = r"""(^|['"\s,\[(])(rm|rmdir|rd|del|erase|unlink|Remove-Item|ri|rimraf)(['"\s,\])]|$)"""
 
 DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "rimraf"))
 CMD_SWITCH_PROGRAMS = frozenset(("del", "erase", "rd", "rmdir"))
@@ -90,7 +100,15 @@ NPX = frozenset(("npx", "pnpx", "bunx"))
 PKG_RUNNERS = frozenset(("pnpm", "yarn", "bun", "npm"))
 _PYTHON = re.compile(r"(?:python|pypy|py)[0-9.]{0,8}w?")
 CODE_INTERPRETERS = frozenset(("node", "nodejs", "deno", "bun", "perl", "ruby", "php"))
-CODE_FLAGS = frozenset(("-c", "-e", "-E", "--eval", "-p", "--print", "-r"))
+CODE_FLAGS = frozenset(("-c", "-e", "-E", "--eval", "-p", "--print", "-r", "-pe"))
+_PY_CODE_CLUSTER = re.compile(r"-[A-Za-z]{1,4}c")      # python -Bc CODE, -Ic CODE, -IBc CODE (G1)
+
+# G2 (RT-A): programs that run a command line they are HANDED. What they run is text the parser does not follow, so
+# they are treated as opaque: with a delete word AND a protected root in their own words (_loose_hit) they deny via
+# S-DEL-FALLBACK; a wrapper that merely names a root without a delete word is not refused.
+_WRAPPER_PROGRAMS = frozenset(("schtasks", "wmic", "docker", "podman", "at", "register-scheduledtask",
+                               "register-scheduledjob", "start-job", "invoke-command", "start-process", "psexec",
+                               "runas"))
 
 # Remove-Item parameters that take a value which is NOT a path (prefix-abbreviated); everything else that is not
 # -Path/-LiteralPath is treated as a switch, so the next word stays an operand (stricter).
@@ -260,6 +278,8 @@ def interpreter_code(e) -> str:
             code.append(nxt)                              # -c CODE, -e CODE, perl/ruby clusters: -pe / -ne CODE
         elif w.startswith("-c") and len(w) > 2 and _PYTHON.fullmatch(p):
             code.append(w[2:])                            # python -cCODE
+        elif _PYTHON.fullmatch(p) and _PY_CODE_CLUSTER.fullmatch(w):
+            code.append(nxt)                              # python -Bc CODE (G1)
     if e.stdin_body and (e.stdin_from.startswith("heredoc:interpreter") or e.stdin_from == "pipe"):
         code.append(e.stdin_body)
     return "\n".join(code)
@@ -275,8 +295,9 @@ def substituted(e):
 
 
 def is_opaque(e) -> bool:
-    """The parser cannot know what this runs: a dynamic program, or a git alias that runs a shell (`!...`)."""
-    if e.program == "?":
+    """The parser cannot know what this runs: a dynamic program, a git alias that runs a shell (`!...`), or a
+    program that runs a command line it is handed (G2)."""
+    if e.program == "?" or os.path.splitext(e.program)[0] in _WRAPPER_PROGRAMS:
         return True
     return e.program == "git" and any(re.match(r"alias\.[^=]*=\s*!", w) for w in e.argv)
 
@@ -537,7 +558,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             opaque = True
         e = substituted(e)
         code = interpreter_code(e)
-        if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code)):
+        if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (
+                has(INTERP_LAUNCH, code) and has(LAUNCH_DELETE_WORD, code))):
             for kind, rx in _root_regexes(roots):
                 if has(rx, code):
                     resolved = Hit(RULE_OF[kind], _match_basename(rx, code))
