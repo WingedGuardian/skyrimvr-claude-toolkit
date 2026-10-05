@@ -389,3 +389,40 @@ def test_moving_a_root_folder_away_names_the_move_not_a_delete(cmd, shell):
     (decision, reason), fired = decide(cmd, shell=shell)
     assert (decision, fired) == ("deny", {"S-MOVE-ROOT"}), (cmd, reason, fired)
     assert "moves" in reason and "deletes" not in reason
+
+
+# ---- Plan 5 final review D1: the Recycle-Bin delete core.md recommends is a delete to every detector.
+_VB = "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::"
+_RB = ", 'OnlyErrorDialogs', 'SendToRecycleBin')"
+
+
+@pytest.mark.parametrize("shell", ["powershell", "bash", ""])
+def test_recycle_bin_delete_into_the_install_denies_in_every_dialect(shell):
+    (decision, reason), fired = decide(_VB + "DeleteDirectory('" + INSTALL + "/Data/meshes'" + _RB, shell=shell,
+                                       cwd="C:/Temp")
+    assert (decision, fired) == ("deny", {"S-DEL-INSTALL"}) and "meshes" in reason, (decision, fired, reason)
+
+
+def test_recycle_bin_delete_of_an_unresolved_root_variable_is_unresolved():
+    got = decide(_VB + 'DeleteDirectory("$env:SKYRIM_GAME_ROOT/Data"' + _RB, shell="powershell", cwd="C:/Temp",
+                 env={})
+    assert got[1] == {"S-DEL-UNRESOLVED"}, got
+
+
+def test_recycle_bin_delete_of_a_variable_in_a_command_naming_the_install_is_unresolved():
+    got = decide("$d = '" + INSTALL + "/Data'; " + _VB + "DeleteDirectory($d" + _RB, shell="powershell", cwd="C:/Temp")
+    assert got[1] == {"S-DEL-UNRESOLVED"}, got
+
+
+def test_recycle_bin_words_reach_the_parse_failure_fallback():
+    assert deletes.recycle_targets(_VB + "DeleteFile('x'" + _RB) == [("x", "single")]
+    assert deletes.recycle_targets("$o.Namespace(10).MoveHere($p)") == [("$p", "bare")]
+    from skyguard.grep import grep
+    assert grep(deletes.DESTROYER, "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory(")
+    assert grep(deletes.DESTROYER_LOOSE, "(New-Object -ComObject Shell.Application).Namespace(10).MoveHere(")
+
+
+def test_recycle_bin_delete_with_a_double_quoted_path_resolves():
+    (decision, reason), fired = decide(_VB + 'DeleteFile("' + INSTALL + '/Data/a.esp"' + _RB, shell="powershell",
+                                       cwd="C:/Temp")
+    assert (decision, fired) == ("deny", {"S-DEL-INSTALL"}) and "a.esp" in reason, (decision, fired, reason)

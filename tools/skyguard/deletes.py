@@ -12,7 +12,9 @@ DELETE PRIMITIVES. rm, rmdir, unlink, del/erase/rd (cmd; PowerShell maps them to
 find -delete (find.delete), [IO.File]::Delete / [IO.Directory]::Delete, `git clean` (its target is the cwd, -C /
 --work-tree, or its pathspecs; `-n`/`--dry-run` deletes nothing), `git rm` (not --cached: it deletes the working
 files), rimraf (also via npx/pnpx/bunx/pnpm dlx), robocopy
-/MIR or /PURGE (deletes in the DESTINATION) and /MOV or /MOVE (deletes the SOURCE), and interpreter code
+/MIR or /PURGE (deletes in the DESTINATION) and /MOV or /MOVE (deletes the SOURCE), the Recycle-Bin delete
+(`[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile/DeleteDirectory`, Shell.Application `Namespace(10).MoveHere`;
+found in the text, see RECYCLE_CALL), and interpreter code
 (`python -c`, `node -e`, `perl -e`, a heredoc or pipe fed to an interpreter; R7(b)) checked with the legacy text
 regex plus a short list of interpreter delete APIs.
 
@@ -92,6 +94,34 @@ INTERP_LAUNCH = (
     r"|\b(system|shell_exec|passthru|proc_open)\s*\("
 )
 LAUNCH_DELETE_WORD = r"""(^|['"\s,\[(])(rm|rmdir|rd|del|erase|unlink|Remove-Item|ri|rimraf)(['"\s,\])]|$)"""
+
+# Plan 5 final review D1: the Recycle-Bin delete. core.md tells agents to delete with
+# [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile / DeleteDirectory (..., 'SendToRecycleBin'); Shell.Application's
+# Namespace(10) is the Recycle Bin and .MoveHere() puts a file in it. Both are .NET/COM EXPRESSIONS, not programs, so the
+# parser yields no exec for them (and bash cannot parse them at all): they are found in the command TEXT, which also
+# covers `powershell -Command "..."` and a script block. A recycled file is still gone from the install, so its first
+# argument is judged exactly like an rm operand (clauses (a) and (b)). Not covered: the call through a variable
+# (`$fs = [...FileSystem]; $fs::DeleteFile(...)`) and the same API from compiled or scripted .NET code (C#, dotnet-script).
+RECYCLE_CALL = re.compile(
+    r"(?:\[\s*(?:global::\s*)?(?:Microsoft\.VisualBasic\.FileIO\.)?FileSystem\s*\]\s*::\s*Delete(?:File|Directory)"
+    r"|\.\s*Namespace\s*\(\s*(?:10|0x0*a)\s*\)\s*\.\s*MoveHere)"
+    r"\s*\(\s*(?:\\?(?P<q>['\"])(?P<lit>[^'\"\n]{0,1024}?)\\?(?P=q)|(?P<bare>[^,)\s][^,)\n]{0,1023}))",
+    re.IGNORECASE)
+_RECYCLE_WORD = r"FileSystem\]\s*::\s*Delete(File|Directory)|Namespace\(\s*10\s*\)\s*\.MoveHere"
+DESTROYER += "|" + _RECYCLE_WORD
+DESTROYER_LOOSE += "|" + _RECYCLE_WORD
+
+
+def recycle_targets(command: str) -> List[Tuple[str, str]]:
+    """(first argument, how it is written: "single" | "double" | "bare") for each Recycle-Bin delete call in the text.
+    A bare argument is a variable or an expression (`$d`, `(Join-Path ...)`): never resolved, only matched raw."""
+    out = []
+    for m in RECYCLE_CALL.finditer(command):
+        if m.group("lit") is not None:
+            out.append((m.group("lit"), "single" if m.group("q") == "'" else "double"))
+        else:
+            out.append((m.group("bare").strip(), "bare"))
+    return out
 
 DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "rimraf"))
 CMD_SWITCH_PROGRAMS = frozenset(("del", "erase", "rd", "rmdir"))
@@ -624,6 +654,24 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if nocwd and not relative and _is_data_word(w) and \
                     targets.resolve(w, targets.exec_cwd(e, _NOCWD, env) or _NOCWD, e.dialect, env) is not None:
                 relative = re.split(r"[/\\]+", w.rstrip("/\\"))[-1] or w
+    # D1: Recycle-Bin deletes, found in the text (RECYCLE_CALL). .NET resolves a relative path against the process
+    # directory, which is the payload cwd (Set-Location does not move it).
+    base = targets.normalise_cwd(cwd)
+    for w, how in (recycle_targets(command) if resolved is None else ()):
+        a = None
+        if how == "single":
+            a = literal_abs(w, base, "powershell")
+        elif how == "double":
+            a = targets.resolve(w, base or "", "powershell", env)
+        if a is not None:
+            kind, b = place(a)
+            if kind:
+                resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
+                break
+            continue
+        unresolved_any = True
+        if unresolved_reach is None and raw_reaches(w, base, "powershell", roots):
+            unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
     if resolved:
         return Scan(resolved, relative)
     if unresolved_reach:

@@ -3966,3 +3966,39 @@ MUTATIONS += [
                  "tests/test_toolchain_check.py::test_newer_spriggit_on_sdk_9_is_degraded",
                  id="toolchain-check-spriggit-version-sets-needed-sdk"),
 ]
+
+
+# Plan 5 final review, fix pass (rules lane). One mutation per clause the fix pass added; each names the row or test
+# that must go red. P5F rows fire in-process from tests/test_skyguard_p5fix.py.
+def _p5f(row):
+    return "tests/test_skyguard_p5fix.py::test_p5f_row[p5f-" + row + "]"
+
+
+_DL = "tools/skyguard/deletes.py"
+_P5F_CLAUSES = [
+    # (id, file, find, replace, test that must go red)
+    # D1: the Recycle-Bin delete (VB FileSystem::DeleteFile/DeleteDirectory, Shell.Application Namespace(10).MoveHere).
+    ("p5f-recycle-bin-delete-not-judged", _DL,
+     "    for w, how in (recycle_targets(command) if resolved is None else ()):", "    for w, how in ():",
+     _p5f("vb-deletedirectory-ps")),
+    ("p5f-recycle-bin-shell-application-not-matched", _DL,
+     '    r"|' + BS + '.' + BS + 's*Namespace' + BS + 's*' + BS + '(' + BS + 's*(?:10|0x0*a)' + BS + 's*' + BS + ')'
+     + BS + 's*' + BS + '.' + BS + 's*MoveHere)"', '    r")"',
+     _p5f("shell-app-recycle")),
+    ("p5f-recycle-bin-relative-path-unresolved", _DL, "    base = targets.normalise_cwd(cwd)\n", "    base = None\n",
+     _p5f("vb-relative-in-install")),
+    ("p5f-recycle-bin-double-quoted-not-resolved", _DL, '        elif how == "double":', "        elif False:",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_delete_with_a_double_quoted_path_resolves"),
+    ("p5f-recycle-bin-unresolved-not-raw-matched", _DL,
+     '        if unresolved_reach is None and raw_reaches(w, base, "powershell", roots):', "        if False:",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_delete_of_an_unresolved_root_variable_is_unresolved"),
+    ("p5f-recycle-bin-unresolved-not-counted", _DL,
+     "            continue\n        unresolved_any = True\n        if unresolved_reach is None and raw_reaches(w, base,",
+     "            continue\n        if unresolved_reach is None and raw_reaches(w, base,",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_delete_of_a_variable_in_a_command_naming_the_install_is_unresolved"),
+    ("p5f-recycle-bin-not-in-fallback-destroyer", _DL, 'DESTROYER += "|" + _RECYCLE_WORD', "",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_words_reach_the_parse_failure_fallback"),
+    ("p5f-recycle-bin-not-in-opaque-destroyer", _DL, 'DESTROYER_LOOSE += "|" + _RECYCLE_WORD', "",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_words_reach_the_parse_failure_fallback"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _P5F_CLAUSES]
