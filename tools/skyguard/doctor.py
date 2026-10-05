@@ -405,13 +405,13 @@ def _guards(st, sf_exists, now):
     if st.rejected:
         rows.append(Row("Guards", "state file", NOT_LIVE, "STATE-REJECTED %s: it is ignored, so guards are on and every "
                         "lift in it is void" % session._clean(st.reason, 80)))
-        rows.append(Row("Guards", "guards", LIVE, "ON (the rejected state file is ignored)", label="ON"))
+        rows.append(Row("Guards", "guards", LIVE, "the rejected state file is ignored, so the guards decide", label="ON"))
         return rows
     rows.append(Row("Guards", "state file", LIVE, "verified (checksum and shape)" if sf_exists else
                     "absent: no lift and no disable recorded"))
     off = [x for x in st.lifts if x["kind"] == "guards" and not _expired(x, now)]
     if not off:
-        rows.append(Row("Guards", "guards", LIVE, "ON: no guards-off lift on record", label="ON"))
+        rows.append(Row("Guards", "guards", LIVE, "no guards-off lift on record", label="ON"))
         return rows
     x = max(off, key=lambda y: y["expires_at"])
     more = " (+%d more)" % (len(off) - 1) if len(off) > 1 else ""
