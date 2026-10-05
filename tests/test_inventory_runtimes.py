@@ -307,7 +307,6 @@ def test_cli_inventory_is_json():
 
 # ---- the shipped prompt -----------------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="Task 9")
 def test_shipped_prompt_authorizes_nothing():
     prompt = (REPO / "SETUP_PROMPT.txt").read_text(encoding="utf-8")
     assert "Host-software installs: NOT AUTHORIZED." in prompt  # absence also parses to nothing; require the sentence

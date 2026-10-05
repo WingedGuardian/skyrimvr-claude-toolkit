@@ -11,7 +11,7 @@ import subprocess
 
 from conftest import BASH, REPO
 
-PROMPT_START = "I just installed the Skyrim Claude Code Modding Toolkit"
+PROMPT_START = "I just installed the Skyrim modding toolkit"
 
 # The canonical copy, and the two files that embed it.
 PROMPT_SOURCES = [
