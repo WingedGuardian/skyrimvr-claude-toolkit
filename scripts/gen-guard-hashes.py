@@ -23,7 +23,6 @@ Format (session.py's reader): `# release <ver>`, then `<sha256>  <relative path>
 from __future__ import annotations
 
 import argparse
-import hashlib
 import re
 import subprocess
 import sys
@@ -54,13 +53,17 @@ def guard_files(repo: Path = REPO):
     return sorted(n for n in names if n not in SETUP_WRITES and kind(n.lower().split("/")) == guard)
 
 
-def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _sha(path: Path, rel: str) -> str:
+    """The file's hash in its REPO form (guard_hash: the slots setup.sh fills are put back to their tokens), so the
+    manifest matches a configured install as well as the repo."""
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import guard_hash
+    return guard_hash.digest(rel, path.read_bytes())[0]
 
 
 def render(repo: Path = REPO) -> str:
     lines = ["# release " + release(repo)]
-    lines += ["%s  %s" % (_sha(repo / n), n) for n in guard_files(repo)]
+    lines += ["%s  %s" % (_sha(repo / n, n), n) for n in guard_files(repo)]
     return "\n".join(lines) + "\n"
 
 
@@ -75,7 +78,7 @@ def verify(root: Path) -> list:
         f = root / rel
         if not f.is_file():
             problems.append("missing: " + rel)
-        elif _sha(f) != digest:
+        elif _sha(f, rel) != digest:
             problems.append("differs: " + rel)
     return problems
 

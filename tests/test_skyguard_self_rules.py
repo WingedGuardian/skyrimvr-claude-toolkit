@@ -19,11 +19,11 @@ import tempfile
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, make_game, run_setup
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, codes, codex_rules, engine, paths, rules, self_rules, session, shell_rules, state  # noqa: E402
-from skyguard import write_rules  # noqa: E402
+from skyguard import guard_hash, write_rules  # noqa: E402
 from skyguard.adapters import codex  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
 
@@ -310,4 +310,75 @@ def test_the_ci_workflow_runs_the_drift_gate():
     assert "scripts/gen-guard-hashes.py --check" in ci
     rel = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     assert "gen-guard-hashes.py --verify" in rel
+
+
+# ---- fix round 1, C1: a CONFIGURED install (setup.sh fills the interpreter into 8 guard files) ----------------------
+
+def test_a_configured_install_banners_nothing_and_a_real_edit_is_named(tmp_path):
+    """From the outside: the real setup.sh into a scratch install, then the session-start drift check. Setup's own
+    substitutions must not read as drift; an edit after it must, and only that file."""
+    game = make_game(tmp_path)
+    r = run_setup(game)
+    hook = (game / ".claude" / "hooks" / "protect-bash.sh").read_text(encoding="utf-8")
+    assert "{{PYTHON_PATH}}" not in hook, "setup.sh did not configure the hooks:\n" + r.stdout[-2000:] + r.stderr[-2000:]
+    entry = (game / ".codex" / "hooks" / "skyguard-entry.ps1").read_text(encoding="utf-8")
+    assert "{{PYTHON_PATH}}" not in entry and "{{BASH_PATH}}" not in entry
+    release, differ, missing, unchecked = session._guard_drift(str(game))
+    assert (differ, missing, unchecked) == ([], 0, []), (differ, missing, unchecked)
+    with open(str(game / "tools" / "skyguard" / "verdict.py"), "a", encoding="utf-8") as fh:
+        fh.write("\n# an edit\n")
+    assert session._guard_drift(str(game))[1] == ["verdict.py"]
+
+
+@pytest.mark.parametrize("line,named", [
+    ("PY='C:/Temp/fake/python.exe'", True),          # the right shape, but not the interpreter the other files hold
+    ("PY=/tmp/fake", True),                           # not the shape setup.sh writes
+    ("PY='C:/Python310/python.exe'; exit 0", True),   # a command riding on the slot line
+    (None, False),                                    # the line as setup.sh wrote it
+], ids=["other-interpreter", "unquoted", "trailing-command", "untouched"])
+def test_an_edit_on_the_configured_line_still_shows(tmp_path, line, named):
+    root = tmp_path / "inst"
+    text = _gen().render()
+    for ln in text.splitlines()[1:]:
+        rel = ln.split("  ", 1)[1]
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        data = (REPO / rel).read_bytes()
+        if rel in guard_hash.CONFIGURED:                  # what setup.sh does, in exactly the files it does it to
+            data = data.replace(b"{{PYTHON_PATH}}", b"C:/Python310/python.exe").replace(b"{{BASH_PATH}}", b"C:/Git/bin/bash.exe")
+        (root / rel).write_bytes(data)
+    (root / "GUARD-FILES.sha256").write_text(text, encoding="utf-8")
+    hook = root / ".claude" / "hooks" / "protect-files.sh"
+    if line is not None:
+        body = hook.read_text(encoding="utf-8").replace("PY='C:/Python310/python.exe'", line)
+        hook.write_text(body, encoding="utf-8")
+    differ = session._guard_drift(str(root))[1]
+    assert differ == (["protect-files.sh"] if named else []), differ
+
+
+def test_a_second_slot_line_is_not_normalised_away():
+    body, values = guard_hash.normalised(".claude/hooks/protect-bash.sh", b"PY='/x/python'\nPY='/x/python'\n")
+    assert body == b"PY='{{PYTHON_PATH}}'\nPY='/x/python'\n"           # an ADDED PY line still hashes as a change
+    assert values == {"python": "/x/python"}
+
+
+def test_quote_escapes_in_the_interpreter_path_round_trip():
+    sh, v1 = guard_hash.normalised(".codex/hooks/skyguard-entry.sh", b"PY='C:/O'\\''Brien/py.exe'\r\nBASH_EXE='/b'\r\n")
+    assert sh == b"PY='{{PYTHON_PATH}}'\r\nBASH_EXE='{{BASH_PATH}}'\r\n"
+    ps, v2 = guard_hash.normalised(".codex/hooks/skyguard-entry.ps1", b"$PY = 'C:/O''Brien/py.exe'\r\n$BASHEXE = '/b'\r\n")
+    assert ps == b"$PY = '{{PYTHON_PATH}}'\r\n$BASHEXE = '{{BASH_PATH}}'\r\n"
+    assert v1 == v2 == {"python": "C:/O'Brien/py.exe", "bash": "/b"}
+    assert guard_hash.inconsistent([("a", v1), ("b", v2)]) == []
+
+
+def test_the_configured_set_is_setup_sh_s_own_loop_lists():
+    """guard_hash.CONFIGURED must name exactly the files setup.sh's two configure loops rewrite."""
+    import re
+    text = (REPO / "setup.sh").read_text(encoding="utf-8")
+    loops = re.findall(r"for hook in ((?:[^;]|\\\n)*?); do", text)
+    named = set(re.findall(r"\.(?:claude|codex)/hooks/[\w.-]+", " ".join(loops)))
+    assert named == set(guard_hash.CONFIGURED)
+    slots = {k: {s[0] for s in v} for k, v in guard_hash.CONFIGURED.items()}
+    for rel, kinds in slots.items():
+        src = (REPO / rel).read_text(encoding="utf-8")
+        assert ("{{PYTHON_PATH}}" in src) == ("python" in kinds) and ("{{BASH_PATH}}" in src) == ("bash" in kinds), rel
 

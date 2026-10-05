@@ -215,6 +215,55 @@ def _git_restore(argv) -> List[str]:
     return []
 
 
+# ---- deletes into the state (fix round 1, I1) ------------------------------------------------------------------------
+# S-DEL-INSTALL already refuses these, but guards off shadows it: `rm .skyguard/lock.json` then went through, and with no
+# lock manifest the next session start never relocks (a persistent off nobody approved). So a delete that reaches the
+# state -- a file in it or the folder itself -- is also S-SELF-STATE, never shadowed. (A delete of the whole install
+# stays S-DEL-INSTALL: it takes the game with it.)
+_QUOTED = re.compile(r"'([^'\n]{1,400})'|\"([^\"\n]{1,400})\"")
+# The Recycle-Bin delete (Microsoft.VisualBasic FileSystem.DeleteFile/DeleteDirectory): no Exec carries it, so it is a
+# text construct whose FIRST argument is the path.
+_RECYCLE = re.compile(r"FileSystem\]\s*::\s*Delete(?:File|Directory)\s*\(\s*(?:'([^'\n]{1,400})'|\"([^\"\n]{1,400})\")",
+                      re.IGNORECASE)
+
+
+def _reaches_state(a: str, roots) -> bool:
+    if roots is None or not a:
+        return False
+    rel = _rel(a, roots.install_dirs)
+    return rel is not None and rel[:1] == [".skyguard"]     # the folder or a file in it; not the install itself
+
+
+def _hit_name(a: str, w: str) -> str:
+    rel_name = re.split(r"[/\\]+", (a or w).rstrip("/\\"))[-1] or w
+    return rel_name if ".skyguard" in (a or w).lower() else ".skyguard"
+
+
+def _state_delete(e, cwd, env, roots) -> str:
+    """The name of what a delete by this exec removes from the state ("" for none): rm / Remove-Item / del / rd /
+    [IO.File]::Delete (deletes.operands), and interpreter code with a delete API and a quoted path into the state."""
+    from . import deletes
+    from .grep import grep
+    words = [w for w in (deletes.operands(e) or []) if isinstance(w, str)]
+    code = deletes.interpreter_code(e)
+    if code and (grep(deletes.DESTROYER, code) or grep(deletes.INTERP_DELETE, code)):
+        words += [m.group(1) or m.group(2) for m in _QUOTED.finditer(code)]
+    for w in words:
+        a = targets.resolve_operand(e, w, cwd, env)
+        if (a is not None and _reaches_state(a, roots)) or (a is None and text_kind(w) == STATE):
+            return _hit_name(a, w)
+    return ""
+
+
+def _recycle_delete(command: str, cwd, env, roots) -> str:
+    for m in _RECYCLE.finditer(command):
+        w = m.group(1) or m.group(2)
+        a = targets.resolve(w, cwd, "powershell", env)
+        if (a is not None and _reaches_state(a, roots)) or (a is None and text_kind(w) == STATE):
+            return _hit_name(a, w)
+    return ""
+
+
 def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, str]] = None):
     """(class, basename) of the first protected file a command writes, STATE before GUARD; None when it writes none."""
     from . import deletes
@@ -229,6 +278,14 @@ def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping
             k = kind_of(a, roots, env, holder) if a is not None else (STATE if text_kind(w) == STATE else "")
             if k and k not in found:
                 found[k] = re.split(r"[/\\]+", (a or w).rstrip("/\\"))[-1] or w
+        if STATE not in found:
+            hit = _state_delete(e, cwd, env, roots)
+            if hit:
+                found[STATE] = hit
+    if STATE not in found:
+        hit = _recycle_delete(command, cwd, env, roots)
+        if hit:
+            found[STATE] = hit
     for k in (STATE, GUARD):
         if k in found:
             return k, found[k]

@@ -150,6 +150,11 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     # Deletes (Task 7): decided on the commands that RUN and where their operands RESOLVE (deletes.py, E16).
     parsed = shellparse.parse(command, shell)
     dels = deletes.scan(command, parsed, roots, cwd, env)
+    # Plan 6 Task 12 (R12): a write -- or a delete (fix round 1, I1) -- into .skyguard/** is the CLI's alone. Checked before
+    # the delete deny, because S-DEL-INSTALL is shadowed by guards off and S-SELF-STATE is not.
+    own = self_rules.shell_scan(command, parsed, roots, cwd, env)
+    if own and own[0] == self_rules.STATE:
+        return deny("S-SELF-STATE", own[1])
     if dels.hit:
         rid, file = dels.hit
         reason = rules.message(rid, file=file) if "{file}" in rules.RULES[rid]["template"] else rules.message(rid)
@@ -174,10 +179,6 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     raw = lift_rules.raw_unlock(command, parsed, roots, cwd, env, shell)
     if raw:
         return deny(raw[0], raw[1])
-    # Plan 6 Task 12 (R12): a write into .skyguard/** is the CLI's alone; the guard code and config are priced below.
-    own = self_rules.shell_scan(command, parsed, roots, cwd, env)
-    if own and own[0] == self_rules.STATE:
-        return deny("S-SELF-STATE", own[1])
     # Task 11: the DevBench console reached by curl or devbench-cli.sh (mcp_rules.py judges the same calls as the MCP hook).
     dev = mcp_rules.scan_shell(command, parsed, roots, env)
     if dev and dev[0] == "S-DEVBENCH-CRASH":

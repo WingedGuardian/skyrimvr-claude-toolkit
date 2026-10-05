@@ -7,7 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import prefs
+from . import guard_hash, prefs
 
 HOOK = "session-kb-guard"
 
@@ -94,7 +94,7 @@ def _guard_drift(project):
         return None
     root = os.path.realpath(str(project))
     budget = {"bytes": 0, "deadline": time.monotonic() + TIME_CAP}
-    release, differ, unchecked, missing = "?", [], [], 0
+    release, differ, unchecked, missing, configured = "?", [], [], 0, []
     for line in text.splitlines()[:5000]:
         line = line.strip()
         if line.startswith("# release "):
@@ -114,8 +114,21 @@ def _guard_drift(project):
         except OSError:
             missing += 1
             continue
+        key = rel.replace(chr(92), "/")
         try:
-            got = _hash_capped(target, st.st_size, budget)
+            if key in guard_hash.CONFIGURED:
+                # Fix round 1 (C1): a file setup.sh configures is hashed in its repo form, and the interpreter it was
+                # given is compared across those files (guard_hash). Small files; the same caps apply.
+                got = None
+                fits = st.st_size <= FILE_CAP and budget["bytes"] + st.st_size <= TOTAL_CAP
+                if fits and time.monotonic() <= budget["deadline"]:
+                    with open(target, "rb") as fh:
+                        data = fh.read()
+                    budget["bytes"] += len(data)
+                    got, values = guard_hash.digest(key, data)
+                    configured.append((os.path.basename(rel), values))
+            else:
+                got = _hash_capped(target, st.st_size, budget)
         except OSError:
             missing += 1
             continue
@@ -123,6 +136,9 @@ def _guard_drift(project):
             unchecked.append(os.path.basename(rel))
         elif got != parts[0].lower():
             differ.append(os.path.basename(rel))
+    for name in guard_hash.inconsistent(configured):
+        if name not in differ:
+            differ.append(name)
     return release, differ, missing, unchecked
 
 
