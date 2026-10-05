@@ -53,7 +53,7 @@ def _names(keys) -> str:
 
 def parse(raw: str) -> Request:
     text = raw.replace("\x00", "")
-    if text.startswith("﻿"):
+    if text.startswith("\ufeff"):
         text = text[1:]
     try:
         d = json.loads(text)

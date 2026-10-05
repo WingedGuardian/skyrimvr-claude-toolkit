@@ -69,11 +69,11 @@ def test_ops_default_to_update_so_the_engine_takes_a_backup():
 
 
 def test_nul_and_bom_are_tolerated_like_the_other_adapters():
-    assert neutral.parse("﻿" + req().replace("{", "{\x00", 1)).kind == "write"
+    assert neutral.parse("\ufeff" + req().replace("{", "{\x00", 1)).kind == "write"
 
 
 def test_render_is_ascii_one_line_and_total():
-    v = Verdict("deny", "café – no", "", "evaluated", "write.DENY_PLUGIN")
+    v = Verdict("deny", "caf\u00e9 \u2013 no", "", "evaluated", "write.DENY_PLUGIN")
     out = neutral.render(v)
     out.encode("ascii")
     assert "\n" not in out and json.loads(out)["decision"] == "deny"
