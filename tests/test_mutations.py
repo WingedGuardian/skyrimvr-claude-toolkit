@@ -1522,6 +1522,42 @@ MUTATIONS = [
         'tests/test_skyguard_codex_adapter.py::test_cli_env_unreadable_text_is_agent_neutral',
         id='codex-env-refusal-names-the-claude-hook',
     ),
+    # Plan 7 Task 1: the agent-neutral engine entry (run.py neutral pre-tool).
+    pytest.param(
+        'tools/skyguard/neutral.py',
+        'if isinstance(d.get("v"), bool) or d.get("v") != 1:',
+        'if d.get("v") != 1:',
+        'tests/test_skyguard_neutral.py::test_malformed_requests_are_refused_with_the_reason[bool-version]',
+        id='neutral-bool-version-accepted',
+    ),
+    pytest.param(
+        'tools/skyguard/neutral.py',
+        '        v = Verdict("deny", BAD.format(e), status="failed", code="neutral.BAD_REQUEST")',
+        '        return ("", None)',
+        'tests/test_skyguard_neutral.py::test_handle_turns_a_bad_request_into_a_failed_deny_never_a_raise',
+        id='neutral-bad-request-not-a-deny',
+    ),
+    pytest.param(
+        'tools/skyguard/neutral.py',
+        'raise BadRequest("unknown field {}".format(_names(extra)))',
+        'raise BadRequest("unknown field {}".format(", ".join(extra)))',
+        'tests/test_skyguard_neutral.py::test_an_unknown_key_is_named_on_one_short_line',
+        id='neutral-unknown-key-echoed-raw',
+    ),
+    pytest.param(
+        'tools/skyguard/run.py',
+        'raise engine.RootsUnavailable(neutral.ENV_UNREADABLE)',
+        'raise engine.RootsUnavailable(ENV_UNREADABLE)',
+        'tests/test_skyguard_neutral.py::test_cli_unreadable_paths_file_is_a_neutral_failed_deny',
+        id='neutral-env-refusal-names-the-claude-hook',
+    ),
+    pytest.param(
+        'tools/skyguard/run.py',
+        '    from skyguard import neutral\n    if a.role != "pre-tool":',
+        '    from skyguard import neutral\n    if False:',
+        'tests/test_skyguard_neutral.py::test_cli_rejects_a_role_other_than_pre_tool_with_exit_1_and_no_stdout',
+        id='neutral-any-role-accepted',
+    ),
     pytest.param(
         'tools/skyguard/adapters/codex.py',
         '    if text.startswith("\\ufeff"):',

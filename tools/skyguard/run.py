@@ -107,6 +107,26 @@ def _codex(a, raw: str) -> int:
     return 0
 
 
+def _neutral(a, raw: str) -> int:
+    """Role pre-tool for an adapter this repo has no module for (ADAPTING.md). Output is SKYGUARD-OK + a
+    verdict line; the adapter owns the failure deny, exactly as the Codex wrappers do."""
+    from skyguard import neutral
+    if a.role != "pre-tool":
+        return 1
+    audit = Audit(a.project)
+
+    def roots_fn():
+        env = _declared_env(a)
+        if env is None:
+            raise engine.RootsUnavailable(neutral.ENV_UNREADABLE)
+        return paths.roots(a.root, a.root_win, env)
+
+    text, v = neutral.handle(raw, a.project, roots_fn, audit)
+    _telemetry(a, v)
+    _emit(text)
+    return 0
+
+
 def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
     if len(args) == 2 and args[0] == "--selftest":
@@ -125,7 +145,7 @@ def main(argv=None) -> int:
     except (OSError, ValueError, AttributeError, RuntimeError):
         pass   # no usable stderr: run unwatched rather than not at all (the wrapper's timeout still bounds a fallback)
     ap = argparse.ArgumentParser()
-    ap.add_argument("agent", choices=sorted(ADAPTERS))
+    ap.add_argument("agent", choices=sorted(ADAPTERS) + ["neutral"])
     ap.add_argument("role", choices=["protect-bash", "protect-files", "backup-before-edit",
                                      "snapshot-before-tool", "session-kb-guard", "protect-mcp"]
                     + list(CODEX_ROLES))
@@ -137,6 +157,10 @@ def main(argv=None) -> int:
     ap.add_argument("--telemetry", default="")
     a = ap.parse_args(argv)
     _ARGS.append(a)
+    if a.agent == "neutral":
+        # Plan 7: the agent-neutral role, for an adapter living outside this package (no ADAPTERS module).
+        # _neutral refuses every role but pre-tool with exit 1 (broken wiring, never a decision).
+        return _neutral(a, sys.stdin.buffer.read().decode("utf-8", "replace"))
     if (a.agent == "codex") != (a.role in CODEX_ROLES):
         return 1      # a role the agent does not have: broken wiring, never a decision
     adapter = ADAPTERS[a.agent]
