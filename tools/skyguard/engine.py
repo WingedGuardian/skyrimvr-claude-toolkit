@@ -145,6 +145,10 @@ def side_effects(req, project, audit, v) -> Verdict:
 
 SHADOW_HEAD = "Guards OFF: this would have been denied ({})."
 _LINE_MAX = 190
+# Plan 6 Task 11 (R7, R8): guards off never lifts the lock. Without this an agent could take `guards off` (a D6 lift it
+# may take) and then run `lock disable` with no ask -- a persistent off nobody approved -- or unlock a vanilla file
+# outside the CLI. These refusals stand under shadow mode, logged as `SHADOW <code> kept`.
+NEVER_SHADOW = frozenset(("shell.S-LIFT-PERMANENT", "shell.S-LIFT-RAW", "shell.S-LIFT-UNLOCKCMD"))
 
 
 def _reject_marker(project) -> Path:
@@ -208,6 +212,9 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
         # From here a guards lift is honoured: EVERY call writes a SHADOW line (spec; closes Table M's silence row).
         if not refusal:
             audit.log_strict("skyguard", "SHADOW", "allow")
+            return v
+        if v.code in NEVER_SHADOW:                          # Plan 6 Task 11: guards off never lifts the lock
+            audit.log_strict("skyguard", "SHADOW", "{} kept ({}; a lift rule)".format(v.code, v.decision))
             return v
         if v.status == "failed" or codes._inert(v.code) or v.code == "unknown":
             audit.log_strict("skyguard", "SHADOW", "{} kept ({})".format(v.code, v.decision))

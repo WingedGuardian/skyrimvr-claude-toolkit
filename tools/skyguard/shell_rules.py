@@ -13,6 +13,7 @@ import re
 from . import anchored
 from . import audit as _audit
 from . import deletes
+from . import lift_rules
 from . import mcp_rules
 from . import paths
 from . import rules
@@ -168,6 +169,10 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     champ = anchored.champollion(command, parsed, roots, cwd, env)
     if champ:
         return deny("S-CHAMPOLLION", champ)
+    # Plan 6 Task 11: unlocking a lock target outside the skyguard CLI (whatever --session says), or the user's .cmd.
+    raw = lift_rules.raw_unlock(command, parsed, roots, cwd, env, shell)
+    if raw:
+        return deny(raw[0], raw[1])
     # Task 11: the DevBench console reached by curl or devbench-cli.sh (mcp_rules.py judges the same calls as the MCP hook).
     dev = mcp_rules.scan_shell(command, parsed, roots, env)
     if dev and dev[0] == "S-DEVBENCH-CRASH":
@@ -197,6 +202,16 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         reason = rules.message(dev[0], **dev[1])
         audit.rule(HOOK, dev[0], "ask", reason)
         return Verdict("ask", reason)
+
+    # Plan 6 Task 11 (R7): a persistent `lock disable` is the user's to approve (deny on Codex, via the adapter).
+    if lift_rules.permanent(parsed, command):
+        reason = rules.message("S-LIFT-PERMANENT")
+        audit.rule(HOOK, "S-LIFT-PERMANENT", "ask", reason)
+        return Verdict("ask", reason)
+    # D6: `lock unlock` / `guards off` are lifts the agent may take; it is told what that means.
+    lifted = lift_rules.note(parsed)
+    if lifted:
+        advise("S-LIFT-NOTE", op=lifted)
 
     tool = anchored.external_out(parsed, roots, cwd, env)
     if tool:

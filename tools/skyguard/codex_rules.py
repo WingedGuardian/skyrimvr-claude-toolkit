@@ -43,6 +43,12 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
         "hook_only", "a prefix would also prompt every dry-run; `--apply` position varies (R4)"),
     "shell.S-DEVBENCH-CRASH": ("hook_only", "the console command is inside a JSON body or an MCP argument"),
     "shell.S-DEVBENCH-SAVE": ("hook_only", "depends on whether the save file exists"),
+    # Plan 6 Task 11: hook_only. A `forbidden` prefix could also refuse the USER's own `!` command (not measured),
+    # and running skyguard-unlock.cmd / `lock disable` themselves is what a Codex user is told to do; the operand of
+    # S-LIFT-RAW is path-based. The ask of S-LIFT-PERMANENT reaches Codex as a deny through the adapter (R4).
+    "shell.S-LIFT-RAW": ("hook_only", _PATH),
+    "shell.S-LIFT-UNLOCKCMD": ("hook_only", "the user runs it themselves; a prefix could refuse the user too"),
+    "shell.S-LIFT-PERMANENT": ("hook_only", "the user runs it themselves; a prefix could refuse the user too"),
     "mcp.S-INERT-NOINPUT": ("hook_only", _INERT),
     "write.DENY_PLUGIN": ("hook_only", "a file write, not a command"),
     "write.NO_PATH_DENY": ("hook_only", _INERT),

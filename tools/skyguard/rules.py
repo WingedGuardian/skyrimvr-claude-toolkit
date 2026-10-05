@@ -275,6 +275,47 @@ RULES = {
         'Yes goes ahead; an overwritten save is not kept.'
     ),
     },
+    # Plan 6 Task 11 (D6, R7): the lift rules (lift_rules.py). The CLI lifts are D6's: allowed, with a note. A
+    # persistent off is the user's (ask; the Codex adapter makes it a deny). An unlock outside the CLI is refused.
+    'S-LIFT-NOTE': {
+        "decision": 'advise',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Note: this lifts {op} until the next session starts. Tell the user why, and restore it when done.'
+    ),
+    },
+    'S-LIFT-RAW': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: this unlocks {file} outside skyguard, so the lift is not logged and never expires.\n'
+        'Use: tools/skyguard lock unlock {file}'
+    ),
+    },
+    'S-LIFT-UNLOCKCMD': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: skyguard-unlock.cmd lifts the whole lock with no log and no expiry; it is for the user to run.\n'
+        'Use: tools/skyguard lock unlock <file>, or ask the user to run the .cmd themselves.'
+    ),
+    },
+    'S-LIFT-PERMANENT': {
+        "decision": 'ask',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'This turns the vanilla-file lock off for every future session, not only this one.\n'
+        'Yes disables it until tools/skyguard lock enable.'
+    ),
+    },
     'S-INERT-NOINPUT': {
         "decision": 'deny',
         "hook": 'protect-mcp',

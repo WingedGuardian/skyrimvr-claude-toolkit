@@ -282,6 +282,7 @@ def _rows():
 
 
 REC, CORPUS = _rows()
+_NEVER_SHADOW_IDS = {c.split(".", 1)[1] for c in engine.NEVER_SHADOW}
 
 
 @pytest.fixture(scope="module")
@@ -343,7 +344,7 @@ def test_the_corpus_has_refusals_to_shadow():
 
 def test_every_denied_or_asked_corpus_row_is_shadowed_except_the_inert_ones(corpus_run):
     installs, hb = corpus_run
-    problems, inert, converted = [], 0, 0
+    problems, inert, converted, kept = [], 0, 0, 0
     for row in CORPUS:
         inst = installs[row["layout"]]
         base = _fire(inst, hb, row, "on-sess")
@@ -351,6 +352,11 @@ def test_every_denied_or_asked_corpus_row_is_shadowed_except_the_inert_ones(corp
             continue                                     # the corpus row is not refused on this machine: not ours
         reason = base["permissionDecisionReason"]
         got = _fire(inst, hb, row, "off-sess")
+        if set(row.get("rules") or ()) & _NEVER_SHADOW_IDS:
+            kept += 1                                    # Plan 6 Task 11: guards off never lifts the lock (R7, R8)
+            if got.get("permissionDecision") != base["permissionDecision"] or got.get("permissionDecisionReason") != reason:
+                problems.append((row["id"], "a lift rule was shadowed", got))
+            continue
         if reason.startswith("GUARD INERT"):
             inert += 1
             if got.get("permissionDecision") != "deny" or got.get("permissionDecisionReason") != reason:
@@ -364,7 +370,7 @@ def test_every_denied_or_asked_corpus_row_is_shadowed_except_the_inert_ones(corp
         else:
             converted += 1
     assert not problems, problems[:5]
-    assert converted >= 100 and inert >= 1, (converted, inert)
+    assert converted >= 100 and inert >= 1 and kept >= 10, (converted, inert, kept)
 
 
 def test_the_codex_hook_entry_point_honours_the_lift(tmp_path):
