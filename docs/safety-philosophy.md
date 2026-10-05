@@ -13,12 +13,13 @@ This toolkit was built after experiencing all of these. Every safety feature exi
 
 ## Defense in Depth
 
-The toolkit uses multiple layers of protection:
+The toolkit uses several defenses, one behind the other. (They are numbered as defenses, not layers: the
+"Layers 0-2" of `ADAPTING.md` are a different list, about what an agent the toolkit does not wire itself gets.)
 
-### Layer 1: Knowledge (KNOWLEDGEBASE.md)
+### Defense 1: Knowledge (KNOWLEDGEBASE.md)
 Before making any change, Claude is instructed to check the knowledgebase for known pitfalls. Many Skyrim modding errors are well-documented but easy to forget.
 
-### Layer 2: Confidence Levels
+### Defense 2: Confidence Levels
 Claude must explicitly rate its confidence (0-100%) before proposing any change and list assumptions. This forces investigation before action.
 
 #### Confidence scale
@@ -29,7 +30,7 @@ Claude must explicitly rate its confidence (0-100%) before proposing any change 
 | 60-79% | Reasonable assumption, some unknowns | Research more before proceeding |
 | < 60% | Speculative | Do NOT proceed -- investigate first |
 
-### Layer 3: Hook Guards
+### Defense 3: Hook Guards
 Six thin wrappers over the Python engine `tools/skyguard/` intercept Claude's tool calls:
 
 - **protect-bash.sh** -- Blocks destructive commands; **advises** on file operations in the game directory (a note to Claude, not a prompt to you)
@@ -44,10 +45,10 @@ Six thin wrappers over the Python engine `tools/skyguard/` intercept Claude's to
   Edit/Write hook. Measured on the author's install: zero knowledgebase backups in
   seven months, with the backup hook working correctly throughout.
 
-### Layer 4: Dry-Run Convention
+### Defense 4: Dry-Run Convention
 ESP modifications via xelib always use a two-pass workflow: read-only preview, then write only after human approval.
 
-### Layer 5: Audit Trail
+### Defense 5: Audit Trail
 Every file modification is logged with timestamp, tool name, and backup location. If something goes wrong, you can trace exactly what changed and when.
 
 ## Design Principles

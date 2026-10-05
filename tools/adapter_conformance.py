@@ -9,7 +9,6 @@ import json
 import os
 import re
 import secrets
-import shlex
 import shutil
 import subprocess
 import sys
@@ -26,7 +25,12 @@ SHELL_PAIR = ("decoy-plugin-shell", "benign-shell")
 EXPECTED = {"decoy-plugin-write": "block", "decoy-plugin-shell": "block", "empty-payload": "block",
             "garbage-payload": "block", "benign-write": "allow", "benign-shell": "allow"}
 PROBE_TIMEOUT_S = float(os.environ.get("SKYGUARD_CONF_TIMEOUT_S", "15"))
-SHELL_NOTE = "SHELL UNGUARDED (profile says no shell tool)"
+SHELL_NOTE = "SHELL UNGUARDED (profile lists no shell tool)"
+# The profile names every tool of the agent that writes a file or runs a command; each needs its own decoy case
+# (id decoy-plugin-write or decoy-plugin-write:<anything>, with "tool": <name>; the same for shell).
+TOOL_LISTS = ("write_tools", "shell_tools")
+DECOY = {"write_tools": "decoy-plugin-write", "shell_tools": "decoy-plugin-shell"}
+UNMAPPED_NOTE = "UNMAPPED TOOLS ARE NOT GUARDED"
 # The fake engines write BYTES: print() on Windows ends a line with CRLF, which would break the marker check
 # for a reason that is not the fault being tested.
 _W = "import sys\nw = sys.stdout.buffer.write\n"
@@ -95,8 +99,17 @@ def _profile_problem(p: dict) -> Optional[str]:
                 return "exit codes must be integers"
         if not (b.get("stdout_regex") or b.get("stderr_regex")) and b["exit"] == a["exit"]:
             return "block cannot be told from allow: give a different exit code or a regex"
-        if not isinstance(p.get("has_shell", True), bool):
-            return "has_shell must be true or false"
+        if "has_shell" in p:
+            return "has_shell is replaced by shell_tools (an empty list means the agent has no shell tool)"
+        for key in TOOL_LISTS:
+            tools = p.get(key)
+            if not (isinstance(tools, list) and all(isinstance(t, str) and t.strip() for t in tools)
+                    and len(set(tools)) == len(tools)):
+                return "{} must be a list of distinct tool names, as your agent names them".format(key)
+        if not p["write_tools"]:
+            return "write_tools must list every tool that writes or edits a file (at least one)"
+        if set(p["write_tools"]) & set(p["shell_tools"]):
+            return "a tool cannot be in both write_tools and shell_tools"
         for key in ("stdout_regex", "stderr_regex"):
             if b.get(key):
                 re.compile(b[key])
@@ -171,8 +184,9 @@ def _kill_tree(p: "subprocess.Popen") -> None:
         pass
 
 
-def _case_problems(by_id: dict, has_shell: bool = True) -> List[Row]:
+def _case_problems(by_id: dict, profile: dict) -> List[Row]:
     rows: List[Row] = []
+    has_shell = bool(profile["shell_tools"])
     for rid in REQUIRED + (SHELL_PAIR if has_shell else ()):
         if rid not in by_id:
             rows.append(Row("case:" + rid, False, "required case missing"))
@@ -181,27 +195,78 @@ def _case_problems(by_id: dict, has_shell: bool = True) -> List[Row]:
     for cid, want in EXPECTED.items():
         if cid in by_id and by_id[cid].get("expect") != want:
             rows.append(Row("case:" + cid, False, "this case must expect " + want))
+    # One decoy per listed tool: a write tool the slots leave unmapped is sent as `other` and ALLOWED unjudged,
+    # which only a decoy case through that very tool can show.
+    for key, base in DECOY.items():
+        covered = set()
+        for cid, case in by_id.items():
+            if not (isinstance(cid, str) and (cid == base or cid.startswith(base + ":"))):
+                continue
+            tool = case.get("tool")
+            if case.get("expect") != "block":
+                rows.append(Row("case:" + cid, False, "a decoy case must expect block"))
+            if not isinstance(tool, str) or not tool:
+                rows.append(Row("case:" + cid, False, 'a decoy case must name its tool ("tool": one of the profile\'s '
+                                "{})".format(key)))
+            elif tool not in profile[key]:
+                rows.append(Row("case:" + cid, False, "tool {!r} is not listed in the profile's {}".format(tool, key)))
+            else:
+                covered.add(tool)
+        for tool in profile[key]:
+            if tool not in covered:
+                rows.append(Row("case:{}:{}".format(base, tool), False,
+                                'no decoy case for {!r}: every tool in {} needs its own (id "{}:<name>", '
+                                '"tool": {!r}, expect block)'.format(tool, key, base, tool)))
     return rows
 
 
-def run_conformance(adapter_dir, profile: dict, cases: dict, command: Optional[str] = None,
+def unmapped_note(profile: dict) -> str:
+    return ("{}: conformance probed only write_tools {} and shell_tools {}. Any other tool is sent as kind other "
+            "and allowed unjudged, so every tool that writes a file or runs a command must be in those lists"
+            .format(UNMAPPED_NOTE, profile.get("write_tools"), profile.get("shell_tools")))
+
+
+def build_argv(command: Optional[list], adapter_dir: Path) -> list:
+    """The adapter's argv as a LIST, placeholders substituted per element after the list exists: a path is one
+    argv word whatever it contains. Never a string that something must split."""
+    if command is None:
+        return [sys.executable, str(Path(adapter_dir) / "adapter.py")]
+    sub = {"{DIR}": str(adapter_dir), "{PY}": sys.executable}
+    out = []
+    for word in command:
+        for k, v in sub.items():
+            word = word.replace(k, v)
+        out.append(word)
+    return out
+
+
+def run_conformance(adapter_dir, profile: dict, cases: dict, command: Optional[list] = None,
                     port: bool = False, repo: Path = REPO) -> List[Row]:
     rows: List[Row] = []
     adapter_dir = Path(adapter_dir)
     prob = _profile_problem(profile)
     if prob:
         return [Row("profile", False, prob)]
-    by_id = {c.get("id"): c for c in cases.get("cases", []) if isinstance(c, dict)}
-    if command and not port:
+    listed = [c for c in cases.get("cases", []) if isinstance(c, dict)]
+    by_id = {c.get("id"): c for c in listed}
+    if command is not None and not port:
         # The identity check hashes <adapter-dir>/adapter.py. A --command may run some OTHER file, so it would
         # certify one file and run another. Only a declared port (identity skipped, loudly) may bring a command.
         return [Row("command", False, "--command needs --port: the template-identity check hashes adapter.py, "
                     "which a custom command does not necessarily run")]
-    has_shell = profile.get("has_shell", True)
-    rows = _case_problems(by_id, has_shell)
+    if command is not None and not (isinstance(command, list) and command
+                                    and all(isinstance(a, str) and a for a in command)):
+        # A command STRING would have to be split, and splitting cuts a path with a space (C:/Program Files,
+        # C:/Users/John Smith) or an apostrophe into several argv words: a false FAILED OPEN on every row.
+        return [Row("command", False, 'the command must be a JSON list of argv strings, e.g. ["{PY}", "{DIR}/run.py"]; '
+                    "a command string is never split")]
+    ids = [c.get("id") for c in listed]
+    rows = [Row("case:{}".format(i), False, "duplicate case id: one case would silently shadow the other")
+            for i in sorted({i for i in ids if ids.count(i) > 1}, key=str)]
+    rows += _case_problems(by_id, profile)
     if rows:
         return rows
-    if not has_shell:
+    if not profile["shell_tools"]:
         rows.append(Row("shell-unguarded", True, SHELL_NOTE))
     entry = adapter_dir / "adapter.py"
     if port:
@@ -218,13 +283,7 @@ def run_conformance(adapter_dir, profile: dict, cases: dict, command: Optional[s
 
     with tempfile.TemporaryDirectory() as td:
         root = make_install(adapter_dir, Path(td) / "install", repo)
-        sub = {"{DIR}": str(root / "tools" / "adapters" / adapter_dir.name), "{PY}": sys.executable}
-        cmd = command or "{PY} {DIR}/adapter.py"
-        for k, v in sub.items():
-            cmd = cmd.replace(k, v)
-        argv = shlex.split(cmd, posix=(os.name != "nt"))
-        if os.name == "nt":
-            argv = [a[1:-1] if len(a) > 1 and a[0] == a[-1] == '"' else a for a in argv]
+        argv = build_argv(command, root / "tools" / "adapters" / adapter_dir.name)
         env = dict(os.environ)
         env.pop("SKYGUARD_ADAPTER_TIMEOUT_S", None)
         hung = False
@@ -293,21 +352,29 @@ LEAVES = (
     "skills_dir.path",
     "pre_tool_hook.exists", "pre_tool_hook.fires_on_this_surface", "pre_tool_hook.can_block",
     "pre_tool_hook.block_mechanism", "pre_tool_hook.can_ask", "pre_tool_hook.failed_hook_behaviour",
-    "pre_tool_hook.hook_timeout_s",
+    "pre_tool_hook.hook_timeout_s", "pre_tool_hook.every_write_and_shell_tool_mapped",
     "session_start.exists", "session_start.injects_context",
     "payload_capture.method", "payload_capture.files",
-    "proof.conformance_passed", "proof.live_canary_blocked", "proof.canary_evidence",
+    "proof.conformance_passed", "proof.live_canary_blocked", "proof.live_shell_canary_blocked",
+    "proof.canary_evidence",
 )
+PROOF_BOOLS = ("proof.conformance_passed", "proof.live_canary_blocked", "proof.live_shell_canary_blocked")
 # Leaves that are NOT {"value","tier","evidence"} data: the version, the agent identity, the file list, the proof.
 PLAIN_LEAVES = ("v", "agent.name", "agent.version", "agent.surface", "payload_capture.files",
-                "proof.conformance_passed", "proof.live_canary_blocked", "proof.canary_evidence")
+                "proof.canary_evidence") + PROOF_BOOLS
 TIERS = ("MEASURED", "READ", "INFERRED", "ASSUMED")
 STATUS_FULL = "locally adapted, self-verified"
 STATUS_PARTIAL = "partially supported: Layers 0-2"
 _RANK = {STATUS_PARTIAL: 0, STATUS_FULL: 1}
 FAILED_HOOK_VALUES = ("allows", "blocks", "unknown")
-# The leaves that gate the strong status (all must be MEASURED); the value each must hold is in _gate().
-GATING = ("pre_tool_hook.fires_on_this_surface", "pre_tool_hook.can_block", "pre_tool_hook.failed_hook_behaviour")
+# The leaves that gate the strong status (all must be MEASURED); the value each must hold is in _gate_holds().
+GATING = ("pre_tool_hook.fires_on_this_surface", "pre_tool_hook.can_block", "pre_tool_hook.failed_hook_behaviour",
+          "pre_tool_hook.every_write_and_shell_tool_mapped")
+# The agent's hook timeout gates too, unless a failed hook BLOCKS: a hook the agent gives up on before the adapter
+# answers lets the call RUN on an agent whose failed hook allows. Read from the template, so the two cannot drift.
+TIMEOUT_GATE = "pre_tool_hook.hook_timeout_s"
+ADAPTER_TIMEOUT_S = int(re.search(r"^ADAPTER_TIMEOUT_S = (\d+)", TEMPLATE.read_text(encoding="utf-8"), re.M).group(1))
+HOOK_TIMEOUT_MARGIN_S = 5    # Python start-up and the engine's own spawn, on a loaded machine
 _MISSING = object()
 
 
@@ -334,14 +401,26 @@ def _has_evidence(report, path: str) -> bool:
     return isinstance(ev, str) and bool(ev.strip())
 
 
+def _is_seconds(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
+
+
+def _measured(report, path: str, ok_value) -> bool:
+    value, tier = _data(report, path)
+    return tier == "MEASURED" and ok_value(value) and _has_evidence(report, path)
+
+
 def _gate_holds(report) -> bool:
     for path, ok_value in (("pre_tool_hook.fires_on_this_surface", lambda v: v is True),
                            ("pre_tool_hook.can_block", lambda v: v is True),
-                           ("pre_tool_hook.failed_hook_behaviour", lambda v: v in ("allows", "blocks"))):
-        value, tier = _data(report, path)
-        if tier != "MEASURED" or not ok_value(value) or not _has_evidence(report, path):
+                           ("pre_tool_hook.failed_hook_behaviour", lambda v: v in ("allows", "blocks")),
+                           ("pre_tool_hook.every_write_and_shell_tool_mapped", lambda v: v is True)):
+        if not _measured(report, path, ok_value):
             return False
-    return True
+    if _data(report, "pre_tool_hook.failed_hook_behaviour")[0] == "blocks":
+        return True
+    return _measured(report, TIMEOUT_GATE,
+                     lambda v: _is_seconds(v) and v >= ADAPTER_TIMEOUT_S + HOOK_TIMEOUT_MARGIN_S)
 
 
 def derive_status(report) -> str:
@@ -352,7 +431,7 @@ def derive_status(report) -> str:
     if not isinstance(proof, dict):
         return STATUS_PARTIAL
     evidence = proof.get("canary_evidence")
-    if (proof.get("conformance_passed") is True and proof.get("live_canary_blocked") is True
+    if (all(proof.get(p.split(".")[1]) is True for p in PROOF_BOOLS)
             and isinstance(evidence, str) and evidence.strip()):
         return STATUS_FULL
     return STATUS_PARTIAL
@@ -379,7 +458,7 @@ def validate_report(report) -> List[str]:
         if leaf == "v":
             if type(value) is not int or value != 1:
                 problems.append("v: must be the integer 1")
-        elif leaf in ("proof.conformance_passed", "proof.live_canary_blocked"):
+        elif leaf in PROOF_BOOLS:
             if not isinstance(value, bool):
                 problems.append("{}: must be true or false".format(leaf))
         elif leaf == "payload_capture.files":
@@ -400,6 +479,8 @@ def validate_report(report) -> List[str]:
                 problems.append("{}: evidence must name a file or command".format(leaf))
             if leaf == "pre_tool_hook.failed_hook_behaviour" and value.get("value") not in FAILED_HOOK_VALUES:
                 problems.append("{}: value must be one of {}".format(leaf, "|".join(FAILED_HOOK_VALUES)))
+            if leaf == TIMEOUT_GATE and not _is_seconds(value.get("value")):
+                problems.append("{}: value must be the agent's hook timeout in seconds, a positive number".format(leaf))
         elif value not in ("", None):
             problems.append("{}: a filled leaf must be {{value, tier, evidence}}".format(leaf))
     exists, _ = _data(report, "pre_tool_hook.exists")
@@ -414,7 +495,7 @@ def validate_report(report) -> List[str]:
                             "'supported'".format(STATUS_FULL, STATUS_PARTIAL))
         elif _RANK[claim] > _RANK[derived]:
             problems.append("claimed_status: claims '{}' but the measured leaves only derive '{}'".format(claim, derived))
-            for path in GATING:
+            for path in GATING + (TIMEOUT_GATE,):
                 _, tier = _data(report, path)
                 if tier in ("INFERRED", "ASSUMED"):
                     problems.append("{}: tier {} cannot support the stronger status".format(path, tier))
@@ -457,10 +538,18 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     if a.cmd == "report":
         return report_main(a.file)
-    rows = run_conformance(a.adapter_dir, json.loads(Path(a.profile).read_text(encoding="utf-8")),
-                           json.loads(Path(a.cases).read_text(encoding="utf-8")), a.command, a.port)
+    command = a.command
+    if command is not None:
+        try:
+            command = json.loads(command)     # a JSON argv list; anything else is refused by run_conformance
+        except ValueError:
+            pass
+    profile = json.loads(Path(a.profile).read_text(encoding="utf-8"))
+    rows = run_conformance(a.adapter_dir, profile, json.loads(Path(a.cases).read_text(encoding="utf-8")), command, a.port)
     for row in rows:
         print("{} {}: {}".format("PASS" if row.ok else "FAIL", row.id, row.why))
+    if not any(r.id == "profile" for r in rows):
+        print(unmapped_note(profile))
     print(summary(rows))
     return 0 if all(r.ok for r in rows) else 1
 

@@ -23,9 +23,12 @@ TPL = REPO / "tools" / "adapting" / "adapter_template.py"
 # profile -> (slots file, adapter profile). A profile regex is fully anchored over the whole stream.
 PROFILES = {
     "json-deny": ("json_deny.slots.py", {"block": {"exit": 0, "stdout_regex": '\\{"toy_decision": "block".*', "stderr_regex": None},
-                                         "allow": {"exit": 0}}),
-    "exit2": ("exit2.slots.py", {"block": {"exit": 2, "stdout_regex": None, "stderr_regex": None}, "allow": {"exit": 0}}),
+                                         "allow": {"exit": 0}, "write_tools": ["write_file"], "shell_tools": ["run_shell"]}),
+    "exit2": ("exit2.slots.py", {"block": {"exit": 2, "stdout_regex": None, "stderr_regex": None}, "allow": {"exit": 0},
+                                 "write_tools": ["edit"], "shell_tools": ["sh"]}),
 }
+# The tool names the toy agent uses for each op, per profile (tests/toyagent/toy_agent.py native()).
+TOOL = {"json-deny": {"write": "write_file", "shell": "run_shell"}, "exit2": {"write": "edit", "shell": "sh"}}
 # The pinned engine wording (Task 0 measurement note, section 4), asserted by text and not by a guess.
 PLUGIN_WRITE_TEXT = "plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly"
 PLUGIN_SHELL_TEXT = "writes Decoy.esp as raw text"
@@ -49,10 +52,12 @@ def cases_for(profile: str) -> dict:
         return ({"hook": "pre", "call": {"name": "edit", "file": kw["path"]}, "cwd": "{ROOT}"}
                 if op == "write" else {"hook": "pre", "call": {"name": "sh", "cmdline": kw["cmd"]}, "cwd": "{ROOT}"})
     return {"cases": [
-        {"id": "decoy-plugin-write", "expect": "block", "payload": n("write", path="{ROOT}/Data/Decoy.esp")},
+        {"id": "decoy-plugin-write", "tool": TOOL[profile]["write"], "expect": "block",
+         "payload": n("write", path="{ROOT}/Data/Decoy.esp")},
         {"id": "benign-write", "expect": "allow", "payload": n("write", path="{ROOT}/notes.txt")},
         # quoted: an install path may contain a space, and an unquoted redirect then targets the wrong file
-        {"id": "decoy-plugin-shell", "expect": "block", "payload": n("shell", cmd='echo x > "{ROOT}/Data/Decoy.esp"')},
+        {"id": "decoy-plugin-shell", "tool": TOOL[profile]["shell"], "expect": "block",
+         "payload": n("shell", cmd='echo x > "{ROOT}/Data/Decoy.esp"')},
         {"id": "benign-shell", "expect": "allow", "payload": n("shell", cmd="echo hello")},
         {"id": "empty-payload", "expect": "block", "payload": ""},
         {"id": "garbage-payload", "expect": "block", "payload_hex": "6e6f74206a736f6e00ff"},

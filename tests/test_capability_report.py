@@ -40,12 +40,78 @@ def measured_report() -> dict:
         "pre_tool_hook": {
             "exists": d(True), "fires_on_this_surface": d(True), "can_block": d(True),
             "block_mechanism": d("exit 2"), "can_ask": d(False), "failed_hook_behaviour": d("allows"),
-            "hook_timeout_s": d(30),
+            "hook_timeout_s": d(30), "every_write_and_shell_tool_mapped": d(True),
         },
         "session_start": {"exists": d(False), "injects_context": d(False)},
         "payload_capture": {"method": d("tee to a file"), "files": ["a.json"]},
-        "proof": {"conformance_passed": True, "live_canary_blocked": True, "canary_evidence": "canary.log line 3"},
+        "proof": {"conformance_passed": True, "live_canary_blocked": True, "live_shell_canary_blocked": True,
+                  "canary_evidence": "canary.log line 3"},
     }
+
+
+# ---- final review I1: a hook timeout shorter than the adapter's deadline runs the call when the hook fails ----
+@pytest.mark.parametrize("timeout", [5, 25, 29, 29.9])
+def test_a_hook_timeout_without_margin_over_the_adapter_deadline_demotes_when_a_failed_hook_allows(timeout):
+    r = measured_report()
+    r["pre_tool_hook"]["hook_timeout_s"] = d(timeout)
+    assert conf.derive_status(r) == PARTIAL
+    assert conf.validate_report(r) == []          # an honest short timeout is a gap, not a malformed report
+
+
+def test_the_reviewers_report_with_a_5s_timeout_is_not_locally_adapted(tmp_path):
+    r = measured_report()
+    r["pre_tool_hook"]["hook_timeout_s"] = d(5)
+    r["pre_tool_hook"]["failed_hook_behaviour"] = d("allows")
+    cp = run_cli(tmp_path, r)
+    assert cp.stdout.decode().splitlines()[0] == PARTIAL
+
+
+def test_the_timeout_threshold_is_the_template_deadline_plus_the_margin():
+    tpl = (REPO / "tools" / "adapting" / "adapter_template.py").read_text(encoding="ascii")
+    assert "ADAPTER_TIMEOUT_S = {}    #".format(conf.ADAPTER_TIMEOUT_S) in tpl
+    r = measured_report()
+    r["pre_tool_hook"]["hook_timeout_s"] = d(conf.ADAPTER_TIMEOUT_S + conf.HOOK_TIMEOUT_MARGIN_S)
+    assert conf.derive_status(r) == FULL
+
+
+@pytest.mark.parametrize("tier,evidence", [("INFERRED", "x.log"), ("ASSUMED", "x.log"), ("MEASURED", ""), ("READ", "x")])
+def test_a_hook_timeout_that_is_not_measured_and_evidenced_demotes(tier, evidence):
+    r = measured_report()
+    r["pre_tool_hook"]["hook_timeout_s"] = d(60, tier=tier, evidence=evidence)
+    assert conf.derive_status(r) == PARTIAL
+
+
+@pytest.mark.parametrize("value", ["banana", True, None, -1, 0, "60", [60]])
+def test_a_hook_timeout_that_is_not_a_positive_number_is_a_problem_and_demotes(value):
+    r = measured_report()
+    r["pre_tool_hook"]["hook_timeout_s"] = d(value)
+    assert conf.derive_status(r) == PARTIAL
+    assert any("pre_tool_hook.hook_timeout_s" in p for p in conf.validate_report(r)), value
+
+
+def test_a_failed_hook_that_blocks_needs_no_timeout_margin():
+    """A hook that times out and BLOCKS fails closed by itself: the timeout cannot open anything."""
+    r = measured_report()
+    r["pre_tool_hook"]["failed_hook_behaviour"] = d("blocks")
+    r["pre_tool_hook"]["hook_timeout_s"] = d(5)
+    assert conf.derive_status(r) == FULL
+
+
+# ---- final review I2/I3: every write and shell tool mapped, and a live SHELL canary -------------------------
+@pytest.mark.parametrize("leaf", [d(False), d(True, tier="INFERRED"), d(True, evidence="")])
+def test_the_every_tool_mapped_leaf_gates_the_status(leaf):
+    r = measured_report()
+    r["pre_tool_hook"]["every_write_and_shell_tool_mapped"] = leaf
+    assert conf.derive_status(r) == PARTIAL
+
+
+@pytest.mark.parametrize("value", [False, "yes", None])
+def test_the_live_shell_canary_gates_the_status(value):
+    r = measured_report()
+    r["proof"]["live_shell_canary_blocked"] = value
+    assert conf.derive_status(r) == PARTIAL
+    if value is not False:
+        assert any("proof.live_shell_canary_blocked" in p for p in conf.validate_report(r))
 
 
 def run_cli(tmp_path, report):
@@ -89,7 +155,8 @@ def test_a_gating_leaf_with_the_wrong_value_demotes_the_status(path, value):
 
 
 @pytest.mark.parametrize("key,value", [
-    ("live_canary_blocked", False), ("conformance_passed", False), ("canary_evidence", ""),
+    ("live_canary_blocked", False), ("live_shell_canary_blocked", False), ("conformance_passed", False),
+    ("canary_evidence", ""),
     ("canary_evidence", "   "), ("live_canary_blocked", "yes"),
 ])
 def test_the_proof_block_must_be_true_and_evidenced(key, value):
@@ -225,7 +292,8 @@ def test_cli_prints_the_derived_status_for_a_clean_full_report(tmp_path):
     assert cp.returncode == 0 and cp.stdout.decode().splitlines()[0] == FULL
 
 
-@pytest.mark.parametrize("leaf", ["fires_on_this_surface", "can_block", "failed_hook_behaviour"])
+@pytest.mark.parametrize("leaf", ["fires_on_this_surface", "can_block", "failed_hook_behaviour",
+                                  "every_write_and_shell_tool_mapped"])
 @pytest.mark.parametrize("empty", ["", "   ", None])
 def test_a_gating_leaf_with_no_evidence_does_not_count(leaf, empty):
     r = measured_report()

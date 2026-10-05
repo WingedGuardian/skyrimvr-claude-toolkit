@@ -208,12 +208,51 @@ def test_the_conformance_rows_and_faults_the_doc_describes_exist_in_the_tool():
     faults = set(conf.FAULTS) | set(conf.VERDICT_FAULTS)
     named = set(re.findall(r"`(engine-[a-z0-9-]+)`", sec6))
     assert named == faults, sorted(named ^ faults)
-    for phrase in ("CONFORMANCE PASS", "UNVERIFIED STRUCTURE", conf.SHELL_NOTE.split(" (")[0], "has_shell",
-                   "--port", "--command", "--profile", "--cases", "--adapter-dir"):
+    for phrase in ("CONFORMANCE PASS", "UNVERIFIED STRUCTURE", conf.SHELL_NOTE.split(" (")[0], conf.UNMAPPED_NOTE,
+                   "--port", "--command", "--profile", "--cases", "--adapter-dir", "JSON list") + conf.TOOL_LISTS:
         assert phrase in sec6, phrase + " missing from section 6"
+    for base in conf.DECOY.values():
+        assert "`{}:<tool>`".format(base) in sec6, "section 6 must say how to name a decoy per tool: " + base
     code = (REPO / "tools" / "adapter_conformance.py").read_text(encoding="utf-8")
     for phrase in ("CONFORMANCE PASS", "UNVERIFIED STRUCTURE", "SHELL UNGUARDED", '"--port"', '"--command"'):
         assert phrase in code, phrase + " is no longer printed or accepted by the tool"
+
+
+def test_the_worked_examples_map_only_their_listed_tools_as_the_doc_says():
+    sec6 = section(DOC.read_text(encoding="utf-8"), 6)
+    assert "WRITE_TOOLS" in sec6 and "SHELL_TOOLS" in sec6 and conf.UNMAPPED_NOTE in sec6
+    for ex in ("json_deny.slots.py", "exit2.slots.py"):
+        src = (REPO / "tools" / "adapting" / "examples" / ex).read_text(encoding="ascii")
+        assert "WRITE_TOOLS = (" in src and "SHELL_TOOLS = (" in src and conf.UNMAPPED_NOTE in src, ex
+        assert src.count(" in WRITE_TOOLS:") == 1 and src.count(" in SHELL_TOOLS:") == 1, ex
+
+
+def test_the_live_proof_covers_the_shell_tool_and_a_broken_hook_the_live_session_runs():
+    sec7 = section(DOC.read_text(encoding="utf-8"), 7)
+    for leaf in conf.PROOF_BOOLS[1:]:
+        assert leaf in sec7, leaf + " is not explained in section 7"
+    assert "echo x > Data/Canary.esp" in sec7
+    flat = " ".join(sec7.split())
+    assert "copy's" in flat and "fresh" in flat and "GUARD INERT" in flat
+    assert "rename `run.py`" not in flat, "the old broken-hook step changed a file the live hook never runs"
+
+
+def test_the_layer_2_lock_is_not_promised():
+    t = DOC.read_text(encoding="utf-8")
+    assert "not yet released" in section(t, 0) and "not yet released" in section(t, 2)
+    assert "where installed" not in t
+    assert not re.search(r"\bPlan \d", t), "the doc must not promise a plan by number"
+    philosophy = (REPO / "docs" / "safety-philosophy.md").read_text(encoding="utf-8")
+    assert not re.search(r"^#+ Layer \d", philosophy, re.M), "safety-philosophy.md numbers 'layers' that clash with ADAPTING's"
+
+
+def test_the_doc_says_what_python_means_off_windows():
+    t = " ".join(DOC.read_text(encoding="utf-8").split("## 0.")[0].split())
+    assert "python3" in t and "py -3" in t
+
+
+def test_the_unjudged_mcp_text_in_the_doc_is_the_entrys():
+    assert neutral.UNJUDGED_MCP in section(DOC.read_text(encoding="utf-8"), 4)
 
 
 def test_the_profile_regex_rule_is_stated_the_way_the_tool_applies_it():
@@ -228,8 +267,12 @@ def test_the_capability_report_leaves_in_the_doc_exist_in_the_template_and_the_t
     for path in ("payload_capture.files", "proof"):
         assert path.split(".")[0] in sec3
     assert "report" in sec3 and "derive" in sec3
-    for gating in conf.GATING:
+    for gating in conf.GATING + (conf.TIMEOUT_GATE,):
         assert gating in sec3, "section 3 must say which leaves gate the status: " + gating
+    flat = " ".join(sec3.split())
+    assert "at least {} seconds".format(conf.ADAPTER_TIMEOUT_S + conf.HOOK_TIMEOUT_MARGIN_S) in flat
+    assert "{} s deadline plus a {} s margin".format(tpl.ADAPTER_TIMEOUT_S, conf.HOOK_TIMEOUT_MARGIN_S) in flat
+    assert "Four leaves gate" in flat and len(conf.GATING) == 4
 
 
 def test_the_ask_rule_and_the_failure_rule_match_the_template():

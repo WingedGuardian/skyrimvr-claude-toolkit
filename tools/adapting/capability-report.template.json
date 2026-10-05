@@ -10,9 +10,11 @@
     "block_mechanism": "",
     "can_ask": null,
     "failed_hook_behaviour": "",
-    "hook_timeout_s": null
+    "hook_timeout_s": null,
+    "every_write_and_shell_tool_mapped": null
   },
   "session_start": {"exists": null, "injects_context": null},
   "payload_capture": {"method": "", "files": []},
-  "proof": {"conformance_passed": false, "live_canary_blocked": false, "canary_evidence": ""}
+  "proof": {"conformance_passed": false, "live_canary_blocked": false, "live_shell_canary_blocked": false,
+            "canary_evidence": ""}
 }

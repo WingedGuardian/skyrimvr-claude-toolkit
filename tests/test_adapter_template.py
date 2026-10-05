@@ -133,20 +133,23 @@ def test_ask_becomes_a_block_unless_the_author_set_render_ask(tmp_path):
 # A profile regex is matched with fullmatch against the WHOLE (stripped) stream, DOTALL: it must describe the
 # decision, not mention a word that prose could contain.
 JSON_PROFILE = {"block": {"exit": 0, "stdout_regex": "\\{\"toy_decision\": \"block\".*", "stderr_regex": None},
-                "allow": {"exit": 0}}
-EXIT2_PROFILE = {"block": {"exit": 2, "stdout_regex": None, "stderr_regex": None}, "allow": {"exit": 0}}
+                "allow": {"exit": 0}, "write_tools": ["write_file"], "shell_tools": ["run_shell"]}
+EXIT2_PROFILE = {"block": {"exit": 2, "stdout_regex": None, "stderr_regex": None}, "allow": {"exit": 0},
+                 "write_tools": ["edit"], "shell_tools": ["sh"]}
 
 
 def _json_cases(shell=True):
     cs = [
-        {"id": "decoy-plugin-write", "expect": "block", "payload": {"tool": "write_file", "args": {"path": "{ROOT}/Data/Decoy.esp"}}},
+        {"id": "decoy-plugin-write", "tool": "write_file", "expect": "block",
+         "payload": {"tool": "write_file", "args": {"path": "{ROOT}/Data/Decoy.esp"}}},
         {"id": "benign-write", "expect": "allow", "payload": {"tool": "write_file", "args": {"path": "{ROOT}/notes.txt"}}},
         {"id": "empty-payload", "expect": "block", "payload": ""},
         {"id": "garbage-payload", "expect": "block", "payload": "}{ not json"},
     ]
     if shell:
         cs += [
-            {"id": "decoy-plugin-shell", "expect": "block", "payload": {"tool": "run_shell", "args": {"cmd": "echo x > \"{ROOT}/Data/Decoy.esp\""}}},
+            {"id": "decoy-plugin-shell", "tool": "run_shell", "expect": "block",
+             "payload": {"tool": "run_shell", "args": {"cmd": "echo x > \"{ROOT}/Data/Decoy.esp\""}}},
             {"id": "benign-shell", "expect": "allow", "payload": {"tool": "run_shell", "args": {"cmd": "echo hello"}}},
         ]
     return {"cases": cs}
@@ -154,13 +157,93 @@ def _json_cases(shell=True):
 
 def _exit2_cases():
     return {"cases": [
-        {"id": "decoy-plugin-write", "expect": "block", "payload": {"call": {"name": "edit", "file": "{ROOT}/Data/Decoy.esp"}}},
+        {"id": "decoy-plugin-write", "tool": "edit", "expect": "block",
+         "payload": {"call": {"name": "edit", "file": "{ROOT}/Data/Decoy.esp"}}},
         {"id": "benign-write", "expect": "allow", "payload": {"call": {"name": "edit", "file": "{ROOT}/notes.txt"}}},
         {"id": "empty-payload", "expect": "block", "payload": ""},
         {"id": "garbage-payload", "expect": "block", "payload_hex": "fffe00"},
-        {"id": "decoy-plugin-shell", "expect": "block", "payload": {"call": {"name": "sh", "cmdline": "echo x > \"{ROOT}/Data/Decoy.esp\""}}},
+        {"id": "decoy-plugin-shell", "tool": "sh", "expect": "block",
+         "payload": {"call": {"name": "sh", "cmdline": "echo x > \"{ROOT}/Data/Decoy.esp\""}}},
         {"id": "benign-shell", "expect": "allow", "payload": {"call": {"name": "sh", "cmdline": "echo hello"}}},
     ]}
+
+
+EDIT_DECOY = {"id": "decoy-plugin-write:edit_file", "tool": "edit_file", "expect": "block",
+              "payload": {"tool": "edit_file", "args": {"path": "{ROOT}/Data/Decoy.esp"}}}
+
+
+def test_every_listed_write_tool_needs_its_own_decoy_case(tmp_path):
+    """Final review I2: the required cases covered ONE write tool, so an agent with write_file AND edit_file that
+    copied the example passed while edit_file went unjudged (mapped to `other`)."""
+    c = _conf()
+    d = _toy(tmp_path, JSON_SLOTS)
+    prof = dict(JSON_PROFILE, write_tools=["write_file", "edit_file"])
+    rows = c.run_conformance(d, prof, _json_cases())
+    assert any(r.id == "case:decoy-plugin-write:edit_file" and not r.ok and "no decoy" in r.why for r in rows), rows
+    prof = dict(JSON_PROFILE, shell_tools=["run_shell", "exec_command"])
+    rows = c.run_conformance(d, prof, _json_cases())
+    assert any(r.id == "case:decoy-plugin-shell:exec_command" and not r.ok for r in rows), rows
+
+
+def test_a_listed_write_tool_the_slots_leave_unmapped_goes_red(tmp_path):
+    """The reviewer's own input: an edit_file decoy through the shipped example came back allow ('NOT JUDGED')."""
+    c = _conf()
+    d = _toy(tmp_path, JSON_SLOTS)
+    prof = dict(JSON_PROFILE, write_tools=["write_file", "edit_file"])
+    cases = _json_cases()
+    cases["cases"].append(EDIT_DECOY)
+    by = _by(c.run_conformance(d, prof, cases))
+    assert not by["case:decoy-plugin-write:edit_file"].ok and "NOT BLOCKED" in by["case:decoy-plugin-write:edit_file"].why
+    mapped = JSON_SLOTS.replace('WRITE_TOOLS = ("write_file",)', 'WRITE_TOOLS = ("write_file", "edit_file")')
+    assert mapped != JSON_SLOTS
+    d2 = _toy(tmp_path, mapped, name="mapped")
+    rows = c.run_conformance(d2, prof, cases)
+    assert all(r.ok for r in rows), [r for r in rows if not r.ok]
+
+
+@pytest.mark.parametrize("bad,why", [
+    ({"write_tools": []}, "write_tools"),
+    ({"write_tools": "write_file"}, "write_tools"),
+    ({"write_tools": ["write_file", "write_file"]}, "write_tools"),
+    ({"shell_tools": [3]}, "shell_tools"),
+    ({"shell_tools": ["write_file"]}, "both"),
+])
+def test_the_profile_tool_lists_are_validated(tmp_path, bad, why):
+    c = _conf()
+    d = _toy(tmp_path, JSON_SLOTS)
+    rows = c.run_conformance(d, dict(JSON_PROFILE, **bad), _json_cases())
+    assert [r.id for r in rows] == ["profile"] and why in rows[0].why, rows
+    missing = {k: v for k, v in JSON_PROFILE.items() if k != "write_tools"}
+    assert [r.id for r in c.run_conformance(d, missing, _json_cases())] == ["profile"]
+
+
+def test_a_decoy_case_must_name_a_listed_tool_and_expect_block(tmp_path):
+    c = _conf()
+    d = _toy(tmp_path, JSON_SLOTS)
+    cases = _json_cases()
+    del cases["cases"][0]["tool"]
+    assert any(r.id == "case:decoy-plugin-write" and not r.ok and "tool" in r.why for r in c.run_conformance(d, JSON_PROFILE, cases))
+    cases = _json_cases()
+    cases["cases"].append(dict(EDIT_DECOY, expect="allow"))
+    prof = dict(JSON_PROFILE, write_tools=["write_file", "edit_file"])
+    assert any(r.id == "case:decoy-plugin-write:edit_file" and not r.ok and "block" in r.why
+               for r in c.run_conformance(d, prof, cases))
+    cases = _json_cases()
+    cases["cases"].append(EDIT_DECOY)                  # edit_file is not in the profile's lists
+    assert any(r.id == "case:decoy-plugin-write:edit_file" and not r.ok and "not listed" in r.why
+               for r in c.run_conformance(d, JSON_PROFILE, cases))
+
+
+def test_the_cli_says_out_loud_that_unlisted_tools_are_not_guarded(tmp_path):
+    d = _toy(tmp_path, JSON_SLOTS)
+    (tmp_path / "p.json").write_text(json.dumps(JSON_PROFILE))
+    (tmp_path / "c.json").write_text(json.dumps(_json_cases()))
+    cp = subprocess.run([sys.executable, str(REPO / "tools" / "adapter_conformance.py"), "run", "--adapter-dir", str(d),
+                         "--profile", str(tmp_path / "p.json"), "--cases", str(tmp_path / "c.json")],
+                        capture_output=True, timeout=300, text=True)
+    assert cp.returncode == 0, cp.stdout + cp.stderr
+    note = [l for l in cp.stdout.splitlines() if l.startswith("UNMAPPED TOOLS ARE NOT GUARDED")]
+    assert note and "write_file" in note[0] and "run_shell" in note[0]
 
 
 FAULT_IDS = ["fault:engine-deny-nonce", "fault:engine-allow-valid",
@@ -223,10 +306,47 @@ def test_a_port_skips_identity_with_a_printed_note_and_is_still_probed(tmp_path,
     c = _conf()
     d = _toy(tmp_path, JSON_SLOTS, name="portd")
     (d / "adapter.py").rename(d / "other.py")
-    rows = c.run_conformance(d, JSON_PROFILE, _json_cases(), command="{PY} {DIR}/other.py", port=True)
+    rows = c.run_conformance(d, JSON_PROFILE, _json_cases(), command=["{PY}", "{DIR}/other.py"], port=True)
     assert "template-identical" not in [r.id for r in rows]
     assert "UNVERIFIED STRUCTURE" in capsys.readouterr().err
     assert all(r.ok for r in rows), [r for r in rows if not r.ok]
+
+
+@pytest.mark.parametrize("command", ["{PY} {DIR}/other.py", ["{PY}", 3], [], "not json ["])
+def test_a_command_must_be_an_argv_list_never_a_string_to_split(tmp_path, command):
+    """Final review I4: a command STRING was split with shlex, so a space in a path became two argv words."""
+    c = _conf()
+    d = _toy(tmp_path, JSON_SLOTS, name="portd")
+    rows = c.run_conformance(d, JSON_PROFILE, _json_cases(), command=command, port=True)
+    assert [r.id for r in rows] == ["command"] and not rows[0].ok and "list" in rows[0].why
+
+
+@pytest.mark.parametrize("dirname", ["has space", "o'neil has space"])
+def test_a_temp_or_interpreter_path_with_a_space_or_apostrophe_still_conforms(tmp_path, monkeypatch, dirname):
+    """Final review I4: with TMP under 'C:/Users/John Smith' every fault row printed FAILED OPEN (a false red), and a
+    POSIX apostrophe made shlex raise. The argv is built as a list, so neither can split a path."""
+    import tempfile
+    c = _conf()
+    spaced = tmp_path / dirname
+    spaced.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(spaced))
+    d = _toy(spaced, JSON_SLOTS, name="toy dir")
+    rows = c.run_conformance(d, JSON_PROFILE, _json_cases())
+    assert all(r.ok for r in rows), [r for r in rows if not r.ok]
+    (d / "adapter.py").rename(d / "other.py")
+    rows = c.run_conformance(d, JSON_PROFILE, _json_cases(), command=["{PY}", "{DIR}/other.py"], port=True)
+    assert all(r.ok for r in rows), [r for r in rows if not r.ok]
+
+
+def test_duplicate_case_ids_are_a_failed_row_not_a_silent_shadow(tmp_path):
+    """Final review M8: the case dict kept the LAST of two same-id cases, so a failing case could be hidden."""
+    c = _conf()
+    d = _toy(tmp_path, JSON_SLOTS)
+    cases = _json_cases()
+    cases["cases"].insert(0, {"id": "benign-write", "expect": "allow",
+                              "payload": {"tool": "write_file", "args": {"path": "{ROOT}/Data/Decoy.esp"}}})
+    rows = c.run_conformance(d, JSON_PROFILE, cases)
+    assert any(r.id == "case:benign-write" and not r.ok and "duplicate" in r.why for r in rows), rows
 
 
 def test_profile_and_case_shape_problems_are_failed_rows(tmp_path):
@@ -343,7 +463,7 @@ def test_command_without_port_is_refused_so_the_hashed_file_is_the_one_that_runs
     assert "b'.esp'" in live
     d = _toy(tmp_path, EXIT2_SLOTS)
     (d / "evil.py").write_text(live, newline="\n")
-    rows = c.run_conformance(d, EXIT2_PROFILE, _exit2_cases(), command="{PY} {DIR}/evil.py")
+    rows = c.run_conformance(d, EXIT2_PROFILE, _exit2_cases(), command=["{PY}", "{DIR}/evil.py"])
     assert [r.id for r in rows] == ["command"] and not rows[0].ok
 
 
@@ -381,18 +501,18 @@ def test_a_render_block_that_drops_the_engine_reason_goes_red(tmp_path):
     assert not rows["fault:engine-deny-nonce"].ok and "nonce" in rows["fault:engine-deny-nonce"].why.lower()
 
 
-def test_the_shell_pair_is_mandatory_unless_the_profile_says_there_is_no_shell(tmp_path):
+def test_the_shell_pair_is_mandatory_unless_the_profile_lists_no_shell_tool(tmp_path):
     c = _conf()
     d = _toy(tmp_path, JSON_SLOTS)
     no_shell = _json_cases(shell=False)
     rows = c.run_conformance(d, JSON_PROFILE, no_shell)
     assert {"case:decoy-plugin-shell", "case:benign-shell"} <= {r.id for r in rows if not r.ok}
-    prof = dict(JSON_PROFILE, has_shell=False)
+    prof = dict(JSON_PROFILE, shell_tools=[])
     rows = c.run_conformance(d, prof, no_shell)
     assert all(r.ok for r in rows), [r for r in rows if not r.ok]
-    assert "SHELL UNGUARDED (profile says no shell tool)" in c.summary(rows)
+    assert "SHELL UNGUARDED (profile lists no shell tool)" in c.summary(rows)
     assert "SHELL UNGUARDED" not in c.summary(c.run_conformance(d, JSON_PROFILE, _json_cases()))
-    assert [r.id for r in c.run_conformance(d, dict(JSON_PROFILE, has_shell="no"), no_shell)] == ["profile"]
+    assert [r.id for r in c.run_conformance(d, dict(JSON_PROFILE, shell_tools="no"), no_shell)] == ["profile"]
 
 
 def test_a_non_cp1252_reason_on_a_piped_windows_stdout_still_blocks(tmp_path):
