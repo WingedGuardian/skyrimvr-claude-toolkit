@@ -7,21 +7,31 @@ reads the original path instead of guessing it from the flattened name (every `_
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 from .grep import grep
+
+try:
+    import msvcrt
+except ImportError:                                   # POSIX
+    msvcrt = None
+    import fcntl
 
 HOOK = "backup-before-edit"
 SKIP = (r"[/\\]\.claude[/\\](backups|hooks|plans)[/\\]", r"[/\\]node_modules[/\\]")
 MANIFEST = "MANIFEST.jsonl"
 CHUNK = 1024 * 1024
 MAX_SUFFIX = 999
+LOCK_WAIT = 2.0                                       # seconds; the hook has a time budget, the backup never waits on it
 _hasher = hashlib.sha256
-_NAMED = re.compile(r"^\d{8}_\d{6}(-\d+)?__")
+_NAMED = re.compile(r"^(\d{8}_\d{6})(?:-(\d+))?__")
+_NOT_IN_NAME = "/\\:"
 
 
 def _discard(path):
@@ -73,22 +83,85 @@ def _finalise(part, base):
                 fd = os.open(str(cand), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError:
                 continue
-            os.close(fd)
-            os.replace(str(part), str(cand))
+            try:
+                mine = os.fstat(fd)
+            finally:
+                os.close(fd)
+            try:
+                os.replace(str(part), str(cand))
+            except OSError:
+                _drop_placeholder(cand, mine)
+                raise
             return cand
         _discard(part)
         return cand
     raise OSError("no free backup name after {} tries".format(MAX_SUFFIX + 1))
 
 
-def _append_line(path, line):
-    """ONE os.write of one line. Small O_APPEND writes are atomic on NTFS (INFERRED), so a reader still skips and
-    counts any line that does not parse."""
-    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
+def _drop_placeholder(cand, mine):
+    """Remove the empty name this call claimed with O_EXCL -- only while it is still ours: the same file, still 0
+    bytes. Anything else under that name is somebody's data and stays."""
     try:
-        os.write(fd, line)
+        st = os.stat(str(cand))
+        if st.st_size == 0 and (st.st_ino, st.st_dev) == (mine.st_ino, mine.st_dev):
+            os.unlink(str(cand))
+    except OSError:
+        pass
+
+
+def _try_lock(fd):
+    """One non-blocking attempt at the manifest lock; raises OSError when someone else holds it."""
+    if msvcrt is not None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock(fd):
+    try:
+        if msvcrt is not None:
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass                                          # closing the handle releases it anyway
+
+
+@contextlib.contextmanager
+def _exclusive(lock_path):
+    """Hold an exclusive lock on a sidecar file, waiting at most LOCK_WAIT seconds (then OSError). The OS drops the
+    lock if the holder dies, so a killed hook cannot wedge the next one."""
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
+    try:
+        deadline = time.monotonic() + LOCK_WAIT
+        while True:
+            try:
+                _try_lock(fd)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.002)
+        try:
+            yield
+        finally:
+            _unlock(fd)
     finally:
         os.close(fd)
+
+
+def _append_line(path, line):
+    """ONE os.write of one line, under an exclusive lock. On Windows the CRT emulates O_APPEND as seek-to-end then
+    write, so two unlocked appenders overwrite each other's lines (review I1, MEASURED: 178 of 3000 lost); the lock
+    makes seek + write one step. A reader still skips and counts any line that does not parse."""
+    with _exclusive(Path(str(path) + ".lock")):
+        fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
+        try:
+            os.write(fd, line)
+        finally:
+            os.close(fd)
 
 
 def take(project, tool_name, file_path, audit, agent="", session_id=""):
@@ -126,8 +199,8 @@ def take(project, tool_name, file_path, audit, agent="", session_id=""):
     try:
         _append_line(backups / MANIFEST, (json.dumps(entry, ensure_ascii=True) + "\n").encode("ascii"))
     except OSError:
-        audit.log(HOOK, "FAILED", "backup {} of {} is not in {} -- a restore will have to guess its path".format(
-            dest.name, file_path, MANIFEST))
+        audit.log(HOOK, "FAILED", "backup {} of {} is not in {} (could not append, or its lock was busy for {} s) -- "
+                  "a restore will have to guess its path".format(dest.name, file_path, MANIFEST, LOCK_WAIT))
     audit.raw("[{t}] {n} -> {p} (backup: {d})\n".format(t=ts, n=tool_name, p=file_path, d=dest.name))
     return dest
 
@@ -151,7 +224,7 @@ def read_manifest(backups):
                     and all(isinstance(e.get(k), str) for k in ("ts", "src", "dest", "sha256"))
                     and isinstance(e.get("size"), int) and not isinstance(e.get("size"), bool)):
                 raise ValueError("not a v1 entry")
-            if e["dest"] in ("", ".", "..") or "/" in e["dest"] or "\\" in e["dest"]:
+            if not _plain_name(e["dest"]):
                 raise ValueError("dest is not a name inside the backups folder")
         except ValueError:
             bad += 1
@@ -160,10 +233,26 @@ def read_manifest(backups):
     return entries, bad
 
 
+def _plain_name(name):
+    """A bare file name inside the backups folder: no separator, no drive (`C:x`), no stream (`x:s`), not . or .."""
+    return name not in ("", ".", "..") and not any(c in name for c in _NOT_IN_NAME)
+
+
 def legacy_guess(name):
     """What the pre-manifest restore script printed: stamp stripped, then EVERY `_` turned into `/` (plan L8). Only
     ever shown for a backup the manifest does not know, labelled as a guess."""
-    return re.sub(r"^[0-9]*_[0-9]*__", "", name).replace("_", "/")
+    return _NAMED.sub("", name).replace("_", "/")
+
+
+def _order(dest, ts):
+    """Sort key: the stamp, then the collision suffix as a NUMBER (`-` sorts below `_`, and `-10` below `-2`)."""
+    m = _NAMED.match(dest)
+    return (m.group(1), int(m.group(2) or 0)) if m else (ts, 0)
+
+
+def _shown_stamp(dest, ts):
+    m = _NAMED.match(dest)
+    return m.group(0)[:-2] if m else ts
 
 
 def _native(path):
@@ -181,28 +270,41 @@ def _sha256(path):
 
 
 def _rows(backups, entries):
-    rows = []
+    """(sort key, shown stamp, dest, src, size or None, kind) -- kind "" (recorded), "legacy" (taken before the
+    manifest began) or "lost" (taken after it began, but its line is missing). Plus the orphaned part-file count."""
+    rows, parts = [], 0
+    first = min((e["ts"] for e in entries.values()), default=None)
     for dest, e in entries.items():
         f = backups / dest
-        rows.append((e["ts"], dest, e["src"], f.stat().st_size if f.is_file() else None, ""))
+        rows.append((_order(dest, e["ts"]), _shown_stamp(dest, e["ts"]), dest, e["src"],
+                     f.stat().st_size if f.is_file() else None, ""))
     for f in backups.iterdir():
-        if f.name in entries or not _NAMED.match(f.name) or ".part-" in f.name or not f.is_file():
+        if not _NAMED.match(f.name) or not f.is_file():
             continue
-        rows.append((f.name.split("__", 1)[0], f.name, legacy_guess(f.name), f.stat().st_size, "legacy"))
-    return sorted(rows, reverse=True)
+        if ".part-" in f.name:
+            parts += 1
+            continue
+        if f.name in entries:
+            continue
+        key = _order(f.name, "")
+        kind = "lost" if (first is not None and (key[0] >= first or key[1] > 0)) else "legacy"
+        rows.append((key, _shown_stamp(f.name, ""), f.name, legacy_guess(f.name), f.stat().st_size, kind))
+    return sorted(rows, key=lambda r: (r[0], r[2]), reverse=True), parts
 
 
 def _list(backups, search):
     entries, bad = read_manifest(backups)
-    rows = _rows(backups, entries)
+    rows, parts = _rows(backups, entries)
     if search:
-        rows = [r for r in rows if search.lower() in r[2].lower() or search.lower() in r[1].lower()]
+        rows = [r for r in rows if search.lower() in r[3].lower() or search.lower() in r[2].lower()]
     print("=== Available Backups ===\n")
     if search:
         print("Filtering for: {}\n".format(search))
-    for i, (ts, dest, src, size, kind) in enumerate(rows, 1):
+    for i, (_key, ts, dest, src, size, kind) in enumerate(rows, 1):
         note = "(missing)" if size is None else "({} bytes)".format(size)
-        if kind:
+        if kind == "lost":
+            note += "  (manifest line missing: path guessed)"
+        elif kind:
             note += "  (legacy: path guessed)"
         print("  [{}] {}  {}  {}  <- {}".format(i, ts, src, note, dest))
     if not rows:
@@ -210,6 +312,8 @@ def _list(backups, search):
     print("\nTotal: {} backup(s)".format(len(rows)))
     if bad:
         print("{} unreadable manifest line(s) skipped".format(bad))
+    if parts:
+        print("{} orphaned .part file(s): an interrupted (or still running) backup, not a backup".format(parts))
     print("\nTo restore one (its sha256 is checked first; the current file is backed up before it is replaced):")
     print("  bash scripts/restore-from-backup.sh --restore <backup-file> [--to <path>]")
     print("\nTo view the audit log:\n  cat \"{}\"".format(backups / "AUDIT_LOG.txt"))
@@ -219,11 +323,16 @@ def _list(backups, search):
 def _restore(backups, name, to):
     from .audit import Audit
     f = backups / name
-    if name in ("", ".", "..") or "/" in name or "\\" in name or not f.is_file():
+    if not _plain_name(name) or not f.is_file():
         print("No backup named {!r} in {}".format(name, backups))
         return 2
     entries, _bad = read_manifest(backups)
     e = entries.get(name)
+    if e is not None and not to and not os.path.isabs(_native(e["src"])):
+        print("{} recorded a RELATIVE path ({}); it would land relative to wherever this is run from.".format(
+            name, e["src"]))
+        print("Re-run with --to <path> to say where it goes.")
+        return 2
     if e is None and not to:
         print("{} was taken before backups were recorded: its original path is not known.".format(name))
         print("  guess: {}  (legacy: path guessed)".format(legacy_guess(name)))

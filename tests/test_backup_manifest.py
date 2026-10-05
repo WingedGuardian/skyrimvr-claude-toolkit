@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -39,12 +40,12 @@ def bdir(project):
 
 
 def backup_files(project):
-    """The backup copies themselves: every regular file except the audit log and the manifest."""
+    """The backup copies themselves: every regular file except the audit log, the manifest and its lock."""
     d = bdir(project)
     if not d.is_dir():
         return {}
     return {p.name: p.read_bytes() for p in d.iterdir()
-            if p.is_file() and p.name not in ("AUDIT_LOG.txt", "MANIFEST.jsonl")}
+            if p.is_file() and p.name not in ("AUDIT_LOG.txt", "MANIFEST.jsonl", "MANIFEST.jsonl.lock")}
 
 
 def manifest(project):
@@ -319,3 +320,165 @@ def test_a_recorded_backup_whose_file_is_gone_is_marked_missing(tmp_path, bsa):
     os.unlink(str(bdir(tmp_path) / m["dest"]))
     r = restore(tmp_path)
     assert re.search(re.escape(str(bsa)) + r".*\(missing\)", r.stdout), r.stdout
+
+
+# ---------------------------------------------------------------- fix round 1 (review I1, I2, M1-M3, M5, M6)
+
+_WORKER = r'''
+import os, sys, time
+sys.path.insert(0, sys.argv[1])
+from skyguard import backup
+path, tag, n, go = sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.argv[5]
+while not os.path.exists(go):
+    time.sleep(0.001)
+for i in range(n):
+    backup._append_line(path, ('{"w": "%s", "i": %d, "pad": "%s"}\n' % (tag, i, "x" * 180)).encode("ascii"))
+'''
+
+
+def test_concurrent_manifest_appends_lose_and_tear_nothing(tmp_path):
+    """I1: on Windows the CRT emulates O_APPEND as seek-then-write, so two processes appending at once overwrote each
+    other's lines (review probe: 178 of 3000 lost, some with nothing flagged). Real processes, released together."""
+    path = tmp_path / "MANIFEST.jsonl"
+    go = tmp_path / "go"
+    procs, n = ["a", "b", "c"], 400
+    running = [subprocess.Popen([sys.executable, "-B", "-c", _WORKER, str(REPO / "tools"), str(path), w, str(n), str(go)])
+               for w in procs]
+    go.write_text("go")
+    for p in running:
+        assert p.wait(timeout=120) == 0
+    lines = path.read_bytes().split(b"\n")
+    assert lines[-1] == b""
+    got = [json.loads(x) for x in lines[:-1]]            # a torn line raises here
+    assert sorted((g["w"], g["i"]) for g in got) == sorted((w, i) for w in procs for i in range(n)), (
+        "lost {} of {}".format(len(procs) * n - len(got), len(procs) * n))
+
+
+def test_a_manifest_lock_that_cannot_be_had_in_time_keeps_the_backup(tmp_path, monkeypatch):
+    """The hook has a time budget: a held lock fails the manifest line (FAILED), never the backup, never a hang."""
+    monkeypatch.setattr(backup, "LOCK_WAIT", 0.05)
+
+    def held(fd):
+        raise OSError(13, "locked by someone else")
+
+    monkeypatch.setattr(backup, "_try_lock", held)
+    f = tmp_path / "a.ini"
+    f.write_text("body")
+    t0 = time.monotonic()
+    take(tmp_path, f)
+    assert time.monotonic() - t0 < 2.0, "the wait is not bounded by LOCK_WAIT"
+    assert list(backup_files(tmp_path).values()) == [b"body"]
+    assert manifest(tmp_path) == []
+    assert "is not in MANIFEST.jsonl" in log_text(tmp_path)
+
+
+def _no_link(monkeypatch):
+    def no_link(*a, **k):
+        raise OSError(1, "hard links not supported here")
+
+    monkeypatch.setattr(backup.os, "link", no_link)
+
+
+def _replace_fails(monkeypatch, before=None):
+    def bad(src, dst):
+        if before:
+            before(dst)
+        raise PermissionError(32, "in use by another process")
+
+    monkeypatch.setattr(backup.os, "replace", bad)
+
+
+def test_a_failed_replace_in_the_fallback_leaves_no_placeholder(tmp_path, monkeypatch):
+    """I2: the O_EXCL placeholder must not stay under a final backup name as a 0-byte 'backup'."""
+    _no_link(monkeypatch)
+    _replace_fails(monkeypatch)
+    f = tmp_path / "a.ini"
+    f.write_text("body")
+    take(tmp_path, f)
+    assert backup_files(tmp_path) == {}
+    assert "could not name the copy" in log_text(tmp_path)
+
+
+def test_a_placeholder_someone_else_filled_is_not_removed(tmp_path, monkeypatch):
+    def fill(dst):
+        with open(dst, "ab") as fh:
+            fh.write(b"theirs")
+
+    _no_link(monkeypatch)
+    _replace_fails(monkeypatch, fill)
+    f = tmp_path / "a.ini"
+    f.write_text("body")
+    take(tmp_path, f)
+    assert list(backup_files(tmp_path).values()) == [b"theirs"]
+
+
+def test_a_placeholder_someone_else_replaced_is_not_removed(tmp_path, monkeypatch):
+    def swap(dst):
+        os.unlink(dst)
+        open(dst, "wb").close()                          # a different, also empty, file under the same name
+
+    _no_link(monkeypatch)
+    _replace_fails(monkeypatch, swap)
+    f = tmp_path / "a.ini"
+    f.write_text("body")
+    take(tmp_path, f)
+    assert list(backup_files(tmp_path).values()) == [b""]
+
+
+def listing(tmp_path, capsys, *args):
+    rc = backup.restore_main([str(bdir(tmp_path))] + list(args))
+    return rc, capsys.readouterr().out
+
+
+def test_a_burst_lists_newest_first(tmp_path, capsys):
+    """M1: `-` sorts below `_`, and `-10` below `-2`; the newest of a same-second burst must come first."""
+    f = tmp_path / "a.ini"
+    for i in range(12):
+        f.write_text(str(i))
+        take(tmp_path, f)
+    _rc, out = listing(tmp_path, capsys)
+    order = re.findall(r"<- (" + TS + r"(?:-\d+)?)__", out)
+    assert order == [TS + "-" + str(i) for i in range(11, 0, -1)] + [TS], order
+
+
+@pytest.mark.parametrize("dest", ["C:x.esp", "x.esp:stream"])
+def test_a_manifest_dest_that_is_not_a_plain_name_is_counted_bad(tmp_path, capsys, dest):
+    """M2: drive-relative and alternate-data-stream forms are not names inside the backups folder."""
+    bdir(tmp_path).mkdir(parents=True)
+    line = {"v": 1, "ts": TS, "src": "C:/x.esp", "dest": dest, "size": 1, "sha256": "0" * 64, "tool": "Edit",
+            "agent": "", "session_id": ""}
+    (bdir(tmp_path) / "MANIFEST.jsonl").write_text(json.dumps(line) + "\n")
+    entries, bad = backup.read_manifest(bdir(tmp_path))
+    assert (entries, bad) == ({}, 1)
+
+
+def test_orphaned_part_files_are_counted(tmp_path, capsys, bsa):
+    """M3: a hook killed mid-copy leaves `.part-<pid>`; the listing hides it as a backup but must not hide the leak."""
+    (bdir(tmp_path) / (TS + "__x.ini.part-999")).write_bytes(b"half")
+    _rc, out = listing(tmp_path, capsys)
+    assert "1 orphaned .part file(s)" in out, out
+
+
+def test_a_relative_recorded_path_needs_an_explicit_target(tmp_path, capsys, monkeypatch):
+    """M5: a relative src would resolve against wherever the restore is run from."""
+    bdir(tmp_path).mkdir(parents=True)
+    name = TS + "__Data_x.ini"
+    (bdir(tmp_path) / name).write_bytes(b"old")
+    line = {"v": 1, "ts": TS, "src": "Data/x.ini", "dest": name, "size": 3,
+            "sha256": hashlib.sha256(b"old").hexdigest(), "tool": "Edit", "agent": "", "session_id": ""}
+    (bdir(tmp_path) / "MANIFEST.jsonl").write_text(json.dumps(line) + "\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    rc, out = listing(tmp_path, capsys, "--restore", name)
+    assert rc == 2 and "--to" in out, out
+    assert not (elsewhere / "Data").exists()
+
+
+def test_a_manifest_era_backup_without_its_line_is_labelled_so(tmp_path, capsys, bsa):
+    """M6: a backup taken after the manifest began, whose line is missing, is not a pre-manifest file."""
+    (bdir(tmp_path) / "20250101_000000__C__old.esp").write_bytes(b"old")
+    (bdir(tmp_path) / (TS + "-5__C__lost.esp")).write_bytes(b"lost")
+    _rc, out = listing(tmp_path, capsys)
+    assert re.search(r"C//old\.esp .*\(legacy: path guessed\)", out), out
+    assert re.search(r"C//lost\.esp .*\(manifest line missing: path guessed\)", out), out

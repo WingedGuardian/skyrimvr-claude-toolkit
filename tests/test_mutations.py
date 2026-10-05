@@ -4074,7 +4074,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _BKT + "test_the_codex_patch_backup_records_its_agent_and_session", "l2-backup-codex-session"),
     # ---- restore (step 3)
     # the listing guesses the path from the flattened name although the manifest recorded it (the L8 bug)
-    (_BK, '        rows.append((e["ts"], dest, e["src"],', '        rows.append((e["ts"], dest, legacy_guess(dest),',
+    (_BK, '_shown_stamp(dest, e["ts"]), dest, e["src"],', '_shown_stamp(dest, e["ts"]), dest, legacy_guess(dest),',
      _BKT + "test_restore_lists_the_recorded_path_verbatim", "l2-restore-manifest-path"),
     # ... and so does the restore itself
     (_BK, '    target = Path(_native(to or e["src"]))', "    target = Path(_native(to or legacy_guess(name)))",
@@ -4094,4 +4094,29 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _BKT + "test_restore_puts_the_file_back_at_the_recorded_path", "l2-restore-backs-up-current"),
     (_BK, '"(missing)" if size is None', '"" if size is None',
      _BKT + "test_a_recorded_backup_whose_file_is_gone_is_marked_missing", "l2-restore-missing-marked"),
+    # ---- fix round 1
+    # I1: the manifest append without its lock (seek-to-end + write is two steps on the Windows CRT)
+    (_BK, '    with _exclusive(Path(str(path) + ".lock")):', "    with contextlib.nullcontext():",
+     _BKT + "test_concurrent_manifest_appends_lose_and_tear_nothing", "l2-backup-manifest-lock"),
+    # ... and a lock that waits forever instead of failing the manifest line
+    (_BK, "        deadline = time.monotonic() + LOCK_WAIT", "        deadline = time.monotonic() + 5",
+     _BKT + "test_a_manifest_lock_that_cannot_be_had_in_time_keeps_the_backup", "l2-backup-manifest-lock-bounded"),
+    # I2: the O_EXCL placeholder stays under the final name when os.replace fails
+    (_BK, "                _drop_placeholder(cand, mine)\n", "                pass\n",
+     _BKT + "test_a_failed_replace_in_the_fallback_leaves_no_placeholder", "l2-backup-excl-fallback-cleanup"),
+    (_BK, "        if st.st_size == 0 and (st.st_ino", "        if (st.st_ino",
+     _BKT + "test_a_placeholder_someone_else_filled_is_not_removed", "l2-backup-placeholder-still-empty"),
+    (_BK, " and (st.st_ino, st.st_dev) == (mine.st_ino, mine.st_dev):", ":",
+     _BKT + "test_a_placeholder_someone_else_replaced_is_not_removed", "l2-backup-placeholder-same-file"),
+    # M1-M6
+    (_BK, "    return (m.group(1), int(m.group(2) or 0)) if m else (ts, 0)", "    return (m.group(0), 0) if m else (ts, 0)",
+     _BKT + "test_a_burst_lists_newest_first", "l2-restore-burst-order"),
+    (_BK, r'_NOT_IN_NAME = "/\\:"', r'_NOT_IN_NAME = "/\\"',
+     _BKT + "test_a_manifest_dest_that_is_not_a_plain_name_is_counted_bad[C:x.esp]", "l2-restore-dest-plain-name"),
+    (_BK, "            parts += 1\n", "            pass\n",
+     _BKT + "test_orphaned_part_files_are_counted", "l2-restore-orphan-parts"),
+    (_BK, '    if e is not None and not to and not os.path.isabs(_native(e["src"])):', "    if False:",
+     _BKT + "test_a_relative_recorded_path_needs_an_explicit_target", "l2-restore-relative-src"),
+    (_BK, '        kind = "lost" if (first', '        kind = "legacy" if (first',
+     _BKT + "test_a_manifest_era_backup_without_its_line_is_labelled_so", "l2-restore-line-missing-label"),
 ]]
