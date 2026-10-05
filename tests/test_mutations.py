@@ -4037,3 +4037,39 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_LR, "for x in mine:                                          # I3", "for x in ():  # I3",
      _p6row("r1-listing-filter"), "l2-r1-construct-listing"),
 ]]
+
+
+# Plan 6 Task 13: backups land atomically under an exclusive name and are recorded with a sha256. One twin per clause.
+_BK = "tools/skyguard/backup.py"
+_BKT = "tests/test_backup_manifest.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # the final name replaces whatever holds it (the L7 overwrite)
+    (_BK, "            os.link(str(part), str(cand))", "            os.replace(str(part), str(cand))",
+     _BKT + "test_two_backups_in_the_same_second_both_survive", "l2-backup-excl"),
+    # ... and on a volume without hard links, the name is claimed without O_EXCL
+    (_BK, "os.O_CREAT | os.O_EXCL | os.O_WRONLY", "os.O_CREAT | os.O_WRONLY",
+     _BKT + "test_same_second_backups_survive_where_hard_links_are_unavailable", "l2-backup-excl-fallback"),
+    # the copy is written straight to the final name
+    (_BK, '    part = Path("{}.part-{}".format(base, os.getpid()))', "    part = base",
+     _BKT + "test_a_copy_that_fails_midway_leaves_nothing_under_the_final_name", "l2-backup-part"),
+    # a failed copy leaves its part behind
+    (_BK, '    except OSError:\n        _discard(part)\n        audit.log(HOOK, "FAILED", "could not copy',
+     '    except OSError:\n        audit.log(HOOK, "FAILED", "could not copy',
+     _BKT + "test_a_copy_that_fails_midway_leaves_nothing_under_the_final_name", "l2-backup-part-cleanup"),
+    (_BK, "            os.fsync(fout.fileno())", "            pass",
+     _BKT + "test_the_part_is_fsynced_before_it_gets_its_final_name", "l2-backup-fsync"),
+    (_BK, "    if not (on_disk == copied == want):", "    if False:",
+     _BKT + "test_a_size_mismatch_is_failed_and_the_part_is_removed", "l2-backup-size"),
+    # the recorded sha256 is not the hash of the bytes copied
+    (_BK, "                h.update(chunk)", "                pass",
+     _BKT + "test_the_manifest_line_records_the_copy", "l2-backup-manifest-sha"),
+    (_BK, "        os.write(fd, line)", "        [os.write(fd, line[i:i + 1]) for i in range(len(line))]",
+     _BKT + "test_the_manifest_append_is_one_write_of_one_line", "l2-backup-manifest-one-write"),
+    (_BK, "(backup: {d})\\n\".format(t=ts, n=tool_name, p=file_path, d=dest.name)",
+     "(backup: {d})\\n\".format(t=ts, n=tool_name, p=file_path, d=base.name)",
+     _BKT + "test_the_audit_line_names_the_backup_actually_written", "l2-backup-audit-dest"),
+    ("tools/skyguard/run.py", 'p["empty"], audit, "claude", p.get("session_id", ""))', 'p["empty"], audit)',
+     _BKT + "test_the_claude_hook_records_its_agent_and_session", "l2-backup-claude-session"),
+    ("tools/skyguard/engine.py", "False, audit, req.agent, req.session_id)", "False, audit)",
+     _BKT + "test_the_codex_patch_backup_records_its_agent_and_session", "l2-backup-codex-session"),
+]]

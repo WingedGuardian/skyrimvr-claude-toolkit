@@ -94,7 +94,7 @@ def test_backup_copy_failure_writes_failed(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise OSError("denied")
 
-    monkeypatch.setattr(backup.shutil, "copyfile", boom)
+    monkeypatch.setattr(backup, "_copy_hashed", boom)
     backup.run(str(tmp_path), "Write", str(f), False, audit_mod.Audit(str(tmp_path)))
     assert re.fullmatch(r"\[\d{8}_\d{6}\] backup-before-edit FAILED: could not copy .*a\.txt -- "
                         r"NO BACKUP EXISTS for this edit\n", log_text(tmp_path))

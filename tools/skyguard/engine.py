@@ -127,7 +127,7 @@ def side_effects(req, project, audit, v) -> Verdict:
             if op not in _BACKUP_OPS:
                 continue
             try:
-                backup.run(project, "apply_patch", p, False, audit)
+                backup.run(project, "apply_patch", p, False, audit, req.agent, req.session_id)
             except Exception:
                 partial = True
                 audit.log("backup-before-edit", "FAILED", "backup of {} raised -- NO BACKUP EXISTS".format(p))

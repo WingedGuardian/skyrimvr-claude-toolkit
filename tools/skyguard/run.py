@@ -181,7 +181,7 @@ def main(argv=None) -> int:
         roots = paths.roots(a.root, a.root_win, env if env is not None else {})
         v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)
     elif a.role == "backup-before-edit":
-        backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit)
+        backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit, "claude", p.get("session_id", ""))
         v = Verdict()
     elif a.role == "snapshot-before-tool":
         snapshot.run(a.project, p["command"], p["empty"], audit)
