@@ -186,10 +186,9 @@ For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit se
 ## Safety Rules
 
 **The guards** enforce these automatically on agents with hook support (your agent's notes at the end say
-how). The rules live in the Python engine `tools/skyguard/` (`shell_rules.py`, `write_rules.py`,
-`paths.py`), which needs Python 3; a guard that cannot start it REFUSES rather than allows. **A guard
-exists to stop the agent, not to interrupt the user**, so the rules are graded and only the first list
-refuses.
+how). The rules live in the Python engine `tools/skyguard/`, which needs Python 3; a guard that cannot
+start it REFUSES rather than allows. **A guard exists to stop the agent, not to interrupt the user**, so
+the rules are graded and only the first list refuses.
 
 ### DENIED -- refused outright, cannot proceed
 
@@ -198,44 +197,48 @@ that merely appear in a command (`grep -rn "rm -rf" <install>` is allowed). Rela
 the working directory the agent reports.
 
 - **Deleting inside the game install, the config directory, or Mod Organizer's `mods/` / `overwrite/`**
-  (`rm`, `rmdir`, `del`, `Remove-Item`, `find -delete`, `git clean`, `shutil.rmtree`, ...), in either slash
-  direction and path dialect. A delete whose target the guard cannot work out, in a command naming a
-  protected folder, is refused too. Scratch folders (`/tmp`, temp, the scratchpad) are not protected.
-  It is pattern matching on parsed commands, **not a sandbox**: interpreter code (`python -c`) with a
-  relative path is not resolved. Treat it as a guard against accidents.
+  (`rm`, `del`, `Remove-Item`, `find -delete`, `git clean`, `shutil.rmtree`, a Recycle-Bin delete, ...), or
+  moving files out of them. Also refused: a delete whose target the guard cannot work out in a command
+  naming a protected folder, and deleting everything in a folder it cannot place (`rm -rf *` after an
+  unknown `cd`). Scratch folders (`/tmp`, temp, the scratchpad) are not protected.
+  Pattern matching on parsed commands, **not a sandbox** (a relative path inside `python -c` code is not
+  resolved): a guard against accidents.
 
   The install is **resolved** (from the guard's own location plus `skyrim-paths.env`), never guessed
   from the word "Skyrim". ⚠ If no root resolves, or a path in `skyrim-paths.env` is unreadable, the guard DENIES.
   Why: `docs/safety-philosophy.md`.
+- **Moving or renaming the install, `Data`, the settings folder or `Saves`** away.
 - **Deleting Bethesda registry keys** (`reg delete` / `Remove-Item` on a Bethesda key or one of its parents).
 - **Writing a plugin or archive (`.esp .esm .esl .bsa .ba2`) as raw text, anywhere** -- through the edit
-  tools, and through the shell: `>` / `>>`, `tee`, `Set-Content`, `Add-Content`, `Out-File`, `sed -i`,
-  `dd of=` and `[IO.File]::Write*`. Use xelib, Spriggit or AutoMod. Copying a finished plugin onto `Data/`
-  is **advised**, not refused. Not covered: a plugin written by code an interpreter runs
-  (`python -c "open('x.esp','wb')"`), by an opaque script, or by `perl -i`.
+  tools, and through the shell: `>` / `>>`, `tee`, `Set-Content`, `Out-File`, `sed -i`, `perl -i`, `dd of=`,
+  `[IO.File]::Write*`, downloaders, and a name written in `python -c` / `node -e` code. Use xelib, Spriggit
+  or AutoMod. Copying a finished plugin onto `Data/` is **advised**, not refused. Not covered: a name
+  built at runtime, a script run from a file (`python fix.py`), other interpreters.
 - Tool output aimed straight at an existing `.psc`, and Champollion against a `.pex`
-  inside `Data/Scripts/` -- both have destroyed irreplaceable sources here
-- DevBench `smp reset` (the console command measured to crash a large load order), through the
-  DevBench MCP tool, `curl` to its REST endpoint, or `devbench-cli.sh`
-- A command the guard cannot read at all: empty, not text, or unparseable while naming a protected folder
-  ("GUARD INERT" -- it refuses rather than shrugs)
+  inside `Data/Scripts/` -- both have destroyed sources
+- DevBench `smp reset` (measured to crash a large load order), by MCP, `curl` or `devbench-cli.sh`
+- Decoded text run as commands (`base64 -d | bash`), which the guard cannot read
+- A command the guard cannot read: empty or not text ("GUARD INERT"), or unparseable while it contains
+  a deletion and names a protected folder -- it refuses rather than shrugs
 
 ### ADVISED -- the call proceeds, I get a note, the user is never prompted
 - Skyrim INI files (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini) -- last file wins
 - SKSE plugin configs (`Data/SKSE/Plugins/*.ini`) -- not captured by any snapshot
 - Papyrus scripts (`.psc`, `.pex`) -- a `.pex` loads at game startup ONLY
 - Load order files -- the mod manager owns them and may overwrite a direct edit
-- Other shell writes into `Data/`, the config folder or MO2, and a copy onto a plugin where the game loads it
+- Redirects, `tee`, `sed -i` and other shell writes into `Data/`, the config folder or MO2 (a `cp`/`mv`
+  there is silent), and a copy onto a plugin where the game loads it
 - A decompiler writing its output into the install; `sed -i` with a backslash path
 - AutoMod write commands without `--dry-run`
 
 Naming a plugin or INI in a read-only command is silent: notes fire on the program that writes.
 
-### ASKS THE USER -- two rules
-- A ReSaver `set-global` / `set-var` / `clean` / `reset-havok` / `cleanse-formlists` / `remove-created`
-  with `--apply`, which mutates a `.ess` save through ReSaver's write path
-- A DevBench `save` (the `game` tool, or console `save <name>`) over a save file that already exists:
-  the old save is not kept
+### ASKS THE USER -- five rules
+- A ReSaver write operation (`clean`, `reset-havok`, `set-global`, ...) with `--apply`: it rewrites the save
+- A DevBench save (`game` tool or console `save <name>`) over an existing save: the old one is not kept
+- A shell write, copy or move onto a save in `Saves/`, and an edit-tool write to one (two rules)
+- git that throws away uncommitted changes in a protected folder (`checkout -- x`, `restore`,
+  `reset --hard`)
 
 Few prompts by design: a guard that prompts on routine work gets approved by reflex
 (`docs/safety-philosophy.md`). **Check the guards are alive: `bash tools/hook-canary.sh`.**
@@ -251,16 +254,16 @@ Coverage and gaps: `docs/guard-coverage.md`.
   in-development mod files in `Data/` are fine.)
 - **Delete to the Recycle Bin, never permanently.** Windows: `Microsoft.VisualBasic.FileIO.FileSystem`
   `DeleteFile`/`DeleteDirectory` with `SendToRecycleBin`, not `rm`/`Remove-Item`. A permanent delete
-  needs the user's OK; a tool's own temp files are exempt.
+  needs the user's OK; a tool's own temp files are exempt. The guard judges a Recycle-Bin delete like any delete.
 - **Never push CPU, RAM, free disk, disk I/O or GPU past 80% of the machine**, counting what already
   runs (games, other sessions). Measure first; if it won't fit, wait, shrink or ask. Stress tests: never
   one worker per core, idle priority, time-boxed.
 
 ### Safety improvement loop
-After every session, near-miss, or unexpected outcome, evaluate whether a new guard rule, expanded protection, or knowledgebase entry could have prevented or caught the issue. Propose new guard rules when a pattern of risk emerges -- proactively when you notice a gap. Document proposed rules in a "Hook Candidates" section of `KNOWLEDGEBASE.local.md`.
+After every session, near-miss or surprise, ask whether a new guard rule, protection or knowledgebase entry would have caught it -- proactively, when you notice a gap. Record proposals in a "Hook Candidates" section of `KNOWLEDGEBASE.local.md`.
 
 ### Audit trail
-- Files edited through the agent's own file-edit tool are backed up to `.claude/backups/` first, on agents with hooks. ⚠ A file written by a script is not seen by that backup at all (see the knowledgebase note above).
+- On agents with hooks, files changed through the edit tools are backed up to `.claude/backups/` first. ⚠ A file a script writes is not backed up (see the knowledgebase note above).
 - An audit log at `.claude/backups/AUDIT_LOG.txt` records every file touched, when, and by which tool
 
 ### Iteration snapshots (standing process — do not skip)

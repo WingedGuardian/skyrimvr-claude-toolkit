@@ -12,7 +12,9 @@ DELETE PRIMITIVES. rm, rmdir, unlink, del/erase/rd (cmd; PowerShell maps them to
 find -delete (find.delete), [IO.File]::Delete / [IO.Directory]::Delete, `git clean` (its target is the cwd, -C /
 --work-tree, or its pathspecs; `-n`/`--dry-run` deletes nothing), `git rm` (not --cached: it deletes the working
 files), rimraf (also via npx/pnpx/bunx/pnpm dlx), robocopy
-/MIR or /PURGE (deletes in the DESTINATION) and /MOV or /MOVE (deletes the SOURCE), and interpreter code
+/MIR or /PURGE (deletes in the DESTINATION) and /MOV or /MOVE (deletes the SOURCE), the Recycle-Bin delete
+(`[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile/DeleteDirectory`, Shell.Application `Namespace(10).MoveHere`;
+found in the text, see RECYCLE_CALL), and interpreter code
 (`python -c`, `node -e`, `perl -e`, a heredoc or pipe fed to an interpreter; R7(b)) checked with the legacy text
 regex plus a short list of interpreter delete APIs.
 
@@ -92,6 +94,53 @@ INTERP_LAUNCH = (
     r"|\b(system|shell_exec|passthru|proc_open)\s*\("
 )
 LAUNCH_DELETE_WORD = r"""(^|['"\s,\[(])(rm|rmdir|rd|del|erase|unlink|Remove-Item|ri|rimraf)(['"\s,\])]|$)"""
+
+# Plan 5 final review D1: the Recycle-Bin delete. core.md tells agents to delete with
+# [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile / DeleteDirectory (..., 'SendToRecycleBin'); Shell.Application's
+# Namespace(10) is the Recycle Bin and .MoveHere() puts a file in it. Both are .NET/COM EXPRESSIONS, not programs, so the
+# parser yields no exec for them (and bash cannot parse them at all): they are found in the command TEXT, which also
+# covers `powershell -Command "..."` and a script block. A recycled file is still gone from the install, so its first
+# argument is judged exactly like an rm operand (clauses (a) and (b)). Not covered: the call through a variable
+# (`$fs = [...FileSystem]; $fs::DeleteFile(...)`) and the same API from compiled or scripted .NET code (C#, dotnet-script).
+RECYCLE_CALL = re.compile(
+    r"(?:\[\s*(?:global::\s*)?(?:Microsoft\.VisualBasic\.FileIO\.)?FileSystem\s*\]\s*::\s*Delete(?:File|Directory)"
+    r"|\.\s*Namespace\s*\(\s*(?:10|0x0*a)\s*\)\s*\.\s*MoveHere)"
+    r"\s*\(\s*(?:\\?(?P<q>['\"])(?P<lit>[^'\"\n]{0,1024}?)\\?(?P=q)|(?P<bare>[^,)\s][^,)\n]{0,1023}))",
+    re.IGNORECASE)
+_RECYCLE_WORD = r"FileSystem\]\s*::\s*Delete(File|Directory)|Namespace\(\s*10\s*\)\s*\.MoveHere"
+DESTROYER += "|" + _RECYCLE_WORD
+DESTROYER_LOOSE += "|" + _RECYCLE_WORD
+
+
+# Programs that only SHOW text: a Recycle-Bin call among their words is a mention (`echo`, `grep`, a commit message).
+_MENTION_PROGRAMS = frozenset(("echo", "printf", "grep", "egrep", "fgrep", "rg", "findstr", "select-string",
+                               "write-output", "write-host", "git", "cat", "sed", "awk", "head", "tail"))
+
+
+def recycle_text(command: str, parsed) -> str:
+    """The command text the Recycle-Bin scan reads: without the bodies of data heredocs (`cat > f <<EOF`) and without
+    the words of programs that only show text. Priced: a heredoc writing a TEST file that quoted the call was denied."""
+    text = command
+    for e in parsed.execs:
+        if e.stdin_body and e.stdin_from == "heredoc:data":
+            text = text.replace(e.stdin_body, " ")
+        if e.program in _MENTION_PROGRAMS:
+            for w in e.argv:
+                if RECYCLE_CALL.search(w):
+                    text = text.replace(w, " ")
+    return text
+
+
+def recycle_targets(command: str) -> List[Tuple[str, str]]:
+    """(first argument, how it is written: "single" | "double" | "bare") for each Recycle-Bin delete call in the text.
+    A bare argument is a variable or an expression (`$d`, `(Join-Path ...)`): never resolved, only matched raw."""
+    out = []
+    for m in RECYCLE_CALL.finditer(command):
+        if m.group("lit") is not None:
+            out.append((m.group("lit"), "single" if m.group("q") == "'" else "double"))
+        else:
+            out.append((m.group("bare").strip(), "bare"))
+    return out
 
 DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "rimraf"))
 CMD_SWITCH_PROGRAMS = frozenset(("del", "erase", "rd", "rmdir"))
@@ -493,6 +542,8 @@ def _move_pairs(e) -> List[Tuple[str, str]]:
         from .shellparse import ps_param
         src = list(ps_param(e, "Path", 0)) + list(ps_param(e, "LiteralPath"))
         dst = ps_param(e, "Destination", 1)
+        if not src and e.stdin_from == "pipe":
+            src = [UNRESOLVED]                            # B-I1: `Get-Item X | Move-Item -Destination D`
         return [(s, dst[0] if dst else ".") for s in src]
     if p == "move" and e.dialect == "cmd":
         words = [w for w in argv if not re.fullmatch(r"/[A-Za-z?\-]+(:\S*)?", w)]
@@ -515,9 +566,56 @@ def _move_pairs(e) -> List[Tuple[str, str]]:
                 words.append(w)
             k += 1
         if target is not None:
+            if not words and e.stdin_from == "pipe":
+                words = [UNRESOLVED]                      # B-I1: `... | xargs mv -t D`
             return [(s, target) for s in words]
         return [(s, words[-1]) for s in words[:-1]]
     return []
+
+
+def _expands(word: str) -> bool:
+    """The word holds an expansion the guard did not prove (`$X`, `$env:X`, `%X%`, a backtick)."""
+    return bool(targets._LIVE_DOLLAR.search(word)) or "`" in word or bool(re.search(r"%[A-Za-z_]\w*%", word))
+
+
+_VAR_REF = re.compile(r"\$\{?(?:env:)?([A-Za-z_][A-Za-z0-9_]{0,63})\}?|%([A-Za-z_][A-Za-z0-9_]{0,63})%", re.IGNORECASE)
+
+
+def _assigned_value(name: str, command: str) -> Optional[str]:
+    """The one value the command's own text assigns to `name` (`N=v`, `N="v"`, `$N = 'v'`); None when it assigns none,
+    an empty one, or two different ones."""
+    n = re.escape(name)
+    vals = set()
+    for rx, flags in ((r"(?:^|[;&|(\n])[ \t]{0,16}(?:(?:export|local|declare|readonly)[ \t]{1,16})?" + n + r"=(?:\"([^\"\n]{0,512})\"|'([^'\n]{0,512})'|([^\s;&|\"'`()]{1,512}))", 0),
+                      (r"\$" + n + r"[ \t]{0,16}=[ \t]{0,16}(?:\"([^\"\n]{0,512})\"|'([^'\n]{0,512})')", re.IGNORECASE)):
+        for groups in re.findall(rx, command, flags):
+            vals.add(next((g for g in groups if g), ""))
+    return vals.pop() if len(vals) == 1 and "" not in vals else None
+
+
+def _expand_assigned(word: str, command: str) -> str:
+    """The word with each variable the command itself assigns one value replaced by that text, three levels deep
+    (`B="$P/.claude/backups"`, `P="C:/Game"`). A pricing aid for where a MOVE lands or starts (final review B-I1:
+    every newly denied move into the install's own backups used such a variable), not a proof of the value."""
+    for _ in range(3):
+        new = _VAR_REF.sub(lambda m: _assigned_value(m.group(1) or m.group(2), command) or m.group(0), word)
+        if new == word:
+            break
+        word = new
+    return word
+
+
+def _landing(e, word: str, command: str, cwd: str, env) -> Optional[str]:
+    """Where an unresolved move word most likely points: its same-command assignments expanded, else the literal folder
+    before its first expansion (`Data/textures/$f` lands in Data/textures). None when neither resolves."""
+    x = _expand_assigned(word, command)
+    a = targets.resolve_operand(e, x, cwd, env) if x != word else None
+    if a is None:
+        pre = re.split(r"[$%`]", x, maxsplit=1)[0]
+        pre = pre[:max(pre.rfind("/"), pre.rfind("\\")) + 1]
+        if pre.strip("/\\"):
+            a = targets.resolve_operand(e, pre, cwd, env)
+    return a
 
 
 def _everything(word: str) -> bool:
@@ -553,6 +651,17 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         b = _through(a, links) if links else a
         return protected_kind(b, roots), b
 
+    def piped_reach(i: int) -> bool:
+        """The input execs[i] reads from the pipe reaches a protected root: a word of an earlier stage is a protected
+        root or an ancestor of one, resolved or raw."""
+        for up in _upstream(parsed.execs, i):
+            for uw in up.argv:
+                ua = targets.resolve_operand(up, uw, cwd, env)
+                if (ua is not None and targets.covers_protected(place(ua)[1], roots)) or (
+                        ua is None and raw_reaches(uw, None, up.dialect, roots)):
+                    return True
+        return False
+
     for i, e in enumerate(parsed.execs):
         if is_opaque(e):
             opaque = True
@@ -566,14 +675,42 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                     break
         if e.program in MOVE_PROGRAMS and resolved is None:
             # RT-A: a move whose source is protected and whose destination is NOT in that same protected area
-            # takes the files out of it -- a delete of the source. An unresolved destination proves nothing.
+            # takes the files out of it -- a delete of the source.
+            # B-I1 (final review): an UNRESOLVED source (pipeline input, `xargs mv`, a variable) gets the unresolved
+            # delete operand's tests -- the pipeline's upstream words, the raw word -- unless it lands in a protected
+            # area (a move into or within one is not a delete; cp/mv into Data is silent by ruling). A protected
+            # source sent to a VARIABLE destination (`$env:TEMP`, "$TMP") leaves, unless that destination's own words
+            # reach a protected root; a relative destination with no cwd still proves nothing.
+            mcwd = targets.exec_cwd(e, cwd, env)
+            # Priced (base 300d235): every newly denied move but two landed in the install's own backups through a
+            # variable the command assigns (`B="$P/.claude/backups/x"; mv "$P/a.dll" "$B/"`), so an unresolved word
+            # is read through those assignments, and a destination through its literal folder (_landing).
             for src, dst in _move_pairs(e):
-                a = targets.resolve_operand(e, src, cwd, env)
-                kind, b = place(a) if a else ("", "")
                 d = targets.resolve_operand(e, dst, cwd, env)
+                if d is None:
+                    d = _landing(e, dst, command, cwd, env)
+                dz = targets.zone(place(d)[1], roots) if d is not None else ""
+                a = None if src is UNRESOLVED else targets.resolve_operand(e, src, cwd, env)
+                if a is None and src is not UNRESOLVED and _expand_assigned(src, command) != src:
+                    a = targets.resolve_operand(e, _expand_assigned(src, command), cwd, env)
+                if a is None:
+                    if dz in RULE_OF:
+                        continue
+                    unresolved_any = True                     # with a protected root named: S-DEL-UNRESOLVED
+                    if unresolved_reach is not None:
+                        continue
+                    if (src is UNRESOLVED or e.stdin_from == "pipe") and piped_reach(i):
+                        unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
+                    elif src is not UNRESOLVED and raw_reaches(src, mcwd, e.dialect, roots):
+                        unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
+                    continue
+                kind, b = place(a)
                 z = targets.zone(b, roots)
-                stays = z in RULE_OF and d is not None and targets.zone(place(d)[1], roots) == z
-                if kind and d is not None and not stays:
+                if d is None:
+                    leaves = _expands(dst) and not raw_reaches(dst, mcwd, e.dialect, roots)
+                else:
+                    leaves = not (z in RULE_OF and dz == z)
+                if kind and leaves:
                     resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
                     break
         ops = operands(e)
@@ -606,15 +743,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 # is whatever the earlier stages list: it reaches a root when one of THEIR words is a protected root
                 # or an ancestor of one. A listing INSIDE one (`ls *.bak | xargs rm` run in the install) is the
                 # fix-round-1 known limit: priced 75 occurrences, 0 real.
-                for up in _upstream(parsed.execs, i):
-                    for uw in up.argv:
-                        ua = targets.resolve_operand(up, uw, cwd, env)
-                        if (ua is not None and targets.covers_protected(place(ua)[1], roots)) or (
-                                ua is None and raw_reaches(uw, None, up.dialect, roots)):
-                            unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
-                            break
-                    if unresolved_reach:
-                        break
+                if piped_reach(i):
+                    unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
             if w is UNRESOLVED:
                 continue
             if raw_reaches(w, lit_base, e.dialect, roots) and unresolved_reach is None:
@@ -624,6 +754,24 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if nocwd and not relative and _is_data_word(w) and \
                     targets.resolve(w, targets.exec_cwd(e, _NOCWD, env) or _NOCWD, e.dialect, env) is not None:
                 relative = re.split(r"[/\\]+", w.rstrip("/\\"))[-1] or w
+    # D1: Recycle-Bin deletes, found in the text (RECYCLE_CALL). .NET resolves a relative path against the process
+    # directory, which is the payload cwd (Set-Location does not move it).
+    base = targets.normalise_cwd(cwd)
+    for w, how in (recycle_targets(recycle_text(command, parsed)) if resolved is None else ()):
+        a = None
+        if how == "single":
+            a = literal_abs(w, base, "powershell")
+        elif how == "double":
+            a = targets.resolve(w, base or "", "powershell", env)
+        if a is not None:
+            kind, b = place(a)
+            if kind:
+                resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
+                break
+            continue
+        unresolved_any = True
+        if unresolved_reach is None and raw_reaches(w, base, "powershell", roots):
+            unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
     if resolved:
         return Scan(resolved, relative)
     if unresolved_reach:

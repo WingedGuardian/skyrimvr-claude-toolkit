@@ -319,12 +319,22 @@ def test_a_cache_naming_a_stub_cannot_substitute_the_interpreter(tmp_path):
 
 
 def test_a_fresh_fallback_that_answers_without_the_nonce_is_refused(tmp_path):
-    """A candidate that passes the selftest but answers the engine run with `{}`: no nonce, no verdict."""
+    """A candidate that passes the selftest but answers the engine run with `{}`: no nonce, no verdict.
+
+    Final review C-M7: this asserted `"did not echo the engine nonce" in failed or "engine" in failed`. The nonce
+    record is overwritten by the wrapper's `inert engine` record, so only the second clause could ever hold, and it
+    matched any engine failure. What is asserted now: the stub WAS given the engine run with a nonce, it exited 0,
+    and the wrapper still recorded `engine exit 1` -- the nonce branch is the only step that turns that 0 into 1."""
     root = _install(tmp_path, MISSING)
-    _shim(tmp_path / "shims", "python", f'case "$*" in *--selftest*) exec "{REAL_PY}" "$@" ;; esac\necho "{{}}"\n')
+    log = tmp_path / "engine-runs.log"
+    _shim(tmp_path / "shims", "python", f'case "$*" in *--selftest*) exec "{REAL_PY}" "$@" ;; esac\n'
+                                        f'echo "$*" >> "{log.as_posix()}"\necho "{{}}"\nexit 0\n')
     r = _fire(root, [tmp_path / "shims"], _esp_write(root))
     assert "GUARD INERT" in _reason(r), r.stdout
-    assert "did not echo the engine nonce" in _failed(root, "protect-files") or "engine" in _failed(root, "protect-files")
+    runs = log.read_text(encoding="utf-8") if log.is_file() else ""
+    assert "--nonce" in runs, runs
+    failed = _failed(root, "protect-files")
+    assert failed.rstrip("\n").endswith(" engine exit 1"), failed
 
 
 @pytest.mark.parametrize("bad", ["tag", "name", "relative", "args"])

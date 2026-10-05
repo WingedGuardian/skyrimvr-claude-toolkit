@@ -857,12 +857,24 @@ MUTATIONS = [
     # Stop honouring the CONFIGURED config directory. MO2/Wabbajack put the INIs in the
     # instance profile, outside Documents/My Games, so for those users this arm is the
     # only thing guarding their config -- and it had no test at all.
+    # Final review D3: since Task 6/7 a RESOLVED delete is placed by Roots.config_dirs
+    # (`_add_dir(cfg, v)`), so that is the clause this test guards. The old anchor
+    # (`_add(config, v)` -> a mis-indented `pass`) was killed only by an IndentationError;
+    # reverted with the right indent it survived. The mention regex arm has its own twin.
+    pytest.param(
+        "tools/skyguard/paths.py",
+        "        _add_dir(cfg, v)",
+        "        pass",
+        "tests/test_hooks.py::test_a_configured_config_directory_outside_documents_is_guarded",
+        id="configured-config-directory-is-guarded",
+    ),
     pytest.param(
         "tools/skyguard/paths.py",
         "        _add(config, v)",
-        "    pass",
-        "tests/test_hooks.py::test_a_configured_config_directory_outside_documents_is_guarded",
-        id="configured-config-directory-is-guarded",
+        "        pass",
+        "tests/test_skyguard_deletes.py::"
+        "test_an_unresolved_delete_in_a_command_naming_the_configured_config_dir_is_unresolved",
+        id="configured-config-directory-is-named",
     ),
     # Put the 5s timeouts back. A PreToolUse refusal that arrives late is DISCARDED,
     # and this release leads with that fix -- guarded, until now, by nothing.
@@ -3557,7 +3569,17 @@ def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:
            "until it is unique.\n")
         + f"  {find!r}"
     )
-    io.open(target, "w", encoding="utf-8", newline="").write(text.replace(find, replace))
+    mutated = text.replace(find, replace)
+    # A mutant that does not COMPILE is killed by the SyntaxError, whatever the named test
+    # asserts -- so it proves nothing about the clause. Final review D3 found one
+    # (a mis-indented `pass`), killed only that way while a correct revert survived.
+    if relpath.endswith(".py"):
+        try:
+            compile(mutated, relpath, "exec")
+        except SyntaxError as exc:
+            raise AssertionError(f"mutation of {relpath} does not compile ({exc}); it would be killed by "
+                                 f"the syntax error, not by the test it names.\n  {replace!r}")
+    io.open(target, "w", encoding="utf-8", newline="").write(mutated)
     return work
 
 
@@ -4094,3 +4116,136 @@ MUTATIONS += [pytest.param("tools/skyguard/targets.py", find, rep, test, id="p5a
     ("m5-bare-drive-is-cwd", "    return paths.norm_abs(paths._join(base, rest)) if rest else base",
      "    return paths.norm_abs(paths._join(base, rest)) if rest else None", _p5a("m5-pwsh-set-location-drive")),
 ]]
+
+# Plan 5 final review, fix pass (rules lane). One mutation per clause the fix pass added; each names the row or test
+# that must go red. P5F rows fire in-process from tests/test_skyguard_p5fix.py.
+def _p5f(row):
+    return "tests/test_skyguard_p5fix.py::test_p5f_row[p5f-" + row + "]"
+
+
+_DOCS = "tests/test_guard_docs_agree.py::test_the_documented_ask_count_matches_the_registry"
+_P5F_CLAUSES = [
+    # (id, file, find, replace, test that must go red)
+    # D1: the Recycle-Bin delete (VB FileSystem::DeleteFile/DeleteDirectory, Shell.Application Namespace(10).MoveHere).
+    ("p5f-recycle-bin-delete-not-judged", _DL,
+     "    for w, how in (recycle_targets(recycle_text(command, parsed)) if resolved is None else ()):",
+     "    for w, how in ():",
+     _p5f("vb-deletedirectory-ps")),
+    ("p5f-recycle-bin-shell-application-not-matched", _DL,
+     '    r"|' + BS + '.' + BS + 's*Namespace' + BS + 's*' + BS + '(' + BS + 's*(?:10|0x0*a)' + BS + 's*' + BS + ')'
+     + BS + 's*' + BS + '.' + BS + 's*MoveHere)"', '    r")"',
+     _p5f("shell-app-recycle")),
+    ("p5f-recycle-bin-relative-path-unresolved", _DL, "    base = targets.normalise_cwd(cwd)\n", "    base = None\n",
+     _p5f("vb-relative-in-install")),
+    ("p5f-recycle-bin-double-quoted-not-resolved", _DL, '        elif how == "double":', "        elif False:",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_delete_with_a_double_quoted_path_resolves"),
+    ("p5f-recycle-bin-unresolved-not-raw-matched", _DL,
+     '        if unresolved_reach is None and raw_reaches(w, base, "powershell", roots):', "        if False:",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_delete_of_an_unresolved_root_variable_is_unresolved"),
+    ("p5f-recycle-bin-unresolved-not-counted", _DL,
+     "            continue\n        unresolved_any = True\n        if unresolved_reach is None and raw_reaches(w, base,",
+     "            continue\n        if unresolved_reach is None and raw_reaches(w, base,",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_delete_of_a_variable_in_a_command_naming_the_install_is_unresolved"),
+    ("p5f-recycle-bin-not-in-fallback-destroyer", _DL, 'DESTROYER += "|" + _RECYCLE_WORD', "",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_words_reach_the_parse_failure_fallback"),
+    ("p5f-recycle-bin-not-in-opaque-destroyer", _DL, 'DESTROYER_LOOSE += "|" + _RECYCLE_WORD', "",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_words_reach_the_parse_failure_fallback"),
+    # B-I1: moves with pipeline / unresolved sources and variable destinations.
+    ("p5f-move-item-pipe-source-dropped", _DL, '        if not src and e.stdin_from == "pipe":', "        if False:",
+     _p5f("pipe-gci-move")),
+    ("p5f-mv-target-pipe-source-dropped", _DL, '            if not words and e.stdin_from == "pipe":',
+     "            if False:", _MDEL + "test_xargs_mv_with_a_target_reads_its_sources_from_the_pipe"),
+    ("p5f-move-unresolved-source-ignores-named-root", _DL,
+     "                    unresolved_any = True                     # with a protected root named: S-DEL-UNRESOLVED",
+     "                    pass", _p5f("pipe-get-item-move")),
+    ("p5f-move-unresolved-source-no-upstream-check", _DL,
+     '                    if (src is UNRESOLVED or e.stdin_from == "pipe") and piped_reach(i):', "                    if False:",
+     _MDEL + "test_pipeline_move_of_an_ancestor_of_the_install_is_unresolved"),
+    ("p5f-move-unresolved-source-no-raw-match", _DL,
+     "                    elif src is not UNRESOLVED and raw_reaches(src, mcwd, e.dialect, roots):",
+     "                    elif False:", _p5f("mv-root-var-source")),
+    ("p5f-move-into-protected-area-is-a-delete", _DL,
+     "                    if dz in RULE_OF:\n                        continue\n",
+     "                    if False:\n                        continue\n",
+     _MDEL + "test_an_unresolved_move_into_a_protected_folder_is_not_a_delete"),
+    ("p5f-move-variable-destination-proves-nothing", _DL,
+     "                    leaves = _expands(dst) and not raw_reaches(dst, mcwd, e.dialect, roots)",
+     "                    leaves = False", _p5f("mv-to-env-temp")),
+    ("p5f-move-variable-destination-reaching-a-root-leaves", _DL,
+     "                    leaves = _expands(dst) and not raw_reaches(dst, mcwd, e.dialect, roots)",
+     "                    leaves = _expands(dst)",
+     _MDEL + "test_a_protected_file_moved_to_a_variable_destination_that_reaches_a_root_may_stay"),
+    ("p5f-expands-misses-cmd-variable", _DL, ' or bool(re.search(r"%[A-Za-z_]' + BS + 'w*%", word))', "",
+     _MDEL + "test_expands[%TEMP%/x-True]"),
+    ("p5f-expands-misses-backtick", _DL, ' or "`" in word or bool(', " or bool(", _MDEL + "test_expands[`pwd`/x-True]"),
+    ("p5f-copy-item-pipe-source-dropped", "tools/skyguard/writes.py",
+     '        return [(dst[0] if dst else ".", src)] if src or e.stdin_from == "pipe" else []',
+     '        return [(dst[0] if dst else ".", src)] if src else []', _p5f("pipe-copy-onto-save")),
+    # D2: the documented ask count drifts from the registry again (core.md, README, safety-philosophy).
+    ("p5f-core-md-ask-count-stale", "agent/instructions/core.md", "### ASKS THE USER -- five rules",
+     "### ASKS THE USER -- two rules", _DOCS + "[core]"),
+    ("p5f-readme-ask-count-stale", "README.md", "Only five rules ask *you*", "Only two rules ask *you*",
+     _DOCS + "[readme]"),
+    ("p5f-philosophy-ask-count-stale", "docs/safety-philosophy.md", "Five rules in the toolkit ask you",
+     "Two rules in the toolkit ask you", _DOCS + "[philosophy]"),
+    # Privacy: a fixture carries the home of whoever runs the gate again (built at collection time, so this file
+    # never names anyone).
+    ("p5f-fixture-carries-home", "tests/fixtures/routes-harness/cases9.py", '"file_path":"<HOME>/.codex/config.toml"',
+     '"file_path":"' + str(Path.home()).replace(BS, "/") + '/.codex/config.toml"',
+     "tests/test_payload_fixtures.py::test_no_file_under_fixtures_carries_the_capturing_users_home"),
+    # B-M4: the DevBench URL is read as curl sends it.
+    ("p5f-devbench-url-not-normalised", "tools/skyguard/mcp_rules.py",
+     "        u = _norm_url(w)                                      # rt-fix-b %63onsole; B-M4 dot / empty segments",
+     "        u = unquote(w)", _p5f("devbench-dot-segment")),
+    ("p5f-devbench-prefilter-needs-api-slash-tool", "tools/skyguard/mcp_rules.py",
+     ' and not ("api" in low and "tool" in low):', ":", _p5f("devbench-dotdot-segment")),
+    ("p5f-devbench-text-fallback-not-normalised", "tools/skyguard/mcp_rules.py",
+     "_TEXT_ENDPOINT.search(_norm_text(command)):", "_TEXT_ENDPOINT.search(unquote(command)):",
+     "tests/test_skyguard_p5fix.py::test_the_text_fallback_reads_a_dot_segment_url"),
+    ("p5f-devbench-url-keeps-leading-double-slash", "tools/skyguard/mcp_rules.py",
+     "        path = path[1:]                                    # normpath keeps a POSIX leading `//`",
+     "        pass", "tests/test_skyguard_p5fix.py::test_norm_url[double-slash]"),
+    ("p5f-devbench-url-drops-trailing-slash", "tools/skyguard/mcp_rules.py",
+     '    if parts.path.endswith("/") and not path.endswith("/"):', "    if False:",
+     "tests/test_skyguard_p5fix.py::test_norm_url[double-slash]"),
+    # B-I1 pricing refinements: moves read through the command's own assignments; the Recycle-Bin text scan skips
+    # data heredocs and mentions.
+    ("p5f-recycle-text-reads-data-heredocs", _DL, '        if e.stdin_body and e.stdin_from == "heredoc:data":',
+     "        if False:", _MDEL + "test_a_heredoc_that_quotes_the_recycle_bin_call_is_not_a_delete"),
+    ("p5f-recycle-text-reads-mentions", _DL, "        if e.program in _MENTION_PROGRAMS:", "        if False:",
+     _MDEL + "test_echoing_the_recycle_bin_call_is_not_a_delete"),
+    ("p5f-move-destination-not-landed", _DL, "                    d = _landing(e, dst, command, cwd, env)",
+     "                    pass", _MDEL + "test_a_move_into_the_installs_backups_through_an_assigned_variable_stays"),
+    ("p5f-landing-no-literal-folder", _DL, '        if pre.strip("/' + BS * 2 + '"):', "        if False:",
+     _MDEL + "test_a_move_into_a_literal_data_folder_with_a_loop_variable_stays"),
+    ("p5f-expand-assigned-ambiguous", _DL, '    return vals.pop() if len(vals) == 1 and "" not in vals else None',
+     "    return vals.pop() if vals else None", _MDEL + "test_expand_assigned[$D/x-$D/x]"),
+    ("p5f-move-source-not-expanded", _DL,
+     "                if a is None and src is not UNRESOLVED and _expand_assigned(src, command) != src:",
+     "                if False:", _MDEL + "test_a_move_out_through_an_assigned_variable_still_leaves"),
+    # C-M7: the nonce refusal is observable only as "the stub exited 0 yet the wrapper recorded exit 1". Twin 1: the
+    # refusal is kept but with another code (still denied, so only the exact record can see it). Twin 2: the engine
+    # run no longer carries a nonce (still refused, since the stub never echoes one; only the run log can see it).
+    ("p5f-nonce-refusal-code-changed", "agent/guards/adapters/claude/protect-files.sh",
+     '*) RC=1; _fail python "fallback ${PYC[*]} did not echo the engine nonce -- not used" ;;',
+     '*) RC=3; _fail python "fallback ${PYC[*]} did not echo the engine nonce -- not used" ;;',
+     "tests/test_hook_deadline.py::test_a_fresh_fallback_that_answers_without_the_nonce_is_refused"),
+    ("p5f-nonce-not-passed-to-the-engine-run", "agent/guards/adapters/claude/protect-files.sh",
+     '        _bounded "$1" in "${PYC[@]}" "$RUNPY" "${ENGINE_ARGS[@]}" --nonce "$NONCE"',
+     '        _bounded "$1" in "${PYC[@]}" "$RUNPY" "${ENGINE_ARGS[@]}"',
+     "tests/test_hook_deadline.py::test_a_fresh_fallback_that_answers_without_the_nonce_is_refused"),
+    # B-M1: message fields from command text keep the two-line, 200-character contract.
+    ("p5f-message-keeps-control-characters", "tools/skyguard/rules.py",
+     '    clean = {k: _CONTROL.sub(" ", str(v)) for k, v in fields.items()}', "    clean = {k: str(v) for k, v in fields.items()}",
+     "tests/test_rule_messages.py::test_every_template_keeps_its_shape_whatever_the_fields[newline-in-file]"),
+    ("p5f-message-field-not-cut", "tools/skyguard/rules.py", ' else v[:cap - 3] + "..." for k, v in clean.items()})',
+     " else v for k, v in clean.items()})",
+     "tests/test_rule_messages.py::test_every_template_keeps_its_shape_whatever_the_fields[long-fields]"),
+    ("p5f-message-cap-not-shrunk-for-a-long-line", "tools/skyguard/rules.py",
+     '        if cap <= 16 or all(len(ln) <= LINE_MAX for ln in out.split("' + BS + 'n")):', "        if True:",
+     "tests/test_rule_messages.py::test_every_template_keeps_its_shape_whatever_the_fields[long-fields]"),
+    # C-M1: intent_diff writes UTF-8 whatever the console code page.
+    ("p5f-intent-diff-console-encoding", "scripts/guard-corpus/intent_diff.py", '    if hasattr(sys.stdout, "buffer"):',
+     "    if False:", "tests/test_intent_diff.py::test_main_writes_utf8_whatever_the_console_encoding"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _P5F_CLAUSES]

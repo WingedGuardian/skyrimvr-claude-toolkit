@@ -404,7 +404,8 @@ def copy_targets(e) -> List[Tuple[str, Tuple[str, ...]]]:
     if p in ("copy-item", "move-item"):
         src = tuple(ps_param(e, "path", 0)) + tuple(ps_param(e, "literalpath"))
         dst = ps_param(e, "destination", 1)
-        return [(dst[0] if dst else ".", src)] if src else []
+        # B-I1 (final review): `Get-Item X | Copy-Item -Destination D` still writes D; its source arrives on the pipe.
+        return [(dst[0] if dst else ".", src)] if src or e.stdin_from == "pipe" else []
     if p in CMD_COPY_PROGRAMS and e.dialect == "cmd":
         words = [w for w in argv if not _CMD_SWITCH.fullmatch(w)]
         if not words:

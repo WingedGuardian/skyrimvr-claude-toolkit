@@ -1,13 +1,19 @@
 """Harness: feeds payloads to the real run.py entry. usage: python h.py cases.json"""
 import json, subprocess, sys, os
-REPO = os.environ.get("RT_REPO", "C:/Users/Moona/Projects/toolkit-rtB")
+REPO = os.environ.get("RT_REPO", "")
+if not REPO:
+    sys.exit("set RT_REPO to the toolkit checkout to test (README.md)")
 GAME = "C:/Temp/rt-routes/Game"
+# The fake home the engine is given (USERPROFILE/HOME below). A case names it as <HOME>, the token
+# tools/payload-capture/scrub.py uses, so no case carries a real user's home.
+FAKE_HOME = "C:/Temp/rt-routes/home"
 RUN = REPO + "/tools/skyguard/run.py"
 ROLE = {"Bash": "protect-bash", "PowerShell": "protect-bash", "Monitor": "protect-bash",
         "Edit": "protect-files", "Write": "protect-files", "NotebookEdit": "protect-files"}
 
 
 def fire(agent, tool, ti, cwd=GAME):
+    ti = json.loads(json.dumps(ti).replace("<HOME>", FAKE_HOME))
     d = {"cwd": cwd, "hook_event_name": "PreToolUse", "session_id": "s", "tool_name": tool, "tool_input": ti,
          "permission_mode": "bypassPermissions"}
     if agent == "claude":
@@ -19,8 +25,8 @@ def fire(agent, tool, ti, cwd=GAME):
         d["turn_id"] = "t"
         d["model"] = "m"
     env = dict(os.environ)
-    env["USERPROFILE"] = "C:/Temp/rt-routes/home"
-    env["HOME"] = "C:/Temp/rt-routes/home"
+    env["USERPROFILE"] = FAKE_HOME
+    env["HOME"] = FAKE_HOME
     env["PLUGINS_TXT"] = ""
     p = subprocess.run([sys.executable, RUN, agent, role, "--root", GAME, "--root-win", GAME, "--project", GAME],
                        input=json.dumps(d).encode(), capture_output=True, env=env, timeout=60)

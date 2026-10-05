@@ -20,8 +20,10 @@ python cases1.py
 RT_REPO=<toolkit checkout> python -B h.py C:/Temp/rt-routes/cases1.json > out1.txt
 ```
 
-`RT_REPO` defaults to the checkout the review ran in. The paths are absolute and Windows-shaped because the
-review ran on Windows; a case's `expect` is the red team's judgement at the time, not a spec. The spec for
+`RT_REPO` is required (no default: the old one named the reviewer's own checkout). A case names the user's home
+as `<HOME>`, the token `tools/payload-capture/scrub.py` uses; `h.py` fills it with the fake home it hands the engine
+(`C:/Temp/rt-routes/home`). `tests/test_payload_fixtures.py` fails if any file here carries the home of whoever runs
+it. The paths are absolute and Windows-shaped because the review ran on Windows; a case's `expect` is the red team's judgement at the time, not a spec. The spec for
 each closed hole is its corpus row (`tests/guard_corpus/intended.jsonl`, task `RTB`) or Codex route row
 (`tests/test_skyguard_codex_routes.py`), and a `HOLE?` mark here is a lead to check, not a failure.
 Known holes still marked at rt-fix-b's end belong to branch rt-fix-a (interpreter and wrapper deletes, path
