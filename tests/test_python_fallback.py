@@ -240,7 +240,9 @@ def test_a_hanging_probe_is_cut_off_and_the_chain_moves_on(tmp_path):
     t = time.time()
     r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
     assert _reason(r).startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), r.stdout
-    assert time.time() - t < 25, "a hanging probe held the hook past its budget"
+    # the probe budget (15 s default) and then the next candidate, all inside the definition timeout
+    # (60 s) - 10 s; the deadline itself is tests/test_hook_deadline.py's
+    assert time.time() - t < 50, "a hanging probe held the hook past its budget"
 
 
 def test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget(tmp_path):

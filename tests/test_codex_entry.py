@@ -292,9 +292,10 @@ def test_a_hung_engine_is_killed_with_its_children(tmp_path, entry):
     pidfile = tmp_path / "child.pid"
     _replace_run_py(root, (
         "import subprocess, sys, time\n"
-        "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(15)'])\n"
+        # 40 s: longer than any wait the entry itself may do, so only a KILL can end them in time
+        "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(40)'])\n"
         "open({!r}, 'w').write(str(c.pid))\n"
-        "time.sleep(15)\n").format(str(pidfile)))
+        "time.sleep(40)\n").format(str(pidfile)))
     r = _run(entry, root, "pre-tool", _benign(root), {"SKYGUARD_WRAPPER_TIMEOUT_S": "3"})
     assert r.stdout == _expected("pre-tool", "engine did not answer within 3 s"), r.stdout
     pid = int(pidfile.read_text())

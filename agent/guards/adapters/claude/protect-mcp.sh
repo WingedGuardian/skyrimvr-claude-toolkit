@@ -86,19 +86,25 @@ fi
 # HOOK_TIMEOUT_S - 15 s, and every native child (probe, engine) gets a slice of it. A child is read through
 # a pipe in 0.2 s `read -t` slices (a builtin: no sleep/timeout fork) and, at its limit, killed by its
 # WINDOWS pid (`taskkill /F /T` on /proc/<pid>/winpid; elsewhere `kill -KILL`). The kill is started in the
-# background and never waited for, so the answer is on time even while a child is still dying. coreutils
-# `timeout` is not used: its signal reaches a native python.exe late or never once the CPU is
-# oversubscribed (MEASURED 2026-10-05, 2x load: a 3 s bound took 18-227 s; taskkill by pid 5-6 s).
-# The engine's own in-process watchdog (run.py, faulthandler, SKYGUARD_ENGINE_TIMEOUT, default 20 s) still
-# ends a stuck engine first; the wrapper's kill lands 3 s after it.
+# background; the wrapper waits for the child to go only while time is left before DL, so the answer is on
+# time even while a child is still dying. coreutils `timeout` is not used: its signal reaches a native
+# python.exe late or never once the CPU is oversubscribed (MEASURED 2026-10-05, 2x load: a 3 s bound took
+# 18-227 s; taskkill by pid 5-6 s). The engine's own in-process watchdog (run.py, faulthandler,
+# SKYGUARD_ENGINE_TIMEOUT, default 20 s, counted from run.py's start) normally ends a stuck engine first;
+# the wrapper's kill comes 10 s after that budget, counted from the spawn, which leaves room for a slow
+# interpreter start under load (a hang BEFORE the watchdog is armed is the case only the wrapper sees).
 #
 # The chain runs ONLY once the configured $PY has failed, so it adds no fork to a healthy call. Order:
 # a remembered fallback (below), then py -3 / python / python3 that resolve and are not a Store alias,
 # then the usual install locations (newest version first), then a Store alias, last. A candidate is
 # accepted only if it runs the engine's own `run.py --selftest <nonce>` (ONE process: run.py itself
 # refuses Python < 3.8, and an older one cannot even parse it) and echoes the nonce: a stub that merely
-# exits 0 and prints `{}` would otherwise read as ALLOW. Each probe gets min(SKYGUARD_PROBE_TIMEOUT, 3 s
-# default, sub-second allowed) and no probe starts in the last 10 s before DL (the engine needs them).
+# exits 0 and prints `{}` would otherwise read as ALLOW. Each probe gets min(SKYGUARD_PROBE_TIMEOUT, the
+# time left), sub-second allowed, and no probe starts in the last 10 s before DL (the engine needs them).
+# Default 15 s: a HEALTHY selftest took up to 3.8 s native and ~9 s through a bash shim on 4 cores at 2x
+# load (MEASURED 2026-10-05; 0.35 s idle), so the old 3 s rejected working interpreters exactly when the
+# machine was busiest. A rejected candidate and a hanging one both end fail-closed (GUARD INERT); the
+# slow-but-healthy one is the common case under load, so it gets the room.
 # Multi-word candidates are word-split, never eval'd. A fallback that is taken writes a `failed` record
 # BEFORE the engine runs, so the health report says DEGRADED until the configured interpreter works again.
 #
@@ -133,8 +139,8 @@ H_S="$HOOK_TIMEOUT_S"
 case "${SKYGUARD_HOOK_TIMEOUT_S:-}" in ''|*[!0-9]*) ;; *) [ "$SKYGUARD_HOOK_TIMEOUT_S" -ge "$H_S" ] || H_S="$SKYGUARD_HOOK_TIMEOUT_S" ;; esac
 DL=$(( T0_MS + (H_S - 15) * 1000 ))
 PROBE_END=$(( DL - 10000 ))
-_secs_ms "${SKYGUARD_PROBE_TIMEOUT:-}" 3; PROBE_MS=$MS
-_secs_ms "${SKYGUARD_ENGINE_TIMEOUT:-}" 20; ENGINE_MS=$(( MS + 3000 ))
+_secs_ms "${SKYGUARD_PROBE_TIMEOUT:-}" 15; PROBE_MS=$MS
+_secs_ms "${SKYGUARD_ENGINE_TIMEOUT:-}" 20; ENGINE_MS=$(( MS + 10000 ))
 _kill_tree() {
     local w="" tk=taskkill
     if [ -r "/proc/$1/winpid" ] && read -r w < "/proc/$1/winpid" 2>/dev/null && [ -n "$w" ]; then
@@ -175,7 +181,15 @@ _bounded() {
             break
         fi
         _now
-        if [ "$MS" -ge "$end" ]; then _kill_tree "$cpid"; RC=124; break; fi
+        if [ "$MS" -ge "$end" ]; then
+            _kill_tree "$cpid"; RC=124
+            # let the kill land while there is time (no stray process), but never wait past DL for it
+            while kill -0 "$cpid" 2>/dev/null; do
+                _now; [ "$MS" -lt "$DL" ] && [ "$MS" -lt $(( end + 10000 )) ] || break
+                IFS= read -r -d '' -t 0.1 -u "$fd" part; [ $? -gt 128 ] || sleep 0.05 2>/dev/null
+            done
+            break
+        fi
         [ -z "$eof" ] || sleep 0.05 2>/dev/null
     done
     exec {fd}<&-

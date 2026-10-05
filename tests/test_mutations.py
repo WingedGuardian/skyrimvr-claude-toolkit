@@ -1361,8 +1361,8 @@ MUTATIONS = [
     ),
     pytest.param(
         "agent/guards/adapters/claude/protect-files.sh",
-        'if [ "$MS" -ge "$end" ]; then _kill_tree "$cpid"; RC=124; break; fi',
-        ':',
+        'if [ "$MS" -ge "$end" ]; then',
+        'if false; then',
         "tests/test_python_fallback.py::test_a_hanging_fallback_engine_is_cut_off_by_timeout",
         id="fallback-engine-call-has-no-time-limit",
     ),
@@ -1397,6 +1397,11 @@ MUTATIONS = [
          "DL=$(( T0_MS + (H_S - 15) * 1000 ))", "DL=$(( T0_MS + 600000 ))",
          "tests/test_hook_deadline.py::test_the_outer_deadline_answers_while_the_child_is_still_dying[codex]",
          "codex-sh-deadline-outer-from-definition-timeout"),
+        # ... while time is left, it does let the kill land (no engine still running at the answer)
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '            while kill -0 "$cpid" 2>/dev/null; do', "            while false; do",
+         "tests/test_hook_deadline.py::test_with_time_left_the_wrapper_answers_only_once_the_killed_child_is_gone",
+         "deadline-kill-allowed-to-land-while-time-is-left"),
         ("agent/guards/adapters/claude/protect-files.sh",
          "HOOK_TIMEOUT_S=60 ", "HOOK_TIMEOUT_S=90 ",
          "tests/test_hook_deadline.py::test_every_claude_wrapper_carries_its_definition_timeout",
@@ -1696,8 +1701,8 @@ MUTATIONS = [
 ] + [
     pytest.param("agent/guards/adapters/codex/skyguard-entry.sh", *m[:3], id=m[3])
     for m in [
-        (r'''if [ "$MS" -ge "$end" ]; then _kill_tree "$cpid"; RC=124; break; fi''',
-         r''':''',
+        (r'''if [ "$MS" -ge "$end" ]; then''',
+         r'''if false; then''',
          "tests/test_codex_entry.py::test_a_hung_engine_is_a_deny[bash]", "codex-sh-no-deadline"),
         (r'''"$tk" //F //T //PID "$w" >/dev/null 2>&1 </dev/null &''',
          r''':''',
