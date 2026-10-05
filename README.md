@@ -427,10 +427,14 @@ These aren't things you configure -- they're already wired in. Every session, be
 `bash tools/skyguard.sh lock lock` makes the vanilla masters and archives (an explicit list, never a pattern)
 read-only **and** denies this user write access to them, so a stray overwrite or `-Force` fails with
 "access denied". Nothing is locked unless you run it. `lock status` shows what is locked, `lock unlock <file>`
-lifts one file for the current session, `lock disable` turns it off persistently.
+lifts one file (typed at a terminal it just works; an agent's shell passes `--session <id>` or sets
+`SKYGUARD_SESSION_ID`), `lock disable` turns it off persistently. A file that already has a deny entry of your own
+is skipped and reported, never modified.
 
-- **Unlock without Python:** double-click `tools/skyguard-unlock.cmd`. Last resort, by hand, for one file `F`:
-  `icacls "F" /remove:d *<your SID>` and then `attrib -R "F"` (in that order).
+- **Unlock without Python:** double-click `tools/skyguard-unlock.cmd` (it re-checks every file and exits non-zero,
+  printing `NOT unlocked`, if one is still locked). Last resort, by hand, for one file `F`:
+  `icacls "F" /remove:d *<your SID>` and then `attrib -R "F"` (in that order). Your SID is the `S-1-5-21-...`
+  value that `whoami /user` prints. `/remove:d` removes every explicit deny entry for your account on that file.
 - **Access denied on a vanilla master or archive** means this lock; unlock that file and retry.
 - **Known limits:** an xEdit save is not stopped (it renames the locked master into `zEdit Backups/`, bytes
   intact); Codex's `workspace-write` sandbox cannot lift the lock, so run the `.cmd` yourself; a mod manager's

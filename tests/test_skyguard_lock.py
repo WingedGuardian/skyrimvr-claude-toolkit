@@ -78,6 +78,7 @@ def _scrub(root: Path):
         return
     sid = _sid()
     subprocess.run([str(SYS32 / "icacls.exe"), str(root), "/remove:d", "*" + sid, "/T", "/C"], capture_output=True)
+    subprocess.run([str(SYS32 / "icacls.exe"), str(root), "/remove:d", "*S-1-1-0", "/T", "/C"], capture_output=True)
     subprocess.run([str(SYS32 / "attrib.exe"), "-R", os.path.join(str(root), "*"), "/S", "/D"], capture_output=True)
     shutil.rmtree(str(root), ignore_errors=True)
     assert not root.exists(), "scratch bed could not be removed: %s" % root
@@ -626,14 +627,14 @@ def test_mutation_l2_targets_glob(bed, tmp_path):
 
 @needs_windows
 def test_mutation_l2_lock_single_link_targets(bed, tmp_path):
-    m = _mutant(tmp_path, "    if st.st_nlink != 1:\n        return \"multi-link (mod manager copy)\"\n",
+    m = _mutant(tmp_path, "    if n != 1:\n        return \"multi-link (mod manager copy)\"\n",
                 "    if False:\n        return \"multi-link (mod manager copy)\"\n")
     _red(_scenario_single_link_targets, "multi-link file entered", m, bed)
 
 
 @needs_windows
 def test_mutation_l2_lock_single_link_apply(bed, tmp_path):
-    m = _mutant(tmp_path, "    if single and st.st_nlink != 1:\n", "    if False:\n")
+    m = _mutant(tmp_path, "    if single and _links(path, st) != 1:\n", "    if False:\n")
     _red(_scenario_single_link_apply, "DID NOT RAISE", m, bed)
 
 
@@ -722,9 +723,9 @@ def test_python_free_unlock_refuses_a_path_outside_the_sandbox_and_reports_missi
     assert r.returncode != 0
     assert all(_locked(bed, n) for n in VR_FILES), "the .cmd touched a file outside the sandbox"
     shutil.rmtree(str(box), ignore_errors=True)
-    (bed.root / ".skyguard" / "locked.txt").unlink()
+    (bed.root / ".skyguard" / "locked.txt").write_text(str(bed.root / "elsewhere.bin") + "\n", encoding="utf-8")
     r = _run_cmd(script, _nopy_env())
-    assert r.returncode != 0 and all(_locked(bed, n) for n in VR_FILES)
+    assert r.returncode == 3 and "REFUSED" in r.stdout and all(_locked(bed, n) for n in VR_FILES)
 
 
 def test_python_free_unlock_script_is_pure_cmd_and_crlf():
