@@ -3242,7 +3242,7 @@ MUTATIONS_TASK13 = [
      _COV + "test_coverage_is_degraded_when_one_call_has_no_line", "coverage-degraded-when-a-call-had-no-hook"),
     ("tools/skyguard/health.py", "            hooked = sum(min(hooked_by.get(t, 0), counts.get(t, 0)) for t in tools)",
      "            hooked = sum(hooked_by.get(t, 0) for t in tools)",
-     _COV + "test_claude_coverage_is_judged_per_covered_tool", "coverage-claude-is-judged-per-tool"),
+     _COV + "test_extra_guard_lines_for_one_tool_cannot_cover_another_tools_call", "coverage-claude-is-judged-per-tool"),
     ("tools/skyguard/health.py",
      'COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files", "protect-mcp"), "codex": ("pre-tool",)}',
      'COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files", "protect-mcp", "backup-before-edit"), '
@@ -3433,7 +3433,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _MERGE + "test_skyguard_codes.py::test_a_later_advice_item_cannot_code_the_first",
      "merge-codes-advice-field-cannot-span-items"),
     # codex .rules: a prefix that refuses a registry delete the hook allows (the R5 subset, after Plan 5 narrowed it).
-    ("tools/skyguard/codex_rules.py", '    "HKCU\\\\Software\\\\Bethesda Softworks",\n', '    "HKCU",\n',
+    # (A cut-down key like "HKCU" is no defect: it is an ANCESTOR of a Bethesda key, which the hook also denies.)
+    ("tools/skyguard/codex_rules.py", '    "HKCU\\\\Software\\\\Bethesda Softworks",\n',
+     '    "HKCU\\\\Software\\\\Other Softworks",\n',
      _MERGE + "test_codex_rules.py::test_every_prefix_rule_is_a_subset_of_its_hook_deny",
      "merge-codex-rules-prefix-broader-than-hook"),
     # Codex adapter: a scalar non-string command is refused before any rule (Plan 5 Task 12 on Codex).
@@ -3451,7 +3453,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # Claude adapter: the Request carries the tool's dialect, never a guessed "bash".
     ("tools/skyguard/adapters/claude.py", '                   shell=(p.get("shell") or None) if kind == "shell" else None,',
      '                   shell="bash" if kind == "shell" else None,',
-     _MERGE + "test_skyguard_claude_adapter.py::test_run_passes_the_shell_dialect", "merge-claude-request-guesses-bash"),
+     _MERGE + "test_skyguard_claude_adapter.py::test_run_judges_monitor_in_the_unknown_dialect",
+     "merge-claude-request-guesses-bash"),
     # health: the canary counts Plan 5's widened matchers.
     ("tools/skyguard/health.py", 'CLAUDE_COVERED_TOOLS = ("Bash", "PowerShell", "Monitor", "Edit", "Write", "NotebookEdit")',
      'CLAUDE_COVERED_TOOLS = ("Bash", "Edit", "Write")',

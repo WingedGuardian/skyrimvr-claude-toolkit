@@ -365,3 +365,15 @@ def test_to_request_carries_cwd_raw(cwd):
     """Request.cwd is the agent's cwd string, unnormalized: MSYS and backslash forms pass through."""
     p = claude.extract(json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": cwd}))
     assert claude.to_request(p, "shell").cwd == cwd
+
+
+def test_run_judges_monitor_in_the_unknown_dialect(tmp_path):
+    """Merge of Plans 4+5: Plan 4's to_request hard-coded shell="bash". Monitor names no dialect, so the engine must
+    get "" (bash AND PowerShell, R5): the same python heredoc that is allowed as Bash asks as Monitor."""
+    cmd = "python - <<'EOF'\nprint('resaver-cli.sh reset-havok x.ess --apply')\nEOF"
+    p = claude.extract(json.dumps({"tool_name": "Monitor", "tool_input": {"command": cmd}}))
+    assert claude.to_request(p, "shell").shell is None
+    bash = _run("protect-bash", json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}), tmp_path)
+    mon = _run("protect-bash", json.dumps({"tool_name": "Monitor", "tool_input": {"command": cmd}}), tmp_path)
+    assert json.loads(bash.stdout) == {}
+    assert json.loads(mon.stdout)["hookSpecificOutput"]["permissionDecision"] == "ask"

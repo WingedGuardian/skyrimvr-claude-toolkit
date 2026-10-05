@@ -619,3 +619,19 @@ def test_an_unrendered_codex_keeps_exit_0_but_the_result_says_not_configured(tmp
     code, text = _report(root, tmp_path / "none.toml")
     result = text.split("RESULT:")[1]
     assert code == 0 and "Codex not configured" in result and not result.strip().startswith("OK")
+
+
+def test_extra_guard_lines_for_one_tool_cannot_cover_another_tools_call(tmp_path):
+    """Merge of Plans 4+5: the covered-tool list now comes from the transcript, so the per-tool cap is what stops
+    two guard lines for Bash from covering one Bash call AND one unguarded Edit call."""
+    def fn(rows):
+        for r in rows:
+            c = (r.get("message") or {}).get("content")
+            if isinstance(c, list) and any(isinstance(b, dict) and b.get("type") == "tool_use" for b in c):
+                b = dict(next(b for b in c if b.get("type") == "tool_use"))
+                b["id"], b["name"] = "toolu_second", "Edit"
+                c.append(b)
+                return
+    twin = _rewrite(CLAUDE_P, tmp_path / "bash-edit.jsonl", fn)
+    _session(tmp_path, "claude", SID, twin, ["Bash", "Bash"])
+    assert _cov(tmp_path, "claude")[0][2:] == (1, 2, "DEGRADED")
