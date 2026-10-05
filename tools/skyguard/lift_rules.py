@@ -17,17 +17,25 @@ matches one, and a RECURSIVE icacls/attrib over Data/ or a folder above it, reac
 else (a scratch copy) is not a target. An operand the resolver cannot place (a variable) counts when its own
 basename is a lock name: unresolved is never "safe" (targets.py).
 
-Not covered (residue, written into the report): an interpreter's own code (`python -c "os.chmod(...)"`), cacls/
-takeown, and a console spawned only to look like a person at a terminal (the CLI refuses `--session user-tty`, and
-every lift is cleared at the next session start whoever made it).
+Task 12 (the Task 11 review and its Rulings) added: cacls /G /P /R and takeown /F; interpreter code that clears the bit
+or rewrites an ACL and names a lock target (INTERP_UNLOCK); a Set-Acl / Set-ItemProperty whose own path is only a
+variable, when the command names the install (unresolved is never safe); a Get-ChildItem listing of Data/ piped into
+the unlock (its -Filter decides which targets it reaches); and a construct's target is read from ITS statement and the
+statements that feed it a variable, never from every statement of the command.
+
+Not covered (residue): an interpreter's code whose path is built at runtime with no lock name in it, and a console
+spawned only to look like a person at a terminal (the CLI refuses `--session user-tty`, and every lift is cleared at
+the next session start whoever made it).
 """
 from __future__ import annotations
 
 import re
 from typing import List, Mapping, Optional, Tuple
 
+from . import deletes
 from . import lock as _lock
 from . import shellparse, targets
+from .grep import grep
 
 # ---- the lock targets --------------------------------------------------------------------------------------------
 _ORDERED = []
@@ -63,6 +71,23 @@ def _data_rel(abs_path: str, roots) -> Optional[List[str]]:
     return [c for c in p[len(best):].split("/") if c]
 
 
+# Creation Club names stand for the cc* pattern when a glob or a -Filter is matched (Task 11 review residue: `*.esp`,
+# `cc*.esl` reach a cc plugin the explicit list does not name). One sample per extension the pattern allows.
+_CC_SAMPLES = tuple("ccbgssse001-fish." + x for x in ("esm", "esl", "esp", "bsa"))
+
+
+def pattern_target(pat: str) -> str:
+    """The lock name a glob/filter pattern can match: the first explicit name, else the pattern itself when it can
+    match a Creation Club name; "" when it matches no lock target."""
+    p = (pat or "").lower()
+    for n in LOCK_NAMES:
+        if targets._comp_matches(p, n.lower()):
+            return n
+    if any(targets._comp_matches(p, s) for s in _CC_SAMPLES):
+        return _base(pat)
+    return ""
+
+
 def _target_in(abs_path: str, roots) -> str:
     """The lock-target name abs_path IS (or, as a glob in Data/, matches first); "" otherwise."""
     rel = _data_rel(abs_path, roots)
@@ -72,9 +97,7 @@ def _target_in(abs_path: str, roots) -> str:
     if is_lock_name(name):
         return _base(abs_path)
     if set("*?[{") & set(name):
-        for n in LOCK_NAMES:
-            if targets._comp_matches(name, n.lower()):
-                return n
+        return pattern_target(_base(abs_path))
     return ""
 
 
@@ -133,9 +156,53 @@ def _icacls(e, cwd, env, roots) -> str:
     return _hit(e, e.argv[0], cwd, env, roots, rec)
 
 
+_CACLS_UNLOCK = frozenset(("/g", "/p", "/r"))
+
+
+def _cacls(e, cwd, env, roots) -> str:
+    """cacls (the pre-icacls tool, Ruling): /G grant, /P replace, /R revoke rewrite the ACL; /D adds a deny and no
+    switch only displays. Its file operands are the words before the first switch; /T recurses."""
+    words = [w.lower() for w in e.argv]
+    if not any(w in _CACLS_UNLOCK for w in words):
+        return ""
+    rec = "/t" in words
+    for w in e.argv:
+        if w.startswith("/"):
+            break
+        t = _hit(e, w, cwd, env, roots, rec)
+        if t:
+            return t
+    return ""
+
+
+def _takeown(e, cwd, env, roots) -> str:
+    """takeown /F <file> (Ruling): the owner can rewrite any ACL afterwards, so taking a lock target is an unlock.
+    /R recurses."""
+    words = [w.lower() for w in e.argv]
+    rec = "/r" in words
+    for k, w in enumerate(words):
+        if w == "/f" and k + 1 < len(e.argv):
+            t = _hit(e, e.argv[k + 1], cwd, env, roots, rec)
+            if t:
+                return t
+    return ""
+
+
+def _upstream(parsed, me) -> List[object]:
+    """The execs UPSTREAM of `me` in its own pipeline (Task 11 review: not every other exec of the command -- a
+    `; dir <master>` after it, or a statement before it, feeds it nothing)."""
+    execs = list(parsed.execs)
+    i = next((k for k, x in enumerate(execs) if x is me), -1)
+    out = []
+    while i > 0 and execs[i].stdin_from == "pipe":
+        i -= 1
+        out.append(execs[i])
+    return out
+
+
 def _peers(parsed, me) -> List[Tuple[object, str]]:
-    """Every operand-looking word of every OTHER exec: the pipeline input of a cmdlet given no -Path."""
-    return [(x, w) for x in parsed.execs if x is not me and x.program != "?" for w in x.argv
+    """Every operand-looking word of the execs upstream in the same pipeline: the input of a cmdlet given no -Path."""
+    return [(x, w) for x in _upstream(parsed, me) if x.program != "?" for w in x.argv
             if not (w.startswith("-") or _SWITCH.match(w))]
 
 
@@ -144,26 +211,69 @@ def _ps_paths(e, parsed) -> List[Tuple[object, str]]:
     return [(e, w) for w in own] if own else _peers(parsed, e)
 
 
-def _set_itemproperty(e, parsed, cwd, env, roots) -> str:
-    name = [n.lower() for n in shellparse.ps_param(e, "name", 1)]
-    if not name or name[0] not in ("isreadonly", "attributes"):
+def _listing_hit(x, w, cwd, env, roots) -> str:
+    """A Get-ChildItem upstream of the unlock that lists Data/ (or a folder above it, with -Recurse): the files it
+    passes on are the ones its -Filter/-Include can match (none given: every file). Task 11 review residue."""
+    if x.program != "get-childitem" or w not in shellparse.ps_param(x, "path", 0) + shellparse.ps_param(x, "literalpath"):
         return ""
-    value = [v.lower() for v in shellparse.ps_param(e, "value", 2)]
-    if name[0] == "isreadonly" and value and value[0] in _TRUE:
-        return ""                                          # setting the bit adds protection
-    for x, w in _ps_paths(e, parsed):
-        t = _hit(x, w, cwd, env, roots, False)
+    a = targets.resolve_operand(x, dict(x.subst).get(w, w), cwd, env)
+    if a is None:
+        return ""
+    rec = any(v.lower().startswith("-r") and "recurse".startswith(v.lower()[1:]) for v in x.argv)
+    if _data_rel(a, roots) != ["data"] and not (rec and _covers_data(a, roots)):
+        return ""
+    pats = list(shellparse.ps_param(x, "filter", 1)) + list(shellparse.ps_param(x, "include"))
+    if not pats:
+        return LOCK_NAMES[0]
+    for p in pats:
+        t = pattern_target(p)
         if t:
             return t
     return ""
+
+
+def _peer_hits(e, parsed, cwd, env, roots) -> str:
+    for x, w in _ps_paths(e, parsed):
+        t = _hit(x, w, cwd, env, roots, False) or _listing_hit(x, w, cwd, env, roots)
+        if t:
+            return t
+    return ""
+
+
+_VAR_ONLY = re.compile(r"\$[\w{:]")
+
+
+def _names_install(command: str, roots) -> bool:
+    return any(grep(rx, command) for kind, rx in deletes._root_regexes(roots) if kind == "install")
+
+
+def _opaque_path(e, command: str, roots) -> str:
+    """Ruling (Task 11 review residue): the cmdlet's OWN path is only a variable (`Set-Acl -Path $f ...`,
+    `... | % { Set-Acl $_.FullName $a }`), so where it points cannot be read -- and the command names the install.
+    Unresolved is never safe (targets.py): the lock name the text names, else the first one."""
+    own = list(shellparse.ps_param(e, "path", 0)) + list(shellparse.ps_param(e, "literalpath"))
+    if not own or not all(_VAR_ONLY.match(w) for w in own) or not _names_install(command, roots):
+        return ""
+    named = [_base(w) for w in _text_words(command) if is_lock_name(_base(w))]
+    return named[0] if named else LOCK_NAMES[0]
+
+
+def _sip_unlocks(e) -> bool:
+    name = [n.lower() for n in shellparse.ps_param(e, "name", 1)]
+    if not name or name[0] not in ("isreadonly", "attributes"):
+        return False
+    value = [v.lower() for v in shellparse.ps_param(e, "value", 2)]
+    return not (name[0] == "isreadonly" and value and value[0] in _TRUE)    # setting the bit adds protection
+
+
+def _set_itemproperty(e, parsed, cwd, env, roots) -> str:
+    if not _sip_unlocks(e):
+        return ""
+    return _peer_hits(e, parsed, cwd, env, roots)
 
 
 def _set_acl(e, parsed, cwd, env, roots) -> str:
-    for x, w in _ps_paths(e, parsed):
-        t = _hit(x, w, cwd, env, roots, False)
-        if t:
-            return t
-    return ""
+    return _peer_hits(e, parsed, cwd, env, roots)
 
 
 # A PowerShell member assignment or static call: no Exec carries it, so the CONSTRUCT is matched in the text and the
@@ -208,12 +318,102 @@ def _text_hit(text: str, parsed, cwd, env, roots) -> str:
     return ""
 
 
+def _statements(text: str) -> List[Tuple[int, int]]:
+    """(start, end) of each top-level statement: split on `;`, newline, `&&` and `||` outside quotes and outside
+    ( ) / { } -- a `|` pipeline stays one statement, and so does a `% { ... ; ... }` block. Linear, one pass."""
+    spans, start, depth, quote, i, n = [], 0, 0, "", 0, len(text)
+    while i < n:
+        c = text[i]
+        if quote:
+            if c == quote:
+                quote = ""
+            elif c in "`\\" and quote == '"':
+                i += 1
+        elif c in "'\"":
+            quote = c
+        elif c in "({":
+            depth += 1
+        elif c in ")}":
+            depth = max(0, depth - 1)
+        elif depth == 0 and (c in ";\n" or text[i:i + 2] in ("&&", "||")):
+            spans.append((start, i))
+            i += 1 if c in ";\n" else 2
+            start = i
+            continue
+        i += 1
+    spans.append((start, n))
+    return spans
+
+
+_VAR = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?")
+
+
+def _feeders(text: str, spans, k: int) -> List[int]:
+    """The earlier statements that feed statement k through a variable: for every `$var` statement k (or a feeder)
+    reads, the LATEST earlier statement that assigns it (`$var = ...`, or `foreach ($var in ...)` heading one).
+    Transitive (`$files = gci <master>; foreach ($f in $files) { $f.IsReadOnly = $false }`), each statement taken
+    once, so it is bounded by the statement count. A statement that assigns nothing the construct reads is not its
+    target (Task 11 review: `Copy-Item <master> C:/Temp/x/;` before it, `; Get-FileHash <master>` after it)."""
+    out, todo, seen = [], [k], set()
+    while todo:
+        j = todo.pop()
+        for name in {v.lower() for v in _VAR.findall(text[spans[j][0]:spans[j][1]])} - seen:
+            seen.add(name)
+            assign = re.compile(r"\s*\$\{?" + re.escape(name) + r"\}?\s*=(?!=)", re.IGNORECASE)
+            for i in range(j - 1, -1, -1):
+                if assign.match(text[spans[i][0]:spans[i][1]]):
+                    if i not in out:
+                        out.append(i)
+                        todo.append(i)
+                    break
+    return out
+
+
+def _construct_hit(text: str, parsed, cwd, env, roots) -> str:
+    """A PowerShell unlock construct's target, read from the STATEMENT that holds it (Task 11 review: a statement
+    before or after it -- `Copy-Item <master> C:/Temp/x/;` or `; Get-FileHash <master>` -- is not its target). A
+    `$var.IsReadOnly = $false` receiver also reads the latest earlier statement that assigns `$var`."""
+    spans = _statements(text)
+    for m in PS_CONSTRUCT.finditer(text):
+        k = next((j for j, (a, b) in enumerate(spans) if a <= m.start() < b), len(spans) - 1)
+        chosen = [k] + _feeders(text, spans, k)
+        stmt = "\n".join(text[spans[j][0]:spans[j][1]] for j in sorted(chosen))
+        mine = tuple(x for x in parsed.execs if x.segment.strip() and x.segment.strip() in stmt)
+        t = _text_hit(stmt, shellparse.Parsed(mine, True, ""), cwd, env, roots)
+        if t:
+            return t
+    return ""
+
+
 # R4 fallback: the command could not be read (or ran something opaque). An unlock construct of ANY dialect and a
 # lock target in the text, together.
 _ANY_CONSTRUCT = re.compile(
     r"\battrib(?:\.exe)?\b[^\n;&|]{0,400}\s-r\b"
     r"|\bicacls(?:\.exe)?\b[^\n;&|]{0,400}\s/(?:remove|reset|grant|restore|setowner)"
     r"|\bset-acl\b|\bset-itemproperty\b[^\n;&|]{0,400}\b(?:isreadonly|attributes)\b", re.IGNORECASE)
+
+
+# Interpreter code (Ruling, the G1-style interpreter rule): `python -c`, `node -e`, a heredoc or pipe fed to an
+# interpreter (deletes.interpreter_code) whose code clears the read-only bit or rewrites an ACL, and names a lock
+# target. Python's os.chmod on Windows only toggles read-only; the shell tools and cmdlets may also be launched from it.
+INTERP_UNLOCK = re.compile(
+    r"\bos\.chmod\s*\(|\bchmod(?:Sync)?\s*\(|\bSetFileAttributesW?\s*\(|SetAttributes\s*\(|SetAccessControl\s*\("
+    r"|\.IsReadOnly\s*=\s*(?:False|false|\$false|0)\b|\bSet-Acl\b|\btakeown\b"
+    r"|\bSet-ItemProperty\b[^\n]{0,400}\b(?:IsReadOnly|Attributes)\b"
+    r"|\battrib(?:\.exe)?\b[^\n]{0,400}[\s'\",]-[rR]\b"
+    r"|\bi?cacls(?:\.exe)?\b[^\n]{0,400}[\s'\",]/(?:remove|reset|grant|restore|setowner|[GPR]\b)", re.IGNORECASE)
+
+
+def _interpreter_hit(e, cwd, env, roots) -> str:
+    code = deletes.interpreter_code(e)
+    if not code or not INTERP_UNLOCK.search(code):
+        return ""
+    for w in _text_words(code):
+        if is_lock_name(_base(w)) or set("*?[") & set(_base(w)):
+            t = _hit(e, w, cwd, env, roots, False)
+            if t:
+                return t
+    return ""
 
 
 _UNLOCK_NAMES = ("skyguard-unlock.cmd", "skyguard-unlock")
@@ -273,15 +473,21 @@ def raw_unlock(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping
             t = _attrib(e, cwd, env, roots)
         elif e.program == "icacls":
             t = _icacls(e, cwd, env, roots)
+        elif e.program == "cacls":
+            t = _cacls(e, cwd, env, roots)
+        elif e.program == "takeown":
+            t = _takeown(e, cwd, env, roots)
         elif e.program == "set-itemproperty":
-            t = _set_itemproperty(e, parsed, cwd, env, roots)
+            t = _set_itemproperty(e, parsed, cwd, env, roots) or (_opaque_path(e, command, roots) if _sip_unlocks(e) else "")
         elif e.program == "set-acl":
-            t = _set_acl(e, parsed, cwd, env, roots)
+            t = _set_acl(e, parsed, cwd, env, roots) or _opaque_path(e, command, roots)
+        else:
+            t = _interpreter_hit(e, cwd, env, roots)
         if t:
             return "S-LIFT-RAW", t
     ps = _ps_text(command, parsed, shell)
     if ps and PS_CONSTRUCT.search(ps):
-        t = _text_hit(ps, parsed, cwd, env, roots)
+        t = _construct_hit(ps, parsed, cwd, env, roots)
         if t:
             return "S-LIFT-RAW", t
     for text in _opaque_texts(command, parsed):
@@ -361,9 +567,27 @@ _CLI_TEXT = re.compile(r"skyguard", re.IGNORECASE)
 _DISABLE_TEXT = re.compile(r"\block\s+disable\b", re.IGNORECASE)
 
 
+_HELP = frozenset(("-h", "--help"))
+
+
+def _only_help(args) -> bool:
+    """`lock disable --help` (Task 11 review): the CLI's only token besides `lock disable` is -h/--help, which prints
+    the usage and disables nothing."""
+    rest = list(args)
+    for w in ("lock", "disable"):
+        if w in rest:
+            rest.remove(w)
+    return len(rest) == 1 and rest[0] in _HELP
+
+
 def permanent(parsed, command: str) -> bool:
-    if any(a == ("lock", "disable") for a in ((c, x) for c, x, _ in _cli_actions(parsed))):
-        return True
+    for e in parsed.execs:
+        args = cli_args(e)
+        if args is None:
+            continue
+        pos = _positionals(args)
+        if len(pos) >= 2 and (pos[0], pos[1]) == ("lock", "disable") and not _only_help(args):
+            return True
     return any(_CLI_TEXT.search(t) and _DISABLE_TEXT.search(t) for t in _opaque_texts(command, parsed))
 
 

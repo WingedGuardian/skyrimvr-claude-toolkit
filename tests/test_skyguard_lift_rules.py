@@ -189,6 +189,12 @@ def test_an_unparseable_disable_still_asks():
     assert got[0] == "ask" and fired == {"S-LIFT-PERMANENT"}
 
 
+def test_a_help_only_disable_does_not_hide_a_real_one_beside_it():
+    """Task 11 review: `--help` is judged per CLI call -- a help call earlier in the command cannot excuse the real one."""
+    got, fired = shell("python tools/skyguard lock disable --help && python tools/skyguard lock disable", "bash")
+    assert got[0] == "ask" and fired == {"S-LIFT-PERMANENT"}
+
+
 def test_a_lift_rule_message_never_echoes_the_install_path():
     for cmd in ("attrib -R \"" + GAME + "/Data/Skyrim.esm\"", "python tools/skyguard lock unlock " + GAME + "/Data/Update.esm"):
         (decision, text), _ = shell(cmd)

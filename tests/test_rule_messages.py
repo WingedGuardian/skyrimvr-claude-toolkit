@@ -165,12 +165,21 @@ def _segments(command):
 SPACED_BASENAMES = ("the elder scrolls v skyrim vr", "gog games", "my games", "skyrim vr")
 
 
+# Task 12: a run of a rule's OWN fixed wording is not an echo, even when the command happens to contain the same words
+# (`... && python tools/skyguard lock unlock Skyrim.esm` beside S-LIFT-RAW's "Use: tools/skyguard lock unlock {file}").
+# Only the literal parts of the templates, split at every {field}: a field's value can still be an echo.
+TEMPLATE_LITERALS = tuple(part.lower() for r in rules.RULES.values() for part in re.split(r"\{[a-z]+\}", r["template"])
+                          if len(part) >= MIN_RUN)
+
+
 def echoed_run(text, payload):
     """A >= MIN_RUN character run of `text` (case-insensitive) that also occurs in a string of the payload, unless that
-    run sits inside ONE basename: a space-free token of the command, or a SPACED_BASENAMES folder name. Returns the
-    run, or None."""
+    run sits inside ONE basename: a space-free token of the command, or a SPACED_BASENAMES folder name -- or inside the
+    fixed wording of a rule template (TEMPLATE_LITERALS). Returns the run, or None."""
     body = payload.get("tool_input", payload) if isinstance(payload, dict) else payload
     text = text.lower()
+    for lit in TEMPLATE_LITERALS:                        # the rule's own wording is cut out; its field values stay
+        text = text.replace(lit, "\x01")
     for cmd in _strings(body):
         cmd = cmd.lower()
         segs = _segments(cmd) + list(SPACED_BASENAMES)
@@ -256,6 +265,10 @@ def test_the_contract_check_can_fail():
     q = {"tool_input": {"command": "delete C:/GOG Games/The Elder Scrolls V Skyrim VR/Data"}}
     assert echoed_run("Blocked: deletes The Elder Scrolls V Skyrim VR here.", q) is None
     assert echoed_run("Blocked: GOG Games/The Elder Scrolls V Skyrim VR/Data", q)
+    # a rule's own wording is not an echo; a field value beside it still is (Task 12)
+    u = {"tool_input": {"command": "attrib -R x && python tools/skyguard lock unlock C:/GOG Games/Skyrim VR/Data/a.esm"}}
+    assert echoed_run(rules.message("S-LIFT-RAW", file="a.esm"), u) is None
+    assert echoed_run(rules.RULES["S-LIFT-RAW"]["template"].format(file="C:/GOG Games/Skyrim VR/Data/a.esm"), u)
 
 
 def test_the_wrapper_exemption_does_not_widen():
