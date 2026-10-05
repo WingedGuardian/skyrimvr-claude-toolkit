@@ -69,12 +69,21 @@
 - **An extracted zip that never ran `setup.sh`** (the `{{PYTHON_PATH}}` placeholder still in the hooks) now takes
   the same route: the hooks fall back to a Python they can find and still decide, reported as DEGRADED. They used
   to refuse every command. With no usable Python at all they still refuse (GUARD INERT).
-- **Nothing can hang past the agent's timeout.** On the normal path the engine arms an in-process watchdog
+- **Nothing can hang past the agent's timeout, even on a busy machine.** The engine arms an in-process watchdog
   (`faulthandler`, a C thread that fires even inside a catastrophic regex) that ends it after 20 s
-  (`SKYGUARD_ENGINE_TIMEOUT` seconds) into the ordinary GUARD INERT deny; the traceback goes to stderr, which
-  the wrapper discards. Fallback probes (3 s each) and a fallback engine run use coreutils `timeout` (without it
-  on PATH they run unbounded). **Not covered:** a hung interpreter *start* (before the engine's `main`) on the
-  configured Python, which `setup.sh` verified; that would need a `timeout` fork on every call (~20-30 ms).
+  (`SKYGUARD_ENGINE_TIMEOUT` seconds) into the ordinary GUARD INERT deny. Every bash hook (Claude and Codex)
+  also bounds each Python it starts -- probe and engine, the normal path included -- and kills it by its
+  **Windows process id** (`taskkill /F /T`); it never uses coreutils `timeout`, which under heavy CPU load could
+  not stop a native `python.exe` at all (measured: a 3 s limit took 18-227 s), so a hook outlived its 60 s
+  definition timeout and the agent ran the command. Each hook now answers by its definition timeout minus 15 s
+  whatever its children are doing. Measured on 4 cores at 2x oversubscription: worst 43 s (was 155 s Claude,
+  52 s Codex).
+- **The fallback probes once, not on every call.** A verified fallback interpreter is remembered in
+  `.claude/backups/.hook-heartbeat/<agent>/.python-fallback`; every call through it must echo a fresh nonce from
+  the engine, so that file cannot be used to substitute an interpreter. A candidate costs one process (the
+  engine's own selftest refuses Python < 3.8), gets up to 15 s (`SKYGUARD_PROBE_TIMEOUT`; a healthy one took
+  up to ~9 s under load, so the old 3 s rejected working installs), and is not re-probed after the engine's
+  own watchdog fired.
 - **`setup.sh` requires Python 3.8+** (a 3.6 used to pass and then deny everything) and writes the path into the
   hooks in single quotes, so a `$` or backtick in a folder name is no longer expanded on every hook call.
 
