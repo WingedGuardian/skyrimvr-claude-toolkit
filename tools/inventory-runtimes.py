@@ -50,8 +50,11 @@ def launch(argv, timeout=LAUNCH_TIMEOUT):
 
     This is the tool's ONLY subprocess use.
     """
+    # python.org's Python Install Manager can INSTALL Python from `py -3` / the python.exe alias when none
+    # exists; this switch makes a version probe unable to do that.
+    env = dict(os.environ, PYTHON_MANAGER_AUTOMATIC_INSTALL="false")
     try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env,
                               stdin=subprocess.DEVNULL, errors="replace")
     except subprocess.TimeoutExpired:
         return "timeout", ""
@@ -76,7 +79,8 @@ def classify(argv, runtime, timeout=LAUNCH_TIMEOUT):
         row["status"] = "timeout"
         return row
     if rc == "missing":
-        row["status"] = "missing"
+        # A file that exists but will not launch (zero-byte python.exe) is broken, not absent.
+        row["status"] = "broken" if os.path.isfile(str(row["path"])) else "missing"
         return row
     version = _parse_version(text)
     in_windowsapps = "windowsapps" in str(row["path"]).lower()
@@ -137,34 +141,56 @@ def inventory(candidates=None, timeout=LAUNCH_TIMEOUT):
     return result
 
 
-def parse_authorization(text):
-    """Read ONLY the first 'Host-software installs:' sentence. Returns (authorized, rejected).
-
-    authorized: {runtime: (id, version)}. Anything that is not exactly the documented form is rejected
-    and authorizes nothing. Only the FIRST sentence counts, so a later quoted example cannot widen it.
-    """
-    at = text.find(AUTH_MARKER)
-    if at < 0:
-        return {}, []
-    m = re.match(r"\s*(.*?)\.(?=\s|$)", text[at + len(AUTH_MARKER):], re.S)
-    if not m:
-        return {}, [text[at:at + 80]]
-    body = m.group(1).strip()
-    if body == "NOT AUTHORIZED":
-        return {}, []
-    if body != "AUTHORIZED" and not body.startswith("AUTHORIZED "):
-        return {}, [body]
+def _parse_sentence(body):
+    """One sentence body -> (kind, authorized, rejected); kind is no|template|auth|void|other."""
+    upper = body.upper()
+    if upper == "NOT AUTHORIZED":
+        return "no", {}, []
+    if upper != "AUTHORIZED" and not upper.startswith("AUTHORIZED "):
+        return "other", {}, [body]
     items = [i.strip() for i in body[len("AUTHORIZED"):].split(",") if i.strip()]
     if not items:
-        return {}, [body]
+        return "other", {}, [body]
+    if all("<" in i or ">" in i for i in items):
+        return "template", {}, []  # the documented form with its placeholders unfilled: authorizes nothing
     authorized, rejected = {}, []
     for item in items:
         im = ITEM_RE.fullmatch(item)
-        if not im or im.group(1) in authorized:
+        if not im:
             rejected.append(item)
             continue
-        authorized[im.group(1)] = (im.group(2), im.group(3))
-    return authorized, rejected
+        value = (im.group(2), im.group(3))
+        if authorized.get(im.group(1), value) != value:
+            return "void", {}, [body + "  (conflicting items for " + im.group(1) + ")"]
+        authorized[im.group(1)] = value
+    return "auth", authorized, rejected
+
+
+def parse_authorization(text):
+    """Read every 'Host-software installs:' sentence (case-insensitive). Returns (authorized, rejected).
+
+    authorized: {runtime: (id, version)}. It is non-empty only when the text says AUTHORIZED in the exact
+    documented form and nothing contradicts it: any NOT AUTHORIZED sentence anywhere, two concrete sentences
+    that disagree, or conflicting items for one runtime all void it. An unfilled template is ignored.
+    """
+    rejected, auths = [], []
+    for m in re.finditer(re.escape(AUTH_MARKER), text, re.I):
+        rest = text[m.end():]
+        s = re.match(r"\s*(.*?)\.(?=\s|$)", rest, re.S)
+        if not s:
+            rejected.append(text[m.start():m.start() + 80])
+            continue
+        kind, authorized, rej = _parse_sentence(s.group(1).strip())
+        rejected += rej
+        if kind in ("no", "void"):
+            return {}, rejected
+        if kind == "auth":
+            auths.append(authorized)
+    if not auths:
+        return {}, rejected
+    if any(a != auths[0] for a in auths):
+        return {}, rejected + ["conflicting Host-software installs sentences"]
+    return auths[0], rejected
 
 
 def install_command(pkg_id, version):

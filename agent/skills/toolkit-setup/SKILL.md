@@ -15,7 +15,9 @@ words, that you may install a named runtime at an exact version, you do **not** 
 
 1. **Read the authorization.** The task's first paragraph contains one sentence starting
    `Host-software installs:`. `NOT AUTHORIZED` (or no such sentence) means no installs at all. Otherwise it
-   lists `python|git|node = <winget id>==<exact version>` items.
+   lists items of the form `python=<winget id>==<exact version>` (runtime `python`, `git` or `node`, then `=`, the id,
+   `==` and the version, with no spaces; items are separated by commas). Anything else, a JDK, .NET or Blender
+   included, is never covered: give the user manual steps.
 2. **Inventory by launching.** If any Python is available, run `python tools/inventory-runtimes.py inventory`
    (try `py -3`, `python`, `python3`). It finds every candidate on `PATH` and runs each with `--version` only.
    If no Python runs at all, do the same by hand: `py -3 --version`, `python --version`, `python3 --version`,
@@ -54,4 +56,4 @@ present is covered; on any other system the answer is always `manual`.
 ## Why Git matters
 
 The toolkit's hooks run under Git Bash on Windows, and a hook that cannot start lets some agents run the
-command anyway (spec evidence E3, E17). A missing Git is therefore a safety gap, not a convenience: tell the user.
+command anyway. A missing Git is therefore a safety gap, not a convenience: tell the user.

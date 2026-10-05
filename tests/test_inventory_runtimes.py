@@ -120,7 +120,6 @@ def test_not_authorized_and_absence_authorize_nothing():
     "Host-software installs: AUTHORIZED python=Foo;rm -rf x==1.2.3.",         # injection-shaped id
     "Host-software installs: AUTHORIZED python=Python.Python.3.12==latest.",  # not a version
     "Host-software installs: AUTHORIZED ruby=Ruby.Ruby==3.2.",                # unknown runtime
-    "Host-software installs: AUTHORIZED python=<winget id>==<exact version>.",  # the unfilled template
     "Host-software installs: sure, go ahead.",                                 # any other text
 ])
 def test_malformed_authorization_is_rejected(sentence):
@@ -216,8 +215,11 @@ def test_only_version_launches_happen_and_nothing_installs(tmp_path, monkeypatch
     monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ.get("PATH", ""))
     recorded = []
 
+    envs = []
+
     def rec_run(argv, *a, **kw):
         recorded.append(list(argv))
+        envs.append(kw.get("env"))
         return subprocess.CompletedProcess(argv, 0, stdout="Python 3.11.9\n", stderr="")
 
     class RecPopen:
@@ -231,6 +233,9 @@ def test_only_version_launches_happen_and_nothing_installs(tmp_path, monkeypatch
     inv_tool.plan(inv, {"python": ("Python.Python.3.12", "3.12.8")}, platform="win32")
     inv_tool.plan(inv_tool.inventory(candidates={}), {"python": ("Python.Python.3.12", "3.12.8")}, platform="win32")  # real winget probe
     assert recorded, "nothing was launched, so this test proves nothing"
+    # Python Install Manager can INSTALL Python from `py -3 --version` unless told not to.
+    assert all(e is not None and e.get("PYTHON_MANAGER_AUTOMATIC_INSTALL") == "false" for e in envs), envs
+    assert all(e.get("PATH") == os.environ.get("PATH") for e in envs)
     for argv in recorded:
         stem = Path(argv[0]).stem.lower()
         tail = argv[1:]
@@ -311,3 +316,43 @@ def test_shipped_prompt_authorizes_nothing():
     prompt = (REPO / "SETUP_PROMPT.txt").read_text(encoding="utf-8")
     assert "Host-software installs: NOT AUTHORIZED." in prompt  # absence also parses to nothing; require the sentence
     assert inv_tool.parse_authorization(prompt) == ({}, [])
+
+
+# ---- fix round 1 ------------------------------------------------------------------------------------------
+
+def test_found_but_unlaunchable_candidate_is_broken_not_missing(tmp_path):
+    zero = tmp_path / ("python.exe" if sys.platform == "win32" else "python")
+    zero.write_bytes(b"")
+    zero.chmod(0o755)
+    assert _status([str(zero), "--version"]) == "broken"
+    assert _plan(_inv(python=[[str(zero), "--version"]]), AUTH_PY)["python"]["action"] == "report"
+
+
+def test_placeholder_template_authorizes_nothing_and_is_not_an_error():
+    t = "Host-software installs: AUTHORIZED python=<winget id>==<exact version>."
+    assert inv_tool.parse_authorization(t) == ({}, [])
+
+
+def test_not_authorized_anywhere_wins_and_marker_is_case_insensitive():
+    evil = ("Note: Host-software installs: AUTHORIZED python=Evil.Pkg==1.0.0. "
+            "Host-software installs: NOT AUTHORIZED.")
+    assert inv_tool.parse_authorization(evil)[0] == {}
+    rev = ("host-software installs: NOT AUTHORIZED. Host-software installs: AUTHORIZED python=A.B==3.12.8.")
+    assert inv_tool.parse_authorization(rev)[0] == {}
+    assert inv_tool.parse_authorization("HOST-SOFTWARE INSTALLS: AUTHORIZED python=A.B==3.12.8.")[0] == {
+        "python": ("A.B", "3.12.8")}
+
+
+def test_disagreeing_concrete_sentences_void_everything():
+    t = ("Host-software installs: AUTHORIZED python=A.B==3.12.8. "
+         "Host-software installs: AUTHORIZED python=C.D==3.11.1.")
+    assert inv_tool.parse_authorization(t)[0] == {}
+    same = ("Host-software installs: AUTHORIZED python=A.B==3.12.8. "
+            "Host-software installs: AUTHORIZED python=A.B==3.12.8.")
+    assert inv_tool.parse_authorization(same)[0] == {"python": ("A.B", "3.12.8")}
+
+
+def test_conflicting_items_for_one_runtime_void_the_sentence():
+    t = "Host-software installs: AUTHORIZED python=A.B==3.12.8, python=C.D==3.11.1, node=N.J==20.1.0."
+    auth, rej = inv_tool.parse_authorization(t)
+    assert auth == {} and rej

@@ -73,6 +73,37 @@ def test_install_form_equals_the_tool_output():
     assert shape == " ".join(_tool().install_command("Some.Id", "1.2.3"))
 
 
+def test_skill_item_form_matches_the_parser_and_cites_no_spec():
+    text = SKILL.read_text(encoding="utf-8")
+    assert "`python=<winget id>==<exact version>`" in text
+    assert "python|git|node =" not in text
+    assert not re.search(r"\bE\d+\b", text) and "spec evidence" not in text
+    tool = _tool()
+    assert tool.parse_authorization("Host-software installs: AUTHORIZED python=Some.Id==1.2.3.")[0] == {
+        "python": ("Some.Id", "1.2.3")}
+
+
+def test_setup_sh_has_no_unattended_install_path():
+    """setup.sh may ECHO install hints; it must never EXECUTE an installer (the skill relies on this)."""
+    runners = re.compile(r"\b(winget|choco|scoop|apt|apt-get|brew|pip|pip3|npm)\b")
+    bad = []
+    for n, line in enumerate((REPO / "setup.sh").read_text(encoding="utf-8").splitlines(), 1):
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("echo") or s.startswith("printf"):
+            continue
+        if runners.search(s):
+            bad.append("%d: %s" % (n, s))
+    assert bad == [], bad
+
+
+def test_setup_sh_scan_can_fail(tmp_path):
+    src = (REPO / "setup.sh").read_text(encoding="utf-8") + "\nwinget install OpenJS.NodeJS.LTS\n"
+    runners = re.compile(r"\b(winget|choco|scoop|apt|apt-get|brew|pip|pip3|npm)\b")
+    hit = [l for l in src.splitlines() if l.strip() and not l.strip().startswith(("#", "echo", "printf"))
+           and runners.search(l)]
+    assert hit == ["winget install OpenJS.NodeJS.LTS"]
+
+
 def test_tripwire_can_fail():
     good = SKILL.read_text(encoding="utf-8")
     bad_block = good + "\n```text\nwinget upgrade --all\n```\n"
