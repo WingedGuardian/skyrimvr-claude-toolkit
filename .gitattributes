@@ -11,6 +11,8 @@
 *.yml   text eol=lf
 *.yaml  text eol=lf
 *.json  text eol=lf
+# Extensionless bash launchers.
+tools/skydoctor text eol=lf
 
 # Windows-side helpers stay CRLF.
 *.bat   text eol=crlf
