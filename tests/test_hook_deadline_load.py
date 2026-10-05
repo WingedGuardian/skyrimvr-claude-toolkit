@@ -16,9 +16,23 @@ This file burns CPU on purpose, so it runs only with SKYGUARD_LOAD_TEST=1:
   SKYGUARD_LOAD_REPO     a checkout to take the entries FROM (default: this repo) -- point it at an
                          older tree to measure the "before" numbers
   SKYGUARD_LOAD_REPORT   a JSON-lines file every measurement is appended to
+  SKYGUARD_LOAD_MAX_S    hard time box per burner in seconds (default 300): a burner stops itself then
+  SKYGUARD_LOAD_PRIORITY "idle" (default) or "normal" -- see the resource budget below
 
-The burners are started by this module for one scenario at a time and stopped by their own process
-handles right after it (never by image name).
+Resource budget (user rule 2026-10-05: never push any resource past 80% of the machine, counting what
+already runs; load generators never one worker per core, idle priority, time-boxed, tree-killed; and
+CPU-heavy test work at most 50% of the machine):
+  * before any burner starts, machine CPU use is MEASURED over 3 s; the cell runs only if
+    busy + pinned cores <= 80% of the logical CPUs AND pinned cores <= 50% of them -- otherwise the
+    test SKIPS and prints the numbers (it never "just runs");
+  * the burners are pinned to the cell's cores, so however many there are they can take at most CORES
+    CPUs of the machine;
+  * burners run at IDLE priority by default. Honest trade-off: an idle burner yields to the hook under
+    test, so the default no longer reproduces the starvation the defect needs -- it proves the deadline
+    machinery works under background load, not under oversubscription. SKYGUARD_LOAD_PRIORITY=normal
+    reproduces the defect and must only be used with the user's explicit OK for that run;
+  * every burner exits by itself after SKYGUARD_LOAD_MAX_S and is stopped by its own pid (whole tree on
+    Windows) right after its scenario -- never by image name.
 Pass criterion, per the investigation: the WORST run of every scenario ends below the definition timeout
 minus 10 s -- a p95 is the wrong statistic for a fail-open bound.
 """
@@ -50,6 +64,76 @@ REPORT = os.environ.get("SKYGUARD_LOAD_REPORT", "")
 MISSING = "C:/definitely/not/here/python.exe"
 DEF_TIMEOUT = 60          # the frozen PreToolUse definition timeout, both agents
 CAP = 240                 # a run still going after this is recorded as >= CAP and stopped
+MAX_S = int(os.environ.get("SKYGUARD_LOAD_MAX_S", "300"))
+PRIORITY = os.environ.get("SKYGUARD_LOAD_PRIORITY", "idle")
+MACHINE_CAP = 0.80        # user rule: no resource past 80% of the machine, counting what already runs
+CPU_HEAVY_CAP = 0.50      # user rule: CPU-heavy test work at most 50% of the machine
+IDLE_PRIORITY_CLASS = 0x00000040
+
+
+def _busy_cpus(seconds: float = 3.0) -> float:
+    """Logical CPUs' worth of CPU in use machine-wide, averaged over `seconds` (not one instant)."""
+    total = os.cpu_count() or 1
+    if ON_WINDOWS:
+        import ctypes
+        from ctypes import wintypes
+
+        def times():
+            idle, kern, user = wintypes.FILETIME(), wintypes.FILETIME(), wintypes.FILETIME()
+            if not ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kern), ctypes.byref(user)):
+                raise OSError("GetSystemTimes")
+            v = [(f.dwHighDateTime << 32) | f.dwLowDateTime for f in (idle, kern, user)]
+            return v[0], v[1] + v[2]                       # kernel time includes idle time
+        i0, t0 = times()
+        time.sleep(seconds)
+        i1, t1 = times()
+        span = (t1 - t0) or 1
+        return total * (1 - (i1 - i0) / span)
+    with open("/proc/stat") as f:
+        a = [int(x) for x in f.readline().split()[1:]]
+    time.sleep(seconds)
+    with open("/proc/stat") as f:
+        b = [int(x) for x in f.readline().split()[1:]]
+    d = [y - x for x, y in zip(a, b)]
+    span = sum(d) or 1
+    return total * (1 - (d[3] + (d[4] if len(d) > 4 else 0)) / span)
+
+
+def _budget_check(k: int) -> None:
+    """Skip (with the numbers) unless the cell fits the user's resource budget."""
+    total = os.cpu_count() or 1
+    busy = _busy_cpus()
+    if k > CPU_HEAVY_CAP * total:
+        pytest.skip(f"resource budget: {k} pinned cores > {CPU_HEAVY_CAP:.0%} of {total} CPUs")
+    if busy + k > MACHINE_CAP * total:
+        pytest.skip(f"resource budget: {busy:.1f} CPUs busy now + {k} pinned > {MACHINE_CAP:.0%} of {total}; "
+                    "wait for the machine to quieten or lower SKYGUARD_LOAD_CORES")
+
+
+def _burner_cmd() -> list:
+    # Self-terminating: the burner stops itself after MAX_S even if this process dies without cleanup.
+    return [sys.executable, "-c", f"import time\ne=time.monotonic()+{MAX_S}\nwhile time.monotonic()<e: pass"]
+
+
+def _start_burner():
+    kw = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if PRIORITY == "idle":
+        if ON_WINDOWS:
+            kw["creationflags"] = IDLE_PRIORITY_CLASS
+        else:
+            kw["preexec_fn"] = lambda: os.nice(19)
+    return subprocess.Popen(_burner_cmd(), **kw)
+
+
+def _stop(p) -> None:
+    """By this module's own pid only -- the whole tree on Windows; never by image name."""
+    try:
+        if ON_WINDOWS:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True)
+        else:
+            p.kill()
+    except OSError:
+        pass
 
 
 def _get_affinity():
@@ -88,22 +172,19 @@ def load():
     only for one scenario and are stopped by their own handles right after it; the affinity is restored."""
     total = os.cpu_count() or 1
     k = max(1, min(CORES, total))
+    _budget_check(k)                                        # measured BEFORE anything starts
     cores = list(range(total - k, total))
     before = _get_affinity()
     _set_affinity(sum(1 << c for c in cores) if ON_WINDOWS else set(cores))
     n = max(1, int(round(FACTOR * k)))
     burners = []
     try:
-        burners = [subprocess.Popen([sys.executable, "-c", "while True: pass"],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for _ in range(n)]
+        burners = [_start_burner() for _ in range(n)]
         time.sleep(2)
-        yield {"burners": n, "cores": k}
+        yield {"burners": n, "cores": k, "priority": PRIORITY}
     finally:
-        for p in burners:      # by this module's own handles only
-            try:
-                p.kill()
-            except OSError:
-                pass
+        for p in burners:
+            _stop(p)
         for p in burners:
             try:
                 p.wait(timeout=30)
