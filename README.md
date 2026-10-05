@@ -447,12 +447,14 @@ Approve again when:
 **What is checked:** every shell command and every `apply_patch` the agent runs, including a patch run
 through the shell -- the same rules as Claude Code. **A confirmation becomes a refusal on Codex**: a hook
 there cannot ask you, so anything that would need your OK is refused with `NEEDS YOUR CONFIRMATION`, and
-you run it yourself if you agree. Registry deletes are also refused by `.codex/rules/skyrim.rules`, which
-holds even before you approve the hooks.
+you run it yourself if you agree. Deleting the Bethesda registry keys (`reg delete` / `reg.exe delete` of
+`HKLM\SOFTWARE\Bethesda Softworks` and the other spellings it lists) is also refused by
+`.codex/rules/skyrim.rules`, which holds even before you approve the hooks.
 
 **What is not checked:**
 
-- **Anything, until you approve the hooks** (above). Registry deletes are the one exception.
+- **Anything, until you approve the hooks** (above). Deleting a Bethesda registry key, spelled as the rules file
+  lists it, is the one exception.
 - **Commands you type with `!`** in the Codex prompt -- they run in your own shell and bypass hooks
   (measured on codex-cli 0.160.0).
 - **Input sent to a program that is already running** (Codex's `write_stdin`): probably not guarded -- it carries

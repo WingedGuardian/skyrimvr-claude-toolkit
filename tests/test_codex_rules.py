@@ -5,7 +5,6 @@ the user never approved the hooks, so a prefix broader than its hook would refus
 """
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import sys
@@ -15,7 +14,8 @@ import pytest
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import audit, codex_rules, engine, paths, shell_rules  # noqa: E402
+from skyguard import audit, codes, codex_rules, engine, paths  # noqa: E402
+from skyguard.adapters import codex  # noqa: E402
 from skyguard.request import Request  # noqa: E402
 
 GAME = "C:/SkyguardRules/Skyrim Probe"
@@ -23,13 +23,16 @@ BUCKETS = {"forbidden", "prompt", "hook_only"}
 
 
 def _verdict_codes():
-    return sorted("shell." + n for n, v in vars(shell_rules).items()
-                  if isinstance(v, str) and re.match(r"(DENY|ASK|NO)_", n) and not n.endswith("_LOG"))
+    """Every deny/ask code the engine can emit: the rule-module constants AND (Plan 5) the rule registry, whose
+    messages most denies now render straight from."""
+    return codes.decisive_codes()
 
 
-def _evaluate(tokens, tmp_path):
+def _evaluate(tokens, tmp_path, shell="powershell"):
+    """The argv as Codex hands it over: one text, each token quoted for the dialect (Codex on Windows runs
+    PowerShell; the bash reading is checked too, so a prefix cannot be a subset in one dialect only)."""
     r = paths.roots("/x/install", "", {"SKYRIM_GAME_ROOT": GAME})
-    req = Request(kind="shell", shell="bash", command=" ".join(tokens))
+    req = Request(kind="shell", shell=shell, command=codex._argv_text(list(tokens), shell))
     return engine.evaluate_shell(req, r, audit.Audit(str(tmp_path)))
 
 
@@ -54,20 +57,32 @@ def test_buckets_sum():
 @pytest.mark.parametrize("rule", codex_rules.PREFIX_RULES, ids=lambda r: " ".join(r["pattern"]))
 def test_every_prefix_rule_is_a_subset_of_its_hook_deny(rule, tmp_path):
     assert rule["match"] and rule["not_match"]
-    for tokens in rule["match"]:
-        assert tokens[:len(rule["pattern"])] == rule["pattern"], "match example outside its own pattern"
-        v = _evaluate(tokens, tmp_path)
-        assert (v.decision, v.code) == ("deny", rule["code"]), tokens
-    for tokens in rule["not_match"]:
-        assert tokens[:len(rule["pattern"])] != rule["pattern"], "not_match example inside its own pattern"
-        assert _evaluate(tokens, tmp_path).decision != "deny", tokens
+    for shell in ("powershell", "bash"):
+        for tokens in rule["match"]:
+            assert tokens[:len(rule["pattern"])] == rule["pattern"], "match example outside its own pattern"
+            v = _evaluate(tokens, tmp_path, shell)
+            assert (v.decision, v.code) == ("deny", rule["code"]), (shell, tokens)
+        for tokens in rule["not_match"]:
+            assert tokens[:len(rule["pattern"])] != rule["pattern"], "not_match example inside its own pattern"
+            assert _evaluate(tokens, tmp_path, shell).decision != "deny", (shell, tokens)
+
+
+def test_no_prefix_refuses_a_registry_delete_the_hook_allows(tmp_path):
+    """Merge of Plans 4+5 (R5): Plan 5 narrowed the registry deny to Bethesda keys, so `reg delete <other key>` is
+    ALLOWED by the hook. A .rules prefix applies even after the hooks are approved, so no prefix may cover it."""
+    for prog in ("reg", "reg.exe"):
+        tokens = [prog, "delete", "HKCU" + chr(92) + "Software" + chr(92) + "SkyguardProbe", "/f"]
+        assert _evaluate(tokens, tmp_path).decision == "allow", tokens
+        assert not [r["pattern"] for r in codex_rules.PREFIX_RULES if tokens[:len(r["pattern"])] == r["pattern"]]
 
 
 def test_render_shape():
     text = codex_rules.render()
     assert text.count("prefix_rule(") == len(codex_rules.PREFIX_RULES)
-    assert 'pattern = ["reg", "delete"],' in text and 'pattern = ["reg.exe", "delete"],' in text
-    assert text.count('decision = "forbidden"') == 2
+    assert 'pattern = ["reg", "delete", "HKLM\\\\SOFTWARE\\\\Bethesda Softworks"],' in text
+    assert 'pattern = ["reg.exe", "delete", "HKLM\\\\SOFTWARE\\\\Bethesda Softworks"],' in text
+    assert 'pattern = ["reg", "delete"],' not in text and 'pattern = ["reg.exe", "delete"],' not in text
+    assert text.count('decision = "forbidden"') == len(codex_rules.PREFIX_RULES) == 12
     assert text.count("    match = ") == len(codex_rules.PREFIX_RULES)
     assert text.count("    not_match = ") == len(codex_rules.PREFIX_RULES)
     assert "\\\\Software" in text   # backslashes JSON-escaped, not raw

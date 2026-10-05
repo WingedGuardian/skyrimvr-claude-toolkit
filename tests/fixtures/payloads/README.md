@@ -21,6 +21,20 @@ not the agent. Recapture when an agent upgrades its hook protocol.
   in order: shell: Get-Date. apply_patch: add file notes/a.txt with line hi. apply_patch: update
   notes/a.txt so the line is hello. apply_patch: delete notes/a.txt. Then reply DONE."*
 
+## Monitor and NotebookEdit (captured 2026-10-04, Plan 5 Task 13b)
+
+- **Agent:** `claude --version` -> `2.1.289 (Claude Code)`. Same capture hook, matcher `"*"`, in a scratch project under
+  the session scratchpad; `claude -p --permission-mode bypassPermissions` with the prompt *"Do each with the named
+  tool, one call each: Monitor tool: watch the command 'echo hi'. NotebookEdit tool: in nb.ipynb replace cell 0 source
+  with 'a=2'. Then reply DONE and stop."* Only these two payloads were scrubbed in (the ToolSearch and Read calls were left out).
+- **Monitor** (`claude-PreToolUse-Monitor-1.json`): the shell command is `tool_input.command`; siblings `description`,
+  `timeout_ms`. No dialect field.
+- **NotebookEdit** (`claude-PreToolUse-NotebookEdit-1.json`): the path is `tool_input.notebook_path` (absolute); there
+  is NO `file_path`. Siblings `cell_id`, `new_source`, `edit_mode`.
+- **Monitor WebSocket form** (`tool_input {ws: {url}, description, timeout_ms}`, no `command`): UNMEASURED here, no
+  fixture. Evidence is the documented Monitor schema (`ws {url, protocols}`, cannot be combined with `command`; a command
+  Monitor "runs in the same shell environment as Bash") plus a report from another install.
+
 ## Recapture
 
 ```bash

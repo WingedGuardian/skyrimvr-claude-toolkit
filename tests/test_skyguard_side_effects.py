@@ -124,6 +124,26 @@ def test_snapshot_skips_read_only(tmp_path, cmd):
     assert snaps(tmp_path) == [] and log_text(tmp_path) == ""
 
 
+@pytest.mark.parametrize("cmd", [
+    "Get-ChildItem Data", "Get-Content a.txt", "Select-String -Path a.txt -Pattern x", "Test-Path Data",
+    "Resolve-Path .", "Get-ChildItem Data | Measure-Object", "Measure-Object -Line a.txt",
+    "Get-Date", "Get-Process", "  Get-Item x", "get-childitem Data", "GET-CONTENT a", "Get-Date\nGet-Date"])
+def test_snapshot_skips_powershell_reads(tmp_path, cmd):
+    """The PowerShell tool is wired to this hook (E12): its read-only verbs take no snapshot, like `ls`."""
+    (install(tmp_path) / "a.psc").write_text("x")
+    snap(tmp_path, cmd)
+    assert snaps(tmp_path) == [] and log_text(tmp_path) == ""
+
+
+@pytest.mark.parametrize("cmd", ["Remove-Item a.psc", "Set-Content a.txt x", "Get-ChildItem; Remove-Item a",
+                                 "Getaway-Thing", "Copy-Item a b", "Select-Stringy x", "Test-PathX"])
+def test_snapshot_does_not_skip_powershell_writes(tmp_path, cmd):
+    """A mutating verb, or a lookalike that merely starts with a read verb, still snapshots."""
+    (install(tmp_path) / "a.psc").write_text("x")
+    snap(tmp_path, cmd)
+    assert len(snaps(tmp_path)) == 1, cmd
+
+
 def test_snapshot_uppercase_ls_is_not_skipped(tmp_path):
     (install(tmp_path) / "a.psc").write_text("x")
     snap(tmp_path, "LS x")

@@ -259,7 +259,7 @@ def test_plugin_write_is_denied(tmp_path, entry):
     body = json.loads(r.stdout)["hookSpecificOutput"]
     assert body["permissionDecision"] == "deny"
     assert body["permissionDecisionReason"].startswith(
-        "BLOCKED: Cannot directly write to plugin/archive files"), body
+        "Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), body
     assert "GUARD INERT" not in body["permissionDecisionReason"]
 
 
@@ -330,7 +330,7 @@ def test_a_missing_configured_python_falls_back_and_still_decides(tmp_path, entr
     path = os.pathsep.join([str(Path(sys.executable).parent)] + keep)
     r = _run(entry, root, "pre-tool", _plugin_write(root), {"PATH": path})
     reason = json.loads(r.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
-    assert reason.startswith("BLOCKED: Cannot directly write to plugin/archive files"), reason
+    assert reason.startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), reason
     failed = _rec(root, "pre-tool", "failed")
     assert " python configured C:/definitely/not/here/python.exe unusable; used " in failed, failed
     # recorded BEFORE the engine ran, so the canary reads DEGRADED until the configured one works again

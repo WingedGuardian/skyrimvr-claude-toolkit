@@ -97,7 +97,7 @@ def test_a_missing_configured_python_falls_back_and_still_decides(tmp_path):
     r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
     reason = _reason(r)
     assert "GUARD INERT" not in reason, reason
-    assert reason.startswith("BLOCKED: Cannot directly write to plugin/archive files"), reason
+    assert reason.startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), reason
     failed = _failed(root, "protect-files")
     assert " python " in failed and "configured " + MISSING + " unusable" in failed, failed
     assert "re-run setup.sh" in failed
@@ -108,7 +108,7 @@ def test_a_python2_on_path_is_skipped(tmp_path):
     _shim(tmp_path / "shims", "python", "exit 1\n")          # fails the >= 3.8 probe, like a Python 2
     _working(tmp_path / "shims", "python3")
     r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
-    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert _reason(r).startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), r.stdout
     assert "used python3" in _failed(root, "protect-files")
 
 
@@ -126,7 +126,7 @@ def test_the_store_alias_is_used_only_last(tmp_path):
     _working(tmp_path / "WindowsApps", "python", alias_log)   # first on PATH, and it works
     _working(tmp_path / "regular", "python3")
     r = _fire(root, [tmp_path / "WindowsApps", tmp_path / "regular"], "protect-bash.sh", _rm_install(root))
-    assert _reason(r).startswith("BLOCKED"), r.stdout
+    assert _reason(r).startswith("Blocked: "), r.stdout
     assert not alias_log.exists(), "the Store alias ran although a regular python3 was available:\n" + (
         alias_log.read_text(encoding="utf-8") if alias_log.exists() else "")
     assert "used python3" in _failed(root, "protect-bash")
@@ -136,7 +136,7 @@ def test_the_store_alias_is_still_used_when_it_is_all_there_is(tmp_path):
     root = _install(tmp_path, MISSING)
     _working(tmp_path / "WindowsApps", "python")
     r = _fire(root, [tmp_path / "WindowsApps"], "protect-files.sh", _esp_write(root))
-    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert _reason(r).startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), r.stdout
 
 
 def test_nothing_runnable_still_refuses(tmp_path):
@@ -153,7 +153,7 @@ def test_a_healthy_configured_python_never_touches_the_chain(tmp_path):
     _working(tmp_path / "shims", "python", log)
     _working(tmp_path / "shims", "python3", log)
     r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
-    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert _reason(r).startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), r.stdout
     assert not log.exists(), "a PATH candidate was probed although the configured interpreter works"
     assert " python " not in _failed(root, "protect-files")
 
@@ -163,7 +163,7 @@ def test_a_present_but_broken_configured_python_falls_back_after_the_engine_fail
     root = _install(tmp_path, broken.as_posix())
     _working(tmp_path / "shims", "python3")
     r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
-    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert _reason(r).startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), r.stdout
     assert "used python3" in _failed(root, "protect-files")
 
 
@@ -193,7 +193,7 @@ def test_every_wrapper_lists_the_same_chain():
         t = f.read_text(encoding="utf-8")
         assert t.count(CHAIN_BEGIN) == 1 and t.count(CHAIN_END) == 1, f.name
         chains[f.name] = t[t.index(CHAIN_BEGIN):t.index(CHAIN_END)]
-    assert len(chains) == 5, sorted(chains)
+    assert len(chains) == 6, sorted(chains)
     assert len(set(chains.values())) == 1, "the wrappers disagree about the fallback chain: " + ", ".join(
         n for n, c in chains.items() if c != next(iter(chains.values())))
 
@@ -227,7 +227,7 @@ def test_a_candidate_that_echoes_a_stale_nonce_is_rejected_and_the_next_is_used(
           f'case "$*" in *--selftest*) echo "skyguard-selftest:1234"; exit 0 ;; esac\nexec "{REAL_PY}" "$@"\n')
     _working(tmp_path / "shims", "python3")
     r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
-    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert _reason(r).startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), r.stdout
     assert "used python3" in _failed(root, "protect-files")
 
 
@@ -238,7 +238,7 @@ def test_a_hanging_probe_is_cut_off_and_the_chain_moves_on(tmp_path):
     _working(tmp_path / "shims", "python3")
     t = time.time()
     r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
-    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert _reason(r).startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), r.stdout
     assert time.time() - t < 25, "a hanging probe held the hook past its budget"
 
 
@@ -281,7 +281,7 @@ def test_known_locations_are_tried_newest_version_first(tmp_path):
         _working(lad / "Programs" / "Python" / v, "python.exe", log)
     root = _install(tmp_path, MISSING)
     r = _fire(root, [], "protect-files.sh", _esp_write(root), {"LOCALAPPDATA": str(lad)})
-    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert _reason(r).startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), r.stdout
     assert "Python312/python.exe" in _failed(root, "protect-files"), _failed(root, "protect-files")
 
 
@@ -294,4 +294,4 @@ def test_unset_location_variables_do_not_break_the_chain(tmp_path):
     env["PATH"] = os.pathsep.join([str(tmp_path / "shims"), _clean_path()])
     r = subprocess.run([BASH, str(root / ".claude" / "hooks" / "protect-files.sh")],
                        input=json.dumps(_esp_write(root)), capture_output=True, text=True, env=env, timeout=60)
-    assert _reason(r).startswith("BLOCKED: Cannot directly write"), r.stdout
+    assert _reason(r).startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), r.stdout

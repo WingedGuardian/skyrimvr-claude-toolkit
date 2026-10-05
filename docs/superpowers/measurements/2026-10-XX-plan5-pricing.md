@@ -1,0 +1,667 @@
+# Plan 5 pricing record
+
+- **Base sha (`git rev-parse --short HEAD` at Task 0 start, branch `plan5`):** `0704791`
+- **Preconditions (verified 2026-10-02):** Plan 2 complete on master (`docs/superpowers/plans/2026-10-01-plan2-closeout.md`:
+  "completed 2026-10-02; full suite on a87ce27: 1052 passed, 27 skipped"); Codex harness branch merged
+  (`a87ce27 Merge branch 'codex/harness-repairs-fd71271'`, `tests/run_harness_tests.py` present);
+  `tools/payload-capture/` present (`capture-hook.sh`, `scrub.py`).
+- **Claude Code:** 2.1.288.
+
+## Baseline (Task 2, `scripts/guard-corpus/price.py`)
+
+Run 2026-10-02: `--base c3f32ef` (P5-BASE) against the same tree exported from `c3f32ef` (engine vs itself).
+Raw items stay outside the repo; counts only here.
+
+- **N = 58,558** unique items, deduplicated on (tool, command|file_path|mcp-input, cwd). Per tool:
+  Bash 52,385 / Write 3,166 / Edit 1,450 / PowerShell 1,552 / mcp__devbench* 5. (MultiEdit is folded into the
+  file-tool figures; none was seen separately.)
+- **Raw tool calls** (before dedup): Bash 54,457; Write 4,114; Edit 8,300; PowerShell 1,600;
+  mcp__devbench-vr__capture 6, __console 1, __game 1.
+- **Decision matrix (old>new):** allow>allow 55,766; advise>advise 2,340; deny>deny 445; ask>ask 7.
+  Every `newly-*` and `no-longer-*` direction is 0, `reason_moved` 0, parse failures 0 (old and new).
+- Note: MCP items price as allow until `skyguard.mcp_rules` exists. The engine has no MCP or PowerShell-specific rules at P5-BASE, so MCP items price as allow and
+  PowerShell commands go through the shell rules.
+
+## Task 4: S-RESAVER-APPLY (port of install 4a429bd + 1540b99)
+
+Run 2026-10-02: `price.py --base c3f32ef --only-rule S-RESAVER-APPLY` against the Task 4 tree. Raw items stay
+outside the repo; counts only here.
+
+- **N = 58,832.** Decision matrix (old>new): allow>allow 56,035; advise>advise 2,341; deny>deny 447;
+  **ask>allow 5; ask>advise 4**. Parse failures 0 (old and new), engine errors 0.
+- **S-RESAVER-APPLY: newly-ask 0, no-longer-ask 9.** Every other direction is 0.
+- **All 9 no-longer-ask items were read by hand. None was a ReSaver execution.** Each is a command that
+  merely CONTAINED the rule's words as text: 6 are `python - <<'EOF'` / `cat > x.py <<'EOF'` heredocs
+  (analysis and test-authoring scripts, the P1 class), 1 is a shell test harness that passes
+  `'bash tools/resaver-cli.sh reset-havok ... --apply'` as a quoted argument to a function, 1 is a heredoc that
+  edits `KNOWLEDGEBASE.md`, 1 is a script-generation heredoc that writes this task's own rows. The brief
+  expected 3 (the P1 asks seen when it was written); the other 6 are this arc's own sessions, which talk about
+  the rule while building it. The history holds **zero real `--apply` runs of ReSaver**, so nothing a person
+  would have wanted asked about stopped asking.
+- The 4 `ask>advise` items are not a second change: the old ask discarded the advice that accumulated before
+  it (rule order), so once the false ask is gone, `S-PLUGIN-REF` / `S-LOADORDER-REF` advice on the same
+  command surfaces. Read: all 4 are python heredocs that mention a plugin or `plugins.txt`.
+- `reason_moved` = 21: the earlier rename `S-WRITE-INSTALL` -> `S-REDIRECT-INSTALL` (a rule id, same decision),
+  committed after `c3f32ef`. Not a Task 4 effect; no verdict moved.
+- **The install already has R7.** `1540b99` back-ported the shell-heredoc keep, so P14 no longer reproduces
+  there: the install's 13/13 cases and this task's 18 rows agree on 16. The two rows where they differ are the
+  deliberate extensions: `t04-java` (`java -jar ...ReSaver.jar --apply`: install allows, intended ask) and
+  `t04-herestring` (`cat <<< x` followed by a ReSaver write: the install's awk takes `<<<` for a heredoc and
+  swallows the next command; install allows, intended ask).
+
+### Task 4, fix round 1 (widened rule)
+
+Re-priced 2026-10-02 (`--base c3f32ef --only-rule S-RESAVER-APPLY`), N = 58,947. Matrix: allow>allow 56,138;
+advise>advise 2,341; deny>deny 447; **allow>ask 5; ask>advise 5; ask>allow 11**. S-RESAVER-APPLY:
+**newly-ask 5, no-longer-ask 16**, all else 0; 0 errors, 0 parse failures.
+
+- **newly-ask 5: all read, all REAL saves written.** Each is `bash tools/resaver-cli.sh clean "$IN" "$OUT"
+  --undefined --unattached --apply` against a real `Save*.ess` under `Documents/My Games/Skyrim VR/Saves`.
+  The old text rule never asked about `clean` (not in its op list), so these writes went through unasked; the
+  ask is correct. (The message names "the save" because the path is a shell variable.)
+- **no-longer-ask 16** (9 before, +7 from this arc's own sessions): all 16 re-read; every one is text, a test
+  script, a heredoc, a quoted harness argument or a documentation edit. Zero real executions.
+- `ask>advise` 5: the old ask had swallowed advice on the same command; same reading as before.
+
+### Task 4, fix round 2 (timing, more wrappers)
+
+Re-priced 2026-10-02 (`--base c3f32ef --only-rule S-RESAVER-APPLY`), N = 59,079. Matrix: allow>allow 56,264;
+advise>advise 2,342; deny>deny 449; allow>ask 5; ask>advise 5; ask>allow 14. S-RESAVER-APPLY: **newly-ask 5,
+no-longer-ask 19**, all else 0, `reason_moved` still 21 (the id rename), 0 errors. The five newly-ask are the
+same five real `clean ... --apply` writes as round 1 (re-read). The 3 extra no-longer-ask are this arc's own
+text-only sessions (re-read). The bounded quantifiers, the `A.*B` split in `grep.py` and the write-rule
+lookbehinds changed no other rule's verdict over 59k real calls (no other decision cell moved, `reason_moved`
+unchanged).
+
+### Task 4, fix round 3 (timing fixes, whole engine)
+
+Re-priced 2026-10-02 WITHOUT `--only-rule` (`--base c3f32ef`), N = 59,227. Matrix: allow>allow 56,410;
+advise>advise 2,342; deny>deny 451; allow>ask 5; ask>advise 5; ask>allow 14. Per rule: S-RESAVER-APPLY newly-ask 5 /
+no-longer-ask 19 (unchanged from round 2); S-REDIRECT-INSTALL newly-advise 21 and S-WRITE-INSTALL no-longer-advise
+21, which is the 21 `reason_moved` items of the earlier id rename (same decision). **No decision moved because of
+the timing fixes** (install-path lead lookbehind, relative-Data rewrite, the registry rule split in two greps, the
+`split_dotstar` whitelist): every deny/advise/allow cell is identical to round 2 apart from items added to the
+history since.
+
+## Task 5: `shellparse` (no rule uses it yet) -- the parse-failure gate (R4)
+
+Run 2026-10-02: `price.py --base c3f32ef` (whole engine) against the Task 5 tree. The driver now asks the NEW
+tree's `skyguard.shellparse` whether it can read every Bash/PowerShell item (`parse_ok`, `parse_why`;
+`tests/test_price_tool.py::test_parse_failures_are_reported_per_tool_when_the_engine_has_the_parser`).
+
+- **N = 59,785.** Matrix: allow>allow 56,966; advise>advise 2,342; deny>deny 452; ask>ask 1; allow>ask 5;
+  ask>advise 5; ask>allow 14. Per rule: exactly the Task 4 figures (S-RESAVER-APPLY newly-ask 5 / no-longer-ask 19;
+  the 21-item id rename). **No verdict moved** -- the parser is not wired to any rule. 0 engine errors.
+- **Parse failures (new engine): 63 of 55,001 shell items = 0.115%** (gate: < 0.5%).
+  Bash **61 of 53,443 = 0.114%**; PowerShell **2 of 1,558 = 0.128%**. Old engine 0 (it has no parser).
+- **By reason** (all read): `unterminated " quote` 49 -- **47** are a Windows path ending in `\"`
+  (`ls "C:\x\Data\"`), which bash itself reads as an escaped quote, so the real command failed too; the other 2
+  are genuine. `unterminated \` substitution` 3 (a PowerShell backtick inside a bash double-quoted `pwsh -Command`
+  string -- bash would run it as a substitution). `unterminated heredoc` 3 (two `<<'EOF'` on one line,
+  `python3 - <<'EOF' || python - <<'EOF'`: the second body is empty-and-unterminated in bash as well).
+  `unexpected (` 3, `unterminated ' quote` 2, `unbalanced )` 1 (a backtick-quoted `504)` inside a commit message).
+  PowerShell 2: bash heredoc syntax sent to the PowerShell tool, and a malformed `@{...}`.
+  Every failure is a command its own shell would reject or misread; none is a parser gap found so far.
+- Parser gaps found and FIXED while measuring (before the gate): `name(){ ... }` with no space (was 500 of the
+  first run's 557 failures), and `time ( ... )`.
+
+### Task 5, fix round 1 (adversarial review: deletes returned ok=True but not as executed)
+
+Re-priced 2026-10-03 (`--base c3f32ef`), N = 60,355. **No verdict moved** (same per-rule figures as above:
+S-RESAVER-APPLY 5/19, the 21-item id rename); 0 engine errors.
+- **Parse failures: 63 of 55,467 shell items = 0.114%** (Bash 61 of 53,905 = 0.113%; PowerShell 2 of 1,562 =
+  0.128%). Before the round: 63 of 55,001 = 0.115%. **Delta: no new failure.**
+- An intermediate run of this round read 68 (0.123%). The 5 extra were MY regressions, both fixed and pinned by
+  tests: `wsl` re-joined its words into a string (a `)` inside a quoted vhdx path became syntax; `--import` was read
+  as a command) -- 2 PowerShell + 1 Bash; and a `$(( ))` holding a `$( )` was fed whole to the command parser
+  (`$(( ($(date +%s%N)-s)/1000000 ))`) -- 2 Bash. Only the substitutions inside a skipped span are parsed now.
+
+### Task 5, fix round 3 (casts, Start-Process arrays, stdin into shells/interpreters, env clusters, input cap)
+
+Re-priced 2026-10-03 (`--base c3f32ef`), N = 60,804. No verdict moved (S-RESAVER-APPLY 5/19, the 21-item rename);
+0 engine errors. **Parse failures: 63 of 55,879 = 0.113%** (Bash 61 of 54,298 = 0.112%; PowerShell 2 of 1,581 =
+0.127%). Compared item by item with fix round 1: **no command newly fails, none stopped failing.** The new input
+cap (256 KB) touches nothing real: the largest of the real shell commands is 50,452 characters.
+
+## Task 6: targets + config as data + cwd plumbing; S-RESAVER-APPLY re-based on shellparse
+
+Run 2026-10-03. Two runs over the same history: `--base 4f13eef` (Task 5 head: isolates this task) and
+`--base c3f32ef` (cumulative). New engine = a frozen copy of the working tree's `tools/skyguard`.
+
+**Task 6 alone (`--base 4f13eef`), N = 60,962.** 0 engine errors. Parse failures unchanged: 63 old / 63 new,
+0 reasons moved (Bash 61 of 54,437 = 0.112%; PowerShell 2 of 1,581 = 0.127%).
+Matrix: allow>allow 58,142; advise>advise 2,353; deny>deny 455; ask>ask 5; **allow>ask 5; advise>ask 1;
+ask>allow 1.** Only S-RESAVER-APPLY moved: **newly-ask 6, no-longer-ask 1.** No other rule moved (deny, advise:
+0 in every direction), as expected: no rule reads `cwd` or the new directory roots yet.
+
+All 7 read by hand:
+- newly-ask, **5 true positives** (PowerShell tool, k=16094, 16113, 16118, 16119, 16120): a script defines
+  `function J($a){ & java ... -cp $cp $cli @a }` with `$cp` = `...\ReSaver.jar;...` and `$cli` = `ResaverCLI.java`,
+  then calls `J @("clean"|"set-global"|"set-var", $in, ..., "--apply")`. Each one really runs a ReSaver write
+  (on a save copy in a scratchpad). The parser does not expand functions (a Task 5 known limit), so these are caught
+  by the R4/opaque text fallback (the script also holds an opaque `& $jq ...` program). The old regex rule did not
+  read PowerShell at all. The prompt names the first `.ess` in the text (`*.ess`, from `-Filter *.ess`).
+- newly-ask, **1 false positive** (Bash, k=10700): a hand-run hook test harness,
+  `t(){ ... printf '{"tool_input":{"command":%s}}' "$(printf '%s' "$2" | "$JQ" -R .)" | bash "$H" ...; }` then
+  `t "..." 'bash tools/resaver-cli.sh reset-havok save.ess out.ess --apply'`. The ReSaver command is DATA piped into
+  the hook; the opaque `"$JQ"` program elsewhere in the command triggers the text fallback.
+- no-longer-ask, **1 false positive removed** (Bash, k=9139): `python -c "...for c in ['bash tools/resaver-cli.sh
+  reset-havok \"x.ess\" --apply', ...]: parse(c)"` -- Python code that only mentions the command.
+
+**Ruling (Task 6):** the opaque/parse-failure fallback scans the WHOLE command text (resaver + `--apply` + a
+whole-word operation), not only the opaque exec's own statement. Why: statement scope would lose all 5 true
+positives above (their opaque exec is a different statement from the `J @(... "--apply")` call) to remove 1 false
+positive. Cost if wrong: an over-ask on a command that both mentions a ReSaver write and runs an unrelated opaque
+program -- 1 in 60,962 items here.
+
+**Cumulative (`--base c3f32ef`), N = 60,965.** S-RESAVER-APPLY newly-ask 10, no-longer-ask 23; the 21-item
+S-REDIRECT-INSTALL/S-WRITE-INSTALL id rename (Task 1). Nothing else. 0 engine errors.
+
+**S-INERT-CONFIG over this machine's real paths files (Step 3).** The strict parser was run over every
+`skyrim-paths.env` found (install `.claude/skyrim-paths.env`; no toolkit checkout has one, only the
+`.example` files, which also parse): **0 malformed of 1 real file** (and 0 of the 6 `.example` copies). The
+replay above cannot see this rule (the driver passes no paths file), so this is its whole pricing.
+
+**Re-based rows.** All 63 `t04-*` rows pass unchanged on the parser. 12 `t06-*` rows added; against the Task 5
+engine 4 of them differ (RED): `cmd /c`, the `--ap""ply` quote split, the variable-held program, and the malformed
+paths file. The `pwsh -Command` and PowerShell `&` rows already asked under the regex rule and are pins.
+
+### Task 6, fix round 1 (adversarial review: covers_protected, 8.3 names, admin shares, BOM, scratch ruling)
+
+Re-priced 2026-10-03, new engine = a frozen copy of the fix-round tree.
+- `--base 4f13eef`, **N = 61,149**. 0 engine errors. Parse failures 63 → 63, 0 reasons moved.
+  - The verdict changes are the same as before the round, item for item (compared by command): S-RESAVER-APPLY
+    **newly-ask 6** (the same 5 TP + 1 FP) and **no-longer-ask 1** (the same FP removed).
+  - Nothing else moved. `covers_protected`, the 8.3/admin-share/stream handling and the narrowed scratch list have
+    no rule caller until Task 7, so this round cannot move a verdict; Task 7 prices them.
+- `--base c3f32ef` (cumulative), **N = 61,152**: S-RESAVER-APPLY newly-ask 10, no-longer-ask 25, plus the
+  21-item rename.
+  - The 2 extra no-longer-asks (25 vs 23) are new history items: this session's own commands that write corpus
+    rows or docs CONTAINING a ReSaver `--apply` line as data. Both were read, and both are correct allows.
+- **S-INERT-CONFIG with the BOM fix and the declare forms:** 0 malformed in the install's real `skyrim-paths.env`
+  (1 real file), and 0 in the 3 checked `.example` copies (plan5, master, plan4).
+
+## Task 7: delete rules on the parser (E16, relative deletes, PowerShell forms, MO2)
+
+Run 2026-10-03. New engine = a frozen copy of the working tree. Raw items stay in the session scratchpad.
+
+**Task 7 alone (`--base a07c164`), N = 61,683** (Bash 55,071; PowerShell 1,598; Write 3,445; Edit 1,564; MCP 5).
+0 engine errors. **Parse failures 63 → 63** (Bash 61 of 55,071 = 0.111%; PowerShell 2 of 1,598 = 0.125%; R4 gate
+< 0.5%). 0 shell items carry an empty `cwd` (the R9 empty-cwd path costs nothing on this history).
+
+Decision matrix (old > new): allow>allow 58,853; advise>advise 2,351; ask>ask 11; deny>deny 343;
+**allow>deny 2; deny>advise 90; deny>allow 23; advise>allow 10.** Per rule (a rule "newly fires" when its id is
+new on that item, so a deny that only changed rule counts on both sides):
+
+| rule | newly-deny | no-longer-deny | other |
+|---|---|---|---|
+| S-DEL-INSTALL | 3 | 278 | |
+| S-DEL-CONFIG | 0 | 28 | |
+| S-DEL-UNRESOLVED | 190 | 0 | |
+| S-DEL-FALLBACK | 2 | 0 | |
+| S-REGISTRY | 1 | 1 | |
+| S-RELATIVE-UNKNOWN | | | no-longer-advise 12 |
+| S-PLUGIN-REF / S-EXTERNAL-OUT / S-REDIRECT / S-MOVE / S-LOADORDER | | | newly-advise 87 / 3 / 2 / 1 / 1 (advice a removed deny used to pre-empt) |
+
+Old-rule → new-rule movement: S-DEL-INSTALL→S-DEL-UNRESOLVED 166, S-DEL-CONFIG→S-DEL-UNRESOLVED 24,
+S-DEL-INSTALL→advise 88, S-DEL-INSTALL→allow 21, S-DEL-CONFIG→advise/allow 3, S-DEL-CONFIG→S-DEL-INSTALL 1,
+S-DEL-INSTALL→S-DEL-FALLBACK 1, S-DEL-INSTALL→S-REGISTRY 1, S-REGISTRY→S-DEL-FALLBACK 1, S-RELATIVE-UNKNOWN→none 12,
+allow→S-DEL-INSTALL 2.
+
+**Newly denied items (decision moved to deny): 2. Cap (200) not approached.** Both read:
+- `cd .claude/backups/.hook-heartbeat && rm -f protect-bash.blind ...` (cwd = install): deletes hook heartbeat
+  markers under `.claude/`. True positive BY R8 (`.claude/` stays protected); cost 1 item.
+- `cd _CLAUDE_OUTPUT/nexus-v3.9 && rm -f <two stale notes>` (cwd = install): deletes the user's own deliverables
+  folder inside the install. **Ruling:** not added to `SCRATCH_GLOBS` -- it holds files the user reads, so
+  deleting there is the user's call; cost 1 item.
+
+**No-longer-denied items (deny → advise/allow): 113, every one read** (operands resolved and listed per item):
+- 96 items whose delete operands (136 operands in all) ALL resolve OUTSIDE every protected root: `/tmp/*`,
+  the user's Temp/scratchpad, `C:/Temp/*`, `C:/GOG modding tools/_*`, `C:/GOG Games/spriggit-tmp/*` and
+  `C:/GOG Games/zgin/*` (siblings of the install), `~/.plans`, a toolkit checkout. Each was denied only because
+  the same command also named the install (`cd <install> && ...`). **FP removed.**
+- 17 with no executed delete at all: grep / git log / git commit messages, python heredocs that edit a document or
+  write a script TEXT containing `rm`, hook test harnesses that pass a delete command as data, and 3 `git rm
+  --cached` (index only). **FP removed.**
+- **True positives lost: 0.** (A first pass found one class -- `git rm` without `--cached` deletes working files
+  and was caught only by the text rule -- and `git rm` was added as a delete primitive before this run.)
+- advise → allow (S-RELATIVE-UNKNOWN, 12): absolute operands outside the install, variables holding scratch paths,
+  echo/commit text. All correct (the cwd is known on every item, so relative words resolve).
+
+**Rule moves that stay deny (read by class, not changing a decision):**
+- S-DEL-UNRESOLVED 190 = deny→deny. A variable operand (`rm -rf "$SCRATCH/x"`) in a command that also names the
+  install. Classified by substituting each command's own literal assignments (analysis only): **20 true positives**
+  (the variable holds a path in the install: `.claude/backups/...`, `_CLAUDE_OUTPUT/...`, `Data/...`), **100 false
+  positives** (scratchpad / Temp / `/tmp`), **70 unknown** (loop variables, values built from other variables,
+  `mktemp`). These were denied before too (by S-DEL-INSTALL's text test); the new message says what to do ("Write
+  the full path"). Not narrowed here: tracking same-command assignments is a parser feature with its own misread
+  risk (a silent allow) -- carried as a follow-up with this count.
+- S-DEL-FALLBACK 2 = deny→deny: hook test harnesses whose single exec carries a delete command and the install
+  path as data next to an opaque `"$JQ"` / `bash .claude/hooks/$1`. Retained FPs.
+- **Ruling (opaque clause):** an opaque program triggers the fallback only when ONE exec's own words carry both a
+  delete word and a protected root. A first version applied the legacy whole-command test to any command with an
+  opaque exec: it re-denied 13 commands of the shape `SP=<spriggit.exe>; rm -rf /tmp/x; "$SP" serialize
+  <install>/Data/...` (13 of 13 read: false positives) and newly denied 1 more (an `echo '{"command":"rm -rf
+  /tmp/x"}' | "$JQ"` probe beside a `cd <install>`). Per exec, both are gone and `printf 'rm -rf <install>' | sh`
+  still denies.
+
+**Cumulative (`--base c3f32ef`), N = 61,683:** the Task 7 figures above, plus S-RESAVER-APPLY newly-ask 10 /
+no-longer-ask 25 (Tasks 4-6) and the 21-item S-REDIRECT-INSTALL/S-WRITE-INSTALL rename (Task 1). 0 errors.
+
+**Rulings ledgered in this task** (each pinned by a t07 row and a mutation):
+- Delete primitives beyond the brief: `git rm` (not `--cached`, not `-n`), `rimraf` (direct and via
+  npx/pnpx/bunx/`pnpm|yarn|bun dlx`), `robocopy` with `/MIR` or `/PURGE` (deletes in the destination) or `/MOV`
+  / `/MOVE` (deletes the source), `[IO.File]::Delete` / `[IO.Directory]::Delete`. A `git -c alias.x=!...` is
+  opaque. Interpreter code (R7(b)) is checked with the legacy delete regex PLUS a short list of delete APIs
+  (`os.remove/unlink/rmdir/removedirs`, `.unlink(`, `.rmdir(`, `.rm(Sync)(`, `remove_tree(`, perl `unlink`): 0 newly
+  denied items from it.
+- `git clean -n` / `--dry-run` deletes nothing; a PowerShell `-WhatIf` is NOT honoured (stricter; 0 items seen).
+- Empty cwd (branch 1 of R9 with no cwd in the payload): a relative operand is unresolved, so it denies under
+  clause (b) when the command names a protected root, and otherwise advises (S-RELATIVE-UNKNOWN) when it names
+  `Data`. 0 history items have an empty cwd.
+- Unknown dialect (R5) with no cwd: PowerShell's reading of `/tmp/x` is the current drive's root, which cannot be
+  placed, so `rm -rf /tmp/x && ls <install>` denies under `shell=""`. Pinned by a test; Claude always sends the
+  dialect.
+- A QUOTED word whose literal reading is a protected path is that path (an install named `Skyrim (VR) [x]$`).
+- Tightening: `rm ".../My Games/S<KELVIN SIGN>yrim VR/a.ini"` now denies (Python's lower() folds the Kelvin sign;
+  NTFS would not): two legacy allow rows superseded as deny.
+
+**Latency (Step 4).** `scripts/guard-latency.py` on a setup.sh-configured copy, 50 runs, three runs under 4-16 %
+sampled CPU load with other sessions active. protect-bash p95 905 / 471 / 372 ms (Plan 2: 358 ms under load).
+The gate (every wrapper p95 <= 1 s) FAILED on each run on wrappers this task does not touch (protect-files p95
+1,105 / 1,667 / 360 ms; session-kb-guard 838 / 1,011 / 2,113 ms) -- the load-dominated tail Plan 2's E2E
+measurement documented. Engine alone, in-process over all 56,669 shell items of the history: median 0.094 → 0.173
+ms, p95 0.663 → 0.675 ms, p99 1.278 → 1.109 ms, max 13.3 → 10.7 ms (old = `a07c164`). The delete rules add no
+measurable tail; an idle-machine gate run is still owed (Task 17).
+
+### Task 7, fix round 1 (review follow-ups)
+
+`--base 4777bd3`, **N = 61,935** (Bash 55,285; PowerShell 1,600). 0 engine errors; parse failures 63 → 63.
+Matrix: allow>advise 66, deny>advise 1, every other cell unchanged.
+- **S-DEL-UNRESOLVED-CWD newly-advise 75 = 0.132% of 56,885 shell items** (under the 0.2% noise budget, so it ships).
+  All 75 read: an unresolved delete operand (`$SP/...`, `$S/...`, `$SCRATCH/...`, `(Join-Path $base ...)`, pipe
+  input) run with the cwd inside the install. Substituting each command's own literal assignments (analysis only):
+  **57 resolve outside every root, 18 are built from other variables -- all 18 read, every one a Temp/scratchpad or
+  `C:/Temp` path. 0 of 75 would have deleted inside the install.** On this history the advice is noise; it stays
+  (one line, no echo) because it is the only signal for the silent-allow gap the review named.
+  A first version also advised when the cwd merely CONTAINED a root (`C:/`); the cwd test is now "inside" (zone).
+- **S-DEL-INSTALL no-longer-deny 1** (read): `rm -rf tools/__pycache__` from the install -- the R8 refinement
+  (Python regenerates it). With the deny gone, an S-PLUGIN-REF note on the same command surfaces (newly-advise 1).
+- **Controller ruling: S-DEL-UNRESOLVED-CWD removed** (75 advisories, 0 real -- pure noise; the standing directive
+  is against advice fatigue). It is now a KNOWN LIMIT: an unresolved delete operand run from inside a protected
+  folder is not flagged. Re-priced `--base 4777bd3`, **N = 62,018**: newly-advise 1 (S-PLUGIN-REF) and
+  no-longer-deny 1 (S-DEL-INSTALL) -- both the same item, `rm -rf tools/__pycache__` (item 2). Nothing else moved;
+  0 errors; parse failures 63 → 63.
+
+## Task 8: shell writes to plugins (E21), the write-target notes, ADV_PLUGIN removed
+
+Run 2026-10-03. New engine = a frozen copy of the working tree. Raw items stay in the session scratchpad.
+
+**Task 8 alone (`--base 99bfc4b`), N = 62,181** (Bash 55,505; PowerShell 1,601; Write 3,491; Edit 1,579; MCP 5;
+**shell calls 57,106**). 0 engine errors. Parse failures 63 → 63 (Bash 0.110%, PowerShell 0.125%).
+
+Decision matrix (old > new): allow>allow 59,375; advise>advise 604; ask>ask 11; deny>deny 347;
+**advise>allow 1,834; advise>deny 7; allow>advise 3.**
+
+| rule | direction | items | % of shell calls | hand-read verdict |
+|---|---|---|---|---|
+| S-WRITE-PLUGIN | newly-deny | 7 | 0.012% | all 7 read: every one really writes a file named `.esp` by a redirect (`echo v>victim.esp`, `printf 'canary' > probe-abs.esp`, `> _CLAUDE_OUTPUT/zzz_relock2.esp`, ...). All 7 are probes from the sessions that MEASURED E21 itself. True positives by the rule (any location, like W-PLUGIN). |
+| S-COPY-PLUGIN | newly-advise | 36 | 0.063% | all 36 read: every one copies or moves a file onto a live plugin directly in `Data/` (spriggit-built ESP deployed over `Data/Shinso.esp`, `.esp.save` sidecars promoted, reverts from `.claude/backups`, `ZZZGin*` spike plugins). 36 of 36 accurate; all are the user's own intended deploys. |
+| S-WRITE-INSTALL | newly-advise | 5 | 0.009% | all read: README written into `Data/Sound/FX/...`, `sed > *.psc` and `sed -i` on `Data/Scripts/Source/*.psc`, a stub `.psc`. 5 of 5 real writes in `Data/`. |
+| S-WRITE-LOADORDER | newly-advise | 4 | 0.007% | all read: 3 `printf > .../loadorder.txt` building MO2/Nolvus test fixtures in a scratchpad; 1 `cp` of the VR plugins.txt over the **SSE** plugins.txt (the gotcha-#10 file). 4 of 4 real writes. |
+| S-WRITE-INI | newly-advise | 3 | 0.005% | the same 3 fixture scripts (`printf > .../Skyrim.ini`). Real writes; to scratch fixtures. |
+| S-WRITE-SKSE-INI | newly-advise | 1 | 0.002% | `cp ... "$GAME/Data/SKSE/Plugins/SkyPatcher/npc/IchimaruGinVoice.ini"`: real. |
+| S-PLUGIN-REF (ADV_PLUGIN) | no-longer-advise | 1,851 | 3.24% | see below |
+| S-LOADORDER-REF | no-longer-advise | 176 | 0.31% | see below |
+| S-REDIRECT-INSTALL | no-longer-advise | 23 | | all 23 read (below) |
+| S-MOVE-INSTALL | no-longer-advise | 11 | | all 11 read: the same command now carries S-COPY-PLUGIN, and the legacy text note is not added on top (by design). |
+
+**Advise noise.** New notes: 49 items = **0.086% of shell calls**; every rule is under the 0.2% budget (largest:
+S-COPY-PLUGIN, 0.063%). Removed: 2,061 rule firings, net **1,834 advise items become silent** (3.21% of shell
+calls), against 3 allow → advise.
+
+**No-longer ADV_PLUGIN (1,851): seeded sample of 100 (seed 8) read by hand: 0 shell-primitive writes to a plugin
+missed.** The sample is reads (cat, automod `view-record`/`info`/`archive list`, spriggit `serialize`, xelib
+scripts, grep/strings), copies FROM `Data/*.esp` into `.claude/backups` or staging (correctly silent), and ~10
+`spriggit deserialize --OutputPath Data/X.esp` (the sanctioned writer; S-EXTERNAL-OUT is Task 9's). Two copies onto
+`Data/` plugins in the sample now carry S-COPY-PLUGIN.
+Beyond the sample, **every one of the 1,851** was screened for a write word and a plugin extension in one statement
+segment (245 hits) and each hit read:
+- 147 "redirect/other" segments: redirects of a READ's output into a log/json, `cat > ..._X.esp.yaml` (Spriggit
+  YAML, not a plugin), `sed` on scripts and YAML, `--OutputPath` of spriggit, python/js test DATA strings. The only
+  real redirects onto `.esp` names are the 7 now denied.
+- 1 python `open(...,"w")`: a test history file.
+- 163 copy segments: 31 now noted (S-COPY-PLUGIN). Of the 132 silent: copies FROM Data into backups/staging, and
+  **17 deploys whose destination is a variable** (`cp "$SCRATCH/build/X.esp" "$GAME/Data/X.esp"`, `mv -f
+  "$GAME/Data/X.esp.save" "$GAME/Data/X.esp"`). That was a miss in the first draft; fixed (an unresolved
+  destination whose own words put the plugin directly in a `Data` folder notes) and re-priced: S-COPY-PLUGIN
+  26 → 36 items (the 10 new ones read: all real deploys onto `$GAME/Data/*.esp`). Remaining silent: 6
+  `cp "$S/X.esp" "$D/X.esp"` (SkyrimNet manual deploy; `$D` names no Data folder) -- KNOWN LIMIT.
+
+**No-longer S-LOADORDER-REF (176): screened all for a write word next to `plugins.txt`/`loadorder.txt` (11 hits),
+each read.** One real miss in the first draft -- `cp ".../Skyrim VR/plugins.txt" "$SSEDIR/plugins.txt"` (a COPY
+onto a load-order file) -- fixed (a copy onto a classified file notes as a write of it) and re-priced: S-WRITE-
+LOADORDER newly-advise 3 → 4. Remaining: 1 `fs.writeFileSync(..., 'plugins.txt')` in node code (interpreter code,
+KNOWN LIMIT, R11) and test-data strings. The other 165 are reads.
+
+**No-longer S-REDIRECT-INSTALL (23), all read:** 1 moved to S-WRITE-INSTALL (`cat > Data/Sound/.../README.txt`),
+2 moved to S-WRITE-PLUGIN (probe.esp), and 20 are writes to the install OUTSIDE `Data/`: 16 xelib/tool scripts
+`cat > tools/xelib/*.js`, `tools/snapshot-stack.sh`, an append to `KNOWLEDGEBASE.md`, 2 `_CLAUDE_OUTPUT/*.txt`
+notes. **Ruling:** S-WRITE-INSTALL covers `Data/`, the config folder and MO2 only -- the rest of the install is the
+user's own working tree (scripts, notes, docs); a note there is noise (0 of 20 a game file). Cost if wrong: an
+overwrite of a non-game install file (KNOWLEDGEBASE.md) is silent; the session KB guard snapshots that file.
+
+**First draft vs final.** The first draft (run 1) newly denied 9: the 7 above plus 2 hook-test harnesses that pass
+`printf 'x' > "$SP/Data/Test.esp"` as DATA to a `run()` function beside an opaque `bash "$H"`. The opaque fallback
+now checks only the opaque program's own words and the nearest upstream program feeding its pipe; both FPs are
+gone and `printf 'echo x > a.esp' | sh` still denies (pinned: `t08-harness-data-esp`, `t08-opaque-pipe-esp`).
+
+**Ask stop rule.** Not triggered: S-COPY-PLUGIN ships as ADVISE (controller ruling). All 36 items are the user's
+own deploys -- as an ask that would be 36 prompts (> 20, the stop line), and none is a miss an ask would have
+prevented, so there is no priced case for upgrading it.
+
+**Cumulative (`--base c3f32ef`), N = 62,218:** the Task 7 figures plus Task 8's: S-WRITE-PLUGIN newly-deny 7,
+S-COPY-PLUGIN newly-advise 36, S-PLUGIN-REF no-longer-advise 1,763 (Task 7 had already exposed 88 of the 1,851),
+S-LOADORDER-REF 176, S-WRITE-INSTALL newly 4 / no-longer 20 (the c3f32ef id of the legacy redirect note), S-WRITE-
+LOADORDER 4, S-WRITE-INI 3, S-WRITE-SKSE-INI 1. 0 errors; parse failures 0 → 63 (the old engine has no parser).
+
+**Timing.** 16 new shapes x 2 dialects (`test_write_shell_rules_stay_fast`), all linear; worst at 80 KB 109 ms CPU
+(`fallback-write-words`, the parse-failure segment scan), next 36 ms.
+
+## Task 9: every advice anchored to the executed program; 2-line messages; write-guard notes by zone
+
+### Task 9, item 0 (Task 8 review minors)
+
+`--base dffda1a`, N = 62,406 (Bash 55,697, PowerShell 1,604, Write 3,514, Edit 1,586, MCP 5); shell calls 57,301.
+0 errors; parse failures 63 → 63.
+
+| change | newly-deny | newly-ask | newly-advise | no-longer-deny | no-longer-ask | no-longer-advise |
+|---|---|---|---|---|---|---|
+| fallback: one target word after `>` (not the rest of the segment); `=>`/`->` are arrows | 0 | 0 | 0 | 0 | 0 | 0 |
+| a copy's destination classified by its RESOLVED path too | 0 | 0 | 0 | 0 | 0 | 0 |
+| `cp /dev/null X.esp` (a copy from a null device) is a write | 0 | 0 | 0 | 0 | 0 | 0 |
+
+Decision matrix unchanged (advise 607, allow 61,433, ask 11, deny 355). The three shapes do not occur in this
+machine's history; each is pinned by a `t09-*` row and a mutation. tee keeps ALL its operands as targets (not just
+the first word): `tee a.log X.esp` really writes X.esp, so "first word only" would be a miss, not a fix.
+
+### Task 9, main change (every advice anchored; registry/.psc/Champollion denies anchored; write-guard notes by zone)
+
+`--base dffda1a`, N = 62,551 (Bash 55,819, PowerShell 1,604, Write 3,531, Edit 1,592, MCP 5); shell calls 57,423,
+file-tool calls 5,123. 0 errors; parse failures 63 → 63 (0.109% Bash, 0.125% PowerShell). Matrix: allow>allow
+61,494; advise>advise 245; advise>allow 363; allow>advise 61; allow>deny 20; deny>allow 16; deny>deny 341; ask>ask 11.
+
+| rule | direction | n | hand-read | verdict |
+|---|---|---|---|---|
+| S-CHAMPOLLION | newly-deny | 20 | **all 20:** every one RUNS `tools/Champollion/Champollion.exe "Data/Scripts/X.pex"` after `cd` into the install (a relative operand; 1 is `"Data/Scripts/$s.pex"` in a for loop) -- the exact shape the rule exists for (Champollion writes .psc into Data/Scripts/Source whatever the flags; two items then read the generated `Data/Scripts/Source/X.psc`). The text rule missed them because it needed the absolute path. | TP by rule (the plan's tightening) |
+| S-CHAMPOLLION | no-longer-deny | 1 | read: Champollion on `"$SCR/HiggsVR.pex"` after a `cp` of the install's .pex to a scratch folder -- the remedy the deny prescribes; the text rule saw the install path in the `cp`. | FP removed |
+| S-REGISTRY | no-longer-deny | 15 | **all 15:** 12 TEXT -- heredocs/python edits whose code mentions the words (this plan's own edits, twice), `codex execpolicy check ... <reg-words>` (reg is an ARGUMENT there), a printf to progress.md, a grep, a test-row file; 3 REAL deletes of `HKCU\Software\X4ToolkitTests\...` keys from X4 sessions -- not a Bethesda key (outside the rule's scope; the text rule denied ANY such delete). 0 Bethesda-key deletes lost. | 12 FP removed; 3 out of scope (Ruling below) |
+| S-EXTERNAL-OUT | no-longer-advise | 248 | categorised all 248: 197 Caprica compiling into `Data/Scripts` (`-o ..`, `--output "Data/Scripts"`, absolute), 51 Spriggit `deserialize --OutputPath Data/X.esp`; 0 decompiles. | noise removed (Ruling below) |
+| S-MOVE-INSTALL | no-longer-advise | 103 | categorised all 103: 60 backups INTO `.claude/backups`, 7 backups to `~/.claude/backups`, 30 to an unresolved `$VAR` destination (each read: scratch, snapshot, stash and diag folders; 0 into Data/), 5 syncs into the install's `tools/`, 1 text in a printf. The install was the SOURCE, or the destination was outside Data/, in every one. | noise removed (destination only) |
+| S-MOVE-INSTALL | newly-advise | 66 | **all 66:** real `cp`/`mv` onto files in `Data/` given RELATIVE (after `cd`): mesh/script/audio deploys and reverts from `.claude/backups`, `.fuz`/`.xwm` placement, music-folder moves, 2 `.bak` copies inside `Data/`. 0 FP by the rule's definition (each really overwrites in Data/); each is the user's deliberate deploy. | TP by rule; see the report's concern |
+| S-AUTOMOD-NIF | no-longer-advise | 5 | all 5: a plan-file heredoc, a `--dry-run` rename-strings, a 7z extract of the AutoMod zip, a grep loop, one of this session's python one-liners. 0 executed NIF writes. | FP removed |
+| S-AUTOMOD-ESP | no-longer-advise | 1 | read: a grep over `tools/automod` sources for command names. | FP removed |
+| S-SED-WINPATH | no-longer-advise | 3 | all 3: `sed -i` on scratch files outside the install with no backslash in the replacement; one is a `curl | python` with no sed write at all. | FP removed |
+| W-PAPYRUS | no-longer-advise | 10 | all 10: Edits of decompiled `.psc` in `%TEMP%\pex_decompile\`. | FP removed |
+| S-EXTERNAL-OUT, W-INSTALL, S-SED-WINPATH, S-AUTOMOD-ARCHIVE | newly-* | 0 | -- | -- |
+
+newly-ask 0, no-longer-ask 0. Newly-deny 20 (cap 200).
+
+**Advise noise.** Shell calls carrying any advice: **451 → 159 (0.79% → 0.28%)**; file-tool calls: 157 → 147
+(3.06% → 2.87%). Per rule, % of shell calls (old → new): S-EXTERNAL-OUT 0.432% → 0; S-MOVE-INSTALL 0.251% → 0.186%;
+S-AUTOMOD-NIF 0.021% → 0.012%; S-AUTOMOD-ESP 0.005% → 0.003%; S-SED-WINPATH 0.005% → 0; S-AUTOMOD-ARCHIVE 0.005%
+unchanged. Every shell advise rule is now ≤ 0.2%. Write guard (% of file-tool calls): W-PAPYRUS 2.62% → 2.42% (124
+hits = 0.20% of ALL calls; all 124 are Edits/Writes of `.psc` in the install's `Data/Scripts/Source`, 65 distinct
+files -- the snapshot-before-experimenting case the note exists for); W-INSTALL 0.23% unchanged; W-SKSE-INI 0.20%.
+
+**Rulings.**
+- **S-EXTERNAL-OUT covers decompilers only** (Champollion -p/-a/-o; AutoMod `papyrus decompile`). Of the 501 hits
+  the plan-table rule (any Papyrus/ESP tool's output flag into the install, cwd-resolved) produced in the first
+  draft, 369 were Caprica compiling into Data/Scripts and 127 Spriggit deserializing the user's plugin into Data/ --
+  the tool writing its product where it belongs, every time; 0 were decompiles. That is the "always noise" class
+  the user's directive removes. Cost if wrong: a compiler or Spriggit writing to an unintended install folder is
+  silent (the legacy text rule's 248 hits held no such case either). Supersessions `t09-ext-tool-out(-config)`.
+- **S-REGISTRY covers Bethesda keys and their ancestors** (the plan table: "on a Bethesda key"), plus an
+  unresolved key when the command names Bethesda. The 3 real X4 test-key deletes above become silent. Cost if
+  wrong: a delete of an unrelated key is not this guard's to stop.
+- **On a parse failure the advise rules are not attempted** (as S-WRITE-INSTALL in Task 8: a deviation from R4 for
+  advice only). The deny rules (registry, .psc output, Champollion) keep the legacy text fallback.
+- **S-MOVE-INSTALL covers the install's Data/, the config folder and MO2** (the S-WRITE-INSTALL area): 65 of the 103
+  removed hits were copies into `.claude/backups` and `tools/`.
+
+**Cumulative (`--base c3f32ef`), N = 62,566:** 0 errors; parse failures 0 → 63 (the old engine has no parser).
+Matrix: allow>allow 59,618; advise>allow 2,120; deny>allow 125; allow>deny 22; ask>allow 25; allow>ask 9;
+allow>advise 58; advise>advise 244; advise>deny 6; deny>advise 4; advise>ask 1; ask>ask 1. Task 9's rows as above
+(S-EXTERNAL-OUT no-longer 245, S-MOVE-INSTALL newly 66 / no-longer 113 -- 10 of them taken over by S-COPY-PLUGIN in
+Task 8), Tasks 4-8 unchanged.
+
+**Timing.** 18 anchored-rule shapes x 2 dialects (`test_anchored_rules_stay_fast`) and the write guard's 8 path
+shapes with roots, all linear; a mutation removing the sed path regex's word-start lookbehind is caught.
+
+### Task 9, fix round 1 (review: registry keys that are not written out; interpreter-code keys; S-MOVE-INSTALL removed)
+
+Changes: (1) a registry key that is not written out (`$K`, `%K%`, a backtick, `$(...)`) is resolved from a simple
+same-command assignment (bash `K=...`, PowerShell `$k = '...'`, cmd `set K=...`) and judged like a literal; a key that
+still cannot be known DENIES; a PowerShell path that cannot be known denies when the command names a hive. (2) In
+interpreter code the key after `reg delete` is extracted (string form, `subprocess` list form, `execSync`) and judged
+the same way (parents count); a key joined on from a variable (`+`, `%`, `.format`, an f-string `{k}`, a bare name in
+an argument list) denies. (3)/(4) docstring: the opaque-program-word limit (`R=reg; $R delete ...`), piped and
+location-relative PowerShell, `reg import`, `regedit /s`, `winreg.DeleteKey` recorded as known limits. (5) Controller
+ruling: **S-MOVE-INSTALL removed** -- copies/moves onto ordinary Data/ files get no note (107 of 107 hits in history
+were the user's deliberate deploys); its rows are allow pins, the 4 legacy `shell-cp/mv-inside` rows superseded.
+
+Re-priced, N = 62,799 (Bash 56,033, PowerShell 1,607, Write 3,555, Edit 1,599, MCP 5); shell calls 57,640. 0 errors;
+parse failures 63 → 63.
+
+| base | rule | direction | n | hand-read |
+|---|---|---|---|---|
+| 4f1789b (Task 9) | S-REGISTRY | newly-deny | 1 | the X4 cleanup loop `for k in ...; do reg delete "HKCU\...\X4ToolkitTests\$k" /f; done` -- the key holds a loop variable, so it is unknown; re-denied by ruling (accepted) |
+| 4f1789b | S-REGISTRY | no-longer-deny | 1 | a python heredoc editing a timing test whose source holds the TEXT `"reg delete " * (N // 11)` -- no key follows, it was text (the old Task 9 code denied any code naming both words and Bethesda) |
+| 4f1789b | S-MOVE-INSTALL | no-longer-advise | 107 | the 107 deploys read in Task 9 (66 relative + 41 absolute into Data/) |
+| dffda1a | S-REGISTRY | no-longer-deny | 17 | 15 text (this plan's and Plan 4's heredocs, printf, grep, `codex execpolicy` arguments, test-row files); 2 real deletes of literal `HKCU\Software\X4ToolkitTests\...` keys (not Bethesda: out of scope). 0 Bethesda deletes lost |
+| dffda1a | S-CHAMPOLLION | newly-deny / no-longer-deny | 20 / 1 | unchanged from Task 9 |
+| dffda1a | S-MOVE-INSTALL | no-longer-advise | 144 | all of the legacy rule's hits (Task 9 read and categorised both halves) |
+
+A first draft of (2) newly denied a Plan 4 python heredoc whose code holds a comment "leaves `reg.exe delete`
+unguarded" and a pattern list `["reg", "delete"]`; the fallback that denied any code naming the words with no key
+after them was replaced by the explicit joined-key forms, and the shape is pinned allow (`t09-reg-python-comment`).
+
+**Advise noise.** Shell calls carrying any advice, dffda1a → now: **451 → 57 (0.78% → 0.10% of 57,640)**. Per rule
+(% of shell calls): S-COPY-PLUGIN 0.062%, S-AUTOMOD-NIF 0.012%, S-WRITE-INSTALL 0.009%, S-WRITE-LOADORDER 0.007%,
+S-AUTOMOD-ARCHIVE 0.005%, S-WRITE-INI 0.005%, S-AUTOMOD-ESP 0.003%, S-WRITE-SKSE-INI 0.002%. File-tool calls: 157 →
+147 (3.05% → 2.85% of 5,154; W-PAPYRUS 2.41%, W-INSTALL 0.23%, W-SKSE-INI 0.19%, W-INI 0.02%).
+
+**Cumulative (`--base c3f32ef`):** 0 errors; S-MOVE-INSTALL no-longer-advise 154; S-REGISTRY no-longer-deny 17; the
+rest as in the Task 9 section.
+
+## Task 7b: same-command literal assignments resolve delete operands
+
+Change: a delete operand written with a variable (`D=/tmp/x; rm -rf "$D"`, `$p = 'C:\x'; Remove-Item $p`) is replaced
+by the literal the parser proves it holds, then judged like a written-out path (S-DEL-INSTALL/CONFIG/MO2, or nothing).
+Only a plain literal assigned once in the whole command, as its own statement in the ROOT command's top-level list,
+before the use (an earlier statement, or earlier in the same pure `&&` chain) counts; branches, loops, functions,
+subshells, pipelines, `&`, `||`, `source`/`eval`/dot-source/`Invoke-Expression` and any second write leave it
+unresolved (the deny it was). cmd never resolves. S-REGISTRY's Task 9 text resolver is replaced by the same one.
+
+`--base dc8c59b`, N = 63,637 (Bash 56,799, PowerShell 1,615, Write 3,598, Edit 1,620, MCP 5). 0 errors; parse
+failures 63 → 63. Matrix: deny>allow 87, deny>ask 1, deny>deny 278 (22 of them a rule move), nothing newly denied
+from allow/advise/ask.
+
+| rule | direction | n | hand-read |
+|---|---|---|---|
+| S-DEL-UNRESOLVED | no-longer-deny | 110 (190 → 80) | 88 lifted (87 allow, 1 ask) + 22 rule moves. **88 of 88 false positives**: every delete operand resolves to a scratchpad/Temp path, `/tmp`, `C:/Temp` or a sibling outside every root (one `__pycache__`, scratch by R8); each command read for the flow (assignment first in its list or earlier in the same `&&` chain, no second write). **0 true positives lost.** |
+| S-DEL-INSTALL | newly-deny | 21 | deny → deny: the variable now resolves INTO the install and the file is named (`$GAME/Data/ZZZGinSpike.esp`, `.claude/backups/<x>/*`, `Data/meshes/weapons/Fettered Fragments/*.bak`, `_CLAUDE_OUTPUT/...` zips and stages). These are the analysis-only "~20 true positives" of Task 7 |
+| S-WRITE-PLUGIN | newly-deny | 1 | deny → deny: the delete deny that pre-empted it is gone; the same command's `printf 'x' > _CLAUDE_OUTPUT/zzz_relock.esp` is a real plugin write probe |
+| S-RESAVER-APPLY | newly-ask | 1 | deny → ask: `rm -f "$OUT"` (scratch) no longer pre-empts the ask for the same command's real `reset-havok ... --apply` |
+
+PowerShell (Task 10's 8): 2 lifted (`$tmp`/`$pkg\__pycache__`, temp + scratch), 2 now S-DEL-INSTALL (`_CLAUDE_OUTPUT`
+zips), 4 still unresolved (pipeline input, values built from `$base`, `Join-Path`).
+
+The 80 that remain are values built from another variable (`OUT="$SP/x"`, `SP="$LOCALAPPDATA/..."`), `$(mktemp)`,
+loop variables, pipeline input, and `cd X && D=...; rm "$D"` (not first in its list: if `cd` fails the assignment never
+runs). Shell-rule CPU over the 63,637 items is unchanged in shape; worst new timing shape at 80 KB ~86 ms.
+
+Self-review hardening (special names, IFS, more write forms, wider poison) re-priced: the four per-rule item
+sets are identical to the hand-read ones (compared by command text).
+
+### Task 7b, fix round 1 (adversarial review: 34 shapes where the literal was not the value at the delete)
+
+Controller ruling: broad, conservative poisoning over precise modelling -- any poison class anywhere in the command
+(after joining continuations and dequoting every word) turns ALL resolution in the command off; a closing keyword
+without its opener does the same (`assign.poisoned`, policy in its docstring).
+
+Re-priced `--base dc8c59b`, N = 64,742: 0 errors; parse failures 63 → 63. Matrix: deny>allow 67, deny>ask 1, deny>deny
+299. S-DEL-UNRESOLVED no-longer-deny 90 = **68 still lifted** (67 allow + 1 ask) + the same 22 rule moves.
+
+- **20 of the 88 lifted FPs return to deny** (old decision again), by poison class: function 11 (a `name()` in
+  embedded python/sed/echo text), read 3, export 2 (`export PATH="$PATH:..."`), dot-source 2, PowerShell scope 2.
+  Accepted by the ruling (resolution is a convenience).
+- **No item is newly lifted** (the 68 are a subset of the 88 hand-read FPs, compared by command text): **0 TP lost.**
+- S-DEL-INSTALL 21 / S-WRITE-PLUGIN 1 / S-RESAVER-APPLY 1: identical item sets.
+- After the mutation gate showed the round-0 per-statement poison (parser `poisons()`) and the `${N:=}` / `printf -v`
+  write-count forms to be fully shadowed by `assign.poisoned` (their 9 mutations survived), those mechanisms were
+  removed (one mechanism per concern). Re-priced, N = 64,867: all four per-rule item sets identical (68 still lifted).
+
+## Task 11: the DevBench guard (S-DEVBENCH-CRASH deny, S-DEVBENCH-SAVE ask, protect-mcp)
+
+Change: a DevBench `console` call whose command is on the deny list (`smp reset`, no argument; R14) is denied; a
+`game save` (or console `save <name>`) of an existing save in a declared config dir's `Saves/` asks, and asks when the
+folder or the name cannot be resolved. Reached by MCP (`protect-mcp.sh`), curl / Invoke-RestMethod to
+`/api/tool/<tool>`, and `devbench-cli.sh exec|tool`.
+
+`--base 058b0e2`, N = 65,137 (Bash 58,116, PowerShell 1,623, Write 3,720, Edit 1,673, MCP 5). 0 errors; parse failures
+63 -> 63. Matrix: allow>deny 1, allow>ask 4, everything else unchanged (deny>deny 299, ask>ask 12, advise 210). A final re-run on the finished code (N = 65,360, history had grown) gave the identical 1 deny and 4 asks.
+
+| rule | direction | n | hand-read |
+|---|---|---|---|
+| S-DEVBENCH-CRASH | newly-deny | 1 | a real session `curl ... -d '{"action":"exec","command":"smp reset",...}'` (URL held in `B="http://localhost:8921/api/tool"`, `"$B/console"`): **the measured crash command, true positive** |
+| S-DEVBENCH-SAVE | newly-ask | 4 | 4 real saves (console `save DiagScrambleReload01` twice, `game save BloodEffectFrozen`, `game save DevMusicTest`). The pricing driver declares no config dir, so every save asks (unresolvable); with the real config dir read (`C:/Users/Moona/Documents/My Games/Skyrim VR`, 5,344 files in Saves/) **all 4 are allow**: none of the four names exists as an `.ess` (`DevMusicTest.ess.tmp` is the half-written file KB line 1482 describes) |
+
+The 5 MCP items in history (`capture` x3, `console help`, `game list`) all allow. Of 134 curl-to-console, 62
+`devbench-cli` and 14 curl-to-`game` items in history, one is a crash command and none is an overwrite of an existing save.
+
+**A text match on interpreter code was priced and dropped.** The first version also denied a python/node heredoc that
+held both `/api/tool/console`/`devbench` and `smp reset`: 4 newly-deny, 3 of them scripts written in this session to TEST
+this very rule (the words as strings, not a call), 0 a real post. Dropped (approval fatigue outweighs an unseen shape);
+the broad `devbench` word is also no longer a trigger for the unparsable-command text fallback (only
+`/api/tool/console`). Recorded as a known gap, not handled.
+
+Timing (80 KB): 9 shapes (many `-d` bodies, a 80 KB body, a body with no closing quote, a key repeated 6,600 times,
+296 save calls, a 80 KB CLI word, an unterminated command naming the endpoint) all linear, worst 12 ms; the Saves
+folder is listed once per scan (a Saves folder holds thousands of files).
+
+### Task 11, fix round 1
+
+Two changes: (1) a DevBench console call whose body gives no definite command (`-d command=smp reset`, `--data-urlencode`,
+PowerShell `-Body (@{...} | ConvertTo-Json)` / `-Body $b`, `curl.exe -d "{\"command\":...}"` under PowerShell, a body file written in
+the same command) now denies when the command text names a bare `smp reset`; (2) the save check reads the first existing Saves
+folder among the declared config dirs, then `<Documents>/My Games/<Skyrim VR | Skyrim Special Edition | Skyrim>/Saves` (Documents
+from USERPROFILE, HOME, OneDrive, OneDriveConsumer, OneDriveCommercial), and asks only for an existing name, or when no folder
+or no usable name exists.
+
+`--base 058b0e2`, N = 65,534 (Bash 58,450, PowerShell 1,628, Write 3,766, Edit 1,685, MCP 5), driver run with the real
+environment (Documents resolves to `C:/Users/Moona/Documents/My Games/Skyrim VR/Saves`, 5,344 files). 0 errors; parse failures
+63 -> 63. Matrix: allow>deny 1, **allow>ask 0**, rest unchanged. The 1 deny is still the real `smp reset` curl. The four
+formerly-asked saves are allow (new names). The unreadable-body rule adds no new history hit.
+
+## Task 12: blank or non-string commands deny; S-OPAQUE priced and DROPPED (R15)
+
+`--base 4d0ab17`, N = 65,694 (Bash 58,590, PowerShell 1,640, Write 3,770, Edit 1,689, MCP 5). 0 errors; parse failures 63 -> 63.
+
+- **Denies (whitespace-only, non-string command): newly-deny 0.** History holds no blank or non-string command, so the change
+  costs nothing measurable; the gap it closes was real (the audit: a number or array was stringified and judged as text).
+- **S-OPAQUE (prototype: `bash|sh|python|node|ruby|perl <script> ... <arg that resolves into Data/config/MO2, or a plugin>`,
+  inline `-c/-m/-e` excluded, `tools/xelib/` excluded):** 41 hits = **0.062%** of 65,694, under the 0.2% ceiling. All 41 were
+  hand-read (fewer than the 50-sample floor exist). **Useful: 1 of 41 (2%)**: one in-place mesh patch (`nifpatch.py ... fragmentswhipL.nif`).
+  The other 40 were reads: pyffi/struct header dumps, `crash-triage.py` and `papyrus-triage.py` over the SKSE or Logs folders,
+  `skyrim-winner.js` / `resaver-resolve-names.js` lookups, `py_compile`, pytest runs, plus a few heredocs whose `Skyrim.esm:0CDD84`
+  FormID text was read as a plugin argument. Fails the 50% bar by a wide margin: **dropped** (module, rule, rows deleted).
+  Known limit, recorded: an interpreter script handed a protected path is not flagged; the user's own scratch scripts are the
+  common case and the notes would have been fatigue.
+
+## Inputs for the side-effects plan (Task 16, R16 -- MEASURE ONLY; no behaviour changed)
+
+Measured 2026-10-04 on `plan5` (a4135f6 + this task). **Read-only** on the real install (`C:/GOG Games/The Elder Scrolls V Skyrim VR`:
+directory walks, `stat`, file reads; nothing written there). The timings ran `tools/skyguard/snapshot.run` against **scratch copies**
+of the script folders. Raw output stays outside the repo (`.../scratchpad/plan5-t16/`: `scripts-census.json`, `timing.json`,
+`backups-census.txt`). Tier key: MEASURED (count and denominator given), READ (code), INFERRED.
+**For Plan 6 Task 6: read these numbers from this section**; the scripts that produced them are the method ("the same method").
+
+### 1. Script census (MEASURED, 2026-10-04, mtime vs now, "older" = `(now - mtime) // 86400 >= 7`, the snapshot hook's own test)
+
+| Folder | Level | Ext | Files | Bytes | Older than 7 d |
+|---|---|---|---|---|---|
+| `Data/Scripts` | top-level | `.pex` | 6,336 | 17,643,511 | 6,268 (98.9%) |
+| `Data/Scripts` | top-level | `.psc` | 7 | 255,215 | 7 (100%) |
+| `Data/Scripts` | nested (not `Source/`) | `.pex` | 17 | 83,749 | 17 (100%) |
+| `Data/Scripts/Source` | top-level | `.psc` | 2,134 | 8,889,198 | 2,134 (100%) |
+| `Data/Scripts/Source` | nested | `.psc` | 82 | 203,387 | 82 (100%) |
+| `Data/Source/Scripts` | top-level | `.psc` | 3,322 | 9,651,169 | 3,265 (98.3%) |
+| `Data/Source/Scripts` | nested | `.psc` | 0 | 0 | -- |
+| **All of the above** | | | **11,898** | **36,726,229** | |
+
+(`Data/Scripts` as a whole holds 2,216 nested `.psc`, which is exactly `Source/` 2,134 + 82; the table counts them once.)
+
+What the per-call snapshot (READ: `snapshot.py`, same logic as the old bash hook) looks at: top-level `.psc` in
+`Data/Scripts/Source` and top-level `.pex` in `Data/Scripts` = **8,470 files, 26.5 MB**, and it copies only those **younger than 7
+days**. So, in this install:
+
+- **Not seen at all:** 3,428 files (`Data/Source/Scripts` 3,322; nested `Source` 82; nested `.pex` 17; top-level `.psc` in `Data/Scripts` 7).
+  That is 29% of the 11,898, and every script under the second source folder.
+- **Seen but never copied:** the 2,134 `.psc` in `Source` are all older than 7 days, so the copy loop takes **0 `.psc` per snapshot**
+  (MEASURED on a scratch copy: `psc:0 pex:68` in every snapshot). The test is applied to the file BEFORE the command runs, so a command
+  that rewrites an old `.psc` has its pre-image skipped: the snapshot guards the files that are *already* recent and misses the one the
+  command is about to change. Only the Edit/Write backup channel covers a script edited by the Edit tool.
+
+### 2. Per-call snapshot time (MEASURED, scratch copy of the real `Data/Scripts`: 8,477 files; `snapshot.run` only, in-process)
+
+Excludes the hook wrapper (bash start + python start), which `tools/skyguard` latency work records elsewhere.
+
+| Scenario | Calls | Time per call |
+|---|---|---|
+| Real mtimes (68 recent `.pex`, 2.6 MB copied), snapshot taken | 5 (rate limit cleared each time) | first 690 ms (cold), then 313-320 ms (median 318) |
+| Same, inside the 60 s rate limit and nothing newer | 5 | **72-74 ms** (it still stats the 2,134 `.psc`) |
+| Worst case: every file fresh (a deploy, a checkout, `touch`), 8,470 files / 26.5 MB per snapshot | 5 | first **48.6 s** (cold), then 3.1-3.2 s |
+| Fresh toolkit install (no `Data/Scripts`) | 5 | 0.18-0.34 ms (returns before touching anything) |
+| Read-only command (`ls Data`, skip list) | 1 | 0.013 ms |
+
+A fresh toolkit install (a checkout; `git ls-files` has 0 `.psc`/`.pex`) costs nothing. A user install with the same shape as this one
+pays 72 ms on most calls (the 60 s window) and about 0.3 s on the first call after a minute; a bulk touch costs seconds.
+
+### 3. Backups in `.claude/backups/` (MEASURED, 2026-10-04)
+
+| Item | Count | Bytes |
+|---|---|---|
+| top-level per-edit backups (`<stamp>__<mangled path>`) | 863 | -- |
+| top-level files in total (the 863 + `AUDIT_LOG.txt` + 10 hand-made `.nif/.wav/.esp`) | 874 | 28,145,558 |
+| `auto_snapshots/` | 1,109 snapshot dirs, 72,360 files | **2,816,281,782 (2.82 GB)** |
+| `AUDIT_LOG.txt` | 9,965 lines | |
+
+- **Per-edit backups with no recoverable original path: 1 of 863** (862 names appear as `(backup: <name>)` in `AUDIT_LOG.txt`, which
+  records the full original path; the 1 survives only as a name). Separately, every name is lossy: `/`, `\` and `:` all become `_`
+  (READ: `backup.py`), so a name with an underscore in the original cannot be decoded back unambiguously. The audit log is the
+  only key, and 0 of its 862 backup names point at a file that is gone.
+- **Edits with no backup at all:** the audit log holds **14 `FAILED`** lines ("NO BACKUP EXISTS for this edit") and 3 `BLIND` lines, against 862 recorded backups.
+- **Snapshots are almost all the same bytes.** Hashed (SHA-1) every file in `auto_snapshots`: 72,359 files, 2,816,281,771 bytes,
+  **89 distinct contents totalling 2,764,874 bytes (0.098%)**. Median 68 files / 2.65 MB per snapshot; snapshot age median 1.7 d, max
+  13.9 d, 0 older than 14 d, so the 14-day prune works and 2.8 GB is the steady state of the *current* rate (about 3,500 snapshots logged).
+  That is the same 68 recently-modified `.pex` copied 1,109 times.
+
+### 4. Recommendation (for Plan 6; INFERRED from the numbers above, not built)
+
+Keep the hook non-blocking and keep its trigger; change what it stores.
+
+1. **Manifest plus content-addressed objects, incremental on `(size, mtime_ns)`.** One object store (`objects/<sha256>`) and one small
+   manifest per snapshot (`path -> sha256, size, mtime`). Compare against the previous manifest by stat; hash and copy only files that
+   changed. Measured headroom: the 2.82 GB collapses to about 2.8 MB of distinct content (99.9%). Hardlinks would also work on NTFS
+   but need a same-volume link per file per snapshot (8,470 links per call) and break on a cross-volume or non-NTFS target; the object
+   store has no such failure mode.
+2. **Drop the 7-day filter.** It skips the exact files that matter (section 1). With the incremental store the first call writes a
+   one-time baseline (36.7 MB for all 11,898 files), and every later call writes only what changed. This also removes the
+   "bulk touch costs 3 s / 48 s cold" case after the baseline, since an unchanged-content `touch` hashes but copies nothing.
+3. **Walk nested folders and both source roots** (`Data/Scripts/**`, `Data/Scripts/Source/**`, `Data/Source/Scripts/**`): 3,428 files are invisible today.
+4. **Keep the 60 s rate limit** (72 ms floor is the stat pass over about 8.5 k files); a "changed since last manifest" check must stay a stat, not a hash.
+5. **Edit/Write backups:** write the full original path into the backup's own sidecar (or a manifest entry) so recovery does not depend on the audit log or on decoding `_`; record a loud, countable failure (the 14 `FAILED` lines) in the canary.
+6. **Prune by manifest reachability**, not by directory age, so a snapshot's objects outlive it only while a manifest names them.
+
+Not recommended: "keep" as is. At 1,109 snapshots the current design spends 2.82 GB to hold 2.8 MB, and misses the files it was built for.

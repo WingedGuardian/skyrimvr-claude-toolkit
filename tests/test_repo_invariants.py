@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import subprocess
 
 from conftest import BASH, REPO
@@ -192,7 +193,7 @@ def test_every_hook_locates_its_install_with_the_same_block():
     protect-bash only: the drive-spelling and MSYS-mount tests in test_hooks.py. That covers the other
     four hooks only if they carry the SAME code (comments aside), so a drift in one of them goes red here."""
     hooks = sorted(HOOK_DIR.glob("*.sh"))
-    assert len(hooks) == 5, "expected five hooks -- this test is stale"
+    assert len(hooks) == 6, "expected six hooks -- this test is stale"
     blocks = {}
     for h in hooks:
         text = h.read_text(encoding="utf-8")
@@ -268,6 +269,67 @@ def test_every_hook_is_registered_in_settings_json():
     assert not unwired, (
         "these hooks ship but no event invokes them, so they never run: "
         + ", ".join(unwired))
+
+
+def test_shell_matcher_covers_powershell():
+    """Claude Code's PowerShell tool is a second way to run any command. A matcher of plain `Bash` leaves
+    it unguarded and unsnapshotted, and nothing errors: the hooks just never fire for it (E12).
+
+    Both shell hooks (the command guard and the .psc snapshot) must sit under a matcher that, compiled as a
+    regex the way Claude Code does (the whole tool name), matches `Bash` and `PowerShell` and not the file
+    tools. The Edit|Write hooks must NOT widen to the shells: they read `file_path`, which a shell tool lacks."""
+    settings = json.loads((REPO / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    by_hook = {}
+    for matcher in settings["hooks"]["PreToolUse"]:
+        for entry in matcher.get("hooks", []):
+            by_hook[entry["command"].rsplit("/", 1)[-1].rstrip('"')] = matcher.get("matcher", "")
+    for hook in ("protect-bash.sh", "snapshot-before-tool.sh"):
+        assert hook in by_hook, f"{hook} is not registered under PreToolUse"
+        rx = re.compile(by_hook[hook])
+        for tool in ("Bash", "PowerShell", "Monitor"):     # Monitor: Plan 5 Task 13b (MEASURED outside both, 2.1.289)
+            assert rx.fullmatch(tool), f"{hook}: matcher {by_hook[hook]!r} does not match {tool}"
+        for tool in ("Write", "Edit", "Read", "NotebookEdit"):
+            assert not rx.fullmatch(tool), f"{hook}: matcher {by_hook[hook]!r} wrongly matches {tool}"
+    for hook in ("protect-files.sh", "backup-before-edit.sh"):
+        rx = re.compile(by_hook[hook])
+        assert not rx.fullmatch("PowerShell") and not rx.fullmatch("Bash") and not rx.fullmatch("Monitor"), \
+            f"{hook} must stay on the file tools"
+        assert rx.fullmatch("NotebookEdit"), f"{hook}: matcher {by_hook[hook]!r} does not match NotebookEdit"
+
+
+def test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks():
+    """Task 11 added a sixth hook. The canary's list, the release workflow's floor and verify-release.sh's fallback
+    floor each name the hook set; one left behind makes a hook invisible to the canary or lets a release ship
+    without it."""
+    shipped = {h.stem for h in HOOK_DIR.glob("*.sh")}
+    # Plan 4 rewrote hook-canary.sh as a thin front for tools/skyguard/health.py: the canary's hook list is
+    # health.CLAUDE_HOOKS (read as data, never by grepping the canary, which no longer names any hook).
+    canary = (REPO / "tools" / "hook-canary.sh").read_text(encoding="utf-8")
+    assert "tools/skyguard/health.py" in canary, "hook-canary.sh no longer delegates to health.py; this test is stale"
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import health
+    assert set(health.CLAUDE_HOOKS) == shipped, (health.CLAUDE_HOOKS, sorted(shipped))
+    floor = re.search(r'test "\$nhooks" -ge ([0-9]+)', (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8"))
+    assert floor and int(floor.group(1)) == len(shipped), (floor and floor.group(1), len(shipped))
+    verify = re.search(r"floor=([0-9]+) ;;", (REPO / "tools" / "verify-release.sh").read_text(encoding="utf-8"))
+    assert verify and int(verify.group(1)) == len(shipped), (verify and verify.group(1), len(shipped))
+
+
+def test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher():
+    """Task 11: DevBench's MCP tools are named `mcp__<server>__<tool>` (the server is `devbench-vr` here; the matcher
+    `mcp__devbench.*` was observed firing in Task 0). The hook must match them, and ONLY them: an unrelated MCP server
+    or a shell tool under this matcher would be judged by a guard that reads another tool's arguments."""
+    settings = json.loads((REPO / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    by_hook = {}
+    for matcher in settings["hooks"]["PreToolUse"]:
+        for entry in matcher.get("hooks", []):
+            by_hook[entry["command"].rsplit("/", 1)[-1].rstrip('"')] = matcher.get("matcher", "")
+    assert "protect-mcp.sh" in by_hook, "protect-mcp.sh is not registered under PreToolUse"
+    rx = re.compile(by_hook["protect-mcp.sh"])
+    for tool in ("mcp__devbench-vr__console", "mcp__devbench-vr__game", "mcp__devbench__inspect"):
+        assert rx.fullmatch(tool), f"matcher {by_hook['protect-mcp.sh']!r} does not match {tool}"
+    for tool in ("Bash", "PowerShell", "Write", "mcp__other__console"):
+        assert not rx.fullmatch(tool), f"matcher {by_hook['protect-mcp.sh']!r} wrongly matches {tool}"
 
 
 def test_every_registered_hook_has_a_timeout_that_is_not_the_old_five_seconds():

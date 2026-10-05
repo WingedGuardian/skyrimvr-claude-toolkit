@@ -127,7 +127,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("agent", choices=sorted(ADAPTERS))
     ap.add_argument("role", choices=["protect-bash", "protect-files", "backup-before-edit",
-                                     "snapshot-before-tool", "session-kb-guard"] + list(CODEX_ROLES))
+                                     "snapshot-before-tool", "session-kb-guard", "protect-mcp"]
+                    + list(CODEX_ROLES))
     ap.add_argument("--root", default="")
     ap.add_argument("--root-win", default="")
     ap.add_argument("--project", required=True)
@@ -150,16 +151,34 @@ def main(argv=None) -> int:
     audit = Audit(a.project)
     if a.role == "protect-bash":
         req = adapter.to_request(p, "shell")
-        if not p["command"]:
-            v = engine.evaluate_shell(req, paths.Roots("", ""), audit)
+        if p.get("ws_monitor"):
+            # Plan 5 Task 13b: a WebSocket Monitor runs no command (no `command` key at all): nothing to judge.
+            v = Verdict()
+        elif p["command_type"] != "string" or not p["command"]:
+            # Plan 5 Task 12: a command that is not a string (array, number, object, boolean) is no command the
+            # guard can judge -- `command` renders it as JSON text, which the rules would read as if typed. An
+            # empty or whitespace-only STRING is refused by shell_rules.decide itself.
+            v = engine.evaluate_shell(req._replace(command=""), paths.Roots("", ""), audit)
         else:
             env = _declared_env(a)
             if env is None:
                 v = Verdict("deny", ENV_UNREADABLE, status="failed", code="run.ENV_UNREADABLE")
             else:
+                # The payload's cwd and the tool's dialect reach the rules through the engine (Plan 4/5 handshake).
                 v = engine.evaluate_shell(req, paths.roots(a.root, a.root_win, env), audit)
     elif a.role == "protect-files":
-        v = engine.evaluate_write(p["file_path"], audit)
+        # Plan 5 Task 9: W-PAPYRUS and W-INSTALL decide on where the file RESOLVES, so this role needs the roots
+        # too. Its rules are notes plus a name-based deny, so an unreadable paths file costs only the declared
+        # roots (the install this hook runs from is still known); it is not a reason to refuse an edit.
+        env = _declared_env(a)
+        roots = paths.roots(a.root, a.root_win, env if env is not None else {})
+        v = engine.evaluate_write(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""))
+    elif a.role == "protect-mcp":
+        # Plan 5 Task 11: the DevBench MCP tools. Only the save-exists check reads the declared config dirs, so an
+        # unreadable paths file costs that one answer (it then asks); it is not a reason to refuse every call.
+        env = _declared_env(a)
+        roots = paths.roots(a.root, a.root_win, env if env is not None else {})
+        v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)
     elif a.role == "backup-before-edit":
         backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit)
         v = Verdict()

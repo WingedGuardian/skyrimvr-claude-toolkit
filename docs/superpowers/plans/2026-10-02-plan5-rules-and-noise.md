@@ -200,7 +200,7 @@ The bash reference in `tests/guard_corpus/reference/` defines **the old behaviou
 | S-AUTOMOD-ARCHIVE | automod-cli `archive` write subcommand executed | advise | `Note: loose files override {file}; check for loose copies before trusting it.` |
 | S-EXTERNAL-OUT | an executed Papyrus/ESP tool's output flag resolves into the install/config | advise | `Note: {op} writes its output into the Skyrim install; check it landed where you meant.` |
 | S-RELATIVE-UNKNOWN | a relative delete naming `Data` while `cwd` is unknown or untrusted (R9) | advise | `Note: this deletes {file} by a relative path, and the guard was not told the working folder.` |
-| S-OPAQUE | **only if Task 12's pricing keeps it (R15):** an opaque program (`bash x.sh`, `python x.py`, `node x.js`, `eval`, `Invoke-Expression`) is given a protected path or plugin as an argument | advise | `Note: the guard cannot see what {op} does with {file}.` |
+| S-OPAQUE | **DROPPED by Task 12 pricing (R15: 41 hits = 0.062% but 1 of 41 useful; see the pricing doc). Was:** an opaque program (`bash x.sh`, `python x.py`, `node x.js`, `eval`, `Invoke-Expression`) is given a protected path or plugin as an argument | advise | `Note: the guard cannot see what {op} does with {file}.` |
 
 **Removed:** ADV_DELETE (R10), ADV_RELATIVE (→ cwd resolution / S-RELATIVE-UNKNOWN), ADV_PLUGIN (R11),
 ADV_LOADORDER-on-read and ADV_REDIRECT (→ the S-WRITE-* rules).
@@ -644,6 +644,51 @@ existing regex fields. The regex fields stay for S-DEL-FALLBACK and the legacy a
   - `git-clean-cwd`;
   - `find-delete`.
 - [ ] Commit (after pricing is recorded): `"skyguard: delete rules decide on executed commands and resolved paths (E16, relative, PowerShell, MO2)"`.
+- **Known limits (recorded in Task 7 fix round 1; `tools/skyguard/deletes.py` docstring):**
+  - interpreter code with RELATIVE paths (`python -c "shutil.rmtree('Data')"`, node/perl equivalents) is invisible
+    unless the code also names a protected root;
+  - `mv` out of the install with a relative source path gets no advice;
+  - `shred`, `rsync --delete`, `git checkout -- .`, `git reset --hard`, `git stash -u` are not delete primitives;
+  - per-install user folders such as `_CLAUDE_OUTPUT` are protected like the rest of the install; a configurable
+    allowlist is a follow-up idea, not built;
+  - an unresolved delete operand run from inside a protected folder is not flagged (ruling, fix round 1: measured 75 occurrences, 0 real, in 61,935 items);
+  - `CMD="rm -rf <install>"; $CMD` (an assignment value is not an exec); PS5 `Remove-Item -Recurse` follows junctions.
+
+### Task 7b (controller-added): same-command literal assignments resolve delete operands
+
+S-DEL-UNRESOLVED denied ~190 history items whose operand is a variable in a command naming a root (~100 measured FPs:
+scratch paths). The parser now records LITERAL assignments in the root command's top-level statement list and gives
+each Exec `subst` (word → expanded word) for every use the assignment certainly reaches; `deletes.scan` substitutes
+before clause (a), and S-REGISTRY uses the same resolver (its Task 9 regex resolver is removed). Text rules
+(`tools/skyguard/assign.py`): a name written more than once anywhere (any form: reassignment, `for`/`read`/`printf
+-v`/`export`/`local`/`unset`, `${N:=}`, `N++`, PowerShell scope writes, `foreach`, Set-Variable, -OutVariable,
+parameters, writes inside strings/heredocs) is never resolved; values must be plain literals. Flow rules
+(`shellparse.track_vars`/`lookup`): not inside `bash -c`/eval/backticks, `( )`, `$( )`, `{ }`, if/while/until/for/
+select/case, a function, a pipeline, `&`, after `||`; a use resolves in a later statement only when the assignment was
+first in its `&&` list, or later in the same pure `&&` chain; `source`/`.`/`eval`/dot-source/`Invoke-Expression`
+poison every later use; cmd never resolves (it expands `%K%` before `set` runs).
+
+- Corpus: 74 `t07b-*` rows (20 RED against dc8c59b, the rest pins); `t07-var-data` and `t07-legacy-var-only` now
+  S-DEL-INSTALL (the latter no longer supersedes `testhooks-00bbbc607b`: it gives the legacy verdict again).
+- Priced (dc8c59b, N = 63,637): S-DEL-UNRESOLVED 190 → 80; 88 lifted, all hand-read FPs, 0 TP lost; 22 deny→deny
+  rule moves (21 S-DEL-INSTALL naming the file, 1 S-WRITE-PLUGIN); 1 deny→ask (S-RESAVER-APPLY, a real `--apply`).
+- Tightenings: an unresolved delete run from inside the install with a variable that resolves into it now denies
+  (`D=Data/meshes; rm -rf "$D"`, cwd = install); S-REGISTRY no longer resolves an assignment in a branch, a
+  reassigned name, or cmd's `set K=... & reg delete "%K%"`.
+- Self-review hardening (before review): names the shell sets or refuses (`PWD`, `OLDPWD`, `HOME`, `IFS`, `_`,
+  PowerShell automatic variables) are never resolved; a command that writes `IFS` refuses every unquoted
+  expansion; `exec {D}>f`, Tee-Object -Variable, PowerShell `set`, PSVariable count as writes; `source`/`eval`
+  anywhere in a statement (also behind `builtin`/`command`) and `InvokeScript` poison. Re-priced: identical.
+- Fix round 1 (adversarial review, 34 fail-open shapes; controller ruling): BROAD poisoning -- any poison
+  class anywhere in the normalized command (continuations joined, every word dequoted) turns all resolution
+  off: function definitions, trap/eval/source/`.`/read/readarray/mapfile/getopts/declare/typeset/local/
+  readonly/unset/let at command position, `export $..`, `printf -v`, `wait -p`, `((..=..))`, `${N:=}`, arrays,
+  `$N=`; PowerShell *-Variable cmdlets/aliases, `variable:`, -OutVariable/-PipelineVariable/... and their
+  prefixes, `.Value =`, `[ref]`, PSVariable/SessionState/InvokeScript, iex, `&`/`.` with a variable, quoted
+  command or scriptblock, `= {`, scope prefixes; a stray fi/done/`}`. Re-priced: 68 of the 88 FPs still lifted,
+  0 TP lost; 34 `t07b-r1-*` rows (all red on the round-0 engine), 38 mutations.
+- Known limits: a value built from another variable (`Y="$SP/x"`) and a harmless second mention that reads like a
+  write (`echo "D=$D"`) stay unresolved; the write rules (S-WRITE-PLUGIN) do not read `Exec.subst`.
 
 ### Task 8: Shell writes to plugins (E21) and the write-target advice; ADV_PLUGIN removed
 
@@ -689,6 +734,15 @@ existing regex fields. The regex fields stay for S-DEL-FALLBACK and the legacy a
   - `rule-S-WRITE-SKSE-INI`;
   - `rule-S-WRITE-LOADORDER-write-only` (fire on reads → the `cat plugins.txt` row red).
 - [ ] Commit: `"skyguard: shell writes to plugins are blocked (E21); write advice fires only on writes"`.
+- **Rulings and known limits (recorded in Task 8; `tools/skyguard/writes.py` docstring):**
+  - S-COPY-PLUGIN ships as ADVISE (controller ruling): priced 36 items, all the user's own deploys, 0 misses;
+  - S-WRITE-INSTALL covers the install's `Data/`, the config folder and MO2 only (20 of 23 legacy redirect notes
+    were the user's own scripts/notes elsewhere in the install);
+  - the opaque-program fallback reads the opaque program's own words and the nearest upstream program feeding its
+    pipe, not every exec in the command (2 hook-harness FPs removed);
+  - not handled: `perl -i`, interpreter code and opaque scripts writing a plugin (R11), an unresolved copy
+    destination that names no Data folder (`"$D/X.esp"`), `touch`/`truncate`;
+  - S-REGISTRY is still a text match (the live printf FP, 2026-10-03): Task 9 anchors it to the executed program.
 
 ### Task 9: Anchor and shorten every remaining advise; narrow the write-guard advice
 
@@ -759,6 +813,29 @@ All messages switch to the new templates; the legacy flag is cleared for each.
 - [ ] **Mutations:** `rule-S-DEVBENCH-CRASH-mcp`, `-curl`, `-cli`, `-case-fold`;
   `rule-S-DEVBENCH-SAVE-exists` (ask on every save → the new-name row red); `-unresolvable-asks`.
 - [ ] Commit: `"skyguard: DevBench guard — crash-listed console commands denied, save-overwrite asks"`.
+
+**Task 11 as built.** `tools/skyguard/mcp_rules.py` judges one DevBench tool call once (`judge`), so the three routes cannot
+disagree: MCP (`protect-mcp.sh`, `decide`), curl / `Invoke-RestMethod` (`-d`, `--data*`, `--json`, `-Body`; the URL path
+`/api/tool/<tool>` on any host and port) and `devbench-cli.sh exec|tool`, both found by `scan_shell` inside protect-bash.
+The deny-list is `rules.DEVBENCH_DENY` (data). Console `save <name>` is judged like `game save` (DevBench routes it the
+same way). Message deviations from the table: S-DEVBENCH-CRASH's second line says "or run it yourself" (there is no
+devbench skill to point at); S-DEVBENCH-SAVE reads "will save as {save}, replacing it if it exists" because the ask also
+covers an unresolvable folder. New ids: S-DEVBENCH-CRASH, S-DEVBENCH-SAVE (hook protect-bash, prefixes empty: a console
+body cannot be prefix-matched) and S-INERT-NOINPUT (hook protect-mcp: empty payload or no tool name).
+Ledgered gaps: `-d @file` / `--data-binary @-` / a body in an unresolved variable (unreadable offline); interpreter code
+that posts to the console (a text match was priced and dropped: 3 hits, all scripts written to test the rule); the
+`papyrus` tool and console `bat` files; the `/mcp` HTTP endpoint. Not safe by default (R4): an unparsable or opaque
+command that names `/api/tool/console` and `smp reset` denies.
+
+**Task 11 fix round 1.** (1) A console body with no definite command denies when the whole command text names a bare `smp reset`
+(same as the opaque-program branch). (2) The save check falls back from the declared config dirs to
+`<Documents>/My Games/<game>/Saves` (first existing Saves folder wins); a known folder without the name is allow. The ask text is
+now `Overwrites save X.` (existing) / `Cannot tell if save X exists.` / `Cannot tell which save this overwrites.`, all with the
+second line `Yes goes ahead; an overwritten save is not kept.` (one rule id; the first line is the `{op}` field). After the Plan 4
+merge (agent/skills/devbench/SKILL.md ships on master) the S-DEVBENCH-CRASH message can cite that skill instead of "run it
+yourself"; not edited here. Known limit kept: DevBench's batch / multi-command body shapes are not documented in this repo, so
+`command` as a list, a `commands` key or a batch tool are not judged recursively (a list command in a body that names a bare
+`smp reset` does deny through (1)); Documents redirected only through the Windows known-folder registry is not seen.
 
 ### Task 12: Analysis failures auto-deny; opaque-command advisory (priced, may be dropped)
 

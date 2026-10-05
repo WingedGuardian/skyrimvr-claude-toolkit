@@ -49,7 +49,8 @@ STATES = ("HEALTHY", "STALE", "DEGRADED", "NOT EXERCISED", "UNMEASURABLE", "NEVE
 COVERAGE_STATES = ("HEALTHY", "DEGRADED", "NOT EXERCISED", "UNMEASURABLE")
 STAGES = ("invoked", "received", "evaluated", "emitted", "failed")
 STATUS_VALUES = ("evaluated", "partial", "failed")
-CLAUDE_HOOKS = ("protect-files", "protect-bash", "backup-before-edit", "snapshot-before-tool", "session-kb-guard")
+CLAUDE_HOOKS = ("protect-files", "protect-bash", "protect-mcp", "backup-before-edit", "snapshot-before-tool",
+                "session-kb-guard")
 CODEX_HOOKS = ("pre-tool", "session-start")
 SKEW_S = 300           # a stamp further ahead of "now" than this is a clock fault, not a record
 LATENCY_MAX_BYTES = 256 * 1024
@@ -60,9 +61,15 @@ SESSIONS_KEEP = 20
 _SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 # The hook whose record counts as "this call was guarded", per agent. Claude runs several hooks per call
 # (protect-*, backup, snapshot), so only the two guards are counted -- once each per matched tool.
-COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files"), "codex": ("pre-tool",)}
-# Tools the INSTALLED Claude matchers cover (.claude/settings.json: Bash, Edit|Write). Plan 5 adds PowerShell.
-CLAUDE_COVERED_TOOLS = ("Bash", "Edit", "Write")
+COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files", "protect-mcp"), "codex": ("pre-tool",)}
+# Tools the INSTALLED Claude matchers cover (.claude/settings.json: Bash|PowerShell|Monitor -> protect-bash,
+# Edit|Write|NotebookEdit -> protect-files, and every mcp__devbench* tool -> protect-mcp; Plan 5).
+CLAUDE_COVERED_TOOLS = ("Bash", "PowerShell", "Monitor", "Edit", "Write", "NotebookEdit")
+CLAUDE_COVERED_PREFIX = "mcp__devbench"
+
+
+def _claude_covered(tool):
+    return tool in CLAUDE_COVERED_TOOLS or (isinstance(tool, str) and tool.startswith(CLAUDE_COVERED_PREFIX))
 # Codex: every tool call is matched (matcher ".*"). Known gaps, listed rather than counted:
 CODEX_KNOWN_GAPS = ("write_stdin (input to a running program; not measured on 0.160.0, never counted)",
                     "commands typed with ! in the TUI (measured: they fire no PreToolUse)")
@@ -338,7 +345,7 @@ def _coverage_rows(project, agent, last=5):
             for tool, n in per_hook.get(h, {}).items():
                 hooked_by[tool] = hooked_by.get(tool, 0) + n
         if agent == "claude":
-            tools = [t for t in CLAUDE_COVERED_TOOLS]
+            tools = [t for t in counts if _claude_covered(t)]
             called = sum(counts.get(t, 0) for t in tools)
             # per tool: a guard line for one tool cannot make up for an unseen call of another
             hooked = sum(min(hooked_by.get(t, 0), counts.get(t, 0)) for t in tools)

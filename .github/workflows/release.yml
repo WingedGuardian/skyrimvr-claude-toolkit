@@ -82,7 +82,7 @@ jobs:
           # works. Same for the heartbeat, which a mere `grep -q` satisfied from a
           # COMMENT mentioning it.
           nhooks=$(find "/tmp/$NAME/.claude/hooks" -name '*.sh' | wc -l)
-          test "$nhooks" -ge 5 || { echo "::error::only $nhooks hook(s) in the payload; this check would be vacuous"; exit 1; }
+          test "$nhooks" -ge 6 || { echo "::error::only $nhooks hook(s) in the payload; this check would be vacuous"; exit 1; }
           # find, not a glob: `for h in dir/*.sh` is non-recursive and would skip a
           # hook in a subdirectory that `nhooks` had already counted.
           while IFS= read -r h; do

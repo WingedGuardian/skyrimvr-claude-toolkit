@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from . import backup, codes, paths as _paths, shell_rules, snapshot, write_rules
+from . import backup, codes, mcp_rules, paths as _paths, shell_rules, snapshot, write_rules
 from .verdict import Advice, Verdict
 
 _RANK = {"evaluated": 0, "partial": 1, "failed": 2}
@@ -18,11 +18,20 @@ NO_VERDICTS = "GUARD INERT: the engine combined zero verdicts, so nothing was ch
 
 
 def evaluate_shell(req, roots, audit) -> Verdict:
-    return codes.classify(shell_rules.decide(req.command, roots, audit))
+    """Plan 5: the rules read the payload cwd (RAW) and the dialect; a request that names none ("" / None) is
+    parsed as bash AND PowerShell (spec R5)."""
+    return codes.classify(shell_rules.decide(req.command, roots, audit, cwd=req.cwd or "", shell=req.shell or ""))
 
 
-def evaluate_write(path: str, audit) -> Verdict:
-    return codes.classify(write_rules.decide(path, audit))
+def evaluate_write(path: str, audit, roots=None, cwd: str = "") -> Verdict:
+    """Plan 5 Task 9: W-PAPYRUS / W-INSTALL decide on where the file RESOLVES (roots + cwd). roots=None keeps the
+    legacy text tests (more notes, never fewer denies)."""
+    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd))
+
+
+def evaluate_mcp(tool_name: str, args, audit, roots=None) -> Verdict:
+    """Plan 5 Task 11: the DevBench MCP tools (mcp__devbench*); any other MCP server is allowed by mcp_rules."""
+    return codes.classify(mcp_rules.decide(tool_name, args, audit, roots=roots))
 
 
 def combine(verdicts: Iterable[Verdict]) -> Verdict:
@@ -44,11 +53,11 @@ def combine(verdicts: Iterable[Verdict]) -> Verdict:
     return Verdict("allow", "", advice.joined(), worst, codes_seen[0] if codes_seen else "allow")
 
 
-def evaluate_writes(req, audit) -> Verdict:
+def evaluate_writes(req, audit, roots=None) -> Verdict:
     if not req.paths:
         audit.log("protect-files", "REFUSE", "write request without paths")
         return Verdict("deny", NO_PATHS, status="failed", code="engine.NO_PATHS")
-    return combine(evaluate_write(p, audit) for p in req.paths)
+    return combine(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "") for p in req.paths)
 
 
 INERT_TRANSLATE = ("GUARD INERT: the Codex hook could not read this call ({}), so it checked NOTHING. "
@@ -65,9 +74,19 @@ def _failed(reason: str, code: str) -> Verdict:
     return Verdict("deny", reason, status="failed", code=code)
 
 
+def _soft_roots(roots_fn):
+    """The roots for rules that only ADVISE on location (writes) or read one optional fact (the DevBench save
+    check): an unreadable paths file costs those answers, never a refusal (as on Claude, Plan 5 Task 9).
+    None = the legacy text tests."""
+    try:
+        return roots_fn()
+    except RootsUnavailable:
+        return None
+
+
 def _rules(req, roots_fn, audit) -> Verdict:
     if req.kind == "write":
-        return evaluate_writes(req, audit)
+        return evaluate_writes(req, audit, roots=_soft_roots(roots_fn))
     if req.kind == "shell":
         if not req.command:
             v = evaluate_shell(req, _paths.Roots("", ""), audit)
@@ -78,8 +97,10 @@ def _rules(req, roots_fn, audit) -> Verdict:
                 return _failed(str(e), "run.ENV_UNREADABLE")
             v = evaluate_shell(req, roots, audit)
         if req.paths:
-            v = combine([v, evaluate_writes(req, audit)])
+            v = combine([v, evaluate_writes(req, audit, roots=_soft_roots(roots_fn))])
         return v
+    # kind "mcp": the DevBench judge (evaluate_mcp) is wired for Claude only; on Codex an MCP call is logged as
+    # unhooked and allowed (docs/guard-coverage.md X4). Wiring it is a behaviour change, left to its own task.
     return Verdict()
 
 

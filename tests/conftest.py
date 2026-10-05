@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from harness_isolation import active as _harness_active
+
 REPO = Path(__file__).resolve().parent.parent
 BIN = Path(__file__).resolve().parent / "bin"
 BS = chr(92)  # backslash, spelled this way to keep escapes out of this file
@@ -64,9 +66,25 @@ def _resolve_bash() -> str:
 
 BASH = _resolve_bash()
 
-# setup.sh may shell out to `winget install` (Node.js), which would be
-# a slow, network-dependent step that can hang a CI run. Every invocation is
-# capped so a stuck install fails the test instead of the job.
+
+def harness_active() -> bool:
+    """True when the contained launcher (tests/run_harness_tests.py) installed the barriers."""
+    return _harness_active()
+
+
+def pytest_configure(config):
+    """TOOLKIT_REQUIRE_HARNESS=1 turns "the barriers are not installed" into an error.
+
+    CI sets it. Without it a plain pytest would skip the barrier-dependent modules and
+    still go green, which is a gate that cannot fail.
+    """
+    if os.environ.get("TOOLKIT_REQUIRE_HARNESS") == "1" and not harness_active():
+        raise pytest.UsageError(
+            "TOOLKIT_REQUIRE_HARNESS=1 but the package-manager barriers are not active; "
+            "run through: python -B tests/run_harness_tests.py tests/")
+
+# setup.sh no longer installs anything, but it still shells out to which/python/powershell
+# probes. Every invocation is capped so a stuck probe fails the test instead of hanging the job.
 SETUP_TIMEOUT = 240
 
 IGNORE = shutil.ignore_patterns(

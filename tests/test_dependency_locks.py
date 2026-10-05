@@ -63,7 +63,7 @@ def test_no_mountpoint_nested_in_readonly_workspace():
 # pytest, so this check of the skip itself never ran in the ordinary CI suite.
 def test_bare_pytest_skips_unsafe_controls(tmp_path):
     env = dict(os.environ)
-    for key in ("PYTHONPATH", "PYTEST_PLUGINS", "HARNESS_FIXTURE_ROOT"):
+    for key in ("PYTHONPATH", "PYTEST_PLUGINS", "HARNESS_FIXTURE_ROOT", "TOOLKIT_REQUIRE_HARNESS"):
         env.pop(key, None)
     result = subprocess.run([sys.executable, "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider",
                              "tests/test_harness_controls.py", "tests/test_harness_integrations.py"],
@@ -84,5 +84,13 @@ def test_ci_workflow_parses_and_runs_harness_modules_on_both_legs():
                if "tests/run_harness_tests.py" in str(step.get("run", "")) and "if" not in step]
     assert harness, "no unconditional harness-contained step in the behavior job"
     command = harness[0]["run"]
-    for module in ("tests/test_harness_controls.py", "tests/test_harness_integrations.py"):
-        assert module in command
+    # The WHOLE suite goes through the launcher (which includes both barrier-dependent modules), on
+    # both matrix legs (no `if`), and a run without the barriers is an error, not a quiet green.
+    assert "python -B tests/run_harness_tests.py tests/ " in command + " ", command
+    assert "-rfEs" in command, "failures, errors and skips must all be named: " + command
+    assert str(harness[0].get("env", {}).get("TOOLKIT_REQUIRE_HARNESS")) == "1", harness[0]
+    # ...and nothing else runs plain pytest over tests/, which would skip those modules unseen.
+    plain = [step for step in behavior["steps"] if "-m pytest" in str(step.get("run", ""))
+             and "run_harness_tests" not in str(step.get("run", ""))
+             and "pip install" not in str(step.get("run", ""))]
+    assert not plain, plain

@@ -19,6 +19,9 @@ class _Audit:
     def raw(self, line):
         self.lines.append(line)
 
+    def rule(self, hook, rule_id, decision, msg, level=None):     # Plan 5: rules record their id (Audit.rule)
+        self.log(hook, level or decision.upper(), msg)
+
     @staticmethod
     def stamp():
         return "20261002_000000"

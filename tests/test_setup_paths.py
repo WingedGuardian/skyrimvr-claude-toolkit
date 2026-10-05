@@ -265,9 +265,64 @@ def test_hooks_prefer_a_regular_python_over_the_store_alias(game_dir, py, python
         "FAKE_PYTHON_EXE_py": py, "FAKE_PYTHON_EXE_python": python, "FAKE_PYTHON_EXE_python3": python3})
     assert r.returncode == 0, r.stdout + r.stderr
     lines = hook_python_lines(game_dir)
-    assert len(lines) == 5, sorted(lines)
+    assert len(lines) == 6, sorted(lines)
     for hook, line in lines.items():
         assert line == f"PY='{_fwd(expected)}'", f"{why}: {hook}: {line}"
+
+
+# ---------------------------------------------------------------- MO2 roots for the guard (Plan 5 Task 6)
+
+def _read_paths_config(game):
+    import sys
+    from conftest import REPO
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import paths
+    return paths, paths.read_config(game / ".claude" / "skyrim-paths.env", {})
+
+
+def test_setup_writes_the_mo2_roots_the_guard_reads(portable_mo2):
+    """MO2 keeps every mod's real files in mods/ and overwrite/, OUTSIDE the install, so the delete guard can
+    protect them only if setup records them. Read back the way the guard reads it (as data), not by grepping."""
+    game, inst, mods = portable_mo2
+    r = run_setup(game)
+    assert r.returncode == 0, r.stdout + r.stderr
+    paths, cfg = _read_paths_config(game)
+    assert cfg.malformed == ()
+    got_mods = [v.replace("\\", "/") for v in cfg.values("SKYRIM_MO2_MODS")]
+    got_ow = [v.replace("\\", "/") for v in cfg.values("SKYRIM_MO2_OVERWRITE")]
+    assert len(got_mods) == 1 and got_mods[0].endswith("MODS/mods"), got_mods
+    assert len(got_ow) == 1 and got_ow[0].endswith("MODS/overwrite"), got_ow
+    roots = paths.roots("", "", cfg)
+    assert len(roots.mo2_dirs) == 2
+
+
+def test_setup_writes_empty_mo2_roots_on_a_stock_install(game_dir):
+    r = run_setup(game_dir)
+    assert r.returncode == 0, r.stdout + r.stderr
+    body = (game_dir / ".claude" / "skyrim-paths.env").read_text(encoding="utf-8")
+    assert "SKYRIM_MO2_MODS=''" in body and "SKYRIM_MO2_OVERWRITE=''" in body
+    _, cfg = _read_paths_config(game_dir)
+    assert cfg.malformed == () and cfg.values("SKYRIM_MO2_MODS") == []
+
+
+def test_setup_without_node_prints_instructions_and_never_runs_a_package_manager(game_dir, tmp_path):
+    """setup.sh used to `winget install` Node when it was missing: a package install nobody asked
+    for, from a script whose job is to write config. A tripwire `winget` on PATH logs any call."""
+    import os
+    from conftest import BIN
+    trip = tmp_path / "tripbin"
+    trip.mkdir()
+    log = tmp_path / "winget.log"
+    stub = trip / "winget"
+    stub.write_text('#!/bin/bash\necho "winget $*" >> "' + log.as_posix() + '"\nexit 97\n',
+                    newline="\n")
+    stub.chmod(0o755)
+    path = os.pathsep.join([str(trip), str(BIN), os.environ["PATH"]])
+    r = run_setup(game_dir, env_overrides={"PATH": path, "FAKE_WHICH_MISSING": "node"})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Node.js not found" in r.stdout, r.stdout
+    assert "winget install OpenJS.NodeJS.LTS" in r.stdout   # printed as instructions
+    assert not log.exists() or log.read_text() == "", "setup.sh ran a package manager: " + log.read_text()
 
 
 # ---------------------------------------------------------------- Codex (Plan 4 Task 11)

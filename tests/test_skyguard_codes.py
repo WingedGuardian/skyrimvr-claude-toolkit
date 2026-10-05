@@ -7,10 +7,13 @@ import pytest
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import codes, shell_rules, write_rules  # noqa: E402
+from skyguard import codes, rules, shell_rules, write_rules  # noqa: E402
 from skyguard.verdict import STATUSES, Verdict  # noqa: E402
 
-CORPUS = REPO / "tests" / "guard_corpus" / "expected.jsonl"
+# Merge of Plans 4+5: expected.jsonl is the FROZEN record of the old bash hooks; Plan 5 rewrote every message, so
+# its texts are no longer anything the engine emits (legacy_rules.json maps them to rule ids). The texts the engine
+# emits today are intended.jsonl's -- the hand-authored spec, checked byte for byte through the real wrapper.
+CORPUS = REPO / "tests" / "guard_corpus" / "intended.jsonl"
 
 
 def test_positional_construction_is_unchanged():
@@ -28,7 +31,8 @@ def _constants():
 
 @pytest.mark.parametrize("code,template", list(_constants()), ids=[c for c, _ in _constants()])
 def test_every_rule_constant_codes_to_itself(code, template):
-    text = template.replace("{c}", "rm -rf X").replace("{p}", "C:/X/Data/a.ini")
+    text = (template.replace("{c}", "rm -rf X").replace("{p}", "C:/X/Data/a.ini").replace("{file}", "a.ini")
+            .replace("{op}", "op").replace("{save}", "s.ess").replace("{n}", "1"))
     whole = code.split(".", 1)[1].startswith(("DENY_", "ASK_", "NO_"))
     assert codes.matches(text, whole) == [code]
 
@@ -49,6 +53,29 @@ def test_every_corpus_row_maps_to_exactly_one_code():
     assert seen >= 50, "corpus suspiciously small: {} coded rows".format(seen)
 
 
+@pytest.mark.parametrize("rid", sorted(r for r, v in rules.RULES.items() if not v["legacy"]))
+def test_every_registry_rule_codes_to_exactly_one_code(rid):
+    """Plan 5 renders most verdicts straight from the rule registry (rules.message), not from a module constant.
+    Each must still get its own code -- else the telemetry reads every Plan 5 deny as "unknown"."""
+    rule = rules.RULES[rid]
+    text = rules.message(rid, **{k: "x.esp" if k == "file" else "1" for k in rules.FIELDS
+                                if "{" + k + "}" in rule["template"]})
+    found = codes.matches(text, rule["decision"] in ("deny", "ask"))
+    assert len(found) == 1, (rid, found)
+    v = codes.classify(Verdict("allow" if rule["decision"] == "advise" else rule["decision"],
+                               "" if rule["decision"] == "advise" else text,
+                               text if rule["decision"] == "advise" else ""))
+    assert v.code != "unknown"
+    assert (v.status == "failed") == ("INERT" in rid), (rid, v)
+
+
+def test_a_later_advice_item_cannot_code_the_first():
+    """Advice is coded by its FIRST item: a field must not stretch across ' | ' into a later item's template."""
+    first = rules.message("S-WRITE-LOADORDER", file="plugins.txt")
+    later = rules.message("S-WRITE-INSTALL", file="x.ini")
+    assert codes.matches(first + " | " + later, whole=False) == ["shell.S-WRITE-LOADORDER"]
+
+
 def test_inert_refusals_are_failed_not_evaluated():
     v = codes.classify(Verdict("deny", shell_rules.NO_COMMAND_DENY))
     assert (v.decision, v.status, v.code) == ("deny", "failed", "shell.NO_COMMAND_DENY")
@@ -60,7 +87,7 @@ def test_a_rule_deny_is_evaluated():
 
 
 def test_advice_is_coded_by_its_first_item():
-    ctx = write_rules.ADV_PAPYRUS.format(p="a.psc") + " | " + write_rules.ADV_INSTALL.format(p="x")
+    ctx = write_rules.ADV_PAPYRUS.format(file="a.psc") + " | " + write_rules.ADV_INSTALL.format(file="x")
     assert codes.classify(Verdict("allow", "", ctx)).code == "write.ADV_PAPYRUS"
 
 
@@ -112,7 +139,8 @@ def test_no_deny_or_ask_is_built_outside_the_rule_modules_uncoded():
     pat = re.compile(r"Verdict\(\s*[\"'](deny|ask)[\"']([^\n]*)")
     bad = []
     for f in (REPO / "tools" / "skyguard").rglob("*.py"):
-        if f.name in ("shell_rules.py", "write_rules.py", "codes.py", "verdict.py"):
+        # mcp_rules.py is Plan 5's third rule module: its texts come from the registry, which codes.py reads.
+        if f.name in ("shell_rules.py", "write_rules.py", "mcp_rules.py", "codes.py", "verdict.py"):
             continue
         for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             m = pat.search(line)

@@ -1,0 +1,442 @@
+r"""Delete rules on the parser (Plan 5 Task 7): what a command DELETES, and where that resolves.
+
+    check(command, parsed, roots, cwd, env, has) -> Hit | None      (the first deny, by clause priority)
+    relative_unknown(...)                                            (the S-RELATIVE-UNKNOWN advice)
+
+The legacy rule asked "does the TEXT contain a delete word and a protected path" (E16): `grep -rn "rm -rf"
+<install>` was denied, and `rm -rf Data` run IN the install was not. Here a delete is a PROGRAM that runs
+(shellparse) and its target is an OPERAND resolved against the payload cwd (targets, R9 branch 1: M5a measured
+that cwd tracks the shell's real working directory).
+
+DELETE PRIMITIVES. rm, rmdir, unlink, del/erase/rd (cmd; PowerShell maps them to remove-item), remove-item,
+find -delete (find.delete), [IO.File]::Delete / [IO.Directory]::Delete, `git clean` (its target is the cwd, -C /
+--work-tree, or its pathspecs; `-n`/`--dry-run` deletes nothing), `git rm` (not --cached: it deletes the working
+files), rimraf (also via npx/pnpx/bunx/pnpm dlx), robocopy
+/MIR or /PURGE (deletes in the DESTINATION) and /MOV or /MOVE (deletes the SOURCE), and interpreter code
+(`python -c`, `node -e`, `perl -e`, a heredoc or pipe fed to an interpreter; R7(b)) checked with the legacy text
+regex plus a short list of interpreter delete APIs.
+
+CLAUSES, in priority order (a deny from an earlier clause wins):
+  (a) an operand resolves into the install / config / MO2 (zone, or covers_protected for an ancestor or glob that
+      reaches one), and is not scratch (R8) -> S-DEL-INSTALL / S-DEL-CONFIG / S-DEL-MO2. Interpreter code that
+      matches the delete regex AND names a protected root counts here too.
+  (b) an operand is UNRESOLVED (a variable, a glob in a directory component, an 8.3 name, pipeline input to xargs
+      rm / Remove-Item, a relative word with no usable cwd) AND either the command's text names a protected root
+      or the raw word itself glob/short-name-matches one -> S-DEL-UNRESOLVED. The text is the whole command, not
+      the simple command: `G=<install>; rm -rf "$G/Data"` names the root in a different statement.
+  (c) the parser could not be sure what runs -> S-DEL-FALLBACK:
+      (c1) ok=False (R4) and the legacy DESTROYER + root test over the whole command;
+      (c2) an opaque program ("?", `git -c alias.x=!...`) is present and ONE exec's own words (argv + stdin body)
+           hold both a delete word (a looser regex: after a quote or `$` too) and a protected root --
+           `printf 'rm -rf "<install>"' | sh`, `$SUDO rm -rf <install>`. Per exec, not the whole command: priced,
+           a whole-command test on opaque commands only re-denied `"$SPRIGGIT" serialize ...; rm -rf /tmp/x` with
+           the install named elsewhere (13 of 13 hand-read: false positives).
+
+SAME-COMMAND ASSIGNMENTS (Task 7b). Before any clause, each operand written with a variable that the parser proved
+holds a literal (Exec.subst: `D=/tmp/x; rm -rf "$D"`, `$p = 'C:\x'; Remove-Item $p`) is replaced by that literal and
+then judged exactly like a written-out path: into a protected root -> S-DEL-*; outside or scratch -> nothing. Anything
+less than certain (assign.py and shellparse list the cases) stays UNRESOLVED and reaches clause (b) as before. Priced
+(dc8c59b, N = 64,742, after fix round 1's broad poisoning): of 190 S-DEL-UNRESOLVED denies, 68 no longer deny --
+all hand-read, every operand a scratch or temp path -- and 22 now name the protected file they delete (21 S-DEL-INSTALL, 1 S-WRITE-PLUGIN); 0 true positives
+lost.
+
+ADVICE (no deny): S-RELATIVE-UNKNOWN -- a relative `Data` operand with no cwd (R9).
+
+KNOWN LIMITS (fix round 1, recorded, not handled):
+  - interpreter code with RELATIVE paths (`python -c "shutil.rmtree('Data')"`, node/perl equivalents) is invisible
+    unless the code also names a protected root -- the code is matched as text, not resolved;
+  - `mv` OUT of the install with a relative source path gets no advice (moves are Task 9's rules);
+  - shred, `rsync --delete`, `git checkout -- .`, `git reset --hard`, `git stash -u` are not delete primitives;
+  - a per-install user folder such as `_CLAUDE_OUTPUT` is protected like the rest of the install; a configurable
+    allowlist (beside SCRATCH_GLOBS) is a follow-up idea, not built;
+  - an unresolved delete operand run from inside a protected folder is not flagged (ruling, fix round 1:
+    measured 75 occurrences, 0 real, in 61,935 items);
+  - `CMD="rm -rf <install>"; $CMD`: an assignment value is not an exec; PS5 Remove-Item -Recurse follows junctions;
+  - (Task 7b) a variable built from another variable (`SP=...; Y="$SP/x"; rm -rf "$Y"`) stays unresolved -- only
+    a plain literal counts; so does any name the text writes twice, even harmlessly (`echo "D=$D"`). ~80 such
+    S-DEL-UNRESOLVED denies remain in the history.
+
+NOT A DELETE: a command that only MENTIONS one (grep, rg, Select-String, echo, git log --grep, a data heredoc).
+"""
+from __future__ import annotations
+
+import os
+import posixpath
+import re
+from typing import List, Mapping, NamedTuple, Optional, Tuple
+
+from . import paths, targets
+from .grep import _compile, grep
+
+# ------------------------------------------------------------------------------------------- legacy text tests
+DESTROYER = (
+    r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)\s|Remove-Item|shutil\.rmtree|rmtree\s*\(|\s-delete(\s|$)"
+    r"|Remove-ItemProperty"
+)
+# For an OPAQUE program (`printf 'rm -rf X' | sh`, `$RM -rf X`): the delete word may follow a quote or `$`.
+DESTROYER_LOOSE = (
+    r"(^|[^A-Za-z0-9_.-])(rm|rmdir|del|erase|rd|unlink|ri|rimraf)\s|Remove-Item|rmtree|\s-delete(\s|$)"
+)
+# Interpreter code (R7(b)): the legacy regex plus the delete APIs that code actually calls.
+INTERP_DELETE = (
+    r"\bos\.(remove|unlink|rmdir|removedirs)\s*\(|\.(rm|rmdir|unlink)(Sync)?\s*\(|\bremove_tree\s*\("
+    r"|\bunlink\s*[('\"$]"
+)
+
+DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "rimraf"))
+CMD_SWITCH_PROGRAMS = frozenset(("del", "erase", "rd", "rmdir"))
+_CMD_SWITCH = re.compile(r"/[A-Za-z?](:\S*)?")
+NPX = frozenset(("npx", "pnpx", "bunx"))
+PKG_RUNNERS = frozenset(("pnpm", "yarn", "bun", "npm"))
+_PYTHON = re.compile(r"(?:python|pypy|py)[0-9.]{0,8}w?")
+CODE_INTERPRETERS = frozenset(("node", "nodejs", "deno", "bun", "perl", "ruby", "php"))
+CODE_FLAGS = frozenset(("-c", "-e", "-E", "--eval", "-p", "--print", "-r"))
+
+# Remove-Item parameters that take a value which is NOT a path (prefix-abbreviated); everything else that is not
+# -Path/-LiteralPath is treated as a switch, so the next word stays an operand (stricter).
+_PS_PATH = ("path", "literalpath", "pspath", "lp")
+_PS_VALUED = ("filter", "include", "exclude", "credential", "stream", "erroraction", "warningaction",
+              "informationaction", "errorvariable", "warningvariable", "informationvariable", "outvariable",
+              "outbuffer", "pipelinevariable", "ea", "wa", "ev", "wv", "ov", "ob", "pv", "iv", "infa")
+
+UNRESOLVED = None           # an operand the guard cannot place (pipeline input, a variable, ...)
+_NOCWD = "c:/__skyguard_no_cwd__"
+
+
+class Hit(NamedTuple):
+    rule: str               # S-DEL-INSTALL | S-DEL-CONFIG | S-DEL-MO2 | S-DEL-UNRESOLVED | S-DEL-FALLBACK
+    file: str               # the basename to name in the message ("" for the unresolved/fallback rules)
+
+
+# ------------------------------------------------------------------------------------------- operands
+def _plain_operands(argv) -> List[str]:
+    """Words after the options: `-x` words are options until `--` (rm -rf -- -x)."""
+    out, opts = [], True
+    for w in argv:
+        if opts and w == "--":
+            opts = False
+            continue
+        if opts and w.startswith("-") and len(w) > 1:
+            continue
+        out.append(w)
+    return out
+
+
+def _ps_operands(argv, quoted) -> List[str]:
+    out, k = [], 0
+    while k < len(argv):
+        w, q = argv[k], quoted[k]
+        if w.startswith("-") and len(w) > 1 and not q:
+            key, _, attached = w[1:].partition(":")
+            key = key.lower()
+            if key and any(p.startswith(key) for p in _PS_PATH):
+                if attached:
+                    out.append(attached)
+                elif k + 1 < len(argv):
+                    out.append(argv[k + 1])
+                    k += 1
+            elif key and not attached and any(p.startswith(key) for p in _PS_VALUED) and k + 1 < len(argv):
+                k += 1                                    # its value is a pattern / option, not a path
+            k += 1
+            continue
+        out.append(w)
+        k += 1
+    return out
+
+
+def _is_abs(w: str) -> bool:
+    return bool(paths.norm_abs(w.replace(chr(92), "/"))) or w.startswith(("/", chr(92)))
+
+
+def _git_targets(argv) -> Optional[List[str]]:
+    """None when this git command deletes nothing; else the target words. `git clean`: the base dir (cwd, -C,
+    --work-tree) or base/pathspec. `git rm` without --cached: its pathspecs (it deletes the working files)."""
+    k, base = 0, []
+    while k < len(argv):
+        w = argv[k]
+        if w in ("-C", "--work-tree") and k + 1 < len(argv):
+            base.append(argv[k + 1])
+            k += 2
+            continue
+        if w.startswith("--work-tree="):
+            base.append(w.split("=", 1)[1])
+        elif w in ("-c", "--git-dir", "--namespace", "--exec-path", "--config-env") and k + 1 < len(argv):
+            k += 1
+        elif not w.startswith("-"):
+            break
+        k += 1
+    if k >= len(argv) or argv[k] not in ("clean", "rm"):
+        return None
+    sub = argv[k]
+    specs, k, opts = [], k + 1, True
+    while k < len(argv):
+        w = argv[k]
+        if opts and w == "--":
+            opts = False
+        elif opts and w in ("--dry-run", "--cached"):
+            return None                                   # a dry run; `git rm --cached` touches only the index
+        elif opts and sub == "clean" and (w == "--exclude" or w == "-e"):
+            k += 1
+        elif opts and w.startswith("--pathspec-from-file"):
+            specs.append(UNRESOLVED)                      # the paths are in a file the guard cannot read
+        elif opts and w.startswith("--"):
+            pass
+        elif opts and w.startswith("-") and len(w) > 1:
+            cluster = w[1:]
+            e = cluster.find("e") if sub == "clean" else -1
+            if "n" in (cluster if e < 0 else cluster[:e]):
+                return None
+            if e >= 0 and e == len(cluster) - 1:
+                k += 1                                    # -fe PATTERN
+        else:
+            specs.append(w)
+        k += 1
+    if sub == "rm" and not specs:
+        return None
+    root = "."
+    for b in base:
+        root = b if _is_abs(b) else root + "/" + b
+    return [s if s is UNRESOLVED or _is_abs(s) else root + "/" + s for s in specs] if specs else [root]
+
+
+def _robocopy_targets(argv) -> List[str]:
+    pos = [w for w in argv if not (w.startswith("/") and re.fullmatch(r"/{1,2}[A-Za-z]+(:\S*)?", w))]
+    flags = {w.lstrip("/").split(":")[0].upper() for w in argv if w not in pos}
+    out = []
+    if flags & {"MIR", "PURGE"} and len(pos) > 1:
+        out.append(pos[1])
+    if flags & {"MOV", "MOVE"} and pos:
+        out.append(pos[0])
+    return out
+
+
+def _rimraf_after_runner(e) -> Optional[List[str]]:
+    words = [w for w in e.argv if not w.startswith("-")]
+    if e.program in PKG_RUNNERS:
+        if not words or words[0] not in ("dlx", "exec", "x"):
+            return None
+        words = words[1:]
+    if words and re.fullmatch(r"rimraf(@\S*)?", words[0].lower()):
+        return _plain_operands(e.argv[e.argv.index(words[0]) + 1:])
+    return None
+
+
+def operands(e) -> Optional[List[Optional[str]]]:
+    """None: e deletes nothing. Otherwise its target words; UNRESOLVED stands for input it reads from a pipe."""
+    p = e.program
+    if p == "find.delete":
+        return list(e.argv)
+    if p in ("io.file.delete", "io.directory.delete"):
+        return list(e.argv[:1]) or [UNRESOLVED]
+    if p == "git":
+        return _git_targets(e.argv)
+    if p == "robocopy":
+        return _robocopy_targets(e.argv) or None
+    if p in NPX or p in PKG_RUNNERS:
+        return _rimraf_after_runner(e)
+    if p not in DELETE_PROGRAMS:
+        return None
+    if p == "remove-item":
+        words = _ps_operands(e.argv, e.quoted)
+    else:
+        words = _plain_operands(e.argv)
+        if p in CMD_SWITCH_PROGRAMS:
+            words = [w for w in words if not _CMD_SWITCH.fullmatch(w)]
+    if not words and e.stdin_from == "pipe":
+        return [UNRESOLVED]                              # xargs rm, ... | Remove-Item: the targets arrive on stdin
+    return words
+
+
+def interpreter_code(e) -> str:
+    """The code an interpreter exec runs from its arguments or stdin (R7(b)); "" for a script file."""
+    p = e.program
+    if not (_PYTHON.fullmatch(p) or p in CODE_INTERPRETERS):
+        return ""
+    code = []
+    for i, w in enumerate(e.argv):
+        nxt = e.argv[i + 1] if i + 1 < len(e.argv) else ""
+        if w in CODE_FLAGS or (re.fullmatch(r"-[A-Za-z]{1,4}[eE]", w) and p not in CODE_INTERPRETERS - {"perl",
+                                                                                                         "ruby"}):
+            code.append(nxt)                              # -c CODE, -e CODE, perl/ruby clusters: -pe / -ne CODE
+        elif w.startswith("-c") and len(w) > 2 and _PYTHON.fullmatch(p):
+            code.append(w[2:])                            # python -cCODE
+    if e.stdin_body and (e.stdin_from.startswith("heredoc:interpreter") or e.stdin_from == "pipe"):
+        code.append(e.stdin_body)
+    return "\n".join(code)
+
+
+def substituted(e):
+    """e with each argv word that uses a same-command LITERAL assignment replaced by its value (Task 7b; the parser
+    decides which assignment certainly reaches the word, see assign.py). Other words are unchanged."""
+    if not e.subst:
+        return e
+    sub = dict(e.subst)
+    return e._replace(argv=tuple(sub.get(w, w) for w in e.argv))
+
+
+def is_opaque(e) -> bool:
+    """The parser cannot know what this runs: a dynamic program, or a git alias that runs a shell (`!...`)."""
+    if e.program == "?":
+        return True
+    return e.program == "git" and any(re.match(r"alias\.[^=]*=\s*!", w) for w in e.argv)
+
+
+# ------------------------------------------------------------------------------------------- classification
+def _root_regexes(roots) -> List[Tuple[str, str]]:
+    """(kind, regex) in the legacy priority order: config first, then MO2, then the install."""
+    out = [("config", roots.config)] if roots.config else []
+    mo2 = [r for r in (paths.path_to_regex(d) for d in roots.mo2_dirs) if r]
+    if mo2:
+        out.append(("mo2", "|".join(mo2)))
+    if roots.game:
+        out.append(("install", roots.game))
+    return out
+
+
+def names_root(text: str, roots, has=grep) -> bool:
+    return any(has(rx, text) for _, rx in _root_regexes(roots))
+
+
+def _match_basename(rx: str, text: str) -> str:
+    c = _compile(rx, True)
+    for line in text.split("\n"):
+        m = c.search(line.rstrip("\r"))
+        if m:
+            return re.split(r"[/\\]+", m.group(0).rstrip("/\\"))[-1]
+    return ""
+
+
+RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG", "mo2": "S-DEL-MO2"}
+
+
+def _covers_kind(abs_path: str, roots) -> str:
+    empty = roots._replace(install_dirs=(), config_dirs=(), mo2_dirs=())
+    if targets.covers_protected(abs_path, empty):
+        return "config"                                   # a Documents / My Games folder (the legacy literal)
+    for kind, field in (("mo2", "mo2_dirs"), ("config", "config_dirs"), ("install", "install_dirs")):
+        if targets.covers_protected(abs_path, empty._replace(**{field: getattr(roots, field)})):
+            return kind
+    return ""
+
+
+def protected_kind(abs_path: str, roots) -> str:
+    """install | config | mo2 when deleting abs_path destroys protected files; "" otherwise (scratch: R8)."""
+    z = targets.zone(abs_path, roots)
+    if z in RULE_OF:
+        return z
+    if z == "scratch":
+        return ""
+    return _covers_kind(abs_path, roots)
+
+
+_SHORT = re.compile(r"([^~/]{1,6})~[0-9]+(\.[^/]*)?")
+
+
+def _comp_reaches(pat: str, comp: str) -> bool:
+    if targets._comp_matches(pat, comp):
+        return True
+    m = _SHORT.fullmatch(pat)                             # an 8.3 short name: GOGGAM~1 for "GOG Games"
+    return bool(m) and re.sub(r"[\s.]", "", comp).startswith(m.group(1))
+
+
+def literal_abs(word: str, base: Optional[str], dialect: str) -> Optional[str]:
+    """The word as a LITERAL absolute path: no variable expansion, glob characters kept as characters. None for a
+    word with an expansion (`$`, `%`, backtick, a leading `~`) or a relative word with no base."""
+    if targets._LIVE_DOLLAR.search(word) or "`" in word or word.startswith("~") or (dialect == "cmd" and "%" in word):
+        return None
+    s = word.replace("\\", "/")
+    p = paths.norm_abs(s, msys=(dialect == "bash"))
+    if p is None and base and not re.match(r"[A-Za-z]:|/", s):
+        p = paths.norm_abs(base + "/" + s)
+    return p
+
+
+def raw_reaches(word: str, base: Optional[str], dialect: str, roots) -> bool:
+    """An UNRESOLVED word read literally (globs in any component, 8.3 names) reaches a protected root: it names a
+    root, an ancestor of one, or a path inside one (Task 6 carry: `C:/*/The Elder*/Data` never names the root)."""
+    p = literal_abs(word, base, dialect)
+    if p is None:
+        return False
+    pc = targets._split(p.lower())
+    for root in tuple(roots.install_dirs) + tuple(roots.config_dirs) + tuple(roots.mo2_dirs):
+        rc = targets._split(root.lower())
+        n = min(len(pc), len(rc))
+        if n and all(_comp_reaches(a, b) for a, b in zip(pc[:n], rc[:n])):
+            return True
+    return False
+
+
+# ------------------------------------------------------------------------------------------- the rules
+class Scan(NamedTuple):
+    hit: Optional[Hit]
+    relative_unknown: str           # basename for S-RELATIVE-UNKNOWN advice ("" for none)
+
+
+def _is_data_word(word: str) -> bool:
+    return any(c.lower() == "data" for c in re.split(r"[/\\]+", word))
+
+
+def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, str]] = None, has=grep) -> Scan:
+    env = os.environ if env is None else env
+    resolved: Optional[Hit] = None
+    unresolved_reach: Optional[Hit] = None
+    unresolved_any = False
+    relative = ""
+    opaque = False
+    for e in parsed.execs:
+        if is_opaque(e):
+            opaque = True
+        e = substituted(e)
+        code = interpreter_code(e)
+        if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code)):
+            for kind, rx in _root_regexes(roots):
+                if has(rx, code):
+                    resolved = Hit(RULE_OF[kind], _match_basename(rx, code))
+                    break
+        ops = operands(e)
+        if not ops:
+            continue
+        ecwd = targets.exec_cwd(e, cwd, env)
+        nocwd = ecwd is None and targets.exec_cwd(e, _NOCWD, env) is not None
+        for w in ops:
+            a = None if w is UNRESOLVED else targets.resolve(w, ecwd or "", e.dialect, env)
+            if a is not None:
+                kind = protected_kind(a, roots)
+                if kind and resolved is None:
+                    resolved = Hit(RULE_OF[kind], posixpath.basename(a.rstrip("/")) or a)
+                continue
+            if w is not UNRESOLVED:
+                # Glob characters in a QUOTED word are literal (`"<install with [x] in its name>/Data"`): a word
+                # whose literal reading is a protected path is that path, whatever the glob reading would be.
+                lit = literal_abs(w, ecwd, e.dialect)
+                kind = protected_kind(lit, roots) if lit else ""
+                if kind:
+                    if resolved is None:
+                        resolved = Hit(RULE_OF[kind], posixpath.basename(lit.rstrip("/")) or lit)
+                    continue
+            unresolved_any = True
+            if w is UNRESOLVED:
+                continue
+            if raw_reaches(w, ecwd, e.dialect, roots) and unresolved_reach is None:
+                unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
+            if nocwd and not relative and _is_data_word(w) and \
+                    targets.resolve(w, targets.exec_cwd(e, _NOCWD, env) or _NOCWD, e.dialect, env) is not None:
+                relative = re.split(r"[/\\]+", w.rstrip("/\\"))[-1] or w
+    if resolved:
+        return Scan(resolved, relative)
+    if unresolved_reach:
+        return Scan(unresolved_reach, relative)
+    if unresolved_any and names_root(command, roots, has):
+        return Scan(Hit("S-DEL-UNRESOLVED", ""), relative)
+    if not parsed.ok and has(DESTROYER, command) and names_root(command, roots, has):
+        return Scan(Hit("S-DEL-FALLBACK", ""), relative)
+    if opaque and any(_loose_hit(e, roots, has) for e in parsed.execs):
+        return Scan(Hit("S-DEL-FALLBACK", ""), relative)
+    return Scan(None, relative)
+
+
+def _loose_hit(e, roots, has) -> bool:
+    """One exec's own words carry a delete word AND a protected root (`printf 'rm -rf "<install>"' | sh`,
+    `$SUDO rm -rf <install>`). Per exec, so a delete word in one string and a root in another do not combine."""
+    text = " ".join(e.argv) + ("\n" + e.stdin_body if e.stdin_body else "")
+    return has(DESTROYER_LOOSE, text) and names_root(text, roots, has)

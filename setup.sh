@@ -53,21 +53,19 @@ else
     echo "  jq not found. That is fine: it is optional (devbench-cli.sh and nexus.sh print plain output without it)."
 fi
 
-# --- Detect Node.js (needed for xeditlib; auto-install) ---
+# --- Detect Node.js (needed for xeditlib; NOT auto-installed) ---
+#
+# Setup writes configuration. It does not run a package manager: installing software the user did
+# not ask for from a config script is a side effect this toolkit refuses (the contained test harness
+# blocks winget/npm/pip for the same reason). So a missing Node is reported with how to get it.
 echo ""
 echo "Checking for Node.js..."
 if which node >/dev/null 2>&1; then
     echo "  Found Node.js: $(node --version 2>/dev/null)"
 else
     echo "  Node.js not found. It's needed for xeditlib (ESP read/write via XEditLib.dll)."
-    echo "  Installing Node.js LTS via winget..."
-    winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements 2>/dev/null || {
-        echo "  Could not auto-install Node.js. Install it manually when you need xeditlib:"
-        echo "    winget install OpenJS.NodeJS.LTS   (or download from nodejs.org)"
-    }
-    if which node >/dev/null 2>&1; then
-        echo "  Node.js installed: $(node --version 2>/dev/null)"
-    fi
+    echo "  Setup does not install it. When you need xeditlib, install it yourself:"
+    echo "    winget install OpenJS.NodeJS.LTS   (or download from nodejs.org)"
 fi
 
 # --- Detect Python 3 (needed for cosave-info, save analysis, PyFFI/PyNifly; do NOT auto-install) ---
@@ -334,8 +332,8 @@ echo "Configuring safety hooks..."
 HOOKS_MISSING=0
 # The Codex entries (.codex/hooks/) take the same interpreter. The .sh holds it as PY='...' like the Claude
 # hooks; the .ps1 as $PY = '...' with PowerShell's own quote escaping (PY_PS above).
-for hook in .claude/hooks/protect-bash.sh .claude/hooks/protect-files.sh .claude/hooks/backup-before-edit.sh \
-            .claude/hooks/snapshot-before-tool.sh .claude/hooks/session-kb-guard.sh \
+for hook in .claude/hooks/protect-bash.sh .claude/hooks/protect-files.sh .claude/hooks/protect-mcp.sh \
+            .claude/hooks/backup-before-edit.sh .claude/hooks/snapshot-before-tool.sh .claude/hooks/session-kb-guard.sh \
             .codex/hooks/skyguard-entry.ps1 .codex/hooks/skyguard-entry.sh; do
     case "$hook" in
         *.ps1) H_SED="$PY_PS_SED"; H_LINE="\$PY = '$PY_PS'"; H_RE='^[$]PY = '; H_NEW="\$PY = '$PY_PS_SED'" ;;
@@ -411,6 +409,10 @@ sq() {
     printf 'SKYRIM_GAME_ROOT=%s\n' "$(sq "$GAME_ROOT_WIN")"
     printf 'SKYRIM_CONFIG_DIR=%s\n' "$(sq "$CONFIG_DIR")"
     printf 'SKYRIM_LOADORDER_DIR=%s\n' "$(sq "$LOADORDER_DIR")"
+    # MO2 keeps every mod's real files in mods/ and overwrite/, outside the install, so the guard can only
+    # protect them if it is told where they are. Empty ('') on a non-MO2 install: declares nothing.
+    printf 'SKYRIM_MO2_MODS=%s\n' "$(sq "$MO2_MODS")"
+    printf 'SKYRIM_MO2_OVERWRITE=%s\n' "$(sq "$MO2_OVERWRITE")"
 } > "$GAME_DIR/.claude/skyrim-paths.env"
 
 # It must SOURCE, or the hooks silently fall back to the self-derived root alone. A
@@ -420,9 +422,10 @@ sq() {
 # still says what we wrote. The previous version of this check asked only the first
 # question, so a path whose `$` had been expanded away passed it and printed success.
 # Read the values back and compare them.
-_want=$(printf '%s\n%s\n%s\n' "$GAME_ROOT_WIN" "$CONFIG_DIR" "$LOADORDER_DIR")
+_want=$(printf '%s\n%s\n%s\n%s\n%s\n' "$GAME_ROOT_WIN" "$CONFIG_DIR" "$LOADORDER_DIR" "$MO2_MODS" "$MO2_OVERWRITE")
 _got=$( set -a; . "$GAME_DIR/.claude/skyrim-paths.env" 2>/dev/null
-        printf '%s\n%s\n%s\n' "${SKYRIM_GAME_ROOT:-}" "${SKYRIM_CONFIG_DIR:-}" "${SKYRIM_LOADORDER_DIR:-}" )
+        printf '%s\n%s\n%s\n%s\n%s\n' "${SKYRIM_GAME_ROOT:-}" "${SKYRIM_CONFIG_DIR:-}" "${SKYRIM_LOADORDER_DIR:-}" \
+            "${SKYRIM_MO2_MODS:-}" "${SKYRIM_MO2_OVERWRITE:-}" )
 if [ "$_want" = "$_got" ]; then
     echo "  Wrote: .claude/skyrim-paths.env"
 else
@@ -615,6 +618,7 @@ echo "  KNOWLEDGEBASE.md                 -- 1,300+ lines of Skyrim modding knowl
 echo "  .claude/settings.json            -- Hook configuration"
 echo "  .claude/hooks/protect-bash.sh    -- Guards dangerous commands"
 echo "  .claude/hooks/protect-files.sh   -- Guards file edits"
+echo "  .claude/hooks/protect-mcp.sh     -- Guards the DevBench MCP tools (smp reset denied, save overwrites asked)"
 echo "  .claude/hooks/backup-before-edit.sh -- Auto-backups (Edit/Write) with audit trail"
 echo "  .claude/hooks/snapshot-before-tool.sh -- Auto-snapshots .psc/.pex before Bash commands"
 echo "  .claude/hooks/session-kb-guard.sh -- Snapshots KNOWLEDGEBASE/CLAUDE.md/AGENTS.md once per session"

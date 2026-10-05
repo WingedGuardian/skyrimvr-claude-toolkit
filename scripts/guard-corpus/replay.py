@@ -32,8 +32,27 @@ spec.loader.exec_module(rec)
 FILE_TOOLS = ("Edit", "Write", "MultiEdit")
 
 
-def extract(history: Path) -> tuple[list[dict], dict]:
-    """Unique (hook, payload) items from every tool_use block, plus raw counts per tool."""
+def _wide_item(name: str, inp: dict, cwd):
+    """(dedupe key, item) for the tools the Plan 5 pricing tool prices; None for any other tool."""
+    if name in ("Bash", "PowerShell") and isinstance(inp.get("command"), str):
+        ti, prim = {"command": inp["command"]}, inp["command"]
+    elif name in FILE_TOOLS and isinstance(inp.get("file_path"), str):
+        ti, prim = {"file_path": inp["file_path"]}, inp["file_path"]
+    elif name.startswith("mcp__devbench"):
+        ti, prim = inp, json.dumps(inp, sort_keys=True, ensure_ascii=False)
+    else:
+        return None
+    cwd = cwd if isinstance(cwd, str) else ""
+    return (name, prim, cwd), {"tool_name": name, "tool_input": ti, "cwd": cwd}
+
+
+def extract(history: Path, wide: bool = False) -> tuple[list[dict], dict]:
+    """Unique items from every tool_use block, plus raw counts per tool.
+
+    Default (replay.py): (hook, payload) items for Bash and Edit/Write/MultiEdit, deduplicated on the
+    command / file_path. wide=True (price.py): {tool_name, tool_input, cwd} items that also take PowerShell
+    and mcp__devbench*, deduplicated on (tool_name, command|file_path|mcp-input, cwd).
+    """
     seen, items, counts = set(), [], collections.Counter()
     for f in sorted(history.rglob("*.jsonl")):
         with f.open(encoding="utf-8", errors="replace") as fh:
@@ -52,6 +71,15 @@ def extract(history: Path) -> tuple[list[dict], dict]:
                     if not (isinstance(b, dict) and b.get("type") == "tool_use"):
                         continue
                     name, inp = b.get("name"), b.get("input") or {}
+                    if wide:
+                        w = _wide_item(name, inp, obj.get("cwd")) if isinstance(name, str) and isinstance(inp, dict) else None
+                        if w is None:
+                            continue
+                        counts[name] += 1
+                        if w[0] not in seen:
+                            seen.add(w[0])
+                            items.append(w[1])
+                        continue
                     if name == "Bash" and isinstance(inp.get("command"), str):
                         key = ("protect-bash.sh", inp["command"])
                         payload = {"tool_name": "Bash", "tool_input": {"command": inp["command"]}}

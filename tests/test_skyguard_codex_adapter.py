@@ -166,7 +166,7 @@ def test_an_update_of_an_existing_skse_ini_gets_advice_and_a_backup(tmp_path):
     ini.write_text("a=1\n")
     raw = _patch("*** Update File: {}\n@@\n-a=1\n+a=2".format(str(ini).replace("\\", "/")))
     v = _run(tmp_path, raw)
-    assert v.decision == "allow" and "SKSE" in v.context
+    assert v.decision == "allow" and v.code == "write.ADV_SKSE_CONFIG" and v.context   # Plan 5 rewrote the text
     assert any(p.name.endswith("x.ini") for p in (tmp_path / ".claude" / "backups").iterdir())
 
 
@@ -395,3 +395,44 @@ def test_cli_env_unreadable_text_is_agent_neutral(tmp_path):
     body = r.stdout.decode().split("\n", 1)[1]
     reason = json.loads(body)["hookSpecificOutput"]["permissionDecisionReason"]
     assert "GUARD INERT" in reason and "protect-bash.sh" not in reason
+
+
+# ---- merge of Plans 4+5 ------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cmd", [12, 1.5, True, False, None, {"a": 1}], ids=["int", "float", "true", "false", "null", "object"])
+@pytest.mark.parametrize("tool", ["Bash", "exec_command"])
+def test_a_scalar_non_string_command_is_refused_before_the_rules(tool, cmd, tmp_path):
+    """Plan 5 Task 12 on Codex: a command that is neither a string nor an argv list is no command the guard can
+    judge. Left as kind 'other' (an unknown tool) it was ALLOWED unexamined; it must be a failed deny, decided
+    before any rule runs."""
+    r = codex.to_request(_pre(tool, {"command": cmd}), "win32")
+    assert r.failure and r.kind != "shell", r
+    v = _run(tmp_path, _pre(tool, {"command": cmd}))
+    assert (v.decision, v.status, v.code) == ("deny", "failed", "codex.TRANSLATE"), v
+
+
+def test_an_unknown_tool_with_no_command_key_is_still_other():
+    """The twin: only a PRESENT command of the wrong type is refused; a tool that carries no command is not a shell."""
+    assert codex.to_request(_pre("weird", {"x": 1}), "win32").kind == "other"
+    assert not codex.to_request(_pre("weird", {"x": 1}), "win32").failure
+
+
+@pytest.mark.parametrize("cmd,code", [
+    ('Remove-Item -Recurse -Force "{g}/Data/meshes"', "shell.S-DEL-INSTALL"),
+    ('rm -rf "{g}/Data/meshes"', "shell.S-DEL-INSTALL"),
+    ("Remove-Item -Recurse Data", "shell.S-DEL-INSTALL"),                       # relative to the session cwd
+    ('Remove-Item "{c}/Skyrim.ini"', "shell.S-DEL-CONFIG"),
+    ('rm "{c}/SkyrimPrefs.ini"', "shell.S-DEL-CONFIG"),   # (`rm -f` is ambiguous in PowerShell: it does not run)
+])
+def test_the_codex_instructions_claim_deleting_in_game_or_config_is_refused(tmp_path, cmd, code):
+    """agent/instructions/codex.md (-> AGENTS.md): "deleting in the game or config folders is refused". Re-verified
+    against the MERGED engine (Plan 5 rewrote the delete rules) through the Codex path, PowerShell dialect."""
+    game = tmp_path / "Skyrim VR"
+    cfg = tmp_path / "My Games" / "Skyrim VR"
+    (game / "Data" / "meshes").mkdir(parents=True)
+    cfg.mkdir(parents=True)
+    g, c = str(game).replace(chr(92), "/"), str(cfg).replace(chr(92), "/")
+    req = codex.to_request(_pre("Bash", {"command": cmd.format(g=g, c=c)}, cwd=g), "win32")
+    v = engine.pre_tool(req, str(tmp_path), lambda: paths.roots(g, "", {"SKYRIM_CONFIG_DIR": c}), Audit(str(tmp_path)))
+    assert (v.decision, v.code) == ("deny", code), v
+    assert json.loads(codex.render(v))["hookSpecificOutput"]["permissionDecision"] == "deny"

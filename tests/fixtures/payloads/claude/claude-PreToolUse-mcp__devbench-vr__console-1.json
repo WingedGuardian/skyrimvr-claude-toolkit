@@ -1,0 +1,17 @@
+{
+  "cwd": "<path>",
+  "hook_event_name": "PreToolUse",
+  "mcp_server": {
+    "name": "devbench-vr",
+    "source": "dynamic"
+  },
+  "permission_mode": "bypassPermissions",
+  "prompt_id": "<id>",
+  "session_id": "<id>",
+  "tool_input": {
+    "command": "help"
+  },
+  "tool_name": "mcp__devbench-vr__console",
+  "tool_use_id": "<id>",
+  "transcript_path": "<path>"
+}

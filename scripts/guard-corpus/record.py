@@ -8,14 +8,19 @@ must reproduce every decision and every reason byte for byte. Rows are generated
   * path dialects, multi-line, CRLF and non-ASCII variants (Plan 2 Review Focus);
   * the empty, invalid and non-object payloads.
 Re-record only with --hooks pointing at the hooks whose behaviour is the reference.
+
+tests/guard_corpus/intended.jsonl is the OTHER file: hand-authored expectations for the new behaviour. This
+script never writes it; `--check-intended [--id X]` only fires its rows and prints actual vs intended.
 """
 from __future__ import annotations
 
 import argparse
 import ast
 import hashlib
+import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,12 +31,25 @@ REPO = Path(__file__).resolve().parents[2]
 BS = chr(92)
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
 GAMEW = GAME.replace("/", BS)
+# Every environment variable the engine reads as a root; a recording must not inherit the recorder's own.
+ENV_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR", "SKYRIM_MO2_MODS", "SKYRIM_MO2_OVERWRITE")
 LAYOUTS = {
     # name: (install dir name, skyrim-paths.env text)
     "declared": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\n'),
     "undeclared": ("Skyrim VR", ""),
     "metachar": ("Skyrim (VR) [x]$", ""),
     "config": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_CONFIG_DIR="D:/Profiles/MO2/profiles/Default"\n'),
+    # Plan 5 Task 6: bash would expand $X here, so the guard cannot know the folder -> S-INERT-CONFIG.
+    "malformed": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2 $X/mods"\n'),
+    # Plan 5 Task 7: a Mod Organizer setup, so S-DEL-MO2 has roots to protect.
+    # Plan 5 Task 11: a config dir that holds a Saves folder with one save (cfg/Saves/Existing.ess), so the DevBench
+    # save-exists check has a filesystem to read. `<install>` is filled with the temp install's real path.
+    "saves": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_CONFIG_DIR="<install>/cfg"\n'),
+    # Fix round 1: no config dir declared, but the user's Documents (USERPROFILE is pointed at the install) holds
+    # My Games/Skyrim VR/Saves/Existing.ess: the fallback the DevBench save check reads.
+    "docs": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\n'),
+    "mo2": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2/mods"\n'
+                         'SKYRIM_MO2_OVERWRITE="D:/MO2/overwrite"\n'),
 }
 
 
@@ -63,8 +81,14 @@ def make_install(base: Path, hooks_src: Path, layout: str) -> Path:
     if (REPO / "tools" / "skyguard").is_dir():
         shutil.copytree(REPO / "tools" / "skyguard", root / "tools" / "skyguard",
                         ignore=shutil.ignore_patterns("__pycache__"))
+    if layout == "saves":
+        (root / "cfg" / "Saves").mkdir(parents=True)
+        (root / "cfg" / "Saves" / "Existing.ess").write_bytes(b"x")
+    if layout == "docs":
+        (root / "Documents" / "My Games" / "Skyrim VR" / "Saves").mkdir(parents=True)
+        (root / "Documents" / "My Games" / "Skyrim VR" / "Saves" / "Existing.ess").write_bytes(b"x")
     if env:
-        (root / ".claude" / "skyrim-paths.env").write_text(env, encoding="utf-8", newline="\n")
+        (root / ".claude" / "skyrim-paths.env").write_text(env.replace("<install>", root.as_posix()), encoding="utf-8", newline="\n")
     return root
 
 
@@ -95,11 +119,19 @@ def classify(out: str) -> dict:
     return {"decision": "allow", "text": ""}
 
 
+def home_env(install: Path) -> dict:
+    """Where `Documents` is for a recording: inside the install, never the recorder's own (the DevBench save check
+    reads <Documents>/My Games/<game>/Saves). OneDrive redirections are emptied."""
+    return {"USERPROFILE": str(install), "HOME": str(install), "OneDrive": "", "OneDriveConsumer": "",
+            "OneDriveCommercial": ""}
+
+
 def fire(install: Path, hook: str, payload) -> dict:
     stdin = "" if payload is None else (payload if isinstance(payload, str) else json.dumps(payload))
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(install))
-    for k in ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR"):
+    for k in ENV_KEYS:
         env.pop(k, None)
+    env.update(home_env(install))
     # as_posix(): production runs `bash "$CLAUDE_PROJECT_DIR/.claude/hooks/X.sh"`, i.e. a forward-slash
     # (or mixed) path; a backslash-only path hides defects in how the wrapper derives its own location.
     r = subprocess.run([bash(), (install / ".claude" / "hooks" / hook).as_posix()], input=stdin.encode("utf-8"),
@@ -107,6 +139,185 @@ def fire(install: Path, hook: str, payload) -> dict:
     if r.returncode != 0:
         raise RuntimeError(f"{hook} exited {r.returncode}: {r.stderr[:300]!r}")
     return classify(r.stdout.decode("utf-8"))
+
+
+def load_rows(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
+
+
+def row_payload(row: dict, install: Path):
+    """The payload to fire: install-relative rows (any `<install>` in the payload, `cwd` included) are filled in."""
+    p = row["payload"]
+    return install_relative(p, install) if row.get("payload_note") == "install-relative" else p
+
+
+# ---- rule ids -------------------------------------------------------------------------------------------
+# The wrapper prints only a message, and Plan 5 rewrites every message, so a verdict is compared by decision
+# and RULE ID. A legacy row's rule ids come from its frozen text through legacy_rules.json; the engine's come
+# from the rule trace (Audit.fired), read in-process because the wrapper does not print it.
+
+def legacy_rule_ids(text: str, templates: dict) -> set:
+    """Rule ids whose legacy template occurs in `text`: every literal chunk of the template, in order."""
+    found = set()
+    for template, rid in templates.items():
+        chunks = [c for c in re.split(r"\{[a-z]+\}", template) if c]
+        pos = 0
+        for c in chunks:
+            at = text.find(c, pos)
+            if at < 0:
+                break
+            pos = at + len(c)
+        else:
+            found.add(rid)
+    return found
+
+
+def _engine_eval():
+    spec = importlib.util.spec_from_file_location("engine_eval", REPO / "scripts" / "guard-corpus" / "engine_eval.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def engine_verdict(install: Path, hook: str, payload) -> dict:
+    """What the engine decides, with the rule ids it fired. Mirrors tools/skyguard/run.py without the wrapper."""
+    tools = str(REPO / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    from skyguard import mcp_rules, paths, shell_rules, write_rules
+    from skyguard.adapters import claude
+    from skyguard.audit import Audit
+    from skyguard.verdict import Verdict
+    ee = _engine_eval()
+    raw = "" if payload is None else (payload if isinstance(payload, str) else json.dumps(payload))
+    p = claude.extract(raw)
+    audit = ee.make_audit(Audit)
+    root = install.as_posix()
+    root_win = root if os.name == "nt" else ""
+    cwd = payload.get("cwd", "") if isinstance(payload, dict) and isinstance(payload.get("cwd"), str) else ""
+    environ = {k: val for k, val in os.environ.items() if k not in ENV_KEYS}
+    environ.update(home_env(install))
+    if hook == "protect-bash.sh":
+        if p["command_type"] != "string":        # run.py (Task 12): a non-string command is refused as no command
+            v = ee.call(shell_rules.decide, ("", paths.Roots("", ""), audit), cwd=cwd)
+        else:
+            env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
+            v = ee.call(shell_rules.decide, (p["command"], paths.roots(root, root_win, env), audit), cwd=cwd,
+                        shell=p.get("shell", ""), env=environ)
+    elif hook == "protect-mcp.sh":
+        env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
+        v = ee.call(mcp_rules.decide, (p["tool_name"], p["mcp_input"], audit),
+                    roots=paths.roots(root, root_win, env), env=environ)
+    else:
+        # Plan 5 Task 9: the write guard's zone notes need the roots, as run.py passes them.
+        env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
+        v = ee.call(write_rules.decide, (p["file_path"], audit), cwd=cwd, roots=paths.roots(root, root_win, env))
+    if v.decision in ("deny", "ask"):
+        decision, text = v.decision, v.reason
+    elif v.context:
+        decision, text = "advise", v.context
+    else:
+        decision, text = "allow", ""
+    return {"decision": decision, "text": text, "rules": {rid for rid, _ in audit.trace}}
+
+
+def fire_full(install: Path, row: dict) -> dict:
+    """The real wrapper's decision and text, plus the engine's rule ids (which must agree on the decision)."""
+    payload = row_payload(row, install)
+    got = fire(install, row["hook"], payload)
+    eng = engine_verdict(install, row["hook"], payload)
+    if eng["decision"] != got["decision"]:
+        raise RuntimeError(f"{row['id']}: wrapper says {got['decision']} but the in-process engine says "
+                           f"{eng['decision']}; the rule ids would describe a different verdict")
+    return {**got, "rules": eng["rules"]}
+
+
+def intended_problems(row: dict, got: dict) -> list[str]:
+    """How an intended row differs from what the engine did. Decision, rule ids AND exact text."""
+    out = []
+    if got["decision"] != row["decision"]:
+        out.append(f"decision: intended {row['decision']}, got {got['decision']}")
+    if set(got["rules"]) != set(row["rules"]):
+        out.append(f"rules: intended {sorted(row['rules'])}, got {sorted(got['rules'])}")
+    if got["text"] != row["text"]:
+        out.append(f"text: intended {row['text']!r}, got {got['text']!r}")
+    return out
+
+
+def intended_row_problems(row: dict) -> list[str]:
+    """Static checks on one hand-authored row: required fields, and a reason it exists."""
+    out = [f"missing {k}" for k in ("id", "layout", "hook", "payload", "decision", "rules", "text")
+           if k not in row]
+    if row.get("layout") not in LAYOUTS:
+        out.append(f"unknown layout {row.get('layout')!r}")
+    if row.get("decision") not in ("allow", "advise", "ask", "deny"):
+        out.append(f"bad decision {row.get('decision')!r}")
+    if not str(row.get("why") or "").strip():
+        out.append("empty why")
+    if not str(row.get("task") or "").strip():
+        out.append("empty task")
+    if (row.get("decision") == "allow") == bool(row.get("rules")):
+        out.append("an allow row must name no rules, and any other row must name at least one")
+    return out
+
+
+STRENGTH = {"allow": 0, "advise": 1, "ask": 2, "deny": 3}
+
+
+def supersession_problems(intended: list[dict], legacy: list[dict], templates: dict, current) -> list[str]:
+    """Every `supersedes` must name a real legacy row with the identical case and a verdict the new engine
+    really changes. `current(row)` -> {"decision", "rules"} for the intended row as the engine runs it now."""
+    by_id = {r["id"]: r for r in legacy}
+    out = []
+    seen = {}
+    for row in intended:
+        if row.get("supersedes"):
+            if row["supersedes"] in seen:
+                out.append(f"{row['id']}: supersedes {row['supersedes']}, which {seen[row['supersedes']]} already "
+                           f"supersedes; a legacy row is re-specified by exactly one intended row")
+            seen.setdefault(row["supersedes"], row["id"])
+    for row in intended:
+        target = row.get("supersedes")
+        if not target:
+            continue
+        old = by_id.get(target)
+        if old is None:
+            out.append(f"{row['id']}: supersedes {target}, which is not a legacy row")
+            continue
+        if (old["payload"], old["hook"], old["layout"], old.get("payload_note")) != \
+                (row["payload"], row["hook"], row["layout"], row.get("payload_note")):
+            out.append(f"{row['id']}: payload, hook or layout differs from the legacy row {target}")
+            continue
+        if STRENGTH[row["decision"]] < STRENGTH[old["decision"]] and not (
+                row.get("loosens") is True and isinstance(row.get("reason"), str) and row["reason"].strip()):
+            out.append(f"{row['id']}: loosens {target} from {old['decision']} to {row['decision']} without "
+                       f'"loosens": true and a non-empty reason; a silently loosened rule must be impossible')
+            continue
+        now = current(row)
+        was = (old["decision"], legacy_rule_ids(old["text"], templates))
+        if (now["decision"], set(now["rules"])) == was:
+            out.append(f"{row['id']}: supersedes {target}, but the engine still gives the legacy verdict {was[0]} "
+                       f"{sorted(was[1])}; a stale supersession hides a later regression")
+    return out
+
+
+def check_intended(only: str | None = None) -> int:
+    """Debugging aid: fire intended rows and print actual vs intended. Never writes a file."""
+    rows = load_rows(REPO / "tests" / "guard_corpus" / "intended.jsonl")
+    if only:
+        rows = [r for r in rows if r["id"] == only]
+    bad = 0
+    with tempfile.TemporaryDirectory() as td:
+        installs = {name: make_install(Path(td), REPO / ".claude" / "hooks", name) for name in LAYOUTS}
+        for r in rows:
+            got = fire_full(installs[r["layout"]], r)
+            problems = intended_problems(r, got)
+            bad += bool(problems)
+            print(f"{'DIFF' if problems else 'ok  '} {r['id']}: {got['decision']} {sorted(got['rules'])}")
+            for p in problems:
+                print("     " + p)
+    print(f"{len(rows)} intended row(s), {bad} differ")
+    return 1 if bad else 0
 
 
 def _from_test_hooks() -> list[tuple[str, str]]:
@@ -304,5 +515,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--hooks", type=Path, default=REPO / ".claude" / "hooks")
     ap.add_argument("--out", type=Path, default=REPO / "tests" / "guard_corpus" / "expected.jsonl")
+    ap.add_argument("--check-intended", action="store_true",
+                    help="fire the hand-authored rows in intended.jsonl and print actual vs intended; writes nothing")
+    ap.add_argument("--id", help="with --check-intended: only this row")
     a = ap.parse_args()
+    if a.check_intended:
+        sys.exit(check_intended(a.id))
     print(f"recorded {record(a.hooks, a.out)} rows from {a.hooks}")

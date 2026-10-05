@@ -127,12 +127,12 @@ def _derived():
             def rm(p):
                 p["tool_input"]["command"] = 'Remove-Item -Recurse -Force "{}/Data/Skyrim.esm"'.format(p["cwd"])
             out.append(_variant(f, "derived:{}:Remove-Item".format(label), rm,
-                                {"verdict": "deny", "code": "shell.DENY_INSTALL"}))
+                                {"verdict": "deny", "code": "shell.S-DEL-INSTALL"}))   # Plan 5: S-DEL-INSTALL replaced DENY_INSTALL
 
             def resaver(p):
                 p["tool_input"]["command"] = "bash tools/resaver-cli.sh reset-havok save.ess --apply"
             out.append(_variant(f, "derived:{}:resaver-apply".format(label), resaver,
-                                {"verdict": "deny", "code": "shell.ASK_RESAVER",
+                                {"verdict": "deny", "code": "shell.S-RESAVER-APPLY",   # Plan 5: was ASK_RESAVER
                                  "reason_prefix": "NEEDS YOUR CONFIRMATION"}))
     return out
 

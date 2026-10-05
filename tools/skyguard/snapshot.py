@@ -13,6 +13,9 @@ from .grep import grep
 
 SKIP = (r"^\s*(ls|cat|head|tail|grep|find|wc|file|stat|pwd|echo|date|whoami|which|type|env|printenv)\s",
         r"^\s*git\s+(status|log|diff|show|branch|remote|config\s+--get)")
+# The PowerShell tool is wired to this hook too (E12). Its read-only verbs take no snapshot, like `ls`. PowerShell
+# verbs are case-insensitive, so these match any case; the bash list above stays case-sensitive (`LS x` snapshots).
+SKIP_POWERSHELL = r"^\s*(get-[a-z]+|select-string|test-path|resolve-path|measure-object)(\s|$)"
 DAY = 86400
 
 
@@ -34,7 +37,7 @@ def run(project, command, payload_empty, audit, now=None):
     if payload_empty:
         audit.raw("[{}] snapshot-before-tool BLIND: EMPTY payload -- no snapshot taken\n".format(audit.stamp()))
         return
-    if any(grep(p, command, icase=False) for p in SKIP):
+    if any(grep(p, command, icase=False) for p in SKIP) or grep(SKIP_POWERSHELL, command, icase=True):
         return
     now = time.time() if now is None else now
     ts = audit.stamp()

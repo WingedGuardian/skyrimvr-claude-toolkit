@@ -8,6 +8,11 @@ import sys
 import tempfile
 
 
+# The only inherited variables; everything else is scrubbed. TOOLKIT_REQUIRE_HARNESS must be here or
+# the "barriers are not active" check could never fire under the launcher.
+FORWARDED_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "TOOLKIT_REQUIRE_HARNESS")
+
+
 def evidence_root(repo):
     """repo/.pytest_cache, or container-local scratch when the checkout is read-only.
 
@@ -85,8 +90,11 @@ def main():
         " with open(os.environ['HARNESS_TRIPWIRE_LOG'], 'a') as log: log.write('python -m pip\\n')\n"
         " os.write(2, b'PACKAGE-MANAGER TRIPWIRE: python -m pip\\n'); os._exit(97)\n"
         "from harness_isolation import install\ninstall()\n")
-    env = {k: v for k, v in os.environ.items() if k.upper() in
-           ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT")}
+    env = {k: v for k, v in os.environ.items() if k.upper() in FORWARDED_ENV}
+    # pytest's basetemp (every tmp_path) lives OUTSIDE the repo, in system temp: tests that run repo
+    # tools such as scripts/guard-corpus refuse an --out-dir inside the checkout, and tmp_path under
+    # <repo>/.pytest_cache is inside it.
+    scratch = Path(tempfile.mkdtemp(prefix="skyrim-harness-", dir=os.environ.get("RUNNER_TEMP") or None))
     for directory in ("home", "temp", "home/local", "home/roaming"):
         (work / directory).mkdir(parents=True, exist_ok=True)
     tripbin = binary.as_posix()
@@ -98,15 +106,18 @@ def main():
                PYTHONDONTWRITEBYTECODE="1", PYTEST_DISABLE_PLUGIN_AUTOLOAD="1",
                PYTHONPATH=os.pathsep.join([str(work), str(repo / "tests")]),
                PYTEST_PLUGINS="harness_pytest", BASH_ENV=bootstrap.as_posix(),
-               HARNESS_TRIPWIRE_BIN=tripbin, HARNESS_FIXTURE_ROOT=str(work),
+               HARNESS_TRIPWIRE_BIN=tripbin, HARNESS_FIXTURE_ROOT=os.pathsep.join([str(work), str(scratch)]),
                HARNESS_TRIPWIRE_LOG=str(work / "tripwire.log"),
                GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
     args = sys.argv[1:] or ["tests/", "-q", "-rs"]
     command = [sys.executable, "-B", "-m", "pytest", *args, "-p", "no:cacheprovider",
-               "--basetemp", str(work / "pytest")]
+               "--basetemp", str(scratch / "pytest")]
     (work / "command.json").write_text(json.dumps(command, indent=2))
     print("Evidence:", work, flush=True)
-    return subprocess.call(command, cwd=repo, env=env)
+    try:
+        return subprocess.call(command, cwd=repo, env=env)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 if __name__ == "__main__":

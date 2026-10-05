@@ -150,15 +150,25 @@ def fpath(p):
     ("C:" + BS + "Games" + BS + "Skyrim VR" + BS + "Data" + BS + "M.esp", "deny", "same, backslashes"),
     ("/c/games/skyrim/Data/x.BSA", "deny", "archives too, and case-insensitively"),
     # Controls. Each must NOT deny.
-    ("C:/Games/Skyrim VR/Data/Textures/x.dds", "advise", "an ordinary asset is a note"),
+    ("C:/Games/Skyrim VR/Data/Textures/x.dds", "allow", "not the declared install: the note is by resolved zone (Plan 5 Task 9)"),
     ("C:/Games/Skyrim VR/.claude/hooks/x.sh", "allow", "our own workspace is silent"),
     ("C:/work/notes.md", "allow", "nothing to do with the install"),
     ("C:/Users/x/Documents/My Games/Skyrim VR/SkyrimVR.ini", "advise", "config is consequential"),
-    ("C:/Games/Skyrim VR/Data/Scripts/Source/A.psc", "advise", "a .pex loads at startup only"),
+    ("C:/Games/Skyrim VR/Data/Scripts/Source/A.psc", "allow", "not the declared install's Data/Scripts (Plan 5 Task 9)"),
 ])
 def test_protect_files_decides(project, path, expected, why):
     got, _ = fire(project, "protect-files.sh", fpath(path))
     assert got == expected, f"{why}: {path}"
+
+
+def test_protect_files_notes_inside_the_declared_install(project):
+    """Plan 5 Task 9: W-INSTALL / W-PAPYRUS are decided on where the path resolves, so the hook must hand the engine
+    its roots. A dict built here, not fpath(): the corpus recorder harvests fpath() literals (record.inputs)."""
+    for path, want in ((GAME + "/Data/Textures/x.dds", "Note: editing x.dds inside the live Skyrim install."),
+                       (GAME + "/Data/Scripts/Source/A.psc", "Note: a script change in A.psc reaches the game only "
+                                                            "at its next start; snapshot it first.")):
+        got, text = fire(project, "protect-files.sh", {"tool_name": "Write", "tool_input": {"file_path": path}})
+        assert (got, text) == ("advise", want), path
 
 
 # --------------------------------------------------------------------------
@@ -187,10 +197,10 @@ def test_protect_files_decides(project, path, expected, why):
     ('Champollion.exe "C:/tmp/A.pex" -p C:/tmp', "allow", "Champollion somewhere safe"),
     ("rm mydata/cache.bin", "allow", "the word boundary: mydata is not Data"),
     # Advisories.
-    ('cat "C:/Games/Skyrim VR/Data/x.esp"', "advise", "reading a plugin is fine"),
+    ('cat "C:/Games/Skyrim VR/Data/x.esp"', "allow", "reading a plugin is silent (R11, Plan 5 Task 8)"),
     ("rm Data/Textures/x.dds", "advise", "a relative delete inside Data"),
     ("rm ./Data/x.dds", "advise", "dot-relative too"),
-    ("cat loadorder.txt", "advise", "the mod manager owns load order"),
+    ("cat loadorder.txt", "allow", "reading the load order is silent; a write notes (Plan 5 Task 8)"),
     # The single ask -- genuinely the user's decision.
     ("bash tools/resaver-cli.sh reset-havok save.ess --apply", "ask",
      "--apply MUTATES a save through ReSaver's write path"),
@@ -205,7 +215,9 @@ def test_protect_bash_decides(project, command, expected, why):
 # The defect itself
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh"])
+MCP_RESET = {"tool_name": "mcp__devbench-vr__console", "tool_input": {"command": "smp reset"}}     # protect-mcp (Task 11): a call the engine denies
+
+@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh", "protect-mcp.sh"])
 def test_a_windows_python_path_still_produces_parseable_json(tmp_path, name):
     r"""A backslash path (`C:\Users\...\python.exe`) is what a hand-edit or a careless
     paste puts in the hook. It is echoed into a JSON string via printf, and `\U` is not a
@@ -214,7 +226,7 @@ def test_a_windows_python_path_still_produces_parseable_json(tmp_path, name):
     root = install_hooks(tmp_path / "install",
                          python="C:" + BS + "Users" + BS + "me" + BS + "AppData" + BS + "python.exe")
     payload = (cmd('rm -rf "C:/x"') if name == "protect-bash.sh"
-               else fpath("C:/Games/Skyrim VR/Data/M.esp"))
+               else MCP_RESET if name == "protect-mcp.sh" else fpath("C:/Games/Skyrim VR/Data/M.esp"))
     env = no_python_env(CLAUDE_PROJECT_DIR=str(root))
     r = subprocess.run([_bash(), str(root / ".claude" / "hooks" / name)],
                        input=json.dumps(payload), capture_output=True, text=True,
@@ -237,7 +249,14 @@ def test_a_blocking_hook_refuses_when_it_cannot_see_its_input(project, hook, fie
     assert "GUARD INERT" in reason, reason
 
 
-@pytest.mark.parametrize("hook", ["protect-files.sh", "protect-bash.sh"])
+def test_protect_mcp_refuses_when_it_cannot_see_the_tool_name(project):
+    """The same guarantee for the DevBench hook: a payload whose tool_name did not arrive is a call it cannot judge."""
+    got, reason = fire(project, "protect-mcp.sh", {"tool_input": {"command": "smp reset"}})
+    assert got == "deny", "protect-mcp allowed a call whose tool it could not read"
+    assert "GUARD INERT" in reason, reason
+
+
+@pytest.mark.parametrize("hook", ["protect-files.sh", "protect-bash.sh", "protect-mcp.sh"])
 def test_a_blocking_hook_refuses_on_genuinely_empty_stdin(project, hook):
     """The exact shape `cat /dev/stdin` produced on every invocation."""
     got, reason = fire(project, hook, None)
@@ -262,12 +281,13 @@ def test_every_hook_writes_a_liveness_heartbeat(project):
     hook that stops writing one has removed the sole detector for its own death."""
     for hook, payload in (("protect-files.sh", fpath("C:/work/x.md")),
                           ("protect-bash.sh", cmd("ls -la")),
+                          ("protect-mcp.sh", {"tool_name": "mcp__devbench-vr__console", "tool_input": {"command": "help"}}),
                           ("backup-before-edit.sh", fpath("C:/work/x.md")),
                           ("snapshot-before-tool.sh", cmd("ls -la"))):
         fire(project, hook, payload)
     hb = project / ".claude" / "backups" / ".hook-heartbeat" / "claude"
     names = {f.name for f in hb.iterdir()}
-    for hook in ("protect-files", "protect-bash", "backup-before-edit", "snapshot-before-tool"):
+    for hook in ("protect-files", "protect-bash", "protect-mcp", "backup-before-edit", "snapshot-before-tool"):
         # every stage, written from inside a real invocation: ran, received, evaluated, delivered
         for stage in ("invoked", "received", "evaluated", "emitted", "latency"):
             assert "{}.{}".format(hook, stage) in names, (hook, stage, sorted(names))
@@ -335,8 +355,8 @@ def test_the_install_cannot_be_deleted_however_it_is_spelled(project, command, w
     ("rm -rf /tmp/scratch", "allow", "an rm somewhere else entirely"),
     ('grep -rn "rm" README.md', "allow", "the WORD rm inside a quoted argument"),
     ("python -m pytest tests/ -q", "allow", "running the suite"),
-    (f'cat "{GAME}/Data/x.esp"', "advise", "READING a game path is not deleting one"),
-    (f'cp "{GAME}/Data/x.nif" /tmp/', "advise", "copying OUT is not deleting"),
+    (f'cat "{GAME}/Data/x.esp"', "allow", "READING a game path is not deleting one (and is silent, R11)"),
+    (f'cp "{GAME}/Data/x.nif" /tmp/', "allow", "copying OUT is not deleting, and the install is only the source"),
     (f'ls "{GAME}/Data/Scripts"', "allow", "listing is not writing"),
 
     # ---- paths that merely CONTAIN the word Skyrim, and are not the install ----
@@ -495,7 +515,7 @@ def test_a_configured_config_directory_outside_documents_is_guarded(tmp_path):
     assert _decide(root, f'rm -rf "{other}"') != "deny"
 
 
-@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh"])
+@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh", "protect-mcp.sh"])
 @pytest.mark.parametrize("python,why", [
     ("/c/nonexistent/python.exe", "Python uninstalled after setup"),
     ("{{PYTHON_PATH}}", "the zip was extracted and setup.sh never run"),
@@ -506,7 +526,7 @@ def test_a_blocking_hook_refuses_when_python_is_unusable(tmp_path, name, python,
     printf -- says so."""
     root = install_hooks(tmp_path / "install", names={name}, python=python)
     payload = (cmd('rm -rf "C:/Games/Skyrim VR"') if name == "protect-bash.sh"
-               else fpath("C:/Games/Skyrim VR/Data/M.esp"))
+               else MCP_RESET if name == "protect-mcp.sh" else fpath("C:/Games/Skyrim VR/Data/M.esp"))
     env = no_python_env(CLAUDE_PROJECT_DIR=str(root))
     r = subprocess.run([_bash(), str(root / ".claude" / "hooks" / name)],
                        input=json.dumps(payload), capture_output=True, text=True,
@@ -539,6 +559,7 @@ def _run_wrapper(root, env, name, payload):
 BLOCKING = [
     ("protect-bash.sh", {"tool_name": "Bash", "tool_input": {"command": "ls"}}),
     ("protect-files.sh", {"tool_name": "Write", "tool_input": {"file_path": "C:/work/notes.md"}}),
+    ("protect-mcp.sh", {"tool_name": "mcp__devbench-vr__console", "tool_input": {"command": "help"}}),
 ]
 NONBLOCKING = [
     ("backup-before-edit.sh", "backup-before-edit"),
@@ -791,14 +812,14 @@ def test_protect_bash_resolves_its_install_however_it_is_launched(project, how):
     assert ok[0] == "allow", f"{how}: an `ls` was not allowed: {ok}"
     rm = {"tool_name": "Bash", "tool_input": {"command": f'rm -rf "{project.as_posix()}"'}}
     got = _decision(_invoke(project, "protect-bash.sh", rm, how))
-    assert got[0] == "deny" and got[1].startswith("BLOCKED"), f"{how}: deleting the install was not refused: {got}"
+    assert got[0] == "deny" and got[1].startswith("Blocked: this deletes"), f"{how}: deleting the install was not refused: {got}"
 
 
 @pytest.mark.parametrize("how", ["forward-slash", "mixed", "relative"])
 def test_protect_files_works_however_it_is_launched(project, how):
     esp = {"tool_name": "Write", "tool_input": {"file_path": "C:/Games/Skyrim VR/Data/M.esp"}}
     got = _decision(_invoke(project, "protect-files.sh", esp, how))
-    assert got[0] == "deny" and got[1].startswith("BLOCKED"), f"{how}: {got}"
+    assert got[0] == "deny" and got[1].startswith("Blocked"), f"{how}: {got}"
     ok = _decision(_invoke(project, "protect-files.sh",
                            {"tool_name": "Write", "tool_input": {"file_path": "C:/work/notes.md"}}, how))
     assert ok[0] == "allow", f"{how}: {ok}"
@@ -883,7 +904,7 @@ def _check_root_spelling(root: Path, launch: str):
     ok = _fire_at(launch, root, _shell("ls"))
     assert ok[0] == "allow", f"an `ls` was not allowed -- the engine path was misspelled: {ok}"
     got = _fire_at(launch, root, _shell(f'rm -rf "{root.as_posix()}"'))
-    assert got[0] == "deny" and got[1].startswith("BLOCKED"), f"deleting the install was not refused: {got}"
+    assert got[0] == "deny" and got[1].startswith("Blocked: this deletes"), f"deleting the install was not refused: {got}"
 
 
 def test_a_drive_root_is_converted_to_its_windows_spelling(tmp_path):
@@ -908,7 +929,7 @@ def test_a_root_on_an_msys_mount_still_gets_its_windows_spelling(tmp_path):
     _check_root_spelling(root, "/tmp" + here[len(tmp_win):] + "/.claude/hooks/protect-bash.sh")
 
 
-@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh", "backup-before-edit.sh",
+@pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh", "protect-mcp.sh", "backup-before-edit.sh",
                                   "snapshot-before-tool.sh", "session-kb-guard.sh"])
 def test_a_fresh_install_gets_its_heartbeat_directory(tmp_path, name):
     """mkdir now runs only when the directory is missing. On a fresh install it IS missing, and a
@@ -916,7 +937,8 @@ def test_a_fresh_install_gets_its_heartbeat_directory(tmp_path, name):
     root = install_hooks(tmp_path / "install", names={name})
     payload = ({"hook_event_name": "SessionStart", "source": "compact"} if name == "session-kb-guard.sh"
                else _shell("ls") if name in ("protect-bash.sh", "snapshot-before-tool.sh")
-               else _write("C:/work/notes.md"))
+               else {"tool_name": "mcp__devbench-vr__console", "tool_input": {"command": "help"}}
+               if name == "protect-mcp.sh" else _write("C:/work/notes.md"))
     hb = root / ".claude" / "backups" / ".hook-heartbeat"
     assert not hb.exists()
     r = _run_wrapper(root, dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), name, payload)

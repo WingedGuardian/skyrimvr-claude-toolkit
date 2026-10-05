@@ -1,0 +1,18 @@
+{
+  "cwd": "<path>",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "bypassPermissions",
+  "prompt_id": "<id>",
+  "session_id": "<id>",
+  "tool_input": {
+    "command": "echo hi",
+    "description": "echo hi test",
+    "timeout_ms": 60000
+  },
+  "tool_name": "Monitor",
+  "tool_use_id": "<id>",
+  "transcript_path": "<path>"
+}

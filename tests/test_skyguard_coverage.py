@@ -264,17 +264,49 @@ def test_claude_coverage_is_judged_per_covered_tool(tmp_path):
     assert _cov(tmp_path, "claude")[0][4] == "DEGRADED"
 
 
-def test_claude_tools_the_installed_matchers_do_not_cover_are_not_counted(tmp_path):
+def _claude_twin(tmp_path, tool):
     def fn(rows):
         for r in rows:
             c = (r.get("message") or {}).get("content")
             if isinstance(c, list):
                 for b in c:
                     if isinstance(b, dict) and b.get("type") == "tool_use":
-                        b["name"] = "PowerShell"
-    twin = _rewrite(CLAUDE_P, tmp_path / "ps.jsonl", fn)
-    _session(tmp_path, "claude", SID, twin, [])
+                        b["name"] = tool
+    return _rewrite(CLAUDE_P, tmp_path / (tool.replace("_", "-") + ".jsonl"), fn)
+
+
+@pytest.mark.parametrize("tool", ["Read", "mcp__other__console"])
+def test_claude_tools_the_installed_matchers_do_not_cover_are_not_counted(tmp_path, tool):
+    _session(tmp_path, "claude", SID, _claude_twin(tmp_path, tool), [])
     assert _cov(tmp_path, "claude")[0][2:] == (0, 0, "NOT EXERCISED")
+
+
+# Merge of Plans 4+5: Plan 5 widened the installed matchers (Bash|PowerShell|Monitor, Edit|Write|NotebookEdit, and
+# mcp__devbench.* -> protect-mcp). A covered call the guard never saw must read DEGRADED, and the guard's own line
+# must count, or an unguarded PowerShell/NotebookEdit/DevBench session reads as fine.
+@pytest.mark.parametrize("tool,hook", [("PowerShell", "protect-bash"), ("Monitor", "protect-bash"),
+                                       ("NotebookEdit", "protect-files"), ("mcp__devbench-vr__console", "protect-mcp")])
+def test_claude_coverage_counts_every_tool_the_installed_matchers_cover(tmp_path, tool, hook):
+    twin = _claude_twin(tmp_path, tool)
+    _session(tmp_path, "claude", SID, twin, [])
+    assert _cov(tmp_path, "claude")[0][2:] == (0, 1, "DEGRADED")
+    _session(tmp_path, "claude", SID, twin, [tool], hook=hook)
+    assert _cov(tmp_path, "claude")[0][2:] == (1, 1, "HEALTHY")
+
+
+def test_the_covered_tools_match_the_installed_matchers():
+    """health's idea of what is covered is read from the shipped .claude/settings.json matchers, not restated."""
+    settings = json.loads((REPO / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    guards = {"protect-bash.sh", "protect-files.sh", "protect-mcp.sh"}
+    import re
+    rxs = [re.compile(m.get("matcher", "")) for m in settings["hooks"]["PreToolUse"]
+           if any(h["command"].rsplit("/", 1)[-1].rstrip('"') in guards for h in m.get("hooks", []))]
+    for tool in health.CLAUDE_COVERED_TOOLS + ("mcp__devbench-vr__console",):
+        assert any(rx.fullmatch(tool) for rx in rxs), tool
+        assert health._claude_covered(tool), tool
+    for tool in ("Read", "Glob", "mcp__other__console"):
+        assert not any(rx.fullmatch(tool) for rx in rxs), tool
+        assert not health._claude_covered(tool), tool
 
 
 def test_coverage_reads_only_the_newest_sessions(tmp_path):
@@ -587,3 +619,19 @@ def test_an_unrendered_codex_keeps_exit_0_but_the_result_says_not_configured(tmp
     code, text = _report(root, tmp_path / "none.toml")
     result = text.split("RESULT:")[1]
     assert code == 0 and "Codex not configured" in result and not result.strip().startswith("OK")
+
+
+def test_extra_guard_lines_for_one_tool_cannot_cover_another_tools_call(tmp_path):
+    """Merge of Plans 4+5: the covered-tool list now comes from the transcript, so the per-tool cap is what stops
+    two guard lines for Bash from covering one Bash call AND one unguarded Edit call."""
+    def fn(rows):
+        for r in rows:
+            c = (r.get("message") or {}).get("content")
+            if isinstance(c, list) and any(isinstance(b, dict) and b.get("type") == "tool_use" for b in c):
+                b = dict(next(b for b in c if b.get("type") == "tool_use"))
+                b["id"], b["name"] = "toolu_second", "Edit"
+                c.append(b)
+                return
+    twin = _rewrite(CLAUDE_P, tmp_path / "bash-edit.jsonl", fn)
+    _session(tmp_path, "claude", SID, twin, ["Bash", "Bash"])
+    assert _cov(tmp_path, "claude")[0][2:] == (1, 2, "DEGRADED")

@@ -1,0 +1,31 @@
+{
+  "about": "Which plugins.txt a tool reads. Read by tests/test_paths_precedence.py (skyguard.paths.plugins_txt) AND tools/xelib/paths-precedence.test.js (active-plugins.js defaultPluginsTxt): both must give the same answer for every case. Precedence (R3 / Codex handoff item 4): PLUGINS_TXT > SKYRIM_LOADORDER_DIR env > paths file > LOCALAPPDATA probe. {tmp} is a fresh temp dir; LOCALAPPDATA is {tmp}/local; the paths file is {tmp}/skyrim-paths.env, named by SKYRIM_PATHS_FILE; 'probe' lists the game folders under LOCALAPPDATA that hold a plugins.txt. want 'error' means the lookup must throw.",
+  "cases": [
+    {"id": "plugins-txt-wins-over-everything",
+     "env": {"PLUGINS_TXT": "{tmp}/explicit/plugins.txt", "SKYRIM_LOADORDER_DIR": "{tmp}/lo-env"},
+     "paths_file": "SKYRIM_LOADORDER_DIR='{tmp}/lo-file'\n", "probe": ["Skyrim VR"],
+     "want": "{tmp}/explicit/plugins.txt"},
+    {"id": "loadorder-env-beats-the-file",
+     "env": {"SKYRIM_LOADORDER_DIR": "{tmp}/lo-env"},
+     "paths_file": "SKYRIM_LOADORDER_DIR='{tmp}/lo-file'\n", "probe": ["Skyrim VR"],
+     "want": "{tmp}/lo-env/plugins.txt"},
+    {"id": "the-file-beats-the-probe",
+     "env": {}, "paths_file": "SKYRIM_GAME_ROOT='C:/G'\nSKYRIM_LOADORDER_DIR='{tmp}/lo-file'\n", "probe": ["Skyrim VR"],
+     "want": "{tmp}/lo-file/plugins.txt"},
+    {"id": "file-value-with-an-apostrophe",
+     "env": {}, "paths_file": "SKYRIM_LOADORDER_DIR='{tmp}/Bob'\\''s Order'\n", "probe": [],
+     "want": "{tmp}/Bob's Order/plugins.txt"},
+    {"id": "probe-prefers-vr-over-se",
+     "env": {}, "paths_file": "# no load-order key\n", "probe": ["Skyrim Special Edition", "Skyrim VR"],
+     "want": "{tmp}/local/Skyrim VR/plugins.txt"},
+    {"id": "probe-falls-through-to-se",
+     "env": {}, "paths_file": "# no load-order key\n", "probe": ["Skyrim Special Edition"],
+     "want": "{tmp}/local/Skyrim Special Edition/plugins.txt"},
+    {"id": "probe-with-nothing-names-the-vr-path",
+     "env": {}, "paths_file": "# no load-order key\n", "probe": [],
+     "want": "{tmp}/local/Skyrim VR/plugins.txt"},
+    {"id": "malformed-file-value-throws",
+     "env": {}, "paths_file": "SKYRIM_LOADORDER_DIR='{tmp}/unterminated\n", "probe": ["Skyrim VR"],
+     "want": "error"}
+  ]
+}

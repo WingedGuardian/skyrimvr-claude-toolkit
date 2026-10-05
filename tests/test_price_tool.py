@@ -1,0 +1,215 @@
+"""scripts/guard-corpus/price.py: per-rule old-vs-new engine pricing over (synthetic) history.
+
+Every check here has a twin that goes red: an identical pair reads all zeros, a pair that differs in ONE
+rule reads non-zero for that rule and zero for every other, and an out-dir inside the repo is refused.
+"""
+import importlib.util
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+
+from conftest import REPO
+
+SKYGUARD = REPO / "tools" / "skyguard"
+
+
+def _mod(name):
+    spec = importlib.util.spec_from_file_location(name, REPO / "scripts" / "guard-corpus" / (name + ".py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+price = _mod("price")
+replay = _mod("replay")
+
+
+def _line(name, inp, cwd="C:/work"):
+    return json.dumps({"cwd": cwd, "message": {"content": [{"type": "tool_use", "name": name, "input": inp}]}})
+
+
+@pytest.fixture
+def history(tmp_path):
+    h = tmp_path / "hist"
+    h.mkdir()
+    lines = [
+        _line("Bash", {"command": "ls"}),
+        _line("Bash", {"command": "ls"}),                                  # exact duplicate: deduplicated
+        _line("Bash", {"command": "ls"}, cwd="C:/sentinel"),               # same command, other cwd: kept
+        # old: WRITE-LOADORDER; broadened: + WRITE-INI, which fires AFTER it (so first-rule attribution is wrong)
+        _line("Bash", {"command": "echo x >> plugins.txt 2> notes.md"}),
+        _line("PowerShell", {"command": "Add-Content loadorder.txt x"}),   # WRITE-LOADORDER
+        _line("Edit", {"file_path": "C:/work/a.py"}),
+        _line("mcp__devbench-vr__console", {"action": "exec", "command": "help"}),
+        _line("Read", {"file_path": "C:/work/a.py"}),                      # not a priced tool
+    ]
+    (h / "s.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return h
+
+
+def _scratch_engine(tmp_path, name, edits):
+    dest = tmp_path / name
+    shutil.copytree(SKYGUARD, dest, ignore=shutil.ignore_patterns("__pycache__"))
+    for rel, old, new in edits:
+        p = dest / rel
+        text = p.read_bytes().decode("utf-8")
+        assert text.count(old) == 1, (rel, old)
+        p.write_bytes(text.replace(old, new).encode("utf-8"))
+    return dest
+
+
+def _run(tmp_path, base_dir, new_dir, history, only_rule=None):
+    out = tmp_path / "out"
+    return price.price(price.stage_tree(base_dir, tmp_path / "b"), price.stage_tree(new_dir, tmp_path / "n"),
+                       history, out, only_rule=only_rule), out
+
+
+def test_extract_wide_takes_powershell_mcp_and_cwd_and_dedupes_on_cwd(history):
+    items, counts = replay.extract(history, wide=True)
+    assert [(i["tool_name"], i["cwd"]) for i in items] == [
+        ("Bash", "C:/work"), ("Bash", "C:/sentinel"), ("Bash", "C:/work"), ("PowerShell", "C:/work"),
+        ("Edit", "C:/work"), ("mcp__devbench-vr__console", "C:/work")]
+    assert counts["Bash"] == 4 and counts["PowerShell"] == 1 and "Read" not in counts
+    assert items[-1]["tool_input"] == {"action": "exec", "command": "help"}
+
+
+def test_extract_default_is_unchanged_for_replay(history):
+    items, counts = replay.extract(history)
+    assert {i["hook"] for i in items} == {"protect-bash.sh", "protect-files.sh"}
+    assert counts["PowerShell_not_wired"] == 1
+
+
+def test_identical_engines_price_to_all_zeros(tmp_path, history):
+    s, _ = _run(tmp_path, SKYGUARD, SKYGUARD, history)
+    assert s["N"] == 6
+    assert all(v == 0 for v in s["totals"].values()), s["totals"]
+    assert s["rules"] == {} and s["reason_moved"] == 0
+    assert set(s["matrix"]) <= {"allow>allow", "advise>advise"}
+    assert s["N_per_tool"] == {"Bash": 3, "PowerShell": 1, "Edit": 1, "mcp__*": 1}
+
+
+def test_a_broadened_rule_moves_only_that_rule(tmp_path, history):
+    new = _scratch_engine(tmp_path, "scratch", [
+        ("targets.py", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)$", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini|notes\.md)$")])
+    s, out = _run(tmp_path, SKYGUARD, new, history)
+    # The plugins.txt/notes.md write newly fires WRITE-INI while WRITE-LOADORDER (fired first) fires in both:
+    # attribution must name the rule that is new, not the first rule the item fires.
+    assert s["rules"] == {"S-WRITE-INI": {"newly-advise": 1}}
+    assert s["totals"]["newly-advise"] == 1 and s["matrix"].get("advise>advise", 0) >= 1
+    rows = [json.loads(x) for x in (out / "S-WRITE-INI__newly-advise.jsonl").read_text("utf-8").splitlines()]
+    assert [r["item"]["tool_input"]["command"] for r in rows] == ["echo x >> plugins.txt 2> notes.md"]
+
+
+def test_a_rule_that_stops_firing_reads_no_longer(tmp_path, history):
+    new = _scratch_engine(tmp_path, "scratch", [
+        ("targets.py", r"(loadorder\.txt|plugins\.txt)$", r"(plugins\.txt)$")])
+    s, _ = _run(tmp_path, SKYGUARD, new, history)
+    assert s["rules"] == {"S-WRITE-LOADORDER": {"no-longer-advise": 1}}    # the PowerShell loadorder.txt write
+    assert s["matrix"].get("advise>allow") == 1
+
+
+def test_only_rule_filters_the_report(tmp_path, history):
+    new = _scratch_engine(tmp_path, "scratch", [
+        ("targets.py", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)$", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini|notes\.md)$")])
+    s, _ = _run(tmp_path, SKYGUARD, new, history, only_rule="S-WRITE-LOADORDER")
+    assert s["rules"] == {}
+
+
+def test_the_driver_hands_the_item_cwd_to_an_engine_that_accepts_it(tmp_path, history):
+    new = _scratch_engine(tmp_path, "scratch", [(
+        "shell_rules.py",
+        # The engine takes cwd since Plan 5 Task 6; the sentinel proves the driver hands it the item's cwd.
+        "    if command.strip() == \"\":\n        audit.rule(HOOK, \"S-INERT-NOCMD\"",
+        "    if cwd == \"C:/sentinel\":\n"
+        "        audit.rule(HOOK, \"S-LOADORDER-REF\", \"advise\", \"cwd seen\")\n"
+        "    if command.strip() == \"\":\n        audit.rule(HOOK, \"S-INERT-NOCMD\"")])
+    s, _ = _run(tmp_path, SKYGUARD, new, history)
+    # Only the one `ls` that ran in C:/sentinel; the old engine, which has no cwd parameter, still priced.
+    assert s["rules"] == {"S-LOADORDER-REF": {"newly-advise": 1}}
+
+
+def test_out_dir_inside_the_repo_is_refused(tmp_path, history):
+    target = REPO / "scripts" / "guard-corpus" / "_price_out_should_not_exist"
+    with pytest.raises(SystemExit) as e:
+        price.main(["--base-dir", str(SKYGUARD), "--history", str(history), "--out-dir", str(target)])
+    assert "outside the repo" in str(e.value)
+    assert not target.exists()
+
+
+def test_cli_prices_the_working_tree_against_itself(tmp_path, history, capsys):
+    rc = price.main(["--base-dir", str(SKYGUARD), "--history", str(history), "--out-dir", str(tmp_path / "o")])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "N=6" in out and "'newly-deny': 0" in out
+
+
+def test_a_decision_change_on_the_same_rule_is_priced(tmp_path, history):
+    """advise -> deny on a rule that fires in both engines: same id, so only the decision differs."""
+    new = _scratch_engine(tmp_path, "scratch", [(
+        "shell_rules.py",
+        '    for rid, file in list(wr.advice) + anchored.automod(parsed):\n',
+        '    for rid, file in list(wr.advice) + anchored.automod(parsed):\n'
+        '        if rid == "S-WRITE-LOADORDER" and file == "loadorder.txt":\n'
+        '            audit.rule(HOOK, rid, "deny", "x")\n'
+        '            return Verdict("deny", "x")\n')])
+    s, _ = _run(tmp_path, SKYGUARD, new, history)
+    assert s["rules"] == {"S-WRITE-LOADORDER": {"newly-deny": 1, "no-longer-advise": 1}}
+    assert s["totals"]["newly-deny"] == 1 and s["totals"]["no-longer-advise"] == 1
+    assert s["matrix"].get("advise>deny") == 1
+
+
+def test_a_crash_in_the_new_engine_is_flagged_not_clean(tmp_path, history):
+    new = _scratch_engine(tmp_path, "scratch", [(
+        "shell_rules.py",
+        '    advice = Advice()\n',
+        '    advice = Advice()\n    if command == "ls":\n        raise RuntimeError("boom")\n')])
+    s, _ = _run(tmp_path, SKYGUARD, new, history)
+    assert s["errors"] == {"old": 0, "new": 2}                      # the two `ls` items (cwd differs)
+    assert s["rules"] == {"<engine-error>": {"newly-error": 2}}
+    assert s["totals"]["newly-error"] == 2
+
+
+def test_parse_failures_are_reported_per_tool_when_the_engine_has_the_parser(tmp_path):
+    """Plan 5 Task 5 (R4 gate): the driver asks the NEW tree's shellparse whether it can read each command. An old
+    tree without shellparse reads 0; an unterminated quote in Bash and PowerShell each count once."""
+    h = tmp_path / "hist"
+    h.mkdir()
+    lines = [_line("Bash", {"command": "ls"}), _line("Bash", {"command": "echo 'oops"}),
+             _line("PowerShell", {"command": "Get-Item 'oops"}), _line("PowerShell", {"command": "Get-Item a"})]
+    (h / "s.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # An engine from before the parser: no shellparse.py, and (since Tasks 6-7, where the ReSaver and delete rules
+    # moved onto the parser) a shell rule table that does not use one.
+    old = _scratch_engine(tmp_path, "old", [])
+    (old / "shellparse.py").unlink()
+    (old / "deletes.py").unlink()
+    (old / "shell_rules.py").write_text(
+        "from .verdict import Verdict\n\n\ndef decide(command, roots, audit, cwd='', shell=''):\n    return Verdict()\n",
+        encoding="utf-8")
+    s, _ = _run(tmp_path, old, SKYGUARD, h)
+    assert s["parse_failures"] == {"old": 0, "new": 2}
+    assert s["parse_failures_new_per_tool"] == {"Bash": 1, "PowerShell": 1}
+    assert s["totals"]["newly-error"] == 0
+
+
+def test_two_engine_dirs_load_separately(tmp_path):
+    edits = [("shell_rules.py", "    advice = Advice()\n",
+              '    advice = Advice()\n    return Verdict("deny", __file__)\n')]
+    a = _scratch_engine(tmp_path, "engA", edits)
+    b = _scratch_engine(tmp_path, "engB", edits)
+    items = tmp_path / "items.jsonl"
+    items.write_text(json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": ""}) + "\n")
+    ra = price.run_engine(price.stage_tree(a, tmp_path / "ta"), items, tmp_path / "ra.jsonl", "C:/g", "C:/g")[0]
+    rb = price.run_engine(price.stage_tree(b, tmp_path / "tb"), items, tmp_path / "rb.jsonl", "C:/g", "C:/g")[0]
+    assert "ta" in Path(ra["text"]).parts and "tb" in Path(rb["text"]).parts
+    assert ra["text"] != rb["text"]
+
+
+def test_only_this_tools_stale_files_are_cleared(tmp_path, history):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "S-OLD__newly-deny.jsonl").write_text("stale")
+    (out / "mine__notes.jsonl").write_text("keep")
+    _run(tmp_path, SKYGUARD, SKYGUARD, history)
+    assert not (out / "S-OLD__newly-deny.jsonl").exists() and (out / "mine__notes.jsonl").exists()

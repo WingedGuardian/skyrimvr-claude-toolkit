@@ -44,7 +44,8 @@ MUTATIONS = [
         "tools/skyguard/paths.py",
         "    _add(game, root_posix)\n    _add(game, root_win)\n",
         "    game.append(" + 'r"[A-Za-z]:[/' + BS * 2 + '].*Skyrim")' + "\n",
-        "tests/test_hooks.py::test_the_delete_rule_does_not_swallow_ordinary_work",
+        # Task 7: a resolved delete operand no longer uses this regex; clause (b)'s root MENTION test still does.
+        "tests/test_skyguard_deletes.py::test_a_path_that_merely_contains_skyrim_is_not_a_root_mention",
         id="install-root-resolved-not-substring-matched",
     ),
     # And the other direction: a guard that cannot work out which directory the install
@@ -52,7 +53,7 @@ MUTATIONS = [
     # that prove the install still cannot be deleted.
     pytest.param(
         "tools/skyguard/shell_rules.py",
-        'if g == "":',
+        'if roots.game == "":',
         'if False:',
         "tests/test_hooks.py::test_the_delete_guard_refuses_when_it_cannot_locate_the_install",
         id="delete-guard-fails-closed-when-no-root-resolves",
@@ -698,8 +699,8 @@ MUTATIONS = [
         # Widen the --help line range back over the code. A banner that prints too
         # much still looks like a banner, which is why this rotted unnoticed.
         "tools/esp-verify-wrapper.sh",
-        "    sed -n '2,40p' \"$0\"",
-        "    sed -n '2,44p' \"$0\"",
+        "    sed -n '2,42p' \"$0\"",
+        "    sed -n '2,46p' \"$0\"",
         "tests/test_repo_invariants.py::test_help_banner_range_stays_inside_the_comment_header",
         id="help-banner-leaks-source",
     ),
@@ -750,9 +751,10 @@ MUTATIONS = [
     pytest.param(
         # Go back to anchoring the game-directory deny on one spelling of rm. Eleven
         # other spellings then reach the install, while the README says they cannot.
-        "tools/skyguard/shell_rules.py",
-        "    if has(DESTROYER):",
-        '    if has(r"rm' + BS + 's+(-[a-z]*f[a-z]*' + BS + 's+)?"):',
+        # (Task 7: the deny now keys on the executed program, so the one spelling is the program list.)
+        "tools/skyguard/deletes.py",
+        'DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "rimraf"))',
+        'DELETE_PROGRAMS = frozenset(("rm",))',
         "tests/test_hooks.py::test_the_install_cannot_be_deleted_however_it_is_spelled",
         id="delete-guard-anchored-on-one-spelling-of-rm",
     ),
@@ -769,10 +771,11 @@ MUTATIONS = [
 
     pytest.param(
         # Put the bare `Skyrim` back in the catch-all. Every edit to a checkout of
-        # this toolkit is then annotated as an edit inside a live game install.
+        # this toolkit is then annotated as an edit inside a live game install. (Plan 5 Task 9: the
+        # catch-all is decided on the resolved zone, so the bare word goes back in THERE.)
         "tools/skyguard/write_rules.py",
-        'Data[/' + BS * 2 + ']+|My Games[/' + BS * 2 + ']+Skyrim"',
-        'Data[/' + BS * 2 + ']+|Skyrim|My Games[/' + BS * 2 + ']+Skyrim"',
+        "        install = a is not None and in_install_area(a, roots)",
+        '        install = a is not None and (in_install_area(a, roots) or "skyrim" in a.lower())',
         "tests/test_hooks.py::test_editing_this_toolkits_own_checkout_is_not_editing_a_game_install",
         id="catch-all-matches-a-bare-skyrim",
     ),
@@ -801,7 +804,8 @@ MUTATIONS = [
         "tools/skyguard/paths.py",
         'SEP = r"[/' + BS * 2 + ']+"',
         'SEP = r"[/' + BS * 2 + ']"',
-        "tests/test_hooks.py::test_the_install_cannot_be_deleted_however_it_is_spelled",
+        # Task 7: a resolved delete operand no longer uses this regex; clause (b)'s root MENTION test still does.
+        "tests/test_skyguard_deletes.py::test_mention_with_doubled_separators_still_names_the_root",
         id="separator-class-accepts-doubled-paths",
     ),
     # Stop escaping regex metacharacters in the resolved root. `C:/Program Files (x86)/`
@@ -812,7 +816,8 @@ MUTATIONS = [
         "tools/skyguard/paths.py",
         '("' + BS * 2 + '" + c if c in _META else c)',
         "c",
-        "tests/test_hooks.py::test_an_install_path_containing_regex_metacharacters_is_still_guarded",
+        # Task 7: a resolved delete operand no longer uses this regex; clause (b)'s root MENTION test still does.
+        "tests/test_skyguard_deletes.py::test_mention_of_a_root_with_regex_metacharacters_still_names_it",
         id="path-to-ere-escapes-regex-metacharacters",
     ),
     # Stop honouring the CONFIGURED config directory. MO2/Wabbajack put the INIs in the
@@ -820,7 +825,7 @@ MUTATIONS = [
     # only thing guarding their config -- and it had no test at all.
     pytest.param(
         "tools/skyguard/paths.py",
-        '    _add(config, env.get("SKYRIM_CONFIG_DIR", ""))',
+        "        _add(config, v)",
         "    pass",
         "tests/test_hooks.py::test_a_configured_config_directory_outside_documents_is_guarded",
         id="configured-config-directory-is-guarded",
@@ -1128,6 +1133,82 @@ MUTATIONS = [
         "tests/test_hooks.py::test_an_unreadable_declared_env_file_fails_closed",
         id="unreadable-declared-env-fails-closed",
     ),
+    # Rule trace (Plan 5 Task 1): the rule id is recorded where the verdict is made. Drop the audit.rule
+    # call in deny() and the log line survives (hook-canary stays green) while the trace goes silent.
+    pytest.param(
+        "tools/skyguard/shell_rules.py",
+        'audit.rule(HOOK, rid, "deny", reason)',          # Task 7: the delete deny records its own id
+        'audit.log(HOOK, "DENY", reason)',
+        "tests/test_skyguard_shell.py::test_rule_trace_records_the_rule_id",
+        id="rule-trace-records-id",
+    ),
+    pytest.param(
+        "tools/skyguard/write_rules.py",
+        'audit.rule(HOOK, "W-PLUGIN", "deny", DENY_PLUGIN)',
+        'audit.log(HOOK, "DENY", DENY_PLUGIN)',
+        "tests/test_skyguard_write.py::test_rule_trace_records_the_rule_id",
+        id="rule-trace-records-id-write",
+    ),
+    # Fix round 1: the basename splitter lost a backslash and raised re.error on every real message.
+    pytest.param(
+        "tools/skyguard/rules.py",
+        'r"[/' + BS*2 + ']+", str(value)',
+        'r"[/' + BS + ']+", str(value)',
+        "tests/test_rule_messages.py::test_a_non_legacy_rule_renders_through_message",
+        id="rule-basename-splits-on-backslash",
+    ),
+    # Plan 5 Task 2: attribute every newly-fired rule to the first rule the item fires. Counts still
+    # total correctly; the per-rule table lies, which is the one thing the pricing tool is for.
+    pytest.param(
+        "scripts/guard-corpus/price.py",
+        'out.append((rid, "newly-" + dec))',
+        'out.append((new_fired[0][0], "newly-" + dec))',
+        "tests/test_price_tool.py::test_a_broadened_rule_moves_only_that_rule",
+        id="price-attribution-per-rule",
+    ),
+    # Fix round 1: compare only whether a rule id fired, never its decision. A promotion advise->deny on
+    # a rule firing in both engines then prices as nothing.
+    pytest.param(
+        "scripts/guard-corpus/price.py",
+        "if rid not in old_dec or old_dec[rid] != dec:",
+        "if rid not in old_dec:",
+        "tests/test_price_tool.py::test_a_decision_change_on_the_same_rule_is_priced",
+        id="price-decision-change-on-same-rule",
+    ),
+    # Plan 5 Task 3: a supersession that never checks the engine still differs from the legacy verdict.
+    # A stale one then sits in intended.jsonl forever, hiding the regression that brings the old verdict back.
+    pytest.param(
+        "scripts/guard-corpus/record.py",
+        'if (now["decision"], set(now["rules"])) == was:',
+        "if False:",
+        "tests/test_guard_corpus.py::test_a_stale_supersession_is_caught",
+        id="corpus-supersession-must-be-live",
+    ),
+    # Plan 5 Task 4 (controller ruling): a supersession may not weaken a verdict unless it declares and explains it.
+    pytest.param(
+        "scripts/guard-corpus/record.py",
+        'if STRENGTH[row["decision"]] < STRENGTH[old["decision"]] and not (',
+        'if False and not (',
+        "tests/test_guard_corpus.py::test_a_supersession_that_loosens_the_decision_needs_loosens_and_a_reason",
+        id="corpus-supersession-no-silent-loosening",
+    ),
+    pytest.param(
+        "scripts/guard-corpus/record.py",
+        'if row["supersedes"] in seen:',
+        'if False:',
+        "tests/test_guard_corpus.py::test_a_legacy_row_is_superseded_by_at_most_one_intended_row",
+        id="corpus-supersession-unique",
+    ),
+    # Compare decisions and rule ids only: an intended row whose `text` is wrong stays green, and the exact
+    # wording the spec fixes is no longer held by anything.
+    pytest.param(
+        "scripts/guard-corpus/record.py",
+        'if got["text"] != row["text"]:',
+        "if False:",
+        "tests/test_guard_corpus.py::test_intended_rows_reproduce",
+        id="corpus-intended-text-exact",
+    ),
+    # ---- Plan 4 (master) entries, merged 2026-10-04 ----
     # --- instruction budget and neutrality (Plan 3) ------------------------
     # Lift the limit: an AGENTS.md that Codex silently truncates would pass.
     pytest.param("scripts/gen_agent_trees.py", "INSTRUCTION_BUDGET = 32768", "INSTRUCTION_BUDGET = 10 ** 9",
@@ -1195,8 +1276,8 @@ MUTATIONS = [
     # status back into the decision and the telemetry would read a blind guard as a working one.
     pytest.param(
         "tools/skyguard/codes.py",
-        'status = "failed" if ".NO_" in code or code == "wrapper.INERT" else v.status',
-        "status = v.status",
+        '    status = "failed" if _inert(code) else v.status',
+        "    status = v.status",
         "tests/test_skyguard_codes.py::test_inert_refusals_are_failed_not_evaluated",
         id="inert-refusal-is-status-failed",
     ),
@@ -1689,17 +1770,17 @@ MUTATIONS = [
     # unclassified verdict is one nobody decided about.
     pytest.param(*m[:4], id=m[4])
     for m in [
-        ("tools/skyguard/codex_rules.py", '"pattern": ["reg", "delete"]', '"pattern": ["reg"]',
+        ("tools/skyguard/codex_rules.py", '{"pattern": [prog, "delete", key],', '{"pattern": [prog, "delete"],',
          "tests/test_codex_rules.py::test_every_prefix_rule_is_a_subset_of_its_hook_deny",
          "codex-rules-prefix-widened"),
-        ("tools/skyguard/codex_rules.py", '"pattern": ["reg.exe", "delete"], "decision": "forbidden"',
-         '"pattern": ["reg.exe", "delete"], "decision": "prompt"',
+        ("tools/skyguard/codex_rules.py", '"decision": "forbidden", "code": "shell.DENY_REGISTRY",',
+         '"decision": "prompt", "code": "shell.DENY_REGISTRY",',
          "tests/test_codex_rules.py::test_buckets_sum", "codex-rules-decision-drifts-from-bucket"),
         ("tools/skyguard/codex_rules.py", '    "shell.DENY_REGISTRY": (\n        "forbidden",',
          '    "shell.DENY_REGISTRY": (\n        "hook_only",',
          "tests/test_codex_rules.py::test_buckets_sum", "codex-rules-forbidden-bucket-without-rule"),
         ("tools/skyguard/codex_rules.py",
-         '    "shell.NO_ROOT_DENY": ("hook_only", "analysis failure, not a command"),\n', "",
+         '    "shell.NO_ROOT_DENY": ("hook_only", _INERT),\n', "",
          "tests/test_codex_rules.py::test_every_shell_verdict_is_classified", "codex-rules-verdict-unclassified"),
         ("tools/skyguard/codex_rules.py",
          '        out.append("    not_match = {},".format(_s(r["not_match"])))\n', "",
@@ -1745,8 +1826,7 @@ MUTATIONS = [
          "codex-relative-path-not-resolved"),
         # A shell verdict nobody classified for the Codex .rules file (the trip-wire Plan 5 relies on).
         ("tools/skyguard/codex_rules.py",
-         '    "shell.DENY_REGISTRY": (\n        "forbidden",\n        "the hook denies every `reg delete`; '
-         '`reg delete` / `reg.exe delete` prefixes are a strict subset"),\n', "",
+         '    "shell.S-DEL-MO2": ("hook_only", _PATH),\n', "",
          "tests/test_codex_rules.py::test_every_shell_verdict_is_classified", "codex-unclassified-shell-verdict"),
         # The conformance harness itself: an `ask` would pass as a deny if the shape gate stopped checking.
         ("tests/test_codex_conformance.py",
@@ -1755,9 +1835,9 @@ MUTATIONS = [
          "tests/test_codex_conformance.py::test_the_shape_check_can_fail", "codex-conformance-shape-gate-passes-ask"),
         # The plugin rule stops covering .esm: a patch heredoc onto Data/Skyrim.esm (a Bash call carrying a
         # patch) runs. Killed by the shell-patch DERIVED variant of the captured heredoc shape.
-        ("tools/skyguard/write_rules.py",
-         r'''grep(r"\.(esp|esm|esl|bsa|ba2)[\s.]*$", file_path)''',
-         r'''grep(r"\.(esp|esl|bsa|ba2)[\s.]*$", file_path)''',
+        ("tools/skyguard/targets.py",
+         r'''PLUGIN_FILE = r"\.(esp|esm|esl|bsa|ba2)[\s.]*$"''',
+         r'''PLUGIN_FILE = r"\.(esp|esl|bsa|ba2)[\s.]*$"''',
          "tests/test_codex_conformance.py::test_conformance[derived:0.160.0/codex-PreToolUse-Bash-2:Data/Skyrim.esm]",
          "codex-plugin-rule-misses-esm"),
         # An `ask` loses the text that tells the model the user must run it themselves.
@@ -1797,6 +1877,1328 @@ MUTATIONS = [
          r'''        [void]$proc.WaitForExit()''',
          "tests/test_codex_entry.py::test_a_hung_engine_is_a_deny", "codex-wrapper-has-no-deadline"),
     ]
+]
+
+
+_SR = "tools/skyguard/shell_rules.py"
+# Plan 5 Task 6: S-RESAVER-APPLY re-based on shellparse. The Task 4 regex mutations went with the regexes (the
+# wrappers, -c strings, heredoc consumers, continuations and quoting they covered are now parser branches, each with
+# its own shellparse-* mutation). One mutation per clause of the parser rule; each names the ROW that must go red.
+# (id suffix, find, replace, row in test_resaver_rows)
+_SR_CLAUSES = [
+    ("program", "    if e.program in RESAVER_PROGRAMS:", "    if False:", "t04-apply"),
+    ("java", 'return e.program == "java" and any(', 'return False and any(', "t04-java"),
+    ("apply-same-cmd", "    if RESAVER_APPLY not in words:", "    if False:", "t04-apply-elsewhere"),
+    ("whole-word-op", 'return next((a for a in words if a in RESAVER_OPS), "")',
+     'return next((o for a in words for o in RESAVER_OPS if o in a), "")', "t04-op-in-filename"),
+    ("op-set-global", '("set-global", "set-var", "clean",', '("set-var", "clean",', "t04-set-global"),
+    ("op-set-var", '("set-global", "set-var", "clean",', '("set-global", "clean",', "t04-set-var"),
+    ("op-clean", '("set-global", "set-var", "clean",', '("set-global", "set-var",', "t04-clean"),
+    ("op-reset-havok", '"reset-havok", "cleanse-formlists",', '"cleanse-formlists",', "t04-apply"),
+    ("op-cleanse-formlists", '"reset-havok", "cleanse-formlists",', '"reset-havok",', "t04-apply-env"),
+    ("op-list", '"cleanse-formlists", "remove-created")', '"cleanse-formlists")', "t04-apply-chain"),
+    ("save-from-segment", 'or (lambda m: m.group(0) if m else "")(RESAVER_TEXT_SAVE.search(e.segment))', 'or ""',
+     "t04-find-exec"),
+    ("opaque-is-unresolved", "    if not parsed.ok or opaque:", "    if not parsed.ok:", "t06-resaver-variable-program"),
+    ("parse-fail-falls-back", "    if not parsed.ok or opaque:", "    if opaque:", "t06-resaver-parse-fail"),
+    ("fallback-needs-apply", 'if "resaver" not in low or RESAVER_APPLY not in low:', 'if "resaver" not in low:',
+     "t06-resaver-variable-dry"),
+    ("fallback-op-lookbehind", "re.compile(r\"(?<![^\\s\\\"'])(\" + \"|\".join(RESAVER_OPS)",
+     "re.compile(r\"(\" + \"|\".join(RESAVER_OPS)", "t06-resaver-variable-op-suffix"),
+    ("fallback-op-lookahead", "+ r\")(?![^\\s\\\"'])\", re.ASCII", "+ r\")\", re.ASCII",
+     "t06-resaver-variable-op-in-filename"),
+    # Task 7: decide() parses once (with the dialect) and hands the parse to the ReSaver rule.
+    ("dialect", "    parsed = shellparse.parse(command, shell)\n    dels", "    parsed = shellparse.parse(command)\n    dels",
+     "t04-heredoc-py"),
+]
+MUTATIONS += [
+    pytest.param(_SR, find, rep, "tests/test_skyguard_shell.py::test_resaver_rows[" + row + "]",
+                 id="rule-S-RESAVER-APPLY-" + suffix)
+    for suffix, find, rep, row in _SR_CLAUSES
+]
+MUTATIONS += [
+    # R7 now lives in the parser: a heredoc body fed to a shell is commands. Treat every body as data and the
+    # ReSaver run inside `bash <<'EOF'` must stop asking (the Task 5 entry names the parser test; this one the rule).
+    pytest.param("tools/skyguard/shellparse.py", "if self.bodies and program in ALL_SHELLS and self.recurse:",
+                 "if False:", "tests/test_skyguard_shell.py::test_resaver_rows[t04-bash-heredoc]",
+                 id="rule-S-RESAVER-APPLY-heredoc-consumer"),
+]
+# Task 4 fix rounds 2-3: a hook that answers after its timeout is dropped, so each cause of superlinear matching is
+# put back and the timing test must go red. (id suffix, file, find, replace, timing shape that must fail)
+# Task 6 removed the entries whose regexes no longer exist (env-ambiguity, unbounded-path, java/find lazy bounds) and
+# the resaver-prefilter one: the parser rejects or finishes every adversarial shape in milliseconds (measured: 80 KB
+# of `(` 3 ms, 40,000 words 6 ms), so the early return is an optimisation no longer guarding a timeout.
+_SR_TIMING = [
+    # Task 7: the `rm ... .*root` advice is gone (R10); the mv/cp move advice still relies on the split.
+    # Task 9: the mv/cp text note is gone; the registry text fallback (`Remove-ItemProperty.*Bethesda`) still splits.
+    ("timing-dotstar-scan", "tools/skyguard/grep.py", "parts = split_dotstar(pattern)", "parts = None",
+     "registry-parse-fail-words"),
+    # fix round 3: a separator run must start a match only at its first character, in the install-path regex
+    # (shared by every delete/move/sed/redirect rule), and the relative-Data rule must not rescan a run.
+    ("timing-lead-lookbehind-rm", "tools/skyguard/paths.py", r'LEAD = r"(?<![/\\])[/\\]+"', r'LEAD = r"[/\\]+"',
+     "rm-slash-run"),
+    # Task 9: the sed note no longer reads the install-path regex; its backslash-run twin is the delete fallback.
+    ("timing-lead-lookbehind-sed", "tools/skyguard/paths.py", r'LEAD = r"(?<![/\\])[/\\]+"', r'LEAD = r"[/\\]+"',
+     "rm-backslash-run"),
+    # (Task 7 removed timing-relative-data-run: RELATIVE_DATA_DELETE is gone; relative deletes resolve from cwd.)
+    # Task 9: the registry text test lives on as anchored.py's fallback; still two greps, never one alternation.
+    ("timing-registry-split", "tools/skyguard/anchored.py",
+     "    return grep(REG_DELETE_TEXT, text) or grep(REG_PROPERTY_TEXT, text)",
+     '    return grep("(" + REG_DELETE_TEXT + "|" + REG_PROPERTY_TEXT + ")", text)',
+     "tests/test_skyguard_timing.py::test_the_registry_rule_is_linear"),
+    ("split-safe-list", "tools/skyguard/grep.py", "or pattern[:cut] not in SPLIT_SAFE_FIRST", "",
+     "tests/test_skyguard_timing.py::test_split_dotstar_refuses_what_it_cannot_prove_equivalent"),
+]
+MUTATIONS += [
+    pytest.param(f, find, rep,
+                 shape if shape.startswith("tests/") else
+                 "tests/test_skyguard_timing.py::test_shell_rules_stay_fast_on_adversarial_input[" + shape + "]",
+                 id="rule-S-RESAVER-APPLY-" + suffix if f == _SR else "guard-" + suffix)
+    for suffix, f, find, rep, shape in _SR_TIMING
+]
+# Plan 5 Task 6: targets (operand resolution, zones) and skyrim-paths.env read as data.
+_TG = "tools/skyguard/targets.py"
+_PA = "tools/skyguard/paths.py"
+MUTATIONS += [
+    pytest.param(_TG, "    base = normalise_cwd(cwd)\n    try:", "    base = None\n    try:",
+                 "tests/test_targets.py::test_relative_word_resolves_against_the_payload_cwd",
+                 id="targets-cwd-used"),
+    pytest.param(_PA, 'return posixpath.normpath("/" + "/".join(parts).lstrip("/")).lstrip("/")',
+                 'return "/".join(parts).lstrip("/")',
+                 "tests/test_targets.py::test_absolute_spellings_bash", id="targets-dotdot"),
+    pytest.param(_PA, "        m = _MSYS_DRIVE.match(p)", "        m = None",
+                 "tests/test_targets.py::test_absolute_spellings_bash", id="targets-msys"),
+    pytest.param(_TG, "    if any(_has_glob(c, dialect) for c in comps[:-1]):", "    if False:",
+                 "tests/test_targets.py::test_unresolvable_is_none", id="targets-glob-dir-unresolvable"),
+    pytest.param(_TG, '        raise _Unresolvable(word)                        # $(...), $1, ${x:-y}, a stray backtick',
+                 "        pass", "tests/test_targets.py::test_unresolvable_is_none", id="targets-unknown-var-unresolvable"),
+    pytest.param(_TG, '            return "scratch"', '            return "install"',
+                 "tests/test_targets.py::test_zone", id="targets-scratch-allowlist"),
+    pytest.param(_TG, "if _under(p, dl.rstrip(\"/\") or dl) and len(dl) > best_len:",
+                 "if _under(p, dl.rstrip(\"/\") or dl) and len(dl) >= 0:",
+                 "tests/test_targets.py::test_mo2_nested_inside_the_install_wins", id="targets-most-specific-wins"),
+    pytest.param(_TG, '            return paths.norm_abs(s, msys=True)          # /c/x (Git Bash drive), /tmp/x (POSIX)',
+                 "            return None", "tests/test_targets.py::test_absolute_spellings_bash",
+                 id="targets-bash-posix-absolute"),
+    pytest.param(_PA, "        for v in ([self.env[key]] if self.env.get(key) else []) + list(self.file.get(key, ())):",
+                 "        for v in (list(self.file.get(key, ())) or ([self.env[key]] if self.env.get(key) else [])):",
+                 "tests/test_skyguard_core.py::test_env_and_file_are_a_union_and_both_quote_styles_parse",
+                 id="paths-union"),
+    pytest.param(_PA, "                    bad.append((path.name, key))", "                    pass",
+                 "tests/test_skyguard_core.py::test_a_malformed_protection_value_is_reported_by_key_not_skipped",
+                 id="paths-malformed-visible"),
+    pytest.param(_PA, "                if c in \"$`\":", "                if False:",
+                 "tests/test_skyguard_core.py::test_a_malformed_protection_value_is_reported_by_key_not_skipped",
+                 id="paths-strict-dq-expansion"),
+    pytest.param(_PA, "                value = None                                          # a relative root protects nothing",
+                 "                pass",
+                 "tests/test_skyguard_core.py::test_a_malformed_protection_value_is_reported_by_key_not_skipped",
+                 id="paths-strict-relative-root"),
+    pytest.param(_PA, "            value = None if (m.group(4) or not flags_ok) else parse_value(m.group(5))",
+                 "            value = None if (not flags_ok) else parse_value(m.group(5))",
+                 "tests/test_skyguard_core.py::test_a_malformed_protection_value_is_reported_by_key_not_skipped",
+                 id="paths-strict-space-before-equals"),
+    pytest.param(_PA, "            if rest == \"\" or rest.startswith(\"#\"):\n                break\n            return None",
+                 "            break",
+                 "tests/test_skyguard_core.py::test_a_malformed_protection_value_is_reported_by_key_not_skipped",
+                 id="paths-strict-unquoted-space"),
+    pytest.param(_PA, "    bad = env.malformed if isinstance(env, PathsConfig) else ()", "    bad = ()",
+                 "tests/test_skyguard_core.py::test_a_malformed_value_denies_naming_the_key",
+                 id="rule-S-INERT-CONFIG-roots-carry"),
+    pytest.param(_SR, "    if roots.malformed:", "    if False:",
+                 "tests/test_skyguard_core.py::test_a_malformed_value_denies_naming_the_key",
+                 id="rule-S-INERT-CONFIG-deny"),
+    pytest.param(_PA, "    if environ.get(\"PLUGINS_TXT\"):", "    if False:",
+                 "tests/test_paths_precedence.py::test_python_lookup", id="paths-plugins-txt-wins"),
+    pytest.param("tools/xelib/active-plugins.js", "    if (process.env.PLUGINS_TXT) return process.env.PLUGINS_TXT;",
+                 "", "tests/test_paths_precedence.py::test_node_agrees_with_python", id="paths-js-plugins-txt-wins"),
+    pytest.param("tools/skyguard/engine.py", 'cwd=req.cwd or "", shell=req.shell or ""))',
+                 'cwd=req.cwd or ""))',
+                 "tests/test_skyguard_claude_adapter.py::test_run_passes_the_shell_dialect", id="run-passes-shell"),
+    pytest.param("tools/skyguard/adapters/claude.py", '        "cwd": cwd.replace("\\x00", "") if isinstance(cwd, str) else "",',
+                 '        "cwd": "",', "tests/test_skyguard_claude_adapter.py::test_cwd_is_passed_raw",
+                 id="adapter-extracts-cwd"),
+    pytest.param("setup.sh", "    printf 'SKYRIM_MO2_MODS=%s" + BS + "n' \"$(sq \"$MO2_MODS\")\"", "",
+                 "tests/test_setup_paths.py::test_setup_writes_the_mo2_roots_the_guard_reads",
+                 id="setup-writes-mo2-keys"),
+]
+# Task 6 fix round 1 (adversarial review): one mutation per new clause. (id, file, find, replace, test)
+_T6R1 = [
+    ("targets-covers-ancestor", _TG, "if len(pc) <= len(rc) and all(", "if len(pc) == len(rc) and all(",
+     "tests/test_targets.py::test_a_path_that_contains_or_globs_a_protected_root_covers_it"),
+    ("targets-covers-glob", _TG,
+     "return any(_glob_match(alt, comp) if (_GLOB_CHARS & set(alt)) else alt == comp for alt in _braces(pat))",
+     "return pat == comp", "tests/test_targets.py::test_a_path_that_contains_or_globs_a_protected_root_covers_it"),
+    ("targets-covers-braces", _TG, "else alt == comp for alt in _braces(pat))", "else alt == comp for alt in [pat])",
+     "tests/test_targets.py::test_a_path_that_contains_or_globs_a_protected_root_covers_it"),
+    ("targets-covers-documents", _TG, '    if len(pc) >= 2 and pc[-1] == "documents":', "    if False:",
+     "tests/test_targets.py::test_covers_protected_includes_the_root_itself_and_documents_ancestors"),
+    ("targets-short-name", _TG, "    if _SHORT_NAME.search(p):", "    if False:",
+     "tests/test_targets.py::test_an_8dot3_short_name_is_unresolvable"),
+    ("targets-short-name-cwd", _TG, "return None if p is None or _SHORT_NAME.search(p) else p", "return p",
+     "tests/test_targets.py::test_a_short_name_cwd_makes_relative_words_unresolvable"),
+    ("targets-loopback-share", _TG, "if _LOOPBACK.fullmatch(host) or (me and host.lower() == me):", "if False:",
+     "tests/test_targets.py::test_a_loopback_admin_share_is_the_drive"),
+    ("targets-other-host-share", _TG, "            return None\n    return p", "    return p",
+     "tests/test_targets.py::test_another_hosts_admin_share_is_unresolvable_and_a_plain_share_is_outside"),
+    ("targets-literal-dollar", _TG, "    if _LIVE_DOLLAR.search(out) or", '    if "$" in out or',
+     "tests/test_targets.py::test_a_loopback_admin_share_is_the_drive"),
+    ("targets-ntfs-stream", _PA, '        if ":" in c:', "        if False:",
+     "tests/test_targets.py::test_an_ntfs_stream_suffix_is_stripped"),
+    ("targets-scratch-not-tools-data", _TG, "rel[0] not in paths.SCRATCH_EXCLUDED_TOP and ", "",
+     "tests/test_targets.py::test_scratch_never_covers_tools_or_data"),
+    ("paths-bom", _PA, 'decode("utf-8-sig")', 'decode("utf-8")',
+     "tests/test_skyguard_core.py::test_a_bom_does_not_hide_the_first_key"),
+    ("paths-lone-cr", _PA, '        for line in text.split("\\n"):', "        for line in text.splitlines():",
+     "tests/test_skyguard_core.py::test_a_lone_cr_does_not_split_a_line"),
+    ("paths-declare", _PA, "(export|declare|typeset|readonly)", "(export)",
+     "tests/test_skyguard_core.py::test_declare_forms_are_read_like_bash"),
+    ("paths-declare-flags", _PA, 'flags_ok = m.group(1) in (None, "export") or _SAFE_FLAGS.fullmatch(m.group(2) or "")',
+     "flags_ok = True", "tests/test_skyguard_core.py::test_a_declare_that_changes_the_value_is_malformed"),
+    ("paths-protection-key-mention", _PA, "k = _PROT_MENTION.search(line)", "k = None",
+     "tests/test_skyguard_core.py::test_a_declare_that_changes_the_value_is_malformed"),
+    ("paths-hash-mid-word", _PA, "[A-Za-z0-9_./:,+@%=#-]+", "[A-Za-z0-9_./:,+@%=-]+",
+     "tests/test_skyguard_core.py::test_value_grammar_reads_what_bash_reads"),
+    ("paths-mo2-overwrite", _PA, '_values(env, "SKYRIM_MO2_MODS") + _values(env, "SKYRIM_MO2_OVERWRITE")',
+     '_values(env, "SKYRIM_MO2_MODS")', "tests/test_skyguard_core.py::test_mo2_keys_become_mo2_dirs"),
+    ("paths-mo2-mods", _PA, '_values(env, "SKYRIM_MO2_MODS") + _values(env, "SKYRIM_MO2_OVERWRITE")',
+     '_values(env, "SKYRIM_MO2_OVERWRITE")', "tests/test_skyguard_core.py::test_mo2_keys_become_mo2_dirs"),
+    ("timing-braces-linear", _TG, "            j = next_close[i + 1]",
+     "            j = comp.find('}', i + 1)\n            j = n if j < 0 else j",
+     "tests/test_skyguard_timing.py::test_brace_expansion_is_linear"),
+    # fix round 2
+    ("targets-covers-literal-first", _TG, "    if pat == comp:\n        return True", "    if False:\n        return True",
+     "tests/test_targets.py::test_a_root_with_literal_glob_characters_covers_itself"),
+    ("targets-brace-separator-unresolvable", _TG, 'if dialect == "bash" and any("," in g and "/" in g',
+     'if False and any("," in g and "/" in g', "tests/test_targets.py::test_a_brace_group_holding_a_separator_is_unresolvable"),
+    ("targets-scratch-not-claude", _PA, '("tools", "data", ".claude")', '("tools", "data")',
+     "tests/test_targets.py::test_claude_dir_is_never_scratch"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T6R1]
+for _suffix, _find, _rep in [
+    ("claude", r'r"(^|(?<![/\\])[/\\]+)\.claude', r'r"(^|[/\\]+)\.claude'),
+    ("node-modules", r'r"(?<![/\\])[/\\]+node_modules', r'r"[/\\]+node_modules'),
+    ("skse-ini", r'r"(?<![/\\])[/\\]+Data[/\\]+SKSE', r'r"[/\\]+Data[/\\]+SKSE'),
+    ("install", r'r"(^|(?<![/\\])[/\\]+)Data', r'r"(^|[/\\]+)Data'),
+]:
+    MUTATIONS.append(pytest.param(
+        # Task 8: the SKSE-ini pattern moved to targets.py (one classifier for both guards)
+        "tools/skyguard/targets.py" if _suffix == "skse-ini" else "tools/skyguard/write_rules.py", _find, _rep,
+        "tests/test_skyguard_timing.py::test_write_rules_stay_fast_on_adversarial_paths[separator-run]",
+        id="guard-timing-separator-run-lookbehind-" + _suffix,
+    ))
+# Plan 5 Task 5: shellparse. A misparse is a silent allow once rules sit on the parser, so every executed-code
+# branch is deleted here and the named test must go red. (id suffix, find, replace, test in tests/test_shellparse.py)
+_SP = "tools/skyguard/shellparse.py"
+_SP_CLAUSES = [
+    # the seven the plan names
+    ("subst-recursion", 'self._push(f, "subst", i, True)                     # bash $( ... ): commands, parsed in place',
+     'i = self._pairs()[i + 1] - 1; w.add("$(...)")', "test_bash_substitutions_are_parsed"),
+    ("heredoc-consumer", "if self.bodies and program in ALL_SHELLS and self.recurse:", "if False:",
+     "test_t04_rows_come_out_as_executed_commands[t04-bash-heredoc]"),
+    ("pwsh-alias", '"ri": "remove-item", "rm": "remove-item"', '"rm": "remove-item"', "test_pwsh_aliases"),
+    ("find-delete", 'if w == "-delete":', "if False:", "test_find_delete_is_a_delete_on_the_start_paths"),
+    ("bash-c", 'self.reparse(v[j], "bash")', "pass", "test_bash_shell_strings_reparsed_in_their_dialect"),
+    ("pwsh-command", 'self.reparse(" ".join(rest), "powershell")', "pass",
+     "test_bash_shell_strings_reparsed_in_their_dialect"),
+    ("never-raises", "raise ParseError(\"unterminated ' quote\")    # bash single quote",
+     "raise ValueError(\"unterminated ' quote\")", "test_never_raises_on_random_text_or_corpus_commands"),
+    # executed-code paths
+    ("backtick-recursion", '_sub("".join(parts), "bash", self.depth + 1, f.cd, self.ctx)', "pass",
+     "test_bash_substitutions_are_parsed"),
+    ("procsubst", 'self._push(f, "proc", i, True)', 'i = self._pairs()[i + 1] - 1; self._word(f).add("<(...)")',
+     "test_bash_substitutions_are_parsed"),
+    ("heredoc-pipe-to-shell", "            if not readers:\n                continue",
+     "            if True:\n                continue", "test_heredoc_piped_into_a_shell_is_parsed"),
+    ("herestring", 'if op.endswith("<<<"):', "if False:", "test_heredoc_piped_into_a_shell_is_parsed"),
+    ("interpreter-kind", "if program in INTERPRETERS or _PYTHON.fullmatch(program):", "if False:",
+     "test_heredoc_to_an_interpreter_is_code_not_commands"),
+    ("find-exec", 'if w in ("-exec", "-execdir", "-ok", "-okdir"):', "if False:",
+     "test_find_exec_runs_its_command_on_the_start_paths"),
+    ("cmd-c", 'self.reparse(" ".join(rest), "cmd")', "pass", "test_bash_shell_strings_reparsed_in_their_dialect"),
+    ("eval", 'self.reparse(" ".join(v[k + 1:]), "bash")', "pass",
+     "test_bash_shell_strings_reparsed_in_their_dialect"),
+    ("iex", 'self.reparse(s, "powershell")', "pass", "test_pwsh_blocks_and_subexpressions_parsed"),
+    ("encoded-command", 'self.reparse(text, "powershell")', "pass", "test_pwsh_encoded_command_is_decoded"),
+    ("script-file", "self.emit(program_name(v[j], self.d, self.y[j]), j + 1)", "self.emit(p, k + 1)",
+     "test_bash_script_file_runs_the_script"),
+    ("wrap-sudo", 'if p in ("sudo", "doas"):', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-env", 'if p == "env" and self.d == "bash":', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-command", 'if p in ("command", "builtin") and self.d == "bash":', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-exec", 'if p == "exec" and self.d == "bash":', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-nohup-time", 'if p in ("nohup", "winpty", "chronic") or (p == "time" and self.d == "bash"):', "if False:",
+     "test_bash_wrappers_unwrapped"),
+    ("wrap-nice", 'if p == "nice":', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-timeout", 'if p == "timeout" and self.d == "bash":', "if False:", "test_bash_wrappers_unwrapped"),
+    ("wrap-xargs", 'if p == "xargs":', "if False:", "test_bash_xargs_runs_its_command_on_stdin"),
+    ("wrap-source", 'if p in ("source", ".") and self.d == "bash" or (p == "." and self.d == "powershell"):',
+     "if False:", "test_bash_script_file_runs_the_script"),
+    ("assign-skip", "ws = ws[k:]", "ws = ws[0:]", "test_bash_assignment_prefixes_skipped"),
+    ("r6-literal-reading", "if d == \"bash\" and any(w.bs for w in ws):", "if False:",
+     "test_unquoted_backslash_is_read_both_ways_r6"),
+    ("comment", 'if c == "#" and f.word is None:                     # bash comment', "if False:",
+     "test_comments_dropped"),
+    ("keyword-then", '_BASH_DROP = frozenset(("if", "then",', '_BASH_DROP = frozenset(("if",',
+     "test_bash_compound_commands"),
+    ("case", 'if v == "case":', "if False:", "test_bash_compound_commands"),
+    ("function-def", 'if j < self.n and t[j] == ")":                      # name() -- a function definition',
+     "if False:", "test_bash_compound_commands"),
+    ("pipe-stdin", 'stdin = "pipe" if rec.stage > 0 else ""', 'stdin = ""', "test_pipeline_stage_reads_the_pipe"),
+    # cd_before
+    ("cd-tracked", "                    self.track_cd(f, cmd)", "                    pass", "test_bash_cd_before"),
+    ("cd-not-from-a-pipeline", 'if sep not in ("|", "|&") and cmd.stage == 0:', "if True:", "test_bash_cd_before"),
+    ("cd-subshell-scope", '        self.frames.pop()\n        p = self.frames[-1]\n        if f.kind in ("subst", "proc"):',
+     '        self.frames.pop()\n        p = self.frames[-1]\n        p.cd = f.cd\n        if f.kind in ("subst", "proc"):',
+     "test_bash_cd_before"),
+    # fail closed (R4)
+    ("token-cap", "if self.tokens > MAX_TOKENS:", "if False:", "test_too_many_tokens_fails_closed"),
+    ("depth-cap-frames", "if len(self.frames) + self.depth > MAX_DEPTH:", "if False:",
+     "test_nesting_deeper_than_eight_fails_closed"),
+    ("depth-cap-reparse", "    if depth > MAX_DEPTH:", "    if False:", "test_nested_reparse_counts_toward_the_depth"),
+    ("unterminated-heredoc", "raise ParseError(\"unterminated heredoc (no line '%s')\" % h.delim[:40])",
+     "h.body = t[start:]; pos = n + 1; break", "test_unparseable_is_ok_false_with_a_reason"),
+    ("unterminated-dq", "raise ParseError('unterminated \" quote')            # bash double quote", "pass",
+     "test_unparseable_is_ok_false_with_a_reason"),
+    ("unbalanced-subst", 'raise ParseError("unbalanced ( or $( or <(")', "self.frames = self.frames[:1]",
+     "test_unparseable_is_ok_false_with_a_reason"),
+    ("stray-paren", 'raise ParseError("unbalanced )")', "self.i += 1; return",
+     "test_unparseable_is_ok_false_with_a_reason"),
+    # PowerShell
+    ("pwsh-block", 'self._push(f, "block", self.i, True)', 'self._push(f, "hash", self.i, True)',
+     "test_pwsh_blocks_and_subexpressions_parsed"),
+    ("pwsh-subexpression", 'self._push(f, "subst", i, True)                     # PowerShell $( ... ) subexpression',
+     'i = self._pairs()[i + 1] - 1; w.add("$(...)")', "test_pwsh_blocks_and_subexpressions_parsed"),
+    ("pwsh-io-file", "io = _io_program(m.group(1), m.group(2))", 'io = ""',
+     "test_pwsh_io_file_calls_are_synthetic_execs"),
+    ("pwsh-param-prefix", "if key and want.startswith(key):", "if key and want == key:",
+     "test_pwsh_named_parameters"),
+    ("pwsh-call-operator", "self._cmd(f, i).call = True                    # & call operator", "pass",
+     "test_pwsh_separators_and_call"),
+    ("pwsh-expression", 'if v[k][:1] == "{" or not self.call and (', "if False and (",
+     "test_pwsh_expressions_and_here_strings_are_not_commands"),
+    ("pwsh-hash-discarded", "drop = set(id(r) for r in mine)", "drop = set()",
+     "test_pwsh_expressions_and_here_strings_are_not_commands"),
+    # fix round 1 (adversarial review): one per new clause
+    # fix round 3
+    ("r3-cast-not-call", "call = bool(m or tail)", "call = True", "test_r3_pwsh_cast_is_a_command_group_not_a_call"),
+    ("r3-saps-array", 'if a.startswith("@(") and a.endswith(")"):', "if False:",
+     "test_r3_start_process_array_argument"),
+    ("r3-saps-dynamic-opaque", "elif dyn:                                           # -ArgumentList $args: not known",
+     "elif False:", "test_r3_start_process_unknown_arguments_are_opaque"),
+    ("r3-ps-array-literal-only",
+     "if sc.synth or any(w.dyn for w in words) or any(r.redirs or r.heredocs for r in sc.recs):", "if False:",
+     "test_r3_start_process_unknown_arguments_are_opaque"),
+    ("r3-printf-not-emulated", '_TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))',
+     '_TEXT_SOURCES = frozenset(("echo", "printf", "write-output", "write-host", ""))',
+     "test_r3_unreconstructable_stdin_into_a_shell_or_interpreter_is_opaque"),
+    ("r3-echo-e", ' and not (e.program == "echo" and e.argv and _ECHO_OPTS.match(e.argv[0]))', "",
+     "test_r3_unreconstructable_stdin_into_a_shell_or_interpreter_is_opaque"),
+    ("r3-interpreter-reader",
+     'e.program in ALL_SHELLS or (consumer_kind(e.program) == "interpreter" and _reads_code(e.argv)))]',
+     "e.program in ALL_SHELLS)]", "test_r3_unreconstructable_stdin_into_a_shell_or_interpreter_is_opaque"),
+    ("r3-literal-code-to-body", r'ctx.out[j] = reader._replace(stdin_body="\n".join(texts))', "pass",
+     "test_r3_literal_stdin_into_an_interpreter_is_code_not_opaque"),
+    ("r3-reads-code", "    for a in argv:\n        if a in _CODE_OPTS:",
+     "    return True\n    for a in argv:\n        if a in _CODE_OPTS:",
+     "test_r3_literal_stdin_into_an_interpreter_is_code_not_opaque"),
+    ("r3-xargs-opaque",
+     'if program in ALL_SHELLS or (consumer_kind(program) == "interpreter" and _reads_code(e.argv)):',
+     "if False:", "test_r3_xargs_input_is_arguments_not_a_script"),
+    ("r3-via-xargs-skip", "id(e) not in ctx.via_xargs and (", "True and (",
+     "test_r3_xargs_input_is_arguments_not_a_script"),
+    ("r3-c-without-string",
+     "self.opaque(k)                      # `xargs -0 sh -c`: the command string comes from elsewhere", "pass",
+     "test_r3_unreconstructable_stdin_into_a_shell_or_interpreter_is_opaque"),
+    ("r3-env-cluster", 'if len(w) > 2 and w[0] == "-" and w[1] != "-":  # clustered', "if False:  # clustered",
+     "test_r3_env_combined_flags"),
+    ("r3-cmd-pre-switch", "while j < len(v) and _CMD_PRE_SWITCH.match(v[j]):", "while False:",
+     "test_r3_cmd_switches_before_c"),
+    ("r3-input-cap", "if len(command) > MAX_INPUT_CHARS:", "if False:",
+     "test_r3_input_larger_than_the_cap_is_unsure"),
+    ("r1-cmd-eq-token",'if c == "=" and t.startswith("==", self.i):', "if False:",
+     "test_r1_cmd_if_condition_is_not_the_program"),
+    ("r1-cmd-slash-split", "if _CMD_NAME.fullmatch(head):", "if False:", "test_r1_cmd_forms"),
+    ("r1-cmd-dot", 'b = b.rstrip(".")', "b = b", "test_r1_cmd_forms"),
+    ("r1-cmd-for-body", 'if first == "for" and last == "in" and f.word is None:',
+     'if first == "for" and f.word is None:', "test_r1_cmd_forms"),
+    ("r1-cmd-for-command", 'self.reparse(inner[1:-1], "cmd")', "pass", "test_r1_cmd_forms"),
+    ("r1-cmd-rem-ends-at-amp", "e = _CMD_REM_END.search(t, self.i)", "e = None", "test_r1_cmd_forms"),
+    ("r1-comspec", 'if p == "?" and _cmd_c_follows(v, k + 1):', "if False:", "test_r1_cmd_forms"),
+    ("r1-time-keyword", 'if v == "time":', "if False:", "test_r1_bash_time_and_coproc"),
+    ("r1-time-p", 'if after_time and v in ("-p", "--"):', "if False:", "test_r1_bash_time_and_coproc"),
+    ("r1-coproc", 'if v == "coproc":', "if False:", "test_r1_bash_time_and_coproc"),
+    ("r1-coproc-name", "if coproc and _VARNAME.fullmatch(v):", "if False:", "test_r1_bash_time_and_coproc"),
+    ("r1-skipped-subst", "m = _SUBST_START.search(t, j, b)", "m = None",
+     "test_r1_skipped_spans_with_substitutions_are_parsed"),
+    ("r1-skipped-array", "self._skipped(f, i + 1, k, False)", "pass",
+     "test_r1_array_literals_are_scanned_for_substitutions"),
+    ("r1-skipped-brace", "self._skipped(f, i + 2, end - 1, False)", "pass",
+     "test_r1_skipped_spans_with_substitutions_are_parsed"),
+    ("r1-skipped-dollar-arith", "self._skipped(f, i + 3, k - 1, True)", "pass",
+     "test_r1_skipped_spans_with_substitutions_are_parsed"),
+    ("r1-skipped-dparen", "self._skipped(f, i + 2, k - 1, True)", "pass",
+     "test_r1_double_paren_that_reads_as_a_command_is_unsure"),
+    ("r1-arith-cmdlike", "if not found and arith and _CMDLIKE.match(t, a, b):", "if False:",
+     "test_r1_double_paren_that_reads_as_a_command_is_unsure"),
+    ("r1-pwsh-herestring", 'if nx in _DQ and "$(" in t[j:k]:', "if False:",
+     "test_r1_pwsh_here_string_with_a_subexpression_is_unsure"),
+    ("r1-pwsh-opaque-method", "if tail and tail.group(1).lower() in _PS_OPAQUE_METHODS:", "if False:",
+     "test_r1_unknown_execution_is_opaque_not_missing"),
+    ("r1-pwsh-dashes", 'vals = ["-" + v[1:] if v[:1] in _PS_DASHES', "vals = [v if v[:1] in _PS_DASHES",
+     "test_r1_pwsh_dash_variants_are_parameters"),
+    ("r1-pwsh-stop-parsing", 'keep = [j for j, w in enumerate(ws) if not (vals[j] == "--%" and not w.quoted)]',
+     "keep = list(range(len(ws)))", "test_r1_more_wrappers"),
+    ("r1-pipe-into-shell-opaque", "if not known:", "if False:", "test_r1_unknown_execution_is_opaque_not_missing"),
+    ("r1-shell-reads-a-file-opaque", 'elif program in ALL_SHELLS and any(op in ("<", "0<") for op, _ in self.redirs):',
+     "elif False:", "test_r1_unknown_execution_is_opaque_not_missing"),
+    ("r1-env-split-string", "if split is not None:", "if False:", "test_r1_more_wrappers"),
+    ("r1-wrappers", "if p in _WRAPPERS:", "if False:", "test_r1_more_wrappers"),
+    ("r1-watch-reparse", 'if p == "watch":', "if False:", "test_r1_wsl_and_watch_run_their_words_as_bash"),
+    ("r1-wsl-runs-bash", 'if p == "wsl":', "if False:", "test_r1_wsl_and_watch_run_their_words_as_bash"),
+    ("r1-wsl-management", "else:                                       # --import, --list, --shutdown ...: no command",
+     "else:\n                        k += 1\n                        continue", "test_r1_wsl_management_and_quoted_words"),
+    ("r1-flock-c", 'if p == "flock" and self._reparse_after_c(k):', "if False:", "test_r1_more_wrappers"),
+    ("r1-su-script-c", "if not self._reparse_after_c(k + 1):", "if True:", "test_r1_more_wrappers"),
+    ("r1-trap", 'self.reparse(v[h], "bash")                  # the handler runs on the signal', "pass",
+     "test_r1_more_wrappers"),
+    ("r1-alias", 'self.reparse(w.split("=", 1)[1], "bash")', "pass", "test_r1_more_wrappers"),
+    ("r1-parallel", 'if p == "parallel":', "if False:", "test_r1_more_wrappers"),
+    ("r1-iex-opaque", "if not lits or any(self.y[k + 1:]):", "if False:",
+     "test_r1_unknown_execution_is_opaque_not_missing"),
+    ("r1-saps-args-alias", 'if name and ("argumentlist".startswith(name) or name == "args"):',
+     'if name and "argumentlist".startswith(name):', "test_r1_start_process_runs_its_argument_list"),
+    ("r1-saps-reparse", "self.reparse('\"' + fp[0].replace('\"', \"\") + '\" ' + \" \".join(words), \"cmd\")", "pass",
+     "test_r1_start_process_runs_its_argument_list"),
+    ("r1-bash-stdin-dash", 'sflag = sflag or w == "-"', "sflag = sflag", "test_r1_stdin_dash_and_command_prefix"),
+    ("r1-pwsh-stdin-dash", 'if w == "-":                                        # `pwsh -`: commands from stdin',
+     "if False:",
+     "test_r1_stdin_dash_and_command_prefix"),
+    ("r1-pwsh-co-prefix", '(len(name) >= 2 and "command".startswith(name))',
+     '(len(name) >= 3 and "command".startswith(name))', "test_r1_stdin_dash_and_command_prefix"),
+    # cmd and R5
+    ("cmd-if", 'if p == "if":', "if False:", "test_cmd_commands"),
+    ("dialect-union", 'a, b = _parse_one(command, "bash"), _parse_one(command, "powershell")',
+     'a = b = _parse_one(command, "bash")', "test_unknown_dialect_unions_bash_and_powershell"),
+]
+MUTATIONS += [
+    pytest.param(_SP, find, rep, "tests/test_shellparse.py::" + test, id="shellparse-" + suffix)
+    for suffix, find, rep, test in _SP_CLAUSES
+]
+# Plan 5 Task 5 fix round 2: the timing harness itself. CPU (not wall) time, and the 80/20 linearity ratio.
+_TT = "tests/test_skyguard_timing.py"
+MUTATIONS += [
+    pytest.param(_TT, "if large >= RATIO_FLOOR_MS:", "if False:",
+                 _TT + "::test_the_ratio_clause_alone_catches_quadratic_work_under_the_ceilings",
+                 id="timing-harness-ratio-clause"),
+    pytest.param(_TT, "spent = (time.process_time() - t0) * 1000", "spent = (time.perf_counter() - w0) * 1000",
+                 _TT + "::test_cpu_time_ignores_time_spent_waiting", id="timing-harness-cpu-not-wall"),
+]
+# ---- Plan 5 Task 7: delete rules on the parser (one twin per clause; each names the t07 row it must turn red,
+# fired in-process by tests/test_skyguard_deletes.py::test_t07_row).
+_DL = "tools/skyguard/deletes.py"
+
+
+def _t07(row):
+    return "tests/test_skyguard_deletes.py::test_t07_row[t07-" + row + "]"
+
+
+_DEL_CLAUSES = [
+    # (id, file, find, replace, t07 row that must go red)
+    # clause (a): an operand that RESOLVES into a protected zone
+    ("rule-S-DEL-INSTALL-resolved", _DL, "                if kind and resolved is None:\n",
+     "                if False:\n", "rel-rm-data"),
+    ("rule-S-DEL-INSTALL-scratch", "tools/skyguard/paths.py",
+     'SCRATCH_GLOBS = ("**/__pycache__/**", "**/node_modules/**", "**/.pytest_cache/**")', "SCRATCH_GLOBS = ()",
+     "pycache"),
+    ("rule-S-DEL-INSTALL-covers-ancestor", _DL, "    return _covers_kind(abs_path, roots)", '    return ""',
+     "abs-ancestor"),
+    ("rule-S-DEL-CONFIG-zone", _DL,
+     'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG", "mo2": "S-DEL-MO2"}',
+     'RULE_OF = {"install": "S-DEL-INSTALL", "mo2": "S-DEL-MO2"}', "config-pwsh"),
+    ("rule-S-DEL-MO2-zone", _DL,
+     'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG", "mo2": "S-DEL-MO2"}',
+     'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG"}', "mo2-bash"),
+    ("rule-S-DEL-INSTALL-interpreter-code", _DL,
+     "        if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code)):",
+     "        if False:", "python-rmtree"),
+    ("rule-S-DEL-INSTALL-interpreter-api", _DL,
+     "(has(DESTROYER, code) or has(INTERP_DELETE, code))", "(has(DESTROYER, code))", "node-rmsync"),
+    # clause (b): an UNRESOLVED operand
+    ("rule-S-DEL-UNRESOLVED-needs-root-mention", _DL, "    if unresolved_any and names_root(command, roots, has):",
+     "    if unresolved_any:", "tmp-var"),
+    ("rule-S-DEL-UNRESOLVED-needs-unresolved", _DL, "    if unresolved_any and names_root(command, roots, has):",
+     "    if names_root(command, roots, has):", "grep-control"),
+    ("rule-S-DEL-UNRESOLVED-raw-glob", _DL,
+     "            if raw_reaches(w, ecwd, e.dialect, roots) and unresolved_reach is None:",
+     "            if False:", "glob-middle"),
+    ("rule-S-DEL-UNRESOLVED-short-name", _DL,
+     '    return bool(m) and re.sub(r"[\\s.]", "", comp).startswith(m.group(1))', "    return False", "short-name"),
+    ("rule-S-DEL-UNRESOLVED-pipe-input", _DL,
+     '    if not words and e.stdin_from == "pipe":', "    if False:", "pipe-remove-item"),
+    # clause (c): the parser could not be sure
+    ("rule-S-DEL-FALLBACK-on-parse-fail", _DL,
+     "    if not parsed.ok and has(DESTROYER, command) and names_root(command, roots, has):", "    if False:",
+     "parse-fail"),
+    ("rule-S-DEL-FALLBACK-opaque", _DL,
+     "    if opaque and any(_loose_hit(e, roots, has) for e in parsed.execs):", "    if False:", "opaque-printf-sh"),
+    ("rule-S-DEL-FALLBACK-opaque-per-exec", _DL,
+     "    if opaque and any(_loose_hit(e, roots, has) for e in parsed.execs):",
+     "    if opaque and has(DESTROYER_LOOSE, command) and names_root(command, roots, has):", "opaque-elsewhere"),
+    # R9: no cwd -> advice, never a guess
+    ("rule-S-RELATIVE-UNKNOWN-advises", _DL, "            if nocwd and not relative and _is_data_word(w) and",
+     "            if False and", "relative-unknown"),
+    # primitives
+    ("pwsh-remove-item-alias", _DL,
+     'DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "rimraf"))',
+     'DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "rimraf"))', "rel-pwsh-ri"),
+    ("git-clean-cwd", _DL, "if specs else [root]", "if specs else []", "git-clean"),
+    ("git-clean-dry-run", _DL, '            if "n" in (cluster if e < 0 else cluster[:e]):',
+     '            if "Q" in (cluster if e < 0 else cluster[:e]):', "git-clean-dry-run"),
+    ("git-rm", _DL, 'argv[k] not in ("clean", "rm")', 'argv[k] not in ("clean",)', "git-rm"),
+    ("git-rm-cached", _DL, 'w in ("--dry-run", "--cached")', 'w in ("--dry-run",)', "git-rm-cached"),
+    ("find-delete", _DL, '    if p == "find.delete":\n        return list(e.argv)',
+     '    if p == "find.delete":\n        return None', "rel-find-delete"),
+    ("iodirectory-delete", _DL, '    if p in ("io.file.delete", "io.directory.delete"):', "    if False:", "iodir-delete"),
+    ("robocopy-mir", _DL, '    if flags & {"MIR", "PURGE"} and len(pos) > 1:', "    if False:", "robocopy-mir"),
+    ("rimraf-via-npx", _DL, "    if p in NPX or p in PKG_RUNNERS:", "    if False:", "rimraf"),
+    ("pwsh-valued-param-not-operand", _DL,
+     "                k += 1                                    # its value is a pattern / option, not a path",
+     "                pass", "pwsh-include-not-operand"),
+    ("rule-S-DEL-INSTALL-tools-pycache-scratch", "tools/skyguard/targets.py",
+     '        tools_cache = rel[0] == "tools" and any(c in paths.SCRATCH_UNDER_TOOLS for c in rel[1:])',
+     "        tools_cache = False", "tools-pycache"),
+    ("rule-S-DEL-INSTALL-tools-node-modules-protected", "tools/skyguard/paths.py",
+     'SCRATCH_UNDER_TOOLS = ("__pycache__",)', 'SCRATCH_UNDER_TOOLS = ("__pycache__", "node_modules")',
+     "tools-node-modules"),
+    ("option-skip", _DL, '        if opts and w.startswith("-") and len(w) > 1:\n            continue',
+     '        if False:\n            continue', "compound-tmp"),
+]
+MUTATIONS += [
+    pytest.param(f, find, rep, _t07(row), id="deletes-" + i if not i.startswith("rule-") else i)
+    for i, f, find, rep, row in _DEL_CLAUSES
+]
+MUTATIONS.append(pytest.param(   # a quoted `[x]` in the install's own name is literal, not a glob: still the install
+    _DL, '                kind = protected_kind(lit, roots) if lit else ""', '                kind = ""',
+    "tests/test_guard_corpus.py::test_hook_reproduces_the_recorded_decision_and_rules[root-metachar-self]",
+    id="rule-S-DEL-INSTALL-literal-quoted-glob",
+))
+
+# ---- Plan 5 Task 8: shell writes (E21). One twin per primitive class and per clause; each names the t08 row it must
+# turn red, fired in-process by tests/test_skyguard_writes.py::test_t08_row.
+_WR = "tools/skyguard/writes.py"
+_TGT = "tools/skyguard/targets.py"
+
+
+def _t08(row):
+    return "tests/test_skyguard_writes.py::test_t08_row[t08-" + row + "]"
+
+
+_WRITE_CLAUSES = [
+    # (id, file, find, replace, t08 row that must go red)
+    ("rule-S-WRITE-PLUGIN-redirect", _WR, "    out = _redirect_targets(e)\n", "    out = []\n", "redirect-esp"),
+    ("rule-S-WRITE-PLUGIN-tee", _WR, '    if p == "tee":', "    if False:", "tee-esm"),
+    ("rule-S-WRITE-PLUGIN-set-content", _WR, '("set-content", "add-content", "clear-content", "new-item")',
+     '("add-content", "clear-content", "new-item")', "set-content-pwsh"),
+    ("rule-S-WRITE-PLUGIN-out-file", _WR, '("tee-object", "out-file")', '("tee-object",)', "out-file-esl"),
+    ("rule-S-WRITE-PLUGIN-iofile", _WR, '("io.file.write", "io.file.append")', '("io.file.append",)', "iofile-esp"),
+    ("rule-S-WRITE-PLUGIN-sed-i", _WR, "        out += _sed_files(e.argv)", "        out += []", "sed-i-esp"),
+    ("rule-S-WRITE-PLUGIN-dd", _WR, 'w.startswith("of=")]', 'w.startswith("xx=")]', "dd-of-esp"),
+    ("rule-S-WRITE-PLUGIN-wired", "tools/skyguard/shell_rules.py", "    if wr.deny:", "    if False:", "redirect-esp"),
+    ("rule-S-WRITE-PLUGIN-parse-fail", _WR, "texts = [command] if not parsed.ok else", "texts = [] if not parsed.ok else",
+     "parse-fail-esp"),
+    ("rule-S-WRITE-PLUGIN-opaque-upstream", _WR, '        if e.stdin_from == "pipe":', "        if False:",
+     "opaque-pipe-esp"),
+    ("rule-S-WRITE-PLUGIN-opaque-not-whole-command", _WR,
+     "texts = [command] if not parsed.ok else _opaque_texts(parsed.execs)",
+     'texts = [command] if not parsed.ok or any(e.program == "?" for e in parsed.execs) else []',
+     "harness-data-esp"),
+    # S-COPY-PLUGIN (advise)
+    ("rule-S-COPY-PLUGIN-destination-only", _WR, "            a = targets.resolve_operand(e, cand, cwd, env)",
+     "            a = targets.resolve_operand(e, srcs[0] if srcs else cand, cwd, env)", "cp-source-only"),
+    ("rule-S-COPY-PLUGIN-zone", _WR, "if (a is not None and game_loads(a, roots))", "if (a is not None)",
+     "cp-outside"),
+    ("rule-S-COPY-PLUGIN-data-root-only", _WR, 'len(rel) == 2 and rel[0] == "data"', "len(rel) >= 1",
+     "cp-to-backups"),
+    ("rule-S-COPY-PLUGIN-dir-destination", _WR, "            elif _looks_like_dir(dst):", "            elif False:",
+     "cp-into-data-dir"),
+    ("rule-S-COPY-PLUGIN-unresolved-data", _WR, "(a is None and _DATA_CHILD.search(cand))", "(a is None and False)",
+     "cp-var-data"),
+    # the class notes
+    ("rule-S-WRITE-SKSE-INI-class", _TGT, ', ("skse-ini", SKSE_INI, "S-WRITE-SKSE-INI"))', ")",
+     "out-file-skse-ini"),
+    ("rule-S-WRITE-INI-class", _TGT, '("ini", SKYRIM_INI, "S-WRITE-INI"), ', "", "sed-i-skyrim-ini"),
+    ("rule-S-WRITE-LOADORDER-write-only", _WR, "        for w in write_targets(e):",
+     "        for w in write_targets(e) + list(e.argv):", "loadorder-read"),
+    ("rule-S-WRITE-LOADORDER-copy", _WR, '            if kind and kind != "plugin":', "            if False:",
+     "cp-onto-plugins-txt"),
+    ("rule-S-WRITE-INSTALL-zone", _WR, '    return bool(rel) and rel[0] == "data"', "    return bool(rel)",
+     "redirect-install-root"),
+    ("rule-S-WRITE-INSTALL-resolved", _WR,
+     "            elif not sed_note and a is not None and in_install_area(a, roots):",
+     "            elif False:", "redirect-data-file"),
+]
+MUTATIONS += [pytest.param(f, find, rep, _t08(row), id=i) for i, f, find, rep, row in _WRITE_CLAUSES]
+
+
+# ---- Plan 5 Task 9: every advice anchored to the executed program. Each names the t09 row it must turn red, fired
+# in-process by tests/test_skyguard_t09.py::test_t09_row.
+def _t09(row):
+    return "tests/test_skyguard_t09.py::test_t09_row[t09-" + row + "]"
+
+
+_AN = "tools/skyguard/anchored.py"
+_WRR = "tools/skyguard/write_rules.py"
+
+
+_T9_CLAUSES = [
+    # item 0 (Task 8 review minors)
+    ("rule-S-WRITE-PLUGIN-fallback-first-word", _WR,
+     'words += [m.group(1) or m.group(2) or m.group(3) or "" for m in _REDIRECT_TARGET.finditer(seg)]',
+     'words += _words(seg[seg.index(">") + 1:])', "fallback-interp-gt"),
+    ("rule-S-WRITE-PLUGIN-fallback-arrow", _WR, r'''_REDIRECT_TARGET = re.compile(r"""[0-9&*]?(?<![=\-])>''',
+     r'''_REDIRECT_TARGET = re.compile(r"""[0-9&*]?>''', "fallback-arrow"),
+    ("rule-S-WRITE-PLUGIN-fallback-quoted", _WR, '''(?:"([^"\\n]*)"|'([^'\\n]*)'|''',
+     '''(?:"()"|'()'|''', "fallback-redirect-esp"),
+    ("rule-S-WRITE-PLUGIN-copy-null", _WR,
+     '            if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):',
+     "            if False:", "cp-devnull-esp"),
+    ("rule-S-WRITE-SKSE-INI-copy-resolved", _WR, '            kind = file_class(dst, a_dst or "")',
+     "            kind = file_class(dst)", "cp-skse-ini-resolved"),
+    # S-REGISTRY (deny): the executed reg / registry cmdlet, a Bethesda key or an ancestor
+    ("rule-S-REGISTRY-anchor", _AN, "    if not parsed.ok:\n        return _legacy_registry(command)",
+     "    if True:\n        return _legacy_registry(command)", "reg-printf-note"),
+    ("rule-S-REGISTRY-parse-fail", _AN, "        return _legacy_registry(command)\n", "        return False\n",
+     "reg-parse-fail"),
+    ("rule-S-REGISTRY-opaque", _AN, "    if any(_legacy_registry(t) for t in _opaque_texts(parsed.execs)):",
+     "    if False:", "reg-opaque-cmd"),
+    ("rule-S-REGISTRY-opaque-pipe", _AN, "    if any(_legacy_registry(t) for t in _opaque_texts(parsed.execs)):",
+     "    if any(_legacy_registry(t) for t in _opaque_texts([e for e in parsed.execs if e.stdin_from != 'pipe'])):",
+     "reg-pipe-sh"),
+    ("rule-S-REGISTRY-unrelated-key", _AN, "if len(e.argv) < 2 or bethesda_key(e.argv[1], subst):", "if True:",
+     "reg-other-key"),
+    ("rule-S-REGISTRY-ancestor", _AN, "    return any(b.startswith(", "    return False and any(b.startswith(",
+     "reg-ancestor"),
+    ("rule-S-REGISTRY-powershell", _AN, "        elif e.program in PS_REG_PROGRAMS:", "        elif False:",
+     "reg-ps-remove-item"),
+    ("rule-S-REGISTRY-registry-path", _AN, "if _is_reg_path(w) and bethesda_key(", "if bethesda_key(", "reg-file-bethesda-folder"),
+    ("rule-S-REGISTRY-interpreter", _AN, "if code and code_deletes_bethesda(code):",
+     "if False and code and code_deletes_bethesda(code):", "reg-python-code"),
+    ("rule-S-REGISTRY-prefilter", _AN, '_REG_WORDS = ("reg", "hklm", "hkcu", "hkey_")', '_REG_WORDS = ("reg",)',
+     "reg-ps-remove-item"),
+    # S-PSC-OUT (deny)
+    ("rule-S-PSC-OUT-anchor", _AN, "    if not parsed.ok:\n        m = re.search(", "    if True:\n        m = re.search(",
+     "psc-echo"),
+    ("rule-S-PSC-OUT-text-programs", _AN, "        if e.program in TEXT_PROGRAMS:\n            continue\n", "",
+     "psc-grep-o"),
+    ("rule-S-PSC-OUT-eq-form", _AN, 'elif "=" in lw and lw.split("=", 1)[0] in flags:', "elif False:",
+     "psc-output-eq"),
+    # S-CHAMPOLLION (deny, cwd-resolved)
+    ("rule-S-CHAMPOLLION-anchor", _AN, "    if not parsed.ok:\n        return text_hit(command)",
+     "    if True:\n        return text_hit(command)", "champ-echo"),
+    ("rule-S-CHAMPOLLION-cwd", _AN, "            a = targets.resolve_operand(e, w, cwd, env)",
+     '            a = targets.resolve_operand(e, w, "", env)', "champ-relative-outside"),
+    ("rule-S-CHAMPOLLION-data-scripts", _AN, 'return rel[2:] if rel[:2] == ["data", "scripts"] else None',
+     "return rel", "champ-install-not-scripts"),
+    ("rule-S-CHAMPOLLION-wired-cwd", "tools/skyguard/shell_rules.py",
+     "champ = anchored.champollion(command, parsed, roots, cwd, env)",
+     'champ = anchored.champollion(command, parsed, roots, "", env)', "champ-relative-outside"),
+    # (S-MOVE-INSTALL removed in fix round 1; its rows are allow pins.)
+    # S-REGISTRY fix round 1: unknown keys, same-command assignments, interpreter-code keys
+    ("rule-S-REGISTRY-unknown-key-denies", _AN,
+     "        if word is None or _NONLITERAL.search(word):\n            return True",
+     "        if word is None or _NONLITERAL.search(word):\n            return False", "reg-var-unknown"),
+    # Task 7b: the key is resolved by the parser's Exec.subst (one resolver with the delete rules)
+    ("rule-S-REGISTRY-assignment-resolved", _AN, "        word = subst.get(word)", "        word = None",
+     "reg-var-assigned-unrelated"),
+    ("rule-S-REGISTRY-assignment-bash", "tools/skyguard/shellparse.py",
+     "                out.append((_VARNAME.match(lhs).group(), value))", "                pass",
+     "reg-var-assigned-unrelated"),
+    ("rule-S-REGISTRY-assignment-powershell", "tools/skyguard/shellparse.py",
+     "        a = assign.ps_assignment(self.t[cmd.start:cmd.end])", "        a = None", "reg-ps-var-unrelated"),
+    ("rule-S-REGISTRY-ps-unknown-hive", _AN, "                        if names_hive:\n                            return True",
+     "                        if False:\n                            return True", "reg-ps-unknown-hive"),
+    ("rule-S-REGISTRY-ps-unknown-needs-hive", _AN, "                        if names_hive:\n",
+     "                        if True:\n", "reg-ps-unknown-nohive"),
+    ("rule-S-REGISTRY-code-key", _AN,
+     '        if (listed and not quoted) or not key or "{" in key or bethesda_key(key, {}):',
+     '        if (listed and not quoted) or not key or "{" in key or "bethesda" in key.lower():',
+     "reg-python-ancestor"),
+    ("rule-S-REGISTRY-code-literal-unrelated", _AN,
+     '        if (listed and not quoted) or not key or "{" in key or bethesda_key(key, {}):',
+     "        if True:", "reg-python-unrelated"),
+    ("rule-S-REGISTRY-code-list-variable", _AN, '        if (listed and not quoted) or not key or',
+     "        if not key or", "reg-python-list-var"),
+    ("rule-S-REGISTRY-code-list-form", _AN, '''r"""\\breg(?:\\.exe)?\\b['"]?(?:\\s*,\\s*|\\s+)''',
+     '''r"""\\breg(?:\\.exe)?\\b['"]?(?:\\s+)''', "reg-python-list"),
+    ("rule-S-REGISTRY-code-joined-key", _AN, "    if _CODE_REG_DELETE_JOINED.search(code):\n        return True",
+     "    if False:\n        return True", "reg-python-var"),
+    # S-SED-WINPATH (advise): a backslash path in the replacement, on an install/config file; replaces S-WRITE-INSTALL
+    ("rule-S-SED-WINPATH-anchor", _WR,
+     "winpath = bool(sed_files) and any(sed_win_replacement(s) for s in _sed_scripts(e.argv))",
+     "winpath = bool(sed_files)", "sed-doubled"),
+    ("rule-S-SED-WINPATH-single-backslash", _WR, '                shape.append("/" if r[i + 1] ==',
+     '                shape.append("' + BS + 'x00" + r[i + 1] if r[i + 1] ==', "sed-doubled"),
+    ("rule-S-SED-WINPATH-zone", _WR, " and targets.zone(a, roots) in SED_ZONES", "", "sed-winpath-outside"),
+    ("rule-S-SED-WINPATH-replaces-install-note", _WR, "            elif not sed_note and a is not None",
+     "            elif a is not None", "sed-winpath"),
+    ("rule-S-SED-WINPATH-script-option", _WR, '        if w in ("-e", "--expression") and k + 1 < len(argv):',
+     "        if False:", "sed-winpath-e"),
+    # S-AUTOMOD-* (advise): AutoMod RUNS, module + command among its own arguments
+    ("rule-S-AUTOMOD-ESP-anchor", _AN, "    if e.program in AUTOMOD_PROGRAMS:\n        return e.argv",
+     "    if True:\n        return e.argv", "automod-echo"),
+    ("rule-S-AUTOMOD-ESP-module", _AN, 'if module == "esp" and cmd in ESP_WRITES:', "if cmd in ESP_WRITES:",
+     "automod-archive-merge"),
+    ("rule-S-AUTOMOD-ESP-dotnet", _AN, '    if e.program == "dotnet":\n        for i, w in enumerate(e.argv):',
+     '    if False:\n        for i, w in enumerate(e.argv):', "automod-dotnet"),
+    ("rule-S-AUTOMOD-NIF-branch", _AN, 'elif module == "nif" and cmd in NIF_WRITES:', "elif False:",
+     "automod-nif-scale"),
+    ("rule-S-AUTOMOD-ARCHIVE-branch", _AN, 'elif module == "archive" and cmd in ARCHIVE_WRITES:', "elif False:",
+     "automod-archive-merge"),
+    # S-EXTERNAL-OUT (advise): a DECOMPILER's own output flag into the install
+    ("rule-S-EXTERNAL-OUT-anchor", _AN, '    if e.program == "champollion":\n        return "Champollion"',
+     '    if True:\n        return "Champollion"', "external-echo"),
+    ("rule-S-EXTERNAL-OUT-decompilers-only", _AN, '    if e.program == "champollion":\n        return "Champollion"',
+     '    if e.program in ("champollion", "caprica"):\n        return "Champollion"', "ext-tool-out"),
+    ("rule-S-EXTERNAL-OUT-zone", _AN, "            if a is not None and in_install_area(a, roots):\n                return name",
+     "            if a is not None:\n                return name", "external-champollion-outside"),
+    ("rule-S-EXTERNAL-OUT-automod-decompile", _AN, 'if words[:2] == ["papyrus", "decompile"]:', "if False:",
+     "external-automod-decompile"),
+    # W-PAPYRUS / W-INSTALL (the write guard, by resolved zone)
+    ("rule-W-PAPYRUS-zone", _WRR, "        papyrus = a is not None and papyrus_zone(a, roots)", "        papyrus = True",
+     "papyrus-toolkit"),
+    ("rule-W-PAPYRUS-mo2", _WRR, '    if z == "mo2":\n        return True\n    rel = _rel(',
+     '    if False:\n        return True\n    rel = _rel(', "papyrus-mo2"),
+    ("rule-W-INSTALL-zone", _WRR, "        install = a is not None and in_install_area(a, roots)",
+     "        install = grep(LEGACY_INSTALL_TEXT, file_path)", "install-relative-outside"),
+    ("rule-W-INSTALL-cwd", _WRR, 'a = targets.resolve(file_path, cwd, "bash"', 'a = targets.resolve(file_path, "", "bash"',
+     "install-relative-inside"),
+]
+MUTATIONS += [pytest.param(f, find, rep, _t09(row), id=i) for i, f, find, rep, row in _T9_CLAUSES]
+MUTATIONS += [
+    pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in (
+        # the hook must hand the write guard its roots, or the zone notes fall back to the text tests
+        ("rule-W-INSTALL-wired", "tools/skyguard/run.py",
+         'v = engine.evaluate_write(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""))',
+         'v = engine.evaluate_write(p["file_path"], audit)', "tests/test_guard_corpus.py::test_intended_rows_reproduce"),
+        ("rule-W-INI-class", _WRR, '    if grep(targets.SKYRIM_INI, file_path):', "    if False:",
+         "tests/test_skyguard_write.py::test_rule4_skyrim_ini"),
+        ("rule-W-SKSE-INI-class", _WRR, '    if grep(targets.SKSE_INI, file_path):', "    if False:",
+         "tests/test_skyguard_write.py::test_rule5_skse_plugin_ini"),
+        ("rule-W-LOADORDER-class", _WRR, '    if grep(targets.LOADORDER, file_path):', "    if False:",
+         "tests/test_skyguard_write.py::test_rule6_load_order"),
+        ("rule-S-AUTOMOD-ESP-dry-run", _AN, 'any(w.lower() == "--dry-run" for w in args)', "False",
+         "tests/test_skyguard_writes.py::test_t08_row[t08-automod-dry]"),
+        # timing: without the word-start lookbehind the sed path regex restarts inside every long word (quadratic)
+        ("timing-sed-win-word-start", _WR, "(?<![A-Za-z0-9_])[A-Za-z0-9_]{2,}", "[A-Za-z0-9_]{2,}",
+         "tests/test_skyguard_timing.py::test_anchored_rules_stay_fast[sed-long-word-bash]"),
+    )
+]
+
+MUTATIONS.append(pytest.param(   # the pricing driver stops asking the parser: the R4 gate would read 0 forever
+    "scripts/guard-corpus/engine_eval.py", "parse_ok = parse_ok and p.ok", "parse_ok = parse_ok",
+    "tests/test_price_tool.py::test_parse_failures_are_reported_per_tool_when_the_engine_has_the_parser",
+    id="price-reports-parse-failures",
+))
+MUTATIONS.append(pytest.param(
+    "scripts/guard-corpus/record.py",
+    'isinstance(row.get("reason"), str) and row["reason"].strip()',
+    'str(row.get("reason") or "").strip()',
+    "tests/test_guard_corpus.py::test_loosens_reason_must_be_a_non_empty_string",
+    id="corpus-supersession-reason-is-a-string",
+))
+
+# ---- Plan 5 Task 7b: same-command literal assignments resolve delete operands. One mutation per clause; each names
+# the t07b row (fired in-process by tests/test_skyguard_assign.py::test_t07b_row) or the single-purpose test it must
+# turn red. The flow clauses are in shellparse (track_vars / lookup), the text clauses in assign.py.
+_AS = "tools/skyguard/assign.py"
+_TA = "tests/test_skyguard_assign.py::"
+
+
+def _t07b(row):
+    return _TA + "test_t07b_row[t07b-" + row + "]"
+
+
+_GATE = "        if f is not top or top.ctl != 0 or top.case:"
+_REC = '        if cmd is not None and not cmd.skip and cmd.stage == 0 and sep not in ("|", "|&"):'
+_LOOK = '        r = self.vars.get(name if self.DIALECT == "bash" else name.lower())'
+_SAME = "        if cmd.valid and lst == cmd.lst and seq < cmd.seq:"
+_OPEN = '_BASH_OPEN = frozenset(("if", "while", "until", "{"))'
+_CLOSE = '_BASH_CLOSE = frozenset(("fi", "done", "}"))'
+_COUNT = "    for rx in (_W_PLAIN, _W_DOLLAR, _W_FD):"
+_ONCE = "                if self.ctx.writes(name) == 1 and name.lower() not in assign.SPECIAL:"
+_T7B_CLAUSES = [
+    # (id, file, find, replace, test)
+    # where an assignment may be recorded: the ROOT command, its top-level statement list
+    ("t7b-root-only", _SP, '        if self.depth == 0 and self.DIALECT in ("bash", "powershell"):',
+     '        if self.DIALECT in ("bash", "powershell"):', _t07b("bash-c")),
+    ("t7b-top-frame", _SP, _GATE, "        if top.ctl != 0 or top.case:", _t07b("assign-in-subshell")),
+    ("t7b-control-depth", _SP, _GATE, "        if f is not top or top.case:", _t07b("assign-in-if")),
+    ("t7b-case-arm", _SP, _GATE, "        if f is not top or top.ctl != 0:", _t07b("assign-in-case")),
+    ("t7b-open-while", _SP, _OPEN, '_BASH_OPEN = frozenset(("if", "until", "{"))',
+     _TA + "test_flow_closers_reset_control_depth[while y; do :; done]"),
+    ("t7b-open-brace", _SP, _OPEN, '_BASH_OPEN = frozenset(("if", "while", "until"))',
+     _TA + "test_flow_closers_reset_control_depth[{ :; }]"),
+    ("t7b-open-for", _SP, "            f.ctl += 1                                          # closed by `done`",
+     "            pass", _TA + "test_flow_closers_reset_control_depth[for i in 1; do :; done]"),
+    ("t7b-close-fi", _SP, _CLOSE, '_BASH_CLOSE = frozenset(("done", "}"))',
+     _TA + "test_flow_closers_reset_control_depth[if y; then :; fi]"),
+    ("t7b-close-done", _SP, _CLOSE, '_BASH_CLOSE = frozenset(("fi", "}"))',
+     _TA + "test_flow_closers_reset_control_depth[while y; do :; done]"),
+    ("t7b-close-brace", _SP, _CLOSE, '_BASH_CLOSE = frozenset(("fi", "done"))',
+     _TA + "test_flow_closers_reset_control_depth[{ :; }]"),
+    ("t7b-pipeline-separator", _SP, _REC, "        if cmd is not None and not cmd.skip and cmd.stage == 0:",
+     _t07b("pipeline-head")),
+    ("t7b-pipeline-stage", _SP, _REC,
+     '        if cmd is not None and not cmd.skip and sep not in ("|", "|&"):', _t07b("pipeline-stage")),
+    ("t7b-written-once", _SP, _ONCE, "                if self.ctx.writes(name) >= 1 and name.lower() not in "
+     "assign.SPECIAL:", _t07b("reassigned-in-branch")),
+    ("t7b-special-names", _SP, _ONCE, "                if self.ctx.writes(name) == 1:", _t07b("pwd-after-cd")),
+    ("t7b-ps-key-folded", _SP, '                    key = name if self.DIALECT == "bash" else name.lower()',
+     "                    key = name", _t07b("ps-case-insensitive")),
+    ("t7b-first-in-list", _SP, "                    if cmd.seq == 0:", "                    if True:",
+     _t07b("assign-after-and")),
+    ("t7b-and-moves-position", _SP, '        if sep == "&&":\n            top.seq += 1',
+     '        if sep == "&&":\n            pass', _t07b("assign-after-and")),
+    ("t7b-or-moves-position", _SP, '        elif sep == "||":\n            top.seq += 1\n',
+     '        elif sep == "||":\n', _t07b("assign-after-or")),
+    ("t7b-or-breaks-chain", _SP, "            top.chain_ok = False", "            pass", _t07b("or-chain")),
+    ("t7b-background", _SP, '            if top.pend and sep != "&":', "            if top.pend:",
+     _t07b("background")),
+    ("t7b-promotion", _SP, "                    self.vars[k][1] = top.kv", "                    pass",
+     _t07b("scratch-var")),
+    # which use an assignment reaches
+    ("t7b-bash-case-sensitive", _SP, _LOOK, "        r = self.vars.get(name.lower())", _t07b("case-differs")),
+    ("t7b-ps-case-insensitive", _SP, _LOOK, "        r = self.vars.get(name)", _t07b("ps-case-insensitive-use")),
+    ("t7b-earlier-statement", _SP, "        if kv is not None and kv <= cmd.kv:", "        if kv is not None:",
+     _t07b("use-before-assign")),
+    ("t7b-chain-valid", _SP, _SAME, "        if lst == cmd.lst and seq < cmd.seq:", _t07b("or-chain")),
+    ("t7b-chain-same-list", _SP, _SAME, "        if cmd.valid and seq < cmd.seq:",
+     _TA + "test_flow_cross_list_same_position"),
+    ("t7b-chain-order", _SP, _SAME, "        if cmd.valid and lst == cmd.lst:",
+     _TA + "test_flow_use_before_in_same_chain"),
+    # what is an assignment, and what resets every name
+    ("t7b-prefix-env", _SP, "                return []                                       # `K=v cmd`: K is set for cmd only",
+     "                continue", _t07b("prefix-env")),
+    ("t7b-append", _SP, '            if "[" in lhs or lhs.endswith("+="):', "            if False:", _t07b("append")),
+    ("t7b-subst-attached", _SP, "        saved, ctx.subst = ctx.subst, (_subst(sc, rec, ws, vals) if sc.vars else ())",
+     "        saved, ctx.subst = ctx.subst, ()", _t07b("scratch-var")),
+    ("t7b-two-readings", _SP, "        got[val] = s if got.get(val, s) == s else None", "        got[val] = s",
+     _TA + "test_two_readings_of_one_word_value_are_not_substituted"),
+    ("t7b-emit-carries", _SP, "                 body, self.ctx.subst)", "                 body)", _t07b("scratch-var")),
+    ("t7b-find-delete-carries", _SP, 'self.seg, "", self.ctx.subst)', 'self.seg, "", ())', _t07b("find-delete")),
+    ("t7b-deletes-wired", _DL, "        e = substituted(e)\n", "", _t07b("scratch-var")),
+    # assign.py: every form of a second write counts; values and uses are literal or nothing
+    ("t7b-count-plain", _AS, _COUNT, "    for rx in (_W_DOLLAR, _W_FD):",
+     _TA + "test_plain_assignment_is_counted"),
+    ("t7b-count-dollar", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_FD):",
+     _TA + "test_dollar_assignment_is_counted"),
+    ("t7b-count-fd", _AS, _COUNT, "    for rx in (_W_PLAIN, _W_DOLLAR):", _t07b("fd-alloc")),
+    ("t7b-count-ps-tee", _AS, "tee-object|-variable|", "", _t07b("ps-tee-variable")),
+    ("t7b-count-increment", _AS, "    for m in _W_INC.finditer(text):", '    for m in _W_INC.finditer(""):',
+     _TA + "test_increment_is_a_write"),
+    ("t7b-count-bash-keywords", _AS, "        elif _KW_BASH.search(piece):", "        elif False:",
+     _t07b("for-variable")),
+    ("t7b-count-ps-keywords", _AS, "        if _KW_PS.search(piece):", "        if False:", _t07b("ps-foreach")),
+    ("t7b-count-dollar-is-a-read", _AS, '_BARE_IDENT = re.compile(r"(?<![\\w$])(?<!\\$\\{)(" + _IDENT + r")")',
+     '_BARE_IDENT = re.compile(r"(" + _IDENT + r")")', _TA + "test_for_list_dollar_is_a_read"),
+    ("t7b-value-tilde", _AS, '        elif c in "$`' + BS * 2 + '~(){}" or c.isspace():',
+     '        elif c in "$`' + BS * 2 + '(){}" or c.isspace():', _t07b("tilde-value")),
+    ("t7b-unquoted-split", _AS,
+     '            if v is None or v == "" or _UNSAFE_UNQUOTED.search(v) or not split_safe:',
+     "            if v is None or not split_safe:", _t07b("unquoted-space")),
+    ("t7b-ifs-split", _SP, '    split_safe = sc.DIALECT != "bash" or sc.ctx.writes("IFS") == 0',
+     "    split_safe = True", _t07b("ifs-split")),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T7B_CLAUSES]
+
+# ---- Task 7b fix round 1: broad poisoning (controller ruling). One mutation per poison class, each naming the
+# class's unit case (tests/test_skyguard_assign.py::test_poison_class[<id>]) or the review row it must turn red.
+def _pc(case):
+    return _TA + "test_poison_class[" + case + "]"
+
+
+_PCMD1 = '_POISON_COMMANDS = frozenset(("trap", "eval", "source", ".", "read", "readarray", "mapfile", "getopts", "declare",'
+_PCMD2 = '                              "typeset", "local", "readonly", "unset", "let"))'
+_T7B_R1 = [
+    ("t7b-r1-continuation", _AS, '_CONT = re.compile(r"[' + BS * 2 + '`]' + BS + 'r?' + BS + 'n")',
+     '_CONT = re.compile(r"(?!)")', _pc("read-continuation")),
+    ("t7b-r1-dequote", _AS, '_DEQUOTE = str.maketrans("", "", ', '_DEQUOTE = {} and str.maketrans("", "", ',
+     _pc("source-quoted")),
+    ("t7b-r1-function", _AS, "_FUNC_DEF = re.compile(", '_FUNC_DEF = re.compile("(?!)") or re.compile(',
+     _pc("function-parens")),
+    ("t7b-r1-default-assign", _AS, '(_DEFAULT_SET, "default-assign"), ', "", _pc("default-assign")),
+    ("t7b-r1-array", _AS, '(_ARRAY_SET, "array"), ', "", _pc("array-element")),
+    ("t7b-r1-indirect", _AS, ', (_DOLLAR_NAME_SET, "indirect")', "", _pc("indirect-name")),
+    ("t7b-r1-ps-variable-cmdlet", _AS, "        if _PS_VAR_CMDLET.search(t):", "        if False:", _pc("ps-sv")),
+    ("t7b-r1-ps-scope", _AS, "        if _PS_WORDS.search(t):", "        if False:", _pc("ps-variable-drive")),
+    ("t7b-r1-ps-quoted-call", _AS, '        if _PS_QUOTED_CALL.search(_CONT.sub("", text)):', "        if False:",
+     _pc("ps-quoted-call")),
+    ("t7b-r1-ps-param-prefix", _AS, "any(v.startswith(p) for v in _PS_VAR_PARAMS)", "False",
+     _pc("ps-outvariable-prefix")),
+    ("t7b-r1-ps-param-alias", _AS, "p in _PS_VAR_ALIASES or ", "", _pc("ps-ov-alias")),
+    ("t7b-r1-arithmetic", _AS, '            if i >= 0 and "=" in piece[i:]:', "            if False:",
+     _pc("arithmetic")),
+    ("t7b-r1-dot", _AS, '        if w == ".":', "        if False:", _pc("dot")),
+    ("t7b-r1-export", _AS, '        if w == "export" and any("$" in r for r in rest):', "        if False:",
+     _pc("export-dollar")),
+    ("t7b-r1-printf-v", _AS, '        if w == "printf" and any(_PRINTF_V.match(r) for r in rest):', "        if False:",
+     _pc("printf-v-attached")),
+    ("t7b-r1-wait-p", _AS, '        if w == "wait" and any(_WAIT_P.match(r) for r in rest):', "        if False:",
+     _pc("wait-p")),
+    ("t7b-r1-taker-options", _AS, '        elif after_taker and t.startswith("-"):', "        elif False:",
+     _pc("dot-builtin-options")),
+    ("t7b-r1-prefix-then", _AS, '_PREFIX_WORDS = frozenset(("then", ', "_PREFIX_WORDS = frozenset((",
+     _pc("dot-after-then")),
+    ("t7b-r1-leading-assignment", _AS, "        elif _ASSIGN_WORD.match(t):", "        elif False:",
+     _pc("read-after-assignment")),
+    ("t7b-r1-cmd-never", _AS, '        return "cmd"', '        return ""', _pc("cmd-never")),
+    # wiring: the poison and the stray-closer flag turn the whole command's resolution off
+    ("t7b-r1-gate-poison", _SP, "    if sc.unsure or sc.ctx.poisoned():", "    if sc.unsure:",
+     _t07b("r1-source-quoted")),
+    ("t7b-r1-gate-unsure", _SP, "    if sc.unsure or sc.ctx.poisoned():", "    if sc.ctx.poisoned():",
+     _t07b("r1-stray-fi-then-if-body")),
+    ("t7b-r1-stray-closer", _SP, "                    self.unsure = True              # a stray fi/done/}",
+     "                    pass  # a stray fi/done/}", _t07b("r1-stray-done-then-while")),
+    ("t7b-r1-count-normalized", _SP, "            self.counts = assign.write_counts(assign.normalize(self.root))",
+     "            self.counts = assign.write_counts(self.root)", _t07b("r1-cont-d-nl")),
+    ("t7b-r1-dialect-passed", _SP, "    ctx = _Ctx(command, dialect)", "    ctx = _Ctx(command)",
+     _t07b("scratch-var")),
+]
+for _name in ("trap", "eval", "source", "read", "readarray", "mapfile", "getopts", "declare", "typeset", "local",
+              "readonly", "unset", "let"):
+    _line = _PCMD1 if ('"' + _name + '"') in _PCMD1 else _PCMD2
+    _T7B_R1.append(("t7b-r1-command-" + _name, _AS, _line, _line.replace('"' + _name + '"', '"' + _name + '-x"'),
+                    _pc(_name)))
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T7B_R1]
+
+
+_SNAP = "tools/skyguard/snapshot.py"
+_PSR = "tests/test_skyguard_side_effects.py::test_snapshot_skips_powershell_reads"
+MUTATIONS += [   # Task 10 (E12): the PowerShell tool is wired; its read-only verbs take no snapshot
+    pytest.param(".claude/settings.json", '"matcher": "Bash|PowerShell|Monitor"', '"matcher": "Bash|Monitor"',
+                 "tests/test_repo_invariants.py::test_shell_matcher_covers_powershell", id="matcher-includes-powershell"),
+    pytest.param(".claude/settings.json", '"matcher": "Edit|Write|NotebookEdit"', '"matcher": "Edit|Write|NotebookEdit|PowerShell"',
+                 "tests/test_repo_invariants.py::test_shell_matcher_covers_powershell",
+                 id="matcher-file-hooks-stay-off-powershell"),
+    # Task 13b: Monitor and NotebookEdit were MEASURED outside every matcher (Claude Code 2.1.289); each matcher entry
+    # is pinned in both the live settings and the shipped target file.
+    pytest.param(".claude/settings.json", '"matcher": "Bash|PowerShell|Monitor"', '"matcher": "Bash|PowerShell"',
+                 "tests/test_repo_invariants.py::test_shell_matcher_covers_powershell", id="matcher-includes-monitor"),
+    pytest.param(".claude/settings.json", '"matcher": "Edit|Write|NotebookEdit"', '"matcher": "Edit|Write"',
+                 "tests/test_repo_invariants.py::test_shell_matcher_covers_powershell", id="matcher-includes-notebookedit"),
+    pytest.param("agent/targets/claude/settings.json", '"matcher": "Bash|PowerShell|Monitor"', '"matcher": "Bash|PowerShell"',
+                 "tests/test_guard_coverage.py::test_inventory_matches_the_shipped_matchers", id="target-matcher-includes-monitor"),
+    pytest.param("agent/targets/claude/settings.json", '"matcher": "Edit|Write|NotebookEdit"', '"matcher": "Edit|Write"',
+                 "tests/test_guard_coverage.py::test_inventory_matches_the_shipped_matchers", id="target-matcher-includes-notebookedit"),
+    pytest.param("tools/skyguard/adapters/claude.py", ' and "command" not in ti', "",
+                 "tests/test_skyguard_claude_adapter.py::test_monitor_ws_twins_still_deny", id="monitor-ws-needs-no-command-key"),
+    pytest.param("tools/skyguard/adapters/claude.py", 'isinstance(ws, dict)', 'ws is not None',
+                 "tests/test_skyguard_claude_adapter.py::test_monitor_ws_twins_still_deny", id="monitor-ws-must-be-an-object"),
+    pytest.param("tools/skyguard/adapters/claude.py", ' and ws["url"] != ""', "",
+                 "tests/test_skyguard_claude_adapter.py::test_monitor_ws_twins_still_deny", id="monitor-ws-url-non-empty"),
+    pytest.param("tools/skyguard/adapters/claude.py", 'isinstance(ws.get("url"), str)', 'True',
+                 "tests/test_skyguard_claude_adapter.py::test_monitor_ws_twins_still_deny", id="monitor-ws-url-is-a-string"),
+    pytest.param("tools/skyguard/adapters/claude.py", 'return (tool_name == "Monitor" and isinstance(ws', 'return (isinstance(ws',
+                 "tests/test_skyguard_claude_adapter.py::test_ws_form_only_exempts_monitor", id="monitor-ws-only-for-monitor"),
+    pytest.param("tools/skyguard/run.py", 'if p.get("ws_monitor"):', 'if False:',
+                 "tests/test_skyguard_claude_adapter.py::test_websocket_monitor_is_allowed", id="run-allows-ws-monitor-branch"),
+    pytest.param("tools/skyguard/adapters/claude.py", 'if key in ti:', 'if ti.get(key):',
+                 "tests/test_skyguard_claude_adapter.py::test_notebook_edit_without_a_string_path_fails_closed",
+                 id="notebook-bad-path-no-fallback"),
+    pytest.param("tools/skyguard/adapters/claude.py", 'PATH_KEYS = {"NotebookEdit": "notebook_path"}', 'PATH_KEYS = {}',
+                 "tests/test_skyguard_claude_adapter.py::test_notebook_edit_on_a_protected_path_is_denied_and_in_scratch_allowed",
+                 id="adapter-reads-notebook-path"),
+    pytest.param(_SNAP, " or grep(SKIP_POWERSHELL, command, icase=True)", "", _PSR + "[Get-ChildItem Data]",
+                 id="snapshot-skips-pwsh-reads"),
+    pytest.param(_SNAP, "get-[a-z]+|select-string|", "select-string|", _PSR + "[Get-Process]",
+                 id="snapshot-skips-pwsh-get-verbs"),
+    pytest.param(_SNAP, "|select-string|test-path|", "|test-path|", _PSR + "[Select-String -Path a.txt -Pattern x]",
+                 id="snapshot-skips-pwsh-select-string"),
+    pytest.param(_SNAP, "|test-path|resolve-path|", "|resolve-path|", _PSR + "[Test-Path Data]",
+                 id="snapshot-skips-pwsh-test-path"),
+    pytest.param(_SNAP, "|resolve-path|measure-object)", "|measure-object)", _PSR + "[Resolve-Path .]",
+                 id="snapshot-skips-pwsh-resolve-path"),
+    pytest.param(_SNAP, "|resolve-path|measure-object)", "|resolve-path)", _PSR + "[Measure-Object -Line a.txt]",
+                 id="snapshot-skips-pwsh-measure-object"),
+    pytest.param(_SNAP, "grep(SKIP_POWERSHELL, command, icase=True)", "grep(SKIP_POWERSHELL, command, icase=False)",
+                 _PSR + "[GET-CONTENT a]", id="snapshot-pwsh-verbs-are-case-insensitive"),
+    pytest.param(_SNAP, "(\\s|$)\"", "(\\s)\"", _PSR + "[Get-Date]", id="snapshot-pwsh-verb-may-end-the-line"),
+    pytest.param(_SNAP, "(\\s|$)\"", "\"",
+                 "tests/test_skyguard_side_effects.py::test_snapshot_does_not_skip_powershell_writes[Test-PathX]",
+                 id="snapshot-pwsh-verb-must-end-at-a-boundary"),
+]
+
+
+# --- Task 11: the DevBench guard (mcp_rules.py) ------------------------------------------------------------------
+_MC = "tools/skyguard/mcp_rules.py"
+_SHR = "tools/skyguard/shell_rules.py"
+_T11 = "tests/test_skyguard_mcp.py::"
+
+
+def _t11row(row):
+    return _T11 + "test_t11_row[" + row + "]"
+
+
+def _t11curl(case):
+    return _T11 + "test_curl_forms_that_send_the_denied_command[" + case + "]"
+
+
+_T11_CLAUSES = [
+    # (id, file, find, replace, test that must go red)
+    # S-DEVBENCH-CRASH: one mutation per route, then per clause
+    ("rule-S-DEVBENCH-CRASH-mcp", _MC, "    hit = judge(parts[-1], args, roots, None, env) if isinstance(args, dict) else None",
+     "    hit = None", _t11row("t11-mcp-smp-reset")),
+    ("rule-S-DEVBENCH-CRASH-curl", _MC, "            calls = _web_call(e, command)", "            calls = []",
+     _t11row("t11-curl-smp-reset")),
+    ("rule-S-DEVBENCH-CRASH-cli", _MC, "            calls = _cli_call(e, command)", "            calls = []",
+     _t11row("t11-cli-exec-smp-reset")),
+    ("rule-S-DEVBENCH-CRASH-case-fold", _MC, "        words = stmt.lower().split()", "        words = stmt.split()",
+     _t11row("t11-mcp-smp-reset-case-space")),
+    ("rule-S-DEVBENCH-CRASH-whitespace", _MC, "        words = stmt.lower().split()", "        words = stmt.lower().split(\" \")",
+     _t11row("t11-mcp-smp-reset-case-space")),
+    ("rule-S-DEVBENCH-CRASH-whole-command", _MC, "            if tuple(words) == denied:",
+     "            if tuple(words[:len(denied)]) == denied:", _t11row("t11-mcp-smp-reset-target")),
+    ("rule-S-DEVBENCH-CRASH-statements", _MC, '_SPLIT_STATEMENTS = re.compile(r"[;' + BS + "n" + BS + 'r]")',
+     '_SPLIT_STATEMENTS = re.compile(r"[' + BS + "n" + BS + 'r]")', _t11row("t11-mcp-smp-reset-chained")),
+    ("rule-S-DEVBENCH-CRASH-data-list", _MC, "        for denied in rules.DEVBENCH_DENY:",
+     '        for denied in (("smp", "reset"),):',
+     _T11 + "test_a_command_added_to_the_data_list_is_denied_with_no_code_change"),
+    ("rule-S-DEVBENCH-CRASH-console-tool", _MC, '    if tool == "console":', "    if True:",
+     _T11 + "test_curl_forms_that_do_not_send_it[papyrus-tool]"),
+    ("rule-S-DEVBENCH-CRASH-string-command", _MC, "        if not isinstance(cmd, str):\n            return None\n        op =",
+     "        op =", _T11 + "test_a_non_string_console_command_is_not_judged"),
+    ("rule-S-DEVBENCH-CRASH-dict-input", _MC, "if isinstance(args, dict) else None", "if True else None",
+     _T11 + "test_a_non_dict_tool_input_is_not_judged"),
+    ("rule-S-DEVBENCH-CRASH-devbench-only", _MC, 'or not parts[1].startswith("devbench"):', ":",
+     _T11 + "test_only_devbench_servers_are_judged[mcp__other__console]"),
+    ("rule-S-DEVBENCH-CRASH-mcp-prefix", _MC, 'or parts[0] != "mcp" or', "or",
+     _T11 + "test_only_devbench_servers_are_judged[xmcp__devbench-vr__console]"),
+    ("rule-S-DEVBENCH-CRASH-short-name", _MC, "    if len(parts) < 3 or parts[0]", "    if parts[0]",
+     _T11 + "test_only_devbench_servers_are_judged[mcp]"),
+    ("rule-S-DEVBENCH-CRASH-server-name", _MC, 'not parts[1].startswith("devbench")', 'not parts[1].startswith("devbench-vr")',
+     _T11 + "test_any_devbench_server_name_is_judged[devbench]"),
+    # the curl route, per clause
+    ("rule-S-DEVBENCH-CRASH-curl-json-flag", _MC, '"--data-urlencode", "--json")', '"--data-urlencode")', _t11curl("json-flag")),
+    ("rule-S-DEVBENCH-CRASH-curl-data-flags", _MC, '_CURL_BODY_FLAGS = ("--data", "--data-raw", ',
+     '_CURL_BODY_FLAGS = ("--data-raw", ', _t11curl("data")),
+    ("rule-S-DEVBENCH-CRASH-curl-short-cluster", _MC, '        if w in _CURL_BODY_FLAGS or re.fullmatch(r"-[A-Za-z]*d", w):',
+     '        if w in _CURL_BODY_FLAGS or w == "-d":', _t11curl("short-cluster")),
+    ("rule-S-DEVBENCH-CRASH-curl-attached-body", _MC, '        if w.startswith("-d") and len(w) > 2 and not w.startswith("--"):',
+     "        if False:", _t11curl("attached-body")),
+    ("rule-S-DEVBENCH-CRASH-curl-every-body", _MC, "            k += 2\n            continue\n", "            break\n",
+     _t11curl("two-bodies")),
+    ("rule-S-DEVBENCH-CRASH-curl-endpoint", _MC, '_ENDPOINT = re.compile(r"/api/tool/([A-Za-z_]+)/?(?:[?#].*)?$")',
+     '_ENDPOINT = re.compile(r"/api/tool/([A-Za-z_]+)/?$")', _t11curl("query-string")),
+    ("rule-S-DEVBENCH-CRASH-curl-endpoint-slash", _MC, '_ENDPOINT = re.compile(r"/api/tool/([A-Za-z_]+)/?(?:[?#].*)?$")',
+     '_ENDPOINT = re.compile(r"/api/tool/([A-Za-z_]+)(?:[?#].*)?$")', _t11curl("trailing-slash")),
+    ("rule-S-DEVBENCH-CRASH-curl-any-host", _MC, '_ENDPOINT = re.compile(r"/api/tool/([A-Za-z_]+)/?(?:[?#].*)?$")',
+     '_ENDPOINT = re.compile(r"127.0.0.1:8921/api/tool/([A-Za-z_]+)/?(?:[?#].*)?$")', _t11curl("other-host-port")),
+    ("rule-S-DEVBENCH-CRASH-curl-program", _MC, '_WEB_PROGRAMS = frozenset(("curl", ', '_WEB_PROGRAMS = frozenset(("curlx", ',
+     _t11curl("d")),
+    ("rule-S-DEVBENCH-CRASH-curl-subst", _MC, "        e = deletes.substituted(e)", "        e = e",
+     _T11 + "test_a_url_held_in_a_same_command_variable_is_resolved"),
+    ("rule-S-DEVBENCH-CRASH-curl-damaged-json", _MC, '    for key in ("action", "command", "name"):', "    for key in ():",
+     _T11 + "test_a_damaged_json_body_is_still_read_for_the_action_and_name"),
+    ("rule-S-DEVBENCH-CRASH-curl-bad-escape", _MC, "            except ValueError:\n                out[key]", "            except KeyError:\n                out[key]",
+     _T11 + "test_a_damaged_body_with_a_bad_escape_does_not_crash"),
+    ("rule-S-DEVBENCH-CRASH-curl-object-body", _MC, "        return d if isinstance(d, dict) else None", "        return d",
+     _T11 + "test_a_json_body_that_is_not_an_object_is_not_a_call"),
+    ("rule-S-DEVBENCH-CRASH-powershell", _MC, '    if e.program in _PS_PROGRAMS:', "    if False:",
+     _T11 + "test_the_powershell_cmdlets_are_read"),
+    ("rule-S-DEVBENCH-CRASH-powershell-programs", _MC, '_WEB_PROGRAMS = frozenset(("curl", "invoke-restmethod", "irm", "invoke-webrequest", "iwr"))',
+     '_WEB_PROGRAMS = frozenset(("curl",))', _T11 + "test_the_powershell_cmdlets_are_read"),
+    # the CLI route, per clause
+    ("rule-S-DEVBENCH-CRASH-cli-join", _MC, '" ".join(argv[1:])', "argv[1]", _t11row("t11-cli-exec-split-words")),
+    ("rule-S-DEVBENCH-CRASH-cli-tool", _MC, '    if argv[0] == "tool" and len(argv) > 2:', "    if False:",
+     _t11row("t11-cli-tool-console")),
+    ("rule-S-DEVBENCH-CRASH-cli-exec", _MC, '    if argv[0] == "exec" and len(argv) > 1:', "    if False:",
+     _t11row("t11-cli-exec-smp-reset")),
+    ("rule-S-DEVBENCH-CRASH-cli-program", _MC, '        elif e.program == "devbench-cli":', '        elif e.program == "devbench":',
+     _t11row("t11-cli-exec-smp-reset")),
+    # not safe by default (R4), per clause
+    ("rule-S-DEVBENCH-CRASH-unparsable", _MC, "    if (not parsed.ok or opaque) and", "    if False and",
+     _t11row("t11-curl-unparsable")),
+    ("rule-S-DEVBENCH-CRASH-unparsable-only", _MC, "    if (not parsed.ok or opaque) and", "    if (opaque) and",
+     _t11row("t11-curl-unparsable")),
+    ("rule-S-DEVBENCH-CRASH-opaque", _MC, "    if (not parsed.ok or opaque) and", "    if (not parsed.ok) and",
+     _T11 + "test_an_opaque_program_next_to_the_endpoint_and_the_denied_command_denies"),
+    ("rule-S-DEVBENCH-CRASH-text-needs-reset", _MC, " and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(command):",
+     " and _TEXT_ENDPOINT.search(command):",
+     _T11 + "test_an_unreadable_command_that_only_names_one_of_them_does_not"),
+    ("rule-S-DEVBENCH-CRASH-text-needs-endpoint", _MC, " and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(command):",
+     " and _TEXT_RESET.search(command):", _T11 + "test_an_unreadable_command_that_only_names_one_of_them_does_not"),
+    ("rule-S-DEVBENCH-CRASH-prefilter", _MC, "    if not any(w in low for w in _SHELL_WORDS):\n        return None", "    pass",
+     _T11 + "test_a_command_that_names_neither_is_not_scanned"),
+    ("rule-S-DEVBENCH-CRASH-wired", _SHR, '    if dev and dev[0] == "S-DEVBENCH-CRASH":', "    if False:",
+     _t11row("t11-curl-smp-reset")),
+    ("rule-S-DEVBENCH-CRASH-outranks-ask", _MC, '            if hit[0] == "S-DEVBENCH-CRASH":\n                return hit',
+     '            if False:\n                return hit', _T11 + "test_a_deny_outranks_an_ask_in_one_command"),
+    # S-DEVBENCH-SAVE
+    ("rule-S-DEVBENCH-SAVE-name-slash", _MC, "_BAD_NAME = re.compile(r'[/" + BS * 2, "_BAD_NAME = re.compile(r'[" + BS * 2,
+     _t11row("t11-mcp-save-path-name")),
+    ("rule-S-DEVBENCH-SAVE-name-backslash", _MC, "_BAD_NAME = re.compile(r'[/" + BS * 2 + ":", "_BAD_NAME = re.compile(r'[/:",
+     _T11 + "test_an_unusable_save_name_asks[backslash]"),
+    ("rule-S-DEVBENCH-SAVE-name-colon", _MC, "_BAD_NAME = re.compile(r'[/" + BS * 2 + ":*?", "_BAD_NAME = re.compile(r'[/" + BS * 2 + "*?",
+     _T11 + "test_an_unusable_save_name_asks[colon]"),
+    ("rule-S-DEVBENCH-SAVE-name-wildcards", _MC, ":*?" + '"<>|', ':"<>|', _T11 + "test_an_unusable_save_name_asks[star]"),
+    ("rule-S-DEVBENCH-SAVE-name-brackets", _MC, '"<>|' + BS + "x00", BS + "x00", _T11 + "test_an_unusable_save_name_asks[angle]"),
+    ("rule-S-DEVBENCH-SAVE-name-control", _MC, BS + "x00-" + BS + "x1f]", "]", _T11 + "test_an_unusable_save_name_asks[control]"),
+    ("rule-S-DEVBENCH-SAVE-name-dotdot", _MC, '    if not n or n in (".", "..") or', "    if not n or",
+     _T11 + "test_an_unusable_save_name_asks[dotdot]"),
+    ("rule-S-DEVBENCH-SAVE-name-dot", _MC, '    if not n or n in (".", "..") or', '    if not n or n in ("..",) or',
+     _T11 + "test_an_unusable_save_name_asks[dot]"),
+    ("rule-S-DEVBENCH-SAVE-name-string", _MC, "    if not isinstance(name, str):\n        return None\n    n = name.strip()",
+     "    n = str(name).strip()", _T11 + "test_an_unusable_save_name_asks[number]"),
+    ("rule-S-DEVBENCH-SAVE-name-strip", _MC, "    n = name.strip()", "    n = name", _T11 + "test_an_unusable_save_name_asks[blank]"),
+    ("rule-S-DEVBENCH-SAVE-ess-suffix", _MC, '    if n.lower().endswith(".ess"):\n        n = n[:-4]', "    if False:\n        n = n[:-4]",
+     _t11row("t11-mcp-save-existing-case")),
+    ("rule-S-DEVBENCH-SAVE-case-insensitive", _MC, "frozenset(n.casefold() for n in os.listdir(folder))",
+     "frozenset(os.listdir(folder))", _t11row("t11-mcp-save-existing-case")),
+    ("rule-S-DEVBENCH-SAVE-game-action", _MC, '        if isinstance(action, str) and action.strip().lower() == "save":',
+     "        if False:", _t11row("t11-mcp-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-action-case", _MC, 'action.strip().lower() == "save"', 'action.strip() == "save"',
+     _T11 + "test_the_save_action_is_read_leniently[args0]"),
+    ("rule-S-DEVBENCH-SAVE-action-strip", _MC, 'action.strip().lower() == "save"', 'action.lower() == "save"',
+     _T11 + "test_the_save_action_is_read_leniently[args1]"),
+    ("rule-S-DEVBENCH-SAVE-action-string", _MC, '        if isinstance(action, str) and action.strip()', "        if action.strip()",
+     _T11 + "test_other_game_actions_never_ask[7]"),
+    ("rule-S-DEVBENCH-SAVE-console", _MC, "        name = _console_save_name(cmd)\n        if name is not None:",
+     "        name = None\n        if name is not None:", _t11row("t11-mcp-console-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-console-case", _MC, '        if words and words[0].lower() == "save":', '        if words and words[0] == "save":',
+     _T11 + "test_the_console_save_word_is_case_insensitive"),
+    ("rule-S-DEVBENCH-SAVE-console-whole-word", _MC, '        if words and words[0].lower() == "save":',
+     '        if words and words[0].lower().startswith("save"):', _T11 + "test_the_console_save_word_is_case_insensitive"),
+    ("rule-S-DEVBENCH-SAVE-wired", _SHR, "    if dev:                                                  # S-DEVBENCH-SAVE",
+     "    if False:                                                # S-DEVBENCH-SAVE", _t11row("t11-cli-tool-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-roots", "tools/skyguard/run.py", 'v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)',
+     'v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit)', "tests/test_guard_corpus.py::test_intended_rows_reproduce"),
+    # S-INERT-NOINPUT
+    ("rule-S-INERT-NOINPUT-empty", _MC, '    if name == "" or name == "unknown":', '    if name == "unknown":',
+     _T11 + "test_an_empty_payload_is_refused_not_allowed"),
+    ("rule-S-INERT-NOINPUT-no-tool-name", _MC, '    if name == "" or name == "unknown":', '    if name == "":',
+     "tests/test_hooks.py::test_protect_mcp_refuses_when_it_cannot_see_the_tool_name"),
+    # the wiring: the matcher, setup.sh and the gates that count hooks
+    ("rule-S-DEVBENCH-CRASH-matcher", ".claude/settings.json", '"matcher": "mcp__devbench.*"', '"matcher": "mcp__other.*"',
+     "tests/test_repo_invariants.py::test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher"),
+    ("rule-S-DEVBENCH-CRASH-matcher-narrow", ".claude/settings.json", '"matcher": "mcp__devbench.*"', '"matcher": "mcp__devbench-vr__console"',
+     "tests/test_repo_invariants.py::test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher"),
+    ("rule-S-DEVBENCH-CRASH-setup-configures-it", "setup.sh",
+     ".claude/hooks/protect-files.sh .claude/hooks/protect-mcp.sh \\\n", ".claude/hooks/protect-files.sh \\\n",
+     "tests/test_repo_invariants.py::test_every_hook_is_configured_by_setup_and_carries_one_placeholder"),
+    # Plan 4 moved the canary's hook list into health.py (hook-canary.sh delegates to it).
+    ("rule-S-DEVBENCH-CRASH-canary-lists-it", "tools/skyguard/health.py",
+     'CLAUDE_HOOKS = ("protect-files", "protect-bash", "protect-mcp", "backup-before-edit",',
+     'CLAUDE_HOOKS = ("protect-files", "protect-bash", "backup-before-edit",',
+     "tests/test_repo_invariants.py::test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks"),
+    ("rule-S-DEVBENCH-CRASH-release-floor", ".github/workflows/release.yml", 'test "$nhooks" -ge 6', 'test "$nhooks" -ge 5',
+     "tests/test_repo_invariants.py::test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks"),
+    ("rule-S-DEVBENCH-CRASH-verify-floor", "tools/verify-release.sh", "*[!0-9]*) floor=6 ;;", "*[!0-9]*) floor=5 ;;",
+     "tests/test_repo_invariants.py::test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks"),
+    ("wrapper-protect-mcp-names-its-role", ".claude/hooks/protect-mcp.sh", 'HOOK_NAME="protect-mcp"', 'HOOK_NAME="protect-files"',
+     "tests/test_hooks.py::test_a_fresh_install_gets_its_heartbeat_directory[protect-mcp.sh]"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T11_CLAUSES]
+
+
+# --- Task 11 fix round 1: unreadable bodies deny when they name a bare reset; the saves-folder fallback chain -----------
+def _t11u(case):
+    return _T11 + "test_an_unreadable_console_body_naming_a_bare_reset_denies[" + case + "]"
+
+
+_UW = '        elif tool.lower() == "console" and _unreadable_names_reset(text):'
+_UC = '        if argv[1].lower() == "console" and _unreadable_names_reset(text):'
+_RX = '(?:["' + "'" + '`)}'
+_T11_R1 = [
+    # a body with no definite command
+    ("rule-S-DEVBENCH-CRASH-unreadable-body", _MC, _UW, "        elif False:", _t11row("t11-curl-form-body")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-console-only", _MC, _UW, "        elif _unreadable_names_reset(text):",
+     _T11 + "test_an_unreadable_body_is_only_judged_for_the_console_tool"),
+    ("rule-S-DEVBENCH-CRASH-unreadable-tool-case", _MC, _UW, '        elif tool == "console" and _unreadable_names_reset(text):',
+     _T11 + "test_the_console_tool_name_is_case_insensitive_on_the_wire"),
+    ("rule-S-DEVBENCH-CRASH-unreadable-command-type", _MC, '(tool.lower() != "console" or isinstance(args.get("command"), str))',
+     "(True)", _T11 + "test_a_body_whose_command_is_not_a_string_is_unreadable_not_ignored"),
+    ("rule-S-DEVBENCH-CRASH-unreadable-cli", _MC, _UC, "        if False:",
+     _T11 + "test_the_cli_tool_console_with_an_unreadable_body_naming_a_reset_denies"),
+    ("rule-S-DEVBENCH-CRASH-unreadable-cli-console-only", _MC, _UC, "        if _unreadable_names_reset(text):",
+     _T11 + "test_an_unreadable_body_is_only_judged_for_the_console_tool"),
+    ("rule-S-DEVBENCH-CRASH-unreadable-cli-tool-case", _MC, _UC, '        if argv[1] == "console" and _unreadable_names_reset(text):',
+     _T11 + "test_the_cli_tool_console_with_an_unreadable_body_naming_a_reset_denies"),
+    ("rule-S-DEVBENCH-CRASH-unreadable-whole-command", _MC, "calls = _web_call(e, command)", "calls = _web_call(e, e.segment)",
+     _t11row("t11-ps-body-variable-built-earlier")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-needs-reset", _MC, "    return bool(_TEXT_BARE_RESET.search(text))", "    return True",
+     _T11 + "test_an_unreadable_console_body_naming_something_else_is_allowed[smp list]"),
+    ("rule-S-DEVBENCH-CRASH-unreadable-word-start", _MC, '"""' + BS + "bsmp", '"""smp',
+     _T11 + "test_an_unreadable_console_body_naming_something_else_is_allowed[xsmp reset]"),
+    ("rule-S-DEVBENCH-CRASH-unreadable-no-argument", _MC, "|<>]|$)" + '"""', "|<>]|$|" + BS + "s)" + '"""',
+     _T11 + "test_an_unreadable_console_body_naming_something_else_is_allowed[smp reset 0x14]"),
+    ("rule-S-DEVBENCH-CRASH-unreadable-whole-word", _MC, "|<>]|$)" + '"""', "|<>]|$|" + BS + "w)" + '"""',
+     _T11 + "test_an_unreadable_console_body_naming_something_else_is_allowed[smp resetx]"),
+    ("rule-S-DEVBENCH-CRASH-unreadable-term-quote", _MC, _RX, "(?:['" + '`)}', _t11u("quote")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-term-squote", _MC, _RX, '(?:["`)}', _t11u("squote")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-term-backtick", _MC, _RX, '(?:["' + "'" + ")}", _t11u("backtick")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-term-paren", _MC, _RX, '(?:["' + "'" + "`}", _t11u("paren")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-term-brace", _MC, _RX, '(?:["' + "'" + "`)", _t11u("brace")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-term-backslash", _MC, "`)}" + BS * 3 + "]", "`)}" + BS + "]", _t11u("escaped-quote")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-term-bracket", _MC, BS + "];,&", ";,&", _t11u("bracket")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-term-semicolon", _MC, ";,&|<>]", ",&|<>]", _t11u("semicolon")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-term-amp", _MC, ";,&|<>]", ";,|<>]", _t11u("amp")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-term-pipe", _MC, ";,&|<>]", ";,&<>]", _t11u("pipe")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-term-redirect", _MC, ";,&|<>]", ";,&|]", _t11u("redirect")),
+    ("rule-S-DEVBENCH-CRASH-unreadable-case", _MC, '|$)""", re.IGNORECASE)', '|$)""")', _t11u("case")),
+    # the saves-folder fallback chain
+    ("rule-S-DEVBENCH-SAVE-exists", _MC, '    if exists is False:\n        return ("", {})', '    if True:\n        return ("", {})',
+     _t11row("t11-mcp-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-asks-every-save", _MC, '    if exists is False:\n        return ("", {})', '    if False:\n        return ("", {})',
+     _t11row("t11-mcp-save-new")),
+    ("rule-S-DEVBENCH-SAVE-unresolvable-asks", _MC,
+     '    if exists is None:\n        return ("S-DEVBENCH-SAVE", {"op": f"Cannot tell if save {clean} exists."})',
+     '    if exists is None:\n        return ("", {})', _t11row("t11-mcp-save-unresolvable")),
+    ("rule-S-DEVBENCH-SAVE-overwrite-text", _MC, 'f"Overwrites save {clean}."', 'f"Cannot tell if save {clean} exists."',
+     _t11row("t11-mcp-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-unusable-name", _MC,
+     '    if clean is None:\n        return ("S-DEVBENCH-SAVE", {"op": "Cannot tell which save this overwrites."})',
+     '    if clean is None:\n        return ("", {})', _t11row("t11-mcp-save-no-name")),
+    ("rule-S-DEVBENCH-SAVE-case-insensitive-name", _MC, '(name + ".ess").casefold() in', '(name + ".ess") in',
+     _t11row("t11-mcp-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-saves-folder", _MC, '[os.path.join(d, "Saves") for d', "[d for d", _t11row("t11-mcp-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-config-dirs", _MC, '    cands = [os.path.join(d, "Saves") for d in roots.config_dirs]', "    cands = []",
+     _t11row("t11-mcp-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-first-wins", _MC, "    return next((c for c in cands if os.path.isdir(c)), None)",
+     "    return next((c for c in reversed(cands) if os.path.isdir(c)), None)", _T11 + "test_the_first_existing_saves_folder_wins"),
+    ("rule-S-DEVBENCH-SAVE-skips-missing", _MC, "    return next((c for c in cands if os.path.isdir(c)), None)",
+     "    return next(iter(cands), None)", _T11 + "test_the_first_existing_saves_folder_wins"),
+    ("rule-S-DEVBENCH-SAVE-config-outranks-documents", _MC, "    for docs in _documents(env):\n        cands += [",
+     "    for docs in _documents(env):\n        cands = [", _T11 + "test_a_declared_config_dir_outranks_documents"),
+    ("rule-S-DEVBENCH-SAVE-documents-fallback", _MC, "    for docs in _documents(env):", "    for docs in []:",
+     _t11row("t11-mcp-save-docs-existing")),
+    ("rule-S-DEVBENCH-SAVE-game-folders", _MC, "for g in paths.GAME_FOLDERS]", 'for g in ("Skyrim VR",)]',
+     _T11 + "test_every_game_folder_name_is_searched[Skyrim Special Edition]"),
+    ("rule-S-DEVBENCH-SAVE-game-folder-base", _MC, "for g in paths.GAME_FOLDERS]", 'for g in ("Skyrim VR", "Skyrim Special Edition")]',
+     _T11 + "test_every_game_folder_name_is_searched[Skyrim]"),
+    ("rule-S-DEVBENCH-SAVE-vr-first", _MC, "for g in paths.GAME_FOLDERS]", "for g in reversed(paths.GAME_FOLDERS)]",
+     _T11 + "test_vr_outranks_the_other_game_folders"),
+    ("rule-S-DEVBENCH-SAVE-userprofile", _MC, '("USERPROFILE", "HOME", ', '("HOME", ',
+     _T11 + "test_documents_is_the_fallback_when_no_config_dir_has_saves"),
+    ("rule-S-DEVBENCH-SAVE-home", _MC, '"USERPROFILE", "HOME", "OneDrive"', '"USERPROFILE", "OneDrive"',
+     _T11 + "test_a_redirected_documents_is_found[HOME]"),
+    ("rule-S-DEVBENCH-SAVE-onedrive", _MC, '"HOME", "OneDrive", "OneDriveConsumer"', '"HOME", "OneDriveConsumer"',
+     _T11 + "test_a_redirected_documents_is_found[OneDrive]"),
+    ("rule-S-DEVBENCH-SAVE-onedrive-consumer", _MC, '"OneDriveConsumer", "OneDriveCommercial")', '"OneDriveCommercial")',
+     _T11 + "test_a_redirected_documents_is_found[OneDriveConsumer]"),
+    ("rule-S-DEVBENCH-SAVE-onedrive-commercial", _MC, '"OneDriveConsumer", "OneDriveCommercial")', '"OneDriveConsumer")',
+     _T11 + "test_a_redirected_documents_is_found[OneDriveCommercial]"),
+    ("rule-S-DEVBENCH-SAVE-empty-documents", _MC, "        if base:  ", "        if True:  ",
+     _T11 + "test_an_empty_documents_variable_is_not_read_relative_to_the_cwd"),
+    ("rule-S-DEVBENCH-SAVE-no-folder", _MC, "    if folder is None:\n        return None\n    if folder not in memo:",
+     "    if folder is None:\n        return False\n    if folder not in memo:", _t11row("t11-mcp-save-unresolvable")),
+    ("rule-S-DEVBENCH-SAVE-listing-error", _MC, "        except OSError:\n            memo[folder] = None",
+     "        except KeyError:\n            memo[folder] = None", _T11 + "test_an_unreadable_saves_folder_is_unknown_not_a_crash"),
+    ("rule-S-DEVBENCH-SAVE-listing-unknown", _MC, "    if memo[folder] is None:\n        return None",
+     "    if memo[folder] is None:\n        return False", _T11 + "test_an_unreadable_saves_folder_is_unknown_not_a_crash"),
+    ("rule-S-DEVBENCH-SAVE-listing-memo", _MC, "    if folder not in memo:\n        try:", "    if True:\n        try:",
+     _T11 + "test_a_scan_lists_each_saves_folder_once"),
+    ("rule-S-DEVBENCH-SAVE-env-wired", _MC, "hit = judge(parts[-1], args, roots, None, env) if", "hit = judge(parts[-1], args, roots) if",
+     _t11row("t11-mcp-save-docs-existing")),
+    ("rule-S-DEVBENCH-SAVE-env-wired-shell", _MC, "hit = judge(tool, args, roots, memo, env)", "hit = judge(tool, args, roots, memo)",
+     _t11row("t11-curl-save-docs-existing")),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T11_R1]
+
+
+# --- Task 12: a blank or non-string command fails closed. One twin per clause; each names the test that must go red.
+_T12 = "tests/test_skyguard_t12.py::"
+MUTATIONS += [
+    pytest.param("tools/skyguard/run.py", 'elif p["command_type"] != "string" or not p["command"]:',
+                 'elif not p["command"]:',
+                 _T12 + "test_run_denies_a_non_string_command", id="rule-S-INERT-NOCMD-nonstring"),
+    pytest.param("tools/skyguard/shell_rules.py", '    if command.strip() == "":', '    if command == "":',
+                 _T12 + "test_decide_denies_a_whitespace_only_command", id="rule-S-INERT-NOCMD-whitespace"),
+]
+
+
+# --- Task 13: the strict message contract and the registry rules it emptied of legacy text. One twin per clause.
+_RM = "tests/test_rule_messages.py::"
+_USE = "'Use xelib, Spriggit or AutoMod to change them instead.'"
+_USE3 = "'Use xelib, Spriggit or AutoMod to change them instead.\\nThird line.'"
+MUTATIONS += [
+    pytest.param("tools/skyguard/shell_rules.py", '    if roots.game == "":', '    if roots.game == None:',
+                 "tests/test_skyguard_shell.py::test_rule0b_no_root", id="rule-S-INERT-NOROOT-empty-root"),
+    pytest.param("tools/skyguard/write_rules.py", '    if file_path == "":', '    if file_path == None:',
+                 "tests/test_skyguard_write.py::test_rule0_empty_path", id="rule-W-INERT-NOPATH-empty-path"),
+    pytest.param("tools/skyguard/write_rules.py", '    if grep(targets.PLUGIN_FILE, file_path):', '    if False:',
+                 "tests/test_skyguard_write.py::test_rule1_plugin_write_denied", id="rule-W-PLUGIN-plugin-file"),
+    # messages-no-echo: the command is appended to a live message; only the corpus-wide check can see that.
+    pytest.param("tools/skyguard/shell_rules.py",
+                 'reason = rules.message("S-RESAVER-APPLY", op=op, save=save or "the save")',
+                 'reason = rules.message("S-RESAVER-APPLY", op=op, save=save or "the save") + " " + command',
+                 _RM + "test_no_message_echoes_its_command", id="messages-no-echo"),
+    # ... and the static twin: a template that carries a command placeholder.
+    pytest.param("tools/skyguard/rules.py", _USE, "'Use xelib, Spriggit or AutoMod to change them instead of {c}.'",
+                 _RM + "test_no_template_echoes_the_command", id="messages-no-echo-template"),
+    # messages-two-lines: a third line, seen by the corpus-wide check and by the per-template check.
+    pytest.param("tools/skyguard/rules.py", _USE, _USE3, _RM + "test_no_message_echoes_its_command",
+                 id="messages-two-lines"),
+    pytest.param("tools/skyguard/rules.py", _USE, _USE3, _RM + "test_message_shape", id="messages-two-lines-shape"),
+    # the R13 exemption must stay narrow: only a payload-* row ...
+    pytest.param("tests/test_rule_messages.py",
+                 'return row_id.startswith("payload-") and bool(WRAPPER_INERT.match(text))',
+                 'return bool(WRAPPER_INERT.match(text))',
+                 _RM + "test_the_wrapper_exemption_does_not_widen", id="messages-exemption-any-row"),
+    # ... only that exact text (the end anchor) ...
+    pytest.param("tests/test_rule_messages.py", 'indistinguishable from approving\\.$")',
+                 'indistinguishable from approving\\.")',
+                 _RM + "test_the_wrapper_exemption_does_not_widen", id="messages-exemption-any-suffix"),
+    # ... and it may skip the shape check, never the echo check.
+    pytest.param("tests/test_rule_messages.py", "    run = echoed_run(text, payload)\n    if run:",
+                 "    run = None if _wrapper_exempt(row_id, text) else echoed_run(text, payload)\n    if run:",
+                 _RM + "test_the_wrapper_exemption_does_not_widen", id="messages-exemption-skips-echo"),
+    # a legacy message coming back
+    pytest.param("tools/skyguard/rules.py",
+                 '"legacy": False,\n        "prefixes": [],\n        "template": (\n        \'Blocked: plugin',
+                 '"legacy": True,\n        "prefixes": [],\n        "template": (\n        \'Blocked: plugin',
+                 _RM + "test_no_legacy_messages", id="messages-legacy-returns"),
+
+    pytest.param("tests/conftest.py",
+                 'if os.environ.get("TOOLKIT_REQUIRE_HARNESS") == "1" and not harness_active():',
+                 'if False:',
+                 "tests/test_harness_required.py::test_requiring_the_harness_without_it_is_an_error",
+                 id="require-harness-without-harness-is-silent"),
+
+    pytest.param("setup.sh",
+                 '    echo "  Setup does not install it. When you need xeditlib, install it yourself:"\n',
+                 '    winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements 2>/dev/null || true\n',
+                 "tests/test_setup_paths.py::test_setup_without_node_prints_instructions_and_never_runs_a_package_manager",
+                 id="setup-no-node-autoinstall"),
+
+    pytest.param("tools/esp-verify-wrapper.sh",
+                 'if [ "$allow_empty" -eq 0 ] && { [ ! -s "$snap" ] || [ ! -s "$after" ]; }; then',
+                 'if false; then',
+                 "tests/test_esp_verify.py::test_two_empty_inventories_are_not_a_pass",
+                 id="esp-verify-empty-inventory-fails"),
+
+    pytest.param("tests/run_harness_tests.py",
+                 '"PATHEXT", "TOOLKIT_REQUIRE_HARNESS")',
+                 '"PATHEXT")',
+                 "tests/test_harness_required.py::test_the_launcher_forwards_the_require_flag_to_pytest",
+                 id="launcher-drops-require-harness-flag"),
+
+    pytest.param("tools/esp-verify-wrapper.sh",
+                 "    comm -13 \"$before\" \"$after\" | awk -F'\\t'",
+                 "    : | awk -F'\\t'",
+                 "tests/test_esp_verify.py::test_allow_empty_still_lists_the_references_that_appeared",
+                 id="esp-verify-allow-empty-hides-additions"),
+
+    pytest.param("scripts/check_could_not_check.py",
+                 'if skipped and not any("short test summary info" in line for line in lines):',
+                 'if False:',
+                 "tests/test_could_not_check.py::test_counted_skips_without_a_short_summary_section_cannot_pass",
+                 id="could-not-check-passes-without-rs"),
+
+    pytest.param("tools/esp-verify-wrapper.sh",
+                 '  if [ -z "$(find "$tmp" -name \'*.yaml\' -print -quit)" ]; then',
+                 '  if false; then',
+                 "tests/test_esp_verify.py::test_snapshot_dies_when_the_serializer_yields_no_yaml",
+                 id="esp-verify-no-yaml-dies"),
 ]
 
 
@@ -1840,10 +3242,10 @@ MUTATIONS_TASK13 = [
      _COV + "test_coverage_is_degraded_when_one_call_has_no_line", "coverage-degraded-when-a-call-had-no-hook"),
     ("tools/skyguard/health.py", "            hooked = sum(min(hooked_by.get(t, 0), counts.get(t, 0)) for t in tools)",
      "            hooked = sum(hooked_by.get(t, 0) for t in tools)",
-     _COV + "test_claude_coverage_is_judged_per_covered_tool", "coverage-claude-is-judged-per-tool"),
+     _COV + "test_extra_guard_lines_for_one_tool_cannot_cover_another_tools_call", "coverage-claude-is-judged-per-tool"),
     ("tools/skyguard/health.py",
-     'COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files"), "codex": ("pre-tool",)}',
-     'COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files", "backup-before-edit"), '
+     'COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files", "protect-mcp"), "codex": ("pre-tool",)}',
+     'COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files", "protect-mcp", "backup-before-edit"), '
      '"codex": ("pre-tool", "session-start")}',
      _COV + "test_only_the_pre_tool_guard_counts_as_seeing_a_codex_call", "coverage-counts-only-the-guard-hooks"),
     ("tools/skyguard/health.py", "            if not transcript:\n", "            if False:\n",
@@ -2015,3 +3417,55 @@ def test_guard_actually_bites(tmp_path, relpath, find, replace, test_id):
         + f"--- mutation ---\n{find!r} -> {replace!r}\n"
         f"--- pytest output ---\n{result.stdout[-2000:]}"
     )
+
+
+# Merge of Plans 4+5 (2026-10-04). One entry per guard the merge itself added; each names the test that must go red.
+_MERGE = "tests/"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # codes: Plan 5 renders most verdicts from the registry; drop that source and they all code "unknown".
+    ("tools/skyguard/codes.py", "    for rid, rule in sorted(rules.RULES.items()):", "    for rid, rule in []:",
+     _MERGE + "test_skyguard_codes.py::test_every_registry_rule_codes_to_exactly_one_code[S-DEL-MO2]",
+     "merge-codes-read-the-registry"),
+    ("tools/skyguard/codes.py", '    return ".NO_" in code or "INERT" in code', '    return ".NO_" in code',
+     _MERGE + "test_skyguard_codes.py::test_every_registry_rule_codes_to_exactly_one_code[S-INERT-CONFIG]",
+     "merge-codes-registry-inert-is-failed"),
+    ("tools/skyguard/codes.py", '_ONE_ITEM = r"(?:(?! \\| ).)*"', '_ONE_ITEM = ".*"',
+     _MERGE + "test_skyguard_codes.py::test_a_later_advice_item_cannot_code_the_first",
+     "merge-codes-advice-field-cannot-span-items"),
+    # codex .rules: a prefix that refuses a registry delete the hook allows (the R5 subset, after Plan 5 narrowed it).
+    # (A cut-down key like "HKCU" is no defect: it is an ANCESTOR of a Bethesda key, which the hook also denies.)
+    ("tools/skyguard/codex_rules.py", '    "HKCU\\\\Software\\\\Bethesda Softworks",\n',
+     '    "HKCU\\\\Software\\\\Other Softworks",\n',
+     _MERGE + "test_codex_rules.py::test_every_prefix_rule_is_a_subset_of_its_hook_deny",
+     "merge-codex-rules-prefix-broader-than-hook"),
+    # Codex adapter: a scalar non-string command is refused before any rule (Plan 5 Task 12 on Codex).
+    ("tools/skyguard/adapters/codex.py",
+     '    if not name.startswith("mcp__") and "command" in ti and not isinstance(cmd, (str, list)):',
+     "    if False:",
+     _MERGE + "test_skyguard_codex_adapter.py::test_a_scalar_non_string_command_is_refused_before_the_rules[exec_command-int]",
+     "merge-codex-scalar-command-allowed"),
+    # engine: Plan 5's cwd and dialect must reach the rules through the Plan 4 engine.
+    ("tools/skyguard/engine.py", 'cwd=req.cwd or "", shell=req.shell or ""))', 'shell=req.shell or ""))',
+     _MERGE + "test_guard_corpus.py::test_intended_rows_reproduce", "merge-engine-drops-cwd"),
+    ("tools/skyguard/engine.py", "    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd))",
+     "    return codes.classify(write_rules.decide(path, audit))",
+     _MERGE + "test_guard_corpus.py::test_intended_rows_reproduce", "merge-engine-write-drops-roots"),
+    # Claude adapter: the Request carries the tool's dialect, never a guessed "bash".
+    ("tools/skyguard/adapters/claude.py", '                   shell=(p.get("shell") or None) if kind == "shell" else None,',
+     '                   shell="bash" if kind == "shell" else None,',
+     _MERGE + "test_skyguard_claude_adapter.py::test_run_judges_monitor_in_the_unknown_dialect",
+     "merge-claude-request-guesses-bash"),
+    # health: the canary counts Plan 5's widened matchers.
+    ("tools/skyguard/health.py", 'CLAUDE_COVERED_TOOLS = ("Bash", "PowerShell", "Monitor", "Edit", "Write", "NotebookEdit")',
+     'CLAUDE_COVERED_TOOLS = ("Bash", "Edit", "Write")',
+     _MERGE + "test_skyguard_coverage.py::test_claude_coverage_counts_every_tool_the_installed_matchers_cover[PowerShell-protect-bash]",
+     "merge-coverage-ignores-powershell"),
+    ("tools/skyguard/health.py", "    return tool in CLAUDE_COVERED_TOOLS or (isinstance(tool, str) and tool.startswith(CLAUDE_COVERED_PREFIX))",
+     "    return tool in CLAUDE_COVERED_TOOLS",
+     _MERGE + "test_skyguard_coverage.py::test_claude_coverage_counts_every_tool_the_installed_matchers_cover[mcp__devbench-vr__console-protect-mcp]",
+     "merge-coverage-ignores-devbench-mcp"),
+    ("tools/skyguard/health.py", "            tools = [t for t in counts if _claude_covered(t)]",
+     "            tools = [t for t in CLAUDE_COVERED_TOOLS]",
+     _MERGE + "test_skyguard_coverage.py::test_claude_coverage_counts_every_tool_the_installed_matchers_cover[mcp__devbench-vr__console-protect-mcp]",
+     "merge-coverage-per-tool-list-is-static"),
+]]

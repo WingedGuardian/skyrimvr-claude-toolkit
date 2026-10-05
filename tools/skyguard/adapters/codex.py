@@ -146,6 +146,11 @@ def to_request(raw: str, platform: str = sys.platform) -> Request:
                            ops=tuple(o for o, _ in ops), **common)
     except patch_paths.PatchParseError as e:
         return Request(event="pre_tool", failure="unreadable patch: {}".format(e), **common)
+    if not name.startswith("mcp__") and "command" in ti and not isinstance(cmd, (str, list)):
+        # Merge of Plans 4+5 (Plan 5 Task 12): a PRESENT command that is a number, boolean, null or object is no
+        # command the guard can judge; as kind 'other' it would be allowed unexamined. Refused before any rule.
+        return Request(event="pre_tool", failure="tool call whose command is not a string or an argv list",
+                       **common)
     if not name.startswith("mcp__") and isinstance(cmd, list):
         cmd = _argv_text(cmd, "powershell" if platform.startswith("win") else "bash")
         if cmd is None:

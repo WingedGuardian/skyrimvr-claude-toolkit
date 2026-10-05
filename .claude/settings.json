@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell|Monitor",
         "hooks": [
           {
             "type": "command",
@@ -19,7 +19,7 @@
         ]
       },
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit|Write|NotebookEdit",
         "hooks": [
           {
             "type": "command",
@@ -32,6 +32,17 @@
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/backup-before-edit.sh\"",
             "timeout": 60,
             "statusMessage": "Backing up file..."
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__devbench.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-mcp.sh\"",
+            "timeout": 60,
+            "statusMessage": "Checking DevBench call..."
           }
         ]
       }

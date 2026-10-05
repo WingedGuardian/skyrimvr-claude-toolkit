@@ -14,7 +14,7 @@ def active():
 
 def install():
     global _ACTIVE
-    root = Path(os.environ["HARNESS_FIXTURE_ROOT"]).resolve()
+    roots = [Path(r).resolve() for r in os.environ["HARNESS_FIXTURE_ROOT"].split(os.pathsep) if r]
 
     def contained(value):
         if isinstance(value, int) or value is None:
@@ -24,7 +24,7 @@ def install():
             return True
         if value.startswith("\\\\?\\"):
             value = "\\\\" + value[8:] if value[4:].startswith("UNC\\") else value[4:]
-        return Path(value).resolve().is_relative_to(root)
+        return any(Path(value).resolve().is_relative_to(root) for root in roots)
 
     def dir_fds(event, args):
         # POSIX shutil.rmtree is fd-based: it removes RELATIVE names with dir_fd=<open dir>.
