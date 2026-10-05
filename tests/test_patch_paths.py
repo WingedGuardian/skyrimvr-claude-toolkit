@@ -180,6 +180,16 @@ def test_every_way_to_run_it_is_attributed_or_refused(prefix):
         shell_patch(prefix + " " + _ONE)
 
 
+@pytest.mark.parametrize("prefix", [
+    "FOO=1 apply_patch", "/usr/bin/apply_patch", "apply_patch.exe", "bash -lc \"apply_patch",
+])
+def test_every_way_to_run_it_from_a_file_is_refused(prefix):
+    # rt-fix-b: a patch BODY beside any spelling of the program is refused anyway, so the run-position clauses are
+    # only what refuses a patch read from a file (no body in the command text).
+    with pytest.raises(PatchParseError):
+        shell_patch(prefix + " < p.diff")
+
+
 @pytest.mark.parametrize("cmd", [
     "rg -n apply_patch tools/", "echo apply_patch is a tool", "git commit -m \"fix apply_patch parsing\"",
     "grep -rn applypatch .", "cat docs/apply_patch.md", "Get-Content apply_patch.txt",
