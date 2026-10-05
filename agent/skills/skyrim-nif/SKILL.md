@@ -129,15 +129,19 @@ with open('path/to/output.nif', 'wb') as f:
 
 # PyNifly — BSTriShape (SSE) + animation/controller authoring
 
-Installed at `tools/pynifly/io_scene_nifly/pyn/` (BadDogSkyrim PyNifly; the prebuilt `NiflyDLL.dll`
+Installed at `tools/pynifly/io_scene_nifly/` (BadDogSkyrim PyNifly; the prebuilt `NiflyDLL.dll`
 ships with it — no Blender, no compile; plain Python 3.10/3.12 x64). It wraps ousnius/nifly, the
-library behind BodySlide/Outfit Studio.
+library behind BodySlide/Outfit Studio. Verified on **PyNifly 29.1.0**: the DLL is at
+`io_scene_nifly/NiflyDLL.dll` (releases before 29.x kept it at `io_scene_nifly/pyn/NiflyDLL.dll`),
+and `from pyn import pynifly` loads it automatically. The NiControllerSequence authoring
+round-trip below was validated on 27.x and has NOT been re-run on 29.1.0 — re-validate before trusting it.
 
 ```python
-import sys, os
+import sys
 sys.path.insert(0, "tools/pynifly/io_scene_nifly")
-from pyn import pynifly      # import as the package, NOT `import pynifly`
-pynifly.NifFile.Load(os.path.abspath("tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll"))
+from pyn import pynifly      # import as the package, NOT `import pynifly`; loads the DLL itself
+# Releases before 29.x need an explicit load first:
+#   import os; pynifly.NifFile.Load(os.path.abspath("tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll"))
 nf = pynifly.NifFile(path)               # reads SSE BSTriShape AND LE NiTriShape
 [s.name for s in nf.shapes]; list(nf.nodes.keys())
 ```

@@ -1364,8 +1364,10 @@ stdlib in 3.12 (PEP 632) — `pip install pyffi setuptools` fixes it, since setu
 vendored `distutils` plus an import shim (the official PEP 632 migration path). Verified end-to-end
 on Python 3.14. The separate `time.clock` monkey-patch (removed in 3.8, [still open upstream](https://github.com/niftools/pyffi/issues/80)) is unrelated and still required regardless of interpreter version.
 
-**PyNifly is the fix** (installed `tools/pynifly/io_scene_nifly/pyn/`, prebuilt DLL, no Blender;
-`from pyn import pynifly` after putting `io_scene_nifly` on `sys.path`). Wraps ousnius/nifly (the
+**PyNifly is the fix** (installed `tools/pynifly/io_scene_nifly/`, prebuilt DLL, no Blender; verified on PyNifly 29.1.0,
+where the DLL is `io_scene_nifly/NiflyDLL.dll` -- before 29.x it was `io_scene_nifly/pyn/NiflyDLL.dll` --
+and `from pyn import pynifly`, after putting `io_scene_nifly` on `sys.path`, loads it itself;
+the animation-authoring round-trip was validated on 27.x, not re-run on 29.1.0). Wraps ousnius/nifly (the
 BodySlide/Outfit Studio engine). **Reads/writes SSE incl. BSTriShape** AND has correct `.New()`
 controller-authoring factories. Use it for any BSTriShape NIF and ALL animation authoring. See
 the `SpecialIdle`-named NiControllerSequence auto-loops on a placed Activator with zero scripting
