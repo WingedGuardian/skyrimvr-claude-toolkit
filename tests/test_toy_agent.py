@@ -123,14 +123,13 @@ def test_a_broken_engine_fails_closed_through_the_agent(tmp_path, profile, fault
     decoy = root / "Data" / "Decoy.esp"
     r = drive(root, adapter, profile, [{"op": "write", "path": str(decoy)}], env={"SKYGUARD_ADAPTER_TIMEOUT_S": "2"})
     assert r[0]["blocked"] and not decoy.exists()
-    if profile == "json-deny":
-        assert "GUARD INERT" in r[0]["reason"]
+    # For exit2 the reason IS stderr, so this also stops a missing adapter file passing as a block (exit 2 alone).
+    assert "GUARD INERT" in r[0]["reason"]
 
 
 def test_control_a_naive_hook_lets_the_toy_write_the_decoy(tmp_path):
     """The toy must be able to fail open, or every block above proves nothing."""
     root, adapter = staged(tmp_path, "json-deny")
-    (root / "tools" / "skyguard" / "run.py").write_text("raise SystemExit(1)\n")
     naive = root / "naive.py"
     naive.write_text("import subprocess, sys\n"
                      "cp = subprocess.run([sys.executable, %r], input=sys.stdin.buffer.read(), capture_output=True)\n"
@@ -168,6 +167,9 @@ MUTANTS = {  # id -> (exact text in the template, replacement, the row that must
     "ignore-version": ("v.get(\"v\") != 1 or ", "", "fault:engine-wrong-version"),
     "deny-to-allow": ("    if decision == \"deny\":\n        return _checked(render_block(reason))",
                       "    if decision == \"deny\":\n        return _checked(render_allow(context))", "case:decoy-plugin-write"),
+    "ignore-marker": ("    if not text.startswith(MARKER):\n        raise RuntimeError(\"engine answered without the marker\")\n",
+                      "", "fault:engine-no-marker"),
+    "ignore-decision": ("v.get(\"decision\") not in (\"allow\", \"ask\", \"deny\")", "False", "fault:engine-unknown-decision"),
     "no-timeout": ("        timeout=float(os.environ.get(\"SKYGUARD_ADAPTER_TIMEOUT_S\", ADAPTER_TIMEOUT_S)), env=env)",
                    "        env=env)", "fault:engine-hang"),
 }

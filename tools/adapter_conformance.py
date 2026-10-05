@@ -39,6 +39,9 @@ FAULTS = {
     "engine-marker-garbage": _W + "w(b'SKYGUARD-OK\\nnot json\\n')\n",
     "engine-wrong-version": _W + "w(b'SKYGUARD-OK\\n{\"v\":2,\"decision\":\"allow\"}\\n')\n",
     "engine-allow-but-exit-1": ALLOW_V1 + "\nraise SystemExit(1)\n",
+    # Valid verdict JSON with no marker, behind 12 filler bytes so that a missing marker CHECK still parses it.
+    "engine-no-marker": _W + "w(b'            {\"v\":1,\"decision\":\"allow\",\"reason\":\"\",\"context\":\"\"}\\n')\n",
+    "engine-unknown-decision": _W + "w(b'SKYGUARD-OK\\n{\"v\":1,\"decision\":\"maybe\",\"reason\":\"\",\"context\":\"\"}\\n')\n",
     "engine-hang": "import time; time.sleep(60)\n",
     "engine-missing": None,
 }
@@ -325,12 +328,18 @@ def _data(report, path: str):
     return None, None
 
 
+def _has_evidence(report, path: str) -> bool:
+    leaf = _get(report, path)
+    ev = leaf.get("evidence") if isinstance(leaf, dict) else None
+    return isinstance(ev, str) and bool(ev.strip())
+
+
 def _gate_holds(report) -> bool:
     for path, ok_value in (("pre_tool_hook.fires_on_this_surface", lambda v: v is True),
                            ("pre_tool_hook.can_block", lambda v: v is True),
                            ("pre_tool_hook.failed_hook_behaviour", lambda v: v in ("allows", "blocks"))):
         value, tier = _data(report, path)
-        if tier != "MEASURED" or not ok_value(value):
+        if tier != "MEASURED" or not ok_value(value) or not _has_evidence(report, path):
             return False
     return True
 
@@ -353,6 +362,15 @@ def validate_report(report) -> List[str]:
     if not isinstance(report, dict):
         return ["report: must be a JSON object"]
     problems: List[str] = []
+    sections = {l.split(".")[0] for l in LEAVES}
+    for key in report:
+        if key not in sections and key != "claimed_status":
+            problems.append("{}: unknown key (a report has only the template's keys and an optional claimed_status)".format(key))
+        elif key in sections and isinstance(report[key], dict):
+            known = {l.split(".", 1)[1] for l in LEAVES if l.startswith(key + ".")}
+            for sub in report[key]:
+                if sub not in known:
+                    problems.append("{}.{}: unknown key".format(key, sub))
     for leaf in LEAVES:
         value = _get(report, leaf)
         if value is _MISSING:
@@ -371,6 +389,8 @@ def validate_report(report) -> List[str]:
             if not isinstance(value, str):
                 problems.append("{}: must be a string".format(leaf))
         elif isinstance(value, dict):
+            for extra in sorted(set(value) - {"value", "tier", "evidence"}, key=str):
+                problems.append("{}: unknown key '{}' (only value, tier, evidence)".format(leaf, extra))
             if "value" not in value:
                 problems.append("{}: no 'value'".format(leaf))
             if value.get("tier") not in TIERS:
@@ -382,10 +402,14 @@ def validate_report(report) -> List[str]:
                 problems.append("{}: value must be one of {}".format(leaf, "|".join(FAILED_HOOK_VALUES)))
         elif value not in ("", None):
             problems.append("{}: a filled leaf must be {{value, tier, evidence}}".format(leaf))
+    exists, _ = _data(report, "pre_tool_hook.exists")
+    fires, _ = _data(report, "pre_tool_hook.fires_on_this_surface")
+    if exists is False and fires is True:
+        problems.append("pre_tool_hook.exists: false, yet fires_on_this_surface is true; a hook that does not exist cannot fire")
     derived = derive_status(report)
     if "claimed_status" in report:
         claim = report["claimed_status"]
-        if claim not in _RANK:
+        if not isinstance(claim, str) or claim not in _RANK:
             problems.append("claimed_status: must be one of '{}' or '{}'; the toolkit never lets a report say "
                             "'supported'".format(STATUS_FULL, STATUS_PARTIAL))
         elif _RANK[claim] > _RANK[derived]:
@@ -403,8 +427,10 @@ def report_main(path: str) -> int:
     except (OSError, ValueError) as e:
         print("cannot read the report: {}".format(e))
         return 1
-    print(derive_status(report))
     problems = validate_report(report)
+    status = derive_status(report)
+    # The strong status is printed only for a report with no problems at all.
+    print(STATUS_PARTIAL if problems and status == STATUS_FULL else status)
     for p in problems:
         print("PROBLEM " + p)
     return 1 if problems else 0

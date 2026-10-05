@@ -225,6 +225,57 @@ def test_cli_prints_the_derived_status_for_a_clean_full_report(tmp_path):
     assert cp.returncode == 0 and cp.stdout.decode().splitlines()[0] == FULL
 
 
+@pytest.mark.parametrize("leaf", ["fires_on_this_surface", "can_block", "failed_hook_behaviour"])
+@pytest.mark.parametrize("empty", ["", "   ", None])
+def test_a_gating_leaf_with_no_evidence_does_not_count(leaf, empty):
+    r = measured_report()
+    r["pre_tool_hook"][leaf]["evidence"] = empty
+    assert conf.derive_status(r) == PARTIAL
+
+
+def test_the_cli_never_prints_the_strong_status_over_a_problem(tmp_path):
+    r = measured_report()
+    r["status"] = "supported"           # derive alone would say FULL; the problem must stop that line
+    cp = run_cli(tmp_path, r)
+    assert cp.returncode == 1
+    assert cp.stdout.decode().splitlines()[0] == PARTIAL
+
+
+@pytest.mark.parametrize("claim", [[], {}, ["x"], 3.5, True])
+def test_an_unhashable_or_non_string_claim_is_a_problem_not_a_traceback(tmp_path, claim):
+    r = measured_report()
+    r["claimed_status"] = claim
+    assert any("claimed_status" in p for p in conf.validate_report(r))
+    cp = run_cli(tmp_path, r)
+    assert cp.returncode == 1 and b"Traceback" not in cp.stderr
+
+
+def test_a_top_level_status_key_is_rejected():
+    r = measured_report()
+    r["status"] = "supported"
+    assert any("status" in p and "unknown" in p for p in conf.validate_report(r))
+
+
+def test_unknown_nested_keys_are_rejected():
+    r = measured_report()
+    r["pre_tool_hook"]["can_blok"] = d(True)
+    assert any("pre_tool_hook.can_blok" in p for p in conf.validate_report(r))
+    r = measured_report()
+    r["pre_tool_hook"]["can_block"]["confidence"] = 99
+    assert any("pre_tool_hook.can_block" in p and "confidence" in p for p in conf.validate_report(r))
+
+
+def test_a_hook_that_does_not_exist_cannot_fire():
+    r = measured_report()
+    r["pre_tool_hook"]["exists"] = d(False)
+    probs = conf.validate_report(r)
+    assert any("pre_tool_hook.exists" in p and "fires_on_this_surface" in p for p in probs)
+    r = measured_report()
+    r["pre_tool_hook"]["exists"] = d(True)
+    r["pre_tool_hook"]["fires_on_this_surface"] = d(False)
+    assert conf.validate_report(r) == []
+
+
 def _flatten(t):
     out = []
     for k, v in t.items():
