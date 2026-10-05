@@ -60,7 +60,7 @@ def evaluate_writes(req, audit, roots=None) -> Verdict:
     return combine(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "") for p in req.paths)
 
 
-INERT_TRANSLATE = ("GUARD INERT: the Codex hook could not read this call ({}), so it checked NOTHING. "
+INERT_TRANSLATE = ("GUARD INERT: the agent's hook could not read this call ({}), so it checked NOTHING. "
                    "This is a refusal, not a verdict.")
 _BACKUP_OPS = ("update", "delete", "move_from")
 UNHOOKED_LOG = "codex-unhooked-tools.log"
@@ -108,6 +108,8 @@ def _unhooked(req) -> bool:
     """A call no Codex rule guards by name: record it (never for a call already refused)."""
     if req.failure or req.event != "pre_tool":
         return False
+    if req.agent != "codex":
+        return False   # Plan 7: the neutral role's calls are judged by kind, not by a Codex tool name
     return req.kind in ("mcp", "other") or (req.kind == "shell" and req.tool_name != "Bash")
 
 

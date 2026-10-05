@@ -10,9 +10,12 @@ import pytest
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import neutral  # noqa: E402
+from skyguard import engine, neutral, paths  # noqa: E402
 from skyguard.audit import Audit  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
+
+_BASE = '{"v":1,"event":"pre_tool",'
+DEEP = 100000   # far past the json module's C recursion limit
 
 
 def req(**kw):
@@ -48,6 +51,21 @@ BAD = {  # row -> (request text, fragment the refusal must name)
     "ops-length": (req(ops=["add", "add"]), "ops must be parallel"),
     "bad-op": (req(ops=["rewrite"]), "ops must be parallel"),
     "command-not-string": (req(kind="shell", paths=[], command=7), "command must be a string"),
+    # Fix round 1
+    "float-version": (req(v=1.0), "v must be 1"),
+    "duplicate-paths": (_BASE + '"kind":"write","paths":["/x/a.esp"],"paths":["/x/b.txt"]}', "duplicate field"),
+    "duplicate-kind": (_BASE + '"kind":"other","paths":["/x/a.esp"],"kind":"write"}', "duplicate field"),
+    "duplicate-nested": (_BASE + '"kind":"write","paths":[{"a":1,"a":2}]}', "duplicate field"),
+    "duplicate-in-mcp-args": (req(kind="mcp", paths=[], mcp_tool="mcp__devbench-vr__console",
+                                  mcp_args='{"command":"help","command":"smp reset"}'), "duplicate field"),
+    "deep-request": (_BASE + '"kind":"write","paths":' + "[" * DEEP + "]" * DEEP + "}", "too deeply nested"),
+    "deep-mcp-args": (req(kind="mcp", paths=[], mcp_tool="mcp__devbench-vr__console",
+                          mcp_args="[" * DEEP + "]" * DEEP), "too deeply nested"),
+    "mcp-args-not-object": (req(kind="mcp", paths=[], mcp_tool="mcp__x__y", mcp_args="[1]"),
+                            "mcp_args must be"),
+    "mcp-args-not-json": (req(kind="mcp", paths=[], mcp_tool="mcp__x__y", mcp_args="{"), "mcp_args must be"),
+    "agent-claims-codex": (req(agent="codex"), "agent must not be"),
+    "agent-claims-claude": (req(agent="claude"), "agent must not be"),
 }
 
 
@@ -128,7 +146,100 @@ def test_cli_rejects_a_role_other_than_pre_tool_with_exit_1_and_no_stdout(tmp_pa
 def test_cli_writes_telemetry_when_asked(tmp_path):
     hb = tmp_path / "hb"
     _cli(tmp_path, req(paths=[str(tmp_path / "n.txt")]).encode(), "--invocation", "1.1-a", "--telemetry", str(hb))
-    assert (hb / "pre-tool.evaluated").is_file()
+    # Its own role name: a neutral record must never land on (or be read as) the Codex hook's pre-tool record.
+    assert (hb / "neutral-pre-tool.evaluated").is_file()
+    assert not (hb / "pre-tool.evaluated").exists()
+
+
+# ---- fix round 1 -----------------------------------------------------------------------------------
+def _roots(tmp_path):
+    return lambda: paths.roots(tmp_path.as_posix(), str(tmp_path), {})
+
+
+def _unhooked_log(tmp_path):
+    return tmp_path / ".claude" / "backups" / engine.UNHOOKED_LOG
+
+
+def test_a_judged_neutral_shell_call_is_not_logged_as_unhooked(tmp_path):
+    (tmp_path / "Data").mkdir()
+    for cmd, want in (('echo x > "{}"'.format((tmp_path / "Data" / "Decoy.esp").as_posix()), "deny"),
+                      ("Get-Date", "allow")):
+        _, v = neutral.handle(req(kind="shell", paths=[], command=cmd, cwd=tmp_path.as_posix()), str(tmp_path),
+                              _roots(tmp_path), Audit(str(tmp_path)))
+        assert v.decision == want, (cmd, v)
+    assert not _unhooked_log(tmp_path).exists()
+
+
+def test_the_devbench_crash_command_is_denied_through_the_mcp_rules(tmp_path):
+    args = json.dumps({"action": "exec", "command": "smp reset"})
+    _, v = neutral.handle(req(kind="mcp", paths=[], mcp_tool="mcp__devbench-vr__console", mcp_args=args),
+                          str(tmp_path), _roots(tmp_path), Audit(str(tmp_path)))
+    # The registry codes this rule under the hook that owns it (shell.); the rule id is what matters.
+    assert v.decision == "deny" and v.code.endswith(".S-DEVBENCH-CRASH"), v
+
+
+def test_a_harmless_devbench_call_and_another_mcp_server_are_allowed(tmp_path):
+    for tool, args in (("mcp__devbench-vr__console", {"action": "exec", "command": "help"}),
+                       ("mcp__other__thing", {"command": "smp reset"})):
+        _, v = neutral.handle(req(kind="mcp", paths=[], mcp_tool=tool, mcp_args=json.dumps(args)),
+                              str(tmp_path), _roots(tmp_path), Audit(str(tmp_path)))
+        assert v.decision == "allow", (tool, v)
+    assert not _unhooked_log(tmp_path).exists()
+
+
+def test_an_mcp_request_without_a_tool_name_is_a_failed_deny(tmp_path):
+    _, v = neutral.handle(req(kind="mcp", paths=[]), str(tmp_path), _roots(tmp_path), Audit(str(tmp_path)))
+    assert (v.decision, v.status) == ("deny", "failed"), v
+
+
+def test_kind_other_is_allowed_but_never_reads_as_a_verdict(tmp_path):
+    text, v = neutral.handle(req(kind="other", paths=[], tool_name="web_fetch"), str(tmp_path),
+                             _roots(tmp_path), Audit(str(tmp_path)))
+    assert (v.decision, v.code, v.context) == ("allow", "neutral.UNJUDGED", neutral.UNJUDGED)
+    assert neutral.UNJUDGED == "NOT JUDGED: this tool kind is not guarded"
+    assert json.loads(text.split("\n", 1)[1])["code"] == "neutral.UNJUDGED"
+    assert not _unhooked_log(tmp_path).exists()
+
+
+@pytest.mark.parametrize("row", ["no-command", "blank-command", "no-root"])
+def test_inert_shell_refusals_name_no_other_agents_hook(tmp_path, row):
+    command = {"no-command": "", "blank-command": "   ", "no-root": "rm -rf x"}[row]
+    roots = (lambda: paths.Roots("", "")) if row == "no-root" else _roots(tmp_path)
+    _, v = neutral.handle(req(kind="shell", paths=[], command=command), str(tmp_path), roots, Audit(str(tmp_path)))
+    assert (v.decision, v.status) == ("deny", "failed"), v
+    assert v.code in ("shell.NO_COMMAND_DENY", "shell.NO_ROOT_DENY"), v
+    assert "protect-bash" not in v.reason and "Codex" not in v.reason and "GUARD INERT" in v.reason
+    assert len(v.reason.splitlines()) <= 2
+
+
+def test_the_engine_translate_refusal_names_no_agent():
+    assert "Codex" not in engine.INERT_TRANSLATE and "protect-bash" not in engine.INERT_TRANSLATE
+
+
+def test_invalid_utf8_is_a_bad_request_not_a_replacement_character(tmp_path):
+    raw = (_BASE + '"kind":"write","paths":["/x/a\xff.txt"]}').encode("latin-1")
+    text, v = neutral.handle(raw, str(tmp_path), _roots(tmp_path), Audit(str(tmp_path)))
+    assert (v.decision, v.code) == ("deny", "neutral.BAD_REQUEST") and "UTF-8" in v.reason, v
+
+
+def test_cli_invalid_utf8_is_a_bad_request(tmp_path):
+    cp = _cli(tmp_path, (_BASE + '"kind":"write","paths":["/x/a\xff.txt"]}').encode("latin-1"))
+    assert cp.returncode == 0 and cp.stdout.startswith(b"SKYGUARD-OK\n"), cp.stderr
+    body = json.loads(cp.stdout.split(b"\n", 1)[1])
+    assert (body["decision"], body["code"]) == ("deny", "neutral.BAD_REQUEST")
+
+
+def test_cli_deeply_nested_request_is_a_bad_request_not_a_crash(tmp_path):
+    cp = _cli(tmp_path, (_BASE + '"kind":"write","paths":' + "[" * DEEP + "]" * DEEP + "}").encode())
+    assert cp.returncode == 0, cp.stderr[-300:]
+    assert json.loads(cp.stdout.split(b"\n", 1)[1])["code"] == "neutral.BAD_REQUEST"
+
+
+def test_cli_devbench_crash_command_is_denied(tmp_path):
+    args = json.dumps({"action": "exec", "command": "smp reset"})
+    cp = _cli(tmp_path, req(kind="mcp", paths=[], mcp_tool="mcp__devbench-vr__console", mcp_args=args).encode())
+    body = json.loads(cp.stdout.split(b"\n", 1)[1])
+    assert body["decision"] == "deny" and body["code"].endswith(".S-DEVBENCH-CRASH"), body
 
 
 def test_an_unknown_key_is_named_on_one_short_line():

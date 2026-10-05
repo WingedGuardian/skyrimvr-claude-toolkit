@@ -31,6 +31,19 @@ ENV_UNREADABLE = (
     "GUARD INERT: the adapter's engine call found .claude/skyrim-paths.env but could not read it, so it cannot "
     "tell which directories are the Skyrim install. Refusing rather than guarding the wrong set. "
     "Fix or delete that file (re-run setup.sh).")
+TELEMETRY_ROLE = "neutral-pre-tool"   # never "pre-tool": that file is the Codex hook's record
+OWN_ENTRY_AGENTS = ("claude", "codex")
+# kind "other": no rule guards an arbitrary tool. Allowed (blocking every unknown tool would make an adapted agent
+# unusable), but coded and labelled so a reader can never take it for a verdict.
+UNJUDGED = "NOT JUDGED: this tool kind is not guarded"
+# The shell rules' own INERT texts name protect-bash.sh (Plan 5's rule modules are not edited here); the neutral
+# role keeps their CODE and replaces their wording.
+NO_COMMAND = ("GUARD INERT: the adapter sent a shell request with no command, so the toolkit checked nothing.\n"
+              "Investigate the adapter's request before retrying.")
+NO_ROOT = ("GUARD INERT: the toolkit cannot tell which folder is the Skyrim install, so its delete rules checked "
+           "nothing.\nRe-run setup.sh from your Skyrim folder.")
+REWORD = {"shell.NO_COMMAND_DENY": NO_COMMAND, "shell.NO_ROOT_DENY": NO_ROOT}
+_BOM = chr(0xFEFF)
 
 
 class BadRequest(ValueError):
@@ -51,20 +64,49 @@ def _names(keys) -> str:
     return ", ".join(repr(k)[:40] for k in keys[:5]) + (", ..." if len(keys) > 5 else "")
 
 
+def _unique(pairs):
+    """object_pairs_hook: a repeated key is refused at EVERY nesting level. json keeps the last value silently, so
+    `"kind":"other", ..., "kind":"write"` would otherwise be judged as whichever one the adapter did not mean."""
+    seen = set()
+    for k, _ in pairs:
+        if k in seen:
+            raise BadRequest("duplicate field {}".format(_names([k])))
+        seen.add(k)
+    return dict(pairs)
+
+
+def _loads(text: str, what: str, not_json: str):
+    try:
+        return json.loads(text, object_pairs_hook=_unique)
+    except BadRequest:
+        raise
+    except RecursionError:
+        raise BadRequest("{} is too deeply nested".format(what))
+    except ValueError:
+        raise BadRequest(not_json)
+
+
+def mcp_args(text: str) -> dict:
+    """mcp_args is JSON object TEXT ("" = no arguments); anything else is refused, never judged as "no args"."""
+    if text == "":
+        return {}
+    obj = _loads(text, "mcp_args", "mcp_args must be a JSON object text")
+    if not isinstance(obj, dict):
+        raise BadRequest("mcp_args must be a JSON object text")
+    return obj
+
+
 def parse(raw: str) -> Request:
     text = raw.replace("\x00", "")
-    if text.startswith("\ufeff"):
+    if text.startswith(_BOM):
         text = text[1:]
-    try:
-        d = json.loads(text)
-    except ValueError:
-        raise BadRequest("request is not JSON")
+    d = _loads(text, "request", "request is not JSON")
     if not isinstance(d, dict):
         raise BadRequest("request is not a JSON object")
     extra = sorted(k for k in d if k not in FIELDS)
     if extra:
         raise BadRequest("unknown field {}".format(_names(extra)))
-    if isinstance(d.get("v"), bool) or d.get("v") != 1:
+    if type(d.get("v")) is not int or d.get("v") != 1:   # exactly int 1: not True, not 1.0, not "1"
         raise BadRequest("v must be 1")
     if d.get("event") != "pre_tool":
         raise BadRequest("event must be pre_tool")
@@ -88,9 +130,15 @@ def parse(raw: str) -> Request:
     if not (isinstance(ops, list) and len(ops) == len(paths)
             and all(isinstance(o, str) and o in OPS for o in ops)):
         raise BadRequest("ops must be parallel to paths, each one of {}".format(", ".join(OPS)))
-    return Request(agent=_str(d, "agent") or "neutral", event="pre_tool", kind=kind, shell=shell,
+    agent = _str(d, "agent")
+    if agent.strip().lower() in OWN_ENTRY_AGENTS:
+        # The engine keys Codex-only behaviour (the unhooked-tools log) on agent == "codex".
+        raise BadRequest("agent must not be claude or codex: those agents have their own entry")
+    margs = _str(d, "mcp_args")
+    mcp_args(margs)
+    return Request(agent=agent or "neutral", event="pre_tool", kind=kind, shell=shell,
                    command=_str(d, "command"), paths=tuple(paths), ops=tuple(ops),
-                   mcp_tool=_str(d, "mcp_tool"), mcp_args=_str(d, "mcp_args"), cwd=_str(d, "cwd"),
+                   mcp_tool=_str(d, "mcp_tool"), mcp_args=margs, cwd=_str(d, "cwd"),
                    tool_name=_str(d, "tool_name") or "neutral", session_id=_str(d, "session_id"))
 
 
@@ -102,12 +150,38 @@ def render(v: Verdict) -> str:
                        "status": status, "code": v.code}, ensure_ascii=True, separators=(",", ":"))
 
 
-def handle(raw: str, project: str, roots_fn, audit) -> Tuple[str, Verdict]:
+def _soft_roots(roots_fn):
+    """The DevBench save check reads one optional fact from the roots; an unreadable paths file costs that answer
+    (it then asks), never a refusal of every call -- as on Claude's protect-mcp role."""
     try:
+        return roots_fn()
+    except engine.RootsUnavailable:
+        return None
+
+
+def _decide(req: Request, project: str, roots_fn, audit) -> Verdict:
+    if req.kind == "other":
+        return Verdict("allow", "", UNJUDGED, status="partial", code="neutral.UNJUDGED")
+    if req.kind == "mcp":
+        # The same judge Claude's protect-mcp role uses (engine.evaluate_mcp -> mcp_rules).
+        return engine.evaluate_mcp(req.mcp_tool, mcp_args(req.mcp_args), audit, roots=_soft_roots(roots_fn))
+    v = codes.classify(engine.pre_tool(req, project, roots_fn, audit))
+    text = REWORD.get(v.code)
+    return v._replace(reason=text) if text and v.decision == "deny" else v
+
+
+def handle(raw, project: str, roots_fn, audit) -> Tuple[str, Verdict]:
+    """raw: the request as bytes (decoded here, strictly: a bad byte is refused, never replaced) or as text."""
+    try:
+        if isinstance(raw, bytes):
+            try:
+                raw = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                raise BadRequest("request is not UTF-8")
         req = parse(raw)
     except BadRequest as e:
         audit.log("neutral", "REFUSE", str(e))
         v = Verdict("deny", BAD.format(e), status="failed", code="neutral.BAD_REQUEST")
     else:
-        v = codes.classify(engine.pre_tool(req, project, roots_fn, audit))
+        v = _decide(req, project, roots_fn, audit)
     return OK + "\n" + render(v) + "\n", v

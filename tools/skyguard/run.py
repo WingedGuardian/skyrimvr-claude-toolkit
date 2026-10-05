@@ -107,12 +107,15 @@ def _codex(a, raw: str) -> int:
     return 0
 
 
-def _neutral(a, raw: str) -> int:
+def _neutral(a, raw: bytes) -> int:
     """Role pre-tool for an adapter this repo has no module for (ADAPTING.md). Output is SKYGUARD-OK + a
     verdict line; the adapter owns the failure deny, exactly as the Codex wrappers do."""
     from skyguard import neutral
     if a.role != "pre-tool":
         return 1
+    # Telemetry (and the last-resort `failed` record in __main__, which reads this same object) is written under
+    # its own name, so a neutral call can never overwrite or be read as the Codex hook's pre-tool record.
+    a.role = neutral.TELEMETRY_ROLE
     audit = Audit(a.project)
 
     def roots_fn():
@@ -160,7 +163,7 @@ def main(argv=None) -> int:
     if a.agent == "neutral":
         # Plan 7: the agent-neutral role, for an adapter living outside this package (no ADAPTERS module).
         # _neutral refuses every role but pre-tool with exit 1 (broken wiring, never a decision).
-        return _neutral(a, sys.stdin.buffer.read().decode("utf-8", "replace"))
+        return _neutral(a, sys.stdin.buffer.read())   # bytes: neutral decodes strictly (a bad byte is refused)
     if (a.agent == "codex") != (a.role in CODEX_ROLES):
         return 1      # a role the agent does not have: broken wiring, never a decision
     adapter = ADAPTERS[a.agent]
