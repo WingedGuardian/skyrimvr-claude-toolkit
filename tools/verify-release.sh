@@ -107,6 +107,12 @@ if python "$HERE/check-codex-payload.py" "$ROOT"; then
 else
   bad "Codex payload (check-codex-payload.py)" "see the !! lines above"
 fi
+# The adapter kit for agents the toolkit does not wire itself (ADAPTING.md and the tools it names).
+if python "$HERE/check-adapter-payload.py" "$ROOT"; then
+  ok "adapter kit whole (check-adapter-payload.py)"
+else
+  bad "adapter kit (check-adapter-payload.py)" "see the !! lines above"
+fi
 
 # --- the tools must RUN from the artifact ---------------------------------
 if [ -d "$REAL_DUMPS" ]; then

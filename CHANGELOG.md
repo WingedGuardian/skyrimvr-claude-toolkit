@@ -2,6 +2,17 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Other agents: the adapter kit
+
+- **New `ADAPTING.md`, written to an agent the toolkit does not support yet.** Any agent that reads files already gets the instructions, the skills and the tools (Layers 0-2). `ADAPTING.md` walks such an agent through wiring the rest into itself, and through saying honestly how far it got. The toolkit still lists only Claude Code and Codex as supported; an adapted agent is "locally adapted, self-verified", a statement about one install on one machine.
+- **New neutral engine entry: `python tools/skyguard/run.py neutral pre-tool`.** It takes one agent-neutral JSON request on stdin and answers allow, ask or deny with the engine's real rules. Anything it cannot read or decide is a refusal, never an allow.
+- **New adapter kit in `tools/adapting/`:** an adapter template, a capability-report template and two worked examples (a hook that refuses by exit code, one that refuses by JSON).
+- **New conformance tool, `tools/adapter_conformance.py`.** It runs an adapter against ten faults injected into the engine (a crash, a hang, silence, garbage output, a missing marker, an unknown decision, a missing engine and so on) and fails any adapter that lets a command through when the engine could not decide, or that does not obey a valid verdict. Its capability report names a protection status only when there is evidence for it.
+- **New skill `toolkit-setup` and tool `tools/inventory-runtimes.py`.** The skill checks Python, Git and Node by launching them, reports anything missing, broken or too old, and never upgrades, repairs or removes one that exists.
+- **The setup prompt is now agent-neutral, and it no longer asks the agent to install a missing Python or Node.** Installing host software is off unless you change one sentence in the prompt to authorize an exact package and version; otherwise the agent tells you the manual steps and waits.
+- **Core instructions point an unsupported agent, or a machine with a missing runtime, at `ADAPTING.md` and `toolkit-setup`.**
+- Release builds now check that the adapter kit is in the zip (`tools/check-adapter-payload.py`). The toy-agent test that exercises the kit lives in `tests/`, which is not shipped: it is a check on the toolkit's own CI, not part of the download.
+
 ### Codex support
 
 - **First Codex hook definitions (v1): approve them in /hooks.** Open `codex` in your Skyrim folder, type `/hooks`, approve the 2 Skyrim toolkit hooks; until then Codex runs none of them and does not say so.
