@@ -4060,5 +4060,10 @@ _P5F_CLAUSES = [
      _DOCS + "[readme]"),
     ("p5f-philosophy-ask-count-stale", "docs/safety-philosophy.md", "Five rules in the toolkit ask you",
      "Two rules in the toolkit ask you", _DOCS + "[philosophy]"),
+    # Privacy: a fixture carries the home of whoever runs the gate again (built at collection time, so this file
+    # never names anyone).
+    ("p5f-fixture-carries-home", "tests/fixtures/routes-harness/cases9.py", '"file_path":"<HOME>/.codex/config.toml"',
+     '"file_path":"' + str(Path.home()).replace(BS, "/") + '/.codex/config.toml"',
+     "tests/test_payload_fixtures.py::test_no_file_under_fixtures_carries_the_capturing_users_home"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _P5F_CLAUSES]

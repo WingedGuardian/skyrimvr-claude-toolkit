@@ -211,7 +211,7 @@ add("Edit", {"file_path": G + "/Data/Plugin.esp", "old_string": "x", "new_string
 add("Edit", {"file_path": G + "/Data/Plugin.esp", "old_string": "x", "new_string": "y", "replace_all": True})
 add("MultiEdit", {"file_path": G + "/Data/Plugin.esp", "edits": [{"old_string": "x", "new_string": "y"}]})
 add("NotebookEdit", {"notebook_path": G + "/Data/Plugin.esp::$DATA", "new_source": "x"})
-add("Write", {"file_path": "C:/Users/Moona/.claude/settings.json", "content": "{\"disableAllHooks\":true}"}, expect="allow advise deny ask")
+add("Write", {"file_path": "<HOME>/.claude/settings.json", "content": "{\"disableAllHooks\":true}"}, expect="allow advise deny ask")
 add("Write", {"file_path": G + "/.claude/settings.local.json", "content": "{\"disableAllHooks\":true}"}, expect="allow advise deny ask")
 json.dump(cases, open("C:/Temp/rt-routes/cases4.json", "w"))
 print(len(cases))

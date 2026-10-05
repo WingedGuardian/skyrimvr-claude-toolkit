@@ -30,7 +30,7 @@ add("Write",{"file_path":G+"/tools/skyguard/shell_rules.py","content":"x"},expec
 add("Edit",{"file_path":G+"/.claude/settings.json","old_string":"a","new_string":"b"},expect="allow advise deny ask")
 add("Write",{"file_path":G+"/.codex/hooks.json","content":"{}"},expect="allow advise deny ask")
 add("Write",{"file_path":G+"/.codex/rules/skyrim.rules","content":""},expect="allow advise deny ask")
-add("Write",{"file_path":"C:/Users/Moona/.codex/config.toml","content":"x"},expect="allow advise deny ask")
+add("Write",{"file_path":"<HOME>/.codex/config.toml","content":"x"},expect="allow advise deny ask")
 add("apply_patch",{"command":"*** Begin Patch\n*** Delete File: C:/Temp/rt-routes/Game/.codex/hooks.json\n*** End Patch"},agent="codex")
 add("apply_patch",{"command":"*** Begin Patch\n*** Update File: C:/Temp/rt-routes/Game/.codex/hooks.json\n@@\n-a\n+b\n*** End Patch"},agent="codex")
 sh("rm C:/Temp/rt-routes/Game/.codex/hooks.json",agent="codex")

@@ -39,3 +39,18 @@ def test_no_fixture_carries_the_capturing_users_home():
         assert loaded, f"{agent}: no fixtures -- an empty set would pass this check vacuously"
         for name, p in loaded.items():
             assert user not in json.dumps(p).lower(), name
+
+
+def test_no_file_under_fixtures_carries_the_capturing_users_home():
+    """Final review (privacy): the check above read only the captured payloads, and the routes harness committed
+    beside them carried the author's name and home paths. Every file under tests/fixtures/ is read, as bytes, in
+    UTF-8 and UTF-16 spellings, so no fixture of any kind ships the home of whoever runs this."""
+    user = Path.home().name.lower()
+    assert len(user) >= 3, f"user name {user!r} too short to search for meaningfully"
+    root = REPO / "tests" / "fixtures"
+    files = [f for f in sorted(root.rglob("*")) if f.is_file() and "__pycache__" not in f.parts]
+    assert len(files) > 10, f"only {len(files)} fixture files -- the scan would be near-vacuous"
+    needles = (user.encode("utf-8"), user.encode("utf-16-le"))
+    hits = [f.relative_to(root).as_posix() for f in files
+            if any(n in f.read_bytes().lower() for n in needles)]
+    assert hits == [], hits
