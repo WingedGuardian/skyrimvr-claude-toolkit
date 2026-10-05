@@ -351,17 +351,52 @@ def literal_abs(word: str, base: Optional[str], dialect: str) -> Optional[str]:
     return p
 
 
+# RT-A: the protection keys of skyrim-paths.env, read as variables (`$SKYRIM_GAME_ROOT`, `$env:SKYRIM_CONFIG_DIR`,
+# `%SKYRIM_MO2_MODS%`): their value IS a protected root, so an operand built on one reaches it.
+_ROOT_VAR = re.compile(r"(?:\$\{?(?:env:)?|%)(?:" + "|".join(paths.PROTECTION_KEYS) + r")(?![A-Za-z0-9_])",
+                       re.IGNORECASE)
+# A variable spelled where a DRIVE goes (`$env:SystemDrive\GOG Games\...`, `%SYSTEMDRIVE%\...`, `${D}/...`).
+_LEAD_VAR = re.compile(r"(?:\$\{?(?:env:)?[A-Za-z_][A-Za-z0-9_]{0,255}\}?|%[A-Za-z_][A-Za-z0-9_]{0,255}%)(?=[/\\])",
+                       re.IGNORECASE)
+_VOLUME = re.compile(r"//[?.]/volume\{[^{}/]{1,64}\}(?=/|$)", re.IGNORECASE)
+_ANY_DRIVE = "*:"
+
+
+def _reach_comps(word: str, base: Optional[str], dialect: str) -> Optional[List[str]]:
+    """The word's components as raw_reaches compares them, lower-case. RT-A: a volume GUID (`\\\\?\\Volume{..}\\x`) and a
+    leading variable (`$env:SystemDrive\\x`) stand for ANY drive; an admin share on ANY host (`\\\\h\\c$\\x`) for its
+    drive -- whether that host is this machine cannot be proven, so it is not ruled out."""
+    s = word.replace("\\", "/")
+    m = _VOLUME.match(s)
+    if m:
+        return [_ANY_DRIVE] + [c for c in s[m.end():].lower().split("/") if c]
+    m = _LEAD_VAR.match(word)
+    if m:
+        return [_ANY_DRIVE] + [c for c in s[m.end():].lower().split("/") if c]
+    p = literal_abs(word, base, dialect)
+    if p is None:
+        return None
+    pc = targets._split(p.lower())
+    if pc and pc[0].startswith("//"):
+        share = pc[0][2:].split("/")
+        if len(share) == 2 and targets._ADMIN_SHARE.fullmatch(share[1]):
+            pc = [share[1][0] + ":"] + pc[1:]
+    return pc
+
+
 def raw_reaches(word: str, base: Optional[str], dialect: str, roots) -> bool:
     """An UNRESOLVED word read literally (globs in any component, 8.3 names) reaches a protected root: it names a
     root, an ancestor of one, or a path inside one (Task 6 carry: `C:/*/The Elder*/Data` never names the root)."""
-    p = literal_abs(word, base, dialect)
-    if p is None:
+    if _ROOT_VAR.search(word):
+        return True
+    pc = _reach_comps(word, base, dialect)
+    if not pc:
         return False
-    pc = targets._split(p.lower())
     for root in tuple(roots.install_dirs) + tuple(roots.config_dirs) + tuple(roots.mo2_dirs):
         rc = targets._split(root.lower())
         n = min(len(pc), len(rc))
-        if n and all(_comp_reaches(a, b) for a, b in zip(pc[:n], rc[:n])):
+        if n > (pc[0] == _ANY_DRIVE) and all(
+                (a == _ANY_DRIVE and b.endswith(":")) or _comp_reaches(a, b) for a, b in zip(pc[:n], rc[:n])):
             return True
     return False
 
@@ -376,14 +411,128 @@ def _is_data_word(word: str) -> bool:
     return any(c.lower() == "data" for c in re.split(r"[/\\]+", word))
 
 
+LINK_PROGRAMS = frozenset(("ln", "new-item", "mklink", "subst"))
+MOVE_PROGRAMS = frozenset(("mv", "move-item", "io.file.move", "io.directory.move"))
+_LINK_TYPES = ("junction", "symboliclink")
+
+
+def _links(execs, cwd: str, env) -> List[Tuple[str, str]]:
+    """RT-A: (link, target) for each link the command itself makes -- `ln -s T L`, `New-Item -ItemType Junction|
+    SymbolicLink -Path L -Target T`, `mklink [/D|/J] L T`, `subst X: T` -- both resolved. A delete through the link
+    deletes inside the target (the filesystem is never read; only links made in the same command are known)."""
+    out = []
+    for e in execs:
+        p, pair = e.program, None
+        if p == "ln" and any(w in ("-s", "--symbolic") or (w[:1] == "-" and w[1:2] != "-" and "s" in w[1:])
+                             for w in e.argv):
+            ops = [w for w in _plain_operands(e.argv)]
+            if len(ops) >= 2:
+                pair = (ops[-1], ops[-2])
+        elif p == "new-item":
+            from .shellparse import ps_param
+            kind = (ps_param(e, "ItemType") or ("",))[0].lower()
+            link = ps_param(e, "Path", 0) or ps_param(e, "LiteralPath")
+            target = ps_param(e, "Target") or ps_param(e, "Value")
+            if kind in _LINK_TYPES and link and target:
+                pair = (link[0], target[0])
+        elif p == "mklink" and e.dialect == "cmd":
+            ops = [w for w in e.argv if not re.fullmatch(r"/[A-Za-z]", w)]
+            if len(ops) >= 2 and not any(w.lower() == "/h" for w in e.argv):
+                pair = (ops[0], ops[1])
+        elif p == "subst":
+            ops = [w for w in e.argv if not w.startswith("/")]
+            if len(ops) >= 2 and re.fullmatch(r"[A-Za-z]:", ops[0]):
+                t = targets.resolve_operand(e, ops[1], cwd, env)
+                if t:
+                    out.append((ops[0][0].lower() + ":", t))
+                continue
+        if pair:
+            link, target = (targets.resolve_operand(e, w, cwd, env) for w in pair)
+            if link and target:
+                out.append((link.lower().rstrip("/"), target))
+    return out
+
+
+def _through(a: str, links) -> str:
+    """a with a same-command link prefix replaced by its target (the first that applies), else a."""
+    al = a.lower()
+    for link, target in links:
+        if al == link or al.startswith(link + "/"):
+            return target.rstrip("/") + a[len(link):]
+    return a
+
+
+def _move_pairs(e) -> List[Tuple[str, str]]:
+    """(source, destination) words for each move this exec makes: mv, Move-Item, cmd move, [IO.File]/[IO.Directory]
+    ::Move."""
+    p, argv = e.program, e.argv
+    if p in ("io.file.move", "io.directory.move"):
+        return [(argv[0], argv[1])] if len(argv) > 1 else []
+    if p == "move-item":
+        from .shellparse import ps_param
+        src = list(ps_param(e, "Path", 0)) + list(ps_param(e, "LiteralPath"))
+        dst = ps_param(e, "Destination", 1)
+        return [(s, dst[0] if dst else ".") for s in src]
+    if p == "move" and e.dialect == "cmd":
+        words = [w for w in argv if not re.fullmatch(r"/[A-Za-z?\-]+(:\S*)?", w)]
+        return [(s, words[-1]) for s in words[:-1]]
+    if p == "mv":
+        target, words, k = None, [], 0
+        while k < len(argv):
+            w = argv[k]
+            if w in ("-t", "--target-directory") and k + 1 < len(argv):
+                target, k = argv[k + 1], k + 2
+                continue
+            if w.startswith("--target-directory="):
+                target = w.split("=", 1)[1]
+            elif w in ("-S", "--suffix") and k + 1 < len(argv):
+                k += 1
+            elif w == "--":
+                words += list(argv[k + 1:])
+                break
+            elif not (w.startswith("-") and len(w) > 1):
+                words.append(w)
+            k += 1
+        if target is not None:
+            return [(s, target) for s in words]
+        return [(s, words[-1]) for s in words[:-1]]
+    return []
+
+
+def _everything(word: str) -> bool:
+    """`.`, `*`, `./*`, `..`, `.*`: the whole of a folder (S-DEL-UNKNOWN-DIR when that folder is unknown)."""
+    comps = [c for c in re.split(r"[/\\]+", word.strip()) if c]
+    return bool(comps) and all(c in (".", "..", "*", ".*", "*.*") for c in comps)
+
+
+def _upstream(execs, i: int) -> list:
+    """The execs earlier in the same pipeline as execs[i] (which reads a pipe): back to the first stage."""
+    out = []
+    j = i - 1
+    while j >= 0:
+        out.append(execs[j])
+        if execs[j].stdin_from != "pipe":
+            break
+        j -= 1
+    return out
+
+
 def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, str]] = None, has=grep) -> Scan:
     env = os.environ if env is None else env
     resolved: Optional[Hit] = None
     unresolved_reach: Optional[Hit] = None
+    unknown_dir: Optional[Hit] = None
     unresolved_any = False
     relative = ""
     opaque = False
-    for e in parsed.execs:
+    links = _links(parsed.execs, cwd, env) if any(e.program in LINK_PROGRAMS for e in parsed.execs) else []
+
+    def place(a: str) -> Tuple[str, str]:
+        """(protected kind, the path it is) for a resolved operand, through any same-command link."""
+        b = _through(a, links) if links else a
+        return protected_kind(b, roots), b
+
+    for i, e in enumerate(parsed.execs):
         if is_opaque(e):
             opaque = True
         e = substituted(e)
@@ -393,17 +542,32 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 if has(rx, code):
                     resolved = Hit(RULE_OF[kind], _match_basename(rx, code))
                     break
+        if e.program in MOVE_PROGRAMS and resolved is None:
+            # RT-A: a move whose source is protected and whose destination is NOT in that same protected area
+            # takes the files out of it -- a delete of the source. An unresolved destination proves nothing.
+            for src, dst in _move_pairs(e):
+                a = targets.resolve_operand(e, src, cwd, env)
+                kind, b = place(a) if a else ("", "")
+                d = targets.resolve_operand(e, dst, cwd, env)
+                z = targets.zone(b, roots)
+                stays = z in RULE_OF and d is not None and targets.zone(place(d)[1], roots) == z
+                if kind and d is not None and not stays:
+                    resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
+                    break
         ops = operands(e)
         if not ops:
             continue
         ecwd = targets.exec_cwd(e, cwd, env)
-        nocwd = ecwd is None and targets.exec_cwd(e, _NOCWD, env) is not None
+        cd_lost = e.cd_before == "?" or (e.cd_before != "" and targets.exec_cwd(e, _NOCWD, env) is None)
+        nocwd = ecwd is None and (targets.exec_cwd(e, _NOCWD, env) is not None or e.cd_before == "?")
+        # RT-A: a literal cd the guard cannot expand (`cd C:/GOGGAM~1/THEELD~1`) still says where a relative word is.
+        lit_base = ecwd or (e.cd_before if e.cd_before not in ("", "?") and _is_abs(e.cd_before) else None)
         for w in ops:
             a = None if w is UNRESOLVED else targets.resolve(w, ecwd or "", e.dialect, env)
             if a is not None:
-                kind = protected_kind(a, roots)
+                kind, b = place(a)
                 if kind and resolved is None:
-                    resolved = Hit(RULE_OF[kind], posixpath.basename(a.rstrip("/")) or a)
+                    resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
                 continue
             if w is not UNRESOLVED:
                 # Glob characters in a QUOTED word are literal (`"<install with [x] in its name>/Data"`): a word
@@ -415,10 +579,26 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                         resolved = Hit(RULE_OF[kind], posixpath.basename(lit.rstrip("/")) or lit)
                     continue
             unresolved_any = True
+            if (w is UNRESOLVED or e.stdin_from == "pipe") and unresolved_reach is None:
+                # RT-A: pipeline input (`Get-ChildItem 'C:\GOG Games' | Remove-Item`, `echo X | xargs -I {} rm {}`)
+                # is whatever the earlier stages list: it reaches a root when one of THEIR words is a protected root
+                # or an ancestor of one. A listing INSIDE one (`ls *.bak | xargs rm` run in the install) is the
+                # fix-round-1 known limit: priced 75 occurrences, 0 real.
+                for up in _upstream(parsed.execs, i):
+                    for uw in up.argv:
+                        ua = targets.resolve_operand(up, uw, cwd, env)
+                        if (ua is not None and targets.covers_protected(place(ua)[1], roots)) or (
+                                ua is None and raw_reaches(uw, None, up.dialect, roots)):
+                            unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
+                            break
+                    if unresolved_reach:
+                        break
             if w is UNRESOLVED:
                 continue
-            if raw_reaches(w, ecwd, e.dialect, roots) and unresolved_reach is None:
+            if raw_reaches(w, lit_base, e.dialect, roots) and unresolved_reach is None:
                 unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
+            if cd_lost and unknown_dir is None and _everything(w):
+                unknown_dir = Hit("S-DEL-UNKNOWN-DIR", "")
             if nocwd and not relative and _is_data_word(w) and \
                     targets.resolve(w, targets.exec_cwd(e, _NOCWD, env) or _NOCWD, e.dialect, env) is not None:
                 relative = re.split(r"[/\\]+", w.rstrip("/\\"))[-1] or w
@@ -426,6 +606,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         return Scan(resolved, relative)
     if unresolved_reach:
         return Scan(unresolved_reach, relative)
+    if unknown_dir:
+        return Scan(unknown_dir, relative)
     if unresolved_any and names_root(command, roots, has):
         return Scan(Hit("S-DEL-UNRESOLVED", ""), relative)
     if not parsed.ok and has(DESTROYER, command) and names_root(command, roots, has):

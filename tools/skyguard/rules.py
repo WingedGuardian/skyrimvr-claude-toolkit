@@ -97,6 +97,26 @@ RULES = {
         'Write the full path, or run it yourself.'
     ),
     },
+    'S-DEL-UNKNOWN-DIR': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: this deletes everything in a folder the guard cannot work out.\n'
+        'Write the full path, or run it yourself.'
+    ),
+    },
+    'S-SHELL-UNREAD': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: decoded text is run as shell commands, so the guard cannot read what it does.\n'
+        'Decode it to a file, read it, then run that file; or run it yourself.'
+    ),
+    },
     'S-DEL-FALLBACK': {
         "decision": 'deny',
         "hook": 'protect-bash',
@@ -354,7 +374,11 @@ RULES = {
 
 
 def _basename(value) -> str:
-    return re.split(r"[/\\]+", str(value).rstrip("/\\"))[-1]
+    """The file name a message shows. RT-A: an NTFS stream suffix is cut (`a.esp::$DATA` names a.esp); a bare drive
+    (`C:`) is kept."""
+    b = re.split(r"[/\\]+", str(value).rstrip("/\\"))[-1]
+    m = re.match(r"([^:]{2,}):\S*(.*)\Z", b, re.S)          # `a.esp::$DATA and 1 more` -> `a.esp and 1 more`
+    return m.group(1) + m.group(2) if m else b
 
 
 def message(rule_id: str, **fields) -> str:

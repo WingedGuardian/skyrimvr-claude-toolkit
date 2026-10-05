@@ -63,7 +63,7 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdic
     advice = Advice()
 
     def advise(rule_id: str) -> None:
-        text = rules.message(rule_id, file=file_path)
+        text = rules.message(rule_id, file=file_path)       # rules._basename cuts a stream suffix (RT-A)
         audit.rule(HOOK, rule_id, "advise", text)
         advice.add(text)
 
@@ -81,7 +81,7 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdic
         advise("W-SKSE-INI")
     if grep(targets.LOADORDER, file_path):
         advise("W-LOADORDER")
-    if papyrus and grep(r"\.(pex|psc)$", file_path):
+    if papyrus and grep(r"\.(pex|psc)" + targets.STREAM + "$", file_path):
         advise("W-PAPYRUS")
 
     if not advice.items and install:
