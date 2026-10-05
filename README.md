@@ -482,6 +482,10 @@ against how many the hooks recorded. That coverage covers **only sessions in whi
 whose hooks never fire leaves no record at all, so it cannot appear as a gap. That is why only the surfaces
 probed live (`codex exec` and the TUI) are claimed, and why the desktop app and IDE extensions are not.
 
+## Other agents
+
+Any agent that reads files gets Layers 0-2 of the toolkit: the instructions, the skills and the tools, with no hook. [`ADAPTING.md`](ADAPTING.md) is written for such an agent: it lets the agent wire up the rest itself and describes how far it can prove it got. The toolkit does not call such an agent supported; only Claude Code and Codex are listed as supported here.
+
 ---
 
 ## FAQ

@@ -33,6 +33,9 @@ by `tests/test_instruction_budget.py`); `instructions/codex.md` is counted at it
 Move bulk out of `core.md` into a skill (a recipe, read before the work) or `docs/` (background), and
 leave a one-line rule plus a pointer behind. Never raise the constants to make it pass.
 
+**Unsupported agents.** The core's last *Where the rest lives* row sends an agent the README does not list to
+`ADAPTING.md` and the `toolkit-setup` skill. Keep that row agent-neutral.
+
 **Neutrality.** `core.md` is shared by every agent, and so are the `devbench`, `triage-and-conflicts`
 and `xelib` skills: no Claude-only tool names, variables, slash commands or config paths in them.
 Agent-specific text goes in `instructions/<agent>.md` (`claude.md` into `CLAUDE.md` only, `codex.md` into
