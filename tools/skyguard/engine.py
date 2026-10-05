@@ -158,13 +158,12 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
       * a refusal no rule claims (code "unknown");
       * anything when the state is unreadable or forged (the reader returns guards-on and a reason, logged here);
       * anything when this function itself fails (the original refusal stands).
-    Every conversion writes `SHADOW <rule>` to the audit log. The lock and Codex `.rules` are outside the engine."""
-    if v.decision not in ("deny", "ask"):
-        return v
+    Every conversion writes `SHADOW <rule>` to the audit log, and while a guards lift is honoured EVERY call writes
+    one (`SHADOW allow`, `SHADOW <rule> kept`), so an honoured lift can never be silent. The lock and Codex `.rules` are outside the engine."""
     try:
-        v = codes.classify(v)
-        if v.status == "failed" or codes._inert(v.code) or v.code == "unknown":
-            return v
+        refusal = v.decision in ("deny", "ask")
+        if refusal:
+            v = codes.classify(v)
         st = _state.read(str(Path(project) / ".skyguard" / "state.json"))
         if st.rejected:
             audit.log("skyguard", "STATE-REJECTED", st.reason)
@@ -174,6 +173,13 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
         start = _state.session_start(telemetry, session_id) if telemetry else None
         now = time.time() if now is None else now
         if not [x for x in _state.honoured(st, session_id, now, start) if x["kind"] == "guards"]:
+            return v
+        # From here a guards lift is honoured: EVERY call writes a SHADOW line (spec; closes Table M's silence row).
+        if not refusal:
+            audit.log("skyguard", "SHADOW", "allow")
+            return v
+        if v.status == "failed" or codes._inert(v.code) or v.code == "unknown":
+            audit.log("skyguard", "SHADOW", "{} kept ({})".format(v.code, v.decision))
             return v
         first = (v.reason.split("\n", 1)[0] if v.reason else "")[:_LINE_MAX]
         context = SHADOW_HEAD.format(v.code) + ("\n" + first if first else "")

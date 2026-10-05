@@ -11,7 +11,7 @@ from __future__ import annotations
 import sys
 
 USAGE = "usage: skyguard <lock|guards|doctor> ... (see tools/skyguard/cli.py)"
-GUARDS_USAGE = "usage: guards <off|on|status> [--root R] [--session S]"
+GUARDS_USAGE = "usage: guards <off|on|status> [--project P] [--session S]"
 
 
 def _clip(s: str, n: int = 190) -> str:
@@ -43,7 +43,7 @@ def guards_main(argv, out) -> int:
     from . import lock, state
     ap = argparse.ArgumentParser(prog="skyguard guards", add_help=False)
     ap.add_argument("action", nargs="?", choices=("off", "on", "status"))
-    ap.add_argument("--root", default=None)
+    ap.add_argument("--project", "--root", dest="project", default=None)
     ap.add_argument("--session", default=None)
     try:
         a = ap.parse_args(argv)
@@ -53,7 +53,14 @@ def guards_main(argv, out) -> int:
     if not a.action:
         print(GUARDS_USAGE, file=out)
         return 2
-    root = a.root or lock.default_root()
+    # The engine reads <--project>/.skyguard/state.json, and the hooks pass --project "$CLAUDE_PROJECT_DIR": resolve
+    # the same folder here (explicit flag, else the agent's own project dir, else this toolkit's root).
+    root = a.project or os.environ.get("CLAUDE_PROJECT_DIR") or lock.default_root()
+    if not os.path.isdir(root):
+        print(_clip("The project folder %r does not exist, so there is no state to write." % os.path.basename(str(root))),
+              file=out)
+        print("Pass --project <the install root> (the folder the hooks run with); nothing was changed.", file=out)
+        return 2
     session = a.session or os.environ.get(lock.ENV_SESSION) or None
     now = time.time()
     try:
@@ -78,6 +85,16 @@ def guards_main(argv, out) -> int:
         if not lock._valid_session(session):
             print("No session id: pass --session <id> (or set SKYGUARD_SESSION_ID) so the lift is bound to it.", file=out)
             print("Without one the lift could not be honoured by any session, so nothing was recorded.", file=out)
+            return 2
+        agent = os.environ.get(lock.ENV_AGENT, "")
+        hb_root = os.path.join(root, ".claude", "backups", ".hook-heartbeat")
+        seen = [d for d in ((agent,) if agent in ("claude", "codex") else ("claude", "codex"))
+                if state.session_start(os.path.join(hb_root, d), session) is not None]
+        if not seen:
+            print(_clip("No session start for %s is visible under .claude/backups/.hook-heartbeat of that project." % session),
+                  file=out)
+            print("A lift would never be honoured; check the session id, --project and SKYGUARD_AGENT. Nothing was written.",
+                  file=out)
             return 2
         lift = {"kind": "guards", "reason": "guards off", "session_id": session,
                 "agent": os.environ.get(lock.ENV_AGENT, "cli") or "cli", "created": now,

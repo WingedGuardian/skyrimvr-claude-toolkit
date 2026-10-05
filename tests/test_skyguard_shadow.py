@@ -91,11 +91,31 @@ def test_a_long_first_line_keeps_the_context_within_the_message_contract(tmp_pat
     assert len(lines) == 2 and all(len(x) <= 200 for x in lines)
 
 
-def test_an_allow_or_advice_is_returned_untouched_and_the_state_is_not_read(tmp_path, monkeypatch):
+def test_an_allowed_call_is_returned_untouched_but_logged_while_a_lift_is_honoured(tmp_path):
+    """l2-shadow-every-call: spec wins -- silence is closed by a SHADOW line on EVERY call, allowed ones too."""
     _env(tmp_path, [_lift()])
-    monkeypatch.setattr(engine._state, "read", lambda *a, **k: pytest.fail("state read for a non-refusal"))
     adv = Verdict("allow", "", "advice", "evaluated", "write.ADV_X")
     assert _shadow(tmp_path, adv) is adv
+    plain = Verdict()
+    assert _shadow(tmp_path, plain) is plain
+    lines = [x for x in _log(tmp_path).splitlines() if "SHADOW" in x]
+    assert len(lines) == 2 and all(x.endswith("SHADOW: allow") for x in lines), lines
+
+
+def test_an_allowed_call_writes_no_shadow_line_without_an_honoured_lift(tmp_path):
+    _env(tmp_path, [_lift(session_id="someone-else")])
+    _shadow(tmp_path, Verdict())
+    _env(tmp_path, [_lift(expires_at=NOW - 1)])
+    _shadow(tmp_path, Verdict())
+    assert "SHADOW" not in _log(tmp_path)
+
+
+def test_a_kept_inert_refusal_is_still_logged_while_a_lift_is_honoured(tmp_path):
+    _env(tmp_path, [_lift()])
+    v = _shadow(tmp_path, _deny(code="engine.EMPTY_COMBINE", status="failed"))
+    assert v.decision == "deny"
+    line = [x for x in _log(tmp_path).splitlines() if "SHADOW" in x]
+    assert len(line) == 1 and "engine.EMPTY_COMBINE" in line[0] and "kept" in line[0]
 
 
 def test_an_unclassifiable_refusal_is_not_converted(tmp_path):
@@ -191,7 +211,7 @@ def test_every_converted_verdict_writes_a_shadow_audit_line_naming_the_rule(tmp_
     _shadow(tmp_path, _deny())
     _shadow(tmp_path, _deny(code="write.DENY_OTHER"))
     lines = [x for x in _log(tmp_path).splitlines() if "SHADOW" in x]
-    assert len(lines) == 2
+    assert len(lines) == 2 and not any("kept" in x for x in lines)
     assert "write.DENY_PLUGIN" in lines[0] and "write.DENY_OTHER" in lines[1]
 
 
@@ -369,18 +389,27 @@ def test_the_codex_hook_entry_point_honours_the_lift(tmp_path):
 
 # ---- the CLI: guards off | on | status --------------------------------------------------------------------------
 
-def _cli(tmp_path, *args, session=SID, env=None):
-    root = tmp_path / "root"
-    root.mkdir(exist_ok=True)
-    saved = {k: os.environ.get(k) for k in ("SKYGUARD_LOCK_SANDBOX", "SKYGUARD_SESSION_ID")}
-    os.environ["SKYGUARD_LOCK_SANDBOX"] = str(tmp_path)
-    os.environ.pop("SKYGUARD_SESSION_ID", None)
-    if env:
-        os.environ.update(env)
+def _hb(project, agent="claude"):
+    return Path(project) / ".claude" / "backups" / ".hook-heartbeat" / agent
+
+
+def _start(project, session=SID, agent="claude", when=None):
+    f = _hb(project, agent) / "sessions" / (session + ".log")
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("{:.6f} start startup t.jsonl\n".format((time.time() - 60) if when is None else when), encoding="utf-8")
+
+
+_ENVS = ("SKYGUARD_LOCK_SANDBOX", "SKYGUARD_SESSION_ID", "SKYGUARD_AGENT", "CLAUDE_PROJECT_DIR")
+
+
+def _cli_raw(argv, env=None):
     import io
+    saved = {k: os.environ.get(k) for k in _ENVS}
+    for k in _ENVS:
+        os.environ.pop(k, None)
+    os.environ.update(env or {})
     out = io.StringIO()
     try:
-        argv = ["guards"] + list(args) + ["--root", str(root)] + (["--session", session] if session else [])
         code = cli.main(argv, out)
     finally:
         for k, v in saved.items():
@@ -388,7 +417,17 @@ def _cli(tmp_path, *args, session=SID, env=None):
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
-    return code, out.getvalue(), root / ".skyguard" / "state.json"
+    return code, out.getvalue()
+
+
+def _cli(tmp_path, *args, session=SID, env=None, start=True, flag="--project"):
+    root = tmp_path / "root"
+    root.mkdir(exist_ok=True)
+    if start and session:
+        _start(root, session)
+    argv = ["guards"] + list(args) + [flag, str(root)] + (["--session", session] if session else [])
+    code, text = _cli_raw(argv, dict({"SKYGUARD_LOCK_SANDBOX": str(tmp_path)}, **(env or {})))
+    return code, text, root / ".skyguard" / "state.json"
 
 
 def test_guards_off_records_a_session_bound_expiring_guards_lift(tmp_path):
@@ -450,28 +489,75 @@ def test_guards_without_a_subcommand_is_a_usage_error(tmp_path):
 
 def test_guards_refuses_a_state_folder_that_is_outside_the_sandbox(tmp_path):
     from skyguard import lock
-    out = tmp_path / "elsewhere"
+    out, sandbox = tmp_path / "elsewhere", tmp_path / "sbx"
     out.mkdir()
-    sandbox = tmp_path / "sbx"
     sandbox.mkdir()
-    import io
-    buf = io.StringIO()
-    os.environ["SKYGUARD_LOCK_SANDBOX"] = str(sandbox)
-    try:
-        code = cli.main(["guards", "off", "--root", str(out), "--session", SID], buf)
-    finally:
-        os.environ.pop("SKYGUARD_LOCK_SANDBOX", None)
-    assert code == 2 and not (out / ".skyguard" / "state.json").exists()
+    _start(out)
+    code, text = _cli_raw(["guards", "off", "--project", str(out), "--session", SID],
+                          {"SKYGUARD_LOCK_SANDBOX": str(sandbox)})
+    assert code == 2 and "sandbox" in text and not (out / ".skyguard" / "state.json").exists()
     assert lock.SandboxViolation  # the refusal is the lock module's own choke, not a second one
 
 
-def test_a_lift_made_by_the_cli_is_honoured_by_the_engine_end_to_end(tmp_path):
+# ---- the lift is written where the engine reads it, and only when it can be honoured ---------------------------
+
+def test_guards_off_without_a_visible_session_start_writes_nothing_and_says_so(tmp_path):
+    """The lift would never be honoured; a dead lift must not look like success."""
+    code, text, sf = _cli(tmp_path, "off", start=False)
+    lines = text.strip().splitlines()
+    assert code == 2 and not sf.exists() and len(lines) == 2 and all(len(x) <= 200 for x in lines), text
+    assert "start" in lines[0].lower() and SID in lines[0]
+
+
+def test_a_start_line_of_another_agents_heartbeat_dir_counts_when_the_agent_is_unnamed_but_not_a_wrong_named_one(tmp_path):
     root = tmp_path / "root"
-    code, text, sf = _cli(tmp_path, "off")
+    root.mkdir()
+    _start(root, agent="codex")
+    code, _t, _s = _cli(tmp_path, "off", start=False)
+    assert code == 0                                           # agent unnamed: either heartbeat dir is accepted
+    code, text, _s = _cli(tmp_path, "off", start=False, env={"SKYGUARD_AGENT": "claude"})
+    assert code == 2                                           # claude named: only claude's dir is looked in
+
+
+def test_guards_off_refuses_a_project_that_is_not_a_folder_with_two_lines(tmp_path):
+    code, text = _cli_raw(["guards", "off", "--project", str(tmp_path / "nope"), "--session", SID],
+                          {"SKYGUARD_LOCK_SANDBOX": str(tmp_path)})
+    lines = text.strip().splitlines()
+    assert code == 2 and len(lines) == 2 and not (tmp_path / "nope").exists(), text
+    assert "does not exist" in lines[0]
+
+
+def test_the_project_defaults_to_the_agents_project_dir_and_root_stays_a_synonym(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    _start(root)
+    code, text = _cli_raw(["guards", "off", "--session", SID],
+                          {"SKYGUARD_LOCK_SANDBOX": str(tmp_path), "CLAUDE_PROJECT_DIR": str(root)})
     assert code == 0, text
-    hb = tmp_path / "hb"
-    f = hb / "sessions" / (SID + ".log")
-    f.parent.mkdir(parents=True)
-    f.write_text("{:.6f} start startup t.jsonl\n".format(time.time() - 600), encoding="utf-8")
-    v = engine.shadow(_deny(), str(root), SID, str(hb), Audit(str(root)))
-    assert v.decision == "allow" and v.context.startswith("Guards OFF")   # lift made now, start line 10 min ago
+    assert state.read(str(root / ".skyguard" / "state.json")).lifts
+    code, text, sf = _cli(tmp_path, "on", flag="--root")
+    assert code == 0 and not state.read(str(sf)).lifts
+
+
+def _through_run(project, sid, tool="Write", path="Data/a.esp"):
+    import subprocess
+    payload = {"tool_name": tool, "session_id": sid, "tool_input": {"file_path": path}}
+    argv = [sys.executable, "-B", str(REPO / "tools" / "skyguard" / "run.py"), "claude", "protect-files",
+            "--root", str(project), "--project", str(project), "--telemetry", str(_hb(project))]
+    r = subprocess.run(argv, input=json.dumps(payload).encode("utf-8"), capture_output=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-200:]
+    text = r.stdout.decode("utf-8").strip()
+    return json.loads(text)["hookSpecificOutput"] if text else {}
+
+
+def test_guards_off_then_a_call_through_run_py_with_the_same_project_is_converted(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    assert _through_run(root, SID).get("permissionDecision") == "deny"          # the control
+    code, text, _sf = _cli(tmp_path, "off")
+    assert code == 0, text
+    got = _through_run(root, SID)
+    assert "permissionDecision" not in got and got["additionalContext"].startswith("Guards OFF: this would have")
+    assert _through_run(root, "another-session").get("permissionDecision") == "deny"   # session-bound end to end
+    _cli(tmp_path, "on")
+    assert _through_run(root, SID).get("permissionDecision") == "deny"

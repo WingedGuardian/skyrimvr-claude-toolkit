@@ -3576,3 +3576,22 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/run.py", "audit, telemetry=a.telemetry))", "audit))",
      _SH + "test_the_codex_hook_entry_point_honours_the_lift", "l2-shadow-codex-wired"),
 ]]
+
+
+# Plan 6 Task 9 round 2: SHADOW on every call; guards off writes where the engine reads and only when honourable.
+_CL = "tools/skyguard/cli.py"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_EN, '            audit.log("skyguard", "SHADOW", "allow")', "            pass",
+     _SH + "test_an_allowed_call_is_returned_untouched_but_logged_while_a_lift_is_honoured", "l2-shadow-every-call"),
+    (_EN, '            audit.log("skyguard", "SHADOW", "{} kept ({})".format(v.code, v.decision))', "            pass",
+     _SH + "test_a_kept_inert_refusal_is_still_logged_while_a_lift_is_honoured", "l2-shadow-kept-logs"),
+    (_CL, "        if not seen:", "        if False:",
+     _SH + "test_guards_off_without_a_visible_session_start_writes_nothing_and_says_so", "l2-guards-start-visible"),
+    (_CL, "    if not os.path.isdir(root):", "    if False:",
+     _SH + "test_guards_off_refuses_a_project_that_is_not_a_folder_with_two_lines", "l2-guards-project-dir"),
+    (_CL, 'os.environ.get("CLAUDE_PROJECT_DIR") or ', "",
+     _SH + "test_the_project_defaults_to_the_agents_project_dir_and_root_stays_a_synonym", "l2-guards-project-default"),
+    (_CL, '(agent,) if agent in ("claude", "codex") else ("claude", "codex")', '("claude", "codex")',
+     _SH + "test_a_start_line_of_another_agents_heartbeat_dir_counts_when_the_agent_is_unnamed_but_not_a_wrong_named_one",
+     "l2-guards-agent-dir"),
+]]
