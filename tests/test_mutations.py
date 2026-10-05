@@ -1725,8 +1725,11 @@ MUTATIONS = [
     pytest.param('tools/skyguard/neutral.py', 'raw = raw.decode("utf-8")', 'raw = raw.decode("utf-8", "replace")',
                  'tests/test_skyguard_neutral.py::test_invalid_utf8_is_a_bad_request_not_a_replacement_character',
                  id='neutral-bad-utf8-replaced'),
+    # Merge of Plan 5 (2026-10-05): engine.pre_tool now routes kind mcp to the DevBench judge itself (rt-fix-b /
+    # Task 17), so dropping this branch still denies `smp reset`; what the branch alone adds is the NOT JUDGED
+    # label for a server the rules do not judge. The engine route has its own mutation (codex-mcp-devbench-judged).
     pytest.param('tools/skyguard/neutral.py', '    if req.kind == "mcp":', '    if False:',
-                 'tests/test_skyguard_neutral.py::test_the_devbench_crash_command_is_denied_through_the_mcp_rules',
+                 'tests/test_skyguard_neutral.py::test_an_mcp_call_the_rules_do_not_judge_is_labelled_unjudged_not_evaluated[mcp__other__thing]',
                  id='neutral-mcp-not-judged'),
     pytest.param('tools/skyguard/neutral.py', '    if req.kind == "other":', '    if False:',
                  'tests/test_skyguard_neutral.py::test_kind_other_is_allowed_but_never_reads_as_a_verdict',
