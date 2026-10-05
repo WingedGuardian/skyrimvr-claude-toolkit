@@ -109,8 +109,8 @@ def install(tmp_path):
 
 
 def snaps(tmp_path):
-    base = tmp_path / ".claude" / "backups" / "auto_snapshots"
-    return sorted(p for p in base.iterdir() if p.is_dir()) if base.is_dir() else []
+    """The snapshot manifests, oldest first (Task 14: one manifest per snapshot)."""
+    return snapshot.manifest_names(tmp_path / ".claude" / "backups" / "auto_snapshots")
 
 
 def snap(tmp_path, command, now=None):
@@ -150,37 +150,24 @@ def test_snapshot_uppercase_ls_is_not_skipped(tmp_path):
     assert len(snaps(tmp_path)) == 1
 
 
-def test_snapshot_copies_only_recent_and_ignores_uppercase_ext(tmp_path):
+def test_snapshot_stores_every_script_whatever_its_age_or_case(tmp_path):
+    """Task 14: no 7-day exclusion, and `.PSC` is a script too (Windows names are case-insensitive)."""
     src = install(tmp_path)
     (src / "new.psc").write_text("n")
     (src / "old.psc").write_text("o")
-    age(src / "old.psc", 8)
+    age(src / "old.psc", 30)
     (src / "UP.PSC").write_text("u")
     (tmp_path / "Data" / "Scripts" / "x.pex").write_text("p")
     snap(tmp_path, "make it")
     (s,) = snaps(tmp_path)
-    assert sorted(os.listdir(str(s / "source"))) == ["new.psc"]
-    assert sorted(os.listdir(str(s / "deploy"))) == ["x.pex"]
-    assert re.fullmatch(r"\[\d{8}_\d{6}\] AUTO-SNAPSHOT \(psc:1 pex:1\) before: make it\n", log_text(tmp_path))
+    m = snapshot.resolve(tmp_path / ".claude" / "backups" / "auto_snapshots", s)
+    assert sorted(m) == ["Data/Scripts/Source/UP.PSC", "Data/Scripts/Source/new.psc", "Data/Scripts/Source/old.psc",
+                         "Data/Scripts/x.pex"]
+    assert re.fullmatch(r"\[\d{8}_\d{6}\] AUTO-SNAPSHOT \(psc:3 pex:1 changed, 4 files\) " + re.escape(s)
+                        + r" before: make it\n", log_text(tmp_path))
     rl = tmp_path / ".claude" / "backups" / "auto_snapshots" / ".last_snapshot"
     raw = rl.read_bytes()
     assert re.fullmatch(rb"\d+\n", raw) and abs(int(raw) - time.time()) < 30
-
-
-def test_snapshot_age_boundary_is_truncated_days(tmp_path):
-    src = install(tmp_path)
-    now = time.time()
-    f = src / "edge.psc"
-    f.write_text("x")
-    t = now - 7 * DAY + 5          # 6.99994 days: find -mtime -7 includes it
-    os.utime(str(f), (t, t))
-    g = src / "edge2.psc"
-    g.write_text("x")
-    t = now - 7 * DAY - 5          # 7.00006 days truncates to 7: excluded
-    os.utime(str(g), (t, t))
-    snap(tmp_path, "make", now)
-    (s,) = snaps(tmp_path)
-    assert os.listdir(str(s / "source")) == ["edge.psc"]
 
 
 def test_snapshot_rate_limit_and_newer_psc(tmp_path):
@@ -191,14 +178,13 @@ def test_snapshot_rate_limit_and_newer_psc(tmp_path):
     rl = tmp_path / ".claude" / "backups" / "auto_snapshots" / ".last_snapshot"
     t = time.time() - 10
     os.utime(str(rl), (t, t))
+    f.write_text("y")
     os.utime(str(f), (t - 5, t - 5))
-    snap(tmp_path, "make 2")                       # nothing newer -> skipped
-    assert len(log_text(tmp_path).splitlines()) == 1
-    os.utime(str(f), (t + 5, t + 5))               # strictly newer than the rate file
-    (s,) = snaps(tmp_path)                         # the snapshot dir name is a 1-second stamp: avoid a clash
-    s.rename(s.with_name("19990101_000000"))
+    snap(tmp_path, "make 2")                       # inside the window, nothing newer than the last walk -> skipped
+    assert len(snaps(tmp_path)) == 1
+    os.utime(str(f), (t + 5, t + 5))               # strictly newer than the last walk
     snap(tmp_path, "make 3")
-    assert len(log_text(tmp_path).splitlines()) == 2
+    assert len(snaps(tmp_path)) == 2 and len(log_text(tmp_path).splitlines()) == 2
 
 
 def test_snapshot_equal_mtime_is_not_newer(tmp_path):
@@ -209,18 +195,20 @@ def test_snapshot_equal_mtime_is_not_newer(tmp_path):
     rl = tmp_path / ".claude" / "backups" / "auto_snapshots" / ".last_snapshot"
     t = time.time() - 10
     os.utime(str(rl), (t, t))
+    f.write_text("y")
     os.utime(str(f), (t, t))
     snap(tmp_path, "make 2")
     assert len(log_text(tmp_path).splitlines()) == 1
 
 
-def test_snapshot_empty_is_removed_and_no_rate_file(tmp_path):
-    src = install(tmp_path)
-    (src / "old.psc").write_text("x")
-    age(src / "old.psc", 30)
-    snap(tmp_path, "make")
-    assert snaps(tmp_path) == [] and log_text(tmp_path) == ""
-    assert not (tmp_path / ".claude" / "backups" / "auto_snapshots" / ".last_snapshot").exists()
+def test_snapshot_nothing_changed_writes_no_snapshot(tmp_path):
+    """A walk that finds every file as the index has it takes no snapshot and logs nothing (it still records the
+    walk, so the rate limit counts from it)."""
+    (install(tmp_path) / "a.psc").write_text("x")
+    snap(tmp_path, "make 1")
+    snap(tmp_path, "make 2", now=time.time() + 120)
+    assert len(snaps(tmp_path)) == 1 and len(log_text(tmp_path).splitlines()) == 1
+    assert (tmp_path / ".claude" / "backups" / "auto_snapshots" / ".last_snapshot").is_file()
 
 
 def test_snapshot_without_script_dirs_does_nothing(tmp_path):
@@ -228,7 +216,8 @@ def test_snapshot_without_script_dirs_does_nothing(tmp_path):
     assert snaps(tmp_path) == [] and log_text(tmp_path) == ""
 
 
-def test_snapshot_prunes_old_dirs_and_keeps_new(tmp_path):
+def test_snapshot_prunes_old_legacy_dirs_and_keeps_new(tmp_path):
+    """The bash-era `<stamp>/` copy folders still age out after 14 days (floor), and only those."""
     src = install(tmp_path)
     (src / "a.psc").write_text("x")
     base = tmp_path / ".claude" / "backups" / "auto_snapshots"
@@ -237,13 +226,15 @@ def test_snapshot_prunes_old_dirs_and_keeps_new(tmp_path):
     young.mkdir()
     edge = base / "20200103_000000"
     edge.mkdir()
+    other = base / "not-a-stamp"
+    other.mkdir()
     age(old, 15)
     age(young, 13)
     age(edge, 14)                                   # 14.0007 days: floor 14, not > 14 -> kept
+    age(other, 30)
     snap(tmp_path, "make")
-    names = [p.name for p in snaps(tmp_path)]
-    assert "20200101_000000" not in names and "20200102_000000" in names and "20200103_000000" in names
-    assert len(names) == 3
+    names = sorted(p.name for p in base.iterdir() if p.is_dir())
+    assert names == ["20200102_000000", "20200103_000000", "blobs", "manifests", "not-a-stamp"]
 
 
 def test_snapshot_audit_line_carries_first_120_bytes(tmp_path):
@@ -339,31 +330,7 @@ def test_backup_equivalent_to_real_bash(tmp_path, name):
 
 
 @needs_jq
-@pytest.mark.parametrize("command", ["make it", "LS x", "python build.py --out Data/x"])
-def test_snapshot_equivalent_to_real_bash(tmp_path, command):
-    inst_b = record.make_install(tmp_path / "bash", HOOKS, "declared")
-    py = tmp_path / "py"
-    (py / "Data" / "Scripts" / "Source").mkdir(parents=True)
-    for root in (inst_b, py):
-        (root / "Data" / "Scripts" / "Source" / "a.psc").write_text("src")
-        (root / "Data" / "Scripts" / "a.pex").write_text("pex")
-    record.fire(inst_b, "snapshot-before-tool.sh", {"tool_name": "Bash", "tool_input": {"command": command}})
-    snapshot.run(str(py), command, False, audit_mod.Audit(str(py)))
-
-    def result(root):
-        base = root / ".claude" / "backups" / "auto_snapshots"
-        (d,) = [p for p in base.iterdir() if p.is_dir()]
-        files = sorted((p.relative_to(d).as_posix(), p.read_bytes()) for p in d.rglob("*") if p.is_file())
-        return files, strip_ts(log_text(root)), re.fullmatch(rb"\d+\n", (base / ".last_snapshot").read_bytes()) is not None
-
-    rb, rp = result(inst_b), result(py)
-    assert rb[0] and rb == rp
-
-
-
-
-@needs_jq
-@pytest.mark.parametrize("command", ["ls x", "make\nls y", "git status", "LS x"])
+@pytest.mark.parametrize("command", ["ls x", "make\nls y", "git status"])
 def test_snapshot_skip_equivalent_to_real_bash(tmp_path, command):
     inst_b = record.make_install(tmp_path / "bash", HOOKS, "declared")
     py = tmp_path / "py"
@@ -397,37 +364,47 @@ def test_snapshot_one_failed_copy_does_not_abort(tmp_path, monkeypatch):
     src = install(tmp_path)
     (src / "bad.psc").write_text("b")
     (src / "good.psc").write_text("g")
-    real = snapshot.shutil.copyfile
+    real = snapshot.backup._copy_hashed
 
     def flaky(a, b, *k, **kw):
         if str(a).endswith("bad.psc"):
             raise OSError("locked")
         return real(a, b, *k, **kw)
 
-    monkeypatch.setattr(snapshot.shutil, "copyfile", flaky)
+    monkeypatch.setattr(snapshot.backup, "_copy_hashed", flaky)
     snap(tmp_path, "make")
     (s,) = snaps(tmp_path)
-    assert os.listdir(str(s / "source")) == ["good.psc"]
-    assert re.fullmatch(r"\[\d{8}_\d{6}\] AUTO-SNAPSHOT \(psc:1 pex:0\) before: make\n", log_text(tmp_path))
+    assert sorted(snapshot.resolve(tmp_path / ".claude" / "backups" / "auto_snapshots", s)) == [
+        "Data/Scripts/Source/good.psc"]
+    assert re.fullmatch(r"\[\d{8}_\d{6}\] AUTO-SNAPSHOT \(psc:1 pex:0 changed, 1 files, 1 could not be read -- "
+                        r"retried on the next walk\) \S+ before: make\n", log_text(tmp_path))
     assert (tmp_path / ".claude" / "backups" / "auto_snapshots" / ".last_snapshot").is_file()
+    monkeypatch.setattr(snapshot.backup, "_copy_hashed", real)
+    snap(tmp_path, "make", now=time.time() + 120)          # the next full walk picks it up
+    assert "Data/Scripts/Source/bad.psc" in snapshot.resolve(
+        tmp_path / ".claude" / "backups" / "auto_snapshots", snaps(tmp_path)[-1])
 
 
 def test_snapshot_rate_limit_window_is_60_seconds(tmp_path):
-    (install(tmp_path) / "a.psc").write_text("x")
+    """Inside the window only a NEWER file is looked at; from 60 s on, the full index comparison runs again. Shown
+    with the stated gap's own shape: content replaced under an OLDER mtime."""
+    src = install(tmp_path)
+    f = src / "a.psc"
+    f.write_text("x")
     now = time.time()
-    base = tmp_path / ".claude" / "backups" / "auto_snapshots"
+    snap(tmp_path, "make", now)
+    t = now - 3600
 
-    def go(at):
-        for d in snaps(tmp_path):                  # same-second dir names would merge; not what is tested
-            shutil.rmtree(str(d))
+    def go(at, body):                  # each body a new size: same size + same mtime is the index's own blind spot
+        f.write_text(body)
+        os.utime(str(f), (t, t))                   # an mtime-preserving replace: older than the last walk
         snap(tmp_path, "make", at)
-        return len(log_text(tmp_path).splitlines())
+        return len(snaps(tmp_path))
 
-    assert go(now) == 1
-    assert go(now + 59) == 1          # inside the window, nothing newer -> skipped
-    assert go(now + 60) == 2          # boundary: 60 is not < 60 -> taken
-    assert go(now + 60 + 61) == 3     # 61 s after the previous snapshot -> taken
-    assert (base / ".last_snapshot").is_file()
+    assert go(now + 59, "yy") == 1     # inside the window: not seen (the stated gap)
+    assert go(now + 60, "zzz") == 2     # boundary: 60 is not < 60 -> the full comparison runs
+    assert go(now + 60 + 59, "wwww") == 2
+    assert go(now + 60 + 60, "vvvvv") == 3
 
 
 def test_backup_mkdir_failure_logs_failed(tmp_path):

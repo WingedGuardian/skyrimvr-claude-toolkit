@@ -8,7 +8,10 @@ import argparse
 import faulthandler
 import os
 import sys
+import time
 from pathlib import Path
+
+_T0 = time.monotonic()        # the engine's time budget counts from (about) here
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -78,6 +81,20 @@ def _declared_env(a):
         return None
 
 
+SNAPSHOT_MARGIN = 3.0         # seconds left unused before the engine budget's watchdog
+
+
+def _session_snapshot(project, source, audit) -> None:
+    """The SessionStart snapshot (Plan 6 Task 14): the first-ever baseline, time-boxed to snapshot.BASELINE_BOX -- and
+    never past the engine budget minus a margin, because the watchdog would end the process and take the session's
+    banners and preferences with it. Never raises: a failed snapshot must not cost the session its context."""
+    box = min(snapshot.BASELINE_BOX, _T0 + _engine_budget() - SNAPSHOT_MARGIN - time.monotonic())
+    try:
+        snapshot.session_start(project, source, audit, box=box)
+    except Exception:
+        audit.log("snapshot-before-tool", "FAILED", "the session-start snapshot raised -- no snapshot was taken")
+
+
 def _codex(a, raw: str) -> int:
     """Codex roles. Output is SKYGUARD-OK + body: the wrapper tells "decided" (marker present) from "broke"
     (exit 1, nothing on stdout) -- only a JSON deny blocks on Codex, so the wrapper owns the failure deny."""
@@ -86,6 +103,7 @@ def _codex(a, raw: str) -> int:
     if a.role == "session-start":
         _session_line(a, req.session_id, source=req.source, transcript=req.transcript_path)
         out, status, code = session.run_status(a.project, req.source, a.bash, audit)
+        _session_snapshot(a.project, req.source, audit)
         _telemetry(a, Verdict("allow", "", "", status, code))
         _emit("SKYGUARD-OK\n" + codex.session_body(out))
         return 0
@@ -188,6 +206,7 @@ def main(argv=None) -> int:
         v = Verdict()
     else:
         out, status, code = session.run_status(a.project, "" if p["empty"] else p["source"], a.bash, audit)
+        _session_snapshot(a.project, "" if p["empty"] else p["source"], audit)
         _telemetry(a, Verdict(status=status, code=code))
         session.export_env(p["session_id"], "claude")   # later Bash calls get SKYGUARD_SESSION_ID (Task 10)
         _emit(out)
