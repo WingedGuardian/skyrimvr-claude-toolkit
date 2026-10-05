@@ -114,8 +114,9 @@ def test_a_python2_on_path_is_skipped(tmp_path):
 
 def test_an_old_python3_is_skipped_by_the_capability_probe_not_just_by_existing(tmp_path):
     root = _install(tmp_path, MISSING)
-    # answers the probe like Python 3.6 (exit 1) and would otherwise run anything else
-    _shim(tmp_path / "shims", "python", f'case "$*" in *version_info*) exit 1 ;; esac\nexec "{REAL_PY}" "$@"\n')
+    # answers the selftest the way run.py does on Python 3.7 (it refuses: exit 1, no nonce), and would
+    # otherwise run anything else. The probe is ONE process now: there is no separate version check.
+    _shim(tmp_path / "shims", "python", f'case "$*" in *--selftest*) exit 1 ;; esac\nexec "{REAL_PY}" "$@"\n')
     r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root))
     assert "GUARD INERT" in _reason(r), r.stdout
 
@@ -259,10 +260,14 @@ def test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget(tmp_path
     assert "GUARD INERT" in _reason(r) and "engine failed" in _reason(r), r.stdout
     assert r.stdout.strip().startswith("{") and "Traceback" not in r.stdout and "Thread" not in r.stdout
     assert time.time() - t < 12, "the watchdog did not end the call at its budget"
+    # the WATCHDOG ended it (exit 1), not the wrapper's own kill 3 s later (exit 124)
+    assert "exit 1" in _failed(root, "protect-files") and "exit 124" not in _failed(root, "protect-files"), \
+        _failed(root, "protect-files")
 
 
 def test_a_hanging_fallback_engine_is_cut_off_by_timeout(tmp_path):
-    """On the fallback path the wrapper bounds the engine with coreutils `timeout`."""
+    """On the fallback path the wrapper bounds the engine (SKYGUARD_ENGINE_TIMEOUT + 3 s), killing it by
+    its Windows pid -- not with coreutils `timeout`, which cannot stop a native python.exe under load."""
     import time
     root = _install(tmp_path, MISSING)
     _shim(tmp_path / "shims", "python",

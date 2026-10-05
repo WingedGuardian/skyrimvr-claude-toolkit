@@ -12,15 +12,18 @@
 # (session-start), and it always exits 0 -- an EXIT trap emits the deny if nothing else did.
 #
 # Hot path = bash builtins, as in the Claude wrappers (a fork costs 10-70 ms on Git Bash); the remaining
-# forks are `$(cat)`, `timeout` and the engine. Never logs the environment (hooks inherit secrets).
+# forks are `$(cat)` and the engine. Never logs the environment (hooks inherit secrets).
 # SETUP: setup.sh fills in the two paths below.
 # Test-only knobs: SKYGUARD_WRAPPER_TIMEOUT_S (engine deadline; default 40 pre-tool, 95 session-start,
-# 20+ s below the definition timeouts 60/120), SKYGUARD_NO_PYTHON_FALLBACK=1 (configured interpreter only).
+# 20+ s below the definition timeouts 60/120), SKYGUARD_NO_PYTHON_FALLBACK=1 (configured interpreter only),
+# SKYGUARD_HOOK_TIMEOUT_S (a SHORTER definition timeout for the outer deadline; see PY-CHAIN below).
 
 ROLE="${1:-}"
 PY='{{PYTHON_PATH}}'
 BASH_EXE='{{BASH_PATH}}'
 HOOK_NAME="$ROLE"
+# the FROZEN definition timeouts in .codex/hooks.json (tests/test_hook_deadline.py checks them)
+HOOK_TIMEOUT_S=60; [ "$ROLE" = "session-start" ] && HOOK_TIMEOUT_S=120
 EMITTED=""
 INV=""
 HB_DIR=""
@@ -46,10 +49,8 @@ deny() {
     fi
     exit 0
 }
-OUTF=""
 _finally() {
     [ -n "$EMITTED" ] || deny wrapper "the wrapper ended without a verdict"
-    [ -z "$OUTF" ] || rm -f -- "$OUTF" 2>/dev/null
     exit 0
 }
 # UTF-8 validity in builtins (byte-wise in the C locale): Codex decodes stdout as UTF-8, and a body it
@@ -116,46 +117,147 @@ case "$LIMIT" in ''|*[!0-9]*) deny wrapper "SKYGUARD_WRAPPER_TIMEOUT_S is not a 
 case "$BASH_EXE" in '{{'*) BASH_EXE="${BASH:-bash}" ;; esac
 
 # PY-CHAIN-BEGIN
-# Interpreter fallback chain (identical in every wrapper). The configured $PY is the only thing the hot
-# path touches; the probing below runs ONLY once it has failed, so it adds no fork to a healthy call.
-# Order: py -3 / python / python3 that resolve and are not a Store alias, then the usual install
-# locations (newest version first), then a Store alias, last. A candidate is accepted only if it is
-# Python >= 3.8 (the engine's floor) AND runs the engine's own `run.py --selftest <nonce>` and echoes the
-# nonce: a stub that merely exits 0 and prints `{}` would otherwise read as ALLOW. Multi-word candidates
-# are word-split, never eval'd. A fallback that is taken writes a `failed` record BEFORE the engine runs,
-# so the health report says DEGRADED until a call through the configured interpreter completes again.
-# Time limits: the agent DISCARDS a deny that arrives after its own 30 s hook timeout (measured) and runs
-# the command, so everything is bounded. Probes and a FALLBACK engine run use coreutils `timeout` (3 s per
-# probe, no probing after 8 s, the engine capped so the whole call ends by ~28 s); without `timeout` on
-# PATH they run unbounded. The NORMAL path (configured PY works) has no `timeout` -- it is one more fork,
-# ~20-30 ms on every call -- and relies on run.py's in-process watchdog (faulthandler, a C thread that fires
-# even while a regex holds the GIL; SKYGUARD_ENGINE_TIMEOUT s, default 20) which exits 1 into the ordinary
-# "engine failed" deny. NOT covered: a hung interpreter START (before run.py's main) on the configured PY
-# -- rare, and setup.sh verified that PY.
+# Interpreter fallback chain and time limits (identical in every bash entry). Needs from the wrapper: T0,
+# ROOT, ROOT_WIN, HB_DIR, INV, PY, INPUT, _fail, and HOOK_TIMEOUT_S = this hook's FROZEN definition timeout.
+#
+# Time limits. An agent DISCARDS an answer that arrives after its hook timeout and runs the command (Claude
+# Code: MEASURED; Codex: a timeout is not a deny), so the whole call has an OUTER deadline DL = start +
+# HOOK_TIMEOUT_S - 15 s, and every native child (probe, engine) gets a slice of it. A child is read through
+# a pipe in 0.2 s `read -t` slices (a builtin: no sleep/timeout fork) and, at its limit, killed by its
+# WINDOWS pid (`taskkill /F /T` on /proc/<pid>/winpid; elsewhere `kill -KILL`). The kill is started in the
+# background and never waited for, so the answer is on time even while a child is still dying. coreutils
+# `timeout` is not used: its signal reaches a native python.exe late or never once the CPU is
+# oversubscribed (MEASURED 2026-10-05, 2x load: a 3 s bound took 18-227 s; taskkill by pid 5-6 s).
+# The engine's own in-process watchdog (run.py, faulthandler, SKYGUARD_ENGINE_TIMEOUT, default 20 s) still
+# ends a stuck engine first; the wrapper's kill lands 3 s after it.
+#
+# The chain runs ONLY once the configured $PY has failed, so it adds no fork to a healthy call. Order:
+# a remembered fallback (below), then py -3 / python / python3 that resolve and are not a Store alias,
+# then the usual install locations (newest version first), then a Store alias, last. A candidate is
+# accepted only if it runs the engine's own `run.py --selftest <nonce>` (ONE process: run.py itself
+# refuses Python < 3.8, and an older one cannot even parse it) and echoes the nonce: a stub that merely
+# exits 0 and prints `{}` would otherwise read as ALLOW. Each probe gets min(SKYGUARD_PROBE_TIMEOUT, 3 s
+# default, sub-second allowed) and no probe starts in the last 10 s before DL (the engine needs them).
+# Multi-word candidates are word-split, never eval'd. A fallback that is taken writes a `failed` record
+# BEFORE the engine runs, so the health report says DEGRADED until the configured interpreter works again.
+#
+# A verified fallback is remembered in $HB_DIR/.python-fallback (tab-separated: version tag, absolute
+# path, optional -3), so a sustained outage probes once, not on every call. The file is never trusted:
+# any read or format problem is "no cache"; the path must be absolute, named like a Python and executable;
+# it is dropped when that file or run.py is newer than the cache; and EVERY fallback engine run must echo
+# a fresh nonce (--nonce) ahead of its answer -- the identity check rides on the run itself, so writing
+# that file cannot substitute an interpreter. A remembered fallback that fails is forgotten.
 PYC=("$PY")
-TM=()
-FB=""
-PTMO=(); command -v timeout >/dev/null 2>&1 && PTMO=(timeout -k 1 "${SKYGUARD_PROBE_TIMEOUT:-3}")
-_elapsed() { local n="${EPOCHREALTIME:-}"; [ -n "$n" ] || printf -v n '%(%s)T' -1; EL=$(( ${n%%[.,]*} - ${T0%%.*} )); }
-_budget() {
-    local t="${SKYGUARD_ENGINE_TIMEOUT:-20}"
-    _elapsed; [ $((EL + t)) -le 26 ] || t=$((26 - EL)); [ "$t" -ge 2 ] || t=2
-    TM=(); command -v timeout >/dev/null 2>&1 && TM=(timeout -k 2 "$t")
+FB=""             # "" configured interpreter / 1 probed this call / cache remembered
+WD=""             # the last child was ended by run.py's own watchdog (its report is on stdout)
+NUL=""            # the last child's stdout held a NUL byte (dropped from OUT)
+OUT=""; RC=0; NOCACHE=""
+NONCE="$RANDOM$RANDOM$RANDOM"
+RUNPY="${ROOT_WIN:-$ROOT}/tools/skyguard/run.py"
+PYFB_CACHE="$HB_DIR/.python-fallback"
+_to_ms() {
+    local s="${1%%[.,]*}" f=""
+    [ "$s" = "$1" ] || f="${1#*[.,]}"
+    f="${f}000"; f="${f:0:3}"
+    case "$s" in ''|*[!0-9]*) return 1 ;; esac
+    case "$f" in *[!0-9]*) return 1 ;; esac
+    MS=$(( 10#$s * 1000 + 10#$f ))
 }
-py_ok() { "${PTMO[@]}" "$@" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)' >/dev/null 2>&1; }
+_now() { local n="${EPOCHREALTIME:-}"; [ -n "$n" ] || printf -v n '%(%s)T' -1; _to_ms "$n"; }
+_secs_ms() { { _to_ms "$1" && [ "$MS" -gt 0 ]; } || _to_ms "$2"; }
+_to_ms "$T0" || _now
+T0_MS=$MS
+H_S="$HOOK_TIMEOUT_S"
+# test-only: a SHORTER deadline (never a longer one than the definition's)
+case "${SKYGUARD_HOOK_TIMEOUT_S:-}" in ''|*[!0-9]*) ;; *) [ "$SKYGUARD_HOOK_TIMEOUT_S" -ge "$H_S" ] || H_S="$SKYGUARD_HOOK_TIMEOUT_S" ;; esac
+DL=$(( T0_MS + (H_S - 15) * 1000 ))
+PROBE_END=$(( DL - 10000 ))
+_secs_ms "${SKYGUARD_PROBE_TIMEOUT:-}" 3; PROBE_MS=$MS
+_secs_ms "${SKYGUARD_ENGINE_TIMEOUT:-}" 20; ENGINE_MS=$(( MS + 3000 ))
+_kill_tree() {
+    local w="" tk=taskkill
+    if [ -r "/proc/$1/winpid" ] && read -r w < "/proc/$1/winpid" 2>/dev/null && [ -n "$w" ]; then
+        hash taskkill 2>/dev/null || tk="${SYSTEMROOT//\\//}/System32/taskkill.exe"
+        "$tk" //F //T //PID "$w" >/dev/null 2>&1 </dev/null &
+    else
+        kill -KILL "$1" 2>/dev/null
+    fi
+}
+# _bounded <limit ms> <in|none> <command...>: run a native child with $INPUT (in) or nothing on stdin,
+# never past DL. Sets OUT (stdout), RC (124 = the limit ended it), NUL, WD.
+_bounded() {
+    local end fd cpid part r eof="" in="$2"
+    _now; end=$(( MS + $1 )); [ "$end" -le "$DL" ] || end=$DL
+    shift 2
+    OUT=""; RC=124; NUL=""; WD=""
+    [ $(( end - MS )) -ge 200 ] || return 0
+    if [ "$in" = in ] && [ -n "$INPUT" ]; then
+        exec {fd}< <(exec "$@" 2>/dev/null <<<"$INPUT") || { RC=126; return 0; }
+    else
+        exec {fd}< <(exec "$@" 2>/dev/null </dev/null) || { RC=126; return 0; }
+    fi
+    cpid=$!
+    while :; do
+        if [ -z "$eof" ]; then
+            part=""; IFS= read -r -d '' -t 0.2 -u "$fd" part; r=$?; OUT+="$part"
+            if [ "$r" -eq 0 ]; then NUL=1; continue; fi
+            [ "$r" -gt 128 ] || eof=1
+        fi
+        if ! kill -0 "$cpid" 2>/dev/null; then
+            # it exited: take what it wrote first (a grandchild may still hold the pipe, so no read to EOF)
+            while [ -z "$eof" ]; do
+                part=""; IFS= read -r -d '' -t 0.05 -u "$fd" part; r=$?; OUT+="$part"
+                if [ "$r" -eq 0 ]; then NUL=1; elif [ "$r" -le 128 ]; then eof=1; elif [ -z "$part" ]; then break; fi
+                _now; [ "$MS" -lt "$end" ] || break
+            done
+            wait "$cpid"; RC=$?
+            break
+        fi
+        _now
+        if [ "$MS" -ge "$end" ]; then _kill_tree "$cpid"; RC=124; break; fi
+        [ -z "$eof" ] || sleep 0.05 2>/dev/null
+    done
+    exec {fd}<&-
+    case "$OUT" in "Timeout ("*) [ "$RC" -eq 0 ] || WD=1 ;; esac
+}
 py_good() {
-    local n o
-    _elapsed; [ "$EL" -le 8 ] || return 1
-    py_ok "$@" || return 1
+    local n o b
+    _now; b=$(( PROBE_END - MS )); [ "$b" -le "$PROBE_MS" ] || b=$PROBE_MS
+    [ "$b" -ge 200 ] || return 1
     n="$RANDOM$RANDOM"
-    o=$("${PTMO[@]}" "$@" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" --selftest "$n" 2>/dev/null)
-    [ "${o%$'\r'}" = "skyguard-selftest:$n" ]
+    _bounded "$b" none "$@" "$RUNPY" --selftest "$n"
+    o="${OUT%$'\n'}"
+    [ "$RC" -eq 0 ] && [ "${o%$'\r'}" = "skyguard-selftest:$n" ]
 }
-py_use() { PYC=("$@"); FB=1; _fail python "configured $PY unusable; used $* -- re-run setup.sh"; return 0; }
+_cache_put() {
+    local p="$1" w
+    case "$p" in */*) ;; *) hash "$p" 2>/dev/null && p="${BASH_CMDS[$p]:-}" ;; esac
+    case "$p" in /*|[A-Za-z]:/*) ;; *) return 0 ;; esac
+    shift
+    { printf 'skyguard-pyfb-v1\t%s' "$p"; for w in "$@"; do printf '\t%s' "$w"; done; printf '\n'; } \
+        > "$PYFB_CACHE" 2>/dev/null
+    return 0
+}
+py_cached() {
+    local c=() f="$PYFB_CACHE"
+    [ -z "$NOCACHE" ] && [ -n "$HB_DIR" ] && [ -f "$f" ] && [ -r "$f" ] || return 1
+    IFS=$'\t' read -r -a c < "$f" 2>/dev/null || return 1
+    [ "${c[0]:-}" = "skyguard-pyfb-v1" ] && [ "${#c[@]}" -ge 2 ] && [ "${#c[@]}" -le 3 ] || return 1
+    c=("${c[@]:1}")
+    [ "${#c[@]}" -eq 1 ] || [ "${c[1]}" = "-3" ] || return 1
+    case "${c[0]}" in /*|[A-Za-z]:/*) ;; *) return 1 ;; esac
+    case "${c[0]##*/}" in python|python3|py|python.exe|python3.exe|py.exe) ;; *) return 1 ;; esac
+    [ -x "${c[0]}" ] && [ ! "${c[0]}" -nt "$f" ] && [ ! "$ROOT/tools/skyguard/run.py" -nt "$f" ] || return 1
+    PYC=("${c[@]}"); FB=cache
+    _fail python "configured $PY unusable; used ${c[*]} (verified earlier) -- re-run setup.sh"
+}
+py_use() { PYC=("$@"); FB=1; _fail python "configured $PY unusable; used $* -- re-run setup.sh"; _cache_put "$@"; }
 py_fallback() {
     local c p d m PY_ALIAS="" bases=()
+    py_cached && return 0
     for c in "py -3" python python3; do
-        p=$(command -v ${c%% *} 2>/dev/null) || continue
+        hash "${c%% *}" 2>/dev/null || continue
+        p="${BASH_CMDS[${c%% *}]:-}"
         case "$p" in
             */[Ww]indows[Aa]pps/*) [ -z "$PY_ALIAS" ] && PY_ALIAS="$c"; continue ;;
         esac
@@ -177,53 +279,64 @@ py_fallback() {
     if [ -n "$PY_ALIAS" ] && py_good $PY_ALIAS; then py_use $PY_ALIAS; return 0; fi
     return 1
 }
+# _engine <limit ms>: run.py with ENGINE_ARGS (the wrapper's) through PYC. A fallback must echo NONCE
+# first; OUT is the answer without it, trailing newlines removed.
+_engine() {
+    if [ -n "$FB" ]; then
+        _bounded "$1" in "${PYC[@]}" "$RUNPY" "${ENGINE_ARGS[@]}" --nonce "$NONCE"
+        if [ "$RC" -eq 0 ]; then
+            case "$OUT" in
+                "skyguard-nonce:$NONCE"$'\n'*) OUT="${OUT#*$'\n'}" ;;
+                *) RC=1; _fail python "fallback ${PYC[*]} did not echo the engine nonce -- not used" ;;
+            esac
+        fi
+    else
+        _bounded "$1" in "${PYC[@]}" "$RUNPY" "${ENGINE_ARGS[@]}"
+    fi
+    while [ "${OUT%$'\n'}" != "$OUT" ]; do OUT="${OUT%$'\n'}"; done
+}
+# After a failed engine run, is the INTERPRETER to blame? Not when run.py's own watchdog ended it (that
+# proves the interpreter runs the engine), not at the limit (no time left), and a fallback probed in this
+# call is not probed again. A remembered fallback that failed is forgotten and the chain probes afresh.
+_retry() {
+    [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ] && [ -z "$WD" ] && [ "$FB" != 1 ] || return 1
+    if [ "$FB" = cache ]; then
+        NOCACHE=1; : > "$PYFB_CACHE" 2>/dev/null; FB=""
+    elif py_good "${PYC[@]}"; then
+        return 1
+    fi
+    py_fallback
+}
 # PY-CHAIN-END
 
-# The deadline. Codex runs the command when a hook outlives its timeout, so the engine call is bounded
-# by `timeout` (when present) on EVERY path here, not only the fallback one; run.py's own watchdog
-# (SKYGUARD_ENGINE_TIMEOUT, default 20 s) normally ends a stuck engine first.
-_engine_tm() {
-    local lim
-    _elapsed; lim=$((LIMIT - EL)); [ "$lim" -ge 1 ] || lim=1
-    if [ -n "$FB" ]; then
-        _budget
-        [ "${#TM[@]}" -gt 0 ] && [ "${TM[3]}" -lt "$lim" ] && lim="${TM[3]}"
-    fi
-    TM=(); command -v timeout >/dev/null 2>&1 && TM=(timeout -k 2 "$lim")
+# The engine's limit: LIMIT s from the start of the call on EVERY path (Codex runs the command when a
+# hook outlives its timeout), the fallback's shorter budget on a fallback, never past the outer deadline.
+# run.py's own watchdog (SKYGUARD_ENGINE_TIMEOUT, default 20 s) normally ends a stuck engine first.
+# The output is read by _bounded, which stops at the engine's EXIT, not at EOF: a grandchild that inherited
+# the pipe cannot hold this file past Codex's timeout.
+_engine_limit() {
+    _now; ELIM=$(( T0_MS + LIMIT * 1000 - MS ))
+    [ -z "$FB" ] || [ "$ENGINE_MS" -ge "$ELIM" ] || ELIM=$ENGINE_MS
+    [ "$ELIM" -ge 1000 ] || ELIM=1000
 }
-run_engine() {
-    _engine_tm
-    printf '%s' "$INPUT" | "${TM[@]}" "${PYC[@]}" "$RUNPY" codex "$ROLE" \
-        --root "$ROOT" --root-win "$ROOT_WIN" --project "${ROOT_WIN:-$ROOT}" --bash "$BASH_EXE" \
-        --invocation "$INV" --telemetry "${ROOT_WIN:-$ROOT}/.claude/backups/.hook-heartbeat/codex" 2>/dev/null
-}
+ENGINE_ARGS=(codex "$ROLE" --root "$ROOT" --root-win "$ROOT_WIN" --project "${ROOT_WIN:-$ROOT}" --bash "$BASH_EXE"
+             --invocation "$INV" --telemetry "${ROOT_WIN:-$ROOT}/.claude/backups/.hook-heartbeat/codex")
 
 if ! command -v "$PY" >/dev/null 2>&1 || [ "${PY:0:2}" = "{{" ]; then
     [ "${SKYGUARD_NO_PYTHON_FALLBACK:-}" != 1 ] && py_fallback || deny python "cannot run Python -- install Python 3 and run setup.sh"
 fi
-# The engine writes to a FILE, not into $(...): command substitution reads the pipe to EOF, i.e. until
-# every process that inherited it exits -- a grandchild holding it would keep this file past Codex's
-# timeout, and Codex then RUNS the command. A file is done when the engine (or `timeout`) exits.
-OUTF="$HB_DIR/.$HOOK_NAME.$INV.out"
-if ! { : > "$OUTF"; } 2>/dev/null; then
-    OUTF="${TMPDIR:-/tmp}/skyguard-$HOOK_NAME.$INV.out"
-    { : > "$OUTF"; } 2>/dev/null || { OUTF=""; deny wrapper "cannot create a file for the engine output"; }
-fi
-run_engine > "$OUTF"
-RC=$?
-if [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ] && [ "$RC" -ne 137 ] && [ -z "$FB" ] && [ "${SKYGUARD_NO_PYTHON_FALLBACK:-}" != 1 ] \
-        && ! py_good "${PYC[@]}" && py_fallback; then
-    run_engine > "$OUTF"; RC=$?
+_engine_limit; _engine "$ELIM"
+if [ "${SKYGUARD_NO_PYTHON_FALLBACK:-}" != 1 ] && _retry; then
+    _engine_limit; _engine "$ELIM"
 fi
 case "$RC" in
     0) ;;
-    124|137) deny engine "engine did not answer within $LIMIT s" ;;
+    124) deny engine "engine did not answer within $LIMIT s" ;;
     *) deny engine "engine exited $RC" ;;
 esac
 
-# `read` (a builtin) succeeds only when it stops at a NUL byte, which no engine answer contains.
-OUT=""
-IFS= read -r -d '' OUT < "$OUTF" && deny emission "engine output has a NUL byte"
+# A NUL byte: no engine answer contains one, and everything after it would otherwise vanish.
+[ -z "$NUL" ] || deny emission "engine output has a NUL byte"
 OUT="${OUT//$'\r'/}"
 while [ "${OUT%$'\n'}" != "$OUT" ]; do OUT="${OUT%$'\n'}"; done
 _utf8_ok "$OUT" || deny emission "engine output is not valid UTF-8"
