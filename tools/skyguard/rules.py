@@ -316,6 +316,31 @@ RULES = {
         'Yes disables it until tools/skyguard lock enable.'
     ),
     },
+    # Plan 6 Task 12 (R12): self-protection (self_rules.py). The state is the CLI's alone (deny); the guard code and
+    # config are priced (ask or advise). The W- twins say the same in different words: one text, one code.
+    'S-SELF-STATE': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        "Blocked: {file} holds the guards' on/off state and is written only by tools/skyguard.\n"
+        'Use tools/skyguard guards off, or lock unlock.'
+    ),
+    },
+    # PRICED (pricing doc, Task 12 Ruling): advise. 24 newly asked over 70,342 items, and 24 of 24 were maintenance the
+    # user asked for, against a pre-committed bar of <= 25 %. The ask text, if a later pricing flips it back:
+    #   'This edits {file}, part of the safety guards themselves.' / 'Yes applies it; the next session start lists
+    #   guard files that differ from the release.' (W-: 'Yes saves it; ...'). The session-start banner ships either way.
+    'S-SELF-GUARD': {
+        "decision": 'advise',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Note: this edits {file}, part of the safety guards themselves.'
+    ),
+    },
     'S-INERT-NOINPUT': {
         "decision": 'deny',
         "hook": 'protect-mcp',
@@ -344,6 +369,25 @@ RULES = {
         "template": (
         'Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly.\n'
         'Use xelib, Spriggit or AutoMod to change them instead.'
+    ),
+    },
+    'W-SELF-STATE': {
+        "decision": 'deny',
+        "hook": 'protect-files',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        "Blocked: {file} holds the guards' on/off state and is written only by tools/skyguard.\n"
+        'Use tools/skyguard guards off, or lock unlock, not an edit.'
+    ),
+    },
+    'W-SELF-GUARD': {
+        "decision": 'advise',
+        "hook": 'protect-files',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Note: this changes {file}, part of the safety guards themselves.'
     ),
     },
     'W-INI': {

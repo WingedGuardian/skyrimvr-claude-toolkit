@@ -49,6 +49,9 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
     "shell.S-LIFT-RAW": ("hook_only", _PATH),
     "shell.S-LIFT-UNLOCKCMD": ("hook_only", "the user runs it themselves; a prefix could refuse the user too"),
     "shell.S-LIFT-PERMANENT": ("hook_only", "the user runs it themselves; a prefix could refuse the user too"),
+    # Plan 6 Task 12: path-based (where the write RESOLVES). S-SELF-GUARD / W-SELF-GUARD priced to advise: not decisive.
+    "shell.S-SELF-STATE": ("hook_only", _PATH),
+    "write.W-SELF-STATE": ("hook_only", "a file write, not a command"),
     "mcp.S-INERT-NOINPUT": ("hook_only", _INERT),
     "write.DENY_PLUGIN": ("hook_only", "a file write, not a command"),
     "write.NO_PATH_DENY": ("hook_only", _INERT),

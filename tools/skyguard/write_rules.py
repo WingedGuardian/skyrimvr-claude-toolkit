@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 
-from . import rules, targets
+from . import rules, self_rules, targets
 from .grep import grep
 from .verdict import Advice, Verdict
 
@@ -54,6 +54,30 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdic
     if grep(targets.PLUGIN_FILE, file_path):
         audit.rule(HOOK, "W-PLUGIN", "deny", DENY_PLUGIN)
         return Verdict("deny", DENY_PLUGIN)
+
+    # Plan 6 Task 12 (R12): the guards' state (deny) and their code and config (priced), decided on where the file
+    # RESOLVES -- before the silent whitelist below, which used to cover .claude/hooks and .claude/backups. With no
+    # roots (an old caller, an unreadable paths file on Codex) the path's own words decide (self_rules.text_kind).
+    env_ = os.environ if env is None else env
+    if roots is not None:
+        a = targets.resolve(file_path, cwd, "bash", env_)
+        # An unresolved path (relative, no cwd) fails closed for the STATE class only, as on the shell.
+        own = self_rules.kind_of(a, roots, env_) if a is not None else (
+            self_rules.STATE if self_rules.text_kind(file_path) == self_rules.STATE else "")
+    else:
+        own = self_rules.text_kind(file_path)
+    if own == self_rules.STATE:
+        reason = rules.message("W-SELF-STATE", file=file_path)
+        audit.rule(HOOK, "W-SELF-STATE", "deny", reason)
+        return Verdict("deny", reason)
+    if own == self_rules.GUARD and rules.RULES["W-SELF-GUARD"]["decision"] == "ask":
+        reason = rules.message("W-SELF-GUARD", file=file_path)
+        audit.rule(HOOK, "W-SELF-GUARD", "ask", reason)
+        return Verdict("ask", reason)
+    if own == self_rules.GUARD:
+        text = rules.message("W-SELF-GUARD", file=file_path)
+        audit.rule(HOOK, "W-SELF-GUARD", "advise", text)
+        return Verdict("allow", "", text)
 
     if grep(r"(^|(?<![/\\])[/\\]+)\.claude[/\\]+(hooks|plans|backups|memory|projects)[/\\]+", file_path):
         return Verdict()

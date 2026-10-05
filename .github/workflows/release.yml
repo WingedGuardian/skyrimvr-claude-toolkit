@@ -59,6 +59,8 @@ jobs:
           test -d "/tmp/$NAME/.claude/hooks" || { echo "::error::.claude/ missing from payload"; exit 1; }
           # setup.sh is the first thing every doc surface tells the user to run.
           test -f "/tmp/$NAME/setup.sh" || { echo "::error::setup.sh missing from the payload"; exit 1; }
+          # R12: the payload's guard files hash to what its own GUARD-FILES.sha256 says (the session-start banner's input).
+          python scripts/gen-guard-hashes.py --verify "/tmp/$NAME"
 
           # THE SHIPPED HOOKS MUST NOT BE INERT.
           #

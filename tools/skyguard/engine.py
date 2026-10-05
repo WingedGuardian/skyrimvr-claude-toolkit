@@ -149,6 +149,9 @@ _LINE_MAX = 190
 # may take) and then run `lock disable` with no ask -- a persistent off nobody approved -- or unlock a vanilla file
 # outside the CLI. These refusals stand under shadow mode, logged as `SHADOW <code> kept`.
 NEVER_SHADOW = frozenset(("shell.S-LIFT-PERMANENT", "shell.S-LIFT-RAW", "shell.S-LIFT-UNLOCKCMD"))
+# Plan 6 Task 12 (R12): nor does it open the state file. Shadowed, a `guards off` would let the agent then write
+# .skyguard/state.json directly -- a persistent disable or an extended lift that nobody approved.
+NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE", "write.W-SELF-STATE"))
 
 
 def _reject_marker(project) -> Path:

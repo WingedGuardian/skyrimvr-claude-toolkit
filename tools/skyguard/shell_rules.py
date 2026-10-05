@@ -17,6 +17,7 @@ from . import lift_rules
 from . import mcp_rules
 from . import paths
 from . import rules
+from . import self_rules
 from . import shellparse
 from . import writes
 from .verdict import Advice, Verdict
@@ -173,6 +174,10 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     raw = lift_rules.raw_unlock(command, parsed, roots, cwd, env, shell)
     if raw:
         return deny(raw[0], raw[1])
+    # Plan 6 Task 12 (R12): a write into .skyguard/** is the CLI's alone; the guard code and config are priced below.
+    own = self_rules.shell_scan(command, parsed, roots, cwd, env)
+    if own and own[0] == self_rules.STATE:
+        return deny("S-SELF-STATE", own[1])
     # Task 11: the DevBench console reached by curl or devbench-cli.sh (mcp_rules.py judges the same calls as the MCP hook).
     dev = mcp_rules.scan_shell(command, parsed, roots, env)
     if dev and dev[0] == "S-DEVBENCH-CRASH":
@@ -208,6 +213,13 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         reason = rules.message("S-LIFT-PERMANENT")
         audit.rule(HOOK, "S-LIFT-PERMANENT", "ask", reason)
         return Verdict("ask", reason)
+    # Plan 6 Task 12 (R12, priced): a write into the guard code or config. The registry holds the priced decision.
+    if own and rules.RULES["S-SELF-GUARD"]["decision"] == "ask":
+        reason = rules.message("S-SELF-GUARD", file=own[1])
+        audit.rule(HOOK, "S-SELF-GUARD", "ask", reason)
+        return Verdict("ask", reason)
+    if own:
+        advise("S-SELF-GUARD", file=own[1])
     # D6: `lock unlock` / `guards off` are lifts the agent may take; it is told what that means.
     lifted = lift_rules.note(parsed)
     if lifted:

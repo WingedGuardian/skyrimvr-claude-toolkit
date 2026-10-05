@@ -3886,3 +3886,87 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SR6, "    lifted = lift_rules.note(parsed)", '    lifted = ""', _p6row("note-guards-off-flag-first"),
      "rule-S-LIFT-NOTE-wired"),
 ]]
+
+
+# Plan 6 Task 12 (R12): self-protection, one twin per clause. Each names the ONE row or test that must go red.
+_SF = "tools/skyguard/self_rules.py"
+_SFT = "tests/test_skyguard_self_rules.py::"
+_WR6 = "tools/skyguard/write_rules.py"
+
+
+def _p12row(row):
+    return _SFT + "test_p6t12_row[p6t12-" + row + "]"
+
+
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # ---- the protected classes (install_kind / user_kind / holders)
+    (_SF, '    if rel[0] == ".skyguard":\n        return STATE', "    if False:\n        return STATE", _p12row("state-redirect"),
+     "rule-S-SELF-STATE-class"),
+    (_SF, '    if rel[0] == ".codex":\n        return GUARD', "    if False:\n        return GUARD",
+     _p12row("guard-codex-config"), "rule-S-SELF-GUARD-codex"),
+    (_SF, '([".claude", "hooks"], ["tools", "skyguard"], ["agent", "guards"])', '(["tools", "skyguard"], ["agent", "guards"])',
+     _p12row("guard-hook-redirect"), "rule-S-SELF-GUARD-hooks"),
+    (_SF, '([".claude", "hooks"], ["tools", "skyguard"], ["agent", "guards"])', '([".claude", "hooks"], ["agent", "guards"])',
+     _p12row("guard-engine-file"), "rule-S-SELF-GUARD-engine"),
+    (_SF, '([".claude", "hooks"], ["tools", "skyguard"], ["agent", "guards"])', '([".claude", "hooks"], ["tools", "skyguard"])',
+     _p12row("guard-agent-guards"), "rule-S-SELF-GUARD-agent-guards"),
+    (_SF, '(_settings(rel[1]) or rel[1] == "skyrim-paths.env")', '(rel[1] == "skyrim-paths.env")',
+     _p12row("guard-settings-sed"), "rule-S-SELF-GUARD-settings"),
+    (_SF, '(_settings(rel[1]) or rel[1] == "skyrim-paths.env")', "_settings(rel[1])", _p12row("guard-paths-env"),
+     "rule-S-SELF-GUARD-paths-env"),
+    (_SF, '    return fnmatch.fnmatchcase(name, "settings*.json")', '    return fnmatch.fnmatchcase(name, "settings*")',
+     _p12row("allow-settings-backup-copy"), "rule-S-SELF-GUARD-settings-json-only"),
+    (_SF, 'if rel[:3] == [".claude", "backups", ".hook-heartbeat"] or ', "if ", _p12row("guard-heartbeat"),
+     "rule-S-SELF-GUARD-heartbeat"),
+    (_SF, ' or rel == [".claude", "backups", "audit_log.txt"]', "", _p12row("guard-audit-log"), "rule-S-SELF-GUARD-audit-log"),
+    (_SF, '        return GUARD if (rel == [] or rel in _HOLDERS) else ""', '        return ""', _p12row("guard-mv-claude-folder"),
+     "rule-S-SELF-GUARD-holder-folder"),
+    # l2-self-userlevel: the `~` expansion dropped -- the home folder is no longer known.
+    (_SF, '    for n in ("HOME", "USERPROFILE"):', "    for n in ():",
+     _SFT + "test_a_user_level_hook_switch_is_a_guard_file[claude-settings]", "l2-self-userlevel"),
+    (_SF, '    if rel == [".codex", "config.toml"]:', "    if False:",
+     _SFT + "test_a_user_level_hook_switch_is_a_guard_file[codex-config]", "rule-S-SELF-GUARD-user-codex-config"),
+    (_SF, '    if len(rel) == 2 and rel[0] == ".claude" and _settings(rel[1]):', '    if rel[:1] == [".claude"]:',
+     _SFT + "test_the_rest_of_the_home_folder_is_not[claude-notes]", "rule-S-SELF-GUARD-user-settings-only"),
+    # ---- the shell routes
+    (_SF, "            out += [(s, True) for s in srcs]", "            pass", _p12row("state-mv-away"),
+     "rule-S-SELF-STATE-move-source"),
+    (_SF, '    if p == "rename-item":', "    if False:", _p12row("guard-hook-rename-item"), "rule-S-SELF-GUARD-rename-item"),
+    (_SF, '    elif p == "ln":', "    elif False:", _p12row("guard-hook-ln"), "rule-S-SELF-GUARD-ln"),
+    (_SF, '    elif p == "truncate":', "    elif False:", _p12row("guard-hook-truncate"), "rule-S-SELF-GUARD-truncate"),
+    (_SF, '    elif p in ("chmod", "chown", "chgrp"):', "    elif False:", _p12row("guard-hook-chmod"), "rule-S-SELF-GUARD-chmod"),
+    (_SF, "        if any(w.lower().startswith(_ICACLS_WRITE) for w in argv[1:]):", "        if True:",
+     _p12row("allow-hook-icacls-read"), "rule-S-SELF-GUARD-icacls-read-allowed"),
+    (_SF, '    elif p == "icacls" and argv', '    elif False and argv', _p12row("guard-hook-icacls-deny"),
+     "rule-S-SELF-GUARD-icacls"),
+    (_SF, "        out += [(w, True) for w in _git_restore(argv)]", "        pass", _p12row("guard-git-checkout-hooks"),
+     "rule-S-SELF-GUARD-git-checkout"),
+    (_SF, '    if sub == "restore":', "    if False:", _p12row("guard-git-restore-settings"), "rule-S-SELF-GUARD-git-restore"),
+    (_SF, '(STATE if text_kind(w) == STATE else "")', '""', _p12row("state-unresolved-var"),
+     "rule-S-SELF-STATE-unresolved-fails-closed"),
+    # ---- the wiring: shell, write, shadow, the patch Move
+    (_SR6, "    if own and own[0] == self_rules.STATE:", "    if False:", _p12row("state-redirect"), "rule-S-SELF-STATE-wired"),
+    (_SR6, '    if own:\n        advise("S-SELF-GUARD", file=own[1])', "    if False:\n        pass",
+     _p12row("guard-hook-redirect"), "rule-S-SELF-GUARD-wired"),
+    (_WR6, "    if own == self_rules.STATE:", "    if False:", _p12row("state-write-tool"), "rule-W-SELF-STATE-wired"),
+    (_WR6, '    if own == self_rules.GUARD:\n        text = rules.message("W-SELF-GUARD"', '    if False:\n        text = rules.message("W-SELF-GUARD"',
+     _p12row("guard-edit-hook"), "rule-W-SELF-GUARD-wired"),
+    (_WR6, "    else:\n        own = self_rules.text_kind(file_path)", '    else:\n        own = ""',
+     _SFT + "test_without_roots_the_path_words_decide", "rule-W-SELF-no-roots-text"),
+    (_SF, '    if ".skyguard" in comps[:-1] or (comps and comps[-1] == ".skyguard"):', "    if False:",
+     _SFT + "test_without_roots_the_path_words_decide", "rule-W-SELF-STATE-text-kind"),
+    (_EN, 'NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE", "write.W-SELF-STATE"))',
+     'NEVER_SHADOW = NEVER_SHADOW | frozenset(("write.W-SELF-STATE",))',
+     _SFT + "test_guards_off_does_not_open_the_state_file[shell]", "rule-S-SELF-STATE-never-shadowed"),
+    (_EN, 'NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE", "write.W-SELF-STATE"))',
+     'NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE",))',
+     _SFT + "test_guards_off_does_not_open_the_state_file[write]", "rule-W-SELF-STATE-never-shadowed"),
+    # l2-self-applypatch-move: the `*** Move to:` path dropped from the patch's path list.
+    ("tools/skyguard/patch_paths.py", '                out.append(("move_to", path))', "                pass",
+     _SFT + "test_apply_patch_move_to_into_the_state_is_denied", "l2-self-applypatch-move"),
+    # ---- GUARD-FILES.sha256: the drift gate bites, setup.sh's rewritten file stays out
+    ("tools/skyguard/verdict.py", "from __future__ import annotations", "from __future__ import annotations  # edited",
+     _SFT + "test_the_committed_manifest_is_current", "l2-self-manifest-drift"),
+    ("scripts/gen-guard-hashes.py", 'SETUP_WRITES = frozenset((".codex/hooks.json",))', "SETUP_WRITES = frozenset()",
+     _SFT + "test_the_manifest_names_exactly_the_tracked_guard_files", "l2-self-manifest-setup-writes"),
+]]

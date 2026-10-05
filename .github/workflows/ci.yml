@@ -96,6 +96,11 @@ jobs:
         with:
           python-version-file: .python-version
 
+      # R12 (Plan 6 Task 12): every session start hashes the guard files against GUARD-FILES.sha256 and banners the
+      # ones that differ. A guard file changed without regenerating the manifest would banner on every install.
+      - name: GUARD-FILES.sha256 is current
+        run: python scripts/gen-guard-hashes.py --check
+
       - name: settings JSON parses
         run: |
           fail=0
