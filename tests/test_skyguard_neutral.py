@@ -187,6 +187,26 @@ def test_a_harmless_devbench_call_and_another_mcp_server_are_allowed(tmp_path):
     assert not _unhooked_log(tmp_path).exists()
 
 
+@pytest.mark.parametrize("tool", ["mcp__other__thing", "mcp__filesystem__write_file", "not_three_parts",
+                                  "mcp__dev-bench__console", "mcp__devbench"])
+def test_an_mcp_call_the_rules_do_not_judge_is_labelled_unjudged_not_evaluated(tmp_path, tool):
+    """Final review M6: a call to a non-DevBench server came back status 'evaluated', so an adapter logging status
+    would record it as checked. It is allowed, as before, but labelled like kind other."""
+    text, v = neutral.handle(req(kind="mcp", paths=[], mcp_tool=tool, mcp_args='{"command": "smp reset"}'),
+                             str(tmp_path), _roots(tmp_path), Audit(str(tmp_path)))
+    assert (v.decision, v.status) == ("allow", "partial"), v
+    assert (v.code, v.context) == ("neutral.UNJUDGED_MCP", neutral.UNJUDGED_MCP)
+    assert neutral.UNJUDGED_MCP.startswith("NOT JUDGED")
+    assert json.loads(text.splitlines()[-1])["status"] == "partial"
+
+
+def test_a_devbench_call_is_still_evaluated(tmp_path):
+    _, v = neutral.handle(req(kind="mcp", paths=[], mcp_tool="mcp__devbench-vr__console",
+                              mcp_args=json.dumps({"action": "exec", "command": "help"})),
+                          str(tmp_path), _roots(tmp_path), Audit(str(tmp_path)))
+    assert (v.decision, v.status) == ("allow", "evaluated"), v
+
+
 def test_an_mcp_request_without_a_tool_name_is_a_failed_deny(tmp_path):
     _, v = neutral.handle(req(kind="mcp", paths=[]), str(tmp_path), _roots(tmp_path), Audit(str(tmp_path)))
     assert (v.decision, v.status) == ("deny", "failed"), v
