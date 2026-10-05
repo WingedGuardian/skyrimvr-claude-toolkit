@@ -125,7 +125,9 @@ def text_kind(path: str) -> str:
     if ".skyguard" in comps[:-1] or (comps and comps[-1] == ".skyguard"):
         return STATE
     for i in range(len(comps)):
-        k = install_kind(comps[i:])
+        # At most 4 components: install_kind never looks further, and a length of 4 still fails its `== 2` / `== 3`
+        # tests as the full tail would. The full tail made this quadratic (test_skyguard_timing, fix round 1).
+        k = install_kind(comps[i:i + 4])
         if k == GUARD:
             return k
     return ""

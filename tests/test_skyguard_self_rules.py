@@ -138,6 +138,53 @@ def test_guards_off_does_not_open_the_state_file(tmp_path, route):
     assert "kept" in (project / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8")
 
 
+def test_guards_off_does_not_let_the_lock_manifest_be_deleted(tmp_path):
+    """Fix round 1, I1: `rm .skyguard/lock.json` under an honoured guards lift stays denied (with no manifest the next
+    session start never relocks). The control beside it: an ordinary install delete IS shadowed."""
+    project, hb = _shadow_env(tmp_path)
+    (decision, reason), fired = shell("rm .skyguard/lock.json")
+    assert decision == "deny" and fired == {"S-SELF-STATE"}
+    v = engine.shadow(codes.classify(Verdict(decision, reason)), str(project), SID, str(hb), audit.Audit(str(project)),
+                      now=NOW)
+    assert (v.decision, v.reason) == (decision, reason)
+    (decision, reason), fired = shell("rm Data/meshes/x.nif")
+    assert decision == "deny" and fired == {"S-DEL-INSTALL"}
+    v = engine.shadow(codes.classify(Verdict(decision, reason)), str(project), SID, str(hb), audit.Audit(str(project)),
+                      now=NOW)
+    assert v.decision == "allow" and v.context.startswith("Guards OFF")
+
+
+def test_a_delete_of_the_whole_install_stays_s_del_install():
+    """I1 is about the state, not the install: deleting the whole install (which holds .skyguard) keeps its own rule."""
+    (decision, _), fired = shell("rm -rf \"" + GAME + "\"")
+    assert decision == "deny" and fired == {"S-DEL-INSTALL"}
+
+
+@pytest.mark.parametrize("route", ["shell", "write"])
+def test_the_ask_branch_works_if_a_later_pricing_flips_the_guard_rule_back(monkeypatch, route):
+    """Review M3: the registry holds the priced decision; the `ask` branch must work, not merely exist."""
+    rid = "S-SELF-GUARD" if route == "shell" else "W-SELF-GUARD"
+    monkeypatch.setitem(rules.RULES[rid], "decision", "ask")
+    if route == "shell":
+        (decision, text), fired = shell("echo x > \"" + GAME + "/.claude/hooks/protect-bash.sh\"")
+    else:
+        (decision, text), fired = write(GAME + "/.claude/hooks/protect-bash.sh")
+    assert decision == "ask" and fired == {rid}
+    assert text == rules.message(rid, file="protect-bash.sh")
+
+
+def test_every_hashed_guard_file_has_a_pinned_line_ending():
+    """Review M2: the manifest's hashes are LF/CRLF-stable only because .gitattributes pins every guard file's eol. A new
+    guard file type with no eol rule would hash differently on Windows and Linux."""
+    import subprocess
+    names = _gen().guard_files()
+    out = subprocess.run(["git", "-C", str(REPO), "check-attr", "eol", "--"] + names, capture_output=True, text=True,
+                         check=True).stdout
+    unpinned = [ln.split(":", 1)[0] for ln in out.splitlines() if ln.endswith(": unspecified")]
+    assert unpinned == [], unpinned
+    assert len(out.splitlines()) == len(names)
+
+
 # ---- Codex apply_patch: Add / Update / Delete / Move, both ends of a Move -----------------------------------------
 
 def _codex(body):
@@ -325,6 +372,7 @@ def test_a_configured_install_banners_nothing_and_a_real_edit_is_named(tmp_path)
     assert "{{PYTHON_PATH}}" not in entry and "{{BASH_PATH}}" not in entry
     release, differ, missing, unchecked = session._guard_drift(str(game))
     assert (differ, missing, unchecked) == ([], 0, []), (differ, missing, unchecked)
+    assert _gen().verify(game) == []                          # --verify reads a configured install the same way
     with open(str(game / "tools" / "skyguard" / "verdict.py"), "a", encoding="utf-8") as fh:
         fh.write("\n# an edit\n")
     assert session._guard_drift(str(game))[1] == ["verdict.py"]

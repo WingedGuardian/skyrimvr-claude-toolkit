@@ -90,7 +90,12 @@ in the same transcript, found by matching the exact tool input):
 <= 25 % user-requested maintenance AND <= 50 newly asked. Measured: 24 newly asked (passes the count) but **24 of 24 =
 100 %** user-requested maintenance (fails the share), so advise. Cost if wrong: an agent that edits a hook on its own
 gets a note, not a prompt; the session-start `GUARD-FILES.sha256` banner (shipped either way) names the changed file
-in the next session. The ask text stays recorded beside the registry entry.
+in the next session. (Corrected in Task 12 fix round 1: as first shipped, the manifest held the hashes of the files with
+setup.sh's placeholders still in them, so every configured install bannered 8 files every session and an edit hid
+among them. The hash is now taken on the repo form -- the interpreter slot lines setup.sh writes are put back to their
+tokens, exact line shape only, and the interpreter values compared across the files -- so a configured install is
+silent and only a real edit is named, MEASURED with the real setup.sh on a scratch install. Residue: one identical
+edit to all eight interpreter lines is not seen by the banner; the per-call note still is.) The ask text stays recorded beside the registry entry.
 
 **Part B as shipped (advise).** Run on the committed engine (`b721468`; the history grew between runs): N = 70,752 (matrix: allow>allow 70,177; advise>advise 214; allow>advise 24; deny>deny 323; ask>ask 13; allow>deny 1): newly-deny 1 (the scratch item above), newly-advise 24 (the same 24 items,
 checked identical as a set), newly-ask 0, no-longer-* 0, errors 0, parse failures 64 / 64.

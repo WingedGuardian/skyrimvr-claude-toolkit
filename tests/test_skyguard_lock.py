@@ -61,6 +61,19 @@ def _icacls(p):
     return r.stdout
 
 
+def _acl(p):
+    """icacls output that is known to be REAL (review M4): a failed or empty icacls run would make `"DENY" not in ...`
+    pass vacuously, so it fails the test instead, carrying what icacls printed."""
+    r = subprocess.run([str(SYS32 / "icacls.exe"), str(p)], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.strip(), (p, r.returncode, r.stdout, r.stderr)
+    return r.stdout
+
+
+def _attrib(flag, p):
+    r = subprocess.run([str(SYS32 / "attrib.exe"), flag, str(p)], capture_output=True, text=True)
+    assert r.returncode == 0, (flag, p, r.returncode, r.stdout, r.stderr)
+
+
 def _ro(p):
     return bool(os.stat(str(p)).st_file_attributes & 1)
 
@@ -391,23 +404,25 @@ def test_unsupported_platform_exits_3_and_changes_nothing(bed, monkeypatch, whic
 
 def _scenario_preexisting_ro(lock, bed, lose_manifest):
     pre = bed.path("Skyrim - Interface.bsa")
-    subprocess.run([str(SYS32 / "attrib.exe"), "+R", str(pre)], capture_output=True)
+    _attrib("+R", pre)
     assert _ro(pre)
-    assert lock.lock_all(str(bed.root)).exit == 0
+    res = lock.lock_all(str(bed.root))
+    assert res.exit == 0, res.lines
     if not lose_manifest:
         manifest = json.loads((bed.root / ".skyguard" / "lock.json").read_text(encoding="utf-8"))
         assert manifest["files"]["Skyrim - Interface.bsa"]["preexisting_ro"] is True
         assert manifest["files"]["Skyrim.esm"]["preexisting_ro"] is False
-    assert _ro(pre) and "DENY" in _icacls(pre)
+    assert _ro(pre) and "DENY" in _acl(pre)
     if lose_manifest:
         (bed.root / ".skyguard" / "lock.json").unlink()
-    assert lock.unlock(str(bed.root), None, SESSION).exit == 0
+    res = lock.unlock(str(bed.root), None, SESSION)
+    assert res.exit == 0, res.lines
     assert _ro(pre), "unlock cleared a read-only bit the user set (R5)"
-    assert "DENY" not in _icacls(pre)
+    assert "DENY" not in _acl(pre)
     for n in VR_FILES:
         if n != "Skyrim - Interface.bsa":
-            assert not _ro(bed.path(n)) and "DENY" not in _icacls(bed.path(n)), n
-    subprocess.run([str(SYS32 / "attrib.exe"), "-R", str(pre)], capture_output=True)
+            assert not _ro(bed.path(n)) and "DENY" not in _acl(bed.path(n)), n
+    _attrib("-R", pre)
 
 
 @needs_windows
