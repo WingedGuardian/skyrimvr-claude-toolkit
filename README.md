@@ -422,6 +422,20 @@ These aren't things you configure -- they're already wired in. Every session, be
 | **Investigation-first** | Claude checks the knowledgebase and web-searches before touching anything. |
 | **Validate-before-test** | Authored NIFs are cross-checked with an independent parser and a headless render before they're handed off for in-game testing -- crashes get caught in tooling, not your headset. |
 
+### Optional: lock the vanilla files (Layer 2, off by default, Windows)
+
+`bash tools/skyguard.sh lock lock` makes the vanilla masters and archives (an explicit list, never a pattern)
+read-only **and** denies this user write access to them, so a stray overwrite or `-Force` fails with
+"access denied". Nothing is locked unless you run it. `lock status` shows what is locked, `lock unlock <file>`
+lifts one file for the current session, `lock disable` turns it off persistently.
+
+- **Unlock without Python:** double-click `tools/skyguard-unlock.cmd`. Last resort, by hand, for one file `F`:
+  `icacls "F" /remove:d *<your SID>` and then `attrib -R "F"` (in that order).
+- **Access denied on a vanilla master or archive** means this lock; unlock that file and retry.
+- **Known limits:** an xEdit save is not stopped (it renames the locked master into `zEdit Backups/`, bytes
+  intact); Codex's `workspace-write` sandbox cannot lift the lock, so run the `.cmd` yourself; a mod manager's
+  hardlinked copy is never locked and is reported; Linux/Proton is unsupported (exit 3).
+
 ---
 
 ## Using with Codex
