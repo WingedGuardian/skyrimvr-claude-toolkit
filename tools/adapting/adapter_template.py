@@ -10,6 +10,7 @@ If anything at all goes wrong it renders the same hard block, because an agent t
 as "allow" would otherwise run the command (that is how Codex behaves: spec E1, E17).
 Python >= 3.8, standard library only.
 """
+import io
 import json
 import os
 import re
@@ -141,6 +142,8 @@ def _emit(out, code, err):
 
 
 def main():
+    real_stdout = sys.stdout
+    sys.stdout = io.StringIO()      # a slot's print() must never reach the agent: only _emit writes stdout
     root = _root()
     inv = "1.{}-{}".format(os.getpid(), int(time.time() * 1000) % 100000)
     try:
@@ -159,6 +162,7 @@ def main():
     except BaseException as e:
         out, code, err = _block_for_failure(e.__class__.__name__ + " " + str(e))
         _hb(root, "failed", inv, e.__class__.__name__)
+    sys.stdout = real_stdout
     _emit(out, code, err)
 
 
