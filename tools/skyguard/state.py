@@ -213,9 +213,10 @@ def honoured(state: State, session_id, now: float, session_start) -> list:
 
 
 def session_start(dirpath, session_id):
-    """Epoch seconds of the LAST `start` line Plan 4's `health.session_record` wrote for this session, or None.
-    One is appended per resume, so a lift made before a resume is older than the start and not honoured after
-    it (stricter than the first start, and right even if an agent reuses ids). `dirpath` is the agent's
+    """Epoch seconds of the LATEST `start` time among the `start` lines Plan 4's `health.session_record` wrote for this
+    session (the MAX, not the last line: an appended early-dated forged line cannot move it back), or None. One is
+    appended per resume, so a lift made before a resume is older than the start and not honoured after it.
+    Any garbled or non-finite start line gives None. `dirpath` is the agent's
     heartbeat directory (the one `session_record` was given)."""
     from . import health
     if not isinstance(session_id, str) or not health._SESSION_ID.match(session_id):
@@ -224,15 +225,17 @@ def session_start(dirpath, session_id):
         text = (Path(dirpath) / "sessions" / (session_id + ".log")).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    last = None
+    best = None
     for line in text.splitlines():
         f = line.split(None, 3)
-        if len(f) >= 3 and f[1] == "start":
-            last = f[0]
-    if last is None:
-        return None
-    try:
-        t = float(last)
-    except ValueError:
-        return None
-    return t if math.isfinite(t) else None
+        if len(f) < 3 or f[1] != "start":
+            continue
+        try:
+            t = float(f[0])
+        except ValueError:
+            return None            # a garbled start line: the session start cannot be shown
+        if not math.isfinite(t):
+            return None
+        if best is None or t > best:
+            best = t
+    return best

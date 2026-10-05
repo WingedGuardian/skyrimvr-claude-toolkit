@@ -561,3 +561,125 @@ def test_guards_off_then_a_call_through_run_py_with_the_same_project_is_converte
     assert _through_run(root, "another-session").get("permissionDecision") == "deny"   # session-bound end to end
     _cli(tmp_path, "on")
     assert _through_run(root, SID).get("permissionDecision") == "deny"
+
+
+# ---- review fix round (Task 9) ----------------------------------------------------------------------------------
+
+def test_a_refusal_is_not_converted_when_its_shadow_line_cannot_be_written(tmp_path):
+    """l2-shadow-line-must-land: Audit.raw swallows OSError, so a converted verdict could be silent."""
+    project, _hb = _env(tmp_path, [_lift()])
+    (project / ".claude" / "backups" / "AUDIT_LOG.txt").mkdir(parents=True)        # appending to it raises
+    v = _shadow(tmp_path, _deny())
+    assert v.decision == "deny"
+    ok = _shadow(tmp_path, Verdict())                      # an allow stays an allow either way
+    assert ok.decision == "allow"
+
+
+def _two_starts(tmp_path, first, second):
+    f = tmp_path / "hb" / "sessions" / (SID + ".log")
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("{:.6f} start startup t\n{:.6f} start resume t\n".format(first, second), encoding="utf-8")
+    return f
+
+
+def test_a_forged_early_start_line_cannot_revive_a_pre_resume_lift(tmp_path):
+    """l2-state-start-max: the session start is the MAX of its start lines, not whichever is appended last."""
+    f = _two_starts(tmp_path, NOW - 5 * H, NOW - H)                  # the lift below (NOW - 2h) predates the resume
+    with open(f, "a", encoding="utf-8") as fh:
+        fh.write("0.000001 start resume forged\n")
+    assert state.session_start(str(tmp_path / "hb"), SID) == NOW - H
+    project, _hb = _env(tmp_path, [_lift(created=NOW - 2 * H)], start=None)
+    assert _shadow(tmp_path, _deny()).decision == "deny"
+
+
+# one SHADOW line per tool call: only the decision roles log
+
+def _run_role(project, role, payload):
+    import faulthandler
+    import io
+    from skyguard import run
+    hb = _hb(project)
+    argv = ["claude", role, "--root", project.as_posix(), "--root-win", project.as_posix() if os.name == "nt" else "",
+            "--project", str(project), "--telemetry", str(hb)]
+    saved = (sys.stdin, sys.stdout)
+
+    class _Std:
+        def __init__(self, buf):
+            self.buffer = buf
+
+    out = io.BytesIO()
+    sys.stdin, sys.stdout = _Std(io.BytesIO(json.dumps(payload).encode("utf-8"))), _Std(out)
+    try:
+        assert run.main(argv) == 0
+    finally:
+        faulthandler.cancel_dump_traceback_later()
+        sys.stdin, sys.stdout = saved
+
+
+def _shadow_lines(project):
+    p = project / ".claude" / "backups" / "AUDIT_LOG.txt"
+    return [x for x in p.read_text(encoding="utf-8").splitlines() if "SHADOW" in x] if p.exists() else []
+
+
+def test_a_tool_call_logs_one_shadow_line_not_one_per_hook(tmp_path):
+    """l2-shadow-decision-roles-only: backup-before-edit / snapshot-before-tool pass no verdict worth logging."""
+    project = tmp_path / "root"
+    project.mkdir()
+    _start(project)
+    code, text, _sf = _cli(tmp_path, "off")
+    assert code == 0, text
+    (project / "notes").mkdir()
+    (project / "notes" / "a.txt").write_text("x")
+    edit = {"tool_name": "Edit", "session_id": SID, "tool_input": {"file_path": str(project / "notes" / "a.txt")}}
+    for role in ("protect-files", "backup-before-edit"):
+        _run_role(project, role, edit)
+    assert len(_shadow_lines(project)) == 1, _shadow_lines(project)
+    bash = {"tool_name": "Bash", "session_id": SID, "tool_input": {"command": "echo hi"}}
+    for role in ("protect-bash", "snapshot-before-tool"):
+        _run_role(project, role, bash)
+    assert len(_shadow_lines(project)) == 2
+
+
+# STATE-REJECTED is logged when the reason changes, not on every hook call
+
+def _break(project, how):
+    sf = project / ".skyguard" / "state.json"
+    if how == "sum":
+        sf.write_text(sf.read_text().replace('"reason": "test"', '"reason": "hand edited"'), encoding="utf-8")
+    else:
+        sf.write_text("garbage", encoding="utf-8")
+
+
+def _rejects(tmp_path):
+    return [x for x in _log(tmp_path).splitlines() if "STATE-REJECTED" in x]
+
+
+def test_a_state_rejection_is_logged_once_per_reason_not_once_per_call(tmp_path):
+    """l2-shadow-reject-once"""
+    project, _hb = _env(tmp_path, [_lift()])
+    _break(project, "sum")
+    for _ in range(3):
+        _shadow(tmp_path, Verdict())
+    assert len(_rejects(tmp_path)) == 1
+    _break(project, "garbage")                                    # a different reason is news
+    _shadow(tmp_path, Verdict())
+    _shadow(tmp_path, Verdict())
+    assert len(_rejects(tmp_path)) == 2
+    _env(tmp_path, [_lift()])                                      # repaired ...
+    _shadow(tmp_path, Verdict())
+    _break(project, "garbage")                                    # ... and broken again: logged again
+    _shadow(tmp_path, Verdict())
+    assert len(_rejects(tmp_path)) == 3
+
+
+def test_guards_on_over_an_unverifiable_state_says_so_in_two_lines(tmp_path):
+    root = tmp_path / "root"
+    _cli(tmp_path, "off")
+    _break(root, "garbage")
+    code, text, sf = _cli(tmp_path, "on")
+    lines = text.strip().splitlines()
+    assert code == 0 and 1 <= len(lines) <= 2 and "verif" in text.lower() and "unparseable" in text, text
+    st = state.read(str(sf))
+    assert not st.rejected and st.lifts == []
+    code, text, _ = _cli(tmp_path, "on")                           # a clean state: the ordinary one-liner
+    assert "verif" not in text.lower()

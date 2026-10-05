@@ -79,8 +79,14 @@ def guards_main(argv, out) -> int:
                     0, int((ends - now) // 60)), file=out)
             return 0
         if a.action == "on":
+            st0 = state.read(os.path.join(root, ".skyguard", "state.json"))
             _guards_write(root, lambda x: x["kind"] != "guards", now=now)
-            print("Guards ON: every shadow-mode lift is cleared.", file=out)
+            if st0.rejected:
+                print(_clip("The state file could not be verified (%s); it was replaced by a fresh one." % st0.reason),
+                      file=out)
+                print("Guards are ON. Any lift it held is gone, including a lock lift.", file=out)
+            else:
+                print("Guards ON: every shadow-mode lift is cleared.", file=out)
             return 0
         if not lock._valid_session(session):
             print("No session id: pass --session <id> (or set SKYGUARD_SESSION_ID) so the lift is bound to it.", file=out)

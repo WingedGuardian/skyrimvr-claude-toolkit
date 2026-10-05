@@ -26,6 +26,13 @@ class Audit:
         except OSError:
             pass                                          # bash: >> "$AUDIT_LOG" 2>/dev/null
 
+    def log_strict(self, hook: str, level: str, msg: str) -> None:
+        """Like log(), but an append that fails RAISES (OSError). For a line a decision depends on: shadow mode
+        converts a refusal only after its SHADOW line is on disk."""
+        self.backups.mkdir(parents=True, exist_ok=True)
+        with open(self.path, "ab") as fh:
+            fh.write("[{}] {} {}: {}\n".format(self.stamp(), hook, level, msg).encode("utf-8"))
+
     def log(self, hook: str, level: str, msg: str) -> None:
         self.raw("[{}] {} {}: {}\n".format(self.stamp(), hook, level, msg))
 

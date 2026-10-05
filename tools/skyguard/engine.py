@@ -147,6 +147,34 @@ SHADOW_HEAD = "Guards OFF: this would have been denied ({})."
 _LINE_MAX = 190
 
 
+def _reject_marker(project) -> Path:
+    return Path(project) / ".claude" / "backups" / ".last-state-reject"
+
+
+def _state_reject_is_new(project, reason) -> bool:
+    """STATE-REJECTED is logged when the reason CHANGES, not on every hook call: the last reason is persisted."""
+    try:
+        marker = _reject_marker(project)
+        try:
+            if marker.read_text(encoding="utf-8") == reason:
+                return False
+        except OSError:
+            pass
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(reason, encoding="utf-8")
+    except OSError:
+        pass          # cannot persist: log every time rather than never
+    return True
+
+
+def _state_reject_clear(project) -> None:
+    """A readable state ends the episode, so the same fault later is news again."""
+    try:
+        _reject_marker(project).unlink()
+    except OSError:
+        pass
+
+
 def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
     """R8, shadow mode: the ONE place a refusal can be turned into an allow. Called on the finished verdict
     (after combine, after the side effects) by every agent's decision path.
@@ -158,7 +186,8 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
       * a refusal no rule claims (code "unknown");
       * anything when the state is unreadable or forged (the reader returns guards-on and a reason, logged here);
       * anything when this function itself fails (the original refusal stands).
-    Every conversion writes `SHADOW <rule>` to the audit log, and while a guards lift is honoured EVERY call writes
+    Every conversion writes `SHADOW <rule>` to the audit log FIRST (a raising append: if the line cannot be written the
+    refusal stands), and while a guards lift is honoured EVERY call writes
     one (`SHADOW allow`, `SHADOW <rule> kept`), so an honoured lift can never be silent. The lock and Codex `.rules` are outside the engine."""
     try:
         refusal = v.decision in ("deny", "ask")
@@ -166,8 +195,10 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
             v = codes.classify(v)
         st = _state.read(str(Path(project) / ".skyguard" / "state.json"))
         if st.rejected:
-            audit.log("skyguard", "STATE-REJECTED", st.reason)
+            if _state_reject_is_new(project, st.reason):
+                audit.log("skyguard", "STATE-REJECTED", st.reason)
             return v
+        _state_reject_clear(project)
         if not st.lifts:
             return v
         start = _state.session_start(telemetry, session_id) if telemetry else None
@@ -176,14 +207,14 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
             return v
         # From here a guards lift is honoured: EVERY call writes a SHADOW line (spec; closes Table M's silence row).
         if not refusal:
-            audit.log("skyguard", "SHADOW", "allow")
+            audit.log_strict("skyguard", "SHADOW", "allow")
             return v
         if v.status == "failed" or codes._inert(v.code) or v.code == "unknown":
-            audit.log("skyguard", "SHADOW", "{} kept ({})".format(v.code, v.decision))
+            audit.log_strict("skyguard", "SHADOW", "{} kept ({})".format(v.code, v.decision))
             return v
         first = (v.reason.split("\n", 1)[0] if v.reason else "")[:_LINE_MAX]
         context = SHADOW_HEAD.format(v.code) + ("\n" + first if first else "")
-        audit.log("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))
+        audit.log_strict("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))   # raises -> the refusal stands
         return Verdict("allow", "", context, v.status, v.code)
     except Exception:  # noqa: BLE001 -- shadow mode must never be able to break or loosen a decision by failing
         return v
