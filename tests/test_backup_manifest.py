@@ -229,3 +229,93 @@ def test_the_codex_patch_backup_records_its_agent_and_session(tmp_path):
                     audit_mod.Audit(str(tmp_path)))
     (m,) = manifest(tmp_path)
     assert (m["agent"], m["session_id"]) == ("codex", "cx-7")
+
+
+# ---------------------------------------------------------------- Step 3: restore
+
+def restore(project, *args):
+    env = dict(os.environ, GAME_DIR=str(project), SKYGUARD_PYTHON=sys.executable)
+    return subprocess.run([BASH, str(RESTORE), *args], capture_output=True, text=True, env=env, timeout=120)
+
+
+@pytest.fixture
+def bsa(tmp_path):
+    d = tmp_path / "Data"
+    d.mkdir()
+    f = d / "Skyrim_VR - Main.bsa"
+    f.write_bytes(b"original")
+    take(tmp_path, f)
+    return f
+
+
+def test_restore_lists_the_recorded_path_verbatim(tmp_path, bsa):
+    r = restore(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert str(bsa) in r.stdout, r.stdout
+    assert "(legacy: path guessed)" not in r.stdout
+
+
+def test_restore_puts_the_file_back_at_the_recorded_path(tmp_path, bsa):
+    bsa.write_bytes(b"broken by an edit")
+    (m,) = manifest(tmp_path)
+    r = restore(tmp_path, "--restore", m["dest"])
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert bsa.read_bytes() == b"original"
+    # the version it replaced was itself backed up first
+    assert b"broken by an edit" in backup_files(tmp_path).values()
+
+
+def test_restore_refuses_a_backup_whose_sha256_does_not_match(tmp_path, bsa):
+    bsa.write_bytes(b"current")
+    (m,) = manifest(tmp_path)
+    (bdir(tmp_path) / m["dest"]).write_bytes(b"tampered")
+    before = backup_files(tmp_path)
+    r = restore(tmp_path, "--restore", m["dest"])
+    assert r.returncode == 1 and r.stdout.startswith("REFUSED: ") and "sha256" in r.stdout, r.stdout + r.stderr
+    assert bsa.read_bytes() == b"current"
+    assert backup_files(tmp_path) == before, "refused before anything was touched"
+
+
+def test_a_backup_that_changes_after_its_check_is_not_restored(tmp_path, bsa, monkeypatch, capsys):
+    """The copy is hashed again on the way out: a file swapped between the check and the copy is caught."""
+    bsa.write_bytes(b"current")
+    (m,) = manifest(tmp_path)
+    (bdir(tmp_path) / m["dest"]).write_bytes(b"tampered")
+    monkeypatch.setattr(backup, "_sha256", lambda p: m["sha256"])        # the check saw the recorded bytes
+    assert backup.restore_main([str(bdir(tmp_path)), "--restore", m["dest"]]) == 1
+    assert bsa.read_bytes() == b"current"
+    assert "FAILED" in capsys.readouterr().out
+    assert not [p for p in bsa.parent.iterdir() if ".restore-part-" in p.name]
+
+
+def test_a_pre_manifest_backup_is_listed_as_a_guess(tmp_path):
+    bdir(tmp_path).mkdir(parents=True)
+    (bdir(tmp_path) / "20250101_000000__C__Games_My_Mod.esp").write_bytes(b"old")
+    r = restore(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert re.search(r"C//Games/My/Mod\.esp .*\(legacy: path guessed\)", r.stdout), r.stdout
+
+
+def test_a_legacy_restore_needs_an_explicit_target(tmp_path):
+    bdir(tmp_path).mkdir(parents=True)
+    (bdir(tmp_path) / "20250101_000000__x.txt").write_bytes(b"old")
+    r = restore(tmp_path, "--restore", "20250101_000000__x.txt")
+    assert r.returncode == 2 and "--to" in r.stdout, r.stdout + r.stderr
+    out = tmp_path / "back.txt"
+    r = restore(tmp_path, "--restore", "20250101_000000__x.txt", "--to", str(out))
+    assert r.returncode == 0 and out.read_bytes() == b"old", r.stdout + r.stderr
+
+
+def test_an_unreadable_manifest_line_is_skipped_and_counted(tmp_path, bsa):
+    with open(str(bdir(tmp_path) / "MANIFEST.jsonl"), "ab") as fh:
+        fh.write(b'{"v":1, "src": "torn\n')
+    r = restore(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert str(bsa) in r.stdout and "1 unreadable manifest line(s) skipped" in r.stdout, r.stdout
+
+
+def test_a_recorded_backup_whose_file_is_gone_is_marked_missing(tmp_path, bsa):
+    (m,) = manifest(tmp_path)
+    os.unlink(str(bdir(tmp_path) / m["dest"]))
+    r = restore(tmp_path)
+    assert re.search(re.escape(str(bsa)) + r".*\(missing\)", r.stdout), r.stdout

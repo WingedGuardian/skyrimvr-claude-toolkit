@@ -4072,4 +4072,26 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _BKT + "test_the_claude_hook_records_its_agent_and_session", "l2-backup-claude-session"),
     ("tools/skyguard/engine.py", "False, audit, req.agent, req.session_id)", "False, audit)",
      _BKT + "test_the_codex_patch_backup_records_its_agent_and_session", "l2-backup-codex-session"),
+    # ---- restore (step 3)
+    # the listing guesses the path from the flattened name although the manifest recorded it (the L8 bug)
+    (_BK, '        rows.append((e["ts"], dest, e["src"],', '        rows.append((e["ts"], dest, legacy_guess(dest),',
+     _BKT + "test_restore_lists_the_recorded_path_verbatim", "l2-restore-manifest-path"),
+    # ... and so does the restore itself
+    (_BK, '    target = Path(_native(to or e["src"]))', "    target = Path(_native(to or legacy_guess(name)))",
+     _BKT + "test_restore_puts_the_file_back_at_the_recorded_path", "l2-restore-manifest-target"),
+    (_BK, '        if got != e["sha256"]:', "        if False:",
+     _BKT + "test_restore_refuses_a_backup_whose_sha256_does_not_match", "l2-restore-sha-check"),
+    (_BK, '        if e is not None and digest != e["sha256"]:', "        if False:",
+     _BKT + "test_a_backup_that_changes_after_its_check_is_not_restored", "l2-restore-sha-recheck"),
+    (_BK, '            note += "  (legacy: path guessed)"', "            pass",
+     _BKT + "test_a_pre_manifest_backup_is_listed_as_a_guess", "l2-restore-legacy-label"),
+    # a pre-manifest backup is restored to its guessed path instead of asking for --to
+    (_BK, "    if e is None and not to:\n", "    if e is None and not to:\n        to = legacy_guess(name)\n    if False:\n",
+     _BKT + "test_a_legacy_restore_needs_an_explicit_target", "l2-restore-legacy-needs-to"),
+    (_BK, "            bad += 1\n", "            pass\n",
+     _BKT + "test_an_unreadable_manifest_line_is_skipped_and_counted", "l2-restore-bad-line-counted"),
+    (_BK, "    if target.is_file() and take(", "    if False and take(",
+     _BKT + "test_restore_puts_the_file_back_at_the_recorded_path", "l2-restore-backs-up-current"),
+    (_BK, '"(missing)" if size is None', '"" if size is None',
+     _BKT + "test_a_recorded_backup_whose_file_is_gone_is_marked_missing", "l2-restore-missing-marked"),
 ]]
