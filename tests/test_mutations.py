@@ -4066,3 +4066,18 @@ MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep
      "                    k += 1                                      # M2: `-n10` carries its value\n",
      _P5S + "test_m2_nice_value_spellings"),
 ]]
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # coordinator ruling: cmd's /c quote rule, and nested quotes split by the caller fail closed
+    ("cmdq-split-nested-quotes-opaque", "                if len(rest) > 1 and line.lstrip().startswith('\"'):",
+     "                if False:", _p5a("cmdq-s-nested-quotes")),
+    ("cmdq-readings-reparsed", "                for text in _cmd_c_lines(line, s_flag):", "                for text in [line]:",
+     _p5a("cmdq-s-quoted-line")),
+    ("cmdq-s-switch-detected", '            if head == "/s":', "            if False:",
+     _P5S + "test_cmd_c_s_switch_always_strips"),
+    ("cmdq-s-switch-strips", "    if s_flag:\n        return [stripped]\n", "", _P5S + "test_cmd_c_quote_rule"),
+    ("cmdq-ambiguous-both-readings", "        return [stripped, s]", "        return [stripped]",
+     _P5S + "test_cmd_c_quote_rule"),
+    ("cmdq-two-quotes-only", "    if s.count('\"') == 2 and inner and", "    if inner and", _P5S + "test_cmd_c_quote_rule"),
+    ("cmdq-special-char-strips", " and not (set(inner) & _CMD_QUOTE_SPECIAL) and", " and", _P5S + "test_cmd_c_quote_rule"),
+    ("cmdq-no-whitespace-strips", 'and re.search(r"\\s", inner):', "and True:", _P5S + "test_cmd_c_quote_rule"),
+]]

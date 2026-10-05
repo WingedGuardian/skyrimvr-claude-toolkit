@@ -1719,6 +1719,27 @@ def _join_words(words, dialect: str) -> str:
     return " ".join(out)
 
 
+_CMD_QUOTE_SPECIAL = frozenset("&<>()@^|")
+
+
+def _cmd_c_lines(line: str, s_flag: bool) -> List[str]:
+    """The command line(s) `cmd /c LINE` runs, after cmd's own quote rule (`cmd /?`): with /S, or unless the line
+    holds exactly two quotes with no special character and some whitespace between them, the FIRST and the LAST quote
+    are removed. When those conditions hold cmd keeps the quotes only if the quoted text names an executable file,
+    which the parser cannot know: both readings."""
+    s = line.lstrip()
+    if not s.startswith('"'):
+        return [line]
+    last = s.rfind('"')
+    stripped = s[1:last] + s[last + 1:] if last > 0 else s[1:]
+    if s_flag:
+        return [stripped]
+    inner = s[1:last] if last > 0 else ""
+    if s.count('"') == 2 and inner and not (set(inner) & _CMD_QUOTE_SPECIAL) and re.search(r"\s", inner):
+        return [stripped, s]
+    return [stripped]
+
+
 def _cmd_c_follows(v, j) -> bool:
     """Whether v[j:] is cmd's switch list ending in /c or /k (`/s /q /d /e:on /v:off ... /c`)."""
     while j < len(v) and _CMD_PRE_SWITCH.match(v[j]):
@@ -2402,14 +2423,27 @@ class _Resolver:
     def _cmd_shell(self, k):
         v, n = self.v, len(self.v)
         j = k + 1
+        s_flag = False
         while j < n:
             lw = v[j].lower()
             head = lw[1:] if lw.startswith("//") else lw
             if head[:2] in ("/c", "/k", "/r"):
                 rest = ([v[j][len(lw) - len(head) + 2:]] if len(head) > 2 else []) + list(v[j + 1:])
-                self.reparse(_join_words(rest, "cmd"), "cmd")
+                line = _join_words(rest, "cmd")
+                if len(rest) > 1 and line.lstrip().startswith('"'):
+                    # Coordinator ruling on the lane-A probe: `cmd /s /c "rd /s /q "C:\x y\Data""`. The caller split the
+                    # nested quotes into SEVERAL words; the line cmd really receives was rebuilt by the runtime (MSYS /
+                    # PowerShell re-quote each word, MSYS also rewrites backslashes -- MEASURED) and cmd then strips
+                    # its outer quotes. Not modelled exactly: an opaque exec holding the stripped line, so a delete
+                    # word and a protected root in it refuse (S-DEL-FALLBACK), beside the modelled readings below.
+                    e = self.opaque(k)
+                    self.ctx.out[-1] = self.made[-1] = e._replace(argv=(_cmd_c_lines(line, True)[0],), quoted=(False,))
+                for text in _cmd_c_lines(line, s_flag):
+                    self.reparse(text, "cmd")
                 self._carry("cmd", k + 1)
                 return self.made
+            if head == "/s":
+                s_flag = True
             if lw.startswith("/"):
                 j += 1
                 continue

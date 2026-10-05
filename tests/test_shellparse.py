@@ -958,3 +958,47 @@ def test_m1_any_prefix_of_encodedcommand_is_decoded():
                                  "nice --adjustment=5 rm -rf X", "nice -5 rm -rf X", "nice -- rm -rf X"])
 def test_m2_nice_value_spellings(cmd):
     assert deletes_x(cmd, "bash") is True
+
+
+# Coordinator ruling on the lane-A probe: cmd's /c quote rule, and nested quotes split by the caller fail closed.
+@pytest.mark.parametrize("cmd", ["cmd //s //c '\"rd /s /q X\"'", "cmd //c '\"rd /s /q X\"'",
+                                 "cmd /s /c '\"rd /s /q\" X'"])
+def test_cmd_c_strips_its_outer_quotes(cmd):
+    assert deletes_x(cmd, "bash") is True
+
+
+def test_cmd_c_two_quotes_around_a_spaced_name_reads_both_ways():
+    assert {"x", "program"} <= set(progs("cmd //c '\"C:" + BS + "Program Files" + BS + "x.exe\" a'"))
+
+
+@pytest.mark.parametrize("cmd,shell", [
+    ('cmd //s //c "rd /s /q "C:' + BS + 'a b' + BS + 'Data""', "bash"),
+    ('cmd /s /c "rd /s /q "C:' + BS + 'a b' + BS + 'Data""', "powershell"),
+    ('cmd /s /c "rd /s /q "C:' + BS + 'a b' + BS + 'Data""', "cmd"),
+])
+def test_cmd_c_nested_quotes_split_by_the_caller_are_opaque(cmd, shell):
+    p = parse(cmd, shell)
+    assert p.ok
+    assert ("?", ("rd /s /q C:" + BS + "a b" + BS + "Data",)) in [(e.program, e.argv) for e in p.execs]
+
+
+def test_cmd_c_a_single_word_line_is_not_opaque():
+    assert "?" not in progs('cmd //c "rd /s /q X"')
+    assert "?" not in progs("cmd //c dir " + '"C:' + BS + 'a b"')
+
+
+@pytest.mark.parametrize("line,s_flag,want", [
+    ('"a b" c', False, ["a b c", '"a b" c']),        # two quotes, whitespace, nothing special: both readings
+    ('"a "b c""', False, ['a "b c"']),               # more than two quotes: stripped
+    ('"a & b"', False, ["a & b"]),                   # a special character between them: stripped
+    ('"ab" c', False, ["ab c"]),                     # no whitespace between them: stripped
+    ('"a b" c', True, ["a b c"]),                    # /S: always stripped
+    ('a "b c"', False, ['a "b c"']),                 # the line does not start with a quote: as written
+])
+def test_cmd_c_quote_rule(line, s_flag, want):
+    assert sp._cmd_c_lines(line, s_flag) == want
+
+
+def test_cmd_c_s_switch_always_strips():
+    assert "q x" not in progs("cmd //s //c '\"rd /s /q X\"'")
+    assert "q x" in progs("cmd //c '\"rd /s /q X\"'")         # without /S cmd may keep the quotes: both readings
