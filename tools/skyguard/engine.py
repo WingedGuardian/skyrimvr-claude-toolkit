@@ -5,10 +5,11 @@ in one place. Rule modules are called, never edited, from this file.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Iterable
 
-from . import backup, codes, mcp_rules, paths as _paths, shell_rules, snapshot, write_rules
+from . import backup, codes, mcp_rules, paths as _paths, shell_rules, shellparse, snapshot, write_rules
 from .verdict import Advice, Verdict
 
 _RANK = {"evaluated": 0, "partial": 1, "failed": 2}
@@ -20,7 +21,18 @@ NO_VERDICTS = "GUARD INERT: the engine combined zero verdicts, so nothing was ch
 def evaluate_shell(req, roots, audit) -> Verdict:
     """Plan 5: the rules read the payload cwd (RAW) and the dialect; a request that names none ("" / None) is
     parsed as bash AND PowerShell (spec R5)."""
-    return codes.classify(shell_rules.decide(req.command, roots, audit, cwd=req.cwd or "", shell=req.shell or ""))
+    command, shell = req.command, req.shell or ""
+    try:
+        parsed = shellparse.parse(command, shell) if isinstance(command, str) else None
+    except Exception:
+        parsed = None                  # decide() parses (and fails) as before; the answer below is partial either way
+    v = codes.classify(shell_rules.decide(command, roots, audit, cwd=req.cwd or "", shell=shell, parsed=parsed))
+    # D-P4-2 (Plan 4 Verdict.status, Plan 5 Task 17): the rules ran, but on a command the parser could not read
+    # completely (a quote or heredoc it could not close) or whose program is a variable. The answer stands; the
+    # telemetry must not call it a full evaluation. A failed status (an INERT refusal) is never lowered.
+    if v.status == "evaluated" and (parsed is None or not parsed.ok or any(e.program == "?" for e in parsed.execs)):
+        v = v._replace(status="partial")
+    return v
 
 
 def evaluate_write(path: str, audit, roots=None, cwd: str = "") -> Verdict:
@@ -99,15 +111,32 @@ def _rules(req, roots_fn, audit) -> Verdict:
         if req.paths:
             v = combine([v, evaluate_writes(req, audit, roots=_soft_roots(roots_fn))])
         return v
-    # kind "mcp": the DevBench judge (evaluate_mcp) is wired for Claude only; on Codex an MCP call is logged as
-    # unhooked and allowed (docs/guard-coverage.md X4). Wiring it is a behaviour change, left to its own task.
+    if req.kind == "mcp" and mcp_rules.is_devbench(req.mcp_tool):
+        return _codex_devbench(req, roots_fn, audit)
+    # Any other MCP server, and every other tool: logged as unhooked and allowed (docs/guard-coverage.md X4, C11).
     return Verdict()
+
+
+def _codex_devbench(req, roots_fn, audit) -> Verdict:
+    """Plan 5 Task 17 (gap X4): the DevBench judge Claude uses, on Codex, for its DENY outcomes only. An ASK outcome
+    (S-DEVBENCH-SAVE) stays an allow on Codex -- Codex fails an ask open anyway, so this adds no refusal -- and its text
+    is handed to the model as advice. Unreadable arguments are not a refusal either (as on Claude)."""
+    try:
+        args = json.loads(req.mcp_args) if req.mcp_args else None
+    except ValueError:
+        args = None
+    v = evaluate_mcp(req.mcp_tool, args, audit, roots=_soft_roots(roots_fn))
+    if v.decision == "ask":
+        return v._replace(decision="allow", reason="", context=v.reason)
+    return v
 
 
 def _unhooked(req) -> bool:
     """A call no Codex rule guards by name: record it (never for a call already refused)."""
     if req.failure or req.event != "pre_tool":
         return False
+    if req.kind == "mcp" and mcp_rules.is_devbench(req.mcp_tool):
+        return False                    # judged by name (_codex_devbench): not an unhooked call
     return req.kind in ("mcp", "other") or (req.kind == "shell" and req.tool_name != "Bash")
 
 

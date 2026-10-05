@@ -2869,13 +2869,13 @@ _T11_CLAUSES = [
      "        op =", _T11 + "test_a_non_string_console_command_is_not_judged"),
     ("rule-S-DEVBENCH-CRASH-dict-input", _MC, "if isinstance(args, dict) else None", "if True else None",
      _T11 + "test_a_non_dict_tool_input_is_not_judged"),
-    ("rule-S-DEVBENCH-CRASH-devbench-only", _MC, 'or not parts[1].startswith("devbench"):', ":",
+    ("rule-S-DEVBENCH-CRASH-devbench-only", _MC, ' and parts[1].startswith("devbench")', "",
      _T11 + "test_only_devbench_servers_are_judged[mcp__other__console]"),
-    ("rule-S-DEVBENCH-CRASH-mcp-prefix", _MC, 'or parts[0] != "mcp" or', "or",
+    ("rule-S-DEVBENCH-CRASH-mcp-prefix", _MC, ' and parts[0] == "mcp"', "",
      _T11 + "test_only_devbench_servers_are_judged[xmcp__devbench-vr__console]"),
-    ("rule-S-DEVBENCH-CRASH-short-name", _MC, "    if len(parts) < 3 or parts[0]", "    if parts[0]",
+    ("rule-S-DEVBENCH-CRASH-short-name", _MC, "len(parts) >= 3 and ", "",
      _T11 + "test_only_devbench_servers_are_judged[mcp]"),
-    ("rule-S-DEVBENCH-CRASH-server-name", _MC, 'not parts[1].startswith("devbench")', 'not parts[1].startswith("devbench-vr")',
+    ("rule-S-DEVBENCH-CRASH-server-name", _MC, 'parts[1].startswith("devbench")', 'parts[1].startswith("devbench-vr")',
      _T11 + "test_any_devbench_server_name_is_judged[devbench]"),
     # the curl route, per clause
     ("rule-S-DEVBENCH-CRASH-curl-json-flag", _MC, '"--data-urlencode", "--json")', '"--data-urlencode")', _t11curl("json-flag")),
@@ -3468,4 +3468,61 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "            tools = [t for t in CLAUDE_COVERED_TOOLS]",
      _MERGE + "test_skyguard_coverage.py::test_claude_coverage_counts_every_tool_the_installed_matchers_cover[mcp__devbench-vr__console-protect-mcp]",
      "merge-coverage-per-tool-list-is-static"),
+]]
+
+
+
+# Task 17 (gap X4): the DevBench judge on Codex, deny-class outcomes only. One mutation per clause, each naming the test
+# that must go red.
+_T17 = "tests/test_skyguard_codex_adapter.py::"
+_T17_ROUTE = '    if req.kind == "mcp" and mcp_rules.is_devbench(req.mcp_tool):\n        return '
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # Codex stops routing DevBench MCP calls to the judge: smp reset is allowed again.
+    ("tools/skyguard/engine.py", _T17_ROUTE + "_codex_devbench", "    if False:\n        return _codex_devbench",
+     _T17 + "test_a_devbench_smp_reset_is_denied_on_codex[mcp__devbench-vr__console]", "t17-codex-devbench-not-routed"),
+    # An ask outcome reaches Codex as a refusal (a NEW refusal: Codex would have failed it open).
+    ("tools/skyguard/engine.py", '    if v.decision == "ask":\n        return v._replace(decision="allow"',
+     '    if False:\n        return v._replace(decision="allow"',
+     _T17 + "test_a_devbench_ask_stays_an_allow_with_the_advice_on_codex", "t17-codex-devbench-ask-not-downgraded"),
+    # The downgraded ask loses its text: the model is no longer told why.
+    ("tools/skyguard/engine.py", 'reason="", context=v.reason)', 'reason="", context="")',
+     _T17 + "test_a_devbench_ask_stays_an_allow_with_the_advice_on_codex", "t17-codex-devbench-ask-advice-dropped"),
+    # A downgraded ask keeps its reason (a stale refusal text next to an allow).
+    ("tools/skyguard/engine.py", 'return v._replace(decision="allow", reason="", context=v.reason)',
+     'return v._replace(decision="allow", context=v.reason)',
+     _T17 + "test_a_devbench_ask_stays_an_allow_with_the_advice_on_codex", "t17-codex-devbench-ask-keeps-reason"),
+    # Unreadable arguments become a crash instead of the judge's own answer.
+    ("tools/skyguard/engine.py", "    except ValueError:\n        args = None\n    v = evaluate_mcp",
+     "    except ValueError:\n        raise\n    v = evaluate_mcp",
+     _T17 + "test_unreadable_devbench_arguments_are_not_a_refusal_on_codex", "t17-codex-devbench-bad-args-crash"),
+    # The judged call is logged as unhooked again (the log would claim nothing guarded it).
+    ("tools/skyguard/engine.py", _T17_ROUTE + "False", "    if False:\n        return False",
+     _T17 + "test_a_judged_devbench_call_is_not_logged_as_unhooked", "t17-codex-devbench-logged-as-unhooked"),
+    # Every MCP server is judged, not only DevBench's.
+    ("tools/skyguard/mcp_rules.py", ' and parts[1].startswith("devbench")\n\n\ndef decide', "\n\n\ndef decide",
+     _T17 + "test_only_devbench_servers_are_judged_on_codex", "t17-is-devbench-matches-every-server"),
+    # The underscore spelling of the server name is no longer recognised.
+    ("tools/skyguard/mcp_rules.py", 'parts[1].startswith("devbench")', 'parts[1].startswith("devbench-")',
+     _T17 + "test_a_devbench_smp_reset_is_denied_on_codex[mcp__devbench_vr__console]", "t17-is-devbench-needs-a-hyphen"),
+]]
+
+
+# Task 17 step 2 (D-P4-2): status "partial" on a command the parser could not fully read. One mutation per clause.
+_T17E = "tests/test_skyguard_engine.py::"
+_T17_PARTIAL = '    if v.status == "evaluated" and (parsed is None or not parsed.ok or any(e.program == "?" for e in parsed.execs)):'
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/engine.py", _T17_PARTIAL,
+     '    if v.status == "evaluated" and (parsed is None or any(e.program == "?" for e in parsed.execs)):',
+     _T17E + "test_a_parse_failure_makes_the_verdict_partial", "t17-partial-ignores-parse-failure"),
+    ("tools/skyguard/engine.py", _T17_PARTIAL,
+     '    if v.status == "evaluated" and (parsed is None or not parsed.ok):',
+     _T17E + "test_an_opaque_program_makes_the_verdict_partial", "t17-partial-ignores-opaque-program"),
+    ("tools/skyguard/engine.py", _T17_PARTIAL,
+     '    if (parsed is None or not parsed.ok or any(e.program == "?" for e in parsed.execs)):',
+     _T17E + "test_a_failed_status_is_never_lowered_to_partial", "t17-partial-lowers-a-failed-status"),
+    ("tools/skyguard/engine.py", _T17_PARTIAL, "    if False:",
+     _T17E + "test_a_deny_on_an_unparseable_command_stays_a_deny_and_says_partial", "t17-partial-never-set"),
+    # decide() must reuse the parse it is handed: dropping the argument parses twice and can disagree.
+    ("tools/skyguard/engine.py", "shell=shell, parsed=parsed))", "shell=shell))",
+     _T17E + "test_decide_reuses_the_parse_it_is_handed", "t17-decide-reparses"),
 ]]

@@ -115,10 +115,12 @@ def resaver_apply(command: str, shell: str = "", parsed=None):
 
 
 def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "", shell: str = "",
-           env=None) -> Verdict:
+           env=None, parsed=None) -> Verdict:
     """cwd: the payload's working directory, RAW (any spelling; targets normalises it). shell: "bash",
     "powershell", "cmd", or "" for unknown (parsed as bash AND PowerShell, R5). Both default so every existing
-    caller stays valid (Plan 4 handshake). env: where `~`, $HOME and %USERPROFILE% resolve from (os.environ)."""
+    caller stays valid (Plan 4 handshake). env: where `~`, $HOME and %USERPROFILE% resolve from (os.environ).
+    parsed: the command's shellparse.parse() when the caller already holds it (engine.evaluate_shell does, to read
+    whether the parse was complete); None parses here."""
     # Task 12: a whitespace-only command is no command either.
     if command.strip() == "":
         audit.rule(HOOK, "S-INERT-NOCMD", "deny", NO_COMMAND_LOG, level="REFUSE")
@@ -146,7 +148,7 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
 
     # --- hard blocks
     # Deletes (Task 7): decided on the commands that RUN and where their operands RESOLVE (deletes.py, E16).
-    parsed = shellparse.parse(command, shell)
+    parsed = shellparse.parse(command, shell) if parsed is None else parsed
     dels = deletes.scan(command, parsed, roots, cwd, env)
     if dels.hit:
         rid, file = dels.hit

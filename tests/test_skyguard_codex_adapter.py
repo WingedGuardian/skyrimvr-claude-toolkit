@@ -436,3 +436,80 @@ def test_the_codex_instructions_claim_deleting_in_game_or_config_is_refused(tmp_
     v = engine.pre_tool(req, str(tmp_path), lambda: paths.roots(g, "", {"SKYRIM_CONFIG_DIR": c}), Audit(str(tmp_path)))
     assert (v.decision, v.code) == ("deny", code), v
     assert json.loads(codex.render(v))["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# ---- DevBench on Codex (gap X4; Task 17): DENY-class outcomes only ---------------------------------------------------
+
+DEVBENCH_TOOLS = ["mcp__devbench-vr__console", "mcp__devbench__console", "mcp__devbench_vr__console"]
+
+
+def _unhooked_log(tmp_path):
+    f = tmp_path / ".claude" / "backups" / "codex-unhooked-tools.log"
+    return f.read_text() if f.exists() else ""
+
+
+@pytest.mark.parametrize("tool", DEVBENCH_TOOLS)
+def test_a_devbench_smp_reset_is_denied_on_codex(tmp_path, tool):
+    v = _run(tmp_path, _pre(tool, {"action": "exec", "command": "smp reset"}))
+    assert (v.decision, v.status, v.code) == ("deny", "evaluated", "shell.S-DEVBENCH-CRASH")
+    out = json.loads(codex.render(v))["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "smp reset" in out["permissionDecisionReason"]
+
+
+def test_a_judged_devbench_call_is_not_logged_as_unhooked(tmp_path):
+    _run(tmp_path, _pre("mcp__devbench-vr__console", {"action": "exec", "command": "smp reset"}))
+    _run(tmp_path, _pre("mcp__devbench-vr__inspect", {"kind": "state"}))
+    assert _unhooked_log(tmp_path) == ""
+
+
+def test_an_ordinary_devbench_call_is_allowed_silently(tmp_path):
+    v = _run(tmp_path, _pre("mcp__devbench-vr__inspect", {"kind": "state"}))
+    assert (v.decision, v.context, v.status) == ("allow", "", "evaluated")
+    v = _run(tmp_path, _pre("mcp__devbench-vr__console", {"action": "exec", "command": "player.additem f 1"}))
+    assert (v.decision, v.context) == ("allow", "")
+
+
+def test_only_devbench_servers_are_judged_on_codex(tmp_path):
+    v = _run(tmp_path, _pre("mcp__probe__console", {"action": "exec", "command": "smp reset"}))
+    assert (v.decision, v.context) == ("allow", "")
+    assert "mcp__probe__console" in _unhooked_log(tmp_path)
+
+
+def _run_with_saves(tmp_path, raw):
+    cfg = tmp_path / "cfg"
+    (cfg / "Saves").mkdir(parents=True)
+    (cfg / "Saves" / "Existing.ess").write_bytes(b"x")
+    req = codex.to_request(raw, "win32")
+    audit = Audit(str(tmp_path))
+    v = engine.pre_tool(req, str(tmp_path), lambda: paths.roots(str(tmp_path), "", {"SKYRIM_CONFIG_DIR": str(cfg)}), audit)
+    return v, audit
+
+
+def test_a_devbench_ask_stays_an_allow_with_the_advice_on_codex(tmp_path):
+    """Codex fails an ask open anyway: no new refusal, and the model still reads why."""
+    v, audit = _run_with_saves(tmp_path, _pre("mcp__devbench-vr__game", {"action": "save", "name": "Existing"}))
+    assert (v.decision, v.reason) == ("allow", "")
+    assert "Existing" in v.context and v.context.count("\n") <= 1
+    assert v.code == "shell.S-DEVBENCH-SAVE"
+    assert ("S-DEVBENCH-SAVE", "ask") in audit.fired
+    out = json.loads(codex.render(v))["hookSpecificOutput"]
+    assert "permissionDecision" not in out and out["additionalContext"] == v.context
+
+
+def test_a_devbench_save_to_a_new_name_is_silent_on_codex(tmp_path):
+    v, _ = _run_with_saves(tmp_path, _pre("mcp__devbench-vr__game", {"action": "save", "name": "Brand New"}))
+    assert (v.decision, v.context) == ("allow", "")
+
+
+def test_cli_a_devbench_reset_is_denied_through_the_real_entry(tmp_path):
+    r = _cli(tmp_path, "codex", "pre-tool", _pre("mcp__devbench-vr__console", {"action": "exec", "command": "smp reset"}))
+    head, body = r.stdout.decode().split("\n", 1)
+    assert r.returncode == 0 and head == "SKYGUARD-OK"
+    assert json.loads(body)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_unreadable_devbench_arguments_are_not_a_refusal_on_codex(tmp_path):
+    req = codex.to_request(_pre("mcp__devbench-vr__console", {"command": "smp reset"}), "win32")
+    req = req._replace(mcp_args="{not json")
+    v = engine.pre_tool(req, str(tmp_path), lambda: paths.roots(str(tmp_path), "", {}), Audit(str(tmp_path)))
+    assert (v.decision, v.status) == ("allow", "evaluated")

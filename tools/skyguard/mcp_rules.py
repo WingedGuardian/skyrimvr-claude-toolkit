@@ -168,15 +168,21 @@ def judge(tool: str, args: dict, roots, memo: Optional[dict] = None, env=None) -
 
 
 # ------------------------------------------------------------------------------------------------------ MCP route
+def is_devbench(name: str) -> bool:
+    """True for `mcp__<server>__<tool>` where the server name starts with `devbench` (`devbench-vr`, `devbench_vr`)."""
+    parts = name.split("__") if isinstance(name, str) else []
+    return len(parts) >= 3 and parts[0] == "mcp" and parts[1].startswith("devbench")
+
+
 def decide(name: str, args, audit, roots=None, env=None) -> Verdict:
     """protect-mcp: the verdict for one `mcp__<server>__<tool>` call. Only DevBench servers are judged here."""
     if name == "" or name == "unknown":
         audit.rule(HOOK, "S-INERT-NOINPUT", "deny", "no tool call in payload -- the DevBench guard checked nothing",
                    level="REFUSE")
         return Verdict("deny", rules.message("S-INERT-NOINPUT"))
-    parts = name.split("__")
-    if len(parts) < 3 or parts[0] != "mcp" or not parts[1].startswith("devbench"):
+    if not is_devbench(name):
         return Verdict()
+    parts = name.split("__")
     hit = judge(parts[-1], args, roots, None, env) if isinstance(args, dict) else None
     if hit is None:
         return Verdict()
