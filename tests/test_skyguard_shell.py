@@ -236,6 +236,28 @@ def test_resaver_rows(tmp_path, row):
     assert {rid for rid, _ in a.fired if rid == "S-RESAVER-APPLY"} == set(row["rules"])
 
 
+# Merge of rt-fix-a into plan5 (2026-10-05): rt-fix-a's parser now resolves `R=tools/resaver-cli.sh; $R ...` and
+# `find -name X -exec ... {}` itself, so the t06 / t04 rows no longer reach the text fallback or the segment's save
+# name. These are the shapes that still do: a program the parser cannot prove (a command substitution), and a find
+# whose `{}` it does not narrow (`-path`). Mutations of those clauses name these tests.
+_OPAQUE_R = "R=$(echo tools/resaver-cli.sh); $R "
+
+
+@pytest.mark.parametrize("tail,want", [
+    ("reset-havok s.ess --apply", ("reset-havok", "s.ess")),     # opaque program: the text rule asks
+    ("reset-havok s.ess", None),                                 # no --apply: nothing written
+    ("info save-reset-havok --apply", None),                     # the op word only as a suffix of another word
+    ("info reset-havok.ess --apply", None),                      # the op word only inside a file name
+], ids=["opaque-apply", "opaque-dry", "opaque-op-suffix", "opaque-op-in-filename"])
+def test_resaver_text_rule_on_an_opaque_program(tail, want):
+    assert shell_rules.resaver_apply(_OPAQUE_R + tail, "bash") == want
+
+
+def test_resaver_save_named_by_the_find_segment():
+    cmd = 'find Saves -path "*/Quick.ess" -exec bash tools/resaver-cli.sh reset-havok {} --apply \\;'
+    assert shell_rules.resaver_apply(cmd, "bash") == ("reset-havok", "Quick.ess")
+
+
 def test_resaver_without_a_save_name_still_asks(tmp_path):
     v = run("bash tools/resaver-cli.sh reset-havok --apply", tmp_path)
     assert v.decision == "ask" and "(reset-havok on the save)" in v.reason

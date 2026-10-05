@@ -1820,8 +1820,10 @@ MUTATIONS = [
         ("tools/skyguard/codex_rules.py",
          '        out.append("    not_match = {},".format(_s(r["not_match"])))\n', "",
          "tests/test_codex_rules.py::test_render_shape", "codex-rules-render-drops-not-match"),
+        # (Merge 2026-10-05: named test_rules_file_passes_codex_execpolicy, which SKIPS without `codex` on PATH, so the
+        # mutation "survived" by a skip; test_render_shape counts the rendered decisions with no codex needed.)
         ("tools/skyguard/codex_rules.py", 'format(_s(r["decision"]))', 'format(_s("prompt"))',
-         "tests/test_codex_rules.py::test_rules_file_passes_codex_execpolicy", "codex-rules-render-wrong-decision"),
+         "tests/test_codex_rules.py::test_render_shape", "codex-rules-render-wrong-decision"),
     ]
 ] + [
     # Plan 4 Task 12 (spec 7.4): conformance from captured payloads, and the adapter / wrapper clauses that
@@ -1932,16 +1934,19 @@ _SR_CLAUSES = [
     ("op-reset-havok", '"reset-havok", "cleanse-formlists",', '"cleanse-formlists",', "t04-apply"),
     ("op-cleanse-formlists", '"reset-havok", "cleanse-formlists",', '"reset-havok",', "t04-apply-env"),
     ("op-list", '"cleanse-formlists", "remove-created")', '"cleanse-formlists")', "t04-apply-chain"),
+    # (Merge 2026-10-05: rt-fix-a's parser resolves the t04-find-exec / t06-resaver-variable-* shapes itself, so these
+    # clauses are pinned by the shapes that still reach them; a full test name is used as-is below.)
     ("save-from-segment", 'or (lambda m: m.group(0) if m else "")(RESAVER_TEXT_SAVE.search(e.segment))', 'or ""',
-     "t04-find-exec"),
-    ("opaque-is-unresolved", "    if not parsed.ok or opaque:", "    if not parsed.ok:", "t06-resaver-variable-program"),
+     "test_resaver_save_named_by_the_find_segment"),
+    ("opaque-is-unresolved", "    if not parsed.ok or opaque:", "    if not parsed.ok:",
+     "test_resaver_text_rule_on_an_opaque_program[opaque-apply]"),
     ("parse-fail-falls-back", "    if not parsed.ok or opaque:", "    if opaque:", "t06-resaver-parse-fail"),
     ("fallback-needs-apply", 'if "resaver" not in low or RESAVER_APPLY not in low:', 'if "resaver" not in low:',
-     "t06-resaver-variable-dry"),
+     "test_resaver_text_rule_on_an_opaque_program[opaque-dry]"),
     ("fallback-op-lookbehind", "re.compile(r\"(?<![^\\s\\\"'])(\" + \"|\".join(RESAVER_OPS)",
-     "re.compile(r\"(\" + \"|\".join(RESAVER_OPS)", "t06-resaver-variable-op-suffix"),
+     "re.compile(r\"(\" + \"|\".join(RESAVER_OPS)", "test_resaver_text_rule_on_an_opaque_program[opaque-op-suffix]"),
     ("fallback-op-lookahead", "+ r\")(?![^\\s\\\"'])\", re.ASCII", "+ r\")\", re.ASCII",
-     "t06-resaver-variable-op-in-filename"),
+     "test_resaver_text_rule_on_an_opaque_program[opaque-op-in-filename]"),
     # Task 7: decide() parses once (with the dialect) and hands the parse to the ReSaver rule.
     # (Anchor follows Task 17, which made decide() accept the caller's parse; the fallback parse keeps the dialect.)
     ("dialect", "    parsed = shellparse.parse(command, shell) if parsed is None else parsed\n    dels",
@@ -1949,7 +1954,8 @@ _SR_CLAUSES = [
      "t04-heredoc-py"),
 ]
 MUTATIONS += [
-    pytest.param(_SR, find, rep, "tests/test_skyguard_shell.py::test_resaver_rows[" + row + "]",
+    pytest.param(_SR, find, rep, "tests/test_skyguard_shell.py::"
+                 + (row if row.startswith("test_") else "test_resaver_rows[" + row + "]"),
                  id="rule-S-RESAVER-APPLY-" + suffix)
     for suffix, find, rep, row in _SR_CLAUSES
 ]
@@ -2932,9 +2938,11 @@ _T11_CLAUSES = [
      _T11 + "test_a_non_dict_tool_input_is_judged_on_its_strings"),
     ("rule-S-DEVBENCH-CRASH-devbench-only", _MC, 'or not is_devbench_server(parts[1]):', ":",
      _T11 + "test_only_devbench_servers_are_judged[mcp__other__console]"),
-    ("rule-S-DEVBENCH-CRASH-mcp-prefix", _MC, ' and parts[0] == "mcp"', "",
+    # (Merge 2026-10-05: back on decide()'s own clauses -- Task 17 had moved them into is_devbench(), which decide()
+    # no longer calls since rt-fix-b's is_devbench_server; mutating is_devbench() there survived.)
+    ("rule-S-DEVBENCH-CRASH-mcp-prefix", _MC, 'or parts[0] != "mcp" or', "or",
      _T11 + "test_only_devbench_servers_are_judged[xmcp__devbench-vr__console]"),
-    ("rule-S-DEVBENCH-CRASH-short-name", _MC, "len(parts) >= 3 and ", "",
+    ("rule-S-DEVBENCH-CRASH-short-name", _MC, "    if len(parts) < 3 or parts[0]", "    if parts[0]",
      _T11 + "test_only_devbench_servers_are_judged[mcp]"),
     ("rule-S-DEVBENCH-CRASH-server-name", _MC, 'not is_devbench_server(parts[1])', 'not parts[1].startswith("devbench-vr")',
      _T11 + "test_any_devbench_server_name_is_judged[devbench]"),
