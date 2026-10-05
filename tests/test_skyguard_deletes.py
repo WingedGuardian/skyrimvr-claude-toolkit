@@ -453,3 +453,10 @@ def test_pipeline_move_of_an_ancestor_of_the_install_is_unresolved():
                                           ("`pwd`/x", True), ("C:/Temp", False), ("50%", False)])
 def test_expands(word, expands):
     assert deletes._expands(word) is expands
+
+
+def test_an_unresolved_delete_in_a_command_naming_the_configured_config_dir_is_unresolved():
+    """The configured settings folder's MENTION arm (paths.roots: `_add(config, v)`): an unresolved operand in a
+    command that names it. Resolved deletes use Roots.config_dirs instead, which this does not exercise."""
+    got = decide('ls "D:/Profiles/MO2/profiles/Default"; rm -rf "$X"', layout="config", cwd="C:/work")
+    assert got[1] == {"S-DEL-UNRESOLVED"}, got

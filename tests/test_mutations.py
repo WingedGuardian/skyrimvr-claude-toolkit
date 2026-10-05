@@ -857,12 +857,24 @@ MUTATIONS = [
     # Stop honouring the CONFIGURED config directory. MO2/Wabbajack put the INIs in the
     # instance profile, outside Documents/My Games, so for those users this arm is the
     # only thing guarding their config -- and it had no test at all.
+    # Final review D3: since Task 6/7 a RESOLVED delete is placed by Roots.config_dirs
+    # (`_add_dir(cfg, v)`), so that is the clause this test guards. The old anchor
+    # (`_add(config, v)` -> a mis-indented `pass`) was killed only by an IndentationError;
+    # reverted with the right indent it survived. The mention regex arm has its own twin.
+    pytest.param(
+        "tools/skyguard/paths.py",
+        "        _add_dir(cfg, v)",
+        "        pass",
+        "tests/test_hooks.py::test_a_configured_config_directory_outside_documents_is_guarded",
+        id="configured-config-directory-is-guarded",
+    ),
     pytest.param(
         "tools/skyguard/paths.py",
         "        _add(config, v)",
-        "    pass",
-        "tests/test_hooks.py::test_a_configured_config_directory_outside_documents_is_guarded",
-        id="configured-config-directory-is-guarded",
+        "        pass",
+        "tests/test_skyguard_deletes.py::"
+        "test_an_unresolved_delete_in_a_command_naming_the_configured_config_dir_is_unresolved",
+        id="configured-config-directory-is-named",
     ),
     # Put the 5s timeouts back. A PreToolUse refusal that arrives late is DISCARDED,
     # and this release leads with that fix -- guarded, until now, by nothing.
@@ -3557,7 +3569,17 @@ def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:
            "until it is unique.\n")
         + f"  {find!r}"
     )
-    io.open(target, "w", encoding="utf-8", newline="").write(text.replace(find, replace))
+    mutated = text.replace(find, replace)
+    # A mutant that does not COMPILE is killed by the SyntaxError, whatever the named test
+    # asserts -- so it proves nothing about the clause. Final review D3 found one
+    # (a mis-indented `pass`), killed only that way while a correct revert survived.
+    if relpath.endswith(".py"):
+        try:
+            compile(mutated, relpath, "exec")
+        except SyntaxError as exc:
+            raise AssertionError(f"mutation of {relpath} does not compile ({exc}); it would be killed by "
+                                 f"the syntax error, not by the test it names.\n  {replace!r}")
+    io.open(target, "w", encoding="utf-8", newline="").write(mutated)
     return work
 
 
