@@ -4080,5 +4080,16 @@ _P5F_CLAUSES = [
     ("p5f-devbench-url-drops-trailing-slash", "tools/skyguard/mcp_rules.py",
      '    if parts.path.endswith("/") and not path.endswith("/"):', "    if False:",
      "tests/test_skyguard_p5fix.py::test_norm_url[double-slash]"),
+    # C-M7: the nonce refusal is observable only as "the stub exited 0 yet the wrapper recorded exit 1". Twin 1: the
+    # refusal is kept but with another code (still denied, so only the exact record can see it). Twin 2: the engine
+    # run no longer carries a nonce (still refused, since the stub never echoes one; only the run log can see it).
+    ("p5f-nonce-refusal-code-changed", "agent/guards/adapters/claude/protect-files.sh",
+     '*) RC=1; _fail python "fallback ${PYC[*]} did not echo the engine nonce -- not used" ;;',
+     '*) RC=3; _fail python "fallback ${PYC[*]} did not echo the engine nonce -- not used" ;;',
+     "tests/test_hook_deadline.py::test_a_fresh_fallback_that_answers_without_the_nonce_is_refused"),
+    ("p5f-nonce-not-passed-to-the-engine-run", "agent/guards/adapters/claude/protect-files.sh",
+     '        _bounded "$1" in "${PYC[@]}" "$RUNPY" "${ENGINE_ARGS[@]}" --nonce "$NONCE"',
+     '        _bounded "$1" in "${PYC[@]}" "$RUNPY" "${ENGINE_ARGS[@]}"',
+     "tests/test_hook_deadline.py::test_a_fresh_fallback_that_answers_without_the_nonce_is_refused"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _P5F_CLAUSES]
