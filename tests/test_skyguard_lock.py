@@ -785,6 +785,23 @@ def test_default_is_off_until_the_batch_decides(bed):
 
 
 @needs_windows
+def test_the_bash_wrapper_called_by_a_backslash_path_from_elsewhere_runs_its_own_package(bed, tmp_path):
+    """Task 16 found it: `bash C:\\...\\tools\\skyguard.sh` split its path on `/` only, so `here` was `.` and it ran
+    `./skyguard` from the CALLER's folder -- `lock lock` then did nothing at all. Called from a folder with no
+    skyguard package, it must still find its own."""
+    from conftest import BASH
+    env = {k: os.environ[k] for k in ("SystemRoot", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "TEMP", "TMP", "PATH")
+           if k in os.environ}
+    env["SKYGUARD_PYTHON"] = sys.executable.replace("\\", "/")
+    env["SKYGUARD_LOCK_SANDBOX"] = str(SCRATCH)
+    script = str(REPO / "tools" / "skyguard.sh").replace("/", "\\")
+    r = subprocess.run([BASH, script, "lock", "status", "--json", "--root", str(bed.root)], cwd=str(tmp_path),
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=120)
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert json.loads(r.stdout)["edition"] == "vr", r.stdout
+
+
+@needs_windows
 def test_wrapper_scripts_exist_and_the_cmd_twin_runs(bed):
     assert (REPO / "tools" / "skyguard.sh").is_file() and (REPO / "tools" / "skyguard.cmd").is_file()
     env = {k: os.environ[k] for k in ("SystemRoot", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "TEMP", "TMP") if k in os.environ}

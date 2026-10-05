@@ -4130,3 +4130,12 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '"%SKYGUARD_PYTHON%" -B "%HERE%skyguard' + BS + 'cli.py" %*',
      _DRT + "test_the_cmd_twin_runs", "l2-doctor-launcher-cmd"),
 ]]
+
+
+# The skyguard.sh launcher splits its own path on either slash (found by Task 16's outside run).
+MUTATIONS += [
+    pytest.param("tools/skyguard.sh", 'src="${BASH_SOURCE[0]//' + BS + BS + '//}"', 'src="${BASH_SOURCE[0]}"',
+                 "tests/test_skyguard_lock.py::"
+                 "test_the_bash_wrapper_called_by_a_backslash_path_from_elsewhere_runs_its_own_package",
+                 id="l2-skyguard-sh-backslash-path"),
+]
