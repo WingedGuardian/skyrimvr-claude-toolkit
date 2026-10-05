@@ -104,6 +104,9 @@ def resaver_apply(command: str, shell: str = "", parsed=None):
             opaque = True
             continue
         if _is_resaver(e):
+            e = deletes.substituted(e)             # RT-A: `OP=reset-havok; ... $OP x.ess --apply`
+            if any("$" in a or "`" in a for a in e.argv):
+                opaque = True                       # RT-A: an argument not proven literal (`$(echo --apply)`): the text
             op = _resaver_op(e)
             if op:
                 # No .ess among its own arguments (`find -name "*.ess" -exec ... {}`): name the one its segment selects.
@@ -176,6 +179,10 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         reason = rules.message(dev[0], **dev[1])
         audit.rule(HOOK, dev[0], "deny", reason)
         return Verdict("deny", reason)
+    # RT-A (port of the install's text rule): decoded text -- base64 -d, xxd -r, printf '\x..', FromBase64String --
+    # run by a shell, eval, iex or source. Whatever it holds, no rule above could read it.
+    if parsed.unread:
+        return deny("S-SHELL-UNREAD")
 
     # --- advise
     if dels.relative_unknown:

@@ -758,6 +758,40 @@ MUTATIONS = [
         "tests/test_hooks.py::test_the_install_cannot_be_deleted_however_it_is_spelled",
         id="delete-guard-anchored-on-one-spelling-of-rm",
     ),
+    # G1 (RT-A): interpreter code that launches a process, naming a protected root, is judged like a delete.
+    pytest.param(
+        "tools/skyguard/deletes.py",
+        "                has(INTERP_LAUNCH, code) and has(LAUNCH_DELETE_WORD, code))):\n",
+        "                False)):\n",
+        # py-subprocess: its command list carries no delete WORD, so only the process-launch clause can catch it
+        # (py-os-system's text also holds `del`, which the legacy delete words catch on their own).
+        "tests/test_skyguard_deletes.py::test_g1_interpreter_code_naming_a_root_denies[py-subprocess]",
+        id="g1-process-launch-api-not-judged",
+    ),
+    # G1: python -Bc CODE (a flag cluster ending in c) carries code.
+    pytest.param(
+        "tools/skyguard/deletes.py",
+        "        elif _PYTHON.fullmatch(p) and _PY_CODE_CLUSTER.fullmatch(w):\n",
+        "        elif False:\n",
+        "tests/test_skyguard_deletes.py::test_g1_interpreter_code_naming_a_root_denies[py-Bc-rmtree]",
+        id="g1-python-code-cluster-unread",
+    ),
+    # G1: node -pe CODE carries code.
+    pytest.param(
+        "tools/skyguard/deletes.py",
+        'CODE_FLAGS = frozenset(("-c", "-e", "-E", "--eval", "-p", "--print", "-r", "-pe"))',
+        'CODE_FLAGS = frozenset(("-c", "-e", "-E", "--eval", "-p", "--print", "-r"))',
+        "tests/test_skyguard_deletes.py::test_g1_interpreter_code_naming_a_root_denies[node-pe-rmSync]",
+        id="g1-node-pe-unread",
+    ),
+    # G2 (RT-A): a program that runs a command line it is handed is opaque.
+    pytest.param(
+        "tools/skyguard/deletes.py",
+        '    if e.program == "?" or os.path.splitext(e.program)[0] in _WRAPPER_PROGRAMS:\n',
+        '    if e.program == "?":\n',
+        "tests/test_skyguard_deletes.py::test_g2_wrapper_with_delete_and_root_denies[schtasks-rd]",
+        id="g2-command-wrappers-not-opaque",
+    ),
 
     pytest.param(
         # Remove the "no Python" refusal from protect-bash. The wrapper then falls through to the
@@ -2382,6 +2416,18 @@ MUTATIONS.append(pytest.param(   # a quoted `[x]` in the install's own name is l
     "tests/test_guard_corpus.py::test_hook_reproduces_the_recorded_decision_and_rules[root-metachar-self]",
     id="rule-S-DEL-INSTALL-literal-quoted-glob",
 ))
+
+# ---- RT-A: S-DEL-UNKNOWN-DIR and S-SHELL-UNREAD; each named twin must turn the intended rows red.
+_IR = "tests/test_guard_corpus.py::test_intended_rows_reproduce"
+MUTATIONS += [
+    pytest.param(_DL, "            if cd_lost and unknown_dir is None and _everything(w):", "            if False:", _IR,
+                 id="rule-S-DEL-UNKNOWN-DIR-whole-folder"),
+    pytest.param("tools/skyguard/shell_rules.py", "    if parsed.unread:", "    if False:", _IR,
+                 id="rule-S-SHELL-UNREAD-denies"),
+    pytest.param("tools/skyguard/shellparse.py",
+                 "            if reader.program in ALL_SHELLS and any(_is_decoder(e) for _, umade in items[:ci] for e in umade):",
+                 "            if False:", _IR, id="rule-S-SHELL-UNREAD-pipe-into-shell"),
+]
 
 # ---- Plan 5 Task 8: shell writes (E21). One twin per primitive class and per clause; each names the t08 row it must
 # turn red, fired in-process by tests/test_skyguard_writes.py::test_t08_row.

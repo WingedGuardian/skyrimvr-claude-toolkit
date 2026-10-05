@@ -45,7 +45,8 @@ HOOK = "protect-mcp"
 # The endpoint any HTTP route uses: `/api/tool/<tool>`, host and port irrelevant (the port moves when 8921 is taken).
 _ENDPOINT = re.compile(r"/api/tool/([A-Za-z_]+)/?(?:[?#].*)?$")
 _CURL_BODY_FLAGS = ("--data", "--data-raw", "--data-binary", "--data-ascii", "--data-urlencode", "--json")
-_WEB_PROGRAMS = frozenset(("curl", "invoke-restmethod", "irm", "invoke-webrequest", "iwr"))
+_WEB_PROGRAMS = frozenset(("curl", "wget", "invoke-restmethod", "irm", "invoke-webrequest", "iwr"))
+_WGET_BODY = ("--post-data", "--body-data")       # RT-A: wget sends a literal body like curl -d
 _PS_PROGRAMS = frozenset(("invoke-restmethod", "irm", "invoke-webrequest", "iwr"))
 _SPLIT_STATEMENTS = re.compile(r"[;\n\r]")
 # The shell-route cheap prefilter: every form names one of these.
@@ -226,6 +227,20 @@ def _curl_bodies(argv) -> list:
     return out
 
 
+def _wget_bodies(argv) -> list:
+    out, k = [], 0
+    while k < len(argv):
+        w = argv[k]
+        if w in _WGET_BODY and k + 1 < len(argv):
+            out.append(argv[k + 1])
+            k += 2
+            continue
+        if w.startswith(tuple(f + "=" for f in _WGET_BODY)):
+            out.append(w.split("=", 1)[1])
+        k += 1
+    return out
+
+
 def _web_call(e, text: str) -> list:
     """(tool, args) pairs for each DevBench REST call this curl / Invoke-RestMethod exec makes; unreadable bodies
     (`@file`, a variable) yield nothing."""
@@ -240,6 +255,8 @@ def _web_call(e, text: str) -> list:
     if e.program in _PS_PROGRAMS:
         from .shellparse import ps_param
         bodies = list(ps_param(e, "body"))
+    elif e.program == "wget":
+        bodies = _wget_bodies(e.argv)
     else:
         bodies = _curl_bodies(e.argv)
     out = []

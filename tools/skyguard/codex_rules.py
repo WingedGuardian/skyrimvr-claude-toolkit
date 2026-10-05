@@ -39,6 +39,8 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
     "shell.S-DEL-MO2": ("hook_only", _PATH),
     "shell.S-DEL-UNRESOLVED": ("hook_only", _PATH),
     "shell.S-DEL-FALLBACK": ("hook_only", _INERT),
+    "shell.S-DEL-UNKNOWN-DIR": ("hook_only", "depends on an earlier `cd` in the same command, not on a prefix"),
+    "shell.S-SHELL-UNREAD": ("hook_only", "the decoder and the shell can be anywhere in a pipeline"),
     "shell.S-RESAVER-APPLY": (
         "hook_only", "a prefix would also prompt every dry-run; `--apply` position varies (R4)"),
     "shell.S-DEVBENCH-CRASH": ("hook_only", "the console command is inside a JSON body or an MCP argument"),
