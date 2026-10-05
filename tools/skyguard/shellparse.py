@@ -77,6 +77,8 @@ KNOWN LIMITS -- each gives a partial answer, never a "safe" one:
 from __future__ import annotations
 
 import base64
+import fnmatch
+import functools
 import re
 from typing import List, NamedTuple, Optional, Tuple
 
@@ -108,6 +110,11 @@ class Parsed(NamedTuple):
     execs: Tuple[Exec, ...]
     ok: bool
     why: str
+    unread: bool = False        # RT-A: DECODED text (base64 -d, xxd -r, printf '\x..', FromBase64String) runs as commands
+    # RT-A G1/G2: the command STRING each shell was given with -c / -Command, as (shell program, text). The string's
+    # own commands are execs as usual but the shell itself is not one, so a rule about the string reads it here.
+    codes: Tuple[Tuple[str, str], ...] = ()
+    xargs: Tuple[str, ...] = ()     # RT-A G2: the program each `xargs` runs (its first word after the options)
 
 
 class ParseError(Exception):
@@ -133,6 +140,7 @@ PS_ALIASES = {
     "gci": "get-childitem", "ls": "get-childitem", "dir": "get-childitem",
     "gc": "get-content", "cat": "get-content", "type": "get-content",
     "echo": "write-output", "write": "write-output",
+    "sal": "set-alias", "nal": "new-alias",
 }
 CMD_ALIASES = {"erase": "del", "rd": "rmdir", "md": "mkdir", "ren": "rename", "chdir": "cd"}
 POSIX_SHELLS = frozenset(("bash", "sh", "zsh", "dash", "ksh", "ash", "mksh"))
@@ -240,9 +248,14 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
 # Shared scanner state
 # ----------------------------------------------------------------------------------------------------------
 class _Ctx:
-    __slots__ = ("tokens", "out", "frame_ids", "via_xargs", "root", "counts", "subst", "dialect", "poison")
+    __slots__ = ("tokens", "out", "frame_ids", "via_xargs", "root", "counts", "subst", "dialect", "poison", "unread",
+                 "aliases", "codes", "xargs")
 
     def __init__(self, root: str = "", dialect: str = ""):
+        self.unread = False             # RT-A: decoded text runs as commands (Parsed.unread)
+        self.aliases: dict = {}         # RT-A: same-command aliases, name -> body (bash alias, PowerShell Set-Alias)
+        self.codes: List[Tuple[str, str]] = []      # RT-A G1/G2: Parsed.codes
+        self.xargs: List[str] = []                  # RT-A G2: Parsed.xargs
         self.tokens = 0
         self.out: List[Exec] = []
         self.frame_ids = 0
@@ -636,6 +649,10 @@ class _Bash(_Scanner):
         k = 0
         while k < len(ws) and _ASSIGN.match(ws[k].raw):
             k += 1
+        while k < len(ws) and not ws[k].quoted and not ws[k].dyn and "".join(ws[k].b) in ("builtin", "command"):
+            k += 1                                              # RT-A: `builtin cd X`, `command [-p] cd X` are cd
+            while k < len(ws) and "".join(ws[k].b) in ("-p", "--"):
+                k += 1
         if k >= len(ws) or ws[k].quoted or ws[k].dyn:
             return
         p = "".join(ws[k].b)
@@ -723,7 +740,9 @@ class _Bash(_Scanner):
             self.i += 3
             return
         w = self._word(f)
-        w.add(nx, "\\" + nx)
+        # RT-A: `\ ` is an escaped SPACE in either reading (`/c/GOG\ Games`, `C:\GOG\ Games\x`): the literal (Windows)
+        # reading keeps every other backslash as a separator, never this one.
+        w.add(nx, nx if nx in " \t" else "\\" + nx)
         w.bs = True
         self.i += 2
 
@@ -1124,6 +1143,12 @@ _PS_OPAQUE_METHODS = frozenset(("delete", "moveto", "copyto", "invoke", "invoker
 _PS_DASHES = "–—―"                                 # PowerShell takes these as a parameter dash
 
 
+def _ps_quoted(w) -> bool:
+    """A PowerShell word is a PARAMETER when its first character is an unquoted dash, whatever is quoted after it:
+    `-Path:'C:\\x y'` binds -Path (RT-A). Only a word whose dash is itself quoted (`'-x'`) is a string."""
+    return w.quoted and not (w.raw[:1] in "-" + _PS_DASHES and len(w.raw) > 1)
+
+
 def _io_program(cls: str, method: str) -> str:
     cls, m = cls.lower(), method.lower()
     if cls == "file":
@@ -1174,7 +1199,7 @@ class _Pwsh(_Scanner):
             return
         if p not in _SET_LOCATION:
             return
-        ex = _exec_of("powershell", [("".join(w.b), w.quoted, w.dyn) for w in cmd.words[1:]], p)
+        ex = _exec_of("powershell", [("".join(w.b), _ps_quoted(w), w.dyn) for w in cmd.words[1:]], p)
         vals = ps_param(ex, "Path", 0) or ps_param(ex, "LiteralPath")
         if not vals:
             new = "~"
@@ -1615,6 +1640,23 @@ _CMD_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}\.?")
 _CMD_PRE_SWITCH = re.compile(r"/{1,2}(?:[sqdau]|[efvt]:[A-Za-z0-9]{1,8})$", re.IGNORECASE)   # cmd switches before /c
 
 
+def _join_words(words, dialect: str) -> str:
+    """argv words joined back into one command line for `cmd /c` / `pwsh -Command`. RT-A: when the line arrives as
+    SEVERAL words, a word holding a space was one argument (`cmd /c rd /s /q "C:\\GOG Games\\x"`), so it is quoted
+    again rather than re-split. A single word is the whole command line, as written."""
+    if len(words) < 2:
+        return " ".join(words)
+    out = []
+    for w in words:
+        if not re.search(r"\s", w) or (w[:1] in "\"'" and w[-1:] == w[:1]):
+            out.append(w)
+        elif dialect == "cmd":
+            out.append('"' + w.replace('"', "") + '"')
+        else:
+            out.append("'" + w.replace("'", "''") + "'")
+    return " ".join(out)
+
+
 def _cmd_c_follows(v, j) -> bool:
     """Whether v[j:] is cmd's switch list ending in /c or /k (`/s /q /d /e:on /v:off ... /c`)."""
     while j < len(v) and _CMD_PRE_SWITCH.match(v[j]):
@@ -1624,6 +1666,115 @@ def _cmd_c_follows(v, j) -> bool:
 _PS_VALUE_PARAMS = ("executionpolicy", "ep", "ex", "workingdirectory", "wd", "configurationname", "config",
                     "custompipename", "inputformat", "outputformat", "of", "windowstyle", "version",
                     "settingsfile", "encodedarguments", "psconsolefile")
+
+
+# ---- RT-A: decoded text run as commands (Parsed.unread). Ported from the install's text rule "decoded text piped into
+# a shell": a DECODER's output is text the guard never sees, so a shell (or eval / iex / source) running it is
+# unreadable, whatever it holds. An installer piped to sh (`curl ... | sh`) is not decoded text: not this rule.
+_ESCAPED = re.compile(r"\\(?:x[0-9A-Fa-f]|u[0-9A-Fa-f]|U[0-9A-Fa-f]|[0-7])")
+_DECODE_TEXT = re.compile(
+    r"\bbase(?:64|32)\b[^|;&)\n]{0,200}?[ \t]-(?:-decode\b|[A-Za-z]{0,4}[dD])"
+    r"|\bxxd\b[^|;&)\n]{0,200}?[ \t]-[A-Za-z]{0,4}r|\buudecode\b|\bcertutil\b[^|;&)\n]{0,200}?-decode"
+    r"|\bopenssl\b[^|;&)\n]{0,200}?[ \t]-d\b|FromBase64String|\bprintf[ \t]{1,20}['\"]?[^'\"|;&\n]{0,200}?"
+    r"\\(?:x[0-9A-Fa-f]|[0-7])", re.IGNORECASE)
+
+
+def _is_decoder(e: Exec) -> bool:
+    """An exec whose OUTPUT is decoded text: base64/base32 -d, xxd -r, openssl ... -d, uudecode, certutil -decode,
+    printf (or echo -e) with \\x / octal / \\u escapes in its words."""
+    p, a = e.program, e.argv
+    short = [w[1:] for w in a if w.startswith("-") and not w.startswith("--")]
+    if p in ("base64", "base32", "basenc"):
+        return "--decode" in a or any("d" in s or "D" in s for s in short)
+    if p == "xxd":
+        return any("r" in s for s in short)
+    if p == "openssl":
+        return "-d" in a
+    if p == "uudecode":
+        return True
+    if p == "certutil":
+        return any(w.lower() == "-decode" for w in a)
+    if p == "printf":
+        return any(_ESCAPED.search(w) for w in a)
+    if p == "echo" and a and _ECHO_OPTS.match(a[0]):
+        return any(_ESCAPED.search(w) for w in a[1:])
+    return "frombase64string" in e.segment.lower()
+
+
+# ---- RT-A: a program word the parser cannot prove. A word whose value is CERTAIN (Exec.subst: `R=rm; $R x`) is that
+# program; otherwise each program the word CAN be -- a literal assigned to its variable anywhere in the command, a
+# `${V:-rm}` default, a program named inside its `$( )`/backticks, a glob or brace word that matches -- is judged too,
+# beside the opaque "?" exec. Only these programs are candidates: the delete primitives, the shells and ReSaver.
+CANDIDATE_PROGRAMS = ("rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "rimraf", "resaver-cli",
+                      "resavercli") + tuple(sorted(ALL_SHELLS))
+_EXPANSION = re.compile(r"\$\([^()]{0,4096}\)|`[^`]{0,4096}`|\$\{[^{}]{0,256}\}|\$[A-Za-z0-9_]{1,256}")
+_WHOLE_VAR = re.compile(r"\$\{?(?:env:)?([A-Za-z_][A-Za-z0-9_]{0,255})\}?", re.IGNORECASE)
+_DEFAULT = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]{0,255}):?[-=]([^{}]{0,256})\}")
+_TOKEN = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_BRACE1 = re.compile(r"\{([^{}]{0,256},[^{}]{0,256})\}")
+
+
+@functools.lru_cache(maxsize=256)    # one scan of the command per variable, not one per use of it (linear time)
+def _assigned_literals(root: str, name: str, dialect: str) -> Tuple[str, ...]:
+    """Every literal the command's text assigns to `name` anywhere (`N=v`, `N='v'`, `$N = "v"`): what a program
+    variable MAY hold, used only as candidates, never as the certain value."""
+    n = re.escape(name)
+    if dialect == "powershell":
+        rx = r"\$" + n + r"[ \t]{0,64}=[ \t]{0,64}(?:'([^'\n]{1,256})'|\"([^\"$`\n]{1,256})\"|([A-Za-z0-9_.:\\/-]{1,256}))"
+        flags = re.IGNORECASE
+    else:
+        rx = r"(?<![\w$])" + n + r"=(?:'([^'\n]{1,256})'|\"([^\"$`\n]{1,256})\"|([A-Za-z0-9_.:/+-]{1,256}))"
+        flags = 0
+    return tuple(a or b or c for a, b, c in re.findall(rx, root, flags))
+
+
+def _brace_alts(word: str) -> List[str]:
+    out = [word]
+    for _ in range(4):
+        nxt = []
+        for w in out:
+            m = _BRACE1.search(w)
+            if not m:
+                nxt.append(w)
+                continue
+            nxt += [w[:m.start()] + alt + w[m.end():] for alt in m.group(1).split(",")]
+        out = nxt[:64]
+    return out
+
+
+def _glob_word(base: str) -> bool:
+    """A bash program word that is a glob or a brace expansion (`r?`, `r[m]`, `r{m,m}`), not a literal name."""
+    if "*" in base or "?" in base or _BRACE1.search(base):
+        return True
+    i = base.find("[")
+    return i >= 0 and base.find("]", i + 2) > i
+
+
+def _program_candidates(word: str, dialect: str, root: str) -> List[str]:
+    """The CANDIDATE_PROGRAMS an unproven program word can run (see above), in a stable order."""
+    if len(word) > 8192:
+        return list(CANDIDATE_PROGRAMS)             # no real program word is this long: any of them (stricter)
+    found: List[str] = []
+    m = _WHOLE_VAR.fullmatch(word)
+    names = [m.group(1)] if m else []
+    d = _DEFAULT.fullmatch(word)
+    if d:
+        names.append(d.group(1))
+        found.append(d.group(2))
+    for nm in names:
+        found += _assigned_literals(root, nm, dialect)
+    for sub in re.findall(r"\$\(([^()]{0,4096})\)|`([^`]{0,4096})`", word):
+        found += _TOKEN.findall(sub[0] or sub[1])
+    base = _basename(_EXPANSION.sub("*", word)).lower()
+    if dialect == "bash" and re.search(r"[a-z0-9]", base) and ("*" in base or _glob_word(base)):
+        for alt in _brace_alts(base):
+            found += [p for p in CANDIDATE_PROGRAMS if fnmatch.fnmatchcase(p, alt)]
+    out: List[str] = []
+    for w in found:
+        p = program_name(w.strip(), dialect)
+        if p in CANDIDATE_PROGRAMS and p not in out:
+            out.append(p)
+    return out
 
 
 class _Resolver:
@@ -1644,7 +1795,66 @@ class _Resolver:
         self.recurse = recurse
         self.call = call
         self.xargs = False
+        self.alt_done = False         # RT-A: this resolver already IS one reading of an unproven program word
         self.made: List[Exec] = []
+
+    # -- RT-A: unproven program words, aliases, carried redirects, decoded text
+    def _sub_run(self, words: List[str], k: int) -> None:
+        """Resolve `words` + the arguments after the program word as another reading of this command."""
+        if self.depth + 1 > MAX_DEPTH:
+            raise ParseError("nesting deeper than %d" % MAX_DEPTH)
+        n = len(words)
+        r = _Resolver(self.d, list(words) + list(self.v[k + 1:]), [False] * n + list(self.q[k + 1:]),
+                      [False] * n + list(self.y[k + 1:]), self.redirs, self.cd, self.stdin, self.seg, self.bodies,
+                      self.depth + 1, self.ctx, self.recurse, False)
+        r.alt_done = True
+        self.made += r.run()
+
+    def _certain_program(self, k: int) -> Optional[List[str]]:
+        """The words a dynamic program word CERTAINLY expands to (a same-command literal, Exec.subst), else None."""
+        val = dict(self.ctx.subst).get(self.v[k])
+        if not val or "$" in val or "`" in val:
+            return None
+        words = val.split()
+        if len(words) != 1 and self.q[k]:
+            return None                                 # "$R" holding `rm -rf`: one word naming no program
+        return words or None
+
+    def _carry(self, p: str, k: int) -> None:
+        """A shell that re-parses a string still owns its OWN redirects: `bash -c 'echo x' > X.esp`, `cmd /c echo x >
+        X.esp` write X.esp from the outer command. Its stdin is not the pipe's reader (that is the string's job)."""
+        if any(">" in op for op, _ in self.redirs):
+            e = Exec(p, tuple(self.v[k:]), tuple(self.q[k:]), self.redirs, self.d, self.cd, "", self.seg, "",
+                     self.ctx.subst)
+            self.ctx.out.append(e)
+            self.made.append(e)
+
+    def _decoded(self, text: str) -> None:
+        if _DECODE_TEXT.search(text):
+            self.ctx.unread = True
+
+    def _procsub(self, word: str) -> None:
+        """`source <(...)`, `bash <(...)`: the substitution's OUTPUT runs as commands. Echoed literal text is re-parsed
+        as those commands; decoded text is unreadable (Parsed.unread); anything else stays the opaque exec."""
+        if not (word.startswith("<(") and word.endswith(")")):
+            return
+        inner = word[2:-1]
+        if self.depth + 1 > MAX_DEPTH:
+            raise ParseError("nesting deeper than %d" % MAX_DEPTH)
+        sub = _Ctx(inner, "bash")
+        try:
+            _sub(inner, "bash", self.depth + 1, self.cd, sub)
+        except ParseError:
+            self._decoded(inner)
+            return
+        if any(_is_decoder(e) for e in sub.out) or sub.unread:
+            self.ctx.unread = True
+            return
+        if sub.out and all(e.program in _TEXT_SOURCES and e.program and not (e.argv and _ECHO_OPTS.match(e.argv[0]))
+                           for e in sub.out):
+            for e in sub.out:
+                if e.argv:
+                    self.reparse(" ".join(e.argv), "bash")
 
     def emit(self, program: str, k: int) -> Exec:
         stdin, body = self.stdin, ""
@@ -1687,7 +1897,9 @@ class _Resolver:
         return False
 
     def reparse(self, text: str, dialect: str) -> None:
-        if self.recurse:
+        # RT-A: cmd's string is re-read in the R6 literal (Windows) reading too -- `cmd /c mklink /J C:\w\j ...` names
+        # C:\w\j, which bash would have mangled. One extra reading per bash-to-cmd hop; MAX_DEPTH bounds the hops.
+        if self.recurse or dialect == "cmd":
             _sub(text, dialect, self.depth + 1, self.cd, self.ctx)
 
     def run(self, k: int = 0) -> List[Exec]:
@@ -1723,6 +1935,23 @@ class _Resolver:
                         self.emit("", n)                       # (a block's commands were parsed in place)
                     return self.made
             first = False
+            if not self.alt_done:
+                if self.d == "bash" and p != "?" and not self.q[k] and _glob_word(_basename(v[k])):
+                    p = "?"                                     # RT-A: `/???/r?`, `r[m]`, `r{m,m}`: not a literal name
+                if p == "?":
+                    certain = self._certain_program(k)
+                    if certain is not None:                     # RT-A: `R=rm; $R x` runs rm; `R=echo; $R rm x` prints
+                        self.v = v = list(v[:k]) + certain + list(v[k + 1:])
+                        self.q = list(self.q[:k]) + [False] * len(certain) + list(self.q[k + 1:])
+                        self.y = list(self.y[:k]) + [False] * len(certain) + list(self.y[k + 1:])
+                        n = len(v)
+                        continue
+                    for cand in _program_candidates(v[k], self.d, self.ctx.root):
+                        self._sub_run([cand], k)                # each program it CAN be; the "?" exec stays too
+                elif not self.y[k]:
+                    body = self.ctx.aliases.get(v[k] if self.d == "bash" else v[k].lower())
+                    if body:
+                        self._sub_run(body.split(), k)          # RT-A: an alias defined in the same command
             if p in ("sudo", "doas"):
                 k += 1
                 while k < n and v[k].startswith("-") and v[k] != "--":
@@ -1852,7 +2081,15 @@ class _Resolver:
                 self.emit(p, k + 1)
                 for w in v[k + 1:]:
                     if "=" in w:
-                        self.reparse(w.split("=", 1)[1], "bash")  # an alias body runs where the alias is used
+                        name, body = w.split("=", 1)
+                        self.ctx.aliases[name] = body           # RT-A: later uses run the body with their arguments
+                        self.reparse(body, "bash")              # an alias body runs where the alias is used
+                return self.made
+            if p in ("set-alias", "new-alias") and self.d == "powershell":
+                e = self.emit(p, k + 1)
+                name, value = ps_param(e, "Name", 0), ps_param(e, "Value", 1)
+                if name and value:
+                    self.ctx.aliases[name[0].lower()] = value[0]
                 return self.made
             if p == "parallel":
                 k += 1
@@ -1882,11 +2119,26 @@ class _Resolver:
                 k += 1
                 self.stdin = "pipe"
                 self.xargs = True
+                repl = ""
                 while k < n and v[k].startswith("-"):
-                    k += 2 if v[k] in _XARGS_ARG else 1
+                    w = v[k]
+                    if w == "-I" and k + 1 < n:
+                        repl = v[k + 1]
+                    elif w.startswith("-I") and len(w) > 2:
+                        repl = w[2:]
+                    elif w == "-i" or w == "--replace":
+                        repl = "{}"
+                    elif w.startswith(("-i", "--replace=")):
+                        repl = w.split("=", 1)[1] if w.startswith("--") else w[2:]
+                    k += 2 if w in _XARGS_ARG else 1
                 if k >= n:
                     self.emit("echo", n)
                     return self.made
+                self.ctx.xargs.append(program_name(v[k], self.d, self.y[k]))
+                if repl:                                       # RT-A: `-I {}`: the placeholder is a stdin item
+                    old = list(v[k:])
+                    self.v = v = list(v[:k]) + [w.replace(repl, "${XARGS_ITEM}") for w in old]
+                    self.y = list(self.y[:k]) + [y or repl in w for w, y in zip(old, self.y[k:])]
                 continue
             if p in ("source", ".") and self.d == "bash" or (p == "." and self.d == "powershell"):
                 k += 1
@@ -1894,10 +2146,12 @@ class _Resolver:
                     self.emit(p, k)
                     return self.made
                 self.emit(program_name(v[k], self.d, self.y[k]), k + 1)
+                self._procsub(v[k])                             # RT-A: source <(echo ...) runs the echoed text
                 return self.made
             if p == "eval" and self.d == "bash":
                 self.emit(p, k + 1)
                 if k + 1 < n:
+                    self._decoded(" ".join(v[k + 1:]))
                     self.reparse(" ".join(v[k + 1:]), "bash")
                 return self.made
             if p in POSIX_SHELLS:
@@ -1913,6 +2167,9 @@ class _Resolver:
                     self.emit(p, k + 1)
                     ex = self.made[-1]
                     lits = ps_param(ex, "Command", 0)
+                    self._decoded(" ".join(v[k + 1:]))         # RT-A: iex ([Text.Encoding]::...FromBase64String(..))
+                    if not ex.argv and self.stdin == "pipe" and "frombase64string" in self.ctx.root.lower():
+                        self.ctx.unread = True                  # ... | iex, fed by a FromBase64String expression
                     for s in lits:
                         self.reparse(s, "powershell")
                     if not lits or any(self.y[k + 1:]):        # iex $cmd, iex ('a' + 'b'): unknown text runs
@@ -1954,8 +2211,30 @@ class _Resolver:
                         j += 1
                     k = j + 1
                     continue
-            self.emit(p, k + 1)
+            e = self.emit(p, k + 1)
+            if p == "rename-item" and self.d == "powershell" or p == "rename" and self.d == "cmd":
+                self._rename_as_move(e)
             return self.made
+
+    def _rename_as_move(self, e: Exec) -> None:
+        """RT-A: `Rename-Item b.txt a.esp` / cmd `ren b.txt a.esp` is a MOVE inside the source's own folder (the new
+        name is a name, never a path): also emitted as `move-item <src> <folder>/<new name>`, so the copy and move rules
+        judge it as one."""
+        if e.program == "rename":
+            words = [w for w in e.argv if not w.startswith("/")]
+            src, new = (words[0], words[1]) if len(words) > 1 else ("", "")
+        else:
+            s = ps_param(e, "Path", 0) or ps_param(e, "LiteralPath")
+            nn = ps_param(e, "NewName", 1)
+            src, new = (s[0] if s else ""), (nn[0] if nn else "")
+        if not src or not new:
+            return
+        head = re.split(r"[/\\]+", src.rstrip("/\\"))[:-1]
+        dst = "/".join(head + [_basename(new)]) if head else _basename(new)
+        m = Exec("move-item", (src, dst), (True, True), (), e.dialect, e.cd_before, e.stdin_from, e.segment, "",
+                 e.subst)
+        self.ctx.out.append(m)
+        self.made.append(m)
 
     def _posix_shell(self, p, k):
         v, n = self.v, len(self.v)
@@ -1979,12 +2258,16 @@ class _Resolver:
             break
         if cflag:
             if j < n:
+                self.ctx.codes.append((p, v[j]))
+                self._decoded(v[j])
                 self.reparse(v[j], "bash")
             else:
                 self.opaque(k)                      # `xargs -0 sh -c`: the command string comes from elsewhere
+            self._carry(p, k + 1)
             return self.made
         if j < n and not sflag:
             self.emit(program_name(v[j], self.d, self.y[j]), j + 1)    # bash FILE args: FILE runs
+            self._procsub(v[j])                                        # RT-A: bash <(echo ...)
             return self.made
         self.emit(p, k + 1)                                            # reads commands from stdin
         return self.made
@@ -2004,7 +2287,10 @@ class _Resolver:
                     if rest == ["-"] or not rest:
                         self.emit(p, k + 1)
                     else:
-                        self.reparse(" ".join(rest), "powershell")
+                        self.ctx.codes.append((p, " ".join(rest)))
+                        self._decoded(" ".join(rest))
+                        self.reparse(_join_words(rest, "powershell"), "powershell")
+                        self._carry(p, k + 1)
                     return self.made
                 if name in ("e", "ec") or (len(name) >= 3 and "encodedcommand".startswith(name)):
                     if j + 1 < n:
@@ -2013,6 +2299,7 @@ class _Resolver:
                         except Exception:
                             raise ParseError("an undecodable -EncodedCommand")
                         self.reparse(text, "powershell")
+                        self._carry(p, k + 1)
                     return self.made
                 if name == "f" or (len(name) >= 2 and "file".startswith(name)):
                     if j + 1 < n:
@@ -2023,7 +2310,8 @@ class _Resolver:
                 j += 2 if any(name and s.startswith(name) for s in _PS_VALUE_PARAMS) else 1
                 continue
             if p == "powershell":
-                self.reparse(" ".join(v[j:]), "powershell")
+                self.reparse(_join_words(v[j:], "powershell"), "powershell")
+                self._carry(p, k + 1)
             else:
                 self.emit(program_name(w, "powershell", self.y[j]), j + 1)
             return self.made
@@ -2038,7 +2326,8 @@ class _Resolver:
             head = lw[1:] if lw.startswith("//") else lw
             if head[:2] in ("/c", "/k", "/r"):
                 rest = ([v[j][len(lw) - len(head) + 2:]] if len(head) > 2 else []) + list(v[j + 1:])
-                self.reparse(" ".join(rest), "cmd")
+                self.reparse(_join_words(rest, "cmd"), "cmd")
+                self._carry("cmd", k + 1)
                 return self.made
             if lw.startswith("/"):
                 j += 1
@@ -2060,10 +2349,17 @@ class _Resolver:
             j += 1
         if not starts:
             starts, sq = ["."], [False]
+        items, negated = starts, False   # RT-A: what {} / -delete reach: the start, or start/NAME under a -name filter
         while j < n:
             w = v[j]
+            if w in ("!", "\\!", "-not", "-o", "-or", ","):
+                negated, items = True, starts       # a negated or alternative filter: back to the whole start (stricter)
+            elif w in ("-name", "-iname") and j + 1 < n and not negated and "/" not in v[j + 1]:
+                items = [s.rstrip("/\\") + "/" + v[j + 1] for s in starts]
+                j += 2
+                continue
             if w == "-delete":
-                e = Exec("find.delete", tuple(starts), tuple(sq), self.redirs, self.d, self.cd, self.stdin,
+                e = Exec("find.delete", tuple(items), tuple(sq), self.redirs, self.d, self.cd, self.stdin,
                          self.seg, "", self.ctx.subst)
                 self.ctx.out.append(e)
                 self.made.append(e)
@@ -2074,9 +2370,9 @@ class _Resolver:
                 iv, iq, iy = [], [], []
                 while j < n and v[j] not in (";", "\\;") and not (v[j] == "+" and v[j - 1] == "{}"):
                     if v[j] == "{}":
-                        iv += starts
+                        iv += items
                         iq += sq
-                        iy += [False] * len(starts)
+                        iy += [False] * len(items)
                     else:
                         iv.append(v[j])
                         iq.append(self.q[j])
@@ -2193,7 +2489,7 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
         seg = t[rec.start:rec.end]
         stdin = "pipe" if rec.stage > 0 else ""
         bodies = [(h.body or "", h.quoted) for h in rec.heredocs]
-        quoted = [w.quoted for w in ws]
+        quoted = [_ps_quoted(w) for w in ws] if d == "powershell" else [w.quoted for w in ws]
         dyn = [w.dyn for w in ws]
         saved, ctx.subst = ctx.subst, (_subst(sc, rec, ws, vals) if sc.vars else ())
         made = _Resolver(d, vals, quoted, dyn, rec.redirs, rec.cd, stdin, seg, bodies,
@@ -2218,9 +2514,14 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
             if not readers:
                 continue
             reader = readers[0]
+            if reader.program in ALL_SHELLS and any(_is_decoder(e) for _, umade in items[:ci] for e in umade):
+                ctx.unread = True                   # RT-A: `echo .. | base64 -d | sh`, `printf '\x72\x6d ..' | sh`
             texts, known = [], True                 # the upstream text, if it can be rebuilt statically
+            strings = []                            # RT-A G1: a PowerShell string stage, `@'..'@ | python -`
             for urec, umade in items[:ci]:
                 texts += [h.body or "" for h in urec.heredocs]
+                if d == "powershell" and not umade and len(urec.words) == 1 and _ps_quoted(urec.words[0]):
+                    strings.append("".join(urec.words[0].b))
                 for e in umade:
                     if e.program in _TEXT_SOURCES and not (e.program == "echo" and e.argv and _ECHO_OPTS.match(e.argv[0])):
                         if e.argv:
@@ -2235,7 +2536,7 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
             else:                            # literal code into python/node/...: R7(b), the legacy text rules
                 for j in range(len(ctx.out) - 1, -1, -1):
                     if ctx.out[j] is reader:
-                        ctx.out[j] = reader._replace(stdin_body="\n".join(texts))
+                        ctx.out[j] = reader._replace(stdin_body="\n".join(texts + strings))
                         break
             break        # only the FIRST reader reads the upstream text; a later one reads that reader's output
 
@@ -2272,11 +2573,12 @@ def _parse_one(command: str, dialect: str) -> Parsed:
     ctx = _Ctx(command, dialect)
     try:
         _sub(command, dialect, 0, "", ctx)
-        return Parsed(tuple(ctx.out), True, "")
+        return Parsed(tuple(ctx.out), True, "", ctx.unread, tuple(ctx.codes), tuple(ctx.xargs))
     except ParseError as e:
-        return Parsed(tuple(ctx.out), False, "%s: %s" % (dialect, e))
+        return Parsed(tuple(ctx.out), False, "%s: %s" % (dialect, e), ctx.unread, tuple(ctx.codes), tuple(ctx.xargs))
     except Exception as e:  # a bug here must read as "could not parse", never as an allow
-        return Parsed(tuple(ctx.out), False, "internal error: %s: %s" % (type(e).__name__, e))
+        return Parsed(tuple(ctx.out), False, "internal error: %s: %s" % (type(e).__name__, e), ctx.unread,
+                      tuple(ctx.codes), tuple(ctx.xargs))
 
 
 def parse(command: str, shell: str = "") -> Parsed:
@@ -2290,6 +2592,7 @@ def parse(command: str, shell: str = "") -> Parsed:
         if d is not None:
             return _parse_one(command, d)
         a, b = _parse_one(command, "bash"), _parse_one(command, "powershell")
-        return Parsed(a.execs + b.execs, a.ok and b.ok, "; ".join(x for x in (a.why, b.why) if x))
+        return Parsed(a.execs + b.execs, a.ok and b.ok, "; ".join(x for x in (a.why, b.why) if x),
+                      a.unread or b.unread, a.codes + b.codes, a.xargs + b.xargs)
     except Exception as e:
         return Parsed((), False, "internal error: %s: %s" % (type(e).__name__, e))

@@ -157,6 +157,26 @@ _LOOPBACK = re.compile(r"(?:localhost|127(?:\.[0-9]{1,3}){3}|\[?::1\]?|0:0:0:0:0
 _ADMIN_SHARE = re.compile(r"([A-Za-z])\$")
 
 
+_IPV4_PART = re.compile(r"0[xX][0-9a-fA-F]{1,8}|0[0-7]{0,11}|[1-9][0-9]{0,9}")
+
+
+def _ipv4_loopback(host: str) -> bool:
+    """RT-A: a numeric host in any spelling Windows' inet_aton accepts (`127.1`, `2130706433`, `0x7f.1`) that is in
+    127.0.0.0/8. Each of the 1-4 parts is decimal, octal (leading 0) or hex; the last part fills the remaining bytes."""
+    parts = host.split(".")
+    if not 1 <= len(parts) <= 4 or not all(_IPV4_PART.fullmatch(x) for x in parts):
+        return False
+    nums = [int(x, 16) if x[:2].lower() == "0x" else int(x, 8) if len(x) > 1 and x[0] == "0" else int(x)
+            for x in parts]
+    if any(v > 255 for v in nums[:-1]) or nums[-1] >= 256 ** (5 - len(parts)):
+        return False
+    value = 0
+    for v in nums[:-1]:
+        value = value * 256 + v
+    value = value * 256 ** (5 - len(parts)) + nums[-1]
+    return value >> 24 == 127
+
+
 def _final(p: Optional[str], env: Mapping[str, str]) -> Optional[str]:
     """Last checks on a normalised path: an 8.3 short name cannot be expanded without the filesystem (None, the
     stricter answer); a loopback admin share is its drive; another host's admin share is unknowable (None)."""
@@ -169,7 +189,7 @@ def _final(p: Optional[str], env: Mapping[str, str]) -> Optional[str]:
         if len(bits) >= 2 and _ADMIN_SHARE.fullmatch(bits[1]):
             host = bits[0]
             me = (env.get("COMPUTERNAME") or "").lower()
-            if _LOOPBACK.fullmatch(host) or (me and host.lower() == me):
+            if _LOOPBACK.fullmatch(host) or _ipv4_loopback(host) or (me and host.lower() == me):
                 return paths.norm_abs(bits[1][0] + ":/" + (bits[2] if len(bits) > 2 else ""))
             return None
     return p
@@ -184,6 +204,8 @@ def normalise_cwd(cwd: str) -> Optional[str]:
 def _resolve(word: str, cwd: str, dialect: str, env: Mapping[str, str]) -> Optional[str]:
     if not word or word == "-":
         return None
+    if dialect == "powershell" and word.startswith(("(", "@(")):
+        return None             # RT-A: `('C:\x')` is an expression whose VALUE is the path, never a file named `(...)`
     base = normalise_cwd(cwd)
     try:
         w = word
@@ -405,10 +427,13 @@ def covers_protected(abs_path: Optional[str], roots) -> bool:
 # --------------------------------------------------------------------------------------------- file classes (Task 8)
 # One classifier for both guards: write_rules (Edit/Write) and this module (shell) test a path with these same
 # patterns, through grep (line-based, case-insensitive, trailing CRs dropped).
-PLUGIN_FILE = r"\.(esp|esm|esl|bsa|ba2)[\s.]*$"
-SKYRIM_INI = r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)$"
-SKSE_INI = r"(?<![/\\])[/\\]+Data[/\\]+SKSE[/\\]+Plugins[/\\]+.*\.ini$"
-LOADORDER = r"(loadorder\.txt|plugins\.txt)$"
+# RT-A: an NTFS stream suffix names the SAME file -- `a.esp::$DATA` is a.esp's own data, `a.esp:s` a stream stored in
+# a.esp -- so each class allows one after its name. A colon occurs in no Windows file name otherwise.
+STREAM = r"(?::[^/\\]*)?"
+PLUGIN_FILE = r"\.(esp|esm|esl|bsa|ba2)[\s.]*" + STREAM + "$"
+SKYRIM_INI = r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)" + STREAM + "$"
+SKSE_INI = r"(?<![/\\])[/\\]+Data[/\\]+SKSE[/\\]+Plugins[/\\]+.*\.ini" + STREAM + "$"
+LOADORDER = r"(loadorder\.txt|plugins\.txt)" + STREAM + "$"
 
 CLASS_RULE = (("plugin", PLUGIN_FILE, "S-WRITE-PLUGIN"), ("loadorder", LOADORDER, "S-WRITE-LOADORDER"),
               ("ini", SKYRIM_INI, "S-WRITE-INI"), ("skse-ini", SKSE_INI, "S-WRITE-SKSE-INI"))
