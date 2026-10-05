@@ -388,6 +388,9 @@ def _cd_value(w: _Word, lit: bool) -> str:
 class _Scanner:
     """Common frame/word/command bookkeeping. Subclasses implement run()."""
     DIALECT = ""
+    # Final review I1: bash runs a pipeline stage or a ( ) in a subshell, so a cd there does not carry. PowerShell's
+    # location is SESSION-wide: a Set-Location in a pipeline stage, an if/try body, `& { }` or `. { }` moves the caller.
+    SESSION_CD = False
 
     def __init__(self, text: str, depth: int, cd: str, ctx: _Ctx, mode: str = "n"):
         self.t = text
@@ -473,7 +476,7 @@ class _Scanner:
             cmd.end = self.i
             if not cmd.skip and (cmd.words or cmd.redirs or cmd.heredocs):
                 self.recs.append(cmd)
-                if sep not in ("|", "|&") and cmd.stage == 0:
+                if self.SESSION_CD or (sep not in ("|", "|&") and cmd.stage == 0):
                     self.track_cd(f, cmd)
         if self.depth == 0 and self.DIALECT in ("bash", "powershell"):
             self.track_vars(f, cmd, sep)
@@ -1149,6 +1152,14 @@ def _ps_quoted(w) -> bool:
     return w.quoted and not (w.raw[:1] in "-" + _PS_DASHES and len(w.raw) > 1)
 
 
+def _ps_string(w) -> bool:
+    """Final review I4: a word whose FIRST character opens a string (`'x'`, `"x"`, `@'..'@`) is an expression in
+    command position, never a command name. A backtick escape inside a bare word (`Re`move-Item`) does not make it one:
+    PowerShell still runs that word as a command."""
+    r = w.raw
+    return r[:1] in _SQ + _DQ or (r[:1] == "@" and r[1:2] in _SQ + _DQ)
+
+
 def _io_program(cls: str, method: str) -> str:
     cls, m = cls.lower(), method.lower()
     if cls == "file":
@@ -1166,6 +1177,7 @@ def _io_program(cls: str, method: str) -> str:
 
 class _Pwsh(_Scanner):
     DIALECT = "powershell"
+    SESSION_CD = True
 
     def keyword(self, f, cmd, w):
         if cmd.words or cmd.skip:
@@ -1191,7 +1203,7 @@ class _Pwsh(_Scanner):
         return [a] if a else []
 
     def track_cd(self, f, cmd):
-        if not cmd.words or cmd.words[0].quoted or cmd.words[0].dyn:
+        if not cmd.words or _ps_string(cmd.words[0]) or cmd.words[0].dyn:
             return
         p = program_name("".join(cmd.words[0].b), "powershell")
         if p == "pop-location":
@@ -1202,7 +1214,7 @@ class _Pwsh(_Scanner):
         ex = _exec_of("powershell", [("".join(w.b), _ps_quoted(w), w.dyn) for w in cmd.words[1:]], p)
         vals = ps_param(ex, "Path", 0) or ps_param(ex, "LiteralPath")
         if not vals:
-            new = "~"
+            new = "?" if cmd.stage > 0 else "~"           # I1: `Get-Item X | Set-Location`: the path is pipe input
         else:
             src = [w for w in cmd.words[1:] if "".join(w.b) == vals[0]]
             new = _cd_value(src[0], False) if src else vals[0]
@@ -1421,6 +1433,10 @@ class _Pwsh(_Scanner):
         self.end_cmd(f, c)
         self.frames.pop()
         p = self.frames[-1]
+        if f.cd != p.cd:
+            # I1: the location is session-wide, so a Set-Location inside an if/try body, `& { }`, `. { }` or ( ) moves
+            # the caller too -- but whether that body ran (a branch, a scriptblock merely defined) is not known.
+            p.cd = "?"
         if f.kind in ("hash", "call"):
             mine = [r for r in self.recs[f.rec_mark:] if r.frame == f.id]
             if f.kind == "call" and f.io:
@@ -1796,6 +1812,7 @@ class _Resolver:
         self.call = call
         self.xargs = False
         self.alt_done = False         # RT-A: this resolver already IS one reading of an unproven program word
+        self.strq: Optional[List[bool]] = None    # I4: PowerShell, per word: opens with a string quote (_ps_string)
         self.made: List[Exec] = []
 
     # -- RT-A: unproven program words, aliases, carried redirects, decoded text
@@ -1929,8 +1946,9 @@ class _Resolver:
                     if k >= n:
                         continue
                     p = program_name(v[k], self.d, self.y[k])
+                strq = self.q[k] if self.strq is None else self.strq[k]
                 if v[k][:1] == "{" or not self.call and (
-                        self.q[k] or (self.y[k] and v[k][:1] in "$(@") or v[k][:1] in "(["):
+                        strq or (self.y[k] and v[k][:1] in "$(@") or v[k][:1] in "(["):
                     if self.redirs:                            # an expression or a script block, not a command
                         self.emit("", n)                       # (a block's commands were parsed in place)
                     return self.made
@@ -2507,8 +2525,10 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
         quoted = [_ps_quoted(w) for w in ws] if d == "powershell" else [w.quoted for w in ws]
         dyn = [w.dyn for w in ws]
         saved, ctx.subst = ctx.subst, (_subst(sc, rec, ws, vals) if sc.vars else ())
-        made = _Resolver(d, vals, quoted, dyn, rec.redirs, rec.cd, stdin, seg, bodies,
-                         sc.depth, ctx, recurse, rec.call).run()
+        res = _Resolver(d, vals, quoted, dyn, rec.redirs, rec.cd, stdin, seg, bodies, sc.depth, ctx, recurse, rec.call)
+        if d == "powershell":
+            res.strq = [_ps_string(w) for w in ws]
+        made = res.run()
         if d == "bash" and any(w.bs for w in ws):                     # R6: the literal reading too
             made = made + _Resolver(d, ["".join(w.l) for w in ws], quoted, dyn, rec.redirs, rec.cd, stdin, seg,
                                     bodies, sc.depth, ctx, False, rec.call).run()

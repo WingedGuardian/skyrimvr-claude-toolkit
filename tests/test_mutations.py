@@ -3994,3 +3994,19 @@ MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep
     ("m4-source-stdin-script", '                if self.d == "bash" and v[k] in _STDIN_SCRIPTS:', "                if False:",
      _P5S + "test_m4_a_script_that_is_stdin_reads_the_heredoc_or_pipe"),
 ]]
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # I1: PowerShell's location is session-wide
+    ("i1-pipeline-stage-cd-carries", "    SESSION_CD = True\n", "    SESSION_CD = False\n",
+     _p5a("i1-setlocation-pipe-outnull")),
+    ("i1-block-cd-makes-caller-unknown", "        if f.cd != p.cd:", "        if False:", _p5a("i1-setlocation-in-if")),
+    ("i1-piped-set-location-is-unknown", '            new = "?" if cmd.stage > 0 else "~"', '            new = "~"',
+     _P5S + "test_i1_powershell_location_is_session_wide"),
+    # I4: a backtick does not make a command name an expression
+    ("i4-resolver-string-quoted", "                strq = self.q[k] if self.strq is None else self.strq[k]",
+     "                strq = self.q[k]", _p5a("i4-tick-in-name")),
+    ("i4-set-location-string-quoted", "        if not cmd.words or _ps_string(cmd.words[0]) or cmd.words[0].dyn:",
+     "        if not cmd.words or cmd.words[0].quoted or cmd.words[0].dyn:",
+     _P5S + "test_i4_a_string_in_command_position_is_still_an_expression"),
+    ("i4-here-string-is-a-string", '    return r[:1] in _SQ + _DQ or (r[:1] == "@" and r[1:2] in _SQ + _DQ)',
+     "    return r[:1] in _SQ + _DQ", _P5S + "test_pwsh_expressions_and_here_strings_are_not_commands"),
+]]

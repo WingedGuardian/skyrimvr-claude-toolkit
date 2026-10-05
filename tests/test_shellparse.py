@@ -856,3 +856,36 @@ def test_m4_a_script_that_is_stdin_reads_the_heredoc_or_pipe(cmd):
     assert deletes_x(cmd, "bash") is True
 
 
+@pytest.mark.parametrize("cmd,cd", [
+    ("Set-Location C:/x; Remove-Item a", "C:/x"),
+    ("Set-Location C:/x | Out-Null; Remove-Item a", "C:/x"),
+    ("Push-Location C:/x | Out-Null; Remove-Item a", "C:/x"),
+    ("if ($true) { Set-Location C:/x }; Remove-Item a", "?"),
+    ("try { Set-Location C:/x } catch {}; Remove-Item a", "?"),
+    ("& { Set-Location C:/x }; Remove-Item a", "?"),
+    (". { Set-Location C:/x }; Remove-Item a", "?"),
+    ("Get-Item C:/x | Set-Location; Remove-Item a", "?"),
+    ("Set-Location C:/x; if ($true) { Get-Date }; Remove-Item a", "C:/x"),
+    ("if ($true) { Set-Location C:/x; Remove-Item a }", "C:/x"),
+])
+def test_i1_powershell_location_is_session_wide(cmd, cd):
+    """I1: a Set-Location in a pipeline stage or a block moves the CALLER (bash's subshell rule does not apply)."""
+    assert find(cmd, "remove-item", "powershell").cd_before == cd
+
+
+def test_i1_bash_pipeline_and_subshell_cd_still_do_not_carry():
+    assert find("cd /c/x | true; rm a", "rm").cd_before == ""
+    assert find("(cd /c/x); rm a", "rm").cd_before == ""
+
+
+@pytest.mark.parametrize("cmd", ["Re`move-Item -Recurse X", "R`e`m`o`v`e-Item X", "r`i -r X"])
+def test_i4_a_backtick_in_a_command_name_is_still_a_command(cmd):
+    assert deletes_x(cmd, "powershell") is True
+
+
+def test_i4_a_string_in_command_position_is_still_an_expression():
+    assert "remove-item" not in progs("'Remove-Item' X", "powershell")
+    assert "remove-item" not in progs('"Remove-Item X"', "powershell")
+    assert find("S`et-Location C:/x; Remove-Item a", "remove-item", "powershell").cd_before == "C:/x"
+
+
