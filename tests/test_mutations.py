@@ -1887,6 +1887,21 @@ MUTATIONS = [
         '    return "template", {}, None',
         "tests/test_inventory_runtimes.py::test_any_unclassifiable_occurrence_voids_a_later_authorization",
         id="inventory-unclassified-authorization-is-not-void"),
+    # Round 3: a loose spelling of the marker that is not the exact marker must void everything; skipped, a
+    # damaged "Host - software installs: NOT AUTHORIZED." is invisible and a later AUTHORIZED sentence wins.
+    pytest.param(
+        "tools/inventory-runtimes.py",
+        "        if text[m.start():m.start() + len(AUTH_MARKER)].lower() != AUTH_MARKER.lower():",
+        "        if False:",
+        "tests/test_inventory_runtimes.py::test_a_loose_marker_that_is_not_the_exact_marker_voids_everything",
+        id="inventory-loose-marker-is-not-void"),
+    # Round 3: format characters inside the marker must be stripped before searching.
+    pytest.param(
+        "tools/inventory-runtimes.py",
+        '    text = "".join(c for c in text if unicodedata.category(c) != "Cf")\n',
+        "",
+        "tests/test_inventory_runtimes.py::test_normalisation_does_not_break_the_clean_cases",
+        id="inventory-format-characters-not-stripped"),
 ]
 
 

@@ -24,13 +24,15 @@ import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 
 PYTHON_FLOOR = (3, 8)  # tools/skyguard/run.py: version_info[:2] < (3, 8)
 RUNTIMES = ("python", "git", "node")
 LAUNCH_TIMEOUT = 10
 
 AUTH_MARKER = "Host-software installs:"
-ITEM_RE = re.compile(r"(python|git|node)=([A-Za-z0-9][A-Za-z0-9.+-]*)==([0-9]+(?:\.[0-9]+){1,3})")
+LOOSE_MARKER_RE = re.compile(r"host[\W_]*software[\W_]*installs", re.I)
+ITEM_RE =re.compile(r"(python|git|node)=([A-Za-z0-9][A-Za-z0-9.+-]*)==([0-9]+(?:\.[0-9]+){1,3})")
 VERSION_RE = re.compile(r"([0-9]+)\.([0-9]+)(?:\.([0-9]+))?")
 
 # Worst first: something that exists but is wrong must be reported before anything is installed over it.
@@ -176,6 +178,14 @@ def parse_authorization(text):
     authorized: {runtime: (id, version)}, non-empty only when EVERY occurrence is a clean AUTHORIZED list
     or the unfilled template, and the clean ones agree. Any other occurrence, a denial included, voids it.
     """
+    # Normalise first: drop zero-width / format characters (category Cf: ZWSP, soft hyphen, word joiner ...)
+    # and collapse every whitespace run (newline, NBSP ...) to one space, so a damaged marker cannot hide.
+    text = "".join(c for c in text if unicodedata.category(c) != "Cf")
+    text = re.sub(r"\s+", " ", text)
+    # Any loose spelling of the marker that is not the exact marker voids everything: unknown means no.
+    for m in LOOSE_MARKER_RE.finditer(text):
+        if text[m.start():m.start() + len(AUTH_MARKER)].lower() != AUTH_MARKER.lower():
+            return {}, ["damaged marker: " + text[m.start():m.start() + 40]]
     auths = []
     for m in re.finditer(re.escape(AUTH_MARKER), text, re.I):
         kind, authorized, note = _classify_occurrence(text[m.end():])
