@@ -4091,5 +4091,18 @@ _P5F_CLAUSES = [
      '        _bounded "$1" in "${PYC[@]}" "$RUNPY" "${ENGINE_ARGS[@]}" --nonce "$NONCE"',
      '        _bounded "$1" in "${PYC[@]}" "$RUNPY" "${ENGINE_ARGS[@]}"',
      "tests/test_hook_deadline.py::test_a_fresh_fallback_that_answers_without_the_nonce_is_refused"),
+    # B-M1: message fields from command text keep the two-line, 200-character contract.
+    ("p5f-message-keeps-control-characters", "tools/skyguard/rules.py",
+     '    clean = {k: _CONTROL.sub(" ", str(v)) for k, v in fields.items()}', "    clean = {k: str(v) for k, v in fields.items()}",
+     "tests/test_rule_messages.py::test_every_template_keeps_its_shape_whatever_the_fields[newline-in-file]"),
+    ("p5f-message-field-not-cut", "tools/skyguard/rules.py", ' else v[:cap - 3] + "..." for k, v in clean.items()})',
+     " else v for k, v in clean.items()})",
+     "tests/test_rule_messages.py::test_every_template_keeps_its_shape_whatever_the_fields[long-fields]"),
+    ("p5f-message-cap-not-shrunk-for-a-long-line", "tools/skyguard/rules.py",
+     '        if cap <= 16 or all(len(ln) <= LINE_MAX for ln in out.split("' + BS + 'n")):', "        if True:",
+     "tests/test_rule_messages.py::test_every_template_keeps_its_shape_whatever_the_fields[long-fields]"),
+    # C-M1: intent_diff writes UTF-8 whatever the console code page.
+    ("p5f-intent-diff-console-encoding", "scripts/guard-corpus/intent_diff.py", '    if hasattr(sys.stdout, "buffer"):',
+     "    if False:", "tests/test_intent_diff.py::test_main_writes_utf8_whatever_the_console_encoding"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _P5F_CLAUSES]

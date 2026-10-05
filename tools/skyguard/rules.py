@@ -421,6 +421,11 @@ RULES = {
 }
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+FIELD_MAX = 96              # characters a rendered field may take, at most
+LINE_MAX = 200              # the message contract (tests/test_rule_messages.py)
+
+
 def _basename(value) -> str:
     """The file name a message shows. RT-A: an NTFS stream suffix is cut (`a.esp::$DATA` names a.esp); a bare drive
     (`C:`) is kept."""
@@ -439,7 +444,16 @@ def message(rule_id: str, **fields) -> str:
         raise ValueError("unsupported message fields: " + ", ".join(sorted(bad)))
     if "file" in fields:
         fields["file"] = _basename(fields["file"])
-    return rule["template"].format(**fields)
+    # Final review B-M1: the guard judges command TEXT, so a field can hold a newline (`> "a<LF>b.esp"`) or be any
+    # length; either broke the two-line, 200-character message contract. Control characters become spaces and the
+    # fields are cut, shorter while a line is still too long (two fields can share one line).
+    clean = {k: _CONTROL.sub(" ", str(v)) for k, v in fields.items()}
+    cap = FIELD_MAX
+    while True:
+        out = rule["template"].format(**{k: v if len(v) <= cap else v[:cap - 3] + "..." for k, v in clean.items()})
+        if cap <= 16 or all(len(ln) <= LINE_MAX for ln in out.split("\n")):
+            return out
+        cap -= 8
 
 
 def legacy_message(rule_id: str, **fields) -> str:
