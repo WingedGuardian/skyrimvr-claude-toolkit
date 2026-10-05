@@ -113,7 +113,7 @@ def test_only_files_whose_entry_changed_are_read_again(tmp_path, monkeypatch):
     snap(tmp_path)
     reads = []
     real = snapshot.backup._copy_hashed
-    monkeypatch.setattr(snapshot.backup, "_copy_hashed", lambda s, p: reads.append(os.path.basename(s)) or real(s, p))
+    monkeypatch.setattr(snapshot.backup, "_copy_hashed", lambda s, p, **k: reads.append(os.path.basename(s)) or real(s, p, **k))
     put(tmp_path, "Data/Scripts/s3.pex", b"body 3, changed")
     snap(tmp_path, now=later())
     assert reads == ["s3.pex"]
@@ -173,8 +173,8 @@ def test_a_file_that_changes_size_while_it_is_copied_is_not_stored(tmp_path, mon
     put(tmp_path, "Data/Scripts/a.pex", b"growing")
     real = snapshot.backup._copy_hashed
 
-    def torn(src, part):
-        want, copied, digest = real(src, part)
+    def torn(src, part, **k):
+        want, copied, digest = real(src, part, **k)
         return want + 1, copied, digest              # the file grew between open and end of copy
     monkeypatch.setattr(snapshot.backup, "_copy_hashed", torn)
     snap(tmp_path)
@@ -271,8 +271,22 @@ class Clock:
 
 
 def nine(tmp_path):
+    """s0 .. s8, each a minute newer than the one before (s8 the newest)."""
+    base = time.time() - 3600
     for i in range(9):
-        put(tmp_path, "Data/Scripts/s{}.pex".format(i), b"body %d" % i)
+        p = put(tmp_path, "Data/Scripts/s{}.pex".format(i), b"body %d" % i)
+        os.utime(str(p), (base + 60 * i, base + 60 * i))
+
+
+def test_a_baseline_reads_the_newest_scripts_first(tmp_path, monkeypatch):
+    """Review I3: the scripts being experimented on are the recent ones; a time-boxed baseline must reach them first,
+    not after the alphabetical long tail."""
+    nine(tmp_path)
+    monkeypatch.setattr(snapshot, "time", Clock())
+    snapshot.take(str(tmp_path), audit_mod.Audit(str(tmp_path)), "first", box=2.5)
+    (n1,) = snapshot.manifest_names(store(tmp_path))
+    assert sorted(snapshot.resolve(store(tmp_path), n1)) == ["Data/Scripts/s6.pex", "Data/Scripts/s7.pex",
+                                                             "Data/Scripts/s8.pex"]
 
 
 def test_an_unfinished_baseline_is_partial_and_resumes_on_the_next_call(tmp_path, monkeypatch):
@@ -299,22 +313,22 @@ def test_a_real_change_during_a_baseline_is_snapshotted_at_once(tmp_path, monkey
     nine(tmp_path)
     monkeypatch.setattr(snapshot, "time", Clock())
     au = audit_mod.Audit(str(tmp_path))
-    snapshot.take(str(tmp_path), au, "first", box=2.5)        # s0..s2 read
-    put(tmp_path, "Data/Scripts/s0.pex", b"s0, edited")
+    snapshot.take(str(tmp_path), au, "first", box=2.5)        # s8..s6 read (newest first)
+    put(tmp_path, "Data/Scripts/s8.pex", b"s8, edited")
     snapshot.take(str(tmp_path), au, "second", box=2.5)
     names = snapshot.manifest_names(store(tmp_path))
-    assert len(names) == 2 and snapshot.resolve(store(tmp_path), names[-1])["Data/Scripts/s0.pex"] == sha(b"s0, edited")
+    assert len(names) == 2 and snapshot.resolve(store(tmp_path), names[-1])["Data/Scripts/s8.pex"] == sha(b"s8, edited")
 
 
 def test_a_deletion_during_a_baseline_is_snapshotted_at_once(tmp_path, monkeypatch):
     nine(tmp_path)
     monkeypatch.setattr(snapshot, "time", Clock())
     au = audit_mod.Audit(str(tmp_path))
-    snapshot.take(str(tmp_path), au, "first", box=2.5)        # s0..s2 read
-    os.unlink(str(tmp_path / "Data" / "Scripts" / "s1.pex"))  # the test's own tmp_path file
+    snapshot.take(str(tmp_path), au, "first", box=2.5)        # s8..s6 read (newest first)
+    os.unlink(str(tmp_path / "Data" / "Scripts" / "s7.pex"))  # the test's own tmp_path file
     snapshot.take(str(tmp_path), au, "second", box=1.5)
     names = snapshot.manifest_names(store(tmp_path))
-    assert len(names) == 2 and "Data/Scripts/s1.pex" not in snapshot.resolve(store(tmp_path), names[-1])
+    assert len(names) == 2 and "Data/Scripts/s7.pex" not in snapshot.resolve(store(tmp_path), names[-1])
 
 
 def test_every_call_makes_progress_however_small_its_box(tmp_path, monkeypatch):
@@ -338,7 +352,7 @@ def test_pruning_runs_at_most_once_a_day_per_call(tmp_path, monkeypatch):
     f = put(tmp_path, "Data/Scripts/a.pex", b"a")
     calls = []
     real = snapshot.prune
-    monkeypatch.setattr(snapshot, "prune", lambda *a: calls.append(1) or real(*a))
+    monkeypatch.setattr(snapshot, "prune", lambda *a, **k: calls.append(1) or real(*a, **k))
     t = time.time()
     snap(tmp_path, now=t)                              # never pruned before: due
     f.write_bytes(b"a2")
@@ -505,3 +519,253 @@ def test_pruning_removes_only_stale_part_files(tmp_path):
     os.utime(str(old), (t, t))
     snapshot.prune(store(tmp_path), time.time(), audit_mod.Audit(str(tmp_path)))
     assert not old.exists() and new.exists()
+
+
+# ---------------------------------------------------------------- fix round 1 (review I1, I2, fsync ruling, minors)
+
+needs_windows = pytest.mark.skipif(sys.platform != "win32", reason="NTFS junctions and listing semantics")
+
+
+@pytest.fixture
+def junction():
+    """make(link, target) creates an NTFS junction; teardown removes the LINK only (os.rmdir on a junction never
+    touches its target), before pytest's own cleanup could walk through it."""
+    import _winapi
+    made = []
+
+    def make(link, target):
+        _winapi.CreateJunction(str(target), str(link))
+        made.append(link)
+        return link
+    yield make
+    for link in reversed(made):
+        try:
+            os.rmdir(str(link))
+        except OSError:
+            pass
+
+
+@needs_windows
+def test_a_junction_out_of_the_tree_is_not_followed(tmp_path, junction):
+    put(tmp_path, "Data/Scripts/mine.pex", b"mine")
+    put(tmp_path, "outside/foreign.pex", b"foreign")
+    junction(tmp_path / "Data" / "Scripts" / "jn", tmp_path / "outside")
+    snap(tmp_path)
+    assert sorted(latest(tmp_path)) == ["Data/Scripts/mine.pex"]
+    log = log_text(tmp_path)
+    assert "LINKS: 1 linked folder(s) under the script trees are NOT followed" in log and "Data/Scripts/jn" in log
+    assert "1 linked folder(s) not followed" in log
+
+
+@needs_windows
+def test_a_junction_loop_is_not_followed(tmp_path, junction):
+    put(tmp_path, "Data/Scripts/a.pex", b"a")
+    put(tmp_path, "Data/Source/Scripts/b.psc", b"b")
+    junction(tmp_path / "Data" / "Scripts" / "loop", tmp_path / "Data")
+    files, linked, truncated = snapshot.scan(tmp_path)
+    assert sorted(files) == ["Data/Scripts/a.pex", "Data/Source/Scripts/b.psc"]
+    assert linked == ["Data/Scripts/loop"] and truncated is False
+
+
+def test_a_symlinked_folder_is_not_followed(tmp_path):
+    put(tmp_path, "Data/Scripts/a.pex", b"a")
+    put(tmp_path, "outside/foreign.pex", b"foreign")
+    try:
+        os.symlink(str(tmp_path / "outside"), str(tmp_path / "Data" / "Scripts" / "sl"), target_is_directory=True)
+    except (OSError, NotImplementedError) as e:
+        pytest.skip("cannot create a directory symlink here: {}".format(e))
+    files, linked, _t = snapshot.scan(tmp_path)
+    assert sorted(files) == ["Data/Scripts/a.pex"] and linked == ["Data/Scripts/sl"]
+
+
+def test_the_walk_stops_at_its_time_box_and_deletes_nothing(tmp_path, monkeypatch):
+    """No tree can hold a hook past the walk's box; a cut-short walk is PARTIAL and never reads as deletions."""
+    put(tmp_path, "Data/Scripts/top.pex", b"top")
+    for d in ("b", "c"):
+        put(tmp_path, "Data/Scripts/{}/x.pex".format(d), d.encode())
+    snap(tmp_path)
+    ticks = iter(range(1000))
+    monkeypatch.setattr(snapshot, "_walk_clock", lambda: float(next(ticks)))
+    monkeypatch.setattr(snapshot, "WALK_BOX", 2.0)    # one folder listed, then the box is spent
+    put(tmp_path, "Data/Scripts/top.pex", b"top, edited")
+    snap(tmp_path, now=later())
+    log = log_text(tmp_path)
+    assert "PARTIAL: the walk stopped at its time box" in log and "AUTO-SNAPSHOT PARTIAL" in log
+    m = latest(tmp_path)
+    assert m["Data/Scripts/top.pex"] == sha(b"top, edited")
+    assert sorted(m) == ["Data/Scripts/b/x.pex", "Data/Scripts/c/x.pex", "Data/Scripts/top.pex"], \
+        "a folder the walk did not reach must not count as deleted"
+
+
+@needs_windows
+def test_a_hard_link_edited_through_its_other_path_is_seen(tmp_path):
+    """Review I2 (MEASURED by the reviewer): the listing of one hard link keeps the size/mtime of its own directory
+    entry after an edit through the OTHER link. Vortex deploys by hard link by default."""
+    staging = put(tmp_path, "staging/mine.pex", b"original")
+    (tmp_path / "Data" / "Scripts").mkdir(parents=True)
+    os.link(str(staging), str(tmp_path / "Data" / "Scripts" / "mine.pex"))
+    snap(tmp_path)
+    assert latest(tmp_path)["Data/Scripts/mine.pex"] == sha(b"original")
+    with open(str(staging), "wb") as fh:              # in place: the same file, through the staging link
+        fh.write(b"edited in the staging folder")
+    snap(tmp_path, now=later())
+    assert latest(tmp_path)["Data/Scripts/mine.pex"] == sha(b"edited in the staging folder")
+
+
+def test_blobs_are_not_fsynced_but_the_index_and_manifests_are(tmp_path, monkeypatch):
+    put(tmp_path, "Data/Scripts/a.pex", b"a")
+    put(tmp_path, "Data/Scripts/b.pex", b"b")
+    monkeypatch.setattr(snapshot, "PRUNE_EVERY", 10 ** 12)   # pruning rewrites the index too; not under test here
+    synced = []
+    real = os.fsync
+
+    def spy(fd):
+        synced.append(fd)
+        return real(fd)
+    monkeypatch.setattr(os, "fsync", spy)
+    snap(tmp_path)
+    assert len(synced) == 2, "one fsync for the manifest and one for the index, none for the two blobs"
+
+
+def test_a_torn_blob_is_replaced_not_trusted(tmp_path):
+    """Blobs are not fsynced: after a power loss a blob can sit under its hash name with the wrong bytes. A blob of the
+    wrong size is replaced the next time that content is stored."""
+    put(tmp_path, "Data/Scripts/a.pex", b"the real bytes")
+    (store(tmp_path) / "blobs").mkdir(parents=True)
+    (store(tmp_path) / "blobs" / sha(b"the real bytes")).write_bytes(b"")
+    snap(tmp_path)
+    assert (store(tmp_path) / "blobs" / sha(b"the real bytes")).read_bytes() == b"the real bytes"
+
+
+def test_materialise_refuses_a_damaged_blob(tmp_path):
+    put(tmp_path, "Data/Scripts/a.pex", b"good bytes")
+    snap(tmp_path)
+    (store(tmp_path) / "blobs" / sha(b"good bytes")).write_bytes(b"bad bytes!")
+    with pytest.raises(ValueError, match="damaged"):
+        snapshot.materialise(str(tmp_path), snapshot.manifest_names(store(tmp_path))[-1], str(tmp_path / "out"))
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("rel", ["../escape.pex", "Data/../../escape.pex", "C:/x.pex", "Data\\x.pex", "/abs.pex"],
+                         ids=["dotdot", "nested-dotdot", "drive", "backslash", "absolute"])
+def test_materialise_refuses_a_path_that_leaves_its_target(tmp_path, rel):
+    put(tmp_path, "Data/Scripts/a.pex", b"a")
+    name = snap(tmp_path) or snapshot.manifest_names(store(tmp_path))[-1]
+    p = store(tmp_path) / "manifests" / name
+    m = json.loads(p.read_bytes().decode("utf-8"))
+    m["set"] = {rel: sha(b"a")}
+    p.write_bytes(json.dumps(m).encode("ascii"))
+    with pytest.raises(ValueError, match="refusing"):
+        snapshot.materialise(str(tmp_path), name, str(tmp_path / "out"))
+
+
+def test_materialise_refuses_a_malformed_hash(tmp_path):
+    put(tmp_path, "Data/Scripts/a.pex", b"a")
+    snap(tmp_path)
+    name = snapshot.manifest_names(store(tmp_path))[-1]
+    p = store(tmp_path) / "manifests" / name
+    m = json.loads(p.read_bytes().decode("utf-8"))
+    m["set"] = {"Data/Scripts/a.pex": "../../../../outside"}
+    p.write_bytes(json.dumps(m).encode("ascii"))
+    (store(tmp_path) / "blobs" / ".." / ".." / ".." / ".." / "outside").write_bytes(b"x")   # a file the hash would reach
+    with pytest.raises(ValueError, match="refusing"):
+        snapshot.materialise(str(tmp_path), name, str(tmp_path / "out"))
+
+
+@needs_windows
+def test_materialise_replaces_a_hard_linked_target_instead_of_writing_through(tmp_path):
+    put(tmp_path, "Data/Scripts/a.pex", b"snapshot content")
+    snap(tmp_path)
+    out = tmp_path / "out"
+    staging = put(tmp_path, "staging/a.pex", b"staging must stay")
+    (out / "Data" / "Scripts").mkdir(parents=True)
+    os.link(str(staging), str(out / "Data" / "Scripts" / "a.pex"))
+    snapshot.materialise(str(tmp_path), snapshot.manifest_names(store(tmp_path))[-1], str(out))
+    assert (out / "Data" / "Scripts" / "a.pex").read_bytes() == b"snapshot content"
+    assert staging.read_bytes() == b"staging must stay"
+
+
+def test_a_tool_call_waits_only_briefly_for_the_store_lock(tmp_path, monkeypatch):
+    """Review M6: a call that finds another session's baseline holding the lock gives up within CALL_LOCK_WAIT, not
+    backup's 2 s, so it stays inside the 1 s per-wrapper gate."""
+    put(tmp_path, "Data/Scripts/a.pex", b"a")
+    (store(tmp_path) / "blobs").mkdir(parents=True)
+    with snapshot.backup._exclusive(store(tmp_path) / ".lock"):
+        t = time.monotonic()
+        snap(tmp_path)
+        took = time.monotonic() - t
+    assert "SKIPPED" in log_text(tmp_path) and took < 1.0, took
+
+
+def test_pruning_stops_at_its_deadline(tmp_path, monkeypatch):
+    full_maps(monkeypatch)
+    a = put(tmp_path, "Data/Scripts/a.pex", b"a1")
+    snap(tmp_path, now=at(40))
+    a.write_bytes(b"a22")
+    snap(tmp_path, now=at(30))
+    a.write_bytes(b"a333")
+    snap(tmp_path, now=at(20))
+    before = snapshot.manifest_names(store(tmp_path))
+    snapshot.prune(store(tmp_path), time.time(), audit_mod.Audit(str(tmp_path)), deadline=0.0)   # already past
+    assert snapshot.manifest_names(store(tmp_path)) == before
+    assert "PRUNE-PARTIAL" in log_text(tmp_path)
+
+
+def test_pruning_orders_snapshots_by_their_recorded_time_not_their_name(tmp_path, monkeypatch):
+    """Review M2: names are local-time stamps (a DST fall-back hour reorders them); `t` is the epoch."""
+    full_maps(monkeypatch)
+    a = put(tmp_path, "Data/Scripts/a.pex", b"a1")
+    snap(tmp_path, now=at(40))
+    a.write_bytes(b"a22")
+    snap(tmp_path, now=at(30))
+    older, newer = snapshot.manifest_names(store(tmp_path))
+    mdir = store(tmp_path) / "manifests"
+    # swap the names: the NEWER snapshot now carries the earlier stamp
+    (mdir / older).rename(mdir / "tmp.json")
+    (mdir / newer).rename(mdir / older)
+    (mdir / "tmp.json").rename(mdir / newer)
+    snapshot.prune(store(tmp_path), time.time(), audit_mod.Audit(str(tmp_path)))
+    (left,) = snapshot.manifest_names(store(tmp_path))
+    assert snapshot.resolve(store(tmp_path), left) == {"Data/Scripts/a.pex": sha(b"a22")}
+
+
+def test_pruning_removes_stale_part_files_beside_manifests_and_index(tmp_path):
+    put(tmp_path, "Data/Scripts/a.pex", b"a1")
+    snap(tmp_path)
+    old_m = store(tmp_path) / "manifests" / "20200101_000000__snapshot.json.part-99999"
+    old_i = store(tmp_path) / "index.json.part-99999"
+    new_i = store(tmp_path) / "index.json.part-99998"
+    for p in (old_m, old_i, new_i):
+        p.write_bytes(b"x")
+    t = at(2)
+    os.utime(str(old_m), (t, t))
+    os.utime(str(old_i), (t, t))
+    snapshot.prune(store(tmp_path), time.time(), audit_mod.Audit(str(tmp_path)))
+    assert not old_m.exists() and not old_i.exists() and new_i.exists()
+
+
+def test_an_unreadable_index_stops_blob_pruning(tmp_path, monkeypatch):
+    full_maps(monkeypatch)
+    a = put(tmp_path, "Data/Scripts/a.pex", b"a1")
+    snap(tmp_path, now=at(40))
+    a.write_bytes(b"a22")
+    snap(tmp_path, now=at(30))
+    (store(tmp_path) / "index.json").write_bytes(b"not json")
+    snapshot.prune(store(tmp_path), time.time(), audit_mod.Audit(str(tmp_path)))
+    assert sha(b"a1") in blobs(tmp_path)
+    assert "PRUNE-SKIPPED: the index is unreadable" in log_text(tmp_path)
+
+
+def test_a_delta_whose_base_is_unreadable_is_kept(tmp_path, monkeypatch):
+    monkeypatch.setattr(snapshot, "PRUNE_EVERY", 10 ** 12)
+    a = put(tmp_path, "Data/Scripts/a.pex", b"a1")
+    put(tmp_path, "Data/Scripts/b.pex", b"b1")
+    snap(tmp_path, now=at(40))
+    a.write_bytes(b"a22")
+    snap(tmp_path, now=at(30))                         # a delta on the first
+    put(tmp_path, "Data/Scripts/b.pex", b"b22")
+    snap(tmp_path, now=at(20))                         # another delta on the first
+    base, d1, d2 = snapshot.manifest_names(store(tmp_path))
+    (store(tmp_path) / "manifests" / base).write_bytes(b"not json")
+    snapshot.prune(store(tmp_path), time.time(), audit_mod.Audit(str(tmp_path)))
+    assert snapshot.manifest_names(store(tmp_path)) == [base, d1, d2], "never guess what a base-less delta held"

@@ -42,8 +42,10 @@ def _discard(path):
         pass
 
 
-def _copy_hashed(src, part):
-    """Copy src to part in one read pass, hashing as it goes. Returns (size at open, bytes copied, sha256)."""
+def _copy_hashed(src, part, fsync=True):
+    """Copy src to part in one read pass, hashing as it goes. Returns (size at open, bytes copied, sha256).
+    fsync=False is for snapshot blobs (Task 14 fix round 1): they are named by their hash and size-checked on reuse, so
+    a power loss costs one blob, while the fsync cost ~43% of a cold baseline (MEASURED). Backups keep it."""
     h = _hasher()
     copied = 0
     with open(src, "rb") as fin:
@@ -57,7 +59,8 @@ def _copy_hashed(src, part):
                 fout.write(chunk)
                 copied += len(chunk)
             fout.flush()
-            os.fsync(fout.fileno())
+            if fsync:
+                os.fsync(fout.fileno())
     return want, copied, h.hexdigest()
 
 
@@ -130,12 +133,12 @@ def _unlock(fd):
 
 
 @contextlib.contextmanager
-def _exclusive(lock_path):
-    """Hold an exclusive lock on a sidecar file, waiting at most LOCK_WAIT seconds (then OSError). The OS drops the
-    lock if the holder dies, so a killed hook cannot wedge the next one."""
+def _exclusive(lock_path, wait=None):
+    """Hold an exclusive lock on a sidecar file, waiting at most LOCK_WAIT seconds, or `wait` (then OSError). The OS
+    drops the lock if the holder dies, so a killed hook cannot wedge the next one."""
     fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
     try:
-        deadline = time.monotonic() + LOCK_WAIT
+        deadline = time.monotonic() + LOCK_WAIT if wait is None else time.monotonic() + wait
         while True:
             try:
                 _try_lock(fd)

@@ -7,12 +7,17 @@ holding 89 distinct contents). Now:
 
 * WHAT: every `.psc` / `.pex` (any case) under `Data/Scripts/**` (which holds `Data/Scripts/Source/**`) and
   `Data/Source/Scripts/**`, whatever its age. One `os.scandir` walk; on Windows a DirEntry's size and mtime come with
-  the listing, so the walk makes no per-file stat call.
+  the listing, so the walk makes no per-file stat call. A linked FOLDER (junction, symlink, any reparse point) is never
+  entered -- it is counted and logged -- and the walk has its own time box (WALK_BOX); a walk cut short is PARTIAL and
+  never reads as deletions.
 * STORE: `auto_snapshots/blobs/<sha256>`, content-addressed, so unchanged bytes are never stored twice. A blob is
-  written by backup.py's helpers (part file, sha256 in the same pass, fsync, size check) and only then linked to its
-  final name.
-* INDEX: `auto_snapshots/index.json` keeps `(size, mtime_ns) -> sha256` per path; only a path whose entry changed is
-  read and hashed again.
+  written by backup.py's helpers (part file, sha256 in the same pass, size check) and only then linked to its final
+  name. Blobs are NOT fsynced (controller ruling, fix round 1): a blob already present at its name is size-checked and
+  replaced when wrong, and `materialise` re-hashes every blob before writing. The index and manifests are fsynced.
+* INDEX: `auto_snapshots/index.json` keeps `(size, mtime_ns, sha256, nlink)` per path; only a path whose entry changed
+  is read and hashed again. A path with more than one hard link is re-stat'd on every comparison: NTFS lists a hard
+  link with its own directory entry's size/mtime, which an edit through the OTHER link does not update.
+* ORDER: a baseline reads the newest files first, so the scripts being worked on are captured inside the first box.
 * SNAPSHOT: one manifest per snapshot, `auto_snapshots/manifests/<stamp>__snapshot.json`, taken only when something
   changed. A manifest is FULL (`"base": null`, `"set"` = every path -> sha256) or a DELTA against one full manifest
   (`"set"` = paths whose content differs from that base, `"gone"` = paths the base has and this snapshot does not);
@@ -25,8 +30,9 @@ holding 89 distinct contents). Now:
   audit log and `"partial": true` in its manifest.
 * RATE LIMIT (Task 14's pre-committed latency gate; the measured branch is stated at RATE): the walk always runs; a
   full index comparison runs at most once per RATE seconds, unless a walked file is newer than the last full walk.
-  Stated gap: inside the window, a file replaced with an OLDER mtime (an mtime-preserving copy or extract) is not seen
-  until the window ends.
+  Stated gaps: inside the window, a file replaced with an OLDER mtime (an mtime-preserving copy or extract), and an edit
+  made through another hard link (its listing is stale until the comparison re-stats it), are not seen until the window
+  ends; a rewrite that keeps both the size and the mtime is not seen by the index at all.
 * PRUNING keeps every blob referenced by the newest snapshot, by any snapshot younger than 14 days, or by the index
   (the live files' content); and it keeps, whatever its age, the newest snapshot that holds each path's latest content,
   so the only copy of a deleted script's last version is never pruned. Pruning DELETES PERMANENTLY: it is this tool
@@ -38,6 +44,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import time
 from pathlib import Path
 
@@ -59,7 +66,14 @@ BASELINE_BOX = 20.0       # seconds at SessionStart
 # Seconds per tool call while a baseline is unfinished: inside the engine's measured ~0.25-0.35 s of p95 headroom under
 # the 1 s per-wrapper gate (Plan 4 Risk 2), so finishing a baseline never makes a call miss that gate.
 CALL_BOX = 0.25
+# The walk has its own box: no tree (a huge folder, a slow disk) can hold a hook past it. MEASURED walk of the Task 6
+# tree: 22 ms p95, so 1 s is ~45x headroom; a truncated walk compares only what it saw and is reported.
+WALK_BOX = 1.0
+CALL_LOCK_WAIT = 0.2      # a tool call waits this long for the store lock, then takes no snapshot (inside the 1 s gate)
+PRUNE_CALL_BOX = 1.0      # the once-a-day pruning inside a tool call stops deleting after this long
 PRUNE_EVERY = DAY         # per-call pruning at most this often; SessionStart always prunes
+_REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+_walk_clock = time.monotonic      # bound at import: the walk's box is real time even where a test fakes snapshot.time
 REBASE_MIN = 256          # a delta larger than max(REBASE_MIN, base/REBASE_SHARE) paths is written as a new full map
 REBASE_SHARE = 20
 INDEX = "index.json"
@@ -77,27 +91,51 @@ def store_dir(project):
 
 
 def walk(project):
-    """{rel: (size, mtime_ns)} for every .psc/.pex under TREES, recursively. rel uses `/`, from the project root."""
-    out = {}
+    """{rel: (size, mtime_ns)} for every .psc/.pex under TREES (see scan)."""
+    return scan(project)[0]
+
+
+def _is_link(e):
+    """A symlink, a junction, or any other reparse point. On Windows `is_dir(follow_symlinks=False)` is True for a
+    JUNCTION and `is_symlink()` False (review I1, MEASURED: a junction to `Data` recursed to MAX_PATH), so the reparse
+    attribute is read too -- it comes with the directory listing, no extra call."""
+    if e.is_symlink():
+        return True
+    return bool(getattr(e.stat(follow_symlinks=False), "st_file_attributes", 0) & _REPARSE)
+
+
+def scan(project, deadline=None):
+    """(files, linked, truncated). files = {rel: (size, mtime_ns)} for every .psc/.pex under TREES, recursively; rel
+    uses `/`, from the project root. A linked FOLDER (junction, symlink, other reparse point) is never entered: it is
+    listed in `linked`, so it can be reported. A linked FILE is read through its link (one file, no loop). `truncated`
+    is True when the walk reached `deadline` (a `_walk_clock()` time) before it finished."""
+    out, linked = {}, []
     for tree in TREES:
         stack = [(os.path.join(str(project), *tree.split("/")), tree + "/")]
         while stack:
+            if deadline is not None and _walk_clock() >= deadline:
+                return out, linked, True
             d, rel = stack.pop()
             try:
                 it = os.scandir(d)
             except OSError:
                 continue
             with it:
-                for e in it:
+                for k, e in enumerate(it):
+                    if deadline is not None and k % 256 == 255 and _walk_clock() >= deadline:
+                        return out, linked, True
                     try:
-                        if e.is_dir(follow_symlinks=False):
-                            stack.append((e.path, rel + e.name + "/"))
+                        if e.is_dir():                # follows links: a real folder, a junction or a folder symlink
+                            if _is_link(e):           # only folders are checked: a FILE link is read through
+                                linked.append(rel + e.name)
+                            else:
+                                stack.append((e.path, rel + e.name + "/"))
                         elif e.name[-4:].lower() in EXTS and e.is_file():
                             st = e.stat()
                             out[rel + e.name] = (st.st_size, st.st_mtime_ns)
                     except OSError:
                         continue
-    return out
+    return out, linked, False
 
 
 # ---------------------------------------------------------------- store primitives
@@ -129,7 +167,7 @@ def _store_blob(blobs, src):
     could not be read or changed size while it was copied (the index keeps its old entry, so the next walk retries)."""
     part = blobs / ".part-{}".format(os.getpid())
     try:
-        want, copied, digest = backup._copy_hashed(src, part)
+        want, copied, digest = backup._copy_hashed(src, part, fsync=False)   # see backup._copy_hashed
         on_disk = os.stat(str(part)).st_size
     except OSError:
         backup._discard(part)
@@ -141,16 +179,30 @@ def _store_blob(blobs, src):
     try:
         os.link(str(part), str(dest))
     except FileExistsError:
-        pass                                          # these bytes are already stored
+        # Already stored -- unless a power loss tore it (blobs are not fsynced): a blob of the wrong size is replaced.
+        if not _blob_size_is(dest, copied) and not _replace(part, dest):
+            return None
     except OSError:
-        if not dest.is_file():                        # no hard links on this volume
-            try:
-                os.replace(str(part), str(dest))
-            except OSError:
-                backup._discard(part)
-                return None
+        if not _blob_size_is(dest, copied) and not _replace(part, dest):   # no hard links on this volume
+            return None
     backup._discard(part)
     return digest
+
+
+def _blob_size_is(dest, size):
+    try:
+        return os.stat(str(dest)).st_size == size
+    except OSError:
+        return False
+
+
+def _replace(part, dest):
+    try:
+        os.replace(str(part), str(dest))
+        return True
+    except OSError:
+        backup._discard(part)
+        return False
 
 
 def manifest_names(store):
@@ -194,17 +246,31 @@ def resolve(store, name, _cache=None):
 
 def materialise(project, name, dest):
     """Write snapshot `name`'s files under `dest`, at their recorded relative paths. -> number of files written.
-    Raises ValueError for an unreadable snapshot or a missing blob (nothing partial is left unreported)."""
+    Raises ValueError, before writing anything, for an unreadable snapshot, a path that would leave `dest`, a malformed
+    hash, or a blob that is missing or whose bytes no longer hash to its name (blobs are not fsynced). Each file is
+    written to a part file and swapped in, so a hard-linked target (Vortex) is replaced, never written through."""
     store = store_dir(project)
     files = resolve(store, name)
-    n = 0
-    for rel, sha in sorted(files.items()):
+    for rel, sha in files.items():
+        parts = rel.split("/")
+        if not _BLOB.match(sha) or "\\" in rel or ":" in rel or any(p in ("", ".", "..") for p in parts):
+            raise ValueError("snapshot {}: refusing entry {!r} -> {!r}".format(name, rel, sha))
         blob = store / "blobs" / sha
         if not blob.is_file():
             raise ValueError("snapshot {}: the blob for {} ({}) is missing".format(name, rel, sha))
+        if backup._sha256(blob) != sha:
+            raise ValueError("snapshot {}: the blob for {} does not hash to {} -- it is damaged".format(name, rel, sha))
+    n = 0
+    for rel, sha in sorted(files.items()):
         target = Path(dest).joinpath(*rel.split("/"))
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(str(blob), str(target))
+        part = Path("{}.restore-part-{}".format(target, os.getpid()))
+        try:
+            shutil.copyfile(str(store / "blobs" / sha), str(part))
+            os.replace(str(part), str(target))
+        except OSError:
+            backup._discard(part)
+            raise
         n += 1
     return n
 
@@ -261,12 +327,13 @@ def session_start(project, source, audit, box=BASELINE_BOX, now=None):
         audit.log(HOOK, "SKIPPED", "no time left in the session-start budget -- the snapshot runs on the next call")
         return None
     return take(project, audit, "session start ({})".format(source or "unknown"), now=now, box=box, rate=0,
-                prune_due=True)
+                prune_due=True, lock_wait=None)
 
 
-def take(project, audit, command, now=None, box=CALL_BOX, rate=RATE, prune_due=False):
+def take(project, audit, command, now=None, box=CALL_BOX, rate=RATE, prune_due=False, lock_wait=CALL_LOCK_WAIT):
     """Walk, store what changed, write a manifest when anything did. -> the manifest name written, or None."""
     t0 = time.monotonic()
+    w0 = _walk_clock()
     now = time.time() if now is None else now
     root = Path(project)
     if not any((root / t).is_dir() for t in TREES):
@@ -278,21 +345,37 @@ def take(project, audit, command, now=None, box=CALL_BOX, rate=RATE, prune_due=F
     except OSError:
         audit.log(HOOK, "FAILED", "could not create {} -- no snapshot was taken".format(store))
         return None
-    lock = backup._exclusive(store / ".lock")
+    lock = backup._exclusive(store / ".lock", wait=lock_wait)
     try:
         lock.__enter__()
     except OSError:
         audit.log(HOOK, "SKIPPED", "another snapshot holds the store lock -- this call took none")
         return None
     try:
-        return _take_locked(root, store, audit, command, now, t0 + box, rate, prune_due)
+        return _take_locked(root, store, audit, command, now, t0 + box, rate, prune_due,
+                            w0 + max(box, WALK_BOX), w0 + box)
     finally:
         lock.__exit__(None, None, None)
 
 
-def _take_locked(root, store, audit, command, now, deadline, rate, prune_due):
+def _restat_multilink(root, files, seen):
+    """Review I2: on NTFS the listing's size/mtime for a hard link is its OWN directory entry, which an edit made
+    through ANOTHER link does not update (MEASURED: 9 bytes listed, 16 on disk). For every path the index knows to have
+    more than one link, ask the file itself (os.stat opens it). Real install, MEASURED: 3,049 of 11,899 scripts."""
+    # Serial on purpose: MEASURED 58 ms for 2,975 paths serially, 82-86 ms with 2-8 threads.
+    base = str(root)
+    for rel, v in files.items():
+        if len(v) > 3 and v[3] > 1 and rel in seen:
+            try:
+                st = os.stat(os.path.join(base, *rel.split("/")))
+            except OSError:
+                continue
+            seen[rel] = (st.st_size, st.st_mtime_ns)
+
+
+def _take_locked(root, store, audit, command, now, deadline, rate, prune_due, walk_deadline, box_end):
     walk_ns = time.time_ns()
-    seen = walk(root)
+    seen, linked, truncated = scan(root, walk_deadline)
     rl = store / ".last_snapshot"
     partial_marker = store / PARTIAL
     if rate and rl.is_file() and not partial_marker.exists():
@@ -307,15 +390,25 @@ def _take_locked(root, store, audit, command, now, deadline, rate, prune_due):
     if not (isinstance(idx, dict) and idx.get("v") == 1 and isinstance(idx.get("files"), dict)):
         idx = {"v": 1, "files": {}, "head_base": None, "dirty": False, "pruned": 0}
     files = idx["files"]
-    todo = sorted(r for r, st in seen.items() if (files.get(r) or [None, None])[:2] != list(st))
-    gone = [r for r in files if r not in seen]
+    _restat_multilink(root, files, seen)
+    todo = [r for r, st in seen.items() if (files.get(r) or [None, None])[:2] != list(st)]
+    # Review I3: newest first -- the scripts being experimented on are the recent ones, so a time-boxed baseline
+    # captures them before the long tail of untouched mod scripts.
+    todo.sort(key=lambda r: (-seen[r][1], r))
+    gone = [] if truncated else [r for r in files if r not in seen]   # an unwalked folder is not "deleted"
     blobs = store / "blobs"
     changed, unread, failed, altered = [], [], 0, 0
     for i, rel in enumerate(todo):
         if i and time.monotonic() >= deadline:        # at least one file per call: a slow walk cannot stall a baseline
             unread = todo[i:]
             break
-        sha = _store_blob(blobs, str(root.joinpath(*rel.split("/"))))
+        path = str(root.joinpath(*rel.split("/")))
+        try:
+            st = os.stat(path)                        # BEFORE the copy: an edit during it shows at the next walk
+        except OSError:
+            failed += 1
+            continue
+        sha = _store_blob(blobs, path)
         if sha is None:
             failed += 1                               # unreadable or changing: its old entry stays, retried next walk
             continue
@@ -323,17 +416,30 @@ def _take_locked(root, store, audit, command, now, deadline, rate, prune_due):
         if before is None or before[2] != sha:
             changed.append(rel)
             altered += before is not None
-        files[rel] = [seen[rel][0], seen[rel][1], sha]
+        # The link count makes the next comparisons re-stat this path (an indexed multi-link path's `seen` entry is
+        # already the re-stat; a new one's listing may be stale, which costs at most one extra hash).
+        files[rel] = [seen[rel][0], seen[rel][1], sha, st.st_nlink]
     for rel in gone:
         del files[rel]
-    complete = not unread
+    complete = not unread and not truncated
     was_partial = partial_marker.exists()
+    linked = sorted(linked)
+    links_changed = linked != idx.get("linked", [])
+    if links_changed:
+        idx["linked"] = linked
+        if linked:
+            audit.log(HOOK, "LINKS", "{} linked folder(s) under the script trees are NOT followed (junction or symlink),"
+                      " so nothing inside them is snapshotted: {}".format(len(linked), ", ".join(linked[:5])
+                                                                            + (", ..." if len(linked) > 5 else "")))
+    if truncated:
+        audit.log(HOOK, "PARTIAL", "the walk stopped at its time box -- folders it did not reach were not compared "
+                  "this call, and nothing in them counts as deleted")
     name = None
     # While a baseline is unfinished, a resume that only adds not-yet-read files writes no manifest (one per call would
     # be hundreds of near-identical maps); the first time-boxed run (it always reads at least one file, so `changed`),
     # the completing run and any real change do.
     if (changed and not was_partial) or altered or gone or idx.get("dirty") or (complete and was_partial):
-        snap_files = {r: v[2] for r, v in files.items() if r in seen}
+        snap_files = {r: v[2] for r, v in files.items() if truncated or r in seen}
         ts = audit.stamp()
         try:
             name, idx["head_base"] = _write_manifest(store, ts, now, command, snap_files, not complete,
@@ -344,11 +450,12 @@ def _take_locked(root, store, audit, command, now, deadline, rate, prune_due):
             audit.log(HOOK, "FAILED", "could not write the snapshot manifest -- the files are stored, the next call "
                       "retries the manifest")
         if name is not None:
-            _log_snapshot(audit, ts, name, changed + gone, len(snap_files), len(unread), failed, command)
+            _log_snapshot(audit, ts, name, changed + gone, len(snap_files), len(unread), failed, command, len(linked),
+                          truncated)
     if failed and name is None:
         audit.log(HOOK, "FAILED", "{} script file(s) could not be read -- their current content is in no snapshot "
                   "until a later walk reads them".format(failed))
-    if todo or gone or name is not None or idx.get("dirty"):   # an unchanged walk rewrites nothing (~1.7 MB measured)
+    if todo or gone or name is not None or idx.get("dirty") or links_changed:   # an unchanged walk rewrites nothing
         try:
             _write_replace(store / INDEX, json.dumps(idx, ensure_ascii=True, sort_keys=True).encode("ascii"))
         except OSError:
@@ -364,16 +471,21 @@ def _take_locked(root, store, audit, command, now, deadline, rate, prune_due):
     except OSError:
         pass
     if complete and (prune_due or now - idx.get("pruned", 0) >= PRUNE_EVERY):
-        prune(store, now, audit)
+        # Bounded (review M1): SessionStart prunes inside what its box leaves (at least 0.5 s), a tool call for
+        # PRUNE_CALL_BOX. Pruning is restartable, so stopping early only defers it.
+        until = max(box_end, _walk_clock() + 0.5) if prune_due else _walk_clock() + PRUNE_CALL_BOX
+        prune(store, now, audit, deadline=until)
     return name
 
 
-def _log_snapshot(audit, ts, name, changed, total, unread, failed, command):
+def _log_snapshot(audit, ts, name, changed, total, unread, failed, command, linked=0, truncated=False):
     psc = sum(1 for r in changed if r.lower().endswith(".psc"))
     pex = len(changed) - psc
-    head = "AUTO-SNAPSHOT PARTIAL" if unread else "AUTO-SNAPSHOT"
+    head = "AUTO-SNAPSHOT PARTIAL" if (unread or truncated) else "AUTO-SNAPSHOT"
     tail = ", {} not yet read -- resumes on the next call".format(unread) if unread else ""
+    tail += ", walk cut short by its time box" if truncated else ""
     tail += ", {} could not be read -- retried on the next walk".format(failed) if failed else ""
+    tail += ", {} linked folder(s) not followed".format(linked) if linked else ""
     short = (command + "\n").encode("utf-8")[:120].rstrip(b"\n")
     audit.raw(b"[" + ts.encode() + b"] " + head.encode() + b" (psc:" + str(psc).encode() + b" pex:"
               + str(pex).encode() + b" changed, " + str(total).encode() + b" files" + tail.encode() + b") "
@@ -383,15 +495,30 @@ def _log_snapshot(audit, ts, name, changed, total, unread, failed, command):
 # ---------------------------------------------------------------- pruning
 
 
-def prune(store, now, audit):
+def _stale_part(entry, now):
+    """A `*.part-<pid>` this tool left when it was killed mid-write, older than a day (never a live writer's)."""
+    try:
+        return ".part-" in entry.name and now - entry.stat().st_mtime > DAY
+    except OSError:
+        return False
+
+
+def prune(store, now, audit, deadline=None):
     """Delete (permanently: this is the tool's own store) the snapshots and blobs nothing still needs. See the module
-    docstring for what is kept. Any unreadable manifest stops blob pruning: what it references is unknown."""
+    docstring for what is kept. Any unreadable manifest, or an unreadable index, stops blob pruning: what it
+    references is unknown. With a `deadline` (a `_walk_clock()` time) it stops between deletions -- it is restartable,
+    so stopping only defers the rest (review M1). -> blobs and part files removed."""
     store = Path(store)
+
+    def late():
+        return deadline is not None and _walk_clock() >= deadline
     names = manifest_names(store)
     loaded = {n: _load_manifest(store, n) for n in names}
     unreadable = [n for n, m in loaded.items() if m is None]
-    good = [n for n in names if loaded[n] is not None]
-    keep = set(unreadable)
+    # Newest by the recorded epoch, not the local-time stamp in the name (review M2: a DST fall-back hour reorders
+    # names); the name's collision suffix breaks ties within one second.
+    good = sorted((n for n in names if loaded[n] is not None), key=lambda n: (loaded[n].get("t", 0), _order(n)))
+    keep = set()
     if good:
         keep.add(good[-1])
     keep.update(n for n in good if now - loaded[n].get("t", 0) < KEEP_DAYS * DAY)
@@ -421,48 +548,74 @@ def prune(store, now, audit):
             keep.add(m["base"])
     for n in good:
         if n not in keep:
+            if late():
+                return _pruned(store, now, audit, 0, stopped=True)
             try:
                 os.unlink(str(store / "manifests" / n))
             except OSError:
                 pass
     removed = 0
-    if not unreadable:
+    idx = _read_json(store / INDEX)
+    if unreadable:
+        audit.log(HOOK, "PRUNE-SKIPPED", "{} unreadable snapshot manifest(s) -- no blob was pruned".format(
+            len(unreadable)))
+    elif not (isinstance(idx, dict) and isinstance(idx.get("files"), dict)):
+        audit.log(HOOK, "PRUNE-SKIPPED", "the index is unreadable -- no blob was pruned")
+    else:
         live = set()
         for n in keep:
             m = loaded.get(n)
             if m is not None:
                 live.update(m["set"].values())
-        idx = _read_json(store / INDEX)
-        if not (isinstance(idx, dict) and isinstance(idx.get("files"), dict)):
-            return 0                                  # the live files' content is unknown: delete no blob
         live.update(v[2] for v in idx["files"].values())
         try:
             entries = list(os.scandir(str(store / "blobs")))
         except OSError:
             entries = []
         for e in entries:
-            stale_part = e.name.startswith(".part-") and now - e.stat().st_mtime > DAY
-            if (_BLOB.match(e.name) and e.name not in live) or stale_part:
+            if (_BLOB.match(e.name) and e.name not in live) or _stale_part(e, now):
+                if late():
+                    return _pruned(store, now, audit, removed, stopped=True)
                 try:
                     os.unlink(e.path)
                     removed += 1
                 except OSError:
                     pass
-    else:
-        audit.log(HOOK, "PRUNE-SKIPPED", "{} unreadable snapshot manifest(s) -- no blob was pruned".format(
-            len(unreadable)))
-    idx = _read_json(store / INDEX)
-    if isinstance(idx, dict) and isinstance(idx.get("files"), dict):
-        idx["pruned"] = int(now)                      # once per PRUNE_EVERY, whatever it found
+    # Part files a killed writer left beside the manifests and the index (review M3).
+    for d in (store / "manifests", store):
         try:
-            _write_replace(store / INDEX, json.dumps(idx, ensure_ascii=True, sort_keys=True).encode("ascii"))
+            entries = list(os.scandir(str(d)))
         except OSError:
-            pass
+            continue
+        for e in entries:
+            if e.is_file() and _stale_part(e, now):
+                try:
+                    os.unlink(e.path)
+                    removed += 1
+                except OSError:
+                    pass
     # The bash-era copy folders (`<stamp>/source`, `<stamp>/deploy`) age out as they always did: older than 14 days.
     try:
         for d in store.iterdir():
             if d.is_dir() and _LEGACY_DIR.match(d.name) and int((now - d.stat().st_mtime) // DAY) > KEEP_DAYS:
+                if late():
+                    return _pruned(store, now, audit, removed, stopped=True)
                 shutil.rmtree(str(d), ignore_errors=True)
     except OSError:
         pass
+    return _pruned(store, now, audit, removed)
+
+
+def _pruned(store, now, audit, removed, stopped=False):
+    """Record the prune (once per PRUNE_EVERY, finished or not: a tool call must not retry it every call; the next
+    SessionStart always prunes again)."""
+    if stopped:
+        audit.log(HOOK, "PRUNE-PARTIAL", "pruning stopped at its time box -- the rest is pruned next time")
+    idx = _read_json(store / INDEX)
+    if isinstance(idx, dict) and isinstance(idx.get("files"), dict):
+        idx["pruned"] = int(now)
+        try:
+            _write_replace(store / INDEX, json.dumps(idx, ensure_ascii=True, sort_keys=True).encode("ascii"))
+        except OSError:
+            pass
     return removed
