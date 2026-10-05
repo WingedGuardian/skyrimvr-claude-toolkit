@@ -38,9 +38,10 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 from typing import Optional, Tuple
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit, urlunsplit
 
 from . import deletes, paths, rules
 from .verdict import Verdict
@@ -54,7 +55,8 @@ _CURL_BODY_FLAGS = ("--data", "--data-raw", "--data-binary", "--data-ascii", "--
 _WEB_PROGRAMS = frozenset(("curl", "wget", "invoke-restmethod", "irm", "invoke-webrequest", "iwr"))
 _PS_PROGRAMS = frozenset(("invoke-restmethod", "irm", "invoke-webrequest", "iwr"))
 _SPLIT_STATEMENTS = re.compile(r"[;\n\r]")
-# The shell-route cheap prefilter: every form names one of these.
+# The shell-route cheap prefilter: every form names one of these, or both "api" and "tool" (final review B-M4: a dot
+# segment or an empty one splits `api/tool`, `/api/./tool/console`).
 _SHELL_WORDS = ("api/tool", "devbench", "/mcp")
 # A PowerShell .NET web call (shellparse does not model method calls): its body is text only.
 _DOTNET_WEB = re.compile(r"\.(?:Upload(?:String|Data|Values)(?:Async)?|(?:Post|Send|Put)Async|GetResponse)\s*\(",
@@ -325,12 +327,38 @@ def _curl_bodies(argv) -> list:
     return out
 
 
+def _norm_url(word: str) -> str:
+    """The word as the server sees the URL (final review B-M4): percent-decoded (rt-fix-b: /api/tool/%63onsole), with
+    the path's dot segments and empty segments squashed, as curl squashes them before sending (`/api/./tool/console`,
+    `/api/x/../tool/console`, `/api/%2e/tool/console`, `/api//tool/console`). Linear: posixpath.normpath."""
+    u = unquote(word)
+    if "/" not in u:
+        return u
+    try:
+        parts = urlsplit(u)
+    except ValueError:
+        return u
+    if not parts.path:
+        return u
+    path = posixpath.normpath(parts.path)
+    if path.startswith("//"):
+        path = path[1:]                                    # normpath keeps a POSIX leading `//`
+    if parts.path.endswith("/") and not path.endswith("/"):
+        path += "/"
+    return urlunsplit(parts._replace(path=path))
+
+
+def _norm_text(text: str) -> str:
+    """Every URL-like token of the text normalised by _norm_url (the text fallback's endpoint test)."""
+    return " ".join(_norm_url(t) for t in re.split(r"[\s'\"`]+", text) if t)
+
+
 def _web_call(e, text: str) -> list:
     """(tool, args) pairs for each DevBench REST call this curl / Invoke-RestMethod exec makes; unreadable bodies
     (`@file`, a variable) yield nothing."""
     tool, query, rpc = "", {}, False
     for w in e.argv:
-        u = unquote(w)                                        # rt-fix-b: /api/tool/%63onsole is the console
+        u = _norm_url(w)                                      # rt-fix-b %63onsole; B-M4 dot / empty segments
         m = _ENDPOINT.search(u)
         if m:
             tool = m.group(1)
@@ -399,8 +427,8 @@ def scan_shell(command: str, parsed, roots, env=None) -> Optional[Hit]:
     """The first deny, else the first ask, among the DevBench calls a shell command makes. Not safe by default
     (R4): where the parse failed or a program is opaque, a deny-listed command next to the console endpoint in the
     TEXT denies. Interpreter code is NOT read (see KNOWN LIMITS)."""
-    low = command.lower()
-    if not any(w in low for w in _SHELL_WORDS):
+    low = unquote(command).lower()
+    if not any(w in low for w in _SHELL_WORDS) and not ("api" in low and "tool" in low):
         return None
     ask: Optional[Hit] = None
     opaque = False
@@ -423,6 +451,6 @@ def scan_shell(command: str, parsed, roots, env=None) -> Optional[Hit]:
                 return hit
             ask = ask or hit
     textual = not parsed.ok or opaque or bool(_DOTNET_WEB.search(command))
-    if textual and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(unquote(command)):
+    if textual and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(_norm_text(command)):
         return ("S-DEVBENCH-CRASH", {"op": "smp reset"})
     return ask

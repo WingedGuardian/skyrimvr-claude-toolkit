@@ -49,3 +49,33 @@ def test_p5f_row(installs, row):
     install = inst[row["layout"]]
     got = rec.engine_verdict(install, row["hook"], rec.row_payload(row, install))
     assert rec.intended_problems(row, got) == []
+
+
+# ---- B-M4: the DevBench URL as curl sends it (dot segments, empty segments, %2e) -- helpers and the text fallback.
+def _mcp():
+    import sys
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import mcp_rules, paths, shellparse
+    return mcp_rules, paths, shellparse
+
+
+@pytest.mark.parametrize("word,want", [
+    ("http://127.0.0.1:8921/api/./tool/console", "http://127.0.0.1:8921/api/tool/console"),
+    ("http://127.0.0.1:8921/api/x/../tool/console", "http://127.0.0.1:8921/api/tool/console"),
+    ("http://127.0.0.1:8921/api/%2e/tool/console", "http://127.0.0.1:8921/api/tool/console"),
+    ("http://127.0.0.1:8921//api//tool/console/", "http://127.0.0.1:8921/api/tool/console/"),
+    ("127.0.0.1:8921/api/./tool/console", "127.0.0.1:8921/api/tool/console"),
+    ("-s", "-s"),
+], ids=["dot", "dotdot", "pct-dot", "double-slash", "schemeless", "not-a-url"])
+def test_norm_url(word, want):
+    mcp_rules, _, _ = _mcp()
+    assert mcp_rules._norm_url(word) == want
+
+
+def test_the_text_fallback_reads_a_dot_segment_url():
+    """An opaque program ($C) sends the text-fallback route; its endpoint test reads the normalised URL."""
+    mcp_rules, paths, shellparse = _mcp()
+    cmd = "$C -s http://127.0.0.1:8921/api/./tool/console -d '{\"command\":\"smp reset\"}'"
+    roots = paths.roots("C:/G", "", {})
+    assert mcp_rules.scan_shell(cmd, shellparse.parse(cmd, "bash"), roots, {}) == ("S-DEVBENCH-CRASH",
+                                                                                 {"op": "smp reset"})

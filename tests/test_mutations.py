@@ -4065,5 +4065,20 @@ _P5F_CLAUSES = [
     ("p5f-fixture-carries-home", "tests/fixtures/routes-harness/cases9.py", '"file_path":"<HOME>/.codex/config.toml"',
      '"file_path":"' + str(Path.home()).replace(BS, "/") + '/.codex/config.toml"',
      "tests/test_payload_fixtures.py::test_no_file_under_fixtures_carries_the_capturing_users_home"),
+    # B-M4: the DevBench URL is read as curl sends it.
+    ("p5f-devbench-url-not-normalised", "tools/skyguard/mcp_rules.py",
+     "        u = _norm_url(w)                                      # rt-fix-b %63onsole; B-M4 dot / empty segments",
+     "        u = unquote(w)", _p5f("devbench-dot-segment")),
+    ("p5f-devbench-prefilter-needs-api-slash-tool", "tools/skyguard/mcp_rules.py",
+     ' and not ("api" in low and "tool" in low):', ":", _p5f("devbench-dotdot-segment")),
+    ("p5f-devbench-text-fallback-not-normalised", "tools/skyguard/mcp_rules.py",
+     "_TEXT_ENDPOINT.search(_norm_text(command)):", "_TEXT_ENDPOINT.search(unquote(command)):",
+     "tests/test_skyguard_p5fix.py::test_the_text_fallback_reads_a_dot_segment_url"),
+    ("p5f-devbench-url-keeps-leading-double-slash", "tools/skyguard/mcp_rules.py",
+     "        path = path[1:]                                    # normpath keeps a POSIX leading `//`",
+     "        pass", "tests/test_skyguard_p5fix.py::test_norm_url[double-slash]"),
+    ("p5f-devbench-url-drops-trailing-slash", "tools/skyguard/mcp_rules.py",
+     '    if parts.path.endswith("/") and not path.endswith("/"):', "    if False:",
+     "tests/test_skyguard_p5fix.py::test_norm_url[double-slash]"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _P5F_CLAUSES]
