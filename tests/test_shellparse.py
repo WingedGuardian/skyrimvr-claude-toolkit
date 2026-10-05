@@ -377,7 +377,8 @@ def test_pwsh_expressions_and_here_strings_are_not_commands():
     assert progs("'rm -rf x' | Out-File a", "powershell") == ["out-file"]
     assert progs("@'\nRemove-Item x\n'@ | Out-File a", "powershell") == ["out-file"]
     assert progs("$x = 'a'; $y.Substring(1)", "powershell") == []
-    assert progs("$y.Delete()", "powershell") == ["?"]                 # fix round 1: opaque, not nothing
+    # fix round 1: opaque, not nothing; final review I7: and `.Delete()` deletes its receiver ($y, unresolved)
+    assert progs("$y.Delete()", "powershell") == ["?", "io.directory.delete"]
     assert progs("$h = @{ rm = 1 }", "powershell") == []
     assert progs("<# Remove-Item x #> ls # ri y", "powershell") == ["get-childitem"]
 
@@ -919,5 +920,31 @@ def test_i5_a_splat_is_a_dynamic_word_not_a_file_name():
     e = [x for x in p.execs if x.program == "remove-item"][0]
     assert e.argv == ("@p",)
     assert progs("git clone git@github.com:a/b", "powershell") == ["git"]       # mid-word `@` is literal
+
+
+@pytest.mark.parametrize("cmd", ["'Remove-Item X' | powershell -Command -", "'Remove-Item X' | pwsh -c -",
+                                 "'Remove-Item X' | iex", '"Remove-Item X" | Invoke-Expression'])
+def test_i6_a_string_piped_into_a_shell_or_iex_is_parsed(cmd):
+    assert deletes_x(cmd, "powershell") is True
+
+
+def test_i6_a_string_holding_a_variable_piped_into_iex_is_opaque():
+    p = parse('"Remove-Item $x" | iex', "powershell")
+    assert p.ok and ("?", ("invoke-expression",)) in [(e.program, e.argv) for e in p.execs]
+
+
+def test_i6_decoded_text_piped_into_iex_is_unread():
+    assert parse("'eA==' | base64 -d | iex", "powershell").unread
+
+
+def test_i7_an_opaque_method_keeps_its_receiver_and_arguments():
+    p = parse("(Get-Item 'X').Delete($true)", "powershell")
+    assert p.ok
+    got = [(e.program, e.argv) for e in p.execs]
+    assert ("?", ("(Get-Item 'X').Delete", "$true")) in got
+    assert ("io.directory.delete", ("(Get-Item 'X')",)) in got        # `.Delete()` deletes its receiver
+    sb = parse("[scriptblock]::Create('Remove-Item X').Invoke()", "powershell")
+    assert ("?", ("[scriptblock]::Create", "Remove-Item X")) in [(e.program, e.argv) for e in sb.execs]
+    assert "io.directory.delete" not in progs("$f.MoveTo('Y')", "powershell")
 
 

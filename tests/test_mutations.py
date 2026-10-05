@@ -4032,3 +4032,24 @@ MUTATIONS += [pytest.param("tools/skyguard/targets.py", find, rep, test, id="p5a
     ("i5-splat-is-unresolvable", '    if dialect == "powershell" and _PS_SPLAT.match(word):', "    if False:",
      _p5a("i5-hashtable-splat")),
 ]]
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # I6: a string stage piped into a shell reader or iex
+    ("i6-shell-reader-parses-strings", "                for text in texts + strings:", "                for text in texts:",
+     _p5a("i6-string-into-pwsh-stdin")),
+    ("i6-iex-is-a-reader", '    return e.program == "invoke-expression" and e.dialect == "powershell" and not e.argv',
+     "    return False", _p5a("i6-string-into-iex")),
+    ("i6-iex-reader-is-parsed", "            elif reader.program in ALL_SHELLS or _ps_reads_commands(reader):",
+     "            elif reader.program in ALL_SHELLS:", _p5a("i6-string-into-iex")),
+    ("i6-variable-string-is-opaque", "                    if urec.words[0].dyn:", "                    if False:",
+     _P5S + "test_i6_a_string_holding_a_variable_piped_into_iex_is_opaque"),
+    ("i6-decoded-into-iex-is-unread", "            if (reader.program in ALL_SHELLS or _ps_reads_commands(reader)) and \\",
+     "            if reader.program in ALL_SHELLS and \\", _P5S + "test_i6_decoded_text_piped_into_iex_is_unread"),
+    # I7: an opaque method call keeps its receiver and arguments
+    ("i7-call-arguments-kept", '            if f.kind == "call" and f.io == "?":', "            if False:",
+     _P5S + "test_i7_an_opaque_method_keeps_its_receiver_and_arguments"),
+    ("i7-receiver-text-kept", '                "?", (self.t[w.start:i],), (False,), (), "powershell", f.cd, "", self.t[w.start:i])))',
+     '                "?", (tail.group(1),), (False,), (), "powershell", f.cd, "", self.t[w.start:i])))',
+     _P5S + "test_i7_an_opaque_method_keeps_its_receiver_and_arguments"),
+    ("i7-delete-deletes-its-receiver", '            if tail.group(1).lower() == "delete":', "            if False:",
+     _p5a("i7-delete-method")),
+]]

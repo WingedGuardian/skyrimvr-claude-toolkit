@@ -72,8 +72,10 @@ KNOWN LIMITS -- each gives a partial answer, never a "safe" one:
   - process substitution `<( )` / `>( )`: parsed as commands; the word itself is dynamic.
   - `$(( ))` arithmetic and `${ }` expansions are skipped; a `$( )` INSIDE them is not parsed.
   - aliases and shell functions defined in the same command are not expanded (a function's BODY is parsed).
-  - PowerShell method calls other than [IO.File]/[IO.Directory] (`$item.Delete()`) are not execs; a script
-    block or $( ) passed to one IS parsed.
+  - PowerShell method calls other than [IO.File]/[IO.Directory] are not execs, except the opaque ones
+    (.Delete/.MoveTo/.Invoke/::Create ...): a "?" exec whose argv is the receiver+method as written and the call's
+    arguments, and for `.Delete()` an io.directory.delete of the receiver (unresolved). A script block or $( )
+    passed to any method IS parsed.
   - a here-string `@" "@` is data; `$( )` inside it is not parsed.
   - `env -S STR` and `xargs sh -c` with a dynamic string: program/argv as given, the string is not split.
 """
@@ -335,7 +337,7 @@ class _Cmd:
 
 class _Frame:
     __slots__ = ("kind", "cmd", "word", "mode", "cd", "pipe", "stage", "case", "dbr", "start", "id", "last_sep",
-                 "io", "rec_mark", "ctl", "kv", "lst", "seq", "chain_ok", "pend")
+                 "io", "rec_mark", "ctl", "kv", "lst", "seq", "chain_ok", "pend", "opq")
 
     def __init__(self, kind: str, cd: str, mode: str, fid: int, start: int = 0):
         self.kind = kind
@@ -351,6 +353,7 @@ class _Frame:
         self.id = fid
         self.last_sep = ""
         self.io = ""
+        self.opq = -1               # I7: index in _Scanner.synth of this call's opaque exec
         self.rec_mark = 0
         self.ctl = 0                # if/while/until/for/select/{ depth (bash keywords: not frames)
         self.kv = 0                 # Task 7b, top frame only: promotions so far,
@@ -1422,11 +1425,20 @@ class _Pwsh(_Scanner):
                 io = _io_program(m.group(1), m.group(2))
             elif tail and tail.group(1).lower() in _PS_OPAQUE_METHODS:
                 # .Delete() / .MoveTo() / [scriptblock]::Create().Invoke(): something runs or is deleted,
-                # and the parser cannot say what -- an opaque exec, never a silent nothing.
-                self.synth.append((len(self.recs), Exec(
-                    "?", (tail.group(1),), (False,), (), "powershell", f.cd, "", self.t[w.start:i])))
+                # and the parser cannot say what -- an opaque exec, never a silent nothing. Final review I7: it
+                # carries the receiver and method as written, and (at the `)`) the call's arguments.
+                io = "?"
         g = self._push(f, "call" if call else "paren", i, True)
         g.io = io
+        if io == "?":
+            g.opq = len(self.synth)
+            self.synth.append((len(self.recs), Exec(
+                "?", (self.t[w.start:i],), (False,), (), "powershell", f.cd, "", self.t[w.start:i])))
+            if tail.group(1).lower() == "delete":
+                # `.Delete()` deletes its RECEIVER: an operand the guard cannot place, never nothing.
+                self.synth.append((len(self.recs), Exec(
+                    "io.directory.delete", (self.t[w.start:tail.start()],), (False,), (), "powershell", f.cd, "",
+                    self.t[w.start:i])))
         self.i = i + 1
 
     def _close(self, f, c):
@@ -1442,7 +1454,12 @@ class _Pwsh(_Scanner):
             p.cd = "?"
         if f.kind in ("hash", "call"):
             mine = [r for r in self.recs[f.rec_mark:] if r.frame == f.id]
-            if f.kind == "call" and f.io:
+            if f.kind == "call" and f.io == "?":
+                args = [w for r in mine for w in r.words]   # I7: the opaque call's arguments, as its own words
+                at, ex = self.synth[f.opq]
+                self.synth[f.opq] = (at, ex._replace(argv=ex.argv + tuple("".join(w.b) for w in args),
+                                                     quoted=ex.quoted + tuple(w.quoted for w in args)))
+            elif f.kind == "call" and f.io:
                 args = [w for r in mine for w in r.words]
                 vals = tuple("".join(w.b) for w in args)
                 self.synth.append((len(self.recs), Exec(
@@ -2574,11 +2591,13 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
             if ci == 0:
                 continue
             readers = [e for e in cmade if e.stdin_from == "pipe" and id(e) not in ctx.via_xargs and (
-                e.program in ALL_SHELLS or (consumer_kind(e.program) == "interpreter" and _reads_code(e.argv)))]
+                e.program in ALL_SHELLS or (consumer_kind(e.program) == "interpreter" and _reads_code(e.argv)) or
+                _ps_reads_commands(e))]
             if not readers:
                 continue
             reader = readers[0]
-            if reader.program in ALL_SHELLS and any(_is_decoder(e) for _, umade in items[:ci] for e in umade):
+            if (reader.program in ALL_SHELLS or _ps_reads_commands(reader)) and \
+                    any(_is_decoder(e) for _, umade in items[:ci] for e in umade):
                 ctx.unread = True                   # RT-A: `echo .. | base64 -d | sh`, `printf '\x72\x6d ..' | sh`
             texts, known = [], True                 # the upstream text, if it can be rebuilt statically
             strings = []                            # RT-A G1: a PowerShell string stage, `@'..'@ | python -`
@@ -2586,6 +2605,8 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
                 texts += [h.body or "" for h in urec.heredocs]
                 if d == "powershell" and not umade and len(urec.words) == 1 and _ps_quoted(urec.words[0]):
                     strings.append("".join(urec.words[0].b))
+                    if urec.words[0].dyn:
+                        known = False               # I6: `"Remove-Item $x" | iex`: the text holds a variable's value
                 for e in umade:
                     if e.program in _TEXT_SOURCES and not (e.program == "echo" and e.argv and _ECHO_OPTS.match(e.argv[0])):
                         if e.argv:
@@ -2594,9 +2615,11 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
                         known = False
             if not known:                    # `cat s.sh | bash`, `printf ... | sh`: code the parser never saw
                 ctx.out.append(reader._replace(program="?", argv=(reader.program,), quoted=(False,)))
-            elif reader.program in ALL_SHELLS:
-                for text in texts:
-                    _sub(text, _shell_dialect(reader.program), sc.depth + 1, crec.cd, ctx)
+            elif reader.program in ALL_SHELLS or _ps_reads_commands(reader):
+                # I6: a PowerShell string stage is text too (`'Remove-Item X' | pwsh -Command -`, `'...' | iex`).
+                dialect = "powershell" if reader.program == "invoke-expression" else _shell_dialect(reader.program)
+                for text in texts + strings:
+                    _sub(text, dialect, sc.depth + 1, crec.cd, ctx)
             else:                            # literal code into python/node/...: R7(b), the legacy text rules
                 for j in range(len(ctx.out) - 1, -1, -1):
                     if ctx.out[j] is reader:
@@ -2609,6 +2632,11 @@ _TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))   # printf
 _STDIN_SCRIPTS = frozenset(("/dev/stdin", "/proc/self/fd/0", "/dev/fd/0"))   # M4: a script file that IS stdin
 _ECHO_OPTS = re.compile(r"-[neE]*[eE][neE]*$")                       # echo -e / -ne: escapes, not literal text
 _CODE_OPTS = frozenset(("-c", "-e", "-E", "-m", "-p", "-r", "--eval", "--print", "--command"))
+
+
+def _ps_reads_commands(e: Exec) -> bool:
+    """I6: `... | Invoke-Expression` with no command of its own runs its pipeline input as PowerShell commands."""
+    return e.program == "invoke-expression" and e.dialect == "powershell" and not e.argv
 
 
 def _reads_code(argv) -> bool:
