@@ -58,3 +58,39 @@ Gate (every wrapper p95 <= 1 s): FAIL, on `session-kb-guard` alone; the five per
 shows the same wrapper failing under load (838 / 1,011 / 2,113 ms) and a run here is ~4x worse at 45% load, so this is a baseline
 for Plan 6's later comparison, not a verdict. `session-kb-guard` runs once per session, not per tool call. The idle re-run is owed
 at Task 18. Task 10 adds work to session start, so this wrapper is the one to watch.
+
+## Task 12: agent self-protection (S/W-SELF-STATE, S/W-SELF-GUARD) and the Task 11 review fixes
+
+`price.py --base 7c034b9` (Task 11's commit), run 2026-10-05, one process, machine shared. Raw items stay outside the
+repo (`C:/Temp/p6t12-price-{a,b,c}`); counts only here.
+
+**Part A (Task 11 review fixes + Rulings: per-statement construct targets, upstream-only pipeline peers, Data
+listings, cc* globs, `--help`, cacls/takeown, interpreter code, variable-only cmdlet paths).** N = 70,313. Every
+`newly-*` / `no-longer-*` direction = 0; errors 0; parse failures 64 / 64.
+
+**Part B, priced as ASK first (the pre-committed rule needs the ask count).** N = 70,342: newly-deny 1 (S-SELF-STATE),
+newly-ask 24 (S-SELF-GUARD 11, W-SELF-GUARD 13), nothing else moved; errors 0; parse failures 64 / 64.
+
+Every hit read by hand (MEASURED: the command; INFERRED: who asked for it, from the nearest preceding user message
+in the same transcript, found by matching the exact tool input):
+
+- **S-SELF-STATE, 1 newly-deny.** A Plan 6 Phase A measurement agent building a scratch install
+  (`R=C:/Temp/skyguard-ml2/...; cd $R && ... echo '{}' > .skyguard/state.json`). The parser marks the cwd after
+  `cd $R` unknowable, so the relative `.skyguard/state.json` is unresolved and fails closed. A false positive on scratch
+  work; writing the path absolute avoids it. 1 <= 20, every one read: **S-SELF-STATE ships as deny.**
+- **S-SELF-GUARD, 11 newly-ask.** All hook maintenance of the live install: staging `protect-*.sh.new` copies inside
+  `.claude/hooks`, swapping them in with `mv -f`, copying staged hooks from the toolkit checkout. Preceding user
+  messages: "ok proceed now", "ok phase 1 is ready", the user's own complaint about hook prompts, and task
+  notifications inside sessions the user opened for that hook work. 11 of 11 user-requested maintenance.
+- **W-SELF-GUARD, 13 newly-ask.** 9 Edit/Write on `.claude/hooks/protect-*.sh(.new)`, 1 Write of a
+  `_diag-capture.sh` diagnostic hook, 1 Edit of `.claude/settings.json` (after "ok do it"), and 2 Edits of the
+  user-level `~/.claude/settings.json` from an X4 session (after "Yes, set to 365 days"). 13 of 13 user-requested.
+
+**Ruling: S-SELF-GUARD / W-SELF-GUARD ship as ADVISE.** Pre-committed rule: ask only if the hand-read sample shows
+<= 25 % user-requested maintenance AND <= 50 newly asked. Measured: 24 newly asked (passes the count) but **24 of 24 =
+100 %** user-requested maintenance (fails the share), so advise. Cost if wrong: an agent that edits a hook on its own
+gets a note, not a prompt; the session-start `GUARD-FILES.sha256` banner (shipped either way) names the changed file
+in the next session. The ask text stays recorded beside the registry entry.
+
+**Part B as shipped (advise).** Run on the committed engine (`b721468`; the history grew between runs): N = 70,752 (matrix: allow>allow 70,177; advise>advise 214; allow>advise 24; deny>deny 323; ask>ask 13; allow>deny 1): newly-deny 1 (the scratch item above), newly-advise 24 (the same 24 items,
+checked identical as a set), newly-ask 0, no-longer-* 0, errors 0, parse failures 64 / 64.

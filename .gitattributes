@@ -53,3 +53,6 @@ agent/targets/codex/* text eol=lf
 # would flip every Windows helper. .agents/ holds skills, which may carry images, so it is pinned by
 # extension only (`*.md` above), never by directory.
 .codex/** text eol=lf
+
+# Plan 6 Task 12: the guard manifest is compared byte for byte (scripts/gen-guard-hashes.py --check).
+GUARD-FILES.sha256 text eol=lf
