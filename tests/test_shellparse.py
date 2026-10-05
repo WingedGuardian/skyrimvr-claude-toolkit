@@ -674,6 +674,17 @@ def test_r1_more_wrappers(shell, cmd):
     assert deletes_x(cmd, shell) is True
 
 
+# Merge of rt-fix-a into plan5 (2026-10-05): an alias is judged twice, where it is DEFINED (R1: its use may be in a later
+# tool call the guard never sees beside this one) and where it is USED (RT-A: the use adds its own arguments). Each half
+# alone passes `alias ll='rm -rf X'; ll`, so each gets its own pin.
+def test_r1_an_alias_body_is_judged_where_it_is_defined():
+    assert deletes_x("alias ll='rm -rf X'", "bash") is True
+
+
+def test_ra_an_alias_use_runs_its_body_with_the_uses_arguments():
+    assert deletes_x("alias r='rm -rf'; r X", "bash") is True
+
+
 @pytest.mark.parametrize("shell", ["bash", "powershell", "cmd"])
 def test_r1_wsl_and_watch_run_their_words_as_bash(shell):
     """From PowerShell, `wsl rm -rf X` runs Linux rm -- not the PowerShell alias rm = Remove-Item."""
