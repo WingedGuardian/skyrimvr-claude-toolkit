@@ -50,6 +50,24 @@ def _write(tmp_path, lifts, **extra):
     return p
 
 
+def _forge(tmp_path, body, raw_pad=0):
+    """A state file with a CORRECT sum that state.write() would refuse to produce (what a same-user forger can do)."""
+    st = _state()
+    p = tmp_path / ".skyguard" / "state.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    body = dict(body)
+    body["sum"] = st.canonical_sum(body)
+    text = json.dumps(body) + " " * raw_pad
+    p.write_bytes(text.encode("ascii"))
+    return p
+
+
+def _good_body(**extra):
+    body = {"v": 1, "lifts": [_lift()], "persistent": {}}
+    body.update(extra)
+    return body
+
+
 def _honoured(p, session=SESSION, now=NOW, start=START):
     st = _state()
     return st.honoured(st.read(str(p)), session, now, start)
@@ -94,10 +112,10 @@ def test_s5_unreadable_shapes_read_as_guards_on_without_raising(tmp_path, shape)
     elif shape == "directory":
         p.mkdir()
     elif shape == "oversized":
-        good = _write(tmp_path, [_lift(reason="x" * (70 * 1024))])
+        good = _forge(tmp_path, _good_body(lifts=[_lift(reason="x" * (70 * 1024))]))
         assert good.stat().st_size > 64 * 1024
     elif shape == "unknown_version":
-        _write(tmp_path, [_lift()], v=99)
+        _forge(tmp_path, _good_body(v=99))
     elif shape == "junction":
         real = tmp_path / "elsewhere"
         real.mkdir()
@@ -161,17 +179,17 @@ def test_a_little_clock_skew_is_tolerated(tmp_path):
 
 
 def test_a_bool_is_not_the_version_one(tmp_path):
-    p = _write(tmp_path, [_lift()], v=True)
+    p = _forge(tmp_path, _good_body(v=True))
     got = _state().read(str(p))
     assert got.lifts == [] and "version" in got.reason
 
 
 @pytest.mark.parametrize("bad", [
     {"kind": "everything"}, {"session_id": 7}, {"created": "yesterday"},
-    {"files": "Skyrim.esm"}, {"reason": None}, {"created": True},
+    {"files": "Skyrim.esm"}, {"reason": None}, {"created": True}, {"expires_at": True},
 ])
 def test_a_malformed_lift_rejects_the_whole_state(tmp_path, bad):
-    p = _write(tmp_path, [_lift(), _lift(**bad)])
+    p = _forge(tmp_path, _good_body(lifts=[_lift(), _lift(**bad)]))
     got = _state().read(str(p))
     assert got.lifts == [] and got.reason
 
@@ -182,7 +200,7 @@ def test_a_missing_state_is_safe_and_not_a_rejection(tmp_path):
 
 
 def test_a_rejection_is_marked_so_the_caller_logs_it(tmp_path):
-    p = _write(tmp_path, [_lift()], v=99)
+    p = _forge(tmp_path, _good_body(v=99))
     got = _state().read(str(p))
     assert got.rejected and got.reason and got.lock_disabled is None
 
@@ -251,3 +269,165 @@ def test_write_refuses_a_nan_and_a_hand_written_nan_is_rejected(tmp_path):
     p.write_text('{"v":1,"lifts":[],"persistent":{},"x":NaN,"sum":"0"}', encoding="utf-8")
     got = st.read(str(p))
     assert got.lifts == [] and got.rejected
+
+
+# ---- Fix round 1 (Task 7 review) -----------------------------------------------------------------
+
+@pytest.mark.parametrize("payload", ["[" * 60000, '{"a":' * 12000], ids=["nested-list", "nested-object"])
+def test_s5_hostile_nesting_under_the_size_cap_is_rejected_not_raised(tmp_path, payload):
+    """l2-state-never-raises: json.loads raises RecursionError on this, which is not an OSError or ValueError."""
+    p = tmp_path / ".skyguard" / "state.json"
+    p.parent.mkdir(parents=True)
+    p.write_text(payload, encoding="ascii")
+    assert p.stat().st_size < 64 * 1024
+    got = _state().read(str(p))
+    assert got.lifts == [] and got.rejected and got.reason
+
+
+def test_the_session_start_is_the_last_start_line(tmp_path):
+    """A resume appends a second `start`; a lift made before it must not be honoured after it."""
+    st = _state()
+    d = tmp_path / "hb" / "sessions"
+    d.mkdir(parents=True)
+    (d / "sess-A.log").write_text("50.000000 start startup /t.jsonl\n60.000000 pre-tool Bash\n"
+                                  "120.000000 start resume /t.jsonl\n130.000000 pre-tool Bash\n", encoding="utf-8")
+    start = st.session_start(str(tmp_path / "hb"), "sess-A")
+    assert start == 120.0
+    p = _write(tmp_path, [_lift(created=100.0, expires_at=1e12)])
+    assert st.honoured(st.read(str(p)), SESSION, 200.0, start) == []
+
+
+def test_a_garbled_last_start_line_gives_no_start_not_the_earlier_one(tmp_path):
+    d = tmp_path / "hb" / "sessions"
+    d.mkdir(parents=True)
+    (d / "sess-A.log").write_text("50.000000 start startup /t\nnotatime start resume /t\n", encoding="utf-8")
+    assert _state().session_start(str(tmp_path / "hb"), "sess-A") is None
+
+
+def _lstat_as(monkeypatch, target, **over):
+    """Make os.lstat report `over` for `target` only (the state file), everything else untouched."""
+    import types
+    real = os.lstat
+
+    def fake(p, *a, **k):
+        r = real(p, *a, **k)
+        if os.path.normcase(str(p)) != os.path.normcase(str(target)):
+            return r
+        d = {n: getattr(r, n) for n in dir(r) if n.startswith("st_")}
+        d.update(over)
+        return types.SimpleNamespace(**d)
+    monkeypatch.setattr(os, "lstat", fake)
+
+
+def test_a_state_file_that_is_itself_a_reparse_point_is_rejected(tmp_path, monkeypatch):
+    """l2-state-reparse-file: the symlinked-file clause (a real symlink needs a privilege this user may lack)."""
+    p = _write(tmp_path, [_lift()])
+    real = os.lstat(str(p))
+    _lstat_as(monkeypatch, p, st_file_attributes=getattr(real, "st_file_attributes", 0) | 0x400)
+    got = _state().read(str(p))
+    assert got.lifts == [] and "reparse" in got.reason and "file" in got.reason
+
+
+def test_a_non_regular_state_path_is_rejected_even_when_it_opens(tmp_path, monkeypatch):
+    """l2-state-not-regular: a directory fails open() anyway, so only a path that OPENS can tell this clause."""
+    import stat
+    p = _write(tmp_path, [_lift()])
+    _lstat_as(monkeypatch, p, st_mode=stat.S_IFIFO | 0o600)
+    got = _state().read(str(p))
+    assert got.lifts == [] and "regular" in got.reason
+
+
+def _fstat_as(monkeypatch, **over):
+    import types
+    real = os.fstat
+
+    def fake(fd):
+        r = real(fd)
+        d = {n: getattr(r, n) for n in dir(r) if n.startswith("st_")}
+        d.update(over)
+        return types.SimpleNamespace(**d)
+    monkeypatch.setattr(os, "fstat", fake)
+
+
+def test_a_file_swapped_between_lstat_and_open_is_rejected(tmp_path, monkeypatch):
+    """l2-state-toctou-id: the handle is not the file lstat vetted."""
+    p = _write(tmp_path, [_lift()])
+    _fstat_as(monkeypatch, st_ino=os.lstat(str(p)).st_ino + 1)
+    got = _state().read(str(p))
+    assert got.lifts == [] and got.rejected and "changed" in got.reason
+
+
+def test_a_handle_that_turns_out_to_be_a_reparse_point_is_rejected(tmp_path, monkeypatch):
+    """l2-state-toctou-reparse"""
+    p = _write(tmp_path, [_lift()])
+    _fstat_as(monkeypatch, st_file_attributes=0x400)
+    got = _state().read(str(p))
+    assert got.lifts == [] and got.rejected and "changed" in got.reason
+
+
+def test_a_file_of_exactly_the_cap_is_read_and_one_byte_more_is_not(tmp_path):
+    """l2-state-size-if: the boundary, with VALID json and a CORRECT sum, so only the size clause can reject."""
+    st = _state()
+    body = _good_body()
+    n = _forge(tmp_path, body).stat().st_size
+    p = _forge(tmp_path, body, raw_pad=64 * 1024 - n)
+    assert p.stat().st_size == 64 * 1024
+    assert len(st.read(str(p)).lifts) == 1
+    p = _forge(tmp_path, body, raw_pad=64 * 1024 + 1 - n)
+    assert p.stat().st_size == 64 * 1024 + 1
+    got = st.read(str(p))
+    assert got.lifts == [] and "larger" in got.reason
+
+
+@pytest.mark.parametrize("dis", [
+    "yes", {"since": "now", "by_session": SESSION}, {"since": NOW, "by_session": 7}, {"by_session": SESSION},
+    {"since": True, "by_session": SESSION},
+], ids=["string", "since-str", "by-session-int", "since-missing", "since-bool"])
+def test_a_correctly_summed_state_with_a_bad_lock_disabled_is_rejected(tmp_path, dis):
+    """l2-state-disable-shape (and, for since-bool, the bool exclusion in _num)."""
+    p = _forge(tmp_path, _good_body(lifts=[], persistent={"lock_disabled": dis}))
+    got = _state().read(str(p))
+    assert got.lock_disabled is None and got.rejected
+
+
+@pytest.mark.parametrize("field", ["created", "expires_at"])
+def test_a_bool_is_not_a_time(tmp_path, field):
+    """l2-state-num-bool: True == 1 and is an int, so isinstance() would let it through."""
+    p = _forge(tmp_path, _good_body(lifts=[_lift(**{field: True})]))
+    got = _state().read(str(p))
+    assert got.lifts == [] and got.rejected
+
+
+def test_state_safe_is_fresh_on_every_access(tmp_path):
+    """l2-state-safe-fresh: mutating one SAFE must not change the next."""
+    st = _state()
+    st.State.SAFE.lifts.append({"kind": "guards"})
+    assert st.State.SAFE.lifts == []
+    st.read(str(tmp_path / "nope" / "state.json")).lifts.append(1)
+    assert st.read(str(tmp_path / "nope" / "state.json")).lifts == []
+
+
+@pytest.mark.parametrize("now,start", [(float("nan"), START), (float("inf"), START), (NOW, float("nan")),
+                                       (NOW, float("-inf")), (NOW, True), (True, START), ("x", START)])
+def test_a_non_finite_now_or_start_honours_nothing(tmp_path, now, start):
+    """l2-state-honoured-finite"""
+    p = _write(tmp_path, [_lift()])
+    s = _state()
+    assert s.honoured(s.read(str(p)), SESSION, now, start) == []
+
+
+def test_write_refuses_what_read_would_reject(tmp_path):
+    """l2-state-write-validates: a malformed lift, a bad persistent block, a bad version, an oversize body."""
+    st = _state()
+    p = tmp_path / ".skyguard" / "state.json"
+    for bad in ({"v": 1, "lifts": [_lift(kind="x")], "persistent": {}},
+                {"v": 1, "lifts": [_lift(created=True)], "persistent": {}},
+                {"v": 1, "lifts": [], "persistent": {"lock_disabled": {"since": "x", "by_session": "s"}}},
+                {"v": 1, "lifts": "none", "persistent": {}},
+                {"v": 2, "lifts": [], "persistent": {}},
+                {"v": True, "lifts": [], "persistent": {}},
+                {"v": 1, "lifts": [_lift(reason="x" * (70 * 1024))], "persistent": {}}):
+        with pytest.raises(ValueError):
+            st.write(str(p), bad)
+        assert not p.exists()
+        assert not p.parent.exists() or list(p.parent.iterdir()) == []

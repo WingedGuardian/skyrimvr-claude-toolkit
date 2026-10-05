@@ -3471,25 +3471,49 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 ]]
 
 
-# Plan 6 Task 7: the lift state reader and `honoured`. One mutation per clause; each names the test that must go red.
-# (relpath, find, replace, test, id). The reader's clauses are l2-state-sum / -size / -reparse / -version / -shape;
-# `honoured`'s are -session / -start / -future / -expiry / -clamp / -unknown-start; `write`'s are -atomic / -write-sum.
+# Plan 6 Task 7 (+ fix round 1): the lift state reader, writer and `honoured`. One mutation per clause; each names the
+# test that must go red. (relpath, find, replace, test, id).
+# Reader: l2-state-sum / -size / -size-if / -reparse (folder) / -reparse-file / -not-regular / -toctou-id / -toctou-reparse /
+#   -version / -version-bool / -shape / -disable-shape / -num-bool / -never-raises / -safe-fresh.
+# honoured: -session / -start / -future / -expiry / -clamp / -unknown-start / -honoured-finite; session_start: -last-start.
+# write: -atomic / -write-sum / -write-validates (shape, version, size).
+# (No twin for a non-finite `now`: a NaN or inf `now` honours nothing through the ordinary expiry comparison anyway, so the
+# `not _num(now)` clause is behaviourally redundant; the test still pins it.)
 _ST = "tools/skyguard/state.py"
 _STT = "tests/test_skyguard_state.py::"
+_V = '    if not _version_ok(data):\n'
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
-    (_ST, '        if not isinstance(got, str) or not hmac.compare_digest(got.encode("ascii", "replace"), want.encode("ascii")):',
-     "        if False:", _STT + "test_s1_hand_edit_with_a_wrong_checksum_reads_as_guards_on", "l2-state-sum"),
+    (_ST, '    if not isinstance(got, str) or not hmac.compare_digest(got.encode("ascii", "replace"), want.encode("ascii")):',
+     "    if False:", _STT + "test_s1_hand_edit_with_a_wrong_checksum_reads_as_guards_on", "l2-state-sum"),
     (_ST, "MAX_BYTES = 64 * 1024  ", "MAX_BYTES = 64 * 1024 * 1024  ",
      _STT + "test_s5_unreadable_shapes_read_as_guards_on_without_raising[oversized]", "l2-state-size"),
-    (_ST, "        if _is_reparse(os.lstat(str(path.parent))) or _is_reparse(st):", "        if False:",
+    (_ST, "    if len(raw) > MAX_BYTES:", "    if False:",
+     _STT + "test_a_file_of_exactly_the_cap_is_read_and_one_byte_more_is_not", "l2-state-size-if"),
+    (_ST, "    if _is_reparse(os.lstat(str(path.parent))):", "    if False:",
      _STT + "test_a_valid_state_reached_through_a_junction_is_still_rejected", "l2-state-reparse"),
-    (_ST, '        if type(data.get("v")) is not int or data["v"] != VERSION:', '        if data.get("v") != VERSION and False:',
+    (_ST, "    if _is_reparse(st):", "    if False:",
+     _STT + "test_a_state_file_that_is_itself_a_reparse_point_is_rejected", "l2-state-reparse-file"),
+    (_ST, "    if not _stat.S_ISREG(st.st_mode):", "    if False:",
+     _STT + "test_a_non_regular_state_path_is_rejected_even_when_it_opens", "l2-state-not-regular"),
+    (_ST, "(fst.st_ino, fst.st_dev) != (st.st_ino, st.st_dev) or ", "",
+     _STT + "test_a_file_swapped_between_lstat_and_open_is_rejected", "l2-state-toctou-id"),
+    (_ST, " or _is_reparse(fst):", ":",
+     _STT + "test_a_handle_that_turns_out_to_be_a_reparse_point_is_rejected", "l2-state-toctou-reparse"),
+    (_ST, _V, "    if False:\n",
      _STT + "test_s5_unreadable_shapes_read_as_guards_on_without_raising[unknown_version]", "l2-state-version"),
-    (_ST, '        if type(data.get("v")) is not int or data["v"] != VERSION:', '        if data.get("v") != VERSION:',
+    (_ST, '    return type(data.get("v")) is int and data["v"] == VERSION', '    return data.get("v") == VERSION',
      _STT + "test_a_bool_is_not_the_version_one", "l2-state-version-bool"),
-    (_ST, "        if not isinstance(lifts, list) or not all(_valid_lift(x) for x in lifts) or not isinstance(persistent, dict):",
-     "        if not isinstance(lifts, list) or not isinstance(persistent, dict):",
+    (_ST, "    if not isinstance(lifts, list) or not all(_valid_lift(x) for x in lifts) or not isinstance(persistent, dict):",
+     "    if not isinstance(lifts, list) or not isinstance(persistent, dict):",
      _STT + "test_a_malformed_lift_rejects_the_whole_state[bad0]", "l2-state-shape"),
+    (_ST, "    if dis is not None and not _valid_disable(dis):", "    if False:",
+     _STT + "test_a_correctly_summed_state_with_a_bad_lock_disabled_is_rejected[by-session-int]", "l2-state-disable-shape"),
+    (_ST, "    return type(v) in (int, float) and math.isfinite(v)", "    return isinstance(v, (int, float)) and math.isfinite(v)",
+     _STT + "test_a_bool_is_not_a_time[created]", "l2-state-num-bool"),
+    (_ST, "    except Exception as e:  # noqa: BLE001", "    except OSError as e:  # noqa: BLE001",
+     _STT + "test_s5_hostile_nesting_under_the_size_cap_is_rejected_not_raised[nested-list]", "l2-state-never-raises"),
+    (_ST, "State.SAFE = _Fresh()", "State.SAFE = State()",
+     _STT + "test_state_safe_is_fresh_on_every_access", "l2-state-safe-fresh"),
     (_ST, '        if lift["session_id"] != session_id:', "        if False:",
      _STT + "test_s3_another_session_id_is_ignored", "l2-state-session"),
     (_ST, '        if lift["created"] < session_start:', "        if False:",
@@ -3502,10 +3526,22 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_ST, '        if not now < min(lift["expires_at"], lift["created"] + MAX_LIFT_SECONDS):',
      '        if not now < lift["expires_at"]:',
      _STT + "test_s7_expires_at_beyond_8h_is_clamped", "l2-state-clamp"),
-    (_ST, "    if session_start is None or not isinstance(session_id, str):", "    if not isinstance(session_id, str):",
+    (_ST, "    if not _num(now) or not _num(session_start) or not isinstance(session_id, str):",
+     "    if not _num(now) or not isinstance(session_id, str):",
      _STT + "test_an_unknown_session_start_honours_nothing", "l2-state-unknown-start"),
+    (_ST, "    if not _num(now) or not _num(session_start) or not isinstance(session_id, str):",
+     "    if not _num(now) or session_start is None or not isinstance(session_id, str):",
+     _STT + "test_a_non_finite_now_or_start_honours_nothing[1800000000.0-nan]", "l2-state-honoured-finite"),
+    (_ST, '            last = f[0]', '            last = last or f[0]',
+     _STT + "test_the_session_start_is_the_last_start_line", "l2-state-last-start"),
     (_ST, "        os.replace(tmp, str(path))", '        open(str(path), "wb").write(payload)',
      _STT + "test_a_failed_write_leaves_the_old_state_and_no_temp_file", "l2-state-atomic"),
     (_ST, '    body["sum"] = canonical_sum(body)', '    body["sum"] = data.get("sum", "0")',
      _STT + "test_write_computes_the_sum_itself_and_ignores_a_caller_supplied_one", "l2-state-write-sum"),
+    (_ST, "    problem = _shape_problem(body)\n    if problem:\n        raise ValueError", "    problem = None\n    if problem:\n        raise ValueError",
+     _STT + "test_write_refuses_what_read_would_reject", "l2-state-write-validates-shape"),
+    (_ST, '    if not _version_ok(body):\n        raise ValueError("refusing to write: unknown version")', "    pass",
+     _STT + "test_write_refuses_what_read_would_reject", "l2-state-write-validates-version"),
+    (_ST, "    if len(payload) > MAX_BYTES:\n        raise ValueError", "    if False:\n        raise ValueError",
+     _STT + "test_write_refuses_what_read_would_reject", "l2-state-write-validates-size"),
 ]]
