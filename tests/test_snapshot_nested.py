@@ -382,7 +382,7 @@ def _engine(root, argv, payload, env=None):
     ("claude", "session-kb-guard", {"session_id": "s-1", "source": "startup", "hook_event_name": "SessionStart"}),
     ("codex", "session-start", {"session_id": "s-1", "source": "startup", "hook_event_name": "SessionStart",
                                 "transcript_path": "C:/t/rollout.jsonl", "cwd": "C:/x"}),
-])
+], ids=["claude", "codex"])
 def test_the_session_start_hook_takes_the_baseline(tmp_path, agent, role, payload):
     """Through the real entry point (run.py), for both agents."""
     put(tmp_path, "Data/Source/Scripts/x.psc", b"at session start")

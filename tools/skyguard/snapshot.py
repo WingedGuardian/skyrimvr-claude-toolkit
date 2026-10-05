@@ -330,10 +330,9 @@ def _take_locked(root, store, audit, command, now, deadline, rate, prune_due):
     was_partial = partial_marker.exists()
     name = None
     # While a baseline is unfinished, a resume that only adds not-yet-read files writes no manifest (one per call would
-    # be hundreds of near-identical maps); the first time-boxed run, the completing run and any real change do.
-    first_partial = not complete and not was_partial
-    if (changed and not was_partial) or altered or gone or idx.get("dirty") or first_partial \
-            or (complete and was_partial):
+    # be hundreds of near-identical maps); the first time-boxed run (it always reads at least one file, so `changed`),
+    # the completing run and any real change do.
+    if (changed and not was_partial) or altered or gone or idx.get("dirty") or (complete and was_partial):
         snap_files = {r: v[2] for r, v in files.items() if r in seen}
         ts = audit.stamp()
         try:
