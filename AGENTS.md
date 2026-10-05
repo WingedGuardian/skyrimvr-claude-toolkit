@@ -172,7 +172,7 @@ For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit se
 - `spriggit-meta.json` is required in the YAML root for deserialization
 - ESP header version must be 1.7 for SSE/VR (not 1.0)
 - `--GameRelease` is only for serialize, NOT deserialize; `--PackageVersion` is REQUIRED when `--PackageName` is set
-- **Don't hardcode `--PackageVersion`** (e.g. `0.40.0` goes stale the moment `dotnet tool install` pulls a newer Spriggit). Discover the installed version with `spriggit --version` and pass exactly that.
+- **Spriggit is pinned to 0.40.0** (`.config/dotnet-tools.json`; install with `--version 0.40.0` -- an unpinned install pulls 0.41+, which needs SDK 10; `tools/toolchain-check.sh` flags the drift). Still **don't hardcode `--PackageVersion`**: discover the installed version with `spriggit --version` and pass exactly that.
 - Use `-u` / `--ErrorOnUnknown` on serialize — Spriggit **silently drops unknown YAML fields** otherwise (no error, no warning). Always round-trip verify a new field: deserialize → re-serialize → grep for the field.
 
 ## ESP Dependency Rule: Own Your Records
@@ -378,10 +378,9 @@ Generated into `AGENTS.md` only; everything above is shared. Other agents: this 
   folders is refused; edits inside the game get advice. Files an `apply_patch` changes or deletes are
   backed up to `.claude/backups/` first, and recent `.psc`/`.pex` are snapshotted before shell commands.
   A file written by a script you run is not backed up.
-- **DevBench MCP calls** (any server whose name contains `devbench`): `smp reset` is refused, as on Claude. A
-  save over a save file that already exists is refused too (Codex cannot ask): tell the user, who can confirm
-  and run it themselves.
-- **Not checked:** commands the user types with `!` in the Codex TUI (they bypass hooks), and every MCP tool
-  that is not DevBench's (they are only logged).
+- **DevBench MCP** (server name contains `devbench`): `smp reset` and a save over an existing save are
+  refused; for the save, ask the user to run it.
+- **Not checked:** commands the user types with `!` in the Codex TUI (they bypass hooks), and other MCP
+  tools (only logged).
 - **Skills** are in `.agents/skills/<name>/SKILL.md`: read the file when `core.md` points at it by name.
 - `bash tools/hook-canary.sh` shows whether each hook ran, saw its input and finished, per surface.

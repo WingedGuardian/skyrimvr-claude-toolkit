@@ -3832,3 +3832,15 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "        rid, file",
      _MDEL + "test_moving_a_root_folder_away_names_the_move_not_a_delete[mv-install]", "merge-rt-move-root-wins-over-delete"),
 ]]
+
+
+# 3rd-party drift fix B1: toolchain-check must compare the INSTALLED spriggit with the pin, and derive the SDK it needs
+# from the installed version. One twin per clause (each shadows the other if only one is mutated).
+MUTATIONS += [
+    pytest.param("tools/toolchain-check.sh", 'elif [ "$INSTALLED" = "$PIN" ]; then', 'elif [ -n "$INSTALLED" ]; then',
+                 "tests/test_toolchain_check.py::test_newer_spriggit_on_sdk_9_is_degraded",
+                 id="toolchain-check-spriggit-version-must-equal-pin"),
+    pytest.param("tools/toolchain-check.sh", '|| [ "${SP_MINOR:-0}" -ge 41 ] 2>/dev/null; then NEED=10; fi', '|| false; then NEED=10; fi',
+                 "tests/test_toolchain_check.py::test_newer_spriggit_on_sdk_9_is_degraded",
+                 id="toolchain-check-spriggit-version-sets-needed-sdk"),
+]

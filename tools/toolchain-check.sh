@@ -18,6 +18,8 @@ set -uo pipefail
 ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 FAIL=0
 MISSING=""
+# Test seam: tests/test_toolchain_check.py points this at a fake `dotnet` (the harness shadows the real name).
+DOTNET="${TOOLCHAIN_DOTNET:-dotnet}"
 
 # check <label> <expect-substring> <command...>
 #
@@ -63,7 +65,7 @@ check "python"        "Python 3"       python --version
 check "node"          "v[0-9]"         node --version
 check "jq"            "jq-"            jq --version
 check "java"          "version"        java -version
-check "dotnet"        "[0-9]+\."       dotnet --version
+check "dotnet"        "[0-9]+\."       "$DOTNET" --version
 
 echo "modding tools:"
 if command -v spriggit >/dev/null 2>&1; then
@@ -81,13 +83,34 @@ if command -v spriggit >/dev/null 2>&1; then
   # "DotnetToolSettings.xml was not found in the package" -- the file IS there,
   # under a framework that SDK will not select. A control proved the machine was
   # otherwise healthy: dotnetsay, whose assets are net8.0, installs fine.
-  SDK_MAJORS=$(dotnet --list-sdks 2>/dev/null | sed 's/\..*//' | sort -un | tr '\n' ' ')
-  if dotnet --list-sdks 2>/dev/null | grep -qE '^(9|1[0-9])\.'; then
-    printf '  %-22s ok            SDK 9+ present, so it can fetch its serializer\n' "spriggit entry point"
+  #
+  # VERSION PIN. Every serialize/deserialize command in the toolkit was written against the
+  # version pinned in .config/dotnet-tools.json (0.40.0, target net9.0). An unpinned
+  # `dotnet tool install Spriggit.CLI` pulls a newer one (0.41.0 = net10.0 only), so the
+  # INSTALLED version must equal the pin, and the SDK required follows the INSTALLED version.
+  PIN=$(tr -d '\r\n ' < "$ROOT/.config/dotnet-tools.json" 2>/dev/null | sed -n 's/.*"spriggit\.cli":{"version":"\([^"]*\)".*/\1/p')
+  INSTALLED=$(spriggit --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  if [ -z "$PIN" ]; then
+    printf '  %-22s unknown       no pin readable from .config/dotnet-tools.json\n' "spriggit version"
+  elif [ "$INSTALLED" = "$PIN" ]; then
+    printf '  %-22s ok            installed %s == pinned %s\n' "spriggit version" "$INSTALLED" "$PIN"
+  else
+    printf '  %-22s MISMATCH      installed %s, toolkit pinned to %s\n' "spriggit version" "${INSTALLED:-?}" "$PIN"
+    printf '  %-22s               fix: dotnet tool uninstall -g Spriggit.CLI; dotnet tool install -g Spriggit.CLI --version %s\n' "" "$PIN"
+    FAIL=1; MISSING="$MISSING spriggit-version"
+  fi
+  # Target runtime (SDK major) the INSTALLED spriggit needs: 0.41+ ships net10.0, earlier net9.0.
+  SP_MINOR=$(printf '%s' "$INSTALLED" | cut -d. -f2)
+  SP_MAJOR_N=$(printf '%s' "$INSTALLED" | cut -d. -f1)
+  NEED=9
+  if [ "${SP_MAJOR_N:-0}" -gt 0 ] 2>/dev/null || [ "${SP_MINOR:-0}" -ge 41 ] 2>/dev/null; then NEED=10; fi
+  SDK_MAJORS=$("$DOTNET" --list-sdks 2>/dev/null | sed 's/\..*//' | sort -un | tr '\n' ' ')
+  if "$DOTNET" --list-sdks 2>/dev/null | sed 's/\..*//' | awk -v n="$NEED" '$1+0>=n{f=1} END{exit !f}'; then
+    printf '  %-22s ok            SDK %s+ present, so it can fetch its serializer\n' "spriggit entry point" "$NEED"
   else
     printf '  %-22s CANNOT WORK   spriggit starts but cannot install its serializer\n' "spriggit entry point"
-    printf '  %-22s               (SDK majors here: %s-- needs 9+. Install:\n' "" "$SDK_MAJORS"
-    printf '  %-22s               winget install Microsoft.DotNet.SDK.9)\n' ""
+    printf '  %-22s               (SDK majors here: %s-- spriggit %s needs SDK %s+. Install:\n' "" "$SDK_MAJORS" "${INSTALLED:-?}" "$NEED"
+    printf '  %-22s               winget install Microsoft.DotNet.SDK.%s)\n' "" "$NEED"
     FAIL=1; MISSING="$MISSING spriggit-entry-point"
   fi
 else

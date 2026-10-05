@@ -166,6 +166,10 @@ Claude can then:
   menu* from *actually hung* from *no save loaded yet*, instead of guessing from a frozen frame
   counter. (Needs DevBench 1.11.0+; older builds fall back automatically.)
 
+DevBench minimum is **1.11.0**; newest release the docs were read against is **1.24.0**. Update your
+**VR Address Library first** (newest seen: 0.276.1) -- DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0.
+CrashLogger 1.24+ also writes `__fastfail` dumps; `crash-triage.py` already handles the file naming.
+
 In practice, tuning a value stops being "edit, recompile, reload, ask you to try it" and becomes
 another call into the running game. You just keep playing. The toolkit ships the wrapper
 (`tools/devbench-cli.sh`) and the hard-won hazard list — DevBench itself you install from Nexus.
@@ -248,7 +252,7 @@ None of these are bundled; setup walks you through any you pick.
 
 - **xeditlib** -- programmatic ESP read/write (`npm install github:WingedGuardian/xeditlib`)
 - **Champollion / Caprica** -- Papyrus decompile / compile (GitHub releases)
-- **Spriggit** -- ESP ↔ YAML editing (`dotnet tool install Spriggit.CLI`); **requires the .NET 9 SDK**, not just the runtime (`winget install Microsoft.DotNet.SDK.9`). Spriggit fetches its serializer at runtime as a dotnet tool, and only a matching SDK can install one — with the runtime alone it starts, prints a version, and still cannot serialize. That also disables the cross-reference integrity guard, which drives it.
+- **Spriggit** -- ESP ↔ YAML editing (`dotnet tool install Spriggit.CLI --version 0.40.0` -- **always pinned**: 0.41+ targets net10.0 and breaks on SDK 9; `tools/toolchain-check.sh` flags a version that differs from the pin); **requires the .NET 9 SDK**, not just the runtime (`winget install Microsoft.DotNet.SDK.9`). Spriggit fetches its serializer at runtime as a dotnet tool, and only a matching SDK can install one — with the runtime alone it starts, prints a version, and still cannot serialize. That also disables the cross-reference integrity guard, which drives it.
 - **AutoMod CLI** -- NIF / BSA / audio / MCM / ESP. **Must be cloned and built**: clone https://github.com/SpookyPirate/spookys-automod-toolkit into `tools/automod` and build the Cli project (not the WPF Setup project) — then run via `tools/automod-cli.sh`.
 - **PyFFI** -- LE-format NIF geometry (any modern Python + setuptools, `pip install pyffi setuptools`)
 - **PyNifly** -- SSE BSTriShape + animation authoring (download `io_scene_nifly.zip` from the GitHub **releases**, not a git clone — the compiled DLL ships only in the release zip; no build)
