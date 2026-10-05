@@ -165,6 +165,8 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         reason = rules.message("S-WRITE-PLUGIN", file=wr.deny)
         audit.rule(HOOK, "S-WRITE-PLUGIN", "deny", reason)
         return Verdict("deny", reason)
+    if wr.move_root:                                         # rt-fix-b: moving the install or its folders away
+        return deny("S-MOVE-ROOT", wr.move_root)
     champ = anchored.champollion(command, parsed, roots, cwd, env)
     if champ:
         return deny("S-CHAMPOLLION", champ)
@@ -191,6 +193,17 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         op, save = resaver
         reason = rules.message("S-RESAVER-APPLY", op=op, save=save or "the save")
         audit.rule(HOOK, "S-RESAVER-APPLY", "ask", reason)
+        return Verdict("ask", reason)
+
+    if wr.save:                                              # rt-fix-b: a write, copy or move onto a save
+        reason = rules.message("S-WRITE-SAVE", file=wr.save)
+        audit.rule(HOOK, "S-WRITE-SAVE", "ask", reason)
+        return Verdict("ask", reason)
+
+    git = anchored.git_discard(parsed, roots, cwd, env)      # rt-fix-b: git overwriting a protected working tree
+    if git:
+        reason = rules.message("S-GIT-DISCARD", file=git)
+        audit.rule(HOOK, "S-GIT-DISCARD", "ask", reason)
         return Verdict("ask", reason)
 
     if dev:                                                  # S-DEVBENCH-SAVE: the only other thing scan_shell returns

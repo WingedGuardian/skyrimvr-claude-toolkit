@@ -255,6 +255,42 @@ RULES = {
         'Note: {op} writes its output into the Skyrim install; check it landed where you meant.'
     ),
     },
+    # routes red team (rt-fix-b): a shell write, copy or move ONTO a save in the settings folder replaces it; the old
+    # save is not kept (as S-DEVBENCH-SAVE and S-RESAVER-APPLY, a change to a save asks).
+    'S-WRITE-SAVE': {
+        "decision": 'ask',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'This replaces the save {file}; the old save is not kept.\n'
+        'Approve only if you asked for this save to be changed.'
+    ),
+    },
+    # routes red team (rt-fix-b): moving or renaming the install, its Data folder, the settings folder, its Saves
+    # folder or MO2's folders takes them away from where the game and the tools look for them.
+    'S-MOVE-ROOT': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: this moves {file} away from where the game and its tools look for it.\n'
+        'If you mean it, move it yourself.'
+    ),
+    },
+    # routes red team (rt-fix-b): git commands that overwrite the working tree in a protected folder throw away
+    # uncommitted changes there, which no backup holds.
+    'S-GIT-DISCARD': {
+        "decision": 'ask',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'This git command throws away uncommitted changes in {file}; no backup keeps them.\n'
+        'Approve only if you asked for those changes to be discarded.'
+    ),
+    },
     'S-DEVBENCH-CRASH': {
         "decision": 'deny',
         "hook": 'protect-bash',
@@ -303,6 +339,18 @@ RULES = {
         "template": (
         'Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly.\n'
         'Use xelib, Spriggit or AutoMod to change them instead.'
+    ),
+    },
+    # routes red team (rt-fix-b): an Edit/Write (or apply_patch) onto a save in the settings folder rewrites a binary
+    # save as text; the old save is not kept.
+    'W-SAVE': {
+        "decision": 'ask',
+        "hook": 'protect-files',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'This edit replaces the save {file}; the old save is not kept.\n'
+        'Approve only if you asked for this save to be changed.'
     ),
     },
     'W-INI': {

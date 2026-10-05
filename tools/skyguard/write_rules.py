@@ -68,8 +68,13 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdic
         advice.add(text)
 
     if roots is not None:
-        from .writes import in_install_area
+        from .writes import in_install_area, is_save
         a = targets.resolve(file_path, cwd, "bash", os.environ if env is None else env)
+        if is_save(a, roots):
+            # rt-fix-b: a save rewritten through Edit/Write (or a Codex patch) is a binary file replaced by text.
+            text = rules.message("W-SAVE", file=file_path)
+            audit.rule(HOOK, "W-SAVE", "ask", text)
+            return Verdict("ask", text)
         papyrus = a is not None and papyrus_zone(a, roots)
         install = a is not None and in_install_area(a, roots)
     else:

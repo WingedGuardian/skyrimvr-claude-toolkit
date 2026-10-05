@@ -43,6 +43,12 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
         "hook_only", "a prefix would also prompt every dry-run; `--apply` position varies (R4)"),
     "shell.S-DEVBENCH-CRASH": ("hook_only", "the console command is inside a JSON body or an MCP argument"),
     "shell.S-DEVBENCH-SAVE": ("hook_only", "depends on whether the save file exists"),
+    "shell.S-WRITE-SAVE": ("hook_only", _PATH + " (any writer, copy or move onto a save)"),
+    "shell.S-MOVE-ROOT": ("hook_only", _PATH + " (the moved folder is resolved, not spelled)"),
+    "shell.S-GIT-DISCARD": (
+        "hook_only", "depends on where the working tree resolves (cwd, cd, -C, --work-tree); a `git reset --hard` "
+        "prefix would also refuse it in every unprotected repository"),
+    "write.W-SAVE": ("hook_only", "a file write, not a command"),
     "mcp.S-INERT-NOINPUT": ("hook_only", _INERT),
     "write.DENY_PLUGIN": ("hook_only", "a file write, not a command"),
     "write.NO_PATH_DENY": ("hook_only", _INERT),

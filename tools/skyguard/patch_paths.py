@@ -21,16 +21,23 @@ _MOVE = "*** Move to:"
 _EOF = "*** End of File"
 # apply_patch at the start of a shell command, optionally after `cd <dir> &&` (or `;`). Codex applies a
 # patch run through the shell and reports it as a Bash call (X4 MEASURED, 0.160.0).
+# routes red team: case-insensitive (Windows finds `APPLY_PATCH` on PATH as apply_patch), and the program word
+# may be quoted whole (`'apply_patch' <<EOF` runs the same program).
 _SHELL_FORM = re.compile(
-    r"""^\s*(?:cd\s+(?P<dir>"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*)?(?:apply_patch|applypatch)(?=\s|$|<)""")
+    r"""^\s*(?:cd\s+(?P<dir>"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*)?(?P<q>['"]?)(?:apply_patch|applypatch)(?P=q)"""
+    r"""(?=\s|$|<)""", re.I)
 # The same word where a shell would RUN it: at a command position, after env assignments / sudo-style
 # wrappers / a path, with an optional .exe, or as the first word inside a quoted `bash -lc "..."` string.
 # A mere mention (`rg -n apply_patch`, `echo apply_patch`) is not a run.
 _NAME = r"(?:[^\s'\"`;&|()<>]*[/\\])?(?:apply_patch|applypatch)(?:\.exe)?(?=[\s;&|)<>'\"`]|$)"
 _CMD_POS = (r"(?:^|[;&|\n(`{]|\$\()\s*"
             r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S*|sudo|env|exec|command|nohup|time|builtin)\s+)*")
-_ANY_POSITION = re.compile(_CMD_POS + _NAME)
-_QUOTED_POSITION = re.compile(r"[\"']\s*" + _NAME)
+_ANY_POSITION = re.compile(_CMD_POS + _NAME, re.I)
+_QUOTED_POSITION = re.compile(r"[\"']\s*" + _NAME, re.I)
+# routes red team: a patch BODY beside any spelling of the program (`a=apply_patch; $a <<EOF`, a quoted path with a
+# space) is a patch the shell may apply, whatever the run position looks like. Unattributable -> refused.
+_BODY_LINE = re.compile(r"^\s*\*\*\*\s*begin\s+patch\s*$", re.I | re.M)
+_PROGRAM_WORD = re.compile(r"apply_?patch", re.I)
 _WRAPPER = re.compile(r"\b(?:ba|z|da|k)?sh\b|pwsh|powershell|\bcmd(?:\.exe)?\b|\beval\b|\s-l?c\b", re.I)
 _HEREDOC = re.compile(
     r"<<-?\s*(['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)\1(?P<tail>[^\n]*)\n(?P<body>.*?)\n[ \t]*(?P=tag)[ \t]*(?:\n|$)", re.S)
@@ -83,6 +90,11 @@ def parse_patch(text: str) -> List[Tuple[str, str]]:
     return out
 
 
+def has_patch_body(text: str) -> bool:
+    """A `*** Begin Patch` line anywhere in text (any case and spacing)."""
+    return bool(_BODY_LINE.search(text))
+
+
 def _runs_apply_patch(cmd: str) -> bool:
     return bool(_ANY_POSITION.search(cmd) or (_QUOTED_POSITION.search(cmd) and _WRAPPER.search(cmd)))
 
@@ -92,6 +104,8 @@ def shell_patch(cmd: str) -> Optional[Tuple[str, Optional[str]]]:
     if not m:
         if _runs_apply_patch(cmd):
             raise PatchParseError("apply_patch at a shell position this parser cannot attribute")
+        if _BODY_LINE.search(cmd) and _PROGRAM_WORD.search(cmd):
+            raise PatchParseError("a patch body beside apply_patch that this parser cannot attribute")
         return None
     rest = cmd[m.end():]
     h = _HEREDOC.search(rest)

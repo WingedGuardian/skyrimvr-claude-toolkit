@@ -3,7 +3,8 @@
   "codex-PreToolUse-Bash-1.json": {"verdict": "allow", "code": "allow"},
   "codex-PreToolUse-apply_patch-1.json": {"verdict": "allow", "code": "allow"},
   "codex-PreToolUse-apply_patch-2.json": {"verdict": "allow", "code": "allow"},
-  "codex-PreToolUse-apply_patch-3.json": {"verdict": "allow", "code": "allow"},
+  "_comment_rt_fix_b": "apply_patch-3 (0.159.3) and 0.160.0 apply_patch-5 are captured Deletes; the fixture runs them with the install as cwd, so since rt-fix-b they are deletes inside the install (S-DEL-INSTALL), as the shell twin always was.",
+  "codex-PreToolUse-apply_patch-3.json": {"verdict": "deny", "code": "shell.S-DEL-INSTALL"},
   "codex-SessionStart-none-1.json": {"verdict": "allow", "code": "session.NOT_SNAPSHOTTED"},
   "0.160.0/codex-PreToolUse-Bash-1.json": {"verdict": "allow", "code": "allow"},
   "0.160.0/codex-PreToolUse-Bash-2.json": {"verdict": "allow", "code": "allow"},
@@ -13,7 +14,7 @@
   "0.160.0/codex-PreToolUse-apply_patch-2.json": {"verdict": "allow", "code": "allow"},
   "0.160.0/codex-PreToolUse-apply_patch-3.json": {"verdict": "allow", "code": "allow"},
   "0.160.0/codex-PreToolUse-apply_patch-4.json": {"verdict": "allow", "code": "allow"},
-  "0.160.0/codex-PreToolUse-apply_patch-5.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-PreToolUse-apply_patch-5.json": {"verdict": "deny", "code": "shell.S-DEL-INSTALL"},
   "0.160.0/codex-PreToolUse-mcp__probe__echo-1.json": {"verdict": "allow", "code": "allow"},
   "0.160.0/codex-SessionStart-none-1.json": {"verdict": "allow", "code": "session.NOT_SNAPSHOTTED"},
   "0.160.0/codex-SessionStart-none-2.json": {"verdict": "allow", "code": "session.NOT_SNAPSHOTTED"}
