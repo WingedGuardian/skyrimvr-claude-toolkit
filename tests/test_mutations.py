@@ -3996,7 +3996,7 @@ def _p5f(row):
     return "tests/test_skyguard_p5fix.py::test_p5f_row[p5f-" + row + "]"
 
 
-_DL = "tools/skyguard/deletes.py"
+_DOCS = "tests/test_guard_docs_agree.py::test_the_documented_ask_count_matches_the_registry"
 _P5F_CLAUSES = [
     # (id, file, find, replace, test that must go red)
     # D1: the Recycle-Bin delete (VB FileSystem::DeleteFile/DeleteDirectory, Shell.Application Namespace(10).MoveHere).
@@ -4053,5 +4053,12 @@ _P5F_CLAUSES = [
     ("p5f-copy-item-pipe-source-dropped", "tools/skyguard/writes.py",
      '        return [(dst[0] if dst else ".", src)] if src or e.stdin_from == "pipe" else []',
      '        return [(dst[0] if dst else ".", src)] if src else []', _p5f("pipe-copy-onto-save")),
+    # D2: the documented ask count drifts from the registry again (core.md, README, safety-philosophy).
+    ("p5f-core-md-ask-count-stale", "agent/instructions/core.md", "### ASKS THE USER -- five rules",
+     "### ASKS THE USER -- two rules", _DOCS + "[core]"),
+    ("p5f-readme-ask-count-stale", "README.md", "Only five rules ask *you*", "Only two rules ask *you*",
+     _DOCS + "[readme]"),
+    ("p5f-philosophy-ask-count-stale", "docs/safety-philosophy.md", "Five rules in the toolkit ask you",
+     "Two rules in the toolkit ask you", _DOCS + "[philosophy]"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _P5F_CLAUSES]
