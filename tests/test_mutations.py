@@ -4161,4 +4161,8 @@ MUTATIONS += [
                  "tests/test_skyguard_lock.py::"
                  "test_the_bash_wrapper_called_by_a_backslash_path_from_elsewhere_runs_its_own_package",
                  id="l2-skyguard-sh-backslash-path"),
+    # skydoctor: an empty instruction file is not live (Task 16 re-review).
+    pytest.param("tools/skyguard/doctor.py", "        if size == 0:\n", "        if False:\n",
+                 "tests/test_skydoctor.py::test_layer1_an_empty_instruction_file_is_not_live",
+                 id="l2-doctor-empty-instructions"),
 ]

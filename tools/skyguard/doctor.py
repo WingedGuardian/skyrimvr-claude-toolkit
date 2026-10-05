@@ -208,7 +208,9 @@ def _layer1(root):
         except OSError as e:
             rows.append(Row("Layer 1", name, UNKNOWN, "cannot be read (%s)" % e.__class__.__name__))
             continue
-        if name == "AGENTS.md" and size > AGENTS_MD_MAX:
+        if size == 0:
+            rows.append(Row("Layer 1", name, NOT_LIVE, "empty: the agent starts with no instructions"))
+        elif name == "AGENTS.md" and size > AGENTS_MD_MAX:
             rows.append(Row("Layer 1", name, NOT_LIVE, "{:,} bytes > {:,}: Codex silently truncates the rest".format(
                 size, AGENTS_MD_MAX)))
         else:

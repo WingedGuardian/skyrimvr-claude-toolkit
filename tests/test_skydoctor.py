@@ -265,6 +265,15 @@ def test_layer1_agents_md_over_the_budget_is_not_live_and_the_cap_itself_is_live
 
 
 @needs_windows
+def test_layer1_an_empty_instruction_file_is_not_live(bed):
+    """Task 16 re-review: a 0-byte CLAUDE.md read `live | present (0 bytes)` -- live on an empty set."""
+    (bed.root / "CLAUDE.md").write_bytes(b"")
+    r = bed.row("CLAUDE.md")
+    assert r.status == "not live" and "empty" in r.reason, r
+    assert bed.code() == 1
+
+
+@needs_windows
 def test_layer1_a_missing_instruction_file_is_not_live(bed):
     (bed.root / "CLAUDE.md").unlink()
     assert bed.row("CLAUDE.md").status == "not live"
