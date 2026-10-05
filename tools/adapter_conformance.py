@@ -280,6 +280,136 @@ def run_conformance(adapter_dir, profile: dict, cases: dict, command: Optional[s
     return rows
 
 
+# ---- the capability report (ADAPTING.md section 3) ---------------------------------------------------
+REPORT_TEMPLATE = REPO / "tools" / "adapting" / "capability-report.template.json"
+# Every leaf the validator requires, as dotted paths. The template's keys must equal this tuple (a test says so).
+LEAVES = (
+    "v",
+    "agent.name", "agent.version", "agent.surface",
+    "instruction_file.name", "instruction_file.limit_bytes", "instruction_file.truncation_behaviour",
+    "skills_dir.path",
+    "pre_tool_hook.exists", "pre_tool_hook.fires_on_this_surface", "pre_tool_hook.can_block",
+    "pre_tool_hook.block_mechanism", "pre_tool_hook.can_ask", "pre_tool_hook.failed_hook_behaviour",
+    "pre_tool_hook.hook_timeout_s",
+    "session_start.exists", "session_start.injects_context",
+    "payload_capture.method", "payload_capture.files",
+    "proof.conformance_passed", "proof.live_canary_blocked", "proof.canary_evidence",
+)
+# Leaves that are NOT {"value","tier","evidence"} data: the version, the agent identity, the file list, the proof.
+PLAIN_LEAVES = ("v", "agent.name", "agent.version", "agent.surface", "payload_capture.files",
+                "proof.conformance_passed", "proof.live_canary_blocked", "proof.canary_evidence")
+TIERS = ("MEASURED", "READ", "INFERRED", "ASSUMED")
+STATUS_FULL = "locally adapted, self-verified"
+STATUS_PARTIAL = "partially supported: Layers 0-2"
+_RANK = {STATUS_PARTIAL: 0, STATUS_FULL: 1}
+FAILED_HOOK_VALUES = ("allows", "blocks", "unknown")
+# The leaves that gate the strong status (all must be MEASURED); the value each must hold is in _gate().
+GATING = ("pre_tool_hook.fires_on_this_surface", "pre_tool_hook.can_block", "pre_tool_hook.failed_hook_behaviour")
+_MISSING = object()
+
+
+def _get(report, path: str):
+    node = report
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return _MISSING
+        node = node[part]
+    return node
+
+
+def _data(report, path: str):
+    """-> (value, tier) of a wrapped leaf; (None, None) when it is missing, unfilled or malformed."""
+    leaf = _get(report, path)
+    if isinstance(leaf, dict):
+        return leaf.get("value"), leaf.get("tier")
+    return None, None
+
+
+def _gate_holds(report) -> bool:
+    for path, ok_value in (("pre_tool_hook.fires_on_this_surface", lambda v: v is True),
+                           ("pre_tool_hook.can_block", lambda v: v is True),
+                           ("pre_tool_hook.failed_hook_behaviour", lambda v: v in ("allows", "blocks"))):
+        value, tier = _data(report, path)
+        if tier != "MEASURED" or not ok_value(value):
+            return False
+    return True
+
+
+def derive_status(report) -> str:
+    """The ONLY place a status string is produced. A report can never declare its own."""
+    if not isinstance(report, dict) or not _gate_holds(report):
+        return STATUS_PARTIAL
+    proof = report.get("proof")
+    if not isinstance(proof, dict):
+        return STATUS_PARTIAL
+    evidence = proof.get("canary_evidence")
+    if (proof.get("conformance_passed") is True and proof.get("live_canary_blocked") is True
+            and isinstance(evidence, str) and evidence.strip()):
+        return STATUS_FULL
+    return STATUS_PARTIAL
+
+
+def validate_report(report) -> List[str]:
+    if not isinstance(report, dict):
+        return ["report: must be a JSON object"]
+    problems: List[str] = []
+    for leaf in LEAVES:
+        value = _get(report, leaf)
+        if value is _MISSING:
+            problems.append("{}: missing".format(leaf))
+            continue
+        if leaf == "v":
+            if type(value) is not int or value != 1:
+                problems.append("v: must be the integer 1")
+        elif leaf in ("proof.conformance_passed", "proof.live_canary_blocked"):
+            if not isinstance(value, bool):
+                problems.append("{}: must be true or false".format(leaf))
+        elif leaf == "payload_capture.files":
+            if not isinstance(value, list):
+                problems.append("{}: must be a list".format(leaf))
+        elif leaf in PLAIN_LEAVES:
+            if not isinstance(value, str):
+                problems.append("{}: must be a string".format(leaf))
+        elif isinstance(value, dict):
+            if "value" not in value:
+                problems.append("{}: no 'value'".format(leaf))
+            if value.get("tier") not in TIERS:
+                problems.append("{}: tier must be one of {}".format(leaf, "|".join(TIERS)))
+            ev = value.get("evidence")
+            if not isinstance(ev, str) or not ev.strip():
+                problems.append("{}: evidence must name a file or command".format(leaf))
+            if leaf == "pre_tool_hook.failed_hook_behaviour" and value.get("value") not in FAILED_HOOK_VALUES:
+                problems.append("{}: value must be one of {}".format(leaf, "|".join(FAILED_HOOK_VALUES)))
+        elif value not in ("", None):
+            problems.append("{}: a filled leaf must be {{value, tier, evidence}}".format(leaf))
+    derived = derive_status(report)
+    if "claimed_status" in report:
+        claim = report["claimed_status"]
+        if claim not in _RANK:
+            problems.append("claimed_status: must be one of '{}' or '{}'; the toolkit never lets a report say "
+                            "'supported'".format(STATUS_FULL, STATUS_PARTIAL))
+        elif _RANK[claim] > _RANK[derived]:
+            problems.append("claimed_status: claims '{}' but the measured leaves only derive '{}'".format(claim, derived))
+            for path in GATING:
+                _, tier = _data(report, path)
+                if tier in ("INFERRED", "ASSUMED"):
+                    problems.append("{}: tier {} cannot support the stronger status".format(path, tier))
+    return problems
+
+
+def report_main(path: str) -> int:
+    try:
+        report = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        print("cannot read the report: {}".format(e))
+        return 1
+    print(derive_status(report))
+    problems = validate_report(report)
+    for p in problems:
+        print("PROBLEM " + p)
+    return 1 if problems else 0
+
+
 def summary(rows: List[Row]) -> str:
     bad = [r for r in rows if not r.ok]
     s = "CONFORMANCE PASS ({}/{})".format(len(rows), len(rows)) if not bad else \
@@ -296,7 +426,11 @@ def main(argv=None) -> int:
     r.add_argument("--cases", required=True)
     r.add_argument("--command")
     r.add_argument("--port", action="store_true")
+    rp = sp.add_parser("report", help="validate a capability report and print the status it derives")
+    rp.add_argument("file")
     a = ap.parse_args(argv)
+    if a.cmd == "report":
+        return report_main(a.file)
     rows = run_conformance(a.adapter_dir, json.loads(Path(a.profile).read_text(encoding="utf-8")),
                            json.loads(Path(a.cases).read_text(encoding="utf-8")), a.command, a.port)
     for row in rows:

@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "agent": {"name": "", "version": "", "surface": ""},
+  "instruction_file": {"name": "", "limit_bytes": null, "truncation_behaviour": ""},
+  "skills_dir": {"path": ""},
+  "pre_tool_hook": {
+    "exists": null,
+    "fires_on_this_surface": null,
+    "can_block": null,
+    "block_mechanism": "",
+    "can_ask": null,
+    "failed_hook_behaviour": "",
+    "hook_timeout_s": null
+  },
+  "session_start": {"exists": null, "injects_context": null},
+  "payload_capture": {"method": "", "files": []},
+  "proof": {"conformance_passed": false, "live_canary_blocked": false, "canary_evidence": ""}
+}
