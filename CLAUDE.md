@@ -246,13 +246,16 @@ Coverage and gaps: `docs/guard-coverage.md`.
 - **Always review changes before applying** -- modded installs are delicate
 - Never modify ESP/ESM files directly -- use xelib programmatically or Spriggit
 - Vortex manages load order -- direct edits to loadorder.txt/plugins.txt may be overwritten
-- **Never hand-install a third-party mod into `Data/` -- that is the mod manager's job.** Downloading
-  someone's mod and copying its files in bypasses Vortex/MO2: the files are untracked, a later deploy
-  or purge can clobber or orphan them, and under MO2 they don't appear in the virtual filesystem's
-  conflict view at all. They're also invisible in the user's own record of what's installed, which is
-  the state that makes a broken install undebuggable later. **This includes SKSE plugin DLLs** --
-  DevBench among them. If a mod is needed, tell the user and let them install it with their manager.
-  (Writing the user's **own** in-development mod files into `Data/` is a different thing and is fine.)
+- **Never hand-install a third-party mod into `Data/` -- that is the mod manager's job**, SKSE DLLs
+  (DevBench too) included: copied-in files are untracked, a deploy or purge can clobber or orphan
+  them, and MO2's conflict view never shows them. Tell the user; they install it. (The user's **own**
+  in-development mod files in `Data/` are fine.)
+- **Delete to the Recycle Bin, never permanently.** Windows: `Microsoft.VisualBasic.FileIO.FileSystem`
+  `DeleteFile`/`DeleteDirectory` with `SendToRecycleBin`, not `rm`/`Remove-Item`. A permanent delete
+  needs the user's OK; a tool's own temp files are exempt.
+- **Never push CPU, RAM, free disk, disk I/O or GPU past 80% of the machine**, counting what already
+  runs (games, other sessions). Measure first; if it won't fit, wait, shrink or ask. Stress tests: never
+  one worker per core, idle priority, time-boxed.
 
 ### Safety improvement loop
 After every session, near-miss, or unexpected outcome, evaluate whether a new guard rule, expanded protection, or knowledgebase entry could have prevented or caught the issue. Propose new guard rules when a pattern of risk emerges -- proactively when you notice a gap. Document proposed rules in a "Hook Candidates" section of `KNOWLEDGEBASE.local.md`.
@@ -262,11 +265,10 @@ After every session, near-miss, or unexpected outcome, evaluate whether a new gu
 - An audit log at `.claude/backups/AUDIT_LOG.txt` records every file touched, when, and by which tool
 
 ### Iteration snapshots (standing process — do not skip)
-Mod development requires many experimental iterations. Without snapshots, reverting to a known-good state means reconstructing code from memory or entangled transcript turns.
-1. **Before any experimental change**, copy the current `.psc` source files to `.claude/backups/<descriptive-name>/` (e.g. `known-good-pre-stagger/`). This is the rollback point.
-2. **Automatic copies are not rollback points.** On agents with hooks, edits are backed up and `.psc`/`.pex` are snapshotted before shell commands. A copy you cannot identify later is not a plan, so snapshot by name anyway. Spriggit backs up the ESP on every deserialize, but not scripts.
-3. **After confirming a state works in-game**, snapshot both scripts and a Spriggit export to a dated `known-good/` folder, named descriptively (what works, not just the date).
-4. **"Restore from transcript" is a trap** — past-turn code is entangled with the bugs being fixed that same turn. Read it for reference; don't paste it forward blindly.
+1. **Before any experimental change**, copy the current `.psc` files to `.claude/backups/<descriptive-name>/` (e.g. `known-good-pre-stagger/`): the rollback point.
+2. **Automatic copies are not rollback points** -- you can't identify them later, so snapshot by name anyway. Spriggit backs up the ESP on deserialize, not scripts.
+3. **After a state works in-game**, snapshot scripts and a Spriggit export to a `known-good/` folder named for what works.
+4. **"Restore from transcript" is a trap** -- that code is entangled with the bugs fixed that turn.
 
 ## Confidence Levels (Mandatory)
 
