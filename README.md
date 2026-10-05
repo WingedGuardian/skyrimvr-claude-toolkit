@@ -166,6 +166,10 @@ Claude can then:
   menu* from *actually hung* from *no save loaded yet*, instead of guessing from a frozen frame
   counter. (Needs DevBench 1.11.0+; older builds fall back automatically.)
 
+DevBench minimum is **1.11.0**; newest release the docs were read against is **1.24.0**. Update your
+**VR Address Library first** (newest seen: 0.276.1) -- DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0.
+CrashLogger 1.24+ also writes `__fastfail` dumps; `crash-triage.py` already handles the file naming.
+
 In practice, tuning a value stops being "edit, recompile, reload, ask you to try it" and becomes
 another call into the running game. You just keep playing. The toolkit ships the wrapper
 (`tools/devbench-cli.sh`) and the hard-won hazard list — DevBench itself you install from Nexus.

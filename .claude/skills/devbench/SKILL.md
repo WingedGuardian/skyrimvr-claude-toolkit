@@ -27,7 +27,7 @@ moment it's present.
 bash tools/devbench-cli.sh alive                       # is the GAME running, paused, hung, or not loaded?
 bash tools/devbench-cli.sh health                      # raw off-thread liveness + instance identity
 bash tools/devbench-cli.sh ping                        # server self-test only -- NOT proof of liveness
-bash tools/devbench-cli.sh state                       # {plugin,version,vr,playerLoaded,frame}
+bash tools/devbench-cli.sh state                       # {plugin,version,vr,playerLoaded,frame,pid,port,exe}
 bash tools/devbench-cli.sh inspect vm                  # Papyrus VM health — freeze diagnosis
 bash tools/devbench-cli.sh exec "player.getav health"  # console exec + capture + read output
 bash tools/devbench-cli.sh call Actor IsInCombat '[]' '{"form":"0x14"}'
@@ -49,6 +49,30 @@ the wrapper uses works any time the server is up, with no reconnect.
 quests|effects|refs`) · `papyrus` (list/describe/**call**) · `menu` (list/describe/**accept**/open/close) ·
 `game` (save/load/list) · `scenario` (timed steps with `waitFor`/`waitUntil`, not guessed sleeps) ·
 `camera` · `record`/`replay`.
+
+**Newer tools (from the DevBench 1.16–1.24 changelog and README; this toolkit has not exercised them
+against a live game).** `game` gained `loadLast` (fire-and-forget; reload the latest save), `advanceTime`
+(1.17), `setTimeScale` / `getTimeScale` (1.22; scale 0.1..3.0, leased, refused with 409 while a
+recording runs) · `wait` and `sleep` (1.16; step pacing, incl. in-game hours) · `input` (1.18-1.24;
+`capabilities` / `observe` / `keyboard` / `vrTrackedSet`: **synthetic input, VR-specific and mutating**
+-- treat like `record`/`replay`) · `camera orbit` (third person only; 501 on VR) · `inspect kind=extensions`
+· `menu invoke`. **`scenario` now FAILS when an inner tool errors (since 1.16, #72)**; before that it
+reported success, so a scenario that used to "pass" may now fail honestly -- read the step it names.
+`devbench-bridge.exe` (stdio, shipped with DevBench) is the recommended MCP route for a session that must
+survive game restarts; **register it under a server name that starts with `devbench`**, because the
+toolkit's MCP guard matches `mcp__devbench*` and would not see a bridge named anything else.
+
+**Versions.** The toolkit's wrapper needs **1.11.0+** for `alive` (off-thread health since 1.12.0; older
+builds fall back to a frame diff). Everything it documents (ports, `POST /api/tool/<tool>`,
+`/api/health`, `/api/tools`, console exec/capture/read, 400/504 meanings) is unchanged in 1.24.0 per the
+changelog, which is the newest release this was read against (2026-10-04). **Keep the VR Address Library
+current before updating DevBench:** DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0 and needs a current
+Address Library. The newest VR Address Library seen when this was written is **0.276.1** (2026-10-04);
+a stale Address Library is the usual reason an SKSE plugin fails to load.
+**Console capture:** 1.19 fixed capture when the output buffer is empty (#96) and 1.24 changed how
+console output is captured (#117). The wrapper's exec+sleep+read pair still works; `count:0` was
+common on older builds and is no longer assumed normal -- many commands still print nothing, so verify
+by re-reading state. 1.24 also warns on unknown request keys; the wrapper sends only documented keys.
 
 **Check `alive` first, and believe it over `ping`.** Every tool call above runs *on the game's main
 thread* and 504s after 5s if that thread is stuck — so tool calls fail in exactly the situation you

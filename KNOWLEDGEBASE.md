@@ -1457,6 +1457,23 @@ DevBench (alandtse, Nexus SE 181326) exposes the **running** game over a localho
 Everything below was learned during live sessions on a heavy (700+ plugin) VR load order. Read this
 before your first live session — several of these cost a force-killed game to discover.
 
+### Versions and what changed in 1.16-1.24 (read from the changelog/README, 2026-10-05; not run live)
+- Latest seen: **1.24.0** (2026-10-04). Toolkit floor stays **1.11.0** (`alive`; off-thread since 1.12.0).
+  No removals or renames in 1.16-1.24: ports, `POST /api/tool/<tool>`, `/api/health` fields, `/api/tools`,
+  console exec/capture/read and the 400/504 meanings are all unchanged.
+- **Update the VR Address Library first.** DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0. Newest VR
+  Address Library seen: **0.276.1** (2026-10-04).
+- New: `game loadLast` / `advanceTime` (1.17) / `setTimeScale` / `getTimeScale` (1.22, 0.1..3.0, leased, 409
+  while recording); `wait` and `sleep` (1.16); `input` (1.18-1.24, synthetic keyboard/VR tracked-pose, mutating);
+  `camera orbit` (third person only, 501 on VR); `inspect kind=extensions`; `menu invoke`; `devbench-bridge`
+  stdio exe. `inspect state` also returns `pid`, `port`, `exe`.
+- **`scenario` fails on an inner tool error since 1.16 (#72)**; it used to report success.
+- Console capture: 1.19 fixed empty-buffer capture (#96), 1.24 "capture console output" (#117), and 1.24
+  warns on unknown request keys (#116). The old "count:0 is normal" is partly a pre-1.19 artefact.
+- **CrashLogger:** 1.24.0 added `__fastfail` crash dumps (a crash class older loggers never wrote).
+  `tools/crash-triage.py` already matches `crash-*.txt`/`.log` case-insensitively; no real `__fastfail`
+  dump has been run through it yet -- when one exists, confirm the unparsed counter stays 0.
+
 ### The server is not the game (liveness ≠ ping)
 - The HTTP server runs on a **separate thread from the game**. A deadlocked, hung, or paused game
   still answers `ping` with `{"ok":true}`. **`ping` is not proof the game is alive.**
@@ -1493,7 +1510,8 @@ before your first live session — several of these cost a force-killed game to 
   never hung; only DevBench's own save did.
 - DevBench 1.9.1 changed this area ("console: reroute save/load to game tool path") and mutating
   `game` actions are documented as fire-and-forget with `lifecycle` events for completion. Whether
-  the deadlock persists on current versions is **untested here** — treat `game save` as suspect and
+  the deadlock persists on current versions is **untested here** (1.22.0's changelog says named saves are
+  now queued through SKSE, #104 -- reported fixed in 1.22 per the changelog, unverified) — treat `game save` as suspect and
   prefer the user-driven load until you have verified otherwise on your version.
 - If you do try it on a newer build, watch it with `alive` / `GET /api/health` (see above) rather than
   `inspect` — a tool call is dispatched onto the very main thread the deadlock freezes, so it 504s
@@ -1518,7 +1536,8 @@ before your first live session — several of these cost a force-killed game to 
   **Spawn dedicated test actors and act on those** (`player.placeatme <hostileBase> N`), and observe
   the player's natural activity rather than perturbing it.
 - Many commands produce **no console output at all** (`addmusic`/`removemusic`, etc.). `count:0` from
-  a capture is normal — judge the result by re-reading state, not by captured lines.
+  a capture can be genuine (on DevBench < 1.19 it was also what an empty capture buffer returned; fixed in
+  1.19, reworked in 1.24) — judge the result by re-reading state, not by captured lines.
 
 ### Papyrus `call` gotchas
 - Globals/native functions: **omit `self`**. Member functions: pass it —

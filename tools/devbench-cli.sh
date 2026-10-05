@@ -14,7 +14,7 @@
 #   bash tools/devbench-cli.sh ping                       # server self-test (NOT proof of liveness)
 #   bash tools/devbench-cli.sh alive                      # is the GAME running / paused / hung?
 #   bash tools/devbench-cli.sh health                     # raw off-thread liveness+identity probe
-#   bash tools/devbench-cli.sh state                      # {plugin,version,vr,playerLoaded,frame}
+#   bash tools/devbench-cli.sh state                      # {plugin,version,vr,playerLoaded,frame,pid,port,exe}
 #   bash tools/devbench-cli.sh inspect vm                 # kinds: state health vm scene mods player
 #                                                         #        inventory quests effects refs
 #   bash tools/devbench-cli.sh exec "player.getav health" # console exec + capture + read output
@@ -201,8 +201,9 @@ case "$CMD" in
       post console "$payload" >/dev/null || exit 1
       sleep 1   # commands are queued on the game thread; they land on a later frame
       post console '{"action":"read"}' | pretty
-      # NOTE: many commands (addmusic/removemusic/...) produce NO console output. count:0 is normal
-      # -- judge the result by re-reading state, not by the captured lines.
+      # NOTE: many commands (addmusic/removemusic/...) produce NO console output, so count:0 can be
+      # genuine. On DevBench < 1.19 it was also what an empty capture buffer returned (fixed in 1.19, #96;
+      # capture reworked again in 1.24, #117) -- either way, judge the result by re-reading state.
       ;;
 
   call)
