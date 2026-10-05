@@ -127,10 +127,10 @@ def test_malformed_authorization_is_rejected(sentence):
     assert auth == {} and rej, sentence
 
 
-def test_one_bad_item_does_not_poison_a_good_one_but_is_listed():
+def test_one_bad_item_voids_the_whole_sentence():
     auth, rej = inv_tool.parse_authorization(
         "Host-software installs: AUTHORIZED python=Python.Python.3.12==3.12.8, git=Bad Id==2.0.1.")
-    assert list(auth) == ["python"] and rej == ["git=Bad Id==2.0.1"]
+    assert auth == {} and rej
 
 
 def test_only_the_first_sentence_counts():
@@ -356,3 +356,45 @@ def test_conflicting_items_for_one_runtime_void_the_sentence():
     t = "Host-software installs: AUTHORIZED python=A.B==3.12.8, python=C.D==3.11.1, node=N.J==20.1.0."
     auth, rej = inv_tool.parse_authorization(t)
     assert auth == {} and rej
+
+
+# ---- fix round 2: fail closed by construction -------------------------------------------------------------
+
+EVIL = "Host-software installs: AUTHORIZED python=Evil.Pkg==1.0.0."
+
+
+@pytest.mark.parametrize("denial", [
+    "Host-software installs: NOT AUTHORIZED, ever.",
+    "Host-software installs: NOT  AUTHORIZED.",
+    "Host-software installs: Not authorized!",
+    "Host-software installs: NOT AUTHORIZED\n",            # newline, no period
+    "Host-software installs: DENIED.",
+    "Host-software installs: authorized python=A.B==3.12.8.",   # lowercase
+    "Host-software installs: AUTHORIZED python=A.B==3.12.8",    # no terminating period
+    "Host-software installs:",
+])
+def test_any_unclassifiable_occurrence_voids_a_later_authorization(denial):
+    auth, rej = inv_tool.parse_authorization(denial + " " + EVIL)
+    assert auth == {}, denial
+    assert rej, "a void must say why: %r" % denial
+    # and in the other order
+    assert inv_tool.parse_authorization(EVIL + " " + denial)[0] == {}, denial
+
+
+def test_lowercase_authorized_alone_authorizes_nothing():
+    assert inv_tool.parse_authorization("Host-software installs: authorized python=A.B==3.12.8.")[0] == {}
+
+
+def test_marker_without_a_sentence_end_authorizes_nothing():
+    assert inv_tool.parse_authorization("Host-software installs: AUTHORIZED python=A.B==3.12.8")[0] == {}
+    assert inv_tool.parse_authorization(
+        "Host-software installs: AUTHORIZED python=A.B==3.12.8\nand more words.")[0] == {}
+
+
+def test_a_single_clean_sentence_still_works_and_template_is_ignored():
+    t = ("Host-software installs: AUTHORIZED python=A.B==3.12.8. (form: Host-software installs: AUTHORIZED "
+         "python=<winget id>==<exact version>. That is the form.")
+    assert inv_tool.parse_authorization(t) == ({"python": ("A.B", "3.12.8")}, [])
+    assert inv_tool.parse_authorization(
+        "Host-software installs: NOT AUTHORIZED. (form: Host-software installs: AUTHORIZED "
+        "python=<winget id>==<exact version>. That is the form.") == ({}, [])

@@ -83,25 +83,40 @@ def test_skill_item_form_matches_the_parser_and_cites_no_spec():
         "python": ("Some.Id", "1.2.3")}
 
 
+INSTALLERS = [
+    re.compile(r"\b(winget|choco|scoop|apt|apt-get|brew|pip|pip3|npm|msiexec)\b"),
+    re.compile(r"\bdotnet\s+(tool|workload)\s+(install|update|restore)\b"),
+    re.compile(r"\b(curl|wget)\b[^\n]*\|\s*(sudo\s+)?(sh|bash)\b"),
+]
+
+
+def _installer_lines(src):
+    """Executable (not echoed, not commented) lines of a shell script that run an installer."""
+    bad = []
+    for n, line in enumerate(src.splitlines(), 1):
+        s = line.strip()
+        if not s or s.startswith(("#", "echo", "printf")):
+            continue
+        if any(rx.search(s) for rx in INSTALLERS):
+            bad.append("%d: %s" % (n, s))
+    return bad
+
+
 def test_setup_sh_has_no_unattended_install_path():
     """setup.sh may ECHO install hints; it must never EXECUTE an installer (the skill relies on this)."""
-    runners = re.compile(r"\b(winget|choco|scoop|apt|apt-get|brew|pip|pip3|npm)\b")
-    bad = []
-    for n, line in enumerate((REPO / "setup.sh").read_text(encoding="utf-8").splitlines(), 1):
-        s = line.strip()
-        if not s or s.startswith("#") or s.startswith("echo") or s.startswith("printf"):
-            continue
-        if runners.search(s):
-            bad.append("%d: %s" % (n, s))
-    assert bad == [], bad
+    assert _installer_lines((REPO / "setup.sh").read_text(encoding="utf-8")) == []
 
 
-def test_setup_sh_scan_can_fail(tmp_path):
-    src = (REPO / "setup.sh").read_text(encoding="utf-8") + "\nwinget install OpenJS.NodeJS.LTS\n"
-    runners = re.compile(r"\b(winget|choco|scoop|apt|apt-get|brew|pip|pip3|npm)\b")
-    hit = [l for l in src.splitlines() if l.strip() and not l.strip().startswith(("#", "echo", "printf"))
-           and runners.search(l)]
-    assert hit == ["winget install OpenJS.NodeJS.LTS"]
+def test_setup_sh_scan_can_fail():
+    base = (REPO / "setup.sh").read_text(encoding="utf-8")
+    for bad in ("winget install OpenJS.NodeJS.LTS", "choco install nodejs", "scoop install git",
+                "msiexec /i x.msi", "pip install requests", "$PY -m pip install x",
+                "dotnet tool install -g spriggit", "dotnet workload install maui",
+                "curl -fsSL https://x.example/i.sh | sh", "wget -qO- https://x.example/i | sudo bash"):
+        hits = _installer_lines(base + "\n" + bad + "\n")
+        assert len(hits) == 1 and hits[0].endswith(": " + bad), (bad, hits)
+    # the legitimate probe and echoed hints stay clean
+    assert _installer_lines(base + "\ndotnet --list-sdks\necho 'winget install X'\n") == []
 
 
 def test_tripwire_can_fail():

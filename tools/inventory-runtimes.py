@@ -141,56 +141,55 @@ def inventory(candidates=None, timeout=LAUNCH_TIMEOUT):
     return result
 
 
-def _parse_sentence(body):
-    """One sentence body -> (kind, authorized, rejected); kind is no|template|auth|void|other."""
-    upper = body.upper()
-    if upper == "NOT AUTHORIZED":
-        return "no", {}, []
-    if upper != "AUTHORIZED" and not upper.startswith("AUTHORIZED "):
-        return "other", {}, [body]
-    items = [i.strip() for i in body[len("AUTHORIZED"):].split(",") if i.strip()]
-    if not items:
-        return "other", {}, [body]
-    if all("<" in i or ">" in i for i in items):
-        return "template", {}, []  # the documented form with its placeholders unfilled: authorizes nothing
-    authorized, rejected = {}, []
-    for item in items:
-        im = ITEM_RE.fullmatch(item)
-        if not im:
-            rejected.append(item)
-            continue
-        value = (im.group(2), im.group(3))
-        if authorized.get(im.group(1), value) != value:
-            return "void", {}, [body + "  (conflicting items for " + im.group(1) + ")"]
-        authorized[im.group(1)] = value
-    return "auth", authorized, rejected
+def _classify_occurrence(rest):
+    """Classify the text after ONE marker as exactly one of: auth, template, denial, void.
+
+    auth     -- uppercase AUTHORIZED, a single space, valid items joined by ", ", then a sentence end.
+    template -- the prompt's unfilled form (every item is a <placeholder>); ignored.
+    denial   -- exactly "NOT AUTHORIZED" plus a sentence end.
+    void     -- anything else. Unknown means no.
+    Returns (kind, authorized, note).
+    """
+    m = re.match(r" ([^\n]*?)\.(?=\s|$)", rest)
+    if not m:
+        return "void", {}, "marker with no sentence end: " + rest[:60].strip()
+    body = m.group(1)
+    if body == "NOT AUTHORIZED":
+        return "denial", {}, None
+    if body.startswith("AUTHORIZED "):
+        items = body[len("AUTHORIZED "):].split(", ")
+        if all("<" in i or ">" in i for i in items):
+            return "template", {}, None
+        authorized = {}
+        for item in items:
+            im = ITEM_RE.fullmatch(item)
+            if not im or im.group(1) in authorized:
+                return "void", {}, "bad or repeated item: " + item
+            authorized[im.group(1)] = (im.group(2), im.group(3))
+        return "auth", authorized, None
+    return "void", {}, "unrecognised wording: " + body  # unclassified-is-void
 
 
 def parse_authorization(text):
-    """Read every 'Host-software installs:' sentence (case-insensitive). Returns (authorized, rejected).
+    """Fail-closed read of every 'Host-software installs:' marker (case-insensitive). Returns (authorized, rejected).
 
-    authorized: {runtime: (id, version)}. It is non-empty only when the text says AUTHORIZED in the exact
-    documented form and nothing contradicts it: any NOT AUTHORIZED sentence anywhere, two concrete sentences
-    that disagree, or conflicting items for one runtime all void it. An unfilled template is ignored.
+    authorized: {runtime: (id, version)}, non-empty only when EVERY occurrence is a clean AUTHORIZED list
+    or the unfilled template, and the clean ones agree. Any other occurrence, a denial included, voids it.
     """
-    rejected, auths = [], []
+    auths = []
     for m in re.finditer(re.escape(AUTH_MARKER), text, re.I):
-        rest = text[m.end():]
-        s = re.match(r"\s*(.*?)\.(?=\s|$)", rest, re.S)
-        if not s:
-            rejected.append(text[m.start():m.start() + 80])
-            continue
-        kind, authorized, rej = _parse_sentence(s.group(1).strip())
-        rejected += rej
-        if kind in ("no", "void"):
-            return {}, rejected
+        kind, authorized, note = _classify_occurrence(text[m.end():])
+        if kind == "void":
+            return {}, [note]
+        if kind == "denial":
+            return {}, []
         if kind == "auth":
             auths.append(authorized)
     if not auths:
-        return {}, rejected
+        return {}, []
     if any(a != auths[0] for a in auths):
-        return {}, rejected + ["conflicting Host-software installs sentences"]
-    return auths[0], rejected
+        return {}, ["conflicting Host-software installs sentences"]
+    return auths[0], []
 
 
 def install_command(pkg_id, version):

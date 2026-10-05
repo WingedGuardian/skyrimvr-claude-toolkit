@@ -1877,6 +1877,16 @@ MUTATIONS = [
          r'''        [void]$proc.WaitForExit()''',
          "tests/test_codex_entry.py::test_a_hung_engine_is_a_deny", "codex-wrapper-has-no-deadline"),
     ]
+] + [
+    # Plan 7 fix round 2: an occurrence of the authorization marker that is not a clean AUTHORIZED list
+    # must void everything. Treated as ignorable, a stray "NOT AUTHORIZED, ever." beside a later AUTHORIZED
+    # sentence stops denying, and an unattended install becomes possible.
+    pytest.param(
+        "tools/inventory-runtimes.py",
+        '    return "void", {}, "unrecognised wording: " + body  # unclassified-is-void',
+        '    return "template", {}, None',
+        "tests/test_inventory_runtimes.py::test_any_unclassifiable_occurrence_voids_a_later_authorization",
+        id="inventory-unclassified-authorization-is-not-void"),
 ]
 
 
