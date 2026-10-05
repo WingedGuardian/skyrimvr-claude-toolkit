@@ -2383,6 +2383,18 @@ MUTATIONS.append(pytest.param(   # a quoted `[x]` in the install's own name is l
     id="rule-S-DEL-INSTALL-literal-quoted-glob",
 ))
 
+# ---- RT-A: S-DEL-UNKNOWN-DIR and S-SHELL-UNREAD; each named twin must turn the intended rows red.
+_IR = "tests/test_guard_corpus.py::test_intended_rows_reproduce"
+MUTATIONS += [
+    pytest.param(_DL, "            if cd_lost and unknown_dir is None and _everything(w):", "            if False:", _IR,
+                 id="rule-S-DEL-UNKNOWN-DIR-whole-folder"),
+    pytest.param("tools/skyguard/shell_rules.py", "    if parsed.unread:", "    if False:", _IR,
+                 id="rule-S-SHELL-UNREAD-denies"),
+    pytest.param("tools/skyguard/shellparse.py",
+                 "            if reader.program in ALL_SHELLS and any(_is_decoder(e) for _, umade in items[:ci] for e in umade):",
+                 "            if False:", _IR, id="rule-S-SHELL-UNREAD-pipe-into-shell"),
+]
+
 # ---- Plan 5 Task 8: shell writes (E21). One twin per primitive class and per clause; each names the t08 row it must
 # turn red, fired in-process by tests/test_skyguard_writes.py::test_t08_row.
 _WR = "tools/skyguard/writes.py"
