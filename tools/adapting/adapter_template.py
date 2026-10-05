@@ -133,11 +133,23 @@ def _block_for_failure(why):
 
 
 def _emit(out, code, err):
-    sys.stdout.write(out)
-    sys.stdout.flush()
-    if err:
-        sys.stderr.write(err)
-        sys.stderr.flush()
+    """Write UTF-8 BYTES, never text: a piped Windows stdout is cp1252 and raises on a reason it cannot encode,
+    and this runs outside main()'s try. Any failure falls back to STATIC_BLOCK on raw file descriptors."""
+    try:
+        o, e = out.encode("utf-8", "replace"), err.encode("utf-8", "replace")
+        sys.stdout.buffer.write(o)
+        sys.stdout.buffer.flush()
+        if e:
+            sys.stderr.buffer.write(e)
+            sys.stderr.buffer.flush()
+    except BaseException:
+        try:
+            so, code, se = STATIC_BLOCK
+            os.write(1, so.encode("utf-8", "replace"))
+            if se:
+                os.write(2, se.encode("utf-8", "replace"))
+        except BaseException:
+            code = 2
     sys.exit(code)
 
 

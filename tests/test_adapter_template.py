@@ -5,6 +5,8 @@ import ast
 import subprocess
 import sys
 
+import pytest
+
 from conftest import REPO
 
 TPL = REPO / "tools" / "adapting" / "adapter_template.py"
@@ -128,7 +130,9 @@ def test_ask_becomes_a_block_unless_the_author_set_render_ask(tmp_path):
     assert ns["_render"]({"decision": "ask", "reason": "r", "context": ""})[0] == "ASKED r"
 
 
-JSON_PROFILE = {"block": {"exit": 0, "stdout_regex": "\"toy_decision\": ?\"block\"", "stderr_regex": None},
+# A profile regex is matched with fullmatch against the WHOLE (stripped) stream, DOTALL: it must describe the
+# decision, not mention a word that prose could contain.
+JSON_PROFILE = {"block": {"exit": 0, "stdout_regex": "\\{\"toy_decision\": \"block\".*", "stderr_regex": None},
                 "allow": {"exit": 0}}
 EXIT2_PROFILE = {"block": {"exit": 2, "stdout_regex": None, "stderr_regex": None}, "allow": {"exit": 0}}
 
@@ -154,10 +158,13 @@ def _exit2_cases():
         {"id": "benign-write", "expect": "allow", "payload": {"call": {"name": "edit", "file": "{ROOT}/notes.txt"}}},
         {"id": "empty-payload", "expect": "block", "payload": ""},
         {"id": "garbage-payload", "expect": "block", "payload_hex": "fffe00"},
+        {"id": "decoy-plugin-shell", "expect": "block", "payload": {"call": {"name": "sh", "cmdline": "echo x > \"{ROOT}/Data/Decoy.esp\""}}},
+        {"id": "benign-shell", "expect": "allow", "payload": {"call": {"name": "sh", "cmdline": "echo hello"}}},
     ]}
 
 
-FAULT_IDS = ["fault:engine-crash", "fault:engine-silent", "fault:engine-garbage", "fault:engine-marker-garbage",
+FAULT_IDS = ["fault:engine-deny-nonce", "fault:engine-allow-valid",
+"fault:engine-crash", "fault:engine-silent", "fault:engine-garbage", "fault:engine-marker-garbage",
              "fault:engine-wrong-version", "fault:engine-allow-but-exit-1", "fault:engine-hang", "fault:engine-missing"]
 
 
@@ -247,7 +254,7 @@ def test_a_slot_that_allows_everything_is_caught_by_the_decoy_case(tmp_path):
     assert 'kind": "none"' in evil
     d = _toy(tmp_path, evil)
     rows = c.run_conformance(d, JSON_PROFILE, _json_cases())
-    assert not _by(rows)["case:decoy-plugin-write"].ok
+    assert not _by(rows)["case:benign-write"].ok      # the engine refuses a request of no kind; the adapter relays it
     assert c.summary(rows).startswith("CONFORMANCE FAIL")
 
 
@@ -269,10 +276,10 @@ def test_a_slot_that_raises_or_exits_is_a_block_so_the_fail_closed_rows_pass(tmp
         d = _toy(tmp_path, hostile, name="h" + str(n))
         rows = _by(c.run_conformance(d, JSON_PROFILE, _json_cases()))
         assert rows["case:garbage-payload"].ok and rows["case:empty-payload"].ok, (body, rows)
-        # It refuses everything: closed (never "NOT BLOCKED"), and visibly useless (the decoy's own reason is
-        # missing and the benign call is refused), so conformance still goes red.
-        assert rows["case:decoy-plugin-write"].why.startswith("blocked, but"), (body, rows["case:decoy-plugin-write"])
-        assert not rows["case:benign-write"].ok, body
+        assert rows["case:decoy-plugin-write"].ok, body          # closed: it blocks the decoy ...
+        # ... but it blocks everything: the benign call is refused and the verdict-fidelity faults go red.
+        assert not rows["case:benign-write"].ok and not rows["fault:engine-allow-valid"].ok, body
+        assert not rows["fault:engine-deny-nonce"].ok, body      # the engine's reason never reached the agent
 
 
 def _gone(pid):
@@ -290,24 +297,138 @@ def test_a_slot_that_hangs_ends_in_a_failed_row_and_the_child_is_killed(tmp_path
     c = _conf()
     c.PROBE_TIMEOUT_S = 2
     pidfile = tmp_path / "pid.txt"
-    hang = "import os, time\n    open(%r, 'w').write(str(os.getpid()))\n    time.sleep(120)\n    " % pidfile.as_posix()
+    # The slot hangs AND leaves a grandchild (an "engine") holding the inherited pipes: killing only the adapter
+    # would orphan it and, on Windows, block the pipe read for as long as the grandchild lives.
+    hang = ("import os, time, subprocess\n    g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+            "    open(%r, 'a').write(str(os.getpid()) + ' ' + str(g.pid) + '\\n')\n    time.sleep(120)\n    " % pidfile.as_posix())
     d = _toy(tmp_path, JSON_SLOTS.replace(MAP_HEAD, hang + MAP_HEAD, 1))
     t0 = time.time()
-    rows = c.run_conformance(d, JSON_PROFILE, _json_cases())
-    assert time.time() - t0 < 90
-    by = _by(rows)
-    assert not by["case:decoy-plugin-write"].ok and "TIMEOUT" in by["case:decoy-plugin-write"].why
-    assert not by["faults"].ok
-    assert c.summary(rows).startswith("CONFORMANCE FAIL")
-    assert pidfile.exists() and _gone(int(pidfile.read_text()))
+    try:
+        rows = c.run_conformance(d, JSON_PROFILE, _json_cases())
+        assert time.time() - t0 < 60
+        by = _by(rows)
+        assert not by["case:decoy-plugin-write"].ok and "TIMEOUT" in by["case:decoy-plugin-write"].why
+        assert not by["faults"].ok
+        assert c.summary(rows).startswith("CONFORMANCE FAIL")
+        pids = [int(x) for x in pidfile.read_text().split()]
+        assert len(pids) >= 2 and all(_gone(p) for p in pids), pids      # adapter AND its grandchild
+    finally:                                   # only PIDs this test's own slot spawned
+        if pidfile.exists() and sys.platform == "win32":
+            for p in pidfile.read_text().split():
+                subprocess.run(["taskkill", "/T", "/F", "/PID", p], capture_output=True)
 
 
 def test_stderr_crlf_on_windows_does_not_break_an_exit2_block_check():
     c = _conf()
-    prof = {"block": {"exit": 2, "stdout_regex": None, "stderr_regex": "GUARD INERT: adapter failed$"}, "allow": {"exit": 0}}
+    prof = {"block": {"exit": 2, "stdout_regex": None, "stderr_regex": "GUARD INERT: adapter failed"}, "allow": {"exit": 0}}
     assert c.is_block(prof, "", 2, "GUARD INERT: adapter failed\r\n")
     assert not c.is_block(prof, "", 2, "something else\n")
     assert not c.is_block(prof, "", 1, "GUARD INERT: adapter failed")
+
+
+def test_a_profile_regex_must_match_the_whole_stream_so_prose_cannot_pose_as_a_block():
+    c = _conf()
+    assert c.is_block(JSON_PROFILE, '{"toy_decision": "block", "reason": "r"}\n', 0, "")
+    assert not c.is_block(JSON_PROFILE, '{"toy_decision": "allow", "context": "the word block"}', 0, "")
+    assert not c.is_block(JSON_PROFILE, 'junk {"toy_decision": "block", "reason": "r"}', 0, "")
+    loose = {"block": {"exit": 0, "stdout_regex": "block", "stderr_regex": None}, "allow": {"exit": 0}}
+    assert not c.is_block(loose, '{"toy_decision": "allow", "context": "block"}', 0, "")
+
+
+def test_command_without_port_is_refused_so_the_hashed_file_is_the_one_that_runs(tmp_path):
+    c = _conf()
+    live = c.compose(TPL.read_text(encoding="ascii"), EXIT2_SLOTS).replace(
+        "out, code, err = _render(v)",
+        "out, code, err = (('', 2, 'plugin refused') if b'.esp' in raw else ('', 0, ''))")
+    assert "b'.esp'" in live
+    d = _toy(tmp_path, EXIT2_SLOTS)
+    (d / "evil.py").write_text(live, newline="\n")
+    rows = c.run_conformance(d, EXIT2_PROFILE, _exit2_cases(), command="{PY} {DIR}/evil.py")
+    assert [r.id for r in rows] == ["command"] and not rows[0].ok
+
+
+def test_a_port_that_checks_liveness_but_ignores_the_verdict_goes_red(tmp_path):
+    """Reviewer's cheat A: block on '.esp' in the raw payload, never read the engine's decision."""
+    c = _conf()
+    live = c.compose(TPL.read_text(encoding="ascii"), EXIT2_SLOTS).replace(
+        "out, code, err = _render(v)",
+        "out, code, err = (('', 2, 'plugin refused') if b'.esp' in raw else ('', 0, ''))")
+    d = _toy(tmp_path, EXIT2_SLOTS)
+    (d / "adapter.py").write_text(live, newline="\n")
+    rows = _by(c.run_conformance(d, EXIT2_PROFILE, _exit2_cases(), port=True))
+    assert not rows["fault:engine-allow-valid"].ok and not rows["fault:engine-deny-nonce"].ok
+
+
+def test_a_slot_that_maps_everything_to_other_and_decides_for_itself_goes_red(tmp_path):
+    """Reviewer's cheat F: the slot never asks the engine anything real; render_allow blocks on '.esp'."""
+    c = _conf()
+    f = JSON_SLOTS.replace("def map_payload(raw):\n", "def map_payload(raw):\n    global RAW; RAW = raw; json.loads(raw.decode('utf-8'))\n"
+                           "    return {\"v\": 1, \"agent\": \"toy-json\", \"event\": \"pre_tool\", \"cwd\": \"\", \"kind\": \"other\", \"tool_name\": \"x\"}\n", 1)
+    f = f.replace("def render_allow(context):\n", "def render_allow(context):\n    if b'.esp' in RAW: return render_block('plugin refused')\n", 1)
+    assert "RAW" in f
+    d = _toy(tmp_path, f)
+    rows = _by(c.run_conformance(d, JSON_PROFILE, _json_cases()))
+    assert rows["case:decoy-plugin-write"].ok          # the old checks all pass this cheat ...
+    assert not rows["fault:engine-allow-valid"].ok     # ... the verdict-fidelity fault does not
+
+
+def test_a_render_block_that_drops_the_engine_reason_goes_red(tmp_path):
+    c = _conf()
+    b = EXIT2_SLOTS.replace('return ("", 2, reason)', 'return ("", 2, "GUARD INERT: refused a plugin/archive op")')
+    assert b != EXIT2_SLOTS
+    d = _toy(tmp_path, b)
+    rows = _by(c.run_conformance(d, EXIT2_PROFILE, _exit2_cases()))
+    assert not rows["fault:engine-deny-nonce"].ok and "nonce" in rows["fault:engine-deny-nonce"].why.lower()
+
+
+def test_the_shell_pair_is_mandatory_unless_the_profile_says_there_is_no_shell(tmp_path):
+    c = _conf()
+    d = _toy(tmp_path, JSON_SLOTS)
+    no_shell = _json_cases(shell=False)
+    rows = c.run_conformance(d, JSON_PROFILE, no_shell)
+    assert {"case:decoy-plugin-shell", "case:benign-shell"} <= {r.id for r in rows if not r.ok}
+    prof = dict(JSON_PROFILE, has_shell=False)
+    rows = c.run_conformance(d, prof, no_shell)
+    assert all(r.ok for r in rows), [r for r in rows if not r.ok]
+    assert "SHELL UNGUARDED (profile says no shell tool)" in c.summary(rows)
+    assert "SHELL UNGUARDED" not in c.summary(c.run_conformance(d, JSON_PROFILE, _json_cases()))
+    assert [r.id for r in c.run_conformance(d, dict(JSON_PROFILE, has_shell="no"), no_shell)] == ["profile"]
+
+
+def test_a_non_cp1252_reason_on_a_piped_windows_stdout_still_blocks(tmp_path):
+    """Reviewer's E: a text-stdout block shape with a reason the console codepage cannot encode used to crash
+    in _emit (outside the try) and exit 1, which a fail-open agent reads as allow."""
+    c = _conf()
+    e = EXIT2_SLOTS.replace('return ("", 2, reason)', 'return (reason + " \\u65e5\\u672c", 2, "")')
+    assert "u65e5" in e
+    d = _toy(tmp_path, e, name="textout")
+    root = c.make_install(d, tmp_path / "inst")
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONIOENCODING", "PYTHONUTF8")}
+    p = json.dumps({"call": {"name": "edit", "file": (root / "Data" / "x.esp").as_posix()}}).encode()
+    cp = subprocess.run([sys.executable, str(root / "tools" / "adapters" / "textout" / "adapter.py")],
+                        input=p, capture_output=True, env=env, timeout=60)
+    assert cp.returncode == 2, (cp.returncode, cp.stdout, cp.stderr[-300:])
+    assert "日本" in cp.stdout.decode("utf-8")
+
+
+def test_emit_falls_back_to_the_static_block_when_the_streams_are_broken(tmp_path, monkeypatch):
+    c = _conf()
+    ns = {"__name__": "adapter_under_test"}
+    exec(compile(c.compose(TPL.read_text(encoding="ascii"), EXIT2_SLOTS), "adapter.py", "exec"), ns)
+
+    class Broken:
+        class buffer:
+            @staticmethod
+            def write(b):
+                raise OSError("stream is broken")
+            flush = write
+    wrote = []
+    monkeypatch.setattr(sys, "stdout", Broken)
+    monkeypatch.setattr(sys, "stderr", Broken)
+    monkeypatch.setattr(os, "write", lambda fd, data: wrote.append((fd, data)) or len(data))
+    with pytest.raises(SystemExit) as ex:
+        ns["_emit"]("allow text", 0, "")
+    assert ex.value.code == 2 and (2, b"GUARD INERT: adapter failed") in wrote
 
 
 def test_every_fault_row_goes_red_when_the_machinery_fails_open(tmp_path):
@@ -321,7 +442,7 @@ def test_every_fault_row_goes_red_when_the_machinery_fails_open(tmp_path):
     assert old in src
     p.write_text(src.replace(old, '        return _checked(render_allow("x"))\n    except BaseException:'), newline="\n")
     rows = _by(c.run_conformance(d, JSON_PROFILE, _json_cases()))
-    for fid in FAULT_IDS:
+    for fid in FAULT_IDS[2:]:                  # the 8 engine-break faults (the two verdict faults are not about failure)
         assert not rows[fid].ok, fid
     assert not rows["case:garbage-payload"].ok and not rows["case:empty-payload"].ok
     assert not rows["template-identical"].ok

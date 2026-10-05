@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -25,20 +26,25 @@ SHELL_PAIR = ("decoy-plugin-shell", "benign-shell")
 EXPECTED = {"decoy-plugin-write": "block", "decoy-plugin-shell": "block", "empty-payload": "block",
             "garbage-payload": "block", "benign-write": "allow", "benign-shell": "allow"}
 PROBE_TIMEOUT_S = float(os.environ.get("SKYGUARD_CONF_TIMEOUT_S", "15"))
-# The engine's plugin-write refusal names "plugin/archive" (write_rules.DENY_PLUGIN, pinned in Task 0).
-VISIBLE = re.compile(r"(?i)plugin|archive")
-ALLOW_V1 = ('print("SKYGUARD-OK"); print(\'{"v":1,"decision":"allow","reason":"","context":"",'
-            '"status":"evaluated","code":"allow"}\')')
+SHELL_NOTE = "SHELL UNGUARDED (profile says no shell tool)"
+# The fake engines write BYTES: print() on Windows ends a line with CRLF, which would break the marker check
+# for a reason that is not the fault being tested.
+_W = "import sys\nw = sys.stdout.buffer.write\n"
+ALLOW_V1 = _W + 'w(b\'SKYGUARD-OK\\n{"v":1,"decision":"allow","reason":"","context":"","status":"evaluated","code":"allow"}\\n\')'
+# Faults that make the engine BREAK: the adapter must fail closed with GUARD INERT visible.
 FAULTS = {
     "engine-crash": "raise SystemExit(1)\n",
     "engine-silent": "pass\n",
-    "engine-garbage": "print('hello')\n",
-    "engine-marker-garbage": "print('SKYGUARD-OK'); print('not json')\n",
-    "engine-wrong-version": "print('SKYGUARD-OK'); print('{\"v\":2,\"decision\":\"allow\"}')\n",
-    "engine-allow-but-exit-1": ALLOW_V1 + "; raise SystemExit(1)\n",
+    "engine-garbage": _W + "w(b'hello\\n')\n",
+    "engine-marker-garbage": _W + "w(b'SKYGUARD-OK\\nnot json\\n')\n",
+    "engine-wrong-version": _W + "w(b'SKYGUARD-OK\\n{\"v\":2,\"decision\":\"allow\"}\\n')\n",
+    "engine-allow-but-exit-1": ALLOW_V1 + "\nraise SystemExit(1)\n",
     "engine-hang": "import time; time.sleep(60)\n",
     "engine-missing": None,
 }
+# Faults that make the engine DECIDE something the payload does not suggest: the adapter must obey the verdict,
+# not its own opinion of the payload. Both are valid, well-formed engine answers.
+VERDICT_FAULTS = ("engine-deny-nonce", "engine-allow-valid")
 
 
 class Row(NamedTuple):
@@ -86,19 +92,28 @@ def _profile_problem(p: dict) -> Optional[str]:
                 return "exit codes must be integers"
         if not (b.get("stdout_regex") or b.get("stderr_regex")) and b["exit"] == a["exit"]:
             return "block cannot be told from allow: give a different exit code or a regex"
+        if not isinstance(p.get("has_shell", True), bool):
+            return "has_shell must be true or false"
+        for key in ("stdout_regex", "stderr_regex"):
+            if b.get(key):
+                re.compile(b[key])
+    except re.error as e:
+        return "block regex does not compile: {}".format(e)
     except (KeyError, TypeError, AttributeError):
         return "profile needs block.exit and allow.exit"
     return None
 
 
 def is_block(profile: dict, out: str, code: Optional[int], err: str) -> bool:
+    """A profile regex is matched with re.fullmatch (DOTALL) against the WHOLE stream, stripped, with CRLF folded
+    to LF. So it must describe the decision (e.g. '\\{"decision": "block".*'), not mention a word that an allow's
+    free text could contain, and a block shape with junk in front of it is not a block."""
     b = profile["block"]
     if code != b["exit"]:
         return False
-    # Windows writes stderr in text mode, so a reason can arrive with CRLF line endings: compare as LF.
-    out, err = out.replace("\r\n", "\n"), err.replace("\r\n", "\n")
+    out, err = out.replace("\r\n", "\n").strip(), err.replace("\r\n", "\n").strip()
     for key, text in (("stdout_regex", out), ("stderr_regex", err)):
-        if b.get(key) and not re.search(b[key], text):
+        if b.get(key) and not re.fullmatch(b[key], text, re.DOTALL):
             return False
     return True
 
@@ -119,18 +134,43 @@ def _payload_bytes(case: dict, root: Path) -> bytes:
 
 
 def _run(argv: list, data: bytes, env: dict) -> Tuple[str, Optional[int], str]:
+    kw = {} if os.name == "nt" else {"start_new_session": True}
     try:
-        cp = subprocess.run(argv, input=data, capture_output=True, env=env, timeout=PROBE_TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        return "", None, "TIMEOUT: the adapter did not answer within {}s".format(PROBE_TIMEOUT_S)
+        p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, **kw)
     except OSError as e:
         return "", None, "cannot start the adapter: {}".format(e)
-    return cp.stdout.decode("utf-8", "replace"), cp.returncode, cp.stderr.decode("utf-8", "replace")
+    try:
+        so, se = p.communicate(data, timeout=PROBE_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        _kill_tree(p)
+        try:
+            p.communicate(timeout=10)
+        except Exception:
+            pass
+        return "", None, "TIMEOUT: the adapter did not answer within {}s".format(PROBE_TIMEOUT_S)
+    return so.decode("utf-8", "replace"), p.returncode, se.decode("utf-8", "replace")
 
 
-def _case_problems(by_id: dict) -> List[Row]:
+def _kill_tree(p: "subprocess.Popen") -> None:
+    """Kill the adapter AND everything it started (its engine), by the PID this tool spawned: never by image
+    name, and never only the top process, which would orphan the engine and keep the pipes open."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True, timeout=30)
+        else:
+            import signal
+            os.killpg(p.pid, signal.SIGKILL)
+    except Exception:
+        pass
+    try:
+        p.kill()
+    except Exception:
+        pass
+
+
+def _case_problems(by_id: dict, has_shell: bool = True) -> List[Row]:
     rows: List[Row] = []
-    for rid in REQUIRED:
+    for rid in REQUIRED + (SHELL_PAIR if has_shell else ()):
         if rid not in by_id:
             rows.append(Row("case:" + rid, False, "required case missing"))
     if (SHELL_PAIR[0] in by_id) != (SHELL_PAIR[1] in by_id):
@@ -149,9 +189,17 @@ def run_conformance(adapter_dir, profile: dict, cases: dict, command: Optional[s
     if prob:
         return [Row("profile", False, prob)]
     by_id = {c.get("id"): c for c in cases.get("cases", []) if isinstance(c, dict)}
-    rows = _case_problems(by_id)
+    if command and not port:
+        # The identity check hashes <adapter-dir>/adapter.py. A --command may run some OTHER file, so it would
+        # certify one file and run another. Only a declared port (identity skipped, loudly) may bring a command.
+        return [Row("command", False, "--command needs --port: the template-identity check hashes adapter.py, "
+                    "which a custom command does not necessarily run")]
+    has_shell = profile.get("has_shell", True)
+    rows = _case_problems(by_id, has_shell)
     if rows:
         return rows
+    if not has_shell:
+        rows.append(Row("shell-unguarded", True, SHELL_NOTE))
     entry = adapter_dir / "adapter.py"
     if port:
         print("UNVERIFIED STRUCTURE: this adapter is a port; the template-identical check was skipped", file=sys.stderr)
@@ -182,16 +230,8 @@ def run_conformance(adapter_dir, profile: dict, cases: dict, command: Optional[s
             hung = hung or code is None and err.startswith("TIMEOUT")
             want = case.get("expect")
             if want == "block":
-                ok = blocked = is_block(profile, out, code, err)
-                if ok and cid.startswith("decoy-"):
-                    ok = bool(VISIBLE.search(out + err))
-                if ok:
-                    why = "blocked, reason visible"
-                elif blocked:
-                    why = "blocked, but the engine's plugin/archive reason did not reach the agent (stdout {!r}, stderr {!r})".format(
-                        out[:80], err[:80])
-                else:
-                    why = "NOT BLOCKED (exit {}, stdout {!r}, stderr {!r})".format(code, out[:80], err[:80])
+                ok = is_block(profile, out, code, err)
+                why = "blocked" if ok else "NOT BLOCKED (exit {}, stdout {!r}, stderr {!r})".format(code, out[:80], err[:80])
             elif want == "allow":
                 ok = is_allow(profile, out, code, err)
                 why = "allowed" if ok else "NOT ALLOWED (exit {}, stdout {!r}, stderr {!r})".format(code, out[:80], err[:80])
@@ -215,13 +255,36 @@ def run_conformance(adapter_dir, profile: dict, cases: dict, command: Optional[s
             rows.append(Row("fault:" + name, ok, "failed closed, cause visible" if ok else
                             "FAILED OPEN or hid the cause (exit {}, stdout {!r}, stderr {!r})".format(code, out[:80], err[:80])))
             run_py.write_text(original, encoding="utf-8", newline="\n")
+        # Verdict fidelity: the engine answers with a valid verdict the payload does not suggest. An adapter
+        # that decides from the payload, or drops the reason, is caught here and nowhere else.
+        nonce = "NONCE" + secrets.token_hex(8)
+        deny = _W + ('w(b\'SKYGUARD-OK\\n{"v": 1, "decision": "deny", "reason": "%s", "context": "", '
+                     '"status": "evaluated", "code": "x"}\\n\')\n' % nonce)
+        for name, source, payload in (("engine-deny-nonce", deny, benign),
+                                      ("engine-allow-valid", ALLOW_V1 + "\n", _payload_bytes(by_id["decoy-plugin-write"], root))):
+            run_py.write_text(source, encoding="utf-8", newline="\n")
+            out, code, err = _run(argv, payload, env)
+            if name == "engine-deny-nonce":
+                blocked = is_block(profile, out, code, err)
+                ok = blocked and nonce in (out + err)
+                why = ("blocked and the engine's own reason reached the agent" if ok else
+                       "blocked, but the engine's reason (the nonce) never reached the agent" if blocked else
+                       "NOT BLOCKED though the engine denied (exit {}, stdout {!r}, stderr {!r})".format(code, out[:80], err[:80]))
+            else:
+                ok = is_allow(profile, out, code, err)
+                why = ("allowed what the engine allowed" if ok else
+                       "did not allow though the engine allowed: the adapter decides for itself (exit {}, stdout {!r}, stderr {!r})"
+                       .format(code, out[:80], err[:80]))
+            rows.append(Row("fault:" + name, ok, why))
+        run_py.write_text(original, encoding="utf-8", newline="\n")
     return rows
 
 
 def summary(rows: List[Row]) -> str:
     bad = [r for r in rows if not r.ok]
-    return "CONFORMANCE PASS ({}/{})".format(len(rows), len(rows)) if not bad else \
+    s = "CONFORMANCE PASS ({}/{})".format(len(rows), len(rows)) if not bad else \
         "CONFORMANCE FAIL ({} of {})".format(len(bad), len(rows))
+    return s + (" - " + SHELL_NOTE if any(r.id == "shell-unguarded" for r in rows) else "")
 
 
 def main(argv=None) -> int:
