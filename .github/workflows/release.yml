@@ -111,7 +111,8 @@ jobs:
           # The adapter kit for agents the toolkit does not wire itself: ADAPTING.md, tools/adapting/, the
           # conformance and inventory tools, the neutral engine entry, the toolkit-setup skill. Shipped by the
           # rsync rule above; asserted here so a rule change cannot drop one silently.
-          python3 tools/check-adapter-payload.py "/tmp/$NAME"             || { echo "::error::the adapter kit is incomplete in the payload (see the !! lines above)"; exit 1; }
+          python3 tools/check-adapter-payload.py "/tmp/$NAME" \
+            || { echo "::error::the adapter kit is incomplete in the payload (see the !! lines above)"; exit 1; }
           (cd /tmp && zip -qr "$NAME.zip" "$NAME")
           mv "/tmp/$NAME.zip" .
           unzip -l "$NAME.zip" | tail -5

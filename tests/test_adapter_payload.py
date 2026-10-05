@@ -8,6 +8,7 @@ ADAPTING.md. So each path is asserted on the payload (tools/check-adapter-payloa
 from __future__ import annotations
 
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -18,7 +19,20 @@ from conftest import REPO
 
 CHECKER = REPO / "tools" / "check-adapter-payload.py"
 
-NEW_PATHS = [
+CITE = re.compile(r"\[(src|repo|spec|measured): ([^\]]+)\]")
+SPEC = "docs/superpowers/specs/2026-09-30-universal-agent-support-design.md"
+
+
+def adapting_references():
+    """Every repo file ADAPTING.md tells the agent to use (`tools/...` in backticks) or cites as evidence."""
+    text = (REPO / "ADAPTING.md").read_text(encoding="utf-8")
+    out = {p for p in re.findall(r"`((?:tools|tests|agent|docs)/[A-Za-z0-9_./-]+\.[a-z]+)`", text) if "<" not in p}
+    for kind, target in CITE.findall(text):
+        out.add(SPEC if kind == "spec" else re.split(r"::|#", target)[0].strip())
+    return sorted(out)
+
+
+NEW_PATHS = sorted(set([
     "ADAPTING.md",
     "tools/adapting/adapter_template.py",
     "tools/adapting/capability-report.template.json",
@@ -27,7 +41,21 @@ NEW_PATHS = [
     "tools/skyguard/neutral.py",
     ".claude/skills/toolkit-setup/SKILL.md",
     ".agents/skills/toolkit-setup/SKILL.md",
-]
+    "tools/adapting/examples/json_deny.slots.py",
+    "tools/adapting/examples/exit2.slots.py",
+] + adapting_references()))
+
+
+def test_every_file_adapting_md_names_or_cites_is_checked():
+    """Final review M2: ADAPTING.md sends the agent to the worked examples and cites the spec and measurements,
+    but the payload check did not list them: a rule change could drop them and leave dead references."""
+    spec = importlib.util.spec_from_file_location("check_adapter_payload", CHECKER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    refs = adapting_references()
+    assert "tools/adapting/examples/json_deny.slots.py" in refs and SPEC in refs, refs   # the scan sees them
+    missing = sorted(set(refs) - set(mod.REQUIRED))
+    assert not missing, missing
 
 
 def _run(root):
@@ -79,6 +107,24 @@ def test_both_release_gates_run_the_adapter_check():
         runs = [l for l in text.splitlines()
                 if not l.strip().startswith("#") and "python" in l and "check-adapter-payload.py" in l]
         assert runs, f"{rel} never runs tools/check-adapter-payload.py"
+
+
+LOST_CONTINUATION = re.compile(r"\S {6,}(\|\||&&)")
+
+
+def test_the_release_gates_parse_and_lost_no_line_continuation():
+    """Final review M1: a heredoc edit ate the backslash of a `\\` continuation in release.yml, leaving the command
+    on one physical line with a run of spaces where the line break was. It still ran, by luck of the spacing."""
+    yaml = pytest.importorskip("yaml")
+    for wf in sorted((REPO / ".github" / "workflows").glob("*.yml")):
+        yaml.safe_load(wf.read_text(encoding="utf-8"))
+    for rel in [p.relative_to(REPO).as_posix() for p in sorted((REPO / ".github" / "workflows").glob("*.yml"))] + [
+            "tools/verify-release.sh"]:
+        bad = [l.strip()[:90] for l in (REPO / rel).read_text(encoding="utf-8").splitlines()
+               if LOST_CONTINUATION.search(l)]
+        assert not bad, (rel, bad)
+    assert LOST_CONTINUATION.search('python3 x.py "/tmp/$NAME"             || { exit 1; }')
+    assert not LOST_CONTINUATION.search('          || { echo "x"; exit 1; }')
 
 
 def test_the_release_zip_rule_does_not_exclude_the_new_paths():

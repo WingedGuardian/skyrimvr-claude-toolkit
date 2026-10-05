@@ -24,6 +24,24 @@ REQUIRED = (
     "tools/skyguard/neutral.py",
     ".claude/skills/toolkit-setup/SKILL.md",
     ".agents/skills/toolkit-setup/SKILL.md",
+    # What ADAPTING.md sends the agent to read (the worked examples), and the files its citations resolve
+    # against: a dropped one leaves the agent a dead reference and an unbacked claim.
+    "tools/adapting/examples/json_deny.slots.py",
+    "tools/adapting/examples/exit2.slots.py",
+    "tools/hook-canary.sh",
+    "tools/skyguard/run.py",
+    "tools/skyguard/engine.py",
+    "tools/skyguard/health.py",
+    "tools/skyguard/mcp_rules.py",
+    "tools/skyguard/patch_paths.py",
+    "tools/skyguard/adapters/claude.py",
+    "tools/skyguard/adapters/codex.py",
+    "agent/guards/adapters/codex/skyguard-entry.sh",
+    "README.md",
+    "docs/safety-philosophy.md",
+    "docs/superpowers/specs/2026-09-30-universal-agent-support-design.md",
+    "docs/superpowers/measurements/2026-10-02-plan4-codex-derisk.md",
+    "docs/superpowers/measurements/2026-10-05-plan7-adapter-latency.md",
 )
 
 
