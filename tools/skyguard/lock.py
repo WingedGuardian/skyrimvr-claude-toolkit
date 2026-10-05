@@ -44,6 +44,7 @@ MECHANISM = "M-D"
 ENV_SANDBOX = "SKYGUARD_LOCK_SANDBOX"
 ENV_SESSION = "SKYGUARD_SESSION_ID"
 ENV_AGENT = "SKYGUARD_AGENT"
+USER_SESSION = "user-tty"  # the lift id of a person typing at a terminal: no agent session can ever match it
 LIFT_SECONDS = 3600.0      # a lock lift lasts an hour (state caps every lift at 8 h)
 
 # Access-mask bits. The whitelist is exactly these four (L4, L5): never W/M/F, SYNCHRONIZE, WDAC, WO, D or DE.
@@ -166,13 +167,28 @@ def _is_reparse(st) -> bool:
     return _stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & _REPARSE)
 
 
-def _skip_reason(st):
+def _links(path, st):
+    """The number of hard links, read from an open FILE HANDLE (GetFileInformationByHandle) on Windows: lstat's
+    st_nlink is not trustworthy there (an ACE such as a user's deny on DELETE made it report a wrong count and a
+    plain file read as multi-link). None when it cannot be read; elsewhere lstat's own count."""
+    if not supported():
+        return st.st_nlink
+    try:
+        return _win().link_count(os.path.normpath(os.fspath(path)))
+    except OSError:
+        return None
+
+
+def _skip_reason(st, path):
     """Why this lstat result is not lockable, or None."""
     if _is_reparse(st):
         return "reparse point"
     if not _stat.S_ISREG(st.st_mode):
         return "not a regular file"
-    if st.st_nlink != 1:
+    n = _links(path, st)
+    if n is None:
+        return "cannot be opened (a deny entry or another lock is on it)"
+    if n != 1:
         return "multi-link (mod manager copy)"
     return None
 
@@ -190,10 +206,13 @@ def targets(data_dir, edition=None) -> Targets:
         p = data_dir / name
         try:
             st = os.lstat(str(p))
-        except OSError:
+        except FileNotFoundError:
             t.skips.append((name, "missing"))
             continue
-        reason = _skip_reason(st)
+        except OSError as e:
+            t.skips.append((name, "unreadable (%s)" % e.__class__.__name__))
+            continue
+        reason = _skip_reason(st, p)
         if reason:
             t.skips.append((name, reason))
         else:
@@ -245,6 +264,19 @@ class _Win:
         k32.GetFileAttributesW.argtypes = [wt.LPCWSTR]
         k32.GetFileAttributesW.restype = wt.DWORD
         k32.SetFileAttributesW.argtypes = [wt.LPCWSTR, wt.DWORD]
+
+        class BY_HANDLE_FILE_INFORMATION(ct.Structure):
+            _fields_ = [("dwFileAttributes", wt.DWORD), ("ftCreationTime", wt.FILETIME),
+                        ("ftLastAccessTime", wt.FILETIME), ("ftLastWriteTime", wt.FILETIME),
+                        ("dwVolumeSerialNumber", wt.DWORD), ("nFileSizeHigh", wt.DWORD),
+                        ("nFileSizeLow", wt.DWORD), ("nNumberOfLinks", wt.DWORD),
+                        ("nFileIndexHigh", wt.DWORD), ("nFileIndexLow", wt.DWORD)]
+
+        self.BY_HANDLE_FILE_INFORMATION = BY_HANDLE_FILE_INFORMATION
+        k32.CreateFileW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, vp, wt.DWORD, wt.DWORD, vp]
+        k32.CreateFileW.restype = vp
+        k32.GetFileInformationByHandle.argtypes = [vp, ct.POINTER(BY_HANDLE_FILE_INFORMATION)]
+        k32.CloseHandle.argtypes = [vp]
         self._sid_buf = None
         self._sid_addr = None
         self.sid_str = ""
@@ -277,6 +309,21 @@ class _Win:
             return out.value
         finally:
             self.k32.LocalFree(ct.cast(out, ct.c_void_p))
+
+    def link_count(self, path) -> int:
+        """nNumberOfLinks from a handle opened with FILE_READ_ATTRIBUTES only (needs no right a deny ACE on the
+        file's data, delete or write could have taken away). Raises OSError when the file cannot be opened."""
+        ct = self.ct
+        h = self.k32.CreateFileW(path, 0x80, 0x7, None, 3, 0x02000000, None)   # share all, OPEN_EXISTING
+        if h is None or h == ct.c_void_p(-1).value:
+            raise ct.WinError(ct.get_last_error())
+        try:
+            info = self.BY_HANDLE_FILE_INFORMATION()
+            if not self.k32.GetFileInformationByHandle(h, ct.byref(info)):
+                raise ct.WinError(ct.get_last_error())
+            return info.nNumberOfLinks
+        finally:
+            self.k32.CloseHandle(h)
 
     def attrs(self, path) -> int:
         a = self.k32.GetFileAttributesW(path)
@@ -425,7 +472,7 @@ def _assert_plain(path, single: bool):
     st = os.lstat(os.fspath(path))
     if _is_reparse(st) or not _stat.S_ISREG(st.st_mode):
         raise ValueError("not a plain file: " + os.path.basename(str(path)))
-    if single and st.st_nlink != 1:
+    if single and _links(path, st) != 1:
         raise ValueError("multi-link (mod manager copy): " + os.path.basename(str(path)))
 
 
@@ -453,6 +500,11 @@ def apply_one(path) -> str:
     st = read_state(path)
     if st.ours is not None:
         return st.ours                      # already locked: idempotent
+    for a in st.aces:
+        # The user's OWN deny entry for this account would be merged with ours by the ACL API (and unlock could
+        # then not tell them apart): refuse, never touch it.
+        if a["type"] == 1 and a["mine"] and a["mask"] not in _LABEL:
+            raise ValueError("has its own deny entry for this account: " + os.path.basename(str(path)))
     pre_ro = st.readonly
     mask = MASK_PRE if pre_ro else MASK_FULL
     _apply_file(path, mask, pre_ro)
@@ -476,6 +528,16 @@ def _remove_file(path, keep_bit):
     w.remove_ours(p, (MASK_FULL, MASK_PRE))
     if not keep_bit:
         w.set_readonly(p, False)
+
+
+def _undo(path, before: FileState) -> bool:
+    """Put back exactly what a failed lock changed (our ACE; the bit only if WE set it) and verify it."""
+    try:
+        _remove_file(path, before.readonly)
+        st = read_state(path)
+        return st.ours is None and st.readonly == before.readonly
+    except OSError:
+        return False
 
 
 def _verify_unlocked(path, keep_bit) -> bool:
@@ -606,39 +668,47 @@ def lock_all(root) -> Result:
         return _res(2, "No vanilla master or archive found in Data/ to lock.")
     old, _status = _read_manifest(root)
     record, failed = {}, []
-    for p in t.files:
-        name = p.name
-        try:
-            before = read_state(p)
-            info = _prior(before, p)
-            label = apply_one(p)
-            ok = _verify_locked(p, label)
-        except ValueError as e:
-            failed.append((name, str(e).split(":")[0]))
-            continue
-        except OSError as e:
-            failed.append((name, "error " + e.__class__.__name__))
-            continue
-        if not ok:
-            failed.append((name, "did not verify on re-read"))
-            continue
-        prev = old.get(name, {})
-        pre = label == "pre" or bool(prev.get("preexisting_ro"))
-        if before.ours is not None:                  # already ours: keep the record of what it was BEFORE us
-            info = {k: prev[k] for k in ("prior_attrs", "prior_aces") if k in prev} or info
-        record[name] = dict(info, preexisting_ro=pre, locked_at=prev.get("locked_at", time.time()))
-    # Keep records of files locked earlier that are no longer in the target set (e.g. became multi-link).
+    # Records of files locked earlier that are no longer in the target set (e.g. became multi-link) are carried.
+    carry = {}
+    in_set = {p.name for p in t.files}
     for name, rec in old.items():
-        if name not in record and name not in {p.name for p in t.files}:
+        if name not in in_set:
             try:
                 if read_state(data_dir / name).ours is not None:
-                    record[name] = rec
+                    carry[name] = rec
             except OSError:
                 pass
     try:
-        _write_manifest(root, t.edition, record)
+        for p in t.files:
+            name = p.name
+            before = None
+            try:
+                before = read_state(p)
+                info = _prior(before, p)
+                label = apply_one(p)
+                ok = _verify_locked(p, label)
+            except ValueError as e:
+                failed.append((name, str(e).split(":")[0]))
+                continue
+            except OSError as e:
+                failed.append((name, "error " + e.__class__.__name__))
+                continue
+            if not ok:
+                # Undo exactly what THIS call changed, and say whether the undo itself verified.
+                undone = before.ours is None and _undo(p, before)
+                failed.append((name, "did not verify on re-read" + ("; undone" if undone else "; UNDO FAILED")))
+                continue
+            prev = old.get(name, {})
+            pre = label == "pre" or bool(prev.get("preexisting_ro"))
+            if before.ours is not None:              # already ours: keep the record of what it was BEFORE us
+                info = {k: prev[k] for k in ("prior_attrs", "prior_aces") if k in prev} or info
+            record[name] = dict(info, preexisting_ro=pre, locked_at=prev.get("locked_at", time.time()))
+            # Written per file, atomically: a crash mid-lock leaves a list that matches what is locked.
+            _write_manifest(root, t.edition, dict(carry, **record))  # per file
+        _write_manifest(root, t.edition, dict(carry, **record))
     except Refused as e:
         return _res(2, str(e))
+    record.update(carry)
     skipped = [(n, r) for n, r in t.skips if r != "missing"]
     partial = failed + skipped
     if partial:
@@ -652,6 +722,25 @@ def lock_all(root) -> Result:
 
 
 # ---- unlock ----------------------------------------------------------------------------------------------------
+
+MAX_LIFTS = 100
+
+
+def _live_lifts(lifts, now):
+    """The lifts worth keeping: not yet expired, and at most MAX_LIFTS (the newest). Without this every unlock
+    appends a lift for good and state.json hits state.MAX_BYTES after ~300, after which EVERY unlock fails."""
+    live = [x for x in lifts if x["expires_at"] > now]
+    live.sort(key=lambda x: x["created"])
+    return live[-MAX_LIFTS:]
+
+
+def _interactive() -> bool:
+    """True when a person is at a terminal: stdin AND stdout are consoles (an agent's shell has pipes)."""
+    try:
+        return bool(sys.stdin.isatty() and sys.stdout.isatty())
+    except (AttributeError, ValueError):
+        return False
+
 
 def _valid_session(s):
     from . import health
@@ -674,7 +763,7 @@ def _travelled(data_dir: Path):
     for p in cands[:2000]:
         try:
             st = os.lstat(str(p))
-            if _skip_reason(st) in ("reparse point", "not a regular file"):
+            if _is_reparse(st) or not _stat.S_ISREG(st.st_mode):
                 continue
             if read_state(p).ours is not None:
                 out.append(p)
@@ -706,8 +795,8 @@ def unlock(root, names, session, now=None) -> Result:
         return g
     data_dir, t = g
     if not _valid_session(session):
-        return _res(2, "No session id: pass --session <id> (or set SKYGUARD_SESSION_ID) so the lift is recorded.",
-                    "Without one, run tools/skyguard-unlock.cmd.")
+        return _res(2, "No session id: pass --session <id> or set SKYGUARD_SESSION_ID so the lift is recorded "
+                       "(at a terminal it is automatic).", "Without one, run tools/skyguard-unlock.cmd.")
     manifest, mstatus = _read_manifest(root)
     try:
         chosen = _resolve_names(root, data_dir, t, names, manifest) if names else None
@@ -722,13 +811,15 @@ def unlock(root, names, session, now=None) -> Result:
         sf = _skyguard_dir(root) / "state.json"
         cur = _state.read(str(sf))
         lift = {"kind": "lock", "reason": "lock unlock " + (_names_list(chosen, 3) if names else "all"),
-                "session_id": session, "agent": os.environ.get(ENV_AGENT, "cli") or "cli",
+                "session_id": session,
+                "agent": "user" if session == USER_SESSION else (os.environ.get(ENV_AGENT, "cli") or "cli"),
                 "created": now, "expires_at": now + LIFT_SECONDS}
         if names:
             lift["files"] = list(chosen)
         persistent = {"lock_disabled": cur.lock_disabled} if cur.lock_disabled else {}
         _assert_sandbox(sf)
-        _state.write(str(sf), {"v": 1, "lifts": list(cur.lifts) + [lift], "persistent": persistent})
+        lifts = _live_lifts(list(cur.lifts) + [lift], now)
+        _state.write(str(sf), {"v": 1, "lifts": lifts, "persistent": persistent})
     except Refused as e:
         return _res(2, str(e))
     except (ValueError, OSError) as e:
@@ -842,7 +933,7 @@ def _write_persistent(root, session, disabled: bool):
     cur = _state.read(str(sf))
     persistent = {"lock_disabled": {"since": time.time(), "by_session": session or "manual"}} if disabled else {}
     _assert_sandbox(sf)
-    _state.write(str(sf), {"v": 1, "lifts": list(cur.lifts), "persistent": persistent})
+    _state.write(str(sf), {"v": 1, "lifts": _live_lifts(list(cur.lifts), time.time()), "persistent": persistent})
 
 
 def disable(root, session=None) -> Result:
@@ -897,7 +988,7 @@ def main(argv=None, out=None) -> int:
         print("usage: lock <lock|unlock [file...]|status [--json]|disable|enable> [--root R] [--session S]", file=out)
         return 2
     root = a.root or default_root()
-    session = a.session or os.environ.get(ENV_SESSION) or None
+    session = a.session or os.environ.get(ENV_SESSION) or (USER_SESSION if _interactive() else None)
     try:
         if a.cmd == "lock":
             res = lock_all(root)
