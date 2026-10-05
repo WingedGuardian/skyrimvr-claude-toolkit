@@ -22,7 +22,7 @@ generator writes LF and `*.ps1` is otherwise CRLF). `--target all` (the default;
 the union of both targets and refuses two targets emitting one path; `--target claude|codex` renders one.
 
 Skills (`skills/<name>/SKILL.md`): `create-mod`, `devbench`, `inspect-esp`, `port-to-vr`, `skyrim-audio`,
-`skyrim-bsa`, `skyrim-context`, `skyrim-mcm`, `skyrim-nif`, `skyrim-save`, `triage-and-conflicts`, `xelib`.
+`skyrim-bsa`, `skyrim-context`, `skyrim-mcm`, `skyrim-nif`, `skyrim-save`, `toolkit-setup`, `triage-and-conflicts`, `xelib`.
 `devbench`, `triage-and-conflicts` and `xelib` hold what used to be bulk in `core.md`; the core points at
 them from its *Where the rest lives* table.
 
