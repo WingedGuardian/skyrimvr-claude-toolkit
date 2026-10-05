@@ -484,7 +484,7 @@ probed live (`codex exec` and the TUI) are claimed, and why the desktop app and 
 
 ## Other agents
 
-Any agent that reads files gets Layers 0-2 of the toolkit: the instructions, the skills and the tools, with no hook. [`ADAPTING.md`](ADAPTING.md) is written for such an agent: it lets the agent wire up the rest itself and describes how far it can prove it got. The toolkit does not call such an agent supported; only Claude Code and Codex are listed as supported here.
+Any agent that reads files gets the toolkit's instructions, skills and tools, with no hook (Layers 0 and 1; Layer 2, a read-only lock below the agent, is not yet released). [`ADAPTING.md`](ADAPTING.md) is written for such an agent: it lets the agent wire up the rest itself and describes how far it can prove it got. The toolkit does not call such an agent supported; only Claude Code and Codex are listed as supported here.
 
 ---
 
