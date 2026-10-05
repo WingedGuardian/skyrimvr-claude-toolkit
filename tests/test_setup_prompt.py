@@ -84,6 +84,22 @@ def test_devbench_is_told_and_installed_only_by_the_mod_manager():
     assert "never copy files into Data/ yourself" in p
 
 
+def _after_prompt(rel, chars=900):
+    text = (REPO / rel).read_text(encoding="utf-8")
+    i = text.index(_prompt()) + len(_prompt())
+    return text[i:i + chars]
+
+
+def test_the_prose_after_each_embedded_prompt_does_not_contradict_it():
+    """Final review M3: README said, right under a prompt that forbids host installs, that the agent 'will
+    configure paths, install dependencies'; getting-started said 'Claude will: ... Check Python 3'."""
+    for rel in ("README.md", "docs/getting-started.md"):
+        tail = " ".join(_after_prompt(rel).split())
+        assert "install dependencies" not in tail, rel
+        assert not re.search(r"\bClaude (will|handles)\b", tail), rel
+        assert "does not install" in tail or "will not install" in tail, rel
+
+
 def test_product_is_not_named():
     """The rename is a later plan's; the prompt names no product."""
     assert "Claude Code Modding Toolkit" not in _prompt()

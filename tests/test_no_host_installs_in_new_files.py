@@ -21,7 +21,21 @@ SCANNED = [
     "tools/inventory-runtimes.py",
     "tools/adapting/adapter_template.py",
     "tools/adapter_conformance.py",
+    "tools/adapting/examples/json_deny.slots.py",
+    "tools/adapting/examples/exit2.slots.py",
+    # The texts an agent reads as INSTRUCTIONS (final review M7): the adapter guide and the setup prompt.
+    "ADAPTING.md",
+    "SETUP_PROMPT.txt",
 ]
+# The setup prompt is also embedded in two long documents; only the embedded prompt line is scanned there.
+PROMPT_EMBEDDINGS = ["README.md", "docs/getting-started.md"]
+
+
+def _texts():
+    from test_repo_invariants import _extract_prompt
+    out = {rel: (REPO / rel).read_text(encoding="utf-8") for rel in SCANNED}
+    out.update({rel + " (setup prompt)": _extract_prompt(rel) for rel in PROMPT_EMBEDDINGS})
+    return out
 
 # winget/choco/brew/apt/apt-get/pip(3) install, also python -m pip install and the quoted-argv spelling.
 INSTALL_RE = re.compile(
@@ -47,11 +61,19 @@ def offenders(text: str):
 
 def test_the_new_files_install_nothing():
     found = {}
-    for rel in SCANNED:
-        hits = offenders((REPO / rel).read_text(encoding="utf-8"))
+    for rel, text in _texts().items():
+        hits = offenders(text)
         if hits:
             found[rel] = hits
     assert not found, f"host-install commands outside the skill's install-form block: {found}"
+
+
+def test_the_scan_covers_every_text_an_agent_reads_as_instructions():
+    """Final review M7: ADAPTING.md and the setup prompt (all three copies) were not scanned at all."""
+    texts = _texts()
+    for rel in ("ADAPTING.md", "SETUP_PROMPT.txt", "README.md (setup prompt)", "docs/getting-started.md (setup prompt)"):
+        assert rel in texts and texts[rel].strip(), rel
+    assert offenders(texts["README.md (setup prompt)"] + " then pip install x") == ["pip install"]
 
 
 def test_the_tripwire_can_fail_on_pip_install():
