@@ -4037,3 +4037,96 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_LR, "for x in mine:                                          # I3", "for x in ():  # I3",
      _p6row("r1-listing-filter"), "l2-r1-construct-listing"),
 ]]
+
+
+# Plan 6 Task 16: skydoctor. One twin per state and clause, each killed through the named test.
+# No twin (behaviourally redundant, said so rather than padded): the expiry clause in _lift_for (collect() has already
+# removed every expired lift from a state that verifies, and a rejected state's lifts are never read), and the
+# `st.rejected` early return in clear_expired (a rejected State carries no lifts, so nothing would be rewritten anyway).
+_DR = "tools/skyguard/doctor.py"
+_DRT = "tests/test_skydoctor.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # ---- the line and the exit code
+    (_DR, "        if not str(self.reason).strip():", "        if False:",
+     _DRT + "test_the_row_constructor_refuses_a_blank_reason", "l2-doctor-row-reason-never-blank"),
+    (_DR, "        if self.status not in STATUSES:", "        if False:",
+     _DRT + "test_the_row_constructor_refuses_a_blank_reason", "l2-doctor-row-status-is-one-of-three"),
+    (_DR, "    if NOT_LIVE in counted:", "    if False:",
+     _DRT + "test_exit_codes_not_live_outranks_unknown", "l2-doctor-exit-1-not-live"),
+    (_DR, "    if UNKNOWN in counted:", "    if False:",
+     _DRT + "test_layer0_a_toolchain_check_that_cannot_run_is_unknown", "l2-doctor-exit-2-unknown"),
+    (_DR, "    counted = [r.status for r in rows if r.counted]", "    counted = [r.status for r in rows]",
+     _DRT + "test_layer2_the_honest_gap_list_is_printed_and_not_counted", "l2-doctor-exit-gaps-not-counted"),
+    # ---- Layer 0 / Layer 1
+    (_DR, "    if rc == 0:", "    if rc == 99:",
+     _DRT + "test_a_fully_live_install_exits_0_and_every_line_is_live", "l2-doctor-l0-live"),
+    (_DR, "    if rc == 1:", "    if rc == 99:",
+     _DRT + "test_layer0_a_degraded_toolchain_is_not_live", "l2-doctor-l0-not-live"),
+    (_DR, '        if name == "AGENTS.md" and size > AGENTS_MD_MAX:', "        if False:",
+     _DRT + "test_layer1_agents_md_over_the_budget_is_not_live_and_the_cap_itself_is_live", "l2-doctor-l1-budget"),
+    (_DR, '        if name == "AGENTS.md" and size > AGENTS_MD_MAX:', '        if name == "AGENTS.md" and size >= AGENTS_MD_MAX:',
+     _DRT + "test_layer1_agents_md_over_the_budget_is_not_live_and_the_cap_itself_is_live", "l2-doctor-l1-budget-boundary"),
+    (_DR, 'rows.append(Row("Layer 1", name, NOT_LIVE, "missing:', 'rows.append(Row("Layer 1", name, LIVE, "missing:',
+     _DRT + "test_layer1_a_missing_instruction_file_is_not_live", "l2-doctor-l1-missing"),
+    # ---- Layer 2: one per target state, the mechanism, the disable
+    (_DR, "        if fs.ours is not None and fs.readonly:", "        if fs.ours is not None and False:",
+     _DRT + "test_a_fully_live_install_exits_0_and_every_line_is_live", "l2-doctor-l2-locked"),
+    (_DR, "        lift = None if st.rejected else _lift_for(st.lifts, p.name, now)", "        lift = None",
+     _DRT + "test_layer2_a_lifted_file_reads_unlocked_with_its_lift_time", "l2-doctor-l2-lift-until"),
+    (_DR, '            and (x.get("files") is None or name.lower() in (f.lower() for f in x["files"]))]',
+     "            and True]",
+     _DRT + "test_layer2_a_lift_for_another_file_does_not_explain_this_one", "l2-doctor-l2-lift-names-the-file"),
+    (_DR, 'label="unlocked (outside skyguard)"))', 'label="unlocked"))',
+     _DRT + "test_layer2_a_file_opened_outside_skyguard_says_so", "l2-doctor-l2-outside-skyguard"),
+    (_DR, '        elif reason.startswith("multi-link"):', "        elif False:",
+     _DRT + "test_layer2_a_multilink_target_is_skipped", "l2-doctor-l2-skipped-multilink"),
+    (_DR, "            if name in manifest:", "            if False:",
+     _DRT + "test_layer2_a_locked_file_that_vanished_is_missing", "l2-doctor-l2-missing"),
+    (_DR, "    elif st.lock_disabled:", "    elif False:",
+     _DRT + "test_layer2_a_persistent_disable_is_named_with_its_date", "l2-doctor-l2-disabled-since"),
+    (_DR, '    engaged = mstatus != "absent" or marked', "    engaged = True",
+     _DRT + "test_layer2_mechanism_and_a_never_applied_lock", "l2-doctor-l2-never-applied"),
+    # ---- R9: the one write, and nothing else
+    (_DR, "    gone = [x for x in st.lifts if _expired(x, now)]", "    gone = []",
+     _DRT + "test_an_expired_lift_is_cleared_and_logged", "l2-doctor-r9-clears-expired"),
+    (_DR, '    return not now < min(lift["expires_at"], lift["created"] + state.MAX_LIFT_SECONDS)',
+     '    return not now < lift["expires_at"]',
+     _DRT + "test_an_expired_lift_is_cleared_and_logged", "l2-doctor-r9-eight-hour-cap"),
+    (_DR, '    Audit(str(root)).log("skydoctor", "INFO",', '    (lambda *a: None)("skydoctor", "INFO",',
+     _DRT + "test_an_expired_lift_is_cleared_and_logged", "l2-doctor-r9-logs"),
+    (_DR, "    if not gone:\n        return []", "    if False:\n        return []",
+     _DRT + "test_the_report_writes_nothing_when_nothing_expired", "l2-doctor-writes-nothing"),
+    # ---- Guards / Integrity
+    (_DR, "    if not off:", "    if True:",
+     _DRT + "test_guards_off_names_who_why_and_until", "l2-doctor-guards-off"),
+    (_DR, '    if st.rejected:\n        rows.append(Row("Guards"', '    if False:\n        rows.append(Row("Guards"',
+     _DRT + "test_a_rejected_state_reads_state_rejected", "l2-doctor-state-rejected"),
+    (_DR, "    if differ or missing:", "    if False:",
+     _DRT + "test_integrity_an_edited_guard_file_is_named", "l2-doctor-integrity-differs"),
+    (_DR, 'return [Row("Integrity", "guard files", UNKNOWN, "no readable',
+     'return [Row("Integrity", "guard files", LIVE, "no readable',
+     _DRT + "test_integrity_without_a_manifest_is_unknown", "l2-doctor-integrity-no-manifest"),
+    # ---- Layer 3
+    (_DR, "        if not any(wire.search(c) for c in cmds):", "        if False:",
+     _DRT + "test_claude_an_unwired_hook_is_not_live", "l2-doctor-claude-wiring"),
+    (_DR, 'HOOK_STATUS = {"HEALTHY": LIVE, "DEGRADED": NOT_LIVE,', 'HOOK_STATUS = {"HEALTHY": LIVE, "DEGRADED": LIVE,',
+     _DRT + "test_claude_a_degraded_hook_is_not_live_and_an_unexercised_one_unknown", "l2-doctor-claude-hook-state"),
+    (_DR, '        elif data is not None and data.get("disableAllHooks") is True:', "        elif False:",
+     _DRT + "test_claude_disable_all_hooks_is_not_live", "l2-doctor-claude-hook-switch"),
+    (_DR, '    if overall == "trusted":', '    if overall in ("trusted", "untrusted"):',
+     _DRT + "test_codex_untrusted_hooks_are_not_live", "l2-doctor-codex-trust"),
+    (_DR, '    elif overall == "unknown":', "    elif False:",
+     _DRT + "test_codex_trust_it_cannot_read_is_unknown", "l2-doctor-codex-trust-unknown"),
+    (_DR, '    if (Path(root) / ".codex" / "rules" / "skyrim.rules").is_file():', "    if True:",
+     _DRT + "test_codex_a_missing_rules_file_is_not_live", "l2-doctor-codex-rules"),
+    (_DR, 'COVERAGE_STATUS = {"HEALTHY": LIVE, "DEGRADED": NOT_LIVE,', 'COVERAGE_STATUS = {"HEALTHY": LIVE, "DEGRADED": LIVE,',
+     _DRT + "test_codex_coverage_short_is_not_live_and_none_recorded_is_unknown", "l2-doctor-codex-coverage"),
+    (_DR, "    if not cov:", "    if False:",
+     _DRT + "test_codex_coverage_short_is_not_live_and_none_recorded_is_unknown", "l2-doctor-codex-no-sessions"),
+    # ---- the launchers
+    ("tools/skydoctor", 'src="${BASH_SOURCE[0]//' + BS * 2 + '//}"', 'src="${BASH_SOURCE[0]}"',
+     _DRT + "test_the_bash_launcher_reports_json_and_exits_by_the_worst_line", "l2-doctor-launcher-windows-path"),
+    ("tools/skydoctor.cmd", '"%SKYGUARD_PYTHON%" -B "%HERE%skyguard' + BS + 'doctor.py" %*',
+     '"%SKYGUARD_PYTHON%" -B "%HERE%skyguard' + BS + 'cli.py" %*',
+     _DRT + "test_the_cmd_twin_runs", "l2-doctor-launcher-cmd"),
+]]
