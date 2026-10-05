@@ -26,6 +26,7 @@ Use the appropriate `esp add-*` command for each record:
 - Books: `esp add-book <esp> <editorId> --name "<name>" --text "<content>" --dry-run --json`
 - Perks: `esp add-perk <esp> <editorId> --name "<name>" --effect <preset> --dry-run --json`
 - Globals: `esp add-global <esp> <editorId> --type float --value <n> --dry-run --json`
+- Also available: `esp add-quest` and `esp set-property` (arguments: `bash tools/automod-cli.sh esp --help --json`)
 
 **Important**: Weapons and armor REQUIRE `--model` or they'll be invisible. Spells REQUIRE `--effect` or they'll do nothing.
 
@@ -35,7 +36,7 @@ Always preview with `--dry-run` first, then remove it after user approves.
 
 1. Write the `.psc` source file
 2. Compile: `bash tools/automod-cli.sh papyrus compile <source> --output Data/Scripts --headers tools/automod/skyrim-script-headers --json`
-   (Or use our existing Caprica: `tools/Caprica/Caprica.exe --game skyrim --import "Data/Scripts/Source" --flags "TESV_Papyrus_Flags.flg" --output "Data/Scripts" "script.psc"`)
+   (Or use Caprica: from `Data/Scripts/Source`, with a BARE filename (a path makes Caprica fail with a namespacing Fatal Error): `"<game root>/tools/Caprica/Caprica.exe" --game skyrim -f TESV_Papyrus_Flags.flg -i . -i "<base-game .psc sources>" -o "<game root>/Data/Scripts" MyScript.psc`. The second `-i` is REQUIRED whenever the base-game sources are not in the current folder (e.g. `<game root>/Data/Source/Scripts`): without it any script extending a vanilla type fails with "Unable to resolve type". One `-i` per further import folder.)
 3. Attach to quest: `bash tools/automod-cli.sh esp attach-script <esp> --quest <editorId> --script <name> --json`
 4. Auto-fill properties: `bash tools/automod-cli.sh esp auto-fill <esp> --quest <editorId> --script <name> --script-dir Data/Scripts/Source --data-folder Data --json`
 
@@ -57,5 +58,5 @@ Review the record counts and verify everything was added correctly.
 
 - All effects on a spell must have the same casting type
 - ESL FormIDs must be in xx000800-xx000FFF range
-- Use `GetFormFromFile()` in scripts to avoid complex VMAD properties
+- In scripts, use `GetFormFromFile()` on your OWN plugin's forms to minimize properties (never another mod's — see *Own Your Records*), and check the result for `None`, to avoid complex VMAD properties
 - Test in-game before distributing

@@ -41,11 +41,13 @@ import json
 import os
 import shutil
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
-from conftest import REPO, install_hooks
+from conftest import REPO, install_hooks, no_python_env
 
 HOOKS = REPO / ".claude" / "hooks"
 BS = chr(92)
@@ -225,7 +227,7 @@ def test_a_windows_python_path_still_produces_parseable_json(tmp_path, name):
                          python="C:" + BS + "Users" + BS + "me" + BS + "AppData" + BS + "python.exe")
     payload = (cmd('rm -rf "C:/x"') if name == "protect-bash.sh"
                else MCP_RESET if name == "protect-mcp.sh" else fpath("C:/Games/Skyrim VR/Data/M.esp"))
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    env = no_python_env(CLAUDE_PROJECT_DIR=str(root))
     r = subprocess.run([_bash(), str(root / ".claude" / "hooks" / name)],
                        input=json.dumps(payload), capture_output=True, text=True,
                        env=env, timeout=60)
@@ -283,14 +285,19 @@ def test_every_hook_writes_a_liveness_heartbeat(project):
                           ("backup-before-edit.sh", fpath("C:/work/x.md")),
                           ("snapshot-before-tool.sh", cmd("ls -la"))):
         fire(project, hook, payload)
-    hb = project / ".claude" / "backups" / ".hook-heartbeat"
-    alive = {f.name for f in hb.iterdir() if not f.name.endswith(".blind")}
-    assert alive == {"protect-files", "protect-bash", "protect-mcp",
-                     "backup-before-edit", "snapshot-before-tool"}, sorted(alive)
-    for f in hb.iterdir():
-        if not f.name.endswith(".blind"):
-            assert "payload_bytes=" in f.read_text(encoding="utf-8")
-            assert "payload_bytes=0" not in f.read_text(encoding="utf-8")
+    hb = project / ".claude" / "backups" / ".hook-heartbeat" / "claude"
+    names = {f.name for f in hb.iterdir()}
+    for hook in ("protect-files", "protect-bash", "protect-mcp", "backup-before-edit", "snapshot-before-tool"):
+        # every stage, written from inside a real invocation: ran, received, evaluated, delivered
+        for stage in ("invoked", "received", "evaluated", "emitted", "latency"):
+            assert "{}.{}".format(hook, stage) in names, (hook, stage, sorted(names))
+        recv = (hb / (hook + ".received")).read_text(encoding="utf-8").split()
+        assert recv[2].startswith("bytes=") and int(recv[2][6:]) > 0, recv
+        evaluated = (hb / (hook + ".evaluated")).read_text(encoding="utf-8").split()
+        assert evaluated[2] == "evaluated" and evaluated[1] == recv[1], evaluated  # same invocation id
+        assert (hb / (hook + ".emitted")).read_text(encoding="utf-8").split()[1] == recv[1]
+    # the old 3.x layout is gone: nothing beside the agent directory
+    assert not [f for f in hb.parent.iterdir() if f.is_file()], "3.x heartbeat files must not be written"
 
 
 # --------------------------------------------------------------------------
@@ -520,7 +527,7 @@ def test_a_blocking_hook_refuses_when_python_is_unusable(tmp_path, name, python,
     root = install_hooks(tmp_path / "install", names={name}, python=python)
     payload = (cmd('rm -rf "C:/Games/Skyrim VR"') if name == "protect-bash.sh"
                else MCP_RESET if name == "protect-mcp.sh" else fpath("C:/Games/Skyrim VR/Data/M.esp"))
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    env = no_python_env(CLAUDE_PROJECT_DIR=str(root))
     r = subprocess.run([_bash(), str(root / ".claude" / "hooks" / name)],
                        input=json.dumps(payload), capture_output=True, text=True,
                        env=env, timeout=60)
@@ -609,11 +616,162 @@ def test_nonblocking_wrapper_logs_when_engine_crashes(tmp_path, name, what):
 @pytest.mark.parametrize("name,what", NONBLOCKING)
 def test_nonblocking_wrapper_logs_without_python(tmp_path, name, what):
     root = install_hooks(tmp_path / "install", names={name}, python="{{PYTHON_PATH}}")
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    env = no_python_env(CLAUDE_PROJECT_DIR=str(root))
     r = _run_wrapper(root, env, name, EDIT)
     assert r.returncode == 0 and r.stdout.strip() == ""
     log = (root / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8")
     assert f"{what} FAILED: Python not runnable" in log and "NO backup/snapshot was taken" in log
+
+
+# --------------------------------------------------------------------------
+# stage telemetry: failures leave a record, and a payload-less call cannot clear itself
+# (Plan 4 Task 4; helpers are local -- cmd()/fpath() calls in this file are harvested into the corpus)
+# --------------------------------------------------------------------------
+
+def _hb_dir(root):
+    return root / ".claude" / "backups" / ".hook-heartbeat" / "claude"
+
+
+def _rec(root, name, stage):
+    f = _hb_dir(root) / "{}.{}".format(name[:-3], stage)
+    return f.read_text(encoding="utf-8").split() if f.is_file() else None
+
+
+@pytest.mark.parametrize("name,payload", BLOCKING)
+def test_a_crashing_engine_leaves_a_failed_engine_record_and_no_emission(tmp_path, name, payload):
+    root, env = _with_engine(tmp_path, name, "raise SystemExit(3)\n")
+    _run_wrapper(root, env, name, payload)
+    failed = _rec(root, name, "failed")
+    assert failed and failed[2] == "engine" and "exit" in failed, failed
+    assert _rec(root, name, "emitted") is None, "a refused call must not read as a delivered verdict"
+    assert _rec(root, name, "invoked") and _rec(root, name, "received")
+
+
+@pytest.mark.parametrize("name,payload", BLOCKING)
+def test_non_json_output_is_an_emission_failure(tmp_path, name, payload):
+    root, env = _with_engine(tmp_path, name, 'print("hi")\n')
+    _run_wrapper(root, env, name, payload)
+    failed = _rec(root, name, "failed")
+    assert failed and failed[2] == "emission", failed
+    assert _rec(root, name, "emitted") is None
+
+
+@pytest.mark.parametrize("name,payload", BLOCKING)
+def test_missing_python_is_a_python_failure(tmp_path, name, payload):
+    root = install_hooks(tmp_path / "install", names={name}, python="{{PYTHON_PATH}}")
+    _run_wrapper(root, no_python_env(CLAUDE_PROJECT_DIR=str(root)), name, payload)
+    failed = _rec(root, name, "failed")
+    assert failed and failed[2] == "python", failed
+    assert _rec(root, name, "invoked") and _rec(root, name, "emitted") is None
+
+
+@pytest.mark.parametrize("name,what", NONBLOCKING)
+def test_nonblocking_failures_leave_records_too(tmp_path, name, what):
+    root, env = _with_engine(tmp_path, name, "raise SystemExit(3)\n")
+    _run_wrapper(root, env, name, EDIT)
+    failed = _rec(root, name, "failed")
+    assert failed and failed[2] == "engine", failed
+    assert _rec(root, name, "emitted") is None
+    root2 = install_hooks(tmp_path / "install2", names={name}, python="{{PYTHON_PATH}}")
+    _run_wrapper(root2, no_python_env(CLAUDE_PROJECT_DIR=str(root2)), name, EDIT)
+    assert _rec(root2, name, "failed")[2] == "python"
+
+
+@pytest.mark.parametrize("name,payload", BLOCKING)
+def test_an_empty_payload_stays_failed_even_though_the_engine_then_evaluates(tmp_path, name, payload):
+    """The engine still runs on an empty payload and a verdict is emitted. That completed evaluation must
+    NOT clear the receipt failure of the very call that produced it (it would read HEALTHY at once)."""
+    root = install_hooks(tmp_path / "install", names={name})
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    r = subprocess.run([_bash(), str(root / ".claude" / "hooks" / name)], input="", capture_output=True,
+                       text=True, env=env, timeout=60)
+    assert r.returncode == 0
+    failed, ev = _rec(root, name, "failed"), _rec(root, name, "evaluated")
+    assert failed and failed[2] == "receipt", failed
+    assert ev and float(failed[0]) > float(ev[0]), "the failure must be NEWER than the evaluation it accompanies"
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import health
+    assert health.hook_state(_hb_dir(root), name[:-3], time.time())[0] == "DEGRADED"
+
+
+def _health():
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import health
+    return health
+
+
+def _good_call(root, name="protect-bash.sh"):
+    payload = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
+    r = _run_wrapper(root, dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), name, payload)
+    assert r.returncode == 0, r.stderr
+
+
+def test_the_invocation_sequence_advances_on_every_call(tmp_path):
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
+    seqs = []
+    for _ in range(3):
+        _good_call(root)
+        seqs.append(int(_rec(root, "protect-bash.sh", "invoked")[1].split(".")[0]))
+    assert seqs == [1, 2, 3], seqs
+
+
+def test_a_killed_run_is_reported_and_stays_degraded_until_a_newer_completion(tmp_path):
+    """The agent's timeout kills a hook after `invoked`; the next call overwrites `invoked`, which used to
+    erase the only trace -- and then read HEALTHY."""
+    h = _health()
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
+    _good_call(root)
+    inv = _hb_dir(root) / "protect-bash.invoked"
+    inv.write_text("{:.6f} 9.1-1\n".format(time.time() - 200), encoding="utf-8")   # never emitted
+    _good_call(root)                       # this call itself completes fine ...
+    state, detail = h.hook_state(_hb_dir(root), "protect-bash", time.time())
+    assert state == "DEGRADED" and "killed" in detail and "9.1-1" in detail, (state, detail)   # ... and is NOT newer
+    _good_call(root)
+    state, detail = h.hook_state(_hb_dir(root), "protect-bash", time.time())
+    assert state == "HEALTHY" and "recovered" in detail and "killed" in detail, (state, detail)
+
+
+def test_a_run_still_inside_the_grace_period_is_not_called_killed(tmp_path):
+    """Parallel tool calls: another invocation that started a few seconds ago may simply still be running."""
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
+    _good_call(root)
+    (_hb_dir(root) / "protect-bash.invoked").write_text("{:.6f} 9.1-1\n".format(time.time() - 5), encoding="utf-8")
+    _good_call(root)
+    assert _rec(root, "protect-bash.sh", "failed") is None
+
+
+def test_a_failed_run_is_not_also_called_killed(tmp_path):
+    """An old invocation that recorded its own failure (and so never emitted) is not reported twice."""
+    root, env = _with_engine(tmp_path, "protect-bash.sh", "raise SystemExit(3)\n")
+    _run_wrapper(root, env, "protect-bash.sh", BLOCKING[0][1])
+    inv = _hb_dir(root) / "protect-bash.invoked"
+    old = inv.read_text(encoding="utf-8").split()
+    inv.write_text("{:.6f} {}\n".format(time.time() - 500, old[1]), encoding="utf-8")
+    (root / "tools" / "skyguard" / "run.py").write_bytes((REPO / "tools" / "skyguard" / "run.py").read_bytes())
+    _run_wrapper(root, env, "protect-bash.sh", BLOCKING[0][1])     # a healthy call: it must not rewrite the failure
+    assert "killed" not in " ".join(_rec(root, "protect-bash.sh", "failed")), _rec(root, "protect-bash.sh", "failed")
+
+
+def test_a_session_start_that_could_not_run_kb_guard_is_degraded(tmp_path):
+    """The wrapper emits the engine's text either way; the canary must still see that nothing was checked."""
+    h = _health()
+    root = install_hooks(tmp_path / "install", names={"session-kb-guard.sh"})
+    r = _run_wrapper(root, dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), "session-kb-guard.sh",
+                     {"hook_event_name": "SessionStart", "source": "startup"})
+    assert r.returncode == 0 and "NOT RUN" in r.stdout
+    state, detail = h.hook_state(_hb_dir(root), "session-kb-guard", time.time())
+    assert state == "DEGRADED" and "NOT_RUN" in detail, (state, detail)
+
+
+def test_telemetry_never_blocks_a_hook(tmp_path):
+    """An unwritable telemetry directory is recorded nowhere and changes no decision."""
+    root = install_hooks(tmp_path / "install", names={"protect-files.sh"})
+    hb_parent = root / ".claude" / "backups"
+    hb_parent.mkdir(parents=True)
+    (hb_parent / ".hook-heartbeat").write_text("not a directory", encoding="utf-8")   # mkdir -p fails
+    r = _run_wrapper(root, dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), "protect-files.sh",
+                     {"tool_name": "Write", "tool_input": {"file_path": "C:/work/notes.md"}})
+    assert r.returncode == 0 and r.stdout.strip() == "{}", (r.stdout, r.stderr)
 
 
 # --------------------------------------------------------------------------
@@ -785,9 +943,10 @@ def test_a_fresh_install_gets_its_heartbeat_directory(tmp_path, name):
     assert not hb.exists()
     r = _run_wrapper(root, dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), name, payload)
     assert r.returncode == 0, r.stderr
-    beat = hb / name[:-3]
-    assert beat.is_file(), f"{name}: no heartbeat on a fresh install"
-    assert "payload_bytes=" in beat.read_text(encoding="utf-8")
+    hb = hb / "claude"
+    for stage in ("invoked", "received", "evaluated", "emitted"):
+        assert (hb / "{}.{}".format(name[:-3], stage)).is_file(), f"{name}: no {stage} record on a fresh install"
+    assert "bytes=" in (hb / (name[:-3] + ".received")).read_text(encoding="utf-8")
 
 
 # --------------------------------------------------------------------------

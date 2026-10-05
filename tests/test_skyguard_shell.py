@@ -81,7 +81,7 @@ def test_rule2_install_delete_denied_with_exact_text(tmp_path):
 
 
 def test_rule2_destroyer_elsewhere_allowed(tmp_path):
-    assert run("rm -rf /tmp/scratch", tmp_path) == ("allow", "", "")
+    assert run("rm -rf /tmp/scratch", tmp_path)[:3] == ("allow", "", "")
 
 
 def test_rule2_unresolved_operand_with_the_root_named_still_denies(tmp_path):
@@ -92,8 +92,8 @@ def test_rule2_unresolved_operand_with_the_root_named_still_denies(tmp_path):
 
 def test_rule2_mention_alone_is_not_a_delete(tmp_path):
     # E16: the old rule denied any text holding a delete word and the install path.
-    assert run(f'grep -rn "rm -rf" "{GAME}/tools"', tmp_path) == ("allow", "", "")
-    assert run(f'rm -rf /tmp/x && ls "{GAME}"', tmp_path) == ("allow", "", "")
+    assert run(f'grep -rn "rm -rf" "{GAME}/tools"', tmp_path)[:3] == ("allow", "", "")
+    assert run(f'rm -rf /tmp/x && ls "{GAME}"', tmp_path)[:3] == ("allow", "", "")
 
 
 def test_rule3_registry(tmp_path):
@@ -137,7 +137,7 @@ def test_rule7_relative_delete_resolves_from_the_payload_cwd(tmp_path):
     v = shell_rules.decide("rm -rf Data", r, audit.Audit(str(tmp_path)), cwd="/x/install", shell="bash")
     assert (v.decision, v.reason) == ("deny", del_install("Data"))
     v = shell_rules.decide("rm -rf Data", r, audit.Audit(str(tmp_path)), cwd="C:/Users/u/proj", shell="bash")
-    assert v == ("allow", "", "")
+    assert v[:3] == ("allow", "", "")
 
 
 def test_rule8_move_copy_note_is_gone(tmp_path):
@@ -208,7 +208,7 @@ def test_rule16_resaver_apply_asks(tmp_path):
     cmd = "bash tools/resaver-cli.sh reset-havok s.ess --apply"
     v = run(cmd, tmp_path)
     assert (v.decision, v.reason, v.context) == ("ask", NEW_RESAVER, "")
-    assert run(cmd.replace(" --apply", ""), tmp_path) == ("allow", "", "")
+    assert run(cmd.replace(" --apply", ""), tmp_path)[:3] == ("allow", "", "")
 
 
 def test_rule16_ask_drops_earlier_advice(tmp_path):
@@ -340,7 +340,7 @@ STRICTNESS = {"allow": 0, "advise": 1, "ask": 2, "deny": 3}
 
 @pytest.mark.parametrize("cmd", RESIDUE_RESOLVED)
 def test_unicode_residue_on_a_plugin_read_now_matches_bash(tmp_path, cmd):
-    assert run(cmd, tmp_path) == ("allow", "", "")
+    assert run(cmd, tmp_path)[:3] == ("allow", "", "")
 
 
 def test_unicode_word_boundary_residue_is_never_looser(tmp_path):

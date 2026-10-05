@@ -26,6 +26,7 @@ set -uo pipefail
 
 TAG="${1:?usage: bash tools/verify-release.sh vX.Y.Z}"
 VER="${TAG#v}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this checkout's tools/, before the cd below
 WORK="$(mktemp -d)"
 # Nothing removed these: 56 stale workspaces, ~1.2 MB each, had accumulated on the
 # author's machine because every exit path left one behind.
@@ -99,6 +100,13 @@ done < <(find "$ROOT/.claude/hooks" -name '*.sh' 2>/dev/null)
 [ -e "$ROOT/KNOWLEDGEBASE.local.md" ] && bad "KNOWLEDGEBASE.local.md excluded" "PRESENT -- this zip would overwrite the user's notes" \
                                       || ok "KNOWLEDGEBASE.local.md excluded"
 [ -f "$ROOT/KNOWLEDGEBASE.md" ] && ok "the toolkit's KNOWLEDGEBASE.md shipped" || bad "KNOWLEDGEBASE.md" "MISSING"
+# The Codex half, with THIS CHECKOUT's checker (like the hook floor above): definitions, their scripts,
+# the rules file, .agents skills, AGENTS.md size. Its own lines print first; one summary line counts here.
+if python "$HERE/check-codex-payload.py" "$ROOT"; then
+  ok "Codex payload whole (check-codex-payload.py)"
+else
+  bad "Codex payload (check-codex-payload.py)" "see the !! lines above"
+fi
 
 # --- the tools must RUN from the artifact ---------------------------------
 if [ -d "$REAL_DUMPS" ]; then

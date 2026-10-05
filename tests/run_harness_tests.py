@@ -10,7 +10,7 @@ import tempfile
 
 # The only inherited variables; everything else is scrubbed. TOOLKIT_REQUIRE_HARNESS must be here or
 # the "barriers are not active" check could never fire under the launcher.
-FORWARDED_ENV = ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TOOLKIT_REQUIRE_HARNESS")
+FORWARDED_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "TOOLKIT_REQUIRE_HARNESS")
 
 
 def evidence_root(repo):

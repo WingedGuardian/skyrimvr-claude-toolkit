@@ -1,0 +1,14 @@
+{
+  "cwd": "<path>",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "session_id": "<id>",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Update File: shapes/a.txt\n@@\n-one\n+two\n*** End Patch"
+  },
+  "tool_name": "apply_patch",
+  "tool_use_id": "<id>",
+  "transcript_path": "<path>",
+  "turn_id": "<id>"
+}

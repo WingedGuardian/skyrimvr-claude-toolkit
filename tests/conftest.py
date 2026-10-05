@@ -184,6 +184,16 @@ def install_hooks(root: Path, names=None, python: str | None = None, with_engine
     return root
 
 
+def no_python_env(**extra) -> dict:
+    """An environment in which the hook wrappers' interpreter fallback chain finds NOTHING: PATH minus every
+    directory that offers a python, and no LOCALAPPDATA / PROGRAMFILES to search. For tests that mean
+    "the interpreter is unusable" (Plan 4 Task 5: otherwise the chain would, correctly, rescue the call)."""
+    keep = [d for d in os.environ.get("PATH", "").split(os.pathsep)
+            if d and not any((Path(d) / n).exists() or (Path(d) / (n + ".exe")).exists()
+                             for n in ("python", "python3", "py"))]
+    return dict(os.environ, PATH=os.pathsep.join(keep), LOCALAPPDATA="", PROGRAMFILES="", **extra)
+
+
 def key_path(game: Path, label: str) -> str:
     """Pull one `- **Label**: `value`` line out of the emitted CLAUDE.md."""
     for line in claude_md(game).splitlines():

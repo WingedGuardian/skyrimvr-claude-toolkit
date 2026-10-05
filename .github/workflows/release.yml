@@ -103,6 +103,11 @@ jobs:
           # blocking hook denies every call with "engine failed" -- honest, and unusable.
           test -f "/tmp/$NAME/tools/skyguard/run.py" || { echo "::error::tools/skyguard/run.py missing from the payload; every hook would report the engine failed"; exit 1; }
           echo "hooks: $nhooks shipped, all reading stdin correctly, all with a heartbeat, canary and skyguard engine present"
+          # The Codex half (Plan 4): definitions parse and every script they run is here, the rules file, one
+          # .agents skill per .claude skill, AGENTS.md within the size Codex reads without truncating. A piece
+          # missing here does not error on a user's machine -- a Codex hook that cannot start lets the command RUN.
+          python3 tools/check-codex-payload.py "/tmp/$NAME" \
+            || { echo "::error::the Codex payload is incomplete (see the !! lines above)"; exit 1; }
           (cd /tmp && zip -qr "$NAME.zip" "$NAME")
           mv "/tmp/$NAME.zip" .
           unzip -l "$NAME.zip" | tail -5

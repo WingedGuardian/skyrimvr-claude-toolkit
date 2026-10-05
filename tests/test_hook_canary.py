@@ -1,127 +1,256 @@
-"""The hook canary: can it ever go back to green, and can it ever go green wrongly?
+"""tools/hook-canary.sh -- the user-facing liveness report -- driven against fixture telemetry.
 
-`tools/hook-canary.sh` exists because a hook can be alive, be invoked, and still see
-nothing -- the inert-hook defect, which no test suite could catch because a suite pipes
-stdin. The canary reads heartbeats written from inside REAL invocations.
+It is a thin front for `tools/skyguard/health.py report` (the state rules are unit-tested in
+tests/test_skyguard_health.py). What THIS file proves is the real script, end to end: it finds an
+interpreter, reads the staged records under `.claude/backups/.hook-heartbeat/<agent>/`, and exits per
+the table, with every scenario the old heartbeat canary was written for:
 
-MEASURED 2026-09-09, in two rounds, both of them regressions in the fix for the round
-before:
+  * blind, then recovered       -- a failure clears only on a NEWER COMPLETED evaluation, and says so
+  * equal timestamps            -- the same instant proves no ordering
+  * a truncated timestamp       -- used to sort LOW and silently clear a failure; now never green
+  * stale                       -- an old completion
+  * not exercised               -- no records: proves nothing either way
 
-1. It branched on the mere EXISTENCE of a `.blind` marker and never compared it against
-   the good heartbeat, so one legitimate empty-payload invocation pinned it BLIND
-   permanently -- with good heartbeats 107 SECONDS newer and the hooks demonstrably
-   receiving 900+ byte payloads. An instrument stuck red gets ignored, which is the
-   same end state as no instrument.
-2. The fix for (1) then cleared a marker too eagerly: on EQUAL timestamps, and on a
-   truncated marker like `20260909_15` that sorts BELOW a real stamp. Both read green.
-
-So the contract is narrow and tested in both directions: a blind marker is CURRENT
-unless a **well-formed** marker is followed by a **strictly newer** good heartbeat.
-Anything less is not proof of recovery.
-
-A recovered hook gets its own `RECOVERED` status rather than being folded into ALIVE,
-because for `backup-before-edit.sh` and `snapshot-before-tool.sh` -- which exit 0
-silently on an empty payload -- this report is the only place intermittent starvation
-could ever surface. Its exit code stays 0: the hook IS working now, and saying
-otherwise would be the false positive that gets the tool ignored.
-
-⚠ Clock skew is out of reach by construction: no pair of timestamps can reveal a
-non-monotonic clock. That risk is inherent, not a defect, and is not tested here.
+Exit: 1 if any hook is DEGRADED; else 2 if any is UNMEASURABLE or the install cannot be checked; else 0.
+The 3.x files (`.hook-heartbeat/<hook>`, `<hook>.blind`) are ignored and the report says so.
 """
-
 from __future__ import annotations
 
+import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
-from conftest import BASH, REPO
+from conftest import BASH, REPO, install_hooks
 
 TOOL = REPO / "tools" / "hook-canary.sh"
 HOOK = "protect-bash"
 
 
-def _run(tmp_path: Path, blind_ts, good_ts):
-    hb = tmp_path / ".claude" / "backups" / ".hook-heartbeat"
-    hb.mkdir(parents=True)
-    (tmp_path / ".claude" / "hooks").mkdir(parents=True)  # canary refuses without it
-    if blind_ts is not None:
-        (hb / (HOOK + ".blind")).write_text("%s NO PAYLOAD\n" % blind_ts, encoding="utf-8")
-    if good_ts is not None:
-        (hb / HOOK).write_text("%s payload_bytes=908\n" % good_ts, encoding="utf-8")
+def _install(tmp_path: Path) -> Path:
+    root = install_hooks(tmp_path / "install")
+    return root
+
+
+def _hb(root: Path) -> Path:
+    d = root / ".claude" / "backups" / ".hook-heartbeat" / "claude"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _w(root, stage, line, hook=HOOK):
+    (_hb(root) / "{}.{}".format(hook, stage)).write_text(line + "\n", encoding="utf-8")
+
+
+def _complete(root, t, inv="1-1", hook=HOOK):
+    _w(root, "invoked", "{} {}".format(t - 0.2, inv), hook)
+    _w(root, "received", "{} {} bytes=40".format(t - 0.1, inv), hook)
+    _w(root, "evaluated", "{} {} evaluated allow allow".format(t, inv), hook)
+    _w(root, "emitted", "{} {} ok".format(t + 0.01, inv), hook)
+
+
+def _run(root: Path, stale_min=None, args=()):
     env = {
-        "CLAUDE_PROJECT_DIR": str(tmp_path).replace("\\", "/"),
-        "HOOK_CANARY_STALE_MIN": "999999",  # keep age out of the verdict
-        "PATH": subprocess.os.environ.get("PATH", ""),
-        "SYSTEMROOT": subprocess.os.environ.get("SYSTEMROOT", ""),
+        "CLAUDE_PROJECT_DIR": str(root).replace("\\", "/"),
+        "PATH": os.environ.get("PATH", ""),
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+        # Without SystemDrive, py.exe / the python3 Store alias create a literal `%SystemDrive%/ProgramData/...`
+        # cache folder in the current directory -- the repo, under pytest (found in Plan 4 Task 11).
+        "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE", ""),
     }
-    p = subprocess.run([BASH, str(TOOL)], capture_output=True, text=True, env=env, timeout=120)
-    line = next((l for l in p.stdout.splitlines() if HOOK in l), "")
-    return p.returncode, line
+    if stale_min is not None:
+        env["HOOK_CANARY_STALE_MIN"] = str(stale_min)
+    p = subprocess.run([BASH, str(TOOL), *args], capture_output=True, text=True, env=env, timeout=120)
+    line = next((ln for ln in p.stdout.splitlines() if HOOK in ln), "")
+    return p.returncode, line, p.stdout
 
 
-# A RECOVERED line contains the substring "WAS BLIND", so order matters when
-# classifying. Getting this backwards made a passing fix look broken.
 def _status(line):
-    for word in ("RECOVERED", "BLIND", "ALIVE"):
-        if word in line:
+    # The state is the column right after the hook name: a recovered HEALTHY row names DEGRADED in its detail.
+    after = line.split(HOOK, 1)[1].strip() if HOOK in line else ""
+    for word in ("NOT EXERCISED", "UNMEASURABLE", "DEGRADED", "STALE", "HEALTHY"):
+        if after.startswith(word):
             return word
     return "?"
 
 
-@pytest.mark.parametrize(
-    "label,blind_ts,good_ts",
-    [
-        ("no good heartbeat at all", "20260909_150000", None),
-        ("blind is the newest event", "20260909_150500", "20260909_150000"),
-        # Round-2 regressions. Each of these read green before being tightened.
-        ("timestamps are EQUAL", "20260909_150000", "20260909_150000"),
-        ("marker is empty", "", "20260909_150500"),
-        ("marker is truncated and sorts low", "20260909_15", "20260909_150500"),
-        ("marker is not a timestamp", "NOPAYLOAD", "20260909_150500"),
-    ],
-)
-def test_an_unproven_recovery_stays_blind(tmp_path, label, blind_ts, good_ts):
-    """Only a well-formed marker followed by a STRICTLY newer good heartbeat is proof."""
-    rc, line = _run(tmp_path, blind_ts, good_ts)
-    assert _status(line) == "BLIND", "%s: expected BLIND, got %r" % (label, line)
-    assert rc == 1, "%s: a blind hook must exit 1, got %s" % (label, rc)
+def test_a_completed_evaluation_reads_healthy_and_exits_0(tmp_path):
+    root = _install(tmp_path)
+    _complete(root, time.time() - 5)
+    rc, line, out = _run(root)
+    assert _status(line) == "HEALTHY", line
+    assert rc == 0, out
 
 
-def test_a_proven_recovery_reads_recovered_not_alive(tmp_path):
-    """The regression this file was added for -- but it must not read as plain green
-    either, or intermittent starvation has nowhere to show up."""
-    rc, line = _run(tmp_path, "20260909_150000", "20260909_150500")
-    assert _status(line) == "RECOVERED", "a recovered hook must be distinguishable: %r" % line
-    assert "WAS BLIND" in line, "the earlier blind event must still be named: %r" % line
-    assert rc == 0, "a hook that is working now must exit 0, got %s" % rc
-
-
-def test_a_hook_with_no_blind_history_is_plain_alive(tmp_path):
-    rc, line = _run(tmp_path, None, "20260909_150000")
-    assert _status(line) == "ALIVE", line
-    assert "WAS BLIND" not in line
+def test_nothing_exercised_exits_0_and_does_not_claim_health(tmp_path):
+    root = _install(tmp_path)
+    rc, line, out = _run(root)
+    assert _status(line) == "NOT EXERCISED", out
+    assert "UNPROVEN" in out and "OK --" not in out
     assert rc == 0
 
 
-def test_the_summary_counts_recovered_separately(tmp_path):
-    """A recovered hook folded into the alive count is the same information loss as
-    folding it into the ALIVE line."""
-    hb = tmp_path / ".claude" / "backups" / ".hook-heartbeat"
-    hb.mkdir(parents=True)
-    (tmp_path / ".claude" / "hooks").mkdir(parents=True)
-    (hb / (HOOK + ".blind")).write_text("20260909_150000 NO PAYLOAD\n", encoding="utf-8")
-    (hb / HOOK).write_text("20260909_150500 payload_bytes=908\n", encoding="utf-8")
-    env = {
-        "CLAUDE_PROJECT_DIR": str(tmp_path).replace("\\", "/"),
-        "HOOK_CANARY_STALE_MIN": "999999",
-        "PATH": subprocess.os.environ.get("PATH", ""),
-        "SYSTEMROOT": subprocess.os.environ.get("SYSTEMROOT", ""),
-    }
+def test_a_failure_exits_1(tmp_path):
+    root = _install(tmp_path)
+    _complete(root, time.time() - 50)
+    _w(root, "failed", "{} 2-2 engine exit 1".format(time.time() - 10))
+    rc, line, out = _run(root)
+    assert _status(line) == "DEGRADED" and "engine" in line, line
+    assert rc == 1, out
+    assert "RESULT: DEGRADED" in out
+
+
+def test_a_receipt_alone_is_not_recovery(tmp_path):
+    """The defect class this tool exists for: payload arrival read as proof of life."""
+    root = _install(tmp_path)
+    _w(root, "failed", "{} 2-2 engine exit 1".format(time.time() - 10))
+    _w(root, "invoked", "{} 3-3".format(time.time() - 5))
+    _w(root, "received", "{} 3-3 bytes=40".format(time.time() - 5))
+    rc, line, _ = _run(root)
+    assert _status(line) == "DEGRADED", line
+    assert rc == 1
+
+
+def test_a_newer_completed_evaluation_clears_it_but_says_it_was_degraded(tmp_path):
+    root = _install(tmp_path)
+    _w(root, "failed", "{} 2-2 engine exit 1".format(time.time() - 100))
+    _complete(root, time.time() - 5, inv="3-3")
+    rc, line, _ = _run(root)
+    assert _status(line) == "HEALTHY" and "recovered" in line and "DEGRADED" in line, line
+    assert rc == 0
+
+
+def test_equal_timestamps_stay_degraded(tmp_path):
+    root = _install(tmp_path)
+    t = time.time() - 20
+    _complete(root, t, inv="3-3")
+    _w(root, "failed", "{} 2-2 engine exit 1".format(t))
+    rc, line, _ = _run(root)
+    assert _status(line) == "DEGRADED", line
+    assert rc == 1
+
+
+def test_a_truncated_stamp_is_unmeasurable_not_green(tmp_path):
+    root = _install(tmp_path)
+    _complete(root, time.time() - 5)
+    _w(root, "failed", "20260909_15")
+    rc, line, out = _run(root)
+    assert _status(line) == "UNMEASURABLE", line
+    assert rc == 2, out
+
+
+def test_a_stale_completion_reads_stale_and_exits_0(tmp_path):
+    root = _install(tmp_path)
+    _complete(root, time.time() - 3 * 3600)
+    rc, line, _ = _run(root)
+    assert _status(line) == "STALE", line
+    assert rc == 0
+
+
+def test_the_stale_threshold_is_configurable(tmp_path):
+    root = _install(tmp_path)
+    _complete(root, time.time() - 600)
+    assert _status(_run(root, stale_min=999)[1]) == "HEALTHY"
+    assert _status(_run(root, stale_min=5)[1]) == "STALE"
+
+
+def test_a_killed_invocation_exits_1(tmp_path):
+    root = _install(tmp_path)
+    _complete(root, time.time() - 1000)
+    _w(root, "invoked", "{} 9-9".format(time.time() - 400))
+    rc, line, _ = _run(root)
+    assert _status(line) == "DEGRADED" and "never finished" in line, line
+    assert rc == 1
+
+
+def test_degraded_outranks_unmeasurable_in_the_exit_code(tmp_path):
+    root = _install(tmp_path)
+    _w(root, "failed", "{} 2-2 python cannot run".format(time.time() - 10))
+    _w(root, "emitted", "garbage", hook="protect-files")
+    rc, _, out = _run(root)
+    assert "UNMEASURABLE" in out and rc == 1
+
+
+def test_the_3x_heartbeat_files_are_ignored_and_named(tmp_path):
+    """A stale 3.x BLIND must not pin the canary red, and the report says what it skipped."""
+    root = _install(tmp_path)
+    d = root / ".claude" / "backups" / ".hook-heartbeat"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (HOOK + ".blind")).write_text("20260101_000000 NO PAYLOAD\n", encoding="utf-8")
+    (d / HOOK).write_text("20260101_000100 payload_bytes=908\n", encoding="utf-8")
+    rc, line, out = _run(root)
+    assert _status(line) == "NOT EXERCISED", out
+    assert "ignored 2 legacy 3.x heartbeat file" in out
+    assert rc == 0
+
+
+def test_json_output_is_machine_readable(tmp_path):
+    import json
+    root = _install(tmp_path)
+    _complete(root, time.time() - 5)
+    rc, _, out = _run(root, args=("--json",))
+    data = json.loads(out)
+    assert data["exit"] == rc == 0
+    assert {r["hook"]: r["state"] for r in data["rows"]}[HOOK] == "HEALTHY"
+
+
+def test_no_hooks_installed_exits_2(tmp_path):
+    root = tmp_path / "empty"
+    (root / "tools" / "skyguard").mkdir(parents=True)
+    for f in (REPO / "tools" / "skyguard").glob("*.py"):
+        (root / "tools" / "skyguard" / f.name).write_bytes(f.read_bytes())
+    rc, _, _ = _run(root)
+    assert rc == 2
+
+
+def test_with_no_python_it_says_so_and_exits_2(tmp_path):
+    """No Python means every blocking hook is refusing every command; the canary must not claim a state."""
+    root = tmp_path / "nopy"
+    (root / ".claude" / "hooks").mkdir(parents=True)
+    (root / ".claude" / "hooks" / "protect-bash.sh").write_text('PY="{{PYTHON_PATH}}"\n', encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # a PATH holding only bash's own directory: no python3, python or py
+    env = {"CLAUDE_PROJECT_DIR": str(root).replace("\\", "/"), "PATH": str(Path(BASH).parent),
+           "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""), "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE", "")}
     p = subprocess.run([BASH, str(TOOL)], capture_output=True, text=True, env=env, timeout=120)
-    summary = next((l for l in p.stdout.splitlines() if l.startswith("alive:")), "")
-    assert "recovered-after-blind: 1" in summary, summary
-    assert "alive: 0" in summary, "a recovered hook must not also count as alive: %s" % summary
-    # and it must not fall through to "no hook has recorded a payload yet"
-    assert "UNPROVEN" not in p.stdout
+    if "UNMEASURABLE: no Python 3" not in p.stdout:
+        pytest.skip("a Python 3 is reachable from bash's own directory on this machine")
+    assert p.returncode == 2
+
+
+def test_the_wrapper_telemetry_round_trips_through_the_canary(tmp_path):
+    """The real wrappers, the real engine, the real canary -- no fixture records. This is the check that
+    would have caught a wrapper writing a record shape the reader cannot parse."""
+    import json
+    root = install_hooks(tmp_path / "install")
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}})
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    for hook in ("protect-bash", "snapshot-before-tool"):
+        r = subprocess.run([BASH, str(root / ".claude" / "hooks" / (hook + ".sh"))], input=payload,
+                           capture_output=True, text=True, env=env, timeout=120)
+        assert r.returncode == 0, r.stderr
+    rc, line, out = _run(root)
+    assert rc == 0, out
+    assert _status(line) == "HEALTHY", out
+    assert "snapshot-before-tool" in out and "HEALTHY" in next(
+        ln for ln in out.splitlines() if "snapshot-before-tool" in ln)
+
+
+def test_a_telemetry_directory_hooks_cannot_write_to_is_unmeasurable(tmp_path):
+    """The wrappers swallow a failed write, so without this a frozen directory reads HEALTHY, then STALE."""
+    root = _install(tmp_path)
+    _complete(root, time.time() - 5)
+    (_hb(root) / ".canary-probe").mkdir()      # makes the probe write fail on every platform
+    rc, line, out = _run(root)
+    assert _status(line) == "UNMEASURABLE" and "not writable" in line, out
+    assert rc == 2
+
+
+def test_the_canary_probe_leaves_nothing_behind(tmp_path):
+    root = _install(tmp_path)
+    _complete(root, time.time() - 5)
+    _run(root)
+    assert not (_hb(root) / ".canary-probe").exists()

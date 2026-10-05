@@ -358,3 +358,10 @@ def test_ws_form_only_exempts_monitor(tmp_path):
     for tool in ("Bash", "PowerShell"):
         out = _verdict("protect-bash", {"tool_name": tool, "tool_input": {"ws": WS}}, tmp_path)
         assert _decision(out) == "deny", tool
+
+
+@pytest.mark.parametrize("cwd", ["/c/Users/x", "C:\\x"])
+def test_to_request_carries_cwd_raw(cwd):
+    """Request.cwd is the agent's cwd string, unnormalized: MSYS and backslash forms pass through."""
+    p = claude.extract(json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": cwd}))
+    assert claude.to_request(p, "shell").cwd == cwd

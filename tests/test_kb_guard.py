@@ -168,6 +168,7 @@ def test_every_watched_file_is_actually_snapshotted(tmp_path):
         "KNOWLEDGEBASE.md": "shipped kb\n",
         "KNOWLEDGEBASE.local.md": "MY OWN NOTES, the file the release exists for\n",
         "CLAUDE.md": "install paths\n",
+        "AGENTS.md": "the same install paths, for Codex\n",   # Plan 4 Task 11
     }
     for name, body in bodies.items():
         write(root, name, body)
@@ -256,12 +257,13 @@ def test_the_hook_never_fails_the_session_even_when_the_guard_alarms(tmp_path):
     assert r.returncode == 0, f"the hook failed the session: {r.stdout}{r.stderr}"
     assert "ALARM" in r.stdout, "the hook swallowed the guard's alarm"
 
-    hb = root / ".claude" / "backups" / ".hook-heartbeat" / "session-kb-guard"
-    assert hb.is_file(), "no heartbeat written, so hook-canary.sh cannot see this hook"
-    # NOT `payload_bytes=0`: that branch only runs when INPUT is non-empty, so the
-    # assertion could never fail and was decoration. Assert the byte count matches
-    # what we actually sent, which can.
-    assert "payload_bytes=" in hb.read_text(encoding="utf-8")
+    hb = root / ".claude" / "backups" / ".hook-heartbeat" / "claude"
+    for stage in ("invoked", "received", "evaluated", "emitted"):
+        assert (hb / ("session-kb-guard." + stage)).is_file(), \
+            "no %s record written, so hook-canary.sh cannot see this hook" % stage
+    # NOT a bare `bytes=` test: the receipt must name the byte count we actually sent, which can fail.
+    sent = len(json.dumps({"hook_event_name": "SessionStart", "source": "startup"}))
+    assert "bytes=%d" % sent in (hb / "session-kb-guard.received").read_text(encoding="utf-8")
 
     # `compact` is the same session continuing. Re-running would spend context
     # re-announcing a snapshot that was taken at its start.

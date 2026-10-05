@@ -12,18 +12,20 @@ REQUIRED = {
 
 
 def _load(agent):
-    return {f.name: json.loads(f.read_text(encoding="utf-8")) for f in sorted((FIX / agent).glob("*.json"))}
+    """Every payload under the agent's folder, version subfolders included (keyed by path under it)."""
+    return {f.relative_to(FIX / agent).as_posix(): json.loads(f.read_text(encoding="utf-8"))
+            for f in sorted((FIX / agent).rglob("*.json")) if f.name != "EXPECTED.json"}
 
 
 def test_every_required_shape_was_captured():
     for agent, keys in REQUIRED.items():
-        names = list(_load(agent))
+        names = [n.rsplit("/", 1)[-1] for n in _load(agent)]
         for k in keys:
             assert any(n.startswith(f"{agent}-{k}-") for n in names), f"{agent}: no {k} fixture"
 
 
 def test_codex_patches_cover_add_update_and_delete():
-    cmds = [p["tool_input"]["command"] for n, p in _load("codex").items() if "apply_patch" in n]
+    cmds = [p["tool_input"]["command"] for n, p in _load("codex").items() if "apply_patch" in n.rsplit("/", 1)[-1]]
     for verb in ("*** Add File:", "*** Update File:", "*** Delete File:"):
         assert any(verb in c for c in cmds), verb
 

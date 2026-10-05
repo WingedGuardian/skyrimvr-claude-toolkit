@@ -101,6 +101,8 @@ def extract(payload_text: str) -> dict:
         "cwd": cwd.replace("\x00", "") if isinstance(cwd, str) else "",
         "shell": SHELLS.get(tool_name, ""),
         "mcp_input": ti if tool_name.startswith("mcp__") else {},
+        "session_id": _sub(d.get("session_id")),
+        "transcript_path": _sub(d.get("transcript_path")),
     }
 
 
@@ -113,3 +115,15 @@ def render(v) -> str:
     else:
         out = {}
     return json.dumps(out, ensure_ascii=False)
+
+
+def to_request(p: dict, kind: str):
+    """`p` is extract()'s dict. The payload cwd is the shell's real cwd for Bash and PowerShell (Plan 5 T0)."""
+    from ..request import Request
+    # shell: the dialect from tool_name (Bash -> bash, PowerShell -> powershell); a shell tool that names none (Monitor)
+    # is None here and "" to the rules = BOTH dialects (spec R5), never a guessed "bash".
+    return Request(agent="claude", event="pre_tool", kind=kind,
+                   shell=(p.get("shell") or None) if kind == "shell" else None,
+                   command=p["command"], paths=(p["file_path"],) if p["file_path"] else (),
+                   cwd=p.get("cwd", ""), session_id=p.get("session_id", ""),
+                   tool_name=p["tool_name"], empty=p["empty"])

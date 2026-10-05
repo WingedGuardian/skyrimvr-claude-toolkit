@@ -6,7 +6,7 @@ argument-hint: <PluginName.esp>
 
 # Inspect ESP Plugin
 
-Inspect the ESP/ESM file specified by `$ARGUMENTS` and provide a comprehensive summary.
+Inspect the plugin the user named (`$ARGUMENTS` in Claude Code) and provide a comprehensive summary.
 
 ## Workflow
 
@@ -14,16 +14,16 @@ Inspect the ESP/ESM file specified by `$ARGUMENTS` and provide a comprehensive s
 
 1. Serialize the ESP to YAML:
    ```bash
-   spriggit serialize --InputPath "Data/$ARGUMENTS" --OutputPath "/tmp/esp-inspect" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "0.40.0"
+   bash tools/spriggit-cli.sh serialize --InputPath "Data/<Plugin.esp>" --OutputPath "<scratch dir>" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "<the version spriggit --version prints>"
    ```
 2. Read the generated YAML files to understand the record structure
 3. Summarize: record types, counts, editor IDs, masters, notable records
 
 ### Option B: xeditlib (programmatic — for deeper analysis)
 
-If xeditlib is installed (`tools/xelib/` exists), run:
+If `node -e "require('xeditlib')"` exits clean from the toolkit root, run:
 ```bash
-node examples/inspect-esp.js "$ARGUMENTS"
+node examples/inspect-esp.js "<Plugin.esp>"
 ```
 
 Or write a targeted inspection script if the example doesn't cover what's needed.

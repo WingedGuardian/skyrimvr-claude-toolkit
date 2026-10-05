@@ -65,8 +65,8 @@ def test_rule1_plugin_write_denied(tmp_path):
         assert (v.decision, v.reason) == ("deny", rules.RULES["W-PLUGIN"]["template"]), ext
     # trailing dots/space still count; a longer extension or a bare word does not
     assert run("C:/x/Data/My.esp. ", tmp_path).decision == "deny"
-    assert run("C:/x/notes/My.espx", tmp_path) == ("allow", "", "")
-    assert run("C:/x/notes/esp", tmp_path) == ("allow", "", "")
+    assert run("C:/x/notes/My.espx", tmp_path)[:3] == ("allow", "", "")
+    assert run("C:/x/notes/esp", tmp_path)[:3] == ("allow", "", "")
 
 
 def test_rule1_beats_whitelist(tmp_path):
@@ -75,19 +75,19 @@ def test_rule1_beats_whitelist(tmp_path):
 
 def test_rule2_claude_workspace_silent_allow(tmp_path):
     for sub_dir in ("hooks", "plans", "backups", "memory", "projects"):
-        assert run(GAME + "/Data/.claude/" + sub_dir + "/a.psc", tmp_path) == ("allow", "", "")
-    assert run(".claude" + BS + "hooks" + BS + "a.ini", tmp_path) == ("allow", "", "")
+        assert run(GAME + "/Data/.claude/" + sub_dir + "/a.psc", tmp_path)[:3] == ("allow", "", "")
+    assert run(".claude" + BS + "hooks" + BS + "a.ini", tmp_path)[:3] == ("allow", "", "")
     assert not (tmp_path / ".claude/backups/AUDIT_LOG.txt").exists()  # silent: no log either
     # another .claude subdirectory is not whitelisted (falls through to the catch-all)
     assert advice(GAME + "/Data/.claude/other/a.txt", tmp_path) == note("W-INSTALL", "a.txt")
 
 
 def test_rule2_beats_advise_rules(tmp_path):
-    assert run("C:/x/.claude/memory/plugins.txt", tmp_path) == ("allow", "", "")
+    assert run("C:/x/.claude/memory/plugins.txt", tmp_path)[:3] == ("allow", "", "")
 
 
 def test_rule3_node_modules_silent_allow(tmp_path):
-    assert run(GAME + "/Data/node_modules/p/Skyrim.ini", tmp_path) == ("allow", "", "")
+    assert run(GAME + "/Data/node_modules/p/Skyrim.ini", tmp_path)[:3] == ("allow", "", "")
     assert advice(GAME + "/Data/node_modulesx/a.txt", tmp_path) == note("W-INSTALL", "a.txt")
 
 

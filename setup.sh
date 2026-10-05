@@ -73,12 +73,23 @@ echo ""
 echo "Checking for Python 3..."
 PY_FOUND=""
 for c in "py -3" "python" "python3"; do
-    if $c -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1; then
+    # >= 3.8 is the safety engine's floor: a 3.6 that passed a bare "is it 3?" probe made every hook
+    # deny "engine failed" with nothing saying why.
+    if $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,8) else 1)' >/dev/null 2>&1; then
         PY_FOUND="$c"; echo "  Found Python 3: '$c' -> $($c --version 2>&1)"; break
     fi
 done
 if [ -z "$PY_FOUND" ]; then
-    echo "  Python 3 not found. It's needed for cosave-info and the save-analysis scripts (and PyFFI/PyNifly if you use them)."
+    for c in "py -3" "python" "python3"; do
+        if $c -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1; then
+            echo "  Python 3 found ('$c' -> $($c --version 2>&1)) but it is too old: the safety hooks need Python 3.8 or newer."
+            echo "  Install a current Python (python.org, or 'winget install Python.Python.3.12') and re-run."
+            break
+        fi
+    done
+fi
+if [ -z "$PY_FOUND" ]; then
+    echo "  Python 3.8+ not found. It's needed for cosave-info and the save-analysis scripts (and PyFFI/PyNifly if you use them)."
     echo "  Install it from python.org (or 'winget install Python.Python.3.12') and re-run — the bundled tools try 'py -3', 'python', then 'python3'."
 fi
 
@@ -98,7 +109,7 @@ PYTHON_PATH=""
 PY_STORE=""
 if [ -n "$PY_FOUND" ]; then
     for c in "py -3" "python" "python3"; do
-        $c -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1 || continue
+        $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,8) else 1)' >/dev/null 2>&1 || continue
         exe=$($c -c 'import sys; print(sys.executable)' 2>/dev/null | tr -d '\r' | tr '\134' '/') || exe=""
         [ -n "$exe" ] || continue
         case "$exe" in
@@ -116,7 +127,14 @@ if [ -n "$PY_FOUND" ]; then
 fi
 # The form that goes into sed's REPLACEMENT: `&` (the whole match), `|` (our delimiter) and a backslash
 # are all special there, and a Windows folder name may legally contain `&`.
-PY_SED=$(printf '%s' "$PYTHON_PATH" | sed -e 's/[\\|&]/\\&/g')
+# The hooks hold it as PY='...' (single quotes: a `$` or backtick in a folder name must not expand at every
+# call), so a single quote inside the path is closed, escaped and reopened first: ' -> '\''
+PY_Q="${PYTHON_PATH//\'/\'\\\'\'}"
+PY_SED=$(printf '%s' "$PY_Q" | sed -e 's/[\\|&]/\\&/g')
+# The Codex PowerShell entry holds it as $PY = '...'. PowerShell escapes a quote inside single quotes by
+# DOUBLING it (' -> ''); the bash '\'' form above would end the string there and break the script.
+PY_PS="${PYTHON_PATH//\'/\'\'}"
+PY_PS_SED=$(printf '%s' "$PY_PS" | sed -e 's/[\\|&]/\\&/g')
 if [ -z "$PYTHON_PATH" ]; then
     echo ""
     echo "  WARNING: the safety hooks need Python 3 and will REFUSE every command until it is installed"
@@ -312,29 +330,53 @@ fi
 echo ""
 echo "Configuring safety hooks..."
 HOOKS_MISSING=0
-for hook in protect-bash.sh protect-files.sh protect-mcp.sh backup-before-edit.sh snapshot-before-tool.sh session-kb-guard.sh; do
+# The Codex entries (.codex/hooks/) take the same interpreter. The .sh holds it as PY='...' like the Claude
+# hooks; the .ps1 as $PY = '...' with PowerShell's own quote escaping (PY_PS above).
+for hook in .claude/hooks/protect-bash.sh .claude/hooks/protect-files.sh .claude/hooks/protect-mcp.sh \
+            .claude/hooks/backup-before-edit.sh .claude/hooks/snapshot-before-tool.sh .claude/hooks/session-kb-guard.sh \
+            .codex/hooks/skyguard-entry.ps1 .codex/hooks/skyguard-entry.sh; do
+    case "$hook" in
+        *.ps1) H_SED="$PY_PS_SED"; H_LINE="\$PY = '$PY_PS'"; H_RE='^[$]PY = '; H_NEW="\$PY = '$PY_PS_SED'" ;;
+        *)     H_SED="$PY_SED";    H_LINE="PY='$PY_Q'";       H_RE='^PY=';       H_NEW="PY='$PY_SED'" ;;
+    esac
     # Check it EXISTS first. `grep -q` on a missing file exits 2, which is not 0, so
     # control fell to the else branch and a hook that had been quarantined by antivirus
     # or lost to a partial unzip was reported as "Already configured".
-    if [ ! -f "$GAME_DIR/.claude/hooks/$hook" ]; then
-        echo "  MISSING: .claude/hooks/$hook -- this hook is NOT installed and will never run"
+    if [ ! -f "$GAME_DIR/$hook" ]; then
+        echo "  MISSING: $hook -- this hook is NOT installed and will never run"
         HOOKS_MISSING=$((HOOKS_MISSING + 1))
-    elif grep -q '{{PYTHON_PATH}}' "$GAME_DIR/.claude/hooks/$hook"; then
+    elif grep -q '{{PYTHON_PATH}}' "$GAME_DIR/$hook"; then
         if [ -n "$PYTHON_PATH" ]; then
-            sed -i "s|{{PYTHON_PATH}}|$PY_SED|g" "$GAME_DIR/.claude/hooks/$hook"
-            echo "  Configured: .claude/hooks/$hook"
+            sed -i "s|{{PYTHON_PATH}}|$H_SED|g" "$GAME_DIR/$hook"
+            echo "  Configured: $hook"
         else
-            echo "  NOT CONFIGURED: .claude/hooks/$hook -- no Python 3 found, so this hook will refuse until setup.sh is re-run"
+            echo "  NOT CONFIGURED: $hook -- no Python 3 found, so this hook will refuse until setup.sh is re-run"
         fi
-    elif [ -n "$PYTHON_PATH" ] && ! grep -qxF "PY=\"$PYTHON_PATH\"" "$GAME_DIR/.claude/hooks/$hook"; then
+    elif [ -n "$PYTHON_PATH" ] && ! grep -qxF "$H_LINE" "$GAME_DIR/$hook"; then
         # Already configured, but for a different interpreter (Python upgraded or moved). Left alone,
         # the hook would refuse every command while this script said "Already configured".
-        OLD_PY=$(grep -m1 '^PY=' "$GAME_DIR/.claude/hooks/$hook" || true)
-        sed -i "s|^PY=.*|PY=\"$PY_SED\"|" "$GAME_DIR/.claude/hooks/$hook"
-        echo "  Updated interpreter: .claude/hooks/$hook ($OLD_PY -> PY=\"$PYTHON_PATH\")"
+        OLD_PY=$(grep -m1 "$H_RE" "$GAME_DIR/$hook" || true)
+        sed -i "s|$H_RE.*|$H_NEW|" "$GAME_DIR/$hook"
+        echo "  Updated interpreter: $hook ($OLD_PY -> PY=$PYTHON_PATH)"
     else
-        echo "  Already configured: .claude/hooks/$hook"
+        echo "  Already configured: $hook"
     fi
+done
+
+# The Codex entries also pass the engine a bash for the rules that run shell snippets. A Windows path on
+# Git Bash (the PowerShell entry cannot use /usr/bin/bash), else bash's own path.
+BASH_FOR_HOOKS="${BASH:-bash}"
+if command -v cygpath >/dev/null 2>&1; then
+    BASH_FOR_HOOKS=$(cygpath -m "$BASH_FOR_HOOKS" 2>/dev/null | tr -d '\r') || BASH_FOR_HOOKS="${BASH:-bash}"
+fi
+B_SH="${BASH_FOR_HOOKS//\'/\'\\\'\'}"
+B_SH_SED=$(printf '%s' "$B_SH" | sed -e 's/[\\|&]/\\&/g')
+B_PS="${BASH_FOR_HOOKS//\'/\'\'}"
+B_PS_SED=$(printf '%s' "$B_PS" | sed -e 's/[\\|&]/\\&/g')
+for hook in .codex/hooks/skyguard-entry.ps1 .codex/hooks/skyguard-entry.sh; do
+    [ -f "$GAME_DIR/$hook" ] && grep -q '{{BASH_PATH}}' "$GAME_DIR/$hook" || continue
+    case "$hook" in *.ps1) H_SED="$B_PS_SED" ;; *) H_SED="$B_SH_SED" ;; esac
+    sed -i "s|{{BASH_PATH}}|$H_SED|g" "$GAME_DIR/$hook"
 done
 
 # --- Record the resolved paths where the hooks can read them ---
@@ -392,14 +434,93 @@ else
     echo "           directory. Check for unusual characters in your paths."
 fi
 
-# --- Configure CLAUDE.md (replace path placeholders) ---
+# --- Configure the Codex hook definitions (.codex/hooks.json) ---
+#
+# Codex runs a project hook only after the user approves it, and the approval is a hash of the rendered
+# definition -- install path included. So the rendering is part of the frozen surface: it is done by
+# tools/skyguard/codex_definitions.py, the ONE renderer (pinned by tests against hashes Codex itself
+# reported), never re-implemented here with sed. It refuses a root holding % ! $ ` or " (cmd.exe or bash
+# would expand or cut the hook's path, the hook could not start, and a hook that cannot start lets every
+# command RUN); then the Codex side is left unconfigured and this says so.
 echo ""
-echo "Configuring CLAUDE.md..."
-if grep -q '{{GAME_ROOT}}' "$GAME_DIR/CLAUDE.md"; then
-    sed -i "s|{{GAME_ROOT}}|$GAME_ROOT_WIN|g" "$GAME_DIR/CLAUDE.md"
-    sed -i "s|{{CONFIG_DIR}}|$CONFIG_DIR|g" "$GAME_DIR/CLAUDE.md"
-    sed -i "s|{{LOADORDER_DIR}}|$LOADORDER_DIR|g" "$GAME_DIR/CLAUDE.md"
-    sed -i "s|{{SKYRIM_FOLDER}}|$SKYRIM_FOLDER|g" "$GAME_DIR/CLAUDE.md"
+echo "Configuring the Codex hooks (.codex/hooks.json)..."
+CODEX_DEFS="$GAME_DIR/.codex/hooks.json"
+CODEX_STATE="none"
+case "$GAME_ROOT_WIN" in [A-Za-z]:/*) CODEX_WIN=1 ;; *) CODEX_WIN="" ;; esac
+# "Is this the folder the definitions were rendered for?" Windows paths are case-insensitive and pwd keeps
+# the case the user typed, so the comparison folds case there (ASCII, via tr -- this Git Bash's grep -i
+# aborts with -F). Only the comparison: the rendered path above is never case-folded.
+codex_same_root() {
+    if [ -n "$CODEX_WIN" ]; then
+        tr 'A-Z' 'a-z' < "$CODEX_DEFS" | grep -qF "$(printf '%s' "$GAME_ROOT_WIN/.codex/hooks/skyguard-entry.ps1" | tr 'A-Z' 'a-z')"
+    else
+        grep -qF "$GAME_ROOT_WIN/.codex/hooks/skyguard-entry.ps1" "$CODEX_DEFS"
+    fi
+}
+if [ ! -f "$CODEX_DEFS" ]; then
+    echo "  MISSING: .codex/hooks.json -- Codex has no toolkit hooks in this folder."
+elif grep -q '{{CODEX_ROOT' "$CODEX_DEFS"; then
+    if [ -z "$CODEX_WIN" ]; then
+        echo "  NOT CONFIGURED: the toolkit's Codex support is Windows-only (Codex on Linux or WSL is not"
+        echo "  supported). Claude Code is configured as usual."
+    elif [ -z "$PY_FOUND" ]; then
+        echo "  NOT CONFIGURED: rendering the Codex hooks needs Python 3.8+. Install it and re-run setup.sh."
+    else
+        # Windows-form paths and no MSYS argument conversion: Git Bash would otherwise rewrite the POSIX
+        # root (/c/...) into C:/... on its way to a native python, and the definition would change.
+        CODEX_ERR=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND \
+            "$GAME_ROOT_WIN/tools/skyguard/codex_definitions.py" render \
+            --template "$GAME_ROOT_WIN/.codex/hooks.json" \
+            --root-win "$GAME_ROOT_WIN" --root-posix "$GAME_DIR" \
+            --out "$GAME_ROOT_WIN/.codex/hooks.json.new" 2>&1) && CODEX_RC=0 || CODEX_RC=$?
+        if [ "$CODEX_RC" = 0 ] && [ -s "$CODEX_DEFS.new" ]; then
+            mv -f "$CODEX_DEFS.new" "$CODEX_DEFS"
+            CODEX_STATE="configured"
+            echo "  Configured: .codex/hooks.json (hooks run from $GAME_ROOT_WIN)"
+        else
+            rm -f "$CODEX_DEFS.new"
+            echo ""
+            echo "  !! CODEX HOOKS NOT CONFIGURED -- Codex will run WITHOUT the toolkit's safety hooks here."
+            echo "  !! ${CODEX_ERR:-the renderer failed (exit $CODEX_RC)}"
+            echo "  !! Claude Code is configured as usual; only the Codex side is affected."
+        fi
+    fi
+elif codex_same_root; then
+    CODEX_STATE="configured"
+    echo "  Already configured: .codex/hooks.json"
+else
+    # Rendered for another folder: the toolkit was moved or copied after setup. Not rewritten here --
+    # re-extracting gives the pristine definitions, and the new path needs a fresh approval anyway.
+    CODEX_OLD=$(sed -n 's/.*-File \\"\(.*\)\/\.codex\/hooks\/skyguard-entry\.ps1\\".*/\1/p' "$CODEX_DEFS" | head -n1)
+    CODEX_STATE="elsewhere"
+    echo ""
+    echo "  WARNING: .codex/hooks.json points at ${CODEX_OLD:-another folder}, not this one ($GAME_ROOT_WIN)."
+    echo "  Codex would run the hooks of that other folder, or none. To fix:"
+    echo "    1. Re-extract the toolkit zip into this folder (restores the unconfigured .codex/hooks.json)."
+    echo "    2. Run: bash setup.sh"
+    echo "    3. Re-approve the hooks: open codex here, type /hooks, approve the 2 Skyrim toolkit hooks."
+fi
+if [ "$CODEX_STATE" = "configured" ]; then
+    echo ""
+    echo "Codex users: Codex runs these hooks only after you approve them. Open \`codex\` in this folder, type"
+    echo "/hooks, and approve the 2 Skyrim toolkit hooks. Until then NOTHING is checked and Codex does not say so."
+    echo "Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you."
+    echo "Check any time with: bash tools/hook-canary.sh"
+fi
+
+# --- Configure CLAUDE.md and AGENTS.md (replace path placeholders) ---
+# Both carry the same shared instructions (agent/instructions/core.md) and so the same placeholders:
+# CLAUDE.md for Claude Code, AGENTS.md for Codex and other agents.
+for DOC in CLAUDE.md AGENTS.md; do
+echo ""
+echo "Configuring $DOC..."
+if [ ! -f "$GAME_DIR/$DOC" ]; then
+    echo "  MISSING: $DOC"
+elif grep -q '{{GAME_ROOT}}' "$GAME_DIR/$DOC"; then
+    sed -i "s|{{GAME_ROOT}}|$GAME_ROOT_WIN|g" "$GAME_DIR/$DOC"
+    sed -i "s|{{CONFIG_DIR}}|$CONFIG_DIR|g" "$GAME_DIR/$DOC"
+    sed -i "s|{{LOADORDER_DIR}}|$LOADORDER_DIR|g" "$GAME_DIR/$DOC"
+    sed -i "s|{{SKYRIM_FOLDER}}|$SKYRIM_FOLDER|g" "$GAME_DIR/$DOC"
 
     # Mod-manager block. Built in a temp file and spliced in with sed's `r`, so no amount of
     # punctuation in a path can break the substitution.
@@ -429,13 +550,14 @@ MMEOF
   so `Data/` is the real, merged view of everything installed.
 MMEOF
     fi
-    sed -i -e "/{{MOD_MANAGER_PATHS}}/{r $MM_BLOCK" -e "d}" "$GAME_DIR/CLAUDE.md"
+    sed -i -e "/{{MOD_MANAGER_PATHS}}/{r $MM_BLOCK" -e "d}" "$GAME_DIR/$DOC"
     rm -f "$MM_BLOCK"
 
     echo "  Configured with your paths (Skyrim folder: $SKYRIM_FOLDER)."
 else
     echo "  Already configured."
 fi
+done
 
 # --- Configure the devcontainer (optional; only if the user has .devcontainer/) ---
 if [ -f "$GAME_DIR/.devcontainer/devcontainer.json" ] && grep -q '{{DEVCONTAINER_MODS_MOUNT}}' "$GAME_DIR/.devcontainer/devcontainer.json"; then
@@ -490,6 +612,8 @@ echo "============================================"
 echo ""
 echo "Installed and configured:"
 echo "  CLAUDE.md                        -- Project instructions (paths filled in)"
+echo "  AGENTS.md                        -- The same instructions for Codex (paths filled in)"
+echo "  .codex/                          -- Codex hook definitions + entries (approve them in Codex /hooks)"
 echo "  KNOWLEDGEBASE.md                 -- 1,300+ lines of Skyrim modding knowledge"
 echo "  .claude/settings.json            -- Hook configuration"
 echo "  .claude/hooks/protect-bash.sh    -- Guards dangerous commands"
@@ -497,7 +621,7 @@ echo "  .claude/hooks/protect-files.sh   -- Guards file edits"
 echo "  .claude/hooks/protect-mcp.sh     -- Guards the DevBench MCP tools (smp reset denied, save overwrites asked)"
 echo "  .claude/hooks/backup-before-edit.sh -- Auto-backups (Edit/Write) with audit trail"
 echo "  .claude/hooks/snapshot-before-tool.sh -- Auto-snapshots .psc/.pex before Bash commands"
-echo "  .claude/hooks/session-kb-guard.sh -- Snapshots KNOWLEDGEBASE/CLAUDE.md once per session"
+echo "  .claude/hooks/session-kb-guard.sh -- Snapshots KNOWLEDGEBASE/CLAUDE.md/AGENTS.md once per session"
 echo "  tools/                           -- Helper scripts (AutoMod wrapper, esp-verify, NIF tools, nexus.sh, resaver-cli.sh)"
 echo "  .claude/backups/                 -- Backup storage (empty for now)"
 echo ""

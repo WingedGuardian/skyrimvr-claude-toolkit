@@ -6,7 +6,7 @@ paths: "**/*.nif,Data/meshes/**"
 
 # NIF Mesh Operations
 
-Use the AutoMod CLI for all mesh work. Always use `--json` for output.
+Use the AutoMod CLI for texture, string and shader work (always with `--json`); PyFFI and PyNifly (below) cover geometry and animation.
 
 ```bash
 bash tools/automod-cli.sh nif <command> [args] --json
@@ -19,6 +19,9 @@ bash tools/automod-cli.sh nif <command> [args] --json
 - `nif list-strings <path>` — all string entries / node names
 - `nif shader-info <path>` — shader property details
 - `nif verify <path>` — integrity check
+
+**AutoMod `nif` cannot inspect Havok collision (`bhk*`) blocks** — it handles textures/strings/shaders only.
+Use NifSkope or a purpose-built parser (PyFFI, below) for collision.
 
 ## Write Commands (always confirm with user first)
 
@@ -67,6 +70,9 @@ A crash-to-desktop must be caught in tooling, not the headset. Run these gates i
    blender.exe --background --python tools/blender-nif-render.py -- <path.nif> <out.png>
    ```
 3. **NifSkope (GUI)** — the independent visual validator for anything the headless render can't show.
+4. **Diff against a known-good structure** — compare the block layout with a NIF that is known to work
+   in game before trusting a new one. Author with valid-by-construction tools (PyNifly), not
+   hand-rolled controller blocks.
 
 > Blender shares the nifly library, so it is NOT an independent *parser* — use it for repair and
 > rendering, and PyNifly/NifSkope for validation. PyFFI's own readback is NOT a valid gate (same tool
@@ -83,7 +89,7 @@ Works on any modern Python with `setuptools` installed alongside `pyffi`. The
 stdlib in 3.8; unrelated to the distutils issue).
 
 > **HARD LIMITS — repeated here deliberately, because this file may be read without the root
-> CLAUDE.md in context:**
+> instruction file in context:**
 > 1. PyFFI **cannot read BSTriShape** (`Unknown block type 'BSTriShape'`) — any SSE-format
 >    (`user_version_2=100`) NIF. Use PyNifly.
 > 2. **NEVER author animations with PyFFI.** It can construct controller blocks and its own

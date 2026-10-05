@@ -1,0 +1,9 @@
+{
+  "cwd": "<path>",
+  "hook_event_name": "SessionStart",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "session_id": "<id>",
+  "source": "startup",
+  "transcript_path": "<path>"
+}

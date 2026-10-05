@@ -14,7 +14,9 @@
 # not date; mkdir only when the directory is missing. The remaining forks are `$(cat)` and the engine.
 
 HOOK_NAME="protect-mcp"
-PY="{{PYTHON_PATH}}"
+PY='{{PYTHON_PATH}}'
+T0="${EPOCHREALTIME:-}"; T0="${T0/,/.}"; [ -n "$T0" ] || printf -v T0 '%(%s)T' -1
+NOPAY=""
 INPUT=$(cat)
 
 # Where the install is: two levels above this file, however the hook was launched (forward, mixed,
@@ -34,13 +36,115 @@ case "$OSTYPE:$ROOT" in
     msys*:/*)          ROOT_WIN="$(CDPATH= cd -- "$ROOT" 2>/dev/null && pwd -W 2>/dev/null)" ;;
 esac
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$ROOT}"
-HB_DIR="$PROJECT_DIR/.claude/backups/.hook-heartbeat"
+HB_DIR="$PROJECT_DIR/.claude/backups/.hook-heartbeat/claude"
 [ -d "$HB_DIR" ] || mkdir -p "$HB_DIR" 2>/dev/null
-printf -v NOW '%(%Y%m%d_%H%M%S)T' -1
+# Stage records (see tools/skyguard/health.py): invoked -> received -> evaluated (engine) -> emitted, and
+# `failed` from any stage. `_done` also writes the latency line; a payload-less call keeps a `failed`
+# record NEWER than its own evaluation, so one empty payload cannot clear itself.
+_stamp() { T1="${EPOCHREALTIME:-$T0}"; T1="${T1/,/.}"; }
+_fail() { _stamp; printf '%s %s %s %s\n' "$T1" "$INV" "$1" "$2" > "$HB_DIR/$HOOK_NAME.failed" 2>/dev/null; }
+_done() {
+    _stamp
+    printf '%s %s ok\n' "$T1" "$INV" > "$HB_DIR/$HOOK_NAME.emitted" 2>/dev/null
+    printf '%s %s %s\n' "$INV" "$T0" "$T1" >> "$HB_DIR/$HOOK_NAME.latency" 2>/dev/null
+    [ -z "$NOPAY" ] || _fail receipt "NO PAYLOAD"
+}
+# Invocation sequence and killed-run detection, from the PREVIOUS records, with the `read` builtin only.
+# The id is `<seq>.<pid>-<rand>`: health.py orders failures against completions by <seq>, so a clock that
+# steps back cannot hide a failure. A previous `invoked` that never emitted, never recorded a failure, and
+# is older than the grace below was killed (the agent's timeout); that is recorded under THIS id, so this
+# call's own completion is not "newer" and the report stays DEGRADED until the next one.
+OT=""; OINV=""; EINV=""; FINV=""
+[ -r "$HB_DIR/$HOOK_NAME.invoked" ] && read -r OT OINV < "$HB_DIR/$HOOK_NAME.invoked" 2>/dev/null
+[ -r "$HB_DIR/$HOOK_NAME.emitted" ] && read -r _ EINV _ < "$HB_DIR/$HOOK_NAME.emitted" 2>/dev/null
+[ -r "$HB_DIR/$HOOK_NAME.failed" ] && read -r _ FINV _ < "$HB_DIR/$HOOK_NAME.failed" 2>/dev/null
+# a record rewritten by a Windows-native writer may end in CR; a CR would make every id look different
+OINV="${OINV%$'\r'}"; EINV="${EINV%$'\r'}"; FINV="${FINV%$'\r'}"
+SEQ="${OINV%%.*}"; case "$SEQ" in ''|*[!0-9]*) SEQ=0 ;; esac
+INV="$((SEQ + 1)).$$-$RANDOM"
+O_S="${OT%%.*}"; T_S="${T0%%.*}"
+case "$O_S$T_S" in
+    ''|*[!0-9]*) ;;
+    *) if [ -n "$OINV" ] && [ "$OINV" != "$EINV" ] && [ "$OINV" != "$FINV" ] && [ $((T_S - O_S)) -gt 60 ]; then
+           _fail killed "run $OINV invoked at $OT never finished"
+       fi ;;
+esac
+printf '%s %s\n' "$T0" "$INV" > "$HB_DIR/$HOOK_NAME.invoked" 2>/dev/null
+if [ -n "$INPUT" ]; then
+    printf '%s %s bytes=%s\n' "$T0" "$INV" "${#INPUT}" > "$HB_DIR/$HOOK_NAME.received" 2>/dev/null
+else
+    NOPAY=1
+    printf '%s %s receipt NO PAYLOAD\n' "$T0" "$INV" > "$HB_DIR/$HOOK_NAME.failed" 2>/dev/null
+fi
+
+# PY-CHAIN-BEGIN
+# Interpreter fallback chain (identical in every wrapper). The configured $PY is the only thing the hot
+# path touches; the probing below runs ONLY once it has failed, so it adds no fork to a healthy call.
+# Order: py -3 / python / python3 that resolve and are not a Store alias, then the usual install
+# locations (newest version first), then a Store alias, last. A candidate is accepted only if it is
+# Python >= 3.8 (the engine's floor) AND runs the engine's own `run.py --selftest <nonce>` and echoes the
+# nonce: a stub that merely exits 0 and prints `{}` would otherwise read as ALLOW. Multi-word candidates
+# are word-split, never eval'd. A fallback that is taken writes a `failed` record BEFORE the engine runs,
+# so the health report says DEGRADED until a call through the configured interpreter completes again.
+# Time limits: the agent DISCARDS a deny that arrives after its own 30 s hook timeout (measured) and runs
+# the command, so everything is bounded. Probes and a FALLBACK engine run use coreutils `timeout` (3 s per
+# probe, no probing after 8 s, the engine capped so the whole call ends by ~28 s); without `timeout` on
+# PATH they run unbounded. The NORMAL path (configured PY works) has no `timeout` -- it is one more fork,
+# ~20-30 ms on every call -- and relies on run.py's in-process watchdog (faulthandler, a C thread that fires
+# even while a regex holds the GIL; SKYGUARD_ENGINE_TIMEOUT s, default 20) which exits 1 into the ordinary
+# "engine failed" deny. NOT covered: a hung interpreter START (before run.py's main) on the configured PY
+# -- rare, and setup.sh verified that PY.
+PYC=("$PY")
+TM=()
+FB=""
+PTMO=(); command -v timeout >/dev/null 2>&1 && PTMO=(timeout -k 1 "${SKYGUARD_PROBE_TIMEOUT:-3}")
+_elapsed() { local n="${EPOCHREALTIME:-}"; [ -n "$n" ] || printf -v n '%(%s)T' -1; EL=$(( ${n%%[.,]*} - ${T0%%.*} )); }
+_budget() {
+    local t="${SKYGUARD_ENGINE_TIMEOUT:-20}"
+    _elapsed; [ $((EL + t)) -le 26 ] || t=$((26 - EL)); [ "$t" -ge 2 ] || t=2
+    TM=(); command -v timeout >/dev/null 2>&1 && TM=(timeout -k 2 "$t")
+}
+py_ok() { "${PTMO[@]}" "$@" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)' >/dev/null 2>&1; }
+py_good() {
+    local n o
+    _elapsed; [ "$EL" -le 8 ] || return 1
+    py_ok "$@" || return 1
+    n="$RANDOM$RANDOM"
+    o=$("${PTMO[@]}" "$@" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" --selftest "$n" 2>/dev/null)
+    [ "${o%$'\r'}" = "skyguard-selftest:$n" ]
+}
+py_use() { PYC=("$@"); FB=1; _fail python "configured $PY unusable; used $* -- re-run setup.sh"; return 0; }
+py_fallback() {
+    local c p d m PY_ALIAS="" bases=()
+    for c in "py -3" python python3; do
+        p=$(command -v ${c%% *} 2>/dev/null) || continue
+        case "$p" in
+            */[Ww]indows[Aa]pps/*) [ -z "$PY_ALIAS" ] && PY_ALIAS="$c"; continue ;;
+        esac
+        if py_good $c; then py_use $c; return 0; fi
+    done
+    [ -z "${LOCALAPPDATA:-}" ] || bases+=("${LOCALAPPDATA//\\//}/Programs/Python")
+    [ -z "${PROGRAMFILES:-}" ] || bases+=("${PROGRAMFILES//\\//}")
+    bases+=(/c)
+    for ((m = 30; m >= 8; m--)); do
+        for d in "${bases[@]}"; do
+            if [ -x "$d/Python3$m/python.exe" ] && py_good "$d/Python3$m/python.exe"; then
+                py_use "$d/Python3$m/python.exe"; return 0
+            fi
+        done
+    done
+    for d in /usr/bin/python3 /usr/local/bin/python3; do
+        if [ -x "$d" ] && py_good "$d"; then py_use "$d"; return 0; fi
+    done
+    if [ -n "$PY_ALIAS" ] && py_good $PY_ALIAS; then py_use $PY_ALIAS; return 0; fi
+    return 1
+}
+# PY-CHAIN-END
 
 inert() {
+    _fail "$1" "${3:-$2}"
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"GUARD INERT: %s %s, so it evaluated NO rules and cannot report a decision. Allowing silently would be indistinguishable from approving."}}\n' \
-        "$HOOK_NAME" "$1"
+        "$HOOK_NAME" "$2"
     exit 0
 }
 
@@ -48,18 +152,19 @@ inert() {
 # MSYS /tmp/... path, and Git Bash only converts such an argument when it looks like a plain path.
 # `command -v` is a builtin: no extra interpreter start per call. An unsubstituted placeholder or a
 # missing path fails here; a present-but-broken Python fails below as "engine failed".
-command -v "$PY" >/dev/null 2>&1 || inert "cannot run Python ($(printf '%s' "$PY" | tr '\134' '/')) -- install Python 3 and run setup.sh to configure its path"
+command -v "$PY" >/dev/null 2>&1 || py_fallback || inert python "cannot run Python ($(printf '%s' "$PY" | tr '\134' '/')) -- install Python 3 and run setup.sh to configure its path" "cannot run Python"
 
-if [ -n "$INPUT" ]; then
-    printf '%s payload_bytes=%s\n' "$NOW" "${#INPUT}" > "$HB_DIR/$HOOK_NAME" 2>/dev/null
-else
-    printf '%s NO PAYLOAD\n' "$NOW" > "$HB_DIR/$HOOK_NAME.blind" 2>/dev/null
-fi
-
-OUT=$(printf '%s' "$INPUT" | "$PY" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" claude "$HOOK_NAME" \
-      --root "$ROOT" --root-win "$ROOT_WIN" --project "$PROJECT_DIR" 2>/dev/null)
+run_engine() { [ -z "$FB" ] || _budget; printf '%s' "$INPUT" | "${TM[@]}" "${PYC[@]}" "${ROOT_WIN:-$ROOT}/tools/skyguard/run.py" claude "$HOOK_NAME" \
+      --root "$ROOT" --root-win "$ROOT_WIN" --project "$PROJECT_DIR" --invocation "$INV" --telemetry "$HB_DIR" 2>/dev/null; }
+OUT=$(run_engine)
 RC=$?
+if [ "$RC" -ne 0 ] && ! py_good "${PYC[@]}" && py_fallback; then
+    OUT=$(run_engine); RC=$?
+fi
+if [ "$RC" -ne 0 ]; then
+    inert engine "engine failed (exit $RC) -- run: bash tools/hook-canary.sh" "exit $RC"
+fi
 case "$OUT" in
-    "{"*) [ "$RC" -eq 0 ] && { printf '%s\n' "$OUT"; exit 0; } ;;
+    "{"*) printf '%s\n' "$OUT"; _done; exit 0 ;;
 esac
-inert "engine failed (exit $RC) -- run: bash tools/hook-canary.sh"
+inert emission "engine failed (exit $RC) -- run: bash tools/hook-canary.sh" "engine output was not a JSON verdict"

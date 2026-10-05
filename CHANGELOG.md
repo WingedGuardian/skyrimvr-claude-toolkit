@@ -2,6 +2,104 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Codex support
+
+- **First Codex hook definitions (v1): approve them in /hooks.** Open `codex` in your Skyrim folder, type `/hooks`, approve the 2 Skyrim toolkit hooks; until then Codex runs none of them and does not say so.
+- **Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you.** (Measured: a non-git install, Codex started in `Data\Scripts`, 2 of 2 runs.)
+- The canary no longer counts a refused Codex call as guarded: a refusal leaves no transcript item, so one refusal used to hide one unguarded call (hooked 1 / called 1, HEALTHY).
+- A Codex tool call whose command is an argv list (not a string) is now guarded with the shell rules, and refused when an element is not a string; it used to be allowed unexamined.
+- `setup.sh` no longer warns that the install moved when you re-run it from a folder typed in a different letter case on Windows.
+- `setup.sh` configures Codex: it fills in `.codex/hooks.json` for your install folder and prints the approval step.
+- `setup.sh` fills your paths into `AGENTS.md`, the instruction file Codex reads, exactly as into `CLAUDE.md`.
+- `setup.sh` writes the Python path into the Codex hook scripts, and repairs it on a re-run after Python moves.
+- `setup.sh` refuses to configure the Codex hooks in a folder whose path contains `%`, `!`, `$`, `` ` `` or `"`, and says why (the hook could not start there, and Codex runs the command when a hook cannot start).
+- `setup.sh` warns, and changes nothing, when `.codex/hooks.json` was set up for a different folder: re-extract, re-run `setup.sh`, re-approve.
+- The session-start snapshot (`tools/kb-guard.sh`) now also keeps copies of `AGENTS.md`.
+- Release builds now check the Codex files: hook definitions present and parsing, every script they run present, the rules file, one Codex skill per Claude skill, `AGENTS.md` at most 32,768 bytes.
+- Unsupported, and both leave the hooks unable to start: a group policy forcing PowerShell's `AllSigned` execution policy, and Codex running inside WSL.
+- Commands you type with `!` in the Codex prompt bypass the hooks (measured); see "Using with Codex" in the README for the full list of what is not checked.
+
+### Codex adapter: known coverage gaps
+
+- **MCP tools are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the
+  hook as `mcp__<server>__<tool>`; the toolkit allows it and records one line in
+  `.claude/backups/codex-unhooked-tools.log`. Only the DevBench MCP is covered by rules (Plan 5 Task 11).
+  Unknown non-MCP tools that carry a command string are guarded with the shell rules (and logged).
+
+### Hook interpreter fallback
+
+- **A moved or upgraded Python no longer takes every blocking hook down.** If the interpreter `setup.sh`
+  configured stops working, the hooks try `py -3`, `python`, `python3` (never a Microsoft Store alias while a
+  regular install exists), then the usual install folders (newest version first), then a Store alias, and keep
+  deciding. A candidate is accepted only if it is Python 3.8 or newer **and** runs the guard engine itself
+  (`run.py --selftest <nonce>`), so a stub that merely exits 0 cannot turn into "allow". The healthy path is
+  unchanged: nothing is probed unless the configured interpreter has failed.
+- **Reported, not hidden:** a fallback that is used shows as DEGRADED in `bash tools/hook-canary.sh` ("configured
+  ... unusable; used ...") until a call through the configured interpreter completes again. Re-run `setup.sh`.
+- **An extracted zip that never ran `setup.sh`** (the `{{PYTHON_PATH}}` placeholder still in the hooks) now takes
+  the same route: the hooks fall back to a Python they can find and still decide, reported as DEGRADED. They used
+  to refuse every command. With no usable Python at all they still refuse (GUARD INERT).
+- **Nothing can hang past the agent's timeout.** On the normal path the engine arms an in-process watchdog
+  (`faulthandler`, a C thread that fires even inside a catastrophic regex) that ends it after 20 s
+  (`SKYGUARD_ENGINE_TIMEOUT` seconds) into the ordinary GUARD INERT deny; the traceback goes to stderr, which
+  the wrapper discards. Fallback probes (3 s each) and a fallback engine run use coreutils `timeout` (without it
+  on PATH they run unbounded). **Not covered:** a hung interpreter *start* (before the engine's `main`) on the
+  configured Python, which `setup.sh` verified; that would need a `timeout` fork on every call (~20-30 ms).
+- **`setup.sh` requires Python 3.8+** (a 3.6 used to pass and then deny everything) and writes the path into the
+  hooks in single quotes, so a `$` or backtick in a folder name is no longer expanded on every hook call.
+
+### Hook health telemetry
+
+- **`bash tools/hook-canary.sh` now reads staged records** (ran, received, evaluated, emitted, failed) instead of
+  one heartbeat, so it sees the failures that happen *after* a payload arrives: an engine crash, a hook the agent
+  killed, an output nobody could parse. States: HEALTHY, STALE, DEGRADED, NOT EXERCISED, UNMEASURABLE. A failure
+  clears only on a newer completed evaluation. Per-call latency (p50/p95) is recorded and shown.
+
+### 📚 Instructions split
+
+- **`CLAUDE.md` shrinks from 53,578 to 28,174 bytes** (the shared core from 53,367 to 26,304), so the
+  instruction file Codex will read stays under its silent 32,768-byte truncation limit. Nothing was deleted:
+  every moved line was checked against its new home.
+- **Three new skills hold what used to be core bulk:** `devbench` (the live in-game test channel),
+  `triage-and-conflicts` (skyrim-winner, Papyrus and crash-log triage, ESP cross-reference snapshots, how the
+  tools pick a folder) and `xelib` (XEditLib API quirks, loading the real active order, judging success by
+  stdout).
+- **Install notes move to `docs/installing-tools.md`** (the optional tools, why some have wrappers, the Nexus
+  API key). The devcontainer guide joins `docs/container-vs-windows.md`; the guards' internals join
+  `docs/safety-philosophy.md`.
+- **The AutoMod CLI section folds into its skills**; `skyrim-nif` gains the Havok-collision limit and the
+  "diff against a known-good structure" gate, `create-mod` gains `add-quest` / `set-property`.
+- **The core is agent-neutral.** Claude Code specifics (skills loading, hook wiring, `/hooks`, the backup
+  hook's blind spot) move to an addendum generated into `CLAUDE.md` only.
+- **`KNOWLEDGEBASE.local.md` → `## My preferences`:** every agent is told to read your standing instructions
+  there at the start of each session, and to add to them when you state a lasting preference.
+- **`AGENTS.md` corrected:** skills are plain Markdown any agent can read; the stale "require confirmation"
+  claim and an orphaned sentence fragment are gone.
+- For contributors: `gen_agent_trees.py --check` now fails when the worst-case installed instruction file
+  exceeds 32,768 bytes (`--budget` prints it), and `tests/test_instruction_neutrality.py` bans Claude-only
+  constructs from the shared core and the three new skills. Both are mutation-tested.
+
+### ✨ Your preferences reach the agent at every session start
+
+- The SessionStart hook now prints the `## My preferences` section of `KNOWLEDGEBASE.local.md` into the
+  session, after the knowledgebase snapshot report.
+- The injected section is capped at 4,096 bytes (cut on a character boundary, with a note saying where the
+  rest is); a file that exists but cannot be read is said so out loud and never fails the session.
+- It is injected again after a compaction (which drops earlier context); the snapshot is still skipped then.
+- Agents without session hooks get the same section through the instruction to read it at session start.
+
+### 🐛 Prompt-audit fixes
+
+- Caprica: the documented command now runs from `Data/Scripts/Source` with a bare filename, `-f` flags and `-o ..` (the old form wrote the `.pex` into the game root, and a path argument fails with a namespacing error).
+- port-to-vr: "Precision doesn't exist for VR" replaced with how VR melee hit detection is layered and what to check.
+- port-to-vr: the unsourced Animation Motion Revolution VR claim replaced with "check its Nexus page".
+- port-to-vr: "SCAR → VR port exists (BFCO)" corrected; BFCO is a separate framework, not a SCAR port.
+- skyrim-nif: "AutoMod for all mesh work" scoped to texture, string and shader work.
+- `GetFormFromFile()` advice now says your OWN plugin's forms only, and to check for `None` (four places).
+- Own Your Records: vanilla records can be overridden by other plugins too; copy any whose behaviour you rely on.
+- inspect-esp: uses `tools/spriggit-cli.sh`, a scratch output folder and the installed Spriggit version instead of a hardcoded `0.40.0` and `/tmp`.
+- inspect-esp: the xeditlib check now tests that `require('xeditlib')` resolves, not that `tools/xelib/` exists.
+
 ### 🔒 Safety hooks now run on a Python engine (no verdict loosened)
 
 - **The five hooks are now thin wrappers over `tools/skyguard/`**, a Python engine holding every rule,
