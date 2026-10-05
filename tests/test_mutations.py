@@ -3970,3 +3970,25 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("scripts/gen-guard-hashes.py", 'SETUP_WRITES = frozenset((".codex/hooks.json",))', "SETUP_WRITES = frozenset()",
      _SFT + "test_the_manifest_names_exactly_the_tracked_guard_files", "l2-self-manifest-setup-writes"),
 ]]
+
+
+# Plan 6 Task 12 review, I2/I3 (statement scoping): one twin per clause. A feeder shape that goes unrecognised falls
+# back to the whole text (fail closed) and still refuses, so those clauses are pinned by their ALLOW rows instead.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_LR, '    if j >= 0 and text[j] in "|`":', '    if j >= 0 and text[j] in "`":', _p6row("r1-pipe-newline"),
+     "l2-r1-continue-trailing-pipe"),
+    (_LR, '    if j >= 0 and text[j] in "|`":', '    if j >= 0 and text[j] in "|":', _p6row("r1-backtick-args"),
+     "l2-r1-continue-backtick"),
+    (_LR, '    return j < stop and text[j] == "|"', "    return False", _p6row("r1-leading-pipe"),
+     "l2-r1-continue-leading-pipe"),
+    (_LR, r"(?:\[[^\]\n]{1,200}\]\s*)*", "", _p6row("r1-allow-cast-scratch"), "l2-r1-feeder-cast"),
+    (_LR, r'(?:(?:global|script|local|private):)?" + n + r"\}?\s*(?:[+\-*/]?=)(?!=)"',
+     r'" + n + r"\}?\s*(?:[+\-*/]?=)(?!=)"', _p6row("r1-allow-global-scratch"), "l2-r1-feeder-scope"),
+    (_LR, r"|\s*(?:set|new)-variable", r"|\s*(?:set|new)-variableX", _p6row("r1-allow-setvar-scratch"),
+     "l2-r1-feeder-set-variable"),
+    (_LR, "        if _unfed(text, spans, chosen):", "        if False:", _p6row("r1-unfed"), "l2-r1-unfed-fails-closed"),
+    (_LR, '_AUTOMATIC = {"_", "psitem",', '_AUTOMATIC = {"psitem",', _p6row("r1-allow-automatic"),
+     "l2-r1-automatic-underscore"),
+    (_LR, "for x in mine:                                          # I3", "for x in ():  # I3",
+     _p6row("r1-listing-filter"), "l2-r1-construct-listing"),
+]]

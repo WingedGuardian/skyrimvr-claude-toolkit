@@ -29,6 +29,7 @@ the next session start whoever made it).
 """
 from __future__ import annotations
 
+import functools
 import re
 from typing import List, Mapping, Optional, Tuple
 
@@ -318,9 +319,24 @@ def _text_hit(text: str, parsed, cwd, env, roots) -> str:
     return ""
 
 
+def _continues(text: str, i: int) -> bool:
+    """The newline at i does not end a PowerShell statement: the line before it ends in `|` or a backtick, or the
+    next non-blank line starts with `|` (Task 12 review I2: a split there cut a pipeline from its upstream)."""
+    j = i - 1
+    while j >= 0 and text[j] in " \t\r":
+        j -= 1
+    if j >= 0 and text[j] in "|`":
+        return True
+    j, stop = i + 1, min(len(text), i + 4096)        # bounded: a run of blank lines cannot make this quadratic
+    while j < stop and text[j] in " \t\r\n":
+        j += 1
+    return j < stop and text[j] == "|"
+
+
 def _statements(text: str) -> List[Tuple[int, int]]:
     """(start, end) of each top-level statement: split on `;`, newline, `&&` and `||` outside quotes and outside
-    ( ) / { } -- a `|` pipeline stays one statement, and so does a `% { ... ; ... }` block. Linear, one pass."""
+    ( ) / { } -- a `|` pipeline stays one statement (also across a line continuation), and so does a
+    `% { ... ; ... }` block. Linear, one pass."""
     spans, start, depth, quote, i, n = [], 0, 0, "", 0, len(text)
     while i < n:
         c = text[i]
@@ -335,7 +351,7 @@ def _statements(text: str) -> List[Tuple[int, int]]:
             depth += 1
         elif c in ")}":
             depth = max(0, depth - 1)
-        elif depth == 0 and (c in ";\n" or text[i:i + 2] in ("&&", "||")):
+        elif depth == 0 and (c == ";" or (c == "\n" and not _continues(text, i)) or text[i:i + 2] in ("&&", "||")):
             spans.append((start, i))
             i += 1 if c in ";\n" else 2
             start = i
@@ -345,7 +361,38 @@ def _statements(text: str) -> List[Tuple[int, int]]:
     return spans
 
 
-_VAR = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?")
+_VAR = re.compile(r"\$\{?(?:(?:global|script|local|private):)?([A-Za-z_][A-Za-z0-9_]*)\}?", re.IGNORECASE)
+# PowerShell's own variables: never assigned by the command, never a missing feeder.
+_AUTOMATIC = {"_", "psitem", "true", "false", "null", "args", "input", "this", "env", "home", "pwd", "host",
+              "error", "matches", "lastexitcode", "pscmdlet", "psscriptroot", "pscommandpath", "myinvocation"}
+
+
+@functools.lru_cache(maxsize=256)
+def _assigns(name: str) -> "re.Pattern":
+    """A statement that assigns $name: `$name =`, `[type]$name =`, `$scope:name =`, `$name +=`, or
+    `Set-Variable`/`New-Variable [-Name] name` (Task 12 review I2: only a bare `$name =` was recognised)."""
+    n = re.escape(name)
+    return re.compile(
+        r"\s*(?:\[[^\]\n]{1,200}\]\s*)*\$\{?(?:(?:global|script|local|private):)?" + n + r"\}?\s*(?:[+\-*/]?=)(?!=)"
+        r"|\s*(?:set|new)-variable\s+(?:-name\s+)?['\"]?(?:(?:global|script|local|private):)?" + n + r"['\"]?(?![\w])",
+        re.IGNORECASE)
+
+
+def _bound_inside(text: str, name: str) -> bool:
+    """$name gets its value inside the statement itself: a `foreach ($name in ...)` heading or an assignment."""
+    n = re.escape(name)
+    return bool(re.search(r"foreach\s*\(\s*\$" + n + r"\s+in\b", text, re.IGNORECASE)
+                or any(_assigns(name).match(text, m.start()) for m in re.finditer(r"[\[$]|(?i:set|new)-", text)))
+
+
+def _unfed(text: str, spans, chosen) -> bool:
+    """Fail closed (Task 12 review I2): the construct's statements read a variable that nothing in the command is
+    seen to assign -- its value came from a shape this reader does not know, so the statement scope cannot be trusted."""
+    body = "\n".join(text[spans[j][0]:spans[j][1]] for j in chosen)
+    for name in {v.lower() for v in _VAR.findall(body)} - _AUTOMATIC:
+        if not _bound_inside(body, name):
+            return True
+    return False
 
 
 def _feeders(text: str, spans, k: int) -> List[int]:
@@ -359,7 +406,7 @@ def _feeders(text: str, spans, k: int) -> List[int]:
         j = todo.pop()
         for name in {v.lower() for v in _VAR.findall(text[spans[j][0]:spans[j][1]])} - seen:
             seen.add(name)
-            assign = re.compile(r"\s*\$\{?" + re.escape(name) + r"\}?\s*=(?!=)", re.IGNORECASE)
+            assign = _assigns(name)
             for i in range(j - 1, -1, -1):
                 if assign.match(text[spans[i][0]:spans[i][1]]):
                     if i not in out:
@@ -376,12 +423,22 @@ def _construct_hit(text: str, parsed, cwd, env, roots) -> str:
     spans = _statements(text)
     for m in PS_CONSTRUCT.finditer(text):
         k = next((j for j, (a, b) in enumerate(spans) if a <= m.start() < b), len(spans) - 1)
-        chosen = [k] + _feeders(text, spans, k)
-        stmt = "\n".join(text[spans[j][0]:spans[j][1]] for j in sorted(chosen))
+        chosen = sorted([k] + _feeders(text, spans, k))
+        if _unfed(text, spans, chosen):
+            t = _text_hit(text, parsed, cwd, env, roots)        # the base's whole-text reading
+            if t:
+                return t
+            continue
+        stmt = "\n".join(text[spans[j][0]:spans[j][1]] for j in chosen)
         mine = tuple(x for x in parsed.execs if x.segment.strip() and x.segment.strip() in stmt)
         t = _text_hit(stmt, shellparse.Parsed(mine, True, ""), cwd, env, roots)
         if t:
             return t
+        for x in mine:                                          # I3: Get-ChildItem Data [-Filter *.esm] | % {...}
+            for w in x.argv:
+                t = _listing_hit(x, w, cwd, env, roots)
+                if t:
+                    return t
     return ""
 
 
