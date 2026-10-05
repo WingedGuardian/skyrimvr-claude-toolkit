@@ -945,6 +945,9 @@ def disable(root, session=None) -> Result:
         return _res(2, str(e))
     except (ValueError, OSError) as e:
         return _res(2, "Could not record the disable (%s)." % e.__class__.__name__)
+    if session != USER_SESSION:
+        return _res(0, "Recorded, but a session start honours a disable only when it was made at a terminal.",
+                    "Run `tools/skyguard lock disable` yourself in a terminal to keep the lock off across sessions.")
     return _res(0, "The lock is persistently disabled; every session start will say so until `lock enable`.")
 
 

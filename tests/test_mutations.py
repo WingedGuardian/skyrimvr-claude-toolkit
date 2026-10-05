@@ -3595,3 +3595,41 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SH + "test_a_start_line_of_another_agents_heartbeat_dir_counts_when_the_agent_is_unnamed_but_not_a_wrong_named_one",
      "l2-guards-agent-dir"),
 ]]
+
+
+# Plan 6 Task 10: session start (expiry, drift, banners). One mutation per clause; each names the test that must go red.
+_SS = "tools/skyguard/session.py"
+_SST = "tests/test_skyguard_session_start.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_SS, '        if source == "compact":\n            return [disabled] if disabled else []', '        if False:\n            return []',
+     _SST + "test_compact_does_not_clear_or_report_lifts", "l2-sess-compact-shortcut"),
+    (_SS, "        if not st.rejected and (st.lifts or untrusted):", "        if False:",
+     _SST + "test_a_guards_lift_is_reported_and_cleared_at_start", "l2-sess-clear"),
+    (_SS, '        failure = _relock(root) if engaged else ""', '        failure = ""',
+     _SST + "test_relock_happens_before_the_report_and_names_the_lifted_files", "l2-sess-relock"),
+    (_SS, "        lifted, drift = _scan(root, st.lifts) if engaged else ([], [])", "        lifted, drift = [], []",
+     _SST + "test_relock_happens_before_the_report_and_names_the_lifted_files", "l2-sess-scan"),
+    (_SS, "        elif p.name in manifest:", "        elif False:",
+     _SST + "test_drift_is_a_file_unlocked_with_no_lift_record", "l2-sess-drift"),
+    (_SS, '    return dis.get("by_session") == TRUSTED_DISABLE, dis.get("since")', '    return True, dis.get("since")',
+     _SST + "test_a_disable_not_made_at_a_terminal_buys_no_persistence", "l2-sess-disabled-trust"),
+    (_SS, "            banners.append(disabled)", "            pass",
+     _SST + "test_a_terminal_disable_is_honoured_and_shown_every_session", "l2-sess-disabled-banner"),
+    (_SS, "        engaged = _engaged(root) and not trusted", "        engaged = _engaged(root)",
+     _SST + "test_a_terminal_disable_is_honoured_and_shown_every_session", "l2-sess-disabled-honoured"),
+    (_SS, '.is_file()\n', ' or True\n',
+     _SST + "test_the_lock_is_not_applied_when_it_was_never_engaged", "l2-sess-engaged"),
+    (_SS, "        if st.rejected:\n            banners.append", "        if False:\n            banners.append",
+     _SST + "test_a_rejected_state_is_reported_and_the_lock_is_enforced", "l2-sess-rejected"),
+    (_SS, '    t = "".join(c if c.isprintable() else " " for c in str(s))', "    t = str(s)",
+     _SST + "test_a_hostile_reason_cannot_add_lines_or_overrun", "l2-sess-sanitize"),
+    (_SS, "        if os.path.isabs(rel) or not _inside(root, target):", "        if os.path.isabs(rel):",
+     _SST + "test_a_manifest_path_cannot_reach_outside_the_project", "l2-sess-guardfile-path"),
+    (_SS, "not health._SESSION_ID.match(session_id)", "False",
+     _SST + "test_an_unsafe_session_id_is_never_written_to_a_shell_file[$(id)]", "l2-sess-env-id"),
+    (_SS, '        return _with_prefs("\\n".join(t for t in (banners, missing) if t), project, audit), "failed"',
+     '        return _with_prefs("\\n".join(t for t in (missing, banners) if t), project, audit), "failed"',
+     _SST + "test_banners_come_before_the_kb_guard_text_and_never_on_compact", "l2-sess-order"),
+    ("tools/skyguard/run.py", '        session.export_env(p["session_id"], "claude")', "        pass",
+     _SST + "test_the_claude_session_start_exports_the_id", "l2-sess-env-wired"),
+]]

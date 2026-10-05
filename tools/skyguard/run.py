@@ -188,6 +188,7 @@ def main(argv=None) -> int:
     else:
         out, status, code = session.run_status(a.project, "" if p["empty"] else p["source"], a.bash, audit)
         _telemetry(a, Verdict(status=status, code=code))
+        session.export_env(p["session_id"], "claude")   # later Bash calls get SKYGUARD_SESSION_ID (Task 10)
         _emit(out)
         return 0
     v = codes.classify(engine.shadow(v, a.project, p["session_id"], a.telemetry, audit))   # R8: the one exit
