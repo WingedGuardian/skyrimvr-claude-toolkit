@@ -4001,7 +4001,8 @@ _P5F_CLAUSES = [
     # (id, file, find, replace, test that must go red)
     # D1: the Recycle-Bin delete (VB FileSystem::DeleteFile/DeleteDirectory, Shell.Application Namespace(10).MoveHere).
     ("p5f-recycle-bin-delete-not-judged", _DL,
-     "    for w, how in (recycle_targets(command) if resolved is None else ()):", "    for w, how in ():",
+     "    for w, how in (recycle_targets(recycle_text(command, parsed)) if resolved is None else ()):",
+     "    for w, how in ():",
      _p5f("vb-deletedirectory-ps")),
     ("p5f-recycle-bin-shell-application-not-matched", _DL,
      '    r"|' + BS + '.' + BS + 's*Namespace' + BS + 's*' + BS + '(' + BS + 's*(?:10|0x0*a)' + BS + 's*' + BS + ')'
@@ -4080,6 +4081,21 @@ _P5F_CLAUSES = [
     ("p5f-devbench-url-drops-trailing-slash", "tools/skyguard/mcp_rules.py",
      '    if parts.path.endswith("/") and not path.endswith("/"):', "    if False:",
      "tests/test_skyguard_p5fix.py::test_norm_url[double-slash]"),
+    # B-I1 pricing refinements: moves read through the command's own assignments; the Recycle-Bin text scan skips
+    # data heredocs and mentions.
+    ("p5f-recycle-text-reads-data-heredocs", _DL, '        if e.stdin_body and e.stdin_from == "heredoc:data":',
+     "        if False:", _MDEL + "test_a_heredoc_that_quotes_the_recycle_bin_call_is_not_a_delete"),
+    ("p5f-recycle-text-reads-mentions", _DL, "        if e.program in _MENTION_PROGRAMS:", "        if False:",
+     _MDEL + "test_echoing_the_recycle_bin_call_is_not_a_delete"),
+    ("p5f-move-destination-not-landed", _DL, "                    d = _landing(e, dst, command, cwd, env)",
+     "                    pass", _MDEL + "test_a_move_into_the_installs_backups_through_an_assigned_variable_stays"),
+    ("p5f-landing-no-literal-folder", _DL, '        if pre.strip("/' + BS * 2 + '"):', "        if False:",
+     _MDEL + "test_a_move_into_a_literal_data_folder_with_a_loop_variable_stays"),
+    ("p5f-expand-assigned-ambiguous", _DL, '    return vals.pop() if len(vals) == 1 and "" not in vals else None',
+     "    return vals.pop() if vals else None", _MDEL + "test_expand_assigned[$D/x-$D/x]"),
+    ("p5f-move-source-not-expanded", _DL,
+     "                if a is None and src is not UNRESOLVED and _expand_assigned(src, command) != src:",
+     "                if False:", _MDEL + "test_a_move_out_through_an_assigned_variable_still_leaves"),
     # C-M7: the nonce refusal is observable only as "the stub exited 0 yet the wrapper recorded exit 1". Twin 1: the
     # refusal is kept but with another code (still denied, so only the exact record can see it). Twin 2: the engine
     # run no longer carries a nonce (still refused, since the stub never echoes one; only the run log can see it).

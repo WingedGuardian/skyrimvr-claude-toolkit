@@ -112,6 +112,25 @@ DESTROYER += "|" + _RECYCLE_WORD
 DESTROYER_LOOSE += "|" + _RECYCLE_WORD
 
 
+# Programs that only SHOW text: a Recycle-Bin call among their words is a mention (`echo`, `grep`, a commit message).
+_MENTION_PROGRAMS = frozenset(("echo", "printf", "grep", "egrep", "fgrep", "rg", "findstr", "select-string",
+                               "write-output", "write-host", "git", "cat", "sed", "awk", "head", "tail"))
+
+
+def recycle_text(command: str, parsed) -> str:
+    """The command text the Recycle-Bin scan reads: without the bodies of data heredocs (`cat > f <<EOF`) and without
+    the words of programs that only show text. Priced: a heredoc writing a TEST file that quoted the call was denied."""
+    text = command
+    for e in parsed.execs:
+        if e.stdin_body and e.stdin_from == "heredoc:data":
+            text = text.replace(e.stdin_body, " ")
+        if e.program in _MENTION_PROGRAMS:
+            for w in e.argv:
+                if RECYCLE_CALL.search(w):
+                    text = text.replace(w, " ")
+    return text
+
+
 def recycle_targets(command: str) -> List[Tuple[str, str]]:
     """(first argument, how it is written: "single" | "double" | "bare") for each Recycle-Bin delete call in the text.
     A bare argument is a variable or an expression (`$d`, `(Join-Path ...)`): never resolved, only matched raw."""
@@ -559,6 +578,46 @@ def _expands(word: str) -> bool:
     return bool(targets._LIVE_DOLLAR.search(word)) or "`" in word or bool(re.search(r"%[A-Za-z_]\w*%", word))
 
 
+_VAR_REF = re.compile(r"\$\{?(?:env:)?([A-Za-z_][A-Za-z0-9_]{0,63})\}?|%([A-Za-z_][A-Za-z0-9_]{0,63})%", re.IGNORECASE)
+
+
+def _assigned_value(name: str, command: str) -> Optional[str]:
+    """The one value the command's own text assigns to `name` (`N=v`, `N="v"`, `$N = 'v'`); None when it assigns none,
+    an empty one, or two different ones."""
+    n = re.escape(name)
+    vals = set()
+    for rx, flags in ((r"(?:^|[;&|(\n])[ \t]{0,16}(?:(?:export|local|declare|readonly)[ \t]{1,16})?" + n + r"=(?:\"([^\"\n]{0,512})\"|'([^'\n]{0,512})'|([^\s;&|\"'`()]{1,512}))", 0),
+                      (r"\$" + n + r"[ \t]{0,16}=[ \t]{0,16}(?:\"([^\"\n]{0,512})\"|'([^'\n]{0,512})')", re.IGNORECASE)):
+        for groups in re.findall(rx, command, flags):
+            vals.add(next((g for g in groups if g), ""))
+    return vals.pop() if len(vals) == 1 and "" not in vals else None
+
+
+def _expand_assigned(word: str, command: str) -> str:
+    """The word with each variable the command itself assigns one value replaced by that text, three levels deep
+    (`B="$P/.claude/backups"`, `P="C:/Game"`). A pricing aid for where a MOVE lands or starts (final review B-I1:
+    every newly denied move into the install's own backups used such a variable), not a proof of the value."""
+    for _ in range(3):
+        new = _VAR_REF.sub(lambda m: _assigned_value(m.group(1) or m.group(2), command) or m.group(0), word)
+        if new == word:
+            break
+        word = new
+    return word
+
+
+def _landing(e, word: str, command: str, cwd: str, env) -> Optional[str]:
+    """Where an unresolved move word most likely points: its same-command assignments expanded, else the literal folder
+    before its first expansion (`Data/textures/$f` lands in Data/textures). None when neither resolves."""
+    x = _expand_assigned(word, command)
+    a = targets.resolve_operand(e, x, cwd, env) if x != word else None
+    if a is None:
+        pre = re.split(r"[$%`]", x, maxsplit=1)[0]
+        pre = pre[:max(pre.rfind("/"), pre.rfind("\\")) + 1]
+        if pre.strip("/\\"):
+            a = targets.resolve_operand(e, pre, cwd, env)
+    return a
+
+
 def _everything(word: str) -> bool:
     """`.`, `*`, `./*`, `..`, `.*`: the whole of a folder (S-DEL-UNKNOWN-DIR when that folder is unknown)."""
     comps = [c for c in re.split(r"[/\\]+", word.strip()) if c]
@@ -623,10 +682,17 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             # source sent to a VARIABLE destination (`$env:TEMP`, "$TMP") leaves, unless that destination's own words
             # reach a protected root; a relative destination with no cwd still proves nothing.
             mcwd = targets.exec_cwd(e, cwd, env)
+            # Priced (base 300d235): every newly denied move but two landed in the install's own backups through a
+            # variable the command assigns (`B="$P/.claude/backups/x"; mv "$P/a.dll" "$B/"`), so an unresolved word
+            # is read through those assignments, and a destination through its literal folder (_landing).
             for src, dst in _move_pairs(e):
                 d = targets.resolve_operand(e, dst, cwd, env)
+                if d is None:
+                    d = _landing(e, dst, command, cwd, env)
                 dz = targets.zone(place(d)[1], roots) if d is not None else ""
                 a = None if src is UNRESOLVED else targets.resolve_operand(e, src, cwd, env)
+                if a is None and src is not UNRESOLVED and _expand_assigned(src, command) != src:
+                    a = targets.resolve_operand(e, _expand_assigned(src, command), cwd, env)
                 if a is None:
                     if dz in RULE_OF:
                         continue
@@ -691,7 +757,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     # D1: Recycle-Bin deletes, found in the text (RECYCLE_CALL). .NET resolves a relative path against the process
     # directory, which is the payload cwd (Set-Location does not move it).
     base = targets.normalise_cwd(cwd)
-    for w, how in (recycle_targets(command) if resolved is None else ()):
+    for w, how in (recycle_targets(recycle_text(command, parsed)) if resolved is None else ()):
         a = None
         if how == "single":
             a = literal_abs(w, base, "powershell")

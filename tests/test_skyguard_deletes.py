@@ -460,3 +460,42 @@ def test_an_unresolved_delete_in_a_command_naming_the_configured_config_dir_is_u
     command that names it. Resolved deletes use Roots.config_dirs instead, which this does not exercise."""
     got = decide('ls "D:/Profiles/MO2/profiles/Default"; rm -rf "$X"', layout="config", cwd="C:/work")
     assert got[1] == {"S-DEL-UNRESOLVED"}, got
+
+
+# ---- B-I1 pricing (base 300d235, N = 70,710): the newly denied moves, read one by one, were mostly moves INTO the
+# install's own backups through a variable the command assigns; a delete-rule twin of each shape is pinned here.
+def test_a_move_into_the_installs_backups_through_an_assigned_variable_stays():
+    cmd = ('P="' + INSTALL + '"\nB="$P/.claude/backups/x"\nmkdir -p "$B"\nmv "$P/openvr_api.dll" "$B/openvr_api.dll"')
+    got = decide(cmd, cwd=INSTALL)
+    assert got[0][0] != "deny", got
+
+
+def test_a_move_out_through_an_assigned_variable_still_leaves():
+    cmd = 'ROOT="' + INSTALL + '"; SCR="C:/Temp/scratch"; echo "ROOT=$ROOT"; mv "$ROOT/x.psc" "$SCR/"'
+    (decision, reason), fired = decide(cmd, cwd="C:/work")
+    assert (decision, fired) == ("deny", {"S-DEL-INSTALL"}) and "x.psc" in reason, (decision, fired, reason)
+
+
+def test_a_move_into_a_literal_data_folder_with_a_loop_variable_stays():
+    cmd = 'cd "' + INSTALL + '" && SRC=".claude/backups/b" && for f in a.dds b.dds; do mv "$SRC/$f" "Data/textures/$f"; done'
+    got = decide(cmd, cwd=INSTALL)
+    assert got[0][0] != "deny", got
+
+
+def test_a_heredoc_that_quotes_the_recycle_bin_call_is_not_a_delete():
+    cmd = ("cat >> notes.py <<'EOF'\nX = \"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory('" + INSTALL
+           + "/Data', 'OnlyErrorDialogs', 'SendToRecycleBin')\"\nEOF")
+    got = decide(cmd, cwd="C:/work")
+    assert got[0][0] != "deny", got
+
+
+def test_echoing_the_recycle_bin_call_is_not_a_delete():
+    cmd = "echo \"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('" + INSTALL + "/Data/a.esp')\""
+    got = decide(cmd, cwd="C:/work")
+    assert got[0][0] != "deny", got
+
+
+@pytest.mark.parametrize("word,want", [("$B/x", "C:/G/.claude/backups/x"), ("$T/x", "$T/x"), ("$D/x", "$D/x")])
+def test_expand_assigned(word, want):
+    cmd = 'P="C:/G"; B="$P/.claude/backups"; D=a; D=b'
+    assert deletes._expand_assigned(word, cmd) == want
