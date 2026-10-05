@@ -2,6 +2,23 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Guard rules rewritten on a parser (Plan 5): security fixes to the 3.x guards, and far less noise
+
+- **Security fix (E12): the PowerShell tool was not guarded.** The 3.x Claude matcher was `Bash` only, so a delete or write
+  made through the PowerShell tool reached no hook. The matchers are now `Bash|PowerShell|Monitor` (the Monitor tool runs
+  shell commands and bypassed every hook) and `Edit|Write|NotebookEdit`. **If you installed a 3.x toolkit, your PowerShell
+  tool was unguarded.**
+- **Security fix (E21): shell writes to plugins and archives were only advised.** `echo x > Foo.esp`, `Set-Content Foo.esp`,
+  `tee`, `Out-File`, `sed -i` and `dd of=` into an `.esp .esm .esl .bsa .ba2` now refuse, in Bash and PowerShell. Until now the
+  "refused outright" claim held only for the Edit and Write tools. Copying a finished plugin onto `Data/` stays a note.
+- Deletes are judged on the program that runs and where its operand resolves (relative paths against the working directory
+  Claude reports), also for Mod Organizer's `mods/` and `overwrite/`. `grep -rn "rm -rf" <install>` is no longer refused.
+- New: DevBench `smp reset` is refused (MCP tool, `curl`, `devbench-cli.sh`, and on Codex); a DevBench save over an existing save asks.
+- **Noise cut, measured on 66,773 real tool calls:** advice notes 2,437 to 211 (the P2 baseline was 2,028; 0.316% of calls
+  against 3.79%); asks 26 to 12, 11 of them an executed ReSaver `--apply`; 205 wrong denies removed, none a real action.
+  Verdicts now carry `status: partial` when the parser could not read a command completely.
+- Every message is at most two plain lines and never echoes the command.
+
 ### Codex support
 
 - **First Codex hook definitions (v1): approve them in /hooks.** Open `codex` in your Skyrim folder, type `/hooks`, approve the 2 Skyrim toolkit hooks; until then Codex runs none of them and does not say so.
@@ -21,9 +38,11 @@
 
 ### Codex adapter: known coverage gaps
 
-- **MCP tools are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the
+- **MCP tools other than DevBench's are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the
   hook as `mcp__<server>__<tool>`; the toolkit allows it and records one line in
-  `.claude/backups/codex-unhooked-tools.log`. Only the DevBench MCP is covered by rules (Plan 5 Task 11).
+  `.claude/backups/codex-unhooked-tools.log`. DevBench's tools (`mcp__devbench*`) get the same judge as on Claude
+  for its refusals: `smp reset` is refused on Codex too. A save over an existing save is not refused there (Codex
+  cannot ask); the model gets a note instead. No hook definition changed, so no re-approval is needed.
   Unknown non-MCP tools that carry a command string are guarded with the shell rules (and logged).
 
 ### Hook interpreter fallback

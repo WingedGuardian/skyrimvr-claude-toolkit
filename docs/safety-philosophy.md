@@ -53,7 +53,7 @@ Every file modification is logged with timestamp, tool name, and backup location
 ## Design Principles
 
 ### 1. No Silent Modifications
-Destructive changes are blocked outright. Everything else that is consequential but legitimate is **advised**: a note is injected into Claude's context and the call proceeds -- you are not prompted. Exactly one rule in the toolkit asks you to decide (a ReSaver command that mutates a save).
+Destructive changes are blocked outright. Everything else that is consequential but legitimate is **advised**: a note is injected into Claude's context and the call proceeds -- you are not prompted. Two rules in the toolkit ask you to decide: a ReSaver command that mutates a save, and a DevBench save over an existing save.
 
 ⚠ This inverted in v3.8.3 and this page said the opposite until v3.9. A guard that prompts on routine work gets approved by reflex and then protects nothing; the X4 toolkit measured 40 such prompts across 13,282 commands, every one of them noise. So the honest summary is: **few prompts, a short deny list, and a lot of advice** -- not "nothing happens without your approval".
 

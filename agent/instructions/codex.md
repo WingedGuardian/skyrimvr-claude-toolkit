@@ -24,7 +24,9 @@ Generated into `AGENTS.md` only; everything above is shared. Other agents: this 
   folders is refused; edits inside the game get advice. Files an `apply_patch` changes or deletes are
   backed up to `.claude/backups/` first, and recent `.psc`/`.pex` are snapshotted before shell commands.
   A file written by a script you run is not backed up.
-- **Not checked:** commands the user types with `!` in the Codex TUI (they bypass hooks), and MCP tools
-  (DevBench included).
+- **DevBench MCP calls** (`mcp__devbench*`): `smp reset` is refused, as on Claude. A save over a save file
+  that already exists is not refused on Codex (it cannot ask): you get a note, so say so to the user first.
+- **Not checked:** commands the user types with `!` in the Codex TUI (they bypass hooks), and every MCP tool
+  that is not DevBench's (they are only logged).
 - **Skills** are in `.agents/skills/<name>/SKILL.md`: read the file when `core.md` points at it by name.
 - `bash tools/hook-canary.sh` shows whether each hook ran, saw its input and finished, per surface.

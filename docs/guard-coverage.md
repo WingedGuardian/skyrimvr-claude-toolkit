@@ -61,7 +61,7 @@ Matchers are compared with a full match against the tool name (measured below: `
 | X1 | codex | Shell command (`exec_command`, PowerShell or bash) | `-` | guarded | `.codex/hooks/skyguard-entry` pre-tool, matcher `.*`, the same skyguard shell rules | READ (master `agent/targets/codex/hooks.json`). MEASURED Plan 4 E2E A4, A5: `Remove-Item` blocked, ReSaver apply refused. Codex cannot ask, so every ASK becomes a refusal. Blind spots as C1 |
 | X2 | codex | `apply_patch` (Add, Update, Delete, Move) | `-` | guarded | pre-tool entry parses the patch; protect-files rules; backup of changed files | MEASURED Plan 4 (5 of 5 patch payloads; E2E A1 plugin deny, A2 advise plus backup) |
 | X3 | codex | `apply_patch` run through the shell (`@'...'@ \| apply_patch`) | `-` | guarded | refused as unattributable (fail-by-deny) | MEASURED Plan 4 E2E A3: blocked, `unreadable patch`; not a path verdict |
-| X4 | codex | MCP tools, DevBench included | `-` | uncovered | `.*` fires and the entry logs it; no rule judges it | MEASURED Plan 4 (toy server: PreToolUse fired with `mcp__probe__echo`). READ `agent/instructions/codex.md`: "Not checked: ... MCP tools (DevBench included)". The Claude C10 judge is not wired for Codex |
+| X4 | codex | MCP tools, DevBench included | `-` | partial | `.*` fires; `mcp__devbench*` goes to the same DevBench judge as C10, DENY outcomes only (`smp reset` refused); an ask outcome (a save over an existing save) stays an allow with the text as advice, because Codex fails asks open; every other MCP tool is logged in `codex-unhooked-tools.log`, not judged | MEASURED Plan 4 (toy server: PreToolUse fired with `mcp__probe__echo`). READ `engine.py` `_codex_devbench`; tests `test_skyguard_codex_adapter.py` (`test_a_devbench_smp_reset_is_denied_on_codex`, `test_a_devbench_ask_stays_an_allow_with_the_advice_on_codex`) and 8 mutation params `t17-*`. Closed by controller ruling 2026-10-04 with no new refusal and no hook-definition change (the Codex PreToolUse matcher is already `.*`). Same limits as C10: the `papyrus` tool and console `bat` files are not judged; a non-object `tool_input` is read as empty and allowed. Every other MCP server stays uncovered (as C11, C12) |
 | X5 | codex | `!` user-shell commands in the Codex TUI | `-` | out-of-scope | n/a | MEASURED Plan 4 derisk: no PreToolUse fired. User-typed, not an agent path |
 | X6 | codex | Codex launched where the hooks do not run: hooks not approved with `/hooks`; started in a subfolder of a non-git install | `-` | uncovered | `.codex/rules/skyrim.rules` prefix rules only (registry deletes) | MEASURED Plan 4 E2E: B2 (`Data/New.esp` created, hooks unapproved), R-subdir (2 of 2 runs, no hook line) and Plan 6 F6, F7 (written, no heartbeat). Unapproved hooks are skipped silently |
 | O1 | any | Interpreter or opaque-script writes launched from a shell (`python -c`, `node -e`, `perl -i`, a script that writes a plugin) | `Bash`, `PowerShell` | partial | the shell guard sees the command text only | READ (R11, `writes.py` docstring): a plugin written by `open('X.esp','w')` gets no message; Plan 6's read-only lock is the backstop. Priced in Task 12: an opaque-script rule hit 41 of 65,694 items, 1 useful, dropped |
@@ -73,8 +73,8 @@ Matchers are compared with a full match against the tool name (measured below: `
 Counts by status for the routes above (the test recomputes these and fails on a mismatch):
 
 - guarded: 10
-- partial: 4
-- uncovered: 9
+- partial: 5
+- uncovered: 8
 - absent: 1
 - out-of-scope: 3
 
@@ -83,5 +83,5 @@ Ranked by what an agent can do through the route, the uncovered routes to close 
 1. **C12 MCP code execution** and **C11 other MCP**: only a `*` matcher sees them; the cheapest safe step is a
    `mcp__.*` matcher that logs, then an allow-list of servers the user trusts. Until then the MCP surface is the
    widest hole, and the Layer 2 lock is the only backstop.
-2. **X6 Codex without active hooks** and **X4 Codex MCP**: no rule runs.
+2. **X6 Codex without active hooks**: no rule runs. (**X4 Codex MCP** is partial since Task 17: DevBench's `smp reset` is refused; other MCP servers are still only logged.)
 3. **C9 worktree tools**, **C13** and **C17**: lower impact; record and watch.

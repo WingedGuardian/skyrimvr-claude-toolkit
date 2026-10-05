@@ -193,36 +193,54 @@ exists to stop the agent, not to interrupt the user**, so the rules are graded a
 refuses.
 
 ### DENIED -- refused outright, cannot proceed
-- Deleting the game installation directory or the config directory -- anchored on any
-  destroyer (`rm`, `rmdir`, `del`, `Remove-Item`, `shutil.rmtree`, `find -delete`)
-  named alongside a path inside the **resolved** install, in either slash direction and
-  either path dialect. It is pattern matching, not a sandbox; treat it as a guard
-  against accidents.
+
+Each is judged on the **program that runs** and the file it targets, in Bash and PowerShell, not on words
+that merely appear in a command (`grep -rn "rm -rf" <install>` is allowed). Relative paths resolve against
+the working directory the agent reports.
+
+- **Deleting inside the game install, the config directory, or Mod Organizer's `mods/` / `overwrite/`**
+  (`rm`, `rmdir`, `del`, `Remove-Item`, `find -delete`, `git clean`, `shutil.rmtree`, ...), in either slash
+  direction and path dialect. A delete whose target the guard cannot work out, in a command naming a
+  protected folder, is refused too. Scratch folders (`/tmp`, temp, the scratchpad) are not protected.
+  It is pattern matching on parsed commands, **not a sandbox**: interpreter code (`python -c`) with a
+  relative path is not resolved. Treat it as a guard against accidents.
 
   The install is **resolved** (from the guard's own location plus `skyrim-paths.env`), never guessed
-  from the word "Skyrim". ⚠ If no root resolves, the guard DENIES. ⚠ A relative path cannot be resolved,
-  so `rm Data/x.nif` is only advised. Use absolute paths when deleting. Why, with measurements:
-  `docs/safety-philosophy.md`.
-- Deleting Bethesda registry keys
-- Directly writing to ESP/ESM/ESL/BSA/BA2 files (use xelib, Spriggit or AutoMod)
+  from the word "Skyrim". ⚠ If no root resolves, or a path in `skyrim-paths.env` is unreadable, the guard DENIES.
+  Why: `docs/safety-philosophy.md`.
+- **Deleting Bethesda registry keys** (`reg delete` / `Remove-Item` on a Bethesda key or one of its parents).
+- **Writing a plugin or archive (`.esp .esm .esl .bsa .ba2`) as raw text, anywhere** -- through the edit
+  tools, and through the shell: `>` / `>>`, `tee`, `Set-Content`, `Add-Content`, `Out-File`, `sed -i`,
+  `dd of=` and `[IO.File]::Write*`. Use xelib, Spriggit or AutoMod. Copying a finished plugin onto `Data/`
+  is **advised**, not refused. Not covered: a plugin written by code an interpreter runs
+  (`python -c "open('x.esp','wb')"`), by an opaque script, or by `perl -i`.
 - Tool output aimed straight at an existing `.psc`, and Champollion against a `.pex`
   inside `Data/Scripts/` -- both have destroyed irreplaceable sources here
+- DevBench `smp reset` (the console command measured to crash a large load order), through the
+  DevBench MCP tool, `curl` to its REST endpoint, or `devbench-cli.sh`
+- A command the guard cannot read at all: empty, not text, or unparseable while naming a protected folder
+  ("GUARD INERT" -- it refuses rather than shrugs)
 
 ### ADVISED -- the call proceeds, I get a note, the user is never prompted
 - Skyrim INI files (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini) -- last file wins
 - SKSE plugin configs (`Data/SKSE/Plugins/*.ini`) -- not captured by any snapshot
 - Papyrus scripts (`.psc`, `.pex`) -- a `.pex` loads at game startup ONLY
 - Load order files -- the mod manager owns them and may overwrite a direct edit
-- `rm`, `mv`, `cp`, redirects and `sed -i` touching game/config directories
-- Any bash command referencing plugin/archive files
+- Other shell writes into `Data/`, the config folder or MO2, and a copy onto a plugin where the game loads it
+- A decompiler writing its output into the install; `sed -i` with a backslash path
 - AutoMod write commands without `--dry-run`
 
-### ASKS THE USER -- exactly one rule
-- A ReSaver `reset-havok` / `cleanse-formlists` / `remove-created` with `--apply`,
-  which mutates a `.ess` save through ReSaver's write path
+Naming a plugin or INI in a read-only command is silent: notes fire on the program that writes.
+
+### ASKS THE USER -- two rules
+- A ReSaver `set-global` / `set-var` / `clean` / `reset-havok` / `cleanse-formlists` / `remove-created`
+  with `--apply`, which mutates a `.ess` save through ReSaver's write path
+- A DevBench `save` (the `game` tool, or console `save <name>`) over a save file that already exists:
+  the old save is not kept
 
 Few prompts by design: a guard that prompts on routine work gets approved by reflex
 (`docs/safety-philosophy.md`). **Check the guards are alive: `bash tools/hook-canary.sh`.**
+Coverage and gaps: `docs/guard-coverage.md`.
 
 ### General rules
 - **Always review changes before applying** -- modded installs are delicate
