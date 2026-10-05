@@ -68,6 +68,13 @@ def decisive_codes() -> List[str]:
     return sorted(code for code, _w, _f, decisive in TEMPLATES if decisive and code != "wrapper.INERT")
 
 
+def rule_code(rid: str) -> str:
+    """The code a verdict rendered from rule `rid`'s template carries: what classify() would derive from its text
+    (its first whole match), for a verdict built outside the rule modules (engine's apply_patch delete)."""
+    found = matches(rules.RULES[rid]["template"], True)
+    return found[0] if found else "unknown"
+
+
 def matches(text: str, whole: bool) -> List[str]:
     if whole:
         return [code for code, w, _f, _d in TEMPLATES if w.fullmatch(text)]

@@ -105,12 +105,18 @@ def _derived():
         name, label = d.get("tool_name"), _label(f)
         if name == "apply_patch":
             cmd = d["tool_input"]["command"]
+            # routes red team (rt-fix-b): a Delete inside the install is a delete (codex.md: "deleting in the game
+            # or config folders is refused"), judged before the write rules, so every derived target of a captured
+            # Delete shape is S-DEL-INSTALL -- and the file is still backed up first.
+            dele = "*** Delete File:" in cmd
+            del_install = {"verdict": "deny", "code": "shell.S-DEL-INSTALL"}
             for target, cwd_sub, expect, setup in (
-                ("Data/Decoy.esp", "", {"verdict": "deny", "code": "write.DENY_PLUGIN"}, None),
-                ("../x.esp", "sub", {"verdict": "deny", "code": "write.DENY_PLUGIN"}, None),
+                ("Data/Decoy.esp", "", del_install if dele else {"verdict": "deny", "code": "write.DENY_PLUGIN"},
+                 None),
+                ("../x.esp", "sub", del_install if dele else {"verdict": "deny", "code": "write.DENY_PLUGIN"}, None),
                 ("Data/SKSE/Plugins/x.ini", "",
-                 {"verdict": "advise", "code": "write.ADV_SKSE_CONFIG",
-                  "backup": any(o in cmd for o in ("*** Update File:", "*** Delete File:"))}, _seed_ini),
+                 dict(del_install if dele else {"verdict": "advise", "code": "write.ADV_SKSE_CONFIG"},
+                      backup=any(o in cmd for o in ("*** Update File:", "*** Delete File:"))), _seed_ini),
             ):
                 def edit(p, t=target, c=cmd):
                     p["tool_input"]["command"] = _with_paths(c, t)

@@ -1,7 +1,12 @@
 """Entry point the per-agent hook wrappers call: run.py <agent> <role> --root .. --root-win .. --project ..
 
 Exits 1 with NOTHING on stdout on any internal failure, so a wrapper can tell "the engine decided"
-from "the engine broke" -- the second must never read as allow (spec section 5.1)."""
+from "the engine broke" -- the second must never read as allow (spec section 5.1). The one exception is
+the in-process watchdog: its report goes to stdout and starts `Timeout (`, so a bash wrapper can tell
+"the watchdog ended a working interpreter" from "the interpreter is broken" (and skip a re-probe).
+
+`--nonce N` (the bash wrappers pass it on a FALLBACK interpreter) prefixes the answer with the line
+`skyguard-nonce:N`: the run itself proves it is this engine, so a remembered fallback needs no probe."""
 from __future__ import annotations
 
 import argparse
@@ -28,8 +33,13 @@ ENV_UNREADABLE = (
 )
 
 
+_NONCE = []   # --nonce: echoed ahead of the (single) answer
+
+
 def _emit(text: str) -> None:
     """One write of UTF-8 bytes, so a console code page cannot raise and no partial output can escape."""
+    if _NONCE:
+        text = "skyguard-nonce:{}\n".format(_NONCE.pop()) + text
     sys.stdout.buffer.write(text.encode("utf-8", "replace"))
     sys.stdout.buffer.flush()
 
@@ -72,7 +82,13 @@ def _engine_budget() -> float:
 def _declared_env(a):
     """The install's declared roots (.claude/skyrim-paths.env), or None when it exists but cannot be read."""
     try:
-        return paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))
+        cfg = paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))
+        # rt-fix-b: hooks run from a git worktree's copy: the main tree's paths file (untracked, so absent from the
+        # worktree) declares the config and MO2 folders too. Union, as R3 does for every root.
+        main = paths.main_worktree(a.root_win or a.root)
+        if main:
+            cfg = paths.merge_configs(cfg, paths.read_env(Path(main) / ".claude" / "skyrim-paths.env", {}))
+        return cfg
     except (OSError, ValueError):
         return None
 
@@ -141,12 +157,14 @@ def main(argv=None) -> int:
         return 0
     # Hard time limit, armed before anything can run long. faulthandler's watchdog is a C thread that does
     # not need the GIL, so it fires even inside a catastrophic regex; exit=True ends the process with
-    # status 1 (the wrapper's "engine failed" deny) and the traceback goes to stderr, which the wrapper
-    # discards -- never stdout. The agent discards a deny that arrives after ITS timeout, so we must end first.
+    # status 1 (the wrapper's "engine failed" deny). The agent discards a deny that arrives after ITS
+    # timeout, so we must end first. The report goes to STDOUT (it starts "Timeout ("): no wrapper passes a
+    # failed run's stdout on, and the bash wrappers read it to skip re-probing an interpreter that has
+    # just proved it runs the engine.
     try:
-        faulthandler.dump_traceback_later(_engine_budget(), exit=True)
+        faulthandler.dump_traceback_later(_engine_budget(), exit=True, file=sys.stdout)
     except (OSError, ValueError, AttributeError, RuntimeError):
-        pass   # no usable stderr: run unwatched rather than not at all (the wrapper's timeout still bounds a fallback)
+        pass   # no usable stdout: run unwatched rather than not at all (the wrapper's own limit still bounds it)
     ap = argparse.ArgumentParser()
     ap.add_argument("agent", choices=sorted(ADAPTERS) + ["neutral"])
     ap.add_argument("role", choices=["protect-bash", "protect-files", "backup-before-edit",
@@ -158,8 +176,11 @@ def main(argv=None) -> int:
     ap.add_argument("--bash", default="bash")
     ap.add_argument("--invocation", default="")
     ap.add_argument("--telemetry", default="")
+    ap.add_argument("--nonce", default="")
     a = ap.parse_args(argv)
     _ARGS.append(a)
+    if a.nonce:
+        _NONCE.append(a.nonce)
     if a.agent == "neutral":
         # Plan 7: the agent-neutral role, for an adapter living outside this package (no ADAPTERS module).
         # _neutral refuses every role but pre-tool with exit 1 (broken wiring, never a decision).

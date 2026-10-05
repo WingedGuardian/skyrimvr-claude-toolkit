@@ -188,7 +188,7 @@ def test_a_harmless_devbench_call_and_another_mcp_server_are_allowed(tmp_path):
 
 
 @pytest.mark.parametrize("tool", ["mcp__other__thing", "mcp__filesystem__write_file", "not_three_parts",
-                                  "mcp__dev-bench__console", "mcp__devbench"])
+                                  "mcp__devbench"])
 def test_an_mcp_call_the_rules_do_not_judge_is_labelled_unjudged_not_evaluated(tmp_path, tool):
     """Final review M6: a call to a non-DevBench server came back status 'evaluated', so an adapter logging status
     would record it as checked. It is allowed, as before, but labelled like kind other."""
@@ -198,6 +198,15 @@ def test_an_mcp_call_the_rules_do_not_judge_is_labelled_unjudged_not_evaluated(t
     assert (v.code, v.context) == ("neutral.UNJUDGED_MCP", neutral.UNJUDGED_MCP)
     assert neutral.UNJUDGED_MCP.startswith("NOT JUDGED")
     assert json.loads(text.splitlines()[-1])["status"] == "partial"
+
+
+@pytest.mark.parametrize("tool", ["mcp__dev-bench__console", "mcp__DevBench-vr__console", "mcp__skyrim-devbench__console"])
+def test_a_devbench_server_by_any_spelling_is_judged_not_labelled_unjudged(tmp_path, tool):
+    """Merge of Plan 5 (rt-fix-b is_devbench_server) into Plan 7: every spelling the MCP rules judge is judged on the
+    neutral entry too, so its NOT JUDGED label and the decision can never disagree."""
+    _, v = neutral.handle(req(kind="mcp", paths=[], mcp_tool=tool, mcp_args='{"command": "smp reset"}'),
+                          str(tmp_path), _roots(tmp_path), Audit(str(tmp_path)))
+    assert (v.decision, v.status) == ("deny", "evaluated"), v
 
 
 def test_a_devbench_call_is_still_evaluated(tmp_path):

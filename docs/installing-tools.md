@@ -15,7 +15,7 @@ Install them into the `tools/` folder in your game directory; the setup prompt w
   - Acquire: download a release from github.com/Orvid/Caprica/releases and unpack into `tools/Caprica/`.
   - Verify: `tools/Caprica/Caprica.exe --help`.
 - **Spriggit** — ESP ↔ YAML/JSON serialization.
-  - Acquire: `dotnet tool install Spriggit.CLI` (or `dotnet tool install --global Spriggit.CLI`).
+  - Acquire, **pinned to 0.40.0** (the version every serialize/deserialize command here was written against; needs the .NET 9 SDK): `dotnet tool install Spriggit.CLI --version 0.40.0` (local, uses the repo's `.config/dotnet-tools.json`, also 0.40.0) or `dotnet tool install --global Spriggit.CLI --version 0.40.0`. **Never install it unpinned**: 0.41.0 ships only a `net10.0` tool, and on an SDK-9 machine it starts, prints a version, and cannot serialize. `bash tools/toolchain-check.sh` reports DEGRADED when the installed version differs from the pin or its target SDK is missing.
   - For deeply-nested output paths that trip `UnauthorizedAccessException`, call `tools/spriggit-cli.sh` (same args; it runs in a shallow workspace and copies the result back).
   - Verify: `spriggit --help`.
 - **AutoMod CLI** — NIF / BSA / audio / MCM / ESP one-liners.
@@ -32,8 +32,8 @@ Install them into the `tools/` folder in your game directory; the setup prompt w
   - The `time.clock = time.perf_counter` monkey-patch (recipe: the `skyrim-nif` skill) is still required (`time.clock` was removed in Python 3.8 — the only OTHER Python-version issue, also the only one ever reported upstream, still open/unfixed as [GitHub issue #80](https://github.com/niftools/pyffi/issues/80)).
   - Verify with that same interpreter: `python -c "import pyffi; print(pyffi.__version__)"`.
 - **PyNifly** — SSE BSTriShape read/write + animation/controller authoring + the independent parse gate.
-  - Acquire: download `io_scene_nifly.zip` from the latest release at https://github.com/BadDogSkyrim/PyNifly/releases and extract it into `tools/pynifly/` so the prebuilt DLL lands at `tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll`. No build step. (A `git clone` of the repo does NOT contain the compiled DLL — it only ships in the release zip.)
-  - Verify: load the DLL per the skyrim-nif skill.
+  - Acquire: download `io_scene_nifly.zip` from the latest release at https://github.com/BadDogSkyrim/PyNifly/releases and extract it into `tools/pynifly/` so the prebuilt DLL lands at `tools/pynifly/io_scene_nifly/NiflyDLL.dll` (PyNifly 29.x, the version this was verified with: 29.1.0; releases before 29.x put it at `tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll`). No build step. (A `git clone` of the repo does NOT contain the compiled DLL — it only ships in the release zip.)
+  - Verify: `python -c "import sys; sys.path.insert(0,'tools/pynifly/io_scene_nifly'); from pyn import pynifly"` (29.x loads the DLL on import; older releases need `pynifly.NifFile.Load(<path to pyn/NiflyDLL.dll>)` per the skyrim-nif skill).
 - **Blender (headless)** — NIF mesh repair + render-to-PNG verification.
   - Acquire: download from blender.org; install the PyNifly Blender addon.
   - Verify: `blender --background --version`.

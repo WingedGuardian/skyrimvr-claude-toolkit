@@ -49,7 +49,10 @@ def _json_type(v, present: bool) -> str:
 def _file_path(tool_name: str, ti: dict) -> str:
     key = PATH_KEYS.get(tool_name)
     if key is None:
-        return _sub(ti.get("file_path"))
+        # rt-fix-b (routes u197-u199): a file_path that is a list, object or number is no path; rendered as JSON text
+        # it would be judged as a name ("[\"X.esp\"]" is no plugin), so it is "" and refused (W-INERT-NOPATH).
+        fp = ti.get("file_path")
+        return _sub(fp) if isinstance(fp, str) else ""
     if key in ti:
         # notebook_path is the key the tool writes. Present but empty / not a string -> "" -> refused; it never falls
         # back to file_path (that could judge a path the tool does not write).

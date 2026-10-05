@@ -13,6 +13,34 @@
 - **Core instructions point an unsupported agent, or a machine with a missing runtime, at `ADAPTING.md` and `toolkit-setup`.**
 - Release builds now check that the adapter kit is in the zip (`tools/check-adapter-payload.py`). The toy-agent test that exercises the kit lives in `tests/`, which is not shipped: it is a check on the toolkit's own CI, not part of the download.
 
+### Guard rules rewritten on a parser (Plan 5): security fixes to the 3.x guards, and far less noise
+
+- **Security fix (E12): the PowerShell tool was not guarded.** The 3.x Claude matcher was `Bash` only, so a delete or write
+  made through the PowerShell tool reached no hook. The matchers are now `Bash|PowerShell|Monitor` (the Monitor tool runs
+  shell commands and bypassed every hook) and `Edit|Write|NotebookEdit`. **If you installed a 3.x toolkit, your PowerShell
+  tool was unguarded.**
+- **Security fix (E21): shell writes to plugins and archives were only advised.** `echo x > Foo.esp`, `Set-Content Foo.esp`,
+  `tee`, `Out-File`, `sed -i` and `dd of=` into an `.esp .esm .esl .bsa .ba2` now refuse, in Bash and PowerShell. Until now the
+  "refused outright" claim held only for the Edit and Write tools. Copying a finished plugin onto `Data/` stays a note.
+- Deletes are judged on the program that runs and where its operand resolves (relative paths against the working directory
+  Claude reports), also for Mod Organizer's `mods/` and `overwrite/`. `grep -rn "rm -rf" <install>` is no longer refused.
+- New: DevBench `smp reset` is refused (MCP tool, `curl`, `devbench-cli.sh`, and on Codex); a DevBench save over an existing save asks.
+- **Red-team fixes (routes and shell):** a Codex `apply_patch` Delete, or a Move out of the folder, inside the game,
+  settings or Mod Organizer folders is now judged as a delete and refused (it was judged only as a write). Plugin and
+  archive writes by non-text tools (`curl -o`, `wget -O`, `-OutFile`, `bitsadmin`, `certutil`, `tar`/`zip`, `fsutil`,
+  `truncate`, inline `python -c` / `node -e` with a literal name) refuse like a redirect. New confirmations: replacing a save file (shell or patch), and a git command
+  that throws away uncommitted changes in the install. New refusals: moving a file out of where the game looks for it;
+  running decoded text (`base64 -d | sh`, `iex` of a decoded string); `rm -rf *` in a folder the guard cannot place;
+  interpreter code that launches a delete (`os.system`, `child_process`) and command-running wrappers (`schtasks`,
+  `Start-Process`, `docker`, `psexec`) whose own words delete in a protected folder. DevBench calls are read anywhere in
+  their arguments, including scenario steps and `wget`; NTFS stream suffixes (`x.esp:stream`) no longer hide a plugin
+  name. Hooks run from a git worktree of the install also protect the main install. Priced over ~68,000 real tool calls:
+  9 newly refused or advised, all scratch test scripts; no routine modding call changed.
+- **Noise cut, measured on 66,773 real tool calls:** advice notes 2,437 to 211 (the P2 baseline was 2,028; 0.316% of calls
+  against 3.79%); asks 26 to 12, 11 of them an executed ReSaver `--apply`; 205 wrong denies removed, none a real action.
+  Verdicts now carry `status: partial` when the parser could not read a command completely.
+- Every message is at most two plain lines and never echoes the command.
+
 ### Codex support
 
 - **First Codex hook definitions (v1): approve them in /hooks.** Open `codex` in your Skyrim folder, type `/hooks`, approve the 2 Skyrim toolkit hooks; until then Codex runs none of them and does not say so.
@@ -32,9 +60,11 @@
 
 ### Codex adapter: known coverage gaps
 
-- **MCP tools are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the
+- **MCP tools other than DevBench's are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the
   hook as `mcp__<server>__<tool>`; the toolkit allows it and records one line in
-  `.claude/backups/codex-unhooked-tools.log`. Only the DevBench MCP is covered by rules (Plan 5 Task 11).
+  `.claude/backups/codex-unhooked-tools.log`. DevBench's tools (any server whose name contains `devbench`) get the
+  same judge as on Claude: `smp reset` is refused on Codex too, and a save over an existing save is refused with
+  `NEEDS YOUR CONFIRMATION` (Codex cannot ask). No hook definition changed, so no re-approval is needed.
   Unknown non-MCP tools that carry a command string are guarded with the shell rules (and logged).
 
 ### Hook interpreter fallback
@@ -50,12 +80,21 @@
 - **An extracted zip that never ran `setup.sh`** (the `{{PYTHON_PATH}}` placeholder still in the hooks) now takes
   the same route: the hooks fall back to a Python they can find and still decide, reported as DEGRADED. They used
   to refuse every command. With no usable Python at all they still refuse (GUARD INERT).
-- **Nothing can hang past the agent's timeout.** On the normal path the engine arms an in-process watchdog
+- **Nothing can hang past the agent's timeout, even on a busy machine.** The engine arms an in-process watchdog
   (`faulthandler`, a C thread that fires even inside a catastrophic regex) that ends it after 20 s
-  (`SKYGUARD_ENGINE_TIMEOUT` seconds) into the ordinary GUARD INERT deny; the traceback goes to stderr, which
-  the wrapper discards. Fallback probes (3 s each) and a fallback engine run use coreutils `timeout` (without it
-  on PATH they run unbounded). **Not covered:** a hung interpreter *start* (before the engine's `main`) on the
-  configured Python, which `setup.sh` verified; that would need a `timeout` fork on every call (~20-30 ms).
+  (`SKYGUARD_ENGINE_TIMEOUT` seconds) into the ordinary GUARD INERT deny. Every bash hook (Claude and Codex)
+  also bounds each Python it starts -- probe and engine, the normal path included -- and kills it by its
+  **Windows process id** (`taskkill /F /T`); it never uses coreutils `timeout`, which under heavy CPU load could
+  not stop a native `python.exe` at all (measured: a 3 s limit took 18-227 s), so a hook outlived its 60 s
+  definition timeout and the agent ran the command. Each hook now answers by its definition timeout minus 15 s
+  whatever its children are doing. Measured on 4 cores at 2x oversubscription: worst 43 s (was 155 s Claude,
+  52 s Codex).
+- **The fallback probes once, not on every call.** A verified fallback interpreter is remembered in
+  `.claude/backups/.hook-heartbeat/<agent>/.python-fallback`; every call through it must echo a fresh nonce from
+  the engine, so that file cannot be used to substitute an interpreter. A candidate costs one process (the
+  engine's own selftest refuses Python < 3.8), gets up to 15 s (`SKYGUARD_PROBE_TIMEOUT`; a healthy one took
+  up to ~9 s under load, so the old 3 s rejected working installs), and is not re-probed after the engine's
+  own watchdog fired.
 - **`setup.sh` requires Python 3.8+** (a 3.6 used to pass and then deny everything) and writes the path into the
   hooks in single quotes, so a `$` or backtick in a folder name is no longer expanded on every hook call.
 

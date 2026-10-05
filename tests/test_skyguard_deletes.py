@@ -308,3 +308,194 @@ def test_tools_pycache_is_scratch_but_tools_node_modules_is_not(p, kind):
 def test_unresolved_operand_from_above_the_root_is_silent():
     assert decide('rm -rf "$X"', cwd="C:/") == (("allow", ""), set())
     assert decide('rm -rf "$X"', cwd="C:/t7") == (("allow", ""), set())
+
+
+# ---- G1 (RT-A): interpreter inline code that launches a process / removes, naming a protected root -> deny
+_ROOT_IN_CODE = INSTALL + "/Data"
+
+
+@pytest.mark.parametrize("cmd", [
+    f"python -c \"import os; os.system('del /s /q \\\"{_ROOT_IN_CODE}\\\"')\"",
+    f"python -c \"import subprocess; subprocess.run(['cmd','/c','rd','/s','/q','{_ROOT_IN_CODE}'])\"",
+    f"python -Bc \"import shutil; shutil.rmtree('{_ROOT_IN_CODE}')\"",
+    f"node -e \"require('child_process').execSync('rd /s /q \\\"{_ROOT_IN_CODE}\\\"')\"",
+    f"node -pe \"require('fs').rmSync('{_ROOT_IN_CODE}',{{recursive:true}})\"",
+    f"php -r \"system('rd /s /q \\\"{_ROOT_IN_CODE}\\\"');\"",
+    f"ruby -e \"require 'fileutils'; FileUtils.rm_rf('{_ROOT_IN_CODE}')\"",
+], ids=["py-os-system", "py-subprocess", "py-Bc-rmtree", "node-execSync", "node-pe-rmSync", "php-system",
+        "ruby-fileutils"])
+def test_g1_interpreter_code_naming_a_root_denies(cmd):
+    (decision, _), fired = decide(cmd)
+    assert decision == "deny", (cmd, decision, fired)
+
+
+@pytest.mark.parametrize("cmd", [
+    "python -c \"import os; print(os.listdir('C:/Temp'))\"",
+    f"python -c \"print(open('{_ROOT_IN_CODE}/x.txt').read())\"",
+    "node -e \"console.log(1)\"",
+    "python -c \"import subprocess; subprocess.run(['git','status'])\"",
+    f"python -Bc \"import os; os.system('dir C:/Temp')\"",
+    # priced false positive (6 history items): a read-only tool run per archive while naming the install
+    f"python -c \"import subprocess,glob; [subprocess.run(['bash','tools/automod-cli.sh','archive','list',b,'--json'])"
+    f" for b in glob.glob('{_ROOT_IN_CODE}/*.bsa')]\"",
+], ids=["py-listdir-scratch", "py-read-in-install", "node-log", "py-subprocess-no-root", "py-Bc-system-no-root",
+        "py-subprocess-readonly-tool-in-install"])
+def test_g1_ordinary_interpreter_code_is_not_refused(cmd):
+    (decision, _), fired = decide(cmd)
+    assert decision != "deny", (cmd, fired)
+
+
+# ---- G2 (RT-A): command-running wrappers are opaque; delete word + protected root in their own words -> deny
+@pytest.mark.parametrize("cmd,shell", [
+    (f"schtasks /create /tn x /sc once /st 00:00 /tr \"cmd /c rd /s /q \\\"{_ROOT_IN_CODE}\\\"\"", "bash"),
+    (f"wmic process call create \"cmd /c rd /s /q \\\"{_ROOT_IN_CODE}\\\"\"", "bash"),
+    (f"docker run --rm -v \"{INSTALL}:/g\" alpine rm -rf /g/Data \"{INSTALL}\"", "bash"),
+    (f"Start-Process cmd -ArgumentList '/c rd /s /q \"{_ROOT_IN_CODE}\"'", "powershell"),
+    (f"Invoke-Command -ScriptBlock {{ Remove-Item -Recurse '{_ROOT_IN_CODE}' }}", "powershell"),
+], ids=["schtasks-rd", "wmic-rd", "docker-rm", "start-process-rd", "invoke-command-remove-item"])
+def test_g2_wrapper_with_delete_and_root_denies(cmd, shell):
+    (decision, _), fired = decide(cmd, shell=shell)
+    assert decision == "deny", (cmd, decision, fired)
+
+
+@pytest.mark.parametrize("cmd,shell", [
+    ("docker run hello-world", "bash"),
+    (f"docker run --rm -v \"{INSTALL}:/g\" alpine ls /g/Data", "bash"),
+    ("schtasks /query /fo LIST", "bash"),
+    ("Start-Process notepad", "powershell"),
+], ids=["docker-hello", "docker-ls-install", "schtasks-query", "start-process-notepad"])
+def test_g2_wrapper_without_a_delete_is_not_refused(cmd, shell):
+    (decision, _), fired = decide(cmd, shell=shell)
+    assert decision != "deny", (cmd, fired)
+
+
+# ---- Merge of rt-fix-a + rt-fix-b (2026-10-05): a move out of a protected folder is a delete of the source (rt-fix-a);
+# a move that takes a protected ROOT folder away is S-MOVE-ROOT (rt-fix-b), whose text says what happens.
+@pytest.mark.parametrize("cmd,shell", [
+    (f'mv "{INSTALL}/Data/meshes/a.nif" C:/Temp/a.nif', "bash"),
+    (f'Move-Item "{INSTALL}/Data/meshes/a.nif" C:/Temp/a.nif', "powershell"),
+], ids=["mv", "move-item"])
+def test_moving_a_file_out_of_the_install_is_a_delete(cmd, shell):
+    (decision, reason), fired = decide(cmd, shell=shell)
+    assert (decision, fired) == ("deny", {"S-DEL-INSTALL"}), (cmd, reason, fired)
+    assert "a.nif" in reason
+
+
+@pytest.mark.parametrize("cmd,shell", [
+    (f'mv "{INSTALL}" C:/Temp/Game.old', "bash"),
+    (f'Move-Item "{INSTALL}/Data" C:/Temp/Data.old', "powershell"),
+], ids=["mv-install", "move-item-data"])
+def test_moving_a_root_folder_away_names_the_move_not_a_delete(cmd, shell):
+    (decision, reason), fired = decide(cmd, shell=shell)
+    assert (decision, fired) == ("deny", {"S-MOVE-ROOT"}), (cmd, reason, fired)
+    assert "moves" in reason and "deletes" not in reason
+
+
+# ---- Plan 5 final review D1: the Recycle-Bin delete core.md recommends is a delete to every detector.
+_VB = "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::"
+_RB = ", 'OnlyErrorDialogs', 'SendToRecycleBin')"
+
+
+@pytest.mark.parametrize("shell", ["powershell", "bash", ""])
+def test_recycle_bin_delete_into_the_install_denies_in_every_dialect(shell):
+    (decision, reason), fired = decide(_VB + "DeleteDirectory('" + INSTALL + "/Data/meshes'" + _RB, shell=shell,
+                                       cwd="C:/Temp")
+    assert (decision, fired) == ("deny", {"S-DEL-INSTALL"}) and "meshes" in reason, (decision, fired, reason)
+
+
+def test_recycle_bin_delete_of_an_unresolved_root_variable_is_unresolved():
+    got = decide(_VB + 'DeleteDirectory("$env:SKYRIM_GAME_ROOT/Data"' + _RB, shell="powershell", cwd="C:/Temp",
+                 env={})
+    assert got[1] == {"S-DEL-UNRESOLVED"}, got
+
+
+def test_recycle_bin_delete_of_a_variable_in_a_command_naming_the_install_is_unresolved():
+    got = decide("$d = '" + INSTALL + "/Data'; " + _VB + "DeleteDirectory($d" + _RB, shell="powershell", cwd="C:/Temp")
+    assert got[1] == {"S-DEL-UNRESOLVED"}, got
+
+
+def test_recycle_bin_words_reach_the_parse_failure_fallback():
+    assert deletes.recycle_targets(_VB + "DeleteFile('x'" + _RB) == [("x", "single")]
+    assert deletes.recycle_targets("$o.Namespace(10).MoveHere($p)") == [("$p", "bare")]
+    from skyguard.grep import grep
+    assert grep(deletes.DESTROYER, "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory(")
+    assert grep(deletes.DESTROYER_LOOSE, "(New-Object -ComObject Shell.Application).Namespace(10).MoveHere(")
+
+
+def test_recycle_bin_delete_with_a_double_quoted_path_resolves():
+    (decision, reason), fired = decide(_VB + 'DeleteFile("' + INSTALL + '/Data/a.esp"' + _RB, shell="powershell",
+                                       cwd="C:/Temp")
+    assert (decision, fired) == ("deny", {"S-DEL-INSTALL"}) and "a.esp" in reason, (decision, fired, reason)
+
+
+# ---- Plan 5 final review B-I1: moves with pipeline / unresolved sources and variable destinations.
+def test_a_protected_file_moved_to_a_variable_destination_that_reaches_a_root_may_stay():
+    got = decide('mv Data/a.esp "$SKYRIM_GAME_ROOT/Data/b.esp"', cwd=INSTALL, env={})
+    assert got[0][0] != "deny", got
+
+
+def test_xargs_mv_with_a_target_reads_its_sources_from_the_pipe():
+    got = decide('ls "' + INSTALL + '/Data" | xargs mv -t /tmp', cwd="C:/work")
+    assert got[1] == {"S-DEL-UNRESOLVED"}, got
+
+
+def test_an_unresolved_move_into_a_protected_folder_is_not_a_delete():
+    got = decide('ls x | xargs mv -t "' + INSTALL + '/Data"', cwd="C:/work")
+    assert got[0][0] != "deny", got
+
+
+def test_pipeline_move_of_an_ancestor_of_the_install_is_unresolved():
+    got = decide("Get-ChildItem 'C:/t7' | Move-Item -Destination C:/Temp", shell="powershell", cwd="C:/work")
+    assert got[1] == {"S-DEL-UNRESOLVED"}, got
+
+
+@pytest.mark.parametrize("word,expands", [("$TMP", True), ("$env:TEMP", True), ("%TEMP%/x", True),
+                                          ("`pwd`/x", True), ("C:/Temp", False), ("50%", False)])
+def test_expands(word, expands):
+    assert deletes._expands(word) is expands
+
+
+def test_an_unresolved_delete_in_a_command_naming_the_configured_config_dir_is_unresolved():
+    """The configured settings folder's MENTION arm (paths.roots: `_add(config, v)`): an unresolved operand in a
+    command that names it. Resolved deletes use Roots.config_dirs instead, which this does not exercise."""
+    got = decide('ls "D:/Profiles/MO2/profiles/Default"; rm -rf "$X"', layout="config", cwd="C:/work")
+    assert got[1] == {"S-DEL-UNRESOLVED"}, got
+
+
+# ---- B-I1 pricing (base 300d235, N = 70,710): the newly denied moves, read one by one, were mostly moves INTO the
+# install's own backups through a variable the command assigns; a delete-rule twin of each shape is pinned here.
+def test_a_move_into_the_installs_backups_through_an_assigned_variable_stays():
+    cmd = ('P="' + INSTALL + '"\nB="$P/.claude/backups/x"\nmkdir -p "$B"\nmv "$P/openvr_api.dll" "$B/openvr_api.dll"')
+    got = decide(cmd, cwd=INSTALL)
+    assert got[0][0] != "deny", got
+
+
+def test_a_move_out_through_an_assigned_variable_still_leaves():
+    cmd = 'ROOT="' + INSTALL + '"; SCR="C:/Temp/scratch"; echo "ROOT=$ROOT"; mv "$ROOT/x.psc" "$SCR/"'
+    (decision, reason), fired = decide(cmd, cwd="C:/work")
+    assert (decision, fired) == ("deny", {"S-DEL-INSTALL"}) and "x.psc" in reason, (decision, fired, reason)
+
+
+def test_a_move_into_a_literal_data_folder_with_a_loop_variable_stays():
+    cmd = 'cd "' + INSTALL + '" && SRC=".claude/backups/b" && for f in a.dds b.dds; do mv "$SRC/$f" "Data/textures/$f"; done'
+    got = decide(cmd, cwd=INSTALL)
+    assert got[0][0] != "deny", got
+
+
+def test_a_heredoc_that_quotes_the_recycle_bin_call_is_not_a_delete():
+    cmd = ("cat >> notes.py <<'EOF'\nX = \"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory('" + INSTALL
+           + "/Data', 'OnlyErrorDialogs', 'SendToRecycleBin')\"\nEOF")
+    got = decide(cmd, cwd="C:/work")
+    assert got[0][0] != "deny", got
+
+
+def test_echoing_the_recycle_bin_call_is_not_a_delete():
+    cmd = "echo \"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('" + INSTALL + "/Data/a.esp')\""
+    got = decide(cmd, cwd="C:/work")
+    assert got[0][0] != "deny", got
+
+
+@pytest.mark.parametrize("word,want", [("$B/x", "C:/G/.claude/backups/x"), ("$T/x", "$T/x"), ("$D/x", "$D/x")])
+def test_expand_assigned(word, want):
+    cmd = 'P="C:/G"; B="$P/.claude/backups"; D=a; D=b'
+    assert deletes._expand_assigned(word, cmd) == want

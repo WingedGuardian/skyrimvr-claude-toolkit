@@ -29,8 +29,8 @@ All under `tools/`:
 | **XEditLib.dll** | Programmatic ESP/ESM reading via FFI | Load with koffi in Node.js (skill `xelib`) |
 | **Spriggit** | ESP ↔ YAML/JSON conversion (.NET) | `spriggit serialize ...` |
 | **AutoMod CLI** | NIF meshes, BSA archives, audio, MCM, ESP one-liners | `bash tools/automod-cli.sh <module> <command> --json` |
-| **PyFFI** | NIF geometry edit — **NiTriShape (LE-format) ONLY** (any modern Python with setuptools) | See PyFFI / PyNifly below; recipes in the skyrim-nif skill |
-| **PyNifly** | NIF read/write incl. **BSTriShape (SSE)** + **animation/controller authoring** (Python, prebuilt DLL) | See PyFFI / PyNifly below; recipes in the skyrim-nif skill |
+| **PyFFI** | NIF geometry edit — **NiTriShape (LE-format) ONLY** (any modern Python with setuptools) | PyFFI / PyNifly below; skill `skyrim-nif` |
+| **PyNifly** | NIF read/write incl. **BSTriShape (SSE)** + **animation/controller authoring** (Python, prebuilt DLL) | PyFFI / PyNifly below; skill `skyrim-nif` |
 | **ReSaver CLI** | Headless `.ess` save parse / query / cross-reference / clean | `bash tools/resaver-cli.sh <op> <save.ess>` — op list and rules: skill `skyrim-save` (write ops are dry-run unless `--apply`, always a NEW file). Needs JDK 17+ + ReSaver's jar (see `docs/installing-tools.md`). |
 | **cosave-info** | READ-ONLY structural survey of an SKSE `.skse` co-save → JSON (which mods stashed co-save data + how much) | `bash tools/cosave-cli.sh <cosave.skse>` (Python 3; the cosave sits next to its `.ess`) |
 | **skyrim-winner** | **"Which plugin actually wins this record?"** Loads the FULL active load order and asks xEdit. No index, no cache -- xEdit is the authority. | `bash tools/skyrim-winner.sh <winner\|chain> <formid> [plugin]` · `... conflicts <plugin>` -- needs **xeditlib**; skill `triage-and-conflicts` |
@@ -55,7 +55,7 @@ any agent can read one directly. Read the skill BEFORE the work:
 | install or verify an optional tool, or set up the Nexus API key | `docs/installing-tools.md` |
 | use the Linux devcontainer | `docs/container-vs-windows.md` |
 | understand why the guards behave as they do | `docs/safety-philosophy.md` |
-| your agent is not one the README lists as supported, or Python, Git or Node is missing or broken | `ADAPTING.md`, skill `toolkit-setup` |
+| adapt an unsupported agent, or Python, Git or Node is missing or broken | `ADAPTING.md`, skill `toolkit-setup` |
 
 ## PyFFI / PyNifly (NIF geometry + animation authoring)
 
@@ -173,7 +173,7 @@ For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit se
 - `spriggit-meta.json` is required in the YAML root for deserialization
 - ESP header version must be 1.7 for SSE/VR (not 1.0)
 - `--GameRelease` is only for serialize, NOT deserialize; `--PackageVersion` is REQUIRED when `--PackageName` is set
-- **Don't hardcode `--PackageVersion`** (e.g. `0.40.0` goes stale the moment `dotnet tool install` pulls a newer Spriggit). Discover the installed version with `spriggit --version` and pass exactly that.
+- **Spriggit is pinned to 0.40.0** (`.config/dotnet-tools.json`; install with `--version 0.40.0` -- an unpinned install pulls 0.41+, which needs SDK 10; `tools/toolchain-check.sh` flags the drift). Still **don't hardcode `--PackageVersion`**: discover the installed version with `spriggit --version` and pass exactly that.
 - Use `-u` / `--ErrorOnUnknown` on serialize — Spriggit **silently drops unknown YAML fields** otherwise (no error, no warning). Always round-trip verify a new field: deserialize → re-serialize → grep for the field.
 
 ## ESP Dependency Rule: Own Your Records
@@ -188,68 +188,91 @@ For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit se
 ## Safety Rules
 
 **The guards** enforce these automatically on agents with hook support (your agent's notes at the end say
-how). The rules live in the Python engine `tools/skyguard/` (`shell_rules.py`, `write_rules.py`,
-`paths.py`), which needs Python 3; a guard that cannot start it REFUSES rather than allows. **A guard
-exists to stop the agent, not to interrupt the user**, so the rules are graded and only the first list
-refuses.
+how). The rules live in the Python engine `tools/skyguard/`, which needs Python 3; a guard that cannot
+start it REFUSES rather than allows. **A guard exists to stop the agent, not to interrupt the user**, so
+the rules are graded and only the first list refuses.
 
 ### DENIED -- refused outright, cannot proceed
-- Deleting the game installation directory or the config directory -- anchored on any
-  destroyer (`rm`, `rmdir`, `del`, `Remove-Item`, `shutil.rmtree`, `find -delete`)
-  named alongside a path inside the **resolved** install, in either slash direction and
-  either path dialect. It is pattern matching, not a sandbox; treat it as a guard
-  against accidents.
+
+Each is judged on the **program that runs** and the file it targets, in Bash and PowerShell, not on words
+that merely appear in a command (`grep -rn "rm -rf" <install>` is allowed). Relative paths resolve against
+the working directory the agent reports.
+
+- **Deleting inside the game install, the config directory, or Mod Organizer's `mods/` / `overwrite/`**
+  (`rm`, `del`, `Remove-Item`, `find -delete`, `git clean`, `shutil.rmtree`, a Recycle-Bin delete, ...), or
+  moving files out of them. Also refused: a delete whose target the guard cannot work out in a command
+  naming a protected folder, and deleting everything in a folder it cannot place (`rm -rf *` after an
+  unknown `cd`). Scratch folders (`/tmp`, temp, the scratchpad) are not protected.
+  Pattern matching on parsed commands, **not a sandbox** (a relative path inside `python -c` code is not
+  resolved): a guard against accidents.
 
   The install is **resolved** (from the guard's own location plus `skyrim-paths.env`), never guessed
-  from the word "Skyrim". ⚠ If no root resolves, the guard DENIES. ⚠ A relative path cannot be resolved,
-  so `rm Data/x.nif` is only advised. Use absolute paths when deleting. Why, with measurements:
-  `docs/safety-philosophy.md`.
-- Deleting Bethesda registry keys
-- Directly writing to ESP/ESM/ESL/BSA/BA2 files (use xelib, Spriggit or AutoMod)
+  from the word "Skyrim". ⚠ If no root resolves, or a path in `skyrim-paths.env` is unreadable, the guard DENIES.
+  Why: `docs/safety-philosophy.md`.
+- **Moving or renaming the install, `Data`, the settings folder or `Saves`** away.
+- **Deleting Bethesda registry keys** (`reg delete` / `Remove-Item` on a Bethesda key or one of its parents).
+- **Writing a plugin or archive (`.esp .esm .esl .bsa .ba2`) as raw text, anywhere** -- through the edit
+  tools, and through the shell: `>` / `>>`, `tee`, `Set-Content`, `Out-File`, `sed -i`, `perl -i`, `dd of=`,
+  `[IO.File]::Write*`, downloaders, and a name written in `python -c` / `node -e` code. Use xelib, Spriggit
+  or AutoMod. Copying a finished plugin onto `Data/` is **advised**, not refused. Not covered: a name
+  built at runtime, a script run from a file (`python fix.py`), other interpreters.
 - Tool output aimed straight at an existing `.psc`, and Champollion against a `.pex`
-  inside `Data/Scripts/` -- both have destroyed irreplaceable sources here
+  inside `Data/Scripts/` -- both have destroyed sources
+- DevBench `smp reset` (measured to crash a large load order), by MCP, `curl` or `devbench-cli.sh`
+- Decoded text run as commands (`base64 -d | bash`), which the guard cannot read
+- A command the guard cannot read: empty or not text ("GUARD INERT"), or unparseable while it contains
+  a deletion and names a protected folder -- it refuses rather than shrugs
 
 ### ADVISED -- the call proceeds, I get a note, the user is never prompted
 - Skyrim INI files (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini) -- last file wins
 - SKSE plugin configs (`Data/SKSE/Plugins/*.ini`) -- not captured by any snapshot
 - Papyrus scripts (`.psc`, `.pex`) -- a `.pex` loads at game startup ONLY
 - Load order files -- the mod manager owns them and may overwrite a direct edit
-- `rm`, `mv`, `cp`, redirects and `sed -i` touching game/config directories
-- Any bash command referencing plugin/archive files
+- Redirects, `tee`, `sed -i` and other shell writes into `Data/`, the config folder or MO2 (a `cp`/`mv`
+  there is silent), and a copy onto a plugin where the game loads it
+- A decompiler writing its output into the install; `sed -i` with a backslash path
 - AutoMod write commands without `--dry-run`
 
-### ASKS THE USER -- exactly one rule
-- A ReSaver `reset-havok` / `cleanse-formlists` / `remove-created` with `--apply`,
-  which mutates a `.ess` save through ReSaver's write path
+Naming a plugin or INI in a read-only command is silent: notes fire on the program that writes.
+
+### ASKS THE USER -- five rules
+- A ReSaver write operation (`clean`, `reset-havok`, `set-global`, ...) with `--apply`: it rewrites the save
+- A DevBench save (`game` tool or console `save <name>`) over an existing save: the old one is not kept
+- A shell write, copy or move onto a save in `Saves/`, and an edit-tool write to one (two rules)
+- git that throws away uncommitted changes in a protected folder (`checkout -- x`, `restore`,
+  `reset --hard`)
 
 Few prompts by design: a guard that prompts on routine work gets approved by reflex
 (`docs/safety-philosophy.md`). **Check the guards are alive: `bash tools/hook-canary.sh`.**
+Coverage and gaps: `docs/guard-coverage.md`.
 
 ### General rules
 - **Always review changes before applying** -- modded installs are delicate
 - Never modify ESP/ESM files directly -- use xelib programmatically or Spriggit
 - Vortex manages load order -- direct edits to loadorder.txt/plugins.txt may be overwritten
-- **Never hand-install a third-party mod into `Data/` -- that is the mod manager's job.** Downloading
-  someone's mod and copying its files in bypasses Vortex/MO2: the files are untracked, a later deploy
-  or purge can clobber or orphan them, and under MO2 they don't appear in the virtual filesystem's
-  conflict view at all. They're also invisible in the user's own record of what's installed, which is
-  the state that makes a broken install undebuggable later. **This includes SKSE plugin DLLs** --
-  DevBench among them. If a mod is needed, tell the user and let them install it with their manager.
-  (Writing the user's **own** in-development mod files into `Data/` is a different thing and is fine.)
+- **Never hand-install a third-party mod into `Data/` -- that is the mod manager's job**, SKSE DLLs
+  (DevBench too) included: copied-in files are untracked, a deploy or purge can clobber or orphan
+  them, and MO2's conflict view never shows them. Tell the user; they install it. (The user's **own**
+  in-development mod files in `Data/` are fine.)
+- **Delete to the Recycle Bin, never permanently.** Windows: `Microsoft.VisualBasic.FileIO.FileSystem`
+  `DeleteFile`/`DeleteDirectory` with `SendToRecycleBin`, not `rm`/`Remove-Item`. A permanent delete
+  needs the user's OK; a tool's own temp files are exempt. The guard judges a Recycle-Bin delete like any delete.
+- **Never push CPU, RAM, free disk, disk I/O or GPU past 80% of the machine**, counting what already
+  runs (games, other sessions). Measure first; if it won't fit, wait, shrink or ask. Stress tests: never
+  one worker per core, idle priority, time-boxed.
 
 ### Safety improvement loop
-After every session, near-miss, or unexpected outcome, evaluate whether a new guard rule, expanded protection, or knowledgebase entry could have prevented or caught the issue. Propose new guard rules when a pattern of risk emerges -- proactively when you notice a gap. Document proposed rules in a "Hook Candidates" section of `KNOWLEDGEBASE.local.md`.
+After every session, near-miss or surprise, ask whether a new guard rule, protection or knowledgebase entry would have caught it -- proactively, when you notice a gap. Record proposals in a "Hook Candidates" section of `KNOWLEDGEBASE.local.md`.
 
 ### Audit trail
-- Files edited through the agent's own file-edit tool are backed up to `.claude/backups/` first, on agents with hooks. ⚠ A file written by a script is not seen by that backup at all (see the knowledgebase note above).
+- On agents with hooks, files changed through the edit tools are backed up to `.claude/backups/` first. ⚠ A file a script writes is not backed up (see the knowledgebase note above).
 - An audit log at `.claude/backups/AUDIT_LOG.txt` records every file touched, when, and by which tool
 
 ### Iteration snapshots (standing process — do not skip)
-Mod development requires many experimental iterations. Without snapshots, reverting to a known-good state means reconstructing code from memory or entangled transcript turns.
-1. **Before any experimental change**, copy the current `.psc` source files to `.claude/backups/<descriptive-name>/` (e.g. `known-good-pre-stagger/`). This is the rollback point.
-2. **Automatic copies are not rollback points.** On agents with hooks, edits are backed up and `.psc`/`.pex` are snapshotted before shell commands. A copy you cannot identify later is not a plan, so snapshot by name anyway. Spriggit backs up the ESP on every deserialize, but not scripts.
-3. **After confirming a state works in-game**, snapshot both scripts and a Spriggit export to a dated `known-good/` folder, named descriptively (what works, not just the date).
-4. **"Restore from transcript" is a trap** — past-turn code is entangled with the bugs being fixed that same turn. Read it for reference; don't paste it forward blindly.
+1. **Before any experimental change**, copy the current `.psc` files to `.claude/backups/<descriptive-name>/` (e.g. `known-good-pre-stagger/`): the rollback point.
+2. **Automatic copies are not rollback points** -- you can't identify them later, so snapshot by name anyway. Spriggit backs up the ESP on deserialize, not scripts.
+3. **After a state works in-game**, snapshot scripts and a Spriggit export to a `known-good/` folder named for what works.
+4. **"Restore from transcript" is a trap** -- that code is entangled with the bugs fixed that turn.
 
 ## Confidence Levels (Mandatory)
 
@@ -361,7 +384,9 @@ Generated into `AGENTS.md` only; everything above is shared. Other agents: this 
   folders is refused; edits inside the game get advice. Files an `apply_patch` changes or deletes are
   backed up to `.claude/backups/` first, and recent `.psc`/`.pex` are snapshotted before shell commands.
   A file written by a script you run is not backed up.
-- **Not checked:** commands the user types with `!` in the Codex TUI (they bypass hooks), and MCP tools
-  (DevBench included).
+- **DevBench MCP** (server name contains `devbench`): `smp reset` and a save over an existing save are
+  refused; for the save, ask the user to run it.
+- **Not checked:** commands the user types with `!` in the Codex TUI (they bypass hooks), and other MCP
+  tools (only logged).
 - **Skills** are in `.agents/skills/<name>/SKILL.md`: read the file when `core.md` points at it by name.
 - `bash tools/hook-canary.sh` shows whether each hook ran, saw its input and finished, per surface.

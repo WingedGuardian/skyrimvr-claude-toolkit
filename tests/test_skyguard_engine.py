@@ -68,3 +68,48 @@ def test_claude_to_request_carries_cwd_and_kind():
 def test_combine_of_nothing_is_a_failed_deny_not_an_allow():
     v = engine.combine([])
     assert (v.decision, v.status, v.code) == ("deny", "failed", "engine.EMPTY_COMBINE")
+
+
+# ---- Plan 5 Task 17 step 2 (D-P4-2): a verdict reached on a command the parser could not fully read is "partial" ----
+
+def _shell_status(command, shell="bash"):
+    from skyguard import paths
+    req = Request(kind="shell", shell=shell, command=command, cwd="C:/G")
+    return engine.evaluate_shell(req, paths.roots("C:/G", "", {}), _Audit())
+
+
+def test_a_command_the_parser_read_completely_is_evaluated():
+    v = _shell_status("ls Data")
+    assert (v.decision, v.status) == ("allow", "evaluated")
+
+
+def test_a_parse_failure_makes_the_verdict_partial():
+    v = _shell_status('ls "C:' + chr(92) + 'x' + chr(92) + 'Data' + chr(92) + '"')       # an unterminated " quote
+    assert (v.decision, v.status) == ("allow", "partial")
+
+
+def test_an_opaque_program_makes_the_verdict_partial():
+    v = _shell_status('"$TOOL" --run Data')                                             # the program is a variable
+    assert (v.decision, v.status) == ("allow", "partial")
+
+
+def test_a_deny_on_an_unparseable_command_stays_a_deny_and_says_partial():
+    v = _shell_status('rm -rf "C:/G/Data" "unterminated')
+    assert v.decision == "deny" and v.status == "partial"
+
+
+def test_decide_reuses_the_parse_it_is_handed(monkeypatch):
+    from skyguard import shellparse
+    calls = []
+    real = shellparse.parse
+    monkeypatch.setattr(shellparse, "parse", lambda *a, **k: calls.append(a) or real(*a, **k))
+    _shell_status("ls Data")
+    assert len(calls) == 1
+
+
+def test_a_failed_status_is_never_lowered_to_partial():
+    from skyguard import paths
+    # an INERT refusal (no install root) on a command that is ALSO opaque: still "failed", not "partial"
+    v = engine.evaluate_shell(Request(kind="shell", shell="bash", command='"$TOOL" --run', cwd="C:/G"),
+                              paths.Roots("", ""), _Audit())
+    assert (v.decision, v.status) == ("deny", "failed")

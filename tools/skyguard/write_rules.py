@@ -63,13 +63,18 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdic
     advice = Advice()
 
     def advise(rule_id: str) -> None:
-        text = rules.message(rule_id, file=file_path)
+        text = rules.message(rule_id, file=file_path)       # rules._basename cuts a stream suffix (RT-A)
         audit.rule(HOOK, rule_id, "advise", text)
         advice.add(text)
 
     if roots is not None:
-        from .writes import in_install_area
+        from .writes import in_install_area, is_save
         a = targets.resolve(file_path, cwd, "bash", os.environ if env is None else env)
+        if is_save(a, roots):
+            # rt-fix-b: a save rewritten through Edit/Write (or a Codex patch) is a binary file replaced by text.
+            text = rules.message("W-SAVE", file=file_path)
+            audit.rule(HOOK, "W-SAVE", "ask", text)
+            return Verdict("ask", text)
         papyrus = a is not None and papyrus_zone(a, roots)
         install = a is not None and in_install_area(a, roots)
     else:
@@ -81,7 +86,7 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdic
         advise("W-SKSE-INI")
     if grep(targets.LOADORDER, file_path):
         advise("W-LOADORDER")
-    if papyrus and grep(r"\.(pex|psc)$", file_path):
+    if papyrus and grep(r"\.(pex|psc)" + targets.STREAM + "$", file_path):
         advise("W-PAPYRUS")
 
     if not advice.items and install:

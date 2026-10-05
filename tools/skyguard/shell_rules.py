@@ -104,6 +104,9 @@ def resaver_apply(command: str, shell: str = "", parsed=None):
             opaque = True
             continue
         if _is_resaver(e):
+            e = deletes.substituted(e)             # RT-A: `OP=reset-havok; ... $OP x.ess --apply`
+            if any("$" in a or "`" in a for a in e.argv):
+                opaque = True                       # RT-A: an argument not proven literal (`$(echo --apply)`): the text
             op = _resaver_op(e)
             if op:
                 # No .ess among its own arguments (`find -name "*.ess" -exec ... {}`): name the one its segment selects.
@@ -115,10 +118,12 @@ def resaver_apply(command: str, shell: str = "", parsed=None):
 
 
 def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "", shell: str = "",
-           env=None) -> Verdict:
+           env=None, parsed=None) -> Verdict:
     """cwd: the payload's working directory, RAW (any spelling; targets normalises it). shell: "bash",
     "powershell", "cmd", or "" for unknown (parsed as bash AND PowerShell, R5). Both default so every existing
-    caller stays valid (Plan 4 handshake). env: where `~`, $HOME and %USERPROFILE% resolve from (os.environ)."""
+    caller stays valid (Plan 4 handshake). env: where `~`, $HOME and %USERPROFILE% resolve from (os.environ).
+    parsed: the command's shellparse.parse() when the caller already holds it (engine.evaluate_shell does, to read
+    whether the parse was complete); None parses here."""
     # Task 12: a whitespace-only command is no command either.
     if command.strip() == "":
         audit.rule(HOOK, "S-INERT-NOCMD", "deny", NO_COMMAND_LOG, level="REFUSE")
@@ -146,9 +151,16 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
 
     # --- hard blocks
     # Deletes (Task 7): decided on the commands that RUN and where their operands RESOLVE (deletes.py, E16).
-    parsed = shellparse.parse(command, shell)
+    parsed = shellparse.parse(command, shell) if parsed is None else parsed
     dels = deletes.scan(command, parsed, roots, cwd, env)
     if dels.hit:
+        # Merge of rt-fix-a + rt-fix-b (2026-10-05): rt-fix-a reads a move out of a protected folder as a delete of the
+        # source; rt-fix-b's S-MOVE-ROOT names a move that takes a protected ROOT folder (the install, Data, the
+        # settings folder, Saves) away. Both deny; for a root, S-MOVE-ROOT's text is the true one ("moves X away", not
+        # "deletes X inside the install"), so it wins. Any other file moved out stays rt-fix-a's delete.
+        wr = writes.scan(command, parsed, roots, cwd, env)
+        if wr.move_root:
+            return deny("S-MOVE-ROOT", wr.move_root)
         rid, file = dels.hit
         reason = rules.message(rid, file=file) if "{file}" in rules.RULES[rid]["template"] else rules.message(rid)
         audit.rule(HOOK, rid, "deny", reason)
@@ -165,6 +177,8 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         reason = rules.message("S-WRITE-PLUGIN", file=wr.deny)
         audit.rule(HOOK, "S-WRITE-PLUGIN", "deny", reason)
         return Verdict("deny", reason)
+    if wr.move_root:                                         # rt-fix-b: moving the install or its folders away
+        return deny("S-MOVE-ROOT", wr.move_root)
     champ = anchored.champollion(command, parsed, roots, cwd, env)
     if champ:
         return deny("S-CHAMPOLLION", champ)
@@ -174,6 +188,10 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         reason = rules.message(dev[0], **dev[1])
         audit.rule(HOOK, dev[0], "deny", reason)
         return Verdict("deny", reason)
+    # RT-A (port of the install's text rule): decoded text -- base64 -d, xxd -r, printf '\x..', FromBase64String --
+    # run by a shell, eval, iex or source. Whatever it holds, no rule above could read it.
+    if parsed.unread:
+        return deny("S-SHELL-UNREAD")
 
     # --- advise
     if dels.relative_unknown:
@@ -191,6 +209,17 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         op, save = resaver
         reason = rules.message("S-RESAVER-APPLY", op=op, save=save or "the save")
         audit.rule(HOOK, "S-RESAVER-APPLY", "ask", reason)
+        return Verdict("ask", reason)
+
+    if wr.save:                                              # rt-fix-b: a write, copy or move onto a save
+        reason = rules.message("S-WRITE-SAVE", file=wr.save)
+        audit.rule(HOOK, "S-WRITE-SAVE", "ask", reason)
+        return Verdict("ask", reason)
+
+    git = anchored.git_discard(parsed, roots, cwd, env)      # rt-fix-b: git overwriting a protected working tree
+    if git:
+        reason = rules.message("S-GIT-DISCARD", file=git)
+        audit.rule(HOOK, "S-GIT-DISCARD", "ask", reason)
         return Verdict("ask", reason)
 
     if dev:                                                  # S-DEVBENCH-SAVE: the only other thing scan_shell returns

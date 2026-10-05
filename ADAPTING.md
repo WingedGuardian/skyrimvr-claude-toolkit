@@ -132,7 +132,7 @@ Copy their *mechanism*, not their wording. Every row is cited.
 | A user-typed `!` command in the Codex prompt fires no pre-tool hook | MEASURED | [src: tools/skyguard/adapters/codex.py::fires no PreToolUse] |
 | The Codex adapter turns every `ask` into a deny that says the user must run it themselves | READ | [src: tools/skyguard/adapters/codex.py::def render] |
 | The Claude adapter passes `ask` and `deny` through | READ | [src: tools/skyguard/adapters/claude.py::def render] |
-| A deny that arrives after the agent's own hook timeout is discarded, so every wrapper bounds its own work below that timeout | READ | [src: agent/guards/adapters/codex/skyguard-entry.sh::DISCARDS a deny] |
+| A deny that arrives after the agent's own hook timeout is discarded, so every wrapper bounds its own work below that timeout | READ | [src: agent/guards/adapters/codex/skyguard-entry.sh::DISCARDS an answer that arrives after its hook timeout] |
 | `AGENTS.md` past 32 KiB is silently truncated by Codex | MEASURED | [spec: E7] |
 | A skill with Claude-only frontmatter loads and runs in Codex | MEASURED | [spec: E6] |
 | The adapter template adds one Python start to every call; measured median and p95 are recorded | MEASURED | [measured: docs/superpowers/measurements/2026-10-05-plan7-adapter-latency.md#adapter median] |
@@ -265,8 +265,8 @@ List every gap in the report. These are the ones the toolkit already knows about
 - The neutral entry allows kind `other` and labels it not judged | [src: tools/skyguard/neutral.py::NOT JUDGED]
 - The neutral entry sends kind `mcp` to the DevBench rules | [src: tools/skyguard/neutral.py::engine.evaluate_mcp]
 - The neutral entry allows an MCP call to any other server and labels it not judged, status `partial` | [src: tools/skyguard/neutral.py::UNJUDGED_MCP = "NOT JUDGED: only a DevBench MCP server is guarded"]
-- Only an MCP server whose name starts `devbench` is judged, so a DevBench server registered under any other name is allowed unjudged; an adapter must map such a server to a `devbench` name itself, and Claude's own matcher has the same limit | [src: tools/skyguard/mcp_rules.py::startswith("devbench")]
-- The MCP judge reads only the DevBench `console` and `game` tools; the contents of a `replay` or `record` call are not judged | [src: tools/skyguard/mcp_rules.py::elif tool == "game"]
+- Only an MCP server whose name contains `devbench`, ignoring case and `-` `_` `.` (`DevBench-vr`, `dev-bench`, `skyrim-devbench`), is judged, so a DevBench server registered under any other name is allowed unjudged; an adapter must map such a server to such a name itself. | [src: tools/skyguard/mcp_rules.py::"devbench" in re.sub(]
+- The MCP judge reads every string in a DevBench call, whatever the tool, for a refused console command (`smp reset`); the save-over-a-save confirmation reads only the `console`, `game` and `papyrus` tools and scenario steps (`steps`), so a save made by a `replay` of a recording is not confirmed | [src: tools/skyguard/mcp_rules.py::for s in _strings(args):] [src: tools/skyguard/mcp_rules.py::elif tool == "game"]
 - Ops that take a backup are exactly `update`, `delete` and `move_from` | [src: tools/skyguard/engine.py::_BACKUP_OPS = ("update", "delete", "move_from")]
 - The engine's own telemetry role for the neutral entry is `neutral-pre-tool` | [src: tools/skyguard/neutral.py::TELEMETRY_ROLE = "neutral-pre-tool"]
 - The engine's own health tooling knows only the agents `claude` and `codex`; it does not certify an adapted agent | [src: tools/skyguard/health.py::COUNTING_HOOKS]

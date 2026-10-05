@@ -38,7 +38,7 @@ def w(s):
     (w("//?/C:/x"), "c:/x"),
     (w("//?/UNC/srv/share/x"), "//srv/share/x"),
     ("C:foo", None),
-    ("C:", None),
+    ("C:", "c:/"),                       # M5, MEASURED in Git Bash: `cd C:` -> /c
     ("/cygdrive/d/x", "d:/x"),
     ("/mnt/c/x", "c:/x"),
     ("/proc/cygdrive/c/x", "c:/x"),
@@ -52,7 +52,7 @@ def test_absolute_spellings_bash(word, want):
 @pytest.mark.parametrize("dialect", ["bash", "powershell", "cmd"])
 def test_absolute_windows_path_is_dialect_independent(dialect):
     assert targets.resolve(w("C:/a/b"), "", dialect, ENV) == "c:/a/b"
-    assert targets.resolve("C:foo", CWD_WIN, dialect, ENV) is None
+    assert targets.resolve("C:foo", "D:/elsewhere", dialect, ENV) is None      # another drive's own cwd: unknown
 
 
 @pytest.mark.parametrize("word,dialect,want", [
@@ -150,6 +150,33 @@ def test_cd_before_unknowable_is_none():
 def test_no_cd_uses_the_payload_cwd():
     e = _exec("rm x")[0]
     assert targets.exec_cwd(e, CWD_WIN, ENV) == GAMEN
+
+
+@pytest.mark.parametrize("cmd,dialect", [
+    ("cd /c/GOG*/The*Skyrim*; rm -rf Data", "bash"),
+    ("cd '" + GAME[:-3] + "'*; rm -rf Data", "bash"),
+    ("cd '" + GAME[:-3] + "'?R; rm -rf Data", "bash"),
+    ("Set-Location '" + w(GAME[:-3]) + "*'; Remove-Item -Recurse Data", "powershell"),
+])
+def test_i3_a_glob_in_the_cd_target_makes_the_directory_unknown(cmd, dialect):
+    """I3: resolve() keeps a glob in the LAST component; a relative word joined onto it read as resolved+outside."""
+    e = _exec(cmd, dialect)[0]
+    assert targets.exec_cwd(e, "C:/work", ENV) is None
+    assert targets.resolve_operand(e, "Data", "C:/work", ENV) is None
+
+
+def test_i3_a_literal_cd_still_resolves():
+    e = _exec("cd '" + GAME + "'; rm -rf Data")[0]
+    assert targets.exec_cwd(e, "C:/work", ENV) == GAMEN
+
+
+@pytest.mark.parametrize("word", ["@p", "@args", "@splat_1"])
+def test_i5_a_powershell_splat_is_unresolvable(word):
+    assert targets.resolve(word, GAME, "powershell", ENV) is None
+
+
+def test_i5_an_at_word_in_bash_is_a_file_name():
+    assert targets.resolve("@p", GAME, "bash", ENV) == GAMEN + "/@p"
 
 
 # ------------------------------------------------------------------------------------------------ zones
@@ -377,3 +404,27 @@ def test_a_brace_group_without_a_separator_still_resolves():
 def test_claude_dir_is_never_scratch():
     assert targets.zone(GAMEN + "/.claude/node_modules/x", ROOTS) == "install"
     assert targets.zone(GAMEN + "/.claude/hooks/__pycache__", ROOTS) == "install"
+
+
+# Final review M5 (coordinator ruling): a drive-relative word resolves only when it provably can, never "outside".
+@pytest.mark.parametrize("word,cwd,dialect,want", [
+    ("C:foo", "C:/w", "powershell", "c:/w/foo"),
+    ("C:foo", w("C:/w"), "cmd", "c:/w/foo"),
+    ("c:foo/bar", "C:/w", "powershell", "c:/w/foo/bar"),
+    ("C:", "C:/w", "powershell", "c:/w"),
+    ("C:foo", "D:/w", "powershell", None),
+    ("C:foo", "", "powershell", None),
+    ("C:foo", "//srv/share/w", "cmd", None),
+    ("C:foo", "C:/w", "bash", None),
+    ("C:", "D:/w", "bash", "c:/"),
+])
+def test_m5_drive_relative_words(word, cwd, dialect, want):
+    assert targets.resolve(word, cwd, dialect, ENV) == want
+
+
+def test_m5_set_location_to_the_cwd_drive_keeps_the_cwd():
+    e = _exec("Set-Location C:; Remove-Item -Recurse Data", "powershell")[0]
+    assert targets.exec_cwd(e, GAME, ENV) == GAMEN
+    assert targets.exec_cwd(e, "D:/w", ENV) is None
+    e = _exec("cd C:; rm -rf x")[0]
+    assert targets.exec_cwd(e, "D:/w", ENV) == "c:/"

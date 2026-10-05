@@ -97,6 +97,26 @@ RULES = {
         'Write the full path, or run it yourself.'
     ),
     },
+    'S-DEL-UNKNOWN-DIR': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: this deletes everything in a folder the guard cannot work out.\n'
+        'Write the full path, or run it yourself.'
+    ),
+    },
+    'S-SHELL-UNREAD': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: decoded text is run as shell commands, so the guard cannot read what it does.\n'
+        'Decode it to a file, read it, then run that file; or run it yourself.'
+    ),
+    },
     'S-DEL-FALLBACK': {
         "decision": 'deny',
         "hook": 'protect-bash',
@@ -255,6 +275,42 @@ RULES = {
         'Note: {op} writes its output into the Skyrim install; check it landed where you meant.'
     ),
     },
+    # routes red team (rt-fix-b): a shell write, copy or move ONTO a save in the settings folder replaces it; the old
+    # save is not kept (as S-DEVBENCH-SAVE and S-RESAVER-APPLY, a change to a save asks).
+    'S-WRITE-SAVE': {
+        "decision": 'ask',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'This replaces the save {file}; the old save is not kept.\n'
+        'Approve only if you asked for this save to be changed.'
+    ),
+    },
+    # routes red team (rt-fix-b): moving or renaming the install, its Data folder, the settings folder, its Saves
+    # folder or MO2's folders takes them away from where the game and the tools look for them.
+    'S-MOVE-ROOT': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: this moves {file} away from where the game and its tools look for it.\n'
+        'If you mean it, move it yourself.'
+    ),
+    },
+    # routes red team (rt-fix-b): git commands that overwrite the working tree in a protected folder throw away
+    # uncommitted changes there, which no backup holds.
+    'S-GIT-DISCARD': {
+        "decision": 'ask',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'This git command throws away uncommitted changes in {file}; no backup keeps them.\n'
+        'Approve only if you asked for those changes to be discarded.'
+    ),
+    },
     'S-DEVBENCH-CRASH': {
         "decision": 'deny',
         "hook": 'protect-bash',
@@ -305,6 +361,18 @@ RULES = {
         'Use xelib, Spriggit or AutoMod to change them instead.'
     ),
     },
+    # routes red team (rt-fix-b): an Edit/Write (or apply_patch) onto a save in the settings folder rewrites a binary
+    # save as text; the old save is not kept.
+    'W-SAVE': {
+        "decision": 'ask',
+        "hook": 'protect-files',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'This edit replaces the save {file}; the old save is not kept.\n'
+        'Approve only if you asked for this save to be changed.'
+    ),
+    },
     'W-INI': {
         "decision": 'advise',
         "hook": 'protect-files',
@@ -353,8 +421,17 @@ RULES = {
 }
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+FIELD_MAX = 96              # characters a rendered field may take, at most
+LINE_MAX = 200              # the message contract (tests/test_rule_messages.py)
+
+
 def _basename(value) -> str:
-    return re.split(r"[/\\]+", str(value).rstrip("/\\"))[-1]
+    """The file name a message shows. RT-A: an NTFS stream suffix is cut (`a.esp::$DATA` names a.esp); a bare drive
+    (`C:`) is kept."""
+    b = re.split(r"[/\\]+", str(value).rstrip("/\\"))[-1]
+    m = re.match(r"([^:]{2,}):\S*(.*)\Z", b, re.S)          # `a.esp::$DATA and 1 more` -> `a.esp and 1 more`
+    return m.group(1) + m.group(2) if m else b
 
 
 def message(rule_id: str, **fields) -> str:
@@ -367,7 +444,16 @@ def message(rule_id: str, **fields) -> str:
         raise ValueError("unsupported message fields: " + ", ".join(sorted(bad)))
     if "file" in fields:
         fields["file"] = _basename(fields["file"])
-    return rule["template"].format(**fields)
+    # Final review B-M1: the guard judges command TEXT, so a field can hold a newline (`> "a<LF>b.esp"`) or be any
+    # length; either broke the two-line, 200-character message contract. Control characters become spaces and the
+    # fields are cut, shorter while a line is still too long (two fields can share one line).
+    clean = {k: _CONTROL.sub(" ", str(v)) for k, v in fields.items()}
+    cap = FIELD_MAX
+    while True:
+        out = rule["template"].format(**{k: v if len(v) <= cap else v[:cap - 3] + "..." for k, v in clean.items()})
+        if cap <= 16 or all(len(ln) <= LINE_MAX for ln in out.split("\n")):
+            return out
+        cap -= 8
 
 
 def legacy_message(rule_id: str, **fields) -> str:

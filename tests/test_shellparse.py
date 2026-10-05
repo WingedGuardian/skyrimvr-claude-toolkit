@@ -124,7 +124,8 @@ def test_bash_script_file_runs_the_script():
 
 
 @pytest.mark.parametrize("cmd,starts", [
-    ("find Data -name '*.tmp' -delete", ("Data",)),
+    ("find Data -name '*.tmp' -delete", ("Data/*.tmp",)),    # RT-A: a -name filter narrows the items to start/NAME
+    ("find Data -type f -delete", ("Data",)),
     ("find a b -type f -delete", ("a", "b")),
     ("find -L Data -delete", ("Data",)),
     ("find -delete", (".",)),
@@ -140,7 +141,8 @@ def test_find_delete_is_a_delete_on_the_start_paths(cmd, starts):
     "find Data -ok rm -rf {} " + BS + ";",
 ])
 def test_find_exec_runs_its_command_on_the_start_paths(cmd):
-    assert find(cmd, "rm").argv == ("-rf", "Data")
+    # RT-A: under a -name filter {} is start/NAME, otherwise the start itself
+    assert find(cmd, "rm").argv == ("-rf", "Data/x" if "-name" in cmd else "Data")
 
 
 def test_find_exec_shell_string_is_reparsed():
@@ -375,7 +377,8 @@ def test_pwsh_expressions_and_here_strings_are_not_commands():
     assert progs("'rm -rf x' | Out-File a", "powershell") == ["out-file"]
     assert progs("@'\nRemove-Item x\n'@ | Out-File a", "powershell") == ["out-file"]
     assert progs("$x = 'a'; $y.Substring(1)", "powershell") == []
-    assert progs("$y.Delete()", "powershell") == ["?"]                 # fix round 1: opaque, not nothing
+    # fix round 1: opaque, not nothing; final review I7: and `.Delete()` deletes its receiver ($y, unresolved)
+    assert progs("$y.Delete()", "powershell") == ["?", "io.directory.delete"]
     assert progs("$h = @{ rm = 1 }", "powershell") == []
     assert progs("<# Remove-Item x #> ls # ri y", "powershell") == ["get-childitem"]
 
@@ -672,6 +675,17 @@ def test_r1_more_wrappers(shell, cmd):
     assert deletes_x(cmd, shell) is True
 
 
+# Merge of rt-fix-a into plan5 (2026-10-05): an alias is judged twice, where it is DEFINED (R1: its use may be in a later
+# tool call the guard never sees beside this one) and where it is USED (RT-A: the use adds its own arguments). Each half
+# alone passes `alias ll='rm -rf X'; ll`, so each gets its own pin.
+def test_r1_an_alias_body_is_judged_where_it_is_defined():
+    assert deletes_x("alias ll='rm -rf X'", "bash") is True
+
+
+def test_ra_an_alias_use_runs_its_body_with_the_uses_arguments():
+    assert deletes_x("alias r='rm -rf'; r X", "bash") is True
+
+
 @pytest.mark.parametrize("shell", ["bash", "powershell", "cmd"])
 def test_r1_wsl_and_watch_run_their_words_as_bash(shell):
     """From PowerShell, `wsl rm -rf X` runs Linux rm -- not the PowerShell alias rm = Remove-Item."""
@@ -715,7 +729,7 @@ def test_r1_stdin_dash_and_command_prefix(cmd):
 @pytest.mark.parametrize("shell,cmd", [
     ("bash", "cat s.sh | bash"), ("bash", "curl -s http://x | sh"), ("bash", "sh < s.sh"),
     ("bash", "sh < <(echo 'rm -rf X')"), ("bash", "bash <(echo rm -rf X)"), ("bash", "source <(echo rm -rf X)"),
-    ("bash", "x=rm; $x -rf X"), ("bash", "parallel < cmds.txt"),
+    ("bash", "$x -rf X"), ("bash", "parallel < cmds.txt"),
     ("powershell", "(Get-Item X).Delete()"), ("powershell", "gci X -r | % { $_.Delete() }"),
     ("powershell", "[System.IO.DirectoryInfo]::new('X').Delete($true)"), ("powershell", "iex $cmd"),
     ("powershell", "Invoke-Expression ('Remove-Item ' + 'X')"),
@@ -805,3 +819,186 @@ def test_r3_input_larger_than_the_cap_is_unsure():
     p = parse(big, "bash")
     assert not p.ok and "larger" in p.why
     assert parse("rm -rf X; " + "a" * (sp.MAX_INPUT_CHARS - 100), "bash").ok
+
+
+# ------------------------------------------------------------------------- Plan 5 final review, lane A (fix pass)
+# Each finding was a parse that returned ok=True with the executed command, or its directory, dropped.
+_OPTION_VALUES = {"pipefail", "errexit", "posix", "extglob", "nounset"}
+
+
+@pytest.mark.parametrize("cmd", [
+    "bash -eo pipefail -c 'rm -rf X'", "bash -euo pipefail -c 'rm -rf X'", "sh -o errexit -c 'rm -rf X'",
+    "bash +o posix -c 'rm -rf X'", "bash -O extglob -c 'rm -rf X'", "bash -oO pipefail extglob -c 'rm -rf X'",
+    "bash -c -o pipefail 'rm -rf X'", "bash -ec -o pipefail 'rm -rf X'", "dash -eo errexit -c 'rm -rf X'",
+    "bash -eo pipefail +O extglob -c 'rm -rf X'", "zsh -oerrexit -c 'rm -rf X'", "zsh -eo errexit -c 'rm -rf X'",
+    "bash +c 'rm -rf X'",                       # MEASURED in Git Bash: `bash +c 'echo x'` runs the string
+])
+def test_c1_a_shell_option_value_is_not_the_command(cmd):
+    """C1: `-eo pipefail` took `pipefail` as the script FILE and never reached the -c string."""
+    assert deletes_x(cmd, "bash") is True
+    assert not _OPTION_VALUES & set(progs(cmd))
+
+
+@pytest.mark.parametrize("cmd", ["echo 'rm -rf X' | bash -eo pipefail", "echo 'rm -rf X' | sh -euo nounset",
+                                 "cat <<'EOF' | bash -o pipefail -e\nrm -rf X\nEOF"])
+def test_c1_a_shell_with_option_values_still_reads_the_pipe(cmd):
+    assert deletes_x(cmd, "bash") is True
+
+
+def test_c1_a_script_after_option_values_is_the_script():
+    assert progs("bash -eo pipefail scripts/build.sh a") == ["build"]
+    assert progs("zsh -oerrexit scripts/build.sh") == ["build"]
+    assert progs("zsh -oshwordsplit scripts/build.sh") == ["build"]     # zsh: the value is the rest of the word
+
+
+@pytest.mark.parametrize("cmd", ["bash /dev/stdin <<'EOF'\nrm -rf X\nEOF", "sh /proc/self/fd/0 <<< 'rm -rf X'",
+                                 "source /dev/stdin <<'EOF'\nrm -rf X\nEOF", "echo 'rm -rf X' | bash /dev/stdin"])
+def test_m4_a_script_that_is_stdin_reads_the_heredoc_or_pipe(cmd):
+    assert deletes_x(cmd, "bash") is True
+
+
+@pytest.mark.parametrize("cmd,cd", [
+    ("Set-Location C:/x; Remove-Item a", "C:/x"),
+    ("Set-Location C:/x | Out-Null; Remove-Item a", "C:/x"),
+    ("Push-Location C:/x | Out-Null; Remove-Item a", "C:/x"),
+    ("if ($true) { Set-Location C:/x }; Remove-Item a", "?"),
+    ("try { Set-Location C:/x } catch {}; Remove-Item a", "?"),
+    ("& { Set-Location C:/x }; Remove-Item a", "?"),
+    (". { Set-Location C:/x }; Remove-Item a", "?"),
+    ("Get-Item C:/x | Set-Location; Remove-Item a", "?"),
+    ("Set-Location C:/x; if ($true) { Get-Date }; Remove-Item a", "C:/x"),
+    ("if ($true) { Set-Location C:/x; Remove-Item a }", "C:/x"),
+])
+def test_i1_powershell_location_is_session_wide(cmd, cd):
+    """I1: a Set-Location in a pipeline stage or a block moves the CALLER (bash's subshell rule does not apply)."""
+    assert find(cmd, "remove-item", "powershell").cd_before == cd
+
+
+def test_i1_bash_pipeline_and_subshell_cd_still_do_not_carry():
+    assert find("cd /c/x | true; rm a", "rm").cd_before == ""
+    assert find("(cd /c/x); rm a", "rm").cd_before == ""
+
+
+@pytest.mark.parametrize("cmd,cd", [
+    ("cd C:" + BS + "t7" + BS + "Skyrim VR && rd /s /q Data", "C:" + BS + "t7" + BS + "Skyrim VR"),
+    ("cd /d C:" + BS + "a b" + BS + "c d & rd Data", "C:" + BS + "a b" + BS + "c d"),
+    ("chdir C:" + BS + "a b & rd Data", "C:" + BS + "a b"),
+    ('cd/d "C:' + BS + 't7' + BS + 'Skyrim VR" && rd /s /q Data', "C:" + BS + "t7" + BS + "Skyrim VR"),
+    ("cd/D C:" + BS + "x && rd Data", "C:" + BS + "x"),
+    ("cd" + BS + "t7" + BS + "Skyrim VR && rd /s /q Data", BS + "t7" + BS + "Skyrim VR"),
+    ("cd.. && rd Data", ".."),
+    ("cd C:" + BS + "a  b && rd Data", "?"),
+    ("pushd C:" + BS + "a b && rd Data", "?"),
+    ("cd C:" + BS + "a %X% && rd Data", "?"),
+    ("cd/x C:" + BS + "a && rd Data", "?"),
+    ('cd "C:' + BS + 'a b" && rd Data', "C:" + BS + "a b"),
+])
+def test_i2_cmd_cd_takes_the_rest_of_the_line(cmd, cd):
+    """I2: with extensions on, cmd's cd does not split on spaces; `cd/d` and `cd\\x` are cd too."""
+    assert find(cmd, "rmdir", "cmd").cd_before == cd
+
+
+def test_i2_cmd_cd_inside_cmd_c_from_bash():
+    e = find('cmd /c "cd /d C:' + BS + 't7' + BS + 'Skyrim VR && rd /s /q Data"', "rmdir")
+    assert e.cd_before == "C:" + BS + "t7" + BS + "Skyrim VR"
+
+
+@pytest.mark.parametrize("cmd", ["Re`move-Item -Recurse X", "R`e`m`o`v`e-Item X", "r`i -r X"])
+def test_i4_a_backtick_in_a_command_name_is_still_a_command(cmd):
+    assert deletes_x(cmd, "powershell") is True
+
+
+def test_i4_a_string_in_command_position_is_still_an_expression():
+    assert "remove-item" not in progs("'Remove-Item' X", "powershell")
+    assert "remove-item" not in progs('"Remove-Item X"', "powershell")
+    assert find("S`et-Location C:/x; Remove-Item a", "remove-item", "powershell").cd_before == "C:/x"
+
+
+def test_i5_a_splat_is_a_dynamic_word_not_a_file_name():
+    p = parse("$p = @{Path='X'}; Remove-Item @p", "powershell")
+    assert p.ok
+    e = [x for x in p.execs if x.program == "remove-item"][0]
+    assert e.argv == ("@p",)
+    assert progs("git clone git@github.com:a/b", "powershell") == ["git"]       # mid-word `@` is literal
+
+
+@pytest.mark.parametrize("cmd", ["'Remove-Item X' | powershell -Command -", "'Remove-Item X' | pwsh -c -",
+                                 "'Remove-Item X' | iex", '"Remove-Item X" | Invoke-Expression'])
+def test_i6_a_string_piped_into_a_shell_or_iex_is_parsed(cmd):
+    assert deletes_x(cmd, "powershell") is True
+
+
+def test_i6_a_string_holding_a_variable_piped_into_iex_is_opaque():
+    p = parse('"Remove-Item $x" | iex', "powershell")
+    assert p.ok and ("?", ("invoke-expression",)) in [(e.program, e.argv) for e in p.execs]
+
+
+def test_i6_decoded_text_piped_into_iex_is_unread():
+    assert parse("'eA==' | base64 -d | iex", "powershell").unread
+
+
+def test_i7_an_opaque_method_keeps_its_receiver_and_arguments():
+    p = parse("(Get-Item 'X').Delete($true)", "powershell")
+    assert p.ok
+    got = [(e.program, e.argv) for e in p.execs]
+    assert ("?", ("(Get-Item 'X').Delete", "$true")) in got
+    assert ("io.directory.delete", ("(Get-Item 'X')",)) in got        # `.Delete()` deletes its receiver
+    sb = parse("[scriptblock]::Create('Remove-Item X').Invoke()", "powershell")
+    assert ("?", ("[scriptblock]::Create", "Remove-Item X")) in [(e.program, e.argv) for e in sb.execs]
+    assert "io.directory.delete" not in progs("$f.MoveTo('Y')", "powershell")
+
+
+def test_m1_any_prefix_of_encodedcommand_is_decoded():
+    enc = base64.b64encode("Remove-Item X".encode("utf-16-le")).decode()
+    for flag in ("-e", "-en", "-enc", "-encoded", "-ec", "/en"):
+        assert deletes_x("powershell " + flag + " " + enc, "powershell") is True, flag
+
+
+@pytest.mark.parametrize("cmd", ["nice -n10 rm -rf X", "nice -n 10 rm -rf X", "nice --adjustment 5 rm -rf X",
+                                 "nice --adjustment=5 rm -rf X", "nice -5 rm -rf X", "nice -- rm -rf X"])
+def test_m2_nice_value_spellings(cmd):
+    assert deletes_x(cmd, "bash") is True
+
+
+# Coordinator ruling on the lane-A probe: cmd's /c quote rule, and nested quotes split by the caller fail closed.
+@pytest.mark.parametrize("cmd", ["cmd //s //c '\"rd /s /q X\"'", "cmd //c '\"rd /s /q X\"'",
+                                 "cmd /s /c '\"rd /s /q\" X'"])
+def test_cmd_c_strips_its_outer_quotes(cmd):
+    assert deletes_x(cmd, "bash") is True
+
+
+def test_cmd_c_two_quotes_around_a_spaced_name_reads_both_ways():
+    assert {"x", "program"} <= set(progs("cmd //c '\"C:" + BS + "Program Files" + BS + "x.exe\" a'"))
+
+
+@pytest.mark.parametrize("cmd,shell", [
+    ('cmd //s //c "rd /s /q "C:' + BS + 'a b' + BS + 'Data""', "bash"),
+    ('cmd /s /c "rd /s /q "C:' + BS + 'a b' + BS + 'Data""', "powershell"),
+    ('cmd /s /c "rd /s /q "C:' + BS + 'a b' + BS + 'Data""', "cmd"),
+])
+def test_cmd_c_nested_quotes_split_by_the_caller_are_opaque(cmd, shell):
+    p = parse(cmd, shell)
+    assert p.ok
+    assert ("?", ("rd /s /q C:" + BS + "a b" + BS + "Data",)) in [(e.program, e.argv) for e in p.execs]
+
+
+def test_cmd_c_a_single_word_line_is_not_opaque():
+    assert "?" not in progs('cmd //c "rd /s /q X"')
+    assert "?" not in progs("cmd //c dir " + '"C:' + BS + 'a b"')
+
+
+@pytest.mark.parametrize("line,s_flag,want", [
+    ('"a b" c', False, ["a b c", '"a b" c']),        # two quotes, whitespace, nothing special: both readings
+    ('"a "b c""', False, ['a "b c"']),               # more than two quotes: stripped
+    ('"a & b"', False, ["a & b"]),                   # a special character between them: stripped
+    ('"ab" c', False, ["ab c"]),                     # no whitespace between them: stripped
+    ('"a b" c', True, ["a b c"]),                    # /S: always stripped
+    ('a "b c"', False, ['a "b c"']),                 # the line does not start with a quote: as written
+])
+def test_cmd_c_quote_rule(line, s_flag, want):
+    assert sp._cmd_c_lines(line, s_flag) == want
+
+
+def test_cmd_c_s_switch_always_strips():
+    assert "q x" not in progs("cmd //s //c '\"rd /s /q X\"'")
+    assert "q x" in progs("cmd //c '\"rd /s /q X\"'")         # without /S cmd may keep the quotes: both readings

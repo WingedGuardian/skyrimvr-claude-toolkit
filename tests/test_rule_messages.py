@@ -294,3 +294,19 @@ def test_message_fields_are_basenames():
             assert "C:" not in out and chr(92) not in out, rid
             assert max(len(ln) for ln in out.split("\n")) <= 200, rid
     assert seen >= 3, seen
+
+
+# ---- Final review B-M1: a field from command text can hold control characters or be any length.
+@pytest.mark.parametrize("fields", [
+    {"file": "a\nsecond line of the message.esp", "op": "op", "save": "Save1", "n": 3},
+    {"file": "x.esp", "op": "clean\r\nmore", "save": "Save\n1.ess", "n": 3},
+    {"file": "a" * 251 + ".esp", "op": "o" * 300, "save": "s" * 300, "n": 3},
+], ids=["newline-in-file", "newline-in-op-and-save", "long-fields"])
+def test_every_template_keeps_its_shape_whatever_the_fields(fields):
+    for rid, r in rules.RULES.items():
+        if r["legacy"]:
+            continue
+        out = rules.message(rid, **{k: v for k, v in fields.items() if "{" + k + "}" in r["template"]})
+        lines = out.split("\n")
+        assert len(lines) <= 2 and all(len(ln) <= 200 for ln in lines), (rid, out)
+        assert "\r" not in out, rid
