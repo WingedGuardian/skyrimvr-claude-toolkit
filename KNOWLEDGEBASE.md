@@ -404,9 +404,24 @@ This applies to `getValue`, `setValue`, `setFloatValue` — all path-based funct
 
 ### ESP Removal and Existing Saves (CRITICAL)
 
-**NEVER remove/disable an ESP from the load order on an existing save.** Removing an ESP shifts all downstream ESPs' load order positions. Every ESP after the removed one gets a new load order index, which resets its quest stages, script state, and alias references in the save — as if freshly installed. With 700+ plugins, this is catastrophic.
+**NEVER remove/disable an ESP from the load order on an existing save.** The rule stands; the
+reason originally written here was WRONG (corrected 2026-10-05, ledger-style note below).
 
-**Lobotomize instead:** Keep the ESP in the load order (maintains position stability) but strip its functionality:
+- ~~Removing an ESP shifts downstream load-order indices, which resets their quest/script state.~~
+  **Refuted.** The `.ess` carries a plugin-NAME table (`pluginInfo`, plus a separate
+  `lightPluginInfo` list for ESL/FE plugins) and a `formIDArray` of save-time FormIDs; on load the
+  game remaps save-time IDs to the current order — SKSE's `ResolveFormId` documents exactly that
+  contract for co-save data ("takes a formID as it was when the save was made and writes the formID
+  as it is when the save is loaded"). READ: UESP *Skyrim Mod:Save File Format*; CommonLibSSE
+  *Serialization* wiki. "Remapped by plugin name" is INFERRED from that format, not quoted from a
+  page — but no source supports a reset, and inserting/reordering is routine on long saves.
+- **The real dangers of removal:** every form from the removed plugin is dropped from the save,
+  while its script instances stay baked in (`Cannot open store for class "X", missing file?` in
+  the Papyrus log); references, aliases, inventory items and other mods' scripts that pointed at
+  its forms dangle. "Removing mods and continuing to use the same save game is not supported by
+  the game" (CK *Save File Notes (Papyrus)*). That is why we lobotomize instead.
+
+**Lobotomize instead:** Keep the ESP in the load order (its forms stay resolvable) but strip its functionality:
 1. Remove compiled scripts (.pex files from `Data/Scripts/`)
 2. Disable SKSE plugins (.dll → .dll.disabled)
 3. Disable SPID distribution files (.ini → .ini.disabled) if applicable
@@ -415,6 +430,107 @@ This applies to `getValue`, `setValue`, `setFloatValue` — all path-based funct
 The ESP remains as a hollow shell. Only suggest removing ESPs when the user is starting a new game.
 
 *Source: direct experience — the lobotomy approach is confirmed working.*
+
+### Updating or Adding Mods on an Existing Save: Safety Rubric
+
+**Classify every update by what it CHANGES, never by what the mod "is".** A "DLL mod" that also
+ships `.pex` files is a script update; a "texture mod" that ships an ESP is a plugin update. Open
+the archive and sort its files into the rows below, and the riskiest row present sets the verdict.
+
+**Verdicts:** `SAFE` · `SAFE-WITH-STEPS` · `RISKY` (one at a time, checkpoint save between) ·
+`DON'T` · **`UNCLEAR`, which means "not proven safe", never "probably fine".** It needs the archive,
+a diff, or a DevBench test before it can move. For a mod not yet installed: `ADD-OK` ·
+`ADD-WITH-STEPS` · `NEW-GAME-ONLY`.
+
+#### 1. What the update changes, from no save footprint to deep
+
+| Changes | Save footprint | Default verdict | Why / what to check |
+|---|---|---|---|
+| Textures, meshes, sounds, voice, strings, INI/JSON/TOML config | none | SAFE | Nothing is stored in the save. VR caveats still apply: PreWEAPON/PreSHIELD skeleton nodes CTD (gotcha #11), and a flat-screen `.swf` can replace a VR one. |
+| Animations / behavior (`.hkx`, OAR configs) | none | SAFE-WITH-STEPS | No save data, but behavior output may need regenerating (Nemesis/Pandora). An OAR config change needs no regen. |
+| SKSE DLL that writes **no co-save records** and registers no Papyrus natives | none | SAFE *if VR-loadable* | See §2. Revert = put the old DLL back, even on the same save. |
+| SKSE DLL **that writes co-save records** | `.skse` co-save | SAFE-WITH-STEPS | SKSE hands each plugin its record `version` and leaves the format to the author. A DLL that ignores its own version field after a format change is UNSOURCED territory, so read the changelog for "save format" or "reset". Back up the `.skse` together with the `.ess`. |
+| SKSE DLL **+ its `.pex`/`.psc` native declarations** | depends | SAFE-WITH-STEPS | The pair must move together. A mismatch logs `does not match existing signature` and the native goes unbound. |
+| ESP record **field edits, FormIDs unchanged** | partial | SAFE-WITH-STEPS | Base-record edits apply on load, except for fields the save already changed (change forms). Visited cells, opened containers and met NPCs keep their baked state until a reset, so the "fix" may be inert on an existing save. That is lost value, not damage. |
+| ESP: **records removed** that the save may reference | dangling refs | RISKY | Same as removal: dropped forms and orphaned instances. Needs a diff. |
+| ESP: **FormIDs renumbered / compacted** | broken refs | **DON'T** | The save looks for the old IDs. ESLify: "do not compact... mods that have generated facegendata, scripts, or .seq files." |
+| ESP: **ESL flag added**, IDs already within 0x800–0xFFF | slot move | RISKY | The plugin moves from a full slot to the FE light list. Remap should cover it (INFERRED), but community advice is new games only. |
+| ESP: **ESL flag removed** | slot move | RISKY | UNSOURCED. Treat like the row above. |
+| ESP: **master added** | none, if the master is present | SAFE-WITH-STEPS | The new master must already be installed and load earlier. Once in a save, masters can't be dropped. |
+| ESP: **running quest** changed (stages, aliases, fragments) | baked | RISKY | QUST is a change form, so alias fills and stage state persist. Changes land only when the quest restarts (INFERRED). |
+| `.pex`: **function bodies only** | none | SAFE | "Adding functions: no issues occur." A frame already on the stack finishes on the OLD code, and later calls use the new code. |
+| `.pex`: **variable/property removed or renamed** | warning | SAFE-WITH-STEPS | The saved value is discarded with a log warning, and the warning stops after the next save. A rename counts as delete + add. |
+| `.pex`: **property ADDED** | unresolved | RISKY / UNCLEAR | **Sources conflict:** the CK page says a new auto property takes the plugin's value, while a Skyrim LE report says instances already in the save stay `None`. Non-auto properties stay blank (gotcha #10). Settle it with DevBench on a save copy before trusting an update that depends on it. |
+| `.pex`: **existing property's VALUE changed** in the ESP | baked | inert on an existing save | "Changing the value will not overwrite the value it has in the save game" (unless the property is `const`). The update's fix may never reach the save. |
+| `.pex`: **script, state or quest removed** | orphans | RISKY | `Cannot open store for class`. ReSaver can clean unattached instances afterwards. |
+| Long-running loop or registration in a changed script | persistent | RISKY | `RegisterForUpdate` and event registrations persist until unregistered. A loop on the stack keeps running old code until it exits. |
+
+**Things that LOWER script risk:** the mod has a version-migration path, such as an SkyUI MCM
+`OnVersionUpdate`, a maintenance quest on `OnPlayerLoadGame`, or an "update/reset" MCM button.
+Read the decompiled source (Champollion) to confirm it actually exists.
+
+#### 2. SKSE DLLs: the VR gate comes before save safety
+
+"DLL-only = update whenever" is true for save safety only. A DLL can still be wrong for VR:
+- **It must be a VR build**, or a CommonLibSSE-NG / CommonLibVR multi-runtime build that declares
+  VR. An SE/AE-only DLL is at best refused by SKSE, which disables the feature silently, and at
+  worst crashes. NG itself warns: "fundamental ABI incompatibilities between SE/AE and VR".
+- **Check the VR-incompatible ledger first**, if you keep one: some releases of otherwise-VR-capable
+  plugins (a Papyrus fix-up plugin, a crash logger) are known to break VR or a particular runtime.
+- **Fork or rename migrations leave the old DLL behind, and SKSE loads BOTH.** A renamed fork's old
+  DLL beside the new one is the classic case. After any update, check for an old-named sibling.
+- **The proof is the SKSE log, not the install:** every DLL gets one result line in
+  `Documents/My Games/Skyrim VR/SKSE/sksevr.log`: `loaded correctly`, `reported as incompatible
+  during query|load`, or `does not appear to be an SKSE plugin`. Diff that file before and after
+  each update.
+- **Find stateful DLLs from the save itself:** `bash tools/cosave-cli.sh <save>.skse` lists the
+  co-save records by opcode. JContainers (`JSTR`), PapyrusUtil (`STFV`/`STRL`/...), Papyrus Extender
+  (`P3PE`), SPID and DbSkseFunctions are common writers; many opcodes will be unnamed.
+
+#### 3. Adding a mod not yet installed
+
+- **Appending, or inserting mid-order, does not corrupt other mods' saved state** (see the
+  correction above). **It CAN change which plugin wins records other mods depend on.** Run
+  `bash tools/skyrim-winner.sh conflicts <new.esp>`, plus a check of what the new plugin newly
+  WINS, before activating.
+- **Adding a scripted mod is a one-way door.** Removal is unsupported (above), so the only exit is a
+  lobotomy. Weigh that before adding, not after.
+- **Start-Game-Enabled quests.** Community sources (AutoSEQ README) say SGE quests still start on an
+  existing save, but their dialogue, scenes and some fragments need a matching `Data/SEQ/<plugin>.seq`
+  plus a save/reload. **One measurement disagrees**: a single SGE quest did NOT auto-start across
+  multiple loads and needed `Quest.Start()` plus a save (MEASURED once, 2026-07-09; one quest, one
+  load order, not a general rule). So: check that the SEQ file ships, then confirm `Quest.IsRunning`
+  via DevBench after the first load. Don't assume it started.
+- **Plugin slots:** count from the VR `plugins.txt` at decision time (full slots, light slots, and
+  whether a VR ESL-support plugin is loaded); don't carry a number over from an earlier session.
+- **The author's "requires a new game" is an author ruling, not an engine rule.** Respect it unless
+  a diff proves otherwise.
+- **Distribution mods (SPID/KID/SkyPatcher)** apply at runtime on every load, so they can be added
+  without a save footprint, except for what they hand out (spells, perks, items), which actors
+  then carry.
+
+#### 4. The routine for every update session
+
+1. **Baseline before touching anything:** copy the current `.ess` **and its `.skse`**, `plugins.txt`
+   and `loadorder.txt`. Snapshot `sksevr.log`, and run `papyrus-triage` and `crash-triage` so
+   "after" has a "before".
+2. **One RISKY change at a time,** with a checkpoint save between, so a break can be bisected.
+   SAFE items can be batched.
+3. **Install through your mod manager (or a dry-run installer that backs up overwritten files and
+   writes a manifest)**, so every file stays attributable.
+4. **Verify from the outside after each batch:** the `sksevr.log` result line for every touched DLL,
+   a DevBench load (`/api/health`, then `game loadLast`), and a Papyrus log diff for new
+   `Cannot open store`, `does not match existing signature` or `not found` lines.
+5. **If something breaks:** asset or DLL → restore the backup, on the same save. ESP or script →
+   roll back to the pre-change save. Never "fix forward" a save that loaded a bad script state.
+
+**Sources:** UESP *Skyrim Mod:Save File Format* and *Skyrim:Form ID*; CommonLibSSE *Serialization*
+wiki; CommonLibSSE-NG *Runtime Targeting*; CK *Save File Notes (Papyrus)* and *Persistence (Papyrus)*
+(read via the fallout.wiki mirror, because the Skyrim pages 403; VM rules are shared, but not
+re-confirmed on the Skyrim page); Nexus forum 9922438 (new properties `None` on existing saves) and
+13476332 (orphan log lines); ESLify mod page (SE 21618); AutoSEQ README; Nexus article *Mods,
+Stability, and Save games* (Skyrim 801). Rows marked INFERRED or UNSOURCED are claims to test,
+not facts.
 
 ### BSA/BA2 Archive Load Order
 
@@ -1190,10 +1306,25 @@ suppressing one. This contradicts common Papyrus advice — trust the empirical 
 in-script way to make such a phantom instance short-circuit; fix it at the source (reduce the
 broadcast, detach the script at ESP level, or filter via an SKSE plugin), not in the script body.
 
-### po3 Papyrus Extender (VR) exports a subset
-`po3_papyrusextender_vr.dll` omits ~24 functions present in the SSE build (e.g. `Apply3DHavokImpulse`,
-`GetAllActiveEffectsOnActor`, `InstantKill`, `RemoveChildNode`). Mods calling them fail silently
-("Function X could not be found"). Check the VR fork's exports before assuming a po3 function exists.
+### po3 Papyrus Extender on VR: the old 2019 port is a trap (corrected 2026-10-05)
+The earlier note here said `po3_papyrusextender_vr.dll` "omits ~24 functions present in the SSE build"
+(`Apply3DHavokImpulse`, `GetAllActiveEffectsOnActor`, `InstantKill`, `RemoveChildNode`). That described
+the **old 2019 port** (log banner `po3_PapyrusExtenderVR 2.3`), not the modern VR build.
+- **Correct VR setup:** Nexus SE **22854**'s scripts (the original Papyrus Extender) **plus** Nexus SE
+  **58296**'s DLL (alandtse's CommonLibVR build, `po3_PapyrusExtender.dll`, same filename, meant to
+  overwrite the original's DLL). 58296's page says it requires the original for the scripts, and its
+  archive ships only that one DLL. A mod manager may file the VR DLL under 22854 because it was
+  dropped over the original's in staging; that is the documented install, not an error.
+- **The trap:** a 2019 `po3_papyrusextender_vr.dll` left beside the modern DLL is a second Papyrus
+  Extender. It loads after it and **replaces about 90 of the modern DLL's natives** (measured on
+  one install: 90 of 90 shared names), and some replacements change signature, so scripts compiled
+  against the modern `.psc` call them with the wrong shape. The function-gap list above was the old
+  port's; the modern VR build supplies most of it.
+- **Fix:** retire the old DLL (rename to `.disabled`; a DLL change is save-safe), then confirm the
+  `Replacing native function` lines disappear from the next Papyrus log.
+- **General lesson:** `grep "Replacing native function"` in the Papyrus log to find **stale duplicate
+  SKSE plugins**. Two plugins registering the same script's natives is the signature, whatever the
+  plugin (see the rubric's "old-named sibling" rule).
 
 ### PapyrusTweaks.ini on heavy modlists
 Useful keys: `iMaxOpsPerFrame` (raise from vanilla 100); `bDisableMissingScriptError` and
