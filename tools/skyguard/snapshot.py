@@ -78,6 +78,12 @@ PRUNE_CALL_BOX = 1.0      # the once-a-day pruning inside a tool call stops dele
 PRUNE_EVERY = DAY         # per-call pruning at most this often; SessionStart always prunes
 RESTAT_BOX = 0.075        # cap on re-stat'ing hard-linked scripts per comparison (real install MEASURED: 58 ms in all)
 RESTAT_CURSOR = ".restat_cursor"
+# Re-review N3: a path indexed with ONE link is re-stat'd in turn, this long per comparison (at least one path), from a
+# position cursor, so a hard link made AFTER indexing is found. The listing cannot tell: on Windows a DirEntry's
+# st_nlink is always 0 (MEASURED, Task 15). Real install: ~8,850 single-link scripts at ~20 us per os.stat (Task 14's
+# 58 ms for 2,975), so ~500 per comparison and a full round in ~18 comparisons (>= 18 min at RATE 60).
+SWEEP_BOX = 0.010
+SWEEP_CURSOR = ".sweep_cursor"
 _REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _walk_clock = time.monotonic      # bound at import: the walk's box is real time even where a test fakes snapshot.time
 REBASE_MIN = 256          # a delta larger than max(REBASE_MIN, base/REBASE_SHARE) paths is written as a new full map
@@ -259,7 +265,7 @@ def materialise(project, name, dest):
     files = resolve(store, name)
     for rel, sha in files.items():
         parts = rel.split("/")
-        if not _BLOB.match(sha) or "\\" in rel or ":" in rel or any(p in ("", ".", "..") for p in parts):
+        if not isinstance(sha, str) or not _BLOB.match(sha) or "\\" in rel or ":" in rel or any(p in ("", ".", "..") for p in parts):
             raise ValueError("snapshot {}: refusing entry {!r} -> {!r}".format(name, rel, sha))
         blob = store / "blobs" / sha
         if not blob.is_file():
@@ -408,6 +414,46 @@ def _restat_multilink(root, store, files, seen, audit):
     return done, len(order)
 
 
+def _sweep_links(root, store, files, seen):
+    """Re-review N3: re-stat single-link indexed paths in turn (SWEEP_BOX per comparison). One found to have gained a
+    link gets its link count recorded -- from then on _restat_multilink re-stats it on every comparison -- and its
+    REAL size/mtime in `seen`, so an edit already made through the new link is compared now. -> paths whose recorded
+    link count changed (the index must be rewritten for them even when no content changed)."""
+    keys = [rel for rel, v in files.items() if rel in seen and not (len(v) > 3 and v[3] > 1)]
+    if not keys:
+        return 0
+    cursor_file = store / SWEEP_CURSOR
+    try:
+        start = int(cursor_file.read_bytes().decode("ascii").strip()) % len(keys)
+    except (OSError, ValueError):
+        start = 0
+    base = str(root)
+    stop = _walk_clock() + SWEEP_BOX
+    relinked, k = 0, 0
+    while k < len(keys):
+        rel = keys[(start + k) % len(keys)]
+        k += 1
+        try:
+            st = os.stat(os.path.join(base, *rel.split("/")))
+        except OSError:
+            st = None
+        if st is not None and st.st_nlink > 1:
+            v = files[rel]
+            if len(v) > 3:
+                v[3] = st.st_nlink
+            else:
+                v.append(st.st_nlink)
+            seen[rel] = (st.st_size, st.st_mtime_ns)
+            relinked += 1
+        if _walk_clock() >= stop:
+            break
+    try:
+        cursor_file.write_bytes(str((start + k) % len(keys)).encode("ascii"))
+    except OSError:
+        pass
+    return relinked
+
+
 def _take_locked(root, store, audit, command, now, deadline, rate, prune_due, walk_deadline, box_end):
     walk_ns = time.time_ns()
     seen, linked, truncated = scan(root, walk_deadline)
@@ -426,6 +472,7 @@ def _take_locked(root, store, audit, command, now, deadline, rate, prune_due, wa
         idx = {"v": 1, "files": {}, "head_base": None, "dirty": False, "pruned": 0}
     files = idx["files"]
     _restat_multilink(root, store, files, seen, audit)
+    relinked = _sweep_links(root, store, files, seen)
     todo = [r for r, st in seen.items() if (files.get(r) or [None, None])[:2] != list(st)]
     # Review I3: newest first -- the scripts being experimented on are the recent ones, so a time-boxed baseline
     # captures them before the long tail of untouched mod scripts.
@@ -490,7 +537,7 @@ def _take_locked(root, store, audit, command, now, deadline, rate, prune_due, wa
     if failed and name is None:
         audit.log(HOOK, "FAILED", "{} script file(s) could not be read -- their current content is in no snapshot "
                   "until a later walk reads them".format(failed))
-    if todo or gone or name is not None or idx.get("dirty") or links_changed:   # an unchanged walk rewrites nothing
+    if todo or gone or name is not None or idx.get("dirty") or links_changed or relinked:   # unchanged: no rewrite
         try:
             _write_replace(store / INDEX, json.dumps(idx, ensure_ascii=True, sort_keys=True).encode("ascii"))
         except OSError:
@@ -548,7 +595,11 @@ def prune(store, now, audit, deadline=None):
     def late():
         return deadline is not None and _walk_clock() >= deadline
     names = manifest_names(store)
-    loaded = {n: _load_manifest(store, n) for n in names}
+    loaded = {}
+    for n in names:                                   # re-review N1: loading is inside the box too (~5 ms each, cold)
+        if late():
+            return _pruned(store, now, audit, 0, stopped=True)
+        loaded[n] = _load_manifest(store, n)
     unreadable = [n for n, m in loaded.items() if m is None]
     # Newest by the recorded epoch, not the local-time stamp in the name (review M2: a DST fall-back hour reorders
     # names); the name's collision suffix breaks ties within one second.

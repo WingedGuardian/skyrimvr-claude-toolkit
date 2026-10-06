@@ -733,9 +733,100 @@ def test_pruning_stops_at_its_deadline(tmp_path, monkeypatch):
     a.write_bytes(b"a333")
     snap(tmp_path, now=at(20))
     before = snapshot.manifest_names(store(tmp_path))
-    snapshot.prune(store(tmp_path), time.time(), audit_mod.Audit(str(tmp_path)), deadline=0.0)   # already past
+    # One tick per reading: the three manifests load inside the box (ticks 0-2), the first deletion meets it (tick 3).
+    ticks = iter(range(1000))
+    monkeypatch.setattr(snapshot, "_walk_clock", lambda: float(next(ticks)))
+    snapshot.prune(store(tmp_path), time.time(), audit_mod.Audit(str(tmp_path)), deadline=3.0)
     assert snapshot.manifest_names(store(tmp_path)) == before
     assert "PRUNE-PARTIAL" in log_text(tmp_path)
+
+
+def test_pruning_loads_no_manifest_once_its_deadline_has_passed(tmp_path, monkeypatch):
+    """Task 14 re-review N1: loading every manifest ran before the first deadline check (~5 ms each, cold), so a
+    store with hundreds of snapshots could hold one tool call for seconds."""
+    full_maps(monkeypatch)
+    a = put(tmp_path, "Data/Scripts/a.pex", b"a1")
+    snap(tmp_path, now=at(40))
+    a.write_bytes(b"a22")
+    snap(tmp_path, now=at(30))
+    loads = []
+    real = snapshot._load_manifest
+    monkeypatch.setattr(snapshot, "_load_manifest", lambda s, n: loads.append(n) or real(s, n))
+    snapshot.prune(store(tmp_path), time.time(), audit_mod.Audit(str(tmp_path)), deadline=0.0)   # already past
+    assert loads == [] and "PRUNE-PARTIAL" in log_text(tmp_path)
+
+
+def test_materialise_refuses_a_non_string_hash_with_a_valueerror(tmp_path):
+    """Task 14 re-review N2: a tampered manifest holding a number raised TypeError, which no caller expects."""
+    put(tmp_path, "Data/Scripts/a.pex", b"a")
+    snap(tmp_path)
+    name = snapshot.manifest_names(store(tmp_path))[-1]
+    p = store(tmp_path) / "manifests" / name
+    m = json.loads(p.read_bytes().decode("utf-8"))
+    m["set"] = {"Data/Scripts/a.pex": 12345}
+    p.write_bytes(json.dumps(m).encode("ascii"))
+    with pytest.raises(ValueError, match="refusing"):
+        snapshot.materialise(str(tmp_path), name, str(tmp_path / "out"))
+
+
+@needs_windows
+def test_a_file_hard_linked_after_it_was_indexed_is_rechecked(tmp_path):
+    """Task 14 re-review N3: a path indexed with one link was never re-stat'd, so a hard link made LATER (mklink /H
+    into a staging folder) and edited through hid the edit: the Data listing keeps its own stale size/mtime."""
+    p = put(tmp_path, "Data/Scripts/mine.pex", b"original")
+    snap(tmp_path)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    os.link(str(p), str(staging / "mine.pex"))
+    with open(str(staging / "mine.pex"), "wb") as fh:
+        fh.write(b"edited through a link made after indexing")
+    snap(tmp_path, now=later())
+    assert latest(tmp_path)["Data/Scripts/mine.pex"] == sha(b"edited through a link made after indexing")
+
+
+def test_a_link_count_found_by_the_sweep_is_kept_in_the_index(tmp_path):
+    """The sweep's finding must persist even when the content did not change, or the next comparisons never re-stat
+    the file and an edit through the other link waits for the sweep to come round again."""
+    p = put(tmp_path, "Data/Scripts/mine.pex", b"original")
+    snap(tmp_path)
+    (tmp_path / "staging").mkdir()
+    os.link(str(p), str(tmp_path / "staging" / "mine.pex"))
+    snap(tmp_path, now=later())
+    idx = json.loads((store(tmp_path) / "index.json").read_bytes().decode("utf-8"))
+    assert idx["files"]["Data/Scripts/mine.pex"][3] == 2
+
+
+def _linked_pair(tmp_path):
+    (tmp_path / "Data" / "Scripts").mkdir(parents=True)
+    for n in ("l0.pex", "l1.pex"):
+        s = put(tmp_path, "staging/" + n, b"v1 " + n.encode())
+        os.link(str(s), str(tmp_path / "Data" / "Scripts" / n))
+
+
+def test_a_garbled_restat_cursor_restarts_the_pass(tmp_path):
+    """Re-review N6: the cursor is a small sidecar written without fsync; torn or garbled, it must restart the pass,
+    never raise into the hook."""
+    _linked_pair(tmp_path)
+    snap(tmp_path)
+    (store(tmp_path) / snapshot.RESTAT_CURSOR).write_bytes(b"\xff\xfe\x00 not utf-8")
+    for n in ("l0.pex", "l1.pex"):
+        with open(str(tmp_path / "staging" / n), "wb") as fh:
+            fh.write(b"version two of " + n.encode())
+    snap(tmp_path, now=later())
+    m = latest(tmp_path)
+    assert m["Data/Scripts/l0.pex"] == sha(b"version two of l0.pex")
+
+
+def test_a_completed_restat_pass_removes_its_cursor(tmp_path, monkeypatch):
+    _linked_pair(tmp_path)
+    snap(tmp_path)
+    monkeypatch.setattr(snapshot, "RESTAT_BOX", 0.0)   # one re-stat per comparison: the pass stops and leaves a cursor
+    snap(tmp_path, now=later(1))
+    cursor = store(tmp_path) / snapshot.RESTAT_CURSOR
+    assert cursor.is_file()
+    monkeypatch.setattr(snapshot, "RESTAT_BOX", 60.0)
+    snap(tmp_path, now=later(2))
+    assert not cursor.exists(), "a finished pass must not leave a cursor the next pass would start from"
 
 
 def test_pruning_orders_snapshots_by_their_recorded_time_not_their_name(tmp_path, monkeypatch):

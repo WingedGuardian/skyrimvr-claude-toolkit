@@ -4276,7 +4276,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SNT + "test_materialise_refuses_a_path_that_leaves_its_target[drive]", "l2-snap-r1-materialise-drive"),
     (_SN, 'or "\\\\" in rel or', "or",
      _SNT + "test_materialise_refuses_a_path_that_leaves_its_target[backslash]", "l2-snap-r1-materialise-backslash"),
-    (_SN, "        if not _BLOB.match(sha) or", "        if",
+    (_SN, "        if not isinstance(sha, str) or not _BLOB.match(sha) or", "        if",
      _SNT + "test_materialise_refuses_a_malformed_hash", "l2-snap-r1-materialise-hash-shape"),
     (_SN, 'shutil.copyfile(str(store / "blobs" / sha), str(part))\n            os.replace(str(part), str(target))',
      'shutil.copyfile(str(store / "blobs" / sha), str(target))',
@@ -4433,3 +4433,25 @@ MUTATIONS += [
                  "tests/test_skydoctor.py::test_layer1_an_empty_instruction_file_is_not_live",
                  id="l2-doctor-empty-instructions"),
 ]
+
+
+# Plan 6 Task 15, part 1: the Task 14 re-review minors that live in snapshot.py (task-14-rereview.md N1-N3, N6).
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_SN, "        if late():\n            return _pruned(store, now, audit, 0, stopped=True)\n        loaded[n]",
+     "        if False:\n            return _pruned(store, now, audit, 0, stopped=True)\n        loaded[n]",
+     _SNT + "test_pruning_loads_no_manifest_once_its_deadline_has_passed", "l2-snap-r3-prune-load-in-box"),
+    (_SN, "not isinstance(sha, str) or not _BLOB", "not _BLOB",
+     _SNT + "test_materialise_refuses_a_non_string_hash_with_a_valueerror", "l2-snap-r3-materialise-hash-type"),
+    (_SN, "    relinked = _sweep_links(root, store, files, seen)\n", "    relinked = 0\n",
+     _SNT + "test_a_file_hard_linked_after_it_was_indexed_is_rechecked", "l2-snap-r3-sweep"),
+    (_SN, "            seen[rel] = (st.st_size, st.st_mtime_ns)\n            relinked += 1",
+     "            relinked += 1",
+     _SNT + "test_a_file_hard_linked_after_it_was_indexed_is_rechecked", "l2-snap-r3-sweep-real-stat"),
+    (_SN, " or links_changed or relinked:", " or links_changed:",
+     _SNT + "test_a_link_count_found_by_the_sweep_is_kept_in_the_index", "l2-snap-r3-sweep-persisted"),
+    (_SN, "    except (OSError, UnicodeDecodeError):\n        after = \"\"", "    except OSError:\n        after = \"\"",
+     _SNT + "test_a_garbled_restat_cursor_restarts_the_pass", "l2-snap-r3-cursor-garbage"),
+    (_SN, "        elif cursor_file.exists():\n            cursor_file.unlink()",
+     "        elif False:\n            cursor_file.unlink()",
+     _SNT + "test_a_completed_restat_pass_removes_its_cursor", "l2-snap-r3-cursor-unlink"),
+]]
