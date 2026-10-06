@@ -4463,3 +4463,90 @@ _P5F_CLAUSES = [
      "    if False:", "tests/test_intent_diff.py::test_main_writes_utf8_whatever_the_console_encoding"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _P5F_CLAUSES]
+
+
+# --- Plan 8 T9: the 3.x -> 4.0 migration (tools/migrate-3x.py, tools/pre-update-snapshot.sh) ----------------
+# One row per clause that decides "shipped" vs "yours", what is read, what is kept, and what is never copied.
+# Not mutated (said so, not hidden): the exclusive-create `open(target, "xb")` behind the suffixed settings
+# backup -- shadowed by the suffix choice, it only matters in a race no test can stage -- and the snapshot's
+# `cmp -s` read-back, which no test can make a working `cp` fail.
+_M3 = "tools/migrate-3x.py"
+_M3T = "tests/test_migrate_3x.py::"
+_SN = "tools/pre-update-snapshot.sh"
+_M3_CLAUSES = [
+    # A placeholder value may not hold a backtick: a note the user wrote after a path is theirs, not setup's.
+    ("m3x-placeholder-value-excludes-backticks", _M3, '        parts.append("([^`' + BS + 'n]*)")',
+     '        parts.append("(.*)")',
+     _M3T + "test_an_edit_anywhere_is_not_mistaken_for_the_shipped_file[a note in backticks on a path line]"),
+    # The same placeholder must hold the same value on every line it appears.
+    ("m3x-same-placeholder-same-value", _M3, "if values.setdefault(name, value) != value:", "if False:",
+     _M3T + "test_an_edit_anywhere_is_not_mistaken_for_the_shipped_file[the mods path changed in one of its two places]"),
+    # The recorded paths (3.9 skyrim-paths.env) must agree with the file.
+    ("m3x-recorded-paths-cross-check", _M3, "if name in values and values[name] != recorded:", "if False:",
+     _M3T + "test_a_hand_corrected_path_is_kept_when_the_install_recorded_another"),
+    # The spliced mod-manager block must be one setup.sh could write, line for line.
+    ("m3x-block-must-be-a-shipped-block", _M3,
+     'and not any(_block_matches(lines[start:end], v) for v in block["variants"]):', "and False:",
+     _M3T + "test_an_edit_anywhere_is_not_mistaken_for_the_shipped_file[inside the MO2 block]"),
+    # CRLF is not an edit.
+    ("m3x-crlf-folded", _M3,
+     '    return data.decode("utf-8", "surrogateescape").replace("' + BS + "r" + BS + 'n", "' + BS + 'n")',
+     '    return data.decode("utf-8", "surrogateescape")',
+     _M3T + "test_a_real_391_rendering_is_recognised_as_shipped[crlf-stock]"),
+    # Each 4.x sign alone marks the live install as not-3.x (one twin per clause: each shadows the others).
+    ("m3x-era-4x-instruction-file", _M3, "if p and GENERATED_4X.match(norm(p.read_bytes())):", "if False:",
+     _M3T + "test_one_4x_file_is_enough_to_skip_the_live_files[CLAUDE.md]"),
+    ("m3x-era-4x-settings", _M3, "if p and SETTINGS_4X in norm(p.read_bytes()):", "if False:",
+     _M3T + "test_one_4x_file_is_enough_to_skip_the_live_files[settings]"),
+    ("m3x-era-4x-codex", _M3, "        if self.codex:", "        if False:",
+     _M3T + "test_one_4x_file_is_enough_to_skip_the_live_files[codex]"),
+    # The kb-guard store is a source at all (the no-snapshot path) ...
+    ("m3x-kb-store-is-a-source", _M3, "        cands.append(kb)", "        pass",
+     _M3T + "test_without_a_snapshot_the_kb_guard_copy_is_used"),
+    # ... and only its NEWEST copy counts (an old edited 3.x copy is history once a 4.x session ran).
+    ("m3x-kb-store-newest-copy", _M3,
+     "        d = _newest([d for d in store.iterdir() if (d / name).is_file()])",
+     '        d = min([d for d in store.iterdir() if (d / name).is_file()] or [None], key=lambda x: x.name if x else "")',
+     _M3T + "test_the_kb_guard_store_is_ignored_once_a_4x_session_ran"),
+    # Idempotence: the state record (a deleted block stays deleted) and the marker (a lost state file).
+    ("m3x-state-remembers-carried", _M3, "if key in carried or (name, digest) in present:",
+     "if (name, digest) in present:", _M3T + "test_a_block_the_user_deleted_does_not_come_back"),
+    ("m3x-marker-remembers-carried", _M3, "if key in carried or (name, digest) in present:",
+     "if key in carried:", _M3T + "test_a_lost_state_file_does_not_duplicate_a_block"),
+    # Blocks are read structurally: a marker inside carried text is content, not a block.
+    ("m3x-blocks-read-structurally", _M3, 'if open_key is None and kind == "BEGIN":', 'if kind == "BEGIN":',
+     _M3T + "test_hostile_content_is_copied_verbatim_and_never_becomes_preferences[absent]"),
+    # A `## My preferences` heading ahead of the blocks, so carried text never becomes the injected preferences.
+    ("m3x-prefs-heading-ahead-of-blocks", _M3,
+     '            prefix = "' + BS + "n## My preferences" + BS + "n" + BS + 'n"', '            prefix = ""',
+     _M3T + "test_hostile_content_is_copied_verbatim_and_never_becomes_preferences[no-prefs-section]"),
+    # The fence outgrows any backtick run in the carried text.
+    ("m3x-fence-outgrows-content", _M3, '    return "`" * max(4, longest + 1)', '    return "````"',
+     _M3T + "test_hostile_content_is_copied_verbatim_and_never_becomes_preferences[absent]"),
+    # The old KNOWLEDGEBASE.local.md is backed up BEFORE it is rewritten.
+    ("m3x-local-kb-backed-up-first", _M3,
+     '            (run_dir / (LOCAL_KB + ".before")).write_bytes(local_bytes)', "            pass",
+     _M3T + "test_upgrade_from_391_with_edits_keeps_every_edit"),
+    # A different existing .3x-backup is never overwritten.
+    ("m3x-settings-backup-not-overwritten", _M3,
+     '                    target = root / ".claude" / "settings.json.3x-backup.{}".format(digest[:12])',
+     "                    pass", _M3T + "test_an_existing_different_settings_backup_is_never_overwritten"),
+    # Notes appended to a shipped KNOWLEDGEBASE.md are carried as text.
+    ("m3x-kb-appended-notes-carried", _M3,
+     '        if len(raw) > n and hashlib.sha256(raw[:n]).hexdigest() == spec["sha256"]:', "        if False:",
+     _M3T + "test_upgrade_from_391_with_edits_keeps_every_edit"),
+    # pre-update-snapshot.sh: copies what the new toolkit would overwrite ...
+    ("snap-copies-what-the-update-overwrites", _SN,
+     "rel=${rel#./}\n        [ -f \"$TARGET/$rel\" ] && printf", "rel=${rel#./}\n        false && printf",
+     _M3T + "test_snapshot_copies_what_the_update_replaces_and_changes_nothing"),
+    # ... but never enumerates the install itself, another game folder, or a backups folder.
+    ("snap-not-from-the-install-itself", _SN, '[ "$SRC" != "$TARGET" ] && ', "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[the install itself]"),
+    ("snap-not-from-a-game-folder", _SN, '[ ! -f "$SRC/SkyrimVR.exe" ] && ', "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[another game folder]"),
+    ("snap-backups-pruned", _SN, " -o -path ./.claude/backups", "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[unpacked toolkit]"),
+    ("snap-unique-stamp", _SN, 'while [ -e "$BACKUPS/pre-update-$STAMP" ]; do', "while false; do",
+     _M3T + "test_two_snapshots_in_one_second_do_not_share_a_folder"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _M3_CLAUSES]
