@@ -294,7 +294,8 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
 
 def main(argv, out=None):
     out = sys.stdout if out is None else out
-    ap = argparse.ArgumentParser(prog="skyguard snapshot", add_help=False)
+    # Fix round 2 (N1): no abbreviated options -- `--in` must not run as --in-place unseen by the guard's rule.
+    ap = argparse.ArgumentParser(prog="skyguard snapshot", add_help=False, allow_abbrev=False)
     ap.add_argument("action", nargs="?", choices=("list", "restore"))
     ap.add_argument("id", nargs="?")
     ap.add_argument("--kind", choices=_KINDS)

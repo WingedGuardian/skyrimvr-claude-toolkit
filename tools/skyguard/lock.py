@@ -979,16 +979,18 @@ def default_root() -> str:
 def main(argv=None, out=None) -> int:
     import argparse
     out = sys.stdout if out is None else out
-    ap = argparse.ArgumentParser(prog="skyguard lock", description="Layer 2 read-only lock (M-D, off by default).")
+    # Task 15 fix round 2 (N1): no abbreviated options anywhere in the CLI the guard rules read.
+    ap = argparse.ArgumentParser(prog="skyguard lock", description="Layer 2 read-only lock (M-D, off by default).",
+                                 allow_abbrev=False)
     sub = ap.add_subparsers(dest="cmd")
-    common = argparse.ArgumentParser(add_help=False)
+    common = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     common.add_argument("--root", default=None, help="the Skyrim install root (default: this toolkit's)")
     common.add_argument("--session", default=None, help="session id for the lift (default $SKYGUARD_SESSION_ID)")
     for name in ("lock", "disable", "enable"):
-        sub.add_parser(name, parents=[common])
-    up = sub.add_parser("unlock", parents=[common])
+        sub.add_parser(name, parents=[common], allow_abbrev=False)
+    up = sub.add_parser("unlock", parents=[common], allow_abbrev=False)
     up.add_argument("files", nargs="*")
-    sp = sub.add_parser("status", parents=[common])
+    sp = sub.add_parser("status", parents=[common], allow_abbrev=False)
     sp.add_argument("--json", action="store_true")
     try:
         a = ap.parse_args(argv)

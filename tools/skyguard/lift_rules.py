@@ -675,11 +675,20 @@ def restore_in_place(parsed) -> bool:
     order, INIs, saves or scripts -- a write into the install the other write rules never see (the CLI does it)."""
     for e in parsed.execs:
         args = cli_args(e)
-        if args is None:
+        if args is None or _HELP & set(args):
             continue
-        if _positionals(args)[:2] == ["snapshot", "restore"] and "--in-place" in args and not _HELP & set(args):
+        # Fix round 2 (N1): the verb is found by position-free search (`snapshot --in-place restore <id>` is accepted by
+        # argparse), and the flag in any spelling that could ever mean it -- the parser now refuses abbreviations
+        # (allow_abbrev=False), but `--in`, `--in-p` and `--in-place=...` still ask.
+        verb = "snapshot" in args and "restore" in args[args.index("snapshot") + 1:]
+        if verb and any(_in_place_flag(a) for a in args):
             return True
     return False
+
+
+def _in_place_flag(word: str) -> bool:
+    head = word.split("=", 1)[0]
+    return len(head) >= 4 and "--in-place".startswith(head)
 
 
 def _clean(name: str) -> str:

@@ -187,3 +187,7 @@ path:
 **Pricing S-RESTORE-INPLACE (ask)** with `price.py --base a1f24df` over 74,803 real tool calls: **0 changes in any
 direction.** No call in the history runs `skyguard snapshot restore --in-place`. The ask therefore costs nothing
 historically, and it covers a write into the install that no other write rule sees.
+
+- **Fix round 2** (the rule now matches any spelling of the verb and the flag, and the CLI parsers set
+  `allow_abbrev=False`): over 75,670 calls, **1 newly-ask, 0 other changes**. The one hit is the re-reviewer's own
+  probe of an abbreviated in-place restore (`--in`) in a scratch install, so it is a true positive.

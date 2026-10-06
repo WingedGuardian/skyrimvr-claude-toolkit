@@ -43,7 +43,7 @@ def guards_main(argv, out) -> int:
     import os
     import time
     from . import lock, state
-    ap = argparse.ArgumentParser(prog="skyguard guards", add_help=False)
+    ap = argparse.ArgumentParser(prog="skyguard guards", add_help=False, allow_abbrev=False)
     ap.add_argument("action", nargs="?", choices=("off", "on", "status"))
     ap.add_argument("--project", "--root", dest="project", default=None)
     ap.add_argument("--session", default=None)

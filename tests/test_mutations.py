@@ -4625,8 +4625,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/shell_rules.py", "    if lift_rules.restore_in_place(parsed):", "    if False:",
      _SCT + "test_the_guard_asks_before_an_in_place_restore[bash tools/skyguard.sh snapshot restore "
      "20261005_120000-config --in-place]", "rule-S-RESTORE-INPLACE-fires"),
-    ("tools/skyguard/lift_rules.py", ' and "--in-place" in args and not _HELP & set(args):',
-     " and not _HELP & set(args):", _SCT + "test_the_guard_lets_a_restore_to_a_new_folder_through",
+    ("tools/skyguard/lift_rules.py", "        if verb and any(_in_place_flag(a) for a in args):",
+     "        if verb:", _SCT + "test_the_guard_lets_a_restore_to_a_new_folder_through",
      "rule-S-RESTORE-INPLACE-only-in-place"),
     # M8: an unreadable blob is a refusal
     (_SC, '    except OSError as e:' + "\n" + '        print("REFUSED: a stored copy',
@@ -4647,3 +4647,27 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 MUTATIONS.append(pytest.param(_RC, "    if free is not None and free - total < SAVE_RESERVE_BYTES:", "    if False:",
                               _RCT + "test_a_save_that_would_fill_the_drive_is_skipped_and_says_why",
                               id="l2-rec-fr1-m2-reserve"))
+
+
+# Plan 6 Task 15 fix round 2 (task-15-rereview.md N1-N3).
+_SCR = _SCT + "test_the_guard_asks_for_every_spelling_of_an_in_place_restore"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/lift_rules.py",
+     '        verb = "snapshot" in args and "restore" in args[args.index("snapshot") + 1:]',
+     '        verb = list(args[:2]) == ["snapshot", "restore"]', _SCR + "[option-first]",
+     "rule-S-RESTORE-INPLACE-verb-anywhere"),
+    ("tools/skyguard/lift_rules.py", '    return len(head) >= 4 and "--in-place".startswith(head)',
+     '    return word == "--in-place"', _SCR + "[abbrev-in]", "rule-S-RESTORE-INPLACE-flag-spellings"),
+    (_SC, 'prog="skyguard snapshot", add_help=False, allow_abbrev=False)', 'prog="skyguard snapshot", add_help=False)',
+     _SCT + "test_the_cli_refuses_an_abbreviated_in_place[--in]", "l2-restore-fr2-no-abbrev-snapshot"),
+    ("tools/skyguard/cli.py", 'prog="skyguard guards", add_help=False, allow_abbrev=False)',
+     'prog="skyguard guards", add_help=False)',
+     _SCT + "test_no_skyguard_subcommand_takes_an_abbreviated_option[guards]", "l2-restore-fr2-no-abbrev-guards"),
+    ("tools/skyguard/lock.py", '    sp = sub.add_parser("status", parents=[common], allow_abbrev=False)',
+     '    sp = sub.add_parser("status", parents=[common])',
+     _SCT + "test_no_skyguard_subcommand_takes_an_abbreviated_option[lock-json]", "l2-restore-fr2-no-abbrev-lock-status"),
+    # No twin for the common parent parser's allow_abbrev: a parent only lends its arguments; the subparser's own
+    # setting decides (the status subparser's twin above covers it).
+    (_RC, '(?:-' + BS + 'd+)?' + BS + 'Z")', '(?:-' + BS + 'd+)?$")',
+     _SCT + "test_a_recovery_id_with_a_trailing_newline_is_not_an_id", "l2-rec-fr2-id-anchor"),
+]]

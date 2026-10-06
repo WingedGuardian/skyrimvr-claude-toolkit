@@ -227,6 +227,50 @@ def test_the_guard_asks_before_an_in_place_restore(inst, cmd):
     assert v.decision == "ask" and "S-RESTORE-INPLACE" in [r for r, _d in inst.audit.fired]
 
 
+@pytest.mark.parametrize("cmd,shell", [
+    ("bash tools/skyguard.sh snapshot restore 20261005_120000-config --in", "bash"),
+    ("bash tools/skyguard.sh snapshot restore 20261005_120000-config --in-p", "bash"),
+    ("bash tools/skyguard.sh snapshot --in-place restore 20261005_120000-config", "bash"),
+    ("bash tools/skyguard.sh snapshot restore 20261005_120000-config --in-place=1", "bash"),
+    ("tools\\skyguard.cmd snapshot restore 20261005_120000-config --in-place", "powershell"),
+    ("py -3 tools/skyguard snapshot restore 20261005_120000-config --in-place", "bash"),
+    ("python -m skyguard snapshot --project x restore 20261005_120000-config --in-place", "bash"),
+], ids=["abbrev-in", "abbrev-in-p", "option-first", "equals", "cmd-launcher", "py-3", "python-m"])
+def test_the_guard_asks_for_every_spelling_of_an_in_place_restore(inst, cmd, shell):
+    """Fix round 2, N1 (MEASURED by the re-reviewer: `--in`, `--in-p` and `snapshot --in-place restore` restored in place
+    while the rule said allow). N2: the .cmd and python launcher forms."""
+    v = recovery.shell_rules.decide(cmd, inst.roots, inst.audit, shell=shell, env={})
+    assert v.decision == "ask", v
+
+
+@pytest.mark.parametrize("flag", ["--in", "--in-p", "--in-plac"])
+def test_the_cli_refuses_an_abbreviated_in_place(inst, flag):
+    """Only the full spelling runs (allow_abbrev=False), so the guard's rule and the CLI read the same flag."""
+    take_all(inst)
+    put(inst.lo / "plugins.txt", b"*Broken.esp\n")
+    rc, _text = cli_run(inst, "restore", ids(inst, "config")[0], flag)
+    assert rc == 2 and (inst.lo / "plugins.txt").read_bytes() == b"*Broken.esp\n"
+
+
+@pytest.mark.parametrize("full,short", [
+    (["guards", "status", "--project", "{d}"], ["guards", "status", "--proj", "{d}"]),
+    (["lock", "status", "--json", "--root", "{d}"], ["lock", "status", "--js", "--root", "{d}"]),
+], ids=["guards", "lock-json"])
+def test_no_skyguard_subcommand_takes_an_abbreviated_option(tmp_path, full, short):
+    """Fix round 2, N1: the full spelling runs (its own output), the abbreviation is a usage error with none of it."""
+    d = str(tmp_path)
+    ok, bad = io.StringIO(), io.StringIO()
+    cli.main([a.format(d=d) for a in full], out=ok)
+    rc = cli.main([a.format(d=d) for a in short], out=bad)
+    assert ok.getvalue().strip(), "the control must produce output"
+    assert rc == 2 and ok.getvalue().strip()[:12] not in bad.getvalue()
+
+
+def test_a_recovery_id_with_a_trailing_newline_is_not_an_id():
+    """Fix round 2, N3: `$` also matches before a final newline; `\\Z` does not."""
+    assert recovery._ID.match("20261005_120000-config") and not recovery._ID.match("20261005_120000-config\n")
+
+
 def test_the_guard_lets_a_restore_to_a_new_folder_through(inst):
     v = recovery.shell_rules.decide("bash tools/skyguard.sh snapshot restore 20261005_120000-config --to out",
                                     inst.roots, inst.audit, env={})

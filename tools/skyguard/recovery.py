@@ -76,7 +76,7 @@ PRUNE_EVERY = DAY
 PRUNE_BOX = 0.5
 COSAVE = ".skse"
 _BLOB = re.compile(r"^[0-9a-f]{64}$")
-_ID = re.compile(r"^\d{8}_\d{6}-(config|save)(?:-\d+)?$")
+_ID = re.compile(r"^\d{8}_\d{6}-(config|save)(?:-\d+)?\Z")   # \Z: `$` also matches before a final newline
 _MB = 1024 * 1024
 
 
