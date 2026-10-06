@@ -31,7 +31,7 @@ DECISION_ROLES = ("protect-bash", "protect-files", "protect-mcp")
 
 
 ENV_UNREADABLE = (
-    "GUARD INERT: protect-bash.sh found .claude/skyrim-paths.env but could not read it, so it cannot tell "
+    "GUARD INERT: protect-bash.sh found skyrim-paths.env but could not read it, so it cannot tell "
     "which directories are the Skyrim install. Refusing rather than guarding the wrong set. "
     "Fix or delete that file (re-run setup.sh)."
 )
@@ -84,14 +84,15 @@ def _engine_budget() -> float:
 
 
 def _declared_env(a):
-    """The install's declared roots (.claude/skyrim-paths.env), or None when it exists but cannot be read."""
+    """The install's declared roots (skyrim-paths.env at the root, else the legacy .claude/ one: paths.read_install),
+    or None when the file it reads exists but cannot be read. No root reads no file (deferred item 9)."""
     try:
-        cfg = paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))
+        cfg = paths.read_install(a.root_win or a.root, dict(os.environ))
         # rt-fix-b: hooks run from a git worktree's copy: the main tree's paths file (untracked, so absent from the
         # worktree) declares the config and MO2 folders too. Union, as R3 does for every root.
         main = paths.main_worktree(a.root_win or a.root)
         if main:
-            cfg = paths.merge_configs(cfg, paths.read_env(Path(main) / ".claude" / "skyrim-paths.env", {}))
+            cfg = paths.merge_configs(cfg, paths.read_install(main, {}))
         return cfg
     except (OSError, ValueError):
         return None

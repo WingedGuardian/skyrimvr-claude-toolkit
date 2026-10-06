@@ -7,7 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import guard_hash, prefs
+from . import guard_hash, paths, prefs
 
 HOOK = "session-kb-guard"
 
@@ -294,7 +294,9 @@ def run_status(project, source, bash, audit):
     if source == "compact":
         # no snapshot on compact (R4: prefs survive), no clearing (R9); only the standing disable notice
         return _with_prefs(banners, project, audit), "evaluated", "session"
-    tool = "{}/tools/kb-guard.sh".format(project)
+    # Plan 8 T8: the legacy paths-file location is announced here, once per session start -- never per tool call.
+    banners = "\n".join(t for t in (banners, paths.legacy_notice(project)) if t)
+    tool ="{}/tools/kb-guard.sh".format(project)
     if not Path(tool).is_file():
         audit.raw("[{}] {} NOT RUN: tools/kb-guard.sh missing\n".format(audit.stamp(), HOOK))
         missing = "KB GUARD: NOT RUN -- {} is missing, so your knowledgebase was NOT snapshotted this session.".format(tool)

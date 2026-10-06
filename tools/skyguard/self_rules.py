@@ -9,9 +9,9 @@ Two protected classes, both decided on where a path RESOLVES (targets), never on
   STATE  `.skyguard/**` in the install: the on/off state (state.json) and the lock manifest. Only tools/skyguard writes
          it, so any other write is refused (S-SELF-STATE / W-SELF-STATE). The CLI's own run is never a write primitive
          here, so `bash tools/skyguard.sh guards off` is S-LIFT-NOTE, not this.
-  GUARD  the guard code and config: `.claude/hooks/**`, `.claude/settings*.json`, `.claude/skyrim-paths.env` (red team
-         F5: the declared roots), `.codex/**`, `tools/skyguard/**`, `agent/guards/**`, the telemetry the canary and
-         shadow mode read (`.claude/backups/.hook-heartbeat/**`, `.claude/backups/AUDIT_LOG.txt`; Task 9 review (e)),
+  GUARD  the guard code and config: `.claude/hooks/**`, `.claude/settings*.json`, `skyrim-paths.env` at the install root
+         and its legacy `.claude/skyrim-paths.env` (red team F5: the declared roots; Plan 8 T8), `.codex/**`,
+         `tools/skyguard/**`, `agent/guards/**`, the telemetry the canary and shadow mode read (`.claude/backups/.hook-heartbeat/**`, `.claude/backups/AUDIT_LOG.txt`; Task 9 review (e)),
          and the user-level `~/.claude/settings*.json` and `~/.codex/config.toml` (S-SELF-GUARD / W-SELF-GUARD, priced).
 
 A path counts in either install folder the roots know (the hook's own root and a declared game root). A scratch copy
@@ -81,6 +81,8 @@ def install_kind(rel: List[str]) -> str:
     if rel[:2] in ([".claude", "hooks"], ["tools", "skyguard"], ["agent", "guards"]) and len(rel) >= 2:
         return GUARD
     if rel[0] == ".claude" and len(rel) == 2 and (_settings(rel[1]) or rel[1] == "skyrim-paths.env"):
+        return GUARD
+    if rel == ["skyrim-paths.env"]:                  # Plan 8 T8: the paths file's own location, the toolkit root
         return GUARD
     if rel[:3] == [".claude", "backups", ".hook-heartbeat"] or rel == [".claude", "backups", "audit_log.txt"]:
         return GUARD
