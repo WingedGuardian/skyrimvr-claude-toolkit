@@ -1,7 +1,7 @@
 r"""Agent self-protection (Plan 6 Task 12, R12): the guards' own state, code and config.
 
     kind_of(abs_path, roots, env)                     -> ("state" | "guard" | "", basename)
-    shell_scan(command, parsed, roots, cwd, env)      -> ("state" | "guard", basename) | None
+    shell_scan(command, parsed, roots, cwd, env)      -> ("state" | "guard", basename, op) | None
     text_kind(path)                                   -> the same answer from the path's words alone (no roots)
 
 Two protected classes, both decided on where a path RESOLVES (targets), never on words in the command:
@@ -27,7 +27,10 @@ THE SHELL ROUTES (shell_scan), each operand resolved against the payload cwd:
   - `git checkout`/`git restore` with a pathspec that is, or holds, a guard file (red team F3);
   - T8 fix round 1: a create-without-content program (`touch`, `install`'s destination, cmd `mklink`'s link name), a
     link whose SOURCE is a guard file (`ln`, `mklink`, New-Item -ItemType HardLink/SymbolicLink/Junction), and an NTFS
-    stream spelling of either class (`x::$DATA`, read as x like the plugin rules' targets.STREAM).
+    stream spelling of either class (`x::$DATA`, read as x like the plugin rules' targets.STREAM);
+  - T8 fix round 2: `cp -l/--link/-s/--symbolic-link` (a copy that is an alias), `fsutil hardlink create`, New-Item
+    `-Type` (the alias of -ItemType), and the .NET [IO.File]/[IO.Directory]::CreateSymbolicLink/CreateHardLink calls.
+    The S-SELF-GUARD note names the verb: "edits", "creates" or "makes a link to".
 NOT covered (residue, R6): interpreter code that writes these files (`python -c "open(...).write"`), a branch switch
 (`git checkout <branch>` rewrites tracked hooks with no pathspec), and environment tamper (setx, red team F7).
 """
@@ -159,6 +162,8 @@ _INSTALL_VALUED = frozenset(("-m", "--mode", "-o", "--owner", "-g", "--group", "
 # in any later command. The plugin rules do not refuse a plugin link, so the priced classes apply (GUARD note,
 # STATE deny), never a new refusal.
 _PS_LINK_TYPES = ("hardlink", "symboliclink", "junction")
+# Review N4 (fix round 2): the note's verb says what the route does to the guard file.
+EDITS, CREATES, LINKS = "edits", "creates", "makes a link to"
 
 
 def _touch_operands(argv) -> List[str]:
@@ -221,8 +226,19 @@ def resolve_own(resolve, word: str) -> Optional[str]:
     return a
 
 
-def _routes(e) -> List[Tuple[str, bool]]:
-    """(word, holder) for every operand this exec writes, replaces, moves away or re-permissions."""
+def _short(w: str, letters: str) -> bool:
+    """A short-option cluster (`-al`, not `--link`) holding any of `letters`."""
+    return w.startswith("-") and not w.startswith("--") and len(w) > 1 and any(c in w[1:] for c in letters)
+
+
+def _cp_links(argv) -> bool:
+    """`cp -l` / `--link` (hard links) or `-s` / `--symbolic-link`: the copy is an ALIAS of its source, not a copy."""
+    return any(w in ("--link", "--symbolic-link") or _short(w, "ls") for w in argv)
+
+
+def _routes(e) -> List[Tuple[str, bool, str]]:
+    """(word, holder, op) for every operand this exec writes, replaces, moves away or re-permissions -- or, T8 fix
+    rounds 1-2, creates empty or makes a link to. `op` is the verb the S-SELF-GUARD note uses (review N4)."""
     from . import writes
     from .shellparse import ps_param
     out = [(w, False) for w in writes.write_targets(e)]
@@ -241,16 +257,26 @@ def _routes(e) -> List[Tuple[str, bool]]:
         words = _plain(argv)
         if len(words) >= 2:
             out.append((words[-1], False))
-        out += [(w, False) for w in (words[:-1] if len(words) >= 2 else words)]     # P2: the link's source(s)
+        out += [(w, False, LINKS) for w in (words[:-1] if len(words) >= 2 else words)]   # P2: the link's source(s)
     elif p == "touch":
-        out += [(w, False) for w in _touch_operands(argv)]                           # I1
+        out += [(w, False, CREATES) for w in _touch_operands(argv)]                      # I1
     elif p == "install":
-        out += [(w, False) for w in _install_targets(argv)]                          # I1
+        out += [(w, False) for w in _install_targets(argv)]                              # I1 (a copy: it writes)
     elif p == "mklink":
         words = [w for w in argv if not w.startswith("/")]
-        out += [(w, False) for w in words[:2]]                   # I1 the link name; P2 its target (the source)
-    elif p == "new-item" and any(t.lower() in _PS_LINK_TYPES for t in ps_param(e, "itemtype")):
-        out += [(w, False) for w in list(ps_param(e, "target")) + list(ps_param(e, "value"))]   # P2
+        out += [(w, False, CREATES) for w in words[:1]]                                  # I1 the link name
+        out += [(w, False, LINKS) for w in words[1:2]]                                   # P2 its target (the source)
+    elif p == "new-item" and any(t.lower() in _PS_LINK_TYPES
+                                 for t in list(ps_param(e, "itemtype")) + list(ps_param(e, "type"))):
+        out += [(w, False, LINKS) for w in list(ps_param(e, "target")) + list(ps_param(e, "value"))]   # P2
+    elif p == "fsutil" and [w.lower() for w in argv[:2]] == ["hardlink", "create"]:
+        out += [(w, False, CREATES) for w in argv[2:3]]                                  # r2 N2: the new name...
+        out += [(w, False, LINKS) for w in argv[3:4]]                                    # ...and the existing file
+    elif p in ("io.file.link", "io.directory.link"):
+        out += [(w, False, CREATES) for w in argv[:1]] + [(w, False, LINKS) for w in argv[1:2]]   # r2 N2: .NET
+    elif p == "cp" and _cp_links(argv):
+        rec = any(_short(w, "aRr") or w in ("--recursive", "--archive") for w in argv)
+        out += [(s, rec, LINKS) for _, srcs in writes.copy_targets(e) for s in srcs]     # r2 N2: cp -l / -s
     elif p in ("chmod", "chown", "chgrp"):
         words = [w for w in argv if not w.startswith("-") and not w.startswith("--reference")]
         out += [(w, False) for w in words[1:]]
@@ -261,7 +287,7 @@ def _routes(e) -> List[Tuple[str, bool]]:
         out += [(w, False) for w in list(ps_param(e, "path", 0)) + list(ps_param(e, "literalpath"))]
     elif p == "git":
         out += [(w, True) for w in _git_restore(argv)]
-    return out
+    return [r if len(r) == 3 else (r[0], r[1], EDITS) for r in out]
 
 
 def _git_restore(argv) -> List[str]:
@@ -381,32 +407,33 @@ def _state_text(command: str, parsed) -> str:
 
 
 def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, str]] = None):
-    """(class, basename) of the first protected file a command writes, STATE before GUARD; None when it writes none."""
+    """(class, basename, op) of the first protected file a command writes, STATE before GUARD; None when it writes none.
+    op: EDITS / CREATES / LINKS, the verb of the S-SELF-GUARD note (T8 fix round 2, review N4)."""
     from . import deletes
     env = os.environ if env is None else env
     found = {}
     for e in parsed.execs:
         e = deletes.substituted(e)
-        for w, holder in _routes(e):
+        for w, holder, op in _routes(e):
             a = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), w)
             # Unresolved is never safe (targets.py) -- for the STATE class only, whose deny has no priced cost: a word
             # the resolver cannot place (`"$R/.skyguard/state.json"`) counts when its own words name `.skyguard`.
             k = kind_of(a, roots, env, holder) if a is not None else (STATE if text_kind(w) == STATE else "")
             if k and k not in found:
-                found[k] = re.split(r"[/\\]+", (a or w).rstrip("/\\"))[-1] or w
+                found[k] = (re.split(r"[/\\]+", (a or w).rstrip("/\\"))[-1] or w, op)
         if STATE not in found:
             hit = _state_delete(e, cwd, env, roots)
             if hit:
-                found[STATE] = hit
+                found[STATE] = (hit, EDITS)
     if STATE not in found:
         hit = _recycle_delete(command, parsed, cwd, env, roots)
         if hit:
-            found[STATE] = hit
+            found[STATE] = (hit, EDITS)
     if STATE not in found:
         hit = _state_text(command, parsed)
         if hit:
-            found[STATE] = hit
+            found[STATE] = (hit, EDITS)
     for k in (STATE, GUARD):
         if k in found:
-            return k, found[k]
+            return (k,) + found[k]
     return None

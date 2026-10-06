@@ -27,8 +27,14 @@ def _roots():
     return paths.roots(INST, "", {})
 
 
-def _scan(command, shell="bash", cwd=INST):
+def _full(command, shell="bash", cwd=INST):
     return self_rules.shell_scan(command, shellparse.parse(command, shell), _roots(), cwd, ENV0)
+
+
+def _scan(command, shell="bash", cwd=INST):
+    """(class, basename): what the route reaches. The verb is _full(...)[2]."""
+    got = _full(command, shell, cwd)
+    return got[:2] if got else None
 
 
 def _audit():
@@ -152,3 +158,66 @@ def test_a_hard_link_to_the_state_is_refused_as_state():
 ], ids=["outside", "not-a-guard-file", "new-item-file-value-is-content", "junction-outside"])
 def test_a_link_elsewhere_is_not(command, shell):
     assert _scan(command, shell) is None
+
+
+# ---- fix round 2 (re-review N2): more link and creator spellings -------------------------------------------------
+
+@pytest.mark.parametrize("command,shell", [
+    ("cp -l skyrim-paths.env /tmp/alias", "bash"),
+    ("cp --link .claude/hooks/protect-bash.sh /tmp/alias", "bash"),
+    ("cp -s '{}/skyrim-paths.env' /tmp/alias".format(INST), "bash"),
+    ("cp --symbolic-link .claude/settings.json /tmp/alias", "bash"),
+    ("cp -al .claude /tmp/aliasdir", "bash"),
+    ("fsutil hardlink create 'C:\\Temp\\alias' skyrim-paths.env", "bash"),
+    ("fsutil hardlink create C:\\Temp\\alias skyrim-paths.env", "powershell"),
+    ("New-Item -Type HardLink -Path C:/Temp/alias -Target skyrim-paths.env", "powershell"),
+    ("[IO.File]::CreateSymbolicLink('C:\\Temp\\alias', '{}/skyrim-paths.env')".format(INST), "powershell"),
+    ("[System.IO.File]::CreateHardLink('C:\\Temp\\alias', '{}/.claude/skyrim-paths.env')".format(INST), "powershell"),
+    ("[System.IO.Directory]::CreateSymbolicLink('C:\\Temp\\d', '{}/.claude/hooks')".format(INST), "powershell"),
+], ids=["cp-l", "cp-link", "cp-s", "cp-symbolic-link", "cp-al-folder", "fsutil-bash", "fsutil-powershell",
+        "new-item-type-alias", "dotnet-file-symlink", "dotnet-file-hardlink", "dotnet-directory-symlink"])
+def test_more_link_spellings_to_a_guard_file_get_the_note(command, shell):
+    got = _full(command, shell)
+    assert got is not None and got[0] == self_rules.GUARD and got[2] == self_rules.LINKS, got
+
+
+@pytest.mark.parametrize("command,shell", [
+    ("cp -l .skyguard/state.json /tmp/alias", "bash"),
+    ("fsutil hardlink create C:\\Temp\\alias .skyguard\\state.json", "powershell"),
+], ids=["cp-l", "fsutil"])
+def test_a_link_to_the_state_by_any_spelling_is_refused(command, shell):
+    assert _scan(command, shell) == (self_rules.STATE, "state.json")
+
+
+@pytest.mark.parametrize("command,shell", [
+    ("cp skyrim-paths.env /tmp/backup.env", "bash"),
+    ("cp -r Data/Scripts /tmp/scripts", "bash"),
+    ("cp -l /tmp/a /tmp/b", "bash"),
+    ("fsutil hardlink list skyrim-paths.env", "powershell"),
+    ("New-Item -Type File -Path C:/Temp/x -Value skyrim-paths.env", "powershell"),
+    ("[IO.File]::CreateSymbolicLink('C:\\Temp\\a', 'C:\\Temp\\b')", "powershell"),
+], ids=["plain-copy-reads-it", "plain-recursive-copy", "link-outside", "fsutil-list", "new-item-type-file",
+        "dotnet-outside"])
+def test_a_plain_copy_or_an_outside_link_is_not(command, shell):
+    assert _scan(command, shell) is None
+
+
+def test_fsutil_creating_the_link_name_at_a_guard_path_creates_it():
+    assert _full("fsutil hardlink create skyrim-paths.env C:\\Temp\\x", "powershell")[1:] == ("skyrim-paths.env",
+                                                                                               self_rules.CREATES)
+
+
+# ---- fix round 2 (re-review N4): the note's verb says what the command does --------------------------------------
+
+@pytest.mark.parametrize("command,shell,op", [
+    ("echo x > skyrim-paths.env", "bash", "edits"),
+    ("touch skyrim-paths.env", "bash", "creates"),
+    ("install -m644 /dev/null skyrim-paths.env", "bash", "edits"),
+    ("cmd //c mklink skyrim-paths.env C:\\\\x", "bash", "creates"),
+    ("ln skyrim-paths.env /tmp/alias", "bash", "makes a link to"),
+    ("cmd //c mklink /H C:\\\\Temp\\\\alias skyrim-paths.env", "bash", "makes a link to"),
+], ids=["redirect", "touch", "install", "mklink-name", "ln-source", "mklink-target"])
+def test_the_note_says_what_the_command_does(command, shell, op):
+    from skyguard import shell_rules
+    v = shell_rules.decide(command, _roots(), _audit(), cwd=INST, shell=shell, env=ENV0)
+    assert v.context == "Note: this command {} skyrim-paths.env, part of the safety guards themselves.".format(op), v

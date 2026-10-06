@@ -4270,7 +4270,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "rule-S-SELF-STATE-unresolved-fails-closed"),
     # ---- the wiring: shell, write, shadow, the patch Move
     (_SR6, "    if own and own[0] == self_rules.STATE:", "    if False:", _p12row("state-redirect"), "rule-S-SELF-STATE-wired"),
-    (_SR6, '    if own:\n        advise("S-SELF-GUARD", file=own[1])', "    if False:\n        pass",
+    (_SR6, '    if own:\n        advise("S-SELF-GUARD", file=own[1], op=own[2])', "    if False:\n        pass",
      _p12row("guard-hook-redirect"), "rule-S-SELF-GUARD-wired"),
     (_WR6, "    if own == self_rules.STATE:", "    if False:", _p12row("state-write-tool"), "rule-W-SELF-STATE-wired"),
     (_WR6, '    if own == self_rules.GUARD:\n        text = rules.message("W-SELF-GUARD"', '    if False:\n        text = rules.message("W-SELF-GUARD"',
@@ -6694,7 +6694,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_P8T8_PA, 'value != "" and key in ENV_KEYS and norm_abs(value) is None', 'value != "" and norm_abs(value) is None',
      _P8T8 + "test_a_non_path_skyguard_python_is_kept[launcher]", "p8t8-abs-rule-roots-only"),
     # the deprecation notice names the legacy location only
-    (_P8T8_PA, "read_install(root, {}).legacy", 'read_install(root, {}).source != ""',
+    (_P8T8_PA, '    return DEPRECATION if cfg.legacy else ""', '    return DEPRECATION if cfg.source != "" else ""',
      _P8T8 + "test_no_notice_once_the_root_file_covers_the_legacy_one", "p8t8-notice-legacy-only"),
     # run.py reads the install's file through read_install...
     ("tools/skyguard/run.py", "        cfg = paths.read_install(a.root_win or a.root, dict(os.environ))",
@@ -6893,11 +6893,13 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_P8T8_PA, "    for key in PROTECTION_KEYS:\n", "    for key in ENV_KEYS + TOOL_KEYS:\n",
      _P8T8 + "test_non_protection_values_come_from_the_root_file_when_present", "p8r1-union-protection-only"),
     # ...of the legacy file's WELL-FORMED values (its malformed entries do not refuse everything)
-    (_P8T8_PA, "    return cfg._replace(file=file, legacy=added)",
-     "    return cfg._replace(file=file, legacy=added, malformed=cfg.malformed + leg.malformed)",
+    (_P8T8_PA, "    return cfg._replace(file=file, legacy=added, legacy_broken=bool(leg.malformed))",
+     "    return cfg._replace(file=file, legacy=added, legacy_broken=bool(leg.malformed), "
+     "malformed=cfg.malformed + leg.malformed)",
      _P8T8 + "test_a_broken_legacy_leftover_does_not_matter_once_the_root_file_exists", "p8r1-legacy-malformed-ignored"),
     # ...an undecodable legacy leftover adds nothing (no refusal)
-    (_P8T8_PA, "    except (OSError, ValueError):\n        return cfg\n", "    except ():\n        return cfg\n",
+    (_P8T8_PA, "    except (OSError, ValueError):\n        return cfg._replace(legacy_broken=True)",
+     "    except ():\n        return cfg._replace(legacy_broken=True)",
      _P8T8 + "test_an_undecodable_legacy_leftover_adds_nothing_once_the_root_file_exists",
      "p8r1-legacy-unreadable-adds-nothing"),
     # ...the notice shows while the legacy file adds a root...
@@ -6919,8 +6921,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/run.py", "                                              root=a.root_win or a.root)",
      "                                              root=None)",
      _P8T8 + "test_run_keys_the_session_notice_on_its_root[claude-session-kb-guard]", "p8r1-claude-passes-root"),
-    # I1 rules: touch / install / mklink aimed at a guard file
-    (_P8R1_SR, "        out += [(w, False) for w in _touch_operands(argv)]", "        pass",
+    # I1 rules: touch / install / mklink aimed at a guard file (fix round 2: re-anchored, the routes carry a verb)
+    (_P8R1_SR, "        out += [(w, False, CREATES) for w in _touch_operands(argv)]", "        pass",
      _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[touch]", "p8r1-touch"),
     (_P8R1_SR, "            j += 1                                       # its value", "            pass  # its value",
      _P8R1 + "test_a_creator_elsewhere_is_not[reference-is-read]", "p8r1-touch-valued-option"),
@@ -6933,20 +6935,20 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_P8R1_SR, '        elif w in ("-d", "--directory"):\n            dirs = True',
      '        elif w in ("-d", "--directory"):\n            dirs = False',
      _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[install-d]", "p8r1-install-d"),
-    (_P8R1_SR, "        out += [(w, False) for w in words[:2]]", "        out += [(w, False) for w in words[1:2]]",
+    (_P8R1_SR, "        out += [(w, False, CREATES) for w in words[:1]]", "        pass",
      _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[mklink]", "p8r1-mklink-link-name"),
-    (_P8R1_SR, "        out += [(w, False) for w in words[:2]]", "        out += [(w, False) for w in words[:1]]",
+    (_P8R1_SR, "        out += [(w, False, LINKS) for w in words[1:2]]", "        pass",
      _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[mklink-hard]", "p8r1-mklink-target"),
     # P2: a link whose source is a guard file
-    (_P8R1_SR, "        out += [(w, False) for w in (words[:-1] if len(words) >= 2 else words)]", "        pass",
+    (_P8R1_SR, "        out += [(w, False, LINKS) for w in (words[:-1] if len(words) >= 2 else words)]", "        pass",
      _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[ln-hard]", "p8r1-ln-source"),
-    (_P8R1_SR, '        out += [(w, False) for w in list(ps_param(e, "target")) + list(ps_param(e, "value"))]',
-     '        out += [(w, False) for w in list(ps_param(e, "value"))]',
+    (_P8R1_SR, '        out += [(w, False, LINKS) for w in list(ps_param(e, "target")) + list(ps_param(e, "value"))]',
+     '        out += [(w, False, LINKS) for w in list(ps_param(e, "value"))]',
      _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[new-item-hardlink]", "p8r1-new-item-target"),
-    (_P8R1_SR, '        out += [(w, False) for w in list(ps_param(e, "target")) + list(ps_param(e, "value"))]',
-     '        out += [(w, False) for w in list(ps_param(e, "target"))]',
+    (_P8R1_SR, '        out += [(w, False, LINKS) for w in list(ps_param(e, "target")) + list(ps_param(e, "value"))]',
+     '        out += [(w, False, LINKS) for w in list(ps_param(e, "target"))]',
      _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[new-item-symlink-value]", "p8r1-new-item-value"),
-    (_P8R1_SR, 'any(t.lower() in _PS_LINK_TYPES for t in ps_param(e, "itemtype"))', "True",
+    (_P8R1_SR, "any(t.lower() in _PS_LINK_TYPES\n", "True or any(t.lower() in _PS_LINK_TYPES\n",
      _P8R1 + "test_a_link_elsewhere_is_not[new-item-file-value-is-content]", "p8r1-new-item-link-types-only"),
     # P1: an NTFS stream suffix names the same file -- on the shell and through the Write tool
     (_P8R1_SR, "        s = strip_stream(word)", "        s = None",
@@ -6960,4 +6962,61 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '        a = self_rules.resolve_own(lambda x: targets.resolve(x, cwd, "bash", env_), file_path)',
      '        a = targets.resolve(file_path, cwd, "bash", env_)',
      _P8R1 + "test_the_write_tool_on_a_guard_file_stream_gets_the_note", "p8r1-stream-write-tool-wired"),
+]]
+
+# ---- Plan 8 T8 fix round 2 (lane p8-paths): re-review N1, N2, N4. One twin per clause. ---------------------------
+_P8R2_SP = "tools/skyguard/shellparse.py"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # N1: a broken legacy file beside a root file is never silent -- undecodable...
+    (_P8T8_PA, "        return cfg._replace(legacy_broken=True)", "        return cfg",
+     _P8T8 + "test_a_broken_legacy_file_beside_a_root_file_raises_the_attention_notice[undecodable]",
+     "p8r2-unreadable-legacy-flagged"),
+    # ...or naming a protection value the guard cannot read...
+    (_P8T8_PA, "legacy_broken=bool(leg.malformed))", "legacy_broken=False)",
+     _P8T8 + "test_a_broken_legacy_file_beside_a_root_file_raises_the_attention_notice[malformed]",
+     "p8r2-malformed-legacy-flagged"),
+    # ...and the flag reaches the session-start notice
+    (_P8T8_PA, "    if cfg.legacy_broken:\n        return LEGACY_BROKEN", "    if False:\n        return LEGACY_BROKEN",
+     _P8T8 + "test_a_broken_legacy_file_beside_a_root_file_raises_the_attention_notice[relative]",
+     "p8r2-attention-notice-shown"),
+    # N2: cp -l / --link / -s / --symbolic-link, combined short flags, recursive holder
+    (_P8R1_SR, '    elif p == "cp" and _cp_links(argv):', "    elif False:",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[cp-l]", "p8r2-cp-links"),
+    (_P8R1_SR, '    return any(w in ("--link", "--symbolic-link") or _short(w, "ls") for w in argv)', "    return True",
+     _P8R1 + "test_a_plain_copy_or_an_outside_link_is_not[plain-copy-reads-it]", "p8r2-cp-links-only"),
+    (_P8R1_SR, 'w in ("--link", "--symbolic-link") or', "w in () or",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[cp-link]", "p8r2-cp-long-options"),
+    (_P8R1_SR, "any(c in w[1:] for c in letters)", "w[1:] in letters",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[cp-al-folder]", "p8r2-short-cluster"),
+    (_P8R1_SR, '        rec = any(_short(w, "aRr") or w in ("--recursive", "--archive") for w in argv)', "        rec = False",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[cp-al-folder]", "p8r2-cp-recursive-holder"),
+    # N2: fsutil hardlink create <new> <existing>
+    (_P8R1_SR, '    elif p == "fsutil" and [w.lower() for w in argv[:2]] == ["hardlink", "create"]:',
+     '    elif p == "fsutil":',
+     _P8R1 + "test_a_plain_copy_or_an_outside_link_is_not[fsutil-list]", "p8r2-fsutil-create-only"),
+    (_P8R1_SR, "        out += [(w, False, LINKS) for w in argv[3:4]]", "        pass",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[fsutil-powershell]", "p8r2-fsutil-existing"),
+    (_P8R1_SR, "        out += [(w, False, CREATES) for w in argv[2:3]]", "        pass",
+     _P8R1 + "test_fsutil_creating_the_link_name_at_a_guard_path_creates_it", "p8r2-fsutil-new-name"),
+    # N2: New-Item -Type (alias of -ItemType)
+    (_P8R1_SR, ' + list(ps_param(e, "type")))', ")",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[new-item-type-alias]", "p8r2-new-item-type-alias"),
+    # N2: .NET CreateSymbolicLink / CreateHardLink -- the parser names them, the rule reads (link, target)
+    (_P8R2_SP, '        if m in _IO_LINK_METHODS:\n            return "io.file.link"',
+     '        if False:\n            return "io.file.link"',
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[dotnet-file-hardlink]", "p8r2-parser-file-link"),
+    (_P8R2_SP, '    if m in _IO_LINK_METHODS:\n        return "io.directory.link"',
+     '    if False:\n        return "io.directory.link"',
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[dotnet-directory-symlink]",
+     "p8r2-parser-directory-link"),
+    (_P8R1_SR, "        out += [(w, False, CREATES) for w in argv[:1]] + [(w, False, LINKS) for w in argv[1:2]]",
+     "        out += [(w, False, CREATES) for w in argv[:1]]",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[dotnet-file-symlink]", "p8r2-dotnet-target"),
+    # N4: the note's verb -- carried by the route, rendered by the rule
+    ("tools/skyguard/shell_rules.py", 'advise("S-SELF-GUARD", file=own[1], op=own[2])',
+     'advise("S-SELF-GUARD", file=own[1], op="edits")',
+     _P8R1 + "test_the_note_says_what_the_command_does[touch]", "p8r2-verb-rendered"),
+    (_P8R1_SR, "    return [r if len(r) == 3 else (r[0], r[1], EDITS) for r in out]",
+     "    return [r if len(r) == 3 else (r[0], r[1], CREATES) for r in out]",
+     _P8R1 + "test_the_note_says_what_the_command_does[redirect]", "p8r2-verb-default-edits"),
 ]]
