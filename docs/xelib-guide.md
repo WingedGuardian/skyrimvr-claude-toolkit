@@ -11,10 +11,10 @@ This means you can read, inspect, diff, and modify ESP/ESM files with code inste
 Run this **from the toolkit root** (the folder containing `tools/` and `examples/`):
 
 ```bash
-npm install --no-save --ignore-scripts github:WingedGuardian/xeditlib#19bef0976738a9db0760d45975263e2d7eb76062 koffi@2.15.1
+npm ci --ignore-scripts --no-audit --no-fund
 ```
 
-That is xeditlib v1.0.1 (commit `19bef09`) with koffi 2.15.1, the pair this toolkit was tested with; see `docs/installing-tools.md` for why both are pinned and how to verify them.
+That installs exactly the shipped `package-lock.json`: xeditlib v1.0.1 (commit `19bef09`) with koffi 2.15.1, the pair this toolkit was tested with, each checked against its integrity hash; see `docs/installing-tools.md` for why both are pinned and how to verify them.
 
 Installing at the root puts `node_modules/xeditlib` where Node's upward module lookup can find it
 from every bundled script — `tools/xelib/*.js`, `tools/resaver-resolve-names.js`, and `examples/*.js`

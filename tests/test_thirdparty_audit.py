@@ -527,14 +527,14 @@ def rules(tmp_path, files, exempt=()):
 
 def test_the_shipped_tree_has_no_unpinned_delivery_path():
     """The gate itself: on this tree every install instruction is exact and verifiable, or exempt with a reason."""
-    found, exempted, _history, _stale = ta.delivery_findings(ta.Repo(REPO))
+    found, exempted, _stale = ta.delivery_findings(ta.Repo(REPO))
     assert found == [], "\n".join("%s:%d [%s] %s" % f[:4] for f in found)
     assert all(e[5] for e in exempted)
 
 
 def test_every_delivery_exemption_still_matches_the_real_tree():
     """An exemption whose line was fixed (or moved) must be removed, or it silently excuses the next such line."""
-    stale = ta.delivery_findings(ta.Repo(REPO))[3]
+    stale = ta.delivery_findings(ta.Repo(REPO))[2]
     assert stale == [], stale
 
 
@@ -654,16 +654,28 @@ def test_a_download_needs_a_hash_or_the_pinned_downloads_table(tmp_path, line, r
     assert (("docs/x.md", "download-unverified") in rules(tmp_path, {"docs/x.md": line + "\n"})) is red
 
 
-def test_a_historical_install_line_is_skipped_and_counted(tmp_path):
-    found, _ex, history, _stale = findings(tmp_path, {"README.md": "Older toolkits said `pip install lz4`.\n"})
-    assert found == [] and history == 1
+@pytest.mark.parametrize("line", [
+    "Before you start, run `pip install lz4`.",                     # review I1: these were all read as history
+    "Before installing, run `npm install -g foo`.",
+    "Instead of the old tool, run `winget install Git.Git`.",
+    "Prior to setup: `pip install lz4`",
+    "Older toolkits said `pip install lz4`.",                       # no wording excuses a line any more
+])
+def test_no_wording_silences_an_install_line(tmp_path, line):
+    assert findings(tmp_path, {"README.md": line + "\n"})[0], line
+
+
+def test_only_history_files_are_skipped(tmp_path):
+    line = "Older toolkits said `pip install lz4`.\n"
+    assert findings(tmp_path, {"CHANGELOG.md": line, "docs/superpowers/plans/x.md": line})[0] == []
+    assert [f[0] for f in findings(tmp_path / "b", {"docs/x.md": line})[0]] == ["docs/x.md"]
 
 
 def test_an_exempt_line_is_reported_with_its_reason_and_an_unused_exemption_is_stale(tmp_path):
     files = {"README.md": "`npm install -g @anthropic-ai/claude-code`\n"}
     ex = [("README.md", "npm", r"@anthropic-ai/claude-code", "the agent updates itself"),
           ("README.md", "pip", r"pip install nothing-here", "unused")]
-    found, exempted, _h, stale = findings(tmp_path, files, ex)
+    found, exempted, stale = findings(tmp_path, files, ex)
     assert found == [] and [e[5] for e in exempted] == ["the agent updates itself"]
     assert stale == [ex[1]]
     assert ("README.md", "npm") in rules(tmp_path, files, ex[1:])   # the same line without its exemption is red
@@ -731,3 +743,93 @@ def test_the_newest_main_nexus_file_is_the_upstream_version(tmp_path):
                        {"category_name": "OLD_VERSION", "version": "9.9.9"}]}
     f = ta.Fetcher(make_cache(tmp_path, extra=[(url, 200, json.dumps(files).encode())]), offline=True, env={})
     assert ta.nexus_file_latest(f, "g", 1) == "6.0.643"
+
+
+# Fix round 1 (review I1): the installer families the first version missed, each red and green.
+
+@pytest.mark.parametrize("line,rule,red", [
+    ("`npx some-tool --help`", "package-runner", True),
+    ("`npx some-tool@1.2.3 --help`", "package-runner", False),
+    ("`npm exec create-thing`", "package-runner", True),
+    ("`uvx ruff check`", "package-runner", True),
+    ("`uvx ruff==0.16.9 check`", "package-runner", False),
+    ("`pipx install black`", "tool-installer", True),
+    ("`pipx install black==24.1.0`", "tool-installer", False),
+    ("`uv tool install ruff`", "tool-installer", True),
+    ("`uv tool install ruff==0.16.9`", "tool-installer", False),
+    ("`scoop install jq`", "tool-installer", True),
+    ("`scoop install jq@1.7.1`", "tool-installer", False),
+    ("`cargo install xwin`", "tool-installer", True),
+    ("`cargo install xwin --version 0.6.5`", "tool-installer", True),          # no --locked: deps float
+    ("`cargo install xwin --version 0.6.5 --locked`", "tool-installer", False),
+    ("`go install example.com/x@latest`", "tool-installer", True),
+    ("`go install example.com/x@v1.2.3`", "tool-installer", False),
+    ("`uv pip install lz4`", "pip", True),
+    ("`uv pip install --require-hashes -r tools/requirements-tools.lock`", "pip", False),
+    ("`gh release download -R a/b`", "gh-release", True),                     # no tag: newest
+    ("`gh release download v1 -R a/b`", "gh-release", True),                  # tag, nothing checks it
+    ("`gh release download v1 -R a/b && sha256sum -c SUMS`", "gh-release", False),
+    ("`irm https://get.x.io/install.ps1 | iex`", "pipe-to-shell", True),
+    ("`iwr -useb https://get.x.io | iex`", "pipe-to-shell", True),
+    ("`iex (iwr https://get.x.io).Content`", "pipe-to-shell", True),
+    ("`curl -fsSL https://get.x.io | sh`", "pipe-to-shell", True),
+    ("`wget -qO- https://get.x.io | sh`", "pipe-to-shell", True),
+    ("`choco install jq`", "system-package", True),
+    ("`choco install jq --version 1.7.1`", "system-package", False),
+])
+def test_every_installer_family_needs_an_exact_version(tmp_path, line, rule, red):
+    assert (("README.md", rule) in rules(tmp_path, {"README.md": line + "\n"})) is red
+
+
+@pytest.mark.parametrize("line,red", [
+    ("`pip install lz4; pip install --only-binary=:all: --require-hashes -r t.lock`", True),   # review M1
+    ("`pip install --dry-run x` then `pip install lz4`", True),
+    ("`pip install --dry-run --report r.json -r requirements.txt`", False),
+])
+def test_pip_is_judged_per_command(tmp_path, line, red):
+    assert (("README.md", "pip") in rules(tmp_path, {"README.md": line + "\n"})) is red
+
+
+@pytest.mark.parametrize("name", ["tools/x.py", "tools/x.sh", "tools/x.ps1", "tools/x.cmd", "agent/x.json",
+                                  "agent/x.yml", "docs/x.md", "x.txt"])
+def test_an_unverified_download_is_found_in_every_shipped_text_type(tmp_path, name):
+    bad = '    "Download Python from https://www.python.org/downloads/ and install it."\n'
+    assert (name, "download-unverified") in rules(tmp_path, {name: bad})
+
+
+def test_a_download_hash_may_wrap_onto_the_next_two_lines(tmp_path):
+    text = ('"Download python-3.12.10-amd64.exe from https://www.python.org/ftp/python/3.12.10/ -- "\n'
+            '"check its SHA-256 equals "\n"' + "e" * 64 + '"\n')
+    assert rules(tmp_path, {"tools/x.py": text}) == []
+    far = text.replace('"check its SHA-256 equals "\n', '"one"\n"two"\n"three"\n')
+    assert ("tools/x.py", "download-unverified") in rules(tmp_path / "far", {"tools/x.py": far})
+
+
+def test_the_pre_fix_manual_steps_are_seen(tmp_path):
+    """Review I2: the toolkit-setup skill's manual steps (tools/inventory-runtimes.py) sent users to whatever
+    python.org / nodejs.org / git-scm served; the scan did not read .py strings."""
+    old = ('    "python": "Download Python 3.8 or newer from https://www.python.org/downloads/ and install it, "\n'
+           '    "git": "Download Git for Windows from https://git-scm.com/download/win and install it. "\n'
+           '    "node": "Download the LTS release from https://nodejs.org/ and install it. Then open a new terminal.",\n')
+    found = findings(tmp_path, {"tools/inventory-runtimes.py": old})[0]
+    assert sorted({(f[1], f[2]) for f in found}) == [(1, "download-unverified"), (2, "download-unverified"),
+                                                    (3, "download-unverified"), (3, "follows-latest")]
+
+
+def test_the_real_tree_install_refs_agree_with_their_pins(tmp_path):
+    """Every version a shipped file states for a pinned tool equals its pin (offline: install refs are local). The
+    only disagreements left are setup.sh's, owed to T7 (review I5: a doc's 'JDK 17 is in the image')."""
+    rows = ta.run(REPO, ta.Fetcher(tmp_path / "empty", offline=True, env={}))
+    bad = [r.detail for r in rows if r.check == "install refs" and r.status == ta.DRIFT]
+    assert [d for d in bad if not d.startswith("setup.sh:")] == [], bad
+
+
+def test_a_doc_stating_another_jdk_than_the_image_is_drift(tmp_path):
+    files = {".devcontainer/Dockerfile": "ARG JDK_VERSION=21.0.12\n",
+             "docs/container-vs-windows.md": "| Parse a save | Container | ReSaver CLI (JDK 17 is in the image) |\n"}
+    rows, code = audit(make_repo(tmp_path, files), tmp_path / "c", ["Microsoft OpenJDK"])
+    assert any(r.check == "install refs" and "container-vs-windows.md:1 says 17" in r.detail
+               for r in by(rows, ta.DRIFT)), [r.as_dict() for r in rows]
+    files["docs/container-vs-windows.md"] = files["docs/container-vs-windows.md"].replace("JDK 17", "JDK 21.0.12")
+    rows, _ = audit(make_repo(tmp_path / "ok", files), tmp_path / "c", ["Microsoft OpenJDK"])
+    assert not [r for r in by(rows, ta.DRIFT) if r.check == "install refs"]

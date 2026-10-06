@@ -47,12 +47,23 @@ _PYTHON_ID_RE = re.compile(r"Python\.Python\.3\.([0-9]+)")
 # Worst first: something that exists but is wrong must be reported before anything is installed over it.
 _SEVERITY = ["too-old", "broken", "timeout", "store-alias", "missing"]
 
+# The exact versions the toolkit was tested with (Plan 8 reproducibility ruling): the same pins README.md and
+# docs/getting-started.md give, each with the installer's SHA-256 (MEASURED 2026-10-05: downloaded and hashed; equal
+# to the hash in winget's manifest, which winget itself checks). scripts/thirdparty-audit.py holds these to the docs.
+_VERIFY = "before running it, check that `Get-FileHash <file> -Algorithm SHA256` prints "
+# Steps for the USER to follow: a download plus its hash, never a package-manager command (an agent reading these must
+# not find a command to run; tests/test_no_host_installs_in_new_files.py holds this file to that).
 MANUAL_STEPS = {
-    "python": "Download Python 3.8 or newer from https://www.python.org/downloads/ and install it, "
-              "ticking 'Add python.exe to PATH'. Then open a new terminal.",
-    "git": "Download Git for Windows from https://git-scm.com/download/win and install it (it includes Git Bash). "
-           "Then open a new terminal.",
-    "node": "Download the LTS release from https://nodejs.org/ and install it. Then open a new terminal.",
+    "python": "Install Python 3.12.10 (inside the tested 3.10-3.13 range): download python-3.12.10-amd64.exe from "
+              "https://www.python.org/ftp/python/3.12.10/ -- " + _VERIFY
+              + "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb -- run it and tick "
+              "'Add python.exe to PATH'. Then open a new terminal.",
+    "git": "Install Git for Windows 2.48.1 (it includes Git Bash): download Git-2.48.1-64-bit.exe from "
+           "https://github.com/git-for-windows/git/releases/download/v2.48.1.windows.1/ -- " + _VERIFY
+           + "ce45e23275049f4b36edd90d5fd986a1e230efb6c511e9260a90176ce8e825df -- and run it. Then open a new terminal.",
+    "node": "Install Node.js 24.19.0: download node-v24.19.0-x64.msi from https://nodejs.org/dist/v24.19.0/ -- "
+            + _VERIFY + "f0f66c2a80c08a30a5ab5179ee9ea9e45f9b46289436a8cc87ff833b852db351 -- and run it. "
+            "Then open a new terminal.",
 }
 
 

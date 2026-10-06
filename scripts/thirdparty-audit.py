@@ -552,6 +552,8 @@ NODE_REFS = [
     {"pattern": r"OpenJS\.NodeJS(?:\.LTS)? --exact --version[ =]+(?P<v>\d+\.\d+\.\d+)"},
     {"pattern": r"\"node\":\s*\">=\s*(?P<v>\d+)", "compare": "major", "files": ["package.json"]},
     {"pattern": r"\bNode(?:\.js)? (?P<v>\d{2})\b(?!\.\d)", "compare": "major"},
+    {"pattern": r"\bNode(?:\.js)? \*?\*?(?P<v>\d+\.\d+\.\d+)"},
+    {"pattern": r"node-v(?P<v>\d+\.\d+\.\d+)-"},
 ]
 DOTNET_REFS = [
     {"pattern": r"\.NET (?P<v>\d+)(?:\.0)? (?:SDK|runtime)", "compare": "major"},
@@ -561,6 +563,7 @@ DOTNET_REFS = [
     # The exact SDK every install hint names, and the variable toolchain-check fills its hint from.
     {"pattern": r"Microsoft\.DotNet\.SDK\.\d+ --exact --version[ =]+(?P<v>[\d$%{][^\s`'\")]*)"},
     {"pattern": r"SDK_PIN=(?P<v>\d+\.\d+\.\d+)", "files": ["tools/toolchain-check.sh"]},
+    {"pattern": r"\.NET SDK (?P<v>\d+\.\d+\.\d+)"},
 ]
 # A download pinned in docs/installing-tools.md's *Pinned downloads* table: | Tool | Version | File | SHA-256 | From |
 PINNED_DOWNLOADS = "docs/installing-tools.md"
@@ -641,10 +644,13 @@ REGISTRY = [
     {"name": "Caprica", "pins": [("regex", PINNED_DOWNLOADS, table_row("Caprica"))], "upstream": ("github", "Orvid/Caprica"),
      "refs": [{"pattern": r"Caprica[. ](?P<v>v\d+\.\d+\.\d+)"}],
      "checks": [hashes("Caprica")]},
-    {"name": "xeditlib", "pins": [("regex", PINNED_DOWNLOADS, r"WingedGuardian/xeditlib#(?P<v>[0-9a-f]{40})")],
+    {"name": "xeditlib", "pins": [("regex", "package.json", r"xeditlib/tar\.gz/(?P<v>[0-9a-f]{40})"),
+                                  ("regex", "package-lock.json", r"xeditlib/tar\.gz/(?P<v>[0-9a-f]{40})")],
      "tag_pins": [("regex", PINNED_DOWNLOADS, r"xeditlib (?P<v>v\d+\.\d+\.\d+) = commit")],
      "upstream": ("github", "WingedGuardian/xeditlib"),
      "refs": [{"pattern": r"WingedGuardian/xeditlib#(?P<v>[0-9a-f]{40})"},
+              {"pattern": r"(?:xeditlib/tar\.gz/|commit `)(?P<v>[0-9a-f]{7,40})", "line": r"xeditlib",
+               "compare": "prefix"},
               {"pattern": r"\bnpm (?:install|i)\b(?P<tail>[^\n`\"']*WingedGuardian/xeditlib[^\n`\"']*)",
                "version": r"xeditlib#(?P<v>[0-9a-f]{40})", "unpinned": "xeditlib install without #<commit>"}],
      "checks": [("tag_commit", {"repo": "WingedGuardian/xeditlib"})]},
@@ -652,10 +658,10 @@ REGISTRY = [
      "not_delivered": "credited only: XEditLib.dll reaches users inside the pinned xeditlib commit, not from zEdit"},
     {"name": "xEdit (SSEEdit)", "upstream": ("github", "TES5Edit/TES5Edit"),
      "not_delivered": "the user's own modding tool; the toolkit uses XEditLib.dll from the pinned xeditlib, never xEdit"},
-    {"name": "koffi", "pins": [("regex", PINNED_DOWNLOADS, r"koffi@(?P<v>\d+\.\d+\.\d+)")], "upstream": ("npm", "koffi"),
-     "refs": [{"pattern": r"\bkoffi@(?P<v>\d+\.\d+\.\d+)"},
-              {"pattern": r"\bnpm (?:install|i)\b(?P<tail>[^\n`\"']*WingedGuardian/xeditlib[^\n`\"']*)",
-               "version": r"koffi@(?P<v>\d+\.\d+\.\d+)", "unpinned": "xeditlib install without koffi@<version>"}]},
+    {"name": "koffi", "pins": [("json", "package.json", ["optionalDependencies", "koffi"]),
+                               ("json", "package-lock.json", ["packages", "node_modules/koffi", "version"])],
+     "upstream": ("npm", "koffi"),
+     "refs": [{"pattern": r"\bkoffi@(?P<v>\d+\.\d+\.\d+)"}, {"pattern": r"\bkoffi (?P<v>\d+\.\d+\.\d+)\b"}]},
     {"name": "PyFFI", "pins": [("regex", "tools/requirements-tools.txt", r"(?m)^PyFFI==(?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("pypi", "PyFFI")},
     {"name": "ReSaver (FallrimTools)", "pins": [("regex", PINNED_DOWNLOADS, table_row("ReSaver"))],
@@ -666,7 +672,12 @@ REGISTRY = [
     {"name": "Microsoft OpenJDK", "pins": [("regex", ".devcontainer/Dockerfile", r"JDK_VERSION=(?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("eol", "microsoft-build-of-openjdk", "major"),
      "refs": [{"pattern": r"Microsoft\.OpenJDK\.\d+ --exact --version[ =]+(?P<v>\d+\.\d+\.\d+)", "compare": "prefix"},
-              {"pattern": r"microsoft-jdk-(?P<v>\d+\.\d+\.\d+)-linux", "files": [".devcontainer/Dockerfile"]}],
+              {"pattern": r"microsoft-jdk-(?P<v>\d+\.\d+\.\d+)-linux", "files": [".devcontainer/Dockerfile"]},
+              # A JDK version a doc states (exact anywhere; a bare major in the doc that describes the image) must
+              # be the image's (review I5: "JDK 17 is in the image" outlived the move to 21).
+              {"pattern": r"\b(?:Open)?JDK (?P<v>\d+\.\d+\.\d+)\b"},
+              {"pattern": r"\b(?:Open)?JDK (?P<v>\d{2})\b(?![+.\d])", "compare": "major",
+               "files": ["docs/container-vs-windows.md"]}],
      "checks": [("hashes", {"items": [
          {"label": "JDK amd64", "file": ".devcontainer/Dockerfile",
           "pattern": r"JDK_VERSION=(?P<v>[\d.]+)[\s\S]*?JDK_SHA256_AMD64=(?P<sha>[0-9a-f]{64})",
@@ -677,7 +688,10 @@ REGISTRY = [
     {"name": "Python (Windows install)",
      "pins": [("regex", "README.md", r"Python\.Python\.3\.\d+ --exact --version (?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("eol", "python", "minor"),
-     "refs": [{"pattern": r"Python\.Python\.3\.\d+ --exact --version[ =]+(?P<v>\d+\.\d+\.\d+)"}]},
+     "refs": [{"pattern": r"Python\.Python\.3\.\d+ --exact --version[ =]+(?P<v>\d+\.\d+\.\d+)"},
+              {"pattern": r"python-(?P<v>\d+\.\d+\.\d+)-amd64\.exe"}],
+     "newer_note": "stays NEWER by design: 3.12.10 is the last 3.12 with a Windows installer (later 3.12.x are "
+                   "source-only security releases); moving off it means another minor (3.13.x) -- a T7/user decision"},
     {"name": "NifSkope", "pins": [("regex", PINNED_DOWNLOADS, table_row("NifSkope"))],
      "upstream": ("github", "hexabits/nifskope"),   # the maintained fork the docs link and the toolkit was tested with
      "checks": [hashes("NifSkope")]},
@@ -692,9 +706,13 @@ REGISTRY = [
      "not_delivered": "the user's own mod manager; the toolkit only reads its layout"},
     {"name": "Wrye Bash", "upstream": ("github", "wrye-bash/wrye-bash"),
      "not_delivered": "the user's own tool; no shipped instruction installs it"},
-    {"name": "Git for Windows", "upstream": ("github", "git-for-windows/git"),
-     "not_delivered": "runtime: the toolkit-setup skill installs only the exact id and version the user authorizes "
-                      "(winget --exact --version); the tested range is setup.sh's check (T7)"},
+    {"name": "Git for Windows", "pins": [("regex", "tools/inventory-runtimes.py",
+                                          r"Git-(?P<v>\d+\.\d+\.\d+)-64-bit\.exe")],
+     "upstream": ("github", "git-for-windows/git"),
+     "refs": [{"pattern": r"Git\.Git --exact --version[ =]+(?P<v>\d+\.\d+\.\d+)"},
+              {"pattern": r"Git-(?P<v>\d+\.\d+\.\d+)-64-bit\.exe"}],
+     "newer_note": "the Git these suites ran under on the dev machine; Plan 8 Q6 updates Git before T14b -- move "
+                   "this pin (inventory-runtimes MANUAL_STEPS) with it"},
     {"name": "Codex CLI", "pins": [("dirs", "tests/fixtures/codex/*"), ("dirs", "tests/fixtures/payloads/codex/*"),
                                    ("regex", "tools/skyguard/codex_trust.py", r"MEASURED on codex-cli (?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("npm", "@openai/codex"),
@@ -728,11 +746,14 @@ def dynamic_entries(repo):
     pkg = repo.read("package.json")
     if pkg is not None:
         try:
-            deps = json.loads(pkg).get("dependencies", {})
+            data = json.loads(pkg)
+            deps = dict(data.get("dependencies", {}), **data.get("optionalDependencies", {}))
         except ValueError:
             deps = None
             out.append({"name": "package.json", "broken": "package.json is not valid JSON"})
         for name in sorted(deps or {}):
+            if re.fullmatch(r"https://codeload\.github\.com/[\w.-]+/[\w.-]+/tar\.gz/[0-9a-f]{40}", deps[name]):
+                continue   # a commit tarball (xeditlib): its registry entry holds the commit and the tag
             out.append({"name": "npm " + name, "npm": name, "spec": deps[name]})
     req = repo.read("requirements.txt")
     if req is not None:
@@ -1205,24 +1226,28 @@ def pin_of(repo, spec):
 
 
 # ------------------------------------------------------------------------------------- delivery paths
-# Plan 8 T6d (user ruling 2026-10-05: every user gets EXACTLY the versions we tested). Every instruction on a shipped
-# surface that puts third-party software on a machine must name ONE version and give a way to verify it. Purely local
-# (no network): `tests/test_thirdparty_audit.py` runs it offline on the real tree and on synthetic ones.
+# Plan 8 T6d (user ruling 2026-10-05: every user gets EXACTLY the versions we tested). Every instruction in a shipped
+# text file that puts third-party software on a machine must name ONE version and give a way to verify it. Purely
+# local (no network): `tests/test_thirdparty_audit.py` runs it offline on the real tree and on synthetic ones.
+#
+# There is NO wording-based history skip here (review I1: "Before you start, run `pip install lz4`" read as history
+# and silenced every rule). History lives in DELIVERY_HISTORY_FILES, skipped by file; any other line that only
+# records history needs an exemption with its reason.
 
-DELIVERY_GLOBS = SURFACES + ("CLAUDE.md", "AGENTS.md", "tools/*.js", "tools/xelib/*.js", "scripts/read-save.py",
-                             "devshell.sh", "devshell-docker.sh")
+DELIVERY_SUFFIXES = (".md", ".txt", ".sh", ".ps1", ".cmd", ".bat", ".py", ".json", ".yml", ".yaml", ".js", ".example")
+DELIVERY_SKIP_DIRS = {".git", "node_modules", "tests", ".superpowers", ".pytest_cache", "__pycache__", ".venv"}
+# Files that only record history (file-scoped; nothing in them is an instruction), plus this file's own rule text.
+DELIVERY_HISTORY_FILES = ("CHANGELOG.md", "docs/superpowers/*", "scripts/thirdparty-audit.py")
 SHA256_HEX = re.compile(r"\b[0-9a-f]{64}\b")
 EXACT_NPM = re.compile(r"(?:@[\w.-]+/)?[\w.-]+@\d+\.\d+\.\d+(?:-[\w.]+)?")
 COMMIT_NPM = re.compile(r"(?:github:)?[\w.-]+/[\w.-]+#[0-9a-f]{40}")
+EXACT_PY = re.compile(r"[\w.\-\[\]]+==\d+(?:\.\d+)+")
 # A clone is pinned when it names a tag AND something checks the commit after cloning: repo -> (file, proof regex).
 VERIFIED_CLONES = {"SpookyPirate/spookys-automod-toolkit": ("tools/automod-cli.sh", r'PIN_COMMIT="[0-9a-f]{40}"')}
-DOWNLOAD_HOSTS = (r"github\.com/[\w.-]+/[\w.-]+/releases|blender\.org|nodejs\.org|python\.org|nexusmods|"
-                  r"Nexus mod \d+|FallrimTools page")
-
-
-# Where an instruction starts on its line: the history window (HISTORY_WINDOW characters) ends here.
-INSTALL_WORD = re.compile(r"(?i)pip3?(?:\.exe)? install|npm |dotnet tool|git clone|winget|curl|wget|apt|choco|"
-                          r"brew|dnf|yum|apk|download|acquire|install|click|grab|$")
+DOWNLOAD_HOSTS = (r"github\.com/[\w.-]+/[\w.-]+/releases|blender\.org|nodejs\.org|python\.org|git-scm\.com|"
+                  r"nexusmods|Nexus mod \d+|FallrimTools page|aka\.ms/|dot\.net/")
+# A download's hash may sit on the same line or the next two (a wrapped string literal or bullet).
+HASH_WINDOW = 3
 
 
 def _command_args(line, head):
@@ -1231,15 +1256,69 @@ def _command_args(line, head):
     return [m.group("args") for m in re.finditer(head + r"(?P<args>[^`\"'\n|;&)]*)", line)]
 
 
+def _specs(args):
+    return [t for t in args.split() if not t.startswith("-") and not t.startswith("<")]
+
+
 def _npm_problems(line):
     out = []
-    for m in re.finditer(r"\bnpm\s+(?:install|i|add)\b(?P<args>[^`\"'\n|;&)]*)", line):
-        specs = [t for t in m.group("args").split() if not t.startswith("-") and not t.startswith("<")]
+    for args in _command_args(line, r"\bnpm\s+(?:install|i|add)\b"):
+        specs = _specs(args)
         if not specs:
             out.append("bare `npm install` resolves ranges at install time: use `npm ci` (the lockfile)")
         for s in specs:
             if not (EXACT_NPM.fullmatch(s) or COMMIT_NPM.fullmatch(s)):
                 out.append("npm package `%s` without an exact version (@x.y.z) or a commit (#<40-hex sha>)" % s)
+    return out
+
+
+def _runner_problems(line):
+    """npx / npm exec / uvx run a package fetched at that moment: the package must carry its exact version."""
+    out = []
+    for args in _command_args(line, r"\b(?:npx|npm\s+exec|uvx|pnpm\s+dlx|bunx)(?=\s)"):
+        specs = _specs(args)
+        if specs and not (EXACT_NPM.fullmatch(specs[0]) or EXACT_PY.fullmatch(specs[0])):
+            out.append("package runner fetches `%s` with no exact version" % specs[0])
+    return out
+
+
+def _pip_problems(line):
+    """pip (and `uv pip`, whose command contains it): per command (review M1), hash-locked or a dry run that
+    installs nothing."""
+    out = []
+    for args in _command_args(line, r"\bpip3?(?:\.exe)?\s+install\b"):
+        if "--dry-run" in args.split():
+            continue
+        if not (re.search(r"--require-hashes\b", args) and re.search(r"-r\s+\S+\.lock\b", args)):
+            out.append("pip install without `--require-hashes -r <file>.lock`: versions and wheels are not verified")
+    return out
+
+
+def _tool_installer_problems(line):
+    """pipx / uv tool: exact == pin (they have no hash lock); scoop: app@version; cargo: --version + --locked;
+    go install: @vX.Y.Z (never @latest)."""
+    out = []
+    for args in _command_args(line, r"\b(?:pipx\s+(?:install|run)|uv\s+tool\s+(?:install|run))\b"):
+        if not any(EXACT_PY.fullmatch(s) for s in _specs(args)):
+            out.append("pipx / uv tool without an exact `pkg==x.y.z`")
+    for args in _command_args(line, r"\bscoop\s+install\b"):
+        out += ["scoop app `%s` without @version" % s for s in _specs(args) if not re.search(r"@\d", s)]
+    for args in _command_args(line, r"\bcargo\s+install\b"):
+        if not (re.search(r"--version[ =]+\d", args) and "--locked" in args.split()):
+            out.append("cargo install without --version <x.y.z> --locked")
+    for args in _command_args(line, r"\bgo\s+install\b"):
+        out += ["go install `%s` without @vX.Y.Z" % s for s in _specs(args) if not re.search(r"@v\d", s)]
+    return out
+
+
+def _gh_download_problems(line, window):
+    out = []
+    for m in re.finditer(r"\bgh\s+release\s+download\b(?P<args>[^`\n|;&)]*)", line):   # a quoted "$TAG" counts
+        toks = m.group("args").split()
+        if not toks or toks[0].startswith("-"):   # the tag is the first positional; a flag's value is not one
+            out.append("gh release download without a tag: you get the newest release")
+        elif not re.search(r"\bsha(?:256|512)sum\b|Get-FileHash|\b[0-9a-f]{64}\b", window):
+            out.append("gh release download with no checksum check")
     return out
 
 
@@ -1259,51 +1338,58 @@ def _clone_problems(line, repo):
 
 
 def _pkg_manager_problems(line):
-    m = re.search(r"\b(?:apt(?:-get)?|choco|brew|dnf|yum|apk)\s+install\b(?P<args>[^`\"'\n|;&]*)", line)
-    if not m:
-        return []
-    pkgs = [t for t in m.group("args").split() if not t.startswith("-")]
-    loose = [p for p in pkgs if "=" not in p]
-    return ["system package `%s` without an exact version (pkg=version)" % p for p in loose] or (
-        [] if pkgs else ["system package install with no package named"])
+    out = []
+    for args in _command_args(line, r"\b(?:apt(?:-get)?|choco|brew|dnf|yum|apk)\s+install\b"):
+        if re.search(r"--version[ =]+\d", args):   # choco install x --version 1.2.3
+            continue
+        pkgs = _specs(args)
+        out += ["system package `%s` without an exact version (pkg=version)" % p for p in pkgs
+                if "=" not in p and not re.search(r"@\d", p)]
+    return out
 
 
-# rule id -> (applies to file?, finder(line, repo) -> [problem, ...])
+def _shell_pipe_problems(line):
+    sh = re.search(r"\b(?:curl|wget)\b[^|\n]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b", line)
+    ps = (re.search(r"(?i)\b(?:irm|iwr|curl|wget|Invoke-RestMethod|Invoke-WebRequest|DownloadString)\b", line)
+          and re.search(r"(?i)\|\s*(?:iex|Invoke-Expression)\b|\b(?:iex|Invoke-Expression)\s*\(", line))
+    return ["download piped into a shell: nothing pins or verifies what runs"] if sh or ps else []
+
+
+# rule id -> (applies to file?, finder(line, repo, window) -> [problem, ...]); window = the line plus the next
+# HASH_WINDOW - 1 lines, for rules whose proof may wrap onto the next line.
 DELIVERY_RULES = {
-    "pip": (lambda rel: True, lambda line, repo: [] if (
-        not re.search(r"\bpip3?(?:\.exe)? install\b", line) or "--dry-run" in line
-        or (re.search(r"--require-hashes\b", line) and re.search(r"-r\s+\S+\.lock\b", line)))
-        else ["pip install without `--require-hashes -r <file>.lock`: versions and wheels are not verified"]),
-    "npm": (lambda rel: True, lambda line, repo: _npm_problems(line)),
-    "dotnet-tool": (lambda rel: True, lambda line, repo: [
+    "pip": (lambda rel: True, lambda line, repo, window: _pip_problems(line)),
+    "npm": (lambda rel: True, lambda line, repo, window: _npm_problems(line)),
+    "package-runner": (lambda rel: True, lambda line, repo, window: _runner_problems(line)),
+    "tool-installer": (lambda rel: True, lambda line, repo, window: _tool_installer_problems(line)),
+    "gh-release": (lambda rel: True, lambda line, repo, window: _gh_download_problems(line, window)),
+    "dotnet-tool": (lambda rel: True, lambda line, repo, window: [
         "dotnet tool install/update without --version: you get whatever is newest"
         for args in _command_args(line, r"\bdotnet tool (?:install|update)\b")
         if not re.search(r"--version[ =]+[^\s`'\"]", args)]),
-    "git-clone": (lambda rel: True, _clone_problems),
-    "winget": (lambda rel: True, lambda line, repo: [
+    "git-clone": (lambda rel: True, lambda line, repo, window: _clone_problems(line, repo)),
+    "winget": (lambda rel: True, lambda line, repo, window: [
         "winget install without --exact --version <V>: you get whatever is newest"
         for args in _command_args(line, r"\bwinget install\b")
         if not (re.search(r"--exact\b", args) and re.search(r"--version[ =]+[^\s`'\"-]", args))]),
-    "pipe-to-shell": (lambda rel: True, lambda line, repo: [
-        "download piped into a shell: nothing pins or verifies what runs"] if re.search(
-        r"\b(?:curl|wget)\b[^|\n]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b", line) else []),
-    "docker-from": (lambda rel: True, lambda line, repo: [
+    "pipe-to-shell": (lambda rel: True, lambda line, repo, window: _shell_pipe_problems(line)),
+    "docker-from": (lambda rel: True, lambda line, repo, window: [
         "base image by tag, not by digest (@sha256:...)"] if (
         re.match(r"\s*FROM\s+(?!scratch\b)\S+", line) and "@sha256:" not in line) else []),
-    "system-package": (lambda rel: True, lambda line, repo: _pkg_manager_problems(line)),
+    "system-package": (lambda rel: True, lambda line, repo, window: _pkg_manager_problems(line)),
     "download-checksum": (lambda rel: rel.endswith("Dockerfile") or "/.devcontainer/" in "/" + rel,
-                          lambda line, repo: ["download with no checksum check in the same step"] if (
+                          lambda line, repo, window: ["download with no checksum check in the same step"] if (
                               re.search(r"\b(?:curl|wget)\b", line)
                               and not re.search(r"\bsha(?:256|512)sum\b", line)) else []),
-    "follows-latest": (lambda rel: True, lambda line, repo: [
+    "follows-latest": (lambda rel: True, lambda line, repo, window: [
         "install follows whatever is newest"] if re.search(r"(?i)\b(?:download|install|acquire|click|grab)", line)
         and re.search(
-        r"(?i)\b(?:latest|newest)\s+(?:release|version|build)\b|releases/latest|big green LTS|"
-        r"\bdownload\s+(?:a|any)\s+release\b", line) else []),
-    "download-unverified": (lambda rel: rel.endswith((".md", ".txt")), lambda line, repo: [
+        r"(?i)\b(?:latest|newest|current)\s+(?:LTS\s+)?(?:release|version|build)\b|releases/latest|big green LTS|"
+        r"\bthe LTS release\b|\bdownload\s+(?:a|any)\s+release\b", line) else []),
+    "download-unverified": (lambda rel: True, lambda line, repo, window: [
         "download instruction without a pinned version + SHA-256 (or a pointer to *Pinned downloads*)"] if (
         re.search(r"(?i)\bdownload", line) and re.search(DOWNLOAD_HOSTS, line)
-        and not SHA256_HEX.search(line) and "Pinned downloads" not in line) else []),
+        and not SHA256_HEX.search(window) and "Pinned downloads" not in window) else []),
 }
 
 # Lines that match a rule but are not a delivery path, each with its reason. Every entry must still match something
@@ -1313,6 +1399,8 @@ _CLAUDE = ("the agent itself: Claude Code updates itself after install, so an in
            "toolkit records the versions its adapter was measured on instead (the Claude Code registry row)")
 _SKSE = ("third-party recipe quoted verbatim and labeled 'Not pinned and not verified' in the doc; the toolkit "
          "never runs it")
+_OWN = ("downloads the toolkit's OWN release by its tag in order to verify it: the script itself is the verification "
+        "(and a published zip's contents are checked member by member)")
 _CI = ("CI runner tooling (T10's workflows): never delivered to a user; versions follow the runner image")
 DELIVERY_EXEMPT = [
     ("README.md", "npm", r"npm install -g @anthropic-ai/claude-code", _CLAUDE),
@@ -1328,6 +1416,16 @@ DELIVERY_EXEMPT = [
     ("docs/skse-cross-compile.md", "pipe-to-shell", r"xmake\.io/shget\.text \| bash", _SKSE),
     ("docs/skse-cross-compile.md", "download-unverified", r"Jake-Shadle/xwin/releases/download", _SKSE),
     (".github/workflows/ci.yml", "system-package", r"sudo apt-get install -y|choco install jq -y", _CI),
+    ("setup.sh", "download-unverified", r"download from nodejs\.org|download io_scene_nifly\.zip|"
+                                        r"download ReSaver from Nexus", _T7),
+    ("*settings.local.json.example", "npm", r'"Bash\(npm install:\*\)"', "a permission-allowlist pattern, not an install"),
+    ("*settings.local.json.example", "pip", r'"Bash\(pip install:\*\)"', "a permission-allowlist pattern, not an install"),
+    ("*", "follows-latest", r"install locations \(newest version first\)",
+     "the hook wrappers' search order for an interpreter already installed, not an install"),
+    ("scripts/build-nexus-pack.sh", "gh-release", r'gh release download "\$TAG"', _OWN),
+    ("tools/verify-release.sh", "gh-release", r"gh release download", _OWN),
+    ("tools/skyguard/shellparse.py", "pipe-to-shell", r"An installer piped to sh \(`curl \.\.\. \| sh`\)",
+     "skyguard's own rule documentation, describing what that rule does not treat as decoded text"),
 ]
 
 
@@ -1350,34 +1448,35 @@ def logical_lines(text):
 
 
 def delivery_files(repo):
-    seen = []
-    for pattern in DELIVERY_GLOBS:
-        for p in sorted(repo.root.glob(pattern)):
-            rel = p.relative_to(repo.root).as_posix()
-            if p.is_file() and rel not in seen and not any(fnmatch.fnmatch(rel, x) for x in SURFACE_EXCLUDES):
-                seen.append(rel)
-    return seen
+    """Every shipped text file: DELIVERY_SUFFIXES or a Dockerfile, outside DELIVERY_SKIP_DIRS (tests and VCS/cache
+    folders never ship) and DELIVERY_HISTORY_FILES."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(repo.root):
+        dirnames[:] = sorted(d for d in dirnames if d not in DELIVERY_SKIP_DIRS)
+        for name in sorted(filenames):
+            if not (name.endswith(DELIVERY_SUFFIXES) or name == "Dockerfile" or name.startswith("Dockerfile.")):
+                continue
+            rel = (Path(dirpath) / name).relative_to(repo.root).as_posix()
+            if not any(fnmatch.fnmatch(rel, x) for x in DELIVERY_HISTORY_FILES):
+                out.append(rel)
+    return out
 
 
 def delivery_findings(repo, exempt=None):
-    """-> (findings, exempted, history, stale): findings/exempted are (file, line, rule, problem, text[, reason]);
-    stale lists the exemptions that matched nothing (tests hold the real tree to none, so a fixed line cannot leave
-    a silent hole behind; a synthetic tree legitimately leaves most of them unused)."""
+    """-> (findings, exempted, stale): findings/exempted are (file, line, rule, problem, text[, reason]); stale lists
+    the exemptions that matched nothing (tests hold the real tree to none, so a fixed line cannot leave a silent hole
+    behind; a synthetic tree legitimately leaves most of them unused)."""
     exempt = DELIVERY_EXEMPT if exempt is None else exempt
-    findings, exempted, history, used = [], [], 0, set()
+    findings, exempted, used = [], [], set()
     for rel in delivery_files(repo):
         text = repo.read(rel) or ""
         raw = text.splitlines()
         for lineno, line in logical_lines(text):
+            window = " ".join([line] + raw[lineno:lineno + HASH_WINDOW - 1])
             for rule, (applies, finder) in DELIVERY_RULES.items():
                 if not applies(rel):
                     continue
-                problems = finder(line, repo)
-                if problems and HISTORY.search(history_context([raw[lineno - 2] if lineno > 1 else "", line], 1,
-                                                               INSTALL_WORD.search(line).start())):
-                    history += 1
-                    continue
-                for problem in problems:
+                for problem in finder(line, repo, window):
                     hit = next((k for k, e in enumerate(exempt) if fnmatch.fnmatch(rel, e[0]) and e[1] == rule
                                 and re.search(e[2], line)), None)
                     if hit is None:
@@ -1386,17 +1485,16 @@ def delivery_findings(repo, exempt=None):
                         used.add(hit)
                         exempted.append((rel, lineno, rule, problem, line.strip()[:160], exempt[hit][3]))
     stale = [e for k, e in enumerate(exempt) if k not in used]
-    return findings, exempted, history, stale
+    return findings, exempted, stale
 
 
 def audit_delivery(repo, rows):
-    findings, exempted, history, _stale = delivery_findings(repo)
+    findings, exempted, _stale = delivery_findings(repo)
     for rel, line, rule, problem, _text in findings:
         rows.append(Row("delivery paths", rule, None, None, DRIFT, "%s:%d %s" % (rel, line, problem)))
     if not findings:
         rows.append(Row("delivery paths", "pinned+verified", None, None, OK,
-                        "%d file(s) scanned; %d exempt with a reason; %d historical mention(s) skipped"
-                        % (len(delivery_files(repo)), len(exempted), history)))
+                        "%d file(s) scanned; %d exempt with a reason" % (len(delivery_files(repo)), len(exempted))))
 
 
 def run(repo_root, fetcher, only=None):

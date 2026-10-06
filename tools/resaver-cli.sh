@@ -34,18 +34,28 @@
 #   unintended divergence the output is DELETED and the op fails (fail-to-write beats silent corruption).
 # Names: ResaverCLI emits Plugin:FORMID; resolve to EditorIDs on demand via tools/resaver-resolve-names.js.
 #
-# Requires a downloaded ReSaver.jar + its lib/ in tools/resaver-cli/ (FallrimTools, Nexus mod 5031),
-# and JDK 17+ (JDK 21 LTS recommended). The wrapper compiles its small driver on first run.
+# Requires ReSaver 6.0.643 (FallrimTools, Nexus mod 5031; ReSaver.jar's SHA-256 is in docs/installing-tools.md
+# *Pinned downloads*) with its lib/ in tools/resaver-cli/, and JDK 17+ (JDK 21 LTS recommended). The wrapper
+# compiles its small driver on first run, and again whenever the JDK's major version changes.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd -W 2>/dev/null)"
 [ -z "$HERE" ] && HERE="$(cd "$(dirname "$0")" && pwd)"
 TOOL="$HERE/resaver-cli"
-CP="$TOOL/ReSaver.jar;$TOOL/lib/*"
+# Java's classpath separator is the PLATFORM's: ';' on Windows (Git Bash passes Windows paths, which contain ':'),
+# ':' everywhere else -- with ';' on Linux java reads the whole string as one path and finds no class (review P1).
+# Test seam: RESAVER_CLI_UNAME stands in for `uname -s`, honoured only under TOOLKIT_TEST_MODE=1.
+UNAME="$(uname -s 2>/dev/null)"
+[ "${TOOLKIT_TEST_MODE:-}" = 1 ] && [ -n "${RESAVER_CLI_UNAME:-}" ] && UNAME="$RESAVER_CLI_UNAME"
+case "$UNAME" in
+  MINGW*|MSYS*|CYGWIN*|Windows*) S=';' ;;
+  *) S=':' ;;
+esac
+CP="$TOOL/ReSaver.jar$S$TOOL/lib/*"
 OVERLAY="$TOOL/analysis-overlay"   # read-only analysis overlay (modified ReSaver source; see analysis-overlay/NOTICE.md)
 
 if [ ! -f "$TOOL/ReSaver.jar" ]; then
-  echo '{"ok":false,"error":"ReSaver.jar not found in tools/resaver-cli/ — download it (FallrimTools, Nexus mod 5031) and drop ReSaver.jar + its lib/ here."}'
+  echo '{"ok":false,"error":"ReSaver.jar not found in tools/resaver-cli/ — get ReSaver 6.0.643 (FallrimTools, Nexus mod 5031), check ReSaver.jar against the SHA-256 in docs/installing-tools.md Pinned downloads, and drop ReSaver.jar + its lib/ here."}'
   exit 1
 fi
 
@@ -57,9 +67,22 @@ FLAGS=""
 [ "${JV:-0}" -ge 17 ] 2>/dev/null && FLAGS="$FLAGS --enable-native-access=ALL-UNNAMED"
 [ "${JV:-0}" -ge 23 ] 2>/dev/null && FLAGS="$FLAGS --sun-misc-unsafe-memory-access=allow"
 
-# Compile the driver once (or when the source is newer than the class).
+# Compile the driver once, when the source is newer than the class, or when the JDK's major version differs from
+# the one that compiled it (a class built by JDK 24 does not load on the pinned JDK 21: UnsupportedClassVersionError).
+# The stamp also stands for the overlay's classes, which the same JDK compiled.
+STAMP="$TOOL/.compiled-by-jdk"
+JDK_CHANGED=0
+[ "$(cat "$STAMP" 2>/dev/null)" = "${JV:-?}" ] || JDK_CHANGED=1
 if [ ! -f "$TOOL/ResaverCLI.class" ] || [ "$TOOL/ResaverCLI.java" -nt "$TOOL/ResaverCLI.class" ]; then
   javac -cp "$CP" -d "$TOOL" "$TOOL/ResaverCLI.java" >&2 || { echo '{"ok":false,"error":"compile failed"}'; exit 1; }
+  printf '%s\n' "${JV:-?}" > "$STAMP" 2>/dev/null || true
+elif [ "$JDK_CHANGED" = 1 ]; then
+  # The class exists and may still load; a failed rebuild (no javac on PATH, say) warns instead of stopping.
+  if javac -cp "$CP" -d "$TOOL" "$TOOL/ResaverCLI.java" >&2; then
+    printf '%s\n' "${JV:-?}" > "$STAMP" 2>/dev/null || true
+  else
+    echo "[resaver-cli] WARN: could not recompile the driver for JDK ${JV:-?}; trying the existing class." >&2
+  fi
 fi
 
 # Op-aware classpath (corruption safety). The analysis overlay carries modified-ReSaver parser fixes
@@ -79,7 +102,8 @@ case "$OP" in
     OVERLAY_OK=1
     if [ -f "$EDD_SRC" ]; then
       if [ ! -f "$EDD_CLS" ] || [ ! -f "$QUST_CLS" ] || [ ! -f "$REFR_CLS" ] \
-         || [ "$EDD_SRC" -nt "$EDD_CLS" ] || [ "$QUST_SRC" -nt "$QUST_CLS" ] || [ "$REFR_SRC" -nt "$REFR_CLS" ]; then
+         || [ "$EDD_SRC" -nt "$EDD_CLS" ] || [ "$QUST_SRC" -nt "$QUST_CLS" ] || [ "$REFR_SRC" -nt "$REFR_CLS" ] \
+         || [ "$JDK_CHANGED" = 1 ]; then
         if ! javac -cp "$CP" -d "$OVERLAY" "$EDD_SRC" "$QUST_SRC" "$REFR_SRC" >&2; then
           # Almost always a ReSaver.jar version mismatch. Degrade gracefully to stock parsing rather
           # than hard-failing basic reads — enhanced changeform coverage is disabled, everything else works.
@@ -90,10 +114,10 @@ case "$OP" in
     else
       OVERLAY_OK=0   # overlay not installed (older layout) — stock is fine
     fi
-    if [ "$OVERLAY_OK" = "1" ]; then RUNCP="$OVERLAY;$TOOL;$CP"; else RUNCP="$TOOL;$CP"; fi
+    if [ "$OVERLAY_OK" = "1" ]; then RUNCP="$OVERLAY$S$TOOL$S$CP"; else RUNCP="$TOOL$S$CP"; fi
     ;;
   *)
-    RUNCP="$TOOL;$CP"           # stock only — overlay structurally excluded from write ops
+    RUNCP="$TOOL$S$CP"           # stock only — overlay structurally excluded from write ops
     ;;
 esac
 
