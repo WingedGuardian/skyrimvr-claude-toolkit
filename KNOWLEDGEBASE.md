@@ -653,12 +653,20 @@ not facts.
   "DotnetToolSettings.xml was not found". 0.40.0 targeted net9.0. `tools/toolchain-check.sh`
   compares `spriggit --version` with the pin in `.config/dotnet-tools.json` (older or newer is
   a MISMATCH) and requires SDK 10+ for 0.41+, SDK 9+ before that.
+- **`spriggit --version` exits 1 even when it works** (MEASURED 2026-10-05, 0.41.0, global tool and
+  `dotnet tool run spriggit` alike): it prints `Spriggit version 0.41.0+...`, a stray `--version`, and
+  `Spriggit.CLI 0.41.0+...`, then returns 1. Probe it by its OUTPUT, never its exit status, and not with
+  `| grep -q` under `pipefail` (grep closes the pipe early and the SIGPIPE fails the pipeline). A fake that
+  printed one line and exited 0 kept two new tests green while the real tool was never detected.
+- **Two installs, both supported:** the global tool (`spriggit` on PATH) and `dotnet tool restore`'s local
+  tool (`dotnet tool run spriggit`, answers only from inside the toolkit). `tools/spriggit-cli.sh`,
+  `tools/esp-verify-wrapper.sh` and `tools/toolchain-check.sh` use the global one first, then the local one.
 - **Use `-u` / `--ErrorOnUnknown` on serialize.** It makes Spriggit throw on unknown
   fields/records instead of dropping them silently — directly mitigates the silent-drop
   issue below. Make it the default for our workflow.
 
 ### ✅ Spriggit round-trip is lossless — compare YAML, not ESP bytes (re-measured 2026-10-05)
-- A controlled no-op round-trip (`serialize → deserialize unchanged → serialize`) of the
+- A controlled no-op round-trip (`serialize → deserialize unchanged → serialize`) of
   a test ESP produced a **byte-for-byte identical file** (2026-05-18); an unmodified ESP
   round-trip to identical YAML with `:Skyrim.esm` references intact.
 - ⚠ **The bytes are only stable once Spriggit has written the file.** MEASURED 2026-10-05 on a

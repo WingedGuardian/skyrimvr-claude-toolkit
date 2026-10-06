@@ -146,6 +146,7 @@ def _run_wrappers(tmp_path: Path, root: Path, shadow_bash: bool = False):
     env["CLAUDE_PROJECT_DIR"] = str(root).replace("\\", "/")
     env["TOOLCHAIN_DOTNET"] = str(b / "dotnet").replace("\\", "/")
     env["AUTOMOD_DOTNET"] = str(b / "dotnet").replace("\\", "/")
+    env["AUTOMOD_TEST_PIN_COMMIT"] = PIN_SHA
     p = subprocess.run([BASH, str(TOOL)], capture_output=True, text=True, env=env, timeout=120)
     return p.stdout
 
@@ -154,15 +155,23 @@ def _failed(out: str) -> str:
     return out.split("RESULT:")[1] if "RESULT:" in out else ""
 
 
-def _automod_built(root: Path, tfm: str = "net10.0") -> None:
+PIN_SHA = "a" * 40  # the wrapper's pinned commit, named through its AUTOMOD_TEST_PIN_COMMIT seam
+
+
+def _automod_built(root: Path, tfm: str = "net10.0", commit: str = PIN_SHA) -> None:
     d = root / "tools" / "automod" / "src" / "SpookysAutomod.Cli" / "bin" / "Release" / tfm
     d.mkdir(parents=True)
     (d / "spookys-automod.dll").write_bytes(b"MZ")
+    if commit:
+        (d / "toolkit-built-from.txt").write_text(commit + "\n", encoding="utf-8")
 
 
-def _resaver_installed(root: Path, compiled: bool = True) -> None:
+def _resaver_installed(root: Path, compiled: bool = True, lib: bool = True) -> None:
     rs = root / "tools" / "resaver-cli"
     (rs / "ReSaver.jar").write_bytes(b"PK")
+    if lib:
+        (rs / "lib").mkdir()
+        (rs / "lib" / "lz4-java.jar").write_bytes(b"PK")
     if compiled:
         cls = rs / "ResaverCLI.class"
         cls.write_bytes(b"\xca\xfe")
@@ -235,3 +244,90 @@ def test_wrappers_run_under_this_bash_not_a_bare_bash_on_path(tmp_path):
     out = _run_wrappers(tmp_path, root, shadow_bash=True)
     assert " ok " in _line(out, "automod-cli"), out
     assert " ok " in _line(out, "resaver-cli"), out
+
+
+def test_automod_built_from_the_pinned_commit_says_which(tmp_path):
+    root = _toolkit(tmp_path)
+    _automod_built(root)
+    out = _run_wrappers(tmp_path, root)
+    line = _line(out, "automod version")
+    assert " ok " in line and PIN_SHA[:12] in line and "v1.11.2" in line, out
+    assert "automod-version" not in _failed(out), out
+
+
+def test_automod_built_from_another_commit_is_degraded(tmp_path):
+    """Every v3 user cloned unpinned: a DLL from another commit runs, and is not what the toolkit tested."""
+    root = _toolkit(tmp_path)
+    _automod_built(root, commit="b" * 40)
+    out = _run_wrappers(tmp_path, root)
+    assert " ok " in _line(out, "automod-cli"), out
+    line = _line(out, "automod version")
+    assert "MISMATCH" in line and "b" * 12 in line, out
+    assert "automod-version" in _failed(out), out
+
+
+def test_automod_built_without_a_marker_is_degraded(tmp_path):
+    root = _toolkit(tmp_path)
+    _automod_built(root, commit="")
+    out = _run_wrappers(tmp_path, root)
+    assert "MISMATCH" in _line(out, "automod version"), out
+    assert "automod-version" in _failed(out), out
+
+
+def test_resaver_whose_lib_was_removed_is_not_ok(tmp_path):
+    """--help exits before ReSaver loads a class, so a compiled driver answers even with lib/ gone (review M1)."""
+    root = _toolkit(tmp_path)
+    _resaver_installed(root, lib=False)
+    out = _run_wrappers(tmp_path, root)
+    line = _line(out, "resaver-cli")
+    assert " ok " not in line and "lib/" in line, out
+    assert "resaver-cli" in _failed(out), out
+
+
+# --- Spriggit installed from the repo's tool manifest (`dotnet tool restore`) -----------------------
+# installing-tools documents `dotnet tool restore`, which installs exactly the pinned version but puts no
+# `spriggit` on PATH. Review I3: toolchain-check read that healthy install as "not installed".
+
+def _path_without_spriggit() -> str:
+    import shutil
+    keep = [d for d in os.environ.get("PATH", "").split(os.pathsep)
+            if d and not (shutil.which("spriggit", path=d) or shutil.which("spriggit.exe", path=d))]
+    return os.pathsep.join(keep)
+
+
+def _run_local_spriggit(tmp_path: Path, local_version: str):
+    b = tmp_path / "lbin"
+    b.mkdir()
+    # `dotnet tool run spriggit -- ...` answers only where the manifest is (the toolkit root), like the real one.
+    body = ('if [ "$1" = "--list-sdks" ]; then echo "10.0.100 [C:/fake]"; exit 0; fi\n'
+            'if [ "$1" = "--version" ]; then echo 10.0.100; exit 0; fi\n'
+            'if [ "$1 $2 $3" = "tool run spriggit" ]; then\n'
+            '  [ -f .config/dotnet-tools.json ] || { echo "Cannot find a manifest file."; exit 1; }\n')
+    # MEASURED 2026-10-05: the real `spriggit --version` prints three lines and EXITS 1, global or local.
+    body += ('  printf "Spriggit version {0}+Branch.main\n--version\nSpriggit.CLI {0}+Branch.main\n"; exit 1\n'.format(local_version)
+             if local_version
+             else '  echo "Run dotnet tool restore to make the spriggit command available."; exit 1\n')
+    body += "fi\nexit 1\n"
+    _script(b / "dotnet", body)
+    env = dict(os.environ)
+    env["PATH"] = str(b).replace("\\", "/") + os.pathsep + _path_without_spriggit()
+    env["TOOLCHAIN_DOTNET"] = str(b / "dotnet").replace("\\", "/")
+    p = subprocess.run([BASH, str(TOOL)], capture_output=True, text=True, env=env, timeout=120, cwd=str(tmp_path))
+    return p.stdout
+
+
+def test_a_spriggit_restored_from_the_manifest_is_found(tmp_path):
+    out = _run_local_spriggit(tmp_path, PIN)
+    assert "not installed" not in _line(out, "spriggit "), out
+    assert " ok " in _line(out, "spriggit version"), out
+    assert " ok " in _line(out, "spriggit entry point"), out
+
+
+def test_a_manifest_spriggit_at_another_version_is_a_mismatch(tmp_path):
+    out = _run_local_spriggit(tmp_path, "0.40.0")
+    assert "MISMATCH" in _line(out, "spriggit version"), out
+
+
+def test_no_spriggit_anywhere_is_optional(tmp_path):
+    out = _run_local_spriggit(tmp_path, "")
+    assert "not installed (optional)" in _line(out, "spriggit "), out
