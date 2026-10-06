@@ -1042,36 +1042,103 @@ def test_a_cmd_style_unlock_with_no_lift_record_survives_hook_calls(bed):
     assert _locked(bed, "Skyrim.esm") and not _locked(bed, "Dawnguard.esm")
 
 
+# The state lock is an OS lock (state.locked -> backup._exclusive): only ANOTHER PROCESS can hold it against this one.
+# (A thread cannot stand in for it: state._HELD makes a second locked() in the same process re-entrant.)
+_HOLDER = ("import sys\nsys.path.insert(0, sys.argv[1])\nfrom skyguard import state\n"
+           "with state.locked(sys.argv[2], wait=30):\n    open(sys.argv[3], 'w').close()\n    sys.stdin.read()\n")
+
+
+def _hold_state_lock(folder, sf):
+    """Another process holding the state lock (as a CLI writer mid read-modify-write would) until _release()."""
+    flag = Path(folder) / ("held-%s" % uuid.uuid4().hex[:8])
+    proc = subprocess.Popen([sys.executable, "-B", "-c", _HOLDER, str(REPO / "tools"), str(sf), str(flag)],
+                            stdin=subprocess.PIPE)
+    deadline = time.monotonic() + 60
+    while not flag.exists():
+        if proc.poll() is not None or time.monotonic() > deadline:
+            proc.kill()
+            pytest.fail("the state lock holder did not start (exit %r)" % proc.poll())
+        time.sleep(0.02)
+    return proc
+
+
+def _release(proc):
+    if proc.poll() is None:
+        proc.stdin.close()
+    proc.wait(timeout=60)
+
+
 @needs_windows
 def test_a_busy_state_file_skips_the_relock_without_blocking_the_hook(bed):
-    from skyguard import state
     lock = _lock()
     assert lock.lock_all(str(bed.root)).exit == 0
     assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
-    lf = str(_state_file(bed)) + state.LOCK_SUFFIX
-    Path(lf).write_text("999999", encoding="ascii")                   # another writer holds the lock
-    t = time.monotonic()
-    v = _hook(bed, T0 + lock.LIFT_SECONDS + 1)
-    assert time.monotonic() - t < 2.0 and v.decision == "allow"
-    assert not _locked(bed, "Skyrim.esm") and "state file is busy" in _audit_log(bed)
-    os.unlink(lf)
+    proc = _hold_state_lock(bed.root, _state_file(bed))                # another process holds the state lock
+    try:
+        t = time.monotonic()
+        v = _hook(bed, T0 + lock.LIFT_SECONDS + 1)
+        took = time.monotonic() - t
+        assert took < 2.0, "the hook blocked %.2f s on a busy state lock" % took
+        assert v.decision == "allow"
+        assert not _locked(bed, "Skyrim.esm") and "state file is busy" in _audit_log(bed)
+        assert [x for x in _lifts(bed) if x["kind"] == "lock"], "the skipped relock must leave its lift for a retry"
+    finally:
+        _release(proc)
     _hook(bed, T0 + lock.LIFT_SECONDS + 2)                            # released: the next call relocks
     assert _locked(bed, "Skyrim.esm")
 
 
-def test_the_state_lock_serialises_writers_and_breaks_a_stale_lock(tmp_path):
+_RMW = ("import sys, time\nsys.path.insert(0, sys.argv[1])\nfrom skyguard import state\n"
+        "sf, n, tag, go = sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]\n"
+        "import os\nwhile not os.path.exists(go):\n    time.sleep(0.005)\n"
+        "for i in range(n):\n"
+        "    with state.locked(sf, wait=30):\n"
+        "        st = state.read(sf)\n"
+        "        assert not st.rejected, st.reason\n"
+        "        add = {'kind': 'guards', 'reason': '%s-%d' % (tag, i), 'session_id': tag, 'agent': 't',\n"
+        "               'created': 1.0, 'expires_at': 2.0}\n"
+        "        state.write(sf, {'v': 1, 'lifts': st.lifts + [add], 'persistent': {}})\n")
+
+
+def test_the_state_lock_serialises_read_modify_writes_across_processes(tmp_path):
+    """Two processes each append N lifts by read-modify-write under state.locked, released together: none is lost.
+    Without the lock they interleave and overwrite each other's appends (or os.replace collides)."""
+    from skyguard import state
+    sf = tmp_path / ".skyguard" / "state.json"
+    state.write(str(sf), {"v": 1, "lifts": [], "persistent": {}})
+    go, n = tmp_path / "go", 40
+    procs = [subprocess.Popen([sys.executable, "-B", "-c", _RMW, str(REPO / "tools"), str(sf), str(n), tag, str(go)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for tag in ("a", "b")]
+    time.sleep(1.0)                                                    # both interpreters up and waiting
+    go.write_text("", encoding="ascii")
+    outs = [p.communicate(timeout=120) for p in procs]
+    reasons = sorted(x["reason"] for x in state.read(str(sf)).lifts)
+    want = sorted("%s-%d" % (t, i) for t in ("a", "b") for i in range(n))
+    lost = len(set(want) - set(reasons))
+    assert [p.returncode for p in procs] == [0, 0] and reasons == want, "lost %d of %d read-modify-writes; %s" % (
+        lost, len(want), [o[1].strip().splitlines()[-1:] for o in outs])
+
+
+def test_a_state_lock_holder_that_dies_releases_the_lock(tmp_path):
+    """Replaces fix A's "breaks a stale lock": the kept lock is the OS's, so a killed holder (a hook killed at its
+    timeout) leaves nothing to break. While it lives a writer gets StateBusy and the file is untouched; once it is
+    killed -- no cleanup ran -- the next writer gets the lock at once. Re-entrant inside one read-modify-write."""
     from skyguard import state
     sf = tmp_path / ".skyguard" / "state.json"
     body = {"v": 1, "lifts": [], "persistent": {}}
     state.write(str(sf), body)
-    lf = Path(str(sf) + state.LOCK_SUFFIX)
-    assert not lf.exists()                                           # released after the write
-    lf.write_text("1", encoding="ascii")
-    with pytest.raises(state.StateBusy):
+    before = sf.read_bytes()
+    proc = _hold_state_lock(tmp_path, sf)
+    try:
+        with pytest.raises(state.StateBusy):
+            state.write(str(sf), dict(body, persistent={"lock_disabled": {"since": 1.0, "by_session": "s"}}), wait=0.1)
+        assert sf.read_bytes() == before
+    finally:
+        proc.kill()                                                    # dies holding it: no __exit__, no unlink
+        proc.wait(timeout=60)
+    after = dict(body, persistent={"lock_disabled": {"since": 2.0, "by_session": "s"}})
+    state.write(str(sf), after, wait=2.0)
+    assert state.read(str(sf)).lock_disabled == {"since": 2.0, "by_session": "s"}
+    with state.locked(sf, 0.1):                                        # re-entrant inside one read-modify-write
         state.write(str(sf), body, wait=0.1)
-    old = time.time() - state.LOCK_STALE - 5
-    os.utime(str(lf), (old, old))
-    state.write(str(sf), body, wait=0.1)                             # a crashed holder's lock is broken
-    assert not lf.exists()
-    with state.locked(sf, 0.1):                                       # re-entrant inside one read-modify-write
-        state.write(str(sf), body, wait=0.1)
+    assert state.read(str(sf)).lock_disabled is None
