@@ -68,6 +68,9 @@ def test_no_summary_is_could_not_check(tmp_path):
     ("tests/test_a.py::x\n\n9 tests collected in 1.0s\n", 1),
     ("12 tests collected, 1 error in 1.0s\n", 1),
     ("nothing\n", 2),
+    # A node id may itself carry summary-shaped text (this very file's ids do): only the summary line counts.
+    ("tests/test_ci_leg.py::test_collect_mode[3 tests collected, 1 error in 1.0s\\n-1]\n\n12 tests collected in 1.0s\n",
+     0),
 ])
 def test_collect_mode(tmp_path, text, rc):
     assert _run(tmp_path, "collect", text).returncode == rc

@@ -35,6 +35,9 @@ def _count(lines, word):
 
 
 def check_collect(lines, spec, leg):
+    # Node ids (`path::name[params]`) are never the summary, and a param id can carry summary-shaped text
+    # ("12 tests collected, 1 error ...": test_ci_leg's own ids do), so only non-node-id lines are read.
+    lines = [l for l in lines if "::" not in l]
     m = next((re.search(r"(\d+) tests? collected", l) for l in lines if re.search(r"\d+ tests? collected", l)), None)
     if m is None:
         return 2, ["COULD NOT CHECK: no 'N tests collected' line"]

@@ -4656,6 +4656,9 @@ _T10 = [
     ("t10-ci-log-collected-floor-off", _CL, '    elif collected < spec["collected_floor"]:', "    elif False:",
      _CT + "test_each_tripwire_goes_red"),
     ("t10-ci-collect-floor-off", _CL, "    if n < floor:", "    if False:", _CT + "test_collect_mode"),
+    # wave-1 merge: a node id carrying summary-shaped text must not be read as the collect summary
+    ("w1-ci-collect-reads-node-ids", _CL, '    lines = [l for l in lines if "::" not in l]', "    pass",
+     _CT + "test_collect_mode"),
     # T10.5 the freeze-gate baseline
     ("t10-freeze-baseline-is-the-tag-being-cut", "tests/test_codex_definitions.py",
      '        if _git("rev-parse", tag + "^{commit}", cwd=repo).stdout.decode().strip() == head:', "        if False:",
