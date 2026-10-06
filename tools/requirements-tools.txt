@@ -1,0 +1,9 @@
+# Optional Python tools a USER installs (not the test stack -- that is requirements.txt):
+#   PyFFI + setuptools  LE-format NiTriShape geometry (docs/installing-tools.md, the skyrim-nif skill);
+#                       setuptools supplies the `distutils` PyFFI 2.2.3 imports on Python 3.12+.
+#   lz4                 scripts/read-save.py (the skyrim-save skill).
+# Installed only from tools/requirements-tools.lock (--require-hashes); this file is the input it is generated
+# from. Refresh: docs/harness-integrations.md ("An intentional dependency refresh"), with this pair of paths.
+PyFFI==2.2.3
+setuptools==84.0.0
+lz4==4.4.5
