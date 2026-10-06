@@ -87,7 +87,11 @@ jobs:
           done < <(git ls-files '*.js')
           exit $fail
 
+      # TOOLKIT_REQUIRE_NODE_DEPS=1: the FOMOD smoke (tests/fomod-xmlbuilder.test.js) must run against the
+      # `npm ci` install above, never skip because node_modules is missing.
       - name: npm test
+        env:
+          TOOLKIT_REQUIRE_NODE_DEPS: "1"
         run: npm test
 
   toolkit:

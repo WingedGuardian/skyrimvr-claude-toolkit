@@ -4491,3 +4491,12 @@ MUTATIONS += [pytest.param("requirements.lock", "Pygments==2.21.0 \\", "Pygments
 MUTATIONS += [pytest.param("package.json", '"zod": "3.25.76"', '"zod": "^3.25.76"',
                            "tests/test_dependency_locks.py::test_package_json_pins_exact_versions_that_the_lock_resolves_to",
                            id="t6c-package-json-range-not-exact")]
+
+# Plan 8 T6c: the FOMOD smoke for the container's documented fast-xml-parser use can fail, and cannot silently skip.
+_NS = "tests/test_node_fomod_smoke.py::"
+MUTATIONS += [pytest.param("tests/fomod-xmlbuilder.test.js", find, rep, test, id=i) for i, find, rep, test in [
+    ("t6c-fomod-smoke-injection-check-weakened", "assert.ok(!('injected' in back.root),", "assert.ok(true || !('injected' in back.root),",
+     _NS + "test_the_smoke_goes_red_on_a_fast_xml_parser_before_the_escaping_fix"),
+    ("t6c-fomod-smoke-always-skips", "const opts = { skip: (!fxp && !required) ?", "const opts = { skip: true ?",
+     _NS + "test_the_smoke_passes_against_the_locked_npm_ci_install"),
+]]
