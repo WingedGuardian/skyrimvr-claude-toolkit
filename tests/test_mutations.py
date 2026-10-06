@@ -6474,3 +6474,42 @@ MUTATIONS += [
                  "tests/test_gen_agent_trees.py::test_files_linux_tools_read_are_pinned_lf", id="eol-devcontainer-lf"),
 ]
 
+
+# Plan 6 final fix pass, lane A (p6-fixA). One mutation per clause; each names the test that must go red.
+_FXA = "tests/test_skyguard_never_shadow_mix.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # C1: the raw unlock is read before every shadowable rule (a decoy delete first no longer hides it).
+    ("tools/skyguard/shell_rules.py",
+     "    raw = lift_rules.raw_unlock(command, parsed, roots, cwd, env, shell)\n    if raw:\n        return deny(raw[0], raw[1])\n",
+     "",
+     _FXA + "test_a_never_shadow_refusal_stands_under_guards_off_beside_a_decoy[attrib-after-decoy-delete]",
+     "fixA-c1-raw-unlock-first"),
+    # C1: `lock disable` (an ask) is carried beside the refusal that outranks it.
+    ("tools/skyguard/shell_rules.py", '        v = v._replace(never=Verdict("ask", perm))', "        pass",
+     _FXA + "test_a_never_shadow_refusal_stands_under_guards_off_beside_a_decoy[disable-after-decoy-delete]",
+     "fixA-c1-permanent-carried"),
+    # C1: ...but never in place of the decoy's deny when nothing is shadowed (the twin of the one above).
+    ("tools/skyguard/shell_rules.py", '        v = v._replace(never=Verdict("ask", perm))',
+     '        v = Verdict("ask", perm)',
+     _FXA + "test_without_a_lift_the_decoy_call_is_refused_no_less_strictly[disable-after-decoy-delete]",
+     "fixA-c1-permanent-not-instead-of-the-deny"),
+    # C1: shadow mode returns the carried NEVER_SHADOW refusal.
+    ("tools/skyguard/engine.py", "        kept = _never_of(v)\n        if kept is not None:",
+     "        kept = None\n        if kept is not None:",
+     _FXA + "test_a_never_shadow_refusal_stands_under_guards_off_beside_a_decoy[disable-after-decoy-ask]",
+     "fixA-c1-shadow-returns-the-kept"),
+    # C1: combine ranks a NEVER_SHADOW deny above an earlier shadowable one...
+    ("tools/skyguard/engine.py", "            top = next((v for v in hits if _is_never(v)), hits[0])",
+     "            top = hits[0]",
+     _FXA + "test_combine_puts_a_never_shadow_deny_above_an_earlier_shadowable_deny", "fixA-c1-combine-ranks"),
+    # C1: ...and carries a NEVER_SHADOW ask beside a deny that outranks it.
+    ("tools/skyguard/engine.py", "                top = top._replace(never=kept[0])", "                pass",
+     _FXA + "test_combine_keeps_a_deny_and_carries_the_never_shadow_ask_beside_it", "fixA-c1-combine-carries"),
+    # C1 end to end on Codex: drop both combine clauses and the decoy delete hides the state write again.
+    ("tools/skyguard/engine.py",
+     "    kept = sorted((n for n in (_never_of(v) for v in vs) if n is not None), key=lambda n: n.decision != \"deny\")",
+     "    kept = []\n    _is_never = lambda v: False  # noqa: E731",
+     _FXA + "test_a_codex_patch_deleting_a_file_then_adding_the_state_is_refused_under_guards_off",
+     "fixA-c1-codex-patch"),
+]]
+

@@ -21,6 +21,10 @@ class Verdict(NamedTuple):
     context: str = ""              # advice text for the model
     status: str = "evaluated"      # evaluated | partial | failed
     code: str = ""                 # e.g. "write.DENY_PLUGIN"; "" until codes.classify() fills it
+    # Plan 6 final fix (lane A C1): a NEVER_SHADOW refusal (engine.NEVER_SHADOW) the same call ALSO produced, when the
+    # decision above is a different refusal that outranked it (a deny beside a lift rule's ask). engine.shadow returns
+    # it instead of converting the call, so a decoy refusal can never hide a lift or self-state refusal.
+    never: object = None
 
 
 class Advice:

@@ -168,8 +168,39 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         reason = rules.message("S-INERT-CONFIG", file=file, op=key)
         audit.rule(HOOK, "S-INERT-CONFIG", "deny", reason, level="REFUSE")
         return Verdict("deny", reason)
-    advice = Advice()
     env = os.environ if env is None else env
+
+    def deny(rule_id: str, file: str = "") -> Verdict:
+        reason = rules.message(rule_id, file=file) if file else rules.message(rule_id)
+        audit.rule(HOOK, rule_id, "deny", reason)
+        return Verdict("deny", reason)
+
+    # --- hard blocks
+    # Deletes (Task 7): decided on the commands that RUN and where their operands RESOLVE (deletes.py, E16).
+    parsed = shellparse.parse(command, shell) if parsed is None else parsed
+    dels = deletes.scan(command, parsed, roots, cwd, env)
+    # Plan 6 Task 12 (R12): a write -- or a delete (fix round 1, I1) -- into .skyguard/** is the CLI's alone. Checked before
+    # the delete deny, because S-DEL-INSTALL is shadowed by guards off and S-SELF-STATE is not.
+    own = self_rules.shell_scan(command, parsed, roots, cwd, env)
+    if own and own[0] == self_rules.STATE:
+        return deny("S-SELF-STATE", own[1])
+    # Plan 6 final fix (lane A C1): the lift rules are NEVER_SHADOW too, so they are read BEFORE any shadowable rule. A
+    # raw unlock is a deny, so it simply goes first (deny for deny). `lock disable` is an ask: returned first it would
+    # loosen a decoy's deny when no guards lift is honoured, so it is carried BESIDE whatever refusal outranks it
+    # (Verdict.never) and engine.shadow returns it instead of converting the call.
+    raw = lift_rules.raw_unlock(command, parsed, roots, cwd, env, shell)
+    if raw:
+        return deny(raw[0], raw[1])
+    v = _ordered(command, parsed, dels, own, roots, audit, cwd, shell, env)
+    perm = rules.message("S-LIFT-PERMANENT")
+    if v.decision in ("deny", "ask") and v.reason != perm and lift_rules.permanent(parsed, command):
+        v = v._replace(never=Verdict("ask", perm))
+    return v
+
+
+def _ordered(command, parsed, dels, own, roots, audit, cwd, shell, env) -> Verdict:
+    """decide()'s rules after the NEVER_SHADOW denies, in the bash file's order (the first refusal wins)."""
+    advice = Advice()
 
     def deny(rule_id: str, file: str = "") -> Verdict:
         reason = rules.message(rule_id, file=file) if file else rules.message(rule_id)
@@ -181,15 +212,6 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         audit.rule(HOOK, rule_id, "advise", msg)
         advice.add(msg)
 
-    # --- hard blocks
-    # Deletes (Task 7): decided on the commands that RUN and where their operands RESOLVE (deletes.py, E16).
-    parsed = shellparse.parse(command, shell) if parsed is None else parsed
-    dels = deletes.scan(command, parsed, roots, cwd, env)
-    # Plan 6 Task 12 (R12): a write -- or a delete (fix round 1, I1) -- into .skyguard/** is the CLI's alone. Checked before
-    # the delete deny, because S-DEL-INSTALL is shadowed by guards off and S-SELF-STATE is not.
-    own = self_rules.shell_scan(command, parsed, roots, cwd, env)
-    if own and own[0] == self_rules.STATE:
-        return deny("S-SELF-STATE", own[1])
     if dels.hit:
         # Merge of rt-fix-a + rt-fix-b (2026-10-05): rt-fix-a reads a move out of a protected folder as a delete of the
         # source; rt-fix-b's S-MOVE-ROOT names a move that takes a protected ROOT folder (the install, Data, the
@@ -219,10 +241,6 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     champ = anchored.champollion(command, parsed, roots, cwd, env)
     if champ:
         return deny("S-CHAMPOLLION", champ)
-    # Plan 6 Task 11: unlocking a lock target outside the skyguard CLI (whatever --session says), or the user's .cmd.
-    raw = lift_rules.raw_unlock(command, parsed, roots, cwd, env, shell)
-    if raw:
-        return deny(raw[0], raw[1])
     # Task 11: the DevBench console reached by curl or devbench-cli.sh (mcp_rules.py judges the same calls as the MCP hook).
     dev = mcp_rules.scan_shell(command, parsed, roots, env)
     if dev and dev[0] == "S-DEVBENCH-CRASH":

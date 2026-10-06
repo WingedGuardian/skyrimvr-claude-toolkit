@@ -59,10 +59,17 @@ def combine(verdicts: Iterable[Verdict]) -> Verdict:
     if not vs:   # nothing was evaluated; an empty fold must never read as "allow"
         return Verdict("deny", NO_VERDICTS, status="failed", code="engine.EMPTY_COMBINE")
     worst = max((v.status for v in vs), key=lambda s: _RANK.get(s, 2), default="evaluated")
+    # Plan 6 final fix (lane A C1): within a decision a NEVER_SHADOW refusal outranks the others (an apply_patch that
+    # deletes an install file and then adds .skyguard/state.json is W-SELF-STATE, not S-DEL-INSTALL), and one that a
+    # stronger refusal outranks is carried beside it (Verdict.never), for shadow mode to return.
+    kept = sorted((n for n in (_never_of(v) for v in vs) if n is not None), key=lambda n: n.decision != "deny")
     for want in ("deny", "ask"):
-        for v in vs:
-            if v.decision == want:
-                return v._replace(status=worst)
+        hits = [v for v in vs if v.decision == want]
+        if hits:
+            top = next((v for v in hits if _is_never(v)), hits[0])
+            if not _is_never(top) and top.never is None and kept:
+                top = top._replace(never=kept[0])
+            return top._replace(status=worst)
     advice, seen = Advice(), set()
     for v in vs:
         for item in [v.context] if v.context else []:
@@ -71,6 +78,18 @@ def combine(verdicts: Iterable[Verdict]) -> Verdict:
                 advice.add(item)
     codes_seen = [v.code for v in vs if v.context]
     return Verdict("allow", "", advice.joined(), worst, codes_seen[0] if codes_seen else "allow")
+
+
+def _is_never(v: Verdict) -> bool:
+    return v.decision in ("deny", "ask") and codes.classify(v).code in NEVER_SHADOW
+
+
+def _never_of(v: Verdict):
+    """The NEVER_SHADOW refusal `v` is or carries (Verdict.never), classified; None for neither."""
+    if _is_never(v):
+        return codes.classify(v)
+    n = v.never
+    return codes.classify(n) if isinstance(n, Verdict) and n.decision in ("deny", "ask") else None
 
 
 def patch_target(path: str, cwd: str) -> Optional[str]:
@@ -331,6 +350,13 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
         if v.code in NEVER_SHADOW:                          # Plan 6 Task 11: guards off never lifts the lock
             audit.log_strict("skyguard", "SHADOW", "{} kept ({}; a lift rule)".format(v.code, v.decision))
             return v
+        # Plan 6 final fix (lane A C1): the call ALSO carries a NEVER_SHADOW refusal that a decoy outranked. Shadow mode
+        # would allow the decoy and with it the whole command, so the call is refused by THAT rule, and the log says so.
+        kept = _never_of(v)
+        if kept is not None:
+            audit.log_strict("skyguard", "SHADOW", "{} kept ({}; a lift rule, beside {})".format(
+                kept.code, kept.decision, v.code))
+            return kept._replace(status=v.status, never=None)
         if v.status == "failed" or codes._inert(v.code) or v.code == "unknown":
             audit.log_strict("skyguard", "SHADOW", "{} kept ({})".format(v.code, v.decision))
             return v
