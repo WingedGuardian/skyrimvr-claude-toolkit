@@ -9,12 +9,20 @@ on:
 permissions:
   contents: read
 
+# Every action is pinned by COMMIT SHA (the tag in the comment is for humans): a tag can be moved to other code,
+# a sha cannot (user ruling 2026-10-05: every user, and every CI run, gets exactly what was tested).
+# tests/test_workflows.py fails on an unpinned `uses:` and on a job without timeout-minutes (a hang must be a
+# red job, not a six-hour stall).
+
 jobs:
   shell:
     name: Shell
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Syntax and shebangs
         run: |
@@ -39,9 +47,12 @@ jobs:
   python:
     name: Python
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version-file: .python-version
 
@@ -67,9 +78,12 @@ jobs:
   node:
     name: Node
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version-file: .node-version
 
@@ -90,9 +104,12 @@ jobs:
   toolkit:
     name: Claude Code config
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version-file: .python-version
 
@@ -240,8 +257,11 @@ jobs:
   setup-smoke:
     name: setup.sh runs clean
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install into a fake game directory
         run: |
@@ -289,12 +309,17 @@ jobs:
           done
 
   behavior:
-    name: Behavioral tests (${{ matrix.os }})
+    name: Behavioral tests (${{ matrix.os }}, Python ${{ matrix.python }})
     strategy:
       fail-fast: false
+      # OS x the TESTED Python range (user ruling 2026-10-05: setup checks 3.10-3.13, so CI runs all four).
+      # Node comes from .node-version on every leg; the .NET 10 toolchain has its own job below.
       matrix:
         os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
+    # The whole suite includes tests/test_mutations.py; a leg that hangs must die red, not stall for six hours.
+    timeout-minutes: 240
     # Both legs block. Windows is the platform this toolkit actually targets and
     # every path bug it has shipped was Windows-specific, so a non-blocking
     # Windows leg would be a gate that cannot fail -- the exact defect this job
@@ -305,20 +330,20 @@ jobs:
     steps:
       # Full history WITH tags: the Codex hook-definition freeze gate compares against the newest release
       # tag, and fails (rather than passing vacuously) in a tagless shallow clone.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Deliberately NOT python-version-file here. .python-version pins an exact
       # patch (3.11.15) for the devcontainer, and that patch has no Windows x64
       # build in the runner manifest -- the Windows leg died at setup before
-      # running a single test. These tests exercise shell behavior, not Python
-      # semantics, so the minor version is what matters.
-      - uses: actions/setup-python@v7
+      # running a single test. The matrix names the minor; the runner supplies its latest patch.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version-file: .node-version
 
@@ -352,16 +377,47 @@ jobs:
           docker pull busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
           docker tag busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e busybox:1.37
 
-      - name: Behavioral suite (contained harness)
+      # TRIPWIRE, before an hour of suite: this leg must COLLECT at least the recorded floor
+      # (.github/ci-leg.json). A module that stopped importing, or a leg looking at the wrong tree, goes red here.
+      - name: Tripwire -- the leg collects the whole suite
+        timeout-minutes: 10
         env:
           TOOLKIT_REQUIRE_HARNESS: "1"
-        run: python -B tests/run_harness_tests.py tests/ -v --durations=10 -rfEs | tee behavioral.log
+        run: |
+          set -o pipefail
+          python -B tests/run_harness_tests.py tests/ --collect-only -q | tee collect.log
+          python scripts/check_ci_leg.py collect collect.log --leg "$RUNNER_OS"
+
+      # The timing guards (catastrophic-regex, quadratic-input) and the hook deadline tests, alone and under a
+      # hard step timeout: a regression there is a HANG, and a hang must be a red step, not a stalled job.
+      # They run again inside the full suite; this run exists for the timeout. The opt-in CPU-load file
+      # (test_hook_deadline_load.py) is NOT run in CI: a shared runner gives no stable CPU to measure against.
+      - name: Timing guards and hook deadlines, under a hard timeout
+        timeout-minutes: 20
+        env:
+          TOOLKIT_REQUIRE_HARNESS: "1"
+        run: python -B tests/run_harness_tests.py tests/test_skyguard_timing.py tests/test_python_fallback.py tests/test_hook_deadline.py -q -rfEs
+
+      - name: Behavioral suite (contained harness)
+        timeout-minutes: 200
+        env:
+          TOOLKIT_REQUIRE_HARNESS: "1"
+        run: |
+          set -o pipefail
+          python -B tests/run_harness_tests.py tests/ -v --durations=10 -rfEs | tee behavioral.log
+
+      # The skip ceiling, the xfail ceiling, every required module (harness-contained ones, hook deadlines, the
+      # freeze gate, the release machinery; the platform's own) has a PASSED test, and the load test did not run.
+      - name: Tripwire -- skip ceiling and required modules
+        if: always()
+        run: python scripts/check_ci_leg.py log behavioral.log --leg "$RUNNER_OS"
 
       # A COULD NOT CHECK skip means a test did not run. Linux has a daemon and the sentinel image,
       # so NOTHING may be unchecked there. On Windows the Docker daemon is the one expected absence
       # (no Linux daemon on the runner) and the dir_fd skip is POSIX-only by definition. Anything
       # else going unchecked fails the job. -rfEs names failures and errors as well as skips.
       - name: No unexpected COULD NOT CHECK skips
+        if: always()
         run: |
           allow=()
           if [ "$RUNNER_OS" = "Windows" ]; then
@@ -376,3 +432,66 @@ jobs:
       # No `npm install` step: these tests use only the Node standard library.
       - name: Node tests
         run: npm test
+
+  # The pinned .NET tools restore and start with the SDK the toolkit requires (10): setup-dotnet installs
+  # channel 10.0 and `dotnet tool restore` resolves .config/dotnet-tools.json with it. Honest limit: hosted
+  # runner images carry other .NET runtimes too, so this leg cannot prove a 10-ONLY machine works -- that is
+  # T6b's net10-only spike, run locally.
+  dotnet:
+    name: .NET 10 toolchain (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+      - name: The SDK is 10, and the pinned tools restore with it
+        run: |
+          set -euo pipefail
+          v=$(dotnet --version)
+          case "$v" in 10.*) echo "SDK $v" ;; *) echo "::error::dotnet resolves SDK $v, not 10"; exit 1 ;; esac
+          dotnet tool restore
+          dotnet tool list --local
+
+  # The release machinery on every push: build the zip from the commit (scripts/build-release-zip.sh, the same
+  # build release.yml runs), then verify it as a user would get it -- payload checker, leak grep, and a scrubbed
+  # install (setup.sh, canary, drift check, engine selftest, every hook entry) on both platforms.
+  release-build:
+    name: Release build + scrubbed verify (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+      # FIRST, before any step writes into the checkout: the builder refuses a dirty tree, and CI never passes
+      # --allow-dirty.
+      - name: Build the zip from the commit
+        run: |
+          set -euo pipefail
+          bash scripts/build-release-zip.sh HEAD "$RUNNER_TEMP/dist" | tee build.out
+          echo "ZIP=$(sed -n 's/^ZIP=//p' build.out)" >> "$GITHUB_ENV"
+          echo "COMMIT=$(sed -n 's/^COMMIT=//p' build.out)" >> "$GITHUB_ENV"
+      - name: Verify the zip in a scrubbed environment
+        run: bash tools/verify-release.sh --local "$ZIP" --scrubbed --expect-commit "$COMMIT"

@@ -354,9 +354,10 @@ MUTATIONS = [
     # still keeps it untracked -- but nothing would stop a release shipping it and
     # overwriting their notes on update. A convention with no gate cannot go red.
     pytest.param(
-        ".github/workflows/release.yml",
-        'test ! -e "/tmp/$NAME/KNOWLEDGEBASE.local.md"',
-        "true",
+        # Plan 8 T10: the gate is an entry of the one payload checker both release gates run.
+        "tools/check-release-payload.py",
+        '    "KNOWLEDGEBASE.local.md",\n',
+        "",
         "tests/test_repo_invariants.py::test_the_users_knowledgebase_is_never_shipped_and_is_where_writes_go",
         id="users-knowledgebase-stays-out-of-the-payload",
     ),
@@ -3290,10 +3291,11 @@ _T11_CLAUSES = [
      'CLAUDE_HOOKS = ("protect-files", "protect-bash", "protect-mcp", "backup-before-edit",',
      'CLAUDE_HOOKS = ("protect-files", "protect-bash", "backup-before-edit",',
      "tests/test_repo_invariants.py::test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks"),
-    ("rule-S-DEVBENCH-CRASH-release-floor", ".github/workflows/release.yml", 'test "$nhooks" -ge 6', 'test "$nhooks" -ge 5',
+    # Plan 8 T10: both release gates read the floor from tools/check-release-payload.py.
+    ("rule-S-DEVBENCH-CRASH-release-floor", "tools/check-release-payload.py", "CLAUDE_HOOK_FLOOR = 6", "CLAUDE_HOOK_FLOOR = 5",
      "tests/test_repo_invariants.py::test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks"),
-    ("rule-S-DEVBENCH-CRASH-verify-floor", "tools/verify-release.sh", "*[!0-9]*) floor=6 ;;", "*[!0-9]*) floor=5 ;;",
-     "tests/test_repo_invariants.py::test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks"),
+    ("release-codex-entry-floor", "tools/check-release-payload.py", "CODEX_ENTRY_FLOOR = 2", "CODEX_ENTRY_FLOOR = 1",
+     "tests/test_release_payload.py::test_the_hook_floor_is_the_tree_recounted"),
     ("wrapper-protect-mcp-names-its-role", ".claude/hooks/protect-mcp.sh", 'HOOK_NAME="protect-mcp"', 'HOOK_NAME="protect-files"',
      "tests/test_hooks.py::test_a_fresh_install_gets_its_heartbeat_directory[protect-mcp.sh]"),
 ]
@@ -3858,12 +3860,12 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _T + "test_skyguard_neutral.py::test_an_mcp_call_the_rules_do_not_judge_is_labelled_unjudged_not_evaluated[mcp__other__thing]",
      "p7final-neutral-unjudged-mcp-reads-evaluated"),
     # M1: the release gate's line continuation.
-    (".github/workflows/release.yml", 'check-adapter-payload.py "/tmp/$NAME" ' + BS + "\n            || { echo",
-     'check-adapter-payload.py "/tmp/$NAME"             || { echo',
+    (".github/workflows/release.yml", "refs/remotes/origin/master >/dev/null " + BS + "\n            || { echo",
+     "refs/remotes/origin/master >/dev/null             || { echo",
      _T + "test_adapter_payload.py::test_the_release_gates_parse_and_lost_no_line_continuation",
      "p7final-release-loses-line-continuation"),
     # M2: the payload check lists what ADAPTING.md names.
-    ("tools/check-adapter-payload.py", '    "tools/adapting/examples/json_deny.slots.py",\n', "",
+    ("tools/check-release-payload.py", '    "tools/adapting/examples/json_deny.slots.py",\n', "",
      _T + "test_adapter_payload.py::test_every_file_adapting_md_names_or_cites_is_checked",
      "p7final-payload-drops-a-worked-example"),
     # M3: the prose under the prompt.
@@ -4463,3 +4465,240 @@ _P5F_CLAUSES = [
      "    if False:", "tests/test_intent_diff.py::test_main_writes_utf8_whatever_the_console_encoding"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _P5F_CLAUSES]
+
+
+# Plan 8 T10 (release machinery): one mutation per gating clause; each names the test that must go red.
+_BZ, _CRP, _VR, _CL = ("scripts/build_release_zip.py", "tools/check-release-payload.py", "tools/verify-release.sh",
+                       "scripts/check_ci_leg.py")
+_RB, _RP, _VT, _CT, _WT = ("tests/test_release_build.py::", "tests/test_release_payload.py::",
+                           "tests/test_verify_release.py::", "tests/test_ci_leg.py::", "tests/test_workflows.py::")
+_T10 = [
+    # T10.1 the builder
+    ("t10-build-dirty-tree-allowed", _BZ, "    if dirty and not allow_dirty:", "    if False:",
+     _RB + "test_an_untracked_file_refuses_the_build_and_never_reaches_the_zip"),
+    ("t10-build-foreign-rev-allowed", _BZ,
+     '    if _git("merge-base", "--is-ancestor", sha, "HEAD", check=False).returncode != 0:', "    if False:",
+     _RB + "test_a_rev_that_is_not_an_ancestor_of_head_is_refused"),
+    ("t10-build-committed-build-info-allowed", _BZ,
+     '    if _git("cat-file", "-e", "{}:{}".format(sha, BUILD_INFO), check=False).returncode == 0:', "    if False:",
+     _RB + "test_the_build_info_is_a_file_the_commit_cannot_supply"),
+    ("t10-build-ships-tests", _BZ, 'EXCLUDE = ("tests", ".github")', 'EXCLUDE = (".github",)',
+     _RB + "test_tests_and_github_are_not_shipped"),
+    ("t10-build-info-wrong-commit", _BZ, 'built-from=git archive (committed objects only)\\n".format(sha, version)',
+     'built-from=git archive (committed objects only)\\n".format("0" * 40, version)',
+     _RB + "test_a_clean_build_has_one_versioned_root_and_build_info"),
+    # T10.2 the one payload checker
+    ("t10-payload-routes-harness-allowed", _CRP, '    "tests/fixtures/routes-harness",\n', "",
+     _RP + "test_every_check_can_fail_on_its_own_line[routes-harness-shipped]"),
+    ("t10-payload-github-allowed", _CRP, '    ".github",\n', "",
+     _RP + "test_every_check_can_fail_on_its_own_line[github-shipped]"),
+    ("t10-payload-paths-env-anywhere", _CRP, 'ABSENT_NAMES = ("skyrim-paths.env", ".nexus_api_key")',
+     'ABSENT_NAMES = (".nexus_api_key",)', _RP + "test_every_check_can_fail_on_its_own_line[paths-env-shipped-deep]"),
+    ("t10-payload-stdin-any-cat", _CRP, 'None if "INPUT=$(cat)" in text.splitlines() else', 'None if "cat" in text else',
+     _RP + "test_every_check_can_fail_on_its_own_line[claude-hook-inert-stdin]"),
+    ("t10-payload-heartbeat-in-comment", _CRP, 'HEARTBEAT_RE = re.compile(r"^[^#]*hook-heartbeat", re.M)',
+     'HEARTBEAT_RE = re.compile(r"hook-heartbeat")',
+     _RP + "test_every_check_can_fail_on_its_own_line[claude-hook-heartbeat-in-comment]"),
+    ("t10-payload-ps1-stdin-unchecked", _CRP, "None if PS_STDIN_RE.search(text) else", "None if True else",
+     _RP + "test_every_check_can_fail_on_its_own_line[codex-ps1-no-stdin]"),
+    ("t10-payload-expected-commit-ignored", _CRP, "None if commit == expect_commit else", "None if True else",
+     _RP + "test_every_check_can_fail_on_its_own_line[build-info-other-commit]"),
+    ("t10-payload-short-sha-accepted", _CRP, "None if SHA_RE.fullmatch(commit) else", "None if commit else",
+     _RP + "test_every_check_can_fail_on_its_own_line[build-info-short-sha]"),
+    # T10.3 the leak grep
+    ("t10-leaks-backslash-spelling", _CRP, '("home path, backslash", "Users" + BS + n),', '',
+     _RP + "test_every_home_spelling_is_found_without_the_bare_name"),
+    ("t10-leaks-bare-name", _CRP, "        if n in persons or (n.lower() not in GENERIC_ACCOUNTS and len(n) >= 4):",
+     "        if n in persons:",
+     _RP + "test_every_spelling_of_the_home_is_found"),
+    ("t10-leaks-utf16-unread", _CRP, '            for enc in ("utf-8", "utf-16-le", "utf-16-be"):',
+     '            for enc in ("utf-8", "utf-16-be"):', _RP + "test_utf16_is_read_too"),
+    ("t10-leaks-allow-prefix-ignored", _CRP, '                    text = text.replace(a, "<allowed>")',
+     "                    pass", _RP + "test_an_allowed_prefix_is_blanked_but_anything_else_under_the_home_is_not"),
+    ("t10-leaks-baseline-skips-changed", _CRP, "                if twin.is_file() and twin.read_bytes() == data:",
+     "                if twin.is_file():", _RP + "test_changed_from_skips_only_byte_identical_files"),
+    ("t10-leaks-names-not-from-env", _CRP, '    names = {env.get(k, "") for k in ("USERNAME", "USER", "LOGNAME")}',
+     "    names = set()", _RP + "test_the_names_come_from_the_environment"),
+    ("t10-leaks-runner-is-a-person", _CRP, 'GENERIC_ACCOUNTS = frozenset(("runner", ', "GENERIC_ACCOUNTS = frozenset((",
+     _RP + "test_a_generic_account_is_searched_by_path_only"),
+    ("t10-leaks-nothing-to-search-passes", _CRP, "    if not names and not extra and not persons:", "    if False:",
+     _RP + "test_leaks_mode_with_nothing_to_search_for_is_could_not_check"),
+    # T10.3 the verifier
+    ("t10-verify-scrub-keeps-the-environment", _VR, '  scrub() { env -i "${SCRUB_ENV[@]}" "$@"; }',
+     '  scrub() { env "${SCRUB_ENV[@]}" "$@"; }', _VT + "test_the_scrubbed_install_runs_and_its_canary_is_invisible"),
+    ("t10-verify-payload-leaks-unchecked", _VR, '"$PY" "$HERE/check-release-payload.py" --leaks "$(winpath "$ROOT")" "${REQ[@]}"; rc=$?',
+     "rc=0", _VT + "test_a_home_path_in_the_payload_is_red"),
+    ("t10-verify-expected-commit-dropped", _VR, '"$(winpath "$ROOT")" ${EXPECT:+--expect-commit "$EXPECT"}; then',
+     '"$(winpath "$ROOT")"; then', _VT + "test_the_expected_commit_is_enforced"),
+    ("t10-verify-two-roots-accepted", _VR, """if [ "$(printf '%s\\n' "$tops" | grep -c .)" -ne 1 ]; then""",
+     "if false; then", _VT + "test_two_roots_are_refused"),
+    # T10.4 the per-leg tripwires
+    ("t10-ci-skip-ceiling-off", _CL, "    if skipped > ceiling:", "    if False:", _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-skip-ceiling-not-per-leg", _CL, '    ceiling = spec["skip_ceiling"][leg]',
+     '    ceiling = max(spec["skip_ceiling"].values())', _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-xfail-ceiling-off", _CL, '    if xfailed > spec["xfail_ceiling"]:', "    if False:",
+     _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-required-modules-off", _CL, "    for mod in required:", "    for mod in []:", _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-load-test-allowed", _CL, '    for mod in spec["forbidden_passing"]:', "    for mod in []:",
+     _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-log-collected-floor-off", _CL, '    elif collected < spec["collected_floor"]:', "    elif False:",
+     _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-collect-floor-off", _CL, "    if n < floor:", "    if False:", _CT + "test_collect_mode"),
+    # T10.5 the freeze-gate baseline
+    ("t10-freeze-baseline-is-the-tag-being-cut", "tests/test_codex_definitions.py",
+     '        if _git("rev-parse", tag + "^{commit}", cwd=repo).stdout.decode().strip() == head:', "        if False:",
+     "tests/test_codex_definitions.py::test_the_release_being_cut_is_not_its_own_baseline"),
+    # T10.4/T10.6 the workflows
+    ("t10-wf-action-unpinned", ".github/workflows/release.yml",
+     "uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0",
+     "uses: actions/setup-python@v7  # v7.0.0", _WT + "test_every_action_is_pinned_by_commit_sha[release.yml]"),
+    ("t10-wf-no-timeout", ".github/workflows/release.yml", "    timeout-minutes: 45\n", "",
+     _WT + "test_every_job_has_a_timeout[release.yml]"),
+    ("t10-wf-input-spliced", ".github/workflows/release.yml", '          TAG="${INPUT_TAG:-$REF_NAME}"',
+     '          TAG="${{ github.event.inputs.tag }}"', _WT + "test_no_user_input_is_spliced_into_a_script[release.yml]"),
+    ("t10-wf-not-on-master", ".github/workflows/release.yml",
+     '          git merge-base --is-ancestor "$SHA" refs/remotes/origin/master ', "          true ",
+     _WT + "test_release_gates_are_in_order"),
+    ("t10-wf-release-verify-not-scrubbed", ".github/workflows/release.yml",
+     'run: bash tools/verify-release.sh --local "$ZIP" --scrubbed --expect-commit "$SHA" --tag "$TAG"',
+     'run: bash tools/verify-release.sh --local "$ZIP" --expect-commit "$SHA" --tag "$TAG"',
+     _WT + "test_release_gates_are_in_order"),
+    ("t10-wf-release-keeps-token", ".github/workflows/release.yml",
+     "          persist-credentials: false\n          # Without this", "          # Without this",
+     _WT + "test_least_privilege_and_no_dangerous_triggers[release.yml]"),
+    ("t10-wf-load-test-in-ci", ".github/workflows/ci.yml",
+     "        run: python -B tests/run_harness_tests.py tests/test_skyguard_timing.py",
+     "        run: SKYGUARD_LOAD_TEST=1 python -B tests/run_harness_tests.py tests/test_skyguard_timing.py",
+     _WT + "test_the_load_test_never_runs_in_ci_and_the_deadline_tests_run_on_both_legs"),
+    ("t10-wf-python-range-short", ".github/workflows/ci.yml", '        python: ["3.10", "3.11", "3.12", "3.13"]',
+     '        python: ["3.11"]', _WT + "test_the_behavior_matrix_is_both_oses_times_the_tested_pythons"),
+    ("t10-wf-collect-tripwire-dropped", ".github/workflows/ci.yml",
+     '          python scripts/check_ci_leg.py collect collect.log --leg "$RUNNER_OS"', "          true",
+     _WT + "test_the_tripwires_bracket_the_suite_on_every_leg"),
+    # Review M7: dropping the pipefail TEXT was an equivalent mutant (the job's bash default already adds it);
+    # the real hazard is losing that default, so the twin removes it.
+    ("t10-wf-behavior-loses-bash-default", ".github/workflows/ci.yml",
+     "    defaults:\n      run:\n        shell: bash\n    steps:\n      # Full history WITH tags",
+     "    steps:\n      # Full history WITH tags", _WT + "test_the_tripwires_bracket_the_suite_on_every_leg"),
+    ("t10-wf-behavior-shallow", ".github/workflows/ci.yml",
+     "tagless shallow clone.\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1\n"
+     "        with:\n          fetch-depth: 0",
+     "tagless shallow clone.\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1\n"
+     "        with:\n          fetch-depth: 1",
+     _WT + "test_every_job_that_runs_the_freeze_gate_has_full_history"),
+    ("t10-wf-dotnet-channel", ".github/workflows/ci.yml", '          dotnet-version: "10.0.x"', '          dotnet-version: "9.0.x"',
+     _WT + "test_node_comes_from_node_version_and_dotnet_is_channel_10"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10]
+
+# Plan 8 T10 fix round 1 (review I1-I3, M1-M5, M8, M9): one twin per new clause.
+_T10FR = [
+    # I1 the identity tokens, failing closed
+    ("t10fr-require-tokens-off", _CRP, "    if require and not (persons or token_paths):", "    if False:",
+     _RP + "test_require_tokens_fails_closed_without_them"),
+    ("t10fr-verify-tokens-not-required", _VR, 'REQ=(); [ "${VERIFY_REQUIRE_LEAK_TOKENS:-0}" = 1 ] && REQ=(--require-tokens)',
+     "REQ=()", _VT + "test_the_release_mode_fails_closed_without_leak_tokens"),
+    ("t10fr-wf-tokens-not-required", ".github/workflows/release.yml", '          VERIFY_REQUIRE_LEAK_TOKENS: "1"\n', "",
+     _WT + "test_release_gates_are_in_order"),
+    ("t10fr-token-paths-ignored", _CRP, '    extra = [p for p in os.environ.get("RELEASE_LEAK_PATHS", "").split("|") if p.strip()] + token_paths',
+     '    extra = [p for p in os.environ.get("RELEASE_LEAK_PATHS", "").split("|") if p.strip()]',
+     _RP + "test_a_token_name_is_found_even_when_the_runner_is_generic"),
+    # I2 the config folder allow-list
+    ("t10fr-config-shape-unchecked", _CRP, "    return bool(CONFIG_SHAPE.match(c[len(h) + 1:]))", "    return True",
+     _RP + "test_the_config_folder_is_allow_listed_only_in_its_expected_shape"),
+    ("t10fr-config-not-below-home", _CRP, ' or not c.lower().startswith(h.lower() + "/"):', ":",
+     _RP + "test_the_config_folder_is_allow_listed_only_in_its_expected_shape"),
+    ("t10fr-config-allowed-unvalidated", _CRP, "        if config_dir_ok(c, home):", "        if True:",
+     _RP + "test_a_home_level_config_hides_nothing"),
+    # I3 secrets and key shapes
+    ("t10fr-secret-value-unread", _CRP, "                        i = raw.find(value)", "                        i = -1",
+     _RP + "test_a_secret_value_is_found_and_never_printed"),
+    ("t10fr-secret-file-unread", _CRP, "        if p is not None and p.is_file():", "        if False:",
+     _RP + "test_the_nexus_key_file_is_read"),
+    ("t10fr-shape-nexus", _CRP, '     re.compile(r"[A-Za-z0-9+/]{16,}={0,2}--', '     re.compile(r"(?!)[A-Za-z0-9+/]{16,}={0,2}--',
+     _RP + "test_every_key_shape_is_found"),
+    ("t10fr-shape-github", _CRP, 're.compile(r"\\b(?:gh[pousr]_', 're.compile(r"(?!)(?:gh[pousr]_',
+     _RP + "test_every_key_shape_is_found"),
+    ("t10fr-shape-openai", _CRP, 're.compile(r"\\bsk-(?:proj-', 're.compile(r"(?!)sk-(?:proj-',
+     _RP + "test_every_key_shape_is_found"),
+    ("t10fr-shape-aws", _CRP, 're.compile(r"\\bAKIA[0-9A-Z]{16}\\b")', 're.compile(r"(?!)AKIA[0-9A-Z]{16}\\b")',
+     _RP + "test_every_key_shape_is_found"),
+    # M3 spellings
+    ("t10fr-leaks-utf16be-unread", _CRP, '            for enc in ("utf-8", "utf-16-le", "utf-16-be"):',
+     '            for enc in ("utf-8", "utf-16-le"):', _RP + "test_utf16_big_endian_is_read_too"),
+    ("t10fr-leaks-url-encoded-path", _CRP,
+     '    out += [(k + ", url-encoded", v.replace(" ", "%20")) for k, v in out if " " in v]', "    out += []",
+     _RP + "test_url_and_json_slash_spellings_of_a_path"),
+    ("t10fr-leaks-json-slash-path", _CRP, '           ("json-slash", fwd.replace("/", BS + "/"))]', "           ]",
+     _RP + "test_url_and_json_slash_spellings_of_a_path"),
+    # M5 named hooks, M8 dotenv
+    ("t10fr-registered-hook-unchecked", _CRP, "        missing = [p for p in named if not (root / p).is_file()]",
+     "        missing = []", _RP + "test_a_registered_hook_missing_from_the_payload_is_named"),
+    ("t10fr-dotenv-allowed", _CRP, 'DOTENV_GLOBS = (".env", "*.env", ".env.*", "*.env.local")', "DOTENV_GLOBS = ()",
+     _RP + "test_a_dotenv_file_is_refused"),
+    # M1/M2 the builder
+    ("t10fr-build-info-attributes-ignored", _BZ, "    if info.exists():", "    if False:",
+     _RB + "test_machine_local_info_attributes_refuse_the_build"),
+    ("t10fr-build-attributes-file-ignored", _BZ,
+     '"-c", "core.attributesFile=" + _empty_attributes_file().replace("' + BS * 2 + '", "/"), *args],', "*args],",
+     _RB + "test_the_default_global_attributes_file_is_neutralised"),
+    ("t10fr-build-altering-attrs-allowed", _BZ, 'ALTERING_ATTRS = ("filter", "export-subst", "export-ignore", "ident")',
+     "ALTERING_ATTRS = ()", _RB + "test_a_committed_attribute_that_alters_the_archive_refuses"),
+    ("t10fr-build-submodule-allowed", _BZ, "    if links:", "    if False:", _RB + "test_a_submodule_refuses_the_build"),
+    # M4 published/tagged verify
+    ("t10fr-verify-root-not-the-tag", _VR, '  [ "$tops" = "skyrimvr-claude-toolkit-${TAG#v}" ] && ok', "  true && ok",
+     _VT + "test_a_tag_must_match_the_root_folder_and_build_info"),
+    ("t10fr-verify-build-version-not-the-tag", _VR, '  [ "$BUILT_VERSION" = "${TAG#v}" ] && ok', "  true && ok",
+     _VT + "test_a_tag_must_match_the_root_folder_and_build_info"),
+    # M9 release tags only
+    ("t10fr-freeze-any-tag-is-a-release", "tests/test_codex_definitions.py", '"--list", "v[0-9]*", ', "",
+     "tests/test_codex_definitions.py::test_the_release_being_cut_is_not_its_own_baseline"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10FR]
+
+# Plan 8 T10 fix round 2 (re-review N1-N3, N5): one twin per new clause.
+_T10FR2 = [
+    # N1 a hit never prints identity text; the workflow masks every spelling first
+    ("t10fr2-label-carries-home-spelling", _CRP, '            needles.append(("identity token #{} ({})".format(k, kind), s.lower()))',
+     '            needles.append(("{} ({})".format(s, kind), s.lower()))',
+     _RP + "test_a_hit_never_prints_the_identity_in_any_spelling"),
+    ("t10fr2-label-carries-path-spelling", _CRP,
+     '            needles.append(("identity token #{} (path, {})".format(k, kind), s.lower()))',
+     '            needles.append(("path {} ({})".format(s, kind), s.lower()))',
+     _RP + "test_a_hit_never_prints_the_identity_in_any_spelling"),
+    ("t10fr2-file-name-not-withheld", _CRP, "            if any(needle in name.lower() for _, needle in needles):",
+     "            if False:", _RP + "test_a_file_name_holding_the_identity_is_withheld"),
+    ("t10fr2-config-folder-printed", _CRP,
+     '            print("  allow-listed the config folder (validated <home>/.../Documents/My Games/Skyrim*)")',
+     '            print("  allow-listed " + c)', _RP + "test_the_config_folder_is_never_printed"),
+    ("t10fr2-mask-only-raw-tokens", _CRP, '    return ["::add-mask::" + v for v in sorted(vals) if v]',
+     '    return ["::add-mask::" + v for v in sorted(set(persons) | set(paths)) if v]',
+     _RP + "test_mask_lines_cover_every_token_and_spelling"),
+    ("t10fr2-wf-no-mask-step", ".github/workflows/release.yml",
+     "        run: python -B tools/check-release-payload.py --mask-tokens", "        run: true",
+     _WT + "test_release_masks_every_identity_spelling_before_anything_prints"),
+    # N3 the token floor
+    ("t10fr2-token-name-floor-off", _CRP, '        elif len(t) < 4 or not re.search(r"[A-Za-z0-9]", t):', "        elif False:",
+     _RP + "test_a_vague_token_is_rejected_by_number_never_text"),
+    ("t10fr2-token-path-floor-off", _CRP,
+     '            if len(t) < 4 or len(segs) < 2 or not any(re.search(r"[A-Za-z0-9]", x) for x in segs):',
+     "            if False:", _RP + "test_a_vague_token_is_rejected_by_number_never_text"),
+    ("t10fr2-token-problems-ignored", _CRP, "    problems = token_problems()\n    if problems:",
+     "    problems = token_problems()\n    if False:", _RP + "test_a_vague_token_is_rejected_by_number_never_text"),
+    # N2 the post-build proof
+    ("t10fr2-proof-misses-dropped-files", _BZ,
+     '    problems = ["missing from the zip: " + p for p in sorted(set(want) - set(got))]', "    problems = []",
+     _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
+    ("t10fr2-proof-misses-extra-files", _BZ,
+     '    problems += ["not in the commit: " + p for p in sorted(set(got) - set(want))]', "    problems += []",
+     _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
+    ("t10fr2-proof-misses-altered-bytes", _BZ,
+     '        if got[p].replace(b"' + BS + 'r' + BS + 'n", b"' + BS + 'n") != blobs[want[p]].replace(b"' + BS + 'r' + BS
+     + 'n", b"' + BS + 'n"):', "        if False:", _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
+    ("t10fr2-proof-not-wired", _BZ, "    if problems:\n        raise Refused(5,", "    if False:\n        raise Refused(5,",
+     _RB + "test_a_build_whose_archive_differs_is_refused_and_writes_nothing"),
+    # N5 attributes parsed, not substring-matched
+    ("t10fr2-attrs-pattern-read-as-attribute", _BZ, "        for attr in parts[1:]:", "        for attr in parts:",
+     _RB + "test_gitattributes_are_parsed_not_substring_matched"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10FR2]

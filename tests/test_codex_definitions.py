@@ -221,8 +221,8 @@ def _top_section(changelog: str) -> str:
     return changelog[heads[0]:heads[1] if len(heads) > 1 else len(changelog)]
 
 
-def _git(*args) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=str(REPO), capture_output=True)
+def _git(*args, cwd=None) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=str(cwd or REPO), capture_output=True)
 
 
 def freeze_problems(ledger_text: str, template: bytes, changelog: str, released, tags_seen: bool,
@@ -269,18 +269,64 @@ def freeze_problems(ledger_text: str, template: bytes, changelog: str, released,
     return out
 
 
-def _released():
-    """((tag, bytes) of the newest tag whose tree has the definitions, or None; does any tag exist?)"""
-    if not (REPO / ".git").exists():
+def _released(repo=None):
+    """((tag, bytes) of the newest tag whose tree has the definitions, or None; does any tag exist?)
+
+    A tag on HEAD itself is skipped (Plan 8 T10.5): release.yml runs this gate on the tag being released, and
+    comparing that tag's definitions with themselves passes by construction. The baseline of a release is the
+    release BEFORE it -- and for the first release carrying the definitions (v4.0.0, a "tagless release" for
+    this file) there is none, so FROZEN.sha256 decides."""
+    repo = repo or REPO
+    if not (repo / ".git").exists():
         return None, False
-    tags = _git("tag", "--sort=-creatordate").stdout.decode().split()
+    # Release tags only (review M9): a stray non-version tag (this repo has one, `release`) is no release.
+    tags = _git("tag", "--list", "v[0-9]*", "--sort=-creatordate", cwd=repo).stdout.decode().split()
+    head = _git("rev-parse", "HEAD", cwd=repo).stdout.decode().strip()
     for tag in tags:
-        blob = _git("show", "{}:{}".format(tag, REL))
+        if _git("rev-parse", tag + "^{commit}", cwd=repo).stdout.decode().strip() == head:
+            continue
+        blob = _git("show", "{}:{}".format(tag, REL), cwd=repo)
         if blob.returncode == 0:
             return (tag, blob.stdout), True
     if tags:
-        print("freeze gate: no tag carries {} yet -- the ledger half decides".format(REL))
+        print("freeze gate: no earlier tag carries {} -- the ledger (FROZEN.sha256) decides".format(REL))
     return None, bool(tags)
+
+
+def _tagged_repo(tmp_path, steps):
+    """A throwaway repo: each step is (hooks.json text, tag or None), committed in order."""
+    r = tmp_path / "repo"
+    (r / "agent" / "targets" / "codex").mkdir(parents=True)
+    g = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+    subprocess.run(g + ["init", "-q"], cwd=str(r), check=True, capture_output=True)
+    for text, tag in steps:
+        (r / REL).write_bytes(text.encode("utf-8"))      # exact bytes, whatever git's autocrlf says
+        subprocess.run(g + ["add", "-A"], cwd=str(r), check=True, capture_output=True)
+        subprocess.run(g + ["commit", "-q", "--allow-empty", "-m", "x"], cwd=str(r), check=True, capture_output=True)
+        if tag:
+            subprocess.run(g + ["tag", tag], cwd=str(r), check=True, capture_output=True)
+    return r
+
+
+def test_the_release_being_cut_is_not_its_own_baseline(tmp_path):
+    """Plan 8 T10.5, both branches. The first release carrying the definitions has NO baseline (the ledger
+    decides); a later release compares against the previous tag, never the tag at HEAD."""
+    # tagless release: the only tag carrying hooks.json is the one being released (HEAD)
+    first = _tagged_repo(tmp_path / "a", [('{"v": 1}\n', "v3.9.1"), ('{"v": 2}\n', "v4.0.0")])
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@e", "tag", "-d", "v3.9.1"], cwd=str(first),
+                   capture_output=True)
+    released, tags_seen = _released(first)
+    assert released is None and tags_seen, released
+    # a later release: v4.1.0 at HEAD is skipped, v4.0.0 (the previous) is the baseline
+    later = _tagged_repo(tmp_path / "b", [('{"v": 1}\n', "v4.0.0"), ('{"v": 2}\n', "v4.1.0")])
+    released, tags_seen = _released(later)
+    assert released is not None and released[0] == "v4.0.0" and released[1] == b'{"v": 1}\n', released
+    # ...and once HEAD moves past the tag (ordinary master CI), the newest tag is the baseline again
+    on = _tagged_repo(tmp_path / "c", [('{"v": 1}\n', "v4.0.0"), ('{"v": 1}\n', None)])
+    assert _released(on)[0][0] == "v4.0.0"
+    # a non-release tag is never a baseline
+    stray = _tagged_repo(tmp_path / "d", [('{"v": 1}\n', "release"), ('{"v": 2}\n', None)])
+    assert _released(stray)[0] is None
 
 
 def test_codex_hook_definitions_are_frozen():
