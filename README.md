@@ -569,7 +569,8 @@ refusals of writes into `.skyguard/`.
   to a hook plus a matching edit to `GUARD-FILES.sha256` hides that hook from the session-start banner (the per-call
   note on the hook edit itself remains).
 - **The guard code and config get a note, not a prompt:** `.claude/hooks/`, `.claude/settings*.json`, `.codex/`,
-  `tools/skyguard/`, `agent/guards/`, `.claude/skyrim-paths.env`, the hook heartbeats and audit log, and your user-level
+  `tools/skyguard/`, `agent/guards/`, `skyrim-paths.env` (at the toolkit root, and the 3.x `.claude/skyrim-paths.env`),
+  the hook heartbeats and audit log, and your user-level
   `~/.claude/settings*.json` and `~/.codex/config.toml`. A prompt was priced against the author's own history and
   rejected: 24 of 24 would-be prompts were hook maintenance the user had asked for.
 - **A session-start banner** compares the guard files against the shipped `GUARD-FILES.sha256` and names the files

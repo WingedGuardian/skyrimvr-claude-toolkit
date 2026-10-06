@@ -43,7 +43,7 @@ def pristine(tmp_path_factory):
     """The tree as the builder ships it: tracked content (copy_repo drops tests/), no .github/, a BUILD-INFO."""
     root = copy_repo(tmp_path_factory.mktemp("payload") / "toolkit")
     shutil.rmtree(root / ".github")
-    for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", ".claude/backups",
+    for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", ".claude/backups",
                  "KNOWLEDGEBASE.local.md", ".superpowers", ".skyguard"):
         p = root / junk
         if p.is_dir():
@@ -132,6 +132,8 @@ BREAKS = {
                                ".claude/settings.local.json NOT shipped"),
     "paths-env-shipped": (lambda r: (r / ".claude" / "skyrim-paths.env").write_text("X=1"),
                           "no file named skyrim-paths.env"),
+    "paths-env-shipped-root": (lambda r: (r / "skyrim-paths.env").write_text("X=1"),    # Plan 8 T8: 4.0's location
+                               "no file named skyrim-paths.env"),
     "paths-env-shipped-deep": (lambda r: (r / "agent" / "targets" / "skyrim-paths.env").write_text("X=1"),
                                "no file named skyrim-paths.env"),
     "nexus-key-shipped": (lambda r: (r / "tools" / ".nexus_api_key").write_text("k"), "no file named .nexus_api_key"),

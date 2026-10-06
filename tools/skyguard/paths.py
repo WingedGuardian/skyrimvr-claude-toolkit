@@ -33,7 +33,16 @@ ENV_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR", "SK
             "SKYRIM_MO2_OVERWRITE")
 # A malformed value for one of these leaves a protected folder unknown, so it is S-INERT-CONFIG, not a skip.
 PROTECTION_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_MO2_MODS", "SKYRIM_MO2_OVERWRITE")
+# Plan 8 T8: the paths file lives at the TOOLKIT ROOT (the install folder the hooks sit two levels below). The 3.x /
+# early-4.0 spelling under .claude/ is still read, but only when the root file is absent, and it earns a deprecation
+# notice at session start (session.py). setup.sh writes the root file.
 PATHS_FILE = "skyrim-paths.env"
+LEGACY_PATHS_FILE = ".claude/" + PATHS_FILE
+# Read from the file (and the environment) but NO root: the interpreter setup.sh resolved at install time (spec 4).
+TOOL_KEYS = ("SKYGUARD_PYTHON",)
+DEPRECATION = ("NOTICE: your paths file is still at the old location, .claude/skyrim-paths.env. This toolkit reads "
+               "skyrim-paths.env in the toolkit folder first and falls back to the old one; re-run setup.sh to "
+               "move it.")
 
 # R8: delete protection covers the install EXCEPT these, kept as data and extended only from hand-read replay
 # false positives (each extension with its count). Only the `**/<name>/**` shape is supported (checked at import):
@@ -204,9 +213,10 @@ def parse_value(raw: str) -> Optional[str]:
 
 
 class PathsConfig(NamedTuple):
-    env: Dict[str, str]                       # the environment's value per key (ENV_KEYS only, non-empty)
+    env: Dict[str, str]                       # the environment's value per key (ENV_KEYS + TOOL_KEYS, non-empty)
     file: Dict[str, Tuple[str, ...]]          # every value the file assigns per key, in file order
     malformed: Tuple[Tuple[str, str], ...]    # (file name, key) for each protection key the file cannot give
+    source: str = ""                          # read_install: PATHS_FILE / LEGACY_PATHS_FILE / "" (none read)
 
     def values(self, key: str) -> List[str]:
         """R3: the UNION of the environment's and the file's values, environment first, duplicates dropped."""
@@ -228,7 +238,7 @@ class PathsConfig(NamedTuple):
 def read_config(path: Path, environ: Mapping[str, str]) -> PathsConfig:
     """The environment's values plus the paths file's, as data. An absent file declares nothing; a present but
     unreadable or undecodable one RAISES (OSError/ValueError): the caller fails closed (run.ENV_UNREADABLE)."""
-    env = {k: environ[k] for k in ENV_KEYS if environ.get(k)}
+    env = {k: environ[k] for k in ENV_KEYS + TOOL_KEYS if environ.get(k)}
     file: Dict[str, List[str]] = {}
     bad: List[Tuple[str, str]] = []
     path = Path(path)
@@ -248,12 +258,12 @@ def read_config(path: Path, environ: Mapping[str, str]) -> PathsConfig:
                 if k and (path.name, k.group(1)) not in bad:
                     bad.append((path.name, k.group(1)))
                 continue
-            if key not in ENV_KEYS:
+            if key not in ENV_KEYS + TOOL_KEYS:
                 continue
             flags_ok = m.group(1) in (None, "export") or _SAFE_FLAGS.fullmatch(m.group(2) or "")
             # `KEY ='x'` is a command, not an assignment; `declare -i KEY=` evaluates the value
             value = None if (m.group(4) or not flags_ok) else parse_value(m.group(5))
-            if value is not None and value != "" and norm_abs(value) is None:
+            if value is not None and value != "" and key in ENV_KEYS and norm_abs(value) is None:
                 value = None                                          # a relative root protects nothing
             if value is None:
                 if key in PROTECTION_KEYS and (path.name, key) not in bad:
@@ -264,8 +274,44 @@ def read_config(path: Path, environ: Mapping[str, str]) -> PathsConfig:
 
 
 def read_env(path: Path, environ: Mapping[str, str]) -> PathsConfig:
-    """Kept name for callers: same as read_config."""
+    """Kept name for callers: same as read_config, for ONE file. Callers that mean "this install's paths file" use
+    read_install, which knows both locations.
+
+    Scope (deferred item 4): the grammar is the form setup.sh writes (`KEY='value'`, its '\'' escape) plus the
+    plain hand-edited spellings bash reads the same way. It is deliberately NOT `source`: a value bash would expand
+    or run (`$HOME`, `$(...)`, a backtick, `~`) is not evaluated here but reported MALFORMED for a protection key
+    (S-INERT-CONFIG) and skipped for any other key, and a later assignment ADDS a value (R3 union) where a sourced
+    file would keep only the last. So a hand edit that works when sourced can still be refused here; that is the
+    intended direction (refuse, never guess)."""
     return read_config(path, environ)
+
+
+def install_files(root: str) -> Tuple[Path, Path]:
+    """(the root file, the legacy file) for an install root. Callers must not pass "": see read_install."""
+    return Path(root) / PATHS_FILE, Path(root) / ".claude" / PATHS_FILE
+
+
+def read_install(root: str, environ: Mapping[str, str]) -> PathsConfig:
+    """The install's paths file, as data (Plan 8 T8): `<root>/skyrim-paths.env` when it exists -- whole, the legacy
+    file is then not read at all, so a stale or broken leftover cannot change the guard -- else
+    `<root>/.claude/skyrim-paths.env`, else nothing. A root file that exists but cannot be read RAISES like
+    read_config (fail closed); it never falls back to the legacy file. An EMPTY root reads no file at all (deferred
+    item 9: `Path("")` was the process cwd, so any folder's paths file could stand in for the install's)."""
+    if not root:
+        return PathsConfig({k: environ[k] for k in ENV_KEYS + TOOL_KEYS if environ.get(k)}, {}, ())
+    new, old = install_files(root)
+    for path, label in ((new, PATHS_FILE), (old, LEGACY_PATHS_FILE)):
+        if path.is_file():
+            return read_config(path, environ)._replace(source=label)
+    return read_config(new, environ)
+
+
+def legacy_notice(root: str) -> str:
+    """DEPRECATION when this install's paths file is read from the legacy location only, else ""."""
+    try:
+        return DEPRECATION if root and read_install(root, {}).source == LEGACY_PATHS_FILE else ""
+    except (OSError, ValueError):
+        return ""
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -340,7 +386,7 @@ def merge_configs(a: "PathsConfig", b: "PathsConfig") -> "PathsConfig":
     file: Dict[str, Tuple[str, ...]] = dict(a.file)
     for k, vals in b.file.items():
         file[k] = tuple(dict.fromkeys(tuple(file.get(k, ())) + tuple(vals)))
-    return PathsConfig(a.env, file, tuple(dict.fromkeys(a.malformed + b.malformed)))
+    return PathsConfig(a.env, file, tuple(dict.fromkeys(a.malformed + b.malformed)), a.source)
 
 
 def roots(root_posix: str, root_win: str, env: EnvLike) -> Roots:

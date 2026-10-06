@@ -1168,8 +1168,8 @@ MUTATIONS = [
     # declared game root outside the install drops out, so deleting it is allowed.
     pytest.param(
         "tools/skyguard/run.py",
-        "Path(a.root_win or a.root)",
-        "Path(a.root)",
+        "paths.read_install(a.root_win or a.root, ",      # Plan 8 T8: re-anchored (the read moved into read_install)
+        "paths.read_install(a.root, ",
         "tests/test_hooks.py::test_a_declared_root_is_read_with_path_conversion_off",
         id="engine-reads-declared-env-from-the-windows-root",
     ),
@@ -6660,3 +6660,62 @@ MUTATIONS += [
                  "tests/test_skydoctor.py::test_an_expired_lock_lift_is_relocked_not_stranded",
                  id="p6final-doctor-relocks-expired-lift"),
 ]
+
+
+# ---- Plan 8 T8 (lane p8-paths): skyrim-paths.env at the toolkit root, .claude/ as the deprecated fallback. -------
+# One twin per clause of paths.read_install / legacy_notice, the TOOL_KEYS read, the run.py / snapcli wiring, the
+# SessionStart notice and the self-protection of the new location. Each is killed through the named test.
+_P8T8 = "tests/test_paths_location.py::"
+_P8T8_PA = "tools/skyguard/paths.py"
+_P8T8_LOOP = "    for path, label in ((new, PATHS_FILE), (old, LEGACY_PATHS_FILE)):"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # an empty root reads no file at all (deferred item 9: Path("") was the cwd)
+    (_P8T8_PA, "    if not root:\n        return PathsConfig(", "    if False:\n        return PathsConfig(",
+     _P8T8 + "test_no_root_reads_no_file_at_all", "p8t8-no-root-reads-no-file"),
+    # a reader that ignores the new location
+    (_P8T8_PA, _P8T8_LOOP, "    for path, label in ((old, LEGACY_PATHS_FILE),):",
+     _P8T8 + "test_the_root_file_is_read", "p8t8-reader-ignores-root-file"),
+    # ...one that drops the legacy fallback
+    (_P8T8_PA, _P8T8_LOOP, "    for path, label in ((new, PATHS_FILE),):",
+     _P8T8 + "test_the_legacy_file_is_the_fallback", "p8t8-reader-drops-legacy-fallback"),
+    # ...and one where the legacy file wins when both exist
+    (_P8T8_PA, _P8T8_LOOP, "    for path, label in ((old, LEGACY_PATHS_FILE), (new, PATHS_FILE)):",
+     _P8T8 + "test_both_present_and_disagreeing_the_root_file_wins_whole", "p8t8-legacy-wins-over-root"),
+    # SKYGUARD_PYTHON is read from the file...
+    (_P8T8_PA, "            if key not in ENV_KEYS + TOOL_KEYS:", "            if key not in ENV_KEYS:",
+     _P8T8 + "test_skyguard_python_is_read_and_is_no_root", "p8t8-tool-key-read-from-file"),
+    # ...and from the environment, which wins for lookup
+    (_P8T8_PA, "    env = {k: environ[k] for k in ENV_KEYS + TOOL_KEYS if environ.get(k)}",
+     "    env = {k: environ[k] for k in ENV_KEYS if environ.get(k)}",
+     _P8T8 + "test_the_environment_skyguard_python_wins_for_lookup", "p8t8-tool-key-read-from-env"),
+    # the absolute-path rule binds ROOTS only (a launcher like `py -3` is a legitimate interpreter)
+    (_P8T8_PA, 'value != "" and key in ENV_KEYS and norm_abs(value) is None', 'value != "" and norm_abs(value) is None',
+     _P8T8 + "test_a_non_path_skyguard_python_is_kept[launcher]", "p8t8-abs-rule-roots-only"),
+    # the deprecation notice names the legacy location only
+    (_P8T8_PA, "read_install(root, {}).source == LEGACY_PATHS_FILE", 'read_install(root, {}).source != ""',
+     _P8T8 + "test_no_notice_once_the_root_file_exists", "p8t8-notice-legacy-only"),
+    # run.py reads the install's file through read_install...
+    ("tools/skyguard/run.py", "        cfg = paths.read_install(a.root_win or a.root, dict(os.environ))",
+     '        cfg = paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))',
+     _P8T8 + "test_run_guards_a_config_dir_declared_in_the_root_file", "p8t8-run-reads-root-file"),
+    # ...and the main worktree's too
+    ("tools/skyguard/run.py", "paths.read_install(main, {})", 'paths.read_env(Path(main) / ".claude" / "skyrim-paths.env", {})',
+     _P8T8 + "test_a_worktree_reads_the_main_trees_root_file", "p8t8-run-worktree-reads-root-file"),
+    # snapshot restore --in-place finds the declared roots at the root
+    ("tools/skyguard/snapcli.py", "        cfg = paths.read_install(str(project), os.environ)",
+     '        cfg = paths.read_env(Path(project) / ".claude" / "skyrim-paths.env", os.environ)',
+     _P8T8 + "test_an_in_place_restore_reads_the_root_file", "p8t8-snapcli-reads-root-file"),
+    # SessionStart prints the notice...
+    ("tools/skyguard/session.py", '    banners = "\\n".join(t for t in (banners, paths.legacy_notice(project)) if t)',
+     "    pass", _P8T8 + "test_the_legacy_location_gets_a_notice_at_session_start", "p8t8-session-notice"),
+    # ...but not on compact (once per session start, not per context compaction)
+    ("tools/skyguard/session.py", '        return _with_prefs(banners, project, audit), "evaluated", "session"',
+     '        return _with_prefs(banners + paths.legacy_notice(project), project, audit), "evaluated", "session"',
+     _P8T8 + "test_the_notice_is_not_repeated_on_compact", "p8t8-session-notice-not-on-compact"),
+    # self-protection: the root file is a guard file...
+    ("tools/skyguard/self_rules.py", '    if rel == ["skyrim-paths.env"]:', "    if False:",
+     _P8T8 + "test_both_locations_are_guard_files[root]", "p8t8-self-guard-root-file"),
+    # ...at the root only, not any file of that name deeper in the install
+    ("tools/skyguard/self_rules.py", '    if rel == ["skyrim-paths.env"]:', '    if rel[-1:] == ["skyrim-paths.env"]:',
+     _P8T8 + "test_only_the_root_level_name_is_a_guard_file", "p8t8-self-guard-root-level-only"),
+]]
