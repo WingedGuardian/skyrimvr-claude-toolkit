@@ -272,7 +272,7 @@ RULES = {
         "prefixes": [],
         "template": (
         '{op}\n'
-        'Yes goes ahead; an overwritten save is not kept.'
+        'Yes goes ahead; the save it overwrites is copied first when it can be (skyguard snapshot list).'
     ),
     },
     # Plan 6 Task 11 (D6, R7): the lift rules (lift_rules.py). The CLI lifts are D6's: allowed, with a note. A
@@ -314,6 +314,17 @@ RULES = {
         "template": (
         'This turns the vanilla-file lock off for every future session, not only this one.\n'
         'Yes disables it until tools/skyguard lock enable.'
+    ),
+    },
+    # Plan 6 Task 15 fix round 1 (I3): `skyguard snapshot restore --in-place` (lift_rules.restore_in_place).
+    'S-RESTORE-INPLACE': {
+        "decision": 'ask',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'This writes snapshot files back over the live load order, INIs, saves or scripts.\n'
+        'Yes restores them; each file it replaces is backed up first.'
     ),
     },
     # Plan 6 Task 12 (R12): self-protection (self_rules.py). The state is the CLI's alone (deny); the guard code and

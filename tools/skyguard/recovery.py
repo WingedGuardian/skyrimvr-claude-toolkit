@@ -8,8 +8,9 @@ does not protect:
   directly in each declared SKYRIM_CONFIG_DIR. The CONFIGURED roots only (skyrim-paths.env and the environment, through
   paths.roots): nothing is probed, so an install that declares neither gets no such snapshot and the audit log says so
   (once per change of that state, not once per call).
-* THE NAMED SAVE, before a command S-RESAVER-APPLY asks about (ReSaver run with --apply and a save-writing operation,
-  found by shell_rules.resaver_target, the rule's own decision) or one S-DEVBENCH-SAVE covers (DevBench told to save
+* THE SAVE A COMMAND WRITES, whatever the command's first word (fix round 1, I1), before a command S-RESAVER-APPLY
+  asks about (ReSaver run with --apply and a save-writing operation; shell_rules.resaver_writes, on the rule's own
+  decision: the <out.ess> it writes, never the input it only reads -- fix round 1, I2) or one S-DEVBENCH-SAVE covers (DevBench told to save
   over an EXISTING save, by MCP, curl, Invoke-RestMethod or devbench-cli; mcp_rules.save_name / shell_save_names, then
   the rule's Saves folder and its case-insensitive listing): that `<name>.ess` and its `<name>.skse` co-save. Never the
   save folder. A save and its co-save are kept together or not at all.
@@ -35,9 +36,12 @@ part file and no snapshot of that save and is logged PARTIAL -- never a silent s
 ORDER. The hooks call this in PreToolUse (Claude: snapshot-before-tool and protect-mcp; Codex: pre-tool's side
 effects), so the copy is finished before the command can start.
 
-PRUNING (once a day, inside PRUNE_BOX): a line older than KEEP_DAYS (a save line: SAVE_KEEP_DAYS) is dropped unless it
-is the newest line of its path; then every blob no remaining line names is deleted -- PERMANENTLY, as this is the tool's
-own store. An unreadable line is kept as it is and stops blob deletion (what it names is unknown).
+PRUNING (once a day, inside PRUNE_BOX): a snapshot is kept WHOLE while it is younger than KEEP_DAYS (a save:
+SAVE_KEEP_DAYS) or holds some path's newest content, and each kept config snapshot keeps the earlier lines its full state
+needs (fix round 1, I4); every other line goes, then every blob no remaining line names is deleted -- PERMANENTLY, as
+this is the tool's own store. An unreadable line is kept as it is and stops blob deletion. Every line records its
+snapshot's line count and full path set, so resolve() REFUSES a snapshot pruning has cut into instead of returning a
+state that never existed. A save copy also keeps SAVE_RESERVE_BYTES free on its drive (review M2).
 
 Restoring: `tools/skyguard.sh snapshot list | restore` (snapcli.py).
 """
@@ -46,6 +50,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -61,6 +66,8 @@ SAVE_RATE = 300           # seconds: one copy of a given save per this long
 LOADORDER_FILES = ("plugins.txt", "loadorder.txt")
 _INI = re.compile(r"^skyrim[^/\\]*\.ini$", re.IGNORECASE)
 SAVE_MAX_BYTES = 192 * 1024 * 1024   # .ess + .skse together
+# Review M2: a save copy never takes its drive below this much free space (SKIPPED, logged, instead).
+SAVE_RESERVE_BYTES = 2 * 1024 * 1024 * 1024
 SAVE_BOX = 10.0           # seconds, at most, for one call's save copies (also capped by the caller's deadline)
 LOCK_WAIT = 0.2           # a call waits this long for the store lock
 KEEP_DAYS = 14
@@ -122,10 +129,15 @@ def _cosave(ess):
 
 
 def _resaver_save(word, cwd, shell, roots, env):
-    """(path, problem). The save ReSaver was given, as the rule read it: absolute, relative to the payload cwd, or a
-    bare name in the Saves folder."""
+    """(path, (level, message) or None). A save ReSaver WRITES (fix round 1, I2), as written: absolute, relative to the
+    payload cwd (where ReSaver resolves it), else a bare name in the Saves folder. A target that does not exist yet is
+    a NEW file: nothing to keep, and the log says so."""
     if not word:
-        return None, "ReSaver --apply names no .ess this guard can read, so it cannot tell which save to keep"
+        return None, ("SKIPPED", "ReSaver --apply names no .ess this guard can read, so it cannot tell which save "
+                                 "to keep")
+    if "*" in word or "?" in word:
+        return None, ("SKIPPED", "ReSaver --apply names a pattern ({}), not one save, so no save was kept -- copy the "
+                                 "saves yourself first".format(word))
     n = paths.norm_abs(word, msys=(shell != "powershell"))
     cands = [n] if n else []
     if not n:
@@ -140,8 +152,8 @@ def _resaver_save(word, cwd, shell, roots, env):
     for c in cands:
         hit = _listed(*os.path.split(c))
         if hit:
-            return hit, ""
-    return None, "save {} was not found, so no copy of it was taken".format(word)
+            return hit, None
+    return None, ("NEW", "ReSaver writes {}, which does not exist yet -- nothing to keep".format(word))
 
 
 def _devbench_save(name, roots, env):
@@ -156,28 +168,33 @@ def _devbench_save(name, roots, env):
 
 
 def shell_saves(command, shell, cwd, roots, env):
-    """([save path], [problem]) for the S-RESAVER-APPLY / S-DEVBENCH-SAVE saves a shell command would write. The parse
-    happens only when the text names ReSaver with --apply, or the DevBench endpoint / CLI and a save."""
+    """([save path], [(level, message)]) for the saves a shell command WRITES under S-RESAVER-APPLY / S-DEVBENCH-SAVE,
+    decided on the parsed command as the rules decide (fix round 1, I1: whatever its first word). The parse happens
+    only when the text names ReSaver with --apply, or the DevBench endpoint / CLI (M6: a JSON-escaped "save" is found
+    by the parse, not by a text filter)."""
     low = command.lower()
     resaver = "resaver" in low and shell_rules.RESAVER_APPLY in low
-    dev = "save" in low and any(w in low for w in mcp_rules._SHELL_WORDS)
+    dev = any(w in low for w in mcp_rules._SHELL_WORDS)
     if not (resaver or dev) or roots is None:
         return [], []
     parsed = shellparse.parse(command, shell or "")
-    found, problems = [], []
+    found, notes = [], []
     if resaver:
-        t = shell_rules.resaver_target(command, shell or "", parsed)
-        if t:
-            p, why = _resaver_save(t[1], cwd, shell, roots, env)
-            (found if p else problems).append(p or why)
+        w = shell_rules.resaver_writes(command, shell or "", parsed)
+        for word in (w[1] or [""]) if w else []:
+            p, note = _resaver_save(word, cwd, shell, roots, env)
+            if p:
+                found.append(p)
+            if note:
+                notes.append(note)
     if dev:
         for name in mcp_rules.shell_save_names(command, parsed):
             p, why = _devbench_save(name, roots, env)
             if p:
                 found.append(p)
             elif why:
-                problems.append(why)
-    return list(dict.fromkeys(found)), problems
+                notes.append(("SKIPPED", why))
+    return list(dict.fromkeys(found)), notes
 
 
 # ---------------------------------------------------------------- entry points (the hooks)
@@ -185,12 +202,15 @@ def shell_saves(command, shell, cwd, roots, env):
 
 def run(project, command, payload_empty, audit, roots, cwd="", shell="", agent="", session_id="", deadline=None,
         now=None, env=None):
-    """Shell route: the named save (if any), then the load order and INIs. Never raises into the hook."""
-    if payload_empty or not (command or "").strip() or snapshot.read_only(command):
+    """Shell route: the saves the command writes (if any), then the load order and INIs. Never raises into the hook.
+    Fix round 1 (I1): the read-only first-word skip applies to the load order and INIs only -- `echo x && resaver ...`,
+    `env X=y resaver ...` still write the save, and the rule still fires on them."""
+    if payload_empty or not (command or "").strip():
         return
     env = os.environ if env is None else env
-    saves, problems = shell_saves(command, shell, cwd, roots, env)
-    take(project, audit, roots, command, saves, problems, True, now, deadline, agent, session_id)
+    saves, notes = shell_saves(command, shell, cwd, roots, env)
+    take(project, audit, roots, command, saves, notes, not snapshot.read_only(command), now, deadline, agent,
+         session_id)
 
 
 def mcp(project, tool_name, args, audit, roots, agent="", session_id="", deadline=None, now=None, env=None):
@@ -204,8 +224,8 @@ def mcp(project, tool_name, args, audit, roots, agent="", session_id="", deadlin
     p, why = _devbench_save(name, roots, os.environ if env is None else env)
     if not (p or why):
         return
-    take(project, audit, roots, "{} save {}".format(tool_name, name), [p] if p else [], [why] if why else [], False,
-         now, deadline, agent, session_id)
+    take(project, audit, roots, "{} save {}".format(tool_name, name), [p] if p else [],
+         [("SKIPPED", why)] if why else [], False, now, deadline, agent, session_id)
 
 
 # ---------------------------------------------------------------- taking a snapshot
@@ -235,8 +255,8 @@ def _new_id(idx, ts, kind):
 
 def take(project, audit, roots, command, saves, problems, do_config, now=None, deadline=None, agent="", session_id=""):
     now = time.time() if now is None else now
-    for why in problems:
-        audit.log(HOOK, "SKIPPED", why)
+    for level, msg in problems:
+        audit.log(HOOK, level, msg)
     if not saves and not do_config:
         return
     store = store_dir(project)
@@ -292,9 +312,12 @@ def _take_locked(store, audit, roots, command, saves, do_config, now, deadline, 
             audit.log(HOOK, "FAILED", "could not write {} -- the next call reads those files again".format(INDEX))
 
 
-def _line(ts, now, src, sha, size, kind, sid, command, agent, session_id):
+def _line(ts, now, src, sha, size, kind, sid, command, agent, session_id, lines, state):
+    """Fix round 1 (I4): every line also records how many lines its snapshot has and the full set of paths its state
+    holds, so resolve() can tell a whole snapshot from one pruning has cut into, and refuse the latter."""
     return {"v": 1, "ts": ts, "t": int(now), "src": src, "dest": sha, "size": size, "sha256": sha, "tool": HOOK,
-            "agent": agent, "session_id": session_id, "kind": kind, "snap": sid, "command": _short(command)}
+            "agent": agent, "session_id": session_id, "kind": kind, "snap": sid, "command": _short(command),
+            "lines": lines, "state": state}
 
 
 def _note(idx, audit, level, msg):
@@ -347,7 +370,9 @@ def _config(store, idx, roots, audit, command, now, agent, session_id):
     sid = _new_id(idx, ts, "config")
     for u in updates.values():
         u[3] = sid
-    lines = [_line(ts, now, src, sha, size, "config", sid, command, agent, session_id) for src, sha, size in changed]
+    state = sorted({e["src"] for e in read_manifest(store)[0] if e["kind"] == "config"} | {s for s, _h, _z in changed})
+    lines = [_line(ts, now, src, sha, size, "config", sid, command, agent, session_id, len(changed), state)
+             for src, sha, size in changed]
     names = ", ".join(os.path.basename(s) for s, _h, _z in changed)
     logline = "[{}] RECOVERY-SNAPSHOT (config: {} of {} file(s) changed: {}) {} before: {}\n".format(
         ts, len(changed), len(files), names, sid, _short(command))
@@ -367,6 +392,15 @@ def _save(store, idx, ess, audit, command, now, box_end, agent, session_id):
     if total > SAVE_MAX_BYTES:
         audit.log(HOOK, "SKIPPED", "save {} is {:.1f} MB with its co-save, over the {:.0f} MB bound -- NO snapshot of it "
                   "was taken; copy it yourself before this command".format(name, total / _MB, SAVE_MAX_BYTES / _MB))
+        return None
+    try:
+        free = shutil.disk_usage(str(store)).free
+    except OSError:
+        free = None
+    if free is not None and free - total < SAVE_RESERVE_BYTES:
+        audit.log(HOOK, "SKIPPED", "save {} ({:.1f} MB) would leave under {:.0f} MB free on the snapshot drive -- NO "
+                  "snapshot of it was taken; copy it yourself before this command".format(
+                      name, total / _MB, SAVE_RESERVE_BYTES / _MB))
         return None
     recs = [idx["files"].get(m) for m in members]
     if all(isinstance(r, list) and r[:2] == [s.st_size, s.st_mtime_ns] for r, s in zip(recs, stats)):
@@ -397,8 +431,8 @@ def _save(store, idx, ess, audit, command, now, box_end, agent, session_id):
         got.append((m, sha, s))
     ts = audit.stamp()
     sid = _new_id(idx, ts, "save")
-    lines = [_line(ts, now, m, sha, os.stat(str(blobs / sha)).st_size, "save", sid, command, agent, session_id)
-             for m, sha, _s in got]
+    lines = [_line(ts, now, m, sha, os.stat(str(blobs / sha)).st_size, "save", sid, command, agent, session_id,
+                   len(got), sorted(g[0] for g in got)) for m, sha, _s in got]
     updates = {m: [s.st_size, s.st_mtime_ns, sha, sid, int(now)] for m, sha, s in got}
     logline = "[{}] RECOVERY-SNAPSHOT (save: {}{}, {:.1f} MB) {} before: {}\n".format(
         ts, name, " + " + os.path.basename(co) if co else ", no co-save", total / _MB, sid, _short(command))
@@ -413,7 +447,10 @@ def _valid(e):
             and all(isinstance(e.get(k), str) for k in ("ts", "src", "dest", "sha256", "kind", "snap"))
             and e.get("kind") in ("config", "save") and _ID.match(e["snap"]) is not None
             and isinstance(e.get("size"), int) and not isinstance(e.get("size"), bool)
-            and e["dest"] == e["sha256"] and _BLOB.match(e["sha256"]) is not None)
+            and e["dest"] == e["sha256"] and _BLOB.match(e["sha256"]) is not None
+            and isinstance(e.get("lines"), int) and not isinstance(e.get("lines"), bool) and e["lines"] > 0
+            and isinstance(e.get("t"), int) and not isinstance(e.get("t"), bool)
+            and isinstance(e.get("state"), list) and all(isinstance(s, str) for s in e["state"]))
 
 
 def _raw_lines(store):
@@ -450,30 +487,69 @@ def snapshots(store):
     groups = {}
     for e in read_manifest(store)[0]:
         g = groups.setdefault(e["snap"], {"id": e["snap"], "kind": e["kind"], "ts": e["ts"], "t": e.get("t", 0),
-                                          "command": e.get("command", ""), "files": []})
+                                          "command": e.get("command", ""), "files": [], "lines": e["lines"]})
         g["files"].append(e)
+    for g in groups.values():
+        g["complete"] = len(g["files"]) == g["lines"]
     return list(groups.values())
 
 
 def resolve(store, sid):
     """{src: entry} -- the full state a snapshot stands for. A config snapshot holds only what changed, so its state is
     every config path's newest line up to and including that snapshot's; a save snapshot is its own files. Raises
-    ValueError for an unknown id."""
+    ValueError for an unknown id -- and (fix round 1, I4) for a snapshot that is no longer whole: one of its own lines
+    is gone, or a path its state held has no line left at that point. A partial state is refused, never returned."""
     entries = read_manifest(store)[0]
     mine = [i for i, e in enumerate(entries) if e["snap"] == sid]
     if not mine:
         raise ValueError("no recovery snapshot {}".format(sid))
-    kind = entries[mine[0]]["kind"]
-    if kind == "save":
-        return {entries[i]["src"]: entries[i] for i in mine}
-    state = {}
-    for e in entries[:mine[-1] + 1]:
-        if e["kind"] == "config":
-            state[e["src"]] = e
-    return state
+    first = entries[mine[0]]
+    if len(mine) != first["lines"]:
+        raise ValueError("recovery snapshot {} is incomplete: {} of its {} file(s) remain after pruning, so it cannot "
+                         "be restored as a whole".format(sid, len(mine), first["lines"]))
+    if first["kind"] == "save":
+        state = {entries[i]["src"]: entries[i] for i in mine}
+    else:
+        state = {}
+        for e in entries[:mine[-1] + 1]:
+            if e["kind"] == "config":
+                state[e["src"]] = e
+    missing = sorted(set(first["state"]) - set(state))
+    if missing:
+        raise ValueError("recovery snapshot {} is incomplete: no stored copy of {} is left for that point, so the state "
+                         "it recorded cannot be rebuilt".format(sid, ", ".join(missing)))
+    return {s: state[s] for s in first["state"]} if first["kind"] == "config" else state
 
 
 # ---------------------------------------------------------------- pruning
+
+
+def _needed(parsed, now):
+    """The indices of the lines pruning keeps (fix round 1, I4). A snapshot is KEPT -- whole -- when it is younger than
+    KEEP_DAYS (a save: SAVE_KEEP_DAYS) or holds the newest line of some path (the only copy of that content). For every
+    kept config snapshot, each path's newest line at or before it is kept too, so its full state still resolves. A line
+    kept only for that leaves its own (old) snapshot partial, which resolve() then refuses rather than misreports."""
+    newest, last = {}, {}
+    for i, e in enumerate(parsed):
+        if e is not None:
+            newest[e["src"]] = i
+            last[e["snap"]] = i
+    kept = {parsed[i]["snap"] for i in newest.values()}
+    for sid, i in last.items():
+        days = SAVE_KEEP_DAYS if parsed[i]["kind"] == "save" else KEEP_DAYS
+        if now - parsed[i]["t"] < days * DAY:
+            kept.add(sid)
+    need, latest = set(), {}
+    for i, e in enumerate(parsed):
+        if e is None:
+            continue
+        if e["snap"] in kept:
+            need.add(i)
+        if e["kind"] == "config":
+            latest[e["src"]] = i
+            if e["snap"] in kept and last[e["snap"]] == i:
+                need.update(latest.values())
+    return need
 
 
 def prune(store, now, audit, deadline=None):
@@ -488,18 +564,8 @@ def prune(store, now, audit, deadline=None):
         with backup._exclusive(Path(str(mpath) + ".lock"), wait=LOCK_WAIT):
             raws = _raw_lines(store)
             parsed = [_parse(r) for r in raws]
-            newest = {}
-            for i, e in enumerate(parsed):
-                if e is not None:
-                    newest[e["src"]] = i
-            keep = []
-            for i, (r, e) in enumerate(zip(raws, parsed)):
-                if e is None or newest[e["src"]] == i:
-                    keep.append((r, e))
-                    continue
-                days = SAVE_KEEP_DAYS if e["kind"] == "save" else KEEP_DAYS
-                if not isinstance(e.get("t"), int) or now - e["t"] < days * DAY:
-                    keep.append((r, e))
+            need = _needed(parsed, now)
+            keep = [(r, e) for i, (r, e) in enumerate(zip(raws, parsed)) if e is None or i in need]
             if len(keep) != len(raws):
                 if late():
                     audit.log(HOOK, "PRUNE-PARTIAL", "pruning stopped at its time box -- the rest is pruned next time")

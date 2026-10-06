@@ -670,6 +670,18 @@ def permanent(parsed, command: str) -> bool:
     return any(_CLI_TEXT.search(t) and _DISABLE_TEXT.search(t) for t in _opaque_texts(command, parsed))
 
 
+def restore_in_place(parsed) -> bool:
+    """Task 15 fix round 1 (I3): `skyguard snapshot restore ... --in-place` writes snapshot files over the live load
+    order, INIs, saves or scripts -- a write into the install the other write rules never see (the CLI does it)."""
+    for e in parsed.execs:
+        args = cli_args(e)
+        if args is None:
+            continue
+        if _positionals(args)[:2] == ["snapshot", "restore"] and "--in-place" in args and not _HELP & set(args):
+            return True
+    return False
+
+
 def _clean(name: str) -> str:
     b = re.sub(r"[^\w .\-]", "", _base(name))[:60]
     return b or "a file"

@@ -49,6 +49,8 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
     "shell.S-LIFT-RAW": ("hook_only", _PATH),
     "shell.S-LIFT-UNLOCKCMD": ("hook_only", "the user runs it themselves; a prefix could refuse the user too"),
     "shell.S-LIFT-PERMANENT": ("hook_only", "the user runs it themselves; a prefix could refuse the user too"),
+    # Plan 6 Task 15: the ask reaches Codex as a deny through the adapter (R4); the user runs the restore themselves.
+    "shell.S-RESTORE-INPLACE": ("hook_only", "the user runs it themselves; a prefix could refuse the user too"),
     # Plan 6 Task 12: path-based (where the write RESOLVES). S-SELF-GUARD / W-SELF-GUARD priced to advise: not decisive.
     "shell.S-SELF-STATE": ("hook_only", _PATH),
     "write.W-SELF-STATE": ("hook_only", "a file write, not a command"),

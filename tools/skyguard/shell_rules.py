@@ -122,6 +122,24 @@ def resaver_target(command: str, shell: str = "", parsed=None):
     return None
 
 
+def resaver_writes(command: str, shell: str = "", parsed=None):
+    """(operation, [the saves it WRITES, as written]) on the same decision as resaver_target. Task 15 fix round 1 (I2):
+    the toolkit's ReSaver CLI writes `<out.ess>` -- the .ess after the input -- and never the input
+    (tools/resaver-cli/ResaverCLI.java:49); set-global, set-var and clean write it with no existence check. A ReSaver
+    given ONE .ess is taken to write that one (another front end writing in place). The text fallback reads the same
+    shape from the raw text."""
+    parsed = shellparse.parse(command, shell) if parsed is None and "resaver" in command.lower() else parsed
+    t = resaver_target(command, shell, parsed)
+    if t is None:
+        return None
+    for e in parsed.execs:
+        if e.program != "?" and _is_resaver(e) and _resaver_op(e):
+            ws = [a for a in e.argv if a.lower().endswith(".ess")] or RESAVER_TEXT_SAVE.findall(e.segment)
+            return t[0], ws[1:] or ws
+    ws = RESAVER_TEXT_SAVE.findall(command)
+    return t[0], ws[1:] or ws
+
+
 def resaver_apply(command: str, shell: str = "", parsed=None):
     """(operation, save basename or "") when ReSaver is executed with --apply and a write operation."""
     t = resaver_target(command, shell, parsed)
@@ -225,6 +243,11 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     if lift_rules.permanent(parsed, command):
         reason = rules.message("S-LIFT-PERMANENT")
         audit.rule(HOOK, "S-LIFT-PERMANENT", "ask", reason)
+        return Verdict("ask", reason)
+    # Plan 6 Task 15 fix round 1 (I3): an in-place snapshot restore writes over live files; the user approves it.
+    if lift_rules.restore_in_place(parsed):
+        reason = rules.message("S-RESTORE-INPLACE")
+        audit.rule(HOOK, "S-RESTORE-INPLACE", "ask", reason)
         return Verdict("ask", reason)
     # Plan 6 Task 12 (R12, priced): a write into the guard code or config. The registry holds the priced decision.
     if own and rules.RULES["S-SELF-GUARD"]["decision"] == "ask":

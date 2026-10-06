@@ -22,7 +22,14 @@ def inst(tmp_path):
     i = Install(tmp_path)
     put(i.game / "Data" / "Scripts" / "a.pex", b"script a v1")
     put(i.game / "Data" / "Scripts" / "Source" / "a.psc", b"source a v1")
+    write_paths(i, i.cfg)
     return i
+
+
+def write_paths(i, cfg):
+    """The install's declared roots, as setup.sh writes them: --in-place writes only inside these (fix round 1, I3)."""
+    put(i.game / ".claude" / "skyrim-paths.env", "SKYRIM_CONFIG_DIR='{}'\nSKYRIM_LOADORDER_DIR='{}'\n".format(
+        cfg.as_posix(), i.lo.as_posix()).encode("utf-8"))
 
 
 def cli_run(inst, *args):
@@ -74,6 +81,7 @@ def test_a_config_restore_goes_to_a_new_folder_byte_identical_and_the_live_files
     put(inst.lo / "plugins.txt", b"*Broken.esp\n")         # the bad command
     rc, text = cli_run(inst, "restore", ids(inst, "config")[0])
     assert rc == 0, text
+    assert (inst.game / ".claude" / "backups" / "restored").is_dir(), text      # review M8: an assertion, not a crash
     (folder,) = (inst.game / ".claude" / "backups" / "restored").iterdir()
     got = {k.rsplit("/", 1)[-1]: v for k, v in tree(folder).items()}
     assert got["plugins.txt"] == b"*Skyrim.esm\n*Mine.esp\n"
@@ -139,16 +147,90 @@ def test_in_place_restores_a_script_into_the_install(inst):
     assert (inst.game / "Data" / "Scripts" / "a.pex").read_bytes() == b"script a v1"
 
 
-def test_in_place_never_writes_a_name_a_recovery_snapshot_does_not_take(inst):
-    """A tampered manifest line cannot aim an in-place restore at an arbitrary file."""
+def forge_recovery(inst, victim, sid):
+    """A whole one-file recovery snapshot whose line names `victim` -- what a tampered store can hold."""
     inst.run("make")
-    victim = inst.game.parent / "victim.dll"
     put(victim, b"keep me")
-    line = dict(inst.lines()[0], src=str(victim), snap="20991231_000000-config")
+    line = dict(inst.lines()[0], src=str(victim), snap=sid, lines=1, state=[str(victim)])
     with open(str(inst.store / recovery.MANIFEST), "ab") as fh:
         fh.write((json.dumps(line) + "\n").encode("ascii"))
-    rc, text = cli_run(inst, "restore", "20991231_000000-config", "--path", "victim.dll", "--in-place")
-    assert rc == 2 and victim.read_bytes() == b"keep me"
+    assert list(recovery.resolve(inst.store, sid)) == [str(victim)], "the forged snapshot itself is whole"
+
+
+@pytest.mark.parametrize("where", ["skse-ini", "outside-ini", "other-file-in-config-dir"])
+def test_in_place_refuses_an_ini_outside_the_configured_config_dir(inst, where):
+    """Fix round 1, I3 (MEASURED by the reviewer: an SKSE plugin INI was overwritten, rc 0)."""
+    victim = {"skse-ini": inst.game / "Data" / "SKSE" / "Plugins" / "SkyrimUpscaler.ini",
+              "outside-ini": inst.game.parent / "elsewhere" / "Skyrim.ini",
+              "other-file-in-config-dir": inst.cfg / "Other.ini"}[where]
+    forge_recovery(inst, victim, "20991231_000000-config")
+    rc, text = cli_run(inst, "restore", "20991231_000000-config", "--in-place")
+    assert rc == 2 and "not a load-order file or game INI" in text and victim.read_bytes() == b"keep me"
+
+
+@pytest.mark.parametrize("name", ["outside", "not-a-save"])
+def test_in_place_refuses_a_save_outside_the_saves_folder(inst, name):
+    victim = inst.game.parent / "victim.ess" if name == "outside" else inst.saves / "notes.txt"
+    forge_recovery(inst, victim, "20991231_000000-save")
+    rc, text = cli_run(inst, "restore", "20991231_000000-save", "--in-place")
+    assert rc == 2 and "not a save directly in the configured Saves folder" in text
+    assert victim.read_bytes() == b"keep me"
+
+
+@pytest.mark.parametrize("key", [".claude/hooks/protect-bash.sh", "Data/x.esp", "Data/Scripts/x.ini", "Data/x.pex"])
+def test_in_place_refuses_a_script_snapshot_key_outside_the_script_files(inst, key):
+    """MEASURED by the reviewer: a script manifest key `.claude/hooks/protect-bash.sh` overwrote the hook, rc 0."""
+    take_all(inst)
+    store = snapshot.store_dir(str(inst.game))
+    name = snapshot.manifest_names(store)[-1]
+    victim = inst.game.joinpath(*key.split("/"))
+    put(victim, b"keep me")
+    m = json.loads((store / "manifests" / name).read_bytes().decode("utf-8"))
+    m["set"] = {key: sha(b"script a v1")}
+    (store / "manifests" / name).write_bytes(json.dumps(m).encode("ascii"))
+    rc, text = cli_run(inst, "restore", name[:-len("__snapshot.json")], "--in-place")
+    assert rc == 2 and victim.read_bytes() == b"keep me", text
+
+
+def test_in_place_never_writes_inside_the_guards_own_folders_even_when_configured_there(inst):
+    """Clause (c) holds even when (a) and (b) pass: a config dir declared under .claude/ (an edited paths file)."""
+    odd = inst.game / ".claude" / "cfg"
+    write_paths(inst, odd)
+    victim = odd / "Skyrim.ini"
+    forge_recovery(inst, victim, "20991231_000000-config")
+    rc, text = cli_run(inst, "restore", "20991231_000000-config", "--in-place")
+    assert rc == 2 and "inside the guard's own files" in text and victim.read_bytes() == b"keep me"
+
+
+def test_in_place_needs_readable_roots(inst):
+    (inst.game / ".claude" / "skyrim-paths.env").unlink()
+    inst.run("make")
+    rc, text = cli_run(inst, "restore", ids(inst, "config")[0], "--path", "plugins.txt", "--in-place")
+    assert rc == 2 and "not a load-order file" in text
+
+
+def test_an_unreadable_stored_copy_is_a_refusal_not_a_traceback(inst, monkeypatch):
+    """Review M8: check_blobs reading a blob it cannot open raised out of cmd_restore."""
+    take_all(inst)
+
+    def denied(path):
+        raise PermissionError(13, "Access is denied", str(path))
+    monkeypatch.setattr(snapshot.backup, "_sha256", denied)
+    rc, text = cli_run(inst, "restore", ids(inst, "scripts")[0], "--to", str(inst.game.parent / "out"))
+    assert rc == 2 and "cannot be read" in text
+
+
+@pytest.mark.parametrize("cmd", ["bash tools/skyguard.sh snapshot restore 20261005_120000-config --in-place",
+                                 "python tools/skyguard snapshot restore --in-place 20261005_120000"])
+def test_the_guard_asks_before_an_in_place_restore(inst, cmd):
+    v = recovery.shell_rules.decide(cmd, inst.roots, inst.audit, env={})
+    assert v.decision == "ask" and "S-RESTORE-INPLACE" in [r for r, _d in inst.audit.fired]
+
+
+def test_the_guard_lets_a_restore_to_a_new_folder_through(inst):
+    v = recovery.shell_rules.decide("bash tools/skyguard.sh snapshot restore 20261005_120000-config --to out",
+                                    inst.roots, inst.audit, env={})
+    assert v.decision == "allow"
 
 
 # ---------------------------------------------------------------- a damaged blob (task-14-rereview N4)

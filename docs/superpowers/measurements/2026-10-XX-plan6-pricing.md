@@ -158,3 +158,32 @@ the 60 s rate limit stands**. The margin is 13–19 ms.
 - The first session's cold baseline costs about 100 s in total. It is spread across the session-start box and per-call
   boxes of 0.25 s.
 - To re-run: `scratchpad/p6t14/measure3.py` and `stream.py`.
+
+## Task 15: recovery snapshots and `snapshot restore`
+
+**Hook ordering (INFERRED from Claude Code's documentation, not measured).** The save copy is correct only if it
+finishes before the command runs. Claude Code runs every matching PreToolUse hook in parallel, and runs the tool only
+after all of them return or time out (60 s in the shipped settings). The recovery deadline is the engine start plus
+17 s (the 20 s engine budget minus a 3 s margin), so the copy finishes well inside that.
+- The tests show the copy exists when the hook returns. They cannot show Claude Code's scheduling.
+- Residual: a hook that Claude Code kills at its timeout lets the tool run with no copy. The heartbeat then records the
+  run as killed.
+- On Codex the copy happens in the pre-tool side effects, in the same process that returns the verdict.
+
+**Latency (MEASURED, in process, files sized like a 700-plugin install).** Added per call on the non-read-only shell
+path:
+
+| Shape | p95 |
+|---|---|
+| Common call: inside the 60 s window, nothing changed | 0.62 ms |
+| Full re-read, once a minute (mostly the index fsync) | 13.8 ms |
+| `plugins.txt` changed | 15.4 ms |
+
+- A 41 MB save copy takes about 57 ms warm.
+- The single-link nlink sweep (Task 14 re-review N3) adds 7.7 ms p95 to a comparison call. It is capped at 256 paths
+  and 6 ms on perf_counter, because `time.monotonic` ticks every ~15.6 ms on Windows: a 10 ms monotonic box MEASURED
+  15.5 ms.
+
+**Pricing S-RESTORE-INPLACE (ask)** with `price.py --base a1f24df` over 74,803 real tool calls: **0 changes in any
+direction.** No call in the history runs `skyguard snapshot restore --in-place`. The ask therefore costs nothing
+historically, and it covers a write into the install that no other write rule sees.

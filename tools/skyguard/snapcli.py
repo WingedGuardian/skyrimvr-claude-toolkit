@@ -29,16 +29,64 @@ import sys
 import time
 from pathlib import Path
 
-from . import backup, paths, recovery, snapshot
+from . import backup, mcp_rules, paths, recovery, snapshot
 
 USAGE = ("usage: skyguard snapshot list [--kind scripts|config|save] [--project P]\n"
          "       skyguard snapshot restore <id> [--path FILE ...] [--to DIR | --in-place] [--project P]")
 SHOW = 50
 HOOK = "skyguard-snapshot"
 _KINDS = ("scripts", "config", "save")
-# --in-place writes a recovery file back only under a name the recovery snapshot takes: a tampered manifest line cannot
-# aim a restore at any other file.
-_LIVE_OK = re.compile(r"^(plugins\.txt|loadorder\.txt|skyrim[^/\\]*\.ini|.+\.ess|.+\.skse)$", re.IGNORECASE)
+# Fix round 1 (I3): --in-place writes only where the snapshot's kind may write, resolved through links, inside the
+# CONFIGURED roots; never a plugin or archive, never the guard's own files. A manifest line is data a tampered store can
+# hold, so its path is checked here, at the write.
+_NEVER_EXT = (".esp", ".esm", ".esl", ".bsa", ".ba2")
+_NEVER_DIRS = (".claude", ".codex", ".skyguard")
+_NEVER_RUNS = (("tools", "skyguard"), ("agent", "guards"))
+_LOADORDER = ("plugins.txt", "loadorder.txt")
+
+
+def _real(p):
+    return os.path.normcase(os.path.realpath(str(p)))
+
+
+def _never(target):
+    """Clause (c): a plugin or archive, or anything under the guard's own folders. -> the reason, or ""."""
+    parts = [x.lower() for x in re.split(r"[/\\]+", _real(target)) if x]
+    if parts and parts[-1].endswith(_NEVER_EXT):
+        return "a plugin or archive"
+    if any(x in _NEVER_DIRS for x in parts) or any(
+            parts[i:i + 2] == list(run) for run in _NEVER_RUNS for i in range(len(parts) - 1)):
+        return "inside the guard's own files"
+    if any(":" in x for x in parts[1:]):
+        return "a stream or device name"
+    return ""
+
+
+def _allowed(project, sid, key, target):
+    """"" when snapshot `sid` may write `target` in place, else why not (clauses a and b, then c)."""
+    why = _never(target)
+    if why:
+        return why
+    real, parent = _real(target), _real(Path(target).parent)
+    name = Path(target).name.lower()
+    if not recovery._ID.match(sid):                       # a script snapshot: .psc/.pex under the script trees
+        inside = any(real.startswith(_real(Path(project).joinpath(*t.split("/"))) + os.sep) for t in snapshot.TREES)
+        ok = name.endswith(snapshot.EXTS) and inside and _real(Path(project).joinpath(*key.split("/"))) == real
+        return "" if ok else "not a .psc/.pex under the script folders of this install"
+    try:
+        cfg = paths.read_env(Path(project) / ".claude" / "skyrim-paths.env", os.environ)
+    except (OSError, ValueError):
+        return "the configured roots cannot be read"
+    roots = paths.roots(str(project), str(project), cfg)
+    if sid.endswith("-save") or "-save-" in sid:
+        folder = mcp_rules.saves_folder(roots, os.environ)
+        ok = name.endswith((".ess", ".skse")) and folder is not None and parent == _real(folder)
+        return "" if ok else "not a save directly in the configured Saves folder"
+    if name in _LOADORDER and parent in {_real(d) for d in roots.loadorder_dirs}:
+        return ""
+    if recovery._INI.match(name) and parent in {_real(d) for d in roots.config_dirs}:
+        return ""
+    return "not a load-order file or game INI directly in a configured folder"
 
 
 def _project(p):
@@ -78,6 +126,8 @@ def _recovery_rows(project, kind):
             what = " + ".join(names) + ", " + _mb(sum(e["size"] for e in g["files"]))
         else:
             what = "{} changed: {}".format(len(names), ", ".join(names))
+        if not g["complete"]:
+            what += "  (incomplete after pruning: cannot be restored)"
         rows.append((g["id"], what, g["command"]))
     return rows
 
@@ -185,6 +235,10 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
     chosen = {k: files[k] for k in keys}
     try:
         bad = snapshot.check_blobs(store, sid, chosen)
+    except OSError as e:
+        print("REFUSED: a stored copy in snapshot {} cannot be read ({}). Nothing was restored.".format(sid, e),
+              file=out)
+        return 2
     except ValueError as e:
         print("REFUSED: {}. Nothing was restored.".format(e), file=out)
         return 2
@@ -201,10 +255,10 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
         return 2
     audit = Audit(str(project))
     if in_place:
-        odd = [str(live[k]) for k in keys if recovery._ID.match(sid) and not _LIVE_OK.match(live[k].name)]
+        odd = [(live[k], why) for k in keys for why in [_allowed(project, sid, k, live[k])] if why]
         if odd:
-            print("REFUSED: {} is not a file a recovery snapshot takes, so it is not written back in place. Nothing was "
-                  "restored.".format(odd[0]), file=out)
+            print("REFUSED: {} is {}, so it is not written back in place. Nothing was restored.".format(*odd[0]),
+                  file=out)
             return 2
         pairs = [(live[k], chosen[k]) for k in keys]
         dest = "the live files"

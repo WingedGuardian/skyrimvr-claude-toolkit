@@ -4469,7 +4469,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _RCT + "test_a_command_snapshots_the_load_order_and_the_game_inis_from_the_configured_roots", "l2-rec-ini-any-case"),
     (_RC, 'LOADORDER_FILES = ("plugins.txt", "loadorder.txt")', 'LOADORDER_FILES = ("plugins.txt",)',
      _RCT + "test_a_command_snapshots_the_load_order_and_the_game_inis_from_the_configured_roots", "l2-rec-loadorder"),
-    (_RC, ' or snapshot.read_only(command):', ":",
+    (_RC, "not snapshot.read_only(command), now,", "True, now,",
      _RCT + "test_a_read_only_command_takes_no_recovery_snapshot[ls -la]", "l2-rec-read-only"),
     # ---- dedup and the rate limit
     (_RC, "        if isinstance(rec, list) and len(rec) > 3 and rec[2] == sha:", "        if False:",
@@ -4487,7 +4487,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_RC, "    if last == base:\n        n = 2", "    if False:\n        n = 2",
      _RCT + "test_two_snapshots_in_one_second_get_different_ids", "l2-rec-unique-id"),
     # ---- the named save
-    (_RC, '        t = shell_rules.resaver_target(command, shell or "", parsed)', "        t = None",
+    (_RC, '        w = shell_rules.resaver_writes(command, shell or "", parsed)', "        w = None",
      _RCT + "test_resaver_apply_snapshots_the_named_save_and_its_cosave_only", "l2-rec-resaver"),
     (_RC, "    members = [ess] + ([co] if co else [])", "    members = [ess]",
      _RCT + "test_resaver_apply_snapshots_the_named_save_and_its_cosave_only", "l2-rec-cosave"),
@@ -4527,9 +4527,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # ---- the state a snapshot stands for, and pruning
     (_RC, "    for e in entries[:mine[-1] + 1]:", "    for e in entries:",
      _RCT + "test_resolve_gives_the_full_state_at_a_snapshot", "l2-rec-resolve-at-id"),
-    (_RC, '                if e is None or newest[e["src"]] == i:', "                if e is None:",
+    (_RC, '    kept = {parsed[i]["snap"] for i in newest.values()}', "    kept = set()",
      _RCT + "test_pruning_drops_old_lines_but_keeps_each_paths_newest", "l2-rec-prune-keeps-newest"),
-    (_RC, '                days = SAVE_KEEP_DAYS if e["kind"] == "save" else KEEP_DAYS', "                days = KEEP_DAYS",
+    (_RC, '        days = SAVE_KEEP_DAYS if parsed[i]["kind"] == "save" else KEEP_DAYS', "        days = KEEP_DAYS",
      _RCT + "test_old_save_snapshots_age_out_sooner", "l2-rec-prune-save-days"),
     (_RC, "    if any(e is None for _r, e in keep):", "    if False:",
      _RCT + "test_an_unreadable_manifest_line_stops_blob_pruning_and_is_kept", "l2-rec-prune-unreadable"),
@@ -4581,3 +4581,69 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 # Task 15: the sweep is capped by a path count (time.monotonic ticks every ~15.6 ms on Windows, MEASURED overrun).
 MUTATIONS.append(pytest.param(_SN, "        if k >= SWEEP_MAX or _sweep_clock() >= stop:", "        if _sweep_clock() >= stop:",
                               _SNT + "test_the_sweep_is_capped_per_comparison_and_resumes", id="l2-snap-r3-sweep-cap"))
+
+
+# Plan 6 Task 15 fix round 1 (task-15-review.md): one twin per finding clause.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # I1: the save follows the rule, not the read-only first word
+    (_RC, '    if payload_empty or not (command or "").strip():' + "\n        return",
+     '    if payload_empty or not (command or "").strip() or snapshot.read_only(command):' + "\n        return",
+     _RCT + "test_a_read_only_looking_prefix_does_not_hide_the_save[env-wrapper]", "l2-rec-fr1-i1-prefix"),
+    # I2: the save ReSaver WRITES (its out), not the input
+    ("tools/skyguard/shell_rules.py", "RESAVER_TEXT_SAVE.findall(e.segment)\n            return t[0], ws[1:] or ws",
+     "RESAVER_TEXT_SAVE.findall(e.segment)\n            return t[0], ws[:1]",
+     _RCT + "test_resaver_keeps_the_save_it_writes_not_the_one_it_reads", "l2-rec-fr1-i2-out"),
+    (_RC, '    return None, ("NEW", "ReSaver writes {}, which does not exist yet -- nothing to keep".format(word))',
+     "    return None, None",
+     _RCT + "test_resaver_writing_a_new_out_keeps_nothing_and_says_so", "l2-rec-fr1-i2-new-out-logged"),
+    (_RC, '    if "*" in word or "?" in word:', "    if False:",
+     _RCT + "test_resaver_given_a_pattern_says_it_cannot_keep_one_save", "l2-rec-fr1-m10-pattern"),
+]]
+
+_SCF = _SCT + "test_in_place_refuses_"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # I3: --in-place writes only inside the configured roots, only the kind's own files, never the guard's files
+    (_SC, "    if recovery._INI.match(name) and parent in {_real(d) for d in roots.config_dirs}:",
+     "    if recovery._INI.match(name):", _SCF + "an_ini_outside_the_configured_config_dir[outside-ini]",
+     "l2-restore-fr1-i3-config-in-root"),
+    (_SC, "    if recovery._INI.match(name) and parent in {_real(d) for d in roots.config_dirs}:",
+     "    if parent in {_real(d) for d in roots.config_dirs}:",
+     _SCF + "an_ini_outside_the_configured_config_dir[other-file-in-config-dir]", "l2-restore-fr1-i3-config-kind"),
+    (_SC, '        ok = name.endswith((".ess", ".skse")) and folder is not None and parent == _real(folder)',
+     '        ok = name.endswith((".ess", ".skse"))', _SCF + "a_save_outside_the_saves_folder[outside]",
+     "l2-restore-fr1-i3-save-in-root"),
+    (_SC, '        ok = name.endswith((".ess", ".skse")) and folder is not None and parent == _real(folder)',
+     "        ok = folder is not None and parent == _real(folder)", _SCF + "a_save_outside_the_saves_folder[not-a-save]",
+     "l2-restore-fr1-i3-save-kind"),
+    (_SC, "        ok = name.endswith(snapshot.EXTS) and inside and", "        ok = name.endswith(snapshot.EXTS) and",
+     _SCF + "a_script_snapshot_key_outside_the_script_files[Data/x.pex]", "l2-restore-fr1-i3-script-in-trees"),
+    (_SC, "        ok = name.endswith(snapshot.EXTS) and inside and", "        ok = inside and",
+     _SCF + "a_script_snapshot_key_outside_the_script_files[Data/Scripts/x.ini]", "l2-restore-fr1-i3-script-kind"),
+    (_SC, '_NEVER_DIRS = (".claude", ".codex", ".skyguard")', "_NEVER_DIRS = ()",
+     _SCT + "test_in_place_never_writes_inside_the_guards_own_folders_even_when_configured_there",
+     "l2-restore-fr1-i3-never-guard-dirs"),
+    ("tools/skyguard/shell_rules.py", "    if lift_rules.restore_in_place(parsed):", "    if False:",
+     _SCT + "test_the_guard_asks_before_an_in_place_restore[bash tools/skyguard.sh snapshot restore "
+     "20261005_120000-config --in-place]", "rule-S-RESTORE-INPLACE-fires"),
+    ("tools/skyguard/lift_rules.py", ' and "--in-place" in args and not _HELP & set(args):',
+     " and not _HELP & set(args):", _SCT + "test_the_guard_lets_a_restore_to_a_new_folder_through",
+     "rule-S-RESTORE-INPLACE-only-in-place"),
+    # M8: an unreadable blob is a refusal
+    (_SC, '    except OSError as e:' + "\n" + '        print("REFUSED: a stored copy',
+     '    except ZeroDivisionError as e:' + "\n" + '        print("REFUSED: a stored copy',
+     _SCT + "test_an_unreadable_stored_copy_is_a_refusal_not_a_traceback", "l2-restore-fr1-m8-unreadable-blob"),
+    # I4: whole snapshots or a refusal
+    (_RC, "            if e[\"snap\"] in kept and last[e[\"snap\"]] == i:" + "\n" +
+     "                need.update(latest.values())",
+     "            if e[\"snap\"] in kept and last[e[\"snap\"]] == i:" + "\n" + "                pass",
+     _RCT + "test_pruning_never_cuts_into_the_state_a_kept_snapshot_needs", "l2-rec-fr1-i4-prune-keeps-needed"),
+    (_RC, '    if len(mine) != first["lines"]:', "    if False:",
+     _RCT + "test_a_snapshot_missing_one_of_its_own_lines_is_refused", "l2-rec-fr1-i4-lines-count"),
+    (_RC, '    missing = sorted(set(first["state"]) - set(state))', "    missing = []",
+     _RCT + "test_a_snapshot_whose_earlier_state_line_is_gone_is_refused", "l2-rec-fr1-i4-state-check"),
+]]
+
+# Review M2: a save copy keeps SAVE_RESERVE_BYTES free on its drive.
+MUTATIONS.append(pytest.param(_RC, "    if free is not None and free - total < SAVE_RESERVE_BYTES:", "    if False:",
+                              _RCT + "test_a_save_that_would_fill_the_drive_is_skipped_and_says_why",
+                              id="l2-rec-fr1-m2-reserve"))

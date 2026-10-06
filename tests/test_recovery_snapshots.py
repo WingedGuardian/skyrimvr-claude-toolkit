@@ -213,6 +213,38 @@ def test_a_failed_manifest_append_is_retried_by_the_next_call(inst, monkeypatch)
     assert "plugins.txt" in inst.stored("config")
 
 
+@pytest.mark.parametrize("cmd", [
+    "echo go && bash tools/resaver-cli.sh clean Quick.ess --apply",
+    "env JAVA_OPTS=-Xmx2g bash tools/resaver-cli.sh clean Quick.ess --apply",
+    "ls Saves; bash tools/resaver-cli.sh reset-havok Quick.ess --apply",
+    "cat notes.txt | head -1; bash tools/devbench-cli.sh exec save Quick",
+], ids=["echo-and", "env-wrapper", "ls-then", "cat-pipe-then-devbench"])
+def test_a_read_only_looking_prefix_does_not_hide_the_save(inst, cmd):
+    """Fix round 1, I1 (MEASURED by the reviewer): the read-only skip looks at the FIRST word only, while the rule
+    parses every exec. The save snapshot follows the rule; the first word decides only the load order and INIs."""
+    assert recovery.shell_rules.decide(cmd, inst.roots, inst.audit, env={}).decision == "ask"
+    inst.run(cmd)
+    assert sorted(inst.stored("save")) == ["Quick.ess", "Quick.skse"]
+
+
+def test_resaver_keeps_the_save_it_writes_not_the_one_it_reads(inst):
+    """Fix round 1, I2: ResaverCLI writes <out.ess> (the second .ess) and never the input (ResaverCLI.java:49);
+    clean / set-global / set-var overwrite an existing out with no check."""
+    inst.run("bash tools/resaver-cli.sh clean Quick.ess Other.ess --apply")
+    assert sorted(inst.stored("save")) == ["Other.ess", "Other.skse"]
+
+
+def test_resaver_writing_a_new_out_keeps_nothing_and_says_so(inst):
+    inst.run("bash tools/resaver-cli.sh set-global Quick.ess 0x14 1 Fresh.ess --apply")
+    assert inst.stored("save") == {}
+    assert "Fresh.ess, which does not exist yet" in inst.log()
+
+
+def test_resaver_given_a_pattern_says_it_cannot_keep_one_save(inst):
+    inst.run('find . -name "*.ess" -exec bash tools/resaver-cli.sh clean {} --apply \\;')
+    assert "names a pattern" in inst.log()
+
+
 def test_resaver_without_apply_copies_no_save(inst):
     inst.run('bash tools/resaver-cli.sh clean "{}"'.format((inst.saves / "Quick.ess").as_posix()))
     assert inst.stored("save") == {}
@@ -282,6 +314,16 @@ def test_the_save_snapshot_reads_a_call_exactly_as_the_rule_does(inst, tool, arg
     recovery.mcp(str(inst.game), "mcp__devbench-vr__" + tool, args, inst.audit, inst.roots, env={})
     kept = inst.stored("save") != {} or "SKIPPED" in inst.log()
     assert kept == (hit is not None and hit[0] == "S-DEVBENCH-SAVE")
+
+
+def test_a_save_that_would_fill_the_drive_is_skipped_and_says_why(inst, monkeypatch):
+    """Review M2: no copy takes the snapshot drive below SAVE_RESERVE_BYTES free."""
+    real = recovery.shutil.disk_usage
+    monkeypatch.setattr(recovery.shutil, "disk_usage",
+                        lambda p: real(p)._replace(free=recovery.SAVE_RESERVE_BYTES + 10))
+    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    assert inst.stored("save") == {}
+    assert "would leave under" in inst.log()
 
 
 def test_a_save_over_the_size_bound_is_skipped_and_says_why(inst, monkeypatch):
@@ -370,16 +412,75 @@ def test_two_snapshots_in_one_second_get_different_ids(inst, monkeypatch):
 
 
 def test_pruning_drops_old_lines_but_keeps_each_paths_newest(inst):
+    """An old snapshot that holds no path's newest content goes as a whole; the newest snapshot of each path stays
+    (fix round 1, I4: a snapshot that still holds a newest line is kept WHOLE, so it stays restorable)."""
     old = time.time() - 30 * DAY
     inst.run("old", now=old)
     put(inst.lo / "plugins.txt", b"*Skyrim.esm\n")
+    for p in (inst.cfg / "Skyrim.ini", inst.lo / "loadorder.txt", inst.cfg / "SkyrimVR.ini",
+              inst.cfg / "skyrimprefs.INI"):
+        put(p, b"newer")
     inst.run("newer", now=old + 1)
-    before = len(inst.lines())
+    newer = inst.lines()[-1]["snap"]
     recovery.prune(inst.store, time.time(), inst.audit)
     after = inst.lines()
-    assert len(after) == before - 1, "only plugins.txt's superseded old line goes"
+    assert [e["snap"] for e in after] == [newer] * 5, "the old snapshot, superseded on every path, goes whole"
     assert not (inst.store / "blobs" / sha(b"*Skyrim.esm\n*Mine.esp\n")).exists()
     assert (inst.store / "blobs" / sha(b"*Skyrim.esm\n")).exists()
+
+
+def test_pruning_never_cuts_into_the_state_a_kept_snapshot_needs(inst):
+    """Fix round 1, I4 (MEASURED by the reviewer): S1 day 0 (5 files), S2 day 10 (plugins.txt), S3 day 13 (the other
+    four); pruned on day 15, S2 lost Skyrim.ini and still 'restored' -- a state that never existed. Now S2 resolves
+    whole, and S1 (whose plugins.txt line went) is refused, never returned partial."""
+    day0 = time.time() - 15 * DAY
+    inst.run("s1", now=day0)
+    s1 = inst.lines()[0]["snap"]
+    put(inst.lo / "plugins.txt", b"*Skyrim.esm\n")
+    inst.run("s2", now=day0 + 10 * DAY)
+    s2 = inst.lines()[-1]["snap"]
+    for p in (inst.cfg / "Skyrim.ini", inst.lo / "loadorder.txt", inst.cfg / "SkyrimVR.ini",
+              inst.cfg / "skyrimprefs.INI"):
+        put(p, b"changed on day 13")
+    inst.run("s3", now=day0 + 13 * DAY)
+    before = {s: e["sha256"] for s, e in recovery.resolve(inst.store, s2).items()}
+    assert len(before) == 5
+    recovery.prune(inst.store, time.time(), inst.audit)
+    after = {s: e["sha256"] for s, e in recovery.resolve(inst.store, s2).items()}
+    assert after == before
+    with pytest.raises(ValueError, match="incomplete"):
+        recovery.resolve(inst.store, s1)
+
+
+def _drop_line(inst, pred):
+    raw = [r for r in (inst.store / recovery.MANIFEST).read_bytes().split(b"\n") if r.strip()]
+    keep = [r for r in raw if not pred(json.loads(r))]
+    assert len(keep) == len(raw) - 1
+    (inst.store / recovery.MANIFEST).write_bytes(b"\n".join(keep) + b"\n")
+
+
+def test_a_snapshot_missing_one_of_its_own_lines_is_refused(inst):
+    """Its state still resolves (plugins.txt falls back to the older line) -- only the line count tells."""
+    inst.run("s1")
+    put(inst.lo / "plugins.txt", b"*Skyrim.esm\n")
+    put(inst.cfg / "Skyrim.ini", b"[changed]\n")
+    inst.run("s2")
+    s2 = inst.lines()[-1]["snap"]
+    _drop_line(inst, lambda e: e["snap"] == s2 and e["src"].endswith("plugins.txt"))
+    with pytest.raises(ValueError, match="1 of its 2 file"):
+        recovery.resolve(inst.store, s2)
+
+
+def test_a_snapshot_whose_earlier_state_line_is_gone_is_refused(inst):
+    """Its own lines are all there; a path it holds from an EARLIER snapshot is not -- only the state check tells."""
+    inst.run("s1")
+    s1 = inst.lines()[0]["snap"]
+    put(inst.lo / "plugins.txt", b"*Skyrim.esm\n")
+    inst.run("s2")
+    s2 = inst.lines()[-1]["snap"]
+    _drop_line(inst, lambda e: e["snap"] == s1 and e["src"].endswith("Skyrim.ini"))
+    with pytest.raises(ValueError, match="no stored copy of .*Skyrim.ini"):
+        recovery.resolve(inst.store, s2)
 
 
 def test_old_save_snapshots_age_out_sooner(inst):

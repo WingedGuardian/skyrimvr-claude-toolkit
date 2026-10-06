@@ -16,7 +16,7 @@ reset of a 700+ plugin order. Compared on whitespace-split lower-case words, so 
 
 S-DEVBENCH-SAVE (ask). The `game` tool is told to save (`action: save`, `name`), or the console is given `save <name>`
 (DevBench routes a console save through the same path), and `<config dir>/Saves/<name>.ess` EXISTS: the save would be
-overwritten and the old one is not kept. Asks only for an existing save; a NEW name passes. This is the only
+overwritten (recovery.py snapshots the old one first, Plan 6 Task 15). Asks only for an existing save; a NEW name passes. This is the only
 filesystem read in the rules. When the save folder cannot be found (no declared config dir has a Saves folder), or the
 name is missing or is not a plain file name, the answer is not knowable and the rule ASKS (not safe by default).
 
