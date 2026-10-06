@@ -4481,3 +4481,8 @@ MUTATIONS += [pytest.param("scripts/lock-python-dependencies.py", '    if "pytes
                            '    if packages.get("pytest", {}).get("metadata", {}).get("version") == "8.0.0":',
                            "tests/test_lock_generator.py::test_an_incomplete_pytest_closure_is_refused_for_any_pytest_version[tomli-9.0.3]",
                            id="t6c-lock-guard-keyed-on-one-pytest-version")]
+
+# Plan 8 T6c: the lock never carries a pygments with the open ReDoS advisory (a stale pin would re-introduce it).
+MUTATIONS += [pytest.param("requirements.lock", "Pygments==2.21.0 \\", "Pygments==2.19.2 \\",
+                           "tests/test_dependency_locks.py::test_the_lock_never_pins_a_pygments_with_the_known_advisory",
+                           id="t6c-lock-pygments-with-advisory")]
