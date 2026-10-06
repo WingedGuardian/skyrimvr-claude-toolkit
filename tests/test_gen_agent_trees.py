@@ -20,6 +20,19 @@ def test_every_generated_path_is_pinned_lf():
     assert not unpinned, "not pinned to LF:\n" + "\n".join(unpinned)
 
 
+LINUX_READ = [".devcontainer/Dockerfile", ".devcontainer/devcontainer.json", ".devcontainer/install-dependencies.sh",
+              "requirements.lock", ".node-version", ".python-version", "requirements.txt", "x.toml", "x.java"]
+
+
+def test_files_linux_tools_read_are_pinned_lf():
+    """MEASURED 2026-10-06: the Dockerfile blob was LF but a Windows autocrlf checkout made all 79 lines CRLF, which
+    breaks every backslash-continued RUN line in a Linux devcontainer build. Pinned, every checkout stays LF."""
+    out = subprocess.run(["git", "check-attr", "eol", "--", *LINUX_READ],
+                         cwd=REPO, capture_output=True, text=True, check=True).stdout
+    unpinned = [line for line in out.splitlines() if not line.endswith(": eol: lf")]
+    assert not unpinned, "not pinned to LF:\n" + "\n".join(unpinned)
+
+
 def _gen():
     spec = importlib.util.spec_from_file_location("gen_agent_trees", REPO / "scripts" / "gen_agent_trees.py")
     mod = importlib.util.module_from_spec(spec)

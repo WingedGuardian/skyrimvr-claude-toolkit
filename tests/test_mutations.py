@@ -5226,3 +5226,19 @@ _T6D_CLAUSES_R1 = [
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T6D_CLAUSES_R1]
 
+
+# check_ci_leg reads real pytest -v output (`collecting ... collected N items`, MEASURED 2026-10-06) and only
+# non-node-id lines.
+MUTATIONS += [
+    pytest.param("scripts/check_ci_leg.py", r'r"^(?:collecting \.\.\. )?collected (\d+) items?\b"',
+                 r'r"^collected (\d+) items?\b"',
+                 "tests/test_ci_leg.py::test_the_real_pytest_collect_line_is_read", id="ci-leg-real-collect-line"),
+    # Anchoring is what keeps a node id from counting as the collect line.
+    pytest.param("scripts/check_ci_leg.py", r're.match(r"^(?:collecting', r're.search(r"(?:collecting',
+                 "tests/test_ci_leg.py::test_a_node_id_mentioning_collected_is_not_the_collect_line",
+                 id="ci-leg-collect-line-anchored"),
+    # Linux-read files stay LF in an autocrlf checkout.
+    pytest.param(".gitattributes", ".devcontainer/**   text eol=lf\n", "",
+                 "tests/test_gen_agent_trees.py::test_files_linux_tools_read_are_pinned_lf", id="eol-devcontainer-lf"),
+]
+

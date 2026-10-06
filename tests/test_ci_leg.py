@@ -54,6 +54,21 @@ def test_each_tripwire_goes_red(tmp_path, text, leg, why):
     assert "TRIPWIRE" in r.stdout, why
 
 
+def test_the_real_pytest_collect_line_is_read(tmp_path):
+    """`pytest -v` piped to a file prints `collecting ... collected N items` on ONE line (MEASURED 2026-10-06). The
+    synthetic logs above start with `collected`, so the checker passed its tests and failed every real CI run."""
+    real = _log().replace("collected 12 items", "collecting ... collected 12 items", 1)
+    r = _run(tmp_path, "log", real)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_a_node_id_mentioning_collected_is_not_the_collect_line(tmp_path):
+    """Only the collect line counts: a parametrized node id can carry the same words (test_ci_leg's own ids do)."""
+    fake = "tests/test_a.py::test_x[collected 99 items] PASSED  [ 1%]"
+    r = _run(tmp_path, "log", _log(extra=(fake,), drop=("collected 12",)))
+    assert r.returncode == 1 and "collected N items" in r.stdout, r.stdout
+
+
 def test_the_linux_leg_does_not_require_the_windows_module(tmp_path):
     assert _run(tmp_path, "log", _log(drop=("test_w.py",)), "Linux").returncode == 0
 
