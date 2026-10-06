@@ -4475,3 +4475,9 @@ MUTATIONS += [pytest.param("ruff.toml", find, rep, test, id=i) for i, find, rep,
     ("t6c-ruff-exclude-swallows-real-files", 'extend-exclude = ["*.slots.py"]', 'extend-exclude = ["*.py"]',
      _RG + "test_the_gate_skips_a_slot_fragment_but_still_catches_a_real_undefined_name"),
 ]]
+
+# Plan 8 T6c: the lock generator's completeness guard covers every pytest version, not only 8.0.0.
+MUTATIONS += [pytest.param("scripts/lock-python-dependencies.py", '    if "pytest" in packages:',
+                           '    if packages.get("pytest", {}).get("metadata", {}).get("version") == "8.0.0":',
+                           "tests/test_lock_generator.py::test_an_incomplete_pytest_closure_is_refused_for_any_pytest_version[tomli-9.0.3]",
+                           id="t6c-lock-guard-keyed-on-one-pytest-version")]
