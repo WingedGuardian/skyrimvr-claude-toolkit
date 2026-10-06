@@ -279,7 +279,8 @@ def _released(repo=None):
     repo = repo or REPO
     if not (repo / ".git").exists():
         return None, False
-    tags = _git("tag", "--sort=-creatordate", cwd=repo).stdout.decode().split()
+    # Release tags only (review M9): a stray non-version tag (this repo has one, `release`) is no release.
+    tags = _git("tag", "--list", "v[0-9]*", "--sort=-creatordate", cwd=repo).stdout.decode().split()
     head = _git("rev-parse", "HEAD", cwd=repo).stdout.decode().strip()
     for tag in tags:
         if _git("rev-parse", tag + "^{commit}", cwd=repo).stdout.decode().strip() == head:
@@ -323,6 +324,9 @@ def test_the_release_being_cut_is_not_its_own_baseline(tmp_path):
     # ...and once HEAD moves past the tag (ordinary master CI), the newest tag is the baseline again
     on = _tagged_repo(tmp_path / "c", [('{"v": 1}\n', "v4.0.0"), ('{"v": 1}\n', None)])
     assert _released(on)[0][0] == "v4.0.0"
+    # a non-release tag is never a baseline
+    stray = _tagged_repo(tmp_path / "d", [('{"v": 1}\n', "release"), ('{"v": 2}\n', None)])
+    assert _released(stray)[0] is None
 
 
 def test_codex_hook_definitions_are_frozen():

@@ -19,7 +19,13 @@
 #
 # Leak greps (both modes): every file of the payload, and with --scrubbed every file setup.sh generated,
 # for the home folder and user name of whoever runs this, in every spelling (tools/check-release-payload.py
-# --leaks; the name comes from the environment, never from this repo). RELEASE_LEAK_PATHS='p1|p2' adds paths,
+# --leaks; the name comes from the environment, never from this repo), for the VALUE of every secret this
+# machine holds (X4_NEXUS_KEY, NEXUS_API_KEY, GH_TOKEN, GITHUB_TOKEN, tools/.nexus_api_key -- never printed),
+# and for API-key shapes (Nexus, GitHub, OpenAI-style, AWS). LEAK_TOKENS (newline-separated names and paths)
+# adds the maintainer's identity where the environment cannot supply it: the release workflow fills it from
+# the repository secret LEAK_TOKENS and sets VERIFY_REQUIRE_LEAK_TOKENS=1, so an empty secret FAILS CLOSED
+# (a runner's own name is `runner`, which says nothing about the maintainer). The authoritative identity gate
+# is this script run LOCALLY by the maintainer before any tag. RELEASE_LEAK_PATHS='p1|p2' adds paths,
 # e.g. this machine's real Skyrim folder.
 #
 # Why the artifact: the zip and the repo have diverged and shipped a defect twice -- once when a release port
@@ -46,6 +52,7 @@ done
 case "$TAG" in ''|v[0-9]*) ;; *) echo "verify-release: --tag must look like vX.Y.Z, got '$TAG'" >&2; exit 2 ;; esac
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this checkout's tools/
+REAL_HOME="${USERPROFILE:-${HOME:-}}"                  # before any scrub: the config folder must sit below it
 CHECKOUT="$(cd "$HERE/.." && pwd)"
 PY="${PYTHON:-}"
 if [ -z "$PY" ]; then
@@ -109,7 +116,19 @@ ROOT="$WORK/x/$tops"
 case "$tops" in skyrimvr-claude-toolkit-*) ok "extracted to a versioned root ($tops)" ;; *) bad "versioned root" "$tops" ;; esac
 BUILT_COMMIT=$(sed -n 's/^commit=//p' "$ROOT/BUILD-INFO" 2>/dev/null | head -1)
 BUILT_VERSION=$(sed -n 's/^version=//p' "$ROOT/BUILD-INFO" 2>/dev/null | head -1)
-[ -n "$TAG" ] || case "$BUILT_VERSION" in [0-9]*) TAG="v$BUILT_VERSION" ;; esac
+if [ -n "$TAG" ]; then
+  # A tag names the version: the root folder and BUILD-INFO must both say it, and (published mode) BUILD-INFO
+  # must name the tag's commit when this checkout has the tag.
+  [ "$tops" = "skyrimvr-claude-toolkit-${TAG#v}" ] && ok "root folder names $TAG" || bad "root folder names $TAG" "$tops"
+  [ "$BUILT_VERSION" = "${TAG#v}" ] && ok "BUILD-INFO version is ${TAG#v}" || bad "BUILD-INFO version" "'$BUILT_VERSION', expected '${TAG#v}'"
+  if [ -z "$EXPECT" ] && [ -z "$LOCAL_ZIP" ]; then
+    EXPECT=$(git -C "$CHECKOUT" rev-parse --verify --quiet "refs/tags/$TAG^{commit}" 2>/dev/null || true)
+    [ -n "$EXPECT" ] || skip "BUILD-INFO commit = the tag's" "this checkout has no tag $TAG"
+  fi
+else
+  case "$BUILT_VERSION" in [0-9]*) TAG="v$BUILT_VERSION" ;; esac
+fi
+REQ=(); [ "${VERIFY_REQUIRE_LEAK_TOKENS:-0}" = 1 ] && REQ=(--require-tokens)
 
 # --- payload shape, hooks, Codex half, adapter kit: ONE checker, the same one release.yml runs ---------------
 if "$PY" "$HERE/check-release-payload.py" "$(winpath "$ROOT")" ${EXPECT:+--expect-commit "$EXPECT"}; then
@@ -132,11 +151,11 @@ fi
 export RELEASE_LEAK_PATHS="${RELEASE_LEAK_PATHS:-}"
 
 # --- leak grep on what ships ------------------------------------------------------------------------------
-"$PY" "$HERE/check-release-payload.py" --leaks "$(winpath "$ROOT")"; rc=$?
+"$PY" "$HERE/check-release-payload.py" --leaks "$(winpath "$ROOT")" "${REQ[@]}"; rc=$?
 case $rc in
-  0) ok "no home path or user name in the payload" ;;
+  0) ok "no home path, user name or key in the payload" ;;
   1) bad "leak grep (payload)" "see the !! lines above" ;;
-  *) bad "leak grep (payload)" "COULD NOT CHECK: no user name in the environment" ;;
+  *) bad "leak grep (payload)" "COULD NOT CHECK (see above): a grep that cannot see the maintainer is a fail" ;;
 esac
 
 # --- the tools must RUN from the artifact -----------------------------------------------------------------
@@ -335,13 +354,15 @@ except Exception:
   pybase=$("$PY" -c 'import sys; print(sys.base_prefix)')
   cfg=$(sed -n "s/^SKYRIM_CONFIG_DIR=['\"]\{0,1\}\([^'\"]*\).*/\1/p" "$GAME/.claude/skyrim-paths.env" 2>/dev/null | head -1)
   allow=(--allow-prefix "$(winpath "$WORK")" --allow-prefix "$pybase")
-  [ -n "$cfg" ] && allow+=(--allow-prefix "$cfg")
-  note "allowed in generated files (machine discovery)" "$pybase${cfg:+ | $cfg}"
-  "$PY" "$HERE/check-release-payload.py" --leaks "$(winpath "$GAME")" "${allow[@]}" --changed-from "$(winpath "$ROOT")"; rc=$?
+  # The config folder is NOT taken on trust from setup's own output: the checker allow-lists it only if it is
+  # <home>/.../Documents/My Games/Skyrim*, strictly below the REAL home (the parent's, not the scrubbed one).
+  [ -n "$cfg" ] && allow+=(--allow-config "$cfg" --home "$(winpath "${REAL_HOME}")")
+  note "allowed in generated files (machine discovery)" "$pybase${cfg:+ | $cfg (if shaped right)}"
+  "$PY" "$HERE/check-release-payload.py" --leaks "$(winpath "$GAME")" "${allow[@]}" --changed-from "$(winpath "$ROOT")" "${REQ[@]}"; rc=$?
   case $rc in
     0) ok "no home path or user name in the installed files" ;;
     1) bad "leak grep (installed files)" "see the !! lines above" ;;
-    *) bad "leak grep (installed files)" "COULD NOT CHECK: no user name in the environment" ;;
+    *) bad "leak grep (installed files)" "COULD NOT CHECK (see above)" ;;
   esac
   unset PLAN8_LEAK_CANARY
 fi

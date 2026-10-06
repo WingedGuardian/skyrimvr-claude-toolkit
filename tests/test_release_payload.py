@@ -320,3 +320,150 @@ def test_every_home_spelling_is_found_without_the_bare_name(tmp_path, spelling):
     assert GENERIC in m.GENERIC_ACCOUNTS
     (tmp_path / "f.md").write_text(spelling, encoding="utf-8")
     assert m.scan_leaks([tmp_path], m.leak_needles([GENERIC])), spelling
+
+
+# ------------------------------------------------------------------ fix round 1 (review I1, I2, I3, M3, M5, M8)
+
+def test_leak_tokens_split_names_from_paths():
+    m = _mod()
+    names, paths = m.leak_tokens({"LEAK_TOKENS": NAME + "\r\nD:/Games/My Skyrim\n\nE:" + m.BS + "x\n"})
+    assert names == [NAME] and paths == ["D:/Games/My Skyrim", "E:" + m.BS + "x"]
+    assert m.leak_tokens({}) == ([], [])
+
+
+def test_require_tokens_fails_closed_without_them(tmp_path):
+    """Review I1: on a CI runner the environment names `runner`; a release grep without the maintainer's tokens
+    must refuse, never pass."""
+    (tmp_path / "a.md").write_text("clean", encoding="utf-8")
+    r = _leaks([tmp_path], _clean_env(USERNAME="runner"), "--require-tokens")
+    assert r.returncode == 2 and "LEAK_TOKENS" in r.stdout, r.stdout + r.stderr
+    r = _leaks([tmp_path], _clean_env(USERNAME="runner", LEAK_TOKENS="  \n "), "--require-tokens")
+    assert r.returncode == 2, r.stdout
+
+
+def test_a_token_name_is_found_even_when_the_runner_is_generic(tmp_path):
+    (tmp_path / "a.md").write_text("notes by " + NAME, encoding="utf-8")
+    r = _leaks([tmp_path], _clean_env(USERNAME="runner", LEAK_TOKENS=NAME), "--require-tokens")
+    assert r.returncode == 1 and "a.md" in r.stdout, r.stdout
+    (tmp_path / "a.md").write_text("see D:/Games/My Skyrim VR/Data", encoding="utf-8")
+    r = _leaks([tmp_path], _clean_env(USERNAME="runner", LEAK_TOKENS="D:/Games/My Skyrim VR"), "--require-tokens")
+    assert r.returncode == 1, r.stdout
+
+
+FAKE_SECRET = "zz" + "Q9fakeSECRETvalue" + "0123"   # synthetic, built here: no real key is in this repo
+
+
+def test_a_secret_value_is_found_and_never_printed(tmp_path):
+    """Review I3a: the machine's own key values, read at check time; the report names file and line only."""
+    (tmp_path / "a.md").write_text("line one\nkey = " + FAKE_SECRET + "\n", encoding="utf-8")
+    r = _leaks([tmp_path], _clean_env(USERNAME=NAME, X4_NEXUS_KEY=FAKE_SECRET))
+    assert r.returncode == 1, r.stdout
+    assert "secret value of X4_NEXUS_KEY (line 2)" in r.stdout
+    assert FAKE_SECRET not in r.stdout + r.stderr
+
+
+def test_the_nexus_key_file_is_read(tmp_path):
+    m = _mod()
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / ".nexus_api_key").write_text(FAKE_SECRET + "\n", encoding="utf-8")
+    assert m.secret_values(env={}, checkout=tmp_path) == [("secret value of tools/.nexus_api_key", FAKE_SECRET)]
+    assert m.secret_values(env={"GH_TOKEN": "short"}, checkout=tmp_path / "none") == []
+
+
+def _shape(kind):
+    a = "A" * 4 + "b" * 4
+    return {
+        "nexus": a * 4 + "==" + "--" + a * 2 + "--" + a * 2 + "==",
+        "github-classic": "gh" + "p_" + a * 5,
+        "github-pat": "github" + "_pat_" + a * 6,
+        "openai": "s" + "k-" + "proj-" + a * 4,
+        "aws": "AK" + "IA" + "ABCDEFGHIJKLMNOP",
+    }[kind]
+
+
+@pytest.mark.parametrize("kind", ["nexus", "github-classic", "github-pat", "openai", "aws"])
+def test_every_key_shape_is_found(tmp_path, kind):
+    """Review I3b: a key this machine does not hold, by its shape. Synthetic values, assembled at run time."""
+    m = _mod()
+    (tmp_path / "f.md").write_text("x\nconfig " + _shape(kind) + " end\n", encoding="utf-8")
+    hits = m.scan_leaks([tmp_path], [])
+    assert hits and "(line 2)" in hits[0][1], (kind, hits)
+
+
+@pytest.mark.parametrize("text", [
+    "bash tools/verify-release.sh --local x.zip --scrubbed --expect-commit abc",
+    "the task-runner skips; disk-check; ask-me-anything-about-the-long-flag-names",
+    "AKIA is the AWS prefix; ghp_ is GitHub's",
+])
+def test_ordinary_text_has_no_key_shape(tmp_path, text):
+    m = _mod()
+    (tmp_path / "f.md").write_text(text, encoding="utf-8")
+    assert m.scan_leaks([tmp_path], []) == []
+
+
+@pytest.mark.parametrize("cfg,ok", [
+    ("C:/Users/" + NAME + "/Documents/My Games/Skyrim VR", True),
+    ("C:/Users/" + NAME + "/OneDrive/Documents/My Games/Skyrim Special Edition", True),
+    ("C:/Users/" + NAME, False),                                     # the home itself
+    ("C:/Users/" + NAME + "/Desktop", False),                        # an odd folder
+    ("C:/Users/" + NAME + "/Documents", False),                      # too shallow
+    ("C:/Users/" + NAME + "/Documents/My Games/Skyrim VR/../../..", False),
+    ("D:/Elsewhere/Documents/My Games/Skyrim VR", False),            # not below the home
+    ("C:/Users/" + NAME + "XY/Documents/My Games/Skyrim VR", False),  # a sibling profile sharing the prefix
+])
+def test_the_config_folder_is_allow_listed_only_in_its_expected_shape(cfg, ok):
+    """Review I2: the folder comes from setup's own output, so it is validated before it may hide anything."""
+    m = _mod()
+    assert m.config_dir_ok(cfg, "C:/Users/" + NAME) is ok
+    assert m.config_dir_ok(cfg.replace("/", m.BS), "C:" + m.BS + "Users" + m.BS + NAME) is ok
+
+
+def test_a_home_level_config_hides_nothing(tmp_path):
+    """The circular allow-list the review measured: setup records the HOME as the config folder, and a file
+    naming <home>/.ssh then passed. It must show."""
+    home = "C:/Users/" + NAME
+    (tmp_path / "gen.md").write_text(home + "/.ssh/id_rsa", encoding="utf-8")
+    env = _clean_env(USERNAME=NAME)
+    r = _leaks([tmp_path], env, "--allow-config", home, "--home", home)
+    assert r.returncode == 1 and "NOT allow-listed" in r.stdout, r.stdout
+    good = home + "/Documents/My Games/Skyrim VR"
+    (tmp_path / "gen.md").write_text(good + "/Skyrim.ini", encoding="utf-8")
+    r = _leaks([tmp_path], env, "--allow-config", good, "--home", home)
+    assert r.returncode == 0, r.stdout
+
+
+@pytest.mark.parametrize("spelling", ["D:/My%20Games/Some%20Skyrim/x", "D:" + "\\" + "/My Games" + "\\" + "/Some Skyrim"])
+def test_url_and_json_slash_spellings_of_a_path(tmp_path, spelling):
+    m = _mod()
+    (tmp_path / "f.json").write_text(spelling, encoding="utf-8")
+    assert m.scan_leaks([tmp_path], m.leak_needles([], ["D:/My Games/Some Skyrim"])), spelling
+
+
+def test_utf16_big_endian_is_read_too(tmp_path):
+    m = _mod()
+    (tmp_path / "f.txt").write_bytes(("C:/Users/" + NAME).encode("utf-16-be"))
+    assert m.scan_leaks([tmp_path], m.leak_needles([NAME]))
+
+
+@pytest.mark.parametrize("rel", [".env", "tools/local.env", "config/.env.production", "x/app.env.local"])
+def test_a_dotenv_file_is_refused(payload, rel):
+    """Review M8: only two exact names were refused; a committed .env would have shipped its secrets."""
+    p = payload / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("K=v", encoding="utf-8")
+    r = _check(payload, "--section", "shape")
+    assert r.returncode == 1 and "!!" in _line(r.stdout, "no dotenv-style file"), r.stdout
+
+
+def test_an_example_env_is_not_a_dotenv(payload):
+    (payload / "x.env.example").write_text("K=v", encoding="utf-8")
+    assert "!!" not in _line(_check(payload, "--section", "shape").stdout, "no dotenv-style file")
+
+
+def test_a_registered_hook_missing_from_the_payload_is_named(payload):
+    """Review M5: counted is not named. A stray extra *.sh must not stand in for a registered hook."""
+    (payload / ".claude" / "hooks" / "protect-mcp.sh").unlink()
+    (payload / ".claude" / "hooks" / "stray.sh").write_text("INPUT=$(cat)\n: hook-heartbeat\n", encoding="utf-8")
+    r = _check(payload, "--section", "hooks")
+    line = _line(r.stdout, ".claude/settings.json registers the hooks")
+    assert r.returncode == 1 and "!!" in line and "protect-mcp.sh" in line, r.stdout

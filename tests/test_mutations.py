@@ -4508,10 +4508,11 @@ _T10 = [
     # T10.3 the leak grep
     ("t10-leaks-backslash-spelling", _CRP, '"Users" + BS + n, "Users" + BS * 2 + n', '"Users" + BS * 2 + n',
      _RP + "test_every_home_spelling_is_found_without_the_bare_name"),
-    ("t10-leaks-bare-name", _CRP, "        if n.lower() not in GENERIC_ACCOUNTS and len(n) >= 4:", "        if False:",
+    ("t10-leaks-bare-name", _CRP, "        if n in persons or (n.lower() not in GENERIC_ACCOUNTS and len(n) >= 4):",
+     "        if n in persons:",
      _RP + "test_every_spelling_of_the_home_is_found"),
-    ("t10-leaks-utf16-unread", _CRP, '            for enc in ("utf-8", "utf-16-le"):', '            for enc in ("utf-8",):',
-     _RP + "test_utf16_is_read_too"),
+    ("t10-leaks-utf16-unread", _CRP, '            for enc in ("utf-8", "utf-16-le", "utf-16-be"):',
+     '            for enc in ("utf-8", "utf-16-be"):', _RP + "test_utf16_is_read_too"),
     ("t10-leaks-allow-prefix-ignored", _CRP, '                    text = text.replace(a, "<allowed>")',
      "                    pass", _RP + "test_an_allowed_prefix_is_blanked_but_anything_else_under_the_home_is_not"),
     ("t10-leaks-baseline-skips-changed", _CRP, "                if twin.is_file() and twin.read_bytes() == data:",
@@ -4520,12 +4521,12 @@ _T10 = [
      "    names = set()", _RP + "test_the_names_come_from_the_environment"),
     ("t10-leaks-runner-is-a-person", _CRP, 'GENERIC_ACCOUNTS = frozenset(("runner", ', "GENERIC_ACCOUNTS = frozenset((",
      _RP + "test_a_generic_account_is_searched_by_path_only"),
-    ("t10-leaks-nothing-to-search-passes", _CRP, "    if not names and not extra:", "    if False:",
+    ("t10-leaks-nothing-to-search-passes", _CRP, "    if not names and not extra and not persons:", "    if False:",
      _RP + "test_leaks_mode_with_nothing_to_search_for_is_could_not_check"),
     # T10.3 the verifier
     ("t10-verify-scrub-keeps-the-environment", _VR, '  scrub() { env -i "${SCRUB_ENV[@]}" "$@"; }',
      '  scrub() { env "${SCRUB_ENV[@]}" "$@"; }', _VT + "test_the_scrubbed_install_runs_and_its_canary_is_invisible"),
-    ("t10-verify-payload-leaks-unchecked", _VR, '"$PY" "$HERE/check-release-payload.py" --leaks "$(winpath "$ROOT")"; rc=$?',
+    ("t10-verify-payload-leaks-unchecked", _VR, '"$PY" "$HERE/check-release-payload.py" --leaks "$(winpath "$ROOT")" "${REQ[@]}"; rc=$?',
      "rc=0", _VT + "test_a_home_path_in_the_payload_is_red"),
     ("t10-verify-expected-commit-dropped", _VR, '"$(winpath "$ROOT")" ${EXPECT:+--expect-commit "$EXPECT"}; then',
      '"$(winpath "$ROOT")"; then', _VT + "test_the_expected_commit_is_enforced"),
@@ -4574,9 +4575,11 @@ _T10 = [
     ("t10-wf-collect-tripwire-dropped", ".github/workflows/ci.yml",
      '          python scripts/check_ci_leg.py collect collect.log --leg "$RUNNER_OS"', "          true",
      _WT + "test_the_tripwires_bracket_the_suite_on_every_leg"),
-    ("t10-wf-suite-tee-without-pipefail", ".github/workflows/ci.yml",
-     "          set -o pipefail\n          python -B tests/run_harness_tests.py tests/ -v",
-     "          python -B tests/run_harness_tests.py tests/ -v", _WT + "test_the_tripwires_bracket_the_suite_on_every_leg"),
+    # Review M7: dropping the pipefail TEXT was an equivalent mutant (the job's bash default already adds it);
+    # the real hazard is losing that default, so the twin removes it.
+    ("t10-wf-behavior-loses-bash-default", ".github/workflows/ci.yml",
+     "    defaults:\n      run:\n        shell: bash\n    steps:\n      # Full history WITH tags",
+     "    steps:\n      # Full history WITH tags", _WT + "test_the_tripwires_bracket_the_suite_on_every_leg"),
     ("t10-wf-behavior-shallow", ".github/workflows/ci.yml",
      "tagless shallow clone.\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1\n"
      "        with:\n          fetch-depth: 0",
@@ -4587,3 +4590,67 @@ _T10 = [
      _WT + "test_node_comes_from_node_version_and_dotnet_is_channel_10"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10]
+
+# Plan 8 T10 fix round 1 (review I1-I3, M1-M5, M8, M9): one twin per new clause.
+_T10FR = [
+    # I1 the identity tokens, failing closed
+    ("t10fr-require-tokens-off", _CRP, "    if require and not (persons or token_paths):", "    if False:",
+     _RP + "test_require_tokens_fails_closed_without_them"),
+    ("t10fr-verify-tokens-not-required", _VR, 'REQ=(); [ "${VERIFY_REQUIRE_LEAK_TOKENS:-0}" = 1 ] && REQ=(--require-tokens)',
+     "REQ=()", _VT + "test_the_release_mode_fails_closed_without_leak_tokens"),
+    ("t10fr-wf-tokens-not-required", ".github/workflows/release.yml", '          VERIFY_REQUIRE_LEAK_TOKENS: "1"\n', "",
+     _WT + "test_release_gates_are_in_order"),
+    ("t10fr-token-paths-ignored", _CRP, '    extra = [p for p in os.environ.get("RELEASE_LEAK_PATHS", "").split("|") if p.strip()] + token_paths',
+     '    extra = [p for p in os.environ.get("RELEASE_LEAK_PATHS", "").split("|") if p.strip()]',
+     _RP + "test_a_token_name_is_found_even_when_the_runner_is_generic"),
+    # I2 the config folder allow-list
+    ("t10fr-config-shape-unchecked", _CRP, "    return bool(CONFIG_SHAPE.match(c[len(h) + 1:]))", "    return True",
+     _RP + "test_the_config_folder_is_allow_listed_only_in_its_expected_shape"),
+    ("t10fr-config-not-below-home", _CRP, ' or not c.lower().startswith(h.lower() + "/"):', ":",
+     _RP + "test_the_config_folder_is_allow_listed_only_in_its_expected_shape"),
+    ("t10fr-config-allowed-unvalidated", _CRP, "        if config_dir_ok(c, home):", "        if True:",
+     _RP + "test_a_home_level_config_hides_nothing"),
+    # I3 secrets and key shapes
+    ("t10fr-secret-value-unread", _CRP, "                        i = raw.find(value)", "                        i = -1",
+     _RP + "test_a_secret_value_is_found_and_never_printed"),
+    ("t10fr-secret-file-unread", _CRP, "        if p is not None and p.is_file():", "        if False:",
+     _RP + "test_the_nexus_key_file_is_read"),
+    ("t10fr-shape-nexus", _CRP, '     re.compile(r"[A-Za-z0-9+/]{16,}={0,2}--', '     re.compile(r"(?!)[A-Za-z0-9+/]{16,}={0,2}--',
+     _RP + "test_every_key_shape_is_found"),
+    ("t10fr-shape-github", _CRP, 're.compile(r"\\b(?:gh[pousr]_', 're.compile(r"(?!)(?:gh[pousr]_',
+     _RP + "test_every_key_shape_is_found"),
+    ("t10fr-shape-openai", _CRP, 're.compile(r"\\bsk-(?:proj-', 're.compile(r"(?!)sk-(?:proj-',
+     _RP + "test_every_key_shape_is_found"),
+    ("t10fr-shape-aws", _CRP, 're.compile(r"\\bAKIA[0-9A-Z]{16}\\b")', 're.compile(r"(?!)AKIA[0-9A-Z]{16}\\b")',
+     _RP + "test_every_key_shape_is_found"),
+    # M3 spellings
+    ("t10fr-leaks-utf16be-unread", _CRP, '            for enc in ("utf-8", "utf-16-le", "utf-16-be"):',
+     '            for enc in ("utf-8", "utf-16-le"):', _RP + "test_utf16_big_endian_is_read_too"),
+    ("t10fr-leaks-url-encoded-path", _CRP, '    out |= {s.replace(" ", "%20") for s in out}', "    pass",
+     _RP + "test_url_and_json_slash_spellings_of_a_path"),
+    ("t10fr-leaks-json-slash-path", _CRP, ', fwd.replace("/", BS + "/")}', "}",
+     _RP + "test_url_and_json_slash_spellings_of_a_path"),
+    # M5 named hooks, M8 dotenv
+    ("t10fr-registered-hook-unchecked", _CRP, "        missing = [p for p in named if not (root / p).is_file()]",
+     "        missing = []", _RP + "test_a_registered_hook_missing_from_the_payload_is_named"),
+    ("t10fr-dotenv-allowed", _CRP, 'DOTENV_GLOBS = (".env", "*.env", ".env.*", "*.env.local")', "DOTENV_GLOBS = ()",
+     _RP + "test_a_dotenv_file_is_refused"),
+    # M1/M2 the builder
+    ("t10fr-build-info-attributes-ignored", _BZ, "    if info.is_file() and any(", "    if False and any(",
+     _RB + "test_machine_local_info_attributes_refuse_the_build"),
+    ("t10fr-build-attributes-file-ignored", _BZ,
+     '    if _git("config", "--get", "core.attributesFile", check=False).stdout.strip():', "    if False:",
+     _RB + "test_a_configured_attributes_file_refuses_the_build"),
+    ("t10fr-build-altering-attrs-allowed", _BZ, 'ALTERING_ATTRS = ("filter=", "export-subst", "export-ignore", "ident")',
+     "ALTERING_ATTRS = ()", _RB + "test_a_committed_attribute_that_alters_the_archive_refuses"),
+    ("t10fr-build-submodule-allowed", _BZ, "    if links:", "    if False:", _RB + "test_a_submodule_refuses_the_build"),
+    # M4 published/tagged verify
+    ("t10fr-verify-root-not-the-tag", _VR, '  [ "$tops" = "skyrimvr-claude-toolkit-${TAG#v}" ] && ok', "  true && ok",
+     _VT + "test_a_tag_must_match_the_root_folder_and_build_info"),
+    ("t10fr-verify-build-version-not-the-tag", _VR, '  [ "$BUILT_VERSION" = "${TAG#v}" ] && ok', "  true && ok",
+     _VT + "test_a_tag_must_match_the_root_folder_and_build_info"),
+    # M9 release tags only
+    ("t10fr-freeze-any-tag-is-a-release", "tests/test_codex_definitions.py", '"--list", "v[0-9]*", ', "",
+     "tests/test_codex_definitions.py::test_the_release_being_cut_is_not_its_own_baseline"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10FR]

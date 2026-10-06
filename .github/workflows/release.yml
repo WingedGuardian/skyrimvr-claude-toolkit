@@ -100,10 +100,15 @@ jobs:
 
       # ONE checker for both gates: payload shape, the hook floor, the Codex half, the adapter kit,
       # tests/fixtures/routes-harness/ absent, BUILD-INFO = the tag's commit, the leak grep, and a scrubbed install.
+      # The runner's own account is `runner`, which says nothing about the maintainer: the identity to grep for
+      # (name and home/game paths, newline-separated) comes from the repository secret LEAK_TOKENS, and an empty
+      # or absent secret FAILS this step (VERIFY_REQUIRE_LEAK_TOKENS=1). See README "Releasing (maintainer)".
       - name: Verify the zip as a user gets it
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           SHA: ${{ steps.tag.outputs.sha }}
+          LEAK_TOKENS: ${{ secrets.LEAK_TOKENS }}
+          VERIFY_REQUIRE_LEAK_TOKENS: "1"
         run: bash tools/verify-release.sh --local "$ZIP" --scrubbed --expect-commit "$SHA" --tag "$TAG"
 
       - name: Extract this version's changelog section

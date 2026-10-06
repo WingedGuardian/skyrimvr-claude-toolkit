@@ -15,7 +15,10 @@ Refusals:
           waives this one check (local experiments only; CI never passes it). The zip is still built from
           the commit, never from the tree.
   exit 4  <rev> is unknown, is not HEAD or an ancestor of HEAD (a build of a commit nobody has checked out
-          here), or the commit carries its own BUILD-INFO (a tree must not vouch for itself).
+          here), or the commit carries its own BUILD-INFO (a tree must not vouch for itself); or something would
+          make the archive differ from the committed bytes: machine-local attributes (core.attributesFile,
+          $GIT_DIR/info/attributes), a committed filter/export-subst/export-ignore/ident attribute, or a
+          submodule (it would ship as an empty folder).
   exit 2  bad usage.
 
 Deterministic: entries in git's order, timestamps from the commit, fixed compression. Two builds of one
@@ -70,6 +73,39 @@ def check_tree(sha: str, allow_dirty: bool) -> None:
         raise Refused(4, "{} is not HEAD or an ancestor of HEAD; check out the commit you mean to ship".format(sha))
     if _git("cat-file", "-e", "{}:{}".format(sha, BUILD_INFO), check=False).returncode == 0:
         raise Refused(4, "the commit carries its own {}: a tree must not vouch for itself".format(BUILD_INFO))
+
+
+# Attributes that make `git archive` output something other than the committed bytes: a filter (LFS, any
+# smudge) injects content, export-subst expands $Format:...$ (the author's e-mail among them), export-ignore
+# drops files silently, ident rewrites $Id$. `text`/`eol` stay allowed: they are deterministic and committed.
+ALTERING_ATTRS = ("filter=", "export-subst", "export-ignore", "ident")
+
+
+def check_archive_inputs(sha: str) -> None:
+    """Refuse anything OUTSIDE the commit that would change the archive, and anything in it a zip cannot carry.
+
+    Review M1/M2 (MEASURED there, each exit 0 before): `$GIT_DIR/info/attributes` with export-ignore dropped a
+    committed file, with eol=crlf rewrote one, and a configured smudge filter injected arbitrary content; a
+    gitlink shipped as an empty folder."""
+    if _git("config", "--get", "core.attributesFile", check=False).stdout.strip():
+        raise Refused(4, "core.attributesFile is set in this machine's git config: its attributes would alter "
+                         "the archive. Build in a clone without it")
+    info = Path(_git("rev-parse", "--git-path", "info/attributes").stdout.strip())
+    if info.is_file() and any(ln.strip() and not ln.lstrip().startswith("#")
+                              for ln in info.read_text(encoding="utf-8", errors="replace").splitlines()):
+        raise Refused(4, "{} is not empty: machine-local attributes would alter the archive".format(info.as_posix()))
+    tree = _git("ls-tree", "-r", "--full-tree", sha).stdout.splitlines()
+    links = [ln.split("\t", 1)[-1] for ln in tree if ln.startswith("160000 ")]
+    if links:
+        raise Refused(4, "submodule(s) in the commit ({}): they would ship as empty folders".format(", ".join(links)))
+    for ln in tree:
+        path = ln.split("\t", 1)[-1]
+        if path == ".gitattributes" or path.endswith("/.gitattributes"):
+            text = _git("show", "{}:{}".format(sha, path)).stdout
+            bad = [a for a in ALTERING_ATTRS
+                   if any(a in x for x in text.splitlines() if x.strip() and not x.lstrip().startswith("#"))]
+            if bad:
+                raise Refused(4, "{} uses {}: the archive would not be the committed bytes".format(path, ", ".join(bad)))
 
 
 def default_version(sha: str) -> str:
@@ -134,6 +170,7 @@ def main(argv=None) -> int:
     try:
         sha = resolve(a.rev)
         check_tree(sha, a.allow_dirty)
+        check_archive_inputs(sha)
         version = a.version or default_version(sha)
         if not version or "/" in version or "\\" in version or version.startswith("."):
             raise Refused(2, "bad --version: {!r}".format(version))

@@ -123,3 +123,30 @@ def test_the_scrubbed_install_runs_and_its_canary_is_invisible(tmp_path, payload
         line = _line(out, name)
         assert line.endswith(" ok"), "{!r} not ok:\n{}".format(name, out[-4000:] + r.stderr[-2000:])
     assert r.returncode == 0, out[-4000:]
+
+
+# ------------------------------------------------------------------ fix round 1 (review I1, M4)
+
+def test_the_release_mode_fails_closed_without_leak_tokens(tmp_path, payload):
+    """What release.yml runs: VERIFY_REQUIRE_LEAK_TOKENS=1 and the LEAK_TOKENS secret. Absent or empty, the step
+    must go red -- a runner's own name says nothing about the maintainer."""
+    z = _variant(tmp_path, payload)
+    env = _env(tmp_path)
+    env.update(VERIFY_REQUIRE_LEAK_TOKENS="1", USERNAME="runner")
+    env.pop("LEAK_TOKENS", None)
+    r = subprocess.run([BASH, str(VERIFY), "--local", str(z)], capture_output=True, text=True, env=env,
+                       timeout=900, cwd=str(tmp_path))
+    assert r.returncode != 0, r.stdout[-3000:]
+    assert "!!" in _line(r.stdout, "leak grep (payload)") and "LEAK_TOKENS" in r.stdout, r.stdout[-3000:]
+    env["LEAK_TOKENS"] = NAME
+    r = subprocess.run([BASH, str(VERIFY), "--local", str(z)], capture_output=True, text=True, env=env,
+                       timeout=900, cwd=str(tmp_path))
+    assert r.returncode == 0, r.stdout[-3000:]
+
+
+def test_a_tag_must_match_the_root_folder_and_build_info(tmp_path, payload):
+    """Review M4: any skyrimvr-claude-toolkit-* root passed, and BUILD-INFO's version was never compared."""
+    r = _verify(tmp_path, _variant(tmp_path, payload), "--tag", "v9.9.9")
+    assert r.returncode == 1
+    assert "!!" in _line(r.stdout, "root folder names v9.9.9"), r.stdout[-3000:]
+    assert "!!" in _line(r.stdout, "BUILD-INFO version"), r.stdout[-3000:]

@@ -76,7 +76,7 @@ def test_least_privilege_and_no_dangerous_triggers(name):
     for jid, job in data["jobs"].items():
         for s in _steps(job):
             if str(s.get("uses", "")).startswith("actions/checkout@"):
-                assert (s.get("with") or {}).get("persist-credentials") is False or name == "ci.yml", \
+                assert (s.get("with") or {}).get("persist-credentials") is False, \
                     f"{name}/{jid}: checkout keeps the token in .git/config"
 
 
@@ -125,6 +125,9 @@ def test_the_tripwires_bracket_the_suite_on_every_leg():
     for i in (collect, log):
         assert '--leg "$RUNNER_OS"' in steps[i]["run"]
     assert "set -o pipefail" in steps[suite]["run"], "a `| tee` without pipefail turns a red suite green"
+    # Review M7: the job default is what makes every step bash -eo pipefail on BOTH legs; on Windows the
+    # runner's default shell is PowerShell, where `tee`, `set -o` and "$RUNNER_OS" mean something else.
+    assert data["jobs"]["behavior"].get("defaults", {}).get("run", {}).get("shell") == "bash"
 
 
 def test_every_job_that_runs_the_freeze_gate_has_full_history():
@@ -179,6 +182,9 @@ def test_release_gates_are_in_order():
     for flag in ("--scrubbed", '--expect-commit "$SHA"', '--tag "$TAG"'):
         assert flag in v, flag
     assert "origin/master" in steps[master]["run"]
+    # Review I1: the identity comes from the LEAK_TOKENS secret, and an absent one fails the step closed.
+    env = steps[verify].get("env", {})
+    assert env.get("LEAK_TOKENS") == "${{ secrets.LEAK_TOKENS }}" and str(env.get("VERIFY_REQUIRE_LEAK_TOKENS")) == "1", env
     co = steps[0]
     assert co["with"]["fetch-depth"] == 0 and co["with"]["ref"] == "${{ github.event.inputs.tag || github.ref }}"
 

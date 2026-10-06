@@ -81,6 +81,9 @@ ABSENT_PATHS = (
     ".venv",
 )
 ABSENT_NAMES = ("skyrim-paths.env", ".nexus_api_key")
+# Any dotenv-style file (review M8): a committed `.env` / `x.env` / `.env.local` is where secrets live.
+# A documented `*.example` template is not one.
+DOTENV_GLOBS = (".env", "*.env", ".env.*", "*.env.local")
 
 ADAPTER_REQUIRED = (
     "ADAPTING.md",
@@ -137,6 +140,9 @@ def check_shape(root: Path):
     for name in ABSENT_NAMES:
         found = sorted(p.relative_to(root).as_posix() for p in root.rglob(name))
         yield "no file named {} anywhere".format(name), ("PRESENT: " + ", ".join(found)) if found else None
+    found = sorted({p.relative_to(root).as_posix() for g in DOTENV_GLOBS for p in root.rglob(g)
+                    if p.is_file() and not p.name.endswith(".example")})
+    yield "no dotenv-style file (.env, *.env, .env.*) anywhere", ("PRESENT: " + ", ".join(found)) if found else None
 
 
 def check_hooks(root: Path):
@@ -149,6 +155,19 @@ def check_hooks(root: Path):
         None if len(codex) >= CODEX_ENTRY_FLOOR else "only {}: an entry is missing".format(len(codex)))
     yield "hook floor {} = {} Claude + {} Codex".format(HOOK_FLOOR, CLAUDE_HOOK_FLOOR, CODEX_ENTRY_FLOOR), (
         None if len(claude) + len(codex) >= HOOK_FLOOR else "{} in all".format(len(claude) + len(codex)))
+    # Named, not only counted (review M5): every hook .claude/settings.json registers must be in the payload,
+    # and the registered set must reach the floor -- a stray extra *.sh cannot stand in for a missing hook.
+    settings = root / ".claude" / "settings.json"
+    try:
+        cfg = json.loads(settings.read_text(encoding="utf-8"))
+        cmds = [h.get("command", "") for ms in cfg.get("hooks", {}).values() for m in ms for h in m.get("hooks", [])]
+        named = sorted({p for c in cmds for p in re.findall(r"\$CLAUDE_PROJECT_DIR/([^\"' ]+)", c)})
+        missing = [p for p in named if not (root / p).is_file()]
+        problem = ("missing: " + ", ".join(missing)) if missing else (
+            None if len(named) >= CLAUDE_HOOK_FLOOR else "only {} hook(s) registered".format(len(named)))
+    except (OSError, ValueError, AttributeError, TypeError) as e:
+        problem = "unreadable: {}".format(e)
+    yield ".claude/settings.json registers the hooks, and each is shipped", problem
     # `INPUT=$(cat /dev/stdin)` returns ZERO BYTES when Claude Code spawns a hook, while a bare `cat` returns
     # the payload: every hook that used it fired, read nothing, and exited 0 -- byte-identical to "this is
     # fine". No suite can see it (a suite pipes stdin). Assert the line that works, exactly.
@@ -252,6 +271,21 @@ GENERIC_ACCOUNTS = frozenset(("runner", "runneradmin", "user", "users", "admin",
                               "vagrant", "ubuntu", "codespace", "codespaces", "vscode", "docker", "default",
                               "public", "guest", "test", "ci", "build", "builder", "nobody", "system"))
 BS = "\\"
+# Secrets whose VALUE is grepped for (read at check time, never printed, never stored): a value match has no
+# false positives. Files are relative to the checkout running the check.
+SECRET_VARS = ("X4_NEXUS_KEY", "NEXUS_API_KEY", "GH_TOKEN", "GITHUB_TOKEN")
+SECRET_FILES = ("tools/.nexus_api_key",)
+# Key SHAPES, for a secret this machine does not hold. Each is labelled; the matched text is never printed.
+KEY_SHAPES = (
+    ("Nexus personal API key shape",
+     re.compile(r"[A-Za-z0-9+/]{16,}={0,2}--[A-Za-z0-9+/]{8,}={0,2}--[A-Za-z0-9+/]{8,}={0,2}")),
+    ("GitHub token shape", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})")),
+    ("OpenAI-style secret key shape", re.compile(r"\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}")),
+    ("AWS access key id shape", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+)
+# The config folder setup.sh records is allow-listed in generated files ONLY in this shape, strictly below the
+# home folder: <home>/[...]/Documents/My Games/Skyrim*. Anything else (the home itself, Desktop, .ssh) shows.
+CONFIG_SHAPE = re.compile(r"^(?:[^/]+/)*Documents/My Games/Skyrim[^/]*$", re.I)
 
 
 def leak_names(env=None, home=None):
@@ -265,23 +299,56 @@ def leak_names(env=None, home=None):
     return sorted({n for n in names if len(n) >= 3 and "/" not in n and BS not in n})
 
 
+def leak_tokens(env=None):
+    """LEAK_TOKENS (newline-separated; the release workflow fills it from a repository secret): a token holding
+    a path separator or a drive colon is a path, anything else a person's name. -> (names, paths)"""
+    env = os.environ if env is None else env
+    toks = [t.strip() for t in env.get("LEAK_TOKENS", "").replace("\r", "\n").split("\n") if t.strip()]
+    paths = [t for t in toks if "/" in t or BS in t or ":" in t]
+    return [t for t in toks if t not in paths and len(t) >= 3], paths
+
+
+def secret_values(env=None, checkout=None):
+    """[(label, value)] of the secrets this machine holds. The label names the source, never the value."""
+    env = os.environ if env is None else env
+    out = [("secret value of " + k, env[k].strip()) for k in SECRET_VARS if len(env.get(k, "").strip()) >= 8]
+    for rel in SECRET_FILES:
+        p = Path(checkout) / rel if checkout else None
+        if p is not None and p.is_file():
+            v = p.read_text(encoding="utf-8", errors="ignore").strip()
+            if len(v) >= 8:
+                out.append(("secret value of " + rel, v))
+    return out
+
+
+def config_dir_ok(cfg: str, home: str) -> bool:
+    """Is `cfg` the expected Skyrim config folder: <home>/[...]/Documents/My Games/Skyrim*, strictly below home?"""
+    c, h = cfg.replace(BS, "/").rstrip("/"), home.replace(BS, "/").rstrip("/")
+    if not c or not h or ".." in c.split("/") or not c.lower().startswith(h.lower() + "/"):
+        return False
+    return bool(CONFIG_SHAPE.match(c[len(h) + 1:]))
+
+
 def path_spellings(path: str):
-    """One path as files spell it: forward, backslash, JSON-escaped backslash, and MSYS (/c/...)."""
+    """One path as files spell it: forward, backslash, JSON-escaped backslash or slash, MSYS (/c/...), and
+    URL-encoded spaces."""
     fwd = path.replace(BS, "/").rstrip("/")
-    out = {fwd, fwd.replace("/", BS), fwd.replace("/", BS * 2)}
+    out = {fwd, fwd.replace("/", BS), fwd.replace("/", BS * 2), fwd.replace("/", BS + "/")}
     m = re.match(r"^([A-Za-z]):/(.*)$", fwd)
     if m:
         out.add("/{}/{}".format(m.group(1).lower(), m.group(2)))
+    out |= {s.replace(" ", "%20") for s in out}
     return sorted(s for s in out if s)
 
 
-def leak_needles(names, extra_paths=()):
-    """(label, lowercase needle) pairs. Home-path spellings for every name; the bare name when it is a person's."""
+def leak_needles(names, extra_paths=(), persons=()):
+    """(label, lowercase needle) pairs. Home-path spellings for every name; the bare name when it is a person's
+    (`persons` are always people: they come from LEAK_TOKENS)."""
     needles = []
-    for n in names:
-        for s in ("Users/" + n, "Users" + BS + n, "Users" + BS * 2 + n, "/home/" + n):
+    for n in list(names) + list(persons):
+        for s in ("Users/" + n, "Users" + BS + n, "Users" + BS * 2 + n, "/home/" + n, "Users%2F" + n):
             needles.append(("home path ({})".format(s), s.lower()))
-        if n.lower() not in GENERIC_ACCOUNTS and len(n) >= 4:
+        if n in persons or (n.lower() not in GENERIC_ACCOUNTS and len(n) >= 4):
             needles.append(("user name", n.lower()))
     for p in extra_paths:
         for s in path_spellings(p):
@@ -289,8 +356,14 @@ def leak_needles(names, extra_paths=()):
     return needles
 
 
-def scan_leaks(dirs, needles, allow_prefixes=(), baseline=None):
-    """[(file, label)] for every file under `dirs` holding a needle, UTF-8 or UTF-16, case-insensitively.
+def _line_of(text, idx):
+    return text.count("\n", 0, idx) + 1
+
+
+def scan_leaks(dirs, needles, allow_prefixes=(), baseline=None, secrets=(), shapes=KEY_SHAPES):
+    """[(file, label)] for every file under `dirs` holding a needle (case-insensitive), a secret's exact value,
+    or a key shape -- read as UTF-8, UTF-16LE and UTF-16BE. A secret or shape label carries the line number,
+    never the text.
 
     `baseline`: a folder to compare against -- a file byte-identical to the one at the same path there is
     skipped, so a scan of an installed copy reports what setup GENERATED or changed, not the payload again."""
@@ -304,53 +377,84 @@ def scan_leaks(dirs, needles, allow_prefixes=(), baseline=None):
                 twin = Path(baseline) / f.relative_to(d)
                 if twin.is_file() and twin.read_bytes() == data:
                     continue
-            for enc in ("utf-8", "utf-16-le"):
-                try:
-                    text = data.decode(enc).lower()
-                except UnicodeDecodeError:
-                    text = data.decode(enc, errors="ignore").lower()
+            name = "{}/{}".format(d.name, f.relative_to(d).as_posix())
+            label = None
+            for enc in ("utf-8", "utf-16-le", "utf-16-be"):
+                raw = data.decode(enc, errors="ignore")
+                text = raw.lower()
                 for a in allow:
                     text = text.replace(a, "<allowed>")
-                for label, needle in needles:
-                    if needle in text:
-                        hits.append(("{}/{}".format(d.name, f.relative_to(d).as_posix()), label))
-                        break
-                else:
-                    continue
-                break
+                label = next((lb for lb, needle in needles if needle in text), None)
+                if label is None:
+                    for lb, value in secrets:
+                        i = raw.find(value)
+                        if i >= 0:
+                            label = "{} (line {})".format(lb, _line_of(raw, i))
+                            break
+                if label is None:
+                    for lb, rx in shapes:
+                        m = rx.search(raw)
+                        if m:
+                            label = "{} (line {})".format(lb, _line_of(raw, m.start()))
+                            break
+                if label is not None:
+                    hits.append((name, label))
+                    break
     return hits
 
 
 def run_leaks(args) -> int:
-    dirs, allow, baseline, i = [], [], None, 0
+    dirs, allow, baseline, cfgs, home, require, i = [], [], None, [], None, False, 0
     while i < len(args):
         if args[i] == "--allow-prefix" and i + 1 < len(args):
             allow.append(args[i + 1])
             i += 2
+        elif args[i] == "--allow-config" and i + 1 < len(args):
+            cfgs.append(args[i + 1])
+            i += 2
+        elif args[i] == "--home" and i + 1 < len(args):
+            home, i = args[i + 1], i + 2
         elif args[i] == "--changed-from" and i + 1 < len(args) and Path(args[i + 1]).is_dir():
             baseline, i = args[i + 1], i + 2
+        elif args[i] == "--require-tokens":
+            require, i = True, i + 1
         elif args[i].startswith("--"):
             sys.stderr.write("unknown argument: {}\n".format(args[i]))
             return 2
         else:
             dirs.append(args[i])
             i += 1
-    if not dirs or not all(Path(d).is_dir() for d in dirs):
+    if not dirs or not all(Path(d).is_dir() for d in dirs) or (cfgs and not home):
         sys.stderr.write("usage: check-release-payload.py --leaks <dir> [<dir> ...] [--allow-prefix PATH ...] "
-                         "[--changed-from DIR]\n")
+                         "[--allow-config DIR --home HOME] [--changed-from DIR] [--require-tokens]\n")
         return 2
+    persons, token_paths = leak_tokens()
+    if require and not (persons or token_paths):
+        # Fail CLOSED: on a CI runner the environment names `runner`, so without the maintainer's tokens this
+        # grep would pass a tree full of the maintainer's paths.
+        print("LEAKS: COULD NOT CHECK -- LEAK_TOKENS is empty or absent (the release workflow reads it from the "
+              "repository secret LEAK_TOKENS); refusing to pass a grep that cannot see the maintainer")
+        return 2
+    for c in cfgs:
+        if config_dir_ok(c, home):
+            allow.append(c)
+            print("  allow-listed config folder (exact): {}".format(c))
+        else:
+            print("  !! NOT allow-listed (not <home>/.../Documents/My Games/Skyrim*): {}".format(c))
     names = leak_names()
-    extra = [p for p in os.environ.get("RELEASE_LEAK_PATHS", "").split("|") if p.strip()]
-    if not names and not extra:
+    extra = [p for p in os.environ.get("RELEASE_LEAK_PATHS", "").split("|") if p.strip()] + token_paths
+    secrets = secret_values(checkout=Path(__file__).resolve().parent.parent)
+    if not names and not extra and not persons:
         print("LEAKS: COULD NOT CHECK -- no user name in the environment and no RELEASE_LEAK_PATHS")
         return 2
-    needles = leak_needles(names, extra)
-    print("  searching {} dir(s) for {} spelling(s) of {} name(s) and {} extra path(s)".format(
-        len(dirs), len(needles), len(names), len(extra)))
-    hits = scan_leaks(dirs, needles, allow, baseline)
+    needles = leak_needles(names, extra, persons)
+    print("  searching {} dir(s) for {} spelling(s) of {} name(s), {} extra path(s), {} secret value(s), "
+          "{} key shape(s)".format(len(dirs), len(needles), len(names) + len(persons), len(extra), len(secrets),
+                                   len(KEY_SHAPES)))
+    hits = scan_leaks(dirs, needles, allow, baseline, secrets)
     for f, label in hits:
         print("  !! {}: {}".format(f, label))
-    print("LEAKS: " + ("none" if not hits else "{} FILE(S) CARRY A HOME PATH OR NAME".format(len(hits))))
+    print("LEAKS: " + ("none" if not hits else "{} FILE(S) CARRY A HOME PATH, NAME OR KEY".format(len(hits))))
     return 1 if hits else 0
 
 

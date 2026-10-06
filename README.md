@@ -524,6 +524,15 @@ pack** is built by `scripts/build-nexus-pack.sh <tag> <changelog.txt> <descripti
 downloads the published release asset rather than rebuilding it, records its sha256 and size, and
 **refuses to report success on an incomplete pack**. `tests/test_nexus_pack.py` asserts the shape.
 
+Before any tag, run `bash scripts/build-release-zip.sh HEAD dist` and then
+`bash tools/verify-release.sh --local dist/<zip> --scrubbed` on your own machine: it greps the zip and
+everything a scrubbed install generates for your user name, home folder and real game folder (read from your
+environment, never written into the repo), for the values of your API keys, and for key-shaped strings. That
+local run is the authoritative identity-leak gate. The release workflow repeats the grep, but a CI runner
+does not know who you are: set the repository secret **`LEAK_TOKENS`** (Settings -> Secrets and variables ->
+Actions) to your user name and your home and game folders, one per line. If the secret is missing or empty,
+the release workflow refuses to publish.
+
 The changelog and mod-page description are passed in, not generated: extracting a version block
 from `CHANGELOG.md` yields raw markdown, while the Nexus box renders a flat list and wants one
 issue per line. Nexus has no write API for files or the description, so the upload itself is always

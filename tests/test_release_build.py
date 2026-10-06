@@ -200,3 +200,62 @@ def test_bad_usage_is_exit_2(tmp_path, args):
     r = subprocess.run([sys.executable, "-B", str(BUILDER_PY), *args], cwd=str(tmp_path),
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 2, r.stdout + r.stderr
+
+
+# ------------------------------------------------------------------ fix round 1 (review M1, M2)
+
+def _commit_file(repo, rel, text):
+    p = repo / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(text.encode())
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "add " + rel)
+
+
+def test_machine_local_info_attributes_refuse_the_build(tmp_path):
+    """MEASURED by the review: `$GIT_DIR/info/attributes` export-ignore silently dropped a committed file."""
+    repo = _repo(tmp_path)
+    info = repo / ".git" / "info" / "attributes"
+    info.parent.mkdir(parents=True, exist_ok=True)
+    info.write_text("README.md export-ignore\n", encoding="utf-8")
+    r, out = _build(repo, "HEAD", "--version", "1")
+    assert r.returncode == 4 and "info/attributes" in r.stderr, r.stdout + r.stderr
+    info.write_text("# a comment only\n\n", encoding="utf-8")
+    r, out = _build(repo, "HEAD", "--version", "1")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_a_configured_attributes_file_refuses_the_build(tmp_path):
+    repo = _repo(tmp_path)
+    (tmp_path / "attrs").write_text("*.md eol=crlf\n", encoding="utf-8")
+    _git(repo, "config", "core.attributesFile", str(tmp_path / "attrs"))
+    r, _ = _build(repo, "HEAD", "--version", "1")
+    assert r.returncode == 4 and "core.attributesFile" in r.stderr, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("attr", ["*.md filter=lfs diff=lfs merge=lfs -text", "*.txt export-subst",
+                                  "sub/* export-ignore", "*.sh ident"])
+def test_a_committed_attribute_that_alters_the_archive_refuses(tmp_path, attr):
+    """A filter (LFS or any smudge) injects content; export-subst expands $Format$ (the author's e-mail among
+    them); export-ignore drops files; ident rewrites $Id$."""
+    repo = _repo(tmp_path)
+    _commit_file(repo, ".gitattributes", "*.sh text eol=lf\n" + attr + "\n")
+    r, _ = _build(repo, "HEAD", "--version", "1")
+    assert r.returncode == 4 and ".gitattributes" in r.stderr, (attr, r.stdout + r.stderr)
+
+
+def test_plain_eol_attributes_still_build(tmp_path):
+    repo = _repo(tmp_path)
+    _commit_file(repo, ".gitattributes", "# eol only\n*.sh text eol=lf\n*.png binary\n")
+    r, _ = _build(repo, "HEAD", "--version", "1")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_a_submodule_refuses_the_build(tmp_path):
+    """A gitlink shipped as an empty folder with exit 0."""
+    repo = _repo(tmp_path)
+    sha = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "update-index", "--add", "--cacheinfo", "160000,{},mod".format(sha))
+    _git(repo, "commit", "-q", "-m", "gitlink")
+    r, _ = _build(repo, "HEAD", "--version", "1", "--allow-dirty")
+    assert r.returncode == 4 and "submodule" in r.stderr, r.stdout + r.stderr
