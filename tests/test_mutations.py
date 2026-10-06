@@ -6719,3 +6719,108 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/self_rules.py", '    if rel == ["skyrim-paths.env"]:', '    if rel[-1:] == ["skyrim-paths.env"]:',
      _P8T8 + "test_only_the_root_level_name_is_a_guard_file", "p8t8-self-guard-root-level-only"),
 ]]
+
+
+# ---- Plan 8 T7 (p8-setup): setup.sh --agent, --lock, the root paths file, the 3.x hook-in, runtime ranges, hints ----
+# One twin per branch / clause, each killed through its NAMED test. Twins whose test is Windows-only say so; the
+# Codex-off-Windows refusal has no twin here (its test is POSIX-only) -- the setup-smoke CI leg (ubuntu, codex)
+# expects exit 3 there instead.
+_T7S = "tests/test_setup_agent.py::"
+_T7 = [
+    # usage errors: exit 2, nothing written
+    ("setup.sh", "Nothing was changed.\" >&2\n       usage >&2; exit 2 ;;", "Nothing was changed.\" >&2\n       ;;",
+     _T7S + "test_a_usage_error_exits_2_and_writes_nothing[unknown-value]", "t7-unknown-value-exits-2"),
+    ("setup.sh", "        *) echo \"setup.sh: unknown option '$1'. Nothing was changed.\" >&2; usage >&2; exit 2 ;;",
+     "        *) shift ;;", _T7S + "test_a_usage_error_exits_2_and_writes_nothing[unknown-option]",
+     "t7-unknown-option-exits-2"),
+    # both = all (Windows: the [both] case renders Codex)
+    ("setup.sh", '    both) AGENT_ARG="all" ;;', '    both) AGENT_ARG="claude" ;;',
+     _T7S + "test_each_value_configures_exactly_its_agents[both]", "t7-both-means-all"),
+    # auto: the agents on PATH; none found means all
+    ("setup.sh", '        *) AGENT_SEL="all" ;;', '        *) AGENT_SEL="claude" ;;',
+     _T7S + "test_auto_configures_the_agents_found_on_path[none-found-means-all]", "t7-auto-none-found-means-all"),
+    ("setup.sh", '    which claude >/dev/null 2>&1 && AGENTS_FOUND="claude"', "    true",
+     _T7S + "test_auto_configures_the_agents_found_on_path[claude-only]", "t7-auto-detects-claude"),
+    ("setup.sh", '    if [ -n "$CODEX_WIN" ] && which codex >/dev/null 2>&1; then', "    if false; then",
+     _T7S + "test_auto_configures_the_agents_found_on_path[codex-only]", "t7-auto-detects-codex"),
+    # an unselected agent's files are kept as extracted
+    ("setup.sh", '    *) DOC_ON="$DO_CODEX" ;;', "    *) DOC_ON=1 ;;",
+     _T7S + "test_each_value_configures_exactly_its_agents[claude]", "t7-agents-md-only-for-codex"),
+    ("setup.sh", '    CLAUDE.md) DOC_ON="$DO_CLAUDE" ;;', "    CLAUDE.md) DOC_ON=1 ;;",
+     _T7S + "test_each_value_configures_exactly_its_agents[codex]", "t7-claude-md-only-for-claude"),
+    ("setup.sh", 'if [ -z "$DO_CODEX" ]; then', "if false; then",
+     _T7S + "test_each_value_configures_exactly_its_agents[claude]", "t7-codex-render-only-for-codex"),
+    ("setup.sh", 'if [ -n "$DO_CLAUDE" ] && [ ! -f "$GAME_DIR/.claude/settings.local.json" ]',
+     'if [ ! -f "$GAME_DIR/.claude/settings.local.json" ]',
+     _T7S + "test_each_value_configures_exactly_its_agents[codex]", "t7-settings-local-only-for-claude"),
+    # ...and setup says so plainly
+    ("setup.sh", '    echo "  Claude Code: NOT CONFIGURED -- CLAUDE.md has no paths filled in (this run: --agent $AGENT_SEL)."',
+     "    :", _T7S + "test_each_value_configures_exactly_its_agents[codex]", "t7-says-claude-unconfigured"),
+    ("setup.sh", '    echo "  Codex:       NOT CONFIGURED -- .codex/hooks.json is not rendered for this folder, so Codex runs here"',
+     "    :", _T7S + "test_each_value_configures_exactly_its_agents[claude]", "t7-says-codex-unconfigured"),
+    ("setup.sh", 'if [ "$AGENT_SEL" = "codex" ] && { [ "$CODEX_STATE" != "configured" ]',
+     'if false && { [ "$CODEX_STATE" != "configured" ]',
+     _T7S + "test_codex_by_name_exits_1_when_codex_cannot_be_configured", "t7-codex-by-name-unconfigured-is-exit-1"),
+    # partial state: any placeholder left makes the file unconfigured
+    ("setup.sh", 'elif grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/$DOC"; then', "elif grep -q '{{GAME_ROOT}}' \"$GAME_DIR/$DOC\"; then",
+     _T7S + "test_a_half_filled_claude_md_is_completed_by_a_rerun", "t7-every-placeholder-completed"),
+    # the root paths file carries the interpreter
+    ("setup.sh", "    printf 'SKYGUARD_PYTHON=%s\\n' \"$(sq \"$PYTHON_PATH\")\"", "    :",
+     _T7S + "test_the_paths_file_is_written_at_the_root_and_no_3x_copy_is_created", "t7-paths-file-records-python"),
+    # the 3.x paths file under the union reader: retired only when it adds nothing and can be compared
+    ("setup.sh", '    if [ -n "$extra" ]; then', "    if false; then",
+     _T7S + "test_a_3x_paths_file_that_adds_a_folder_is_kept_and_its_folders_named", "t7-legacy-adding-a-folder-kept"),
+    ("setup.sh", '    if [ "$rc" != 0 ]; then', "    if false; then",
+     _T7S + "test_a_3x_paths_file_that_cannot_be_compared_is_kept", "t7-legacy-uncomparable-kept"),
+    ("setup.sh", '    if [ -z "$PY_FOUND" ] || [ "${MIG_RC:-0}" != 0 ]; then', '    if [ -z "$PY_FOUND" ]; then',
+     _T7S + "test_a_3x_paths_file_is_kept_while_the_migration_has_not_finished", "t7-legacy-kept-until-migrated"),
+    ("setup.sh", 'mv -n "$PATHS_ENV_3X" "$dest/skyrim-paths.env"', 'cp "$PATHS_ENV_3X" "$dest/skyrim-paths.env"',
+     _T7S + "test_a_3x_paths_file_that_adds_nothing_is_retired_by_a_move", "t7-legacy-retired-by-a-move"),
+    # the 3.x hook-in
+    ("setup.sh", "    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B \"$GAME_ROOT_WIN/tools/migrate-3x.py\" \\",
+     "    true \\", _T7S + "test_setup_runs_the_migration", "t7-migration-runs"),
+    ("setup.sh", '    if [ "$MIG_RC" != 0 ]; then', "    if false; then",
+     _T7S + "test_a_failed_migration_is_said_and_setup_carries_on", "t7-migration-failure-said"),
+    ("setup.sh", '[ -d "$v" ] && [ "${SKYRIM_PREFER_DETECTED:-}" != 1 ]', '[ "${SKYRIM_PREFER_DETECTED:-}" != 1 ]',
+     _T7S + "test_a_3x_path_is_not_applied_when_it_is_not_a_folder_or_detection_is_preferred[not-a-folder]",
+     "t7-carried-path-must-be-a-folder"),
+    ("setup.sh", '[ -d "$v" ] && [ "${SKYRIM_PREFER_DETECTED:-}" != 1 ]', '[ -d "$v" ]',
+     _T7S + "test_a_3x_path_is_not_applied_when_it_is_not_a_folder_or_detection_is_preferred[prefer-detected]",
+     "t7-prefer-detected-honoured"),
+    ("setup.sh", '    CONFIG_DIR=$(pick_3x CONFIG_DIR "$CONFIG_DIR")', "    :",
+     _T7S + "test_a_path_the_3x_install_used_is_kept_when_it_is_a_folder", "t7-carried-config-dir-applied"),
+    # runtime ranges
+    ("setup.sh", '            if [ "$NODE_MAJOR" -lt 24 ]; then', '            if [ "$NODE_MAJOR" -lt 22 ]; then',
+     _T7S + "test_an_old_node_gets_a_plain_message[v22.12.0-True]", "t7-node-below-24-is-old"),
+    ("setup.sh", "    if printf '%s\\n' \"$DOTNET_SDKS\" | grep -qE '^10\\.'; then",
+     "    if printf '%s\\n' \"$DOTNET_SDKS\" | grep -qE '^(1[0-9])\\.'; then",
+     _T7S + "test_the_dotnet_check_wants_exactly_major_10[sdk11-only]", "t7-dotnet-exactly-major-10"),
+    ("setup.sh", "        if ! printf '%s\\n' \"$DOTNET_SDKS\" | grep -qxF \"$DOTNET_SDK_PIN\"; then", "        if false; then",
+     _T7S + "test_the_dotnet_check_wants_exactly_major_10[sdk10-other-band]", "t7-dotnet-tested-band-noted"),
+    ("setup.sh", '            if [ "$JAVA_MAJOR" -lt 17 ]; then', '            if [ "$JAVA_MAJOR" -lt 11 ]; then',
+     _T7S + 'test_the_jdk_check[openjdk version "11.0.2" 2019-01-15-True-is too old for ReSaver CLI]',
+     "t7-jdk-below-17-is-old"),
+    ("setup.sh", "            elif ! which javac >/dev/null 2>&1; then", "            elif false; then",
+     _T7S + 'test_the_jdk_check[openjdk version "21.0.12" 2026-07-15-False-No javac]', "t7-jre-without-javac-said"),
+    ("setup.sh", "        3.10|3.11|3.12|3.13) echo", "        3.10|3.11|3.12|3.13|3.14) echo",
+     _T7S + "test_the_python_range_message[3.14.0-outside the tested range 3.10-3.13 (newer than tested)]",
+     "t7-python-tested-range"),
+    # the instruction budget
+    ('setup.sh', '    [ "$DOC_BYTES" -gt "$INSTRUCTION_BUDGET" ] || continue', "    continue",
+     _T7S + "test_an_installed_agents_md_past_the_budget_is_warned_about[True]", "t7-budget-warning"),
+    # the lock: off unless asked, and a lock that did not apply is not a success
+    ("setup.sh", 'WANT_LOCK=""', "WANT_LOCK=1", _T7S + "test_the_lock_is_not_applied_without_lock", "t7-lock-off-by-default"),
+    ("setup.sh", 'if [ -n "$WANT_LOCK" ] && [ "$LOCK_RC" != 0 ]; then', "if false; then",
+     _T7S + "test_lock_runs_the_lock_and_a_failure_is_exit_1", "t7-lock-failure-is-exit-1"),
+    # authorization-aware hints (a pin stripped from the REAL file turns the scan red)
+    ("setup.sh", '    echo "      winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade"',
+     '    echo "      winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0"',
+     "tests/test_install_hints.py::test_every_install_hint_is_in_an_authorized_form[setup.sh]", "t7-hint-no-upgrade"),
+    ("setup.sh", 'hint_jdk() {\n    echo "    Manual step, for you to run (an agent may not install this):"',
+     'hint_jdk() {\n    echo "    For you to run:"',
+     "tests/test_install_hints.py::test_every_install_hint_is_in_an_authorized_form[setup.sh]", "t7-hint-jdk-is-manual"),
+    ("README.md", "   Install Node.js **24.19.0**, the version this toolkit was tested with. For you to run, in Windows Terminal:",
+     "   Install Node.js **24.19.0**, the version this toolkit was tested with. In Windows Terminal:",
+     "tests/test_install_hints.py::test_every_install_hint_is_in_an_authorized_form[README.md]", "t7-hint-readme-label"),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _T7]

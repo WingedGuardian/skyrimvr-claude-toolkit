@@ -125,8 +125,11 @@ def test_each_value_configures_exactly_its_agents(game_dir, value):
         assert "CLAUDE.md: not configured by this run" in out
         assert not (game_dir / ".claude" / "settings.local.json").exists(), "a Claude-only file was created"
     if not codex:
-        assert "Codex:       NOT CONFIGURED" in out and "WITHOUT the toolkit's hooks" in out
-        assert "bash setup.sh --agent codex" in out and "AGENTS.md: not configured by this run" in out
+        assert "Codex:       NOT CONFIGURED" in out and "AGENTS.md: not configured by this run" in out
+        if WIN:
+            assert "WITHOUT the toolkit's hooks" in out and "bash setup.sh --agent codex" in out
+        else:
+            assert "Codex support is Windows-only" in out
         assert "Codex users: Codex runs these hooks only after you approve them" not in out
     else:
         assert "/hooks, and approve the 2 Skyrim toolkit hooks" in out
@@ -330,6 +333,14 @@ def test_a_3x_paths_file_that_adds_a_folder_is_kept_and_its_folders_named(game_d
     assert not _retired(game_dir)
     assert "still protects them (the two files are combined)" in r.stdout and "SKYRIM_CONFIG_DIR=D:/Old INIs" in r.stdout
     assert "wins" not in r.stdout, "the union reader means the root file does not 'win' for protected folders"
+
+
+def test_a_3x_paths_file_that_cannot_be_compared_is_kept(game_dir):
+    """A value the guard cannot read as data (an expansion) makes the comparison impossible: keep, never retire."""
+    legacy, before = _legacy(game_dir, "SKYRIM_CONFIG_DIR=$HOME/My INIs\n")
+    r = run_setup(game_dir)
+    assert legacy.read_bytes() == before and not _retired(game_dir), r.stdout[-1500:]
+    assert "could not be compared" in r.stdout
 
 
 def test_a_3x_paths_file_is_kept_while_the_migration_has_not_finished(game_dir):
@@ -546,13 +557,13 @@ def test_an_installed_agents_md_past_the_budget_is_warned_about(game_dir, over):
 # ------------------------------------------------------------------------------------ the lock (opt-in) --
 
 def test_the_lock_is_not_applied_without_lock(game_dir):
-    (game_dir / "Data").mkdir()
-    (game_dir / "Data" / "Skyrim.esm").write_bytes(b"TES4")
+    """No masters here on purpose: a regression that applied the lock unasked must fail this test, not lock
+    real files in a temp folder nobody unlocks (a lock attempt with no Data/ is refused, and said)."""
     r = run_setup(game_dir)
-    assert r.returncode == 0
+    assert r.returncode == 0, r.stdout[-1500:]
     assert "Layer 2 lock: OFF (the default)" in r.stdout
+    assert "Applying the Layer 2 lock" not in r.stdout
     assert not (game_dir / ".skyguard" / "lock.json").exists()
-    assert os.access(str(game_dir / "Data" / "Skyrim.esm"), os.W_OK)
 
 
 def test_lock_runs_the_lock_and_a_failure_is_exit_1(game_dir):
