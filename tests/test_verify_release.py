@@ -35,7 +35,7 @@ def payload(tmp_path_factory):
     for junk in (".github", ".claude/backups", ".superpowers", ".skyguard"):
         if (root / junk).exists():
             shutil.rmtree(root / junk)
-    for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "KNOWLEDGEBASE.local.md"):
+    for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", "KNOWLEDGEBASE.local.md"):
         if (root / junk).exists():
             (root / junk).unlink()
     (root / "BUILD-INFO").write_text("commit={}\nversion=dev-test\n".format(SHA), encoding="utf-8")

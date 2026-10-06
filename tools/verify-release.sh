@@ -352,7 +352,9 @@ except Exception:
   #    Python install the hooks were configured with, and the config folder setup found through the Windows
   #    shell-folder API (which reads the profile, not USERPROFILE -- the one thing env -i cannot hide).
   pybase=$("$PY" -c 'import sys; print(sys.base_prefix)')
-  cfg=$(sed -n "s/^SKYRIM_CONFIG_DIR=['\"]\{0,1\}\([^'\"]*\).*/\1/p" "$GAME/.claude/skyrim-paths.env" 2>/dev/null | head -1)
+  envf="$GAME/skyrim-paths.env"                       # 4.0: the toolkit root; 3.x: .claude/
+  [ -f "$envf" ] || envf="$GAME/.claude/skyrim-paths.env"
+  cfg=$(sed -n "s/^SKYRIM_CONFIG_DIR=['\"]\{0,1\}\([^'\"]*\).*/\1/p" "$envf" 2>/dev/null | head -1)
   allow=(--allow-prefix "$(winpath "$WORK")" --allow-prefix "$pybase")
   # The config folder is NOT taken on trust from setup's own output: the checker allow-lists it only if it is
   # <home>/.../Documents/My Games/Skyrim*, strictly below the REAL home (the parent's, not the scrubbed one).

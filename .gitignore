@@ -24,7 +24,9 @@ __pycache__/
 
 # Machine-local paths recorded by setup.sh for the safety hooks. Never tracked:
 # it names one user's directories, and shipping it would point another
-# install's guard at a folder that does not exist there.
+# install's guard at a folder that does not exist there. 4.0 writes it at the
+# toolkit root; the .claude/ spelling is the 3.x location, still read as a fallback.
+/skyrim-paths.env
 .claude/skyrim-paths.env
 
 # YOUR knowledgebase, not ours. Never tracked and never shipped: the update path is
