@@ -3479,8 +3479,8 @@ MUTATIONS += [
                  id="esp-verify-empty-inventory-fails"),
 
     pytest.param("tests/run_harness_tests.py",
-                 '"PATHEXT", "TOOLKIT_REQUIRE_HARNESS")',
-                 '"PATHEXT")',
+                 '"PATHEXT", "TOOLKIT_REQUIRE_HARNESS",',
+                 '"PATHEXT",',
                  "tests/test_harness_required.py::test_the_launcher_forwards_the_require_flag_to_pytest",
                  id="launcher-drops-require-harness-flag"),
 
@@ -4702,3 +4702,41 @@ _T10FR2 = [
      _RB + "test_gitattributes_are_parsed_not_substring_matched"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10FR2]
+
+# Plan 8 T6c: the CI ruff hard gate skips template slot fragments, by a naming rule, and nothing else.
+_RG = "tests/test_ruff_gate.py::"
+MUTATIONS += [pytest.param("ruff.toml", find, rep, test, id=i) for i, find, rep, test in [
+    ("t6c-ruff-force-exclude-dropped", "force-exclude = true", "force-exclude = false",
+     _RG + "test_the_shipped_slot_fragments_pass_the_gate_as_ci_passes_them"),
+    ("t6c-ruff-slot-fragments-not-excluded", 'extend-exclude = ["*.slots.py"]', "extend-exclude = []",
+     _RG + "test_the_shipped_slot_fragments_pass_the_gate_as_ci_passes_them"),
+    ("t6c-ruff-exclude-swallows-real-files", 'extend-exclude = ["*.slots.py"]', 'extend-exclude = ["*.py"]',
+     _RG + "test_the_gate_skips_a_slot_fragment_but_still_catches_a_real_undefined_name"),
+]]
+
+# Plan 8 T6c: the lock generator's completeness guard covers every pytest version, not only 8.0.0.
+MUTATIONS += [pytest.param("scripts/lock-python-dependencies.py", '    if "pytest" in packages:',
+                           '    if packages.get("pytest", {}).get("metadata", {}).get("version") == "8.0.0":',
+                           "tests/test_lock_generator.py::test_an_incomplete_pytest_closure_is_refused_for_any_pytest_version[tomli-9.0.3]",
+                           id="t6c-lock-guard-keyed-on-one-pytest-version")]
+
+# Plan 8 T6c: the lock never carries a pygments with the open ReDoS advisory (a stale pin would re-introduce it).
+MUTATIONS += [pytest.param("requirements.lock", "Pygments==2.21.0 \\", "Pygments==2.19.2 \\",
+                           "tests/test_dependency_locks.py::test_the_lock_never_pins_a_pygments_with_the_known_advisory",
+                           id="t6c-lock-pygments-with-advisory")]
+
+# Plan 8 T6c: package.json pins exact versions (a range lets a plain `npm install` float away from the lock).
+MUTATIONS += [pytest.param("package.json", '"zod": "3.25.76"', '"zod": "^3.25.76"',
+                           "tests/test_dependency_locks.py::test_package_json_pins_exact_versions_that_the_lock_resolves_to",
+                           id="t6c-package-json-range-not-exact")]
+
+# Plan 8 T6c: the FOMOD smoke wrapper reports a missing install as a failure when TOOLKIT_REQUIRE_NODE_DEPS=1, never as a pass.
+# (Its control, "must go red on fast-xml-parser 4.3.6", needs a package manager and lives in the ci.yml node job.)
+_NS = "tests/test_node_fomod_smoke.py::"
+MUTATIONS += [pytest.param("tests/test_node_fomod_smoke.py", "    if os.environ.get(\"TOOLKIT_REQUIRE_NODE_DEPS\") == \"1\":" + chr(10) + "        pytest.fail(",
+                           "    if False:" + chr(10) + "        pytest.fail(",
+                           _NS + "test_a_missing_install_fails_when_required_and_skips_otherwise",
+                           id="t6c-fomod-smoke-missing-install-must-fail-when-required")]
+MUTATIONS += [pytest.param("tests/run_harness_tests.py", '"TOOLKIT_REQUIRE_NODE_DEPS")', ")",
+                           "tests/test_harness_required.py::test_the_launcher_forwards_the_node_deps_flag_to_pytest",
+                           id="t6c-launcher-drops-require-node-deps-flag")]

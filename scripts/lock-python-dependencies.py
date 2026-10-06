@@ -18,9 +18,10 @@ def merge_reports(reports):
             if key in packages and packages[key]["metadata"]["version"] != metadata["version"]:
                 raise ValueError("conflicting target versions for " + key)
             packages[key] = item
-    # pytest 8's supported-target closure includes these conditional dependencies.
+    # pytest's supported-target closure includes these conditional dependencies (any pytest version: the guard
+    # was once keyed on 8.0.0 and would have stopped checking at the first bump).
     # A Linux/3.11 report alone omits them; never silently emit an incomplete common lock.
-    if packages.get("pytest", {}).get("metadata", {}).get("version") == "8.0.0":
+    if "pytest" in packages:
         missing = {"exceptiongroup", "tomli", "colorama"} - packages.keys()
         if missing:
             raise ValueError("missing supported-target dependencies: " + ", ".join(sorted(missing)))
@@ -29,7 +30,7 @@ def merge_reports(reports):
 
 def render(report, inputs):
     lines = ["# Generated from a pip dry-run report; all transitive versions and wheel hashes frozen.",
-             "# Python 3.10/3.11; refresh: docs/harness-integrations.md",
+             "# Python 3.10-3.13 (the tested range); refresh: docs/harness-integrations.md",
              "# input-sha256: " + hashlib.sha256(inputs.replace(b"\r\n", b"\n")).hexdigest(), ""]
     for item in sorted(report["install"], key=lambda x: x["metadata"]["name"].lower()):
         metadata = item["metadata"]

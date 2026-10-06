@@ -76,18 +76,16 @@ This does not change guard-engine configuration or generate new agent instructio
 `package-lock.json` freezes Node dependencies and integrity hashes. Provision with
 `npm ci --ignore-scripts --no-audit --no-fund`; never use global npm for this project.
 
-`requirements.lock` and `requirements-windows.lock` freeze direct/transitive versions and
-wheel hashes for Python 3.10/3.11. Provision in an isolated virtual environment or container:
+`requirements.lock` freezes direct/transitive versions and every non-yanked wheel hash, so it installs on
+Python 3.10 through 3.13 (Windows x64, Linux x64 and arm64). Provision in an isolated virtual environment or container:
 
 ```text
 python -m pip install --only-binary=:all: --require-hashes -r requirements.lock
-python -m pip install --only-binary=:all: --require-hashes -r requirements-windows.lock
 ```
 
-These locks freeze package resolution, not the complete base image, SDK or interpreter.
-The Windows lock adds pywin32; it does not replace the common lock. `cattrs` moves from
-withdrawn 23.2.0 to 23.2.1: upstream identifies a Python 3.11 import correction in
-[its changelog](https://catt.rs/en/latest/history.html). No host package is upgraded.
+This lock freezes package resolution, not the complete base image, SDK or interpreter. It holds only what the
+suite and CI run (pytest, PyYAML, ruff and their dependencies). There is no Windows-only lock: pywin32 was never
+imported by anything and was removed with the other unused pins (pydantic, cattrs, mypy, pytest-cov).
 
 An intentional dependency refresh, outside all tests, may use:
 
@@ -102,7 +100,7 @@ older-Python conditional dependencies), alongside Linux/Python 3.11 evidence. Mi
 dependencies or conflicting resolved versions stop generation; they are never silently omitted.
 The checked-in lock was generated from the Windows 3.10 superset and its Linux 3.11 wheels were
 verified by hash-required dry-run, not a real Linux installation.
-Repeat with the Windows input/output files on Windows. The generator rejects withdrawn
+The generator rejects withdrawn
 wheels and performs no installation. The reports and PyPI metadata define the frozen result;
 subsequent installs do not resolve fresh versions. Input checksums normalize line endings.
 

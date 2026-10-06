@@ -66,7 +66,10 @@ jobs:
 
       # ruff is already a declared dev dependency in requirements.txt. Only the
       # genuine-bug rules gate the build (undefined names, syntax); the full
-      # ruleset currently reports 18 style findings and runs advisory-only.
+      # ruleset runs advisory-only (its count depends on the pinned ruff: about
+      # 1400 findings at 0.16.9). ruff.toml makes both runs skip the template
+      # slot fragments (*.slots.py); tests/test_ruff_gate.py proves the gate still
+      # goes red on a real undefined name.
       - name: ruff
         run: |
           python -m pip install --only-binary=:all: --require-hashes -r requirements.lock
@@ -98,8 +101,26 @@ jobs:
           done < <(git ls-files '*.js')
           exit $fail
 
+      # TOOLKIT_REQUIRE_NODE_DEPS=1: the FOMOD smoke (tests/fomod-xmlbuilder.test.js) must run against the
+      # `npm ci` install above, never skip because node_modules is missing.
       - name: npm test
+        env:
+          TOOLKIT_REQUIRE_NODE_DEPS: "1"
         run: npm test
+
+      # The smoke's own control: it must go RED on fast-xml-parser 4.3.6, which lets comment/CDATA text inject
+      # elements. This needs a package manager, so it lives here and not in the contained launcher's pytest run.
+      - name: FOMOD smoke control (must fail on fast-xml-parser 4.3.6)
+        run: |
+          d="$(mktemp -d)"
+          cp tests/fomod-xmlbuilder.test.js "$d/"
+          cd "$d"
+          echo '{"name":"control","version":"1.0.0","private":true}' > package.json
+          npm install --ignore-scripts --no-audit --no-fund fast-xml-parser@4.3.6
+          if out="$(TOOLKIT_REQUIRE_NODE_DEPS=1 node --test fomod-xmlbuilder.test.js 2>&1)"; then
+            echo "$out"; echo "::error::the FOMOD smoke passed on injectable fast-xml-parser 4.3.6: it cannot fail"; exit 1
+          fi
+          echo "$out" | grep -q "created an element" || { echo "$out"; echo "::error::smoke failed, but not on the injection check"; exit 1; }
 
   toolkit:
     name: Claude Code config
@@ -371,6 +392,13 @@ jobs:
       # makes a run without the barriers an error rather than a quiet green.
       # The live-Docker controls never pull; give the Linux leg (which has a daemon) the exact
       # sentinel image, pinned by digest, so they run there instead of reporting COULD NOT CHECK.
+      # --- FOMOD smoke prerequisite (Plan 8 T6c) ---
+      # tests/test_node_fomod_smoke.py runs under the launcher, whose tripwire blocks package managers, so the
+      # locked node_modules must already be installed here, outside the launcher.
+      - name: Install Node dependencies for the FOMOD smoke
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      # --- end FOMOD smoke prerequisite ---
+
       - name: Live-Docker sentinel image (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -402,6 +430,7 @@ jobs:
         timeout-minutes: 200
         env:
           TOOLKIT_REQUIRE_HARNESS: "1"
+          TOOLKIT_REQUIRE_NODE_DEPS: "1"
         run: |
           set -o pipefail
           python -B tests/run_harness_tests.py tests/ -v --durations=10 -rfEs | tee behavioral.log
@@ -429,8 +458,10 @@ jobs:
       # discovery), and the `node` job runs on Linux only -- where `path.sep`
       # is '/' and a Windows-separator bug cannot surface. Windows is the
       # platform this toolkit targets, so they run on both legs here too.
-      # No `npm install` step: these tests use only the Node standard library.
+      # node_modules comes from the `npm ci` step above, so the FOMOD smoke runs here too and must not skip.
       - name: Node tests
+        env:
+          TOOLKIT_REQUIRE_NODE_DEPS: "1"
         run: npm test
 
   # The pinned .NET tools restore and start with the SDK the toolkit requires (10): setup-dotnet installs

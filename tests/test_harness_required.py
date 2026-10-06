@@ -60,3 +60,24 @@ def test_not_requiring_the_harness_collects_normally():
     # an unrelated collection failure.
     result = _child(None)
     assert result.returncode == 0, result.stdout[-800:] + result.stderr[-800:]
+
+
+def test_probe_the_launcher_forwarded_the_node_deps_flag():
+    """Child of the test below, like the probe above: runs only when targeted by name."""
+    import pytest
+    if not any("test_probe_the_launcher_forwarded_the_node_deps_flag" in a for a in sys.argv):
+        pytest.skip("probe: runs only when targeted by the launcher test")
+    assert os.environ.get("TOOLKIT_REQUIRE_NODE_DEPS") == "1"
+
+
+def test_the_launcher_forwards_the_node_deps_flag_to_pytest():
+    # Same hazard as the harness flag: the launcher scrubs its environment, so without the allow-list entry
+    # TOOLKIT_REQUIRE_NODE_DEPS=1 never reaches tests/test_node_fomod_smoke.py and a missing `npm ci` would skip it.
+    env = {k: v for k, v in os.environ.items() if not k.startswith(STRIP)}
+    env["TOOLKIT_REQUIRE_NODE_DEPS"] = "1"
+    result = subprocess.run(
+        [sys.executable, "-B", "tests/run_harness_tests.py",
+         "tests/test_harness_required.py::test_probe_the_launcher_forwarded_the_node_deps_flag", "-q"],
+        cwd=str(REPO), env=env, capture_output=True, text=True, timeout=300)
+    assert result.returncode == 0, result.stdout[-1500:] + result.stderr[-800:]
+    assert "1 passed" in result.stdout, result.stdout[-800:]

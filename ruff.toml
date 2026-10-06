@@ -1,0 +1,6 @@
+# Only the file selection lives here; the rules the CI hard gate runs are on its command line (ci.yml).
+# Template slot fragments (`*.slots.py`) are spliced into tools/adapting/adapter_template.py, which supplies
+# the names they use, so linted alone they report F821 on every one. `force-exclude` makes the exclusion
+# apply to the explicit file paths CI passes. tests/test_ruff_gate.py proves both clauses.
+force-exclude = true
+extend-exclude = ["*.slots.py"]
