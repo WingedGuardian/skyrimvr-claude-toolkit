@@ -812,3 +812,80 @@ def test_wrapper_scripts_exist_and_the_cmd_twin_runs(bed):
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=120)
     assert r.returncode == 0, (r.stdout, r.stderr)
     assert json.loads(r.stdout)["edition"] == "vr"
+
+
+# ---- Plan 6 final fix (lane A I2): lock and unlock never change ACL inheritance ------------------------------------
+# _set_dacl passed UNPROTECTED_DACL_SECURITY_INFORMATION on every write, so a file whose inheritance was turned off
+# gained every inheritable ACE of Data\ on `lock lock` and KEPT them after `lock unlock` (MEASURED by the reviewer). The
+# lock now keeps the file's current protection when it adds its entry, records the original in the manifest, and puts
+# exactly that back on unlock. Compared as the DACL's SDDL ("D:P..." = protected), before lock and after unlock.
+
+def _sddl(p):
+    import ctypes
+    from ctypes import wintypes as wt
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    vp = ctypes.c_void_p
+    adv.GetNamedSecurityInfoW.argtypes = [wt.LPCWSTR, ctypes.c_int, wt.DWORD, vp, vp, ctypes.POINTER(vp), vp,
+                                          ctypes.POINTER(vp)]
+    adv.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [vp, wt.DWORD, wt.DWORD,
+                                                                         ctypes.POINTER(wt.LPWSTR), vp]
+    k32.LocalFree.argtypes = [vp]
+    dacl, sd, out = vp(), vp(), wt.LPWSTR()
+    rc = adv.GetNamedSecurityInfoW(str(p), 1, 0x4, None, None, ctypes.byref(dacl), None, ctypes.byref(sd))
+    assert rc == 0, rc
+    try:
+        assert adv.ConvertSecurityDescriptorToStringSecurityDescriptorW(sd, 1, 0x4, ctypes.byref(out), None)
+        try:
+            return out.value
+        finally:
+            k32.LocalFree(ctypes.cast(out, vp))
+    finally:
+        k32.LocalFree(sd)
+
+
+def _no_inheritance(p):
+    r = subprocess.run([str(SYS32 / "icacls.exe"), str(p), "/inheritance:d"], capture_output=True, text=True)
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert _sddl(p).startswith("D:P"), _sddl(p)
+
+
+@needs_windows
+def test_lock_and_unlock_keep_a_protected_dacl_exactly(bed):
+    lock = _lock()
+    p = bed.path("Skyrim.esm")
+    _no_inheritance(p)
+    before = _sddl(p)
+    assert lock.lock_all(str(bed.root)).exit == 0
+    during = _sddl(p)
+    assert during.startswith("D:P") and ";ID;" not in during, during      # no inherited entry was pulled in
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION).exit == 0
+    assert _sddl(p) == before
+
+
+@needs_windows
+def test_lock_and_unlock_keep_an_inheriting_dacl_exactly(bed):
+    """The twin: a file that inherits (the default) keeps inheriting, and its DACL comes back identical."""
+    lock = _lock()
+    p = bed.path("Update.esm")
+    before = _sddl(p)
+    assert not before.startswith("D:P"), before
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert not _sddl(p).startswith("D:P")
+    assert lock.unlock(str(bed.root), ["Update.esm"], SESSION).exit == 0
+    assert _sddl(p) == before
+
+
+@needs_windows
+def test_unlock_restores_the_protection_the_manifest_recorded(bed):
+    """Recorded at lock time, restored on unlock: a protection flipped while the file was locked is put back."""
+    lock = _lock()
+    p = bed.path("Dawnguard.esm")
+    _no_inheritance(p)
+    assert lock.lock_all(str(bed.root)).exit == 0
+    man = json.loads((bed.root / ".skyguard" / "lock.json").read_text(encoding="utf-8"))
+    assert man["files"]["Dawnguard.esm"]["prior_protected"] is True
+    r = subprocess.run([str(SYS32 / "icacls.exe"), str(p), "/inheritance:e"], capture_output=True, text=True)
+    assert r.returncode == 0 and not _sddl(p).startswith("D:P"), (r.stdout, r.stderr)
+    assert lock.unlock(str(bed.root), ["Dawnguard.esm"], SESSION).exit == 0
+    assert _sddl(p).startswith("D:P"), _sddl(p)

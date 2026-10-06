@@ -251,6 +251,7 @@ class _Win:
         adv.GetNamedSecurityInfoW.argtypes = [wt.LPCWSTR, ct.c_int, wt.DWORD, vp, vp, ct.POINTER(vp), vp, ct.POINTER(vp)]
         adv.SetNamedSecurityInfoW.argtypes = [wt.LPWSTR, ct.c_int, wt.DWORD, vp, vp, vp, vp]
         adv.SetEntriesInAclW.argtypes = [wt.ULONG, ct.POINTER(EXPLICIT_ACCESS_W), vp, ct.POINTER(vp)]
+        adv.GetSecurityDescriptorControl.argtypes = [vp, ct.POINTER(ct.c_uint16), ct.POINTER(ct.c_uint32)]
         adv.GetAclInformation.argtypes = [vp, vp, wt.DWORD, ct.c_int]
         adv.GetAce.argtypes = [vp, wt.DWORD, ct.POINTER(vp)]
         adv.DeleteAce.argtypes = [vp, wt.DWORD]
@@ -345,8 +346,24 @@ class _Win:
             raise ct.WinError(rc)
         return dacl, sd
 
-    def _set_dacl(self, path, dacl):
-        rc = self.adv.SetNamedSecurityInfoW(path, 1, 0x4 | 0x20000000, None, None, dacl, None)
+    def protected(self, path) -> bool:
+        """SE_DACL_PROTECTED (0x1000): the file's inheritance is turned off."""
+        ct = self.ct
+        dacl, sd = self._get_dacl(path)
+        try:
+            control, rev = ct.c_uint16(), ct.c_uint32()
+            if not self.adv.GetSecurityDescriptorControl(sd, ct.byref(control), ct.byref(rev)):
+                raise ct.WinError(ct.get_last_error())
+            return bool(control.value & 0x1000)
+        finally:
+            self.k32.LocalFree(sd)
+
+    def _set_dacl(self, path, dacl, protected=None):
+        """Plan 6 final fix (lane A I2): write the DACL with the protection `protected` names, or -- None -- the one the
+        file has NOW. Always passing UNPROTECTED turned a protected DACL into an inheriting one for good."""
+        protected = self.protected(path) if protected is None else protected
+        rc = self.adv.SetNamedSecurityInfoW(path, 1, 0x4 | (0x80000000 if protected else 0x20000000), None, None,
+                                            dacl, None)
         if rc:
             raise self.ct.WinError(rc)
 
@@ -400,8 +417,9 @@ class _Win:
                 self.k32.LocalFree(new)
             self.k32.LocalFree(sd)
 
-    def remove_ours(self, path, masks):
-        """Delete this user's explicit deny ACEs whose mask is one of `masks`. Returns how many."""
+    def remove_ours(self, path, masks, protected=None):
+        """Delete this user's explicit deny ACEs whose mask is one of `masks`. Returns how many. `protected`: the DACL
+        protection to write back (the one recorded at lock time), None for the file's current one."""
         ct = self.ct
         dacl, sd = self._get_dacl(path)
         removed = 0
@@ -427,7 +445,7 @@ class _Win:
                     raise ct.WinError(ct.get_last_error())
                 removed += 1
             if removed:
-                self._set_dacl(path, dacl)
+                self._set_dacl(path, dacl, protected)
         finally:
             self.k32.LocalFree(sd)
         return removed
@@ -521,11 +539,12 @@ def _keep_bit(st: FileState, preexisting: bool) -> bool:
     return keep_bit
 
 
-def _remove_file(path, keep_bit):
-    """Deny ACE first (with WA denied `attrib -R` is itself refused), then the bit, unless it was the user's."""
+def _remove_file(path, keep_bit, protected=None):
+    """Deny ACE first (with WA denied `attrib -R` is itself refused), then the bit, unless it was the user's.
+    protected: the DACL protection recorded at lock time (the manifest's prior_protected), None = keep the current."""
     p = os.path.normpath(os.fspath(path))
     w = _win()
-    w.remove_ours(p, (MASK_FULL, MASK_PRE))
+    w.remove_ours(p, (MASK_FULL, MASK_PRE), protected)
     if not keep_bit:
         w.set_readonly(p, False)
 
@@ -649,8 +668,10 @@ def _guard(root):
 
 
 def _prior(st: FileState, path) -> dict:
-    return {"prior_attrs": _win().attrs(os.path.normpath(str(path))),
-            "prior_aces": [[a["type"], a["mask"], a["sid"]] for a in st.aces]}
+    p = os.path.normpath(str(path))
+    return {"prior_attrs": _win().attrs(p),
+            "prior_aces": [[a["type"], a["mask"], a["sid"]] for a in st.aces],
+            "prior_protected": _win().protected(p)}         # final fix (lane A I2): unlock writes exactly this back
 
 
 # ---- lock ------------------------------------------------------------------------------------------------------
@@ -701,7 +722,7 @@ def lock_all(root) -> Result:
             prev = old.get(name, {})
             pre = label == "pre" or bool(prev.get("preexisting_ro"))
             if before.ours is not None:              # already ours: keep the record of what it was BEFORE us
-                info = {k: prev[k] for k in ("prior_attrs", "prior_aces") if k in prev} or info
+                info = {k: prev[k] for k in ("prior_attrs", "prior_aces", "prior_protected") if k in prev} or info
             record[name] = dict(info, preexisting_ro=pre, locked_at=prev.get("locked_at", time.time()))
             # Written per file, atomically: a crash mid-lock leaves a list that matches what is locked.
             _write_manifest(root, t.edition, dict(carry, **record))  # per file
@@ -849,7 +870,8 @@ def unlock(root, names, session, now=None) -> Result:
                     settled.add(name)                   # not locked by us: nothing to undo
                 continue
             keep = _keep_bit(st, bool(manifest.get(name, {}).get("preexisting_ro")))
-            _remove_file(p, keep)
+            prot = manifest.get(name, {}).get("prior_protected")
+            _remove_file(p, keep, prot if isinstance(prot, bool) else None)
             if _verify_unlocked(p, keep):
                 done.append(name)
                 if keep:

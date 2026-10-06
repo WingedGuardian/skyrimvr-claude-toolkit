@@ -6527,4 +6527,18 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _FXI1 + "test_an_unparseable_command_that_writes_no_state_is_not_s_self_state[write-and-mention-in-another-line]",
      "fixA-i1-same-statement"),
 ]]
+_FXI2 = "tests/test_skyguard_lock.py::"
+_PROT = "0x4 | (0x80000000 if protected else 0x20000000)"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # A-I2: the DACL is written with the file's protection, never always-unprotected...
+    ("tools/skyguard/lock.py", _PROT, "0x4 | 0x20000000", _FXI2 + "test_lock_and_unlock_keep_a_protected_dacl_exactly",
+     "fixA-i2-keep-protected"),
+    # ...nor always-protected (the inheriting twin).
+    ("tools/skyguard/lock.py", _PROT, "0x4 | 0x80000000", _FXI2 + "test_lock_and_unlock_keep_an_inheriting_dacl_exactly",
+     "fixA-i2-keep-inheriting"),
+    # ...and unlock writes back the protection the manifest recorded at lock time.
+    ("tools/skyguard/lock.py", "            _remove_file(p, keep, prot if isinstance(prot, bool) else None)",
+     "            _remove_file(p, keep, None)", _FXI2 + "test_unlock_restores_the_protection_the_manifest_recorded",
+     "fixA-i2-restore-recorded"),
+]]
 
