@@ -15,10 +15,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends openjdk-17-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Node.js 20 LTS ---
+# --- Node.js 24 LTS ---
 # Installed directly from NodeSource rather than the devcontainer feature so the image is fully
 # self-contained and devshell-docker.sh has the same behavior without going through the CLI.
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
