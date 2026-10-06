@@ -11,9 +11,10 @@ silently; and only the first READ_CAP bytes of the file are read.
 """
 from __future__ import annotations
 
+import bisect
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 FILE = "KNOWLEDGEBASE.local.md"
 CAP = 4096                                    # bytes of section body (R5)
@@ -24,36 +25,69 @@ _ENDS = re.compile(r"^#{1,2}[ \t]+\S")
 _FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 
 
-def _closes(line: str, opener: str) -> bool:
-    """CommonMark: a closing fence is the opener's character, at least as long, and nothing after it."""
-    m = _FENCE.match(line)
-    return bool(m) and m.group(1)[0] == opener[0] and len(m.group(1)) >= len(opener) and \
-        not line[m.end():].strip()
+def _closers(lines: List[str], ms) -> Dict[str, Tuple[List[int], List[int], List[int]]]:
+    """Per fence character, the lines that can close a fence (CommonMark: a bare fence, nothing after it): their
+    indices, their fence lengths, and the suffix maximum of those lengths. A closer must be the opener's character and
+    at least as long, so the character is the key."""
+    found: Dict[str, Tuple[List[int], List[int]]] = {}
+    for i, m in enumerate(ms):
+        if m and not lines[i][m.end():].strip():
+            fence = m.group(1)
+            key = fence[0]
+            ix, ln = found.setdefault(key, ([], []))
+            ix.append(i)
+            ln.append(len(fence))
+    out = {}
+    for key, (ix, ln) in found.items():
+        suf = list(ln)
+        for k in range(len(suf) - 2, -1, -1):
+            suf[k] = max(suf[k], suf[k + 1])
+        out[key] = (ix, ln, suf)
+    return out
+
+
+def _next_closer(closers, i: int, opener: str) -> Optional[int]:
+    """The first line after i that closes `opener`, or None. Review I1: the old form rescanned the rest of the file
+    from every opener that never closes (a ```a line has an info string, so it is no closer): 120 KB took 138 s, past the
+    SessionStart timeout. Here a never-closing opener costs one bisect (the suffix maximum says no closer is long
+    enough), and the caller jumps past every closer it is handed, so each closer is stepped over at most once."""
+    ix, ln, suf = closers.get(opener[0], ((), (), ()))
+    q = bisect.bisect_right(ix, i)
+    if q == len(ix) or suf[q] < len(opener):
+        return None
+    while ln[q] < len(opener):
+        q += 1
+    return ix[q]
 
 
 def _fenced(lines: List[str]) -> List[bool]:
     """Per line: True inside a CLOSED code fence (its two fence lines included). An opener that is never closed is
-    plain text, so it cannot hide a heading after it or carry the section past the next one."""
+    plain text, so it cannot hide a heading after it or carry the section past the next one. Linear in the lines."""
     out = [False] * len(lines)
+    ms = [_FENCE.match(line) for line in lines]          # each line is matched once
+    closers = _closers(lines, ms)
     i = 0
     while i < len(lines):
-        m = _FENCE.match(lines[i])
+        m = ms[i]
         if m:
-            end = next((j for j in range(i + 1, len(lines)) if _closes(lines[j], m.group(1))), None)
+            end = _next_closer(closers, i, m.group(1))
             if end is not None:
-                for k in range(i, end + 1):
-                    out[k] = True
+                out[i:end + 1] = [True] * (end + 1 - i)
                 i = end + 1
                 continue
         i += 1
     return out
 
 
-def _section(text: str) -> Tuple[Optional[str], bool]:
+def _scan(text: str):
+    lines = text.splitlines()
+    return lines, _fenced(lines)
+
+
+def _section(text: str, scanned=None) -> Tuple[Optional[str], bool]:
     """(body, ended): the body under the first `## My preferences` heading outside a code fence, up to the next
     `#`/`##` heading outside a fence; ended is False when the text ran out first. (None, False) if no heading."""
-    lines = text.splitlines()
-    fenced = _fenced(lines)
+    lines, fenced = scanned or _scan(text)
     start = next((i + 1 for i, line in enumerate(lines) if not fenced[i] and _HEADING.match(line)), None)
     if start is None:
         return None, False
@@ -72,9 +106,8 @@ def section(text: str) -> Optional[str]:
     return _section(text)[0]
 
 
-def _near_miss(text: str) -> Optional[str]:
-    lines = text.splitlines()
-    fenced = _fenced(lines)
+def _near_miss(text: str, scanned=None) -> Optional[str]:
+    lines, fenced = scanned or _scan(text)
     return next((line.strip() for i, line in enumerate(lines) if not fenced[i] and _NEAR.match(line)), None)
 
 
@@ -95,12 +128,13 @@ def _render(project, audit) -> str:
         audit.log("session-kb-guard", "prefs FAILED", "could not read {}: {}".format(FILE, e.__class__.__name__))
         return "PREFERENCES: NOT INJECTED -- {} exists but could not be read; read its `## My preferences` yourself.".format(FILE)
     text = data.decode("utf-8-sig", "replace")
-    body, ended = _section(text)
+    scanned = _scan(text)                     # once: the section and the near-miss search share it
+    body, ended = _section(text, scanned)
     if body is None:
         if cut:
             return _not_injected(audit, "{} is larger than {} bytes and its first {} bytes have no `## My preferences` "
                                         "section; read it yourself.".format(FILE, READ_CAP, READ_CAP))
-        near = _near_miss(text)
+        near = _near_miss(text, scanned)
         if near:
             return _not_injected(audit, "{} has the heading `{}`, which is not `## My preferences`; rename it to "
                                         "that, or read the section yourself.".format(FILE, near))

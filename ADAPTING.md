@@ -5,7 +5,7 @@ is already wired for you (see `README.md`). Otherwise you can wire it into yours
 far you get: the toolkit gives you Layers 0 and 1 without any hook (Layer 2 is not yet released), and Layer 3
 only if you can *prove* a hook of yours blocks.
 
-`python` in this file means a Python 3.8 or newer interpreter. On Linux and macOS that is usually `python3`; on
+`python` in this file means a Python 3.10 or newer interpreter. On Linux and macOS that is usually `python3`; on
 Windows, `py -3` or `python`. Use whichever one starts on this machine.
 
 ## 0. The only status words you may use

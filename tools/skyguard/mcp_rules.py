@@ -304,10 +304,13 @@ def is_devbench_server(server: str) -> bool:
 
 
 def is_devbench(name: str) -> bool:
-    """True for an `mcp__<server>__<tool>` call whose server is a DevBench one (is_devbench_server). Plan 5 Task 17:
-    the Codex engine uses it to keep a judged DevBench call out of the unhooked-tools log."""
+    """True for an `mcp__<server>__<tool>` call whose name after `mcp__` contains devbench in any case or spelling
+    (is_devbench_server). Plan 5 Task 17: the Codex engine uses it to keep a judged DevBench call out of the
+    unhooked-tools log. Plan 8 T6 fix round 1 (review M4): Claude's matcher fires on any tool name containing devbench,
+    and a server name may itself hold `__` (`mcp__my__devbench__console`), so the whole remainder is read -- reading
+    only the first piece as the server let such a call through unjudged."""
     parts = name.split("__") if isinstance(name, str) else []
-    return len(parts) >= 3 and parts[0] == "mcp" and is_devbench_server(parts[1])
+    return len(parts) >= 3 and parts[0] == "mcp" and is_devbench_server("__".join(parts[1:]))
 
 
 def judged_server(name: str) -> bool:
@@ -323,7 +326,7 @@ def decide(name: str, args, audit, roots=None, env=None) -> Verdict:
                    level="REFUSE")
         return Verdict("deny", rules.message("S-INERT-NOINPUT"))
     parts = name.split("__")
-    if len(parts) < 3 or parts[0] != "mcp" or not is_devbench_server(parts[1]):
+    if not is_devbench(name):
         return Verdict()
     hit = judge(parts[-1], args, roots, None, env)
     if hit is None:

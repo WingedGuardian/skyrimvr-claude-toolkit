@@ -110,7 +110,9 @@ def _allowlist_clause():
     spec = importlib.util.spec_from_file_location("inventory_runtimes", REPO / "tools" / "inventory-runtimes.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    parts = ["{} for {}".format(" or ".join(ids), rt) for rt, ids in mod.ALLOWED_IDS.items()]
+    floor = " ({}.{} or newer)".format(*mod.PYTHON_FLOOR)
+    parts = ["{}{} for {}".format(" or ".join(ids), floor if rt == "python" else "", rt)
+             for rt, ids in mod.ALLOWED_IDS.items()]
     return "The only winget ids it can name are " + ", ".join(parts[:-1]) + ", and " + parts[-1] + ","
 
 
@@ -121,3 +123,16 @@ def test_the_authorization_form_lists_exactly_the_parsers_allowlist():
     assert p.count("The only winget ids it can name are ") == 1
     assert "each at the exact version I write, installed with --no-upgrade" in p
     assert "for those, and for anything else, you only give me manual steps" in p
+
+
+def test_the_python_floor_is_stated_the_same_everywhere():
+    """Review M2: the floor the parser enforces is the one the skill and ADAPTING.md state (3.10: the tested range)."""
+    spec = importlib.util.spec_from_file_location("inventory_runtimes", REPO / "tools" / "inventory-runtimes.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    floor = "{}.{}".format(*mod.PYTHON_FLOOR)
+    assert floor == "3.10"
+    skill = (REPO / "agent" / "skills" / "toolkit-setup" / "SKILL.md").read_text(encoding="utf-8")
+    assert "for `python` ({} or newer,".format(floor) in skill
+    assert "means a Python {} or newer interpreter".format(floor) in (REPO / "ADAPTING.md").read_text(encoding="utf-8")
+    assert "Python.Python.3.<minor> ({} or newer) for python".format(floor) in _prompt()

@@ -183,16 +183,18 @@ def test_several_targets_name_one_and_count_the_rest():
 # Plan 8 T6 (rt-fix-b concern 3, deferred row 54): an archive writer onto a file in the install got the redirect
 # note ("a > redirect empties it first"), which is false for it. It gets its own two-line note.
 ARCHIVE_NOTE = ("Note: this writes the archive {} in the Skyrim install.\n"
-                "If that file exists, tar and -Force replace it; zip, 7z and -Update add to it.")
+                "If that file exists, tar and -Force replace it; zip, 7z and -Update change what is inside it.")
 
 
 @pytest.mark.parametrize("command,shell,name", [
     ('Compress-Archive -Path C:/Temp/x -DestinationPath "<i>/Data/out.zip"', "powershell", "out.zip"),
     ('Compress-Archive C:/Temp/x "<i>/Data/SKSE/Plugins/a.zip" -Force', "powershell", "a.zip"),
     ('7z a "<i>/Data/out.7z" C:/Temp/x', "bash", "out.7z"),
+    ('7z d "<i>/Data/out.7z" old.txt', "bash", "out.7z"),
+    ('7z rn "<i>/Data/out.7z" a.txt b.txt', "bash", "out.7z"),
     ('zip "<i>/Data/out.zip" C:/Temp/x', "bash", "out.zip"),
     ('tar -cf "<i>/Data/out.tar" C:/Temp/x', "bash", "out.tar"),
-], ids=["compress-archive", "compress-archive-positional", "7z", "zip", "tar"])
+], ids=["compress-archive", "compress-archive-positional", "7z", "7z-delete", "7z-rename", "zip", "tar"])
 def test_an_archive_writer_in_the_install_gets_the_archive_note(command, shell, name):
     got, fired = decide(command.replace("<i>", INSTALL), shell=shell)
     assert (got, fired) == (("advise", ARCHIVE_NOTE.format(name)), {"S-WRITE-ARCHIVE"})

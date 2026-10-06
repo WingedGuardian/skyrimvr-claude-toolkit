@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from conftest import BASH, REPO, install_hooks
 
 sys.path.insert(0, str(REPO / "tools"))
@@ -141,6 +143,28 @@ def test_a_section_cut_by_the_read_cap_says_it_was_cut(tmp_path):
     filler = ("z" * 99 + "\n") * (prefs.READ_CAP // 100 - 1)
     out = _render(_kb(tmp_path, "# KB\n" + filler + "## My preferences\n- START\n" + "- more\n" * 100))
     assert "- START" in out and "truncated" in out
+
+
+# Review I1: `_fenced` rescanned the rest of the file from every opener that never closes (```a has an info string,
+# so it can never be a closer): 120 KB took 138 s, past the 120 s SessionStart timeout. Run in a child process with
+# a hard timeout, so the quadratic form fails in seconds instead of hanging the suite.
+# MEASURED 2026-10-06 (this machine, load ~20 % CPU, 3 runs each at the 1 MiB cap): 0.16-0.29 s for the four
+# shapes below; the quadratic form did not finish the first in 30 s. The bound keeps about 3x headroom.
+FAST_S = 1.0
+
+
+@pytest.mark.parametrize("unit", ["```a\n", "````\n```\n", "~~~~ x\n```\n", "```\n"],
+                         ids=["never-closing-openers", "short-closers-under-long-openers", "mixed-characters",
+                              "closing-pairs"])
+def test_a_worst_case_file_at_the_read_cap_renders_fast(tmp_path, unit):
+    _kb(tmp_path, unit * (prefs.READ_CAP // len(unit)))
+    code = ("import sys, time; sys.path.insert(0, {!r}); from skyguard import prefs, audit; "
+            "a = audit.Audit({!r}); t = time.perf_counter(); prefs._render({!r}, a); "
+            "print(time.perf_counter() - t)").format(str(REPO / "tools"), str(tmp_path), str(tmp_path))
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr[-2000:]
+    took = float(r.stdout.strip())
+    assert took < FAST_S, "{:.3f} s for a {} byte file".format(took, prefs.READ_CAP)
 
 
 def test_unreadable_file_says_so_and_never_raises(tmp_path):

@@ -75,6 +75,18 @@ def test_extract_wide_takes_powershell_mcp_and_cwd_and_dedupes_on_cwd(history):
     assert items[-1]["tool_input"] == {"action": "exec", "command": "help"}
 
 
+def test_extract_wide_takes_every_devbench_spelling(tmp_path):
+    """Plan 8 T6 fix round 1: the pricing extractor selects DevBench tools as protect-mcp's matcher and judge do --
+    any tool name containing devbench, in any case -- not by the old `mcp__devbench` prefix."""
+    h = tmp_path / "hist"
+    h.mkdir()
+    names = ["mcp__skyrim-devbench__console", "mcp__DevBench-vr__game", "mcp__my__devbench__console",
+             "mcp__other__console"]
+    (h / "s.jsonl").write_text("\n".join(_line(n, {"command": "help"}) for n in names) + "\n", encoding="utf-8")
+    items, _ = replay.extract(h, wide=True)
+    assert [i["tool_name"] for i in items] == names[:3]
+
+
 def test_extract_default_is_unchanged_for_replay(history):
     items, counts = replay.extract(history)
     assert {i["hook"] for i in items} == {"protect-bash.sh", "protect-files.sh"}

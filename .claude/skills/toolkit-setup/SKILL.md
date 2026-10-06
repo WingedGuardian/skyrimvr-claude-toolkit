@@ -18,7 +18,7 @@ words, that you may install a named runtime at an exact version, you do **not** 
    `Host-software installs:`. `NOT AUTHORIZED` (or no such sentence) means no installs at all. Otherwise it
    lists items of the form `python=<winget id>==<exact version>` (runtime `python`, `git` or `node`, then `=`, the id,
    `==` and the version, with no spaces; items are separated by commas). Only these winget ids are ever accepted:
-   `Python.Python.3.<minor>` for `python` (3.8 or newer, and the version must be that minor's), `Git.Git` for
+   `Python.Python.3.<minor>` for `python` (3.10 or newer, and the version must be that minor's), `Git.Git` for
    `git`, and `OpenJS.NodeJS` or `OpenJS.NodeJS.LTS` for `node`. Any other id authorizes nothing. Anything else, a
    JDK, .NET or Blender included, is never covered: give the user manual steps.
 2. **Inventory by launching.** If any Python is available, run `python tools/inventory-runtimes.py inventory`

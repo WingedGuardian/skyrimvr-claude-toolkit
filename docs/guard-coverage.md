@@ -86,5 +86,7 @@ Ranked by what an agent can do through the route, the uncovered routes to close 
 2. **X6 Codex without active hooks**: no rule runs. (X4 Codex MCP is partial since Task 17 / rt-fix-b: DevBench is
    judged, other servers are not.)
 3. **C10's matcher name gap** (narrowed in Plan 8 T6): the matcher now takes any server name containing devbench
-   in any case; only a name with devbench split by two or more separators is still unseen by Claude.
+   in any case; only a name with devbench split by two or more separators is still unseen by Claude. The judge
+   reads the whole name after `mcp__` (fix round 1), so a server name holding `__` (`mcp__my__devbench__console`)
+   is judged too, not allowed unjudged (row `p8t6-mcp-devbench-after-double-underscore`).
 4. **C9 worktree tools**, **C13** and **C17**: lower impact; record and watch.
