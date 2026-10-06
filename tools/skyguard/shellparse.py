@@ -1175,10 +1175,17 @@ def _io_program(cls: str, method: str) -> str:
             return "io.file.append"
         if m in ("delete", "move", "copy", "replace"):
             return "io.file." + m
+        if m in _IO_LINK_METHODS:
+            return "io.file.link"                       # T8 fix round 2: (link path, target) -- self_rules reads both
         return ""
     if m in ("delete", "move"):
         return "io.directory." + m
+    if m in _IO_LINK_METHODS:
+        return "io.directory.link"
     return ""
+
+
+_IO_LINK_METHODS = frozenset(("createsymboliclink", "createhardlink"))
 
 
 class _Pwsh(_Scanner):

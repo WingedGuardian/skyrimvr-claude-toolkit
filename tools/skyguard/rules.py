@@ -405,7 +405,9 @@ RULES = {
         "legacy": False,
         "prefixes": [],
         "template": (
-        'Note: this edits {file}, part of the safety guards themselves.'
+        # op: self_rules EDITS/CREATES/LINKS (T8 fix round 2, N4). "this command" keeps the text apart from
+        # W-SELF-GUARD's "Note: this changes {file}" -- a bare "this {op}" would match both (codes.matches).
+        'Note: this command {op} {file}, part of the safety guards themselves.'
     ),
     },
     'S-INERT-NOINPUT': {

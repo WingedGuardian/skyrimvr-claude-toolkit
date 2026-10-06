@@ -186,7 +186,7 @@ def test_the_ask_branch_works_if_a_later_pricing_flips_the_guard_rule_back(monke
     else:
         (decision, text), fired = write(GAME + "/.claude/hooks/protect-bash.sh")
     assert decision == "ask" and fired == {rid}
-    assert text == rules.message(rid, file="protect-bash.sh")
+    assert text == rules.message(rid, file="protect-bash.sh", op="edits")   # T8 r2: S-SELF-GUARD names its verb
 
 
 def test_every_hashed_guard_file_has_a_pinned_line_ending():
@@ -242,7 +242,7 @@ def test_apply_patch_elsewhere_is_untouched():
 
 def test_on_codex_a_guard_ask_is_a_deny_and_a_state_deny_stays_one():
     for rid in ("S-SELF-GUARD", "S-SELF-STATE"):
-        text = rules.message(rid, file="x")
+        text = rules.message(rid, file="x", op="edits")
         decision = rules.RULES[rid]["decision"]
         if decision == "advise":
             continue

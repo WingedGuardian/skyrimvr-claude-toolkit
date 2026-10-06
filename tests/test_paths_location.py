@@ -126,6 +126,39 @@ def test_an_undecodable_legacy_leftover_adds_nothing_once_the_root_file_exists(t
     assert paths.read_install(str(tmp_path), {}).values("SKYRIM_CONFIG_DIR") == ["C:/new/cfg"]
 
 
+@pytest.mark.parametrize("legacy", [b'SKYRIM_MO2_MODS="D:/MO2 $X/mods"\n', b"SKYRIM_MO2_MODS='mods'\n",
+                                    b'SKYRIM_GAME_ROOT="\xff\xfe\x80"\n'],
+                         ids=["malformed", "relative", "undecodable"])
+def test_a_broken_legacy_file_beside_a_root_file_raises_the_attention_notice(legacy, tmp_path):
+    """Fix round 2 (re-review N1): its unreadable folder is unguarded and nothing refuses -- so the notice says so."""
+    _root_file(tmp_path, "")
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "skyrim-paths.env").write_bytes(legacy)
+    assert paths.read_install(str(tmp_path), {}).legacy_broken
+    text, _, _ = session.run_status(str(tmp_path), "startup", "bash", Audit(str(tmp_path)))
+    assert paths.LEGACY_BROKEN in text and paths.DEPRECATION not in text
+
+
+def test_a_broken_legacy_file_beside_a_root_file_still_refuses_nothing(tmp_path):
+    root = tmp_path / "Game"
+    _root_file(root, "")
+    _legacy_file(root, 'SKYRIM_MO2_MODS="D:/MO2 $X/mods"\n')
+    assert _fire(root.as_posix(), {"tool_name": "Bash", "tool_input": {"command": "ls"}})[0] == "allow"
+
+
+def test_a_clean_legacy_file_is_not_broken(tmp_path):
+    _root_file(tmp_path, "")
+    _legacy_file(tmp_path, "SKYRIM_MO2_MODS='C:/mods'\n")
+    cfg = paths.read_install(str(tmp_path), {})
+    assert cfg.legacy and not cfg.legacy_broken
+    assert paths.legacy_notice(str(tmp_path)) == paths.DEPRECATION
+
+
+def test_the_attention_notice_names_the_old_file_and_the_fix():
+    assert ".claude/skyrim-paths.env" in paths.LEGACY_BROKEN and "NOT protected" in paths.LEGACY_BROKEN
+    assert "setup.sh" in paths.LEGACY_BROKEN
+
+
 def test_run_still_guards_a_legacy_mo2_folder_after_the_root_file_is_touched(tmp_path):
     """The review's I1 reproduction, through run.py: legacy-only MO2 root plus a 0-byte root file."""
     root, mods = tmp_path / "Game", tmp_path / "mods"

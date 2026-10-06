@@ -122,7 +122,7 @@ def test_unreadable_env_refusal_is_failed_and_coded(monkeypatch, tmp_path, capsy
     def boom(*a, **k):
         raise OSError("unreadable")
 
-    monkeypatch.setattr(paths, "read_env", boom)
+    monkeypatch.setattr(paths, "read_install", boom)       # T8: run.py reads through read_install
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "rm -rf X"}}).encode()
 
     class _In:
