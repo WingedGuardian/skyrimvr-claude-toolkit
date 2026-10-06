@@ -2,6 +2,12 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Dependencies (exact, hash-locked, refreshed with the reasons recorded)
+
+- **Removed the unused pins** from the container's Python requirements: pydantic (and pydantic-core), cattrs, mypy and pytest-cov
+  (with coverage, attrs, annotated-types, mypy-extensions), plus the Windows-only `requirements-windows.txt/.lock` (pywin32).
+  Nothing in the toolkit imported or ran any of them, so no behaviour changes; the hash lock goes from 20 packages to 10 and
+  installs on Python 3.10 through 3.13. Anything of yours that imported one of them from the container must add it back itself.
 ### Other agents: the adapter kit
 
 - **New `ADAPTING.md`, written to an agent the toolkit does not support yet.** Any agent that reads files already gets the instructions, the skills and the tools (Layers 0 and 1; Layer 2, a read-only lock below the agent, is not yet released). `ADAPTING.md` walks such an agent through wiring the rest into itself, and through saying honestly how far it got. The toolkit still lists only Claude Code and Codex as supported; an adapted agent is "locally adapted, self-verified", a statement about one install on one machine.

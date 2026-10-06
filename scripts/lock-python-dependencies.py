@@ -30,7 +30,7 @@ def merge_reports(reports):
 
 def render(report, inputs):
     lines = ["# Generated from a pip dry-run report; all transitive versions and wheel hashes frozen.",
-             "# Python 3.10/3.11; refresh: docs/harness-integrations.md",
+             "# Python 3.10-3.13 (the tested range); refresh: docs/harness-integrations.md",
              "# input-sha256: " + hashlib.sha256(inputs.replace(b"\r\n", b"\n")).hexdigest(), ""]
     for item in sorted(report["install"], key=lambda x: x["metadata"]["name"].lower()):
         metadata = item["metadata"]

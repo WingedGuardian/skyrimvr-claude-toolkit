@@ -9,8 +9,7 @@ import pytest
 from conftest import REPO
 
 
-@pytest.mark.parametrize("input_file,lock_file", [("requirements.txt", "requirements.lock"),
-                                                   ("requirements-windows.txt", "requirements-windows.lock")])
+@pytest.mark.parametrize("input_file,lock_file", [("requirements.txt", "requirements.lock")])
 def test_python_lock_tracks_input_and_hashes(input_file, lock_file):
     digest = hashlib.sha256((REPO / input_file).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
     text = (REPO / lock_file).read_text()
