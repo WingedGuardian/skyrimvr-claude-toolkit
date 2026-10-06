@@ -72,7 +72,7 @@ def guards_main(argv, out) -> int:
     try:
         if a.action == "status":
             st = state.read(str(__import__("pathlib").Path(root) / ".skyguard" / "state.json"))
-            live = [x for x in st.lifts if x["kind"] == "guards" and x["expires_at"] > now]
+            live = [x for x in st.lifts if x["kind"] == "guards" and not state.lift_expired(x, now)]   # as the engine
             if st.rejected:
                 print(_clip("Guards ON: the state file cannot be trusted (%s), so it is ignored." % st.reason), file=out)
             elif not live:

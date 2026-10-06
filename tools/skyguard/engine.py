@@ -313,6 +313,29 @@ def _state_reject_clear(project) -> None:
         pass
 
 
+def _relock_due(project, st, now, audit) -> None:
+    """Plan 6 final fix (A-I3 / C-I1 ruling): the first guarded call after a lock lift's expires_at relocks the files
+    it opened (lock.relock_expired) and logs it; session start stays the backstop. Costs a time compare per lift while
+    none is due; never changes or breaks the decision (a failure is logged, never raised)."""
+    if not any(x["kind"] == "lock" and _state.lift_expired(x, now) for x in st.lifts):
+        return
+    from . import lock
+    try:
+        res = lock.relock_expired(project, now)
+    except (Exception, lock.SandboxViolation) as e:  # noqa: BLE001 -- the call's decision must stand
+        audit.log("skyguard", "RELOCK", "FAILED: an expired lock lift could not be relocked ({})".format(
+            e.__class__.__name__))
+        return
+    if res is None:
+        return
+    names = res.data.get("relocked", [])
+    if names:
+        what = "relocked {} file(s): {}".format(len(names), ", ".join(names[:5]) + (" ..." if len(names) > 5 else ""))
+    else:
+        what = res.lines[0] if res.lines else "nothing relocked"
+    audit.log("skyguard", "RELOCK", "lock lift expired: " + what + ("" if res.exit == 0 else " (exit {})".format(res.exit)))
+
+
 def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
     """R8, shadow mode: the ONE place a refusal can be turned into an allow. Called on the finished verdict
     (after combine, after the side effects) by every agent's decision path.
@@ -339,8 +362,9 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
         _state_reject_clear(project)
         if not st.lifts:
             return v
-        start = _state.session_start(telemetry, session_id) if telemetry else None
         now = time.time() if now is None else now
+        _relock_due(project, st, now, audit)          # Plan 6 final fix: a lock lift's expiry relocks (A-I3 / C-I1)
+        start = _state.session_start(telemetry, session_id) if telemetry else None
         if not [x for x in _state.honoured(st, session_id, now, start) if x["kind"] == "guards"]:
             return v
         # From here a guards lift is honoured: EVERY call writes a SHADOW line (spec; closes Table M's silence row).

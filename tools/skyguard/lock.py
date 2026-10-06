@@ -676,7 +676,9 @@ def _prior(st: FileState, path) -> dict:
 
 # ---- lock ------------------------------------------------------------------------------------------------------
 
-def lock_all(root) -> Result:
+def lock_all(root, only=None) -> Result:
+    """Lock the derived target set. only: a predicate on a target's NAME -- lock just those (relock_expired); every
+    other record in the manifest is kept as it is."""
     g = _guard(root)
     if isinstance(g, Result):
         return g
@@ -699,9 +701,13 @@ def lock_all(root) -> Result:
                     carry[name] = rec
             except OSError:
                 pass
+        elif only is not None and not only(name):
+            carry[name] = rec                    # a target this call does not touch: its record stays
     try:
         for p in t.files:
             name = p.name
+            if only is not None and not only(name):
+                continue
             before = None
             try:
                 before = read_state(p)
@@ -730,7 +736,7 @@ def lock_all(root) -> Result:
     except Refused as e:
         return _res(2, str(e))
     record.update(carry)
-    skipped = [(n, r) for n, r in t.skips if r != "missing"]
+    skipped = [(n, r) for n, r in t.skips if r != "missing" and (only is None or only(n))]
     partial = failed + skipped
     if partial:
         names = ["%s (%s)" % (n, r) for n, r in partial]
@@ -892,8 +898,41 @@ def unlock(root, names, session, now=None) -> Result:
         return _res(1, "Unlocked %d files; %d not unlocked." % (len(done), len(failed)),
                     "Not unlocked: " + _names_list(["%s (%s)" % f for f in failed], 3),
                     data={"unlocked": done, "failed": failed})
-    return _res(0, "Unlocked %d files; the lift is recorded for this session and expires in %d min."
-                % (len(done), int(LIFT_SECONDS // 60)), extra, data={"unlocked": done})
+    return _res(0, "Unlocked %d files for %d min: the first guarded tool call after that relocks them (session start "
+                   "at the latest)." % (len(done), int(LIFT_SECONDS // 60)), extra, data={"unlocked": done})
+
+
+# ---- the expiry (Plan 6 final fix, A-I3 / C-I1 ruling) -----------------------------------------------------------
+
+def relock_expired(root, now=None):
+    """Relock what an EXPIRED lock lift opened, and clear that lift. -> None when no lock lift is due, else a Result
+    whose data["relocked"] names the files locked again. Called by engine.shadow on every guarded hook call (a time
+    compare when nothing is due); session start stays the backstop. A file a LIVE lock lift (any session) still
+    covers stays open; nothing is relocked while the lock is persistently disabled or was never applied."""
+    now = time.time() if now is None else now
+    sf = Path(root) / ".skyguard" / "state.json"
+    st = _state.read(str(sf))
+    if st.rejected or not any(x["kind"] == "lock" and _state.lift_expired(x, now) for x in st.lifts):
+        return None
+    due = [x for x in st.lifts if x["kind"] == "lock" and _state.lift_expired(x, now)]
+    live = [x for x in st.lifts if x["kind"] == "lock" and not _state.lift_expired(x, now)]
+    keep = [x for x in st.lifts if not (x["kind"] == "lock" and _state.lift_expired(x, now))]
+    persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
+    _assert_sandbox(sf)
+    _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})    # cleared first: one relock, not one per call
+    if st.lock_disabled or not supported() or not (Path(root) / ".skyguard" / "lock.json").is_file():
+        return _res(0, "An expired lock lift was cleared; nothing relocked (the lock is %s)."
+                    % ("disabled" if st.lock_disabled else "not applied"), data={"relocked": []})
+    if any(x.get("files") is None for x in live):
+        return _res(0, "An expired lock lift was cleared; a live lift still opens every file.", data={"relocked": []})
+    covered = {f.lower() for x in live for f in x["files"]}
+    want = None if any(x.get("files") is None for x in due) else {f.lower() for x in due for f in x["files"]}
+
+    def only(name):
+        return name.lower() not in covered and (want is None or name.lower() in want)
+
+    res = lock_all(root, only=only)
+    return Result(res.exit, res.lines, dict(res.data, relocked=[n for n in res.data.get("locked", []) if only(n)]))
 
 
 # ---- status ----------------------------------------------------------------------------------------------------

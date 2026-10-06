@@ -212,6 +212,12 @@ def honoured(state: State, session_id, now: float, session_start) -> list:
     return out
 
 
+def lift_expired(lift, now) -> bool:
+    """Plan 6 final fix (A-I3): past its expires_at or older than MAX_LIFT_SECONDS -- the bound honoured() applies. The
+    lock's mid-session relock (engine.shadow -> lock.relock_expired) and `guards status` use this one test."""
+    return not now < min(lift["expires_at"], lift["created"] + MAX_LIFT_SECONDS)
+
+
 def session_start(dirpath, session_id):
     """Epoch seconds of the LATEST `start` time among the `start` lines Plan 4's `health.session_record` wrote for this
     session (the MAX, not the last line: an appended early-dated forged line cannot move it back), or None. One is
@@ -229,6 +235,11 @@ def session_start(dirpath, session_id):
     for line in text.splitlines():
         f = line.split(None, 3)
         if len(f) < 3 or f[1] != "start":
+            continue
+        # Plan 6 final fix (A-M1, R9: compact changes nothing): a compaction is not a new start. Counted, it ended a
+        # `guards off` that `guards status` still reported as on. A lift from before a startup/resume/clear start is still
+        # not honoured, and a session with no start line but compact ones honours nothing (None).
+        if f[2] == "compact":
             continue
         try:
             t = float(f[0])

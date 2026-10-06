@@ -689,3 +689,51 @@ def test_guards_on_over_an_unverifiable_state_says_so_in_two_lines(tmp_path):
     assert not st.rejected and st.lifts == []
     code, text, _ = _cli(tmp_path, "on")                           # a clean state: the ordinary one-liner
     assert "verif" not in text.lower()
+
+
+# ---- Plan 6 final fix pass (A-I3 / C-I1 ruling, A-M1) -----------------------------------------------------------
+
+def _off_and_hook(tmp_path):
+    code, text, sf = _cli(tmp_path, "off")
+    assert code == 0, text
+    root = tmp_path / "root"
+    lift = state.read(str(sf)).lifts[0]
+    hb = _hb(root)
+
+    def hook(now):
+        return engine.shadow(_deny(), str(root), SID, str(hb), Audit(str(root)), now=now)
+    return lift, hook
+
+
+def test_a_guards_off_lift_ends_shadow_mode_at_its_expiry(tmp_path):
+    """Fake clock on the CLI's own lift: a second before expires_at the deny is shadowed, a second after it stands."""
+    lift, hook = _off_and_hook(tmp_path)
+    assert hook(lift["expires_at"] - 1).decision == "allow"
+    assert hook(lift["expires_at"] + 1).decision == "deny"
+
+
+def _status(tmp_path):
+    code, text, _ = _cli(tmp_path, "status", start=False)
+    assert code == 0, text
+    return text
+
+
+def test_a_compact_does_not_end_guards_off_and_status_agrees(tmp_path):
+    """A-M1 (R9: compact changes nothing): run.py writes a `start compact` line for a compaction, which used to end the
+    lift in the engine while `guards status` still said OFF. Now neither changes: the engine ignores compact lines."""
+    lift, hook = _off_and_hook(tmp_path)
+    f = _hb(tmp_path / "root") / "sessions" / (SID + ".log")
+    with open(str(f), "a", encoding="utf-8") as fh:
+        fh.write("{:.6f} start compact t.jsonl\n".format(lift["created"] + 5))
+    assert hook(lift["created"] + 10).decision == "allow"
+    assert "Guards OFF" in _status(tmp_path)
+
+
+def test_a_resume_after_the_lift_still_ends_it(tmp_path):
+    """The twin: a `resume` start line after the lift is a new start, so the lift is not honoured (and session start
+    clears it, so status then agrees)."""
+    lift, hook = _off_and_hook(tmp_path)
+    f = _hb(tmp_path / "root") / "sessions" / (SID + ".log")
+    with open(str(f), "a", encoding="utf-8") as fh:
+        fh.write("{:.6f} start resume t.jsonl\n".format(lift["created"] + 5))
+    assert hook(lift["created"] + 10).decision == "deny"

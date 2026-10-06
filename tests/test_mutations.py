@@ -6541,4 +6541,28 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "            _remove_file(p, keep, None)", _FXI2 + "test_unlock_restores_the_protection_the_manifest_recorded",
      "fixA-i2-restore-recorded"),
 ]]
+_FXI3 = "tests/test_skyguard_lock.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # A-I3 / C-I1 ruling: the guarded hook path relocks an expired lock lift...
+    ("tools/skyguard/engine.py", "        _relock_due(project, st, now, audit)", "        pass",
+     _FXI3 + "test_the_first_hook_call_after_a_lock_lift_expires_relocks_the_file_and_logs_it", "fixA-i3-wired"),
+    # ...only once it IS expired (the one expiry test both the gate and the relock read)...
+    ("tools/skyguard/state.py", '    return not now < min(lift["expires_at"], lift["created"] + MAX_LIFT_SECONDS)',
+     "    return True", _FXI3 + "test_a_hook_call_before_the_expiry_relocks_nothing", "fixA-i3-only-when-due"),
+    # ...never a file a live lift still covers...
+    ("tools/skyguard/lock.py", "        return name.lower() not in covered and (want is None or name.lower() in want)",
+     "        return want is None or name.lower() in want",
+     _FXI3 + "test_an_expired_lift_does_not_relock_a_file_a_live_lift_still_covers", "fixA-i3-live-lift-covers"),
+    # ...only the files the expired lift named...
+    ("tools/skyguard/lock.py",
+     '    want = None if any(x.get("files") is None for x in due) else {f.lower() for x in due for f in x["files"]}',
+     "    want = None", _FXI3 + "test_an_expired_lift_relocks_only_the_files_it_named", "fixA-i3-only-its-files"),
+    # ...and never over a persistent disable (said so in the log, not as a failed relock).
+    ("tools/skyguard/lock.py", "    if st.lock_disabled or not supported() or not (Path(root)",
+     "    if not supported() or not (Path(root)",
+     _FXI3 + "test_an_expired_unlock_all_relocks_every_target_and_nothing_while_disabled", "fixA-i3-not-while-disabled"),
+    # A-M1: a compaction is not a new session start (guards status and the engine agree).
+    ("tools/skyguard/state.py", '        if f[2] == "compact":\n            continue', "        pass",
+     "tests/test_skyguard_shadow.py::test_a_compact_does_not_end_guards_off_and_status_agrees", "fixA-m1-compact"),
+]]
 

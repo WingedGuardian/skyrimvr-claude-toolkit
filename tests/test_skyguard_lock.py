@@ -889,3 +889,96 @@ def test_unlock_restores_the_protection_the_manifest_recorded(bed):
     assert r.returncode == 0 and not _sddl(p).startswith("D:P"), (r.stdout, r.stderr)
     assert lock.unlock(str(bed.root), ["Dawnguard.esm"], SESSION).exit == 0
     assert _sddl(p).startswith("D:P"), _sddl(p)
+
+
+# ---- Plan 6 final fix (A-I3 / C-I1, ruling): a lock lift's expiry is real ------------------------------------------
+# The first guarded hook call after a lock lift's expires_at relocks the files it lifted (engine.shadow, which every
+# decision path already runs and which already reads the state); session start stays the backstop. Fake clock: the lift
+# is written at T and the hook is called at T +/- a second around T + LIFT_SECONDS.
+
+T0 = 1_900_000_000.0
+
+
+def _hook(bed, now):
+    from skyguard import audit, engine
+    from skyguard.verdict import Verdict
+    return engine.shadow(Verdict(), str(bed.root), "sess-other", "", audit.Audit(str(bed.root)), now=now)
+
+
+def _audit_log(bed):
+    p = bed.root / ".claude" / "backups" / "AUDIT_LOG.txt"
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+def _lifts(bed):
+    from skyguard import state
+    return state.read(str(_state_file(bed))).lifts
+
+
+@needs_windows
+def test_the_first_hook_call_after_a_lock_lift_expires_relocks_the_file_and_logs_it(bed):
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    assert not _locked(bed, "Skyrim.esm")
+    v = _hook(bed, T0 + lock.LIFT_SECONDS + 1)
+    assert v.decision == "allow"                                   # the decision is untouched
+    assert _locked(bed, "Skyrim.esm")
+    assert not [x for x in _lifts(bed) if x["kind"] == "lock"]     # cleared, so the next call does nothing
+    assert "RELOCK" in _audit_log(bed) and "Skyrim.esm" in _audit_log(bed)
+
+
+@needs_windows
+def test_a_hook_call_before_the_expiry_relocks_nothing(bed):
+    """The twin: the same call a second BEFORE the expiry leaves the lifted file open and the lift recorded."""
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    _hook(bed, T0 + lock.LIFT_SECONDS - 1)
+    assert not _locked(bed, "Skyrim.esm")
+    assert [x for x in _lifts(bed) if x["kind"] == "lock"]
+    assert "RELOCK" not in _audit_log(bed)
+
+
+@needs_windows
+def test_an_expired_lift_does_not_relock_a_file_a_live_lift_still_covers(bed):
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm", "Update.esm"], "sess-lock-2", now=T0 + 1800).exit == 0
+    _hook(bed, T0 + lock.LIFT_SECONDS + 1)                          # the first lift is due, the second is not
+    assert not _locked(bed, "Skyrim.esm") and not _locked(bed, "Update.esm")
+    assert [x["session_id"] for x in _lifts(bed)] == ["sess-lock-2"]
+    _hook(bed, T0 + 1800 + lock.LIFT_SECONDS + 1)                   # now the second is due too
+    assert _locked(bed, "Skyrim.esm") and _locked(bed, "Update.esm")
+
+
+@needs_windows
+def test_an_expired_unlock_all_relocks_every_target_and_nothing_while_disabled(bed):
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), None, SESSION, now=T0).exit == 0
+    _hook(bed, T0 + lock.LIFT_SECONDS + 1)
+    assert all(_locked(bed, n) for n in VR_FILES)
+    # the persistent disable is the user's: an expired lift never relocks over it
+    assert lock.unlock(str(bed.root), None, SESSION, now=T0 + 10).exit == 0
+    assert lock.disable(str(bed.root), SESSION).exit == 0
+    _hook(bed, T0 + 10 + lock.LIFT_SECONDS + 1)
+    assert not any(_locked(bed, n) for n in VR_FILES)
+    assert "nothing relocked (the lock is disabled)" in _audit_log(bed)
+
+
+@needs_windows
+def test_an_expired_lift_relocks_only_the_files_it_named(bed):
+    """A file opened with no lift on record (its record cleared, or opened outside skyguard) is session start's to
+    report and relock; the expiry relocks what ITS lift opened."""
+    from skyguard import state
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    assert lock.unlock(str(bed.root), ["Update.esm"], "sess-lock-2", now=T0).exit == 0
+    st = state.read(str(_state_file(bed)))
+    state.write(str(_state_file(bed)), {"v": 1, "persistent": {},
+                                        "lifts": [x for x in st.lifts if x["session_id"] == SESSION]})
+    _hook(bed, T0 + lock.LIFT_SECONDS + 1)
+    assert _locked(bed, "Skyrim.esm") and not _locked(bed, "Update.esm")
