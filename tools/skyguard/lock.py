@@ -686,7 +686,7 @@ def lock_all(root, only=None) -> Result:
     st0 = _state.read(str(Path(root) / ".skyguard" / "state.json"))
     if st0.lock_disabled:
         return _res(2, "The lock is disabled (persistent, since %s)." % time.strftime(
-            "%Y-%m-%d %H:%M", time.localtime(st0.lock_disabled["since"])), "Run `lock enable` to turn it back on.")
+            "%Y-%m-%d %H:%M", time.localtime(st0.lock_disabled["since"])), "Run `bash tools/skyguard.sh lock enable` to turn it back on.")
     if not t.files:
         return _res(2, "No vanilla master or archive found in Data/ to lock.")
     old, _status = _read_manifest(root)
@@ -744,7 +744,7 @@ def lock_all(root, only=None) -> Result:
                                                                           len(partial)),
                     "Not locked: " + _names_list(names, 3), data={"locked": sorted(record), "not_locked": partial})
     return _res(0, "Locked %d vanilla files (M-D, verified by re-read)." % len(record),
-                "Unlock one with `lock unlock <file>`; the Python-free route is tools/skyguard-unlock.cmd.",
+                "Unlock one with `bash tools/skyguard.sh lock unlock <file>`; the Python-free route is tools\\skyguard-unlock.cmd.",
                 data={"locked": sorted(record)})
 
 
@@ -833,7 +833,7 @@ def unlock(root, names, session, now=None) -> Result:
     data_dir, t = g
     if not _valid_session(session):
         return _res(2, "No session id: pass --session <id> or set SKYGUARD_SESSION_ID so the lift is recorded "
-                       "(at a terminal it is automatic).", "Without one, run tools/skyguard-unlock.cmd.")
+                       "(at a terminal it is automatic).", "Without one, run tools\\skyguard-unlock.cmd in your own terminal.")
     manifest, mstatus = _read_manifest(root)
     try:
         chosen = _resolve_names(root, data_dir, t, names, manifest) if names else None
@@ -1028,7 +1028,7 @@ def disable(root, session=None) -> Result:
         return _res(2, str(e))
     except (ValueError, OSError) as e:
         return _res(2, "Could not record the disable (%s)." % e.__class__.__name__)
-    return _res(0, "The lock is persistently disabled; every session start will say so until `lock enable`.")
+    return _res(0, "The lock is persistently disabled; every session start will say so until `bash tools/skyguard.sh lock enable`.")
 
 
 def enable(root, session=None) -> Result:

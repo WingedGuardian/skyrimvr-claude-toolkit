@@ -8,7 +8,7 @@ Two protected classes, both decided on where a path RESOLVES (targets), never on
 
   STATE  `.skyguard/**` in the install: the on/off state (state.json) and the lock manifest. Only tools/skyguard writes
          it, so any other write is refused (S-SELF-STATE / W-SELF-STATE). The CLI's own run is never a write primitive
-         here, so `tools/skyguard guards off` is S-LIFT-NOTE, not this.
+         here, so `bash tools/skyguard.sh guards off` is S-LIFT-NOTE, not this.
   GUARD  the guard code and config: `.claude/hooks/**`, `.claude/settings*.json`, `.claude/skyrim-paths.env` (red team
          F5: the declared roots), `.codex/**`, `tools/skyguard/**`, `agent/guards/**`, the telemetry the canary and
          shadow mode read (`.claude/backups/.hook-heartbeat/**`, `.claude/backups/AUDIT_LOG.txt`; Task 9 review (e)),

@@ -22,7 +22,7 @@ unproven line, as in health.report.
 It WRITES NOTHING, with one exception (R9): a lift past its expiry (or the 8-hour cap) is removed from
 .skyguard/state.json through state.write, a line is appended to .claude/backups/AUDIT_LOG.txt, and the report says so.
 A state file that does not verify is never rewritten. Nothing is relocked here: the next session start, or
-`tools/skyguard lock lock`, does that. (health.report is not reused whole for the same reason: it probes the telemetry
+`bash tools/skyguard.sh lock lock`, does that. (health.report is not reused whole for the same reason: it probes the telemetry
 folder by writing a file into it.)
 """
 from __future__ import annotations
@@ -242,7 +242,7 @@ def _layer2(root, st, now, cleared):
     if st.rejected:
         rows.append(Row(S, "persistent disable", UNKNOWN, "the state file was rejected, so a disable cannot be read"))
     elif st.lock_disabled:
-        rows.append(Row(S, "persistent disable", NOT_LIVE, "disabled since %s by session %s; `tools/skyguard lock "
+        rows.append(Row(S, "persistent disable", NOT_LIVE, "disabled since %s by session %s; `bash tools/skyguard.sh lock "
                         "enable` turns it back on" % (_when(st.lock_disabled["since"]),
                                                       session._clean(st.lock_disabled["by_session"], 60))))
     else:
@@ -261,7 +261,7 @@ def _layer2(root, st, now, cleared):
     absent = "; %d edition name(s) absent from Data/, nothing to lock there" % len(
         [n for n in missing if n not in manifest]) if missing else ""
     if not engaged:
-        rows.insert(0, Row(S, "lock", NOT_LIVE, "never applied here (off by default, R3); `tools/skyguard lock lock` "
+        rows.insert(0, Row(S, "lock", NOT_LIVE, "never applied here (off by default, R3); `bash tools/skyguard.sh lock lock` "
                            "applies it. " + head + absent))
         return rows + _gaps()
     per = []
@@ -289,9 +289,9 @@ def _layer2(root, st, now, cleared):
             why = "read-only, but without the toolkit's mark"
         elif p.name.lower() in cleared_names or "*" in cleared_names:
             why = ("its lift expired and this run cleared it; nothing relocks until the next session start or "
-                   "`tools/skyguard lock lock`")
+                   "`bash tools/skyguard.sh lock lock`")
         else:
-            why = "no lift on record explains it; `tools/skyguard lock lock` relocks"
+            why = "no lift on record explains it; `bash tools/skyguard.sh lock lock` relocks"
         per.append(Row(S, p.name, NOT_LIVE, why, label="unlocked (outside skyguard)"))
     for name, reason in t.skips:
         if reason == "missing":

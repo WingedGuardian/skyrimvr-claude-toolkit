@@ -349,7 +349,7 @@ RULES = {
         "prefixes": [],
         "template": (
         'Blocked: this unlocks {file} outside skyguard, so the lift is not logged and never expires.\n'
-        'Use: tools/skyguard lock unlock {file}'
+        'Use: bash tools/skyguard.sh lock unlock {file}'
     ),
     },
     'S-LIFT-UNLOCKCMD': {
@@ -359,7 +359,7 @@ RULES = {
         "prefixes": [],
         "template": (
         'Blocked: skyguard-unlock.cmd lifts the whole lock with no log and no expiry; it is for the user to run.\n'
-        'Use: tools/skyguard lock unlock <file>, or ask the user to run the .cmd themselves.'
+        'Use: bash tools/skyguard.sh lock unlock <file>, or ask the user to run the .cmd themselves.'
     ),
     },
     'S-LIFT-PERMANENT': {
@@ -369,7 +369,7 @@ RULES = {
         "prefixes": [],
         "template": (
         'This turns the vanilla-file lock off for every future session, not only this one.\n'
-        'Yes disables it until tools/skyguard lock enable.'
+        'Yes disables it until bash tools/skyguard.sh lock enable.'
     ),
     },
     # Plan 6 Task 15 fix round 1 (I3): `skyguard snapshot restore --in-place` (lift_rules.restore_in_place).
@@ -392,7 +392,7 @@ RULES = {
         "prefixes": [],
         "template": (
         "Blocked: {file} holds the guards' on/off state and is written only by tools/skyguard.\n"
-        'Use tools/skyguard guards off, or lock unlock.'
+        'Use bash tools/skyguard.sh guards off, or lock unlock.'
     ),
     },
     # PRICED (pricing doc, Task 12 Ruling): advise. 24 newly asked over 70,342 items, and 24 of 24 were maintenance the
@@ -445,7 +445,7 @@ RULES = {
         "prefixes": [],
         "template": (
         "Blocked: {file} holds the guards' on/off state and is written only by tools/skyguard.\n"
-        'Use tools/skyguard guards off, or lock unlock, not an edit.'
+        'Use bash tools/skyguard.sh guards off, or lock unlock, not an edit.'
     ),
     },
     'W-SELF-GUARD': {

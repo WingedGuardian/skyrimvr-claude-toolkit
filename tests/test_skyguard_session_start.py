@@ -202,7 +202,8 @@ def test_a_terminal_disable_is_honoured_and_shown_every_session(proj):
     lock.disable(str(proj), lock.USER_SESSION)
     lock.unlock(str(proj), None, lock.USER_SESSION)
     since = time.strftime("%Y-%m-%d", time.localtime(state.read(str(_sf(proj))).lock_disabled["since"]))
-    want = "Vanilla-file lock DISABLED since %s. tools/skyguard lock enable turns it back on." % since
+    want = ("Vanilla-file lock DISABLED since %s. `bash tools/skyguard.sh lock enable` "
+            "(tools\\skyguard.cmd in cmd) turns it back on." % since)
     for source in ("startup", "resume", "clear", "compact"):
         out = _start(proj, source)
         assert want in out, source

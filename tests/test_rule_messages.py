@@ -166,7 +166,7 @@ SPACED_BASENAMES = ("the elder scrolls v skyrim vr", "gog games", "my games", "s
 
 
 # Task 12: a run of a rule's OWN fixed wording is not an echo, even when the command happens to contain the same words
-# (`... && python tools/skyguard lock unlock Skyrim.esm` beside S-LIFT-RAW's "Use: tools/skyguard lock unlock {file}").
+# (`... && python tools/skyguard lock unlock Skyrim.esm` beside S-LIFT-RAW's "Use: bash tools/skyguard.sh lock unlock {file}").
 # Only the literal parts of the templates, split at every {field}: a field's value can still be an echo.
 TEMPLATE_LITERALS = tuple(part.lower() for r in rules.RULES.values() for part in re.split(r"\{[a-z]+\}", r["template"])
                           if len(part) >= MIN_RUN)
