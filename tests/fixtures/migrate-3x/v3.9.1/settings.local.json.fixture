@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(rm:*)",
+      "Bash(cp:*)",
+      "Bash(mkdir:*)",
+      "Bash(head:*)",
+      "Bash(bash:*)",
+      "Bash(export:*)",
+      "Bash(git:*)",
+      "Bash(node:*)",
+      "Bash(npm install:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(dotnet:*)",
+      "Bash(curl:*)",
+      "Bash(powershell:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(reg query:*)",
+      "Bash(gh auth:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.nexusmods.com)",
+      "WebFetch(domain:forums.nexusmods.com)",
+      "WebFetch(domain:en.uesp.net)",
+      "WebFetch(domain:ck.uesp.net)",
+      "WebFetch(domain:wiki.beyondskyrim.org)",
+      "WebFetch(domain:www.gamesas.com)",
+      "WebFetch(domain:tes5edit.github.io)",
+      "WebFetch(domain:mutagen-modding.github.io)"
+    ]
+  }
+}

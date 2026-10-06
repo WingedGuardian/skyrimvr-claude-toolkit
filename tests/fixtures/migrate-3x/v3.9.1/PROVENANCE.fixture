@@ -1,0 +1,16 @@
+A real v3.9.1 install, rendered by v3.9.1's OWN setup.sh -- not by a re-implementation of it.
+
+Made 2026-10-05: `git archive v3.9.1` extracted into a fake game folder holding an empty SkyrimVR.exe, then
+`bash setup.sh` run there with `powershell` shimmed to print D:/Docs (the Documents folder) and
+LOCALAPPDATA=D:/LocalAppData, so no real user path is in any file.
+
+  CLAUDE.stock.fixture         C:/Temp/p8mig/stock/Skyrim VR, no mod manager detected (the stock block)
+  CLAUDE.mo2.fixture           C:/Temp/p8mig/mo2/Skyrim VR, with a portable MO2 instance beside it
+                               (C:/Temp/p8mig/mo2/MO2, profile "Survival") found by the sibling probe
+  skyrim-paths.*.fixture       the .claude/skyrim-paths.env each run wrote
+  AGENTS / KNOWLEDGEBASE / settings.json / settings.local.json
+                               untouched by setup; byte-identical to the v3.9.1 blobs
+                               (git hash-object --no-filters == git rev-parse v3.9.1:<path>)
+
+All files are LF, as the release zip (built on Linux CI) shipped them. The extension is .fixture so the
+repo's Markdown link check and JSON scanners leave them alone.
