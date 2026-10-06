@@ -6756,3 +6756,13 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '    audit.rule("protect-files", rid, "deny", reason)',
      _P8CR + "test_a_patch_delete_is_audited_under_its_rules_own_hook", "p8t6-patch-delete-audit-label"),
 ]]
+# Row 49: the prompt's authorization form lists exactly the parser's allowlist, whichever side changes alone.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/inventory-runtimes.py", '               "node": ("OpenJS.NodeJS", "OpenJS.NodeJS.LTS")}',
+     '               "node": ("OpenJS.NodeJS", "OpenJS.NodeJS.LTS", "OpenJS.NodeJS.Nightly")}',
+     "tests/test_setup_prompt.py::test_the_authorization_form_lists_exactly_the_parsers_allowlist",
+     "p8t6-allowlist-grows-without-the-prompt"),
+    ("SETUP_PROMPT.txt", "for python, Git.Git for git, and OpenJS.NodeJS", "for python, and OpenJS.NodeJS",
+     "tests/test_setup_prompt.py::test_the_authorization_form_lists_exactly_the_parsers_allowlist",
+     "p8t6-prompt-drops-an-allowed-id"),
+]]

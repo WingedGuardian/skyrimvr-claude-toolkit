@@ -103,3 +103,21 @@ def test_the_prose_after_each_embedded_prompt_does_not_contradict_it():
 def test_product_is_not_named():
     """The rename is a later plan's; the prompt names no product."""
     assert "Claude Code Modding Toolkit" not in _prompt()
+
+
+# Plan 8 T6 (Plan 7 minor, deferred row 49): the authorization form names the exact ids the parser accepts.
+def _allowlist_clause():
+    spec = importlib.util.spec_from_file_location("inventory_runtimes", REPO / "tools" / "inventory-runtimes.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    parts = ["{} for {}".format(" or ".join(ids), rt) for rt, ids in mod.ALLOWED_IDS.items()]
+    return "The only winget ids it can name are " + ", ".join(parts[:-1]) + ", and " + parts[-1] + ","
+
+
+def test_the_authorization_form_lists_exactly_the_parsers_allowlist():
+    """The prompt's list is the parser's ALLOWED_IDS, rendered: an id added to either side alone goes red."""
+    p = _prompt()
+    assert _allowlist_clause() in p, _allowlist_clause()
+    assert p.count("The only winget ids it can name are ") == 1
+    assert "each at the exact version I write, installed with --no-upgrade" in p
+    assert "for those, and for anything else, you only give me manual steps" in p
