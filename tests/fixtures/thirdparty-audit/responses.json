@@ -5,7 +5,9 @@
 
   {"url": "https://api.github.com/repos/BadDogSkyrim/PyNifly/releases/latest", "status": 200, "json": {"tag_name": "V29.1.0"}},
   {"url": "https://api.github.com/repos/BadDogSkyrim/PyNifly/releases/tags/V29.1.0", "status": 200,
-   "json": {"tag_name": "V29.1.0", "assets": [{"name": "io_scene_nifly.zip"}]}},
+   "json": {"tag_name": "V29.1.0", "assets": [{"name": "io_scene_nifly.zip", "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}},
+  {"url": "https://api.github.com/repos/BadDogSkyrim/PyNifly/releases/tags/V27.2.0", "status": 200,
+   "json": {"tag_name": "V27.2.0", "assets": [{"name": "io_scene_nifly.zip", "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}},
   {"url": "https://github.com/BadDogSkyrim/PyNifly/releases/download/V29.1.0/io_scene_nifly.zip", "range": "0-0", "status": 200,
    "zip": ["io_scene_nifly/", "io_scene_nifly/__init__.py", "io_scene_nifly/NiflyDLL.dll", "io_scene_nifly/pyn/", "io_scene_nifly/pyn/pynifly.py"]},
 

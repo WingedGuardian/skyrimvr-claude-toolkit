@@ -105,10 +105,16 @@ CODEX = {
 PYNIFLY_DOC = ("- **PyNifly** -- download `io_scene_nifly.zip` from the latest release of PyNifly and extract it so "
                "the DLL lands at `tools/pynifly/{path}` (the version this was verified with: 29.1.0).\n")
 PYNIFLY_SKILL = "Verified on **PyNifly 29.1.0**: the DLL ships with it.\n"
+# The Pinned downloads rows; the synthetic GitHub release JSON publishes these same (made-up) digests.
+SHA_A, SHA_B = "a" * 64, "b" * 64
+PYNIFLY_TABLE = ("| PyNifly | 29.1.0 | `io_scene_nifly.zip` | `%s` | "
+                 "<https://github.com/BadDogSkyrim/PyNifly/releases/download/V29.1.0/io_scene_nifly.zip> |\n"
+                 "| PyNifly Blender add-on | 27.2.0 | `io_scene_nifly.zip` | `%s` | "
+                 "<https://github.com/BadDogSkyrim/PyNifly/releases/download/V27.2.0/io_scene_nifly.zip> |\n")
 
 
 def pynifly_repo(tmp_path, path):
-    return make_repo(tmp_path, {"docs/installing-tools.md": PYNIFLY_DOC.format(path=path),
+    return make_repo(tmp_path, {"docs/installing-tools.md": PYNIFLY_DOC.format(path=path) + PYNIFLY_TABLE % (SHA_A, SHA_B),
                                 "agent/skills/skyrim-nif/SKILL.md": PYNIFLY_SKILL})
 
 
@@ -174,7 +180,8 @@ def test_a_historical_path_mention_is_not_an_instruction(tmp_path):
     text = (PYNIFLY_DOC.format(path="io_scene_nifly/NiflyDLL.dll")
             + "Releases before 29.x need an explicit load first:\n"
             + "    pynifly.NifFile.Load('tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll')\n")
-    repo = make_repo(tmp_path, {"docs/installing-tools.md": text, "agent/skills/skyrim-nif/SKILL.md": PYNIFLY_SKILL})
+    repo = make_repo(tmp_path, {"docs/installing-tools.md": text + PYNIFLY_TABLE % (SHA_A, SHA_B),
+                                "agent/skills/skyrim-nif/SKILL.md": PYNIFLY_SKILL})
     rows, code = audit(repo, make_cache(tmp_path), ["PyNifly"])
     assert code == 0, [r.as_dict() for r in rows]
 
@@ -247,13 +254,15 @@ def test_offline_without_a_cached_answer_is_could_not_check(tmp_path):
 
 
 def test_the_whole_registry_offline_with_no_cache_is_never_ok(tmp_path):
-    """Every integration, nothing reachable: not one row may read OK/NEWER/UNPINNED, and the exit is 2."""
+    """Every integration, nothing reachable: not one row may read OK/NEWER/UNPINNED, and the exit is 2.
+    The only rows that may be decided are network-free: install refs, the delivery-path scan and NOT DELIVERED."""
     repo = make_repo(tmp_path, dict(CODEX, **SPRIGGIT_BASE))
     code, out = cli(repo, tmp_path / "empty-cache")
     assert code == 2, out
     body = out.split("\n\n")[0].splitlines()[1:]
-    assert body and all("COULD NOT CHECK" in line or " OK " in line for line in body), out
-    assert all("install refs" in line for line in body if " OK " in line), out   # only local, network-free rows
+    assert body and all("COULD NOT CHECK" in line or " OK " in line or "NOT DELIVERED" in line for line in body), out
+    assert all("install refs" in line or line.startswith("delivery paths") for line in body if " OK " in line), out
+    assert "UNPINNED" not in out.split("\n\n")[0], out
 
 
 def test_nothing_audited_is_not_ok(tmp_path):
@@ -502,3 +511,223 @@ def test_the_real_tree_declares_readable_pin_sites():
     unread = [(s["name"], site[1]) for s in ta.REGISTRY for site in s.get("pins", []) + s.get("tag_pins", [])
               if ta.read_pin_site(repo, site)[1] is None]
     assert unread == [], unread
+
+
+# ------------------------------------------------------------------ Plan 8 T6d: every delivery path exact + verified
+# User ruling 2026-10-05: every user gets EXACTLY the versions we tested. delivery_findings() scans every shipped
+# surface for an install instruction that is not one exact, verifiable version. One red/green pair per rule clause.
+
+def findings(tmp_path, files, exempt=()):
+    return ta.delivery_findings(ta.Repo(make_repo(tmp_path, files)), exempt=list(exempt))
+
+
+def rules(tmp_path, files, exempt=()):
+    return sorted({(f[0], f[2]) for f in findings(tmp_path, files, exempt)[0]})
+
+
+def test_the_shipped_tree_has_no_unpinned_delivery_path():
+    """The gate itself: on this tree every install instruction is exact and verifiable, or exempt with a reason."""
+    found, exempted, _history, _stale = ta.delivery_findings(ta.Repo(REPO))
+    assert found == [], "\n".join("%s:%d [%s] %s" % f[:4] for f in found)
+    assert all(e[5] for e in exempted)
+
+
+def test_every_delivery_exemption_still_matches_the_real_tree():
+    """An exemption whose line was fixed (or moved) must be removed, or it silently excuses the next such line."""
+    stale = ta.delivery_findings(ta.Repo(REPO))[3]
+    assert stale == [], stale
+
+
+@pytest.mark.parametrize("line,red", [
+    ("Run `pip install lz4` first.", True),
+    ("Run `python -m pip install pyffi==2.2.3` first.", True),                                    # pinned, unverified
+    ("`python -m pip install --require-hashes pyffi==2.2.3`", True),                            # hashes but no lock
+    ("`python -m pip install -r tools/requirements-tools.lock`", True),                         # lock, hashes optional
+    ("`python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-tools.lock`", False),
+    ("`python -m pip install --dry-run --report r.json -r requirements.txt`", False),          # resolves, installs nothing
+])
+def test_a_pip_install_must_be_hash_locked(tmp_path, line, red):
+    assert (("README.md", "pip") in rules(tmp_path, {"README.md": line + "\n"})) is red
+
+
+@pytest.mark.parametrize("line,red", [
+    ("`npm install`", True),                                                  # bare: resolves ranges, use npm ci
+    ("`npm install -g @devcontainers/cli`", True),
+    ("`npm install github:WingedGuardian/xeditlib`", True),                   # default-branch HEAD
+    ("`npm install github:WingedGuardian/xeditlib#v1.0.1`", True),            # a tag can move; a commit cannot
+    ("`npm install -g @devcontainers/cli@0.89.0`", False),
+    ("`npm install --no-save github:WingedGuardian/xeditlib#" + "1" * 40 + " koffi@2.15.1`", False),
+    ("`npm ci --ignore-scripts`", False),
+])
+def test_an_npm_install_must_name_an_exact_version_or_commit(tmp_path, line, red):
+    assert (("README.md", "npm") in rules(tmp_path, {"README.md": line + "\n"})) is red
+
+
+@pytest.mark.parametrize("line,red", [
+    ("`dotnet tool install -g Spriggit.CLI`", True),
+    ("`dotnet tool update -g Spriggit.CLI`", True),
+    ("`dotnet tool install -g Spriggit.CLI --version 0.41.0`", False),
+    ("`dotnet tool install -g Spriggit.CLI`, then `spriggit --version 0.41.0`", True),   # another command's flag
+    ("`dotnet tool restore`", False),
+])
+def test_a_dotnet_tool_install_must_name_a_version(tmp_path, line, red):
+    assert (("README.md", "dotnet-tool") in rules(tmp_path, {"README.md": line + "\n"})) is red
+
+
+AUTOMOD_URL = "https://github.com/SpookyPirate/spookys-automod-toolkit"
+
+
+@pytest.mark.parametrize("line,proof,red", [
+    ("`git clone %s tools/automod`" % AUTOMOD_URL, True, True),                        # no tag: default HEAD
+    ("`git clone --branch v1.11.2 %s tools/automod`" % AUTOMOD_URL, False, True),      # tag, nothing checks the commit
+    ("`git clone --branch v1.0 https://github.com/someone/else x`", True, True),       # a repo nobody verifies
+    ("`git clone --branch v1.11.2 %s tools/automod`" % AUTOMOD_URL, True, False),
+    ("A `git clone` of the repo does NOT contain the DLL.", True, False),              # prose, not a command
+])
+def test_a_git_clone_must_name_a_tag_and_be_commit_verified(tmp_path, line, proof, red):
+    files = {"README.md": line + "\n"}
+    if proof:
+        files["tools/automod-cli.sh"] = 'PIN_COMMIT="%s"\n' % ("e" * 40)
+    assert (("README.md", "git-clone") in rules(tmp_path, files)) is red
+
+
+@pytest.mark.parametrize("line,red", [
+    ("`winget install Python.Python.3.12`", True),
+    ("`winget install --id Python.Python.3.12 --exact`", True),
+    ("`winget install --id Python.Python.3.12 --version 3.12.10`", True),
+    ("`winget install --id Python.Python.3.12 --exact --version 3.12.10`", False),
+    ("Spriggit (`dotnet tool install X --version 0.41.0`) needs `winget install --id Y --exact`", True),
+
+])
+def test_a_winget_install_must_be_exact_with_a_version(tmp_path, line, red):
+    assert (("README.md", "winget") in rules(tmp_path, {"README.md": line + "\n"})) is red
+
+
+def test_a_download_piped_into_a_shell_is_never_pinned(tmp_path):
+    assert ("README.md", "pipe-to-shell") in rules(tmp_path, {"README.md": "RUN curl -fsSL https://x.io/i.sh | bash\n"})
+    assert rules(tmp_path, {"README.md": "Read it with `curl -s https://x.io/a.json | jq .`\n"}) == []
+
+
+@pytest.mark.parametrize("line,red", [
+    ("FROM mcr.microsoft.com/devcontainers/python:3.0.6-3.11-bookworm", True),
+    ("FROM mcr.microsoft.com/devcontainers/python:3.0.6-3.11-bookworm@sha256:" + "c" * 64, False),
+])
+def test_a_base_image_must_be_pinned_by_digest(tmp_path, line, red):
+    assert ((".devcontainer/Dockerfile", "docker-from") in rules(tmp_path, {".devcontainer/Dockerfile": line + "\n"})) is red
+
+
+@pytest.mark.parametrize("line,red", [
+    ("RUN apt-get update && apt-get install -y --no-install-recommends openjdk-17-jdk-headless", True),
+    ("RUN apt-get install -y --no-install-recommends openjdk-17-jdk-headless=17.0.16+8-1~deb12u1", False),
+    ("choco install jq -y", True),
+])
+def test_a_system_package_must_name_an_exact_version(tmp_path, line, red):
+    assert ((".devcontainer/Dockerfile", "system-package") in rules(tmp_path, {".devcontainer/Dockerfile": line + "\n"})) is red
+
+
+def test_a_container_download_must_be_checksummed_in_the_same_step(tmp_path):
+    bad = "RUN curl -fsSL -o /tmp/n.tar.gz https://nodejs.org/dist/v1/n.tar.gz \\\n    && tar -xzf /tmp/n.tar.gz\n"
+    good = ("RUN curl -fsSL -o /tmp/n.tar.gz https://nodejs.org/dist/v1/n.tar.gz \\\n"
+            "    && echo \"$sum  /tmp/n.tar.gz\" | sha256sum -c - \\\n    && tar -xzf /tmp/n.tar.gz\n")
+    assert (".devcontainer/Dockerfile", "download-checksum") in rules(tmp_path, {".devcontainer/Dockerfile": bad})
+    assert rules(tmp_path, {".devcontainer/Dockerfile": good}) == []   # the continuation lines are one command
+
+
+@pytest.mark.parametrize("line,red", [
+    ("Download `io_scene_nifly.zip` from the latest release.", True),
+    ("Acquire: download a release from github.com/Orvid/Champollion/releases.", True),
+    ("Click the big green LTS button.", True),
+    ("The newest release on Nexus is 1.24.0.", False),                      # a statement, not an install
+])
+def test_an_install_that_follows_the_newest_release_is_unpinned(tmp_path, line, red):
+    assert (("docs/x.md", "follows-latest") in rules(tmp_path, {"docs/x.md": line + "\n"})) is red
+
+
+@pytest.mark.parametrize("line,red", [
+    ("Download v1.3.2 from https://github.com/Orvid/Champollion/releases/download/v1.3.2/x.zip", True),
+    ("Download v1.3.2 from https://github.com/Orvid/Champollion/releases/download/v1.3.2/x.zip, SHA-256 `"
+     + "d" * 64 + "`", False),
+    ("Download ReSaver 6.0.643 from Nexus mod 5031; check it against Pinned downloads.", False),
+    ("Download ReSaver from Nexus mod 5031.", True),
+])
+def test_a_download_needs_a_hash_or_the_pinned_downloads_table(tmp_path, line, red):
+    assert (("docs/x.md", "download-unverified") in rules(tmp_path, {"docs/x.md": line + "\n"})) is red
+
+
+def test_a_historical_install_line_is_skipped_and_counted(tmp_path):
+    found, _ex, history, _stale = findings(tmp_path, {"README.md": "Older toolkits said `pip install lz4`.\n"})
+    assert found == [] and history == 1
+
+
+def test_an_exempt_line_is_reported_with_its_reason_and_an_unused_exemption_is_stale(tmp_path):
+    files = {"README.md": "`npm install -g @anthropic-ai/claude-code`\n"}
+    ex = [("README.md", "npm", r"@anthropic-ai/claude-code", "the agent updates itself"),
+          ("README.md", "pip", r"pip install nothing-here", "unused")]
+    found, exempted, _h, stale = findings(tmp_path, files, ex)
+    assert found == [] and [e[5] for e in exempted] == ["the agent updates itself"]
+    assert stale == [ex[1]]
+    assert ("README.md", "npm") in rules(tmp_path, files, ex[1:])   # the same line without its exemption is red
+    wrong_rule = [("README.md", "pip", r"@anthropic-ai/claude-code", "an exemption for another rule")]
+    assert ("README.md", "npm") in rules(tmp_path, files, wrong_rule)   # it excuses only its own rule
+
+
+def test_an_unpinned_delivery_path_fails_the_audit(tmp_path):
+    repo = make_repo(tmp_path, {"README.md": "`pip install lz4`\n"})
+    rows, code = audit(repo, tmp_path / "c", ["delivery paths"])
+    assert code == 1 and any(r.tool == "delivery paths" and "README.md:1" in r.detail for r in by(rows, ta.DRIFT))
+    clean = make_repo(tmp_path / "clean", {"README.md": "`npm ci`\n"})
+    rows, code = audit(clean, tmp_path / "c", ["delivery paths"])
+    assert code == 0 and [r.status for r in rows] == [ta.OK]
+
+
+# NOT DELIVERED: a registry entry the toolkit never installs says why, and is never UNPINNED.
+
+def test_an_integration_the_toolkit_never_delivers_is_reported_with_its_reason(tmp_path, monkeypatch):
+    spec = {"name": "Some Manager", "upstream": ("npm", "@openai/codex"), "not_delivered": "the user's own tool"}
+    monkeypatch.setattr(ta, "REGISTRY", [spec])
+    rows, code = audit(make_repo(tmp_path, {}), make_cache(tmp_path), ["Some Manager"])
+    assert [(r.status, r.detail, r.upstream) for r in rows] == [(ta.OUTSIDE, "the user's own tool", "0.161.0")]
+    assert code == 0
+    del spec["not_delivered"]
+    rows, _code = audit(make_repo(tmp_path, {}), make_cache(tmp_path), ["Some Manager"])
+    assert [r.status for r in rows] == [ta.UNPINNED]   # the control: without the reason it is UNPINNED
+
+
+def test_every_registry_entry_reads_a_pin_or_says_why_it_is_not_delivered():
+    """UNPINNED cannot come back silently: a new entry needs a pin site or a not_delivered reason."""
+    bare = [s["name"] for s in ta.REGISTRY if not s.get("pins") and not s.get("not_delivered")]
+    assert bare == [], bare
+
+
+# Pinned hashes are re-checked against upstream: a published checksum, or the file itself.
+
+def pynifly_table_repo(tmp_path, sha_a):
+    return make_repo(tmp_path, {"docs/installing-tools.md": PYNIFLY_DOC.format(path="io_scene_nifly/NiflyDLL.dll")
+                                + PYNIFLY_TABLE % (sha_a, SHA_B), "agent/skills/skyrim-nif/SKILL.md": PYNIFLY_SKILL})
+
+
+def test_a_pinned_hash_upstream_publishes_is_ok_and_a_different_one_is_drift(tmp_path):
+    rows, code = audit(pynifly_table_repo(tmp_path, SHA_A), make_cache(tmp_path), ["PyNifly"])
+    assert code == 0 and len([r for r in rows if r.check == "pinned hash" and r.status == ta.OK]) == 2
+    rows, code = audit(pynifly_table_repo(tmp_path / "bad", "f" * 64), make_cache(tmp_path / "bad"), ["PyNifly"])
+    bad = [r for r in by(rows, ta.DRIFT) if r.check == "pinned hash"]
+    assert code == 1 and [r.upstream for r in bad] == ["PyNifly"] and "NOT what upstream has" in bad[0].detail
+
+
+def test_a_pinned_hash_is_checked_by_downloading_when_upstream_publishes_none(tmp_path):
+    url = "https://github.com/Orvid/Champollion/releases/download/v1.3.2/Champollion.v1.3.2.zip"
+    body = b"champollion bytes"
+    row = "| Champollion | v1.3.2 | `Champollion.v1.3.2.zip` | `%s` | <%s> |\n"
+    for sha, want in ((__import__("hashlib").sha256(body).hexdigest(), ta.OK), ("0" * 64, ta.DRIFT)):
+        repo = make_repo(tmp_path / want.replace(" ", "_"), {"docs/installing-tools.md": row % (sha, url)})
+        cache = make_cache(tmp_path / want.replace(" ", "_"), extra=[(url, 200, body)])
+        rows, _code = audit(repo, cache, ["Champollion"])
+        assert [r.status for r in rows if r.check == "pinned hash"] == [want], [r.as_dict() for r in rows]
+
+
+def test_the_newest_main_nexus_file_is_the_upstream_version(tmp_path):
+    url = "https://api.nexusmods.com/v1/games/g/mods/1/files.json"
+    files = {"files": [{"category_name": "MAIN", "version": "6.0.636"}, {"category_name": "MAIN", "version": "6.0.643"},
+                       {"category_name": "OLD_VERSION", "version": "9.9.9"}]}
+    f = ta.Fetcher(make_cache(tmp_path, extra=[(url, 200, json.dumps(files).encode())]), offline=True, env={})
+    assert ta.nexus_file_latest(f, "g", 1) == "6.0.643"
