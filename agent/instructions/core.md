@@ -207,7 +207,7 @@ the working directory the agent reports.
   `[IO.File]::Write*`, downloaders, and a name written in `python -c` / `node -e` code. Use xelib, Spriggit
   or AutoMod. Copying a finished plugin onto `Data/` is **advised**, not refused. Not covered: a name
   built at runtime, a script run from a file (`python fix.py`), other interpreters.
-- Tool output aimed straight at an existing `.psc`, and Champollion against a `.pex`
+- A program's output flag (`-o`, `--output`) aimed at a `.psc`, and Champollion against a `.pex`
   inside `Data/Scripts/` -- both have destroyed sources
 - DevBench `smp reset` (measured to crash a large load order), by MCP, `curl` or `devbench-cli.sh`
 - Decoded text run as commands (`base64 -d | bash`), which the guard cannot read
@@ -221,7 +221,7 @@ the working directory the agent reports.
 - Load order files -- the mod manager owns them and may overwrite a direct edit
 - Redirects, `tee`, `sed -i` and other shell writes into `Data/`, the config folder or MO2 (a `cp`/`mv`
   there is silent), and a copy onto a plugin where the game loads it
-- A decompiler writing its output into the install; `sed -i` with a backslash path
+- A decompiler writing its output into the install; `sed -i` with a backslash path, on a file in the install
 - AutoMod write commands without `--dry-run`
 
 Naming a plugin or INI in a read-only command is silent: notes fire on the program that writes.
