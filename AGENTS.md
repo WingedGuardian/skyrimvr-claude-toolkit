@@ -233,7 +233,8 @@ Naming a plugin or INI in a read-only command is silent: notes fire on the progr
 - A shell write, copy or move onto a save in `Saves/`, and an edit-tool write to one (two rules)
 - git that throws away uncommitted changes in a protected folder (`checkout -- x`, `restore`,
   `reset --hard`)
-- `lock disable` (the file lock off for good), and `snapshot restore --in-place` (writes over live files)
+- `lock disable` (the file lock off for good), and `snapshot restore --in-place` or
+  `restore-from-backup.sh --restore` (writes over live files)
 
 Few prompts by design: a guard that prompts on routine work gets approved by reflex
 (`docs/safety-philosophy.md`). **Check the guards are alive: `bash tools/hook-canary.sh`.**
@@ -241,9 +242,10 @@ Coverage and gaps: `docs/guard-coverage.md`.
 
 ### The file lock and the guards' own state
 - **"Access denied" writing a vanilla master or archive** (`Skyrim.esm`, a base `.bsa`) is the optional lock, not
-  a fault (the OS says no more): never retry or work around it. `bash tools/skyguard.sh lock unlock <file>` lifts it
-  until the next session start: **tell the user why first; relock when done** (`lock lock`). Never clear the
-  read-only bit or ACL by hand.
+  a fault (the OS says no more): never retry or work around it. `bash tools/skyguard.sh lock unlock <file>` lifts
+  it for an hour (the next tool call after that relocks it): **tell the user why first; relock when done**
+  (`lock lock`). If it answers "No session id", you cannot lift it, by design: ask the user to run
+  `tools\skyguard-unlock.cmd` in their own terminal. Never clear the read-only bit or ACL by hand.
 - **Never edit `.skyguard/`** (guard on/off state): refused. `bash tools/skydoctor` shows what is live.
 
 ### General rules
