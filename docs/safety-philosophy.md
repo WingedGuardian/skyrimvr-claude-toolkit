@@ -91,7 +91,9 @@ refuse every command if it is missing, so a broken engine can never read as "all
 **"The install" is RESOLVED, not guessed from the word "Skyrim".** The guards derive
 their root from their own location -- for the Claude Code hooks, two directories above
 `.claude/hooks/` -- and add whatever
-`setup.sh` recorded in `.claude/skyrim-paths.env`. The previous rule matched *any*
+`setup.sh` recorded in `skyrim-paths.env` at the toolkit root (a 3.x install's
+`.claude/skyrim-paths.env` is read when that file is absent, with a session-start notice
+to re-run `setup.sh`). The previous rule matched *any*
 path containing "Skyrim", which meant the session scratchpad (its path contains
 `C--GOG-Games-...-Skyrim-VR`), a checkout of this toolkit, `C:/Temp/skyrim-notes.txt`
 and a GitHub URL were all refused as "deleting the game". MEASURED: 71 of 443
