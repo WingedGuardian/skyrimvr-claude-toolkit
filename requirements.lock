@@ -1,6 +1,6 @@
 # Generated from a pip dry-run report; all transitive versions and wheel hashes frozen.
 # Python 3.10-3.13 (the tested range); refresh: docs/harness-integrations.md
-# input-sha256: 7d8a95206bc1a97f1d40ceaf3913429fd7cf7da9af0a05f84e778fb9d58f743c
+# input-sha256: 725ba4f3afe2194f5e7fbfca87663b9c622cdc3e44ff549b1db3f977b0db021a
 
 colorama==0.4.6; sys_platform == "win32" \
     --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
@@ -20,8 +20,8 @@ pluggy==1.6.0 \
 Pygments==2.21.0 \
     --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
 
-pytest==8.4.2 \
-    --hash=sha256:872f880de3fc3a5bdc88a11b39c9710c3497a547cfa9320bc3c5e62fbf272e79
+pytest==9.0.3 \
+    --hash=sha256:2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9
 
 PyYAML==6.0.3 \
     --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \

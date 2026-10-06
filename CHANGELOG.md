@@ -9,7 +9,7 @@
   Nothing in the toolkit imported or ran any of them, so no behaviour changes; the hash lock goes from 20 packages to 10 and
   installs on Python 3.10 through 3.13. Anything of yours that imported one of them from the container must add it back itself.
 - **PyYAML 6.0.1 to 6.0.3**: the first release with Python 3.13 wheels (and 3.14). Only `yaml.safe_load` is used; no API change.
-- **pytest 8.0.0 to 8.4.2** (intermediate step; see the next line). Adds Pygments as a dependency; the lock pins 2.21.0 because every release before 2.20.0 has a known ReDoS advisory (a test now enforces this).
+- **pytest 8.0.0 to 9.0.3**: 9.0.3 is the only release line that fixes CVE-2025-71176 (predictable `/tmp/pytest-of-<user>` directory on Unix; 8.x is still affected). pytest now needs Python 3.10 or newer, which is the tested range's floor. Adds Pygments as a dependency; the lock pins 2.21.0 because every release before 2.20.0 has a known ReDoS advisory (a test enforces this).
 ### Other agents: the adapter kit
 
 - **New `ADAPTING.md`, written to an agent the toolkit does not support yet.** Any agent that reads files already gets the instructions, the skills and the tools (Layers 0 and 1; Layer 2, a read-only lock below the agent, is not yet released). `ADAPTING.md` walks such an agent through wiring the rest into itself, and through saying honestly how far it got. The toolkit still lists only Claude Code and Codex as supported; an adapted agent is "locally adapted, self-verified", a statement about one install on one machine.
