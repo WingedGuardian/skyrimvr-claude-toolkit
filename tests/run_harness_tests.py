@@ -9,8 +9,10 @@ import tempfile
 
 
 # The only inherited variables; everything else is scrubbed. TOOLKIT_REQUIRE_HARNESS must be here or
-# the "barriers are not active" check could never fire under the launcher.
-FORWARDED_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "TOOLKIT_REQUIRE_HARNESS")
+# the "barriers are not active" check could never fire under the launcher. TOOLKIT_REQUIRE_NODE_DEPS likewise:
+# without it a missing `npm ci` would skip the FOMOD smoke instead of failing it (tests/test_node_fomod_smoke.py).
+FORWARDED_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "TOOLKIT_REQUIRE_HARNESS",
+                 "TOOLKIT_REQUIRE_NODE_DEPS")
 
 
 def evidence_root(repo):

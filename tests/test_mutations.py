@@ -3477,8 +3477,8 @@ MUTATIONS += [
                  id="esp-verify-empty-inventory-fails"),
 
     pytest.param("tests/run_harness_tests.py",
-                 '"PATHEXT", "TOOLKIT_REQUIRE_HARNESS")',
-                 '"PATHEXT")',
+                 '"PATHEXT", "TOOLKIT_REQUIRE_HARNESS",',
+                 '"PATHEXT",',
                  "tests/test_harness_required.py::test_the_launcher_forwards_the_require_flag_to_pytest",
                  id="launcher-drops-require-harness-flag"),
 
@@ -4492,11 +4492,13 @@ MUTATIONS += [pytest.param("package.json", '"zod": "3.25.76"', '"zod": "^3.25.76
                            "tests/test_dependency_locks.py::test_package_json_pins_exact_versions_that_the_lock_resolves_to",
                            id="t6c-package-json-range-not-exact")]
 
-# Plan 8 T6c: the FOMOD smoke for the container's documented fast-xml-parser use can fail, and cannot silently skip.
+# Plan 8 T6c: the FOMOD smoke wrapper reports a missing install as a failure when TOOLKIT_REQUIRE_NODE_DEPS=1, never as a pass.
+# (Its control, "must go red on fast-xml-parser 4.3.6", needs a package manager and lives in the ci.yml node job.)
 _NS = "tests/test_node_fomod_smoke.py::"
-MUTATIONS += [pytest.param("tests/fomod-xmlbuilder.test.js", find, rep, test, id=i) for i, find, rep, test in [
-    ("t6c-fomod-smoke-injection-check-weakened", "assert.ok(!('injected' in back.root),", "assert.ok(true || !('injected' in back.root),",
-     _NS + "test_the_smoke_goes_red_on_a_fast_xml_parser_before_the_escaping_fix"),
-    ("t6c-fomod-smoke-always-skips", "const opts = { skip: (!fxp && !required) ?", "const opts = { skip: true ?",
-     _NS + "test_the_smoke_passes_against_the_locked_npm_ci_install"),
-]]
+MUTATIONS += [pytest.param("tests/test_node_fomod_smoke.py", "    if os.environ.get(\"TOOLKIT_REQUIRE_NODE_DEPS\") == \"1\":" + chr(10) + "        pytest.fail(",
+                           "    if False:" + chr(10) + "        pytest.fail(",
+                           _NS + "test_a_missing_install_fails_when_required_and_skips_otherwise",
+                           id="t6c-fomod-smoke-missing-install-must-fail-when-required")]
+MUTATIONS += [pytest.param("tests/run_harness_tests.py", '"TOOLKIT_REQUIRE_NODE_DEPS")', ")",
+                           "tests/test_harness_required.py::test_the_launcher_forwards_the_node_deps_flag_to_pytest",
+                           id="t6c-launcher-drops-require-node-deps-flag")]

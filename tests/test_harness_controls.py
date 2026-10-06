@@ -123,8 +123,8 @@ def test_lock_refresh_merges_target_reports_and_rejects_missing_extras():
     locker = importlib.util.module_from_spec(spec); spec.loader.exec_module(locker)
     def report(names):
         return {"install": [{"metadata": {"name": name, "version": version}} for name, version in names]}
-    linux = report([("pytest", "8.0.0")])
-    windows310 = report([("pytest", "8.0.0"), ("colorama", "0.4.6"),
+    linux = report([("pytest", "9.0.3")])
+    windows310 = report([("pytest", "9.0.3"), ("colorama", "0.4.6"),
                          ("exceptiongroup", "1.3.1"), ("tomli", "2.4.1")])
     with pytest.raises(ValueError, match="target"):
         locker.merge_reports([linux])
