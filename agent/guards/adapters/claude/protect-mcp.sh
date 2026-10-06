@@ -1,5 +1,5 @@
 #!/bin/bash
-# Claude Code adapter for skyguard's DevBench guard (the mcp__devbench* tools). The rules live in tools/skyguard/ (Python);
+# Claude Code adapter for skyguard's DevBench guard (every MCP tool whose server name contains devbench, any case). The rules live in tools/skyguard/ (Python);
 # this wrapper only reads the payload, records the heartbeat and passes the verdict through.
 #
 # SETUP: setup.sh fills in the Python path below (it writes sys.executable of the Python it found).

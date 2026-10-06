@@ -72,6 +72,77 @@ def test_long_section_is_capped_on_a_character_boundary(tmp_path):
     assert len(out.encode("utf-8")) < prefs.CAP + 400
 
 
+# --- Plan 8 T6 (deferred rows 18-20): an unclosed fence, the variant heading, a bounded read ---------------------
+def _audit_text(tmp_path):
+    p = tmp_path / ".claude" / "backups" / "AUDIT_LOG.txt"
+    return p.read_text(encoding="utf-8") if p.is_file() else ""
+
+
+def test_an_unclosed_fence_does_not_swallow_the_sections_after_it(tmp_path):
+    """Row 18: a fence opened and never closed used to run to the end of the file, so every later section (here a
+    private one) was injected as a preference, up to the cap."""
+    out = _render(_kb(tmp_path, "## My preferences\n- a\n```\n- b\n## Private notes\n- SECRET-LATER\n"))
+    assert "- a" in out and "- b" in out
+    assert "SECRET-LATER" not in out
+
+
+def test_an_unclosed_fence_before_the_heading_does_not_hide_it(tmp_path):
+    out = _render(_kb(tmp_path, "# KB\n```\nstray fence\n## My preferences\n- REAL\n## Next\n- no\n"))
+    assert "- REAL" in out and "- no" not in out
+
+
+def test_a_closed_fence_still_hides_headings_inside_it(tmp_path):
+    """The twin: only an UNCLOSED fence is read as plain text; a closed one (even with a ~~~ line inside a ``` block)
+    still keeps a heading inside it out of the section search."""
+    text = "```\n~~~\n## My preferences\n- fake\n```\n## My preferences\n- real\n"
+    out = _render(_kb(tmp_path, text))
+    assert "- real" in out and "- fake" not in out
+
+
+def test_the_variant_heading_with_a_parenthetical_is_the_section(tmp_path):
+    """Row 19: `## My Preferences (read every session)` injected nothing and logged nothing."""
+    out = _render(_kb(tmp_path, "## My Preferences (read every session)\n- VARIANT\n## Next\n- no\n"))
+    assert "- VARIANT" in out and "- no" not in out
+
+
+def test_a_near_miss_heading_says_so_and_is_audited(tmp_path):
+    """A heading that is evidently meant as the section but is not it (another level, or extra words) is named in
+    one line and an audit line, never silently dropped."""
+    out = _render(_kb(tmp_path, "# KB\n### My preferences for combat\n- x\n"))
+    assert out.startswith("PREFERENCES: NOT INJECTED") and "### My preferences for combat" in out
+    assert "## My preferences" in out
+    assert "prefs NOT INJECTED" in _audit_text(tmp_path)
+
+
+def test_a_file_without_any_preferences_heading_stays_silent(tmp_path):
+    """The near-miss note is only for a heading that names the section, not for an ordinary knowledgebase."""
+    assert _render(_kb(tmp_path, "# Notes\n## Engine preferences of the renderer\n- a\n")) == ""
+    assert _audit_text(tmp_path) == ""
+
+
+def test_the_read_is_bounded(tmp_path):
+    """Row 20: the file was read whole. Only the first READ_CAP bytes are read now: a section that starts after
+    them is not found (an unbounded read would inject it), and the reason is said and audited."""
+    filler = ("x" * 99 + "\n") * (prefs.READ_CAP // 100 + 10)
+    out = _render(_kb(tmp_path, "# KB\n" + filler + "## My preferences\n- BEYOND-CAP\n"))
+    assert "BEYOND-CAP" not in out
+    assert out.startswith("PREFERENCES: NOT INJECTED") and "larger than" in out
+    assert "prefs NOT INJECTED" in _audit_text(tmp_path)
+
+
+def test_a_section_at_the_top_of_a_large_file_is_still_injected(tmp_path):
+    filler = ("y" * 99 + "\n") * (prefs.READ_CAP // 100 + 10)
+    out = _render(_kb(tmp_path, "## My preferences\n- TOP\n## Rest\n" + filler))
+    assert out.startswith("USER PREFERENCES") and "- TOP" in out
+
+
+def test_a_section_cut_by_the_read_cap_says_it_was_cut(tmp_path):
+    """A section that runs past the end of what was read is marked as cut, like the 4,096-byte cap."""
+    filler = ("z" * 99 + "\n") * (prefs.READ_CAP // 100 - 1)
+    out = _render(_kb(tmp_path, "# KB\n" + filler + "## My preferences\n- START\n" + "- more\n" * 100))
+    assert "- START" in out and "truncated" in out
+
+
 def test_unreadable_file_says_so_and_never_raises(tmp_path):
     (tmp_path / KB).mkdir()                       # a directory where the file should be
     out = _render(tmp_path)

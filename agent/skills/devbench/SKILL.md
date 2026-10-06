@@ -58,9 +58,9 @@ recording runs) · `wait` and `sleep` (1.16; step pacing, incl. in-game hours) �
 · `menu invoke`. **`scenario` now FAILS when an inner tool errors (since 1.16, #72)**; before that it
 reported success, so a scenario that used to "pass" may now fail honestly -- read the step it names.
 `devbench-bridge.exe` (stdio, shipped with DevBench) is the recommended MCP route for a session that must
-survive game restarts; **register it under a server name that starts with `devbench`**, because the
-toolkit's MCP guard matches server names starting with `devbench` and would not see a bridge named
-anything else.
+survive game restarts; **register it under a server name containing `devbench`** (any case; `dev-bench`
+works too), because the toolkit's MCP guard matches a server name containing devbench and would not see a
+bridge named anything else.
 
 **Versions.** The toolkit's wrapper needs **1.11.0+** for `alive` (off-thread health since 1.12.0; older
 builds fall back to a frame diff). Everything it documents (ports, `POST /api/tool/<tool>`,

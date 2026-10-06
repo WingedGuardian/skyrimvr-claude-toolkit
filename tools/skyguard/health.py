@@ -63,13 +63,16 @@ _SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 # (protect-*, backup, snapshot), so only the two guards are counted -- once each per matched tool.
 COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files", "protect-mcp"), "codex": ("pre-tool",)}
 # Tools the INSTALLED Claude matchers cover (.claude/settings.json: Bash|PowerShell|Monitor -> protect-bash,
-# Edit|Write|NotebookEdit -> protect-files, and every mcp__devbench* tool -> protect-mcp; Plan 5).
+# Edit|Write|NotebookEdit -> protect-files; Plan 5), and every MCP tool whose name contains devbench in any case,
+# or dev-bench / dev_bench / dev.bench -> protect-mcp (Plan 8 T6: was the prefix mcp__devbench). The pattern is the
+# installed matcher's text, character for character (tests/test_skyguard_coverage.py); Claude matchers take no inline
+# flags, so case is spelled with character classes.
 CLAUDE_COVERED_TOOLS = ("Bash", "PowerShell", "Monitor", "Edit", "Write", "NotebookEdit")
-CLAUDE_COVERED_PREFIX = "mcp__devbench"
+CLAUDE_COVERED_MCP = re.compile(r"mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*")
 
 
 def _claude_covered(tool):
-    return tool in CLAUDE_COVERED_TOOLS or (isinstance(tool, str) and tool.startswith(CLAUDE_COVERED_PREFIX))
+    return tool in CLAUDE_COVERED_TOOLS or (isinstance(tool, str) and CLAUDE_COVERED_MCP.fullmatch(tool) is not None)
 # Codex: every tool call is matched (matcher ".*"). Known gaps, listed rather than counted:
 CODEX_KNOWN_GAPS = ("write_stdin (input to a running program; not measured on 0.160.0, never counted)",
                     "commands typed with ! in the TUI (measured: they fire no PreToolUse)")

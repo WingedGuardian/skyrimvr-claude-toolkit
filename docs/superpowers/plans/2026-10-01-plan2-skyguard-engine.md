@@ -831,7 +831,7 @@ from pathlib import Path
 from .grep import grep
 
 HOOK = "backup-before-edit"
-SKIP = (r"[/\\]\.claude[/\\](backups|hooks|plans)[/\\]", r"[/\\]node_modules[/\\]")
+SKIP = (r"[/\\]\.claude[/\\]" r"(backups|hooks|plans)[/\\]", r"[/\\]node_modules[/\\]")
 
 
 def run(project, tool_name, file_path, payload_empty, audit):

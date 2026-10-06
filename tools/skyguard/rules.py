@@ -193,6 +193,18 @@ RULES = {
         'Note: this writes {file} in the Skyrim install; a > redirect empties it first.'
     ),
     },
+    # Plan 8 T6 (rt-fix-b concern 3): an archive writer (Compress-Archive, 7z, zip, tar -c) into the same area. It got
+    # the S-WRITE-INSTALL note, whose redirect sentence is false for it.
+    'S-WRITE-ARCHIVE': {
+        "decision": 'advise',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Note: this writes the archive {file} in the Skyrim install.\n'
+        'If that file exists, tar and -Force replace it; zip, 7z and -Update add to it.'
+    ),
+    },
     'S-WRITE-LOADORDER': {
         "decision": 'advise',
         "hook": 'protect-bash',

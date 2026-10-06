@@ -1296,8 +1296,8 @@ MUTATIONS = [
                  "tests/test_instruction_neutrality.py::test_core_tells_every_agent_to_read_my_preferences",
                  id="core-keeps-the-preferences-fallback"),
     # --- preferences injection (Plan 3, D15) --------------------------------
-    pytest.param("tools/skyguard/prefs.py", "        elif not in_fence and _HEADING.match(line):",
-                 "        elif _HEADING.match(line):",
+    pytest.param("tools/skyguard/prefs.py", "if not fenced[i] and _HEADING.match(line)), None)",
+                 "if _HEADING.match(line)), None)",
                  "tests/test_skyguard_prefs.py::test_heading_inside_a_code_fence_is_not_the_section",
                  id="prefs-ignore-a-fenced-heading"),
     pytest.param("tools/skyguard/prefs.py", "    if len(data) > CAP:", "    if False:",
@@ -1652,8 +1652,8 @@ MUTATIONS = [
     pytest.param(
         'tools/skyguard/adapters/codex.py',
         # rt-fix-b: the command keys are read for every non-MCP tool; reading them for Bash only reverts it.
-        '        key = next((k for k in _COMMAND_KEYS if k in ti), None)',
-        '        key = next((k for k in _COMMAND_KEYS if k in ti), None) if name == "Bash" else None',
+        '        keys = [k for k in _COMMAND_KEYS if k in ti]\n',
+        '        keys = [k for k in _COMMAND_KEYS if k in ti] if name == "Bash" else []\n',
         'tests/test_skyguard_codex_adapter.py::test_an_unknown_tool_with_a_command_string_gets_the_shell_rules',
         id='codex-unknown-tool-command-unguarded',
     ),
@@ -3280,9 +3280,10 @@ _T11_CLAUSES = [
     ("rule-S-INERT-NOINPUT-no-tool-name", _MC, '    if name == "" or name == "unknown":', '    if name == "":',
      "tests/test_hooks.py::test_protect_mcp_refuses_when_it_cannot_see_the_tool_name"),
     # the wiring: the matcher, setup.sh and the gates that count hooks
-    ("rule-S-DEVBENCH-CRASH-matcher", ".claude/settings.json", '"matcher": "mcp__devbench.*"', '"matcher": "mcp__other.*"',
+    ("rule-S-DEVBENCH-CRASH-matcher", ".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*"', '"matcher": "mcp__other.*"',
      "tests/test_repo_invariants.py::test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher"),
-    ("rule-S-DEVBENCH-CRASH-matcher-narrow", ".claude/settings.json", '"matcher": "mcp__devbench.*"', '"matcher": "mcp__devbench-vr__console"',
+    ("rule-S-DEVBENCH-CRASH-matcher-narrow", ".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*"',
+     '"matcher": "mcp__devbench-vr__console"',
      "tests/test_repo_invariants.py::test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher"),
     ("rule-S-DEVBENCH-CRASH-setup-configures-it", "setup.sh",
      ".claude/hooks/protect-files.sh .claude/hooks/protect-mcp.sh \\\n", ".claude/hooks/protect-files.sh \\\n",
@@ -3773,7 +3774,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      'CLAUDE_COVERED_TOOLS = ("Bash", "Edit", "Write")',
      _MERGE + "test_skyguard_coverage.py::test_claude_coverage_counts_every_tool_the_installed_matchers_cover[PowerShell-protect-bash]",
      "merge-coverage-ignores-powershell"),
-    ("tools/skyguard/health.py", "    return tool in CLAUDE_COVERED_TOOLS or (isinstance(tool, str) and tool.startswith(CLAUDE_COVERED_PREFIX))",
+    ("tools/skyguard/health.py", "    return tool in CLAUDE_COVERED_TOOLS or (isinstance(tool, str) and CLAUDE_COVERED_MCP.fullmatch(tool) is not None)",
      "    return tool in CLAUDE_COVERED_TOOLS",
      _MERGE + "test_skyguard_coverage.py::test_claude_coverage_counts_every_tool_the_installed_matchers_cover[mcp__devbench-vr__console-protect-mcp]",
      "merge-coverage-ignores-devbench-mcp"),
@@ -5367,9 +5368,11 @@ _RTB_CLAUSES = [
      "    if False:", _cxr("workdir")),
     ("codex-patch-tool-case", _CX, 'if name.lower() in ("apply_patch", "applypatch"):', 'if name in ("apply_patch", "applypatch"):',
      _cxr("patch-case")),
-    ("codex-unified-exec-cmd-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars")', '_COMMAND_KEYS = ("command", "chars")',
+    ("codex-unified-exec-cmd-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars", "script")',
+     '_COMMAND_KEYS = ("command", "chars", "script")',
      _cxr("unknown-cmd-key")),
-    ("codex-write-stdin-chars-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars")', '_COMMAND_KEYS = ("command", "cmd")',
+    ("codex-write-stdin-chars-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars", "script")',
+     '_COMMAND_KEYS = ("command", "cmd", "script")',
      _cxr("write-stdin")),
     ("codex-patch-under-unknown-key", _CX, "            if body is not None:", "            if False:",
      _cxr("unknown-patch-key")),
@@ -6661,3 +6664,124 @@ MUTATIONS += [
                  "tests/test_skydoctor.py::test_an_expired_lock_lift_is_relocked_not_stranded",
                  id="p6final-doctor-relocks-expired-lift"),
 ]
+
+
+# ---- Plan 8 T6 (lane p8-deferred): deferred items fixed in Plan 8. One twin per clause, each killed by the named test.
+# Rows 18-20, prefs: an unclosed fence is plain text, a fence closes only on its own character, the `(...)` variant
+# heading is the section, a near-miss heading is said and audited, the read is bounded, a section beyond the bound
+# says why it is missing, and a section cut by the bound is marked as cut.
+_P8P = "tools/skyguard/prefs.py"
+_P8PT = "tests/test_skyguard_prefs.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_P8P, "            end = next((j for j in range(i + 1, len(lines)) if _closes(lines[j], m.group(1))), None)",
+     "            end = next((j for j in range(i + 1, len(lines)) if _closes(lines[j], m.group(1))), len(lines) - 1)",
+     _P8PT + "test_an_unclosed_fence_does_not_swallow_the_sections_after_it", "p8t6-prefs-unclosed-fence-is-text"),
+    (_P8P, "    return bool(m) and m.group(1)[0] == opener[0] and len(m.group(1)) >= len(opener) and \\",
+     "    return bool(m) and len(m.group(1)) >= len(opener) and \\",
+     _P8PT + "test_a_closed_fence_still_hides_headings_inside_it", "p8t6-prefs-fence-closer-same-character"),
+    (_P8P, r'_HEADING = re.compile(r"^##[ \t]+my[ \t]+preferences[ \t]*(?:\([^)\n]*\)[ \t]*)?:?[ \t]*#*[ \t]*$", re.I)',
+     r'_HEADING = re.compile(r"^##[ \t]+my[ \t]+preferences[ \t]*:?[ \t]*#*[ \t]*$", re.I)',
+     _P8PT + "test_the_variant_heading_with_a_parenthetical_is_the_section", "p8t6-prefs-variant-heading"),
+    (_P8P, "        if near:\n", "        if False:\n",
+     _P8PT + "test_a_near_miss_heading_says_so_and_is_audited", "p8t6-prefs-near-miss-said"),
+    (_P8P, "            data = fh.read(READ_CAP)\n", "            data = fh.read()\n",
+     _P8PT + "test_the_read_is_bounded", "p8t6-prefs-read-bounded"),
+    (_P8P, "        if cut:\n            return _not_injected(", "        if False:\n            return _not_injected(",
+     _P8PT + "test_the_read_is_bounded", "p8t6-prefs-cut-says-why"),
+    (_P8P, "    elif cut and not ended:", "    elif False:",
+     _P8PT + "test_a_section_cut_by_the_read_cap_says_it_was_cut", "p8t6-prefs-cut-section-marked"),
+]]
+# Row 24: the launcher's scrub keeps SystemDrive, and a minimal env elsewhere cannot drop it unnoticed.
+# Row 26: the catastrophic-regex test arms the reaper, and the reaper really ends a spinning process (per platform: the
+# branch that runs there).
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tests/run_harness_tests.py", 'FORWARDED_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", ', 'FORWARDED_ENV = ("SYSTEMROOT", ',
+     "tests/test_env_scrub.py::test_the_launcher_scrub_keeps_systemroot_and_systemdrive", "p8t6-launcher-keeps-systemdrive"),
+    ("tests/test_skyguard_lock.py",
+     '            "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE", "C:"), "COMSPEC": str(SYS32 / "cmd.exe"), "SKYGUARD_NO_PAUSE": "1",',
+     '            "COMSPEC": str(SYS32 / "cmd.exe"), "SKYGUARD_NO_PAUSE": "1",',
+     "tests/test_env_scrub.py::test_every_minimal_env_that_keeps_systemroot_keeps_systemdrive",
+     "p8t6-every-minimal-env-keeps-systemdrive"),
+    ("tests/test_python_fallback.py", '    run_py.write_text(src.replace(needle, reaper + "    re.match(',
+     '    run_py.write_text(src.replace(needle, "    import re\\n" + "    re.match(',
+     "tests/test_python_fallback.py::test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget",
+     "p8t6-catastrophic-test-arms-the-reaper"),
+]]
+MUTATIONS += [
+    pytest.param("tests/spin_reaper.py", "            k32.TerminateProcess(h, 9)\n", "            pass\n",
+                 "tests/test_spin_reaper.py::test_a_spinning_process_is_ended_at_the_deadline",
+                 marks=pytest.mark.skipif(sys.platform != "win32", reason="the Windows branch runs on Windows"),
+                 id="p8t6-reaper-terminates-windows"),
+    pytest.param("tests/spin_reaper.py", "    os.kill(pid, signal.SIGKILL)\n", "    pass\n",
+                 "tests/test_spin_reaper.py::test_a_spinning_process_is_ended_at_the_deadline",
+                 marks=pytest.mark.skipif(sys.platform == "win32", reason="the POSIX branch runs on POSIX"),
+                 id="p8t6-reaper-terminates-posix"),
+]
+# Rows 22/51: the plan docs' links resolve under CI's own check.
+MUTATIONS.append(pytest.param(
+    "docs/superpowers/plans/2026-10-02-plan3-closeout.md",
+    "plan3's own example of a relative link to skse-cross-compile.md",
+    "plan3's own [skse-cross-compile.md](skse-cross-compile.md) example",
+    "tests/test_markdown_links.py::test_every_relative_markdown_link_resolves", id="p8t6-plan-doc-link-broken"))
+# Row 52: any DevBench server name, in the installed matcher and in health's count of what it covers.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*",',
+     '"matcher": "mcp__devbench.*",',
+     "tests/test_repo_invariants.py::test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher",
+     "p8t6-devbench-matcher-prefix-only"),
+    ("tools/skyguard/health.py", 'CLAUDE_COVERED_MCP = re.compile(r"mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*")',
+     'CLAUDE_COVERED_MCP = re.compile(r"mcp__devbench.*")',
+     "tests/test_skyguard_coverage.py::test_every_devbench_spelling_is_covered_and_judged[mcp__DevBench-vr__console]",
+     "p8t6-health-counts-prefix-only"),
+]]
+# Row 54: an archive writer in the install gets its own note; its redirect keeps the redirect note.
+# Row 55: Codex `script` is command text; two command fields are refused. Row 57: an apply_patch Delete is audited
+# under its rule's own hook.
+_P8WT = "tests/test_skyguard_writes.py::"
+_P8CR = "tests/test_skyguard_codex_routes.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/writes.py", '                notes["S-WRITE-ARCHIVE" if w in archives else "S-WRITE-INSTALL"].append(_name(w))',
+     '                notes["S-WRITE-INSTALL"].append(_name(w))',
+     _P8WT + "test_an_archive_writer_in_the_install_gets_the_archive_note[compress-archive]",
+     "rule-S-WRITE-ARCHIVE-note-routed"),
+    ("tools/skyguard/writes.py", "        archives = set(tool_write_targets(e)) if e.program in ARCHIVE_PROGRAMS else set()",
+     "        archives = set(write_targets(e)) if e.program in ARCHIVE_PROGRAMS else set()",
+     _P8WT + "test_a_redirect_on_an_archive_writer_keeps_the_redirect_note", "rule-S-WRITE-ARCHIVE-only-the-archive"),
+    ("tools/skyguard/writes.py", '"7z.exe", "zip", "tar"))', '"7z.exe", "zip"))',
+     _P8WT + "test_an_archive_writer_in_the_install_gets_the_archive_note[tar]", "rule-S-WRITE-ARCHIVE-tar"),
+    ("tools/skyguard/adapters/codex.py", '_COMMAND_KEYS = ("command", "cmd", "chars", "script")',
+     '_COMMAND_KEYS = ("command", "cmd", "chars")',
+     _P8CR + "test_codex_route_rows[rt-codex-script-key]", "p8t6-codex-script-key-read"),
+    ("tools/skyguard/adapters/codex.py", "        if len(keys) > 1:\n", "        if False:\n",
+     _P8CR + "test_codex_route_rows[rt-codex-two-command-keys]", "p8t6-codex-two-command-fields-refused"),
+    ("tools/skyguard/engine.py", '    audit.rule(rules.RULES[rid]["hook"], rid, "deny", reason)',
+     '    audit.rule("protect-files", rid, "deny", reason)',
+     _P8CR + "test_a_patch_delete_is_audited_under_its_rules_own_hook", "p8t6-patch-delete-audit-label"),
+]]
+# Row 49: the prompt's authorization form lists exactly the parser's allowlist, whichever side changes alone.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/inventory-runtimes.py", '               "node": ("OpenJS.NodeJS", "OpenJS.NodeJS.LTS")}',
+     '               "node": ("OpenJS.NodeJS", "OpenJS.NodeJS.LTS", "OpenJS.NodeJS.Nightly")}',
+     "tests/test_setup_prompt.py::test_the_authorization_form_lists_exactly_the_parsers_allowlist",
+     "p8t6-allowlist-grows-without-the-prompt"),
+    ("SETUP_PROMPT.txt", "for python, Git.Git for git, and OpenJS.NodeJS", "for python, and OpenJS.NodeJS",
+     "tests/test_setup_prompt.py::test_the_authorization_form_lists_exactly_the_parsers_allowlist",
+     "p8t6-prompt-drops-an-allowed-id"),
+]]
+# T4 claims audit K6: `find` is judged as GNU find on every dialect, and its -exec program by argv.
+# K1: a shadowed ask says it was let through, and `guards off` says confirmation prompts are shadowed too.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/shellparse.py", '            if p == "find":\n', '            if p == "find" and self.d == "bash":\n',
+     "tests/test_skyguard_deletes.py::test_gnu_find_deletes_are_judged_on_every_dialect[delete-powershell]",
+     "p8t6-find-on-every-dialect"),
+    ("tools/skyguard/shellparse.py", '                    r = _Resolver("bash", iv, iq, iy, (), self.cd, "", self.seg, [], self.depth + 1, self.ctx,',
+     '                    r = _Resolver(self.d, iv, iq, iy, (), self.cd, "", self.seg, [], self.depth + 1, self.ctx,',
+     "tests/test_skyguard_deletes.py::test_gnu_find_deletes_are_judged_on_every_dialect[exec-rm-powershell]",
+     "p8t6-find-exec-runs-by-argv"),
+    ("tools/skyguard/engine.py", '        head = SHADOW_ASK_HEAD if v.decision == "ask" else SHADOW_HEAD\n',
+     "        head = SHADOW_HEAD\n",
+     "tests/test_skyguard_shadow.py::test_an_ask_is_converted_too", "p8t6-shadowed-ask-says-asked"),
+    ("tools/skyguard/cli.py", "a refusal or a confirmation prompt becomes an allow", "a refusal becomes an allow",
+     "tests/test_skyguard_shadow.py::test_guards_off_records_a_session_bound_expiring_guards_lift",
+     "p8t6-guards-off-names-confirmation-prompts"),
+]]

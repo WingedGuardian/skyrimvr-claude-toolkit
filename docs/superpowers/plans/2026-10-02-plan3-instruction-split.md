@@ -488,7 +488,7 @@ except for the edits each bullet lists.
 - [ ] **Step 2: `docs/container-vs-windows.md`.** Append `## Using the devcontainer`, holding the Optional
   Devcontainer section verbatim (L319–342). Drop its sentence "See `docs/container-vs-windows.md` for the
   full routing guide", because that is now this file. Add `docs/skse-cross-compile.md` as a relative link
-  `[skse-cross-compile.md](skse-cross-compile.md)`.
+  (link text and target both `skse-cross-compile.md`, the file being in the same folder).
 - [ ] **Step 3: `docs/safety-philosophy.md`.** Append `## How the guards resolve "the install"` (core
   L525–540: RESOLVED history with the MEASURED 71/443/7,641 figures, fail-closed, broken env file, relative
   paths). Append `## Why so few prompts` (L559–563). Append `## Is the guard actually running?`

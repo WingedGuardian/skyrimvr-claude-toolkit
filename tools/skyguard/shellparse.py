@@ -2249,7 +2249,10 @@ class _Resolver:
                 return self._ps_shell(p, k)
             if p == "cmd":
                 return self._cmd_shell(k)
-            if p == "find" and self.d == "bash":
+            # Plan 8 T6 (T4 audit K6): `find` is ambiguous on Windows -- System32's find.exe searches text, Git's
+            # usr/bin find deletes (-delete, -exec rm), and PATH order picks one. An ambiguous program is judged as
+            # its destructive binary, on every dialect (it was bash only, so Codex's PowerShell let -delete through).
+            if p == "find":
                 return self._find(k)
             if self.d == "powershell":
                 if p == "invoke-expression":
@@ -2497,7 +2500,9 @@ class _Resolver:
                 if iv:
                     if self.depth + 1 > MAX_DEPTH:
                         raise ParseError("nesting deeper than %d" % MAX_DEPTH)
-                    r = _Resolver(self.d, iv, iq, iy, (), self.cd, "", self.seg, [], self.depth + 1, self.ctx,
+                    # Plan 8 T6: find runs the -exec program itself, by argv, never through the calling shell, so
+                    # `rm` there is rm, not PowerShell's Remove-Item alias (whose `-f` would bind as -Filter).
+                    r = _Resolver("bash", iv, iq, iy, (), self.cd, "", self.seg, [], self.depth + 1, self.ctx,
                                   self.recurse, False)
                     self.made += r.run()
                 continue

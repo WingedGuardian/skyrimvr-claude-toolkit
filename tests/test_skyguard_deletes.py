@@ -499,3 +499,30 @@ def test_echoing_the_recycle_bin_call_is_not_a_delete():
 def test_expand_assigned(word, want):
     cmd = 'P="C:/G"; B="$P/.claude/backups"; D=a; D=b'
     assert deletes._expand_assigned(word, cmd) == want
+
+
+# Plan 8 T6 (T4 claims audit K6): `find` is ambiguous on Windows -- System32's find.exe searches text, Git's usr/bin
+# find deletes with -delete / -exec rm, and which one runs depends on PATH order. MEASURED before the fix: in the
+# PowerShell and cmd dialects (Codex's shell is PowerShell) `find <Data> -delete` was allowed. Ruling: an ambiguous
+# program is judged as its destructive binary, on every dialect.
+_FIND_DEL = ("Blocked: this deletes {} inside the Skyrim install.\n"
+             "A mod manager cannot restore your own files there; if you mean it, run it yourself.")
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "cmd"])
+@pytest.mark.parametrize("command,name", [
+    ('find "<i>/Data" -delete', "Data"),
+    ('find "<i>/Data" -name "*.bak" -delete', "*.bak"),
+    ('find "<i>/Data" -exec rm -f {} +', "Data"),
+], ids=["delete", "name-delete", "exec-rm"])
+def test_gnu_find_deletes_are_judged_on_every_dialect(shell, command, name):
+    got, fired = decide(command.replace("<i>", INSTALL), shell=shell)
+    assert (got, fired) == (("deny", _FIND_DEL.format(name)), {"S-DEL-INSTALL"})
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "cmd"])
+@pytest.mark.parametrize("command", ['find /i "x" "<i>/Data/a.txt"', 'find "<i>/Data" -name x.txt',
+                                     "find C:/Temp/x -delete"], ids=["find-exe-search", "gnu-search", "outside"])
+def test_a_find_that_deletes_nothing_protected_stays_allowed(shell, command):
+    """The twins: find.exe's own text search, a GNU search, and a delete outside the protected folders."""
+    assert decide(command.replace("<i>", INSTALL), shell=shell) == (("allow", ""), set())
