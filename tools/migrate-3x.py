@@ -417,17 +417,19 @@ def _has_prefs_section(text: str) -> bool:
             sys.path.pop(0)
 
 
-def build_block(name: str, digest: str, title: str, intro: str, content) -> str:
+def build_block(name: str, digest: str, title: str, intro: str, content, nl: str = "\n") -> str:
+    """One marked block. Its own lines end with `nl` (the local knowledgebase's style); the carried `content`
+    is inserted exactly as it is -- a CRLF file does not get its carried text's lone LFs rewritten."""
     # The heading comes FIRST: the session hook's preferences section runs up to the next heading, so a marker
     # line ahead of it would be read as part of whatever `## My preferences` section precedes the block.
-    out = ["", "## " + title, "<!-- {} BEGIN {} sha256={} -->".format(MARK, name, digest), "", intro]
-    if content is not None:
-        if not content.endswith("\n"):
-            content += "\n"
-        f = _fence(content)
-        out += ["", f + "text", content + f]
-    out.append("<!-- {} END {} sha256={} -->".format(MARK, name, digest))
-    return "\n".join(out) + "\n"
+    head = ["", "## " + title, "<!-- {} BEGIN {} sha256={} -->".format(MARK, name, digest), "", intro]
+    end = "<!-- {} END {} sha256={} -->".format(MARK, name, digest) + nl
+    if content is None:
+        return nl.join(head) + nl + end
+    if not content.endswith("\n"):
+        content += nl
+    f = _fence(content)
+    return nl.join(head + ["", f + "text"]) + nl + content + f + nl + end
 
 
 # --------------------------------------------------------------------------------------- settings --
@@ -549,6 +551,7 @@ def _write_checked(path: Path, data: bytes):
 
 
 _PREFS_FENCE = re.compile(r"^[ \t]{0,3}(```|~~~)")    # the session hook's own fence test (skyguard/prefs.py)
+_FENCE_RUN = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 
 
 def _open_fence(text: str):
@@ -558,7 +561,8 @@ def _open_fence(text: str):
     for line in text.splitlines():
         m = _PREFS_FENCE.match(line)
         if m:
-            token = m.group(1) if token is None else None
+            # The full run (```` or ~~~~~), so the closer this tool appends is as long as the opener.
+            token = _FENCE_RUN.match(line).group(1) if token is None else None
     return token
 
 
@@ -567,7 +571,8 @@ def _sh_quote(value: str) -> str:
 
 
 def paths_file(values: dict, how: str, src_label: str, env: dict) -> str:
-    out = ["# Written by tools/migrate-3x.py: the paths your 3.x CLAUDE.md held, read from {}.".format(src_label),
+    label = re.sub(r"[\r\n]+", " ", src_label)         # a folder name with a newline stays in the comment
+    out = ["# Written by tools/migrate-3x.py: the paths your 3.x CLAUDE.md held, read from {}.".format(label),
            "# setup.sh reads this so that a path you had corrected by hand is kept, not re-detected.",
            "# {} (exact = a shipped rendering; searched = found line by line in a file you had edited).".format(how)]
     for name in sorted(values):
@@ -687,13 +692,20 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
         return 0
 
     now = _now()
-    run_dir = _unique_dir(root / STORE, now.strftime("%Y%m%d_%H%M%S"))
+    failed_before = state.get("failed_run")
+    retry = bool(failed_before) and (root / failed_before).is_dir()
+    run_dir = root / failed_before if retry else _unique_dir(root / STORE, now.strftime("%Y%m%d_%H%M%S"))
     run_rel = run_dir.relative_to(root).as_posix()
-    log = ["3.x -> 4.0 migration, {}".format(now.isoformat(timespec="seconds")), "source: " + src.label, ""]
-    rc = 0
+    log = ["", "=" * 60] if retry else []
+    log += ["3.x -> 4.0 migration, {}{}".format(now.isoformat(timespec="seconds"),
+                                                " -- RETRY of the failed run recorded above" if retry else ""),
+            "source: " + src.label, ""]
+    if retry:
+        out("  (retrying the failed run in {} -- no new folder)".format(run_rel))
+    rc, unexpected = 0, None
     try:
         try:
-            run_dir.mkdir(parents=True)
+            run_dir.mkdir(parents=True, exist_ok=retry)
         except OSError as e:
             raise _Failed("could not create {}: {}".format(run_rel, e))
         # 1. Backups FIRST: every 3.x file and the current KNOWLEDGEBASE.local.md, each read back.
@@ -711,9 +723,9 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
                 log.append("UNDO {}: it did not exist before; send it to the Recycle Bin".format(LOCAL_KB))
         # 2. The carried paths: one copy for this run, one stable copy setup.sh reads.
         if paths_text is not None:
-            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8"))
+            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))
             if paths_new:
-                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8"))
+                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))
                 state["carried_paths"] = paths
                 log.append("wrote {}/carried-paths.env (copy of this run's: {}/carried-paths.env); "
                            "an earlier one, if any, is in its own run folder".format(STORE, run_rel))
@@ -753,11 +765,11 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
                     # A `## My preferences` heading ahead of the blocks: the session hook reads the FIRST one, so
                     # text carried below can never become the injected preferences, whatever it contains.
                     prefix += "\n## My preferences\n\n"
-            appended = (prefix + "".join(build_block(n, d, t, intro.format(run=run_rel, n=n, src=src.label), c)
-                                         for _, (n, d, t, intro, c) in blocks)).encode("utf-8", "surrogateescape")
             old = local_bytes or b""
-            if old.count(b"\r\n") * 2 > old.count(b"\n"):          # keep a CRLF file CRLF
-                appended = re.sub(rb"(?<!\r)\n", b"\r\n", appended)
+            nl = "\r\n" if old.count(b"\r\n") * 2 > old.count(b"\n") else "\n"     # a CRLF file stays CRLF
+            appended = (prefix.replace("\n", nl) + "".join(
+                build_block(n, d, t, intro.format(run=run_rel, n=n, src=src.label), c, nl)
+                for _, (n, d, t, intro, c) in blocks)).encode("utf-8", "surrogateescape")
             sep = b"" if not old or old.endswith(b"\n") else (b"\r\n" if b"\r\n" in old else b"\n")
             new = old + sep + appended
             try:
@@ -770,22 +782,33 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
                 carried[key] = {"run": run_rel}
                 out("  {}: carried into {} (marked block)".format(key.split(":")[0], LOCAL_KB))
                 log.append("carried the 3.x {} into {} (marked block)".format(key.split(":")[0], LOCAL_KB))
-    except (_Failed, OSError) as e:
+    except Exception as e:                    # noqa: BLE001 -- ANY failure is recorded; the unforeseen re-raised
         rc = 1
+        if not isinstance(e, (_Failed, OSError)):
+            unexpected = e
+        what = "{}: {}".format(type(e).__name__, e) if unexpected else str(e)
         out("migrate-3x: FAILED -- {}. What was done before the failure is listed in {}/MIGRATION.txt; "
-            "nothing was deleted.".format(e, run_rel))
-        log += ["", "FAILED: {}".format(e), "The steps above this line were done; nothing after it was."]
+            "nothing was deleted. Running it again reuses that folder.".format(what, run_rel))
+        log += ["", "FAILED: {}".format(what), "The steps above this line were done; nothing after it was."]
     finally:
         log += ["", "Nothing was deleted. Every file this run wrote is listed above with its undo."]
         try:
             if run_dir.is_dir():
-                (run_dir / "MIGRATION.txt").write_text("\n".join(log) + "\n", encoding="utf-8")
+                with open(run_dir / "MIGRATION.txt", "a" if retry else "w", encoding="utf-8",
+                          errors="surrogateescape") as fh:
+                    fh.write("\n".join(log) + "\n")
             state["carried"], state["copied"] = carried, copied
+            if rc and run_dir.is_dir():
+                state["failed_run"] = run_rel
+            else:
+                state.pop("failed_run", None)
             _write_atomic(root / STORE / "state.json",
                           (json.dumps(state, indent=2, sort_keys=True) + "\n").encode("utf-8"))
         except OSError as e:
             rc = 1
             out("migrate-3x: could not write the record ({}) -- the backups in {} are intact".format(e, run_rel))
+    if unexpected is not None:
+        raise unexpected                      # recorded above; the traceback is the rest of the report
     if rc == 0:
         out("migrate-3x: done. Backups and the undo steps: {}/MIGRATION.txt".format(run_rel))
         _codex_note(out)
@@ -795,6 +818,14 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
 def _codex_note(out):
     out("  Codex: 3.x shipped no Codex hook definitions, so there is nothing to re-approve -- approve the 4.0 "
         "hooks once in Codex's /hooks.")
+
+
+def _say(line: str):
+    """Print a line whatever it holds: undecodable bytes (surrogates) and characters the console cannot show
+    become replacement marks ON SCREEN only -- the files keep the exact bytes."""
+    data = line.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(data.encode(enc, "replace").decode(enc, "replace"))
 
 
 def main(argv=None) -> int:
@@ -811,7 +842,7 @@ def main(argv=None) -> int:
     if a.from_dir is not None and not a.from_dir.is_dir():
         print("migrate-3x: --from {} is not a folder".format(a.from_dir), file=sys.stderr)
         return 2
-    return run(root, a.from_dir.resolve() if a.from_dir else None, a.dry_run)
+    return run(root, a.from_dir.resolve() if a.from_dir else None, a.dry_run, out=_say)
 
 
 if __name__ == "__main__":

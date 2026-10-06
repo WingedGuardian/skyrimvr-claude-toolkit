@@ -73,9 +73,9 @@ def tree(root: Path) -> dict:
             for p in sorted(root.rglob("*")) if p.is_file() and "__pycache__" not in p.parts}
 
 
-def migrate(root: Path, *args, tool: Path = TOOL):
-    r = subprocess.run([sys.executable, str(tool), "--root", str(root), *args],
-                       capture_output=True, text=True, encoding="utf-8", timeout=120)
+def migrate(root: Path, *args, tool: Path = TOOL, env=None):
+    r = subprocess.run([sys.executable, str(tool), "--root", str(root), *args], env=env,
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
     return r.returncode, r.stdout + r.stderr
 
 
@@ -547,7 +547,9 @@ def test_a_crlf_local_knowledgebase_stays_crlf(tmp_path):
     (root / "CLAUDE.md").write_bytes(edited_claude())
     assert run_inproc(root)[0] == 0
     data = (root / "KNOWLEDGEBASE.local.md").read_bytes()
-    assert data.count(b"\n") == data.count(b"\r\n"), "mixed line endings"
+    assert edited_claude() in data, "the carried LF text was rewritten"       # carried text: exactly as it was
+    wrapper = data.replace(edited_claude(), b"")
+    assert wrapper.count(b"\n") == wrapper.count(b"\r\n"), "the block's own lines are not CRLF"
 
 
 def test_the_settings_report_names_removed_and_changed_hooks(tmp_path):
@@ -614,6 +616,83 @@ def test_a_new_local_knowledgebase_starts_with_an_empty_preferences_section(tmp_
     assert run_inproc(root)[0] == 0
     local = (root / "KNOWLEDGEBASE.local.md").read_text(encoding="utf-8")
     assert local.startswith("# Local knowledgebase\n\n## My preferences\n"), local[:80]
+
+
+@pytest.mark.parametrize("kind", ["only the path changed", "edited elsewhere too"])
+def test_a_cp1252_accented_path_is_carried_byte_exact_through_the_launcher(tmp_path, kind):
+    """A CLAUDE.md saved by Notepad as ANSI: the accented path is not UTF-8. The run must complete and carry
+    the exact bytes (T9 re-review N1: it crashed on every run)."""
+    root = make_391(tmp_path / "i", "mo2")
+    data = fx("CLAUDE.mo2.fixture").replace(
+        b"`C:/Temp/p8mig/mo2/MO2/overwrite/`", "`E:/Café Jörmungandr/overwrite/`".encode("cp1252"))
+    if kind == "edited elsewhere too":
+        data = data.replace(b"## Key Paths\n", b"## Key Paths\n\nmy line\n", 1)
+    (root / "CLAUDE.md").write_bytes(data)
+    # A Windows ANSI console: printing a character it cannot show must not kill the run.
+    ansi = dict(os.environ, PYTHONIOENCODING="cp1252:strict", PYTHONUTF8="0")
+    rc, out = migrate(root, env=ansi)
+    assert rc == 0, out
+    stable = (root / ".claude" / "backups" / "migrate-3x" / "carried-paths.env").read_bytes()
+    assert b"SKYRIM_3X_MO2_OVERWRITE='E:/Caf\xe9 J\xf6rmungandr/overwrite'" in stable, stable
+    assert (run_dir(root) / "CLAUDE.md").read_bytes() == data
+    if kind == "edited elsewhere too":
+        assert data in (root / "KNOWLEDGEBASE.local.md").read_bytes(), "the edited file was not carried"
+    rc, out2 = migrate(root)
+    assert rc == 0 and "nothing new" in out2, out2
+
+
+_BOOM = (
+    "import importlib.util, sys\n"
+    "s = importlib.util.spec_from_file_location('m', sys.argv[1]); m = importlib.util.module_from_spec(s)\n"
+    "s.loader.exec_module(m)\n"
+    "def boom(*a, **k):\n"
+    "    raise RuntimeError('unforeseen')\n"
+    "m.build_block = boom\n"
+    "sys.exit(m.main(['--root', sys.argv[2]]))\n"
+)
+
+
+def test_an_unforeseen_error_is_recorded_and_a_retry_reuses_the_folder(tmp_path):
+    """Any exception -- not only the ones the tool anticipates -- leaves a FAILED line in MIGRATION.txt and a
+    non-zero exit; running again (still failing, then fixed) reuses that run's folder instead of adding one
+    per attempt. Driven through main(), the launcher's entry, in a child process."""
+    root = make_391(tmp_path / "i")
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    store = root / ".claude" / "backups" / "migrate-3x"
+    for attempt in (1, 2):
+        r = subprocess.run([sys.executable, "-c", _BOOM, str(TOOL), str(root)], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=120)
+        assert r.returncode != 0, r.stdout + r.stderr
+        assert "RuntimeError" in r.stderr, r.stderr
+        logs = sorted(store.glob("*/MIGRATION.txt"))
+        assert len(logs) == 1, "a retry added a new run folder: {}".format(logs)
+        recorded = logs[0].read_text(encoding="utf-8").count("FAILED: RuntimeError: unforeseen")
+        assert recorded == attempt, "the unforeseen failure was not recorded"
+    rd = run_dir(root)
+    assert (root / "KNOWLEDGEBASE.local.md").read_bytes() == USER_LOCAL_KB
+    rc, out = migrate(root)
+    assert rc == 0, out
+    assert run_dir(root) == rd, "the retry made a new folder"
+    assert edited_claude() in (root / "KNOWLEDGEBASE.local.md").read_bytes()
+    state = json.loads((root / ".claude" / "backups" / "migrate-3x" / "state.json").read_text(encoding="utf-8"))
+    assert "failed_run" not in state
+
+
+def test_a_newline_in_the_source_label_stays_in_its_comment():
+    text = M.paths_file({"GAME_ROOT": "C:/G"}, "exact", "x\nSKYRIM_3X_GAME_ROOT='evil'\r\n", {})
+    lines = text.splitlines()
+    assert all(ln.startswith(("#", "SKYRIM_3X_")) for ln in lines), lines
+    assert [ln for ln in lines if ln.startswith("SKYRIM_3X_GAME_ROOT=")] == ["SKYRIM_3X_GAME_ROOT='C:/G'"], lines
+
+
+def test_an_unclosed_four_backtick_fence_is_closed_with_four(tmp_path):
+    root = make_391(tmp_path / "i")
+    mine = b"## My preferences\n\n- x\n\n````\ncode\n"
+    (root / "KNOWLEDGEBASE.local.md").write_bytes(mine)
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    assert run_inproc(root)[0] == 0
+    added = (root / "KNOWLEDGEBASE.local.md").read_bytes()[len(mine):]
+    assert added.startswith(b"````\n"), added[:20]
 
 
 def test_dry_run_writes_nothing(tmp_path):
@@ -723,6 +802,24 @@ def test_snapshot_refuses_when_the_drive_is_nearly_full(tmp_path):
     r = subprocess.run([BASH, str(SNAP), str(root)], capture_output=True, text=True, env=env, timeout=180)
     assert r.returncode == 3, r.stdout + r.stderr
     assert not list((root / ".claude" / "backups").glob("pre-update-*")), "copied anyway"
+
+
+def test_snapshot_counts_each_file_once_against_free_space(tmp_path):
+    """Free space for 1.5x what the copy really needs: it must fit. Counting the files listed twice (the
+    fixed list and the update-overwrites list overlap) would make it refuse (T9 re-review N3)."""
+    root = make_391(tmp_path / "i")
+    assert snapshot(root)[0] == 0
+    d = next((root / ".claude" / "backups").glob("pre-update-*"))
+    need = sum(p.stat().st_size for p in d.rglob("*") if p.is_file() and p.name != "MANIFEST.txt")
+    shim = tmp_path / "bin"
+    shim.mkdir()
+    avail_kb = need * 3 // 2 // 1024 + 1
+    (shim / "df").write_bytes("#!/bin/bash\necho 'Filesystem 1024-blocks Used Available Capacity Mounted'\n"
+                              "echo 'X 99999999 1 {} 1% /'\n".format(avail_kb).encode("ascii"))
+    (shim / "df").chmod(0o755)
+    env = dict(os.environ, PATH=str(shim) + os.pathsep + os.environ["PATH"])
+    r = subprocess.run([BASH, str(SNAP), str(root)], capture_output=True, text=True, env=env, timeout=180)
+    assert r.returncode == 0, r.stdout + r.stderr
 
 
 def test_snapshot_refuses_a_folder_that_is_not_an_install(tmp_path):

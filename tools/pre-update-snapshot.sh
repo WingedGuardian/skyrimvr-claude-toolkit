@@ -48,9 +48,9 @@ while [ -e "$BACKUPS/pre-update-$STAMP" ]; do
 done
 DEST="$BACKUPS/pre-update-$STAMP"
 
-LIST=$(mktemp) || { echo "pre-update-snapshot: cannot create a temp file" >&2; exit 1; }
+LIST=$(mktemp) && UNIQ=$(mktemp) || { echo "pre-update-snapshot: cannot create a temp file" >&2; exit 1; }
 # The script's own temp file, removed by the script itself.
-trap 'rm -f "$LIST"' EXIT
+trap 'rm -f "$LIST" "$UNIQ"' EXIT
 
 for rel in CLAUDE.md AGENTS.md KNOWLEDGEBASE.md KNOWLEDGEBASE.local.md skyrim-paths.env \
            .claude/settings.json .claude/settings.local.json .claude/skyrim-paths.env \
@@ -75,7 +75,10 @@ fi
 
 # Room for it? The copy may not take more than 80% of the free space on the install's drive (it is normally a
 # few MB, but .claude/skills, .codex and .agents are copied whole). Unknown free space is said, not guessed.
-need=$( cd "$TARGET" && xargs -0 cat < "$LIST" 2>/dev/null | wc -c | tr -d ' ' ) || need=0
+# Each file ONCE: the "always" list and the "update overwrites" list overlap, and counting a file twice made
+# the space check refuse copies that fit (T9 re-review N3).
+sort -zu "$LIST" > "$UNIQ"
+need=$( cd "$TARGET" && xargs -0 cat < "$UNIQ" 2>/dev/null | wc -c | tr -d ' ' ) || need=0
 case "$need" in ''|*[!0-9]*) need=0 ;; esac
 free_kb=$(df -Pk "$TARGET" 2>/dev/null | awk 'NR==2 {print $4}')
 case "$free_kb" in
@@ -89,17 +92,14 @@ esac
 
 count=0
 failed=""
-seen=$'\n'
 while IFS= read -r -d '' rel; do
-    case "$seen" in *$'\n'"$rel"$'\n'*) continue ;; esac
-    seen="$seen$rel"$'\n'
     if mkdir -p "$DEST/$(dirname "$rel")" 2>/dev/null && cp -p "$TARGET/$rel" "$DEST/$rel" 2>/dev/null \
        && cmp -s "$TARGET/$rel" "$DEST/$rel"; then
         count=$((count + 1))
     else
         failed="$failed"$'\n'"  $rel"
     fi
-done < "$LIST"
+done < "$UNIQ"
 
 if [ "$count" -eq 0 ] && [ -z "$failed" ]; then
     echo "pre-update-snapshot: nothing in $TARGET that an update replaces -- nothing saved."

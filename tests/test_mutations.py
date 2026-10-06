@@ -4567,10 +4567,10 @@ _M3_CLAUSES = [
      _M3T + "test_a_corrected_path_is_kept_and_carried_whatever_the_verdict[renamed profile]"),
     # ... and every filled-in path is carried as data: this run's copy, and the stable one setup.sh reads ...
     ("m3x-carried-paths-run-copy", _M3,
-     '            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8"))', "            pass",
+     '            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))', "            pass",
      _M3T + "test_a_corrected_path_is_kept_and_carried_whatever_the_verdict[moved instance]"),
     ("m3x-carried-paths-stable-copy", _M3,
-     '                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8"))', "                pass",
+     '                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))', "                pass",
      _M3T + "test_a_corrected_path_is_kept_and_carried_whatever_the_verdict[corrected overwrite path]"),
     # ... found line by line in an EDITED file as well.
     ("m3x-paths-searched-in-edited-files", _M3, "        if len(found) > len(best):", "        if False:",
@@ -4607,7 +4607,46 @@ _M3_CLAUSES = [
      '                prefix = "# Local knowledgebase' + BS + 'n' + BS + 'n## My preferences' + BS + 'n' + BS + 'n"',
      '                prefix = ""', _M3T + "test_a_new_local_knowledgebase_starts_with_an_empty_preferences_section"),
     # Minor 8: a CRLF local knowledgebase stays CRLF.
-    ("m3x-crlf-local-kb-kept", _M3, '            if old.count(b"' + BS + 'r' + BS + 'n") * 2 > old.count(b"' + BS + 'n"):',
-     "            if False:", _M3T + "test_a_crlf_local_knowledgebase_stays_crlf"),
+    ("m3x-crlf-local-kb-kept", _M3,
+     '            nl = "' + BS + 'r' + BS + 'n" if old.count(b"' + BS + 'r' + BS + 'n") * 2 > old.count(b"' + BS + 'n") else "' + BS + 'n"',
+     '            nl = "' + BS + 'n"', _M3T + "test_a_crlf_local_knowledgebase_stays_crlf"),
+    # --- Fix round 2 (T9 re-review) ---
+    # N5: the carried text is inserted untouched; only the block's own lines follow the file's style.
+    ("m3x-carried-text-not-rewritten", _M3,
+     '    return nl.join(head + ["", f + "text"]) + nl + content + f + nl + end',
+     '    return nl.join(head + ["", f + "text"]) + nl + content.replace("' + BS + 'n", nl) + f + nl + end',
+     _M3T + "test_a_crlf_local_knowledgebase_stays_crlf"),
+    # N1: a value that is not UTF-8 is written with its exact bytes (both copies) ...
+    ("m3x-carried-paths-run-copy-lossless", _M3,
+     '            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))',
+     '            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8"))',
+     _M3T + "test_a_cp1252_accented_path_is_carried_byte_exact_through_the_launcher[only the path changed]"),
+    ("m3x-carried-paths-stable-copy-lossless", _M3,
+     '                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))',
+     '                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8"))',
+     _M3T + "test_a_cp1252_accented_path_is_carried_byte_exact_through_the_launcher[only the path changed]"),
+    # ... and printed without dying (the launcher's printer) ...
+    ("m3x-launcher-prints-any-value", _M3, "a.dry_run, out=_say)", "a.dry_run, out=print)",
+     _M3T + "test_a_cp1252_accented_path_is_carried_byte_exact_through_the_launcher[only the path changed]"),
+    # ... ANY exception is recorded as FAILED, and a retry reuses the failed run's folder.
+    ("m3x-any-failure-recorded", _M3,
+     "    except Exception as e:                    # noqa: BLE001 -- ANY failure is recorded; the unforeseen re-raised",
+     "    except (_Failed, OSError) as e:",
+     _M3T + "test_an_unforeseen_error_is_recorded_and_a_retry_reuses_the_folder"),
+    ("m3x-retry-reuses-failed-folder", _M3,
+     "    retry = bool(failed_before) and (root / failed_before).is_dir()", "    retry = False",
+     _M3T + "test_an_unforeseen_error_is_recorded_and_a_retry_reuses_the_folder"),
+    # Minor: a newline in the source label cannot break out of the env file's comment.
+    ("m3x-label-newline-stays-in-comment", _M3,
+     '    label = re.sub(r"[' + BS + 'r' + BS + 'n]+", " ", src_label)', "    label = src_label",
+     _M3T + "test_a_newline_in_the_source_label_stays_in_its_comment"),
+    # Minor: the fence closer is as long as the opener.
+    ("m3x-fence-closer-matches-opener", _M3,
+     "            token = _FENCE_RUN.match(line).group(1) if token is None else None",
+     "            token = m.group(1) if token is None else None",
+     _M3T + "test_an_unclosed_four_backtick_fence_is_closed_with_four"),
+    # N3: the snapshot counts each file once against free space.
+    ("snap-free-space-counts-each-file-once", _SN, 'sort -zu "$LIST" > "$UNIQ"', 'cat "$LIST" > "$UNIQ"',
+     _M3T + "test_snapshot_counts_each_file_once_against_free_space"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _M3_CLAUSES]
