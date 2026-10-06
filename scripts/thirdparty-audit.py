@@ -619,12 +619,14 @@ REGISTRY = [
     {"name": "PyNifly", "pins": [("regex", "docs/installing-tools.md", r"verified with:? (?P<v>\d+\.\d+\.\d+)"),
                                  ("regex", "agent/skills/skyrim-nif/SKILL.md", r"Verified on \*\*PyNifly (?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("github", "BadDogSkyrim/PyNifly"),
+     "newer_note": "29.1.0 was re-validated and rejected (2026-10-06): its Blender add-on strips effect shaders on a "
+                   "round trip when the texture is not beside the NIF; re-validate any newer release the same way",
      "refs": [{"pattern": r"(?m)^\| PyNifly \| (?P<v>\d+\.\d+\.\d+) \|", "files": [PINNED_DOWNLOADS]},
               {"pattern": r"PyNifly/releases/download/V(?P<v>\d+\.\d+\.\d+)/io_scene_nifly\.zip", "line": r"^\| PyNifly \|"}],
      "checks": [("follows_latest", {"pattern": r"(?i)latest release[^\n]*PyNifly|PyNifly[^\n]*latest release"}),
                 hashes("PyNifly", "https://api.github.com/repos/BadDogSkyrim/PyNifly/releases/tags/V{v}"),
                 hashes("PyNifly Blender add-on", "https://api.github.com/repos/BadDogSkyrim/PyNifly/releases/tags/V{v}"),
-                ("zip_paths", {"repo": "BadDogSkyrim/PyNifly", "asset": "io_scene_nifly.zip",
+                ("zip_paths", {"repo": "BadDogSkyrim/PyNifly", "asset": "io_scene_nifly.zip", "tag_format": "V{v}",
                                "pattern": r"(?<![\w/])(?:tools/pynifly/)?(?P<p>io_scene_nifly/[\w./-]+\.(?:dll|py))"})]},
     {"name": "DevBench", "pins": [("regex", "README.md", r"newest release the docs were read against is \*\*(?P<v>\d+\.\d+\.\d+)"),
                                   ("regex", "agent/skills/devbench/SKILL.md", r"unchanged in (?P<v>\d+\.\d+\.\d+) per the")],
@@ -1068,7 +1070,8 @@ def check_follows_latest(f, repo, name, pinned, tag_pin, args, rows, ctx, latest
 
 
 def check_zip_paths(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box):
-    tag = latest_box.get("v")
+    # The release users are told to download is the PINNED one; without a tag format, the latest release.
+    tag = args["tag_format"].format(v=pinned) if args.get("tag_format") and pinned else latest_box.get("v")
     if tag is None:
         raise CouldNotCheck("upstream release unknown")
     paths = documented_paths(repo, None, args["pattern"])

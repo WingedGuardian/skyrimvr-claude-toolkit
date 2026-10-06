@@ -18,6 +18,9 @@
 
 ### Dependencies (exact, hash-locked, refreshed with the reasons recorded)
 
+- **PyNifly pinned to 27.2.0 for both the library (`tools/pynifly`) and the Blender add-on.** 29.1.0 was re-validated and rejected: its Blender add-on strips effect shaders (and their textures and alpha) from a shape on an import/export round trip when the texture is not beside the NIF; 27.2.0 keeps them.
+- **Corrected the PyNifly DLL note:** the DLL actually loaded is `io_scene_nifly/NiflyDLL.dll`; the zip's `io_scene_nifly/pyn/NiflyDLL.dll` is never loaded, and `NifFile.Load` is not needed.
+- **Never round-trip an animated NIF through Blender:** the add-on drops animation controllers on both 27.2.0 and 29.1.0 (the skyrim-nif skill now says so).
 - **Removed the unused pins** from the container's Python requirements: pydantic (and pydantic-core), cattrs, mypy and pytest-cov
   (with coverage, attrs, annotated-types, mypy-extensions), plus the Windows-only `requirements-windows.txt/.lock` (pywin32).
   Nothing in the toolkit imported or ran any of them, so no behaviour changes; the hash lock goes from 20 packages to 10 and

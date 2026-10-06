@@ -38,10 +38,10 @@ Install them into the `tools/` folder in your game directory; the setup prompt w
   - The `time.clock = time.perf_counter` monkey-patch (recipe: the `skyrim-nif` skill) is still required (`time.clock` was removed in Python 3.8 — the only OTHER Python-version issue, also the only one ever reported upstream, still open/unfixed as [GitHub issue #80](https://github.com/niftools/pyffi/issues/80)).
   - Verify with that same interpreter: `python -c "import pyffi; print(pyffi.__version__)"`.
 - **PyNifly** — SSE BSTriShape read/write + animation/controller authoring + the independent parse gate.
-  - Acquire: download `io_scene_nifly.zip` of release **V29.1.0** (see [Pinned downloads](#pinned-downloads)), check its SHA-256, and extract it into `tools/pynifly/` so the prebuilt DLL lands at `tools/pynifly/io_scene_nifly/NiflyDLL.dll` (PyNifly 29.x, the version this was verified with: 29.1.0; releases before 29.x put it at `tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll`). No build step. (A `git clone` of the repo does NOT contain the compiled DLL — it only ships in the release zip.)
-  - Verify: `python -c "import sys; sys.path.insert(0,'tools/pynifly/io_scene_nifly'); from pyn import pynifly"` (29.x loads the DLL on import; older releases need `pynifly.NifFile.Load(<path to pyn/NiflyDLL.dll>)` per the skyrim-nif skill).
+  - Acquire: download `io_scene_nifly.zip` of release **V27.2.0** (see [Pinned downloads](#pinned-downloads)), check its SHA-256, and extract it into `tools/pynifly/` so the prebuilt DLL lands at `tools/pynifly/io_scene_nifly/NiflyDLL.dll` (the version this was verified with: 27.2.0; the zip also contains `io_scene_nifly/pyn/NiflyDLL.dll`, and that copy is never loaded). One PyNifly version for the library and the Blender add-on: 29.1.0 failed re-validation (2026-10-06) because its Blender add-on strips effect shaders on a round trip when the texture is not beside the NIF. No build step. (A `git clone` of the repo does NOT contain the compiled DLL — it only ships in the release zip.)
+  - Verify: `python -c "import sys; sys.path.insert(0,'tools/pynifly/io_scene_nifly'); from pyn import pynifly"` (it loads the DLL on import (27.2.0 and later; `NifFile.Load` is a no-op)).
 - **Blender (headless)** — NIF mesh repair + render-to-PNG verification.
-  - Acquire: Blender **4.2.9 LTS** (`blender-4.2.9-windows-x64.zip`, see [Pinned downloads](#pinned-downloads)) — check its SHA-256, then install the PyNifly Blender add-on **27.2.0** (its own row there: the add-on version installed in the Blender this was tested with, not the 29.1.0 used by `tools/pynifly/`).
+  - Acquire: Blender **4.2.9 LTS** (`blender-4.2.9-windows-x64.zip`, see [Pinned downloads](#pinned-downloads)) — check its SHA-256, then install the PyNifly Blender add-on: the **same** 27.2.0 `io_scene_nifly.zip` as PyNifly above.
   - Verify: `blender --background --version`.
 - **NifSkope** — independent visual NIF render gate (GUI).
   - Acquire: **NifSkope v2.0.dev9** from the maintained hexabits fork (`NifSkope_2_0_2023-09-29-x64.7z`, see [Pinned downloads](#pinned-downloads)); check its SHA-256. The original niftools repo stopped at v2.0.dev7 (2017); dev9 is the build this toolkit was tested with.
@@ -65,7 +65,7 @@ ignoring case). A different hash means a different file than the one tested — 
 |---|---|---|---|---|
 | Champollion | v1.3.2 | `Champollion.v1.3.2.zip` | `ea53054276ac8006ccd3b323286bfbc6e34a454fa419d08da9bd440cbd31b383` | <https://github.com/Orvid/Champollion/releases/download/v1.3.2/Champollion.v1.3.2.zip> |
 | Caprica | v0.3.0 | `Caprica.v0.3.0.7z` | `0037e54cf3a1021e976278d9a637e8ae541aaf9ebeb8d274b6c2cfe32f4ee559` | <https://github.com/Orvid/Caprica/releases/download/v0.3.0/Caprica.v0.3.0.7z> |
-| PyNifly | 29.1.0 | `io_scene_nifly.zip` | `fa52960650fc81dc1e4ac41538c86ba838f9defc9b0fc73e864348a8b5a46dd6` | <https://github.com/BadDogSkyrim/PyNifly/releases/download/V29.1.0/io_scene_nifly.zip> |
+| PyNifly | 27.2.0 | `io_scene_nifly.zip` | `920a17c8c4001c4f2a12eff85aad8e54fd19ebcf7e828624733f1fb2bba972da` | <https://github.com/BadDogSkyrim/PyNifly/releases/download/V27.2.0/io_scene_nifly.zip> |
 | PyNifly Blender add-on | 27.2.0 | `io_scene_nifly.zip` | `920a17c8c4001c4f2a12eff85aad8e54fd19ebcf7e828624733f1fb2bba972da` | <https://github.com/BadDogSkyrim/PyNifly/releases/download/V27.2.0/io_scene_nifly.zip> |
 | Blender | 4.2.9 | `blender-4.2.9-windows-x64.zip` | `223cd22afc5cab3f8cb43006574f1c962ff9bb9e07418c3f4f2542b7c34899cb` | <https://download.blender.org/release/Blender4.2/blender-4.2.9-windows-x64.zip> |
 | NifSkope | v2.0.dev9 | `NifSkope_2_0_2023-09-29-x64.7z` | `8d608e558b2cdd32edb7e09acc26f491f8ec2faa11fac984682570df55330e0d` | <https://github.com/hexabits/nifskope/releases/download/v2.0.dev9/NifSkope_2_0_2023-09-29-x64.7z> |
@@ -74,8 +74,8 @@ ignoring case). A different hash means a different file than the one tested — 
 
 How each hash was obtained (MEASURED 2026-10-05): Champollion, Caprica and NifSkope were downloaded and hashed,
 and the unpacked `Champollion.exe`, `Caprica.exe` and `NifSkope.exe` are byte-identical to the copies this toolkit
-was tested with; both PyNifly rows equal the SHA-256 GitHub publishes for that release asset (29.1.0 was also
-fetched and hashed); Blender's row is the hash blender.org publishes in `blender-4.2.9.sha256`, and the
+was tested with; both PyNifly rows equal the SHA-256 GitHub publishes for that release asset (27.2.0 fetched and hashed
+2026-10-06; one file serves both rows); Blender's row is the hash blender.org publishes in `blender-4.2.9.sha256`, and the
 tested Blender reports `4.2.9 LTS`. `python scripts/thirdparty-audit.py` re-checks each published hash.
 
 **Nexus gives no direct download link and no published hash**, so the two Nexus rows cannot be checked before
