@@ -322,6 +322,9 @@ def _relock_due(project, st, now, audit) -> None:
     from . import lock
     try:
         res = lock.relock_expired(project, now)
+    except _state.StateBusy:
+        audit.log("skyguard", "RELOCK", "skipped: the state file is busy; the next guarded call retries")
+        return
     except (Exception, lock.SandboxViolation) as e:  # noqa: BLE001 -- the call's decision must stand
         audit.log("skyguard", "RELOCK", "FAILED: an expired lock lift could not be relocked ({})".format(
             e.__class__.__name__))

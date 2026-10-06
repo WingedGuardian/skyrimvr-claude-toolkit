@@ -982,3 +982,55 @@ def test_an_expired_lift_relocks_only_the_files_it_named(bed):
                                         "lifts": [x for x in st.lifts if x["session_id"] == SESSION]})
     _hook(bed, T0 + lock.LIFT_SECONDS + 1)
     assert _locked(bed, "Skyrim.esm") and not _locked(bed, "Update.esm")
+
+
+@needs_windows
+def test_a_cmd_style_unlock_with_no_lift_record_survives_hook_calls(bed):
+    """The user's own tools/skyguard-unlock.cmd records no lift: the hook must never undo that deliberate unlock, even
+    while another file's lift expires beside it. (Session start keeps its old behaviour for it.)"""
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    lock._remove_file(bed.path("Dawnguard.esm"), False)              # what the .cmd does: no lift, no record
+    assert not _locked(bed, "Dawnguard.esm")
+    for k in range(3):
+        _hook(bed, T0 + k)
+    assert not _locked(bed, "Dawnguard.esm")
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    for k in range(3):
+        _hook(bed, T0 + lock.LIFT_SECONDS + 1 + k)
+    assert _locked(bed, "Skyrim.esm") and not _locked(bed, "Dawnguard.esm")
+
+
+@needs_windows
+def test_a_busy_state_file_skips_the_relock_without_blocking_the_hook(bed):
+    from skyguard import state
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    lf = str(_state_file(bed)) + state.LOCK_SUFFIX
+    Path(lf).write_text("999999", encoding="ascii")                   # another writer holds the lock
+    t = time.monotonic()
+    v = _hook(bed, T0 + lock.LIFT_SECONDS + 1)
+    assert time.monotonic() - t < 2.0 and v.decision == "allow"
+    assert not _locked(bed, "Skyrim.esm") and "state file is busy" in _audit_log(bed)
+    os.unlink(lf)
+    _hook(bed, T0 + lock.LIFT_SECONDS + 2)                            # released: the next call relocks
+    assert _locked(bed, "Skyrim.esm")
+
+
+def test_the_state_lock_serialises_writers_and_breaks_a_stale_lock(tmp_path):
+    from skyguard import state
+    sf = tmp_path / ".skyguard" / "state.json"
+    body = {"v": 1, "lifts": [], "persistent": {}}
+    state.write(str(sf), body)
+    lf = Path(str(sf) + state.LOCK_SUFFIX)
+    assert not lf.exists()                                           # released after the write
+    lf.write_text("1", encoding="ascii")
+    with pytest.raises(state.StateBusy):
+        state.write(str(sf), body, wait=0.1)
+    old = time.time() - state.LOCK_STALE - 5
+    os.utime(str(lf), (old, old))
+    state.write(str(sf), body, wait=0.1)                             # a crashed holder's lock is broken
+    assert not lf.exists()
+    with state.locked(sf, 0.1):                                       # re-entrant inside one read-modify-write
+        state.write(str(sf), body, wait=0.1)

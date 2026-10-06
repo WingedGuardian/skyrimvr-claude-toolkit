@@ -106,11 +106,73 @@ def _shape_problem(data):
     return None
 
 
-def write(path, data: dict) -> None:
-    """Atomically write `data` with its checksum. Refuses (ValueError) anything `read()` would reject: an
-    unknown version, a malformed lift or persistent block, or more than MAX_BYTES. Temp file in the same
-    directory, then `os.replace`: a reader sees the old file or the new one, never a half-written one. On any
-    failure the old file is left and no temp file remains. The only sanctioned writer of state.json."""
+# ---- the state lock (Plan 6 final fix; minimal version, reconciled with the docs lane's at merge) -------------------
+# ONE lock file beside the state, `state.json.lock`, created exclusively. Every write takes it (waiting up to `wait`
+# seconds); a read-modify-write wraps the read AND the write in `locked()` so a concurrent writer cannot be lost between
+# them. Re-entrant within a process. A per-call hook path passes a SHORT wait and skips (logged) on StateBusy. A lock
+# file older than LOCK_STALE seconds is a crashed holder's and is broken.
+LOCK_SUFFIX = ".lock"
+LOCK_STALE = 30.0
+DEFAULT_WAIT = 5.0
+_HELD = set()
+
+
+class StateBusy(OSError):
+    """Another writer holds the state lock past the wait."""
+
+
+class locked:
+    def __init__(self, path, wait=DEFAULT_WAIT):
+        self.lp = str(path) + LOCK_SUFFIX
+        self.key = os.path.normcase(os.path.abspath(self.lp))
+        self.wait, self.mine = wait, False
+
+    def __enter__(self):
+        import time
+        if self.key in _HELD:
+            return self
+        Path(self.lp).parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + max(0.0, float(self.wait))
+        while True:
+            try:
+                fd = os.open(self.lp, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode("ascii"))
+                os.close(fd)
+                break
+            except FileExistsError:
+                try:
+                    if time.time() - os.stat(self.lp).st_mtime > LOCK_STALE:
+                        os.unlink(self.lp)
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    raise StateBusy("the state file is being written by another process")
+                time.sleep(0.02)
+        _HELD.add(self.key)
+        self.mine = True
+        return self
+
+    def __exit__(self, *exc):
+        if self.mine:
+            _HELD.discard(self.key)
+            try:
+                os.unlink(self.lp)
+            except OSError:
+                pass
+        return False
+
+
+def write(path, data: dict, wait=DEFAULT_WAIT) -> None:
+    """Atomically write `data` with its checksum, under the state lock (`locked`). Refuses (ValueError) anything
+    `read()` would reject: an unknown version, a malformed lift or persistent block, or more than MAX_BYTES. Temp file
+    in the same directory, then `os.replace`: a reader sees the old file or the new one, never a half-written one. On
+    any failure the old file is left and no temp file remains. The only sanctioned writer of state.json."""
+    with locked(path, wait):
+        _write(path, data)
+
+
+def _write(path, data: dict) -> None:
     path = Path(path)
     body = {k: v for k, v in data.items() if k != "sum"}
     if not _version_ok(body):
