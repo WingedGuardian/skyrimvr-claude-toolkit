@@ -174,13 +174,17 @@ def _write_replace(path, data):
         raise
 
 
-def _store_blob(blobs, src):
+def _store_blob(blobs, src, deadline=None):
     """Copy `src` into the store under its sha256 (backup.py's hashed part-file copy). -> sha256, or None when the file
-    could not be read or changed size while it was copied (the index keeps its old entry, so the next walk retries)."""
+    could not be read or changed size while it was copied (the index keeps its old entry, so the next walk retries).
+    With a `deadline` (backup._clock time) a copy that reaches it raises backup.CopyTimeout, its part file removed."""
     part = blobs / ".part-{}".format(os.getpid())
     try:
-        want, copied, digest = backup._copy_hashed(src, part, fsync=False)   # see backup._copy_hashed
+        want, copied, digest = backup._copy_hashed(src, part, fsync=False, deadline=deadline)   # see backup._copy_hashed
         on_disk = os.stat(str(part)).st_size
+    except backup.CopyTimeout:
+        backup._discard(part)
+        raise
     except OSError:
         backup._discard(part)
         return None
@@ -321,11 +325,16 @@ def _write_manifest(store, ts, now, command, files, partial, head_base):
 # ---------------------------------------------------------------- the snapshot
 
 
+def read_only(command):
+    """A read-only verb takes no snapshot (recovery.py asks the same question, so both stores agree)."""
+    return any(grep(p, command, icase=False) for p in SKIP) or grep(SKIP_POWERSHELL, command, icase=True)
+
+
 def run(project, command, payload_empty, audit, now=None):
     if payload_empty:
         audit.raw("[{}] snapshot-before-tool BLIND: EMPTY payload -- no snapshot taken\n".format(audit.stamp()))
         return
-    if any(grep(p, command, icase=False) for p in SKIP) or grep(SKIP_POWERSHELL, command, icase=True):
+    if read_only(command):
         return
     take(project, audit, command, now=now)
 

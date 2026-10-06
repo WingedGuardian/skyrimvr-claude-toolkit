@@ -29,6 +29,7 @@ MANIFEST = "MANIFEST.jsonl"
 CHUNK = 1024 * 1024
 MAX_SUFFIX = 999
 LOCK_WAIT = 2.0                                       # seconds; the hook has a time budget, the backup never waits on it
+_clock = time.monotonic                               # the copy deadline's clock (a test can tick it)
 _hasher = hashlib.sha256
 _NAMED = re.compile(r"^(\d{8}_\d{6})(?:-(\d+))?__")
 _NOT_IN_NAME = "/\\:"
@@ -42,10 +43,16 @@ def _discard(path):
         pass
 
 
-def _copy_hashed(src, part, fsync=True):
+class CopyTimeout(OSError):
+    """_copy_hashed reached its deadline before the copy finished (the part file is incomplete)."""
+
+
+def _copy_hashed(src, part, fsync=True, deadline=None):
     """Copy src to part in one read pass, hashing as it goes. Returns (size at open, bytes copied, sha256).
     fsync=False is for snapshot blobs (Task 14 fix round 1): they are named by their hash and size-checked on reuse, so
-    a power loss costs one blob, while the fsync cost ~43% of a cold baseline (MEASURED). Backups keep it."""
+    a power loss costs one blob, while the fsync cost ~43% of a cold baseline (MEASURED). Backups keep it.
+    deadline: a `_clock()` time checked after each chunk; reaching it raises CopyTimeout (Task 15: a save copy inside a
+    hook's budget)."""
     h = _hasher()
     copied = 0
     with open(src, "rb") as fin:
@@ -58,6 +65,8 @@ def _copy_hashed(src, part, fsync=True):
                 h.update(chunk)
                 fout.write(chunk)
                 copied += len(chunk)
+                if deadline is not None and _clock() >= deadline:
+                    raise CopyTimeout("the copy of {} reached its deadline after {} bytes".format(src, copied))
             fout.flush()
             if fsync:
                 os.fsync(fout.fileno())

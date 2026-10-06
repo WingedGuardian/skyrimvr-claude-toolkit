@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-from . import backup, codes, mcp_rules, paths as _paths, shell_rules, snapshot, state as _state, write_rules
+from . import backup, codes, mcp_rules, paths as _paths, recovery, shell_rules, snapshot, state as _state, write_rules
 from .verdict import Advice, Verdict
 
 _RANK = {"evaluated": 0, "partial": 1, "failed": 2}
@@ -112,11 +112,19 @@ def _unhooked(req) -> bool:
     return req.kind in ("mcp", "other") or (req.kind == "shell" and req.tool_name != "Bash")
 
 
-def side_effects(req, project, audit, v) -> Verdict:
+def side_effects(req, project, audit, v, roots_fn=None, deadline=None) -> Verdict:
     """Snapshot and backups, whatever the decision (as on Claude, where those hooks run beside the guard).
-    Each step has its own try: one failing never skips the next and never changes the decision."""
+    Each step has its own try: one failing never skips the next and never changes the decision. Task 15: the recovery
+    snapshot (load order, INIs, the named save) goes first, inside `deadline` (a time.monotonic time)."""
     partial = False
     if req.kind == "shell":
+        try:
+            recovery.run(project, req.command, False, audit, _soft_roots(roots_fn) if roots_fn else None,
+                         cwd=req.cwd or "", shell=req.shell or "", agent=req.agent, session_id=req.session_id,
+                         deadline=deadline)
+        except Exception:
+            partial = True
+            audit.log(recovery.HOOK, "FAILED", "the recovery snapshot raised -- none was taken")
         try:
             snapshot.run(project, req.command, False, audit)
         except Exception:
@@ -230,7 +238,7 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
         return v
 
 
-def pre_tool(req, project, roots_fn, audit, telemetry="", now=None) -> Verdict:
+def pre_tool(req, project, roots_fn, audit, telemetry="", now=None, deadline=None) -> Verdict:
     """All Codex PreToolUse work: the rules, then the side effects, then shadow mode on the finished verdict."""
     if req.failure:
         audit.log("codex-pre-tool", "REFUSE", req.failure)
@@ -239,5 +247,5 @@ def pre_tool(req, project, roots_fn, audit, telemetry="", now=None) -> Verdict:
         v = _failed(INERT_TRANSLATE.format("unexpected event {!r}".format(req.event)), "codex.TRANSLATE")
     else:
         v = _rules(req, roots_fn, audit)
-    v = side_effects(req, project, audit, v)
+    v = side_effects(req, project, audit, v, roots_fn, deadline)
     return shadow(v, project, req.session_id, telemetry, audit, now=now)

@@ -167,6 +167,41 @@ def judge(tool: str, args: dict, roots, memo: Optional[dict] = None, env=None) -
     return None
 
 
+def save_name(tool: str, args) -> Optional[str]:
+    """The raw name a DevBench call saves under ("" when it names none), or None when the call saves nothing -- read as
+    judge() reads it. recovery.py snapshots that save before the call (Plan 6 Task 15); tests hold the two in step."""
+    if not isinstance(args, dict):
+        return None
+    t = tool.lower()
+    if t == "console":
+        c = args.get("command")
+        return _console_save_name(c) if isinstance(c, str) else None
+    if t == "game":
+        act = args.get("action")
+        if isinstance(act, str) and act.strip().lower() == "save":
+            n = args.get("name")
+            return n if isinstance(n, str) else ""
+    return None
+
+
+def shell_save_names(command: str, parsed) -> list:
+    """The raw save names of the DevBench calls a shell command makes (curl, Invoke-RestMethod, devbench-cli), found as
+    scan_shell finds the calls. Opaque or unparsed commands yield nothing (no name can be read from them)."""
+    if not any(w in command.lower() for w in _SHELL_WORDS):
+        return []
+    names = []
+    for raw in parsed.execs:
+        if raw.program == "?":
+            continue
+        ex = deletes.substituted(raw)
+        route = _web_call if ex.program in _WEB_PROGRAMS else (_cli_call if ex.program == "devbench-cli" else None)
+        for tool, args in (route(ex, command) if route else []):
+            n = save_name(tool, args)
+            if n is not None:
+                names.append(n)
+    return names
+
+
 # ------------------------------------------------------------------------------------------------------ MCP route
 def decide(name: str, args, audit, roots=None, env=None) -> Verdict:
     """protect-mcp: the verdict for one `mcp__<server>__<tool>` call. Only DevBench servers are judged here."""

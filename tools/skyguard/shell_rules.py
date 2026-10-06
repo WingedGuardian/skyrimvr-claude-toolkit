@@ -76,11 +76,16 @@ def _resaver_op(e) -> str:
     return next((a for a in words if a in RESAVER_OPS), "")
 
 
-def _save_of(words) -> str:
+def _save_word(words) -> str:
+    """The first .ess argument AS WRITTEN (a path or a bare name), "" when there is none."""
     for a in words:
         if a.lower().endswith(".ess"):
-            return re.split(r"[/\\]", a)[-1]
+            return a
     return ""
+
+
+def _save_of(words) -> str:
+    return re.split(r"[/\\]", _save_word(words))[-1]
 
 
 def _text_fallback(command: str):
@@ -95,8 +100,9 @@ def _text_fallback(command: str):
     return m.group(1).lower(), (s.group(0) if s else "")
 
 
-def resaver_apply(command: str, shell: str = "", parsed=None):
-    """(operation, save basename or "") when ReSaver is executed with --apply and a write operation."""
+def resaver_target(command: str, shell: str = "", parsed=None):
+    """(operation, the save as written -- a path or a bare name -- or "") when ReSaver is executed with --apply and a
+    write operation. The ONE decision S-RESAVER-APPLY asks on; recovery.py uses it to find the save to snapshot."""
     if "resaver" not in command.lower():        # every form names resaver; skip the parse entirely
         return None
     parsed = shellparse.parse(command, shell) if parsed is None else parsed
@@ -109,11 +115,17 @@ def resaver_apply(command: str, shell: str = "", parsed=None):
             op = _resaver_op(e)
             if op:
                 # No .ess among its own arguments (`find -name "*.ess" -exec ... {}`): name the one its segment selects.
-                s = _save_of(e.argv) or (lambda m: m.group(0) if m else "")(RESAVER_TEXT_SAVE.search(e.segment))
+                s = _save_word(e.argv) or (lambda m: m.group(0) if m else "")(RESAVER_TEXT_SAVE.search(e.segment))
                 return op, s
     if not parsed.ok or opaque:
         return _text_fallback(command)
     return None
+
+
+def resaver_apply(command: str, shell: str = "", parsed=None):
+    """(operation, save basename or "") when ReSaver is executed with --apply and a write operation."""
+    t = resaver_target(command, shell, parsed)
+    return None if t is None else (t[0], re.split(r"[/\\]", t[1])[-1])
 
 
 def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "", shell: str = "",

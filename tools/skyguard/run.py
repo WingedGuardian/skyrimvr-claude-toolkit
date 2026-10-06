@@ -15,7 +15,7 @@ _T0 = time.monotonic()        # the engine's time budget counts from (about) her
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from skyguard import backup, codes, engine, health, paths, session, snapshot  # noqa: E402
+from skyguard import backup, codes, engine, health, paths, recovery, session, snapshot  # noqa: E402
 from skyguard.adapters import claude, codex  # noqa: E402
 from skyguard.audit import Audit  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
@@ -95,6 +95,26 @@ def _session_snapshot(project, source, audit) -> None:
         audit.log("snapshot-before-tool", "FAILED", "the session-start snapshot raised -- no snapshot was taken")
 
 
+def _recovery_deadline() -> float:
+    """Task 15: a recovery snapshot (a save copy) ends this far before the engine budget's watchdog."""
+    return _T0 + _engine_budget() - SNAPSHOT_MARGIN
+
+
+def _recovery(a, p, audit, roots) -> None:
+    """Task 15: the load order, INIs and the named save, before the command (snapshot role) or the DevBench call
+    (protect-mcp). Never raises and never changes a verdict."""
+    try:
+        if a.role == "protect-mcp":
+            recovery.mcp(a.project, p["tool_name"], p["mcp_input"], audit, roots, agent="claude",
+                         session_id=p.get("session_id", ""), deadline=_recovery_deadline())
+        else:
+            recovery.run(a.project, p["command"], p["empty"], audit, roots, cwd=p.get("cwd", ""),
+                         shell=p.get("shell", ""), agent="claude", session_id=p.get("session_id", ""),
+                         deadline=_recovery_deadline())
+    except Exception:
+        audit.log(recovery.HOOK, "FAILED", "the recovery snapshot raised -- none was taken")
+
+
 def _codex(a, raw: str) -> int:
     """Codex roles. Output is SKYGUARD-OK + body: the wrapper tells "decided" (marker present) from "broke"
     (exit 1, nothing on stdout) -- only a JSON deny blocks on Codex, so the wrapper owns the failure deny."""
@@ -116,7 +136,8 @@ def _codex(a, raw: str) -> int:
             raise engine.RootsUnavailable(codex.ENV_UNREADABLE)
         return paths.roots(a.root, a.root_win, env)
 
-    v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit, telemetry=a.telemetry))
+    v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit, telemetry=a.telemetry,
+                                       deadline=_recovery_deadline()))
     _telemetry(a, v)
     if v.decision != "allow":
         # A refused call leaves no item in the agent's transcript, so the canary must not count its hook
@@ -198,10 +219,13 @@ def main(argv=None) -> int:
         env = _declared_env(a)
         roots = paths.roots(a.root, a.root_win, env if env is not None else {})
         v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)
+        _recovery(a, p, audit, roots)          # Task 15: an existing save DevBench overwrites is kept first
     elif a.role == "backup-before-edit":
         backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit, "claude", p.get("session_id", ""))
         v = Verdict()
     elif a.role == "snapshot-before-tool":
+        env = _declared_env(a)                 # Task 15: the save first (the bigger copy gets the budget), then scripts
+        _recovery(a, p, audit, None if env is None else paths.roots(a.root, a.root_win, env))
         snapshot.run(a.project, p["command"], p["empty"], audit)
         v = Verdict()
     else:

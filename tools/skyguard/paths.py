@@ -278,6 +278,7 @@ class Roots(NamedTuple):
     config_dirs: Tuple[str, ...] = ()
     mo2_dirs: Tuple[str, ...] = ()
     malformed: Tuple[Tuple[str, str], ...] = ()
+    loadorder_dirs: Tuple[str, ...] = ()      # SKYRIM_LOADORDER_DIR, normalised: recovery snapshots only (Plan 6 Task 15)
 
 
 def _add(acc: List[str], value: str) -> None:
@@ -323,7 +324,10 @@ def roots(root_posix: str, root_win: str, env: EnvLike) -> Roots:
     for v in _values(env, "SKYRIM_MO2_MODS") + _values(env, "SKYRIM_MO2_OVERWRITE"):
         _add_dir(mo2, v)
     bad = env.malformed if isinstance(env, PathsConfig) else ()
-    return Roots("|".join(game), "|".join(config), tuple(install), tuple(cfg), tuple(mo2), bad)
+    lo: List[str] = []
+    for v in _values(env, "SKYRIM_LOADORDER_DIR"):
+        _add_dir(lo, v)
+    return Roots("|".join(game), "|".join(config), tuple(install), tuple(cfg), tuple(mo2), bad, tuple(lo))
 
 
 # ---------------------------------------------------------------------------------------------------------
