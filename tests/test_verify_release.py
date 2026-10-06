@@ -49,6 +49,11 @@ def _env(tmp_path):
            if k not in ("USER", "LOGNAME", "RELEASE_LEAK_NAMES", "RELEASE_LEAK_PATHS", "SKSE_CRASH_DIR")}
     env.update(USERNAME=NAME, HOME=str(home), USERPROFILE=str(home), RELEASE_LEAK_REGISTRY="0",
                VERIFY_WORK_ROOT=str(tmp_path))
+    # verify-release runs `esp-verify-wrapper.sh --help`, which (since T6b) probes the repo-local Spriggit with
+    # `dotnet tool run spriggit -- --version`. Under the launcher `dotnet` is the package-manager tripwire, so point
+    # the wrapper's own seam at a dotnet that does not exist: the probe fails, the --help line SKIPs as it does on
+    # any machine without Spriggit, and no test here ever reaches a real or stub dotnet.
+    env["ESP_VERIFY_DOTNET"] = str(tmp_path / "no-dotnet-here")
     return env
 
 
