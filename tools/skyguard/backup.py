@@ -328,6 +328,8 @@ def _list(backups, search):
         print("{} orphaned .part file(s): an interrupted (or still running) backup, not a backup".format(parts))
     print("\nTo restore one (its sha256 is checked first; the current file is backed up before it is replaced):")
     print("  bash scripts/restore-from-backup.sh --restore <backup-file> [--to <path>]")
+    print("\nSnapshots taken before commands (scripts, load order, INIs, the save a command rewrote):")
+    print("  bash tools/skyguard.sh snapshot list")
     print("\nTo view the audit log:\n  cat \"{}\"".format(backups / "AUDIT_LOG.txt"))
     return 0
 

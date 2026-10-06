@@ -3,6 +3,8 @@
     python tools/skyguard lock <lock|unlock [file...]|status [--json]|disable|enable> [--root R] [--session S]
     python tools/skyguard guards <on|off|status> [--root R] [--session S]   shadow mode (engine.shadow, R8)
     python tools/skyguard doctor [--root R] [--json]  the hook health report (tools/skyguard/health.py)
+    python tools/skyguard snapshot <list|restore <id> [--path F] [--to DIR | --in-place]> [--project P]
+                                                     script and recovery snapshots (tools/skyguard/snapcli.py)
 
 Exit codes follow the X4 contract: 0 verified, 1 partial or disagreeing, 2 refused or unreadable, 3 unsupported.
 """
@@ -10,7 +12,7 @@ from __future__ import annotations
 
 import sys
 
-USAGE = "usage: skyguard <lock|guards|doctor> ... (see tools/skyguard/cli.py)"
+USAGE = "usage: skyguard <lock|guards|doctor|snapshot> ... (see tools/skyguard/cli.py)"
 GUARDS_USAGE = "usage: guards <off|on|status> [--project P] [--session S]"
 
 
@@ -137,6 +139,9 @@ def main(argv=None, out=None) -> int:
         return lock.main(rest, out)
     if cmd == "guards":
         return guards_main(rest, out)
+    if cmd == "snapshot":
+        from . import snapcli
+        return snapcli.main(rest, out)
     if cmd == "doctor":
         from . import health
         from . import lock as _lock

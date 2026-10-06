@@ -260,25 +260,56 @@ def resolve(store, name, _cache=None):
     return out
 
 
-def materialise(project, name, dest):
-    """Write snapshot `name`'s files under `dest`, at their recorded relative paths. -> number of files written.
-    Raises ValueError, before writing anything, for an unreadable snapshot, a path that would leave `dest`, a malformed
-    hash, or a blob that is missing or whose bytes no longer hash to its name (blobs are not fsynced). Each file is
-    written to a part file and swapped in, so a hard-linked target (Vortex) is replaced, never written through."""
-    store = store_dir(project)
-    files = resolve(store, name)
+class Damaged(ValueError):
+    """Selected blobs are missing, or their bytes no longer hash to their names. `bad` = [(path, problem)]."""
+
+    def __init__(self, name, bad):
+        super().__init__("snapshot {}: {} -- nothing was written; the other files can be restored one by one".format(
+            name, "; ".join("the blob for {} {}".format(rel, why) for rel, why in bad)))
+        self.bad = bad
+
+
+def check_blobs(store, name, files):
+    """Before anything is written: every entry's path must stay inside its destination and its hash be a sha256 (a
+    tampered manifest raises ValueError -- never TypeError, re-review N2), and every blob is re-hashed (blobs are not
+    fsynced). -> [(path, problem)] for each blob that is missing or damaged (Task 15: the caller can then restore the
+    others file by file, re-review N4)."""
+    bad = []
     for rel, sha in files.items():
         parts = rel.split("/")
         if not isinstance(sha, str) or not _BLOB.match(sha) or "\\" in rel or ":" in rel or any(p in ("", ".", "..") for p in parts):
             raise ValueError("snapshot {}: refusing entry {!r} -> {!r}".format(name, rel, sha))
-        blob = store / "blobs" / sha
+        blob = Path(store) / "blobs" / sha
         if not blob.is_file():
-            raise ValueError("snapshot {}: the blob for {} ({}) is missing".format(name, rel, sha))
+            bad.append((rel, "is missing ({})".format(sha)))
+            continue
         if backup._sha256(blob) != sha:
-            raise ValueError("snapshot {}: the blob for {} does not hash to {} -- it is damaged".format(name, rel, sha))
+            bad.append((rel, "does not hash to {} -- it is damaged".format(sha)))
+    return bad
+
+
+def materialise(project, name, dest, only=None):
+    """Write snapshot `name`'s files under `dest`, at their recorded relative paths. -> number of files written.
+    `only`: just these relative paths (per-file restore). Raises ValueError, before writing anything, for an unreadable
+    snapshot or a bad entry (check_blobs), and Damaged (a ValueError) naming every selected blob that is missing or
+    damaged."""
+    store = store_dir(project)
+    files = resolve(store, name)
+    if only is not None:
+        files = {r: s for r, s in files.items() if r in only}
+    bad = check_blobs(store, name, files)
+    if bad:
+        raise Damaged(name, bad)
+    return write_blobs(store, [(Path(dest).joinpath(*rel.split("/")), sha) for rel, sha in sorted(files.items())])
+
+
+def write_blobs(store, pairs):
+    """Copy each (target, sha256) blob of `store` to its target. Each file is written to a part file and swapped in, so
+    a hard-linked target (Vortex) is replaced, never written through. -> files written; OSError at the first failure."""
+    store = Path(store)
     n = 0
-    for rel, sha in sorted(files.items()):
-        target = Path(dest).joinpath(*rel.split("/"))
+    for target, sha in pairs:
+        target = Path(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         part = Path("{}.restore-part-{}".format(target, os.getpid()))
         try:

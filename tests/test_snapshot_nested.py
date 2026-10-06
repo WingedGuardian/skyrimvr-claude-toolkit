@@ -598,9 +598,12 @@ def test_the_walk_stops_at_its_time_box_and_deletes_nothing(tmp_path, monkeypatc
 
 
 @needs_windows
-def test_a_hard_link_edited_through_its_other_path_is_seen(tmp_path):
+def test_a_hard_link_edited_through_its_other_path_is_seen(tmp_path, monkeypatch):
     """Review I2 (MEASURED by the reviewer): the listing of one hard link keeps the size/mtime of its own directory
-    entry after an edit through the OTHER link. Vortex deploys by hard link by default."""
+    entry after an edit through the OTHER link. Vortex deploys by hard link by default. The single-link sweep (re-review
+    N3) is switched off here: on a real tree it reaches a given file only every ~18 comparisons, so the link count
+    recorded at hash time is what makes the NEXT comparison re-stat it."""
+    monkeypatch.setattr(snapshot, "_sweep_links", lambda *a: 0)
     staging = put(tmp_path, "staging/mine.pex", b"original")
     (tmp_path / "Data" / "Scripts").mkdir(parents=True)
     os.link(str(staging), str(tmp_path / "Data" / "Scripts" / "mine.pex"))

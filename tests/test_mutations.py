@@ -4545,3 +4545,35 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "            (lambda *a, **k: None)(project, req.command, False, audit,",
      _RCT + "test_the_save_is_copied_by_the_hook_before_the_command_can_change_it[codex-pre-tool]", "l2-rec-codex-wired"),
 ]]
+
+
+# Plan 6 Task 15, part 3: `skyguard snapshot list | restore` (controller ruling) and per-file restore (re-review N4).
+_SC = "tools/skyguard/snapcli.py"
+_SCT = "tests/test_snapshot_restore_cli.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_SC, "        base = Path(to) if to else _new_folder(project, sid)", "        base = Path(to) if to else Path(project)",
+     _SCT + "test_a_config_restore_goes_to_a_new_folder_byte_identical_and_the_live_files_are_untouched",
+     "l2-restore-cli-new-folder"),
+    (_SC, "        if clash:", "        if False:",
+     _SCT + "test_restore_refuses_to_overwrite_a_file_in_the_destination_and_writes_nothing", "l2-restore-cli-no-clobber"),
+    (_SC, "            if target.is_file() and backup.take(", "            if False and backup.take(",
+     _SCT + "test_in_place_backs_up_what_it_replaces_first", "l2-restore-cli-in-place-backup"),
+    (_SC, "        if odd:", "        if False:",
+     _SCT + "test_in_place_never_writes_a_name_a_recovery_snapshot_does_not_take", "l2-restore-cli-in-place-names"),
+    (_SC, '    if bad:\n        print("REFUSED: {} of the', '    if False:\n        print("REFUSED: {} of the',
+     _SCT + "test_one_damaged_blob_refuses_the_whole_restore_and_names_it", "l2-restore-cli-damaged-refuses"),
+    (_SC, "    if not wanted:\n        return keys, []", "    if True:\n        return keys, []",
+     _SCT + "test_per_file_restore_of_the_good_files_works_beside_a_damaged_one", "l2-restore-cli-per-file"),
+    (_SC, "        if not hit:\n            missing.append(w)", "        if False:\n            missing.append(w)",
+     _SCT + "test_a_path_that_matches_nothing_is_refused", "l2-restore-cli-path-must-match"),
+    (_SC, ' or s.rsplit("/", 1)[-1] == w', "",
+     _SCT + "test_in_place_backs_up_what_it_replaces_first", "l2-restore-cli-path-by-name"),
+    (_SN, "        if not blob.is_file():\n            bad.append(", "        if False:\n            bad.append(",
+     _SCT + "test_per_file_restore_of_the_damaged_file_is_refused", "l2-restore-cli-missing-blob"),
+    (_SN, "    if only is not None:\n        files = {", "    if False:\n        files = {",
+     _SCT + "test_materialise_restores_only_the_files_asked_for", "l2-restore-materialise-only"),
+    ("tools/skyguard/cli.py", '    if cmd == "snapshot":', "    if False:",
+     _SCT + "test_the_bash_launcher_lists_and_restores", "l2-restore-cli-wired"),
+    ("tools/skyguard/backup.py", '    print("  bash tools/skyguard.sh snapshot list")', "    pass",
+     _SCT + "test_the_backup_listing_points_at_the_snapshot_listing", "l2-restore-backup-list-points-at-snapshots"),
+]]
