@@ -49,7 +49,7 @@ Every hook read stdin with `cat /dev/stdin`, which returns nothing when Claude C
 spawns it — so each hook fired, read zero bytes, fell through its first guard and
 exited 0, which is byte-identical to approving. No ESP write block, no
 game-directory delete block, no automatic backups, and nothing looked wrong. Update,
-then run `bash tools/hook-canary.sh`: it reports HEALTHY, STALE, DEGRADED, NOT EXERCISED or UNMEASURABLE per hook by reading
+then run `bash tools/hook-canary.sh`: it reports HEALTHY, STALE, DEGRADED, NOT EXERCISED, UNMEASURABLE or NEVER INVOKED per hook by reading
 heartbeats written from inside real invocations, which is the only way to know.
 
 The same release re-anchors the delete guard (eleven spellings of "delete the game
@@ -422,8 +422,8 @@ These aren't things you configure -- they're already wired in. Every session, be
 | Protection | What It Does |
 |-----------|-------------|
 | **Command guard** | Blocks deleting inside the install, the config folder or Mod Organizer's `mods`/`overwrite` (a Recycle-Bin delete included), deleting everything in a folder it cannot place, moving the install, `Data`, the settings folder or `Saves` away, running decoded text (`base64 -d` piped to a shell), deleting Bethesda registry keys, raw-text shell writes to ESP/ESM/ESL/BSA/BA2 (`>`, `tee`, `Set-Content`, `Out-File`, ...), and DevBench `smp reset`. Runs on the Bash and PowerShell tools. **Advises** on other file operations in game directories -- a note to Claude, not a prompt to you. |
-| **File guard** | Blocks direct writes to ESP/ESM/ESL/BSA/BA2 files through the edit tools. **Advises** on INIs, load-order files and scripts; it does not prompt. |
-| **Auto-backup** | Copies every file to `.claude/backups/` before modification, with full audit log. |
+| **File guard** | Blocks direct writes to ESP/ESM/ESL/BSA/BA2 files through the edit tools. **Advises** on INIs, load-order files and scripts; its one prompt is a write onto a save in `Saves/`. |
+| **Auto-backup** | Copies a file to `.claude/backups/` before the edit tools (or Codex `apply_patch`) change it, with full audit log. A file a script writes through the shell is not backed up. |
 | **Confidence system** | Claude must rate confidence 0-100% and list assumptions before any change. |
 | **Investigation-first** | Claude checks the knowledgebase and web-searches before touching anything. |
 | **Validate-before-test** | Authored NIFs are cross-checked with an independent parser and a headless render before they're handed off for in-game testing -- crashes get caught in tooling, not your headset. |
@@ -441,7 +441,7 @@ nothing else, and never delete or read). The deny on write-attributes is what st
 clearing the attribute. The targets are an **explicit per-edition list of names** (a pattern would also lock
 mod files that look vanilla), and only files that exist, are regular and have a single hard link: a copy a mod
 manager hard-linked is reported and skipped, never locked. It is applied in-process (no process per file) and
-needs no administrator rights (apply plus remove over the 26 names of the full VR list took at most 0.021 s, over
+needs no administrator rights (apply plus remove over the 26 names of the spike's full VR set, which the shipped list has grown to 33, took at most 0.021 s, over
 5 runs, MEASURED on the Phase A spike's in-process code `fastlock.py`, not on the shipped `lock.py`;
 `docs/superpowers/measurements/2026-10-04-plan6-ml2.md`, C10). **It is off by default**: nothing is locked until you
 run it.
@@ -540,7 +540,7 @@ file the engine cannot verify is read as guards on and the lock on, with a `STAT
 ### Shadow mode: `guards off`
 
 `bash tools/skyguard.sh guards off --session <id>` (`tools\skyguard.cmd ...` from cmd or PowerShell) switches the
-guards to **shadow mode** for that one session, for an hour: every rule still runs, but a refusal becomes an allow plus a warning (`Guards OFF: this would have been
+guards to **shadow mode** for that one session, for an hour or until the next session starts, whichever is first: every rule still runs, but a refusal or a confirmation prompt becomes an allow plus a warning (`Guards OFF: this would have been
 denied (<rule>)`), and every call is logged as `SHADOW` in `.claude/backups/AUDIT_LOG.txt`. `guards on` ends it;
 `guards status` shows it. Backups and snapshots still run. **Never shadowed:** a broken guard (`GUARD INERT`),
 Codex's `.rules` file, the Layer 2 lock, the refusals of hand-unlocking a lock target and of `lock disable`, and the
@@ -692,7 +692,7 @@ probed live (`codex exec` and the TUI) are claimed, and why the desktop app and 
 
 ## Other agents
 
-Any agent that reads files gets the toolkit's instructions, skills and tools, with no hook (Layers 0 and 1; Layer 2, a read-only lock below the agent, is not yet released). [`ADAPTING.md`](ADAPTING.md) is written for such an agent: it lets the agent wire up the rest itself and describes how far it can prove it got. The toolkit does not call such an agent supported; only Claude Code and Codex are listed as supported here.
+Any agent that reads files gets the toolkit's instructions, skills and tools, with no hook (Layers 0 and 1, plus Layer 2 if the user turns it on: a read-only lock on the vanilla files below the agent, off by default, Windows only). [`ADAPTING.md`](ADAPTING.md) is written for such an agent: it lets the agent wire up the rest itself and describes how far it can prove it got. The toolkit does not call such an agent supported; only Claude Code and Codex are listed as supported here.
 
 ---
 

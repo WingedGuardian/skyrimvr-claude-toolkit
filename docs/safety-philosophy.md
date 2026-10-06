@@ -37,7 +37,7 @@ Six thin wrappers over the Python engine `tools/skyguard/` intercept Claude's to
 - **protect-files.sh** -- Blocks writes to plugin/archive binaries through the Edit/Write tools; **advises** on all other edits in the install
 - **protect-mcp.sh** -- Guards the DevBench MCP tools (and the curl / `devbench-cli.sh` route to the same tools): denies the one console command measured to crash a large load order (`smp reset`), and asks before a save would overwrite an existing save
 - **backup-before-edit.sh** -- Copies a file before Claude modifies it **through the Edit/Write tools**. ⚠ Anything written by a script run through Bash is invisible to it -- that is a property of hooks, not a bug here. MEASURED: zero backups of a 177,459-byte `KNOWLEDGEBASE.md` across seven months, because it is written by a script. `session-kb-guard.sh` below covers that channel.
-- **snapshot-before-tool.sh** -- Snapshots active Papyrus source/compiled scripts before any Bash command
+- **snapshot-before-tool.sh** -- Snapshots Papyrus source/compiled scripts before shell commands
 - **session-kb-guard.sh** -- At SessionStart, copies the files nothing can rebuild
   (`KNOWLEDGEBASE.md`, `KNOWLEDGEBASE.local.md`, `CLAUDE.md`, `AGENTS.md`) and raises an alarm if
   one shrank. It exists because the first five all key on a *tool call*, and the
@@ -49,23 +49,23 @@ Six thin wrappers over the Python engine `tools/skyguard/` intercept Claude's to
 ESP modifications via xelib always use a two-pass workflow: read-only preview, then write only after human approval.
 
 ### Defense 5: Audit Trail
-Every file modification is logged with timestamp, tool name, and backup location. If something goes wrong, you can trace exactly what changed and when.
+Every change made through the edit tools (and Codex `apply_patch`) is logged with timestamp, tool name, and backup location, and so is every refusal and note. A file a script writes through the shell is not logged as a change. If something goes wrong, you can trace what the edit tools changed and when.
 
 ## Design Principles
 
 ### 1. No Silent Modifications
-Destructive changes are blocked outright. Everything else that is consequential but legitimate is **advised**: a note is injected into Claude's context and the call proceeds -- you are not prompted. Seven rules in the toolkit ask you to decide: a ReSaver command that mutates a save file, a DevBench save over an existing save, a write, copy or move onto a save in `Saves` (two rules: the shell and the edit tools), a git command that would throw away uncommitted changes in a protected folder, a `lock disable` that turns the vanilla-file lock off for good, and an in-place snapshot restore (`snapshot restore --in-place`), which writes over live files.
+Destructive changes are blocked outright. Everything else that is consequential but legitimate is **advised**: a note is injected into Claude's context and the call proceeds -- you are not prompted. Seven rules in the toolkit ask you to decide: a ReSaver command that mutates a save file, a DevBench save over an existing save, a write, copy or move onto a save in `Saves` (two rules: the shell and the edit tools), a git command that would throw away uncommitted changes in a protected folder, a `lock disable` that turns the vanilla-file lock off for good, and an in-place restore (`snapshot restore --in-place` or `restore-from-backup.sh --restore`), which writes over live files.
 
 ⚠ This inverted in v3.8.3 and this page said the opposite until v3.9. A guard that prompts on routine work gets approved by reflex and then protects nothing; the X4 toolkit measured 40 such prompts across 13,282 commands, every one of them noise. So the honest summary is: **few prompts, a short deny list, and a lot of advice** -- not "nothing happens without your approval".
 
 ### 2. Reversibility
-Every edit has a timestamped backup. The `restore-from-backup.sh` script makes recovery straightforward.
+Every edit made through the edit tools (and Codex `apply_patch`) has a timestamped backup; a file a script writes does not. The `restore-from-backup.sh` script makes recovery straightforward.
 
 ### 3. Investigation First
 The confidence level system and investigation checklist ensure research happens before action. This prevents the most common class of errors: acting on incorrect assumptions about how Skyrim works.
 
 ### 4. Binary Files Are Sacred
-ESP, ESM, ESL, BSA, and BA2 files cannot be written directly. They must go through proper tooling (xelib, Spriggit, Creation Kit). This prevents accidental corruption of binary formats.
+ESP, ESM, ESL, BSA, and BA2 files cannot be written directly through the edit tools or the shell writes the guard can read (a script run from a file, or a name built at runtime, is not seen). They must go through proper tooling (xelib, Spriggit, Creation Kit). This prevents accidental corruption of binary formats.
 
 ### 5. Continuous Improvement
 The "safety improvement loop" instruction in CLAUDE.md asks Claude to evaluate whether new hooks or protections are needed after every session. The `Hook Candidates` section in the knowledgebase tracks proposed improvements.
@@ -100,11 +100,13 @@ the install.
 
 ⚠ **If no root can be resolved, the guard DENIES.** A guard that evaluated nothing
 must not answer "fine" -- that conflation is what left every hook here inert for five
-weeks. ⚠ A broken `skyrim-paths.env` does NOT cost you refusals: the self-derived root always resolves, so the guard silently narrows to the install folder plus the generic config literal, and an MO2 profile directory stops being guarded with nothing reported. The fail-closed branch fires only when NO root resolves at all.
+weeks. ⚠ A `skyrim-paths.env` the guard cannot read, or one with a malformed value for a protected folder (the install, the settings folder, MO2 `mods`/`overwrite`), DENIES every call (`GUARD INERT`) until `setup.sh` rewrites it. An emptied file, or a missing key, does NOT cost you refusals: the self-derived root always resolves, so the guard silently narrows to the install folder plus the generic config literal, and an MO2 folder stops being guarded with nothing reported.
 
-⚠ **A relative path cannot be resolved** -- the hook is never told the caller's
-working directory -- so `rm Data/x.nif` gets an advisory, not a refusal. Prefer
-absolute paths when deleting.
+⚠ **A relative path resolves against the working directory the agent reports** in the
+hook payload, so `rm Data/x.nif` run from the install is refused. Only when the payload
+carries no working directory does it get an advisory (Claude) or a refusal (Codex
+refuses such a payload). A relative path inside interpreter code (`python -c`) is not
+resolved. Prefer absolute paths when deleting.
 
 ## Why so few prompts
 

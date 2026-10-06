@@ -238,8 +238,11 @@ def test_the_live_proof_covers_the_shell_tool_and_a_broken_hook_the_live_session
 
 
 def test_the_layer_2_lock_is_not_promised():
+    # Plan 8 T4: Layer 2 ships in v4.0.0 as an opt-in lock, so the doc says "off by default" (it used to say "not yet
+    # released"); either way an adapted agent is never told the lock protects it.
     t = DOC.read_text(encoding="utf-8")
-    assert "not yet released" in section(t, 0) and "not yet released" in section(t, 2)
+    assert "off by default" in section(t, 0) and "off by default" in section(t, 2)
+    assert "not yet released" not in t
     assert "where installed" not in t
     assert not re.search(r"\bPlan \d", t), "the doc must not promise a plan by number"
     philosophy = (REPO / "docs" / "safety-philosophy.md").read_text(encoding="utf-8")

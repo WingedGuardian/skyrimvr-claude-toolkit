@@ -2,7 +2,7 @@
 
 This file is written to you, the coding agent. If you are Claude Code or the Codex CLI, stop: the toolkit
 is already wired for you (see `README.md`). Otherwise you can wire it into yourself. Be honest about how
-far you get: the toolkit gives you Layers 0 and 1 without any hook (Layer 2 is not yet released), and Layer 3
+far you get: the toolkit gives you Layers 0 and 1 without any hook (Layer 2, the vanilla-file lock, is off by default), and Layer 3
 only if you can *prove* a hook of yours blocks.
 
 `python` in this file means a Python 3.8 or newer interpreter. On Linux and macOS that is usually `python3`; on
@@ -13,7 +13,7 @@ Windows, `py -3` or `python`. Use whichever one starts on this machine.
 | Say | When |
 |---|---|
 | *supported* | never about yourself: only the Claude Code CLI and the Codex CLI are, as `README.md` lists them |
-| **partially supported: Layers 0-2** | the default. You read the instructions and skills and use the tools; **nothing stops a destructive command**. Layer 2, a read-only lock below the agent, is not yet released |
+| **partially supported: Layers 0-2** | the default. You read the instructions and skills and use the tools; **nothing stops a destructive command**. Layer 2, a read-only lock below the agent, is off by default and covers only the vanilla masters and archives |
 | **locally adapted, self-verified** | only after section 7. It describes *this install on this machine*. It is not a claim by the toolkit |
 
 ## 1. Rules
@@ -31,7 +31,7 @@ Windows, `py -3` or `python`. Use whichever one starts on this machine.
 
 The layers, as this kit numbers them: **Layer 0**, the command-line tools in `tools/`; **Layer 1**, the plain-text
 instructions, skills and knowledgebase; **Layer 2**, protection below the agent: a read-only lock on the vanilla
-masters and archives, **not yet released**, so it protects nothing today; **Layer 3**, an in-loop hook, which is
+masters and archives (Windows only), **off by default**, so it protects nothing until the user runs `bash tools/skyguard.sh lock lock`; **Layer 3**, an in-loop hook, which is
 what an adapter adds. These are not the numbered defenses of `docs/safety-philosophy.md`, which describe the two
 supported agents.
 

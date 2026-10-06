@@ -208,7 +208,7 @@ the working directory the agent reports.
   `[IO.File]::Write*`, downloaders, and a name written in `python -c` / `node -e` code. Use xelib, Spriggit
   or AutoMod. Copying a finished plugin onto `Data/` is **advised**, not refused. Not covered: a name
   built at runtime, a script run from a file (`python fix.py`), other interpreters.
-- Tool output aimed straight at an existing `.psc`, and Champollion against a `.pex`
+- A program's output flag (`-o`, `--output`) aimed at a `.psc`, and Champollion against a `.pex`
   inside `Data/Scripts/` -- both have destroyed sources
 - DevBench `smp reset` (measured to crash a large load order), by MCP, `curl` or `devbench-cli.sh`
 - Decoded text run as commands (`base64 -d | bash`), which the guard cannot read
@@ -222,7 +222,7 @@ the working directory the agent reports.
 - Load order files -- the mod manager owns them and may overwrite a direct edit
 - Redirects, `tee`, `sed -i` and other shell writes into `Data/`, the config folder or MO2 (a `cp`/`mv`
   there is silent), and a copy onto a plugin where the game loads it
-- A decompiler writing its output into the install; `sed -i` with a backslash path
+- A decompiler writing its output into the install; `sed -i` with a backslash path, on a file in the install
 - AutoMod write commands without `--dry-run`
 
 Naming a plugin or INI in a read-only command is silent: notes fire on the program that writes.
@@ -371,10 +371,10 @@ Generated into `CLAUDE.md` only. Everything above is shared with every agent.
   A path-scoped skill (`paths:` in its frontmatter) is *listed* automatically when you touch a matching
   file (`skyrim-nif` is scoped to `**/*.nif,Data/meshes/**`). Listing is not loading: invoke it.
 - **The guards** are `.claude/hooks/*.sh`, thin adapters over `tools/skyguard/`, wired up in
-  `.claude/settings.json`: `Bash` → `protect-bash` + `snapshot-before-tool`; `Edit|Write` →
-  `protect-files` + `backup-before-edit`; SessionStart → `session-kb-guard` (knowledgebase snapshot, then your `## My preferences`). `setup.sh` records the
-  Python path in each hook. The user lists or disables them with `/hooks`. The PowerShell tool is not
-  matched yet, and only the Bash tool gets `SKYGUARD_SESSION_ID`, so lift the lock from Bash, never PowerShell.
+  `.claude/settings.json`: `Bash`, `PowerShell`, `Monitor` → `protect-bash` + `snapshot-before-tool`; `Edit`, `Write`,
+  `NotebookEdit` → `protect-files` + `backup-before-edit`; the DevBench MCP tools → `protect-mcp`; SessionStart → `session-kb-guard` (knowledgebase snapshot, then your `## My preferences`). `setup.sh` records the
+  Python path in each hook. The user lists or disables them with `/hooks`. Only the Bash tool gets
+  `SKYGUARD_SESSION_ID`, so lift the lock from Bash, never PowerShell.
 - **What the backup hook cannot see.** `backup-before-edit.sh` fires on Edit/Write tool calls only, with no
   extension filter (`.psc` included). A file written by a script run through the Bash tool is invisible to
   it. That is how the knowledgebase is usually written, and it is why `session-kb-guard.sh` snapshots the

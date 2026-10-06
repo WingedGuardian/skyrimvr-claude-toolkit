@@ -22,7 +22,7 @@
   Codex. On Codex and from Claude's PowerShell tool an agent cannot lift the lock at all (no session id there, by design): you run
   `tools\skyguard-unlock.cmd` in your own terminal. Without hooks nothing relocks a lift until a hooked session runs or you run
   `lock lock`; `skydoctor` reports it. Lift notes go to the agent's context only; whether any of it is shown to you is not claimed.
-- **`guards off` is shadow mode.** Every rule still runs; a refusal becomes an allow plus a warning and a `SHADOW` line per call, backups
+- **`guards off` is shadow mode.** Every rule still runs; a refusal or a confirmation prompt becomes an allow plus a warning and a `SHADOW` line per call, backups
   and snapshots still run. Never shadowed: `GUARD INERT`, Codex `.rules`, the lock, the lift refusals and writes into `.skyguard/`.
 - **Self-protection.** Writes into `.skyguard/` are refused through the shell's write commands, the file tools, `apply_patch`, moves and
   deletes. Known gaps (MEASURED as allowed): an interpreter writing it from code, `install`, and unpacking an archive into it. Edits to the
@@ -83,7 +83,7 @@
 
 ### Other agents: the adapter kit
 
-- **New `ADAPTING.md`, written to an agent the toolkit does not support yet.** Any agent that reads files already gets the instructions, the skills and the tools (Layers 0 and 1; Layer 2, a read-only lock below the agent, is not yet released). `ADAPTING.md` walks such an agent through wiring the rest into itself, and through saying honestly how far it got. The toolkit still lists only Claude Code and Codex as supported; an adapted agent is "locally adapted, self-verified", a statement about one install on one machine.
+- **New `ADAPTING.md`, written to an agent the toolkit does not support yet.** Any agent that reads files already gets the instructions, the skills and the tools (Layers 0 and 1, plus Layer 2 if the user turns it on: the read-only lock on the vanilla files, off by default, Windows only). `ADAPTING.md` walks such an agent through wiring the rest into itself, and through saying honestly how far it got. The toolkit still lists only Claude Code and Codex as supported; an adapted agent is "locally adapted, self-verified", a statement about one install on one machine.
 - **New neutral engine entry: `python tools/skyguard/run.py neutral pre-tool`.** It takes one agent-neutral JSON request on stdin and answers allow, ask or deny with the engine's real rules. Anything it cannot read or decide is a refusal, never an allow.
 - **New adapter kit in `tools/adapting/`:** an adapter template, a capability-report template and two worked examples (a hook that refuses by exit code, one that refuses by JSON).
 - **New conformance tool, `tools/adapter_conformance.py`.** It runs an adapter against ten faults injected into the engine (a crash, a hang, silence, garbage output, a missing marker, an unknown decision, a missing engine and so on) and fails any adapter that lets a command through when the engine could not decide, or that does not obey a valid verdict. Every tool the agent has that writes a file or runs a command must be listed and gets its own decoy test; a tool left off the list is reported as not guarded. Its capability report names a protection status only when there is evidence for it, including a live shell test, every such tool mapped, and an agent hook timeout longer than the adapter's own deadline.
@@ -181,7 +181,7 @@
 
 - **`bash tools/hook-canary.sh` now reads staged records** (ran, received, evaluated, emitted, failed) instead of
   one heartbeat, so it sees the failures that happen *after* a payload arrives: an engine crash, a hook the agent
-  killed, an output nobody could parse. States: HEALTHY, STALE, DEGRADED, NOT EXERCISED, UNMEASURABLE. A failure
+  killed, an output nobody could parse. States: HEALTHY, STALE, DEGRADED, NOT EXERCISED, UNMEASURABLE, NEVER INVOKED. A failure
   clears only on a newer completed evaluation. Per-call latency (p50/p95) is recorded and shown.
 
 ### 📚 Instructions split
