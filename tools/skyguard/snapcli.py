@@ -11,7 +11,8 @@ paths keep their install-relative layout (`Data/Scripts/...`), recovery files th
 as a folder (`C/Users/.../plugins.txt`). `--to DIR` writes there instead and refuses, writing nothing, when any file it
 would write already exists. `--in-place` writes over the live files -- each one that exists is first backed up the
 Task 13 way (backup.take: hashed copy + MANIFEST.jsonl line, listed by scripts/restore-from-backup.sh); when any backup
-fails, nothing is restored.
+fails, nothing is restored. A live file whose bytes already match the snapshot is left alone and reported `unchanged`
+(final review B-M1: rewriting it would cut a mod manager's hard link and take a backup for nothing).
 
 WHAT. A script snapshot restores its full map; a config snapshot the full load-order / INI state at that id
 (recovery.resolve); a save snapshot its .ess and .skse. `--path FILE` (repeatable) restores only the files whose path
@@ -87,6 +88,15 @@ def _allowed(project, sid, key, target):
     if recovery._INI.match(name) and parent in {_real(d) for d in roots.config_dirs}:
         return ""
     return "not a load-order file or game INI directly in a configured folder"
+
+
+def _unchanged(target, sha):
+    """True when the live `target` is a regular file whose bytes already hash to the snapshot's `sha` (B-M1). Any
+    doubt (missing, a link or folder, unreadable) is False: the file is then restored, backed up first, as before."""
+    try:
+        return os.path.isfile(str(target)) and not os.path.islink(str(target)) and backup._sha256(target) == sha
+    except OSError:
+        return False
 
 
 def _project(p):
@@ -260,7 +270,11 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
             print("REFUSED: {} is {}, so it is not written back in place. Nothing was restored.".format(*odd[0]),
                   file=out)
             return 2
-        pairs = [(live[k], chosen[k]) for k in keys]
+        # Final review B-M1: a live file that already holds the snapshot's bytes is NOT rewritten. Replacing it would
+        # cut a mod manager's hard link (the part file + os.replace below makes a new file) and back it up for nothing.
+        same = [k for k in keys if _unchanged(live[k], chosen[k])]
+        pairs = [(live[k], chosen[k]) for k in keys if k not in same]
+        unchanged = [live[k] for k in same]
         dest = "the live files"
         for target, _sha in pairs:
             if target.is_file() and backup.take(str(project), "skyguard snapshot restore", str(target), audit) is None:
@@ -276,19 +290,25 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
                   "restored.".format(len(clash), base, clash[0]), file=out)
             return 2
         dest = str(base)
+        unchanged = []
     try:
         n = snapshot.write_blobs(store, pairs)
     except OSError as e:
         print("FAILED part-way restoring snapshot {} to {}: {}".format(sid, dest, e), file=out)
         audit.log(HOOK, "FAILED", "restore of {} to {} stopped: {}".format(sid, dest, e))
         return 1
-    audit.log(HOOK, "RESTORED", "{} ({} file(s)) -> {}".format(sid, n, dest))
+    audit.log(HOOK, "RESTORED", "{} ({} file(s), {} unchanged) -> {}".format(sid, n, len(unchanged), dest))
     for target, _sha in pairs[:SHOW]:
         print("  restored {}".format(target), file=out)
     if len(pairs) > SHOW:
         print("  ... and {} more".format(len(pairs) - SHOW), file=out)
-    print("Restored {} file(s) from snapshot {} to {}{}".format(
-        n, sid, dest, " (each replaced file was backed up first)" if in_place else ""), file=out)
+    for target in unchanged[:SHOW]:
+        print("  unchanged {} (already identical to the snapshot: not rewritten)".format(target), file=out)
+    if len(unchanged) > SHOW:
+        print("  ... and {} more unchanged".format(len(unchanged) - SHOW), file=out)
+    print("Restored {} file(s) from snapshot {} to {}{}{}".format(
+        n, sid, dest, " (each replaced file was backed up first)" if in_place and n else "",
+        "; {} already matched and were left as they are".format(len(unchanged)) if unchanged else ""), file=out)
     return 0
 
 

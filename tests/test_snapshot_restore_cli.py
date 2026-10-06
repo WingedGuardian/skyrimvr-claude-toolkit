@@ -147,6 +147,49 @@ def test_in_place_restores_a_script_into_the_install(inst):
     assert (inst.game / "Data" / "Scripts" / "a.pex").read_bytes() == b"script a v1"
 
 
+def _linked_install(inst):
+    """a.pex hard-linked from a mod manager's staging folder (Vortex deploys this way), then snapshotted."""
+    live = inst.game / "Data" / "Scripts" / "a.pex"
+    staging = inst.game.parent / "staging" / "a.pex"
+    staging.parent.mkdir(parents=True)
+    os.link(str(live), str(staging))
+    take_all(inst)
+    assert os.stat(str(live)).st_nlink == 2
+    return live, staging
+
+
+def _backups(inst):
+    return backup.read_manifest(inst.game / ".claude" / "backups")[0]
+
+
+def test_in_place_restore_of_an_unchanged_snapshot_leaves_a_hard_link_intact(inst):
+    """Final review B-M1 (MEASURED by the reviewer: nothing had changed, yet all 3 files were rewritten, each backed up,
+    and the hard-linked .pex went from nlink 2 to 1). A file already identical to the snapshot is not rewritten."""
+    live, staging = _linked_install(inst)
+    before = os.stat(str(live))
+    rc, text = cli_run(inst, "restore", ids(inst, "scripts")[0], "--in-place")
+    assert rc == 0, text
+    after = os.stat(str(live))
+    assert (after.st_ino, after.st_dev, after.st_nlink) == (before.st_ino, before.st_dev, 2), text
+    assert os.path.samefile(str(live), str(staging)), "the mod manager's link still points at the live file"
+    assert "unchanged {}".format(live) in text and "Restored 0 file(s)" in text, text
+    assert "2 already matched" in text, text
+    assert _backups(inst) == {}, "nothing was replaced, so nothing was backed up"
+
+
+def test_in_place_restore_still_replaces_a_changed_file_beside_an_unchanged_one(inst):
+    """The twin: only IDENTICAL bytes are skipped. A changed file is backed up and replaced (which cuts its link, by
+    design: write_blobs never writes through a link)."""
+    live, _staging = _linked_install(inst)
+    src = inst.game / "Data" / "Scripts" / "Source" / "a.psc"
+    put(src, b"broken experiment")
+    rc, text = cli_run(inst, "restore", ids(inst, "scripts")[0], "--in-place")
+    assert rc == 0, text
+    assert src.read_bytes() == b"source a v1" and "restored {}".format(src) in text, text
+    assert "unchanged {}".format(live) in text and os.stat(str(live)).st_nlink == 2, text
+    assert [e["src"] for e in _backups(inst).values()] == [str(src)], "only the replaced file was backed up"
+
+
 def forge_recovery(inst, victim, sid):
     """A whole one-file recovery snapshot whose line names `victim` -- what a tampered store can hold."""
     inst.run("make")

@@ -6474,3 +6474,15 @@ MUTATIONS += [
                  "tests/test_gen_agent_trees.py::test_files_linux_tools_read_are_pinned_lf", id="eol-devcontainer-lf"),
 ]
 
+
+
+# Plan 6 final review, fix lane B: one twin per clause, each killed by the named test.
+_FB = [
+    # B-M1: a live file already identical to the snapshot is not rewritten (a mod manager's hard link survives)
+    (_SC, "        same = [k for k in keys if _unchanged(live[k], chosen[k])]", "        same = []",
+     _SCT + "test_in_place_restore_of_an_unchanged_snapshot_leaves_a_hard_link_intact", "p6fb-m1-identical-not-rewritten"),
+    (_SC, "        return os.path.isfile(str(target)) and not os.path.islink(str(target)) and backup._sha256(target) == sha",
+     "        return os.path.isfile(str(target))",
+     _SCT + "test_in_place_restore_still_replaces_a_changed_file_beside_an_unchanged_one", "p6fb-m1-only-identical-skipped"),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _FB]
