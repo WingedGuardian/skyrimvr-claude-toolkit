@@ -6712,3 +6712,9 @@ MUTATIONS += [
                  marks=pytest.mark.skipif(sys.platform == "win32", reason="the POSIX branch runs on POSIX"),
                  id="p8t6-reaper-terminates-posix"),
 ]
+# Rows 22/51: the plan docs' links resolve under CI's own check.
+MUTATIONS.append(pytest.param(
+    "docs/superpowers/plans/2026-10-02-plan3-closeout.md",
+    "plan3's own example of a relative link to skse-cross-compile.md",
+    "plan3's own [skse-cross-compile.md](skse-cross-compile.md) example",
+    "tests/test_markdown_links.py::test_every_relative_markdown_link_resolves", id="p8t6-plan-doc-link-broken"))
