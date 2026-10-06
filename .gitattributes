@@ -52,3 +52,6 @@ agent/targets/codex/* text eol=lf
 # would flip every Windows helper. .agents/ holds skills, which may carry images, so it is pinned by
 # extension only (`*.md` above), never by directory.
 .codex/** text eol=lf
+
+# The 3.x -> 4.0 migration fixtures are a real v3.9.1 install, compared byte for byte (T9). Text only.
+tests/fixtures/migrate-3x/** text eol=lf

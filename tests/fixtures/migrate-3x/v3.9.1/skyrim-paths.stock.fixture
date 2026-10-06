@@ -1,0 +1,6 @@
+# Written by setup.sh. Machine-local: not tracked, not shipped.
+# protect-bash.sh reads these to tell YOUR install from a path that merely
+# contains the word "Skyrim" -- a scratchpad, a checkout, a downloaded zip.
+SKYRIM_GAME_ROOT='C:/Temp/p8mig/stock/Skyrim VR'
+SKYRIM_CONFIG_DIR='D:/Docs/My Games/Skyrim VR'
+SKYRIM_LOADORDER_DIR='D:/LocalAppData/Skyrim VR'

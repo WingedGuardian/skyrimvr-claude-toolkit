@@ -4740,3 +4740,211 @@ MUTATIONS += [pytest.param("tests/test_node_fomod_smoke.py", "    if os.environ.
 MUTATIONS += [pytest.param("tests/run_harness_tests.py", '"TOOLKIT_REQUIRE_NODE_DEPS")', ")",
                            "tests/test_harness_required.py::test_the_launcher_forwards_the_node_deps_flag_to_pytest",
                            id="t6c-launcher-drops-require-node-deps-flag")]
+
+# --- Plan 8 T9: the 3.x -> 4.0 migration (tools/migrate-3x.py, tools/pre-update-snapshot.sh) ----------------
+# One row per clause that decides "shipped" vs "yours", what is read, what is kept, and what is never copied.
+# Not mutated (said so, not hidden): the exclusive-create `open(target, "xb")` behind the suffixed settings
+# backup -- shadowed by the suffix choice, it only matters in a race no test can stage -- and the snapshot's
+# `cmp -s` read-back, which no test can make a working `cp` fail.
+_M3 = "tools/migrate-3x.py"
+_M3T = "tests/test_migrate_3x.py::"
+_SN = "tools/pre-update-snapshot.sh"
+_M3_CLAUSES = [
+    # A placeholder value may not hold a backtick: a note the user wrote after a path is theirs, not setup's.
+    ("m3x-placeholder-value-excludes-backticks", _M3, '        parts.append("([^`' + BS + 'n]*)")',
+     '        parts.append("(.*)")',
+     _M3T + "test_an_edit_anywhere_is_not_mistaken_for_the_shipped_file[a note in backticks on a path line]"),
+    # The same placeholder must hold the same value on every line it appears.
+    ("m3x-same-placeholder-same-value", _M3, "if values.setdefault(name, value) != value:", "if False:",
+     _M3T + "test_an_edit_anywhere_is_not_mistaken_for_the_shipped_file[the mods path changed in one of its two places]"),
+    # The recorded paths (3.9 skyrim-paths.env) must agree with the file.
+    ("m3x-recorded-paths-cross-check", _M3, "if name in values and values[name] != recorded:", "if False:",
+     _M3T + "test_a_hand_corrected_path_is_an_edit_when_the_install_recorded_another"),
+    # The spliced mod-manager block must be one setup.sh could write, line for line.
+    ("m3x-block-must-be-a-shipped-block", _M3,
+     'and not any(_block_matches(lines[start:end], v, values) for v in block["variants"]):', "and False:",
+     _M3T + "test_an_edit_anywhere_is_not_mistaken_for_the_shipped_file[inside the MO2 block]"),
+    # CRLF is not an edit.
+    ("m3x-crlf-folded", _M3,
+     '    return data.decode("utf-8", "surrogateescape").replace("' + BS + "r" + BS + 'n", "' + BS + 'n")',
+     '    return data.decode("utf-8", "surrogateescape")',
+     _M3T + "test_a_real_391_rendering_is_recognised_as_shipped[crlf-stock]"),
+    # Each 4.x sign alone marks the live install as not-3.x (one twin per clause: each shadows the others).
+    ("m3x-era-4x-instruction-file", _M3, "if p and GENERATED_4X.match(norm(p.read_bytes())):", "if False:",
+     _M3T + "test_one_4x_file_is_enough_to_skip_the_live_files[CLAUDE.md]"),
+    ("m3x-era-4x-settings", _M3, "if p and SETTINGS_4X in norm(p.read_bytes()):", "if False:",
+     _M3T + "test_one_4x_file_is_enough_to_skip_the_live_files[settings]"),
+    ("m3x-era-4x-codex", _M3, "        if self.codex:", "        if False:",
+     _M3T + "test_one_4x_file_is_enough_to_skip_the_live_files[codex]"),
+    # The kb-guard store is a source at all (the no-snapshot path) ...
+    ("m3x-kb-store-is-a-source", _M3, "        cands.append(kb)", "        pass",
+     _M3T + "test_without_a_snapshot_the_kb_guard_copy_is_used"),
+    # ... its NEWEST 3.x copy, not an older one ...
+    ("m3x-kb-store-newest-copy", _M3, "            files[name] = ok[-1] / name", "            files[name] = ok[0] / name",
+     _M3T + "test_without_a_snapshot_the_kb_guard_copy_is_used"),
+    # ... skipping 4.x copies stored by a 4.0 session that started before setup (review I2) ...
+    ("m3x-kb-store-skips-4x-copies", _M3,
+     "        ok = [d for d in dirs if (d / name).is_file() and not _is_4x_doc(d / name)]",
+     "        ok = [d for d in dirs if (d / name).is_file()]",
+     _M3T + "test_a_4x_session_before_setup_does_not_hide_the_3x_copy"),
+    # ... and the knowledgebase copy from BEFORE the first 4.x copy (it has no header to tell it by).
+    ("m3x-kb-store-knowledgebase-before-4x", _M3, "(cutoff is None or _stamp_key(d.name) < cutoff)", "True",
+     _M3T + "test_a_4x_session_before_setup_does_not_hide_the_3x_copy"),
+    # Idempotence: the state record (a deleted block stays deleted) and the marker (a lost state file).
+    ("m3x-state-remembers-carried", _M3, "if key in carried or (name, digest) in present:",
+     "if (name, digest) in present:", _M3T + "test_a_block_the_user_deleted_does_not_come_back"),
+    ("m3x-marker-remembers-carried", _M3, "if key in carried or (name, digest) in present:",
+     "if key in carried:", _M3T + "test_a_lost_state_file_does_not_duplicate_a_block"),
+    # Blocks are read structurally: a marker inside carried text is content, not a block.
+    ("m3x-blocks-read-structurally", _M3, 'if open_key is None and kind == "BEGIN":', 'if kind == "BEGIN":',
+     _M3T + "test_hostile_content_is_copied_verbatim_and_never_becomes_preferences[absent]"),
+    # A `## My preferences` heading ahead of the blocks, so carried text never becomes the injected preferences.
+    ("m3x-prefs-heading-ahead-of-blocks", _M3,
+     '                    prefix += "' + BS + "n## My preferences" + BS + "n" + BS + 'n"', '                    pass',
+     _M3T + "test_hostile_content_is_copied_verbatim_and_never_becomes_preferences[no-prefs-section]"),
+    # The fence outgrows any backtick run in the carried text.
+    ("m3x-fence-outgrows-content", _M3, '    return "`" * max(4, longest + 1)', '    return "````"',
+     _M3T + "test_hostile_content_is_copied_verbatim_and_never_becomes_preferences[absent]"),
+    # The old KNOWLEDGEBASE.local.md is backed up BEFORE it is rewritten.
+    ("m3x-local-kb-backed-up-first", _M3,
+     '                _write_checked(run_dir / (LOCAL_KB + ".before"), local_bytes)', "                pass",
+     _M3T + "test_upgrade_from_391_with_edits_keeps_every_edit"),
+    # A different existing .3x-backup is never overwritten.
+    ("m3x-settings-backup-not-overwritten", _M3,
+     '                    target = root / ".claude" / "settings.json.3x-backup.{}".format(digest[:12])',
+     "                    pass", _M3T + "test_an_existing_different_settings_backup_is_never_overwritten"),
+    # Notes appended to a shipped KNOWLEDGEBASE.md are carried as text.
+    ("m3x-kb-appended-notes-carried", _M3,
+     '        if len(raw) > n and hashlib.sha256(raw[:n]).hexdigest() == spec["sha256"]:', "        if False:",
+     _M3T + "test_upgrade_from_391_with_edits_keeps_every_edit"),
+    # pre-update-snapshot.sh: copies what the new toolkit would overwrite ...
+    ("snap-copies-what-the-update-overwrites", _SN,
+     "rel=${rel#./}\n        [ -f \"$TARGET/$rel\" ] && printf", "rel=${rel#./}\n        false && printf",
+     _M3T + "test_snapshot_copies_what_the_update_replaces_and_changes_nothing"),
+    # ... but never enumerates the install itself, another game folder, or a backups folder.
+    ("snap-not-from-the-install-itself", _SN, '[ "$SRC" != "$TARGET" ] && ', "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[the install itself]"),
+    ("snap-not-from-a-game-folder", _SN, '[ ! -f "$SRC/SkyrimVR.exe" ] && ', "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[another game folder SkyrimVR.exe]"),
+    ("snap-not-from-a-game-folder-se", _SN, ' && [ ! -f "$SRC/SkyrimSE.exe" ]', "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[another game folder SkyrimSE.exe]"),
+    ("snap-not-from-a-game-folder-le", _SN, '   && [ ! -f "$SRC/TESV.exe" ]', "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[another game folder TESV.exe]"),
+    ("snap-free-space-checked", _SN, '    *) if [ "$need" -gt $(( free_kb * 1024 / 10 * 8 )) ]; then', "    *) if false; then",
+     _M3T + "test_snapshot_refuses_when_the_drive_is_nearly_full"),
+    ("snap-backups-pruned", _SN, " -o -path ./.claude/backups", "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[unpacked toolkit]"),
+    ("snap-unique-stamp", _SN, 'while [ -e "$BACKUPS/pre-update-$STAMP" ]; do', "while false; do",
+     _M3T + "test_two_snapshots_in_one_second_do_not_share_a_folder"),
+    # --- Fix round 1 (T9 review) ---
+    # I1: a shipped 3.x file is copied too -- "shipped" never means "no copy" ...
+    ("m3x-pristine-files-copied-too", _M3, "        if ckey not in copied:",
+     '        if ckey not in copied and verdict == "edited":',
+     _M3T + "test_a_corrected_path_is_kept_and_carried_whatever_the_verdict[renamed profile]"),
+    # ... and every filled-in path is carried as data: this run's copy, and the stable one setup.sh reads ...
+    ("m3x-carried-paths-run-copy", _M3,
+     '            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))', "            pass",
+     _M3T + "test_a_corrected_path_is_kept_and_carried_whatever_the_verdict[moved instance]"),
+    ("m3x-carried-paths-stable-copy", _M3,
+     '                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))', "                pass",
+     _M3T + "test_a_corrected_path_is_kept_and_carried_whatever_the_verdict[corrected overwrite path]"),
+    # ... found line by line in an EDITED file as well.
+    ("m3x-paths-searched-in-edited-files", _M3, "        if len(found) > len(best):", "        if False:",
+     _M3T + "test_paths_are_still_found_when_no_template_is_complete"),
+    ("m3x-paths-newest-complete-template", _M3,
+     '            return found, "searched"          # the newest template whose every path line is still there',
+     "            pass", _M3T + "test_paths_in_an_edited_file_come_from_the_newest_complete_template"),
+    # Minor 1: the collision suffix sorts inside its own second.
+    ("m3x-stamp-suffix-after-the-time", _M3,
+     '    m = re.match(r"(.*_' + BS + 'd{6})(?:_(' + BS + 'd+))?' + BS + 'Z", name)',
+     '    m = re.match(r"(.*?)(?:_(' + BS + 'd+))?' + BS + 'Z", name)',
+     _M3T + "test_a_collision_suffix_sorts_inside_its_own_second"),
+    # Minor 2: a source with no settings file says so.
+    ("m3x-settings-not-checked-said", _M3, "    if SETTINGS not in src.files:", "    if False:",
+     _M3T + "test_a_4x_session_before_setup_does_not_hide_the_3x_copy"),
+    # Minor 3: removed shipped hooks and changed commands are reported.
+    ("m3x-settings-removed-hooks", _M3, "        if pair in shipped and pair not in mine:", "        if False:",
+     _M3T + "test_the_settings_report_names_removed_and_changed_hooks"),
+    ("m3x-settings-changed-command", _M3, "        if command not in ref_cmds:", "        if False:",
+     _M3T + "test_the_settings_report_names_removed_and_changed_hooks"),
+    # Minor 4: an unclosed fence in the user's file is closed before the blocks.
+    ("m3x-unclosed-fence-closed", _M3, '                    prefix += token + "' + BS + 'n"', "                    pass",
+     _M3T + "test_an_unclosed_fence_in_the_users_file_does_not_leak_into_preferences"),
+    # Minor 5: the .before copy is read back; the undo record is written even on failure.
+    ("m3x-before-copy-read-back", _M3,
+     '                _write_checked(run_dir / (LOCAL_KB + ".before"), local_bytes)',
+     '                (run_dir / (LOCAL_KB + ".before")).write_bytes(local_bytes)',
+     _M3T + "test_a_backup_that_does_not_read_back_stops_the_run[KNOWLEDGEBASE.local.md.before]"),
+    ("m3x-undo-record-on-failure", _M3, "            if run_dir.is_dir():", "            if rc == 0 and run_dir.is_dir():",
+     _M3T + "test_a_failure_still_leaves_the_undo_record"),
+    # Minor 7: the three guards that had no twin.
+    ("m3x-source-copy-read-back", _M3, "    if path.read_bytes() != data:", "    if False:",
+     _M3T + "test_a_backup_that_does_not_read_back_stops_the_run[CLAUDE.md]"),
+    ("m3x-local-kb-read-back", _M3, "            if not local_path.read_bytes().startswith(old):", "            if False:",
+     _M3T + "test_a_local_knowledgebase_that_does_not_read_back_is_reported"),
+    ("m3x-new-local-kb-prefix", _M3,
+     '                prefix = "# Local knowledgebase' + BS + 'n' + BS + 'n## My preferences' + BS + 'n' + BS + 'n"',
+     '                prefix = ""', _M3T + "test_a_new_local_knowledgebase_starts_with_an_empty_preferences_section"),
+    # Minor 8: a CRLF local knowledgebase stays CRLF.
+    ("m3x-crlf-local-kb-kept", _M3,
+     '            nl = "' + BS + 'r' + BS + 'n" if old.count(b"' + BS + 'r' + BS + 'n") * 2 > old.count(b"' + BS + 'n") else "' + BS + 'n"',
+     '            nl = "' + BS + 'n"', _M3T + "test_a_crlf_local_knowledgebase_stays_crlf"),
+    # --- Fix round 2 (T9 re-review) ---
+    # N5: the carried text is inserted untouched; only the block's own lines follow the file's style.
+    ("m3x-carried-text-not-rewritten", _M3,
+     '    return nl.join(head + ["", f + "text"]) + nl + content + f + nl + end',
+     '    return nl.join(head + ["", f + "text"]) + nl + content.replace("' + BS + 'n", nl) + f + nl + end',
+     _M3T + "test_a_crlf_local_knowledgebase_stays_crlf"),
+    # N1: a value that is not UTF-8 is written with its exact bytes (both copies) ...
+    ("m3x-carried-paths-run-copy-lossless", _M3,
+     '            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))',
+     '            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8"))',
+     _M3T + "test_a_cp1252_accented_path_is_carried_byte_exact_through_the_launcher[only the path changed]"),
+    ("m3x-carried-paths-stable-copy-lossless", _M3,
+     '                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))',
+     '                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8"))',
+     _M3T + "test_a_cp1252_accented_path_is_carried_byte_exact_through_the_launcher[only the path changed]"),
+    # ... and printed without dying (the launcher's printer) ...
+    ("m3x-launcher-prints-any-value", _M3, "a.dry_run, out=_say)", "a.dry_run, out=print)",
+     _M3T + "test_a_cp1252_accented_path_is_carried_byte_exact_through_the_launcher[only the path changed]"),
+    # ... ANY exception is recorded as FAILED, and a retry reuses the failed run's folder.
+    ("m3x-any-failure-recorded", _M3,
+     "    except BaseException as e:                # noqa: BLE001 -- ANY end but success is recorded, then re-raised",
+     "    except (_Failed, OSError) as e:",
+     _M3T + "test_an_unforeseen_error_is_recorded_and_every_run_gets_a_new_folder"),
+    # Minor: a newline in the source label cannot break out of the env file's comment.
+    ("m3x-label-newline-stays-in-comment", _M3,
+     '    label = re.sub(r"[' + BS + 'r' + BS + 'n]+", " ", src_label)', "    label = src_label",
+     _M3T + "test_a_newline_in_the_source_label_stays_in_its_comment"),
+    # Minor: the fence closer is as long as the opener.
+    ("m3x-fence-closer-matches-opener", _M3,
+     "            token = _FENCE_RUN.match(line).group(1) if token is None else None",
+     "            token = m.group(1) if token is None else None",
+     _M3T + "test_an_unclosed_four_backtick_fence_is_closed_with_four"),
+    # N3: the snapshot counts each file once against free space.
+    ("snap-free-space-counts-each-file-once", _SN, 'sort -zu "$LIST" > "$UNIQ"', 'cat "$LIST" > "$UNIQ"',
+     _M3T + "test_snapshot_counts_each_file_once_against_free_space"),
+    # --- Fix round 3 (T9 re-review 2) ---
+    # R1: a copy is created EXCLUSIVELY -- no code path can replace an earlier run's copy ...
+    ("m3x-copy-created-exclusively", _M3, '        with open(path, "xb") as fh:', '        with open(path, "wb") as fh:',
+     _M3T + "test_a_copy_never_replaces_an_existing_file"),
+    # ... and a later run's record names the failed run it left alone.
+    ("m3x-new-record-names-the-failed-run", _M3,
+     '        log += ["An earlier run FAILED: {} (its copies and its record are untouched).".format(failed_before), ""]',
+     "        pass", _M3T + "test_an_unforeseen_error_is_recorded_and_every_run_gets_a_new_folder"),
+    # R2: an interrupt is recorded as INTERRUPTED and is not success.
+    ("m3x-interrupt-recorded", _M3,
+     "    except BaseException as e:                # noqa: BLE001 -- ANY end but success is recorded, then re-raised",
+     "    except Exception as e:", _M3T + "test_an_interrupt_is_recorded_as_interrupted_not_success"),
+    ("m3x-interrupt-named-interrupted", _M3,
+     '        word = "FAILED" if isinstance(e, Exception) else "INTERRUPTED"     # Ctrl+C, SystemExit, ...',
+     '        word = "FAILED"', _M3T + "test_an_interrupt_is_recorded_as_interrupted_not_success"),
+    # R3: a lone surrogate in a label is shown, never fatal (label, and the printer's fallback).
+    ("m3x-label-escapes-lone-surrogates", _M3,
+     '    return text.encode("utf-8", "backslashreplace").decode("utf-8")', "    return text",
+     _M3T + "test_a_lone_surrogate_in_a_label_is_shown_not_fatal"),
+    ("m3x-printer-escapes-lone-surrogates", _M3,
+     '        data = line.encode("utf-8", "backslashreplace").decode("utf-8")', "        raise",
+     _M3T + "test_a_lone_surrogate_in_a_label_is_shown_not_fatal"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _M3_CLAUSES]
