@@ -920,7 +920,7 @@ SSE, AE, and VR saves all use the same `.ess` format with LZ4 compression. The c
 - **Mod footprint**: Search for a mod's EditorID prefix to see how many references it left.
 - **Save bloat tracking**: Compare decompressed sizes across saves.
 
-*Tool: `scripts/read-save.py` — requires Python + `lz4` package (`pip install lz4`)*
+*Tool: `scripts/read-save.py` — requires Python + `lz4` (pinned, hash-locked: `python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-tools.lock`)*
 
 ---
 
@@ -1509,14 +1509,14 @@ VM freezes/dumps instead of growing into the fault) — without touching page ge
 **Not a real limit, despite what it looks like: PyFFI does NOT need a dedicated Python 3.10.** The
 only actual Python-version blocker is one unconditional `from distutils.cmd import Command` in
 `pyffi/utils/__init__.py` (an unused doc-building helper), and `distutils` was removed from the
-stdlib in 3.12 (PEP 632) — `pip install pyffi setuptools` fixes it, since setuptools ships its own
+stdlib in 3.12 (PEP 632) — installing setuptools beside it (hash-locked: `python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-tools.lock`) fixes it, since setuptools ships its own
 vendored `distutils` plus an import shim (the official PEP 632 migration path). Verified end-to-end
 on Python 3.14. The separate `time.clock` monkey-patch (removed in 3.8, [still open upstream](https://github.com/niftools/pyffi/issues/80)) is unrelated and still required regardless of interpreter version.
 
-**PyNifly is the fix** (installed `tools/pynifly/io_scene_nifly/`, prebuilt DLL, no Blender; verified on PyNifly 29.1.0,
-where the DLL is `io_scene_nifly/NiflyDLL.dll` -- before 29.x it was `io_scene_nifly/pyn/NiflyDLL.dll` --
-and `from pyn import pynifly`, after putting `io_scene_nifly` on `sys.path`, loads it itself;
-the animation-authoring round-trip was validated on 27.x, not re-run on 29.1.0). Wraps ousnius/nifly (the
+**PyNifly is the fix** (installed `tools/pynifly/io_scene_nifly/`, prebuilt DLL, no Blender; verified on PyNifly 27.2.0,
+the toolkit's one pinned version (library and Blender add-on), where the DLL actually loaded is `io_scene_nifly/NiflyDLL.dll` (the zip's
+`io_scene_nifly/pyn/NiflyDLL.dll` is never loaded) and `from pyn import pynifly`, after putting `io_scene_nifly` on `sys.path`, loads it itself;
+the animation-authoring round-trip was re-validated 2026-10-06: 27.2.0 and 29.1.0 author byte-identical controller stacks. 29.1.0 is NOT pinned: its Blender add-on strips BSEffectShaderProperty on an import/export round trip when the diffuse texture is not on disk, and a Blender round trip drops animation controllers on both versions). Wraps ousnius/nifly (the
 BodySlide/Outfit Studio engine). **Reads/writes SSE incl. BSTriShape** AND has correct `.New()`
 controller-authoring factories. Use it for any BSTriShape NIF and ALL animation authoring. See
 the `SpecialIdle`-named NiControllerSequence auto-loops on a placed Activator with zero scripting
@@ -1861,7 +1861,7 @@ counted as a crash.
 
 AutoMod's `archive` module reads a BSA index natively for `list`, but `create`, `extract`,
 `extract-file`, and `repack` shell out to **BSArch.exe** — without it they fail with `BSArch not found`
-(`create` MEASURED 2026-10-05). Place `bsarch.exe` at `<build-output>/tools/bsarch/bsarch.exe`, i.e.
+(`create` MEASURED 2026-10-05). Place `bsarch.exe` (BSArch 1.0, the tested build; hash in docs/installing-tools.md *Pinned downloads*) at `<build-output>/tools/bsarch/bsarch.exe`, i.e.
 under the same `bin/Release/net10.0/` folder the wrapper runs the DLL from (`net8.0/` before v4: the
 v4 retarget builds into a NEW folder, so move an existing copy across). BSArch also refuses an
 `extract --output` folder that does not exist yet (`EInvalidArguments: Folder does not exist`);

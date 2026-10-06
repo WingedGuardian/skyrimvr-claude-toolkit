@@ -4,7 +4,7 @@
 #
 # Prerequisites:
 #   - Docker Desktop running
-#   - @devcontainers/cli installed globally: npm install -g @devcontainers/cli
+#   - the devcontainer CLI installed globally, pinned: npm install -g @devcontainers/cli@0.89.0
 #
 # If you don't have the devcontainer CLI, use ./devshell-docker.sh instead -- it drives
 # Docker directly with no extra dependencies.

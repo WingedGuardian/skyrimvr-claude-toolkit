@@ -54,7 +54,11 @@ def check_log(lines, spec, leg):
     if not summary:
         return 2, ["COULD NOT CHECK: no pytest summary line"]
     problems, notes = [], []
-    collected = next((int(m.group(1)) for l in lines for m in [re.match(r"^collected (\d+) items", l)] if m), None)
+    # Real `pytest -v` output piped to a file reads `collecting ... collected N items` on one line (MEASURED
+    # 2026-10-06). The match is anchored at the line start, so a node id carrying the same words in its
+    # parameters never counts.
+    collected = next((int(m.group(1)) for l in lines
+                      for m in [re.match(r"^(?:collecting \.\.\. )?collected (\d+) items?\b", l)] if m), None)
     if collected is None:
         problems.append("no 'collected N items' line: was the suite run with -v?")
     elif collected < spec["collected_floor"]:

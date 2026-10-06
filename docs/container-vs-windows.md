@@ -23,7 +23,7 @@ mount contracts, disposable sentinel checks and the COULD NOT CHECK status.
 | Generate FOMOD XML | Container | Node.js (`fast-xml-parser`) |
 | Validate JSON schemas | Container | Node.js (`ajv`, `zod`) |
 | Unit test mod logic | Container | `pytest` |
-| Parse a `.ess` save | Container | ReSaver CLI (JDK 17 is in the image) |
+| Parse a `.ess` save | Container | ReSaver CLI (JDK 21.0.12 is in the image) |
 | Read INI / load order files | Container | `SKYRIM_PROFILE_DIR` mount |
 | Read an installed mod's files | Container | `SKYRIM_MODS_DIR` mount |
 | Load-order-dependent ESP edits | Windows (MO2) | xelib (`examples/inspect-esp.js`, etc.) |
@@ -101,7 +101,7 @@ To bring a result back to the host, publish it deliberately from Windows (or cop
 
 Files: `.devcontainer/`, `devshell.sh`, `devshell-docker.sh`.
 
-A reproducible Linux container (Python 3.11, Node 24 LTS, .NET 10, JDK 17) for the tools that don't need
+A reproducible Linux container (Python 3.11, Node 24.19.0, .NET SDK 10.0.401, JDK 21.0.12) for the tools that don't need
 Windows or an active MO2 session: Spriggit ESP inspection/diffing, FOMOD/JSON generation, unit-testing
 mod logic, ReSaver CLI. xelib and
 anything load-order-dependent still needs Windows (and MO2's executables list, on an MO2 install).
@@ -112,8 +112,8 @@ The checkout is mounted read-only; where each workflow writes instead is in
   Docker Desktop and `jq` on the host (it refuses to start without it). Reads its mount sources
   straight out of `.devcontainer/devcontainer.json` (which `setup.sh` fills in with your real mod
   paths), so it never hardcodes them.
-- **`bash devshell.sh`** — same thing via the `@devcontainers/cli` (`npm install -g
-  @devcontainers/cli`), for editor integration (VS Code's Dev Containers extension uses the same
+- **`bash devshell.sh`** — same thing via the devcontainer CLI
+  (`npm install -g @devcontainers/cli@0.89.0`), for editor integration (VS Code's Dev Containers extension uses the same
   `devcontainer.json`).
 - `setup.sh` fills in `.devcontainer/devcontainer.json`'s mount paths automatically: on an MO2
   install, from the detected instance's mods/profile/overwrite folders; on stock/Vortex, from `Data/`

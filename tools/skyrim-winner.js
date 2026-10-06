@@ -77,7 +77,7 @@ function loadXelib() {
     // "installed somewhere Node will not look".
     if (!xelib) {
         const brief = errors.map(e => e.split('Require stack')[0].trim()).join(' | ');
-        die('xeditlib is not installed -- run "npm install github:WingedGuardian/xeditlib" '
+        die('xeditlib is not installed -- run "npm ci --ignore-scripts --no-audit --no-fund" (it installs the pinned xeditlib + koffi from package-lock.json) '
             + 'from the toolkit ROOT (every bundled script finds it by upward lookup). '
             + 'Tried: ' + brief);
     }

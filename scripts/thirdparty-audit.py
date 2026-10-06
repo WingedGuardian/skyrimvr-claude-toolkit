@@ -22,7 +22,8 @@ mechanical:
   * CLI flags / APIs      a documented flag or endpoint is still in the pinned upstream source / README.
 
 Statuses:  OK | NEWER (upstream moved on; reported, never a failure) | UNPINNED (recommended, no pin;
-reported) | DRIFT | COULD NOT CHECK (always with a reason).
+reported) | NOT DELIVERED (nothing the toolkit ships installs it; the reason is printed) | DRIFT |
+COULD NOT CHECK (always with a reason).
 Exit:  1 = at least one DRIFT;  2 = no DRIFT but at least one row could not be checked;  0 = otherwise.
 A run is never silently OK: a row nobody could check is printed and changes the exit code.
 
@@ -53,6 +54,7 @@ import urllib.request
 from pathlib import Path
 
 OK, NEWER, UNPINNED, DRIFT, UNCHECKED = "OK", "NEWER", "UNPINNED", "DRIFT", "COULD NOT CHECK"
+OUTSIDE = "NOT DELIVERED"   # nothing the toolkit ships installs it; the row says why (reported, never a failure)
 DEFAULT_CACHE = Path(tempfile.gettempdir()) / "thirdparty-audit-cache"
 USER_AGENT = "skyrimvr-claude-toolkit-thirdparty-audit/1"
 
@@ -321,6 +323,16 @@ def nexus_version(f, game, mod_id):
     return str(f.get_ok("https://api.nexusmods.com/v1/games/%s/mods/%s.json" % (game, mod_id)).json()["version"])
 
 
+def nexus_file_latest(f, game, mod_id):
+    """Newest version among a mod's MAIN files. Some pages never bump the mod-level version (ReSaver: page 6.0.636,
+    newest MAIN file 6.0.643), and the file a user downloads is what counts."""
+    files = f.get_ok("https://api.nexusmods.com/v1/games/%s/mods/%s/files.json" % (game, mod_id)).json().get("files", [])
+    main = [str(x.get("version")) for x in files if x.get("category_name") == "MAIN" and x.get("version")]
+    if not main:
+        raise CouldNotCheck("no MAIN file listed for %s/%s" % (game, mod_id))
+    return max(main, key=vkey)
+
+
 def eol_latest(f, product, cycle):
     return f.get_ok("https://endoflife.date/api/%s/%s.json" % (product, cycle)).json()["latest"]
 
@@ -536,15 +548,38 @@ def scan_refs(repo, ref):
 
 NODE_REFS = [
     {"pattern": r"setup_(?P<v>\d+)\.x", "compare": "major"},
+    {"pattern": r"NODE_VERSION=(?P<v>\d+\.\d+\.\d+)"},
+    {"pattern": r"OpenJS\.NodeJS(?:\.LTS)? --exact --version[ =]+(?P<v>\d+\.\d+\.\d+)"},
     {"pattern": r"\"node\":\s*\">=\s*(?P<v>\d+)", "compare": "major", "files": ["package.json"]},
     {"pattern": r"\bNode(?:\.js)? (?P<v>\d{2})\b(?!\.\d)", "compare": "major"},
+    {"pattern": r"\bNode(?:\.js)? \*?\*?(?P<v>\d+\.\d+\.\d+)"},
+    {"pattern": r"node-v(?P<v>\d+\.\d+\.\d+)-"},
 ]
 DOTNET_REFS = [
     {"pattern": r"\.NET (?P<v>\d+)(?:\.0)? (?:SDK|runtime)", "compare": "major"},
     {"pattern": r"Microsoft\.DotNet\.SDK\.(?P<v>\d+)", "compare": "major"},
     {"pattern": r"--channel (?P<v>\d+)\.\d", "compare": "major"},
     {"pattern": r"dotnet-version:\s*[\"']?(?P<v>\d+)\.", "compare": "major"},
+    # The exact SDK every install hint names, and the variable toolchain-check fills its hint from.
+    {"pattern": r"Microsoft\.DotNet\.SDK\.\d+ --exact --version[ =]+(?P<v>[\d$%{][^\s`'\")]*)"},
+    {"pattern": r"SDK_PIN=(?P<v>\d+\.\d+\.\d+)", "files": ["tools/toolchain-check.sh"]},
+    {"pattern": r"\.NET SDK (?P<v>\d+\.\d+\.\d+)"},
 ]
+# A download pinned in docs/installing-tools.md's *Pinned downloads* table: | Tool | Version | File | SHA-256 | From |
+PINNED_DOWNLOADS = "docs/installing-tools.md"
+
+
+def table_row(tool):
+    """Pin-site regex for one row of the Pinned downloads table (named groups: v, sha, url)."""
+    return (r"(?m)^\| " + re.escape(tool) + r" \| (?P<v>[\w.]+) \| [^|]+\| `(?P<sha>[0-9a-f]{64})` \| "
+            r"<?(?P<url>https://[^>|\s]+|[^|]+?)>? \|")
+
+
+def hashes(tool, published=None):
+    """The `hashes` check for one table row: published=URL template (fields from the row) whose text must contain
+    the pinned hash, or None to download the file itself and hash it (small assets only)."""
+    return ("hashes", {"items": [{"label": tool, "file": PINNED_DOWNLOADS, "pattern": table_row(tool),
+                                  "published": published}]})
 
 REGISTRY = [
     {"name": "Spriggit", "pins": [("json", ".config/dotnet-tools.json", ["tools", "spriggit.cli", "version"])],
@@ -556,10 +591,19 @@ REGISTRY = [
                                "sources": ["Spriggit.Core/Commands/SerializeCommand.cs",
                                            "Spriggit.Core/Commands/DeserializeCommand.cs"]}),
                 ("nupkg_tfm", {"package": "spriggit.cli", "runtime": ".NET SDK"})]},
-    {"name": ".NET SDK", "pins": [("regex", ".devcontainer/Dockerfile", r"--channel (?P<v>\d+\.\d+)"),
+    {"name": ".NET SDK", "pins": [("regex", ".devcontainer/Dockerfile", r"DOTNET_SDK_VERSION=(?P<v>\d+\.\d+\.\d+)"),
                                   ("regex", ".github/workflows/ci.yml", r"dotnet-version:\s*[\"']?(?P<v>\d+\.\d+)")],
-     "compare": "minor", "upstream": ("dotnet", None), "refs": DOTNET_REFS},
-    {"name": "Node.js", "pins": [("text", ".node-version")], "upstream": ("eol", "nodejs", "major"), "refs": NODE_REFS},
+     "compare": "minor", "upstream": ("dotnet", None), "refs": DOTNET_REFS,
+     "checks": [("hashes", {"items": [
+         {"label": ".NET SDK " + arch, "file": ".devcontainer/Dockerfile",
+          "pattern": r"DOTNET_SDK_VERSION=(?P<v>(?P<ch>\d+\.\d+)\.\d+)[\s\S]*?DOTNET_SHA512_%s=(?P<sha>[0-9a-f]{128})" % arch,
+          "published": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/{ch}/releases.json"}
+         for arch in ("AMD64", "ARM64")]})]},
+    {"name": "Node.js", "pins": [("text", ".node-version")], "upstream": ("eol", "nodejs", "major"), "refs": NODE_REFS,
+     "checks": [("hashes", {"items": [
+         {"label": "Node.js " + arch, "file": ".devcontainer/Dockerfile",
+          "pattern": r"NODE_VERSION=(?P<v>\d+\.\d+\.\d+)[\s\S]*?NODE_SHA256_%s=(?P<sha>[0-9a-f]{64})" % arch,
+          "published": "https://nodejs.org/dist/v{v}/SHASUMS256.txt"} for arch in ("AMD64", "ARM64")]})]},
     {"name": "Python", "pins": [("text", ".python-version")], "upstream": ("eol", "python", "minor"),
      "refs": [{"pattern": r"devcontainers/python:[\d.]+-(?P<v>\d+\.\d+)-", "compare": "minor"}]},
     {"name": "AutoMod", "pins": [("regex", "tools/automod-cli.sh", r"PIN_COMMIT=\"(?P<v>[0-9a-f]{40})\"")],
@@ -575,8 +619,14 @@ REGISTRY = [
     {"name": "PyNifly", "pins": [("regex", "docs/installing-tools.md", r"verified with:? (?P<v>\d+\.\d+\.\d+)"),
                                  ("regex", "agent/skills/skyrim-nif/SKILL.md", r"Verified on \*\*PyNifly (?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("github", "BadDogSkyrim/PyNifly"),
+     "newer_note": "29.1.0 was re-validated and rejected (2026-10-06): its Blender add-on strips effect shaders on a "
+                   "round trip when the texture is not beside the NIF; re-validate any newer release the same way",
+     "refs": [{"pattern": r"(?m)^\| PyNifly \| (?P<v>\d+\.\d+\.\d+) \|", "files": [PINNED_DOWNLOADS]},
+              {"pattern": r"PyNifly/releases/download/V(?P<v>\d+\.\d+\.\d+)/io_scene_nifly\.zip", "line": r"^\| PyNifly \|"}],
      "checks": [("follows_latest", {"pattern": r"(?i)latest release[^\n]*PyNifly|PyNifly[^\n]*latest release"}),
-                ("zip_paths", {"repo": "BadDogSkyrim/PyNifly", "asset": "io_scene_nifly.zip",
+                hashes("PyNifly", "https://api.github.com/repos/BadDogSkyrim/PyNifly/releases/tags/V{v}"),
+                hashes("PyNifly Blender add-on", "https://api.github.com/repos/BadDogSkyrim/PyNifly/releases/tags/V{v}"),
+                ("zip_paths", {"repo": "BadDogSkyrim/PyNifly", "asset": "io_scene_nifly.zip", "tag_format": "V{v}",
                                "pattern": r"(?<![\w/])(?:tools/pynifly/)?(?P<p>io_scene_nifly/[\w./-]+\.(?:dll|py))"})]},
     {"name": "DevBench", "pins": [("regex", "README.md", r"newest release the docs were read against is \*\*(?P<v>\d+\.\d+\.\d+)"),
                                   ("regex", "agent/skills/devbench/SKILL.md", r"unchanged in (?P<v>\d+\.\d+\.\d+) per the")],
@@ -586,26 +636,85 @@ REGISTRY = [
     {"name": "VR Address Library", "pins": [("regex", "README.md", r"newest seen: (?P<v>\d+\.\d+\.\d+)"),
                                             ("regex", "agent/skills/devbench/SKILL.md", r"VR Address Library seen when this was written is \*\*(?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("nexus", "skyrimspecialedition", 58101)},
-    {"name": "CrashLoggerSSE", "upstream": ("github", "alandtse/CrashLoggerSSE"), "nexus": ("skyrimspecialedition", 59818)},
-    {"name": "SKSE VR", "upstream": ("nexus", "skyrimspecialedition", 30457)},
-    {"name": "Champollion", "upstream": ("github", "Orvid/Champollion")},
-    {"name": "Caprica", "upstream": ("github", "Orvid/Caprica")},
-    {"name": "xeditlib", "upstream": ("github", "WingedGuardian/xeditlib")},
-    {"name": "zEdit", "upstream": ("github", "z-edit/zedit")},
-    {"name": "xEdit (SSEEdit)", "upstream": ("github", "TES5Edit/TES5Edit")},
-    {"name": "koffi", "upstream": ("npm", "koffi")},
-    {"name": "PyFFI", "upstream": ("pypi", "PyFFI")},
-    {"name": "ReSaver (FallrimTools)", "upstream": ("nexus", "skyrimspecialedition", 5031)},
+    {"name": "CrashLoggerSSE", "upstream": ("github", "alandtse/CrashLoggerSSE"), "nexus": ("skyrimspecialedition", 59818),
+     "not_delivered": "a game mod the user installs with their own mod manager; the toolkit never installs or names a version of it; crash-triage reads the dumps of whatever version is installed"},
+    {"name": "SKSE VR", "upstream": ("nexus", "skyrimspecialedition", 30457), "not_delivered": "a game mod the user installs with their own mod manager; the toolkit never installs or names a version of it"},
+    {"name": "Champollion", "pins": [("regex", PINNED_DOWNLOADS, table_row("Champollion"))],
+     "upstream": ("github", "Orvid/Champollion"),
+     "refs": [{"pattern": r"Champollion[. ](?P<v>v\d+\.\d+\.\d+)"}],
+     "checks": [hashes("Champollion")]},
+    {"name": "Caprica", "pins": [("regex", PINNED_DOWNLOADS, table_row("Caprica"))], "upstream": ("github", "Orvid/Caprica"),
+     "refs": [{"pattern": r"Caprica[. ](?P<v>v\d+\.\d+\.\d+)"}],
+     "checks": [hashes("Caprica")]},
+    {"name": "xeditlib", "pins": [("regex", "package.json", r"xeditlib/tar\.gz/(?P<v>[0-9a-f]{40})"),
+                                  ("regex", "package-lock.json", r"xeditlib/tar\.gz/(?P<v>[0-9a-f]{40})")],
+     "tag_pins": [("regex", PINNED_DOWNLOADS, r"xeditlib (?P<v>v\d+\.\d+\.\d+) = commit")],
+     "upstream": ("github", "WingedGuardian/xeditlib"),
+     "refs": [{"pattern": r"WingedGuardian/xeditlib#(?P<v>[0-9a-f]{40})"},
+              {"pattern": r"(?:xeditlib/tar\.gz/|commit `)(?P<v>[0-9a-f]{7,40})", "line": r"xeditlib",
+               "compare": "prefix"},
+              {"pattern": r"\bnpm (?:install|i)\b(?P<tail>[^\n`\"']*WingedGuardian/xeditlib[^\n`\"']*)",
+               "version": r"xeditlib#(?P<v>[0-9a-f]{40})", "unpinned": "xeditlib install without #<commit>"}],
+     "checks": [("tag_commit", {"repo": "WingedGuardian/xeditlib"})]},
+    {"name": "zEdit", "upstream": ("github", "z-edit/zedit"),
+     "not_delivered": "credited only: XEditLib.dll reaches users inside the pinned xeditlib commit, not from zEdit"},
+    {"name": "xEdit (SSEEdit)", "upstream": ("github", "TES5Edit/TES5Edit"),
+     "not_delivered": "the user's own modding tool; the toolkit uses XEditLib.dll from the pinned xeditlib, never xEdit"},
+    {"name": "koffi", "pins": [("json", "package.json", ["optionalDependencies", "koffi"]),
+                               ("json", "package-lock.json", ["packages", "node_modules/koffi", "version"])],
+     "upstream": ("npm", "koffi"),
+     "refs": [{"pattern": r"\bkoffi@(?P<v>\d+\.\d+\.\d+)"}, {"pattern": r"\bkoffi (?P<v>\d+\.\d+\.\d+)\b"}]},
+    {"name": "PyFFI", "pins": [("regex", "tools/requirements-tools.txt", r"(?m)^PyFFI==(?P<v>\d+\.\d+\.\d+)")],
+     "upstream": ("pypi", "PyFFI")},
+    {"name": "ReSaver (FallrimTools)", "pins": [("regex", PINNED_DOWNLOADS, table_row("ReSaver"))],
+     "upstream": ("nexus-file", "skyrimspecialedition", 5031),
+     "refs": [{"pattern": r"ReSaver \*?\*?(?P<v>6\.\d+\.\d+)"}]},
     {"name": "JDK (recommended LTS)", "pins": [("regex", "docs/installing-tools.md", r"JDK (?P<v>\d+) LTS recommended")],
      "upstream": ("eol", "eclipse-temurin", "major"), "refs": [{"pattern": r"JDK (?P<v>\d+) LTS recommended", "compare": "major"}]},
-    {"name": "NifSkope", "upstream": ("github", "niftools/nifskope")},   # what docs link (not the hexabits fork)
-    {"name": "Blender (4.2 LTS)", "upstream": ("blender", "4.2")},
-    {"name": "Cathedral Assets Optimizer", "upstream": ("nexus", "skyrimspecialedition", 23316)},
-    {"name": "BSArch", "upstream": ("nexus", "newvegas", 64745)},
-    {"name": "Mod Organizer 2", "upstream": ("github", "ModOrganizer2/modorganizer")},
-    {"name": "Vortex", "upstream": ("github", "Nexus-Mods/Vortex")},
-    {"name": "Wrye Bash", "upstream": ("github", "wrye-bash/wrye-bash")},
-    {"name": "Git for Windows", "upstream": ("github", "git-for-windows/git")},
+    {"name": "Microsoft OpenJDK", "pins": [("regex", ".devcontainer/Dockerfile", r"JDK_VERSION=(?P<v>\d+\.\d+\.\d+)")],
+     "upstream": ("eol", "microsoft-build-of-openjdk", "major"),
+     "refs": [{"pattern": r"Microsoft\.OpenJDK\.\d+ --exact --version[ =]+(?P<v>\d+\.\d+\.\d+)", "compare": "prefix"},
+              {"pattern": r"microsoft-jdk-(?P<v>\d+\.\d+\.\d+)-linux", "files": [".devcontainer/Dockerfile"]},
+              # A JDK version a doc states (exact anywhere; a bare major in the doc that describes the image) must
+              # be the image's (review I5: "JDK 17 is in the image" outlived the move to 21).
+              {"pattern": r"\b(?:Open)?JDK (?P<v>\d+\.\d+\.\d+)\b"},
+              {"pattern": r"\b(?:Open)?JDK (?P<v>\d{2})\b(?![+.\d])", "compare": "major",
+               "files": ["docs/container-vs-windows.md"]}],
+     "checks": [("hashes", {"items": [
+         {"label": "JDK amd64", "file": ".devcontainer/Dockerfile",
+          "pattern": r"JDK_VERSION=(?P<v>[\d.]+)[\s\S]*?JDK_SHA256_AMD64=(?P<sha>[0-9a-f]{64})",
+          "published": "https://aka.ms/download-jdk/microsoft-jdk-{v}-linux-x64.tar.gz.sha256sum.txt"},
+         {"label": "JDK arm64", "file": ".devcontainer/Dockerfile",
+          "pattern": r"JDK_VERSION=(?P<v>[\d.]+)[\s\S]*?JDK_SHA256_ARM64=(?P<sha>[0-9a-f]{64})",
+          "published": "https://aka.ms/download-jdk/microsoft-jdk-{v}-linux-aarch64.tar.gz.sha256sum.txt"}]})]},
+    {"name": "Python (Windows install)",
+     "pins": [("regex", "README.md", r"Python\.Python\.3\.\d+ --exact --version (?P<v>\d+\.\d+\.\d+)")],
+     "upstream": ("eol", "python", "minor"),
+     "refs": [{"pattern": r"Python\.Python\.3\.\d+ --exact --version[ =]+(?P<v>\d+\.\d+\.\d+)"},
+              {"pattern": r"python-(?P<v>\d+\.\d+\.\d+)-amd64\.exe"}],
+     "newer_note": "stays NEWER by design: 3.12.10 is the last 3.12 with a Windows installer (later 3.12.x are "
+                   "source-only security releases); moving off it means another minor (3.13.x) -- a T7/user decision"},
+    {"name": "NifSkope", "pins": [("regex", PINNED_DOWNLOADS, table_row("NifSkope"))],
+     "upstream": ("github", "hexabits/nifskope"),   # the maintained fork the docs link and the toolkit was tested with
+     "checks": [hashes("NifSkope")]},
+    {"name": "Blender (4.2 LTS)", "pins": [("regex", PINNED_DOWNLOADS, table_row("Blender"))], "upstream": ("blender", "4.2"),
+     "checks": [hashes("Blender", "https://download.blender.org/release/Blender4.2/blender-{v}.sha256")]},
+    {"name": "Cathedral Assets Optimizer", "upstream": ("nexus", "skyrimspecialedition", 23316),
+     "not_delivered": "evaluated and NOT adopted (KNOWLEDGEBASE.md); nothing tells a user to install it"},
+    {"name": "BSArch", "pins": [("regex", PINNED_DOWNLOADS, table_row("BSArch"))], "upstream": ("nexus", "newvegas", 64745)},
+    {"name": "Mod Organizer 2", "upstream": ("github", "ModOrganizer2/modorganizer"),
+     "not_delivered": "the user's own mod manager; the toolkit only reads its layout"},
+    {"name": "Vortex", "upstream": ("github", "Nexus-Mods/Vortex"),
+     "not_delivered": "the user's own mod manager; the toolkit only reads its layout"},
+    {"name": "Wrye Bash", "upstream": ("github", "wrye-bash/wrye-bash"),
+     "not_delivered": "the user's own tool; no shipped instruction installs it"},
+    {"name": "Git for Windows", "pins": [("regex", "tools/inventory-runtimes.py",
+                                          r"Git-(?P<v>\d+\.\d+\.\d+)-64-bit\.exe")],
+     "upstream": ("github", "git-for-windows/git"),
+     "refs": [{"pattern": r"Git\.Git --exact --version[ =]+(?P<v>\d+\.\d+\.\d+)"},
+              {"pattern": r"Git-(?P<v>\d+\.\d+\.\d+)-64-bit\.exe"}],
+     "newer_note": "the Git these suites ran under on the dev machine; Plan 8 Q6 updates Git before T14b -- move "
+                   "this pin (inventory-runtimes MANUAL_STEPS) with it"},
     {"name": "Codex CLI", "pins": [("dirs", "tests/fixtures/codex/*"), ("dirs", "tests/fixtures/payloads/codex/*"),
                                    ("regex", "tools/skyguard/codex_trust.py", r"MEASURED on codex-cli (?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("npm", "@openai/codex"),
@@ -615,11 +724,17 @@ REGISTRY = [
      "upstream": ("npm", "@anthropic-ai/claude-code"),
      "newer_note": "re-capture payload fixtures + re-run conformance (T15b)"},
     {"name": "devcontainer base image", "pins": [("regex", ".devcontainer/Dockerfile", r"devcontainers/python:(?P<v>\d+\.\d+\.\d+)-")],
+     "checks": [("hashes", {"items": [{
+         "label": "image index digest", "file": ".devcontainer/Dockerfile",
+         "pattern": r"devcontainers/python:(?P<tag>[\w.-]+)@sha256:(?P<sha>[0-9a-f]{64})",
+         "url": "https://mcr.microsoft.com/v2/devcontainers/python/manifests/{tag}",
+         "accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json"}]})],
      "upstream": ("mcr", "devcontainers/python", r"\d+\.\d+\.\d+-{pyminor}-bookworm")},
     {"name": "busybox (CI sentinel)", "pins": [("regex", ".github/workflows/ci.yml", r"busybox:(?P<v>\d+\.\d+)\b")],
      "upstream": ("dockerhub", "library/busybox"), "compare": "minor"},
 ]
 # Names the manual audit (2026-10-05) covered; tests/test_thirdparty_audit.py holds the registry to this floor.
+# Every entry either reads a pin from the repo or says why the toolkit never delivers it (tests hold this).
 AUDIT_FLOOR = ("Spriggit", ".NET SDK", "Node.js", "Python", "AutoMod", "PyNifly", "DevBench", "VR Address Library",
                "CrashLoggerSSE", "SKSE VR", "Champollion", "Caprica", "xeditlib", "zEdit", "koffi", "PyFFI",
                "ReSaver (FallrimTools)", "NifSkope", "Blender (4.2 LTS)", "Cathedral Assets Optimizer", "BSArch",
@@ -633,11 +748,14 @@ def dynamic_entries(repo):
     pkg = repo.read("package.json")
     if pkg is not None:
         try:
-            deps = json.loads(pkg).get("dependencies", {})
+            data = json.loads(pkg)
+            deps = dict(data.get("dependencies", {}), **data.get("optionalDependencies", {}))
         except ValueError:
             deps = None
             out.append({"name": "package.json", "broken": "package.json is not valid JSON"})
         for name in sorted(deps or {}):
+            if re.fullmatch(r"https://codeload\.github\.com/[\w.-]+/[\w.-]+/tar\.gz/[0-9a-f]{40}", deps[name]):
+                continue   # a commit tarball (xeditlib): its registry entry holds the commit and the tag
             out.append({"name": "npm " + name, "npm": name, "spec": deps[name]})
     req = repo.read("requirements.txt")
     if req is not None:
@@ -695,6 +813,8 @@ def latest_of(f, upstream, pinned):
         return pypi_latest(f, upstream[1])
     if kind == "nexus":
         return nexus_version(f, upstream[1], upstream[2])
+    if kind == "nexus-file":
+        return nexus_file_latest(f, upstream[1], upstream[2])
     if kind == "blender":
         return blender_latest(f, upstream[1])
     if kind == "dockerhub":
@@ -739,6 +859,16 @@ def audit_entry(f, repo, spec, rows, ctx):
     # 2. version vs upstream.
     upstream = spec.get("upstream")
     latest_box = {}
+    if spec.get("not_delivered"):
+        # Nothing the toolkit ships puts this on a machine, so there is no pin to hold. Upstream latest is shown when
+        # it can be read; an unreadable one changes nothing here (no decision depends on it).
+        try:
+            latest = latest_of(f, upstream, pinned) if upstream else None
+            latest_box["v"] = latest
+        except CouldNotCheck as exc:
+            latest = "unknown (%s)" % exc
+        rows.append(Row(name, "delivery", None, latest, OUTSIDE, spec["not_delivered"]))
+        upstream = None
     if upstream:
         def version_row():
             shown_pin = tag_pin or pinned
@@ -940,7 +1070,8 @@ def check_follows_latest(f, repo, name, pinned, tag_pin, args, rows, ctx, latest
 
 
 def check_zip_paths(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box):
-    tag = latest_box.get("v")
+    # The release users are told to download is the PINNED one; without a tag format, the latest release.
+    tag = args["tag_format"].format(v=pinned) if args.get("tag_format") and pinned else latest_box.get("v")
     if tag is None:
         raise CouldNotCheck("upstream release unknown")
     paths = documented_paths(repo, None, args["pattern"])
@@ -984,7 +1115,30 @@ def check_upstream_text(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_
                         "%d documented item(s) still in upstream %s" % (len(items), args["path"])))
 
 
-CHECKS = {"cli_flags": check_cli_flags, "nupkg_tfm": check_nupkg_tfm, "tag_commit": check_tag_commit,
+def check_hashes(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box):
+    """Every pinned SHA in the repo is the one upstream publishes for that exact file. An item with `published`
+    fetches that URL (fields filled from the pattern's named groups) and requires the hash in its text; without it,
+    the file at the row's URL is downloaded and hashed (small assets only)."""
+    for it in args["items"]:
+        m = re.search(it["pattern"], repo.read(it["file"]) or "")
+        if not m:
+            rows.append(Row(name, "pinned hash", pinned, it["label"], UNCHECKED,
+                            "no pinned hash found in %s (moved or reworded?)" % it["file"]))
+            continue
+        want, fields = m.group("sha").lower(), {k: v for k, v in m.groupdict().items() if v is not None}
+        if it.get("published"):
+            url = it["published"].format(**fields)
+            ok = want in f.get_ok(url).text().lower()
+        else:
+            url = it["url"].format(**fields) if it.get("url") else fields.get("url", "")
+            if not url.startswith("https://"):
+                raise CouldNotCheck("%s: no download URL to hash" % it["label"])
+            ok = hashlib.sha256(f.get_ok(url, accept=it.get("accept")).body).hexdigest() == want
+        rows.append(Row(name, "pinned hash", fields.get("v", pinned), it["label"], OK if ok else DRIFT,
+                        ("SHA-256 matches " if ok else "pinned SHA %s... is NOT what upstream has at " % want[:12]) + url))
+
+
+CHECKS = {"hashes": check_hashes, "cli_flags": check_cli_flags, "nupkg_tfm": check_nupkg_tfm, "tag_commit": check_tag_commit,
           "repo_paths": check_repo_paths, "follows_latest": check_follows_latest, "zip_paths": check_zip_paths,
           "upstream_text": check_upstream_text}
 
@@ -1074,6 +1228,278 @@ def pin_of(repo, spec):
     return vals[0] if vals else None
 
 
+# ------------------------------------------------------------------------------------- delivery paths
+# Plan 8 T6d (user ruling 2026-10-05: every user gets EXACTLY the versions we tested). Every instruction in a shipped
+# text file that puts third-party software on a machine must name ONE version and give a way to verify it. Purely
+# local (no network): `tests/test_thirdparty_audit.py` runs it offline on the real tree and on synthetic ones.
+#
+# There is NO wording-based history skip here (review I1: "Before you start, run `pip install lz4`" read as history
+# and silenced every rule). History lives in DELIVERY_HISTORY_FILES, skipped by file; any other line that only
+# records history needs an exemption with its reason.
+
+DELIVERY_SUFFIXES = (".md", ".txt", ".sh", ".ps1", ".cmd", ".bat", ".py", ".json", ".yml", ".yaml", ".js", ".example")
+DELIVERY_SKIP_DIRS = {".git", "node_modules", "tests", ".superpowers", ".pytest_cache", "__pycache__", ".venv"}
+# Files that only record history (file-scoped; nothing in them is an instruction), plus this file's own rule text.
+DELIVERY_HISTORY_FILES = ("CHANGELOG.md", "docs/superpowers/*", "scripts/thirdparty-audit.py")
+SHA256_HEX = re.compile(r"\b[0-9a-f]{64}\b")
+EXACT_NPM = re.compile(r"(?:@[\w.-]+/)?[\w.-]+@\d+\.\d+\.\d+(?:-[\w.]+)?")
+COMMIT_NPM = re.compile(r"(?:github:)?[\w.-]+/[\w.-]+#[0-9a-f]{40}")
+EXACT_PY = re.compile(r"[\w.\-\[\]]+==\d+(?:\.\d+)+")
+# A clone is pinned when it names a tag AND something checks the commit after cloning: repo -> (file, proof regex).
+VERIFIED_CLONES = {"SpookyPirate/spookys-automod-toolkit": ("tools/automod-cli.sh", r'PIN_COMMIT="[0-9a-f]{40}"')}
+DOWNLOAD_HOSTS = (r"github\.com/[\w.-]+/[\w.-]+/releases|blender\.org|nodejs\.org|python\.org|git-scm\.com|"
+                  r"nexusmods|Nexus mod \d+|FallrimTools page|aka\.ms/|dot\.net/")
+# A download's hash may sit on the same line or the next two (a wrapped string literal or bullet).
+HASH_WINDOW = 3
+
+
+def _command_args(line, head):
+    """The arguments of each `head` command on the line, up to where the command ends (a quote, a backtick, a
+    pipe, ...): a flag elsewhere on the line -- another command's --version -- must not pin this one."""
+    return [m.group("args") for m in re.finditer(head + r"(?P<args>[^`\"'\n|;&)]*)", line)]
+
+
+def _specs(args):
+    return [t for t in args.split() if not t.startswith("-") and not t.startswith("<")]
+
+
+def _npm_problems(line):
+    out = []
+    for args in _command_args(line, r"\bnpm\s+(?:install|i|add)\b"):
+        specs = _specs(args)
+        if not specs:
+            out.append("bare `npm install` resolves ranges at install time: use `npm ci` (the lockfile)")
+        for s in specs:
+            if not (EXACT_NPM.fullmatch(s) or COMMIT_NPM.fullmatch(s)):
+                out.append("npm package `%s` without an exact version (@x.y.z) or a commit (#<40-hex sha>)" % s)
+    return out
+
+
+def _runner_problems(line):
+    """npx / npm exec / uvx run a package fetched at that moment: the package must carry its exact version."""
+    out = []
+    for args in _command_args(line, r"\b(?:npx|npm\s+exec|uvx|pnpm\s+dlx|bunx)(?=\s)"):
+        specs = _specs(args)
+        if specs and not (EXACT_NPM.fullmatch(specs[0]) or EXACT_PY.fullmatch(specs[0])):
+            out.append("package runner fetches `%s` with no exact version" % specs[0])
+    return out
+
+
+def _pip_problems(line):
+    """pip (and `uv pip`, whose command contains it): per command (review M1), hash-locked or a dry run that
+    installs nothing."""
+    out = []
+    for args in _command_args(line, r"\bpip3?(?:\.exe)?\s+install\b"):
+        if "--dry-run" in args.split():
+            continue
+        if not (re.search(r"--require-hashes\b", args) and re.search(r"-r\s+\S+\.lock\b", args)):
+            out.append("pip install without `--require-hashes -r <file>.lock`: versions and wheels are not verified")
+    return out
+
+
+def _tool_installer_problems(line):
+    """pipx / uv tool: exact == pin (they have no hash lock); scoop: app@version; cargo: --version + --locked;
+    go install: @vX.Y.Z (never @latest)."""
+    out = []
+    for args in _command_args(line, r"\b(?:pipx\s+(?:install|run)|uv\s+tool\s+(?:install|run))\b"):
+        if not any(EXACT_PY.fullmatch(s) for s in _specs(args)):
+            out.append("pipx / uv tool without an exact `pkg==x.y.z`")
+    for args in _command_args(line, r"\bscoop\s+install\b"):
+        out += ["scoop app `%s` without @version" % s for s in _specs(args) if not re.search(r"@\d", s)]
+    for args in _command_args(line, r"\bcargo\s+install\b"):
+        if not (re.search(r"--version[ =]+\d", args) and "--locked" in args.split()):
+            out.append("cargo install without --version <x.y.z> --locked")
+    for args in _command_args(line, r"\bgo\s+install\b"):
+        out += ["go install `%s` without @vX.Y.Z" % s for s in _specs(args) if not re.search(r"@v\d", s)]
+    return out
+
+
+def _gh_download_problems(line, window):
+    out = []
+    for m in re.finditer(r"\bgh\s+release\s+download\b(?P<args>[^`\n|;&)]*)", line):   # a quoted "$TAG" counts
+        toks = m.group("args").split()
+        if not toks or toks[0].startswith("-"):   # the tag is the first positional; a flag's value is not one
+            out.append("gh release download without a tag: you get the newest release")
+        elif not re.search(r"\bsha(?:256|512)sum\b|Get-FileHash|\b[0-9a-f]{64}\b", window):
+            out.append("gh release download with no checksum check")
+    return out
+
+
+def _clone_problems(line, repo):
+    out = []
+    for m in re.finditer(r"\bgit clone\s+(?P<args>(?:-|https?://|git@|\$)[^`\"'\n|;&]*)", line):
+        args = m.group("args")
+        if not re.search(r"--branch[ =]+\S+", args):
+            out.append("git clone without --branch <tag>: you get the default branch's HEAD")
+            continue
+        url = re.search(r"github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?(?:\s|$)", args + " ")
+        proof = VERIFIED_CLONES.get(url.group(1)) if url else None
+        if not proof or not re.search(proof[1], repo.read(proof[0]) or ""):
+            out.append("git clone of %s is not commit-verified after cloning (no entry in VERIFIED_CLONES whose "
+                       "proof is present)" % (url.group(1) if url else "an unknown repo"))
+    return out
+
+
+def _pkg_manager_problems(line):
+    out = []
+    for args in _command_args(line, r"\b(?:apt(?:-get)?|choco|brew|dnf|yum|apk)\s+install\b"):
+        if re.search(r"--version[ =]+\d", args):   # choco install x --version 1.2.3
+            continue
+        pkgs = _specs(args)
+        out += ["system package `%s` without an exact version (pkg=version)" % p for p in pkgs
+                if "=" not in p and not re.search(r"@\d", p)]
+    return out
+
+
+def _shell_pipe_problems(line):
+    sh = re.search(r"\b(?:curl|wget)\b[^|\n]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b", line)
+    ps = (re.search(r"(?i)\b(?:irm|iwr|curl|wget|Invoke-RestMethod|Invoke-WebRequest|DownloadString)\b", line)
+          and re.search(r"(?i)\|\s*(?:iex|Invoke-Expression)\b|\b(?:iex|Invoke-Expression)\s*\(", line))
+    return ["download piped into a shell: nothing pins or verifies what runs"] if sh or ps else []
+
+
+# rule id -> (applies to file?, finder(line, repo, window) -> [problem, ...]); window = the line plus the next
+# HASH_WINDOW - 1 lines, for rules whose proof may wrap onto the next line.
+DELIVERY_RULES = {
+    "pip": (lambda rel: True, lambda line, repo, window: _pip_problems(line)),
+    "npm": (lambda rel: True, lambda line, repo, window: _npm_problems(line)),
+    "package-runner": (lambda rel: True, lambda line, repo, window: _runner_problems(line)),
+    "tool-installer": (lambda rel: True, lambda line, repo, window: _tool_installer_problems(line)),
+    "gh-release": (lambda rel: True, lambda line, repo, window: _gh_download_problems(line, window)),
+    "dotnet-tool": (lambda rel: True, lambda line, repo, window: [
+        "dotnet tool install/update without --version: you get whatever is newest"
+        for args in _command_args(line, r"\bdotnet tool (?:install|update)\b")
+        if not re.search(r"--version[ =]+[^\s`'\"]", args)]),
+    "git-clone": (lambda rel: True, lambda line, repo, window: _clone_problems(line, repo)),
+    "winget": (lambda rel: True, lambda line, repo, window: [
+        "winget install without --exact --version <V>: you get whatever is newest"
+        for args in _command_args(line, r"\bwinget install\b")
+        if not (re.search(r"--exact\b", args) and re.search(r"--version[ =]+[^\s`'\"-]", args))]),
+    "pipe-to-shell": (lambda rel: True, lambda line, repo, window: _shell_pipe_problems(line)),
+    "docker-from": (lambda rel: True, lambda line, repo, window: [
+        "base image by tag, not by digest (@sha256:...)"] if (
+        re.match(r"\s*FROM\s+(?!scratch\b)\S+", line) and "@sha256:" not in line) else []),
+    "system-package": (lambda rel: True, lambda line, repo, window: _pkg_manager_problems(line)),
+    "download-checksum": (lambda rel: rel.endswith("Dockerfile") or "/.devcontainer/" in "/" + rel,
+                          lambda line, repo, window: ["download with no checksum check in the same step"] if (
+                              re.search(r"\b(?:curl|wget)\b", line)
+                              and not re.search(r"\bsha(?:256|512)sum\b", line)) else []),
+    "follows-latest": (lambda rel: True, lambda line, repo, window: [
+        "install follows whatever is newest"] if re.search(r"(?i)\b(?:download|install|acquire|click|grab)", line)
+        and re.search(
+        r"(?i)\b(?:latest|newest|current)\s+(?:LTS\s+)?(?:release|version|build)\b|releases/latest|big green LTS|"
+        r"\bthe LTS release\b|\bdownload\s+(?:a|any)\s+release\b", line) else []),
+    "download-unverified": (lambda rel: True, lambda line, repo, window: [
+        "download instruction without a pinned version + SHA-256 (or a pointer to *Pinned downloads*)"] if (
+        re.search(r"(?i)\bdownload", line) and re.search(DOWNLOAD_HOSTS, line)
+        and not SHA256_HEX.search(window) and "Pinned downloads" not in window) else []),
+}
+
+# Lines that match a rule but are not a delivery path, each with its reason. Every entry must still match something
+# on the real tree (tests/test_thirdparty_audit.py), so a fixed line cannot leave a silent hole behind.
+_T7 = "OWED to T7 (wave 2): setup.sh is rewritten there; remove this entry when it lands"
+_CLAUDE = ("the agent itself: Claude Code updates itself after install, so an install-time pin cannot hold; the "
+           "toolkit records the versions its adapter was measured on instead (the Claude Code registry row)")
+_SKSE = ("third-party recipe quoted verbatim and labeled 'Not pinned and not verified' in the doc; the toolkit "
+         "never runs it")
+_OWN = ("downloads the toolkit's OWN release by its tag in order to verify it: the script itself is the verification "
+        "(and a published zip's contents are checked member by member)")
+_CI = ("CI runner tooling (T10's workflows): never delivered to a user; versions follow the runner image")
+DELIVERY_EXEMPT = [
+    ("README.md", "npm", r"npm install -g @anthropic-ai/claude-code", _CLAUDE),
+    ("docs/getting-started.md", "npm", r"npm install -g @anthropic-ai/claude-code", _CLAUDE),
+    ("setup.sh", "winget", r"winget install (OpenJS\.NodeJS\.LTS|Python\.Python\.3\.12|Microsoft\.DotNet\.SDK\.[89]|"
+                           r"Microsoft\.OpenJDK\.21)\b", _T7),
+    ("setup.sh", "dotnet-tool", r"`dotnet tool install Spriggit\.(CLI|Yaml\.Skyrim)`", _T7),
+    ("setup.sh", "npm", r"npm install github:WingedGuardian/xeditlib\"", _T7),
+    ("setup.sh", "pip", r"pip install pyffi setuptools", _T7),
+    ("KNOWLEDGEBASE.md", "dotnet-tool", r"a `dotnet tool update` on an SDK 6/8/9 machine failed",
+     "records the failure that motivated the pin; the instruction two lines up is pinned"),
+    ("docs/skse-cross-compile.md", "system-package", r"apt-get install -y --no-install-recommends", _SKSE),
+    ("docs/skse-cross-compile.md", "pipe-to-shell", r"xmake\.io/shget\.text \| bash", _SKSE),
+    ("docs/skse-cross-compile.md", "download-unverified", r"Jake-Shadle/xwin/releases/download", _SKSE),
+    (".github/workflows/ci.yml", "system-package", r"sudo apt-get install -y|choco install jq -y", _CI),
+    ("setup.sh", "download-unverified", r"download from nodejs\.org|download io_scene_nifly\.zip|"
+                                        r"download ReSaver from Nexus", _T7),
+    ("*settings.local.json.example", "npm", r'"Bash\(npm install:\*\)"', "a permission-allowlist pattern, not an install"),
+    ("*settings.local.json.example", "pip", r'"Bash\(pip install:\*\)"', "a permission-allowlist pattern, not an install"),
+    ("*", "follows-latest", r"install locations \(newest version first\)",
+     "the hook wrappers' search order for an interpreter already installed, not an install"),
+    ("scripts/build-nexus-pack.sh", "gh-release", r'gh release download "\$TAG"', _OWN),
+    ("tools/verify-release.sh", "gh-release", r"gh release download", _OWN),
+    ("tools/skyguard/shellparse.py", "pipe-to-shell", r"An installer piped to sh \(`curl \.\.\. \| sh`\)",
+     "skyguard's own rule documentation, describing what that rule does not treat as decoded text"),
+]
+
+
+def logical_lines(text):
+    """(first line number, text) with backslash continuations joined: one shell command is one line."""
+    out, buf, start = [], [], None
+    for i, line in enumerate(text.splitlines()):
+        if start is None:
+            start = i + 1
+        stripped = line.rstrip()
+        if stripped.endswith("\\") and not stripped.endswith("\\\\"):
+            buf.append(stripped[:-1])
+            continue
+        buf.append(line)
+        out.append((start, " ".join(b.strip() for b in buf)))
+        buf, start = [], None
+    if buf:
+        out.append((start, " ".join(b.strip() for b in buf)))
+    return out
+
+
+def delivery_files(repo):
+    """Every shipped text file: DELIVERY_SUFFIXES or a Dockerfile, outside DELIVERY_SKIP_DIRS (tests and VCS/cache
+    folders never ship) and DELIVERY_HISTORY_FILES."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(repo.root):
+        dirnames[:] = sorted(d for d in dirnames if d not in DELIVERY_SKIP_DIRS)
+        for name in sorted(filenames):
+            if not (name.endswith(DELIVERY_SUFFIXES) or name == "Dockerfile" or name.startswith("Dockerfile.")):
+                continue
+            rel = (Path(dirpath) / name).relative_to(repo.root).as_posix()
+            if not any(fnmatch.fnmatch(rel, x) for x in DELIVERY_HISTORY_FILES):
+                out.append(rel)
+    return out
+
+
+def delivery_findings(repo, exempt=None):
+    """-> (findings, exempted, stale): findings/exempted are (file, line, rule, problem, text[, reason]); stale lists
+    the exemptions that matched nothing (tests hold the real tree to none, so a fixed line cannot leave a silent hole
+    behind; a synthetic tree legitimately leaves most of them unused)."""
+    exempt = DELIVERY_EXEMPT if exempt is None else exempt
+    findings, exempted, used = [], [], set()
+    for rel in delivery_files(repo):
+        text = repo.read(rel) or ""
+        raw = text.splitlines()
+        for lineno, line in logical_lines(text):
+            window = " ".join([line] + raw[lineno:lineno + HASH_WINDOW - 1])
+            for rule, (applies, finder) in DELIVERY_RULES.items():
+                if not applies(rel):
+                    continue
+                for problem in finder(line, repo, window):
+                    hit = next((k for k, e in enumerate(exempt) if fnmatch.fnmatch(rel, e[0]) and e[1] == rule
+                                and re.search(e[2], line)), None)
+                    if hit is None:
+                        findings.append((rel, lineno, rule, problem, line.strip()[:160]))
+                    else:
+                        used.add(hit)
+                        exempted.append((rel, lineno, rule, problem, line.strip()[:160], exempt[hit][3]))
+    stale = [e for k, e in enumerate(exempt) if k not in used]
+    return findings, exempted, stale
+
+
+def audit_delivery(repo, rows):
+    findings, exempted, _stale = delivery_findings(repo)
+    for rel, line, rule, problem, _text in findings:
+        rows.append(Row("delivery paths", rule, None, None, DRIFT, "%s:%d %s" % (rel, line, problem)))
+    if not findings:
+        rows.append(Row("delivery paths", "pinned+verified", None, None, OK,
+                        "%d file(s) scanned; %d exempt with a reason" % (len(delivery_files(repo)), len(exempted))))
+
+
 def run(repo_root, fetcher, only=None):
     repo = Repo(repo_root)
     rows = []
@@ -1087,8 +1513,11 @@ def run(repo_root, fetcher, only=None):
     for d in dynamic_entries(repo):
         if wanted is None or d["name"].lower() in wanted:
             audit_dynamic(fetcher, repo, d, rows)
+    if wanted is None or "delivery paths" in wanted:
+        audit_delivery(repo, rows)
     if wanted is not None:
-        known = {s["name"].lower() for s in REGISTRY} | {d["name"].lower() for d in dynamic_entries(repo)}
+        known = ({s["name"].lower() for s in REGISTRY} | {d["name"].lower() for d in dynamic_entries(repo)}
+                 | {"delivery paths"})
         for o in sorted(wanted - known):
             rows.append(Row(o, "selection", None, None, UNCHECKED, "--only names no known integration"))
     if not rows:
@@ -1118,7 +1547,7 @@ def render(rows, secrets=()):
     out = []
     for row in table:
         out.append("  ".join(str(c).ljust(widths[i]) if i < 5 else str(c) for i, c in enumerate(row)).rstrip())
-    counts = {s: sum(1 for r in rows if r.status == s) for s in (OK, NEWER, UNPINNED, DRIFT, UNCHECKED)}
+    counts = {s: sum(1 for r in rows if r.status == s) for s in (OK, NEWER, UNPINNED, OUTSIDE, DRIFT, UNCHECKED)}
     out.append("")
     out.append("rows: %d  " % len(rows) + "  ".join("%s %d" % kv for kv in counts.items()))
     text = "\n".join(out)

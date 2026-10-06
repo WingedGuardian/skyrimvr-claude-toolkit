@@ -56,10 +56,19 @@ agent/targets/codex/* text eol=lf
 # extension only (`*.md` above), never by directory.
 .codex/** text eol=lf
 
-<<<<<<< HEAD
 # Plan 6 Task 12: the guard manifest is compared byte for byte (scripts/gen-guard-hashes.py --check).
 GUARD-FILES.sha256 text eol=lf
-=======
+
 # The 3.x -> 4.0 migration fixtures are a real v3.9.1 install, compared byte for byte (T9). Text only.
 tests/fixtures/migrate-3x/** text eol=lf
->>>>>>> master
+
+# Read by Linux tools (the devcontainer build, CI's setup-node/setup-python, pip, javac in the container): an
+# autocrlf checkout must not rewrite them. MEASURED 2026-10-06: master's Dockerfile blob is LF but a Windows
+# checkout had 79 CRLF lines, which breaks every backslash-continued RUN line in a Linux build.
+.devcontainer/**   text eol=lf
+*.lock             text eol=lf
+*.toml             text eol=lf
+*.java             text eol=lf
+.node-version      text eol=lf
+.python-version    text eol=lf
+requirements*.txt  text eol=lf

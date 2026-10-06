@@ -10,7 +10,8 @@ Usage:
     python scripts/read-save.py search <save.ess> --hex "DEADBEEF"
     python scripts/read-save.py plugins <save.ess>
 
-Requires: pip install lz4
+Requires: lz4, pinned and hash-locked (run from the toolkit root):
+    python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-tools.lock
 """
 
 import argparse
@@ -22,7 +23,8 @@ import os
 try:
     import lz4.block
 except ImportError:
-    print("Error: lz4 package required. Install with: pip install lz4", file=sys.stderr)
+    print("Error: lz4 package required. Install the tested version from the toolkit root with: "
+          "python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-tools.lock", file=sys.stderr)
     sys.exit(1)
 
 

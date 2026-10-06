@@ -20,6 +20,9 @@ FAIL=0
 MISSING=""
 # Test seam: tests/test_toolchain_check.py points this at a fake `dotnet` (the harness shadows the real name).
 DOTNET="${TOOLCHAIN_DOTNET:-dotnet}"
+# The .NET SDK the toolkit was tested with (the devcontainer pins the same one: .devcontainer/Dockerfile
+# DOTNET_SDK_VERSION; scripts/thirdparty-audit.py holds the two equal). Install hints name it exactly.
+SDK_PIN=10.0.401
 
 # check <label> <expect-substring> <command...>
 #
@@ -93,8 +96,8 @@ if [ -n "$SPRIGGIT" ]; then
   # rather than capability, the exact confusion the whole script exists to catch,
   # committed inside the script itself.
   #
-  # MEASURED: spriggit resolves its serializer at RUNTIME via `dotnet tool install
-  # Spriggit.Yaml.Skyrim`. Its tool assets ship under tools/net9.0/ (CLI 0.40.0) or
+  # MEASURED: spriggit resolves its serializer at RUNTIME (it runs dotnet's own tool installer for
+  # Spriggit.Yaml.Skyrim, at the CLI's own version). Its tool assets ship under tools/net9.0/ (CLI 0.40.0) or
   # tools/net10.0/ (0.41.0), and the SDK can only install a tool whose target
   # framework it supports. With only SDK 8 the install fails with a misleading
   # "DotnetToolSettings.xml was not found in the package" -- the file IS there,
@@ -102,8 +105,8 @@ if [ -n "$SPRIGGIT" ]; then
   # otherwise healthy: dotnetsay, whose assets are net8.0, installs fine.
   #
   # VERSION PIN. Every serialize/deserialize command in the toolkit was written against the
-  # version pinned in .config/dotnet-tools.json (0.41.0, target net10.0). An unpinned
-  # `dotnet tool install Spriggit.CLI` pulls whatever is newest, and an older one (0.40.0 =
+  # version pinned in .config/dotnet-tools.json (0.41.0, target net10.0). An install of
+  # Spriggit.CLI without --version pulls whatever is newest, and an older one (0.40.0 =
   # net9.0) is just as untested, so the INSTALLED version must equal the pin, and the SDK
   # required follows the INSTALLED version.
   PIN=$(tr -d '\r\n ' < "$ROOT/.config/dotnet-tools.json" 2>/dev/null | sed -n 's/.*"spriggit\.cli":{"version":"\([^"]*\)".*/\1/p')
@@ -131,8 +134,8 @@ if [ -n "$SPRIGGIT" ]; then
     printf '  %-22s ok            SDK %s+ present, so it can fetch its serializer\n' "spriggit entry point" "$NEED"
   else
     printf '  %-22s CANNOT WORK   spriggit starts but cannot install its serializer\n' "spriggit entry point"
-    printf '  %-22s               (SDK majors here: %s-- spriggit %s needs SDK %s+. Install:\n' "" "$SDK_MAJORS" "${INSTALLED:-?}" "$NEED"
-    printf '  %-22s               winget install Microsoft.DotNet.SDK.%s)\n' "" "$NEED"
+    printf '  %-22s               (SDK majors here: %s-- spriggit %s needs SDK %s+. Install the tested SDK:\n' "" "$SDK_MAJORS" "${INSTALLED:-?}" "$NEED"
+    printf '  %-22s               winget install --id Microsoft.DotNet.SDK.10 --exact --version %s)\n' "" "$SDK_PIN"
     FAIL=1; MISSING="$MISSING spriggit-entry-point"
   fi
 else

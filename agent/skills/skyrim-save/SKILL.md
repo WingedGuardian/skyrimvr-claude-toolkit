@@ -6,7 +6,7 @@ paths: "**/*.ess"
 
 # Save File Analysis
 
-Use `scripts/read-save.py` to decompress and scan Skyrim save files. Requires Python with `lz4` package (`pip install lz4`). All output is JSON.
+Use `scripts/read-save.py` to decompress and scan Skyrim save files. Requires Python with `lz4`, pinned and hash-locked (from the toolkit root: `python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-tools.lock`). All output is JSON.
 
 ## Commands
 
