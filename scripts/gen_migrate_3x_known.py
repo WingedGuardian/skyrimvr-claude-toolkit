@@ -197,7 +197,9 @@ def build():
             text = raw.decode("utf-8").replace("\r\n", "\n")
             key = ("S", sha(text))
             if key not in by:
-                by[key] = {"sha256": sha(text), "canonical_sha256": sha(tool.canonical_json(text)), "tags": []}
+                hooks = sorted({(e, tool._script(c)) for e, m, c in tool._hook_entries(json.loads(text))})
+                by[key] = {"sha256": sha(text), "canonical_sha256": sha(tool.canonical_json(text)), "tags": [],
+                           "hooks": [list(h) for h in hooks]}
                 out["settings"].append(by[key])
             by[key]["tags"].append(tag)
     return json.dumps(out, indent=1, sort_keys=True, ensure_ascii=False) + "\n"

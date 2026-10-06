@@ -4,14 +4,18 @@
 WHY. The documented update is "extract the new zip over your install". That replaces every file the
 toolkit ships -- including three a 3.x user may have edited: CLAUDE.md (and AGENTS.md), the hook settings
 in .claude/settings.json, and KNOWLEDGEBASE.md (3.x told you to append findings to it until 3.9). This tool
-finds the 3.x copies, decides for each one whether it is exactly what a release shipped, and keeps every
-one that is not.
+finds the 3.x copies and keeps a byte-exact copy of EVERY one, shipped or not ("shipped" never means "no
+copy"); it then decides for each whether it is exactly what a release shipped, and carries the text of every
+one that is not. The paths setup.sh had filled into CLAUDE.md are carried as data in any case
+(.claude/backups/migrate-3x/carried-paths.env), so a path corrected by hand survives 4.0's fresh detection.
 
 WHERE THE 3.x COPIES COME FROM (the first that is a 3.x install wins; `--from DIR` overrides all three):
   1. the install itself, when the update has not been extracted yet (its CLAUDE.md is still 3.x);
   2. the newest `.claude/backups/pre-update-<stamp>/` -- what `tools/pre-update-snapshot.sh` writes;
-  3. the newest copies in `.claude/backups/kb/` (3.9's session-kb-guard), but only while the newest
-     CLAUDE.md there is still a 3.x one, i.e. no 4.x session has run yet. Settings are not kept there.
+  3. the kb-guard store `.claude/backups/kb/` (3.9's session-kb-guard): the newest 3.x-shaped CLAUDE.md /
+     AGENTS.md copies (4.x copies, stored if a 4.0 session started before setup, are skipped by their header),
+     and the knowledgebase copy from before the first 4.x copy. The copies used are named. Settings are not
+     kept there, and the tool says so.
 
 "EXACTLY WHAT A RELEASE SHIPPED" is decided against tools/migrate-3x-known.json, built from every
 pre-4 tag by scripts/gen_migrate_3x_known.py. setup.sh wrote your paths into CLAUDE.md, so a hash of the
@@ -38,9 +42,10 @@ WHAT HAPPENS TO AN EDITED FILE
                             you are told which of yours 4.0 already covers (its widened matchers) and which
                             you must re-add.
   Before anything is written, every source file and the old KNOWLEDGEBASE.local.md are copied into
-  .claude/backups/migrate-3x/<stamp>/, and MIGRATION.txt there says how to undo each change.
+  .claude/backups/migrate-3x/<stamp>/ and read back, and MIGRATION.txt there says how to undo each change --
+  written even when a later step fails, listing what was done.
 
-IDEMPOTENT. Each carried file is recorded by name and content hash in .claude/backups/migrate-3x/state.json
+IDEMPOTENT. Each copied and carried file is recorded by name and content hash in .claude/backups/migrate-3x/state.json
 and found again by its marker in KNOWLEDGEBASE.local.md. A second run changes nothing, and a block you
 deleted after sorting it does not come back.
 
@@ -144,39 +149,76 @@ def _fill(lines, spec, values) -> bool:
     return True
 
 
-def matches(text: str, spec: dict, env=None) -> bool:
-    """Is `text` (normalised) a setup.sh rendering of the template `spec` describes, and nothing else?"""
+def match_values(text: str, spec: dict, env=None):
+    """If `text` (normalised) is a setup.sh rendering of the template `spec` describes and nothing else, the
+    placeholder values setup.sh filled in (mod-manager block included); otherwise None."""
     lines = text.split("\n")
     block = spec.get("block")
+    values: dict = {}
     if block:
         start = block["index"]
         tail = spec["lines"] - start - 1
         end = len(lines) - tail
         if start < 0 or end <= start:
-            return False
+            return None
         # setup.sh never ran: the placeholder line itself is still there, which is the template, not an edit.
         unrendered = lines[start:end] == ["{{MOD_MANAGER_PATHS}}"]
-        if not unrendered and not any(_block_matches(lines[start:end], v) for v in block["variants"]):
-            return False
+        if not unrendered and not any(_block_matches(lines[start:end], v, values) for v in block["variants"]):
+            return None
         lines = lines[:start] + ["{{MOD_MANAGER_PATHS}}"] + lines[end:]
     if "lines" in spec and len(lines) != spec["lines"]:
-        return False
-    values: dict = {}
+        return None
     if not _fill(lines, spec, values):
-        return False
+        return None
     for name, recorded in (env or {}).items():
         if name in values and values[name] != recorded:
-            return False                 # the file says one path, the install recorded another: an edit
-    return sha("\n".join(lines)) == spec["sha256"]
+            return None                  # the file says one path, the install recorded another: an edit
+    return values if sha("\n".join(lines)) == spec["sha256"] else None
 
 
-def _block_matches(block_lines, variant) -> bool:
-    lines = list(block_lines)
+def matches(text: str, spec: dict, env=None) -> bool:
+    return match_values(text, spec, env) is not None
+
+
+def _block_matches(block_lines, variant, into=None) -> bool:
+    lines, values = list(block_lines), {}
     if len(lines) != variant["lines"]:
         return False
-    if not _fill(lines, variant, {}):
+    if not _fill(lines, variant, values):
         return False
-    return sha("\n".join(lines)) == variant["sha256"]
+    if sha("\n".join(lines)) != variant["sha256"]:
+        return False
+    if into is not None:
+        into.update(values)
+    return True
+
+
+def extract_paths(text: str, known: dict, env=None):
+    """Every value setup.sh filled into a 3.x CLAUDE.md -> ({placeholder: value}, how). A shipped rendering
+    gives them exactly; an edited file is searched line by line with each template's placeholder lines (the
+    newest template that yields the most values wins), so a path is carried even from a file you changed."""
+    for spec in known["docs"].get("CLAUDE.md", []):
+        v = match_values(text, spec, env)
+        if v is not None:
+            return v, "exact"
+    lines = text.split("\n")
+    best: dict = {}
+    for spec in reversed(known["docs"].get("CLAUDE.md", [])):
+        tlines = [t for _, t in spec.get("placeholders", [])]
+        for variant in spec.get("block", {}).get("variants", []):
+            tlines += [t for _, t in variant.get("placeholders", [])]
+        found: dict = {}
+        for tline in tlines:
+            rx, names = _line_regex(tline)
+            for line in lines:
+                m = rx.match(line)
+                if m:
+                    for name, value in zip(names, m.groups()):
+                        found.setdefault(name, value)
+                    break
+        if len(found) > len(best):
+            best = found
+    return best, "searched"
 
 
 def read_env(path: Path):
@@ -244,8 +286,10 @@ def classify_settings(data: bytes, known: dict):
 # --------------------------------------------------------------------------------------- source sets --
 
 def _stamp_key(name: str):
-    m = re.match(r"(.*?)(?:_(\d+))?\Z", name)
-    return (m.group(1), int(m.group(2) or 1))
+    """`<prefix>YYYYmmdd_HHMMSS[_n]` -> sortable key. The suffix is only ever a collision counter AFTER the
+    six-digit time, so it is matched there -- splitting at the last `_` would read the time as a counter."""
+    m = re.match(r"(.*_\d{6})(?:_(\d+))?\Z", name)
+    return (m.group(1), int(m.group(2) or 1)) if m else (name, 1)
 
 
 def _newest(dirs):
@@ -276,18 +320,37 @@ def _set_from_dir(label: str, base: Path) -> SourceSet:
     return SourceSet(label, files, read_env(base / ENV), (base / ".codex" / "hooks.json").is_file())
 
 
+def _is_4x_doc(path: Path) -> bool:
+    return GENERATED_4X.match(norm(path.read_bytes())) is not None
+
+
 def _kb_store_set(root: Path):
+    """The newest 3.x-shaped CLAUDE.md / AGENTS.md copies in the kb-guard store, and the newest
+    KNOWLEDGEBASE.md copy from BEFORE the first 4.x copy that follows them. A 4.0 session started before
+    setup (extract, open the agent, ask it to run setup) stores the 4.0 files as the newest copies; skipping
+    those by their generated header keeps the last 3.x state reachable. The knowledgebase has no header,
+    so it is dated instead: kb-guard copies every changed file in the same run, so the 4.0 one lands in the
+    same folder as the first 4.x CLAUDE.md, at or after the cutoff."""
     store = root / ".claude" / "backups" / "kb"
     if not store.is_dir():
         return None
-    files = {}
-    for name in (*DOCS, KB):
-        d = _newest([d for d in store.iterdir() if (d / name).is_file()])
-        if d:
-            files[name] = d / name
+    dirs = sorted((d for d in store.iterdir() if d.is_dir()), key=lambda d: _stamp_key(d.name))
+    files, chosen = {}, []
+    for name in DOCS:
+        ok = [d for d in dirs if (d / name).is_file() and not _is_4x_doc(d / name)]
+        if ok:
+            files[name] = ok[-1] / name
+            chosen.append(_stamp_key(ok[-1].name))
     if not files:
         return None
-    return SourceSet(".claude/backups/kb (newest copies)", files, {}, False)
+    last3 = max(chosen)
+    cutoff = next((_stamp_key(d.name) for d in dirs if _stamp_key(d.name) > last3
+                   and any((d / n).is_file() and _is_4x_doc(d / n) for n in DOCS)), None)
+    kb = [d for d in dirs if (d / KB).is_file() and (cutoff is None or _stamp_key(d.name) < cutoff)]
+    if kb:
+        files[KB] = kb[-1] / KB
+    used = ", ".join("{} from {}".format(n, p.parent.name) for n, p in files.items())
+    return SourceSet(".claude/backups/kb (the newest 3.x copies: {})".format(used), files, {}, False)
 
 
 def pick_source(root: Path, from_dir):
@@ -399,8 +462,9 @@ def _covers(ref_matcher: str, token: str) -> bool:
         return False
 
 
-def settings_report(user_text: str, ref_path: Path):
-    """What a user's 3.x settings held that 4.0's do not. Report only: the backup keeps all of it."""
+def settings_report(user_text: str, ref_path: Path, known=None):
+    """How a user's 3.x settings differ from 4.0's: hooks of theirs 4.0 lacks, matchers 4.0 widened, commands
+    they changed, shipped hooks they removed, extra keys. Report only: the backup keeps all of it."""
     try:
         user = json.loads(user_text)
     except ValueError:
@@ -409,14 +473,17 @@ def settings_report(user_text: str, ref_path: Path):
         ref = json.loads(ref_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return ["(the 4.0 .claude/settings.json could not be read, so nothing was compared)"]
-    lines, ref_entries = [], _hook_entries(ref)
-    for event, matcher, command in _hook_entries(user):
+    lines, ref_entries, user_entries = [], _hook_entries(ref), _hook_entries(user)
+    for event, matcher, command in user_entries:
         script = _script(command)
         same = [m for e, m, c in ref_entries if e == event and _script(c) == script]
         label = "{} {} -> {}".format(event, matcher or "(all)", script)
         if not same:
             lines.append("NOT in 4.0, re-add it by hand (in .claude/settings.local.json): " + label)
             continue
+        ref_cmds = [c for e, m, c in ref_entries if e == event and _script(c) == script]
+        if command not in ref_cmds:
+            lines.append("changed command: yours runs `{}`, 4.0 runs `{}`: {}".format(command, ref_cmds[0], label))
         tokens = [t for t in matcher.split("|") if t] if matcher else []
         missing = [t for t in tokens if not any(_covers(m, t) for m in same)]
         if missing:
@@ -424,6 +491,12 @@ def settings_report(user_text: str, ref_path: Path):
                 script, "|".join(missing), label))
         elif matcher and matcher not in same:
             lines.append("covered by 4.0's wider matcher ({}): {}".format(" / ".join(same), label))
+    shipped = {tuple(h) for spec in (known or {}).get("settings", []) for h in spec.get("hooks", [])}
+    mine = {(e, _script(c)) for e, m, c in user_entries}
+    for pair in sorted({(e, _script(c)) for e, m, c in ref_entries}):
+        if pair in shipped and pair not in mine:
+            lines.append("removed by you in 3.x, and 4.0 runs it again: {} -> {} (to keep it off, say so in "
+                         ".claude/settings.local.json or ask your agent)".format(*pair))
     for key in sorted(k for k in (user if isinstance(user, dict) else {}) if k != "hooks"):
         if not isinstance(ref, dict) or key not in ref:
             lines.append("top-level key '{}' is not in 4.0's file: move it to .claude/settings.local.json".format(key))
@@ -463,6 +536,47 @@ def load_state(root: Path) -> dict:
         return {"carried": {}}
 
 
+class _Failed(Exception):
+    pass
+
+
+def _write_checked(path: Path, data: bytes):
+    """Write and read back. A copy that does not read back identical is not a backup."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    if path.read_bytes() != data:
+        raise _Failed("{} did not read back identical".format(path.name))
+
+
+_PREFS_FENCE = re.compile(r"^[ \t]{0,3}(```|~~~)")    # the session hook's own fence test (skyguard/prefs.py)
+
+
+def _open_fence(text: str):
+    """The fence token left OPEN at the end of `text`, counted the way the session hook counts (it toggles on
+    every fence line), or None. An unclosed fence would swallow the blocks' headings into the preferences."""
+    token = None
+    for line in text.splitlines():
+        m = _PREFS_FENCE.match(line)
+        if m:
+            token = m.group(1) if token is None else None
+    return token
+
+
+def _sh_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def paths_file(values: dict, how: str, src_label: str, env: dict) -> str:
+    out = ["# Written by tools/migrate-3x.py: the paths your 3.x CLAUDE.md held, read from {}.".format(src_label),
+           "# setup.sh reads this so that a path you had corrected by hand is kept, not re-detected.",
+           "# {} (exact = a shipped rendering; searched = found line by line in a file you had edited).".format(how)]
+    for name in sorted(values):
+        if env.get(name) not in (None, values[name]):
+            out.append("# NOTE: 3.9 recorded {} as {} -- the file says otherwise".format(name, _sh_quote(env[name])))
+        out.append("SKYRIM_3X_{}={}".format(name, _sh_quote(values[name])))
+    return "\n".join(out) + "\n"
+
+
 def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
     known = json.loads(KNOWN_FILE.read_text(encoding="utf-8"))
     src = pick_source(root, from_dir)
@@ -472,34 +586,59 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
     out("migrate-3x: reading the 3.x files from " + src.label)
     if src.label == LIVE and from_dir is None:
         out("  (the update has not been extracted over this install yet -- fine: run setup.sh again afterwards)")
+    if SETTINGS not in src.files:
+        out("  {}: not in {} -- NOT checked. If you had changed it, the only copy is a pre-update snapshot "
+            "or your own backup.".format(SETTINGS, src.label))
     state = load_state(root)
     carried = state.setdefault("carried", {})
+    copied = state.setdefault("copied", {})
     local_path = root / LOCAL_KB
     local_bytes = local_path.read_bytes() if local_path.is_file() else None
     local_text = norm(local_bytes) if local_bytes is not None else ""
     present = existing_blocks(local_text)
 
-    blocks, keep, settings_actions, notes = [], [], [], []
-    for name in (*DOCS, KB):
+    # EVERY 3.x file the update replaces gets a byte-exact copy, shipped or not: "shipped" only decides whether
+    # its text is ALSO carried into KNOWLEDGEBASE.local.md. A copy is made once per content (state "copied").
+    copies, blocks, settings_actions, notes = [], [], [], []
+    verdicts = {}
+    for name in (*DOCS, KB, SETTINGS):
         p = src.files.get(name)
         if p is None:
             continue
         data = p.read_bytes()
         digest = sha_bytes(data)
-        if name == KB:
+        if name == SETTINGS:
+            verdict, _ = classify_settings(data, known)
+        elif name == KB:
             verdict = "pristine" if any(sha(norm(data)) == s["sha256"] for s in known["docs"][KB]) else "edited"
         else:
             verdict, _ = classify_doc(name, data, known, src.env)
-        if verdict != "edited":
-            out("  {}: {} -- nothing of yours in it".format(name, "a shipped 3.x version" if verdict == "pristine"
-                                                           else "already a 4.x file"))
+        if verdict == "4x":
+            out("  {}: already a 4.x file -- nothing to keep".format(name))
             continue
-        key = "{}:{}".format(name, digest)
+        verdicts[name] = verdict
+        ckey = "{}:{}".format(name, digest)
+        if ckey not in copied:
+            copies.append((name, data, ckey))
+        key = ckey
+        if verdict != "edited":
+            continue
+        if name == SETTINGS:
+            if key in carried:
+                continue
+            target = root / ".claude" / "settings.json.3x-backup"
+            if target.exists():
+                if sha_bytes(target.read_bytes()) == digest:
+                    target = None
+                else:
+                    target = root / ".claude" / "settings.json.3x-backup.{}".format(digest[:12])
+            settings_actions.append((key, data, target))
+            notes += settings_report(norm(data), HERE.parent / SETTINGS, known)
+            continue
         if key in carried or (name, digest) in present:
             out("  {}: carried over before ({}) -- left alone".format(
                 name, carried.get(key, {}).get("run", "its block is in " + LOCAL_KB)))
             continue
-        keep.append((name, p, data))
         if name == KB:
             added = kb_appended(data, known)
             if added is not None:
@@ -522,116 +661,135 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
                 "block from its heading to its END line -- it will not come back. A byte-exact copy is in "
                 "{run}.", verbatim(data))))
 
-    p = src.files.get(SETTINGS)
-    if p is not None:
-        data = p.read_bytes()
-        verdict, _ = classify_settings(data, known)
-        digest = sha_bytes(data)
-        key = "{}:{}".format(SETTINGS, digest)
-        if verdict != "edited":
-            out("  {}: {} -- replaced by 4.0's without a backup".format(
-                SETTINGS, "a shipped 3.x version" if verdict == "pristine" else "already a 4.x file"))
-        elif key in carried:
-            out("  {}: backed up before ({}) -- left alone".format(SETTINGS, carried[key].get("backup")))
-        else:
-            target = root / ".claude" / "settings.json.3x-backup"
-            if target.exists():
-                if sha_bytes(target.read_bytes()) == digest:
-                    target = None
-                else:
-                    target = root / ".claude" / "settings.json.3x-backup.{}".format(digest[:12])
-            settings_actions.append((key, data, target))
-            keep.append((SETTINGS, p, data))
-            notes += settings_report(norm(data), HERE.parent / SETTINGS)
+    # The paths setup.sh filled in -- carried as data, so a corrected path survives 4.0's fresh detection.
+    paths, how = {}, ""
+    if "CLAUDE.md" in verdicts:
+        paths, how = extract_paths(norm(src.files["CLAUDE.md"].read_bytes()), known, src.env)
+    paths_text = paths_file(paths, how, src.label, src.env) if paths else None
+    paths_new = paths_text is not None and state.get("carried_paths") != paths
 
-    if not blocks and not settings_actions:
-        out("migrate-3x: nothing to carry over.")
+    if not copies and not blocks and not settings_actions and not paths_new:
+        out("migrate-3x: nothing new -- every 3.x file here was kept before ({}).".format(
+            ", ".join(sorted({v["run"] for v in copied.values() if "run" in v})) or STORE))
         _codex_note(out)
         return 0
     if dry_run:
+        for name, _, _ in copies:
+            out("  would keep a byte-exact copy of the 3.x " + name)
         for key, _ in blocks:
             out("  would carry over " + key.split(":")[0] + " into " + LOCAL_KB)
         for key, _, target in settings_actions:
             out("  would save {} as {}".format(SETTINGS, target.relative_to(root).as_posix() if target else "(identical backup exists)"))
+        for name in sorted(paths):
+            out("  would carry {} = {}".format(name, paths[name]))
         for n in notes:
             out("    " + n)
         return 0
 
-    # Backups FIRST: every source and the current KNOWLEDGEBASE.local.md, before anything is written.
     now = _now()
     run_dir = _unique_dir(root / STORE, now.strftime("%Y%m%d_%H%M%S"))
     run_rel = run_dir.relative_to(root).as_posix()
-    log = ["3.x -> 4.0 migration, {}".format(now.isoformat(timespec="seconds")),
-           "source: " + src.label, ""]
+    log = ["3.x -> 4.0 migration, {}".format(now.isoformat(timespec="seconds")), "source: " + src.label, ""]
+    rc = 0
     try:
-        run_dir.mkdir(parents=True)
-        for name, path, data in keep:
-            dest = run_dir / name
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(data)
-            if dest.read_bytes() != data:
-                raise OSError("copy of {} did not read back".format(name))
+        try:
+            run_dir.mkdir(parents=True)
+        except OSError as e:
+            raise _Failed("could not create {}: {}".format(run_rel, e))
+        # 1. Backups FIRST: every 3.x file and the current KNOWLEDGEBASE.local.md, each read back.
+        for name, data, ckey in copies:
+            _write_checked(run_dir / name, data)
+            copied[ckey] = {"run": run_rel, "copy": "{}/{}".format(run_rel, name)}
+            what = {"pristine": "a shipped 3.x version", "edited": "yours had changes"}[verdicts[name]]
+            out("  {}: {} -- byte-exact copy kept at {}/{}".format(name, what, run_rel, name))
             log.append("kept the 3.x {} (byte-exact): {}/{}".format(name, run_rel, name))
-        if local_bytes is not None:
-            (run_dir / (LOCAL_KB + ".before")).write_bytes(local_bytes)
-            log.append("UNDO {}: copy {}/{}.before back over it".format(LOCAL_KB, run_rel, LOCAL_KB))
-        else:
-            log.append("UNDO {}: it did not exist before; send it to the Recycle Bin".format(LOCAL_KB))
-    except OSError as e:
-        out("migrate-3x: FAILED before changing anything -- could not write the backup in {}: {}".format(run_rel, e))
-        return 1
-
-    for key, data, target in settings_actions:
-        if target is None:
-            log.append("{}: an identical .3x-backup already exists".format(SETTINGS))
-            carried[key] = {"run": run_rel, "backup": ".claude/settings.json.3x-backup"}
-            continue
-        try:
-            with open(target, "xb") as fh:      # exclusive: an existing backup is never overwritten
-                fh.write(data)
-        except OSError as e:
-            out("migrate-3x: FAILED -- could not save {}: {} (your 3.x copy is in {})".format(target, e, run_rel))
-            return 1
-        rel = target.relative_to(root).as_posix()
-        carried[key] = {"run": run_rel, "backup": rel}
-        log.append("saved your 3.x {} as {}. UNDO (back to 3.x hooks): copy it over {}".format(SETTINGS, rel, SETTINGS))
-        out("  {}: yours had changes -- saved as {}".format(SETTINGS, rel))
-    for n in notes:
-        out("    " + n)
-        log.append("  " + n)
-
-    if blocks:
-        prefix = ""
-        if local_bytes is None:
-            prefix = "# Local knowledgebase\n\n## My preferences\n\n"
-        elif not _has_prefs_section(local_text):
-            # A `## My preferences` heading ahead of the blocks: the session hook reads the FIRST one, so text
-            # carried below can never become the injected preferences, whatever it contains.
-            prefix = "\n## My preferences\n\n"
-        appended = prefix + "".join(
-            build_block(n, d, t, intro.format(run=run_rel, n=n, src=src.label), c) for _, (n, d, t, intro, c) in blocks)
-        old = local_bytes or b""
-        sep = b"" if not old or old.endswith(b"\n") else b"\n"
-        new = old + sep + appended.encode("utf-8", "surrogateescape")
-        try:
-            _write_atomic(local_path, new)
+        if blocks:
+            if local_bytes is not None:
+                _write_checked(run_dir / (LOCAL_KB + ".before"), local_bytes)
+                log.append("UNDO {}: copy {}/{}.before back over it".format(LOCAL_KB, run_rel, LOCAL_KB))
+            else:
+                log.append("UNDO {}: it did not exist before; send it to the Recycle Bin".format(LOCAL_KB))
+        # 2. The carried paths: one copy for this run, one stable copy setup.sh reads.
+        if paths_text is not None:
+            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8"))
+            if paths_new:
+                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8"))
+                state["carried_paths"] = paths
+                log.append("wrote {}/carried-paths.env (copy of this run's: {}/carried-paths.env); "
+                           "an earlier one, if any, is in its own run folder".format(STORE, run_rel))
+                out("  your 3.x paths ({}), carried to {}/carried-paths.env for setup.sh:".format(how, STORE))
+                for name in sorted(paths):
+                    out("    {} = {}".format(name, paths[name]))
+        # 3. Settings.
+        for key, data, target in settings_actions:
+            if target is None:
+                carried[key] = {"run": run_rel, "backup": ".claude/settings.json.3x-backup"}
+                log.append("{}: an identical .3x-backup already exists".format(SETTINGS))
+                continue
+            try:
+                with open(target, "xb") as fh:      # exclusive: an existing backup is never overwritten
+                    fh.write(data)
+            except OSError as e:
+                raise _Failed("could not save {}: {}".format(target, e))
+            rel = target.relative_to(root).as_posix()
+            carried[key] = {"run": run_rel, "backup": rel}
+            log.append("saved your 3.x {} as {}. UNDO (back to 3.x hooks): copy it over {}".format(SETTINGS, rel, SETTINGS))
+            out("  {}: yours had changes -- also saved as {}".format(SETTINGS, rel))
+        for n in notes:
+            out("    " + n)
+            log.append("  " + n)
+        # 4. The blocks.
+        if blocks:
+            prefix = ""
+            if local_bytes is None:
+                prefix = "# Local knowledgebase\n\n## My preferences\n\n"
+            else:
+                token = _open_fence(local_text)
+                if token:
+                    # The file ends inside an unclosed fence: close it, or the blocks' headings would be read as
+                    # inside the user's text and their intros joined to the preferences.
+                    prefix += token + "\n"
+                if not _has_prefs_section(local_text + ("\n" + token if token else "")):
+                    # A `## My preferences` heading ahead of the blocks: the session hook reads the FIRST one, so
+                    # text carried below can never become the injected preferences, whatever it contains.
+                    prefix += "\n## My preferences\n\n"
+            appended = (prefix + "".join(build_block(n, d, t, intro.format(run=run_rel, n=n, src=src.label), c)
+                                         for _, (n, d, t, intro, c) in blocks)).encode("utf-8", "surrogateescape")
+            old = local_bytes or b""
+            if old.count(b"\r\n") * 2 > old.count(b"\n"):          # keep a CRLF file CRLF
+                appended = re.sub(rb"(?<!\r)\n", b"\r\n", appended)
+            sep = b"" if not old or old.endswith(b"\n") else (b"\r\n" if b"\r\n" in old else b"\n")
+            new = old + sep + appended
+            try:
+                _write_atomic(local_path, new)
+            except OSError as e:
+                raise _Failed("could not write {}: {}".format(LOCAL_KB, e))
             if not local_path.read_bytes().startswith(old):
-                raise OSError("read-back does not start with the old content")
+                raise _Failed("{} did not read back starting with its old content".format(LOCAL_KB))
+            for key, _ in blocks:
+                carried[key] = {"run": run_rel}
+                out("  {}: carried into {} (marked block)".format(key.split(":")[0], LOCAL_KB))
+                log.append("carried the 3.x {} into {} (marked block)".format(key.split(":")[0], LOCAL_KB))
+    except (_Failed, OSError) as e:
+        rc = 1
+        out("migrate-3x: FAILED -- {}. What was done before the failure is listed in {}/MIGRATION.txt; "
+            "nothing was deleted.".format(e, run_rel))
+        log += ["", "FAILED: {}".format(e), "The steps above this line were done; nothing after it was."]
+    finally:
+        log += ["", "Nothing was deleted. Every file this run wrote is listed above with its undo."]
+        try:
+            if run_dir.is_dir():
+                (run_dir / "MIGRATION.txt").write_text("\n".join(log) + "\n", encoding="utf-8")
+            state["carried"], state["copied"] = carried, copied
+            _write_atomic(root / STORE / "state.json",
+                          (json.dumps(state, indent=2, sort_keys=True) + "\n").encode("utf-8"))
         except OSError as e:
-            out("migrate-3x: FAILED writing {}: {} -- the old one is in {}".format(LOCAL_KB, e, run_rel))
-            return 1
-        for key, _ in blocks:
-            carried[key] = {"run": run_rel}
-            out("  {}: yours had changes -- carried into {} (marked block)".format(key.split(":")[0], LOCAL_KB))
-
-    log.append("")
-    log.append("Nothing was deleted. Every file this run wrote is listed above with its undo.")
-    (run_dir / "MIGRATION.txt").write_text("\n".join(log) + "\n", encoding="utf-8")
-    state["carried"] = carried
-    _write_atomic(root / STORE / "state.json", (json.dumps(state, indent=2, sort_keys=True) + "\n").encode("utf-8"))
-    out("migrate-3x: done. Backups and the undo steps: {}/MIGRATION.txt".format(run_rel))
-    _codex_note(out)
-    return 0
+            rc = 1
+            out("migrate-3x: could not write the record ({}) -- the backups in {} are intact".format(e, run_rel))
+    if rc == 0:
+        out("migrate-3x: done. Backups and the undo steps: {}/MIGRATION.txt".format(run_rel))
+        _codex_note(out)
+    return rc
 
 
 def _codex_note(out):

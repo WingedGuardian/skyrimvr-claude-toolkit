@@ -20,7 +20,7 @@
 # .claude/backups is never copied into itself. A MANIFEST.txt lists each file with its SHA-256.
 #
 # Exit: 0 = saved (or nothing to save) · 1 = some file could not be copied (named; the rest is saved)
-#       2 = the folder is not a toolkit install
+#       2 = the folder is not a toolkit install · 3 = not enough free space (nothing copied)
 
 set -uo pipefail
 
@@ -64,13 +64,28 @@ done
 
 # Every file the new toolkit would overwrite. Skipped when this script runs from the install itself (the
 # tree would be the whole game folder) or from any game folder.
-if [ -n "$SRC" ] && [ "$SRC" != "$TARGET" ] && [ ! -f "$SRC/SkyrimVR.exe" ] && [ ! -f "$SRC/SkyrimSE.exe" ]; then
+if [ -n "$SRC" ] && [ "$SRC" != "$TARGET" ] && [ ! -f "$SRC/SkyrimVR.exe" ] && [ ! -f "$SRC/SkyrimSE.exe" ] \
+   && [ ! -f "$SRC/TESV.exe" ]; then
     while IFS= read -r -d '' rel; do
         rel=${rel#./}
         [ -f "$TARGET/$rel" ] && printf '%s\0' "$rel" >> "$LIST"
     done < <(cd "$SRC" && find . \( -path ./.git -o -path ./node_modules -o -path ./.claude/backups \) -prune \
                                 -o -type f -print0)
 fi
+
+# Room for it? The copy may not take more than 80% of the free space on the install's drive (it is normally a
+# few MB, but .claude/skills, .codex and .agents are copied whole). Unknown free space is said, not guessed.
+need=$( cd "$TARGET" && xargs -0 cat < "$LIST" 2>/dev/null | wc -c | tr -d ' ' ) || need=0
+case "$need" in ''|*[!0-9]*) need=0 ;; esac
+free_kb=$(df -Pk "$TARGET" 2>/dev/null | awk 'NR==2 {print $4}')
+case "$free_kb" in
+    ''|*[!0-9]*) echo "pre-update-snapshot: could not read the free space on $TARGET's drive; copying $need bytes anyway." ;;
+    *) if [ "$need" -gt $(( free_kb * 1024 / 10 * 8 )) ]; then
+           echo "pre-update-snapshot: NOT saved -- the copy needs $need bytes and the drive has $((free_kb * 1024)) free;" >&2
+           echo "  it may use at most 80% of that. Free some space and run this again, BEFORE extracting." >&2
+           exit 3
+       fi ;;
+esac
 
 count=0
 failed=""

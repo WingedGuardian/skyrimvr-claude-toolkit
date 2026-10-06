@@ -194,14 +194,55 @@ def test_an_edit_anywhere_is_not_mistaken_for_the_shipped_file(label):
     assert M.classify_doc("CLAUDE.md", data, KNOWN, {})[0] == "edited"
 
 
-def test_a_hand_corrected_path_is_kept_when_the_install_recorded_another():
+def test_a_hand_corrected_path_is_an_edit_when_the_install_recorded_another():
     """The game root rewritten consistently is indistinguishable from a different install -- except that 3.9
-    recorded the real one in skyrim-paths.env. With the record it is an edit; without one it is not (a stated
-    limit: an older install that hand-corrected its paths gets 4.0's freshly detected ones)."""
+    recorded the real one in skyrim-paths.env. With the record it is an edit. Without one it classifies as
+    shipped, which is why the PATHS are carried as data whatever the verdict (next test)."""
     data = _edit("stock", "`C:/Temp/p8mig/stock/Skyrim VR/`", "`C:/Games/Skyrim VR/`")
     env = M.read_env(FIX / "skyrim-paths.stock.fixture")
     assert M.classify_doc("CLAUDE.md", data, KNOWN, env)[0] == "edited"
     assert M.classify_doc("CLAUDE.md", data, KNOWN, {})[0] == "pristine"
+
+
+def _paths_env(root: Path) -> dict:
+    out = {}
+    for line in (root / ".claude" / "backups" / "migrate-3x" / "carried-paths.env").read_text(encoding="utf-8").splitlines():
+        if line.startswith("SKYRIM_3X_"):
+            k, v = line.split("=", 1)
+            out[k[len("SKYRIM_3X_"):]] = v[1:-1].replace("'\\''", "'")
+    return out
+
+
+PROBES = {   # the reviewer's probes (T9 review I1): an edit that lives only in a placeholder value
+    "corrected overwrite path": ("mo2", "`C:/Temp/p8mig/mo2/MO2/overwrite/`", "`E:/MO2 data/overwrite/`",
+                                 "MO2_OVERWRITE", "E:/MO2 data/overwrite"),
+    "renamed profile": ("mo2", "profile `Survival`", "profile `Survival 2`", "MO2_PROFILE", "Survival 2"),
+    "moved instance": ("mo2", "instance `C:/Temp/p8mig/mo2/MO2/`", "instance `E:/MO2/`", "MO2_INSTANCE", "E:/MO2"),
+    "annotated profile path": (
+        "mo2", "- **MO2 profile**: `C:/Temp/p8mig/mo2/MO2/profiles/Survival/`",
+        "- **MO2 profile**: `C:/Temp/p8mig/mo2/MO2/profiles/Survival (NOT Default! Default is broken)/`",
+        "MO2_PROFILE_DIR", "C:/Temp/p8mig/mo2/MO2/profiles/Survival (NOT Default! Default is broken)"),
+    "pre-3.9 corrected game root": ("stock", "`C:/Temp/p8mig/stock/Skyrim VR/`", "`C:/Games/Skyrim VR/`",
+                                    "GAME_ROOT", "C:/Games/Skyrim VR"),
+}
+
+
+@pytest.mark.parametrize("probe", sorted(PROBES))
+def test_a_corrected_path_is_kept_and_carried_whatever_the_verdict(tmp_path, probe):
+    """'Shipped' never means 'no copy': the 3.x file is kept byte-exact, and every path setup.sh had filled in
+    -- as the file says it, corrections and notes included -- is carried for setup.sh in carried-paths.env."""
+    variant, old, new, name, value = PROBES[probe]
+    root = make_391(tmp_path / "i", variant)
+    data = _edit(variant, old, new)
+    (root / "CLAUDE.md").write_bytes(data)
+    if probe.startswith("pre-3.9"):
+        (root / ".claude" / "skyrim-paths.env").unlink()
+    rc, out = run_inproc(root)
+    assert rc == 0, out
+    assert (run_dir(root) / "CLAUDE.md").read_bytes() == data, "no byte-exact copy of the 3.x CLAUDE.md"
+    assert _paths_env(root)[name] == value, out
+    assert value in out, "the carried path is not shown to the user"
+    assert (run_dir(root) / "carried-paths.env").is_file()
 
 
 def test_the_4x_files_are_never_taken_for_3x_ones():
@@ -218,7 +259,7 @@ def test_settings_reformatted_but_equal_is_still_shipped():
 
 # ------------------------------------------------------------------------- upgrade from 3.9.1, E2E --
 
-def test_upgrade_from_391_pristine_is_silent(tmp_path):
+def test_upgrade_from_391_pristine_keeps_copies_and_carries_no_text(tmp_path):
     root = make_391(tmp_path / "Skyrim VR")
     rc, out = snapshot(root)
     assert rc == 0, out
@@ -227,16 +268,21 @@ def test_upgrade_from_391_pristine_is_silent(tmp_path):
     extract_40(root)
     rc, out = migrate(root, tool=root / "tools" / "migrate-3x.py")
     assert rc == 0, out
-    assert "nothing to carry over" in out, out
     assert "nothing to re-approve" in out, out
     for rel, data in before_user.items():
         assert (root / rel).read_bytes() == data, rel
     assert not (root / ".claude" / "settings.json.3x-backup").exists()
-    assert not (root / ".claude" / "backups" / "migrate-3x").exists(), "a silent migration wrote a backup"
+    rd = run_dir(root)
+    for rel, fixture in (("CLAUDE.md", "CLAUDE.stock.fixture"), ("AGENTS.md", "AGENTS.fixture"),
+                         ("KNOWLEDGEBASE.md", "KNOWLEDGEBASE.fixture"), (".claude/settings.json", "settings.json.fixture")):
+        assert (rd / rel).read_bytes() == fx(fixture), rel
+        assert "{}: a shipped 3.x version -- byte-exact copy kept at {}/{}".format(rel, rd.relative_to(root).as_posix(), rel) in out
+    assert _paths_env(root)["GAME_ROOT"] == "C:/Temp/p8mig/stock/Skyrim VR"
     assert (root / "CLAUDE.md").read_bytes() == (REPO / "CLAUDE.md").read_bytes(), "the 4.0 file was touched"
     snap = tree(root)
     rc, out2 = migrate(root, tool=root / "tools" / "migrate-3x.py")
     assert rc == 0 and tree(root) == snap, out2
+    assert "nothing new" in out2
 
 
 def test_upgrade_from_391_with_edits_keeps_every_edit(tmp_path):
@@ -263,6 +309,9 @@ def test_upgrade_from_391_with_edits_keeps_every_edit(tmp_path):
     assert agents in local, "AGENTS.md not carried byte for byte"
     assert kb_notes.encode("utf-8") in local, "the notes appended to KNOWLEDGEBASE.md were not carried"
     assert {n for n, _ in M.existing_blocks(local.decode("utf-8"))} == {"CLAUDE.md", "AGENTS.md", "KNOWLEDGEBASE.md"}
+    # The paths are carried from the EDITED file too (found line by line).
+    assert _paths_env(root)["MO2_PROFILE"] == "Survival"
+    assert _paths_env(root)["MO2_OVERWRITE"] == "C:/Temp/p8mig/mo2/MO2/overwrite"
     assert (root / ".claude" / "settings.json.3x-backup").read_bytes() == settings
     for rel, data in keep.items():
         assert (root / rel).read_bytes() == data, rel
@@ -343,20 +392,26 @@ def test_without_a_snapshot_the_kb_guard_copy_is_used(tmp_path):
     assert edited_claude() in (root / "KNOWLEDGEBASE.local.md").read_bytes(), out
 
 
-def test_the_kb_guard_store_is_ignored_once_a_4x_session_ran(tmp_path):
-    """After the first 4.x session the newest stored CLAUDE.md is 4.x; an older edited 3.x copy there is history
-    the user already moved past, not something to carry into a later update."""
+def test_a_4x_session_before_setup_does_not_hide_the_3x_copy(tmp_path):
+    """Extract, open the agent, ask it to run setup: SessionStart's kb-guard has by then stored the 4.0 files as
+    the newest copies. The newest 3.x-shaped CLAUDE.md is still the one to carry -- and the knowledgebase copy
+    is the one from BEFORE the 4.0 copies (same kb-guard run), not the 4.0 knowledgebase."""
     root = make_391(tmp_path / "i")
     store = root / ".claude" / "backups" / "kb"
     (store / "20260901_090000").mkdir(parents=True)
     (store / "20260901_090000" / "CLAUDE.md").write_bytes(edited_claude())
+    (store / "20260901_090000" / "KNOWLEDGEBASE.md").write_bytes(fx("KNOWLEDGEBASE.fixture"))
     (store / "20261001_090000").mkdir()
     (store / "20261001_090000" / "CLAUDE.md").write_bytes((REPO / "CLAUDE.md").read_bytes())
+    (store / "20261001_090000" / "KNOWLEDGEBASE.md").write_bytes((REPO / "KNOWLEDGEBASE.md").read_bytes())
     extract_40(root)
     rc, out = run_inproc(root)
-    assert rc == 0
-    assert (root / "KNOWLEDGEBASE.local.md").read_bytes() == USER_LOCAL_KB, out
-    assert "nothing to do" in out
+    assert rc == 0, out
+    assert "CLAUDE.md from 20260901_090000" in out, "the copy used is not named"
+    assert "KNOWLEDGEBASE.md from 20260901_090000" in out, "the 4.0 knowledgebase was taken for a 3.x one"
+    local = (root / "KNOWLEDGEBASE.local.md").read_text(encoding="utf-8")
+    assert {n for n, _ in M.existing_blocks(local)} == {"CLAUDE.md"}, out
+    assert "NOT checked" in out, "the kb store holds no settings, and that was not said"
 
 
 @pytest.mark.parametrize("marker", ["CLAUDE.md", "AGENTS.md", "settings", "codex"])
@@ -464,6 +519,103 @@ def test_an_existing_different_settings_backup_is_never_overwritten(tmp_path):
     assert len(suffixed) == 1 and suffixed[0].read_bytes() == settings
 
 
+def test_a_collision_suffix_sorts_inside_its_own_second():
+    names = ["pre-update-20261005_090000_2", "pre-update-20261005_140000", "pre-update-20261005_090000"]
+    assert max(names, key=M._stamp_key) == "pre-update-20261005_140000"
+    assert sorted(["x_20261005_090000_10", "x_20261005_090000_2"], key=M._stamp_key)[-1] == "x_20261005_090000_10"
+
+
+def test_an_unclosed_fence_in_the_users_file_does_not_leak_into_preferences(tmp_path):
+    root = make_391(tmp_path / "i")
+    mine = b"## My preferences\n\n- be careful\n\n```\nsome code, never closed\n"
+    (root / "KNOWLEDGEBASE.local.md").write_bytes(mine)
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    assert run_inproc(root)[0] == 0
+    local = (root / "KNOWLEDGEBASE.local.md").read_text(encoding="utf-8")
+    assert local.encode("utf-8").startswith(mine)
+    sys.path.insert(0, str(REPO / "tools"))
+    try:
+        from skyguard import prefs
+    finally:
+        sys.path.pop(0)
+    assert prefs.section(local) == prefs.section(mine.decode("utf-8") + "```\n"), "the blocks joined the preferences"
+
+
+def test_a_crlf_local_knowledgebase_stays_crlf(tmp_path):
+    root = make_391(tmp_path / "i")
+    (root / "KNOWLEDGEBASE.local.md").write_bytes(USER_LOCAL_KB.replace(b"\n", b"\r\n"))
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    assert run_inproc(root)[0] == 0
+    data = (root / "KNOWLEDGEBASE.local.md").read_bytes()
+    assert data.count(b"\n") == data.count(b"\r\n"), "mixed line endings"
+
+
+def test_the_settings_report_names_removed_and_changed_hooks(tmp_path):
+    obj = json.loads(fx("settings.json.fixture"))
+    groups = obj["hooks"]["PreToolUse"]
+    obj["hooks"]["PreToolUse"] = [g for g in groups if g["matcher"] != "Bash"]          # protect-bash removed
+    obj["hooks"]["PreToolUse"][0]["hooks"][0]["command"] += " --strict"                  # protect-files changed
+    lines = M.settings_report(json.dumps(obj), REPO / ".claude" / "settings.json", KNOWN)
+    text = "\n".join(lines)
+    assert "removed by you in 3.x, and 4.0 runs it again: PreToolUse -> protect-bash.sh" in text, text
+    assert "changed command" in text and "--strict" in text, text
+    assert "protect-mcp.sh" not in text, "a hook 3.x never shipped is not 'removed by you'"
+
+
+def _break_writes(monkeypatch, suffix):
+    real = Path.write_bytes
+
+    def fake(self, data):
+        return real(self, data[:-1] if self.name.endswith(suffix) else data)
+    monkeypatch.setattr(Path, "write_bytes", fake)
+
+
+@pytest.mark.parametrize("which", ["CLAUDE.md", "KNOWLEDGEBASE.local.md.before"])
+def test_a_backup_that_does_not_read_back_stops_the_run(tmp_path, monkeypatch, which):
+    root = make_391(tmp_path / "i")
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    _break_writes(monkeypatch, which)
+    rc, out = run_inproc(root)
+    assert rc == 1, out
+    assert (root / "KNOWLEDGEBASE.local.md").read_bytes() == USER_LOCAL_KB, "wrote on top of a bad backup"
+
+
+def test_a_local_knowledgebase_that_does_not_read_back_is_reported(tmp_path, monkeypatch):
+    root = make_391(tmp_path / "i")
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    real = M._write_atomic
+    monkeypatch.setattr(M, "_write_atomic",
+                        lambda p, d: real(p, d[1:] if p.name == "KNOWLEDGEBASE.local.md" else d))
+    rc, out = run_inproc(root)
+    assert rc == 1 and "did not read back" in out, out
+
+
+def test_a_failure_still_leaves_the_undo_record(tmp_path, monkeypatch):
+    root = make_391(tmp_path / "i")
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    (root / ".claude" / "settings.json").write_bytes(json.dumps(USER_SETTINGS).encode("utf-8"))
+    real = M._write_atomic
+
+    def fail_kb(p, d):
+        if p.name == "KNOWLEDGEBASE.local.md":
+            raise OSError("disk full")
+        return real(p, d)
+    monkeypatch.setattr(M, "_write_atomic", fail_kb)
+    rc, out = run_inproc(root)
+    assert rc == 1, out
+    log = (run_dir(root) / "MIGRATION.txt").read_text(encoding="utf-8")
+    assert "FAILED" in log and "settings.json.3x-backup" in log and "kept the 3.x CLAUDE.md" in log, log
+
+
+def test_a_new_local_knowledgebase_starts_with_an_empty_preferences_section(tmp_path):
+    root = make_391(tmp_path / "i")
+    (root / "KNOWLEDGEBASE.local.md").unlink()
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    assert run_inproc(root)[0] == 0
+    local = (root / "KNOWLEDGEBASE.local.md").read_text(encoding="utf-8")
+    assert local.startswith("# Local knowledgebase\n\n## My preferences\n"), local[:80]
+
+
 def test_dry_run_writes_nothing(tmp_path):
     root = make_391(tmp_path / "i")
     (root / "CLAUDE.md").write_bytes(edited_claude())
@@ -522,7 +674,7 @@ def test_two_snapshots_in_one_second_do_not_share_a_folder(tmp_path):
     assert names == ["pre-update-20260101_000000", "pre-update-20260101_000000_2"], names
 
 
-def _toolkit_tree(base: Path, game: bool = False) -> Path:
+def _toolkit_tree(base: Path, game: str = "") -> Path:
     """A folder holding the snapshot script, as an unpacked toolkit (or, with game=True, another install)."""
     (base / "tools").mkdir(parents=True)
     shutil.copyfile(SNAP, base / "tools" / "pre-update-snapshot.sh")
@@ -530,13 +682,15 @@ def _toolkit_tree(base: Path, game: bool = False) -> Path:
     (base / ".claude" / "backups").mkdir(parents=True)
     (base / ".claude" / "backups" / "old.txt").write_bytes(b"x")
     if game:                                       # a game folder: its Data/ collides with the target's
-        (base / "SkyrimVR.exe").write_bytes(b"")
+        (base / game).write_bytes(b"")
         (base / "Data").mkdir()
         (base / "Data" / "Mine.esp").write_bytes(b"x")
     return base / "tools" / "pre-update-snapshot.sh"
 
 
-@pytest.mark.parametrize("where", ["unpacked toolkit", "another game folder", "the install itself"])
+@pytest.mark.parametrize("where", ["unpacked toolkit", "another game folder SkyrimVR.exe",
+                                   "another game folder SkyrimSE.exe", "another game folder TESV.exe",
+                                   "the install itself"])
 def test_snapshot_never_copies_beyond_what_the_update_replaces(tmp_path, where):
     root = make_391(tmp_path / "i")
     (root / "Data").mkdir()
@@ -549,13 +703,26 @@ def test_snapshot_never_copies_beyond_what_the_update_replaces(tmp_path, where):
         shutil.copyfile(script, root / "tools" / "pre-update-snapshot.sh")
         script = root / "tools" / "pre-update-snapshot.sh"
     else:
-        script = _toolkit_tree(tmp_path / "src", game=(where == "another game folder"))
+        script = _toolkit_tree(tmp_path / "src", game=where.split()[-1] if "game folder" in where else "")
     rc, out = snapshot(root, str(root), script=script)
     assert rc == 0, out
     d = next((root / ".claude" / "backups").glob("pre-update-*"))
     assert (d / "CLAUDE.md").is_file()
     assert not (d / "Data").exists(), "copied a mod file the update never touches"
     assert not (d / ".claude" / "backups").exists(), "copied the backups into themselves"
+
+
+def test_snapshot_refuses_when_the_drive_is_nearly_full(tmp_path):
+    root = make_391(tmp_path / "i")
+    shim = tmp_path / "bin"
+    shim.mkdir()
+    (shim / "df").write_bytes(b"#!/bin/bash\necho 'Filesystem 1024-blocks Used Available Capacity Mounted'\n"
+                              b"echo 'X 1000 999 1 99% /'\n")
+    (shim / "df").chmod(0o755)
+    env = dict(os.environ, PATH=str(shim) + os.pathsep + os.environ["PATH"])
+    r = subprocess.run([BASH, str(SNAP), str(root)], capture_output=True, text=True, env=env, timeout=180)
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert not list((root / ".claude" / "backups").glob("pre-update-*")), "copied anyway"
 
 
 def test_snapshot_refuses_a_folder_that_is_not_an_install(tmp_path):

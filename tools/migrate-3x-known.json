@@ -839,6 +839,20 @@
  "settings": [
   {
    "canonical_sha256": "2b75044ca26f74be8391f810210d8d637c2144de1108a4e62802284860e1a37f",
+   "hooks": [
+    [
+     "PreToolUse",
+     "backup-before-edit.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-bash.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-files.sh"
+    ]
+   ],
    "sha256": "0531282fb9c3872e54623417a5a331301d9719f81dc0305d9d37c303f5e4f977",
    "tags": [
     "release",
@@ -847,6 +861,24 @@
   },
   {
    "canonical_sha256": "aa023ae90c872ff37ff8a2b7bb39d12dd30556fac757f47016e08c56ce7149bb",
+   "hooks": [
+    [
+     "PreToolUse",
+     "backup-before-edit.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-bash.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-files.sh"
+    ],
+    [
+     "PreToolUse",
+     "snapshot-before-tool.sh"
+    ]
+   ],
    "sha256": "db566207a0d049f24a68f6d142c1fee02d11c9ec83dffc36f4f3d581ed5bdff6",
    "tags": [
     "v3.0",
@@ -870,6 +902,28 @@
   },
   {
    "canonical_sha256": "b35d4c8c0d1c146e26cdd06fdef9a0acb7a69d132dc293971a6d4625b5f55bf1",
+   "hooks": [
+    [
+     "PreToolUse",
+     "backup-before-edit.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-bash.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-files.sh"
+    ],
+    [
+     "PreToolUse",
+     "snapshot-before-tool.sh"
+    ],
+    [
+     "SessionStart",
+     "session-kb-guard.sh"
+    ]
+   ],
    "sha256": "20aa63920859740acf2b558285f5ecc0d2823202b683e58eaf27164c6eefb2ea",
    "tags": [
     "v3.9"
@@ -877,6 +931,28 @@
   },
   {
    "canonical_sha256": "e526894404570f9aef19e1411c1bcbbed8896efc7c1ae0360766d973c75a6e86",
+   "hooks": [
+    [
+     "PreToolUse",
+     "backup-before-edit.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-bash.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-files.sh"
+    ],
+    [
+     "PreToolUse",
+     "snapshot-before-tool.sh"
+    ],
+    [
+     "SessionStart",
+     "session-kb-guard.sh"
+    ]
+   ],
    "sha256": "83001d9e7466cee94823b884072a95a6c1137b27100ff035d2c92ef12b955ee9",
    "tags": [
     "v3.9.1"
