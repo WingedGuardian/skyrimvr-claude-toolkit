@@ -4677,7 +4677,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_DR, '    engaged = mstatus != "absent" or marked', "    engaged = True",
      _DRT + "test_layer2_mechanism_and_a_never_applied_lock", "l2-doctor-l2-never-applied"),
     # ---- R9: the one write, and nothing else
-    (_DR, "    gone = [x for x in st.lifts if _expired(x, now)]", "    gone = []",
+    (_DR, "    due = [x for x in state.read(str(sf)).lifts if _expired(x, now)]", "    due = []",
      _DRT + "test_an_expired_lift_is_cleared_and_logged", "l2-doctor-r9-clears-expired"),
     (_DR, '    return not now < min(lift["expires_at"], lift["created"] + state.MAX_LIFT_SECONDS)',
      '    return not now < lift["expires_at"]',
