@@ -784,6 +784,47 @@ def test_default_is_off_until_the_batch_decides(bed):
     assert "default off" in " ".join(_lock().status(str(bed.root)).lines).lower() or WINDOWS
 
 
+def _sh_with_python(bed, tmp_path, value):
+    from conftest import BASH
+    env = {k: os.environ[k] for k in ("SystemRoot", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "TEMP", "TMP", "PATH")
+           if k in os.environ}
+    env["SKYGUARD_PYTHON"] = value
+    env["SKYGUARD_LOCK_SANDBOX"] = str(SCRATCH)
+    return subprocess.run([BASH, str(REPO / "tools" / "skyguard.sh"), "lock", "status", "--json", "--root",
+                           str(bed.root)], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=120)
+
+
+def _py_wrapper(folder: Path, mark: Path) -> Path:
+    """A bash script standing in for an interpreter: it records that it ran (with any --tag), then runs Python."""
+    folder.mkdir(parents=True, exist_ok=True)
+    w = folder / "python"
+    w.write_bytes(('#!/bin/bash\nif [ "$1" = "--tag" ]; then shift; echo tag >> "%s"; else echo plain >> "%s"; fi\n'
+                   'exec "%s" "$@"\n' % (mark.as_posix(), mark.as_posix(), sys.executable.replace("\\", "/")))
+                  .encode("ascii"))
+    return w
+
+
+@needs_windows
+def test_skyguard_sh_runs_a_skyguard_python_whose_path_has_spaces(bed, tmp_path):
+    """Lane A M3: the value was word-split, so `C:/Program Files/...` failed its probe and the loop fell through to
+    python3/python with no word -- the user's choice silently ignored. The wrapper must be the one that ran."""
+    mark = tmp_path / "ran.txt"
+    w = _py_wrapper(tmp_path / "my python dir", mark)
+    r = _sh_with_python(bed, tmp_path, w.as_posix())
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert mark.read_text(encoding="ascii").split() == ["plain", "plain"]      # the probe, then the run
+
+
+@needs_windows
+def test_skyguard_sh_still_splits_a_launcher_with_arguments(bed, tmp_path):
+    """The twin: a value that is not an existing path (`py -3` style) is still split into words."""
+    mark = tmp_path / "ran.txt"
+    w = _py_wrapper(tmp_path / "nospace", mark)
+    r = _sh_with_python(bed, tmp_path, w.as_posix() + " --tag")
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert mark.read_text(encoding="ascii").split() == ["tag", "tag"]
+
+
 @needs_windows
 def test_the_bash_wrapper_called_by_a_backslash_path_from_elsewhere_runs_its_own_package(bed, tmp_path):
     """Task 16 found it: `bash C:\\...\\tools\\skyguard.sh` split its path on `/` only, so `here` was `.` and it ran

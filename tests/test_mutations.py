@@ -6595,5 +6595,15 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # ...and the hook's relock waits only briefly for it, skipping (logged) when busy.
     ("tools/skyguard/lock.py", "    with _state.locked(sf, wait):", "    if True:",
      _FXSL + "test_a_busy_state_file_skips_the_relock_without_blocking_the_hook", "fixA-state-lock-hook-short-wait"),
+    # A-M3: skyguard.sh runs a SKYGUARD_PYTHON path with spaces as one word...
+    ("tools/skyguard.sh", '    if [ -e "$cand" ]; then run=("$cand"); else', '    if false; then run=("$cand"); else',
+     _FXSL + "test_skyguard_sh_runs_a_skyguard_python_whose_path_has_spaces", "fixA-m3-path-one-word"),
+    # ...and still splits a launcher with arguments (the twin).
+    ("tools/skyguard.sh", """else IFS=' ' read -r -a run <<< "$cand"; fi""", 'else run=("$cand"); fi',
+     _FXSL + "test_skyguard_sh_still_splits_a_launcher_with_arguments", "fixA-m3-launcher-split"),
+    # Item 6: the rule texts name the runnable command (the corpus rows quote it).
+    ("tools/skyguard/rules.py", "        'Use: bash tools/skyguard.sh lock unlock {file}'",
+     "        'Use: tools/skyguard lock unlock {file}'",
+     "tests/test_skyguard_lift_rules.py::test_p6t11_row[p6t11-raw-attrib-bsa]", "fixA-cmd-text-runnable"),
 ]]
 
