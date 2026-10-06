@@ -88,6 +88,11 @@ def _never_of(v: Verdict):
     """The NEVER_SHADOW refusal `v` is or carries (Verdict.never), classified; None for neither."""
     if _is_never(v):
         return codes.classify(v)
+    return _carried(v)
+
+
+def _carried(v: Verdict):
+    """The NEVER_SHADOW refusal `v` CARRIES beside its own decision (Verdict.never), classified; None when none."""
     n = v.never
     return codes.classify(n) if isinstance(n, Verdict) and n.decision in ("deny", "ask") else None
 
@@ -379,7 +384,9 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
             return v
         # Plan 6 final fix (lane A C1): the call ALSO carries a NEVER_SHADOW refusal that a decoy outranked. Shadow mode
         # would allow the decoy and with it the whole command, so the call is refused by THAT rule, and the log says so.
-        kept = _never_of(v)
+        # Only the CARRIED one is read here: `v` itself being a NEVER_SHADOW refusal is the clause above's case alone
+        # (reading it here too made each of the two a silent backstop of the other, so neither could be proved needed).
+        kept = _carried(v)
         if kept is not None:
             audit.log_strict("skyguard", "SHADOW", "{} kept ({}; a lift rule, beside {})".format(
                 kept.code, kept.decision, v.code))

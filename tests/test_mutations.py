@@ -4144,6 +4144,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "            pass", _LT + "test_guards_off_does_not_shadow_a_lift_rule[raw]", "l2-lift-kept-logs"),
     (_EN, _NS, _NS.replace('"shell.S-LIFT-RAW", ', ""), _LT + "test_guards_off_does_not_shadow_a_lift_rule[raw]",
      "rule-S-LIFT-RAW-never-shadowed"),
+    # The ONLY clause holding a direct lift rule in shadow mode: engine.shadow's carried-refusal step reads Verdict.never
+    # alone (_carried), so it no longer silently backstops this one (it did after A-C1, and this twin survived).
     (_EN, "        if v.code in NEVER_SHADOW:", "        if False:", _LT + "test_guards_off_does_not_shadow_a_lift_rule[permanent]",
      "l2-lift-never-shadow-clause"),
     # ---- S-LIFT-UNLOCKCMD
@@ -6496,7 +6498,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _FXA + "test_without_a_lift_the_decoy_call_is_refused_no_less_strictly[disable-after-decoy-delete]",
      "fixA-c1-permanent-not-instead-of-the-deny"),
     # C1: shadow mode returns the carried NEVER_SHADOW refusal.
-    ("tools/skyguard/engine.py", "        kept = _never_of(v)\n        if kept is not None:",
+    ("tools/skyguard/engine.py", "        kept = _carried(v)\n        if kept is not None:",
      "        kept = None\n        if kept is not None:",
      _FXA + "test_a_never_shadow_refusal_stands_under_guards_off_beside_a_decoy[disable-after-decoy-ask]",
      "fixA-c1-shadow-returns-the-kept"),
