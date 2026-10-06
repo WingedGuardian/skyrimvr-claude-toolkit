@@ -159,6 +159,9 @@ ROWS = [
     ("rt-codex-script-key-harmless", "Bash", {"script": "Get-Date"}, None, "allow", set(), ""),
     ("rt-codex-two-command-keys", "Bash", {"command": "Get-Date", "script": "rm -rf <install>/Data"}, None,
      "deny", set(), INERT.format("tool call with more than one command field (command, script)")),
+    # Plan 8 T6 (T4 audit K6): Codex's shell is PowerShell, where `find` was read as find.exe and allowed.
+    ("rt-codex-find-delete", "Bash", {"command": "find <install>/Data -name *.bak -delete"}, None,
+     "deny", {"S-DEL-INSTALL"}, DEL_INSTALL.format("*.bak")),
     # Twins that must stay allowed: deleting outside the protected folders, a rename inside one, a scratch dir.
     ("rt-codex-patch-delete-outside", "apply_patch", _patch("*** Delete File: C:/Temp/rtB/x.txt"), None,
      "allow", set(), ""),

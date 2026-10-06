@@ -278,6 +278,8 @@ def side_effects(req, project, audit, v, roots_fn=None, deadline=None) -> Verdic
 
 
 SHADOW_HEAD = "Guards OFF: this would have been denied ({})."
+# Plan 8 T6 (T4 audit K1): a shadowed ASK ran without its confirmation prompt; "denied" was not what happened.
+SHADOW_ASK_HEAD = "Guards OFF: this would have asked you first ({}); it ran without asking."
 _LINE_MAX = 190
 # Plan 6 Task 11 (R7, R8): guards off never lifts the lock. Without this an agent could take `guards off` (a D6 lift it
 # may take) and then run `lock disable` with no ask -- a persistent off nobody approved -- or unlock a vanilla file
@@ -391,7 +393,8 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
             audit.log_strict("skyguard", "SHADOW", "{} kept ({})".format(v.code, v.decision))
             return v
         first = (v.reason.split("\n", 1)[0] if v.reason else "")[:_LINE_MAX]
-        context = SHADOW_HEAD.format(v.code) + ("\n" + first if first else "")
+        head = SHADOW_ASK_HEAD if v.decision == "ask" else SHADOW_HEAD
+        context = head.format(v.code) + ("\n" + first if first else "")
         audit.log_strict("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))   # raises -> the refusal stands
         return Verdict("allow", "", context, v.status, v.code)
     except Exception:  # noqa: BLE001 -- shadow mode must never be able to break or loosen a decision by failing

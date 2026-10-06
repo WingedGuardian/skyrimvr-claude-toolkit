@@ -6766,3 +6766,20 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "tests/test_setup_prompt.py::test_the_authorization_form_lists_exactly_the_parsers_allowlist",
      "p8t6-prompt-drops-an-allowed-id"),
 ]]
+# T4 claims audit K6: `find` is judged as GNU find on every dialect, and its -exec program by argv.
+# K1: a shadowed ask says it was let through, and `guards off` says confirmation prompts are shadowed too.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/shellparse.py", '            if p == "find":\n', '            if p == "find" and self.d == "bash":\n',
+     "tests/test_skyguard_deletes.py::test_gnu_find_deletes_are_judged_on_every_dialect[delete-powershell]",
+     "p8t6-find-on-every-dialect"),
+    ("tools/skyguard/shellparse.py", '                    r = _Resolver("bash", iv, iq, iy, (), self.cd, "", self.seg, [], self.depth + 1, self.ctx,',
+     '                    r = _Resolver(self.d, iv, iq, iy, (), self.cd, "", self.seg, [], self.depth + 1, self.ctx,',
+     "tests/test_skyguard_deletes.py::test_gnu_find_deletes_are_judged_on_every_dialect[exec-rm-powershell]",
+     "p8t6-find-exec-runs-by-argv"),
+    ("tools/skyguard/engine.py", '        head = SHADOW_ASK_HEAD if v.decision == "ask" else SHADOW_HEAD\n',
+     "        head = SHADOW_HEAD\n",
+     "tests/test_skyguard_shadow.py::test_an_ask_is_converted_too", "p8t6-shadowed-ask-says-asked"),
+    ("tools/skyguard/cli.py", "a refusal or a confirmation prompt becomes an allow", "a refusal becomes an allow",
+     "tests/test_skyguard_shadow.py::test_guards_off_records_a_session_bound_expiring_guards_lift",
+     "p8t6-guards-off-names-confirmation-prompts"),
+]]

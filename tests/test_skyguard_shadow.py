@@ -1,6 +1,7 @@
 """Plan 6 Task 9 (R8): `guards off` is ENGINE SHADOW MODE.
 
-Rules still evaluate. A deny/ask verdict becomes allow + context `Guards OFF: this would have been denied ({rule}).`
+Rules still evaluate. A deny verdict becomes allow + context `Guards OFF: this would have been denied ({rule}).`, an ask
+one `Guards OFF: this would have asked you first ({rule}); it ran without asking.`
 (+ the rule's own first line) when, and only when, an HONOURED `guards` lift exists for THIS session. A `GUARD INERT`
 refusal (a broken engine) is never converted; backups/snapshots still run; every conversion writes a `SHADOW <rule>`
 audit line. The state reader (Task 7) decides what is honoured; this file tests what the engine does with it.
@@ -31,6 +32,8 @@ H = 3600.0
 NOW = 1_800_000_000.0
 SID = "sess-shadow"
 HEAD = "Guards OFF: this would have been denied ({}).".format
+# Plan 8 T6 (T4 claims audit K1): a shadowed ASK says what happened -- it ran without the confirmation -- not "denied".
+ASK_HEAD = "Guards OFF: this would have asked you first ({}); it ran without asking.".format
 
 
 def _lift(**kw):
@@ -81,7 +84,8 @@ def test_an_honoured_lift_turns_a_deny_into_allow_with_the_two_line_context(tmp_
 def test_an_ask_is_converted_too(tmp_path):
     _env(tmp_path, [_lift()])
     v = _shadow(tmp_path, _deny(code="shell.ASK_X", decision="ask"))
-    assert v.decision == "allow" and v.context.startswith(HEAD("shell.ASK_X"))
+    assert v.decision == "allow" and v.context.startswith(ASK_HEAD("shell.ASK_X"))
+    assert "denied" not in v.context and len(v.context.split("\n")) <= 2
 
 
 def test_a_long_first_line_keeps_the_context_within_the_message_contract(tmp_path):
@@ -363,7 +367,9 @@ def test_every_denied_or_asked_corpus_row_is_shadowed_except_the_inert_ones(corp
                 problems.append((row["id"], "INERT row was changed", got))
             continue
         ctx = got.get("additionalContext", "")
-        if "permissionDecision" in got or not ctx.startswith("Guards OFF: this would have been denied ("):
+        head = ("Guards OFF: this would have been denied (" if base["permissionDecision"] == "deny" else
+                "Guards OFF: this would have asked you first (")
+        if "permissionDecision" in got or not ctx.startswith(head):
             problems.append((row["id"], "not shadowed", got))
         elif reason.split("\n")[0][:190] not in ctx:
             problems.append((row["id"], "context lacks the rule's first line", ctx))
@@ -444,6 +450,7 @@ def test_guards_off_records_a_session_bound_expiring_guards_lift(tmp_path):
     assert 0 < lifts[0]["expires_at"] - lifts[0]["created"] <= state.MAX_LIFT_SECONDS
     lines = text.strip().splitlines()
     assert len(lines) <= 2 and all(len(x) <= 200 for x in lines)
+    assert "a refusal or a confirmation prompt becomes an allow" in lines[0], lines[0]   # K1: asks are shadowed too
 
 
 def test_guards_off_needs_a_session_id(tmp_path):

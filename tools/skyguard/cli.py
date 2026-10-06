@@ -122,7 +122,8 @@ def guards_main(argv, out) -> int:
     except (ValueError, OSError) as e:
         print("Could not write the guards state (%s); nothing changed." % e.__class__.__name__, file=out)
         return 2
-    print(_clip("Guards OFF for this session (%d min): a refusal becomes an allow plus a warning, and is logged as SHADOW."
+    print(_clip("Guards OFF for this session (%d min): a refusal or a confirmation prompt becomes an allow plus a warning, and is "
+                "logged as SHADOW."
                 % int(lock.LIFT_SECONDS // 60)), file=out)
     print("GUARD INERT refusals and the file lock still apply. `guards on` ends it.", file=out)
     return 0
