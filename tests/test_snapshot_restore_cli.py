@@ -190,6 +190,40 @@ def test_in_place_restore_still_replaces_a_changed_file_beside_an_unchanged_one(
     assert [e["src"] for e in _backups(inst).values()] == [str(src)], "only the replaced file was backed up"
 
 
+def _moved_config_dir(inst):
+    """A config snapshot, then the user points SKYRIM_CONFIG_DIR somewhere else, and plugins.txt goes bad."""
+    take_all(inst)
+    new_cfg = inst.game.parent / "docs2" / "Skyrim VR"
+    new_cfg.mkdir(parents=True)
+    write_paths(inst, new_cfg)
+    put(inst.cfg / "Skyrim.ini", b"[General]\nedited since\n")       # in the no-longer-configured folder
+    put(inst.lo / "plugins.txt", b"*Broken.esp\n")
+    return ids(inst, "config")[0]
+
+
+def test_a_full_in_place_config_restore_skips_a_no_longer_configured_folder_and_restores_the_rest(inst):
+    """Final review B-M4: the snapshot's INIs sit in a folder that is no longer configured; the whole restore was
+    refused. Now the configured files are restored and the others are named, untouched."""
+    sid = _moved_config_dir(inst)
+    rc, text = cli_run(inst, "restore", sid, "--in-place")
+    assert rc == 0, text
+    assert (inst.lo / "plugins.txt").read_bytes() == b"*Skyrim.esm\n*Mine.esp\n", text
+    assert (inst.cfg / "Skyrim.ini").read_bytes() == b"[General]\nedited since\n", "outside the roots: never written"
+    for n in ("Skyrim.ini", "SkyrimVR.ini", "skyrimprefs.INI"):     # the drive letter's case is the recorder's
+        assert "not restored {}: its folder is no longer".format(inst.cfg / n).lower() in text.lower(), text
+    assert "3 file(s) were NOT restored" in text, text
+    assert "SKIPPED" in inst.log(), "the skip is in the audit log too"
+
+
+def test_a_per_file_in_place_restore_of_a_no_longer_configured_ini_still_refuses(inst):
+    """The twin: asked for BY NAME (--path), the out-of-roots file is still a refusal, not a silent skip."""
+    sid = _moved_config_dir(inst)
+    rc, text = cli_run(inst, "restore", sid, "--path", "plugins.txt", "--path", "Skyrim.ini", "--in-place")
+    assert rc == 2 and "not a load-order file or game INI" in text and "Nothing was restored" in text, text
+    assert (inst.cfg / "Skyrim.ini").read_bytes() == b"[General]\nedited since\n"
+    assert (inst.lo / "plugins.txt").read_bytes() == b"*Broken.esp\n", "a refusal writes nothing at all"
+
+
 def forge_recovery(inst, victim, sid):
     """A whole one-file recovery snapshot whose line names `victim` -- what a tampered store can hold."""
     inst.run("make")

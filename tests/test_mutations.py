@@ -6493,6 +6493,15 @@ _FB = [
      _RCT + "test_a_devbench_save_with_an_unreadable_paths_file_is_logged", "p6fb-m2-devbench-shell-logged"),
     (_RC, '             [("SKIPPED", UNREADABLE_SAVE.format(name))], False, now', "             [], False, now",
      _RCT + "test_a_devbench_save_with_an_unreadable_paths_file_is_logged", "p6fb-m2-devbench-mcp-logged"),
+    # B-M4: a full config restore skips (and names) a no-longer-configured folder; by name it still refuses
+    (_SC, "        moved = [k for k, why in odd if not wanted and _no_longer_configured(live[k], why)]", "        moved = []",
+     _SCT + "test_a_full_in_place_config_restore_skips_a_no_longer_configured_folder_and_restores_the_rest",
+     "p6fb-m4-full-restore-skips-moved-folder"),
+    (_SC, "if not wanted and _no_longer_configured(", "if _no_longer_configured(",
+     _SCT + "test_a_per_file_in_place_restore_of_a_no_longer_configured_ini_still_refuses", "p6fb-m4-by-name-still-refuses"),
+    (_SC, "    return why == _OUT_OF_ROOTS and (name in _LOADORDER", "    return (name in _LOADORDER",
+     _SCT + "test_in_place_never_writes_inside_the_guards_own_folders_even_when_configured_there",
+     "p6fb-m4-only-the-out-of-roots-reason"),
     # B-M3: skydoctor's R9 clear is a read-modify-write under the one state lock that every write takes
     (_DR, "    with state.locked(str(sf)):", "    if True:",
      _DRT + "test_r9_clear_does_not_undo_a_lock_enable_that_lands_after_its_first_read", "p6fb-m3-doctor-rmw-locked"),
