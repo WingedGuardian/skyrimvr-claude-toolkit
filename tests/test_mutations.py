@@ -4307,8 +4307,10 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "rule-S-SELF-STATE-delete-recycle-bin"),
     (_SF, "    if code and (grep(deletes.DESTROYER, code) or grep(deletes.INTERP_DELETE, code)):", "    if False:",
      _p12row("state-del-python"), "rule-S-SELF-STATE-delete-interpreter"),
-    (_SR6, '    if own and own[0] == self_rules.STATE:\n        return deny("S-SELF-STATE", own[1])\n    if dels.hit:',
-     '    if own and own[0] == self_rules.STATE and not dels.hit:\n        return deny("S-SELF-STATE", own[1])\n    if dels.hit:',
+    # Re-anchored in the final fix pass (lane A C1 put the raw-unlock check between this and the deletes).
+    (_SR6, '    if own and own[0] == self_rules.STATE:\n        return deny("S-SELF-STATE", own[1])\n    # Plan 6 final fix',
+     '    if own and own[0] == self_rules.STATE and not dels.hit:\n        return deny("S-SELF-STATE", own[1])\n'
+     '    # Plan 6 final fix',
      _SFT + "test_guards_off_does_not_let_the_lock_manifest_be_deleted", "rule-S-SELF-STATE-delete-before-del-install"),
     (_SF, '    return rel is not None and rel[:1] == [".skyguard"]', '    return rel is not None and (rel == [] or rel[:1] == [".skyguard"])',
      _SFT + "test_a_delete_of_the_whole_install_stays_s_del_install", "rule-S-SELF-STATE-delete-not-the-install"),
