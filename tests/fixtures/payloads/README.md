@@ -35,6 +35,20 @@ not the agent. Recapture when an agent upgrades its hook protocol.
   fixture. Evidence is the documented Monitor schema (`ws {url, protocols}`, cannot be combined with `command`; a command
   Monitor "runs in the same shell environment as Bash") plus a report from another install.
 
+## Re-verification on the release versions (2026-10-06, Plan 8)
+
+- **Agents:** `claude --version` -> `2.1.291 (Claude Code)`; `codex --version` -> `codex-cli 0.160.0`.
+- **How:** the recipe in "Recapture" below, same prompts as the first capture (Claude, Codex) and the Monitor/NotebookEdit
+  prompt above, in throwaway scratch repos under the session scratchpad. Scrubbed with `scrub.py`; the output was grepped
+  for the user's name and home folder in every spelling (clean).
+- **Result: no shape change, so no fixture was replaced.** Every new payload had the same key set and value types as its
+  committed twin (Claude: Bash, PowerShell, Write, Edit, Monitor, NotebookEdit, SessionStart; Codex: Bash, three
+  `apply_patch` forms, SessionStart). Same tool names, same events, same added fields (`effort`, `prompt_id` on Claude;
+  `model`, `turn_id` on Codex). One non-difference: `NotebookEdit.edit_mode` was absent this time because the model left the
+  default (`replace`) out; it is an optional model-chosen field, not a protocol change.
+- **Not re-captured:** the two `mcp__devbench-vr__*` Claude fixtures (the DevBench server was not running) and the
+  Codex 0.160.0 shapes that need special probes (MCP, `-C` subdirectory, `<<'PATCH'` through the shell).
+
 ## Recapture
 
 ```bash
