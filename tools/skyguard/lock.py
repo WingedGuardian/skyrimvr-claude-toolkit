@@ -251,6 +251,7 @@ class _Win:
         adv.GetNamedSecurityInfoW.argtypes = [wt.LPCWSTR, ct.c_int, wt.DWORD, vp, vp, ct.POINTER(vp), vp, ct.POINTER(vp)]
         adv.SetNamedSecurityInfoW.argtypes = [wt.LPWSTR, ct.c_int, wt.DWORD, vp, vp, vp, vp]
         adv.SetEntriesInAclW.argtypes = [wt.ULONG, ct.POINTER(EXPLICIT_ACCESS_W), vp, ct.POINTER(vp)]
+        adv.GetSecurityDescriptorControl.argtypes = [vp, ct.POINTER(ct.c_uint16), ct.POINTER(ct.c_uint32)]
         adv.GetAclInformation.argtypes = [vp, vp, wt.DWORD, ct.c_int]
         adv.GetAce.argtypes = [vp, wt.DWORD, ct.POINTER(vp)]
         adv.DeleteAce.argtypes = [vp, wt.DWORD]
@@ -345,8 +346,24 @@ class _Win:
             raise ct.WinError(rc)
         return dacl, sd
 
-    def _set_dacl(self, path, dacl):
-        rc = self.adv.SetNamedSecurityInfoW(path, 1, 0x4 | 0x20000000, None, None, dacl, None)
+    def protected(self, path) -> bool:
+        """SE_DACL_PROTECTED (0x1000): the file's inheritance is turned off."""
+        ct = self.ct
+        dacl, sd = self._get_dacl(path)
+        try:
+            control, rev = ct.c_uint16(), ct.c_uint32()
+            if not self.adv.GetSecurityDescriptorControl(sd, ct.byref(control), ct.byref(rev)):
+                raise ct.WinError(ct.get_last_error())
+            return bool(control.value & 0x1000)
+        finally:
+            self.k32.LocalFree(sd)
+
+    def _set_dacl(self, path, dacl, protected=None):
+        """Plan 6 final fix (lane A I2): write the DACL with the protection `protected` names, or -- None -- the one the
+        file has NOW. Always passing UNPROTECTED turned a protected DACL into an inheriting one for good."""
+        protected = self.protected(path) if protected is None else protected
+        rc = self.adv.SetNamedSecurityInfoW(path, 1, 0x4 | (0x80000000 if protected else 0x20000000), None, None,
+                                            dacl, None)
         if rc:
             raise self.ct.WinError(rc)
 
@@ -400,8 +417,9 @@ class _Win:
                 self.k32.LocalFree(new)
             self.k32.LocalFree(sd)
 
-    def remove_ours(self, path, masks):
-        """Delete this user's explicit deny ACEs whose mask is one of `masks`. Returns how many."""
+    def remove_ours(self, path, masks, protected=None):
+        """Delete this user's explicit deny ACEs whose mask is one of `masks`. Returns how many. `protected`: the DACL
+        protection to write back (the one recorded at lock time), None for the file's current one."""
         ct = self.ct
         dacl, sd = self._get_dacl(path)
         removed = 0
@@ -427,7 +445,7 @@ class _Win:
                     raise ct.WinError(ct.get_last_error())
                 removed += 1
             if removed:
-                self._set_dacl(path, dacl)
+                self._set_dacl(path, dacl, protected)
         finally:
             self.k32.LocalFree(sd)
         return removed
@@ -521,11 +539,12 @@ def _keep_bit(st: FileState, preexisting: bool) -> bool:
     return keep_bit
 
 
-def _remove_file(path, keep_bit):
-    """Deny ACE first (with WA denied `attrib -R` is itself refused), then the bit, unless it was the user's."""
+def _remove_file(path, keep_bit, protected=None):
+    """Deny ACE first (with WA denied `attrib -R` is itself refused), then the bit, unless it was the user's.
+    protected: the DACL protection recorded at lock time (the manifest's prior_protected), None = keep the current."""
     p = os.path.normpath(os.fspath(path))
     w = _win()
-    w.remove_ours(p, (MASK_FULL, MASK_PRE))
+    w.remove_ours(p, (MASK_FULL, MASK_PRE), protected)
     if not keep_bit:
         w.set_readonly(p, False)
 
@@ -649,13 +668,17 @@ def _guard(root):
 
 
 def _prior(st: FileState, path) -> dict:
-    return {"prior_attrs": _win().attrs(os.path.normpath(str(path))),
-            "prior_aces": [[a["type"], a["mask"], a["sid"]] for a in st.aces]}
+    p = os.path.normpath(str(path))
+    return {"prior_attrs": _win().attrs(p),
+            "prior_aces": [[a["type"], a["mask"], a["sid"]] for a in st.aces],
+            "prior_protected": _win().protected(p)}         # final fix (lane A I2): unlock writes exactly this back
 
 
 # ---- lock ------------------------------------------------------------------------------------------------------
 
-def lock_all(root) -> Result:
+def lock_all(root, only=None) -> Result:
+    """Lock the derived target set. only: a predicate on a target's NAME -- lock just those (relock_expired); every
+    other record in the manifest is kept as it is."""
     g = _guard(root)
     if isinstance(g, Result):
         return g
@@ -663,7 +686,7 @@ def lock_all(root) -> Result:
     st0 = _state.read(str(Path(root) / ".skyguard" / "state.json"))
     if st0.lock_disabled:
         return _res(2, "The lock is disabled (persistent, since %s)." % time.strftime(
-            "%Y-%m-%d %H:%M", time.localtime(st0.lock_disabled["since"])), "Run `lock enable` to turn it back on.")
+            "%Y-%m-%d %H:%M", time.localtime(st0.lock_disabled["since"])), "Run `bash tools/skyguard.sh lock enable` to turn it back on.")
     if not t.files:
         return _res(2, "No vanilla master or archive found in Data/ to lock.")
     old, _status = _read_manifest(root)
@@ -678,9 +701,13 @@ def lock_all(root) -> Result:
                     carry[name] = rec
             except OSError:
                 pass
+        elif only is not None and not only(name):
+            carry[name] = rec                    # a target this call does not touch: its record stays
     try:
         for p in t.files:
             name = p.name
+            if only is not None and not only(name):
+                continue
             before = None
             try:
                 before = read_state(p)
@@ -701,7 +728,7 @@ def lock_all(root) -> Result:
             prev = old.get(name, {})
             pre = label == "pre" or bool(prev.get("preexisting_ro"))
             if before.ours is not None:              # already ours: keep the record of what it was BEFORE us
-                info = {k: prev[k] for k in ("prior_attrs", "prior_aces") if k in prev} or info
+                info = {k: prev[k] for k in ("prior_attrs", "prior_aces", "prior_protected") if k in prev} or info
             record[name] = dict(info, preexisting_ro=pre, locked_at=prev.get("locked_at", time.time()))
             # Written per file, atomically: a crash mid-lock leaves a list that matches what is locked.
             _write_manifest(root, t.edition, dict(carry, **record))  # per file
@@ -709,7 +736,7 @@ def lock_all(root) -> Result:
     except Refused as e:
         return _res(2, str(e))
     record.update(carry)
-    skipped = [(n, r) for n, r in t.skips if r != "missing"]
+    skipped = [(n, r) for n, r in t.skips if r != "missing" and (only is None or only(n))]
     partial = failed + skipped
     if partial:
         names = ["%s (%s)" % (n, r) for n, r in partial]
@@ -717,7 +744,7 @@ def lock_all(root) -> Result:
                                                                           len(partial)),
                     "Not locked: " + _names_list(names, 3), data={"locked": sorted(record), "not_locked": partial})
     return _res(0, "Locked %d vanilla files (M-D, verified by re-read)." % len(record),
-                "Unlock one with `lock unlock <file>`; the Python-free route is tools/skyguard-unlock.cmd.",
+                "Unlock one with `bash tools/skyguard.sh lock unlock <file>`; the Python-free route is tools\\skyguard-unlock.cmd.",
                 data={"locked": sorted(record)})
 
 
@@ -806,7 +833,7 @@ def unlock(root, names, session, now=None) -> Result:
     data_dir, t = g
     if not _valid_session(session):
         return _res(2, "No session id: pass --session <id> or set SKYGUARD_SESSION_ID so the lift is recorded "
-                       "(at a terminal it is automatic).", "Without one, run tools/skyguard-unlock.cmd.")
+                       "(at a terminal it is automatic).", "Without one, run tools\\skyguard-unlock.cmd in your own terminal.")
     manifest, mstatus = _read_manifest(root)
     try:
         chosen = _resolve_names(root, data_dir, t, names, manifest) if names else None
@@ -819,17 +846,18 @@ def unlock(root, names, session, now=None) -> Result:
     now = time.time() if now is None else now
     try:
         sf = _skyguard_dir(root) / "state.json"
-        cur = _state.read(str(sf))
-        lift = {"kind": "lock", "reason": "lock unlock " + (_names_list(chosen, 3) if names else "all"),
-                "session_id": session,
-                "agent": "user" if session == USER_SESSION else (os.environ.get(ENV_AGENT, "cli") or "cli"),
-                "created": now, "expires_at": now + LIFT_SECONDS}
-        if names:
-            lift["files"] = list(chosen)
-        persistent = {"lock_disabled": cur.lock_disabled} if cur.lock_disabled else {}
         _assert_sandbox(sf)
-        lifts = _live_lifts(list(cur.lifts) + [lift], now)
-        _state.write(str(sf), {"v": 1, "lifts": lifts, "persistent": persistent})
+        with _state.locked(sf):                             # read-modify-write under the one state lock
+            cur = _state.read(str(sf))
+            lift = {"kind": "lock", "reason": "lock unlock " + (_names_list(chosen, 3) if names else "all"),
+                    "session_id": session,
+                    "agent": "user" if session == USER_SESSION else (os.environ.get(ENV_AGENT, "cli") or "cli"),
+                    "created": now, "expires_at": now + LIFT_SECONDS}
+            if names:
+                lift["files"] = list(chosen)
+            persistent = {"lock_disabled": cur.lock_disabled} if cur.lock_disabled else {}
+            lifts = _live_lifts(list(cur.lifts) + [lift], now)
+            _state.write(str(sf), {"v": 1, "lifts": lifts, "persistent": persistent})
     except Refused as e:
         return _res(2, str(e))
     except (ValueError, OSError) as e:
@@ -849,7 +877,8 @@ def unlock(root, names, session, now=None) -> Result:
                     settled.add(name)                   # not locked by us: nothing to undo
                 continue
             keep = _keep_bit(st, bool(manifest.get(name, {}).get("preexisting_ro")))
-            _remove_file(p, keep)
+            prot = manifest.get(name, {}).get("prior_protected")
+            _remove_file(p, keep, prot if isinstance(prot, bool) else None)
             if _verify_unlocked(p, keep):
                 done.append(name)
                 if keep:
@@ -870,8 +899,51 @@ def unlock(root, names, session, now=None) -> Result:
         return _res(1, "Unlocked %d files; %d not unlocked." % (len(done), len(failed)),
                     "Not unlocked: " + _names_list(["%s (%s)" % f for f in failed], 3),
                     data={"unlocked": done, "failed": failed})
-    return _res(0, "Unlocked %d files; the lift is recorded for this session and expires in %d min."
-                % (len(done), int(LIFT_SECONDS // 60)), extra, data={"unlocked": done})
+    return _res(0, "Unlocked %d files for %d min: the first guarded tool call after that relocks them (session start "
+                   "at the latest)." % (len(done), int(LIFT_SECONDS // 60)), extra, data={"unlocked": done})
+
+
+# ---- the expiry (Plan 6 final fix, A-I3 / C-I1 ruling) -----------------------------------------------------------
+
+HOOK_STATE_WAIT = 0.2      # the per-call hook path never blocks on the state lock longer than this
+
+
+def relock_expired(root, now=None, wait=HOOK_STATE_WAIT):
+    """Relock what an EXPIRED lock lift opened, and clear that lift. -> None when no lock lift is due, else a Result
+    whose data["relocked"] names the files locked again. Called by engine.shadow on every guarded hook call (a time
+    compare when nothing is due); session start stays the backstop. A file a LIVE lock lift (any session) still
+    covers stays open; nothing is relocked while the lock is persistently disabled or was never applied."""
+    now = time.time() if now is None else now
+    sf = Path(root) / ".skyguard" / "state.json"
+    st = _state.read(str(sf))
+    if st.rejected or not any(x["kind"] == "lock" and _state.lift_expired(x, now) for x in st.lifts):
+        return None
+    _assert_sandbox(sf)
+    # A hook path: a SHORT wait for the state lock; busy -> StateBusy (the caller logs it and the next call retries).
+    with _state.locked(sf, wait):
+        st = _state.read(str(sf))                            # re-read under the lock
+        if st.rejected:
+            return None
+        due = [x for x in st.lifts if x["kind"] == "lock" and _state.lift_expired(x, now)]
+        if not due:
+            return None
+        live = [x for x in st.lifts if x["kind"] == "lock" and not _state.lift_expired(x, now)]
+        keep = [x for x in st.lifts if not (x["kind"] == "lock" and _state.lift_expired(x, now))]
+        persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
+        _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})   # cleared first: one relock, not one per call
+    if st.lock_disabled or not supported() or not (Path(root) / ".skyguard" / "lock.json").is_file():
+        return _res(0, "An expired lock lift was cleared; nothing relocked (the lock is %s)."
+                    % ("disabled" if st.lock_disabled else "not applied"), data={"relocked": []})
+    if any(x.get("files") is None for x in live):
+        return _res(0, "An expired lock lift was cleared; a live lift still opens every file.", data={"relocked": []})
+    covered = {f.lower() for x in live for f in x["files"]}
+    want = None if any(x.get("files") is None for x in due) else {f.lower() for x in due for f in x["files"]}
+
+    def only(name):
+        return name.lower() not in covered and (want is None or name.lower() in want)
+
+    res = lock_all(root, only=only)
+    return Result(res.exit, res.lines, dict(res.data, relocked=[n for n in res.data.get("locked", []) if only(n)]))
 
 
 # ---- status ----------------------------------------------------------------------------------------------------
@@ -940,10 +1012,11 @@ def status(root) -> Result:
 
 def _write_persistent(root, session, disabled: bool):
     sf = _skyguard_dir(root) / "state.json"
-    cur = _state.read(str(sf))
-    persistent = {"lock_disabled": {"since": time.time(), "by_session": session or "manual"}} if disabled else {}
     _assert_sandbox(sf)
-    _state.write(str(sf), {"v": 1, "lifts": _live_lifts(list(cur.lifts), time.time()), "persistent": persistent})
+    with _state.locked(sf):                                 # read-modify-write under the one state lock
+        cur = _state.read(str(sf))
+        persistent = {"lock_disabled": {"since": time.time(), "by_session": session or "manual"}} if disabled else {}
+        _state.write(str(sf), {"v": 1, "lifts": _live_lifts(list(cur.lifts), time.time()), "persistent": persistent})
 
 
 def disable(root, session=None) -> Result:
@@ -955,7 +1028,7 @@ def disable(root, session=None) -> Result:
         return _res(2, str(e))
     except (ValueError, OSError) as e:
         return _res(2, "Could not record the disable (%s)." % e.__class__.__name__)
-    return _res(0, "The lock is persistently disabled; every session start will say so until `lock enable`.")
+    return _res(0, "The lock is persistently disabled; every session start will say so until `bash tools/skyguard.sh lock enable`.")
 
 
 def enable(root, session=None) -> Result:

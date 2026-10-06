@@ -784,6 +784,47 @@ def test_default_is_off_until_the_batch_decides(bed):
     assert "default off" in " ".join(_lock().status(str(bed.root)).lines).lower() or WINDOWS
 
 
+def _sh_with_python(bed, tmp_path, value):
+    from conftest import BASH
+    env = {k: os.environ[k] for k in ("SystemRoot", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "TEMP", "TMP", "PATH")
+           if k in os.environ}
+    env["SKYGUARD_PYTHON"] = value
+    env["SKYGUARD_LOCK_SANDBOX"] = str(SCRATCH)
+    return subprocess.run([BASH, str(REPO / "tools" / "skyguard.sh"), "lock", "status", "--json", "--root",
+                           str(bed.root)], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=120)
+
+
+def _py_wrapper(folder: Path, mark: Path) -> Path:
+    """A bash script standing in for an interpreter: it records that it ran (with any --tag), then runs Python."""
+    folder.mkdir(parents=True, exist_ok=True)
+    w = folder / "python"
+    w.write_bytes(('#!/bin/bash\nif [ "$1" = "--tag" ]; then shift; echo tag >> "%s"; else echo plain >> "%s"; fi\n'
+                   'exec "%s" "$@"\n' % (mark.as_posix(), mark.as_posix(), sys.executable.replace("\\", "/")))
+                  .encode("ascii"))
+    return w
+
+
+@needs_windows
+def test_skyguard_sh_runs_a_skyguard_python_whose_path_has_spaces(bed, tmp_path):
+    """Lane A M3: the value was word-split, so `C:/Program Files/...` failed its probe and the loop fell through to
+    python3/python with no word -- the user's choice silently ignored. The wrapper must be the one that ran."""
+    mark = tmp_path / "ran.txt"
+    w = _py_wrapper(tmp_path / "my python dir", mark)
+    r = _sh_with_python(bed, tmp_path, w.as_posix())
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert mark.read_text(encoding="ascii").split() == ["plain", "plain"]      # the probe, then the run
+
+
+@needs_windows
+def test_skyguard_sh_still_splits_a_launcher_with_arguments(bed, tmp_path):
+    """The twin: a value that is not an existing path (`py -3` style) is still split into words."""
+    mark = tmp_path / "ran.txt"
+    w = _py_wrapper(tmp_path / "nospace", mark)
+    r = _sh_with_python(bed, tmp_path, w.as_posix() + " --tag")
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert mark.read_text(encoding="ascii").split() == ["tag", "tag"]
+
+
 @needs_windows
 def test_the_bash_wrapper_called_by_a_backslash_path_from_elsewhere_runs_its_own_package(bed, tmp_path):
     """Task 16 found it: `bash C:\\...\\tools\\skyguard.sh` split its path on `/` only, so `here` was `.` and it ran
@@ -812,3 +853,225 @@ def test_wrapper_scripts_exist_and_the_cmd_twin_runs(bed):
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=120)
     assert r.returncode == 0, (r.stdout, r.stderr)
     assert json.loads(r.stdout)["edition"] == "vr"
+
+
+# ---- Plan 6 final fix (lane A I2): lock and unlock never change ACL inheritance ------------------------------------
+# _set_dacl passed UNPROTECTED_DACL_SECURITY_INFORMATION on every write, so a file whose inheritance was turned off
+# gained every inheritable ACE of Data\ on `lock lock` and KEPT them after `lock unlock` (MEASURED by the reviewer). The
+# lock now keeps the file's current protection when it adds its entry, records the original in the manifest, and puts
+# exactly that back on unlock. Compared as the DACL's SDDL ("D:P..." = protected), before lock and after unlock.
+
+def _sddl(p):
+    import ctypes
+    from ctypes import wintypes as wt
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    vp = ctypes.c_void_p
+    adv.GetNamedSecurityInfoW.argtypes = [wt.LPCWSTR, ctypes.c_int, wt.DWORD, vp, vp, ctypes.POINTER(vp), vp,
+                                          ctypes.POINTER(vp)]
+    adv.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [vp, wt.DWORD, wt.DWORD,
+                                                                         ctypes.POINTER(wt.LPWSTR), vp]
+    k32.LocalFree.argtypes = [vp]
+    dacl, sd, out = vp(), vp(), wt.LPWSTR()
+    rc = adv.GetNamedSecurityInfoW(str(p), 1, 0x4, None, None, ctypes.byref(dacl), None, ctypes.byref(sd))
+    assert rc == 0, rc
+    try:
+        assert adv.ConvertSecurityDescriptorToStringSecurityDescriptorW(sd, 1, 0x4, ctypes.byref(out), None)
+        try:
+            return out.value
+        finally:
+            k32.LocalFree(ctypes.cast(out, vp))
+    finally:
+        k32.LocalFree(sd)
+
+
+def _no_inheritance(p):
+    r = subprocess.run([str(SYS32 / "icacls.exe"), str(p), "/inheritance:d"], capture_output=True, text=True)
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert _sddl(p).startswith("D:P"), _sddl(p)
+
+
+@needs_windows
+def test_lock_and_unlock_keep_a_protected_dacl_exactly(bed):
+    lock = _lock()
+    p = bed.path("Skyrim.esm")
+    _no_inheritance(p)
+    before = _sddl(p)
+    assert lock.lock_all(str(bed.root)).exit == 0
+    during = _sddl(p)
+    assert during.startswith("D:P") and ";ID;" not in during, during      # no inherited entry was pulled in
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION).exit == 0
+    assert _sddl(p) == before
+
+
+@needs_windows
+def test_lock_and_unlock_keep_an_inheriting_dacl_exactly(bed):
+    """The twin: a file that inherits (the default) keeps inheriting, and its DACL comes back identical."""
+    lock = _lock()
+    p = bed.path("Update.esm")
+    before = _sddl(p)
+    assert not before.startswith("D:P"), before
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert not _sddl(p).startswith("D:P")
+    assert lock.unlock(str(bed.root), ["Update.esm"], SESSION).exit == 0
+    assert _sddl(p) == before
+
+
+@needs_windows
+def test_unlock_restores_the_protection_the_manifest_recorded(bed):
+    """Recorded at lock time, restored on unlock: a protection flipped while the file was locked is put back."""
+    lock = _lock()
+    p = bed.path("Dawnguard.esm")
+    _no_inheritance(p)
+    assert lock.lock_all(str(bed.root)).exit == 0
+    man = json.loads((bed.root / ".skyguard" / "lock.json").read_text(encoding="utf-8"))
+    assert man["files"]["Dawnguard.esm"]["prior_protected"] is True
+    r = subprocess.run([str(SYS32 / "icacls.exe"), str(p), "/inheritance:e"], capture_output=True, text=True)
+    assert r.returncode == 0 and not _sddl(p).startswith("D:P"), (r.stdout, r.stderr)
+    assert lock.unlock(str(bed.root), ["Dawnguard.esm"], SESSION).exit == 0
+    assert _sddl(p).startswith("D:P"), _sddl(p)
+
+
+# ---- Plan 6 final fix (A-I3 / C-I1, ruling): a lock lift's expiry is real ------------------------------------------
+# The first guarded hook call after a lock lift's expires_at relocks the files it lifted (engine.shadow, which every
+# decision path already runs and which already reads the state); session start stays the backstop. Fake clock: the lift
+# is written at T and the hook is called at T +/- a second around T + LIFT_SECONDS.
+
+T0 = 1_900_000_000.0
+
+
+def _hook(bed, now):
+    from skyguard import audit, engine
+    from skyguard.verdict import Verdict
+    return engine.shadow(Verdict(), str(bed.root), "sess-other", "", audit.Audit(str(bed.root)), now=now)
+
+
+def _audit_log(bed):
+    p = bed.root / ".claude" / "backups" / "AUDIT_LOG.txt"
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+def _lifts(bed):
+    from skyguard import state
+    return state.read(str(_state_file(bed))).lifts
+
+
+@needs_windows
+def test_the_first_hook_call_after_a_lock_lift_expires_relocks_the_file_and_logs_it(bed):
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    assert not _locked(bed, "Skyrim.esm")
+    v = _hook(bed, T0 + lock.LIFT_SECONDS + 1)
+    assert v.decision == "allow"                                   # the decision is untouched
+    assert _locked(bed, "Skyrim.esm")
+    assert not [x for x in _lifts(bed) if x["kind"] == "lock"]     # cleared, so the next call does nothing
+    assert "RELOCK" in _audit_log(bed) and "Skyrim.esm" in _audit_log(bed)
+
+
+@needs_windows
+def test_a_hook_call_before_the_expiry_relocks_nothing(bed):
+    """The twin: the same call a second BEFORE the expiry leaves the lifted file open and the lift recorded."""
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    _hook(bed, T0 + lock.LIFT_SECONDS - 1)
+    assert not _locked(bed, "Skyrim.esm")
+    assert [x for x in _lifts(bed) if x["kind"] == "lock"]
+    assert "RELOCK" not in _audit_log(bed)
+
+
+@needs_windows
+def test_an_expired_lift_does_not_relock_a_file_a_live_lift_still_covers(bed):
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm", "Update.esm"], "sess-lock-2", now=T0 + 1800).exit == 0
+    _hook(bed, T0 + lock.LIFT_SECONDS + 1)                          # the first lift is due, the second is not
+    assert not _locked(bed, "Skyrim.esm") and not _locked(bed, "Update.esm")
+    assert [x["session_id"] for x in _lifts(bed)] == ["sess-lock-2"]
+    _hook(bed, T0 + 1800 + lock.LIFT_SECONDS + 1)                   # now the second is due too
+    assert _locked(bed, "Skyrim.esm") and _locked(bed, "Update.esm")
+
+
+@needs_windows
+def test_an_expired_unlock_all_relocks_every_target_and_nothing_while_disabled(bed):
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), None, SESSION, now=T0).exit == 0
+    _hook(bed, T0 + lock.LIFT_SECONDS + 1)
+    assert all(_locked(bed, n) for n in VR_FILES)
+    # the persistent disable is the user's: an expired lift never relocks over it
+    assert lock.unlock(str(bed.root), None, SESSION, now=T0 + 10).exit == 0
+    assert lock.disable(str(bed.root), SESSION).exit == 0
+    _hook(bed, T0 + 10 + lock.LIFT_SECONDS + 1)
+    assert not any(_locked(bed, n) for n in VR_FILES)
+    assert "nothing relocked (the lock is disabled)" in _audit_log(bed)
+
+
+@needs_windows
+def test_an_expired_lift_relocks_only_the_files_it_named(bed):
+    """A file opened with no lift on record (its record cleared, or opened outside skyguard) is session start's to
+    report and relock; the expiry relocks what ITS lift opened."""
+    from skyguard import state
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    assert lock.unlock(str(bed.root), ["Update.esm"], "sess-lock-2", now=T0).exit == 0
+    st = state.read(str(_state_file(bed)))
+    state.write(str(_state_file(bed)), {"v": 1, "persistent": {},
+                                        "lifts": [x for x in st.lifts if x["session_id"] == SESSION]})
+    _hook(bed, T0 + lock.LIFT_SECONDS + 1)
+    assert _locked(bed, "Skyrim.esm") and not _locked(bed, "Update.esm")
+
+
+@needs_windows
+def test_a_cmd_style_unlock_with_no_lift_record_survives_hook_calls(bed):
+    """The user's own tools/skyguard-unlock.cmd records no lift: the hook must never undo that deliberate unlock, even
+    while another file's lift expires beside it. (Session start keeps its old behaviour for it.)"""
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    lock._remove_file(bed.path("Dawnguard.esm"), False)              # what the .cmd does: no lift, no record
+    assert not _locked(bed, "Dawnguard.esm")
+    for k in range(3):
+        _hook(bed, T0 + k)
+    assert not _locked(bed, "Dawnguard.esm")
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    for k in range(3):
+        _hook(bed, T0 + lock.LIFT_SECONDS + 1 + k)
+    assert _locked(bed, "Skyrim.esm") and not _locked(bed, "Dawnguard.esm")
+
+
+@needs_windows
+def test_a_busy_state_file_skips_the_relock_without_blocking_the_hook(bed):
+    from skyguard import state
+    lock = _lock()
+    assert lock.lock_all(str(bed.root)).exit == 0
+    assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=T0).exit == 0
+    lf = str(_state_file(bed)) + state.LOCK_SUFFIX
+    Path(lf).write_text("999999", encoding="ascii")                   # another writer holds the lock
+    t = time.monotonic()
+    v = _hook(bed, T0 + lock.LIFT_SECONDS + 1)
+    assert time.monotonic() - t < 2.0 and v.decision == "allow"
+    assert not _locked(bed, "Skyrim.esm") and "state file is busy" in _audit_log(bed)
+    os.unlink(lf)
+    _hook(bed, T0 + lock.LIFT_SECONDS + 2)                            # released: the next call relocks
+    assert _locked(bed, "Skyrim.esm")
+
+
+def test_the_state_lock_serialises_writers_and_breaks_a_stale_lock(tmp_path):
+    from skyguard import state
+    sf = tmp_path / ".skyguard" / "state.json"
+    body = {"v": 1, "lifts": [], "persistent": {}}
+    state.write(str(sf), body)
+    lf = Path(str(sf) + state.LOCK_SUFFIX)
+    assert not lf.exists()                                           # released after the write
+    lf.write_text("1", encoding="ascii")
+    with pytest.raises(state.StateBusy):
+        state.write(str(sf), body, wait=0.1)
+    old = time.time() - state.LOCK_STALE - 5
+    os.utime(str(lf), (old, old))
+    state.write(str(sf), body, wait=0.1)                             # a crashed holder's lock is broken
+    assert not lf.exists()
+    with state.locked(sf, 0.1):                                       # re-entrant inside one read-modify-write
+        state.write(str(sf), body, wait=0.1)

@@ -133,7 +133,7 @@ set /a N+=1
 exit /b 0
 
 :failed
-echo NOT unlocked "%F%" - the toolkit's mark or the read-only bit is still there; run: tools\skyguard lock status
+echo NOT unlocked "%F%" - the toolkit's mark or the read-only bit is still there; run: tools\skyguard.cmd lock status
 set "RC=4"
 set /a BADN+=1
 exit /b 0

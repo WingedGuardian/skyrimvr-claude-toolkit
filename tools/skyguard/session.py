@@ -181,7 +181,7 @@ def _relock(root):
     res = lock.lock_all(root)
     bad = [x for x in res.data.get("not_locked", []) if x[1].startswith(("did not verify", "error"))]
     if res.exit == 2 or bad:
-        return _clip("Vanilla-file relock FAILED: " + _clean(res.lines[0] if res.lines else "see skyguard lock status", 150))
+        return _clip("Vanilla-file relock FAILED: " + _clean(res.lines[0] if res.lines else "see `bash tools/skyguard.sh lock status`", 150))
     return ""
 
 
@@ -202,7 +202,8 @@ def layer2_start(project, source="startup"):
                 when = time.strftime("%Y-%m-%d", time.localtime(st.lock_disabled["since"]))
             except (OverflowError, OSError, ValueError):
                 when = "an unknown date"
-            disabled = "Vanilla-file lock DISABLED since %s. tools/skyguard lock enable turns it back on." % when
+            disabled = ("Vanilla-file lock DISABLED since %s. `bash tools/skyguard.sh lock enable` "
+                        "(tools\\skyguard.cmd in cmd) turns it back on." % when)
         if source == "compact":
             return [disabled] if disabled else []
         engaged = _engaged(root) and not disabled

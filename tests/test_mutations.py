@@ -4307,8 +4307,10 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "rule-S-SELF-STATE-delete-recycle-bin"),
     (_SF, "    if code and (grep(deletes.DESTROYER, code) or grep(deletes.INTERP_DELETE, code)):", "    if False:",
      _p12row("state-del-python"), "rule-S-SELF-STATE-delete-interpreter"),
-    (_SR6, '    if own and own[0] == self_rules.STATE:\n        return deny("S-SELF-STATE", own[1])\n    if dels.hit:',
-     '    if own and own[0] == self_rules.STATE and not dels.hit:\n        return deny("S-SELF-STATE", own[1])\n    if dels.hit:',
+    # Re-anchored in the final fix pass (lane A C1 put the raw-unlock check between this and the deletes).
+    (_SR6, '    if own and own[0] == self_rules.STATE:\n        return deny("S-SELF-STATE", own[1])\n    # Plan 6 final fix',
+     '    if own and own[0] == self_rules.STATE and not dels.hit:\n        return deny("S-SELF-STATE", own[1])\n'
+     '    # Plan 6 final fix',
      _SFT + "test_guards_off_does_not_let_the_lock_manifest_be_deleted", "rule-S-SELF-STATE-delete-before-del-install"),
     (_SF, '    return rel is not None and rel[:1] == [".skyguard"]', '    return rel is not None and (rel == [] or rel[:1] == [".skyguard"])',
      _SFT + "test_a_delete_of_the_whole_install_stays_s_del_install", "rule-S-SELF-STATE-delete-not-the-install"),
@@ -6473,4 +6475,137 @@ MUTATIONS += [
     pytest.param(".gitattributes", ".devcontainer/**   text eol=lf\n", "",
                  "tests/test_gen_agent_trees.py::test_files_linux_tools_read_are_pinned_lf", id="eol-devcontainer-lf"),
 ]
+
+
+# Plan 6 final fix pass, lane A (p6-fixA). One mutation per clause; each names the test that must go red.
+_FXA = "tests/test_skyguard_never_shadow_mix.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # C1: the raw unlock is read before every shadowable rule (a decoy delete first no longer hides it).
+    ("tools/skyguard/shell_rules.py",
+     "    raw = lift_rules.raw_unlock(command, parsed, roots, cwd, env, shell)\n    if raw:\n        return deny(raw[0], raw[1])\n",
+     "",
+     _FXA + "test_a_never_shadow_refusal_stands_under_guards_off_beside_a_decoy[attrib-after-decoy-delete]",
+     "fixA-c1-raw-unlock-first"),
+    # C1: `lock disable` (an ask) is carried beside the refusal that outranks it.
+    ("tools/skyguard/shell_rules.py", '        v = v._replace(never=Verdict("ask", perm))', "        pass",
+     _FXA + "test_a_never_shadow_refusal_stands_under_guards_off_beside_a_decoy[disable-after-decoy-delete]",
+     "fixA-c1-permanent-carried"),
+    # C1: ...but never in place of the decoy's deny when nothing is shadowed (the twin of the one above).
+    ("tools/skyguard/shell_rules.py", '        v = v._replace(never=Verdict("ask", perm))',
+     '        v = Verdict("ask", perm)',
+     _FXA + "test_without_a_lift_the_decoy_call_is_refused_no_less_strictly[disable-after-decoy-delete]",
+     "fixA-c1-permanent-not-instead-of-the-deny"),
+    # C1: shadow mode returns the carried NEVER_SHADOW refusal.
+    ("tools/skyguard/engine.py", "        kept = _never_of(v)\n        if kept is not None:",
+     "        kept = None\n        if kept is not None:",
+     _FXA + "test_a_never_shadow_refusal_stands_under_guards_off_beside_a_decoy[disable-after-decoy-ask]",
+     "fixA-c1-shadow-returns-the-kept"),
+    # C1: combine ranks a NEVER_SHADOW deny above an earlier shadowable one...
+    ("tools/skyguard/engine.py", "            top = next((v for v in hits if _is_never(v)), hits[0])",
+     "            top = hits[0]",
+     _FXA + "test_combine_puts_a_never_shadow_deny_above_an_earlier_shadowable_deny", "fixA-c1-combine-ranks"),
+    # C1: ...and carries a NEVER_SHADOW ask beside a deny that outranks it.
+    ("tools/skyguard/engine.py", "                top = top._replace(never=kept[0])", "                pass",
+     _FXA + "test_combine_keeps_a_deny_and_carries_the_never_shadow_ask_beside_it", "fixA-c1-combine-carries"),
+    # C1 end to end on Codex: drop both combine clauses and the decoy delete hides the state write again.
+    ("tools/skyguard/engine.py",
+     "    kept = sorted((n for n in (_never_of(v) for v in vs) if n is not None), key=lambda n: n.decision != \"deny\")",
+     "    kept = []\n    _is_never = lambda v: False  # noqa: E731",
+     _FXA + "test_a_codex_patch_deleting_a_file_then_adding_the_state_is_refused_under_guards_off",
+     "fixA-c1-codex-patch"),
+]]
+_FXI1 = "tests/test_skyguard_state_text_fallback.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # A-I1: S-SELF-STATE reads an unreadable command's text...
+    ("tools/skyguard/self_rules.py", "        hit = _state_text(command, parsed)", '        hit = ""',
+     _FXI1 + "test_an_unparseable_write_into_the_state_is_s_self_state[unclosed-quote-redirect]", "fixA-i1-fallback"),
+    # ...needing a write construct (a read of the state is not a write)...
+    ("tools/skyguard/self_rules.py", "            if m and _STATE_TEXT_WRITE.search(stmt):", "            if m:",
+     _FXI1 + "test_an_unparseable_command_that_writes_no_state_is_not_s_self_state[read-only-unclosed]",
+     "fixA-i1-needs-a-write"),
+    # ...in the SAME statement as the `.skyguard` path.
+    ("tools/skyguard/self_rules.py", "            if m and _STATE_TEXT_WRITE.search(stmt):",
+     "            if m and _STATE_TEXT_WRITE.search(text):",
+     _FXI1 + "test_an_unparseable_command_that_writes_no_state_is_not_s_self_state[write-and-mention-in-another-line]",
+     "fixA-i1-same-statement"),
+]]
+_FXI2 = "tests/test_skyguard_lock.py::"
+_PROT = "0x4 | (0x80000000 if protected else 0x20000000)"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # A-I2: the DACL is written with the file's protection, never always-unprotected...
+    ("tools/skyguard/lock.py", _PROT, "0x4 | 0x20000000", _FXI2 + "test_lock_and_unlock_keep_a_protected_dacl_exactly",
+     "fixA-i2-keep-protected"),
+    # ...nor always-protected (the inheriting twin).
+    ("tools/skyguard/lock.py", _PROT, "0x4 | 0x80000000", _FXI2 + "test_lock_and_unlock_keep_an_inheriting_dacl_exactly",
+     "fixA-i2-keep-inheriting"),
+    # ...and unlock writes back the protection the manifest recorded at lock time.
+    ("tools/skyguard/lock.py", "            _remove_file(p, keep, prot if isinstance(prot, bool) else None)",
+     "            _remove_file(p, keep, None)", _FXI2 + "test_unlock_restores_the_protection_the_manifest_recorded",
+     "fixA-i2-restore-recorded"),
+]]
+_FXI3 = "tests/test_skyguard_lock.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # A-I3 / C-I1 ruling: the guarded hook path relocks an expired lock lift...
+    ("tools/skyguard/engine.py", "        _relock_due(project, st, now, audit)", "        pass",
+     _FXI3 + "test_the_first_hook_call_after_a_lock_lift_expires_relocks_the_file_and_logs_it", "fixA-i3-wired"),
+    # ...only once it IS expired (the one expiry test both the gate and the relock read)...
+    ("tools/skyguard/state.py", '    return not now < min(lift["expires_at"], lift["created"] + MAX_LIFT_SECONDS)',
+     "    return True", _FXI3 + "test_a_hook_call_before_the_expiry_relocks_nothing", "fixA-i3-only-when-due"),
+    # ...never a file a live lift still covers...
+    ("tools/skyguard/lock.py", "        return name.lower() not in covered and (want is None or name.lower() in want)",
+     "        return want is None or name.lower() in want",
+     _FXI3 + "test_an_expired_lift_does_not_relock_a_file_a_live_lift_still_covers", "fixA-i3-live-lift-covers"),
+    # ...only the files the expired lift named...
+    ("tools/skyguard/lock.py",
+     '    want = None if any(x.get("files") is None for x in due) else {f.lower() for x in due for f in x["files"]}',
+     "    want = None", _FXI3 + "test_an_expired_lift_relocks_only_the_files_it_named", "fixA-i3-only-its-files"),
+    # ...and never over a persistent disable (said so in the log, not as a failed relock).
+    ("tools/skyguard/lock.py", "    if st.lock_disabled or not supported() or not (Path(root)",
+     "    if not supported() or not (Path(root)",
+     _FXI3 + "test_an_expired_unlock_all_relocks_every_target_and_nothing_while_disabled", "fixA-i3-not-while-disabled"),
+    # A-M1: a compaction is not a new session start (guards status and the engine agree).
+    ("tools/skyguard/state.py", '        if f[2] == "compact":\n            continue', "        pass",
+     "tests/test_skyguard_shadow.py::test_a_compact_does_not_end_guards_off_and_status_agrees", "fixA-m1-compact"),
+]]
+_FXB1 = "tests/test_restore_backup_containment.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # B-I1: the backup restore refuses the guard's files, a plugin or archive...
+    ("tools/skyguard/backup.py", "    why = _restore_refusal(target)\n    if why:", '    why = ""\n    if why:',
+     _FXB1 + "test_the_reviewers_state_json_probe_is_refused_at_the_restore", "fixA-b1-containment"),
+    # ...reading the target through links too...
+    ("tools/skyguard/backup.py", "    for p in (str(target), os.path.realpath(str(target))):", "    for p in (str(target),):",
+     _FXB1 + "test_a_restore_through_a_junction_into_the_state_is_refused", "fixA-b1-realpath"),
+    # ...backup-before-edit no longer copies the state...
+    ("tools/skyguard/backup.py", r', r"[/\\]\.skyguard[/\\]")', ")",
+     _FXB1 + "test_the_state_folder_is_not_backed_up_at_all", "fixA-b1-skip-state"),
+    # ...and the guard asks before `restore-from-backup --restore` (S-RESTORE-INPLACE)...
+    ("tools/skyguard/lift_rules.py", "    return restore_backup(parsed)", "    return False",
+     _FXB1 + "test_the_guard_asks_before_a_backup_restore[sh]", "fixA-b1-guard-wired"),
+    ("tools/skyguard/lift_rules.py", "        if shellparse._PYTHON.fullmatch(e.program or \"\") and any(\"backup\" in a",
+     "        if False and any(\"backup\" in a", _FXB1 + "test_the_guard_asks_before_a_backup_restore[python-entry]",
+     "fixA-b1-guard-python-entry"),
+    # ...but not before the listing (the twin).
+    ("tools/skyguard/lift_rules.py", '        if e.program == "restore-from-backup" and "--restore" in e.argv:',
+     '        if e.program == "restore-from-backup":', _FXB1 + "test_listing_the_backups_is_not_asked[list]",
+     "fixA-b1-listing-allowed"),
+]]
+_FXSL = "tests/test_skyguard_lock.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # The state lock (coordination item 3): every write takes it...
+    ("tools/skyguard/state.py", "    with locked(path, wait):\n        _write(path, data)", "    _write(path, data)",
+     _FXSL + "test_the_state_lock_serialises_writers_and_breaks_a_stale_lock", "fixA-state-lock-write"),
+    # ...and the hook's relock waits only briefly for it, skipping (logged) when busy.
+    ("tools/skyguard/lock.py", "    with _state.locked(sf, wait):", "    if True:",
+     _FXSL + "test_a_busy_state_file_skips_the_relock_without_blocking_the_hook", "fixA-state-lock-hook-short-wait"),
+    # A-M3: skyguard.sh runs a SKYGUARD_PYTHON path with spaces as one word...
+    ("tools/skyguard.sh", '    if [ -e "$cand" ]; then run=("$cand"); else', '    if false; then run=("$cand"); else',
+     _FXSL + "test_skyguard_sh_runs_a_skyguard_python_whose_path_has_spaces", "fixA-m3-path-one-word"),
+    # ...and still splits a launcher with arguments (the twin).
+    ("tools/skyguard.sh", """else IFS=' ' read -r -a run <<< "$cand"; fi""", 'else run=("$cand"); fi',
+     _FXSL + "test_skyguard_sh_still_splits_a_launcher_with_arguments", "fixA-m3-launcher-split"),
+    # Item 6: the rule texts name the runnable command (the corpus rows quote it).
+    ("tools/skyguard/rules.py", "        'Use: bash tools/skyguard.sh lock unlock {file}'",
+     "        'Use: tools/skyguard lock unlock {file}'",
+     "tests/test_skyguard_lift_rules.py::test_p6t11_row[p6t11-raw-attrib-bsa]", "fixA-cmd-text-runnable"),
+]]
 

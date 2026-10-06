@@ -8,7 +8,7 @@ Two protected classes, both decided on where a path RESOLVES (targets), never on
 
   STATE  `.skyguard/**` in the install: the on/off state (state.json) and the lock manifest. Only tools/skyguard writes
          it, so any other write is refused (S-SELF-STATE / W-SELF-STATE). The CLI's own run is never a write primitive
-         here, so `tools/skyguard guards off` is S-LIFT-NOTE, not this.
+         here, so `bash tools/skyguard.sh guards off` is S-LIFT-NOTE, not this.
   GUARD  the guard code and config: `.claude/hooks/**`, `.claude/settings*.json`, `.claude/skyrim-paths.env` (red team
          F5: the declared roots), `.codex/**`, `tools/skyguard/**`, `agent/guards/**`, the telemetry the canary and
          shadow mode read (`.claude/backups/.hook-heartbeat/**`, `.claude/backups/AUDIT_LOG.txt`; Task 9 review (e)),
@@ -263,6 +263,36 @@ def _recycle_delete(command: str, parsed, cwd, env, roots) -> str:
     return ""
 
 
+# ---- the text fallback for an unreadable command (Plan 6 final fix, lane A I1) --------------------------------------
+# bash runs the lines before a syntax error, so a command the parser cannot read (ok=False: an unclosed quote or heredoc)
+# or a program it cannot name ("?") is read as TEXT, as the plugin-write and lift rules already are: one statement (a
+# line or a `;` segment) naming a `.skyguard` path component AND holding a write or delete construct is S-SELF-STATE.
+# Not resolved against the roots (an unreadable command has no reliable operands): a scratch `.skyguard` counts too --
+# the fallback's priced cost, a refusal only on an unreadable command that mentions `.skyguard` beside a write.
+_STATE_TEXT = re.compile(r"""(?:^|[\s"'=/\\:(])\.skyguard(?:[/\\]+([\w.\-]{1,120}))?(?![\w.\-])""", re.IGNORECASE)
+_STATE_TEXT_WRITE = re.compile(
+    r">|\b(?:tee|cp|mv|ln|install|rsync|dd|truncate|touch|rm|rmdir|unlink|shred|del|erase|rd|copy|move|ren|rename"
+    r"|xcopy|robocopy|mklink|curl|wget|tar|unzip|7z|sed|chmod|icacls|git)\b"
+    r"|Set-Content|Add-Content|Out-File|Clear-Content|Tee-Object|Copy-Item|Move-Item|Rename-Item|Remove-Item"
+    r"|New-Item|Invoke-WebRequest|Expand-Archive|::\s*(?:Write|Append|Copy|Move|Delete|Replace|Create)"
+    r"|\bof=|\bopen\s*\(|write_text|write_bytes|writeFile",
+    re.IGNORECASE)
+_STATEMENT = re.compile(r"[\n;]")
+
+
+def _state_text(command: str, parsed) -> str:
+    """The name a write into the state has in an unreadable command's text ("" for none)."""
+    if ".skyguard" not in command.lower():
+        return ""
+    texts = [command] if not parsed.ok else [e.segment for e in parsed.execs if e.program == "?"]
+    for text in texts:
+        for stmt in _STATEMENT.split(text):
+            m = _STATE_TEXT.search(stmt)
+            if m and _STATE_TEXT_WRITE.search(stmt):
+                return m.group(1) or ".skyguard"
+    return ""
+
+
 def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, str]] = None):
     """(class, basename) of the first protected file a command writes, STATE before GUARD; None when it writes none."""
     from . import deletes
@@ -283,6 +313,10 @@ def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping
                 found[STATE] = hit
     if STATE not in found:
         hit = _recycle_delete(command, parsed, cwd, env, roots)
+        if hit:
+            found[STATE] = hit
+    if STATE not in found:
+        hit = _state_text(command, parsed)
         if hit:
             found[STATE] = hit
     for k in (STATE, GUARD):

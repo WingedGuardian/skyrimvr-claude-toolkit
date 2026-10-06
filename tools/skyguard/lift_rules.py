@@ -683,6 +683,25 @@ def restore_in_place(parsed) -> bool:
         verb = "snapshot" in args and "restore" in args[args.index("snapshot") + 1:]
         if verb and any(_in_place_flag(a) for a in args):
             return True
+    return restore_backup(parsed)
+
+
+# Plan 6 final fix (lane B I1): the pre-edit backup restore writes a backup back over the live file its manifest line
+# names -- the same act as an in-place snapshot restore, so the same ask (S-RESTORE-INPLACE). The parser names the
+# script `restore-from-backup` however it is launched (bash, ./, a PowerShell `bash scripts\...`); the python entry is
+# backup.restore_main with `--restore`, or backup._restore called directly.
+_BACKUP_ENTRY = re.compile(r"\brestore_main\b|\b_restore\s*\(")
+
+
+def restore_backup(parsed) -> bool:
+    for e in parsed.execs:
+        if e.program == "restore-from-backup" and "--restore" in e.argv:
+            return True
+        if shellparse._PYTHON.fullmatch(e.program or "") and any("backup" in a and _BACKUP_ENTRY.search(a)
+                                                                for a in e.argv):
+            code = next(a for a in e.argv if "backup" in a and _BACKUP_ENTRY.search(a))
+            if "--restore" in e.argv or re.search(r"\b_restore\s*\(", code) or "--restore" in code:
+                return True
     return False
 
 

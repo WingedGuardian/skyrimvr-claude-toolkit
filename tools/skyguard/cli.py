@@ -30,10 +30,11 @@ def _guards_write(root, keep, add=None, now=None):
     now = time.time() if now is None else now
     sf = lock._skyguard_dir(root) / "state.json"
     lock._assert_sandbox(sf)
-    cur = state.read(str(sf))
-    lifts = [x for x in cur.lifts if x["expires_at"] > now and keep(x)] + ([add] if add else [])
-    persistent = {"lock_disabled": cur.lock_disabled} if cur.lock_disabled else {}
-    state.write(str(sf), {"v": 1, "lifts": lifts, "persistent": persistent})
+    with state.locked(sf):                                  # read-modify-write under the one state lock
+        cur = state.read(str(sf))
+        lifts = [x for x in cur.lifts if x["expires_at"] > now and keep(x)] + ([add] if add else [])
+        persistent = {"lock_disabled": cur.lock_disabled} if cur.lock_disabled else {}
+        state.write(str(sf), {"v": 1, "lifts": lifts, "persistent": persistent})
 
 
 def guards_main(argv, out) -> int:
@@ -72,7 +73,7 @@ def guards_main(argv, out) -> int:
     try:
         if a.action == "status":
             st = state.read(str(__import__("pathlib").Path(root) / ".skyguard" / "state.json"))
-            live = [x for x in st.lifts if x["kind"] == "guards" and x["expires_at"] > now]
+            live = [x for x in st.lifts if x["kind"] == "guards" and not state.lift_expired(x, now)]   # as the engine
             if st.rejected:
                 print(_clip("Guards ON: the state file cannot be trusted (%s), so it is ignored." % st.reason), file=out)
             elif not live:
