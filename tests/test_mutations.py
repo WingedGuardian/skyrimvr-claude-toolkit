@@ -4559,7 +4559,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SC, "            if target.is_file() and backup.take(", "            if False and backup.take(",
      _SCT + "test_in_place_backs_up_what_it_replaces_first", "l2-restore-cli-in-place-backup"),
     (_SC, "        if odd:", "        if False:",
-     _SCT + "test_in_place_never_writes_a_name_a_recovery_snapshot_does_not_take", "l2-restore-cli-in-place-names"),
+     _SCT + "test_in_place_refuses_a_save_outside_the_saves_folder[outside]", "l2-restore-cli-in-place-names"),
     (_SC, '    if bad:\n        print("REFUSED: {} of the', '    if False:\n        print("REFUSED: {} of the',
      _SCT + "test_one_damaged_blob_refuses_the_whole_restore_and_names_it", "l2-restore-cli-damaged-refuses"),
     (_SC, "    if not wanted:\n        return keys, []", "    if True:\n        return keys, []",
