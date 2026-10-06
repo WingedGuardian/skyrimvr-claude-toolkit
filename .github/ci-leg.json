@@ -1,7 +1,7 @@
 {
-  "_comment": "Read by scripts/check_ci_leg.py on every behavior leg. collected_floor: 8234 measured on Windows (collect-only through the launcher, Plan 8 wave-1 merge, 2026-10-05), floored to leave room for platform-conditional parametrisation; raise it when the suite grows. skip_ceiling: the wave-1 merge's full Windows suite (launcher, Python 3.10 venv from requirements.lock, node_modules from npm ci, TOOLKIT_REQUIRE_NODE_DEPS=1) skipped 165; the ceiling is that plus a small margin. The Linux leg is UNMEASURED locally: its ceiling copies the Windows number until a real Linux run records its own. xfail_ceiling: 12 measured in every recent full run.",
+  "_comment": "Read by scripts/check_ci_leg.py on every behavior leg. collected_floor: 8234 measured on Windows (collect-only through the launcher, Plan 8 wave-1 merge, 2026-10-05), floored to leave room for platform-conditional parametrisation; raise it when the suite grows. skip_ceiling: the wave-1 merge's full Windows suite (launcher, Python 3.10 venv from requirements.lock, node_modules from npm ci, TOOLKIT_REQUIRE_NODE_DEPS=1) skipped 165; the ceiling is that plus a small margin. The Linux leg is UNMEASURED locally: its ceiling copied the Windows number, and the merge of Plan 6 (2026-10-05) adds the 133 tests Plan 6 marks Windows-only (the lock, skydoctor, session-start relock, NTFS junctions, the .cmd twin), counted by collection as items carrying a platform skipif (244 in the merged tree vs 111 on master, test_mutations.py unchanged at 27): 172 + 133 = 305, until a real Linux run records its own. The merged Windows suite skipped 167 (launcher, lock venv, npm ci), still under 172. xfail_ceiling: 12 measured in every recent full run.",
   "collected_floor": 8100,
-  "skip_ceiling": {"Linux": 172, "Windows": 172},
+  "skip_ceiling": {"Linux": 305, "Windows": 172},
   "xfail_ceiling": 12,
   "required_modules": {
     "all": [
