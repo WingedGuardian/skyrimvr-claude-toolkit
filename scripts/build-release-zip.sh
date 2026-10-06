@@ -10,9 +10,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${PYTHON:-}"
 if [ -z "$PY" ]; then
   for cand in python3 python; do
-    # The Windows Store alias `python3` exists and prints an advert instead of running: ask for a version.
-    if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
-      PY="$cand"; break
+    # Skip the Windows Store launchers (WindowsApps): one prints an advert instead of running, and the Store
+    # Python reports a sys.executable under LOCALAPPDATA, which a scrubbed environment moves (MEASURED: setup.sh
+    # then recorded an interpreter that did not exist and every hook fell back).
+    p=$(command -v "$cand" 2>/dev/null) || continue
+    case "$p" in *WindowsApps*) continue ;; esac
+    if "$p" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+      PY="$p"; break
     fi
   done
 fi

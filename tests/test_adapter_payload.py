@@ -1,8 +1,9 @@
 """The adapter kit ships, and the release gates would notice if it did not.
 
-`release.yml` zips the tree by rule, so the files ship today without a list. A rule can change; a file
-that is expected but missing does not error on a user's machine, it just leaves an agent with no
-ADAPTING.md. So each path is asserted on the payload (tools/check-adapter-payload.py), by both gates.
+The release zip is built by rule (scripts/build-release-zip.sh), so the files ship without a list. A rule can
+change; a file that is expected but missing does not error on a user's machine, it just leaves an agent with no
+ADAPTING.md. So each path is asserted on the payload by the adapter section of tools/check-release-payload.py
+(Plan 8 T10 folded the separate check-adapter-payload.py into it), which both release gates run.
 `tests/` is not shipped, so the toy-agent test is a CI gate, not a bundle member.
 """
 from __future__ import annotations
@@ -17,7 +18,7 @@ import pytest
 
 from conftest import REPO
 
-CHECKER = REPO / "tools" / "check-adapter-payload.py"
+CHECKER = REPO / "tools" / "check-release-payload.py"
 
 CITE = re.compile(r"\[(src|repo|spec|measured): ([^\]]+)\]")
 SPEC = "docs/superpowers/specs/2026-09-30-universal-agent-support-design.md"
@@ -49,17 +50,17 @@ NEW_PATHS = sorted(set([
 def test_every_file_adapting_md_names_or_cites_is_checked():
     """Final review M2: ADAPTING.md sends the agent to the worked examples and cites the spec and measurements,
     but the payload check did not list them: a rule change could drop them and leave dead references."""
-    spec = importlib.util.spec_from_file_location("check_adapter_payload", CHECKER)
+    spec = importlib.util.spec_from_file_location("check_release_payload", CHECKER)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     refs = adapting_references()
     assert "tools/adapting/examples/json_deny.slots.py" in refs and SPEC in refs, refs   # the scan sees them
-    missing = sorted(set(refs) - set(mod.REQUIRED))
+    missing = sorted(set(refs) - set(mod.ADAPTER_REQUIRED))
     assert not missing, missing
 
 
 def _run(root):
-    return subprocess.run([sys.executable, "-B", str(CHECKER), str(root)],
+    return subprocess.run([sys.executable, "-B", str(CHECKER), str(root), "--section", "adapter"],
                           capture_output=True, text=True, timeout=120)
 
 
@@ -81,7 +82,7 @@ def test_the_repo_itself_passes():
 def test_a_whole_payload_passes(payload):
     r = _run(payload)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "ADAPTER PAYLOAD: OK" in r.stdout
+    assert "RELEASE PAYLOAD: OK" in r.stdout
 
 
 @pytest.mark.parametrize("rel", NEW_PATHS)
@@ -101,12 +102,17 @@ def test_an_empty_adapter_file_is_not_present(payload):
 
 
 def test_both_release_gates_run_the_adapter_check():
-    """The construct, not a name in a comment: an executable line in each gate runs the checker."""
-    for rel in (".github/workflows/release.yml", "tools/verify-release.sh"):
-        text = (REPO / rel).read_text(encoding="utf-8")
-        runs = [l for l in text.splitlines()
-                if not l.strip().startswith("#") and "python" in l and "check-adapter-payload.py" in l]
-        assert runs, f"{rel} never runs tools/check-adapter-payload.py"
+    """The construct, not a name in a comment: verify-release.sh runs the one checker (adapter section included),
+    and release.yml runs verify-release.sh --local on the zip it publishes."""
+    verify = (REPO / "tools" / "verify-release.sh").read_text(encoding="utf-8")
+    runs = [l for l in verify.splitlines()
+            if not l.strip().startswith("#") and ("python" in l.lower() or l.lstrip().startswith('"$PY"'))
+            and "check-release-payload.py" in l]
+    assert runs, "tools/verify-release.sh never runs tools/check-release-payload.py"
+    workflow = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    runs = [l for l in workflow.splitlines()
+            if not l.strip().startswith("#") and "tools/verify-release.sh" in l and "--local" in l]
+    assert runs, "release.yml never runs tools/verify-release.sh --local"
 
 
 LOST_CONTINUATION = re.compile(r"\S {6,}(\|\||&&)")
@@ -128,11 +134,10 @@ def test_the_release_gates_parse_and_lost_no_line_continuation():
 
 
 def test_the_release_zip_rule_does_not_exclude_the_new_paths():
-    """release.yml builds the zip by exclusion; none of its --exclude names may swallow a new path."""
-    import re
-    text = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-    excluded = set(re.findall(r"--exclude '([^']+)'", text))
-    assert excluded, "no --exclude rules found: the zip rule changed, re-read it"
+    """The builder ships `git archive` minus EXCLUDE; no excluded top-level path may swallow a new path."""
+    spec = importlib.util.spec_from_file_location("build_release_zip", REPO / "scripts" / "build_release_zip.py")
+    b = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(b)
+    assert b.EXCLUDE, "no exclude rules found: the zip rule changed, re-read it"
     for rel in NEW_PATHS:
-        for part in rel.split("/"):
-            assert part not in excluded, f"{rel} is excluded from the zip by '--exclude {part}'"
+        assert rel.split("/")[0] not in b.EXCLUDE, f"{rel} is excluded from the zip by EXCLUDE"

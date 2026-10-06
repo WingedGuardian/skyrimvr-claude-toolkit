@@ -1,0 +1,322 @@
+"""tools/check-release-payload.py: one checker for both release gates (Plan 8 T10.2), and the leak grep (T10.3).
+
+Every check is proven red on a payload missing its piece -- on ITS OWN line, not by luck -- and green on a
+whole payload first (a gate that was never green proves nothing by going red). The Codex and adapter
+sections keep their own tests in test_repo_invariants.py and test_adapter_payload.py.
+"""
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from conftest import REPO, copy_repo
+
+CHECKER = REPO / "tools" / "check-release-payload.py"
+SHA = "a" * 40
+
+
+def _mod():
+    spec = importlib.util.spec_from_file_location("check_release_payload", CHECKER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _check(root, *extra, env=None):
+    return subprocess.run([sys.executable, "-B", str(CHECKER), str(root), *extra],
+                          capture_output=True, text=True, timeout=120, env=env)
+
+
+def _line(out, name):
+    return next((l for l in out.splitlines() if name in l), "")
+
+
+@pytest.fixture(scope="module")
+def pristine(tmp_path_factory):
+    """The tree as the builder ships it: tracked content (copy_repo drops tests/), no .github/, a BUILD-INFO."""
+    root = copy_repo(tmp_path_factory.mktemp("payload") / "toolkit")
+    shutil.rmtree(root / ".github")
+    for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", ".claude/backups",
+                 "KNOWLEDGEBASE.local.md", ".superpowers", ".skyguard"):
+        p = root / junk
+        if p.is_dir():
+            shutil.rmtree(p)
+        elif p.exists():
+            p.unlink()
+    (root / "BUILD-INFO").write_text("commit={}\nversion=9.9.9\n".format(SHA), encoding="utf-8")
+    return root
+
+
+@pytest.fixture()
+def payload(tmp_path, pristine):
+    root = tmp_path / "toolkit"
+    shutil.copytree(pristine, root)
+    return root
+
+
+def test_a_whole_payload_passes(pristine):
+    r = _check(pristine, "--expect-commit", SHA)
+    assert r.returncode == 0 and "RELEASE PAYLOAD: OK" in r.stdout, r.stdout + r.stderr
+
+
+def _mkdir(rel):
+    def f(r):
+        (r / rel).mkdir(parents=True, exist_ok=True)
+        (r / rel / "x").write_text("x", encoding="utf-8")
+    return f
+
+
+def _first_claude_hook(r):
+    return sorted((r / ".claude" / "hooks").glob("*.sh"))[0]
+
+
+def _inert_stdin(r):
+    h = _first_claude_hook(r)
+    h.write_text(h.read_text(encoding="utf-8").replace("INPUT=$(cat)", "INPUT=$(cat /dev/stdin)"), encoding="utf-8")
+
+
+def _heartbeat_only_in_comment(r):
+    h = _first_claude_hook(r)
+    lines = [("# " + l if "hook-heartbeat" in l and not l.lstrip().startswith("#") else l)
+             for l in h.read_text(encoding="utf-8").splitlines()]
+    h.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _codex_sh_inert(r):
+    h = r / ".codex" / "hooks" / "skyguard-entry.sh"
+    h.write_text(h.read_text(encoding="utf-8").replace("INPUT=$(cat)", "INPUT=$(cat /dev/fd/0)"), encoding="utf-8")
+
+
+def _ps1_no_stdin(r):
+    h = r / ".codex" / "hooks" / "skyguard-entry.ps1"
+    h.write_text(h.read_text(encoding="utf-8").replace("[Console]::OpenStandardInput()", "$null"), encoding="utf-8")
+
+
+def _ps1_no_heartbeat(r):
+    h = r / ".codex" / "hooks" / "skyguard-entry.ps1"
+    lines = [("# " + l if "hook-heartbeat" in l else l) for l in h.read_text(encoding="utf-8").splitlines()]
+    h.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _forge_build_info(r):
+    (r / "BUILD-INFO").write_text("commit=deadbeef\n", encoding="utf-8")
+
+
+BREAKS = {
+    "build-info-missing": (lambda r: (r / "BUILD-INFO").unlink(), "BUILD-INFO present"),
+    "build-info-short-sha": (_forge_build_info, "BUILD-INFO names a full commit sha"),
+    "build-info-other-commit": (lambda r: (r / "BUILD-INFO").write_text("commit={}\n".format("b" * 40)),
+                                "BUILD-INFO commit is the expected one"),
+    "setup-missing": (lambda r: (r / "setup.sh").unlink(), "setup.sh present"),
+    "kb-missing": (lambda r: (r / "KNOWLEDGEBASE.md").unlink(), "KNOWLEDGEBASE.md present"),
+    "canary-missing": (lambda r: (r / "tools" / "hook-canary.sh").unlink(), "tools/hook-canary.sh present"),
+    "kb-guard-missing": (lambda r: (r / "tools" / "kb-guard.sh").unlink(), "tools/kb-guard.sh present"),
+    "engine-missing": (lambda r: (r / "tools" / "skyguard" / "run.py").unlink(), "tools/skyguard/run.py present"),
+    "generator-missing": (lambda r: (r / "scripts" / "gen_agent_trees.py").unlink(), "scripts/gen_agent_trees.py present"),
+    "tests-shipped": (_mkdir("tests"), "tests NOT shipped"),
+    "routes-harness-shipped": (_mkdir("tests/fixtures/routes-harness"), "tests/fixtures/routes-harness NOT shipped"),
+    "github-shipped": (_mkdir(".github"), ".github NOT shipped"),
+    "git-shipped": (_mkdir(".git"), ".git NOT shipped"),
+    "superpowers-shipped": (_mkdir(".superpowers"), ".superpowers NOT shipped"),
+    "skyguard-state-shipped": (_mkdir(".skyguard"), ".skyguard NOT shipped"),
+    "local-kb-shipped": (lambda r: (r / "KNOWLEDGEBASE.local.md").write_text("mine"), "KNOWLEDGEBASE.local.md NOT shipped"),
+    "backups-shipped": (_mkdir(".claude/backups"), ".claude/backups NOT shipped"),
+    "settings-local-shipped": (lambda r: (r / ".claude" / "settings.local.json").write_text("{}"),
+                               ".claude/settings.local.json NOT shipped"),
+    "paths-env-shipped": (lambda r: (r / ".claude" / "skyrim-paths.env").write_text("X=1"),
+                          "no file named skyrim-paths.env"),
+    "paths-env-shipped-deep": (lambda r: (r / "agent" / "targets" / "skyrim-paths.env").write_text("X=1"),
+                               "no file named skyrim-paths.env"),
+    "nexus-key-shipped": (lambda r: (r / "tools" / ".nexus_api_key").write_text("k"), "no file named .nexus_api_key"),
+    "claude-hook-missing": (lambda r: _first_claude_hook(r).unlink(), "Claude hook wrappers"),
+    "codex-entry-missing": (lambda r: (r / ".codex" / "hooks" / "skyguard-entry.ps1").unlink(), "Codex hook entries"),
+    "claude-hook-inert-stdin": (_inert_stdin, "reads stdin with a bare cat"),
+    "claude-hook-heartbeat-in-comment": (_heartbeat_only_in_comment, "writes a heartbeat outside a comment"),
+    "codex-sh-inert-stdin": (_codex_sh_inert, "skyguard-entry.sh reads stdin with a bare cat"),
+    "codex-ps1-no-stdin": (_ps1_no_stdin, "skyguard-entry.ps1 reads the standard input stream"),
+    "codex-ps1-no-heartbeat": (_ps1_no_heartbeat, "skyguard-entry.ps1 writes a heartbeat"),
+}
+
+
+@pytest.mark.parametrize("brk", sorted(BREAKS))
+def test_every_check_can_fail_on_its_own_line(payload, brk):
+    damage, name = BREAKS[brk]
+    damage(payload)
+    r = _check(payload, "--expect-commit", SHA)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "!!" in _line(r.stdout, name), f"{brk}: the '{name}' line did not go red:\n{r.stdout}"
+
+
+def test_the_hook_floor_is_the_tree_recounted():
+    """6 Claude wrappers plus the Codex entries, counted from the tree, not retyped from an old workflow."""
+    m = _mod()
+    claude = sorted((REPO / ".claude" / "hooks").rglob("*.sh"))
+    codex = sorted(p for p in (REPO / ".codex" / "hooks").rglob("*") if p.is_file())
+    assert m.CLAUDE_HOOK_FLOOR == len(claude) == 6, claude
+    assert m.CODEX_ENTRY_FLOOR == len(codex), codex
+    assert m.HOOK_FLOOR == len(claude) + len(codex)
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import health
+    assert len(health.CLAUDE_HOOKS) == m.CLAUDE_HOOK_FLOOR
+
+
+def test_the_shape_lists_cover_what_the_builder_excludes():
+    spec = importlib.util.spec_from_file_location("build_release_zip", REPO / "scripts" / "build_release_zip.py")
+    b = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(b)
+    assert set(b.EXCLUDE) <= set(_mod().ABSENT_PATHS)
+
+
+def test_bad_usage_is_exit_2(tmp_path):
+    assert _check(tmp_path / "nope").returncode == 2
+    assert _check(tmp_path, "--section", "bogus").returncode == 2
+
+
+# ------------------------------------------------------------------ leaks
+
+NAME = "zqxuserq"   # a made-up account: this file never names a real person
+
+
+def test_the_names_come_from_the_environment():
+    m = _mod()
+    assert m.leak_names({"USERNAME": NAME}, home="") == [NAME]
+    assert m.leak_names({"USER": NAME}, home="") == [NAME]
+    assert m.leak_names({}, home="C:" + m.BS + "Users" + m.BS + NAME) == [NAME]
+    assert m.leak_names({"RELEASE_LEAK_NAMES": NAME + ",other"}, home="") == ["other", NAME]
+    assert m.leak_names({}, home="") == []
+
+
+@pytest.mark.parametrize("spelling", [
+    "C:/Users/" + NAME + "/x", "C:" + "\\" + "Users" + "\\" + NAME + "\\x", '"C:\\\\Users\\\\' + NAME + '\\\\x"',
+    "/c/Users/" + NAME + "/x", "/home/" + NAME + "/x", "c:/users/" + NAME.upper() + "/x", "hello " + NAME,
+])
+def test_every_spelling_of_the_home_is_found(tmp_path, spelling):
+    m = _mod()
+    (tmp_path / "f.md").write_text(spelling, encoding="utf-8")
+    assert m.scan_leaks([tmp_path], m.leak_needles([NAME])), spelling
+
+
+def test_utf16_is_read_too(tmp_path):
+    m = _mod()
+    (tmp_path / "f.txt").write_bytes(("C:/Users/" + NAME).encode("utf-16-le"))
+    assert m.scan_leaks([tmp_path], m.leak_needles([NAME]))
+
+
+def test_a_generic_account_is_searched_by_path_only(tmp_path):
+    """On a CI runner the account is `runner`: the bare word is prose ("the CI runner"), its home is a leak."""
+    m = _mod()
+    (tmp_path / "prose.md").write_text("the CI runner runs it", encoding="utf-8")
+    assert not m.scan_leaks([tmp_path], m.leak_needles(["runner"]))
+    (tmp_path / "path.md").write_text("/home/runner/work", encoding="utf-8")
+    assert [h[0].rsplit("/", 1)[-1] for h in m.scan_leaks([tmp_path], m.leak_needles(["runner"]))] == ["path.md"]
+
+
+def test_extra_paths_are_found_in_every_spelling(tmp_path):
+    m = _mod()
+    game = "D:/Games/Some Skyrim"
+    for i, s in enumerate(("D:/Games/Some Skyrim/Data", "D:\\Games\\Some Skyrim", "/d/Games/Some Skyrim")):
+        (tmp_path / "f{}.txt".format(i)).write_text(s, encoding="utf-8")
+    assert len(m.scan_leaks([tmp_path], m.leak_needles([], [game]))) == 3
+
+
+def test_an_allowed_prefix_is_blanked_but_anything_else_under_the_home_is_not(tmp_path):
+    m = _mod()
+    work = "C:/Users/" + NAME + "/AppData/Local/Temp/verify"
+    (tmp_path / "gen.md").write_text("Game root: C:\\Users\\" + NAME + "\\AppData\\Local\\Temp\\verify\\game", encoding="utf-8")
+    assert not m.scan_leaks([tmp_path], m.leak_needles([NAME]), [work])
+    (tmp_path / "other.md").write_text("C:/Users/" + NAME + "/Desktop/secret", encoding="utf-8")
+    hits = m.scan_leaks([tmp_path], m.leak_needles([NAME]), [work])
+    assert [h[0].rsplit("/", 1)[-1] for h in hits] == ["other.md"]
+
+
+def _leaks(dirs, env, *extra):
+    return subprocess.run([sys.executable, "-B", str(CHECKER), "--leaks", *map(str, dirs), *extra],
+                          capture_output=True, text=True, timeout=120, env=env)
+
+
+def _clean_env(**kv):
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("USERNAME", "USER", "LOGNAME", "HOME", "USERPROFILE", "RELEASE_LEAK_NAMES", "RELEASE_LEAK_PATHS")}
+    env.update(kv)
+    return env
+
+
+def test_leaks_mode_goes_red_and_names_the_file(tmp_path):
+    (tmp_path / "a.md").write_text("see C:/Users/" + NAME + "/notes", encoding="utf-8")
+    (tmp_path / "b.md").write_text("clean", encoding="utf-8")
+    r = _leaks([tmp_path], _clean_env(USERNAME=NAME))
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "a.md" in r.stdout and "b.md" not in r.stdout
+
+
+def test_leaks_mode_is_green_on_a_clean_tree(tmp_path):
+    (tmp_path / "b.md").write_text("clean", encoding="utf-8")
+    r = _leaks([tmp_path], _clean_env(USERNAME=NAME))
+    assert r.returncode == 0 and "LEAKS: none" in r.stdout, r.stdout + r.stderr
+
+
+def test_leaks_mode_with_nothing_to_search_for_is_could_not_check(tmp_path):
+    r = _leaks([tmp_path], _clean_env())
+    assert r.returncode == 2 and "COULD NOT CHECK" in r.stdout, r.stdout + r.stderr
+
+
+def test_leaks_mode_reads_release_leak_paths(tmp_path):
+    (tmp_path / "a.md").write_text("E:\\Steam\\Skyrim VR\\Data", encoding="utf-8")
+    r = _leaks([tmp_path], _clean_env(RELEASE_LEAK_PATHS="E:/Steam/Skyrim VR"))
+    assert r.returncode == 1, r.stdout + r.stderr
+
+
+def test_leaks_mode_honours_allow_prefix(tmp_path):
+    (tmp_path / "a.md").write_text("/home/" + NAME + "/tmp/work/game", encoding="utf-8")
+    env = _clean_env(USERNAME=NAME)
+    assert _leaks([tmp_path], env).returncode == 1
+    r = _leaks([tmp_path], env, "--allow-prefix", "/home/" + NAME + "/tmp/work")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_the_checker_itself_names_no_one():
+    """The name is read at check time. A literal one in the repo would be the very leak this hunts."""
+    text = CHECKER.read_text(encoding="utf-8").lower()
+    for k in ("USERNAME", "USER", "LOGNAME"):
+        n = os.environ.get(k, "")
+        if len(n) >= 4 and n.lower() not in _mod().GENERIC_ACCOUNTS:
+            assert n.lower() not in text, k
+    assert json.dumps  # keep the import honest for linters
+
+
+def test_changed_from_skips_only_byte_identical_files(tmp_path):
+    """An installed copy is grepped for what setup GENERATED or changed; the payload's own files were grepped once."""
+    m = _mod()
+    base, inst = tmp_path / "payload", tmp_path / "install"
+    for d in (base, inst):
+        d.mkdir()
+    leak = "C:/Users/" + NAME + "/x"
+    (base / "same.md").write_text(leak, encoding="utf-8")
+    (inst / "same.md").write_text(leak, encoding="utf-8")
+    (base / "changed.md").write_text("clean", encoding="utf-8")
+    (inst / "changed.md").write_text(leak, encoding="utf-8")
+    (inst / "new.md").write_text(leak, encoding="utf-8")
+    hits = sorted(h[0].rsplit("/", 1)[-1] for h in m.scan_leaks([inst], m.leak_needles([NAME]), baseline=base))
+    assert hits == ["changed.md", "new.md"], hits
+
+
+GENERIC = "runneradmin"   # a CI account: only its home-path spellings are searched, so each must stand alone
+
+
+@pytest.mark.parametrize("spelling", [
+    "C:/Users/" + GENERIC + "/x", "C:" + chr(92) + "Users" + chr(92) + GENERIC + chr(92) + "x",
+    '"C:' + chr(92) * 2 + "Users" + chr(92) * 2 + GENERIC + '"', "/c/Users/" + GENERIC + "/x", "/home/" + GENERIC + "/x",
+])
+def test_every_home_spelling_is_found_without_the_bare_name(tmp_path, spelling):
+    """The bare name would mask a missing spelling for a person; for a generic account each spelling must hold."""
+    m = _mod()
+    assert GENERIC in m.GENERIC_ACCOUNTS
+    (tmp_path / "f.md").write_text(spelling, encoding="utf-8")
+    assert m.scan_leaks([tmp_path], m.leak_needles([GENERIC])), spelling
