@@ -6686,3 +6686,29 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_P8P, "    elif cut and not ended:", "    elif False:",
      _P8PT + "test_a_section_cut_by_the_read_cap_says_it_was_cut", "p8t6-prefs-cut-section-marked"),
 ]]
+# Row 24: the launcher's scrub keeps SystemDrive, and a minimal env elsewhere cannot drop it unnoticed.
+# Row 26: the catastrophic-regex test arms the reaper, and the reaper really ends a spinning process (per platform: the
+# branch that runs there).
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tests/run_harness_tests.py", 'FORWARDED_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", ', 'FORWARDED_ENV = ("SYSTEMROOT", ',
+     "tests/test_env_scrub.py::test_the_launcher_scrub_keeps_systemroot_and_systemdrive", "p8t6-launcher-keeps-systemdrive"),
+    ("tests/test_skyguard_lock.py",
+     '            "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE", "C:"), "COMSPEC": str(SYS32 / "cmd.exe"), "SKYGUARD_NO_PAUSE": "1",',
+     '            "COMSPEC": str(SYS32 / "cmd.exe"), "SKYGUARD_NO_PAUSE": "1",',
+     "tests/test_env_scrub.py::test_every_minimal_env_that_keeps_systemroot_keeps_systemdrive",
+     "p8t6-every-minimal-env-keeps-systemdrive"),
+    ("tests/test_python_fallback.py", '    run_py.write_text(src.replace(needle, reaper + "    re.match(',
+     '    run_py.write_text(src.replace(needle, "    import re\\n" + "    re.match(',
+     "tests/test_python_fallback.py::test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget",
+     "p8t6-catastrophic-test-arms-the-reaper"),
+]]
+MUTATIONS += [
+    pytest.param("tests/spin_reaper.py", "            k32.TerminateProcess(h, 9)\n", "            pass\n",
+                 "tests/test_spin_reaper.py::test_a_spinning_process_is_ended_at_the_deadline",
+                 marks=pytest.mark.skipif(sys.platform != "win32", reason="the Windows branch runs on Windows"),
+                 id="p8t6-reaper-terminates-windows"),
+    pytest.param("tests/spin_reaper.py", "    os.kill(pid, signal.SIGKILL)\n", "    pass\n",
+                 "tests/test_spin_reaper.py::test_a_spinning_process_is_ended_at_the_deadline",
+                 marks=pytest.mark.skipif(sys.platform == "win32", reason="the POSIX branch runs on POSIX"),
+                 id="p8t6-reaper-terminates-posix"),
+]

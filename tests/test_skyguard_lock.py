@@ -694,7 +694,7 @@ def _stage_cmd(bed):
 
 def _nopy_env():
     return {"PATH": r"C:\Windows\System32;C:\Windows", "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
-            "COMSPEC": str(SYS32 / "cmd.exe"), "SKYGUARD_NO_PAUSE": "1",
+            "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE", "C:"), "COMSPEC": str(SYS32 / "cmd.exe"), "SKYGUARD_NO_PAUSE": "1",
             "SKYGUARD_LOCK_SANDBOX": str(SCRATCH)}
 
 

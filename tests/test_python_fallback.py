@@ -245,6 +245,19 @@ def test_a_hanging_probe_is_cut_off_and_the_chain_moves_on(tmp_path):
     assert time.time() - t < 50, "a hanging probe held the hook past its budget"
 
 
+REAPER_S = 4    # under the wrapper's own kill (budget 2 s + 3 s), so a disarmed watchdog shows as the reaper's exit 9
+
+
+def _reaper_armed(marker: Path) -> bool:
+    import time
+    end = time.time() + 5
+    while time.time() < end:
+        if marker.is_file() and marker.read_text(encoding="utf-8").startswith("armed "):
+            return True
+        time.sleep(0.1)
+    return False
+
+
 def test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget(tmp_path):
     """The normal path has no `timeout` fork: run.py's own watchdog must end a call stuck in C code that
     holds the GIL (a catastrophic regex), and the wrapper must turn that into the ordinary deny. The agent
@@ -255,10 +268,17 @@ def test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget(tmp_path
     src = run_py.read_text(encoding="utf-8")
     needle = "    raw = sys.stdin.buffer.read()"
     assert needle in src
-    run_py.write_text(src.replace(needle, "    import re; re.match(r'(a+)+$', 'a' * 30 + 'b')\n" + needle, 1),
+    # Deferred row 26: the planted spin arms tests/spin_reaper.py first, so it ends within REAPER_S whatever happens
+    # to the watchdog (its mutant used to leave a python.exe spinning, orphaned, after the test timed out).
+    marker = tmp_path / "reaper.txt"
+    reaper = ("    import re, subprocess as _sp, os as _os; _sp.Popen([sys.executable, {!r}, str(_os.getpid()), {!r}, {!r}], "
+              "stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)\n").format(
+                  (REPO / "tests" / "spin_reaper.py").as_posix(), str(REAPER_S), marker.as_posix())
+    run_py.write_text(src.replace(needle, reaper + "    re.match(r'(a+)+$', 'a' * 30 + 'b')\n" + needle, 1),
                       encoding="utf-8", newline="\n")
     t = time.time()
     r = _fire(root, [], "protect-files.sh", _esp_write(root), {"SKYGUARD_ENGINE_TIMEOUT": "2"})
+    assert _reaper_armed(marker), "the spin was planted without its reaper"
     assert "GUARD INERT" in _reason(r) and "engine failed" in _reason(r), r.stdout
     assert r.stdout.strip().startswith("{") and "Traceback" not in r.stdout and "Thread" not in r.stdout
     assert time.time() - t < 12, "the watchdog did not end the call at its budget"

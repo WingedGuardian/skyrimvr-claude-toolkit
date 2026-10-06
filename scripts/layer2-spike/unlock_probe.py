@@ -120,7 +120,7 @@ def main():
     # U2 -- no Python on PATH
     lock_all(mech, paths)
     env = {"PATH": r"C:\Windows\System32;C:\Windows", "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
-           "COMSPEC": r"C:\Windows\System32\cmd.exe"}
+           "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE", "C:"), "COMSPEC": r"C:\Windows\System32\cmd.exe"}
     where = subprocess.run("cmd.exe /d /c where python", capture_output=True, text=True, env=env)
     # The script path is NOT quoted: with /c, a command line that STARTS with a quote and holds
     # more than two has its first and last quote stripped (MEASURED: rc 1, no output).
