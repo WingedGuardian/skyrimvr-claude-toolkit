@@ -4486,3 +4486,8 @@ MUTATIONS += [pytest.param("scripts/lock-python-dependencies.py", '    if "pytes
 MUTATIONS += [pytest.param("requirements.lock", "Pygments==2.21.0 \\", "Pygments==2.19.2 \\",
                            "tests/test_dependency_locks.py::test_the_lock_never_pins_a_pygments_with_the_known_advisory",
                            id="t6c-lock-pygments-with-advisory")]
+
+# Plan 8 T6c: package.json pins exact versions (a range lets a plain `npm install` float away from the lock).
+MUTATIONS += [pytest.param("package.json", '"zod": "3.25.76"', '"zod": "^3.25.76"',
+                           "tests/test_dependency_locks.py::test_package_json_pins_exact_versions_that_the_lock_resolves_to",
+                           id="t6c-package-json-range-not-exact")]

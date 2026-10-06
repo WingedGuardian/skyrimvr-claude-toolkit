@@ -101,3 +101,14 @@ def test_the_lock_never_pins_a_pygments_with_the_known_advisory():
     versions = re.findall(r"^pygments==(\d+)\.(\d+)\.(\d+)", (REPO / "requirements.lock").read_text(), re.M | re.I)
     for v in versions:
         assert tuple(map(int, v)) >= (2, 20, 0), "pygments %s.%s.%s in requirements.lock has an open advisory" % v
+
+
+def test_package_json_pins_exact_versions_that_the_lock_resolves_to():
+    """A caret lets a plain `npm install` float; exact specs mean every install path gets the locked version."""
+    import re
+    package = json.loads((REPO / "package.json").read_text())
+    lock = json.loads((REPO / "package-lock.json").read_text())
+    assert package["dependencies"]
+    for name, spec in package["dependencies"].items():
+        assert re.fullmatch(r"\d+\.\d+\.\d+", spec), "%s: %r is a range, not an exact version" % (name, spec)
+        assert lock["packages"]["node_modules/" + name]["version"] == spec, name
