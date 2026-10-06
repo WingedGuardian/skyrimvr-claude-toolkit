@@ -5238,7 +5238,7 @@ MUTATIONS += [
                  "tests/test_ci_leg.py::test_a_node_id_mentioning_collected_is_not_the_collect_line",
                  id="ci-leg-collect-line-anchored"),
     # Linux-read files stay LF in an autocrlf checkout.
-    pytest.param(".gitattributes", ".devcontainer/**   text eol=lf\n", "",
+    pytest.param(".gitattributes", ".devcontainer/**   text eol=lf", "",
                  "tests/test_gen_agent_trees.py::test_files_linux_tools_read_are_pinned_lf", id="eol-devcontainer-lf"),
 ]
 

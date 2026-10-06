@@ -66,3 +66,6 @@ tests/fixtures/migrate-3x/** text eol=lf
 .node-version      text eol=lf
 .python-version    text eol=lf
 requirements*.txt  text eol=lf
+
+# This file itself: an autocrlf checkout must not rewrite it either (a mutation anchor reads its lines).
+.gitattributes     text eol=lf
