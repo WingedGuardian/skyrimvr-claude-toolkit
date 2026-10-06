@@ -39,7 +39,8 @@ check() {
     FAIL=1; MISSING="$MISSING $label"; return
   fi
   if [ -n "$expect" ] && ! printf '%s' "$out" | grep -qiE "$expect"; then
-    printf '  %-22s SUSPECT       -- ran (rc=%s) but output did not look like %s\n' "$label" "$rc" "$label"
+    printf '  %-22s SUSPECT       -- ran (rc=%s) but output did not look like %s: %s\n' "$label" "$rc" "$label" \
+      "$(printf '%s' "$out" | grep -v '^[[:space:]]*$' | head -1 | cut -c1-60)"
     FAIL=1; MISSING="$MISSING $label"; return
   fi
   printf '  %-22s ok            %s\n' "$label" "$(printf '%s' "$out" | head -1 | cut -c1-52)"
@@ -58,7 +59,9 @@ echo "=============================================================="
 echo "TOOLCHAIN CHECK -- can each documented tool actually start?"
 echo "=============================================================="
 
-command -v bash >/dev/null 2>&1 || { echo "no bash?" >&2; exit 2; }
+# The bash running THIS script runs the wrappers too. A bare `bash` on PATH can be WSL's launcher
+# (C:\Windows\System32\bash.exe), which exits 1 with no distro installed -- not Git's bash.exe.
+{ [ -n "${BASH:-}" ] && [ -x "$BASH" ]; } || { echo "cannot tell which bash is running this check" >&2; exit 2; }
 
 echo "runtimes:"
 check "python"        "Python 3"       python --version
@@ -122,13 +125,24 @@ optional "Champollion" "$ROOT/tools/Champollion/Champollion.exe" --help
 optional "Caprica"     "$ROOT/tools/Caprica/Caprica.exe" --help
 
 echo "our wrappers (do they reach their dependency?):"
-for w in automod-cli resaver-cli; do
-  if [ -f "$ROOT/tools/$w.sh" ]; then
-    check "$w" "" bash "$ROOT/tools/$w.sh" --help
-  else
+# wrapper <name> <the dependency the user installs> <what a WORKING wrapper prints for --help>
+#
+# The identity is the point. Both wrappers START fine with their dependency missing -- they print
+# "Built DLL not found" / {"ok":false,"error":"ReSaver.jar not found"} -- and an empty expectation
+# reported that as "ok". An error pattern will not do either: a WORKING resaver-cli answers --help
+# with {"ok":false,"error":"need <op> <save> [...]"} from our own driver (ResaverCLI.java).
+wrapper() {
+  local w="$1" dep="$2" expect="$3"
+  if [ ! -f "$ROOT/tools/$w.sh" ]; then
     printf '  %-22s not present (optional)\n' "$w"
+  elif [ ! -e "$dep" ]; then
+    printf '  %-22s not installed (optional)\n' "$w"
+  else
+    check "$w" "$expect" "$BASH" "$ROOT/tools/$w.sh" --help
   fi
-done
+}
+wrapper automod-cli "$ROOT/tools/automod" "Spooky's AutoMod Toolkit"
+wrapper resaver-cli "$ROOT/tools/resaver-cli/ReSaver.jar" "need <op>"
 
 echo "safety:"
 if [ -f "$ROOT/tools/hook-canary.sh" ]; then

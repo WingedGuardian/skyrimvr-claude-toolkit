@@ -4211,6 +4211,17 @@ MUTATIONS += [
 _TC = "tests/test_toolchain_check.py::"
 _AM = "tests/test_automod_cli.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/toolchain-check.sh", '''wrapper automod-cli "$ROOT/tools/automod" "Spooky's AutoMod Toolkit"''',
+     'wrapper automod-cli "$ROOT/tools/automod" ""', _TC + "test_automod_cloned_but_not_built_is_not_ok",
+     "t6b-toolchain-automod-identity"),
+    ("tools/toolchain-check.sh", 'wrapper resaver-cli "$ROOT/tools/resaver-cli/ReSaver.jar" "need <op>"',
+     'wrapper resaver-cli "$ROOT/tools/resaver-cli/ReSaver.jar" ""',
+     _TC + "test_resaver_whose_driver_cannot_compile_is_not_ok", "t6b-toolchain-resaver-identity"),
+    ("tools/toolchain-check.sh", '  elif [ ! -e "$dep" ]; then', "  elif false; then",
+     _TC + "test_resaver_without_its_jar_is_optional_not_ok", "t6b-toolchain-absent-dependency-is-optional"),
+    ("tools/toolchain-check.sh", '    check "$w" "$expect" "$BASH" "$ROOT/tools/$w.sh" --help',
+     '    check "$w" "$expect" bash "$ROOT/tools/$w.sh" --help',
+     _TC + "test_wrappers_run_under_this_bash_not_a_bare_bash_on_path", "t6b-toolchain-wrappers-run-under-this-bash"),
     ("tools/automod-cli.sh", '"version": "10.0.100", "rollForward"', '"version": "8.0.100", "rollForward"',
      _AM + "test_rebuild_pins_the_net10_sdk_not_8", "t6b-automod-sdk-10-pin"),
     ("tools/automod-cli.sh", '    if grep -qF "$TFM_OLD" "$PROPS"; then', "    if false; then",

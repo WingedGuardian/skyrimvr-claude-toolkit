@@ -93,3 +93,145 @@ def test_pinned_version_with_only_sdk_8_cannot_work(tmp_path):
 def test_a_version_suffix_does_not_hide_a_mismatch(tmp_path):
     out = _run(tmp_path, "0.41.1+abc123", ["10.0.100"])
     assert "MISMATCH" in _line(out, "spriggit version"), out
+
+
+# --- Our wrappers: "it started" is not "it works" -------------------------------------------------
+# A wrapper that prints "Built DLL not found" or "ReSaver.jar not found" used to be reported "ok":
+# the check confirmed the WRAPPER started, never that it reached its dependency. Each wrapper now
+# has to print what a working one prints (AutoMod's help banner; our ReSaver driver's own reply).
+# These run the script against a FAKE toolkit root (CLAUDE_PROJECT_DIR) holding real copies of the
+# wrappers, with fakes for dotnet/java. Fakes use #!/bin/bash so a shadowed `bash` cannot hijack them.
+
+def _toolkit(tmp_path: Path) -> Path:
+    root = tmp_path / "tk"
+    (root / "tools").mkdir(parents=True)
+    (root / ".config").mkdir()
+    (root / ".config" / "dotnet-tools.json").write_bytes((REPO / ".config" / "dotnet-tools.json").read_bytes())
+    for name in ("automod-cli.sh", "resaver-cli.sh", "hook-canary.sh"):
+        (root / "tools" / name).write_bytes((REPO / "tools" / name).read_bytes())
+    (root / "tools" / "resaver-cli").mkdir()
+    (root / "tools" / "resaver-cli" / "ResaverCLI.java").write_bytes(
+        (REPO / "tools" / "resaver-cli" / "ResaverCLI.java").read_bytes())
+    return root
+
+
+def _script(path: Path, body: str) -> None:
+    path.write_text("#!/bin/bash\n" + body, encoding="utf-8", newline="\n")
+
+
+def _bins(tmp_path: Path) -> Path:
+    b = tmp_path / "wbin"
+    b.mkdir(exist_ok=True)
+    # what AutoMod's real CLI prints for --help (RootCommand description at v1.11.2)
+    _script(b / "dotnet", 'if [ "$1" = "--list-sdks" ]; then echo "10.0.100 [C:/fake]"; exit 0; fi\n'
+                          'if [ "$1" = "--version" ]; then echo 10.0.100; exit 0; fi\n'
+                          'echo "Description:"; echo "  Spooky\'s AutoMod Toolkit - LLM-friendly Skyrim mod creation"\n')
+    # what our ResaverCLI driver prints for an op it was not given (tools/resaver-cli/ResaverCLI.java)
+    _script(b / "java", 'if [ "$1" = "-version" ]; then echo \'openjdk version "21.0.4"\' >&2; exit 0; fi\n'
+                        'echo \'{"ok":false,"error":"need <op> <save> [...]"}\'\n')
+    _script(b / "javac", "exit 1\n")
+    return b
+
+
+def _run_wrappers(tmp_path: Path, root: Path, shadow_bash: bool = False):
+    b = _bins(tmp_path)
+    path = [str(b).replace("\\", "/")]
+    if shadow_bash:  # a bare `bash` that is not Git's -- WSL's launcher on a stock Windows box
+        s = tmp_path / "shadow"
+        s.mkdir()
+        _script(s / "bash", 'echo "WSL: no installed distributions"; exit 1\n')
+        path.insert(0, str(s).replace("\\", "/"))
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join(path + [env.get("PATH", "")])
+    env["CLAUDE_PROJECT_DIR"] = str(root).replace("\\", "/")
+    env["TOOLCHAIN_DOTNET"] = str(b / "dotnet").replace("\\", "/")
+    env["AUTOMOD_DOTNET"] = str(b / "dotnet").replace("\\", "/")
+    p = subprocess.run([BASH, str(TOOL)], capture_output=True, text=True, env=env, timeout=120)
+    return p.stdout
+
+
+def _failed(out: str) -> str:
+    return out.split("RESULT:")[1] if "RESULT:" in out else ""
+
+
+def _automod_built(root: Path, tfm: str = "net10.0") -> None:
+    d = root / "tools" / "automod" / "src" / "SpookysAutomod.Cli" / "bin" / "Release" / tfm
+    d.mkdir(parents=True)
+    (d / "spookys-automod.dll").write_bytes(b"MZ")
+
+
+def _resaver_installed(root: Path, compiled: bool = True) -> None:
+    rs = root / "tools" / "resaver-cli"
+    (rs / "ReSaver.jar").write_bytes(b"PK")
+    if compiled:
+        cls = rs / "ResaverCLI.class"
+        cls.write_bytes(b"\xca\xfe")
+        os.utime(cls, (os.stat(rs / "ResaverCLI.java").st_mtime + 60,) * 2)
+
+
+def test_automod_cloned_but_not_built_is_not_ok(tmp_path):
+    root = _toolkit(tmp_path)
+    (root / "tools" / "automod" / "src" / "SpookysAutomod.Cli").mkdir(parents=True)
+    out = _run_wrappers(tmp_path, root)
+    line = _line(out, "automod-cli")
+    assert " ok " not in line and "Built DLL not found" in line, out
+    assert "automod-cli" in _failed(out), out
+
+
+def test_automod_left_on_an_old_net8_build_is_not_ok(tmp_path):
+    root = _toolkit(tmp_path)
+    _automod_built(root, "net8.0")
+    out = _run_wrappers(tmp_path, root)
+    assert " ok " not in _line(out, "automod-cli"), out
+    assert "automod-cli" in _failed(out), out
+
+
+def test_automod_not_cloned_is_optional_not_ok(tmp_path):
+    root = _toolkit(tmp_path)
+    out = _run_wrappers(tmp_path, root)
+    line = _line(out, "automod-cli")
+    assert "not installed (optional)" in line and " ok " not in line, out
+    assert "automod-cli" not in _failed(out), out
+
+
+def test_automod_built_is_ok(tmp_path):
+    root = _toolkit(tmp_path)
+    _automod_built(root)
+    out = _run_wrappers(tmp_path, root)
+    assert " ok " in _line(out, "automod-cli"), out
+    assert "automod-cli" not in _failed(out), out
+
+
+def test_resaver_without_its_jar_is_optional_not_ok(tmp_path):
+    root = _toolkit(tmp_path)
+    out = _run_wrappers(tmp_path, root)
+    line = _line(out, "resaver-cli")
+    assert "not installed (optional)" in line and " ok " not in line, out
+    assert "resaver-cli" not in _failed(out), out
+
+
+def test_resaver_whose_driver_cannot_compile_is_not_ok(tmp_path):
+    root = _toolkit(tmp_path)
+    _resaver_installed(root, compiled=False)
+    out = _run_wrappers(tmp_path, root)
+    line = _line(out, "resaver-cli")
+    assert " ok " not in line and "compile failed" in line, out
+    assert "resaver-cli" in _failed(out), out
+
+
+def test_resaver_reaching_its_driver_is_ok(tmp_path):
+    root = _toolkit(tmp_path)
+    _resaver_installed(root)
+    out = _run_wrappers(tmp_path, root)
+    assert " ok " in _line(out, "resaver-cli"), out
+    assert "resaver-cli" not in _failed(out), out
+
+
+def test_wrappers_run_under_this_bash_not_a_bare_bash_on_path(tmp_path):
+    """On Windows a bare `bash` can be WSL's launcher; the wrappers must run under the bash running the check."""
+    root = _toolkit(tmp_path)
+    _automod_built(root)
+    _resaver_installed(root)
+    out = _run_wrappers(tmp_path, root, shadow_bash=True)
+    assert " ok " in _line(out, "automod-cli"), out
+    assert " ok " in _line(out, "resaver-cli"), out
