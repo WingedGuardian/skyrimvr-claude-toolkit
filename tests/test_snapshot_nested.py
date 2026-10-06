@@ -612,6 +612,33 @@ def test_a_hard_link_edited_through_its_other_path_is_seen(tmp_path):
     assert latest(tmp_path)["Data/Scripts/mine.pex"] == sha(b"edited in the staging folder")
 
 
+@needs_windows
+def test_the_hard_link_recheck_is_capped_and_resumes_where_it_stopped(tmp_path, monkeypatch):
+    """Gate ruling, condition 3: the re-stat pass has its own cap (a fully hard-linked install measured 186-442 ms),
+    and the next comparison carries on from where it stopped, so every linked file is re-checked in turn."""
+    (tmp_path / "Data" / "Scripts").mkdir(parents=True)
+    names = ["l{}.pex".format(i) for i in range(6)]
+    for n in names:
+        s = put(tmp_path, "staging/" + n, b"v1 " + n.encode())
+        os.link(str(s), str(tmp_path / "Data" / "Scripts" / n))
+    snap(tmp_path)
+    for n in names:                                    # every file edited through the OTHER link
+        with open(str(tmp_path / "staging" / n), "wb") as fh:
+            fh.write(b"version two of " + n.encode())
+    monkeypatch.setattr(snapshot, "RESTAT_BOX", 0.0)   # one re-stat per comparison
+    t = time.time()
+
+    def edited():
+        m = latest(tmp_path)
+        return [n for n in names if m["Data/Scripts/" + n] == sha(b"version two of " + n.encode())]
+    snap(tmp_path, now=t + 1 * (snapshot.RATE + 60))
+    assert len(edited()) == 1, "the cap must stop the pass after one file"
+    assert "RESTAT-PARTIAL: 1 of 6 hard-linked script(s) re-checked" in log_text(tmp_path)
+    for k in range(2, 7):
+        snap(tmp_path, now=t + k * (snapshot.RATE + 60))
+    assert sorted(edited()) == sorted(names), "the next comparisons resume where the last one stopped"
+
+
 def test_blobs_are_not_fsynced_but_the_index_and_manifests_are(tmp_path, monkeypatch):
     put(tmp_path, "Data/Scripts/a.pex", b"a")
     put(tmp_path, "Data/Scripts/b.pex", b"b")

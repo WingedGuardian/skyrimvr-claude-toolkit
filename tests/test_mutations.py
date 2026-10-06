@@ -4253,7 +4253,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SN, "(unread or truncated)", "unread",
      _SNT + "test_the_walk_stops_at_its_time_box_and_deletes_nothing", "l2-snap-r1-cut-walk-is-partial"),
     # ---- I2: hard links
-    (_SN, "    _restat_multilink(root, files, seen)\n", "",
+    (_SN, "    _restat_multilink(root, store, files, seen, audit)\n", "",
      _SNT + "test_a_hard_link_edited_through_its_other_path_is_seen", "l2-snap-r1-restat-multilink"),
     (_SN, "        files[rel] = [seen[rel][0], seen[rel][1], sha, st.st_nlink]",
      "        files[rel] = [seen[rel][0], seen[rel][1], sha, 1]",
@@ -4297,6 +4297,13 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SN, "                keep.add(n)                           # its base is gone",
      "                pass  # its base is gone",
      _SNT + "test_a_delta_whose_base_is_unreadable_is_kept", "l2-snap-r1-prune-baseless-delta-kept"),
+    # ---- gate ruling, condition 3: the hard-link re-check is capped and resumes
+    (_SN, "        if done < len(order) and _walk_clock() >= stop:", "        if False:",
+     _SNT + "test_the_hard_link_recheck_is_capped_and_resumes_where_it_stopped", "l2-snap-r2-restat-cap"),
+    (_SN, "    start = bisect.bisect_right(multi, after) if after else 0", "    start = 0",
+     _SNT + "test_the_hard_link_recheck_is_capped_and_resumes_where_it_stopped", "l2-snap-r2-restat-resumes"),
+    (_SN, '            audit.log(HOOK, "RESTAT-PARTIAL",', '            (lambda *a: None)(HOOK, "RESTAT-PARTIAL",',
+     _SNT + "test_the_hard_link_recheck_is_capped_and_resumes_where_it_stopped", "l2-snap-r2-restat-cap-logged"),
 ]]
 
 # Plan 6 Task 16: skydoctor. One twin per state and clause, each killed through the named test.

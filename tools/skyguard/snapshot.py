@@ -40,6 +40,7 @@ holding 89 distinct contents). Now:
 """
 from __future__ import annotations
 
+import bisect
 import json
 import os
 import re
@@ -60,7 +61,10 @@ HOOK = "snapshot-before-tool"
 DAY = 86400
 TREES = ("Data/Scripts", "Data/Source/Scripts")   # Data/Scripts/** holds the LE layout Data/Scripts/Source/** too
 EXTS = (".psc", ".pex")
-RATE = 60                 # latency gate branch <= 150 ms (measured, see the Task 14 report): the 60 s rate limit
+# Latency gate (controller ruling: the added PER-CALL p95 over the real call stream): 131-137 ms MEASURED by replaying
+# 15,138 real walking hook calls against measured shape costs -> the <= 150 ms branch, the 60 s rate limit. The worst
+# single-call shape is 160-168 ms p95. Source and numbers: docs/superpowers/measurements/2026-10-XX-plan6-pricing.md.
+RATE = 60
 KEEP_DAYS = 14
 BASELINE_BOX = 20.0       # seconds at SessionStart
 # Seconds per tool call while a baseline is unfinished: inside the engine's measured ~0.25-0.35 s of p95 headroom under
@@ -72,6 +76,8 @@ WALK_BOX = 1.0
 CALL_LOCK_WAIT = 0.2      # a tool call waits this long for the store lock, then takes no snapshot (inside the 1 s gate)
 PRUNE_CALL_BOX = 1.0      # the once-a-day pruning inside a tool call stops deleting after this long
 PRUNE_EVERY = DAY         # per-call pruning at most this often; SessionStart always prunes
+RESTAT_BOX = 0.075        # cap on re-stat'ing hard-linked scripts per comparison (real install MEASURED: 58 ms in all)
+RESTAT_CURSOR = ".restat_cursor"
 _REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _walk_clock = time.monotonic      # bound at import: the walk's box is real time even where a test fakes snapshot.time
 REBASE_MIN = 256          # a delta larger than max(REBASE_MIN, base/REBASE_SHARE) paths is written as a new full map
@@ -358,19 +364,48 @@ def take(project, audit, command, now=None, box=CALL_BOX, rate=RATE, prune_due=F
         lock.__exit__(None, None, None)
 
 
-def _restat_multilink(root, files, seen):
+def _restat_multilink(root, store, files, seen, audit):
     """Review I2: on NTFS the listing's size/mtime for a hard link is its OWN directory entry, which an edit made
     through ANOTHER link does not update (MEASURED: 9 bytes listed, 16 on disk). For every path the index knows to have
-    more than one link, ask the file itself (os.stat opens it). Real install, MEASURED: 3,049 of 11,899 scripts."""
+    more than one link, ask the file itself (os.stat opens it). Real install, MEASURED: 3,049 of 11,899 scripts.
+
+    Capped at RESTAT_BOX (ruling on the gate, condition 3): a fully hard-linked install (11,898 os.stat MEASURED at
+    186 ms warm / 442 ms cold) must not stretch one call. The pass resumes where it stopped at the next comparison, in
+    path order, from a cursor in a small sidecar file (never the 2 MB index). A path not reached this call keeps its
+    listing values, so an edit made through THIS link is still seen at once. -> (re-stat'd, multi-link total)."""
     # Serial on purpose: MEASURED 58 ms for 2,975 paths serially, 82-86 ms with 2-8 threads.
+    multi = sorted(rel for rel, v in files.items() if len(v) > 3 and v[3] > 1 and rel in seen)
+    if not multi:
+        return 0, 0
+    cursor_file = store / RESTAT_CURSOR
+    try:
+        after = cursor_file.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        after = ""
+    start = bisect.bisect_right(multi, after) if after else 0
+    order = multi[start:] + multi[:start]
     base = str(root)
-    for rel, v in files.items():
-        if len(v) > 3 and v[3] > 1 and rel in seen:
-            try:
-                st = os.stat(os.path.join(base, *rel.split("/")))
-            except OSError:
-                continue
+    stop = _walk_clock() + RESTAT_BOX
+    done = 0
+    for done, rel in enumerate(order, 1):
+        try:
+            st = os.stat(os.path.join(base, *rel.split("/")))
+        except OSError:
+            st = None
+        if st is not None:
             seen[rel] = (st.st_size, st.st_mtime_ns)
+        if done < len(order) and _walk_clock() >= stop:
+            break
+    try:
+        if done < len(order):
+            cursor_file.write_bytes(order[done - 1].encode("utf-8"))
+            audit.log(HOOK, "RESTAT-PARTIAL", "{} of {} hard-linked script(s) re-checked inside the {:g} s cap -- "
+                      "the rest at the next comparison".format(done, len(order), RESTAT_BOX))
+        elif cursor_file.exists():
+            cursor_file.unlink()
+    except OSError:
+        pass
+    return done, len(order)
 
 
 def _take_locked(root, store, audit, command, now, deadline, rate, prune_due, walk_deadline, box_end):
@@ -390,7 +425,7 @@ def _take_locked(root, store, audit, command, now, deadline, rate, prune_due, wa
     if not (isinstance(idx, dict) and idx.get("v") == 1 and isinstance(idx.get("files"), dict)):
         idx = {"v": 1, "files": {}, "head_base": None, "dirty": False, "pruned": 0}
     files = idx["files"]
-    _restat_multilink(root, files, seen)
+    _restat_multilink(root, store, files, seen, audit)
     todo = [r for r, st in seen.items() if (files.get(r) or [None, None])[:2] != list(st)]
     # Review I3: newest first -- the scripts being experimented on are the recent ones, so a time-boxed baseline
     # captures them before the long tail of untouched mod scripts.
