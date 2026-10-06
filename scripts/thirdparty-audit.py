@@ -598,7 +598,7 @@ REGISTRY = [
     {"name": "ReSaver (FallrimTools)", "upstream": ("nexus", "skyrimspecialedition", 5031)},
     {"name": "JDK (recommended LTS)", "pins": [("regex", "docs/installing-tools.md", r"JDK (?P<v>\d+) LTS recommended")],
      "upstream": ("eol", "eclipse-temurin", "major"), "refs": [{"pattern": r"JDK (?P<v>\d+) LTS recommended", "compare": "major"}]},
-    {"name": "NifSkope", "upstream": ("github-pre", "niftools/nifskope")},
+    {"name": "NifSkope", "upstream": ("github", "niftools/nifskope")},   # what docs link (not the hexabits fork)
     {"name": "Blender (4.2 LTS)", "upstream": ("blender", "4.2")},
     {"name": "Cathedral Assets Optimizer", "upstream": ("nexus", "skyrimspecialedition", 23316)},
     {"name": "BSArch", "upstream": ("nexus", "newvegas", 64745)},
