@@ -4,7 +4,8 @@
 // Usage: node diff-esp.js "Original.esp" "Modified.esp"
 // Both ESPs must be in your Skyrim Data/ folder.
 //
-// Requires: xeditlib (npm install xeditlib)
+// Requires: xeditlib, pinned (docs/installing-tools.md), from the toolkit root:
+//   npm install --no-save --ignore-scripts github:WingedGuardian/xeditlib#19bef0976738a9db0760d45975263e2d7eb76062 koffi@2.15.1
 
 const xelib = require('xeditlib');
 

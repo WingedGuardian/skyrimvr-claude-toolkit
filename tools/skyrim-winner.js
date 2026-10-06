@@ -77,7 +77,7 @@ function loadXelib() {
     // "installed somewhere Node will not look".
     if (!xelib) {
         const brief = errors.map(e => e.split('Require stack')[0].trim()).join(' | ');
-        die('xeditlib is not installed -- run "npm install github:WingedGuardian/xeditlib" '
+        die('xeditlib is not installed -- run "npm install --no-save --ignore-scripts github:WingedGuardian/xeditlib#19bef0976738a9db0760d45975263e2d7eb76062 koffi@2.15.1" '
             + 'from the toolkit ROOT (every bundled script finds it by upward lookup). '
             + 'Tried: ' + brief);
     }
