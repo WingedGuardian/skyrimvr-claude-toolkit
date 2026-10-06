@@ -68,3 +68,22 @@ def test_the_smoke_script_fails_when_setup_ignores_the_agent(tmp_path):
 def test_the_smoke_script_refuses_a_bad_value(tmp_path):
     r = _run(tmp_path, "gpt")
     assert r.returncode == 2 and "usage" in r.stderr
+
+
+# Linux bash has no `pwd -W`: emulated in Git Bash by a function that refuses -W, as the review measured it. Both
+# setup.sh and the smoke then see a non-drive root, which is the ubuntu CI leg (T7 review I1: three of those legs
+# were red and nothing had run them).
+LINUXISH = 'pwd(){ if [ "${1:-}" = -W ]; then return 1; fi; builtin pwd "$@"; }; export -f pwd; '
+
+
+@pytest.mark.parametrize("value", ["all", "codex"])
+def test_the_linux_legs_pass(tmp_path, value):
+    script = (REPO / "scripts" / "setup-smoke.sh").as_posix()
+    r = subprocess.run([BASH, "-c", LINUXISH + 'bash "$0" "$1" "$2"', script, value, (tmp_path / "w").as_posix()],
+                       capture_output=True, text=True, errors="replace", timeout=600)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-2000:]
+    assert "setup-smoke [%s]: 0 failure(s)" % value in r.stdout
+    if value == "codex":
+        assert "--agent codex off Windows exits 3" in r.stdout
+    else:
+        assert "AGENTS.md filled in" in r.stdout and ".codex/hooks.json left unrendered" in r.stdout

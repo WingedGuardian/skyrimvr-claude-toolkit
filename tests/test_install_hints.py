@@ -20,7 +20,8 @@ from conftest import REPO
 
 SCANNED = ["setup.sh", "README.md", "docs/installing-tools.md", "docs/getting-started.md", "tools/toolchain-check.sh"]
 WINDOW = 2   # the label may sit on the command's line or up to two lines above it (setup.sh prints it first)
-ANY_WINGET = re.compile(r"\bwinget\s+(?P<verb>install|upgrade|update)\b")
+# winget's `add` is an alias of install; `winget.exe` is the same program (T7 review M3).
+ANY_WINGET = re.compile(r"\bwinget(?:\.exe)?\s+(?P<verb>install|add|upgrade|update)\b", re.I)
 FORM = re.compile(r"winget install --id (?P<id>[A-Za-z0-9.]+) --exact --version "
                   r"(?P<v>\d+(?:\.\d+){1,3}|%s|\$\{?[A-Z_]+\}?) --no-upgrade(?![\w-])")
 OTHER = re.compile(r"\b(?:choco|scoop)\s+install\b|\bmsiexec\b|\bInstall-Package\b|\bInstall-Module\b")
@@ -48,13 +49,19 @@ def allowlisted(pkg_id: str) -> bool:
     return False
 
 
+def _comment(rel: str, line: str) -> bool:
+    """A line the user never sees: a shell comment, or a Markdown/HTML comment. It can neither be a hint nor label one."""
+    s = line.strip()
+    return (rel.endswith(".sh") and s.startswith("#")) or (s.startswith("<!--") and s.endswith("-->"))
+
+
 def problems(rel: str, text: str) -> list:
     out = []
     lines = text.splitlines()
     for i, line in enumerate(lines):
-        if rel.endswith(".sh") and line.lstrip().startswith("#"):
+        if _comment(rel, line):
             continue
-        ctx = " ".join(lines[max(0, i - WINDOW):i + 1]).lower()
+        ctx = " ".join(x for x in lines[max(0, i - WINDOW):i + 1] if not _comment(rel, x)).lower()
         if OTHER.search(line):
             out.append("%s:%d: a host installer outside the two forms: %s" % (rel, i + 1, line.strip()[:120]))
         for m in ANY_WINGET.finditer(line):
@@ -105,11 +112,22 @@ GOOD_MANUAL = ("Manual step, for you to run (an agent may not install this): "
     ("For you to run: winget install --id Python.Python.3.7 --exact --version 3.7.9 --no-upgrade", True),  # < floor
     ("For you to run: winget install --id OpenJS.NodeJS.Current --exact --version 25.0.0 --no-upgrade", True),
     ("For you to run: winget upgrade --id OpenJS.NodeJS.LTS --exact --version 24.19.0", True),
+    ("For you to run: winget add --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade", True),   # alias
+    ("For you to run: winget.exe install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade", True),
     ("choco install nodejs-lts --version 24.19.0", True),
     ("msiexec /i node-v24.19.0-x64.msi", True),
 ])
 def test_the_scan_can_fail(line, bad):
     assert bool(problems("README.md", "intro\n" + line + "\n")) is bad, problems("README.md", line)
+
+
+def test_a_comment_is_not_a_label():
+    """The user never sees a comment, so `# for you to run` cannot be the label a hint needs."""
+    cmd = 'echo "      winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade"'
+    assert problems("setup.sh", "echo 'For you to run:'\n" + cmd + "\n") == []
+    assert problems("setup.sh", "# for you to run\n" + cmd + "\n") != []
+    md = "`winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade`"
+    assert problems("README.md", "<!-- for you to run -->\n" + md + "\n") != []
 
 
 def test_a_label_two_lines_up_counts_and_three_does_not():

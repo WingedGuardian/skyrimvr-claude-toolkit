@@ -18,6 +18,8 @@ GAME="$(cd "$GAME" && pwd)"          # tar reads `C:\...` as host:path; the shel
 [ -z "$(ls -A "$GAME")" ] || { echo "setup-smoke: $GAME is not empty" >&2; exit 2; }
 tar -C "$REPO" --exclude=./.git --exclude=./node_modules --exclude=./.pytest_cache -cf - . | tar -C "$GAME" -xf - || exit 2
 : > "$GAME/SkyrimVR.exe"
+# A vanilla master, so a lock applied unasked would have something to lock (and the check below could go red).
+mkdir -p "$GAME/Data" && printf 'TES4' > "$GAME/Data/Skyrim.esm"
 FAILS=0
 fail() { echo "::error::setup-smoke [$AGENT]: $*"; FAILS=$((FAILS + 1)); }
 ok() { echo "  ok: $*"; }
@@ -47,24 +49,31 @@ case "$AGENT" in auto) ;; both) [ "$sel" = all ] || fail "--agent both configure
     *) [ "$sel" = "$AGENT" ] || fail "--agent $AGENT configured '$sel'" ;; esac
 case "$sel" in claude) WANT_C=1; WANT_X="" ;; codex) WANT_C=""; WANT_X=1 ;; all) WANT_C=1; WANT_X=1 ;;
     *) fail "no 'configuring:' line in the output"; WANT_C=""; WANT_X="" ;; esac
-[ -n "$WIN" ] || WANT_X=""          # Codex is configured on Windows only
+# AGENTS.md serves Codex AND every other agent, so it is filled whenever Codex is selected, on any OS; only Codex's
+# hooks (.codex/hooks.json) are Windows-only.
+WANT_HOOKS="$WANT_X"; [ -n "$WIN" ] || WANT_HOOKS=""
 if has_marks CLAUDE.md; then [ -z "$WANT_C" ] && ok "CLAUDE.md left as extracted" || fail "CLAUDE.md not filled in"
 else [ -n "$WANT_C" ] && ok "CLAUDE.md filled in" || fail "CLAUDE.md filled in for an unselected agent"; fi
 if has_marks AGENTS.md; then [ -z "$WANT_X" ] && ok "AGENTS.md left as extracted" || fail "AGENTS.md not filled in"
 else [ -n "$WANT_X" ] && ok "AGENTS.md filled in" || fail "AGENTS.md filled in for an unselected agent"; fi
 if grep -q '{{CODEX_ROOT' "$GAME/.codex/hooks.json"; then
-    [ -z "$WANT_X" ] && ok ".codex/hooks.json left unrendered" || fail ".codex/hooks.json not rendered"
+    [ -z "$WANT_HOOKS" ] && ok ".codex/hooks.json left unrendered" || fail ".codex/hooks.json not rendered"
     printf '%s\n' "$out" | grep -q "Codex:       NOT CONFIGURED" && ok "says Codex is not configured" \
         || fail "Codex is unconfigured and setup does not say so"
 else
-    [ -n "$WANT_X" ] && ok ".codex/hooks.json rendered" || fail ".codex/hooks.json rendered for an unselected agent"
+    [ -n "$WANT_HOOKS" ] && ok ".codex/hooks.json rendered" || fail ".codex/hooks.json rendered for an unselected agent"
 fi
 for h in "$GAME"/.claude/hooks/*.sh "$GAME"/.codex/hooks/skyguard-entry.*; do
     grep -q '{{PYTHON_PATH}}' "$h" && fail "${h#"$GAME"/}: interpreter placeholder left"
 done
 [ -s "$GAME/skyrim-paths.env" ] && grep -q "^SKYRIM_GAME_ROOT='" "$GAME/skyrim-paths.env" \
     && ok "skyrim-paths.env written at the toolkit root" || fail "no usable skyrim-paths.env at the toolkit root"
-[ ! -e "$GAME/.skyguard/lock.json" ] && ok "no lock without --lock" || fail "the lock was applied without --lock"
+if printf '%s\n' "$out" | grep -q "Layer 2 lock: OFF (the default)" && ! printf '%s\n' "$out" | grep -q "Applying the Layer 2 lock" \
+   && [ ! -e "$GAME/.skyguard/lock.json" ] && [ -w "$GAME/Data/Skyrim.esm" ]; then
+    ok "no lock without --lock"
+else
+    fail "the lock was attempted or applied without --lock"
+fi
 
 # 3. Idempotent: a second run changes nothing.
 first=$(snapshot)

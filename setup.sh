@@ -56,6 +56,13 @@ GAME_ROOT_WIN=$(pwd -W 2>/dev/null || pwd)
 GAME_ROOT_WIN=$(printf '%s' "$GAME_ROOT_WIN" | tr '\134' '/')
 # The toolkit's Codex support is Windows-only: its hooks are rendered for a drive-letter root.
 case "$GAME_ROOT_WIN" in [A-Za-z]:/*) CODEX_WIN=1 ;; *) CODEX_WIN="" ;; esac
+# The root as a native Python opens it (every tools/*.py call below): the C:/ form wherever Git Bash's cygpath
+# exists -- the same as `pwd -W` normally -- else the shell's own path (Linux).
+PY_ROOT="$GAME_ROOT_WIN"
+if command -v cygpath >/dev/null 2>&1; then
+    PY_ROOT=$(cygpath -m "$GAME_DIR" 2>/dev/null | tr -d '\r') || PY_ROOT="$GAME_ROOT_WIN"
+    [ -n "$PY_ROOT" ] || PY_ROOT="$GAME_ROOT_WIN"
+fi
 
 # --- Which agents this run configures --------------------------------------------------------------------
 # auto = every agent found on PATH. When none is found: all of them -- an agent installed later, or installed
@@ -378,8 +385,8 @@ elif [ -z "$PY_FOUND" ]; then
     echo "  Migration skipped: it needs Python 3.8+. Your files from before the update are in"
     echo "  .claude/backups/ (pre-update-* if you ran tools/pre-update-snapshot.sh). Re-run setup.sh after installing Python."
 else
-    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B "$GAME_ROOT_WIN/tools/migrate-3x.py" \
-        --root "$GAME_ROOT_WIN" && MIG_RC=0 || MIG_RC=$?
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B "$PY_ROOT/tools/migrate-3x.py" \
+        --root "$PY_ROOT" && MIG_RC=0 || MIG_RC=$?
     if [ "$MIG_RC" != 0 ]; then
         echo "  !! The 3.x migration reported a problem (exit $MIG_RC, above). Your 3.x files are in .claude/backups/;"
         echo "  !! setup continues."
@@ -391,7 +398,10 @@ fi
 # it may be redirected (OneDrive "Back up your folders", a manual Properties > Location move,
 # or a GPO folder redirect all update the same Known Folder, none of which live under
 # C:/Users/$USERNAME/Documents in that case).
-DOCUMENTS_DIR=$(powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')" 2>/dev/null | tr -d '\r')
+# UTF-8, set INSIDE the probe: piped, Windows PowerShell answers in the OEM code page (cp437 here), so a
+# "Dokumente – Müller" folder arrived as cp437 bytes, landed in skyrim-paths.env, and the guard's UTF-8 reader
+# refused every command (MEASURED, Plan 8 T7 review C1). This spelling emits UTF-8 with no BOM (MEASURED).
+DOCUMENTS_DIR=$(powershell -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Environment]::GetFolderPath('MyDocuments')" 2>/dev/null | tr -d '\r')
 [ -z "$DOCUMENTS_DIR" ] && DOCUMENTS_DIR="C:/Users/$USERNAME/Documents"
 # Normalize backslashes to forward slashes -- via tr, not bash's ${var//\\//}, which was
 # unreliable across the bash builds we tested (Cygwin bash silently no-ops on it).
@@ -632,51 +642,67 @@ sq() {
 }
 PATHS_ENV="$GAME_DIR/skyrim-paths.env"
 PATHS_ENV_3X="$GAME_DIR/.claude/skyrim-paths.env"
-if [ -f "$PATHS_ENV_3X" ] && [ ! -f "$PATHS_ENV" ]; then
-    # The state the session-start notice describes (tools/skyguard/paths.py DEPRECATION); this run fixes it.
-    echo "  NOTICE: your paths file is still at the old location, .claude/skyrim-paths.env. This toolkit reads skyrim-paths.env in the toolkit folder first and falls back to the old one; re-run setup.sh to move it."
-    echo "  (this run writes skyrim-paths.env in the toolkit folder now)"
+PATHS_BAD=""
+# The guard's OWN reader (tools/skyguard/paths.py), run on the files as data -- never by sourcing them -- so what
+# setup checks is what the guard will read. Output is UTF-8 bytes, whatever the console's code page.
+#   skypaths notice   the session-start notice for this install, verbatim (paths.legacy_notice), or nothing
+#   skypaths readback the six values the guard reads from <root>/skyrim-paths.env, one per line (exit 3: malformed)
+#   skypaths legacy   each protected folder the 3.x file still ADDS over the root file, as KEY=value (the reader's
+#                     own union, read_install); nothing printed = it adds nothing
+skypaths() {
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B -c '
+import os, sys
+mode, root = sys.argv[1], sys.argv[2]
+sys.path.insert(0, os.path.join(root, "tools"))
+from skyguard import paths
+lines = []
+if mode == "notice":
+    lines = [x for x in [paths.legacy_notice(root)] if x]
+elif mode == "readback":
+    cfg = paths.read_config(os.path.join(root, paths.PATHS_FILE), {})
+    if cfg.malformed:
+        sys.exit(3)
+    for k in ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR", "SKYRIM_MO2_MODS",
+              "SKYRIM_MO2_OVERWRITE", "SKYGUARD_PYTHON"):
+        lines.append((cfg.file.get(k) or ("",))[0])
+else:
+    cfg = paths.read_install(root, {})
+    if cfg.legacy:
+        own = paths.read_config(os.path.join(root, paths.PATHS_FILE), {})
+        for k in paths.PROTECTION_KEYS:
+            lines += ["%s=%s" % (k, v) for v in cfg.file.get(k, ()) if v not in own.file.get(k, ())]
+sys.stdout.buffer.write("".join(x + "\n" for x in lines).encode("utf-8"))
+' "$1" "$PY_ROOT"
+}
+if [ -f "$PATHS_ENV_3X" ] && [ ! -f "$PATHS_ENV" ] && [ -n "$PY_FOUND" ]; then
+    # The state the session-start notice describes, in the reader's own words; this run writes the root file.
+    _notice=$(skypaths notice 2>/dev/null) || _notice=""
+    if [ -n "$_notice" ]; then
+        printf '  %s\n' "$_notice"
+        echo "  (this run writes skyrim-paths.env in the toolkit folder now)"
+    fi
 fi
-# The 3.x file under the 4.0 reader: its PROTECTION roots are added to the root file's (a union -- a stale file
-# can add a root, never hide one); everything else comes from the root file. So it is never silently left to
-# drift. When it declares no folder the root file does not, it adds nothing: it is retired -- MOVED (not
-# deleted) into .claude/backups/skyrim-paths-3x/<stamp>/ and the move verified. When it declares more, it is
-# kept, because it still protects those folders, and they are named. Kept too when the comparison cannot be
-# made (no Python, an unreadable file) or the 3.x migration did not finish (it reads this file).
+# The 3.x file under the 4.0 reader: its well-formed PROTECTED folders are added to the root file's (a union -- a
+# stale file can add a folder, never hide one); nothing else of it is read. So it must not be left to drift: when
+# the reader says it adds nothing, it is retired -- MOVED (not deleted) into .claude/backups/skyrim-paths-3x/<stamp>/
+# and the move verified. When it adds a folder it is kept, and the folders are named. It is kept as well until the
+# 3.x migration has run here (tools/migrate-3x.py reads it as the 3.9 record), and when no Python can ask the reader.
 retire_3x_paths() {
     local extra rc stamp dest
     [ -f "$PATHS_ENV_3X" ] || return 0
-    if [ -z "$PY_FOUND" ] || [ "${MIG_RC:-0}" != 0 ]; then
-        echo "  .claude/skyrim-paths.env (the 3.x location) is kept: it still ADDS its folders to what the guard protects."
+    if [ -z "$PY_FOUND" ] || [ "${MIG_RC-unset}" != 0 ]; then
+        echo "  .claude/skyrim-paths.env (the 3.x location) is kept until the 3.x migration has run here (it reads"
+        echo "  that file). Meanwhile the guard still adds any protected folder it lists that skyrim-paths.env does not."
         return 0
     fi
-    # Both files read the way the guard reads them (as data, never sourced); each folder the 3.x file adds is printed.
-    extra=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B -c '
-import os, sys
-root = sys.argv[1]
-sys.path.insert(0, os.path.join(root, "tools"))
-from skyguard import paths
-new = paths.read_config(os.path.join(root, "skyrim-paths.env"), {})
-old = paths.read_config(os.path.join(root, ".claude", "skyrim-paths.env"), {})
-if new.malformed or old.malformed:
-    sys.exit(3)
-def key(v):
-    n = (paths.norm_abs(v) or v).replace(chr(92), "/").rstrip("/")
-    return n.lower() if os.name == "nt" else n
-for k in paths.ENV_KEYS:
-    have = {key(v) for v in new.values(k)}
-    for v in old.values(k):
-        if key(v) not in have:
-            print("%s=%s" % (k, v))
-' "$GAME_ROOT_WIN" 2>/dev/null) && rc=0 || rc=$?
+    extra=$(skypaths legacy 2>/dev/null) && rc=0 || rc=$?
     if [ "$rc" != 0 ]; then
-        echo "  .claude/skyrim-paths.env (the 3.x location) could not be compared with skyrim-paths.env, so it is kept:"
-        echo "  it still ADDS its folders to what the guard protects until you remove it."
+        echo "  .claude/skyrim-paths.env (the 3.x location) could not be compared by the guard's reader, so it is kept."
         return 0
     fi
     if [ -n "$extra" ]; then
-        echo "  .claude/skyrim-paths.env (the 3.x location) declares folders skyrim-paths.env does not, and the guard"
-        echo "  still protects them (the two files are combined) until you remove it:"
+        echo "  .claude/skyrim-paths.env (the 3.x location) lists protected folders skyrim-paths.env does not, and the"
+        echo "  guard still protects them (it combines the two files) until you remove it:"
         printf '%s\n' "$extra" | sed 's/^/    /'
         echo "  Keep it if those folders should stay protected. Otherwise retire it (moved, not deleted):"
         echo "    mkdir -p .claude/backups/skyrim-paths-3x && mv .claude/skyrim-paths.env .claude/backups/skyrim-paths-3x/"
@@ -687,11 +713,11 @@ for k in paths.ENV_KEYS:
     # A rename keeps every byte, and -n never replaces an earlier copy. Verified: the old path gone, the copy there.
     if mkdir -p "$dest" && mv -n "$PATHS_ENV_3X" "$dest/skyrim-paths.env" && [ ! -e "$PATHS_ENV_3X" ] \
        && [ -f "$dest/skyrim-paths.env" ]; then
-        echo "  Retired .claude/skyrim-paths.env (the 3.x location): it declared no folder skyrim-paths.env does not."
-        echo "  Moved, not deleted: .claude/backups/skyrim-paths-3x/$stamp/skyrim-paths.env"
+        echo "  Retired .claude/skyrim-paths.env (the 3.x location): the guard reads nothing from it that"
+        echo "  skyrim-paths.env does not already say. Moved, not deleted: .claude/backups/skyrim-paths-3x/$stamp/skyrim-paths.env"
     else
         echo "  .claude/skyrim-paths.env (the 3.x location) could not be moved into .claude/backups/, so it is kept"
-        echo "  (it adds nothing the root file lacks)."
+        echo "  (the guard reads nothing from it that skyrim-paths.env does not already say)."
     fi
 }
 # Written beside it, then renamed: a crash never leaves half a file, or an empty one, in place.
@@ -727,14 +753,23 @@ else
             set -a; . "$PATHS_ENV" 2>/dev/null
             printf '%s\n%s\n%s\n%s\n%s\n%s\n' "${SKYRIM_GAME_ROOT:-}" "${SKYRIM_CONFIG_DIR:-}" "${SKYRIM_LOADORDER_DIR:-}" \
                 "${SKYRIM_MO2_MODS:-}" "${SKYRIM_MO2_OVERWRITE:-}" "${SKYGUARD_PYTHON:-}" )
-    if [ "$_want" = "$_got" ]; then
-        echo "  Wrote: skyrim-paths.env"
-    else
-        echo "  WARNING: skyrim-paths.env does not parse as shell."
-        echo "           The hooks will still guard this folder, but not the config"
-        echo "           directory. Check for unusual characters in your paths."
+    # ...and what the GUARD reads (its own parser, UTF-8). Sourcing alone passed a file of cp437 bytes that the
+    # guard cannot decode, which makes it refuse every command (T7 review C1). No Python = no hook runs anyway.
+    _guard="$_want"; _grc=0
+    if [ -n "$PY_FOUND" ]; then
+        _guard=$(skypaths readback 2>/dev/null) && _grc=0 || _grc=$?
     fi
-    retire_3x_paths
+    if [ "$_want" = "$_got" ] && [ "$_grc" = 0 ] && [ "$_want" = "$_guard" ]; then
+        echo "  Wrote: skyrim-paths.env"
+        retire_3x_paths
+    else
+        PATHS_BAD=1
+        echo ""
+        echo "  !! skyrim-paths.env does NOT read back as written ($( [ "$_grc" != 0 ] && echo "the guard's reader failed, exit $_grc" \
+            || echo "a value came back different")). While the guard cannot read it, it REFUSES EVERY COMMAND."
+        echo "  !! The cause is a character in one of the paths above (an encoding, or one the guard refuses)."
+        echo "  !! Fix that path (or set the folder by hand in skyrim-paths.env) and re-run: bash setup.sh"
+    fi
 fi
 
 # --- Configure the Codex hook definitions (.codex/hooks.json) ---
@@ -828,6 +863,10 @@ fi
 # CLAUDE.md for Claude Code, AGENTS.md for Codex and other agents. Only the selected agents' files are
 # filled; the other is kept exactly as extracted. Every placeholder is filled separately, so a file an
 # interrupted run left half-done (root filled, config dir not) is completed by the next run.
+# A value spliced into sed's REPLACEMENT is escaped first: `&` means "the whole match" there (a root holding
+# "Skyrim & Mods" re-inserted the placeholder, so CLAUDE.md grew on every run), and `\` and the `|` delimiter are
+# special too. The same escape the interpreter path gets above.
+sed_repl() { printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'; }
 DOC_PLACEHOLDERS='{{GAME_ROOT}}\|{{CONFIG_DIR}}\|{{LOADORDER_DIR}}\|{{SKYRIM_FOLDER}}\|{{MOD_MANAGER_PATHS}}'
 for DOC in CLAUDE.md AGENTS.md; do
 case "$DOC" in
@@ -843,10 +882,10 @@ echo "Configuring $DOC..."
 if [ ! -f "$GAME_DIR/$DOC" ]; then
     echo "  MISSING: $DOC"
 elif grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/$DOC"; then
-    sed -i "s|{{GAME_ROOT}}|$GAME_ROOT_WIN|g" "$GAME_DIR/$DOC"
-    sed -i "s|{{CONFIG_DIR}}|$CONFIG_DIR|g" "$GAME_DIR/$DOC"
-    sed -i "s|{{LOADORDER_DIR}}|$LOADORDER_DIR|g" "$GAME_DIR/$DOC"
-    sed -i "s|{{SKYRIM_FOLDER}}|$SKYRIM_FOLDER|g" "$GAME_DIR/$DOC"
+    sed -i "s|{{GAME_ROOT}}|$(sed_repl "$GAME_ROOT_WIN")|g" "$GAME_DIR/$DOC"
+    sed -i "s|{{CONFIG_DIR}}|$(sed_repl "$CONFIG_DIR")|g" "$GAME_DIR/$DOC"
+    sed -i "s|{{LOADORDER_DIR}}|$(sed_repl "$LOADORDER_DIR")|g" "$GAME_DIR/$DOC"
+    sed -i "s|{{SKYRIM_FOLDER}}|$(sed_repl "$SKYRIM_FOLDER")|g" "$GAME_DIR/$DOC"
 
     # Mod-manager block. Built in a temp file and spliced in with sed's `r`, so no amount of
     # punctuation in a path can break the substitution.
@@ -917,9 +956,9 @@ if [ -f "$GAME_DIR/.devcontainer/devcontainer.json" ] && grep -q '{{DEVCONTAINER
         # or overwrite catcher -- point all three at what actually exists.
         DC_MODS="$GAME_ROOT_WIN/Data"; DC_PROFILE="$CONFIG_DIR"; DC_OVERWRITE="$GAME_ROOT_WIN/Data"
     fi
-    sed -i "s|{{DEVCONTAINER_MODS_MOUNT}}|$DC_MODS|g" "$GAME_DIR/.devcontainer/devcontainer.json"
-    sed -i "s|{{DEVCONTAINER_PROFILE_MOUNT}}|$DC_PROFILE|g" "$GAME_DIR/.devcontainer/devcontainer.json"
-    sed -i "s|{{DEVCONTAINER_OVERWRITE_MOUNT}}|$DC_OVERWRITE|g" "$GAME_DIR/.devcontainer/devcontainer.json"
+    sed -i "s|{{DEVCONTAINER_MODS_MOUNT}}|$(sed_repl "$DC_MODS")|g" "$GAME_DIR/.devcontainer/devcontainer.json"
+    sed -i "s|{{DEVCONTAINER_PROFILE_MOUNT}}|$(sed_repl "$DC_PROFILE")|g" "$GAME_DIR/.devcontainer/devcontainer.json"
+    sed -i "s|{{DEVCONTAINER_OVERWRITE_MOUNT}}|$(sed_repl "$DC_OVERWRITE")|g" "$GAME_DIR/.devcontainer/devcontainer.json"
     echo "  Configured .devcontainer/devcontainer.json with your mod paths."
     echo "  Run ./devshell-docker.sh (Docker only) or ./devshell.sh (needs the devcontainer CLI)."
 fi
@@ -963,8 +1002,8 @@ if [ -n "$WANT_LOCK" ]; then
         LOCK_RC=2
         echo "  !! LOCK NOT APPLIED: it needs Python 3.8+. Install it and re-run: bash setup.sh --lock"
     else
-        MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B "$GAME_ROOT_WIN/tools/skyguard" lock lock \
-            --root "$GAME_ROOT_WIN" && LOCK_RC=0 || LOCK_RC=$?
+        MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B "$PY_ROOT/tools/skyguard" lock lock \
+            --root "$PY_ROOT" && LOCK_RC=0 || LOCK_RC=$?
         if [ "$LOCK_RC" = 0 ]; then
             echo "  The lock is on. Unlock one file with: bash tools/skyguard.sh lock unlock <file>"
         else
@@ -1082,6 +1121,11 @@ SETUP_RC=0
 if [ "$AGENT_SEL" = "codex" ] && { [ "$CODEX_STATE" != "configured" ] || [ "$AGENTS_DOC_STATE" != "configured" ]; }; then
     echo ""
     echo "!! --agent codex: Codex is NOT configured (see above), so this run did not do what it was asked."
+    SETUP_RC=1
+fi
+if [ -n "$PATHS_BAD" ]; then
+    echo ""
+    echo "!! skyrim-paths.env could not be read back as the guard reads it (see above): the guard refuses every command."
     SETUP_RC=1
 fi
 if [ -n "$WANT_LOCK" ] && [ "$LOCK_RC" != 0 ]; then

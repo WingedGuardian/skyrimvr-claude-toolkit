@@ -141,7 +141,9 @@ def run_setup(cwd: Path, env_overrides: dict | None = None, shim_path: bool = Fa
         [BASH, "setup.sh", *args],
         cwd=str(cwd), env=env,
         stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=SETUP_TIMEOUT,
+        # errors="replace": a path setup echoes may hold bytes the locale codec cannot decode (a cp437 probe);
+        # without it the reader thread dies and the test sees stdout=None instead of the message it asserts on.
+        capture_output=True, text=True, errors="replace", timeout=SETUP_TIMEOUT,
     )
 
 

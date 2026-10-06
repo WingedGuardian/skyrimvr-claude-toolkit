@@ -106,14 +106,17 @@ AGENT_CASES = {
 @pytest.mark.parametrize("value", sorted(AGENT_CASES))
 def test_each_value_configures_exactly_its_agents(game_dir, value):
     claude, codex = AGENT_CASES[value]
-    if codex and not WIN:
-        pytest.skip("Codex is configured on Windows only")
+    if value == "codex" and not WIN:
+        pytest.skip("--agent codex off Windows is refused (test_codex_by_name_off_windows_...)")
     r = run_setup(game_dir, args=("--agent", value))
     assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
     out = r.stdout
     assert configured(game_dir, "CLAUDE.md") is claude
+    # AGENTS.md serves Codex and every other agent: filled whenever Codex is selected, on any OS (T7 review I1).
     assert configured(game_dir, "AGENTS.md") is codex
-    assert codex_rendered(game_dir) is codex
+    # Only Codex's hooks are Windows-only.
+    assert codex_rendered(game_dir) is (codex and WIN)
+    codex = codex and WIN
     # Every guard file runs the one engine on the one interpreter, whichever agent was selected.
     for rel in GUARD_FILES:
         assert "{{PYTHON_PATH}}" not in (game_dir / rel).read_text(encoding="utf-8"), rel
@@ -124,7 +127,8 @@ def test_each_value_configures_exactly_its_agents(game_dir, value):
         assert "CLAUDE.md: not configured by this run" in out
         assert not (game_dir / ".claude" / "settings.local.json").exists(), "a Claude-only file was created"
     if not codex:
-        assert "Codex:       NOT CONFIGURED" in out and "AGENTS.md: not configured by this run" in out
+        assert "Codex:       NOT CONFIGURED" in out
+        assert ("AGENTS.md: not configured by this run" in out) is (not AGENT_CASES[value][1])
         if WIN:
             assert "WITHOUT the toolkit's hooks" in out and "bash setup.sh --agent codex" in out
         else:
@@ -330,16 +334,39 @@ def test_a_3x_paths_file_that_adds_a_folder_is_kept_and_its_folders_named(game_d
     assert r.returncode == 0
     assert legacy.read_bytes() == before, "a 3.x file that still adds protection was changed"
     assert not _retired(game_dir)
-    assert "still protects them (the two files are combined)" in r.stdout and "SKYRIM_CONFIG_DIR=D:/Old INIs" in r.stdout
+    assert "still protects them (it combines the two files)" in r.stdout and "SKYRIM_CONFIG_DIR=D:/Old INIs" in r.stdout
     assert "wins" not in r.stdout, "the union reader means the root file does not 'win' for protected folders"
 
 
-def test_a_3x_paths_file_that_cannot_be_compared_is_kept(game_dir):
-    """A value the guard cannot read as data (an expansion) makes the comparison impossible: keep, never retire."""
-    legacy, before = _legacy(game_dir, "SKYRIM_CONFIG_DIR=$HOME/My INIs\n")
+@pytest.mark.parametrize("body", [b"SKYRIM_CONFIG_DIR=$HOME/My INIs\n", b"SKYRIM_CONFIG_DIR='D:/M\x81ller'\n"],
+                         ids=["malformed", "not-utf8"])
+def test_a_3x_paths_file_the_guard_reads_nothing_from_is_retired(game_dir, body):
+    """The union reader takes only WELL-FORMED protected values from the 3.x file and ignores one it cannot decode,
+    so these add nothing: retired by a move like any other, never deleted."""
+    legacy, _ = _legacy(game_dir)
+    legacy.write_bytes(legacy.read_bytes() + body)
+    before = legacy.read_bytes()
+    r = run_setup(game_dir)
+    assert not legacy.exists(), r.stdout[-2000:]
+    assert len(_retired(game_dir)) == 1 and _retired(game_dir)[0].read_bytes() == before
+
+
+def test_a_3x_paths_file_differing_only_in_a_folder_the_guard_does_not_protect_is_retired(game_dir):
+    """SKYRIM_LOADORDER_DIR is not a protection key: the union reader never adds it, so a 3.x file that differs only
+    there adds nothing, and saying "the guard still protects" it would be false (T7 review M1)."""
+    legacy, _ = _legacy(game_dir, "SKYRIM_LOADORDER_DIR='C:/Elsewhere/Skyrim VR'\n")
+    r = run_setup(game_dir)
+    assert not legacy.exists() and len(_retired(game_dir)) == 1, r.stdout[-2000:]
+    assert "still protects" not in r.stdout
+
+
+def test_a_3x_paths_file_is_kept_when_the_migration_tool_is_missing(game_dir):
+    """No tools/migrate-3x.py = the migration has NOT run here: the 3.9 record it reads is kept (T7 review M5)."""
+    legacy, before = _legacy(game_dir)
+    (game_dir / "tools" / "migrate-3x.py").unlink()
     r = run_setup(game_dir)
     assert legacy.read_bytes() == before and not _retired(game_dir), r.stdout[-1500:]
-    assert "could not be compared" in r.stdout
+    assert "kept until the 3.x migration has run" in r.stdout
 
 
 def test_a_3x_paths_file_is_kept_while_the_migration_has_not_finished(game_dir):
@@ -348,7 +375,7 @@ def test_a_3x_paths_file_is_kept_while_the_migration_has_not_finished(game_dir):
     (game_dir / "tools" / "migrate-3x.py").write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
     r = run_setup(game_dir)
     assert legacy.read_bytes() == before and not _retired(game_dir), r.stdout[-1500:]
-    assert "still ADDS its folders" in r.stdout
+    assert "kept until the 3.x migration has run" in r.stdout
 
 
 def test_no_interpreter_line_when_no_python_was_found(game_dir):
@@ -598,3 +625,72 @@ def test_lock_applies_the_lock_to_the_vanilla_masters(tmp_path):
     finally:
         _scrub_lock(game / "Data")
     assert os.access(str(game / "Data" / "Skyrim.esm"), os.W_OK)
+
+
+# ------------------------------------------------------------------------- non-ASCII and `&` in paths --
+
+UTF8_DOCS = "C:/Users/testuser/Dokumente \u2013 M\u00fcller"
+
+
+def _powershell(tmp_path, honour_utf8=True):
+    """A `powershell` that answers like Windows PowerShell piped: the OEM code page (cp437: u-umlaut = 0x81, no
+    en dash), unless the command sets [Console]::OutputEncoding to UTF-8 and `honour_utf8` is on."""
+    utf8 = UTF8_DOCS.encode("utf-8")
+    oem = "C:/Users/testuser/Dokumente M\u00fcller".encode("cp437")
+    def esc(b):
+        return "".join("\\x%02x" % c for c in b)
+    body = ('case "$*" in *"OutputEncoding=[Text.Encoding]::UTF8"*) %s ;; *) printf \'%s\\r\\n\' ;; esac'
+            % (("printf '%s\\r\\n'" % esc(utf8)) if honour_utf8 else ("printf '%s\\r\\n'" % esc(oem)), esc(oem)))
+    return stub_bin(tmp_path, powershell=body)
+
+
+def _cfg(game):
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import paths
+    return paths.read_config(game / "skyrim-paths.env", {})
+
+
+def test_a_non_ascii_documents_folder_reaches_the_paths_file_as_utf8(game_dir, tmp_path):
+    """T7 review C1: piped, PowerShell answered in cp437; the guard's UTF-8 reader then refused EVERY command while
+    setup printed "Wrote:". The probe now asks for UTF-8, and the file is read back with the guard's own reader."""
+    r = run_setup(game_dir, env_overrides={"PATH": path_with(_powershell(tmp_path))}, args=("--agent", "claude"))
+    assert r.returncode == 0, r.stdout[-2500:]
+    assert "Wrote: skyrim-paths.env" in r.stdout
+    cfg = _cfg(game_dir)
+    assert cfg.malformed == () and cfg.values("SKYRIM_CONFIG_DIR") == [UTF8_DOCS + "/My Games/Skyrim VR"]
+    assert UTF8_DOCS + "/My Games/Skyrim VR/" in (game_dir / "CLAUDE.md").read_text(encoding="utf-8")
+
+
+def test_a_paths_file_the_guard_cannot_read_is_a_loud_failure(game_dir, tmp_path):
+    """If the bytes are still not UTF-8 (a PowerShell that ignores the request), setup must not print success."""
+    r = run_setup(game_dir, env_overrides={"PATH": path_with(_powershell(tmp_path, honour_utf8=False))},
+                  args=("--agent", "claude"))
+    assert r.returncode == 1, r.stdout[-2500:]
+    assert "Wrote: skyrim-paths.env" not in r.stdout
+    assert "does NOT read back as written" in r.stdout and "REFUSES EVERY COMMAND" in r.stdout
+
+
+def test_an_ampersand_in_the_root_is_filled_in_once_and_rerun_changes_nothing(tmp_path):
+    """T7 review I2: `&` in sed's replacement re-inserted the placeholder, so CLAUDE.md grew on every run and setup
+    called a configured install NOT CONFIGURED."""
+    game = make_game(tmp_path, name="Skyrim & Mods VR")
+    r = run_setup(game, args=("--agent", "claude"))
+    assert r.returncode == 0, r.stdout[-2000:]
+    assert configured(game, "CLAUDE.md") and "Claude Code: CONFIGURED" in r.stdout
+    line = next(l for l in (game / "CLAUDE.md").read_text(encoding="utf-8").splitlines() if l.startswith("- **Game root"))
+    assert line.count("Skyrim & Mods VR") == 1, line
+    first = tree(game)
+    assert run_setup(game, args=("--agent", "claude")).returncode == 0
+    assert tree(game) == first
+
+
+@windows_only
+def test_a_stale_hooks_json_new_is_removed_even_when_nothing_renders(game_dir):
+    """No Python: nothing is rendered, and a leftover hooks.json.new from an interrupted run is still not left
+    lying beside the definitions (T7 review M6)."""
+    from conftest import no_python_env
+    (game_dir / ".codex" / "hooks.json.new").write_text("{\"stale\": true}", encoding="utf-8")
+    env = no_python_env()
+    run_setup(game_dir, env_overrides={"PATH": env["PATH"] + os.pathsep + os.path.dirname(BASH)},
+              args=("--agent", "codex"))
+    assert not (game_dir / ".codex" / "hooks.json.new").exists()

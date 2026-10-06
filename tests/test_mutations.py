@@ -6780,7 +6780,7 @@ _T7 = [
     ("setup.sh", 'mv -n "$PATHS_ENV_3X" "$dest/skyrim-paths.env"', 'cp "$PATHS_ENV_3X" "$dest/skyrim-paths.env"',
      _T7S + "test_a_3x_paths_file_that_adds_nothing_is_retired_by_a_move", "t7-legacy-retired-by-a-move"),
     # the 3.x hook-in
-    ("setup.sh", "    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B \"$GAME_ROOT_WIN/tools/migrate-3x.py\" \\",
+    ("setup.sh", "    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B \"$PY_ROOT/tools/migrate-3x.py\" \\",
      "    true \\", _T7S + "test_setup_runs_the_migration", "t7-migration-runs"),
     ("setup.sh", '    if [ "$MIG_RC" != 0 ]; then', "    if false; then",
      _T7S + "test_a_failed_migration_is_said_and_setup_carries_on", "t7-migration-failure-said"),
