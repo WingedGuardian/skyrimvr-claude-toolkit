@@ -195,6 +195,28 @@ def test_a_worktree_reads_the_main_trees_root_file(tmp_path):
     assert _fire(wt.as_posix(), _rm(cfg.as_posix() + "/Skyrim.ini")) == ("deny", DEL_CONFIG.format("Skyrim.ini"))
 
 
+def test_an_in_place_restore_reads_the_root_file(tmp_path):
+    """snapcli: --in-place writes only inside the DECLARED roots, so it must find them at the 4.0 location."""
+    from test_recovery_snapshots import Install, put
+    from test_snapshot_restore_cli import cli_run, ids, take_all
+    inst = Install(tmp_path)
+    put(inst.game / "Data" / "Scripts" / "a.pex", b"script a v1")
+    put(inst.game / "skyrim-paths.env", "SKYRIM_CONFIG_DIR='{}'\nSKYRIM_LOADORDER_DIR='{}'\n".format(
+        inst.cfg.as_posix(), inst.lo.as_posix()).encode("utf-8"))
+    take_all(inst)
+    put(inst.lo / "plugins.txt", b"*Broken.esp\n")
+    rc, text = cli_run(inst, "restore", ids(inst, "config")[0], "--path", "plugins.txt", "--in-place")
+    assert rc == 0, text
+    assert (inst.lo / "plugins.txt").read_bytes() == b"*Skyrim.esm\n*Mine.esp\n"
+
+
+@pytest.mark.parametrize("value", ["'py -3'", "python3"], ids=["launcher", "bare-name"])
+def test_a_non_path_skyguard_python_is_kept(value, tmp_path):
+    """SKYGUARD_PYTHON is no root, so the absolute-path rule for roots does not apply (a launcher is legitimate)."""
+    _root_file(tmp_path, "SKYGUARD_PYTHON={}\n".format(value))
+    assert paths.read_install(str(tmp_path), {}).first("SKYGUARD_PYTHON") == value.strip("'")
+
+
 # ---- the deprecation notice: SessionStart only -------------------------------------------------------------------
 
 def test_the_legacy_location_gets_a_notice_at_session_start(tmp_path):
@@ -229,6 +251,22 @@ def test_a_tool_call_never_carries_the_notice(tmp_path):
 def test_the_notice_names_both_locations_and_the_fix():
     assert "skyrim-paths.env" in paths.DEPRECATION and ".claude/skyrim-paths.env" in paths.DEPRECATION
     assert "setup.sh" in paths.DEPRECATION
+
+
+# ---- never tracked, never shipped ----------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("rel", ["skyrim-paths.env", ".claude/skyrim-paths.env"], ids=["root", "legacy"])
+def test_the_paths_file_is_never_tracked_at_either_location(rel):
+    """The release is built from committed objects: an ignored file cannot reach the zip by `git add .`.
+    (tools/check-release-payload.py refuses ANY file of that name in the payload: tests/test_release_payload.py.)"""
+    r = subprocess.run(["git", "check-ignore", "-q", "--no-index", rel], cwd=str(REPO), capture_output=True)
+    assert r.returncode == 0, rel + " is not ignored by .gitignore"
+
+
+def test_a_lookalike_deeper_in_the_tree_is_not_swallowed_by_the_root_ignore():
+    r = subprocess.run(["git", "check-ignore", "-q", "--no-index", "docs/skyrim-paths.env"], cwd=str(REPO),
+                       capture_output=True)
+    assert r.returncode == 1
 
 
 # ---- self-protection covers the new location ----------------------------------------------------------------------

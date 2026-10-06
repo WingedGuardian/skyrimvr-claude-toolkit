@@ -265,8 +265,6 @@ def read_config(path: Path, environ: Mapping[str, str]) -> PathsConfig:
             value = None if (m.group(4) or not flags_ok) else parse_value(m.group(5))
             if value is not None and value != "" and key in ENV_KEYS and norm_abs(value) is None:
                 value = None                                          # a relative root protects nothing
-            if value == "" and key in TOOL_KEYS:
-                continue                                              # empty = not set (setup writes the key always)
             if value is None:
                 if key in PROTECTION_KEYS and (path.name, key) not in bad:
                     bad.append((path.name, key))
