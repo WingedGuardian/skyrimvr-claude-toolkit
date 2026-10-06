@@ -6512,4 +6512,19 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _FXA + "test_a_codex_patch_deleting_a_file_then_adding_the_state_is_refused_under_guards_off",
      "fixA-c1-codex-patch"),
 ]]
+_FXI1 = "tests/test_skyguard_state_text_fallback.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # A-I1: S-SELF-STATE reads an unreadable command's text...
+    ("tools/skyguard/self_rules.py", "        hit = _state_text(command, parsed)", '        hit = ""',
+     _FXI1 + "test_an_unparseable_write_into_the_state_is_s_self_state[unclosed-quote-redirect]", "fixA-i1-fallback"),
+    # ...needing a write construct (a read of the state is not a write)...
+    ("tools/skyguard/self_rules.py", "            if m and _STATE_TEXT_WRITE.search(stmt):", "            if m:",
+     _FXI1 + "test_an_unparseable_command_that_writes_no_state_is_not_s_self_state[read-only-unclosed]",
+     "fixA-i1-needs-a-write"),
+    # ...in the SAME statement as the `.skyguard` path.
+    ("tools/skyguard/self_rules.py", "            if m and _STATE_TEXT_WRITE.search(stmt):",
+     "            if m and _STATE_TEXT_WRITE.search(text):",
+     _FXI1 + "test_an_unparseable_command_that_writes_no_state_is_not_s_self_state[write-and-mention-in-another-line]",
+     "fixA-i1-same-statement"),
+]]
 
