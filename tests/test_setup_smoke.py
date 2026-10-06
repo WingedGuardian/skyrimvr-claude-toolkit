@@ -1,0 +1,71 @@
+"""The setup-smoke CI job covers every --agent value on both OSes, and the script it runs really checks.
+
+scripts/setup-smoke.sh is run here for one value end to end (the per-value behaviour itself is asserted in
+tests/test_setup_agent.py); the rest is the structure of the job, so a value or an OS cannot drop out unseen.
+"""
+from __future__ import annotations
+
+import subprocess
+import sys
+
+import pytest
+
+from conftest import BASH, REPO
+
+VALUES = ["claude", "codex", "all", "both", "auto"]
+
+
+def _job():
+    yaml = pytest.importorskip("yaml")
+    wf = yaml.safe_load((REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    return wf["jobs"]["setup-smoke"]
+
+
+def test_the_ci_job_runs_every_agent_value_on_both_oses():
+    job = _job()
+    m = job["strategy"]["matrix"]
+    assert sorted(m["agent"]) == sorted(VALUES)
+    assert sorted(m["os"]) == ["ubuntu-latest", "windows-latest"]
+    assert job["strategy"]["fail-fast"] is False
+    runs = " ".join(s.get("run", "") for s in job["steps"])
+    assert 'bash scripts/setup-smoke.sh "${{ matrix.agent }}"' in runs
+
+
+def test_setup_main_values_match_the_smoke_values():
+    """Every value setup.sh accepts is smoked, and nothing else."""
+    text = (REPO / "setup.sh").read_text(encoding="utf-8")
+    assert "    claude|codex|all|auto) ;;\n    both) AGENT_ARG=\"all\" ;;" in text
+
+
+def _run(tmp_path, value):
+    return subprocess.run([BASH, str(REPO / "scripts" / "setup-smoke.sh"), value, str(tmp_path / "w")],
+                          capture_output=True, text=True, timeout=600)
+
+
+def test_the_smoke_script_passes_on_the_real_setup(tmp_path):
+    r = _run(tmp_path, "claude")
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-2000:]
+    assert "setup-smoke [claude]: 0 failure(s)" in r.stdout
+    assert "second run changed nothing" in r.stdout and "--agent nonsense wrote nothing" in r.stdout
+
+
+def test_the_smoke_script_fails_when_setup_ignores_the_agent(tmp_path):
+    """Can it go red? A setup.sh that configures everything whatever --agent says must fail the claude smoke."""
+    import shutil
+    repo = tmp_path / "repo"
+    shutil.copytree(REPO, repo, ignore=shutil.ignore_patterns(".git", "tests", "node_modules", "__pycache__",
+                                                              ".pytest_cache"))
+    s = repo / "setup.sh"
+    text = s.read_text(encoding="utf-8")
+    anchor = 'DO_CLAUDE=""; DO_CODEX=""\n'
+    assert text.count(anchor) == 1
+    s.write_text(text.replace(anchor, 'DO_CLAUDE=""; DO_CODEX=""; AGENT_SEL=all\n'), encoding="utf-8", newline="\n")
+    r = subprocess.run([BASH, str(repo / "scripts" / "setup-smoke.sh"), "claude", str(tmp_path / "w")],
+                       capture_output=True, text=True, timeout=600)
+    assert r.returncode == 1, r.stdout[-3000:]
+    assert "--agent claude configured 'all'" in r.stdout
+
+
+def test_the_smoke_script_refuses_a_bad_value(tmp_path):
+    r = _run(tmp_path, "gpt")
+    assert r.returncode == 2 and "usage" in r.stderr
