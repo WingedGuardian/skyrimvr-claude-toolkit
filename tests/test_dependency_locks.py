@@ -83,6 +83,10 @@ def test_ci_workflow_parses_and_runs_harness_modules_on_both_legs():
     harness = [step for step in behavior["steps"]
                if "tests/run_harness_tests.py" in str(step.get("run", "")) and "if" not in step]
     assert harness, "no unconditional harness-contained step in the behavior job"
+    # Plan 8 T10 added harness-run tripwire and timing steps before it: the suite is the one naming -rfEs on tests/.
+    suite = [step for step in harness if "tests/ -v" in step["run"]]
+    assert len(suite) == 1, [step.get("name") for step in harness]
+    harness = suite
     command = harness[0]["run"]
     # The WHOLE suite goes through the launcher (which includes both barrier-dependent modules), on
     # both matrix legs (no `if`), and a run without the barriers is an error, not a quiet green.
