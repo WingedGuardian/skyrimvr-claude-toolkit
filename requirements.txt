@@ -2,6 +2,6 @@
 # Every pin here is one the suite or CI actually runs. The Windows-only xEdit access is XEditLib.dll via
 # the Node-based tools/xelib helpers, not a Python binding -- see docs/container-vs-windows.md.
 # Provisioned only from requirements.lock (--require-hashes); this file is the direct-dependency input.
-PyYAML==6.0.1
+PyYAML==6.0.3
 pytest==8.0.0
 ruff==0.3.0
