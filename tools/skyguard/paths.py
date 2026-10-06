@@ -40,9 +40,9 @@ PATHS_FILE = "skyrim-paths.env"
 LEGACY_PATHS_FILE = ".claude/" + PATHS_FILE
 # Read from the file (and the environment) but NO root: the interpreter setup.sh resolved at install time (spec 4).
 TOOL_KEYS = ("SKYGUARD_PYTHON",)
-DEPRECATION = ("NOTICE: your paths file is still at the old location, .claude/skyrim-paths.env. This toolkit reads "
-               "skyrim-paths.env in the toolkit folder first and falls back to the old one; re-run setup.sh to "
-               "move it.")
+DEPRECATION = ("NOTICE: the old paths file, .claude/skyrim-paths.env, is still in use. The guard reads "
+               "skyrim-paths.env in the toolkit folder first and still adds the folders the old file protects. "
+               "Re-run setup.sh so skyrim-paths.env lists every folder you want guarded, then remove the old file.")
 
 # R8: delete protection covers the install EXCEPT these, kept as data and extended only from hand-read replay
 # false positives (each extension with its count). Only the `**/<name>/**` shape is supported (checked at import):
@@ -217,6 +217,7 @@ class PathsConfig(NamedTuple):
     file: Dict[str, Tuple[str, ...]]          # every value the file assigns per key, in file order
     malformed: Tuple[Tuple[str, str], ...]    # (file name, key) for each protection key the file cannot give
     source: str = ""                          # read_install: PATHS_FILE / LEGACY_PATHS_FILE / "" (none read)
+    legacy: bool = False                      # read_install: the legacy .claude/ file supplied anything
 
     def values(self, key: str) -> List[str]:
         """R3: the UNION of the environment's and the file's values, environment first, duplicates dropped."""
@@ -292,24 +293,43 @@ def install_files(root: str) -> Tuple[Path, Path]:
 
 
 def read_install(root: str, environ: Mapping[str, str]) -> PathsConfig:
-    """The install's paths file, as data (Plan 8 T8): `<root>/skyrim-paths.env` when it exists -- whole, the legacy
-    file is then not read at all, so a stale or broken leftover cannot change the guard -- else
+    """The install's paths file, as data (Plan 8 T8): `<root>/skyrim-paths.env` when it exists, else
     `<root>/.claude/skyrim-paths.env`, else nothing. A root file that exists but cannot be read RAISES like
     read_config (fail closed); it never falls back to the legacy file. An EMPTY root reads no file at all (deferred
-    item 9: `Path("")` was the process cwd, so any folder's paths file could stand in for the install's)."""
+    item 9: `Path("")` was the process cwd, so any folder's paths file could stand in for the install's).
+
+    BOTH present (T8 fix round 1, I1 -- R3: a stale source can add a root, never hide one): the PROTECTION keys are the
+    union, root file first, so an empty or touched root file cannot strip a folder the legacy file still protects.
+    Only the legacy file's WELL-FORMED protection values join; its malformed entries, its other keys
+    (SKYRIM_LOADORDER_DIR, SKYGUARD_PYTHON) and an unreadable legacy file add nothing -- the root file is the record,
+    and a broken leftover must not refuse every command. `legacy` says the legacy file supplied anything."""
     if not root:
         return PathsConfig({k: environ[k] for k in ENV_KEYS + TOOL_KEYS if environ.get(k)}, {}, ())
     new, old = install_files(root)
-    for path, label in ((new, PATHS_FILE), (old, LEGACY_PATHS_FILE)):
-        if path.is_file():
-            return read_config(path, environ)._replace(source=label)
-    return read_config(new, environ)
+    if not new.is_file():
+        if old.is_file():
+            return read_config(old, environ)._replace(source=LEGACY_PATHS_FILE, legacy=True)
+        return read_config(new, environ)
+    cfg = read_config(new, environ)._replace(source=PATHS_FILE)
+    if not old.is_file():
+        return cfg
+    try:
+        leg = read_config(old, {})
+    except (OSError, ValueError):
+        return cfg
+    file, added = dict(cfg.file), False
+    for key in PROTECTION_KEYS:
+        extra = tuple(v for v in leg.file.get(key, ()) if v not in file.get(key, ()))
+        if extra:
+            file[key], added = tuple(file.get(key, ())) + extra, True
+    return cfg._replace(file=file, legacy=added)
 
 
 def legacy_notice(root: str) -> str:
-    """DEPRECATION when this install's paths file is read from the legacy location only, else ""."""
+    """DEPRECATION while the legacy file supplies anything to this install's paths (alone, or a protected folder the
+    root file does not list), else ""."""
     try:
-        return DEPRECATION if root and read_install(root, {}).source == LEGACY_PATHS_FILE else ""
+        return DEPRECATION if root and read_install(root, {}).legacy else ""
     except (OSError, ValueError):
         return ""
 
@@ -386,7 +406,7 @@ def merge_configs(a: "PathsConfig", b: "PathsConfig") -> "PathsConfig":
     file: Dict[str, Tuple[str, ...]] = dict(a.file)
     for k, vals in b.file.items():
         file[k] = tuple(dict.fromkeys(tuple(file.get(k, ())) + tuple(vals)))
-    return PathsConfig(a.env, file, tuple(dict.fromkeys(a.malformed + b.malformed)), a.source)
+    return PathsConfig(a.env, file, tuple(dict.fromkeys(a.malformed + b.malformed)), a.source, a.legacy)
 
 
 def roots(root_posix: str, root_win: str, env: EnvLike) -> Roots:

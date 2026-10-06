@@ -139,7 +139,7 @@ def _codex(a, raw: str) -> int:
     req = codex.to_request(raw)
     if a.role == "session-start":
         _session_line(a, req.session_id, source=req.source, transcript=req.transcript_path)
-        out, status, code = session.run_status(a.project, req.source, a.bash, audit)
+        out, status, code = session.run_status(a.project, req.source, a.bash, audit, root=a.root_win or a.root)
         _session_snapshot(a.project, req.source, audit)
         _telemetry(a, Verdict("allow", "", "", status, code))
         _emit("SKYGUARD-OK\n" + codex.session_body(out))
@@ -278,7 +278,8 @@ def main(argv=None) -> int:
         snapshot.run(a.project, p["command"], p["empty"], audit)
         v = Verdict()
     else:
-        out, status, code = session.run_status(a.project, "" if p["empty"] else p["source"], a.bash, audit)
+        out, status, code = session.run_status(a.project, "" if p["empty"] else p["source"], a.bash, audit,
+                                              root=a.root_win or a.root)
         _session_snapshot(a.project, "" if p["empty"] else p["source"], audit)
         _telemetry(a, Verdict(status=status, code=code))
         session.export_env(p["session_id"], "claude")   # later Bash calls get SKYGUARD_SESSION_ID (Task 10)

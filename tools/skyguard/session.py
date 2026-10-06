@@ -287,16 +287,18 @@ def run(project, source, bash, audit):
     return run_status(project, source, bash, audit)[0]
 
 
-def run_status(project, source, bash, audit):
+def run_status(project, source, bash, audit, root=None):
     """-> (text, status, code). status is what the engine reports to the canary: `failed` when the guard did
-    not run at all, `partial` when it ran but snapshotted nothing (kb-guard exit 2), else `evaluated`."""
+    not run at all, `partial` when it ran but snapshotted nothing (kb-guard exit 2), else `evaluated`.
+    `root`: the install the guard reads its paths file from (run.py's --root); the legacy-location notice is keyed on
+    it, not on the session's project folder (T8 review M2). None: the project (the two normally coincide)."""
     banners = "\n".join(layer2_start(project, source))
     if source == "compact":
         # no snapshot on compact (R4: prefs survive), no clearing (R9); only the standing disable notice
         return _with_prefs(banners, project, audit), "evaluated", "session"
     # Plan 8 T8: the legacy paths-file location is announced here, once per session start -- never per tool call.
-    banners = "\n".join(t for t in (banners, paths.legacy_notice(project)) if t)
-    tool ="{}/tools/kb-guard.sh".format(project)
+    banners = "\n".join(t for t in (banners, paths.legacy_notice(project if root is None else root)) if t)
+    tool = "{}/tools/kb-guard.sh".format(project)
     if not Path(tool).is_file():
         audit.raw("[{}] {} NOT RUN: tools/kb-guard.sh missing\n".format(audit.stamp(), HOOK))
         missing = "KB GUARD: NOT RUN -- {} is missing, so your knowledgebase was NOT snapshotted this session.".format(tool)

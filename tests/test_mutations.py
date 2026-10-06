@@ -6666,20 +6666,22 @@ MUTATIONS += [
 # SessionStart notice and the self-protection of the new location. Each is killed through the named test.
 _P8T8 = "tests/test_paths_location.py::"
 _P8T8_PA = "tools/skyguard/paths.py"
-_P8T8_LOOP = "    for path, label in ((new, PATHS_FILE), (old, LEGACY_PATHS_FILE)):"
+_P8T8_UNION = "            file[key], added = tuple(file.get(key, ())) + extra, True"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # an empty root reads no file at all (deferred item 9: Path("") was the cwd)
     (_P8T8_PA, "    if not root:\n        return PathsConfig(", "    if False:\n        return PathsConfig(",
      _P8T8 + "test_no_root_reads_no_file_at_all", "p8t8-no-root-reads-no-file"),
-    # a reader that ignores the new location
-    (_P8T8_PA, _P8T8_LOOP, "    for path, label in ((old, LEGACY_PATHS_FILE),):",
+    # a reader that ignores the new location (re-anchored in fix round 1: the read is no longer a loop)
+    (_P8T8_PA, "    cfg = read_config(new, environ)._replace(source=PATHS_FILE)",
+     "    cfg = read_config(old, environ)._replace(source=PATHS_FILE)",
      _P8T8 + "test_the_root_file_is_read", "p8t8-reader-ignores-root-file"),
     # ...one that drops the legacy fallback
-    (_P8T8_PA, _P8T8_LOOP, "    for path, label in ((new, PATHS_FILE),):",
+    (_P8T8_PA, "            return read_config(old, environ)._replace(source=LEGACY_PATHS_FILE, legacy=True)",
+     "            return read_config(new, environ)",
      _P8T8 + "test_the_legacy_file_is_the_fallback", "p8t8-reader-drops-legacy-fallback"),
-    # ...and one where the legacy file wins when both exist
-    (_P8T8_PA, _P8T8_LOOP, "    for path, label in ((old, LEGACY_PATHS_FILE), (new, PATHS_FILE)):",
-     _P8T8 + "test_both_present_and_disagreeing_the_root_file_wins_whole", "p8t8-legacy-wins-over-root"),
+    # ...and one where the legacy file's roots come first when both exist (fix round 1: union, root file first)
+    (_P8T8_PA, _P8T8_UNION, "            file[key], added = extra + tuple(file.get(key, ())), True",
+     _P8T8 + "test_both_present_protection_roots_are_the_union_root_file_first", "p8t8-legacy-wins-over-root"),
     # SKYGUARD_PYTHON is read from the file...
     (_P8T8_PA, "            if key not in ENV_KEYS + TOOL_KEYS:", "            if key not in ENV_KEYS:",
      _P8T8 + "test_skyguard_python_is_read_and_is_no_root", "p8t8-tool-key-read-from-file"),
@@ -6691,8 +6693,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_P8T8_PA, 'value != "" and key in ENV_KEYS and norm_abs(value) is None', 'value != "" and norm_abs(value) is None',
      _P8T8 + "test_a_non_path_skyguard_python_is_kept[launcher]", "p8t8-abs-rule-roots-only"),
     # the deprecation notice names the legacy location only
-    (_P8T8_PA, "read_install(root, {}).source == LEGACY_PATHS_FILE", 'read_install(root, {}).source != ""',
-     _P8T8 + "test_no_notice_once_the_root_file_exists", "p8t8-notice-legacy-only"),
+    (_P8T8_PA, "read_install(root, {}).legacy", 'read_install(root, {}).source != ""',
+     _P8T8 + "test_no_notice_once_the_root_file_covers_the_legacy_one", "p8t8-notice-legacy-only"),
     # run.py reads the install's file through read_install...
     ("tools/skyguard/run.py", "        cfg = paths.read_install(a.root_win or a.root, dict(os.environ))",
      '        cfg = paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))',
@@ -6705,7 +6707,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '        cfg = paths.read_env(Path(project) / ".claude" / "skyrim-paths.env", os.environ)',
      _P8T8 + "test_an_in_place_restore_reads_the_root_file", "p8t8-snapcli-reads-root-file"),
     # SessionStart prints the notice...
-    ("tools/skyguard/session.py", '    banners = "\\n".join(t for t in (banners, paths.legacy_notice(project)) if t)',
+    ("tools/skyguard/session.py",
+     '    banners = "\\n".join(t for t in (banners, paths.legacy_notice(project if root is None else root)) if t)',
      "    pass", _P8T8 + "test_the_legacy_location_gets_a_notice_at_session_start", "p8t8-session-notice"),
     # ...but not on compact (once per session start, not per context compaction)
     ("tools/skyguard/session.py", '        return _with_prefs(banners, project, audit), "evaluated", "session"',
@@ -6717,4 +6720,84 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # ...at the root only, not any file of that name deeper in the install
     ("tools/skyguard/self_rules.py", '    if rel == ["skyrim-paths.env"]:', '    if rel[-1:] == ["skyrim-paths.env"]:',
      _P8T8 + "test_only_the_root_level_name_is_a_guard_file", "p8t8-self-guard-root-level-only"),
+]]
+
+# ---- Plan 8 T8 fix round 1 (lane p8-paths): review I1 (both halves), M2, P1, P2. One twin per clause. ---------------
+_P8R1 = "tests/test_self_guard_creators.py::"
+_P8R1_SR = "tools/skyguard/self_rules.py"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # I1 reader: protection roots are the union of both files...
+    (_P8T8_PA, "    for key in PROTECTION_KEYS:\n", "    for key in ():\n",
+     _P8T8 + "test_an_empty_root_file_hides_no_legacy_root[SKYRIM_MO2_MODS]", "p8r1-union-protection-keys"),
+    # ...of the protection keys only (non-protection values from the root file)
+    (_P8T8_PA, "    for key in PROTECTION_KEYS:\n", "    for key in ENV_KEYS + TOOL_KEYS:\n",
+     _P8T8 + "test_non_protection_values_come_from_the_root_file_when_present", "p8r1-union-protection-only"),
+    # ...of the legacy file's WELL-FORMED values (its malformed entries do not refuse everything)
+    (_P8T8_PA, "    return cfg._replace(file=file, legacy=added)",
+     "    return cfg._replace(file=file, legacy=added, malformed=cfg.malformed + leg.malformed)",
+     _P8T8 + "test_a_broken_legacy_leftover_does_not_matter_once_the_root_file_exists", "p8r1-legacy-malformed-ignored"),
+    # ...an undecodable legacy leftover adds nothing (no refusal)
+    (_P8T8_PA, "    except (OSError, ValueError):\n        return cfg\n", "    except ():\n        return cfg\n",
+     _P8T8 + "test_an_undecodable_legacy_leftover_adds_nothing_once_the_root_file_exists",
+     "p8r1-legacy-unreadable-adds-nothing"),
+    # ...the notice shows while the legacy file adds a root...
+    (_P8T8_PA, _P8T8_UNION, "            file[key], added = tuple(file.get(key, ())) + extra, False",
+     _P8T8 + "test_the_notice_shows_while_the_legacy_file_still_adds_a_root", "p8r1-legacy-flag-set"),
+    # ...and only a root the root file does not already list counts
+    (_P8T8_PA, "        extra = tuple(v for v in leg.file.get(key, ()) if v not in file.get(key, ()))",
+     "        extra = tuple(leg.file.get(key, ()))",
+     _P8T8 + "test_a_legacy_file_saying_nothing_new_is_not_in_use", "p8r1-only-new-roots-count"),
+    # the review's reproduction, end to end through run.py
+    (_P8T8_PA, "    for key in PROTECTION_KEYS:\n", "    for key in ('SKYRIM_GAME_ROOT',):\n",
+     _P8T8 + "test_run_still_guards_a_legacy_mo2_folder_after_the_root_file_is_touched", "p8r1-union-through-run"),
+    # M2: the notice follows the guard's root, and run.py passes it on both agents
+    ("tools/skyguard/session.py", "paths.legacy_notice(project if root is None else root)", "paths.legacy_notice(project)",
+     _P8T8 + "test_the_notice_is_keyed_on_the_root_the_guard_reads", "p8r1-notice-keyed-on-root"),
+    ("tools/skyguard/run.py", "session.run_status(a.project, req.source, a.bash, audit, root=a.root_win or a.root)",
+     "session.run_status(a.project, req.source, a.bash, audit, root=None)",
+     _P8T8 + "test_run_keys_the_session_notice_on_its_root[codex-session-start]", "p8r1-codex-passes-root"),
+    ("tools/skyguard/run.py", "                                              root=a.root_win or a.root)",
+     "                                              root=None)",
+     _P8T8 + "test_run_keys_the_session_notice_on_its_root[claude-session-kb-guard]", "p8r1-claude-passes-root"),
+    # I1 rules: touch / install / mklink aimed at a guard file
+    (_P8R1_SR, "        out += [(w, False) for w in _touch_operands(argv)]", "        pass",
+     _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[touch]", "p8r1-touch"),
+    (_P8R1_SR, "            j += 1                                       # its value", "            pass  # its value",
+     _P8R1 + "test_a_creator_elsewhere_is_not[reference-is-read]", "p8r1-touch-valued-option"),
+    (_P8R1_SR, "        out += [(w, False) for w in _install_targets(argv)]", "        pass",
+     _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[install]", "p8r1-install"),
+    (_P8R1_SR, "        if w in _INSTALL_VALUED:", "        if False:",
+     _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[install-target-dir]", "p8r1-install-valued"),
+    (_P8R1_SR, "    return words[-1:] if len(words) >= 2 else []", "    return words",
+     _P8R1 + "test_a_creator_elsewhere_is_not[install-source-is-read]", "p8r1-install-dest-only"),
+    (_P8R1_SR, '        elif w in ("-d", "--directory"):\n            dirs = True',
+     '        elif w in ("-d", "--directory"):\n            dirs = False',
+     _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[install-d]", "p8r1-install-d"),
+    (_P8R1_SR, "        out += [(w, False) for w in words[:2]]", "        out += [(w, False) for w in words[1:2]]",
+     _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[mklink]", "p8r1-mklink-link-name"),
+    (_P8R1_SR, "        out += [(w, False) for w in words[:2]]", "        out += [(w, False) for w in words[:1]]",
+     _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[mklink-hard]", "p8r1-mklink-target"),
+    # P2: a link whose source is a guard file
+    (_P8R1_SR, "        out += [(w, False) for w in (words[:-1] if len(words) >= 2 else words)]", "        pass",
+     _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[ln-hard]", "p8r1-ln-source"),
+    (_P8R1_SR, '        out += [(w, False) for w in list(ps_param(e, "target")) + list(ps_param(e, "value"))]',
+     '        out += [(w, False) for w in list(ps_param(e, "value"))]',
+     _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[new-item-hardlink]", "p8r1-new-item-target"),
+    (_P8R1_SR, '        out += [(w, False) for w in list(ps_param(e, "target")) + list(ps_param(e, "value"))]',
+     '        out += [(w, False) for w in list(ps_param(e, "target"))]',
+     _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[new-item-symlink-value]", "p8r1-new-item-value"),
+    (_P8R1_SR, 'any(t.lower() in _PS_LINK_TYPES for t in ps_param(e, "itemtype"))', "True",
+     _P8R1 + "test_a_link_elsewhere_is_not[new-item-file-value-is-content]", "p8r1-new-item-link-types-only"),
+    # P1: an NTFS stream suffix names the same file -- on the shell and through the Write tool
+    (_P8R1_SR, "        s = strip_stream(word)", "        s = None",
+     _P8R1 + "test_a_stream_of_a_guard_file_is_the_guard_file[root-data]", "p8r1-stream-stripped"),
+    (_P8R1_SR, "    if not m or (m.group(1) is None and len(m.group(2)) == 1):", "    if not m:",
+     _P8R1 + "test_a_drive_relative_word_is_not_read_as_a_stream", "p8r1-stream-not-a-drive"),
+    (_P8R1_SR, "            a = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), w)",
+     "            a = targets.resolve_operand(e, w, cwd, env)",
+     _P8R1 + "test_a_stream_of_a_guard_file_is_the_guard_file[hook-data]", "p8r1-stream-shell-wired"),
+    ("tools/skyguard/write_rules.py",
+     '        a = self_rules.resolve_own(lambda x: targets.resolve(x, cwd, "bash", env_), file_path)',
+     '        a = targets.resolve(file_path, cwd, "bash", env_)',
+     _P8R1 + "test_the_write_tool_on_a_guard_file_stream_gets_the_note", "p8r1-stream-write-tool-wired"),
 ]]
