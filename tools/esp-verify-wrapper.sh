@@ -38,7 +38,7 @@
 #
 # CONFIG (env overrides): $SPRIGGIT (path or PATH name; default "spriggit"),
 #   $ESP_VERIFY_SNAPDIR, $ESP_VERIFY_RELEASE (default SkyrimSE),
-#   $ESP_VERIFY_PKGVER (default 0.40.0).
+#   $ESP_VERIFY_PKGVER (default 0.41.0, the pin in .config/dotnet-tools.json).
 #
 set -uo pipefail
 
@@ -46,7 +46,7 @@ SPRIGGIT="${SPRIGGIT:-spriggit}"
 SNAPDIR="${ESP_VERIFY_SNAPDIR:-$HOME/.esp-verify-snapshots}"
 GAME_RELEASE="${ESP_VERIFY_RELEASE:-SkyrimSE}"
 PKG=Spriggit.Yaml
-PKGVER="${ESP_VERIFY_PKGVER:-0.40.0}"
+PKGVER="${ESP_VERIFY_PKGVER:-0.41.0}"
 
 mkdir -p "$SNAPDIR"
 

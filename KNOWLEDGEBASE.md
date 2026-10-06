@@ -640,26 +640,36 @@ not facts.
 - In Spriggit YAML: `ModHeader: Stats: Version: 1.7`
 - A `spriggit-meta.json` file is required in the root of the YAML directory for deserialization. Format:
   ```json
-  {"PackageName": "Spriggit.Yaml.Skyrim", "Version": "0.40.0", "Release": "SkyrimSE", "ModKey": "YourMod.esp"}
+  {"PackageName": "Spriggit.Yaml.Skyrim", "Version": "0.41.0", "Release": "SkyrimSE", "ModKey": "YourMod.esp"}
   ```
 
 ### Spriggit CLI
-- Serialize: `spriggit serialize --InputPath "Data/Mod.esp" --OutputPath "/tmp/output" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "0.40.0"`
+- Serialize: `spriggit serialize --InputPath "Data/Mod.esp" --OutputPath "/tmp/output" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "0.41.0"` (pass what `spriggit --version` prints)
 - Deserialize: `spriggit deserialize --InputPath "/tmp/yaml_dir" --OutputPath "Data/Mod.esp"` (reads meta from spriggit-meta.json)
 - `--GameRelease` is only for serialize, NOT deserialize
-- **Install pinned: `dotnet tool install Spriggit.CLI --version 0.40.0`** (2026-10-05 drift audit).
-  0.40.0 targets net9.0; 0.41.0 (2026-07-02) ships only `tools/net10.0`, and per the audit
-  a `dotnet tool update` on an SDK 6/8/9 machine failed with "DotnetToolSettings.xml was not
-  found". 0.40.1 is untested. `tools/toolchain-check.sh` compares `spriggit --version` with the
-  pin in `.config/dotnet-tools.json` and requires SDK 10+ for 0.41+, SDK 9+ before that.
+- **Install pinned: `dotnet tool install Spriggit.CLI --version 0.41.0`** (v4, 2026-10-05; was
+  0.40.0). 0.41.0 (2026-07-02) ships only `tools/net10.0`, so it needs the **.NET 10 SDK**; per
+  the drift audit a `dotnet tool update` on an SDK 6/8/9 machine failed with
+  "DotnetToolSettings.xml was not found". 0.40.0 targeted net9.0. `tools/toolchain-check.sh`
+  compares `spriggit --version` with the pin in `.config/dotnet-tools.json` (older or newer is
+  a MISMATCH) and requires SDK 10+ for 0.41+, SDK 9+ before that.
 - **Use `-u` / `--ErrorOnUnknown` on serialize.** It makes Spriggit throw on unknown
   fields/records instead of dropping them silently — directly mitigates the silent-drop
   issue below. Make it the default for our workflow.
 
-### ✅ Spriggit round-trip is byte-stable — verified 2026-05-18
+### ✅ Spriggit round-trip is lossless — compare YAML, not ESP bytes (re-measured 2026-10-05)
 - A controlled no-op round-trip (`serialize → deserialize unchanged → serialize`) of the
-  a test ESP produced a **byte-for-byte identical file**; an unmodified ESP
-  round-trip to identical YAML with `:Skyrim.esm` references intact. Spriggit serializes
+  a test ESP produced a **byte-for-byte identical file** (2026-05-18); an unmodified ESP
+  round-trip to identical YAML with `:Skyrim.esm` references intact.
+- ⚠ **The bytes are only stable once Spriggit has written the file.** MEASURED 2026-10-05 on a
+  1549-byte ESP another tool wrote (RallysHandcart.esp, 8 STAT records): one
+  serialize → deserialize gave the same size but **1247 of 1549 bytes different** (records come
+  out in a different order), with **0.40.0 and 0.41.0 equally** (their two outputs are
+  byte-identical, so this is not a 0.41 regression). Re-serializing gave YAML identical to the
+  first serialize (10 of 10 files), and a second deserialize reproduced the first output byte for
+  byte, so the first pass canonicalises the order and the result is a fixed point. Same result
+  on SDK 10.0.401 with nothing else installed. **Prove a round trip by re-serializing and
+  diffing the YAML; an ESP byte-compare fails on correct output.** Spriggit serializes
   exactly what the YAML says — it does NOT invent master-attribution corruption.
 - The earlier belief that "Spriggit corrupts master prefixes on round-trip" was a
   **misdiagnosis**. The real culprit for re-mastered references (`:Skyrim.esm`

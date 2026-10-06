@@ -85,9 +85,10 @@ if command -v spriggit >/dev/null 2>&1; then
   # otherwise healthy: dotnetsay, whose assets are net8.0, installs fine.
   #
   # VERSION PIN. Every serialize/deserialize command in the toolkit was written against the
-  # version pinned in .config/dotnet-tools.json (0.40.0, target net9.0). An unpinned
-  # `dotnet tool install Spriggit.CLI` pulls a newer one (0.41.0 = net10.0 only), so the
-  # INSTALLED version must equal the pin, and the SDK required follows the INSTALLED version.
+  # version pinned in .config/dotnet-tools.json (0.41.0, target net10.0). An unpinned
+  # `dotnet tool install Spriggit.CLI` pulls whatever is newest, and an older one (0.40.0 =
+  # net9.0) is just as untested, so the INSTALLED version must equal the pin, and the SDK
+  # required follows the INSTALLED version.
   PIN=$(tr -d '\r\n ' < "$ROOT/.config/dotnet-tools.json" 2>/dev/null | sed -n 's/.*"spriggit\.cli":{"version":"\([^"]*\)".*/\1/p')
   INSTALLED=$(spriggit --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   if [ -z "$PIN" ]; then

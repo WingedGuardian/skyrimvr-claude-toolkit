@@ -22,11 +22,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# --- .NET 9 (Spriggit / AutoMod CLI) ---
+# --- .NET 10 SDK (Spriggit 0.41 / AutoMod CLI) -- the toolkit's only .NET requirement ---
 # Microsoft's dotnet-install.sh is the cross-distro canonical install method.
 RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
-    && /tmp/dotnet-install.sh --channel 9.0 --install-dir /usr/local/dotnet \
+    && /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/local/dotnet \
     && rm /tmp/dotnet-install.sh
 
 ENV DOTNET_ROOT=/usr/local/dotnet

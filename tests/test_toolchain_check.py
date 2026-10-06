@@ -1,8 +1,10 @@
 """tools/toolchain-check.sh -- the Spriggit clause: installed version must equal the pin.
 
-The pin is `.config/dotnet-tools.json` (0.40.0, the version every YAML/serialize command in the
-toolkit was written against). A newer Spriggit (0.41.0 ships only tools/net10.0) next to SDK 9
+The pin is `.config/dotnet-tools.json` (0.41.0, the version every YAML/serialize command in the
+toolkit was written against; it ships only tools/net10.0, so it needs the .NET 10 SDK). On SDK 9 it
 starts, prints a version, and cannot serialize -- the exact false green this script exists to catch.
+An OLDER Spriggit (0.40.0, net9.0) against the 0.41.0 pin is a mismatch too: pins mean exactly the
+tested version, not older and not newer.
 These tests put a FAKE `spriggit` and a FAKE `dotnet` first on PATH and read the two spriggit lines.
 Other tools in the script (python/node/java...) are real, so the overall RESULT is not asserted.
 """
@@ -45,28 +47,37 @@ def _line(out: str, label: str) -> str:
     return next((ln for ln in out.splitlines() if label in ln), "")
 
 
-def test_the_pin_is_0_40_0():
-    assert PIN == "0.40.0"
+def test_the_pin_is_0_41_0():
+    assert PIN == "0.41.0"
 
 
-def test_pinned_version_with_sdk_9_is_ok(tmp_path):
-    out = _run(tmp_path, PIN, ["9.0.100"])
+def test_pinned_version_with_sdk_10_is_ok(tmp_path):
+    out = _run(tmp_path, PIN, ["10.0.100"])
     assert " ok " in _line(out, "spriggit version"), out
     assert " ok " in _line(out, "spriggit entry point"), out
     assert "spriggit-version" not in out and "spriggit-entry-point" not in out
 
 
-def test_newer_spriggit_on_sdk_9_is_degraded(tmp_path):
-    out = _run(tmp_path, "0.41.0", ["9.0.100"])
+def test_pinned_version_on_sdk_9_cannot_work(tmp_path):
+    out = _run(tmp_path, PIN, ["9.0.100"])
+    assert " ok " in _line(out, "spriggit version"), out
+    assert "CANNOT WORK" in _line(out, "spriggit entry point"), out
+    assert "SDK 10+" in out and "Microsoft.DotNet.SDK.10" in out, out
+    assert "RESULT: DEGRADED" in out
+    assert "spriggit-entry-point" in out.split("RESULT:")[1]
+
+
+def test_older_spriggit_against_the_pin_is_a_mismatch(tmp_path):
+    out = _run(tmp_path, "0.40.0", ["9.0.100", "10.0.100"])
     assert "MISMATCH" in _line(out, "spriggit version"), out
     assert "0.40.0" in out and "0.41.0" in out
-    assert "CANNOT WORK" in _line(out, "spriggit entry point"), out
+    assert " ok " in _line(out, "spriggit entry point"), out
     assert "RESULT: DEGRADED" in out
     assert "spriggit-version" in out.split("RESULT:")[1]
 
 
 def test_newer_spriggit_with_sdk_10_still_fails_the_version_pin(tmp_path):
-    out = _run(tmp_path, "0.41.0", ["9.0.100", "10.0.100"])
+    out = _run(tmp_path, "0.42.0", ["10.0.100"])
     assert "MISMATCH" in _line(out, "spriggit version"), out
     assert " ok " in _line(out, "spriggit entry point"), out
     assert "spriggit-version" in out.split("RESULT:")[1]
@@ -80,5 +91,5 @@ def test_pinned_version_with_only_sdk_8_cannot_work(tmp_path):
 
 
 def test_a_version_suffix_does_not_hide_a_mismatch(tmp_path):
-    out = _run(tmp_path, "0.40.1+abc123", ["9.0.100"])
+    out = _run(tmp_path, "0.41.1+abc123", ["10.0.100"])
     assert "MISMATCH" in _line(out, "spriggit version"), out
