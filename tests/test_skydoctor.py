@@ -417,37 +417,69 @@ def test_an_expired_lift_is_cleared_and_logged(bed):
 
 
 def _r9_state(tmp_path, monkeypatch, persistent):
+    """An expired lock lift (lock.relock_expired clears it, under its own lock, before doctor's step) AND an expired
+    guards lift: only doctor's own read-modify-write clears that one, so it is the step these tests observe."""
     monkeypatch.setenv("SKYGUARD_LOCK_SANDBOX", str(tmp_path))
     root = tmp_path / "root"
     sf = root / ".skyguard" / "state.json"
     now = time.time()
-    state.write(str(sf), {"v": 1, "lifts": [_lift("lock", now - 7200, now - 3600, files=["Update.esm"])],
+    state.write(str(sf), {"v": 1, "lifts": [_lift("lock", now - 7200, now - 3600, files=["Update.esm"]),
+                                            _lift("guards", now - 7200, now - 3600)],
                           "persistent": persistent})
     return root, sf, now
 
 
+# A `lock enable` in ANOTHER process (the state lock is an OS lock; in-process, state._HELD would make it re-entrant).
+_ENABLE = ("import sys\nsys.path.insert(0, sys.argv[1])\nfrom skyguard import state\n"
+           "open(sys.argv[3], 'w').close()\n"
+           "with state.locked(sys.argv[2], wait=30):\n"
+           "    st = state.read(sys.argv[2])\n"
+           "    state.write(sys.argv[2], {'v': 1, 'lifts': list(st.lifts), 'persistent': {}})\n")
+
+
 def test_r9_clear_does_not_undo_a_lock_enable_that_lands_after_its_first_read(tmp_path, monkeypatch):
     """Final review B-M3: doctor read state, a `lock enable` removed `lock_disabled`, then doctor wrote back what it
-    had read -- the persistent disable the user just removed was back. Doctor now re-reads under the state lock."""
+    had read -- the persistent disable the user just removed was back. The enable is started at the race point: right
+    after doctor's read-modify-write READS (after relock_expired has run), and given a second to land before doctor
+    writes. Under the state lock it cannot land until doctor has written, so it lands on doctor's result instead."""
     root, sf, now = _r9_state(tmp_path, monkeypatch, {"lock_disabled": {"since": 1.0, "by_session": "s1"}})
-    real, fired = state.locked, []
+    doctor = _doctor()
+    real_relock, real_read, phase, procs = doctor.lock.relock_expired, state.read, [], []
 
-    def enable_lands_first(path, wait=None):
-        if not fired:                   # a concurrent `lock enable`, once, before doctor gets the lock
-            fired.append(1)
-            st = state.read(str(sf))
-            state.write(str(sf), {"v": 1, "lifts": list(st.lifts), "persistent": {}})
-        return real(path, wait)
+    def relock(*a, **k):
+        out = real_relock(*a, **k)
+        phase.append("relocked")
+        return out
 
-    monkeypatch.setattr(state, "locked", enable_lands_first)
-    gone = _doctor().clear_expired(str(root), now)
+    def read(path):
+        st = real_read(path)
+        if phase == ["relocked"]:              # doctor's own read, the first after the relock: the race point
+            phase.append("raced")
+            go = tmp_path / "enable-started"
+            p = subprocess.Popen([sys.executable, "-B", "-c", _ENABLE, str(REPO / "tools"), str(sf), str(go)])
+            procs.append(p)
+            deadline = time.monotonic() + 60
+            while not go.exists() and p.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            try:
+                p.wait(timeout=1.0)            # unlocked, the enable lands now, between doctor's read and write
+            except subprocess.TimeoutExpired:
+                pass                           # it is waiting for the lock doctor holds
+        return st
+
+    monkeypatch.setattr(doctor.lock, "relock_expired", relock)
+    monkeypatch.setattr(state, "read", read)
+    gone = doctor.clear_expired(str(root), now)
+    assert procs and procs[0].wait(timeout=60) == 0
+    monkeypatch.setattr(state, "read", real_read)
     after = state.read(str(sf))
-    assert fired and len(gone) == 1 and after.lifts == []
+    assert phase == ["relocked", "raced"] and len(gone) == 2 and after.lifts == []
     assert after.lock_disabled is None, "skydoctor wrote back a lock disable that `lock enable` had removed"
 
 
 def test_r9_clear_writes_while_holding_the_state_lock(tmp_path, monkeypatch):
-    """The twin: the write itself happens inside doctor's held lock (the read-modify-write is one locked step)."""
+    """The twin: doctor's write happens inside its held lock (the read-modify-write is one locked step). The first
+    write is relock_expired's (its own lock); the second, which clears the guards lift, is doctor's."""
     root, sf, now = _r9_state(tmp_path, monkeypatch, {})
     real_write, seen = state.write, []
 
@@ -456,8 +488,8 @@ def test_r9_clear_writes_while_holding_the_state_lock(tmp_path, monkeypatch):
         return real_write(path, data)
 
     monkeypatch.setattr(state, "write", spy)
-    assert len(_doctor().clear_expired(str(root), now)) == 1
-    assert seen == [True], "the R9 write ran outside the state lock"
+    assert len(_doctor().clear_expired(str(root), now)) == 2
+    assert seen == [True, True], "the R9 write ran outside the state lock"
 
 
 @needs_windows
