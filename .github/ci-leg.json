@@ -1,7 +1,7 @@
 {
-  "_comment": "Read by scripts/check_ci_leg.py on every behavior leg. collected_floor: 7612 measured on Windows (collect-only, p8-release branch, 2026-10-05), floored to leave room for platform-conditional parametrisation; raise it when the suite grows. skip_ceiling: the latest measured full-suite skip count was 164 (Windows, local, plan6 ledger) -- PROVISIONAL until the wave-1 merge suite re-measures both legs. xfail_ceiling: 12 measured in every recent full run.",
-  "collected_floor": 7500,
-  "skip_ceiling": {"Linux": 170, "Windows": 170},
+  "_comment": "Read by scripts/check_ci_leg.py on every behavior leg. collected_floor: 8234 measured on Windows (collect-only through the launcher, Plan 8 wave-1 merge, 2026-10-05), floored to leave room for platform-conditional parametrisation; raise it when the suite grows. skip_ceiling: the wave-1 merge's full Windows suite (launcher, Python 3.10 venv from requirements.lock, node_modules from npm ci, TOOLKIT_REQUIRE_NODE_DEPS=1) skipped 165; the ceiling is that plus a small margin. The Linux leg is UNMEASURED locally: its ceiling copies the Windows number until a real Linux run records its own. xfail_ceiling: 12 measured in every recent full run.",
+  "collected_floor": 8100,
+  "skip_ceiling": {"Linux": 172, "Windows": 172},
   "xfail_ceiling": 12,
   "required_modules": {
     "all": [
