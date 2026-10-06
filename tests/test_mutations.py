@@ -4463,3 +4463,15 @@ _P5F_CLAUSES = [
      "    if False:", "tests/test_intent_diff.py::test_main_writes_utf8_whatever_the_console_encoding"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _P5F_CLAUSES]
+
+
+# Plan 8 T6c: the CI ruff hard gate skips template slot fragments, by a naming rule, and nothing else.
+_RG = "tests/test_ruff_gate.py::"
+MUTATIONS += [pytest.param("ruff.toml", find, rep, test, id=i) for i, find, rep, test in [
+    ("t6c-ruff-force-exclude-dropped", "force-exclude = true", "force-exclude = false",
+     _RG + "test_the_shipped_slot_fragments_pass_the_gate_as_ci_passes_them"),
+    ("t6c-ruff-slot-fragments-not-excluded", 'extend-exclude = ["*.slots.py"]', "extend-exclude = []",
+     _RG + "test_the_shipped_slot_fragments_pass_the_gate_as_ci_passes_them"),
+    ("t6c-ruff-exclude-swallows-real-files", 'extend-exclude = ["*.slots.py"]', 'extend-exclude = ["*.py"]',
+     _RG + "test_the_gate_skips_a_slot_fragment_but_still_catches_a_real_undefined_name"),
+]]
