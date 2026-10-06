@@ -23,7 +23,7 @@ from pathlib import Path
 
 # Must match .config/dotnet-tools.json and the version CLAUDE.md's Spriggit workflow uses --
 # --PackageVersion is REQUIRED whenever --PackageName is set, or Spriggit exits non-zero.
-SPRIGGIT_PACKAGE_VERSION = "0.40.0"
+SPRIGGIT_PACKAGE_VERSION = "0.41.0"
 
 
 def inspect_plugin(esp_path: Path) -> int:

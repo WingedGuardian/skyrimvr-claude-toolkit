@@ -535,7 +535,7 @@ folder or the name cannot be resolved. Reached by MCP (`protect-mcp.sh`), curl /
 | rule | direction | n | hand-read |
 |---|---|---|---|
 | S-DEVBENCH-CRASH | newly-deny | 1 | a real session `curl ... -d '{"action":"exec","command":"smp reset",...}'` (URL held in `B="http://localhost:8921/api/tool"`, `"$B/console"`): **the measured crash command, true positive** |
-| S-DEVBENCH-SAVE | newly-ask | 4 | 4 real saves (console `save DiagScrambleReload01` twice, `game save BloodEffectFrozen`, `game save DevMusicTest`). The pricing driver declares no config dir, so every save asks (unresolvable); with the real config dir read (`C:/Users/Moona/Documents/My Games/Skyrim VR`, 5,344 files in Saves/) **all 4 are allow**: none of the four names exists as an `.ess` (`DevMusicTest.ess.tmp` is the half-written file KB line 1482 describes) |
+| S-DEVBENCH-SAVE | newly-ask | 4 | 4 real saves (console `save DiagScrambleReload01` twice, `game save BloodEffectFrozen`, `game save DevMusicTest`). The pricing driver declares no config dir, so every save asks (unresolvable); with the real config dir read (`<HOME>/Documents/My Games/Skyrim VR`, 5,344 files in Saves/) **all 4 are allow**: none of the four names exists as an `.ess` (`DevMusicTest.ess.tmp` is the half-written file KB line 1482 describes) |
 
 The 5 MCP items in history (`capture` x3, `console help`, `game list`) all allow. Of 134 curl-to-console, 62
 `devbench-cli` and 14 curl-to-`game` items in history, one is a crash command and none is an overwrite of an existing save.
@@ -560,7 +560,7 @@ from USERPROFILE, HOME, OneDrive, OneDriveConsumer, OneDriveCommercial), and ask
 or no usable name exists.
 
 `--base 058b0e2`, N = 65,534 (Bash 58,450, PowerShell 1,628, Write 3,766, Edit 1,685, MCP 5), driver run with the real
-environment (Documents resolves to `C:/Users/Moona/Documents/My Games/Skyrim VR/Saves`, 5,344 files). 0 errors; parse failures
+environment (Documents resolves to `<HOME>/Documents/My Games/Skyrim VR/Saves`, 5,344 files). 0 errors; parse failures
 63 -> 63. Matrix: allow>deny 1, **allow>ask 0**, rest unchanged. The 1 deny is still the real `smp reset` curl. The four
 formerly-asked saves are allow (new names). The unreadable-body rule adds no new history hit.
 

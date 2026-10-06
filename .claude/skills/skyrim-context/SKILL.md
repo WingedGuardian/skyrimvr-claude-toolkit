@@ -42,6 +42,25 @@ You are working in a modded Skyrim installation with a full modding toolkit. Con
 **Default (creating/editing records):** Use Spriggit serialize → edit YAML → deserialize
 **Analysis and inspection:** Use xeditlib for programmatic traversal and diffing
 
+### Spriggit, step by step
+1. **Serialize**: `bash tools/spriggit-cli.sh serialize --InputPath "Data/MyMod.esp" --OutputPath "<output-yaml-dir>" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "<installed-version>"` (use the wrapper — scratch/output paths are usually deeply nested and raw `spriggit` throws `UnauthorizedAccessException` on them; `<installed-version>`: see "Don't hardcode `--PackageVersion`" below)
+2. **Edit**: Read and modify the YAML files directly
+3. **Review**: User reviews the YAML changes (human-readable diffs)
+4. **Deserialize**: `bash tools/spriggit-cli.sh deserialize --InputPath "<output-yaml-dir>" --OutputPath "Data/MyMod.esp"`
+
+### Spriggit notes
+- `spriggit-meta.json` is required in the YAML root for deserialization
+- ESP header version must be 1.7 for SSE/VR (not 1.0)
+- `--GameRelease` is only for serialize, NOT deserialize; `--PackageVersion` is REQUIRED when `--PackageName` is set
+- **Spriggit is pinned to 0.41.0** (`.config/dotnet-tools.json`; install with `--version 0.41.0`; needs the .NET 10 SDK; `tools/toolchain-check.sh` flags drift either way). Still **don't hardcode `--PackageVersion`**: discover the installed version with `spriggit --version` and pass exactly that.
+- Use `-u` / `--ErrorOnUnknown` on serialize — Spriggit **silently drops unknown YAML fields** otherwise (no error, no warning). Always round-trip verify a new field: deserialize → re-serialize → grep for the field.
+
+## Compiling Papyrus (Caprica)
+
+From `Data/Scripts/Source`, with a BARE filename (a path fails with a namespacing Fatal Error):
+`"<game root>/tools/Caprica/Caprica.exe" --game skyrim -f TESV_Papyrus_Flags.flg -i . -i "<base-game .psc sources>" -o "<game root>/Data/Scripts" MyScript.psc`.
+The second `-i` is REQUIRED whenever the base-game sources are not in the current folder (e.g. `<game root>/Data/Source/Scripts`): without it any script extending a vanilla type fails with "Unable to resolve type". One `-i` per further import folder.
+
 ## Before Any Change
 
 Always check `KNOWLEDGEBASE.md` for the full context on whatever you're about to touch.

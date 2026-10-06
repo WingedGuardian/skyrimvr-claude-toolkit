@@ -305,17 +305,57 @@ def _values(env: EnvLike, key: str) -> List[str]:
     return [v] if v else []
 
 
+_GITDIR = re.compile(r"gitdir:\s*(.+?)\s*$")
+
+
+def main_worktree(root: str) -> str:
+    """When `root` is a git LINKED worktree -- its `.git` is a file `gitdir: <main>/.git/worktrees/<name>`, which is
+    what `git worktree add` and Claude Code's EnterWorktree (`.claude/worktrees/<name>`) create -- the main working
+    tree's path, else "". rt-fix-b (routes): hooks run from a worktree's copy derive their root from their own
+    location, i.e. the worktree, so without this the real install beside it is not protected. Reads one small file;
+    any error is "" (the worktree's own root is still guarded)."""
+    if not root:
+        return ""
+    try:
+        dotgit = Path(root) / ".git"
+        if not dotgit.is_file():
+            return ""
+        first = dotgit.read_bytes()[:4096].decode("utf-8", "replace").splitlines()[0]
+    except (OSError, IndexError):
+        return ""
+    m = _GITDIR.match(first)
+    if not m:
+        return ""
+    gd = m.group(1)
+    gdp = os.path.normpath(gd if os.path.isabs(gd) else os.path.join(root, gd))
+    worktrees = os.path.dirname(gdp)
+    git_dir = os.path.dirname(worktrees)
+    if os.path.basename(worktrees).lower() != "worktrees" or os.path.basename(git_dir).lower() != ".git":
+        return ""
+    return os.path.dirname(git_dir).replace("\\", "/")
+
+
+def merge_configs(a: "PathsConfig", b: "PathsConfig") -> "PathsConfig":
+    """R3 union of two paths files' values (the worktree's own and its main tree's)."""
+    file: Dict[str, Tuple[str, ...]] = dict(a.file)
+    for k, vals in b.file.items():
+        file[k] = tuple(dict.fromkeys(tuple(file.get(k, ())) + tuple(vals)))
+    return PathsConfig(a.env, file, tuple(dict.fromkeys(a.malformed + b.malformed)))
+
+
 def roots(root_posix: str, root_win: str, env: EnvLike) -> Roots:
+    main = main_worktree(root_win or root_posix)
     game: List[str] = []
     _add(game, root_posix)
     _add(game, root_win)
+    _add(game, main)
     for v in _values(env, "SKYRIM_GAME_ROOT"):
         _add(game, v)
     config = [CONFIG_LITERAL]
     for v in _values(env, "SKYRIM_CONFIG_DIR"):
         _add(config, v)
     install: List[str] = []
-    for v in [root_posix, root_win] + _values(env, "SKYRIM_GAME_ROOT"):
+    for v in [root_posix, root_win, main] + _values(env, "SKYRIM_GAME_ROOT"):
         _add_dir(install, v)
     cfg: List[str] = []
     for v in _values(env, "SKYRIM_CONFIG_DIR"):

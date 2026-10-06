@@ -285,16 +285,17 @@ def _alive(pid: int) -> bool:
     return str(pid) in out
 
 
-@pytest.mark.skipif(not ON_WINDOWS, reason="the process-tree kill is the Windows entry's (taskkill /T)")
-@pytest.mark.parametrize("entry", ENTRIES[:2])
+@pytest.mark.skipif(not ON_WINDOWS, reason="the process-tree kill is a Windows one (taskkill /T, by pid)")
+@pytest.mark.parametrize("entry", ENTRIES)
 def test_a_hung_engine_is_killed_with_its_children(tmp_path, entry):
     root = _install(tmp_path)
     pidfile = tmp_path / "child.pid"
     _replace_run_py(root, (
         "import subprocess, sys, time\n"
-        "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(15)'])\n"
+        # 40 s: longer than any wait the entry itself may do, so only a KILL can end them in time
+        "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(40)'])\n"
         "open({!r}, 'w').write(str(c.pid))\n"
-        "time.sleep(15)\n").format(str(pidfile)))
+        "time.sleep(40)\n").format(str(pidfile)))
     r = _run(entry, root, "pre-tool", _benign(root), {"SKYGUARD_WRAPPER_TIMEOUT_S": "3"})
     assert r.stdout == _expected("pre-tool", "engine did not answer within 3 s"), r.stdout
     pid = int(pidfile.read_text())
@@ -521,6 +522,7 @@ def test_fallback_chain_matches_the_claude_wrappers():
     # and the Store alias is tried last in both
     assert ps.index("if ($null -ne $alias -and") > ps.index("$script:PyPosix)")
     assert claude.index('if [ -n "$PY_ALIAS" ] && py_good') > claude.index("/usr/local/bin/python3")
-    # the same acceptance test: >= 3.8, then the engine's own --selftest nonce
-    for text in (ps, claude):
-        assert "sys.version_info[:2] >= (3, 8)" in text and "--selftest" in text
+    # the same acceptance test: >= 3.8 and the engine's own --selftest nonce. The PowerShell entry checks
+    # the version in its own process; the bash chain in ONE (run.py --selftest refuses < 3.8 itself).
+    assert "sys.version_info[:2] >= (3, 8)" in ps and "--selftest" in ps
+    assert "--selftest" in claude and "version_info" not in claude

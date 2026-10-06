@@ -1,0 +1,985 @@
+{
+ "codex_definitions_shipped": false,
+ "docs": {
+  "AGENTS.md": [
+   {
+    "sha256": "02a2283d9613139c349be87d96a65076b087443658806a5f78c2b9cd4855241e",
+    "tags": [
+     "v3.4",
+     "v3.5",
+     "v3.5.1",
+     "v3.5.2",
+     "v3.5.3",
+     "v3.5.4",
+     "v3.6",
+     "v3.7",
+     "v3.8",
+     "v3.8.1",
+     "v3.8.2",
+     "v3.8.3"
+    ]
+   },
+   {
+    "sha256": "2c510d18fae6bdeabd044c771e05bccbceecc0fd748c924f2ba4456b9f16e5d9",
+    "tags": [
+     "v3.9",
+     "v3.9.1"
+    ]
+   }
+  ],
+  "CLAUDE.md": [
+   {
+    "lines": 164,
+    "placeholders": [
+     [
+      10,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      11,
+      "- **User INI configs**: `{{DOCUMENTS_DIR}}/My Games/Skyrim VR/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      12,
+      "- **Load order**: `C:/Users/{{USERNAME}}/AppData/Local/Skyrim VR/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "0701118719eb7364785395cf47fc8ac58b7b7a40153303dec009c2d9bb8af08f",
+    "tags": [
+     "release"
+    ]
+   },
+   {
+    "lines": 207,
+    "placeholders": [
+     [
+      10,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      11,
+      "- **User INI configs**: `{{DOCUMENTS_DIR}}/My Games/Skyrim VR/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      12,
+      "- **Load order**: `C:/Users/{{USERNAME}}/AppData/Local/Skyrim VR/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "2994c89f0a76c0487457246beb39d0fe515fac149be86915953e1167041717e4",
+    "tags": [
+     "v2.0"
+    ]
+   },
+   {
+    "lines": 370,
+    "placeholders": [
+     [
+      10,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      11,
+      "- **User INI configs**: `{{DOCUMENTS_DIR}}/My Games/Skyrim VR/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ]
+    ],
+    "sha256": "5051302cc989cd22a13e733da6f78c668da8714e3f9f81cfbdc896e74b7b0b6c",
+    "tags": [
+     "v3.0"
+    ]
+   },
+   {
+    "lines": 424,
+    "placeholders": [
+     [
+      10,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      11,
+      "- **User INI configs**: `{{DOCUMENTS_DIR}}/My Games/{{SKYRIM_FOLDER}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      12,
+      "- **Load order**: `{{LOCALAPPDATA}}/{{SKYRIM_FOLDER}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "083fd2f9e8e07a3a793c8050984f563ae359024eebc89fac396e44eda8614663",
+    "tags": [
+     "v3.1"
+    ]
+   },
+   {
+    "lines": 428,
+    "placeholders": [
+     [
+      10,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      11,
+      "- **User INI configs**: `{{DOCUMENTS_DIR}}/My Games/{{SKYRIM_FOLDER}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      12,
+      "- **Load order**: `{{LOCALAPPDATA}}/{{SKYRIM_FOLDER}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "8ed51088b933bb4d47ee52122f7ec34ae854ac090de9c16fed9a7bf3c0a49740",
+    "tags": [
+     "v3.2",
+     "v3.2.1"
+    ]
+   },
+   {
+    "lines": 475,
+    "placeholders": [
+     [
+      10,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      11,
+      "- **User INI configs**: `{{DOCUMENTS_DIR}}/My Games/{{SKYRIM_FOLDER}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      12,
+      "- **Load order**: `{{LOCALAPPDATA}}/{{SKYRIM_FOLDER}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "5f27764439dfd2b935a4a11289e8fee764c8111b3121b91e715d5266c7d73cba",
+    "tags": [
+     "v3.3"
+    ]
+   },
+   {
+    "block": {
+     "index": 17,
+     "variants": [
+      {
+       "lines": 2,
+       "placeholders": [],
+       "sha256": "109c0b7f6743c4ed6ca2bee165313bad30983b981dcdf0b3ce017309ea5ad47c"
+      },
+      {
+       "lines": 16,
+       "placeholders": [
+        [
+         0,
+         "- **Mod manager**: **Mod Organizer 2** — instance `{{MO2_INSTANCE}}/`, profile `{{MO2_PROFILE}}`"
+        ],
+        [
+         1,
+         "- **MO2 mods**: `{{MO2_MODS}}/<mod-name>/` — the REAL location of every installed mod's files"
+        ],
+        [
+         2,
+         "- **MO2 overwrite**: `{{MO2_OVERWRITE}}/` — catches files written to Data/ during a session"
+        ],
+        [
+         3,
+         "- **MO2 profile**: `{{MO2_PROFILE_DIR}}/` — this profile's INIs, `loadorder.txt`, `plugins.txt`"
+        ],
+        [
+         8,
+         "> mod's files, read `{{MO2_MODS}}/<mod-name>/`, not `Data/`."
+        ]
+       ],
+       "sha256": "c842d5a7ab709c6df979d9e5c2da7f6bc8b77d5a8ac266a92bf7b3e7da1b4e39"
+      }
+     ]
+    },
+    "lines": 478,
+    "placeholders": [
+     [
+      12,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      13,
+      "- **User INI configs**: `{{CONFIG_DIR}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      14,
+      "- **Load order**: `{{LOADORDER_DIR}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "3ab5ca07168ea9019670ab0622116d2190829549e4ba77e8ed2be3f1799e3c76",
+    "tags": [
+     "v3.4"
+    ]
+   },
+   {
+    "block": {
+     "index": 17,
+     "variants": [
+      {
+       "lines": 2,
+       "placeholders": [],
+       "sha256": "109c0b7f6743c4ed6ca2bee165313bad30983b981dcdf0b3ce017309ea5ad47c"
+      },
+      {
+       "lines": 16,
+       "placeholders": [
+        [
+         0,
+         "- **Mod manager**: **Mod Organizer 2** — instance `{{MO2_INSTANCE}}/`, profile `{{MO2_PROFILE}}`"
+        ],
+        [
+         1,
+         "- **MO2 mods**: `{{MO2_MODS}}/<mod-name>/` — the REAL location of every installed mod's files"
+        ],
+        [
+         2,
+         "- **MO2 overwrite**: `{{MO2_OVERWRITE}}/` — catches files written to Data/ during a session"
+        ],
+        [
+         3,
+         "- **MO2 profile**: `{{MO2_PROFILE_DIR}}/` — this profile's INIs, `loadorder.txt`, `plugins.txt`"
+        ],
+        [
+         8,
+         "> mod's files, read `{{MO2_MODS}}/<mod-name>/`, not `Data/`."
+        ]
+       ],
+       "sha256": "c842d5a7ab709c6df979d9e5c2da7f6bc8b77d5a8ac266a92bf7b3e7da1b4e39"
+      }
+     ]
+    },
+    "lines": 505,
+    "placeholders": [
+     [
+      12,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      13,
+      "- **User INI configs**: `{{CONFIG_DIR}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      14,
+      "- **Load order**: `{{LOADORDER_DIR}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "0c5ca92438ce8909cb5418865b08c3b6ed0f4bf26ca31827fd46691be69df486",
+    "tags": [
+     "v3.5"
+    ]
+   },
+   {
+    "block": {
+     "index": 17,
+     "variants": [
+      {
+       "lines": 2,
+       "placeholders": [],
+       "sha256": "109c0b7f6743c4ed6ca2bee165313bad30983b981dcdf0b3ce017309ea5ad47c"
+      },
+      {
+       "lines": 16,
+       "placeholders": [
+        [
+         0,
+         "- **Mod manager**: **Mod Organizer 2** — instance `{{MO2_INSTANCE}}/`, profile `{{MO2_PROFILE}}`"
+        ],
+        [
+         1,
+         "- **MO2 mods**: `{{MO2_MODS}}/<mod-name>/` — the REAL location of every installed mod's files"
+        ],
+        [
+         2,
+         "- **MO2 overwrite**: `{{MO2_OVERWRITE}}/` — catches files written to Data/ during a session"
+        ],
+        [
+         3,
+         "- **MO2 profile**: `{{MO2_PROFILE_DIR}}/` — this profile's INIs, `loadorder.txt`, `plugins.txt`"
+        ],
+        [
+         8,
+         "> mod's files, read `{{MO2_MODS}}/<mod-name>/`, not `Data/`."
+        ]
+       ],
+       "sha256": "c842d5a7ab709c6df979d9e5c2da7f6bc8b77d5a8ac266a92bf7b3e7da1b4e39"
+      }
+     ]
+    },
+    "lines": 517,
+    "placeholders": [
+     [
+      12,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      13,
+      "- **User INI configs**: `{{CONFIG_DIR}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      14,
+      "- **Load order**: `{{LOADORDER_DIR}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "352941ba3ffec6c9cbad3fd57eff5797011cd8bc8872dec7bf1174f5c658d878",
+    "tags": [
+     "v3.5.1"
+    ]
+   },
+   {
+    "block": {
+     "index": 17,
+     "variants": [
+      {
+       "lines": 2,
+       "placeholders": [],
+       "sha256": "109c0b7f6743c4ed6ca2bee165313bad30983b981dcdf0b3ce017309ea5ad47c"
+      },
+      {
+       "lines": 16,
+       "placeholders": [
+        [
+         0,
+         "- **Mod manager**: **Mod Organizer 2** — instance `{{MO2_INSTANCE}}/`, profile `{{MO2_PROFILE}}`"
+        ],
+        [
+         1,
+         "- **MO2 mods**: `{{MO2_MODS}}/<mod-name>/` — the REAL location of every installed mod's files"
+        ],
+        [
+         2,
+         "- **MO2 overwrite**: `{{MO2_OVERWRITE}}/` — catches files written to Data/ during a session"
+        ],
+        [
+         3,
+         "- **MO2 profile**: `{{MO2_PROFILE_DIR}}/` — this profile's INIs, `loadorder.txt`, `plugins.txt`"
+        ],
+        [
+         8,
+         "> mod's files, read `{{MO2_MODS}}/<mod-name>/`, not `Data/`."
+        ]
+       ],
+       "sha256": "c842d5a7ab709c6df979d9e5c2da7f6bc8b77d5a8ac266a92bf7b3e7da1b4e39"
+      }
+     ]
+    },
+    "lines": 524,
+    "placeholders": [
+     [
+      12,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      13,
+      "- **User INI configs**: `{{CONFIG_DIR}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      14,
+      "- **Load order**: `{{LOADORDER_DIR}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "8962ef1a5dcc12aa455de687373904a169ab7eb26ea9937cbc9fae027c53c800",
+    "tags": [
+     "v3.5.2"
+    ]
+   },
+   {
+    "block": {
+     "index": 17,
+     "variants": [
+      {
+       "lines": 2,
+       "placeholders": [],
+       "sha256": "109c0b7f6743c4ed6ca2bee165313bad30983b981dcdf0b3ce017309ea5ad47c"
+      },
+      {
+       "lines": 16,
+       "placeholders": [
+        [
+         0,
+         "- **Mod manager**: **Mod Organizer 2** — instance `{{MO2_INSTANCE}}/`, profile `{{MO2_PROFILE}}`"
+        ],
+        [
+         1,
+         "- **MO2 mods**: `{{MO2_MODS}}/<mod-name>/` — the REAL location of every installed mod's files"
+        ],
+        [
+         2,
+         "- **MO2 overwrite**: `{{MO2_OVERWRITE}}/` — catches files written to Data/ during a session"
+        ],
+        [
+         3,
+         "- **MO2 profile**: `{{MO2_PROFILE_DIR}}/` — this profile's INIs, `loadorder.txt`, `plugins.txt`"
+        ],
+        [
+         8,
+         "> mod's files, read `{{MO2_MODS}}/<mod-name>/`, not `Data/`."
+        ]
+       ],
+       "sha256": "c842d5a7ab709c6df979d9e5c2da7f6bc8b77d5a8ac266a92bf7b3e7da1b4e39"
+      }
+     ]
+    },
+    "lines": 531,
+    "placeholders": [
+     [
+      12,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      13,
+      "- **User INI configs**: `{{CONFIG_DIR}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      14,
+      "- **Load order**: `{{LOADORDER_DIR}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "b377063b16d8ccc0f32ff5874d06010fbfba8bd25ffc7e86e8084cc95cbda1ca",
+    "tags": [
+     "v3.5.3"
+    ]
+   },
+   {
+    "block": {
+     "index": 17,
+     "variants": [
+      {
+       "lines": 2,
+       "placeholders": [],
+       "sha256": "109c0b7f6743c4ed6ca2bee165313bad30983b981dcdf0b3ce017309ea5ad47c"
+      },
+      {
+       "lines": 16,
+       "placeholders": [
+        [
+         0,
+         "- **Mod manager**: **Mod Organizer 2** — instance `{{MO2_INSTANCE}}/`, profile `{{MO2_PROFILE}}`"
+        ],
+        [
+         1,
+         "- **MO2 mods**: `{{MO2_MODS}}/<mod-name>/` — the REAL location of every installed mod's files"
+        ],
+        [
+         2,
+         "- **MO2 overwrite**: `{{MO2_OVERWRITE}}/` — catches files written to Data/ during a session"
+        ],
+        [
+         3,
+         "- **MO2 profile**: `{{MO2_PROFILE_DIR}}/` — this profile's INIs, `loadorder.txt`, `plugins.txt`"
+        ],
+        [
+         8,
+         "> mod's files, read `{{MO2_MODS}}/<mod-name>/`, not `Data/`."
+        ]
+       ],
+       "sha256": "c842d5a7ab709c6df979d9e5c2da7f6bc8b77d5a8ac266a92bf7b3e7da1b4e39"
+      }
+     ]
+    },
+    "lines": 531,
+    "placeholders": [
+     [
+      12,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      13,
+      "- **User INI configs**: `{{CONFIG_DIR}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      14,
+      "- **Load order**: `{{LOADORDER_DIR}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "09cf35f8089366f89ee0a7272cd0a130c8e4cb5a5773c2f771c8f3adae276446",
+    "tags": [
+     "v3.5.4",
+     "v3.6",
+     "v3.7"
+    ]
+   },
+   {
+    "block": {
+     "index": 17,
+     "variants": [
+      {
+       "lines": 2,
+       "placeholders": [],
+       "sha256": "109c0b7f6743c4ed6ca2bee165313bad30983b981dcdf0b3ce017309ea5ad47c"
+      },
+      {
+       "lines": 16,
+       "placeholders": [
+        [
+         0,
+         "- **Mod manager**: **Mod Organizer 2** — instance `{{MO2_INSTANCE}}/`, profile `{{MO2_PROFILE}}`"
+        ],
+        [
+         1,
+         "- **MO2 mods**: `{{MO2_MODS}}/<mod-name>/` — the REAL location of every installed mod's files"
+        ],
+        [
+         2,
+         "- **MO2 overwrite**: `{{MO2_OVERWRITE}}/` — catches files written to Data/ during a session"
+        ],
+        [
+         3,
+         "- **MO2 profile**: `{{MO2_PROFILE_DIR}}/` — this profile's INIs, `loadorder.txt`, `plugins.txt`"
+        ],
+        [
+         8,
+         "> mod's files, read `{{MO2_MODS}}/<mod-name>/`, not `Data/`."
+        ]
+       ],
+       "sha256": "c842d5a7ab709c6df979d9e5c2da7f6bc8b77d5a8ac266a92bf7b3e7da1b4e39"
+      }
+     ]
+    },
+    "lines": 631,
+    "placeholders": [
+     [
+      12,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      13,
+      "- **User INI configs**: `{{CONFIG_DIR}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      14,
+      "- **Load order**: `{{LOADORDER_DIR}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "2cc9c64961d0596bfc3d0d7379d1e654fd3fca551d657bfa8063e88078a56bb8",
+    "tags": [
+     "v3.8",
+     "v3.8.1",
+     "v3.8.2"
+    ]
+   },
+   {
+    "block": {
+     "index": 17,
+     "variants": [
+      {
+       "lines": 2,
+       "placeholders": [],
+       "sha256": "109c0b7f6743c4ed6ca2bee165313bad30983b981dcdf0b3ce017309ea5ad47c"
+      },
+      {
+       "lines": 16,
+       "placeholders": [
+        [
+         0,
+         "- **Mod manager**: **Mod Organizer 2** — instance `{{MO2_INSTANCE}}/`, profile `{{MO2_PROFILE}}`"
+        ],
+        [
+         1,
+         "- **MO2 mods**: `{{MO2_MODS}}/<mod-name>/` — the REAL location of every installed mod's files"
+        ],
+        [
+         2,
+         "- **MO2 overwrite**: `{{MO2_OVERWRITE}}/` — catches files written to Data/ during a session"
+        ],
+        [
+         3,
+         "- **MO2 profile**: `{{MO2_PROFILE_DIR}}/` — this profile's INIs, `loadorder.txt`, `plugins.txt`"
+        ],
+        [
+         8,
+         "> mod's files, read `{{MO2_MODS}}/<mod-name>/`, not `Data/`."
+        ]
+       ],
+       "sha256": "c842d5a7ab709c6df979d9e5c2da7f6bc8b77d5a8ac266a92bf7b3e7da1b4e39"
+      }
+     ]
+    },
+    "lines": 655,
+    "placeholders": [
+     [
+      12,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      13,
+      "- **User INI configs**: `{{CONFIG_DIR}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      14,
+      "- **Load order**: `{{LOADORDER_DIR}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "1bd8aea2fbf4d71cc0a7af6066083b8b043bae997d6b0e745d3459bb8c0e7f94",
+    "tags": [
+     "v3.8.3"
+    ]
+   },
+   {
+    "block": {
+     "index": 17,
+     "variants": [
+      {
+       "lines": 2,
+       "placeholders": [],
+       "sha256": "109c0b7f6743c4ed6ca2bee165313bad30983b981dcdf0b3ce017309ea5ad47c"
+      },
+      {
+       "lines": 16,
+       "placeholders": [
+        [
+         0,
+         "- **Mod manager**: **Mod Organizer 2** — instance `{{MO2_INSTANCE}}/`, profile `{{MO2_PROFILE}}`"
+        ],
+        [
+         1,
+         "- **MO2 mods**: `{{MO2_MODS}}/<mod-name>/` — the REAL location of every installed mod's files"
+        ],
+        [
+         2,
+         "- **MO2 overwrite**: `{{MO2_OVERWRITE}}/` — catches files written to Data/ during a session"
+        ],
+        [
+         3,
+         "- **MO2 profile**: `{{MO2_PROFILE_DIR}}/` — this profile's INIs, `loadorder.txt`, `plugins.txt`"
+        ],
+        [
+         8,
+         "> mod's files, read `{{MO2_MODS}}/<mod-name>/`, not `Data/`."
+        ]
+       ],
+       "sha256": "c842d5a7ab709c6df979d9e5c2da7f6bc8b77d5a8ac266a92bf7b3e7da1b4e39"
+      }
+     ]
+    },
+    "lines": 716,
+    "placeholders": [
+     [
+      12,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      13,
+      "- **User INI configs**: `{{CONFIG_DIR}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      14,
+      "- **Load order**: `{{LOADORDER_DIR}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "3e4e7928ccab87aab87b72dd83b05470bedbefb17cb8e2f8f8f68284f9ad0555",
+    "tags": [
+     "v3.9"
+    ]
+   },
+   {
+    "block": {
+     "index": 17,
+     "variants": [
+      {
+       "lines": 2,
+       "placeholders": [],
+       "sha256": "109c0b7f6743c4ed6ca2bee165313bad30983b981dcdf0b3ce017309ea5ad47c"
+      },
+      {
+       "lines": 16,
+       "placeholders": [
+        [
+         0,
+         "- **Mod manager**: **Mod Organizer 2** — instance `{{MO2_INSTANCE}}/`, profile `{{MO2_PROFILE}}`"
+        ],
+        [
+         1,
+         "- **MO2 mods**: `{{MO2_MODS}}/<mod-name>/` — the REAL location of every installed mod's files"
+        ],
+        [
+         2,
+         "- **MO2 overwrite**: `{{MO2_OVERWRITE}}/` — catches files written to Data/ during a session"
+        ],
+        [
+         3,
+         "- **MO2 profile**: `{{MO2_PROFILE_DIR}}/` — this profile's INIs, `loadorder.txt`, `plugins.txt`"
+        ],
+        [
+         8,
+         "> mod's files, read `{{MO2_MODS}}/<mod-name>/`, not `Data/`."
+        ]
+       ],
+       "sha256": "c842d5a7ab709c6df979d9e5c2da7f6bc8b77d5a8ac266a92bf7b3e7da1b4e39"
+      }
+     ]
+    },
+    "lines": 684,
+    "placeholders": [
+     [
+      12,
+      "- **Game root**: `{{GAME_ROOT}}/`"
+     ],
+     [
+      13,
+      "- **User INI configs**: `{{CONFIG_DIR}}/` (Skyrim.ini, SkyrimVR.ini, SkyrimPrefs.ini)"
+     ],
+     [
+      14,
+      "- **Load order**: `{{LOADORDER_DIR}}/loadorder.txt` and `plugins.txt`"
+     ]
+    ],
+    "sha256": "a515d9daae5c53e07b7f901b5dc3677a4cb77d429f8bc35074f830667a68b5eb",
+    "tags": [
+     "v3.9.1"
+    ]
+   }
+  ],
+  "KNOWLEDGEBASE.md": [
+   {
+    "bytes": 34538,
+    "sha256": "3e458e06645f8238dd3231c62d5f028f9358ee79aa185c0d65833175f6d623e8",
+    "tags": [
+     "release"
+    ]
+   },
+   {
+    "bytes": 35338,
+    "sha256": "2a23cf14af5b9ddd54d9dd53ac9647f0e7a26f2bf058daa34616bc07cb2e55d9",
+    "tags": [
+     "v2.0"
+    ]
+   },
+   {
+    "bytes": 91299,
+    "sha256": "c4f4d9a824de37db9dc7ceec96b85a67c68be0367a36c7f9ee8e2f4d485a51f4",
+    "tags": [
+     "v3.0"
+    ]
+   },
+   {
+    "bytes": 93489,
+    "sha256": "ef69c5c4ebaf4a03978b84cc5b169fb43ec5682d0e0f925876a973d323d11218",
+    "tags": [
+     "v3.1"
+    ]
+   },
+   {
+    "bytes": 95859,
+    "sha256": "f2ab8efb488c445e1c89a2d8fc356534fbea704cf8efa36a739a91020efd24c0",
+    "tags": [
+     "v3.2",
+     "v3.2.1"
+    ]
+   },
+   {
+    "bytes": 100734,
+    "sha256": "30604e1d28b92db401744c1833def4c6d323c157ea3d89f776f93fec9a320205",
+    "tags": [
+     "v3.3"
+    ]
+   },
+   {
+    "bytes": 109233,
+    "sha256": "898d0e313d47d73a82624eb6667b189174ba3d0eecb7b69247b8991ec9bf22e2",
+    "tags": [
+     "v3.4",
+     "v3.5"
+    ]
+   },
+   {
+    "bytes": 111074,
+    "sha256": "773608fd9fe019cf88c1d2a11dcaf1629f899114c2e7a0cd6c0bc2ff64b0d76a",
+    "tags": [
+     "v3.5.1"
+    ]
+   },
+   {
+    "bytes": 112106,
+    "sha256": "1e3bfa03b714aa582743495422bb492da3f7d297ef6fd02d317b71be335898b1",
+    "tags": [
+     "v3.5.2",
+     "v3.5.3"
+    ]
+   },
+   {
+    "bytes": 112805,
+    "sha256": "402b9998dc23c171962da19e35be0ba3f02821020dc91993a5cff5f005b8579c",
+    "tags": [
+     "v3.5.4"
+    ]
+   },
+   {
+    "bytes": 113515,
+    "sha256": "f6cc8d8b5caa3c751c030924e55dbee4a05f9e480caadf380f25e42239cc66ca",
+    "tags": [
+     "v3.6"
+    ]
+   },
+   {
+    "bytes": 114954,
+    "sha256": "e6f07f45429cb5ea5af95248ffa6bf6adf8256b2a9754c081ebf3563cbcd087e",
+    "tags": [
+     "v3.7"
+    ]
+   },
+   {
+    "bytes": 118428,
+    "sha256": "41569a68b23e8c896f9960569d4eaff35cbb783af40064e93195f49334a4ee1c",
+    "tags": [
+     "v3.8",
+     "v3.8.1",
+     "v3.8.2",
+     "v3.8.3",
+     "v3.9"
+    ]
+   },
+   {
+    "bytes": 123214,
+    "sha256": "f2c17f02b6cab3f9156843382f3bfc59a55160d4f1999e914e17cde230e8a32c",
+    "tags": [
+     "v3.9.1"
+    ]
+   }
+  ]
+ },
+ "generated_by": "scripts/gen_migrate_3x_known.py",
+ "schema": 1,
+ "settings": [
+  {
+   "canonical_sha256": "2b75044ca26f74be8391f810210d8d637c2144de1108a4e62802284860e1a37f",
+   "hooks": [
+    [
+     "PreToolUse",
+     "backup-before-edit.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-bash.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-files.sh"
+    ]
+   ],
+   "sha256": "0531282fb9c3872e54623417a5a331301d9719f81dc0305d9d37c303f5e4f977",
+   "tags": [
+    "release",
+    "v2.0"
+   ]
+  },
+  {
+   "canonical_sha256": "aa023ae90c872ff37ff8a2b7bb39d12dd30556fac757f47016e08c56ce7149bb",
+   "hooks": [
+    [
+     "PreToolUse",
+     "backup-before-edit.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-bash.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-files.sh"
+    ],
+    [
+     "PreToolUse",
+     "snapshot-before-tool.sh"
+    ]
+   ],
+   "sha256": "db566207a0d049f24a68f6d142c1fee02d11c9ec83dffc36f4f3d581ed5bdff6",
+   "tags": [
+    "v3.0",
+    "v3.1",
+    "v3.2",
+    "v3.2.1",
+    "v3.3",
+    "v3.4",
+    "v3.5",
+    "v3.5.1",
+    "v3.5.2",
+    "v3.5.3",
+    "v3.5.4",
+    "v3.6",
+    "v3.7",
+    "v3.8",
+    "v3.8.1",
+    "v3.8.2",
+    "v3.8.3"
+   ]
+  },
+  {
+   "canonical_sha256": "b35d4c8c0d1c146e26cdd06fdef9a0acb7a69d132dc293971a6d4625b5f55bf1",
+   "hooks": [
+    [
+     "PreToolUse",
+     "backup-before-edit.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-bash.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-files.sh"
+    ],
+    [
+     "PreToolUse",
+     "snapshot-before-tool.sh"
+    ],
+    [
+     "SessionStart",
+     "session-kb-guard.sh"
+    ]
+   ],
+   "sha256": "20aa63920859740acf2b558285f5ecc0d2823202b683e58eaf27164c6eefb2ea",
+   "tags": [
+    "v3.9"
+   ]
+  },
+  {
+   "canonical_sha256": "e526894404570f9aef19e1411c1bcbbed8896efc7c1ae0360766d973c75a6e86",
+   "hooks": [
+    [
+     "PreToolUse",
+     "backup-before-edit.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-bash.sh"
+    ],
+    [
+     "PreToolUse",
+     "protect-files.sh"
+    ],
+    [
+     "PreToolUse",
+     "snapshot-before-tool.sh"
+    ],
+    [
+     "SessionStart",
+     "session-kb-guard.sh"
+    ]
+   ],
+   "sha256": "83001d9e7466cee94823b884072a95a6c1137b27100ff035d2c92ef12b955ee9",
+   "tags": [
+    "v3.9.1"
+   ]
+  }
+ ],
+ "tags": {
+  "release": "badfcfd06e90ddfd0a984d853215a92b7b64aae1",
+  "v2.0": "43948872db3abce1f4a40646a014e34c8fab716c",
+  "v3.0": "39667196d9fa10aed8668ba2db4ac10a7f68146d",
+  "v3.1": "ce689a8202165531610291fb0d46db8da3f4ccfb",
+  "v3.2": "3b0607cdebf808f93d4a90866bee19d4ef53c465",
+  "v3.2.1": "8d80497009bf6f24712e1801c50bf76a337ea9a6",
+  "v3.3": "65074728f61e6348ee682173c7818ddbd59e8991",
+  "v3.4": "17ddc3ab0317ddc2fc5a40374e1fefcfb26d44a7",
+  "v3.5": "13b212727a59c8d7d77be8accacebb78047dffdd",
+  "v3.5.1": "399e3427e8e2233f9f79352994ad19dfa0f47bf9",
+  "v3.5.2": "3c3c36c86b0eab29c6fa0dcba6f9080d3b2bfd66",
+  "v3.5.3": "6a0ca835c65f63a8653c9f2c2fba5eec5f349d64",
+  "v3.5.4": "fb50b8242ea3c5c0c5308a6981c9a09c23a87e49",
+  "v3.6": "554dc7e94634102fb505afcc65d0a7855bb2788e",
+  "v3.7": "b48438953d9835c9daa582328196ad7f2cecdf4f",
+  "v3.8": "6024f841109c1d9786c389aab86299874a7a387d",
+  "v3.8.1": "8302672931e96c9afefc6b1fab8aeaf175ae6c4c",
+  "v3.8.2": "a464329cc9938ef6f9321b70cad875f1fda8f063",
+  "v3.8.3": "319a606cf4b8c9ca40e71bf3051b0cd9c726359f",
+  "v3.9": "46fa9c05d6a492453d53deb89e51d6e934e04c63",
+  "v3.9.1": "aff185792d27e227ce2dd5fa19dc4b483deaa998"
+ }
+}

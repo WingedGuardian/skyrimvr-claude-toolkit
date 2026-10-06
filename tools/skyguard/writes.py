@@ -57,11 +57,12 @@ copy primitives.
 from __future__ import annotations
 
 import os
+import posixpath
 import re
 from typing import List, Mapping, NamedTuple, Optional, Tuple
 
 from . import shellparse, targets
-from .deletes import _plain_operands
+from .deletes import _plain_operands, interpreter_code
 from .grep import _compile
 from .shellparse import ps_param
 
@@ -197,9 +198,188 @@ def sed_win_replacement(script: str) -> bool:
     return False
 
 
+# ------------------------------------------------------------------------------- other byte writers (routes red team)
+# Programs that put bytes into a file NAMED on their command line without being a text-write primitive: downloaders,
+# decoders, archivers, truncators, in-place editors. Each writes its OWN format (an HTTP body, a zip, a tar, zeros)
+# into the name it is given, so onto a plugin or archive name it is the same corruption S-WRITE-PLUGIN denies.
+_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s]+")
+WEB_GET = frozenset(("invoke-webrequest", "iwr", "invoke-restmethod", "irm"))
+_CERTUTIL_WRITES = ("-urlcache", "-decode", "-decodehex", "-encode", "-encodehex")
+
+
+def _url_name(url: str) -> str:
+    """The file name curl -O / wget give a download: the URL path's last component."""
+    path = re.sub(r"[?#].*$", "", url.split("://", 1)[-1])
+    return path.rsplit("/", 1)[-1] if "/" in path else ""
+
+
+def _opt_values(argv, longs, shorts) -> List[str]:
+    """Values of `--long X`, `--long=X`, `-s X` and a short cluster ending in s (`-sLo X`, `-oX`)."""
+    out, k = [], 0
+    while k < len(argv):
+        w = argv[k]
+        if w in longs or w in shorts:
+            if k + 1 < len(argv):
+                out.append(argv[k + 1])
+            k += 2
+            continue
+        if any(w.startswith(lg + "=") for lg in longs):
+            out.append(w.split("=", 1)[1])
+        elif w.startswith("-") and not w.startswith("--") and len(w) > 2:
+            for s in shorts:
+                c = s[1:]
+                if w.endswith(c) and k + 1 < len(argv):
+                    out.append(argv[k + 1])
+                    k += 1
+                    break
+                if w[1:2] == c:
+                    out.append(w[2:])
+                    break
+        k += 1
+    return out
+
+
+def _has_flag(argv, longs, short_letter, valued_letters="") -> bool:
+    """`--long`, or `short_letter` in a short cluster before any letter that takes a value (`-XPOST` is -X POST)."""
+    for w in argv:
+        if w in longs:
+            return True
+        if w.startswith("-") and not w.startswith("--"):
+            for c in w[1:]:
+                if c == short_letter:
+                    return True
+                if c in valued_letters:
+                    break
+    return False
+
+
+_CURL_VALUED = "XHdubceAFTwxmrEKoCYyzQPtUD"
+
+
+def _download_names(argv, outdir_longs, outdir_shorts) -> List[str]:
+    """curl -O / wget without -O: each URL's own name, under the output directory when one is given."""
+    names = [n for n in (_url_name(u) for u in argv if _URL.fullmatch(u)) if n]
+    dirs = _opt_values(argv, outdir_longs, outdir_shorts)
+    return [(dirs[-1].rstrip("/\\") + "/" + n) if dirs else n for n in names]
+
+
+def _first_operand(argv, valued=()) -> List[str]:
+    k = 0
+    while k < len(argv):
+        w = argv[k]
+        if w in valued:
+            k += 2
+            continue
+        if not (w.startswith("-") and len(w) > 1):
+            return [w]
+        k += 1
+    return []
+
+
+def tool_write_targets(e) -> List[str]:
+    p, argv = e.program, e.argv
+    if p in WEB_GET or (p in ("curl", "wget") and e.dialect == "powershell" and ps_param(e, "outfile")):
+        return list(ps_param(e, "outfile"))            # PowerShell 5's curl/wget are Invoke-WebRequest
+    if p == "curl":
+        out = _opt_values(argv, ("--output",), ("-o",))
+        if _has_flag(argv, ("--remote-name", "--remote-name-all"), "O", _CURL_VALUED):
+            out += _download_names(argv, ("--output-dir",), ())
+        return out
+    if p == "wget":
+        out = _opt_values(argv, ("--output-document",), ("-O",))
+        if out:
+            return [w for w in out if w != "-"]
+        return _download_names(argv, ("--directory-prefix",), ("-P",))
+    if p == "start-bitstransfer":
+        return list(ps_param(e, "destination", 1))
+    if p == "certutil" and any(w.lower() in _CERTUTIL_WRITES for w in argv):
+        ops = [w for w in argv if not w.startswith("-")]
+        return ops[-1:]
+    if p == "bitsadmin" and any(w.lower() in ("/transfer", "/addfile") for w in argv):
+        return list(argv[-1:])
+    if p == "truncate":
+        return _plain_operands_valued(argv, ("-s", "--size", "-r", "--reference"))
+    if p == "perl" and any(re.fullmatch(r"-[a-hj-zA-Z]*i\S*", w) for w in argv):
+        return _plain_operands_valued(argv, ("-e", "-E", "-M", "-I", "-m"))[0 if _perl_code_given(argv) else 1:]
+    if p == "fsutil" and argv[:1] == ("file",):
+        return [w for w in argv[2:] if not w.startswith("-")]
+    if p == "openssl":
+        return _opt_values(argv, ("-out",), ())
+    if p in ("7z", "7za", "7zr", "7z.exe") and argv and argv[0].lower() in ("a", "u", "d", "rn"):
+        return _first_operand(argv[1:])
+    if p == "zip":
+        return _first_operand(argv, ("-b", "-t", "-tt", "-n", "-x", "-i"))
+    if p == "tar" and _tar_creates(argv):
+        return _opt_values(argv, ("--file",), ("-f",)) or _tar_bundled_file(argv)
+    if p == "compress-archive":
+        return list(ps_param(e, "destinationpath", 1))
+    if p in ("export-csv", "export-clixml"):
+        return list(ps_param(e, "path", 0)) + list(ps_param(e, "literalpath"))
+    return []
+
+
+def _plain_operands_valued(argv, valued) -> List[str]:
+    out, k = [], 0
+    while k < len(argv):
+        w = argv[k]
+        if w in valued:
+            k += 2
+            continue
+        if not (w.startswith("-") and len(w) > 1):
+            out.append(w)
+        k += 1
+    return out
+
+
+def _perl_code_given(argv) -> bool:
+    return any(w in ("-e", "-E") for w in argv)
+
+
+def _tar_creates(argv) -> bool:
+    first = argv[0] if argv else ""
+    if first and not first.startswith("-") and re.fullmatch(r"[A-Za-z]+", first):
+        return bool(set(first) & set("cruA"))                # old-style bundled `tar cf x.tar ...`
+    return any(w in ("--create", "--append", "--update", "--concatenate") or
+               (w.startswith("-") and not w.startswith("--") and set(w[1:]) & set("cruA")) for w in argv)
+
+
+def _tar_bundled_file(argv) -> List[str]:
+    first = argv[0] if argv else ""
+    if first and not first.startswith("-") and "f" in first and len(argv) > 1:
+        return [argv[1]]
+    return []
+
+
+# PowerShell .NET calls that write a file named in their FIRST string argument... (parsed as text: shellparse does not
+# model method calls): WebClient.DownloadFile(url, PATH), FileStream(PATH, ...), [IO.File]::Open/Create/OpenWrite.
+_PS_METHOD_WRITE = re.compile(
+    r"""(?:\.DownloadFile(?:Async)?\(\s*[^,()]+,\s*|FileStream\s*\(?\s*|::(?:Open|Create|OpenWrite)\(\s*)"""
+    r"""['"]([^'"\n]{1,400})['"]""", re.IGNORECASE)
+# Interpreter code that writes a file NAMED by a string literal: Python open(..., 'w'/'a'/'x'/'+'), Path(...).write_*,
+# os.truncate; Node fs.writeFile*/appendFile*/truncate*/createWriteStream. Only a literal name is read.
+_LIT = r"""\s*[rRbBuUfF]{0,2}(['"])([^'"\n]{1,400})\1"""
+_INTERP_WRITE = (
+    re.compile(r"\bopen\(" + _LIT + r"""\s*,\s*(?:mode\s*=\s*)?[rRbBuU]{0,2}['"][rbt]*[wax+]""", re.IGNORECASE),
+    re.compile(r"\bPath\(" + _LIT + r"\s*\)\s*\.\s*(?:write_bytes|write_text|open\(\s*['\"][rbt]*[wax+])"),
+    re.compile(r"\bos\.truncate\(" + _LIT),
+    re.compile(r"\b(?:writeFile|appendFile|truncate|createWriteStream)(?:Sync)?\(" + _LIT),
+)
+
+
+def text_write_targets_ps(text: str) -> List[str]:
+    return [m.group(1) for m in _PS_METHOD_WRITE.finditer(text)]
+
+
+def text_write_targets(code: str) -> List[str]:
+    out = []
+    for rx in _INTERP_WRITE:
+        out += [m.group(2) for m in rx.finditer(code)]
+    return out
+
+
 def write_targets(e) -> List[str]:
     """The files this exec writes in place (redirects included)."""
-    out = _redirect_targets(e)
+    out = _redirect_targets(e) + list(tool_write_targets(e))
     p = e.program
     if p == "tee":
         out += _plain_operands(e.argv)
@@ -224,7 +404,8 @@ def copy_targets(e) -> List[Tuple[str, Tuple[str, ...]]]:
     if p in ("copy-item", "move-item"):
         src = tuple(ps_param(e, "path", 0)) + tuple(ps_param(e, "literalpath"))
         dst = ps_param(e, "destination", 1)
-        return [(dst[0] if dst else ".", src)] if src else []
+        # B-I1 (final review): `Get-Item X | Copy-Item -Destination D` still writes D; its source arrives on the pipe.
+        return [(dst[0] if dst else ".", src)] if src or e.stdin_from == "pipe" else []
     if p in CMD_COPY_PROGRAMS and e.dialect == "cmd":
         words = [w for w in argv if not _CMD_SWITCH.fullmatch(w)]
         if not words:
@@ -344,6 +525,48 @@ def _segment_hits(text: str) -> List[Tuple[str, str]]:
 class Scan(NamedTuple):
     deny: str                               # basename of a plugin a write primitive targets ("" for none)
     advice: Tuple[Tuple[str, str], ...]     # (rule id, file phrase) in rule order, one per rule
+    move_root: str = ""                     # S-MOVE-ROOT: basename of a protected folder a move takes away
+    save: str = ""                          # S-WRITE-SAVE: basename of a save a write / copy / move replaces
+
+
+# ------------------------------------------------------------------------- saves and protected folders (rt-fix-b)
+SAVE_EXTS = (".ess", ".skse")
+_CONFIG_SAVES = re.compile(r"/documents/my games/skyrim[^/]*/saves$")
+
+
+def is_save(abs_path: Optional[str], roots) -> bool:
+    """A save (or its SKSE co-save) in the settings folder, where the game reads it."""
+    return bool(abs_path) and abs_path.lower().endswith(SAVE_EXTS) and targets.zone(abs_path, roots) == "config"
+
+
+def is_protected_folder(abs_path: Optional[str], roots) -> bool:
+    """A folder whose MOVE takes the game's files away: a protected root itself or an ancestor of one
+    (targets.covers_protected), the install's Data folder, or the settings folder's Saves folder."""
+    if not abs_path:
+        return False
+    if targets.covers_protected(abs_path, roots):
+        return True
+    if _rel(abs_path, roots.install_dirs) == ["data"] and targets.zone(abs_path, roots) == "install":
+        return True
+    return _rel(abs_path, roots.config_dirs) == ["saves"] or bool(_CONFIG_SAVES.search(abs_path.lower()))
+
+
+MOVE_PROGRAMS = frozenset(("mv", "move-item"))
+
+
+def move_sources(e) -> List[str]:
+    """The words a move or rename takes away from where they are."""
+    p, argv = e.program, e.argv
+    if p in MOVE_PROGRAMS or (p == "move" and e.dialect == "cmd") or p in ("io.file.move", "io.directory.move"):
+        return [w for _, srcs in copy_targets(e) for w in srcs] if p not in ("io.file.move", "io.directory.move") \
+            else list(argv[:1])
+    # `rename-item`: since the merge with rt-fix-a (2026-10-05) the parser also emits every Rename-Item that names a
+    # -NewName as a `move-item` (shellparse._rename_as_move), judged by the branch above. A Rename-Item without one
+    # cannot run (NewName is mandatory), so a branch here only duplicated it.
+    if p == "rename":
+        words = [w for w in argv if not _CMD_SWITCH.fullmatch(w)]
+        return words[:1]
+    return []
 
 
 ADVICE_ORDER = ("S-COPY-PLUGIN", "S-WRITE-LOADORDER", "S-WRITE-INI", "S-WRITE-SKSE-INI", "S-WRITE-INSTALL",
@@ -382,6 +605,8 @@ def _opaque_texts(execs) -> List[str]:
 def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, str]] = None) -> Scan:
     env = os.environ if env is None else env
     plugin: List[str] = []
+    moved: List[str] = []
+    saves: List[str] = []
     notes = {k: [] for k in ADVICE_ORDER}
 
     for e in parsed.execs:
@@ -395,6 +620,9 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 continue
             # S-SED-WINPATH (Task 9): sed -i on an install/config/MO2 file whose replacement holds a backslash path.
             # It REPLACES the S-WRITE-INSTALL note for that file (one note per write, not two).
+            if is_save(a, roots):
+                saves.append(_name(w))                              # replaces the S-WRITE-INSTALL note: an ask
+                continue
             sed_note = winpath and w in sed_files and a is not None and targets.zone(a, roots) in SED_ZONES
             if sed_note:
                 notes["S-SED-WINPATH"].append(_name(w))
@@ -402,9 +630,22 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 notes[RULE_OF_CLASS[kind]].append(_name(w))
             elif not sed_note and a is not None and in_install_area(a, roots):
                 notes["S-WRITE-INSTALL"].append(_name(w))
+        for w in move_sources(e):
+            a = targets.resolve_operand(e, w, cwd, env)
+            if is_protected_folder(a, roots):
+                moved.append(posixpath.basename(a.rstrip("/")) or a)
         for dst, srcs in copy_targets(e):
             # The destination as written AND where it resolves (`cp a.ini x.ini` run inside Data/SKSE/Plugins).
             a_dst = targets.resolve_operand(e, dst, cwd, env)
+            # A save replaced: the destination itself, or a folder destination that takes a save's name.
+            if is_save(a_dst, roots):
+                saves.append(_name(dst))
+                continue
+            if a_dst is not None and _looks_like_dir(dst):
+                hit = next((s for s in srcs if s.lower().endswith(SAVE_EXTS)), None)
+                if hit is not None and is_save(a_dst.rstrip("/") + "/" + _name(hit), roots):
+                    saves.append(_name(hit))
+                    continue
             kind = file_class(dst, a_dst or "")
             if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):
                 plugin.append(_name(dst))                           # cp /dev/null X.esp truncates it: a write
@@ -425,6 +666,23 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if (a is not None and game_loads(a, roots)) or (a is None and _DATA_CHILD.search(cand)):
                 notes["S-COPY-PLUGIN"].append(name)
 
+    # routes red team: a file written by name in interpreter code (`python -c "open('X.esp','wb')"`, node
+    # writeFileSync) or by a .NET call in PowerShell text (WebClient.DownloadFile, FileStream, [IO.File]::Open).
+    # Only literal names; judged by file class alone (where a literal in code lands is not resolved).
+    lit = text_write_targets_ps(command)
+    for e in parsed.execs:
+        code = interpreter_code(e)
+        if code:
+            lit += text_write_targets(code)
+    for word in lit:
+        kind = file_class(word)
+        if kind == "plugin":
+            plugin.append(_name(word))
+        elif kind:
+            notes[RULE_OF_CLASS[kind]].append(_name(word))
+        elif is_save(targets.resolve(word, cwd, "cmd", env), roots):     # a literal: nothing in it expands
+            saves.append(_name(word))
+
     texts = [command] if not parsed.ok else _opaque_texts(parsed.execs)
     for t in texts:
         for kind, word in _segment_hits(t):
@@ -432,8 +690,9 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 plugin.append(_name(word))
             else:
                 notes[RULE_OF_CLASS[kind]].append(_name(word))
+    extra = dict(move_root=_phrase(moved) if moved else "", save=_phrase(saves) if saves else "")
     if plugin:
-        return Scan(_phrase(plugin), ())
-    return Scan("", tuple((r, _phrase(notes[r])) for r in ADVICE_ORDER if notes[r]))
+        return Scan(_phrase(plugin), (), **extra)
+    return Scan("", tuple((r, _phrase(notes[r])) for r in ADVICE_ORDER if notes[r]), **extra)
 
 

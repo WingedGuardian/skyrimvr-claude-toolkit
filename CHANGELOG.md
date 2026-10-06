@@ -40,6 +40,71 @@
   `bash tools/skyguard.sh snapshot list` shows them; `snapshot restore <id>` writes to a new folder by default, `--to DIR` picks one,
   and `--in-place` restores only the files that kind of snapshot may write, inside the configured roots, after backing up what it replaces.
 
+### Runtimes: one .NET SDK (10), Node 24 LTS, Spriggit 0.41.0
+
+- **The .NET 10 SDK is now the only .NET the toolkit needs.** Spriggit and AutoMod both run on it; .NET 8 and 9 are no longer used (both reach end of support on 2026-11-10).
+- **Spriggit is pinned to 0.41.0** (was 0.40.0); it needs the .NET 10 SDK. `tools/toolchain-check.sh` now reports an older Spriggit as a mismatch too, not only a newer one. Update with `dotnet tool update -g Spriggit.CLI --version 0.41.0`.
+- **AutoMod must be rebuilt once: `bash tools/automod-cli.sh --rebuild`.** It first puts your clone on the tested commit (v1.11.2, `e1c34ea`): older toolkits had you clone upstream HEAD, so a clean clone is checked out to the pin, and one with your own changes is left alone with instructions. It then pins SDK 10 in `tools/automod/global.json`, retargets the clone to net10.0 (a one-line local patch) and builds; the wrapper refuses an old net8.0 build. The first build needs internet. `tools/toolchain-check.sh` now reports which commit AutoMod was built from and reads DEGRADED when it is not the pin.
+- The setup prompt (and its copies in README and getting-started) now clones AutoMod at v1.11.2 and builds it with `--rebuild`; it used to clone upstream HEAD and `dotnet build` it.
+- Spriggit installed with `dotnet tool restore` (the repo-local, exactly-pinned install) now works with the ESP guard `tools/esp-verify-wrapper.sh` and `tools/toolchain-check.sh`; before, the guard stopped with "spriggit not found" and the check read "not installed".
+- `tools/toolchain-check.sh`: a ReSaver whose `lib/` folder is missing now reads DEGRADED instead of ok.
+- If you placed `bsarch.exe` for AutoMod, move it from `bin/Release/net8.0/tools/bsarch/` to `bin/Release/net10.0/tools/bsarch/`.
+- **Node 24 LTS** (Node 20 is end-of-life): `.node-version` 24.19.0 (the version tested), `engines.node` `>=24`, and the devcontainer installs Node 24 and .NET 10.
+- `tools/toolchain-check.sh` no longer reports AutoMod or ReSaver "ok" when the wrapper says its DLL or jar is missing: a wrapper must now reach its dependency, and one you never installed reads "not installed (optional)".
+- `tools/toolchain-check.sh` runs the wrappers under the bash running the check, not whatever `bash` is first on PATH (on Windows that can be WSL's launcher).
+- KB correction: a Spriggit round trip of an ESP another tool wrote reorders its records (same size, different bytes) on 0.40 and 0.41 alike, while the YAML is identical. Compare re-serialized YAML, not ESP bytes.
+
+### Dependencies (exact, hash-locked, refreshed with the reasons recorded)
+
+- **Removed the unused pins** from the container's Python requirements: pydantic (and pydantic-core), cattrs, mypy and pytest-cov
+  (with coverage, attrs, annotated-types, mypy-extensions), plus the Windows-only `requirements-windows.txt/.lock` (pywin32).
+  Nothing in the toolkit imported or ran any of them, so no behaviour changes; the hash lock goes from 20 packages to 10 and
+  installs on Python 3.10 through 3.13. Anything of yours that imported one of them from the container must add it back itself.
+- **PyYAML 6.0.1 to 6.0.3**: the first release with Python 3.13 wheels (and 3.14). Only `yaml.safe_load` is used; no API change.
+- **pytest 8.0.0 to 9.0.3**: 9.0.3 is the only release line that fixes CVE-2025-71176 (predictable `/tmp/pytest-of-<user>` directory on Unix; 8.x is still affected). pytest now needs Python 3.10 or newer, which is the tested range's floor. Adds Pygments as a dependency; the lock pins 2.21.0 because every release before 2.20.0 has a known ReDoS advisory (a test enforces this).
+- **ruff 0.3.0 to 0.16.9** (CI lint only; never installed for users). The hard gate (`E9,F63,F7,F82`) gives identical results on 0.3.0, 0.3.7, 0.15.22, 0.16.9 and 0.16.10 over every tracked Python file; the advisory full-ruleset run is noisier (about 1400 findings). The gate no longer reports the adapter template's slot fragments (`ruff.toml`), which made it fail before.
+- **`package.json` pins exact versions** (ajv 8.20.0, fast-xml-parser 5.7.3, zod 3.25.76) instead of `^` ranges, so a plain `npm install` can no longer float away from the lock. The lock already held ajv and zod at these versions; fast-xml-parser moves in the next line.
+- **fast-xml-parser 4.5.7 to 5.7.3** (the container's "Generate FOMOD XML" tool). `npm audit` flags every 4.x for the `XMLBuilder` comment/CDATA injection advisory (GHSA-gh4j-gqv2-49f6, fixed in 5.7.0); 5.7.3 clears it, at the cost of four more small dependencies. A new smoke test (`tests/fomod-xmlbuilder.test.js`, run from `npm ci` by `tests/test_node_fomod_smoke.py` and by CI) builds a FOMOD ModuleConfig with `XMLBuilder`, parses it back, and checks that comment and CDATA text cannot inject elements; a control run on 4.3.6 proves the smoke fails on an injectable version. ajv 8.20.0 and zod 3.25.76 are already the newest of their lines and do not change.
+
+### Other agents: the adapter kit
+
+- **New `ADAPTING.md`, written to an agent the toolkit does not support yet.** Any agent that reads files already gets the instructions, the skills and the tools (Layers 0 and 1; Layer 2, a read-only lock below the agent, is not yet released). `ADAPTING.md` walks such an agent through wiring the rest into itself, and through saying honestly how far it got. The toolkit still lists only Claude Code and Codex as supported; an adapted agent is "locally adapted, self-verified", a statement about one install on one machine.
+- **New neutral engine entry: `python tools/skyguard/run.py neutral pre-tool`.** It takes one agent-neutral JSON request on stdin and answers allow, ask or deny with the engine's real rules. Anything it cannot read or decide is a refusal, never an allow.
+- **New adapter kit in `tools/adapting/`:** an adapter template, a capability-report template and two worked examples (a hook that refuses by exit code, one that refuses by JSON).
+- **New conformance tool, `tools/adapter_conformance.py`.** It runs an adapter against ten faults injected into the engine (a crash, a hang, silence, garbage output, a missing marker, an unknown decision, a missing engine and so on) and fails any adapter that lets a command through when the engine could not decide, or that does not obey a valid verdict. Every tool the agent has that writes a file or runs a command must be listed and gets its own decoy test; a tool left off the list is reported as not guarded. Its capability report names a protection status only when there is evidence for it, including a live shell test, every such tool mapped, and an agent hook timeout longer than the adapter's own deadline.
+- **New skill `toolkit-setup` and tool `tools/inventory-runtimes.py`.** The skill checks Python, Git and Node by launching them, reports anything missing, broken or too old, and never upgrades, repairs or removes one that exists. An authorized install is accepted only for the known winget ids (`Python.Python.3.<minor>`, `Git.Git`, `OpenJS.NodeJS`, `OpenJS.NodeJS.LTS`), read from your whole message.
+- **The setup prompt is now agent-neutral, and it no longer asks the agent to install a missing Python or Node.** Installing host software is off unless you change one sentence in the prompt to authorize an exact package and version; otherwise the agent tells you the manual steps and waits.
+- **Core instructions point an unsupported agent, or a machine with a missing runtime, at `ADAPTING.md` and `toolkit-setup`.**
+- Release builds now check that the adapter kit is in the zip (`tools/check-adapter-payload.py`). The toy-agent test that exercises the kit lives in `tests/`, which is not shipped: it is a check on the toolkit's own CI, not part of the download.
+
+### Guard rules rewritten on a parser (Plan 5): security fixes to the 3.x guards, and far less noise
+
+- **Security fix (E12): the PowerShell tool was not guarded.** The 3.x Claude matcher was `Bash` only, so a delete or write
+  made through the PowerShell tool reached no hook. The matchers are now `Bash|PowerShell|Monitor` (the Monitor tool runs
+  shell commands and bypassed every hook) and `Edit|Write|NotebookEdit`. **If you installed a 3.x toolkit, your PowerShell
+  tool was unguarded.**
+- **Security fix (E21): shell writes to plugins and archives were only advised.** `echo x > Foo.esp`, `Set-Content Foo.esp`,
+  `tee`, `Out-File`, `sed -i` and `dd of=` into an `.esp .esm .esl .bsa .ba2` now refuse, in Bash and PowerShell. Until now the
+  "refused outright" claim held only for the Edit and Write tools. Copying a finished plugin onto `Data/` stays a note.
+- Deletes are judged on the program that runs and where its operand resolves (relative paths against the working directory
+  Claude reports), also for Mod Organizer's `mods/` and `overwrite/`. `grep -rn "rm -rf" <install>` is no longer refused.
+- New: DevBench `smp reset` is refused (MCP tool, `curl`, `devbench-cli.sh`, and on Codex); a DevBench save over an existing save asks.
+- **Red-team fixes (routes and shell):** a Codex `apply_patch` Delete, or a Move out of the folder, inside the game,
+  settings or Mod Organizer folders is now judged as a delete and refused (it was judged only as a write). Plugin and
+  archive writes by non-text tools (`curl -o`, `wget -O`, `-OutFile`, `bitsadmin`, `certutil`, `tar`/`zip`, `fsutil`,
+  `truncate`, inline `python -c` / `node -e` with a literal name) refuse like a redirect. New confirmations: replacing a save file (shell or patch), and a git command
+  that throws away uncommitted changes in the install. New refusals: moving a file out of where the game looks for it;
+  running decoded text (`base64 -d | sh`, `iex` of a decoded string); `rm -rf *` in a folder the guard cannot place;
+  interpreter code that launches a delete (`os.system`, `child_process`) and command-running wrappers (`schtasks`,
+  `Start-Process`, `docker`, `psexec`) whose own words delete in a protected folder. DevBench calls are read anywhere in
+  their arguments, including scenario steps and `wget`; NTFS stream suffixes (`x.esp:stream`) no longer hide a plugin
+  name. Hooks run from a git worktree of the install also protect the main install. Priced over ~68,000 real tool calls:
+  9 newly refused or advised, all scratch test scripts; no routine modding call changed.
+- **Noise cut, measured on 66,773 real tool calls:** advice notes 2,437 to 211 (the P2 baseline was 2,028; 0.316% of calls
+  against 3.79%); asks 26 to 12, 11 of them an executed ReSaver `--apply`; 205 wrong denies removed, none a real action.
+  Verdicts now carry `status: partial` when the parser could not read a command completely.
+- Every message is at most two plain lines and never echoes the command.
+
 ### Codex support
 
 - **First Codex hook definitions (v1): approve them in /hooks.** Open `codex` in your Skyrim folder, type `/hooks`, approve the 2 Skyrim toolkit hooks; until then Codex runs none of them and does not say so.
@@ -59,9 +124,11 @@
 
 ### Codex adapter: known coverage gaps
 
-- **MCP tools are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the
+- **MCP tools other than DevBench's are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the
   hook as `mcp__<server>__<tool>`; the toolkit allows it and records one line in
-  `.claude/backups/codex-unhooked-tools.log`. Only the DevBench MCP is covered by rules (Plan 5 Task 11).
+  `.claude/backups/codex-unhooked-tools.log`. DevBench's tools (any server whose name contains `devbench`) get the
+  same judge as on Claude: `smp reset` is refused on Codex too, and a save over an existing save is refused with
+  `NEEDS YOUR CONFIRMATION` (Codex cannot ask). No hook definition changed, so no re-approval is needed.
   Unknown non-MCP tools that carry a command string are guarded with the shell rules (and logged).
 
 ### Hook interpreter fallback
@@ -77,12 +144,21 @@
 - **An extracted zip that never ran `setup.sh`** (the `{{PYTHON_PATH}}` placeholder still in the hooks) now takes
   the same route: the hooks fall back to a Python they can find and still decide, reported as DEGRADED. They used
   to refuse every command. With no usable Python at all they still refuse (GUARD INERT).
-- **Nothing can hang past the agent's timeout.** On the normal path the engine arms an in-process watchdog
+- **Nothing can hang past the agent's timeout, even on a busy machine.** The engine arms an in-process watchdog
   (`faulthandler`, a C thread that fires even inside a catastrophic regex) that ends it after 20 s
-  (`SKYGUARD_ENGINE_TIMEOUT` seconds) into the ordinary GUARD INERT deny; the traceback goes to stderr, which
-  the wrapper discards. Fallback probes (3 s each) and a fallback engine run use coreutils `timeout` (without it
-  on PATH they run unbounded). **Not covered:** a hung interpreter *start* (before the engine's `main`) on the
-  configured Python, which `setup.sh` verified; that would need a `timeout` fork on every call (~20-30 ms).
+  (`SKYGUARD_ENGINE_TIMEOUT` seconds) into the ordinary GUARD INERT deny. Every bash hook (Claude and Codex)
+  also bounds each Python it starts -- probe and engine, the normal path included -- and kills it by its
+  **Windows process id** (`taskkill /F /T`); it never uses coreutils `timeout`, which under heavy CPU load could
+  not stop a native `python.exe` at all (measured: a 3 s limit took 18-227 s), so a hook outlived its 60 s
+  definition timeout and the agent ran the command. Each hook now answers by its definition timeout minus 15 s
+  whatever its children are doing. Measured on 4 cores at 2x oversubscription: worst 43 s (was 155 s Claude,
+  52 s Codex).
+- **The fallback probes once, not on every call.** A verified fallback interpreter is remembered in
+  `.claude/backups/.hook-heartbeat/<agent>/.python-fallback`; every call through it must echo a fresh nonce from
+  the engine, so that file cannot be used to substitute an interpreter. A candidate costs one process (the
+  engine's own selftest refuses Python < 3.8), gets up to 15 s (`SKYGUARD_PROBE_TIMEOUT`; a healthy one took
+  up to ~9 s under load, so the old 3 s rejected working installs), and is not re-probed after the engine's
+  own watchdog fired.
 - **`setup.sh` requires Python 3.8+** (a 3.6 used to pass and then deny everything) and writes the path into the
   hooks in single quotes, so a `$` or backtick in a folder name is no longer expanded on every hook call.
 

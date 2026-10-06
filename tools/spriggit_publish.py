@@ -24,7 +24,7 @@ def validate(source):
         raise ValueError("empty output artifact")
 
 
-# What a real `spriggit serialize` writes (measured 2026-10-02, Spriggit.CLI 0.40.0 round trip):
+# What a real `spriggit serialize` writes (measured 2026-10-02 on Spriggit.CLI 0.40.0, re-measured 2026-10-05 on 0.41.0):
 # top-level spriggit-meta.json and RecordData.yaml, plus record-group directories (Weapons/, ...)
 # holding only record files. Anything else in a destination directory -- .git, notes, a README --
 # was put there by someone else, and replacing the directory would delete it.

@@ -4,7 +4,8 @@
     python scripts/gen-guard-hashes.py              write GUARD-FILES.sha256 at the repo root
     python scripts/gen-guard-hashes.py --check      exit 1 when the committed file differs from a fresh one (CI)
     python scripts/gen-guard-hashes.py --verify DIR exit 1 when a file the manifest in DIR names is missing there or
-                                                    hashes differently (the release payload, before it is zipped)
+                                                    hashes differently (tools/check-release-payload.py's guards
+                                                    section runs the same verify() on the release zip)
 
 At every session start tools/skyguard/session.py hashes the files this manifest names and banners the ones that differ
 (`{n} guard files differ from release {ver} ...`), so an edit to the guards -- the user's, or an agent's that the
@@ -15,7 +16,7 @@ uses, so the two can never disagree -- except the files setup.sh rewrites on eve
 hash would differ on every machine and turn the banner into noise.
 
 WHICH BYTES: the working-tree file, as checked out. .gitattributes pins every guard file type's line endings (eol=lf;
-the Codex .ps1 entry eol=crlf), so a Windows checkout, the Linux CI checkout and the rsync-built release zip all hold
+the Codex .ps1 entry eol=crlf), so a Windows checkout, the Linux CI checkout and the release zip (git archive of the commit) all hold
 the same bytes, and those are the bytes a user extracts.
 
 Format (session.py's reader): `# release <ver>`, then `<sha256>  <relative path>` per file, sorted, LF line endings.

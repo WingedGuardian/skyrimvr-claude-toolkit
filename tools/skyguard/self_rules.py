@@ -223,10 +223,10 @@ def _git_restore(argv) -> List[str]:
 # state -- a file in it or the folder itself -- is also S-SELF-STATE, never shadowed. (A delete of the whole install
 # stays S-DEL-INSTALL: it takes the game with it.)
 _QUOTED = re.compile(r"'([^'\n]{1,400})'|\"([^\"\n]{1,400})\"")
-# The Recycle-Bin delete (Microsoft.VisualBasic FileSystem.DeleteFile/DeleteDirectory): no Exec carries it, so it is a
-# text construct whose FIRST argument is the path.
-_RECYCLE = re.compile(r"FileSystem\]\s*::\s*Delete(?:File|Directory)\s*\(\s*(?:'([^'\n]{1,400})'|\"([^\"\n]{1,400})\")",
-                      re.IGNORECASE)
+# The Recycle-Bin delete has no Exec, so it is a text construct whose FIRST argument is the path. Merge of master into
+# plan6 (2026-10-05): read through deletes.RECYCLE_CALL (Plan 5 final review D1), the ONE definition -- it also knows
+# Shell.Application's Namespace(10).MoveHere, escaped quotes and bare arguments, which this rule's own regex did not, so
+# such a delete of .skyguard/lock.json reached only S-DEL-INSTALL, which guards off shadows.
 
 
 def _reaches_state(a: str, roots) -> bool:
@@ -257,10 +257,17 @@ def _state_delete(e, cwd, env, roots) -> str:
     return ""
 
 
-def _recycle_delete(command: str, cwd, env, roots) -> str:
-    for m in _RECYCLE.finditer(command):
-        w = m.group(1) or m.group(2)
-        a = targets.resolve(w, cwd, "powershell", env)
+def _recycle_delete(command: str, parsed, cwd, env, roots) -> str:
+    """The name of what a Recycle-Bin delete removes from the state ("" for none); each argument is resolved as
+    deletes.scan resolves it (single-quoted: literal; double-quoted: expanded; bare: never resolved, matched raw)."""
+    from . import deletes
+    base = targets.normalise_cwd(cwd)
+    for w, how in deletes.recycle_targets(deletes.recycle_text(command, parsed)):
+        a = None
+        if how == "single":
+            a = deletes.literal_abs(w, base, "powershell")
+        elif how == "double":
+            a = targets.resolve(w, base or "", "powershell", env)
         if (a is not None and _reaches_state(a, roots)) or (a is None and text_kind(w) == STATE):
             return _hit_name(a, w)
     return ""
@@ -285,7 +292,7 @@ def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping
             if hit:
                 found[STATE] = hit
     if STATE not in found:
-        hit = _recycle_delete(command, cwd, env, roots)
+        hit = _recycle_delete(command, parsed, cwd, env, roots)
         if hit:
             found[STATE] = hit
     for k in (STATE, GUARD):

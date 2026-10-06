@@ -82,7 +82,7 @@ def main():
         shutil.rmtree(spr)
     sp = subprocess.run(["spriggit", "serialize", "--InputPath", DATA + "/Spike.esp", "--OutputPath", spr,
                          "--GameRelease", "SkyrimSE", "--PackageName", "Spriggit.Yaml", "--PackageVersion",
-                         "0.40.0"], capture_output=True, text=True, timeout=600)
+                         "0.41.0"], capture_output=True, text=True, timeout=600)
     yamls = []
     for dp, _, fs in os.walk(spr) if os.path.exists(spr) else []:
         yamls += [os.path.join(dp, f) for f in fs if f.endswith(".yaml")]

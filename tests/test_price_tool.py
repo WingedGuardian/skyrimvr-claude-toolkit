@@ -92,7 +92,7 @@ def test_identical_engines_price_to_all_zeros(tmp_path, history):
 
 def test_a_broadened_rule_moves_only_that_rule(tmp_path, history):
     new = _scratch_engine(tmp_path, "scratch", [
-        ("targets.py", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)$", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini|notes\.md)$")])
+        ("targets.py", r'(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)"', r'(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini|notes\.md)"')])
     s, out = _run(tmp_path, SKYGUARD, new, history)
     # The plugins.txt/notes.md write newly fires WRITE-INI while WRITE-LOADORDER (fired first) fires in both:
     # attribution must name the rule that is new, not the first rule the item fires.
@@ -104,7 +104,7 @@ def test_a_broadened_rule_moves_only_that_rule(tmp_path, history):
 
 def test_a_rule_that_stops_firing_reads_no_longer(tmp_path, history):
     new = _scratch_engine(tmp_path, "scratch", [
-        ("targets.py", r"(loadorder\.txt|plugins\.txt)$", r"(plugins\.txt)$")])
+        ("targets.py", r'(loadorder\.txt|plugins\.txt)"', r'(plugins\.txt)"')])
     s, _ = _run(tmp_path, SKYGUARD, new, history)
     assert s["rules"] == {"S-WRITE-LOADORDER": {"no-longer-advise": 1}}    # the PowerShell loadorder.txt write
     assert s["matrix"].get("advise>allow") == 1
@@ -112,7 +112,7 @@ def test_a_rule_that_stops_firing_reads_no_longer(tmp_path, history):
 
 def test_only_rule_filters_the_report(tmp_path, history):
     new = _scratch_engine(tmp_path, "scratch", [
-        ("targets.py", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)$", r"(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini|notes\.md)$")])
+        ("targets.py", r'(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini)"', r'(Skyrim\.ini|SkyrimVR\.ini|SkyrimPrefs\.ini|SkyrimCustom\.ini|notes\.md)"')])
     s, _ = _run(tmp_path, SKYGUARD, new, history, only_rule="S-WRITE-LOADORDER")
     assert s["rules"] == {}
 

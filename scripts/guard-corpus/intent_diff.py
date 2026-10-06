@@ -85,7 +85,14 @@ def main(argv=None) -> int:
     old = parse(git_file(base, INTENDED))
     new = parse(git_file(head, INTENDED))
     legacy = parse(git_file(head, EXPECTED))
-    sys.stdout.write(render(table(old, new, legacy)))
+    text = render(table(old, new, legacy))
+    # Final review C-M1: UTF-8 bytes, not the console code page (cp1252 cannot encode the corpus's Kelvin sign).
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout.flush()
+        sys.stdout.buffer.write(text.encode("utf-8"))
+        sys.stdout.buffer.flush()
+    else:
+        sys.stdout.write(text)
     return 0
 
 

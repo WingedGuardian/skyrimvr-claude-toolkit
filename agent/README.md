@@ -22,7 +22,7 @@ generator writes LF and `*.ps1` is otherwise CRLF). `--target all` (the default;
 the union of both targets and refuses two targets emitting one path; `--target claude|codex` renders one.
 
 Skills (`skills/<name>/SKILL.md`): `create-mod`, `devbench`, `inspect-esp`, `port-to-vr`, `skyrim-audio`,
-`skyrim-bsa`, `skyrim-context`, `skyrim-mcm`, `skyrim-nif`, `skyrim-save`, `triage-and-conflicts`, `xelib`.
+`skyrim-bsa`, `skyrim-context`, `skyrim-mcm`, `skyrim-nif`, `skyrim-save`, `toolkit-setup`, `triage-and-conflicts`, `xelib`.
 `devbench`, `triage-and-conflicts` and `xelib` hold what used to be bulk in `core.md`; the core points at
 them from its *Where the rest lives* table.
 
@@ -32,6 +32,9 @@ worst-case INSTALLED size of header + `core.md` + any addendum exceeds that. "In
 by `tests/test_instruction_budget.py`); `instructions/codex.md` is counted at its real size. `python scripts/gen_agent_trees.py --budget` prints every row and its headroom. Over budget?
 Move bulk out of `core.md` into a skill (a recipe, read before the work) or `docs/` (background), and
 leave a one-line rule plus a pointer behind. Never raise the constants to make it pass.
+
+**Unsupported agents.** The core's last *Where the rest lives* row sends an agent the README does not list to
+`ADAPTING.md` and the `toolkit-setup` skill. Keep that row agent-neutral.
 
 **Neutrality.** `core.md` is shared by every agent, and so are the `devbench`, `triage-and-conflicts`
 and `xelib` skills: no Claude-only tool names, variables, slash commands or config paths in them.

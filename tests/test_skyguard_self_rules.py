@@ -154,6 +154,22 @@ def test_guards_off_does_not_let_the_lock_manifest_be_deleted(tmp_path):
     assert v.decision == "allow" and v.context.startswith("Guards OFF")
 
 
+@pytest.mark.parametrize("command,shell_name", [
+    ("(New-Object -ComObject Shell.Application).Namespace(10).MoveHere('" + GAME + "/.skyguard/lock.json')",
+     "powershell"),
+    ("[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('.skyguard/lock.json', 'OnlyErrorDialogs', "
+     "'SendToRecycleBin')", "powershell"),
+    ('powershell -Command "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\"' + GAME
+     + '/.skyguard/lock.json\\", \'OnlyErrorDialogs\', \'SendToRecycleBin\')"', "bash"),
+], ids=["shell-application-movehere", "visualbasic-relative", "escaped-quotes-through-bash"])
+def test_a_recycle_bin_delete_of_the_state_is_s_self_state_in_every_spelling(command, shell_name):
+    """Merge of master into plan6: S-SELF-STATE reads Recycle-Bin deletes through deletes.RECYCLE_CALL (Plan 5 final
+    review D1). Its own narrower regex missed MoveHere and escaped quotes, so those reached only S-DEL-INSTALL, which
+    guards off shadows -- the lock manifest gone, nothing relocks."""
+    (decision, _), fired = shell(command, shell_name)
+    assert decision == "deny" and fired == {"S-SELF-STATE"}, (decision, fired)
+
+
 def test_a_delete_of_the_whole_install_stays_s_del_install():
     """I1 is about the state, not the install: deleting the whole install (which holds .skyguard) keeps its own rule."""
     (decision, _), fired = shell("rm -rf \"" + GAME + "\"")
@@ -249,6 +265,19 @@ def test_a_user_level_hook_switch_is_a_guard_file(command, shell_name):
     """l2-self-userlevel: `~` (and $HOME) resolve to the home folder, where the user-level switches live."""
     (decision, text), fired = shell(command, shell_name, cwd="C:/work", env=UENV)
     assert fired == {"S-SELF-GUARD"}, (decision, text)
+
+
+@pytest.mark.parametrize("command", [
+    "git checkout HEAD~5 -- .claude/settings.json",
+    "git restore --source=HEAD~1 .claude/settings.json",
+], ids=["checkout", "restore"])
+def test_a_git_restore_of_a_guard_file_outside_the_install_is_the_guard_rule(command):
+    """Merge of master into plan6: inside the install S-GIT-DISCARD (master) asks first, so rows
+    p6t12-guard-git-checkout-hooks / -restore-settings now ask and no longer show the git route of S-SELF-GUARD. Run
+    from the home folder -- no protected working tree, so git_discard is silent -- the route is still the one that
+    decides (the mutations rule-S-SELF-GUARD-git-checkout / -git-restore name these cases)."""
+    (decision, _), fired = shell(command, cwd=HOME, env=UENV)
+    assert fired == {"S-SELF-GUARD"}, (decision, fired)
 
 
 def test_a_user_level_write_tool_is_a_guard_file():
@@ -355,8 +384,18 @@ def test_the_check_mode_fails_on_a_stale_manifest(tmp_path, monkeypatch, capsys)
 def test_the_ci_workflow_runs_the_drift_gate():
     ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "scripts/gen-guard-hashes.py --check" in ci
+    # Merge of master into plan6: release.yml (Plan 8 T10) verifies the zip through ONE checker, run by
+    # tools/verify-release.sh with every section; the manifest verify is its `guards` section.
     rel = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-    assert "gen-guard-hashes.py --verify" in rel
+    assert "bash tools/verify-release.sh --local" in rel
+    vr = (REPO / "tools" / "verify-release.sh").read_text(encoding="utf-8")
+    call = next(ln for ln in vr.splitlines() if "check-release-payload.py" in ln and "--leaks" not in ln
+                and not ln.lstrip().startswith("#"))
+    assert "--section" not in call, call
+    spec = importlib.util.spec_from_file_location("crp", REPO / "tools" / "check-release-payload.py")
+    crp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(crp)
+    assert crp.SECTIONS["guards"] is crp.check_guards and "GUARD-FILES.sha256" in crp.CORE_REQUIRED
 
 
 # ---- fix round 1, C1: a CONFIGURED install (setup.sh fills the interpreter into 8 guard files) ----------------------

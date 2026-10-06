@@ -387,3 +387,78 @@ def external_out(parsed, roots, cwd: str, env: Mapping[str, str]) -> str:
             if a is not None and in_install_area(a, roots):
                 return name
     return ""
+
+
+# ------------------------------------------------------------------------------- S-GIT-DISCARD (rt-fix-b)
+# git subcommands that OVERWRITE working files with a committed version, throwing away uncommitted changes, which
+# no backup holds: `checkout` with a pathspec (`-- x`, `.`) or -f, `restore` (the working tree unless only --staged),
+# `reset --hard`, `switch -f / --discard-changes`, `checkout-index -f`, `read-tree -u --reset`. Judged where the
+# repository's working tree resolves: the payload cwd moved by cd, then -C / --work-tree. Asked in the install,
+# config or MO2 folders (not scratch). Not here: `git clean` and `git rm` (deletes.py), `git stash` (keeps the
+# changes), merges and pulls (git refuses to overwrite local changes on its own).
+# KNOWN LIMITS: `git checkout <name>` with no `--` is read as a branch switch unless <name> looks like a file (`.`,
+# a name with an extension, a glob), so `git checkout Data` is missed; a working tree reached through an unresolved
+# variable is not judged.
+_GIT_GLOBAL_VALUED = frozenset(("-c", "--git-dir", "--namespace", "--exec-path", "--config-env"))
+_PATHY = re.compile(r"^\.$|\.[A-Za-z][A-Za-z0-9]{0,7}$|[*?]")    # not `/`: origin/main is a branch
+
+
+def _git_split(argv):
+    """(working-tree words from -C / --work-tree, subcommand, its args) or None."""
+    k, base = 0, []
+    while k < len(argv):
+        w = argv[k]
+        if w in ("-C", "--work-tree") and k + 1 < len(argv):
+            base.append(argv[k + 1])
+            k += 2
+            continue
+        if w.startswith("--work-tree="):
+            base.append(w.split("=", 1)[1])
+        elif w in _GIT_GLOBAL_VALUED and k + 1 < len(argv):
+            k += 1
+        elif not w.startswith("-"):
+            return base, w, list(argv[k + 1:])
+        k += 1
+    return None
+
+
+def _git_discards(sub: str, args) -> bool:
+    opts = [a for a in args if a.startswith("-")]
+    if sub == "checkout":
+        if "--" in args or any(a in ("-f", "--force") for a in opts):
+            return True
+        if any(a in ("-b", "-B", "--orphan") for a in opts):
+            return False
+        return any(_PATHY.search(a) for a in args if not a.startswith("-"))
+    if sub == "restore":
+        staged = any(a in ("--staged", "-S") for a in opts) or any(
+            a.startswith("-") and not a.startswith("--") and "S" in a[1:] for a in opts)
+        worktree = any(a in ("--worktree", "-W") for a in opts) or any(
+            a.startswith("-") and not a.startswith("--") and "W" in a[1:] for a in opts)
+        return worktree or not staged
+    if sub == "reset":
+        return "--hard" in opts
+    if sub == "switch":
+        return any(a in ("-f", "--force", "--discard-changes") for a in opts)
+    if sub == "checkout-index":
+        return any(a in ("-f", "--force") or (a.startswith("-") and not a.startswith("--") and "f" in a[1:])
+                   for a in opts)
+    if sub == "read-tree":
+        return "-u" in opts and "--reset" in opts
+    return False
+
+
+def git_discard(parsed, roots, cwd: str, env: Mapping[str, str]) -> str:
+    """The basename of the protected working tree a git command overwrites, else ""."""
+    for e in parsed.execs:
+        if e.program != "git":
+            continue
+        split = _git_split(e.argv)
+        if split is None or not _git_discards(split[1], split[2]):
+            continue
+        where = targets.exec_cwd(e, cwd, env)
+        for b in split[0]:
+            where = targets.resolve(b, where or "", e.dialect, env)
+        if where is not None and targets.zone(where, roots) in ("install", "config", "mo2"):
+            return where.rstrip("/").rsplit("/", 1)[-1] or where
+    return ""

@@ -12,7 +12,7 @@ import subprocess
 
 from conftest import BASH, REPO
 
-PROMPT_START = "I just installed the Skyrim Claude Code Modding Toolkit"
+PROMPT_START = "I just installed the Skyrim modding toolkit"
 
 # The canonical copy, and the two files that embed it.
 PROMPT_SOURCES = [
@@ -309,10 +309,12 @@ def test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks():
     sys.path.insert(0, str(REPO / "tools"))
     from skyguard import health
     assert set(health.CLAUDE_HOOKS) == shipped, (health.CLAUDE_HOOKS, sorted(shipped))
-    floor = re.search(r'test "\$nhooks" -ge ([0-9]+)', (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8"))
-    assert floor and int(floor.group(1)) == len(shipped), (floor and floor.group(1), len(shipped))
-    verify = re.search(r"floor=([0-9]+) ;;", (REPO / "tools" / "verify-release.sh").read_text(encoding="utf-8"))
-    assert verify and int(verify.group(1)) == len(shipped), (verify and verify.group(1), len(shipped))
+    # Plan 8 T10: both release gates run tools/check-release-payload.py, which owns the floor.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("crp", REPO / "tools" / "check-release-payload.py")
+    crp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(crp)
+    assert crp.CLAUDE_HOOK_FLOOR == len(shipped), (crp.CLAUDE_HOOK_FLOOR, len(shipped))
 
 
 def test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher():
@@ -404,15 +406,19 @@ def test_the_users_knowledgebase_is_never_shipped_and_is_where_writes_go():
     # explaining the gate also contains, so deleting the gate itself left the test
     # green. A check that its own documentation satisfies is worse than no check: it
     # goes red only when someone removes the explanation.
+    # Plan 8 T10: the gate is an entry of the one payload checker (proven red on its own line in
+    # test_release_payload.py), and release.yml runs that checker on the zip it publishes.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("crp", REPO / "tools" / "check-release-payload.py")
+    crp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(crp)
+    assert local in crp.ABSENT_PATHS, (
+        "tools/check-release-payload.py does not assert " + local + " is absent from the "
+        "payload. Without that gate the split is a convention, and a convention cannot go red")
     workflow = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-    gate = [
-        l for l in workflow.splitlines()
-        if not l.strip().startswith("#") and "test ! -e" in l and local in l
-    ]
-    assert gate, (
-        "release.yml has no executable assertion that " + local + " is absent from the "
-        "payload (a comment mentioning it does not count). Without that gate the split "
-        "is a convention, and a convention cannot go red")
+    assert [l for l in workflow.splitlines()
+            if not l.strip().startswith("#") and "tools/verify-release.sh" in l and "--local" in l], (
+        "release.yml does not run the payload checker (through verify-release.sh --local) on the zip it publishes")
 
     # ...and the toolkit's own knowledgebase must still SHIP. Dropping it would make
     # the assertion above pass for the wrong reason.
@@ -431,11 +437,12 @@ import pytest  # noqa: E402
 
 from conftest import copy_repo  # noqa: E402
 
-CHECKER = REPO / "tools" / "check-codex-payload.py"
+CHECKER = REPO / "tools" / "check-release-payload.py"   # Plan 8 T10: the Codex section of the one checker
 
 
 def _check(root):
-    return subprocess.run([sys.executable, str(CHECKER), str(root)], capture_output=True, text=True, timeout=60)
+    return subprocess.run([sys.executable, str(CHECKER), str(root), "--section", "codex"],
+                          capture_output=True, text=True, timeout=60)
 
 
 def _line(out, name):
@@ -478,7 +485,7 @@ def pristine_payload(tmp_path_factory):
 
 def test_the_codex_payload_check_passes_on_the_real_payload(pristine_payload):
     r = _check(pristine_payload)
-    assert r.returncode == 0 and "CODEX PAYLOAD: OK" in r.stdout, r.stdout + r.stderr
+    assert r.returncode == 0 and "RELEASE PAYLOAD: OK" in r.stdout, r.stdout + r.stderr
 
 
 @pytest.mark.parametrize("brk", sorted(BREAKS))
@@ -493,13 +500,18 @@ def test_every_codex_payload_check_can_fail(tmp_path, pristine_payload, brk):
     assert "!!" in _line(r.stdout, name), f"{brk}: the '{name}' check did not go red:\n{r.stdout}"
 
 
-def test_both_release_gates_run_the_codex_payload_check():
-    """The construct, not the name in a comment: an executable line in each gate runs the checker."""
-    for rel in (".github/workflows/release.yml", "tools/verify-release.sh"):
-        text = (REPO / rel).read_text(encoding="utf-8")
-        runs = [l for l in text.splitlines()
-                if not l.strip().startswith("#") and "python" in l and "check-codex-payload.py" in l]
-        assert runs, f"{rel} never runs tools/check-codex-payload.py"
+def test_both_release_gates_run_the_release_payload_check():
+    """The construct, not the name in a comment: release.yml runs verify-release.sh on the zip it publishes, and
+    verify-release.sh runs the one checker (whose Codex section is tested above)."""
+    verify = (REPO / "tools" / "verify-release.sh").read_text(encoding="utf-8")
+    runs = [l for l in verify.splitlines()
+            if not l.strip().startswith("#") and ("python" in l.lower() or l.lstrip().startswith('"$PY"'))
+            and "check-release-payload.py" in l]
+    assert runs, "tools/verify-release.sh never runs tools/check-release-payload.py"
+    workflow = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    runs = [l for l in workflow.splitlines()
+            if not l.strip().startswith("#") and "tools/verify-release.sh" in l and "--local" in l]
+    assert runs, "release.yml never runs tools/verify-release.sh --local on the zip it publishes"
 
 
 def test_the_codex_files_are_not_gitignored():

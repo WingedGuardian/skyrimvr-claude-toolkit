@@ -166,6 +166,10 @@ Claude can then:
   menu* from *actually hung* from *no save loaded yet*, instead of guessing from a frozen frame
   counter. (Needs DevBench 1.11.0+; older builds fall back automatically.)
 
+DevBench minimum is **1.11.0**; newest release the docs were read against is **1.24.0**. Update your
+**VR Address Library first** (newest seen: 0.276.1) -- DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0.
+CrashLogger 1.24+ also writes `__fastfail` dumps; `crash-triage.py` already handles the file naming.
+
 In practice, tuning a value stops being "edit, recompile, reload, ask you to try it" and becomes
 another call into the running game. You just keep playing. The toolkit ships the wrapper
 (`tools/devbench-cli.sh`) and the hard-won hazard list — DevBench itself you install from Nexus.
@@ -225,7 +229,7 @@ The clearest example: **xeditlib**. XEditLib.dll is the engine inside SSEEdit/xE
 - **1,300+ lines of Skyrim modding knowledge** -- Papyrus quirks, version-specific differences, xEdit pitfalls, engine bugs, NIF/animation authoring, VR hit-detection, and more (including VR-specific sections). Loaded into every Claude session automatically.
 - **NIF authoring & animation** -- Author self-animating meshes (self-spinning, telescoping, keyframed motion) with PyNifly, edit LE geometry with PyFFI, and verify everything with a headless render before you load the game.
 - **Render-verification loop** -- Headless Blender renders any NIF to a PNG so fixes are confirmed in chat; NifSkope and PyNifly act as independent render/parse gates so bad files are caught in tooling.
-- **Safety hooks** -- Claude is refused outright on the things that are never correct (writing into an ESP/ESM/BSA, deleting the game or config directory, deleting Bethesda registry keys), and is warned -- without interrupting you -- on the things that are consequential but legitimate. Files it edits are backed up first, with a full audit trail. Only one action asks *you* to decide: a ReSaver command that mutates a save file. Run `bash tools/hook-canary.sh` any time to confirm the hooks are alive and actually receiving their input -- they once were not, and nothing looked wrong.
+- **Safety hooks** -- Claude is refused outright on the things that are never correct (writing a plugin or archive as raw text -- through the edit tools **and** through the shell -- deleting inside the game, config or Mod Organizer folders or moving files out of them, moving the install, `Data`, the settings folder or `Saves` away, deleting Bethesda registry keys, running decoded text as commands, DevBench's `smp reset`), and is warned -- without interrupting you -- on the things that are consequential but legitimate. Files it edits are backed up first, with a full audit trail. Only seven rules ask *you* to decide: a ReSaver command that mutates a save file, a DevBench save over an existing save, a write, copy or move onto a save in `Saves` (two rules: the shell and the edit tools), a git command that would throw away uncommitted changes in a protected folder, a `lock disable` that turns the vanilla-file lock off for good, and an in-place snapshot restore (`snapshot restore --in-place`), which writes over live files. Run `bash tools/hook-canary.sh` any time to confirm the hooks are alive and actually receiving their input -- they once were not, and nothing looked wrong.
 - **Confidence system** -- Claude rates its confidence (0-100%) and lists its assumptions before proposing any change. No guessing, no "this should work."
 - **ESP editing via Spriggit** -- Serialize any ESP to human-readable YAML, edit it directly, deserialize back. Claude's native file editing works on YAML out of the box — no FFI layer, no scripting, and changes diff cleanly in git.
 - **ESP analysis via xeditlib** -- Programmatic inspection, diffing, and bulk queries across records. The hard Delphi FFI work is already done. ([xeditlib on GitHub](https://github.com/WingedGuardian/xeditlib))
@@ -248,8 +252,8 @@ None of these are bundled; setup walks you through any you pick.
 
 - **xeditlib** -- programmatic ESP read/write (`npm install github:WingedGuardian/xeditlib`)
 - **Champollion / Caprica** -- Papyrus decompile / compile (GitHub releases)
-- **Spriggit** -- ESP ↔ YAML editing (`dotnet tool install Spriggit.CLI`); **requires the .NET 9 SDK**, not just the runtime (`winget install Microsoft.DotNet.SDK.9`). Spriggit fetches its serializer at runtime as a dotnet tool, and only a matching SDK can install one — with the runtime alone it starts, prints a version, and still cannot serialize. That also disables the cross-reference integrity guard, which drives it.
-- **AutoMod CLI** -- NIF / BSA / audio / MCM / ESP. **Must be cloned and built**: clone https://github.com/SpookyPirate/spookys-automod-toolkit into `tools/automod` and build the Cli project (not the WPF Setup project) — then run via `tools/automod-cli.sh`.
+- **Spriggit** -- ESP ↔ YAML editing (`dotnet tool install Spriggit.CLI --version 0.41.0` -- **always pinned** to the tested version, not older and not newer; `tools/toolchain-check.sh` flags a version that differs from the pin); **requires the .NET 10 SDK**, not just the runtime (`winget install Microsoft.DotNet.SDK.10 --exact`). The .NET 10 SDK is the toolkit's **only** .NET requirement: Spriggit and AutoMod both run on it. Spriggit fetches its serializer at runtime as a dotnet tool, and only a matching SDK can install one — with the runtime alone it starts, prints a version, and still cannot serialize. That also disables the cross-reference integrity guard, which drives it.
+- **AutoMod CLI** -- NIF / BSA / audio / MCM / ESP. **Must be cloned and built**: clone https://github.com/SpookyPirate/spookys-automod-toolkit at tag `v1.11.2` into `tools/automod`, then `bash tools/automod-cli.sh --rebuild` (retargets it to .NET 10 and builds the Cli project only; the first build needs internet) — then run via `tools/automod-cli.sh`. Same .NET 10 SDK as Spriggit; no .NET 8.
 - **PyFFI** -- LE-format NIF geometry (any modern Python + setuptools, `pip install pyffi setuptools`)
 - **PyNifly** -- SSE BSTriShape + animation authoring (download `io_scene_nifly.zip` from the GitHub **releases**, not a git clone — the compiled DLL ships only in the release zip; no build)
 - **Blender (headless) / NifSkope** -- NIF mesh repair + render verification (large external apps)
@@ -310,13 +314,13 @@ claude
 
 ### Step 4: Paste This Prompt
 
-Copy this entire prompt and paste it into Claude Code (it's also saved as `SETUP_PROMPT.txt` in your Skyrim folder):
+Copy this entire prompt and paste it into your coding agent (Claude Code, Codex, ...) (it's also saved as `SETUP_PROMPT.txt` in your Skyrim folder):
 
 ```
-I just installed the Skyrim Claude Code Modding Toolkit into this folder. Run "bash setup.sh" to set everything up. Install any missing prerequisites (Python 3, Node.js) for me. After setup, ask me which optional modding tools I'd like (xeditlib, Champollion, Caprica, Spriggit, AutoMod CLI, PyFFI, PyNifly, Blender, NifSkope, ReSaver CLI) and install the ones I pick. AutoMod CLI adds NIF mesh editing, BSA archive tools, audio processing, and MCM menu generation -- it is a real tool you install by cloning https://github.com/SpookyPirate/spookys-automod-toolkit into tools/automod and building the Cli project (dotnet build tools/automod/src/SpookysAutomod.Cli -c Release; do not build the WPF Setup project headless), after which it runs via tools/automod-cli.sh. PyFFI + PyNifly add NIF geometry and animation/controller authoring; Blender (headless) + NifSkope add mesh repair and render-verification of meshes before in-game testing. ReSaver CLI adds headless .ess save parsing, cross-referencing, cleaning, and changeform-level diagnostics (download ReSaver.jar from Nexus mod 5031 into tools/resaver-cli/; needs JDK 17+ (JDK 21 LTS recommended; e.g. `winget install Microsoft.OpenJDK.21`)). Separately, TELL me about DevBench but do NOT install it: it is an optional dev-only SKSE plugin (Nexus mod 181326 by alandtse, no gameplay change and no save data) that runs a localhost server inside the running game, letting you inspect live state, run console commands and read their output, and call Papyrus functions -- so you can test your own fixes while I keep playing, instead of asking me to launch, trigger, and report back. Unlike everything else in that list it is a mod, not a dev tool, so if I want it I install it through my own mod manager like any other SKSE plugin -- never copy files into Data/ yourself. The wrapper tools/devbench-cli.sh is already bundled and works as soon as it's installed. The bundled cosave-info tool (tools/cosave-cli.sh, Python 3, no download) gives a read-only structural survey of an SKSE .skse co-save. Be sure to tailor the environment specifically to my Skyrim version and install (may or may not be VR). Also ask me whether I want to enable the optional Nexus API integration (mod update-detection / version & changelog checks); if yes, explain how to get a free Personal API Key and save it to tools/.nexus_api_key (which is gitignored). Explain everything in plain English and ask me any questions you may need to.
+I just installed the Skyrim modding toolkit into this folder. Read AGENTS.md (Claude Code reads CLAUDE.md, which says the same), then read the skill toolkit-setup (.agents/skills/toolkit-setup/SKILL.md; Claude Code: .claude/skills/toolkit-setup/SKILL.md) and follow it: it inventories Python, Git and Node by launching them, then you run "bash setup.sh". Host-software installs: NOT AUTHORIZED. That means: do not install, upgrade, repair or remove Python, Git, Node or any other system software (a JDK, .NET, Blender) on my computer; if something is missing or broken, tell me the exact manual steps and wait for me. (To authorize installing Python, Git or Node I will change that sentence myself, to this form: Host-software installs: AUTHORIZED python=<winget id>==<exact version>. That sentence never covers a JDK, .NET or Blender: for those you only give me manual steps.) If you are an agent other than Claude Code or Codex, read ADAPTING.md after setup and tell me honestly which protection layers you can provide and which you cannot. After setup, ask me which optional modding tools I'd like (xeditlib, Champollion, Caprica, Spriggit, AutoMod CLI, PyFFI, PyNifly, Blender, NifSkope, ReSaver CLI) and set up the ones I pick, only inside this folder (git clones or downloads into tools/). AutoMod CLI adds NIF mesh editing, BSA archive tools, audio processing, and MCM menu generation -- it is a real tool you install by cloning https://github.com/SpookyPirate/spookys-automod-toolkit at tag v1.11.2 (commit e1c34ea, the version this toolkit tested) into tools/automod and then running bash tools/automod-cli.sh --rebuild, which checks out that commit, retargets it to the .NET 10 SDK and builds only the Cli project (never build it with a bare dotnet build; the first build needs internet), after which it runs via tools/automod-cli.sh. PyFFI + PyNifly add NIF geometry and animation/controller authoring; Blender (headless) + NifSkope add mesh repair and render-verification of meshes before in-game testing. ReSaver CLI adds headless .ess save parsing, cross-referencing, cleaning, and changeform-level diagnostics (download ReSaver.jar from Nexus mod 5031 into tools/resaver-cli/; needs JDK 17+ (JDK 21 LTS recommended; a JDK is system software: never install it yourself, give me the manual steps)). Separately, TELL me about DevBench but do NOT install it: it is an optional dev-only SKSE plugin (Nexus mod 181326 by alandtse, no gameplay change and no save data) that runs a localhost server inside the running game, letting you inspect live state, run console commands and read their output, and call Papyrus functions -- so you can test your own fixes while I keep playing, instead of asking me to launch, trigger, and report back. Unlike everything else in that list it is a mod, not a dev tool, so if I want it I install it through my own mod manager like any other SKSE plugin -- never copy files into Data/ yourself. The wrapper tools/devbench-cli.sh is already bundled and works as soon as it's installed. The bundled cosave-info tool (tools/cosave-cli.sh, Python 3, no download) gives a read-only structural survey of an SKSE .skse co-save. Be sure to tailor the environment specifically to my Skyrim version and install (may or may not be VR). Also ask me whether I want to enable the optional Nexus API integration (mod update-detection / version & changelog checks); if yes, explain how to get a free Personal API Key and save it to tools/.nexus_api_key (which is gitignored). Explain everything in plain English and ask me any questions you may need to.
 ```
 
-Claude handles the rest. It will configure paths, install dependencies, set up the safety hooks, and walk you through optional tool installation. Just answer any questions it asks.
+Your agent handles the rest. It checks which of Python, Git and Node actually start, configures paths, sets up the safety hooks, and walks you through the optional tools (installed only inside this folder). It does not install Python, Git, Node or any other system software: if one is missing it tells you the manual steps, unless you change the authorization sentence in the prompt yourself. Just answer any questions it asks.
 
 > **Note on the NIF render loop:** The headless render-verification step uses Blender (and, optionally, NifSkope for an independent visual check). These are large external GUI apps, so — like Champollion/Caprica — they aren't bundled in the zip; the setup will point you to install them and wire up the addon. PyFFI and PyNifly themselves are lightweight and handled by setup.
 
@@ -415,8 +419,8 @@ These aren't things you configure -- they're already wired in. Every session, be
 
 | Protection | What It Does |
 |-----------|-------------|
-| **Command guard** | Blocks deleting the install or Bethesda registry keys. **Advises** on other file operations in game directories -- a note to Claude, not a prompt to you. |
-| **File guard** | Blocks direct writes to ESP/ESM/BSA files. Confirms all other game file edits. |
+| **Command guard** | Blocks deleting inside the install, the config folder or Mod Organizer's `mods`/`overwrite` (a Recycle-Bin delete included), deleting everything in a folder it cannot place, moving the install, `Data`, the settings folder or `Saves` away, running decoded text (`base64 -d` piped to a shell), deleting Bethesda registry keys, raw-text shell writes to ESP/ESM/ESL/BSA/BA2 (`>`, `tee`, `Set-Content`, `Out-File`, ...), and DevBench `smp reset`. Runs on the Bash and PowerShell tools. **Advises** on other file operations in game directories -- a note to Claude, not a prompt to you. |
+| **File guard** | Blocks direct writes to ESP/ESM/ESL/BSA/BA2 files through the edit tools. **Advises** on INIs, load-order files and scripts; it does not prompt. |
 | **Auto-backup** | Copies every file to `.claude/backups/` before modification, with full audit log. |
 | **Confidence system** | Claude must rate confidence 0-100% and list assumptions before any change. |
 | **Investigation-first** | Claude checks the knowledgebase and web-searches before touching anything. |
@@ -624,14 +628,16 @@ you run it yourself if you agree. Deleting the Bethesda registry keys (`reg dele
   lists it, is the one exception.
 - **Commands you type with `!`** in the Codex prompt -- they run in your own shell and bypass hooks
   (measured on codex-cli 0.160.0).
-- **Input sent to a program that is already running** (Codex's `write_stdin`): probably not guarded -- it carries
-  no command for the guards to read. This is **unmeasured** on 0.160.0 (an older, different-toolkit observation,
-  not re-run here), so treat it as a possible gap.
-- **MCP tools**, DevBench included: logged, not guarded, until a later release adds rules for them.
-- **A shell call's own working directory** (`workdir`): the toolkit's reading of the hook payload takes the
-  `cwd` field and does not read a `workdir` tool argument, so a call that sets one may have its relative
-  paths judged against the session folder instead. Whether Codex puts `workdir` in the payload is
-  **unmeasured**. Use absolute paths for anything in the game folder.
+- **Input sent to a program that is already running** (Codex's `write_stdin`): the keystrokes are judged as a
+  shell command when the hook sees them, but whether Codex 0.160.0 fires a hook for `write_stdin` at all is
+  **unmeasured**, and keystrokes that only finish a command typed earlier are not put back together. Treat it
+  as a possible gap.
+- **MCP tools other than DevBench's**: logged in `.claude/backups/codex-unhooked-tools.log`, not guarded. DevBench's own tools
+  (any server whose name contains `devbench`) get the same judge as on Claude: `smp reset` is refused, and a save over an
+  existing save is refused with `NEEDS YOUR CONFIRMATION`, like every other confirmation on Codex.
+- **A shell call's own working directory** (`workdir`): read when the hook payload carries one, so relative
+  paths land there; whether Codex puts `workdir` in the payload is **unmeasured**. Use absolute paths for
+  anything in the game folder.
 - **A hook that cannot start lets the command run.** That is how Codex treats a failed hook, so the toolkit's
   entry scripts never fail on their own -- but a hook that never starts cannot help. Two setups where it
   never starts are **not supported**: a Windows group policy that forces the PowerShell execution policy to
@@ -649,6 +655,10 @@ against how many the hooks recorded. That coverage covers **only sessions in whi
 whose hooks never fire leaves no record at all, so it cannot appear as a gap. That is why only the surfaces
 probed live (`codex exec` and the TUI) are claimed, and why the desktop app and IDE extensions are not.
 
+## Other agents
+
+Any agent that reads files gets the toolkit's instructions, skills and tools, with no hook (Layers 0 and 1; Layer 2, a read-only lock below the agent, is not yet released). [`ADAPTING.md`](ADAPTING.md) is written for such an agent: it lets the agent wire up the rest itself and describes how far it can prove it got. The toolkit does not call such an agent supported; only Claude Code and Codex are listed as supported here.
+
 ---
 
 ## FAQ
@@ -657,7 +667,7 @@ probed live (`codex exec` and the TUI) are claimed, and why the desktop app and 
 A: Yes! The knowledgebase covers both. VR-specific sections only apply to VR. Safety hooks and workflow work for either. Just tell Claude Code to adapt your environment to your specific Skyrim version.
 
 **Q: Can Claude break my mods or save files?**
-A: The safety hooks refuse the destructive cases outright rather than asking you to confirm them: writing into an ESP/ESM/BSA, deleting the game or config directory, and deleting Bethesda's registry keys are all denied. The delete rule is anchored on *any* destroyer (`rm`, `rmdir`, `del`, `Remove-Item`, `shutil.rmtree`, `find -delete`) appearing alongside a path inside **your actual install**, in either slash direction and either path dialect -- an earlier version keyed on one spelling of `rm` and eleven others walked past it. The install is *resolved*, from the hooks' own location plus the paths `setup.sh` records in `.claude/skyrim-paths.env`; it is not "any path containing the word Skyrim", which used to match a temp folder, a checkout of this toolkit, and even a git URL, refusing ordinary work as though it were deleting your game. If the hooks cannot work out where the install is, they **refuse rather than allow** -- a guard that checked nothing must not answer "fine". **It is still pattern matching, not a sandbox**, so treat it as a guard against accidents rather than a guarantee against everything. Ordinary edits proceed with a warning in Claude's context instead of a prompt at you, and files it edits through the Edit/Write tools are copied to `.claude/backups/` first with an audit-log entry -- work done by external tools through Bash is covered by the `.psc`/`.pex` snapshot instead. Verify the hooks are actually live with `bash tools/hook-canary.sh`, and keep your own backups regardless.
+A: The safety hooks refuse the destructive cases outright rather than asking you to confirm them: writing a plugin or archive (through the edit tools or a shell write such as `>`, `tee`, `Set-Content`), deleting inside the game, config or Mod Organizer folders, and deleting Bethesda's registry keys are all denied. The delete rule is anchored on the *program that runs* (`rm`, `rmdir`, `del`, `Remove-Item`, `shutil.rmtree`, `find -delete`, in Bash and PowerShell) and on where its operand **resolves**, relative paths against the working directory Claude reports, in either slash direction and either path dialect -- an earlier version keyed on one spelling of `rm` and eleven others walked past it, and matched the words of a `grep` as if they were a delete. The install is *resolved*, from the hooks' own location plus the paths `setup.sh` records in `.claude/skyrim-paths.env`; it is not "any path containing the word Skyrim", which used to match a temp folder, a checkout of this toolkit, and even a git URL, refusing ordinary work as though it were deleting your game. If the hooks cannot work out where the install is, they **refuse rather than allow** -- a guard that checked nothing must not answer "fine". **It is still pattern matching, not a sandbox**, so treat it as a guard against accidents rather than a guarantee against everything. Ordinary edits proceed with a warning in Claude's context instead of a prompt at you, and files it edits through the Edit/Write tools are copied to `.claude/backups/` first with an audit-log entry -- work done by external tools through Bash is covered by the `.psc`/`.pex` snapshot instead. Verify the hooks are actually live with `bash tools/hook-canary.sh`, and keep your own backups regardless.
 
 **Q: Do I need Blender or NifSkope?**
 A: Only for the optional headless render-verification loop. The core NIF authoring/editing (PyFFI, PyNifly) works without them. If you want Claude to render a mesh to a PNG and show it to you in chat, install Blender; NifSkope adds an independent visual gate. Setup will walk you through it.
@@ -681,6 +691,18 @@ pack** is built by `scripts/build-nexus-pack.sh <tag> <changelog.txt> <descripti
 downloads the published release asset rather than rebuilding it, records its sha256 and size, and
 **refuses to report success on an incomplete pack**. `tests/test_nexus_pack.py` asserts the shape.
 
+Before any tag, run `bash scripts/build-release-zip.sh HEAD dist` and then
+`bash tools/verify-release.sh --local dist/<zip> --scrubbed` on your own machine: it greps the zip and
+everything a scrubbed install generates for your user name, home folder and real game folder (read from your
+environment, never written into the repo), for the values of your API keys, and for key-shaped strings. That
+local run is the authoritative identity-leak gate. The release workflow repeats the grep, but a CI runner
+does not know who you are: set the repository secret **`LEAK_TOKENS`** (Settings -> Secrets and variables ->
+Actions) to your user name and your home and game folders, one per line. Write each folder ONCE, as a
+Windows path (`C:\Users\<you>`, `D:\Games\Skyrim VR`): the checker derives the other spellings itself
+(forward slashes, JSON-escaped, `/c/...`, URL-encoded). A name needs at least 4 characters and a folder at
+least two named levels, or the token is rejected (by line number; the release log never prints a token or a
+matched spelling). If the secret is missing, empty or rejected, the release workflow refuses to publish.
+
 The changelog and mod-page description are passed in, not generated: extracting a version block
 from `CHANGELOG.md` yields raw markdown, while the Nexus box renders a flat list and wants one
 issue per line. Nexus has no write API for files or the description, so the upload itself is always
@@ -698,7 +720,7 @@ generated file. `--check` also enforces the **instruction budget**: the installe
 (header + `agent/instructions/core.md` + an addendum, plus room for `setup.sh`'s path expansion) must
 stay at or under 32,768 bytes, because Codex silently truncates past that. Check it with
 `python scripts/gen_agent_trees.py --budget`; when over, move bulk into a skill or `docs/`. The core
-and the `devbench`, `triage-and-conflicts` and `xelib` skills must also stay **agent-neutral**
+and the `devbench`, `toolkit-setup`, `triage-and-conflicts` and `xelib` skills must also stay **agent-neutral**
 (no Claude-only tool names, variables, slash commands or config paths; Claude specifics go in
 `agent/instructions/claude.md`), enforced by `tests/test_instruction_neutrality.py`.
 

@@ -354,9 +354,10 @@ MUTATIONS = [
     # still keeps it untracked -- but nothing would stop a release shipping it and
     # overwriting their notes on update. A convention with no gate cannot go red.
     pytest.param(
-        ".github/workflows/release.yml",
-        'test ! -e "/tmp/$NAME/KNOWLEDGEBASE.local.md"',
-        "true",
+        # Plan 8 T10: the gate is an entry of the one payload checker both release gates run.
+        "tools/check-release-payload.py",
+        '    "KNOWLEDGEBASE.local.md",\n',
+        "",
         "tests/test_repo_invariants.py::test_the_users_knowledgebase_is_never_shipped_and_is_where_writes_go",
         id="users-knowledgebase-stays-out-of-the-payload",
     ),
@@ -758,6 +759,40 @@ MUTATIONS = [
         "tests/test_hooks.py::test_the_install_cannot_be_deleted_however_it_is_spelled",
         id="delete-guard-anchored-on-one-spelling-of-rm",
     ),
+    # G1 (RT-A): interpreter code that launches a process, naming a protected root, is judged like a delete.
+    pytest.param(
+        "tools/skyguard/deletes.py",
+        "                has(INTERP_LAUNCH, code) and has(LAUNCH_DELETE_WORD, code))):\n",
+        "                False)):\n",
+        # py-subprocess: its command list carries no delete WORD, so only the process-launch clause can catch it
+        # (py-os-system's text also holds `del`, which the legacy delete words catch on their own).
+        "tests/test_skyguard_deletes.py::test_g1_interpreter_code_naming_a_root_denies[py-subprocess]",
+        id="g1-process-launch-api-not-judged",
+    ),
+    # G1: python -Bc CODE (a flag cluster ending in c) carries code.
+    pytest.param(
+        "tools/skyguard/deletes.py",
+        "        elif _PYTHON.fullmatch(p) and _PY_CODE_CLUSTER.fullmatch(w):\n",
+        "        elif False:\n",
+        "tests/test_skyguard_deletes.py::test_g1_interpreter_code_naming_a_root_denies[py-Bc-rmtree]",
+        id="g1-python-code-cluster-unread",
+    ),
+    # G1: node -pe CODE carries code.
+    pytest.param(
+        "tools/skyguard/deletes.py",
+        'CODE_FLAGS = frozenset(("-c", "-e", "-E", "--eval", "-p", "--print", "-r", "-pe"))',
+        'CODE_FLAGS = frozenset(("-c", "-e", "-E", "--eval", "-p", "--print", "-r"))',
+        "tests/test_skyguard_deletes.py::test_g1_interpreter_code_naming_a_root_denies[node-pe-rmSync]",
+        id="g1-node-pe-unread",
+    ),
+    # G2 (RT-A): a program that runs a command line it is handed is opaque.
+    pytest.param(
+        "tools/skyguard/deletes.py",
+        '    if e.program == "?" or os.path.splitext(e.program)[0] in _WRAPPER_PROGRAMS:\n',
+        '    if e.program == "?":\n',
+        "tests/test_skyguard_deletes.py::test_g2_wrapper_with_delete_and_root_denies[schtasks-rd]",
+        id="g2-command-wrappers-not-opaque",
+    ),
 
     pytest.param(
         # Remove the "no Python" refusal from protect-bash. The wrapper then falls through to the
@@ -823,12 +858,24 @@ MUTATIONS = [
     # Stop honouring the CONFIGURED config directory. MO2/Wabbajack put the INIs in the
     # instance profile, outside Documents/My Games, so for those users this arm is the
     # only thing guarding their config -- and it had no test at all.
+    # Final review D3: since Task 6/7 a RESOLVED delete is placed by Roots.config_dirs
+    # (`_add_dir(cfg, v)`), so that is the clause this test guards. The old anchor
+    # (`_add(config, v)` -> a mis-indented `pass`) was killed only by an IndentationError;
+    # reverted with the right indent it survived. The mention regex arm has its own twin.
+    pytest.param(
+        "tools/skyguard/paths.py",
+        "        _add_dir(cfg, v)",
+        "        pass",
+        "tests/test_hooks.py::test_a_configured_config_directory_outside_documents_is_guarded",
+        id="configured-config-directory-is-guarded",
+    ),
     pytest.param(
         "tools/skyguard/paths.py",
         "        _add(config, v)",
-        "    pass",
-        "tests/test_hooks.py::test_a_configured_config_directory_outside_documents_is_guarded",
-        id="configured-config-directory-is-guarded",
+        "        pass",
+        "tests/test_skyguard_deletes.py::"
+        "test_an_unresolved_delete_in_a_command_naming_the_configured_config_dir_is_unresolved",
+        id="configured-config-directory-is-named",
     ),
     # Put the 5s timeouts back. A PreToolUse refusal that arrives late is DISCARDED,
     # and this release leads with that fix -- guarded, until now, by nothing.
@@ -1328,22 +1375,22 @@ MUTATIONS = [
     pytest.param(
         "tools/skyguard/patch_paths.py",
         "(?:[A-Za-z_][A-Za-z0-9_]*=\\S*|sudo|env|", "(?:sudo|env|",
-        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        "tests/test_patch_paths.py::test_every_way_to_run_it_from_a_file_is_refused",
         id="patch-env-assignment-prefix-is-a-run",
     ),
     pytest.param(
         "tools/skyguard/patch_paths.py", '_NAME = r"(?:[^\\s\'\\"`;&|()<>]*[/\\\\])?', '_NAME = r"',
-        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        "tests/test_patch_paths.py::test_every_way_to_run_it_from_a_file_is_refused",
         id="patch-path-prefix-is-a-run",
     ),
     pytest.param(
         "tools/skyguard/patch_paths.py", "(?:\\.exe)?(?=[\\s;", "(?=[\\s;",
-        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        "tests/test_patch_paths.py::test_every_way_to_run_it_from_a_file_is_refused",
         id="patch-exe-suffix-is-a-run",
     ),
     pytest.param(
         "tools/skyguard/patch_paths.py", "or (_QUOTED_POSITION.search(cmd) and _WRAPPER.search(cmd))", "",
-        "tests/test_patch_paths.py::test_every_way_to_run_it_is_attributed_or_refused",
+        "tests/test_patch_paths.py::test_every_way_to_run_it_from_a_file_is_refused",
         id="patch-run-inside-a-wrapped-shell-string",
     ),
     pytest.param(
@@ -1362,18 +1409,118 @@ MUTATIONS = [
     ),
     pytest.param(
         "agent/guards/adapters/claude/protect-files.sh",
-        'TM=(); command -v timeout >/dev/null 2>&1 && TM=(timeout -k 2 "$t")',
-        'TM=()',
+        'if [ "$MS" -ge "$end" ]; then',
+        'if false; then',
         "tests/test_python_fallback.py::test_a_hanging_fallback_engine_is_cut_off_by_timeout",
         id="fallback-engine-call-has-no-time-limit",
     ),
     pytest.param(
         "tools/skyguard/run.py",
-        "faulthandler.dump_traceback_later(_engine_budget(), exit=True)",
+        "faulthandler.dump_traceback_later(_engine_budget(), exit=True, file=sys.stdout)",
         "pass",
         "tests/test_python_fallback.py::test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget",
         id="engine-watchdog-disarmed",
     ),
+] + [
+    # load-deadline fix (2026-10-05): one mutation per new clause of the bash entries' time limits and of
+    # the remembered fallback. Each names the ONE test that isolates that clause.
+    pytest.param(m[0], m[1], m[2], m[3], id=m[4])
+    for m in [
+        # 1: the kill is by WINDOWS pid (a hung engine must actually be gone afterwards)
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '"$tk" //F //T //PID "$w" >/dev/null 2>&1 </dev/null &', ":",
+         "tests/test_hook_deadline.py::test_a_hung_engine_on_the_healthy_path_is_killed_by_its_pid",
+         "deadline-kill-by-windows-pid"),
+        # 2: the OUTER deadline comes from the definition timeout ...
+        ("agent/guards/adapters/claude/protect-files.sh",
+         "DL=$(( T0_MS + (H_S - 15) * 1000 ))", "DL=$(( T0_MS + 600000 ))",
+         "tests/test_hook_deadline.py::test_the_outer_deadline_answers_while_the_child_is_still_dying[claude]",
+         "deadline-outer-from-definition-timeout"),
+        # ... and the answer does not wait for a kill that is still landing
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '"$tk" //F //T //PID "$w" >/dev/null 2>&1 </dev/null &', '"$tk" //F //T //PID "$w" >/dev/null 2>&1 </dev/null',
+         "tests/test_hook_deadline.py::test_the_outer_deadline_answers_while_the_child_is_still_dying[claude]",
+         "deadline-kill-is-not-waited-for"),
+        ("agent/guards/adapters/codex/skyguard-entry.sh",
+         "DL=$(( T0_MS + (H_S - 15) * 1000 ))", "DL=$(( T0_MS + 600000 ))",
+         "tests/test_hook_deadline.py::test_the_outer_deadline_answers_while_the_child_is_still_dying[codex]",
+         "codex-sh-deadline-outer-from-definition-timeout"),
+        # ... while time is left, it does let the kill land (no engine still running at the answer)
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '            while kill -0 "$cpid" 2>/dev/null; do', "            while false; do",
+         "tests/test_hook_deadline.py::test_with_time_left_the_wrapper_answers_only_once_the_killed_child_is_gone",
+         "deadline-kill-allowed-to-land-while-time-is-left"),
+        ("agent/guards/adapters/claude/protect-files.sh",
+         "HOOK_TIMEOUT_S=60 ", "HOOK_TIMEOUT_S=90 ",
+         "tests/test_hook_deadline.py::test_every_claude_wrapper_carries_its_definition_timeout",
+         "deadline-definition-timeout-drift"),
+        # 3: one process per candidate
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '    n="$RANDOM$RANDOM"\n    _bounded "$b" none',
+         '    "$@" -c "import sys" >/dev/null 2>&1\n    n="$RANDOM$RANDOM"\n    _bounded "$b" none',
+         "tests/test_hook_deadline.py::test_a_candidate_costs_one_probe_process",
+         "python-fallback-second-probe-process"),
+        # 4: the remembered fallback: used, and every one of its guards
+        ("agent/guards/adapters/claude/protect-files.sh",
+         "    py_cached && return 0", "    false && return 0",
+         "tests/test_hook_deadline.py::test_a_verified_fallback_is_remembered_and_not_probed_again",
+         "python-fallback-not-remembered"),
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '[ -x "${c[0]}" ] && [ ! "${c[0]}" -nt "$f" ] && ', '[ -x "${c[0]}" ] && ',
+         "tests/test_hook_deadline.py::test_a_remembered_fallback_is_dropped_when_it_or_the_engine_changed[interpreter]",
+         "python-fallback-cache-ignores-a-changed-interpreter"),
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '[ ! "$ROOT/tools/skyguard/run.py" -nt "$f" ] || return 1', "true",
+         "tests/test_hook_deadline.py::test_a_remembered_fallback_is_dropped_when_it_or_the_engine_changed[engine]",
+         "python-fallback-cache-ignores-a-changed-engine"),
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '*) RC=1; _fail python "fallback ${PYC[*]} did not echo the engine nonce -- not used" ;;', "*) ;;",
+         "tests/test_hook_deadline.py::test_a_cache_naming_a_stub_cannot_substitute_the_interpreter",
+         "python-fallback-cache-substitutes-an-interpreter"),
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '*) RC=1; _fail python "fallback ${PYC[*]} did not echo the engine nonce -- not used" ;;', "*) ;;",
+         "tests/test_hook_deadline.py::test_a_fresh_fallback_that_answers_without_the_nonce_is_refused",
+         "python-fallback-engine-run-without-nonce"),
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '[ "${c[0]:-}" = "skyguard-pyfb-v1" ] && ', "",
+         "tests/test_hook_deadline.py::test_a_malformed_cache_is_not_used[tag]",
+         "python-fallback-cache-version-unchecked"),
+        ("agent/guards/adapters/claude/protect-files.sh",
+         'case "${c[0]##*/}" in python|python3|py|python.exe|python3.exe|py.exe) ;; *) return 1 ;; esac', ":",
+         "tests/test_hook_deadline.py::test_a_malformed_cache_is_not_used[name]",
+         "python-fallback-cache-any-program"),
+        ("agent/guards/adapters/claude/protect-files.sh",
+         'case "${c[0]}" in /*|[A-Za-z]:/*) ;; *) return 1 ;; esac', ":",
+         "tests/test_hook_deadline.py::test_a_malformed_cache_is_not_used[relative]",
+         "python-fallback-cache-relative-path"),
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '[ "${#c[@]}" -eq 1 ] || [ "${c[1]}" = "-3" ] || return 1', ":",
+         "tests/test_hook_deadline.py::test_a_malformed_cache_is_not_used[args]",
+         "python-fallback-cache-any-arguments"),
+        ("agent/guards/adapters/claude/protect-files.sh",
+         'NOCACHE=1; : > "$PYFB_CACHE" 2>/dev/null; FB=""', 'FB=""',
+         "tests/test_hook_deadline.py::test_a_remembered_fallback_that_fails_is_forgotten",
+         "python-fallback-failed-cache-kept"),
+        # 5: probe budgets from the time left, sub-second
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '[ "$b" -le "$PROBE_MS" ] || b=$PROBE_MS', "b=$PROBE_MS",
+         "tests/test_hook_deadline.py::test_a_probe_gets_only_the_time_left_before_the_deadline",
+         "python-fallback-probe-ignores-time-left"),
+        ("agent/guards/adapters/claude/protect-files.sh",
+         'f="${f}000"; f="${f:0:3}"', 'f="000"',
+         "tests/test_hook_deadline.py::test_a_sub_second_probe_budget_is_honoured",
+         "python-fallback-probe-whole-seconds-only"),
+        # 6: no re-probe after run.py's own watchdog
+        ("agent/guards/adapters/claude/protect-files.sh",
+         '[ "$RC" -ne 124 ] && [ -z "$WD" ] && ', '[ "$RC" -ne 124 ] && ',
+         "tests/test_hook_deadline.py::test_no_reprobe_after_the_engine_watchdog_fired",
+         "python-fallback-reprobes-after-the-watchdog"),
+        ("tools/skyguard/run.py",
+         "exit=True, file=sys.stdout)", "exit=True)",
+         "tests/test_hook_deadline.py::test_no_reprobe_after_the_engine_watchdog_fired",
+         "engine-watchdog-report-not-on-stdout"),
+    ]
+] + [
     pytest.param(
         "agent/guards/adapters/claude/protect-files.sh",
         'for ((m = 30; m >= 8; m--)); do',
@@ -1426,8 +1573,8 @@ MUTATIONS = [
     ),
     pytest.param(
         'tools/skyguard/adapters/codex.py',
-        '            sp = patch_paths.shell_patch(cmd)',
-        '            sp = None',
+        '        sp = patch_paths.shell_patch(cmd)',
+        '        sp = None',
         'tests/test_skyguard_codex_adapter.py::test_a_patch_through_the_shell_carries_its_paths',
         id='codex-shell-patch-paths-dropped',
     ),
@@ -1504,8 +1651,9 @@ MUTATIONS = [
     ),
     pytest.param(
         'tools/skyguard/adapters/codex.py',
-        '    if not name.startswith("mcp__") and isinstance(cmd, str):',
-        '    if False:',
+        # rt-fix-b: the command keys are read for every non-MCP tool; reading them for Bash only reverts it.
+        '        key = next((k for k in _COMMAND_KEYS if k in ti), None)',
+        '        key = next((k for k in _COMMAND_KEYS if k in ti), None) if name == "Bash" else None',
         'tests/test_skyguard_codex_adapter.py::test_an_unknown_tool_with_a_command_string_gets_the_shell_rules',
         id='codex-unknown-tool-command-unguarded',
     ),
@@ -1523,6 +1671,91 @@ MUTATIONS = [
         'tests/test_skyguard_codex_adapter.py::test_cli_env_unreadable_text_is_agent_neutral',
         id='codex-env-refusal-names-the-claude-hook',
     ),
+    # Plan 7 Task 1: the agent-neutral engine entry (run.py neutral pre-tool).
+    pytest.param(
+        'tools/skyguard/neutral.py',
+        'if type(d.get("v")) is not int or d.get("v") != 1:',
+        'if d.get("v") != 1:',
+        'tests/test_skyguard_neutral.py::test_malformed_requests_are_refused_with_the_reason[bool-version]',
+        id='neutral-bool-version-accepted',
+    ),
+    pytest.param(
+        'tools/skyguard/neutral.py',
+        '        v = Verdict("deny", BAD.format(e), status="failed", code="neutral.BAD_REQUEST")',
+        '        return ("", None)',
+        'tests/test_skyguard_neutral.py::test_handle_turns_a_bad_request_into_a_failed_deny_never_a_raise',
+        id='neutral-bad-request-not-a-deny',
+    ),
+    pytest.param(
+        'tools/skyguard/neutral.py',
+        'raise BadRequest("unknown field {}".format(_names(extra)))',
+        'raise BadRequest("unknown field {}".format(", ".join(extra)))',
+        'tests/test_skyguard_neutral.py::test_an_unknown_key_is_named_on_one_short_line',
+        id='neutral-unknown-key-echoed-raw',
+    ),
+    pytest.param(
+        'tools/skyguard/run.py',
+        'raise engine.RootsUnavailable(neutral.ENV_UNREADABLE)',
+        'raise engine.RootsUnavailable(ENV_UNREADABLE)',
+        'tests/test_skyguard_neutral.py::test_cli_unreadable_paths_file_is_a_neutral_failed_deny',
+        id='neutral-env-refusal-names-the-claude-hook',
+    ),
+    pytest.param(
+        'tools/skyguard/run.py',
+        '    from skyguard import neutral\n    if a.role != "pre-tool":',
+        '    from skyguard import neutral\n    if False:',
+        'tests/test_skyguard_neutral.py::test_cli_rejects_a_role_other_than_pre_tool_with_exit_1_and_no_stdout',
+        id='neutral-any-role-accepted',
+    ),
+    # Plan 7 Task 1, fix round 1.
+    pytest.param('tools/skyguard/neutral.py', '    if extra:', '    if False:',
+                 'tests/test_skyguard_neutral.py::test_malformed_requests_are_refused_with_the_reason[unknown-key]',
+                 id='neutral-unknown-field-accepted'),
+    pytest.param('tools/skyguard/neutral.py', '        if k in seen:', '        if False:',
+                 'tests/test_skyguard_neutral.py::test_malformed_requests_are_refused_with_the_reason[duplicate-kind]',
+                 id='neutral-duplicate-key-last-wins'),
+    pytest.param('tools/skyguard/neutral.py', '    if v.decision not in DECISIONS:', '    if False:',
+                 'tests/test_skyguard_neutral.py::test_render_is_ascii_one_line_and_total',
+                 id='neutral-render-passes-an-unknown-decision'),
+    pytest.param('tools/skyguard/neutral.py', 'if type(d.get("v")) is not int or d.get("v") != 1:',
+                 'if isinstance(d.get("v"), bool) or d.get("v") != 1:',
+                 'tests/test_skyguard_neutral.py::test_malformed_requests_are_refused_with_the_reason[float-version]',
+                 id='neutral-float-version-accepted'),
+    pytest.param('tools/skyguard/neutral.py', '    except RecursionError:', '    except ZeroDivisionError:',
+                 'tests/test_skyguard_neutral.py::test_malformed_requests_are_refused_with_the_reason[deep-request]',
+                 id='neutral-deep-nesting-crashes'),
+    pytest.param('tools/skyguard/neutral.py', 'raw = raw.decode("utf-8")', 'raw = raw.decode("utf-8", "replace")',
+                 'tests/test_skyguard_neutral.py::test_invalid_utf8_is_a_bad_request_not_a_replacement_character',
+                 id='neutral-bad-utf8-replaced'),
+    # Merge of Plan 5 (2026-10-05): engine.pre_tool now routes kind mcp to the DevBench judge itself (rt-fix-b /
+    # Task 17), so dropping this branch still denies `smp reset`; what the branch alone adds is the NOT JUDGED
+    # label for a server the rules do not judge. The engine route has its own mutation (codex-mcp-devbench-judged).
+    pytest.param('tools/skyguard/neutral.py', '    if req.kind == "mcp":', '    if False:',
+                 'tests/test_skyguard_neutral.py::test_an_mcp_call_the_rules_do_not_judge_is_labelled_unjudged_not_evaluated[mcp__other__thing]',
+                 id='neutral-mcp-not-judged'),
+    pytest.param('tools/skyguard/neutral.py', '    if req.kind == "other":', '    if False:',
+                 'tests/test_skyguard_neutral.py::test_kind_other_is_allowed_but_never_reads_as_a_verdict',
+                 id='neutral-other-reads-as-a-verdict'),
+    pytest.param('tools/skyguard/neutral.py', '    if not isinstance(obj, dict):', '    if False:',
+                 'tests/test_skyguard_neutral.py::test_malformed_requests_are_refused_with_the_reason[mcp-args-not-object]',
+                 id='neutral-mcp-args-not-object-accepted'),
+    pytest.param('tools/skyguard/neutral.py', '    if agent.strip().lower() in OWN_ENTRY_AGENTS:', '    if False:',
+                 'tests/test_skyguard_neutral.py::test_malformed_requests_are_refused_with_the_reason[agent-claims-codex]',
+                 id='neutral-agent-may-claim-codex'),
+    pytest.param('tools/skyguard/neutral.py',
+                 '    return v._replace(reason=text) if text and v.decision == "deny" else v', '    return v',
+                 'tests/test_skyguard_neutral.py::test_inert_shell_refusals_name_no_other_agents_hook[no-command]',
+                 id='neutral-inert-text-names-protect-bash'),
+    pytest.param('tools/skyguard/engine.py', '    if req.agent != "codex":', '    if False:',
+                 'tests/test_skyguard_neutral.py::test_a_judged_neutral_shell_call_is_not_logged_as_unhooked',
+                 id='neutral-shell-call-logged-as-unhooked'),
+    pytest.param('tools/skyguard/engine.py', "the agent's hook could not read this call",
+                 'the Codex hook could not read this call',
+                 'tests/test_skyguard_neutral.py::test_the_engine_translate_refusal_names_no_agent',
+                 id='engine-translate-refusal-names-codex'),
+    pytest.param('tools/skyguard/run.py', '    a.role = neutral.TELEMETRY_ROLE', '    pass',
+                 'tests/test_skyguard_neutral.py::test_cli_writes_telemetry_when_asked',
+                 id='neutral-telemetry-collides-with-codex'),
     pytest.param(
         'tools/skyguard/adapters/codex.py',
         '    if text.startswith("\\ufeff"):',
@@ -1602,9 +1835,12 @@ MUTATIONS = [
 ] + [
     pytest.param("agent/guards/adapters/codex/skyguard-entry.sh", *m[:3], id=m[3])
     for m in [
-        (r'''    TM=(); command -v timeout >/dev/null 2>&1 && TM=(timeout -k 2 "$lim")''',
-         r'''    TM=()''',
+        (r'''if [ "$MS" -ge "$end" ]; then''',
+         r'''if false; then''',
          "tests/test_codex_entry.py::test_a_hung_engine_is_a_deny[bash]", "codex-sh-no-deadline"),
+        (r'''"$tk" //F //T //PID "$w" >/dev/null 2>&1 </dev/null &''',
+         r''':''',
+         "tests/test_codex_entry.py::test_a_hung_engine_is_killed_with_its_children[bash]", "codex-sh-kill-by-windows-pid"),
         (r'''        [ "$K" != '"permissionDecision"' ] || [ "$V" = '"deny"' ] || deny emission "engine answered a permissionDecision other than deny"''',
          r'''        true''',
          "tests/test_codex_entry.py::test_every_path_exits_zero[bash-pre-tool-allow]", "codex-sh-allow-passes"),
@@ -1647,16 +1883,17 @@ MUTATIONS = [
          r'''    SUR='\\u[dD][89abAB]''' + "'",
          "tests/test_codex_entry.py::test_an_escaped_backslash_before_u_is_not_a_surrogate[bash]",
          "codex-sh-surrogate-ignores-escaped-backslash"),
-        ('\nrun_engine > "$OUTF"\nRC=$?\n',
-         '\nOUT=$(run_engine)\nRC=$?\nprintf \'%s\' "$OUT" > "$OUTF"\n',
+        # reading to EOF waits for a grandchild that inherited the pipe; the read must stop at the EXIT
+        (r'''        if ! kill -0 "$cpid" 2>/dev/null; then''',
+         r'''        if false; then''',
          "tests/test_codex_entry.py::test_a_grandchild_holding_stdout_does_not_outlast_the_deadline[bash]",
-         "codex-sh-engine-output-through-a-pipe"),
+         "codex-sh-engine-output-read-to-eof"),
         (r'''_utf8_ok "$OUT" || deny emission "engine output is not valid UTF-8"''',
          r'''true''',
          "tests/test_codex_entry.py::test_invalid_utf8_from_the_engine_never_reaches_codex[pre-tool-bash]",
          "codex-sh-invalid-utf8-passes"),
-        (r'''IFS= read -r -d '' OUT < "$OUTF" && deny emission "engine output has a NUL byte"''',
-         r'''IFS= read -r -d '' OUT < "$OUTF"''',
+        (r'''[ -z "$NUL" ] || deny emission "engine output has a NUL byte"''',
+         r'''true''',
          "tests/test_codex_entry.py::test_a_nul_byte_in_the_engine_output_is_refused[pre-tool-bash]",
          "codex-sh-nul-truncates-to-allow"),
     ]
@@ -1786,8 +2023,10 @@ MUTATIONS = [
         ("tools/skyguard/codex_rules.py",
          '        out.append("    not_match = {},".format(_s(r["not_match"])))\n', "",
          "tests/test_codex_rules.py::test_render_shape", "codex-rules-render-drops-not-match"),
+        # (Merge 2026-10-05: named test_rules_file_passes_codex_execpolicy, which SKIPS without `codex` on PATH, so the
+        # mutation "survived" by a skip; test_render_shape counts the rendered decisions with no codex needed.)
         ("tools/skyguard/codex_rules.py", 'format(_s(r["decision"]))', 'format(_s("prompt"))',
-         "tests/test_codex_rules.py::test_rules_file_passes_codex_execpolicy", "codex-rules-render-wrong-decision"),
+         "tests/test_codex_rules.py::test_render_shape", "codex-rules-render-wrong-decision"),
     ]
 ] + [
     # Plan 4 Task 12 (spec 7.4): conformance from captured payloads, and the adapter / wrapper clauses that
@@ -1837,8 +2076,8 @@ MUTATIONS = [
         # The plugin rule stops covering .esm: a patch heredoc onto Data/Skyrim.esm (a Bash call carrying a
         # patch) runs. Killed by the shell-patch DERIVED variant of the captured heredoc shape.
         ("tools/skyguard/targets.py",
-         r'''PLUGIN_FILE = r"\.(esp|esm|esl|bsa|ba2)[\s.]*$"''',
-         r'''PLUGIN_FILE = r"\.(esp|esl|bsa|ba2)[\s.]*$"''',
+         r'''PLUGIN_FILE = r"\.(esp|esm|esl|bsa|ba2)[\s.]*" + STREAM + "$"''',
+         r'''PLUGIN_FILE = r"\.(esp|esl|bsa|ba2)[\s.]*" + STREAM + "$"''',
          "tests/test_codex_conformance.py::test_conformance[derived:0.160.0/codex-PreToolUse-Bash-2:Data/Skyrim.esm]",
          "codex-plugin-rule-misses-esm"),
         # An `ask` loses the text that tells the model the user must run it themselves.
@@ -1878,6 +2117,31 @@ MUTATIONS = [
          r'''        [void]$proc.WaitForExit()''',
          "tests/test_codex_entry.py::test_a_hung_engine_is_a_deny", "codex-wrapper-has-no-deadline"),
     ]
+] + [
+    # Plan 7 fix round 2: an occurrence of the authorization marker that is not a clean AUTHORIZED list
+    # must void everything. Treated as ignorable, a stray "NOT AUTHORIZED, ever." beside a later AUTHORIZED
+    # sentence stops denying, and an unattended install becomes possible.
+    pytest.param(
+        "tools/inventory-runtimes.py",
+        '    return "void", {}, "unrecognised wording: " + body  # unclassified-is-void',
+        '    return "template", {}, None',
+        "tests/test_inventory_runtimes.py::test_any_unclassifiable_occurrence_voids_a_later_authorization",
+        id="inventory-unclassified-authorization-is-not-void"),
+    # Round 3: a loose spelling of the marker that is not the exact marker must void everything; skipped, a
+    # damaged "Host - software installs: NOT AUTHORIZED." is invisible and a later AUTHORIZED sentence wins.
+    pytest.param(
+        "tools/inventory-runtimes.py",
+        "        if text[m.start():m.start() + len(AUTH_MARKER)].lower() != AUTH_MARKER.lower():",
+        "        if False:",
+        "tests/test_inventory_runtimes.py::test_a_loose_marker_that_is_not_the_exact_marker_voids_everything",
+        id="inventory-loose-marker-is-not-void"),
+    # Round 3: format characters inside the marker must be stripped before searching.
+    pytest.param(
+        "tools/inventory-runtimes.py",
+        '    text = "".join(c for c in text if unicodedata.category(c) != "Cf")\n',
+        "",
+        "tests/test_inventory_runtimes.py::test_normalisation_does_not_break_the_clean_cases",
+        id="inventory-format-characters-not-stripped"),
 ]
 
 
@@ -1898,22 +2162,28 @@ _SR_CLAUSES = [
     ("op-reset-havok", '"reset-havok", "cleanse-formlists",', '"cleanse-formlists",', "t04-apply"),
     ("op-cleanse-formlists", '"reset-havok", "cleanse-formlists",', '"reset-havok",', "t04-apply-env"),
     ("op-list", '"cleanse-formlists", "remove-created")', '"cleanse-formlists")', "t04-apply-chain"),
+    # (Merge 2026-10-05: rt-fix-a's parser resolves the t04-find-exec / t06-resaver-variable-* shapes itself, so these
+    # clauses are pinned by the shapes that still reach them; a full test name is used as-is below.)
     ("save-from-segment", 'or (lambda m: m.group(0) if m else "")(RESAVER_TEXT_SAVE.search(e.segment))', 'or ""',
-     "t04-find-exec"),
-    ("opaque-is-unresolved", "    if not parsed.ok or opaque:", "    if not parsed.ok:", "t06-resaver-variable-program"),
+     "test_resaver_save_named_by_the_find_segment"),
+    ("opaque-is-unresolved", "    if not parsed.ok or opaque:", "    if not parsed.ok:",
+     "test_resaver_text_rule_on_an_opaque_program[opaque-apply]"),
     ("parse-fail-falls-back", "    if not parsed.ok or opaque:", "    if opaque:", "t06-resaver-parse-fail"),
     ("fallback-needs-apply", 'if "resaver" not in low or RESAVER_APPLY not in low:', 'if "resaver" not in low:',
-     "t06-resaver-variable-dry"),
+     "test_resaver_text_rule_on_an_opaque_program[opaque-dry]"),
     ("fallback-op-lookbehind", "re.compile(r\"(?<![^\\s\\\"'])(\" + \"|\".join(RESAVER_OPS)",
-     "re.compile(r\"(\" + \"|\".join(RESAVER_OPS)", "t06-resaver-variable-op-suffix"),
+     "re.compile(r\"(\" + \"|\".join(RESAVER_OPS)", "test_resaver_text_rule_on_an_opaque_program[opaque-op-suffix]"),
     ("fallback-op-lookahead", "+ r\")(?![^\\s\\\"'])\", re.ASCII", "+ r\")\", re.ASCII",
-     "t06-resaver-variable-op-in-filename"),
+     "test_resaver_text_rule_on_an_opaque_program[opaque-op-in-filename]"),
     # Task 7: decide() parses once (with the dialect) and hands the parse to the ReSaver rule.
-    ("dialect", "    parsed = shellparse.parse(command, shell)\n    dels", "    parsed = shellparse.parse(command)\n    dels",
+    # (Anchor follows Task 17, which made decide() accept the caller's parse; the fallback parse keeps the dialect.)
+    ("dialect", "    parsed = shellparse.parse(command, shell) if parsed is None else parsed\n    dels",
+     "    parsed = shellparse.parse(command) if parsed is None else parsed\n    dels",
      "t04-heredoc-py"),
 ]
 MUTATIONS += [
-    pytest.param(_SR, find, rep, "tests/test_skyguard_shell.py::test_resaver_rows[" + row + "]",
+    pytest.param(_SR, find, rep, "tests/test_skyguard_shell.py::"
+                 + (row if row.startswith("test_") else "test_resaver_rows[" + row + "]"),
                  id="rule-S-RESAVER-APPLY-" + suffix)
     for suffix, find, rep, row in _SR_CLAUSES
 ]
@@ -2013,8 +2283,9 @@ MUTATIONS += [
                  "tests/test_paths_precedence.py::test_python_lookup", id="paths-plugins-txt-wins"),
     pytest.param("tools/xelib/active-plugins.js", "    if (process.env.PLUGINS_TXT) return process.env.PLUGINS_TXT;",
                  "", "tests/test_paths_precedence.py::test_node_agrees_with_python", id="paths-js-plugins-txt-wins"),
-    pytest.param("tools/skyguard/engine.py", 'cwd=req.cwd or "", shell=req.shell or ""))',
-                 'cwd=req.cwd or ""))',
+    # (Task 17 moved the dialect into evaluate_shell's own parse; revert it at the one place it is read.)
+    pytest.param("tools/skyguard/engine.py", '    command, shell = req.command, req.shell or ""',
+                 '    command, shell = req.command, ""',
                  "tests/test_skyguard_claude_adapter.py::test_run_passes_the_shell_dialect", id="run-passes-shell"),
     pytest.param("tools/skyguard/adapters/claude.py", '        "cwd": cwd.replace("\\x00", "") if isinstance(cwd, str) else "",',
                  '        "cwd": "",', "tests/test_skyguard_claude_adapter.py::test_cwd_is_passed_raw",
@@ -2038,7 +2309,8 @@ _T6R1 = [
      "tests/test_targets.py::test_an_8dot3_short_name_is_unresolvable"),
     ("targets-short-name-cwd", _TG, "return None if p is None or _SHORT_NAME.search(p) else p", "return p",
      "tests/test_targets.py::test_a_short_name_cwd_makes_relative_words_unresolvable"),
-    ("targets-loopback-share", _TG, "if _LOOPBACK.fullmatch(host) or (me and host.lower() == me):", "if False:",
+    ("targets-loopback-share", _TG,
+     "if _LOOPBACK.fullmatch(host) or _ipv4_loopback(host) or (me and host.lower() == me):", "if False:",
      "tests/test_targets.py::test_a_loopback_admin_share_is_the_drive"),
     ("targets-other-host-share", _TG, "            return None\n    return p", "    return p",
      "tests/test_targets.py::test_another_hosts_admin_share_is_unresolvable_and_a_plain_share_is_outside"),
@@ -2100,7 +2372,7 @@ _SP_CLAUSES = [
     ("pwsh-alias", '"ri": "remove-item", "rm": "remove-item"', '"rm": "remove-item"', "test_pwsh_aliases"),
     ("find-delete", 'if w == "-delete":', "if False:", "test_find_delete_is_a_delete_on_the_start_paths"),
     ("bash-c", 'self.reparse(v[j], "bash")', "pass", "test_bash_shell_strings_reparsed_in_their_dialect"),
-    ("pwsh-command", 'self.reparse(" ".join(rest), "powershell")', "pass",
+    ("pwsh-command", 'self.reparse(_join_words(rest, "powershell"), "powershell")', "pass",
      "test_bash_shell_strings_reparsed_in_their_dialect"),
     ("never-raises", "raise ParseError(\"unterminated ' quote\")    # bash single quote",
      "raise ValueError(\"unterminated ' quote\")", "test_never_raises_on_random_text_or_corpus_commands"),
@@ -2116,7 +2388,7 @@ _SP_CLAUSES = [
      "test_heredoc_to_an_interpreter_is_code_not_commands"),
     ("find-exec", 'if w in ("-exec", "-execdir", "-ok", "-okdir"):', "if False:",
      "test_find_exec_runs_its_command_on_the_start_paths"),
-    ("cmd-c", 'self.reparse(" ".join(rest), "cmd")', "pass", "test_bash_shell_strings_reparsed_in_their_dialect"),
+    ("cmd-c", '                    self.reparse(text, "cmd")', "                    pass", "test_bash_shell_strings_reparsed_in_their_dialect"),
     ("eval", 'self.reparse(" ".join(v[k + 1:]), "bash")', "pass",
      "test_bash_shell_strings_reparsed_in_their_dialect"),
     ("iex", 'self.reparse(s, "powershell")', "pass", "test_pwsh_blocks_and_subexpressions_parsed"),
@@ -2147,7 +2419,7 @@ _SP_CLAUSES = [
     ("pipe-stdin", 'stdin = "pipe" if rec.stage > 0 else ""', 'stdin = ""', "test_pipeline_stage_reads_the_pipe"),
     # cd_before
     ("cd-tracked", "                    self.track_cd(f, cmd)", "                    pass", "test_bash_cd_before"),
-    ("cd-not-from-a-pipeline", 'if sep not in ("|", "|&") and cmd.stage == 0:', "if True:", "test_bash_cd_before"),
+    ("cd-not-from-a-pipeline", 'if self.SESSION_CD or (sep not in ("|", "|&") and cmd.stage == 0):', "if True:", "test_bash_cd_before"),
     ("cd-subshell-scope", '        self.frames.pop()\n        p = self.frames[-1]\n        if f.kind in ("subst", "proc"):',
      '        self.frames.pop()\n        p = self.frames[-1]\n        p.cd = f.cd\n        if f.kind in ("subst", "proc"):',
      "test_bash_cd_before"),
@@ -2195,9 +2467,9 @@ _SP_CLAUSES = [
     ("r3-echo-e", ' and not (e.program == "echo" and e.argv and _ECHO_OPTS.match(e.argv[0]))', "",
      "test_r3_unreconstructable_stdin_into_a_shell_or_interpreter_is_opaque"),
     ("r3-interpreter-reader",
-     'e.program in ALL_SHELLS or (consumer_kind(e.program) == "interpreter" and _reads_code(e.argv)))]',
-     "e.program in ALL_SHELLS)]", "test_r3_unreconstructable_stdin_into_a_shell_or_interpreter_is_opaque"),
-    ("r3-literal-code-to-body", r'ctx.out[j] = reader._replace(stdin_body="\n".join(texts))', "pass",
+     'e.program in ALL_SHELLS or (consumer_kind(e.program) == "interpreter" and _reads_code(e.argv)) or' + "\n",
+     "e.program in ALL_SHELLS or" + "\n", "test_r3_unreconstructable_stdin_into_a_shell_or_interpreter_is_opaque"),
+    ("r3-literal-code-to-body", r'ctx.out[j] = reader._replace(stdin_body="\n".join(texts + strings))', "pass",
      "test_r3_literal_stdin_into_an_interpreter_is_code_not_opaque"),
     ("r3-reads-code", "    for a in argv:\n        if a in _CODE_OPTS:",
      "    return True\n    for a in argv:\n        if a in _CODE_OPTS:",
@@ -2262,7 +2534,12 @@ _SP_CLAUSES = [
     ("r1-su-script-c", "if not self._reparse_after_c(k + 1):", "if True:", "test_r1_more_wrappers"),
     ("r1-trap", 'self.reparse(v[h], "bash")                  # the handler runs on the signal', "pass",
      "test_r1_more_wrappers"),
-    ("r1-alias", 'self.reparse(w.split("=", 1)[1], "bash")', "pass", "test_r1_more_wrappers"),
+    # (Merge 2026-10-05: rt-fix-a also expands an alias at its use, which alone passes test_r1_more_wrappers' alias
+    # case; each half is pinned by its own test.)
+    ("r1-alias", 'self.reparse(body, "bash")              # an alias body runs where the alias is used', "pass",
+     "test_r1_an_alias_body_is_judged_where_it_is_defined"),
+    ("ra-alias-use", "self._sub_run(body.split(), k)          # RT-A: an alias defined in the same command", "pass",
+     "test_ra_an_alias_use_runs_its_body_with_the_uses_arguments"),
     ("r1-parallel", 'if p == "parallel":', "if False:", "test_r1_more_wrappers"),
     ("r1-iex-opaque", "if not lits or any(self.y[k + 1:]):", "if False:",
      "test_r1_unknown_execution_is_opaque_not_missing"),
@@ -2320,22 +2597,24 @@ _DEL_CLAUSES = [
      'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG", "mo2": "S-DEL-MO2"}',
      'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG"}', "mo2-bash"),
     ("rule-S-DEL-INSTALL-interpreter-code", _DL,
-     "        if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code)):",
-     "        if False:", "python-rmtree"),
+     "        if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (",
+     "        if code and resolved is None and False and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (",
+     "python-rmtree"),
     ("rule-S-DEL-INSTALL-interpreter-api", _DL,
-     "(has(DESTROYER, code) or has(INTERP_DELETE, code))", "(has(DESTROYER, code))", "node-rmsync"),
+     "(has(DESTROYER, code) or has(INTERP_DELETE, code) or (", "(has(DESTROYER, code) or (", "node-rmsync"),
     # clause (b): an UNRESOLVED operand
     ("rule-S-DEL-UNRESOLVED-needs-root-mention", _DL, "    if unresolved_any and names_root(command, roots, has):",
      "    if unresolved_any:", "tmp-var"),
     ("rule-S-DEL-UNRESOLVED-needs-unresolved", _DL, "    if unresolved_any and names_root(command, roots, has):",
      "    if names_root(command, roots, has):", "grep-control"),
     ("rule-S-DEL-UNRESOLVED-raw-glob", _DL,
-     "            if raw_reaches(w, ecwd, e.dialect, roots) and unresolved_reach is None:",
+     "            if raw_reaches(w, lit_base, e.dialect, roots) and unresolved_reach is None:",
      "            if False:", "glob-middle"),
     ("rule-S-DEL-UNRESOLVED-short-name", _DL,
      '    return bool(m) and re.sub(r"[\\s.]", "", comp).startswith(m.group(1))', "    return False", "short-name"),
     ("rule-S-DEL-UNRESOLVED-pipe-input", _DL,
-     '    if not words and e.stdin_from == "pipe":', "    if False:", "pipe-remove-item"),
+     '    if not words and e.stdin_from == "pipe":' + "\n" + '        return [UNRESOLVED]',
+     "    if False:" + "\n" + "        return [UNRESOLVED]", "pipe-remove-item"),
     # clause (c): the parser could not be sure
     ("rule-S-DEL-FALLBACK-on-parse-fail", _DL,
      "    if not parsed.ok and has(DESTROYER, command) and names_root(command, roots, has):", "    if False:",
@@ -2384,6 +2663,18 @@ MUTATIONS.append(pytest.param(   # a quoted `[x]` in the install's own name is l
     id="rule-S-DEL-INSTALL-literal-quoted-glob",
 ))
 
+# ---- RT-A: S-DEL-UNKNOWN-DIR and S-SHELL-UNREAD; each named twin must turn the intended rows red.
+_IR = "tests/test_guard_corpus.py::test_intended_rows_reproduce"
+MUTATIONS += [
+    pytest.param(_DL, "            if cd_lost and unknown_dir is None and _everything(w):", "            if False:", _IR,
+                 id="rule-S-DEL-UNKNOWN-DIR-whole-folder"),
+    pytest.param("tools/skyguard/shell_rules.py", "    if parsed.unread:", "    if False:", _IR,
+                 id="rule-S-SHELL-UNREAD-denies"),
+    pytest.param("tools/skyguard/shellparse.py",
+                 "            if (reader.program in ALL_SHELLS or _ps_reads_commands(reader)) and",
+                 "            if False and", _IR, id="rule-S-SHELL-UNREAD-pipe-into-shell"),
+]
+
 # ---- Plan 5 Task 8: shell writes (E21). One twin per primitive class and per clause; each names the t08 row it must
 # turn red, fired in-process by tests/test_skyguard_writes.py::test_t08_row.
 _WR = "tools/skyguard/writes.py"
@@ -2396,7 +2687,8 @@ def _t08(row):
 
 _WRITE_CLAUSES = [
     # (id, file, find, replace, t08 row that must go red)
-    ("rule-S-WRITE-PLUGIN-redirect", _WR, "    out = _redirect_targets(e)\n", "    out = []\n", "redirect-esp"),
+    ("rule-S-WRITE-PLUGIN-redirect", _WR, "    out = _redirect_targets(e) + list(tool_write_targets(e))\n",
+     "    out = list(tool_write_targets(e))\n", "redirect-esp"),
     ("rule-S-WRITE-PLUGIN-tee", _WR, '    if p == "tee":', "    if False:", "tee-esm"),
     ("rule-S-WRITE-PLUGIN-set-content", _WR, '("set-content", "add-content", "clear-content", "new-item")',
      '("add-content", "clear-content", "new-item")', "set-content-pwsh"),
@@ -2847,7 +3139,7 @@ def _t11curl(case):
 _T11_CLAUSES = [
     # (id, file, find, replace, test that must go red)
     # S-DEVBENCH-CRASH: one mutation per route, then per clause
-    ("rule-S-DEVBENCH-CRASH-mcp", _MC, "    hit = judge(parts[-1], args, roots, None, env) if isinstance(args, dict) else None",
+    ("rule-S-DEVBENCH-CRASH-mcp", _MC, "    hit = judge(parts[-1], args, roots, None, env)",
      "    hit = None", _t11row("t11-mcp-smp-reset")),
     ("rule-S-DEVBENCH-CRASH-curl", _MC, "            calls = _web_call(e, command)", "            calls = []",
      _t11row("t11-curl-smp-reset")),
@@ -2864,19 +3156,24 @@ _T11_CLAUSES = [
     ("rule-S-DEVBENCH-CRASH-data-list", _MC, "        for denied in rules.DEVBENCH_DENY:",
      '        for denied in (("smp", "reset"),):',
      _T11 + "test_a_command_added_to_the_data_list_is_denied_with_no_code_change"),
+    # rt-fix-b: a deny-listed line anywhere in a DevBench call denies (the papyrus-tool ruling moved to SENDS); the
+    # console tool's own clause now only decides which strings are console SAVE lines.
     ("rule-S-DEVBENCH-CRASH-console-tool", _MC, '    if tool == "console":', "    if True:",
-     _T11 + "test_curl_forms_that_do_not_send_it[papyrus-tool]"),
-    ("rule-S-DEVBENCH-CRASH-string-command", _MC, "        if not isinstance(cmd, str):\n            return None\n        op =",
-     "        op =", _T11 + "test_a_non_string_console_command_is_not_judged"),
-    ("rule-S-DEVBENCH-CRASH-dict-input", _MC, "if isinstance(args, dict) else None", "if True else None",
-     _T11 + "test_a_non_dict_tool_input_is_not_judged"),
-    ("rule-S-DEVBENCH-CRASH-devbench-only", _MC, 'or not parts[1].startswith("devbench"):', ":",
+     "tests/test_skyguard_rtb.py::test_rtb_row[rtb-mcp-papyrus-save-line]"),
+    ("rule-S-DEVBENCH-CRASH-string-command", _MC, "    elif isinstance(obj, (list, tuple)):", "    elif False:",
+     "tests/test_skyguard_rtb.py::test_rtb_row[rtb-mcp-command-list]"),
+    ("rule-S-DEVBENCH-CRASH-dict-input", _MC, "    for s in _strings(args):",
+     "    for s in (_strings(args) if isinstance(args, dict) else ()):",
+     _T11 + "test_a_non_dict_tool_input_is_judged_on_its_strings"),
+    ("rule-S-DEVBENCH-CRASH-devbench-only", _MC, 'or not is_devbench_server(parts[1]):', ":",
      _T11 + "test_only_devbench_servers_are_judged[mcp__other__console]"),
+    # (Merge 2026-10-05: back on decide()'s own clauses -- Task 17 had moved them into is_devbench(), which decide()
+    # no longer calls since rt-fix-b's is_devbench_server; mutating is_devbench() there survived.)
     ("rule-S-DEVBENCH-CRASH-mcp-prefix", _MC, 'or parts[0] != "mcp" or', "or",
      _T11 + "test_only_devbench_servers_are_judged[xmcp__devbench-vr__console]"),
     ("rule-S-DEVBENCH-CRASH-short-name", _MC, "    if len(parts) < 3 or parts[0]", "    if parts[0]",
      _T11 + "test_only_devbench_servers_are_judged[mcp]"),
-    ("rule-S-DEVBENCH-CRASH-server-name", _MC, 'not parts[1].startswith("devbench")', 'not parts[1].startswith("devbench-vr")',
+    ("rule-S-DEVBENCH-CRASH-server-name", _MC, 'not is_devbench_server(parts[1])', 'not parts[1].startswith("devbench-vr")',
      _T11 + "test_any_devbench_server_name_is_judged[devbench]"),
     # the curl route, per clause
     ("rule-S-DEVBENCH-CRASH-curl-json-flag", _MC, '"--data-urlencode", "--json")', '"--data-urlencode")', _t11curl("json-flag")),
@@ -2906,8 +3203,8 @@ _T11_CLAUSES = [
      _T11 + "test_a_json_body_that_is_not_an_object_is_not_a_call"),
     ("rule-S-DEVBENCH-CRASH-powershell", _MC, '    if e.program in _PS_PROGRAMS:', "    if False:",
      _T11 + "test_the_powershell_cmdlets_are_read"),
-    ("rule-S-DEVBENCH-CRASH-powershell-programs", _MC, '_WEB_PROGRAMS = frozenset(("curl", "invoke-restmethod", "irm", "invoke-webrequest", "iwr"))',
-     '_WEB_PROGRAMS = frozenset(("curl",))', _T11 + "test_the_powershell_cmdlets_are_read"),
+    ("rule-S-DEVBENCH-CRASH-powershell-programs", _MC, '_WEB_PROGRAMS = frozenset(("curl", "wget", "invoke-restmethod", "irm", "invoke-webrequest", "iwr"))',
+     '_WEB_PROGRAMS = frozenset(("curl", "wget"))', _T11 + "test_the_powershell_cmdlets_are_read"),
     # the CLI route, per clause
     ("rule-S-DEVBENCH-CRASH-cli-join", _MC, '" ".join(argv[1:])', "argv[1]", _t11row("t11-cli-exec-split-words")),
     ("rule-S-DEVBENCH-CRASH-cli-tool", _MC, '    if argv[0] == "tool" and len(argv) > 2:', "    if False:",
@@ -2917,18 +3214,20 @@ _T11_CLAUSES = [
     ("rule-S-DEVBENCH-CRASH-cli-program", _MC, '        elif e.program == "devbench-cli":', '        elif e.program == "devbench":',
      _t11row("t11-cli-exec-smp-reset")),
     # not safe by default (R4), per clause
-    ("rule-S-DEVBENCH-CRASH-unparsable", _MC, "    if (not parsed.ok or opaque) and", "    if False and",
+    ("rule-S-DEVBENCH-CRASH-unparsable", _MC, "    textual = not parsed.ok or opaque or bool(", "    textual = False and bool(",
      _t11row("t11-curl-unparsable")),
-    ("rule-S-DEVBENCH-CRASH-unparsable-only", _MC, "    if (not parsed.ok or opaque) and", "    if (opaque) and",
+    ("rule-S-DEVBENCH-CRASH-unparsable-only", _MC, "    textual = not parsed.ok or opaque or bool(", "    textual = opaque or bool(",
      _t11row("t11-curl-unparsable")),
-    ("rule-S-DEVBENCH-CRASH-opaque", _MC, "    if (not parsed.ok or opaque) and", "    if (not parsed.ok) and",
+    ("rule-S-DEVBENCH-CRASH-opaque", _MC, "    textual = not parsed.ok or opaque or bool(", "    textual = not parsed.ok or bool(",
      _T11 + "test_an_opaque_program_next_to_the_endpoint_and_the_denied_command_denies"),
-    ("rule-S-DEVBENCH-CRASH-text-needs-reset", _MC, " and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(command):",
-     " and _TEXT_ENDPOINT.search(command):",
+    ("rule-S-DEVBENCH-CRASH-text-needs-reset", _MC, " and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(_norm_text(command)):",
+     " and _TEXT_ENDPOINT.search(_norm_text(command)):",
      _T11 + "test_an_unreadable_command_that_only_names_one_of_them_does_not"),
-    ("rule-S-DEVBENCH-CRASH-text-needs-endpoint", _MC, " and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(command):",
+    ("rule-S-DEVBENCH-CRASH-text-needs-endpoint", _MC, " and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(_norm_text(command)):",
      " and _TEXT_RESET.search(command):", _T11 + "test_an_unreadable_command_that_only_names_one_of_them_does_not"),
-    ("rule-S-DEVBENCH-CRASH-prefilter", _MC, "    if not any(w in low for w in _SHELL_WORDS):\n        return None", "    pass",
+    ("rule-S-DEVBENCH-CRASH-prefilter", _MC,
+     '    if not any(w in low for w in _SHELL_WORDS) and not ("api" in low and "tool" in low):' + "\n        return None",
+     "    pass",
      _T11 + "test_a_command_that_names_neither_is_not_scanned"),
     ("rule-S-DEVBENCH-CRASH-wired", _SHR, '    if dev and dev[0] == "S-DEVBENCH-CRASH":', "    if False:",
      _t11row("t11-curl-smp-reset")),
@@ -2944,13 +3243,15 @@ _T11_CLAUSES = [
     ("rule-S-DEVBENCH-SAVE-name-wildcards", _MC, ":*?" + '"<>|', ':"<>|', _T11 + "test_an_unusable_save_name_asks[star]"),
     ("rule-S-DEVBENCH-SAVE-name-brackets", _MC, '"<>|' + BS + "x00", BS + "x00", _T11 + "test_an_unusable_save_name_asks[angle]"),
     ("rule-S-DEVBENCH-SAVE-name-control", _MC, BS + "x00-" + BS + "x1f]", "]", _T11 + "test_an_unusable_save_name_asks[control]"),
-    ("rule-S-DEVBENCH-SAVE-name-dotdot", _MC, '    if not n or n in (".", "..") or', "    if not n or",
+    # rt-fix-b: `.` and `..` are now emptied by the trailing-dot strip (Windows drops trailing dots), so their own
+    # clause was dead and is gone; the strip is what the [dot] / [dotdot] cases now guard.
+    ("rule-S-DEVBENCH-SAVE-name-dotdot", _MC, '    n = name.strip().rstrip(" .")', '    n = name.strip().rstrip(" ")',
      _T11 + "test_an_unusable_save_name_asks[dotdot]"),
-    ("rule-S-DEVBENCH-SAVE-name-dot", _MC, '    if not n or n in (".", "..") or', '    if not n or n in ("..",) or',
+    ("rule-S-DEVBENCH-SAVE-name-dot", _MC, '    n = name.strip().rstrip(" .")', '    n = name.strip()',
      _T11 + "test_an_unusable_save_name_asks[dot]"),
     ("rule-S-DEVBENCH-SAVE-name-string", _MC, "    if not isinstance(name, str):\n        return None\n    n = name.strip()",
      "    n = str(name).strip()", _T11 + "test_an_unusable_save_name_asks[number]"),
-    ("rule-S-DEVBENCH-SAVE-name-strip", _MC, "    n = name.strip()", "    n = name", _T11 + "test_an_unusable_save_name_asks[blank]"),
+    ("rule-S-DEVBENCH-SAVE-name-strip", _MC, "    n = name.strip()", "    n = name", _T11 + "test_a_save_name_is_read_trimmed"),
     ("rule-S-DEVBENCH-SAVE-ess-suffix", _MC, '    if n.lower().endswith(".ess"):\n        n = n[:-4]', "    if False:\n        n = n[:-4]",
      _t11row("t11-mcp-save-existing-case")),
     ("rule-S-DEVBENCH-SAVE-case-insensitive", _MC, "frozenset(n.casefold() for n in os.listdir(folder))",
@@ -2963,12 +3264,12 @@ _T11_CLAUSES = [
      _T11 + "test_the_save_action_is_read_leniently[args1]"),
     ("rule-S-DEVBENCH-SAVE-action-string", _MC, '        if isinstance(action, str) and action.strip()', "        if action.strip()",
      _T11 + "test_other_game_actions_never_ask[7]"),
-    ("rule-S-DEVBENCH-SAVE-console", _MC, "        name = _console_save_name(cmd)\n        if name is not None:",
-     "        name = None\n        if name is not None:", _t11row("t11-mcp-console-save-existing")),
-    ("rule-S-DEVBENCH-SAVE-console-case", _MC, '        if words and words[0].lower() == "save":', '        if words and words[0] == "save":',
-     _T11 + "test_the_console_save_word_is_case_insensitive"),
-    ("rule-S-DEVBENCH-SAVE-console-whole-word", _MC, '        if words and words[0].lower() == "save":',
-     '        if words and words[0].lower().startswith("save"):', _T11 + "test_the_console_save_word_is_case_insensitive"),
+    ("rule-S-DEVBENCH-SAVE-console", _MC, "        name = _console_save_name(line)",
+     "        name = None", _t11row("t11-mcp-console-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-console-case", _MC, '        if words and words[0].lower() in SAVE_COMMANDS:',
+     '        if words and words[0] in SAVE_COMMANDS:', _T11 + "test_the_console_save_word_is_case_insensitive"),
+    ("rule-S-DEVBENCH-SAVE-console-whole-word", _MC, '        if words and words[0].lower() in SAVE_COMMANDS:',
+     '        if words and words[0].lower().startswith(SAVE_COMMANDS):', _T11 + "test_the_console_save_word_is_case_insensitive"),
     ("rule-S-DEVBENCH-SAVE-wired", _SHR, "    if dev:                                                  # S-DEVBENCH-SAVE",
      "    if False:                                                # S-DEVBENCH-SAVE", _t11row("t11-cli-tool-save-existing")),
     ("rule-S-DEVBENCH-SAVE-roots", "tools/skyguard/run.py", 'v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)',
@@ -2991,10 +3292,11 @@ _T11_CLAUSES = [
      'CLAUDE_HOOKS = ("protect-files", "protect-bash", "protect-mcp", "backup-before-edit",',
      'CLAUDE_HOOKS = ("protect-files", "protect-bash", "backup-before-edit",',
      "tests/test_repo_invariants.py::test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks"),
-    ("rule-S-DEVBENCH-CRASH-release-floor", ".github/workflows/release.yml", 'test "$nhooks" -ge 6', 'test "$nhooks" -ge 5',
+    # Plan 8 T10: both release gates read the floor from tools/check-release-payload.py.
+    ("rule-S-DEVBENCH-CRASH-release-floor", "tools/check-release-payload.py", "CLAUDE_HOOK_FLOOR = 6", "CLAUDE_HOOK_FLOOR = 5",
      "tests/test_repo_invariants.py::test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks"),
-    ("rule-S-DEVBENCH-CRASH-verify-floor", "tools/verify-release.sh", "*[!0-9]*) floor=6 ;;", "*[!0-9]*) floor=5 ;;",
-     "tests/test_repo_invariants.py::test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks"),
+    ("release-codex-entry-floor", "tools/check-release-payload.py", "CODEX_ENTRY_FLOOR = 2", "CODEX_ENTRY_FLOOR = 1",
+     "tests/test_release_payload.py::test_the_hook_floor_is_the_tree_recounted"),
     ("wrapper-protect-mcp-names-its-role", ".claude/hooks/protect-mcp.sh", 'HOOK_NAME="protect-mcp"', 'HOOK_NAME="protect-files"',
      "tests/test_hooks.py::test_a_fresh_install_gets_its_heartbeat_directory[protect-mcp.sh]"),
 ]
@@ -3098,7 +3400,7 @@ _T11_R1 = [
      "    if memo[folder] is None:\n        return False", _T11 + "test_an_unreadable_saves_folder_is_unknown_not_a_crash"),
     ("rule-S-DEVBENCH-SAVE-listing-memo", _MC, "    if folder not in memo:\n        try:", "    if True:\n        try:",
      _T11 + "test_a_scan_lists_each_saves_folder_once"),
-    ("rule-S-DEVBENCH-SAVE-env-wired", _MC, "hit = judge(parts[-1], args, roots, None, env) if", "hit = judge(parts[-1], args, roots) if",
+    ("rule-S-DEVBENCH-SAVE-env-wired", _MC, "hit = judge(parts[-1], args, roots, None, env)", "hit = judge(parts[-1], args, roots)",
      _t11row("t11-mcp-save-docs-existing")),
     ("rule-S-DEVBENCH-SAVE-env-wired-shell", _MC, "hit = judge(tool, args, roots, memo, env)", "hit = judge(tool, args, roots, memo)",
      _t11row("t11-curl-save-docs-existing")),
@@ -3178,8 +3480,8 @@ MUTATIONS += [
                  id="esp-verify-empty-inventory-fails"),
 
     pytest.param("tests/run_harness_tests.py",
-                 '"PATHEXT", "TOOLKIT_REQUIRE_HARNESS")',
-                 '"PATHEXT")',
+                 '"PATHEXT", "TOOLKIT_REQUIRE_HARNESS",',
+                 '"PATHEXT",',
                  "tests/test_harness_required.py::test_the_launcher_forwards_the_require_flag_to_pytest",
                  id="launcher-drops-require-harness-flag"),
 
@@ -3318,10 +3620,10 @@ MUTATIONS_FINAL = [
     ("tools/skyguard/run.py", '    if v.decision != "allow":', "    if False:",
      _COV + "test_the_engine_records_a_refusal_in_the_session_line_and_an_allow_does_not",
      "engine-records-codex-refusals"),
-    ("tools/skyguard/adapters/codex.py", "            if isinstance(cmd, list):", "            if False:",
+    # rt-fix-b: Bash and every other command-carrying tool now share one branch; the argv join is that branch's.
+    ("tools/skyguard/adapters/codex.py", "        if isinstance(cmd, list):", "        if False:",
      _ADP + "test_an_argv_list_command_is_guarded_as_a_shell_request", "codex-bash-argv-list-unjoined"),
-    ("tools/skyguard/adapters/codex.py", '    if not name.startswith("mcp__") and isinstance(cmd, list):',
-     "    if False:",
+    ("tools/skyguard/adapters/codex.py", "        if isinstance(cmd, list):", '        if isinstance(cmd, list) and name == "Bash":',
      _ADP + "test_an_argv_list_command_gets_the_shell_rules", "codex-unknown-tool-argv-list-allowed"),
     ("tools/skyguard/adapters/codex.py",
      "    if not isinstance(cmd, list) or not cmd or not all(isinstance(x, str) for x in cmd):",
@@ -3383,7 +3685,17 @@ def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:
            "until it is unique.\n")
         + f"  {find!r}"
     )
-    io.open(target, "w", encoding="utf-8", newline="").write(text.replace(find, replace))
+    mutated = text.replace(find, replace)
+    # A mutant that does not COMPILE is killed by the SyntaxError, whatever the named test
+    # asserts -- so it proves nothing about the clause. Final review D3 found one
+    # (a mis-indented `pass`), killed only that way while a correct revert survived.
+    if relpath.endswith(".py"):
+        try:
+            compile(mutated, relpath, "exec")
+        except SyntaxError as exc:
+            raise AssertionError(f"mutation of {relpath} does not compile ({exc}); it would be killed by "
+                                 f"the syntax error, not by the test it names.\n  {replace!r}")
+    io.open(target, "w", encoding="utf-8", newline="").write(mutated)
     return work
 
 
@@ -3441,12 +3753,12 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "merge-codex-rules-prefix-broader-than-hook"),
     # Codex adapter: a scalar non-string command is refused before any rule (Plan 5 Task 12 on Codex).
     ("tools/skyguard/adapters/codex.py",
-     '    if not name.startswith("mcp__") and "command" in ti and not isinstance(cmd, (str, list)):',
-     "    if False:",
+     "        if not isinstance(cmd, str):\n            # Merge of Plans 4+5",
+     "        if False:\n            # Merge of Plans 4+5",
      _MERGE + "test_skyguard_codex_adapter.py::test_a_scalar_non_string_command_is_refused_before_the_rules[exec_command-int]",
      "merge-codex-scalar-command-allowed"),
     # engine: Plan 5's cwd and dialect must reach the rules through the Plan 4 engine.
-    ("tools/skyguard/engine.py", 'cwd=req.cwd or "", shell=req.shell or ""))', 'shell=req.shell or ""))',
+    ("tools/skyguard/engine.py", 'cwd=req.cwd or "", shell=shell, parsed=parsed))', 'shell=shell, parsed=parsed))',
      _MERGE + "test_guard_corpus.py::test_intended_rows_reproduce", "merge-engine-drops-cwd"),
     ("tools/skyguard/engine.py", "    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd))",
      "    return codes.classify(write_rules.decide(path, audit))",
@@ -3941,9 +4253,14 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _p12row("allow-hook-icacls-read"), "rule-S-SELF-GUARD-icacls-read-allowed"),
     (_SF, '    elif p == "icacls" and argv', '    elif False and argv', _p12row("guard-hook-icacls-deny"),
      "rule-S-SELF-GUARD-icacls"),
-    (_SF, "        out += [(w, True) for w in _git_restore(argv)]", "        pass", _p12row("guard-git-checkout-hooks"),
+    # Merge of master into plan6: inside the install S-GIT-DISCARD now asks first, so the git route is shown from the
+    # home folder (the rows p6t12-guard-git-* moved to the ask).
+    (_SF, "        out += [(w, True) for w in _git_restore(argv)]", "        pass",
+     _SFT + "test_a_git_restore_of_a_guard_file_outside_the_install_is_the_guard_rule[checkout]",
      "rule-S-SELF-GUARD-git-checkout"),
-    (_SF, '    if sub == "restore":', "    if False:", _p12row("guard-git-restore-settings"), "rule-S-SELF-GUARD-git-restore"),
+    (_SF, '    if sub == "restore":', "    if False:",
+     _SFT + "test_a_git_restore_of_a_guard_file_outside_the_install_is_the_guard_rule[restore]",
+     "rule-S-SELF-GUARD-git-restore"),
     (_SF, '(STATE if text_kind(w) == STATE else "")', '""', _p12row("state-unresolved-var"),
      "rule-S-SELF-STATE-unresolved-fails-closed"),
     # ---- the wiring: shell, write, shadow, the patch Move
@@ -3982,7 +4299,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _p12row("state-del-cmd-rd"), "rule-S-SELF-STATE-delete-cmd-rd"),
     ("tools/skyguard/deletes.py", '    if p in ("io.file.delete", "io.directory.delete"):', "    if False:",
      _p12row("state-del-io-file"), "rule-S-SELF-STATE-delete-io-file"),
-    (_SF, "        hit = _recycle_delete(command, cwd, env, roots)", '        hit = ""', _p12row("state-del-recycle"),
+    (_SF, "        hit = _recycle_delete(command, parsed, cwd, env, roots)",'        hit = ""', _p12row("state-del-recycle"),
      "rule-S-SELF-STATE-delete-recycle-bin"),
     (_SF, "    if code and (grep(deletes.DESTROYER, code) or grep(deletes.INTERP_DELETE, code)):", "    if False:",
      _p12row("state-del-python"), "rule-S-SELF-STATE-delete-interpreter"),
@@ -4670,4 +4987,1392 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # setting decides (the status subparser's twin above covers it).
     (_RC, '(?:-' + BS + 'd+)?' + BS + 'Z")', '(?:-' + BS + 'd+)?$")',
      _SCT + "test_a_recovery_id_with_a_trailing_newline_is_not_an_id", "l2-rec-fr2-id-anchor"),
+]]
+
+# Plan 7 final review (2026-10-05): one mutation per gating or validation clause the fix pass added. Each reverts
+# that clause alone, and the test named for it must go red.
+_AC, _INV, _T = "tools/adapter_conformance.py", "tools/inventory-runtimes.py", "tests/"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # I1: the agent's hook timeout must clear the adapter's deadline plus the margin, unless a failed hook blocks.
+    (_AC, "lambda v: _is_seconds(v) and v >= ADAPTER_TIMEOUT_S + HOOK_TIMEOUT_MARGIN_S)", "lambda v: True)",
+     _T + "test_capability_report.py::test_a_hook_timeout_without_margin_over_the_adapter_deadline_demotes_when_a_failed_hook_allows[5]",
+     "p7final-report-ignores-hook-timeout"),
+    (_AC, "v >= ADAPTER_TIMEOUT_S + HOOK_TIMEOUT_MARGIN_S)", "v >= ADAPTER_TIMEOUT_S)",
+     _T + "test_capability_report.py::test_a_hook_timeout_without_margin_over_the_adapter_deadline_demotes_when_a_failed_hook_allows[25]",
+     "p7final-report-timeout-has-no-margin"),
+    (_AC, '            if leaf == TIMEOUT_GATE and not _is_seconds(value.get("value")):', "            if False:",
+     _T + "test_capability_report.py::test_a_hook_timeout_that_is_not_a_positive_number_is_a_problem_and_demotes[banana]",
+     "p7final-report-accepts-a-non-numeric-timeout"),
+    # I2: the every-tool-mapped leaf gates; every listed tool needs its own decoy; a decoy names a listed tool.
+    (_AC, '                           ("pre_tool_hook.every_write_and_shell_tool_mapped", lambda v: v is True)):',
+     "                           ):",
+     _T + "test_capability_report.py::test_the_every_tool_mapped_leaf_gates_the_status[leaf0]",
+     "p7final-report-ignores-tool-mapping"),
+    (_AC, "            if tool not in covered:", "            if False:",
+     _T + "test_adapter_template.py::test_every_listed_write_tool_needs_its_own_decoy_case",
+     "p7final-conformance-one-decoy-covers-every-tool"),
+    (_AC, "            elif tool not in profile[key]:", "            elif False:",
+     _T + "test_adapter_template.py::test_a_decoy_case_must_name_a_listed_tool_and_expect_block",
+     "p7final-conformance-decoy-tool-not-checked"),
+    (_AC, '        if not p["write_tools"]:', "        if False:",
+     _T + "test_adapter_template.py::test_the_profile_tool_lists_are_validated[bad0-write_tools]",
+     "p7final-profile-empty-write-tools"),
+    (_AC, '        if set(p["write_tools"]) & set(p["shell_tools"]):', "        if False:",
+     _T + "test_adapter_template.py::test_the_profile_tool_lists_are_validated[bad4-both]",
+     "p7final-profile-tool-in-both-lists"),
+    # I3: the live shell canary is part of the proof.
+    (_AC, 'all(proof.get(p.split(".")[1]) is True for p in PROOF_BOOLS)',
+     'all(proof.get(p.split(".")[1]) is True for p in PROOF_BOOLS[:2])',
+     _T + "test_capability_report.py::test_the_live_shell_canary_gates_the_status[False]",
+     "p7final-report-ignores-shell-canary"),
+    ("ADAPTING.md", "run `echo x > Data/Canary.esp` through your shell tool", "use your shell tool",
+     _T + "test_adapting_claims.py::test_the_live_proof_covers_the_shell_tool_and_a_broken_hook_the_live_session_runs",
+     "p7final-doc-drops-shell-canary"),
+    ("ADAPTING.md", "**copy's**", "**real install's**",
+     _T + "test_adapting_claims.py::test_the_live_proof_covers_the_shell_tool_and_a_broken_hook_the_live_session_runs",
+     "p7final-doc-broken-hook-not-live"),
+    # I4: the adapter argv is a list; a command must be an argv list.
+    (_AC, '        return [sys.executable, str(Path(adapter_dir) / "adapter.py")]',
+     '        return (sys.executable + " " + str(Path(adapter_dir) / "adapter.py")).split()',
+     _T + "test_adapter_template.py::test_a_temp_or_interpreter_path_with_a_space_or_apostrophe_still_conforms[has space]",
+     "p7final-conformance-splits-the-argv"),
+    (_AC, "    if command is not None and not (isinstance(command, list) and command",
+     "    if False and not (isinstance(command, list) and command",
+     _T + "test_adapter_template.py::test_a_command_must_be_an_argv_list_never_a_string_to_split[command1]",
+     "p7final-conformance-accepts-a-non-list-command"),
+    # M8: duplicate case ids.
+    (_AC, "            for i in sorted({i for i in ids if ids.count(i) > 1}, key=str)]", "            for i in []]",
+     _T + "test_adapter_template.py::test_duplicate_case_ids_are_a_failed_row_not_a_silent_shadow",
+     "p7final-conformance-duplicate-ids-shadow"),
+    # I5: the winget allowlist, in the parser and where the command is built; the whole text only.
+    (_INV, "            problem = id_problem(im.group(1), im.group(2), im.group(3))", "            problem = None",
+     _T + "test_inventory_runtimes.py::test_an_id_outside_the_runtimes_allowlist_authorizes_nothing[node=Contoso.Backdoor==1.0]",
+     "p7final-inventory-any-id-authorizes"),
+    (_INV, " and not id_problem(runtime, *authorization[runtime]):", ":",
+     _T + "test_inventory_runtimes.py::test_the_plan_refuses_an_unlisted_id_even_if_handed_one_directly",
+     "p7final-inventory-plan-builds-any-id"),
+    (_INV, "        if not m or int(m.group(1)) < PYTHON_FLOOR[1]:", "        if not m:",
+     _T + "test_inventory_runtimes.py::test_an_id_outside_the_runtimes_allowlist_authorizes_nothing[python=Python.Python.3.7==3.7.9]",
+     "p7final-inventory-python-below-floor"),
+    (_INV, '        if version.split(".")[:2] != ["3", m.group(1)]:', "        if False:",
+     _T + "test_inventory_runtimes.py::test_an_id_outside_the_runtimes_allowlist_authorizes_nothing[python=Python.Python.3.12==3.11.4]",
+     "p7final-inventory-version-not-bound-to-id"),
+    (_INV, '    pl.add_argument("--auth-file", help=', '    pl.add_argument("--auth-text")\n    pl.add_argument("--auth-file", help=',
+     _T + "test_inventory_runtimes.py::test_the_cli_takes_the_whole_task_text_never_a_chosen_sentence",
+     "p7final-inventory-takes-a-chosen-sentence"),
+    # M6: a non-DevBench MCP call is labelled unjudged, not evaluated.
+    ("tools/skyguard/neutral.py",
+     '        if req.mcp_tool not in ("", "unknown") and not mcp_rules.judged_server(req.mcp_tool):', "        if False:",
+     _T + "test_skyguard_neutral.py::test_an_mcp_call_the_rules_do_not_judge_is_labelled_unjudged_not_evaluated[mcp__other__thing]",
+     "p7final-neutral-unjudged-mcp-reads-evaluated"),
+    # M1: the release gate's line continuation.
+    (".github/workflows/release.yml", "refs/remotes/origin/master >/dev/null " + BS + "\n            || { echo",
+     "refs/remotes/origin/master >/dev/null             || { echo",
+     _T + "test_adapter_payload.py::test_the_release_gates_parse_and_lost_no_line_continuation",
+     "p7final-release-loses-line-continuation"),
+    # M2: the payload check lists what ADAPTING.md names.
+    ("tools/check-release-payload.py", '    "tools/adapting/examples/json_deny.slots.py",\n', "",
+     _T + "test_adapter_payload.py::test_every_file_adapting_md_names_or_cites_is_checked",
+     "p7final-payload-drops-a-worked-example"),
+    # M3: the prose under the prompt.
+    ("README.md", "It does not install Python, Git, Node or any other system software",
+     "It will install dependencies: Python, Git, Node or any other system software",
+     _T + "test_setup_prompt.py::test_the_prose_after_each_embedded_prompt_does_not_contradict_it",
+     "p7final-readme-promises-installs"),
+    # M4: no promised lock, no clashing layer numbers.
+    ("docs/safety-philosophy.md", "### Defense 1: Knowledge", "### Layer 1: Knowledge",
+     _T + "test_adapting_claims.py::test_the_layer_2_lock_is_not_promised", "p7final-layer-numbers-clash"),
+    # M7: the tripwire scans the texts an agent reads.
+    ("tests/test_no_host_installs_in_new_files.py", '    "ADAPTING.md",\n    "SETUP_PROMPT.txt",\n', "",
+     _T + "test_no_host_installs_in_new_files.py::test_the_scan_covers_every_text_an_agent_reads_as_instructions",
+     "p7final-tripwire-skips-the-instructions"),
+    # M9: what `python` means off Windows.
+    ("ADAPTING.md", "On Linux and macOS that is usually `python3`; on", "On",
+     _T + "test_adapting_claims.py::test_the_doc_says_what_python_means_off_windows", "p7final-doc-python-only"),
+]]
+
+# Task 17 (gap X4): the DevBench judge on Codex. One mutation per clause, each naming the test that must go red.
+# Merge of rt-fix-b (2026-10-05): the route is rt-fix-b's (`if req.kind == "mcp":` in engine._rules), which keeps an ask
+# an ask (the Codex render refuses it) and fails closed on unreadable arguments; Task 17's ask-to-advice downgrade is
+# gone, so its three downgrade mutations became one that puts the downgrade back.
+_T17 = "tests/test_skyguard_codex_adapter.py::"
+_T17_ROUTE = '    if req.kind == "mcp" and mcp_rules.is_devbench(req.mcp_tool):\n        return '
+_T17_JUDGE = '        return evaluate_mcp(req.mcp_tool, args, audit, roots=_soft_roots(roots_fn) or _paths.Roots("", ""))'
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # Codex stops routing DevBench MCP calls to the judge: smp reset is allowed again.
+    ("tools/skyguard/engine.py", '    if req.kind == "mcp":\n        # rt-fix-b', '    if False:\n        # rt-fix-b',
+     _T17 + "test_a_devbench_smp_reset_is_denied_on_codex[mcp__devbench-vr__console]", "t17-codex-devbench-not-routed"),
+    # An ask outcome is quietly downgraded to an allow on Codex: the overwrite of an existing save runs unconfirmed.
+    ("tools/skyguard/engine.py", _T17_JUDGE,
+     _T17_JUDGE.replace("        return evaluate_mcp(", "        v = evaluate_mcp(")
+     + '\n        return v._replace(decision="allow", reason="", context=v.reason) if v.decision == "ask" else v',
+     _T17 + "test_a_devbench_ask_is_refused_with_the_confirmation_on_codex", "t17-codex-devbench-ask-downgraded"),
+    # Unreadable arguments are judged as no arguments (an allow) instead of the INERT refusal.
+    ("tools/skyguard/engine.py", '            return _failed(INERT_TRANSLATE.format("unreadable MCP arguments"), "codex.TRANSLATE")',
+     "            args = {}",
+     _T17 + "test_unreadable_devbench_arguments_are_refused_as_inert_on_codex", "t17-codex-devbench-bad-args-allowed"),
+    # The judged call is logged as unhooked again (the log would claim nothing guarded it).
+    ("tools/skyguard/engine.py", _T17_ROUTE + "False", "    if False:\n        return False",
+     _T17 + "test_a_judged_devbench_call_is_not_logged_as_unhooked", "t17-codex-devbench-logged-as-unhooked"),
+    # Every MCP server counts as DevBench for the unhooked log, not only DevBench's.
+    ("tools/skyguard/mcp_rules.py", 'parts[0] == "mcp" and is_devbench_server(parts[1])', 'parts[0] == "mcp"',
+     _T17 + "test_only_devbench_servers_are_judged_on_codex", "t17-is-devbench-matches-every-server"),
+    # The underscore spelling of the server name is no longer recognised.
+    ("tools/skyguard/mcp_rules.py", '    return "devbench" in re.sub(r"[-_.\\s]", "", server.lower())',
+     '    return server.lower().startswith("devbench-")',
+     _T17 + "test_a_devbench_smp_reset_is_denied_on_codex[mcp__devbench_vr__console]", "t17-is-devbench-needs-a-hyphen"),
+]]
+
+
+# Task 17 step 2 (D-P4-2): status "partial" on a command the parser could not fully read. One mutation per clause.
+_T17E = "tests/test_skyguard_engine.py::"
+_T17_PARTIAL = '    if v.status == "evaluated" and (parsed is None or not parsed.ok or any(e.program == "?" for e in parsed.execs)):'
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/engine.py", _T17_PARTIAL,
+     '    if v.status == "evaluated" and (parsed is None or any(e.program == "?" for e in parsed.execs)):',
+     _T17E + "test_a_parse_failure_makes_the_verdict_partial", "t17-partial-ignores-parse-failure"),
+    ("tools/skyguard/engine.py", _T17_PARTIAL,
+     '    if v.status == "evaluated" and (parsed is None or not parsed.ok):',
+     _T17E + "test_an_opaque_program_makes_the_verdict_partial", "t17-partial-ignores-opaque-program"),
+    ("tools/skyguard/engine.py", _T17_PARTIAL,
+     '    if (parsed is None or not parsed.ok or any(e.program == "?" for e in parsed.execs)):',
+     _T17E + "test_a_failed_status_is_never_lowered_to_partial", "t17-partial-lowers-a-failed-status"),
+    ("tools/skyguard/engine.py", _T17_PARTIAL, "    if False:",
+     _T17E + "test_a_deny_on_an_unparseable_command_stays_a_deny_and_says_partial", "t17-partial-never-set"),
+    # decide() must reuse the parse it is handed: dropping the argument parses twice and can disagree.
+    ("tools/skyguard/engine.py", "shell=shell, parsed=parsed))", "shell=shell))",
+     _T17E + "test_decide_reuses_the_parse_it_is_handed", "t17-decide-reparses"),
+]]
+
+
+# rt-fix-b (routes red team, 2026-10-04). One mutation per guard clause the branch added; each names the row or test
+# that must go red. RTB rows fire in-process from tests/test_skyguard_rtb.py; Codex rows from test_skyguard_codex_routes.
+def _rtb(row):
+    return "tests/test_skyguard_rtb.py::test_rtb_row[rtb-" + row + "]"
+
+
+def _cxr(row):
+    return "tests/test_skyguard_codex_routes.py::test_codex_route_rows[rt-codex-" + row + "]"
+
+
+_CXT = "tests/test_skyguard_codex_routes.py::"
+_RTT = "tests/test_skyguard_routes.py::"
+_CX = "tools/skyguard/adapters/codex.py"
+_EN = "tools/skyguard/engine.py"
+_PP = "tools/skyguard/patch_paths.py"
+_RTB_CLAUSES = [
+    # (id, file, find, replace, test that must go red)
+    # --- S-WRITE-PLUGIN: non-text writers onto a plugin or archive name (writes.tool_write_targets)
+    ("rule-S-WRITE-PLUGIN-tool-writers-wired", _WR, "    out = _redirect_targets(e) + list(tool_write_targets(e))\n",
+     "    out = _redirect_targets(e)\n", _rtb("curl-o")),
+    ("rule-S-WRITE-PLUGIN-curl-output", _WR, '        out = _opt_values(argv, ("--output",), ("-o",))', "        out = []",
+     _rtb("curl-output")),
+    ("rule-S-WRITE-PLUGIN-short-cluster-value", _WR, "                if w.endswith(c) and k + 1 < len(argv):",
+     "                if False:", _rtb("curl-cluster")),
+    ("rule-S-WRITE-PLUGIN-curl-remote-name", _WR,
+     '        if _has_flag(argv, ("--remote-name", "--remote-name-all"), "O", _CURL_VALUED):', "        if False:",
+     _rtb("curl-remote-name")),
+    ("rule-S-WRITE-PLUGIN-curl-valued-letters", _WR, '_CURL_VALUED = "XHdubceAFTwxmrEKoCYyzQPtUD"', '_CURL_VALUED = ""',
+     _rtb("curl-xpost")),
+    ("rule-S-WRITE-PLUGIN-wget-output", _WR, '        out = _opt_values(argv, ("--output-document",), ("-O",))',
+     "        out = []", _rtb("wget-O")),
+    ("rule-S-WRITE-PLUGIN-wget-output-wins", _WR, '        if out:\n            return [w for w in out if w != "-"]',
+     "        if False:\n            return []", _rtb("wget-stdout")),
+    ("rule-S-WRITE-PLUGIN-wget-url-name", _WR, '        return _download_names(argv, ("--directory-prefix",), ("-P",))',
+     "        return []", _rtb("wget-url-name")),
+    ("rule-S-WRITE-PLUGIN-web-cmdlets", _WR, "    if p in WEB_GET or (", "    if p in () or (", _rtb("iwr-outfile")),
+    ("rule-S-WRITE-PLUGIN-bits-transfer", _WR, '    if p == "start-bitstransfer":', "    if False:", _rtb("bits-transfer")),
+    ("rule-S-WRITE-PLUGIN-certutil", _WR, '    if p == "certutil" and', "    if False and", _rtb("certutil-urlcache")),
+    ("rule-S-WRITE-PLUGIN-bitsadmin", _WR, '    if p == "bitsadmin" and', "    if False and", _rtb("bitsadmin")),
+    ("rule-S-WRITE-PLUGIN-truncate", _WR, '    if p == "truncate":', "    if False:", _rtb("truncate")),
+    ("rule-S-WRITE-PLUGIN-perl-inplace", _WR, '    if p == "perl" and', "    if False and", _rtb("perl-inplace")),
+    ("rule-S-WRITE-PLUGIN-perl-cluster", _WR, 're.fullmatch(r"-[a-hj-zA-Z]*i', 're.fullmatch(r"-i', _rtb("perl-pi")),
+    ("rule-S-WRITE-PLUGIN-fsutil", _WR, '    if p == "fsutil" and', "    if False and", _rtb("fsutil-zero")),
+    ("rule-S-WRITE-PLUGIN-openssl", _WR, '    if p == "openssl":', "    if False:", _rtb("openssl-out")),
+    ("rule-S-WRITE-PLUGIN-7z", _WR, '    if p in ("7z", "7za", "7zr", "7z.exe") and', "    if False and", _rtb("7z-add")),
+    ("rule-S-WRITE-PLUGIN-zip", _WR, '    if p == "zip":', "    if False:", _rtb("zip")),
+    ("rule-S-WRITE-PLUGIN-tar", _WR, '    if p == "tar" and _tar_creates(argv):', "    if False:", _rtb("tar-create")),
+    ("rule-S-WRITE-PLUGIN-tar-creates-only", _WR, '    if p == "tar" and _tar_creates(argv):', '    if p == "tar":',
+     _rtb("tar-extract")),
+    ("rule-S-WRITE-PLUGIN-tar-bundled", _WR, '        return bool(set(first) & set("cruA"))', "        return False",
+     _rtb("tar-bundled")),
+    ("rule-S-WRITE-PLUGIN-export-cmdlets", _WR, '    if p in ("export-csv", "export-clixml"):', "    if False:",
+     _rtb("export-csv")),
+    ("rule-S-WRITE-PLUGIN-ps-method-calls", _WR, "    lit = text_write_targets_ps(command)", "    lit = []",
+     _rtb("ps-downloadfile")),
+    ("rule-S-WRITE-PLUGIN-interpreter-literals", _WR, "            lit += text_write_targets(code)", "            pass",
+     _rtb("python-open-write")),
+    ("rule-S-WRITE-PLUGIN-open-write-mode", _WR, "[rbt]*[wax+]\"\"\", re.IGNORECASE)", "?\"\"\", re.IGNORECASE)",
+     _rtb("python-open-read")),
+    ("rule-S-WRITE-PLUGIN-pathlib", _WR, 're.compile(r"' + BS + "bPath" + BS + '(', 're.compile(r"' + BS + "bNoPath" + BS + '(',
+     _rtb("python-pathlib")),
+    ("rule-S-WRITE-PLUGIN-node-writefile", _WR, "(?:writeFile|appendFile|", "(?:appendFile|", _rtb("node-writefile")),
+    # --- S-WRITE-SAVE: a write, copy or move onto a save in the settings folder
+    ("rule-S-WRITE-SAVE-wired", _SHR, "    if wr.save:", "    if False:", _rtb("save-redirect")),
+    ("rule-S-WRITE-SAVE-write", _WR, "            if is_save(a, roots):", "            if False:", _rtb("save-redirect")),
+    ("rule-S-WRITE-SAVE-copy-onto", _WR, "            if is_save(a_dst, roots):", "            if False:", _rtb("save-cp")),
+    ("rule-S-WRITE-SAVE-copy-into-folder", _WR, "                if hit is not None and is_save(",
+     "                if False and is_save(", _rtb("save-cp-into-folder")),
+    ("rule-S-WRITE-SAVE-interpreter-literal", _WR, '        elif is_save(targets.resolve(word, cwd, "cmd", env), roots):',
+     "        elif False:", _rtb("save-python")),
+    ("rule-S-WRITE-SAVE-cosave", _WR, 'SAVE_EXTS = (".ess", ".skse")', 'SAVE_EXTS = (".ess",)', _rtb("save-cosave")),
+    ("rule-S-WRITE-SAVE-settings-folder-only", _WR, '.endswith(SAVE_EXTS) and targets.zone(abs_path, roots) == "config"',
+     ".endswith(SAVE_EXTS)", _rtb("write-save-outside")),
+    # --- S-MOVE-ROOT: moving the install or its folders away
+    # Merge (2026-10-05): a root moved OUT of its zone now reaches S-MOVE-ROOT through the delete branch too, so this
+    # clause is pinned by a move that stays in its zone (no delete hit): Saves renamed beside itself.
+    ("rule-S-MOVE-ROOT-wired", _SHR, "    if wr.move_root:                                         # rt-fix-b",
+     "    if False:                                         # rt-fix-b", _rtb("move-saves")),
+    ("rule-S-MOVE-ROOT-protected-roots", _WR, "    if targets.covers_protected(abs_path, roots):", "    if False:",
+     _rtb("move-install")),
+    ("rule-S-MOVE-ROOT-data-folder", _WR, '    if _rel(abs_path, roots.install_dirs) == ["data"] and', "    if False and",
+     _rtb("move-data-relative")),
+    ("rule-S-MOVE-ROOT-saves-folder", _WR, '    return _rel(abs_path, roots.config_dirs) == ["saves"] or', "    return False or",
+     _rtb("move-saves")),
+    ("rule-S-MOVE-ROOT-mv", _WR, 'MOVE_PROGRAMS = frozenset(("mv", "move-item"))', 'MOVE_PROGRAMS = frozenset(("move-item",))',
+     _rtb("move-install")),
+    ("rule-S-MOVE-ROOT-move-item", _WR, 'MOVE_PROGRAMS = frozenset(("mv", "move-item"))', 'MOVE_PROGRAMS = frozenset(("mv",))',
+     _rtb("move-item")),
+    # Merge (2026-10-05): writes.move_sources' own rename-item branch duplicated rt-fix-a's parser (every Rename-Item
+    # with a -NewName is also a move-item exec) and was removed; the clause that carries it is the parser's.
+    ("rule-S-MOVE-ROOT-rename-item", "tools/skyguard/shellparse.py",
+     '            if p == "rename-item" and self.d == "powershell" or p == "rename" and self.d == "cmd":',
+     '            if p == "rename" and self.d == "cmd":', _rtb("rename-item")),
+    # --- S-GIT-DISCARD: git overwriting a protected working tree
+    ("rule-S-GIT-DISCARD-wired", _SHR, "    git = anchored.git_discard(parsed, roots, cwd, env)", '    git = ""',
+     _rtb("git-reset-hard")),
+    ("rule-S-GIT-DISCARD-checkout-pathspec", _AN,
+     '        if "--" in args or any(a in ("-f", "--force") for a in opts):',
+     '        if any(a in ("-f", "--force") for a in opts):', _rtb("git-checkout-stash-dir")),
+    ("rule-S-GIT-DISCARD-checkout-force", _AN,
+     '        if "--" in args or any(a in ("-f", "--force") for a in opts):', '        if "--" in args:',
+     _rtb("git-checkout-force")),
+    ("rule-S-GIT-DISCARD-new-branch-is-no-path", _AN, '        if any(a in ("-b", "-B", "--orphan") for a in opts):',
+     "        if False:", _rtb("git-checkout-new-branch-dotted")),
+    ("rule-S-GIT-DISCARD-checkout-pathy", _AN,
+     '        return any(_PATHY.search(a) for a in args if not a.startswith("-"))', "        return False",
+     _rtb("git-checkout-dot")),
+    ("rule-S-GIT-DISCARD-restore-staged-only", _AN, "        return worktree or not staged", "        return True",
+     _rtb("git-restore-staged")),
+    ("rule-S-GIT-DISCARD-restore-worktree", _AN, "        return worktree or not staged", "        return not staged",
+     _rtb("git-restore-both")),
+    ("rule-S-GIT-DISCARD-restore-cluster", _AN, 'a.startswith("-") and not a.startswith("--") and "W" in a[1:] for a in opts)',
+     "False for a in opts)", _rtb("git-restore-cluster")),
+    ("rule-S-GIT-DISCARD-reset-hard", _AN, '        return "--hard" in opts', "        return False", _rtb("git-reset-hard")),
+    ("rule-S-GIT-DISCARD-reset-hard-only", _AN, '        return "--hard" in opts', "        return True", _rtb("git-reset-soft")),
+    ("rule-S-GIT-DISCARD-switch", _AN, '        return any(a in ("-f", "--force", "--discard-changes") for a in opts)',
+     "        return False", _rtb("git-switch-discard")),
+    ("rule-S-GIT-DISCARD-checkout-index-cluster", _AN,
+     '(a.startswith("-") and not a.startswith("--") and "f" in a[1:])', "False", _rtb("git-checkout-index")),
+    ("rule-S-GIT-DISCARD-read-tree", _AN, '        return "-u" in opts and "--reset" in opts', "        return False",
+     _rtb("git-read-tree")),
+    ("rule-S-GIT-DISCARD-dash-C", _AN, '        if w in ("-C", "--work-tree") and k + 1 < len(argv):', "        if False:",
+     _rtb("git-dash-C")),
+    ("rule-S-GIT-DISCARD-work-tree-equals", _AN, '        if w.startswith("--work-tree="):', "        if False:",
+     _rtb("git-work-tree")),
+    ("rule-S-GIT-DISCARD-cd", _AN, "        where = targets.exec_cwd(e, cwd, env)", "        where = targets.normalise_cwd(cwd)",
+     _rtb("git-cd")),
+    ("rule-S-GIT-DISCARD-config-zone", _AN, 'targets.zone(where, roots) in ("install", "config", "mo2"):',
+     'targets.zone(where, roots) in ("install", "mo2"):', _rtb("git-config-dir")),
+    ("rule-S-GIT-DISCARD-protected-zones-only", _AN, 'targets.zone(where, roots) in ("install", "config", "mo2"):',
+     "True:", _rtb("git-reset-hard-elsewhere")),
+    # --- W-SAVE: Edit/Write onto a save
+    ("rule-W-SAVE-wired", _WRR, "        if is_save(a, roots):", "        if False:", _rtb("write-save")),
+    ("rule-W-SAVE-cosave", _WR, 'SAVE_EXTS = (".ess", ".skse")', 'SAVE_EXTS = (".ess",)', _rtb("write-cosave")),
+    ("rule-W-SAVE-settings-folder-only", _WR, '.endswith(SAVE_EXTS) and targets.zone(abs_path, roots) == "config"',
+     ".endswith(SAVE_EXTS)", _rtb("write-save-outside")),
+    # --- Claude Write with a non-string file_path is no path (W-INERT-NOPATH)
+    ("rule-W-INERT-NOPATH-non-string-file-path", "tools/skyguard/adapters/claude.py",
+     '        return _sub(fp) if isinstance(fp, str) else ""', "        return _sub(fp)", _rtb("write-path-list")),
+    # --- DevBench: what the console actually runs, and where a console line can sit
+    ("rule-S-DEVBENCH-CRASH-nul-ends-the-line", _MC, 'command.split("' + BS + 'x00", 1)[0])', "command)", _rtb("mcp-nul")),
+    ("rule-S-DEVBENCH-CRASH-invisible-characters", _MC, '    return _INVISIBLE.sub("", command.split(',
+     '    return (lambda _p, s: s)("", command.split(', _rtb("mcp-zero-width")),
+    ("rule-S-DEVBENCH-CRASH-quoted-statement", _MC, "            s = s[1:-1]", "            pass", _rtb("mcp-quoted")),
+    ("rule-S-DEVBENCH-CRASH-any-key", _MC, "    for s in _strings(args):",
+     '    for s in ([args.get("command")] if isinstance(args, dict) and isinstance(args.get("command"), str) else []):',
+     _rtb("mcp-unknown-key")),
+    ("rule-S-DEVBENCH-CRASH-nested-object", _MC, "    elif isinstance(obj, dict):", "    elif False:", _rtb("mcp-nested")),
+    ("rule-S-DEVBENCH-SAVE-papyrus-console-functions", _MC, "        if fn in _CONSOLE_FUNCTIONS:", "        if False:",
+     _rtb("mcp-papyrus-executecommand-save")),
+    ("rule-S-DEVBENCH-SAVE-papyrus-savegame", _MC, '        elif fn == "savegame":', "        elif False:",
+     _rtb("mcp-papyrus-savegame")),
+    ("rule-S-DEVBENCH-SAVE-console-savegame", _MC, 'SAVE_COMMANDS = ("save", "savegame")', 'SAVE_COMMANDS = ("save",)',
+     _rtb("mcp-console-savegame")),
+    ("rule-S-DEVBENCH-SAVE-scenario-steps", _MC, "        for stool, sargs in _steps(args):", "        for stool, sargs in ():",
+     _rtb("mcp-scenario-step-save")),
+    ("rule-S-DEVBENCH-SAVE-scenario-console-step", _MC, '        if isinstance(step.get("console"), str):', "        if False:",
+     _rtb("mcp-scenario-console-save")),
+    ("rule-S-DEVBENCH-SAVE-trailing-dot", _MC, '    n = name.strip().rstrip(" .")', "    n = name.strip()",
+     _rtb("mcp-save-trailing-dot")),
+    ("rule-S-DEVBENCH-SAVE-short-name", _MC, ' or re.search(r"~[0-9]", n):', ":", _rtb("mcp-save-short-name")),
+    ("rule-S-DEVBENCH-CRASH-server-separators", _MC, 're.sub(r"[-_.' + BS + 's]", "", server.lower())', "server.lower()",
+     _T11 + "test_any_devbench_server_name_is_judged[dev-bench]"),
+    ("rule-S-DEVBENCH-CRASH-server-case", _MC, '"", server.lower())', '"", server)',
+     _T11 + "test_any_devbench_server_name_is_judged[DevBench-vr]"),
+    ("rule-S-DEVBENCH-CRASH-percent-encoded-url", _MC, "    u = unquote(word)", "    u = word", _rtb("curl-percent-encoded")),
+    ("rule-S-DEVBENCH-CRASH-query-string", _MC, "    out = [(tool, query)] if query else []", "    out = []",
+     _rtb("curl-query-string")),
+    ("rule-S-DEVBENCH-CRASH-mcp-endpoint", _MC, "        if _MCP_ENDPOINT.search(u):", "        if False:",
+     _rtb("curl-mcp-jsonrpc")),
+    ("rule-S-DEVBENCH-SAVE-mcp-jsonrpc-params", _MC, "        if rpc and isinstance(args, dict):", "        if False:",
+     _rtb("curl-mcp-jsonrpc-save")),
+    ("rule-S-DEVBENCH-CRASH-mcp-prefilter", _MC, '_SHELL_WORDS = ("api/tool", "devbench", "/mcp")',
+     '_SHELL_WORDS = ("api/tool", "devbench")', _rtb("curl-mcp-body")),
+    ("rule-S-DEVBENCH-CRASH-wget-program", _MC, '_WEB_PROGRAMS = frozenset(("curl", "wget", ', '_WEB_PROGRAMS = frozenset(("curl", ',
+     _rtb("wget-post-data")),
+    ("rule-S-DEVBENCH-CRASH-wget-body", _MC, '    elif e.program == "wget":', "    elif False:", _rtb("wget-post-data")),
+    ("rule-S-DEVBENCH-CRASH-dotnet-web-call", _MC, "    textual = not parsed.ok or opaque or bool(_DOTNET_WEB.search(command))",
+     "    textual = not parsed.ok or opaque", _rtb("ps-uploadstring")),
+    ("rule-S-DEVBENCH-CRASH-cli-call", _MC, '    if argv[0] == "call" and len(argv) > 2:', "    if False:",
+     _rtb("cli-call-executecommand")),
+    # --- Codex: apply_patch Delete / Move judged as deletes (engine)
+    ("codex-patch-delete-judged", _EN, "        if op in DELETE_OPS and roots is not None:", "        if False:",
+     _cxr("patch-delete-install")),
+    ("codex-patch-move-out-is-a-delete", _EN, 'DELETE_OPS = ("delete", "move_from")', 'DELETE_OPS = ("delete",)',
+     _cxr("patch-move-out")),
+    ("codex-patch-move-inside-is-a-rename", _EN,
+     "            if b is not None and targets.zone(b, roots) == targets.zone(a, roots):", "            if False:",
+     _CXT + "test_a_move_inside_the_same_folder_is_a_rename_not_a_delete"),
+    ("codex-patch-delete-unresolved", _EN,
+     '        if deletes.raw_reaches(path, targets.normalise_cwd(cwd), "cmd", roots):', "        if False:",
+     _cxr("patch-delete-unresolved")),
+    ("codex-patch-delete-strict-roots", _EN, "    if not any(op in DELETE_OPS for op in req.ops):", "    if True:",
+     _CXT + "test_a_patch_delete_refuses_when_the_paths_file_is_unreadable"),
+    ("codex-patch-delete-malformed-roots", _EN, "    if roots.malformed:", "    if False:",
+     _CXT + "test_a_patch_delete_refuses_when_the_paths_file_has_an_unreadable_value"),
+    ("codex-patch-delete-code", "tools/skyguard/codes.py", '    return found[0] if found else "unknown"',
+     '    return "unknown"', "tests/test_codex_conformance.py::test_conformance"),
+    # --- Codex: MCP routed to the DevBench judge
+    ("codex-mcp-devbench-judged", _EN, '    if req.kind == "mcp":', "    if False:", _cxr("mcp-crash")),
+    ("codex-mcp-arguments-as-sent", _CX, "mcp_args=json.dumps({} if raw_ti is None else raw_ti, sort_keys=True)",
+     "mcp_args=json.dumps(ti, sort_keys=True)", _cxr("mcp-list-input")),
+    # --- Codex adapter shapes
+    ("codex-deep-nesting-named", _CX, "    except RecursionError:", "    except ZeroDivisionError:",
+     _CXT + "test_deep_nesting_is_refused_by_name_not_by_a_crash"),
+    ("codex-no-cwd-refused", _CX, '    if not isinstance(d.get("cwd"), str) or not d["cwd"].strip():', "    if False:",
+     _CXT + "test_a_malformed_codex_payload_is_refused_with_its_reason"),
+    ("codex-non-object-tool-input-refused", _CX,
+     "    if raw_ti is not None and not isinstance(raw_ti, dict) and not is_mcp:", "    if False:",
+     _CXT + "test_a_malformed_codex_payload_is_refused_with_its_reason"),
+    ("codex-workdir-read", _CX, '    if not is_mcp and isinstance(ti.get("workdir"), str) and ti["workdir"].strip():',
+     "    if False:", _cxr("workdir")),
+    ("codex-patch-tool-case", _CX, 'if name.lower() in ("apply_patch", "applypatch"):', 'if name in ("apply_patch", "applypatch"):',
+     _cxr("patch-case")),
+    ("codex-unified-exec-cmd-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars")', '_COMMAND_KEYS = ("command", "chars")',
+     _cxr("unknown-cmd-key")),
+    ("codex-write-stdin-chars-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars")', '_COMMAND_KEYS = ("command", "cmd")',
+     _cxr("write-stdin")),
+    ("codex-patch-under-unknown-key", _CX, "            if body is not None:", "            if False:",
+     _cxr("unknown-patch-key")),
+    ("codex-write-stdin-poll-is-no-command", _CX, '        if key == "chars" and not cmd.strip():', "        if False:",
+     _cxr("write-stdin-poll")),
+    # --- shell spellings of apply_patch (patch_paths)
+    ("codex-shell-patch-case-insensitive", _PP, '(?=' + BS + 's|$|<)""", re.I)', '(?=' + BS + 's|$|<)""")',
+     _cxr("shell-patch-upper")),
+    ("codex-shell-patch-quoted-program", _PP, "(?P<q>['\"]?)", "(?P<q>)", _cxr("shell-patch-quoted")),
+    ("codex-shell-patch-body-beside-program", _PP, "        if _BODY_LINE.search(cmd) and _PROGRAM_WORD.search(cmd):",
+     "        if False:", _cxr("shell-patch-variable")),
+    # --- linked-worktree install protection (paths, run)
+    ("worktree-main-tree-is-a-game-root", _PA, "    _add(game, main)\n", "",
+     _RTT + "test_hooks_run_from_a_worktree_name_the_main_install_as_a_root"),
+    ("worktree-main-tree-is-an-install-dir", _PA, "    for v in [root_posix, root_win, main] +", "    for v in [root_posix, root_win] +",
+     _RTT + "test_hooks_run_from_a_worktree_still_guard_the_main_install"),
+    ("worktree-only-a-linked-worktree", _PA,
+     '    if os.path.basename(worktrees).lower() != "worktrees" or os.path.basename(git_dir).lower() != ".git":',
+     "    if False:", _RTT + "test_a_dot_git_file_that_is_not_a_linked_worktree_adds_nothing"),
+    ("worktree-main-paths-file-read", "tools/skyguard/run.py", "        if main:", "        if False:",
+     _RTT + "test_hooks_run_from_a_worktree_read_the_main_trees_paths_file"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _RTB_CLAUSES]
+
+
+# Merge of rt-fix-a + rt-fix-b into plan5 (2026-10-05). One mutation per clause the merge itself decided.
+_MDEL = "tests/test_skyguard_deletes.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # rt-fix-a's move-as-delete: a file moved out of the install is no longer refused.
+    ("tools/skyguard/deletes.py", "        if e.program in MOVE_PROGRAMS and resolved is None:", "        if False:",
+     _MDEL + "test_moving_a_file_out_of_the_install_is_a_delete[mv]", "merge-rt-move-out-is-a-delete"),
+    # The merge's precedence: a root moved away reads as a delete again (S-DEL-INSTALL's "deletes X inside the install").
+    ("tools/skyguard/shell_rules.py", "        if wr.move_root:\n            return deny(\"S-MOVE-ROOT\", wr.move_root)\n        rid, file",
+     "        rid, file",
+     _MDEL + "test_moving_a_root_folder_away_names_the_move_not_a_delete[mv-install]", "merge-rt-move-root-wins-over-delete"),
+]]
+
+
+# 3rd-party drift fix B1: toolchain-check must compare the INSTALLED spriggit with the pin, and derive the SDK it needs
+# from the installed version. One twin per clause (each shadows the other if only one is mutated).
+MUTATIONS += [
+    pytest.param("tools/toolchain-check.sh", 'elif [ "$INSTALLED" = "$PIN" ]; then', 'elif [ -n "$INSTALLED" ]; then',
+                 "tests/test_toolchain_check.py::test_older_spriggit_against_the_pin_is_a_mismatch",
+                 id="toolchain-check-spriggit-version-must-equal-pin"),
+    pytest.param("tools/toolchain-check.sh", '|| [ "${SP_MINOR:-0}" -ge 41 ] 2>/dev/null; then NEED=10; fi', '|| false; then NEED=10; fi',
+                 "tests/test_toolchain_check.py::test_pinned_version_on_sdk_9_cannot_work",
+                 id="toolchain-check-spriggit-version-sets-needed-sdk"),
+]
+
+
+# Plan 8 T6b: toolchain-check's wrapper rows must prove the wrapper reached its dependency (identity, not
+# startability), keep an absent optional dependency optional, and run under the bash running the check (a bare
+# `bash` can be WSL's launcher). And automod-cli.sh's .NET 10 build: SDK pin, retarget, refusal, Cli-only build,
+# the net10.0 DLL, and the stale-net8 refusal. One twin per clause.
+_TC = "tests/test_toolchain_check.py::"
+_AM = "tests/test_automod_cli.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/toolchain-check.sh", '''wrapper automod-cli "$ROOT/tools/automod" "Spooky's AutoMod Toolkit"''',
+     'wrapper automod-cli "$ROOT/tools/automod" ""', _TC + "test_automod_cloned_but_not_built_is_not_ok",
+     "t6b-toolchain-automod-identity"),
+    ("tools/toolchain-check.sh", 'wrapper resaver-cli "$ROOT/tools/resaver-cli/ReSaver.jar" "need <op>"',
+     'wrapper resaver-cli "$ROOT/tools/resaver-cli/ReSaver.jar" ""',
+     _TC + "test_resaver_whose_driver_cannot_compile_is_not_ok", "t6b-toolchain-resaver-identity"),
+    ("tools/toolchain-check.sh", '  elif [ ! -e "$dep" ]; then', "  elif false; then",
+     _TC + "test_resaver_without_its_jar_is_optional_not_ok", "t6b-toolchain-absent-dependency-is-optional"),
+    ("tools/toolchain-check.sh", '  check "$w" "$expect" "$BASH" "$ROOT/tools/$w.sh" --help',
+     '  check "$w" "$expect" bash "$ROOT/tools/$w.sh" --help',
+     _TC + "test_wrappers_run_under_this_bash_not_a_bare_bash_on_path", "t6b-toolchain-wrappers-run-under-this-bash"),
+    ("tools/automod-cli.sh", '"version": "10.0.100", "rollForward"', '"version": "8.0.100", "rollForward"',
+     _AM + "test_rebuild_pins_the_net10_sdk_not_8", "t6b-automod-sdk-10-pin"),
+    ("tools/automod-cli.sh", '    if grep -qF "$TFM_OLD" "$PROPS"; then', "    if false; then",
+     _AM + "test_rebuild_retargets_the_clone_to_net10", "t6b-automod-retarget"),
+    ("tools/automod-cli.sh", '    if ! grep -qF "$TFM_OLD" "$PROPS" && ! grep -qF "$TFM_NEW" "$PROPS"; then',
+     "    if false; then",
+     _AM + "test_rebuild_refuses_a_target_it_does_not_recognise_and_writes_nothing", "t6b-automod-refuses-unknown-target"),
+    ("tools/automod-cli.sh", '    "$DOTNET" build "$CLI_PROJ" -c Release', '    "$DOTNET" build "$AUTOMOD" -c Release',
+     _AM + "test_rebuild_builds_the_cli_project_only", "t6b-automod-builds-cli-only"),
+    ("tools/automod-cli.sh", 'OUT="$CLI_PROJ/bin/Release/net10.0"',
+     'OUT="$CLI_PROJ/bin/Release/net8.0"', _AM + "test_a_run_uses_the_net10_build",
+     "t6b-automod-runs-the-net10-dll"),
+    ("tools/automod-cli.sh", '    if [ -f "$OLD_DLL" ]; then', "    if false; then",
+     _AM + "test_an_old_net8_build_is_reported_stale_not_run", "t6b-automod-stale-net8-named"),
+]]
+
+
+# Plan 8 T6b fix round 1 (review I1-I3, M1, M7). AutoMod's pinned commit (move a clean clone, never touch a dirty
+# one, undo only our own patch, record and compare the built commit); toolchain-check's AutoMod version row, ReSaver
+# lib/ and repo-local Spriggit; esp-verify's repo-local Spriggit and pinned package version; the setup prompt's
+# pinned clone. One twin per clause.
+_EV = "tests/test_esp_verify.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/automod-cli.sh", '    g checkout -q --detach "$PIN_COMMIT" || return 1', "    true",
+     _AM + "test_upgrade_a_clean_clone_at_an_older_commit_is_moved_to_the_pin", "t6b-r1-automod-moves-to-pin"),
+    ("tools/automod-cli.sh", '    if [ -n "$dirty" ]; then', "    if false; then",
+     _AM + "test_local_changes_stop_the_move_even_when_git_could_carry_them", "t6b-r1-automod-dirty-clone-untouched"),
+    ("tools/automod-cli.sh", "    if only_our_patch; then g checkout -q -- Directory.Build.props || return 1; fi", "",
+     _AM + "test_upgrade_undoes_only_its_own_patch_before_moving", "t6b-r1-automod-undoes-own-patch"),
+    ("tools/automod-cli.sh", '''    [ "$(g show HEAD:Directory.Build.props | sed "s#$TFM_OLD#$TFM_NEW#" | tr -d '\\r')" = "$(tr -d '\\r' < "$PROPS")" ]''',
+     "    true", _AM + "test_a_user_edit_to_the_props_file_is_not_mistaken_for_our_patch",
+     "t6b-r1-automod-own-patch-is-exact"),
+    ("tools/automod-cli.sh", '''    { printf '%s' "$(g rev-parse HEAD)"; [ -n "$(local_changes)" ] && printf ' dirty'; echo; } > "$MARKER" || exit 1''',
+     "    true",
+     _AM + "test_built_reports_the_pinned_commit_after_a_rebuild", "t6b-r1-automod-records-built-commit"),
+    ("tools/automod-cli.sh", '    if [ "$built" != "$PIN_COMMIT" ]; then', '    if false; then',
+     _AM + "test_built_from_another_commit_is_a_mismatch", "t6b-r1-automod-built-must-equal-pin"),
+    ("tools/automod-cli.sh", '    if [ "$rc" -ne 0 ]; then', "    if false; then",
+     _AM + "test_a_failed_build_says_the_first_build_needs_internet", "t6b-r1-automod-failed-build-reported"),
+    ("tools/toolchain-check.sh", '  if AM_BUILT=$("$BASH" "$ROOT/tools/automod-cli.sh" --built 2>&1); then',
+     "  if AM_BUILT=unchecked; then", _TC + "test_automod_built_from_another_commit_is_degraded",
+     "t6b-r1-toolchain-automod-version"),
+    ("tools/toolchain-check.sh", '  elif [ -n "$also" ] && ! compgen -G "$also" >/dev/null; then', "  elif false; then",
+     _TC + "test_resaver_whose_lib_was_removed_is_not_ok", "t6b-r1-toolchain-resaver-lib"),
+    ("tools/toolchain-check.sh", '''elif SP_OUT=$(spriggit_local --version 2>&1); printf '%s' "$SP_OUT" | grep -qE 'Spriggit[^0-9]*[0-9]+\\.[0-9]+'; then''', "elif false; then",
+     _TC + "test_a_spriggit_restored_from_the_manifest_is_found", "t6b-r1-toolchain-local-spriggit"),
+    # The real `spriggit --version` exits 1: judging the probe by its exit status never finds the local tool.
+    ("tools/toolchain-check.sh", '''elif SP_OUT=$(spriggit_local --version 2>&1); printf '%s' "$SP_OUT" | grep -qE 'Spriggit[^0-9]*[0-9]+\\.[0-9]+'; then''',
+     "elif spriggit_local --version >/dev/null 2>&1; then",
+     _TC + "test_a_spriggit_restored_from_the_manifest_is_found", "t6b-r1-toolchain-local-spriggit-by-output"),
+    ("tools/toolchain-check.sh", 'spriggit_local() { (cd "$ROOT" && "$DOTNET" tool run spriggit -- "$@"); }',
+     'spriggit_local() { ("$DOTNET" tool run spriggit -- "$@"); }',
+     _TC + "test_a_spriggit_restored_from_the_manifest_is_found", "t6b-r1-toolchain-local-spriggit-from-root"),
+    ("tools/esp-verify-wrapper.sh", '''elif SP_OUT=$(spriggit_local --version 2>&1); printf '%s' "$SP_OUT" | grep -qE 'Spriggit[^0-9]*[0-9]+\\.[0-9]+'; then''', "elif false; then",
+     _EV + "test_a_manifest_installed_spriggit_drives_the_guard", "t6b-r1-espverify-local-spriggit"),
+    ("tools/esp-verify-wrapper.sh", '''elif SP_OUT=$(spriggit_local --version 2>&1); printf '%s' "$SP_OUT" | grep -qE 'Spriggit[^0-9]*[0-9]+\\.[0-9]+'; then''',
+     "elif spriggit_local --version >/dev/null 2>&1; then",
+     _EV + "test_a_manifest_installed_spriggit_drives_the_guard", "t6b-r1-espverify-local-spriggit-by-output"),
+    ("tools/esp-verify-wrapper.sh", 'spriggit_local() { (cd "$TOOLKIT_ROOT" && "$DOTNET" tool run spriggit -- "$@"); }',
+     'spriggit_local() { ("$DOTNET" tool run spriggit -- "$@"); }',
+     _EV + "test_a_manifest_installed_spriggit_drives_the_guard", "t6b-r1-espverify-local-spriggit-from-root"),
+    ("tools/esp-verify-wrapper.sh",
+     '  plugin="$(cd "$(dirname "$plugin")" && pwd)/$(basename "$plugin")"   # the local tool runs from the toolkit root',
+     "", _EV + "test_a_manifest_installed_spriggit_drives_the_guard", "t6b-r1-espverify-absolute-plugin-path"),
+    ("tools/esp-verify-wrapper.sh", 'PKGVER="${ESP_VERIFY_PKGVER:-${PIN:-0.41.0}}"', 'PKGVER="${ESP_VERIFY_PKGVER:-0.40.0}"',
+     _EV + "test_the_package_version_defaults_to_the_pin", "t6b-r1-espverify-pkgver-is-the-pin"),
+    ("SETUP_PROMPT.txt", "at tag v1.11.2 (commit e1c34ea", "(commit e1c34ea",
+     "tests/test_automod_docs_pinned.py::test_no_user_facing_copy_clones_automod_unpinned_or_builds_it_bare",
+     "t6b-r1-setup-prompt-pinned-clone"),
+]]
+
+
+# Plan 8 T6b fix round 2 (re-review N1-N3): the shipped pin is a constant unless the tests' own flag is set; a
+# detached commit nothing else holds is never moved; a build records dirty state and the record's age.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/automod-cli.sh", '    if [ "${TOOLKIT_TEST_MODE:-}" = 1 ]; then', "    if true; then",
+     _AM + "test_the_pin_override_is_ignored_without_the_test_flag", "t6b-r2-pin-override-needs-test-mode"),
+    ("tools/automod-cli.sh", '    if ! g symbolic-ref -q HEAD >/dev/null && ! held_elsewhere "$head"; then', "    if false; then",
+     _AM + "test_a_detached_commit_of_the_users_own_is_never_moved", "t6b-r2-detached-own-commit-kept"),
+    ("tools/automod-cli.sh", '''    [ -n "$(g branch -a --contains "$1" 2>/dev/null | grep -v 'HEAD detached')" ]''', "    false",
+     _AM + "test_a_detached_commit_kept_on_a_branch_may_be_moved", "t6b-r2-branch-holds-the-commit"),
+    ("tools/automod-cli.sh", '''[ -n "$(local_changes)" ] && printf ' dirty';''', '''false && printf ' dirty';''',
+     _AM + "test_a_dirty_build_marks_itself_and_is_not_the_pin", "t6b-r2-dirty-build-recorded"),
+    ("tools/automod-cli.sh", '    if [ "$files" = "Directory.Build.props" ] && only_our_patch; then files=""; fi', "",
+     _AM + "test_our_own_patch_does_not_count_as_dirty", "t6b-r2-own-patch-is-not-dirt"),
+    ("tools/automod-cli.sh", '    if [ -n "$state" ]; then', "    if false; then",
+     _TC + "test_automod_built_from_a_dirty_tree_is_degraded", "t6b-r2-dirty-build-is-degraded"),
+    ("tools/automod-cli.sh", '    if [ "$DLL" -nt "$MARKER" ]; then', "    if false; then",
+     _AM + "test_a_dll_newer_than_its_build_record_is_of_unknown_origin", "t6b-r2-dll-newer-than-record"),
+    ("tools/automod-cli.sh", '''    built="${built%$'\\r'}"; state="${state%$'\\r'}"   # a record written with CRLF''', "    true",
+     _TC + "test_automod_built_from_the_pinned_commit_says_which", "t6b-r2-crlf-record"),
+]]
+
+
+# Plan 5 final review, lane A (parser and path layer) fix pass. One twin per new clause; each names the test that
+# must go red. P5A rows fire in-process from tests/test_skyguard_p5_final_a.py.
+def _p5a(row):
+    return "tests/test_skyguard_p5_final_a.py::test_p5a_row[p5a-" + row + "]"
+
+
+_P5S = "tests/test_shellparse.py::"
+_P5T = "tests/test_targets.py::"
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # C1: option values in a cluster
+    ("c1-o-takes-a-value", '                    takes = opts.count("o") + opts.count("O")', "                    takes = 0",
+     _p5a("c1-eo-pipefail-c")),
+    ("c1-O-takes-a-value", '                    takes = opts.count("o") + opts.count("O")',
+     '                    takes = opts.count("o")', _P5S + "test_c1_a_shell_option_value_is_not_the_command"),
+    ("c1-zsh-attached-value", "                    takes = 0 if o < 0 else 1 if o == len(opts) - 1 else 0",
+     "                    takes = 0 if o < 0 else 1", _P5S + "test_c1_a_shell_option_value_is_not_the_command"),
+    ("c1-zsh-value-is-not-options", "                    opts = opts if o < 0 else opts[:o]", "                    opts = opts",
+     _P5S + "test_c1_a_script_after_option_values_is_the_script"),
+    ("c1-plus-c", '                if "c" in opts:', '                if w[0] == "-" and "c" in opts:',
+     _P5S + "test_c1_a_shell_option_value_is_not_the_command"),
+    # M4: a script that is stdin
+    ("m4-shell-stdin-script", "        if not cflag and j < n and v[j] in _STDIN_SCRIPTS:", "        if False:",
+     _p5a("m4-bash-dev-stdin")),
+    ("m4-source-stdin-script", '                if self.d == "bash" and v[k] in _STDIN_SCRIPTS:', "                if False:",
+     _P5S + "test_m4_a_script_that_is_stdin_reads_the_heredoc_or_pipe"),
+]]
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # I1: PowerShell's location is session-wide
+    ("i1-pipeline-stage-cd-carries", "    SESSION_CD = True\n", "    SESSION_CD = False\n",
+     _p5a("i1-setlocation-pipe-outnull")),
+    ("i1-block-cd-makes-caller-unknown", "        if f.cd != p.cd:", "        if False:", _p5a("i1-setlocation-in-if")),
+    ("i1-piped-set-location-is-unknown", '            new = "?" if cmd.stage > 0 else "~"', '            new = "~"',
+     _P5S + "test_i1_powershell_location_is_session_wide"),
+    # I4: a backtick does not make a command name an expression
+    ("i4-resolver-string-quoted", "                strq = self.q[k] if self.strq is None else self.strq[k]",
+     "                strq = self.q[k]", _p5a("i4-tick-in-name")),
+    ("i4-set-location-string-quoted", "        if not cmd.words or _ps_string(cmd.words[0]) or cmd.words[0].dyn:",
+     "        if not cmd.words or cmd.words[0].quoted or cmd.words[0].dyn:",
+     _P5S + "test_i4_a_string_in_command_position_is_still_an_expression"),
+    ("i4-here-string-is-a-string", '    return r[:1] in _SQ + _DQ or (r[:1] == "@" and r[1:2] in _SQ + _DQ)',
+     "    return r[:1] in _SQ + _DQ", _P5S + "test_pwsh_expressions_and_here_strings_are_not_commands"),
+]]
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # I2: cmd cd takes the rest of the line
+    ("i2-cd-joins-the-rest", '                new = " ".join(s for s, _ in parts)', "                new = parts[0][0]",
+     _p5a("i2-cmd-cd-unquoted-space")),
+    ("i2-cd-glued-switch", "        glued = None if w0.quoted else _CMD_CD_GLUED.fullmatch(first)", "        glued = None",
+     _p5a("i2-cmd-cd-glued-switch")),
+    ("i2-pushd-not-joined", '            elif p == "pushd" or any(w.dyn for _, w in parts) or any(',
+     "            elif False or any(w.dyn for _, w in parts) or any(", _P5S + "test_i2_cmd_cd_takes_the_rest_of_the_line"),
+    ("i2-variable-not-joined", '            elif p == "pushd" or any(w.dyn for _, w in parts) or any(',
+     '            elif p == "pushd" or any(False for _, w in parts) or any(',
+     _P5S + "test_i2_cmd_cd_takes_the_rest_of_the_line"),
+    ("i2-gap-not-one-space", '                    self.t[a[1].start + len(a[1].raw):b[1].start] != " " for a, b in',
+     "                    False for a, b in", _P5S + "test_i2_cmd_cd_takes_the_rest_of_the_line"),
+    ("i2-unknown-glued-switch", '                if lead.lower() != "/d":', "                if False:",
+     _P5S + "test_i2_cmd_cd_takes_the_rest_of_the_line"),
+]]
+MUTATIONS += [pytest.param("tools/skyguard/targets.py", find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    ("i3-glob-in-cd-target-is-unknown", "    if r is not None and any(_has_glob(c, e.dialect)",
+     "    if False and any(_has_glob(c, e.dialect)", _p5a("i3-bash-cd-glob")),
+    ("i5-splat-is-unresolvable", '    if dialect == "powershell" and _PS_SPLAT.match(word):', "    if False:",
+     _p5a("i5-hashtable-splat")),
+]]
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # I6: a string stage piped into a shell reader or iex
+    ("i6-shell-reader-parses-strings", "                for text in texts + strings:", "                for text in texts:",
+     _p5a("i6-string-into-pwsh-stdin")),
+    ("i6-iex-is-a-reader", '    return e.program == "invoke-expression" and e.dialect == "powershell" and not e.argv',
+     "    return False", _p5a("i6-string-into-iex")),
+    ("i6-iex-reader-is-parsed", "            elif reader.program in ALL_SHELLS or _ps_reads_commands(reader):",
+     "            elif reader.program in ALL_SHELLS:", _p5a("i6-string-into-iex")),
+    ("i6-variable-string-is-opaque", "                    if urec.words[0].dyn:", "                    if False:",
+     _P5S + "test_i6_a_string_holding_a_variable_piped_into_iex_is_opaque"),
+    ("i6-decoded-into-iex-is-unread", "            if (reader.program in ALL_SHELLS or _ps_reads_commands(reader)) and \\",
+     "            if reader.program in ALL_SHELLS and \\", _P5S + "test_i6_decoded_text_piped_into_iex_is_unread"),
+    # I7: an opaque method call keeps its receiver and arguments
+    ("i7-call-arguments-kept", '            if f.kind == "call" and f.io == "?":', "            if False:",
+     _P5S + "test_i7_an_opaque_method_keeps_its_receiver_and_arguments"),
+    ("i7-receiver-text-kept", '                "?", (self.t[w.start:i],), (False,), (), "powershell", f.cd, "", self.t[w.start:i])))',
+     '                "?", (tail.group(1),), (False,), (), "powershell", f.cd, "", self.t[w.start:i])))',
+     _P5S + "test_i7_an_opaque_method_keeps_its_receiver_and_arguments"),
+    ("i7-delete-deletes-its-receiver", '            if tail.group(1).lower() == "delete":', "            if False:",
+     _p5a("i7-delete-method")),
+]]
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # M1, M2
+    ("m1-encodedcommand-any-prefix", '                if name == "ec" or (name and "encodedcommand".startswith(name)):',
+     '                if name in ("e", "ec") or (len(name) >= 3 and "encodedcommand".startswith(name)):',
+     _p5a("m1-en-prefix")),
+    ("m2-nice-attached-n", 'r"-[0-9]{1,3}|-n.+"', 'r"-[0-9]{1,3}"', _p5a("m2-nice-attached-n")),
+    ("m2-nice-adjustment-takes-a-value", '                if k < n and v[k] in ("-n", "--adjustment"):',
+     '                if k < n and v[k] == "-n":', _P5S + "test_m2_nice_value_spellings"),
+    ("m2-nice-double-dash", "                    k += 1                                      # M2: `-n10` carries its value\n"
+     '                if k < n and v[k] == "--":\n                    k += 1\n',
+     "                    k += 1                                      # M2: `-n10` carries its value\n",
+     _P5S + "test_m2_nice_value_spellings"),
+]]
+MUTATIONS += [pytest.param(_SP, find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # coordinator ruling: cmd's /c quote rule, and nested quotes split by the caller fail closed
+    ("cmdq-split-nested-quotes-opaque", "                if len(rest) > 1 and line.lstrip().startswith('\"'):",
+     "                if False:", _p5a("cmdq-s-nested-quotes")),
+    ("cmdq-readings-reparsed", "                for text in _cmd_c_lines(line, s_flag):", "                for text in [line]:",
+     _p5a("cmdq-s-quoted-line")),
+    ("cmdq-s-switch-detected", '            if head == "/s":', "            if False:",
+     _P5S + "test_cmd_c_s_switch_always_strips"),
+    ("cmdq-s-switch-strips", "    if s_flag:\n        return [stripped]\n", "", _P5S + "test_cmd_c_quote_rule"),
+    ("cmdq-ambiguous-both-readings", "        return [stripped, s]", "        return [stripped]",
+     _P5S + "test_cmd_c_quote_rule"),
+    ("cmdq-two-quotes-only", "    if s.count('\"') == 2 and inner and", "    if inner and", _P5S + "test_cmd_c_quote_rule"),
+    ("cmdq-special-char-strips", " and not (set(inner) & _CMD_QUOTE_SPECIAL) and", " and", _P5S + "test_cmd_c_quote_rule"),
+    ("cmdq-no-whitespace-strips", 'and re.search(r"\\s", inner):', "and True:", _P5S + "test_cmd_c_quote_rule"),
+]]
+MUTATIONS += [pytest.param("tools/skyguard/targets.py", find, rep, test, id="p5a-" + i) for i, find, rep, test in [
+    # M5 (coordinator ruling): a drive-relative word resolves only when it provably can
+    ("m5-drive-relative-modelled", "            return _drive_relative(s, base, dialect)",
+     "            return paths.norm_abs(s)", _p5a("m5-pwsh-drive-relative-operand")),
+    ("m5-bash-bare-drive-is-root", '        return None if rest else drive + "/"', "        return None",
+     _p5a("m5-bash-cd-drive")),
+    ("m5-other-drive-unknown", "    if not base or base[:2].lower() != drive:", "    if not base:",
+     _P5T + "test_m5_drive_relative_words"),
+    ("m5-name-joined-on-cwd", "    return paths.norm_abs(paths._join(base, rest)) if rest else base",
+     "    return None if rest else base", _p5a("m5-pwsh-drive-relative-operand")),
+    ("m5-bare-drive-is-cwd", "    return paths.norm_abs(paths._join(base, rest)) if rest else base",
+     "    return paths.norm_abs(paths._join(base, rest)) if rest else None", _p5a("m5-pwsh-set-location-drive")),
+]]
+
+# Plan 5 final review, fix pass (rules lane). One mutation per clause the fix pass added; each names the row or test
+# that must go red. P5F rows fire in-process from tests/test_skyguard_p5fix.py.
+def _p5f(row):
+    return "tests/test_skyguard_p5fix.py::test_p5f_row[p5f-" + row + "]"
+
+
+_DOCS = "tests/test_guard_docs_agree.py::test_the_documented_ask_count_matches_the_registry"
+_P5F_CLAUSES = [
+    # (id, file, find, replace, test that must go red)
+    # D1: the Recycle-Bin delete (VB FileSystem::DeleteFile/DeleteDirectory, Shell.Application Namespace(10).MoveHere).
+    ("p5f-recycle-bin-delete-not-judged", _DL,
+     "    for w, how in (recycle_targets(recycle_text(command, parsed)) if resolved is None else ()):",
+     "    for w, how in ():",
+     _p5f("vb-deletedirectory-ps")),
+    ("p5f-recycle-bin-shell-application-not-matched", _DL,
+     '    r"|' + BS + '.' + BS + 's*Namespace' + BS + 's*' + BS + '(' + BS + 's*(?:10|0x0*a)' + BS + 's*' + BS + ')'
+     + BS + 's*' + BS + '.' + BS + 's*MoveHere)"', '    r")"',
+     _p5f("shell-app-recycle")),
+    ("p5f-recycle-bin-relative-path-unresolved", _DL, "    base = targets.normalise_cwd(cwd)\n", "    base = None\n",
+     _p5f("vb-relative-in-install")),
+    ("p5f-recycle-bin-double-quoted-not-resolved", _DL, '        elif how == "double":', "        elif False:",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_delete_with_a_double_quoted_path_resolves"),
+    ("p5f-recycle-bin-unresolved-not-raw-matched", _DL,
+     '        if unresolved_reach is None and raw_reaches(w, base, "powershell", roots):', "        if False:",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_delete_of_an_unresolved_root_variable_is_unresolved"),
+    ("p5f-recycle-bin-unresolved-not-counted", _DL,
+     "            continue\n        unresolved_any = True\n        if unresolved_reach is None and raw_reaches(w, base,",
+     "            continue\n        if unresolved_reach is None and raw_reaches(w, base,",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_delete_of_a_variable_in_a_command_naming_the_install_is_unresolved"),
+    ("p5f-recycle-bin-not-in-fallback-destroyer", _DL, 'DESTROYER += "|" + _RECYCLE_WORD', "",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_words_reach_the_parse_failure_fallback"),
+    ("p5f-recycle-bin-not-in-opaque-destroyer", _DL, 'DESTROYER_LOOSE += "|" + _RECYCLE_WORD', "",
+     "tests/test_skyguard_deletes.py::test_recycle_bin_words_reach_the_parse_failure_fallback"),
+    # B-I1: moves with pipeline / unresolved sources and variable destinations.
+    ("p5f-move-item-pipe-source-dropped", _DL, '        if not src and e.stdin_from == "pipe":', "        if False:",
+     _p5f("pipe-gci-move")),
+    ("p5f-mv-target-pipe-source-dropped", _DL, '            if not words and e.stdin_from == "pipe":',
+     "            if False:", _MDEL + "test_xargs_mv_with_a_target_reads_its_sources_from_the_pipe"),
+    ("p5f-move-unresolved-source-ignores-named-root", _DL,
+     "                    unresolved_any = True                     # with a protected root named: S-DEL-UNRESOLVED",
+     "                    pass", _p5f("pipe-get-item-move")),
+    ("p5f-move-unresolved-source-no-upstream-check", _DL,
+     '                    if (src is UNRESOLVED or e.stdin_from == "pipe") and piped_reach(i):', "                    if False:",
+     _MDEL + "test_pipeline_move_of_an_ancestor_of_the_install_is_unresolved"),
+    ("p5f-move-unresolved-source-no-raw-match", _DL,
+     "                    elif src is not UNRESOLVED and raw_reaches(src, mcwd, e.dialect, roots):",
+     "                    elif False:", _p5f("mv-root-var-source")),
+    ("p5f-move-into-protected-area-is-a-delete", _DL,
+     "                    if dz in RULE_OF:\n                        continue\n",
+     "                    if False:\n                        continue\n",
+     _MDEL + "test_an_unresolved_move_into_a_protected_folder_is_not_a_delete"),
+    ("p5f-move-variable-destination-proves-nothing", _DL,
+     "                    leaves = _expands(dst) and not raw_reaches(dst, mcwd, e.dialect, roots)",
+     "                    leaves = False", _p5f("mv-to-env-temp")),
+    ("p5f-move-variable-destination-reaching-a-root-leaves", _DL,
+     "                    leaves = _expands(dst) and not raw_reaches(dst, mcwd, e.dialect, roots)",
+     "                    leaves = _expands(dst)",
+     _MDEL + "test_a_protected_file_moved_to_a_variable_destination_that_reaches_a_root_may_stay"),
+    ("p5f-expands-misses-cmd-variable", _DL, ' or bool(re.search(r"%[A-Za-z_]' + BS + 'w*%", word))', "",
+     _MDEL + "test_expands[%TEMP%/x-True]"),
+    ("p5f-expands-misses-backtick", _DL, ' or "`" in word or bool(', " or bool(", _MDEL + "test_expands[`pwd`/x-True]"),
+    ("p5f-copy-item-pipe-source-dropped", "tools/skyguard/writes.py",
+     '        return [(dst[0] if dst else ".", src)] if src or e.stdin_from == "pipe" else []',
+     '        return [(dst[0] if dst else ".", src)] if src else []', _p5f("pipe-copy-onto-save")),
+    # D2: the documented ask count drifts from the registry again (core.md, README, safety-philosophy).
+    ("p5f-core-md-ask-count-stale", "agent/instructions/core.md", "### ASKS THE USER -- seven rules",
+     "### ASKS THE USER -- two rules", _DOCS + "[core]"),
+    ("p5f-readme-ask-count-stale", "README.md", "Only seven rules ask *you*", "Only two rules ask *you*",
+     _DOCS + "[readme]"),
+    ("p5f-philosophy-ask-count-stale", "docs/safety-philosophy.md", "Seven rules in the toolkit ask you",
+     "Two rules in the toolkit ask you", _DOCS + "[philosophy]"),
+    # Privacy: a fixture carries the home of whoever runs the gate again (built at collection time, so this file
+    # never names anyone).
+    ("p5f-fixture-carries-home", "tests/fixtures/routes-harness/cases9.py", '"file_path":"<HOME>/.codex/config.toml"',
+     '"file_path":"' + str(Path.home()).replace(BS, "/") + '/.codex/config.toml"',
+     "tests/test_payload_fixtures.py::test_no_file_under_fixtures_carries_the_capturing_users_home"),
+    # B-M4: the DevBench URL is read as curl sends it.
+    ("p5f-devbench-url-not-normalised", "tools/skyguard/mcp_rules.py",
+     "        u = _norm_url(w)                                      # rt-fix-b %63onsole; B-M4 dot / empty segments",
+     "        u = unquote(w)", _p5f("devbench-dot-segment")),
+    ("p5f-devbench-prefilter-needs-api-slash-tool", "tools/skyguard/mcp_rules.py",
+     ' and not ("api" in low and "tool" in low):', ":", _p5f("devbench-dotdot-segment")),
+    ("p5f-devbench-text-fallback-not-normalised", "tools/skyguard/mcp_rules.py",
+     "_TEXT_ENDPOINT.search(_norm_text(command)):", "_TEXT_ENDPOINT.search(unquote(command)):",
+     "tests/test_skyguard_p5fix.py::test_the_text_fallback_reads_a_dot_segment_url"),
+    ("p5f-devbench-url-keeps-leading-double-slash", "tools/skyguard/mcp_rules.py",
+     "        path = path[1:]                                    # normpath keeps a POSIX leading `//`",
+     "        pass", "tests/test_skyguard_p5fix.py::test_norm_url[double-slash]"),
+    ("p5f-devbench-url-drops-trailing-slash", "tools/skyguard/mcp_rules.py",
+     '    if parts.path.endswith("/") and not path.endswith("/"):', "    if False:",
+     "tests/test_skyguard_p5fix.py::test_norm_url[double-slash]"),
+    # B-I1 pricing refinements: moves read through the command's own assignments; the Recycle-Bin text scan skips
+    # data heredocs and mentions.
+    ("p5f-recycle-text-reads-data-heredocs", _DL, '        if e.stdin_body and e.stdin_from == "heredoc:data":',
+     "        if False:", _MDEL + "test_a_heredoc_that_quotes_the_recycle_bin_call_is_not_a_delete"),
+    ("p5f-recycle-text-reads-mentions", _DL, "        if e.program in _MENTION_PROGRAMS:", "        if False:",
+     _MDEL + "test_echoing_the_recycle_bin_call_is_not_a_delete"),
+    ("p5f-move-destination-not-landed", _DL, "                    d = _landing(e, dst, command, cwd, env)",
+     "                    pass", _MDEL + "test_a_move_into_the_installs_backups_through_an_assigned_variable_stays"),
+    ("p5f-landing-no-literal-folder", _DL, '        if pre.strip("/' + BS * 2 + '"):', "        if False:",
+     _MDEL + "test_a_move_into_a_literal_data_folder_with_a_loop_variable_stays"),
+    ("p5f-expand-assigned-ambiguous", _DL, '    return vals.pop() if len(vals) == 1 and "" not in vals else None',
+     "    return vals.pop() if vals else None", _MDEL + "test_expand_assigned[$D/x-$D/x]"),
+    ("p5f-move-source-not-expanded", _DL,
+     "                if a is None and src is not UNRESOLVED and _expand_assigned(src, command) != src:",
+     "                if False:", _MDEL + "test_a_move_out_through_an_assigned_variable_still_leaves"),
+    # C-M7: the nonce refusal is observable only as "the stub exited 0 yet the wrapper recorded exit 1". Twin 1: the
+    # refusal is kept but with another code (still denied, so only the exact record can see it). Twin 2: the engine
+    # run no longer carries a nonce (still refused, since the stub never echoes one; only the run log can see it).
+    ("p5f-nonce-refusal-code-changed", "agent/guards/adapters/claude/protect-files.sh",
+     '*) RC=1; _fail python "fallback ${PYC[*]} did not echo the engine nonce -- not used" ;;',
+     '*) RC=3; _fail python "fallback ${PYC[*]} did not echo the engine nonce -- not used" ;;',
+     "tests/test_hook_deadline.py::test_a_fresh_fallback_that_answers_without_the_nonce_is_refused"),
+    ("p5f-nonce-not-passed-to-the-engine-run", "agent/guards/adapters/claude/protect-files.sh",
+     '        _bounded "$1" in "${PYC[@]}" "$RUNPY" "${ENGINE_ARGS[@]}" --nonce "$NONCE"',
+     '        _bounded "$1" in "${PYC[@]}" "$RUNPY" "${ENGINE_ARGS[@]}"',
+     "tests/test_hook_deadline.py::test_a_fresh_fallback_that_answers_without_the_nonce_is_refused"),
+    # B-M1: message fields from command text keep the two-line, 200-character contract.
+    ("p5f-message-keeps-control-characters", "tools/skyguard/rules.py",
+     '    clean = {k: _CONTROL.sub(" ", str(v)) for k, v in fields.items()}', "    clean = {k: str(v) for k, v in fields.items()}",
+     "tests/test_rule_messages.py::test_every_template_keeps_its_shape_whatever_the_fields[newline-in-file]"),
+    ("p5f-message-field-not-cut", "tools/skyguard/rules.py", ' else v[:cap - 3] + "..." for k, v in clean.items()})',
+     " else v for k, v in clean.items()})",
+     "tests/test_rule_messages.py::test_every_template_keeps_its_shape_whatever_the_fields[long-fields]"),
+    ("p5f-message-cap-not-shrunk-for-a-long-line", "tools/skyguard/rules.py",
+     '        if cap <= 16 or all(len(ln) <= LINE_MAX for ln in out.split("' + BS + 'n")):', "        if True:",
+     "tests/test_rule_messages.py::test_every_template_keeps_its_shape_whatever_the_fields[long-fields]"),
+    # C-M1: intent_diff writes UTF-8 whatever the console code page.
+    ("p5f-intent-diff-console-encoding", "scripts/guard-corpus/intent_diff.py", '    if hasattr(sys.stdout, "buffer"):',
+     "    if False:", "tests/test_intent_diff.py::test_main_writes_utf8_whatever_the_console_encoding"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _P5F_CLAUSES]
+
+
+# Plan 8 T10 (release machinery): one mutation per gating clause; each names the test that must go red.
+_BZ, _CRP, _VR, _CL = ("scripts/build_release_zip.py", "tools/check-release-payload.py", "tools/verify-release.sh",
+                       "scripts/check_ci_leg.py")
+_RB, _RP, _VT, _CT, _WT = ("tests/test_release_build.py::", "tests/test_release_payload.py::",
+                           "tests/test_verify_release.py::", "tests/test_ci_leg.py::", "tests/test_workflows.py::")
+_T10 = [
+    # T10.1 the builder
+    ("t10-build-dirty-tree-allowed", _BZ, "    if dirty and not allow_dirty:", "    if False:",
+     _RB + "test_an_untracked_file_refuses_the_build_and_never_reaches_the_zip"),
+    ("t10-build-foreign-rev-allowed", _BZ,
+     '    if _git("merge-base", "--is-ancestor", sha, "HEAD", check=False).returncode != 0:', "    if False:",
+     _RB + "test_a_rev_that_is_not_an_ancestor_of_head_is_refused"),
+    ("t10-build-committed-build-info-allowed", _BZ,
+     '    if _git("cat-file", "-e", "{}:{}".format(sha, BUILD_INFO), check=False).returncode == 0:', "    if False:",
+     _RB + "test_the_build_info_is_a_file_the_commit_cannot_supply"),
+    ("t10-build-ships-tests", _BZ, 'EXCLUDE = ("tests", ".github")', 'EXCLUDE = (".github",)',
+     _RB + "test_tests_and_github_are_not_shipped"),
+    ("t10-build-info-wrong-commit", _BZ, 'built-from=git archive (committed objects only)\\n".format(sha, version)',
+     'built-from=git archive (committed objects only)\\n".format("0" * 40, version)',
+     _RB + "test_a_clean_build_has_one_versioned_root_and_build_info"),
+    # T10.2 the one payload checker
+    ("t10-payload-routes-harness-allowed", _CRP, '    "tests/fixtures/routes-harness",\n', "",
+     _RP + "test_every_check_can_fail_on_its_own_line[routes-harness-shipped]"),
+    ("t10-payload-github-allowed", _CRP, '    ".github",\n', "",
+     _RP + "test_every_check_can_fail_on_its_own_line[github-shipped]"),
+    ("t10-payload-paths-env-anywhere", _CRP, 'ABSENT_NAMES = ("skyrim-paths.env", ".nexus_api_key")',
+     'ABSENT_NAMES = (".nexus_api_key",)', _RP + "test_every_check_can_fail_on_its_own_line[paths-env-shipped-deep]"),
+    ("t10-payload-stdin-any-cat", _CRP, 'None if "INPUT=$(cat)" in text.splitlines() else', 'None if "cat" in text else',
+     _RP + "test_every_check_can_fail_on_its_own_line[claude-hook-inert-stdin]"),
+    ("t10-payload-heartbeat-in-comment", _CRP, 'HEARTBEAT_RE = re.compile(r"^[^#]*hook-heartbeat", re.M)',
+     'HEARTBEAT_RE = re.compile(r"hook-heartbeat")',
+     _RP + "test_every_check_can_fail_on_its_own_line[claude-hook-heartbeat-in-comment]"),
+    ("t10-payload-ps1-stdin-unchecked", _CRP, "None if PS_STDIN_RE.search(text) else", "None if True else",
+     _RP + "test_every_check_can_fail_on_its_own_line[codex-ps1-no-stdin]"),
+    ("t10-payload-expected-commit-ignored", _CRP, "None if commit == expect_commit else", "None if True else",
+     _RP + "test_every_check_can_fail_on_its_own_line[build-info-other-commit]"),
+    ("t10-payload-short-sha-accepted", _CRP, "None if SHA_RE.fullmatch(commit) else", "None if commit else",
+     _RP + "test_every_check_can_fail_on_its_own_line[build-info-short-sha]"),
+    # T10.3 the leak grep
+    ("t10-leaks-backslash-spelling", _CRP, '("home path, backslash", "Users" + BS + n),', '',
+     _RP + "test_every_home_spelling_is_found_without_the_bare_name"),
+    ("t10-leaks-bare-name", _CRP, "        if n in persons or (n.lower() not in GENERIC_ACCOUNTS and len(n) >= 4):",
+     "        if n in persons:",
+     _RP + "test_every_spelling_of_the_home_is_found"),
+    ("t10-leaks-utf16-unread", _CRP, '            for enc in ("utf-8", "utf-16-le", "utf-16-be"):',
+     '            for enc in ("utf-8", "utf-16-be"):', _RP + "test_utf16_is_read_too"),
+    ("t10-leaks-allow-prefix-ignored", _CRP, '                    text = text.replace(a, "<allowed>")',
+     "                    pass", _RP + "test_an_allowed_prefix_is_blanked_but_anything_else_under_the_home_is_not"),
+    ("t10-leaks-baseline-skips-changed", _CRP, "                if twin.is_file() and twin.read_bytes() == data:",
+     "                if twin.is_file():", _RP + "test_changed_from_skips_only_byte_identical_files"),
+    ("t10-leaks-names-not-from-env", _CRP, '    names = {env.get(k, "") for k in ("USERNAME", "USER", "LOGNAME")}',
+     "    names = set()", _RP + "test_the_names_come_from_the_environment"),
+    ("t10-leaks-runner-is-a-person", _CRP, 'GENERIC_ACCOUNTS = frozenset(("runner", ', "GENERIC_ACCOUNTS = frozenset((",
+     _RP + "test_a_generic_account_is_searched_by_path_only"),
+    ("t10-leaks-nothing-to-search-passes", _CRP, "    if not names and not extra and not persons:", "    if False:",
+     _RP + "test_leaks_mode_with_nothing_to_search_for_is_could_not_check"),
+    # T10.3 the verifier
+    ("t10-verify-scrub-keeps-the-environment", _VR, '  scrub() { env -i "${SCRUB_ENV[@]}" "$@"; }',
+     '  scrub() { env "${SCRUB_ENV[@]}" "$@"; }', _VT + "test_the_scrubbed_install_runs_and_its_canary_is_invisible"),
+    ("t10-verify-payload-leaks-unchecked", _VR, '"$PY" "$HERE/check-release-payload.py" --leaks "$(winpath "$ROOT")" "${REQ[@]}"; rc=$?',
+     "rc=0", _VT + "test_a_home_path_in_the_payload_is_red"),
+    ("t10-verify-expected-commit-dropped", _VR, '"$(winpath "$ROOT")" ${EXPECT:+--expect-commit "$EXPECT"}; then',
+     '"$(winpath "$ROOT")"; then', _VT + "test_the_expected_commit_is_enforced"),
+    ("t10-verify-two-roots-accepted", _VR, """if [ "$(printf '%s\\n' "$tops" | grep -c .)" -ne 1 ]; then""",
+     "if false; then", _VT + "test_two_roots_are_refused"),
+    # T10.4 the per-leg tripwires
+    ("t10-ci-skip-ceiling-off", _CL, "    if skipped > ceiling:", "    if False:", _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-skip-ceiling-not-per-leg", _CL, '    ceiling = spec["skip_ceiling"][leg]',
+     '    ceiling = max(spec["skip_ceiling"].values())', _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-xfail-ceiling-off", _CL, '    if xfailed > spec["xfail_ceiling"]:', "    if False:",
+     _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-required-modules-off", _CL, "    for mod in required:", "    for mod in []:", _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-load-test-allowed", _CL, '    for mod in spec["forbidden_passing"]:', "    for mod in []:",
+     _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-log-collected-floor-off", _CL, '    elif collected < spec["collected_floor"]:', "    elif False:",
+     _CT + "test_each_tripwire_goes_red"),
+    ("t10-ci-collect-floor-off", _CL, "    if n < floor:", "    if False:", _CT + "test_collect_mode"),
+    # wave-1 merge: a node id carrying summary-shaped text must not be read as the collect summary
+    ("w1-ci-collect-reads-node-ids", _CL, '    lines = [l for l in lines if "::" not in l]', "    pass",
+     _CT + "test_collect_mode"),
+    # T10.5 the freeze-gate baseline
+    ("t10-freeze-baseline-is-the-tag-being-cut", "tests/test_codex_definitions.py",
+     '        if _git("rev-parse", tag + "^{commit}", cwd=repo).stdout.decode().strip() == head:', "        if False:",
+     "tests/test_codex_definitions.py::test_the_release_being_cut_is_not_its_own_baseline"),
+    # T10.4/T10.6 the workflows
+    ("t10-wf-action-unpinned", ".github/workflows/release.yml",
+     "uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0",
+     "uses: actions/setup-python@v7  # v7.0.0", _WT + "test_every_action_is_pinned_by_commit_sha[release.yml]"),
+    ("t10-wf-no-timeout", ".github/workflows/release.yml", "    timeout-minutes: 45\n", "",
+     _WT + "test_every_job_has_a_timeout[release.yml]"),
+    ("t10-wf-input-spliced", ".github/workflows/release.yml", '          TAG="${INPUT_TAG:-$REF_NAME}"',
+     '          TAG="${{ github.event.inputs.tag }}"', _WT + "test_no_user_input_is_spliced_into_a_script[release.yml]"),
+    ("t10-wf-not-on-master", ".github/workflows/release.yml",
+     '          git merge-base --is-ancestor "$SHA" refs/remotes/origin/master ', "          true ",
+     _WT + "test_release_gates_are_in_order"),
+    ("t10-wf-release-verify-not-scrubbed", ".github/workflows/release.yml",
+     'run: bash tools/verify-release.sh --local "$ZIP" --scrubbed --expect-commit "$SHA" --tag "$TAG"',
+     'run: bash tools/verify-release.sh --local "$ZIP" --expect-commit "$SHA" --tag "$TAG"',
+     _WT + "test_release_gates_are_in_order"),
+    ("t10-wf-release-keeps-token", ".github/workflows/release.yml",
+     "          persist-credentials: false\n          # Without this", "          # Without this",
+     _WT + "test_least_privilege_and_no_dangerous_triggers[release.yml]"),
+    ("t10-wf-load-test-in-ci", ".github/workflows/ci.yml",
+     "        run: python -B tests/run_harness_tests.py tests/test_skyguard_timing.py",
+     "        run: SKYGUARD_LOAD_TEST=1 python -B tests/run_harness_tests.py tests/test_skyguard_timing.py",
+     _WT + "test_the_load_test_never_runs_in_ci_and_the_deadline_tests_run_on_both_legs"),
+    ("t10-wf-python-range-short", ".github/workflows/ci.yml", '        python: ["3.10", "3.11", "3.12", "3.13"]',
+     '        python: ["3.11"]', _WT + "test_the_behavior_matrix_is_both_oses_times_the_tested_pythons"),
+    ("t10-wf-collect-tripwire-dropped", ".github/workflows/ci.yml",
+     '          python scripts/check_ci_leg.py collect collect.log --leg "$RUNNER_OS"', "          true",
+     _WT + "test_the_tripwires_bracket_the_suite_on_every_leg"),
+    # Review M7: dropping the pipefail TEXT was an equivalent mutant (the job's bash default already adds it);
+    # the real hazard is losing that default, so the twin removes it.
+    ("t10-wf-behavior-loses-bash-default", ".github/workflows/ci.yml",
+     "    defaults:\n      run:\n        shell: bash\n    steps:\n      # Full history WITH tags",
+     "    steps:\n      # Full history WITH tags", _WT + "test_the_tripwires_bracket_the_suite_on_every_leg"),
+    ("t10-wf-behavior-shallow", ".github/workflows/ci.yml",
+     "tagless shallow clone.\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1\n"
+     "        with:\n          fetch-depth: 0",
+     "tagless shallow clone.\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1\n"
+     "        with:\n          fetch-depth: 1",
+     _WT + "test_every_job_that_runs_the_freeze_gate_has_full_history"),
+    ("t10-wf-dotnet-channel", ".github/workflows/ci.yml", '          dotnet-version: "10.0.x"', '          dotnet-version: "9.0.x"',
+     _WT + "test_node_comes_from_node_version_and_dotnet_is_channel_10"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10]
+
+# Plan 8 T10 fix round 1 (review I1-I3, M1-M5, M8, M9): one twin per new clause.
+_T10FR = [
+    # I1 the identity tokens, failing closed
+    ("t10fr-require-tokens-off", _CRP, "    if require and not (persons or token_paths):", "    if False:",
+     _RP + "test_require_tokens_fails_closed_without_them"),
+    ("t10fr-verify-tokens-not-required", _VR, 'REQ=(); [ "${VERIFY_REQUIRE_LEAK_TOKENS:-0}" = 1 ] && REQ=(--require-tokens)',
+     "REQ=()", _VT + "test_the_release_mode_fails_closed_without_leak_tokens"),
+    ("t10fr-wf-tokens-not-required", ".github/workflows/release.yml", '          VERIFY_REQUIRE_LEAK_TOKENS: "1"\n', "",
+     _WT + "test_release_gates_are_in_order"),
+    ("t10fr-token-paths-ignored", _CRP, '    extra = [p for p in os.environ.get("RELEASE_LEAK_PATHS", "").split("|") if p.strip()] + token_paths',
+     '    extra = [p for p in os.environ.get("RELEASE_LEAK_PATHS", "").split("|") if p.strip()]',
+     _RP + "test_a_token_name_is_found_even_when_the_runner_is_generic"),
+    # I2 the config folder allow-list
+    ("t10fr-config-shape-unchecked", _CRP, "    return bool(CONFIG_SHAPE.match(c[len(h) + 1:]))", "    return True",
+     _RP + "test_the_config_folder_is_allow_listed_only_in_its_expected_shape"),
+    ("t10fr-config-not-below-home", _CRP, ' or not c.lower().startswith(h.lower() + "/"):', ":",
+     _RP + "test_the_config_folder_is_allow_listed_only_in_its_expected_shape"),
+    ("t10fr-config-allowed-unvalidated", _CRP, "        if config_dir_ok(c, home):", "        if True:",
+     _RP + "test_a_home_level_config_hides_nothing"),
+    # I3 secrets and key shapes
+    ("t10fr-secret-value-unread", _CRP, "                        i = raw.find(value)", "                        i = -1",
+     _RP + "test_a_secret_value_is_found_and_never_printed"),
+    ("t10fr-secret-file-unread", _CRP, "        if p is not None and p.is_file():", "        if False:",
+     _RP + "test_the_nexus_key_file_is_read"),
+    ("t10fr-shape-nexus", _CRP, '     re.compile(r"[A-Za-z0-9+/]{16,}={0,2}--', '     re.compile(r"(?!)[A-Za-z0-9+/]{16,}={0,2}--',
+     _RP + "test_every_key_shape_is_found"),
+    ("t10fr-shape-github", _CRP, 're.compile(r"\\b(?:gh[pousr]_', 're.compile(r"(?!)(?:gh[pousr]_',
+     _RP + "test_every_key_shape_is_found"),
+    ("t10fr-shape-openai", _CRP, 're.compile(r"\\bsk-(?:proj-', 're.compile(r"(?!)sk-(?:proj-',
+     _RP + "test_every_key_shape_is_found"),
+    ("t10fr-shape-aws", _CRP, 're.compile(r"\\bAKIA[0-9A-Z]{16}\\b")', 're.compile(r"(?!)AKIA[0-9A-Z]{16}\\b")',
+     _RP + "test_every_key_shape_is_found"),
+    # M3 spellings
+    ("t10fr-leaks-utf16be-unread", _CRP, '            for enc in ("utf-8", "utf-16-le", "utf-16-be"):',
+     '            for enc in ("utf-8", "utf-16-le"):', _RP + "test_utf16_big_endian_is_read_too"),
+    ("t10fr-leaks-url-encoded-path", _CRP,
+     '    out += [(k + ", url-encoded", v.replace(" ", "%20")) for k, v in out if " " in v]', "    out += []",
+     _RP + "test_url_and_json_slash_spellings_of_a_path"),
+    ("t10fr-leaks-json-slash-path", _CRP, '           ("json-slash", fwd.replace("/", BS + "/"))]', "           ]",
+     _RP + "test_url_and_json_slash_spellings_of_a_path"),
+    # M5 named hooks, M8 dotenv
+    ("t10fr-registered-hook-unchecked", _CRP, "        missing = [p for p in named if not (root / p).is_file()]",
+     "        missing = []", _RP + "test_a_registered_hook_missing_from_the_payload_is_named"),
+    ("t10fr-dotenv-allowed", _CRP, 'DOTENV_GLOBS = (".env", "*.env", ".env.*", "*.env.local")', "DOTENV_GLOBS = ()",
+     _RP + "test_a_dotenv_file_is_refused"),
+    # M1/M2 the builder
+    ("t10fr-build-info-attributes-ignored", _BZ, "    if info.exists():", "    if False:",
+     _RB + "test_machine_local_info_attributes_refuse_the_build"),
+    ("t10fr-build-attributes-file-ignored", _BZ,
+     '"-c", "core.attributesFile=" + _empty_attributes_file().replace("' + BS * 2 + '", "/"), *args],', "*args],",
+     _RB + "test_the_default_global_attributes_file_is_neutralised"),
+    ("t10fr-build-altering-attrs-allowed", _BZ, 'ALTERING_ATTRS = ("filter", "export-subst", "export-ignore", "ident")',
+     "ALTERING_ATTRS = ()", _RB + "test_a_committed_attribute_that_alters_the_archive_refuses"),
+    ("t10fr-build-submodule-allowed", _BZ, "    if links:", "    if False:", _RB + "test_a_submodule_refuses_the_build"),
+    # M4 published/tagged verify
+    ("t10fr-verify-root-not-the-tag", _VR, '  [ "$tops" = "skyrimvr-claude-toolkit-${TAG#v}" ] && ok', "  true && ok",
+     _VT + "test_a_tag_must_match_the_root_folder_and_build_info"),
+    ("t10fr-verify-build-version-not-the-tag", _VR, '  [ "$BUILT_VERSION" = "${TAG#v}" ] && ok', "  true && ok",
+     _VT + "test_a_tag_must_match_the_root_folder_and_build_info"),
+    # M9 release tags only
+    ("t10fr-freeze-any-tag-is-a-release", "tests/test_codex_definitions.py", '"--list", "v[0-9]*", ', "",
+     "tests/test_codex_definitions.py::test_the_release_being_cut_is_not_its_own_baseline"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10FR]
+
+# Plan 8 T10 fix round 2 (re-review N1-N3, N5): one twin per new clause.
+_T10FR2 = [
+    # N1 a hit never prints identity text; the workflow masks every spelling first
+    ("t10fr2-label-carries-home-spelling", _CRP, '            needles.append(("identity token #{} ({})".format(k, kind), s.lower()))',
+     '            needles.append(("{} ({})".format(s, kind), s.lower()))',
+     _RP + "test_a_hit_never_prints_the_identity_in_any_spelling"),
+    ("t10fr2-label-carries-path-spelling", _CRP,
+     '            needles.append(("identity token #{} (path, {})".format(k, kind), s.lower()))',
+     '            needles.append(("path {} ({})".format(s, kind), s.lower()))',
+     _RP + "test_a_hit_never_prints_the_identity_in_any_spelling"),
+    ("t10fr2-file-name-not-withheld", _CRP, "            if any(needle in name.lower() for _, needle in needles):",
+     "            if False:", _RP + "test_a_file_name_holding_the_identity_is_withheld"),
+    ("t10fr2-config-folder-printed", _CRP,
+     '            print("  allow-listed the config folder (validated <home>/.../Documents/My Games/Skyrim*)")',
+     '            print("  allow-listed " + c)', _RP + "test_the_config_folder_is_never_printed"),
+    ("t10fr2-mask-only-raw-tokens", _CRP, '    return ["::add-mask::" + v for v in sorted(vals) if v]',
+     '    return ["::add-mask::" + v for v in sorted(set(persons) | set(paths)) if v]',
+     _RP + "test_mask_lines_cover_every_token_and_spelling"),
+    ("t10fr2-wf-no-mask-step", ".github/workflows/release.yml",
+     "        run: python -B tools/check-release-payload.py --mask-tokens", "        run: true",
+     _WT + "test_release_masks_every_identity_spelling_before_anything_prints"),
+    # N3 the token floor
+    ("t10fr2-token-name-floor-off", _CRP, '        elif len(t) < 4 or not re.search(r"[A-Za-z0-9]", t):', "        elif False:",
+     _RP + "test_a_vague_token_is_rejected_by_number_never_text"),
+    ("t10fr2-token-path-floor-off", _CRP,
+     '            if len(t) < 4 or len(segs) < 2 or not any(re.search(r"[A-Za-z0-9]", x) for x in segs):',
+     "            if False:", _RP + "test_a_vague_token_is_rejected_by_number_never_text"),
+    ("t10fr2-token-problems-ignored", _CRP, "    problems = token_problems()\n    if problems:",
+     "    problems = token_problems()\n    if False:", _RP + "test_a_vague_token_is_rejected_by_number_never_text"),
+    # N2 the post-build proof
+    ("t10fr2-proof-misses-dropped-files", _BZ,
+     '    problems = ["missing from the zip: " + p for p in sorted(set(want) - set(got))]', "    problems = []",
+     _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
+    ("t10fr2-proof-misses-extra-files", _BZ,
+     '    problems += ["not in the commit: " + p for p in sorted(set(got) - set(want))]', "    problems += []",
+     _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
+    ("t10fr2-proof-misses-altered-bytes", _BZ,
+     '        if got[p].replace(b"' + BS + 'r' + BS + 'n", b"' + BS + 'n") != blobs[want[p]].replace(b"' + BS + 'r' + BS
+     + 'n", b"' + BS + 'n"):', "        if False:", _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
+    ("t10fr2-proof-not-wired", _BZ, "    if problems:\n        raise Refused(5,", "    if False:\n        raise Refused(5,",
+     _RB + "test_a_build_whose_archive_differs_is_refused_and_writes_nothing"),
+    # N5 attributes parsed, not substring-matched
+    ("t10fr2-attrs-pattern-read-as-attribute", _BZ, "        for attr in parts[1:]:", "        for attr in parts:",
+     _RB + "test_gitattributes_are_parsed_not_substring_matched"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10FR2]
+
+# Plan 8 T6c: the CI ruff hard gate skips template slot fragments, by a naming rule, and nothing else.
+_RG = "tests/test_ruff_gate.py::"
+MUTATIONS += [pytest.param("ruff.toml", find, rep, test, id=i) for i, find, rep, test in [
+    ("t6c-ruff-force-exclude-dropped", "force-exclude = true", "force-exclude = false",
+     _RG + "test_the_shipped_slot_fragments_pass_the_gate_as_ci_passes_them"),
+    ("t6c-ruff-slot-fragments-not-excluded", 'extend-exclude = ["*.slots.py"]', "extend-exclude = []",
+     _RG + "test_the_shipped_slot_fragments_pass_the_gate_as_ci_passes_them"),
+    ("t6c-ruff-exclude-swallows-real-files", 'extend-exclude = ["*.slots.py"]', 'extend-exclude = ["*.py"]',
+     _RG + "test_the_gate_skips_a_slot_fragment_but_still_catches_a_real_undefined_name"),
+]]
+
+# Plan 8 T6c: the lock generator's completeness guard covers every pytest version, not only 8.0.0.
+MUTATIONS += [pytest.param("scripts/lock-python-dependencies.py", '    if "pytest" in packages:',
+                           '    if packages.get("pytest", {}).get("metadata", {}).get("version") == "8.0.0":',
+                           "tests/test_lock_generator.py::test_an_incomplete_pytest_closure_is_refused_for_any_pytest_version[tomli-9.0.3]",
+                           id="t6c-lock-guard-keyed-on-one-pytest-version")]
+
+# Plan 8 T6c: the lock never carries a pygments with the open ReDoS advisory (a stale pin would re-introduce it).
+MUTATIONS += [pytest.param("requirements.lock", "Pygments==2.21.0 \\", "Pygments==2.19.2 \\",
+                           "tests/test_dependency_locks.py::test_the_lock_never_pins_a_pygments_with_the_known_advisory",
+                           id="t6c-lock-pygments-with-advisory")]
+
+# Plan 8 T6c: package.json pins exact versions (a range lets a plain `npm install` float away from the lock).
+MUTATIONS += [pytest.param("package.json", '"zod": "3.25.76"', '"zod": "^3.25.76"',
+                           "tests/test_dependency_locks.py::test_package_json_pins_exact_versions_that_the_lock_resolves_to",
+                           id="t6c-package-json-range-not-exact")]
+
+# Plan 8 T6c: the FOMOD smoke wrapper reports a missing install as a failure when TOOLKIT_REQUIRE_NODE_DEPS=1, never as a pass.
+# (Its control, "must go red on fast-xml-parser 4.3.6", needs a package manager and lives in the ci.yml node job.)
+_NS = "tests/test_node_fomod_smoke.py::"
+MUTATIONS += [pytest.param("tests/test_node_fomod_smoke.py", "    if os.environ.get(\"TOOLKIT_REQUIRE_NODE_DEPS\") == \"1\":" + chr(10) + "        pytest.fail(",
+                           "    if False:" + chr(10) + "        pytest.fail(",
+                           _NS + "test_a_missing_install_fails_when_required_and_skips_otherwise",
+                           id="t6c-fomod-smoke-missing-install-must-fail-when-required")]
+MUTATIONS += [pytest.param("tests/run_harness_tests.py", '"TOOLKIT_REQUIRE_NODE_DEPS")', ")",
+                           "tests/test_harness_required.py::test_the_launcher_forwards_the_node_deps_flag_to_pytest",
+                           id="t6c-launcher-drops-require-node-deps-flag")]
+
+# --- Plan 8 T9: the 3.x -> 4.0 migration (tools/migrate-3x.py, tools/pre-update-snapshot.sh) ----------------
+# One row per clause that decides "shipped" vs "yours", what is read, what is kept, and what is never copied.
+# Not mutated (said so, not hidden): the exclusive-create `open(target, "xb")` behind the suffixed settings
+# backup -- shadowed by the suffix choice, it only matters in a race no test can stage -- and the snapshot's
+# `cmp -s` read-back, which no test can make a working `cp` fail.
+_M3 = "tools/migrate-3x.py"
+_M3T = "tests/test_migrate_3x.py::"
+_SN = "tools/pre-update-snapshot.sh"
+_M3_CLAUSES = [
+    # A placeholder value may not hold a backtick: a note the user wrote after a path is theirs, not setup's.
+    ("m3x-placeholder-value-excludes-backticks", _M3, '        parts.append("([^`' + BS + 'n]*)")',
+     '        parts.append("(.*)")',
+     _M3T + "test_an_edit_anywhere_is_not_mistaken_for_the_shipped_file[a note in backticks on a path line]"),
+    # The same placeholder must hold the same value on every line it appears.
+    ("m3x-same-placeholder-same-value", _M3, "if values.setdefault(name, value) != value:", "if False:",
+     _M3T + "test_an_edit_anywhere_is_not_mistaken_for_the_shipped_file[the mods path changed in one of its two places]"),
+    # The recorded paths (3.9 skyrim-paths.env) must agree with the file.
+    ("m3x-recorded-paths-cross-check", _M3, "if name in values and values[name] != recorded:", "if False:",
+     _M3T + "test_a_hand_corrected_path_is_an_edit_when_the_install_recorded_another"),
+    # The spliced mod-manager block must be one setup.sh could write, line for line.
+    ("m3x-block-must-be-a-shipped-block", _M3,
+     'and not any(_block_matches(lines[start:end], v, values) for v in block["variants"]):', "and False:",
+     _M3T + "test_an_edit_anywhere_is_not_mistaken_for_the_shipped_file[inside the MO2 block]"),
+    # CRLF is not an edit.
+    ("m3x-crlf-folded", _M3,
+     '    return data.decode("utf-8", "surrogateescape").replace("' + BS + "r" + BS + 'n", "' + BS + 'n")',
+     '    return data.decode("utf-8", "surrogateescape")',
+     _M3T + "test_a_real_391_rendering_is_recognised_as_shipped[crlf-stock]"),
+    # Each 4.x sign alone marks the live install as not-3.x (one twin per clause: each shadows the others).
+    ("m3x-era-4x-instruction-file", _M3, "if p and GENERATED_4X.match(norm(p.read_bytes())):", "if False:",
+     _M3T + "test_one_4x_file_is_enough_to_skip_the_live_files[CLAUDE.md]"),
+    ("m3x-era-4x-settings", _M3, "if p and SETTINGS_4X in norm(p.read_bytes()):", "if False:",
+     _M3T + "test_one_4x_file_is_enough_to_skip_the_live_files[settings]"),
+    ("m3x-era-4x-codex", _M3, "        if self.codex:", "        if False:",
+     _M3T + "test_one_4x_file_is_enough_to_skip_the_live_files[codex]"),
+    # The kb-guard store is a source at all (the no-snapshot path) ...
+    ("m3x-kb-store-is-a-source", _M3, "        cands.append(kb)", "        pass",
+     _M3T + "test_without_a_snapshot_the_kb_guard_copy_is_used"),
+    # ... its NEWEST 3.x copy, not an older one ...
+    ("m3x-kb-store-newest-copy", _M3, "            files[name] = ok[-1] / name", "            files[name] = ok[0] / name",
+     _M3T + "test_without_a_snapshot_the_kb_guard_copy_is_used"),
+    # ... skipping 4.x copies stored by a 4.0 session that started before setup (review I2) ...
+    ("m3x-kb-store-skips-4x-copies", _M3,
+     "        ok = [d for d in dirs if (d / name).is_file() and not _is_4x_doc(d / name)]",
+     "        ok = [d for d in dirs if (d / name).is_file()]",
+     _M3T + "test_a_4x_session_before_setup_does_not_hide_the_3x_copy"),
+    # ... and the knowledgebase copy from BEFORE the first 4.x copy (it has no header to tell it by).
+    ("m3x-kb-store-knowledgebase-before-4x", _M3, "(cutoff is None or _stamp_key(d.name) < cutoff)", "True",
+     _M3T + "test_a_4x_session_before_setup_does_not_hide_the_3x_copy"),
+    # Idempotence: the state record (a deleted block stays deleted) and the marker (a lost state file).
+    ("m3x-state-remembers-carried", _M3, "if key in carried or (name, digest) in present:",
+     "if (name, digest) in present:", _M3T + "test_a_block_the_user_deleted_does_not_come_back"),
+    ("m3x-marker-remembers-carried", _M3, "if key in carried or (name, digest) in present:",
+     "if key in carried:", _M3T + "test_a_lost_state_file_does_not_duplicate_a_block"),
+    # Blocks are read structurally: a marker inside carried text is content, not a block.
+    ("m3x-blocks-read-structurally", _M3, 'if open_key is None and kind == "BEGIN":', 'if kind == "BEGIN":',
+     _M3T + "test_hostile_content_is_copied_verbatim_and_never_becomes_preferences[absent]"),
+    # A `## My preferences` heading ahead of the blocks, so carried text never becomes the injected preferences.
+    ("m3x-prefs-heading-ahead-of-blocks", _M3,
+     '                    prefix += "' + BS + "n## My preferences" + BS + "n" + BS + 'n"', '                    pass',
+     _M3T + "test_hostile_content_is_copied_verbatim_and_never_becomes_preferences[no-prefs-section]"),
+    # The fence outgrows any backtick run in the carried text.
+    ("m3x-fence-outgrows-content", _M3, '    return "`" * max(4, longest + 1)', '    return "````"',
+     _M3T + "test_hostile_content_is_copied_verbatim_and_never_becomes_preferences[absent]"),
+    # The old KNOWLEDGEBASE.local.md is backed up BEFORE it is rewritten.
+    ("m3x-local-kb-backed-up-first", _M3,
+     '                _write_checked(run_dir / (LOCAL_KB + ".before"), local_bytes)', "                pass",
+     _M3T + "test_upgrade_from_391_with_edits_keeps_every_edit"),
+    # A different existing .3x-backup is never overwritten.
+    ("m3x-settings-backup-not-overwritten", _M3,
+     '                    target = root / ".claude" / "settings.json.3x-backup.{}".format(digest[:12])',
+     "                    pass", _M3T + "test_an_existing_different_settings_backup_is_never_overwritten"),
+    # Notes appended to a shipped KNOWLEDGEBASE.md are carried as text.
+    ("m3x-kb-appended-notes-carried", _M3,
+     '        if len(raw) > n and hashlib.sha256(raw[:n]).hexdigest() == spec["sha256"]:', "        if False:",
+     _M3T + "test_upgrade_from_391_with_edits_keeps_every_edit"),
+    # pre-update-snapshot.sh: copies what the new toolkit would overwrite ...
+    ("snap-copies-what-the-update-overwrites", _SN,
+     "rel=${rel#./}\n        [ -f \"$TARGET/$rel\" ] && printf", "rel=${rel#./}\n        false && printf",
+     _M3T + "test_snapshot_copies_what_the_update_replaces_and_changes_nothing"),
+    # ... but never enumerates the install itself, another game folder, or a backups folder.
+    ("snap-not-from-the-install-itself", _SN, '[ "$SRC" != "$TARGET" ] && ', "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[the install itself]"),
+    ("snap-not-from-a-game-folder", _SN, '[ ! -f "$SRC/SkyrimVR.exe" ] && ', "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[another game folder SkyrimVR.exe]"),
+    ("snap-not-from-a-game-folder-se", _SN, ' && [ ! -f "$SRC/SkyrimSE.exe" ]', "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[another game folder SkyrimSE.exe]"),
+    ("snap-not-from-a-game-folder-le", _SN, '   && [ ! -f "$SRC/TESV.exe" ]', "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[another game folder TESV.exe]"),
+    ("snap-free-space-checked", _SN, '    *) if [ "$need" -gt $(( free_kb * 1024 / 10 * 8 )) ]; then', "    *) if false; then",
+     _M3T + "test_snapshot_refuses_when_the_drive_is_nearly_full"),
+    ("snap-backups-pruned", _SN, " -o -path ./.claude/backups", "",
+     _M3T + "test_snapshot_never_copies_beyond_what_the_update_replaces[unpacked toolkit]"),
+    ("snap-unique-stamp", _SN, 'while [ -e "$BACKUPS/pre-update-$STAMP" ]; do', "while false; do",
+     _M3T + "test_two_snapshots_in_one_second_do_not_share_a_folder"),
+    # --- Fix round 1 (T9 review) ---
+    # I1: a shipped 3.x file is copied too -- "shipped" never means "no copy" ...
+    ("m3x-pristine-files-copied-too", _M3, "        if ckey not in copied:",
+     '        if ckey not in copied and verdict == "edited":',
+     _M3T + "test_a_corrected_path_is_kept_and_carried_whatever_the_verdict[renamed profile]"),
+    # ... and every filled-in path is carried as data: this run's copy, and the stable one setup.sh reads ...
+    ("m3x-carried-paths-run-copy", _M3,
+     '            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))', "            pass",
+     _M3T + "test_a_corrected_path_is_kept_and_carried_whatever_the_verdict[moved instance]"),
+    ("m3x-carried-paths-stable-copy", _M3,
+     '                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))', "                pass",
+     _M3T + "test_a_corrected_path_is_kept_and_carried_whatever_the_verdict[corrected overwrite path]"),
+    # ... found line by line in an EDITED file as well.
+    ("m3x-paths-searched-in-edited-files", _M3, "        if len(found) > len(best):", "        if False:",
+     _M3T + "test_paths_are_still_found_when_no_template_is_complete"),
+    ("m3x-paths-newest-complete-template", _M3,
+     '            return found, "searched"          # the newest template whose every path line is still there',
+     "            pass", _M3T + "test_paths_in_an_edited_file_come_from_the_newest_complete_template"),
+    # Minor 1: the collision suffix sorts inside its own second.
+    ("m3x-stamp-suffix-after-the-time", _M3,
+     '    m = re.match(r"(.*_' + BS + 'd{6})(?:_(' + BS + 'd+))?' + BS + 'Z", name)',
+     '    m = re.match(r"(.*?)(?:_(' + BS + 'd+))?' + BS + 'Z", name)',
+     _M3T + "test_a_collision_suffix_sorts_inside_its_own_second"),
+    # Minor 2: a source with no settings file says so.
+    ("m3x-settings-not-checked-said", _M3, "    if SETTINGS not in src.files:", "    if False:",
+     _M3T + "test_a_4x_session_before_setup_does_not_hide_the_3x_copy"),
+    # Minor 3: removed shipped hooks and changed commands are reported.
+    ("m3x-settings-removed-hooks", _M3, "        if pair in shipped and pair not in mine:", "        if False:",
+     _M3T + "test_the_settings_report_names_removed_and_changed_hooks"),
+    ("m3x-settings-changed-command", _M3, "        if command not in ref_cmds:", "        if False:",
+     _M3T + "test_the_settings_report_names_removed_and_changed_hooks"),
+    # Minor 4: an unclosed fence in the user's file is closed before the blocks.
+    ("m3x-unclosed-fence-closed", _M3, '                    prefix += token + "' + BS + 'n"', "                    pass",
+     _M3T + "test_an_unclosed_fence_in_the_users_file_does_not_leak_into_preferences"),
+    # Minor 5: the .before copy is read back; the undo record is written even on failure.
+    ("m3x-before-copy-read-back", _M3,
+     '                _write_checked(run_dir / (LOCAL_KB + ".before"), local_bytes)',
+     '                (run_dir / (LOCAL_KB + ".before")).write_bytes(local_bytes)',
+     _M3T + "test_a_backup_that_does_not_read_back_stops_the_run[KNOWLEDGEBASE.local.md.before]"),
+    ("m3x-undo-record-on-failure", _M3, "            if run_dir.is_dir():", "            if rc == 0 and run_dir.is_dir():",
+     _M3T + "test_a_failure_still_leaves_the_undo_record"),
+    # Minor 7: the three guards that had no twin.
+    ("m3x-source-copy-read-back", _M3, "    if path.read_bytes() != data:", "    if False:",
+     _M3T + "test_a_backup_that_does_not_read_back_stops_the_run[CLAUDE.md]"),
+    ("m3x-local-kb-read-back", _M3, "            if not local_path.read_bytes().startswith(old):", "            if False:",
+     _M3T + "test_a_local_knowledgebase_that_does_not_read_back_is_reported"),
+    ("m3x-new-local-kb-prefix", _M3,
+     '                prefix = "# Local knowledgebase' + BS + 'n' + BS + 'n## My preferences' + BS + 'n' + BS + 'n"',
+     '                prefix = ""', _M3T + "test_a_new_local_knowledgebase_starts_with_an_empty_preferences_section"),
+    # Minor 8: a CRLF local knowledgebase stays CRLF.
+    ("m3x-crlf-local-kb-kept", _M3,
+     '            nl = "' + BS + 'r' + BS + 'n" if old.count(b"' + BS + 'r' + BS + 'n") * 2 > old.count(b"' + BS + 'n") else "' + BS + 'n"',
+     '            nl = "' + BS + 'n"', _M3T + "test_a_crlf_local_knowledgebase_stays_crlf"),
+    # --- Fix round 2 (T9 re-review) ---
+    # N5: the carried text is inserted untouched; only the block's own lines follow the file's style.
+    ("m3x-carried-text-not-rewritten", _M3,
+     '    return nl.join(head + ["", f + "text"]) + nl + content + f + nl + end',
+     '    return nl.join(head + ["", f + "text"]) + nl + content.replace("' + BS + 'n", nl) + f + nl + end',
+     _M3T + "test_a_crlf_local_knowledgebase_stays_crlf"),
+    # N1: a value that is not UTF-8 is written with its exact bytes (both copies) ...
+    ("m3x-carried-paths-run-copy-lossless", _M3,
+     '            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))',
+     '            _write_checked(run_dir / "carried-paths.env", paths_text.encode("utf-8"))',
+     _M3T + "test_a_cp1252_accented_path_is_carried_byte_exact_through_the_launcher[only the path changed]"),
+    ("m3x-carried-paths-stable-copy-lossless", _M3,
+     '                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8", "surrogateescape"))',
+     '                _write_atomic(root / STORE / "carried-paths.env", paths_text.encode("utf-8"))',
+     _M3T + "test_a_cp1252_accented_path_is_carried_byte_exact_through_the_launcher[only the path changed]"),
+    # ... and printed without dying (the launcher's printer) ...
+    ("m3x-launcher-prints-any-value", _M3, "a.dry_run, out=_say)", "a.dry_run, out=print)",
+     _M3T + "test_a_cp1252_accented_path_is_carried_byte_exact_through_the_launcher[only the path changed]"),
+    # ... ANY exception is recorded as FAILED, and a retry reuses the failed run's folder.
+    ("m3x-any-failure-recorded", _M3,
+     "    except BaseException as e:                # noqa: BLE001 -- ANY end but success is recorded, then re-raised",
+     "    except (_Failed, OSError) as e:",
+     _M3T + "test_an_unforeseen_error_is_recorded_and_every_run_gets_a_new_folder"),
+    # Minor: a newline in the source label cannot break out of the env file's comment.
+    ("m3x-label-newline-stays-in-comment", _M3,
+     '    label = re.sub(r"[' + BS + 'r' + BS + 'n]+", " ", src_label)', "    label = src_label",
+     _M3T + "test_a_newline_in_the_source_label_stays_in_its_comment"),
+    # Minor: the fence closer is as long as the opener.
+    ("m3x-fence-closer-matches-opener", _M3,
+     "            token = _FENCE_RUN.match(line).group(1) if token is None else None",
+     "            token = m.group(1) if token is None else None",
+     _M3T + "test_an_unclosed_four_backtick_fence_is_closed_with_four"),
+    # N3: the snapshot counts each file once against free space.
+    ("snap-free-space-counts-each-file-once", _SN, 'sort -zu "$LIST" > "$UNIQ"', 'cat "$LIST" > "$UNIQ"',
+     _M3T + "test_snapshot_counts_each_file_once_against_free_space"),
+    # --- Fix round 3 (T9 re-review 2) ---
+    # R1: a copy is created EXCLUSIVELY -- no code path can replace an earlier run's copy ...
+    ("m3x-copy-created-exclusively", _M3, '        with open(path, "xb") as fh:', '        with open(path, "wb") as fh:',
+     _M3T + "test_a_copy_never_replaces_an_existing_file"),
+    # ... and a later run's record names the failed run it left alone.
+    ("m3x-new-record-names-the-failed-run", _M3,
+     '        log += ["An earlier run FAILED: {} (its copies and its record are untouched).".format(failed_before), ""]',
+     "        pass", _M3T + "test_an_unforeseen_error_is_recorded_and_every_run_gets_a_new_folder"),
+    # R2: an interrupt is recorded as INTERRUPTED and is not success.
+    ("m3x-interrupt-recorded", _M3,
+     "    except BaseException as e:                # noqa: BLE001 -- ANY end but success is recorded, then re-raised",
+     "    except Exception as e:", _M3T + "test_an_interrupt_is_recorded_as_interrupted_not_success"),
+    ("m3x-interrupt-named-interrupted", _M3,
+     '        word = "FAILED" if isinstance(e, Exception) else "INTERRUPTED"     # Ctrl+C, SystemExit, ...',
+     '        word = "FAILED"', _M3T + "test_an_interrupt_is_recorded_as_interrupted_not_success"),
+    # R3: a lone surrogate in a label is shown, never fatal (label, and the printer's fallback).
+    ("m3x-label-escapes-lone-surrogates", _M3,
+     '    return text.encode("utf-8", "backslashreplace").decode("utf-8")', "    return text",
+     _M3T + "test_a_lone_surrogate_in_a_label_is_shown_not_fatal"),
+    ("m3x-printer-escapes-lone-surrogates", _M3,
+     '        data = line.encode("utf-8", "backslashreplace").decode("utf-8")', "        raise",
+     _M3T + "test_a_lone_surrogate_in_a_label_is_shown_not_fatal"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _M3_CLAUSES]
+
+# Plan 8 T15b: scripts/thirdparty-audit.py, the third-party version and integration-drift gate. One twin per gate
+# clause; each names the offline test (synthetic upstream responses) that must go red when the clause is reverted.
+_TPA = "scripts/thirdparty-audit.py"
+_TPT = "tests/test_thirdparty_audit.py::"
+_T15B_CLAUSES = [
+    ("t15b-drift-does-not-exit-1", _TPA, "    if DRIFT in statuses:\n        return 1", "    if False:\n        return 1",
+     _TPT + "test_a_readme_install_version_that_differs_from_the_pin_is_drift"),
+    ("t15b-unchecked-does-not-exit-2", _TPA, "    if UNCHECKED in statuses or not rows:", "    if not rows:",
+     _TPT + "test_an_unreachable_source_is_could_not_check_with_exit_2"),
+    ("t15b-no-rows-is-ok", _TPA, "    if UNCHECKED in statuses or not rows:", "    if UNCHECKED in statuses:",
+     _TPT + "test_nothing_audited_is_not_ok"),
+    ("t15b-newer-upstream-fails", _TPA, '        return NEWER, "upstream moved on (reported, not a failure)"',
+     '        return DRIFT, "upstream moved on"', _TPT + "test_a_newer_upstream_is_reported_not_failed"),
+    ("t15b-pin-ahead-of-upstream-passes", _TPA, '    return DRIFT, "pin is ahead of upstream latest -- not published?"',
+     '    return NEWER, "ahead"', _TPT + "test_a_pin_ahead_of_upstream_is_drift"),
+    ("t15b-ref-version-not-compared", _TPA, "        elif not same(v, target, compare):", "        elif False:",
+     _TPT + "test_a_readme_install_version_that_differs_from_the_pin_is_drift"),
+    ("t15b-unpinned-install-passes", _TPA,
+     '            rows.append(Row(name, "install refs", target, None, DRIFT, "%s:%d %s" % (rel, line, ref.get("unpinned", "no version"))))',
+     "            agree += 1", _TPT + "test_an_unpinned_install_of_a_pinned_tool_is_drift"),
+    ("t15b-pin-variable-read-as-a-version", _TPA, '        elif re.search(r"[$%{]", v):', "        elif False:",
+     _TPT + "test_an_install_line_filled_from_the_pin_variable_is_ok"),
+    ("t15b-history-refs-not-skipped", _TPA,
+     '                if HISTORY.search(history_context(lines, i, m.start())):\n                    yield rel, i + 1, "history", m.group(0)',
+     '                if False:\n                    yield rel, i + 1, "history", m.group(0)',
+     _TPT + "test_a_historical_install_mention_is_skipped_and_counted"),
+    ("t15b-history-paths-not-skipped", _TPA, "                if not HISTORY.search(history_context(lines, i, m.start())):",
+     "                if True:", _TPT + "test_a_historical_path_mention_is_not_an_instruction"),
+    ("t15b-history-window-too-wide", _TPA, "HISTORY_WINDOW = 30\n", "HISTORY_WINDOW = 200\n",
+     _TPT + "test_a_history_word_far_from_the_reference_does_not_hide_it"),
+    ("t15b-history-ignores-new-clause", _TPA, '    before = lines[idx][:start][-HISTORY_WINDOW:].rsplit(";", 1)[-1]',
+     "    before = lines[idx][:start][-HISTORY_WINDOW:]", _TPT + "test_a_new_clause_after_a_semicolon_is_not_history"),
+    ("t15b-history-ignores-introducing-line", _TPA, '    if idx > 0 and lines[idx - 1].rstrip().endswith(":"):',
+     "    if False:", _TPT + "test_a_historical_path_mention_is_not_an_instruction"),
+    ("t15b-zip-path-not-compared", _TPA, "    missing = sorted({p for p, _ in paths if p not in have})", "    missing = []",
+     _TPT + "test_a_documented_path_the_release_no_longer_ships_is_drift"),
+    ("t15b-missing-asset-passes", _TPA, '    if args["asset"] not in assets:', "    if False:",
+     _TPT + "test_a_release_without_the_documented_asset_is_drift"),
+    ("t15b-install-latest-never-drifts", _TPA, "    elif same(pinned, latest):", "    elif True:",
+     _TPT + "test_install_from_latest_when_latest_is_not_the_verified_version_is_drift"),
+    ("t15b-offline-miss-answers", _TPA, '            raise CouldNotCheck("offline and not cached: " + url)',
+     "            return Response(200, b'{\"version\": \"0.160.0\"}')",
+     _TPT + "test_offline_without_a_cached_answer_is_could_not_check"),
+    ("t15b-could-not-check-swallowed", _TPA, "        rows.append(Row(tool, check, pinned, None, UNCHECKED, str(exc)))",
+     "        pass", _TPT + "test_an_unreachable_source_is_could_not_check_with_exit_2"),
+    ("t15b-pin-sites-disagree-pass", _TPA,
+     '            bad = {k: v for k, v in values.items() if not same(v, pinned, compare) or "disagrees" in k}',
+     "            bad = {}", _TPT + "test_pin_sites_that_disagree_are_drift"),
+    ("t15b-unreadable-pin-site-ignored", _TPA, "        if unread:\n", "        if False:\n",
+     _TPT + "test_an_unreadable_declared_pin_site_is_could_not_check"),
+    ("t15b-rate-limit-not-remembered", _TPA, "                self.exhausted[host] = reset", "                pass",
+     _TPT + "test_rate_limit_exhaustion_stops_calling_the_host"),
+    ("t15b-nexus-called-without-key", _TPA, '        if host == "api.nexusmods.com" and not self.nexus_key:',
+     "        if False:", _TPT + "test_nexus_without_a_key_is_could_not_check_and_makes_no_call"),
+    ("t15b-key-not-redacted", _TPA, '            data = data.replace(s.encode("utf-8"), b"<redacted>")', "            pass",
+     _TPT + "test_a_key_echoed_by_an_upstream_is_never_cached_or_printed"),
+    ("t15b-token-sent-to-every-host", _TPA, '        if host == "api.github.com" and self.github_token:',
+     "        if self.github_token:", _TPT + "test_github_token_goes_only_to_the_api_host"),
+    ("t15b-moved-tag-passes", _TPA, '    elif same(sha, pinned, "prefix"):', "    elif True:",
+     _TPT + "test_a_moved_tag_is_drift"),
+    ("t15b-missing-commit-path-passes", _TPA, '        if not gh_path_exists(f, args["repo"], pinned, path):',
+     "        if False:", _TPT + "test_a_path_missing_at_the_pinned_commit_is_drift"),
+    ("t15b-cli-flag-not-compared", _TPA, "    missing = sorted(documented - options)", "    missing = []",
+     _TPT + "test_a_documented_cli_flag_missing_upstream_is_drift"),
+    ("t15b-nupkg-tfm-not-compared", _TPA, "    if want in tfms:", "    if True:",
+     _TPT + "test_a_package_without_the_pinned_sdk_framework_is_drift"),
+    ("t15b-action-sha-not-compared", _TPA, "                elif sha != ref:", "                elif False:",
+     _TPT + "test_an_action_sha_that_is_not_its_tag_is_drift"),
+    ("t15b-action-by-tag-passes", _TPA, '        if not re.fullmatch(r"[0-9a-f]{40}", ref):', "        if False:",
+     _TPT + "test_an_action_by_tag_not_sha_is_drift"),
+    ("t15b-npm-range-passes", _TPA,
+     '            rows.append(Row(name, "exact pin", spec, None, DRIFT, "package.json range, not an exact pin"))',
+     "            pass", _TPT + "test_an_npm_range_is_drift"),
+    ("t15b-npm-lock-not-compared", _TPA, "            if locked != spec:", "            if False:",
+     _TPT + "test_an_npm_lock_that_disagrees_is_drift"),
+    ("t15b-pip-lock-not-compared", _TPA, "                if spec not in locked:", "                if False:",
+     _TPT + "test_a_python_lock_that_disagrees_is_drift"),
+    ("t15b-unknown-only-name-silent", _TPA,
+     '            rows.append(Row(o, "selection", None, None, UNCHECKED, "--only names no known integration"))',
+     "            pass", _TPT + "test_nothing_audited_is_not_ok"),
+    ("t15b-major-compare-is-exact", _TPA, "        return vkey(a)[:1] == vkey(b)[:1]", "        return a == b",
+     _TPT + "test_a_major_version_reference_is_held_to_the_runtime_pin"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T15B_CLAUSES]
+
+# Merge of master into plan6 (2026-10-05): one twin per guard the merge itself added; each names the test that must go red.
+_MM_SR = "tests/test_skyguard_self_rules.py::"
+_MM_RP = "tests/test_release_payload.py::test_every_check_can_fail_on_its_own_line"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # master's apply_patch delete judge must step aside for the state, or guards off shadows a patch delete of it.
+    ("tools/skyguard/engine.py",
+     "    if (self_rules.kind_of(a, roots, os.environ) if a is not None else self_rules.text_kind(path)) == self_rules.STATE:",
+     "    if False:",
+     _MM_SR + "test_apply_patch_into_the_state_is_denied[delete]", "p6mm-patch-delete-of-state-is-s-del"),
+    # S-SELF-STATE reads master's Recycle-Bin definition, MoveHere included.
+    ("tools/skyguard/self_rules.py",
+     "    for w, how in deletes.recycle_targets(deletes.recycle_text(command, parsed)):",
+     '    for w, how in [t for t in deletes.recycle_targets(deletes.recycle_text(command, parsed)) if "MoveHere" not in command]:',
+     _MM_SR + "test_a_recycle_bin_delete_of_the_state_is_s_self_state_in_every_spelling[shell-application-movehere]",
+     "p6mm-self-state-recycle-misses-movehere"),
+    # the payload checker's guard-manifest section, and a Plan 6 launcher in its required list.
+    ("tools/check-release-payload.py", '            "adapter": check_adapter, "guards": check_guards}',
+     '            "adapter": check_adapter}', _MM_RP + "[guard-file-edited]", "p6mm-payload-guards-section-dropped"),
+    ("tools/check-release-payload.py", '    "tools/skydoctor",\n', "", _MM_RP + "[skydoctor-missing]",
+     "p6mm-payload-skydoctor-not-required"),
 ]]

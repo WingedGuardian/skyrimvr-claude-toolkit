@@ -51,3 +51,18 @@ def test_a_rev_range_reads_the_file_at_each_revision(tmp_path):
     assert base == [] and [r["id"] for r in head] == ["new1"]
     assert m.git_file("HEAD", "no/such/file", tmp_path) == ""
     assert [r[0] for r in m.table(base, head, [])] == ["new1"]
+
+
+def test_main_writes_utf8_whatever_the_console_encoding(monkeypatch):
+    """Final review C-M1: on a Windows console (cp1252) a row holding a non-Latin-1 character (the corpus has the
+    Kelvin sign) crashed the table with UnicodeEncodeError. The table is written as UTF-8 bytes."""
+    import io
+    import sys
+    m = _mod()
+    kelvin = _row("kelvin", payload={"tool_name": "Bash", "tool_input": {"command": "rm S" + chr(0x212A) + "yrim"}})
+    monkeypatch.setattr(m, "git_file", lambda rev, path, repo=None: json.dumps(kelvin) + "\n" if rev == "HEAD" else "")
+    raw = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="cp1252"))
+    assert m.main(["base..HEAD"]) == 0
+    sys.stdout.flush()
+    assert ("S" + chr(0x212A) + "yrim") in raw.getvalue().decode("utf-8")

@@ -9,8 +9,7 @@ import pytest
 from conftest import REPO
 
 
-@pytest.mark.parametrize("input_file,lock_file", [("requirements.txt", "requirements.lock"),
-                                                   ("requirements-windows.txt", "requirements-windows.lock")])
+@pytest.mark.parametrize("input_file,lock_file", [("requirements.txt", "requirements.lock")])
 def test_python_lock_tracks_input_and_hashes(input_file, lock_file):
     digest = hashlib.sha256((REPO / input_file).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
     text = (REPO / lock_file).read_text()
@@ -83,6 +82,10 @@ def test_ci_workflow_parses_and_runs_harness_modules_on_both_legs():
     harness = [step for step in behavior["steps"]
                if "tests/run_harness_tests.py" in str(step.get("run", "")) and "if" not in step]
     assert harness, "no unconditional harness-contained step in the behavior job"
+    # Plan 8 T10 added harness-run tripwire and timing steps before it: the suite is the one naming -rfEs on tests/.
+    suite = [step for step in harness if "tests/ -v" in step["run"]]
+    assert len(suite) == 1, [step.get("name") for step in harness]
+    harness = suite
     command = harness[0]["run"]
     # The WHOLE suite goes through the launcher (which includes both barrier-dependent modules), on
     # both matrix legs (no `if`), and a run without the barriers is an error, not a quiet green.
@@ -94,3 +97,22 @@ def test_ci_workflow_parses_and_runs_harness_modules_on_both_legs():
              and "run_harness_tests" not in str(step.get("run", ""))
              and "pip install" not in str(step.get("run", ""))]
     assert not plain, plain
+
+
+def test_the_lock_never_pins_a_pygments_with_the_known_advisory():
+    """pygments < 2.20.0 carries GHSA-5239-wwwm-4pmq (CVE-2026-4539). It enters the lock only through pytest >= 8.4."""
+    import re
+    versions = re.findall(r"^pygments==(\d+)\.(\d+)\.(\d+)", (REPO / "requirements.lock").read_text(), re.M | re.I)
+    for v in versions:
+        assert tuple(map(int, v)) >= (2, 20, 0), "pygments %s.%s.%s in requirements.lock has an open advisory" % v
+
+
+def test_package_json_pins_exact_versions_that_the_lock_resolves_to():
+    """A caret lets a plain `npm install` float; exact specs mean every install path gets the locked version."""
+    import re
+    package = json.loads((REPO / "package.json").read_text())
+    lock = json.loads((REPO / "package-lock.json").read_text())
+    assert package["dependencies"]
+    for name, spec in package["dependencies"].items():
+        assert re.fullmatch(r"\d+\.\d+\.\d+", spec), "%s: %r is a range, not an exact version" % (name, spec)
+        assert lock["packages"]["node_modules/" + name]["version"] == spec, name

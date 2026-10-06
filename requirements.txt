@@ -1,9 +1,7 @@
-# Container-side Python dependencies. xeditlib/pywin32 are Windows-only -- see
-# requirements-windows.txt and docs/container-vs-windows.md.
-pydantic==2.6.0
-cattrs==23.2.1
-PyYAML==6.0.1
-pytest==8.0.0
-pytest-cov==4.1.0
-ruff==0.3.0
-mypy==1.9.0
+# Container-side Python dependencies: the test runner, the CI lint gate and the YAML reader the tests use.
+# Every pin here is one the suite or CI actually runs. The Windows-only xEdit access is XEditLib.dll via
+# the Node-based tools/xelib helpers, not a Python binding -- see docs/container-vs-windows.md.
+# Provisioned only from requirements.lock (--require-hashes); this file is the direct-dependency input.
+PyYAML==6.0.3
+pytest==9.0.3
+ruff==0.16.9
