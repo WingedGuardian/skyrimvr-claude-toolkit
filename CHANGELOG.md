@@ -2,6 +2,44 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Layer 2: the vanilla-file lock (opt-in), lifts, shadow mode, skydoctor
+
+- **Optional read-only lock on the vanilla masters and archives, off by default, Windows only.** `bash tools/skyguard.sh lock lock`
+  sets the read-only attribute and a file-level deny entry for your account on an explicit per-edition name list (never a pattern, so mod
+  files are not locked). It holds below the agent, so it still applies when a hook fails open. Measured on scratch copies, with an unlocked
+  twin as control for every row: 38 of 38 overwrite primitives blocked, 7 of 8 delete rows, reads 5 of 5 work, and 41 of 42 required rows
+  once Claude `Write`/`Edit`, Codex `apply_patch` and an xelib save are counted.
+- **It does not stop an xEdit/xelib save of a locked master** (the save renames the file into `zEdit Backups/`, bytes intact; measured for
+  xelib, 4 of 4 candidate mechanisms) **or renaming a locked file away.** Linux/Proton exits 3 `unsupported`. Wrye Bash, Steam "Verify
+  integrity", the xEdit program and MO2 are not yet measured, so under the pre-committed table the lock stays opt-in until they are.
+- **Unlock in one command:** `bash tools/skyguard.sh lock unlock <file>` (a lift bound to the session, expiring at the next session start,
+  never later than 8 hours), `tools\skyguard-unlock.cmd` with no Python, or two raw commands as a last resort (README). `lock status`,
+  `lock disable` and `lock enable` complete the set.
+- **Lifts are visible and short-lived.** `lock unlock` and `guards off` are allowed with a note; hand-clearing the attribute or ACL of a lock
+  target, running the unlock `.cmd` from an agent, and `lock disable` are refused (a prompt on Claude, a refusal on Codex). On an agent with
+  no session start, nothing relocks a lift until a hooked session starts or you run `lock lock`; `skydoctor` reports it. Whether a lift is
+  shown to you (not only to the agent) is measured only in headless Claude, not interactively and not on Codex.
+- **`guards off` is shadow mode.** Every rule still runs; a refusal becomes an allow plus a warning and a `SHADOW` line per call, backups
+  and snapshots still run. Never shadowed: `GUARD INERT`, Codex `.rules`, the lock, the lift refusals and writes into `.skyguard/`.
+- **Self-protection.** Writes into `.skyguard/` are refused on every route (shell, file tools, `apply_patch`, moves, deletes). Edits to the
+  guard code and config get a note (priced: 24 of 24 would-be prompts in history were maintenance the user asked for). A session-start banner
+  names guard files that differ from the shipped `GUARD-FILES.sha256`.
+- **`skydoctor` (`bash tools/skydoctor`)** reports what is live, layer by layer, as live / not live / unknown with a reason, and exits 0, 1
+  or 2. It is not `skyguard doctor`, which stays the narrower hook-health report. A default install exits 1 on purpose (the lock was never applied).
+- **Backup manifests, and a restore that finds the right file.** Every backup writes a part file, checksums it while copying, takes its final
+  name without replacing another backup, and appends a line (exact path, size, sha256) to `.claude/backups/MANIFEST.jsonl`. Two edits of one
+  file in the same second no longer overwrite each other, and a failed copy leaves no half-file. `scripts/restore-from-backup.sh` reads the
+  manifest and checks the sha256 first. It used to turn every underscore into a slash, so `Skyrim_VR - Main.bsa` or `My_Mod.esp` was restored
+  to the wrong path; a backup with no manifest line is labelled `(legacy: path guessed)`. Concurrent writers: before the fix 178 of 3,000
+  manifest lines were lost in a measured run; after it, 0 lost of 3 processes x 400 lines.
+- **Nested script snapshots.** `.psc` and `.pex` are now snapshotted at any depth under `Data/Scripts/` and under `Data/Source/Scripts/`,
+  with no 7-day limit, in a content-addressed store. The old hook never saw 3,428 of 11,898 scripts (29%) on the author's install. Added
+  latency measured at p95 131 ms over the author's real call stream (gate 150 ms); the first session builds its baseline over about 100 s.
+- **Recovery snapshots and `skyguard snapshot`.** Before a shell command that may change them, `plugins.txt`, `loadorder.txt` and `Skyrim*.ini`
+  are copied (de-duplicated by content); before a ReSaver `--apply` or a DevBench save, the one named save and its `.skse` co-save.
+  `bash tools/skyguard.sh snapshot list` shows them; `snapshot restore <id>` writes to a new folder by default, `--to DIR` picks one,
+  and `--in-place` restores only the files that kind of snapshot may write, inside the configured roots, after backing up what it replaces.
+
 ### Codex support
 
 - **First Codex hook definitions (v1): approve them in /hooks.** Open `codex` in your Skyrim folder, type `/hooks`, approve the 2 Skyrim toolkit hooks; until then Codex runs none of them and does not say so.
