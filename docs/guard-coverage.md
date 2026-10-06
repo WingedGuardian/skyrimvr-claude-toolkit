@@ -64,17 +64,17 @@ Matchers are compared with a full match against the tool name (measured below: `
 | X4 | codex | MCP tools, DevBench included | `-` | uncovered | `.*` fires and the entry logs it; no rule judges it | MEASURED Plan 4 (toy server: PreToolUse fired with `mcp__probe__echo`). READ `agent/instructions/codex.md`: "Not checked: ... MCP tools (DevBench included)". The Claude C10 judge is not wired for Codex |
 | X5 | codex | `!` user-shell commands in the Codex TUI | `-` | out-of-scope | n/a | MEASURED Plan 4 derisk: no PreToolUse fired. User-typed, not an agent path |
 | X6 | codex | Codex launched where the hooks do not run: hooks not approved with `/hooks`; started in a subfolder of a non-git install | `-` | uncovered | `.codex/rules/skyrim.rules` prefix rules only (registry deletes) | MEASURED Plan 4 E2E: B2 (`Data/New.esp` created, hooks unapproved), R-subdir (2 of 2 runs, no hook line) and Plan 6 F6, F7 (written, no heartbeat). Unapproved hooks are skipped silently |
-| O1 | any | Interpreter or opaque-script writes launched from a shell (`python -c`, `node -e`, `perl -i`, a script that writes a plugin) | `Bash`, `PowerShell` | partial | the shell guard sees the command text only | READ (R11, `writes.py` docstring): a plugin written by `open('X.esp','w')` gets no message; Plan 6's read-only lock is the backstop. Priced in Task 12: an opaque-script rule hit 41 of 65,694 items, 1 useful, dropped |
+| O1 | any | Interpreter or opaque-script writes launched from a shell (`python -c`, `node -e`, `perl -i`, a script that writes a plugin) | `Bash`, `PowerShell` | partial | the shell guard sees the command text only | READ (R11, `writes.py` docstring): a plugin written by `open('X.esp','w')` gets no message; Plan 6's read-only lock (opt-in, vanilla files only) is a backstop for those files. Priced in Task 12: an opaque-script rule hit 41 of 65,694 items, 1 useful, dropped |
 | O2 | any | Processes the agent starts that outlive the call (`Start-Process`, `nohup`, `&`, scheduled tasks) | `Bash`, `PowerShell` | partial | the launch is seen; the later writes are not | INFERRED: a hook runs per tool call and cannot see a detached child's later writes |
-| O3 | any | Processes started outside the agent: the user's terminal, Vortex, the game, tools on a schedule | `-` | uncovered | none until Layer 2 (Plan 6, the read-only lock) | READ: `docs/superpowers/plans/2026-10-04-plan6-layer2-lock.md` on master. Not agent routes; listed because a lock, not a hook, is what stops them touching a protected file |
+| O3 | any | Processes started outside the agent: the user's terminal, Vortex, the game, tools on a schedule | `-` | partial | Layer 2, the vanilla-file lock (`tools/skyguard.sh lock lock`): read-only attribute plus a file-level deny entry on an explicit list of vanilla masters and archives. **Off by default, Windows only** | MEASURED Plan 6 (scratch copies, 2026-10-04): 38 of 38 overwrite rows and 7 of 8 delete rows blocked, reads 5 of 5 work; the lock does not look at who started the process. Gaps: an xEdit/xelib save of a locked master is not stopped (it renames the file to `zEdit Backups/`, bytes survive; xelib MEASURED 4 of 4, xEdit program INFERRED); renaming a locked file away is not stopped; mods, plugins and every non-listed file are not covered; Linux/Proton exits 3 `unsupported`; WSL, Wrye Bash, Steam verify, MO2 and the game itself reading locked masters not measured (batch pending, so it stays opt-in); a lift is not relocked on an agent that has no session start (R9). `README.md` "Optional: lock the vanilla files" has the table |
 
 ## Summary
 
 Counts by status for the routes above (the test recomputes these and fails on a mismatch):
 
 - guarded: 10
-- partial: 4
-- uncovered: 9
+- partial: 5
+- uncovered: 8
 - absent: 1
 - out-of-scope: 3
 
@@ -82,6 +82,6 @@ Ranked by what an agent can do through the route, the uncovered routes to close 
 
 1. **C12 MCP code execution** and **C11 other MCP**: only a `*` matcher sees them; the cheapest safe step is a
    `mcp__.*` matcher that logs, then an allow-list of servers the user trusts. Until then the MCP surface is the
-   widest hole, and the Layer 2 lock is the only backstop.
+   widest hole, and the Layer 2 lock is the only backstop, for vanilla files and only if the user turned it on.
 2. **X6 Codex without active hooks** and **X4 Codex MCP**: no rule runs.
 3. **C9 worktree tools**, **C13** and **C17**: lower impact; record and watch.

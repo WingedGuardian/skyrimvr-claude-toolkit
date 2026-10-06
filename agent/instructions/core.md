@@ -223,6 +223,13 @@ refuses.
 Few prompts by design: a guard that prompts on routine work gets approved by reflex
 (`docs/safety-philosophy.md`). **Check the guards are alive: `bash tools/hook-canary.sh`.**
 
+### The file lock and the guards' own state
+- **"Access denied" writing a vanilla master or archive** (`Skyrim.esm`, `Update.esm`, a base `.bsa`) is the
+  toolkit's optional lock, not a fault; the OS cannot say more. Do not retry or work around it. `bash tools/skyguard.sh
+  lock unlock <file>` lifts that file until the next session start: **tell the user why first, and restore it when done**
+  (`lock lock`). Never clear the read-only bit or the ACL by hand.
+- **Never edit `.skyguard/`** (guard on/off state); a write there is refused. `bash tools/skydoctor` shows what is live.
+
 ### General rules
 - **Always review changes before applying** -- modded installs are delicate
 - Never modify ESP/ESM files directly -- use xelib programmatically or Spriggit
