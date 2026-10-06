@@ -45,6 +45,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Review N1: mask the maintainer's identity BEFORE any step can print. GitHub masks a secret's literal
+      # value, but not the spellings derived from it (backslash, JSON-escaped, MSYS, URL-encoded); the checker
+      # prints an ::add-mask:: line for every token and every spelling, which the runner consumes.
+      - name: Mask the identity tokens and every spelling derived from them
+        env:
+          LEAK_TOKENS: ${{ secrets.LEAK_TOKENS }}
+        run: python -B tools/check-release-payload.py --mask-tokens
+
       - name: Resolve and validate the tag
         id: tag
         env:

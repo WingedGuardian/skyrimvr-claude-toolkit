@@ -19,6 +19,8 @@ Refusals:
           make the archive differ from the committed bytes: machine-local attributes (core.attributesFile,
           $GIT_DIR/info/attributes), a committed filter/export-subst/export-ignore/ident attribute, or a
           submodule (it would ship as an empty folder).
+  exit 5  the post-build proof failed: the zip's file list is not the commit's tree minus EXCLUDE, or a member's
+          bytes are not its blob's (beyond the committed CRLF/LF rule). Nothing is written.
   exit 2  bad usage.
 
 Deterministic: entries in git's order, timestamps from the commit, fixed compression. Two builds of one
@@ -28,10 +30,13 @@ Line endings are git's with core.autocrlf off, so .gitattributes alone decides t
 from __future__ import annotations
 
 import argparse
+import atexit
 import io
+import os
 import subprocess
 import sys
 import tarfile
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -48,9 +53,29 @@ class Refused(Exception):
         self.code = code
 
 
-def _git(*args, check=True, text=True):
-    r = subprocess.run(["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", *args],
-                       capture_output=True, text=text, timeout=300)
+_EMPTY_ATTRS = None
+
+
+def _empty_attributes_file() -> str:
+    """An empty file for core.attributesFile, so neither a configured one nor the DEFAULT global file
+    ($XDG_CONFIG_HOME/git/attributes, ~/.config/git/attributes -- used when the key is unset) is read
+    (re-review N2: MEASURED there, a default global `CHANGELOG.md export-ignore` dropped the file, exit 0).
+    The tool's own temp file, removed by the tool at exit (the stated exception to the Recycle-Bin rule)."""
+    global _EMPTY_ATTRS
+    if _EMPTY_ATTRS is None:
+        fd, _EMPTY_ATTRS = tempfile.mkstemp(prefix="build-release-attrs-")
+        os.close(fd)
+        atexit.register(lambda p=_EMPTY_ATTRS: os.path.exists(p) and os.remove(p))
+    return _EMPTY_ATTRS
+
+
+def _git(*args, check=True, text=True, stdin=None):
+    # Every git call is independent of this machine's attributes: the system file is off
+    # (GIT_ATTR_NOSYSTEM), the global one is an empty file, line endings are git's committed rules only.
+    env = dict(os.environ, GIT_ATTR_NOSYSTEM="1")
+    r = subprocess.run(["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+                        "-c", "core.attributesFile=" + _empty_attributes_file().replace("\\", "/"), *args],
+                       capture_output=True, text=text, timeout=300, env=env, input=stdin)
     if check and r.returncode != 0:
         err = r.stderr if text else r.stderr.decode("utf-8", "replace")
         raise Refused(4, "git {} failed: {}".format(" ".join(args[:2]), err.strip()))
@@ -78,7 +103,23 @@ def check_tree(sha: str, allow_dirty: bool) -> None:
 # Attributes that make `git archive` output something other than the committed bytes: a filter (LFS, any
 # smudge) injects content, export-subst expands $Format:...$ (the author's e-mail among them), export-ignore
 # drops files silently, ident rewrites $Id$. `text`/`eol` stay allowed: they are deterministic and committed.
-ALTERING_ATTRS = ("filter=", "export-subst", "export-ignore", "ident")
+ALTERING_ATTRS = ("filter", "export-subst", "export-ignore", "ident")
+
+
+def altering_attributes(text: str):
+    """The ALTERING_ATTRS a .gitattributes text SETS, parsed as git does (re-review N5): a line is a pattern
+    then whitespace-separated attributes; `-x` unsets and `!x` unspecifies (both harmless); `x` or `x=v` sets.
+    A pattern that merely contains a name (`residents/**`) is not an attribute."""
+    found = set()
+    for ln in text.splitlines():
+        parts = ln.split()
+        if not parts or parts[0].startswith("#"):
+            continue
+        for attr in parts[1:]:
+            # `-x` (unset) and `!x` (unspecified) never equal a name, so only a SET attribute matches
+            if attr.split("=", 1)[0] in ALTERING_ATTRS:
+                found.add(attr.split("=", 1)[0])
+    return sorted(found)
 
 
 def check_archive_inputs(sha: str) -> None:
@@ -87,13 +128,11 @@ def check_archive_inputs(sha: str) -> None:
     Review M1/M2 (MEASURED there, each exit 0 before): `$GIT_DIR/info/attributes` with export-ignore dropped a
     committed file, with eol=crlf rewrote one, and a configured smudge filter injected arbitrary content; a
     gitlink shipped as an empty folder."""
-    if _git("config", "--get", "core.attributesFile", check=False).stdout.strip():
-        raise Refused(4, "core.attributesFile is set in this machine's git config: its attributes would alter "
-                         "the archive. Build in a clone without it")
+    # core.attributesFile and the system file are neutralised in _git(); $GIT_DIR/info/attributes cannot be,
+    # so its mere presence refuses (re-review N2).
     info = Path(_git("rev-parse", "--git-path", "info/attributes").stdout.strip())
-    if info.is_file() and any(ln.strip() and not ln.lstrip().startswith("#")
-                              for ln in info.read_text(encoding="utf-8", errors="replace").splitlines()):
-        raise Refused(4, "{} is not empty: machine-local attributes would alter the archive".format(info.as_posix()))
+    if info.exists():
+        raise Refused(4, "{} exists: machine-local attributes would alter the archive".format(info.as_posix()))
     tree = _git("ls-tree", "-r", "--full-tree", sha).stdout.splitlines()
     links = [ln.split("\t", 1)[-1] for ln in tree if ln.startswith("160000 ")]
     if links:
@@ -101,9 +140,7 @@ def check_archive_inputs(sha: str) -> None:
     for ln in tree:
         path = ln.split("\t", 1)[-1]
         if path == ".gitattributes" or path.endswith("/.gitattributes"):
-            text = _git("show", "{}:{}".format(sha, path)).stdout
-            bad = [a for a in ALTERING_ATTRS
-                   if any(a in x for x in text.splitlines() if x.strip() and not x.lstrip().startswith("#"))]
+            bad = altering_attributes(_git("show", "{}:{}".format(sha, path)).stdout)
             if bad:
                 raise Refused(4, "{} uses {}: the archive would not be the committed bytes".format(path, ", ".join(bad)))
 
@@ -116,8 +153,7 @@ def default_version(sha: str) -> str:
 
 def build(sha: str, version: str, outdir: Path) -> Path:
     name = "{}-{}".format(NAME_PREFIX, version)
-    pathspec = ["."] + [":(exclude){}".format(e) for e in EXCLUDE]
-    tar_bytes = _git("archive", "--format=tar", sha, "--", *pathspec, text=False).stdout
+    tar_bytes = _archive(sha)
     when = int(_git("show", "-s", "--format=%ct", sha).stdout.strip())
     stamp = _zip_time(when)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -144,8 +180,65 @@ def build(sha: str, version: str, outdir: Path) -> Path:
         zi.external_attr = (0o100644) << 16
         zi.compress_type = zipfile.ZIP_DEFLATED
         zf.writestr(zi, info.encode("utf-8"), compresslevel=9)
+    problems = prove(buf.getvalue(), sha, name)
+    if problems:
+        raise Refused(5, "the zip is NOT the commit's files ({} problem(s)); nothing written:\n  {}".format(
+            len(problems), "\n  ".join(problems[:40])))
     out.write_bytes(buf.getvalue())
     return out
+
+
+def _archive(sha: str) -> bytes:
+    pathspec = ["."] + [":(exclude){}".format(e) for e in EXCLUDE]
+    return _git("archive", "--format=tar", sha, "--", *pathspec, text=False).stdout
+
+
+def expected_files(sha: str):
+    """{path: blob id} of the commit, minus the documented release exclusions (EXCLUDE)."""
+    out = {}
+    for ln in _git("ls-tree", "-r", "--full-tree", sha).stdout.splitlines():
+        meta, path = ln.split("\t", 1)
+        if path.split("/", 1)[0] not in EXCLUDE:
+            out[path] = meta.split()[2]
+    return out
+
+
+def _blobs(oids):
+    """{oid: bytes} through one `git cat-file --batch`."""
+    uniq = sorted(set(oids))
+    raw = _git("cat-file", "--batch", text=False, stdin=("\n".join(uniq) + "\n").encode()).stdout
+    out, i = {}, 0
+    for oid in uniq:
+        nl = raw.index(b"\n", i)
+        head = raw[i:nl].split()
+        size = int(head[2])
+        out[oid] = raw[nl + 1:nl + 1 + size]
+        i = nl + 1 + size + 1
+    return out
+
+
+def prove(zip_bytes: bytes, sha: str, name: str):
+    """Post-build proof (re-review N2), independent of how the archive was made: the zip's file list is the
+    commit's tree minus EXCLUDE (plus BUILD-INFO), and every member's bytes are its blob's -- the only change
+    allowed is the committed line-ending rule (CRLF <-> LF). Returns the problems (empty = proven)."""
+    want = expected_files(sha)
+    got = {}
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        for zi in zf.infolist():
+            if zi.is_dir():
+                continue
+            rel = zi.filename[len(name) + 1:] if zi.filename.startswith(name + "/") else None
+            if rel is None:
+                got["<outside the root> " + zi.filename] = b""
+            elif rel != BUILD_INFO:
+                got[rel] = zf.read(zi)
+    problems = ["missing from the zip: " + p for p in sorted(set(want) - set(got))]
+    problems += ["not in the commit: " + p for p in sorted(set(got) - set(want))]
+    blobs = _blobs(want[p] for p in want if p in got)
+    for p in sorted(set(want) & set(got)):
+        if got[p].replace(b"\r\n", b"\n") != blobs[want[p]].replace(b"\r\n", b"\n"):
+            problems.append("bytes differ from the committed blob: " + p)
+    return problems
 
 
 def _zip_time(epoch: int):

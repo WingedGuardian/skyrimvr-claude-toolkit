@@ -4506,7 +4506,7 @@ _T10 = [
     ("t10-payload-short-sha-accepted", _CRP, "None if SHA_RE.fullmatch(commit) else", "None if commit else",
      _RP + "test_every_check_can_fail_on_its_own_line[build-info-short-sha]"),
     # T10.3 the leak grep
-    ("t10-leaks-backslash-spelling", _CRP, '"Users" + BS + n, "Users" + BS * 2 + n', '"Users" + BS * 2 + n',
+    ("t10-leaks-backslash-spelling", _CRP, '("home path, backslash", "Users" + BS + n),', '',
      _RP + "test_every_home_spelling_is_found_without_the_bare_name"),
     ("t10-leaks-bare-name", _CRP, "        if n in persons or (n.lower() not in GENERIC_ACCOUNTS and len(n) >= 4):",
      "        if n in persons:",
@@ -4626,9 +4626,10 @@ _T10FR = [
     # M3 spellings
     ("t10fr-leaks-utf16be-unread", _CRP, '            for enc in ("utf-8", "utf-16-le", "utf-16-be"):',
      '            for enc in ("utf-8", "utf-16-le"):', _RP + "test_utf16_big_endian_is_read_too"),
-    ("t10fr-leaks-url-encoded-path", _CRP, '    out |= {s.replace(" ", "%20") for s in out}', "    pass",
+    ("t10fr-leaks-url-encoded-path", _CRP,
+     '    out += [(k + ", url-encoded", v.replace(" ", "%20")) for k, v in out if " " in v]', "    out += []",
      _RP + "test_url_and_json_slash_spellings_of_a_path"),
-    ("t10fr-leaks-json-slash-path", _CRP, ', fwd.replace("/", BS + "/")}', "}",
+    ("t10fr-leaks-json-slash-path", _CRP, '           ("json-slash", fwd.replace("/", BS + "/"))]', "           ]",
      _RP + "test_url_and_json_slash_spellings_of_a_path"),
     # M5 named hooks, M8 dotenv
     ("t10fr-registered-hook-unchecked", _CRP, "        missing = [p for p in named if not (root / p).is_file()]",
@@ -4636,12 +4637,12 @@ _T10FR = [
     ("t10fr-dotenv-allowed", _CRP, 'DOTENV_GLOBS = (".env", "*.env", ".env.*", "*.env.local")', "DOTENV_GLOBS = ()",
      _RP + "test_a_dotenv_file_is_refused"),
     # M1/M2 the builder
-    ("t10fr-build-info-attributes-ignored", _BZ, "    if info.is_file() and any(", "    if False and any(",
+    ("t10fr-build-info-attributes-ignored", _BZ, "    if info.exists():", "    if False:",
      _RB + "test_machine_local_info_attributes_refuse_the_build"),
     ("t10fr-build-attributes-file-ignored", _BZ,
-     '    if _git("config", "--get", "core.attributesFile", check=False).stdout.strip():', "    if False:",
-     _RB + "test_a_configured_attributes_file_refuses_the_build"),
-    ("t10fr-build-altering-attrs-allowed", _BZ, 'ALTERING_ATTRS = ("filter=", "export-subst", "export-ignore", "ident")',
+     '"-c", "core.attributesFile=" + _empty_attributes_file().replace("' + BS * 2 + '", "/"), *args],', "*args],",
+     _RB + "test_the_default_global_attributes_file_is_neutralised"),
+    ("t10fr-build-altering-attrs-allowed", _BZ, 'ALTERING_ATTRS = ("filter", "export-subst", "export-ignore", "ident")',
      "ALTERING_ATTRS = ()", _RB + "test_a_committed_attribute_that_alters_the_archive_refuses"),
     ("t10fr-build-submodule-allowed", _BZ, "    if links:", "    if False:", _RB + "test_a_submodule_refuses_the_build"),
     # M4 published/tagged verify
@@ -4654,3 +4655,50 @@ _T10FR = [
      "tests/test_codex_definitions.py::test_the_release_being_cut_is_not_its_own_baseline"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10FR]
+
+# Plan 8 T10 fix round 2 (re-review N1-N3, N5): one twin per new clause.
+_T10FR2 = [
+    # N1 a hit never prints identity text; the workflow masks every spelling first
+    ("t10fr2-label-carries-home-spelling", _CRP, '            needles.append(("identity token #{} ({})".format(k, kind), s.lower()))',
+     '            needles.append(("{} ({})".format(s, kind), s.lower()))',
+     _RP + "test_a_hit_never_prints_the_identity_in_any_spelling"),
+    ("t10fr2-label-carries-path-spelling", _CRP,
+     '            needles.append(("identity token #{} (path, {})".format(k, kind), s.lower()))',
+     '            needles.append(("path {} ({})".format(s, kind), s.lower()))',
+     _RP + "test_a_hit_never_prints_the_identity_in_any_spelling"),
+    ("t10fr2-file-name-not-withheld", _CRP, "            if any(needle in name.lower() for _, needle in needles):",
+     "            if False:", _RP + "test_a_file_name_holding_the_identity_is_withheld"),
+    ("t10fr2-config-folder-printed", _CRP,
+     '            print("  allow-listed the config folder (validated <home>/.../Documents/My Games/Skyrim*)")',
+     '            print("  allow-listed " + c)', _RP + "test_the_config_folder_is_never_printed"),
+    ("t10fr2-mask-only-raw-tokens", _CRP, '    return ["::add-mask::" + v for v in sorted(vals) if v]',
+     '    return ["::add-mask::" + v for v in sorted(set(persons) | set(paths)) if v]',
+     _RP + "test_mask_lines_cover_every_token_and_spelling"),
+    ("t10fr2-wf-no-mask-step", ".github/workflows/release.yml",
+     "        run: python -B tools/check-release-payload.py --mask-tokens", "        run: true",
+     _WT + "test_release_masks_every_identity_spelling_before_anything_prints"),
+    # N3 the token floor
+    ("t10fr2-token-name-floor-off", _CRP, '        elif len(t) < 4 or not re.search(r"[A-Za-z0-9]", t):', "        elif False:",
+     _RP + "test_a_vague_token_is_rejected_by_number_never_text"),
+    ("t10fr2-token-path-floor-off", _CRP,
+     '            if len(t) < 4 or len(segs) < 2 or not any(re.search(r"[A-Za-z0-9]", x) for x in segs):',
+     "            if False:", _RP + "test_a_vague_token_is_rejected_by_number_never_text"),
+    ("t10fr2-token-problems-ignored", _CRP, "    problems = token_problems()\n    if problems:",
+     "    problems = token_problems()\n    if False:", _RP + "test_a_vague_token_is_rejected_by_number_never_text"),
+    # N2 the post-build proof
+    ("t10fr2-proof-misses-dropped-files", _BZ,
+     '    problems = ["missing from the zip: " + p for p in sorted(set(want) - set(got))]', "    problems = []",
+     _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
+    ("t10fr2-proof-misses-extra-files", _BZ,
+     '    problems += ["not in the commit: " + p for p in sorted(set(got) - set(want))]', "    problems += []",
+     _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
+    ("t10fr2-proof-misses-altered-bytes", _BZ,
+     '        if got[p].replace(b"' + BS + 'r' + BS + 'n", b"' + BS + 'n") != blobs[want[p]].replace(b"' + BS + 'r' + BS
+     + 'n", b"' + BS + 'n"):', "        if False:", _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
+    ("t10fr2-proof-not-wired", _BZ, "    if problems:\n        raise Refused(5,", "    if False:\n        raise Refused(5,",
+     _RB + "test_a_build_whose_archive_differs_is_refused_and_writes_nothing"),
+    # N5 attributes parsed, not substring-matched
+    ("t10fr2-attrs-pattern-read-as-attribute", _BZ, "        for attr in parts[1:]:", "        for attr in parts:",
+     _RB + "test_gitattributes_are_parsed_not_substring_matched"),
+]
+MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10FR2]

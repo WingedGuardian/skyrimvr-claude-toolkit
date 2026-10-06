@@ -12,6 +12,7 @@ mutation harness copies the repo without .git.
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 import zipfile
@@ -213,24 +214,145 @@ def _commit_file(repo, rel, text):
 
 
 def test_machine_local_info_attributes_refuse_the_build(tmp_path):
-    """MEASURED by the review: `$GIT_DIR/info/attributes` export-ignore silently dropped a committed file."""
+    """MEASURED by the review: `$GIT_DIR/info/attributes` export-ignore silently dropped a committed file. It
+    cannot be neutralised by config, so its mere presence refuses (re-review N2)."""
     repo = _repo(tmp_path)
     info = repo / ".git" / "info" / "attributes"
     info.parent.mkdir(parents=True, exist_ok=True)
     info.write_text("README.md export-ignore\n", encoding="utf-8")
     r, out = _build(repo, "HEAD", "--version", "1")
     assert r.returncode == 4 and "info/attributes" in r.stderr, r.stdout + r.stderr
-    info.write_text("# a comment only\n\n", encoding="utf-8")
+    info.write_text("# a comment only\n", encoding="utf-8")
+    r, out = _build(repo, "HEAD", "--version", "1")
+    assert r.returncode == 4, r.stdout + r.stderr
+
+
+def _env_with_home(tmp_path):
+    home = tmp_path / "fakehome"
+    (home / ".config" / "git").mkdir(parents=True)
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), XDG_CONFIG_HOME=str(home / ".config"))
+    return home, env
+
+
+def test_a_configured_attributes_file_is_neutralised(tmp_path):
+    """Re-review N2: a configured core.attributesFile no longer reaches the archive (it is forced empty)."""
+    repo = _repo(tmp_path)
+    (tmp_path / "attrs").write_text("*.md eol=crlf\nREADME.md export-ignore\n", encoding="utf-8")
+    _git(repo, "config", "core.attributesFile", str(tmp_path / "attrs"))
     r, out = _build(repo, "HEAD", "--version", "1")
     assert r.returncode == 0, r.stdout + r.stderr
+    with zipfile.ZipFile(_zip(out)) as zf:
+        assert zf.read("skyrimvr-claude-toolkit-1/README.md") == b"hello\n"
 
 
-def test_a_configured_attributes_file_refuses_the_build(tmp_path):
+def test_the_default_global_attributes_file_is_neutralised(tmp_path):
+    """Re-review N2, MEASURED there: with core.attributesFile UNSET, git reads $XDG_CONFIG_HOME/git/attributes,
+    and `export-ignore` there silently dropped a file (exit 0). Now: never a silently smaller zip."""
     repo = _repo(tmp_path)
-    (tmp_path / "attrs").write_text("*.md eol=crlf\n", encoding="utf-8")
-    _git(repo, "config", "core.attributesFile", str(tmp_path / "attrs"))
+    home, env = _env_with_home(tmp_path)
+    (home / ".config" / "git" / "attributes").write_text("README.md export-ignore\n*.txt eol=crlf\n",
+                                                          encoding="utf-8")
+    out = tmp_path / "out-global"
+    r = subprocess.run([sys.executable, "-B", str(BUILDER_PY), "HEAD", "--version", "1", str(out)], cwd=str(repo),
+                       capture_output=True, text=True, timeout=120, env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    with zipfile.ZipFile(_zip(out)) as zf:
+        assert zf.read("skyrimvr-claude-toolkit-1/README.md") == b"hello\n"
+        assert zf.read("skyrimvr-claude-toolkit-1/sub/a.txt") == b"a\n"
+
+
+def _mod_in(repo, monkeypatch):
+    monkeypatch.chdir(repo)
+    spec = importlib.util.spec_from_file_location("brz_" + repo.name, BUILDER_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _rezip(src: bytes, drop=None, change=None):
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(src)) as zin, zipfile.ZipFile(buf, "w") as zout:
+        for zi in zin.infolist():
+            if drop and zi.filename.endswith(drop):
+                continue
+            data = zin.read(zi)
+            if change and zi.filename.endswith(change[0]):
+                data = change[1](data)
+            zout.writestr(zi, data)
+    return buf.getvalue()
+
+
+def test_the_post_build_proof_catches_a_missing_or_altered_member(tmp_path, monkeypatch):
+    """Re-review N2: whatever made the archive, the zip must be the commit's tree minus EXCLUDE, byte for byte
+    (CRLF/LF aside). Each problem kind is planted on a good zip."""
+    repo = _repo(tmp_path)
+    r, out = _build(repo, "HEAD", "--version", "1")
+    assert r.returncode == 0
+    good = _zip(out).read_bytes()
+    m = _mod_in(repo, monkeypatch)
+    sha = _git(repo, "rev-parse", "HEAD")
+    name = "skyrimvr-claude-toolkit-1"
+    assert m.prove(good, sha, name) == []
+    assert m.prove(_rezip(good, change=("README.md", lambda d: d.replace(b"\n", b"\r\n"))), sha, name) == []
+    assert any("missing from the zip: README.md" in p for p in m.prove(_rezip(good, drop="README.md"), sha, name))
+    assert any("bytes differ" in p and "sub/a.txt" in p
+               for p in m.prove(_rezip(good, change=("sub/a.txt", lambda d: b"injected\n")), sha, name))
+    extra = _rezip(good)
+    import io
+    buf = io.BytesIO(extra)
+    with zipfile.ZipFile(buf, "a") as zf:
+        zf.writestr(name + "/stray.txt", "x")
+    assert any("not in the commit: stray.txt" in p for p in m.prove(buf.getvalue(), sha, name))
+
+
+def test_a_build_whose_archive_differs_is_refused_and_writes_nothing(tmp_path, monkeypatch):
+    """The proof is wired into the build: an archive missing a file (as an unseen attribute source would make
+    it) refuses with exit 5 and no zip."""
+    import io
+    import tarfile
+    repo = _repo(tmp_path)
+    m = _mod_in(repo, monkeypatch)
+    real = m._archive
+
+    def smaller(sha):
+        src = tarfile.open(fileobj=io.BytesIO(real(sha)))
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as dst:
+            for mem in src.getmembers():
+                if not mem.name.endswith("README.md"):
+                    dst.addfile(mem, src.extractfile(mem) if mem.isfile() else None)
+        return buf.getvalue()
+
+    monkeypatch.setattr(m, "_archive", smaller)
+    sha = _git(repo, "rev-parse", "HEAD")
+    with pytest.raises(m.Refused) as e:
+        m.build(sha, "1", tmp_path / "out-proof")
+    assert e.value.code == 5 and "README.md" in str(e.value)
+    assert not list((tmp_path / "out-proof").glob("*.zip"))
+
+
+@pytest.mark.parametrize("text,want", [
+    ("residents/** text\nidentity.txt text eol=lf\n", []),            # names in a PATTERN are not attributes
+    ("*.sh -ident !filter\n", []),                                      # unset / unspecified are harmless
+    ("ident text\n", []),                                               # a FILE named like an attribute
+    ("*.sh text ident\n", ["ident"]),
+    ("*.bin filter=lfs -text\n", ["filter"]),
+    ("# *.txt export-subst\n*.md export-ignore\n", ["export-ignore"]),
+])
+def test_gitattributes_are_parsed_not_substring_matched(text, want):
+    """Re-review N5: `residents/**` contains "ident" and must not refuse a build."""
+    spec = importlib.util.spec_from_file_location("brz_parse", BUILDER_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.altering_attributes(text) == want
+
+
+def test_a_pattern_named_like_an_attribute_still_builds(tmp_path):
+    repo = _repo(tmp_path)
+    _commit_file(repo, ".gitattributes", "residents/** text eol=lf\n")
     r, _ = _build(repo, "HEAD", "--version", "1")
-    assert r.returncode == 4 and "core.attributesFile" in r.stderr, r.stdout + r.stderr
+    assert r.returncode == 0, r.stdout + r.stderr
 
 
 @pytest.mark.parametrize("attr", ["*.md filter=lfs diff=lfs merge=lfs -text", "*.txt export-subst",

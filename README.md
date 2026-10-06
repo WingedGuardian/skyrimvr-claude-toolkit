@@ -530,8 +530,11 @@ everything a scrubbed install generates for your user name, home folder and real
 environment, never written into the repo), for the values of your API keys, and for key-shaped strings. That
 local run is the authoritative identity-leak gate. The release workflow repeats the grep, but a CI runner
 does not know who you are: set the repository secret **`LEAK_TOKENS`** (Settings -> Secrets and variables ->
-Actions) to your user name and your home and game folders, one per line. If the secret is missing or empty,
-the release workflow refuses to publish.
+Actions) to your user name and your home and game folders, one per line. Write each folder ONCE, as a
+Windows path (`C:\Users\<you>`, `D:\Games\Skyrim VR`): the checker derives the other spellings itself
+(forward slashes, JSON-escaped, `/c/...`, URL-encoded). A name needs at least 4 characters and a folder at
+least two named levels, or the token is rejected (by line number; the release log never prints a token or a
+matched spelling). If the secret is missing, empty or rejected, the release workflow refuses to publish.
 
 The changelog and mod-page description are passed in, not generated: extracting a version block
 from `CHANGELOG.md` yields raw markdown, while the Nexus box renders a flat list and wants one

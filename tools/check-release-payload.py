@@ -299,13 +299,37 @@ def leak_names(env=None, home=None):
     return sorted({n for n in names if len(n) >= 3 and "/" not in n and BS not in n})
 
 
+def _raw_tokens(env):
+    return [t.strip() for t in env.get("LEAK_TOKENS", "").replace("\r", "\n").split("\n") if t.strip()]
+
+
+def _is_path(t):
+    return "/" in t or BS in t or ":" in t
+
+
 def leak_tokens(env=None):
     """LEAK_TOKENS (newline-separated; the release workflow fills it from a repository secret): a token holding
     a path separator or a drive colon is a path, anything else a person's name. -> (names, paths)"""
     env = os.environ if env is None else env
-    toks = [t.strip() for t in env.get("LEAK_TOKENS", "").replace("\r", "\n").split("\n") if t.strip()]
-    paths = [t for t in toks if "/" in t or BS in t or ":" in t]
-    return [t for t in toks if t not in paths and len(t) >= 3], paths
+    toks = _raw_tokens(env)
+    paths = [t for t in toks if _is_path(t)]
+    return [t for t in toks if t not in paths], paths
+
+
+def token_problems(env=None):
+    """Review N3: a token too short or too vague matches nearly every file and blocks every release. Each
+    problem names the token by its LINE NUMBER only, never by its text."""
+    env = os.environ if env is None else env
+    out = []
+    for k, t in enumerate(_raw_tokens(env), 1):
+        if _is_path(t):
+            segs = [x for x in re.split(r"[\\/]+", t) if x and not re.fullmatch(r"[A-Za-z]:", x)]
+            if len(t) < 4 or len(segs) < 2 or not any(re.search(r"[A-Za-z0-9]", x) for x in segs):
+                out.append("token #{}: a path needs at least two named folders (write it as a Windows path, "
+                           "e.g. C:\\Games\\Skyrim; the other spellings are derived)".format(k))
+        elif len(t) < 4 or not re.search(r"[A-Za-z0-9]", t):
+            out.append("token #{}: a name needs at least 4 characters, letters or digits".format(k))
+    return out
 
 
 def secret_values(env=None, checkout=None):
@@ -329,31 +353,63 @@ def config_dir_ok(cfg: str, home: str) -> bool:
     return bool(CONFIG_SHAPE.match(c[len(h) + 1:]))
 
 
-def path_spellings(path: str):
-    """One path as files spell it: forward, backslash, JSON-escaped backslash or slash, MSYS (/c/...), and
-    URL-encoded spaces."""
+def path_spelling_kinds(path: str):
+    """[(kind, spelling)]: one path as files spell it -- forward, backslash, JSON-escaped backslash or slash,
+    MSYS (/c/...), each also with URL-encoded spaces. The kind is what a report may print; the spelling never."""
     fwd = path.replace(BS, "/").rstrip("/")
-    out = {fwd, fwd.replace("/", BS), fwd.replace("/", BS * 2), fwd.replace("/", BS + "/")}
+    out = [("forward", fwd), ("backslash", fwd.replace("/", BS)), ("json-escaped", fwd.replace("/", BS * 2)),
+           ("json-slash", fwd.replace("/", BS + "/"))]
     m = re.match(r"^([A-Za-z]):/(.*)$", fwd)
     if m:
-        out.add("/{}/{}".format(m.group(1).lower(), m.group(2)))
-    out |= {s.replace(" ", "%20") for s in out}
-    return sorted(s for s in out if s)
+        out.append(("msys", "/{}/{}".format(m.group(1).lower(), m.group(2))))
+    out += [(k + ", url-encoded", v.replace(" ", "%20")) for k, v in out if " " in v]
+    seen, uniq = set(), []
+    for k, v in out:
+        if v and v not in seen:
+            seen.add(v)
+            uniq.append((k, v))
+    return uniq
+
+
+def path_spellings(path: str):
+    return sorted({v for _, v in path_spelling_kinds(path)})
 
 
 def leak_needles(names, extra_paths=(), persons=()):
     """(label, lowercase needle) pairs. Home-path spellings for every name; the bare name when it is a person's
     (`persons` are always people: they come from LEAK_TOKENS)."""
-    needles = []
+    # Labels are `identity token #k (<spelling kind>)` -- review N1: a hit printed in a CI log must not publish
+    # the identity the gate guards, so no label ever carries the needle.
+    needles, k = [], 0
     for n in list(names) + list(persons):
-        for s in ("Users/" + n, "Users" + BS + n, "Users" + BS * 2 + n, "/home/" + n, "Users%2F" + n):
-            needles.append(("home path ({})".format(s), s.lower()))
+        k += 1
+        for kind, s in (("home path, forward", "Users/" + n), ("home path, backslash", "Users" + BS + n),
+                        ("home path, json-escaped", "Users" + BS * 2 + n), ("home path, /home", "/home/" + n),
+                        ("home path, url-encoded", "Users%2F" + n)):
+            needles.append(("identity token #{} ({})".format(k, kind), s.lower()))
         if n in persons or (n.lower() not in GENERIC_ACCOUNTS and len(n) >= 4):
-            needles.append(("user name", n.lower()))
+            needles.append(("identity token #{} (bare name)".format(k), n.lower()))
     for p in extra_paths:
-        for s in path_spellings(p):
-            needles.append(("path ({})".format(s), s.lower()))
+        k += 1
+        for kind, s in path_spelling_kinds(p):
+            needles.append(("identity token #{} (path, {})".format(k, kind), s.lower()))
     return needles
+
+
+def mask_lines(env=None):
+    """`::add-mask::` lines for every LEAK_TOKENS token and every spelling derived from it (both cases), so a
+    GitHub log never shows one in clear. Printed by the release workflow BEFORE any step that could print."""
+    env = os.environ if env is None else env
+    persons, paths = leak_tokens(env)
+    vals = set(persons) | set(paths)
+    for _, needle in leak_needles([], paths, persons):
+        vals.add(needle)
+    for p in paths:
+        vals |= set(path_spellings(p))
+    for n in persons:
+        vals |= {"Users/" + n, "Users" + BS + n, "Users" + BS * 2 + n, "/home/" + n, "Users%2F" + n}
+    vals |= {v.lower() for v in vals}
+    return ["::add-mask::" + v for v in sorted(vals) if v]
 
 
 def _line_of(text, idx):
@@ -378,27 +434,35 @@ def scan_leaks(dirs, needles, allow_prefixes=(), baseline=None, secrets=(), shap
                 if twin.is_file() and twin.read_bytes() == data:
                     continue
             name = "{}/{}".format(d.name, f.relative_to(d).as_posix())
+            if any(needle in name.lower() for _, needle in needles):
+                name = "{}/<file name withheld: it holds an identity token>".format(d.name)
             label = None
             for enc in ("utf-8", "utf-16-le", "utf-16-be"):
                 raw = data.decode(enc, errors="ignore")
                 text = raw.lower()
                 for a in allow:
                     text = text.replace(a, "<allowed>")
-                label = next((lb for lb, needle in needles if needle in text), None)
+                line = None
+                for lb, needle in needles:
+                    i = text.find(needle)
+                    if i >= 0:
+                        label, line = lb, _line_of(text, i)
+                        break
                 if label is None:
                     for lb, value in secrets:
                         i = raw.find(value)
                         if i >= 0:
-                            label = "{} (line {})".format(lb, _line_of(raw, i))
+                            label, line = lb, _line_of(raw, i)
                             break
                 if label is None:
                     for lb, rx in shapes:
                         m = rx.search(raw)
                         if m:
-                            label = "{} (line {})".format(lb, _line_of(raw, m.start()))
+                            label, line = lb, _line_of(raw, m.start())
                             break
                 if label is not None:
-                    hits.append((name, label))
+                    # file:line and a label only -- never the matched text or the line around it.
+                    hits.append(("{}:{}".format(name, line), label))
                     break
     return hits
 
@@ -429,6 +493,12 @@ def run_leaks(args) -> int:
                          "[--allow-config DIR --home HOME] [--changed-from DIR] [--require-tokens]\n")
         return 2
     persons, token_paths = leak_tokens()
+    problems = token_problems()
+    if problems:
+        for p in problems:
+            print("  !! LEAK_TOKENS " + p)
+        print("LEAKS: COULD NOT CHECK -- fix the LEAK_TOKENS lines named above (by number; their text is not shown)")
+        return 2
     if require and not (persons or token_paths):
         # Fail CLOSED: on a CI runner the environment names `runner`, so without the maintainer's tokens this
         # grep would pass a tree full of the maintainer's paths.
@@ -438,9 +508,9 @@ def run_leaks(args) -> int:
     for c in cfgs:
         if config_dir_ok(c, home):
             allow.append(c)
-            print("  allow-listed config folder (exact): {}".format(c))
+            print("  allow-listed the config folder (validated <home>/.../Documents/My Games/Skyrim*)")
         else:
-            print("  !! NOT allow-listed (not <home>/.../Documents/My Games/Skyrim*): {}".format(c))
+            print("  !! config folder NOT allow-listed: it is not <home>/.../Documents/My Games/Skyrim*")
     names = leak_names()
     extra = [p for p in os.environ.get("RELEASE_LEAK_PATHS", "").split("|") if p.strip()] + token_paths
     secrets = secret_values(checkout=Path(__file__).resolve().parent.parent)
@@ -453,7 +523,7 @@ def run_leaks(args) -> int:
                                    len(KEY_SHAPES)))
     hits = scan_leaks(dirs, needles, allow, baseline, secrets)
     for f, label in hits:
-        print("  !! {}: {}".format(f, label))
+        print("  !! {}: {}".format(f, label))   # f is file:line; label never carries the matched text
     print("LEAKS: " + ("none" if not hits else "{} FILE(S) CARRY A HOME PATH, NAME OR KEY".format(len(hits))))
     return 1 if hits else 0
 
@@ -470,6 +540,10 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["--leaks"]:
         return run_leaks(argv[1:])
+    if argv == ["--mask-tokens"]:
+        for ln in mask_lines():
+            print(ln)
+        return 0
     root, expect, sections, i = None, None, [], 0
     while i < len(argv):
         a = argv[i]

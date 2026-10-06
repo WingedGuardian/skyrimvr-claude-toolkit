@@ -357,7 +357,8 @@ except Exception:
   # The config folder is NOT taken on trust from setup's own output: the checker allow-lists it only if it is
   # <home>/.../Documents/My Games/Skyrim*, strictly below the REAL home (the parent's, not the scrubbed one).
   [ -n "$cfg" ] && allow+=(--allow-config "$cfg" --home "$(winpath "${REAL_HOME}")")
-  note "allowed in generated files (machine discovery)" "$pybase${cfg:+ | $cfg (if shaped right)}"
+  # Named by role, never printed: on this machine both sit under the maintainer's home (review N1).
+  note "allowed in generated files (machine discovery)" "the Python install${cfg:+, the config folder if shaped right}"
   "$PY" "$HERE/check-release-payload.py" --leaks "$(winpath "$GAME")" "${allow[@]}" --changed-from "$(winpath "$ROOT")" "${REQ[@]}"; rc=$?
   case $rc in
     0) ok "no home path or user name in the installed files" ;;

@@ -215,7 +215,7 @@ def test_a_generic_account_is_searched_by_path_only(tmp_path):
     (tmp_path / "prose.md").write_text("the CI runner runs it", encoding="utf-8")
     assert not m.scan_leaks([tmp_path], m.leak_needles(["runner"]))
     (tmp_path / "path.md").write_text("/home/runner/work", encoding="utf-8")
-    assert [h[0].rsplit("/", 1)[-1] for h in m.scan_leaks([tmp_path], m.leak_needles(["runner"]))] == ["path.md"]
+    assert [h[0].rsplit("/", 1)[-1].split(":")[0] for h in m.scan_leaks([tmp_path], m.leak_needles(["runner"]))] == ["path.md"]
 
 
 def test_extra_paths_are_found_in_every_spelling(tmp_path):
@@ -233,7 +233,7 @@ def test_an_allowed_prefix_is_blanked_but_anything_else_under_the_home_is_not(tm
     assert not m.scan_leaks([tmp_path], m.leak_needles([NAME]), [work])
     (tmp_path / "other.md").write_text("C:/Users/" + NAME + "/Desktop/secret", encoding="utf-8")
     hits = m.scan_leaks([tmp_path], m.leak_needles([NAME]), [work])
-    assert [h[0].rsplit("/", 1)[-1] for h in hits] == ["other.md"]
+    assert [h[0].rsplit("/", 1)[-1].split(":")[0] for h in hits] == ["other.md"]
 
 
 def _leaks(dirs, env, *extra):
@@ -303,7 +303,7 @@ def test_changed_from_skips_only_byte_identical_files(tmp_path):
     (base / "changed.md").write_text("clean", encoding="utf-8")
     (inst / "changed.md").write_text(leak, encoding="utf-8")
     (inst / "new.md").write_text(leak, encoding="utf-8")
-    hits = sorted(h[0].rsplit("/", 1)[-1] for h in m.scan_leaks([inst], m.leak_needles([NAME]), baseline=base))
+    hits = sorted(h[0].rsplit("/", 1)[-1].split(":")[0] for h in m.scan_leaks([inst], m.leak_needles([NAME]), baseline=base))
     assert hits == ["changed.md", "new.md"], hits
 
 
@@ -358,7 +358,7 @@ def test_a_secret_value_is_found_and_never_printed(tmp_path):
     (tmp_path / "a.md").write_text("line one\nkey = " + FAKE_SECRET + "\n", encoding="utf-8")
     r = _leaks([tmp_path], _clean_env(USERNAME=NAME, X4_NEXUS_KEY=FAKE_SECRET))
     assert r.returncode == 1, r.stdout
-    assert "secret value of X4_NEXUS_KEY (line 2)" in r.stdout
+    assert "a.md:2: secret value of X4_NEXUS_KEY" in r.stdout
     assert FAKE_SECRET not in r.stdout + r.stderr
 
 
@@ -387,7 +387,7 @@ def test_every_key_shape_is_found(tmp_path, kind):
     m = _mod()
     (tmp_path / "f.md").write_text("x\nconfig " + _shape(kind) + " end\n", encoding="utf-8")
     hits = m.scan_leaks([tmp_path], [])
-    assert hits and "(line 2)" in hits[0][1], (kind, hits)
+    assert hits and hits[0][0].endswith("f.md:2"), (kind, hits)
 
 
 @pytest.mark.parametrize("text", [
@@ -467,3 +467,69 @@ def test_a_registered_hook_missing_from_the_payload_is_named(payload):
     r = _check(payload, "--section", "hooks")
     line = _line(r.stdout, ".claude/settings.json registers the hooks")
     assert r.returncode == 1 and "!!" in line and "protect-mcp.sh" in line, r.stdout
+
+
+# ------------------------------------------------------------------ fix round 2 (re-review N1, N3)
+
+TOKEN_NAME = "Qorvath"                          # synthetic identity: never the maintainer's
+TOKEN_PATH = "D:" + "\\" + "Qgames" + "\\" + "Skyrim Zelvane Edition"   # shares no text with TOKEN_NAME
+
+
+def _all_spellings():
+    m = _mod()
+    out = {TOKEN_NAME, TOKEN_PATH} | set(m.path_spellings(TOKEN_PATH))
+    out |= {"Users/" + TOKEN_NAME, "Users" + m.BS + TOKEN_NAME, "/home/" + TOKEN_NAME}
+    return {x.lower() for x in out}
+
+
+def test_a_hit_never_prints_the_identity_in_any_spelling(tmp_path):
+    """Re-review N1: a failing CI run must not publish the identity the gate guards. Every spelling is planted,
+    each in its own file; the report names file:line and `identity token #k (kind)` only."""
+    m = _mod()
+    for i, (kind, sp) in enumerate(m.path_spelling_kinds(TOKEN_PATH)):
+        (tmp_path / "p{}.md".format(i)).write_text("x\nsee " + sp + "/Data\n", encoding="utf-8")
+    (tmp_path / "n.md").write_text("by " + TOKEN_NAME + " at C:/Users/" + TOKEN_NAME + "/x", encoding="utf-8")
+    env = _clean_env(USERNAME="runner", LEAK_TOKENS=TOKEN_NAME + "\n" + TOKEN_PATH)
+    r = _leaks([tmp_path], env, "--require-tokens", "--allow-config", "C:/Users/runner", "--home", "C:/Users/runner")
+    assert r.returncode == 1, r.stdout + r.stderr
+    out = (r.stdout + r.stderr).lower()
+    assert "identity token #" in out and ":2: identity token" in out
+    leaked = sorted(sp for sp in _all_spellings() if sp in out)
+    assert not leaked, "the report printed identity text ({} spelling(s))".format(len(leaked))
+
+
+def test_a_file_name_holding_the_identity_is_withheld(tmp_path):
+    (tmp_path / (TOKEN_NAME + "-notes.md")).write_text("hello " + TOKEN_NAME, encoding="utf-8")
+    r = _leaks([tmp_path], _clean_env(USERNAME="runner", LEAK_TOKENS=TOKEN_NAME))
+    assert r.returncode == 1 and "withheld" in r.stdout and TOKEN_NAME.lower() not in r.stdout.lower(), r.stdout
+
+
+def test_the_config_folder_is_never_printed(tmp_path):
+    cfg = "C:/Users/" + TOKEN_NAME + "/Documents/My Games/Skyrim VR"
+    (tmp_path / "a.md").write_text("clean", encoding="utf-8")
+    for home in ("C:/Users/" + TOKEN_NAME, "C:/Users/other"):
+        r = _leaks([tmp_path], _clean_env(USERNAME="runner", LEAK_TOKENS=TOKEN_NAME), "--allow-config", cfg, "--home", home)
+        assert TOKEN_NAME.lower() not in (r.stdout + r.stderr).lower(), r.stdout
+
+
+def test_mask_lines_cover_every_token_and_spelling():
+    """What release.yml prints (as ::add-mask:: commands, which GitHub consumes) before any step can print."""
+    m = _mod()
+    masked = {ln[len("::add-mask::"):].lower() for ln in m.mask_lines({"LEAK_TOKENS": TOKEN_NAME + "\n" + TOKEN_PATH})}
+    assert _all_spellings() <= masked, sorted(_all_spellings() - masked)
+    assert m.mask_lines({}) == []
+
+
+@pytest.mark.parametrize("tokens,bad", [
+    ("abc", "token #1"), ("----", "token #1"), (":", "token #1"), ("/", "token #1"), ("C:" + "\\", "token #1"),
+    ("C:" + "\\" + "Games", "token #1"), (TOKEN_NAME + "\n..", "token #2"),
+])
+def test_a_vague_token_is_rejected_by_number_never_text(tmp_path, tokens, bad):
+    """Re-review N3: a 3-letter name or a bare separator matches nearly every file and blocks every release."""
+    (tmp_path / "a.md").write_text("clean", encoding="utf-8")
+    r = _leaks([tmp_path], _clean_env(USERNAME="runner", LEAK_TOKENS=tokens), "--require-tokens")
+    assert r.returncode == 2 and bad in r.stdout, r.stdout
+
+
+def test_sound_tokens_pass_the_floor():
+    assert _mod().token_problems({"LEAK_TOKENS": TOKEN_NAME + "\n" + TOKEN_PATH + "\n/home/" + TOKEN_NAME}) == []

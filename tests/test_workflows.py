@@ -189,6 +189,15 @@ def test_release_gates_are_in_order():
     assert co["with"]["fetch-depth"] == 0 and co["with"]["ref"] == "${{ github.event.inputs.tag || github.ref }}"
 
 
+def test_release_masks_every_identity_spelling_before_anything_prints():
+    """Re-review N1: GitHub masks a secret's literal value, not the spellings derived from it. The mask step is
+    the first step that runs a script, and it reads the same secret."""
+    _, steps = _release_steps()
+    first = _index(steps, lambda s: "run" in s)
+    assert "check-release-payload.py --mask-tokens" in steps[first]["run"], steps[first].get("name")
+    assert steps[first].get("env", {}).get("LEAK_TOKENS") == "${{ secrets.LEAK_TOKENS }}"
+
+
 def test_the_ci_release_build_builds_before_anything_writes():
     _, data = _load("ci.yml")
     steps = _steps(data["jobs"]["release-build"])
