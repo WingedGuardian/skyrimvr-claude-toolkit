@@ -157,7 +157,8 @@ the 60 s rate limit stands**. The margin is 13–19 ms.
 - One call in ten that walks can take 160–168 ms at p95.
 - The first session's cold baseline costs about 100 s in total. It is spread across the session-start box and per-call
   boxes of 0.25 s.
-- To re-run: `scratchpad/p6t14/measure3.py` and `stream.py`.
+- To re-run: `scripts/measure/snapshot_shapes.py` then `scripts/measure/snapshot_stream.py` (committed in Task 18;
+  Task 14 ran the scratchpad originals). The Task 18 re-run is below.
 
 ## Task 15: recovery snapshots and `snapshot restore`
 
@@ -191,3 +192,100 @@ historically, and it covers a write into the install that no other write rule se
 - **Fix round 2** (the rule now matches any spelling of the verb and the flag, and the CLI parsers set
   `allow_abbrev=False`): over 75,670 calls, **1 newly-ask, 0 other changes**. The one hit is the re-reviewer's own
   probe of an abbreviated in-place restore (`--in`) in a scratch install, so it is a true positive.
+
+## Task 18: the release gate (2026-10-05/06)
+
+### Step 1: mutation gate
+
+Every `l2-*` and `rule-*` param in `tests/test_mutations.py`, run by node id through the budget tool in 8 serial chunks
+(`rb.py run --cpu 8 --ram 3`): **702 of 702 killed** (328 `l2-*`, 374 `rule-*`; each passes only when its NAMED test
+fails on the mutated copy). Anchor check by script, the `test_mutation_anchors.py` rule: **all 1,300 anchors occur
+exactly once**; every named test collects (two named by their parametrized function, `tests/test_skyguard_t12.py`,
+which pytest selects as the whole parametrization). No survivor, so nothing to re-anchor or strengthen.
+
+### Step 2: cumulative pricing, `price.py --base 544efd4` (the Task 6 base)
+
+N = **75,933** unique items (Bash 67,387; Write 4,624; Edit 2,047; PowerShell 1,868; mcp 7). Engine errors 0/0. Parse
+failures 68 old / 68 new (Bash 66 of 67,387 = 0.098%; PowerShell 2 of 1,868 = 0.107%); reason_moved 0.
+Matrix (old>new): allow>allow 75,345; advise>advise 216; allow>advise 24; allow>ask 1; allow>deny 3; ask>ask 13;
+deny>deny 331. **No-longer-* in every direction: 0** (nothing Plan 6 loosened over history).
+
+| Rule | newly-deny | newly-ask | newly-advise |
+|---|---|---|---|
+| S-LIFT-RAW | 1 | 0 | 0 |
+| S-SELF-STATE | 2 | 0 | 0 |
+| S-RESTORE-INPLACE | 0 | 1 | 0 |
+| S-SELF-GUARD | 0 | 0 | 11 |
+| W-SELF-GUARD | 0 | 0 | 13 |
+| every other Plan 6 rule (S-LIFT-NOTE, S-LIFT-PERMANENT, S-LIFT-UNLOCKCMD, W-SELF-STATE, ...) | 0 | 0 | 0 |
+
+Total 3 newly-deny + 1 newly-ask = 4, far under the 200 cap. Every one read by hand:
+
+1. **S-LIFT-RAW deny: FP, accepted (Task 11).** A review agent's scratch install, `R="C:/Temp/p6rev/Game (x86) & Co";
+   icacls "$R/Data/HearthFires.esm" /reset`. The variable is not resolved, the word ends in a lock name, so it fails
+   closed by design.
+2. **S-SELF-STATE deny: FP, accepted (Task 12).** A Phase A subagent building a scratch install, `cd $R && echo '{}' >
+   .skyguard/state.json`; the cwd after `cd $R` is unresolved.
+3. **S-SELF-STATE deny: FP, same class, new since Task 12.** The Task 16 reviewer seeding a scratch
+   `.skyguard/lock.json` after `cd $S/a` (unresolved). Writing the path absolute avoids it. Cosmetic: the message says
+   lock.json "holds the guards' on/off state", which is true of state.json only.
+4. **S-RESTORE-INPLACE ask: TP (Task 15 fix round 2).** The re-reviewer's own `--in` / `--in-pl` probe of an in-place
+   restore in a scratch install.
+
+The 24 advise items are **the identical set** Task 12 read (compared as a set against `C:/Temp/p6t12-price-e`: 24 of
+24 shared) and were re-skimmed: hook staging/swaps of `protect-*.sh(.new)`, `_diag-capture.sh`, project and user-level
+`settings.json` edits, all user-requested maintenance. Cosmetic: a move of `protect-bash.sh.new` onto
+`protect-bash.sh` names the move's source in the note. Raw items: scratchpad `p6t18/price` (outside the repo).
+
+### Step 3: snapshot latency gate, re-run with Task 15's re-check sweep (controller ruling)
+
+Re-run with the committed scripts on the code at c69eaaa, which includes Task 15's single-link re-check (bounded
+256 paths / 6 ms) inside the comparison path. In process, n = 200 per shape, machine background CPU ~6%; trees built in
+the scratchpad and sent to the Recycle Bin afterwards.
+
+| Tree | in window p95 | outside, unchanged p95 | outside, one `.psc` changed p95 | cold baseline |
+|---|---|---|---|---|
+| 3,049 hard-linked (as the live install) | 25.0 | 121.2 | **148.5** | 98.8 s |
+| all 11,898 hard-linked (re-stat capped) | 18.2 | 110.7 | **150.7** | 102.4 s |
+
+Call stream, read-only over this install's transcripts (`--transcripts ~/.claude/projects/<install>`): 486 files,
+2026-03-20 .. 2026-10-06; 39,398 `tool_use` events; 23,282 snapshot-hook calls (6,610 read-only, 16,672 walk);
+2,593 script-change events (heuristic, ASSUMED to be the change rate). Gaps between walking calls: median 12.0 s;
+84.0% under 60 s. Classes under RATE 60: in window 11,452; outside unchanged 4,127; outside changed 1,093.
+
+| Tree | stream p95, every hook call | **stream p95, walking calls only (the gate)** | worst single-shape p95 |
+|---|---|---|---|
+| 3,049 hard-linked | 126.6 | **129.9** | 148.5 |
+| all hard-linked, capped | 113.9 | **137.7** | 150.7 |
+
+**Verdict: the gate holds (≤ 150 ms); RATE stays 60 s.** Margin 12–20 ms. Against Task 14 (131.1 / 137.3 ms) the
+re-check sweep moved the stream p95 by -1.2 / +0.4 ms, inside resample noise; the worst single shape fell from
+167.7 / 160.0 to 148.5 / 150.7 ms (cause not isolated; this run's machine was quieter, ~6% vs 5–16%).
+
+Sensitivity, not the gate as defined: the hook also runs Task 15's recovery snapshot (load order + INIs; MEASURED p95
+0.62 ms in window, 13.8 ms on the once-a-minute re-read). Charging 13.8 ms to EVERY out-of-window walking call
+(conservative: the two stores' 60 s windows are independent) gives a walking-call stream p95 of **143.7 ms** (as-live
+tree) and **151.5 ms** (fully linked tree, 1.5 ms over). Reported, RATE not changed.
+
+### Step 4: wrapper latency (`scripts/guard-latency.py`, 50 runs, 2026-10-06)
+
+Configured copy: `git archive HEAD` (c69eaaa) into `C:/Temp/p6t18-lat/game`, zero-byte `SkyrimVR.exe`, `setup.sh` with
+Documents/LOCALAPPDATA pointed into scratch. Run alone through `rb.py` (background CPU 6.3%: the idle run Task 6 owed).
+
+| Wrapper | min | median | p95 | max (ms) | Task 6 p95 (45% load) | Plan 5 p95 (4–16% load, 3 runs) |
+|---|---|---|---|---|---|---|
+| protect-bash | 169 | 174 | 281 | 476 | 416 | 905 / 471 / 372 |
+| protect-files | 171 | 188 | 279 | 325 | 482 | 1,105 / 1,667 / 360 |
+| protect-mcp | 170 | 189 | 281 | 469 | 480 | -- |
+| backup-before-edit | 154 | 171 | 218 | 220 | 437 | -- |
+| snapshot-before-tool | 156 | 172 | 220 | 314 | 391 | -- |
+| session-kb-guard | 488 | 558 | **640** | 688 | 9,221 | 838 / 1,011 / 2,113 |
+
+**Gate PASS: worst p95 640 ms ≤ 1 s.** Every per-call wrapper is lower than both earlier runs; those ran under heavier
+load, so the delta is mostly load, not code (INFERRED; the engine work Plan 6 added per call is ms-scale, measured
+in-process above and in Tasks 13–15). `session-kb-guard` now carries the Layer 2 session start and still passes idle.
+
+**Codex headroom.** The configured copy's real Windows entry (`pwsh -File .codex/hooks/skyguard-entry.ps1 pre-tool`,
+payload on stdin), 45 calls over three commands (`git status` walk, a decoy `.esp` `Set-Content` deny, `python
+--version`): p50 402 ms, **p95 464 ms**, max 494 ms. Headroom under the 1 s gate: **~536 ms** (Plan 4 E2E: p95 541 ms
+from heartbeat latency lines, so no measurable regression). Timeout in `.codex/hooks.json`: 60 s.
