@@ -402,9 +402,13 @@ def test_mutation_l2_unlock_tty(bed, tmp_path, monkeypatch):
 
 @needs_windows
 def test_mutation_l2_unlock_ace_before_bit(bed, tmp_path):
+    # Our deny ACE denies WA (write attributes), so clearing the bit before removing it is itself refused. The
+    # `protected` argument is fix-A I2's (unlock writes back the DACL protection recorded at lock time).
     m = _mutant(tmp_path,
-                "    w.remove_ours(p, (MASK_FULL, MASK_PRE))\n    if not keep_bit:\n        w.set_readonly(p, False)\n",
-                "    if not keep_bit:\n        w.set_readonly(p, False)\n    w.remove_ours(p, (MASK_FULL, MASK_PRE))\n")
+                "    w.remove_ours(p, (MASK_FULL, MASK_PRE), protected)\n    if not keep_bit:\n"
+                "        w.set_readonly(p, False)\n",
+                "    if not keep_bit:\n        w.set_readonly(p, False)\n"
+                "    w.remove_ours(p, (MASK_FULL, MASK_PRE), protected)\n")
     _red(_scenario_unlock_ok, "unlock failed", m, bed)
 
 
