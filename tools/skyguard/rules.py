@@ -379,7 +379,7 @@ RULES = {
         "legacy": False,
         "prefixes": [],
         "template": (
-        'This writes snapshot files back over the live load order, INIs, saves or scripts.\n'
+        'This writes a snapshot or a pre-edit backup back over the live files (load order, INIs, saves, scripts).\n'
         'Yes restores them; each file it replaces is backed up first.'
     ),
     },

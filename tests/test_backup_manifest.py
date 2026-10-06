@@ -243,7 +243,10 @@ def restore(project, *args):
 def bsa(tmp_path):
     d = tmp_path / "Data"
     d.mkdir()
-    f = d / "Skyrim_VR - Main.bsa"
+    # The name that broke the legacy guess (`_` read as `/`), with an .ini extension: since the Plan 6 final fix (lane
+    # B I1) a restore never writes a plugin or archive (test_restore_backup_containment), as an in-place snapshot
+    # restore never does.
+    f = d / "Skyrim_VR - Main.ini"
     f.write_bytes(b"original")
     take(tmp_path, f)
     return f

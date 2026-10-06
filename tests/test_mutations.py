@@ -6565,4 +6565,35 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/state.py", '        if f[2] == "compact":\n            continue', "        pass",
      "tests/test_skyguard_shadow.py::test_a_compact_does_not_end_guards_off_and_status_agrees", "fixA-m1-compact"),
 ]]
+_FXB1 = "tests/test_restore_backup_containment.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # B-I1: the backup restore refuses the guard's files, a plugin or archive...
+    ("tools/skyguard/backup.py", "    why = _restore_refusal(target)\n    if why:", '    why = ""\n    if why:',
+     _FXB1 + "test_the_reviewers_state_json_probe_is_refused_at_the_restore", "fixA-b1-containment"),
+    # ...reading the target through links too...
+    ("tools/skyguard/backup.py", "    for p in (str(target), os.path.realpath(str(target))):", "    for p in (str(target),):",
+     _FXB1 + "test_a_restore_through_a_junction_into_the_state_is_refused", "fixA-b1-realpath"),
+    # ...backup-before-edit no longer copies the state...
+    ("tools/skyguard/backup.py", r', r"[/\\]\.skyguard[/\\]")', ")",
+     _FXB1 + "test_the_state_folder_is_not_backed_up_at_all", "fixA-b1-skip-state"),
+    # ...and the guard asks before `restore-from-backup --restore` (S-RESTORE-INPLACE)...
+    ("tools/skyguard/lift_rules.py", "    return restore_backup(parsed)", "    return False",
+     _FXB1 + "test_the_guard_asks_before_a_backup_restore[sh]", "fixA-b1-guard-wired"),
+    ("tools/skyguard/lift_rules.py", "        if shellparse._PYTHON.fullmatch(e.program or \"\") and any(\"backup\" in a",
+     "        if False and any(\"backup\" in a", _FXB1 + "test_the_guard_asks_before_a_backup_restore[python-entry]",
+     "fixA-b1-guard-python-entry"),
+    # ...but not before the listing (the twin).
+    ("tools/skyguard/lift_rules.py", '        if e.program == "restore-from-backup" and "--restore" in e.argv:',
+     '        if e.program == "restore-from-backup":', _FXB1 + "test_listing_the_backups_is_not_asked[list]",
+     "fixA-b1-listing-allowed"),
+]]
+_FXSL = "tests/test_skyguard_lock.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # The state lock (coordination item 3): every write takes it...
+    ("tools/skyguard/state.py", "    with locked(path, wait):\n        _write(path, data)", "    _write(path, data)",
+     _FXSL + "test_the_state_lock_serialises_writers_and_breaks_a_stale_lock", "fixA-state-lock-write"),
+    # ...and the hook's relock waits only briefly for it, skipping (logged) when busy.
+    ("tools/skyguard/lock.py", "    with _state.locked(sf, wait):", "    if True:",
+     _FXSL + "test_a_busy_state_file_skips_the_relock_without_blocking_the_hook", "fixA-state-lock-hook-short-wait"),
+]]
 

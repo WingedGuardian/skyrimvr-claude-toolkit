@@ -24,7 +24,8 @@ except ImportError:                                   # POSIX
     import fcntl
 
 HOOK = "backup-before-edit"
-SKIP = (r"[/\\]\.claude[/\\](backups|hooks|plans)[/\\]", r"[/\\]node_modules[/\\]")
+# Plan 6 final fix (lane B I1): `.skyguard/` too -- the CLI is its only writer, so a copy is only a way back in.
+SKIP = (r"[/\\]\.claude[/\\](backups|hooks|plans)[/\\]", r"[/\\]node_modules[/\\]", r"[/\\]\.skyguard[/\\]")
 MANIFEST = "MANIFEST.jsonl"
 CHUNK = 1024 * 1024
 MAX_SUFFIX = 999
@@ -334,6 +335,28 @@ def _list(backups, search):
     return 0
 
 
+# Plan 6 final fix (lane B I1): what a restore never writes, whatever the manifest line or --to says (a manifest line is
+# data a tampered store can hold) -- the same containment as `snapshot restore --in-place` (snapcli._never): the guards'
+# state and code (self_rules.text_kind: .skyguard, .claude/hooks, .claude/settings*.json, skyrim-paths.env, .codex,
+# tools/skyguard, agent/guards, the telemetry), GUARD-FILES.sha256, a plugin or archive, a stream or device name.
+_RESTORE_NEVER_EXT = (".esp", ".esm", ".esl", ".bsa", ".ba2")
+
+
+def _restore_refusal(target):
+    """Why a restore must not write `target` ("" when it may), read as written AND through links (realpath)."""
+    from . import self_rules
+    for p in (str(target), os.path.realpath(str(target))):
+        parts = [x for x in re.split(r"[/\\]+", p) if x]
+        low = [x.lower() for x in parts]
+        if low and low[-1].endswith(_RESTORE_NEVER_EXT):
+            return "a plugin or archive"
+        if self_rules.text_kind(p) or (low and low[-1] == "guard-files.sha256"):
+            return "one of the guard's own files"
+        if any(":" in x for x in parts[1:]):
+            return "a stream or device name"
+    return ""
+
+
 def _restore(backups, name, to):
     from .audit import Audit
     f = backups / name
@@ -359,6 +382,10 @@ def _restore(backups, name, to):
                   "Nothing was restored.".format(name, e["sha256"], got))
             return 1
     target = Path(_native(to or e["src"]))
+    why = _restore_refusal(target)
+    if why:
+        print("REFUSED: {} is {}; a backup is never restored there. Nothing was restored.".format(target, why))
+        return 2
     audit = Audit(str(backups.parent.parent))
     if target.is_file() and take(str(backups.parent.parent), "restore-from-backup", str(target), audit) is None:
         print("REFUSED: could not back up the current {} first. Nothing was restored.".format(target))
