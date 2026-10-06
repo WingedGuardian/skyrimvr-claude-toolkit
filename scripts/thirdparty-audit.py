@@ -556,7 +556,7 @@ REGISTRY = [
                                "sources": ["Spriggit.Core/Commands/SerializeCommand.cs",
                                            "Spriggit.Core/Commands/DeserializeCommand.cs"]}),
                 ("nupkg_tfm", {"package": "spriggit.cli", "runtime": ".NET SDK"})]},
-    {"name": ".NET SDK", "pins": [("regex", ".devcontainer/Dockerfile", r"--channel (?P<v>\d+\.\d+)"),
+    {"name": ".NET SDK", "pins": [("regex", ".devcontainer/Dockerfile", r"DOTNET_SDK_VERSION=(?P<v>\d+\.\d+\.\d+)"),
                                   ("regex", ".github/workflows/ci.yml", r"dotnet-version:\s*[\"']?(?P<v>\d+\.\d+)")],
      "compare": "minor", "upstream": ("dotnet", None), "refs": DOTNET_REFS},
     {"name": "Node.js", "pins": [("text", ".node-version")], "upstream": ("eol", "nodejs", "major"), "refs": NODE_REFS},
