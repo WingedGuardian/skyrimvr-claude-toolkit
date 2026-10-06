@@ -54,14 +54,18 @@ LAYOUTS = {
     # .claude/ spelling, which is still read when the root file is absent).
     "declared-root": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\n'),
     "malformed-root": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2 $X/mods"\n'),
+    # T8 fix round 1 (I1): a 0-byte root file (`touch skyrim-paths.env`) beside a legacy file that declares MO2.
+    "touched-root": ("Skyrim VR", ""),
 }
-# Layouts whose paths file is written at the toolkit root instead of .claude/. Each ALSO gets a legacy .claude/ file
-# that would flip its rows' verdicts if it were read (the root file must win whole): declared-root's decoy is
-# malformed (every row would be S-INERT-CONFIG), malformed-root's decoy is clean (its refusal would vanish).
-ROOT_LEVEL_LAYOUTS = ("declared-root", "malformed-root")
+# Layouts whose paths file is written at the toolkit root instead of .claude/ (written even when empty). Each ALSO gets
+# a legacy .claude/ file. declared-root's is malformed (a reader that let the legacy file's malformed entries in, or
+# let it win, would make every row S-INERT-CONFIG); malformed-root's is clean (a legacy-wins reader would lose the
+# refusal); touched-root's declares MO2 folders the empty root file must not hide (R3 union, T8 fix round 1).
+ROOT_LEVEL_LAYOUTS = ("declared-root", "malformed-root", "touched-root")
 LEGACY_DECOYS = {
     "declared-root": f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_CONFIG_DIR="D:/decoy $X"\n',
     "malformed-root": f'SKYRIM_GAME_ROOT="{GAME}"\n',
+    "touched-root": f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2/mods"\nSKYRIM_MO2_OVERWRITE="D:/MO2/overwrite"\n',
 }
 
 
@@ -101,7 +105,7 @@ def make_install(base: Path, hooks_src: Path, layout: str) -> Path:
         (root / "Documents" / "My Games" / "Skyrim VR" / "Saves" / "Existing.ess").write_bytes(b"x")
     if layout in LEGACY_DECOYS:
         (root / ".claude" / "skyrim-paths.env").write_text(LEGACY_DECOYS[layout], encoding="utf-8", newline="\n")
-    if env:
+    if env or layout in ROOT_LEVEL_LAYOUTS:
         (root / ("" if layout in ROOT_LEVEL_LAYOUTS else ".claude") / "skyrim-paths.env").write_text(env.replace("<install>", root.as_posix()), encoding="utf-8", newline="\n")
     return root
 

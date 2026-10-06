@@ -24,7 +24,10 @@ THE SHELL ROUTES (shell_scan), each operand resolved against the payload cwd:
     as surely as deleting it (red team F2), and a move of a folder that holds guard files (`mv .claude x`) counts;
   - `ln` (its link name), `truncate`, `chmod`/`chown`, an ACL rewrite (icacls with a modifying switch, Set-Acl): an
     unreadable or emptied hook fails open (red team F1);
-  - `git checkout`/`git restore` with a pathspec that is, or holds, a guard file (red team F3).
+  - `git checkout`/`git restore` with a pathspec that is, or holds, a guard file (red team F3);
+  - T8 fix round 1: a create-without-content program (`touch`, `install`'s destination, cmd `mklink`'s link name), a
+    link whose SOURCE is a guard file (`ln`, `mklink`, New-Item -ItemType HardLink/SymbolicLink/Junction), and an NTFS
+    stream spelling of either class (`x::$DATA`, read as x like the plugin rules' targets.STREAM).
 NOT covered (residue, R6): interpreter code that writes these files (`python -c "open(...).write"`), a branch switch
 (`git checkout <branch>` rewrites tracked hooks with no pathspec), and environment tamper (setx, red team F7).
 """
@@ -146,6 +149,78 @@ def _plain(argv) -> List[str]:
     return [w for w in argv if not (w.startswith("-") and len(w) > 1)]
 
 
+# ---- T8 fix round 1 ---------------------------------------------------------------------------------------------------
+# I1: programs that CREATE a file with no content (or only stamp it): writes.py has no write primitive for them, so they
+# reached no rule. An empty hook fails open (red team F1); an empty paths file declares nothing.
+_TOUCH_VALUED = frozenset(("-d", "-t", "-r", "--date", "--reference"))
+_INSTALL_VALUED = frozenset(("-m", "--mode", "-o", "--owner", "-g", "--group", "-S", "--suffix", "-t",
+                             "--target-directory", "--strip-program"))
+# P2: a link whose SOURCE is a guard file is an alias outside the install that edits the guard with no protected path
+# in any later command. The plugin rules do not refuse a plugin link, so the priced classes apply (GUARD note,
+# STATE deny), never a new refusal.
+_PS_LINK_TYPES = ("hardlink", "symboliclink", "junction")
+
+
+def _touch_operands(argv) -> List[str]:
+    out, j = [], 0
+    while j < len(argv):
+        w = argv[j]
+        if w in _TOUCH_VALUED:
+            j += 1                                       # its value (a date, a reference file READ) is no target
+        elif not (w.startswith("-") and len(w) > 1):     # `--` and options; no guard file's name starts with `-`
+            out.append(w)
+        j += 1
+    return out
+
+
+def _install_targets(argv) -> List[str]:
+    """`install SRC DEST`, `install SRC... -t DIR` (DIR/<basename>), `install -d DIR...` (each one created)."""
+    words, tdir, dirs, j = [], None, False, 0
+    while j < len(argv):
+        w = argv[j]
+        if w in _INSTALL_VALUED:
+            if w in ("-t", "--target-directory") and j + 1 < len(argv):
+                tdir = argv[j + 1]
+            j += 2
+            continue
+        if w.startswith("--target-directory="):
+            tdir = w.split("=", 1)[1]
+        elif w in ("-d", "--directory"):
+            dirs = True
+        elif not (w.startswith("-") and len(w) > 1):
+            words.append(w)
+        j += 1
+    if dirs:
+        return words
+    if tdir is not None:
+        return [tdir.rstrip("/\\") + "/" + (re.split(r"[/\\]+", s.rstrip("/\\"))[-1]) for s in words]
+    return words[-1:] if len(words) >= 2 else []
+
+
+# P1: an NTFS stream suffix names the SAME file (`x::$DATA` is x's own data, `x:s` a stream stored in x), as
+# targets.STREAM reads it for the plugin rules. A resolved path already drops it (paths._fold); this is for the word the
+# resolver cannot place because of the suffix itself (`$DATA` reads as a variable). Not a drive spelling (`C:x`, `C:`).
+_STREAM_TAIL = re.compile(r"^(.*[/\\])?([^/\\:]+):[^/\\]*$")
+
+
+def strip_stream(word: str) -> Optional[str]:
+    """`word` without an NTFS stream suffix on its last component, or None when it has none."""
+    m = _STREAM_TAIL.match(word or "")
+    if not m or (m.group(1) is None and len(m.group(2)) == 1):
+        return None
+    return (m.group(1) or "") + m.group(2)
+
+
+def resolve_own(resolve, word: str) -> Optional[str]:
+    """resolve(word), else resolve(word without its stream suffix): the path a self-protection check judges."""
+    a = resolve(word)
+    if a is None:
+        s = strip_stream(word)
+        if s is not None:
+            a = resolve(s)
+    return a
+
+
 def _routes(e) -> List[Tuple[str, bool]]:
     """(word, holder) for every operand this exec writes, replaces, moves away or re-permissions."""
     from . import writes
@@ -166,6 +241,16 @@ def _routes(e) -> List[Tuple[str, bool]]:
         words = _plain(argv)
         if len(words) >= 2:
             out.append((words[-1], False))
+        out += [(w, False) for w in (words[:-1] if len(words) >= 2 else words)]     # P2: the link's source(s)
+    elif p == "touch":
+        out += [(w, False) for w in _touch_operands(argv)]                           # I1
+    elif p == "install":
+        out += [(w, False) for w in _install_targets(argv)]                          # I1
+    elif p == "mklink":
+        words = [w for w in argv if not w.startswith("/")]
+        out += [(w, False) for w in words[:2]]                   # I1 the link name; P2 its target (the source)
+    elif p == "new-item" and any(t.lower() in _PS_LINK_TYPES for t in ps_param(e, "itemtype")):
+        out += [(w, False) for w in list(ps_param(e, "target")) + list(ps_param(e, "value"))]   # P2
     elif p in ("chmod", "chown", "chgrp"):
         words = [w for w in argv if not w.startswith("-") and not w.startswith("--reference")]
         out += [(w, False) for w in words[1:]]
@@ -303,7 +388,7 @@ def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping
     for e in parsed.execs:
         e = deletes.substituted(e)
         for w, holder in _routes(e):
-            a = targets.resolve_operand(e, w, cwd, env)
+            a = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), w)
             # Unresolved is never safe (targets.py) -- for the STATE class only, whose deny has no priced cost: a word
             # the resolver cannot place (`"$R/.skyguard/state.json"`) counts when its own words name `.skyguard`.
             k = kind_of(a, roots, env, holder) if a is not None else (STATE if text_kind(w) == STATE else "")

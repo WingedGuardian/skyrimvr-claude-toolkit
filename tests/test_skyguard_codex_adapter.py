@@ -329,7 +329,8 @@ def test_run_session_start_output_is_capped(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(run.session, "run_status", lambda *a, **k: ("noise line\n" * 3000,"evaluated", "session"))
     sent = []
     monkeypatch.setattr(run, "_emit", sent.append)
-    a = run.argparse.Namespace(project=str(tmp_path), bash="bash", role="session-start", invocation="", telemetry="")
+    a = run.argparse.Namespace(project=str(tmp_path), bash="bash", role="session-start", invocation="", telemetry="",
+                               root="", root_win="")     # T8 fix round 1: the session start reads the guard's root
     assert run._codex(a, json.dumps({"hook_event_name": "SessionStart", "source": "startup"})) == 0
     assert sent[0].startswith("SKYGUARD-OK\n" + codex.BANNER)
     assert len(sent[0].encode("utf-8")) <= codex.CONTEXT_LIMIT + len("SKYGUARD-OK\n")

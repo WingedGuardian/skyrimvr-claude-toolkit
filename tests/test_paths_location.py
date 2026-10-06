@@ -77,19 +77,64 @@ def test_the_legacy_file_is_the_fallback(tmp_path):
     assert cfg.source == ".claude/skyrim-paths.env"
 
 
-def test_both_present_and_disagreeing_the_root_file_wins_whole(tmp_path):
+def test_both_present_protection_roots_are_the_union_root_file_first(tmp_path):
+    """Fix round 1 (I1, R3): a stale source can add a root, never hide one -- an empty or touched root file must not
+    strip the folders the legacy file protects."""
     _root_file(tmp_path, "SKYRIM_CONFIG_DIR='C:/new/cfg'\n")
     _legacy_file(tmp_path, "SKYRIM_CONFIG_DIR='C:/old/cfg'\nSKYRIM_MO2_MODS='C:/old/mods'\n")
     cfg = paths.read_install(str(tmp_path), {})
-    assert cfg.values("SKYRIM_CONFIG_DIR") == ["C:/new/cfg"]
-    assert cfg.values("SKYRIM_MO2_MODS") == [], "a key only the legacy file declares must not leak past the root file"
-    assert cfg.source == "skyrim-paths.env"
+    assert cfg.values("SKYRIM_CONFIG_DIR") == ["C:/new/cfg", "C:/old/cfg"]
+    assert cfg.values("SKYRIM_MO2_MODS") == ["C:/old/mods"]
+    assert cfg.source == "skyrim-paths.env" and cfg.legacy
+
+
+@pytest.mark.parametrize("key", ["SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_MO2_MODS", "SKYRIM_MO2_OVERWRITE"])
+def test_an_empty_root_file_hides_no_legacy_root(key, tmp_path):
+    _root_file(tmp_path, "")
+    _legacy_file(tmp_path, "{}='C:/old/x'\n".format(key))
+    assert paths.read_install(str(tmp_path), {}).values(key) == ["C:/old/x"]
+
+
+def test_non_protection_values_come_from_the_root_file_when_present(tmp_path):
+    _root_file(tmp_path, "SKYRIM_LOADORDER_DIR='C:/new/lo'\nSKYGUARD_PYTHON='C:/new/python.exe'\n")
+    _legacy_file(tmp_path, "SKYRIM_LOADORDER_DIR='C:/old/lo'\nSKYGUARD_PYTHON='C:/old/python.exe'\n")
+    cfg = paths.read_install(str(tmp_path), {})
+    assert cfg.values("SKYRIM_LOADORDER_DIR") == ["C:/new/lo"]
+    assert cfg.first("SKYGUARD_PYTHON") == "C:/new/python.exe"
+    assert not cfg.legacy, "the legacy file added no protected folder"
+
+
+def test_a_legacy_file_saying_nothing_new_is_not_in_use(tmp_path):
+    _root_file(tmp_path, "SKYRIM_CONFIG_DIR='C:/same/cfg'\n")
+    _legacy_file(tmp_path, "SKYRIM_CONFIG_DIR='C:/same/cfg'\n")
+    cfg = paths.read_install(str(tmp_path), {})
+    assert cfg.values("SKYRIM_CONFIG_DIR") == ["C:/same/cfg"] and not cfg.legacy
 
 
 def test_a_broken_legacy_leftover_does_not_matter_once_the_root_file_exists(tmp_path):
     _root_file(tmp_path, "SKYRIM_CONFIG_DIR='C:/new/cfg'\n")
-    _legacy_file(tmp_path, 'SKYRIM_MO2_MODS="D:/MO2 $X/mods"\n')
-    assert paths.read_install(str(tmp_path), {}).malformed == ()
+    _legacy_file(tmp_path, 'SKYRIM_MO2_MODS="D:/MO2 $X/mods"\nSKYRIM_CONFIG_DIR=\'C:/old/cfg\'\n')
+    cfg = paths.read_install(str(tmp_path), {})
+    assert cfg.malformed == ()
+    assert cfg.values("SKYRIM_CONFIG_DIR") == ["C:/new/cfg", "C:/old/cfg"], "its well-formed roots still count"
+
+
+def test_an_undecodable_legacy_leftover_adds_nothing_once_the_root_file_exists(tmp_path):
+    _root_file(tmp_path, "SKYRIM_CONFIG_DIR='C:/new/cfg'\n")
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "skyrim-paths.env").write_bytes(b'SKYRIM_GAME_ROOT="\xff\xfe\x80"\n')
+    assert paths.read_install(str(tmp_path), {}).values("SKYRIM_CONFIG_DIR") == ["C:/new/cfg"]
+
+
+def test_run_still_guards_a_legacy_mo2_folder_after_the_root_file_is_touched(tmp_path):
+    """The review's I1 reproduction, through run.py: legacy-only MO2 root plus a 0-byte root file."""
+    root, mods = tmp_path / "Game", tmp_path / "mods"
+    (mods / "M").mkdir(parents=True)
+    _legacy_file(root, "SKYRIM_MO2_MODS='{}'\n".format(mods.as_posix()))
+    _root_file(root, "")
+    got = _fire(root.as_posix(), {"tool_name": "Bash", "tool_input": {"command": "rm -f '{}/M/a.esp'".format(
+        mods.as_posix())}})
+    assert got[0] == "deny", got
 
 
 def test_an_unreadable_root_file_raises_and_never_falls_back(tmp_path):
@@ -225,11 +270,44 @@ def test_the_legacy_location_gets_a_notice_at_session_start(tmp_path):
     assert paths.DEPRECATION in text
 
 
-def test_no_notice_once_the_root_file_exists(tmp_path):
+def test_no_notice_once_the_root_file_covers_the_legacy_one(tmp_path):
+    _root_file(tmp_path, "SKYRIM_CONFIG_DIR='C:/new/cfg'\nSKYRIM_MO2_MODS='C:/mods'\n")
+    _legacy_file(tmp_path, "SKYRIM_MO2_MODS='C:/mods'\n")
+    text, _, _ = session.run_status(str(tmp_path), "startup", "bash", Audit(str(tmp_path)))
+    assert paths.DEPRECATION not in text
+
+
+def test_the_notice_shows_while_the_legacy_file_still_adds_a_root(tmp_path):
     _root_file(tmp_path, "SKYRIM_CONFIG_DIR='C:/new/cfg'\n")
     _legacy_file(tmp_path, "SKYRIM_CONFIG_DIR='C:/old/cfg'\n")
     text, _, _ = session.run_status(str(tmp_path), "startup", "bash", Audit(str(tmp_path)))
+    assert paths.DEPRECATION in text
+
+
+def test_the_notice_is_keyed_on_the_root_the_guard_reads(tmp_path):
+    """Review M2: the session's project folder and the hook's root can differ; the notice follows the root."""
+    root, project = tmp_path / "Game", tmp_path / "project"
+    project.mkdir()
+    _legacy_file(root, "SKYRIM_CONFIG_DIR='C:/old/cfg'\n")
+    text, _, _ = session.run_status(str(project), "startup", "bash", Audit(str(project)), root=str(root))
+    assert paths.DEPRECATION in text
+    _legacy_file(project, "SKYRIM_CONFIG_DIR='C:/old/cfg'\n")
+    text, _, _ = session.run_status(str(project), "startup", "bash", Audit(str(project)), root=str(tmp_path / "none"))
     assert paths.DEPRECATION not in text
+
+
+@pytest.mark.parametrize("agent,role", [("claude", "session-kb-guard"), ("codex", "session-start")])
+def test_run_keys_the_session_notice_on_its_root(agent, role, tmp_path):
+    """The wiring for M2: run.py hands SessionStart the --root it reads the paths file from."""
+    root, project = tmp_path / "Game", tmp_path / "project"
+    project.mkdir()
+    _legacy_file(root, "SKYRIM_CONFIG_DIR='C:/old/cfg'\n")
+    payload = {"hook_event_name": "SessionStart", "session_id": "s", "source": "startup", "transcript_path": ""}
+    r = subprocess.run([sys.executable, str(RUN), agent, role, "--root", root.as_posix(), "--root-win",
+                        root.as_posix(), "--project", str(project)], input=json.dumps(payload).encode(),
+                       capture_output=True, env=_clean_env(), timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert b"the old paths file" in r.stdout, r.stdout[:600]
 
 
 def test_the_notice_is_not_repeated_on_compact(tmp_path):
