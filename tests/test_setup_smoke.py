@@ -6,7 +6,6 @@ tests/test_setup_agent.py); the rest is the structure of the job, so a value or 
 from __future__ import annotations
 
 import subprocess
-import sys
 
 import pytest
 
