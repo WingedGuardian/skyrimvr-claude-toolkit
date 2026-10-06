@@ -1,0 +1,37 @@
+{
+ "_comment": "SYNTHETIC upstream responses for tests/test_thirdparty_audit.py (no real keys, no live data). Each entry is loaded into a temp response cache and the tool runs --offline against it. 'zip' lists member names; the test builds that zip in memory and serves it as the whole file (status 200) for the 0-0 range probe.",
+ "responses": [
+  {"url": "https://registry.npmjs.org/@openai/codex/latest", "status": 200, "json": {"version": "0.161.0"}},
+
+  {"url": "https://api.github.com/repos/BadDogSkyrim/PyNifly/releases/latest", "status": 200, "json": {"tag_name": "V29.1.0"}},
+  {"url": "https://api.github.com/repos/BadDogSkyrim/PyNifly/releases/tags/V29.1.0", "status": 200,
+   "json": {"tag_name": "V29.1.0", "assets": [{"name": "io_scene_nifly.zip"}]}},
+  {"url": "https://github.com/BadDogSkyrim/PyNifly/releases/download/V29.1.0/io_scene_nifly.zip", "range": "0-0", "status": 200,
+   "zip": ["io_scene_nifly/", "io_scene_nifly/__init__.py", "io_scene_nifly/NiflyDLL.dll", "io_scene_nifly/pyn/", "io_scene_nifly/pyn/pynifly.py"]},
+
+  {"url": "https://api.nuget.org/v3-flatcontainer/spriggit.cli/index.json", "status": 200, "json": {"versions": ["0.40.0", "0.41.0", "0.42.0-alpha.0"]}},
+  {"url": "https://raw.githubusercontent.com/Mutagen-Modding/Spriggit/0.41.0/Spriggit.Core/Commands/SerializeCommand.cs", "status": 200,
+   "text": "public class SerializeCommand\n{\n    [Option('i', \"InputPath\", Required = true)]\n    [Option('o', \"OutputPath\", Required = true)]\n    [Option('g', \"GameRelease\")]\n    [Option('p', \"PackageName\")]\n    [Option('v', \"PackageVersion\")]\n}\n"},
+  {"url": "https://raw.githubusercontent.com/Mutagen-Modding/Spriggit/0.41.0/Spriggit.Core/Commands/DeserializeCommand.cs", "status": 200,
+   "text": "public class DeserializeCommand\n{\n    [Option('i', \"InputPath\", Required = true)]\n    [Option('o', \"OutputPath\", Required = true)]\n    [Option('p', \"PackageName\")]\n    [Option('v', \"PackageVersion\")]\n}\n"},
+  {"url": "https://api.nuget.org/v3-flatcontainer/spriggit.cli/0.41.0/spriggit.cli.0.41.0.nupkg", "range": "0-0", "status": 200,
+   "zip": ["spriggit.cli.nuspec", "tools/net10.0/any/Spriggit.CLI.dll", "tools/net10.0/any/DotnetToolSettings.xml"]},
+
+  {"url": "https://api.github.com/repos/SpookyPirate/spookys-automod-toolkit/releases/latest", "status": 200, "json": {"tag_name": "v1.11.2"}},
+  {"url": "https://api.github.com/repos/SpookyPirate/spookys-automod-toolkit/git/ref/tags/v1.11.2", "status": 200,
+   "json": {"object": {"type": "commit", "sha": "e1c34ea34cae4b9a1a547ea6a90c8a91412d689e"}}},
+  {"url": "https://api.github.com/repos/SpookyPirate/spookys-automod-toolkit/contents/Directory.Build.props?ref=e1c34ea34cae4b9a1a547ea6a90c8a91412d689e", "status": 200, "json": {"type": "file"}},
+  {"url": "https://api.github.com/repos/SpookyPirate/spookys-automod-toolkit/contents/src/SpookysAutomod.Cli?ref=e1c34ea34cae4b9a1a547ea6a90c8a91412d689e", "status": 200, "json": [{"type": "file"}]},
+
+  {"url": "https://api.github.com/repos/actions/checkout/git/ref/tags/v7.0.1", "status": 200,
+   "json": {"object": {"type": "tag", "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}},
+  {"url": "https://api.github.com/repos/actions/checkout/git/tags/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "status": 200,
+   "json": {"object": {"type": "commit", "sha": "3d3c42e5aac5ba805825da76410c181273ba90b1"}}},
+  {"url": "https://api.github.com/repos/actions/checkout/releases/latest", "status": 200, "json": {"tag_name": "v7.0.1"}},
+
+  {"url": "https://registry.npmjs.org/zod/latest", "status": 200, "json": {"version": "3.25.76"}},
+  {"url": "https://registry.npmjs.org/zod/3.25.76", "status": 200, "json": {"version": "3.25.76"}},
+  {"url": "https://pypi.org/pypi/PyYAML/json", "status": 200, "json": {"info": {"version": "6.0.3"}}},
+  {"url": "https://pypi.org/pypi/PyYAML/6.0.3/json", "status": 200, "json": {"info": {"version": "6.0.3"}}}
+ ]
+}
