@@ -12,7 +12,7 @@ Generated into `CLAUDE.md` only. Everything above is shared with every agent.
   `.claude/settings.json`: `Bash` → `protect-bash` + `snapshot-before-tool`; `Edit|Write` →
   `protect-files` + `backup-before-edit`; SessionStart → `session-kb-guard` (knowledgebase snapshot, then your `## My preferences`). `setup.sh` records the
   Python path in each hook. The user lists or disables them with `/hooks`. The PowerShell tool is not
-  matched yet.
+  matched yet, and only the Bash tool gets `SKYGUARD_SESSION_ID`, so lift the lock from Bash, never PowerShell.
 - **What the backup hook cannot see.** `backup-before-edit.sh` fires on Edit/Write tool calls only, with no
   extension filter (`.psc` included). A file written by a script run through the Bash tool is invisible to
   it. That is how the knowledgebase is usually written, and it is why `session-kb-guard.sh` snapshots the

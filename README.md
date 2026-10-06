@@ -442,7 +442,9 @@ clearing the attribute. The targets are an **explicit per-edition list of names*
 mod files that look vanilla), and only files that exist, are regular and have a single hard link: a copy a mod
 manager hard-linked is reported and skipped, never locked. It is applied in-process (no process per file) and
 needs no administrator rights (apply plus remove over the 26 names of the full VR list took at most 0.021 s, over
-5 runs). **It is off by default**: nothing is locked until you run it.
+5 runs, MEASURED on the Phase A spike's in-process code `fastlock.py`, not on the shipped `lock.py`;
+`docs/superpowers/measurements/2026-10-04-plan6-ml2.md`, C10). **It is off by default**: nothing is locked until you
+run it.
 
 **What it stops, MEASURED** (2026-10-04, on scratch copies of real masters under `C:/Temp`, one Windows 11
 machine, one unelevated user; every row ran against the locked file **and** an unlocked twin that had to change,
@@ -474,24 +476,30 @@ rows were blocked (`-Force`, `cp -f`, `sed -i` and `mv` over a file got through)
   mod-manager deploy (needs Developer Mode, not available on the test machine); the ownership of a file by another
   principal.
 - **Pending the manual batch, so the lock stays off by default.** Wrye Bash scanning and building a Bashed Patch with
-  the masters locked, Steam "Verify integrity" on a locked file, the xEdit program and Mod Organizer 2's virtual
-  file system have **not** been run. Vortex was checked by replaying its own file operations (hard-link deploy,
+  the masters locked, Steam "Verify integrity" on a locked file, a **Steam game update**, an Anniversary Edition
+  in-game **Creation download** (`cc*.esm` / `.bsa`, which are on the lock list), the xEdit program and Mod
+  Organizer 2's virtual file system have **not** been run. A Steam update or a Creation download writes into the same
+  locked files, so it is INFERRED (not measured) to fail with a write error while they are locked: unlock first. Vortex was checked by replaying its own file operations (hard-link deploy,
   purge, a game-file collision backup and restore) on a copy: every replayed step passed (the symlink-deploy step
   could not be run), and a collided file that became multi-link is reported rather than relocked. Under the pre-committed decision table, "not run" means **opt-in on
   every edition**; the default flips to on only after those results are in.
 - **`guards off` does not cancel the lock**, and the lock cannot say why it refused: the OS reports only "access
   denied" (see below).
 
-**Unlock in one command.** `bash tools/skyguard.sh lock unlock <file>` lifts one file; with no file it lifts every
-target. Typed at your own terminal it just works. An agent's shell must pass `--session <id>` (or have
-`SKYGUARD_SESSION_ID` set); the lift is then recorded, bound to that session, and **expires at the next session
-start** (never later than 8 hours), when the files are locked again and a banner says so. `bash tools/skyguard.sh lock status`
-shows what is locked, lifted or skipped; `lock disable` turns the lock off for good (until `lock enable`) and a banner
-repeats it at every session start. To lock again now: `lock lock`.
+**Unlock in one command.** `bash tools/skyguard.sh lock unlock <file>` (from `cmd` or PowerShell:
+`tools\skyguard.cmd lock unlock <file>`) lifts one file; with no file it lifts every target. Typed at your own
+terminal it needs nothing else. An agent's shell must pass `--session <id>` (or have `SKYGUARD_SESSION_ID` set); the
+lift is then recorded and bound to that session. **A lift lasts one hour by default: the first tool call after it
+expires locks the file again**, and the next session start relocks anything still open (the backstop). Without hooks
+neither happens (see below). `bash tools/skyguard.sh lock status` shows each target as locked, unlocked, missing,
+half-locked (`drift`) or read-only but not locked by the toolkit, plus the files it skipped; it does not show lifts (a lifted file reads
+`unlocked`): `bash tools/skydoctor` shows each lift and when it ends. `lock disable` turns the lock off for good (until
+`lock enable`) and a banner repeats it at every session start. To lock again now: `lock lock`.
 
-- **Without Python:** double-click `tools\skyguard-unlock.cmd`. It re-checks every file, prints `NOT unlocked` and
-  exits non-zero if one is still locked. (MEASURED on the Phase A spike version of this script with Python removed
-  from `PATH`: 4 of 4 candidate mechanisms unlocked cleanly.)
+- **Without Python:** double-click `tools\skyguard-unlock.cmd`. It unlocks every target (no lift is recorded), re-checks
+  every file, prints `NOT unlocked` and exits non-zero if one is still locked; `lock lock`, or the next session start,
+  locks them again. MEASURED on the shipped script with Python off `PATH` (only `C:\Windows\System32` on it): 6 of 6
+  masters unlocked, no toolkit deny entry left (`docs/superpowers/measurements/2026-10-XX-plan6-e2e.md`, row 9).
 - **Last resort, by hand,** for one file `F`, in this order: `icacls "F" /remove:d *<your SID>` and then
   `attrib -R "F"`. Your SID is the `S-1-5-21-...` value `whoami /user` prints (call `System32\whoami.exe`, not Git's).
   `/remove:d` removes every explicit deny entry for your account on that file. Afterwards `icacls "F"` should list no
@@ -501,32 +509,38 @@ repeats it at every session start. To lock again now: `lock lock`.
   lock target (`attrib -R`, `icacls ... /remove`, `Set-ItemProperty`, interpreter code that does the same) or runs
   `tools\skyguard-unlock.cmd`; `lock disable` is a prompt on Claude and a refusal on Codex. Hand-clearing would skip the
   log and the expiry. This is a Layer 1 rule, so it only holds where the hooks run.
-- **Codex in its default `workspace-write` sandbox cannot lift the lock** (MEASURED once, codex-cli 0.160.0: `icacls`
-  changes nothing there, and `attrib -R` is refused by the deny entry). Run the `.cmd` or `lock unlock` yourself in a
-  normal terminal, or start Codex with `danger-full-access`.
+- **On Codex, and from Claude's PowerShell tool, the agent cannot lift the lock, by design.** A lift needs the
+  session id, and only Claude's Bash tool receives it (as `SKYGUARD_SESSION_ID`); Codex and the PowerShell tool get
+  none, and the `.cmd` and hand-clearing are refused to agents (above). There, **you** run `tools\skyguard-unlock.cmd`
+  in your own terminal when the agent needs a master written (and `lock lock` afterwards, or let the next session
+  start relock). Codex's default `workspace-write` sandbox could not clear the lock by hand either (MEASURED once,
+  codex-cli 0.160.0: `icacls` changes nothing there, and `attrib -R` is refused by the deny entry).
 - **An agent that never read this** sees only "access denied". The core instructions tell every agent what that means.
 
-**If nothing runs at session start (no hooks), nothing relocks a lift.** There is no scheduled task and no service,
-by design. An expired lift is no longer honoured and `bash tools/skydoctor` drops its record, and `skydoctor`
-reports the files as `unlocked (lift until ...)` or `unlocked (outside skyguard)`, but they stay unlocked until a
-hooked session starts or you run `lock lock`. On an agent with no hooks, an unlock can therefore outlast its hour.
+**If no hooks run, nothing relocks a lift.** The relock after an hour happens on the next tool call the hooks see, and
+the backstop at session start; there is no scheduled task and no service, by design. On an agent with no hooks, an
+expired lift is no longer honoured, `bash tools/skydoctor` reports the files as `unlocked (lift until ...)` or
+`unlocked (outside skyguard)` and drops the expired record, but the files stay unlocked until a hooked session runs or
+you run `lock lock`. An unlock there can therefore outlast its hour.
 
-**Who is told about a lift (Table V; the interactive screens are still pending).** Every shadow-mode
-call is written to `.claude/backups/AUDIT_LOG.txt` and put in the model's context, the session-start banners go to the
-model's context, and `bash tools/skydoctor` shows every lift. Whether it is **shown to you** is MEASURED only in headless Claude (`claude -p`): a per-call hook message appeared
-as a notice to the user, a session-start one did not. The interactive Claude screen has not been checked, and for
-Codex it is unmeasured, so the toolkit claims for both only that **every lift is reported to the agent, recorded
-in the state file, and shown by `skydoctor`**, not that it is shown to you.
+**Who is told about a lift (Table V; the interactive screens are still pending).** Every shadow-mode call is written
+to `.claude/backups/AUDIT_LOG.txt` and put in the model's context, the lift notes and session-start banners go to the
+model's context, and `bash tools/skydoctor` shows every lift. None of them is sent through a channel that is shown to
+you: the toolkit's hooks emit model context (`additionalContext`) only (MEASURED in headless Claude, `claude -p`:
+every note arrived as `additionalContext`; `docs/superpowers/measurements/2026-10-XX-plan6-e2e.md`). The interactive
+Claude screen has not been checked, and for Codex it is unmeasured, so the toolkit claims only that **every lift is
+reported to the agent, recorded in the state file, and shown by `skydoctor`**, not that it is shown to you.
 
 **A forged state file cannot be prevented, only made loud.** Code running as you can rewrite any file, so a lift is
-checksummed (catches accidents and naive edits only), bound to the session that made it, capped at 8 hours, logged on
-every call it is honoured, and reported and cleared at the next session start. A state file the engine cannot verify
-is read as guards on and the lock on, with a `STATE-REJECTED` banner. Direct writes to `.skyguard/` are refused.
+checksummed (catches accidents and naive edits only), bound to the session that made it, expires (an hour by
+default), is logged on every call it is honoured, and is reported and cleared at the next session start. A state
+file the engine cannot verify is read as guards on and the lock on, with a `STATE-REJECTED` banner. Writes to
+`.skyguard/` are refused on the routes listed below, not on every route.
 
 ### Shadow mode: `guards off`
 
-`python tools/skyguard guards off --session <id>` switches the guards to **shadow mode** for that one session, for
-an hour: every rule still runs, but a refusal becomes an allow plus a warning (`Guards OFF: this would have been
+`bash tools/skyguard.sh guards off --session <id>` (`tools\skyguard.cmd ...` from cmd or PowerShell) switches the
+guards to **shadow mode** for that one session, for an hour: every rule still runs, but a refusal becomes an allow plus a warning (`Guards OFF: this would have been
 denied (<rule>)`), and every call is logged as `SHADOW` in `.claude/backups/AUDIT_LOG.txt`. `guards on` ends it;
 `guards status` shows it. Backups and snapshots still run. **Never shadowed:** a broken guard (`GUARD INERT`),
 Codex's `.rules` file, the Layer 2 lock, the refusals of hand-unlocking a lock target and of `lock disable`, and the
@@ -542,8 +556,18 @@ refusals of writes into `.skyguard/`.
 
 ### The guards protect themselves, and tell you when they change
 
-- **`.skyguard/` (the on/off and lift state) is refused** to every write route (shell, the file tools, Codex
-  `apply_patch`, moves and deletes): only `tools/skyguard` writes it.
+- **Writes to `.skyguard/` (the on/off and lift state) are refused** on the shell (redirects, `cp`, `tee`, `sed -i`,
+  `Set-Content`, `Copy-Item`, `git checkout -- .skyguard`, downloads and more), the file tools, Codex `apply_patch`,
+  moves and deletes; only `tools/skyguard` should write it. **Known gaps, MEASURED as allowed** (final review, lane
+  A): an interpreter writing it from code (`python -c "open('.skyguard/state.json','w')..."`; interpreter deletes are
+  caught, writes are not), `install -m 644 x .skyguard/state.json`, and unpacking an archive into it (`tar -xf a.tar
+  -C .skyguard`, `7z x a.7z -o.skyguard`). Such a forged state still needs a valid checksum and the session id, and
+  is named by the next session-start banner.
+- **Not guarded at all, so an edit gets no note:** `GUARD-FILES.sha256` itself, the launchers `tools/skyguard.sh`,
+  `tools/skydoctor` and `tools/skyguard-unlock.cmd`, and `.claude/backups/MANIFEST.jsonl` (which a restore trusts
+  for the original path; MEASURED by an engine probe: a `Write` or `echo >` to each is allowed with no note). An edit
+  to a hook plus a matching edit to `GUARD-FILES.sha256` hides that hook from the session-start banner (the per-call
+  note on the hook edit itself remains).
 - **The guard code and config get a note, not a prompt:** `.claude/hooks/`, `.claude/settings*.json`, `.codex/`,
   `tools/skyguard/`, `agent/guards/`, `.claude/skyrim-paths.env`, the hook heartbeats and audit log, and your user-level
   `~/.claude/settings*.json` and `~/.codex/config.toml`. A prompt was priced against the author's own history and
@@ -559,18 +583,24 @@ refusals of writes into `.skyguard/`.
   and given its final name without ever replacing another backup, so two edits of one file in the same second keep
   two backups and a failed copy leaves no half-file.
 - **`bash scripts/restore-from-backup.sh`** reads the manifest, shows the exact original path, checks the sha256
-  before it restores, and backs up the file it replaces. The old script rebuilt paths by turning every underscore into
-  a slash, so `Skyrim_VR - Main.bsa` or `My_Mod.esp` was restored to the wrong place; a backup with no manifest line
-  is still offered, labelled `(legacy: path guessed)`.
+  before it restores, and backs up the file it replaces. `--restore` never writes into a plugin or archive or the
+  guard's own folders (the same refusal `snapshot restore --in-place` applies), and an agent that runs it is asked
+  to confirm first. The old script rebuilt paths by turning every underscore into a slash, so
+  `Skyrim_VR - Main.bsa` or `My_Mod.esp` was restored to the wrong place; a backup with no manifest line is still
+  offered, labelled `(legacy: path guessed)`.
 - **Script snapshots reach every script.** `.psc` and `.pex` are now snapshotted wherever they sit under
   `Data/Scripts/` (nested folders included) and `Data/Source/Scripts/`, with no 7-day age limit, into a
   content-addressed store. The old hook saw only the top level of one layout and only files younger than 7 days: on
   the author's install **3,428 of 11,898 scripts (29%) were never seen** (MEASURED read-only). Folders that are
-  junctions are not followed. Added latency, on a synthetic tree with the install's file counts and the author's real
-  call pattern (15,138 hook calls that walk, out of 21,596; how often scripts change is ASSUMED from history):
-  **p95 131 ms** across the call stream, against a gate of 150 ms. One walking call in ten can still take about
-  160-168 ms. The first session builds its baseline over about 100 s of work spread across the session start and the
-  first calls.
+  junctions are not followed. Added latency, MEASURED on the release code on synthetic trees with the install's file
+  counts, replayed over the author's real call pattern (16,672 hook calls that walk, out of 23,282; how often scripts
+  change is ASSUMED from history): **p95 129.9 ms** over the walking calls with 3,049 scripts hard-linked as on the
+  live install, **137.7 ms** with all 11,898 hard-linked, against a gate of 150 ms; the slowest single call shape is
+  148.5 / 150.7 ms at p95. Charging the recovery snapshot's once-a-minute re-read (13.8 ms) to every walking call
+  outside the rate window, a conservative sensitivity check rather than the gate, gives 143.7 ms and **151.5 ms, 1.5 ms
+  over the gate** on the fully linked tree (`docs/superpowers/measurements/2026-10-XX-plan6-pricing.md`, Task 18 step
+  3). The first session builds its baseline over about 100 s of work spread across the session start and the first
+  calls.
 - **Recovery snapshots** also copy, before a shell command that may change them, your `plugins.txt`, `loadorder.txt`
   and `Skyrim*.ini` from the configured folders, and, before a ReSaver `--apply` or a DevBench save, the **one save
   it will overwrite and its `.skse` co-save** (for ReSaver that is the output save; never the whole save folder).
@@ -579,8 +609,11 @@ refusals of writes into `.skyguard/`.
   (`.claude/backups/restored/<id>__<time>/`) and touches nothing live. `--to DIR` chooses the folder (it refuses if
   a target exists); `--in-place` puts files back where they came from, only the files that kind of snapshot is allowed to write
   (for load order, INIs and saves: `plugins.txt`, `loadorder.txt`, `Skyrim*.ini`, `.ess`, `.skse`) and only inside the
-  configured roots, and **backs up each file it replaces first**. An agent that runs an in-place restore is asked to
-  confirm first. A damaged stored copy refuses the restore and names the file.
+  configured roots, and **backs up each file it replaces first**. A file that already matches the snapshot is left
+  alone and reported `unchanged`, so a mod manager's hard link to it survives. A full restore of a load-order/INI
+  snapshot skips, and names, a file whose folder is no longer configured, and restores the rest. Before it replaces a
+  save it keeps 2 GiB free on the backups drive, or restores nothing. An agent that runs an in-place restore is asked
+  to confirm first. A damaged stored copy refuses the restore and names the file.
 
 ### `skydoctor`, and how it differs from `skyguard doctor`
 
@@ -591,7 +624,7 @@ refusals of writes into `.skyguard/`.
   guards are on, and whether the guard files match the release. Exit 0 = everything live, 1 = something not live,
   2 = something unknown. It writes nothing except dropping expired lifts (and logging that it did). **A default
   install, with the lock never applied, exits 1 on purpose.**
-- **`python tools/skyguard doctor`** is the older, narrower command: only the **hook health** report (are the hooks
+- **`bash tools/skyguard.sh doctor`** is the older, narrower command: only the **hook health** report (are the hooks
   firing and receiving their payload). `skydoctor` includes that reading as one part. Use `skydoctor` for the whole
   picture; use `skyguard doctor` only if you want the hook report alone.
 

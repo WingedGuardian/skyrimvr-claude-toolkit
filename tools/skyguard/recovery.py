@@ -78,6 +78,8 @@ COSAVE = ".skse"
 _BLOB = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^\d{8}_\d{6}-(config|save)(?:-\d+)?\Z")   # \Z: `$` also matches before a final newline
 _MB = 1024 * 1024
+UNREADABLE_SAVE = ("the save {} is NOT being kept: the paths file could not be read, so the Saves folder is unknown "
+                   "-- copy that save yourself before the command runs")
 
 
 def store_dir(project):
@@ -146,13 +148,17 @@ def _resaver_save(word, cwd, shell, roots, env):
             j = paths.norm_abs(base + "/" + word.replace("\\", "/"))
             if j:
                 cands.append(j)
-        folder = mcp_rules.saves_folder(roots, env)
+        folder = mcp_rules.saves_folder(roots, env) if roots is not None else None
         if folder:
             cands.append(os.path.join(folder, re.split(r"[/\\]", word)[-1]))
     for c in cands:
         hit = _listed(*os.path.split(c))
         if hit:
             return hit, None
+    if roots is None and not n:
+        # Final review B-M2: a bare or relative name not found by the cwd may still be in the Saves folder, which is
+        # unknown without the paths file -- so this is NOT a new save, and the log must say the save was not kept.
+        return None, ("SKIPPED", UNREADABLE_SAVE.format(word))
     return None, ("NEW", "ReSaver writes {}, which does not exist yet -- nothing to keep".format(word))
 
 
@@ -175,8 +181,10 @@ def shell_saves(command, shell, cwd, roots, env):
     low = command.lower()
     resaver = "resaver" in low and shell_rules.RESAVER_APPLY in low
     dev = any(w in low for w in mcp_rules._SHELL_WORDS)
-    if not (resaver or dev) or roots is None:
+    if not (resaver or dev):
         return [], []
+    # Final review B-M2: an unreadable paths file (roots None) used to return here with no log line, before even an
+    # absolute .ess that needs no roots. Now an absolute or cwd-relative save is still kept, and any other is logged.
     parsed = shellparse.parse(command, shell or "")
     found, notes = [], []
     if resaver:
@@ -189,6 +197,9 @@ def shell_saves(command, shell, cwd, roots, env):
                 notes.append(note)
     if dev:
         for name in mcp_rules.shell_save_names(command, parsed):
+            if roots is None:
+                notes.append(("SKIPPED", UNREADABLE_SAVE.format(name)))
+                continue
             p, why = _devbench_save(name, roots, env)
             if p:
                 found.append(p)
@@ -219,7 +230,11 @@ def mcp(project, tool_name, args, audit, roots, agent="", session_id="", deadlin
     if len(parts) < 3 or parts[0] != "mcp" or not parts[1].startswith("devbench"):
         return
     name = mcp_rules.save_name(parts[-1], args)
-    if name is None or roots is None:
+    if name is None:
+        return
+    if roots is None:                         # final review B-M2: never a silent skip
+        take(project, audit, roots, "{} save {}".format(tool_name, name), [],
+             [("SKIPPED", UNREADABLE_SAVE.format(name))], False, now, deadline, agent, session_id)
         return
     p, why = _devbench_save(name, roots, os.environ if env is None else env)
     if not (p or why):

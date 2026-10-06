@@ -103,16 +103,27 @@ def clear_expired(root, now):
     sf = Path(root) / ".skyguard" / "state.json"
     if not os.path.lexists(str(sf)):
         return []
-    st = state.read(str(sf))
-    if st.rejected:
+    if state.read(str(sf)).rejected:
         return []
-    gone = [x for x in st.lifts if _expired(x, now)]
-    if not gone:
-        return []
-    keep = [x for x in st.lifts if not _expired(x, now)]
-    persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
     lock._assert_sandbox(sf)
-    state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
+    # Final review (fix A concern 2): an expired LOCK lift is first carried out the way every hook call does it --
+    # relock what it opened, then drop it -- so clearing it here can never leave a file open until session start.
+    due = [x for x in state.read(str(sf)).lifts if _expired(x, now)]     # what this run must report as cleared
+    lock.relock_expired(str(root), now=now, wait=state.LOCK_WAIT)
+    # Final review B-M3: read, decide and write under the state lock, so a `lock enable` / `lock unlock` /
+    # `guards off` that lands in between waits, instead of being undone (or an old `lock_disabled` written back).
+    with state.locked(str(sf)):
+        st = state.read(str(sf))
+        if st.rejected:
+            return []
+        rest = [x for x in st.lifts if _expired(x, now)]
+        if rest:
+            keep = [x for x in st.lifts if not _expired(x, now)]
+            persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
+            state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
+        gone = due + [x for x in rest if x not in due]
+        if not gone:
+            return []
     from skyguard.audit import Audit
     what = ", ".join(session._clean("%s %s" % (x["kind"], x["session_id"]), 60) for x in gone[:5])
     Audit(str(root)).log("skydoctor", "INFO", "cleared %d expired lift(s) (R9): %s" % (len(gone), what))

@@ -11,7 +11,10 @@ paths keep their install-relative layout (`Data/Scripts/...`), recovery files th
 as a folder (`C/Users/.../plugins.txt`). `--to DIR` writes there instead and refuses, writing nothing, when any file it
 would write already exists. `--in-place` writes over the live files -- each one that exists is first backed up the
 Task 13 way (backup.take: hashed copy + MANIFEST.jsonl line, listed by scripts/restore-from-backup.sh); when any backup
-fails, nothing is restored.
+fails, nothing is restored. A live file whose bytes already match the snapshot is left alone and reported `unchanged`
+(final review B-M1: rewriting it would cut a mod manager's hard link and take a backup for nothing). A FULL in-place
+restore of a config snapshot skips, and names, a load-order file or INI whose folder is no longer configured, and
+restores the rest (B-M4); with --path, or for any other reason, an out-of-bounds file still refuses everything.
 
 WHAT. A script snapshot restores its full map; a config snapshot the full load-order / INI state at that id
 (recovery.resolve); a save snapshot its .ess and .skse. `--path FILE` (repeatable) restores only the files whose path
@@ -43,6 +46,7 @@ _NEVER_EXT = (".esp", ".esm", ".esl", ".bsa", ".ba2")
 _NEVER_DIRS = (".claude", ".codex", ".skyguard")
 _NEVER_RUNS = (("tools", "skyguard"), ("agent", "guards"))
 _LOADORDER = ("plugins.txt", "loadorder.txt")
+_OUT_OF_ROOTS = "not a load-order file or game INI directly in a configured folder"
 
 
 def _real(p):
@@ -86,7 +90,24 @@ def _allowed(project, sid, key, target):
         return ""
     if recovery._INI.match(name) and parent in {_real(d) for d in roots.config_dirs}:
         return ""
-    return "not a load-order file or game INI directly in a configured folder"
+    return _OUT_OF_ROOTS
+
+
+def _no_longer_configured(target, why):
+    """B-M4: a load-order file or game INI refused only because its folder is not (any longer) a configured one --
+    skipped and named in a full restore. `_allowed` gives _OUT_OF_ROOTS for a config snapshot only, and only after
+    `_never` passed, so this is never a plugin, a guard file, a stream or a save."""
+    name = Path(target).name.lower()
+    return why == _OUT_OF_ROOTS and (name in _LOADORDER or bool(recovery._INI.match(name)))
+
+
+def _unchanged(target, sha):
+    """True when the live `target` is a regular file whose bytes already hash to the snapshot's `sha` (B-M1). Any
+    doubt (missing, a link or folder, unreadable) is False: the file is then restored, backed up first, as before."""
+    try:
+        return os.path.isfile(str(target)) and not os.path.islink(str(target)) and backup._sha256(target) == sha
+    except OSError:
+        return False
 
 
 def _project(p):
@@ -255,12 +276,27 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
         return 2
     audit = Audit(str(project))
     if in_place:
-        odd = [(live[k], why) for k in keys for why in [_allowed(project, sid, k, live[k])] if why]
+        odd = [(k, why) for k in keys for why in [_allowed(project, sid, k, live[k])] if why]
+        # Final review B-M4: a FULL config restore holds every path ever recorded; one whose folder is no longer
+        # configured is skipped and named, not a reason to refuse the rest. Anything else still refuses everything.
+        moved = [k for k, why in odd if not wanted and _no_longer_configured(live[k], why)]
+        odd = [(live[k], why) for k, why in odd if k not in moved]
         if odd:
             print("REFUSED: {} is {}, so it is not written back in place. Nothing was restored.".format(*odd[0]),
                   file=out)
             return 2
-        pairs = [(live[k], chosen[k]) for k in keys]
+        if moved and len(moved) == len(keys):
+            print("REFUSED: every file of snapshot {} is {} (first: {}), so none is written back in place. Restore "
+                  "to a folder (--to) instead. Nothing was restored.".format(sid, _OUT_OF_ROOTS, live[moved[0]]),
+                  file=out)
+            return 2
+        keys = [k for k in keys if k not in moved]
+        skipped = [live[k] for k in moved]
+        # Final review B-M1: a live file that already holds the snapshot's bytes is NOT rewritten. Replacing it would
+        # cut a mod manager's hard link (the part file + os.replace below makes a new file) and back it up for nothing.
+        same = [k for k in keys if _unchanged(live[k], chosen[k])]
+        pairs = [(live[k], chosen[k]) for k in keys if k not in same]
+        unchanged = [live[k] for k in same]
         dest = "the live files"
         for target, _sha in pairs:
             if target.is_file() and backup.take(str(project), "skyguard snapshot restore", str(target), audit) is None:
@@ -276,19 +312,32 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
                   "restored.".format(len(clash), base, clash[0]), file=out)
             return 2
         dest = str(base)
+        unchanged, skipped = [], []
     try:
         n = snapshot.write_blobs(store, pairs)
     except OSError as e:
         print("FAILED part-way restoring snapshot {} to {}: {}".format(sid, dest, e), file=out)
         audit.log(HOOK, "FAILED", "restore of {} to {} stopped: {}".format(sid, dest, e))
         return 1
-    audit.log(HOOK, "RESTORED", "{} ({} file(s)) -> {}".format(sid, n, dest))
+    audit.log(HOOK, "RESTORED", "{} ({} file(s), {} unchanged) -> {}".format(sid, n, len(unchanged), dest))
+    for target in skipped:
+        audit.log(HOOK, "SKIPPED", "{}: {} is no longer in a configured folder -- NOT restored".format(sid, target))
+        print("  NOT restored {}: its folder is no longer a configured one; get it with --to <folder> --path \"{}\"".format(
+            target, target), file=out)
     for target, _sha in pairs[:SHOW]:
         print("  restored {}".format(target), file=out)
     if len(pairs) > SHOW:
         print("  ... and {} more".format(len(pairs) - SHOW), file=out)
-    print("Restored {} file(s) from snapshot {} to {}{}".format(
-        n, sid, dest, " (each replaced file was backed up first)" if in_place else ""), file=out)
+    for target in unchanged[:SHOW]:
+        print("  unchanged {} (already identical to the snapshot: not rewritten)".format(target), file=out)
+    if len(unchanged) > SHOW:
+        print("  ... and {} more unchanged".format(len(unchanged) - SHOW), file=out)
+    print("Restored {} file(s) from snapshot {} to {}{}{}".format(
+        n, sid, dest, " (each replaced file was backed up first)" if in_place and n else "",
+        "; {} already matched and were left as they are".format(len(unchanged)) if unchanged else ""), file=out)
+    if skipped:
+        print("{} file(s) were NOT restored: their folder is no longer configured (listed above).".format(len(skipped)),
+              file=out)
     return 0
 
 

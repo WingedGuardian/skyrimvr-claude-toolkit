@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -177,6 +178,25 @@ def _append_line(path, line):
             os.close(fd)
 
 
+def _save_room(backups, file_path):
+    """Final review B-M6: a SAVE (.ess / .skse, up to ~192 MB) is backed up only when the backups drive keeps the
+    recovery store's SAVE_RESERVE_BYTES free afterwards -- the reserve every save copy keeps (recovery.py). -> why
+    not, or "". Every caller that replaces a save backs it up first and replaces nothing when the backup fails: both
+    in-place restores, and the edit hooks (which never block). An unreadable size or free space is not a refusal."""
+    if not str(file_path).lower().endswith((".ess", ".skse")):
+        return ""
+    from .recovery import SAVE_RESERVE_BYTES
+    try:
+        size = os.path.getsize(str(file_path))
+        free = shutil.disk_usage(str(backups)).free
+    except OSError:
+        return ""
+    if free - size < SAVE_RESERVE_BYTES:
+        return "backing up the save {} ({:.1f} MB) would leave under {:.0f} MB free on the backups drive".format(
+            file_path, size / (1024 * 1024), SAVE_RESERVE_BYTES / (1024 * 1024))
+    return ""
+
+
 def take(project, tool_name, file_path, audit, agent="", session_id=""):
     """Back up one existing file. Returns the backup's Path, or None when no backup exists (FAILED is logged)."""
     backups = Path(project) / ".claude" / "backups"
@@ -187,6 +207,10 @@ def take(project, tool_name, file_path, audit, agent="", session_id=""):
     part = Path("{}.part-{}".format(base, os.getpid()))
     try:
         backups.mkdir(parents=True, exist_ok=True)      # bash: mkdir -p 2>/dev/null, then cp fails -> FAILED
+        short = _save_room(backups, file_path)
+        if short:
+            audit.log(HOOK, "FAILED", "{} -- NO BACKUP EXISTS for this edit".format(short))
+            return None
         want, copied, digest = _copy_hashed(file_path, part)
     except OSError:
         _discard(part)

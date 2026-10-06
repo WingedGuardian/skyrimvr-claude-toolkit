@@ -4684,7 +4684,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _DRT + "test_an_expired_lift_is_cleared_and_logged", "l2-doctor-r9-eight-hour-cap"),
     (_DR, '    Audit(str(root)).log("skydoctor", "INFO",', '    (lambda *a: None)("skydoctor", "INFO",',
      _DRT + "test_an_expired_lift_is_cleared_and_logged", "l2-doctor-r9-logs"),
-    (_DR, "    if not gone:\n        return []", "    if False:\n        return []",
+    (_DR, "        if not gone:\n            return []", "        if False:\n            return []",
      _DRT + "test_the_report_writes_nothing_when_nothing_expired", "l2-doctor-writes-nothing"),
     # ---- Guards / Integrity
     (_DR, "    if not off:", "    if True:",
@@ -6592,8 +6592,6 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 _FXSL = "tests/test_skyguard_lock.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # The state lock (coordination item 3): every write takes it...
-    ("tools/skyguard/state.py", "    with locked(path, wait):\n        _write(path, data)", "    _write(path, data)",
-     _FXSL + "test_the_state_lock_serialises_writers_and_breaks_a_stale_lock", "fixA-state-lock-write"),
     # ...and the hook's relock waits only briefly for it, skipping (logged) when busy.
     ("tools/skyguard/lock.py", "    with _state.locked(sf, wait):", "    if True:",
      _FXSL + "test_a_busy_state_file_skips_the_relock_without_blocking_the_hook", "fixA-state-lock-hook-short-wait"),
@@ -6609,3 +6607,55 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "tests/test_skyguard_lift_rules.py::test_p6t11_row[p6t11-raw-attrib-bsa]", "fixA-cmd-text-runnable"),
 ]]
 
+
+
+# Plan 6 final review, fix lane B: one twin per clause, each killed by the named test.
+_FB = [
+    # B-M1: a live file already identical to the snapshot is not rewritten (a mod manager's hard link survives)
+    (_SC, "        same = [k for k in keys if _unchanged(live[k], chosen[k])]", "        same = []",
+     _SCT + "test_in_place_restore_of_an_unchanged_snapshot_leaves_a_hard_link_intact", "p6fb-m1-identical-not-rewritten"),
+    (_SC, "        return os.path.isfile(str(target)) and not os.path.islink(str(target)) and backup._sha256(target) == sha",
+     "        return os.path.isfile(str(target))",
+     _SCT + "test_in_place_restore_still_replaces_a_changed_file_beside_an_unchanged_one", "p6fb-m1-only-identical-skipped"),
+    # B-M2: an unreadable paths file never silently skips the save a command rewrites
+    (_RC, "    if not (resaver or dev):\n        return [], []", "    if not (resaver or dev) or roots is None:\n        return [], []",
+     _RCT + "test_an_absolute_save_is_kept_even_when_the_paths_file_is_unreadable", "p6fb-m2-absolute-save-needs-no-roots"),
+    (_RC, "    if roots is None and not n:", "    if False:",
+     _RCT + "test_a_bare_save_name_with_an_unreadable_paths_file_is_logged_not_kept", "p6fb-m2-bare-name-not-new"),
+    (_RC, '                notes.append(("SKIPPED", UNREADABLE_SAVE.format(name)))', "                pass",
+     _RCT + "test_a_devbench_save_with_an_unreadable_paths_file_is_logged", "p6fb-m2-devbench-shell-logged"),
+    (_RC, '             [("SKIPPED", UNREADABLE_SAVE.format(name))], False, now', "             [], False, now",
+     _RCT + "test_a_devbench_save_with_an_unreadable_paths_file_is_logged", "p6fb-m2-devbench-mcp-logged"),
+    # B-M4: a full config restore skips (and names) a no-longer-configured folder; by name it still refuses
+    (_SC, "        moved = [k for k, why in odd if not wanted and _no_longer_configured(live[k], why)]", "        moved = []",
+     _SCT + "test_a_full_in_place_config_restore_skips_a_no_longer_configured_folder_and_restores_the_rest",
+     "p6fb-m4-full-restore-skips-moved-folder"),
+    (_SC, "if not wanted and _no_longer_configured(", "if _no_longer_configured(",
+     _SCT + "test_a_per_file_in_place_restore_of_a_no_longer_configured_ini_still_refuses", "p6fb-m4-by-name-still-refuses"),
+    (_SC, "    return why == _OUT_OF_ROOTS and (name in _LOADORDER", "    return (name in _LOADORDER",
+     _SCT + "test_in_place_never_writes_inside_the_guards_own_folders_even_when_configured_there",
+     "p6fb-m4-only-the-out-of-roots-reason"),
+    # B-M6: backing up a save before replacing it keeps the save reserve free on the backups drive
+    ("tools/skyguard/backup.py", "    if free - size < SAVE_RESERVE_BYTES:", "    if False:",
+     _SCT + "test_in_place_save_restore_refuses_when_its_backup_would_fill_the_drive", "p6fb-m6-save-reserve"),
+    ("tools/skyguard/backup.py", '    if not str(file_path).lower().endswith((".ess", ".skse")):\n        return ""',
+     '    if False:\n        return ""', _SCT + "test_the_save_reserve_applies_to_saves_only", "p6fb-m6-saves-only"),
+    ("tools/skyguard/backup.py", "        short = _save_room(backups, file_path)", '        short = ""',
+     _SCT + "test_in_place_save_restore_refuses_when_its_backup_would_fill_the_drive", "p6fb-m6-wired-into-take"),
+    # B-M3: skydoctor's R9 clear is a read-modify-write under the one state lock that every write takes
+    (_DR, "    with state.locked(str(sf)):", "    if True:",
+     _DRT + "test_r9_clear_does_not_undo_a_lock_enable_that_lands_after_its_first_read", "p6fb-m3-doctor-rmw-locked"),
+    (_ST, "    with locked(path, wait):\n        _replace(path, payload)", "    _replace(path, payload)",
+     _STT + "test_a_write_waits_while_another_process_holds_the_state_lock", "p6fb-m3-write-takes-the-lock"),
+    (_ST, "    if key in _HELD:\n        yield\n        return", "    if False:\n        yield\n        return",
+     _STT + "test_write_inside_locked_does_not_wait_on_its_own_lock", "p6fb-m3-lock-is-reentrant"),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _FB]
+
+
+# Final fix merge: skydoctor relocks an expired lock lift before clearing it (fix A concern 2).
+MUTATIONS += [
+    pytest.param("tools/skyguard/doctor.py", "    lock.relock_expired(str(root), now=now, wait=state.LOCK_WAIT)\n", "",
+                 "tests/test_skydoctor.py::test_an_expired_lock_lift_is_relocked_not_stranded",
+                 id="p6final-doctor-relocks-expired-lift"),
+]

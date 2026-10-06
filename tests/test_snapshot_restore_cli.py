@@ -147,6 +147,120 @@ def test_in_place_restores_a_script_into_the_install(inst):
     assert (inst.game / "Data" / "Scripts" / "a.pex").read_bytes() == b"script a v1"
 
 
+def _linked_install(inst):
+    """a.pex hard-linked from a mod manager's staging folder (Vortex deploys this way), then snapshotted."""
+    live = inst.game / "Data" / "Scripts" / "a.pex"
+    staging = inst.game.parent / "staging" / "a.pex"
+    staging.parent.mkdir(parents=True)
+    os.link(str(live), str(staging))
+    take_all(inst)
+    assert os.stat(str(live)).st_nlink == 2
+    return live, staging
+
+
+def _backups(inst):
+    return backup.read_manifest(inst.game / ".claude" / "backups")[0]
+
+
+def test_in_place_restore_of_an_unchanged_snapshot_leaves_a_hard_link_intact(inst):
+    """Final review B-M1 (MEASURED by the reviewer: nothing had changed, yet all 3 files were rewritten, each backed up,
+    and the hard-linked .pex went from nlink 2 to 1). A file already identical to the snapshot is not rewritten."""
+    live, staging = _linked_install(inst)
+    before = os.stat(str(live))
+    rc, text = cli_run(inst, "restore", ids(inst, "scripts")[0], "--in-place")
+    assert rc == 0, text
+    after = os.stat(str(live))
+    assert (after.st_ino, after.st_dev, after.st_nlink) == (before.st_ino, before.st_dev, 2), text
+    assert os.path.samefile(str(live), str(staging)), "the mod manager's link still points at the live file"
+    assert "unchanged {}".format(live) in text and "Restored 0 file(s)" in text, text
+    assert "2 already matched" in text, text
+    assert _backups(inst) == {}, "nothing was replaced, so nothing was backed up"
+
+
+def test_in_place_restore_still_replaces_a_changed_file_beside_an_unchanged_one(inst):
+    """The twin: only IDENTICAL bytes are skipped. A changed file is backed up and replaced (which cuts its link, by
+    design: write_blobs never writes through a link)."""
+    live, _staging = _linked_install(inst)
+    src = inst.game / "Data" / "Scripts" / "Source" / "a.psc"
+    put(src, b"broken experiment")
+    rc, text = cli_run(inst, "restore", ids(inst, "scripts")[0], "--in-place")
+    assert rc == 0, text
+    assert src.read_bytes() == b"source a v1" and "restored {}".format(src) in text, text
+    assert "unchanged {}".format(live) in text and os.stat(str(live)).st_nlink == 2, text
+    assert [e["src"] for e in _backups(inst).values()] == [str(src)], "only the replaced file was backed up"
+
+
+def _moved_config_dir(inst):
+    """A config snapshot, then the user points SKYRIM_CONFIG_DIR somewhere else, and plugins.txt goes bad."""
+    take_all(inst)
+    new_cfg = inst.game.parent / "docs2" / "Skyrim VR"
+    new_cfg.mkdir(parents=True)
+    write_paths(inst, new_cfg)
+    put(inst.cfg / "Skyrim.ini", b"[General]\nedited since\n")       # in the no-longer-configured folder
+    put(inst.lo / "plugins.txt", b"*Broken.esp\n")
+    return ids(inst, "config")[0]
+
+
+def test_a_full_in_place_config_restore_skips_a_no_longer_configured_folder_and_restores_the_rest(inst):
+    """Final review B-M4: the snapshot's INIs sit in a folder that is no longer configured; the whole restore was
+    refused. Now the configured files are restored and the others are named, untouched."""
+    sid = _moved_config_dir(inst)
+    rc, text = cli_run(inst, "restore", sid, "--in-place")
+    assert rc == 0, text
+    assert (inst.lo / "plugins.txt").read_bytes() == b"*Skyrim.esm\n*Mine.esp\n", text
+    assert (inst.cfg / "Skyrim.ini").read_bytes() == b"[General]\nedited since\n", "outside the roots: never written"
+    for n in ("Skyrim.ini", "SkyrimVR.ini", "skyrimprefs.INI"):     # the drive letter's case is the recorder's
+        assert "not restored {}: its folder is no longer".format(inst.cfg / n).lower() in text.lower(), text
+    assert "3 file(s) were NOT restored" in text, text
+    assert "SKIPPED" in inst.log(), "the skip is in the audit log too"
+
+
+def test_a_per_file_in_place_restore_of_a_no_longer_configured_ini_still_refuses(inst):
+    """The twin: asked for BY NAME (--path), the out-of-roots file is still a refusal, not a silent skip."""
+    sid = _moved_config_dir(inst)
+    rc, text = cli_run(inst, "restore", sid, "--path", "plugins.txt", "--path", "Skyrim.ini", "--in-place")
+    assert rc == 2 and "not a load-order file or game INI" in text and "Nothing was restored" in text, text
+    assert (inst.cfg / "Skyrim.ini").read_bytes() == b"[General]\nedited since\n"
+    assert (inst.lo / "plugins.txt").read_bytes() == b"*Broken.esp\n", "a refusal writes nothing at all"
+
+
+def _low_disk(monkeypatch, room):
+    """The backups drive has SAVE_RESERVE_BYTES + `room` bytes free."""
+    real = backup.shutil.disk_usage
+    monkeypatch.setattr(backup.shutil, "disk_usage",
+                        lambda p: real(p)._replace(free=recovery.SAVE_RESERVE_BYTES + room))
+
+
+def test_in_place_save_restore_refuses_when_its_backup_would_fill_the_drive(inst, monkeypatch):
+    """Final review B-M6: the live save (up to 192 MB) was backed up with no free-space reserve, on a drive the user
+    keeps ~88% full. The backup now keeps the recovery store's reserve; when it cannot, nothing is restored."""
+    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    put(inst.saves / "Quick.ess", b"what resaver wrote")
+    _low_disk(monkeypatch, 10)
+    rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
+    assert rc == 2 and "could not back up" in text, text
+    assert (inst.saves / "Quick.ess").read_bytes() == b"what resaver wrote", "no backup, so no replace"
+    assert "would leave under" in inst.log() and "NO BACKUP EXISTS" in inst.log()
+
+
+def test_the_save_reserve_applies_to_saves_only(inst, monkeypatch):
+    """The twin: on the same nearly full drive, a load-order file is still backed up and restored."""
+    take_all(inst)
+    put(inst.lo / "plugins.txt", b"*Broken.esp\n")
+    _low_disk(monkeypatch, 10)
+    rc, text = cli_run(inst, "restore", ids(inst, "config")[0], "--path", "plugins.txt", "--in-place")
+    assert rc == 0 and (inst.lo / "plugins.txt").read_bytes() == b"*Skyrim.esm\n*Mine.esp\n", text
+
+
+def test_in_place_save_restore_with_room_backs_the_save_up(inst, monkeypatch):
+    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    put(inst.saves / "Quick.ess", b"what resaver wrote")
+    _low_disk(monkeypatch, 10 * 1024 * 1024)
+    rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
+    assert rc == 0 and (inst.saves / "Quick.ess").read_bytes() == b"quick save bytes", text
+    assert any(e["src"].endswith("Quick.ess") for e in _backups(inst).values())
+
+
 def forge_recovery(inst, victim, sid):
     """A whole one-file recovery snapshot whose line names `victim` -- what a tampered store can hold."""
     inst.run("make")

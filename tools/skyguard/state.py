@@ -18,10 +18,12 @@ the per-call SHADOW line and the session-start report are what bound what a forg
 Known open gap (ledgered, owned by Tasks 10/12): `persistent.lock_disabled` is as forgeable as any other field,
 and unlike a lift it is not session-bound; the guard against it is a deny on writes to state.json that set it.
 
-Times are epoch seconds. Writes go only through `write()`, which refuses what `read()` would reject.
+Times are epoch seconds. Writes go only through `write()`, which refuses what `read()` would reject and holds the
+state lock; a read-modify-write holds it across the read too (`locked`, final review B-M3).
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -38,6 +40,8 @@ MAX_LIFT_SECONDS = 8 * 3600.0
 CLOCK_SKEW_SECONDS = 60.0
 KINDS = ("guards", "lock")
 _REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: a junction, a symlink, a mount point
+LOCK_WAIT = 5.0   # seconds a writer waits for the state lock (B-M3); a CLI or skydoctor call, never a hook's budget
+_HELD = set()     # state files whose lock this process holds (write() inside locked() must not wait on itself)
 
 
 @dataclass(frozen=True)
@@ -106,73 +110,43 @@ def _shape_problem(data):
     return None
 
 
-# ---- the state lock (Plan 6 final fix; minimal version, reconciled with the docs lane's at merge) -------------------
-# ONE lock file beside the state, `state.json.lock`, created exclusively. Every write takes it (waiting up to `wait`
-# seconds); a read-modify-write wraps the read AND the write in `locked()` so a concurrent writer cannot be lost between
-# them. Re-entrant within a process. A per-call hook path passes a SHORT wait and skips (logged) on StateBusy. A lock
-# file older than LOCK_STALE seconds is a crashed holder's and is broken.
-LOCK_SUFFIX = ".lock"
-LOCK_STALE = 30.0
-DEFAULT_WAIT = 5.0
-_HELD = set()
-
-
 class StateBusy(OSError):
-    """Another writer holds the state lock past the wait."""
+    """Another writer held the state lock past the wait (a per-call hook path skips and logs; a CLI reports it)."""
 
 
-class locked:
-    def __init__(self, path, wait=DEFAULT_WAIT):
-        self.lp = str(path) + LOCK_SUFFIX
-        self.key = os.path.normcase(os.path.abspath(self.lp))
-        self.wait, self.mine = wait, False
-
-    def __enter__(self):
-        import time
-        if self.key in _HELD:
-            return self
-        Path(self.lp).parent.mkdir(parents=True, exist_ok=True)
-        deadline = time.monotonic() + max(0.0, float(self.wait))
-        while True:
-            try:
-                fd = os.open(self.lp, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, str(os.getpid()).encode("ascii"))
-                os.close(fd)
-                break
-            except FileExistsError:
-                try:
-                    if time.time() - os.stat(self.lp).st_mtime > LOCK_STALE:
-                        os.unlink(self.lp)
-                        continue
-                except OSError:
-                    pass
-                if time.monotonic() >= deadline:
-                    raise StateBusy("the state file is being written by another process")
-                time.sleep(0.02)
-        _HELD.add(self.key)
-        self.mine = True
-        return self
-
-    def __exit__(self, *exc):
-        if self.mine:
-            _HELD.discard(self.key)
-            try:
-                os.unlink(self.lp)
-            except OSError:
-                pass
-        return False
+@contextlib.contextmanager
+def locked(path, wait=None):
+    """Hold the state lock (`state.json.lock`, beside it) for a READ-MODIFY-WRITE: read, decide, then `write()`
+    while holding it, so a writer that lands in between waits instead of being undone (final review B-M3: skydoctor's
+    expired-lift clear could write back a `lock_disabled` that `lock enable` had just removed). `write()` takes the
+    same lock, re-entrantly in this process, so every write is serialised with every locked read-modify-write. An OS
+    lock (backup._exclusive): the OS drops it if its holder dies, so no stale-file breaking is needed. Raises
+    StateBusy when it stays busy for `wait` (default LOCK_WAIT) seconds; a per-call hook path passes a short wait."""
+    from . import backup
+    key = os.path.normcase(os.path.abspath(str(path)))
+    if key in _HELD:
+        yield
+        return
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    try:
+        cm = backup._exclusive(Path(str(path) + ".lock"), wait=LOCK_WAIT if wait is None else wait)
+        cm.__enter__()
+    except OSError as e:
+        raise StateBusy("the state file is being written by another process ({})".format(e.__class__.__name__))
+    _HELD.add(key)
+    try:
+        yield
+    finally:
+        _HELD.discard(key)
+        cm.__exit__(None, None, None)
 
 
-def write(path, data: dict, wait=DEFAULT_WAIT) -> None:
-    """Atomically write `data` with its checksum, under the state lock (`locked`). Refuses (ValueError) anything
-    `read()` would reject: an unknown version, a malformed lift or persistent block, or more than MAX_BYTES. Temp file
-    in the same directory, then `os.replace`: a reader sees the old file or the new one, never a half-written one. On
-    any failure the old file is left and no temp file remains. The only sanctioned writer of state.json."""
-    with locked(path, wait):
-        _write(path, data)
-
-
-def _write(path, data: dict) -> None:
+def write(path, data: dict, wait=None) -> None:
+    """Atomically write `data` with its checksum, under the state lock (`locked`, waiting up to `wait`). Refuses
+    (ValueError) anything `read()` would reject: an unknown version, a malformed lift or persistent block, or more
+    than MAX_BYTES. Temp file in the same directory, then `os.replace`: a reader sees the old file or the new one,
+    never a half-written one. On any failure the old file is left and no temp file remains (a refused `data` is
+    refused before the lock, so it leaves nothing at all). The only sanctioned writer of state.json."""
     path = Path(path)
     body = {k: v for k, v in data.items() if k != "sum"}
     if not _version_ok(body):
@@ -184,6 +158,11 @@ def _write(path, data: dict) -> None:
     payload = json.dumps(body, sort_keys=True, indent=1, ensure_ascii=True).encode("ascii") + b"\n"
     if len(payload) > MAX_BYTES:
         raise ValueError("refusing to write: larger than {} KiB".format(MAX_BYTES // 1024))
+    with locked(path, wait):
+        _replace(path, payload)
+
+
+def _replace(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".state-", suffix=".tmp", dir=str(path.parent))
     try:

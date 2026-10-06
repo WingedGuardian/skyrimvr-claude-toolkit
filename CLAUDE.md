@@ -233,7 +233,8 @@ Naming a plugin or INI in a read-only command is silent: notes fire on the progr
 - A shell write, copy or move onto a save in `Saves/`, and an edit-tool write to one (two rules)
 - git that throws away uncommitted changes in a protected folder (`checkout -- x`, `restore`,
   `reset --hard`)
-- `lock disable` (the file lock off for good), and `snapshot restore --in-place` (writes over live files)
+- `lock disable` (the file lock off for good), and `snapshot restore --in-place` or
+  `restore-from-backup.sh --restore` (writes over live files)
 
 Few prompts by design: a guard that prompts on routine work gets approved by reflex
 (`docs/safety-philosophy.md`). **Check the guards are alive: `bash tools/hook-canary.sh`.**
@@ -241,9 +242,10 @@ Coverage and gaps: `docs/guard-coverage.md`.
 
 ### The file lock and the guards' own state
 - **"Access denied" writing a vanilla master or archive** (`Skyrim.esm`, a base `.bsa`) is the optional lock, not
-  a fault (the OS says no more): never retry or work around it. `bash tools/skyguard.sh lock unlock <file>` lifts it
-  until the next session start: **tell the user why first; relock when done** (`lock lock`). Never clear the
-  read-only bit or ACL by hand.
+  a fault (the OS says no more): never retry or work around it. `bash tools/skyguard.sh lock unlock <file>` lifts
+  it for an hour (the next tool call after that relocks it): **tell the user why first; relock when done**
+  (`lock lock`). If it answers "No session id", you cannot lift it, by design: ask the user to run
+  `tools\skyguard-unlock.cmd` in their own terminal. Never clear the read-only bit or ACL by hand.
 - **Never edit `.skyguard/`** (guard on/off state): refused. `bash tools/skydoctor` shows what is live.
 
 ### General rules
@@ -372,7 +374,7 @@ Generated into `CLAUDE.md` only. Everything above is shared with every agent.
   `.claude/settings.json`: `Bash` → `protect-bash` + `snapshot-before-tool`; `Edit|Write` →
   `protect-files` + `backup-before-edit`; SessionStart → `session-kb-guard` (knowledgebase snapshot, then your `## My preferences`). `setup.sh` records the
   Python path in each hook. The user lists or disables them with `/hooks`. The PowerShell tool is not
-  matched yet.
+  matched yet, and only the Bash tool gets `SKYGUARD_SESSION_ID`, so lift the lock from Bash, never PowerShell.
 - **What the backup hook cannot see.** `backup-before-edit.sh` fires on Edit/Write tool calls only, with no
   extension filter (`.psc` included). A file written by a script run through the Bash tool is invisible to
   it. That is how the knowledgebase is usually written, and it is why `session-kb-guard.sh` snapshots the
