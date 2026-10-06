@@ -202,3 +202,13 @@ The devcontainer base image is Python 3.11 only, so 3.10/3.12/3.13 cells need CI
 - mypy 2.4.0 dropping macOS x86_64 wheels and Node 20/Python 3.10 end-of-life dates (taken from the earlier pass, not re-fetched).
 - Whether the maintainer's own FOMOD generator uses `XMLBuilder` (decides the fast-xml-parser 5.7.3 question).
 - Scratch artifacts: venv-like `--target` dirs and the query script under the session scratchpad `.../scratchpad/t6c/` (about 190 MB total, ruff x5 and pytest x3); a stray `pt80/` created in the worktree by mistake was removed to the Recycle Bin and `git status` is clean.
+
+## 9. Implementation addendum (same day): rulings applied, and two corrections to this report
+
+Coordinator rulings applied as separate commits on `p8-deps` (ruff gate fix, lock-generator guard, drops, PyYAML 6.0.3, pytest 8.4.2, pytest 9.0.3, ruff 0.16.9, exact package.json, fast-xml-parser 5.7.3 with a smoke). Every re-lock was checked by a hash-required
+`pip install --dry-run` per cell (Python 3.10-3.13 x win_amd64, linux x86_64, linux aarch64: 12 of 12 OK after PyYAML 6.0.3; 3.13 failed on PyYAML 6.0.1 as predicted) and by a cold venv install from the lock.
+
+Corrections (MEASURED during implementation):
+1. **mypy 1.9.0 does NOT fail to install on ARM Linux.** It publishes a pure-Python `py3-none-any` wheel next to the compiled ones, so `--only-binary=:all:` installs it on aarch64 (the old lock passed the aarch64 cells for 3.10-3.12). Section 0.3 / 2 / 4's "install fails on ARM" claim, inherited from the earlier pass, is wrong; mypy is still dropped because it is unused, and the real 3.13 gap was pydantic-core 2.16.1, PyYAML 6.0.1 and pywin32 306.
+2. **fast-xml-parser 4.5.7 already escapes the XMLBuilder comment/CDATA delimiters** (same output as 5.7.3; 4.3.6 injects). The advisory range `< 5.7.0` does not carve out the 4.5.x backport, so `npm audit` flags 4.5.7 although the behaviour is fixed. "No 4.x fix" in sections 0.4 / 3 was wrong about behaviour. The 5.7.3 bump was made as ruled (clean audit; four more dependencies) in its own commit so it can be reverted to 4.5.7 alone.
+3. The ruff hard-gate failure (section 0.1) is fixed by `ruff.toml` (`force-exclude`, `extend-exclude = ["*.slots.py"]`), a naming rule shared with `tests/test_adapter_template.py`, with a twin that a real F821 still fails the gate.
