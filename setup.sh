@@ -4,9 +4,47 @@
 # This script is designed to be run FROM your Skyrim folder, after
 # extracting the toolkit zip into it. It configures everything in-place.
 #
-# Usage: bash setup.sh
+# Usage: bash setup.sh [--agent claude|codex|all|auto] [--lock]
+#   --agent auto    (the default) every agent found on PATH; when none is found, all of them
+#   --agent claude  Claude Code only      --agent codex  Codex only (Windows only)
+#   --agent all     both (`both` is accepted as another name for it)
+#   --lock          also apply the Layer 2 read-only lock to the vanilla masters and archives.
+#                   OFF unless you pass it (bash tools/skyguard.sh lock unlock <file> lifts it again).
+# Setup never installs software. Every install command it prints is for you to run.
 
 set -e
+
+# --- Options: checked before anything is written ----------------------------------------------------------
+# An unknown option or --agent value is a usage error (exit 2) and nothing is touched.
+usage() {
+    echo "usage: bash setup.sh [--agent claude|codex|all|auto] [--lock]"
+    echo "  --agent auto    the default: every agent found on PATH (claude, codex); all of them when none is found"
+    echo "  --agent claude  configure Claude Code only"
+    echo "  --agent codex   configure Codex only (Windows only)"
+    echo "  --agent all     configure both (\`both\` means the same)"
+    echo "  --lock          also lock the vanilla masters and archives read-only (off unless you ask)"
+}
+AGENT_ARG="auto"
+WANT_LOCK=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --agent)
+            if [ $# -lt 2 ]; then
+                echo "setup.sh: --agent needs a value. Nothing was changed." >&2; usage >&2; exit 2
+            fi
+            AGENT_ARG="$2"; shift 2 ;;
+        --agent=*) AGENT_ARG="${1#--agent=}"; shift ;;
+        --lock) WANT_LOCK=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "setup.sh: unknown option '$1'. Nothing was changed." >&2; usage >&2; exit 2 ;;
+    esac
+done
+case "$AGENT_ARG" in
+    claude|codex|all|auto) ;;
+    both) AGENT_ARG="all" ;;
+    *) echo "setup.sh: --agent must be claude, codex, all (or both) or auto, not '$AGENT_ARG'. Nothing was changed." >&2
+       usage >&2; exit 2 ;;
+esac
 
 GAME_DIR="$(pwd)"
 USERNAME="$(whoami)"
@@ -16,12 +54,47 @@ USERNAME="$(whoami)"
 # filesystem work below -- both forms work there -- and use this one only for substitution.
 GAME_ROOT_WIN=$(pwd -W 2>/dev/null || pwd)
 GAME_ROOT_WIN=$(printf '%s' "$GAME_ROOT_WIN" | tr '\134' '/')
+# The toolkit's Codex support is Windows-only: its hooks are rendered for a drive-letter root.
+case "$GAME_ROOT_WIN" in [A-Za-z]:/*) CODEX_WIN=1 ;; *) CODEX_WIN="" ;; esac
+
+# --- Which agents this run configures --------------------------------------------------------------------
+# auto = every agent found on PATH. When none is found: all of them -- an agent installed later, or installed
+# but not on this shell's PATH, must not find the folder unconfigured. Codex is never an auto candidate off
+# Windows (unsupported there); asking for it by name off Windows is refused here, before anything is written.
+AGENTS_FOUND=""
+if [ "$AGENT_ARG" = "auto" ]; then
+    which claude >/dev/null 2>&1 && AGENTS_FOUND="claude"
+    if [ -n "$CODEX_WIN" ] && which codex >/dev/null 2>&1; then AGENTS_FOUND="${AGENTS_FOUND:+$AGENTS_FOUND }codex"; fi
+    case "$AGENTS_FOUND" in
+        claude) AGENT_SEL="claude" ;;
+        codex) AGENT_SEL="codex" ;;
+        *) AGENT_SEL="all" ;;
+    esac
+else
+    AGENT_SEL="$AGENT_ARG"
+fi
+DO_CLAUDE=""; DO_CODEX=""
+case "$AGENT_SEL" in
+    claude) DO_CLAUDE=1 ;;
+    codex) DO_CODEX=1 ;;
+    all) DO_CLAUDE=1; DO_CODEX=1 ;;
+esac
+if [ "$AGENT_SEL" = "codex" ] && [ -z "$CODEX_WIN" ]; then
+    echo "setup.sh: --agent codex: the toolkit's Codex support is Windows-only (Codex on Linux, macOS or WSL is" >&2
+    echo "not supported), and this folder is not a Windows path ($GAME_ROOT_WIN). Nothing was changed." >&2
+    echo "Use --agent claude here." >&2
+    exit 3
+fi
 
 echo "============================================"
 echo " Skyrim Claude Code Toolkit -- Setup"
 echo "============================================"
 echo ""
 echo "Game directory: $GAME_ROOT_WIN"
+case "$AGENT_ARG" in
+    auto) echo "Agents: ${AGENTS_FOUND:-none found on PATH} -> configuring: $AGENT_SEL (--agent auto)" ;;
+    *) echo "Agents: configuring $AGENT_SEL (--agent $AGENT_ARG)" ;;
+esac
 echo ""
 
 # --- Verify this looks like a Skyrim install ---
@@ -41,11 +114,55 @@ if [ ! -f "$GAME_DIR/KNOWLEDGEBASE.md" ] || [ ! -f "$GAME_DIR/.claude/hooks/prot
     exit 1
 fi
 
+# --- Install hints: setup never runs an installer ----------------------------------------------------------
+# Every command below is printed for the USER. Two forms only (tests/test_install_hints.py):
+#   * a runtime an agent may install when the user's task authorizes exactly that winget id and version
+#     (Python.Python.3.<minor>, Git.Git, OpenJS.NodeJS[.LTS] -- tools/inventory-runtimes.py ALLOWED_IDS):
+#     "for you to run", in the exact form `--id <id> --exact --version <v> --no-upgrade`;
+#   * anything else (the .NET SDK, a JDK), and every upgrade of a runtime that exists: a "manual step",
+#     which an agent may not install.
+# The versions are the tested ones (user ruling: every user gets exactly what was tested).
+NODE_PIN="24.19.0"
+PYTHON_PIN="3.12.10"
+DOTNET_SDK_PIN="10.0.401"
+JDK_PIN="21.0.12.8"
+hint_node() {
+    echo "    For you to run (an agent may run it only when your task authorizes exactly this id and version):"
+    echo "      winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade"
+}
+hint_python() {
+    echo "    For you to run (an agent may run it only when your task authorizes exactly this id and version):"
+    echo "      winget install --id Python.Python.3.12 --exact --version 3.12.10 --no-upgrade"
+}
+hint_dotnet() {
+    echo "    Manual step, for you to run (an agent may not install this):"
+    echo "      winget install --id Microsoft.DotNet.SDK.10 --exact --version 10.0.401 --no-upgrade"
+}
+hint_jdk() {
+    echo "    Manual step, for you to run (an agent may not install this):"
+    echo "      winget install --id Microsoft.OpenJDK.21 --exact --version 21.0.12.8 --no-upgrade"
+}
+
+# --- The shell: the hooks run under Git Bash on Windows ---
+echo "Checking the shell..."
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*)
+        echo "  Git Bash: $(git --version 2>/dev/null | tr -d '\r') (tested with Git for Windows 2.48.1)" ;;
+    *)
+        case "$GAME_DIR" in
+            /mnt/[a-zA-Z]/*)
+                echo "  WARNING: this looks like WSL bash on a Windows drive. The toolkit's hooks run under Git Bash on"
+                echo "  Windows; run setup.sh from Git Bash (Git for Windows), not WSL." ;;
+            *) echo "  bash $BASH_VERSION ($(uname -s 2>/dev/null))" ;;
+        esac ;;
+esac
+
 # --- jq is optional ---
 #
 # The safety hooks no longer use jq (they run on Python -- see below). The only shipped tools that
 # still call it are tools/devbench-cli.sh and tools/nexus.sh, for pretty-printing, and both fall
 # back to plain output without it. So this is informational: no install, no failure.
+echo ""
 echo "Checking for jq (optional)..."
 if which jq >/dev/null 2>&1; then
     echo "  Found jq: $(which jq) -- used for pretty output by devbench-cli.sh and nexus.sh"
@@ -61,11 +178,25 @@ fi
 echo ""
 echo "Checking for Node.js..."
 if which node >/dev/null 2>&1; then
-    echo "  Found Node.js: $(node --version 2>/dev/null)"
+    NODE_V=$(node --version 2>/dev/null | tr -d '\r')
+    echo "  Found Node.js: $NODE_V"
+    NODE_MAJOR="${NODE_V#v}"; NODE_MAJOR="${NODE_MAJOR%%.*}"
+    case "$NODE_MAJOR" in
+        ''|*[!0-9]*) echo "  (could not read its version; the xelib tools were tested with Node.js $NODE_PIN)" ;;
+        *)
+            if [ "$NODE_MAJOR" -lt 24 ]; then
+                echo "  Node.js $NODE_V found; v4 needs Node 24 LTS for the xelib tools (xeditlib, skyrim-winner)."
+                echo "    Upgrading it is a manual step for you (an agent may not install this: it never upgrades a runtime):"
+                echo "      download node-v24.19.0-x64.msi from https://nodejs.org/dist/v24.19.0/, check that its SHA-256 is"
+                echo "      f0f66c2a80c08a30a5ab5179ee9ea9e45f9b46289436a8cc87ff833b852db351, and run it."
+            elif [ "${NODE_V#v}" != "$NODE_PIN" ]; then
+                echo "  (the xelib tools were tested with Node.js $NODE_PIN)"
+            fi ;;
+    esac
 else
     echo "  Node.js not found. It's needed for xeditlib (ESP read/write via XEditLib.dll)."
     echo "  Setup does not install it. When you need xeditlib, install it yourself:"
-    echo "    winget install OpenJS.NodeJS.LTS   (or download from nodejs.org)"
+    hint_node
 fi
 
 # --- Detect Python 3 (needed for cosave-info, save analysis, PyFFI/PyNifly; do NOT auto-install) ---
@@ -83,14 +214,16 @@ if [ -z "$PY_FOUND" ]; then
     for c in "py -3" "python" "python3"; do
         if $c -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1; then
             echo "  Python 3 found ('$c' -> $($c --version 2>&1)) but it is too old: the safety hooks need Python 3.8 or newer."
-            echo "  Install a current Python (python.org, or 'winget install Python.Python.3.12') and re-run."
+            echo "  Install a current Python and re-run (it installs beside the old one; the tested range is 3.10-3.13):"
+            hint_python
             break
         fi
     done
 fi
 if [ -z "$PY_FOUND" ]; then
     echo "  Python 3.8+ not found. It's needed for cosave-info and the save-analysis scripts (and PyFFI/PyNifly if you use them)."
-    echo "  Install it from python.org (or 'winget install Python.Python.3.12') and re-run — the bundled tools try 'py -3', 'python', then 'python3'."
+    echo "  Install it and re-run -- the bundled tools try 'py -3', 'python', then 'python3':"
+    hint_python
 fi
 
 # The safety hooks run on this interpreter. Record the ABSOLUTE path of the one just found, so a hook
@@ -107,23 +240,45 @@ fi
 # the first that is not the alias; the alias is used only when nothing else runs.
 PYTHON_PATH=""
 PY_STORE=""
+PY_HOOK_CAND=""; PY_STORE_CAND=""
 if [ -n "$PY_FOUND" ]; then
     for c in "py -3" "python" "python3"; do
         $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,8) else 1)' >/dev/null 2>&1 || continue
         exe=$($c -c 'import sys; print(sys.executable)' 2>/dev/null | tr -d '\r' | tr '\134' '/') || exe=""
         [ -n "$exe" ] || continue
         case "$exe" in
-            */[Ww]indows[Aa]pps/*) if [ -z "$PY_STORE" ]; then PY_STORE="$exe"; fi ;;
-            *) PYTHON_PATH="$exe"; break ;;
+            */[Ww]indows[Aa]pps/*) if [ -z "$PY_STORE" ]; then PY_STORE="$exe"; PY_STORE_CAND="$c"; fi ;;
+            *) PYTHON_PATH="$exe"; PY_HOOK_CAND="$c"; break ;;
         esac
     done
     if [ -z "$PYTHON_PATH" ] && [ -n "$PY_STORE" ]; then
         PYTHON_PATH="$PY_STORE"
+        PY_HOOK_CAND="$PY_STORE_CAND"
         echo "  Hooks will use the Microsoft Store Python ($PY_STORE). It works, but each hook call starts"
         echo "  ~0.1 s slower than a python.org install would; install one and re-run setup.sh to switch."
     elif [ -n "$PYTHON_PATH" ]; then
         echo "  Hooks will use: $PYTHON_PATH"
     fi
+fi
+# The TESTED range (user ruling 2026-10-05): CI runs 3.10-3.13. 3.8 and 3.9 still run the engine, and a newer
+# Python usually does too, so outside the range is a clear note, never a refusal.
+if [ -n "$PY_HOOK_CAND" ]; then
+    PY_VER=$($PY_HOOK_CAND --version 2>&1 | tr -d '\r' | sed -n 's/^Python \([0-9][0-9]*\.[0-9][0-9]*[.0-9]*\).*/\1/p' | head -n1)
+    PY_MAJ="${PY_VER%%.*}"; PY_MIN="${PY_VER#*.}"; PY_MIN="${PY_MIN%%.*}"
+    case "$PY_MAJ.$PY_MIN" in
+        3.10|3.11|3.12|3.13) echo "  Python $PY_VER is inside the tested range 3.10-3.13." ;;
+        3.8|3.9)
+            echo "  NOTE: Python $PY_VER runs the safety hooks (their floor is 3.8) but is OLDER than the tested range"
+            echo "  3.10-3.13. If anything misbehaves, install a tested Python beside it and re-run setup.sh:"
+            hint_python ;;
+        *)
+            if [ -n "$PY_VER" ]; then
+                echo "  NOTE: Python $PY_VER is outside the tested range 3.10-3.13 (newer than tested). The hooks will"
+                echo "  use it; if anything misbehaves, install a tested Python ($PYTHON_PIN) beside it and re-run setup.sh."
+            else
+                echo "  (could not read the version of the hooks' Python; the tested range is 3.10-3.13)"
+            fi ;;
+    esac
 fi
 # The form that goes into sed's REPLACEMENT: `&` (the whole match), `|` (our delimiter) and a backslash
 # are all special there, and a Windows folder name may legally contain `&`.
@@ -139,64 +294,96 @@ if [ -z "$PYTHON_PATH" ]; then
     echo ""
     echo "  WARNING: the safety hooks need Python 3 and will REFUSE every command until it is installed"
     echo "  and setup.sh is re-run. (They fail closed on purpose: a guard that cannot run must not allow.)"
-    echo "  Install Python 3 from python.org (or 'winget install Python.Python.3.12'), then: bash setup.sh"
+    echo "  Install Python 3, then run: bash setup.sh"
+    hint_python
 fi
 
-# --- Detect .NET (needed for Spriggit / AutoMod; do NOT auto-install) ---
+# --- Detect the .NET SDK (needed for Spriggit / AutoMod; do NOT auto-install) ---
 #
 # This checks whether the SDK Spriggit needs is present, not merely that some
 # dotnet exists. MEASURED 2026-09-06 on the dev machine: this block previously
 # recommended SDK 8 and then printed "Found .NET SDK: 8.0.424", which reads as
-# success. `dotnet tool install Spriggit.CLI` also succeeded. But Spriggit.CLI
-# 0.40.x targets net9.0, so every invocation died with "You must install or update
-# .NET" -- and because tools/esp-verify-wrapper.sh drives spriggit, the ESP
-# cross-reference guard was silently unusable too. Reporting presence when the
-# question is capability is how an install ends up broken while looking configured.
+# success, while the Spriggit of that day targeted another framework, so every
+# invocation died with "You must install or update .NET" -- and because
+# tools/esp-verify-wrapper.sh drives spriggit, the ESP cross-reference guard was
+# silently unusable too. Reporting presence when the question is capability is how
+# an install ends up broken while looking configured.
+#
+# SDK, not runtime, and exactly major 10. With a runtime alone spriggit starts and
+# prints its version, and still cannot serialize: it fetches its serializer at
+# runtime as a dotnet tool package (Spriggit.Yaml.Skyrim), whose assets target one
+# framework, and only an SDK of that major installs it. Spriggit 0.41.0 and AutoMod
+# (its global.json pins 10.0.x, rollForward latestFeature, which never crosses a
+# major) both need 10 -- so another major, older OR newer, is not "present".
 echo ""
-echo "Checking for .NET..."
+echo "Checking for the .NET SDK..."
 if which dotnet >/dev/null 2>&1; then
-    echo "  Found .NET SDK: $(dotnet --version 2>/dev/null)"
-    # SDK, not runtime. MEASURED 2026-09-06, and v3.8.2 shipped this check asking the
-    # WRONG question: with only the .NET 9 RUNTIME installed, spriggit starts and
-    # prints its version -- and still cannot serialize anything. It resolves its
-    # serializer at runtime via `dotnet tool install Spriggit.Yaml.Skyrim`, whose
-    # tool assets live under tools/net9.0/, and an SDK can only install a tool whose
-    # TFM it supports. With SDK 8 that fails with a misleading "DotnetToolSettings.xml
-    # was not found in the package" -- the file is there, under a framework the SDK
-    # will not select. Control: dotnetsay (net8.0 assets) installs fine.
-    #
-    # So a runtime check passes in a state where Spriggit is unusable. Ask for the SDK.
-    if dotnet --list-sdks 2>/dev/null | grep -qE "^(9|1[0-9])\."; then
-        echo "  .NET 9+ SDK present -- Spriggit can run AND fetch its serializer."
+    DOTNET_SDKS=$(dotnet --list-sdks 2>/dev/null | tr -d '\r' | sed 's/ .*//')
+    if printf '%s\n' "$DOTNET_SDKS" | grep -qE '^10\.'; then
+        SDK10=$(printf '%s\n' "$DOTNET_SDKS" | grep -E '^10\.' | tail -n1)
+        echo "  .NET 10 SDK present ($SDK10) -- Spriggit 0.41.0 and AutoMod both run on it."
+        if ! printf '%s\n' "$DOTNET_SDKS" | grep -qxF "$DOTNET_SDK_PIN"; then
+            echo "  (the toolkit was tested with SDK $DOTNET_SDK_PIN)"
+        fi
     else
-        echo "  !! .NET 9 SDK NOT found."
-        echo "     Spriggit (ESP <-> YAML) targets net9.0 and installs its serializer as a"
-        echo "     dotnet tool, which needs a matching SDK -- the RUNTIME alone is not"
-        echo "     enough. Without it spriggit starts, prints a version, and cannot"
-        echo "     serialize, which also disables tools/esp-verify-wrapper.sh."
-        echo "     Install:  winget install Microsoft.DotNet.SDK.9"
-        echo "     then:     dotnet tool install --global Spriggit.CLI --version 0.40.0"
-        echo "     (pin it: an unpinned install pulls 0.41+, which targets net10.0)"
-        echo "     (AutoMod needs an 8.0.x SDK specifically -- it pins one via global.json"
-        echo "      with rollForward: latestFeature, which does not roll 8 -> 9.)"
+        SDK_NEWEST=$(printf '%s\n' "$DOTNET_SDKS" | sed -n '$p')
+        if [ -n "$SDK_NEWEST" ]; then
+            echo "  .NET SDK $SDK_NEWEST found; Spriggit 0.41.0 and AutoMod need the .NET 10 SDK (installs beside it):"
+        else
+            echo "  dotnet runs but lists no SDK (a runtime alone); Spriggit 0.41.0 and AutoMod need the .NET 10 SDK:"
+        fi
+        hint_dotnet
+        echo "     (the RUNTIME alone, or an SDK of another major, is not enough: spriggit starts, prints a"
+        echo "      version, and cannot serialize, which also disables tools/esp-verify-wrapper.sh)"
     fi
 else
-    echo "  .NET not found. Spriggit (ESP <-> YAML) and AutoMod CLI need it."
-    echo "    Spriggit needs SDK 9:   winget install Microsoft.DotNet.SDK.9"
-    echo "    AutoMod ALSO needs 8:   winget install Microsoft.DotNet.SDK.8"
-    echo "    (AutoMod pins SDK 8.0.x via tools/automod/global.json with"
-    echo "     rollForward: latestFeature, which does not roll 8 -> 9. Installing"
-    echo "     only 9 leaves its build failing on SDK resolution.)"
+    echo "  .NET not found. Spriggit (ESP <-> YAML) and AutoMod CLI need the .NET 10 SDK -- one SDK, nothing else:"
+    hint_dotnet
 fi
 
 # --- Detect a JDK (needed for ReSaver CLI; do NOT auto-install) ---
+# ReSaver CLI compiles its small driver on first run, so it needs a JDK (javac), 17 or newer; 21 is tested.
 echo ""
 echo "Checking for a JDK..."
 if which java >/dev/null 2>&1; then
-    echo "  Found Java: $(java -version 2>&1 | head -n1)"
+    JAVA_LINE=$(java -version 2>&1 | tr -d '\r' | head -n1)
+    echo "  Found Java: $JAVA_LINE"
+    JAVA_MAJOR=$(printf '%s' "$JAVA_LINE" | sed -n 's/.*version "\(1\.\)\{0,1\}\([0-9][0-9]*\).*/\2/p')
+    case "$JAVA_MAJOR" in
+        ''|*[!0-9]*) echo "  (could not read its version; ReSaver CLI needs JDK 17+, tested with $JDK_PIN)" ;;
+        *)
+            if [ "$JAVA_MAJOR" -lt 17 ]; then
+                echo "  Java $JAVA_MAJOR is too old for ReSaver CLI, which needs JDK 17+ (installs beside it):"
+                hint_jdk
+            elif ! which javac >/dev/null 2>&1; then
+                echo "  No javac: this is a runtime (JRE), and ReSaver CLI compiles its driver, so it needs a JDK:"
+                hint_jdk
+            fi ;;
+    esac
 else
-    echo "  No JDK found. ReSaver CLI (headless .ess save parse/clean) needs JDK 17+."
-    echo "    Install when you want it:  winget install Microsoft.OpenJDK.21"
+    echo "  No JDK found. ReSaver CLI (headless .ess save parse/clean) needs JDK 17+ (tested: $JDK_PIN)."
+    hint_jdk
+fi
+
+# --- 3.x -> 4.0: carry a 3.x user's own edits forward (tools/migrate-3x.py; it deletes nothing) ---
+# Run BEFORE anything that renders CLAUDE.md/AGENTS.md or can run kb-guard, so the 3.x copies are read
+# first. A fresh 4.x install prints "nothing to do". Exit 1 = a copy or write failed and nothing was
+# half-written: said loudly, and setup carries on. Exit 2 = not an install.
+echo ""
+echo "Checking for a 3.x install to carry forward..."
+MIG_ENV="$GAME_DIR/.claude/backups/migrate-3x/carried-paths.env"
+if [ ! -f "$GAME_DIR/tools/migrate-3x.py" ]; then
+    echo "  tools/migrate-3x.py is missing -- skipped (re-extract the toolkit zip to restore it)."
+elif [ -z "$PY_FOUND" ]; then
+    echo "  Migration skipped: it needs Python 3.8+. Your files from before the update are in"
+    echo "  .claude/backups/ (pre-update-* if you ran tools/pre-update-snapshot.sh). Re-run setup.sh after installing Python."
+else
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B "$GAME_ROOT_WIN/tools/migrate-3x.py" \
+        --root "$GAME_ROOT_WIN" && MIG_RC=0 || MIG_RC=$?
+    if [ "$MIG_RC" != 0 ]; then
+        echo "  !! The 3.x migration reported a problem (exit $MIG_RC, above). Your 3.x files are in .claude/backups/;"
+        echo "  !! setup continues."
+    fi
 fi
 
 # --- Detect user paths ---
@@ -310,6 +497,37 @@ if MO2_INI="$(find_mo2_instance)"; then
     fi
 fi
 
+# --- Paths a 3.x CLAUDE.md held (tools/migrate-3x.py wrote them as data) ---
+# A path the user corrected by hand in 3.x wins over the detected one -- but only when it names a real
+# folder here: an annotated value ("Survival (NOT Default!)") is printed and the detected one kept.
+# SKYRIM_PREFER_DETECTED=1 always keeps the detected paths. Read in a subshell, so nothing in that file can
+# set a variable of setup's own; only a fixed key name is ever looked up, never a value evaluated.
+pick_3x() {  # $1 = placeholder name, $2 = detected value -> prints the value to use; notes go to stderr
+    local v
+    v=$( set -a; . "$MIG_ENV" >/dev/null 2>&1; n="SKYRIM_3X_$1"; printf '%s' "${!n:-}" )
+    if [ -n "$v" ] && [ "$v" != "$2" ] && [ -d "$v" ] && [ "${SKYRIM_PREFER_DETECTED:-}" != 1 ]; then
+        echo "  $1: your 3.x CLAUDE.md said $v (detected: ${2:-nothing}) -- keeping yours" >&2
+        printf '%s' "$v"
+    else
+        if [ -n "$v" ] && [ "$v" != "$2" ]; then
+            echo "  $1: your 3.x CLAUDE.md said $v -- not used (not a folder here, or SKYRIM_PREFER_DETECTED=1); using ${2:-nothing}" >&2
+        fi
+        printf '%s' "$2"
+    fi
+}
+if [ -f "$MIG_ENV" ]; then
+    echo ""
+    echo "Paths carried from your 3.x install ($MIG_ENV):"
+    CONFIG_DIR=$(pick_3x CONFIG_DIR "$CONFIG_DIR")
+    LOADORDER_DIR=$(pick_3x LOADORDER_DIR "$LOADORDER_DIR")
+    if [ -n "$MO2_INSTANCE" ]; then
+        MO2_MODS=$(pick_3x MO2_MODS "$MO2_MODS")
+        MO2_OVERWRITE=$(pick_3x MO2_OVERWRITE "$MO2_OVERWRITE")
+        MO2_PROFILE_DIR=$(pick_3x MO2_PROFILE_DIR "$MO2_PROFILE_DIR")
+    fi
+    # GAME_ROOT is never taken from it: setup runs IN the install, so the detected root is the truth.
+fi
+
 echo ""
 if [ -n "$MO2_INSTANCE" ]; then
     echo "  Mod manager: Mod Organizer 2"
@@ -329,6 +547,9 @@ else
 fi
 
 # --- Configure hook scripts (replace the Python placeholder) ---
+# EVERY guard file, whichever agents this run configures: they all run the one shared engine, and the
+# session-start drift check compares the interpreter across all eight (a file left at the placeholder would
+# read as edited). An agent this run does not configure still gets a hook that runs on this interpreter.
 echo ""
 echo "Configuring safety hooks..."
 HOOKS_MISSING=0
@@ -381,7 +602,7 @@ for hook in .codex/hooks/skyguard-entry.ps1 .codex/hooks/skyguard-entry.sh; do
     sed -i "s|{{BASH_PATH}}|$H_SED|g" "$GAME_DIR/$hook"
 done
 
-# --- Record the resolved paths where the hooks can read them ---
+# --- Record the resolved paths where the guard can read them ---
 #
 # protect-bash.sh decides "is this path inside the install" by resolving a real root,
 # not by looking for the word Skyrim in the command. It derives one root on its own --
@@ -389,6 +610,12 @@ done
 # file for anything else. That ordering is deliberate: the self-derived root ALWAYS
 # resolves, so a missing or unreadable file here can never leave the guard with nothing
 # to match and, via its fail-closed branch, refusing everything.
+#
+# v4: the file lives at the toolkit ROOT (<root>/skyrim-paths.env), shared by every agent. The reader
+# (tools/skyguard/paths.py read_install) uses the root file WHOLE when it exists and falls back to the 3.x
+# location .claude/skyrim-paths.env only when it does not. So the 3.x file is not rewritten here: it is left as
+# it is (tools/migrate-3x.py reads it as the 3.9 record) and simply stops being read. The root file is never
+# written empty -- an empty one would hide the 3.x file and declare nothing.
 #
 # Written with printf per line rather than a heredoc: a quoted heredoc still eats a
 # backslash level through some tool boundaries, and these are Windows paths.
@@ -404,6 +631,14 @@ sq() {
     s=${s//\'/\'\\\'\'}          # ' -> '\''
     printf "'%s'" "$s"
 }
+PATHS_ENV="$GAME_DIR/skyrim-paths.env"
+PATHS_ENV_3X="$GAME_DIR/.claude/skyrim-paths.env"
+if [ -f "$PATHS_ENV_3X" ] && [ ! -f "$PATHS_ENV" ]; then
+    # The state the session-start notice describes (tools/skyguard/paths.py DEPRECATION); this run fixes it.
+    echo "  NOTICE: your paths file is still at the old location, .claude/skyrim-paths.env. This toolkit reads skyrim-paths.env in the toolkit folder first and falls back to the old one; re-run setup.sh to move it."
+    echo "  (this run writes skyrim-paths.env in the toolkit folder now)"
+fi
+# Written beside it, then renamed: a crash never leaves half a file, or an empty one, in place.
 {
     printf '# Written by setup.sh. Machine-local: not tracked, not shipped.\n'
     printf '# protect-bash.sh reads these to tell YOUR install from a path that merely\n'
@@ -415,8 +650,9 @@ sq() {
     # protect them if it is told where they are. Empty ('') on a non-MO2 install: declares nothing.
     printf 'SKYRIM_MO2_MODS=%s\n' "$(sq "$MO2_MODS")"
     printf 'SKYRIM_MO2_OVERWRITE=%s\n' "$(sq "$MO2_OVERWRITE")"
-} > "$GAME_DIR/.claude/skyrim-paths.env"
-
+    # The interpreter the hooks were configured with ('' when no Python was found).
+    printf 'SKYGUARD_PYTHON=%s\n' "$(sq "$PYTHON_PATH")"
+} > "$PATHS_ENV.new" 2>/dev/null && mv -f "$PATHS_ENV.new" "$PATHS_ENV" && PATHS_OK=1 || PATHS_OK=""
 # It must SOURCE, or the hooks silently fall back to the self-derived root alone. A
 # config bash cannot read is the failure this check exists to catch, and it costs
 # nothing to run here where the user can still see the message.
@@ -424,16 +660,28 @@ sq() {
 # still says what we wrote. The previous version of this check asked only the first
 # question, so a path whose `$` had been expanded away passed it and printed success.
 # Read the values back and compare them.
-_want=$(printf '%s\n%s\n%s\n%s\n%s\n' "$GAME_ROOT_WIN" "$CONFIG_DIR" "$LOADORDER_DIR" "$MO2_MODS" "$MO2_OVERWRITE")
-_got=$( set -a; . "$GAME_DIR/.claude/skyrim-paths.env" 2>/dev/null
-        printf '%s\n%s\n%s\n%s\n%s\n' "${SKYRIM_GAME_ROOT:-}" "${SKYRIM_CONFIG_DIR:-}" "${SKYRIM_LOADORDER_DIR:-}" \
-            "${SKYRIM_MO2_MODS:-}" "${SKYRIM_MO2_OVERWRITE:-}" )
-if [ "$_want" = "$_got" ]; then
-    echo "  Wrote: .claude/skyrim-paths.env"
+if [ -z "$PATHS_OK" ]; then
+    rm -f "$PATHS_ENV.new"
+    echo "  WARNING: could not write skyrim-paths.env. The hooks still guard this folder, but not the config directory."
 else
-    echo "  WARNING: .claude/skyrim-paths.env does not parse as shell."
-    echo "           The hooks will still guard this folder, but not the config"
-    echo "           directory. Check for unusual characters in your paths."
+    _want=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$GAME_ROOT_WIN" "$CONFIG_DIR" "$LOADORDER_DIR" "$MO2_MODS" \
+            "$MO2_OVERWRITE" "$PYTHON_PATH")
+    # Cleared first: a value exported by the caller's own shell must not stand in for one the file lacks.
+    _got=$( unset SKYRIM_GAME_ROOT SKYRIM_CONFIG_DIR SKYRIM_LOADORDER_DIR SKYRIM_MO2_MODS SKYRIM_MO2_OVERWRITE SKYGUARD_PYTHON
+            set -a; . "$PATHS_ENV" 2>/dev/null
+            printf '%s\n%s\n%s\n%s\n%s\n%s\n' "${SKYRIM_GAME_ROOT:-}" "${SKYRIM_CONFIG_DIR:-}" "${SKYRIM_LOADORDER_DIR:-}" \
+                "${SKYRIM_MO2_MODS:-}" "${SKYRIM_MO2_OVERWRITE:-}" "${SKYGUARD_PYTHON:-}" )
+    if [ "$_want" = "$_got" ]; then
+        echo "  Wrote: skyrim-paths.env"
+    else
+        echo "  WARNING: skyrim-paths.env does not parse as shell."
+        echo "           The hooks will still guard this folder, but not the config"
+        echo "           directory. Check for unusual characters in your paths."
+    fi
+    if [ -f "$PATHS_ENV_3X" ] && ! cmp -s "$PATHS_ENV_3X" "$PATHS_ENV"; then
+        echo "  The root skyrim-paths.env wins: .claude/skyrim-paths.env (the 3.x location) differs and is no longer"
+        echo "  read. It is left in place as your 3.x record; delete it whenever you like."
+    fi
 fi
 
 # --- Configure the Codex hook definitions (.codex/hooks.json) ---
@@ -444,11 +692,10 @@ fi
 # reported), never re-implemented here with sed. It refuses a root holding % ! $ ` or " (cmd.exe or bash
 # would expand or cut the hook's path, the hook could not start, and a hook that cannot start lets every
 # command RUN); then the Codex side is left unconfigured and this says so.
+# Setup never marks a Codex project trusted and never approves a hook: both are the user's, in Codex.
 echo ""
-echo "Configuring the Codex hooks (.codex/hooks.json)..."
 CODEX_DEFS="$GAME_DIR/.codex/hooks.json"
 CODEX_STATE="none"
-case "$GAME_ROOT_WIN" in [A-Za-z]:/*) CODEX_WIN=1 ;; *) CODEX_WIN="" ;; esac
 # "Is this the folder the definitions were rendered for?" Windows paths are case-insensitive and pwd keeps
 # the case the user typed, so the comparison folds case there (ASCII, via tr -- this Git Bash's grep -i
 # aborts with -F). Only the comparison: the rendered path above is never case-folded.
@@ -459,6 +706,18 @@ codex_same_root() {
         grep -qF "$GAME_ROOT_WIN/.codex/hooks/skyguard-entry.ps1" "$CODEX_DEFS"
     fi
 }
+if [ -z "$DO_CODEX" ]; then
+    # Not selected. Nothing under .codex/ is touched or deleted; the state is reported below.
+    if [ -f "$CODEX_DEFS" ] && ! grep -q '{{CODEX_ROOT' "$CODEX_DEFS" && codex_same_root; then
+        CODEX_STATE="configured"
+    elif [ -f "$CODEX_DEFS" ] && ! grep -q '{{CODEX_ROOT' "$CODEX_DEFS"; then
+        CODEX_STATE="elsewhere"
+    fi
+    echo "Codex hooks (.codex/hooks.json): not configured by this run (--agent $AGENT_SEL) -- left as they are."
+else
+echo "Configuring the Codex hooks (.codex/hooks.json)..."
+# A leftover from an interrupted run is never taken for the result: the renderer writes a fresh one.
+rm -f "$CODEX_DEFS.new"
 if [ ! -f "$CODEX_DEFS" ]; then
     echo "  MISSING: .codex/hooks.json -- Codex has no toolkit hooks in this folder."
 elif grep -q '{{CODEX_ROOT' "$CODEX_DEFS"; then
@@ -509,16 +768,28 @@ if [ "$CODEX_STATE" = "configured" ]; then
     echo "Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you."
     echo "Check any time with: bash tools/hook-canary.sh"
 fi
+fi
 
 # --- Configure CLAUDE.md and AGENTS.md (replace path placeholders) ---
 # Both carry the same shared instructions (agent/instructions/core.md) and so the same placeholders:
-# CLAUDE.md for Claude Code, AGENTS.md for Codex and other agents.
+# CLAUDE.md for Claude Code, AGENTS.md for Codex and other agents. Only the selected agents' files are
+# filled; the other is kept exactly as extracted. Every placeholder is filled separately, so a file an
+# interrupted run left half-done (root filled, config dir not) is completed by the next run.
+DOC_PLACEHOLDERS='{{GAME_ROOT}}\|{{CONFIG_DIR}}\|{{LOADORDER_DIR}}\|{{SKYRIM_FOLDER}}\|{{MOD_MANAGER_PATHS}}'
 for DOC in CLAUDE.md AGENTS.md; do
+case "$DOC" in
+    CLAUDE.md) DOC_ON="$DO_CLAUDE" ;;
+    *) DOC_ON="$DO_CODEX" ;;
+esac
 echo ""
+if [ -z "$DOC_ON" ]; then
+    echo "$DOC: not configured by this run (--agent $AGENT_SEL) -- left as it is."
+    continue
+fi
 echo "Configuring $DOC..."
 if [ ! -f "$GAME_DIR/$DOC" ]; then
     echo "  MISSING: $DOC"
-elif grep -q '{{GAME_ROOT}}' "$GAME_DIR/$DOC"; then
+elif grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/$DOC"; then
     sed -i "s|{{GAME_ROOT}}|$GAME_ROOT_WIN|g" "$GAME_DIR/$DOC"
     sed -i "s|{{CONFIG_DIR}}|$CONFIG_DIR|g" "$GAME_DIR/$DOC"
     sed -i "s|{{LOADORDER_DIR}}|$LOADORDER_DIR|g" "$GAME_DIR/$DOC"
@@ -561,6 +832,27 @@ else
 fi
 done
 
+# --- The instruction budget, measured on the files just written ---
+# Codex reads at most 32,768 bytes of AGENTS.md (project_doc_max_bytes) and silently drops the rest; the
+# toolkit holds core + addendum + a 2,560-byte install reserve under that (scripts/gen_agent_trees.py
+# INSTRUCTION_BUDGET). A very long install root or MO2 paths can still push the INSTALLED copy past it.
+INSTRUCTION_BUDGET=32768
+for DOC in CLAUDE.md AGENTS.md; do
+    [ -f "$GAME_DIR/$DOC" ] || continue
+    grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/$DOC" && continue      # not configured: nothing installed to measure
+    DOC_BYTES=$(wc -c < "$GAME_DIR/$DOC" | tr -d ' \r')
+    [ "$DOC_BYTES" -gt "$INSTRUCTION_BUDGET" ] || continue
+    echo ""
+    echo "  WARNING: $DOC is $DOC_BYTES bytes, over the $INSTRUCTION_BUDGET-byte instruction budget (by $((DOC_BYTES - INSTRUCTION_BUDGET)))."
+    if [ "$DOC" = "AGENTS.md" ]; then
+        echo "  Codex reads only the first $INSTRUCTION_BUDGET bytes of AGENTS.md in a project it does not trust (65,536 in a"
+        echo "  trusted one, set by .codex/config.toml): past that, the END of its instructions is cut off, silently."
+    else
+        echo "  Claude Code reads all of it; the same text in AGENTS.md is what Codex would cut off."
+    fi
+    echo "  The cause is the length of your install paths (filled in above). A shorter game folder path fixes it."
+done
+
 # --- Configure the devcontainer (optional; only if the user has .devcontainer/) ---
 if [ -f "$GAME_DIR/.devcontainer/devcontainer.json" ] && grep -q '{{DEVCONTAINER_MODS_MOUNT}}' "$GAME_DIR/.devcontainer/devcontainer.json"; then
     echo ""
@@ -579,11 +871,11 @@ if [ -f "$GAME_DIR/.devcontainer/devcontainer.json" ] && grep -q '{{DEVCONTAINER
     echo "  Run ./devshell-docker.sh (Docker only) or ./devshell.sh (needs the devcontainer CLI)."
 fi
 
-# --- Ensure backup directory exists ---
+# --- Ensure backup directory exists (both agents' hooks write their records under it) ---
 mkdir -p "$GAME_DIR/.claude/backups"
 
-# --- Copy settings.local.json.example if no settings.local.json exists ---
-if [ ! -f "$GAME_DIR/.claude/settings.local.json" ] && [ -f "$GAME_DIR/.claude/settings.local.json.example" ]; then
+# --- Copy settings.local.json.example if no settings.local.json exists (Claude Code only) ---
+if [ -n "$DO_CLAUDE" ] && [ ! -f "$GAME_DIR/.claude/settings.local.json" ] && [ -f "$GAME_DIR/.claude/settings.local.json.example" ]; then
     cp "$GAME_DIR/.claude/settings.local.json.example" "$GAME_DIR/.claude/settings.local.json"
     echo ""
     echo "  Copied settings.local.json.example -> settings.local.json (customize allowed commands later)"
@@ -604,19 +896,68 @@ else
     echo "    To enable: get a free Personal API Key at"
     echo "      https://www.nexusmods.com/users/myaccount?tab=api"
     echo "    then save it (one line) to tools/.nexus_api_key  (already gitignored),"
-    echo "    or set the NEXUS_API_KEY environment variable. Claude can do this for you on request."
+    echo "    or set the NEXUS_API_KEY environment variable. Your agent can do this for you on request."
 fi
+
+# --- Layer 2: the read-only lock on the vanilla masters and archives -- ONLY with --lock ---
+# Off by default (Plan 6 R3: layer2.default = "off" until the Final Manual Batch decides). Setup never
+# applies it unasked; --lock runs the same command a user would (tools/skyguard lock lock).
+LOCK_RC=""
+echo ""
+if [ -n "$WANT_LOCK" ]; then
+    echo "Applying the Layer 2 lock (--lock)..."
+    if [ -z "$PY_FOUND" ]; then
+        LOCK_RC=2
+        echo "  !! LOCK NOT APPLIED: it needs Python 3.8+. Install it and re-run: bash setup.sh --lock"
+    else
+        MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B "$GAME_ROOT_WIN/tools/skyguard" lock lock \
+            --root "$GAME_ROOT_WIN" && LOCK_RC=0 || LOCK_RC=$?
+        if [ "$LOCK_RC" = 0 ]; then
+            echo "  The lock is on. Unlock one file with: bash tools/skyguard.sh lock unlock <file>"
+        else
+            echo "  !! LOCK NOT (fully) APPLIED (exit $LOCK_RC, above). Check with: bash tools/skyguard.sh lock status"
+        fi
+    fi
+else
+    echo "Layer 2 lock: OFF (the default). bash setup.sh --lock makes the vanilla masters and archives read-only."
+fi
+
+# --- Which agent ends up configured, said plainly ---
+CLAUDE_STATE="not configured"
+if [ -f "$GAME_DIR/CLAUDE.md" ] && ! grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/CLAUDE.md"; then CLAUDE_STATE="configured"; fi
+AGENTS_DOC_STATE="not configured"
+if [ -f "$GAME_DIR/AGENTS.md" ] && ! grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/AGENTS.md"; then AGENTS_DOC_STATE="configured"; fi
 
 echo ""
 echo "============================================"
 echo " Setup Complete!"
 echo "============================================"
 echo ""
-echo "Installed and configured:"
-echo "  CLAUDE.md                        -- Project instructions (paths filled in)"
-echo "  AGENTS.md                        -- The same instructions for Codex (paths filled in)"
+echo "Agents in this folder:"
+if [ "$CLAUDE_STATE" = "configured" ]; then
+    echo "  Claude Code: CONFIGURED -- CLAUDE.md has your paths; the hooks in .claude/settings.json guard every call."
+else
+    echo "  Claude Code: NOT CONFIGURED -- CLAUDE.md has no paths filled in (this run: --agent $AGENT_SEL)."
+    echo "               Its hooks still guard (they run on the interpreter above). To set it up: bash setup.sh --agent claude"
+fi
+if [ "$CODEX_STATE" = "configured" ] && [ "$AGENTS_DOC_STATE" = "configured" ]; then
+    echo "  Codex:       CONFIGURED -- approve the 2 hooks once in Codex's /hooks; until then Codex runs UNGUARDED."
+elif [ "$CODEX_STATE" = "configured" ]; then
+    echo "  Codex:       hooks configured, but AGENTS.md has no paths filled in. To finish: bash setup.sh --agent codex"
+elif [ -z "$CODEX_WIN" ]; then
+    echo "  Codex:       NOT CONFIGURED -- the toolkit's Codex support is Windows-only."
+else
+    echo "  Codex:       NOT CONFIGURED -- .codex/hooks.json is not rendered for this folder, so Codex runs here"
+    echo "               WITHOUT the toolkit's hooks, and AGENTS.md may have no paths. To set it up: bash setup.sh --agent codex"
+    echo "               (bash tools/skydoctor reports it as 'Codex is NOT CONFIGURED' until then.)"
+fi
+echo ""
+echo "Installed:"
+echo "  CLAUDE.md                        -- Project instructions for Claude Code"
+echo "  AGENTS.md                        -- The same instructions for Codex and other agents"
 echo "  .codex/                          -- Codex hook definitions + entries (approve them in Codex /hooks)"
 echo "  KNOWLEDGEBASE.md                 -- 1,300+ lines of Skyrim modding knowledge"
+echo "  skyrim-paths.env                 -- The paths the safety hooks guard (machine-local)"
 echo "  .claude/settings.json            -- Hook configuration"
 echo "  .claude/hooks/protect-bash.sh    -- Guards dangerous commands"
 echo "  .claude/hooks/protect-files.sh   -- Guards file edits"
@@ -625,9 +966,9 @@ echo "  .claude/hooks/backup-before-edit.sh -- Auto-backups (Edit/Write) with au
 echo "  .claude/hooks/snapshot-before-tool.sh -- Auto-snapshots .psc/.pex before Bash commands"
 echo "  .claude/hooks/session-kb-guard.sh -- Snapshots KNOWLEDGEBASE/CLAUDE.md/AGENTS.md once per session"
 echo "  tools/                           -- Helper scripts (AutoMod wrapper, esp-verify, NIF tools, nexus.sh, resaver-cli.sh)"
-echo "  .claude/backups/                 -- Backup storage (empty for now)"
+echo "  .claude/backups/                 -- Backup storage"
 echo ""
-echo "The safety hooks are now active. Claude Code will:"
+echo "The safety hooks are now active. They will:"
 echo "  - Ask permission before editing any game file"
 echo "  - Block direct writes to ESP/ESM/BSA files"
 echo "  - Automatically back up files before modifying them"
@@ -636,30 +977,34 @@ echo ""
 echo "--------------------------------------------"
 echo " Optional modding tools (install as needed)"
 echo "--------------------------------------------"
-echo "These are NOT bundled. Ask Claude to set up any you want, or install yourself:"
-echo "  xeditlib     -- programmatic ESP read/write:  npm install github:WingedGuardian/xeditlib"
-echo "                  (run from THIS toolkit root so the bundled tools/ + examples/ scripts resolve it)"
-echo "  Champollion  -- Papyrus .pex -> .psc:         github.com/Orvid/Champollion/releases"
-echo "  Caprica      -- Papyrus .psc -> .pex:         github.com/Orvid/Caprica/releases"
-echo "  Spriggit     -- ESP <-> YAML editing:         dotnet tool install --global Spriggit.CLI --version 0.40.0   (needs the .NET 9 SDK; pin matches .config/dotnet-tools.json)"
-echo "                  (do NOT install unpinned: 0.41+ targets net10.0 and breaks on an SDK-9 machine)"
+echo "These are NOT bundled. Ask your agent to set up any you want, or install them yourself -- each at exactly the"
+echo "version docs/installing-tools.md names, every download checked against its SHA-256 in *Pinned downloads*:"
+echo "  xeditlib     -- programmatic ESP read/write (v1.0.1 = commit 19bef09 + koffi 2.15.1, integrity-checked by"
+echo "                  package-lock.json), from THIS toolkit root:  npm ci --ignore-scripts --no-audit --no-fund"
+echo "  Champollion  -- Papyrus .pex -> .psc:  v1.3.2 (Champollion.v1.3.2.zip; SHA-256 in Pinned downloads)"
+echo "  Caprica      -- Papyrus .psc -> .pex:  v0.3.0 (Caprica.v0.3.0.7z; SHA-256 in Pinned downloads)"
+echo "  Spriggit     -- ESP <-> YAML editing, 0.41.0 (needs the .NET 10 SDK), from THIS toolkit root:"
+echo "                  dotnet tool restore   (installs exactly .config/dotnet-tools.json's 0.41.0 as a local tool)"
+echo "                  or: dotnet tool install --global Spriggit.CLI --version 0.41.0"
+echo "                  (never install it unpinned: you get whatever is newest, not what was tested)"
 echo "                  (deep output paths: use tools/spriggit-cli.sh)"
-echo "  AutoMod CLI  -- NIF / BSA / audio / MCM / ESP:"
+echo "  AutoMod CLI  -- NIF / BSA / audio / MCM / ESP (needs the .NET 10 SDK):"
 echo "                  git clone --branch v1.11.2 https://github.com/SpookyPirate/spookys-automod-toolkit tools/automod"
 echo "                  then: bash tools/automod-cli.sh --rebuild   (checks out the tested commit e1c34ea,"
 echo "                  retargets it to the .NET 10 SDK, builds the Cli project only; first build needs internet)"
 echo "                  -- never build it with a bare dotnet build -- then use tools/automod-cli.sh"
-echo "  PyFFI        -- LE NiTriShape geometry (any modern Python + setuptools):  pip install pyffi setuptools"
-echo "  PyNifly      -- SSE BSTriShape + animation authoring:"
-echo "                  download io_scene_nifly.zip from github.com/BadDogSkyrim/PyNifly/releases,"
-echo "                  extract into tools/pynifly/ (verified with 29.1.0: DLL -> tools/pynifly/io_scene_nifly/NiflyDLL.dll;"
-echo "                  releases before 29.x: tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll -- either is fine; no build)."
+echo "  PyFFI        -- LE NiTriShape geometry (PyFFI 2.2.3 + setuptools 84.0.0, hash-locked), from THIS toolkit root:"
+echo "                  python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-tools.lock"
+echo "  PyNifly      -- SSE BSTriShape + animation authoring: release V27.2.0 io_scene_nifly.zip (SHA-256 in Pinned"
+echo "                  downloads), extracted into tools/pynifly/. Verified with 27.2.0: the DLL it loads is"
+echo "                  tools/pynifly/io_scene_nifly/NiflyDLL.dll (the zip's pyn/NiflyDLL.dll is unused); no build."
 echo "                  NOTE: a git clone does NOT include the compiled DLL -- use the release zip"
-echo "  Blender      -- NIF repair + render-to-PNG (headless): blender.org (+ PyNifly Blender addon)"
-echo "  NifSkope     -- independent visual NIF render gate:    github.com/niftools/nifskope/releases"
-echo "  ReSaver CLI  -- headless .ess parse/cross-ref/clean:   download ReSaver from Nexus mod 5031"
-echo "                  (FallrimTools); drop ReSaver.jar + lib/ into tools/resaver-cli/; needs JDK 17+;"
-echo "                  the wrapper auto-compiles its driver on first run (tools/resaver-cli.sh)"
+echo "  Blender      -- NIF repair + render-to-PNG (headless): 4.2.9 LTS (SHA-256 in Pinned downloads)"
+echo "                  + the PyNifly Blender add-on, the same 27.2.0 io_scene_nifly.zip"
+echo "  NifSkope     -- independent visual NIF render gate: v2.0.dev9 from the hexabits fork (SHA-256 in Pinned downloads)"
+echo "  ReSaver CLI  -- headless .ess parse/cross-ref/clean: ReSaver 6.0.643 (FallrimTools, Nexus mod 5031); drop"
+echo "                  ReSaver.jar + lib/ into tools/resaver-cli/ and check ReSaver.jar's SHA-256 in Pinned downloads;"
+echo "                  needs JDK 17+ (21 tested); the wrapper auto-compiles its driver on first run (tools/resaver-cli.sh)"
 echo "  cosave-info  -- read-only SKSE .skse co-save survey (bundled): bash tools/cosave-cli.sh <save.skse>"
 echo "  DevBench     -- LIVE in-game inspect/console/Papyrus while you play:"
 echo "                  Nexus mod 181326 (alandtse). This one is a MOD, not a tools/ utility --"
@@ -667,7 +1012,21 @@ echo "                  install it with your mod manager (Vortex/MO2), not by ha
 echo "                  Needs DevBench 1.11.0+ (1.24.0 newest seen). Update the VR Address Library"
 echo "                  FIRST (0.276.1 newest seen): DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0."
 echo "                  dev-only, no gameplay change, no save data. Drive it via tools/devbench-cli.sh"
-echo "                  (bundled wrapper). Lets Claude test its own fixes in the running game instead"
+echo "                  (bundled wrapper). Lets your agent test its own fixes in the running game instead"
 echo "                  of asking you to launch, trigger, and report back."
 echo ""
-echo "You're ready to go! Start asking Claude about your mods."
+echo "You're ready to go! Start your agent in this folder and ask it about your mods."
+
+# --- Exit status: 0, or 1 when something this run was explicitly asked to do did not happen ---
+# --agent codex names Codex alone: Codex left unconfigured means the run did nothing it was asked for.
+# --lock asked for the lock: a lock that did not apply is said above and reported here too.
+SETUP_RC=0
+if [ "$AGENT_SEL" = "codex" ] && { [ "$CODEX_STATE" != "configured" ] || [ "$AGENTS_DOC_STATE" != "configured" ]; }; then
+    echo ""
+    echo "!! --agent codex: Codex is NOT configured (see above), so this run did not do what it was asked."
+    SETUP_RC=1
+fi
+if [ -n "$WANT_LOCK" ] && [ "$LOCK_RC" != 0 ]; then
+    SETUP_RC=1
+fi
+exit "$SETUP_RC"

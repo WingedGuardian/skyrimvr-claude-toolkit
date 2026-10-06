@@ -63,8 +63,9 @@ MUTATIONS = [
     # directory silently stops being guarded, which is the quiet half of the change.
     pytest.param(
         "setup.sh",
-        '} > "$GAME_DIR/.claude/skyrim-paths.env"',
-        "} > /dev/null",
+        # Plan 8 T7: re-anchored on the root-file write (the file moved to <root>/skyrim-paths.env).
+        '} > "$PATHS_ENV.new" 2>/dev/null && mv -f "$PATHS_ENV.new" "$PATHS_ENV" && PATHS_OK=1 || PATHS_OK=""',
+        '} > /dev/null && PATHS_OK=1 || PATHS_OK=""',
         "tests/test_setup_paths.py::test_setup_writes_a_usable_paths_file_for_the_hooks",
         id="setup-records-paths-for-the-hooks",
     ),

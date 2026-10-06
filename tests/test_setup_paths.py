@@ -184,7 +184,7 @@ def test_the_paths_file_survives_a_dollar_sign_in_the_install_path(tmp_path):
     game = make_game(tmp_path, name="My$Game")
     r = run_setup(game)
     assert r.returncode == 0, r.stdout + r.stderr
-    env = (game / ".claude" / "skyrim-paths.env").read_text(encoding="utf-8")
+    env = (game / "skyrim-paths.env").read_text(encoding="utf-8")
     root_line = next(l for l in env.splitlines() if l.startswith("SKYRIM_GAME_ROOT="))
     assert "My$Game" in root_line, (
         f"the dollar sign was lost on the way to disk: {root_line!r}")
@@ -197,7 +197,7 @@ def test_the_paths_file_survives_a_dollar_sign_in_the_install_path(tmp_path):
     # contains a `$`, so a double-quoted path would have `$Game` expanded away by the
     # test's shell before `.` ever ran -- the test reproducing, on itself, the exact
     # defect it exists to catch.
-    env_path = (game / ".claude" / "skyrim-paths.env").as_posix()
+    env_path = (game / "skyrim-paths.env").as_posix()
     got = _sp.run(
         [_BASH, "-c", ". '" + env_path + "'; printf '%s' \"$SKYRIM_GAME_ROOT\""],
         capture_output=True, text=True, timeout=60).stdout
@@ -208,7 +208,7 @@ def test_setup_writes_a_usable_paths_file_for_the_hooks(game_dir):
     """`protect-bash.sh` guards a RESOLVED install root, not any path containing
     the word Skyrim -- which used to match the session scratchpad, this repo's own
     checkout and a downloaded zip. It derives one root from its own location and
-    reads the rest from `.claude/skyrim-paths.env`.
+    reads the rest from `skyrim-paths.env` at the toolkit root (v4; `.claude/` held it in 3.x).
 
     Asserting the FILE, not the log line: setup.sh printing "Wrote" proves nothing,
     and this suite exists because a CI job once ran setup.sh and then only checked
@@ -220,7 +220,8 @@ def test_setup_writes_a_usable_paths_file_for_the_hooks(game_dir):
     r = run_setup(game_dir)
     assert r.returncode == 0, r.stdout + r.stderr
 
-    env = game_dir / ".claude" / "skyrim-paths.env"
+    # v4: the file lives at the toolkit root (Plan 8 T7/T8).
+    env = game_dir / "skyrim-paths.env"
     assert env.exists(), "setup.sh did not record the resolved paths for the hooks"
     body = env.read_text(encoding="utf-8")
 
@@ -277,7 +278,7 @@ def _read_paths_config(game):
     from conftest import REPO
     sys.path.insert(0, str(REPO / "tools"))
     from skyguard import paths
-    return paths, paths.read_config(game / ".claude" / "skyrim-paths.env", {})
+    return paths, paths.read_config(game / "skyrim-paths.env", {})
 
 
 def test_setup_writes_the_mo2_roots_the_guard_reads(portable_mo2):
@@ -299,7 +300,7 @@ def test_setup_writes_the_mo2_roots_the_guard_reads(portable_mo2):
 def test_setup_writes_empty_mo2_roots_on_a_stock_install(game_dir):
     r = run_setup(game_dir)
     assert r.returncode == 0, r.stdout + r.stderr
-    body = (game_dir / ".claude" / "skyrim-paths.env").read_text(encoding="utf-8")
+    body = (game_dir / "skyrim-paths.env").read_text(encoding="utf-8")
     assert "SKYRIM_MO2_MODS=''" in body and "SKYRIM_MO2_OVERWRITE=''" in body
     _, cfg = _read_paths_config(game_dir)
     assert cfg.malformed == () and cfg.values("SKYRIM_MO2_MODS") == []
@@ -321,7 +322,8 @@ def test_setup_without_node_prints_instructions_and_never_runs_a_package_manager
     r = run_setup(game_dir, env_overrides={"PATH": path, "FAKE_WHICH_MISSING": "node"})
     assert r.returncode == 0, r.stdout + r.stderr
     assert "Node.js not found" in r.stdout, r.stdout
-    assert "winget install OpenJS.NodeJS.LTS" in r.stdout   # printed as instructions
+    # printed as instructions, in the authorization-aware form (tests/test_install_hints.py)
+    assert "winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade" in r.stdout
     assert not log.exists() or log.read_text() == "", "setup.sh ran a package manager: " + log.read_text()
 
 
