@@ -2,6 +2,17 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Runtimes: one .NET SDK (10), Node 24 LTS, Spriggit 0.41.0
+
+- **The .NET 10 SDK is now the only .NET the toolkit needs.** Spriggit and AutoMod both run on it; .NET 8 and 9 are no longer used (both reach end of support on 2026-11-10).
+- **Spriggit is pinned to 0.41.0** (was 0.40.0); it needs the .NET 10 SDK. `tools/toolchain-check.sh` now reports an older Spriggit as a mismatch too, not only a newer one. Update with `dotnet tool update -g Spriggit.CLI --version 0.41.0`.
+- **AutoMod must be rebuilt once: `bash tools/automod-cli.sh --rebuild`.** The wrapper now pins SDK 10 in `tools/automod/global.json`, retargets the clone to net10.0 (a one-line local patch) and runs the net10.0 build; it refuses an old net8.0 build with that instruction. The first build needs internet. Docs clone the tested tag, v1.11.2.
+- If you placed `bsarch.exe` for AutoMod, move it from `bin/Release/net8.0/tools/bsarch/` to `bin/Release/net10.0/tools/bsarch/`.
+- **Node 24 LTS** (Node 20 is end-of-life): `.node-version` 24.21.0, `engines.node` `>=24`, and the devcontainer installs Node 24 and .NET 10.
+- `tools/toolchain-check.sh` no longer reports AutoMod or ReSaver "ok" when the wrapper says its DLL or jar is missing: a wrapper must now reach its dependency, and one you never installed reads "not installed (optional)".
+- `tools/toolchain-check.sh` runs the wrappers under the bash running the check, not whatever `bash` is first on PATH (on Windows that can be WSL's launcher).
+- KB correction: a Spriggit round trip of an ESP another tool wrote reorders its records (same size, different bytes) on 0.40 and 0.41 alike, while the YAML is identical. Compare re-serialized YAML, not ESP bytes.
+
 ### Other agents: the adapter kit
 
 - **New `ADAPTING.md`, written to an agent the toolkit does not support yet.** Any agent that reads files already gets the instructions, the skills and the tools (Layers 0 and 1; Layer 2, a read-only lock below the agent, is not yet released). `ADAPTING.md` walks such an agent through wiring the rest into itself, and through saying honestly how far it got. The toolkit still lists only Claude Code and Codex as supported; an adapted agent is "locally adapted, self-verified", a statement about one install on one machine.
