@@ -3280,9 +3280,10 @@ _T11_CLAUSES = [
     ("rule-S-INERT-NOINPUT-no-tool-name", _MC, '    if name == "" or name == "unknown":', '    if name == "":',
      "tests/test_hooks.py::test_protect_mcp_refuses_when_it_cannot_see_the_tool_name"),
     # the wiring: the matcher, setup.sh and the gates that count hooks
-    ("rule-S-DEVBENCH-CRASH-matcher", ".claude/settings.json", '"matcher": "mcp__devbench.*"', '"matcher": "mcp__other.*"',
+    ("rule-S-DEVBENCH-CRASH-matcher", ".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*"', '"matcher": "mcp__other.*"',
      "tests/test_repo_invariants.py::test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher"),
-    ("rule-S-DEVBENCH-CRASH-matcher-narrow", ".claude/settings.json", '"matcher": "mcp__devbench.*"', '"matcher": "mcp__devbench-vr__console"',
+    ("rule-S-DEVBENCH-CRASH-matcher-narrow", ".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*"',
+     '"matcher": "mcp__devbench-vr__console"',
      "tests/test_repo_invariants.py::test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher"),
     ("rule-S-DEVBENCH-CRASH-setup-configures-it", "setup.sh",
      ".claude/hooks/protect-files.sh .claude/hooks/protect-mcp.sh \\\n", ".claude/hooks/protect-files.sh \\\n",
@@ -3773,7 +3774,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      'CLAUDE_COVERED_TOOLS = ("Bash", "Edit", "Write")',
      _MERGE + "test_skyguard_coverage.py::test_claude_coverage_counts_every_tool_the_installed_matchers_cover[PowerShell-protect-bash]",
      "merge-coverage-ignores-powershell"),
-    ("tools/skyguard/health.py", "    return tool in CLAUDE_COVERED_TOOLS or (isinstance(tool, str) and tool.startswith(CLAUDE_COVERED_PREFIX))",
+    ("tools/skyguard/health.py", "    return tool in CLAUDE_COVERED_TOOLS or (isinstance(tool, str) and CLAUDE_COVERED_MCP.fullmatch(tool) is not None)",
      "    return tool in CLAUDE_COVERED_TOOLS",
      _MERGE + "test_skyguard_coverage.py::test_claude_coverage_counts_every_tool_the_installed_matchers_cover[mcp__devbench-vr__console-protect-mcp]",
      "merge-coverage-ignores-devbench-mcp"),
@@ -6718,3 +6719,14 @@ MUTATIONS.append(pytest.param(
     "plan3's own example of a relative link to skse-cross-compile.md",
     "plan3's own [skse-cross-compile.md](skse-cross-compile.md) example",
     "tests/test_markdown_links.py::test_every_relative_markdown_link_resolves", id="p8t6-plan-doc-link-broken"))
+# Row 52: any DevBench server name, in the installed matcher and in health's count of what it covers.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*",',
+     '"matcher": "mcp__devbench.*",',
+     "tests/test_repo_invariants.py::test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher",
+     "p8t6-devbench-matcher-prefix-only"),
+    ("tools/skyguard/health.py", 'CLAUDE_COVERED_MCP = re.compile(r"mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*")',
+     'CLAUDE_COVERED_MCP = re.compile(r"mcp__devbench.*")',
+     "tests/test_skyguard_coverage.py::test_every_devbench_spelling_is_covered_and_judged[mcp__DevBench-vr__console]",
+     "p8t6-health-counts-prefix-only"),
+]]

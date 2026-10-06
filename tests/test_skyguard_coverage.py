@@ -301,12 +301,42 @@ def test_the_covered_tools_match_the_installed_matchers():
     import re
     rxs = [re.compile(m.get("matcher", "")) for m in settings["hooks"]["PreToolUse"]
            if any(h["command"].rsplit("/", 1)[-1].rstrip('"') in guards for h in m.get("hooks", []))]
-    for tool in health.CLAUDE_COVERED_TOOLS + ("mcp__devbench-vr__console",):
+    for tool in health.CLAUDE_COVERED_TOOLS + DEVBENCH_SPELLINGS:
         assert any(rx.fullmatch(tool) for rx in rxs), tool
         assert health._claude_covered(tool), tool
-    for tool in ("Read", "Glob", "mcp__other__console"):
+    for tool in ("Read", "Glob") + NOT_DEVBENCH:
         assert not any(rx.fullmatch(tool) for rx in rxs), tool
         assert not health._claude_covered(tool), tool
+
+
+# Plan 8 T6 (rt-fix-b concern 1, deferred row 52): the matcher was the prefix `mcp__devbench.*`, so a DevBench server
+# registered as `skyrim-devbench`, `plugin_devbench_x` or `DevBench-vr` fired no hook at all, although the judge
+# (mcp_rules.is_devbench_server) recognises every one of them. Claude matchers are regexes without inline flags.
+DEVBENCH_SPELLINGS = ("mcp__devbench-vr__console", "mcp__skyrim-devbench__console", "mcp__plugin_devbench_x__game",
+                      "mcp__DevBench-vr__console", "mcp__dev-bench__inspect", "mcp__DEVBENCH__papyrus")
+NOT_DEVBENCH = ("mcp__other__console", "mcp__bench__console", "mcp__dev__bench")
+
+
+def test_the_protect_mcp_matcher_is_the_one_health_counts():
+    """The installed matcher string and health's pattern are the same text: neither can widen without the other."""
+    settings = json.loads((REPO / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    got = [m["matcher"] for m in settings["hooks"]["PreToolUse"]
+           if any(h["command"].rsplit("/", 1)[-1].rstrip('"') == "protect-mcp.sh" for h in m.get("hooks", []))]
+    assert got == [health.CLAUDE_COVERED_MCP.pattern]
+
+
+@pytest.mark.parametrize("tool", DEVBENCH_SPELLINGS)
+def test_every_devbench_spelling_is_covered_and_judged(tool):
+    """Covered by the matcher AND judged by the engine: a name the hook fires on but the judge passes would be a
+    guarded-looking hole, and the reverse is the original defect."""
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import mcp_rules
+    assert health._claude_covered(tool) and mcp_rules.is_devbench(tool), tool
+
+
+@pytest.mark.parametrize("tool", NOT_DEVBENCH)
+def test_a_non_devbench_tool_stays_unmatched(tool):
+    assert not health._claude_covered(tool), tool
 
 
 def test_coverage_reads_only_the_newest_sessions(tmp_path):

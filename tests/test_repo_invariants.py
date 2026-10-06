@@ -328,9 +328,13 @@ def test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher():
             by_hook[entry["command"].rsplit("/", 1)[-1].rstrip('"')] = matcher.get("matcher", "")
     assert "protect-mcp.sh" in by_hook, "protect-mcp.sh is not registered under PreToolUse"
     rx = re.compile(by_hook["protect-mcp.sh"])
-    for tool in ("mcp__devbench-vr__console", "mcp__devbench-vr__game", "mcp__devbench__inspect"):
+    # Plan 8 T6: any server name containing devbench, in any case (`DevBench-vr`, `skyrim-devbench`, a plugin's
+    # `plugin_devbench_x`), and `dev-bench`: the spellings the judge (mcp_rules.is_devbench_server) recognises.
+    for tool in ("mcp__devbench-vr__console", "mcp__devbench-vr__game", "mcp__devbench__inspect",
+                 "mcp__skyrim-devbench__console", "mcp__plugin_devbench_x__game", "mcp__DevBench-vr__console",
+                 "mcp__dev-bench__console"):
         assert rx.fullmatch(tool), f"matcher {by_hook['protect-mcp.sh']!r} does not match {tool}"
-    for tool in ("Bash", "PowerShell", "Write", "mcp__other__console"):
+    for tool in ("Bash", "PowerShell", "Write", "mcp__other__console", "mcp__bench__console"):
         assert not rx.fullmatch(tool), f"matcher {by_hook['protect-mcp.sh']!r} wrongly matches {tool}"
 
 

@@ -36,7 +36,7 @@
         ]
       },
       {
-        "matcher": "mcp__devbench.*",
+        "matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*",
         "hooks": [
           {
             "type": "command",
