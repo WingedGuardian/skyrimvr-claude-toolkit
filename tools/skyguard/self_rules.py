@@ -154,26 +154,16 @@ def _routes(e) -> List[Tuple[str, bool]]:
             out += [(s, True) for s in srcs]             # the source first: the message names what was moved away
         out.append((dst, False))
     p, argv = e.program, e.argv
-    if p == "rename-item":
-        # The new name lands beside the source, in the same folder, so the source decides the class.
-        out += [(s, True) for s in list(ps_param(e, "path", 0)) + list(ps_param(e, "literalpath"))]
-    elif p in ("ren", "rename") and e.dialect == "cmd":
+    # Merge of master into plan6: `Rename-Item` (emitted by the parser as a move-item since rt-fix-a, its source taken
+    # as moved away by the copy_targets loop above) and `truncate` (a writes.write_targets target since rt-fix-b) are
+    # read by writes.py; this rule's own branches for them only duplicated it.
+    if p in ("ren", "rename") and e.dialect == "cmd":
         words = [w for w in argv if not w.startswith("/")]
         out += [(w, True) for w in words[:1]]
     elif p == "ln":
         words = _plain(argv)
         if len(words) >= 2:
             out.append((words[-1], False))
-    elif p == "truncate":
-        words, k = [], 0
-        while k < len(argv):
-            if argv[k] in ("-s", "--size", "-r", "--reference"):
-                k += 2
-                continue
-            if not argv[k].startswith("-"):
-                words.append(argv[k])
-            k += 1
-        out += [(w, False) for w in words]
     elif p in ("chmod", "chown", "chgrp"):
         words = [w for w in argv if not w.startswith("-") and not w.startswith("--reference")]
         out += [(w, False) for w in words[1:]]

@@ -4245,9 +4245,13 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # ---- the shell routes
     (_SF, "            out += [(s, True) for s in srcs]", "            pass", _p12row("state-mv-away"),
      "rule-S-SELF-STATE-move-source"),
-    (_SF, '    if p == "rename-item":', "    if False:", _p12row("guard-hook-rename-item"), "rule-S-SELF-GUARD-rename-item"),
+    # Merge of master into plan6: Rename-Item and truncate are read by writes.py / the parser now (self_rules' own
+    # branches were dropped as duplicates), so these two twins break THAT route and name the same Plan 6 rows.
+    ("tools/skyguard/shellparse.py", "                self._rename_as_move(e)", "                pass",
+     _p12row("guard-hook-rename-item"), "rule-S-SELF-GUARD-rename-item"),
     (_SF, '    elif p == "ln":', "    elif False:", _p12row("guard-hook-ln"), "rule-S-SELF-GUARD-ln"),
-    (_SF, '    elif p == "truncate":', "    elif False:", _p12row("guard-hook-truncate"), "rule-S-SELF-GUARD-truncate"),
+    ("tools/skyguard/writes.py", '    if p == "truncate":', "    if False:", _p12row("guard-hook-truncate"),
+     "rule-S-SELF-GUARD-truncate"),
     (_SF, '    elif p in ("chmod", "chown", "chgrp"):', "    elif False:", _p12row("guard-hook-chmod"), "rule-S-SELF-GUARD-chmod"),
     (_SF, "        if any(w.lower().startswith(_ICACLS_WRITE) for w in argv[1:]):", "        if True:",
      _p12row("allow-hook-icacls-read"), "rule-S-SELF-GUARD-icacls-read-allowed"),
