@@ -59,8 +59,15 @@ def main():
     if not bash:
         raise SystemExit("Could not check: no Bash runtime")
     runtime_dirs = [str(binary), str(Path(sys.executable).parent), str(Path(bash).parent)]
-    for name in ("node", "jq", "git", "docker"):
-        executable = shutil.which(name)
+    # PowerShell 7 and 5.1 too: without them every pwsh/powershell case of the Codex entry skips, which
+    # silently turned the PowerShell twins into survivors under this launcher.
+    known = {}
+    if os.name == "nt":
+        known = {"pwsh": Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "PowerShell/7/pwsh.exe",
+                 "powershell": Path(os.environ.get("SystemRoot", "C:/Windows"))
+                 / "System32/WindowsPowerShell/v1.0/powershell.exe"}
+    for name in ("node", "jq", "git", "docker", "pwsh", "powershell"):
+        executable = shutil.which(name) or (str(known[name]) if name in known and known[name].exists() else None)
         if executable:
             runtime_dirs.append(str(Path(executable).parent))
     if os.name == "nt":
