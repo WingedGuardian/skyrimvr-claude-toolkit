@@ -401,6 +401,50 @@ def test_an_expired_lift_is_cleared_and_logged(bed):
     assert any(r.item == "expired lifts" and "cleared 2" in r.reason for r in rows)
 
 
+def _r9_state(tmp_path, monkeypatch, persistent):
+    monkeypatch.setenv("SKYGUARD_LOCK_SANDBOX", str(tmp_path))
+    root = tmp_path / "root"
+    sf = root / ".skyguard" / "state.json"
+    now = time.time()
+    state.write(str(sf), {"v": 1, "lifts": [_lift("lock", now - 7200, now - 3600, files=["Update.esm"])],
+                          "persistent": persistent})
+    return root, sf, now
+
+
+def test_r9_clear_does_not_undo_a_lock_enable_that_lands_after_its_first_read(tmp_path, monkeypatch):
+    """Final review B-M3: doctor read state, a `lock enable` removed `lock_disabled`, then doctor wrote back what it
+    had read -- the persistent disable the user just removed was back. Doctor now re-reads under the state lock."""
+    root, sf, now = _r9_state(tmp_path, monkeypatch, {"lock_disabled": {"since": 1.0, "by_session": "s1"}})
+    real, fired = state.locked, []
+
+    def enable_lands_first(path, wait=None):
+        if not fired:                   # a concurrent `lock enable`, once, before doctor gets the lock
+            fired.append(1)
+            st = state.read(str(sf))
+            state.write(str(sf), {"v": 1, "lifts": list(st.lifts), "persistent": {}})
+        return real(path, wait)
+
+    monkeypatch.setattr(state, "locked", enable_lands_first)
+    gone = _doctor().clear_expired(str(root), now)
+    after = state.read(str(sf))
+    assert fired and len(gone) == 1 and after.lifts == []
+    assert after.lock_disabled is None, "skydoctor wrote back a lock disable that `lock enable` had removed"
+
+
+def test_r9_clear_writes_while_holding_the_state_lock(tmp_path, monkeypatch):
+    """The twin: the write itself happens inside doctor's held lock (the read-modify-write is one locked step)."""
+    root, sf, now = _r9_state(tmp_path, monkeypatch, {})
+    real_write, seen = state.write, []
+
+    def spy(path, data):
+        seen.append(os.path.normcase(os.path.abspath(str(path))) in state._HELD)
+        return real_write(path, data)
+
+    monkeypatch.setattr(state, "write", spy)
+    assert len(_doctor().clear_expired(str(root), now)) == 1
+    assert seen == [True], "the R9 write ran outside the state lock"
+
+
 @needs_windows
 def test_a_rejected_state_is_never_rewritten(bed):
     sf = bed.root / ".skyguard" / "state.json"

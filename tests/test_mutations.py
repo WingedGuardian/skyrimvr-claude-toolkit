@@ -4682,7 +4682,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _DRT + "test_an_expired_lift_is_cleared_and_logged", "l2-doctor-r9-eight-hour-cap"),
     (_DR, '    Audit(str(root)).log("skydoctor", "INFO",', '    (lambda *a: None)("skydoctor", "INFO",',
      _DRT + "test_an_expired_lift_is_cleared_and_logged", "l2-doctor-r9-logs"),
-    (_DR, "    if not gone:\n        return []", "    if False:\n        return []",
+    (_DR, "        if not gone:\n            return []", "        if False:\n            return []",
      _DRT + "test_the_report_writes_nothing_when_nothing_expired", "l2-doctor-writes-nothing"),
     # ---- Guards / Integrity
     (_DR, "    if not off:", "    if True:",
@@ -6493,5 +6493,12 @@ _FB = [
      _RCT + "test_a_devbench_save_with_an_unreadable_paths_file_is_logged", "p6fb-m2-devbench-shell-logged"),
     (_RC, '             [("SKIPPED", UNREADABLE_SAVE.format(name))], False, now', "             [], False, now",
      _RCT + "test_a_devbench_save_with_an_unreadable_paths_file_is_logged", "p6fb-m2-devbench-mcp-logged"),
+    # B-M3: skydoctor's R9 clear is a read-modify-write under the one state lock that every write takes
+    (_DR, "    with state.locked(str(sf)):", "    if True:",
+     _DRT + "test_r9_clear_does_not_undo_a_lock_enable_that_lands_after_its_first_read", "p6fb-m3-doctor-rmw-locked"),
+    (_ST, "    with locked(path):\n        _replace(path, payload)", "    _replace(path, payload)",
+     _STT + "test_a_write_waits_while_another_process_holds_the_state_lock", "p6fb-m3-write-takes-the-lock"),
+    (_ST, "    if key in _HELD:\n        yield\n        return", "    if False:\n        yield\n        return",
+     _STT + "test_write_inside_locked_does_not_wait_on_its_own_lock", "p6fb-m3-lock-is-reentrant"),
 ]
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _FB]

@@ -232,7 +232,8 @@ def test_a_failed_write_leaves_the_old_state_and_no_temp_file(tmp_path, monkeypa
         st.write(str(p), {"v": 1, "lifts": [_lift(reason="new")], "persistent": {}})
     monkeypatch.undo()
     assert p.read_bytes() == before
-    assert [x.name for x in p.parent.iterdir()] == ["state.json"]
+    # B-M3: the state lock's sidecar is permanent by design (the OS lock lives on it); no TEMP file may remain.
+    assert sorted(x.name for x in p.parent.iterdir()) == ["state.json", "state.json.lock"]
 
 
 def test_write_computes_the_sum_itself_and_ignores_a_caller_supplied_one(tmp_path):
@@ -431,3 +432,59 @@ def test_write_refuses_what_read_would_reject(tmp_path):
             st.write(str(p), bad)
         assert not p.exists()
         assert not p.parent.exists() or list(p.parent.iterdir()) == []
+
+
+# ---- final review B-M3: one state lock for every write and every read-modify-write -------------------------------
+
+_HOLDER = ("import sys, time\nsys.path.insert(0, sys.argv[1])\nfrom skyguard import state\n"
+           "with state.locked(sys.argv[2]):\n    open(sys.argv[3], 'w').close()\n    time.sleep(float(sys.argv[4]))\n")
+
+
+def _hold_lock(tmp_path, p, seconds):
+    """Another process holding the state lock for `seconds` (as a CLI writer mid read-modify-write would)."""
+    import time
+    flag = tmp_path / "held"
+    proc = subprocess.Popen([sys.executable, "-c", _HOLDER, str(REPO / "tools"), str(p), str(flag), str(seconds)])
+    deadline = time.monotonic() + 60
+    while not flag.exists():
+        assert proc.poll() is None and time.monotonic() < deadline, "the lock holder did not start"
+        time.sleep(0.02)
+    return proc
+
+
+def test_a_write_waits_while_another_process_holds_the_state_lock(tmp_path):
+    import time
+    st = _state()
+    p = tmp_path / ".skyguard" / "state.json"
+    proc = _hold_lock(tmp_path, p, 1.5)
+    try:
+        t0 = time.monotonic()
+        st.write(str(p), {"v": 1, "lifts": [], "persistent": {}})
+        waited = time.monotonic() - t0
+    finally:
+        proc.wait(timeout=60)
+    assert waited >= 1.0, "write() did not wait for the lock ({:.2f} s)".format(waited)
+    assert st.read(str(p)).rejected is False and p.exists()
+
+
+def test_a_state_lock_that_stays_busy_refuses_the_write_and_leaves_the_file(tmp_path):
+    st = _state()
+    p = tmp_path / ".skyguard" / "state.json"
+    st.write(str(p), {"v": 1, "lifts": [_lift()], "persistent": {}})
+    before = p.read_bytes()
+    proc = _hold_lock(tmp_path, p, 3.0)
+    try:
+        with pytest.raises(OSError):
+            with st.locked(str(p), wait=0.2):
+                pass
+    finally:
+        proc.wait(timeout=60)
+    assert p.read_bytes() == before
+
+
+def test_write_inside_locked_does_not_wait_on_its_own_lock(tmp_path):
+    st = _state()
+    p = tmp_path / ".skyguard" / "state.json"
+    with st.locked(str(p), wait=0.2):
+        st.write(str(p), {"v": 1, "lifts": [], "persistent": {}})
+    assert st.read(str(p)).rejected is False

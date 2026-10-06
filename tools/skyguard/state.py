@@ -18,10 +18,12 @@ the per-call SHADOW line and the session-start report are what bound what a forg
 Known open gap (ledgered, owned by Tasks 10/12): `persistent.lock_disabled` is as forgeable as any other field,
 and unlike a lift it is not session-bound; the guard against it is a deny on writes to state.json that set it.
 
-Times are epoch seconds. Writes go only through `write()`, which refuses what `read()` would reject.
+Times are epoch seconds. Writes go only through `write()`, which refuses what `read()` would reject and holds the
+state lock; a read-modify-write holds it across the read too (`locked`, final review B-M3).
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -38,6 +40,8 @@ MAX_LIFT_SECONDS = 8 * 3600.0
 CLOCK_SKEW_SECONDS = 60.0
 KINDS = ("guards", "lock")
 _REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: a junction, a symlink, a mount point
+LOCK_WAIT = 5.0   # seconds a writer waits for the state lock (B-M3); a CLI or skydoctor call, never a hook's budget
+_HELD = set()     # state files whose lock this process holds (write() inside locked() must not wait on itself)
 
 
 @dataclass(frozen=True)
@@ -106,11 +110,33 @@ def _shape_problem(data):
     return None
 
 
+@contextlib.contextmanager
+def locked(path, wait=None):
+    """Hold the state lock (`state.json.lock`, beside it) for a READ-MODIFY-WRITE: read, decide, then `write()`
+    while holding it, so a writer that lands in between waits instead of being undone (final review B-M3: skydoctor's
+    expired-lift clear could write back a `lock_disabled` that `lock enable` had just removed). `write()` takes the
+    same lock, re-entrantly in this process, so every write is serialised with every locked read-modify-write.
+    OSError when it stays busy for `wait` (default LOCK_WAIT) seconds; the OS drops it if its holder dies."""
+    from . import backup
+    key = os.path.normcase(os.path.abspath(str(path)))
+    if key in _HELD:
+        yield
+        return
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with backup._exclusive(Path(str(path) + ".lock"), wait=LOCK_WAIT if wait is None else wait):
+        _HELD.add(key)
+        try:
+            yield
+        finally:
+            _HELD.discard(key)
+
+
 def write(path, data: dict) -> None:
-    """Atomically write `data` with its checksum. Refuses (ValueError) anything `read()` would reject: an
-    unknown version, a malformed lift or persistent block, or more than MAX_BYTES. Temp file in the same
-    directory, then `os.replace`: a reader sees the old file or the new one, never a half-written one. On any
-    failure the old file is left and no temp file remains. The only sanctioned writer of state.json."""
+    """Atomically write `data` with its checksum, under the state lock (`locked`). Refuses (ValueError) anything
+    `read()` would reject: an unknown version, a malformed lift or persistent block, or more than MAX_BYTES. Temp
+    file in the same directory, then `os.replace`: a reader sees the old file or the new one, never a half-written
+    one. On any failure the old file is left and no temp file remains (a refused `data` is refused before the lock,
+    so it leaves nothing at all). The only sanctioned writer of state.json."""
     path = Path(path)
     body = {k: v for k, v in data.items() if k != "sum"}
     if not _version_ok(body):
@@ -122,6 +148,11 @@ def write(path, data: dict) -> None:
     payload = json.dumps(body, sort_keys=True, indent=1, ensure_ascii=True).encode("ascii") + b"\n"
     if len(payload) > MAX_BYTES:
         raise ValueError("refusing to write: larger than {} KiB".format(MAX_BYTES // 1024))
+    with locked(path):
+        _replace(path, payload)
+
+
+def _replace(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".state-", suffix=".tmp", dir=str(path.parent))
     try:
