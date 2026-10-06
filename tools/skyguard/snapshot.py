@@ -78,12 +78,16 @@ PRUNE_CALL_BOX = 1.0      # the once-a-day pruning inside a tool call stops dele
 PRUNE_EVERY = DAY         # per-call pruning at most this often; SessionStart always prunes
 RESTAT_BOX = 0.075        # cap on re-stat'ing hard-linked scripts per comparison (real install MEASURED: 58 ms in all)
 RESTAT_CURSOR = ".restat_cursor"
-# Re-review N3: a path indexed with ONE link is re-stat'd in turn, this long per comparison (at least one path), from a
-# position cursor, so a hard link made AFTER indexing is found. The listing cannot tell: on Windows a DirEntry's
-# st_nlink is always 0 (MEASURED, Task 15). Real install: ~8,850 single-link scripts at ~20 us per os.stat (Task 14's
-# 58 ms for 2,975), so ~500 per comparison and a full round in ~18 comparisons (>= 18 min at RATE 60).
-SWEEP_BOX = 0.010
+# Re-review N3: a path indexed with ONE link is re-stat'd in turn, at most SWEEP_MAX paths and SWEEP_BOX seconds per
+# comparison (at least one path), from a position cursor, so a hard link made AFTER indexing is found. The listing
+# cannot tell: on Windows a DirEntry's st_nlink is always 0 (MEASURED, Task 15). The box uses perf_counter, not
+# _walk_clock: time.monotonic ticks every ~15.6 ms on Windows (Python 3.10), and a 10 ms monotonic box MEASURED 15.5 ms.
+# MEASURED on an 8,850-path synthetic index: ~24 us per os.stat, so ~250 paths (~7 ms in all) per comparison and a full
+# round in ~35 comparisons (>= 35 min at RATE 60).
+SWEEP_MAX = 256
+SWEEP_BOX = 0.006
 SWEEP_CURSOR = ".sweep_cursor"
+_sweep_clock = time.perf_counter
 _REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _walk_clock = time.monotonic      # bound at import: the walk's box is real time even where a test fakes snapshot.time
 REBASE_MIN = 256          # a delta larger than max(REBASE_MIN, base/REBASE_SHARE) paths is written as a new full map
@@ -468,7 +472,7 @@ def _sweep_links(root, store, files, seen):
     except (OSError, ValueError):
         start = 0
     base = str(root)
-    stop = _walk_clock() + SWEEP_BOX
+    stop = _sweep_clock() + SWEEP_BOX
     relinked, k = 0, 0
     while k < len(keys):
         rel = keys[(start + k) % len(keys)]
@@ -485,7 +489,7 @@ def _sweep_links(root, store, files, seen):
                 v.append(st.st_nlink)
             seen[rel] = (st.st_size, st.st_mtime_ns)
             relinked += 1
-        if _walk_clock() >= stop:
+        if k >= SWEEP_MAX or _sweep_clock() >= stop:
             break
     try:
         cursor_file.write_bytes(str((start + k) % len(keys)).encode("ascii"))

@@ -4577,3 +4577,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/backup.py", '    print("  bash tools/skyguard.sh snapshot list")', "    pass",
      _SCT + "test_the_backup_listing_points_at_the_snapshot_listing", "l2-restore-backup-list-points-at-snapshots"),
 ]]
+
+# Task 15: the sweep is capped by a path count (time.monotonic ticks every ~15.6 ms on Windows, MEASURED overrun).
+MUTATIONS.append(pytest.param(_SN, "        if k >= SWEEP_MAX or _sweep_clock() >= stop:", "        if _sweep_clock() >= stop:",
+                              _SNT + "test_the_sweep_is_capped_per_comparison_and_resumes", id="l2-snap-r3-sweep-cap"))

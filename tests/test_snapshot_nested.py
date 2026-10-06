@@ -799,6 +799,24 @@ def test_a_link_count_found_by_the_sweep_is_kept_in_the_index(tmp_path):
     assert idx["files"]["Data/Scripts/mine.pex"][3] == 2
 
 
+def test_the_sweep_is_capped_per_comparison_and_resumes(tmp_path, monkeypatch):
+    """The sweep stops after SWEEP_MAX paths (a count, not only a time: time.monotonic ticks every ~15.6 ms on
+    Windows) and the next comparison starts where it stopped."""
+    for n in ("a", "b", "c"):
+        put(tmp_path, "Data/Scripts/{}.pex".format(n), n.encode())
+    files, seen = {}, {}
+    for rel, (size, mt) in snapshot.walk(tmp_path).items():
+        files[rel], seen[rel] = [size, mt, "0" * 64, 1], (size, mt)
+    st = tmp_path / "store"
+    st.mkdir()
+    monkeypatch.setattr(snapshot, "SWEEP_MAX", 1)
+    monkeypatch.setattr(snapshot, "SWEEP_BOX", 60.0)
+    snapshot._sweep_links(tmp_path, st, files, seen)
+    assert (st / snapshot.SWEEP_CURSOR).read_bytes() == b"1"
+    snapshot._sweep_links(tmp_path, st, files, seen)
+    assert (st / snapshot.SWEEP_CURSOR).read_bytes() == b"2"
+
+
 def _linked_pair(tmp_path):
     (tmp_path / "Data" / "Scripts").mkdir(parents=True)
     for n in ("l0.pex", "l1.pex"):
