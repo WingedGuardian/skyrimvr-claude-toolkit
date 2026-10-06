@@ -147,6 +147,7 @@ def _run_wrappers(tmp_path: Path, root: Path, shadow_bash: bool = False):
     env["TOOLCHAIN_DOTNET"] = str(b / "dotnet").replace("\\", "/")
     env["AUTOMOD_DOTNET"] = str(b / "dotnet").replace("\\", "/")
     env["AUTOMOD_TEST_PIN_COMMIT"] = PIN_SHA
+    env["TOOLKIT_TEST_MODE"] = "1"
     p = subprocess.run([BASH, str(TOOL)], capture_output=True, text=True, env=env, timeout=120)
     return p.stdout
 
@@ -331,3 +332,13 @@ def test_a_manifest_spriggit_at_another_version_is_a_mismatch(tmp_path):
 def test_no_spriggit_anywhere_is_optional(tmp_path):
     out = _run_local_spriggit(tmp_path, "")
     assert "not installed (optional)" in _line(out, "spriggit "), out
+
+
+
+def test_automod_built_from_a_dirty_tree_is_degraded(tmp_path):
+    """Re-review N3: the pinned commit plus local edits is not what the toolkit tested."""
+    root = _toolkit(tmp_path)
+    _automod_built(root, commit=PIN_SHA + " dirty")
+    out = _run_wrappers(tmp_path, root)
+    assert "MISMATCH" in _line(out, "automod version") and "local changes" in _line(out, "automod version"), out
+    assert "automod-version" in _failed(out), out

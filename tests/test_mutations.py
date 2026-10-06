@@ -4254,9 +4254,10 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/automod-cli.sh", '''    [ "$(g show HEAD:Directory.Build.props | sed "s#$TFM_OLD#$TFM_NEW#" | tr -d '\\r')" = "$(tr -d '\\r' < "$PROPS")" ]''',
      "    true", _AM + "test_a_user_edit_to_the_props_file_is_not_mistaken_for_our_patch",
      "t6b-r1-automod-own-patch-is-exact"),
-    ("tools/automod-cli.sh", '    g rev-parse HEAD > "$MARKER" || exit 1', "    true",
+    ("tools/automod-cli.sh", '''    { printf '%s' "$(g rev-parse HEAD)"; [ -n "$(local_changes)" ] && printf ' dirty'; echo; } > "$MARKER" || exit 1''',
+     "    true",
      _AM + "test_built_reports_the_pinned_commit_after_a_rebuild", "t6b-r1-automod-records-built-commit"),
-    ("tools/automod-cli.sh", '    if [ "$built" = "$PIN_COMMIT" ]; then', '    if [ -n "$built" ]; then',
+    ("tools/automod-cli.sh", '    if [ "$built" != "$PIN_COMMIT" ]; then', '    if false; then',
      _AM + "test_built_from_another_commit_is_a_mismatch", "t6b-r1-automod-built-must-equal-pin"),
     ("tools/automod-cli.sh", '    if [ "$rc" -ne 0 ]; then', "    if false; then",
      _AM + "test_a_failed_build_says_the_first_build_needs_internet", "t6b-r1-automod-failed-build-reported"),
@@ -4290,6 +4291,28 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("SETUP_PROMPT.txt", "at tag v1.11.2 (commit e1c34ea", "(commit e1c34ea",
      "tests/test_automod_docs_pinned.py::test_no_user_facing_copy_clones_automod_unpinned_or_builds_it_bare",
      "t6b-r1-setup-prompt-pinned-clone"),
+]]
+
+
+# Plan 8 T6b fix round 2 (re-review N1-N3): the shipped pin is a constant unless the tests' own flag is set; a
+# detached commit nothing else holds is never moved; a build records dirty state and the record's age.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/automod-cli.sh", '    if [ "${TOOLKIT_TEST_MODE:-}" = 1 ]; then', "    if true; then",
+     _AM + "test_the_pin_override_is_ignored_without_the_test_flag", "t6b-r2-pin-override-needs-test-mode"),
+    ("tools/automod-cli.sh", '    if ! g symbolic-ref -q HEAD >/dev/null && ! held_elsewhere "$head"; then', "    if false; then",
+     _AM + "test_a_detached_commit_of_the_users_own_is_never_moved", "t6b-r2-detached-own-commit-kept"),
+    ("tools/automod-cli.sh", '''    [ -n "$(g branch -a --contains "$1" 2>/dev/null | grep -v 'HEAD detached')" ]''', "    false",
+     _AM + "test_a_detached_commit_kept_on_a_branch_may_be_moved", "t6b-r2-branch-holds-the-commit"),
+    ("tools/automod-cli.sh", '''[ -n "$(local_changes)" ] && printf ' dirty';''', '''false && printf ' dirty';''',
+     _AM + "test_a_dirty_build_marks_itself_and_is_not_the_pin", "t6b-r2-dirty-build-recorded"),
+    ("tools/automod-cli.sh", '    if [ "$files" = "Directory.Build.props" ] && only_our_patch; then files=""; fi', "",
+     _AM + "test_our_own_patch_does_not_count_as_dirty", "t6b-r2-own-patch-is-not-dirt"),
+    ("tools/automod-cli.sh", '    if [ -n "$state" ]; then', "    if false; then",
+     _TC + "test_automod_built_from_a_dirty_tree_is_degraded", "t6b-r2-dirty-build-is-degraded"),
+    ("tools/automod-cli.sh", '    if [ "$DLL" -nt "$MARKER" ]; then', "    if false; then",
+     _AM + "test_a_dll_newer_than_its_build_record_is_of_unknown_origin", "t6b-r2-dll-newer-than-record"),
+    ("tools/automod-cli.sh", '''    built="${built%$'\\r'}"; state="${state%$'\\r'}"   # a record written with CRLF''', "    true",
+     _TC + "test_automod_built_from_the_pinned_commit_says_which", "t6b-r2-crlf-record"),
 ]]
 
 

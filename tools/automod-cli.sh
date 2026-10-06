@@ -34,8 +34,18 @@ PROPS="$AUTOMOD/Directory.Build.props"
 TFM_OLD="<TargetFramework>net8.0</TargetFramework>"
 TFM_NEW="<TargetFramework>net10.0</TargetFramework>"
 PIN_TAG="v1.11.2"
-# Test seam: tests/test_automod_cli.py names its own fixture commit (it cannot fabricate this SHA).
-PIN_COMMIT="${AUTOMOD_TEST_PIN_COMMIT:-e1c34ea34cae4b9a1a547ea6a90c8a91412d689e}"
+PIN_COMMIT="e1c34ea34cae4b9a1a547ea6a90c8a91412d689e"
+# Test seam: tests/test_automod_cli.py names its own fixture commit (it cannot fabricate this SHA). Honoured
+# ONLY together with TOOLKIT_TEST_MODE=1, which the tests set and real users never do: an override someone
+# merely has in their environment would otherwise make --built and toolchain-check call a wrong commit
+# "pinned" -- the false green the pin exists to stop (re-review N1).
+if [ -n "${AUTOMOD_TEST_PIN_COMMIT:-}" ]; then
+    if [ "${TOOLKIT_TEST_MODE:-}" = 1 ]; then
+        PIN_COMMIT="$AUTOMOD_TEST_PIN_COMMIT"
+    else
+        echo "note: AUTOMOD_TEST_PIN_COMMIT is a test-only setting and was ignored (pin: $PIN_TAG)" >&2
+    fi
+fi
 CLONE_HINT="git clone --branch $PIN_TAG https://github.com/SpookyPirate/spookys-automod-toolkit tools/automod"
 # Test seam: tests/test_automod_cli.py points this at a fake `dotnet` (the harness shadows the real name).
 DOTNET="${AUTOMOD_DOTNET:-dotnet}"
@@ -46,6 +56,22 @@ g() { git -C "$AUTOMOD" "$@"; }
 only_our_patch() {
     [ "$(g diff --name-only)" = "Directory.Build.props" ] || return 1
     [ "$(g show HEAD:Directory.Build.props | sed "s#$TFM_OLD#$TFM_NEW#" | tr -d '\r')" = "$(tr -d '\r' < "$PROPS")" ]
+}
+
+# True when commit $1 stays reachable after HEAD moves: it is an ancestor of the pin, or a tag or a branch
+# (local or remote) contains it.
+held_elsewhere() {
+    g merge-base --is-ancestor "$1" "$PIN_COMMIT" 2>/dev/null && return 0
+    [ -n "$(g tag --contains "$1" 2>/dev/null)" ] && return 0
+    [ -n "$(g branch -a --contains "$1" 2>/dev/null | grep -v 'HEAD detached')" ]
+}
+
+# Tracked changes OTHER than our own one-line TFM patch ("" when the tree is what was committed).
+local_changes() {
+    local files
+    files="$(g diff --name-only HEAD)"
+    if [ "$files" = "Directory.Build.props" ] && only_our_patch; then files=""; fi
+    printf '%s' "$files"
 }
 
 # Put the clone on the pinned commit, or stop without changing anything.
@@ -74,6 +100,15 @@ to_pinned_commit() {
         echo "Commit $PIN_COMMIT ($PIN_TAG) is not in tools/automod and could not be fetched (internet?)." >&2
         return 1
     }
+    # A detached HEAD carrying commits that no branch, no tag and not the pin contains would, once moved,
+    # survive only in the reflog (re-review N2). A branch is never moved by `checkout --detach`.
+    if ! g symbolic-ref -q HEAD >/dev/null && ! held_elsewhere "$head"; then
+        echo "tools/automod is on a detached commit ${head:0:7} that no branch or tag holds, so it was NOT moved:" >&2
+        echo "moving would leave that commit reachable only from git's reflog. To keep it, give it a branch:" >&2
+        echo "  git -C tools/automod branch my-automod ${head:0:7}" >&2
+        echo "then run: bash tools/automod-cli.sh --rebuild" >&2
+        return 1
+    fi
     g checkout -q --detach "$PIN_COMMIT" || return 1
     echo "Checked out $PIN_TAG (${PIN_COMMIT:0:7})."
 }
@@ -105,19 +140,31 @@ if [ "$1" == "--rebuild" ]; then
         echo "and the .NET 10 SDK (dotnet --list-sdks)." >&2
         exit "$rc"
     fi
-    g rev-parse HEAD > "$MARKER" || exit 1
+    # The record: the commit built, plus "dirty" when tracked files differed from it (re-review N3).
+    { printf '%s' "$(g rev-parse HEAD)"; [ -n "$(local_changes)" ] && printf ' dirty'; echo; } > "$MARKER" || exit 1
     exit 0
 fi
 
 if [ "$1" == "--built" ]; then
     if [ ! -f "$DLL" ]; then echo "AutoMod is not built for net10.0. Run: bash tools/automod-cli.sh --rebuild"; exit 1; fi
-    built="$(tr -d '\r\n ' < "$MARKER" 2>/dev/null)"
-    if [ "$built" = "$PIN_COMMIT" ]; then
-        echo "AutoMod $PIN_TAG (${PIN_COMMIT:0:12}) built for net10.0"
-        exit 0
+    want="toolkit pinned to $PIN_TAG (${PIN_COMMIT:0:12}). Run: bash tools/automod-cli.sh --rebuild"
+    if [ ! -f "$MARKER" ]; then
+        echo "AutoMod built from an unknown commit (no build record: not built by --rebuild); $want"; exit 1
     fi
-    echo "AutoMod built from ${built:+${built:0:12}}${built:-an unknown commit (no build marker)}, toolkit pinned to $PIN_TAG (${PIN_COMMIT:0:12}). Run: bash tools/automod-cli.sh --rebuild"
-    exit 1
+    if [ "$DLL" -nt "$MARKER" ]; then
+        echo "AutoMod's DLL changed after its last --rebuild (unknown source); $want"; exit 1
+    fi
+    read -r built state < "$MARKER"
+    built="${built%$'\r'}"; state="${state%$'\r'}"   # a record written with CRLF
+    if [ "$built" != "$PIN_COMMIT" ]; then
+        echo "AutoMod built from ${built:0:12}, $want"; exit 1
+    fi
+    if [ -n "$state" ]; then
+        echo "AutoMod built from $PIN_TAG (${PIN_COMMIT:0:12}) WITH local changes, not what the toolkit tested. Revert them (git -C tools/automod status), then: bash tools/automod-cli.sh --rebuild"
+        exit 1
+    fi
+    echo "AutoMod $PIN_TAG (${PIN_COMMIT:0:12}) built for net10.0"
+    exit 0
 fi
 
 if [ ! -f "$DLL" ]; then

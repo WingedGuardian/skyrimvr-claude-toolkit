@@ -12,7 +12,7 @@ user has local changes. Every v3 user cloned unpinned, so "an existing clone at 
 normal upgrade case, not an edge. `--built` reports the commit the DLL was built from (toolchain-check uses it).
 
 These tests build a real git clone in tmp (two commits: an "old" one and the "pinned" one, named to the
-wrapper through its AUTOMOD_TEST_PIN_COMMIT seam) and a FAKE `dotnet` (AUTOMOD_DOTNET seam: the test
+wrapper through its AUTOMOD_TEST_PIN_COMMIT seam, which it honours only with TOOLKIT_TEST_MODE=1) and a FAKE `dotnet` (AUTOMOD_DOTNET seam: the test
 harness shadows `dotnet` by name) that records its argv and creates the DLL a real build would.
 """
 from __future__ import annotations
@@ -68,6 +68,7 @@ def _run(tmp_path: Path, tools: Path, pinned: str, *args: str):
     env = dict(os.environ)
     env["AUTOMOD_DOTNET"] = (tmp_path / "dotnet").as_posix()
     env["AUTOMOD_TEST_PIN_COMMIT"] = pinned
+    env["TOOLKIT_TEST_MODE"] = "1"  # the pin override is honoured only with this (re-review N1)
     return subprocess.run([BASH, str(tools / "automod-cli.sh"), *args], capture_output=True, text=True,
                           env=env, timeout=120)
 
@@ -254,3 +255,98 @@ def test_local_changes_stop_the_move_even_when_git_could_carry_them(tmp_path):
     assert _git(tools / "automod", "rev-parse", "HEAD") == old
     assert "mine" in csproj.read_text(encoding="utf-8")
     assert not _builds(tmp_path)
+
+
+# --- fix round 2 (re-review N1-N4) -----------------------------------------------------------------
+SHIPPED_PIN = "e1c34ea34cae4b9a1a547ea6a90c8a91412d689e"
+
+
+def _built_dll(tools: Path, marker):
+    dll = tools / "automod" / DLL_REL
+    dll.parent.mkdir(parents=True, exist_ok=True)
+    dll.write_bytes(b"MZ")
+    if marker is not None:
+        m = dll.parent / "toolkit-built-from.txt"
+        m.write_text(marker + "\n", encoding="utf-8")
+        os.utime(m, (dll.stat().st_mtime + 5,) * 2)
+    return dll
+
+
+def test_the_pin_override_is_ignored_without_the_test_flag(tmp_path):
+    """N1: an AUTOMOD_TEST_PIN_COMMIT a user or agent happens to have set must not move the shipped pin."""
+    tools, pin, _ = _layout(tmp_path)
+    _built_dll(tools, pin)
+    env = dict(os.environ)
+    env.pop("TOOLKIT_TEST_MODE", None)
+    env["AUTOMOD_TEST_PIN_COMMIT"] = pin
+    p = subprocess.run([BASH, str(tools / "automod-cli.sh"), "--built"], capture_output=True, text=True,
+                       env=env, timeout=120)
+    assert p.returncode != 0, "the fixture commit must not count as pinned outside test mode:\n" + p.stdout
+    assert SHIPPED_PIN[:12] in p.stdout, p.stdout
+    assert "AUTOMOD_TEST_PIN_COMMIT" in p.stderr and "ignored" in p.stderr, p.stderr
+
+
+def _detached_own_commit(tools: Path) -> str:
+    am = tools / "automod"
+    (am / "mine.txt").write_text("my work\n", encoding="utf-8", newline="\n")
+    _git(am, "add", "mine.txt")
+    _git(am, "commit", "-q", "-m", "my own commit on a detached HEAD")
+    return _git(am, "rev-parse", "HEAD")
+
+
+def test_a_detached_commit_of_the_users_own_is_never_moved(tmp_path):
+    """N2: moving off a detached commit no branch or tag holds would leave it only in the reflog."""
+    tools, pin, _ = _layout(tmp_path, at="old")
+    mine = _detached_own_commit(tools)
+    p = _run(tmp_path, tools, pin, "--rebuild")
+    assert p.returncode != 0, p.stdout
+    assert mine[:7] in p.stderr and "branch" in p.stderr, p.stderr
+    assert _git(tools / "automod", "rev-parse", "HEAD") == mine
+    assert not _builds(tmp_path)
+
+
+def test_a_detached_commit_kept_on_a_branch_may_be_moved(tmp_path):
+    tools, pin, _ = _layout(tmp_path, at="old")
+    _detached_own_commit(tools)
+    _git(tools / "automod", "branch", "keep-mine")
+    p = _run(tmp_path, tools, pin, "--rebuild")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert _git(tools / "automod", "rev-parse", "HEAD") == pin
+
+
+def test_a_dirty_build_marks_itself_and_is_not_the_pin(tmp_path):
+    """N3: at the pinned commit with a local edit the build goes ahead, and says it is not what was tested."""
+    tools, pin, _ = _layout(tmp_path)
+    (tools / "automod" / "README.md").write_text("my local edit\n", encoding="utf-8", newline="\n")
+    assert _run(tmp_path, tools, pin, "--rebuild").returncode == 0
+    marker = (tools / "automod" / DLL_REL).parent / "toolkit-built-from.txt"
+    assert "dirty" in marker.read_text(encoding="utf-8")
+    p = _run(tmp_path, tools, pin, "--built")
+    assert p.returncode != 0 and "local changes" in p.stdout, p.stdout
+
+
+def test_our_own_patch_does_not_count_as_dirty(tmp_path):
+    tools, pin, _ = _layout(tmp_path)
+    assert _run(tmp_path, tools, pin, "--rebuild").returncode == 0
+    marker = (tools / "automod" / DLL_REL).parent / "toolkit-built-from.txt"
+    assert marker.read_text(encoding="utf-8").strip() == pin
+
+
+def test_a_dll_newer_than_its_build_record_is_of_unknown_origin(tmp_path):
+    """N3: a later manual `dotnet build` replaces the DLL and leaves the record behind."""
+    tools, pin, _ = _layout(tmp_path)
+    dll = _built_dll(tools, pin)
+    os.utime(dll, (dll.stat().st_mtime + 60,) * 2)
+    p = _run(tmp_path, tools, pin, "--built")
+    assert p.returncode != 0 and "--rebuild" in p.stdout, p.stdout
+
+
+def test_the_mismatch_message_names_the_commit_once_and_is_clean(tmp_path):
+    """N4: the commit was printed twice, and a missing record leaked a `tr` error."""
+    tools, pin, old = _layout(tmp_path)
+    _built_dll(tools, old)
+    p = _run(tmp_path, tools, pin, "--built")
+    assert p.stdout.count(old[:12]) == 1 and old not in p.stdout, p.stdout
+    ((tools / "automod" / DLL_REL).parent / "toolkit-built-from.txt").unlink()
+    p = _run(tmp_path, tools, pin, "--built")
+    assert p.returncode != 0 and p.stderr == "", p.stderr
