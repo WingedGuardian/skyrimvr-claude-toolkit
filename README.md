@@ -566,14 +566,15 @@ refusals of writes into `.skyguard/`.
   160-168 ms. The first session builds its baseline over about 100 s of work spread across the session start and the
   first calls.
 - **Recovery snapshots** also copy, before a shell command that may change them, your `plugins.txt`, `loadorder.txt`
-  and `Skyrim*.ini` from the configured folders, and, before a ReSaver `--apply` or a DevBench save, the **one named
-  save and its `.skse` co-save** (never the whole save folder).
+  and `Skyrim*.ini` from the configured folders, and, before a ReSaver `--apply` or a DevBench save, the **one save
+  it will overwrite and its `.skse` co-save** (for ReSaver that is the output save; never the whole save folder).
 - **Restoring:** `bash tools/skyguard.sh snapshot list` shows every snapshot with its id.
   `bash tools/skyguard.sh snapshot restore <id>` writes the files to a **new folder**
   (`.claude/backups/restored/<id>__<time>/`) and touches nothing live. `--to DIR` chooses the folder (it refuses if
   a target exists); `--in-place` puts files back where they came from, only the files that kind of snapshot is allowed to write
   (for load order, INIs and saves: `plugins.txt`, `loadorder.txt`, `Skyrim*.ini`, `.ess`, `.skse`) and only inside the
-  configured roots, and **backs up each file it replaces first**. A damaged stored copy refuses the restore and names the file.
+  configured roots, and **backs up each file it replaces first**. An agent that runs an in-place restore is asked to
+  confirm first. A damaged stored copy refuses the restore and names the file.
 
 ### `skydoctor`, and how it differs from `skyguard doctor`
 
