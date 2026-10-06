@@ -16,7 +16,18 @@ SPEC_FIELDS = ("v", "agent", "event", "kind", "shell", "command", "paths", "mcp_
 
 
 def test_verdict_shape():
-    assert Verdict._fields == ("decision", "reason", "context", "status", "code")
+    # `never` (Plan 6 final review A-C1, commit 3934907): a NEVER_SHADOW refusal carried beside a decision that
+    # outranked it, for engine.shadow. It is engine-internal: the adapter wire line stays the five fields below.
+    assert Verdict._fields == ("decision", "reason", "context", "status", "code", "never")
+    assert Verdict().never is None
+
+
+def test_the_wire_verdict_does_not_carry_never():
+    """ADAPTING.md's answer line is v/decision/reason/context/status/code: the internal `never` must not leak."""
+    import json
+    from skyguard import neutral
+    line = neutral.render(Verdict("deny", "r", never=Verdict("ask", "p")))
+    assert sorted(json.loads(line)) == ["code", "context", "decision", "reason", "status", "v"]
 
 
 def test_request_carries_every_spec_field():
