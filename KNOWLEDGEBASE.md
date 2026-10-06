@@ -640,26 +640,44 @@ not facts.
 - In Spriggit YAML: `ModHeader: Stats: Version: 1.7`
 - A `spriggit-meta.json` file is required in the root of the YAML directory for deserialization. Format:
   ```json
-  {"PackageName": "Spriggit.Yaml.Skyrim", "Version": "0.40.0", "Release": "SkyrimSE", "ModKey": "YourMod.esp"}
+  {"PackageName": "Spriggit.Yaml.Skyrim", "Version": "0.41.0", "Release": "SkyrimSE", "ModKey": "YourMod.esp"}
   ```
 
 ### Spriggit CLI
-- Serialize: `spriggit serialize --InputPath "Data/Mod.esp" --OutputPath "/tmp/output" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "0.40.0"`
+- Serialize: `spriggit serialize --InputPath "Data/Mod.esp" --OutputPath "/tmp/output" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion "0.41.0"` (pass what `spriggit --version` prints)
 - Deserialize: `spriggit deserialize --InputPath "/tmp/yaml_dir" --OutputPath "Data/Mod.esp"` (reads meta from spriggit-meta.json)
 - `--GameRelease` is only for serialize, NOT deserialize
-- **Install pinned: `dotnet tool install Spriggit.CLI --version 0.40.0`** (2026-10-05 drift audit).
-  0.40.0 targets net9.0; 0.41.0 (2026-07-02) ships only `tools/net10.0`, and per the audit
-  a `dotnet tool update` on an SDK 6/8/9 machine failed with "DotnetToolSettings.xml was not
-  found". 0.40.1 is untested. `tools/toolchain-check.sh` compares `spriggit --version` with the
-  pin in `.config/dotnet-tools.json` and requires SDK 10+ for 0.41+, SDK 9+ before that.
+- **Install pinned: `dotnet tool install Spriggit.CLI --version 0.41.0`** (v4, 2026-10-05; was
+  0.40.0). 0.41.0 (2026-07-02) ships only `tools/net10.0`, so it needs the **.NET 10 SDK**; per
+  the drift audit a `dotnet tool update` on an SDK 6/8/9 machine failed with
+  "DotnetToolSettings.xml was not found". 0.40.0 targeted net9.0. `tools/toolchain-check.sh`
+  compares `spriggit --version` with the pin in `.config/dotnet-tools.json` (older or newer is
+  a MISMATCH) and requires SDK 10+ for 0.41+, SDK 9+ before that.
+- **`spriggit --version` exits 1 even when it works** (MEASURED 2026-10-05, 0.41.0, global tool and
+  `dotnet tool run spriggit` alike): it prints `Spriggit version 0.41.0+...`, a stray `--version`, and
+  `Spriggit.CLI 0.41.0+...`, then returns 1. Probe it by its OUTPUT, never its exit status, and not with
+  `| grep -q` under `pipefail` (grep closes the pipe early and the SIGPIPE fails the pipeline). A fake that
+  printed one line and exited 0 kept two new tests green while the real tool was never detected.
+- **Two installs, both supported:** the global tool (`spriggit` on PATH) and `dotnet tool restore`'s local
+  tool (`dotnet tool run spriggit`, answers only from inside the toolkit). `tools/spriggit-cli.sh`,
+  `tools/esp-verify-wrapper.sh` and `tools/toolchain-check.sh` use the global one first, then the local one.
 - **Use `-u` / `--ErrorOnUnknown` on serialize.** It makes Spriggit throw on unknown
   fields/records instead of dropping them silently — directly mitigates the silent-drop
   issue below. Make it the default for our workflow.
 
-### ✅ Spriggit round-trip is byte-stable — verified 2026-05-18
-- A controlled no-op round-trip (`serialize → deserialize unchanged → serialize`) of the
-  a test ESP produced a **byte-for-byte identical file**; an unmodified ESP
-  round-trip to identical YAML with `:Skyrim.esm` references intact. Spriggit serializes
+### ✅ Spriggit round-trip is lossless — compare YAML, not ESP bytes (re-measured 2026-10-05)
+- A controlled no-op round-trip (`serialize → deserialize unchanged → serialize`) of
+  a test ESP produced a **byte-for-byte identical file** (2026-05-18); an unmodified ESP
+  round-trip to identical YAML with `:Skyrim.esm` references intact.
+- ⚠ **The bytes are only stable once Spriggit has written the file.** MEASURED 2026-10-05 on a
+  1549-byte ESP another tool wrote (RallysHandcart.esp, 8 STAT records): one
+  serialize → deserialize gave the same size but **1247 of 1549 bytes different** (records come
+  out in a different order), with **0.40.0 and 0.41.0 equally** (their two outputs are
+  byte-identical, so this is not a 0.41 regression). Re-serializing gave YAML identical to the
+  first serialize (10 of 10 files), and a second deserialize reproduced the first output byte for
+  byte, so the first pass canonicalises the order and the result is a fixed point. Same result
+  on SDK 10.0.401 with nothing else installed. **Prove a round trip by re-serializing and
+  diffing the YAML; an ESP byte-compare fails on correct output.** Spriggit serializes
   exactly what the YAML says — it does NOT invent master-attribution corruption.
 - The earlier belief that "Spriggit corrupts master prefixes on round-trip" was a
   **misdiagnosis**. The real culprit for re-mastered references (`:Skyrim.esm`
@@ -1841,14 +1859,31 @@ counted as a crash.
 
 ## AutoMod BSA extract/repack needs `bsarch.exe`
 
-AutoMod's `archive` module reads a BSA index natively for `list`, but `extract`, `extract-file`, and
-`repack` shell out to **BSArch.exe** — without it they fail with `BSArch not found`. Place `bsarch.exe`
-at `<build-output>/tools/bsarch/bsarch.exe`, i.e. under the same `bin/Release/net8.0/` folder the
-wrapper runs the DLL from. **It lives under `bin/`, so any `dotnet build` or `clean` of AutoMod wipes
+AutoMod's `archive` module reads a BSA index natively for `list`, but `create`, `extract`,
+`extract-file`, and `repack` shell out to **BSArch.exe** — without it they fail with `BSArch not found`
+(`create` MEASURED 2026-10-05). Place `bsarch.exe` at `<build-output>/tools/bsarch/bsarch.exe`, i.e.
+under the same `bin/Release/net10.0/` folder the wrapper runs the DLL from (`net8.0/` before v4: the
+v4 retarget builds into a NEW folder, so move an existing copy across). BSArch also refuses an
+`extract --output` folder that does not exist yet (`EInvalidArguments: Folder does not exist`);
+create it first. **It lives under `bin/`, so any `dotnet build` or `clean` of AutoMod wipes
 it** — keep a canonical copy elsewhere and re-place it after a rebuild.
 
 Similarly, `audio wav-to-xwm` needs `xWMAEncode.exe`, which is not bundled. It is often simpler to call
 `xWMAEncode` directly than to go through AutoMod.
+
+**AutoMod on .NET 10 (v4, MEASURED 2026-10-05, v1.11.2 = e1c34ea, SDK 10.0.401 with no other SDK or
+runtime installed).** Upstream targets net8.0; `bash tools/automod-cli.sh --rebuild` pins SDK 10 in
+`tools/automod/global.json` and retargets `Directory.Build.props` to net10.0 (one line, a local
+patch), then builds the Cli project. It built with 0 errors (2 harmless NU1510 warnings) and on 10.0.12
+alone ran: `esp create`, `add-weapon` (dry-run and real), `add-spell/-armor/-global/-quest/-npc/-book/
+-perk/-faction`, `info`, `view-record`, `list-masters`; `nif info`; `archive list/create/extract`
+(byte-exact); `mcm create/add-toggle/validate`; `papyrus status/generate/validate/download/compile/
+decompile`; `audio info/create-fuz/extract-fuz` (byte-exact). Spriggit 0.41 read the AutoMod-written
+ESP and round-tripped it byte-identical. Upstream's unit tests: 68 of 69 pass on net10.0 — and the
+same 68 of 69 on net8.0: `ResultTests.ToJson_FailedResult_ContainsSuccessFalse` fails on both (a
+failed result's JSON omits `"success": false`), so it is upstream's, not .NET 10's. Rebuilding over an
+old net8.0 build needs no clean. A net8.0 build does NOT start on a 10-only machine without
+`DOTNET_ROLL_FORWARD=Major`; the wrapper refuses it and says to `--rebuild`.
 
 ---
 

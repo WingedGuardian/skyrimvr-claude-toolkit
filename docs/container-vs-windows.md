@@ -101,7 +101,7 @@ To bring a result back to the host, publish it deliberately from Windows (or cop
 
 Files: `.devcontainer/`, `devshell.sh`, `devshell-docker.sh`.
 
-A reproducible Linux container (Python 3.11, Node 20, .NET 9, JDK 17) for the tools that don't need
+A reproducible Linux container (Python 3.11, Node 24 LTS, .NET 10, JDK 17) for the tools that don't need
 Windows or an active MO2 session: Spriggit ESP inspection/diffing, FOMOD/JSON generation, unit-testing
 mod logic, ReSaver CLI. xelib and
 anything load-order-dependent still needs Windows (and MO2's executables list, on an MO2 install).

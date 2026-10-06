@@ -2,6 +2,20 @@
 
 ## Unreleased (v4.0.0 in progress)
 
+### Runtimes: one .NET SDK (10), Node 24 LTS, Spriggit 0.41.0
+
+- **The .NET 10 SDK is now the only .NET the toolkit needs.** Spriggit and AutoMod both run on it; .NET 8 and 9 are no longer used (both reach end of support on 2026-11-10).
+- **Spriggit is pinned to 0.41.0** (was 0.40.0); it needs the .NET 10 SDK. `tools/toolchain-check.sh` now reports an older Spriggit as a mismatch too, not only a newer one. Update with `dotnet tool update -g Spriggit.CLI --version 0.41.0`.
+- **AutoMod must be rebuilt once: `bash tools/automod-cli.sh --rebuild`.** It first puts your clone on the tested commit (v1.11.2, `e1c34ea`): older toolkits had you clone upstream HEAD, so a clean clone is checked out to the pin, and one with your own changes is left alone with instructions. It then pins SDK 10 in `tools/automod/global.json`, retargets the clone to net10.0 (a one-line local patch) and builds; the wrapper refuses an old net8.0 build. The first build needs internet. `tools/toolchain-check.sh` now reports which commit AutoMod was built from and reads DEGRADED when it is not the pin.
+- The setup prompt (and its copies in README and getting-started) now clones AutoMod at v1.11.2 and builds it with `--rebuild`; it used to clone upstream HEAD and `dotnet build` it.
+- Spriggit installed with `dotnet tool restore` (the repo-local, exactly-pinned install) now works with the ESP guard `tools/esp-verify-wrapper.sh` and `tools/toolchain-check.sh`; before, the guard stopped with "spriggit not found" and the check read "not installed".
+- `tools/toolchain-check.sh`: a ReSaver whose `lib/` folder is missing now reads DEGRADED instead of ok.
+- If you placed `bsarch.exe` for AutoMod, move it from `bin/Release/net8.0/tools/bsarch/` to `bin/Release/net10.0/tools/bsarch/`.
+- **Node 24 LTS** (Node 20 is end-of-life): `.node-version` 24.19.0 (the version tested), `engines.node` `>=24`, and the devcontainer installs Node 24 and .NET 10.
+- `tools/toolchain-check.sh` no longer reports AutoMod or ReSaver "ok" when the wrapper says its DLL or jar is missing: a wrapper must now reach its dependency, and one you never installed reads "not installed (optional)".
+- `tools/toolchain-check.sh` runs the wrappers under the bash running the check, not whatever `bash` is first on PATH (on Windows that can be WSL's launcher).
+- KB correction: a Spriggit round trip of an ESP another tool wrote reorders its records (same size, different bytes) on 0.40 and 0.41 alike, while the YAML is identical. Compare re-serialized YAML, not ESP bytes.
+
 ### Dependencies (exact, hash-locked, refreshed with the reasons recorded)
 
 - **Removed the unused pins** from the container's Python requirements: pydantic (and pydantic-core), cattrs, mypy and pytest-cov
@@ -13,6 +27,7 @@
 - **ruff 0.3.0 to 0.16.9** (CI lint only; never installed for users). The hard gate (`E9,F63,F7,F82`) gives identical results on 0.3.0, 0.3.7, 0.15.22, 0.16.9 and 0.16.10 over every tracked Python file; the advisory full-ruleset run is noisier (about 1400 findings). The gate no longer reports the adapter template's slot fragments (`ruff.toml`), which made it fail before.
 - **`package.json` pins exact versions** (ajv 8.20.0, fast-xml-parser 5.7.3, zod 3.25.76) instead of `^` ranges, so a plain `npm install` can no longer float away from the lock. The lock already held ajv and zod at these versions; fast-xml-parser moves in the next line.
 - **fast-xml-parser 4.5.7 to 5.7.3** (the container's "Generate FOMOD XML" tool). `npm audit` flags every 4.x for the `XMLBuilder` comment/CDATA injection advisory (GHSA-gh4j-gqv2-49f6, fixed in 5.7.0); 5.7.3 clears it, at the cost of four more small dependencies. A new smoke test (`tests/fomod-xmlbuilder.test.js`, run from `npm ci` by `tests/test_node_fomod_smoke.py` and by CI) builds a FOMOD ModuleConfig with `XMLBuilder`, parses it back, and checks that comment and CDATA text cannot inject elements; a control run on 4.3.6 proves the smoke fails on an injectable version. ajv 8.20.0 and zod 3.25.76 are already the newest of their lines and do not change.
+
 ### Other agents: the adapter kit
 
 - **New `ADAPTING.md`, written to an agent the toolkit does not support yet.** Any agent that reads files already gets the instructions, the skills and the tools (Layers 0 and 1; Layer 2, a read-only lock below the agent, is not yet released). `ADAPTING.md` walks such an agent through wiring the rest into itself, and through saying honestly how far it got. The toolkit still lists only Claude Code and Codex as supported; an adapted agent is "locally adapted, self-verified", a statement about one install on one machine.

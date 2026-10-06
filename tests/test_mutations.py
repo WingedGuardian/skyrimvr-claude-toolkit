@@ -4198,12 +4198,124 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 # from the installed version. One twin per clause (each shadows the other if only one is mutated).
 MUTATIONS += [
     pytest.param("tools/toolchain-check.sh", 'elif [ "$INSTALLED" = "$PIN" ]; then', 'elif [ -n "$INSTALLED" ]; then',
-                 "tests/test_toolchain_check.py::test_newer_spriggit_on_sdk_9_is_degraded",
+                 "tests/test_toolchain_check.py::test_older_spriggit_against_the_pin_is_a_mismatch",
                  id="toolchain-check-spriggit-version-must-equal-pin"),
     pytest.param("tools/toolchain-check.sh", '|| [ "${SP_MINOR:-0}" -ge 41 ] 2>/dev/null; then NEED=10; fi', '|| false; then NEED=10; fi',
-                 "tests/test_toolchain_check.py::test_newer_spriggit_on_sdk_9_is_degraded",
+                 "tests/test_toolchain_check.py::test_pinned_version_on_sdk_9_cannot_work",
                  id="toolchain-check-spriggit-version-sets-needed-sdk"),
 ]
+
+
+# Plan 8 T6b: toolchain-check's wrapper rows must prove the wrapper reached its dependency (identity, not
+# startability), keep an absent optional dependency optional, and run under the bash running the check (a bare
+# `bash` can be WSL's launcher). And automod-cli.sh's .NET 10 build: SDK pin, retarget, refusal, Cli-only build,
+# the net10.0 DLL, and the stale-net8 refusal. One twin per clause.
+_TC = "tests/test_toolchain_check.py::"
+_AM = "tests/test_automod_cli.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/toolchain-check.sh", '''wrapper automod-cli "$ROOT/tools/automod" "Spooky's AutoMod Toolkit"''',
+     'wrapper automod-cli "$ROOT/tools/automod" ""', _TC + "test_automod_cloned_but_not_built_is_not_ok",
+     "t6b-toolchain-automod-identity"),
+    ("tools/toolchain-check.sh", 'wrapper resaver-cli "$ROOT/tools/resaver-cli/ReSaver.jar" "need <op>"',
+     'wrapper resaver-cli "$ROOT/tools/resaver-cli/ReSaver.jar" ""',
+     _TC + "test_resaver_whose_driver_cannot_compile_is_not_ok", "t6b-toolchain-resaver-identity"),
+    ("tools/toolchain-check.sh", '  elif [ ! -e "$dep" ]; then', "  elif false; then",
+     _TC + "test_resaver_without_its_jar_is_optional_not_ok", "t6b-toolchain-absent-dependency-is-optional"),
+    ("tools/toolchain-check.sh", '  check "$w" "$expect" "$BASH" "$ROOT/tools/$w.sh" --help',
+     '  check "$w" "$expect" bash "$ROOT/tools/$w.sh" --help',
+     _TC + "test_wrappers_run_under_this_bash_not_a_bare_bash_on_path", "t6b-toolchain-wrappers-run-under-this-bash"),
+    ("tools/automod-cli.sh", '"version": "10.0.100", "rollForward"', '"version": "8.0.100", "rollForward"',
+     _AM + "test_rebuild_pins_the_net10_sdk_not_8", "t6b-automod-sdk-10-pin"),
+    ("tools/automod-cli.sh", '    if grep -qF "$TFM_OLD" "$PROPS"; then', "    if false; then",
+     _AM + "test_rebuild_retargets_the_clone_to_net10", "t6b-automod-retarget"),
+    ("tools/automod-cli.sh", '    if ! grep -qF "$TFM_OLD" "$PROPS" && ! grep -qF "$TFM_NEW" "$PROPS"; then',
+     "    if false; then",
+     _AM + "test_rebuild_refuses_a_target_it_does_not_recognise_and_writes_nothing", "t6b-automod-refuses-unknown-target"),
+    ("tools/automod-cli.sh", '    "$DOTNET" build "$CLI_PROJ" -c Release', '    "$DOTNET" build "$AUTOMOD" -c Release',
+     _AM + "test_rebuild_builds_the_cli_project_only", "t6b-automod-builds-cli-only"),
+    ("tools/automod-cli.sh", 'OUT="$CLI_PROJ/bin/Release/net10.0"',
+     'OUT="$CLI_PROJ/bin/Release/net8.0"', _AM + "test_a_run_uses_the_net10_build",
+     "t6b-automod-runs-the-net10-dll"),
+    ("tools/automod-cli.sh", '    if [ -f "$OLD_DLL" ]; then', "    if false; then",
+     _AM + "test_an_old_net8_build_is_reported_stale_not_run", "t6b-automod-stale-net8-named"),
+]]
+
+
+# Plan 8 T6b fix round 1 (review I1-I3, M1, M7). AutoMod's pinned commit (move a clean clone, never touch a dirty
+# one, undo only our own patch, record and compare the built commit); toolchain-check's AutoMod version row, ReSaver
+# lib/ and repo-local Spriggit; esp-verify's repo-local Spriggit and pinned package version; the setup prompt's
+# pinned clone. One twin per clause.
+_EV = "tests/test_esp_verify.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/automod-cli.sh", '    g checkout -q --detach "$PIN_COMMIT" || return 1', "    true",
+     _AM + "test_upgrade_a_clean_clone_at_an_older_commit_is_moved_to_the_pin", "t6b-r1-automod-moves-to-pin"),
+    ("tools/automod-cli.sh", '    if [ -n "$dirty" ]; then', "    if false; then",
+     _AM + "test_local_changes_stop_the_move_even_when_git_could_carry_them", "t6b-r1-automod-dirty-clone-untouched"),
+    ("tools/automod-cli.sh", "    if only_our_patch; then g checkout -q -- Directory.Build.props || return 1; fi", "",
+     _AM + "test_upgrade_undoes_only_its_own_patch_before_moving", "t6b-r1-automod-undoes-own-patch"),
+    ("tools/automod-cli.sh", '''    [ "$(g show HEAD:Directory.Build.props | sed "s#$TFM_OLD#$TFM_NEW#" | tr -d '\\r')" = "$(tr -d '\\r' < "$PROPS")" ]''',
+     "    true", _AM + "test_a_user_edit_to_the_props_file_is_not_mistaken_for_our_patch",
+     "t6b-r1-automod-own-patch-is-exact"),
+    ("tools/automod-cli.sh", '''    { printf '%s' "$(g rev-parse HEAD)"; [ -n "$(local_changes)" ] && printf ' dirty'; echo; } > "$MARKER" || exit 1''',
+     "    true",
+     _AM + "test_built_reports_the_pinned_commit_after_a_rebuild", "t6b-r1-automod-records-built-commit"),
+    ("tools/automod-cli.sh", '    if [ "$built" != "$PIN_COMMIT" ]; then', '    if false; then',
+     _AM + "test_built_from_another_commit_is_a_mismatch", "t6b-r1-automod-built-must-equal-pin"),
+    ("tools/automod-cli.sh", '    if [ "$rc" -ne 0 ]; then', "    if false; then",
+     _AM + "test_a_failed_build_says_the_first_build_needs_internet", "t6b-r1-automod-failed-build-reported"),
+    ("tools/toolchain-check.sh", '  if AM_BUILT=$("$BASH" "$ROOT/tools/automod-cli.sh" --built 2>&1); then',
+     "  if AM_BUILT=unchecked; then", _TC + "test_automod_built_from_another_commit_is_degraded",
+     "t6b-r1-toolchain-automod-version"),
+    ("tools/toolchain-check.sh", '  elif [ -n "$also" ] && ! compgen -G "$also" >/dev/null; then', "  elif false; then",
+     _TC + "test_resaver_whose_lib_was_removed_is_not_ok", "t6b-r1-toolchain-resaver-lib"),
+    ("tools/toolchain-check.sh", '''elif SP_OUT=$(spriggit_local --version 2>&1); printf '%s' "$SP_OUT" | grep -qE 'Spriggit[^0-9]*[0-9]+\\.[0-9]+'; then''', "elif false; then",
+     _TC + "test_a_spriggit_restored_from_the_manifest_is_found", "t6b-r1-toolchain-local-spriggit"),
+    # The real `spriggit --version` exits 1: judging the probe by its exit status never finds the local tool.
+    ("tools/toolchain-check.sh", '''elif SP_OUT=$(spriggit_local --version 2>&1); printf '%s' "$SP_OUT" | grep -qE 'Spriggit[^0-9]*[0-9]+\\.[0-9]+'; then''',
+     "elif spriggit_local --version >/dev/null 2>&1; then",
+     _TC + "test_a_spriggit_restored_from_the_manifest_is_found", "t6b-r1-toolchain-local-spriggit-by-output"),
+    ("tools/toolchain-check.sh", 'spriggit_local() { (cd "$ROOT" && "$DOTNET" tool run spriggit -- "$@"); }',
+     'spriggit_local() { ("$DOTNET" tool run spriggit -- "$@"); }',
+     _TC + "test_a_spriggit_restored_from_the_manifest_is_found", "t6b-r1-toolchain-local-spriggit-from-root"),
+    ("tools/esp-verify-wrapper.sh", '''elif SP_OUT=$(spriggit_local --version 2>&1); printf '%s' "$SP_OUT" | grep -qE 'Spriggit[^0-9]*[0-9]+\\.[0-9]+'; then''', "elif false; then",
+     _EV + "test_a_manifest_installed_spriggit_drives_the_guard", "t6b-r1-espverify-local-spriggit"),
+    ("tools/esp-verify-wrapper.sh", '''elif SP_OUT=$(spriggit_local --version 2>&1); printf '%s' "$SP_OUT" | grep -qE 'Spriggit[^0-9]*[0-9]+\\.[0-9]+'; then''',
+     "elif spriggit_local --version >/dev/null 2>&1; then",
+     _EV + "test_a_manifest_installed_spriggit_drives_the_guard", "t6b-r1-espverify-local-spriggit-by-output"),
+    ("tools/esp-verify-wrapper.sh", 'spriggit_local() { (cd "$TOOLKIT_ROOT" && "$DOTNET" tool run spriggit -- "$@"); }',
+     'spriggit_local() { ("$DOTNET" tool run spriggit -- "$@"); }',
+     _EV + "test_a_manifest_installed_spriggit_drives_the_guard", "t6b-r1-espverify-local-spriggit-from-root"),
+    ("tools/esp-verify-wrapper.sh",
+     '  plugin="$(cd "$(dirname "$plugin")" && pwd)/$(basename "$plugin")"   # the local tool runs from the toolkit root',
+     "", _EV + "test_a_manifest_installed_spriggit_drives_the_guard", "t6b-r1-espverify-absolute-plugin-path"),
+    ("tools/esp-verify-wrapper.sh", 'PKGVER="${ESP_VERIFY_PKGVER:-${PIN:-0.41.0}}"', 'PKGVER="${ESP_VERIFY_PKGVER:-0.40.0}"',
+     _EV + "test_the_package_version_defaults_to_the_pin", "t6b-r1-espverify-pkgver-is-the-pin"),
+    ("SETUP_PROMPT.txt", "at tag v1.11.2 (commit e1c34ea", "(commit e1c34ea",
+     "tests/test_automod_docs_pinned.py::test_no_user_facing_copy_clones_automod_unpinned_or_builds_it_bare",
+     "t6b-r1-setup-prompt-pinned-clone"),
+]]
+
+
+# Plan 8 T6b fix round 2 (re-review N1-N3): the shipped pin is a constant unless the tests' own flag is set; a
+# detached commit nothing else holds is never moved; a build records dirty state and the record's age.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/automod-cli.sh", '    if [ "${TOOLKIT_TEST_MODE:-}" = 1 ]; then', "    if true; then",
+     _AM + "test_the_pin_override_is_ignored_without_the_test_flag", "t6b-r2-pin-override-needs-test-mode"),
+    ("tools/automod-cli.sh", '    if ! g symbolic-ref -q HEAD >/dev/null && ! held_elsewhere "$head"; then', "    if false; then",
+     _AM + "test_a_detached_commit_of_the_users_own_is_never_moved", "t6b-r2-detached-own-commit-kept"),
+    ("tools/automod-cli.sh", '''    [ -n "$(g branch -a --contains "$1" 2>/dev/null | grep -v 'HEAD detached')" ]''', "    false",
+     _AM + "test_a_detached_commit_kept_on_a_branch_may_be_moved", "t6b-r2-branch-holds-the-commit"),
+    ("tools/automod-cli.sh", '''[ -n "$(local_changes)" ] && printf ' dirty';''', '''false && printf ' dirty';''',
+     _AM + "test_a_dirty_build_marks_itself_and_is_not_the_pin", "t6b-r2-dirty-build-recorded"),
+    ("tools/automod-cli.sh", '    if [ "$files" = "Directory.Build.props" ] && only_our_patch; then files=""; fi', "",
+     _AM + "test_our_own_patch_does_not_count_as_dirty", "t6b-r2-own-patch-is-not-dirt"),
+    ("tools/automod-cli.sh", '    if [ -n "$state" ]; then', "    if false; then",
+     _TC + "test_automod_built_from_a_dirty_tree_is_degraded", "t6b-r2-dirty-build-is-degraded"),
+    ("tools/automod-cli.sh", '    if [ "$DLL" -nt "$MARKER" ]; then', "    if false; then",
+     _AM + "test_a_dll_newer_than_its_build_record_is_of_unknown_origin", "t6b-r2-dll-newer-than-record"),
+    ("tools/automod-cli.sh", '''    built="${built%$'\\r'}"; state="${state%$'\\r'}"   # a record written with CRLF''', "    true",
+     _TC + "test_automod_built_from_the_pinned_commit_says_which", "t6b-r2-crlf-record"),
+]]
 
 
 # Plan 5 final review, lane A (parser and path layer) fix pass. One twin per new clause; each names the test that

@@ -36,22 +36,42 @@
 # Snapshots are stored OUTSIDE the game directory ($HOME/.esp-verify-snapshots)
 # so running this never trips the game-directory edit hooks.
 #
-# CONFIG (env overrides): $SPRIGGIT (path or PATH name; default "spriggit"),
+# CONFIG (env overrides): $SPRIGGIT (path or PATH name; default: a global `spriggit`, else the
+#   toolkit's LOCAL tool via `dotnet tool run spriggit` -- what `dotnet tool restore` installs),
 #   $ESP_VERIFY_SNAPDIR, $ESP_VERIFY_RELEASE (default SkyrimSE),
-#   $ESP_VERIFY_PKGVER (default 0.40.0).
+#   $ESP_VERIFY_PKGVER (default: the pin in .config/dotnet-tools.json).
 #
 set -uo pipefail
 
-SPRIGGIT="${SPRIGGIT:-spriggit}"
+TOOLKIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SNAPDIR="${ESP_VERIFY_SNAPDIR:-$HOME/.esp-verify-snapshots}"
 GAME_RELEASE="${ESP_VERIFY_RELEASE:-SkyrimSE}"
 PKG=Spriggit.Yaml
-PKGVER="${ESP_VERIFY_PKGVER:-0.40.0}"
+# The serializer package version is the pinned Spriggit version (review M7: it was a second hardcoded copy).
+PIN=$(tr -d '\r\n ' < "$TOOLKIT_ROOT/.config/dotnet-tools.json" 2>/dev/null | sed -n 's/.*"spriggit\.cli":{"version":"\([^"]*\)".*/\1/p')
+PKGVER="${ESP_VERIFY_PKGVER:-${PIN:-0.41.0}}"
+# Test seam: tests/test_esp_verify.py points this at a fake `dotnet` (the harness shadows the real name).
+DOTNET="${ESP_VERIFY_DOTNET:-dotnet}"
 
 mkdir -p "$SNAPDIR"
 
 die() { echo "esp-verify: $*" >&2; exit 2; }
-[ -x "$SPRIGGIT" ] || command -v "$SPRIGGIT" >/dev/null 2>&1 || die "spriggit not found at $SPRIGGIT (override with \$SPRIGGIT)"
+
+# Which spriggit. Same order as tools/spriggit-cli.sh: $SPRIGGIT, then a global tool on PATH, then the
+# LOCAL tool `dotnet tool restore` installs from .config/dotnet-tools.json. The local one answers only
+# from inside the toolkit, so it runs there (plugin paths are made absolute first). Without this fallback
+# the guard died with "spriggit not found" on that healthy, exactly-pinned install (review I3).
+spriggit_local() { (cd "$TOOLKIT_ROOT" && "$DOTNET" tool run spriggit -- "$@"); }
+if [ -n "${SPRIGGIT:-}" ]; then
+  [ -x "$SPRIGGIT" ] || command -v "$SPRIGGIT" >/dev/null 2>&1 || die "spriggit not found at $SPRIGGIT (override with \$SPRIGGIT)"
+elif command -v spriggit >/dev/null 2>&1; then
+  SPRIGGIT=spriggit
+# Judged by OUTPUT, not exit status: MEASURED 2026-10-05, `spriggit --version` prints its version and EXITS 1.
+elif SP_OUT=$(spriggit_local --version 2>&1); printf '%s' "$SP_OUT" | grep -qE 'Spriggit[^0-9]*[0-9]+\.[0-9]+'; then
+  SPRIGGIT=spriggit_local
+else
+  die "spriggit not found: install it (dotnet tool restore from the toolkit root, or dotnet tool install -g Spriggit.CLI --version $PKGVER), or set \$SPRIGGIT"
+fi
 
 # build_inventory <plugin-path> <output-inv-file>
 #   Emits one TSV line per cross-reference:  <EditorID>\t<FORMID:Master>
@@ -59,6 +79,7 @@ die() { echo "esp-verify: $*" >&2; exit 2; }
 build_inventory() {
   local plugin="$1" out="$2" tmp
   [ -f "$plugin" ] || die "plugin not found: $plugin"
+  plugin="$(cd "$(dirname "$plugin")" && pwd)/$(basename "$plugin")"   # the local tool runs from the toolkit root
   tmp="$(mktemp -d)"
   if ! "$SPRIGGIT" serialize -i "$plugin" -o "$tmp" \
         -g "$GAME_RELEASE" -p "$PKG" -v "$PKGVER" -u >/dev/null 2>&1; then
