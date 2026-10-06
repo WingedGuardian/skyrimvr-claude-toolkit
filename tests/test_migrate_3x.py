@@ -565,11 +565,13 @@ def test_the_settings_report_names_removed_and_changed_hooks(tmp_path):
 
 
 def _break_writes(monkeypatch, suffix):
-    real = Path.write_bytes
+    """The copy named `suffix` reads back one byte short -- what a failing disk or a filter driver looks like."""
+    real = Path.read_bytes
 
-    def fake(self, data):
-        return real(self, data[:-1] if self.name.endswith(suffix) else data)
-    monkeypatch.setattr(Path, "write_bytes", fake)
+    def fake(self):
+        data = real(self)
+        return data[:-1] if self.name.endswith(suffix) and ".claude" in self.parts else data
+    monkeypatch.setattr(Path, "read_bytes", fake)
 
 
 @pytest.mark.parametrize("which", ["CLAUDE.md", "KNOWLEDGEBASE.local.md.before"])
@@ -645,37 +647,143 @@ _BOOM = (
     "import importlib.util, sys\n"
     "s = importlib.util.spec_from_file_location('m', sys.argv[1]); m = importlib.util.module_from_spec(s)\n"
     "s.loader.exec_module(m)\n"
+    "exc = {'RuntimeError': RuntimeError('unforeseen'), 'KeyboardInterrupt': KeyboardInterrupt()}[sys.argv[2]]\n"
     "def boom(*a, **k):\n"
-    "    raise RuntimeError('unforeseen')\n"
+    "    raise exc\n"
     "m.build_block = boom\n"
-    "sys.exit(m.main(['--root', sys.argv[2]]))\n"
+    "sys.exit(m.main(sys.argv[3:]))\n"
 )
 
 
-def test_an_unforeseen_error_is_recorded_and_a_retry_reuses_the_folder(tmp_path):
-    """Any exception -- not only the ones the tool anticipates -- leaves a FAILED line in MIGRATION.txt and a
-    non-zero exit; running again (still failing, then fixed) reuses that run's folder instead of adding one
-    per attempt. Driven through main(), the launcher's entry, in a child process."""
+def boom(root: Path, exc: str = "RuntimeError", *args):
+    """Run the launcher's main() in a child process with the block step failing AFTER the copies (and the
+    .before) were written -- the point where a later run could, before round 3, overwrite them."""
+    return subprocess.run([sys.executable, "-c", _BOOM, str(TOOL), exc, "--root", str(root), *args],
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+
+
+def run_dirs(root: Path):
+    return sorted((d for d in (root / ".claude" / "backups" / "migrate-3x").iterdir() if d.is_dir()),
+                  key=lambda d: M._stamp_key(d.name))
+
+
+def test_an_unforeseen_error_is_recorded_and_every_run_gets_a_new_folder(tmp_path):
+    """Any exception leaves a FAILED line and a non-zero exit. Every later run -- failing again, or fixed --
+    writes a NEW folder whose record names the failed one; the failed folder stays exactly as it was."""
     root = make_391(tmp_path / "i")
     (root / "CLAUDE.md").write_bytes(edited_claude())
-    store = root / ".claude" / "backups" / "migrate-3x"
     for attempt in (1, 2):
-        r = subprocess.run([sys.executable, "-c", _BOOM, str(TOOL), str(root)], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=120)
-        assert r.returncode != 0, r.stdout + r.stderr
-        assert "RuntimeError" in r.stderr, r.stderr
-        logs = sorted(store.glob("*/MIGRATION.txt"))
-        assert len(logs) == 1, "a retry added a new run folder: {}".format(logs)
-        recorded = logs[0].read_text(encoding="utf-8").count("FAILED: RuntimeError: unforeseen")
-        assert recorded == attempt, "the unforeseen failure was not recorded"
-    rd = run_dir(root)
-    assert (root / "KNOWLEDGEBASE.local.md").read_bytes() == USER_LOCAL_KB
+        r = boom(root)
+        assert r.returncode != 0 and "RuntimeError" in r.stderr, r.stdout + r.stderr
+        dirs = run_dirs(root)
+        assert len(dirs) == attempt, dirs
+        log = (dirs[-1] / "MIGRATION.txt").read_text(encoding="utf-8")
+        assert log.count("FAILED: RuntimeError: unforeseen") == 1, "the unforeseen failure was not recorded"
+    first, second = run_dirs(root)
+    assert "An earlier run FAILED: " + first.relative_to(root).as_posix() in \
+        (second / "MIGRATION.txt").read_text(encoding="utf-8"), "the new record does not name the failed run"
+    first_log = (first / "MIGRATION.txt").read_bytes()
     rc, out = migrate(root)
     assert rc == 0, out
-    assert run_dir(root) == rd, "the retry made a new folder"
+    assert len(run_dirs(root)) == 3
+    assert (first / "MIGRATION.txt").read_bytes() == first_log, "the failed run's record was changed"
+    assert (first / "CLAUDE.md").read_bytes() == edited_claude()
     assert edited_claude() in (root / "KNOWLEDGEBASE.local.md").read_bytes()
     state = json.loads((root / ".claude" / "backups" / "migrate-3x" / "state.json").read_text(encoding="utf-8"))
     assert "failed_run" not in state
+
+
+def test_p1_a_file_edited_after_a_failed_run_does_not_replace_its_copy(tmp_path):
+    root = make_391(tmp_path / "i")
+    v1, v2 = edited_claude(), edited_claude() + b"\nsecond edit\n"
+    (root / "CLAUDE.md").write_bytes(v1)
+    assert boom(root).returncode != 0
+    (root / "CLAUDE.md").write_bytes(v2)
+    rc, out = migrate(root)
+    assert rc == 0, out
+    first, second = run_dirs(root)
+    assert (first / "CLAUDE.md").read_bytes() == v1, "the failed run's copy was overwritten"
+    assert (second / "CLAUDE.md").read_bytes() == v2
+
+
+def test_p2_another_source_after_a_failed_run_does_not_replace_its_copy(tmp_path):
+    root = make_391(tmp_path / "i")
+    v1 = edited_claude()
+    (root / "CLAUDE.md").write_bytes(v1)
+    assert boom(root).returncode != 0
+    other = make_391(tmp_path / "other")
+    v3 = edited_claude() + b"\nfrom another folder\n"
+    (other / "CLAUDE.md").write_bytes(v3)
+    rc, out = migrate(root, "--from", str(other))
+    assert rc == 0, out
+    first, second = run_dirs(root)
+    assert (first / "CLAUDE.md").read_bytes() == v1, "the failed run's copy was overwritten"
+    assert (second / "CLAUDE.md").read_bytes() == v3
+
+
+def test_p3_a_rewritten_local_knowledgebase_does_not_replace_the_earlier_before(tmp_path):
+    root = make_391(tmp_path / "i")
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    assert boom(root).returncode != 0
+    rewritten = b"# rewritten by me after the failure\n\n## My preferences\n\n- new\n"
+    (root / "KNOWLEDGEBASE.local.md").write_bytes(rewritten)
+    rc, out = migrate(root)
+    assert rc == 0, out
+    first, second = run_dirs(root)
+    assert (first / "KNOWLEDGEBASE.local.md.before").read_bytes() == USER_LOCAL_KB, "the earlier .before was replaced"
+    assert (second / "KNOWLEDGEBASE.local.md.before").read_bytes() == rewritten
+
+
+def test_paths_in_an_edited_file_come_from_the_newest_complete_template():
+    """An edited 3.9.1 CLAUDE.md: the 3.9.1 template's path lines are all present, so its names are used
+    (CONFIG_DIR), not an older template's that happens to match more pieces (DOCUMENTS_DIR + SKYRIM_FOLDER)."""
+    paths, how = M.extract_paths(M.norm(edited_claude()), KNOWN)
+    assert how == "searched" and paths.get("CONFIG_DIR") == "D:/Docs/My Games/Skyrim VR", paths
+    assert "DOCUMENTS_DIR" not in paths, paths
+
+
+def test_paths_are_still_found_when_no_template_is_complete():
+    """The game-root line deleted: no template is complete; the one yielding the most values is used."""
+    text = M.norm(edited_claude("mo2")).replace("- **Game root**: `C:/Temp/p8mig/mo2/Skyrim VR/`\n", "")
+    paths, how = M.extract_paths(text, KNOWN)
+    assert paths.get("MO2_OVERWRITE") == "C:/Temp/p8mig/mo2/MO2/overwrite", paths
+    assert "GAME_ROOT" not in paths
+
+
+def test_a_copy_never_replaces_an_existing_file(tmp_path):
+    target = tmp_path / "CLAUDE.md"
+    target.write_bytes(b"the earlier copy")
+    with pytest.raises(M._Failed):
+        M._write_checked(target, b"something else")
+    assert target.read_bytes() == b"the earlier copy"
+
+
+def test_an_interrupt_is_recorded_as_interrupted_not_success(tmp_path):
+    root = make_391(tmp_path / "i")
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    r = boom(root, "KeyboardInterrupt")
+    assert r.returncode != 0, r.stdout + r.stderr
+    (rd,) = run_dirs(root)
+    log = (rd / "MIGRATION.txt").read_text(encoding="utf-8")
+    assert "INTERRUPTED: KeyboardInterrupt" in log, log
+    state = json.loads((root / ".claude" / "backups" / "migrate-3x" / "state.json").read_text(encoding="utf-8"))
+    assert state.get("failed_run") == rd.relative_to(root).as_posix(), "an interrupted run was taken for success"
+
+
+def test_a_lone_surrogate_in_a_label_is_shown_not_fatal(tmp_path, capsys):
+    """R3: a Windows path can hold an unpaired surrogate (U+D800), which no UTF-8 encode -- surrogateescape
+    included -- accepts. The label becomes a visible escape; printing never raises."""
+    assert M._label("C:/odd\ud800name").encode("utf-8") == b"C:/odd\\ud800name"
+    M._say("x \ud800 y")
+    assert "x" in capsys.readouterr().out
+    if os.name == "nt":                                  # NTFS stores such names; drive it through main()
+        other = tmp_path / "odd\ud800name"
+        other.mkdir()
+        for name, fixture in (("CLAUDE.md", None), ("AGENTS.md", "AGENTS.fixture")):
+            (other / name).write_bytes(edited_claude() if fixture is None else fx(fixture))
+        root = make_391(tmp_path / "i")
+        assert M.main(["--root", str(root), "--from", str(other)]) == 0
+        assert edited_claude() in (root / "KNOWLEDGEBASE.local.md").read_bytes()
 
 
 def test_a_newline_in_the_source_label_stays_in_its_comment():

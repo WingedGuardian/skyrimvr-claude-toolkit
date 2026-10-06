@@ -4574,7 +4574,10 @@ _M3_CLAUSES = [
      _M3T + "test_a_corrected_path_is_kept_and_carried_whatever_the_verdict[corrected overwrite path]"),
     # ... found line by line in an EDITED file as well.
     ("m3x-paths-searched-in-edited-files", _M3, "        if len(found) > len(best):", "        if False:",
-     _M3T + "test_upgrade_from_391_with_edits_keeps_every_edit"),
+     _M3T + "test_paths_are_still_found_when_no_template_is_complete"),
+    ("m3x-paths-newest-complete-template", _M3,
+     '            return found, "searched"          # the newest template whose every path line is still there',
+     "            pass", _M3T + "test_paths_in_an_edited_file_come_from_the_newest_complete_template"),
     # Minor 1: the collision suffix sorts inside its own second.
     ("m3x-stamp-suffix-after-the-time", _M3,
      '    m = re.match(r"(.*_' + BS + 'd{6})(?:_(' + BS + 'd+))?' + BS + 'Z", name)',
@@ -4630,12 +4633,9 @@ _M3_CLAUSES = [
      _M3T + "test_a_cp1252_accented_path_is_carried_byte_exact_through_the_launcher[only the path changed]"),
     # ... ANY exception is recorded as FAILED, and a retry reuses the failed run's folder.
     ("m3x-any-failure-recorded", _M3,
-     "    except Exception as e:                    # noqa: BLE001 -- ANY failure is recorded; the unforeseen re-raised",
+     "    except BaseException as e:                # noqa: BLE001 -- ANY end but success is recorded, then re-raised",
      "    except (_Failed, OSError) as e:",
-     _M3T + "test_an_unforeseen_error_is_recorded_and_a_retry_reuses_the_folder"),
-    ("m3x-retry-reuses-failed-folder", _M3,
-     "    retry = bool(failed_before) and (root / failed_before).is_dir()", "    retry = False",
-     _M3T + "test_an_unforeseen_error_is_recorded_and_a_retry_reuses_the_folder"),
+     _M3T + "test_an_unforeseen_error_is_recorded_and_every_run_gets_a_new_folder"),
     # Minor: a newline in the source label cannot break out of the env file's comment.
     ("m3x-label-newline-stays-in-comment", _M3,
      '    label = re.sub(r"[' + BS + 'r' + BS + 'n]+", " ", src_label)', "    label = src_label",
@@ -4648,5 +4648,27 @@ _M3_CLAUSES = [
     # N3: the snapshot counts each file once against free space.
     ("snap-free-space-counts-each-file-once", _SN, 'sort -zu "$LIST" > "$UNIQ"', 'cat "$LIST" > "$UNIQ"',
      _M3T + "test_snapshot_counts_each_file_once_against_free_space"),
+    # --- Fix round 3 (T9 re-review 2) ---
+    # R1: a copy is created EXCLUSIVELY -- no code path can replace an earlier run's copy ...
+    ("m3x-copy-created-exclusively", _M3, '        with open(path, "xb") as fh:', '        with open(path, "wb") as fh:',
+     _M3T + "test_a_copy_never_replaces_an_existing_file"),
+    # ... and a later run's record names the failed run it left alone.
+    ("m3x-new-record-names-the-failed-run", _M3,
+     '        log += ["An earlier run FAILED: {} (its copies and its record are untouched).".format(failed_before), ""]',
+     "        pass", _M3T + "test_an_unforeseen_error_is_recorded_and_every_run_gets_a_new_folder"),
+    # R2: an interrupt is recorded as INTERRUPTED and is not success.
+    ("m3x-interrupt-recorded", _M3,
+     "    except BaseException as e:                # noqa: BLE001 -- ANY end but success is recorded, then re-raised",
+     "    except Exception as e:", _M3T + "test_an_interrupt_is_recorded_as_interrupted_not_success"),
+    ("m3x-interrupt-named-interrupted", _M3,
+     '        word = "FAILED" if isinstance(e, Exception) else "INTERRUPTED"     # Ctrl+C, SystemExit, ...',
+     '        word = "FAILED"', _M3T + "test_an_interrupt_is_recorded_as_interrupted_not_success"),
+    # R3: a lone surrogate in a label is shown, never fatal (label, and the printer's fallback).
+    ("m3x-label-escapes-lone-surrogates", _M3,
+     '    return text.encode("utf-8", "backslashreplace").decode("utf-8")', "    return text",
+     _M3T + "test_a_lone_surrogate_in_a_label_is_shown_not_fatal"),
+    ("m3x-printer-escapes-lone-surrogates", _M3,
+     '        data = line.encode("utf-8", "backslashreplace").decode("utf-8")', "        raise",
+     _M3T + "test_a_lone_surrogate_in_a_label_is_shown_not_fatal"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _M3_CLAUSES]

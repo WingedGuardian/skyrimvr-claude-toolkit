@@ -204,18 +204,23 @@ def extract_paths(text: str, known: dict, env=None):
     lines = text.split("\n")
     best: dict = {}
     for spec in reversed(known["docs"].get("CLAUDE.md", [])):
-        tlines = [t for _, t in spec.get("placeholders", [])]
+        top = [t for _, t in spec.get("placeholders", [])]
+        tlines = list(top)
         for variant in spec.get("block", {}).get("variants", []):
             tlines += [t for _, t in variant.get("placeholders", [])]
         found: dict = {}
+        hit = 0
         for tline in tlines:
             rx, names = _line_regex(tline)
             for line in lines:
                 m = rx.match(line)
                 if m:
+                    hit += tline in top
                     for name, value in zip(names, m.groups()):
                         found.setdefault(name, value)
                     break
+        if top and hit == len(top):
+            return found, "searched"          # the newest template whose every path line is still there
         if len(found) > len(best):
             best = found
     return best, "searched"
@@ -315,6 +320,12 @@ class SourceSet:
         return "3" if self.files else "none"
 
 
+def _label(text: str) -> str:
+    """A path as display text that every later encode accepts. Undecodable bytes (U+DC80..U+DCFF) and a lone
+    surrogate a Windows path can carry both become visible escapes (\\udcxx) -- a label is shown, never used."""
+    return text.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
 def _set_from_dir(label: str, base: Path) -> SourceSet:
     files = {n: base / n for n in (*DOCS, KB, SETTINGS) if (base / n).is_file()}
     return SourceSet(label, files, read_env(base / ENV), (base / ".codex" / "hooks.json").is_file())
@@ -357,7 +368,7 @@ def pick_source(root: Path, from_dir):
     """The 3.x set to migrate from, or None. Order: --from; the live install; the newest pre-update
     snapshot; the kb-guard store. The first that is a 3.x set wins."""
     if from_dir is not None:
-        s = _set_from_dir(str(from_dir), from_dir)
+        s = _set_from_dir(_label(str(from_dir)), from_dir)
         return s if s.era() == "3" else None
     cands = [_set_from_dir(LIVE, root)]
     snap = _newest(list((root / ".claude" / "backups").glob("pre-update-*")))
@@ -543,9 +554,15 @@ class _Failed(Exception):
 
 
 def _write_checked(path: Path, data: bytes):
-    """Write and read back. A copy that does not read back identical is not a backup."""
+    """Create (never replace) and read back. A copy that does not read back identical is not a backup, and a
+    copy that could replace an earlier one is not a backup either: the create is EXCLUSIVE, so no code path
+    -- a retry, a second source, a bug -- can overwrite a copy an earlier run made."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
+    try:
+        with open(path, "xb") as fh:
+            fh.write(data)
+    except FileExistsError:
+        raise _Failed("{} already exists -- an earlier copy is never replaced".format(path))
     if path.read_bytes() != data:
         raise _Failed("{} did not read back identical".format(path.name))
 
@@ -692,20 +709,19 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
         return 0
 
     now = _now()
+    # Every run writes a NEW folder. A failed run's folder is left exactly as it was (its copies, its FAILED
+    # line); this run's record names it.
     failed_before = state.get("failed_run")
-    retry = bool(failed_before) and (root / failed_before).is_dir()
-    run_dir = root / failed_before if retry else _unique_dir(root / STORE, now.strftime("%Y%m%d_%H%M%S"))
+    run_dir = _unique_dir(root / STORE, now.strftime("%Y%m%d_%H%M%S"))
     run_rel = run_dir.relative_to(root).as_posix()
-    log = ["", "=" * 60] if retry else []
-    log += ["3.x -> 4.0 migration, {}{}".format(now.isoformat(timespec="seconds"),
-                                                " -- RETRY of the failed run recorded above" if retry else ""),
-            "source: " + src.label, ""]
-    if retry:
-        out("  (retrying the failed run in {} -- no new folder)".format(run_rel))
+    log = ["3.x -> 4.0 migration, {}".format(now.isoformat(timespec="seconds")), "source: " + src.label, ""]
+    if failed_before:
+        log += ["An earlier run FAILED: {} (its copies and its record are untouched).".format(failed_before), ""]
+        out("  (an earlier run failed: {} -- left as it is; this run uses a new folder)".format(failed_before))
     rc, unexpected = 0, None
     try:
         try:
-            run_dir.mkdir(parents=True, exist_ok=retry)
+            run_dir.mkdir(parents=True)
         except OSError as e:
             raise _Failed("could not create {}: {}".format(run_rel, e))
         # 1. Backups FIRST: every 3.x file and the current KNOWLEDGEBASE.local.md, each read back.
@@ -782,20 +798,20 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
                 carried[key] = {"run": run_rel}
                 out("  {}: carried into {} (marked block)".format(key.split(":")[0], LOCAL_KB))
                 log.append("carried the 3.x {} into {} (marked block)".format(key.split(":")[0], LOCAL_KB))
-    except Exception as e:                    # noqa: BLE001 -- ANY failure is recorded; the unforeseen re-raised
+    except BaseException as e:                # noqa: BLE001 -- ANY end but success is recorded, then re-raised
         rc = 1
         if not isinstance(e, (_Failed, OSError)):
             unexpected = e
         what = "{}: {}".format(type(e).__name__, e) if unexpected else str(e)
-        out("migrate-3x: FAILED -- {}. What was done before the failure is listed in {}/MIGRATION.txt; "
-            "nothing was deleted. Running it again reuses that folder.".format(what, run_rel))
-        log += ["", "FAILED: {}".format(what), "The steps above this line were done; nothing after it was."]
+        word = "FAILED" if isinstance(e, Exception) else "INTERRUPTED"     # Ctrl+C, SystemExit, ...
+        out("migrate-3x: {} -- {}. What was done before that is listed in {}/MIGRATION.txt; nothing was "
+            "deleted. Running it again starts a new folder.".format(word, what, run_rel))
+        log += ["", "{}: {}".format(word, what), "The steps above this line were done; nothing after it was."]
     finally:
         log += ["", "Nothing was deleted. Every file this run wrote is listed above with its undo."]
         try:
             if run_dir.is_dir():
-                with open(run_dir / "MIGRATION.txt", "a" if retry else "w", encoding="utf-8",
-                          errors="surrogateescape") as fh:
+                with open(run_dir / "MIGRATION.txt", "x", encoding="utf-8", errors="surrogateescape") as fh:
                     fh.write("\n".join(log) + "\n")
             state["carried"], state["copied"] = carried, copied
             if rc and run_dir.is_dir():
@@ -823,7 +839,10 @@ def _codex_note(out):
 def _say(line: str):
     """Print a line whatever it holds: undecodable bytes (surrogates) and characters the console cannot show
     become replacement marks ON SCREEN only -- the files keep the exact bytes."""
-    data = line.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+    try:
+        data = line.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+    except UnicodeEncodeError:                # a surrogate surrogateescape cannot map (not U+DC80..U+DCFF)
+        data = line.encode("utf-8", "backslashreplace").decode("utf-8")
     enc = getattr(sys.stdout, "encoding", None) or "utf-8"
     print(data.encode(enc, "replace").decode(enc, "replace"))
 
