@@ -3848,7 +3848,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _STT + "test_a_non_finite_now_or_start_honours_nothing[1800000000.0-nan]", "l2-state-honoured-finite"),
     (_ST, "        if best is None or t > best:", "        if best is None:",
      _STT + "test_the_session_start_is_the_last_start_line", "l2-state-last-start"),
-    (_ST, "        os.replace(tmp, str(path))", '        open(str(path), "wb").write(payload)',
+    (_ST, "        _replace_retrying(tmp, str(path))", '        open(str(path), "wb").write(payload)',
      _STT + "test_a_failed_write_leaves_the_old_state_and_no_temp_file", "l2-state-atomic"),
     (_ST, '    body["sum"] = canonical_sum(body)', '    body["sum"] = data.get("sum", "0")',
      _STT + "test_write_computes_the_sum_itself_and_ignores_a_caller_supplied_one", "l2-state-write-sum"),
@@ -6784,4 +6784,11 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/cli.py", "a refusal or a confirmation prompt becomes an allow", "a refusal becomes an allow",
      "tests/test_skyguard_shadow.py::test_guards_off_records_a_session_bound_expiring_guards_lift",
      "p8t6-guards-off-names-confirmation-prompts"),
+]]
+
+# Controller (p8-int): the state writer waits out a reader holding state.json open (Windows).
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/state.py", "            if time.monotonic() >= deadline:\n", "            if True:\n",
+     "tests/test_skyguard_state.py::test_a_write_waits_out_a_reader_holding_the_state_file_open",
+     "p8int-state-replace-retries"),
 ]]

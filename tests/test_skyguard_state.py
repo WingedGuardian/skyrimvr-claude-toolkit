@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 import sys
 
 import pytest
@@ -488,3 +489,28 @@ def test_write_inside_locked_does_not_wait_on_its_own_lock(tmp_path):
     with st.locked(str(p), wait=0.2):
         st.write(str(p), {"v": 1, "lifts": [], "persistent": {}})
     assert st.read(str(p)).rejected is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows: an open handle without FILE_SHARE_DELETE blocks os.replace")
+def test_a_write_waits_out_a_reader_holding_the_state_file_open(tmp_path):
+    """Hooks read state.json without the state lock. On Windows a reader's open handle makes the writer's
+    os.replace fail with PermissionError, so a `skyguard lock enable` racing a hook used to fail outright.
+    The writer retries briefly; the reader here holds the file for 0.4 s."""
+    st = _state()
+    p = tmp_path / ".skyguard" / "state.json"
+    st.write(str(p), {"v": 1, "lifts": [], "persistent": {}})
+    ready = tmp_path / "ready"
+    holder = subprocess.Popen([sys.executable, "-c",
+                               "import sys,time,pathlib\n"
+                               "f=open(sys.argv[1],'rb'); pathlib.Path(sys.argv[2]).write_text('x'); time.sleep(0.4)",
+                               str(p), str(ready)])
+    try:
+        for _ in range(200):
+            if ready.exists():
+                break
+            time.sleep(0.01)
+        assert ready.exists(), "holder never opened the file"
+        st.write(str(p), {"v": 1, "lifts": [_lift(reason="after")], "persistent": {}})
+    finally:
+        holder.wait(timeout=10)
+    assert [lf["reason"] for lf in st.read(str(p)).lifts] == ["after"]

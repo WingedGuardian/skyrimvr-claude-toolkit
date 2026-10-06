@@ -31,6 +31,7 @@ import math
 import os
 import stat as _stat
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -170,13 +171,31 @@ def _replace(path: Path, payload: bytes) -> None:
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, str(path))
+        _replace_retrying(tmp, str(path))
     except BaseException:
         try:
             os.unlink(tmp)
         except OSError:
             pass
         raise
+
+
+REPLACE_RETRY = 2.0   # seconds; hooks read state.json without the lock and hold it open for milliseconds
+
+
+def _replace_retrying(tmp: str, dest: str) -> None:
+    """os.replace, waiting out a reader. On Windows a reader's open handle (opened without FILE_SHARE_DELETE, as
+    Python opens files) makes the rename fail with PermissionError; a hook holds the file for milliseconds, so
+    retry for up to REPLACE_RETRY seconds, then raise the last error."""
+    deadline = time.monotonic() + REPLACE_RETRY
+    while True:
+        try:
+            os.replace(tmp, dest)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
 
 
 def _is_reparse(st) -> bool:
