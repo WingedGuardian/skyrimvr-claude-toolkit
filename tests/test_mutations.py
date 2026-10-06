@@ -6484,5 +6484,14 @@ _FB = [
     (_SC, "        return os.path.isfile(str(target)) and not os.path.islink(str(target)) and backup._sha256(target) == sha",
      "        return os.path.isfile(str(target))",
      _SCT + "test_in_place_restore_still_replaces_a_changed_file_beside_an_unchanged_one", "p6fb-m1-only-identical-skipped"),
+    # B-M2: an unreadable paths file never silently skips the save a command rewrites
+    (_RC, "    if not (resaver or dev):\n        return [], []", "    if not (resaver or dev) or roots is None:\n        return [], []",
+     _RCT + "test_an_absolute_save_is_kept_even_when_the_paths_file_is_unreadable", "p6fb-m2-absolute-save-needs-no-roots"),
+    (_RC, "    if roots is None and not n:", "    if False:",
+     _RCT + "test_a_bare_save_name_with_an_unreadable_paths_file_is_logged_not_kept", "p6fb-m2-bare-name-not-new"),
+    (_RC, '                notes.append(("SKIPPED", UNREADABLE_SAVE.format(name)))', "                pass",
+     _RCT + "test_a_devbench_save_with_an_unreadable_paths_file_is_logged", "p6fb-m2-devbench-shell-logged"),
+    (_RC, '             [("SKIPPED", UNREADABLE_SAVE.format(name))], False, now', "             [], False, now",
+     _RCT + "test_a_devbench_save_with_an_unreadable_paths_file_is_logged", "p6fb-m2-devbench-mcp-logged"),
 ]
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _FB]

@@ -279,6 +279,35 @@ def test_a_save_that_cannot_be_identified_is_logged(inst):
     assert "SKIPPED" in inst.log() and "cannot tell which save" in inst.log()
 
 
+def _run_without_roots(inst, command):
+    """The hook's call when the paths file cannot be read: run.py passes roots=None."""
+    recovery.run(str(inst.game), command, False, inst.audit, None, shell="bash", env={})
+
+
+def test_an_absolute_save_is_kept_even_when_the_paths_file_is_unreadable(inst):
+    """Final review B-M2: `roots is None` returned before an absolute .ess, which needs no roots, with no log line."""
+    _run_without_roots(inst, 'bash tools/resaver-cli.sh clean "{}" --apply'.format((inst.saves / "Quick.ess").as_posix()))
+    assert sorted(inst.stored("save")) == ["Quick.ess", "Quick.skse"], inst.log()
+
+
+def test_a_bare_save_name_with_an_unreadable_paths_file_is_logged_not_kept(inst):
+    """The twin: a bare name lives in the (now unknown) Saves folder -- not kept, and the log says so (never 'NEW')."""
+    _run_without_roots(inst, "bash tools/resaver-cli.sh clean Quick.ess --apply")
+    assert inst.stored("save") == {}
+    log = inst.log()
+    assert "SKIPPED" in log and "the save Quick.ess is NOT being kept: the paths file could not be read" in log, log
+    assert "does not exist yet" not in log
+
+
+def test_a_devbench_save_with_an_unreadable_paths_file_is_logged(inst):
+    recovery.mcp(str(inst.game), "mcp__devbench-vr__game", {"action": "save", "name": "Quick"}, inst.audit, None,
+                 env={})
+    assert "the save Quick is NOT being kept" in inst.log()
+    _run_without_roots(inst, "curl -s -X POST http://127.0.0.1:8921/api/tool/console -H 'Content-Type: application/json' "
+                             "-d '{\"action\":\"exec\",\"command\":\"save Other\"}'")
+    assert "the save Other is NOT being kept" in inst.log()
+
+
 def test_an_unchanged_save_is_not_copied_twice(inst):
     cmd = "bash tools/resaver-cli.sh clean Quick.ess --apply"
     inst.run(cmd)
