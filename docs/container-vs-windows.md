@@ -112,8 +112,8 @@ The checkout is mounted read-only; where each workflow writes instead is in
   Docker Desktop and `jq` on the host (it refuses to start without it). Reads its mount sources
   straight out of `.devcontainer/devcontainer.json` (which `setup.sh` fills in with your real mod
   paths), so it never hardcodes them.
-- **`bash devshell.sh`** — same thing via the `@devcontainers/cli` (`npm install -g
-  @devcontainers/cli`), for editor integration (VS Code's Dev Containers extension uses the same
+- **`bash devshell.sh`** — same thing via the devcontainer CLI
+  (`npm install -g @devcontainers/cli@0.89.0`), for editor integration (VS Code's Dev Containers extension uses the same
   `devcontainer.json`).
 - `setup.sh` fills in `.devcontainer/devcontainer.json`'s mount paths automatically: on an MO2
   install, from the detected instance's mods/profile/overwrite folders; on stock/Vortex, from `Data/`

@@ -2,17 +2,19 @@
 
 None of the modding tools are bundled — install only the ones you need. Per tool: what it is, how to acquire it, and a quick verify.
 
+**Every install here is ONE exact version — the one this toolkit was tested with — and every one can be verified** (user ruling, v4: not older, not newer). Packages install from a lock or an exact pin; downloads are checked against the SHA-256 in [Pinned downloads](#pinned-downloads) before you unpack them. If a hash does not match, stop: you have a different file than the one that was tested.
+
 Install them into the `tools/` folder in your game directory; the setup prompt walks through this. See the [xeditlib](https://github.com/WingedGuardian/xeditlib) repo for XEditLib setup. NifSkope and Blender (used for NIF render-verification and mesh repair) are large external GUI apps installed separately, not bundled.
 
 - **xeditlib** — Node.js wrapper around XEditLib.dll for programmatic ESP/ESM read/write.
-  - Acquire: run `npm install github:WingedGuardian/xeditlib` **from the toolkit root** (installs from GitHub; the bare `npm install xeditlib` works only once it's published to the npm registry). Installing at the root puts `node_modules/xeditlib` where Node's upward lookup finds it from every bundled script (`tools/xelib/*.js`, `tools/resaver-resolve-names.js`, `examples/*.js` all `require('xeditlib')`). The bundled `XEditLib.dll` + `*.Hardcoded.dat` load relative to the package folder, so the scripts are cwd-independent once installed.
+  - Acquire, **pinned**: run `npm install --no-save --ignore-scripts github:WingedGuardian/xeditlib#19bef0976738a9db0760d45975263e2d7eb76062 koffi@2.15.1` **from the toolkit root**. That is xeditlib v1.0.1 = commit `19bef0976738a9db0760d45975263e2d7eb76062`, plus koffi 2.15.1, the version tested with it: xeditlib itself asks for koffi `^2.15.1`, which would otherwise float to the newest 2.x. `--no-save` leaves the toolkit's shipped `package.json`/`package-lock.json` untouched (npm verifies koffi against the registry's integrity hash; the git commit fixes xeditlib's contents); `--ignore-scripts` is safe because koffi ships prebuilt binaries (MEASURED 2026-10-05: both load). Installing at the root puts `node_modules/xeditlib` where Node's upward lookup finds it from every bundled script (`tools/xelib/*.js`, `tools/resaver-resolve-names.js`, `examples/*.js` all `require('xeditlib')`). The bundled `XEditLib.dll` + `*.Hardcoded.dat` load relative to the package folder, so the scripts are cwd-independent once installed.
   - **Registry requirement**: XEditLib loads in `gmSSE` mode (game mode 4) even on VR, so it reads the game path from the **SSE** registry key. If `HKLM\SOFTWARE\WOW6432Node\Bethesda Softworks\Skyrim Special Edition` is missing (common on a VR-only install), ESP loads fail. Create it from an **admin** terminal: `reg add "HKLM\SOFTWARE\WOW6432Node\Bethesda Softworks\Skyrim Special Edition" /v "Installed Path" /t REG_SZ /d "<GAME_DIR>\" /f`.
-  - Verify: from the toolkit root, `node -e "require('xeditlib')"` exits clean.
+  - Verify: from the toolkit root, `npm ls xeditlib koffi` shows `xeditlib@1.0.1` resolved at `#19bef0976738a9db0760d45975263e2d7eb76062` and `koffi@2.15.1` (both marked "extraneous" because of `--no-save` — expected), and `node -e "require('xeditlib')"` exits clean.
 - **Champollion** — decompiles Papyrus `.pex` → `.psc`.
-  - Acquire: download a release from github.com/Orvid/Champollion/releases and unpack into `tools/Champollion/`.
+  - Acquire: download **v1.3.2** (`Champollion.v1.3.2.zip`, see [Pinned downloads](#pinned-downloads)), check its SHA-256, and unpack into `tools/Champollion/`.
   - Verify: `tools/Champollion/Champollion.exe --help`.
 - **Caprica** — compiles Papyrus `.psc` → `.pex`.
-  - Acquire: download a release from github.com/Orvid/Caprica/releases and unpack into `tools/Caprica/`.
+  - Acquire: download **v0.3.0** (`Caprica.v0.3.0.7z`, see [Pinned downloads](#pinned-downloads)), check its SHA-256, and unpack into `tools/Caprica/`.
   - Verify: `tools/Caprica/Caprica.exe --help`.
 - **Spriggit** — ESP ↔ YAML/JSON serialization.
   - Acquire, **pinned to 0.41.0** (the version every serialize/deserialize command here was tested against; needs the **.NET 10 SDK**, the toolkit's single .NET requirement): `dotnet tool restore` from the toolkit root (installs exactly the version in `.config/dotnet-tools.json`, also 0.41.0, as a local tool you run as `dotnet tool run spriggit`) or `dotnet tool install --global Spriggit.CLI --version 0.41.0`. Either works with everything here: `tools/spriggit-cli.sh`, the ESP guard `tools/esp-verify-wrapper.sh` and `tools/toolchain-check.sh` use a global `spriggit` when one is on PATH and fall back to the local tool otherwise. **Never install it unpinned**: you get whatever is newest, not what was tested. 0.41.0 ships only a `net10.0` tool, so on an SDK-9 machine it starts, prints a version, and cannot serialize. `bash tools/toolchain-check.sh` reports DEGRADED when the installed version differs from the pin (older or newer) or its target SDK is missing.
@@ -31,26 +33,56 @@ Install them into the `tools/` folder in your game directory; the setup prompt w
   - Run via the wrapper: `bash tools/automod-cli.sh <module> <command> --json`. Never `dotnet build` it yourself: that skips the commit check and the retarget.
   - Verify: `bash tools/automod-cli.sh esp --help --json`.
 - **PyFFI** — LE-format NiTriShape geometry edits.
-  - **Works on any modern Python (verified through 3.14) as long as `setuptools` is installed in that same environment** — no dedicated Python 3.10 needed. PyFFI 2.2.3's real (and only) Python-version blocker is a single unconditional `from distutils.cmd import Command` in `pyffi/utils/__init__.py` (used only by an unused, `# pragma: no cover` doc-building helper class) — `distutils` was removed from the stdlib in Python 3.12 (PEP 632). `pip install pyffi setuptools` fixes it: setuptools ships its own vendored `distutils` plus a compatibility shim that transparently satisfies that import, which is the officially-sanctioned PEP 632 migration path, not a fragile workaround. Confirmed end-to-end on Python 3.14.6: imported cleanly, read a real 735-block Skyrim skeleton NIF spanning ~15 block types (NiNode, several bhk\* physics types, controllers, etc.), modified it, wrote it back out, and re-read the result — all clean. The upstream [niftools/pyffi](https://github.com/niftools/pyffi) repo itself has had no real commits since **January 2020** (only a stray dependabot branch since), so this is the practical path forward rather than expecting an upstream fix there.
+  - **Works on any modern Python (verified through 3.14) as long as `setuptools` is installed in that same environment** — no dedicated Python 3.10 needed. PyFFI 2.2.3's real (and only) Python-version blocker is a single unconditional `from distutils.cmd import Command` in `pyffi/utils/__init__.py` (used only by an unused, `# pragma: no cover` doc-building helper class) — `distutils` was removed from the stdlib in Python 3.12 (PEP 632). Installing setuptools beside it fixes it: setuptools ships its own vendored `distutils` plus a compatibility shim that transparently satisfies that import, which is the officially-sanctioned PEP 632 migration path, not a fragile workaround. Confirmed end-to-end on Python 3.14.6: imported cleanly, read a real 735-block Skyrim skeleton NIF spanning ~15 block types (NiNode, several bhk\* physics types, controllers, etc.), modified it, wrote it back out, and re-read the result — all clean. The upstream [niftools/pyffi](https://github.com/niftools/pyffi) repo itself has had no real commits since **January 2020** (only a stray dependabot branch since), so this is the practical path forward rather than expecting an upstream fix there.
+  - Acquire, **pinned and hash-locked** (PyFFI 2.2.3 + setuptools 84.0.0, plus lz4 4.4.5 for `scripts/read-save.py`), with the Python you will run it from, from the toolkit root: `python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-tools.lock`. pip refuses any file whose hash is not in the lock. MEASURED 2026-10-05: installs into fresh venvs on Python 3.10.10 and 3.12.10, and on both PyFFI reads a real NIF and lz4 decompresses a real save.
   - The `time.clock = time.perf_counter` monkey-patch (recipe: the `skyrim-nif` skill) is still required (`time.clock` was removed in Python 3.8 — the only OTHER Python-version issue, also the only one ever reported upstream, still open/unfixed as [GitHub issue #80](https://github.com/niftools/pyffi/issues/80)).
   - Verify with that same interpreter: `python -c "import pyffi; print(pyffi.__version__)"`.
 - **PyNifly** — SSE BSTriShape read/write + animation/controller authoring + the independent parse gate.
-  - Acquire: download `io_scene_nifly.zip` from the latest release at https://github.com/BadDogSkyrim/PyNifly/releases and extract it into `tools/pynifly/` so the prebuilt DLL lands at `tools/pynifly/io_scene_nifly/NiflyDLL.dll` (PyNifly 29.x, the version this was verified with: 29.1.0; releases before 29.x put it at `tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll`). No build step. (A `git clone` of the repo does NOT contain the compiled DLL — it only ships in the release zip.)
+  - Acquire: download `io_scene_nifly.zip` of release **V29.1.0** (see [Pinned downloads](#pinned-downloads)), check its SHA-256, and extract it into `tools/pynifly/` so the prebuilt DLL lands at `tools/pynifly/io_scene_nifly/NiflyDLL.dll` (PyNifly 29.x, the version this was verified with: 29.1.0; releases before 29.x put it at `tools/pynifly/io_scene_nifly/pyn/NiflyDLL.dll`). No build step. (A `git clone` of the repo does NOT contain the compiled DLL — it only ships in the release zip.)
   - Verify: `python -c "import sys; sys.path.insert(0,'tools/pynifly/io_scene_nifly'); from pyn import pynifly"` (29.x loads the DLL on import; older releases need `pynifly.NifFile.Load(<path to pyn/NiflyDLL.dll>)` per the skyrim-nif skill).
 - **Blender (headless)** — NIF mesh repair + render-to-PNG verification.
-  - Acquire: download from blender.org; install the PyNifly Blender addon.
+  - Acquire: Blender **4.2.9 LTS** (`blender-4.2.9-windows-x64.zip`, see [Pinned downloads](#pinned-downloads)) — check its SHA-256, then install the PyNifly Blender add-on **27.2.0** (its own row there: the add-on version installed in the Blender this was tested with, not the 29.1.0 used by `tools/pynifly/`).
   - Verify: `blender --background --version`.
 - **NifSkope** — independent visual NIF render gate (GUI).
-  - Acquire: download a release from github.com/niftools/nifskope/releases.
+  - Acquire: **NifSkope v2.0.dev9** from the maintained hexabits fork (`NifSkope_2_0_2023-09-29-x64.7z`, see [Pinned downloads](#pinned-downloads)); check its SHA-256. The original niftools repo stopped at v2.0.dev7 (2017); dev9 is the build this toolkit was tested with.
   - Verify: launch it and open any NIF.
 - **ReSaver CLI** — headless `.ess` save parse / cross-reference / clean / changeform-level diagnostics.
-  - Acquire: download ReSaver from the FallrimTools page (Nexus mod 5031) and drop `ReSaver.jar` plus its `lib/` folder into `tools/resaver-cli/`; needs JDK 17+ (JDK 21 LTS recommended; e.g. `winget install Microsoft.OpenJDK.21`). The wrapper auto-compiles its small driver on first run.
+  - Acquire: ReSaver **6.0.643** (FallrimTools, Nexus mod 5031, file `Resaver 6.0.643-5031-6-0-643-1694115572.7z`; see [Pinned downloads](#pinned-downloads)): drop `ReSaver.jar` plus its `lib/` folder into `tools/resaver-cli/` and compare `ReSaver.jar`'s SHA-256 with the table. Needs JDK 17+ (JDK 21 LTS recommended: `winget install --id Microsoft.OpenJDK.21 --exact --version 21.0.12.8`, the same JDK 21.0.12 the devcontainer uses). The wrapper auto-compiles its small driver on first run.
   - The read/diagnostic ops layer a small **analysis overlay** (modified ReSaver source, Apache-2.0 — see `tools/resaver-cli/analysis-overlay/NOTICE.md`) in front of your jar for extra changeform parse coverage; write ops always run the STOCK jar (corruption safety), and if the overlay can't compile against your ReSaver version the wrapper falls back to stock parsing automatically.
   - Verify: `bash tools/resaver-cli.sh info <save.ess>` prints JSON.
 - **cosave-info** — READ-ONLY structural survey of an SKSE `.skse` co-save (which mods stashed co-save data + how much — the mod-state landscape the `.ess` never exposes). No install beyond Python 3.
   - Verify: `bash tools/cosave-cli.sh <SaveN_...>.skse` prints JSON (the `.skse` sits next to its `.ess`).
 - **`tools/nexus.sh`** — built-in Nexus API helper (no install). Needs your Nexus key (see *Nexus API key* below).
   - Verify: `bash tools/nexus.sh mod <id>` prints a mod's name/version.
+
+## Pinned downloads
+
+The exact files this toolkit was tested with. **Check the SHA-256 before you unpack anything**: in Git Bash
+`sha256sum <file>`, in PowerShell `Get-FileHash <file> -Algorithm SHA256` (it prints upper case; compare
+ignoring case). A different hash means a different file than the one tested — do not use it.
+
+| Tool | Version | File | SHA-256 | From |
+|---|---|---|---|---|
+| Champollion | v1.3.2 | `Champollion.v1.3.2.zip` | `ea53054276ac8006ccd3b323286bfbc6e34a454fa419d08da9bd440cbd31b383` | <https://github.com/Orvid/Champollion/releases/download/v1.3.2/Champollion.v1.3.2.zip> |
+| Caprica | v0.3.0 | `Caprica.v0.3.0.7z` | `0037e54cf3a1021e976278d9a637e8ae541aaf9ebeb8d274b6c2cfe32f4ee559` | <https://github.com/Orvid/Caprica/releases/download/v0.3.0/Caprica.v0.3.0.7z> |
+| PyNifly | 29.1.0 | `io_scene_nifly.zip` | `fa52960650fc81dc1e4ac41538c86ba838f9defc9b0fc73e864348a8b5a46dd6` | <https://github.com/BadDogSkyrim/PyNifly/releases/download/V29.1.0/io_scene_nifly.zip> |
+| PyNifly Blender add-on | 27.2.0 | `io_scene_nifly.zip` | `920a17c8c4001c4f2a12eff85aad8e54fd19ebcf7e828624733f1fb2bba972da` | <https://github.com/BadDogSkyrim/PyNifly/releases/download/V27.2.0/io_scene_nifly.zip> |
+| Blender | 4.2.9 | `blender-4.2.9-windows-x64.zip` | `223cd22afc5cab3f8cb43006574f1c962ff9bb9e07418c3f4f2542b7c34899cb` | <https://download.blender.org/release/Blender4.2/blender-4.2.9-windows-x64.zip> |
+| NifSkope | v2.0.dev9 | `NifSkope_2_0_2023-09-29-x64.7z` | `8d608e558b2cdd32edb7e09acc26f491f8ec2faa11fac984682570df55330e0d` | <https://github.com/hexabits/nifskope/releases/download/v2.0.dev9/NifSkope_2_0_2023-09-29-x64.7z> |
+| ReSaver | 6.0.643 | `ReSaver.jar` inside `Resaver 6.0.643-5031-6-0-643-1694115572.7z` | `af6f632d561de9d2f8b97f860d5f1c997a79fb77d821d31a3e0111fabb22c1d3` | Nexus mod 5031 (manual download) |
+| BSArch | 1.0 | `bsarch.exe` inside `BSArch-64745-1-0-1769253446.zip` | `8ca75290b2ec4c821802a3975f10e1d2ddb4e94297357340b1a9b9979e947911` | Nexus (Fallout New Vegas) mod 64745, *Old files* (manual download) |
+
+How each hash was obtained (MEASURED 2026-10-05): Champollion, Caprica and NifSkope were downloaded and hashed,
+and the unpacked `Champollion.exe`, `Caprica.exe` and `NifSkope.exe` are byte-identical to the copies this toolkit
+was tested with; both PyNifly rows equal the SHA-256 GitHub publishes for that release asset (29.1.0 was also
+fetched and hashed); Blender's row is the hash blender.org publishes in `blender-4.2.9.sha256`, and the
+tested Blender reports `4.2.9 LTS`. `python scripts/thirdparty-audit.py` re-checks each published hash.
+
+**Nexus gives no direct download link and no published hash**, so the two Nexus rows cannot be checked before
+you unpack: get exactly the named file (the mod's *Files* tab; BSArch 1.0 is under *Old files*), unpack it, and
+compare the hash of the file named in the *File* column — `ReSaver.jar` (its manifest says
+`Implementation-Build: 643`) and `bsarch.exe` (it prints `BSArch v1.0`). Those two hashes are of the tested files
+themselves.
 
 ## Why some tools have wrappers
 

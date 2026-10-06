@@ -8,6 +8,12 @@ used it (with Claude's help) to cross-compile a pre-pivot version of
 assessment: "I have no idea if this works with any other SKSE plugin source." Treat this as a
 starting point, not a proven pipeline.
 
+**Not pinned and not verified -- the one install recipe in this toolkit that is not.** It is quoted
+verbatim from that fork: it follows moving apt repositories (Debian's and LLVM's), pipes xmake's installer
+straight into a shell, and fetches xwin without a checksum, so it does NOT give you an exact, tested
+toolchain the way every other install here does. The toolkit never runs it. Before you rely on it, pin each
+part yourself (package versions, the xmake release and its hash, xwin's hash).
+
 It's kept out of the default `.devcontainer/Dockerfile` because it roughly doubles the image (LLVM
 17 + the ~700MB Windows SDK/CRT splat) for a capability most users of this toolkit won't touch —
 that cost shouldn't land on everyone's container build for one unconfirmed use case. If you want it,
