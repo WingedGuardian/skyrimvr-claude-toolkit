@@ -252,7 +252,7 @@ None of these are bundled; setup walks you through any you pick.
 
 - **xeditlib** -- programmatic ESP read/write (pinned to v1.0.1 = commit `19bef09` with koffi 2.15.1 in `package-lock.json`, integrity-checked; from the toolkit root: `npm ci --ignore-scripts --no-audit --no-fund`)
 - **Champollion / Caprica** -- Papyrus decompile / compile (Champollion v1.3.2 / Caprica v0.3.0 from their GitHub releases; check each SHA-256 against docs/installing-tools.md *Pinned downloads*)
-- **Spriggit** -- ESP ↔ YAML editing (`dotnet tool install Spriggit.CLI --version 0.41.0` -- **always pinned** to the tested version, not older and not newer; `tools/toolchain-check.sh` flags a version that differs from the pin); **requires the .NET 10 SDK**, not just the runtime (`winget install --id Microsoft.DotNet.SDK.10 --exact --version 10.0.401`, the SDK it was tested with). The .NET 10 SDK is the toolkit's **only** .NET requirement: Spriggit and AutoMod both run on it. Spriggit fetches its serializer at runtime as a dotnet tool, and only a matching SDK can install one — with the runtime alone it starts, prints a version, and still cannot serialize. That also disables the cross-reference integrity guard, which drives it.
+- **Spriggit** -- ESP ↔ YAML editing (`dotnet tool install Spriggit.CLI --version 0.41.0` -- **always pinned** to the tested version, not older and not newer; `tools/toolchain-check.sh` flags a version that differs from the pin); **requires the .NET 10 SDK**, not just the runtime (the SDK it was tested with; a manual step, for you to run -- an agent may not install this: `winget install --id Microsoft.DotNet.SDK.10 --exact --version 10.0.401 --no-upgrade`). The .NET 10 SDK is the toolkit's **only** .NET requirement: Spriggit and AutoMod both run on it. Spriggit fetches its serializer at runtime as a dotnet tool, and only a matching SDK can install one — with the runtime alone it starts, prints a version, and still cannot serialize. That also disables the cross-reference integrity guard, which drives it.
 - **AutoMod CLI** -- NIF / BSA / audio / MCM / ESP. **Must be cloned and built**: clone https://github.com/SpookyPirate/spookys-automod-toolkit at tag `v1.11.2` into `tools/automod`, then `bash tools/automod-cli.sh --rebuild` (retargets it to .NET 10 and builds the Cli project only; the first build needs internet) — then run via `tools/automod-cli.sh`. Same .NET 10 SDK as Spriggit; no .NET 8.
 - **PyFFI** -- LE-format NIF geometry (PyFFI 2.2.3 + setuptools 84.0.0, hash-locked: `python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-tools.lock`)
 - **PyNifly** -- SSE BSTriShape + animation authoring (download `io_scene_nifly.zip` of release **V27.2.0** and check its SHA-256 against docs/installing-tools.md *Pinned downloads*; a release zip, not a repo clone — the compiled DLL ships only in the release zip; no build)
@@ -279,8 +279,8 @@ Setup is this short because the environment is already built. There's no configu
    Download from [claude.ai/code](https://claude.ai/code), install, open it.
 
    **Command Line:**
-   Install Node.js **24.19.0**, the version this toolkit was tested with: in Windows Terminal run
-   `winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0` (winget checks the installer's hash for you).
+   Install Node.js **24.19.0**, the version this toolkit was tested with. For you to run, in Windows Terminal:
+   `winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade` (winget checks the installer's hash for you).
    Claude Code itself is not pinned: it keeps itself up to date after install.
    Then open **Windows Terminal** (search "Terminal" in Start menu) and run:
    ```
@@ -709,7 +709,7 @@ A: The safety hooks refuse the destructive cases outright rather than asking you
 A: Only for the optional headless render-verification loop. The core NIF authoring/editing (PyFFI, PyNifly) works without them. If you want Claude to render a mesh to a PNG and show it to you in chat, install Blender; NifSkope adds an independent visual gate. Setup will walk you through it.
 
 **Q: Every command is refused with "GUARD INERT ... cannot run Python"**
-A: The safety hooks run on Python 3 and refuse everything when they cannot start it (that is deliberate: a guard that cannot run must not allow). Install Python 3 (`winget install --id Python.Python.3.12 --exact --version 3.12.10`: inside the tested 3.10-3.13 range and the Python the optional tools were verified on; winget checks the installer's hash), then run `bash setup.sh` again so it records the interpreter's path in the hooks. `jq` is no longer needed by the hooks; it is optional and only prettifies `tools/devbench-cli.sh` and `tools/nexus.sh` output.
+A: The safety hooks run on Python 3 and refuse everything when they cannot start it (that is deliberate: a guard that cannot run must not allow). Install Python 3 (for you to run: `winget install --id Python.Python.3.12 --exact --version 3.12.10 --no-upgrade`: inside the tested 3.10-3.13 range and the Python the optional tools were verified on; winget checks the installer's hash), then run `bash setup.sh` again so it records the interpreter's path in the hooks. `jq` is no longer needed by the hooks; it is optional and only prettifies `tools/devbench-cli.sh` and `tools/nexus.sh` output.
 
 **Q: How do I update the toolkit?**
 A: Download the new version from Nexus and extract over the old one, then re-run `bash setup.sh`.

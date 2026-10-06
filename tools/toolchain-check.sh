@@ -134,8 +134,9 @@ if [ -n "$SPRIGGIT" ]; then
     printf '  %-22s ok            SDK %s+ present, so it can fetch its serializer\n' "spriggit entry point" "$NEED"
   else
     printf '  %-22s CANNOT WORK   spriggit starts but cannot install its serializer\n' "spriggit entry point"
-    printf '  %-22s               (SDK majors here: %s-- spriggit %s needs SDK %s+. Install the tested SDK:\n' "" "$SDK_MAJORS" "${INSTALLED:-?}" "$NEED"
-    printf '  %-22s               winget install --id Microsoft.DotNet.SDK.10 --exact --version %s)\n' "" "$SDK_PIN"
+    printf '  %-22s               (SDK majors here: %s-- spriggit %s needs SDK %s+. Install the tested SDK,\n' "" "$SDK_MAJORS" "${INSTALLED:-?}" "$NEED"
+    printf '  %-22s               a manual step for you to run (an agent may not install this):\n' ""
+    printf '  %-22s               winget install --id Microsoft.DotNet.SDK.10 --exact --version %s --no-upgrade)\n' "" "$SDK_PIN"
     FAIL=1; MISSING="$MISSING spriggit-entry-point"
   fi
 else

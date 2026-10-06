@@ -1397,7 +1397,6 @@ DELIVERY_RULES = {
 
 # Lines that match a rule but are not a delivery path, each with its reason. Every entry must still match something
 # on the real tree (tests/test_thirdparty_audit.py), so a fixed line cannot leave a silent hole behind.
-_T7 = "OWED to T7 (wave 2): setup.sh is rewritten there; remove this entry when it lands"
 _CLAUDE = ("the agent itself: Claude Code updates itself after install, so an install-time pin cannot hold; the "
            "toolkit records the versions its adapter was measured on instead (the Claude Code registry row)")
 _SKSE = ("third-party recipe quoted verbatim and labeled 'Not pinned and not verified' in the doc; the toolkit "
@@ -1408,19 +1407,12 @@ _CI = ("CI runner tooling (T10's workflows): never delivered to a user; versions
 DELIVERY_EXEMPT = [
     ("README.md", "npm", r"npm install -g @anthropic-ai/claude-code", _CLAUDE),
     ("docs/getting-started.md", "npm", r"npm install -g @anthropic-ai/claude-code", _CLAUDE),
-    ("setup.sh", "winget", r"winget install (OpenJS\.NodeJS\.LTS|Python\.Python\.3\.12|Microsoft\.DotNet\.SDK\.[89]|"
-                           r"Microsoft\.OpenJDK\.21)\b", _T7),
-    ("setup.sh", "dotnet-tool", r"`dotnet tool install Spriggit\.(CLI|Yaml\.Skyrim)`", _T7),
-    ("setup.sh", "npm", r"npm install github:WingedGuardian/xeditlib\"", _T7),
-    ("setup.sh", "pip", r"pip install pyffi setuptools", _T7),
     ("KNOWLEDGEBASE.md", "dotnet-tool", r"a `dotnet tool update` on an SDK 6/8/9 machine failed",
      "records the failure that motivated the pin; the instruction two lines up is pinned"),
     ("docs/skse-cross-compile.md", "system-package", r"apt-get install -y --no-install-recommends", _SKSE),
     ("docs/skse-cross-compile.md", "pipe-to-shell", r"xmake\.io/shget\.text \| bash", _SKSE),
     ("docs/skse-cross-compile.md", "download-unverified", r"Jake-Shadle/xwin/releases/download", _SKSE),
     (".github/workflows/ci.yml", "system-package", r"sudo apt-get install -y|choco install jq -y", _CI),
-    ("setup.sh", "download-unverified", r"download from nodejs\.org|download io_scene_nifly\.zip|"
-                                        r"download ReSaver from Nexus", _T7),
     ("*settings.local.json.example", "npm", r'"Bash\(npm install:\*\)"', "a permission-allowlist pattern, not an install"),
     ("*settings.local.json.example", "pip", r'"Bash\(pip install:\*\)"', "a permission-allowlist pattern, not an install"),
     ("*", "follows-latest", r"install locations \(newest version first\)",

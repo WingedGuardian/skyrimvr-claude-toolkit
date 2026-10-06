@@ -45,7 +45,7 @@ Claude Code is made by Anthropic (the company behind Claude AI). It's like ChatG
 **Option B: Command Line Install**
 
 1. Install Node.js first:
-   - Open Windows Terminal (step 2 shows how) and run `winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0`
+   - For you to run: open Windows Terminal (step 2 shows how) and run `winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade`
      (Node.js 24.19.0 is the version this toolkit was tested with; winget checks the installer's hash)
 2. Open **Windows Terminal**:
    - Press the **Windows key** on your keyboard
@@ -209,7 +209,7 @@ replace this file. For example:
 - Try reinstalling: `npm install -g @anthropic-ai/claude-code`
 
 **"GUARD INERT ... cannot run Python" or hooks aren't working**
-- Install Python 3 (in Windows Terminal: `winget install --id Python.Python.3.12 --exact --version 3.12.10`: inside the tested 3.10-3.13 range and the Python the optional tools were verified on), then run `bash setup.sh` again
+- Install Python 3 (for you to run, in Windows Terminal: `winget install --id Python.Python.3.12 --exact --version 3.12.10 --no-upgrade`: inside the tested 3.10-3.13 range and the Python the optional tools were verified on), then run `bash setup.sh` again
 - Close and reopen Claude Code
 
 **"setup.sh not found"**
