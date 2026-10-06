@@ -180,6 +180,47 @@ def test_several_targets_name_one_and_count_the_rest():
     assert got[1].startswith("Blocked: this writes a.esp and 1 more as raw text")
 
 
+# Plan 8 T6 (rt-fix-b concern 3, deferred row 54): an archive writer onto a file in the install got the redirect
+# note ("a > redirect empties it first"), which is false for it. It gets its own two-line note.
+ARCHIVE_NOTE = ("Note: this writes the archive {} in the Skyrim install.\n"
+                "If that file exists, tar and -Force replace it; zip, 7z and -Update add to it.")
+
+
+@pytest.mark.parametrize("command,shell,name", [
+    ('Compress-Archive -Path C:/Temp/x -DestinationPath "<i>/Data/out.zip"', "powershell", "out.zip"),
+    ('Compress-Archive C:/Temp/x "<i>/Data/SKSE/Plugins/a.zip" -Force', "powershell", "a.zip"),
+    ('7z a "<i>/Data/out.7z" C:/Temp/x', "bash", "out.7z"),
+    ('zip "<i>/Data/out.zip" C:/Temp/x', "bash", "out.zip"),
+    ('tar -cf "<i>/Data/out.tar" C:/Temp/x', "bash", "out.tar"),
+], ids=["compress-archive", "compress-archive-positional", "7z", "zip", "tar"])
+def test_an_archive_writer_in_the_install_gets_the_archive_note(command, shell, name):
+    got, fired = decide(command.replace("<i>", INSTALL), shell=shell)
+    assert (got, fired) == (("advise", ARCHIVE_NOTE.format(name)), {"S-WRITE-ARCHIVE"})
+
+
+def test_a_redirect_in_the_install_keeps_the_redirect_note():
+    """The twin: only the archive writers moved; a redirect into the same folder is still S-WRITE-INSTALL."""
+    got, fired = decide('echo hi > "' + INSTALL + '/Data/out.txt"')
+    assert fired == {"S-WRITE-INSTALL"} and "redirect" in got[1]
+
+
+def test_a_redirect_on_an_archive_writer_keeps_the_redirect_note():
+    """Only the ARCHIVE the program writes gets the archive note; its own redirect is still a redirect."""
+    got, fired = decide('7z a "' + INSTALL + '/Data/out.7z" C:/Temp/x > "' + INSTALL + '/Data/log.txt"')
+    assert fired == {"S-WRITE-ARCHIVE", "S-WRITE-INSTALL"}
+    assert "out.7z" in got[1] and "log.txt in the Skyrim install; a > redirect empties it first" in got[1]
+
+
+def test_an_archive_writer_outside_the_install_is_silent():
+    assert decide("Compress-Archive -Path C:/Temp/x -DestinationPath C:/Temp/out.zip", shell="powershell") == \
+        (("allow", ""), set())
+
+
+def test_an_archive_writer_onto_a_plugin_name_is_still_denied():
+    got, fired = decide('Compress-Archive C:/Temp/x -DestinationPath "' + INSTALL + '/Data/x.bsa"', shell="powershell")
+    assert got[0] == "deny" and fired == {"S-WRITE-PLUGIN"}
+
+
 def test_the_shell_write_deny_matches_the_write_tool_on_the_same_name():
     """A file the Write tool refuses as a plugin is refused through the shell too, and vice versa."""
     a = audit.Audit("")

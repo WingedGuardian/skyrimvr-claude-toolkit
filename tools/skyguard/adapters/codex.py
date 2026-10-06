@@ -40,7 +40,8 @@ _SAFE_PS = re.compile(r"[A-Za-z0-9_@%+=:,./\-]+\Z")
 # Where a non-MCP tool carries shell text: `command` (Codex 0.160.0 normalises its shell to Bash {command}, MEASURED),
 # `cmd` (the unified-exec argument name, ASSUMED from the Codex schema), `chars` (write_stdin: keystrokes into a
 # running process, possibly a shell; whether Codex fires PreToolUse for it is UNMEASURED on 0.160.0).
-_COMMAND_KEYS = ("command", "cmd", "chars")
+# Plan 8 T6 (rt-fix-b concern 4, routes s130): `script` too -- a command under it was allowed unread.
+_COMMAND_KEYS = ("command", "cmd", "chars", "script")
 
 
 def _quote(arg: str, shell: str) -> str:
@@ -151,7 +152,13 @@ def to_request(raw: str, platform: str = sys.platform) -> Request:
             # The arguments as sent (a list or a string too): the DevBench judge reads every string in them.
             return Request(event="pre_tool", kind="mcp", mcp_tool=name,
                            mcp_args=json.dumps({} if raw_ti is None else raw_ti, sort_keys=True), **common)
-        key = next((k for k in _COMMAND_KEYS if k in ti), None)
+        keys = [k for k in _COMMAND_KEYS if k in ti]
+        if len(keys) > 1:
+            # Only one field can be judged as THE command; the other would run unread. No measured Codex tool sends
+            # two (every captured Bash payload carries `command` alone), so the call is refused, not guessed at.
+            return Request(event="pre_tool", failure="tool call with more than one command field ({})".format(
+                ", ".join(keys)), **common)
+        key = keys[0] if keys else None
         if key is None:
             body = next((v for v in ti.values() if isinstance(v, str) and patch_paths.has_patch_body(v)), None)
             if body is not None:                               # a patch under a key no tool here is known to use

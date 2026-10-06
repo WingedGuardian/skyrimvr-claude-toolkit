@@ -8,6 +8,7 @@ recorded from the engine.
 """
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -151,6 +152,13 @@ ROWS = [
      "ask", {"S-DEVBENCH-SAVE"}, "Overwrites save Existing.\nYes goes ahead; the save it overwrites is copied first when it can be (skyguard snapshot list)."),
     ("rt-codex-mcp-other-server", "mcp__probe__echo", {"text": "smp reset"}, None, "allow", set(), ""),
     ("rt-codex-mcp-help", "mcp__devbench-vr__console", {"command": "help"}, None, "allow", set(), ""),
+    # Plan 8 T6 (rt-fix-b concern 4, routes harness s130): a command under `script` was never read, so the call was
+    # allowed unexamined. It is command text now; a call carrying two command fields is refused (one would go unread).
+    ("rt-codex-script-key", "Bash", {"script": "rm -rf <install>/Data"}, None,
+     "deny", {"S-DEL-INSTALL"}, DEL_INSTALL.format("Data")),
+    ("rt-codex-script-key-harmless", "Bash", {"script": "Get-Date"}, None, "allow", set(), ""),
+    ("rt-codex-two-command-keys", "Bash", {"command": "Get-Date", "script": "rm -rf <install>/Data"}, None,
+     "deny", set(), INERT.format("tool call with more than one command field (command, script)")),
     # Twins that must stay allowed: deleting outside the protected folders, a rename inside one, a scratch dir.
     ("rt-codex-patch-delete-outside", "apply_patch", _patch("*** Delete File: C:/Temp/rtB/x.txt"), None,
      "allow", set(), ""),
@@ -163,6 +171,17 @@ def test_a_move_inside_the_same_folder_is_a_rename_not_a_delete(inst):
     ti = _patch("*** Update File: Data/meshes/x.nif", "*** Move to: Data/meshes/y.nif", "@@", "-n", "+n")
     v, fired = _judge(inst, "apply_patch", ti)
     assert v.decision == "allow" and fired == {"W-INSTALL"}, (v, fired)
+
+
+def test_a_patch_delete_is_audited_under_its_rules_own_hook(inst):
+    """Plan 8 T6 (rt-fix-b concern 6): an apply_patch Delete is judged by the shell delete rules (S-DEL-*, registry
+    hook protect-bash, code namespace bash.*); its audit line said protect-files, so the log and the verdict code
+    named two different guards."""
+    v, fired = _judge(inst, "apply_patch", _patch("*** Delete File: Data/meshes/x.nif"))
+    assert fired == {"S-DEL-INSTALL"}
+    log = (Path(inst[0]) / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8")
+    assert " protect-bash DENY: " + DEL_INSTALL.format("x.nif").split("\n")[0] in log, log
+    assert " protect-files DENY:" not in log, log
 
 
 def test_a_patch_delete_refuses_when_the_paths_file_is_unreadable(inst, tmp_path):

@@ -1652,8 +1652,8 @@ MUTATIONS = [
     pytest.param(
         'tools/skyguard/adapters/codex.py',
         # rt-fix-b: the command keys are read for every non-MCP tool; reading them for Bash only reverts it.
-        '        key = next((k for k in _COMMAND_KEYS if k in ti), None)',
-        '        key = next((k for k in _COMMAND_KEYS if k in ti), None) if name == "Bash" else None',
+        '        keys = [k for k in _COMMAND_KEYS if k in ti]\n',
+        '        keys = [k for k in _COMMAND_KEYS if k in ti] if name == "Bash" else []\n',
         'tests/test_skyguard_codex_adapter.py::test_an_unknown_tool_with_a_command_string_gets_the_shell_rules',
         id='codex-unknown-tool-command-unguarded',
     ),
@@ -5366,9 +5366,11 @@ _RTB_CLAUSES = [
      "    if False:", _cxr("workdir")),
     ("codex-patch-tool-case", _CX, 'if name.lower() in ("apply_patch", "applypatch"):', 'if name in ("apply_patch", "applypatch"):',
      _cxr("patch-case")),
-    ("codex-unified-exec-cmd-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars")', '_COMMAND_KEYS = ("command", "chars")',
+    ("codex-unified-exec-cmd-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars", "script")',
+     '_COMMAND_KEYS = ("command", "chars", "script")',
      _cxr("unknown-cmd-key")),
-    ("codex-write-stdin-chars-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars")', '_COMMAND_KEYS = ("command", "cmd")',
+    ("codex-write-stdin-chars-key", _CX, '_COMMAND_KEYS = ("command", "cmd", "chars", "script")',
+     '_COMMAND_KEYS = ("command", "cmd", "script")',
      _cxr("write-stdin")),
     ("codex-patch-under-unknown-key", _CX, "            if body is not None:", "            if False:",
      _cxr("unknown-patch-key")),
@@ -6729,4 +6731,28 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      'CLAUDE_COVERED_MCP = re.compile(r"mcp__devbench.*")',
      "tests/test_skyguard_coverage.py::test_every_devbench_spelling_is_covered_and_judged[mcp__DevBench-vr__console]",
      "p8t6-health-counts-prefix-only"),
+]]
+# Row 54: an archive writer in the install gets its own note; its redirect keeps the redirect note.
+# Row 55: Codex `script` is command text; two command fields are refused. Row 57: an apply_patch Delete is audited
+# under its rule's own hook.
+_P8WT = "tests/test_skyguard_writes.py::"
+_P8CR = "tests/test_skyguard_codex_routes.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/writes.py", '                notes["S-WRITE-ARCHIVE" if w in archives else "S-WRITE-INSTALL"].append(_name(w))',
+     '                notes["S-WRITE-INSTALL"].append(_name(w))',
+     _P8WT + "test_an_archive_writer_in_the_install_gets_the_archive_note[compress-archive]",
+     "rule-S-WRITE-ARCHIVE-note-routed"),
+    ("tools/skyguard/writes.py", "        archives = set(tool_write_targets(e)) if e.program in ARCHIVE_PROGRAMS else set()",
+     "        archives = set(write_targets(e)) if e.program in ARCHIVE_PROGRAMS else set()",
+     _P8WT + "test_a_redirect_on_an_archive_writer_keeps_the_redirect_note", "rule-S-WRITE-ARCHIVE-only-the-archive"),
+    ("tools/skyguard/writes.py", '"7z.exe", "zip", "tar"))', '"7z.exe", "zip"))',
+     _P8WT + "test_an_archive_writer_in_the_install_gets_the_archive_note[tar]", "rule-S-WRITE-ARCHIVE-tar"),
+    ("tools/skyguard/adapters/codex.py", '_COMMAND_KEYS = ("command", "cmd", "chars", "script")',
+     '_COMMAND_KEYS = ("command", "cmd", "chars")',
+     _P8CR + "test_codex_route_rows[rt-codex-script-key]", "p8t6-codex-script-key-read"),
+    ("tools/skyguard/adapters/codex.py", "        if len(keys) > 1:\n", "        if False:\n",
+     _P8CR + "test_codex_route_rows[rt-codex-two-command-keys]", "p8t6-codex-two-command-fields-refused"),
+    ("tools/skyguard/engine.py", '    audit.rule(rules.RULES[rid]["hook"], rid, "deny", reason)',
+     '    audit.rule("protect-files", rid, "deny", reason)',
+     _P8CR + "test_a_patch_delete_is_audited_under_its_rules_own_hook", "p8t6-patch-delete-audit-label"),
 ]]

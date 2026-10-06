@@ -50,7 +50,8 @@ def evaluate_write(path: str, audit, roots=None, cwd: str = "") -> Verdict:
 
 
 def evaluate_mcp(tool_name: str, args, audit, roots=None) -> Verdict:
-    """Plan 5 Task 11: the DevBench MCP tools (mcp__devbench*); any other MCP server is allowed by mcp_rules."""
+    """Plan 5 Task 11: the DevBench MCP tools (a server name containing devbench); any other MCP server is allowed by
+    mcp_rules."""
     return codes.classify(mcp_rules.decide(tool_name, args, audit, roots=roots))
 
 
@@ -133,7 +134,9 @@ def _patch_delete(path: str, dest: Optional[str], roots, cwd: str, audit) -> Opt
                 return None                       # a rename inside the same folder: the W- rules judge both names
         rid, file = deletes.RULE_OF[kind], posixpath.basename(a.rstrip("/")) or a
     reason = rules.message(rid, file=file) if "{file}" in rules.RULES[rid]["template"] else rules.message(rid)
-    audit.rule("protect-files", rid, "deny", reason)
+    # Plan 8 T6 (rt-fix-b concern 6): the rule's own hook (S-DEL-* -> protect-bash, the same label the shell delete
+    # rules write and the namespace of its verdict code), not protect-files.
+    audit.rule(rules.RULES[rid]["hook"], rid, "deny", reason)
     return Verdict("deny", reason, code=codes.rule_code(rid))
 
 

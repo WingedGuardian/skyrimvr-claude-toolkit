@@ -34,6 +34,8 @@ RULES:
     a Skyrim*.ini, or Data/SKSE/Plugins/*.ini -- or a copy onto one (`cp x plugins.txt` writes the load order).
   - S-WRITE-INSTALL (advise): any other write primitive into the install's Data/ folder, the config folder, or MO2
     (not the rest of the install: priced, 18 of 23 legacy redirect notes were the user's own scripts and notes).
+  - S-WRITE-ARCHIVE (advise; Plan 8 T6): the same area, written by an archive writer (Compress-Archive, 7z, zip,
+    tar -c), whose file is replaced or added to -- not emptied by a redirect, as the S-WRITE-INSTALL note says.
 READING a plugin or plugins.txt is silent (R11).
 
 NOT SAFE BY DEFAULT. If the parser could not read the command (ok=False, R4) the whole text is checked per
@@ -569,7 +571,11 @@ def move_sources(e) -> List[str]:
     return []
 
 
-ADVICE_ORDER = ("S-COPY-PLUGIN", "S-WRITE-LOADORDER", "S-WRITE-INI", "S-WRITE-SKSE-INI", "S-WRITE-INSTALL",
+# Plan 8 T6: the programs whose tool_write_targets are archives they create or update (S-WRITE-ARCHIVE, not the
+# redirect note). A redirect on the same exec (`7z a x.7z d > log.txt`) is still S-WRITE-INSTALL.
+ARCHIVE_PROGRAMS = frozenset(("compress-archive", "7z", "7za", "7zr", "7z.exe", "zip", "tar"))
+ADVICE_ORDER = ("S-COPY-PLUGIN", "S-WRITE-LOADORDER", "S-WRITE-INI", "S-WRITE-SKSE-INI", "S-WRITE-ARCHIVE",
+                "S-WRITE-INSTALL",
                 "S-SED-WINPATH")
 
 
@@ -612,6 +618,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     for e in parsed.execs:
         sed_files = set(_sed_files(e.argv)) if e.program == "sed" else set()
         winpath = bool(sed_files) and any(sed_win_replacement(s) for s in _sed_scripts(e.argv))
+        archives = set(tool_write_targets(e)) if e.program in ARCHIVE_PROGRAMS else set()
         for w in write_targets(e):
             a = targets.resolve_operand(e, w, cwd, env)
             kind = file_class(w, a or "")
@@ -629,7 +636,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if kind:
                 notes[RULE_OF_CLASS[kind]].append(_name(w))
             elif not sed_note and a is not None and in_install_area(a, roots):
-                notes["S-WRITE-INSTALL"].append(_name(w))
+                notes["S-WRITE-ARCHIVE" if w in archives else "S-WRITE-INSTALL"].append(_name(w))
         for w in move_sources(e):
             a = targets.resolve_operand(e, w, cwd, env)
             if is_protected_folder(a, roots):
