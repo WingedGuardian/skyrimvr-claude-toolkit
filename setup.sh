@@ -611,11 +611,10 @@ done
 # resolves, so a missing or unreadable file here can never leave the guard with nothing
 # to match and, via its fail-closed branch, refusing everything.
 #
-# v4: the file lives at the toolkit ROOT (<root>/skyrim-paths.env), shared by every agent. The reader
-# (tools/skyguard/paths.py read_install) uses the root file WHOLE when it exists and falls back to the 3.x
-# location .claude/skyrim-paths.env only when it does not. So the 3.x file is not rewritten here: it is left as
-# it is (tools/migrate-3x.py reads it as the 3.9 record) and simply stops being read. The root file is never
-# written empty -- an empty one would hide the 3.x file and declare nothing.
+# v4: the file lives at the toolkit ROOT (<root>/skyrim-paths.env), shared by every agent. A 3.x file at
+# .claude/skyrim-paths.env is never rewritten: the reader adds its protection roots to the root file's (see
+# retire_3x_paths below), so it is either retired by a verified move or kept and named. The root file is never
+# written empty or half-written.
 #
 # Written with printf per line rather than a heredoc: a quoted heredoc still eats a
 # backslash level through some tool boundaries, and these are Windows paths.
@@ -638,6 +637,63 @@ if [ -f "$PATHS_ENV_3X" ] && [ ! -f "$PATHS_ENV" ]; then
     echo "  NOTICE: your paths file is still at the old location, .claude/skyrim-paths.env. This toolkit reads skyrim-paths.env in the toolkit folder first and falls back to the old one; re-run setup.sh to move it."
     echo "  (this run writes skyrim-paths.env in the toolkit folder now)"
 fi
+# The 3.x file under the 4.0 reader: its PROTECTION roots are added to the root file's (a union -- a stale file
+# can add a root, never hide one); everything else comes from the root file. So it is never silently left to
+# drift. When it declares no folder the root file does not, it adds nothing: it is retired -- MOVED (not
+# deleted) into .claude/backups/skyrim-paths-3x/<stamp>/ and the move verified. When it declares more, it is
+# kept, because it still protects those folders, and they are named. Kept too when the comparison cannot be
+# made (no Python, an unreadable file) or the 3.x migration did not finish (it reads this file).
+retire_3x_paths() {
+    local extra rc stamp dest
+    [ -f "$PATHS_ENV_3X" ] || return 0
+    if [ -z "$PY_FOUND" ] || [ "${MIG_RC:-0}" != 0 ]; then
+        echo "  .claude/skyrim-paths.env (the 3.x location) is kept: it still ADDS its folders to what the guard protects."
+        return 0
+    fi
+    # Both files read the way the guard reads them (as data, never sourced); each folder the 3.x file adds is printed.
+    extra=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B -c '
+import os, sys
+root = sys.argv[1]
+sys.path.insert(0, os.path.join(root, "tools"))
+from skyguard import paths
+new = paths.read_config(os.path.join(root, "skyrim-paths.env"), {})
+old = paths.read_config(os.path.join(root, ".claude", "skyrim-paths.env"), {})
+if new.malformed or old.malformed:
+    sys.exit(3)
+def key(v):
+    n = (paths.norm_abs(v) or v).replace(chr(92), "/").rstrip("/")
+    return n.lower() if os.name == "nt" else n
+for k in paths.ENV_KEYS:
+    have = {key(v) for v in new.values(k)}
+    for v in old.values(k):
+        if key(v) not in have:
+            print("%s=%s" % (k, v))
+' "$GAME_ROOT_WIN" 2>/dev/null) && rc=0 || rc=$?
+    if [ "$rc" != 0 ]; then
+        echo "  .claude/skyrim-paths.env (the 3.x location) could not be compared with skyrim-paths.env, so it is kept:"
+        echo "  it still ADDS its folders to what the guard protects until you remove it."
+        return 0
+    fi
+    if [ -n "$extra" ]; then
+        echo "  .claude/skyrim-paths.env (the 3.x location) declares folders skyrim-paths.env does not, and the guard"
+        echo "  still protects them (the two files are combined) until you remove it:"
+        printf '%s\n' "$extra" | sed 's/^/    /'
+        echo "  Keep it if those folders should stay protected. Otherwise retire it (moved, not deleted):"
+        echo "    mkdir -p .claude/backups/skyrim-paths-3x && mv .claude/skyrim-paths.env .claude/backups/skyrim-paths-3x/"
+        return 0
+    fi
+    stamp=$(date +%Y%m%d_%H%M%S)
+    dest="$GAME_DIR/.claude/backups/skyrim-paths-3x/$stamp"
+    # A rename keeps every byte, and -n never replaces an earlier copy. Verified: the old path gone, the copy there.
+    if mkdir -p "$dest" && mv -n "$PATHS_ENV_3X" "$dest/skyrim-paths.env" && [ ! -e "$PATHS_ENV_3X" ] \
+       && [ -f "$dest/skyrim-paths.env" ]; then
+        echo "  Retired .claude/skyrim-paths.env (the 3.x location): it declared no folder skyrim-paths.env does not."
+        echo "  Moved, not deleted: .claude/backups/skyrim-paths-3x/$stamp/skyrim-paths.env"
+    else
+        echo "  .claude/skyrim-paths.env (the 3.x location) could not be moved into .claude/backups/, so it is kept"
+        echo "  (it adds nothing the root file lacks)."
+    fi
+}
 # Written beside it, then renamed: a crash never leaves half a file, or an empty one, in place.
 {
     printf '# Written by setup.sh. Machine-local: not tracked, not shipped.\n'
@@ -678,10 +734,7 @@ else
         echo "           The hooks will still guard this folder, but not the config"
         echo "           directory. Check for unusual characters in your paths."
     fi
-    if [ -f "$PATHS_ENV_3X" ] && ! cmp -s "$PATHS_ENV_3X" "$PATHS_ENV"; then
-        echo "  The root skyrim-paths.env wins: .claude/skyrim-paths.env (the 3.x location) differs and is no longer"
-        echo "  read. It is left in place as your 3.x record; delete it whenever you like."
-    fi
+    retire_3x_paths
 fi
 
 # --- Configure the Codex hook definitions (.codex/hooks.json) ---
@@ -837,14 +890,14 @@ done
 # toolkit holds core + addendum + a 2,560-byte install reserve under that (scripts/gen_agent_trees.py
 # INSTRUCTION_BUDGET). A very long install root or MO2 paths can still push the INSTALLED copy past it.
 INSTRUCTION_BUDGET=32768
-for DOC in CLAUDE.md AGENTS.md; do
-    [ -f "$GAME_DIR/$DOC" ] || continue
-    grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/$DOC" && continue      # not configured: nothing installed to measure
-    DOC_BYTES=$(wc -c < "$GAME_DIR/$DOC" | tr -d ' \r')
+for BDOC in CLAUDE.md AGENTS.md; do
+    [ -f "$GAME_DIR/$BDOC" ] || continue
+    grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/$BDOC" && continue      # not configured: nothing installed to measure
+    DOC_BYTES=$(wc -c < "$GAME_DIR/$BDOC" | tr -d ' \r')
     [ "$DOC_BYTES" -gt "$INSTRUCTION_BUDGET" ] || continue
     echo ""
-    echo "  WARNING: $DOC is $DOC_BYTES bytes, over the $INSTRUCTION_BUDGET-byte instruction budget (by $((DOC_BYTES - INSTRUCTION_BUDGET)))."
-    if [ "$DOC" = "AGENTS.md" ]; then
+    echo "  WARNING: $BDOC is $DOC_BYTES bytes, over the $INSTRUCTION_BUDGET-byte instruction budget (by $((DOC_BYTES - INSTRUCTION_BUDGET)))."
+    if [ "$BDOC" = "AGENTS.md" ]; then
         echo "  Codex reads only the first $INSTRUCTION_BUDGET bytes of AGENTS.md in a project it does not trust (65,536 in a"
         echo "  trusted one, set by .codex/config.toml): past that, the END of its instructions is cut off, silently."
     else
@@ -940,9 +993,14 @@ else
     echo "  Claude Code: NOT CONFIGURED -- CLAUDE.md has no paths filled in (this run: --agent $AGENT_SEL)."
     echo "               Its hooks still guard (they run on the interpreter above). To set it up: bash setup.sh --agent claude"
 fi
-if [ "$CODEX_STATE" = "configured" ] && [ "$AGENTS_DOC_STATE" = "configured" ]; then
+case "$CODEX_STATE/$AGENTS_DOC_STATE" in
+    configured/configured) CODEX_SUMMARY="both" ;;
+    configured/*) CODEX_SUMMARY="hooks-only" ;;
+    *) CODEX_SUMMARY="" ;;
+esac
+if [ "$CODEX_SUMMARY" = "both" ]; then
     echo "  Codex:       CONFIGURED -- approve the 2 hooks once in Codex's /hooks; until then Codex runs UNGUARDED."
-elif [ "$CODEX_STATE" = "configured" ]; then
+elif [ "$CODEX_SUMMARY" = "hooks-only" ]; then
     echo "  Codex:       hooks configured, but AGENTS.md has no paths filled in. To finish: bash setup.sh --agent codex"
 elif [ -z "$CODEX_WIN" ]; then
     echo "  Codex:       NOT CONFIGURED -- the toolkit's Codex support is Windows-only."

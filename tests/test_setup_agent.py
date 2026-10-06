@@ -294,21 +294,51 @@ def test_the_paths_file_is_written_at_the_root_and_no_3x_copy_is_created(game_di
         assert paths.legacy_notice(str(game_dir)) == ""
 
 
-def test_a_3x_paths_file_is_left_alone_and_the_root_file_wins(game_dir):
-    legacy = game_dir / ".claude" / "skyrim-paths.env"
-    legacy.write_text("SKYRIM_GAME_ROOT='C:/Old/Skyrim VR'\nSKYRIM_CONFIG_DIR='D:/Old INIs'\n", encoding="utf-8")
-    before = legacy.read_bytes()
+def _legacy(game, extra=""):
+    """A 3.x .claude/skyrim-paths.env naming this install, plus `extra` lines."""
+    p = game / ".claude" / "skyrim-paths.env"
+    p.write_text("# 3.9\nSKYRIM_GAME_ROOT='%s'\n%s" % (game_root_win(game), extra), encoding="utf-8", newline="\n")
+    return p, p.read_bytes()
+
+
+def _retired(game):
+    return sorted((game / ".claude" / "backups" / "skyrim-paths-3x").glob("*/skyrim-paths.env"))
+
+
+def test_a_3x_paths_file_that_adds_nothing_is_retired_by_a_move(game_dir):
+    """The 4.0 reader UNIONS the protection roots of both files, so a 3.x file left behind would drift silently.
+    One that declares no folder the root file lacks adds nothing: it is moved (never deleted) into backups."""
+    legacy, before = _legacy(game_dir)
     r = run_setup(game_dir)
-    assert r.returncode == 0
+    assert r.returncode == 0, r.stdout[-1500:]
     sys.path.insert(0, str(REPO / "tools"))
     from skyguard import paths
-    if hasattr(paths, "DEPRECATION"):
-        assert paths.DEPRECATION in r.stdout, "the session-start notice text is not what setup printed"
-    assert "The root skyrim-paths.env wins" in r.stdout
-    assert legacy.read_bytes() == before, "the 3.x file (migrate-3x's record) was changed"
-    assert (game_dir / "skyrim-paths.env").is_file()
+    assert paths.DEPRECATION in r.stdout, "setup did not print the session-start notice for the state it found"
+    assert not legacy.exists(), r.stdout[-2000:]
+    moved = _retired(game_dir)
+    assert len(moved) == 1 and moved[0].read_bytes() == before, moved
+    assert "Retired .claude/skyrim-paths.env" in r.stdout and "Moved, not deleted" in r.stdout
     again = run_setup(game_dir)
-    assert "still at the old location" not in again.stdout, "the notice repeats after the move"
+    assert paths.DEPRECATION not in again.stdout and len(_retired(game_dir)) == 1
+
+
+def test_a_3x_paths_file_that_adds_a_folder_is_kept_and_its_folders_named(game_dir):
+    legacy, before = _legacy(game_dir, "SKYRIM_CONFIG_DIR='D:/Old INIs'\n")
+    r = run_setup(game_dir)
+    assert r.returncode == 0
+    assert legacy.read_bytes() == before, "a 3.x file that still adds protection was changed"
+    assert not _retired(game_dir)
+    assert "still protects them (the two files are combined)" in r.stdout and "SKYRIM_CONFIG_DIR=D:/Old INIs" in r.stdout
+    assert "wins" not in r.stdout, "the union reader means the root file does not 'win' for protected folders"
+
+
+def test_a_3x_paths_file_is_kept_while_the_migration_has_not_finished(game_dir):
+    """migrate-3x reads the 3.x file as the 3.9 record: a failed migration keeps it for the retry."""
+    legacy, before = _legacy(game_dir)
+    (game_dir / "tools" / "migrate-3x.py").write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
+    r = run_setup(game_dir)
+    assert legacy.read_bytes() == before and not _retired(game_dir), r.stdout[-1500:]
+    assert "still ADDS its folders" in r.stdout
 
 
 def test_no_interpreter_line_when_no_python_was_found(game_dir):
