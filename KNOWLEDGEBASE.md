@@ -1851,14 +1851,31 @@ counted as a crash.
 
 ## AutoMod BSA extract/repack needs `bsarch.exe`
 
-AutoMod's `archive` module reads a BSA index natively for `list`, but `extract`, `extract-file`, and
-`repack` shell out to **BSArch.exe** — without it they fail with `BSArch not found`. Place `bsarch.exe`
-at `<build-output>/tools/bsarch/bsarch.exe`, i.e. under the same `bin/Release/net8.0/` folder the
-wrapper runs the DLL from. **It lives under `bin/`, so any `dotnet build` or `clean` of AutoMod wipes
+AutoMod's `archive` module reads a BSA index natively for `list`, but `create`, `extract`,
+`extract-file`, and `repack` shell out to **BSArch.exe** — without it they fail with `BSArch not found`
+(`create` MEASURED 2026-10-05). Place `bsarch.exe` at `<build-output>/tools/bsarch/bsarch.exe`, i.e.
+under the same `bin/Release/net10.0/` folder the wrapper runs the DLL from (`net8.0/` before v4: the
+v4 retarget builds into a NEW folder, so move an existing copy across). BSArch also refuses an
+`extract --output` folder that does not exist yet (`EInvalidArguments: Folder does not exist`);
+create it first. **It lives under `bin/`, so any `dotnet build` or `clean` of AutoMod wipes
 it** — keep a canonical copy elsewhere and re-place it after a rebuild.
 
 Similarly, `audio wav-to-xwm` needs `xWMAEncode.exe`, which is not bundled. It is often simpler to call
 `xWMAEncode` directly than to go through AutoMod.
+
+**AutoMod on .NET 10 (v4, MEASURED 2026-10-05, v1.11.2 = e1c34ea, SDK 10.0.401 with no other SDK or
+runtime installed).** Upstream targets net8.0; `bash tools/automod-cli.sh --rebuild` pins SDK 10 in
+`tools/automod/global.json` and retargets `Directory.Build.props` to net10.0 (one line, a local
+patch), then builds the Cli project. It built with 0 errors (2 harmless NU1510 warnings) and on 10.0.12
+alone ran: `esp create`, `add-weapon` (dry-run and real), `add-spell/-armor/-global/-quest/-npc/-book/
+-perk/-faction`, `info`, `view-record`, `list-masters`; `nif info`; `archive list/create/extract`
+(byte-exact); `mcm create/add-toggle/validate`; `papyrus status/generate/validate/download/compile/
+decompile`; `audio info/create-fuz/extract-fuz` (byte-exact). Spriggit 0.41 read the AutoMod-written
+ESP and round-tripped it byte-identical. Upstream's unit tests: 68 of 69 pass on net10.0 — and the
+same 68 of 69 on net8.0: `ResultTests.ToJson_FailedResult_ContainsSuccessFalse` fails on both (a
+failed result's JSON omits `"success": false`), so it is upstream's, not .NET 10's. Rebuilding over an
+old net8.0 build needs no clean. A net8.0 build does NOT start on a 10-only machine without
+`DOTNET_ROLL_FORWARD=Major`; the wrapper refuses it and says to `--rebuild`.
 
 ---
 

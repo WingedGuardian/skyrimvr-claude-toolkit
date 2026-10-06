@@ -21,13 +21,13 @@ Install them into the `tools/` folder in your game directory; the setup prompt w
   - For deeply-nested output paths that trip `UnauthorizedAccessException`, call `tools/spriggit-cli.sh` (same args; it runs in a shallow workspace and copies the result back).
   - Verify: `spriggit --help`.
 - **AutoMod CLI** — NIF / BSA / audio / MCM / ESP one-liners.
-  - Acquire: `git clone https://github.com/SpookyPirate/spookys-automod-toolkit` into `tools/automod`.
-  - Pin the SDK: create `tools/automod/global.json` selecting SDK `8.0.x` with `"rollForward": "latestFeature"`:
-    ```json
-    { "sdk": { "version": "8.0.100", "rollForward": "latestFeature" } }
-    ```
-  - Build the **Cli project only**: `dotnet build tools/automod/src/SpookysAutomod.Cli -c Release`. The WPF `Setup` project targets `net8.0-windows` — **never build it headless** (it will fail). The built artifact is `spookys-automod.dll`.
-  - Run via the wrapper: `bash tools/automod-cli.sh <module> <command> --json`; pass `--rebuild` to rebuild the DLL.
+  - Acquire, **pinned to the tested tag**: `git clone --branch v1.11.2 https://github.com/SpookyPirate/spookys-automod-toolkit tools/automod` (v1.11.2 = commit `e1c34ea34cae4b9a1a547ea6a90c8a91412d689e`).
+  - Build: `bash tools/automod-cli.sh --rebuild`. Needs only the **.NET 10 SDK** (the toolkit's single .NET requirement) and, the first time, internet for the NuGet restore. The wrapper does three things, so you don't have to:
+    1. writes `tools/automod/global.json` selecting SDK 10 (`{ "sdk": { "version": "10.0.100", "rollForward": "latestFeature" } }`), replacing the `8.0.100` pin older toolkits told you to create;
+    2. retargets the clone from net8.0 to net10.0 — a one-line **local patch** of upstream's `Directory.Build.props` (`git -C tools/automod diff` shows it). Retargeting, not roll-forward: a net8.0 build does not start on a machine with only .NET 10 unless `DOTNET_ROLL_FORWARD=Major` is set on every launch;
+    3. builds the **Cli project only** (the WPF `Setup` project targets `net8.0-windows` — never build it headless). The built artifact is `src/SpookysAutomod.Cli/bin/Release/net10.0/spookys-automod.dll`.
+  - Upgrading from a toolkit that built AutoMod for net8.0: the wrapper refuses the old build and tells you to run `--rebuild`; no clean is needed. Move a placed `bsarch.exe` from `bin/Release/net8.0/tools/bsarch/` to `bin/Release/net10.0/tools/bsarch/` (`archive create`/`extract` need it).
+  - Run via the wrapper: `bash tools/automod-cli.sh <module> <command> --json`; pass `--rebuild` after any source update.
   - Verify: `bash tools/automod-cli.sh esp --help --json`.
 - **PyFFI** — LE-format NiTriShape geometry edits.
   - **Works on any modern Python (verified through 3.14) as long as `setuptools` is installed in that same environment** — no dedicated Python 3.10 needed. PyFFI 2.2.3's real (and only) Python-version blocker is a single unconditional `from distutils.cmd import Command` in `pyffi/utils/__init__.py` (used only by an unused, `# pragma: no cover` doc-building helper class) — `distutils` was removed from the stdlib in Python 3.12 (PEP 632). `pip install pyffi setuptools` fixes it: setuptools ships its own vendored `distutils` plus a compatibility shim that transparently satisfies that import, which is the officially-sanctioned PEP 632 migration path, not a fragile workaround. Confirmed end-to-end on Python 3.14.6: imported cleanly, read a real 735-block Skyrim skeleton NIF spanning ~15 block types (NiNode, several bhk\* physics types, controllers, etc.), modified it, wrote it back out, and re-read the result — all clean. The upstream [niftools/pyffi](https://github.com/niftools/pyffi) repo itself has had no real commits since **January 2020** (only a stray dependabot branch since), so this is the practical path forward rather than expecting an upstream fix there.

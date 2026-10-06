@@ -4204,6 +4204,29 @@ MUTATIONS += [
 ]
 
 
+# Plan 8 T6b: toolchain-check's wrapper rows must prove the wrapper reached its dependency (identity, not
+# startability), keep an absent optional dependency optional, and run under the bash running the check (a bare
+# `bash` can be WSL's launcher). And automod-cli.sh's .NET 10 build: SDK pin, retarget, refusal, Cli-only build,
+# the net10.0 DLL, and the stale-net8 refusal. One twin per clause.
+_TC = "tests/test_toolchain_check.py::"
+_AM = "tests/test_automod_cli.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/automod-cli.sh", '"version": "10.0.100", "rollForward"', '"version": "8.0.100", "rollForward"',
+     _AM + "test_rebuild_pins_the_net10_sdk_not_8", "t6b-automod-sdk-10-pin"),
+    ("tools/automod-cli.sh", '    if grep -qF "$TFM_OLD" "$PROPS"; then', "    if false; then",
+     _AM + "test_rebuild_retargets_the_clone_to_net10", "t6b-automod-retarget"),
+    ("tools/automod-cli.sh", '    if ! grep -qF "$TFM_NEW" "$PROPS"; then', "    if false; then",
+     _AM + "test_rebuild_refuses_a_target_it_does_not_recognise", "t6b-automod-refuses-unknown-target"),
+    ("tools/automod-cli.sh", '    "$DOTNET" build "$CLI_PROJ" -c Release', '    "$DOTNET" build "$AUTOMOD" -c Release',
+     _AM + "test_rebuild_builds_the_cli_project_only", "t6b-automod-builds-cli-only"),
+    ("tools/automod-cli.sh", 'DLL="$CLI_PROJ/bin/Release/net10.0/spookys-automod.dll"',
+     'DLL="$CLI_PROJ/bin/Release/net8.0/spookys-automod.dll"', _AM + "test_a_run_uses_the_net10_build",
+     "t6b-automod-runs-the-net10-dll"),
+    ("tools/automod-cli.sh", '    if [ -f "$OLD_DLL" ]; then', "    if false; then",
+     _AM + "test_an_old_net8_build_is_reported_stale_not_run", "t6b-automod-stale-net8-named"),
+]]
+
+
 # Plan 5 final review, lane A (parser and path layer) fix pass. One twin per new clause; each names the test that
 # must go red. P5A rows fire in-process from tests/test_skyguard_p5_final_a.py.
 def _p5a(row):
