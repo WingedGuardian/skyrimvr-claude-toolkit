@@ -224,6 +224,43 @@ def test_a_per_file_in_place_restore_of_a_no_longer_configured_ini_still_refuses
     assert (inst.lo / "plugins.txt").read_bytes() == b"*Broken.esp\n", "a refusal writes nothing at all"
 
 
+def _low_disk(monkeypatch, room):
+    """The backups drive has SAVE_RESERVE_BYTES + `room` bytes free."""
+    real = backup.shutil.disk_usage
+    monkeypatch.setattr(backup.shutil, "disk_usage",
+                        lambda p: real(p)._replace(free=recovery.SAVE_RESERVE_BYTES + room))
+
+
+def test_in_place_save_restore_refuses_when_its_backup_would_fill_the_drive(inst, monkeypatch):
+    """Final review B-M6: the live save (up to 192 MB) was backed up with no free-space reserve, on a drive the user
+    keeps ~88% full. The backup now keeps the recovery store's reserve; when it cannot, nothing is restored."""
+    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    put(inst.saves / "Quick.ess", b"what resaver wrote")
+    _low_disk(monkeypatch, 10)
+    rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
+    assert rc == 2 and "could not back up" in text, text
+    assert (inst.saves / "Quick.ess").read_bytes() == b"what resaver wrote", "no backup, so no replace"
+    assert "would leave under" in inst.log() and "NO BACKUP EXISTS" in inst.log()
+
+
+def test_the_save_reserve_applies_to_saves_only(inst, monkeypatch):
+    """The twin: on the same nearly full drive, a load-order file is still backed up and restored."""
+    take_all(inst)
+    put(inst.lo / "plugins.txt", b"*Broken.esp\n")
+    _low_disk(monkeypatch, 10)
+    rc, text = cli_run(inst, "restore", ids(inst, "config")[0], "--path", "plugins.txt", "--in-place")
+    assert rc == 0 and (inst.lo / "plugins.txt").read_bytes() == b"*Skyrim.esm\n*Mine.esp\n", text
+
+
+def test_in_place_save_restore_with_room_backs_the_save_up(inst, monkeypatch):
+    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    put(inst.saves / "Quick.ess", b"what resaver wrote")
+    _low_disk(monkeypatch, 10 * 1024 * 1024)
+    rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
+    assert rc == 0 and (inst.saves / "Quick.ess").read_bytes() == b"quick save bytes", text
+    assert any(e["src"].endswith("Quick.ess") for e in _backups(inst).values())
+
+
 def forge_recovery(inst, victim, sid):
     """A whole one-file recovery snapshot whose line names `victim` -- what a tampered store can hold."""
     inst.run("make")

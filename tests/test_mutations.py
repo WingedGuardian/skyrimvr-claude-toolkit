@@ -6502,6 +6502,13 @@ _FB = [
     (_SC, "    return why == _OUT_OF_ROOTS and (name in _LOADORDER", "    return (name in _LOADORDER",
      _SCT + "test_in_place_never_writes_inside_the_guards_own_folders_even_when_configured_there",
      "p6fb-m4-only-the-out-of-roots-reason"),
+    # B-M6: backing up a save before replacing it keeps the save reserve free on the backups drive
+    ("tools/skyguard/backup.py", "    if free - size < SAVE_RESERVE_BYTES:", "    if False:",
+     _SCT + "test_in_place_save_restore_refuses_when_its_backup_would_fill_the_drive", "p6fb-m6-save-reserve"),
+    ("tools/skyguard/backup.py", '    if not str(file_path).lower().endswith((".ess", ".skse")):\n        return ""',
+     '    if False:\n        return ""', _SCT + "test_the_save_reserve_applies_to_saves_only", "p6fb-m6-saves-only"),
+    ("tools/skyguard/backup.py", "        short = _save_room(backups, file_path)", '        short = ""',
+     _SCT + "test_in_place_save_restore_refuses_when_its_backup_would_fill_the_drive", "p6fb-m6-wired-into-take"),
     # B-M3: skydoctor's R9 clear is a read-modify-write under the one state lock that every write takes
     (_DR, "    with state.locked(str(sf)):", "    if True:",
      _DRT + "test_r9_clear_does_not_undo_a_lock_enable_that_lands_after_its_first_read", "p6fb-m3-doctor-rmw-locked"),
