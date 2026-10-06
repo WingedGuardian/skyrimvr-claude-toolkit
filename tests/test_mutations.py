@@ -6773,9 +6773,7 @@ _T7 = [
     # the 3.x paths file under the union reader: retired only when it adds nothing and can be compared
     ("setup.sh", '    if [ -n "$extra" ]; then', "    if false; then",
      _T7S + "test_a_3x_paths_file_that_adds_a_folder_is_kept_and_its_folders_named", "t7-legacy-adding-a-folder-kept"),
-    ("setup.sh", '    if [ "$rc" != 0 ]; then', "    if false; then",
-     _T7S + "test_a_3x_paths_file_that_cannot_be_compared_is_kept", "t7-legacy-uncomparable-kept"),
-    ("setup.sh", '    if [ -z "$PY_FOUND" ] || [ "${MIG_RC:-0}" != 0 ]; then', '    if [ -z "$PY_FOUND" ]; then',
+    ("setup.sh", '    if [ -z "$PY_FOUND" ] || [ "${MIG_RC-unset}" != 0 ]; then', '    if [ -z "$PY_FOUND" ]; then',
      _T7S + "test_a_3x_paths_file_is_kept_while_the_migration_has_not_finished", "t7-legacy-kept-until-migrated"),
     ("setup.sh", 'mv -n "$PATHS_ENV_3X" "$dest/skyrim-paths.env"', 'cp "$PATHS_ENV_3X" "$dest/skyrim-paths.env"',
      _T7S + "test_a_3x_paths_file_that_adds_nothing_is_retired_by_a_move", "t7-legacy-retired-by-a-move"),
@@ -6827,6 +6825,63 @@ _T7 = [
      "tests/test_install_hints.py::test_every_install_hint_is_in_an_authorized_form[README.md]", "t7-hint-readme-label"),
 ]
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _T7]
+
+# ---- Plan 8 T7 fix round 1 (review T7-review.md): one twin per fix ------------------------------------------------
+_T7W = "tests/test_wrapper_python.py::"
+_T7F = [
+    # C1: the Documents probe asks for UTF-8 ...
+    ("setup.sh", '"[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Environment]::GetFolderPath(\'MyDocuments\')"',
+     '"[Environment]::GetFolderPath(\'MyDocuments\')"',
+     _T7S + "test_a_non_ascii_documents_folder_reaches_the_paths_file_as_utf8", "t7f-documents-probe-utf8"),
+    # ... and the paths file is read back with the guard's own reader
+    ("setup.sh", '        _guard=$(skypaths readback 2>/dev/null) && _grc=0 || _grc=$?', "        :",
+     _T7S + "test_a_paths_file_the_guard_cannot_read_is_a_loud_failure", "t7f-readback-with-the-guards-reader"),
+    ("setup.sh", 'if [ -n "$PATHS_BAD" ]; then', "if false; then",
+     _T7S + "test_a_paths_file_the_guard_cannot_read_is_a_loud_failure", "t7f-unreadable-paths-file-is-exit-1"),
+    # I2: values spliced into sed replacements are escaped
+    ("setup.sh", "sed_repl() { printf '%s' \"$1\" | sed -e 's/[\\\\|&]/\\\\&/g'; }", "sed_repl() { printf '%s' \"$1\"; }",
+     _T7S + "test_an_ampersand_in_the_root_is_filled_in_once_and_rerun_changes_nothing", "t7f-sed-replacement-escaped"),
+    # M1: the 3.x file is judged by the reader's own union (protection keys only)
+    ("setup.sh", '        for k in paths.PROTECTION_KEYS:', '        for k in paths.ENV_KEYS:',
+     _T7S + "test_a_3x_paths_file_differing_only_in_a_folder_the_guard_does_not_protect_is_retired",
+     "t7f-legacy-protection-keys-only"),
+    # M5: a missing migration tool is "not finished"
+    ("setup.sh", '    if [ -z "$PY_FOUND" ] || [ "${MIG_RC-unset}" != 0 ]; then',
+     '    if [ -z "$PY_FOUND" ] || [ "${MIG_RC:-0}" != 0 ]; then',
+     _T7S + "test_a_3x_paths_file_is_kept_when_the_migration_tool_is_missing", "t7f-missing-migration-is-not-finished"),
+    # M6: --agent with no value; the stale hooks.json.new is removed even when nothing renders (Windows)
+    ("setup.sh", "            if [ $# -lt 2 ]; then", "            if false; then",
+     _T7S + "test_a_usage_error_exits_2_and_writes_nothing[no-value]", "t7f-agent-without-a-value"),
+    ("setup.sh", '# A leftover from an interrupted run is never taken for the result: the renderer writes a fresh one.\nrm -f "$CODEX_DEFS.new"\n',
+     '# A leftover from an interrupted run is never taken for the result: the renderer writes a fresh one.\n',
+     _T7S + "test_a_stale_hooks_json_new_is_removed_even_when_nothing_renders", "t7f-stale-codex-new-removed"),
+    # I1: the smoke expects Codex's hooks only on Windows, AGENTS.md wherever Codex is selected
+    ("scripts/setup-smoke.sh", 'WANT_HOOKS="$WANT_X"; [ -n "$WIN" ] || WANT_HOOKS=""', 'WANT_HOOKS="$WANT_X"',
+     "tests/test_setup_smoke.py::test_the_linux_legs_pass[all]", "t7f-smoke-hooks-windows-only"),
+    # the wrappers read SKYGUARD_PYTHON from the root paths file
+    ("tools/skyguard.sh", 'for cand in "${SKYGUARD_PYTHON:-}" "$file_py" python3 python "py -3"; do',
+     'for cand in "${SKYGUARD_PYTHON:-}" python3 python "py -3"; do',
+     _T7W + "test_the_bash_wrappers_use_the_recorded_interpreter[skyguard.sh]", "t7f-skyguard-sh-reads-the-file"),
+    ("tools/skydoctor", 'for cand in "${SKYGUARD_PYTHON:-}" "$file_py" python3 python "py -3"; do',
+     'for cand in "${SKYGUARD_PYTHON:-}" python3 python "py -3"; do',
+     _T7W + "test_the_bash_wrappers_use_the_recorded_interpreter[skydoctor]", "t7f-skydoctor-reads-the-file"),
+    ("tools/skydoctor", '    if [ -e "$cand" ]; then run=("$cand"); else IFS=\' \' read -r -a run <<< "$cand"; fi',
+     '    IFS=\' \' read -r -a run <<< "$cand"',
+     _T7W + "test_the_environment_still_wins_over_the_file[skydoctor]", "t7f-skydoctor-path-is-one-word"),
+    ("tools/skyguard.sh", '                                 [ -n "$v" ] && [ -e "$v" ] && file_py="$v" ;;',
+     '                                 file_py="$v" ;;',
+     _T7W + "test_a_recorded_interpreter_that_does_not_exist_is_skipped[missing-skyguard.sh]",
+     "t7f-skyguard-sh-skips-a-missing-interpreter"),
+    ("tools/skyguard.cmd", 'if defined SG_FILE_PY if exist "%SG_FILE_PY%" set "SKYGUARD_PYTHON=%SG_FILE_PY%"',
+     'rem', _T7W + "test_the_cmd_twins_use_the_recorded_interpreter[skyguard.cmd]", "t7f-skyguard-cmd-reads-the-file"),
+    ("tools/skydoctor.cmd", 'if defined SG_FILE_PY if exist "%SG_FILE_PY%" set "SKYGUARD_PYTHON=%SG_FILE_PY%"',
+     'rem', _T7W + "test_the_cmd_twins_use_the_recorded_interpreter[skydoctor.cmd]", "t7f-skydoctor-cmd-reads-the-file"),
+    # toolchain-check: exactly the SDK major Spriggit targets
+    ("tools/toolchain-check.sh", "awk -v n=\"$NEED\" '$1+0==n{f=1} END{exit !f}'", "awk -v n=\"$NEED\" '$1+0>=n{f=1} END{exit !f}'",
+     "tests/test_toolchain_check.py::test_pinned_version_on_an_sdk_11_only_machine_cannot_work",
+     "t7f-toolchain-dotnet-exact-major"),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _T7F]
 # ---- Plan 8 T8 fix round 1 (lane p8-paths): review I1 (both halves), M2, P1, P2. One twin per clause. ---------------
 _P8R1 = "tests/test_self_guard_creators.py::"
 _P8R1_SR = "tools/skyguard/self_rules.py"

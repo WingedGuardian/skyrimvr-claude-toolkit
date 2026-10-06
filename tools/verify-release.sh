@@ -278,13 +278,13 @@ if [ "$SCRUBBED" -eq 1 ]; then
     *) ok "repo checkout off the scrubbed PATH" ;;
   esac
 
-  # 2. setup.sh, twice (the second run must be a clean no-op). VERIFY_SETUP_ARGS passes e.g. `--agent all`
-  #    once setup.sh has that option.
+  # 2. setup.sh, twice (the second run must be a clean no-op): `--agent all` unless VERIFY_SETUP_ARGS says otherwise
+  #    (set it to an empty string for a plain `bash setup.sh`).
   # shellcheck disable=SC2086
-  out=$(cd "$GAME" && scrub bash setup.sh ${VERIFY_SETUP_ARGS:-} </dev/null 2>&1); rc=$?
+  out=$(cd "$GAME" && scrub bash setup.sh ${VERIFY_SETUP_ARGS---agent all} </dev/null 2>&1); rc=$?
   [ $rc -eq 0 ] && ok "setup.sh in the scrubbed env (exit 0)" || { bad "setup.sh in the scrubbed env" "exit $rc"; echo "$out" | tail -15; }
   # shellcheck disable=SC2086
-  out=$(cd "$GAME" && scrub bash setup.sh ${VERIFY_SETUP_ARGS:-} </dev/null 2>&1); rc=$?
+  out=$(cd "$GAME" && scrub bash setup.sh ${VERIFY_SETUP_ARGS---agent all} </dev/null 2>&1); rc=$?
   [ $rc -eq 0 ] && ok "setup.sh again: idempotent (exit 0)" || { bad "setup.sh re-run" "exit $rc"; echo "$out" | tail -15; }
   left=$(grep -lE '\{\{[A-Z_]+\}\}' "$GAME/CLAUDE.md" "$GAME/AGENTS.md" "$GAME"/.claude/hooks/*.sh "$GAME"/.codex/hooks/* "$GAME/.codex/hooks.json" 2>/dev/null | tr '\n' ' ')
   [ -z "$left" ] && ok "no unrendered placeholder left by setup" || bad "placeholders left by setup" "$left"

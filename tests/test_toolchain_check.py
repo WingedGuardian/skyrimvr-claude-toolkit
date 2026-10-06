@@ -62,9 +62,17 @@ def test_pinned_version_on_sdk_9_cannot_work(tmp_path):
     out = _run(tmp_path, PIN, ["9.0.100"])
     assert " ok " in _line(out, "spriggit version"), out
     assert "CANNOT WORK" in _line(out, "spriggit entry point"), out
-    assert "SDK 10+" in out and "Microsoft.DotNet.SDK.10" in out, out
+    assert "needs SDK 10." in out and "Microsoft.DotNet.SDK.10" in out, out
     assert "RESULT: DEGRADED" in out
     assert "spriggit-entry-point" in out.split("RESULT:")[1]
+
+
+def test_pinned_version_on_an_sdk_11_only_machine_cannot_work(tmp_path):
+    """Exactly major 10, like setup.sh (T7 fix round 1): a newer major alone is not the tested SDK and brings no
+    .NET 10 runtime for the net10.0 tool."""
+    out = _run(tmp_path, PIN, ["11.0.100"])
+    assert "CANNOT WORK" in _line(out, "spriggit entry point"), out
+    assert "RESULT: DEGRADED" in out
 
 
 def test_older_spriggit_against_the_pin_is_a_mismatch(tmp_path):

@@ -59,7 +59,7 @@ case "$GAME_ROOT_WIN" in [A-Za-z]:/*) CODEX_WIN=1 ;; *) CODEX_WIN="" ;; esac
 # The root as a native Python opens it (every tools/*.py call below): the C:/ form wherever Git Bash's cygpath
 # exists -- the same as `pwd -W` normally -- else the shell's own path (Linux).
 PY_ROOT="$GAME_ROOT_WIN"
-if command -v cygpath >/dev/null 2>&1; then
+if type cygpath >/dev/null 2>&1; then
     PY_ROOT=$(cygpath -m "$GAME_DIR" 2>/dev/null | tr -d '\r') || PY_ROOT="$GAME_ROOT_WIN"
     [ -n "$PY_ROOT" ] || PY_ROOT="$GAME_ROOT_WIN"
 fi

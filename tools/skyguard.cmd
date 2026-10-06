@@ -1,8 +1,14 @@
 @echo off
 rem skyguard.cmd -- the cmd twin of tools/skyguard.sh:  tools\skyguard.cmd lock status
-rem Python: %SKYGUARD_PYTHON%, else py -3, else python. For the lock without Python: tools\skyguard-unlock.cmd
+rem Python: %SKYGUARD_PYTHON%, else the one setup.sh recorded in skyrim-paths.env, else py -3, else python. For the lock without Python: tools\skyguard-unlock.cmd
 setlocal EnableExtensions
 set "HERE=%~dp0"
+if defined SKYGUARD_PYTHON goto custom
+rem No %SKYGUARD_PYTHON%: the interpreter setup.sh recorded in ..\skyrim-paths.env (Plan 8 T7), only when it exists.
+set "SG_FILE_PY="
+if exist "%HERE%..\skyrim-paths.env" for /f "usebackq tokens=1,* delims==" %%a in ("%HERE%..\skyrim-paths.env") do if "%%a"=="SKYGUARD_PYTHON" set "SG_FILE_PY=%%b"
+if defined SG_FILE_PY set "SG_FILE_PY=%SG_FILE_PY:'=%"
+if defined SG_FILE_PY if exist "%SG_FILE_PY%" set "SKYGUARD_PYTHON=%SG_FILE_PY%"
 if defined SKYGUARD_PYTHON goto custom
 py -3 -c "import sys" >nul 2>nul
 if not errorlevel 1 goto usepy

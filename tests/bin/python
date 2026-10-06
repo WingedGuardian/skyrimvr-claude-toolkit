@@ -22,5 +22,12 @@ _self="$(cd "$(dirname "$0")" && pwd)"
 _name="$(basename "$0")"
 _path=":$PATH:"; _path="${_path//:$_self:/:}"; _path="${_path#:}"; _path="${_path%:}"
 _real="$(PATH="$_path" command -v "$_name" 2>/dev/null)"
+# No real interpreter of this NAME (the contained launcher's PATH has no `py` launcher): run the real python3 /
+# python instead -- `py -3` minus its -3 -- so a script setup.sh runs through the chosen candidate (migrate-3x, the
+# paths readback) still runs, as it would on a machine that has `py`.
+if [ -z "$_real" ]; then
+    for _n in python3 python; do _real="$(PATH="$_path" command -v "$_n" 2>/dev/null)" && [ -n "$_real" ] && break; done
+    [ "$_name" = py ] && [ "${1:-}" = -3 ] && shift
+fi
 [ -n "$_real" ] && exec "$_real" "$@"
 exit 127
