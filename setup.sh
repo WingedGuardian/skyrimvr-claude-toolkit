@@ -648,7 +648,8 @@ PATHS_BAD=""
 #   skypaths notice   the session-start notice for this install, verbatim (paths.legacy_notice), or nothing
 #   skypaths readback the six values the guard reads from <root>/skyrim-paths.env, one per line (exit 3: malformed)
 #   skypaths legacy   each protected folder the 3.x file still ADDS over the root file, as KEY=value (the reader's
-#                     own union, read_install); nothing printed = it adds nothing
+#                     own union, read_install); nothing printed = it adds nothing. A first line "BROKEN<TAB><text>"
+#                     = the reader cannot read it, or a protected folder in it (paths.LEGACY_BROKEN)
 skypaths() {
     MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B -c '
 import os, sys
@@ -667,6 +668,8 @@ elif mode == "readback":
         lines.append((cfg.file.get(k) or ("",))[0])
 else:
     cfg = paths.read_install(root, {})
+    if getattr(cfg, "legacy_broken", False):
+        lines.append("BROKEN\t" + paths.LEGACY_BROKEN)
     if cfg.legacy:
         own = paths.read_config(os.path.join(root, paths.PATHS_FILE), {})
         for k in paths.PROTECTION_KEYS:
@@ -700,6 +703,14 @@ retire_3x_paths() {
         echo "  .claude/skyrim-paths.env (the 3.x location) could not be compared by the guard's reader, so it is kept."
         return 0
     fi
+    case "$extra" in
+        BROKEN*)
+            # The guard cannot read it (or a protected folder in it), so that folder is NOT protected and the session
+            # start says so every time: never moved out of sight here -- the user decides (fix it, or remove it).
+            printf '  %s\n' "$(printf '%s\n' "$extra" | sed -n '1s/^BROKEN\t//p')"
+            echo "  It is kept: fix that line (single quotes, an absolute path), or move it into .claude/backups/."
+            return 0 ;;
+    esac
     if [ -n "$extra" ]; then
         echo "  .claude/skyrim-paths.env (the 3.x location) lists protected folders skyrim-paths.env does not, and the"
         echo "  guard still protects them (it combines the two files) until you remove it:"

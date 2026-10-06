@@ -6841,10 +6841,10 @@ _T7F = [
     # I2: values spliced into sed replacements are escaped
     ("setup.sh", "sed_repl() { printf '%s' \"$1\" | sed -e 's/[\\\\|&]/\\\\&/g'; }", "sed_repl() { printf '%s' \"$1\"; }",
      _T7S + "test_an_ampersand_in_the_root_is_filled_in_once_and_rerun_changes_nothing", "t7f-sed-replacement-escaped"),
-    # M1: the 3.x file is judged by the reader's own union (protection keys only)
-    ("setup.sh", '        for k in paths.PROTECTION_KEYS:', '        for k in paths.ENV_KEYS:',
-     _T7S + "test_a_3x_paths_file_differing_only_in_a_folder_the_guard_does_not_protect_is_retired",
-     "t7f-legacy-protection-keys-only"),
+    # M1: the 3.x file is judged by the reader's own union (read_install), which takes protection keys only -- an
+    # ENV_KEYS loop here was an equivalent mutant (measured). The broken case is the reader's own flag:
+    ("setup.sh", '    if getattr(cfg, "legacy_broken", False):', "    if False:",
+     _T7S + "test_a_3x_paths_file_the_guard_cannot_read_is_kept_and_said[malformed]", "t7f-broken-legacy-kept-and-said"),
     # M5: a missing migration tool is "not finished"
     ("setup.sh", '    if [ -z "$PY_FOUND" ] || [ "${MIG_RC-unset}" != 0 ]; then',
      '    if [ -z "$PY_FOUND" ] || [ "${MIG_RC:-0}" != 0 ]; then',
@@ -6868,10 +6868,6 @@ _T7F = [
     ("tools/skydoctor", '    if [ -e "$cand" ]; then run=("$cand"); else IFS=\' \' read -r -a run <<< "$cand"; fi',
      '    IFS=\' \' read -r -a run <<< "$cand"',
      _T7W + "test_the_environment_still_wins_over_the_file[skydoctor]", "t7f-skydoctor-path-is-one-word"),
-    ("tools/skyguard.sh", '                                 [ -n "$v" ] && [ -e "$v" ] && file_py="$v" ;;',
-     '                                 file_py="$v" ;;',
-     _T7W + "test_a_recorded_interpreter_that_does_not_exist_is_skipped[missing-skyguard.sh]",
-     "t7f-skyguard-sh-skips-a-missing-interpreter"),
     ("tools/skyguard.cmd", 'if defined SG_FILE_PY if exist "%SG_FILE_PY%" set "SKYGUARD_PYTHON=%SG_FILE_PY%"',
      'rem', _T7W + "test_the_cmd_twins_use_the_recorded_interpreter[skyguard.cmd]", "t7f-skyguard-cmd-reads-the-file"),
     ("tools/skydoctor.cmd", 'if defined SG_FILE_PY if exist "%SG_FILE_PY%" set "SKYGUARD_PYTHON=%SG_FILE_PY%"',

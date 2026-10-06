@@ -340,15 +340,18 @@ def test_a_3x_paths_file_that_adds_a_folder_is_kept_and_its_folders_named(game_d
 
 @pytest.mark.parametrize("body", [b"SKYRIM_CONFIG_DIR=$HOME/My INIs\n", b"SKYRIM_CONFIG_DIR='D:/M\x81ller'\n"],
                          ids=["malformed", "not-utf8"])
-def test_a_3x_paths_file_the_guard_reads_nothing_from_is_retired(game_dir, body):
-    """The union reader takes only WELL-FORMED protected values from the 3.x file and ignores one it cannot decode,
-    so these add nothing: retired by a move like any other, never deleted."""
+def test_a_3x_paths_file_the_guard_cannot_read_is_kept_and_said(game_dir, body):
+    """The reader adds nothing from such a file, so the folder it meant is NOT protected, and the session start
+    says so (paths.LEGACY_BROKEN, T8 fix round 2). Setup says the same and never moves it out of sight."""
     legacy, _ = _legacy(game_dir)
     legacy.write_bytes(legacy.read_bytes() + body)
     before = legacy.read_bytes()
     r = run_setup(game_dir)
-    assert not legacy.exists(), r.stdout[-2000:]
-    assert len(_retired(game_dir)) == 1 and _retired(game_dir)[0].read_bytes() == before
+    assert r.returncode == 0, r.stdout[-2000:]
+    assert legacy.read_bytes() == before and not _retired(game_dir), r.stdout[-2000:]
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import paths
+    assert paths.LEGACY_BROKEN in r.stdout
 
 
 def test_a_3x_paths_file_differing_only_in_a_folder_the_guard_does_not_protect_is_retired(game_dir):
