@@ -1296,8 +1296,8 @@ MUTATIONS = [
                  "tests/test_instruction_neutrality.py::test_core_tells_every_agent_to_read_my_preferences",
                  id="core-keeps-the-preferences-fallback"),
     # --- preferences injection (Plan 3, D15) --------------------------------
-    pytest.param("tools/skyguard/prefs.py", "        elif not in_fence and _HEADING.match(line):",
-                 "        elif _HEADING.match(line):",
+    pytest.param("tools/skyguard/prefs.py", "if not fenced[i] and _HEADING.match(line)), None)",
+                 "if _HEADING.match(line)), None)",
                  "tests/test_skyguard_prefs.py::test_heading_inside_a_code_fence_is_not_the_section",
                  id="prefs-ignore-a-fenced-heading"),
     pytest.param("tools/skyguard/prefs.py", "    if len(data) > CAP:", "    if False:",
@@ -6659,3 +6659,30 @@ MUTATIONS += [
                  "tests/test_skydoctor.py::test_an_expired_lock_lift_is_relocked_not_stranded",
                  id="p6final-doctor-relocks-expired-lift"),
 ]
+
+
+# ---- Plan 8 T6 (lane p8-deferred): deferred items fixed in Plan 8. One twin per clause, each killed by the named test.
+# Rows 18-20, prefs: an unclosed fence is plain text, a fence closes only on its own character, the `(...)` variant
+# heading is the section, a near-miss heading is said and audited, the read is bounded, a section beyond the bound
+# says why it is missing, and a section cut by the bound is marked as cut.
+_P8P = "tools/skyguard/prefs.py"
+_P8PT = "tests/test_skyguard_prefs.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_P8P, "            end = next((j for j in range(i + 1, len(lines)) if _closes(lines[j], m.group(1))), None)",
+     "            end = next((j for j in range(i + 1, len(lines)) if _closes(lines[j], m.group(1))), len(lines) - 1)",
+     _P8PT + "test_an_unclosed_fence_does_not_swallow_the_sections_after_it", "p8t6-prefs-unclosed-fence-is-text"),
+    (_P8P, "    return bool(m) and m.group(1)[0] == opener[0] and len(m.group(1)) >= len(opener) and \\",
+     "    return bool(m) and len(m.group(1)) >= len(opener) and \\",
+     _P8PT + "test_a_closed_fence_still_hides_headings_inside_it", "p8t6-prefs-fence-closer-same-character"),
+    (_P8P, r'_HEADING = re.compile(r"^##[ \t]+my[ \t]+preferences[ \t]*(?:\([^)\n]*\)[ \t]*)?:?[ \t]*#*[ \t]*$", re.I)',
+     r'_HEADING = re.compile(r"^##[ \t]+my[ \t]+preferences[ \t]*:?[ \t]*#*[ \t]*$", re.I)',
+     _P8PT + "test_the_variant_heading_with_a_parenthetical_is_the_section", "p8t6-prefs-variant-heading"),
+    (_P8P, "        if near:\n", "        if False:\n",
+     _P8PT + "test_a_near_miss_heading_says_so_and_is_audited", "p8t6-prefs-near-miss-said"),
+    (_P8P, "            data = fh.read(READ_CAP)\n", "            data = fh.read()\n",
+     _P8PT + "test_the_read_is_bounded", "p8t6-prefs-read-bounded"),
+    (_P8P, "        if cut:\n            return _not_injected(", "        if False:\n            return _not_injected(",
+     _P8PT + "test_the_read_is_bounded", "p8t6-prefs-cut-says-why"),
+    (_P8P, "    elif cut and not ended:", "    elif False:",
+     _P8PT + "test_a_section_cut_by_the_read_cap_says_it_was_cut", "p8t6-prefs-cut-section-marked"),
+]]
