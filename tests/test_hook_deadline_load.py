@@ -179,7 +179,8 @@ def load():
     n = max(1, int(round(FACTOR * k)))
     burners = []
     try:
-        burners = [_start_burner() for _ in range(n)]
+        for _ in range(n):
+            burners.append(_start_burner())
         time.sleep(2)
         yield {"burners": n, "cores": k, "priority": PRIORITY}
     finally:
@@ -212,6 +213,7 @@ def _clean_path() -> str:
 def _shim(directory: Path, name: str, body: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / name).write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8", newline="\n")
+    (directory / name).chmod(0o755)
 
 
 def _claude_install(tmp: Path, py: str) -> Path:

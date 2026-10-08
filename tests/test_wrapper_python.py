@@ -27,7 +27,7 @@ def _install(tmp_path: Path, file_value: str | None) -> Path:
         shutil.copyfile(REPO / "tools" / name, inst / "tools" / name)
     if file_value is not None:
         (inst / "skyrim-paths.env").write_text(
-            "SKYRIM_GAME_ROOT='%s'\nSKYGUARD_PYTHON='%s'\n" % (inst.as_posix(), file_value), encoding="utf-8",
+            "SKYRIM_GAME_ROOT='%s'\nSKYGUARD_PYTHON='%s'\n" % (inst.as_posix(), file_value.replace("'", "'\\''")), encoding="utf-8",
             newline="\n")
     return inst
 
@@ -75,11 +75,29 @@ def test_a_recorded_interpreter_that_does_not_exist_is_skipped(tmp_path, name, v
 
 @pytest.mark.skipif(not WIN, reason="the .cmd twins run on Windows")
 @pytest.mark.parametrize("name", sorted(CMD_WRAPPERS))
-def test_the_cmd_twins_use_the_recorded_interpreter(tmp_path, name):
-    stub = _stub(tmp_path, "FILEPY", cmd=True)
+@pytest.mark.parametrize("tag", ["FILEPY", "FILEPY O'Brien", "FILEPY ! literal"],
+                         ids=["space", "apostrophe", "bang"])
+def test_the_cmd_twins_use_the_recorded_interpreter(tmp_path, name, tag):
+    stub = _stub(tmp_path, tag, cmd=True)
     inst = _install(tmp_path, stub.as_posix())
     env = {k: v for k, v in os.environ.items() if k != "SKYGUARD_PYTHON"}
+    env["PATH"] = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
     comspec = os.environ.get("COMSPEC", r"C:\Windows\System32\cmd.exe")
-    r = subprocess.run([comspec, "/d", "/c", str(inst / "tools" / name), "lock", "status"], capture_output=True,
+    r = subprocess.run([comspec, "/d", "/v:on", "/c", str(inst / "tools" / name), "lock", "status"], capture_output=True,
                        text=True, errors="replace", timeout=120, env=env)
-    assert "FILEPY -B" in r.stdout and CMD_WRAPPERS[name] in r.stdout, r.stdout + r.stderr
+    assert tag + " -B" in r.stdout and CMD_WRAPPERS[name] in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.skipif(not WIN, reason="the .cmd twins run on Windows")
+@pytest.mark.parametrize("name", sorted(CMD_WRAPPERS))
+def test_the_cmd_twins_keep_an_unquoted_recorded_interpreter(tmp_path, name):
+    stub = tmp_path / "fakepy.cmd"
+    stub.write_text("@echo UNQUOTED-PY %*\r\n", encoding="ascii")
+    inst = _install(tmp_path, None)
+    (inst / "skyrim-paths.env").write_text("SKYGUARD_PYTHON=" + stub.as_posix() + "\n")
+    env = {k: v for k, v in os.environ.items() if k != "SKYGUARD_PYTHON"}
+    env["PATH"] = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
+    comspec = os.environ.get("COMSPEC", r"C:\Windows\System32\cmd.exe")
+    result = subprocess.run([comspec, "/d", "/c", str(inst / "tools" / name), "lock", "status"],
+                            capture_output=True, text=True, timeout=120, env=env)
+    assert "UNQUOTED-PY -B" in result.stdout and CMD_WRAPPERS[name] in result.stdout, result.stdout + result.stderr

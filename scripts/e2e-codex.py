@@ -51,10 +51,12 @@ def make(dest_dir: Path, git: bool = False) -> Path:
     (copy / "Data" / "Scripts" / "Source" / "a.psc").write_text("Scriptname a\n")
     (copy / "Data" / "SKSE" / "Plugins" / "probe.ini").write_text("[Probe]\nvalue=1\n")
     (copy / "KNOWLEDGEBASE.local.md").write_text(f"# Local notes\n\n## My preferences\n\n- {SENTINEL}\n")
-    r = subprocess.run([bash(), "setup.sh"], cwd=copy, stdin=subprocess.DEVNULL, capture_output=True,
+    r = subprocess.run([bash(), "setup.sh", "--agent", "codex"], cwd=copy, stdin=subprocess.DEVNULL, capture_output=True,
                        text=True, timeout=300, encoding="utf-8", errors="replace",
                        env={**os.environ, "USERNAME": os.environ.get("USERNAME", "probe")})
     (dest_dir / "setup.log").write_text(r.stdout + "\n--- stderr ---\n" + r.stderr, encoding="utf-8")
+    if r.returncode:
+        raise SystemExit(r.returncode)
     if git:
         for c in (["init", "-q", "."], ["config", "user.email", "e2e@example.invalid"], ["config", "user.name", "e2e"],
                   ["add", "-A"], ["commit", "-qm", "install"]):

@@ -25,12 +25,14 @@ def _fake(tmp_path: Path, spriggit_version: str, sdks: list[str]) -> Path:
     b = tmp_path / "bin"
     b.mkdir()
     (b / "spriggit").write_text("#!/usr/bin/env bash\necho {}\n".format(spriggit_version), encoding="utf-8", newline="\n")
+    (b / "spriggit").chmod(0o755)
     sdk_lines = "\\n".join("{} [C:/fake/sdk]".format(s) for s in sdks)
     (b / "dotnet").write_text(
         "#!/usr/bin/env bash\n"
         'if [ "$1" = "--list-sdks" ]; then printf "{}\\n"; exit 0; fi\n'
         'echo "{}"\n'.format(sdk_lines, sdks[-1] if sdks else "0.0.0"),
         encoding="utf-8", newline="\n")
+    (b / "dotnet").chmod(0o755)
     return b
 
 
@@ -125,6 +127,7 @@ def _toolkit(tmp_path: Path) -> Path:
 
 def _script(path: Path, body: str) -> None:
     path.write_text("#!/bin/bash\n" + body, encoding="utf-8", newline="\n")
+    path.chmod(0o755)
 
 
 def _bins(tmp_path: Path) -> Path:

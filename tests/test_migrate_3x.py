@@ -805,6 +805,24 @@ def test_an_unclosed_four_backtick_fence_is_closed_with_four(tmp_path):
     assert added.startswith(b"````\n"), added[:20]
 
 
+@pytest.mark.parametrize("tail", ["~~~~\n", "````still-code\n", "```\n"],
+                         ids=["other-kind", "trailing-text", "short-close"])
+def test_migration_closes_the_actual_open_fence_before_adding_preferences(tmp_path, tail):
+    root = make_391(tmp_path / "i")
+    mine = ("# Local notes\n\n````text\n" + tail).encode("utf-8")
+    (root / "KNOWLEDGEBASE.local.md").write_bytes(mine)
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    assert run_inproc(root)[0] == 0
+    local = (root / "KNOWLEDGEBASE.local.md").read_text(encoding="utf-8")
+    assert local.startswith(mine.decode() + "````\n"), local[:200]
+    sys.path.insert(0, str(REPO / "tools"))
+    try:
+        from skyguard import prefs
+    finally:
+        sys.path.pop(0)
+    assert prefs.section(local) == "", "new preferences heading stayed inside the user's fence"
+
+
 def test_dry_run_writes_nothing(tmp_path):
     root = make_391(tmp_path / "i")
     (root / "CLAUDE.md").write_bytes(edited_claude())

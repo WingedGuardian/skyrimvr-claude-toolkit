@@ -164,7 +164,7 @@ def test_auto_configures_the_agents_found_on_path(game_dir, tmp_path, hide, stub
     assert r.returncode == 0, r.stdout[-1500:] + r.stderr[-1500:]
     assert "-> configuring: %s (--agent auto)" % expected in r.stdout, r.stdout[:800]
     assert configured(game_dir, "CLAUDE.md") is (expected in ("claude", "all"))
-    assert configured(game_dir, "AGENTS.md") is (expected in ("codex", "all") and WIN)
+    assert configured(game_dir, "AGENTS.md") is (expected in ("codex", "all"))
 
 
 def test_auto_is_the_default(game_dir, tmp_path):

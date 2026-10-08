@@ -57,6 +57,7 @@ def _shim(directory: Path, name: str, body: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     p = directory / name
     p.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8", newline="\n")
+    p.chmod(0o755)
     return p
 
 

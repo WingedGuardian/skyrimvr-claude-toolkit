@@ -26,6 +26,7 @@ import pytest
 from conftest import REPO
 
 BS = chr(92)
+CMD_ONLY = pytest.mark.skipif(sys.platform != "win32", reason="the CMD regression runs on Windows")
 
 # Final E2E verdicts must include checks appended after the live probe returns.
 E2E_VERDICT_MUTATIONS = [pytest.param(
@@ -46,6 +47,91 @@ MUTATION_IGNORE = shutil.ignore_patterns(
 
 # (id, relative file, text to find, replacement, test that must then fail)
 MUTATIONS = E2E_VERDICT_MUTATIONS + [
+    pytest.param("tools/" + name,
+                 'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'" set "SG_FILE_PY=%SG_FILE_PY:~1,-1%"',
+                 "rem outer quote decoding removed",
+                 "tests/test_wrapper_python.py::test_the_cmd_twins_use_the_recorded_interpreter[space-" + name + "]",
+                 marks=CMD_ONLY, id="review-" + name + "-outer-quotes")
+    for name in ("skyguard.cmd", "skydoctor.cmd")
+] + [
+    pytest.param("tools/" + name,
+                 'if defined SG_FILE_PY set "SG_FILE_PY=%SG_FILE_PY:\'\\\'\'=\'%"',
+                 "rem embedded apostrophe decoding removed",
+                 "tests/test_wrapper_python.py::test_the_cmd_twins_use_the_recorded_interpreter[apostrophe-" + name + "]",
+                 marks=CMD_ONLY, id="review-" + name + "-apostrophe")
+    for name in ("skyguard.cmd", "skydoctor.cmd")
+] + [
+    pytest.param("tools/" + name, "setlocal EnableExtensions DisableDelayedExpansion",
+                 "setlocal EnableExtensions",
+                 "tests/test_wrapper_python.py::test_the_cmd_twins_use_the_recorded_interpreter[bang-" + name + "]",
+                 marks=CMD_ONLY, id="review-" + name + "-delayed-expansion")
+    for name in ("skyguard.cmd", "skydoctor.cmd")
+] + [
+    pytest.param("tools/" + name,
+                 'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'"',
+                 'if defined SG_FILE_PY',
+                 "tests/test_wrapper_python.py::test_the_cmd_twins_keep_an_unquoted_recorded_interpreter[" + name + "]",
+                 marks=CMD_ONLY, id="review-" + name + "-unquoted-path")
+    for name in ("skyguard.cmd", "skydoctor.cmd")
+] + [
+    pytest.param("tests/test_hook_deadline_load.py",
+                 "        for _ in range(n):\n            burners.append(_start_burner())",
+                 "        burners = [_start_burner() for _ in range(n)]",
+                 "tests/test_hook_load_cleanup.py::test_partial_burner_start_failure_stops_and_waits_for_every_started_child",
+                 id="review-load-partial-start-cleanup"),
+    pytest.param("scripts/e2e-codex.py", '[bash(), "setup.sh", "--agent", "codex"]',
+                 '[bash(), "setup.sh"]',
+                 "tests/test_e2e_codex_verdict.py::test_make_refuses_failed_setup_before_git_initialization",
+                 id="review-e2e-explicit-agent"),
+    pytest.param("scripts/e2e-codex.py", "    if r.returncode:\n        raise SystemExit(r.returncode)",
+                 "    if False:\n        raise SystemExit(r.returncode)",
+                 "tests/test_e2e_codex_verdict.py::test_make_refuses_failed_setup_before_git_initialization",
+                 id="review-e2e-failed-setup-refuses"),
+    pytest.param("tools/migrate-3x.py", "fence[0] == token[0] and len(fence)", "True and len(fence)",
+                 "tests/test_migrate_3x.py::test_migration_closes_the_actual_open_fence_before_adding_preferences[other-kind]",
+                 id="review-migration-fence-kind"),
+    pytest.param("tools/migrate-3x.py", "len(fence) >= len(token)", "True",
+                 "tests/test_migrate_3x.py::test_migration_closes_the_actual_open_fence_before_adding_preferences[short-close]",
+                 id="review-migration-fence-length"),
+    pytest.param("tools/migrate-3x.py", "and not line[m.end():].strip():", ":",
+                 "tests/test_migrate_3x.py::test_migration_closes_the_actual_open_fence_before_adding_preferences[trailing-text]",
+                 id="review-migration-fence-trailing-text"),
+    pytest.param("scripts/build_release_zip.py", 'name = json.loads(_git("show", "{}:package.json".format(sha)).stdout)["name"]',
+                 'name = json.loads((Path(__file__).resolve().parent.parent / "package.json").read_text())["name"]',
+                 "tests/test_release_build.py::test_archive_name_comes_from_the_selected_commit_not_the_producer_checkout",
+                 id="review-builder-committed-product-slug"),
+    pytest.param("scripts/build_release_zip.py", 'raise Refused(4, "the committed package.json has no readable product name")',
+                 'return "skyrim-ai-assistant-toolkit"',
+                 "tests/test_release_build.py::test_a_missing_or_invalid_committed_product_slug_refuses[invalid-json]",
+                 id="review-builder-unreadable-product-slug"),
+    pytest.param("scripts/build_release_zip.py", 'if not isinstance(name, str) or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None:',
+                 "if False:",
+                 "tests/test_release_build.py::test_a_missing_or_invalid_committed_product_slug_refuses[traversal]",
+                 id="review-builder-invalid-product-slug"),
+    pytest.param(".github/workflows/ci.yml", 'tee "$RUNNER_TEMP/build.out"', "tee build.out",
+                 "tests/test_release_build.py::test_the_real_ci_build_step_keeps_its_log_outside_the_checkout",
+                 id="review-ci-build-log-outside-checkout"),
+    pytest.param("tools/verify-release.sh", ' || exit 2\n\n# The workspace goes under VERIFY_WORK_ROOT',
+                 '\n\n# The workspace goes under VERIFY_WORK_ROOT',
+                 "tests/test_verify_release.py::test_a_failed_product_slug_read_refuses_before_artifact_work",
+                 id="review-verify-product-slug-read-refuses"),
+    pytest.param("scripts/build-nexus-pack.sh", ' || die "cannot read release slug from package.json"', "",
+                 "tests/test_nexus_pack.py::test_a_failed_product_slug_read_refuses_before_a_download",
+                 id="review-nexus-product-slug-read-refuses"),
+    pytest.param("tools/skyguard/session.py", "                with state.locked(str(sf)):", "                if True:",
+                 "tests/test_skyguard_session_start.py::test_session_reads_the_state_to_be_rewritten_under_the_writer_lock",
+                 id="review-session-state-read-locked"),
+    pytest.param("tools/skyguard/session.py", "                    st = state.read(str(sf))", "                    pass",
+                 "tests/test_skyguard_session_start.py::test_session_start_preserves_a_newer_persistent_decision[True]",
+                 id="review-session-state-refresh"),
+    pytest.param("tools/skyguard/session.py", 'if source != "compact" and not st.rejected and st.lifts:',
+                 'if not st.rejected and st.lifts:',
+                 "tests/test_skyguard_session_start.py::test_compact_does_not_clear_or_report_lifts",
+                 id="review-session-compact-state-read-only"),
+    pytest.param("tools/skyguard/recovery.py", "    if not mcp_rules.is_devbench(tool_name):",
+                 '    if len(parts) < 3 or parts[0] != "mcp" or not parts[1].startswith("devbench"):',
+                 "tests/test_recovery_snapshots.py::test_each_judged_devbench_alias_keeps_the_save_and_cosave_before_the_call[my__devbench]",
+                 id="review-recovery-devbench-alias"),
     pytest.param("tools/skyguard/self_rules.py",
                  "grep(deletes.INTERP_DESTROYER, code)", "grep(deletes.DESTROYER, code)",
                  "tests/test_skyguard_self_rules.py::test_recycle_examples_outside_the_install_do_not_become_state_targets[double]",
@@ -208,6 +294,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + [
         'ROOT_WIN="${ROOT_WIN^}:${ROOT:2}"',
         'ROOT_WIN="${ROOT_WIN^}:${ROOT:3}"',
         "tests/test_hooks.py::test_a_drive_root_is_converted_to_its_windows_spelling",
+        marks=CMD_ONLY,
         id="wrapper-drive-root-spelling",
     ),
     # Lose the `pwd -W` fallback for a root on an MSYS mount (/tmp/...), which has no textual spelling.
@@ -216,6 +303,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + [
         '    msys*:/*)          ROOT_WIN=',
         '    msys*:/__never__)  ROOT_WIN=',
         "tests/test_hooks.py::test_a_root_on_an_msys_mount_still_gets_its_windows_spelling",
+        marks=CMD_ONLY,
         id="wrapper-msys-mount-root-spelling",
     ),
     # The same block must be the same CODE in every hook, or the protect-bash tests above stop covering
@@ -3938,7 +4026,7 @@ _SST = "tests/test_skyguard_session_start.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SS, '        if source == "compact":\n            return [disabled] if disabled else []', '        if False:\n            return []',
      _SST + "test_compact_does_not_clear_or_report_lifts", "l2-sess-compact-shortcut"),
-    (_SS, "        if not st.rejected and st.lifts:", "        if False:",
+    (_SS, "                    if not st.rejected and st.lifts:", "                    if False:",
      _SST + "test_a_guards_lift_is_reported_and_cleared_at_start", "l2-sess-clear"),
     (_SS, '        failure = _relock(root) if engaged else ""', '        failure = ""',
      _SST + "test_relock_happens_before_the_report_and_names_the_lifted_files", "l2-sess-relock"),
@@ -6271,8 +6359,8 @@ _M3_CLAUSES = [
      _M3T + "test_a_newline_in_the_source_label_stays_in_its_comment"),
     # Minor: the fence closer is as long as the opener.
     ("m3x-fence-closer-matches-opener", _M3,
-     "            token = _FENCE_RUN.match(line).group(1) if token is None else None",
-     "            token = m.group(1) if token is None else None",
+     "                token = fence",
+     '                token = "```"',
      _M3T + "test_an_unclosed_four_backtick_fence_is_closed_with_four"),
     # N3: the snapshot counts each file once against free space.
     ("snap-free-space-counts-each-file-once", _SN, 'sort -zu "$LIST" > "$UNIQ"', 'cat "$LIST" > "$UNIQ"',
@@ -7059,15 +7147,16 @@ _T7F = [
      '    IFS=\' \' read -r -a run <<< "$cand"',
      _T7W + "test_the_environment_still_wins_over_the_file[skydoctor]", "t7f-skydoctor-path-is-one-word"),
     ("tools/skyguard.cmd", 'if defined SG_FILE_PY if exist "%SG_FILE_PY%" set "SKYGUARD_PYTHON=%SG_FILE_PY%"',
-     'rem', _T7W + "test_the_cmd_twins_use_the_recorded_interpreter[skyguard.cmd]", "t7f-skyguard-cmd-reads-the-file"),
+     'rem', _T7W + "test_the_cmd_twins_use_the_recorded_interpreter[space-skyguard.cmd]", "t7f-skyguard-cmd-reads-the-file"),
     ("tools/skydoctor.cmd", 'if defined SG_FILE_PY if exist "%SG_FILE_PY%" set "SKYGUARD_PYTHON=%SG_FILE_PY%"',
-     'rem', _T7W + "test_the_cmd_twins_use_the_recorded_interpreter[skydoctor.cmd]", "t7f-skydoctor-cmd-reads-the-file"),
+     'rem', _T7W + "test_the_cmd_twins_use_the_recorded_interpreter[space-skydoctor.cmd]", "t7f-skydoctor-cmd-reads-the-file"),
     # toolchain-check: exactly the SDK major Spriggit targets
     ("tools/toolchain-check.sh", "awk -v n=\"$NEED\" '$1+0==n{f=1} END{exit !f}'", "awk -v n=\"$NEED\" '$1+0>=n{f=1} END{exit !f}'",
      "tests/test_toolchain_check.py::test_pinned_version_on_an_sdk_11_only_machine_cannot_work",
      "t7f-toolchain-dotnet-exact-major"),
 ]
-MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _T7F]
+MUTATIONS += [pytest.param(*m[:4], id=m[4], marks=CMD_ONLY if m[4] in (
+    "t7f-skyguard-cmd-reads-the-file", "t7f-skydoctor-cmd-reads-the-file") else ()) for m in _T7F]
 # ---- Plan 8 T8 fix round 1 (lane p8-paths): review I1 (both halves), M2, P1, P2. One twin per clause. ---------------
 _P8R1 = "tests/test_self_guard_creators.py::"
 _P8R1_SR = "tools/skyguard/self_rules.py"

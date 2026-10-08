@@ -496,8 +496,8 @@ jobs:
       - name: Build the zip from the commit
         run: |
           set -euo pipefail
-          bash scripts/build-release-zip.sh HEAD "$RUNNER_TEMP/dist" | tee build.out
-          echo "ZIP=$(sed -n 's/^ZIP=//p' build.out)" >> "$GITHUB_ENV"
-          echo "COMMIT=$(sed -n 's/^COMMIT=//p' build.out)" >> "$GITHUB_ENV"
+          bash scripts/build-release-zip.sh HEAD "$RUNNER_TEMP/dist" | tee "$RUNNER_TEMP/build.out"
+          echo "ZIP=$(sed -n 's/^ZIP=//p' "$RUNNER_TEMP/build.out")" >> "$GITHUB_ENV"
+          echo "COMMIT=$(sed -n 's/^COMMIT=//p' "$RUNNER_TEMP/build.out")" >> "$GITHUB_ENV"
       - name: Verify the zip in a scrubbed environment
         run: bash tools/verify-release.sh --local "$ZIP" --scrubbed --expect-commit "$COMMIT"

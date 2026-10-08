@@ -18,6 +18,7 @@ offline and still exercises the completeness logic, which is the part that faile
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -71,6 +72,28 @@ def test_a_complete_pack_has_exactly_the_required_shape(tmp_path):
     got = {f.name for f in dest.iterdir()}
     assert REQUIRED <= got, "missing from pack: %s" % (REQUIRED - got)
     assert not (got - REQUIRED), "unexpected strays in pack: %s" % (got - REQUIRED)
+
+
+def test_a_failed_product_slug_read_refuses_before_a_download(tmp_path):
+    checkout = tmp_path / "checkout"
+    (checkout / "scripts").mkdir(parents=True)
+    script = checkout / "scripts/build-nexus-pack.sh"
+    script.write_bytes(SCRIPT.read_bytes())
+    (checkout / "package.json").write_text("not json", encoding="utf-8")
+    _, cl, de = _stage(tmp_path)
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    marker = tmp_path / "unexpected-download"
+    gh = stub / "gh"
+    gh.write_text('#!/bin/sh\nprintf called > "$DOWNLOAD_MARKER"\nexit 1\n')
+    gh.chmod(0o755)
+    env = dict(subprocess.os.environ, NEXUS_PACK_ROOT=str(tmp_path),
+               PYTHON=sys.executable.replace("\\", "/"), DOWNLOAD_MARKER=str(marker),
+               PATH=str(stub) + subprocess.os.pathsep + subprocess.os.environ.get("PATH", ""))
+    result = subprocess.run([BASH, str(script), TAG, str(cl), str(de)], env=env,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 1 and "cannot read release slug" in result.stderr, result.stdout + result.stderr
+    assert not marker.exists(), "an identity-read failure reached the download step"
 
 
 def test_it_refuses_when_the_changelog_was_never_authored(tmp_path):

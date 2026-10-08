@@ -414,6 +414,15 @@ def test_the_mcp_hook_copies_the_save_before_devbench_overwrites_it(inst):
     assert sorted(inst.stored("save")) == ["Quick.ess", "Quick.skse"]
 
 
+@pytest.mark.parametrize("server", ["DevBench-vr", "skyrim-devbench", "my__devbench"])
+def test_each_judged_devbench_alias_keeps_the_save_and_cosave_before_the_call(inst, server):
+    payload = {"session_id": "s-1", "tool_name": "mcp__" + server + "__game",
+               "hook_event_name": "PreToolUse", "tool_input": {"action": "save", "name": "Quick"}}
+    result = _engine(inst, ["claude", "protect-mcp"], payload)
+    assert result.returncode == 0 and b'"ask"' in result.stdout, result.stderr
+    assert inst.stored("save") == {"Quick.ess": sha(b"quick save bytes"), "Quick.skse": sha(b"quick co-save")}
+
+
 # ---------------------------------------------------------------- resolving and pruning
 
 

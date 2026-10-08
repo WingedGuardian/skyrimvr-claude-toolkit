@@ -196,6 +196,18 @@ def layer2_start(project, source="startup"):
         root = str(project)
         sf = Path(root) / ".skyguard" / "state.json"
         st = state.read(str(sf))
+        # Clear old lifts before scanning. Re-read under the writer lock so a
+        # newer CLI enable/disable decision cannot be overwritten by this start.
+        if source != "compact" and not st.rejected and st.lifts:
+            try:
+                lock._assert_sandbox(sf)
+                with state.locked(str(sf)):
+                    st = state.read(str(sf))
+                    if not st.rejected and st.lifts:
+                        persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
+                        state.write(str(sf), {"v": 1, "lifts": [], "persistent": persistent})
+            except (ValueError, OSError):
+                pass                                    # session-bound lifts still expire
         disabled = None
         if st.lock_disabled:
             try:
@@ -208,14 +220,7 @@ def layer2_start(project, source="startup"):
             return [disabled] if disabled else []
         engaged = _engaged(root) and not disabled
         lifted, drift = _scan(root, st.lifts) if engaged else ([], [])
-        # step 2: clear every lift (the persistent disable stays); THEN relock; THEN report
-        if not st.rejected and st.lifts:
-            try:
-                lock._assert_sandbox(sf)
-                persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
-                state.write(str(sf), {"v": 1, "lifts": [], "persistent": persistent})
-            except (ValueError, OSError):
-                pass                                    # lifts stay, but each is session-bound and expires (R6)
+        # Relock and report using the state captured before the clear.
         failure = _relock(root) if engaged else ""
         # step 3: the banners, in the order the brief lists them
         guards = [x for x in st.lifts if x["kind"] == "guards"]

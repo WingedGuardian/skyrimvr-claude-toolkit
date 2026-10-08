@@ -5,7 +5,7 @@
     bash scripts/build-release-zip.sh   <rev> <outdir> [--version V] [--allow-dirty]
 
 Run inside the repo. The zip is `git archive <rev>` minus EXCLUDE, under one root folder
-`<NAME_PREFIX>-<version>/`, plus a BUILD-INFO file naming the commit. Nothing that is not in the commit can
+`<product-slug>-<version>/`, plus a BUILD-INFO file naming the commit. Nothing that is not in the commit can
 reach it: not an untracked file, not an ignored one, not an uncommitted edit. (The old build rsync'ed the
 checkout, so any of those went to every user.)
 
@@ -34,6 +34,7 @@ import atexit
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -41,8 +42,6 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-# package.json owns the product slug; repository URLs retain their separate identity.
-NAME_PREFIX = json.loads((Path(__file__).resolve().parent.parent / "package.json").read_text(encoding="utf-8"))["name"]
 # Top-level paths that never ship. One list: the payload checker asserts their absence on the zip.
 # tests/ holds tests/fixtures/routes-harness/ among others; .github/ is CI.
 EXCLUDE = ("tests", ".github")
@@ -153,8 +152,19 @@ def default_version(sha: str) -> str:
     return tag[1:] if tag.startswith("v") else (tag or "dev-" + sha[:12])
 
 
+def release_slug(sha: str) -> str:
+    """Read product identity from the selected commit, like every archive member."""
+    try:
+        name = json.loads(_git("show", "{}:package.json".format(sha)).stdout)["name"]
+    except (ValueError, KeyError, TypeError):
+        raise Refused(4, "the committed package.json has no readable product name")
+    if not isinstance(name, str) or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None:
+        raise Refused(4, "the committed product name must be a lowercase, dash-separated slug")
+    return name
+
+
 def build(sha: str, version: str, outdir: Path) -> Path:
-    name = "{}-{}".format(NAME_PREFIX, version)
+    name = "{}-{}".format(release_slug(sha), version)
     tar_bytes = _archive(sha)
     when = int(_git("show", "-s", "--format=%ct", sha).stdout.strip())
     stamp = _zip_time(when)

@@ -144,6 +144,7 @@ def _run_local(tmp_path, *args):
     import os
     fake = tmp_path / "fake-dotnet"
     fake.write_text(LOCAL_DOTNET, newline="\n")
+    fake.chmod(0o755)
     plugin = tmp_path / "Mod.esp"
     plugin.write_bytes(b"TES4")
     env = {k: v for k, v in os.environ.items() if k != "SPRIGGIT"}

@@ -61,6 +61,7 @@ def _layout(tmp_path: Path, props: str = PROPS_NET8, at: str = "pinned"):
         '#!/bin/bash\nprintf "%s\\n" "$*" >> "{}"\n'
         'if [ "$1" = build ]; then mkdir -p "$(dirname "{}")"; printf MZ > "{}"; fi\n'
         'echo "fake-dotnet $*"\n'.format(log.as_posix(), dll, dll), encoding="utf-8", newline="\n")
+    (tmp_path / "dotnet").chmod(0o755)
     return tools, pinned, old
 
 

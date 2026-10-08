@@ -36,7 +36,8 @@ def _repo(tmp_path):
     r = tmp_path / "src"
     for rel, text in {"README.md": "hello\n", "setup.sh": "#!/usr/bin/env bash\necho setup\n",
                       "sub/a.txt": "a\n", "tests/test_x.py": "def test(): pass\n",
-                      ".github/workflows/ci.yml": "name: x\n", ".gitignore": "ignored.txt\n"}.items():
+                      ".github/workflows/ci.yml": "name: x\n", ".gitignore": "ignored.txt\n",
+                      "package.json": '{"name":"skyrim-ai-assistant-toolkit"}\n'}.items():
         p = r / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(text.encode())
@@ -371,6 +372,55 @@ def test_plain_eol_attributes_still_build(tmp_path):
     _commit_file(repo, ".gitattributes", "# eol only\n*.sh text eol=lf\n*.png binary\n")
     r, _ = _build(repo, "HEAD", "--version", "1")
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_archive_name_comes_from_the_selected_commit_not_the_producer_checkout(tmp_path):
+    repo = _repo(tmp_path)
+    _commit_file(repo, "package.json", '{"name":"historical-slug"}\n')
+    ancestor = _git(repo, "rev-parse", "HEAD")
+    _commit_file(repo, "package.json", '{"name":"future-slug"}\n')
+    result, out = _build(repo, ancestor, "--version", "1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    archive = _zip(out)
+    assert archive.name == "historical-slug-1.zip", archive.name
+    with zipfile.ZipFile(archive) as z:
+        assert z.read("historical-slug-1/package.json") == b'{"name":"historical-slug"}\n'
+
+
+def test_the_real_ci_build_step_keeps_its_log_outside_the_checkout(tmp_path):
+    import yaml
+    workflow = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text())
+    script = next(s["run"] for s in workflow["jobs"]["release-build"]["steps"]
+                  if s.get("name") == "Build the zip from the commit")
+    repo = _repo(tmp_path)
+    for filename in ("build-release-zip.sh", "build_release_zip.py"):
+        _commit_file(repo, "scripts/" + filename, (REPO / "scripts" / filename).read_text())
+    temp = tmp_path / "runner-temp"
+    temp.mkdir()
+    env_file = temp / "github-env"
+    env_file.touch()
+    env = dict(os.environ, RUNNER_TEMP=temp.as_posix(), GITHUB_ENV=env_file.as_posix(),
+               PYTHON=sys.executable.replace("\\", "/"))
+    result = subprocess.run([BASH, "-c", script], cwd=repo, env=env,
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    values = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
+    assert Path(values["ZIP"]).is_file() and values["COMMIT"] == _git(repo, "rev-parse", "HEAD")
+    assert _git(repo, "status", "--porcelain") == "", "the workflow itself dirtied the checkout"
+
+
+@pytest.mark.parametrize("identity", [None, "not json", "{}", '{"name":null}', '{"name":""}',
+                                    '{"name":"../outside"}'],
+                         ids=["missing", "invalid-json", "missing-name", "nonstring", "empty", "traversal"])
+def test_a_missing_or_invalid_committed_product_slug_refuses(tmp_path, identity):
+    repo = _repo(tmp_path)
+    if identity is not None:
+        _commit_file(repo, "package.json", identity)
+    else:
+        _git(repo, "rm", "package.json")
+        _git(repo, "commit", "-q", "-m", "fixture without identity")
+    result, out = _build(repo, "HEAD", "--version", "1")
+    assert result.returncode == 4 and not list(out.glob("*.zip")), result.stdout + result.stderr
 
 
 def test_a_submodule_refuses_the_build(tmp_path):

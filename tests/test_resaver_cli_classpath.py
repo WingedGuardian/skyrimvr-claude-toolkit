@@ -17,6 +17,7 @@ from conftest import BASH, REPO
 
 def _script(path: Path, body: str) -> None:
     path.write_text("#!/bin/bash\n" + body, encoding="utf-8", newline="\n")
+    path.chmod(0o755)
 
 
 def _setup(tmp_path: Path, jdk: str = "21.0.12") -> Path:

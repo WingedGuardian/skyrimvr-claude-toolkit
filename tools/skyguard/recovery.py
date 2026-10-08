@@ -227,7 +227,7 @@ def run(project, command, payload_empty, audit, roots, cwd="", shell="", agent="
 def mcp(project, tool_name, args, audit, roots, agent="", session_id="", deadline=None, now=None, env=None):
     """MCP route (protect-mcp): a DevBench save over an existing save keeps that save first."""
     parts = (tool_name or "").split("__")
-    if len(parts) < 3 or parts[0] != "mcp" or not parts[1].startswith("devbench"):
+    if not mcp_rules.is_devbench(tool_name):
         return
     name = mcp_rules.save_name(parts[-1], args)
     if name is None:

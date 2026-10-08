@@ -47,3 +47,25 @@ def test_main_uses_complete_checks_for_output_saved_results_and_exit(e2e, monkey
     assert "B2 FAIL" in output and "B2 PASS" not in output
     saved = json.loads((root.parent / "e2e-results.json").read_text())
     assert next(row for rows in saved.values() for row in rows if row["id"] == "B2")["pass"] is False
+
+
+def test_make_refuses_failed_setup_before_git_initialization(e2e, tmp_path, monkeypatch):
+    module, _ = e2e
+    calls = []
+    monkeypatch.setattr(module.shutil, "copytree", lambda src, dest, **kw: dest.mkdir())
+    monkeypatch.setattr(module, "bash", lambda: "fake-bash-never-launched")
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 1, "injected setup failure", "")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    dest = tmp_path / "make"
+    dest.mkdir()
+    monkeypatch.setattr(sys, "argv", ["e2e-codex.py", "--make", str(dest), "--git"])
+    with pytest.raises(SystemExit) as error:
+        module.main()
+    assert error.value.code == 1
+    assert len(calls) == 1, calls
+    assert calls[0] == ["fake-bash-never-launched", "setup.sh", "--agent", "codex"]
+    assert "injected setup failure" in (dest / "setup.log").read_text()

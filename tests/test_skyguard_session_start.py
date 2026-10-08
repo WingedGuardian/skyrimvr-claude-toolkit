@@ -11,6 +11,7 @@ l2-sess-disabled-trust, l2-sess-disabled-banner, l2-sess-rejected, l2-sess-engag
 from __future__ import annotations
 
 import hashlib
+import contextlib
 import itertools
 import os
 import shutil
@@ -35,6 +36,82 @@ SID = "sess-t10"
 FILES = ["Skyrim.esm", "Update.esm", "Dawnguard.esm", "Skyrim - Textures0.bsa"]
 _ids = itertools.count()
 SCRATCH = None
+
+
+@pytest.mark.parametrize("initial_disabled", [False, True])
+def test_session_start_preserves_a_newer_persistent_decision(tmp_path, monkeypatch, initial_disabled):
+    sf = tmp_path / ".skyguard/state.json"
+    lift = {"kind": "guards", "reason": "fixture", "session_id": "old", "agent": "claude",
+            "created": 1, "expires_at": 2}
+    old = {"lock_disabled": {"since": 1, "by_session": "old"}} if initial_disabled else {}
+    new = {} if initial_disabled else {"lock_disabled": {"since": 3, "by_session": "new"}}
+    state.write(sf, {"v": 1, "lifts": [lift], "persistent": old})
+
+    def concurrent_change(path):
+        state.write(sf, {"v": 1, "lifts": [lift], "persistent": new})
+
+    monkeypatch.setattr(lock, "_assert_sandbox", concurrent_change)
+    monkeypatch.setattr(session, "_engaged", lambda root: True)
+    monkeypatch.setattr(session, "_scan", lambda root, lifts: ([], []))
+    monkeypatch.setattr(session, "_relock", lambda root: "")
+    monkeypatch.setattr(session, "_guard_drift", lambda root: None)
+    banners = session.layer2_start(tmp_path)
+    final = state.read(sf)
+    assert final.lock_disabled == new.get("lock_disabled"), final
+    assert final.lifts == []
+    assert any("lock DISABLED" in line for line in banners) == bool(new), banners
+
+
+def test_session_scan_cannot_overwrite_a_later_persistent_disable(tmp_path, monkeypatch):
+    sf = tmp_path / ".skyguard/state.json"
+    lift = {"kind": "guards", "reason": "fixture", "session_id": "old", "agent": "claude",
+            "created": 1, "expires_at": 2}
+    state.write(sf, {"v": 1, "lifts": [lift], "persistent": {}})
+    disabled = {"since": 3, "by_session": "new"}
+
+    def concurrent_change(root, lifts):
+        state.write(sf, {"v": 1, "lifts": [], "persistent": {"lock_disabled": disabled}})
+        return [], []
+
+    monkeypatch.setattr(lock, "_assert_sandbox", lambda path: None)
+    monkeypatch.setattr(session, "_engaged", lambda root: True)
+    monkeypatch.setattr(session, "_scan", concurrent_change)
+    monkeypatch.setattr(session, "_relock", lambda root: "")
+    monkeypatch.setattr(session, "_guard_drift", lambda root: None)
+    session.layer2_start(tmp_path)
+    assert state.read(sf).lock_disabled == disabled
+
+
+def test_session_reads_the_state_to_be_rewritten_under_the_writer_lock(tmp_path, monkeypatch):
+    sf = tmp_path / ".skyguard/state.json"
+    lift = {"kind": "guards", "reason": "fixture", "session_id": "old", "agent": "claude",
+            "created": 1, "expires_at": 2}
+    state.write(sf, {"v": 1, "lifts": [lift], "persistent": {}})
+    real_read, real_locked = state.read, state.locked
+    active, reads = [], []
+
+    @contextlib.contextmanager
+    def tracked_lock(path, wait=None):
+        with real_locked(path, wait):
+            active.append(True)
+            try:
+                yield
+            finally:
+                active.pop()
+
+    def tracked_read(path):
+        reads.append(bool(active))
+        return real_read(path)
+
+    monkeypatch.setattr(state, "locked", tracked_lock)
+    monkeypatch.setattr(state, "read", tracked_read)
+    monkeypatch.setattr(lock, "_assert_sandbox", lambda path: None)
+    monkeypatch.setattr(session, "_engaged", lambda root: True)
+    monkeypatch.setattr(session, "_scan", lambda root, lifts: ([], []))
+    monkeypatch.setattr(session, "_relock", lambda root: "")
+    monkeypatch.setattr(session, "_guard_drift", lambda root: None)
+    session.layer2_start(tmp_path)
+    assert reads and reads[-1], reads
 
 
 def _whoami():

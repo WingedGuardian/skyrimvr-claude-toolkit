@@ -567,19 +567,21 @@ def _write_checked(path: Path, data: bytes):
         raise _Failed("{} did not read back identical".format(path.name))
 
 
-_PREFS_FENCE = re.compile(r"^[ \t]{0,3}(```|~~~)")    # the session hook's own fence test (skyguard/prefs.py)
 _FENCE_RUN = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 
 
 def _open_fence(text: str):
-    """The fence token left OPEN at the end of `text`, counted the way the session hook counts (it toggles on
-    every fence line), or None. An unclosed fence would swallow the blocks' headings into the preferences."""
+    """The fence left open at EOF, or None. A closer must match the opener's character,
+    be at least as long, and have no trailing text, as in the preferences parser."""
     token = None
     for line in text.splitlines():
-        m = _PREFS_FENCE.match(line)
+        m = _FENCE_RUN.match(line)
         if m:
-            # The full run (```` or ~~~~~), so the closer this tool appends is as long as the opener.
-            token = _FENCE_RUN.match(line).group(1) if token is None else None
+            fence = m.group(1)
+            if token is None:
+                token = fence
+            elif fence[0] == token[0] and len(fence) >= len(token) and not line[m.end():].strip():
+                token = None
     return token
 
 

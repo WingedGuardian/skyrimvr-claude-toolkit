@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -78,6 +79,20 @@ def test_a_whole_artifact_passes(tmp_path, payload):
     r = _verify(tmp_path, _variant(tmp_path, payload), "--expect-commit", SHA)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr
     assert "RESULT: OK" in r.stdout
+
+
+def test_a_failed_product_slug_read_refuses_before_artifact_work(tmp_path):
+    checkout = tmp_path / "checkout"
+    (checkout / "tools").mkdir(parents=True)
+    script = checkout / "tools/verify-release.sh"
+    script.write_bytes(VERIFY.read_bytes())
+    (checkout / "package.json").write_text("not json", encoding="utf-8")
+    env = _env(tmp_path)
+    env["PYTHON"] = sys.executable.replace("\\", "/")
+    result = subprocess.run([BASH, str(script), "--local", str(tmp_path / "absent.zip")],
+                            env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert not list(tmp_path.glob("verify-release.*")), "artifact work began after a failed identity read"
 
 
 def test_a_payload_defect_is_red_on_the_payload_line(tmp_path, payload):
