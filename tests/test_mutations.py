@@ -27,6 +27,17 @@ from conftest import REPO
 
 BS = chr(92)
 
+# Final E2E verdicts must include checks appended after the live probe returns.
+E2E_VERDICT_MUTATIONS = [pytest.param(
+    "scripts/e2e-codex.py", anchor, indent + "pass",
+    "tests/test_e2e_codex_verdict.py::test_checks_added_after_probe_determine_the_phase_verdict[" + case + "]",
+    id="e2e-verdict-" + case,
+) for anchor, indent, case in [
+    ('        p["pass"] = all(p["checks"].values())  # A8: include the residual check', "        ", "phase_a-A8-nogit"),
+    ('    p["pass"] = all(p["checks"].values())  # B2: include file and canary checks', "    ", "phase_b-B2"),
+    ('        p["pass"] = all(p["checks"].values())  # C2: include file and trust checks', "        ", "phase_c-C2-modified"),
+]]
+
 # Copies for mutation must INCLUDE tests/ (unlike conftest.copy_repo, which
 # deliberately excludes it) -- we re-run the suite inside the copy.
 MUTATION_IGNORE = shutil.ignore_patterns(
@@ -34,7 +45,7 @@ MUTATION_IGNORE = shutil.ignore_patterns(
 )
 
 # (id, relative file, text to find, replacement, test that must then fail)
-MUTATIONS = [
+MUTATIONS = E2E_VERDICT_MUTATIONS + [
     # Put the SUBSTRING path test back. It asked "does this command mention a path
     # containing the word Skyrim", which matched the session scratchpad, this repo's
     # own checkout, C:/Temp/skyrim-notes.txt and a git URL -- refusing ordinary work

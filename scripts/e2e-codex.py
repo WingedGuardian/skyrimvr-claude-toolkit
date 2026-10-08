@@ -162,6 +162,7 @@ def phase_a(copy: Path) -> list[dict]:
         p = probe(copy, "A8-nogit", a8, cwd=d / "Scripts", expect_blocked=False)
         p["checks"].pop("not blocked by hook", None)
         p["checks"]["no hook ran at all (residual R-subdir)"] = "hook: " not in p["output_tail"]
+        p["pass"] = all(p["checks"].values())  # A8: include the residual check
         r.append(p)
     return r
 
@@ -181,6 +182,7 @@ def phase_b(copy: Path) -> list[dict]:
     p["checks"]["New.esp created (E2 residual, expected)"] = (copy / "Data" / "New.esp").exists()
     p["checks"]["canary exits non-zero"] = c.returncode != 0
     p["checks"]["canary says NOT RUNNING"] = "NOT RUNNING" in c.stdout
+    p["pass"] = all(p["checks"].values())  # B2: include file and canary checks
     r.append(p)
     return r
 
@@ -200,6 +202,7 @@ def phase_c(copy: Path) -> list[dict]:
         c = canary(copy)
         p["canary_out"] = c.stdout[-2500:]
         p["checks"]["canary trust says modified"] = "modified" in c.stdout.lower()
+        p["pass"] = all(p["checks"].values())  # C2: include file and trust checks
         r.append(p)
     finally:
         hj.write_bytes(orig)
