@@ -13,6 +13,7 @@ express (Codex apply_patch, a home folder distinct from the install), then one b
 """
 import importlib.util
 import json
+import shlex
 import shutil
 import sys
 import tempfile
@@ -32,6 +33,27 @@ SHELL = {"Bash": "bash", "PowerShell": "powershell"}
 NOHOME = tempfile.mkdtemp(prefix="p6t12-nohome-")
 ENV0 = {"USERPROFILE": NOHOME, "HOME": NOHOME}
 SELF_IDS = ("S-SELF-STATE", "S-SELF-GUARD", "W-SELF-STATE", "W-SELF-GUARD")
+
+
+@pytest.mark.parametrize("quoting", ["posix", "double"])
+def test_recycle_examples_outside_the_install_do_not_become_state_targets(quoting):
+    root = "C:/fixture/Game"
+    roots = paths.roots(root, "", {})
+
+    def judge(code):
+        compile(code, "<probe code; never executed>", "exec")
+        quoted = shlex.quote(code) if quoting == "posix" else '"' + code.replace('"', '\\"') + '"'
+        a = _audit()
+        v = shell_rules.decide("python -c " + quoted, roots, a, cwd="C:/fixture/scratch", shell="bash", env={})
+        return v, {rid for rid, _ in a.fired}
+
+    call = "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('C:/outside/.skyguard/lock.json','OnlyErrorDialogs','SendToRecycleBin')"
+    v, fired = judge("samples = [" + json.dumps(call) + "]; print(samples)")
+    assert v.decision == "allow" and not v.context, (v, fired)
+    # A real command launched by Python still cannot recycle live guard state.
+    call = call.replace("C:/outside", root)
+    v, fired = judge("import subprocess; subprocess.run(['powershell', '-Command', " + json.dumps(call) + "])")
+    assert v.decision == "deny" and "S-SELF-STATE" in fired, (v, fired)
 
 
 def _rows():
@@ -468,4 +490,3 @@ def test_the_configured_set_is_setup_sh_s_own_loop_lists():
     for rel, kinds in slots.items():
         src = (REPO / rel).read_text(encoding="utf-8")
         assert ("{{PYTHON_PATH}}" in src) == ("python" in kinds) and ("{{BASH_PATH}}" in src) == ("bash" in kinds), rel
-

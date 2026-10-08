@@ -108,6 +108,9 @@ RECYCLE_CALL = re.compile(
     r"\s*\(\s*(?:\\?(?P<q>['\"])(?P<lit>[^'\"\n]{0,1024}?)\\?(?P=q)|(?P<bare>[^,)\s][^,)\n]{0,1023}))",
     re.IGNORECASE)
 _RECYCLE_WORD = r"FileSystem\]\s*::\s*Delete(File|Directory)|Namespace\(\s*10\s*\)\s*\.MoveHere"
+# Recycle-Bin calls have their own first-argument scanner. Interpreter callers
+# must not turn every other quoted string into an unresolved delete operand.
+INTERP_DESTROYER = DESTROYER
 DESTROYER += "|" + _RECYCLE_WORD
 DESTROYER_LOOSE += "|" + _RECYCLE_WORD
 
@@ -124,6 +127,10 @@ def recycle_text(command: str, parsed) -> str:
     for e in parsed.execs:
         if e.stdin_body and e.stdin_from == "heredoc:data":
             text = text.replace(e.stdin_body, " ")
+        code = interpreter_code(e)
+        if code and e.segment:
+            # Bash quote-joining syntax is not part of the runtime path.
+            text = text.replace(e.segment, code)
         if e.program in _MENTION_PROGRAMS:
             for w in e.argv:
                 if RECYCLE_CALL.search(w):
