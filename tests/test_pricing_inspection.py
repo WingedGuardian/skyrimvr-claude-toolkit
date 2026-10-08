@@ -62,6 +62,12 @@ CONTROLS = {
     "for-print-binding": "for print in [eval]: print(" + repr(PYTHON_DELETE) + ")",
     "comprehension-print-binding": "print([print(" + repr(PYTHON_DELETE) + ") for print in [eval]])",
     "parser-without-import": "shellparse.parse(" + repr(STATE_API) + ",'powershell')",
+    'unknown-parser-method': 'from skyguard import shellparse; shellparse.execute("[IO.File]::Delete(\'C:/fixture/install/.skyguard/lock.json\')",\'powershell\')',
+    'unknown-parser-namespace': 'from skyguard import shellparse; other.parse("[IO.File]::Delete(\'C:/fixture/install/.skyguard/lock.json\')",\'powershell\')',
+    'relative-parser': 'from .skyguard import shellparse; shellparse.parse("[IO.File]::Delete(\'C:/fixture/install/.skyguard/lock.json\')",\'powershell\')',
+    'multi-parser': 'from skyguard import shellparse, extra; shellparse.parse("[IO.File]::Delete(\'C:/fixture/install/.skyguard/lock.json\')",\'powershell\')',
+    'wrongname-parser': 'from skyguard import other; shellparse.parse("[IO.File]::Delete(\'C:/fixture/install/.skyguard/lock.json\')",\'powershell\')',
+    'wrongmodule-parser': 'from custom import shellparse; shellparse.parse("[IO.File]::Delete(\'C:/fixture/install/.skyguard/lock.json\')",\'powershell\')',
 }
 
 @pytest.mark.parametrize("quoting", ["posix", "double"])
