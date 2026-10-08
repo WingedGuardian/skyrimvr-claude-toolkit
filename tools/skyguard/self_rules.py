@@ -351,7 +351,7 @@ def _state_delete(e, cwd, env, roots) -> str:
     from .grep import grep
     words = [w for w in (deletes.operands(e) or []) if isinstance(w, str)]
     code = deletes.interpreter_code(e)
-    if code and (grep(deletes.DESTROYER, code) or grep(deletes.INTERP_DELETE, code)):
+    if code and (grep(deletes.INTERP_DESTROYER, code) or grep(deletes.INTERP_DELETE, code)):
         words += [m.group(1) or m.group(2) for m in _QUOTED.finditer(code)]
     for w in words:
         a = targets.resolve_operand(e, w, cwd, env)

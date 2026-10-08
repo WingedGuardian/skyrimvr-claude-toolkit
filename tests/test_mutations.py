@@ -46,6 +46,14 @@ MUTATION_IGNORE = shutil.ignore_patterns(
 
 # (id, relative file, text to find, replacement, test that must then fail)
 MUTATIONS = E2E_VERDICT_MUTATIONS + [
+    pytest.param("tools/skyguard/self_rules.py",
+                 "grep(deletes.INTERP_DESTROYER, code)", "grep(deletes.DESTROYER, code)",
+                 "tests/test_skyguard_self_rules.py::test_recycle_examples_outside_the_install_do_not_become_state_targets[double]",
+                 id="state-recycle-not-all-interpreter-strings"),
+    pytest.param("tools/skyguard/deletes.py", "            text = text.replace(e.segment, code)",
+                 "            pass",
+                 "tests/test_skyguard_self_rules.py::test_recycle_examples_outside_the_install_do_not_become_state_targets[posix]",
+                 id="state-recycle-decoded-interpreter-path"),
     # Put the SUBSTRING path test back. It asked "does this command mention a path
     # containing the word Skyrim", which matched the session scratchpad, this repo's
     # own checkout, C:/Temp/skyrim-notes.txt and a git URL -- refusing ordinary work
@@ -4321,7 +4329,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _p12row("state-del-io-file"), "rule-S-SELF-STATE-delete-io-file"),
     (_SF, "        hit = _recycle_delete(command, parsed, cwd, env, roots)",'        hit = ""', _p12row("state-del-recycle"),
      "rule-S-SELF-STATE-delete-recycle-bin"),
-    (_SF, "    if code and (grep(deletes.DESTROYER, code) or grep(deletes.INTERP_DELETE, code)):", "    if False:",
+    (_SF, "    if code and (grep(deletes.INTERP_DESTROYER, code) or grep(deletes.INTERP_DELETE, code)):", "    if False:",
      _p12row("state-del-python"), "rule-S-SELF-STATE-delete-interpreter"),
     # Re-anchored in the final fix pass (lane A C1 put the raw-unlock check between this and the deletes).
     (_SR6, '    if own and own[0] == self_rules.STATE:\n        return deny("S-SELF-STATE", own[1])\n    # Plan 6 final fix',

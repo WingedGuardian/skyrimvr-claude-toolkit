@@ -135,6 +135,7 @@
 - **Broken documentation links:** corrected relative links and added a suite check.
 - **Link-check scope:** dependency website Markdown does not count as toolkit filesystem links.
 - **Codex E2E verdicts:** include checks added after the live probe returns, so a late failure cannot leave PASS cached.
+- **Recycle Bin example parsing:** quoted examples outside the install no longer become unresolved guard-state operands; launched live-state deletion controls still refuse.
 - **Corpus path derivation:** preserves the historical mixed-slash spelling while removing it from shipped helpers.
 - **Test tripwire isolation:** intentional setup denials do not contaminate another test's barrier log.
 - **MSYS path regression:** explicitly mounts the test fixture instead of skipping on a mismatched temporary directory.
