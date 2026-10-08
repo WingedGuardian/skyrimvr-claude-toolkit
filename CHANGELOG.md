@@ -182,7 +182,7 @@
 - **Codex confirmations:** the adapter refuses an ask and tells the user to run the intended action themselves.
 - **Codex other MCP tools:** logged rather than guarded, except the recognized DevBench surface.
 - **Codex user commands:** commands typed with `!` bypass hooks.
-- **Codex subfolders:** starting below the game root silently skips hooks.
+- **Codex subfolders:** Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you.
 - **PowerShell policy:** AllSigned may prevent hook launch.
 - **Pattern-based coverage:** the guard is an accident barrier, not a sandbox.
 - **Encoded Bash program names:** some ANSI-C quoted spellings are not classified; this gap predates v4.

@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from conftest import REPO
 
 PIN_TAG = "v1.11.2"
-SKIP_DIRS = {".git", "node_modules", ".superpowers"}
+SKIP_DIRS = {".git", "node_modules", ".superpowers", ".pytest_cache", ".venv", "__pycache__"}
 SKIP_PREFIXES = ("docs/superpowers/",)
 SKIP_FILES = {"CHANGELOG.md"}
 # A line that clones AutoMod must name the pinned tag; nothing may `dotnet build` its projects directly.
@@ -62,3 +64,17 @@ def test_the_check_can_fail():
     assert len(_problems("x", old_prompt)) == 2
     assert _problems("x", 'echo "  git clone https://github.com/SpookyPirate/spookys-automod-toolkit into tools/automod"')
     assert not _problems("x", "git clone --branch v1.11.2 https://github.com/SpookyPirate/spookys-automod-toolkit tools/automod")
+
+
+@pytest.mark.parametrize("cache", [".pytest_cache", ".venv", "__pycache__"])
+def test_generated_caches_are_not_instruction_copies(tmp_path, monkeypatch, cache):
+    """Historical mutation copies must not change the current instruction gate."""
+    old = "git clone https://github.com/SpookyPirate/spookys-automod-toolkit tools/automod"
+    cached = tmp_path / cache / "historical-fixture" / "CLAUDE.md"
+    cached.parent.mkdir(parents=True)
+    cached.write_text(old, encoding="utf-8")
+    (tmp_path / "README.md").write_text(old, encoding="utf-8")
+    monkeypatch.setitem(globals(), "REPO", tmp_path)
+    scanned = dict(_files())
+    assert set(scanned) == {"README.md"}, scanned
+    assert _problems("README.md", scanned["README.md"]), "owned bad instructions must still fail"

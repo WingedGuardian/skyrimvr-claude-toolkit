@@ -6590,6 +6590,48 @@ MUTATIONS += [
                  "tests/test_gen_agent_trees.py::test_files_linux_tools_read_are_pinned_lf", id="eol-devcontainer-lf"),
 ]
 
+# Final gate followups: launcher fallback, isolated barrier evidence, and accurate setup output.
+MUTATIONS += [
+    pytest.param("tests/harness_pytest.py", "    log = Path(name)\n", "    log = Path(previous)\n    log.touch(exist_ok=True)\n", "tests/test_harness_tripwire_scope.py::test_overlapping_control_attempt_does_not_accuse_the_innocent_test[native]", id="review-tripwire-shared-log"),
+    pytest.param("tests/harness_pytest.py", "    os.environ[\"HARNESS_TRIPWIRE_LOG\"] = str(log)\n", "    pass\n", "tests/test_harness_tripwire_scope.py::test_overlapping_control_attempt_does_not_accuse_the_innocent_test[shell]", id="review-tripwire-scope-env"),
+    pytest.param("tests/harness_pytest.py", "            assert not attempts, \"PACKAGE-MANAGER TRIPWIRE: \" + repr(attempts)\n", "            assert True\n", "tests/test_harness_tripwire_scope.py::test_an_unmarked_tests_own_attempt_still_fails_and_keeps_its_evidence[native]", id="review-tripwire-own-attempt-refuses"),
+    pytest.param("tests/harness_pytest.py", "        os.environ[\"HARNESS_TRIPWIRE_LOG\"] = previous\n", "        pass\n", "tests/test_harness_tripwire_scope.py::test_aborted_scope_restores_the_parent_log", id="review-tripwire-parent-log-restored"),
+    pytest.param("tests/test_automod_docs_pinned.py", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".pytest_cache\", \".venv\", \"__pycache__\"}", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".venv\", \"__pycache__\"}", "tests/test_automod_docs_pinned.py::test_generated_caches_are_not_instruction_copies[.pytest_cache]", id="review-instruction-scan-ignores-pytestcache"),
+    pytest.param("tests/test_automod_docs_pinned.py", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".pytest_cache\", \".venv\", \"__pycache__\"}", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".pytest_cache\", \"__pycache__\"}", "tests/test_automod_docs_pinned.py::test_generated_caches_are_not_instruction_copies[.venv]", id="review-instruction-scan-ignores-venv"),
+    pytest.param("tests/test_automod_docs_pinned.py", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".pytest_cache\", \".venv\", \"__pycache__\"}", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".pytest_cache\", \".venv\"}", "tests/test_automod_docs_pinned.py::test_generated_caches_are_not_instruction_copies[__pycache__]", id="review-instruction-scan-ignores-pycache"),
+    pytest.param("setup.sh", "Configured safety hooks, once your agent loads them, can:",
+                 "The safety hooks are now active. They will:",
+                 "tests/test_setup_coverage_summary.py::test_setup_summary_does_not_promise_active_hooks_or_universal_permission_prompts[claude]",
+                 id="review-setup-summary-activation-prerequisite"),
+    pytest.param("setup.sh", "Advise on ordinary game-file edits",
+                 "Ask permission before editing any game file",
+                 "tests/test_setup_coverage_summary.py::test_setup_summary_does_not_promise_active_hooks_or_universal_permission_prompts[all]",
+                 id="review-setup-summary-advice-not-universal-ask"),
+    pytest.param("setup.sh", "Auto-backups (Edit/Write/NotebookEdit)",
+                 "Auto-backups (Edit/Write)",
+                 "tests/test_setup_coverage_summary.py::test_setup_summary_scopes_its_backups_and_script_snapshots",
+                 id="review-setup-summary-notebook-backup-surface"),
+    pytest.param("setup.sh", "shell/script writes are not backed up",
+                 "all writes are backed up",
+                 "tests/test_setup_coverage_summary.py::test_setup_summary_scopes_its_backups_and_script_snapshots",
+                 id="review-setup-summary-script-backup-limit"),
+    pytest.param("setup.sh", "Snapshot Papyrus files before non-read-only shell commands",
+                 "Snapshot your active scripts before running external tools",
+                 "tests/test_setup_coverage_summary.py::test_setup_summary_scopes_its_backups_and_script_snapshots",
+                 id="review-setup-summary-papyrus-snapshot-scope"),
+    pytest.param("setup.sh", "recognized raw writes to ESP/ESM/ESL/BSA/BA2",
+                 "direct writes to ESP/ESM/BSA files",
+                 "tests/test_setup_coverage_summary.py::test_setup_summary_scopes_its_backups_and_script_snapshots",
+                 id="review-setup-summary-recognized-raw-write-scope"),
+] + [
+    pytest.param("tools/" + name, "if not defined SG_FILE_PY goto probe",
+                 "rem absent-recorded-interpreter bypass removed",
+                 "tests/test_wrapper_python.py::test_the_cmd_twins_probe_python_when_no_interpreter_is_recorded[absent-file-" + name + "]",
+                 marks=CMD_ONLY, id="review-" + name + "-absent-interpreter-fallback")
+    for name in ("skyguard.cmd", "skydoctor.cmd")
+]
+
+
 
 # Plan 6 final fix pass, lane A (p6-fixA). One mutation per clause; each names the test that must go red.
 _FXA = "tests/test_skyguard_never_shadow_mix.py::"

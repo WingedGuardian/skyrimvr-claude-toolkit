@@ -36,7 +36,7 @@ Six thin wrappers over the Python engine `tools/skyguard/` intercept Claude's to
 - **protect-bash.sh** -- Blocks destructive commands; **advises** on file operations in the game directory (a note to Claude, not a prompt to you)
 - **protect-files.sh** -- Blocks writes to plugin/archive binaries through the Edit/Write tools; **advises** on all other edits in the install
 - **protect-mcp.sh** -- Guards the DevBench MCP tools (and the curl / `devbench-cli.sh` route to the same tools): denies the one console command measured to crash a large load order (`smp reset`), and asks before a save would overwrite an existing save
-- **backup-before-edit.sh** -- Copies a file before Claude modifies it **through the Edit/Write tools**. ⚠ Anything written by a script run through Bash is invisible to it -- that is a property of hooks, not a bug here. MEASURED: zero backups of a 177,459-byte `KNOWLEDGEBASE.md` across seven months, because it is written by a script. `session-kb-guard.sh` below covers that channel.
+- **backup-before-edit.sh** -- Copies a file before Claude modifies it **through the Edit/Write/NotebookEdit tools**. ⚠ Anything written by a script run through Bash is invisible to it -- that is a property of hooks, not a bug here. MEASURED: zero backups of a 177,459-byte `KNOWLEDGEBASE.md` across seven months, because it is written by a script. `session-kb-guard.sh` below covers that channel.
 - **snapshot-before-tool.sh** -- Snapshots Papyrus source/compiled scripts before shell commands
 - **session-kb-guard.sh** -- At SessionStart, copies the files nothing can rebuild
   (`KNOWLEDGEBASE.md`, `KNOWLEDGEBASE.local.md`, `CLAUDE.md`, `AGENTS.md`) and raises an alarm if
@@ -102,7 +102,7 @@ the install.
 
 ⚠ **If no root can be resolved, the guard DENIES.** A guard that evaluated nothing
 must not answer "fine" -- that conflation is what left every hook here inert for five
-weeks. ⚠ An unreadable or malformed root `skyrim-paths.env` DENIES every call (`GUARD INERT`) until it is repaired. A broken legacy file also denies when no valid root file exists; beside a valid root file it is reported at session start and only the valid root file's folders are used. An emptied file, or a missing key, does NOT cost you refusals: the self-derived root still resolves and valid legacy protection keys remain in the union. With neither file recording the folder, protection narrows to the install plus the generic config literal, and an MO2 folder stops being guarded with nothing reported.
+weeks. ⚠ An unreadable or malformed root `skyrim-paths.env` DENIES every call (`GUARD INERT`) until it is repaired. A broken legacy file also denies when no valid root file exists; beside a valid root file it is reported at session start, and readable, well-formed legacy protection entries still join the union. An emptied file, or a missing key, does NOT cost you refusals: the self-derived root still resolves and valid legacy protection keys remain in the union. With neither file recording the folder, protection narrows to the install plus the generic config literal, and an MO2 folder stops being guarded with nothing reported.
 
 ⚠ **A relative path resolves against the working directory the agent reports** in the
 hook payload, so `rm Data/x.nif` run from the install is refused. Only when the payload
@@ -153,7 +153,7 @@ more than half its bytes. Run it by hand any time: `bash tools/kb-guard.sh --ver
   oldest-first rotation would walk the good copy off the end — a store that destroys
   what it exists to protect while still looking like a store.
 - **Why a separate mechanism at all**, when `backup-before-edit.sh` already exists:
-  that hook fires on Edit/Write tool calls, and the knowledgebase is usually written
+  that hook fires on Edit/Write/NotebookEdit tool calls, and the knowledgebase is usually written
   through a script run via Bash, which an Edit/Write hook structurally cannot see.
   MEASURED on this install 2026-09-08: **zero** `KNOWLEDGEBASE.md` backups across
   seven months, with the backup hook working correctly the whole time.

@@ -101,3 +101,26 @@ def test_the_cmd_twins_keep_an_unquoted_recorded_interpreter(tmp_path, name):
     result = subprocess.run([comspec, "/d", "/c", str(inst / "tools" / name), "lock", "status"],
                             capture_output=True, text=True, timeout=120, env=env)
     assert "UNQUOTED-PY -B" in result.stdout and CMD_WRAPPERS[name] in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(not WIN, reason="the .cmd twins run on Windows")
+@pytest.mark.parametrize("name", sorted(CMD_WRAPPERS))
+@pytest.mark.parametrize("value", [None, "", "unquoted-empty"],
+                         ids=["absent-file", "quoted-empty", "unquoted-empty"])
+def test_the_cmd_twins_probe_python_when_no_interpreter_is_recorded(tmp_path, name, value):
+    inst = _install(tmp_path, "" if value == "unquoted-empty" else value)
+    if value == "unquoted-empty":
+        (inst / "skyrim-paths.env").write_text("SKYGUARD_PYTHON=\n")
+    stub_dir = tmp_path / "fallback-bin"
+    stub_dir.mkdir()
+    marker = tmp_path / "fallback-probe.txt"
+    (stub_dir / "py.cmd").write_text(
+        '@echo off\r\n@echo %* > "%FALLBACK_MARKER%"\r\n@exit /b 0\r\n', encoding="ascii")
+    env = {k: v for k, v in os.environ.items() if k != "SKYGUARD_PYTHON"}
+    env.update(PATH=str(stub_dir), FALLBACK_MARKER=str(marker))
+    comspec = os.environ.get("COMSPEC", r"C:\Windows\System32\cmd.exe")
+    result = subprocess.run([comspec, "/d", "/c", str(inst / "tools" / name), "lock", "status"],
+                            capture_output=True, text=True, timeout=30, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert marker.exists(), "no recorded interpreter prevented the Python fallback probe"
+    assert marker.read_text().strip() == '-3 -c "import sys"'
