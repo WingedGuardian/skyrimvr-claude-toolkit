@@ -1,7 +1,7 @@
 {
-  "name": "skyrimvr-claude-toolkit",
+  "name": "skyrim-ai-assistant-toolkit",
   "version": "1.0.0",
-  "description": "Skyrim Claude Code Modding Toolkit -- Node.js tooling for FOMOD generation and ESP validation",
+  "description": "Skyrim AI Assistant Toolkit -- Node.js tooling for FOMOD generation and ESP validation",
   "private": true,
   "scripts": {
     "test": "node --test"

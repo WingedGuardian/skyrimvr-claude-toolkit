@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import io
+import json
 import os
 import subprocess
 import sys
@@ -40,7 +41,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-NAME_PREFIX = "skyrimvr-claude-toolkit"
+# package.json owns the product slug; repository URLs retain their separate identity.
+NAME_PREFIX = json.loads((Path(__file__).resolve().parent.parent / "package.json").read_text(encoding="utf-8"))["name"]
 # Top-level paths that never ship. One list: the payload checker asserts their absence on the zip.
 # tests/ holds tests/fixtures/routes-harness/ among others; .github/ is CI.
 EXCLUDE = ("tests", ".github")

@@ -36,6 +36,7 @@ if ! printf '%s' "$TAG" | grep -qE '^v[0-9]+(\.[0-9]+)*$'; then
     die "first argument must be a tag like v3.9 (got '${TAG:-<none>}')"
 fi
 VERSION="${TAG#v}"
+RELEASE_SLUG=$("${PYTHON:-python}" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["name"])' "$REPO_DIR/package.json") || die "cannot read release slug from package.json"
 
 # --- where the pack goes -----------------------------------------------------
 # Canonical home, decided 2026-09-09: the game root's _CLAUDE_OUTPUT, because a
@@ -65,7 +66,7 @@ fi
 [ -d "$ROOT" ] || die "resolved root does not exist: $ROOT"
 
 DEST="$ROOT/_CLAUDE_OUTPUT/nexus-$TAG"
-ZIP_NAME="skyrimvr-claude-toolkit-$VERSION.zip"
+ZIP_NAME="$RELEASE_SLUG-$VERSION.zip"
 
 mkdir -p "$DEST" || die "cannot create $DEST"
 printf 'pack home: %s\n' "$DEST"

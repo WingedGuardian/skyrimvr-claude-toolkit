@@ -18,8 +18,8 @@ Run against scratch only. Nothing here touches `C:/GOG Games`.
    checksum exists, so this is your call; extract to `C:/Temp/skyguard-ml2/tools/mo2/`.
 3. Start `ModOrganizer.exe`, choose **Create a portable instance**, game **Skyrim VR**, game folder
    `C:\Temp\skyguard-ml2\game` (browse to it; do NOT accept a detected Steam path).
-4. In MO2: Executables → add `C:\Users\Moona\AppData\Local\Programs\Python\Python310\python.exe`
-   with arguments `C:\Users\Moona\Projects\skyrimvr-claude-toolkit\scripts\layer2-spike\mo2_vfs_check.py`
+4. In MO2: Executables → add `<your supported Python executable>`
+   with arguments `<your toolkit checkout>\scripts\layer2-spike\mo2_vfs_check.py`
    (Phase B writes this collector; until then use `-c "print(open(r'C:\Temp\skyguard-ml2\game\Data\Skyrim.esm','rb').read(16))"`).
 5. Run it from MO2. The collector records: a locked master read under the VFS (must work), a write of
    `Data\Out.esp` (must land in MO2's `overwrite/`), and a write of the locked `Update.esm` (record).

@@ -5991,7 +5991,7 @@ _T10FR = [
      "ALTERING_ATTRS = ()", _RB + "test_a_committed_attribute_that_alters_the_archive_refuses"),
     ("t10fr-build-submodule-allowed", _BZ, "    if links:", "    if False:", _RB + "test_a_submodule_refuses_the_build"),
     # M4 published/tagged verify
-    ("t10fr-verify-root-not-the-tag", _VR, '  [ "$tops" = "skyrimvr-claude-toolkit-${TAG#v}" ] && ok', "  true && ok",
+    ("t10fr-verify-root-not-the-tag", _VR, '  [ "$tops" = "$RELEASE_SLUG-${TAG#v}" ] && ok', "  true && ok",
      _VT + "test_a_tag_must_match_the_root_folder_and_build_info"),
     ("t10fr-verify-build-version-not-the-tag", _VR, '  [ "$BUILT_VERSION" = "${TAG#v}" ] && ok', "  true && ok",
      _VT + "test_a_tag_must_match_the_root_folder_and_build_info"),

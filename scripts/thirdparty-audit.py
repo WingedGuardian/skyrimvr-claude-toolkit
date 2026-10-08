@@ -56,7 +56,7 @@ from pathlib import Path
 OK, NEWER, UNPINNED, DRIFT, UNCHECKED = "OK", "NEWER", "UNPINNED", "DRIFT", "COULD NOT CHECK"
 OUTSIDE = "NOT DELIVERED"   # nothing the toolkit ships installs it; the row says why (reported, never a failure)
 DEFAULT_CACHE = Path(tempfile.gettempdir()) / "thirdparty-audit-cache"
-USER_AGENT = "skyrimvr-claude-toolkit-thirdparty-audit/1"
+USER_AGENT = "skyrim-ai-assistant-toolkit-thirdparty-audit/1"
 
 # User-facing instruction surfaces: what a fresh user (or their agent) reads and follows. agent/ is the source of
 # the generated .claude/ and .agents/ copies (gen_agent_trees --check keeps those identical), so it is read once.

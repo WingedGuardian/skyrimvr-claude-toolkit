@@ -1,4 +1,6 @@
-# Skyrim Claude Code Modding Toolkit
+# Skyrim AI Assistant Toolkit
+
+For coding agents (Claude Code, Codex, …), not an AI NPC mod (SkyrimNet, Mantella, CHIM).
 
 An AI-assisted Skyrim modding environment for power users. Claude Code handles the mechanical work — porting mods across versions, inspecting and editing ESPs, debugging scripts, building mods from scratch, **and now authoring custom animated meshes and VFX you can verify without ever launching the game** — with safety hooks, pre-loaded engine knowledge, and every tool pre-configured.
 

@@ -69,10 +69,10 @@ def test_a_clean_build_has_one_versioned_root_and_build_info(tmp_path):
     r, out = _build(repo, "HEAD", "--version", "9.9.9")
     assert r.returncode == 0, r.stdout + r.stderr
     z = _zip(out)
-    assert z.name == "skyrimvr-claude-toolkit-9.9.9.zip"
+    assert z.name == "skyrim-ai-assistant-toolkit-9.9.9.zip"
     names = _names(z)
-    assert {n.split("/", 1)[0] for n in names} == {"skyrimvr-claude-toolkit-9.9.9"}, names
-    root = "skyrimvr-claude-toolkit-9.9.9/"
+    assert {n.split("/", 1)[0] for n in names} == {"skyrim-ai-assistant-toolkit-9.9.9"}, names
+    root = "skyrim-ai-assistant-toolkit-9.9.9/"
     assert root + "README.md" in names and root + "sub/a.txt" in names and root + "setup.sh" in names
     with zipfile.ZipFile(z) as zf:
         info = zf.read(root + "BUILD-INFO").decode()
@@ -107,7 +107,7 @@ def test_an_uncommitted_edit_refuses_and_the_zip_carries_the_committed_bytes(tmp
     r, out = _build(repo, "HEAD", "--version", "1", "--allow-dirty")
     assert r.returncode == 0, r.stdout + r.stderr
     with zipfile.ZipFile(_zip(out)) as zf:
-        assert zf.read("skyrimvr-claude-toolkit-1/README.md") == b"hello\n"
+        assert zf.read("skyrim-ai-assistant-toolkit-1/README.md") == b"hello\n"
 
 
 def test_an_ignored_file_does_not_count_as_dirty_and_is_not_shipped(tmp_path):
@@ -148,8 +148,8 @@ def test_an_older_ancestor_builds_its_own_bytes(tmp_path):
     r, out = _build(repo, first, "--version", "1")
     assert r.returncode == 0, r.stdout + r.stderr
     with zipfile.ZipFile(_zip(out)) as zf:
-        assert zf.read("skyrimvr-claude-toolkit-1/README.md") == b"hello\n"
-        assert ("commit=" + first) in zf.read("skyrimvr-claude-toolkit-1/BUILD-INFO").decode()
+        assert zf.read("skyrim-ai-assistant-toolkit-1/README.md") == b"hello\n"
+        assert ("commit=" + first) in zf.read("skyrim-ai-assistant-toolkit-1/BUILD-INFO").decode()
 
 
 def test_the_version_defaults_to_an_exact_tag(tmp_path):
@@ -157,7 +157,7 @@ def test_the_version_defaults_to_an_exact_tag(tmp_path):
     _git(repo, "tag", "v4.5.6")
     r, out = _build(repo, "HEAD")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert _zip(out).name == "skyrimvr-claude-toolkit-4.5.6.zip"
+    assert _zip(out).name == "skyrim-ai-assistant-toolkit-4.5.6.zip"
 
 
 def test_two_builds_of_one_commit_are_byte_identical(tmp_path):
@@ -185,7 +185,7 @@ def test_the_shell_entry_runs_the_same_builder(tmp_path):
     r = subprocess.run([BASH, str(BUILDER_SH), "HEAD", str(out), "--version", "2"], cwd=str(repo),
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert _zip(out).name == "skyrimvr-claude-toolkit-2.zip"
+    assert _zip(out).name == "skyrim-ai-assistant-toolkit-2.zip"
     assert "ZIP=" in r.stdout and "COMMIT=" in r.stdout
 
 
@@ -242,7 +242,7 @@ def test_a_configured_attributes_file_is_neutralised(tmp_path):
     r, out = _build(repo, "HEAD", "--version", "1")
     assert r.returncode == 0, r.stdout + r.stderr
     with zipfile.ZipFile(_zip(out)) as zf:
-        assert zf.read("skyrimvr-claude-toolkit-1/README.md") == b"hello\n"
+        assert zf.read("skyrim-ai-assistant-toolkit-1/README.md") == b"hello\n"
 
 
 def test_the_default_global_attributes_file_is_neutralised(tmp_path):
@@ -257,8 +257,8 @@ def test_the_default_global_attributes_file_is_neutralised(tmp_path):
                        capture_output=True, text=True, timeout=120, env=env)
     assert r.returncode == 0, r.stdout + r.stderr
     with zipfile.ZipFile(_zip(out)) as zf:
-        assert zf.read("skyrimvr-claude-toolkit-1/README.md") == b"hello\n"
-        assert zf.read("skyrimvr-claude-toolkit-1/sub/a.txt") == b"a\n"
+        assert zf.read("skyrim-ai-assistant-toolkit-1/README.md") == b"hello\n"
+        assert zf.read("skyrim-ai-assistant-toolkit-1/sub/a.txt") == b"a\n"
 
 
 def _mod_in(repo, monkeypatch):
@@ -292,7 +292,7 @@ def test_the_post_build_proof_catches_a_missing_or_altered_member(tmp_path, monk
     good = _zip(out).read_bytes()
     m = _mod_in(repo, monkeypatch)
     sha = _git(repo, "rev-parse", "HEAD")
-    name = "skyrimvr-claude-toolkit-1"
+    name = "skyrim-ai-assistant-toolkit-1"
     assert m.prove(good, sha, name) == []
     assert m.prove(_rezip(good, change=("README.md", lambda d: d.replace(b"\n", b"\r\n"))), sha, name) == []
     assert any("missing from the zip: README.md" in p for p in m.prove(_rezip(good, drop="README.md"), sha, name))

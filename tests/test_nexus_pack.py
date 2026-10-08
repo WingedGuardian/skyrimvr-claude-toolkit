@@ -27,7 +27,7 @@ from conftest import BASH, REPO
 SCRIPT = REPO / "scripts" / "build-nexus-pack.sh"
 TAG = "v9.9"
 VERSION = "9.9"
-ZIP = "skyrimvr-claude-toolkit-%s.zip" % VERSION
+ZIP = "skyrim-ai-assistant-toolkit-%s.zip" % VERSION
 
 REQUIRED = {
     ZIP,

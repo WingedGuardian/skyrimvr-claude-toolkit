@@ -69,6 +69,7 @@ if [ -z "$PY" ]; then
 fi
 [ -n "$PY" ] || { echo "verify-release: no Python 3 found (set PYTHON)" >&2; exit 2; }
 PY="$(command -v "$PY")"
+RELEASE_SLUG=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["name"])' "$CHECKOUT/package.json") || exit 2
 
 # The workspace goes under VERIFY_WORK_ROOT when given (tests point it at their tmp folder).
 WORK="$(mktemp -d "${VERIFY_WORK_ROOT:-${TMPDIR:-/tmp}}/verify-release.XXXXXX")" || exit 2
@@ -113,13 +114,13 @@ if [ "$(printf '%s\n' "$tops" | grep -c .)" -ne 1 ]; then
   bad "the zip has one root folder" "found: $(printf '%s ' $tops)"; echo "RESULT: FAILED"; exit 1
 fi
 ROOT="$WORK/x/$tops"
-case "$tops" in skyrimvr-claude-toolkit-*) ok "extracted to a versioned root ($tops)" ;; *) bad "versioned root" "$tops" ;; esac
+case "$tops" in "$RELEASE_SLUG"-*) ok "extracted to a versioned root ($tops)" ;; *) bad "versioned root" "$tops" ;; esac
 BUILT_COMMIT=$(sed -n 's/^commit=//p' "$ROOT/BUILD-INFO" 2>/dev/null | head -1)
 BUILT_VERSION=$(sed -n 's/^version=//p' "$ROOT/BUILD-INFO" 2>/dev/null | head -1)
 if [ -n "$TAG" ]; then
   # A tag names the version: the root folder and BUILD-INFO must both say it, and (published mode) BUILD-INFO
   # must name the tag's commit when this checkout has the tag.
-  [ "$tops" = "skyrimvr-claude-toolkit-${TAG#v}" ] && ok "root folder names $TAG" || bad "root folder names $TAG" "$tops"
+  [ "$tops" = "$RELEASE_SLUG-${TAG#v}" ] && ok "root folder names $TAG" || bad "root folder names $TAG" "$tops"
   [ "$BUILT_VERSION" = "${TAG#v}" ] && ok "BUILD-INFO version is ${TAG#v}" || bad "BUILD-INFO version" "'$BUILT_VERSION', expected '${TAG#v}'"
   if [ -z "$EXPECT" ] && [ -z "$LOCAL_ZIP" ]; then
     EXPECT=$(git -C "$CHECKOUT" rev-parse --verify --quiet "refs/tags/$TAG^{commit}" 2>/dev/null || true)

@@ -3,7 +3,7 @@
 The `.java` files under `resaver/ess/` in this folder are **modified copies of ReSaver
 (FallrimTools) source** by Mark Fairchild, redistributed under their original **Apache License
 2.0** (see the per-file headers). Per Apache-2.0 §4(b), each file carries a prominent
-`MODIFICATION NOTICE` describing what the skyrimvr-claude-toolkit project changed.
+`MODIFICATION NOTICE` describing what the Skyrim AI Assistant Toolkit project changed.
 
 ## What these are
 

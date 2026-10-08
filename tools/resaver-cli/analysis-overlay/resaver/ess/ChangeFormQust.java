@@ -15,7 +15,7 @@
  */
 /*
  * MODIFICATION NOTICE (Apache-2.0 §4b) — this file was modified from the original ReSaver
- * (FallrimTools) source by the skyrimvr-claude-toolkit project (2026):
+ * (FallrimTools) source by the Skyrim AI Assistant Toolkit project (2026):
  *   - added QuestInstances / QuestInstanceData parsing (UESP QUST ChangeForm "A1b" region),
  *   - accepted refID-typed case 0 that stock ReSaver threw on.
  * These changes affect READ/diagnostic parsing only and are used solely as an on-the-fly

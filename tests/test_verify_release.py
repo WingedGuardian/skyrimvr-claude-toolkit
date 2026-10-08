@@ -66,7 +66,7 @@ def _line(out, name):
     return next((l for l in out.splitlines() if name in l), "")
 
 
-def _variant(tmp_path, payload, damage=None, top="skyrimvr-claude-toolkit-dev-test"):
+def _variant(tmp_path, payload, damage=None, top="skyrim-ai-assistant-toolkit-dev-test"):
     src = tmp_path / "src"
     shutil.copytree(payload, src)
     if damage:
@@ -150,7 +150,7 @@ def test_the_release_mode_fails_closed_without_leak_tokens(tmp_path, payload):
 
 
 def test_a_tag_must_match_the_root_folder_and_build_info(tmp_path, payload):
-    """Review M4: any skyrimvr-claude-toolkit-* root passed, and BUILD-INFO's version was never compared."""
+    """Review M4: any skyrim-ai-assistant-toolkit-* root passed, and BUILD-INFO's version was never compared."""
     r = _verify(tmp_path, _variant(tmp_path, payload), "--tag", "v9.9.9")
     assert r.returncode == 1
     assert "!!" in _line(r.stdout, "root folder names v9.9.9"), r.stdout[-3000:]

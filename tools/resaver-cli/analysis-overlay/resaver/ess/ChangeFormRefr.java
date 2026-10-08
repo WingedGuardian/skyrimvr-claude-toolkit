@@ -15,7 +15,7 @@
  */
 /*
  * MODIFICATION NOTICE (Apache-2.0 §4b) — this file was modified from the original ReSaver
- * (FallrimTools) source by the skyrimvr-claude-toolkit project (2026): extended REFR ChangeForm
+ * (FallrimTools) source by the Skyrim AI Assistant Toolkit project (2026): extended REFR ChangeForm
  * extra-data parse coverage used by the read-only `extradata-scan`/`recon` diagnostics.
  * These changes affect READ/diagnostic parsing only and are used solely as an on-the-fly
  * classpath overlay in front of the user's own downloaded ReSaver.jar (never redistributed).

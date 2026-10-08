@@ -15,7 +15,7 @@
  */
 /*
  * MODIFICATION NOTICE (Apache-2.0 §4b) — this file was modified from the original ReSaver
- * (FallrimTools) source by the skyrimvr-claude-toolkit project (2026):
+ * (FallrimTools) source by the Skyrim AI Assistant Toolkit project (2026):
  *   - added parse coverage for ChangeForm extra-data types 16 and 135,
  *   - added a RECENT predecessor-type tracker used by the read-only `recon`/`extradata-scan`
  *     diagnostics (the "phantom test").
