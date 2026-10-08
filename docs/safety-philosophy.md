@@ -92,17 +92,17 @@ refuse every command if it is missing, so a broken engine can never read as "all
 their root from their own location -- for the Claude Code hooks, two directories above
 `.claude/hooks/` -- and add whatever
 `setup.sh` recorded in `skyrim-paths.env` at the toolkit root (a 3.x install's
-`.claude/skyrim-paths.env` is read when that file is absent, with a session-start notice
-to re-run `setup.sh`). The previous rule matched *any*
+`.claude/skyrim-paths.env` is also read; its protected folders are added to the root file's folders,
+with a session-start notice to re-run `setup.sh` when the legacy file remains). The previous rule matched *any*
 path containing "Skyrim", which meant the session scratchpad (its path contains
-`C--GOG-Games-...-Skyrim-VR`), a checkout of this toolkit, `C:/Temp/skyrim-notes.txt`
+`C--Games-Skyrim-VR`), a checkout of this toolkit, `C:/Temp/skyrim-notes.txt`
 and a GitHub URL were all refused as "deleting the game". MEASURED: 71 of 443
 refusals over 7,641 real commands were that false positive, and none of the 71 named
 the install.
 
 ⚠ **If no root can be resolved, the guard DENIES.** A guard that evaluated nothing
 must not answer "fine" -- that conflation is what left every hook here inert for five
-weeks. ⚠ A `skyrim-paths.env` the guard cannot read, or one with a malformed value for a protected folder (the install, the settings folder, MO2 `mods`/`overwrite`), DENIES every call (`GUARD INERT`) until `setup.sh` rewrites it. An emptied file, or a missing key, does NOT cost you refusals: the self-derived root always resolves, so the guard silently narrows to the install folder plus the generic config literal, and an MO2 folder stops being guarded with nothing reported.
+weeks. ⚠ An unreadable or malformed root `skyrim-paths.env` DENIES every call (`GUARD INERT`) until it is repaired. A broken legacy file also denies when no valid root file exists; beside a valid root file it is reported at session start and only the valid root file's folders are used. An emptied file, or a missing key, does NOT cost you refusals: the self-derived root still resolves and valid legacy protection keys remain in the union. With neither file recording the folder, protection narrows to the install plus the generic config literal, and an MO2 folder stops being guarded with nothing reported.
 
 ⚠ **A relative path resolves against the working directory the agent reports** in the
 hook payload, so `rm Data/x.nif` run from the install is refused. Only when the payload

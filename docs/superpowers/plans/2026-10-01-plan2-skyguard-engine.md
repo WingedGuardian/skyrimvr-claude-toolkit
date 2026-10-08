@@ -225,9 +225,9 @@ def inputs() -> list[dict]:
         add(f"testhooks-{i:03d}", "declared", hook, payload)
 
     spellings = {
-        "fwd": GAME, "back": GAMEW, "msys": "/c/GOG Games/The Elder Scrolls V Skyrim VR",
+        "fwd": GAME, "back": GAMEW, "msys": "/c/Games/Skyrim VR",
         "doubled": GAME.replace("/", "//"), "doubled-back": GAMEW.replace(BS, BS * 2),
-        "upper": GAME.upper(), "mixed": "c:\\GOG Games/The Elder Scrolls V Skyrim VR",
+        "upper": GAME.upper(), "mixed": "c:\\Games/Skyrim VR",
     }
     destroyers = ['rm -rf "{p}"', 'rm -r -f "{p}/Data"', 'rm --recursive --force "{p}"', 'rm -rf -- "{p}"',
                   'rmdir /s /q "{p}"', 'del /f /s /q "{p}"', 'Remove-Item -Recurse "{p}"', 'find "{p}" -delete',
@@ -453,8 +453,8 @@ def test_grep_case_flag():
 
 def test_path_regex_windows_dialects_all_match():
     rx = paths.path_to_regex("C:/Games/Skyrim VR")
-    for s in ["C:/Games/Skyrim VR", "C:" + BS + "GOG Games" + BS + "Skyrim VR", "/c/GOG Games/Skyrim VR",
-              "C://GOG Games//Skyrim VR", "C:" + BS * 2 + "GOG Games" + BS * 2 + "Skyrim VR", "c:/gog games/skyrim vr"]:
+    for s in ["C:/Games/Skyrim VR", "C:" + BS + "Games" + BS + "Skyrim VR", "/c/Games/Skyrim VR",
+              "C://Games//Skyrim VR", "C:" + BS * 2 + "Games" + BS * 2 + "Skyrim VR", "c:/games/skyrim vr"]:
         assert grep.grep(rx, s), s
 
 

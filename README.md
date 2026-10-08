@@ -402,6 +402,9 @@ refusals of writes into `.skyguard/`.
   that differ from the release. This is tamper evidence, not prevention: an identical edit to all eight hook
   interpreter lines is not seen by the banner (the per-call note still is).
 
+The shell guard remains a pattern-based accident barrier. Some encoded program names in Bash ANSI-C quotes
+are not classified; this gap also exists in v3.9.1. The guard does not provide a sandbox.
+
 ### Backups and snapshots you can restore from
 
 - **Every backup now has a manifest line** (`.claude/backups/MANIFEST.jsonl`: the exact original path, size and

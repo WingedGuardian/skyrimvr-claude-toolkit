@@ -7,7 +7,7 @@ interactive TUI does. Everything is already prepared. You do not need to install
 The scratch folder (a throwaway git repo, Codex 0.160.0 probe hooks already wired):
 
 ```text
-C:\Users\user\AppData\Local\Temp\claude\C--GOG-Games-The-Elder-Scrolls-V-Skyrim-VR\a58938c5-68de-4c34-bf34-f1988738f9f1\scratchpad\plan4-probes\p-tui
+C:\Users\user\AppData\Local\Temp\claude\C--Games-Skyrim-VR\<session-id>\scratchpad\plan4-probes\p-tui
 ```
 
 Its hooks are the plan's R2 launch form (`pwsh ... -File "<folder>\sp ace\probe.ps1" || powershell ...`).
@@ -20,7 +20,7 @@ through. The SessionStart hook injects about 6,000 bytes of context whose **last
 Open a **new** Windows Terminal tab (PowerShell) and paste:
 
 ```powershell
-cd "C:\Users\user\AppData\Local\Temp\claude\C--GOG-Games-The-Elder-Scrolls-V-Skyrim-VR\a58938c5-68de-4c34-bf34-f1988738f9f1\scratchpad\plan4-probes\p-tui"
+cd "C:\Users\user\AppData\Local\Temp\claude\C--Games-Skyrim-VR\<session-id>\scratchpad\plan4-probes\p-tui"
 codex
 ```
 
@@ -73,7 +73,7 @@ Then say **"TUI done"**.
 Codex writes these to `~/.codex/config.toml` by itself; you can delete them by hand once Plan 4 is done:
 
 - From the `codex exec` probes (already there, written 2026-10-02):
-  `[projects.'c:\users\user\appdata\local\temp\claude\c--gog-games-the-elder-scrolls-v-skyrim-vr\a58938c5-68de-4c34-bf34-f1988738f9f1\scratchpad\plan4-probes\p1']`
+  `[projects.'c:\users\user\appdata\local\temp\claude\C--Games-Skyrim-VR\<session-id>\scratchpad\plan4-probes\p1']`
   with `trust_level = "trusted"`.
 - From this TUI probe (will appear): a `[projects.'…\plan4-probes\p-tui']` table, and two
   `[hooks.state.'…\plan4-probes\p-tui\.codex\hooks.json:…']` tables (one per approved hook).

@@ -13,11 +13,11 @@ Generated into `CLAUDE.md` only. Everything above is shared with every agent.
   `NotebookEdit` → `protect-files` + `backup-before-edit`; the DevBench MCP tools → `protect-mcp`; SessionStart → `session-kb-guard` (knowledgebase snapshot, then your `## My preferences`). `setup.sh` records the
   Python path in each hook. The user lists or disables them with `/hooks`. Only the Bash tool gets
   `SKYGUARD_SESSION_ID`, so lift the lock from Bash, never PowerShell.
-- **What the backup hook cannot see.** `backup-before-edit.sh` fires on Edit/Write tool calls only, with no
+- **What the backup hook cannot see.** `backup-before-edit.sh` fires on Edit/Write/NotebookEdit tool calls, with no
   extension filter (`.psc` included). A file written by a script run through the Bash tool is invisible to
   it. That is how the knowledgebase is usually written, and it is why `session-kb-guard.sh` snapshots the
-  knowledgebase files at SessionStart. `snapshot-before-tool.sh` copies recent `.psc`/`.pex` before each
-  non-read-only Bash command.
+  knowledgebase files at SessionStart. `snapshot-before-tool.sh` copies `.psc`/`.pex` from both Papyrus
+  source layouts and the compiled-scripts folder, regardless of age, before each non-read-only shell command.
 - **Why `hook-canary.sh` matters here.** Claude Code spawns a hook with a Win32 pipe on stdin, on which
   `cat /dev/stdin` returns zero bytes. Every hook here was inert that way for months while its suite
   passed. The canary reads heartbeats written from inside real invocations.

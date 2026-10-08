@@ -9,7 +9,7 @@ and so on), already set up with `setup.sh`.
 The scratch folder:
 
 ```text
-C:\Users\user\AppData\Local\Temp\claude\C--GOG-Games-The-Elder-Scrolls-V-Skyrim-VR\a58938c5-68de-4c34-bf34-f1988738f9f1\scratchpad\plan4-e2e\tui
+C:\Users\user\AppData\Local\Temp\claude\C--Games-Skyrim-VR\<session-id>\scratchpad\plan4-e2e\tui
 ```
 
 It holds the install, `Skyrim Probe (x86)`, and the collector, `collect.py`. Open `codex` inside the
@@ -20,7 +20,7 @@ It holds the install, `Skyrim Probe (x86)`, and the collector, `collect.py`. Ope
 Open a **new** Windows Terminal tab (PowerShell) and paste:
 
 ```powershell
-cd "C:\Users\user\AppData\Local\Temp\claude\C--GOG-Games-The-Elder-Scrolls-V-Skyrim-VR\a58938c5-68de-4c34-bf34-f1988738f9f1\scratchpad\plan4-e2e\tui\Skyrim Probe (x86)"
+cd "C:\Users\user\AppData\Local\Temp\claude\C--Games-Skyrim-VR\<session-id>\scratchpad\plan4-e2e\tui\Skyrim Probe (x86)"
 codex
 ```
 
@@ -87,7 +87,7 @@ hooks, no bypass flag, plus the definition-change check) in this same folder.
 Codex writes these to `~/.codex/config.toml` by itself; you can delete them by hand once Plan 4 is done.
 
 - Already there from the `codex exec` runs (2026-10-04), each `trust_level = "trusted"`:
-  - `[projects.'c:\users\user\appdata\local\temp\claude\c--gog-games-the-elder-scrolls-v-skyrim-vr\a58938c5-68de-4c34-bf34-f1988738f9f1\scratchpad\plan4-e2e\a\skyrim probe (x86)']`
+  - `[projects.'c:\users\user\appdata\local\temp\claude\C--Games-Skyrim-VR\<session-id>\scratchpad\plan4-e2e\a\skyrim probe (x86)']`
   - `[projects.'...\plan4-e2e\g\skyrim probe (x86)']` (same prefix)
   - `[projects.'...\plan4-e2e\b\skyrim probe (x86)']` (same prefix)
 - From Task 0 (2026-10-02): `[projects.'...\scratchpad\plan4-probes\p1']`, and from its TUI probe a

@@ -146,6 +146,20 @@
 - **CI output parser:** reads the launcher-produced pytest format.
 - **Release identity checks:** derived spellings are checked without printing matched values.
 - **Committed archive contents:** git attributes cannot substitute unexpected working-tree content.
+- **Session state race:** clearing lifts preserves the latest persistent lock decision under the writer lock.
+- **DevBench recovery aliases:** every judged server spelling receives the same save/co-save snapshot handling.
+- **Codex E2E setup:** a failed setup stops preparation before git initialization.
+- **Codex E2E agent selection:** preparation selects Codex explicitly instead of relying on PATH detection.
+- **Migration fence closers:** another fence kind, a shorter run or trailing text cannot close the user's open fence.
+- **Archive product slug:** archive names come from the selected commit's validated package name.
+- **CI build log:** tee writes outside the checkout so it cannot trip the clean-tree gate.
+- **CMD Python apostrophes:** recorded interpreter paths retain embedded apostrophes.
+- **CMD delayed expansion:** literal exclamation marks in interpreter paths survive callers that enable expansion.
+- **Partial load startup:** already-started test burners are stopped when a later launch fails.
+- **POSIX test executables:** temporary interpreter and tool stubs carry executable permissions.
+- **Auto setup regression:** the test recognizes platform-neutral AGENTS rendering when all agents are selected.
+- **Coverage documentation:** backup, command-payload and paths-union descriptions match the current implementations.
+- **Historical identity examples:** derived scratch-path spellings are scrubbed consistently.
 
 ### Removed
 
@@ -171,6 +185,7 @@
 - **Codex subfolders:** starting below the game root silently skips hooks.
 - **PowerShell policy:** AllSigned may prevent hook launch.
 - **Pattern-based coverage:** the guard is an accident barrier, not a sandbox.
+- **Encoded Bash program names:** some ANSI-C quoted spellings are not classified; this gap predates v4.
 - **Interpreter state writes:** code can write or link guard state through forms the shell scanner does not recognize.
 - **Archive extraction:** unpacking into guard state is not covered.
 - **Indirect shell paths:** computed destinations, uncommon option forms and aliases can escape recognized self-protection.

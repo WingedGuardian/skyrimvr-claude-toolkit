@@ -104,7 +104,8 @@ What each kind means to the engine:
 - `mcp`: judged by the same DevBench rules Claude's MCP hook uses. A call that would crash the game is denied; a
   call that saves over an existing save returns **`ask`**, which falls under the ask rule below. Any other
   call is allowed. Name the tool as the three parts `mcp`, `<server>`, `<tool>` joined by a double underscore:
-  only a server whose name starts `devbench` is judged. A call to any other server is allowed with `status`
+  the name after the leading `mcp` part must contain `devbench` (ignoring case, hyphens, underscores, dots and spaces) to be judged.
+  A call to any other server is allowed with `status`
   `partial` and the context `NOT JUDGED: only a DevBench MCP server is guarded`; treat it as you treat `other`.
 - `other`: **allowed, and never judged.** The answer carries `status` `partial` and the context
   `NOT JUDGED: this tool kind is not guarded`. Show or log that context; do not report the call as checked.
