@@ -1,5 +1,5 @@
 #!/bin/bash
-# Skyrim Claude Code Toolkit -- Setup Script
+# Skyrim AI Assistant Toolkit -- Setup Script
 #
 # This script is designed to be run FROM your Skyrim folder, after
 # extracting the toolkit zip into it. It configures everything in-place.
@@ -1119,8 +1119,9 @@ echo "  cosave-info  -- read-only SKSE .skse co-save survey (bundled): bash tool
 echo "  DevBench     -- LIVE in-game inspect/console/Papyrus while you play:"
 echo "                  Nexus mod 181326 (alandtse). This one is a MOD, not a tools/ utility --"
 echo "                  install it with your mod manager (Vortex/MO2), not by hand into Data/."
-echo "                  Needs DevBench 1.11.0+ (1.24.0 newest seen). Update the VR Address Library"
-echo "                  FIRST (0.276.1 newest seen): DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0."
+echo "                  Needs DevBench 1.11.0+; recorded API/docs reference: 1.24.0 (2026-10-04)."
+echo "                  Update the VR Address Library FIRST (0.276.1 metadata reference, 2026-10-08):"
+echo "                  DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0. Reference dates do not recommend an upgrade."
 echo "                  dev-only, no gameplay change, no save data. Drive it via tools/devbench-cli.sh"
 echo "                  (bundled wrapper). Lets your agent test its own fixes in the running game instead"
 echo "                  of asking you to launch, trigger, and report back."

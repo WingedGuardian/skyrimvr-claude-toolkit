@@ -115,8 +115,10 @@ The toolkit's tested Python range is **3.10–3.13**. Optional xelib tools use *
    `winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade`
 
 DevBench is an optional SKSE mod installed through your mod manager. Its documented minimum is **1.11.0**;
-the newest release the docs were read against is **1.24.0**. The recorded VR Address Library reference is
-**newest seen: 0.276.1**. These are audit reference versions, not a claim of a fresh upstream check;
+the newest release the docs were read against is **1.24.0** (2026-10-04, the recorded API/docs reference).
+The public metadata audit on **2026-10-08** found a newer release that has not been runtime-tested here;
+the recorded API/docs reference remains 1.24.0. The VR Address Library metadata reference is
+**newest seen: 0.276.1** (2026-10-08). These sightings do not change pins or recommend an upgrade;
 follow [installing-tools.md](docs/installing-tools.md) for verification and installation guidance.
 
 ### Step 2: Extract This Toolkit Into Your Skyrim Folder
