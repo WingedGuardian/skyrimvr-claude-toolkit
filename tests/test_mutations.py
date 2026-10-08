@@ -46,7 +46,19 @@ MUTATION_IGNORE = shutil.ignore_patterns(
 )
 
 # (id, relative file, text to find, replacement, test that must then fail)
-MUTATIONS = E2E_VERDICT_MUTATIONS + [
+PROBE_RESULT_MUTATIONS = [pytest.param(
+    "agent/guards/adapters/" + source,
+    "    local n o b OUT RC NUL WD",
+    "    local n o b " + " ".join(item for item in ("OUT", "RC", "NUL", "WD") if item != field),
+    "tests/test_python_probe_state.py::test_py_good_preserves_caller_field[healthy-" + field + "-" + source + "]",
+    id="probe-result-" + source.replace("/", "-").replace(".sh", "") + "-" + field,
+) for source in (
+    "claude/backup-before-edit.sh", "claude/protect-bash.sh", "claude/protect-files.sh",
+    "claude/protect-mcp.sh", "claude/session-kb-guard.sh", "claude/snapshot-before-tool.sh",
+    "codex/skyguard-entry.sh",
+) for field in ("OUT", "RC", "NUL", "WD")]
+
+MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
     pytest.param("tools/" + name,
                  'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'" set "SG_FILE_PY=%SG_FILE_PY:~1,-1%"',
                  "rem outer quote decoding removed",

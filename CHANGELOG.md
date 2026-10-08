@@ -102,6 +102,7 @@
 
 ### Fixed
 
+- **Bash interpreter probes:** health checks preserve failed engine results so session checks and backups cannot falsely record completion.
 - **3.x PowerShell coverage:** the Bash-only matcher left PowerShell calls unguarded.
 - **3.x Monitor coverage:** shell commands through Monitor now reach the command guard.
 - **3.x NotebookEdit coverage:** the old Edit|Write matcher excluded NotebookEdit.

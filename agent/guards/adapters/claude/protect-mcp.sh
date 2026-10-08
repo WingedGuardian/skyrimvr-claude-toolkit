@@ -199,7 +199,8 @@ _bounded() {
     case "$OUT" in "Timeout ("*) [ "$RC" -eq 0 ] || WD=1 ;; esac
 }
 py_good() {
-    local n o b
+    # _bounded writes these fields; a health probe must not replace the engine result.
+    local n o b OUT RC NUL WD
     _now; b=$(( PROBE_END - MS )); [ "$b" -le "$PROBE_MS" ] || b=$PROBE_MS
     [ "$b" -ge 200 ] || return 1
     n="$RANDOM$RANDOM"
