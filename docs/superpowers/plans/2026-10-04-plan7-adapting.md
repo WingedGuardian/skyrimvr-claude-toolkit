@@ -30,7 +30,7 @@ into the template and drives them from a fake agent runtime that fails *open* li
 
 **Spec:** `docs/superpowers/specs/2026-09-30-universal-agent-support-design.md` — §3 unknown-agent row, §5
 contract and adapter duties, §11 `ADAPTING.md`, D7, D14, D17. Roadmap row 7:
-`C:/Users/Moona/.claude/plans/looks-good-lovely-fern.md`.
+`C:/Users/user/.claude/plans/looks-good-lovely-fern.md`.
 
 ## Assumed base (state this before starting; re-verify in Task 0)
 

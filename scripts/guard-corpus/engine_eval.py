@@ -19,9 +19,11 @@ import importlib
 import inspect
 import json
 import sys
+from pathlib import Path
 
-DEFAULT_ROOT = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
-DEFAULT_ROOT_WIN = "C:\\GOG Games\\The Elder Scrolls V Skyrim VR"
+_CORPUS_ROOT = Path(__file__).resolve().parents[2] / "tests/guard_corpus/game-root.txt"
+DEFAULT_ROOT = _CORPUS_ROOT.read_text(encoding="utf-8").strip() if _CORPUS_ROOT.is_file() else "C:/Games/SkyrimVR"
+DEFAULT_ROOT_WIN = DEFAULT_ROOT.replace("/", chr(92))
 FILE_TOOLS = ("Edit", "Write", "MultiEdit")
 
 

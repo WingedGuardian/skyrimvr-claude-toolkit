@@ -13,7 +13,7 @@ import argparse, json, os, statistics, subprocess, sys, time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = (REPO / "tests/guard_corpus/game-root.txt").read_text(encoding="utf-8").strip()
 ROWS = {  # wrapper -> corpus row ids
     "protect-bash": ["shell-delete-inside", "shell-benign-git", "shell-cp-inside"],
     "protect-files": ["write-esp", "write-pex", "write-outside"],

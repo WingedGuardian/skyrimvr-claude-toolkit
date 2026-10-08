@@ -29,7 +29,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 BS = chr(92)
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = (REPO / "tests/guard_corpus/game-root.txt").read_text(encoding="utf-8").strip()
 GAMEW = GAME.replace("/", BS)
 # Every environment variable the engine reads as a root; a recording must not inherit the recorder's own.
 ENV_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR", "SKYRIM_MO2_MODS", "SKYRIM_MO2_OVERWRITE")
@@ -405,9 +405,9 @@ def inputs() -> list[dict]:
         add(f"testhooks-{i}", "declared", hook, payload)
 
     spellings = {
-        "fwd": GAME, "back": GAMEW, "msys": "/c/GOG Games/The Elder Scrolls V Skyrim VR",
+        "fwd": GAME, "back": GAMEW, "msys": "/" + GAME[0].lower() + GAME[2:],
         "doubled": GAME.replace("/", "//"), "doubled-back": GAMEW.replace(BS, BS * 2),
-        "upper": GAME.upper(), "mixed": "c:\\GOG Games/The Elder Scrolls V Skyrim VR",
+        "upper": GAME.upper(), "mixed": GAME[0].lower() + GAME[1:].replace("/", BS),
     }
     destroyers = ['rm -rf "{p}"', 'rm -r -f "{p}/Data"', 'rm --recursive --force "{p}"', 'rm -rf -- "{p}"',
                   'rmdir /s /q "{p}"', 'del /f /s /q "{p}"', 'Remove-Item -Recurse "{p}"', 'find "{p}" -delete',

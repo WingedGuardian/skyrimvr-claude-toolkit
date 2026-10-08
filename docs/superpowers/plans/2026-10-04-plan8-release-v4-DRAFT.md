@@ -2,7 +2,7 @@
 
 **Status:** DRAFT, 2026-10-04. Not approved, not started. Written from: the spec
 (`docs/superpowers/specs/2026-09-30-universal-agent-support-design.md`, §8, §10 phase 9, D1, D3, D13), the roadmap
-(`C:/Users/Moona/.claude/plans/looks-good-lovely-fern.md`, row 8 and the FINAL MANUAL BATCH block), the Plan 2/3
+(`C:/Users/user/.claude/plans/looks-good-lovely-fern.md`, row 8 and the FINAL MANUAL BATCH block), the Plan 2/3
 close-outs, the plan4 ledger, the plan5 ledger (in flight), and the release machinery as it stands on master
 (`.github/workflows/release.yml`, `tools/verify-release.sh`, `setup.sh`, `README.md`, `CHANGELOG.md`).
 

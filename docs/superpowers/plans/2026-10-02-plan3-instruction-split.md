@@ -23,7 +23,7 @@ needed.
 
 **Spec:** `docs/superpowers/specs/2026-09-30-universal-agent-support-design.md`: §4 source layout, §6
 instructions, D9, D10, D15, §7.7 CI gates, §10 phase 4. Roadmap row "Plan 3":
-`C:\Users\Moona\.claude\plans\looks-good-lovely-fern.md`. Predecessors: Plan 1 (generator) and Plan 2
+`C:\Users\user\.claude\plans\looks-good-lovely-fern.md`. Predecessors: Plan 1 (generator) and Plan 2
 (`skyguard`, whose last tasks are still landing; see Task 8's precondition).
 
 ## Measured inventory (2026-10-02, `master` @ `fd71271`)
@@ -196,7 +196,7 @@ and the preferences paragraph (+≈620): **≈ 26,000** (INFERRED; Task 7 measur
 - [ ] **Step 0: Record the pre-split blob** (the conservation check in Task 7 needs it):
 
 ```bash
-cd /c/Users/Moona/Projects/skyrimvr-claude-toolkit
+cd /c/Users/user/Projects/skyrimvr-claude-toolkit
 git rev-parse HEAD   # write this SHA into the Task 7 measurement doc as PRE
 python -m pytest tests/ -q -p no:cacheprovider   # baseline must be green before anything changes
 ```

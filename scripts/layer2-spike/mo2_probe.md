@@ -9,7 +9,7 @@ recorded as **"pending batch"**: Table A treats it as not failed, and the R3 fli
 
 ## B5 steps (C6), for the Final Manual Batch
 
-Run against scratch only. Nothing here touches `C:/GOG Games`.
+Run against scratch only. Nothing here touches `C:/Games`.
 
 1. Lock the bed, read-only state check first:
    `python scripts/layer2-spike/lockprobe.py apply M-D "C:/Temp/skyguard-ml2/game/Data/<each vanilla target>"`

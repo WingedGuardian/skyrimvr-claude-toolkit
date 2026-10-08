@@ -1935,7 +1935,7 @@ strings, or build the separator with `chr(92)`.
 ## `setGamePath` needs a trailing separator — and only tells you later, in `setGameMode`
 
 Measured 2026-08-27. XEditLib wants the game path terminated with a separator. Give it
-`C:/GOG Games/The Elder Scrolls V Skyrim VR` and the **next** call fails:
+`C:/Games/The Elder Scrolls V Skyrim VR` and the **next** call fails:
 
 ```
 SetGameMode failed

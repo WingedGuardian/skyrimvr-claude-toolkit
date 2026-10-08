@@ -37,7 +37,7 @@ NTFS stream suffixes (`x.esp:s`, `dir::$INDEX_ALLOCATION`) are cut from each com
 
 COVERS (fix round 1). zone() says where a path IS; a delete also destroys everything BELOW it. covers_protected()
 says whether a protected root lies at or under the path, matching glob and bash-brace components against the
-root's own names (`C:/GOG Games`, `C:/`, `C:/GOG*`, `*` run from the install's parent all cover the install).
+root's own names (`C:/Games`, `C:/`, `C:/GOG*`, `*` run from the install's parent all cover the install).
 
 DIALECTS. bash: `~` and $VAR/${VAR}; `/c/x` is drive c: (Git Bash); `/tmp/x` stays a POSIX path (outside).
 PowerShell: `~`, $env:VAR / ${env:VAR}, $HOME, $PWD; `FileSystem::` provider prefixes dropped; `/x` and `\x` are
@@ -315,7 +315,7 @@ def zone(abs_path: str, roots) -> str:
 
 # --------------------------------------------------------------------------------------------- covers_protected
 # Fix round 1 (CRITICAL): zone() answers "where is this path". A delete also destroys everything BELOW its operand,
-# so `rm -rf C:/GOG Games`, `rm -rf C:/`, `rm -rf C:/GOG*` and bash `rm -rf *` run from the install's parent all
+# so `rm -rf C:/Games`, `rm -rf C:/`, `rm -rf C:/GOG*` and bash `rm -rf *` run from the install's parent all
 # delete the install while zone() says "outside". covers_protected() answers "does deleting this path reach a
 # protected root": a root lies at or under it, or its glob components match the root's components.
 _GLOB_CHARS = frozenset("*?[{")

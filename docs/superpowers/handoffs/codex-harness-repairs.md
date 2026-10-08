@@ -9,7 +9,7 @@ below describe the earlier verification and are preserved rather than relabeled.
 
 ## Ownership and scope
 
-Worktree: `C:/Users/Moona/Projects/skyrim-toolkit-code71271`.
+Worktree: `C:/Users/user/Projects/skyrim-toolkit-code71271`.
 Branch: `codex/harness-repairs-fd71271`, based on master commit
 `fd71271663342e9754d6176754c9543d54be1ba8`. Claude owns the merge after Plan 2's final
 review. Nothing was committed to master, merged, pushed or deployed.

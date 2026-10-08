@@ -18,7 +18,7 @@ wrapper denies by itself. Plan 2 changes nothing for Codex; Plan 4 adds that ada
 
 **Spec:** `docs/superpowers/specs/2026-09-30-universal-agent-support-design.md` — §5 engine + contract,
 §5.1 fail-by-deny, §7.1 corpus, §7.2 equivalence gate, §10 phase 3. Predecessor: Plan 1 (commits
-`5500829..9c49c20`). Roadmap: `C:\Users\Moona\.claude\plans\looks-good-lovely-fern.md`.
+`5500829..9c49c20`). Roadmap: `C:\Users\user\.claude\plans\looks-good-lovely-fern.md`.
 
 ## Decision to confirm at plan review
 
@@ -110,7 +110,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 BS = chr(92)
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = "C:/Games/The Elder Scrolls V Skyrim VR"
 GAMEW = GAME.replace("/", BS)
 LAYOUTS = {
     # name: (install dir name, skyrim-paths.env text)
@@ -452,8 +452,8 @@ def test_grep_case_flag():
 
 
 def test_path_regex_windows_dialects_all_match():
-    rx = paths.path_to_regex("C:/GOG Games/Skyrim VR")
-    for s in ["C:/GOG Games/Skyrim VR", "C:" + BS + "GOG Games" + BS + "Skyrim VR", "/c/GOG Games/Skyrim VR",
+    rx = paths.path_to_regex("C:/Games/Skyrim VR")
+    for s in ["C:/Games/Skyrim VR", "C:" + BS + "GOG Games" + BS + "Skyrim VR", "/c/GOG Games/Skyrim VR",
               "C://GOG Games//Skyrim VR", "C:" + BS * 2 + "GOG Games" + BS * 2 + "Skyrim VR", "c:/gog games/skyrim vr"]:
         assert grep.grep(rx, s), s
 
@@ -741,7 +741,7 @@ sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, paths, shell_rules  # noqa: E402
 
 BASH = (REPO / "agent" / "guards" / "legacy-bash" / "protect-bash.sh").read_text(encoding="utf-8")
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = "C:/Games/The Elder Scrolls V Skyrim VR"
 
 
 def msg(line_no):

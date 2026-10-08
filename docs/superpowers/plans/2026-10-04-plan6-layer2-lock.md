@@ -42,7 +42,7 @@ uses:
 - §7.5 (the `guards off` → restart → relock cycle); §9 M2 and M-L2;
 - evidence E2, E14, E17, E20, E22.
 
-Roadmap row 6 is in `C:/Users/Moona/.claude/plans/looks-good-lovely-fern.md`, together with its
+Roadmap row 6 is in `C:/Users/user/.claude/plans/looks-good-lovely-fern.md`, together with its
 **FINAL MANUAL BATCH** block. House style follows Plan 2
 (`docs/superpowers/plans/2026-10-01-plan2-skyguard-engine.md`) and Plan 5 (branch `plan5`): corpus rows
 first, priced against real history, one mutation twin per clause, and measured rather than assumed.
@@ -820,7 +820,7 @@ Rules:
 ## Final Manual Batch items this plan adds (appended in Task 19; never asked mid-plan)
 
 All of them run against scratch: the bed `C:/Temp/skyguard-ml2/`, a scratch toolkit install, and a
-stand-in Steam app. **None of them touches `C:/GOG Games`**, except the explicitly optional B6.
+stand-in Steam app. **None of them touches `C:/Games`**, except the explicitly optional B6.
 
 - **B1 — Wrye Bash** (~10 min). Steps:
   1. With the bed locked by `tools/skyguard lock` (the scratch install), launch

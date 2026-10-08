@@ -217,8 +217,8 @@ allow→S-DEL-INSTALL 2.
 
 **No-longer-denied items (deny → advise/allow): 113, every one read** (operands resolved and listed per item):
 - 96 items whose delete operands (136 operands in all) ALL resolve OUTSIDE every protected root: `/tmp/*`,
-  the user's Temp/scratchpad, `C:/Temp/*`, `C:/GOG modding tools/_*`, `C:/GOG Games/spriggit-tmp/*` and
-  `C:/GOG Games/zgin/*` (siblings of the install), `~/.plans`, a toolkit checkout. Each was denied only because
+  the user's Temp/scratchpad, `C:/Temp/*`, `C:/GOG modding tools/_*`, `C:/Games/spriggit-tmp/*` and
+  `C:/Games/zgin/*` (siblings of the install), `~/.plans`, a toolkit checkout. Each was denied only because
   the same command also named the install (`cd <install> && ...`). **FP removed.**
 - 17 with no executed delete at all: grep / git log / git commit messages, python heredocs that edit a document or
   write a script TEXT containing `rm`, hook test harnesses that pass a delete command as data, and 3 `git rm
@@ -581,7 +581,7 @@ formerly-asked saves are allow (new names). The unreadable-body rule adds no new
 
 ## Inputs for the side-effects plan (Task 16, R16 -- MEASURE ONLY; no behaviour changed)
 
-Measured 2026-10-04 on `plan5` (a4135f6 + this task). **Read-only** on the real install (`C:/GOG Games/The Elder Scrolls V Skyrim VR`:
+Measured 2026-10-04 on `plan5` (a4135f6 + this task). **Read-only** on the real install (`C:/Games/The Elder Scrolls V Skyrim VR`:
 directory walks, `stat`, file reads; nothing written there). The timings ran `tools/skyguard/snapshot.run` against **scratch copies**
 of the script folders. Raw output stays outside the repo (`.../scratchpad/plan5-t16/`: `scripts-census.json`, `timing.json`,
 `backups-census.txt`). Tier key: MEASURED (count and denominator given), READ (code), INFERRED.

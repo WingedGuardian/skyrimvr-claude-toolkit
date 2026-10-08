@@ -32,7 +32,7 @@ bash; pytest 8; Node only for the JS↔Python precedence parity test.
 
 **Spec:** `docs/superpowers/specs/2026-09-30-universal-agent-support-design.md` §5 (new rules), §7.1
 (corpus), §10 phase 6; evidence E3, E12, E13, E16, E21. Roadmap row 5:
-`C:\Users\Moona\.claude\plans\looks-good-lovely-fern.md`. The inputs are:
+`C:\Users\user\.claude\plans\looks-good-lovely-fern.md`. The inputs are:
 
 - `docs/superpowers/measurements/2026-10-02-ask-and-analysis-failure-audit.md` (the "audit")
 - `docs/superpowers/measurements/2026-10-02-plan2-equivalence.md` (the "equivalence replay")

@@ -28,13 +28,13 @@ script); bash; pytest 8; `codex-cli` (version recorded in Task 0); GitHub Action
 **Spec:** `docs/superpowers/specs/2026-09-30-universal-agent-support-design.md` — §5 adapters and contract,
 §5.1 fail-by-deny, §7.3–7.5 conformance/mutants/live E2E, §8 trust step, D2/D2a/D9/D14/D15/D16, E1–E7,
 E17–E19, E23–E26. Roadmap row 4 + its *(Codex)* audit items:
-`C:/Users/Moona/.claude/plans/looks-good-lovely-fern.md`. Measured facts:
+`C:/Users/user/.claude/plans/looks-good-lovely-fern.md`. Measured facts:
 `memory/kb-codex-hooks-measured.md`, `docs/superpowers/measurements/2026-10-01-plan1-derisk.md`,
 `docs/superpowers/measurements/2026-10-02-ask-and-analysis-failure-audit.md`. House style:
 `docs/superpowers/plans/2026-10-01-plan2-skyguard-engine.md`.
 
 **Prior art (evidence, not truth — re-measured in Task 0):** the X4 toolkit's lane-B Codex work in
-`C:/Users/Moona/Projects/x4-p2-b` — `docs/superpowers/measurements/2026-10-02-codex-0160.md` (Codex
+`C:/Users/user/Projects/x4-p2-b` — `docs/superpowers/measurements/2026-10-02-codex-0160.md` (Codex
 0.160.0) and `agent/guards/adapters/{codex.py,codex-entry.ps1,codex_trust.py,patch_paths.py}`. Its
 findings that change this plan are folded in below and each is re-measured on our own definitions before
 anything depends on it: `bash` in a hook command resolves by the launcher's PATH and can hit the WSL stub
@@ -249,7 +249,7 @@ is listed with it).
 - [ ] **Step 1: Preconditions.**
 
 ```bash
-cd /c/Users/Moona/Projects/skyrimvr-claude-toolkit
+cd /c/Users/user/Projects/skyrimvr-claude-toolkit
 git status --short                                   # Expected: empty
 git log --oneline -40 | grep -i "plan 3\|prefs\|preferences" # Expected: Plan 3 merge commits present
 test -f tools/skyguard/prefs.py && echo prefs-ok    # Expected: prefs-ok
@@ -330,8 +330,8 @@ Any miss → stop and report which precondition failed.
   **Stop condition:** if PreToolUse does not fire in the TUI, or a JSON deny does not block there, stop:
   D2 says Codex support does not ship without CLI parity. Report to the user with the evidence.
 - [ ] **Step 7: Recapture fixtures.** Scrub `raw/` with `tools/payload-capture/scrub.py --agent codex` into
-  `tests/fixtures/payloads/codex/<version>/`, check no `Moona` survives
-  (`grep -rl Moona tests/fixtures && echo LEAK`), update the fixtures README (version, prompts, what each
+  `tests/fixtures/payloads/codex/<version>/`, check no `user` survives
+  (`grep -rl user tests/fixtures && echo LEAK`), update the fixtures README (version, prompts, what each
   file is, which were not captured).
 - [ ] **Step 8: Write the measurements doc** (one table row per probe: prediction, result, count, tier,
   plan change) and **amend this plan** where a result changed a ruling (R2/R6/R7/R4 text, latency risk).
@@ -1619,7 +1619,7 @@ before it goes into JSON (no hand escaping). ASCII only. Never log the environme
   `test_every_path_exits_zero` (parametrized over the whole fault matrix and the controls).
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Write `skyguard-entry.ps1`.** Base it on the X4 entry
-  (`C:/Users/Moona/Projects/x4-p2-b/agent/guards/adapters/codex-entry.ps1`: stdin as bytes via
+  (`C:/Users/user/Projects/x4-p2-b/agent/guards/adapters/codex-entry.ps1`: stdin as bytes via
   `[Console]::OpenStandardInput()`, `ProcessStartInfo` with async stdout/stderr reads, `WaitForExit(limit)`
   then `taskkill /T /F`, `Test-Body`, quote only whitespace-containing arguments because `py.exe` reads its
   raw command line), and change: the role names; `SKYGUARD-OK` sentinel; the Task 5 chain

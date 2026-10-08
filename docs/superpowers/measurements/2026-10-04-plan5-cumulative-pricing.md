@@ -96,8 +96,8 @@ Every cell where the decision moved was printed with its command and read. The 2
 - **169 "names both a deletion and a path inside the install" (E16) and the 15 "config directory" ones (184 together).**
   Each was checked by an independent regex over its `rm`/`del`/`Remove-Item` operands (not the engine under test): **134 have
   no delete operand outside the scratchpad, `/tmp` or `AppData/Local/Temp`**; the other **50 were hand-read** from the printed
-  command: 18 delete a sibling of the install or a file elsewhere (`C:/GOG Games/spriggit-tmp` 9, `C:/GOG modding tools/_*` 5,
-  `C:/GOG Games/zgin` ffmpeg temporaries 3, `~/.plans` 1), 13 delete a variable that holds a scratch folder (the assignment is in
+  command: 18 delete a sibling of the install or a file elsewhere (`C:/Games/spriggit-tmp` 9, `C:/GOG modding tools/_*` 5,
+  `C:/Games/zgin` ffmpeg temporaries 3, `~/.plans` 1), 13 delete a variable that holds a scratch folder (the assignment is in
   the same command), 13 are text only (a python heredoc that writes a script, a hook-test harness piping `rm -rf` into the hook as
   data, a `grep` for the word), 3 are `git rm --cached` (the index, not the file), 2 are `rm -f tools/_before_check.py` run inside
   another repository, 1 is `rm -rf tools/__pycache__` from the install (allowed by the deliberate `__pycache__` scratch ruling,

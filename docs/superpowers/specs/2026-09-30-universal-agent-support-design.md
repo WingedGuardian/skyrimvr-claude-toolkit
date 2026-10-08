@@ -37,7 +37,7 @@ toolkit to itself.
 
 - **An MCP server as a safety layer.** It cannot stop an agent bypassing it through its own shell. DevBench
   (an MCP server inside the game) is a surface the guards *cover* (§5), not a layer.
-- **The author's personal install** (`C:/GOG Games/...`). It is a test bed; adopting v4 there is a separate
+- **The author's personal install** (`C:/Games/...`). It is a test bed; adopting v4 there is a separate
   decision.
 
 ## 2. Evidence this design rests on

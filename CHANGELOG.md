@@ -469,7 +469,7 @@ toolkit checkout and `C:/Temp/skyrim-notes.txt` were, and are verified.
 
 - **Redirects and tool output into the game directory were never advised at all** on
   any install whose path contains a space — which includes the default Steam layout.
-  The rules used `[^"' ]*`, which cannot span the space in `C:/GOG Games/…`. Fixed by
+  The rules used `[^"' ]*`, which cannot span the space in `C:/Games/…`. Fixed by
   the same resolution work; this one was under-blocking, not over-blocking.
 - The Champollion refusal is now scoped to the live install, so the remedy its own
   message prescribes — copy the `.pex` to a temp directory and run it there — is no
