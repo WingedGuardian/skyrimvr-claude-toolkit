@@ -319,12 +319,17 @@ def test_setup_without_node_prints_instructions_and_never_runs_a_package_manager
                     newline="\n")
     stub.chmod(0o755)
     path = os.pathsep.join([str(trip), str(BIN), os.environ["PATH"]])
-    r = run_setup(game_dir, env_overrides={"PATH": path, "FAKE_WHICH_MISSING": "node"})
+    # The launcher's earlier PATH tripwire also writes here. An intentional
+    # mutation must fail this assertion without contaminating other workers.
+    r = run_setup(game_dir, env_overrides={"PATH": path, "FAKE_WHICH_MISSING": "node",
+                                          "HARNESS_TRIPWIRE_LOG": log.as_posix()})
     assert r.returncode == 0, r.stdout + r.stderr
     assert "Node.js not found" in r.stdout, r.stdout
     # printed as instructions, in the authorization-aware form (tests/test_install_hints.py)
     assert "winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade" in r.stdout
-    assert not log.exists() or log.read_text() == "", "setup.sh ran a package manager: " + log.read_text()
+    attempts = log.read_text().splitlines() if log.exists() else []
+    attempts = [line for line in attempts if line not in ("dotnet --version", "dotnet --list-sdks")]
+    assert not attempts, "setup.sh ran a package manager: " + repr(attempts)
 
 
 # ---------------------------------------------------------------- Codex (Plan 4 Task 11)

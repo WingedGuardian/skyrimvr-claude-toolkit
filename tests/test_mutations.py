@@ -6720,6 +6720,12 @@ MUTATIONS += [
 ]
 # Rows 22/51: the plan docs' links resolve under CI's own check.
 MUTATIONS.append(pytest.param(
+    ".github/workflows/ci.yml",
+    "              if 'node_modules' in f.split(os.sep):",
+    "              if False:",
+    "tests/test_markdown_links.py::test_dependency_website_links_are_not_toolkit_links",
+    id="p8-link-check-excludes-dependency-websites"))
+MUTATIONS.append(pytest.param(
     "docs/superpowers/plans/2026-10-02-plan3-closeout.md",
     "plan3's own example of a relative link to skse-cross-compile.md",
     "plan3's own [skse-cross-compile.md](skse-cross-compile.md) example",

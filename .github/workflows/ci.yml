@@ -268,6 +268,8 @@ jobs:
           import glob, os, re, sys
           fail = False
           for f in glob.glob('**/*.md', recursive=True):
+              if 'node_modules' in f.split(os.sep):
+                  continue
               base = os.path.dirname(f)
               for text, target in re.findall(r'\[([^\]]*)\]\(([^)\s]+)\)',
                                              open(f, encoding='utf-8').read()):

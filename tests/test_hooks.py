@@ -917,15 +917,20 @@ def test_a_drive_root_is_converted_to_its_windows_spelling(tmp_path):
     _check_root_spelling(root, f"/{win[0].lower()}{win[2:]}/.claude/hooks/protect-bash.sh")
 
 
-def test_a_root_on_an_msys_mount_still_gets_its_windows_spelling(tmp_path):
+def test_a_root_on_an_msys_mount_still_gets_its_windows_spelling(tmp_path, monkeypatch):
     """An install reached through an MSYS mount (`/tmp/...`) has no textual Windows spelling; the
     wrapper must fall back to `pwd -W` there rather than hand python.exe a path it cannot open."""
+    if os.name != "nt":
+        pytest.skip("MSYS mount conversion runs on Windows")
+    # Git Bash mounts TMP at /tmp. The launcher deliberately puts its own TMP
+    # outside pytest's fixture directory, so give this probe a fixture-owned mount.
+    monkeypatch.setenv("TMP", str(tmp_path))
+    monkeypatch.setenv("TEMP", str(tmp_path))
     tmp_win = subprocess.run([_bash(), "-c", "cd /tmp 2>/dev/null && pwd -W"],
                              capture_output=True, text=True, timeout=60).stdout.strip()
     root = install_hooks(tmp_path / "Skyrim VR", names={"protect-bash.sh"})
     here = root.as_posix()
-    if not tmp_win or not here.lower().startswith(tmp_win.lower() + "/"):
-        pytest.skip(f"{here} is not under the /tmp mount ({tmp_win!r})")
+    assert tmp_win and here.lower().startswith(tmp_win.lower() + "/"), (here, tmp_win)
     _check_root_spelling(root, "/tmp" + here[len(tmp_win):] + "/.claude/hooks/protect-bash.sh")
 
 

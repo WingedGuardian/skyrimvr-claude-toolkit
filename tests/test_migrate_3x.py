@@ -475,6 +475,8 @@ def test_hostile_content_is_copied_verbatim_and_never_becomes_preferences(tmp_pa
     assert rc == 0, out
     local = (root / "KNOWLEDGEBASE.local.md").read_text(encoding="utf-8")
     assert hostile.decode("utf-8") + "\n" in local, "not verbatim"
+    before_carried = local.split("<!-- skyrim-toolkit migrate-3x BEGIN", 1)[0]
+    assert "\n## My preferences\n" in before_carried, "missing preferences heading before carried blocks"
     assert {n for n, _ in M.existing_blocks(local)} == {"CLAUDE.md", "AGENTS.md"}, "a marker inside the text fooled the reader"
     sys.path.insert(0, str(REPO / "tools"))
     try:

@@ -39,3 +39,16 @@ def test_the_check_can_fail(tmp_path):
     (tmp_path / "doc.md").write_text("see [x](missing.md) and [ok](doc.md)\n", encoding="utf-8")
     r = _run(tmp_path)
     assert r.returncode == 1 and "broken link [x](missing.md)" in r.stdout, r.stdout
+
+
+def test_dependency_website_links_are_not_toolkit_links(tmp_path):
+    for base in (tmp_path, tmp_path / "nested"):
+        dependency = base / "node_modules" / "package" / "doc"
+        dependency.mkdir(parents=True)
+        (dependency / "index.md").write_text("[website route](extensionless-route)\n", encoding="utf-8")
+    (tmp_path / "doc.md").write_text("[ok](doc.md)\n", encoding="utf-8")
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    (tmp_path / "doc.md").write_text("[broken](missing.md)\n", encoding="utf-8")
+    r = _run(tmp_path)
+    assert r.returncode == 1 and "broken link [broken](missing.md)" in r.stdout, r.stdout
