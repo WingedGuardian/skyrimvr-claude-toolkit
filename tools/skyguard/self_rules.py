@@ -36,8 +36,11 @@ NOT covered (residue, R6): interpreter code that writes these files (`python -c 
 """
 from __future__ import annotations
 
+import ast
 import fnmatch
+import io
 import os
+import tokenize
 import re
 from typing import List, Mapping, Optional, Tuple
 
@@ -344,6 +347,64 @@ def _hit_name(a: str, w: str) -> str:
     return rel_name if ".skyguard" in (a or w).lower() else ".skyguard"
 
 
+def _python_inspection_text(program: str, code: str) -> str:
+    """Mask literals only in proven parser inspection; unsupported code keeps the original scan.
+
+    This is deliberately a small grammar, not Python execution analysis. Only
+    print and an exactly imported shellparse.parse can run. Store contexts include
+    loop/comprehension bindings, so neither accepted callable can be rebound.
+    """
+    from . import deletes
+    if not deletes._PYTHON.fullmatch(program):
+        return code
+    if not code.isascii():
+        return code
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError):
+        return code
+    permitted = {ast.Module, ast.ImportFrom, ast.Assign, ast.For, ast.Expr,
+                 ast.List, ast.Tuple, ast.Constant, ast.Name, ast.Attribute,
+                 ast.Call, ast.ListComp, ast.Load, ast.Store, ast.alias, ast.comprehension}
+    nodes = list(ast.walk(tree))
+    if any(type(node) not in permitted for node in nodes):
+        return code
+    imported = False
+    for node in nodes:
+        if isinstance(node, ast.ImportFrom):
+            if not (node.level == 0 and node.module == "skyguard" and len(node.names) == 1
+                    and node.names[0].name == "shellparse" and node.names[0].asname is None):
+                return code
+            imported = True
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id in {"print", "shellparse"}:
+            return code
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+            return code
+    for node in nodes:
+        if isinstance(node, ast.Call):
+            callee = node.func
+            if not ((isinstance(callee, ast.Name) and callee.id == "print")
+                    or (imported and isinstance(callee, ast.Attribute) and callee.attr == "parse"
+                        and isinstance(callee.value, ast.Name) and callee.value.id == "shellparse")):
+                return code
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(code).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return code
+    offsets = [0]
+    for line in code.splitlines(keepends=True):
+        offsets.append(offsets[-1] + len(line))
+    masked = list(code)
+    for token in tokens:
+        if token.type in (tokenize.STRING, tokenize.COMMENT):
+            start = offsets[token.start[0] - 1] + token.start[1]
+            end = offsets[token.end[0] - 1] + token.end[1]
+            for index in range(start, end):
+                if masked[index] not in "\r\n":
+                    masked[index] = " "
+    return "".join(masked)
+
+
 def _state_delete(e, cwd, env, roots) -> str:
     """The name of what a delete by this exec removes from the state ("" for none): rm / Remove-Item / del / rd /
     [IO.File]::Delete (deletes.operands), and interpreter code with a delete API and a quoted path into the state."""
@@ -351,7 +412,10 @@ def _state_delete(e, cwd, env, roots) -> str:
     from .grep import grep
     words = [w for w in (deletes.operands(e) or []) if isinstance(w, str)]
     code = deletes.interpreter_code(e)
-    if code and (grep(deletes.INTERP_DESTROYER, code) or grep(deletes.INTERP_DELETE, code)):
+    delete_api = bool(code and grep(deletes.INTERP_DELETE, code))
+    if delete_api:
+        delete_api = grep(deletes.INTERP_DELETE, _python_inspection_text(e.program, code))
+    if code and (grep(deletes.INTERP_DESTROYER, code) or delete_api):
         words += [m.group(1) or m.group(2) for m in _QUOTED.finditer(code)]
     for w in words:
         a = targets.resolve_operand(e, w, cwd, env)

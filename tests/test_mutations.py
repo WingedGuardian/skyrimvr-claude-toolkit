@@ -4417,7 +4417,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _p12row("state-del-io-file"), "rule-S-SELF-STATE-delete-io-file"),
     (_SF, "        hit = _recycle_delete(command, parsed, cwd, env, roots)",'        hit = ""', _p12row("state-del-recycle"),
      "rule-S-SELF-STATE-delete-recycle-bin"),
-    (_SF, "    if code and (grep(deletes.INTERP_DESTROYER, code) or grep(deletes.INTERP_DELETE, code)):", "    if False:",
+    (_SF, "    if code and (grep(deletes.INTERP_DESTROYER, code) or delete_api):", "    if False:",
      _p12row("state-del-python"), "rule-S-SELF-STATE-delete-interpreter"),
     # Re-anchored in the final fix pass (lane A C1 put the raw-unlock check between this and the deletes).
     (_SR6, '    if own and own[0] == self_rules.STATE:\n        return deny("S-SELF-STATE", own[1])\n    # Plan 6 final fix',
@@ -7337,3 +7337,23 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "    return [r if len(r) == 3 else (r[0], r[1], CREATES) for r in out]",
      _P8R1 + "test_the_note_says_what_the_command_does[redirect]", "p8r2-verb-default-edits"),
 ]]
+
+
+# Narrow Python parser-inspection literal handling (watched false-refusal RED).
+MUTATIONS += [
+    pytest.param('tools/skyguard/self_rules.py', '    if not deletes._PYTHON.fullmatch(program):\n', '    if False:\n', 'tests/test_pricing_inspection.py::test_inspection_comments_are_data_and_other_interpreters_stay_conservative[posix]', id='review-inspection-python-only'),
+    pytest.param('tools/skyguard/self_rules.py', '    if not code.isascii():\n', '    if False:\n', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[unicode-posix]', id='review-inspection-ascii-only'),
+    pytest.param('tools/skyguard/self_rules.py', '    except (SyntaxError, ValueError, RecursionError):\n        return code\n', '    except (SyntaxError, ValueError, RecursionError):\n        return " " * len(code)\n', 'tests/test_pricing_inspection.py::test_inspection_parser_failure_preserves_original_state_refusal[ast]', id='review-inspection-ast-fallback'),
+    pytest.param('tools/skyguard/self_rules.py', '    if any(type(node) not in permitted for node in nodes):\n', '    if False:\n', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[f-string-posix]', id='review-inspection-ast-grammar'),
+    pytest.param('tools/skyguard/self_rules.py', '            if not (node.level == 0 and node.module == "skyguard" and len(node.names) == 1\n                    and node.names[0].name == "shellparse" and node.names[0].asname is None):\n', '            if False:\n', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[unknown-import-posix]', id='review-inspection-exact-import'),
+    pytest.param('tools/skyguard/self_rules.py', '        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id in {"print", "shellparse"}:\n', '        if False:\n', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[comprehension-print-binding-posix]', id='review-inspection-protected-binding'),
+    pytest.param('tools/skyguard/self_rules.py', '        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):\n', '        if False:\n', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[attribute-write-posix]', id='review-inspection-attribute-store'),
+    pytest.param('tools/skyguard/self_rules.py', '            if not ((isinstance(callee, ast.Name) and callee.id == "print")\n                    or (imported and isinstance(callee, ast.Attribute) and callee.attr == "parse"\n                        and isinstance(callee.value, ast.Name) and callee.value.id == "shellparse")):\n', '            if False:\n', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[unknown-call-posix]', id='review-inspection-allowed-call'),
+    pytest.param('tools/skyguard/self_rules.py', '                    or (imported and isinstance(callee, ast.Attribute) and callee.attr == "parse"\n', '                    or (isinstance(callee, ast.Attribute) and callee.attr == "parse"\n', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[parser-without-import-posix]', id='review-inspection-parser-import-required'),
+    pytest.param('tools/skyguard/self_rules.py', '    except (tokenize.TokenError, IndentationError, SyntaxError):\n        return code\n', '    except (tokenize.TokenError, IndentationError, SyntaxError):\n        return " " * len(code)\n', 'tests/test_pricing_inspection.py::test_inspection_parser_failure_preserves_original_state_refusal[tokenize]', id='review-inspection-token-fallback'),
+    pytest.param('tools/skyguard/self_rules.py', '        if token.type in (tokenize.STRING, tokenize.COMMENT):\n', '        if token.type in (tokenize.COMMENT,):\n', 'tests/test_pricing_inspection.py::test_exact_historical_k18699_shell_quoting_is_inspection_data', id='review-inspection-string-mask'),
+    pytest.param('tools/skyguard/self_rules.py', '        if token.type in (tokenize.STRING, tokenize.COMMENT):\n', '        if token.type in (tokenize.STRING,):\n', 'tests/test_pricing_inspection.py::test_inspection_comments_are_data_and_other_interpreters_stay_conservative[posix]', id='review-inspection-comment-mask'),
+    pytest.param('tools/skyguard/self_rules.py', '        delete_api = grep(deletes.INTERP_DELETE, _python_inspection_text(e.program, code))\n', '        delete_api = grep(deletes.INTERP_DELETE, code)\n', 'tests/test_pricing_inspection.py::test_exact_historical_k18699_shell_quoting_is_inspection_data', id='review-inspection-trigger-integration'),
+]
+
+MUTATIONS += [pytest.param('tools/skyguard/self_rules.py', '    except (SyntaxError, ValueError, RecursionError):\n', '    except (SyntaxError, ValueError):\n', 'tests/test_pricing_inspection.py::test_inspection_parser_failure_preserves_original_state_refusal[ast-recursion]', id='review-inspection-ast-recursion-fallback')]
