@@ -102,6 +102,8 @@
 
 ### Fixed
 
+- **Artifact bytecode:** payload verification avoids creating machine-specific bytecode in the extracted archive before scanning it for leaks.
+- **Virtual environment verification:** scrubbed checks recognize the measured interpreter directory alongside its base Python installation.
 - **Bash interpreter probes:** health checks preserve failed engine results so session checks and backups cannot falsely record completion.
 - **3.x PowerShell coverage:** the Bash-only matcher left PowerShell calls unguarded.
 - **3.x Monitor coverage:** shell commands through Monitor now reach the command guard.

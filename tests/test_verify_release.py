@@ -81,6 +81,26 @@ def test_a_whole_artifact_passes(tmp_path, payload):
     assert "RESULT: OK" in r.stdout
 
 
+def test_verification_does_not_create_identity_bearing_payload_bytecode(tmp_path, payload, monkeypatch):
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    workspace = tmp_path / NAME
+    workspace.mkdir()
+    r = _verify(workspace, _variant(tmp_path, payload), "--expect-commit", SHA)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "no home path, user name or key in the payload" in r.stdout
+
+
+def test_scrubbed_verification_accepts_the_measured_venv_interpreter(tmp_path, payload, monkeypatch):
+    import venv
+    runtime = tmp_path / NAME / "runtime"
+    venv.EnvBuilder(with_pip=False).create(runtime)
+    executable = runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    monkeypatch.setenv("PYTHON", str(executable))
+    r = _verify(tmp_path, _variant(tmp_path, payload), "--scrubbed", "--expect-commit", SHA)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "no home path or user name in the installed files" in r.stdout
+
+
 def test_a_failed_product_slug_read_refuses_before_artifact_work(tmp_path):
     checkout = tmp_path / "checkout"
     (checkout / "tools").mkdir(parents=True)

@@ -7375,3 +7375,8 @@ MUTATIONS += [
 ]
 
 MUTATIONS += [pytest.param('tools/skyguard/self_rules.py', '    except (SyntaxError, ValueError, RecursionError):\n', '    except (SyntaxError, ValueError):\n', 'tests/test_pricing_inspection.py::test_inspection_parser_failure_preserves_original_state_refusal[ast-recursion]', id='review-inspection-ast-recursion-fallback')]
+
+MUTATIONS += [
+    pytest.param('tools/verify-release.sh', 'if "$PY" -B "$HERE/check-release-payload.py" "$(winpath "$ROOT")"', 'if "$PY" "$HERE/check-release-payload.py" "$(winpath "$ROOT")"', 'tests/test_verify_release.py::test_verification_does_not_create_identity_bearing_payload_bytecode', id='review-verifier-no-payload-bytecode'),
+    pytest.param('tools/verify-release.sh', ' --allow-prefix "$(winpath "$PYDIR")"', '', 'tests/test_verify_release.py::test_scrubbed_verification_accepts_the_measured_venv_interpreter', id='review-verifier-measured-venv-directory'),
+]

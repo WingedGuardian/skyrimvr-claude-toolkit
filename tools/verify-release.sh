@@ -132,7 +132,8 @@ fi
 REQ=(); [ "${VERIFY_REQUIRE_LEAK_TOKENS:-0}" = 1 ] && REQ=(--require-tokens)
 
 # --- payload shape, hooks, Codex half, adapter kit: ONE checker, the same one release.yml runs ---------------
-if "$PY" "$HERE/check-release-payload.py" "$(winpath "$ROOT")" ${EXPECT:+--expect-commit "$EXPECT"}; then
+# The checker imports the payload's hasher: do not write local bytecode into what we scan as shipped.
+if "$PY" -B "$HERE/check-release-payload.py" "$(winpath "$ROOT")" ${EXPECT:+--expect-commit "$EXPECT"}; then
   ok "payload whole (check-release-payload.py)"
 else
   bad "payload (check-release-payload.py)" "see the !! lines above"
@@ -356,7 +357,8 @@ except Exception:
   envf="$GAME/skyrim-paths.env"                       # 4.0: the toolkit root; 3.x: .claude/
   [ -f "$envf" ] || envf="$GAME/.claude/skyrim-paths.env"
   cfg=$(sed -n "s/^SKYRIM_CONFIG_DIR=['\"]\{0,1\}\([^'\"]*\).*/\1/p" "$envf" 2>/dev/null | head -1)
-  allow=(--allow-prefix "$(winpath "$WORK")" --allow-prefix "$pybase")
+  # A venv's actual executable directory can be outside sys.base_prefix; PYDIR was measured above.
+  allow=(--allow-prefix "$(winpath "$WORK")" --allow-prefix "$pybase" --allow-prefix "$(winpath "$PYDIR")")
   # The config folder is NOT taken on trust from setup's own output: the checker allow-lists it only if it is
   # <home>/.../Documents/My Games/Skyrim*, strictly below the REAL home (the parent's, not the scrubbed one).
   [ -n "$cfg" ] && allow+=(--allow-config "$cfg" --home "$(winpath "${REAL_HOME}")")
