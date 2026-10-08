@@ -271,9 +271,8 @@ def test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget(tmp_path
     # Deferred row 26: the planted spin arms tests/spin_reaper.py first, so it ends within REAPER_S whatever happens
     # to the watchdog (its mutant used to leave a python.exe spinning, orphaned, after the test timed out).
     marker = tmp_path / "reaper.txt"
-    reaper = ("    import re, subprocess as _sp, os as _os; _sp.Popen([sys.executable, {!r}, str(_os.getpid()), {!r}, {!r}], "
-              "stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)\n").format(
-                  (REPO / "tests" / "spin_reaper.py").as_posix(), str(REAPER_S), marker.as_posix())
+    reaper = ("    import re; sys.path.insert(0, {!r}); import spin_reaper; spin_reaper.arm({!r}, {!r})\n").format(
+        (REPO / "tests").as_posix(), REAPER_S, marker.as_posix())
     run_py.write_text(src.replace(needle, reaper + "    re.match(r'(a+)+$', 'a' * 30 + 'b')\n" + needle, 1),
                       encoding="utf-8", newline="\n")
     t = time.time()

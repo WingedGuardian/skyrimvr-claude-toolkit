@@ -3165,15 +3165,16 @@ _T11_CLAUSES = [
     ("rule-S-DEVBENCH-CRASH-dict-input", _MC, "    for s in _strings(args):",
      "    for s in (_strings(args) if isinstance(args, dict) else ()):",
      _T11 + "test_a_non_dict_tool_input_is_judged_on_its_strings"),
-    ("rule-S-DEVBENCH-CRASH-devbench-only", _MC, 'or not is_devbench_server(parts[1]):', ":",
+    ("rule-S-DEVBENCH-CRASH-devbench-only", _MC, ' and is_devbench_server("__".join(parts[1:]))', "",
      _T11 + "test_only_devbench_servers_are_judged[mcp__other__console]"),
     # (Merge 2026-10-05: back on decide()'s own clauses -- Task 17 had moved them into is_devbench(), which decide()
     # no longer calls since rt-fix-b's is_devbench_server; mutating is_devbench() there survived.)
-    ("rule-S-DEVBENCH-CRASH-mcp-prefix", _MC, 'or parts[0] != "mcp" or', "or",
+    ("rule-S-DEVBENCH-CRASH-mcp-prefix", _MC, ' and parts[0] == "mcp" and is_devbench_server("__', ' and is_devbench_server("__',
      _T11 + "test_only_devbench_servers_are_judged[xmcp__devbench-vr__console]"),
-    ("rule-S-DEVBENCH-CRASH-short-name", _MC, "    if len(parts) < 3 or parts[0]", "    if parts[0]",
-     _T11 + "test_only_devbench_servers_are_judged[mcp]"),
-    ("rule-S-DEVBENCH-CRASH-server-name", _MC, 'not is_devbench_server(parts[1])', 'not parts[1].startswith("devbench-vr")',
+    ("rule-S-DEVBENCH-CRASH-short-name", _MC, "    return len(parts) >= 3 and parts[0]", "    return parts[0]",
+     _T11 + "test_only_devbench_servers_are_judged[mcp__devbenchless]"),
+    ("rule-S-DEVBENCH-CRASH-server-name", _MC, 'is_devbench_server("__".join(parts[1:]))',
+     '"__".join(parts[1:]).startswith("devbench-vr")',
      _T11 + "test_any_devbench_server_name_is_judged[devbench]"),
     # the curl route, per clause
     ("rule-S-DEVBENCH-CRASH-curl-json-flag", _MC, '"--data-urlencode", "--json")', '"--data-urlencode")', _t11curl("json-flag")),
@@ -5124,7 +5125,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/engine.py", _T17_ROUTE + "False", "    if False:\n        return False",
      _T17 + "test_a_judged_devbench_call_is_not_logged_as_unhooked", "t17-codex-devbench-logged-as-unhooked"),
     # Every MCP server counts as DevBench for the unhooked log, not only DevBench's.
-    ("tools/skyguard/mcp_rules.py", 'parts[0] == "mcp" and is_devbench_server(parts[1])', 'parts[0] == "mcp"',
+    ("tools/skyguard/mcp_rules.py", 'parts[0] == "mcp" and is_devbench_server("__".join(parts[1:]))', 'parts[0] == "mcp"',
      _T17 + "test_only_devbench_servers_are_judged_on_codex", "t17-is-devbench-matches-every-server"),
     # The underscore spelling of the server name is no longer recognised.
     ("tools/skyguard/mcp_rules.py", '    return "devbench" in re.sub(r"[-_.\\s]", "", server.lower())',
@@ -6673,11 +6674,10 @@ MUTATIONS += [
 _P8P = "tools/skyguard/prefs.py"
 _P8PT = "tests/test_skyguard_prefs.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
-    (_P8P, "            end = next((j for j in range(i + 1, len(lines)) if _closes(lines[j], m.group(1))), None)",
-     "            end = next((j for j in range(i + 1, len(lines)) if _closes(lines[j], m.group(1))), len(lines) - 1)",
+    (_P8P, "            end = _next_closer(closers, i, m.group(1))\n",
+     "            end = _next_closer(closers, i, m.group(1)) or len(lines) - 1\n",
      _P8PT + "test_an_unclosed_fence_does_not_swallow_the_sections_after_it", "p8t6-prefs-unclosed-fence-is-text"),
-    (_P8P, "    return bool(m) and m.group(1)[0] == opener[0] and len(m.group(1)) >= len(opener) and \\",
-     "    return bool(m) and len(m.group(1)) >= len(opener) and \\",
+    (_P8P, "            key = fence[0]\n", "            key = \"`\"\n",
      _P8PT + "test_a_closed_fence_still_hides_headings_inside_it", "p8t6-prefs-fence-closer-same-character"),
     (_P8P, r'_HEADING = re.compile(r"^##[ \t]+my[ \t]+preferences[ \t]*(?:\([^)\n]*\)[ \t]*)?:?[ \t]*#*[ \t]*$", re.I)',
      r'_HEADING = re.compile(r"^##[ \t]+my[ \t]+preferences[ \t]*:?[ \t]*#*[ \t]*$", re.I)',
@@ -6708,11 +6708,11 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "p8t6-catastrophic-test-arms-the-reaper"),
 ]]
 MUTATIONS += [
-    pytest.param("tests/spin_reaper.py", "            k32.TerminateProcess(h, 9)\n", "            pass\n",
+    pytest.param("tests/spin_reaper.py", "            k32.TerminateProcess(handle, 9)\n", "            pass\n",
                  "tests/test_spin_reaper.py::test_a_spinning_process_is_ended_at_the_deadline",
                  marks=pytest.mark.skipif(sys.platform != "win32", reason="the Windows branch runs on Windows"),
                  id="p8t6-reaper-terminates-windows"),
-    pytest.param("tests/spin_reaper.py", "    os.kill(pid, signal.SIGKILL)\n", "    pass\n",
+    pytest.param("tests/spin_reaper.py", "        signal.pidfd_send_signal(fd, signal.SIGKILL)\n", "        pass\n",
                  "tests/test_spin_reaper.py::test_a_spinning_process_is_ended_at_the_deadline",
                  marks=pytest.mark.skipif(sys.platform == "win32", reason="the POSIX branch runs on POSIX"),
                  id="p8t6-reaper-terminates-posix"),
@@ -6792,3 +6792,37 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "tests/test_skyguard_state.py::test_a_write_waits_out_a_reader_holding_the_state_file_open",
      "p8int-state-replace-retries"),
 ]]
+# T6 fix round 1 (review T6-review.md): I1 the fence scan is linear, M1 the reaper holds its target by reference,
+# M2 the Python floor is 3.10, M4 the judge reads the whole MCP name, and the pricing extractor selects the same way.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_P8P, "            end = _next_closer(closers, i, m.group(1))\n",
+     "            end = next((j for j in range(i + 1, len(lines)) if _next_closer(closers, j - 1, m.group(1)) == j), None)\n",
+     _P8PT + "test_a_worst_case_file_at_the_read_cap_renders_fast[never-closing-openers]", "p8t6-fix1-fence-scan-rescans"),
+    ("tools/inventory-runtimes.py", "PYTHON_FLOOR = (3, 10)\n", "PYTHON_FLOOR = (3, 8)\n",
+     "tests/test_inventory_runtimes.py::test_the_floor_is_the_tested_range_3_10", "p8t6-fix1-python-floor-3-8"),
+    ("SETUP_PROMPT.txt", "Python.Python.3.<minor> (3.10 or newer) for python", "Python.Python.3.<minor> for python",
+     "tests/test_setup_prompt.py::test_the_python_floor_is_stated_the_same_everywhere", "p8t6-fix1-prompt-omits-floor"),
+    ("tools/skyguard/mcp_rules.py",
+     '    return len(parts) >= 3 and parts[0] == "mcp" and is_devbench_server("__".join(parts[1:]))',
+     '    return len(parts) >= 3 and parts[0] == "mcp" and is_devbench_server(parts[1])',
+     "tests/test_skyguard_mcp.py::test_a_devbench_name_after_a_double_underscore_is_judged[mcp__my__devbench__console]",
+     "p8t6-fix1-judge-reads-first-piece-only"),
+    ("tools/skyguard/mcp_rules.py", "    if not is_devbench(name):\n",
+     '    if len(parts) < 3 or parts[0] != "mcp" or not is_devbench_server(parts[1]):\n',
+     "tests/test_skyguard_mcp.py::test_a_devbench_name_after_a_double_underscore_is_judged[mcp__x__DevBench__console]",
+     "p8t6-fix1-decide-reads-first-piece-only"),
+    ("scripts/guard-corpus/replay.py",
+     '    elif name.startswith("mcp__") and "devbench" in re.sub(r"[-_.\\s]", "", name[5:].lower()):\n',
+     '    elif name.startswith("mcp__devbench"):\n',
+     "tests/test_price_tool.py::test_extract_wide_takes_every_devbench_spelling", "p8t6-fix1-pricing-prefix-only"),
+]]
+MUTATIONS += [
+    pytest.param("tests/spin_reaper.py", '    if os.name == "nt":\n        k32 = _k32()', '    if False:\n        k32 = _k32()',
+                 "tests/test_spin_reaper.py::test_a_target_that_exits_at_once_is_still_the_reapers_own",
+                 marks=pytest.mark.skipif(sys.platform != "win32", reason="the Windows branch runs on Windows"),
+                 id="p8t6-fix1-reaper-handle-windows"),
+    pytest.param("tests/spin_reaper.py", '    elif hasattr(os, "pidfd_open"):\n', "    elif False:\n",
+                 "tests/test_spin_reaper.py::test_a_target_that_exits_at_once_is_still_the_reapers_own",
+                 marks=pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfd is Linux"),
+                 id="p8t6-fix1-reaper-pidfd-linux"),
+]

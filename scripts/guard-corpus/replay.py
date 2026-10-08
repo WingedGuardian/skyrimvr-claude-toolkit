@@ -38,7 +38,8 @@ def _wide_item(name: str, inp: dict, cwd):
         ti, prim = {"command": inp["command"]}, inp["command"]
     elif name in FILE_TOOLS and isinstance(inp.get("file_path"), str):
         ti, prim = {"file_path": inp["file_path"]}, inp["file_path"]
-    elif name.startswith("mcp__devbench"):
+    elif name.startswith("mcp__") and "devbench" in re.sub(r"[-_.\s]", "", name[5:].lower()):
+        # Plan 8 T6 fix round 1: any tool name containing devbench, any case, as protect-mcp's matcher and judge.
         ti, prim = inp, json.dumps(inp, sort_keys=True, ensure_ascii=False)
     else:
         return None

@@ -62,6 +62,14 @@ def test_too_old():
     assert _status(OLD37) == "too-old"
 
 
+def test_the_floor_is_the_tested_range_3_10():
+    """Plan 8 T6 fix round 1 (review M2): the tested range is 3.10-3.13, so an installed 3.9 is too old and 3.10
+    is not."""
+    assert inv_tool.PYTHON_FLOOR == (3, 10)
+    assert _status(fake("print('Python 3.9.13')")) == "too-old"
+    assert _status(fake("print('Python 3.10.11')")) == "ok"
+
+
 def test_too_old_applies_to_python_only():
     assert _status(fake("print('v6.0.0')"), "node") == "ok"
 
@@ -313,7 +321,7 @@ def test_the_cli_takes_the_whole_task_text_never_a_chosen_sentence():
 # ---- final review I5: the id is bound to the runtime by an allowlist ----------------------------------------
 
 @pytest.mark.parametrize("item", [
-    "python=Python.Python.3.12==3.12.8", "python=Python.Python.3.8==3.8.10", "python=Python.Python.3.13==3.13.0",
+    "python=Python.Python.3.12==3.12.8", "python=Python.Python.3.10==3.10.11", "python=Python.Python.3.13==3.13.0",
     "git=Git.Git==2.45.2", "node=OpenJS.NodeJS==22.1.0", "node=OpenJS.NodeJS.LTS==20.11.0",
 ])
 def test_an_allow_listed_id_authorizes(item):
@@ -327,6 +335,7 @@ def test_an_allow_listed_id_authorizes(item):
     "python=Git.Git==2.45.2",                # a real id under the wrong runtime
     "git=OpenJS.NodeJS==22.1.0",
     "python=Python.Python.3.7==3.7.9",       # below the toolkit's Python floor
+    "python=Python.Python.3.9==3.9.13",      # Plan 8 T6 fix round 1: below the 3.10 floor
     "python=Python.Python.3.12==3.11.4",     # the version is not that id's version
     "python=python.python.3.12==3.12.8",     # winget --exact is case-sensitive: not the allowed id
     "node=OpenJS.NodeJS.Evil==20.1.0",

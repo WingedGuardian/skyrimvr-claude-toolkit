@@ -286,7 +286,8 @@ def test_an_empty_payload_is_refused_not_allowed():
     assert mcp_rules.decide("unknown", {}, _audit()).decision == "deny"
 
 
-@pytest.mark.parametrize("tool", ["mcp__other__console", "Bash", "mcp__devbenchless", "mcp", "xmcp__devbench-vr__console"])
+@pytest.mark.parametrize("tool", ["mcp__other__console", "Bash", "mcp__devbenchless", "mcp", "xmcp__devbench-vr__console",
+                                  "mcp__my__other__console"])
 def test_only_devbench_servers_are_judged(tool):
     assert mcp(tool, {"command": "smp reset"})[0] == ("allow", "")
 
@@ -296,6 +297,15 @@ def test_only_devbench_servers_are_judged(tool):
                                     "DevBench-vr", "dev-bench", "dev_bench.vr", "skyrim-devbench", "plugin_devbench_x"])
 def test_any_devbench_server_name_is_judged(server):
     assert mcp(f"mcp__{server}__console", {"command": "smp reset"})[1] == {"S-DEVBENCH-CRASH"}
+
+
+# Plan 8 T6 fix round 1 (review M4): the widened matcher fires on any tool name containing devbench, so the judge must
+# judge every one of them -- a server name holding `__` was read as its first piece and allowed unjudged.
+@pytest.mark.parametrize("tool", ["mcp__my__devbench__console", "mcp__x__DevBench__console",
+                                  "mcp__plugin__skyrim_devbench__console"])
+def test_a_devbench_name_after_a_double_underscore_is_judged(tool):
+    assert mcp(tool, {"command": "smp reset"})[1] == {"S-DEVBENCH-CRASH"}
+    assert mcp_rules.is_devbench(tool) and mcp_rules.judged_server(tool)
 
 
 def test_run_py_protect_mcp_end_to_end(tmp_path):

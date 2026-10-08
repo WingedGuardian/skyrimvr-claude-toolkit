@@ -202,7 +202,7 @@ RULES = {
         "prefixes": [],
         "template": (
         'Note: this writes the archive {file} in the Skyrim install.\n'
-        'If that file exists, tar and -Force replace it; zip, 7z and -Update add to it.'
+        'If that file exists, tar and -Force replace it; zip, 7z and -Update change what is inside it.'
     ),
     },
     'S-WRITE-LOADORDER': {
