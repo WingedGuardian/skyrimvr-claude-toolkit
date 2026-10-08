@@ -1405,7 +1405,6 @@ _OWN = ("downloads the toolkit's OWN release by its tag in order to verify it: t
         "(and a published zip's contents are checked member by member)")
 _CI = ("CI runner tooling (T10's workflows): never delivered to a user; versions follow the runner image")
 DELIVERY_EXEMPT = [
-    ("README.md", "npm", r"npm install -g @anthropic-ai/claude-code", _CLAUDE),
     ("docs/getting-started.md", "npm", r"npm install -g @anthropic-ai/claude-code", _CLAUDE),
     ("KNOWLEDGEBASE.md", "dotnet-tool", r"a `dotnet tool update` on an SDK 6/8/9 machine failed",
      "records the failure that motivated the pin; the instruction two lines up is pinned"),

@@ -2,181 +2,17 @@
 
 For coding agents (Claude Code, Codex, …), not an AI NPC mod (SkyrimNet, Mantella, CHIM).
 
-An AI-assisted Skyrim modding environment for power users. Claude Code handles the mechanical work — porting mods across versions, inspecting and editing ESPs, debugging scripts, building mods from scratch, **and now authoring custom animated meshes and VFX you can verify without ever launching the game** — with safety hooks, pre-loaded engine knowledge, and every tool pre-configured.
+A modding workspace with engine knowledge, coding-agent instructions, safety hooks and wrappers for optional tools. Use it to inspect plugins, debug scripts, port mods and author meshes. Skyrim VR informed the workflow; check the version-specific guidance for SE, AE and LE.
 
-Built from hundreds of hours of hands-on Skyrim VR mod development. **[Though this env was built with VR in mind, it can be just as powerful in any Skyrim version. Claude Code is the brain.]**
+Optional modding tools are installed separately. The toolkit configures paths and hooks through `setup.sh`; check the canary after real agent calls to confirm that the hooks ran.
 
-> **This isn't just a guide -- it's a complete environment with all the setup prework already done.** You just need to install, and begin building the mod of your dreams! (Or ironing out all the bugs in your existing setup 😛)
+| Agent | Integration |
+|---|---|
+| Claude Code | Generated instructions, skills and hooks |
+| Codex CLI on Windows | Generated instructions, skills and hooks; approval in `/hooks` required |
+| Other coding agents | Instructions and tools; [ADAPTING.md](ADAPTING.md) describes how to add hooks |
 
----
-
-## What Is Claude Code?
-
-[Claude Code](https://claude.ai/code) is an AI assistant by Anthropic that runs directly on your computer. Unlike ChatGPT or regular Claude chat, it can **read your files, run commands, edit configs, execute scripts -- and do the mechanical work of modding for you** -- all with your permission. Think of it as having a modding expert sitting next to you who can actually touch your files.
-
-Most people who try to use Claude Code for modding spend days figuring out tool integrations, fighting weird Delphi DLL quirks, learning what Claude needs to know to be useful, and building safety guardrails so it doesn't break anything. This toolkit ships with all of that already solved. You get a working environment on day one.
-
-It's not perfect, and it will require some trial and error — especially for complex mods from scratch. But for the tedious parts of modding, it's significantly faster than doing it yourself.
-
----
-
-## New in v3.9: The Guard Was Refusing The Wrong Folder, And Could Be Timed Out
-
-**Three things were wrong with the safety layer, and two of them were silent.**
-
-A hook whose answer arrives after its `timeout` has that refusal **discarded** — the
-command runs. That is undocumented, and it was measured here in both permission modes.
-Three of the four hooks were configured 5 seconds (the fourth, 15) while `protect-bash.sh` measured 4,620 ms under
-load, so a busy machine could quietly disarm the delete guard. All hooks are now 60s,
-which is a safety setting rather than a comfort one. ⚠ `hook-canary.sh` cannot detect
-this class: the hook is alive and does receive its payload — it just answers too late.
-
-The delete guard called **any path containing the word "Skyrim"** your game install —
-a temp file, a checkout of this toolkit, a downloaded zip. Measured by replaying
-7,641 real commands: 443 refusals, **71 of them this false positive, none naming the
-install**. It now resolves the real root from its own location plus the paths
-`setup.sh` records. A guard that fires on ordinary work gets worked around, and then
-it protects nothing.
-
-And **updating this toolkit destroyed your own knowledgebase notes while the README
-promised it did not.** Accumulation moves to `KNOWLEDGEBASE.local.md`, which is never
-shipped; a new SessionStart hook also snapshots the files nothing can rebuild, so an
-install that already has notes in the shipped file is covered too. ⚠ If you have notes
-in `KNOWLEDGEBASE.md` from an older version, move them across before you update.
-
-## Also in v3.8.3: The Safety Hooks Were Never Running
-
-**If you installed this toolkit before v3.8.3, its protections were not in force.**
-Every hook read stdin with `cat /dev/stdin`, which returns nothing when Claude Code
-spawns it — so each hook fired, read zero bytes, fell through its first guard and
-exited 0, which is byte-identical to approving. No ESP write block, no
-game-directory delete block, no automatic backups, and nothing looked wrong. Update,
-then run `bash tools/hook-canary.sh`: it reports HEALTHY, STALE, DEGRADED, NOT EXERCISED, UNMEASURABLE or NEVER INVOKED per hook by reading
-heartbeats written from inside real invocations, which is the only way to know.
-
-The same release re-anchors the delete guard (eleven spellings of "delete the game
-directory" used to walk past a rule keyed on one form of `rm`), stops the hooks
-prompting you for routine work, and adds a release gate that inspects the built
-package rather than the repository — because the two had diverged, which is how this
-shipped twice.
-
-## Also in v3.8.2: The Denominator Tools Learn To Doubt Themselves
-
-v3.8.2 turns `crash-triage`'s report on itself. It now reports the share of dumps
-it could not parse and refuses to print `RESULT: OK` when that share says the
-format has moved out from under it — the failure a contributor hit on
-CrashLoggerSSE 1.2x, where it read 1 of 7 dumps and said nothing was wrong.
-
-## New in v3.8: Three Tools That Answer With Their Denominator First
-
-The three additions in v3.8 all replace an answer you would otherwise get by squinting at a wall
-of text — and each one is built so that if it misses something, it says so.
-
-**`skyrim-winner`** answers *"which plugin actually wins this record?"* It loads your **full**
-active load order and asks xEdit, then prints the winner, the whole override chain in order, or
-every record a given plugin loses. The usual shortcut — a script that loads the handful of plugins
-that seem relevant — gives an answer only as complete as the guess, and a plugin outside the list
-can win without the script ever seeing it. No index and no cache here: a full 659-plugin load takes
-about four seconds, so there is nothing to keep fresh and nothing to get stale.
-
-**`papyrus-triage`** buckets a `Papyrus.N.log` by normalized message shape and attributes each
-bucket to the script or plugin that produced it. **`crash-triage`** reduces CrashLogger dumps —
-~5,500 lines each, most of it raw stack — to ranked `module+offset` signatures, and labels the ones
-your knowledgebase has already ruled on, so a settled crash prints as
-`[ACCEPTED - do not re-investigate]` rather than being investigated a fourth time.
-
-Both print the denominator before any finding, sum their rows against **independently counted**
-totals, and print the not-shown remainder **even when it is zero** — the failure mode for a triage
-tool is not crashing, it is confidently reporting a complete-looking total that is missing a shape.
-Every one of those guards is mutation-tested: CI puts the bug back and fails if the test that is
-supposed to catch it doesn't.
-
-That is not a hypothetical. Building `crash-triage` for this release, it reported "8 logs" on the
-dev install and looked right — while silently skipping 20 more, because CrashLoggerSSE switched
-from `crash-*.txt` to `crash-*.log` and the tool matched only one of them.
-
----
-
-## New in v3.5: A Reproducible Dev Container
-
-Every install so far has meant "run `setup.sh`, install prerequisites onto this machine, hope."
-v3.5 adds an alternative: a Docker container with Python, Node, .NET, and a JDK already wired up —
-built and verified end-to-end (Spriggit really does serialize a real mod's ESP inside it) — for the
-parts of the workflow that don't need Windows or an active MO2 session: ESP inspection and diffing,
-FOMOD/JSON generation, unit-testing mod logic, ReSaver CLI save analysis.
-
-`bash devshell-docker.sh` builds the image and drops you into a shell — Docker Desktop and host jq are
-prerequisites. `setup.sh` wires its mounts to your real mod files automatically: on MO2, straight from
-your detected instance; on stock/Vortex, from `Data/`. `docs/container-vs-windows.md` is the routing
-guide for what belongs in the container versus what still needs Windows (xelib, load-order-dependent
-edits, Papyrus compilation, NIF authoring, live in-game testing).
-
-The container mounts the checkout **read-only** at `/workspace`, so anything that writes goes to
-container-local paths instead: project Node modules are installed in `/opt/skyrim-node` (found through
-`NODE_PATH` by `require()`; ES-module `import` ignores `NODE_PATH`), Spriggit output belongs under
-`/tmp` (the wrapper refuses a read-only destination before serializing), and
-`tests/run_harness_tests.py` writes its evidence to the container's temp directory. A fresh clone
-starts with no `node_modules/` and no pre-created directories.
-
-Credit: the devcontainer and its MO2-mount design come from
-[@aaronputty](https://github.com/aaronputty)'s fork of this toolkit.
-
----
-
-## New in v3.4: Mod Organizer 2 Support
-
-If you use MO2, previous versions quietly pointed Claude at the wrong folders. **MO2 has no real
-merged `Data/` folder** — it builds a virtual one at launch, so the game's `Data/` holds the stock
-game and almost none of your mods, and your INIs and load order live in the profile rather than in
-Documents. The toolkit assumed the Vortex/stock layout throughout.
-
-Setup now detects your MO2 instance (global or portable), matches it to this game folder, resolves
-your active profile and the real mods/overwrite/profile paths, and writes those into `CLAUDE.md`
-instead of the wrong ones. It also warns Claude about the trap that costs MO2 users the most time:
-**load-order-aware tooling launched outside MO2 doesn't error — it silently returns a wrong but
-plausible answer**, because it only sees the plugins physically present in the stock `Data/`. Non-MO2
-setups are unaffected and get a stock-layout note instead.
-
-Also new: an **`AGENTS.md`** so agents that follow that convention can pick the toolkit up. The
-knowledge and every tool are agent-neutral already; the safety hooks are the Claude-specific part, and
-`AGENTS.md` was explicit that other agents don't get them. *(Historical, v3.4: since v4 that is no longer true
-of Codex, which has the same guards -- see "Using with Codex" below. Any other agent still has none.)*
-
----
-
-## New in v3.3: Claude Can Test Its Own Fixes in the Running Game
-
-Every other feature here shortens the time it takes Claude to *make* a change. This one attacks the
-part that actually eats your evening: the test loop. Normally it goes change → you launch the game →
-you trigger the thing → "nope, still broken" → guess again. Ten minutes a cycle, and Claude is
-working blind off your description.
-
-**With [DevBench](https://www.nexusmods.com/skyrimspecialedition/mods/181326) installed, Claude drives
-the running game itself.** DevBench is a dev-only SKSE plugin (by alandtse, of Engine Fixes VR) that
-runs a small localhost server inside Skyrim — it changes no gameplay and writes nothing to your saves.
-Claude can then:
-
-- **Read live state** — the Papyrus VM's health (the actual diagnosis for script freezes), active
-  magic effects, your equipment, quests, the loaded reference grid.
-- **Run console commands and read their output** — not fire-and-forget like `cgf`; it sees the result.
-- **Call Papyrus functions and get the return value back**, so it can do read → change → re-read loops
-  without a single game restart.
-- **Narrate tests on your HUD** while you're in the headset, and dismiss modal popups for you.
-- **Run scripted scenarios** with real event waits instead of guessed sleeps.
-- **Tell a hung game from a paused one.** `devbench-cli.sh alive` reads DevBench's off-thread health
-  probe, so it still answers when the game is stuck — and it distinguishes *running* from *paused in a
-  menu* from *actually hung* from *no save loaded yet*, instead of guessing from a frozen frame
-  counter. (Needs DevBench 1.11.0+; older builds fall back automatically.)
-
-DevBench minimum is **1.11.0**; newest release the docs were read against is **1.24.0**. Update your
-**VR Address Library first** (newest seen: 0.276.1) -- DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0.
-CrashLogger 1.24+ also writes `__fastfail` dumps; `crash-triage.py` already handles the file naming.
-
-In practice, tuning a value stops being "edit, recompile, reload, ask you to try it" and becomes
-another call into the running game. You just keep playing. The toolkit ships the wrapper
-(`tools/devbench-cli.sh`) and the hard-won hazard list — DevBench itself you install from Nexus.
-
----
+The optional Windows file lock is off by default. Its limits and the hook coverage are described below. Earlier release announcements are in [CHANGELOG.md](CHANGELOG.md).
 
 ## New in v3: Create Custom Animated VFX — and See Them Before You Load the Game
 
@@ -269,25 +105,19 @@ None of these are bundled; setup walks you through any you pick.
 
 ## Setup (4 Steps)
 
-Setup is this short because the environment is already built. There's no configuration to figure out, no tools to manually wire up, no documentation to read before you start. Everything is pre-configured -- you just point it at your game folder and go.
+### Step 1: Install a supported coding agent
 
-### Step 1: Install Claude Code
+Follow the official installation guide for [Claude Code](https://code.claude.com/docs/en/setup) or [Codex CLI](https://developers.openai.com/codex/cli/). Codex hook support here is for the Windows CLI; the desktop app and IDE extensions are not claimed.
 
-1. **Sign up** at [claude.ai](https://claude.ai) if you don't have an account
-2. **Subscribe** to Claude Pro ($20/month) or Max ($100/month) -- required for Claude Code
-3. **Install Claude Code** -- pick one:
+The toolkit's tested Python range is **3.10–3.13**. Optional xelib tools use **Node 24.19.0**; Spriggit and AutoMod use the **.NET 10 SDK**. [Installing tools](docs/installing-tools.md) lists the exact tested versions and verification steps. The setup prompt below does not authorize host-software installation.
 
-   **Desktop App (easiest):**
-   Download from [claude.ai/code](https://claude.ai/code), install, open it.
-
-   **Command Line:**
    Install Node.js **24.19.0**, the version this toolkit was tested with. For you to run, in Windows Terminal:
-   `winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade` (winget checks the installer's hash for you).
-   Claude Code itself is not pinned: it keeps itself up to date after install.
-   Then open **Windows Terminal** (search "Terminal" in Start menu) and run:
-   ```
-   npm install -g @anthropic-ai/claude-code
-   ```
+   `winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade`
+
+DevBench is an optional SKSE mod installed through your mod manager. Its documented minimum is **1.11.0**;
+the newest release the docs were read against is **1.24.0**. The recorded VR Address Library reference is
+**newest seen: 0.276.1**. These are audit reference versions, not a claim of a fresh upstream check;
+follow [installing-tools.md](docs/installing-tools.md) for verification and installation guidance.
 
 ### Step 2: Extract This Toolkit Into Your Skyrim Folder
 
@@ -299,22 +129,13 @@ Setup is this short because the environment is already built. There's no configu
    - Right-click the downloaded zip > Extract All > paste your Skyrim folder path > Extract
    - The files blend in alongside your existing game files. ⚠ **Files the toolkit ships ARE replaced** -- on a fresh install that costs you nothing, but on an UPDATE it replaces `CLAUDE.md`, `KNOWLEDGEBASE.md` and the hooks. Keep your own notes in `KNOWLEDGEBASE.local.md`, which is never shipped.
 
-### Step 3: Open Claude Code in Your Skyrim Folder
+### Step 3: Open your agent in the Skyrim folder
 
-**Desktop App:** Open Claude Code. Click the folder/path area and navigate to your Skyrim folder. Or type this (replace with YOUR path):
-```
-cd "C:\Steam\steamapps\common\SkyrimVR"
-```
+Open a terminal in the folder containing your game's executable, then start `claude` or `codex`. For Codex, starting in a subfolder silently skips the project hooks.
 
-**Command Line:** Open Windows Terminal and type:
-```
-cd "C:\Steam\steamapps\common\SkyrimVR"
-claude
-```
+Setup accepts `bash setup.sh --agent claude|codex|all|auto`. Choose one value; `auto` is the default and detects agents on PATH, and `both` aliases `all`. An unselected agent keeps its files but is reported NOT CONFIGURED. The optional file lock is off unless you select `--lock`.
 
-> (Use `SkyrimVR`, `Skyrim Special Edition`, or whatever your folder is actually named.)
-
-> **Tip:** In the Steam browse window from Step 2, click the address bar and copy the path. Paste it after `cd `.
+After setup, Codex needs you to run `/hooks` and approve the toolkit's two hooks. Make real tool calls, then run `bash tools/hook-canary.sh` to check their invocation records. Unrendered templates in a source checkout are NOT CONFIGURED; approval alone does not render them.
 
 ### Step 4: Paste This Prompt
 
@@ -328,7 +149,7 @@ Your agent handles the rest. It checks which of Python, Git and Node actually st
 
 > **Note on the NIF render loop:** The headless render-verification step uses Blender (and, optionally, NifSkope for an independent visual check). These are large external GUI apps, so — like Champollion/Caprica — they aren't bundled in the zip; the setup will point you to install them and wire up the addon. PyFFI and PyNifly themselves are lightweight and handled by setup.
 
-**That's it. You're done.**
+Check the canary before relying on the guards. Install optional tools only as needed.
 
 ---
 
@@ -347,7 +168,7 @@ The toolkit can use the free **Nexus Mods API** so Claude can check mod **versio
 
 ## Using It
 
-From now on, whenever you open Claude Code in your Skyrim folder, the full environment loads automatically -- knowledge base, safety hooks, tool integrations, everything. No setup required each session. Just start talking.
+Start your configured agent in the Skyrim folder. It reads the toolkit instructions and knowledgebase; approved, configured hooks provide the safety checks described below. Optional tools must be installed before their wrappers can run.
 
 This toolkit fits best as a **power user tool** — particularly strong for investigating, porting, and debugging existing mods, making targeted record edits, scripting assistance, and now authoring custom meshes and animated VFX. For simpler mods (spells, powers, item records, short scripts), Claude can build these from scratch. For complex systems, expect some iteration.
 
@@ -419,7 +240,7 @@ All of this is pre-loaded and ready to go. And it grows over time -- Claude adds
 
 ## Safety Features
 
-These aren't things you configure -- they're already wired in. Every session, before Claude touches anything, these run automatically:
+After setup and any required hook approval, the supported agents run these checks. They are pattern-based protections against accidents; verify invocation with the canary.
 
 | Protection | What It Does |
 |-----------|-------------|
@@ -561,10 +382,12 @@ refusals of writes into `.skyguard/`.
 - **Writes to `.skyguard/` (the on/off and lift state) are refused** on the shell (redirects, `cp`, `tee`, `sed -i`,
   `Set-Content`, `Copy-Item`, `git checkout -- .skyguard`, downloads and more), the file tools, Codex `apply_patch`,
   moves and deletes; only `tools/skyguard` should write it. **Known gaps, MEASURED as allowed** (final review, lane
-  A): an interpreter writing it from code (`python -c "open('.skyguard/state.json','w')..."`; interpreter deletes are
-  caught, writes are not), `install -m 644 x .skyguard/state.json`, and unpacking an archive into it (`tar -xf a.tar
+  A): an interpreter writing it from code (`python -c "open('.skyguard/state.json','w')..."`; recognized interpreter
+  deletes are caught, writes are not), and unpacking an archive into it (`tar -xf a.tar
   -C .skyguard`, `7z x a.7z -o.skyguard`). Such a forged state still needs a valid checksum and the session id, and
   is named by the next session-start banner.
+  Ordinary `install -m 644 x .skyguard/state.json` is now refused; computed destinations and uncommon option forms
+  remain limited (for example, a glued `install -tDIR` destination).
 - **Not guarded at all, so an edit gets no note:** `GUARD-FILES.sha256` itself, the launchers `tools/skyguard.sh`,
   `tools/skydoctor` and `tools/skyguard-unlock.cmd`, and `.claude/backups/MANIFEST.jsonl` (which a restore trusts
   for the original path; MEASURED by an engine probe: a `Write` or `echo >` to each is allowed with no note). An edit
@@ -714,7 +537,7 @@ A: Only for the optional headless render-verification loop. The core NIF authori
 A: The safety hooks run on Python 3 and refuse everything when they cannot start it (that is deliberate: a guard that cannot run must not allow). Install Python 3 (for you to run: `winget install --id Python.Python.3.12 --exact --version 3.12.10 --no-upgrade`: inside the tested 3.10-3.13 range and the Python the optional tools were verified on; winget checks the installer's hash), then run `bash setup.sh` again so it records the interpreter's path in the hooks. `jq` is no longer needed by the hooks; it is optional and only prettifies `tools/devbench-cli.sh` and `tools/nexus.sh` output.
 
 **Q: How do I update the toolkit?**
-A: Download the new version from Nexus and extract over the old one, then re-run `bash setup.sh`.
+A: Unpack the new zip into a separate folder first. From your Skyrim folder, run `bash "<new folder>/tools/pre-update-snapshot.sh" .` before replacing anything. Then extract the toolkit's contents over the install, re-run `bash setup.sh --agent auto` (or your selected agent), complete Codex hook approval if needed, and check `bash tools/hook-canary.sh` after real calls.
 
 **Anything the toolkit ships is REPLACED by that extract, including `KNOWLEDGEBASE.md` and `CLAUDE.md`.** Earlier versions of this answer claimed your knowledgebase additions were preserved. They were not — the shipped file overwrote yours, which is exactly when a reassurance is worth least. Your own notes belong in **`KNOWLEDGEBASE.local.md`**, which the toolkit never ships and the release build refuses to contain; the agent is instructed to read both files and write only to that one. Its `## My preferences` section is for your standing instructions to the agent ("always…", "never…"); every agent is told to read it at the start of each session, and in Claude Code the session-start hook also puts it straight into the session (again after a compaction; the first 4 KB). If you have notes sitting in `KNOWLEDGEBASE.md` from an older version, move them across before you update. `.claude/backups/`, `skyrim-paths.env` (and a 3.x install's `.claude/skyrim-paths.env`) and `.claude/settings.local.json` are likewise not in the zip and survive.
 

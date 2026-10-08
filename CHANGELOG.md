@@ -1,269 +1,223 @@
 # Changelog
 
-## Unreleased (v4.0.0 in progress)
+## v4.0.0 — 2026-10-08
 
-### Layer 2: the vanilla-file lock (opt-in), lifts, shadow mode, skydoctor
+### Added
 
-- **Optional read-only lock on the vanilla masters and archives, off by default, Windows only.** `bash tools/skyguard.sh lock lock`
-  sets the read-only attribute and a file-level deny entry for your account on an explicit per-edition name list (never a pattern, so mod
-  files are not locked). It holds below the agent, so it still applies when a hook fails open. Measured on scratch copies, with an unlocked
-  twin as control for every row: 38 of 38 overwrite primitives blocked, 7 of 8 delete rows, reads 5 of 5 work, and 41 of 42 required rows
-  once Claude `Write`/`Edit`, Codex `apply_patch` and an xelib save are counted.
-- **It does not stop an xEdit/xelib save of a locked master** (the save renames the file into `zEdit Backups/`, bytes intact; measured for
-  xelib, 4 of 4 candidate mechanisms) **or renaming a locked file away.** Linux/Proton exits 3 `unsupported`. Wrye Bash, Steam "Verify
-  integrity", a Steam game update, an AE in-game Creation download (`cc*` files are on the lock list), the xEdit program and MO2 are not
-  yet measured, so under the pre-committed table the lock stays opt-in until they are.
-- **Unlock in one command:** `bash tools/skyguard.sh lock unlock <file>` (`tools\skyguard.cmd lock unlock <file>` from cmd or
-  PowerShell): a lift bound to the session that lasts an hour by default; the first tool call after it expires relocks the file, and the
-  next session start is the backstop. Also `tools\skyguard-unlock.cmd` with no Python, or two raw commands as a last resort (README).
-  `lock status`, `lock disable` and `lock enable` complete the set.
-- **Lifts are visible and short-lived.** `lock unlock` and `guards off` are allowed with a note. Hand-clearing the attribute or ACL of a
-  lock target and running the unlock `.cmd` from an agent are refused on both agents; `lock disable` is a prompt on Claude and a refusal on
-  Codex. On Codex and from Claude's PowerShell tool an agent cannot lift the lock at all (no session id there, by design): you run
-  `tools\skyguard-unlock.cmd` in your own terminal. Without hooks nothing relocks a lift until a hooked session runs or you run
-  `lock lock`; `skydoctor` reports it. Lift notes go to the agent's context only; whether any of it is shown to you is not claimed.
-- **`guards off` is shadow mode.** Every rule still runs; a refusal or a confirmation prompt becomes an allow plus a warning and a `SHADOW` line per call, backups
-  and snapshots still run. Never shadowed: `GUARD INERT`, Codex `.rules`, the lock, the lift refusals and writes into `.skyguard/`.
-- **Self-protection.** Writes into `.skyguard/` are refused through the shell's write commands, the file tools, `apply_patch`, moves and
-  deletes. Known gaps (MEASURED as allowed): an interpreter writing it from code, `install`, and unpacking an archive into it. Edits to the
-  guard code and config get a note (priced: 24 of 24 would-be prompts in history were maintenance the user asked for); `GUARD-FILES.sha256`,
-  the `tools/` launchers and the backup manifest get none. A session-start banner names guard files that differ from the shipped
-  `GUARD-FILES.sha256` (tamper evidence, not prevention).
-- **`skydoctor` (`bash tools/skydoctor`)** reports what is live, layer by layer, as live / not live / unknown with a reason, and exits 0, 1
-  or 2. It is not `skyguard doctor`, which stays the narrower hook-health report. A default install exits 1 on purpose (the lock was never applied).
-- **Backup manifests, and a restore that finds the right file.** Every backup writes a part file, checksums it while copying, takes its final
-  name without replacing another backup, and appends a line (exact path, size, sha256) to `.claude/backups/MANIFEST.jsonl`. Two edits of one
-  file in the same second no longer overwrite each other, and a failed copy leaves no half-file. `scripts/restore-from-backup.sh` reads the
-  manifest and checks the sha256 first; `--restore` never writes into a plugin, an archive or the guard's own folders, and asks when an
-  agent runs it. It used to turn every underscore into a slash, so `Skyrim_VR - Main.bsa` or `My_Mod.esp` was restored to the wrong path; a
-  backup with no manifest line is labelled `(legacy: path guessed)`. Concurrent writers: three processes appending 400 lines each lose none
-  (`tests/test_backup_manifest.py`, 0 of 1,200 lost); before the locked append, a review probe lost 178 of 3,000 lines (that probe is
-  recorded in the test's docstring and in `tools/skyguard/backup.py`, not in a measurement document).
-- **Nested script snapshots.** `.psc` and `.pex` are now snapshotted at any depth under `Data/Scripts/` and under `Data/Source/Scripts/`,
-  with no 7-day limit, in a content-addressed store. The old hook never saw 3,428 of 11,898 scripts (29%) on the author's install. Added
-  latency on the release code: p95 129.9 ms (3,049 scripts hard-linked, as live) and 137.7 ms (all 11,898 linked) over 16,672 walking
-  calls of the author's real call stream (gate 150 ms); charging the recovery snapshot's re-read to every out-of-window call, a
-  conservative sensitivity check, gives 151.5 ms on the fully linked tree, 1.5 ms over (`docs/superpowers/measurements/2026-10-XX-plan6-pricing.md`,
-  Task 18). The first session builds its baseline over about 100 s.
-- **Recovery snapshots and `skyguard snapshot`.** Before a shell command that may change them, `plugins.txt`, `loadorder.txt` and `Skyrim*.ini`
-  are copied (de-duplicated by content); before a ReSaver `--apply` or a DevBench save, the one named save and its `.skse` co-save.
-  `bash tools/skyguard.sh snapshot list` shows them; `snapshot restore <id>` writes to a new folder by default, `--to DIR` picks one,
-  and `--in-place` restores only the files that kind of snapshot may write, inside the configured roots, after backing up what it replaces.
-  A file already identical to the snapshot is left alone (`unchanged`), so a mod manager's hard link survives; a full config restore skips
-  and names a file whose folder is no longer configured; a save is replaced only when its backup leaves 2 GiB free.
+- **Skyrim AI Assistant Toolkit:** for coding agents (Claude Code, Codex, …), not an AI NPC mod (SkyrimNet, Mantella, CHIM).
+- **Codex CLI support on Windows:** generated instructions, skills, hook definitions and an entry script.
+- **Codex hook approval:** run `/hooks` after setup and start Codex in the game folder itself.
+- **Agent selection:** `setup.sh --agent claude|codex|all|auto`; `auto` is the default and `both` aliases `all`.
+- **Setup diagnostics:** report agents that remain NOT CONFIGURED and the approval steps still needed.
+- **Shared guard engine:** Claude and Codex wrappers use the Python rules under `tools/skyguard/`.
+- **Optional Windows file lock:** Layer 2 locks existing vanilla masters and archives; it is off by default.
+- **Lock at setup:** `setup.sh --lock` opts into Layer 2.
+- **Session-bound lock lifts:** `skyguard lock unlock <file>` records a lift that lasts one hour by default.
+- **Lock controls:** `lock status`, `lock disable` and `lock enable`.
+- **Emergency unlock:** `tools/skyguard-unlock.cmd` works from the user's terminal without Python.
+- **Shadow mode:** `guards off` allows eligible refusals and asks with a warning and audit record.
+- **Guard self-protection:** recognized writes and deletes targeting `.skyguard/` are refused.
+- **Guard integrity banner:** session start reports guard files that differ from `GUARD-FILES.sha256`.
+- **Layer diagnostics:** `bash tools/skydoctor` reports live, not live or unknown for each protection layer.
+- **Backup manifest:** backups record the original path, size and SHA-256 in `.claude/backups/MANIFEST.jsonl`.
+- **Manifest restore:** `scripts/restore-from-backup.sh` checks the recorded hash before restoring.
+- **Nested script snapshots:** content-addressed snapshots cover `.psc` and `.pex` files under both script source layouts.
+- **Recovery snapshots:** recognized shell changes trigger snapshots of load-order and Skyrim INI files.
+- **Save snapshots:** recognized ReSaver writes and DevBench saves snapshot the named save and co-save.
+- **Snapshot CLI:** `snapshot list` and `snapshot restore <id>` restore into a new folder by default.
+- **In-place restore:** `--in-place` is limited and requires confirmation.
+- **3.x migration:** `tools/migrate-3x.py` carries user edits into local notes and a settings backup.
+- **Pre-update snapshot:** `tools/pre-update-snapshot.sh` saves files an extract would replace before the update.
+- **Adapter guide:** `ADAPTING.md` explains integration for other coding agents.
+- **Adapter kit:** templates, capability reports and worked examples under `tools/adapting/`.
+- **Adapter conformance:** fault injection checks that an adapter refuses when the engine cannot decide.
+- **Neutral entry:** `run.py neutral pre-tool` answers allow, ask or deny for an agent-neutral request.
+- **Runtime inventory:** `toolkit-setup` checks Python, Git and Node by launching them.
+- **Universal setup prompt:** host-software installs require an explicit exact-id and exact-version authorization.
+- **Preference injection:** session start reads at most 1 MiB of local notes and injects at most 4,096 bytes of the preferences section.
+- **Focused skills:** DevBench, conflict triage and xelib guidance move out of the core instructions.
+- **Hook telemetry:** the canary reports invocation stages and measured call latency.
+- **Interpreter fallback:** configured hooks can use an available fallback Python and report DEGRADED.
+- **Archive-write advice:** recognized archive creation into the install gets its own rule message.
+- **DevBench protection:** recognized `smp reset` calls are refused.
+- **Third-party audit:** checks pinned tools and installation instructions.
+- **Pinned downloads table:** records version, file, SHA-256 and source for optional downloads.
+- **Optional Python dependencies:** tool requirements have a separate hash lock.
+- **Payload fixtures:** real hook shapes were rechecked on Claude Code 2.1.291 and Codex CLI 0.160.0; no shape change was found.
+- **Generated agent files:** contributors edit `agent/` and regenerate; CI checks synchronization.
+- **Committed release builds:** the archive builder reads git objects, refuses dirty trees and records BUILD-INFO.
+- **Payload verification:** one checker validates archive shape, hooks and adapter files.
+- **Scrubbed verification:** the local verifier checks the archive and generated install for identity and credential leaks.
+- **Maintainer secret:** release CI requires `LEAK_TOKENS` and refuses to publish without a valid value.
+- **CI matrix:** Windows and Linux Python 3.10–3.13 legs include collection and skip tripwires.
+- **Setup smoke matrix:** CI exercises the agent-selection values.
+- **Merge-marker gate:** contributor tests reject committed conflict markers.
 
-### Runtimes: one .NET SDK (10), Node 24 LTS, Spriggit 0.41.0
+### Changed
 
-- **The .NET 10 SDK is now the only .NET the toolkit needs.** Spriggit and AutoMod both run on it; .NET 8 and 9 are no longer used (both reach end of support on 2026-11-10).
-- **Spriggit is pinned to 0.41.0** (was 0.40.0); it needs the .NET 10 SDK. `tools/toolchain-check.sh` now reports an older Spriggit as a mismatch too, not only a newer one. Update with `dotnet tool update -g Spriggit.CLI --version 0.41.0`.
-- **AutoMod must be rebuilt once: `bash tools/automod-cli.sh --rebuild`.** It first puts your clone on the tested commit (v1.11.2, `e1c34ea`): older toolkits had you clone upstream HEAD, so a clean clone is checked out to the pin, and one with your own changes is left alone with instructions. It then pins SDK 10 in `tools/automod/global.json`, retargets the clone to net10.0 (a one-line local patch) and builds; the wrapper refuses an old net8.0 build. The first build needs internet. `tools/toolchain-check.sh` now reports which commit AutoMod was built from and reads DEGRADED when it is not the pin.
-- The setup prompt (and its copies in README and getting-started) now clones AutoMod at v1.11.2 and builds it with `--rebuild`; it used to clone upstream HEAD and `dotnet build` it.
-- Spriggit installed with `dotnet tool restore` (the repo-local, exactly-pinned install) now works with the ESP guard `tools/esp-verify-wrapper.sh` and `tools/toolchain-check.sh`; before, the guard stopped with "spriggit not found" and the check read "not installed".
-- `tools/toolchain-check.sh`: a ReSaver whose `lib/` folder is missing now reads DEGRADED instead of ok.
-- If you placed `bsarch.exe` for AutoMod, move it from `bin/Release/net8.0/tools/bsarch/` to `bin/Release/net10.0/tools/bsarch/`.
-- **Node 24 LTS** (Node 20 is end-of-life): `.node-version` 24.19.0 (the version tested), `engines.node` `>=24`, and the devcontainer installs Node 24 and .NET 10.
-- `tools/toolchain-check.sh` no longer reports AutoMod or ReSaver "ok" when the wrapper says its DLL or jar is missing: a wrapper must now reach its dependency, and one you never installed reads "not installed (optional)".
-- `tools/toolchain-check.sh` runs the wrappers under the bash running the check, not whatever `bash` is first on PATH (on Windows that can be WSL's launcher).
-- KB correction: a Spriggit round trip of an ESP another tool wrote reorders its records (same size, different bytes) on 0.40 and 0.41 alike, while the YAML is identical. Compare re-serialized YAML, not ESP bytes.
+- **Node 24 LTS:** xelib tooling requires Node 24; the tested pin is 24.19.0.
+- **.NET 10 SDK:** Spriggit and AutoMod use .NET 10; the tested SDK pin is 10.0.401.
+- **Spriggit 0.41.0:** replaces the 0.40.0 pin.
+- **Serializer version:** `--PackageVersion` follows the installed `spriggit --version`.
+- **AutoMod rebuild:** `bash tools/automod-cli.sh --rebuild` moves a clean clone to the pinned commit and builds the CLI for net10.0.
+- **AutoMod local edits:** the wrapper leaves a modified clone alone and gives instructions.
+- **AutoMod old builds:** the wrapper refuses an old net8.0 build.
+- **bsarch location:** an AutoMod-local executable belongs under `bin/Release/net10.0/tools/bsarch/`.
+- **PyNifly 27.2.0:** both the library and Blender add-on use this pin.
+- **Exact Node dependencies:** package versions replace range pins.
+- **Pinned xeditlib:** installs use a fixed commit, koffi 2.15.1 and `--ignore-scripts`.
+- **Container runtimes:** the image and runtime downloads are pinned; the JDK moves to 21.
+- **Tested Python range:** 3.10–3.13; guard syntax remains compatible with 3.8/3.9, which are untested.
+- **jq optional:** the guards no longer need jq.
+- **Root paths file:** `skyrim-paths.env` moves to the toolkit root.
+- **Legacy protection union:** the 3.x `.claude/skyrim-paths.env` remains readable and its protection folders are combined with the root file.
+- **Legacy retirement:** setup retires the old paths file only when it contributes no additional protection folder.
+- **Private paths:** the root paths file is ignored and never shipped.
+- **Empty explicit root:** `run.py --root ""` reads no paths file from the current directory.
+- **Install hints:** setup prints exact commands for the user; it does not silently install host runtimes.
+- **Instruction budget:** setup warns when expanded instructions exceed Codex's 32,768-byte limit.
+- **Idempotent setup:** agent selection repairs partially configured files.
+- **All guard interpreters:** setup renders Python paths in guard files regardless of the selected agent.
+- **Migration before rendering:** setup reports a migration failure and continues configuration.
+- **Smaller core instructions:** detailed tool guidance moves into skills and documentation.
+- **Bounded engine runtime:** the default engine timeout is 20 seconds and expiry produces a GUARD INERT refusal.
+- **Hook timeout handling:** wrappers terminate their own timed-out child instead of relying on a late host refusal.
+- **Claude shell matcher:** covers Bash, PowerShell and Monitor.
+- **Claude edit matcher:** covers Edit, Write and NotebookEdit.
+- **DevBench matching:** guard parsing recognizes server names containing devbench.
+- **DevBench scenarios:** recognized scenario steps are judged like direct calls.
+- **GNU find on Codex:** recognized delete forms are judged across reported shell dialects.
+- **Shadow ask wording:** explicitly says the call ran without asking.
+- **Codex command payloads:** script fields and argv lists are judged; ambiguous command fields refuse.
+- **Resolved delete operands:** relative paths use the reported working directory and protection includes MO2 mods and overwrite.
+- **Read-only mentions:** searches for delete syntax are distinguished from commands that delete.
+- **Wrapper health:** toolchain checks report dependency failures and Spriggit version drift.
+- **AutoMod provenance:** toolchain checks show the build commit.
+- **Knowledgebase snapshots:** include AGENTS.md.
+- **Lift expiry:** the next hooked tool call after expiry relocks the affected files.
+- **Archive identity:** the root is `skyrim-ai-assistant-toolkit-<version>`, using the package name as the shared slug.
+- **GitHub links:** retain the current repository path; no remote rename is part of this change.
+- **Shipped identity scrub:** examples and dated reports use neutral paths; non-shipped corpus fixtures preserve historical input bytes.
+- **Freeze baseline:** a tag on HEAD cannot serve as its own comparison baseline.
 
-### Dependencies (exact, hash-locked, refreshed with the reasons recorded)
+### Fixed
 
-- **PyNifly pinned to 27.2.0 for both the library (`tools/pynifly`) and the Blender add-on.** 29.1.0 was re-validated and rejected: its Blender add-on strips effect shaders (and their textures and alpha) from a shape on an import/export round trip when the texture is not beside the NIF; 27.2.0 keeps them.
-- **Corrected the PyNifly DLL note:** the DLL actually loaded is `io_scene_nifly/NiflyDLL.dll`; the zip's `io_scene_nifly/pyn/NiflyDLL.dll` is never loaded, and `NifFile.Load` is not needed.
-- **Never round-trip an animated NIF through Blender:** the add-on drops animation controllers on both 27.2.0 and 29.1.0 (the skyrim-nif skill now says so).
-- **Removed the unused pins** from the container's Python requirements: pydantic (and pydantic-core), cattrs, mypy and pytest-cov
-  (with coverage, attrs, annotated-types, mypy-extensions), plus the Windows-only `requirements-windows.txt/.lock` (pywin32).
-  Nothing in the toolkit imported or ran any of them, so no behaviour changes; the hash lock goes from 20 packages to 10 and
-  installs on Python 3.10 through 3.13. Anything of yours that imported one of them from the container must add it back itself.
-- **PyYAML 6.0.1 to 6.0.3**: the first release with Python 3.13 wheels (and 3.14). Only `yaml.safe_load` is used; no API change.
-- **pytest 8.0.0 to 9.0.3**: 9.0.3 is the only release line that fixes CVE-2025-71176 (predictable `/tmp/pytest-of-<user>` directory on Unix; 8.x is still affected). pytest now needs Python 3.10 or newer, which is the tested range's floor. Adds Pygments as a dependency; the lock pins 2.21.0 because every release before 2.20.0 has a known ReDoS advisory (a test enforces this).
-- **ruff 0.3.0 to 0.16.9** (CI lint only; never installed for users). The hard gate (`E9,F63,F7,F82`) gives identical results on 0.3.0, 0.3.7, 0.15.22, 0.16.9 and 0.16.10 over every tracked Python file; the advisory full-ruleset run is noisier (about 1400 findings). The gate no longer reports the adapter template's slot fragments (`ruff.toml`), which made it fail before.
-- **`package.json` pins exact versions** (ajv 8.20.0, fast-xml-parser 5.7.3, zod 3.25.76) instead of `^` ranges, so a plain `npm install` can no longer float away from the lock. The lock already held ajv and zod at these versions; fast-xml-parser moves in the next line.
-- **fast-xml-parser 4.5.7 to 5.7.3** (the container's "Generate FOMOD XML" tool). `npm audit` flags every 4.x for the `XMLBuilder` comment/CDATA injection advisory (GHSA-gh4j-gqv2-49f6, fixed in 5.7.0); 5.7.3 clears it, at the cost of four more small dependencies. A new smoke test (`tests/fomod-xmlbuilder.test.js`, run from `npm ci` by `tests/test_node_fomod_smoke.py` and by CI) builds a FOMOD ModuleConfig with `XMLBuilder`, parses it back, and checks that comment and CDATA text cannot inject elements; a control run on 4.3.6 proves the smoke fails on an injectable version. ajv 8.20.0 and zod 3.25.76 are already the newest of their lines and do not change.
+- **3.x PowerShell coverage:** the Bash-only matcher left PowerShell calls unguarded.
+- **3.x Monitor coverage:** shell commands through Monitor now reach the command guard.
+- **3.x NotebookEdit coverage:** the old Edit|Write matcher excluded NotebookEdit.
+- **3.x raw plugin writes:** recognized shell writes to ESP, ESM, ESL, BSA and BA2 now refuse.
+- **Prefs fence handling:** unclosed fences and annotated preference headings no longer silently hide preferences.
+- **Prefs complexity:** fence lookup avoids repeated rescanning of the remaining file.
+- **Prefs truncation:** capped or uninjected sections are reported.
+- **Canary verdicts:** a refused Codex call is not counted as a successfully guarded call.
+- **Setup folder casing:** equivalent case spellings do not imply that the install moved.
+- **Setup Python check:** requires a working interpreter and reports unsupported versions.
+- **Codex unsafe install paths:** setup refuses characters its hook launchers cannot quote safely.
+- **Non-ASCII configuration paths:** setup emits a paths file readable by the guard.
+- **Ampersand install paths:** setup re-runs without breaking shell quoting.
+- **Backup restore names:** manifest paths preserve underscores in plugin and archive names.
+- **Backup collisions:** repeated edits within a second do not overwrite the previous backup.
+- **Concurrent manifests:** locked appends retain each backup record.
+- **Identical in-place restores:** skip unchanged files to preserve mod-manager hard links.
+- **Windows launcher paths:** backslash invocation and Python paths containing spaces work.
+- **Snapshot containment:** reparse folders, changed hard links and time-box expiry are checked.
+- **Lock inheritance:** lock and unlock leave ACL inheritance unchanged.
+- **Save reserve:** save snapshots require 2 GiB to remain free on the destination drive.
+- **Local Spriggit:** verification wrappers can use a repo-local restored tool.
+- **Spriggit comparison:** round trips of external ESPs may reorder records; compare re-serialized YAML.
+- **Caprica command:** compile from the source folder using a bare script filename.
+- **PyNifly guidance:** identify the loaded NiflyDLL.dll correctly.
+- **Animated NIF guidance:** Blender round trips can drop controllers; do not use them for animated assets.
+- **VR port guidance:** correct notes for Precision, AMR VR and SCAR-related ports.
+- **Owned record guidance:** GetFormFromFile references should use the mod's own forms and check for None.
+- **Shell advice:** messages distinguish ordinary file writes from raw plugin writes.
+- **Telemetry vocabulary:** documentation uses current registry rule identifiers.
+- **Broken documentation links:** corrected relative links and added a suite check.
+- **Link-check scope:** dependency website Markdown does not count as toolkit filesystem links.
+- **Codex E2E verdicts:** include checks added after the live probe returns, so a late failure cannot leave PASS cached.
+- **Corpus path derivation:** preserves the historical mixed-slash spelling while removing it from shipped helpers.
+- **Test tripwire isolation:** intentional setup denials do not contaminate another test's barrier log.
+- **MSYS path regression:** explicitly mounts the test fixture instead of skipping on a mismatched temporary directory.
+- **Migration regression:** verifies that the preferences heading precedes carried instruction blocks.
+- **Ruff gate:** excludes adapter slot fragments that are not executable Python.
+- **Test environment:** preserves SystemDrive.
+- **Regex test cleanup:** the timeout reaper cannot leave its own spinning test child behind.
+- **CI output parser:** reads the launcher-produced pytest format.
+- **Release identity checks:** derived spellings are checked without printing matched values.
+- **Committed archive contents:** git attributes cannot substitute unexpected working-tree content.
 
-### Other agents: the adapter kit
+### Removed
 
-- **New `ADAPTING.md`, written to an agent the toolkit does not support yet.** Any agent that reads files already gets the instructions, the skills and the tools (Layers 0 and 1, plus Layer 2 if the user turns it on: the read-only lock on the vanilla files, off by default, Windows only). `ADAPTING.md` walks such an agent through wiring the rest into itself, and through saying honestly how far it got. The toolkit still lists only Claude Code and Codex as supported; an adapted agent is "locally adapted, self-verified", a statement about one install on one machine.
-- **New neutral engine entry: `python tools/skyguard/run.py neutral pre-tool`.** It takes one agent-neutral JSON request on stdin and answers allow, ask or deny with the engine's real rules. Anything it cannot read or decide is a refusal, never an allow.
-- **New adapter kit in `tools/adapting/`:** an adapter template, a capability-report template and two worked examples (a hook that refuses by exit code, one that refuses by JSON).
-- **New conformance tool, `tools/adapter_conformance.py`.** It runs an adapter against ten faults injected into the engine (a crash, a hang, silence, garbage output, a missing marker, an unknown decision, a missing engine and so on) and fails any adapter that lets a command through when the engine could not decide, or that does not obey a valid verdict. Every tool the agent has that writes a file or runs a command must be listed and gets its own decoy test; a tool left off the list is reported as not guarded. Its capability report names a protection status only when there is evidence for it, including a live shell test, every such tool mapped, and an agent hook timeout longer than the adapter's own deadline.
-- **New skill `toolkit-setup` and tool `tools/inventory-runtimes.py`.** The skill checks Python, Git and Node by launching them, reports anything missing, broken or too old, and never upgrades, repairs or removes one that exists. An authorized install is accepted only for the known winget ids (`Python.Python.3.<minor>`, `Git.Git`, `OpenJS.NodeJS`, `OpenJS.NodeJS.LTS`), read from your whole message.
-- **The setup prompt is now agent-neutral, and it no longer asks the agent to install a missing Python or Node.** Installing host software is off unless you change one sentence in the prompt to authorize an exact package and version; otherwise the agent tells you the manual steps and waits.
-- **Core instructions point an unsupported agent, or a machine with a missing runtime, at `ADAPTING.md` and `toolkit-setup`.**
-- Release builds now check that the adapter kit is in the zip (`tools/check-adapter-payload.py`). The toy-agent test that exercises the kit lives in `tests/`, which is not shipped: it is a check on the toolkit's own CI, not part of the download.
+- **Unused Python packages:** pydantic, cattrs, mypy and pytest-cov, with their unused dependency pins.
+- **Windows-only requirements:** the pywin32 requirements files.
+- **.NET 8/9 support:** optional .NET tools now use 10.
+- **Node 20 support:** Node tooling now requires 24.
+- **Spriggit 0.40.0 pin:** replaced by 0.41.0.
+- **Old Bash rule engine:** retained only as a non-shipped test reference.
+- **Separate Codex and adapter payload checkers:** folded into the shared checker.
+- **Automatic jq installation:** removed from setup.
+- **Automatic host-runtime installation:** removed from the default setup prompt.
+- **Legacy paths writes:** setup writes the root paths file.
+- **PyNifly 29.1 Blender add-on recommendation:** replaced by the validated 27.2.0 pin.
 
-### Guard rules rewritten on a parser (Plan 5): security fixes to the 3.x guards, and far less noise
+### Known limits
 
-- **Security fix (E12): the PowerShell tool was not guarded.** The 3.x Claude matcher was `Bash` only, so a delete or write
-  made through the PowerShell tool reached no hook. The matchers are now `Bash|PowerShell|Monitor` (the Monitor tool runs
-  shell commands and bypassed every hook) and `Edit|Write|NotebookEdit`. **If you installed a 3.x toolkit, your PowerShell
-  tool was unguarded.**
-- **Security fix (E21): shell writes to plugins and archives were only advised.** `echo x > Foo.esp`, `Set-Content Foo.esp`,
-  `tee`, `Out-File`, `sed -i` and `dd of=` into an `.esp .esm .esl .bsa .ba2` now refuse, in Bash and PowerShell. Until now the
-  "refused outright" claim held only for the Edit and Write tools. Copying a finished plugin onto `Data/` stays a note.
-- Deletes are judged on the program that runs and where its operand resolves (relative paths against the working directory
-  Claude reports), also for Mod Organizer's `mods/` and `overwrite/`. `grep -rn "rm -rf" <install>` is no longer refused.
-- New: DevBench `smp reset` is refused (MCP tool, `curl`, `devbench-cli.sh`, and on Codex); a DevBench save over an existing save asks.
-- **Red-team fixes (routes and shell):** a Codex `apply_patch` Delete, or a Move out of the folder, inside the game,
-  settings or Mod Organizer folders is now judged as a delete and refused (it was judged only as a write). Plugin and
-  archive writes by non-text tools (`curl -o`, `wget -O`, `-OutFile`, `bitsadmin`, `certutil`, `tar`/`zip`, `fsutil`,
-  `truncate`, inline `python -c` / `node -e` with a literal name) refuse like a redirect. New confirmations: replacing a save file (shell or patch), and a git command
-  that throws away uncommitted changes in the install. New refusals: moving a file out of where the game looks for it;
-  running decoded text (`base64 -d | sh`, `iex` of a decoded string); `rm -rf *` in a folder the guard cannot place;
-  interpreter code that launches a delete (`os.system`, `child_process`) and command-running wrappers (`schtasks`,
-  `Start-Process`, `docker`, `psexec`) whose own words delete in a protected folder. DevBench calls are read anywhere in
-  their arguments, including scenario steps and `wget`; NTFS stream suffixes (`x.esp:stream`) no longer hide a plugin
-  name. Hooks run from a git worktree of the install also protect the main install. Priced over ~68,000 real tool calls:
-  9 newly refused or advised, all scratch test scripts; no routine modding call changed.
-- **Noise cut, measured on 66,773 real tool calls:** advice notes 2,437 to 211 (the P2 baseline was 2,028; 0.316% of calls
-  against 3.79%); asks 26 to 12, 11 of them an executed ReSaver `--apply`; 205 wrong denies removed, none a real action.
-  Verdicts now carry `status: partial` when the parser could not read a command completely.
-- Every message is at most two plain lines and never echoes the command.
+- **Hooks need configuration and approval:** unrendered source templates do not become live merely by approving them.
+- **Codex scope:** Windows CLI support is claimed; WSL, desktop and IDE integration are not.
+- **Codex confirmations:** the adapter refuses an ask and tells the user to run the intended action themselves.
+- **Codex other MCP tools:** logged rather than guarded, except the recognized DevBench surface.
+- **Codex user commands:** commands typed with `!` bypass hooks.
+- **Codex subfolders:** starting below the game root silently skips hooks.
+- **PowerShell policy:** AllSigned may prevent hook launch.
+- **Pattern-based coverage:** the guard is an accident barrier, not a sandbox.
+- **Interpreter state writes:** code can write or link guard state through forms the shell scanner does not recognize.
+- **Archive extraction:** unpacking into guard state is not covered.
+- **Indirect shell paths:** computed destinations, uncommon option forms and aliases can escape recognized self-protection.
+- **Empty paths files:** can lose non-install protection folders if neither paths file retains them.
+- **Broken legacy file:** beside a valid root file it is reported, but does not itself stop the guard.
+- **Neutral shadow mode:** the neutral entry does not honour a guards-off lift.
+- **Neutral other kind:** reported UNJUDGED.
+- **DevBench replay/input:** their contents are not judged.
+- **DevBench fixtures:** MCP fixtures were not re-captured during release-version verification.
+- **Layer 2:** opt-in and Windows only; Linux/POSIX returns unsupported.
+- **Lock rename:** a locked file can be renamed away.
+- **xelib save:** can rename the locked original into zEdit Backups and write an unlocked replacement.
+- **Lock manual measurements:** Wrye Bash, Steam update/verify, AE Creation downloads, xEdit GUI and MO2 remain pending.
+- **Lift visibility:** agent context, audit and skydoctor are covered; interactive user visibility remains unmeasured.
+- **Relocking needs hooks:** no background service relocks an expired lift.
+- **Agent unlock session:** Codex and Claude PowerShell do not receive the session binding used by Claude Bash; the user must unlock from their own terminal.
+- **Raw unlock-all:** does not record a per-file lift list.
+- **State replacement:** bounded PermissionError retries handle transient Windows readers; persistent sharing failures can still fail.
+- **Shell delete recovery:** no general backup is made before deletion.
+- **Backup scope:** script writes outside the snapshot paths are not automatically backed up.
+- **Instruction expansion:** unusually long install paths may exceed the instruction budget; setup warns.
+- **Migration scope:** edited hooks and skills are snapshotted rather than migrated.
+- **Migration line endings:** carried notes use LF; the backup retains the original bytes.
+- **Migration concurrency:** simultaneous runs can race and one may fail.
+- **Animated NIFs:** Blender round trips can drop controllers.
+- **Spriggit bytes:** a round trip may reorder records without changing the re-serialized content.
+- **Python 3.8/3.9:** engine compatibility is retained but these versions are outside the tested range.
+- **Live release checks:** a clean suite and review do not substitute for the remaining manual and live-agent batch.
+- **Linux skip ceiling:** remains an estimate until the real CI leg runs.
+- **Container release legs:** require Docker and a separate build/round-trip check.
 
-### Codex support
+### Upgrading from 3.x
 
-- **First Codex hook definitions (v1): approve them in /hooks.** Open `codex` in your Skyrim folder, type `/hooks`, approve the 2 Skyrim toolkit hooks; until then Codex runs none of them and does not say so.
-- **Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you.** (Measured: a non-git install, Codex started in `Data\Scripts`, 2 of 2 runs.)
-- The canary no longer counts a refused Codex call as guarded: a refusal leaves no transcript item, so one refusal used to hide one unguarded call (hooked 1 / called 1, HEALTHY).
-- A Codex tool call whose command is an argv list (not a string) is now guarded with the shell rules, and refused when an element is not a string; it used to be allowed unexamined.
-- `setup.sh` no longer warns that the install moved when you re-run it from a folder typed in a different letter case on Windows.
-- `setup.sh` configures Codex: it fills in `.codex/hooks.json` for your install folder and prints the approval step.
-- `setup.sh` fills your paths into `AGENTS.md`, the instruction file Codex reads, exactly as into `CLAUDE.md`.
-- `setup.sh` writes the Python path into the Codex hook scripts, and repairs it on a re-run after Python moves.
-- `setup.sh` refuses to configure the Codex hooks in a folder whose path contains `%`, `!`, `$`, `` ` `` or `"`, and says why (the hook could not start there, and Codex runs the command when a hook cannot start).
-- `setup.sh` warns, and changes nothing, when `.codex/hooks.json` was set up for a different folder: re-extract, re-run `setup.sh`, re-approve.
-- The session-start snapshot (`tools/kb-guard.sh`) now also keeps copies of `AGENTS.md`.
-- Release builds now check the Codex files: hook definitions present and parsing, every script they run present, the rules file, one Codex skill per Claude skill, `AGENTS.md` at most 32,768 bytes.
-- Unsupported, and both leave the hooks unable to start: a group policy forcing PowerShell's `AllSigned` execution policy, and Codex running inside WSL.
-- Commands you type with `!` in the Codex prompt bypass the hooks (measured); see "Using with Codex" in the README for the full list of what is not checked.
-
-### Codex adapter: known coverage gaps
-
-- **MCP tools other than DevBench's are logged, not guarded, on Codex.** A call such as `mcp__fs__write_file` to a `.esp` reaches the
-  hook as `mcp__<server>__<tool>`; the toolkit allows it and records one line in
-  `.claude/backups/codex-unhooked-tools.log`. DevBench's tools (any server whose name contains `devbench`) get the
-  same judge as on Claude: `smp reset` is refused on Codex too, and a save over an existing save is refused with
-  `NEEDS YOUR CONFIRMATION` (Codex cannot ask). No hook definition changed, so no re-approval is needed.
-  Unknown non-MCP tools that carry a command string are guarded with the shell rules (and logged).
-
-### Hook interpreter fallback
-
-- **A moved or upgraded Python no longer takes every blocking hook down.** If the interpreter `setup.sh`
-  configured stops working, the hooks try `py -3`, `python`, `python3` (never a Microsoft Store alias while a
-  regular install exists), then the usual install folders (newest version first), then a Store alias, and keep
-  deciding. A candidate is accepted only if it is Python 3.8 or newer **and** runs the guard engine itself
-  (`run.py --selftest <nonce>`), so a stub that merely exits 0 cannot turn into "allow". The healthy path is
-  unchanged: nothing is probed unless the configured interpreter has failed.
-- **Reported, not hidden:** a fallback that is used shows as DEGRADED in `bash tools/hook-canary.sh` ("configured
-  ... unusable; used ...") until a call through the configured interpreter completes again. Re-run `setup.sh`.
-- **An extracted zip that never ran `setup.sh`** (the `{{PYTHON_PATH}}` placeholder still in the hooks) now takes
-  the same route: the hooks fall back to a Python they can find and still decide, reported as DEGRADED. They used
-  to refuse every command. With no usable Python at all they still refuse (GUARD INERT).
-- **Nothing can hang past the agent's timeout, even on a busy machine.** The engine arms an in-process watchdog
-  (`faulthandler`, a C thread that fires even inside a catastrophic regex) that ends it after 20 s
-  (`SKYGUARD_ENGINE_TIMEOUT` seconds) into the ordinary GUARD INERT deny. Every bash hook (Claude and Codex)
-  also bounds each Python it starts -- probe and engine, the normal path included -- and kills it by its
-  **Windows process id** (`taskkill /F /T`); it never uses coreutils `timeout`, which under heavy CPU load could
-  not stop a native `python.exe` at all (measured: a 3 s limit took 18-227 s), so a hook outlived its 60 s
-  definition timeout and the agent ran the command. Each hook now answers by its definition timeout minus 15 s
-  whatever its children are doing. Measured on 4 cores at 2x oversubscription: worst 43 s (was 155 s Claude,
-  52 s Codex).
-- **The fallback probes once, not on every call.** A verified fallback interpreter is remembered in
-  `.claude/backups/.hook-heartbeat/<agent>/.python-fallback`; every call through it must echo a fresh nonce from
-  the engine, so that file cannot be used to substitute an interpreter. A candidate costs one process (the
-  engine's own selftest refuses Python < 3.8), gets up to 15 s (`SKYGUARD_PROBE_TIMEOUT`; a healthy one took
-  up to ~9 s under load, so the old 3 s rejected working installs), and is not re-probed after the engine's
-  own watchdog fired.
-- **`setup.sh` requires Python 3.8+** (a 3.6 used to pass and then deny everything) and writes the path into the
-  hooks in single quotes, so a `$` or backtick in a folder name is no longer expanded on every hook call.
-
-### Hook health telemetry
-
-- **`bash tools/hook-canary.sh` now reads staged records** (ran, received, evaluated, emitted, failed) instead of
-  one heartbeat, so it sees the failures that happen *after* a payload arrives: an engine crash, a hook the agent
-  killed, an output nobody could parse. States: HEALTHY, STALE, DEGRADED, NOT EXERCISED, UNMEASURABLE, NEVER INVOKED. A failure
-  clears only on a newer completed evaluation. Per-call latency (p50/p95) is recorded and shown.
-
-### 📚 Instructions split
-
-- **`CLAUDE.md` shrinks from 53,578 to 28,174 bytes** (the shared core from 53,367 to 26,304), so the
-  instruction file Codex will read stays under its silent 32,768-byte truncation limit. Nothing was deleted:
-  every moved line was checked against its new home.
-- **Three new skills hold what used to be core bulk:** `devbench` (the live in-game test channel),
-  `triage-and-conflicts` (skyrim-winner, Papyrus and crash-log triage, ESP cross-reference snapshots, how the
-  tools pick a folder) and `xelib` (XEditLib API quirks, loading the real active order, judging success by
-  stdout).
-- **Install notes move to `docs/installing-tools.md`** (the optional tools, why some have wrappers, the Nexus
-  API key). The devcontainer guide joins `docs/container-vs-windows.md`; the guards' internals join
-  `docs/safety-philosophy.md`.
-- **The AutoMod CLI section folds into its skills**; `skyrim-nif` gains the Havok-collision limit and the
-  "diff against a known-good structure" gate, `create-mod` gains `add-quest` / `set-property`.
-- **The core is agent-neutral.** Claude Code specifics (skills loading, hook wiring, `/hooks`, the backup
-  hook's blind spot) move to an addendum generated into `CLAUDE.md` only.
-- **`KNOWLEDGEBASE.local.md` → `## My preferences`:** every agent is told to read your standing instructions
-  there at the start of each session, and to add to them when you state a lasting preference.
-- **`AGENTS.md` corrected:** skills are plain Markdown any agent can read; the stale "require confirmation"
-  claim and an orphaned sentence fragment are gone.
-- For contributors: `gen_agent_trees.py --check` now fails when the worst-case installed instruction file
-  exceeds 32,768 bytes (`--budget` prints it), and `tests/test_instruction_neutrality.py` bans Claude-only
-  constructs from the shared core and the three new skills. Both are mutation-tested.
-
-### ✨ Your preferences reach the agent at every session start
-
-- The SessionStart hook now prints the `## My preferences` section of `KNOWLEDGEBASE.local.md` into the
-  session, after the knowledgebase snapshot report.
-- The injected section is capped at 4,096 bytes (cut on a character boundary, with a note saying where the
-  rest is); a file that exists but cannot be read is said so out loud and never fails the session.
-- It is injected again after a compaction (which drops earlier context); the snapshot is still skipped then.
-- Agents without session hooks get the same section through the instruction to read it at session start.
-
-### 🐛 Prompt-audit fixes
-
-- Caprica: the documented command now runs from `Data/Scripts/Source` with a bare filename, `-f` flags and `-o ..` (the old form wrote the `.pex` into the game root, and a path argument fails with a namespacing error).
-- port-to-vr: "Precision doesn't exist for VR" replaced with how VR melee hit detection is layered and what to check.
-- port-to-vr: the unsourced Animation Motion Revolution VR claim replaced with "check its Nexus page".
-- port-to-vr: "SCAR → VR port exists (BFCO)" corrected; BFCO is a separate framework, not a SCAR port.
-- skyrim-nif: "AutoMod for all mesh work" scoped to texture, string and shader work.
-- `GetFormFromFile()` advice now says your OWN plugin's forms only, and to check for `None` (four places).
-- Own Your Records: vanilla records can be overridden by other plugins too; copy any whose behaviour you rely on.
-- inspect-esp: uses `tools/spriggit-cli.sh`, a scratch output folder and the installed Spriggit version instead of a hardcoded `0.40.0` and `/tmp`.
-- inspect-esp: the xeditlib check now tests that `require('xeditlib')` resolves, not that `tools/xelib/` exists.
-
-### 🔒 Safety hooks now run on a Python engine (no verdict loosened)
-
-- **The five hooks are now thin wrappers over `tools/skyguard/`**, a Python engine holding every rule,
-  message and side effect. Verdicts were compared on 53,445 real commands from the audit history: 0 verdicts loosened, 2 became
-  stricter advisories on non-ASCII spellings (reviewed and ruled intended), and 2 differ in message text
-  only. A corpus of 278 recorded inputs (every payload the old
-  hook tests used, plus each rule's positive and negative case, path dialects, multi-line, CRLF and
-  non-ASCII inputs) was captured from the bash hooks before the port and is reproduced decision for
-  decision by the new wrappers. The old bash hooks are kept as the frozen
-  reference under `tests/guard_corpus/reference/`.
-- **Python 3.8 or newer is now required** for the hooks (the engine is stdlib-only and written to 3.8 syntax;
-  it parses clean under the 3.7 and 3.8 grammars, but it has only been run here on 3.10; Python was already required for several tools). `setup.sh`
-  records the interpreter's absolute path in each hook. Without Python the blocking hooks REFUSE every
-  command (`GUARD INERT ... cannot run Python`) and `setup.sh` says so loudly; the non-blocking hooks
-  log `FAILED` to the audit log. An engine that crashes or prints something that is not a verdict is
-  refused too, never allowed.
-- **`jq` is now optional.** The hooks no longer use it; `setup.sh` only reports whether it is present
-  and no longer tries to `winget install` it. `tools/devbench-cli.sh` and `tools/nexus.sh` use it for
-  pretty output and fall back to plain output.
-- **Customising rules moves** from the hook scripts to `tools/skyguard/*_rules.py`.
-
-### 🧰 For contributors
-
-- **Agent-facing files are now generated from `agent/`.** `CLAUDE.md`, `AGENTS.md`, `.claude/skills/`,
-  `.claude/hooks/` and `.claude/settings.json` are written by `python scripts/gen_agent_trees.py` from
-  the sources in `agent/`. Edit there, regenerate, and commit both. CI runs
-  `gen_agent_trees.py --check` and fails on any difference, so a hand edit of a generated file
-  cannot land. Behaviour for users is unchanged: every installed file is byte-identical to before
-  apart from one `GENERATED` header line (JSON files have none). An install now also contains
-  `agent/` and the generator. Running the generator inside an install that `setup.sh` configured
-  is **refused** (exit 2, nothing written), because regenerating there would put the placeholders
-  back and leave every hook unconfigured. This is groundwork for Codex and other-agent support (see
-  `docs/superpowers/specs/2026-09-30-universal-agent-support-design.md`).
-- **Hook payload fixtures** captured from real Claude Code and Codex sessions
-  (`tests/fixtures/payloads/`), with the capture and scrub tools in `tools/payload-capture/`.
+1. Unpack the new zip into a separate folder and, from the Skyrim folder, run `bash "<new folder>/tools/pre-update-snapshot.sh" .` before replacing files.
+2. Extract the toolkit contents over the install; shipped files are replaced.
+3. Run `bash setup.sh --agent auto`, or select `claude`, `codex` or `all`.
+4. Review migrated local notes and the settings backup; migration deletes nothing.
+5. Keep personal notes and standing preferences in `KNOWLEDGEBASE.local.md`, which is never shipped.
+6. Install the pinned Node and .NET runtimes yourself if you use the optional tools that require them.
+7. Update Spriggit to 0.41.0 or restore the repo-local tool.
+8. Rebuild AutoMod with `bash tools/automod-cli.sh --rebuild`.
+9. Move an AutoMod-local bsarch.exe into the net10.0 tools directory.
+10. Review any retained legacy paths file and move missing protection folders into the root file.
+11. Start Codex in the game folder, approve the toolkit hooks in `/hooks`, make real tool calls and check the canary.
+12. Enable the optional lock only after reading its limits.
+13. Run `bash tools/skydoctor`; a default install reports the lock as off.
+14. Re-add any removed Python packages your own scripts imported.
+15. User-global tools stay unchanged until you update them.
 
 ## v3.9.1 — 2026-09-09
 
