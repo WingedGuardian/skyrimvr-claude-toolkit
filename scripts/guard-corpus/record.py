@@ -50,6 +50,22 @@ LAYOUTS = {
     "docs": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\n'),
     "mo2": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2/mods"\n'
                          'SKYRIM_MO2_OVERWRITE="D:/MO2/overwrite"\n'),
+    # Plan 8 T8: the same files at the paths file's 4.0 location, the toolkit root (the layouts above keep the legacy
+    # .claude/ spelling, which is still read when the root file is absent).
+    "declared-root": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\n'),
+    "malformed-root": ("Skyrim VR", f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2 $X/mods"\n'),
+    # T8 fix round 1 (I1): a 0-byte root file (`touch skyrim-paths.env`) beside a legacy file that declares MO2.
+    "touched-root": ("Skyrim VR", ""),
+}
+# Layouts whose paths file is written at the toolkit root instead of .claude/ (written even when empty). Each ALSO gets
+# a legacy .claude/ file. declared-root's is malformed (a reader that let the legacy file's malformed entries in, or
+# let it win, would make every row S-INERT-CONFIG); malformed-root's is clean (a legacy-wins reader would lose the
+# refusal); touched-root's declares MO2 folders the empty root file must not hide (R3 union, T8 fix round 1).
+ROOT_LEVEL_LAYOUTS = ("declared-root", "malformed-root", "touched-root")
+LEGACY_DECOYS = {
+    "declared-root": f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_CONFIG_DIR="D:/decoy $X"\n',
+    "malformed-root": f'SKYRIM_GAME_ROOT="{GAME}"\n',
+    "touched-root": f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_MO2_MODS="D:/MO2/mods"\nSKYRIM_MO2_OVERWRITE="D:/MO2/overwrite"\n',
 }
 
 
@@ -87,8 +103,10 @@ def make_install(base: Path, hooks_src: Path, layout: str) -> Path:
     if layout == "docs":
         (root / "Documents" / "My Games" / "Skyrim VR" / "Saves").mkdir(parents=True)
         (root / "Documents" / "My Games" / "Skyrim VR" / "Saves" / "Existing.ess").write_bytes(b"x")
-    if env:
-        (root / ".claude" / "skyrim-paths.env").write_text(env.replace("<install>", root.as_posix()), encoding="utf-8", newline="\n")
+    if layout in LEGACY_DECOYS:
+        (root / ".claude" / "skyrim-paths.env").write_text(LEGACY_DECOYS[layout], encoding="utf-8", newline="\n")
+    if env or layout in ROOT_LEVEL_LAYOUTS:
+        (root / ("" if layout in ROOT_LEVEL_LAYOUTS else ".claude") / "skyrim-paths.env").write_text(env.replace("<install>", root.as_posix()), encoding="utf-8", newline="\n")
     return root
 
 
@@ -201,16 +219,16 @@ def engine_verdict(install: Path, hook: str, payload) -> dict:
         if p["command_type"] != "string":        # run.py (Task 12): a non-string command is refused as no command
             v = ee.call(shell_rules.decide, ("", paths.Roots("", ""), audit), cwd=cwd)
         else:
-            env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
+            env = paths.read_install(root_win or root, environ)
             v = ee.call(shell_rules.decide, (p["command"], paths.roots(root, root_win, env), audit), cwd=cwd,
                         shell=p.get("shell", ""), env=environ)
     elif hook == "protect-mcp.sh":
-        env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
+        env = paths.read_install(root_win or root, environ)
         v = ee.call(mcp_rules.decide, (p["tool_name"], p["mcp_input"], audit),
                     roots=paths.roots(root, root_win, env), env=environ)
     else:
         # Plan 5 Task 9: the write guard's zone notes need the roots, as run.py passes them.
-        env = paths.read_config(Path(root_win or root) / ".claude" / "skyrim-paths.env", environ)
+        env = paths.read_install(root_win or root, environ)
         v = ee.call(write_rules.decide, (p["file_path"], audit), cwd=cwd, roots=paths.roots(root, root_win, env))
     if v.decision in ("deny", "ask"):
         decision, text = v.decision, v.reason

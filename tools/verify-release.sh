@@ -278,13 +278,13 @@ if [ "$SCRUBBED" -eq 1 ]; then
     *) ok "repo checkout off the scrubbed PATH" ;;
   esac
 
-  # 2. setup.sh, twice (the second run must be a clean no-op). VERIFY_SETUP_ARGS passes e.g. `--agent all`
-  #    once setup.sh has that option.
+  # 2. setup.sh, twice (the second run must be a clean no-op): `--agent all` unless VERIFY_SETUP_ARGS says otherwise
+  #    (set it to an empty string for a plain `bash setup.sh`).
   # shellcheck disable=SC2086
-  out=$(cd "$GAME" && scrub bash setup.sh ${VERIFY_SETUP_ARGS:-} </dev/null 2>&1); rc=$?
+  out=$(cd "$GAME" && scrub bash setup.sh ${VERIFY_SETUP_ARGS---agent all} </dev/null 2>&1); rc=$?
   [ $rc -eq 0 ] && ok "setup.sh in the scrubbed env (exit 0)" || { bad "setup.sh in the scrubbed env" "exit $rc"; echo "$out" | tail -15; }
   # shellcheck disable=SC2086
-  out=$(cd "$GAME" && scrub bash setup.sh ${VERIFY_SETUP_ARGS:-} </dev/null 2>&1); rc=$?
+  out=$(cd "$GAME" && scrub bash setup.sh ${VERIFY_SETUP_ARGS---agent all} </dev/null 2>&1); rc=$?
   [ $rc -eq 0 ] && ok "setup.sh again: idempotent (exit 0)" || { bad "setup.sh re-run" "exit $rc"; echo "$out" | tail -15; }
   left=$(grep -lE '\{\{[A-Z_]+\}\}' "$GAME/CLAUDE.md" "$GAME/AGENTS.md" "$GAME"/.claude/hooks/*.sh "$GAME"/.codex/hooks/* "$GAME/.codex/hooks.json" 2>/dev/null | tr '\n' ' ')
   [ -z "$left" ] && ok "no unrendered placeholder left by setup" || bad "placeholders left by setup" "$left"
@@ -352,7 +352,9 @@ except Exception:
   #    Python install the hooks were configured with, and the config folder setup found through the Windows
   #    shell-folder API (which reads the profile, not USERPROFILE -- the one thing env -i cannot hide).
   pybase=$("$PY" -c 'import sys; print(sys.base_prefix)')
-  cfg=$(sed -n "s/^SKYRIM_CONFIG_DIR=['\"]\{0,1\}\([^'\"]*\).*/\1/p" "$GAME/.claude/skyrim-paths.env" 2>/dev/null | head -1)
+  envf="$GAME/skyrim-paths.env"                       # 4.0: the toolkit root; 3.x: .claude/
+  [ -f "$envf" ] || envf="$GAME/.claude/skyrim-paths.env"
+  cfg=$(sed -n "s/^SKYRIM_CONFIG_DIR=['\"]\{0,1\}\([^'\"]*\).*/\1/p" "$envf" 2>/dev/null | head -1)
   allow=(--allow-prefix "$(winpath "$WORK")" --allow-prefix "$pybase")
   # The config folder is NOT taken on trust from setup's own output: the checker allow-lists it only if it is
   # <home>/.../Documents/My Games/Skyrim*, strictly below the REAL home (the parent's, not the scrubbed one).

@@ -298,11 +298,11 @@ def _ordered(command, parsed, dels, own, roots, audit, cwd, shell, env) -> Verdi
         return Verdict("ask", reason)
     # Plan 6 Task 12 (R12, priced): a write into the guard code or config. The registry holds the priced decision.
     if own and rules.RULES["S-SELF-GUARD"]["decision"] == "ask":
-        reason = rules.message("S-SELF-GUARD", file=own[1])
+        reason = rules.message("S-SELF-GUARD", file=own[1], op=own[2])
         audit.rule(HOOK, "S-SELF-GUARD", "ask", reason)
         return Verdict("ask", reason)
     if own:
-        advise("S-SELF-GUARD", file=own[1])
+        advise("S-SELF-GUARD", file=own[1], op=own[2])     # T8 fix round 2 (N4): edits / creates / makes a link to
     # D6: `lock unlock` / `guards off` are lifts the agent may take; it is told what that means.
     lifted = lift_rules.note(parsed)
     if lifted:

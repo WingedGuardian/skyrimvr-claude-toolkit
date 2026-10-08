@@ -63,8 +63,9 @@ MUTATIONS = [
     # directory silently stops being guarded, which is the quiet half of the change.
     pytest.param(
         "setup.sh",
-        '} > "$GAME_DIR/.claude/skyrim-paths.env"',
-        "} > /dev/null",
+        # Plan 8 T7: re-anchored on the root-file write (the file moved to <root>/skyrim-paths.env).
+        '} > "$PATHS_ENV.new" 2>/dev/null && mv -f "$PATHS_ENV.new" "$PATHS_ENV" && PATHS_OK=1 || PATHS_OK=""',
+        '} > /dev/null && PATHS_OK=1 || PATHS_OK=""',
         "tests/test_setup_paths.py::test_setup_writes_a_usable_paths_file_for_the_hooks",
         id="setup-records-paths-for-the-hooks",
     ),
@@ -1167,8 +1168,8 @@ MUTATIONS = [
     # declared game root outside the install drops out, so deleting it is allowed.
     pytest.param(
         "tools/skyguard/run.py",
-        "Path(a.root_win or a.root)",
-        "Path(a.root)",
+        "paths.read_install(a.root_win or a.root, ",      # Plan 8 T8: re-anchored (the read moved into read_install)
+        "paths.read_install(a.root, ",
         "tests/test_hooks.py::test_a_declared_root_is_read_with_path_conversion_off",
         id="engine-reads-declared-env-from-the-windows-root",
     ),
@@ -4273,7 +4274,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "rule-S-SELF-STATE-unresolved-fails-closed"),
     # ---- the wiring: shell, write, shadow, the patch Move
     (_SR6, "    if own and own[0] == self_rules.STATE:", "    if False:", _p12row("state-redirect"), "rule-S-SELF-STATE-wired"),
-    (_SR6, '    if own:\n        advise("S-SELF-GUARD", file=own[1])', "    if False:\n        pass",
+    (_SR6, '    if own:\n        advise("S-SELF-GUARD", file=own[1], op=own[2])', "    if False:\n        pass",
      _p12row("guard-hook-redirect"), "rule-S-SELF-GUARD-wired"),
     (_WR6, "    if own == self_rules.STATE:", "    if False:", _p12row("state-write-tool"), "rule-W-SELF-STATE-wired"),
     (_WR6, '    if own == self_rules.GUARD:\n        text = rules.message("W-SELF-GUARD"', '    if False:\n        text = rules.message("W-SELF-GUARD"',
@@ -6826,3 +6827,357 @@ MUTATIONS += [
                  marks=pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfd is Linux"),
                  id="p8t6-fix1-reaper-pidfd-linux"),
 ]
+# ---- Plan 8 T8 (lane p8-paths): skyrim-paths.env at the toolkit root, .claude/ as the deprecated fallback. -------
+# One twin per clause of paths.read_install / legacy_notice, the TOOL_KEYS read, the run.py / snapcli wiring, the
+# SessionStart notice and the self-protection of the new location. Each is killed through the named test.
+_P8T8 = "tests/test_paths_location.py::"
+_P8T8_PA = "tools/skyguard/paths.py"
+_P8T8_UNION = "            file[key], added = tuple(file.get(key, ())) + extra, True"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # an empty root reads no file at all (deferred item 9: Path("") was the cwd)
+    (_P8T8_PA, "    if not root:\n        return PathsConfig(", "    if False:\n        return PathsConfig(",
+     _P8T8 + "test_no_root_reads_no_file_at_all", "p8t8-no-root-reads-no-file"),
+    # a reader that ignores the new location (re-anchored in fix round 1: the read is no longer a loop)
+    (_P8T8_PA, "    cfg = read_config(new, environ)._replace(source=PATHS_FILE)",
+     "    cfg = read_config(old, environ)._replace(source=PATHS_FILE)",
+     _P8T8 + "test_the_root_file_is_read", "p8t8-reader-ignores-root-file"),
+    # ...one that drops the legacy fallback
+    (_P8T8_PA, "            return read_config(old, environ)._replace(source=LEGACY_PATHS_FILE, legacy=True)",
+     "            return read_config(new, environ)",
+     _P8T8 + "test_the_legacy_file_is_the_fallback", "p8t8-reader-drops-legacy-fallback"),
+    # ...and one where the legacy file's roots come first when both exist (fix round 1: union, root file first)
+    (_P8T8_PA, _P8T8_UNION, "            file[key], added = extra + tuple(file.get(key, ())), True",
+     _P8T8 + "test_both_present_protection_roots_are_the_union_root_file_first", "p8t8-legacy-wins-over-root"),
+    # SKYGUARD_PYTHON is read from the file...
+    (_P8T8_PA, "            if key not in ENV_KEYS + TOOL_KEYS:", "            if key not in ENV_KEYS:",
+     _P8T8 + "test_skyguard_python_is_read_and_is_no_root", "p8t8-tool-key-read-from-file"),
+    # ...and from the environment, which wins for lookup
+    (_P8T8_PA, "    env = {k: environ[k] for k in ENV_KEYS + TOOL_KEYS if environ.get(k)}",
+     "    env = {k: environ[k] for k in ENV_KEYS if environ.get(k)}",
+     _P8T8 + "test_the_environment_skyguard_python_wins_for_lookup", "p8t8-tool-key-read-from-env"),
+    # the absolute-path rule binds ROOTS only (a launcher like `py -3` is a legitimate interpreter)
+    (_P8T8_PA, 'value != "" and key in ENV_KEYS and norm_abs(value) is None', 'value != "" and norm_abs(value) is None',
+     _P8T8 + "test_a_non_path_skyguard_python_is_kept[launcher]", "p8t8-abs-rule-roots-only"),
+    # the deprecation notice names the legacy location only
+    (_P8T8_PA, '    return DEPRECATION if cfg.legacy else ""', '    return DEPRECATION if cfg.source != "" else ""',
+     _P8T8 + "test_no_notice_once_the_root_file_covers_the_legacy_one", "p8t8-notice-legacy-only"),
+    # run.py reads the install's file through read_install...
+    ("tools/skyguard/run.py", "        cfg = paths.read_install(a.root_win or a.root, dict(os.environ))",
+     '        cfg = paths.read_env(Path(a.root_win or a.root) / ".claude" / "skyrim-paths.env", dict(os.environ))',
+     _P8T8 + "test_run_guards_a_config_dir_declared_in_the_root_file", "p8t8-run-reads-root-file"),
+    # ...and the main worktree's too
+    ("tools/skyguard/run.py", "paths.read_install(main, {})", 'paths.read_env(Path(main) / ".claude" / "skyrim-paths.env", {})',
+     _P8T8 + "test_a_worktree_reads_the_main_trees_root_file", "p8t8-run-worktree-reads-root-file"),
+    # snapshot restore --in-place finds the declared roots at the root
+    ("tools/skyguard/snapcli.py", "        cfg = paths.read_install(str(project), os.environ)",
+     '        cfg = paths.read_env(Path(project) / ".claude" / "skyrim-paths.env", os.environ)',
+     _P8T8 + "test_an_in_place_restore_reads_the_root_file", "p8t8-snapcli-reads-root-file"),
+    # SessionStart prints the notice...
+    ("tools/skyguard/session.py",
+     '    banners = "\\n".join(t for t in (banners, paths.legacy_notice(project if root is None else root)) if t)',
+     "    pass", _P8T8 + "test_the_legacy_location_gets_a_notice_at_session_start", "p8t8-session-notice"),
+    # ...but not on compact (once per session start, not per context compaction)
+    ("tools/skyguard/session.py", '        return _with_prefs(banners, project, audit), "evaluated", "session"',
+     '        return _with_prefs(banners + paths.legacy_notice(project), project, audit), "evaluated", "session"',
+     _P8T8 + "test_the_notice_is_not_repeated_on_compact", "p8t8-session-notice-not-on-compact"),
+    # self-protection: the root file is a guard file...
+    ("tools/skyguard/self_rules.py", '    if rel == ["skyrim-paths.env"]:', "    if False:",
+     _P8T8 + "test_both_locations_are_guard_files[root]", "p8t8-self-guard-root-file"),
+    # ...at the root only, not any file of that name deeper in the install
+    ("tools/skyguard/self_rules.py", '    if rel == ["skyrim-paths.env"]:', '    if rel[-1:] == ["skyrim-paths.env"]:',
+     _P8T8 + "test_only_the_root_level_name_is_a_guard_file", "p8t8-self-guard-root-level-only"),
+]]
+
+
+# ---- Plan 8 T7 (p8-setup): setup.sh --agent, --lock, the root paths file, the 3.x hook-in, runtime ranges, hints ----
+# One twin per branch / clause, each killed through its NAMED test. Twins whose test is Windows-only say so; the
+# Codex-off-Windows refusal has no twin here (its test is POSIX-only) -- the setup-smoke CI leg (ubuntu, codex)
+# expects exit 3 there instead.
+_T7S = "tests/test_setup_agent.py::"
+_T7 = [
+    # usage errors: exit 2, nothing written
+    ("setup.sh", "Nothing was changed.\" >&2\n       usage >&2; exit 2 ;;", "Nothing was changed.\" >&2\n       ;;",
+     _T7S + "test_a_usage_error_exits_2_and_writes_nothing[unknown-value]", "t7-unknown-value-exits-2"),
+    ("setup.sh", "        *) echo \"setup.sh: unknown option '$1'. Nothing was changed.\" >&2; usage >&2; exit 2 ;;",
+     "        *) shift ;;", _T7S + "test_a_usage_error_exits_2_and_writes_nothing[unknown-option]",
+     "t7-unknown-option-exits-2"),
+    # both = all (Windows: the [both] case renders Codex)
+    ("setup.sh", '    both) AGENT_ARG="all" ;;', '    both) AGENT_ARG="claude" ;;',
+     _T7S + "test_each_value_configures_exactly_its_agents[both]", "t7-both-means-all"),
+    # auto: the agents on PATH; none found means all
+    ("setup.sh", '        *) AGENT_SEL="all" ;;', '        *) AGENT_SEL="claude" ;;',
+     _T7S + "test_auto_configures_the_agents_found_on_path[none-found-means-all]", "t7-auto-none-found-means-all"),
+    ("setup.sh", '    which claude >/dev/null 2>&1 && AGENTS_FOUND="claude"', "    true",
+     _T7S + "test_auto_configures_the_agents_found_on_path[claude-only]", "t7-auto-detects-claude"),
+    ("setup.sh", '    if [ -n "$CODEX_WIN" ] && which codex >/dev/null 2>&1; then', "    if false; then",
+     _T7S + "test_auto_configures_the_agents_found_on_path[codex-only]", "t7-auto-detects-codex"),
+    # an unselected agent's files are kept as extracted
+    ("setup.sh", '    *) DOC_ON="$DO_CODEX" ;;', "    *) DOC_ON=1 ;;",
+     _T7S + "test_each_value_configures_exactly_its_agents[claude]", "t7-agents-md-only-for-codex"),
+    ("setup.sh", '    CLAUDE.md) DOC_ON="$DO_CLAUDE" ;;', "    CLAUDE.md) DOC_ON=1 ;;",
+     _T7S + "test_each_value_configures_exactly_its_agents[codex]", "t7-claude-md-only-for-claude"),
+    ("setup.sh", 'if [ -z "$DO_CODEX" ]; then', "if false; then",
+     _T7S + "test_each_value_configures_exactly_its_agents[claude]", "t7-codex-render-only-for-codex"),
+    ("setup.sh", 'if [ -n "$DO_CLAUDE" ] && [ ! -f "$GAME_DIR/.claude/settings.local.json" ]',
+     'if [ ! -f "$GAME_DIR/.claude/settings.local.json" ]',
+     _T7S + "test_each_value_configures_exactly_its_agents[codex]", "t7-settings-local-only-for-claude"),
+    # ...and setup says so plainly
+    ("setup.sh", '    echo "  Claude Code: NOT CONFIGURED -- CLAUDE.md has no paths filled in (this run: --agent $AGENT_SEL)."',
+     "    :", _T7S + "test_each_value_configures_exactly_its_agents[codex]", "t7-says-claude-unconfigured"),
+    ("setup.sh", '    echo "  Codex:       NOT CONFIGURED -- .codex/hooks.json is not rendered for this folder, so Codex runs here"',
+     "    :", _T7S + "test_each_value_configures_exactly_its_agents[claude]", "t7-says-codex-unconfigured"),
+    ("setup.sh", 'if [ "$AGENT_SEL" = "codex" ] && { [ "$CODEX_STATE" != "configured" ]',
+     'if false && { [ "$CODEX_STATE" != "configured" ]',
+     _T7S + "test_codex_by_name_exits_1_when_codex_cannot_be_configured", "t7-codex-by-name-unconfigured-is-exit-1"),
+    # partial state: any placeholder left makes the file unconfigured
+    ("setup.sh", 'elif grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/$DOC"; then', "elif grep -q '{{GAME_ROOT}}' \"$GAME_DIR/$DOC\"; then",
+     _T7S + "test_a_half_filled_claude_md_is_completed_by_a_rerun", "t7-every-placeholder-completed"),
+    # the root paths file carries the interpreter
+    ("setup.sh", "    printf 'SKYGUARD_PYTHON=%s\\n' \"$(sq \"$PYTHON_PATH\")\"", "    :",
+     _T7S + "test_the_paths_file_is_written_at_the_root_and_no_3x_copy_is_created", "t7-paths-file-records-python"),
+    # the 3.x paths file under the union reader: retired only when it adds nothing and can be compared
+    ("setup.sh", '    if [ -n "$extra" ]; then', "    if false; then",
+     _T7S + "test_a_3x_paths_file_that_adds_a_folder_is_kept_and_its_folders_named", "t7-legacy-adding-a-folder-kept"),
+    ("setup.sh", '    if [ -z "$PY_FOUND" ] || [ "${MIG_RC-unset}" != 0 ]; then', '    if [ -z "$PY_FOUND" ]; then',
+     _T7S + "test_a_3x_paths_file_is_kept_while_the_migration_has_not_finished", "t7-legacy-kept-until-migrated"),
+    ("setup.sh", 'mv -n "$PATHS_ENV_3X" "$dest/skyrim-paths.env"', 'cp "$PATHS_ENV_3X" "$dest/skyrim-paths.env"',
+     _T7S + "test_a_3x_paths_file_that_adds_nothing_is_retired_by_a_move", "t7-legacy-retired-by-a-move"),
+    # the 3.x hook-in
+    ("setup.sh", "    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B \"$PY_ROOT/tools/migrate-3x.py\" \\",
+     "    true \\", _T7S + "test_setup_runs_the_migration", "t7-migration-runs"),
+    ("setup.sh", '    if [ "$MIG_RC" != 0 ]; then', "    if false; then",
+     _T7S + "test_a_failed_migration_is_said_and_setup_carries_on", "t7-migration-failure-said"),
+    ("setup.sh", '[ -d "$v" ] && [ "${SKYRIM_PREFER_DETECTED:-}" != 1 ]', '[ "${SKYRIM_PREFER_DETECTED:-}" != 1 ]',
+     _T7S + "test_a_3x_path_is_not_applied_when_it_is_not_a_folder_or_detection_is_preferred[not-a-folder]",
+     "t7-carried-path-must-be-a-folder"),
+    ("setup.sh", '[ -d "$v" ] && [ "${SKYRIM_PREFER_DETECTED:-}" != 1 ]', '[ -d "$v" ]',
+     _T7S + "test_a_3x_path_is_not_applied_when_it_is_not_a_folder_or_detection_is_preferred[prefer-detected]",
+     "t7-prefer-detected-honoured"),
+    ("setup.sh", '    CONFIG_DIR=$(pick_3x CONFIG_DIR "$CONFIG_DIR")', "    :",
+     _T7S + "test_a_path_the_3x_install_used_is_kept_when_it_is_a_folder", "t7-carried-config-dir-applied"),
+    # runtime ranges
+    ("setup.sh", '            if [ "$NODE_MAJOR" -lt 24 ]; then', '            if [ "$NODE_MAJOR" -lt 22 ]; then',
+     _T7S + "test_an_old_node_gets_a_plain_message[v22.12.0-True]", "t7-node-below-24-is-old"),
+    ("setup.sh", "    if printf '%s\\n' \"$DOTNET_SDKS\" | grep -qE '^10\\.'; then",
+     "    if printf '%s\\n' \"$DOTNET_SDKS\" | grep -qE '^(1[0-9])\\.'; then",
+     _T7S + "test_the_dotnet_check_wants_exactly_major_10[sdk11-only]", "t7-dotnet-exactly-major-10"),
+    ("setup.sh", "        if ! printf '%s\\n' \"$DOTNET_SDKS\" | grep -qxF \"$DOTNET_SDK_PIN\"; then", "        if false; then",
+     _T7S + "test_the_dotnet_check_wants_exactly_major_10[sdk10-other-band]", "t7-dotnet-tested-band-noted"),
+    ("setup.sh", '            if [ "$JAVA_MAJOR" -lt 17 ]; then', '            if [ "$JAVA_MAJOR" -lt 11 ]; then',
+     _T7S + 'test_the_jdk_check[openjdk version "11.0.2" 2019-01-15-True-is too old for ReSaver CLI]',
+     "t7-jdk-below-17-is-old"),
+    ("setup.sh", "            elif ! which javac >/dev/null 2>&1; then", "            elif false; then",
+     _T7S + 'test_the_jdk_check[openjdk version "21.0.12" 2026-07-15-False-No javac]', "t7-jre-without-javac-said"),
+    ("setup.sh", "        3.10|3.11|3.12|3.13) echo", "        3.10|3.11|3.12|3.13|3.14) echo",
+     _T7S + "test_the_python_range_message[3.14.0-outside the tested range 3.10-3.13 (newer than tested)]",
+     "t7-python-tested-range"),
+    # the instruction budget
+    ('setup.sh', '    [ "$DOC_BYTES" -gt "$INSTRUCTION_BUDGET" ] || continue', "    continue",
+     _T7S + "test_an_installed_agents_md_past_the_budget_is_warned_about[True]", "t7-budget-warning"),
+    # the lock: off unless asked, and a lock that did not apply is not a success
+    ("setup.sh", 'WANT_LOCK=""', "WANT_LOCK=1", _T7S + "test_the_lock_is_not_applied_without_lock", "t7-lock-off-by-default"),
+    ("setup.sh", 'if [ -n "$WANT_LOCK" ] && [ "$LOCK_RC" != 0 ]; then', "if false; then",
+     _T7S + "test_lock_runs_the_lock_and_a_failure_is_exit_1", "t7-lock-failure-is-exit-1"),
+    # authorization-aware hints (a pin stripped from the REAL file turns the scan red)
+    ("setup.sh", '    echo "      winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade"',
+     '    echo "      winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0"',
+     "tests/test_install_hints.py::test_every_install_hint_is_in_an_authorized_form[setup.sh]", "t7-hint-no-upgrade"),
+    ("setup.sh", 'hint_jdk() {\n    echo "    Manual step, for you to run (an agent may not install this):"',
+     'hint_jdk() {\n    echo "    For you to run:"',
+     "tests/test_install_hints.py::test_every_install_hint_is_in_an_authorized_form[setup.sh]", "t7-hint-jdk-is-manual"),
+    ("README.md", "   Install Node.js **24.19.0**, the version this toolkit was tested with. For you to run, in Windows Terminal:",
+     "   Install Node.js **24.19.0**, the version this toolkit was tested with. In Windows Terminal:",
+     "tests/test_install_hints.py::test_every_install_hint_is_in_an_authorized_form[README.md]", "t7-hint-readme-label"),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _T7]
+
+# ---- Plan 8 T7 fix round 1 (review T7-review.md): one twin per fix ------------------------------------------------
+_T7W = "tests/test_wrapper_python.py::"
+_T7F = [
+    # C1: the Documents probe asks for UTF-8 ...
+    ("setup.sh", '"[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Environment]::GetFolderPath(\'MyDocuments\')"',
+     '"[Environment]::GetFolderPath(\'MyDocuments\')"',
+     _T7S + "test_a_non_ascii_documents_folder_reaches_the_paths_file_as_utf8", "t7f-documents-probe-utf8"),
+    # ... and the paths file is read back with the guard's own reader
+    ("setup.sh", '        _guard=$(skypaths readback 2>/dev/null) && _grc=0 || _grc=$?', "        :",
+     _T7S + "test_a_paths_file_the_guard_cannot_read_is_a_loud_failure", "t7f-readback-with-the-guards-reader"),
+    ("setup.sh", 'if [ -n "$PATHS_BAD" ]; then', "if false; then",
+     _T7S + "test_a_paths_file_the_guard_cannot_read_is_a_loud_failure", "t7f-unreadable-paths-file-is-exit-1"),
+    # I2: values spliced into sed replacements are escaped
+    ("setup.sh", "sed_repl() { printf '%s' \"$1\" | sed -e 's/[\\\\|&]/\\\\&/g'; }", "sed_repl() { printf '%s' \"$1\"; }",
+     _T7S + "test_an_ampersand_in_the_root_is_filled_in_once_and_rerun_changes_nothing", "t7f-sed-replacement-escaped"),
+    # M1: the 3.x file is judged by the reader's own union (read_install), which takes protection keys only -- an
+    # ENV_KEYS loop here was an equivalent mutant (measured). The broken case is the reader's own flag:
+    ("setup.sh", '    if getattr(cfg, "legacy_broken", False):', "    if False:",
+     _T7S + "test_a_3x_paths_file_the_guard_cannot_read_is_kept_and_said[malformed]", "t7f-broken-legacy-kept-and-said"),
+    # M5: a missing migration tool is "not finished"
+    ("setup.sh", '    if [ -z "$PY_FOUND" ] || [ "${MIG_RC-unset}" != 0 ]; then',
+     '    if [ -z "$PY_FOUND" ] || [ "${MIG_RC:-0}" != 0 ]; then',
+     _T7S + "test_a_3x_paths_file_is_kept_when_the_migration_tool_is_missing", "t7f-missing-migration-is-not-finished"),
+    # M6: --agent with no value; the stale hooks.json.new is removed even when nothing renders (Windows)
+    ("setup.sh", "            if [ $# -lt 2 ]; then", "            if false; then",
+     _T7S + "test_a_usage_error_exits_2_and_writes_nothing[no-value]", "t7f-agent-without-a-value"),
+    ("setup.sh", '# A leftover from an interrupted run is never taken for the result: the renderer writes a fresh one.\nrm -f "$CODEX_DEFS.new"\n',
+     '# A leftover from an interrupted run is never taken for the result: the renderer writes a fresh one.\n',
+     _T7S + "test_a_stale_hooks_json_new_is_removed_even_when_nothing_renders", "t7f-stale-codex-new-removed"),
+    # I1: the smoke expects Codex's hooks only on Windows, AGENTS.md wherever Codex is selected
+    ("scripts/setup-smoke.sh", 'WANT_HOOKS="$WANT_X"; [ -n "$WIN" ] || WANT_HOOKS=""', 'WANT_HOOKS="$WANT_X"',
+     "tests/test_setup_smoke.py::test_the_linux_legs_pass[all]", "t7f-smoke-hooks-windows-only"),
+    # the wrappers read SKYGUARD_PYTHON from the root paths file
+    ("tools/skyguard.sh", 'for cand in "${SKYGUARD_PYTHON:-}" "$file_py" python3 python "py -3"; do',
+     'for cand in "${SKYGUARD_PYTHON:-}" python3 python "py -3"; do',
+     _T7W + "test_the_bash_wrappers_use_the_recorded_interpreter[skyguard.sh]", "t7f-skyguard-sh-reads-the-file"),
+    ("tools/skydoctor", 'for cand in "${SKYGUARD_PYTHON:-}" "$file_py" python3 python "py -3"; do',
+     'for cand in "${SKYGUARD_PYTHON:-}" python3 python "py -3"; do',
+     _T7W + "test_the_bash_wrappers_use_the_recorded_interpreter[skydoctor]", "t7f-skydoctor-reads-the-file"),
+    ("tools/skydoctor", '    if [ -e "$cand" ]; then run=("$cand"); else IFS=\' \' read -r -a run <<< "$cand"; fi',
+     '    IFS=\' \' read -r -a run <<< "$cand"',
+     _T7W + "test_the_environment_still_wins_over_the_file[skydoctor]", "t7f-skydoctor-path-is-one-word"),
+    ("tools/skyguard.cmd", 'if defined SG_FILE_PY if exist "%SG_FILE_PY%" set "SKYGUARD_PYTHON=%SG_FILE_PY%"',
+     'rem', _T7W + "test_the_cmd_twins_use_the_recorded_interpreter[skyguard.cmd]", "t7f-skyguard-cmd-reads-the-file"),
+    ("tools/skydoctor.cmd", 'if defined SG_FILE_PY if exist "%SG_FILE_PY%" set "SKYGUARD_PYTHON=%SG_FILE_PY%"',
+     'rem', _T7W + "test_the_cmd_twins_use_the_recorded_interpreter[skydoctor.cmd]", "t7f-skydoctor-cmd-reads-the-file"),
+    # toolchain-check: exactly the SDK major Spriggit targets
+    ("tools/toolchain-check.sh", "awk -v n=\"$NEED\" '$1+0==n{f=1} END{exit !f}'", "awk -v n=\"$NEED\" '$1+0>=n{f=1} END{exit !f}'",
+     "tests/test_toolchain_check.py::test_pinned_version_on_an_sdk_11_only_machine_cannot_work",
+     "t7f-toolchain-dotnet-exact-major"),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _T7F]
+# ---- Plan 8 T8 fix round 1 (lane p8-paths): review I1 (both halves), M2, P1, P2. One twin per clause. ---------------
+_P8R1 = "tests/test_self_guard_creators.py::"
+_P8R1_SR = "tools/skyguard/self_rules.py"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # I1 reader: protection roots are the union of both files...
+    (_P8T8_PA, "    for key in PROTECTION_KEYS:\n", "    for key in ():\n",
+     _P8T8 + "test_an_empty_root_file_hides_no_legacy_root[SKYRIM_MO2_MODS]", "p8r1-union-protection-keys"),
+    # ...of the protection keys only (non-protection values from the root file)
+    (_P8T8_PA, "    for key in PROTECTION_KEYS:\n", "    for key in ENV_KEYS + TOOL_KEYS:\n",
+     _P8T8 + "test_non_protection_values_come_from_the_root_file_when_present", "p8r1-union-protection-only"),
+    # ...of the legacy file's WELL-FORMED values (its malformed entries do not refuse everything)
+    (_P8T8_PA, "    return cfg._replace(file=file, legacy=added, legacy_broken=bool(leg.malformed))",
+     "    return cfg._replace(file=file, legacy=added, legacy_broken=bool(leg.malformed), "
+     "malformed=cfg.malformed + leg.malformed)",
+     _P8T8 + "test_a_broken_legacy_leftover_does_not_matter_once_the_root_file_exists", "p8r1-legacy-malformed-ignored"),
+    # ...an undecodable legacy leftover adds nothing (no refusal)
+    (_P8T8_PA, "    except (OSError, ValueError):\n        return cfg._replace(legacy_broken=True)",
+     "    except ():\n        return cfg._replace(legacy_broken=True)",
+     _P8T8 + "test_an_undecodable_legacy_leftover_adds_nothing_once_the_root_file_exists",
+     "p8r1-legacy-unreadable-adds-nothing"),
+    # ...the notice shows while the legacy file adds a root...
+    (_P8T8_PA, _P8T8_UNION, "            file[key], added = tuple(file.get(key, ())) + extra, False",
+     _P8T8 + "test_the_notice_shows_while_the_legacy_file_still_adds_a_root", "p8r1-legacy-flag-set"),
+    # ...and only a root the root file does not already list counts
+    (_P8T8_PA, "        extra = tuple(v for v in leg.file.get(key, ()) if v not in file.get(key, ()))",
+     "        extra = tuple(leg.file.get(key, ()))",
+     _P8T8 + "test_a_legacy_file_saying_nothing_new_is_not_in_use", "p8r1-only-new-roots-count"),
+    # the review's reproduction, end to end through run.py
+    (_P8T8_PA, "    for key in PROTECTION_KEYS:\n", "    for key in ('SKYRIM_GAME_ROOT',):\n",
+     _P8T8 + "test_run_still_guards_a_legacy_mo2_folder_after_the_root_file_is_touched", "p8r1-union-through-run"),
+    # M2: the notice follows the guard's root, and run.py passes it on both agents
+    ("tools/skyguard/session.py", "paths.legacy_notice(project if root is None else root)", "paths.legacy_notice(project)",
+     _P8T8 + "test_the_notice_is_keyed_on_the_root_the_guard_reads", "p8r1-notice-keyed-on-root"),
+    ("tools/skyguard/run.py", "session.run_status(a.project, req.source, a.bash, audit, root=a.root_win or a.root)",
+     "session.run_status(a.project, req.source, a.bash, audit, root=None)",
+     _P8T8 + "test_run_keys_the_session_notice_on_its_root[codex-session-start]", "p8r1-codex-passes-root"),
+    ("tools/skyguard/run.py", "                                              root=a.root_win or a.root)",
+     "                                              root=None)",
+     _P8T8 + "test_run_keys_the_session_notice_on_its_root[claude-session-kb-guard]", "p8r1-claude-passes-root"),
+    # I1 rules: touch / install / mklink aimed at a guard file (fix round 2: re-anchored, the routes carry a verb)
+    (_P8R1_SR, "        out += [(w, False, CREATES) for w in _touch_operands(argv)]", "        pass",
+     _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[touch]", "p8r1-touch"),
+    (_P8R1_SR, "            j += 1                                       # its value", "            pass  # its value",
+     _P8R1 + "test_a_creator_elsewhere_is_not[reference-is-read]", "p8r1-touch-valued-option"),
+    (_P8R1_SR, "        out += [(w, False) for w in _install_targets(argv)]", "        pass",
+     _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[install]", "p8r1-install"),
+    (_P8R1_SR, "        if w in _INSTALL_VALUED:", "        if False:",
+     _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[install-target-dir]", "p8r1-install-valued"),
+    (_P8R1_SR, "    return words[-1:] if len(words) >= 2 else []", "    return words",
+     _P8R1 + "test_a_creator_elsewhere_is_not[install-source-is-read]", "p8r1-install-dest-only"),
+    (_P8R1_SR, '        elif w in ("-d", "--directory"):\n            dirs = True',
+     '        elif w in ("-d", "--directory"):\n            dirs = False',
+     _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[install-d]", "p8r1-install-d"),
+    (_P8R1_SR, "        out += [(w, False, CREATES) for w in words[:1]]", "        pass",
+     _P8R1 + "test_a_creator_aimed_at_a_guard_file_is_a_guard_write[mklink]", "p8r1-mklink-link-name"),
+    (_P8R1_SR, "        out += [(w, False, LINKS) for w in words[1:2]]", "        pass",
+     _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[mklink-hard]", "p8r1-mklink-target"),
+    # P2: a link whose source is a guard file
+    (_P8R1_SR, "        out += [(w, False, LINKS) for w in (words[:-1] if len(words) >= 2 else words)]", "        pass",
+     _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[ln-hard]", "p8r1-ln-source"),
+    (_P8R1_SR, '        out += [(w, False, LINKS) for w in list(ps_param(e, "target")) + list(ps_param(e, "value"))]',
+     '        out += [(w, False, LINKS) for w in list(ps_param(e, "value"))]',
+     _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[new-item-hardlink]", "p8r1-new-item-target"),
+    (_P8R1_SR, '        out += [(w, False, LINKS) for w in list(ps_param(e, "target")) + list(ps_param(e, "value"))]',
+     '        out += [(w, False, LINKS) for w in list(ps_param(e, "target"))]',
+     _P8R1 + "test_a_link_to_a_guard_file_is_a_guard_write[new-item-symlink-value]", "p8r1-new-item-value"),
+    (_P8R1_SR, "any(t.lower() in _PS_LINK_TYPES\n", "True or any(t.lower() in _PS_LINK_TYPES\n",
+     _P8R1 + "test_a_link_elsewhere_is_not[new-item-file-value-is-content]", "p8r1-new-item-link-types-only"),
+    # P1: an NTFS stream suffix names the same file -- on the shell and through the Write tool
+    (_P8R1_SR, "        s = strip_stream(word)", "        s = None",
+     _P8R1 + "test_a_stream_of_a_guard_file_is_the_guard_file[root-data]", "p8r1-stream-stripped"),
+    (_P8R1_SR, "    if not m or (m.group(1) is None and len(m.group(2)) == 1):", "    if not m:",
+     _P8R1 + "test_a_drive_relative_word_is_not_read_as_a_stream", "p8r1-stream-not-a-drive"),
+    (_P8R1_SR, "            a = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), w)",
+     "            a = targets.resolve_operand(e, w, cwd, env)",
+     _P8R1 + "test_a_stream_of_a_guard_file_is_the_guard_file[hook-data]", "p8r1-stream-shell-wired"),
+    ("tools/skyguard/write_rules.py",
+     '        a = self_rules.resolve_own(lambda x: targets.resolve(x, cwd, "bash", env_), file_path)',
+     '        a = targets.resolve(file_path, cwd, "bash", env_)',
+     _P8R1 + "test_the_write_tool_on_a_guard_file_stream_gets_the_note", "p8r1-stream-write-tool-wired"),
+]]
+
+# ---- Plan 8 T8 fix round 2 (lane p8-paths): re-review N1, N2, N4. One twin per clause. ---------------------------
+_P8R2_SP = "tools/skyguard/shellparse.py"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # N1: a broken legacy file beside a root file is never silent -- undecodable...
+    (_P8T8_PA, "        return cfg._replace(legacy_broken=True)", "        return cfg",
+     _P8T8 + "test_a_broken_legacy_file_beside_a_root_file_raises_the_attention_notice[undecodable]",
+     "p8r2-unreadable-legacy-flagged"),
+    # ...or naming a protection value the guard cannot read...
+    (_P8T8_PA, "legacy_broken=bool(leg.malformed))", "legacy_broken=False)",
+     _P8T8 + "test_a_broken_legacy_file_beside_a_root_file_raises_the_attention_notice[malformed]",
+     "p8r2-malformed-legacy-flagged"),
+    # ...and the flag reaches the session-start notice
+    (_P8T8_PA, "    if cfg.legacy_broken:\n        return LEGACY_BROKEN", "    if False:\n        return LEGACY_BROKEN",
+     _P8T8 + "test_a_broken_legacy_file_beside_a_root_file_raises_the_attention_notice[relative]",
+     "p8r2-attention-notice-shown"),
+    # N2: cp -l / --link / -s / --symbolic-link, combined short flags, recursive holder
+    (_P8R1_SR, '    elif p == "cp" and _cp_links(argv):', "    elif False:",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[cp-l]", "p8r2-cp-links"),
+    (_P8R1_SR, '    return any(w in ("--link", "--symbolic-link") or _short(w, "ls") for w in argv)', "    return True",
+     _P8R1 + "test_a_plain_copy_or_an_outside_link_is_not[plain-copy-reads-it]", "p8r2-cp-links-only"),
+    (_P8R1_SR, 'w in ("--link", "--symbolic-link") or', "w in () or",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[cp-link]", "p8r2-cp-long-options"),
+    (_P8R1_SR, "any(c in w[1:] for c in letters)", "w[1:] in letters",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[cp-al-folder]", "p8r2-short-cluster"),
+    (_P8R1_SR, '        rec = any(_short(w, "aRr") or w in ("--recursive", "--archive") for w in argv)', "        rec = False",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[cp-al-folder]", "p8r2-cp-recursive-holder"),
+    # N2: fsutil hardlink create <new> <existing>
+    (_P8R1_SR, '    elif p == "fsutil" and [w.lower() for w in argv[:2]] == ["hardlink", "create"]:',
+     '    elif p == "fsutil":',
+     _P8R1 + "test_a_plain_copy_or_an_outside_link_is_not[fsutil-list]", "p8r2-fsutil-create-only"),
+    (_P8R1_SR, "        out += [(w, False, LINKS) for w in argv[3:4]]", "        pass",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[fsutil-powershell]", "p8r2-fsutil-existing"),
+    (_P8R1_SR, "        out += [(w, False, CREATES) for w in argv[2:3]]", "        pass",
+     _P8R1 + "test_fsutil_creating_the_link_name_at_a_guard_path_creates_it", "p8r2-fsutil-new-name"),
+    # N2: New-Item -Type (alias of -ItemType)
+    (_P8R1_SR, ' + list(ps_param(e, "type")))', ")",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[new-item-type-alias]", "p8r2-new-item-type-alias"),
+    # N2: .NET CreateSymbolicLink / CreateHardLink -- the parser names them, the rule reads (link, target)
+    (_P8R2_SP, '        if m in _IO_LINK_METHODS:\n            return "io.file.link"',
+     '        if False:\n            return "io.file.link"',
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[dotnet-file-hardlink]", "p8r2-parser-file-link"),
+    (_P8R2_SP, '    if m in _IO_LINK_METHODS:\n        return "io.directory.link"',
+     '    if False:\n        return "io.directory.link"',
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[dotnet-directory-symlink]",
+     "p8r2-parser-directory-link"),
+    (_P8R1_SR, "        out += [(w, False, CREATES) for w in argv[:1]] + [(w, False, LINKS) for w in argv[1:2]]",
+     "        out += [(w, False, CREATES) for w in argv[:1]]",
+     _P8R1 + "test_more_link_spellings_to_a_guard_file_get_the_note[dotnet-file-symlink]", "p8r2-dotnet-target"),
+    # N4: the note's verb -- carried by the route, rendered by the rule
+    ("tools/skyguard/shell_rules.py", 'advise("S-SELF-GUARD", file=own[1], op=own[2])',
+     'advise("S-SELF-GUARD", file=own[1], op="edits")',
+     _P8R1 + "test_the_note_says_what_the_command_does[touch]", "p8r2-verb-rendered"),
+    (_P8R1_SR, "    return [r if len(r) == 3 else (r[0], r[1], EDITS) for r in out]",
+     "    return [r if len(r) == 3 else (r[0], r[1], CREATES) for r in out]",
+     _P8R1 + "test_the_note_says_what_the_command_does[redirect]", "p8r2-verb-default-edits"),
+]]

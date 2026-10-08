@@ -1,18 +1,30 @@
 #!/bin/bash
 # skydoctor -- what is live on this install, layer by layer:  bash tools/skydoctor [--root R] [--json] [--no-toolchain]
 # (tools/skydoctor.cmd is the cmd twin.) Exit 0 every line live, 1 any line not live, 2 any line unknown.
-# Python: $SKYGUARD_PYTHON, else the first of python3 / python / py -3 that really runs (a Store alias does not).
+# Python: $SKYGUARD_PYTHON, else the SKYGUARD_PYTHON setup.sh wrote into skyrim-paths.env, else the first of
+# python3 / python / py -3 that really runs (a Store alias does not).
 src="${BASH_SOURCE[0]//\\//}"          # a Windows caller may pass C:\...\tools\skydoctor
 here="${src%/*}"
 [ "$here" = "$src" ] && here="."
 # Layer 0 runs tools/toolchain-check.sh with THIS bash (on Windows a bare `bash` can be WSL's launcher).
 export SKYDOCTOR_BASH="${SKYDOCTOR_BASH:-$BASH}"
-for cand in "${SKYGUARD_PYTHON:-}" python3 python "py -3"; do
+# No $SKYGUARD_PYTHON: the interpreter setup.sh recorded in <toolkit root>/skyrim-paths.env (Plan 8 T7), read as
+# data -- only the exact SKYGUARD_PYTHON='...' line setup writes, never sourced -- and used only if it exists.
+file_py=""
+if [ -z "${SKYGUARD_PYTHON:-}" ] && [ -f "$here/../skyrim-paths.env" ]; then
+    line=$(grep -m1 "^SKYGUARD_PYTHON='" "$here/../skyrim-paths.env" 2>/dev/null); line="${line%$'\r'}"
+    case "$line" in
+        "SKYGUARD_PYTHON='"*"'") v="${line#SKYGUARD_PYTHON=\'}"; v="${v%\'}"; v="${v//\'\\\'\'/\'}"
+                                 [ -n "$v" ] && [ -e "$v" ] && file_py="$v" ;;
+    esac
+fi
+for cand in "${SKYGUARD_PYTHON:-}" "$file_py" python3 python "py -3"; do
     [ -n "$cand" ] || continue
-    # shellcheck disable=SC2086
-    if $cand -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)' >/dev/null 2>&1; then
-        # shellcheck disable=SC2086
-        exec $cand -B "$here/skyguard/doctor.py" "$@"
+    # An existing path is ONE word, spaces and all (C:/Program Files/...); anything else (`py -3`) is split into
+    # words -- as tools/skyguard.sh does (a $SKYGUARD_PYTHON with a space used to be split here and never ran).
+    if [ -e "$cand" ]; then run=("$cand"); else IFS=' ' read -r -a run <<< "$cand"; fi
+    if "${run[@]}" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)' >/dev/null 2>&1; then
+        exec "${run[@]}" -B "$here/skyguard/doctor.py" "$@"
     fi
 done
 echo "skydoctor: no working Python 3.8+ found, so nothing could be checked; for the lock, run tools/skyguard-unlock.cmd" >&2

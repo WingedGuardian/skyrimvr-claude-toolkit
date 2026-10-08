@@ -28,7 +28,7 @@ BAD_DECISION = "GUARD INERT: the engine produced an unknown decision; refusing."
 # run.py's ENV_UNREADABLE names a Claude hook and adapters.codex's names the Codex hook; an adapted agent is
 # neither, so the neutral role carries its own wording (Task 0 measurement note, section 6).
 ENV_UNREADABLE = (
-    "GUARD INERT: the adapter's engine call found .claude/skyrim-paths.env but could not read it, so it cannot "
+    "GUARD INERT: the adapter's engine call found skyrim-paths.env but could not read it, so it cannot "
     "tell which directories are the Skyrim install. Refusing rather than guarding the wrong set. "
     "Fix or delete that file (re-run setup.sh).")
 TELEMETRY_ROLE = "neutral-pre-tool"   # never "pre-tool": that file is the Codex hook's record

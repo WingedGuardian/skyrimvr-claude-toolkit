@@ -281,58 +281,26 @@ jobs:
           PY
 
   setup-smoke:
-    name: setup.sh runs clean
-    runs-on: ubuntu-latest
+    name: setup.sh --agent ${{ matrix.agent }} (${{ matrix.os }})
+    # Every --agent value on both OSes (Plan 8 T7). scripts/setup-smoke.sh asserts on what setup.sh WROTE
+    # (filled CLAUDE.md/AGENTS.md per agent, rendered or untouched .codex/hooks.json, every interpreter slot,
+    # the root skyrim-paths.env, no lock without --lock), that a second run changes nothing, and that a bad
+    # value exits 2 writing nothing. --agent codex on Linux must exit 3 writing nothing (Codex is Windows-only).
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        agent: [claude, codex, all, both, auto]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Install into a fake game directory
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq && sudo apt-get install -y -qq jq rsync
-          GAME=/tmp/fake-skyrim
-          mkdir -p "$GAME"
-          # setup.sh prompts interactively if it cannot find the exe, so stub it.
-          touch "$GAME/SkyrimVR.exe"
-          rsync -a --exclude '.git' ./ "$GAME/"
-          cd "$GAME"
-          bash setup.sh < /dev/null
-          test -f .claude/settings.json || { echo "::error::settings.json missing after setup"; exit 1; }
-          jq empty .claude/settings.json
-
-      - name: Running setup twice is safe
-        run: |
-          set -euo pipefail
-          cd /tmp/fake-skyrim
-          bash setup.sh < /dev/null
-          jq empty .claude/settings.json
-
-      # Running setup.sh and only checking that settings.json parses is close to
-      # a false green: every path bug this toolkit has shipped would pass it.
-      # These assert on what setup.sh actually WROTE. Deeper coverage lives in
-      # the `behavior` job below; this keeps the smoke test honest on its own.
-      - name: setup.sh wrote usable paths, not just valid JSON
-        run: |
-          set -euo pipefail
-          cd /tmp/fake-skyrim
-          leftover=$(grep -nE '\{\{[A-Z_]+\}\}' CLAUDE.md || true)
-          if [ -n "$leftover" ]; then
-            echo "::error::unsubstituted placeholders remain in CLAUDE.md"
-            echo "$leftover"
-            exit 1
-          fi
-          grep -q '^- \*\*Game root\*\*' CLAUDE.md \
-            || { echo "::error::no Game root line written"; exit 1; }
-          grep -q '^- \*\*Mod manager\*\*' CLAUDE.md \
-            || { echo "::error::no Mod manager line written"; exit 1; }
-          for h in .claude/hooks/*.sh; do
-            if grep -q '{{PYTHON_PATH}}' "$h"; then
-              echo "::error file=$h::python placeholder was never substituted"; exit 1
-            fi
-          done
+      - name: Install into a fake game folder, twice, and check what setup.sh wrote
+        shell: bash
+        run: bash scripts/setup-smoke.sh "${{ matrix.agent }}" "$RUNNER_TEMP/setup-smoke"
 
   behavior:
     name: Behavioral tests (${{ matrix.os }}, Python ${{ matrix.python }})

@@ -45,11 +45,16 @@ VERSION="${TAG#v}"
 # new location by hand.
 ROOT="${NEXUS_PACK_ROOT:-}"
 if [ -z "$ROOT" ]; then
-    ENVF="$REPO_DIR/.claude/skyrim-paths.env"
     # The installed copy is the one with real paths; the repo ships only the
-    # .example. Prefer an explicit CLAUDE_PROJECT_DIR, then the repo's own file.
-    [ -f "${CLAUDE_PROJECT_DIR:-}/.claude/skyrim-paths.env" ] && ENVF="$CLAUDE_PROJECT_DIR/.claude/skyrim-paths.env"
-    [ -f "$ENVF" ] || die "no skyrim-paths.env found; set NEXUS_PACK_ROOT or run setup.sh"
+    # .example. Prefer an explicit CLAUDE_PROJECT_DIR, then the repo's own file;
+    # in each, the toolkit-root file (4.0) before the legacy .claude/ one.
+    ENVF=""
+    for f in "${CLAUDE_PROJECT_DIR:+$CLAUDE_PROJECT_DIR/skyrim-paths.env}" \
+             "${CLAUDE_PROJECT_DIR:+$CLAUDE_PROJECT_DIR/.claude/skyrim-paths.env}" \
+             "$REPO_DIR/skyrim-paths.env" "$REPO_DIR/.claude/skyrim-paths.env"; do
+        [ -n "$f" ] && [ -f "$f" ] && { ENVF="$f"; break; }
+    done
+    [ -n "$ENVF" ] || die "no skyrim-paths.env found; set NEXUS_PACK_ROOT or run setup.sh"
     # shellcheck disable=SC1090
     . "$ENVF"
     ROOT="${SKYRIM_GAME_ROOT:-}"

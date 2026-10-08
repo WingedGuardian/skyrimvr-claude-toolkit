@@ -60,7 +60,7 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdic
     # roots (an old caller, an unreadable paths file on Codex) the path's own words decide (self_rules.text_kind).
     env_ = os.environ if env is None else env
     if roots is not None:
-        a = targets.resolve(file_path, cwd, "bash", env_)
+        a = self_rules.resolve_own(lambda x: targets.resolve(x, cwd, "bash", env_), file_path)   # T8 r1 P1: streams
         # An unresolved path (relative, no cwd) fails closed for the STATE class only, as on the shell.
         own = self_rules.kind_of(a, roots, env_) if a is not None else (
             self_rules.STATE if self_rules.text_kind(file_path) == self_rules.STATE else "")

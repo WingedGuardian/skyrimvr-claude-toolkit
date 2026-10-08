@@ -31,7 +31,7 @@ BANNER = "SKYGUARD: Codex hooks live (definitions v1)."
 _NOTE = " [truncated by the toolkit at {n} bytes]"
 _PREFS_MARK = "USER PREFERENCES ("
 ENV_UNREADABLE = (
-    "GUARD INERT: the Codex hook found .claude/skyrim-paths.env but could not read it, so it cannot tell "
+    "GUARD INERT: the Codex hook found skyrim-paths.env but could not read it, so it cannot tell "
     "which directories are the Skyrim install. Refusing rather than guarding the wrong set. "
     "Fix or delete that file (re-run setup.sh).")
 

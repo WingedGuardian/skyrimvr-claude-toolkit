@@ -78,7 +78,7 @@ def _allowed(project, sid, key, target):
         ok = name.endswith(snapshot.EXTS) and inside and _real(Path(project).joinpath(*key.split("/"))) == real
         return "" if ok else "not a .psc/.pex under the script folders of this install"
     try:
-        cfg = paths.read_env(Path(project) / ".claude" / "skyrim-paths.env", os.environ)
+        cfg = paths.read_install(str(project), os.environ)
     except (OSError, ValueError):
         return "the configured roots cannot be read"
     roots = paths.roots(str(project), str(project), cfg)

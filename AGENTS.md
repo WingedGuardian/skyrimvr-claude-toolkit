@@ -198,7 +198,7 @@ the working directory the agent reports.
   Pattern matching on parsed commands, **not a sandbox** (a relative path inside `python -c` code is not
   resolved): a guard against accidents.
 
-  The install is **resolved** (from the guard's own location plus `skyrim-paths.env`), never guessed
+  The install is **resolved** (from the guard's own location plus `skyrim-paths.env` at the toolkit root), never guessed
   from the word "Skyrim". ⚠ If no root resolves, or a path in `skyrim-paths.env` is unreadable, the guard DENIES.
   Why: `docs/safety-philosophy.md`.
 - **Moving or renaming the install, `Data`, the settings folder or `Saves`** away.

@@ -123,12 +123,13 @@ def game_root_win(game: Path) -> str:
     return r.stdout.strip()
 
 
-def run_setup(cwd: Path, env_overrides: dict | None = None, shim_path: bool = False):
+def run_setup(cwd: Path, env_overrides: dict | None = None, shim_path: bool = False, args=()):
     """Run the real setup.sh against `cwd`. Returns a CompletedProcess.
 
     `shim_path` puts tests/bin first on PATH, which is how a test takes control
     of an external command setup.sh depends on (`which`, `powershell`) without
-    adding a test-only seam to the shipped script.
+    adding a test-only seam to the shipped script. `args` go to setup.sh itself
+    (`--agent codex`, `--lock`).
     """
     env = dict(os.environ)
     env.setdefault("USERNAME", "testuser")
@@ -137,10 +138,12 @@ def run_setup(cwd: Path, env_overrides: dict | None = None, shim_path: bool = Fa
     if env_overrides:
         env.update({k: str(v) for k, v in env_overrides.items()})
     return subprocess.run(
-        [BASH, "setup.sh"],
+        [BASH, "setup.sh", *args],
         cwd=str(cwd), env=env,
         stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=SETUP_TIMEOUT,
+        # errors="replace": a path setup echoes may hold bytes the locale codec cannot decode (a cp437 probe);
+        # without it the reader thread dies and the test sees stdout=None instead of the message it asserts on.
+        capture_output=True, text=True, errors="replace", timeout=SETUP_TIMEOUT,
     )
 
 
