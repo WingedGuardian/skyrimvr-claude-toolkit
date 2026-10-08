@@ -407,7 +407,7 @@ def inputs() -> list[dict]:
     spellings = {
         "fwd": GAME, "back": GAMEW, "msys": "/" + GAME[0].lower() + GAME[2:],
         "doubled": GAME.replace("/", "//"), "doubled-back": GAMEW.replace(BS, BS * 2),
-        "upper": GAME.upper(), "mixed": GAME[0].lower() + GAME[1:].replace("/", BS),
+        "upper": GAME.upper(), "mixed": GAME[0].lower() + GAME[1:].replace("/", BS, 1),
     }
     destroyers = ['rm -rf "{p}"', 'rm -r -f "{p}/Data"', 'rm --recursive --force "{p}"', 'rm -rf -- "{p}"',
                   'rmdir /s /q "{p}"', 'del /f /s /q "{p}"', 'Remove-Item -Recurse "{p}"', 'find "{p}" -delete',
