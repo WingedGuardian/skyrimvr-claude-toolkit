@@ -7380,3 +7380,76 @@ MUTATIONS += [
     pytest.param('tools/verify-release.sh', 'if "$PY" -B "$HERE/check-release-payload.py" "$(winpath "$ROOT")"', 'if "$PY" "$HERE/check-release-payload.py" "$(winpath "$ROOT")"', 'tests/test_verify_release.py::test_verification_does_not_create_identity_bearing_payload_bytecode', id='review-verifier-no-payload-bytecode'),
     pytest.param('tools/verify-release.sh', ' --allow-prefix "$(winpath "$PYDIR")"', '', 'tests/test_verify_release.py::test_scrubbed_verification_accepts_the_measured_venv_interpreter', id='review-verifier-measured-venv-directory'),
 ]
+
+
+# Release review T13 (p8-rr-fix): I1 printed text that runs, I2 Recycle-Bin deletes through a variable.
+# One twin per clause, each killed through the named test. Clauses the verdict tests cannot isolate (another route also
+# refuses those commands) are witnessed by the unit tests named here. Not twinned, on purpose: the cost-only early
+# return in _printed_state_delete (`if not code or ".skyguard" not in code.lower()`), whose removal changes no answer.
+_RR = "tests/test_state_output_routes.py::"
+_RRX = _RR + "test_printed_state_delete_that_runs_is_refused_and_never_shadowed[%s-relative]"
+_RRI = _RR + "test_inspection_whose_output_runs_nowhere_stays_allowed[%s]"
+_RRU = _RR + "test_output_is_not_inert_when_the_parser_cannot_vouch_for_the_command[%s]"
+_RRR = _RR + "test_recycle_delete_of_the_state_through_a_variable_is_refused_and_never_shadowed[%s-relative]"
+MUTATIONS += [pytest.param("tools/skyguard/self_rules.py", *m[:3], id=m[3]) for m in [
+    # I1, the mask site: the original quoted scan runs whenever the output is not inert.
+    ("    if delete_api and _output_inert(parsed, e):\n", "    if delete_api:\n",
+     _RR + "test_the_original_quoted_scan_runs_when_the_output_is_not_inert", "rr-i1-mask-only-when-inert"),
+    ("_state_delete(e, cwd, env, roots, parsed) or ", "_state_delete(e, cwd, env, roots) or ",
+     "tests/test_pricing_inspection.py::test_exact_historical_k18699_shell_quoting_is_inspection_data",
+     "rr-i1-scan-passes-the-parse"),
+    # I1, _output_inert: each clause.
+    ("    if parsed is None or not parsed.ok:\n", "    if not parsed.ok:\n", _RRU % "no-parse", "rr-i1-inert-needs-a-parse"),
+    ("    if parsed is None or not parsed.ok:\n", "    if parsed is None:\n", _RRU % "unreadable",
+     "rr-i1-inert-needs-a-readable-command"),
+    ("    if parsed.codes or parsed.xargs or parsed.unread:\n", "    if parsed.xargs or parsed.unread:\n",
+     _RRX % "backtick-powershell", "rr-i1-inert-no-shell-string"),
+    ("    if parsed.codes or parsed.xargs or parsed.unread:\n", "    if parsed.codes or parsed.unread:\n",
+     _RRU % "xargs", "rr-i1-inert-no-xargs"),
+    ("    if parsed.codes or parsed.xargs or parsed.unread:\n", "    if parsed.codes or parsed.xargs:\n",
+     _RRU % "decoded", "rr-i1-inert-no-decoded-text"),
+    ("    if any(_STDOUT_REDIRECT.match(op)", "    if False and any(_STDOUT_REDIRECT.match(op)",
+     _RR + "test_inspection_output_to_a_script_file_is_not_inert", "rr-i1-inert-no-script-redirect"),
+    ("_STDOUT_REDIRECT.match(op) and ", "", _RRI % "stderr-to-script-name", "rr-i1-inert-redirect-is-stdout"),
+    ("_SCRIPT_FILE.search(target", "bool(target) or _SCRIPT_FILE.search(target", _RRI % "redirect-text-file",
+     "rr-i1-inert-redirect-target-is-a-script"),
+    ("(x.program, x.segment) == (e.program, e.segment) or ", "", _RRI % "node-print-alone",
+     "rr-i1-inert-skips-the-exec-itself"),
+    (" or x.program in _INERT_PROGRAMS", "", _RRI % "pipe-head", "rr-i1-inert-read-only-programs"),
+    (" or _is_inspection(x):", ":", _RRI % "two-inspections", "rr-i1-inert-other-inspections"),
+    ("            continue\n        return False\n    return True\n", "            continue\n    return True\n",
+     _RRX % "pipe-powershell-command-dash", "rr-i1-inert-anything-else-is-not"),
+    # I1, _printed_state_delete: each clause.
+    (" or _printed_state_delete(e, parsed, cwd, env, roots)", "", _RRX % "node-pipe-powershell-dash",
+     "rr-i1-printed-route-wired"),
+    ("grep(deletes.INTERP_DELETE, code) or grep(deletes.DESTROYER_LOOSE, code) or parsed.xargs",
+     "grep(deletes.DESTROYER_LOOSE, code) or parsed.xargs", _RRX % "node-pipe-powershell-dash",
+     "rr-i1-printed-delete-api"),
+    ("grep(deletes.INTERP_DELETE, code) or grep(deletes.DESTROYER_LOOSE, code) or parsed.xargs",
+     "grep(deletes.INTERP_DELETE, code) or parsed.xargs", _RRX % "pipe-cat-bash", "rr-i1-printed-delete-word"),
+    ("grep(deletes.INTERP_DELETE, code) or grep(deletes.DESTROYER_LOOSE, code) or parsed.xargs",
+     "grep(deletes.INTERP_DELETE, code) or grep(deletes.DESTROYER_LOOSE, code)", _RRX % "pipe-xargs-rm",
+     "rr-i1-printed-xargs"),
+    ("    if _output_inert(parsed, e):\n        return \"\"\n", "    if False:\n        return \"\"\n",
+     _RRI % "node-print-alone", "rr-i1-printed-only-when-it-may-run"),
+    ("            if i != line_start and code[i - 1] not in _WORD_START:\n", "            if False:\n",
+     _RR + "test_scratch_copies_printed_into_an_interpreter_are_not_the_live_state", "rr-i1-printed-word-boundary"),
+    ("            if a is not None and _reaches_state(a, roots):\n", "            if False:\n",
+     _RRX % "node-pipe-powershell-dash", "rr-i1-printed-resolved-state"),
+    ("        if not placed:\n", "        if False:\n",
+     _RR + "test_a_printed_state_path_no_resolver_can_place_counts", "rr-i1-printed-unplaceable"),
+    # I2, _recycle_delete's fallback: each clause.
+    ("    if placed:\n        return \"\"\n", "    if True:\n        return \"\"\n", _RRR % "python-env-var",
+     "rr-i2-fallback-when-unplaced"),
+    ("        placed = placed and a is not None\n", "        placed = placed\n", _RRR % "python-env-var",
+     "rr-i2-unplaced-argument-noticed"),
+    ("        a = _recycle_abs(w, how, base, env)\n        if a is not None and _reaches_state(a, roots):\n",
+     "        a = _recycle_abs(w, how, base, env)\n        if False:\n", _RRR % "python-env-var",
+     "rr-i2-fallback-resolved-state"),
+    ("        if a is None and text_kind(w) == STATE:\n            return _hit_name(None, w)\n",
+     "        if False:\n            return _hit_name(None, w)\n",
+     _RR + "test_recycle_delete_through_a_variable_no_resolver_can_place_counts", "rr-i2-fallback-unresolved-word"),
+    ("        out += [(n.group(1) if n.group(1) is not None else n.group(2)",
+     "        out += [] and [(n.group(1) if n.group(1) is not None else n.group(2)",
+     _RRR % "powershell-command-variable", "rr-i2-fallback-nested-quotes"),
+]]

@@ -405,15 +405,93 @@ def _python_inspection_text(program: str, code: str) -> str:
     return "".join(masked)
 
 
-def _state_delete(e, cwd, env, roots) -> str:
+# ---- printed text that runs (release review T13 I1) -----------------------------------------------------------------
+# c8b365f masked an inspection's printed literals as inert. They are inert only when nothing in the command can RUN
+# them: `| powershell -Command -`, `| iex`, `powershell -Command "$(...)"`, `> x.ps1; powershell -File x.ps1` all run the
+# printed text as code. The structure of pipes and substitutions is not reliable enough to follow (a substitution's
+# exec appears beside the one it feeds, a script block's inside it), so the answer is an allowlist: every OTHER program
+# in the command only shows or reads text, the parser read all of it, no shell was handed a command string, nothing goes
+# through xargs, and the inspection's stdout is not redirected to a script file. Anything else: not inert.
+_INERT_PROGRAMS = frozenset((
+    "cd", "pushd", "popd", "set-location", "push-location", "pop-location", "true",
+    "head", "tail", "grep", "egrep", "fgrep", "rg", "findstr", "select-string", "sort", "uniq", "wc", "cut", "nl",
+    "less", "more", "cat", "get-content", "echo", "printf", "write-output", "write-host",
+    "select-object", "measure-object", "out-host", "out-null", "out-string", "format-table", "format-list",
+))
+_STDOUT_REDIRECT = re.compile(r"^(?:1|&)?>>?\|?$")
+_SCRIPT_FILE = re.compile(r"\.(?:ps1|psm1|sh|bash|zsh|bat|cmd|py|pyw|js|mjs|cjs|pl|rb|php|vbs|wsf)$", re.IGNORECASE)
+
+
+def _is_inspection(x) -> bool:
+    from . import deletes
+    code = deletes.interpreter_code(x)
+    return bool(code) and _python_inspection_text(x.program, code) != code
+
+
+def _output_inert(parsed, e) -> bool:
+    """True only when nothing in this command can run what exec `e` prints (the allowlist above)."""
+    if parsed is None or not parsed.ok:
+        return False
+    if parsed.codes or parsed.xargs or parsed.unread:
+        return False
+    if any(_STDOUT_REDIRECT.match(op) and _SCRIPT_FILE.search(target.strip("'\"")) for op, target in e.redirects):
+        return False
+    for x in parsed.execs:
+        if (x.program, x.segment) == (e.program, e.segment) or x.program in _INERT_PROGRAMS or _is_inspection(x):
+            continue
+        return False
+    return True
+
+
+# An interpreter whose output may run is read like the code it prints: a `.skyguard` path anywhere in its text, beside
+# a delete construct, is a candidate operand -- nested quotes (`print('[IO.File]::Delete(".skyguard/x")')`) and Node's
+# `console.log` never reached the quoted-string scan, before Plan 8 either. Each candidate is RESOLVED, so a scratch
+# copy's `.skyguard` is not the live state; only a word the resolver cannot place falls back to its own components.
+_STATE_WORD = re.compile(r"\.skyguard(?:[/\\]+[\w.\-]{1,120})?(?![\w.\-])", re.IGNORECASE)
+_WORD_START = set(" \t\n'\"`()[]{}=,;|&<>")
+
+
+def _printed_state_delete(e, parsed, cwd, env, roots) -> str:
+    """The state a delete PRINTED by this interpreter would remove when its output runs ("" for none)."""
+    from . import deletes
+    from .grep import grep
+    code = deletes.interpreter_code(e)
+    if not code or ".skyguard" not in code.lower():
+        return ""                                         # cost only: no code, or no state word for the loop below
+    if not (grep(deletes.INTERP_DELETE, code) or grep(deletes.DESTROYER_LOOSE, code) or parsed.xargs):
+        return ""
+    if _output_inert(parsed, e):
+        return ""
+    for m in _STATE_WORD.finditer(code):
+        # The word may start after any delimiter on its line (a quoted path holds spaces): try each, nearest first.
+        # Never after a `/` or `\`: `C:/Temp/copy/.skyguard` is not a relative `.skyguard` in the cwd.
+        # Only when NO start resolves is the word judged by its own components (`$R/.skyguard/x`); a wider start the
+        # resolver cannot place (`\'C:/Temp/copy/.skyguard`) must not outvote the exact path beside it.
+        line_start = code.rfind("\n", 0, m.start()) + 1
+        placed = False
+        for i in range(m.start(), max(line_start, m.start() - 400) - 1, -1):
+            if i != line_start and code[i - 1] not in _WORD_START:
+                continue
+            w = code[i:m.end()]
+            a = targets.resolve_operand(e, w, cwd, env)
+            if a is not None and _reaches_state(a, roots):
+                return _hit_name(a, w)
+            placed = placed or a is not None
+        if not placed:
+            return _hit_name(None, m.group(0))
+    return ""
+
+
+def _state_delete(e, cwd, env, roots, parsed=None) -> str:
     """The name of what a delete by this exec removes from the state ("" for none): rm / Remove-Item / del / rd /
-    [IO.File]::Delete (deletes.operands), and interpreter code with a delete API and a quoted path into the state."""
+    [IO.File]::Delete (deletes.operands), and interpreter code with a delete API and a quoted path into the state.
+    Parser inspection's literals are masked only when its output provably runs nowhere (_output_inert)."""
     from . import deletes
     from .grep import grep
     words = [w for w in (deletes.operands(e) or []) if isinstance(w, str)]
     code = deletes.interpreter_code(e)
     delete_api = bool(code and grep(deletes.INTERP_DELETE, code))
-    if delete_api:
+    if delete_api and _output_inert(parsed, e):
         delete_api = grep(deletes.INTERP_DELETE, _python_inspection_text(e.program, code))
     if code and (grep(deletes.INTERP_DESTROYER, code) or delete_api):
         words += [m.group(1) or m.group(2) for m in _QUOTED.finditer(code)]
@@ -429,15 +507,45 @@ def _recycle_delete(command: str, parsed, cwd, env, roots) -> str:
     deletes.scan resolves it (single-quoted: literal; double-quoted: expanded; bare: never resolved, matched raw)."""
     from . import deletes
     base = targets.normalise_cwd(cwd)
+    placed = True
     for w, how in deletes.recycle_targets(deletes.recycle_text(command, parsed)):
-        a = None
-        if how == "single":
-            a = deletes.literal_abs(w, base, "powershell")
-        elif how == "double":
-            a = targets.resolve(w, base or "", "powershell", env)
+        a = _recycle_abs(w, how, base, env)
         if (a is not None and _reaches_state(a, roots)) or (a is None and text_kind(w) == STATE):
             return _hit_name(a, w)
+        placed = placed and a is not None
+    if placed:
+        return ""
+    # Release review T13 I2: an argument the guard cannot place (`$env:P`, `$p`, `"'+p+'"`) is the path the command
+    # builds elsewhere, so every quoted word of the command -- and the quoted words inside those, the code a launcher
+    # hands on -- is a candidate target, as this rule read interpreter code before 7570b28. A placed literal outside
+    # the install (`DeleteFile('C:/outside/...')`, the outside examples 7570b28 fixed) never reaches this fallback.
+    for w, how in _quoted_words(deletes.recycle_text(command, parsed)):
+        a = _recycle_abs(w, how, base, env)
+        if a is not None and _reaches_state(a, roots):
+            return _hit_name(a, w)
+        if a is None and text_kind(w) == STATE:
+            return _hit_name(None, w)
     return ""
+
+
+def _recycle_abs(w: str, how: str, base, env) -> Optional[str]:
+    from . import deletes
+    if how == "single":
+        return deletes.literal_abs(w, base, "powershell")
+    if how == "double":
+        return targets.resolve(w, base or "", "powershell", env)
+    return None
+
+
+def _quoted_words(text: str) -> List[Tuple[str, str]]:
+    """(body, "single" | "double") for every quoted word in the text and every quoted word one level inside one."""
+    out = []
+    for m in _QUOTED.finditer(text):
+        body = m.group(1) if m.group(1) is not None else m.group(2)
+        out.append((body, "single" if m.group(1) is not None else "double"))
+        out += [(n.group(1) if n.group(1) is not None else n.group(2), "single" if n.group(1) is not None else "double")
+                for n in _QUOTED.finditer(body)]
+    return out
 
 
 # ---- the text fallback for an unreadable command (Plan 6 final fix, lane A I1) --------------------------------------
@@ -486,7 +594,7 @@ def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping
             if k and k not in found:
                 found[k] = (re.split(r"[/\\]+", (a or w).rstrip("/\\"))[-1] or w, op)
         if STATE not in found:
-            hit = _state_delete(e, cwd, env, roots)
+            hit = _state_delete(e, cwd, env, roots, parsed) or _printed_state_delete(e, parsed, cwd, env, roots)
             if hit:
                 found[STATE] = (hit, EDITS)
     if STATE not in found:
