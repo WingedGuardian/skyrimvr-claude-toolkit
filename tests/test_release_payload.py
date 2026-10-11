@@ -293,6 +293,41 @@ def test_leaks_mode_honours_allow_prefix(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+# Release review T13 M3: an allowance is never the home folder, a folder above it, or a root -- it would blank the
+# home paths the scan exists to find (a Python installed straight into the home folder measures exactly that).
+_WINHOME = "C:/Users/" + NAME
+_FLOOR = {   # case -> (allow-prefix, environment, extra args, planted text)
+    "home": (_WINHOME, {"USERPROFILE": _WINHOME}, (), "C:\\Users\\" + NAME + "\\Desktop\\secret"),
+    "home-trailing-slash": (_WINHOME + "/", {"USERPROFILE": _WINHOME}, (), "C:\\Users\\" + NAME + "\\Desktop\\x"),
+    "msys-home": ("/c/Users/" + NAME, {"USERPROFILE": _WINHOME}, (), "C:\\Users\\" + NAME + "\\Desktop\\secret"),
+    "above-home": ("C:/Users", {"USERPROFILE": _WINHOME}, (), "C:\\Users\\" + NAME + "\\Desktop\\secret"),
+    "drive-root": ("C:/", {"USERPROFILE": _WINHOME}, (), "C:\\Users\\" + NAME + "\\Desktop\\secret"),
+    "other-drive-root": ("D:/", {"USERPROFILE": _WINHOME}, (), "D:\\Users\\" + NAME + "\\Desktop\\secret"),
+    "relative": (".", {"USERPROFILE": _WINHOME}, (), "C:\\Users\\" + NAME + "\\Desktop\\secret"),
+    "posix-home": ("/home/" + NAME, {"HOME": "/home/" + NAME}, (), "/home/" + NAME + "/secret"),
+    "home-argument": (_WINHOME, {}, ("--home", _WINHOME), "C:\\Users\\" + NAME + "\\Desktop\\secret"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_FLOOR))
+def test_an_allow_prefix_at_or_above_the_home_or_a_root_is_never_applied(tmp_path, case):
+    prefix, env, extra, text = _FLOOR[case]
+    (tmp_path / "a.md").write_text(text, encoding="utf-8")
+    r = _leaks([tmp_path], _clean_env(USERNAME=NAME, **env), *extra, "--allow-prefix", prefix)
+    assert r.returncode == 1 and "an --allow-prefix was NOT applied" in r.stdout, r.stdout + r.stderr
+    if len(prefix) > 3:                                   # a root or `.` is not an identity, and appears in prose
+        assert prefix.rstrip("/").lower() not in r.stdout.lower(), "the refused path was printed"
+
+
+def test_an_allow_prefix_below_the_home_is_still_applied(tmp_path):
+    py = _WINHOME + "/AppData/Local/Programs/Python/Python310"
+    (tmp_path / "a.md").write_text(py.replace("/", "\\") + "\\python.exe", encoding="utf-8")
+    env = _clean_env(USERNAME=NAME, USERPROFILE=_WINHOME)
+    assert _leaks([tmp_path], env).returncode == 1
+    r = _leaks([tmp_path], env, "--allow-prefix", py)
+    assert r.returncode == 0 and "NOT applied" not in r.stdout, r.stdout + r.stderr
+
+
 def test_the_checker_itself_names_no_one():
     """The name is read at check time. A literal one in the repo would be the very leak this hunts."""
     text = CHECKER.read_text(encoding="utf-8").lower()

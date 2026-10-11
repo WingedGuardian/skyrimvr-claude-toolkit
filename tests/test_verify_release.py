@@ -6,6 +6,7 @@ nothing about the real machine, and a planted spelling is the only thing that ca
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -190,3 +191,39 @@ def test_a_tag_must_match_the_root_folder_and_build_info(tmp_path, payload):
     assert r.returncode == 1
     assert "!!" in _line(r.stdout, "root folder names v9.9.9"), r.stdout[-3000:]
     assert "!!" in _line(r.stdout, "BUILD-INFO version"), r.stdout[-3000:]
+
+
+# ------------------------------------------------------------------ release review T13 M5
+
+def _product(name):
+    def damage(src):
+        p = src / "package.json"
+        d = json.loads(p.read_text(encoding="utf-8"))
+        if name is None:
+            d.pop("name", None)
+        else:
+            d["name"] = name
+        p.write_text(json.dumps(d, indent=2) + "\n", encoding="utf-8")
+    return damage
+
+
+def test_the_expected_root_comes_from_the_artifact_and_another_product_is_named(tmp_path, payload):
+    """A 3.x-named artifact checked from this checkout: its root matches its OWN product name, and the failing line
+    names both products and the remedy -- not a bare `versioned root` mismatch."""
+    old = "skyrimvr-claude-toolkit"
+    r = _verify(tmp_path, _variant(tmp_path, payload, _product(old), top=old + "-dev-test"))
+    assert r.returncode == 1
+    assert _line(r.stdout, "extracted to a versioned root").endswith(" ok"), r.stdout[-3000:]
+    line = _line(r.stdout, "the artifact is this checkout's product")
+    assert "!!" in line and "'" + old + "'" in line and "its own release tag" in line, r.stdout[-3000:]
+
+
+def test_an_artifact_root_that_is_not_its_own_product_is_red(tmp_path, payload):
+    r = _verify(tmp_path, _variant(tmp_path, payload, top="something-else-dev-test"))
+    assert r.returncode == 1 and "!!" in _line(r.stdout, "versioned root"), r.stdout[-3000:]
+
+
+@pytest.mark.parametrize("name", [None, "Not A Slug"], ids=["absent", "not-a-slug"])
+def test_an_artifact_without_a_valid_product_name_is_red(tmp_path, payload, name):
+    r = _verify(tmp_path, _variant(tmp_path, payload, _product(name)))
+    assert r.returncode == 1 and "!!" in _line(r.stdout, "the artifact names its product"), r.stdout[-3000:]

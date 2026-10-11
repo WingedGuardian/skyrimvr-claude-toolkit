@@ -7453,3 +7453,32 @@ MUTATIONS += [pytest.param("tools/skyguard/self_rules.py", *m[:3], id=m[3]) for 
      "        out += [] and [(n.group(1) if n.group(1) is not None else n.group(2)",
      _RRR % "powershell-command-variable", "rr-i2-fallback-nested-quotes"),
 ]]
+
+# Release review T13 M3 (the allowance floor in the leak checker) and M5 (the expected root from the artifact).
+_RRF = "tests/test_release_payload.py::test_an_allow_prefix_at_or_above_the_home_or_a_root_is_never_applied[%s]"
+_RRV = "tests/test_verify_release.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_CRP, '    if not p or not (p.startswith("/") or re.match(r"^[a-z]:/", p)):\n', "    if False:\n",
+     _RRF % "relative", "rr-m3-floor-absolute-only"),
+    (_CRP, '    if p == "/" or re.fullmatch(r"[a-z]:/", p):\n', "    if False:\n", _RRF % "other-drive-root",
+     "rr-m3-floor-no-root"),
+    (_CRP, "        if hf and hf == p:\n", "        if False:\n", _RRF % "home", "rr-m3-floor-not-the-home"),
+    (_CRP, '        if hf and hf.startswith(p.rstrip("/") + "/"):\n', "        if False:\n", _RRF % "above-home",
+     "rr-m3-floor-not-above-the-home"),
+    (_CRP, 'os.environ.get("USERPROFILE"), ', "", _RRF % "home", "rr-m3-floor-windows-home"),
+    (_CRP, ', os.environ.get("HOME")) if h]', ") if h]", _RRF % "posix-home", "rr-m3-floor-posix-home"),
+    (_CRP, "    homes = [h for h in (home, ", "    homes = [h for h in (", _RRF % "home-argument",
+     "rr-m3-floor-home-argument"),
+    (_CRP, "    allow = kept\n", "    pass\n", _RRF % "home", "rr-m3-floor-applied"),
+    (_CRP, '    if m:\n        s = m.group(1) + ":" + (m.group(2) or "/")\n',
+     '    if False:\n        s = m.group(1) + ":" + (m.group(2) or "/")\n', _RRF % "msys-home", "rr-m3-fold-msys"),
+    (_CRP, 'else s.rstrip("/")', "else s", _RRF % "home-trailing-slash", "rr-m3-fold-trailing-slash"),
+    (_VR, 'RELEASE_SLUG=$(slug_of "$ROOT/package.json")', 'RELEASE_SLUG=$CHECKOUT_SLUG',
+     _RRV + "test_the_expected_root_comes_from_the_artifact_and_another_product_is_named", "rr-m5-root-from-artifact"),
+    (_VR, 'elif [ "$RELEASE_SLUG" != "$CHECKOUT_SLUG" ]; then', "elif false; then",
+     _RRV + "test_the_expected_root_comes_from_the_artifact_and_another_product_is_named", "rr-m5-other-product-named"),
+    (_VR, 'if [ -z "$RELEASE_SLUG" ]; then', "if false; then",
+     _RRV + "test_an_artifact_without_a_valid_product_name_is_red[absent]", "rr-m5-product-name-required"),
+    (_VR, ' or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", n) is None:', ":",
+     _RRV + "test_an_artifact_without_a_valid_product_name_is_red[not-a-slug]", "rr-m5-product-name-is-a-slug"),
+]]

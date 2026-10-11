@@ -32,7 +32,9 @@
 # ran while a mutating gate had a file rewritten in place, and once when the safety hooks were fixed in a
 # private install and only the references were published.
 # ⚠ It checks the artifact against THIS CHECKOUT's expectations (the payload checker is read from here, not
-# from the zip). Run it from the tag you are verifying.
+# from the zip). Run it from the tag you are verifying. The root folder's expected name comes from the zip's own
+# package.json; a zip of another product name (a 3.x skyrimvr-claude-toolkit-* zip checked from a 4.x checkout) is
+# refused on a line that names both and says to verify it from a checkout of its own tag.
 set -uo pipefail
 
 usage() { echo "usage: bash tools/verify-release.sh vX.Y.Z | --local <zip> [--scrubbed] [--expect-commit SHA] [--tag vX.Y.Z]" >&2; exit 2; }
@@ -69,7 +71,7 @@ if [ -z "$PY" ]; then
 fi
 [ -n "$PY" ] || { echo "verify-release: no Python 3 found (set PYTHON)" >&2; exit 2; }
 PY="$(command -v "$PY")"
-RELEASE_SLUG=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["name"])' "$CHECKOUT/package.json") || exit 2
+CHECKOUT_SLUG=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["name"])' "$CHECKOUT/package.json") || exit 2
 
 # The workspace goes under VERIFY_WORK_ROOT when given (tests point it at their tmp folder).
 WORK="$(mktemp -d "${VERIFY_WORK_ROOT:-${TMPDIR:-/tmp}}/verify-release.XXXXXX")" || exit 2
@@ -77,6 +79,18 @@ WORK="$(mktemp -d "${VERIFY_WORK_ROOT:-${TMPDIR:-/tmp}}/verify-release.XXXXXX")"
 # Recycle-Bin rule); kept when a check fails, for inspection.
 trap 'rm -rf "$WORK"' EXIT
 winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+# The product name an ARTIFACT carries: its own package.json, validated as the builder validates it (a lowercase,
+# dash-separated slug). Empty when the artifact has none.
+slug_of() {
+  "$PY" -c 'import json,re,sys
+try:
+    n = json.load(open(sys.argv[1], encoding="utf-8"))["name"]
+except Exception:
+    sys.exit(1)
+if not isinstance(n, str) or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", n) is None:
+    sys.exit(1)
+print(n)' "$(winpath "$1")" 2>/dev/null
+}
 REAL_DUMPS="${SKSE_CRASH_DIR:-}"
 fails=0
 
@@ -114,6 +128,16 @@ if [ "$(printf '%s\n' "$tops" | grep -c .)" -ne 1 ]; then
   bad "the zip has one root folder" "found: $(printf '%s ' $tops)"; echo "RESULT: FAILED"; exit 1
 fi
 ROOT="$WORK/x/$tops"
+# Review T13 M5: the expected root comes from the artifact being verified, not from this checkout -- a renamed
+# product (v3.x shipped as skyrimvr-claude-toolkit-*) then fails on the line that says why, not as a bare
+# "versioned root" mismatch. Every other check here is still THIS checkout's (header): an artifact of another
+# product name is refused by name, with the remedy.
+RELEASE_SLUG=$(slug_of "$ROOT/package.json")
+if [ -z "$RELEASE_SLUG" ]; then
+  bad "the artifact names its product" "no valid package.json name in $tops"
+elif [ "$RELEASE_SLUG" != "$CHECKOUT_SLUG" ]; then
+  bad "the artifact is this checkout's product" "the artifact is '$RELEASE_SLUG', this checkout '$CHECKOUT_SLUG': verify it from a checkout of its own release tag"
+fi
 case "$tops" in "$RELEASE_SLUG"-*) ok "extracted to a versioned root ($tops)" ;; *) bad "versioned root" "$tops" ;; esac
 BUILT_COMMIT=$(sed -n 's/^commit=//p' "$ROOT/BUILD-INFO" 2>/dev/null | head -1)
 BUILT_VERSION=$(sed -n 's/^version=//p' "$ROOT/BUILD-INFO" 2>/dev/null | head -1)

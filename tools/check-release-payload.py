@@ -507,6 +507,36 @@ def scan_leaks(dirs, needles, allow_prefixes=(), baseline=None, secrets=(), shap
     return hits
 
 
+def _fold_dir(path: str) -> str:
+    """A folder spelled one way for comparison: forward slashes, lower case, `/c/x` as `c:/x`, no trailing slash
+    except a root's own (`c:/`, `/`)."""
+    s = (path or "").strip().replace(BS, "/")
+    m = re.match(r"^/([A-Za-z])(/.*)?$", s)
+    if m:
+        s = m.group(1) + ":" + (m.group(2) or "/")
+    s = re.sub(r"/+", "/", s).lower()
+    return s if s == "/" or re.fullmatch(r"[a-z]:/", s) else s.rstrip("/")
+
+
+def allow_prefix_problem(prefix: str, homes) -> str:
+    """Why an --allow-prefix must NOT be applied ("" when it may). Review T13 M3: the allowance blanks every spelling
+    of the prefix before matching, so one that is a drive root, the home folder or a folder above it would blank the
+    very home paths this scan exists to find (a Python installed straight into the home folder makes the measured
+    interpreter directory exactly that). Such an allowance is dropped and the scan stays strict."""
+    p = _fold_dir(prefix)
+    if not p or not (p.startswith("/") or re.match(r"^[a-z]:/", p)):
+        return "is not an absolute path"
+    if p == "/" or re.fullmatch(r"[a-z]:/", p):
+        return "is a drive or filesystem root"
+    for h in homes:
+        hf = _fold_dir(h)
+        if hf and hf == p:
+            return "is the home folder"
+        if hf and hf.startswith(p.rstrip("/") + "/"):
+            return "holds the home folder"
+    return ""
+
+
 def run_leaks(args) -> int:
     dirs, allow, baseline, cfgs, home, require, i = [], [], None, [], None, False, 0
     while i < len(args):
@@ -545,6 +575,15 @@ def run_leaks(args) -> int:
         print("LEAKS: COULD NOT CHECK -- LEAK_TOKENS is empty or absent (the release workflow reads it from the "
               "repository secret LEAK_TOKENS); refusing to pass a grep that cannot see the maintainer")
         return 2
+    homes = [h for h in (home, os.environ.get("USERPROFILE"), os.environ.get("HOME")) if h]
+    kept = []
+    for p in allow:
+        why = allow_prefix_problem(p, homes)
+        if why:
+            print("  !! an --allow-prefix was NOT applied: it " + why)    # the path itself is never printed
+        else:
+            kept.append(p)
+    allow = kept
     for c in cfgs:
         if config_dir_ok(c, home):
             allow.append(c)
