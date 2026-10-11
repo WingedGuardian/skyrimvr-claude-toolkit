@@ -428,9 +428,24 @@ def _is_inspection(x) -> bool:
     return bool(code) and _python_inspection_text(x.program, code) != code
 
 
-def _output_inert(parsed, e) -> bool:
+# Re-review F3: the allowlist can only vouch for steps the parser SAW. Every exec's segment is an exact substring of the
+# command; whatever is left once they are all removed must be separators only. `pwsh -File <(python ...)` read as
+# PowerShell yields the python exec alone and leaves `pwsh -File <( )` unattributed: not inert.
+_SEPARATORS_ONLY = re.compile(r"[\s|;&()]*")
+
+
+def _unattributed(command: str, parsed) -> bool:
+    rest = command
+    for seg in sorted({x.segment.strip() for x in parsed.execs if x.segment.strip()}, key=len, reverse=True):
+        rest = rest.replace(seg, " ")
+    return _SEPARATORS_ONLY.fullmatch(rest) is None
+
+
+def _output_inert(parsed, e, command=None) -> bool:
     """True only when nothing in this command can run what exec `e` prints (the allowlist above)."""
     if parsed is None or not parsed.ok:
+        return False
+    if command is None or _unattributed(command, parsed):
         return False
     if parsed.codes or parsed.xargs or parsed.unread:
         return False
@@ -451,7 +466,7 @@ _STATE_WORD = re.compile(r"\.skyguard(?:[/\\]+[\w.\-]{1,120})?(?![\w.\-])", re.I
 _WORD_START = set(" \t\n'\"`()[]{}=,;|&<>")
 
 
-def _printed_state_delete(e, parsed, cwd, env, roots) -> str:
+def _printed_state_delete(e, parsed, cwd, env, roots, command=None) -> str:
     """The state a delete PRINTED by this interpreter would remove when its output runs ("" for none)."""
     from . import deletes
     from .grep import grep
@@ -460,7 +475,7 @@ def _printed_state_delete(e, parsed, cwd, env, roots) -> str:
         return ""                                         # cost only: no code, or no state word for the loop below
     if not (grep(deletes.INTERP_DELETE, code) or grep(deletes.DESTROYER_LOOSE, code) or parsed.xargs):
         return ""
-    if _output_inert(parsed, e):
+    if _output_inert(parsed, e, command):
         return ""
     for m in _STATE_WORD.finditer(code):
         # The word may start after any delimiter on its line (a quoted path holds spaces): try each, nearest first.
@@ -482,7 +497,7 @@ def _printed_state_delete(e, parsed, cwd, env, roots) -> str:
     return ""
 
 
-def _state_delete(e, cwd, env, roots, parsed=None) -> str:
+def _state_delete(e, cwd, env, roots, parsed=None, command=None) -> str:
     """The name of what a delete by this exec removes from the state ("" for none): rm / Remove-Item / del / rd /
     [IO.File]::Delete (deletes.operands), and interpreter code with a delete API and a quoted path into the state.
     Parser inspection's literals are masked only when its output provably runs nowhere (_output_inert)."""
@@ -491,7 +506,7 @@ def _state_delete(e, cwd, env, roots, parsed=None) -> str:
     words = [w for w in (deletes.operands(e) or []) if isinstance(w, str)]
     code = deletes.interpreter_code(e)
     delete_api = bool(code and grep(deletes.INTERP_DELETE, code))
-    if delete_api and _output_inert(parsed, e):
+    if delete_api and _output_inert(parsed, e, command):
         delete_api = grep(deletes.INTERP_DELETE, _python_inspection_text(e.program, code))
     if code and (grep(deletes.INTERP_DESTROYER, code) or delete_api):
         words += [m.group(1) or m.group(2) for m in _QUOTED.finditer(code)]
@@ -512,7 +527,9 @@ def _recycle_delete(command: str, parsed, cwd, env, roots) -> str:
         a = _recycle_abs(w, how, base, env)
         if (a is not None and _reaches_state(a, roots)) or (a is None and text_kind(w) == STATE):
             return _hit_name(a, w)
-        placed = placed and a is not None
+        # Re-review F1: a literal that is a format hole (`"{p}"`, `"{}"`, `"%s"`, `"%(p)s"`, `${p}`) or empty (`'' + p
+        # + ''`) only LOOKS placed -- the path is filled in elsewhere -- so it counts as unplaced.
+        placed = placed and a is not None and bool(w.strip()) and not _FORMAT_HOLE.search(w)
     if placed:
         return ""
     # Release review T13 I2: an argument the guard cannot place (`$env:P`, `$p`, `"'+p+'"`) is the path the command
@@ -526,6 +543,9 @@ def _recycle_delete(command: str, parsed, cwd, env, roots) -> str:
         if a is None and text_kind(w) == STATE:
             return _hit_name(None, w)
     return ""
+
+
+_FORMAT_HOLE = re.compile(r"\{[^{}\n]{0,80}\}|%(?:\([^)\n]{0,80}\))?[-#0 +]*\d*[sr]")
 
 
 def _recycle_abs(w: str, how: str, base, env) -> Optional[str]:
@@ -594,7 +614,8 @@ def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping
             if k and k not in found:
                 found[k] = (re.split(r"[/\\]+", (a or w).rstrip("/\\"))[-1] or w, op)
         if STATE not in found:
-            hit = _state_delete(e, cwd, env, roots, parsed) or _printed_state_delete(e, parsed, cwd, env, roots)
+            hit = (_state_delete(e, cwd, env, roots, parsed, command)
+                   or _printed_state_delete(e, parsed, cwd, env, roots, command))
             if hit:
                 found[STATE] = (hit, EDITS)
     if STATE not in found:

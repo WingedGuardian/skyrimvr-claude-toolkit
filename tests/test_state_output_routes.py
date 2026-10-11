@@ -60,6 +60,8 @@ EXECUTED_PS = {
     "scriptblock-create": "& ([scriptblock]::Create((" + PRINT_DELETE + ")))",
     "foreach-iex": PRINT_DELETE + " | ForEach-Object { Invoke-Expression $_ }",
     "herestring-python-iex": "@'\nprint('[IO.File]::Delete(''{P}'')')\n'@ | python - | iex",
+    # Re-review F3: the PowerShell parse of this drops the pwsh step entirely; the inert test must not vouch for it.
+    "pwsh-file-procsubst": "pwsh -File <(" + PRINT_DELETE + ")",
 }
 EXECUTED = [(k, "bash", v) for k, v in EXECUTED_BASH.items()] + [(k, "powershell", v) for k, v in EXECUTED_PS.items()]
 
@@ -104,18 +106,20 @@ def test_inspection_whose_output_runs_nowhere_stays_allowed(name):
 INERT_BASE = PRINT_DELETE.replace("{P}", REL) + " | head -5"
 
 
-@pytest.mark.parametrize("clause", ["no-parse", "unreadable", "shell-string", "xargs", "decoded"])
+@pytest.mark.parametrize("clause", ["no-parse", "unreadable", "shell-string", "xargs", "decoded", "no-command",
+                                    "unattributed-text"])
 def test_output_is_not_inert_when_the_parser_cannot_vouch_for_the_command(clause):
     # Clauses the verdict tests cannot isolate (another rule, or another clause, also refuses those commands): each
     # is witnessed here on its own, against a command that IS inert.
     from skyguard import self_rules, shellparse
     parsed = shellparse.parse(INERT_BASE, "bash")
     e = parsed.execs[0]
-    assert e.program == "python" and self_rules._output_inert(parsed, e)
+    assert e.program == "python" and self_rules._output_inert(parsed, e, INERT_BASE)
+    command = {"no-command": None, "unattributed-text": INERT_BASE + "; mystery step"}.get(clause, INERT_BASE)
     changed = {"no-parse": None, "unreadable": parsed._replace(ok=False),
                "shell-string": parsed._replace(codes=(("bash", "x"),)),
-               "xargs": parsed._replace(xargs=("cat",)), "decoded": parsed._replace(unread=True)}[clause]
-    assert not self_rules._output_inert(changed, e), clause
+               "xargs": parsed._replace(xargs=("cat",)), "decoded": parsed._replace(unread=True)}.get(clause, parsed)
+    assert not self_rules._output_inert(changed, e, command), clause
 
 
 def test_the_original_quoted_scan_runs_when_the_output_is_not_inert():
@@ -126,7 +130,7 @@ def test_the_original_quoted_scan_runs_when_the_output_is_not_inert():
                               (INERT_BASE, "")):
         parsed = shellparse.parse(command, "bash")
         e = parsed.execs[0]
-        got = self_rules._state_delete(e, S.GAME, S.ENV0, S._roots(), parsed)
+        got = self_rules._state_delete(e, S.GAME, S.ENV0, S._roots(), parsed, command)
         assert (got != "") == (expected != ""), (command, got)
 
 
@@ -170,6 +174,19 @@ RECYCLE_BASH = {
                     "{env: {P: '{P}'}})\"",
     "powershell-command-variable": "powershell -NoProfile -Command '$p=\"{P}\"; "
                                    "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p,1,2)'",
+    # Re-review F1: the path is filled in by string formatting; the literal the call holds is a format hole.
+    "python-fstring": "python -c \"import subprocess; p='{P}'; subprocess.run(['powershell','-Command',"
+                      "f'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"{p}\\\",1,2)'])\"",
+    "python-fstring-directory": "python -c \"import subprocess; p='{P}'; subprocess.run(['powershell','-Command',"
+                                "f'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory(\\\"{p}\\\",2,2)'])\"",
+    "python-format": "python -c \"import subprocess; p='{P}'; subprocess.run(['powershell','-Command',"
+                     "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"{}\\\",1,2)'.format(p)])\"",
+    "python-percent": "python -c \"import subprocess; subprocess.run(['powershell','-Command',"
+                      "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"%s\\\",1,2)' % '{P}'])\"",
+    "python-percent-named": "python -c \"import subprocess; p='{P}'; subprocess.run(['powershell','-Command',"
+                            "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"%(p)s\\\",1,2)' % {'p': p}])\"",
+    "node-concat": "node -e \"const p='{P}'; require('child_process').execSync('powershell -Command "
+                   "\\\"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\''+p+'\\',1,2)\\\"')\"",
 }
 RECYCLE_PS = {
     "direct-variable": "$p='{P}'; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p,'OnlyErrorDialogs',"
@@ -217,6 +234,8 @@ def test_recycle_literal_argument_outside_beside_a_state_mention_is_allowed():
 ENTRY_PROBES = {
     "I1": EXECUTED_BASH["pipe-powershell-command-dash"].replace("{P}", REL),
     "I2": RECYCLE_BASH["python-env-var"].replace("{P}", REL),
+    "F1-fstring": RECYCLE_BASH["python-fstring"].replace("{P}", REL),
+    "F1-node-concat": RECYCLE_BASH["node-concat"].replace("{P}", REL),
 }
 FIX = REPO / "tests" / "fixtures" / "payloads" / "codex" / "0.160.0" / "codex-PreToolUse-Bash-1.json"
 
