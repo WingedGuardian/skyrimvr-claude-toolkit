@@ -24,8 +24,8 @@
 - **Shadow mode:** `guards off` allows eligible refusals and asks with a warning and audit record.
 - **Guard self-protection:** recognized writes and deletes targeting `.skyguard/` are refused.
 - **Self-protection for printed deletes:** delete text that an interpreter prints into a shell or interpreter (a pipe, a substitution or a script the same command runs) is refused, including under `guards off`.
-- **Self-protection for Recycle Bin deletes through a variable:** a Recycle-Bin delete of guard state is refused when its path comes from a variable, an environment variable, string concatenation or string formatting, including under `guards off`.
-- **Self-protection and parser inspection:** a Python command that only prints or parses delete examples, with output that nothing in the command runs, is not refused as a guard-state delete.
+- **Self-protection for Recycle Bin deletes through a variable:** a Recycle-Bin delete of guard state is refused when its path comes from a variable, an environment variable, a recognized format token (`{p}`, `{}`, `%s`, `%(p)s`, `%.80s`, `${p}`) or an empty literal joined to it, including under `guards off`.
+- **Self-protection and parser inspection:** a Python command that only prints or parses delete examples, with output that nothing in the command runs, is not refused as a guard-state delete when every other part of the command is a recognized text tool or shell structure (`if`, loops, `case`, `{ }`, assignments).
 - **Self-protection and outside examples:** quoted Recycle Bin examples outside the install are not read as guard-state operands.
 - **Guard integrity banner:** session start reports guard files that differ from `GUARD-FILES.sha256`.
 - **Layer diagnostics:** `bash tools/skydoctor` reports live, not live or unknown for each protection layer.
@@ -245,6 +245,8 @@
 - **Printed deletes across commands:** text one command writes to a script and a later command runs is not traced.
 - **Piped delete operands:** a path one program prints and the next deletes (`| Remove-Item`, `| ForEach-Object { Remove-Item $_ }`, `Remove-Item $(...)`, `| while read f; do rm "$f"`) is not resolved for self-protection.
 - **cmd for-loops:** deletes inside `cmd /c for /f ... do del` are not recognized.
+- **Recycle Bin prefix concatenation:** a Recycle-Bin delete whose literal holds part of a guard-state path joined to a variable (`".skyguard/" + p`) is not refused as a guard-state delete; from inside the install only the unresolved-delete rule refuses it, which `guards off` lifts.
+- **Recycle Bin placeholders:** a Recycle-Bin delete whose literal is an arbitrary placeholder replaced at run time (`"PATH".replace("PATH", p)`) is not refused as a guard-state delete; from inside the install only the install-delete rule refuses it, which `guards off` lifts.
 - **Absolute-path inspection:** a read-only inspection that prints a delete of an absolute install path is refused by the install-delete rule, which `guards off` lifts.
 - **Empty paths files:** can lose non-install protection folders if neither paths file retains them.
 - **Broken legacy file:** beside a valid root file it is reported, but does not itself stop the guard.

@@ -63,13 +63,14 @@ The local source-checkout hook notices are consistent with an unrendered templat
 
 ## Independent review round — 2026-10-10/11
 
-A second, independent review of the whole release range after `601b4df` returned CHANGES. Six commits fix it (`8a89f3d..86f2633`); master was locally fast-forwarded to `86f263385cc7b3cbb3da9bcac79e25a672fc822c`.
+A second, independent review of the whole release range after `601b4df` returned CHANGES. Six commits fix it (`8a89f3d` through `86f2633`); master was locally fast-forwarded to `86f263385cc7b3cbb3da9bcac79e25a672fc822c`.
 
 | Reproduced finding | Disposition |
 |---|---|
 | A printed state delete, piped or substituted into an executor, no longer hit the guard-state rule | Restored on every route probed (pipes, `iex`, substitution, `eval`, run-after-redirect, `tee`, `xargs`, `cmd /c`, process substitution), guards on and off, relative and absolute |
-| A Recycle-Bin delete of guard state with a computed operand (variable, concatenation, string formatting) lost the guard-state rule | A format-token or empty operand is now unplaceable, so every quoted word is a candidate; an independent probe of ten spellings not in the fix's own tests refused 30 of 30, and 9 of 9 outside controls were allowed |
-| Output-inert approval could pass a step the parser dropped | Inert only when every part of the command belongs to a parsed step |
+| A Recycle-Bin delete of guard state with a computed operand (variable, concatenation, string formatting) lost the guard-state rule | An operand that is a recognized format token or empty is now unplaceable, and only then does every quoted word of the command become a candidate; prefix concatenation (`".skyguard/" + p`) and arbitrary placeholders (`"PATH".replace(...)`) are not covered and are CHANGELOG Known limits; an independent probe of ten spellings not in the fix's own tests refused 30 of 30, and 9 of 9 outside controls were allowed |
+| Output-inert approval could pass a step the parser dropped | Inert only when every part of the command belongs to a parsed step or is shell structure |
+| Final review of that fix: printf precision/star-width tokens (`%.80s`, `%*s`) were not recognized as format tokens; and the attribution test refused read-only inspections inside ordinary shell structure (`X=1; …`, `if …; then …; fi`, `{ …; } \| head`, `for … do …; done`, PowerShell `$o = …; $o`), allowed at `503b3e4` | `878ed80` widens the percent token (width, precision, `*`, `%a`); `8196e33` reads keywords, braces, `!`, plain assignments, loop lists, case patterns and a PowerShell variable shown as glue only in their structural position, while the dropped-step and executor routes stay refused. Red first; corpus rows and one twin per clause added |
 | Leak-scan allowances had no floor; the verifier took the archive root from the checkout | Floor added; root read from the archive's own package metadata |
 | CHANGELOG combined issues, overclaimed and filed new-feature fixes as 3.x fixes | One issue per line; self-protection lines moved under the new feature |
 
@@ -82,13 +83,15 @@ Full gate on `86f2633`:
 | Full ordinary suite | 9,361 passed, 61 skipped, zero failed; 1,274.32 seconds |
 | CI output-format selftest | 20 passed |
 | Full mutation run | 2,218 passed, two platform skips, one failure: the `messages-no-echo` mutant hit the 600-second per-mutant timeout under eight-way load. Serial rerun killed it (404 seconds). No survivor |
-| Historical decision pricing against `601b4df` | 82,112 calls; zero engine errors in either version; 68 unchanged parse failures; zero decisions moved in any direction |
+| Historical decision pricing against `601b4df` | 82,112 calls; zero engine errors in either version; 68 unchanged parse failures; zero decisions moved in any direction. (`c650024`'s message cites 80,797 items for the same `--base`: that was a separate, earlier run over this machine's local tool-call history, which grows between runs.) |
 | Cold local-clone build at `86f2633` | Archive bytes and all 284 member hashes identical to the producer build |
 | Actual payload checker | Wrong-commit control failed; correct commit passed |
 | Actual scrubbed artifact verification | Passed; no leaks |
 | Independent leak scan | One archive root, no forbidden members, no user name, email, account or key-shaped value; every user-folder path is a placeholder |
 
 Four earlier full-gate attempts on this commit were stopped by the resource watchdog when the game started and exhausted commit memory, and one by a low-memory process reaper during mutations. None counts as a result. On the user's explicit instruction, the gate that produced the table above ran outside the shared resource manager, at below-normal priority with eight workers. The `messages-no-echo` mutant needs about 400 seconds when run alone, which leaves too little margin under its 600-second cap.
+
+The final-review fixes (`878ed80`, `8196e33`) and this report's correction were checked with targeted suites, their own mutation twins and historical pricing against `d6296d1` only. The table above is a result for `86f2633`, not for them: the full gate must be rerun on the final commit.
 
 ## Remaining user and host work
 
