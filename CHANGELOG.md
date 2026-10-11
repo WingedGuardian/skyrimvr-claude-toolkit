@@ -6,14 +6,20 @@
 
 - **Skyrim AI Assistant Toolkit:** for coding agents (Claude Code, Codex, …), not an AI NPC mod (SkyrimNet, Mantella, CHIM).
 - **Codex CLI support on Windows:** generated instructions, skills, hook definitions and an entry script.
-- **Codex hook approval:** run `/hooks` after setup and start Codex in the game folder itself.
-- **Agent selection:** `setup.sh --agent claude|codex|all|auto`; `auto` is the default and `both` aliases `all`.
-- **Setup diagnostics:** report agents that remain NOT CONFIGURED and the approval steps still needed.
+- **Codex hook approval:** run `/hooks` after setup.
+- **Codex start folder:** start Codex in the game folder itself.
+- **Agent selection:** `setup.sh --agent claude|codex|all|auto`.
+- **Default agent selection:** `auto` is the default.
+- **Agent alias:** `both` aliases `all`.
+- **Setup diagnostics:** report agents that remain NOT CONFIGURED.
+- **Approval reminders:** setup lists the hook approval steps still needed.
 - **Shared guard engine:** Claude and Codex wrappers use the Python rules under `tools/skyguard/`.
 - **Optional Windows file lock:** Layer 2 locks existing vanilla masters and archives; it is off by default.
 - **Lock at setup:** `setup.sh --lock` opts into Layer 2.
 - **Session-bound lock lifts:** `skyguard lock unlock <file>` records a lift that lasts one hour by default.
-- **Lock controls:** `lock status`, `lock disable` and `lock enable`.
+- **Lock status:** `lock status` reports the lock state.
+- **Lock disable:** `lock disable` turns the lock off.
+- **Lock enable:** `lock enable` turns the lock back on.
 - **Emergency unlock:** `tools/skyguard-unlock.cmd` works from the user's terminal without Python.
 - **Shadow mode:** `guards off` allows eligible refusals and asks with a warning and audit record.
 - **Guard self-protection:** recognized writes and deletes targeting `.skyguard/` are refused.
@@ -23,33 +29,45 @@
 - **Manifest restore:** `scripts/restore-from-backup.sh` checks the recorded hash before restoring.
 - **Nested script snapshots:** content-addressed snapshots cover `.psc` and `.pex` files under both script source layouts.
 - **Recovery snapshots:** recognized shell changes trigger snapshots of load-order and Skyrim INI files.
-- **Save snapshots:** recognized ReSaver writes and DevBench saves snapshot the named save and co-save.
-- **Snapshot CLI:** `snapshot list` and `snapshot restore <id>` restore into a new folder by default.
+- **ReSaver save snapshots:** recognized ReSaver writes snapshot the named save and co-save.
+- **DevBench save snapshots:** recognized DevBench saves snapshot the named save and co-save.
+- **Snapshot list:** `snapshot list` shows the recorded snapshots.
+- **Snapshot restore:** `snapshot restore <id>` restores into a new folder by default.
 - **In-place restore:** `--in-place` is limited and requires confirmation.
 - **3.x migration:** `tools/migrate-3x.py` carries user edits into local notes and a settings backup.
 - **Pre-update snapshot:** `tools/pre-update-snapshot.sh` saves files an extract would replace before the update.
 - **Adapter guide:** `ADAPTING.md` explains integration for other coding agents.
-- **Adapter kit:** templates, capability reports and worked examples under `tools/adapting/`.
+- **Adapter templates:** under `tools/adapting/`.
+- **Adapter capability reports:** under `tools/adapting/`.
+- **Adapter worked examples:** under `tools/adapting/`.
 - **Adapter conformance:** fault injection checks that an adapter refuses when the engine cannot decide.
 - **Neutral entry:** `run.py neutral pre-tool` answers allow, ask or deny for an agent-neutral request.
 - **Runtime inventory:** `toolkit-setup` checks Python, Git and Node by launching them.
 - **Universal setup prompt:** host-software installs require an explicit exact-id and exact-version authorization.
 - **Preference injection:** session start reads at most 1 MiB of local notes and injects at most 4,096 bytes of the preferences section.
-- **Focused skills:** DevBench, conflict triage and xelib guidance move out of the core instructions.
-- **Hook telemetry:** the canary reports invocation stages and measured call latency.
+- **DevBench skill:** DevBench guidance moves out of the core instructions.
+- **Conflict triage skill:** conflict triage guidance moves out of the core instructions.
+- **xelib skill:** xelib guidance moves out of the core instructions.
+- **Hook stage telemetry:** the canary reports invocation stages.
+- **Hook latency telemetry:** the canary reports measured call latency.
 - **Interpreter fallback:** configured hooks can use an available fallback Python and report DEGRADED.
 - **Archive-write advice:** recognized archive creation into the install gets its own rule message.
 - **DevBench protection:** recognized `smp reset` calls are refused.
-- **Third-party audit:** checks pinned tools and installation instructions.
+- **Third-party tool audit:** checks pinned tools.
+- **Installation instruction audit:** checks installation instructions.
 - **Pinned downloads table:** records version, file, SHA-256 and source for optional downloads.
 - **Optional Python dependencies:** tool requirements have a separate hash lock.
 - **Payload fixtures:** real hook shapes were rechecked on Claude Code 2.1.291 and Codex CLI 0.160.0; no shape change was found.
-- **Generated agent files:** contributors edit `agent/` and regenerate; CI checks synchronization.
-- **Committed release builds:** the archive builder reads git objects, refuses dirty trees and records BUILD-INFO.
+- **Generated agent files:** contributors edit `agent/` and regenerate.
+- **Generated file sync check:** CI checks that generated agent files are in sync.
+- **Committed release builds:** the archive builder reads git objects.
+- **Clean release trees:** the archive builder refuses dirty trees.
+- **Build record:** the archive builder records BUILD-INFO.
 - **Payload verification:** one checker validates archive shape, hooks and adapter files.
 - **Scrubbed verification:** the local verifier checks the archive and generated install for identity and credential leaks.
 - **Maintainer secret:** release CI requires `LEAK_TOKENS` and refuses to publish without a valid value.
-- **CI matrix:** Windows and Linux Python 3.10–3.13 legs include collection and skip tripwires.
+- **CI matrix:** Windows and Linux Python 3.10–3.13 legs.
+- **CI tripwires:** the legs include collection and skip tripwires.
 - **Setup smoke matrix:** CI exercises the agent-selection values.
 - **Merge-marker gate:** contributor tests reject committed conflict markers.
 
@@ -65,9 +83,13 @@
 - **bsarch location:** an AutoMod-local executable belongs under `bin/Release/net10.0/tools/bsarch/`.
 - **PyNifly 27.2.0:** both the library and Blender add-on use this pin.
 - **Exact Node dependencies:** package versions replace range pins.
-- **Pinned xeditlib:** installs use a fixed commit, koffi 2.15.1 and `--ignore-scripts`.
-- **Container runtimes:** the image and runtime downloads are pinned; the JDK moves to 21.
-- **Tested Python range:** 3.10–3.13; guard syntax remains compatible with 3.8/3.9, which are untested.
+- **Pinned xeditlib:** installs use a fixed commit.
+- **Pinned koffi:** xeditlib installs use koffi 2.15.1.
+- **No install scripts:** xeditlib installs use `--ignore-scripts`.
+- **Container runtimes:** the image and runtime downloads are pinned.
+- **Container JDK:** the JDK moves to 21.
+- **Tested Python range:** 3.10–3.13.
+- **Python 3.8/3.9 syntax:** guard syntax remains compatible with 3.8/3.9, which are untested.
 - **jq optional:** the guards no longer need jq.
 - **Root paths file:** `skyrim-paths.env` moves to the toolkit root.
 - **Legacy protection union:** the 3.x `.claude/skyrim-paths.env` remains readable and its protection folders are combined with the root file.
@@ -88,16 +110,21 @@
 - **DevBench scenarios:** recognized scenario steps are judged like direct calls.
 - **GNU find on Codex:** recognized delete forms are judged across reported shell dialects.
 - **Shadow ask wording:** explicitly says the call ran without asking.
-- **Codex command payloads:** script fields and argv lists are judged; ambiguous command fields refuse.
-- **Resolved delete operands:** relative paths use the reported working directory and protection includes MO2 mods and overwrite.
+- **Codex script fields:** script fields in command payloads are judged.
+- **Codex argv lists:** argv lists in command payloads are judged.
+- **Ambiguous Codex commands:** ambiguous command fields refuse.
+- **Relative delete operands:** relative paths use the reported working directory.
+- **MO2 delete protection:** protection includes MO2 mods and overwrite.
 - **Read-only mentions:** searches for delete syntax are distinguished from commands that delete.
-- **Wrapper health:** toolchain checks report dependency failures and Spriggit version drift.
+- **Wrapper dependency health:** toolchain checks report dependency failures.
+- **Spriggit version drift:** toolchain checks report Spriggit version drift.
 - **AutoMod provenance:** toolchain checks show the build commit.
 - **Knowledgebase snapshots:** include AGENTS.md.
 - **Lift expiry:** the next hooked tool call after expiry relocks the affected files.
 - **Archive identity:** the root is `skyrim-ai-assistant-toolkit-<version>`, using the package name as the shared slug.
 - **GitHub links:** retain the current repository path; no remote rename is part of this change.
-- **Shipped identity scrub:** examples and dated reports use neutral paths; non-shipped corpus fixtures preserve historical input bytes.
+- **Shipped identity scrub:** examples and dated reports use neutral paths.
+- **Corpus fixture bytes:** non-shipped corpus fixtures preserve historical input bytes.
 - **Freeze baseline:** a tag on HEAD cannot serve as its own comparison baseline.
 
 ### Fixed
@@ -109,12 +136,14 @@
 - **3.x Monitor coverage:** shell commands through Monitor now reach the command guard.
 - **3.x NotebookEdit coverage:** the old Edit|Write matcher excluded NotebookEdit.
 - **3.x raw plugin writes:** recognized shell writes to ESP, ESM, ESL, BSA and BA2 now refuse.
-- **Prefs fence handling:** unclosed fences and annotated preference headings no longer silently hide preferences.
+- **Prefs unclosed fences:** an unclosed fence no longer silently hides preferences.
+- **Prefs annotated headings:** an annotated preference heading no longer silently hides preferences.
 - **Prefs complexity:** fence lookup avoids repeated rescanning of the remaining file.
 - **Prefs truncation:** capped or uninjected sections are reported.
 - **Canary verdicts:** a refused Codex call is not counted as a successfully guarded call.
 - **Setup folder casing:** equivalent case spellings do not imply that the install moved.
-- **Setup Python check:** requires a working interpreter and reports unsupported versions.
+- **Setup Python check:** requires a working interpreter.
+- **Unsupported Python versions:** setup reports them.
 - **Codex unsafe install paths:** setup refuses characters its hook launchers cannot quote safely.
 - **Non-ASCII configuration paths:** setup emits a paths file readable by the guard.
 - **Ampersand install paths:** setup re-runs without breaking shell quoting.
@@ -122,8 +151,11 @@
 - **Backup collisions:** repeated edits within a second do not overwrite the previous backup.
 - **Concurrent manifests:** locked appends retain each backup record.
 - **Identical in-place restores:** skip unchanged files to preserve mod-manager hard links.
-- **Windows launcher paths:** backslash invocation and Python paths containing spaces work.
-- **Snapshot containment:** reparse folders, changed hard links and time-box expiry are checked.
+- **Windows launcher backslashes:** backslash invocation works.
+- **Windows launcher spaces:** Python paths containing spaces work.
+- **Snapshot reparse folders:** snapshot containment checks reparse folders.
+- **Snapshot hard links:** snapshot containment checks changed hard links.
+- **Snapshot time box:** snapshot containment checks time-box expiry.
 - **Lock inheritance:** lock and unlock leave ACL inheritance unchanged.
 - **Save reserve:** save snapshots require 2 GiB to remain free on the destination drive.
 - **Local Spriggit:** verification wrappers can use a repo-local restored tool.
@@ -131,14 +163,21 @@
 - **Caprica command:** compile from the source folder using a bare script filename.
 - **PyNifly guidance:** identify the loaded NiflyDLL.dll correctly.
 - **Animated NIF guidance:** Blender round trips can drop controllers; do not use them for animated assets.
-- **VR port guidance:** correct notes for Precision, AMR VR and SCAR-related ports.
-- **Owned record guidance:** GetFormFromFile references should use the mod's own forms and check for None.
+- **Precision port guidance:** corrected VR port notes.
+- **AMR VR port guidance:** corrected VR port notes.
+- **SCAR port guidance:** corrected notes for SCAR-related VR ports.
+- **Owned record guidance:** GetFormFromFile references should use the mod's own forms.
+- **None-check guidance:** GetFormFromFile results should be checked for None.
 - **Shell advice:** messages distinguish ordinary file writes from raw plugin writes.
 - **Telemetry vocabulary:** documentation uses current registry rule identifiers.
-- **Broken documentation links:** corrected relative links and added a suite check.
+- **Broken documentation links:** corrected relative links.
+- **Documentation link check:** the suite checks relative links.
 - **Link-check scope:** dependency website Markdown does not count as toolkit filesystem links.
 - **Codex E2E verdicts:** include checks added after the live probe returns, so a late failure cannot leave PASS cached.
-- **Recycle Bin example parsing:** quoted examples outside the install no longer become unresolved guard-state operands; launched live-state deletion controls still refuse.
+- **Recycle Bin example parsing:** quoted examples outside the install no longer become unresolved guard-state operands.
+- **Recycle Bin deletes through a variable:** a Recycle-Bin delete of guard state whose path comes from a variable, an environment variable or string concatenation refuses, including under `guards off`.
+- **Parser inspection false refusal:** a Python command that only prints or parses delete examples, with output that nothing in the command runs, is no longer refused as a guard-state delete.
+- **Printed guard-state deletes:** delete text that an interpreter prints into a shell or interpreter (a pipe, a substitution or a script the same command runs) refuses, including under `guards off`.
 - **Corpus path derivation:** preserves the historical mixed-slash spelling while removing it from shipped helpers.
 - **Test tripwire isolation:** intentional setup denials do not contaminate another test's barrier log.
 - **MSYS path regression:** explicitly mounts the test fixture instead of skipping on a mismatched temporary directory.
@@ -153,7 +192,9 @@
 - **DevBench recovery aliases:** every judged server spelling receives the same save/co-save snapshot handling.
 - **Codex E2E setup:** a failed setup stops preparation before git initialization.
 - **Codex E2E agent selection:** preparation selects Codex explicitly instead of relying on PATH detection.
-- **Migration fence closers:** another fence kind, a shorter run or trailing text cannot close the user's open fence.
+- **Migration fence kind:** another fence kind cannot close the user's open fence.
+- **Migration fence length:** a shorter run cannot close the user's open fence.
+- **Migration fence trailing text:** a closer with trailing text cannot close the user's open fence.
 - **Archive product slug:** archive names come from the selected commit's validated package name.
 - **CI build log:** tee writes outside the checkout so it cannot trip the clean-tree gate.
 - **CMD Python apostrophes:** recorded interpreter paths retain embedded apostrophes.
@@ -161,12 +202,17 @@
 - **Partial load startup:** already-started test burners are stopped when a later launch fails.
 - **POSIX test executables:** temporary interpreter and tool stubs carry executable permissions.
 - **Auto setup regression:** the test recognizes platform-neutral AGENTS rendering when all agents are selected.
-- **Coverage documentation:** backup, command-payload and paths-union descriptions match the current implementations.
+- **Backup coverage documentation:** matches the current implementation.
+- **Command-payload coverage documentation:** matches the current implementation.
+- **Paths-union coverage documentation:** matches the current implementation.
 - **Historical identity examples:** derived scratch-path spellings are scrubbed consistently.
 
 ### Removed
 
-- **Unused Python packages:** pydantic, cattrs, mypy and pytest-cov, with their unused dependency pins.
+- **pydantic:** unused, removed with its dependency pins.
+- **cattrs:** unused, removed with its dependency pins.
+- **mypy:** unused, removed with its dependency pins.
+- **pytest-cov:** unused, removed with its dependency pins.
 - **Windows-only requirements:** the pywin32 requirements files.
 - **.NET 8/9 support:** optional .NET tools now use 10.
 - **Node 20 support:** Node tooling now requires 24.
@@ -191,17 +237,26 @@
 - **Encoded Bash program names:** some ANSI-C quoted spellings are not classified; this gap predates v4.
 - **Interpreter state writes:** code can write or link guard state through forms the shell scanner does not recognize.
 - **Archive extraction:** unpacking into guard state is not covered.
-- **Indirect shell paths:** computed destinations, uncommon option forms and aliases can escape recognized self-protection.
+- **Computed shell destinations:** can escape recognized self-protection.
+- **Uncommon shell option forms:** can escape recognized self-protection.
+- **Shell aliases:** can escape recognized self-protection.
+- **Printed deletes across commands:** text one command writes to a script and a later command runs is not traced.
 - **Empty paths files:** can lose non-install protection folders if neither paths file retains them.
 - **Broken legacy file:** beside a valid root file it is reported, but does not itself stop the guard.
 - **Neutral shadow mode:** the neutral entry does not honour a guards-off lift.
 - **Neutral other kind:** reported UNJUDGED.
-- **DevBench replay/input:** their contents are not judged.
+- **DevBench replay:** its contents are not judged.
+- **DevBench input:** its contents are not judged.
 - **DevBench fixtures:** MCP fixtures were not re-captured during release-version verification.
-- **Layer 2:** opt-in and Windows only; Linux/POSIX returns unsupported.
+- **Layer 2 opt-in:** the lock is off unless enabled.
+- **Layer 2 platform:** Windows only; Linux/POSIX returns unsupported.
 - **Lock rename:** a locked file can be renamed away.
 - **xelib save:** can rename the locked original into zEdit Backups and write an unlocked replacement.
-- **Lock manual measurements:** Wrye Bash, Steam update/verify, AE Creation downloads, xEdit GUI and MO2 remain pending.
+- **Lock with Wrye Bash:** manual measurement pending.
+- **Lock with Steam update/verify:** manual measurement pending.
+- **Lock with AE Creation downloads:** manual measurement pending.
+- **Lock with the xEdit GUI:** manual measurement pending.
+- **Lock with MO2:** manual measurement pending.
 - **Lift visibility:** agent context, audit and skydoctor are covered; interactive user visibility remains unmeasured.
 - **Relocking needs hooks:** no background service relocks an expired lift.
 - **Agent unlock session:** Codex and Claude PowerShell do not receive the session binding used by Claude Bash; the user must unlock from their own terminal.
