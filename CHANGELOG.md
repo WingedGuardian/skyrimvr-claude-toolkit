@@ -221,6 +221,7 @@
 - **Spriggit 0.40.0 pin:** replaced by 0.41.0.
 - **Old Bash rule engine:** retained only as a non-shipped test reference.
 - **Separate Codex and adapter payload checkers:** folded into the shared checker.
+- **Layer 2 research probes in the install zip:** the developer-only `scripts/layer2-spike/` measurement scripts stay in the repository but are no longer shipped.
 - **Automatic jq installation:** removed from setup.
 - **Automatic host-runtime installation:** removed from the default setup prompt.
 - **Legacy paths writes:** setup writes the root paths file.

@@ -89,6 +89,32 @@ def test_tests_and_github_are_not_shipped(tmp_path):
     assert not [n for n in names if "/tests/" in n or "/.github/" in n], names
 
 
+def test_the_layer2_spike_folder_is_excluded_by_prefix_not_its_siblings(tmp_path):
+    """scripts/layer2-spike/ (developer-only Layer 2 lock probes) stays in the repo and out of the zip. The rule is
+    a PATH PREFIX (the folder itself, or anything under it), never a top-level name: scripts/ still ships, and a
+    sibling that merely starts with the same characters (scripts/layer2-spikeX/) is not swallowed."""
+    repo = _repo(tmp_path)
+    for rel in ("scripts/layer2-spike/probe.py", "scripts/layer2-spike/sub/notes.md",
+                "scripts/layer2-spikeX/keep.py", "scripts/layer2-spike.md", "scripts/other.py"):
+        p = repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "spike")
+    r, out = _build(repo, "HEAD", "--version", "1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    root = "skyrim-ai-assistant-toolkit-1/"
+    names = _names(_zip(out))
+    assert not [n for n in names if n.startswith(root + "scripts/layer2-spike/")], names
+    for keep in ("scripts/layer2-spikeX/keep.py", "scripts/layer2-spike.md", "scripts/other.py", "README.md"):
+        assert root + keep in names, (keep, names)
+    spec = importlib.util.spec_from_file_location("brz_prefix", BUILDER_PY)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    assert m.is_excluded("scripts/layer2-spike") and m.is_excluded("scripts/layer2-spike/a/b.py")
+    assert not m.is_excluded("scripts/layer2-spikeX/keep.py") and not m.is_excluded("scripts/other.py")
+
+
 def test_an_untracked_file_refuses_the_build_and_never_reaches_the_zip(tmp_path):
     repo = _repo(tmp_path)
     (repo / "stray.txt").write_text("not committed\n")
@@ -194,7 +220,7 @@ def test_the_excludes_are_one_list_the_tests_can_read():
     spec = importlib.util.spec_from_file_location("build_release_zip", BUILDER_PY)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    assert set(mod.EXCLUDE) == {"tests", ".github"}, mod.EXCLUDE
+    assert set(mod.EXCLUDE) == {"tests", ".github", "scripts/layer2-spike"}, mod.EXCLUDE
 
 
 @pytest.mark.parametrize("args", [[], ["HEAD"], ["HEAD", "out", "--bogus"]])

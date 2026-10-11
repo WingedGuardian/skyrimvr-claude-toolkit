@@ -81,6 +81,7 @@ ABSENT_PATHS = (
     "tests",
     "tests/fixtures/routes-harness",
     ".github",
+    "scripts/layer2-spike",    # Plan 6 Layer 2 lock research probes: developer-only, kept in the repo, never shipped
     ".git",
     ".superpowers",
     ".skyguard",

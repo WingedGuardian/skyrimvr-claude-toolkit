@@ -40,9 +40,12 @@ def _line(out, name):
 
 @pytest.fixture(scope="module")
 def pristine(tmp_path_factory):
-    """The tree as the builder ships it: tracked content (copy_repo drops tests/), no .github/, a BUILD-INFO."""
+    """The tree as the builder ships it: tracked content (copy_repo drops tests/), minus every path the builder
+    excludes (.github/, scripts/layer2-spike/), a BUILD-INFO."""
     root = copy_repo(tmp_path_factory.mktemp("payload") / "toolkit")
     shutil.rmtree(root / ".github")
+    if (root / "scripts" / "layer2-spike").is_dir():
+        shutil.rmtree(root / "scripts" / "layer2-spike")
     for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", ".claude/backups",
                  "KNOWLEDGEBASE.local.md", ".superpowers", ".skyguard"):
         p = root / junk
@@ -123,6 +126,7 @@ BREAKS = {
     "tests-shipped": (_mkdir("tests"), "tests NOT shipped"),
     "routes-harness-shipped": (_mkdir("tests/fixtures/routes-harness"), "tests/fixtures/routes-harness NOT shipped"),
     "github-shipped": (_mkdir(".github"), ".github NOT shipped"),
+    "layer2-spike-shipped": (_mkdir("scripts/layer2-spike"), "scripts/layer2-spike NOT shipped"),
     "git-shipped": (_mkdir(".git"), ".git NOT shipped"),
     "superpowers-shipped": (_mkdir(".superpowers"), ".superpowers NOT shipped"),
     "skyguard-state-shipped": (_mkdir(".skyguard"), ".skyguard NOT shipped"),

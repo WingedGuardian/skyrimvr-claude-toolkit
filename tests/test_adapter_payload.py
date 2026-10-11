@@ -134,10 +134,10 @@ def test_the_release_gates_parse_and_lost_no_line_continuation():
 
 
 def test_the_release_zip_rule_does_not_exclude_the_new_paths():
-    """The builder ships `git archive` minus EXCLUDE; no excluded top-level path may swallow a new path."""
+    """The builder ships `git archive` minus EXCLUDE; no excluded path prefix may swallow a new path."""
     spec = importlib.util.spec_from_file_location("build_release_zip", REPO / "scripts" / "build_release_zip.py")
     b = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(b)
     assert b.EXCLUDE, "no exclude rules found: the zip rule changed, re-read it"
     for rel in NEW_PATHS:
-        assert rel.split("/")[0] not in b.EXCLUDE, f"{rel} is excluded from the zip by EXCLUDE"
+        assert not b.is_excluded(rel), f"{rel} is excluded from the zip by EXCLUDE"

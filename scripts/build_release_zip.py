@@ -42,9 +42,16 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-# Top-level paths that never ship. One list: the payload checker asserts their absence on the zip.
-# tests/ holds tests/fixtures/routes-harness/ among others; .github/ is CI.
-EXCLUDE = ("tests", ".github")
+# Repo-relative path PREFIXES that never ship: the path itself, or anything under it (is_excluded) -- never a bare
+# top-level name match, so excluding scripts/layer2-spike leaves the rest of scripts/ shipping. One list: the
+# payload checker asserts their absence on the zip. tests/ holds tests/fixtures/routes-harness/ among others;
+# .github/ is CI; scripts/layer2-spike/ is the Plan 6 Layer 2 lock research probes (developer-only, kept in the repo).
+EXCLUDE = ("tests", ".github", "scripts/layer2-spike")
+
+
+def is_excluded(path: str) -> bool:
+    """True when a repo-relative POSIX path is an EXCLUDE entry or lies under one."""
+    return any(path == e or path.startswith(e + "/") for e in EXCLUDE)
 BUILD_INFO = "BUILD-INFO"
 
 
@@ -201,7 +208,7 @@ def build(sha: str, version: str, outdir: Path) -> Path:
 
 
 def _archive(sha: str) -> bytes:
-    pathspec = ["."] + [":(exclude){}".format(e) for e in EXCLUDE]
+    pathspec = ["."] + [":(exclude,literal){}".format(e) for e in EXCLUDE]   # literal: a prefix, never a glob
     return _git("archive", "--format=tar", sha, "--", *pathspec, text=False).stdout
 
 
@@ -210,7 +217,7 @@ def expected_files(sha: str):
     out = {}
     for ln in _git("ls-tree", "-r", "--full-tree", sha).stdout.splitlines():
         meta, path = ln.split("\t", 1)
-        if path.split("/", 1)[0] not in EXCLUDE:
+        if not is_excluded(path):
             out[path] = meta.split()[2]
     return out
 
