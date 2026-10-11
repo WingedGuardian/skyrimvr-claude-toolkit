@@ -400,6 +400,34 @@ def test_plain_eol_attributes_still_build(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+def test_an_autocrlf_checkout_under_our_attributes_is_not_a_dirty_tree(tmp_path):
+    """CI run 38178385999 (windows-latest): the runner checks out with core.autocrlf=true, and the four files no
+    .gitattributes rule covered (.gitignore, LICENSE, SETUP_PROMPT.txt, tests/guard_corpus/game-root.txt) came out
+    CRLF. The builder's `git status` runs with core.autocrlf=false, so once git re-read them they were "modified"
+    and the release build refused a pristine checkout as dirty. Reproduced here on any OS: OUR .gitattributes, an
+    autocrlf checkout, then fresh mtimes so status must re-read every file instead of trusting the index stat."""
+    repo = _repo(tmp_path)
+    extra = {"LICENSE": "MIT\nline two\n", "SETUP_PROMPT.txt": "a\nb\n", "tests/guard_corpus/game-root.txt": "x\ny\n",
+             "docs/NOTES": "an extensionless\ntext file\n"}
+    for rel, text in extra.items():
+        p = repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(text.encode())
+    (repo / ".gitattributes").write_bytes((REPO / ".gitattributes").read_bytes())
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "our attributes")
+    tracked = _git(repo, "ls-files").splitlines()
+    for rel in tracked:
+        (repo / rel).unlink()
+    subprocess.run(["git", "-c", "core.autocrlf=true", "checkout", "-f", "--", "."], cwd=str(repo),
+                   capture_output=True, text=True, timeout=60, check=True)
+    later = os.stat(repo / ".git" / "index").st_mtime + 10
+    for rel in tracked:
+        os.utime(repo / rel, (later, later))
+    r, _ = _build(repo, "HEAD", "--version", "1")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
 def test_archive_name_comes_from_the_selected_commit_not_the_producer_checkout(tmp_path):
     repo = _repo(tmp_path)
     _commit_file(repo, "package.json", '{"name":"historical-slug"}\n')

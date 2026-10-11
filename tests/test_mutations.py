@@ -6614,6 +6614,11 @@ MUTATIONS += [
     # Linux-read files stay LF in an autocrlf checkout.
     pytest.param(".gitattributes", ".devcontainer/**   text eol=lf", "",
                  "tests/test_gen_agent_trees.py::test_files_linux_tools_read_are_pinned_lf", id="eol-devcontainer-lf"),
+    # CI run 38178385999: unpinned text files checked out CRLF on windows-latest and the release build refused
+    # the pristine checkout as dirty. The catch-all gives every text file an eol.
+    pytest.param(".gitattributes", "* text=auto eol=lf\n", "",
+                 _RB + "test_an_autocrlf_checkout_under_our_attributes_is_not_a_dirty_tree",
+                 id="eol-catch-all-keeps-autocrlf-checkout-clean"),
 ]
 
 # Final gate followups: launcher fallback, isolated barrier evidence, and accurate setup output.

@@ -5,6 +5,13 @@
 # committed with CRLF fails at exec time with "bad interpreter: /bin/bash^M",
 # so these types are pinned to LF in the repository regardless of the author's
 # core.autocrlf setting.
+#
+# Catch-all FIRST (later lines override it): every text file gets an explicit eol, so no path is left to the
+# checkout's core.autocrlf. MEASURED 2026-10-11 (CI run 38178385999, windows-latest): .gitignore, LICENSE,
+# SETUP_PROMPT.txt and tests/guard_corpus/game-root.txt matched no rule, checked out CRLF under the runner's
+# autocrlf=true, and build_release_zip.py -- whose `git status` runs with core.autocrlf=false so .gitattributes
+# alone decides -- saw them as modified and refused the release build as a dirty tree.
+* text=auto eol=lf
 *.sh    text eol=lf
 *.py    text eol=lf
 *.js    text eol=lf
