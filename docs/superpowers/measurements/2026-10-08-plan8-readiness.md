@@ -61,6 +61,35 @@ The 30 pricing changes concern guard-file advice, a logged lock lift, in-place r
 
 The local source-checkout hook notices are consistent with an unrendered template path failing before the wrapper starts. That is a reproduced launcher symptom and an inference about the app's exact launch, not observed host telemetry. A configured fake-install pass does not establish live hook approval in this source session.
 
+## Independent review round — 2026-10-10/11
+
+A second, independent review of the whole release range after `601b4df` returned CHANGES. Six commits fix it (`8a89f3d..86f2633`); master was locally fast-forwarded to `86f263385cc7b3cbb3da9bcac79e25a672fc822c`.
+
+| Reproduced finding | Disposition |
+|---|---|
+| A printed state delete, piped or substituted into an executor, no longer hit the guard-state rule | Restored on every route probed (pipes, `iex`, substitution, `eval`, run-after-redirect, `tee`, `xargs`, `cmd /c`, process substitution), guards on and off, relative and absolute |
+| A Recycle-Bin delete of guard state with a computed operand (variable, concatenation, string formatting) lost the guard-state rule | A format-token or empty operand is now unplaceable, so every quoted word is a candidate; an independent probe of ten spellings not in the fix's own tests refused 30 of 30, and 9 of 9 outside controls were allowed |
+| Output-inert approval could pass a step the parser dropped | Inert only when every part of the command belongs to a parsed step |
+| Leak-scan allowances had no floor; the verifier took the archive root from the checkout | Floor added; root read from the archive's own package metadata |
+| CHANGELOG combined issues, overclaimed and filed new-feature fixes as 3.x fixes | One issue per line; self-protection lines moved under the new feature |
+
+Pre-existing gaps found by the same review (a printed path piped into a delete, `cmd /c for /f … do del`, absolute-path read-only inspection refused) are recorded as CHANGELOG Known limits, not fixed in this release.
+
+Full gate on `86f2633`:
+
+| Check | Observed result |
+|---|---|
+| Full ordinary suite | 9,361 passed, 61 skipped, zero failed; 1,274.32 seconds |
+| CI output-format selftest | 20 passed |
+| Full mutation run | 2,218 passed, two platform skips, one failure: the `messages-no-echo` mutant hit the 600-second per-mutant timeout under eight-way load. Serial rerun killed it (404 seconds). No survivor |
+| Historical decision pricing against `601b4df` | 82,112 calls; zero engine errors in either version; 68 unchanged parse failures; zero decisions moved in any direction |
+| Cold local-clone build at `86f2633` | Archive bytes and all 284 member hashes identical to the producer build |
+| Actual payload checker | Wrong-commit control failed; correct commit passed |
+| Actual scrubbed artifact verification | Passed; no leaks |
+| Independent leak scan | One archive root, no forbidden members, no user name, email, account or key-shaped value; every user-folder path is a placeholder |
+
+Four earlier full-gate attempts on this commit were stopped by the resource watchdog when the game started and exhausted commit memory, and one by a low-memory process reaper during mutations. None counts as a result. On the user's explicit instruction, the gate that produced the table above ran outside the shared resource manager, at below-normal priority with eight workers. The `messages-no-echo` mutant needs about 400 seconds when run alone, which leaves too little margin under its 600-second cap.
+
 ## Remaining user and host work
 
 1. **Current Codex E2E:** complete the prepared isolated device-login flow in a fresh owned non-temporary home. No existing credentials are copied and no global trust is edited. Then recapture scratch-install E2E on the current installed CLI; historical captures used a different CLI version. Interactive approval, context/lifts and subfolder behavior need their own observations. Claude's quota-consuming E2E half remains deferred unless authorized.
