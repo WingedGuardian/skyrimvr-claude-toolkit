@@ -23,6 +23,10 @@
 - **Emergency unlock:** `tools/skyguard-unlock.cmd` works from the user's terminal without Python.
 - **Shadow mode:** `guards off` allows eligible refusals and asks with a warning and audit record.
 - **Guard self-protection:** recognized writes and deletes targeting `.skyguard/` are refused.
+- **Self-protection for printed deletes:** delete text that an interpreter prints into a shell or interpreter (a pipe, a substitution or a script the same command runs) is refused, including under `guards off`.
+- **Self-protection for Recycle Bin deletes through a variable:** a Recycle-Bin delete of guard state is refused when its path comes from a variable, an environment variable, string concatenation or string formatting, including under `guards off`.
+- **Self-protection and parser inspection:** a Python command that only prints or parses delete examples, with output that nothing in the command runs, is not refused as a guard-state delete.
+- **Self-protection and outside examples:** quoted Recycle Bin examples outside the install are not read as guard-state operands.
 - **Guard integrity banner:** session start reports guard files that differ from `GUARD-FILES.sha256`.
 - **Layer diagnostics:** `bash tools/skydoctor` reports live, not live or unknown for each protection layer.
 - **Backup manifest:** backups record the original path, size and SHA-256 in `.claude/backups/MANIFEST.jsonl`.
@@ -176,10 +180,6 @@
 - **Documentation link check:** the suite checks relative links.
 - **Link-check scope:** dependency website Markdown does not count as toolkit filesystem links.
 - **Codex E2E verdicts:** include checks added after the live probe returns, so a late failure cannot leave PASS cached.
-- **Recycle Bin example parsing:** quoted examples outside the install no longer become unresolved guard-state operands.
-- **Recycle Bin deletes through a variable:** a Recycle-Bin delete of guard state whose path comes from a variable, an environment variable or string concatenation refuses, including under `guards off`.
-- **Parser inspection false refusal:** a Python command that only prints or parses delete examples, with output that nothing in the command runs, is no longer refused as a guard-state delete.
-- **Printed guard-state deletes:** delete text that an interpreter prints into a shell or interpreter (a pipe, a substitution or a script the same command runs) refuses, including under `guards off`.
 - **Corpus path derivation:** preserves the historical mixed-slash spelling while removing it from shipped helpers.
 - **Test tripwire isolation:** intentional setup denials do not contaminate another test's barrier log.
 - **MSYS path regression:** explicitly mounts the test fixture instead of skipping on a mismatched temporary directory.
@@ -243,6 +243,9 @@
 - **Uncommon shell option forms:** can escape recognized self-protection.
 - **Shell aliases:** can escape recognized self-protection.
 - **Printed deletes across commands:** text one command writes to a script and a later command runs is not traced.
+- **Piped delete operands:** a path one program prints and the next deletes (`| Remove-Item`, `| ForEach-Object { Remove-Item $_ }`, `Remove-Item $(...)`, `| while read f; do rm "$f"`) is not resolved for self-protection.
+- **cmd for-loops:** deletes inside `cmd /c for /f ... do del` are not recognized.
+- **Absolute-path inspection:** a read-only inspection that prints a delete of an absolute install path is refused by the install-delete rule, which `guards off` lifts.
 - **Empty paths files:** can lose non-install protection folders if neither paths file retains them.
 - **Broken legacy file:** beside a valid root file it is reported, but does not itself stop the guard.
 - **Neutral shadow mode:** the neutral entry does not honour a guards-off lift.
