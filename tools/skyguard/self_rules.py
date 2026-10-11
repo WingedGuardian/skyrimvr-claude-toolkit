@@ -432,13 +432,84 @@ def _is_inspection(x) -> bool:
 # command; whatever is left once they are all removed must be separators only. `pwsh -File <(python ...)` read as
 # PowerShell yields the python exec alone and leaves `pwsh -File <( )` unattributed: not inert.
 _SEPARATORS_ONLY = re.compile(r"[\s|;&()]*")
+# Final review: shell STRUCTURE is glue too, but only where it is structure (`X=1; P`, `if true; then P; fi`,
+# `{ P; } | head`, `for i in 1; do P; done`, PowerShell `$o = P; $o` were refused by the separators-only test). Each
+# leftover token must be a separator, a brace, a keyword of the dialect, a bash assignment of a plain value, a
+# PowerShell variable shown, a for-loop's plain list word, or a case subject/pattern in its position. Any other word
+# (`pwsh`, `-File`, `<`) is a step the parser did not see. cmd (and an unknown dialect) keeps separators only.
+_GLUE_TOKEN = re.compile(r";;|&&|\|\||[|;&(){}\n]|[^\s|;&(){}]+")
+_GLUE_PUNCT = frozenset((";;", "&&", "||", "|", ";", "&", "(", ")", "{", "}", "\n"))
+_KEYWORDS = {
+    "bash": frozenset("if then else elif fi for while until do done case esac in function select time !".split()),
+    "powershell": frozenset("if elseif else foreach for while do until switch in function".split()),
+}
+_GLUE_NAME = re.compile(r"[A-Za-z_]\w*")
+_GLUE_PLAIN = re.compile(r"[\w.\-/:,+@%]+")
+_GLUE_PATTERN = re.compile(r"[\w.\-/:,+@%*?\[\]]+")
+_BASH_ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=[\w.\-/:,+@%]*")
+_PS_VARIABLE = re.compile(r"\$[A-Za-z_]\w*")
+
+
+def _structure_only(rest: str, dialect: str) -> bool:
+    """True when `rest` (a command with every parsed step removed) is shell structure only, read as `dialect`."""
+    keywords = _KEYWORDS.get(dialect)
+    if keywords is None:
+        return _SEPARATORS_ONLY.fullmatch(rest) is not None
+    toks = _GLUE_TOKEN.findall(rest)
+    want_name = False       # after for / select / function: the loop variable or function name
+    loop_list = False       # after `for NAME in`: plain words until a separator
+    case = 0                # 1: subject next, 2: `in` next, 3: in the body
+    pattern = False         # at a case pattern position (after `in`, `;;`, or a pattern's `|` / leading `(`)
+    for i, tok in enumerate(toks):
+        nxt = toks[i + 1] if i + 1 < len(toks) else ""
+        if want_name:
+            if not _GLUE_NAME.fullmatch(tok):
+                return False
+            want_name = False
+        elif case == 1:
+            if not _GLUE_PLAIN.fullmatch(tok):
+                return False
+            case = 2
+        elif case == 2:
+            if tok != "in":
+                return False
+            case, pattern = 3, True
+        elif case == 3 and pattern and tok in ("(", "|"):
+            pass
+        elif case == 3 and pattern and tok == ")":
+            pattern = False
+        elif case == 3 and pattern and nxt in (")", "|"):
+            if not _GLUE_PATTERN.fullmatch(tok):
+                return False
+        elif tok in _GLUE_PUNCT:
+            loop_list = loop_list and tok not in (";", "\n")
+            pattern = case == 3 and tok == ";;"
+        elif loop_list:
+            if not _GLUE_PLAIN.fullmatch(tok):
+                return False
+        elif tok in keywords:
+            if dialect == "bash":
+                want_name = tok in ("for", "select", "function")
+                loop_list = tok == "in" and i >= 2 and toks[i - 2] in ("for", "select")
+                if tok == "case":
+                    case = 1
+                if tok == "esac":
+                    case, pattern = 0, False
+        elif dialect == "bash" and _BASH_ASSIGNMENT.fullmatch(tok):
+            pass
+        elif dialect == "powershell" and _PS_VARIABLE.fullmatch(tok):
+            pass
+        else:
+            return False
+    return True
 
 
 def _unattributed(command: str, parsed) -> bool:
     rest = command
     for seg in sorted({x.segment.strip() for x in parsed.execs if x.segment.strip()}, key=len, reverse=True):
         rest = rest.replace(seg, " ")
-    return _SEPARATORS_ONLY.fullmatch(rest) is None
+    # Read as every dialect the parse used (shell="" unions bash and PowerShell): glue must be glue in each.
+    return not all(_structure_only(rest, d) for d in {x.dialect for x in parsed.execs} or {""})
 
 
 def _output_inert(parsed, e, command=None) -> bool:

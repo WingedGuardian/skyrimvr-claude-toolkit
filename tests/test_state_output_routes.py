@@ -52,6 +52,10 @@ EXECUTED_BASH = {
     "eval-cmdsubst": "eval \"$(python -c \"print('rm -f \\\"{P}\\\"')\")\"",
     "pipe-python-dash": "python -c \"print('import os; os.remove(\\\"{P}\\\")')\" | python -",
     "pipe-xargs-rm": "python -c \"print('{P}')\" | xargs rm",
+    # Final review: structure around the inspection never vouches for an executor beside it.
+    "if-then-pipe-powershell": "if true; then " + PRINT_DELETE + "; fi | powershell -",
+    "for-do-pipe-powershell": "for i in 1; do " + PRINT_DELETE + "; done | powershell -Command -",
+    "assignment-then-pipe-powershell": "X=1; " + PRINT_DELETE + " | powershell -",
 }
 EXECUTED_PS = {
     "pipe-iex": PRINT_DELETE + " | iex",
@@ -62,6 +66,10 @@ EXECUTED_PS = {
     "herestring-python-iex": "@'\nprint('[IO.File]::Delete(''{P}'')')\n'@ | python - | iex",
     # Re-review F3: the PowerShell parse of this drops the pwsh step entirely; the inert test must not vouch for it.
     "pwsh-file-procsubst": "pwsh -File <(" + PRINT_DELETE + ")",
+    # Final review: an assignment or a shown variable beside the dropped step does not make it glue.
+    "assign-then-pwsh-file-procsubst": "$o = 1; pwsh -File <(" + PRINT_DELETE + ")",
+    "variable-then-pwsh-file-procsubst": "$o; pwsh -File <(" + PRINT_DELETE + ")",
+    "variable-pipe-iex": "$o = " + PRINT_DELETE + "; $o | iex",
 }
 EXECUTED = [(k, "bash", v) for k, v in EXECUTED_BASH.items()] + [(k, "powershell", v) for k, v in EXECUTED_PS.items()]
 
@@ -78,6 +86,15 @@ INERT = {
     "stderr-to-script-name": ("bash", PRINT_DELETE + " 2> trace.ps1"),
     # Not an inspection: Node printing a state delete with nothing to run it is a mention.
     "node-print-alone": ("bash", "node -e \"console.log('[IO.File]::Delete(\\'{P}\\')')\""),
+    # Final review: shell structure around the inspection is glue, not an unattributed step (allowed at 503b3e4).
+    "assignment-then-inspect": ("bash", "X=1; " + PRINT_DELETE),
+    "if-then-inspect": ("bash", "if true; then " + PRINT_DELETE + "; fi"),
+    "group-pipe-head": ("bash", "{ " + PRINT_DELETE + "; } | head"),
+    "for-do-inspect": ("bash", "for i in 1; do " + PRINT_DELETE + "; done"),
+    "while-do-inspect": ("bash", "while true; do " + PRINT_DELETE + "; done"),
+    "case-inspect": ("bash", "case x in x|y) " + PRINT_DELETE + ";; esac"),
+    "ps-variable-shown": ("powershell", "$o = " + PRINT_DELETE + "; $o"),
+    "ps-if-block": ("powershell", "if ($true) { " + PRINT_DELETE + " }"),
 }
 
 
@@ -120,6 +137,61 @@ def test_output_is_not_inert_when_the_parser_cannot_vouch_for_the_command(clause
                "shell-string": parsed._replace(codes=(("bash", "x"),)),
                "xargs": parsed._replace(xargs=("cat",)), "decoded": parsed._replace(unread=True)}.get(clause, parsed)
     assert not self_rules._output_inert(changed, e, command), clause
+
+
+# Final review: what is left once every parsed step is removed. Shell structure is glue only where it is structure.
+STRUCTURE = {
+    "if-fi": ("bash", " ;  ; fi", True),
+    "assignment": ("bash", "X=1;  ", True),
+    "group": ("bash", " ; } |  ", True),
+    "for-list": ("bash", "for i in 1 2;  ; done", True),
+    "case-patterns": ("bash", "case x in (x|y)  ;; z)  ;; esac", True),
+    "bang": ("bash", "! ", True),
+    "ps-variable": ("powershell", " ; $o", True),
+    "ps-if": ("powershell", "if ($true) {   }", True),
+    "cmd-separators": ("cmd", " ; ", True),
+    "f3-bash": ("bash", "pwsh -File <( )", False),
+    "f3-powershell": ("powershell", "pwsh -File <( )", False),
+    "bash-dollar-word": ("bash", " ; $o", False),
+    "ps-no-bash-assignment": ("powershell", "X=1;  ", False),
+    "assignment-value-not-plain": ("bash", "X=$( );  ", False),
+    "for-list-ends-at-separator": ("bash", "for i in 1; pwsh ; done", False),
+    "case-command-position": ("bash", "case x in x) pwsh ;; esac", False),
+    "case-word-before-paren": ("bash", "case x in x) pwsh) ;; esac", False),
+    "for-variable-is-a-name": ("bash", "for pwsh-x in 1;  ; done", False),
+    "case-subject-is-plain": ("bash", "case <x in x)  ;; esac", False),
+    "cmd-no-keywords": ("cmd", " ; fi", False),
+    "case-in-follows-subject": ("bash", "case x pwsh in x)  ;; esac", False),
+    "case-pattern-is-one-word": ("bash", "case x in x pwsh)  ;; esac", False),
+    "case-pattern-is-plain": ("bash", "case x in <x)  ;; esac", False),
+    "case-pattern-after-double-semicolon-only": ("bash", "case x in x)  ; pwsh) ;; esac", False),
+    "case-ends-at-esac": ("bash", "case x in x)  ;; esac pwsh)", False),
+    "for-list-is-plain": ("bash", "for i in <x;  ; done", False),
+    "in-starts-a-list-only-after-for-name": ("bash", "fi in pwsh", False),
+    "ps-for-takes-no-bash-name": ("powershell", "for ($i) {   }", True),
+}
+
+
+@pytest.mark.parametrize("name", sorted(STRUCTURE))
+def test_only_shell_structure_is_glue_between_parsed_steps(name):
+    from skyguard import self_rules
+    dialect, rest, expected = STRUCTURE[name]
+    assert self_rules._structure_only(rest, dialect) is expected, (name, rest)
+
+
+def test_structure_must_be_glue_in_every_dialect_the_command_was_read_as():
+    # shell="" unions the bash and PowerShell readings; `$o` is a shown variable only to PowerShell, so a step read as
+    # bash as well leaves it unvouched. (Built by hand: on real commands the union usually also holds a `?` step.)
+    from skyguard import self_rules, shellparse
+    command = "$o; " + PRINT_DELETE.replace("{P}", REL)
+    parsed = shellparse.parse(command, "powershell")
+    e = parsed.execs[0]
+    assert e.program == "python" and len(parsed.execs) == 1
+    assert self_rules._output_inert(parsed, e, command)
+    both = parsed._replace(execs=parsed.execs + (e._replace(dialect="bash"),))
+    assert not self_rules._output_inert(both, e, command)
+    # No parsed step at all: nothing vouches for the text, so it is read as separators only, never as `all([])`.
+    assert self_rules._unattributed("pwsh -File x", shellparse.Parsed((), True, ""))
 
 
 def test_the_original_quoted_scan_runs_when_the_output_is_not_inert():
