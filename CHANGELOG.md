@@ -131,6 +131,8 @@
 
 - **Artifact bytecode:** payload verification avoids creating machine-specific bytecode in the extracted archive before scanning it for leaks.
 - **Virtual environment verification:** scrubbed checks recognize the measured interpreter directory alongside its base Python installation.
+- **Leak-scan allowance floor:** an allowance that is the home folder, a folder above it or a drive root is never applied.
+- **Cross-product verification:** `verify-release.sh` takes the expected root from the zip's own product name and names an artifact of another product, with the remedy.
 - **Bash interpreter probes:** health checks preserve failed engine results so session checks and backups cannot falsely record completion.
 - **3.x PowerShell coverage:** the Bash-only matcher left PowerShell calls unguarded.
 - **3.x Monitor coverage:** shell commands through Monitor now reach the command guard.
