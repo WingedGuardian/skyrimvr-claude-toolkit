@@ -74,7 +74,7 @@ advise() { hooklog ADVISE "$1"; ADVICE="${ADVICE:+$ADVICE | }$1"; }
 # The old rule asked "does this command mention a path containing the word Skyrim".
 # MEASURED 2026-09-08, every one of these matched and none is the live install:
 #
-#   C:/Users/Moona/Projects/skyrimvr-claude-toolkit   our own repo checkout
+#   C:/Users/Dovah/Projects/skyrimvr-claude-toolkit   our own repo checkout
 #   .../Temp/claude/C--GOG-Games-...-Skyrim-VR/...    the session scratchpad
 #   C:/Temp/skyrim-notes.txt                          a note that happens to be named
 #   .../Downloads/skyrimvr-claude-toolkit-3.8.3.zip   a downloaded zip

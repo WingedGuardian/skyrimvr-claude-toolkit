@@ -309,4 +309,4 @@ def test_the_doc_uses_no_agent_specific_construct_beyond_naming_the_two_supporte
 
 def test_the_doc_contains_no_personal_path():
     t = DOC.read_text(encoding="utf-8")
-    assert not re.search(r"[A-Za-z]:[\\/](Users|GOG)|/Users/\w+|Moona|AppData", t)
+    assert not re.search(r"[A-Za-z]:[\\/](Users|GOG)|/Users/\w+|AppData", t)

@@ -326,7 +326,7 @@ def test_every_hook_writes_a_liveness_heartbeat(project):
      "Remove-Item -- and powershell is allow-listed"),
     (f'find "{GAME}" -delete', "find -delete"),
     (f'python -c "import shutil; shutil.rmtree(r\'{GAME}\')"', "shutil.rmtree"),
-    ('rm -rf "C:/Users/Moona/Documents/My Games/Skyrim VR"', "the config directory"),
+    ('rm -rf "C:/Users/Dovah/Documents/My Games/Skyrim VR"', "the config directory"),
     ('reg.exe delete "HKLM' + BS + 'SOFTWARE' + BS + 'Bethesda Softworks" /f',
      "reg.exe -- the old pattern needed whitespace straight after `reg`"),
     # DOUBLED separators. `shutil.rmtree('C:\\Games\\Skyrim VR')` is not an exotic
