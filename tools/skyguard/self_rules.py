@@ -545,7 +545,10 @@ def _recycle_delete(command: str, parsed, cwd, env, roots) -> str:
     return ""
 
 
-_FORMAT_HOLE = re.compile(r"\{[^{}\n]{0,80}\}|%(?:\([^)\n]{0,80}\))?[-#0 +]*\d*[sr]")
+# printf: `%` [`(name)`] [flags] [width: digits or `*`] [`.` precision: digits or `*`] conversion s / r / a
+# (final review: `%.80s`, `%-10.5s`, `%*s`, `%.*s`, `%(p).10s`, `%.80a`). A brace hole is any `{...}`, so `{0:>20}`
+# and `{p!r:10}` count.
+_FORMAT_HOLE = re.compile(r"\{[^{}\n]{0,80}\}|%(?:\([^)\n]{0,80}\))?[-#0 +]*(?:\*|\d+)?(?:\.(?:\*|\d*))?[sra]")
 
 
 def _recycle_abs(w: str, how: str, base, env) -> Optional[str]:

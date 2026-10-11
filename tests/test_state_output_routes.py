@@ -187,6 +187,32 @@ RECYCLE_BASH = {
                             "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"%(p)s\\\",1,2)' % {'p': p}])\"",
     "node-concat": "node -e \"const p='{P}'; require('child_process').execSync('powershell -Command "
                    "\\\"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\''+p+'\\',1,2)\\\"')\"",
+    # Final review: printf precision and star-width forms, the r/a conversions, and format specs are format holes too.
+    "python-percent-precision": "python -c \"import subprocess; subprocess.run(['powershell','-Command',"
+                                "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"%.80s\\\",1,2)' "
+                                "% '{P}'])\"",
+    "python-percent-left-precision": "python -c \"import subprocess; subprocess.run(['powershell','-Command',"
+                                     "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"%-10.5s\\\",1,2)' "
+                                     "% '{P}'])\"",
+    "python-percent-star": "python -c \"import subprocess; subprocess.run(['powershell','-Command',"
+                           "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"%*s\\\",1,2)' % (0, '{P}')])\"",
+    "python-percent-dot-star": "python -c \"import subprocess; subprocess.run(['powershell','-Command',"
+                               "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"%.*s\\\",1,2)' "
+                               "% (80, '{P}')])\"",
+    "python-percent-named-precision": "python -c \"import subprocess; p='{P}'; subprocess.run(['powershell',"
+                                      "'-Command','[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile("
+                                      "\\\"%(p).80s\\\",1,2)' % {'p': p}])\"",
+    "python-percent-repr": "python -c \"import subprocess; subprocess.run(['powershell','-Command',"
+                           "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(%r,1,2)' % '{P}'])\"",
+    "python-percent-ascii-precision": "python -c \"import subprocess; subprocess.run(['powershell','-Command',"
+                                      "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"%.80a\\\",1,2)' "
+                                      "% '{P}'])\"",
+    "python-format-spec": "python -c \"import subprocess; subprocess.run(['powershell','-Command',"
+                          "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"{0:>20}\\\",1,2)'"
+                          ".format('{P}')])\"",
+    "python-format-conversion-spec": "python -c \"import subprocess; p='{P}'; subprocess.run(['powershell','-Command',"
+                                     "'[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile({p!r:10},1,2)'"
+                                     ".format(p=p)])\"",
 }
 RECYCLE_PS = {
     "direct-variable": "$p='{P}'; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p,'OnlyErrorDialogs',"
@@ -213,6 +239,28 @@ def test_recycle_delete_through_a_variable_outside_the_install_is_allowed(name, 
     assert not (fired & set(S.SELF_IDS)), (name, decision, reason, fired)
     (decision, reason), fired = S.shell(template.replace("{P}", "C:/Temp/scratch/old.log"), shell, cwd="C:/Temp")
     assert decision == "allow" and not fired, (name, decision, reason, fired)
+
+
+OUTSIDE_ODD = ["C:/Temp/{1b2c}/x.txt", "C:/Temp/100%sure.txt", "C:/Temp/%.80s/x.txt"]
+
+
+@pytest.mark.parametrize("path", OUTSIDE_ODD)
+@pytest.mark.parametrize("how", ["literal", "percent-precision", "format-spec"])
+def test_recycle_delete_of_an_outside_path_with_braces_or_percent_is_allowed(path, how):
+    # A brace or percent inside an outside path makes the literal look like a format hole; the fallback then finds
+    # only that outside path, so the delete is still allowed (self-protection only fires on the state).
+    literal = "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\\\"" + path + "\\\",1,2)"
+    template = {"literal": "'" + literal + "'",
+                "percent-precision": RECYCLE_BASH["python-percent-precision"],
+                "format-spec": RECYCLE_BASH["python-format-spec"]}[how]
+    if how == "literal":
+        cmd = "python -c \"import subprocess; subprocess.run(['powershell','-Command'," + template + "])\""
+    else:
+        cmd = template.replace("{P}", path)
+    (decision, reason), fired = S.shell(cmd, "bash")
+    assert not (fired & set(S.SELF_IDS)), (how, path, decision, reason, fired)
+    (decision, reason), fired = S.shell(cmd, "bash", cwd="C:/Temp")
+    assert decision == "allow" and not fired, (how, path, decision, reason, fired)
 
 
 def test_recycle_delete_through_a_variable_no_resolver_can_place_counts():

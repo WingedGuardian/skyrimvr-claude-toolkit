@@ -7459,7 +7459,15 @@ MUTATIONS += [pytest.param("tools/skyguard/self_rules.py", *m[:3], id=m[3]) for 
     (" and not _FORMAT_HOLE.search(w)\n", "\n", _RRR % "python-fstring", "rr-f1-format-hole-is-unplaced"),
     (r'_FORMAT_HOLE = re.compile(r"\{[^{}\n]{0,80}\}|', '_FORMAT_HOLE = re.compile(r"',
      _RRR % "python-format", "rr-f1-hole-braces"),
-    (r'|%(?:\([^)\n]{0,80}\))?[-#0 +]*\d*[sr]")', '")', _RRR % "python-percent", "rr-f1-hole-percent"),
+    # (Re-anchored in the final-review round: the percent hole grew width, precision and the `a` conversion.)
+    (r'|%(?:\([^)\n]{0,80}\))?[-#0 +]*(?:\*|\d+)?(?:\.(?:\*|\d*))?[sra]")', '")', _RRR % "python-percent",
+     "rr-f1-hole-percent"),
+    # Final review: printf star width, precision (digits and star), and the `a` conversion.
+    (r'[-#0 +]*(?:\*|\d+)?(?:\.', r'[-#0 +]*\d*(?:\.', _RRR % "python-percent-star", "fr-f1-hole-star-width"),
+    (r'(?:\.(?:\*|\d*))?[sra]")', r'[sra]")', _RRR % "python-percent-precision", "fr-f1-hole-precision"),
+    (r'(?:\.(?:\*|\d*))?[sra]")', r'(?:\.\d*)?[sra]")', _RRR % "python-percent-dot-star", "fr-f1-hole-star-precision"),
+    (r'(?:\.(?:\*|\d*))?[sra]")', r'(?:\.(?:\*|\d*))?[sr]")', _RRR % "python-percent-ascii-precision",
+     "fr-f1-hole-ascii-conversion"),
     (r'%(?:\([^)\n]{0,80}\))?[-#0 +]', r'%[-#0 +]', _RRR % "python-percent-named", "rr-f1-hole-percent-named"),
     # Re-review F3: the inert allowlist vouches only for steps the parser saw.
     ("    if command is None or _unattributed(command, parsed):\n", "    if command is None:\n",
