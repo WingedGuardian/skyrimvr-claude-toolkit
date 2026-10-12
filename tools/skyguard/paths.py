@@ -101,7 +101,7 @@ _DRIVE_ABS = re.compile(r"([A-Za-z]):/")
 # to None -- unknown, and allowed unless the text named a root (a fail-open). There the current drive's root IS `/`.
 # Read once at import; Windows is unchanged. Tests flip it to exercise the POSIX reading on any host.
 POSIX_HOST = os.name != "nt"
-_MSYS_DRIVE =re.compile(r"/(?:proc/cygdrive/|cygdrive/|mnt/)?([A-Za-z])(?:/|$)")
+_MSYS_DRIVE = re.compile(r"/(?:proc/cygdrive/|cygdrive/|mnt/)?([A-Za-z])(?:/|$)")
 
 
 def _fold(tail: str) -> str:
