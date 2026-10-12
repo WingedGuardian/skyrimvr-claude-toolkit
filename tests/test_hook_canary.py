@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import BASH, REPO, install_hooks
+from conftest import BASH, REPO, install_hooks, offers_python, python_free_path
 
 TOOL = REPO / "tools" / "hook-canary.sh"
 HOOK = "protect-bash"
@@ -212,12 +212,15 @@ def test_with_no_python_it_says_so_and_exits_2(tmp_path):
     (root / ".claude" / "hooks" / "protect-bash.sh").write_text('PY="{{PYTHON_PATH}}"\n', encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    # a PATH holding only bash's own directory: no python3, python or py
-    env = {"CLAUDE_PROJECT_DIR": str(root).replace("\\", "/"), "PATH": str(Path(BASH).parent),
+    # a PATH holding only bash's own directory, minus any python3, python or py. Linux CI run 38277736359: bash's
+    # directory there is /usr/bin, which holds python3, so this test SKIPPED on every Linux leg (it said "a Python 3
+    # is reachable"); python_free_path keeps /usr/bin's other commands through a python-free mirror instead.
+    path = python_free_path(str(Path(BASH).parent))
+    assert not any(offers_python(d) for d in path.split(os.pathsep) if d), path
+    env = {"CLAUDE_PROJECT_DIR": str(root).replace("\\", "/"), "PATH": path,
            "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""), "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE", "")}
     p = subprocess.run([BASH, str(TOOL)], capture_output=True, text=True, env=env, timeout=120)
-    if "UNMEASURABLE: no Python 3" not in p.stdout:
-        pytest.skip("a Python 3 is reachable from bash's own directory on this machine")
+    assert "UNMEASURABLE: no Python 3" in p.stdout, p.stdout[-1500:]
     assert p.returncode == 2
 
 
