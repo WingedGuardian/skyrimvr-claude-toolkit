@@ -187,14 +187,87 @@ def install_hooks(root: Path, names=None, python: str | None = None, with_engine
     return root
 
 
+#: The names the wrappers' fallback chain looks up on PATH (`py -3`, `python`, `python3`).
+PYTHON_NAMES = ("python", "python3", "py")
+
+
+def offers_python(directory: str) -> bool:
+    d = Path(directory)
+    return any((d / n).exists() or (d / (n + ".exe")).exists() for n in PYTHON_NAMES)
+
+
+def _is_python_name(name: str) -> bool:
+    low = name.lower()
+    return low.startswith("python") or low in ("py", "py.exe")
+
+
+def _mirror_without_python(directory: str, into: Path) -> None:
+    """Link every entry of `directory` except the Pythons into `into` (symlink; a hard link or a copy where
+    the platform refuses one)."""
+    into.mkdir(parents=True, exist_ok=True)
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return
+    for name in names:
+        src = Path(directory) / name
+        if _is_python_name(name) or not src.is_file() or (into / name).exists():
+            continue
+        try:
+            os.symlink(src, into / name)
+        except OSError:
+            try:
+                os.link(src, into / name)
+            except OSError:
+                shutil.copy2(src, into / name)
+
+
+_MIRRORS: dict = {}
+
+
+def python_free_path(path: str | None = None, *, mirror: bool | None = None, base: Path | None = None) -> str:
+    """PATH with no python, py or python3 on it -- and EVERYTHING ELSE still on it.
+
+    Dropping each directory that offers a python is enough on Windows, where the Pythons live in their own
+    directories. On Linux the system python3 lives in /usr/bin beside cat, mkdir, tr and sleep: dropping
+    /usr/bin made `INPUT=$(cat)` in every hook wrapper fail with "cat: command not found", so every hook read
+    an EMPTY payload (GUARD INERT ... received no file path / receipt NO PAYLOAD) and mkdir could not make the
+    heartbeat directory. The first native-Linux CI run (38178385999) failed 36 hook tests that way. So a
+    dropped directory is replaced by a mirror of its non-Python entries (default: on every non-Windows
+    platform). `mirror` and `base` are seams for tests/test_python_free_path.py."""
+    path = os.environ.get("PATH", "") if path is None else path
+    mirror = (os.name != "nt") if mirror is None else mirror
+    keep = []
+    for d in path.split(os.pathsep):
+        if not d:
+            continue
+        if not offers_python(d):
+            keep.append(d)
+        elif mirror:
+            key = (d, str(base))
+            if key not in _MIRRORS:
+                if base is None:
+                    import atexit
+                    import tempfile
+                    root = Path(tempfile.mkdtemp(prefix="python-free-path-"))
+                    atexit.register(shutil.rmtree, root, True)
+                else:
+                    root = base
+                link_dir = root / str(len(_MIRRORS))
+                _mirror_without_python(d, link_dir)
+                _MIRRORS[key] = str(link_dir)
+            keep.append(_MIRRORS[key])
+    return os.pathsep.join(keep)
+
+
 def no_python_env(**extra) -> dict:
-    """An environment in which the hook wrappers' interpreter fallback chain finds NOTHING: PATH minus every
-    directory that offers a python, and no LOCALAPPDATA / PROGRAMFILES to search. For tests that mean
-    "the interpreter is unusable" (Plan 4 Task 5: otherwise the chain would, correctly, rescue the call)."""
-    keep = [d for d in os.environ.get("PATH", "").split(os.pathsep)
-            if d and not any((Path(d) / n).exists() or (Path(d) / (n + ".exe")).exists()
-                             for n in ("python", "python3", "py"))]
-    return dict(os.environ, PATH=os.pathsep.join(keep), LOCALAPPDATA="", PROGRAMFILES="", **extra)
+    """An environment in which the hook wrappers' interpreter fallback chain finds NOTHING: PATH with no
+    python on it (python_free_path), no LOCALAPPDATA / PROGRAMFILES to search, and the fixed system locations
+    (/usr/bin/python3, /usr/local/bin/python3 -- present on every Linux runner) switched off with the
+    wrappers' SKYGUARD_NO_SYSTEM_PYTHON knob. For tests that mean "the interpreter is unusable" (Plan 4
+    Task 5: otherwise the chain would, correctly, rescue the call)."""
+    return dict(os.environ, PATH=python_free_path(), LOCALAPPDATA="", PROGRAMFILES="",
+                SKYGUARD_NO_SYSTEM_PYTHON="1", **extra)
 
 
 def key_path(game: Path, label: str) -> str:

@@ -42,6 +42,7 @@ def _fire(root: Path, shim_dirs: list, payload: dict, extra_env: dict | None = N
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root), LOCALAPPDATA="", PROGRAMFILES="")
     for k in [k for k in env if k.startswith("SKYGUARD_")]:
         env.pop(k)
+    env["SKYGUARD_NO_SYSTEM_PYTHON"] = "1"    # only the shims: not the runner's /usr/bin/python3
     env.update(extra_env or {})
     env["PATH"] = os.pathsep.join([str(d) for d in shim_dirs] + [_clean_path()])
     t = time.time()

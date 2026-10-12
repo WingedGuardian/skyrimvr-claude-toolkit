@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import BASH, REPO, BS
+from conftest import BASH, REPO, BS, python_free_path
 
 sys.path.insert(0, str(REPO / "scripts"))
 import gen_agent_trees  # noqa: E402
@@ -44,13 +44,8 @@ def _install(tmp_path: Path, py: str) -> Path:
 
 
 def _clean_path() -> str:
-    """The inherited PATH minus every directory that offers a python, so only shims can supply one."""
-    keep = []
-    for d in os.environ.get("PATH", "").split(os.pathsep):
-        if d and not any((Path(d) / n).exists() or (Path(d) / (n + ".exe")).exists()
-                         for n in ("python", "python3", "py")):
-            keep.append(d)
-    return os.pathsep.join(keep)
+    """The inherited PATH with no python on it, so only shims can supply one (and cat, mkdir... still there)."""
+    return python_free_path()
 
 
 def _shim(directory: Path, name: str, body: str) -> Path:
@@ -68,7 +63,8 @@ def _working(directory: Path, name: str, log: Path | None = None) -> None:
 
 def _fire(root: Path, shim_dirs: list[Path], hook: str, payload: dict,
           extra_env: dict | None = None) -> subprocess.CompletedProcess:
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root), LOCALAPPDATA="", PROGRAMFILES="")
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root), LOCALAPPDATA="", PROGRAMFILES="",
+               SKYGUARD_NO_SYSTEM_PYTHON="1")    # only the shims: not the runner's /usr/bin/python3
     env.update(extra_env or {})
     env["PATH"] = os.pathsep.join([str(d) for d in shim_dirs] + [_clean_path()])
     return subprocess.run([BASH, str(root / ".claude" / "hooks" / hook)], input=json.dumps(payload),

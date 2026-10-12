@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import BASH, REPO, BS
+from conftest import BASH, REPO, BS, python_free_path
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import health  # noqa: E402
@@ -325,10 +325,7 @@ def test_an_unknown_role_is_a_deny(tmp_path, entry):
 @pytest.mark.parametrize("entry", ENTRIES)
 def test_a_missing_configured_python_falls_back_and_still_decides(tmp_path, entry):
     root = _install(tmp_path, "C:/definitely/not/here/python.exe")
-    keep = [d for d in os.environ.get("PATH", "").split(os.pathsep)
-            if d and not any((Path(d) / n).exists() or (Path(d) / (n + ".exe")).exists()
-                             for n in ("python", "python3", "py"))]
-    path = os.pathsep.join([str(Path(sys.executable).parent)] + keep)
+    path = os.pathsep.join([str(Path(sys.executable).parent), python_free_path()])
     r = _run(entry, root, "pre-tool", _plugin_write(root), {"PATH": path})
     reason = json.loads(r.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
     assert reason.startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), reason

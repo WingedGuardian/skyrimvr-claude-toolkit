@@ -252,7 +252,9 @@ py_fallback() {
             fi
         done
     done
-    for d in /usr/bin/python3 /usr/local/bin/python3; do
+    # SKYGUARD_NO_SYSTEM_PYTHON=1 (test knob) skips these fixed locations: every Linux machine has
+    # /usr/bin/python3, so without it "no Python at all" could never be tested there.
+    [ "${SKYGUARD_NO_SYSTEM_PYTHON:-}" = 1 ] || for d in /usr/bin/python3 /usr/local/bin/python3; do
         if [ -x "$d" ] && py_good "$d"; then py_use "$d"; return 0; fi
     done
     if [ -n "$PY_ALIAS" ] && py_good $PY_ALIAS; then py_use $PY_ALIAS; return 0; fi

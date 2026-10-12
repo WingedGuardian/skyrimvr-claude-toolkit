@@ -7585,3 +7585,23 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_VR, ' or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", n) is None:', ":",
      _RRV + "test_an_artifact_without_a_valid_product_name_is_red[not-a-slug]", "rr-m5-product-name-is-a-slug"),
 ]]
+
+
+# First native-Linux CI run (38178385999): the python-free PATH dropped /usr/bin, and cat with it, so every hook
+# read an empty payload. One twin per fix; each names the test that must go red.
+_PFP = "tests/test_python_free_path.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tests/conftest.py", "                _mirror_without_python(d, link_dir)\n",
+     "                link_dir.mkdir(parents=True, exist_ok=True)\n",
+     _PFP + "test_a_dropped_directory_keeps_its_other_commands", "linux-ci-python-free-path-mirrors"),
+    ("agent/guards/adapters/claude/protect-files.sh",
+     '    [ "${SKYGUARD_NO_SYSTEM_PYTHON:-}" = 1 ] || for d in /usr/bin/python3', "    for d in /usr/bin/python3",
+     _PFP + "test_the_knob_skips_the_fixed_system_location", "linux-ci-no-system-python-knob"),
+    ("tests/conftest.py", '                SKYGUARD_NO_SYSTEM_PYTHON="1", **extra)', "                **extra)",
+     _PFP + "test_no_python_env_switches_the_system_locations_off", "linux-ci-no-python-env-sets-the-knob"),
+    ("scripts/check_ci_leg.py", "    except OSError as e:\n", "    except ImportError as e:\n",
+     "tests/test_ci_leg.py::test_a_missing_log_is_could_not_check_not_a_traceback", "linux-ci-leg-missing-log"),
+    ("scripts/check_could_not_check.py", "    except OSError as e:\n", "    except ImportError as e:\n",
+     "tests/test_could_not_check.py::test_a_missing_log_is_could_not_check_not_a_traceback",
+     "linux-ci-could-not-check-missing-log"),
+]]

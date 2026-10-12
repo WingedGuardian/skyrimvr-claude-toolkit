@@ -49,7 +49,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import BASH, REPO, BS
+from conftest import BASH, REPO, BS, python_free_path
 
 pytestmark = pytest.mark.skipif(os.environ.get("SKYGUARD_LOAD_TEST") != "1",
                                 reason="opt-in CPU load test: set SKYGUARD_LOAD_TEST=1")
@@ -202,12 +202,7 @@ def _record(row: dict) -> None:
 
 
 def _clean_path() -> str:
-    keep = []
-    for d in os.environ.get("PATH", "").split(os.pathsep):
-        if d and not any((Path(d) / n).exists() or (Path(d) / (n + ".exe")).exists()
-                         for n in ("python", "python3", "py")):
-            keep.append(d)
-    return os.pathsep.join(keep)
+    return python_free_path()    # no python on it, and cat/mkdir still there (Linux: /usr/bin)
 
 
 def _shim(directory: Path, name: str, body: str) -> None:
@@ -290,7 +285,7 @@ def _env(extra: dict | None = None, path: str | None = None) -> dict:
     for k in list(e):
         if k.startswith("SKYGUARD_"):
             e.pop(k)
-    e.update(LOCALAPPDATA="", PROGRAMFILES="")
+    e.update(LOCALAPPDATA="", PROGRAMFILES="", SKYGUARD_NO_SYSTEM_PYTHON="1")
     if path is not None:
         e["PATH"] = path
     e.update(extra or {})

@@ -204,8 +204,11 @@ function Find-PyFallback {
             if ([System.IO.File]::Exists($p) -and (Test-PyGood @($p))) { return (Use-Py @($p)) }
         }
     }
-    foreach ($p in $script:PyPosix) {
-        if ([System.IO.File]::Exists($p) -and (Test-PyGood @($p))) { return (Use-Py @($p)) }
+    # SKYGUARD_NO_SYSTEM_PYTHON=1 (test knob) skips the fixed POSIX locations, as the bash chain does.
+    if ($env:SKYGUARD_NO_SYSTEM_PYTHON -ne '1') {
+        foreach ($p in $script:PyPosix) {
+            if ([System.IO.File]::Exists($p) -and (Test-PyGood @($p))) { return (Use-Py @($p)) }
+        }
     }
     if ($null -ne $alias -and (Test-PyGood $alias)) { return (Use-Py $alias) }
     return $null

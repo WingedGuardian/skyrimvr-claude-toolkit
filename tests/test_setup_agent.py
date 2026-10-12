@@ -382,10 +382,12 @@ def test_a_3x_paths_file_is_kept_while_the_migration_has_not_finished(game_dir):
 
 
 def test_no_interpreter_line_when_no_python_was_found(game_dir):
-    from conftest import no_python_env
+    from conftest import no_python_env, offers_python
     env = no_python_env()
     bash_dir = os.path.dirname(BASH)
-    r = run_setup(game_dir, env_overrides={"PATH": env["PATH"] + os.pathsep + bash_dir})
+    # Linux: bash lives in /usr/bin beside python3, and no_python_env's PATH already carries it (mirrored)
+    path = env["PATH"] if offers_python(bash_dir) else env["PATH"] + os.pathsep + bash_dir
+    r = run_setup(game_dir, env_overrides={"PATH": path})
     body = (game_dir / "skyrim-paths.env").read_text(encoding="utf-8")
     assert "SKYGUARD_PYTHON=''" in body.splitlines(), body
     assert "Wrote: skyrim-paths.env" in r.stdout, r.stdout[-1500:]
