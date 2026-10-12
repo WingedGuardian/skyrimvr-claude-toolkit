@@ -7767,6 +7767,16 @@ MUTATIONS += [pytest.param(
         ("$script:ProbeEndMs = $script:T0ms + ([long]$limit - 10) * 1000", "$script:ProbeEndMs = $script:T0ms + 8000",
          "tests/test_codex_entry.py::test_a_slow_but_healthy_fallback_interpreter_is_accepted[pwsh]",
          "ci-ps1-probe-budget-total"),
+        # the lookups go back to Get-Command (~24 s per absent name on windows-latest 5.1)
+        ("        $found = Find-OnPath $cand[0]",
+         "        $found = @(Get-Command -Name $cand[0] -CommandType Application -ErrorAction SilentlyContinue) |"
+         " ForEach-Object { $_.Source } | Select-Object -First 1",
+         "tests/test_codex_entry.py::test_the_fallback_chain_never_asks_get_command", "ci-ps1-lookup-no-get-command"),
+        # the PATHEXT order inside a directory is lost: python.cmd (the slow test's only interpreter) is never found
+        ("        foreach ($e in ([string]$env:PATHEXT).Split(';')) { if ($e) { $exts += $e } }",
+         "        $exts = @('.EXE')",
+         "tests/test_codex_entry.py::test_a_slow_but_healthy_fallback_interpreter_is_accepted[pwsh]",
+         "ci-ps1-lookup-honours-pathext"),
     ]]
 # Linux CI run 38201545601: the unknown dialect on a POSIX host places `/tmp/x` (outside) and `/x` in the install.
 MUTATIONS += [pytest.param(

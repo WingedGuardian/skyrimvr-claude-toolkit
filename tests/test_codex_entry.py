@@ -16,6 +16,7 @@ it; R2). The POSIX entry runs under the Git Bash / system bash the rest of the s
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -342,6 +343,22 @@ def test_a_slow_but_healthy_fallback_interpreter_is_accepted(tmp_path, entry):
         (reason, _rec(root, "pre-tool", "failed"), _rec(root, "pre-tool", "probes"))
     assert "used " + str(shims / "python.cmd").replace(BS, "/").lower() in _rec(root, "pre-tool", "failed").replace(
         BS, "/").lower(), _rec(root, "pre-tool", "failed")
+    # The lookups ahead of the probes must be cheap: on windows-latest PowerShell 5.1 they once cost ~24 s of a 30 s
+    # probing window (CI run 38277736359), and the slow probe then had no time left. Every stage is in the record.
+    probes = _rec(root, "pre-tool", "probes")
+    looks = [(m.group(1), int(m.group(2))) for m in re.finditer(r"lookup (\S+) (?:found|absent) (\d+)ms", probes)]
+    assert [n for n, _ in looks][:2] == ["py", "python"], probes
+    assert all(ms < 2000 for _, ms in looks), probes
+
+
+def test_the_fallback_chain_never_asks_get_command():
+    """Get-Command, not the probes, ate the PowerShell budget on windows-latest 5.1 (~22-25 s per fallback call that
+    looked up an absent name; CI runs 38201545601, 38277736359), and that is not reproducible on a machine whose
+    command discovery is fast, so the chain is held to its PATH search structurally. Comments may name it."""
+    chain = _chain((SRC / "skyguard-entry.ps1").read_text(encoding="ascii"))
+    code = [ln for ln in chain.splitlines() if not ln.lstrip().startswith("#")]
+    assert not [ln for ln in code if re.search(r"\bGet-Command\b", ln, re.IGNORECASE)], "the chain calls Get-Command"
+    assert any("Find-OnPath $cand[0]" in ln for ln in code)
 
 
 @pytest.mark.parametrize("entry", ENTRIES)
