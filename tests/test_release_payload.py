@@ -29,6 +29,26 @@ def _mod():
     return mod
 
 
+def test_an_allowed_prefix_also_allows_the_spelling_the_filesystem_gives_it(tmp_path, monkeypatch):
+    """windows-latest (CI run 38187755448): the workspace allowance was the 8.3 short spelling (`cygpath -m /tmp/x`)
+    while setup wrote the long one, so 43 installed files were reported for naming their own folder. The long
+    spelling realpath() gives is allowed too."""
+    mod = _mod()
+    short = "C:/Users/ZQXUSE~1/AppData/Local/Temp/verify-release.x"
+    long_ = "C:/Users/zqxuserq/AppData/Local/Temp/verify-release.x"
+    real_isdir, real_realpath = mod.os.path.isdir, mod.os.path.realpath
+    monkeypatch.setattr(mod.os.path, "isdir", lambda p: p == short or real_isdir(p))
+    monkeypatch.setattr(mod.os.path, "realpath", lambda p: long_ if p == short else real_realpath(p))
+    assert mod._with_long_names([short]) == [short, long_]
+    assert mod._with_long_names(["/not/there"]) == ["/not/there"]
+    scan = tmp_path / "scan"
+    scan.mkdir()
+    (scan / "CLAUDE.md").write_text("- **Game root**: `" + long_ + "/scrubbed/game/`\n", encoding="utf-8")
+    needles = mod.leak_needles(["zqxuserq"])
+    assert mod.scan_leaks([scan], needles, [short]), "control: the short spelling alone allows nothing written long"
+    assert not mod.scan_leaks([scan], needles, mod._with_long_names([short]))
+
+
 def _check(root, *extra, env=None):
     return subprocess.run([sys.executable, "-B", str(CHECKER), str(root), *extra],
                           capture_output=True, text=True, timeout=120, env=env)

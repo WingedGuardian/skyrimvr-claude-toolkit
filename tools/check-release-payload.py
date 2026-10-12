@@ -538,6 +538,28 @@ def allow_prefix_problem(prefix: str, homes) -> str:
     return ""
 
 
+def _with_long_names(prefixes):
+    """Each allowed prefix, plus the spelling the filesystem gives the same folder when that differs.
+
+    One folder has two Windows spellings when TEMP carries 8.3 short names (windows-latest: the CI account's
+    profile folder, in its 8.3 form).
+    Git Bash's /tmp mount keeps TEMP's spelling, so `cygpath -m /tmp/x` gives the SHORT one, while `cd /tmp/x &&
+    pwd -W` and Python give the LONG one -- and setup.sh writes the install's root through those. The workspace
+    allowance then matched nothing setup wrote, and every installed file naming its own folder was reported as a
+    leak (CI run 38187755448: 43 files; MEASURED locally with a short-named TEMP: the same 43). realpath() resolves
+    through the folder itself, so the added spelling is the same folder, and allow_prefix_problem still vets it."""
+    out = []
+    for p in prefixes:
+        out.append(p)
+        try:
+            real = os.path.realpath(p) if os.path.isdir(p) else ""
+        except (OSError, ValueError):
+            real = ""
+        if real and _fold_dir(real) != _fold_dir(p):
+            out.append(real)
+    return out
+
+
 def run_leaks(args) -> int:
     dirs, allow, baseline, cfgs, cfg_homes, require, i = [], [], None, [], [], False, 0
     while i < len(args):
@@ -581,7 +603,7 @@ def run_leaks(args) -> int:
         return 2
     homes = [h for h in (*cfg_homes, os.environ.get("USERPROFILE"), os.environ.get("HOME")) if h]
     kept = []
-    for p in allow:
+    for p in _with_long_names(allow):
         why = allow_prefix_problem(p, homes)
         if why:
             print("  !! an --allow-prefix was NOT applied: it " + why)    # the path itself is never printed

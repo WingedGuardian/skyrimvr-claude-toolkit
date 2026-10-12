@@ -40,6 +40,14 @@ def payload(tmp_path_factory):
     for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", "KNOWLEDGEBASE.local.md"):
         if (root / junk).exists():
             (root / junk).unlink()
+    # Only what a release can ship: git-tracked files. CI tees behavioral.log / collect.log into the checkout
+    # BEFORE this suite runs (ci.yml), and those logs name the runner's home -- copied in, they were reported as a
+    # leak in the "artifact" (CI run 38178385999, 5 tests), a defect of this fixture and not of any release.
+    tracked = subprocess.run(["git", "ls-files", "-z"], cwd=str(REPO), capture_output=True, check=True).stdout
+    keep = {t for t in tracked.decode("utf-8").split("\0") if t}
+    for f in sorted(root.rglob("*"), reverse=True):
+        if f.is_file() and f.relative_to(root).as_posix() not in keep:
+            f.unlink()
     (root / "BUILD-INFO").write_text("commit={}\nversion=dev-test\n".format(SHA), encoding="utf-8")
     return root
 
@@ -251,3 +259,4 @@ def test_an_artifact_root_that_is_not_its_own_product_is_red(tmp_path, payload):
 def test_an_artifact_without_a_valid_product_name_is_red(tmp_path, payload, name):
     r = _verify(tmp_path, _variant(tmp_path, payload, _product(name)))
     assert r.returncode == 1 and "!!" in _line(r.stdout, "the artifact names its product"), r.stdout[-3000:]
+
