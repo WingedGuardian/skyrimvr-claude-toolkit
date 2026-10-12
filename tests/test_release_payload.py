@@ -483,6 +483,31 @@ def test_a_home_level_config_hides_nothing(tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+@pytest.mark.parametrize("order", ["win-first", "posix-first"])
+def test_the_linux_runner_config_folder_is_allow_listed_and_nothing_else(tmp_path, order):
+    """CI run 38178385999 (ubuntu-latest): setup.sh cannot ask Windows for Documents there, so it writes its fallback
+    C:/Users/<login>/Documents/My Games/Skyrim VR, while the real home is /home/<login>. verify-release passes BOTH
+    homes; the folder is allow-listed when it has the validated shape below EITHER, in whichever order they come.
+    Planted controls: any other path under either home is still a leak."""
+    name = "runner"
+    win, posix = "C:/Users/" + name, "/home/" + name
+    homes = (win, posix) if order == "win-first" else (posix, win)
+    cfg = win + "/Documents/My Games/Skyrim VR"
+    home_args = ["--home", homes[0], "--home", homes[1]]
+    env = _clean_env(USERNAME=name)
+    (tmp_path / "gen.md").write_text("- configs: `" + cfg + "/` (Skyrim.ini)\n", encoding="utf-8")
+    r = _leaks([tmp_path], env, "--allow-config", cfg, *home_args)
+    assert r.returncode == 0 and "allow-listed the config folder" in r.stdout, r.stdout + r.stderr
+    for planted in (posix + "/.ssh/id_rsa", win + "/Desktop/secret.txt"):
+        (tmp_path / "planted.md").write_text("x\n" + planted + "\n", encoding="utf-8")
+        r = _leaks([tmp_path], env, "--allow-config", cfg, *home_args)
+        assert r.returncode == 1 and "planted.md:2" in r.stdout, (planted, r.stdout)
+    (tmp_path / "planted.md").unlink()
+    # The home setup did not write under is no allowance on its own (the shape is validated, never assumed).
+    r = _leaks([tmp_path], env, "--allow-config", cfg, "--home", posix)
+    assert r.returncode == 1 and "NOT allow-listed" in r.stdout, r.stdout
+
+
 @pytest.mark.parametrize("spelling", ["D:/My%20Games/Some%20Skyrim/x", "D:" + "\\" + "/My Games" + "\\" + "/Some Skyrim"])
 def test_url_and_json_slash_spellings_of_a_path(tmp_path, spelling):
     m = _mod()

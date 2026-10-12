@@ -379,7 +379,7 @@ elif [ -n "$BODY" ]; then
     S=$'"([^"\\\\\x01-\x1f]|\\\\["\\\\/bfnrt]|\\\\u[0-9a-fA-F]{4})*"'
     W='[ 	]*'
     P="$S$W:$W$S"
-    RE="^[{]$W\"hookSpecificOutput\"$W:$W[{]$W($P($W,$W$P)*)$W[}]$W[}]\$"
+    RE="^[{]$W\"hookSpecificOutput\"$W:${W}[{]$W($P($W,$W$P)*)${W}[}]${W}[}]\$"
     PAIR="^($S)$W:$W($S)$W,?$W(.*)\$"
     [[ $BODY =~ $RE ]] || deny emission "engine output is not a verdict JSON"
     REST="${BASH_REMATCH[1]}"

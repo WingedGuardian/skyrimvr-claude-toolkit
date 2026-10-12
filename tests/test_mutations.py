@@ -6075,7 +6075,7 @@ _T10FR = [
      _RP + "test_the_config_folder_is_allow_listed_only_in_its_expected_shape"),
     ("t10fr-config-not-below-home", _CRP, ' or not c.lower().startswith(h.lower() + "/"):', ":",
      _RP + "test_the_config_folder_is_allow_listed_only_in_its_expected_shape"),
-    ("t10fr-config-allowed-unvalidated", _CRP, "        if config_dir_ok(c, home):", "        if True:",
+    ("t10fr-config-allowed-unvalidated", _CRP, "        if any(config_dir_ok(c, h) for h in cfg_homes):", "        if True:",
      _RP + "test_a_home_level_config_hides_nothing"),
     # I3 secrets and key shapes
     ("t10fr-secret-value-unread", _CRP, "                        i = raw.find(value)", "                        i = -1",
@@ -6614,6 +6614,32 @@ MUTATIONS += [
     # Linux-read files stay LF in an autocrlf checkout.
     pytest.param(".gitattributes", ".devcontainer/**   text eol=lf", "",
                  "tests/test_gen_agent_trees.py::test_files_linux_tools_read_are_pinned_lf", id="eol-devcontainer-lf"),
+    # CI run 38178385999: unpinned text files checked out CRLF on windows-latest and the release build refused
+    # the pristine checkout as dirty. The catch-all gives every text file an eol.
+    pytest.param(".gitattributes", "* text=auto eol=lf\n", "",
+                 _RB + "test_an_autocrlf_checkout_under_our_attributes_is_not_a_dirty_tree",
+                 id="eol-catch-all-keeps-autocrlf-checkout-clean"),
+    # CI run 38178385999 (ubuntu-latest): setup's fallback config folder C:/Users/<login>/... is validated below each
+    # --home; checking only one of them reports the six files naming it as leaks.
+    pytest.param("tools/check-release-payload.py", "        if any(config_dir_ok(c, h) for h in cfg_homes):",
+                 "        if config_dir_ok(c, cfg_homes[-1]):",
+                 "tests/test_release_payload.py::test_the_linux_runner_config_folder_is_allow_listed_and_nothing_else",
+                 id="config-folder-validated-below-every-home"),
+    pytest.param("tools/verify-release.sh",
+                 '  login=$(whoami 2>/dev/null) && [ -n "$login" ] && cfg_homes+=(--home "C:/Users/$login")',
+                 '  login=""',
+                 "tests/test_verify_release.py::"
+                 "test_the_config_folder_setup_writes_is_allow_listed_in_the_scrubbed_install",
+                 id="verify-passes-setups-fallback-home"),
+    # Off Windows setup leaves .codex/hooks.json unrendered by design; the placeholder grep must not count it there.
+    pytest.param("tools/verify-release.sh", '       codex_defs="" ;;', "       : ;;",
+                 "tests/test_verify_release.py::test_the_scrubbed_install_runs_and_its_canary_is_invisible",
+                 marks=pytest.mark.skipif(sys.platform == "win32", reason="the off-Windows branch runs off Windows"),
+                 id="verify-codex-defs-unrendered-off-windows"),
+    # ...and on Windows the rendered file is still checked: the drive-letter branch must not take the other one.
+    pytest.param("tools/verify-release.sh", "    [A-Za-z]:/*) ;;", "    __not_a_drive_root__) ;;",
+                 "tests/test_verify_release.py::test_the_scrubbed_install_runs_and_its_canary_is_invisible",
+                 marks=CMD_ONLY, id="verify-codex-defs-rendered-on-windows"),
 ]
 
 # Final gate followups: launcher fallback, isolated barrier evidence, and accurate setup output.
@@ -7570,7 +7596,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "rr-m3-floor-not-above-the-home"),
     (_CRP, 'os.environ.get("USERPROFILE"), ', "", _RRF % "home", "rr-m3-floor-windows-home"),
     (_CRP, ', os.environ.get("HOME")) if h]', ") if h]", _RRF % "posix-home", "rr-m3-floor-posix-home"),
-    (_CRP, "    homes = [h for h in (home, ", "    homes = [h for h in (", _RRF % "home-argument",
+    (_CRP, "    homes = [h for h in (*cfg_homes, ", "    homes = [h for h in (", _RRF % "home-argument",
      "rr-m3-floor-home-argument"),
     (_CRP, "    allow = kept\n", "    pass\n", _RRF % "home", "rr-m3-floor-applied"),
     (_CRP, '    if m:\n        s = m.group(1) + ":" + (m.group(2) or "/")\n',

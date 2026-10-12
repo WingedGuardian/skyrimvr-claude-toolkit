@@ -166,6 +166,30 @@ def test_the_scrubbed_install_runs_and_its_canary_is_invisible(tmp_path, payload
     assert r.returncode == 0, out[-4000:]
 
 
+def _setup_documents_below_login_home():
+    """Does setup.sh's Documents folder sit below C:/Users/<whoami> here? Whenever PowerShell gives no answer (Linux,
+    or Windows under the test harness's made-up profile -- MEASURED: an empty line) setup writes its
+    C:/Users/<whoami>/Documents fallback; otherwise when the real Documents is not redirected elsewhere."""
+    login = subprocess.run([BASH, "-c", "whoami"], capture_output=True, text=True, timeout=30).stdout.strip()
+    docs = ""
+    if os.name == "nt":
+        docs = subprocess.run(["powershell", "-NoProfile", "-Command", "[Environment]::GetFolderPath('MyDocuments')"],
+                              capture_output=True, text=True, timeout=60).stdout.strip().replace("\\", "/")
+    return bool(login) and (not docs or docs.lower().startswith(("c:/users/" + login + "/").lower()))
+
+
+def test_the_config_folder_setup_writes_is_allow_listed_in_the_scrubbed_install(tmp_path, payload):
+    """CI run 38178385999 (ubuntu-latest): setup.sh wrote its fallback C:/Users/runner/Documents/My Games/Skyrim VR
+    while the real home was /home/runner, so the validated config folder was NOT allow-listed and the six files
+    naming it were reported as leaks. verify-release now also validates it below C:/Users/<whoami>. Here the test's
+    home is a made-up one, so only that second home can allow-list the folder setup really wrote."""
+    if not _setup_documents_below_login_home():
+        pytest.skip("this machine's Documents folder is not below C:/Users/<whoami>; the precondition does not hold")
+    r = _verify(tmp_path, _variant(tmp_path, payload), "--scrubbed")
+    assert "allow-listed the config folder" in r.stdout and "NOT allow-listed" not in r.stdout, r.stdout[-4000:]
+    assert r.returncode == 0, r.stdout[-4000:]
+
+
 # ------------------------------------------------------------------ fix round 1 (review I1, M4)
 
 def test_the_release_mode_fails_closed_without_leak_tokens(tmp_path, payload):
