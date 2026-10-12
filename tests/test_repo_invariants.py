@@ -205,6 +205,21 @@ def test_every_hook_locates_its_install_with_the_same_block():
     assert not drifted, f"location block differs from protect-bash.sh in: {drifted}"
 
 
+def _root_win_block(text):
+    start, end = text.find('ROOT_WIN=""'), text.find("esac", text.find('ROOT_WIN=""'))
+    assert 0 <= start < end, "Windows-spelling block not found"
+    return [ln for ln in text[start:end].splitlines() if not ln.lstrip().startswith("#")]
+
+
+def test_the_codex_entry_locates_its_install_like_the_claude_hooks():
+    """The Codex entry's own copy of the Windows-spelling block (ROOT_WIN) is behaviour-tested through protect-bash
+    only, so it must be the same code. Git for Windows 2.55 changed $OSTYPE to `cygwin`: a copy that kept keying
+    on msys* alone would make every Codex call GUARD INERT there while the Claude hooks still worked."""
+    claude = _root_win_block((HOOK_DIR / "protect-bash.sh").read_text(encoding="utf-8"))
+    codex = _root_win_block((REPO / ".codex" / "hooks" / "skyguard-entry.sh").read_text(encoding="utf-8"))
+    assert codex == claude, "the Codex entry's ROOT_WIN block differs from protect-bash.sh's"
+
+
 def test_every_hook_is_configured_by_setup_and_carries_one_placeholder():
     """setup.sh substitutes {{PYTHON_PATH}} into a HARDCODED LIST of hook filenames, with
     `sed ... /g`. Two things rot silently here:

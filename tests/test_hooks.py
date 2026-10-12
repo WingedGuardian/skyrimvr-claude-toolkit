@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -894,44 +895,60 @@ def _write(p):
     return {"tool_name": "Write", "tool_input": {"file_path": p}}
 
 
-def _fire_at(launch: str, root: Path, payload) -> tuple:
+# Git for Windows 2.55 (bash 5.3, MSYS2 runtime 3.6) reports $OSTYPE `cygwin`, not `msys`: the wrappers keyed the
+# Windows spelling on msys* and handed python.exe a /d/... path it cannot open (GUARD INERT, exit 2 -- first seen on
+# windows-latest CI). Bash takes OSTYPE from the environment when it is set there, so both spellings run on any Git.
+_OSTYPES = [None, "cygwin"]
+
+
+def _fire_at(launch: str, root: Path, payload, ostype=None) -> tuple:
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root), MSYS2_ARG_CONV_EXCL="*")
+    if ostype:
+        env["OSTYPE"] = ostype
     return _decision(subprocess.run([_bash(), launch], input=json.dumps(payload), capture_output=True,
                                     text=True, env=env, timeout=60))
 
 
-def _check_root_spelling(root: Path, launch: str):
-    ok = _fire_at(launch, root, _shell("ls"))
+def _check_root_spelling(root: Path, launch: str, ostype=None):
+    ok = _fire_at(launch, root, _shell("ls"), ostype)
     assert ok[0] == "allow", f"an `ls` was not allowed -- the engine path was misspelled: {ok}"
-    got = _fire_at(launch, root, _shell(f'rm -rf "{root.as_posix()}"'))
+    got = _fire_at(launch, root, _shell(f'rm -rf "{root.as_posix()}"'), ostype)
     assert got[0] == "deny" and got[1].startswith("Blocked: this deletes"), f"deleting the install was not refused: {got}"
 
 
-def test_a_drive_root_is_converted_to_its_windows_spelling(tmp_path):
+@pytest.mark.parametrize("ostype", _OSTYPES, ids=["inherited", "cygwin"])
+def test_a_drive_root_is_converted_to_its_windows_spelling(tmp_path, ostype):
     """`/c/Users/...` must reach the engine as `C:/Users/...`, built without a `pwd -W` fork."""
     root = install_hooks(tmp_path / "Skyrim VR", names={"protect-bash.sh"})
     win = root.as_posix()
     if os.name != "nt" or len(win) < 3 or win[1:3] != ":/":
         pytest.skip(f"not a Windows drive path: {win!r}")
     # Launched by its drive spelling explicitly: pytest's tmp dir is usually also reachable as /tmp.
-    _check_root_spelling(root, f"/{win[0].lower()}{win[2:]}/.claude/hooks/protect-bash.sh")
+    _check_root_spelling(root, f"/{win[0].lower()}{win[2:]}/.claude/hooks/protect-bash.sh", ostype)
 
 
-def test_a_root_on_an_msys_mount_still_gets_its_windows_spelling(tmp_path, monkeypatch):
+@pytest.mark.parametrize("ostype", _OSTYPES, ids=["inherited", "cygwin"])
+def test_a_root_on_an_msys_mount_still_gets_its_windows_spelling(tmp_path, ostype):
     """An install reached through an MSYS mount (`/tmp/...`) has no textual Windows spelling; the
     wrapper must fall back to `pwd -W` there rather than hand python.exe a path it cannot open."""
     if os.name != "nt":
         pytest.skip("MSYS mount conversion runs on Windows")
-    # Git Bash mounts TMP at /tmp. The launcher deliberately puts its own TMP
-    # outside pytest's fixture directory, so give this probe a fixture-owned mount.
-    monkeypatch.setenv("TMP", str(tmp_path))
-    monkeypatch.setenv("TEMP", str(tmp_path))
-    tmp_win = subprocess.run([_bash(), "-c", "cd /tmp 2>/dev/null && pwd -W"],
-                             capture_output=True, text=True, timeout=60).stdout.strip()
     root = install_hooks(tmp_path / "Skyrim VR", names={"protect-bash.sh"})
     here = root.as_posix()
-    assert tmp_win and here.lower().startswith(tmp_win.lower() + "/"), (here, tmp_win)
-    _check_root_spelling(root, "/tmp" + here[len(tmp_win):] + "/.claude/hooks/protect-bash.sh")
+    # Through /tmp when pytest's folder is under it (locally: basetemp is in the user temp). Setting TMP does not
+    # move /tmp -- the mount table is shared by every live process of one MSYS runtime, so while any runs (the CI
+    # step's own Git Bash) /tmp stays where it was first put. MEASURED on windows-latest: /tmp ->
+    # the runner account's own AppData/Local/Temp on C: while tmp_path was on D:. There the install is reached through
+    # /proc/cygdrive/<drive>/..., the runtime's other spelling with no textual Windows form: the same `pwd -W`
+    # branch, and nothing is written outside pytest's folder.
+    tmp_win = subprocess.run([_bash(), "-c", "cd /tmp 2>/dev/null && pwd -W"],
+                             capture_output=True, text=True, timeout=60).stdout.strip()
+    if tmp_win and here.lower().startswith(tmp_win.lower() + "/"):
+        launch = "/tmp" + here[len(tmp_win):]
+    else:
+        assert re.match(r"^[A-Za-z]:/", here), here
+        launch = "/proc/cygdrive/" + here[0].lower() + here[2:]
+    _check_root_spelling(root, launch + "/.claude/hooks/protect-bash.sh", ostype)
 
 
 @pytest.mark.parametrize("name", ["protect-bash.sh", "protect-files.sh", "protect-mcp.sh", "backup-before-edit.sh",
@@ -963,25 +980,33 @@ def test_a_fresh_install_gets_its_heartbeat_directory(tmp_path, name):
 _NO_CONV = [{"MSYS2_ARG_CONV_EXCL": "*"}, {"MSYS_NO_PATHCONV": "1"}]
 
 
-def _declared_fire(root, extra_env, command):
+def _declared_fire(root, extra_env, command, ostype=None):
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root), **extra_env)
+    if ostype:
+        env["OSTYPE"] = ostype
     return _decision(subprocess.run([_bash(), str(root / ".claude" / "hooks" / "protect-bash.sh")],
                                     input=json.dumps(_shell(command)), capture_output=True, text=True,
                                     env=env, timeout=60))
 
 
+@pytest.mark.parametrize("ostype", _OSTYPES, ids=["inherited", "cygwin"])
 @pytest.mark.parametrize("extra", _NO_CONV, ids=["MSYS2_ARG_CONV_EXCL", "MSYS_NO_PATHCONV"])
-def test_a_declared_root_is_read_with_path_conversion_off(tmp_path, extra):
+def test_a_declared_root_is_read_with_path_conversion_off(tmp_path, extra, ostype):
     root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
     other = tmp_path / "declared game"
     (root / ".claude" / "skyrim-paths.env").write_text(
         f'SKYRIM_GAME_ROOT="{other.as_posix()}"\n', encoding="utf-8", newline="\n")
-    got = _declared_fire(root, extra, f'rm -rf "{other.as_posix()}/Data"')
-    assert got[0] == "deny", f"a declared game root was dropped when path conversion was off: {got}"
+    got = _declared_fire(root, extra, f'rm -rf "{other.as_posix()}/Data"', ostype)
+    # A RULE's refusal, not the wrapper's GUARD INERT: a wrapper that cannot start the engine denies too, and
+    # that deny once made this test pass while the declared root was never read (windows-latest, Git 2.55).
+    assert got[0] == "deny" and got[1].startswith("Blocked: this deletes"), \
+        f"a declared game root was dropped when path conversion was off: {got}"
 
 
-def test_an_unreadable_declared_env_file_fails_closed(tmp_path):
+@pytest.mark.parametrize("ostype", _OSTYPES, ids=["inherited", "cygwin"])
+def test_an_unreadable_declared_env_file_fails_closed(tmp_path, ostype):
     root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
     (root / ".claude" / "skyrim-paths.env").write_bytes(b'SKYRIM_GAME_ROOT="\xff\xfe\x80"\n')
-    got = _declared_fire(root, {"MSYS2_ARG_CONV_EXCL": "*"}, "ls")
-    assert got[0] == "deny" and "GUARD INERT" in got[1], got
+    got = _declared_fire(root, {"MSYS2_ARG_CONV_EXCL": "*"}, "ls", ostype)
+    # The ENGINE's refusal naming the file -- the wrapper's own "engine failed" GUARD INERT is a different defect.
+    assert got[0] == "deny" and "found skyrim-paths.env but could not read it" in got[1], got

@@ -104,8 +104,65 @@ def _scratch_root(tmp_path_factory):
     yield SCRATCH
 
 
+_BYPASS_PRIVILEGES = ("SeBackupPrivilege", "SeRestorePrivilege")
+
+
+def _set_privileges(names, enable):
+    """Enable or disable privileges in THIS process's token; returns the names whose state changed. A process
+    holding SeBackupPrivilege/SeRestorePrivilege ENABLED is not refused by a deny ACE when it opens with backup intent
+    -- SetFileAttributesW and a FILE_FLAG_BACKUP_SEMANTICS open both do -- so every scenario that measures a deny
+    entry biting (the l2 ACE/bit order twins, the deny-on-delete handle read) cannot go red in such a process.
+    INFERRED for windows-latest, whose elevated runner account is the one place those four went green-when-mutated."""
+    import ctypes
+    from ctypes import wintypes as wt
+
+    class LUID(ctypes.Structure):
+        _fields_ = [("LowPart", wt.DWORD), ("HighPart", wt.LONG)]
+
+    class TP(ctypes.Structure):
+        _fields_ = [("PrivilegeCount", wt.DWORD), ("Luid", LUID), ("Attributes", wt.DWORD)]
+
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    adv.OpenProcessToken.argtypes = [wt.HANDLE, wt.DWORD, ctypes.POINTER(wt.HANDLE)]
+    adv.LookupPrivilegeValueW.argtypes = [wt.LPCWSTR, wt.LPCWSTR, ctypes.POINTER(LUID)]
+    adv.AdjustTokenPrivileges.argtypes = [wt.HANDLE, wt.BOOL, ctypes.POINTER(TP), wt.DWORD, ctypes.POINTER(TP),
+                                          ctypes.POINTER(wt.DWORD)]
+    k32.GetCurrentProcess.restype = wt.HANDLE
+    tok = wt.HANDLE()
+    if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x20 | 0x8, ctypes.byref(tok)):   # ADJUST | QUERY
+        return []
+    changed = []
+    try:
+        for name in names:
+            tp, prev, need = TP(), TP(), wt.DWORD()
+            if not adv.LookupPrivilegeValueW(None, name, ctypes.byref(tp.Luid)):
+                continue
+            tp.PrivilegeCount, tp.Attributes = 1, (0x2 if enable else 0)
+            ok = adv.AdjustTokenPrivileges(tok, False, ctypes.byref(tp), ctypes.sizeof(prev), ctypes.byref(prev),
+                                           ctypes.byref(need))
+            # ERROR_NOT_ALL_ASSIGNED (1300): the token does not hold it -- nothing changed
+            if ok and ctypes.get_last_error() != 1300 and prev.PrivilegeCount == 1 \
+                    and bool(prev.Attributes & 0x2) != enable:
+                changed.append(name)
+    finally:
+        k32.CloseHandle(tok)
+    return changed
+
+
 @pytest.fixture
 def bed(monkeypatch):
+    # The scenarios measure what a deny entry does to an ordinary process: one without enabled backup/restore
+    # privileges (see _set_privileges). Disabled for the test, re-enabled afterwards exactly as found.
+    disabled = _set_privileges(_BYPASS_PRIVILEGES, False) if WINDOWS else []
+    try:
+        yield from _bed(monkeypatch)
+    finally:
+        if disabled:
+            _set_privileges(disabled, True)
+
+
+def _bed(monkeypatch):
     SCRATCH.mkdir(parents=True, exist_ok=True)
     root = SCRATCH / ("t8-%s-%d" % (uuid.uuid4().hex[:6], next(_ids)))
     (root / "Data").mkdir(parents=True)
@@ -913,6 +970,46 @@ def test_lock_and_unlock_keep_an_inheriting_dacl_exactly(bed):
     assert not before.startswith("D:P"), before
     assert lock.lock_all(str(bed.root)).exit == 0
     assert not _sddl(p).startswith("D:P")
+    assert lock.unlock(str(bed.root), ["Update.esm"], SESSION).exit == 0
+    assert _sddl(p) == before
+
+
+def _inherit_without_auto_inherited(bed, name):
+    """Recreate Data/<name> under a folder DACL written by the legacy API, so the file inherits its entries WITHOUT
+    the SE_DACL_AUTO_INHERITED bit (SDDL `D:(...ID...)`, no `AI`). MEASURED: every file under windows-latest's
+    D:\\a\\_temp looks like this; a local temp folder written through the modern API carries `AI` and hid the defect."""
+    import ctypes
+    from ctypes import wintypes as wt
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    vp = ctypes.c_void_p
+    adv.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [wt.LPCWSTR, wt.DWORD, ctypes.POINTER(vp), vp]
+    adv.SetFileSecurityW.argtypes = [wt.LPCWSTR, wt.DWORD, vp]
+    k32.LocalFree.argtypes = [vp]
+    sd = vp()
+    sddl = "D:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)(A;OICI;FA;;;%s)" % _sid()
+    assert adv.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, ctypes.byref(sd), None)
+    try:
+        assert adv.SetFileSecurityW(str(bed.data), 0x4, sd), ctypes.get_last_error()
+    finally:
+        k32.LocalFree(sd)
+    p = bed.path(name)
+    p.unlink()
+    p.write_bytes(os.urandom(1024))
+    return p
+
+
+@needs_windows
+def test_lock_and_unlock_keep_an_inheriting_dacl_without_the_auto_inherited_bit(bed):
+    """lock + unlock wrote the DACL through SetNamedSecurityInfoW, which marks it auto-inherited: a file without
+    the bit came back `D:AI(...)` -- the same entries, a different DACL (windows-latest CI, test above)."""
+    lock = _lock()
+    p = _inherit_without_auto_inherited(bed, "Update.esm")
+    before = _sddl(p)
+    assert before.startswith("D:(") and ";ID;" in before, before
+    assert lock.lock_all(str(bed.root)).exit == 0
+    during = _sddl(p)
+    assert during.startswith("D:(") and lock.read_state(p).ours == "full", during
     assert lock.unlock(str(bed.root), ["Update.esm"], SESSION).exit == 0
     assert _sddl(p) == before
 

@@ -346,26 +346,56 @@ class _Win:
             raise ct.WinError(rc)
         return dacl, sd
 
-    def protected(self, path) -> bool:
-        """SE_DACL_PROTECTED (0x1000): the file's inheritance is turned off."""
+    def _control(self, path) -> int:
+        """The security descriptor's control bits (SE_DACL_PROTECTED 0x1000, SE_DACL_AUTO_INHERITED 0x400, ...)."""
         ct = self.ct
         dacl, sd = self._get_dacl(path)
         try:
             control, rev = ct.c_uint16(), ct.c_uint32()
             if not self.adv.GetSecurityDescriptorControl(sd, ct.byref(control), ct.byref(rev)):
                 raise ct.WinError(ct.get_last_error())
-            return bool(control.value & 0x1000)
+            return control.value
         finally:
             self.k32.LocalFree(sd)
 
+    def protected(self, path) -> bool:
+        """SE_DACL_PROTECTED (0x1000): the file's inheritance is turned off."""
+        return bool(self._control(path) & 0x1000)
+
     def _set_dacl(self, path, dacl, protected=None):
         """Plan 6 final fix (lane A I2): write the DACL with the protection `protected` names, or -- None -- the one the
-        file has NOW. Always passing UNPROTECTED turned a protected DACL into an inheriting one for good."""
-        protected = self.protected(path) if protected is None else protected
+        file has NOW. Always passing UNPROTECTED turned a protected DACL into an inheriting one for good.
+
+        SetNamedSecurityInfoW re-runs inheritance and always marks the result auto-inherited (SE_DACL_AUTO_INHERITED,
+        SDDL `AI`). A file whose DACL never carried that bit -- every file under windows-latest's D:\\a\\_temp, and any
+        folder tree whose ACL was written by a legacy tool -- came back from lock + unlock with `AI` added: the same
+        entries, not the same DACL. While the protection is unchanged and the bit is absent, the DACL is written as
+        it is instead (SetFileSecurityW: no inheritance pass, the control bits we give it). A protection CHANGE still
+        needs the inheritance pass, so it still goes through SetNamedSecurityInfoW."""
+        control = self._control(path)
+        now = bool(control & 0x1000)
+        protected = now if protected is None else protected
+        if protected == now and not control & 0x400:
+            self._set_dacl_as_is(path, dacl, protected)
+            return
         rc = self.adv.SetNamedSecurityInfoW(path, 1, 0x4 | (0x80000000 if protected else 0x20000000), None, None,
                                             dacl, None)
         if rc:
             raise self.ct.WinError(rc)
+
+    def _set_dacl_as_is(self, path, dacl, protected):
+        ct = self.ct
+        vp = ct.c_void_p
+        adv = self.adv
+        adv.InitializeSecurityDescriptor.argtypes = [vp, ct.c_uint32]
+        adv.SetSecurityDescriptorDacl.argtypes = [vp, ct.c_int, vp, ct.c_int]
+        adv.SetSecurityDescriptorControl.argtypes = [vp, ct.c_uint16, ct.c_uint16]
+        adv.SetFileSecurityW.argtypes = [ct.c_wchar_p, ct.c_uint32, vp]
+        sd = ct.create_string_buffer(64)                  # SECURITY_DESCRIPTOR_MIN_LENGTH is 40 on x64
+        if not (adv.InitializeSecurityDescriptor(sd, 1) and adv.SetSecurityDescriptorDacl(sd, 1, dacl, 0)
+                and adv.SetSecurityDescriptorControl(sd, 0x1000, 0x1000 if protected else 0)
+                and adv.SetFileSecurityW(path, 0x4, sd)):
+            raise ct.WinError(ct.get_last_error())
 
     def aces(self, path):
         """The explicit (non-inherited) ACEs: [{type, mask, sid, mine}]. type: 0 allow, 1 deny, other."""

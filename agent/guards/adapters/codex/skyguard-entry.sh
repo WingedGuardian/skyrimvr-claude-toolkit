@@ -79,10 +79,14 @@ CDPATH= cd -- "$_CWD" >/dev/null 2>&1
 [ -n "$ROOT" ] || deny wrapper "cannot locate the install from the hook path"
 # The Windows spelling under Git Bash (a native python.exe cannot open /c/... or /tmp/... paths).
 ROOT_WIN=""
-case "$OSTYPE:$ROOT" in
-    msys*:/[a-zA-Z]/*) ROOT_WIN="${ROOT:1:1}"; ROOT_WIN="${ROOT_WIN^}:${ROOT:2}" ;;
-    msys*:/[a-zA-Z])   ROOT_WIN="${ROOT:1:1}"; ROOT_WIN="${ROOT_WIN^}:/" ;;
-    msys*:/*)          ROOT_WIN="$(CDPATH= cd -- "$ROOT" 2>/dev/null && pwd -W 2>/dev/null)" ;;
+# Git Bash: $OSTYPE is `msys` up to Git for Windows 2.54 and `cygwin` from 2.55 (bash 5.3 on the MSYS2
+# 3.6 runtime). The runtime DLL tells that from a real Cygwin, where /c is not a drive -- no fork.
+_MSYS=""
+case "$OSTYPE" in msys*) _MSYS=1 ;; cygwin*) [ -e /usr/bin/msys-2.0.dll ] && _MSYS=1 ;; esac
+case "$_MSYS:$ROOT" in
+    1:/[a-zA-Z]/*) ROOT_WIN="${ROOT:1:1}"; ROOT_WIN="${ROOT_WIN^}:${ROOT:2}" ;;
+    1:/[a-zA-Z])   ROOT_WIN="${ROOT:1:1}"; ROOT_WIN="${ROOT_WIN^}:/" ;;
+    1:/*)          ROOT_WIN="$(CDPATH= cd -- "$ROOT" 2>/dev/null && pwd -W 2>/dev/null)" ;;
 esac
 HB_DIR="$ROOT/.claude/backups/.hook-heartbeat/codex"
 [ -d "$HB_DIR" ] || mkdir -p "$HB_DIR" 2>/dev/null
