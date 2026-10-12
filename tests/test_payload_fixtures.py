@@ -43,6 +43,9 @@ def test_no_fixture_carries_the_capturing_users_home():
             assert user not in json.dumps(p).lower(), name
 
 
+SERVICE_ACCOUNTS = frozenset(("runner", "runneradmin"))     # GitHub-hosted runner logins (Linux / Windows)
+
+
 def test_no_file_under_fixtures_carries_the_capturing_users_home():
     """Final review (privacy): the check above read only the captured payloads, and the routes harness committed
     beside them carried the author's name and home paths. Every file under tests/fixtures/ is read, as bytes, in
@@ -61,17 +64,33 @@ def test_no_file_under_fixtures_carries_the_capturing_users_home():
     if m:
         names.add(m.group(1))
     names = {n.lower() for n in names if len(n) >= 3}
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        # Linux CI run 38187755448: GitHub's hosted runner logs in as the service account `runner` (/home/runner),
-        # a word the fixtures use (sessionstart_runner.py, "test runner"). It names no person; matching it found
-        # 3 false hits and nothing else. Every other name is still searched.
-        names.discard("runner")
     if not names:
         pytest.skip("no user name to search for: no login variable, and the checkout is not under a user folder")
     root = REPO / "tests" / "fixtures"
     files = [f for f in sorted(root.rglob("*")) if f.is_file() and "__pycache__" not in f.parts]
     assert len(files) > 10, f"only {len(files)} fixture files -- the scan would be near-vacuous"
-    needles = [n.encode(e) for n in sorted(names) for e in ("utf-8", "utf-16-le")]
-    hits = [f.relative_to(root).as_posix() for f in files
-            if any(n in f.read_bytes().lower() for n in needles)]
+
+    def pattern(n):
+        # Linux CI runs 38187755448 / 38201545601: GitHub's hosted runners log in as `runner` / `runneradmin`, and
+        # `runner` is an ordinary word the fixtures use (sessionstart_runner.py, "test runner"). A service account
+        # names no person, so for those only a HOME PATH counts (Users/<n>, home/<n>, any separator spelling,
+        # escaped or not); every other name still counts anywhere. The launcher drops GITHUB_ACTIONS, so this is
+        # decided by the name, not the environment.
+        e = re.escape(n.encode("ascii", "ignore")) if n.isascii() else None
+        if n in SERVICE_ACCOUNTS and e is not None:
+            return re.compile(rb"(?:users|home)[/\\]+" + e + rb"(?![a-z0-9_])")
+        return None
+
+    hits = []
+    for f in files:
+        data = f.read_bytes().lower()
+        for n in sorted(names):
+            rx = pattern(n)
+            if rx is not None:
+                found = rx.search(data) or rx.search(data.replace(b"\x00", b""))   # utf-16-le spelled too
+            else:
+                found = any(n.encode(enc) in data for enc in ("utf-8", "utf-16-le"))
+            if found:
+                hits.append(f.relative_to(root).as_posix())
+                break
     assert hits == [], hits
