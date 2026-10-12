@@ -96,7 +96,12 @@ def path_to_regex(path: str) -> Optional[str]:
 # Normalised absolute paths
 # ---------------------------------------------------------------------------------------------------------
 _DRIVE_ABS = re.compile(r"([A-Za-z]):/")
-_MSYS_DRIVE = re.compile(r"/(?:proc/cygdrive/|cygdrive/|mnt/)?([A-Za-z])(?:/|$)")
+# Linux CI run 38187755448: on a POSIX host (pwsh on Linux/Proton, Claude Code's opt-in PowerShell tool) a `/x` read
+# as "the root of the current drive" names no drive at all, so every PowerShell operand under a POSIX install resolved
+# to None -- unknown, and allowed unless the text named a root (a fail-open). There the current drive's root IS `/`.
+# Read once at import; Windows is unchanged. Tests flip it to exercise the POSIX reading on any host.
+POSIX_HOST = os.name != "nt"
+_MSYS_DRIVE =re.compile(r"/(?:proc/cygdrive/|cygdrive/|mnt/)?([A-Za-z])(?:/|$)")
 
 
 def _fold(tail: str) -> str:
@@ -141,6 +146,8 @@ def norm_abs(path: str, msys: bool = True) -> Optional[str]:
         if m:
             return m.group(1).lower() + ":/" + _fold(p[m.end():])
         return "/" + _fold(p[1:])
+    if p.startswith("/") and POSIX_HOST:
+        return "/" + _fold(p[1:])                       # msys=False on a POSIX host: `/` is the only root there is
     return None
 
 

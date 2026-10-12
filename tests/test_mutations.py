@@ -7631,3 +7631,20 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "tests/test_could_not_check.py::test_a_missing_log_is_could_not_check_not_a_traceback",
      "linux-ci-could-not-check-missing-log"),
 ]]
+
+
+# Second native-Linux CI run (38187755448): on a POSIX host a PowerShell/cmd/apply_patch `/x` named no drive root, so
+# every operand under a POSIX install was unknown and allowed. One twin per clause of the fix.
+_PHP = "tests/test_posix_host_paths.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/paths.py", "    if p.startswith(\"/\") and POSIX_HOST:\n", "    if False:\n",
+     _PHP + "test_a_powershell_absolute_posix_path_resolves_on_a_posix_host", "linux-ci-posix-norm-abs"),
+    ("tools/skyguard/targets.py", "    if paths.POSIX_HOST and (not cwd or cwd.startswith(\"/\")):\n",
+     "    if False:\n", _PHP + "test_a_powershell_save_overwrite_asks_on_a_posix_host", "linux-ci-posix-drive-root"),
+    ("tools/skyguard/targets.py", "    if paths.POSIX_HOST and (not cwd or cwd.startswith(\"/\")):\n",
+     "    if paths.POSIX_HOST and cwd.startswith(\"/\"):\n",
+     _PHP + "test_a_powershell_absolute_posix_path_resolves_on_a_posix_host", "linux-ci-posix-drive-root-no-cwd"),
+    ("tools/skyguard/targets.py", "    if paths.POSIX_HOST and (not cwd or cwd.startswith(\"/\")):\n",
+     "    if not cwd or cwd.startswith(\"/\"):\n",
+     _PHP + "test_on_windows_a_slash_path_is_still_the_cwd_drives_root", "linux-ci-posix-drive-root-host-gated"),
+]]
