@@ -36,9 +36,20 @@ def test_an_allowed_prefix_also_allows_the_spelling_the_filesystem_gives_it(tmp_
     mod = _mod()
     short = "C:/Users/ZQXUSE~1/AppData/Local/Temp/verify-release.x"
     long_ = "C:/Users/zqxuserq/AppData/Local/Temp/verify-release.x"
-    real_isdir, real_realpath = mod.os.path.isdir, mod.os.path.realpath
-    monkeypatch.setattr(mod.os.path, "isdir", lambda p: p == short or real_isdir(p))
-    monkeypatch.setattr(mod.os.path, "realpath", lambda p: long_ if p == short else real_realpath(p))
+    # The checker's OWN `os` is replaced, never the shared os.path: patching ntpath/posixpath globally also changed
+    # pathlib, which calls realpath(p, strict=...) on 3.11+ and broke on a one-argument stand-in (CI run 38201545601).
+    import types
+
+    def realpath(p, *args, **kwargs):
+        return long_ if p == short else os.path.realpath(p, *args, **kwargs)
+
+    def isdir(p):
+        return p == short or os.path.isdir(p)
+
+    fake_path = types.SimpleNamespace(**{k: getattr(os.path, k) for k in dir(os.path) if not k.startswith("__")})
+    fake_path.realpath, fake_path.isdir = realpath, isdir
+    monkeypatch.setattr(mod, "os", types.SimpleNamespace(**{k: getattr(os, k) for k in dir(os) if not k.startswith("__")}))
+    monkeypatch.setattr(mod.os, "path", fake_path)
     assert mod._with_long_names([short]) == [short, long_]
     assert mod._with_long_names(["/not/there"]) == ["/not/there"]
     scan = tmp_path / "scan"
