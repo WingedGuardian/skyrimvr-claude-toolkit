@@ -97,6 +97,15 @@ def test_payload_cwd_install_template_is_filled_in(tmp_path):
     assert rec.row_payload({"payload": p}, tmp_path) == p          # no note: left alone
 
 
+def test_payload_drive_template_is_the_installs_own_drive():
+    """`<drive>` is the install's drive, never a hard-coded C: (windows-latest puts the temp install on D:)."""
+    rec = _rec()
+    p = {"tool_name": "PowerShell", "cwd": "<install>", "tool_input": {"command": "Remove-Item <drive>Data"}}
+    for root, drive in (("D:/a/_temp/x", "D:"), ("e:/y", "e:"), ("C:/z", "C:"), ("/tmp/x", "C:")):
+        got = rec.row_payload({"payload": p, "payload_note": "install-relative"}, Path(root))
+        assert got["tool_input"]["command"] == f"Remove-Item {drive}Data", (root, got)
+
+
 def test_intended_rows_are_well_formed():
     rec = _rec()
     ids = [r["id"] for r in INTENDED_ROWS]

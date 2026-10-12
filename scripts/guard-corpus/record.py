@@ -111,8 +111,13 @@ def make_install(base: Path, hooks_src: Path, layout: str) -> Path:
 
 
 def install_relative(payload: dict, install: Path) -> dict:
-    """Fill the `<install>` template of an install-relative row with this run's real install path."""
-    return json.loads(json.dumps(payload).replace("<install>", install.as_posix()))
+    """Fill the `<install>` template of an install-relative row with this run's real install path, and `<drive>`
+    with that install's drive (`D:` when the temp install is on D:, as on windows-latest CI). A row about "the
+    cwd's own drive" must not hard-code C:, which is only the cwd's drive when the install happens to be there.
+    Off Windows an install has no drive; `<drive>` is then `C:`, the spelling those rows were recorded with."""
+    root = install.as_posix()
+    drive = root[:2] if len(root) > 1 and root[1] == ":" and root[0].isalpha() else "C:"
+    return json.loads(json.dumps(payload).replace("<install>", root).replace("<drive>", drive))
 
 
 def needs_missing_jq(hooks_src: Path) -> bool:
