@@ -171,7 +171,9 @@ def test_the_manifest_line_records_the_copy(tmp_path):
     f = d / "Skyrim_VR - Main.bsa"
     body = os.urandom(3000)
     f.write_bytes(body)
-    src = str(tmp_path) + "/Data\\Skyrim_VR - Main.bsa"           # mixed separators: recorded verbatim
+    # mixed separators, recorded verbatim (Linux CI run 38187755448: a backslash is a separator only on Windows, a
+    # file-name character on POSIX -- there a doubled slash is the spelling that differs from the normal one)
+    src = str(tmp_path) + ("/Data\\" if os.name == "nt" else "//Data/") + "Skyrim_VR - Main.bsa"
     backup.run(str(tmp_path), "Write", src, False, FixedAudit(str(tmp_path)), agent="claude", session_id="s-1")
     (m,) = manifest(tmp_path)
     assert m == {"v": 1, "ts": TS, "src": src, "dest": TS + "__" + safe(src), "size": 3000,
@@ -226,7 +228,8 @@ def test_the_codex_patch_backup_records_its_agent_and_session(tmp_path):
     raw = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": "C:/G", "session_id": "cx-7",
                       "tool_input": {"command": "*** Begin Patch\n*** Delete File: {}\n*** End Patch".format(
                           f.as_posix())}})
-    engine.pre_tool(codex.to_request(raw, "win32"), str(tmp_path), lambda: paths.roots(str(tmp_path), "", {}),
+    engine.pre_tool(codex.to_request(raw, sys.platform), str(tmp_path),  # host platform (Linux CI, py3.13)
+                    lambda: paths.roots(str(tmp_path), "", {}),
                     audit_mod.Audit(str(tmp_path)))
     (m,) = manifest(tmp_path)
     assert (m["agent"], m["session_id"]) == ("codex", "cx-7")
@@ -416,9 +419,14 @@ def test_a_placeholder_someone_else_filled_is_not_removed(tmp_path, monkeypatch)
 
 
 def test_a_placeholder_someone_else_replaced_is_not_removed(tmp_path, monkeypatch):
+    real_replace = os.replace                            # captured before _replace_fails patches os.replace
+
     def swap(dst):
-        os.unlink(dst)
-        open(dst, "wb").close()                          # a different, also empty, file under the same name
+        # A different, also empty, file under the same name -- made BEFORE ours goes, so it is a different inode
+        # on every OS (Linux CI run 38187755448: unlink-then-create reused the freed inode number on ext4).
+        other = str(dst) + ".other"
+        open(other, "wb").close()
+        real_replace(other, dst)
 
     _no_link(monkeypatch)
     _replace_fails(monkeypatch, swap)

@@ -145,7 +145,9 @@ def test_every_committed_codex_fixture_translates_and_renders(fx):
 
 # ---- engine.pre_tool ------------------------------------------------------------------------------
 
-def _run(tmp_path, raw, platform="win32"):
+def _run(tmp_path, raw, platform=sys.platform):
+    # The HOST platform (Linux CI run 38187755448): these requests name real tmp_path files, and an absolute POSIX
+    # path under the Windows adapter is a mix no host makes (py3.13 ntpath joins it onto the C:/G cwd).
     req = codex.to_request(raw, platform)
     return engine.pre_tool(req, str(tmp_path), lambda: paths.roots(str(tmp_path), "", {}), Audit(str(tmp_path)))
 

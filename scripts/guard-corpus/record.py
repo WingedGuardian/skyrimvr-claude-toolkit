@@ -62,6 +62,28 @@ LAYOUTS = {
 # let it win, would make every row S-INERT-CONFIG); malformed-root's is clean (a legacy-wins reader would lose the
 # refusal); touched-root's declares MO2 folders the empty root file must not hide (R3 union, T8 fix round 1).
 ROOT_LEVEL_LAYOUTS = ("declared-root", "malformed-root", "touched-root")
+# Linux CI run 38187755448: intended rows whose INPUT only exists on Windows -- a program Windows alone ships, or a
+# drive-letter cwd/operand that no POSIX shell can be handed. Off Windows they are skipped by id, never by a rule:
+# each one's POSIX re-spelling (a /work cwd, /tmp operands) was fired on a simulated POSIX host and decided as intended.
+_DRIVE_CWD = "a drive-letter cwd/operand (C:/work, C:\\Temp, C:Data, Set-Location C:) exists only on Windows"
+WINDOWS_ONLY = {
+    "p6t11-raw-icacls-remove": "icacls is a Windows program",
+    "p6t11-raw-icacls-exe-reset": "icacls.exe is a Windows program",
+    "p6t11-raw-cacls-grant": "cacls is a Windows program",
+    "p6t12-guard-hook-icacls-deny": "icacls is a Windows program",
+    "rt-a-subst-then-delete": "subst (a drive letter for a folder) is a Windows program",
+    "rt-a-junction-then-delete": "an NTFS junction under a drive-letter path: " + _DRIVE_CWD,
+    "rt-a-ps-setlocation-colon": _DRIVE_CWD,
+    "p5a-i1-setlocation-pipe-outnull": _DRIVE_CWD,
+    "p5a-m5-pwsh-drive-relative-operand": _DRIVE_CWD,
+    "p5a-m5-pwsh-set-location-drive": _DRIVE_CWD,
+    "p5f-pipe-copy-onto-save": _DRIVE_CWD,
+}
+
+
+def windows_only(row_id: str) -> str:
+    """Why this intended row cannot run off Windows ("" when it can, or when this IS Windows)."""
+    return "" if sys.platform == "win32" else WINDOWS_ONLY.get(row_id, "")
 LEGACY_DECOYS = {
     "declared-root": f'SKYRIM_GAME_ROOT="{GAME}"\nSKYRIM_CONFIG_DIR="D:/decoy $X"\n',
     "malformed-root": f'SKYRIM_GAME_ROOT="{GAME}"\n',

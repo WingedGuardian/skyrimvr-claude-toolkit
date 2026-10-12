@@ -235,9 +235,19 @@ def test_deep_nesting_is_refused_by_name_not_by_a_crash(inst):
     assert codex.to_request(raw, "win32").failure == "payload nested too deeply"
 
 
+# Linux CI run 38187755448: rows whose input only a Windows host can produce. Off Windows the install is a POSIX path,
+# and these splice it into a Windows-only spelling. Their POSIX re-spellings are covered by tests/test_posix_host_paths.py.
+WINDOWS_ONLY_ROWS = {
+    "rt-codex-patch-delete-verbatim": "the //?/ verbatim prefix is a Win32 namespace; on POSIX `//?/` is a folder named ?",
+    "rt-codex-workdir": "a POSIX workdir under a drive-letter cwd (C:/Temp/rtB); py3.13 ntpath joins it onto C:",
+}
+
+
 @pytest.mark.parametrize("row", ROWS, ids=[r[0] for r in ROWS])
 def test_codex_route_rows(inst, row):
     rid, tool, ti, cwd, decision, rule_ids, text = row
+    if sys.platform != "win32" and rid in WINDOWS_ONLY_ROWS:
+        pytest.skip(WINDOWS_ONLY_ROWS[rid])
     ti = json.loads(_sub(inst, json.dumps(ti)))
     v, fired = _judge(inst, tool, ti, cwd=None if cwd is None else _sub(inst, cwd))
     shown = v.reason if v.decision in ("deny", "ask") else v.context

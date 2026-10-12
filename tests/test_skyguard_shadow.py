@@ -233,7 +233,7 @@ def _patch(body):
 
 
 def _pre_tool(project, hb, raw):
-    req = codex.to_request(raw, "win32")
+    req = codex.to_request(raw, sys.platform)  # host platform: on Linux CI an absolute POSIX path under a Windows adapter is a mix no host makes (py3.13 joins it onto C:)
     return engine.pre_tool(req, str(project), lambda: paths.roots(str(project), "", {}), Audit(str(project)),
                            telemetry=str(hb), now=NOW)
 
@@ -339,7 +339,9 @@ def _fire(install, hb, row, sid):
         os.environ.update(saved_env)
     assert code == 0
     text = out.getvalue().decode("utf-8").strip()
-    return json.loads(text)["hookSpecificOutput"] if text else {}
+    # An allow may print JSON with no hookSpecificOutput (Linux CI run 38187755448: a row whose input only Windows
+    # produces is allowed there). That is "not refused on this machine", which the caller already skips.
+    return json.loads(text).get("hookSpecificOutput", {}) if text else {}
 
 
 def test_the_corpus_has_refusals_to_shadow():
