@@ -134,6 +134,16 @@ def test_lock_refresh_merges_target_reports_and_rejects_missing_extras():
         locker.merge_reports([windows310, report([("tomli", "2.0.0")])])
 
 
+def _skip_unless_linux_daemon(docker):
+    """windows-latest has a Docker daemon, but it runs WINDOWS containers: no Linux image (busybox) can run there,
+    pulled or not. That is the expected "no Linux daemon on the runner" absence ci.yml allows, so it is named as
+    such -- reported as a missing image it read as an unexpected gap (CI run 38178385999)."""
+    r = subprocess.run([docker, "info", "--format", "{{.OSType}}"], capture_output=True, text=True, timeout=10)
+    os_type = r.stdout.strip().lower()
+    if r.returncode == 0 and os_type and os_type != "linux":
+        pytest.skip("COULD NOT CHECK: Docker daemon runs %s containers, not Linux" % os_type)
+
+
 def test_live_container_readonly_sentinels(tmp_path):
     docker = shutil.which("docker")
     if not docker:
@@ -144,6 +154,7 @@ def test_live_container_readonly_sentinels(tmp_path):
         pytest.skip("COULD NOT CHECK: Docker daemon timeout")
     if probe.returncode:
         pytest.skip("COULD NOT CHECK: Docker daemon unavailable")
+    _skip_unless_linux_daemon(docker)
     image = "busybox:1.37"
     probe = subprocess.run([docker, "image", "inspect", image], capture_output=True, timeout=10)
     if probe.returncode:
@@ -175,6 +186,7 @@ def _live_docker():
         pytest.skip("COULD NOT CHECK: Docker daemon timeout")
     if probe.returncode:
         pytest.skip("COULD NOT CHECK: Docker daemon unavailable")
+    _skip_unless_linux_daemon(docker)
     if subprocess.run([docker, "image", "inspect", "busybox:1.37"], capture_output=True, timeout=10).returncode:
         pytest.skip("COULD NOT CHECK: existing busybox:1.37 image unavailable; test never pulls")
     return docker

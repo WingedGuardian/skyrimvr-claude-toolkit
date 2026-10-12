@@ -96,6 +96,19 @@ IGNORE = shutil.ignore_patterns(
 # running setup.sh
 # --------------------------------------------------------------------------
 
+def login_name() -> str:
+    """The account this process runs as, read from the OS rather than the environment (the harness launcher
+    scrubs USERNAME/USER and fakes HOME): GetUserNameW on Windows, the passwd entry elsewhere. "" when unreadable.
+    windows-latest CI needs it: its checkout is D:/a/..., under no user folder, so nothing else names the user."""
+    try:
+        if os.name == "nt":
+            return os.getlogin()
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_name
+    except (OSError, KeyError, ImportError):
+        return ""
+
+
 def copy_repo(dest: Path) -> Path:
     """A pristine copy of the toolkit, minus the test suite itself."""
     shutil.copytree(REPO, dest, ignore=IGNORE)

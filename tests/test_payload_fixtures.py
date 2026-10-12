@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, login_name
 
 FIX = REPO / "tests" / "fixtures" / "payloads"
 REQUIRED = {
@@ -49,11 +49,12 @@ def test_no_file_under_fixtures_carries_the_capturing_users_home():
     UTF-8 and UTF-16 spellings, so no fixture of any kind ships the home of whoever runs this.
 
     Which name: the harness launcher points HOME at a fake `home` folder and drops USERNAME, so the names come from
-    the login variables, the home folder when it is not that fake, and the user folder this checkout sits in
-    (`C:/Users/<name>/...`, `/home/<name>/...`)."""
+    the login variables, the account the OS says this runs as, the home folder when it is not that fake, and the
+    user folder this checkout sits in (`C:/Users/<name>/...`, `/home/<name>/...`). windows-latest has only the
+    second: its checkout is D:/a/..., and without it this skipped and its mutation twin survived."""
     import os
     import re
-    names = {os.environ.get(k, "") for k in ("USERNAME", "USER", "LOGNAME")}
+    names = {os.environ.get(k, "") for k in ("USERNAME", "USER", "LOGNAME")} | {login_name()}
     if Path.home().name.lower() != "home":
         names.add(Path.home().name)
     m = re.search(r"(?:^|/)(?:Users|home)/([^/]+)/", REPO.resolve().as_posix(), re.IGNORECASE)

@@ -326,9 +326,15 @@ def test_an_unknown_role_is_a_deny(tmp_path, entry):
 def test_a_missing_configured_python_falls_back_and_still_decides(tmp_path, entry):
     root = _install(tmp_path, "C:/definitely/not/here/python.exe")
     path = os.pathsep.join([str(Path(sys.executable).parent), python_free_path()])
+    t0 = time.monotonic()
     r = _run(entry, root, "pre-tool", _plugin_write(root), {"PATH": path})
+    took = time.monotonic() - t0
     reason = json.loads(r.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
-    assert reason.startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), reason
+    # windows-latest, PowerShell 5.1 only (CI run 38178385999): "cannot run Python" with a working python first on
+    # PATH; not reproduced locally. The fallback probes stop 8 s after the entry starts, so the call's duration and
+    # what was recorded are printed to tell a slow host from a rejected candidate.
+    assert reason.startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), \
+        (reason, "call took {:.1f} s".format(took), _rec(root, "pre-tool", "failed"))
     failed = _rec(root, "pre-tool", "failed")
     assert " python configured C:/definitely/not/here/python.exe unusable; used " in failed, failed
     # recorded BEFORE the engine ran, so the canary reads DEGRADED until the configured one works again

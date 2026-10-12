@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, login_name
 
 BS = chr(92)
 CMD_ONLY = pytest.mark.skipif(sys.platform != "win32", reason="the CMD regression runs on Windows")
@@ -312,8 +312,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
     # Lose the `pwd -W` fallback for a root on an MSYS mount (/tmp/...), which has no textual spelling.
     pytest.param(
         ".claude/hooks/protect-bash.sh",
-        '    msys*:/*)          ROOT_WIN=',
-        '    msys*:/__never__)  ROOT_WIN=',
+        '    1:/*)          ROOT_WIN=',
+        '    1:/__never__)  ROOT_WIN=',
         "tests/test_hooks.py::test_a_root_on_an_msys_mount_still_gets_its_windows_spelling",
         marks=CMD_ONLY,
         id="wrapper-msys-mount-root-spelling",
@@ -322,10 +322,35 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
     # the other four.
     pytest.param(
         ".claude/hooks/snapshot-before-tool.sh",
-        '    msys*:/*)          ROOT_WIN=',
-        '    msys*:/__never__)  ROOT_WIN=',
+        '    1:/*)          ROOT_WIN=',
+        '    1:/__never__)  ROOT_WIN=',
         "tests/test_repo_invariants.py::test_every_hook_locates_its_install_with_the_same_block",
         id="wrapper-location-block-drift",
+    ),
+    # Git for Windows 2.55 (bash 5.3, MSYS2 runtime 3.6) reports $OSTYPE `cygwin`. Keying the Windows spelling on
+    # msys* alone handed python.exe /d/... with conversion off: every call GUARD INERT (windows-latest CI, Git 2.55).
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        "cygwin*) [ -e /usr/bin/msys-2.0.dll ] && _MSYS=1 ;;",
+        "cygwin*) ;;",
+        "tests/test_hooks.py::test_a_drive_root_is_converted_to_its_windows_spelling[cygwin]",
+        marks=CMD_ONLY,
+        id="wrapper-git255-ostype-cygwin-drive",
+    ),
+    pytest.param(
+        ".claude/hooks/protect-bash.sh",
+        "cygwin*) [ -e /usr/bin/msys-2.0.dll ] && _MSYS=1 ;;",
+        "cygwin*) ;;",
+        "tests/test_hooks.py::test_a_root_on_an_msys_mount_still_gets_its_windows_spelling[cygwin]",
+        marks=CMD_ONLY,
+        id="wrapper-git255-ostype-cygwin-mount",
+    ),
+    pytest.param(
+        ".codex/hooks/skyguard-entry.sh",
+        "cygwin*) [ -e /usr/bin/msys-2.0.dll ] && _MSYS=1 ;;",
+        "cygwin*) ;;",
+        "tests/test_repo_invariants.py::test_the_codex_entry_locates_its_install_like_the_claude_hooks",
+        id="wrapper-git255-ostype-codex-drift",
     ),
     # mkdir runs only when the heartbeat directory is missing; make it never run. A fresh install then
     # gets no heartbeat and hook-canary reports a live hook as dead.
@@ -5857,7 +5882,7 @@ _P5F_CLAUSES = [
     # Privacy: a fixture carries the home of whoever runs the gate again (built at collection time, so this file
     # never names anyone).
     ("p5f-fixture-carries-home", "tests/fixtures/routes-harness/cases9.py", '"file_path":"<HOME>/.codex/config.toml"',
-     '"file_path":"' + str(Path.home()).replace(BS, "/") + '/.codex/config.toml"',
+     '"file_path":"C:/Users/' + (login_name() or Path.home().name) + '/.codex/config.toml"',
      "tests/test_payload_fixtures.py::test_no_file_under_fixtures_carries_the_capturing_users_home"),
     # B-M4: the DevBench URL is read as curl sends it.
     ("p5f-devbench-url-not-normalised", "tools/skyguard/mcp_rules.py",
@@ -6750,6 +6775,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/lock.py", "            _remove_file(p, keep, prot if isinstance(prot, bool) else None)",
      "            _remove_file(p, keep, None)", _FXI2 + "test_unlock_restores_the_protection_the_manifest_recorded",
      "fixA-i2-restore-recorded"),
+    # A DACL without SE_DACL_AUTO_INHERITED is written as it is (SetNamedSecurityInfoW would add `AI`)...
+    ("tools/skyguard/lock.py", "        if protected == now and not control & 0x400:", "        if False:",
+     _FXI2 + "test_lock_and_unlock_keep_an_inheriting_dacl_without_the_auto_inherited_bit", "ci-dacl-keep-no-ai"),
 ]]
 _FXI3 = "tests/test_skyguard_lock.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
@@ -7396,7 +7424,10 @@ MUTATIONS += [
     pytest.param('tools/skyguard/self_rules.py', '    if not deletes._PYTHON.fullmatch(program):\n', '    if False:\n', 'tests/test_pricing_inspection.py::test_inspection_comments_are_data_and_other_interpreters_stay_conservative[posix]', id='review-inspection-python-only'),
     pytest.param('tools/skyguard/self_rules.py', '    if not code.isascii():\n', '    if False:\n', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[unicode-posix]', id='review-inspection-ascii-only'),
     pytest.param('tools/skyguard/self_rules.py', '    except (SyntaxError, ValueError, RecursionError):\n        return code\n', '    except (SyntaxError, ValueError, RecursionError):\n        return " " * len(code)\n', 'tests/test_pricing_inspection.py::test_inspection_parser_failure_preserves_original_state_refusal[ast]', id='review-inspection-ast-fallback'),
-    pytest.param('tools/skyguard/self_rules.py', '    if any(type(node) not in permitted for node in nodes):\n', '    if False:\n', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[f-string-posix]', id='review-inspection-ast-grammar'),
+    # [print-file], not [f-string]: on Python 3.12 an f-string tokenizes as FSTRING_* (PEP 701), never STRING, so
+    # it is not masked even without the grammar check and that twin survived on the 3.12 leg (CI run 38178385999).
+    # A keyword argument is outside the grammar on every version, and without the check its literal IS masked.
+    pytest.param('tools/skyguard/self_rules.py', '    if any(type(node) not in permitted for node in nodes):\n', '    if False:\n', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[print-file-posix]', id='review-inspection-ast-grammar'),
     pytest.param('tools/skyguard/self_rules.py', 'node.level == 0 and ', '', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[relative-parser-posix]', id='review-inspection-import-absolute'),
     pytest.param('tools/skyguard/self_rules.py', 'node.module == "skyguard" and ', '', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[wrongmodule-parser-posix]', id='review-inspection-import-module'),
     pytest.param('tools/skyguard/self_rules.py', ' and len(node.names) == 1', '', 'tests/test_pricing_inspection.py::test_inspection_literals_allow_but_executed_or_unknown_code_keeps_state_refusal[multi-parser-posix]', id='review-inspection-import-single-name'),
@@ -7630,4 +7661,14 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("scripts/check_could_not_check.py", "    except OSError as e:\n", "    except ImportError as e:\n",
      "tests/test_could_not_check.py::test_a_missing_log_is_could_not_check_not_a_traceback",
      "linux-ci-could-not-check-missing-log"),
+]]
+# windows-latest CI (runs 38178385999, 38187755448): each twin killed by the named test.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    # The leak grep allows the spelling the filesystem gives an allowed folder (8.3 short TEMP on the runner).
+    ("tools/check-release-payload.py", "            out.append(real)\n", "            pass\n",
+     "tests/test_release_payload.py::test_an_allowed_prefix_also_allows_the_spelling_the_filesystem_gives_it",
+     "ci-allow-long-spelling"),
+    # The p5a corpus rows about "the cwd's own drive" take the install's drive, not a hard-coded C:.
+    ("scripts/guard-corpus/record.py", '.replace("<drive>", drive)', "",
+     "tests/test_guard_corpus.py::test_payload_drive_template_is_the_installs_own_drive", "ci-corpus-drive-template"),
 ]]
