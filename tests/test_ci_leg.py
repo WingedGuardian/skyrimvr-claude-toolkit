@@ -107,3 +107,13 @@ def test_the_recorded_spec_is_well_formed_and_names_real_modules():
     assert "test_hook_deadline_load.py" in spec["forbidden_passing"]         # T10: never in CI
     for harness in ("test_harness_controls.py", "test_harness_integrations.py"):
         assert harness in spec["required_modules"]["all"]
+
+
+def test_a_missing_log_is_could_not_check_not_a_traceback(tmp_path):
+    """CI run 38178385999: the suite step failed, so the always() tripwire read a behavioral.log nobody wrote."""
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps(SPEC), encoding="utf-8")
+    r = subprocess.run([sys.executable, "-B", str(SCRIPT), "log", str(tmp_path / "behavioral.log"), "--leg", "Linux",
+                        "--spec", str(spec)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 2 and "Traceback" not in r.stderr, r.stderr
+    assert "COULD NOT CHECK: cannot read" in r.stdout and "behavioral.log" in r.stdout, r.stdout

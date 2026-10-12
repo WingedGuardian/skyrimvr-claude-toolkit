@@ -55,3 +55,11 @@ def test_counted_skips_without_a_short_summary_section_cannot_pass(tmp_path):
 def test_a_run_with_no_skips_needs_no_short_summary_section(tmp_path):
     r = run(tmp_path, "collected\n", header=False, summary="==== 4 passed in 1.00s ====\n")
     assert r.returncode == 0, r.stdout
+
+
+def test_a_missing_log_is_could_not_check_not_a_traceback(tmp_path):
+    """CI run 38178385999: the suite step failed, so the always() step read a behavioral.log nobody wrote."""
+    r = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path / "behavioral.log")],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 2 and "Traceback" not in r.stderr, r.stderr
+    assert "COULD NOT CHECK: cannot read" in r.stdout, r.stdout

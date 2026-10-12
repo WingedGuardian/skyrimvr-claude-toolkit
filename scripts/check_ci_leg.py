@@ -95,7 +95,13 @@ def main(argv=None) -> int:
     if leg not in spec["skip_ceiling"]:
         sys.stderr.write("unknown leg {!r}; known: {}\n".format(leg, ", ".join(spec["skip_ceiling"])))
         return 2
-    lines = Path(log).read_text(encoding="utf-8", errors="replace").splitlines()
+    # An `if: always()` step after a failed suite step reads a log nobody wrote: say so, not a traceback.
+    try:
+        lines = Path(log).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as e:
+        print("COULD NOT CHECK: cannot read {} ({}) -- did the step that writes it run?".format(log, e.strerror))
+        print("CI LEG {} ({}): COULD NOT CHECK".format(leg, mode))
+        return 2
     rc, msgs = (check_collect if mode == "collect" else check_log)(lines, spec, leg)
     for m in msgs:
         print(("TRIPWIRE: " if rc == 1 else "") + m)

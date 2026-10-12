@@ -27,8 +27,13 @@ def main(argv):
         else:
             print("unknown argument: " + args[i], file=sys.stderr)
             return 2
-    with open(path, encoding="utf-8", errors="replace") as handle:
-        lines = handle.read().splitlines()
+    # An `if: always()` step after a failed suite step reads a log nobody wrote: say so, not a traceback.
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError as e:
+        print("COULD NOT CHECK: cannot read %s (%s) -- did the step that writes it run?" % (path, e.strerror))
+        return 2
     if not any(re.search(r"\b\d+ (passed|failed|skipped|error)", line) for line in lines):
         print("COULD NOT CHECK: no pytest summary line in " + path)
         return 2
