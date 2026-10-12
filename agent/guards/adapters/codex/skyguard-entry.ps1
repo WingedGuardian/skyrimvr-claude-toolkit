@@ -172,6 +172,7 @@ $script:FB = $false
 $script:ProbeMs = [long]15000
 $script:ProbeEndMs = $script:T0ms + 30000          # Invoke-Main sets it from the wrapper's limit
 $script:Probes = @()
+$script:Probed = $false                            # a fallback ran: only then is <role>.probes written
 try {
     if ($env:SKYGUARD_PROBE_TIMEOUT) {
         $v = [double]::Parse($env:SKYGUARD_PROBE_TIMEOUT, [System.Globalization.CultureInfo]::InvariantCulture)
@@ -183,6 +184,32 @@ function Get-ProbeMs {
     $left = $script:ProbeEndMs - [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     if ($left -lt 200) { return 0 }
     return [int][Math]::Min($script:ProbeMs, $left)
+}
+function Add-Stage([string]$what) {
+    # where the call is, in ms since the entry started -- written with the probes (CI run 38277736359: ~24 s went
+    # by between the start and the first probe, and nothing said where)
+    $script:Probes += ($what + ' at ' + ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $script:T0ms) + 'ms')
+}
+function Find-OnPath([string]$name) {
+    # PATH x PATHEXT by hand, in Get-Command's order (each directory in turn, PATHEXT order within it). NOT
+    # Get-Command: on windows-latest Windows PowerShell 5.1 every fallback call that looked an absent name up spent
+    # ~22-25 s before its first probe (CI runs 38201545601, 38277736359: every 5.1 test reaching this chain; pwsh
+    # and the calls that never reach it took ~1-4 s), which used up the budget meant for the probes themselves.
+    $exts = @('')
+    if ($script:IsWin) {
+        $exts = @()
+        foreach ($e in ([string]$env:PATHEXT).Split(';')) { if ($e) { $exts += $e } }
+        if ($exts.Count -eq 0) { $exts = @('.COM', '.EXE', '.BAT', '.CMD') }
+    }
+    foreach ($d in ([string]$env:PATH).Split([System.IO.Path]::PathSeparator)) {
+        $d = $d.Trim().Trim('"')
+        if (-not $d) { continue }
+        foreach ($e in $exts) {
+            try { $f = [System.IO.Path]::Combine($d, $name + $e) } catch { continue }
+            if ([System.IO.File]::Exists($f)) { return $f }
+        }
+    }
+    return $null
 }
 function Add-Probe([string[]]$c, [string]$what, [long]$t0) {
     $script:Probes += (($c -join ' ') + ' ' + $what + ' ' + ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $t0) + 'ms')
@@ -216,10 +243,15 @@ function Use-Py([string[]]$c) {
 }
 function Find-PyFallback {
     $alias = $null
+    $script:Probed = $true
+    Add-Stage 'fallback-start'
     foreach ($cand in $script:PyCandidates) {
-        $found = @(Get-Command -Name $cand[0] -CommandType Application -ErrorAction SilentlyContinue)
-        if ($found.Count -eq 0) { continue }
-        $c = @([string]$found[0].Source) + (Get-Tail $cand)
+        $t0 = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $found = Find-OnPath $cand[0]
+        $script:Probes += ('lookup ' + $cand[0] + ' ' + $(if ($null -eq $found) { 'absent' } else { 'found' }) + ' ' +
+                           ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $t0) + 'ms')
+        if ($null -eq $found) { continue }
+        $c = @([string]$found) + (Get-Tail $cand)
         if ($c[0] -match '[\\/][Ww]indows[Aa]pps[\\/]') { if ($null -eq $alias) { $alias = $c }; continue }
         if (Test-PyGood $c) { return (Use-Py $c) }
     }
@@ -277,6 +309,7 @@ function Invoke-Main {
     $buf = [System.IO.MemoryStream]::new()
     $stdin.CopyTo($buf)
     $payload = $buf.ToArray()
+    Add-Stage 'stdin-read'
 
     if (-not $script:Known) { Send-Failure 'role' 'unknown role'; return }
 
@@ -337,10 +370,11 @@ function Invoke-Main {
 
     # The configured interpreter, else the chain (unless the test knob forbids it).
     $nofb = ($env:SKYGUARD_NO_PYTHON_FALLBACK -eq '1')
+    Add-Stage 'configured-python-check'
     $pyc = $null
     if (-not $PY.StartsWith('{{') -and [System.IO.File]::Exists($PY)) { $pyc = @($PY) }
     if ($null -eq $pyc -and -not $nofb) { $pyc = Find-PyFallback }
-    if ($script:Probes.Count -gt 0) { Write-Record 'probes' ($script:Probes -join '; ') }
+    if ($script:Probed) { Write-Record 'probes' ($script:Probes -join '; ') }
     if ($null -eq $pyc) { Send-Failure 'python' 'cannot run Python -- install Python 3 and run setup.sh'; return }
 
     $left = [long]$limit * 1000 - ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $script:T0ms)
@@ -348,6 +382,7 @@ function Invoke-Main {
     if ($r.TimedOut) { Send-Failure 'engine' ('engine did not answer within ' + $limit + ' s'); return }
     if ($r.Code -ne 0 -and -not $script:FB -and -not $nofb -and -not (Test-PyGood $pyc)) {
         $alt = Find-PyFallback
+        Write-Record 'probes' ($script:Probes -join '; ')
         if ($null -ne $alt) {
             $pyc = $alt
             $left = [long]$limit * 1000 - ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $script:T0ms)
