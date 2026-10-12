@@ -7768,3 +7768,8 @@ MUTATIONS += [pytest.param(
          "tests/test_codex_entry.py::test_a_slow_but_healthy_fallback_interpreter_is_accepted[pwsh]",
          "ci-ps1-probe-budget-total"),
     ]]
+# Linux CI run 38201545601: the unknown dialect on a POSIX host places `/tmp/x` (outside) and `/x` in the install.
+MUTATIONS += [pytest.param(
+    "tools/skyguard/targets.py", "    if paths.POSIX_HOST and (not cwd or cwd.startswith(\"/\")):\n", "    if False:\n",
+    "tests/test_skyguard_deletes.py::test_unknown_dialect_on_a_posix_host_places_slash_paths",
+    id="linux-ci-posix-unknown-dialect")]

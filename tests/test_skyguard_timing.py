@@ -71,22 +71,23 @@ def cpu_ms(fn, min_sample=MIN_SAMPLE_MS):
             return spent / reps
 
 
-def assert_linear(label, make):
-    """make(N) -> a zero-argument callable that runs the shape at size N."""
-    small = cpu_ms(make(SMALL))
-    assert small < EARLY_MS, f"{label}: {small:.0f} ms CPU per call at 20 KB (catastrophic; 80 KB not tried)"
-    large = cpu_ms(make(LARGE))
-    assert large < CEILING_MS, f"{label}: {large:.0f} ms CPU per call at 80 KB (ceiling {CEILING_MS:.0f})"
+def assert_linear(label, make, small_n=SMALL, large_n=LARGE):
+    """make(N) -> a zero-argument callable that runs the shape at size N. small_n/large_n keep a 1:4 ratio."""
+    s_kb, l_kb = small_n // 1000, large_n // 1000
+    small = cpu_ms(make(small_n))
+    assert small < EARLY_MS, f"{label}: {small:.0f} ms CPU per call at {s_kb} KB (catastrophic; {l_kb} KB not tried)"
+    large = cpu_ms(make(large_n))
+    assert large < CEILING_MS, f"{label}: {large:.0f} ms CPU per call at {l_kb} KB (ceiling {CEILING_MS:.0f})"
     if large >= RATIO_FLOOR_MS:
         ratio = large / max(small, 0.25)
         if ratio >= RATIO_MAX:
             # An 80 ms sample of a ~30 ms call is 3 calls on a 15.6 ms clock (+-17%). Before calling it
             # superlinear, measure both sizes once more with a 5x sample (+-3%): a quadratic (~16) stays red.
-            small = cpu_ms(make(SMALL), PRECISE_SAMPLE_MS)
-            large = cpu_ms(make(LARGE), PRECISE_SAMPLE_MS)
+            small = cpu_ms(make(small_n), PRECISE_SAMPLE_MS)
+            large = cpu_ms(make(large_n), PRECISE_SAMPLE_MS)
             ratio = large / max(small, 0.25)
         assert ratio < RATIO_MAX, (
-            f"{label}: superlinear -- {small:.1f} ms CPU at 20 KB, {large:.1f} ms at 80 KB, ratio {ratio:.1f} "
+            f"{label}: superlinear -- {small:.1f} ms CPU at {s_kb} KB, {large:.1f} ms at {l_kb} KB, ratio {ratio:.1f} "
             f"(linear ~4, quadratic ~16, limit {RATIO_MAX:.0f})")
     return small, large
 
@@ -928,8 +929,14 @@ def test_covers_protected_stays_fast(name):
 
 @pytest.mark.parametrize("shape", ["open", "open-a", "closed-no-comma"])
 def test_brace_expansion_is_linear(shape):
-    """covers_protected caps a component at MAX_GLOB_COMPONENT, but _braces itself must not be quadratic either."""
+    """covers_protected caps a component at MAX_GLOB_COMPONENT, but _braces itself must not be quadratic either.
+
+    80 KB -> 320 KB, not the suite's 20 -> 80 (Linux CI runs 38187755448 and 38201545601: the timing-braces-linear
+    twin survived on 2 of 4 legs both times). Its revert scans with str.find, a C memchr: at 20 -> 80 KB that
+    quadratic term is still small beside the linear Python loop, so the ratio read 7.2-8.0 against the limit 8.
+    MEASURED on the dev box, 2 runs, ratio at 80 -> 320 KB: linear 3.9-6.6 (open 4.1-4.2); mutant 11.8-17.3
+    (open 13.0-17.3). The quadratic now dominates; a host with a 3x faster memchr still reads ~13 on `open`."""
     from skyguard import targets
     make_text = {"open": lambda n: "{" * n, "open-a": lambda n: "{a" * (n // 2),
                  "closed-no-comma": lambda n: "{a}" * (n // 3)}[shape]
-    assert_linear(shape, lambda n: (lambda: targets._braces(make_text(n))))
+    assert_linear(shape, lambda n: (lambda: targets._braces(make_text(n))), small_n=4 * SMALL, large_n=4 * LARGE)

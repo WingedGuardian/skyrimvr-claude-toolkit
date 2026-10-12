@@ -215,13 +215,32 @@ def test_is_opaque():
 
 
 # ------------------------------------------------------------------------------------------- whole-rule behaviour
-def test_unknown_dialect_without_cwd_is_stricter():
-    """R5: with no dialect and no cwd, PowerShell's reading of `/tmp/x` (the current drive's root) cannot be placed,
-    so a command that also names the install denies. Claude always sends the dialect; this pins the cost."""
+def test_unknown_dialect_without_cwd_is_stricter(monkeypatch):
+    """R5: with no dialect and no cwd, PowerShell's reading of `/tmp/x` (the current drive's root) cannot be placed
+    ON WINDOWS, so a command that also names the install denies. Claude always sends the dialect; this pins the cost.
+    Both host readings run on every OS (paths.POSIX_HOST), so neither branch goes untested on either CI leg."""
+    monkeypatch.setattr(paths, "POSIX_HOST", False)
     got, fired = decide('rm -rf /tmp/x && ls "' + GAME + '"', shell="")
     assert fired == {"S-DEL-UNRESOLVED"}
     got, fired = decide('rm -rf /tmp/x && ls "' + GAME + '"', shell="bash")
     assert got == ("allow", "")
+
+
+def test_unknown_dialect_on_a_posix_host_places_slash_paths(monkeypatch):
+    """Linux CI run 38201545601: on a POSIX host `/` is the only root, so PowerShell's `/tmp/x` IS /tmp/x -- outside
+    the install, and the Windows-only cost above does not apply. The same shape with the `/x` INSIDE the install
+    still denies, in the unknown dialect and in each named one."""
+    monkeypatch.setattr(paths, "POSIX_HOST", True)
+    got, fired = decide('rm -rf /tmp/x && ls "' + GAME + '"', shell="")
+    assert (got, fired) == (("allow", ""), set())
+    posix_game = "/home/u/Games/Skyrim VR"
+    r = paths.roots(posix_game, "", {})
+    for shell in ("", "bash", "powershell"):
+        a = audit.Audit("")
+        a.raw = lambda line: None
+        v = shell_rules.decide('rm -rf "' + posix_game + '/Data" && ls "' + posix_game + '"', r, a, cwd="",
+                               shell=shell, env={})
+        assert (v.decision, {rid for rid, _ in a.fired}) == ("deny", {"S-DEL-INSTALL"}), shell
 
 
 def test_home_resolves_from_the_env_argument():

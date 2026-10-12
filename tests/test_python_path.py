@@ -111,12 +111,14 @@ def test_setup_warns_loudly_when_no_python_exists(game_dir, tmp_path):
     import os
     import shutil
 
+    from conftest import offers_python, python_free_path
     bash_dir = os.path.dirname(shutil.which("bash") or "")
-    # A PATH with the basics setup.sh needs and no interpreter. Python's own directory is not on it.
-    keep = [d for d in os.environ["PATH"].split(os.pathsep)
-            if d and not any(os.path.exists(os.path.join(d, n))
-                             for n in ("python", "python.exe", "python3", "python3.exe", "py", "py.exe"))]
-    result = run_setup(game_dir, env_overrides={"PATH": os.pathsep.join(keep + [bash_dir])})
+    # A PATH with the basics setup.sh needs and no interpreter. Linux CI run 38201545601: the old filter dropped
+    # /usr/bin and then appended bash's directory -- /usr/bin again, python3 and all -- so setup found the runner's
+    # python3. python_free_path keeps /usr/bin's other commands (bash included) through a python-free mirror.
+    keep = [python_free_path()] + ([] if offers_python(bash_dir) else [bash_dir])
+    assert not any(offers_python(d) for p in keep for d in p.split(os.pathsep) if d), keep
+    result = run_setup(game_dir, env_overrides={"PATH": os.pathsep.join(keep)})
     out = result.stdout
     assert "will REFUSE every command" in out, out[-1500:]
     assert "NOT CONFIGURED" in out
