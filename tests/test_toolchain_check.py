@@ -175,7 +175,8 @@ def _automod_built(root: Path, tfm: str = "net10.0", commit: str = PIN_SHA) -> N
     d.mkdir(parents=True)
     (d / "spookys-automod.dll").write_bytes(b"MZ")
     if commit:
-        (d / "toolkit-built-from.txt").write_text(commit + "\n", encoding="utf-8")
+        # CRLF on every OS, as a Windows build writes it (Linux CI run 38187755448: the CR strip went unexercised)
+        (d / "toolkit-built-from.txt").write_text(commit + "\n", encoding="utf-8", newline="\r\n")
 
 
 def _resaver_installed(root: Path, compiled: bool = True, lib: bool = True) -> None:

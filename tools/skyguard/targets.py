@@ -152,6 +152,8 @@ def _drive_root(cwd: Optional[str]) -> Optional[str]:
     if cwd and cwd.startswith("//"):
         bits = cwd[2:].split("/")
         return "//" + bits[0] + "/" + bits[1] + "/" if len(bits) >= 2 else None
+    if paths.POSIX_HOST and (not cwd or cwd.startswith("/")):
+        return "/"                    # a POSIX host has one root, whatever (or whether) the cwd: `/x` is absolute there
     return None
 
 

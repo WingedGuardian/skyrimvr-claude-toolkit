@@ -747,7 +747,9 @@ def test_a_failed_run_is_not_also_called_killed(tmp_path):
     _run_wrapper(root, env, "protect-bash.sh", BLOCKING[0][1])
     inv = _hb_dir(root) / "protect-bash.invoked"
     old = inv.read_text(encoding="utf-8").split()
-    inv.write_text("{:.6f} {}\n".format(time.time() - 500, old[1]), encoding="utf-8")
+    # CRLF on every OS (Linux CI run 38187755448): a record a Windows tool rewrote ends in \r, and Linux text mode
+    # never wrote one, so the wrapper's CR strip went unexercised there.
+    inv.write_text("{:.6f} {}\n".format(time.time() - 500, old[1]), encoding="utf-8", newline="\r\n")
     (root / "tools" / "skyguard" / "run.py").write_bytes((REPO / "tools" / "skyguard" / "run.py").read_bytes())
     _run_wrapper(root, env, "protect-bash.sh", BLOCKING[0][1])     # a healthy call: it must not rewrite the failure
     assert "killed" not in " ".join(_rec(root, "protect-bash.sh", "failed")), _rec(root, "protect-bash.sh", "failed")

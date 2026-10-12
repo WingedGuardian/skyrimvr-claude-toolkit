@@ -125,6 +125,11 @@ def test_an_intended_row_without_why_or_task_is_rejected():
     assert rec.intended_row_problems({k: v for k, v in row.items() if k != "why"})
 
 
+def test_every_windows_only_row_is_an_intended_row():
+    """record.WINDOWS_ONLY skips by id off Windows: a stale id would skip nothing, a typo would hide nothing."""
+    assert set(_rec().WINDOWS_ONLY) <= {r["id"] for r in INTENDED_ROWS}
+
+
 def test_intended_rows_reproduce(installs):
     """Each hand-authored row: decision + rule ids + EXACT text, through the real wrapper."""
     rec, inst = installs
@@ -137,6 +142,8 @@ def test_intended_rows_reproduce(installs):
     assert rec.intended_problems(good, {"decision": "deny", "rules": {"S-DEL-INSTALL"}, "text": "Blocked: exact"})
     failures = []
     for row in INTENDED_ROWS:
+        if rec.windows_only(row["id"]):
+            continue                  # its input exists only on Windows (record.WINDOWS_ONLY says why)
         got = rec.fire_full(inst[row["layout"]], row)
         failures += [f"{row['id']}: {p}" for p in rec.intended_problems(row, got)]
     assert not failures, "\n".join(failures)

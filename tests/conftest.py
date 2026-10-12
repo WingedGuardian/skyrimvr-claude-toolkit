@@ -88,7 +88,10 @@ def pytest_configure(config):
 SETUP_TIMEOUT = 240
 
 IGNORE = shutil.ignore_patterns(
-    ".git", "tests", "__pycache__", "node_modules", ".pytest_cache", ".venv"
+    ".git", "tests", "__pycache__", "node_modules", ".pytest_cache", ".venv",
+    # CI tees the running suite's own logs into the checkout (ci.yml: collect.log, behavioral.log); a copy that
+    # took them shipped the runner's home path into every verify-release payload (Linux CI run 38187755448).
+    "collect.log", "behavioral.log",
 )
 
 

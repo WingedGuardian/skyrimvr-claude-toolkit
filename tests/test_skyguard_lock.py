@@ -75,6 +75,8 @@ def _attrib(flag, p):
 
 
 def _ro(p):
+    if not WINDOWS:                     # Linux CI run 38187755448: st_file_attributes is Windows-only
+        return not os.stat(str(p)).st_mode & 0o222
     return bool(os.stat(str(p)).st_file_attributes & 1)
 
 
@@ -88,6 +90,10 @@ def _scrub(root: Path):
     """Remove any deny ACE and read-only bit under `root` (raw primitives, no toolkit code), then delete it.
     Two processes for the whole tree: the deny ACEs first (with WA denied attrib -R is refused), then the bits."""
     if not root.exists():
+        return
+    if not WINDOWS:                     # Linux CI run 38187755448: no ACEs or attribute bits exist to clear there,
+        shutil.rmtree(str(root), ignore_errors=True)   # and whoami.exe/icacls.exe do not exist (teardown ERROR)
+        assert not root.exists(), "scratch bed could not be removed: %s" % root
         return
     sid = _sid()
     subprocess.run([str(SYS32 / "icacls.exe"), str(root), "/remove:d", "*" + sid, "/T", "/C"], capture_output=True)
@@ -838,7 +844,10 @@ def test_cli_dispatches_guards_and_doctor(tmp_path, capsys):
 
 def test_default_is_off_until_the_batch_decides(bed):
     assert _lock().DEFAULT == "off"
-    assert "default off" in " ".join(_lock().status(str(bed.root)).lines).lower() or WINDOWS
+    said = " ".join(_lock().status(str(bed.root)).lines).lower()
+    # Off Windows the lock does not exist, and status says so rather than "default off" (Linux CI run 38187755448).
+    if not WINDOWS:
+        assert "unsupported on this platform" in said, said
 
 
 def _sh_with_python(bed, tmp_path, value):

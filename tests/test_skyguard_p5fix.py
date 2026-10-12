@@ -46,6 +46,8 @@ def test_there_are_p5f_rows():
 @pytest.mark.parametrize("row", ROWS, ids=[r["id"] for r in ROWS])
 def test_p5f_row(installs, row):
     rec, inst = installs
+    if rec.windows_only(row["id"]):
+        pytest.skip(rec.windows_only(row["id"]))
     install = inst[row["layout"]]
     got = rec.engine_verdict(install, row["hook"], rec.row_payload(row, install))
     assert rec.intended_problems(row, got) == []

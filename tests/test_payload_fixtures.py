@@ -61,6 +61,11 @@ def test_no_file_under_fixtures_carries_the_capturing_users_home():
     if m:
         names.add(m.group(1))
     names = {n.lower() for n in names if len(n) >= 3}
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        # Linux CI run 38187755448: GitHub's hosted runner logs in as the service account `runner` (/home/runner),
+        # a word the fixtures use (sessionstart_runner.py, "test runner"). It names no person; matching it found
+        # 3 false hits and nothing else. Every other name is still searched.
+        names.discard("runner")
     if not names:
         pytest.skip("no user name to search for: no login variable, and the checkout is not under a user folder")
     root = REPO / "tests" / "fixtures"

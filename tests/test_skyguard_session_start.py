@@ -122,6 +122,10 @@ def _whoami():
 def _scrub(root: Path):
     if not root.exists():
         return
+    if not WINDOWS:                     # Linux CI run 38187755448: no ACEs or attribute bits exist to clear there,
+        shutil.rmtree(str(root), ignore_errors=True)   # and whoami.exe/icacls.exe do not exist (teardown ERROR)
+        assert not root.exists(), "scratch bed could not be removed: %s" % root
+        return
     sid = _whoami()
     subprocess.run([str(SYS32 / "icacls.exe"), str(root), "/remove:d", "*" + sid, "/T", "/C"], capture_output=True)
     subprocess.run([str(SYS32 / "attrib.exe"), "-R", os.path.join(str(root), "*"), "/S", "/D"], capture_output=True)

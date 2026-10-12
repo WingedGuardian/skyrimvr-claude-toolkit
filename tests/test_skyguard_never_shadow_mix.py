@@ -133,7 +133,7 @@ def _patch(body):
 
 
 def _pre_tool(project, hb, raw):
-    req = codex.to_request(raw, "win32")
+    req = codex.to_request(raw, sys.platform)  # host platform: on Linux CI an absolute POSIX path under a Windows adapter is a mix no host makes (py3.13 joins it onto C:)
     return engine.pre_tool(req, str(project), lambda: paths.roots(str(project), "", {}), audit.Audit(str(project)),
                            telemetry=str(hb), now=NOW)
 
