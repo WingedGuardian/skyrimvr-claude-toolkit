@@ -539,7 +539,7 @@ def allow_prefix_problem(prefix: str, homes) -> str:
 
 
 def run_leaks(args) -> int:
-    dirs, allow, baseline, cfgs, home, require, i = [], [], None, [], None, False, 0
+    dirs, allow, baseline, cfgs, cfg_homes, require, i = [], [], None, [], [], False, 0
     while i < len(args):
         if args[i] == "--allow-prefix" and i + 1 < len(args):
             allow.append(args[i + 1])
@@ -548,7 +548,10 @@ def run_leaks(args) -> int:
             cfgs.append(args[i + 1])
             i += 2
         elif args[i] == "--home" and i + 1 < len(args):
-            home, i = args[i + 1], i + 2
+            # Repeatable: the real home, and the C:/Users/<login> home setup.sh synthesizes where it cannot ask
+            # Windows for Documents (Linux, the CI runner). A config folder is validated below EACH, never a prefix.
+            cfg_homes.append(args[i + 1])
+            i += 2
         elif args[i] == "--changed-from" and i + 1 < len(args) and Path(args[i + 1]).is_dir():
             baseline, i = args[i + 1], i + 2
         elif args[i] == "--require-tokens":
@@ -559,9 +562,9 @@ def run_leaks(args) -> int:
         else:
             dirs.append(args[i])
             i += 1
-    if not dirs or not all(Path(d).is_dir() for d in dirs) or (cfgs and not home):
+    if not dirs or not all(Path(d).is_dir() for d in dirs) or (cfgs and not cfg_homes):
         sys.stderr.write("usage: check-release-payload.py --leaks <dir> [<dir> ...] [--allow-prefix PATH ...] "
-                         "[--allow-config DIR --home HOME] [--changed-from DIR] [--require-tokens]\n")
+                         "[--allow-config DIR --home HOME ...] [--changed-from DIR] [--require-tokens]\n")
         return 2
     persons, token_paths = leak_tokens()
     problems = token_problems()
@@ -576,7 +579,7 @@ def run_leaks(args) -> int:
         print("LEAKS: COULD NOT CHECK -- LEAK_TOKENS is empty or absent (the release workflow reads it from the "
               "repository secret LEAK_TOKENS); refusing to pass a grep that cannot see the maintainer")
         return 2
-    homes = [h for h in (home, os.environ.get("USERPROFILE"), os.environ.get("HOME")) if h]
+    homes = [h for h in (*cfg_homes, os.environ.get("USERPROFILE"), os.environ.get("HOME")) if h]
     kept = []
     for p in allow:
         why = allow_prefix_problem(p, homes)
@@ -586,7 +589,7 @@ def run_leaks(args) -> int:
             kept.append(p)
     allow = kept
     for c in cfgs:
-        if config_dir_ok(c, home):
+        if any(config_dir_ok(c, h) for h in cfg_homes):
             allow.append(c)
             print("  allow-listed the config folder (validated <home>/.../Documents/My Games/Skyrim*)")
         else:

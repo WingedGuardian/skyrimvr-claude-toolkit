@@ -312,7 +312,20 @@ if [ "$SCRUBBED" -eq 1 ]; then
   # shellcheck disable=SC2086
   out=$(cd "$GAME" && scrub bash setup.sh ${VERIFY_SETUP_ARGS---agent all} </dev/null 2>&1); rc=$?
   [ $rc -eq 0 ] && ok "setup.sh again: idempotent (exit 0)" || { bad "setup.sh re-run" "exit $rc"; echo "$out" | tail -15; }
-  left=$(grep -lE '\{\{[A-Z_]+\}\}' "$GAME/CLAUDE.md" "$GAME/AGENTS.md" "$GAME"/.claude/hooks/*.sh "$GAME"/.codex/hooks/* "$GAME/.codex/hooks.json" 2>/dev/null | tr '\n' ' ')
+  # setup.sh renders .codex/hooks.json only for a drive-letter root (its CODEX_WIN test on `pwd -W`): the toolkit's
+  # Codex support is Windows-only. Elsewhere (Linux, the CI runner) setup leaves it as shipped -- byte-identical,
+  # placeholders and all -- and that, not a rendered file, is what is checked there.
+  codex_defs="$GAME/.codex/hooks.json"
+  case "$(cd "$GAME" && { pwd -W 2>/dev/null || pwd; } | tr '\134' '/')" in
+    [A-Za-z]:/*) ;;
+    *) if cmp -s "$GAME/.codex/hooks.json" "$ROOT/.codex/hooks.json"; then
+         ok "Codex hooks left as shipped off Windows (Codex support is Windows-only)"
+       else
+         bad "Codex hooks off Windows" "setup changed .codex/hooks.json on a root that is not a drive letter"
+       fi
+       codex_defs="" ;;
+  esac
+  left=$(grep -lE '\{\{[A-Z_]+\}\}' "$GAME/CLAUDE.md" "$GAME/AGENTS.md" "$GAME"/.claude/hooks/*.sh "$GAME"/.codex/hooks/* ${codex_defs:+"$codex_defs"} 2>/dev/null | tr '\n' ' ')
   [ -z "$left" ] && ok "no unrendered placeholder left by setup" || bad "placeholders left by setup" "$left"
   "$PY" -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$(winpath "$GAME/.claude/settings.json")" 2>/dev/null \
     && ok ".claude/settings.json parses after setup" || bad ".claude/settings.json after setup" "does not parse"
@@ -385,7 +398,12 @@ except Exception:
   allow=(--allow-prefix "$(winpath "$WORK")" --allow-prefix "$pybase" --allow-prefix "$(winpath "$PYDIR")")
   # The config folder is NOT taken on trust from setup's own output: the checker allow-lists it only if it is
   # <home>/.../Documents/My Games/Skyrim*, strictly below the REAL home (the parent's, not the scrubbed one).
-  [ -n "$cfg" ] && allow+=(--allow-config "$cfg" --home "$(winpath "${REAL_HOME}")")
+  # A second home, the same validated shape below it: where setup cannot ask Windows for Documents (no PowerShell --
+  # Linux, the CI runner) it writes its fallback C:/Users/$(whoami)/Documents (setup.sh), which is not below a
+  # /home/<login> REAL_HOME. Never an --allow-prefix: only a config folder of that exact shape is allowed.
+  cfg_homes=(--home "$(winpath "${REAL_HOME}")")
+  login=$(whoami 2>/dev/null) && [ -n "$login" ] && cfg_homes+=(--home "C:/Users/$login")
+  [ -n "$cfg" ] && allow+=(--allow-config "$cfg" "${cfg_homes[@]}")
   # Named by role, never printed: on this machine both sit under the maintainer's home (review N1).
   note "allowed in generated files (machine discovery)" "the Python install${cfg:+, the config folder if shaped right}"
   "$PY" "$HERE/check-release-payload.py" --leaks "$(winpath "$GAME")" "${allow[@]}" --changed-from "$(winpath "$ROOT")" "${REQ[@]}"; rc=$?
