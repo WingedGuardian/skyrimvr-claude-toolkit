@@ -16,6 +16,7 @@ under pytest's tmp_path, and pytest is re-invoked inside that copy.
 from __future__ import annotations
 
 import io
+import re
 import shutil
 import subprocess
 import sys
@@ -3772,6 +3773,31 @@ MUTATIONS.append(pytest.param(
     id="codex-ps1-final-exit-not-zero"))
 
 
+def _anchor_skipped_off_windows(returncode: int, stdout: str, platform: str = sys.platform) -> str:
+    """Linux CI run 38187755448: ~90 twins name an anchor test that is itself skipped off Windows (the Layer 2 lock,
+    NTFS junctions, Codex hooks -- each skip carries its own platform reason). Such a twin proves nothing there, and
+    "not killed" would misreport it. Off Windows ONLY, an anchor run that ran nothing but skips (exit 0, "N skipped",
+    nothing passed) returns the anchor's skip reason. On Windows -- where every one of these twins runs -- this is
+    always "", so the gate there is exactly as strict as before. A twin whose anchor PASSES is never excused."""
+    if platform == "win32" or returncode != 0:
+        return ""
+    tail = stdout.strip().splitlines()[-1] if stdout.strip() else ""
+    if not re.search(r"\b\d+ skipped\b", tail) or re.search(r"\b\d+ (?:passed|failed|errors?|xpassed)\b", tail):
+        return ""
+    reasons = [ln.split("] ", 1)[-1].strip() for ln in stdout.splitlines() if ln.startswith("SKIPPED [")]
+    return "; ".join(reasons) or tail
+
+
+def test_a_skipped_anchor_excuses_its_twin_only_off_windows():
+    out = "s                                                                        [100%]\n" \
+          "SKIPPED [1] tests/test_x.py:36: the lock is a Windows mechanism (R11)\n1 skipped in 0.10s\n"
+    assert _anchor_skipped_off_windows(0, out, "linux") == "tests/test_x.py:36: the lock is a Windows mechanism (R11)"
+    assert _anchor_skipped_off_windows(0, out, "win32") == ""                    # Windows: never excused
+    assert _anchor_skipped_off_windows(0, ".\n1 passed in 0.1s\n", "linux") == ""   # a surviving twin stays red
+    assert _anchor_skipped_off_windows(0, "1 passed, 1 skipped in 0.1s\n", "linux") == ""
+    assert _anchor_skipped_off_windows(5, "no tests ran in 0.1s\n", "linux") == ""  # a stale anchor stays red
+
+
 def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:
     work = tmp_path / "mutated"
     shutil.copytree(REPO, work, ignore=MUTATION_IGNORE)
@@ -3826,9 +3852,12 @@ def test_guard_actually_bites(tmp_path, relpath, find, replace, test_id):
     """Revert one fix; the test guarding it must fail."""
     work = _mutate(tmp_path, relpath, find, replace)
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", test_id, "-q", "--no-header", "-p", "no:cacheprovider"],
+        [sys.executable, "-m", "pytest", test_id, "-q", "--no-header", "-p", "no:cacheprovider", "-rs"],
         cwd=str(work), capture_output=True, text=True, timeout=600,
     )
+    why = _anchor_skipped_off_windows(result.returncode, result.stdout)
+    if why:
+        pytest.skip("the anchor test is skipped on this platform, so it cannot kill this twin: " + why)
     # EXIT 1 SPECIFICALLY, not merely non-zero.
     #
     # pytest exits 1 for "a test failed", but 2 for a collection error, 4 for a
@@ -7648,3 +7677,35 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "    if not cwd or cwd.startswith(\"/\"):\n",
      _PHP + "test_on_windows_a_slash_path_is_still_the_cwd_drives_root", "linux-ci-posix-drive-root-host-gated"),
 ]]
+
+
+# Linux CI run 38187755448: twins that mutate a WINDOWS-ONLY branch of the product. Off Windows the mutated line
+# never runs (or the defect it guards cannot occur), so the anchor passes and "not killed" would be a false alarm.
+# Each stays fully enforced on Windows; where the POSIX branch has its own guard, it has its own twin below.
+_WINDOWS_ONLY_TWINS = {
+    "deadline-kill-by-windows-pid": "taskkill by /proc/<pid>/winpid runs only under MSYS/Cygwin; POSIX takes kill -KILL",
+    "deadline-kill-is-not-waited-for": "taskkill by /proc/<pid>/winpid runs only under MSYS/Cygwin; POSIX takes kill -KILL",
+    "deadline-kill-allowed-to-land-while-time-is-left":
+        "off Windows the kill is a synchronous SIGKILL, so whether the child is gone at the answer is a race "
+        "(killed in 1 of 4 Linux runs); the wait exists for the asynchronous taskkill",
+    "l2-backup-manifest-lock": "POSIX O_APPEND writes are atomic; the lost-line race is the Windows CRT's "
+                               "seek-then-write O_APPEND emulation",
+    "engine-reads-declared-env-from-the-windows-root": "the wrappers set ROOT_WIN only under MSYS (case msys*); off "
+                                                       "Windows it is empty and a.root is the only root",
+    "t7-codex-render-only-for-codex":"Codex hooks are rendered on Windows only; off Windows nothing renders them anyway",
+    "t7-says-codex-unconfigured": "the Codex NOT CONFIGURED line is the Windows branch; off Windows setup says "
+                                  "Codex is Windows-only instead",
+}
+assert set(_WINDOWS_ONLY_TWINS) <= {p.id for p in MUTATIONS}, set(_WINDOWS_ONLY_TWINS) - {p.id for p in MUTATIONS}
+MUTATIONS[:] = [
+    pytest.param(*p.values, id=p.id, marks=tuple(p.marks) + (
+        pytest.mark.skipif(sys.platform != "win32", reason=_WINDOWS_ONLY_TWINS[p.id]),))
+    if p.id in _WINDOWS_ONLY_TWINS else p
+    for p in MUTATIONS
+]
+# ... and the POSIX branch of the same kill: without it a hung engine outlives the wrapper off Windows.
+MUTATIONS += [pytest.param(
+    "agent/guards/adapters/claude/protect-files.sh", '        kill -KILL "$1" 2>/dev/null\n', "        :\n",
+    "tests/test_hook_deadline.py::test_a_hung_engine_on_the_healthy_path_is_killed_by_its_pid",
+    marks=pytest.mark.skipif(sys.platform == "win32", reason="the POSIX kill branch runs off Windows"),
+    id="linux-ci-deadline-kill-posix")]
