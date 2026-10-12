@@ -63,7 +63,10 @@ def _path_without_jq() -> str:
         for name in NEEDED:
             real = shutil.which(name)
             if real:
-                (_nojq_dir / name).symlink_to(real)
+                # A COPY (Linux CI run 38187755448): the test harness barrier refuses a symlink to a file outside the
+                # fixture -- writing through it would write /usr/bin/bash -- so symlink_to raised and left the
+                # directory without curl for every later test.
+                shutil.copy2(real, _nojq_dir / name)
     return str(_nojq_dir)
 
 

@@ -56,6 +56,10 @@ def install():
         elif event in ("os.mkdir", "os.remove", "os.rmdir", "os.rename", "os.symlink", "os.link"):
             count = 2 if event in ("os.rename", "os.symlink", "os.link") else 1
             paths = [anchored(p, fd) for p, fd in zip(args[:count], dir_fds(event, args))]
+            if event == "os.symlink" and not isinstance(paths[0], int) and not os.path.isabs(os.fsdecode(paths[0])):
+                # A relative symlink TARGET is relative to the link's own folder, not the cwd (Linux CI run
+                # 38187755448: venv's `lib64 -> lib` inside the fixture was refused as the repository's ./lib).
+                paths[0] = os.path.join(os.path.dirname(os.fsdecode(paths[1])), os.fsdecode(paths[0]))
             if any(not contained(p) for p in paths):
                 raise PermissionError("outside test fixture: " + repr(args[:count]))
         elif event == "subprocess.Popen":

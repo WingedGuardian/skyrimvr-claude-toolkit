@@ -287,3 +287,17 @@ def test_barrier_resolves_dir_fd_relative_removal(tmp_path):
             os.unlink("HARNESS-NONEXISTENT-DECOY", dir_fd=fd)
     finally:
         os.close(fd)
+
+
+def test_barrier_reads_a_relative_symlink_target_against_the_links_folder(tmp_path):
+    """Linux CI run 38187755448: venv makes `lib64 -> lib` (relative) inside the fixture; the barrier judged `lib`
+    against the cwd (the repository) and refused it. The same relative target climbing OUT must still be refused."""
+    d = tmp_path / "venv"
+    (d / "lib").mkdir(parents=True)
+    out = os.path.relpath(REPO, d)                 # from the link's folder up and over into the repository
+    with pytest.raises(PermissionError, match="outside test fixture"):
+        os.symlink(out, d / "escape", target_is_directory=True)     # the barrier refuses before the OS is asked
+    try:
+        os.symlink("lib", d / "lib64", target_is_directory=True)
+    except OSError as e:                           # the OS may refuse (no symlink privilege); the barrier must not
+        assert "outside test fixture" not in str(e), e
