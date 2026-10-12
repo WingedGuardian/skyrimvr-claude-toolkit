@@ -972,21 +972,26 @@ def test_lock_and_unlock_keep_a_protected_dacl_exactly(bed):
 
 @needs_windows
 def test_lock_and_unlock_keep_an_inheriting_dacl_exactly(bed):
-    """The twin: a file that inherits (the default) keeps inheriting, and its DACL comes back identical."""
+    """The twin: a file that inherits (the default) keeps inheriting, and its DACL comes back identical.
+
+    The file is made to carry SE_DACL_AUTO_INHERITED (`D:AI`) on purpose: only such a DACL is written back through
+    SetNamedSecurityInfoW, the call whose protection flag fixA-i2-keep-inheriting mutates. On windows-latest's D:
+    the bed's files had no `AI`, took the as-is path, and that twin survived (CI run 38201545601)."""
     lock = _lock()
-    p = bed.path("Update.esm")
+    p = _reinherit(bed, "Update.esm", auto_inherited=True)
     before = _sddl(p)
-    assert not before.startswith("D:P"), before
+    assert before.startswith("D:AI(") and ";ID;" in before, before
     assert lock.lock_all(str(bed.root)).exit == 0
     assert not _sddl(p).startswith("D:P")
     assert lock.unlock(str(bed.root), ["Update.esm"], SESSION).exit == 0
     assert _sddl(p) == before
 
 
-def _inherit_without_auto_inherited(bed, name):
-    """Recreate Data/<name> under a folder DACL written by the legacy API, so the file inherits its entries WITHOUT
-    the SE_DACL_AUTO_INHERITED bit (SDDL `D:(...ID...)`, no `AI`). MEASURED: every file under windows-latest's
-    D:\\a\\_temp looks like this; a local temp folder written through the modern API carries `AI` and hid the defect."""
+def _reinherit(bed, name, auto_inherited):
+    """Recreate Data/<name> under a folder DACL of inheritable entries, written so the file inherits them WITH the
+    SE_DACL_AUTO_INHERITED bit (`D:AI(...ID...)`: SetNamedSecurityInfoW, the modern API) or WITHOUT it (`D:(...ID...)`:
+    SetFileSecurityW, the legacy one). MEASURED: every file under windows-latest's D:\\a\\_temp has no `AI`, a local
+    temp folder's files have it -- so neither may be left to where the bed happens to live."""
     import ctypes
     from ctypes import wintypes as wt
     adv = ctypes.WinDLL("advapi32", use_last_error=True)
@@ -994,12 +999,20 @@ def _inherit_without_auto_inherited(bed, name):
     vp = ctypes.c_void_p
     adv.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [wt.LPCWSTR, wt.DWORD, ctypes.POINTER(vp), vp]
     adv.SetFileSecurityW.argtypes = [wt.LPCWSTR, wt.DWORD, vp]
+    adv.GetSecurityDescriptorDacl.argtypes = [vp, ctypes.POINTER(wt.BOOL), ctypes.POINTER(vp), ctypes.POINTER(wt.BOOL)]
+    adv.SetNamedSecurityInfoW.argtypes = [wt.LPWSTR, ctypes.c_int, wt.DWORD, vp, vp, vp, vp]
     k32.LocalFree.argtypes = [vp]
     sd = vp()
     sddl = "D:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)(A;OICI;FA;;;%s)" % _sid()
     assert adv.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, ctypes.byref(sd), None)
     try:
-        assert adv.SetFileSecurityW(str(bed.data), 0x4, sd), ctypes.get_last_error()
+        if auto_inherited:
+            present, dacl, defaulted = wt.BOOL(), vp(), wt.BOOL()
+            assert adv.GetSecurityDescriptorDacl(sd, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted))
+            # DACL | UNPROTECTED: the inheritance pass runs and marks the folder auto-inherited
+            assert adv.SetNamedSecurityInfoW(str(bed.data), 1, 0x4 | 0x20000000, None, None, dacl, None) == 0
+        else:
+            assert adv.SetFileSecurityW(str(bed.data), 0x4, sd), ctypes.get_last_error()
     finally:
         k32.LocalFree(sd)
     p = bed.path(name)
@@ -1013,7 +1026,7 @@ def test_lock_and_unlock_keep_an_inheriting_dacl_without_the_auto_inherited_bit(
     """lock + unlock wrote the DACL through SetNamedSecurityInfoW, which marks it auto-inherited: a file without
     the bit came back `D:AI(...)` -- the same entries, a different DACL (windows-latest CI, test above)."""
     lock = _lock()
-    p = _inherit_without_auto_inherited(bed, "Update.esm")
+    p = _reinherit(bed, "Update.esm", auto_inherited=False)
     before = _sddl(p)
     assert before.startswith("D:(") and ";ID;" in before, before
     assert lock.lock_all(str(bed.root)).exit == 0

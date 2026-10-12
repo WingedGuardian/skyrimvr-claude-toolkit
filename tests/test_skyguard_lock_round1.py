@@ -422,7 +422,13 @@ def test_mutation_l2_lock_bit_before_ace(bed, tmp_path):
 @needs_windows
 def test_mutation_l2_lock_handle_link_count(bed, tmp_path):
     m = _mutant(tmp_path, "def _links(path, st):\n", "def _links(path, st):\n    return st.st_nlink\n")
-    _red(_scenario_handle_link_count, "named as: multi-link", m, bed)
+    # Where the mutant goes red depends on the interpreter's lstat. Up to 3.11 it opens the file, fails on the deny
+    # entry and reports st_nlink 0 ("multi-link"); from 3.12 Windows lstat reads it without opening the file and
+    # reports the true 1 (MEASURED on this deny bed: 0 on 3.10.10, 1 on 3.12.10), so the un-openable file walks into
+    # the target set. Both are the defect the handle read prevents; each version is held to its own failure.
+    import sys
+    why = "unlockable file entered the target set" if sys.version_info >= (3, 12) else "named as: multi-link"
+    _red(_scenario_handle_link_count, why, m, bed)
 
 
 @needs_windows
