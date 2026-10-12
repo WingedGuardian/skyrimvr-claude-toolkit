@@ -158,26 +158,56 @@ function Invoke-Proc([string[]]$cmd, [string[]]$more, [byte[]]$in, [int]$ms) {
 # that resolve and are not a Store alias, then the usual install locations (newest version first), then a
 # Store alias, last. A candidate is accepted only if it is Python >= 3.8 AND runs the engine's own
 # `run.py --selftest <nonce>` and echoes the nonce (a stub printing {} would otherwise read as ALLOW).
-# Each probe is cut off at 3 s and probing stops after 8 s. A fallback that is taken writes a `failed`
-# record BEFORE the engine runs, so the health report says DEGRADED until the configured one works again.
+# Each probe gets min(SKYGUARD_PROBE_TIMEOUT, the time left), default 15 s, sub-second allowed, and no probe
+# runs in the last 10 s before the wrapper's own limit (the engine needs them) -- the Claude chain's budget.
+# It was 3 s per probe and 8 s in all: below a HEALTHY selftest MEASURED at up to 3.8 s native and ~9 s
+# through a shim at 2x load (protect-bash.sh), and windows-latest's PowerShell legs refused a working Python
+# that way (CI runs 38178385999, 38201545601). Every probe's outcome and duration goes to <role>.probes.
+# A fallback that is taken writes a `failed` record BEFORE the engine runs, so the health report says
+# DEGRADED until the configured one works again.
 $script:PyCandidates = @(@('py', '-3'), @('python'), @('python3'))
 $script:PyVersions = 30..8
 $script:PyPosix = @('/usr/bin/python3', '/usr/local/bin/python3')
 $script:FB = $false
-function Test-PyOk([string[]]$c) {
-    try {
-        $r = Invoke-Proc $c @('-c', 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)') ([byte[]]@()) 3000
-        return ((-not $r.TimedOut) -and $r.Code -eq 0)
-    } catch { return $false }
+$script:ProbeMs = [long]15000
+$script:ProbeEndMs = $script:T0ms + 30000          # Invoke-Main sets it from the wrapper's limit
+$script:Probes = @()
+try {
+    if ($env:SKYGUARD_PROBE_TIMEOUT) {
+        $v = [double]::Parse($env:SKYGUARD_PROBE_TIMEOUT, [System.Globalization.CultureInfo]::InvariantCulture)
+        if ($v -gt 0) { $script:ProbeMs = [long]($v * 1000) }
+    }
+} catch { }
+function Get-ProbeMs {
+    # the probe's budget: the configured one, never past the end of probing; 0 = no time left to start one
+    $left = $script:ProbeEndMs - [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    if ($left -lt 200) { return 0 }
+    return [int][Math]::Min($script:ProbeMs, $left)
+}
+function Add-Probe([string[]]$c, [string]$what, [long]$t0) {
+    $script:Probes += (($c -join ' ') + ' ' + $what + ' ' + ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $t0) + 'ms')
 }
 function Test-PyGood([string[]]$c) {
-    if ((Get-ElapsedS) -gt 8) { return $false }
-    if (-not (Test-PyOk $c)) { return $false }
+    $t0 = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $ms = Get-ProbeMs
+    if ($ms -le 0) { Add-Probe $c 'skipped:no-time-left' $t0; return $false }
+    try {
+        $r = Invoke-Proc $c @('-c', 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)') ([byte[]]@()) $ms
+    } catch { Add-Probe $c 'rejected:cannot-start' $t0; return $false }
+    if ($r.TimedOut) { Add-Probe $c ('rejected:version-check-timeout-' + $ms + 'ms') $t0; return $false }
+    if ($r.Code -ne 0) { Add-Probe $c ('rejected:version-check-exit-' + $r.Code) $t0; return $false }
+    $ms = Get-ProbeMs
+    if ($ms -le 0) { Add-Probe $c 'rejected:no-time-left-for-selftest' $t0; return $false }
     $n = [string][System.Random]::new().Next(100000, 999999999)
     try {
-        $r = Invoke-Proc $c @($script:RunPy, '--selftest', $n) ([byte[]]@()) 3000
-    } catch { return $false }
-    return ((-not $r.TimedOut) -and $r.Code -eq 0 -and $r.Out.Replace("`r", '').TrimEnd("`n") -ceq ('skyguard-selftest:' + $n))
+        $r = Invoke-Proc $c @($script:RunPy, '--selftest', $n) ([byte[]]@()) $ms
+    } catch { Add-Probe $c 'rejected:selftest-cannot-start' $t0; return $false }
+    if ($r.TimedOut) { Add-Probe $c ('rejected:selftest-timeout-' + $ms + 'ms') $t0; return $false }
+    if (-not ($r.Code -eq 0 -and $r.Out.Replace("`r", '').TrimEnd("`n") -ceq ('skyguard-selftest:' + $n))) {
+        Add-Probe $c ('rejected:selftest-exit-' + $r.Code + '-or-no-nonce') $t0; return $false
+    }
+    Add-Probe $c 'accepted' $t0
+    return $true
 }
 function Use-Py([string[]]$c) {
     $script:FB = $true
@@ -298,6 +328,7 @@ function Invoke-Main {
     $limit = 40
     if ($script:Role -ceq 'session-start') { $limit = 95 }
     if ($env:SKYGUARD_WRAPPER_TIMEOUT_S) { $limit = [int]::Parse($env:SKYGUARD_WRAPPER_TIMEOUT_S, [System.Globalization.CultureInfo]::InvariantCulture) }
+    $script:ProbeEndMs = $script:T0ms + ([long]$limit - 10) * 1000
 
     $bashArg = $BASHEXE
     if ($bashArg.StartsWith('{{')) { $bashArg = 'bash' }
@@ -309,6 +340,7 @@ function Invoke-Main {
     $pyc = $null
     if (-not $PY.StartsWith('{{') -and [System.IO.File]::Exists($PY)) { $pyc = @($PY) }
     if ($null -eq $pyc -and -not $nofb) { $pyc = Find-PyFallback }
+    if ($script:Probes.Count -gt 0) { Write-Record 'probes' ($script:Probes -join '; ') }
     if ($null -eq $pyc) { Send-Failure 'python' 'cannot run Python -- install Python 3 and run setup.sh'; return }
 
     $left = [long]$limit * 1000 - ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $script:T0ms)

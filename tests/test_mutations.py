@@ -6807,6 +6807,10 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # A DACL without SE_DACL_AUTO_INHERITED is written as it is (SetNamedSecurityInfoW would add `AI`)...
     ("tools/skyguard/lock.py", "        if protected == now and not control & 0x400:", "        if False:",
      _FXI2 + "test_lock_and_unlock_keep_an_inheriting_dacl_without_the_auto_inherited_bit", "ci-dacl-keep-no-ai"),
+    # ...with the protection it had: the as-is write must not turn an inheriting no-`AI` DACL protected either.
+    ("tools/skyguard/lock.py", "adv.SetSecurityDescriptorControl(sd, 0x1000, 0x1000 if protected else 0)",
+     "adv.SetSecurityDescriptorControl(sd, 0x1000, 0x1000)",
+     _FXI2 + "test_lock_and_unlock_keep_an_inheriting_dacl_without_the_auto_inherited_bit", "ci-dacl-as-is-keeps-inheriting"),
 ]]
 _FXI3 = "tests/test_skyguard_lock.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
@@ -7750,3 +7754,17 @@ MUTATIONS += [pytest.param(
     "tests/test_hook_deadline.py::test_a_hung_engine_on_the_healthy_path_is_killed_by_its_pid",
     marks=pytest.mark.skipif(sys.platform == "win32", reason="the POSIX kill branch runs off Windows"),
     id="linux-ci-deadline-kill-posix")]
+# The PowerShell fallback chain's probe budget (CI run 38201545601: a working Python refused, GUARD INERT).
+MUTATIONS += [pytest.param(
+    "agent/guards/adapters/codex/skyguard-entry.ps1", *m[:3],
+    marks=pytest.mark.skipif(sys.platform != "win32", reason="the PowerShell entry is tested on Windows"), id=m[3])
+    for m in [
+        # the old per-probe cut: a healthy selftest slower than 3 s is refused
+        ("$script:ProbeMs = [long]15000", "$script:ProbeMs = [long]3000",
+         "tests/test_codex_entry.py::test_a_slow_but_healthy_fallback_interpreter_is_accepted[pwsh]",
+         "ci-ps1-probe-budget-per-probe"),
+        # the old 8 s for all probing: the second probe of one candidate runs out of time
+        ("$script:ProbeEndMs = $script:T0ms + ([long]$limit - 10) * 1000", "$script:ProbeEndMs = $script:T0ms + 8000",
+         "tests/test_codex_entry.py::test_a_slow_but_healthy_fallback_interpreter_is_accepted[pwsh]",
+         "ci-ps1-probe-budget-total"),
+    ]]

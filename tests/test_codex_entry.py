@@ -322,6 +322,28 @@ def test_an_unknown_role_is_a_deny(tmp_path, entry):
     assert not _hb(root).exists() or not any(_hb(root).iterdir()), "an unknown role wrote telemetry"
 
 
+@pytest.mark.skipif(not ON_WINDOWS, reason="a .cmd interpreter shim is a Windows PATH entry")
+@pytest.mark.parametrize("entry", [p for p in ENTRIES if p.values[0] != "bash"])
+def test_a_slow_but_healthy_fallback_interpreter_is_accepted(tmp_path, entry):
+    """The PowerShell chain cut every probe at 3 s and stopped probing 8 s after the entry started. A HEALTHY
+    selftest was MEASURED at up to 3.8 s native and ~9 s through a shim at 2x load (the Claude chain's notes in
+    protect-bash.sh, which took its budget to 15 s for exactly that), and windows-latest's PowerShell 5.1 leg failed
+    this way on every Python (CI runs 38178385999, 38201545601). Every start of this interpreter costs ~4 s."""
+    root = _install(tmp_path, "C:/definitely/not/here/python.exe")
+    shims = tmp_path / "shims"
+    shims.mkdir()
+    real = str(Path(sys.executable))
+    (shims / "python.cmd").write_text(
+        '@"%s" -c "import time; time.sleep(4)"\r\n@"%s" %%*\r\n' % (real, real), encoding="ascii")
+    path = os.pathsep.join([str(shims), python_free_path()])
+    r = _run(entry, root, "pre-tool", _plugin_write(root), {"PATH": path}, timeout=120)
+    reason = json.loads(r.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason.startswith("Blocked: plugin and archive files"), \
+        (reason, _rec(root, "pre-tool", "failed"), _rec(root, "pre-tool", "probes"))
+    assert "used " + str(shims / "python.cmd").replace(BS, "/").lower() in _rec(root, "pre-tool", "failed").replace(
+        BS, "/").lower(), _rec(root, "pre-tool", "failed")
+
+
 @pytest.mark.parametrize("entry", ENTRIES)
 def test_a_missing_configured_python_falls_back_and_still_decides(tmp_path, entry):
     root = _install(tmp_path, "C:/definitely/not/here/python.exe")
@@ -330,11 +352,11 @@ def test_a_missing_configured_python_falls_back_and_still_decides(tmp_path, entr
     r = _run(entry, root, "pre-tool", _plugin_write(root), {"PATH": path})
     took = time.monotonic() - t0
     reason = json.loads(r.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
-    # windows-latest, PowerShell 5.1 only (CI run 38178385999): "cannot run Python" with a working python first on
-    # PATH; not reproduced locally. The fallback probes stop 8 s after the entry starts, so the call's duration and
-    # what was recorded are printed to tell a slow host from a rejected candidate.
+    # windows-latest, PowerShell 5.1 (CI runs 38178385999, 38201545601: 25.1 s, "cannot run Python") with a working
+    # python first on PATH. The 3 s / 8 s probe budget that refused it is fixed (see the slow-interpreter test); the
+    # duration and the per-probe record are printed so a failure here says which probe ran out and how long it took.
     assert reason.startswith("Blocked: plugin and archive files (.esp .esm .esl .bsa .ba2) cannot be written directly."), \
-        (reason, "call took {:.1f} s".format(took), _rec(root, "pre-tool", "failed"))
+        (reason, "call took {:.1f} s".format(took), _rec(root, "pre-tool", "failed"), _rec(root, "pre-tool", "probes"))
     failed = _rec(root, "pre-tool", "failed")
     assert " python configured C:/definitely/not/here/python.exe unusable; used " in failed, failed
     # recorded BEFORE the engine ran, so the canary reads DEGRADED until the configured one works again
