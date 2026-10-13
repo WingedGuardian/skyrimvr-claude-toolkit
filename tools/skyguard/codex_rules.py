@@ -36,6 +36,7 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
     "shell.S-INERT-CONFIG": ("hook_only", _INERT),
     "shell.S-DEL-CONFIG": ("hook_only", _PATH),
     "shell.S-DEL-INSTALL": ("hook_only", _PATH),
+    "shell.S-SED-CRLF": ("hook_only", _PATH + " (and the -b that makes it safe can be anywhere in the options)"),
     "shell.S-DEL-MO2": ("hook_only", _PATH),
     "shell.S-DEL-UNRESOLVED": ("hook_only", _PATH),
     "shell.S-DEL-FALLBACK": ("hook_only", _INERT),
