@@ -21,7 +21,7 @@ copies the template and never edits it. `.codex/**` is pinned LF by a path rule 
 generator writes LF and `*.ps1` is otherwise CRLF). `--target all` (the default; what `--check` and CI use) is
 the union of both targets and refuses two targets emitting one path; `--target claude|codex` renders one.
 
-Skills (`skills/<name>/SKILL.md`): `create-mod`, `devbench`, `inspect-esp`, `port-to-vr`, `skyrim-audio`,
+Skills (`skills/<name>/SKILL.md`): `create-mod`, `devbench`, `inspect-esp`, `mod-release-review`, `port-to-vr`, `skyrim-audio`,
 `skyrim-bsa`, `skyrim-context`, `skyrim-mcm`, `skyrim-nif`, `skyrim-save`, `toolkit-setup`, `triage-and-conflicts`, `xelib`.
 `devbench`, `triage-and-conflicts` and `xelib` hold what used to be bulk in `core.md`; the core points at
 them from its *Where the rest lives* table.
@@ -36,8 +36,8 @@ leave a one-line rule plus a pointer behind. Never raise the constants to make i
 **Unsupported agents.** The core's last *Where the rest lives* row sends an agent the README does not list to
 `ADAPTING.md` and the `toolkit-setup` skill. Keep that row agent-neutral.
 
-**Neutrality.** `core.md` is shared by every agent, and so are the `devbench`, `triage-and-conflicts`
-and `xelib` skills: no Claude-only tool names, variables, slash commands or config paths in them.
+**Neutrality.** `core.md` is shared by every agent, and so are the `devbench`, `mod-release-review`,
+`triage-and-conflicts` and `xelib` skills: no Claude-only tool names, variables, slash commands or config paths in them.
 Agent-specific text goes in `instructions/<agent>.md` (`claude.md` into `CLAUDE.md` only, `codex.md` into
 `AGENTS.md` only). Every skill body is judged too, since Codex reads them all; the one sanctioned Claude-only
 spelling is ``the mod the user named (`$ARGUMENTS` in Claude Code)``. `tests/test_instruction_neutrality.py` is the list of banned constructs, each with a positive

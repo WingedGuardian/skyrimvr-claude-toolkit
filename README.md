@@ -586,7 +586,7 @@ generated file. `--check` also enforces the **instruction budget**: the installe
 (header + `agent/instructions/core.md` + an addendum, plus room for `setup.sh`'s path expansion) must
 stay at or under 32,768 bytes, because Codex silently truncates past that. Check it with
 `python scripts/gen_agent_trees.py --budget`; when over, move bulk into a skill or `docs/`. The core
-and the `devbench`, `toolkit-setup`, `triage-and-conflicts` and `xelib` skills must also stay **agent-neutral**
+and the `devbench`, `mod-release-review`, `toolkit-setup`, `triage-and-conflicts` and `xelib` skills must also stay **agent-neutral**
 (no Claude-only tool names, variables, slash commands or config paths; Claude specifics go in
 `agent/instructions/claude.md`), enforced by `tests/test_instruction_neutrality.py`.
 

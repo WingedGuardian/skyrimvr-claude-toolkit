@@ -59,4 +59,4 @@ Review the record counts and verify everything was added correctly.
 - All effects on a spell must have the same casting type
 - ESL FormIDs must be in xx000800-xx000FFF range
 - In scripts, use `GetFormFromFile()` on your OWN plugin's forms to minimize properties (never another mod's — see *Own Your Records*), and check the result for `None`, to avoid complex VMAD properties
-- Test in-game before distributing
+- Test in-game before distributing, and run the `mod-release-review` skill before every published version
