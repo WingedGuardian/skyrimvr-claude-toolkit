@@ -1105,8 +1105,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
     # Same instant proves no ordering at all.
     pytest.param(
         "tools/skyguard/health.py",
-        "else done > failed[0]",
-        "else done >= failed[0]",
+        "            cleared = done > failed[0]",   # fix-limits 8 moved the stamp comparison into its own branch
+        "            cleared = done >= failed[0]",
         "tests/test_skyguard_health.py::test_equal_timestamps_prove_no_recovery",
         id="canary-a-tie-is-not-a-recovery",
     ),
