@@ -844,7 +844,9 @@ stand-in Steam app. **None of them touches `C:/Games`**, except the explicitly o
   7. Uninstall the app if wanted.
 - **B3 — Codex TUI** (appended to Plan 4 batch item 1, same session, +5 min):
   1. Approve the hooks.
-  2. Ask Codex to run `tools/skyguard guards off "batch test"`, then a decoy `.esp` write.
+  2. Ask Codex to run `tools/skyguard guards off --session <its session id>`, then a decoy `.esp` write.
+     (*Corrected 2026-10-12:* `guards off` takes no reason argument; the old `guards off "batch test"` exits 2 with
+     "unrecognized arguments". See `docs/superpowers/measurements/2026-10-05-plan6-e2e.md`, finding 2.)
   3. Note whether any lift text appears **outside** the model's reply.
   4. Quit, reopen, and look for the session-start banner.
   5. F5: ask Codex to edit `.skyguard/state.json` with `apply_patch`.

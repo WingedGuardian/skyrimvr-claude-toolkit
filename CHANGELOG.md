@@ -255,6 +255,8 @@
 - **Empty paths files:** can lose non-install protection folders if neither paths file retains them.
 - **Broken legacy file:** beside a valid root file it is reported, but does not itself stop the guard.
 - **Neutral shadow mode:** the neutral entry does not honour a guards-off lift.
+- **Guards-off reason:** `guards off` takes no reason (`guards off "why"` exits 2 with "unrecognized arguments"); the reason `skydoctor` and the session-start banner show is always "guards off".
+- **Shadow-mode audit lines:** a shadowed call is logged as the rule's DENY or ASK line followed by `skyguard SHADOW: <code> (deny)` (or `(ask)`); the call was allowed, so read the two lines together.
 - **Neutral other kind:** reported UNJUDGED.
 - **DevBench replay:** its contents are not judged.
 - **DevBench input:** its contents are not judged.
@@ -271,6 +273,7 @@
 - **Lift visibility:** agent context, audit and skydoctor are covered; interactive user visibility remains unmeasured.
 - **Relocking needs hooks:** no background service relocks an expired lift.
 - **Agent unlock session:** Codex and Claude PowerShell do not receive the session binding used by Claude Bash; the user must unlock from their own terminal.
+- **Adapted agents:** `hook-canary` and `skydoctor` know only Claude Code and Codex; an agent adapted through ADAPTING.md writes heartbeats that nothing checks yet.
 - **Raw unlock-all:** does not record a per-file lift list.
 - **State replacement:** bounded PermissionError retries handle transient Windows readers; persistent sharing failures can still fail.
 - **Shell delete recovery:** no general backup is made before deletion.
@@ -283,10 +286,13 @@
 - **Migration concurrency:** simultaneous runs can race and one may fail.
 - **Animated NIFs:** Blender round trips can drop controllers.
 - **Spriggit bytes:** a round trip may reorder records without changing the re-serialized content.
+- **Spriggit in CI:** CI restores the pinned Spriggit with the .NET 10 SDK but never runs it; the serialize/deserialize round trip on .NET 10 was checked by hand, not by CI.
+- **ReSaver lib jars:** only `ReSaver.jar` has a pinned SHA-256; the `lib/` jars from the same archive are not hashed, so take them from the archive you checked.
 - **CrashLogger `__fastfail` dumps:** CrashLogger 1.24.0 added this dump class and no real one has been run through `crash-triage.py`; a dump it cannot read is counted as unparsed, not given a signature, so read that dump by hand.
 - **Python 3.8/3.9:** engine compatibility is retained but these versions are outside the tested range.
 - **Live release checks:** a clean suite and review do not substitute for the remaining manual and live-agent batch.
 - **Container release legs:** require Docker and a separate build/round-trip check.
+- **Devcontainer JDK check:** the image build checks the JDK with `java -version | grep -q` under `pipefail`, so it can fail the build even when the JDK is right (it fails closed: no image); rebuild. Docker legs only.
 
 ### Upgrading from 3.x
 
