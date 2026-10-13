@@ -7853,3 +7853,68 @@ MUTATIONS.append(pytest.param(
     "tests/test_mutations.py", '    reason = _anchor_skipped_off_windows(returncode, stdout, platform=' + '"any")',   # split: unique
     '    reason = ""', "tests/test_mutations.py::test_a_skip_only_anchor_is_reported_unjudged_not_as_a_survivor",
     id="fixu-skip-only-anchor-reported-as-survivor"))
+
+# fix-unclear 4b (v4 regression vs 3.x): a write target held in a same-command literal is judged as its literal,
+# through the delete rules' Exec.subst. One twin per clause.
+_W4B = "tests/test_skyguard_writes.py::"
+_W4B_PAIR = _W4B + "test_a_same_command_literal_target_is_judged_as_its_literal["
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/shellparse.py",
+     '    for w, val in list(zip(ws, vals)) + [(w, "".join(w.b)) for w in rec.redir_words]:',
+     "    for w, val in zip(ws, vals):",
+     _W4B + "test_the_parser_substitutes_redirect_targets_too", "fixu4b-parser-subst-skips-redirect-targets"),
+    ("tools/skyguard/shellparse.py", "                cmd.redir_words.append(w)\n", "",
+     _W4B + "test_the_parser_substitutes_redirect_targets_too", "fixu4b-parser-forgets-redirect-words"),
+    ("tools/skyguard/deletes.py",
+     "                      redirects=tuple((op, sub.get(w, w)) for op, w in e.redirects))   # fix-unclear 4b",
+     "                      redirects=e.redirects)",
+     _W4B_PAIR + "redirect-esp]", "fixu4b-substituted-leaves-redirects"),
+    ("tools/skyguard/writes.py", "        e = substituted(e)\n        sed_files", "        sed_files",
+     _W4B_PAIR + "cp-esp]", "fixu4b-writes-ignore-subst"),
+    ("tools/skyguard/anchored.py",
+     '        e = substituted(e)                      # fix-unclear 4b: `P=Out.psc; caprica -o "$P"` is that literal\n',
+     "", _W4B_PAIR + "psc-out]", "fixu4b-psc-out-ignores-subst"),
+    ("tools/skyguard/anchored.py",
+     "        e = substituted(e)                      # fix-unclear 4b: a same-command literal operand is that literal\n",
+     "", _W4B_PAIR + "champollion]", "fixu4b-champollion-ignores-subst"),
+    ("tools/skyguard/anchored.py",
+     '        e = substituted(e)                      # fix-unclear 4b: `R=<install>; git -C "$R" checkout -- .`\n',
+     "", _W4B_PAIR + "git-discard]", "fixu4b-git-discard-ignores-subst"),
+]]
+
+# fix-unclear (find above a root): a name-filtered recursive search started above a protected root reaches its whole
+# subtree (find -delete / -exec rm|mv, fd -x|-X, ForEach-Object's $_). One twin per clause.
+_FA = "tests/test_skyguard_deletes.py::"
+_FA_PAIR = _FA + "test_a_filtered_search_above_the_install_is_judged_as_its_filterless_control["
+_FA_PARSE = _FA + "test_the_find_parse_keeps_the_start_beside_the_narrowed_name"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/shellparse.py",
+     '        deep = not any(v[x] == "-maxdepth" and v[x + 1] in ("0", "1") for x in range(j, n - 1))',
+     "        deep = False", _FA_PAIR + "find-name-delete]", "fixu-find-reach-never-deep"),
+    ("tools/skyguard/shellparse.py", 'v[x + 1] in ("0", "1") for x in range(j, n - 1))',
+     'False for x in range(j, n - 1))', _FA_PARSE, "fixu-find-maxdepth1-not-narrowed"),
+    ("tools/skyguard/shellparse.py", "                ri, rq = reach(items, sq)\n", "                ri, rq = items, sq\n",
+     _FA_PAIR + "find-name-delete]", "fixu-find-delete-ignores-reach"),
+    ("tools/skyguard/shellparse.py", "if runs in deletes.DELETE_PROGRAMS | deletes.MOVE_PROGRAMS",
+     "if False", _FA_PAIR + "find-exec-rm]", "fixu-find-exec-delete-ignores-reach"),
+    ("tools/skyguard/shellparse.py", "if runs in deletes.DELETE_PROGRAMS | deletes.MOVE_PROGRAMS",
+     "if runs in deletes.DELETE_PROGRAMS", _FA_PAIR + "find-exec-mv-away]", "fixu-find-exec-move-ignores-reach"),
+    ("tools/skyguard/shellparse.py", '            if p in ("fd", "fdfind"):\n                return self._fd(k)\n', "",
+     _FA_PAIR + "fd-exec-batch-rm]", "fixu-fd-not-parsed"),
+    ("tools/skyguard/shellparse.py", "            if iv and not hit:", "            if False:",
+     _FA_PAIR + "fd-exec-batch-rm]", "fixu-fd-no-placeholder-gets-no-paths"),
+    ("tools/skyguard/shellparse.py", "                if v[x] in _FD_PLACEHOLDERS:", "                if False:",
+     _FA_PAIR + "fd-exec-mv-away]", "fixu-fd-placeholder-not-replaced"),
+    ("tools/skyguard/shellparse.py", "                sp.append(v[j + 1])\n", "",
+     _FA_PAIR + "fd-search-path-rm]", "fixu-fd-search-path-dropped"),
+    ("tools/skyguard/deletes.py", ' or (e.dialect == "powershell" and _PS_PIPE_ITEM.match(w))) \\', ") \\",
+     _FA_PAIR + "ps-foreach-remove]", "fixu-ps-foreach-item-not-piped"),
+    ("tools/skyguard/deletes.py", r'_PS_PIPE_ITEM = re.compile(r"\$(?:_|psitem)(?:\.\w+)?$", re.IGNORECASE)',
+     r'_PS_PIPE_ITEM = re.compile(r"\$(?:_|psitem)$", re.IGNORECASE)',
+     _FA_PAIR + "ps-foreach-psitem-fullname]", "fixu-ps-foreach-item-property-not-piped"),
+    ("tools/skyguard/shellparse.py", 'if self.cd != "?" or _is_abs(s)]', "if True]",
+     _FA + "test_a_filtered_search_that_cannot_reach_a_root_stays_allowed[find-after-unknown-cd]",
+     "fixu-find-reach-after-unknown-cd"),
+    ("tools/skyguard/shellparse.py", 'if self.cd != "?" or _is_abs(s)]', 'if self.cd != "?"]',
+     _FA_PAIR + "find-abs-start-after-unknown-cd]", "fixu-find-abs-start-after-unknown-cd"),
+]]

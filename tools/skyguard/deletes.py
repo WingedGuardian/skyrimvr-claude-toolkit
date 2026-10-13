@@ -347,7 +347,8 @@ def substituted(e):
     if not e.subst:
         return e
     sub = dict(e.subst)
-    return e._replace(argv=tuple(sub.get(w, w) for w in e.argv))
+    return e._replace(argv=tuple(sub.get(w, w) for w in e.argv),
+                      redirects=tuple((op, sub.get(w, w)) for op, w in e.redirects))   # fix-unclear 4b
 
 
 def is_opaque(e) -> bool:
@@ -631,6 +632,10 @@ def _everything(word: str) -> bool:
     return bool(comps) and all(c in (".", "..", "*", ".*", "*.*") for c in comps)
 
 
+# PowerShell's current pipeline item, bare or by a property (`$_`, `$PSItem`, `$_.FullName`): case-insensitive.
+_PS_PIPE_ITEM = re.compile(r"\$(?:_|psitem)(?:\.\w+)?$", re.IGNORECASE)
+
+
 def _upstream(execs, i: int) -> list:
     """The execs earlier in the same pipeline as execs[i] (which reads a pipe): back to the first stage."""
     out = []
@@ -745,7 +750,10 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                         resolved = Hit(RULE_OF[kind], posixpath.basename(lit.rstrip("/")) or lit)
                     continue
             unresolved_any = True
-            if (w is UNRESOLVED or e.stdin_from == "pipe") and unresolved_reach is None:
+            # fix-unclear: `... | ForEach-Object { Remove-Item $_ }` -- the block's own exec reads no pipe, but `$_` /
+            # $PSItem IS the pipeline item, so the earlier stages decide its reach exactly as for `| Remove-Item`.
+            if (w is UNRESOLVED or e.stdin_from == "pipe" or (e.dialect == "powershell" and _PS_PIPE_ITEM.match(w))) \
+                    and unresolved_reach is None:
                 # RT-A: pipeline input (`Get-ChildItem 'C:\GOG Games' | Remove-Item`, `echo X | xargs -I {} rm {}`)
                 # is whatever the earlier stages list: it reaches a root when one of THEIR words is a protected root
                 # or an ancestor of one. A listing INSIDE one (`ls *.bak | xargs rm` run in the install) is the

@@ -231,3 +231,60 @@ def test_the_shell_write_deny_matches_the_write_tool_on_the_same_name():
         tool = write_rules.decide(GAME + "/Data/" + name, a).decision == "deny"
         shell = decide('echo x > "' + name + '"', cwd="C:/w")[0][0] == "deny"
         assert tool is shell, name
+
+
+# ---- fix-unclear 4b: a write target held in a same-command literal is judged as that literal (Exec.subst)
+_G = GAME + "/Data/"
+_CFG = "C:/Users/u/Documents/My Games/Skyrim VR/"
+_VAR_PAIRS = [   # (shell, direct, variable form)
+    ("bash", 'echo x > "' + _G + 'X.esp"', 'P="' + _G + 'X.esp"; echo x > "$P"'),
+    ("bash", 'echo x >> "' + _G + 'X.bsa"', 'P="' + _G + 'X.bsa"; echo x >> "$P"'),
+    ("bash", 'echo x | tee "' + _G + 'X.esm"', 'P="' + _G + 'X.esm"; echo x | tee "$P"'),
+    ("bash", 'cp a.esp "' + _G + 'X.esp"', 'P="' + _G + 'X.esp"; cp a.esp "$P"'),
+    ("bash", 'mv b.esp "' + _G + 'X.esp"', 'P="' + _G + 'X.esp"; mv b.esp "$P"'),
+    ("bash", 'echo x > "' + _G + 'X.esp"', 'D="' + GAME + '"; F=X.esp; echo x > "$D/Data/$F"'),
+    ("bash", 'echo x > "' + _CFG + 'Saves/a.ess"', 'S="' + _CFG + 'Saves/a.ess"; echo x > "$S"'),
+    ("bash", 'echo x >> "' + _CFG + 'Skyrim.ini"', 'F="' + _CFG + 'Skyrim.ini"; echo x >> "$F"'),
+    ("bash", "echo x >> plugins.txt", 'F=plugins.txt; echo x >> "$F"'),
+    ("bash", 'echo x > "' + _G + 'notes.txt"', 'F="' + _G + 'notes.txt"; echo x > "$F"'),
+    ("bash", "caprica -o Out.psc a.pex", 'P=Out.psc; caprica -o "$P" a.pex'),
+    ("bash", 'Champollion "' + INSTALL + '/Data/Scripts/a.pex"',
+     'P="' + INSTALL + '/Data/Scripts/a.pex"; Champollion "$P"'),
+    ("bash", 'git -C "' + INSTALL + '" checkout -- .', 'R="' + INSTALL + '"; git -C "$R" checkout -- .'),
+    ("powershell", "Set-Content '" + _G + "X.esp' x", "$p = '" + _G + "X.esp'; Set-Content $p x"),
+    ("powershell", "'x' | Out-File '" + _G + "X.esp'", "$p = '" + _G + "X.esp'; 'x' | Out-File $p"),
+    ("powershell", "'x' > '" + _G + "X.esp'", "$p = '" + _G + "X.esp'; 'x' > $p"),
+    ("powershell", "Copy-Item a.esp '" + _G + "X.esp'", "$p = '" + _G + "X.esp'; Copy-Item a.esp $p"),
+    ("powershell", "Set-Content '" + _CFG + "Saves/a.ess' x", "$p = '" + _CFG + "Saves/a.ess'; Set-Content $p x"),
+]
+
+
+_VAR_IDS = ['redirect-esp', 'append-bsa', 'tee-esm', 'cp-esp', 'mv-esp', 'joined-esp', 'redirect-save', 'append-ini', 'append-loadorder', 'redirect-install-file', 'psc-out', 'champollion', 'git-discard', 'ps-set-content-esp', 'ps-out-file-esp', 'ps-redirect-esp', 'ps-copy-item-esp', 'ps-set-content-save']
+
+
+@pytest.mark.parametrize("shell,direct,var", _VAR_PAIRS, ids=_VAR_IDS)
+def test_a_same_command_literal_target_is_judged_as_its_literal(shell, direct, var):
+    want = decide(direct, cwd="C:/w", shell=shell)
+    assert want[0][0] != "allow", ("the direct form must be caught, or this pair proves nothing", direct)
+    assert decide(var, cwd="C:/w", shell=shell) == want, var
+
+
+@pytest.mark.parametrize("shell,command", [
+    ("bash", 'echo x > "$P"'),                                     # never assigned here
+    ("bash", 'if true; then P=X.esp; fi; echo x > "$P"'),          # assigned in a branch
+    ("bash", 'P=a.txt; P=X.esp; echo x > "$P"'),                   # written twice
+    ("bash", 'cp a.esp "$P"'),
+    ("powershell", "Set-Content $p x"),
+    ("powershell", "'x' > $p"),
+])
+def test_an_unresolvable_variable_target_behaves_as_before(shell, command):
+    assert decide(command, cwd="C:/w", shell=shell)[0][0] == "allow", command
+
+
+def test_the_parser_substitutes_redirect_targets_too():
+    from skyguard import deletes
+    e = shellparse.parse('P=X.esp; echo x > "$P"', "bash").execs[-1]
+    assert ("$P", "X.esp") in e.subst, e
+    assert deletes.substituted(e).redirects == ((">", "X.esp"),)
+    ps = shellparse.parse("$p = 'X.esp'; 'x' > $p", "powershell").execs[-1]
+    assert deletes.substituted(ps).redirects == ((">", "X.esp"),), ps
