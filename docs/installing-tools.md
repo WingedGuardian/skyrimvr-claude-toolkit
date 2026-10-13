@@ -52,6 +52,10 @@ Install them into the `tools/` folder in your game directory; the setup prompt w
   - Verify: `bash tools/resaver-cli.sh info <save.ess>` prints JSON.
 - **cosave-info** — READ-ONLY structural survey of an SKSE `.skse` co-save (which mods stashed co-save data + how much — the mod-state landscape the `.ess` never exposes). No install beyond Python 3.
   - Verify: `bash tools/cosave-cli.sh <SaveN_...>.skse` prints JSON (the `.skse` sits next to its `.ess`).
+- **7-Zip** — reads mod archives (`.7z`, `.zip`, `.rar`) for `tools/archive-triage.py`.
+  - Acquire: **7-Zip 26.00** (see [Pinned downloads](#pinned-downloads)) and check its SHA-256 before running it. Windows: the x64 installer `7z2600-x64.exe` (the default install puts `7z.exe` in `C:\Program Files\7-Zip\`). Linux: `7z2600-linux-x64.tar.xz`, whose console program is `7zz`; put it on `PATH`. 7-Zip is a program you install yourself -- an agent may not install it.
+  - The tools look for it in this order: `$SEVENZIP` (a full path; when it is set and wrong, nothing else is tried), then `7z`, `7zz` or `7za` on `PATH`, then `7-Zip\7z.exe` under Program Files.
+  - Verify: `7z` (or `7zz`) with no arguments prints `7-Zip 26.00` on its first line.
 - **`tools/nexus.sh`** — built-in Nexus API helper (no install). Needs your Nexus key (see *Nexus API key* below).
   - Verify: `bash tools/nexus.sh mod <id>` prints a mod's name/version.
 
@@ -69,6 +73,8 @@ ignoring case). A different hash means a different file than the one tested — 
 | PyNifly Blender add-on | 27.2.0 | `io_scene_nifly.zip` | `920a17c8c4001c4f2a12eff85aad8e54fd19ebcf7e828624733f1fb2bba972da` | <https://github.com/BadDogSkyrim/PyNifly/releases/download/V27.2.0/io_scene_nifly.zip> |
 | Blender | 4.2.9 | `blender-4.2.9-windows-x64.zip` | `223cd22afc5cab3f8cb43006574f1c962ff9bb9e07418c3f4f2542b7c34899cb` | <https://download.blender.org/release/Blender4.2/blender-4.2.9-windows-x64.zip> |
 | NifSkope | v2.0.dev9 | `NifSkope_2_0_2023-09-29-x64.7z` | `8d608e558b2cdd32edb7e09acc26f491f8ec2faa11fac984682570df55330e0d` | <https://github.com/hexabits/nifskope/releases/download/v2.0.dev9/NifSkope_2_0_2023-09-29-x64.7z> |
+| 7-Zip | 26.00 | `7z2600-x64.exe` | `6fe18d5b3080e39678cabfa6cef12cfb25086377389b803a36a3c43236a8a82c` | <https://github.com/ip7z/7zip/releases/download/26.00/7z2600-x64.exe> |
+| 7-Zip (Linux) | 26.00 | `7z2600-linux-x64.tar.xz` | `c74dc4a48492cde43f5fec10d53fb2a66f520e4a62a69d630c44cb22c477edc6` | <https://github.com/ip7z/7zip/releases/download/26.00/7z2600-linux-x64.tar.xz> |
 | ReSaver | 6.0.643 | `ReSaver.jar` inside `Resaver 6.0.643-5031-6-0-643-1694115572.7z` | `af6f632d561de9d2f8b97f860d5f1c997a79fb77d821d31a3e0111fabb22c1d3` | Nexus mod 5031 (manual download) |
 | BSArch | 1.0 | `bsarch.exe` inside `BSArch-64745-1-0-1769253446.zip` | `8ca75290b2ec4c821802a3975f10e1d2ddb4e94297357340b1a9b9979e947911` | Nexus (Fallout New Vegas) mod 64745, *Old files* (manual download) |
 
@@ -76,7 +82,7 @@ How each hash was obtained (MEASURED 2026-10-05): Champollion, Caprica and NifSk
 and the unpacked `Champollion.exe`, `Caprica.exe` and `NifSkope.exe` are byte-identical to the copies this toolkit
 was tested with; both PyNifly rows equal the SHA-256 GitHub publishes for that release asset (27.2.0 fetched and hashed
 2026-10-06; one file serves both rows); Blender's row is the hash blender.org publishes in `blender-4.2.9.sha256`, and the
-tested Blender reports `4.2.9 LTS`. `python scripts/thirdparty-audit.py` re-checks each published hash.
+tested Blender reports `4.2.9 LTS`. 7-Zip (MEASURED 2026-10-13): 7-zip.org's download page links both files from the ip7z/7zip GitHub release `26.00` and publishes no hash; both were downloaded and hashed and equal the SHA-256 GitHub publishes for those release assets, and the `7z.exe` and `7z.dll` inside the x64 installer are byte-identical to the 7-Zip 26.00 that `archive-triage` was tested with (on Windows; the Linux `7zz` was hashed, not run). `python scripts/thirdparty-audit.py` re-checks each published hash.
 
 **Nexus gives no direct download link and no published hash**, so the two Nexus rows cannot be checked before
 you unpack: get exactly the named file (the mod's *Files* tab; BSArch 1.0 is under *Old files*), unpack it, and

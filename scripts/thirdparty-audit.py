@@ -697,6 +697,12 @@ REGISTRY = [
     {"name": "NifSkope", "pins": [("regex", PINNED_DOWNLOADS, table_row("NifSkope"))],
      "upstream": ("github", "hexabits/nifskope"),   # the maintained fork the docs link and the toolkit was tested with
      "checks": [hashes("NifSkope")]},
+    {"name": "7-Zip", "pins": [("regex", PINNED_DOWNLOADS, table_row("7-Zip")),
+                               ("regex", PINNED_DOWNLOADS, table_row("7-Zip (Linux)"))],
+     "upstream": ("github", "ip7z/7zip"),   # 7-zip.org links its downloads from these GitHub releases
+     "refs": [{"pattern": r"7-Zip (?P<v>\d+\.\d+)\b"}],
+     "checks": [hashes("7-Zip", "https://api.github.com/repos/ip7z/7zip/releases/tags/{v}"),
+                hashes("7-Zip (Linux)", "https://api.github.com/repos/ip7z/7zip/releases/tags/{v}")]},
     {"name": "Blender (4.2 LTS)", "pins": [("regex", PINNED_DOWNLOADS, table_row("Blender"))], "upstream": ("blender", "4.2"),
      "checks": [hashes("Blender", "https://download.blender.org/release/Blender4.2/blender-{v}.sha256")]},
     {"name": "Cathedral Assets Optimizer", "upstream": ("nexus", "skyrimspecialedition", 23316),

@@ -1021,6 +1021,30 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
         "tests/test_skse_load_status.py::test_discovery_finds_a_gog_se_folder",
         id="game-dirs-without-gog",
     ),
+    pytest.param(
+        # A SKYRIM_GAME_ROOT the guard's reader refuses quietly becomes "the toolkit folder".
+        "tools/skyrim_paths.py",
+        '    if any(key == "SKYRIM_GAME_ROOT" for _, key in cfg.malformed):',
+        "    if False:",
+        "tests/test_skyrim_paths.py::test_game_root_refuses_a_malformed_value_instead_of_falling_back",
+        id="game-root-malformed-falls-back",
+    ),
+    pytest.param(
+        # Ignore the environment: the paths file's value answers even when the user set SKYRIM_GAME_ROOT.
+        "tools/skyrim_paths.py",
+        '    if env.get("SKYRIM_GAME_ROOT"):',
+        "    if False:",
+        "tests/test_skyrim_paths.py::test_game_root_environment_beats_the_paths_file",
+        id="game-root-env-ignored",
+    ),
+    pytest.param(
+        # A SEVENZIP that names no file falls through to whatever 7-Zip is on PATH.
+        "tools/skyrim_paths.py",
+        '        return None, f"SEVENZIP is set to {override}, which is not a file"',
+        "        pass",
+        "tests/test_skyrim_paths.py::test_a_wrong_sevenzip_override_is_reported_not_replaced",
+        id="sevenzip-wrong-override-falls-through",
+    ),
 
     # --- what the v3.9 release review found ---------------------------------
     # Put back the single-character separator class. Doubled separators name the same

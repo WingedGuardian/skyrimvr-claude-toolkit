@@ -4,6 +4,7 @@
 
 ### Added
 
+- **Shared tool plumbing:** `tools/skyrim_paths.py` finds the game folder the way the guard's tool lookups do (`$SKYRIM_GAME_ROOT`, then `skyrim-paths.env`, then the toolkit folder) and finds 7-Zip (`$SEVENZIP`, then `7z`/`7zz`/`7za` on PATH, then Program Files); 7-Zip 26.00 is pinned with SHA-256 in `docs/installing-tools.md`.
 - **`skse-load-status`:** lists what SKSE did with each plugin DLL at the last launch (loaded, incompatible, not an SKSE plugin, SKSE64 errors) and the version each plugin reports, from `sksevr.log` or `skse64.log`; its rows must sum to the plugins checked.
 - **`mod-release-review` skill:** a review before publishing a Skyrim mod, scoped to what changed since the last published version; it changes nothing while reviewing and brings every finding to the author before any fix.
 - **In-place sed guard (S-SED-CRLF):** `sed -i` without `-b` on a file in the install, config or MO2 folder (or a game INI or load-order file by name) is refused, because Git for Windows' sed rewrites every CRLF line ending to LF; use `sed -i -b`. It fires only when sed is the program that runs, not on text that mentions it.
