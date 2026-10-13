@@ -3883,6 +3883,8 @@ def test_guard_actually_bites(tmp_path, relpath, find, replace, test_id):
     why = _anchor_skipped_off_windows(result.returncode, result.stdout)
     if why:
         pytest.skip("the anchor test is skipped on this platform, so it cannot kill this twin: " + why)
+    unjudged = _unjudged_twin_message(result.returncode, result.stdout)   # Windows: still red, but never a "survivor"
+    assert not unjudged, unjudged
     # EXIT 1 SPECIFICALLY, not merely non-zero.
     #
     # pytest exits 1 for "a test failed", but 2 for a collection error, 4 for a
@@ -7822,3 +7824,32 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("package.json", '"zod": "3.25.76"', '"zod": "3.25.75"',
      _DL + "test_package_json_pins_exact_versions_that_the_lock_resolves_to", "fixu-package-json-exact-but-not-the-lock"),
 ]]
+
+
+def _unjudged_twin_message(returncode: int, stdout: str) -> str:
+    """Plan 8 FINAL (T6 test infra): with PowerShell missing, the pwsh/powershell anchors SKIP, exit 0, and the gate
+    reported each twin as "The test still PASSED -- it does not guard this bug": 24 false survivors. On Windows (where
+    `_anchor_skipped_off_windows` excuses nothing) a twin whose anchor ran nothing but skips is still red, but it says
+    what happened: NOT JUDGED, with the anchor's own skip reason. "" when the anchor ran anything."""
+    reason = _anchor_skipped_off_windows(returncode, stdout, platform="any")
+    if not reason:
+        return ""
+    return ("NOT JUDGED (not a survivor): the anchor test was SKIPPED, so this twin could not be killed or survive. "
+            "Skip reason: " + reason + ". Provide what the anchor needs (e.g. pwsh / Windows PowerShell on PATH) "
+            "and re-run.")
+
+
+def test_a_skip_only_anchor_is_reported_unjudged_not_as_a_survivor():
+    out = ("s                                                                        [100%]\n"
+           "SKIPPED [1] tests/test_codex_entry.py:45: pwsh not installed (Windows only)\n1 skipped in 0.10s\n")
+    msg = _unjudged_twin_message(0, out)
+    assert msg.startswith("NOT JUDGED") and "pwsh not installed" in msg
+    assert _unjudged_twin_message(0, ".\n1 passed in 0.1s\n") == ""           # a real survivor keeps its own message
+    assert _unjudged_twin_message(1, "F\n1 failed in 0.1s\n") == ""           # a kill is a kill
+    assert _unjudged_twin_message(5, "no tests ran in 0.1s\n") == ""          # a stale anchor keeps its own message
+
+
+MUTATIONS.append(pytest.param(
+    "tests/test_mutations.py", '    reason = _anchor_skipped_off_windows(returncode, stdout, platform=' + '"any")',   # split: unique
+    '    reason = ""', "tests/test_mutations.py::test_a_skip_only_anchor_is_reported_unjudged_not_as_a_survivor",
+    id="fixu-skip-only-anchor-reported-as-survivor"))
