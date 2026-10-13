@@ -1205,6 +1205,15 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
            "test_mo2_update_replaces_the_folder_after_keeping_the_old_one_whole"),
           ("update-without-mo2-ignored", "    if update and not mods:", "    if False:",
            "test_update_without_mo2_is_refused"),
+          ("cross-drive-copy-unverified", "        if tree_hashes(dst) != before:\n            raise OSError(\"the copy",
+           "        if False:\n            raise OSError(\"the copy",
+           "test_a_copy_that_does_not_match_leaves_the_original_and_installs_nothing"),
+          ("cross-drive-original-kept", "        shutil.rmtree(str(src))                  # a verified move",
+           "        pass                  # a verified move",
+           "test_update_across_drives_copies_verifies_and_only_then_removes"),
+          ("cross-drive-failure-unhandled", "            except OSError as e:\n                aborted",
+           "            except ZeroDivisionError as e:\n                aborted",
+           "test_a_copy_that_does_not_match_leaves_the_original_and_installs_nothing"),
       ]],
 
     # --- nexus.sh / nexus-render ---------------------------------------------

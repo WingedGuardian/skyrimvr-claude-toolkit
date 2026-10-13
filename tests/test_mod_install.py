@@ -287,3 +287,62 @@ def test_no_vortex_no_warning(tmp_path, sevenz, game):
 @pytest.mark.parametrize("args", [[], ["--bogus", "x.7z"], ["x.7z", "--name"], ["a.7z", "b.7z"]])
 def test_bad_usage_is_exit_2(tmp_path, sevenz, game, args):
     assert run(*args, env=env_for(tmp_path, sevenz, game)).returncode == 2
+
+
+# --------------------------------------------------------------------------- --update across drives
+
+def _cross_drive(monkeypatch, mod):
+    """os.rename fails as it does between volumes, so move_verified takes the copy-verify-remove branch."""
+    import errno
+
+    def no_rename(src, dst):
+        raise OSError(errno.EXDEV, "Invalid cross-device link", str(src))
+
+    monkeypatch.setattr(mod.os, "rename", no_rename)
+
+
+def test_update_across_drives_copies_verifies_and_only_then_removes(tmp_path, sevenz, game, monkeypatch, capsys):
+    mods, old = _old_mod(tmp_path)
+    before = {p.relative_to(old).as_posix(): p.read_bytes() for p in old.rglob("*") if p.is_file()}
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    monkeypatch.setenv("SKYRIM_MO2_MODS", str(mods))
+    _cross_drive(monkeypatch, mod)
+    removed = []
+    real_rmtree = mod.shutil.rmtree
+
+    def watching_rmtree(path, *a, **k):
+        removed.append(str(path))
+        return real_rmtree(path, *a, **k)
+
+    monkeypatch.setattr(mod.shutil, "rmtree", watching_rmtree)
+    rc = mod.main([str(archive(tmp_path, ENTRIES)), "--update", "--apply"])
+    out = capsys.readouterr()
+    assert rc == 0, out.out + out.err
+    kept = list((tmp_path / "records" / "backups").glob("ExampleMod-*/mod-folder/ExampleMod"))
+    assert len(kept) == 1
+    assert {p.relative_to(kept[0]).as_posix(): p.read_bytes() for p in kept[0].rglob("*") if p.is_file()} == before
+    assert str(old) in removed, "the copy branch did not run"
+    assert (old / "ExampleMod.esp").read_bytes() == b"new plugin" and not (old / "Stale.dll").exists()
+
+
+def test_a_copy_that_does_not_match_leaves_the_original_and_installs_nothing(tmp_path, sevenz, game, monkeypatch,
+                                                                            capsys):
+    mods, old = _old_mod(tmp_path)
+    before = {p.relative_to(old).as_posix(): p.read_bytes() for p in old.rglob("*") if p.is_file()}
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    monkeypatch.setenv("SKYRIM_MO2_MODS", str(mods))
+    _cross_drive(monkeypatch, mod)
+    real_copytree = mod.shutil.copytree
+
+    def corrupting_copytree(src, dst, *a, **k):
+        real_copytree(src, dst, *a, **k)
+        (mod.Path(dst) / "ExampleMod.esp").write_bytes(b"bit rot on the way")
+
+    monkeypatch.setattr(mod.shutil, "copytree", corrupting_copytree)
+    rc = mod.main([str(archive(tmp_path, ENTRIES)), "--update", "--apply"])
+    out = capsys.readouterr()
+    assert rc == 2, out.out + out.err
+    assert "does not match the original" in out.err and "Nothing was installed" in out.err
+    assert {p.relative_to(old).as_posix(): p.read_bytes() for p in old.rglob("*") if p.is_file()} == before
+    manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
+    assert "# STATUS: aborted before any write" in manifest

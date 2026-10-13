@@ -359,7 +359,13 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
         manifest.write_text("\n".join(header + ["# STATUS: in progress"] + planned) + "\n", encoding="utf-8")
 
         if old_folder is not None:
-            n_old = move_verified(replacing, old_folder)
+            try:
+                n_old = move_verified(replacing, old_folder)
+            except OSError as e:
+                aborted = "# STATUS: aborted before any write -- the previous mod folder could not be kept: {}".format(e)
+                manifest.write_text("\n".join(header + [aborted]) + "\n", encoding="utf-8")
+                print("ERROR: {}. Nothing was installed.".format(e), file=sys.stderr)
+                return 2
             header.append("# UPDATE: {} file(s) were in the previous mod folder".format(n_old))
             replacing.mkdir(parents=True, exist_ok=True)
             # The user's configs stay (the archive's copy goes beside them as .new), and so does MO2's meta.ini.
