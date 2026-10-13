@@ -1,6 +1,6 @@
 # Universal agent support — design
 
-**Date:** 2026-09-30 · **Status:** DRAFT, awaiting user review · **Target release:** v4.0.0 (from v3.9.1)
+**Date:** 2026-09-30 · **Status:** Approved by the user 2026-10-01 · **Target release:** v4.0.0 (from v3.9.1)
 
 The X4 toolkit's spec of the same date was used as a worked example. None of its decisions was carried
 over unconfirmed: every decision below was re-derived for Skyrim and approved by the user.
@@ -287,8 +287,10 @@ Shipped `CLAUDE.md` is 53,772 bytes. These sections move out; none is deleted:
 
 ## 8. Installer, rename, migration
 
-- **`setup.sh --agent claude|codex|both|auto`** (`auto` = every agent found on PATH). `setup.sh` remains
+- **`setup.sh --agent claude|codex|all|auto`** (`auto` = every agent found on PATH). `setup.sh` remains
   the only installer.
+  - *Amended 2026-10-12 (Plan 8 T7):* the accepted values are `claude`, `codex`, `all` and `auto`, with `both`
+    kept as an alias of `all`. No flag means `auto`; when no agent is found on PATH, `auto` configures all of them.
 - **It never marks a Codex project trusted.** It prints the `/hooks` approval step. `skydoctor` and
   `hook-canary` report "Codex hooks NOT RUNNING (untrusted or unapproved)" until the first heartbeat (E2).
 - **`skyrim-paths.env` moves to the toolkit root.** `.claude/skyrim-paths.env` is still read, with a
