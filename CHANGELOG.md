@@ -292,6 +292,7 @@
 - **State replacement:** bounded PermissionError retries handle transient Windows readers; persistent sharing failures can still fail.
 - **Shell delete recovery:** no general backup is made before deletion.
 - **Backup scope:** script writes outside the snapshot paths are not automatically backed up.
+- **Backslash in a Linux install folder name:** setup stops with exit 1 and says the guard would refuse every command: the guard reads every backslash in a path as a separator (Windows paths depend on it), so such a folder cannot be represented. Rename the folder.
 - **Instruction expansion:** unusually long install paths may exceed the instruction budget; setup warns.
 - **Migration scope:** edited hooks and skills are snapshotted rather than migrated.
 - **Migration line endings:** carried notes use LF; the backup retains the original bytes.
