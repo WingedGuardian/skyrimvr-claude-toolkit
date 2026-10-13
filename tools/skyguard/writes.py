@@ -37,8 +37,9 @@ RULES:
   - S-WRITE-ARCHIVE (advise; Plan 8 T6): the same area, written by an archive writer (Compress-Archive, 7z, zip,
     tar -c), whose file is replaced or added to -- not emptied by a redirect, as the S-WRITE-INSTALL note says.
   - S-WRITE-ROOT (advise; batch-3 ruling 2026-10-13): a write primitive, a copy or a move onto a FILE DIRECTLY IN the
-    install root (the game's exe and dlls, openvr_api.dll, a loader .ini, ENB/ReShade files), or a copy into the root
-    folder itself, which takes the source's name. Not Data/ or any subfolder; not the toolkit's own Markdown there.
+    install root that the game or a loader reads (ROOT_GAME_EXT: exe, dll, asi, ini, toml, cfg, json, fx: the game's
+    exe and dlls, openvr_api.dll, a loader .ini, ENB/ReShade files), or a copy into the root folder itself, which
+    takes the source's name. Not Data/ or any subfolder; not scratch output or the toolkit's own files there.
     A file class (an INI, the load order, a save, a plugin) keeps its own rule.
 READING a plugin or plugins.txt is silent (R11).
 
@@ -507,22 +508,24 @@ def in_install_area(abs_path: str, roots) -> bool:
     return bool(rel) and rel[0] == "data"
 
 
-# S-WRITE-ROOT: Markdown in the root is the toolkit's own (CLAUDE.md, AGENTS.md, KNOWLEDGEBASE.local.md, which the
-# instructions tell the agent to append to), and a dotfile (.gitignore) is a repository's, not the game's: a note on
-# every such write would be noise (priced: 2 of 8 first-draft hits were a .gitignore).
-ROOT_EXEMPT_EXT = (".md",)
+# S-WRITE-ROOT: the kinds of file the game and its loaders read from the install root -- executables, dlls (the
+# OpenVR runtime, ENB/ReShade proxies, the SKSE loader's), .asi, their configs and shader files. Anything else written
+# there is the agent's own scratch or the toolkit's (out.txt, a trace, CLAUDE.md, KNOWLEDGEBASE.local.md, .gitignore,
+# skyrim-paths.env, which S-SELF-GUARD already notes): four earlier rulings keep those silent (an inspection's
+# `> out.txt`, `echo hi > notes.txt` in the root, a captured Codex payload, the guard's own config).
+ROOT_GAME_EXT = (".exe", ".dll", ".asi", ".ini", ".toml", ".cfg", ".json", ".fx", ".fxh")
 
 
-def root_exempt(name: str) -> bool:
-    return name.startswith(".") or name.lower().endswith(ROOT_EXEMPT_EXT)
+def root_game_file(name: str) -> bool:
+    return not name.startswith(".") and name.lower().endswith(ROOT_GAME_EXT)
 
 
 def in_install_root(abs_path: str, roots) -> bool:
-    """S-WRITE-ROOT: a file directly in the install's root folder (not Data/, not any subfolder)."""
+    """S-WRITE-ROOT: a game or loader file directly in the install's root folder (not Data/, not any subfolder)."""
     if targets.zone(abs_path, roots) != "install":
         return False
     rel = _rel(abs_path, roots.install_dirs)
-    return rel is not None and len(rel) == 1 and not root_exempt(rel[0])
+    return rel is not None and len(rel) == 1 and root_game_file(rel[-1])
 
 
 def is_install_root(abs_path: str, roots) -> bool:
@@ -730,20 +733,19 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 notes[RULE_OF_CLASS[kind]].append(_name(dst))      # cp x plugins.txt: a write of the load order
                 continue
             # S-WRITE-ROOT: a file copied or moved directly into the install root, named or taking its source's name.
-            # A destination that names a folder (no extension: `Data`, `bindings`) is not a root FILE (priced: 3 of
-            # 8 first-draft hits). A bare new name in a move made from Rename-Item lives in the SOURCE's folder, not
+            # A destination that names a folder (`Data`, `bindings`) is not a game file (priced: 3 of 8 first-draft
+            # hits; ROOT_GAME_EXT excludes it). A bare new name in a move made from Rename-Item lives in the SOURCE's folder, not
             # the cwd (priced: 1 of 8, a .disabled rename inside Data/SKSE/Plugins).
             root_dst = a_dst
             if e.program == "move-item" and srcs and not re.search(r"[/\\]", dst):
                 a_src = targets.resolve_operand(e, srcs[0], cwd, env)
                 root_dst = posixpath.join(posixpath.dirname(a_src), dst) if a_src else None
             if not kind and root_dst is not None:
-                if not _looks_like_dir(dst) and in_install_root(root_dst, roots):
+                if in_install_root(root_dst, roots):
                     notes["S-WRITE-ROOT"].append(_name(dst))
                     continue
                 if is_install_root(root_dst.rstrip("/"), roots):
-                    names = [_name(x) for x in srcs if not root_exempt(_name(x)) and not _looks_like_dir(x)
-                             and file_class(x) != "plugin"]
+                    names = [_name(x) for x in srcs if root_game_file(_name(x)) and file_class(x) != "plugin"]
                     notes["S-WRITE-ROOT"].extend(names)
                     if names:
                         continue
