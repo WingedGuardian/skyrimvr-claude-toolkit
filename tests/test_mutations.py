@@ -8103,3 +8103,15 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/resaver-cli.sh", "*.jar) ;; *) continue ;; esac", "*) ;; esac",
      _FL5 + "test_an_unknown_jar_on_the_classpath_is_named_but_another_file_is_not", "fl5-non-jar-files-flagged"),
 ]]
+
+# fix-limits 4: CI runs the pinned Spriggit (serialize -> deserialize -> serialize) on a committed synthetic fixture.
+_FL4 = "tests/test_spriggit_fixture.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (".github/workflows/ci.yml", '          diff -r "$work/yaml1" "$work/yaml2"\n', "          true\n",
+     _FL4 + "test_the_dotnet_job_round_trips_the_fixture_after_restoring_spriggit", "fl4-ci-no-record-compare"),
+    (".github/workflows/ci.yml", '          dotnet tool run spriggit -- deserialize --InputPath "$work/yaml1"',
+     '          echo deserialize skipped --InputPath "$work/yaml1"',
+     _FL4 + "test_the_dotnet_job_round_trips_the_fixture_after_restoring_spriggit", "fl4-ci-never-deserializes"),
+    ("tests/fixtures/spriggit/make_fixture.py", "FORM_VERSION = 44", "FORM_VERSION = 43",
+     _FL4 + "test_the_committed_fixture_is_what_its_generator_builds", "fl4-fixture-drifts-from-its-generator"),
+]]

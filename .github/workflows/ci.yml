@@ -468,6 +468,30 @@ jobs:
           case "$v" in 10.*) echo "SDK $v" ;; *) echo "::error::dotnet resolves SDK $v, not 10"; exit 1 ;; esac
           dotnet tool restore
           dotnet tool list --local
+      # Restoring proves Spriggit downloads, not that it works on .NET 10: RUN it. The committed synthetic fixture
+      # (tests/fixtures/spriggit/make_fixture.py documents it) goes plugin -> YAML -> plugin -> YAML. The two YAML
+      # trees must be equal (the same records back); equal bytes were measured locally and are reported here, but a
+      # byte difference alone is a warning, because a round trip may reorder records (CHANGELOG known limit).
+      # Shallow work folder: Spriggit fails on deep output paths.
+      - name: Spriggit round trip on the committed fixture
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP"
+          if command -v cygpath >/dev/null 2>&1; then tmp="$(cygpath -m "$tmp")"; fi
+          work="$tmp/spriggit-rt"
+          mkdir -p "$work/out"
+          cp tests/fixtures/spriggit/FixLimitsRoundTrip.esp "$work/"
+          dotnet tool run spriggit -- serialize --InputPath "$work/FixLimitsRoundTrip.esp" --OutputPath "$work/yaml1" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion 0.41.0
+          dotnet tool run spriggit -- deserialize --InputPath "$work/yaml1" --OutputPath "$work/out/FixLimitsRoundTrip.esp"
+          dotnet tool run spriggit -- serialize --InputPath "$work/out/FixLimitsRoundTrip.esp" --OutputPath "$work/yaml2" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion 0.41.0
+          record="$(cat "$work"/yaml1/Globals/*.yaml)"
+          case "$record" in *"EditorID: FixLimitsRoundTrip"*) ;; *) echo "::error::the fixture's global was not serialized"; exit 1 ;; esac
+          diff -r "$work/yaml1" "$work/yaml2"
+          if cmp -s "$work/FixLimitsRoundTrip.esp" "$work/out/FixLimitsRoundTrip.esp"; then
+            echo "round trip: same records, same bytes"
+          else
+            echo "::warning::round trip: same records, different bytes"
+          fi
 
   # The release machinery on every push: build the zip from the commit (scripts/build-release-zip.sh, the same
   # build release.yml runs), then verify it as a user would get it -- payload checker, leak grep, and a scrubbed
