@@ -149,6 +149,26 @@ def test_intended_rows_reproduce(installs):
     assert not failures, "\n".join(failures)
 
 
+def test_intended_rows_reproduce_in_process(installs):
+    """test_intended_rows_reproduce with run.py's main() called IN PROCESS (record.fire_inprocess): the same rows,
+    decision + rule ids + exact text, through adapter, run.py, engine.py and the rules, without the bash wrapper.
+    MEASURED 2026-10-12: ~4 s for 982 rows against ~420 s through the wrapper. It is the anchor for the mutation
+    twins that break the engine path; the wrapper-fired test above stays for what only the wrapper does."""
+    rec, inst = installs
+    good = {"decision": "deny", "rules": ["S-DEL-INSTALL"], "text": "Blocked: exact."}
+    assert rec.intended_problems(good, dict(good, rules={"S-DEL-INSTALL"})) == []
+    assert rec.intended_problems(good, {"decision": "ask", "rules": {"S-DEL-INSTALL"}, "text": good["text"]})
+    assert rec.intended_problems(good, {"decision": "deny", "rules": {"S-REGISTRY"}, "text": good["text"]})
+    assert rec.intended_problems(good, {"decision": "deny", "rules": {"S-DEL-INSTALL"}, "text": "Blocked: exact"})
+    failures = []
+    for row in INTENDED_ROWS:
+        if rec.windows_only(row["id"]):
+            continue
+        got = rec.fire_full_inprocess(inst[row["layout"]], row)
+        failures += [f"{row['id']}: {p}" for p in rec.intended_problems(row, got)]
+    assert not failures, "\n".join(failures)
+
+
 def _current(rec, inst):
     def current(row):
         got = rec.fire_full(inst[row["layout"]], row)

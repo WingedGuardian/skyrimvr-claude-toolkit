@@ -80,7 +80,7 @@ NULL_TARGETS = frozenset(("/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty",
 COPY_PROGRAMS = frozenset(("cp", "mv", "rsync", "copy-item", "move-item"))
 CMD_COPY_PROGRAMS = frozenset(("copy", "move", "xcopy"))
 _CMD_SWITCH = re.compile(r"/[A-Za-z?\-]+(:\S*)?")
-_SED_INPLACE = re.compile(r"-[nrEsuz]*i\S*|--in-place(=\S*)?")
+_SED_INPLACE = re.compile(r"-[nrEsuzb]*i\S*|--in-place(=\S*)?")    # P8-SED: `-bi` is in-place too
 _SED_VALUED = frozenset(("-e", "-f", "-l", "--expression", "--file", "--line-length"))
 _CP_VALUED = frozenset(("-S", "--suffix", "-t", "--target-directory"))
 
@@ -114,6 +114,35 @@ def _sed_files(argv) -> List[str]:
             words.append(w)
         k += 1
     return words if script_given else words[1:]
+
+
+# S-SED-CRLF (P8-SED): Git for Windows' sed (GNU 4.9, MSYS) opens files in TEXT mode, so an in-place edit without
+# -b/--binary rewrites EVERY CRLF line ending of the file to LF -- untouched lines, and a run that matches nothing, too
+# (MEASURED on scratch files). -b keeps them and is a no-op on an LF file. GNU getopt permutes, so -b counts anywhere
+# before `--`. In a short cluster -i and -e/-f/-l take the rest of the word as their value: `-bi` is binary, `-ib` is
+# in-place with the backup suffix "b" (MEASURED: CRLF lost, a `...b` backup written), `-es/b/x/` is a script.
+_SED_ATTACHED = frozenset("iefl")
+
+
+def sed_binary(argv) -> bool:
+    k = 0
+    while k < len(argv):
+        w = argv[k]
+        if w == "--":
+            return False
+        if w == "--binary":
+            return True
+        if w in _SED_VALUED:
+            k += 2
+            continue
+        if w.startswith("-") and not w.startswith("--"):
+            for c in w[1:]:
+                if c == "b":
+                    return True
+                if c in _SED_ATTACHED:
+                    break
+        k += 1
+    return False
 
 
 def _sed_scripts(argv) -> List[str]:
@@ -529,6 +558,7 @@ class Scan(NamedTuple):
     advice: Tuple[Tuple[str, str], ...]     # (rule id, file phrase) in rule order, one per rule
     move_root: str = ""                     # S-MOVE-ROOT: basename of a protected folder a move takes away
     save: str = ""                          # S-WRITE-SAVE: basename of a save a write / copy / move replaces
+    sed_crlf: str = ""                      # S-SED-CRLF: basename of a file sed -i rewrites without -b
 
 
 # ------------------------------------------------------------------------- saves and protected folders (rt-fix-b)
@@ -613,11 +643,13 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     plugin: List[str] = []
     moved: List[str] = []
     saves: List[str] = []
+    crlf: List[str] = []
     notes = {k: [] for k in ADVICE_ORDER}
 
     for e in parsed.execs:
         sed_files = set(_sed_files(e.argv)) if e.program == "sed" else set()
         winpath = bool(sed_files) and any(sed_win_replacement(s) for s in _sed_scripts(e.argv))
+        text_mode = bool(sed_files) and not sed_binary(e.argv)
         archives = set(tool_write_targets(e)) if e.program in ARCHIVE_PROGRAMS else set()
         for w in write_targets(e):
             a = targets.resolve_operand(e, w, cwd, env)
@@ -630,6 +662,10 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if is_save(a, roots):
                 saves.append(_name(w))                              # replaces the S-WRITE-INSTALL note: an ask
                 continue
+            # S-SED-CRLF (P8-SED): a game file by name, or any file in the install / config / MO2 area.
+            in_zone = targets.zone(a, roots) in SED_ZONES if a is not None else False
+            if text_mode and w in sed_files and (kind or in_zone):
+                crlf.append(_name(w))
             sed_note = winpath and w in sed_files and a is not None and targets.zone(a, roots) in SED_ZONES
             if sed_note:
                 notes["S-SED-WINPATH"].append(_name(w))
@@ -697,7 +733,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 plugin.append(_name(word))
             else:
                 notes[RULE_OF_CLASS[kind]].append(_name(word))
-    extra = dict(move_root=_phrase(moved) if moved else "", save=_phrase(saves) if saves else "")
+    extra = dict(move_root=_phrase(moved) if moved else "", save=_phrase(saves) if saves else "",
+                 sed_crlf=_phrase(crlf) if crlf else "")
     if plugin:
         return Scan(_phrase(plugin), (), **extra)
     return Scan("", tuple((r, _phrase(notes[r])) for r in ADVICE_ORDER if notes[r]), **extra)

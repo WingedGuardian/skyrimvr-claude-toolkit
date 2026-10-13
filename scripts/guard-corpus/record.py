@@ -18,6 +18,7 @@ import argparse
 import ast
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -184,6 +185,69 @@ def fire(install: Path, hook: str, payload) -> dict:
     if r.returncode != 0:
         raise RuntimeError(f"{hook} exited {r.returncode}: {r.stderr[:300]!r}")
     return classify(r.stdout.decode("utf-8"))
+
+
+class _Stream:
+    """A text stream with the `.buffer` run.py reads stdin from and writes its one answer to."""
+    def __init__(self, data: bytes = b""):
+        self.buffer = io.BytesIO(data)
+
+
+_RUN = []
+
+
+def _run_module():
+    """tools/skyguard/run.py, loaded once (its `skyguard` package is the one engine_verdict imports)."""
+    if not _RUN:
+        spec = importlib.util.spec_from_file_location("skyguard_run_inprocess", REPO / "tools" / "skyguard" / "run.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        _RUN.append(m)
+    return _RUN[0]
+
+
+def fire_inprocess(install: Path, hook: str, payload) -> dict:
+    """run.py's main() in THIS process, with the payload, project and environment fire() gives the wrapper: the
+    engine path the wrapper runs (adapter, run.py, engine.py, the rules, render), without the bash wrapper and the
+    two process starts per row (MEASURED 2026-10-12: 0.43 s a row through fire(), ~2 ms in process).
+
+    Roots as engine_verdict passes them. NOT covered: the wrapper's own decisions (a payload it refuses before
+    the engine runs, GUARD INERT texts) -- fire() remains the check for those."""
+    import faulthandler
+    run = _run_module()
+    stdin = "" if payload is None else (payload if isinstance(payload, str) else json.dumps(payload))
+    root = install.as_posix()
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(install))
+    for k in ENV_KEYS:
+        env.pop(k, None)
+    env.update(home_env(install))
+    saved = dict(os.environ), sys.stdin, sys.stdout
+    out = _Stream()
+    try:
+        os.environ.clear()
+        os.environ.update(env)
+        sys.stdin, sys.stdout = _Stream(stdin.encode("utf-8")), out
+        rc = run.main(["claude", hook[:-len(".sh")], "--root", root, "--root-win", root if os.name == "nt" else "",
+                       "--project", str(install)])
+    finally:
+        faulthandler.cancel_dump_traceback_later()       # main() arms an exit=True watchdog; never leave it armed
+        os.environ.clear()
+        os.environ.update(saved[0])
+        sys.stdin, sys.stdout = saved[1], saved[2]
+    if rc != 0:
+        raise RuntimeError(f"{hook} (in process) returned {rc}")
+    return classify(out.buffer.getvalue().decode("utf-8"))
+
+
+def fire_full_inprocess(install: Path, row: dict) -> dict:
+    """fire_full through fire_inprocess: run.py's decision and text, plus the engine's rule ids."""
+    payload = row_payload(row, install)
+    got = fire_inprocess(install, row["hook"], payload)
+    eng = engine_verdict(install, row["hook"], payload)
+    if eng["decision"] != got["decision"]:
+        raise RuntimeError(f"{row['id']}: run.py says {got['decision']} but the in-process engine says "
+                           f"{eng['decision']}; the rule ids would describe a different verdict")
+    return {**got, "rules": eng["rules"]}
 
 
 def load_rows(path: Path) -> list[dict]:

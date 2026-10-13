@@ -7783,3 +7783,64 @@ MUTATIONS += [pytest.param(
     "tools/skyguard/targets.py", "    if paths.POSIX_HOST and (not cwd or cwd.startswith(\"/\")):\n", "    if False:\n",
     "tests/test_skyguard_deletes.py::test_unknown_dialect_on_a_posix_host_places_slash_paths",
     id="linux-ci-posix-unknown-dialect")]
+# P8-SED: S-SED-CRLF (deny) -- sed -i without -b rewrites every CRLF line to LF (Git for Windows' sed, MEASURED).
+# One twin per clause of the condition; each names the test that must go red.
+_SEDT = "tests/test_skyguard_shell.py::"
+_SEDB = "tests/test_skyguard_writes.py::test_sed_binary["
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/writes.py", "        text_mode = bool(sed_files) and not sed_binary(e.argv)\n",
+     "        text_mode = False\n", _SEDT + "test_sed_crlf_in_the_install_area_denies", "rule-S-SED-CRLF-anchor"),
+    ("tools/skyguard/writes.py", "        text_mode = bool(sed_files) and not sed_binary(e.argv)\n",
+     "        text_mode = bool(sed_files)\n", _SEDT + "test_sed_crlf_binary_mode_is_allowed", "rule-S-SED-CRLF-binary"),
+    ("tools/skyguard/writes.py", "            if text_mode and w in sed_files and (kind or",
+     "            if text_mode and (kind or", _SEDT + "test_sed_crlf_judges_only_the_files_sed_edits",
+     "rule-S-SED-CRLF-sed-operands"),
+    ("tools/skyguard/writes.py", "w in sed_files and (kind or in_zone):", "w in sed_files and (in_zone):",
+     _SEDT + "test_sed_crlf_names_a_game_ini_wherever_it_resolves", "rule-S-SED-CRLF-game-file-by-name"),
+    ("tools/skyguard/writes.py", "in_zone = targets.zone(a, roots) in SED_ZONES if a is not None else False",
+     "in_zone = a is not None", _SEDT + "test_sed_crlf_outside_the_install_area_is_silent", "rule-S-SED-CRLF-zone"),
+    ("tools/skyguard/writes.py", "in_zone = targets.zone(a, roots) in SED_ZONES if a is not None else False",
+     "in_zone = False", _SEDT + "test_sed_crlf_in_the_install_area_denies", "rule-S-SED-CRLF-zone-any-file"),
+    ("tools/skyguard/shell_rules.py", "    if wr.sed_crlf:  ", "    if False:  ",
+     _SEDT + "test_sed_crlf_in_the_install_area_denies", "rule-S-SED-CRLF-wired"),
+    ("tools/skyguard/writes.py", '        if w == "--binary":\n            return True\n', "",
+     _SEDB + "binary-long]", "rule-S-SED-CRLF-binary-long"),
+    ("tools/skyguard/writes.py", '                if c == "b":\n                    return True\n', "",
+     _SEDB + "bi-cluster]", "rule-S-SED-CRLF-binary-short"),
+    ("tools/skyguard/writes.py", "                if c in _SED_ATTACHED:\n                    break\n", "",
+     _SEDT + "test_sed_crlf_backup_suffix_b_is_not_binary", "rule-S-SED-CRLF-attached-value"),
+    ("tools/skyguard/writes.py", '        if w == "--":\n            return False\n', "",
+     _SEDB + "dashdash]", "rule-S-SED-CRLF-end-of-options"),
+    ("tools/skyguard/writes.py",
+     '        if w in _SED_VALUED:\n            k += 2\n            continue\n        if w.startswith("-") and not w.startswith("--"):',
+     '        if w.startswith("-") and not w.startswith("--"):', _SEDB + "f-valued]", "rule-S-SED-CRLF-option-value"),
+    # -bi is in-place too: before P8-SED the write scan did not see it as a write at all
+    ("tools/skyguard/writes.py", 'r"-[nrEsuzb]*i', 'r"-[nrEsuz]*i', _SEDT + "test_sed_crlf_binary_mode_is_allowed",
+     "rule-S-SED-CRLF-bi-is-in-place"),
+]]
+# P8-SED item 2: messages-no-echo and messages-two-lines break a message INSIDE the engine, but their anchor fired all
+# 1,258 corpus rows through the real wrapper (0.43 s a row, MEASURED: ~540 s; the twin timed out at 595 s against the
+# 600 s cap). Retarget them to the in-process twin of the same contract check (~2 s). The wrapper-fired test stays in
+# the suite; it only stops being the anchor. An appended override keeps the Task 13 block untouched; in place ([:]),
+# because the parametrize decorator above already holds this list object.
+_FAST_ECHO = "tests/test_rule_messages.py::test_no_engine_message_echoes_its_command"
+_RETARGET = ("messages-no-echo", "messages-two-lines")
+assert sum(p.id in _RETARGET for p in MUTATIONS) == len(_RETARGET)
+MUTATIONS[:] = [pytest.param(*p.values[:3], _FAST_ECHO, marks=p.marks, id=p.id) if p.id in _RETARGET else p
+                for p in MUTATIONS]
+# P8-SED follow-up: every twin anchored on test_guard_corpus.py::test_intended_rows_reproduce, which fires all 982
+# intended rows through the real wrapper (0.43 s a row). MEASURED before, serial, below-normal: four of the eight
+# ran 457 s or hit a 580 s limit against the runner's 600 s cap; the others were killed early only because the
+# wrapper and the engine disagreed on the first broken row. All eight break the engine path the wrapper runs
+# (record.py's check, deletes/shellparse/shell_rules, run.py, engine.py), so they anchor on the in-process twin of
+# the same check, which calls run.py's main() per row (~4 s). The wrapper-fired test stays in the suite.
+# Appended in-place override ([:]): the decorator above holds this list object, and the original blocks stay as
+# they are.
+_FAST_IR = "tests/test_guard_corpus.py::test_intended_rows_reproduce_in_process"
+_RETARGET_IR = ("corpus-intended-text-exact", "rule-S-DEL-UNKNOWN-DIR-whole-folder", "rule-S-SHELL-UNREAD-denies",
+                "rule-S-SHELL-UNREAD-pipe-into-shell", "rule-W-INSTALL-wired", "rule-S-DEVBENCH-SAVE-roots",
+                "merge-engine-drops-cwd", "merge-engine-write-drops-roots")
+assert sorted(p.id for p in MUTATIONS if p.values[3] == "tests/test_guard_corpus.py::test_intended_rows_reproduce") \
+    == sorted(_RETARGET_IR)
+MUTATIONS[:] = [pytest.param(*p.values[:3], _FAST_IR, marks=p.marks, id=p.id) if p.id in _RETARGET_IR else p
+                for p in MUTATIONS]
