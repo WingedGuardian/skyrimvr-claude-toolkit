@@ -135,6 +135,7 @@
 
 ### Fixed
 
+- **Loop structure around an inspection:** `false`, `break` and `continue` count as inert structure, so `while false; do <inspection>; done` is no longer refused; piping the loop's output into a shell is still refused.
 - **Interpreter literal writes:** a file named by inline interpreter code (`python -c "open('X','w')"`, Node `writeFileSync`) is resolved where the code runs, after any `cd` before it, and judged exactly as a shell write to that place: an SKSE INI by where it lands, any other file in the install area with the install-write note. It was judged by its name alone. A raw write of a plugin-named file is refused wherever it lands, for interpreter code and shell redirects alike; a copy (`cp`) is judged by its destination.
 - **`cd` through a variable:** a `cd` / `Set-Location` whose folder comes from a literal assigned earlier in the same command (`D=...; cd "$D"`) is followed like the literal `cd`, so a name-filtered `find . -delete` after it is judged from that folder; it was judged from the folder before the `cd`.
 - **robocopy exclusions:** the `/XF` and `/XD` lists are read as exclusions, not as files to copy, so an excluded `*.esp` no longer raises the copy-onto-plugin note.
