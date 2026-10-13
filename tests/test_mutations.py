@@ -2865,7 +2865,6 @@ _WRITE_CLAUSES = [
     # the class notes
     ("rule-S-WRITE-SKSE-INI-class", _TGT, ', ("skse-ini", SKSE_INI, "S-WRITE-SKSE-INI"))', ")",
      "out-file-skse-ini"),
-    ("rule-S-WRITE-INI-class", _TGT, '("ini", SKYRIM_INI, "S-WRITE-INI"), ', "", "sed-i-skyrim-ini"),
     ("rule-S-WRITE-LOADORDER-write-only", _WR, "        for w in write_targets(e):",
      "        for w in write_targets(e) + list(e.argv):", "loadorder-read"),
     ("rule-S-WRITE-LOADORDER-copy", _WR, '            if kind and kind != "plugin":', "            if False:",
@@ -8175,3 +8174,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '        elif False:\n            notes["S-WRITE-INSTALL"].append(_name(word))',
      _FL9P + "node-Data/notes.txt-C:/t7/Skyrim VR-echo x > Data/notes.txt]", "fl9-no-install-note"),
 ]]
+
+# fix-limits sweep: rule-S-WRITE-INI-class was anchored on test_t08_row[t08-sed-i-skyrim-ini], a row the S-SED-CRLF
+# batch moved to task P8-SED, so test_t08_row no longer collects it (pytest exit 4: the twin proved nothing). No T8
+# row needs the INI class now, so the twin moves to the class test itself.
+MUTATIONS.append(pytest.param(_TGT, '("ini", SKYRIM_INI, "S-WRITE-INI"), ', "",
+                              "tests/test_skyguard_writes.py::test_file_class[SkyrimPrefs.ini-ini]", id="rule-S-WRITE-INI-class"))
