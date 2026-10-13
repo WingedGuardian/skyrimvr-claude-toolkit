@@ -223,7 +223,52 @@ def test_mo2_refuses_an_existing_mod_folder(tmp_path, sevenz, game):
     (mods / "ExampleMod").mkdir(parents=True)
     (mods / "ExampleMod" / "keep.txt").write_text("x", encoding="utf-8")
     r = run(archive(tmp_path, ENTRIES), "--apply", env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
-    assert r.returncode == 2 and "already exists" in r.stderr, r.stderr
+    assert r.returncode == 2 and "already exists" in r.stderr and "--update" in r.stderr, r.stderr
+    assert sorted(p.name for p in (mods / "ExampleMod").iterdir()) == ["keep.txt"]
+
+
+def _old_mod(tmp_path):
+    mods = tmp_path / "MO2" / "mods"
+    old = mods / "ExampleMod"
+    (old / "SKSE" / "Plugins").mkdir(parents=True)
+    (old / "ExampleMod.esp").write_bytes(b"old plugin")
+    (old / "Stale.dll").write_bytes(b"a file the new version dropped")
+    (old / "meta.ini").write_bytes(b"[General]\nmodid=101\n")
+    (old / "SKSE" / "Plugins" / "ExampleFramework.ini").write_bytes(b"mine=1\n")
+    return mods, old
+
+
+def test_mo2_update_replaces_the_folder_after_keeping_the_old_one_whole(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    before = {p.relative_to(old).as_posix(): p.read_bytes() for p in old.rglob("*") if p.is_file()}
+    r = run(archive(tmp_path, ENTRIES), "--update", "--apply", env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (old / "ExampleMod.esp").read_bytes() == b"new plugin"
+    assert not (old / "Stale.dll").exists(), "an update replaces the folder; it does not merge into it"
+    assert (old / "meta.ini").read_bytes() == b"[General]\nmodid=101\n", "MO2's record of the mod was lost"
+    ini = old / "SKSE" / "Plugins" / "ExampleFramework.ini"
+    assert ini.read_bytes() == b"mine=1\n" and ini.with_name("ExampleFramework.ini.new").read_bytes() == b"theirs=1\n"
+    kept = list((tmp_path / "records" / "backups").glob("ExampleMod-*/mod-folder/ExampleMod"))
+    assert len(kept) == 1
+    assert {p.relative_to(kept[0]).as_posix(): p.read_bytes() for p in kept[0].rglob("*") if p.is_file()} == before
+    manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
+    assert "# UPDATE: the previous mod folder {} is kept whole at {}".format(old, kept[0]) in manifest
+    assert "# UPDATE: 4 file(s) were in the previous mod folder" in manifest
+    assert "# STATUS: complete" in manifest
+
+
+def test_mo2_update_dry_run_changes_nothing(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    r = run(archive(tmp_path, ENTRIES), "--update", env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
+    assert r.returncode == 0 and "UPDATING the existing mod" in r.stdout, r.stdout + r.stderr
+    assert (old / "Stale.dll").exists() and (old / "ExampleMod.esp").read_bytes() == b"old plugin"
+    assert not (tmp_path / "records").exists()
+
+
+def test_update_without_mo2_is_refused(tmp_path, sevenz, game):
+    r = run(archive(tmp_path, ENTRIES), "--update", "--apply", env=env_for(tmp_path, sevenz, game))
+    assert r.returncode == 2 and "SKYRIM_MO2_MODS" in r.stderr, r.stdout + r.stderr
+    assert (game / "Data" / "ExampleMod.esp").read_bytes() == b"old plugin"
 
 
 def test_vortex_is_warned_about_not_refused(tmp_path, sevenz, game):

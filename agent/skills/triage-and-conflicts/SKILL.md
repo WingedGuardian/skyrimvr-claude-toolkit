@@ -151,10 +151,17 @@ python tools/mod-install.py <archive> --group "Option A"   # an option (FOMOD) a
 python tools/mod-install.py <archive> --apply              # write it
 ```
 
-Prefer the user's mod manager; use this when the user installs by hand, and only after they have
-read the dry run. It is a dry run unless `--apply`, and it prints every destination in full: read
-each one, and tell the user about anything flagged `outside Data/` before applying (it is not
-refused: the SKSE loader and ENB/ReShade files legitimately go there).
+Prefer the user's mod manager; use this when the user installs by hand, never a bare copy. Nothing
+here is enforced by a guard: the checks are yours.
+
+1. **Dry run first, and read every destination it prints.** Anything flagged `outside Data/` goes
+   to the user before `--apply`: it is not refused (the SKSE loader and ENB/ReShade files
+   legitimately go there), so you are the check.
+2. **`--apply`**, with the same arguments.
+3. **Check the result:** exit 0, the manifest's `# STATUS: complete, N file(s), 0 verify
+   mismatch(es)` line, and `archive-triage.py` on the same archive now showing the installed files
+   as SAME. For a DLL, the SKSE log line after the next launch (`skse-load-status.py`). Exit 1 =
+   a written file did not match its staged copy: report it, and restore from the backup folder.
 
 - Every replaced file is backed up and every written file recorded with its SHA-256, under
   `.claude/backups/manual-installs/` (or `$SKYRIM_MANUAL_INSTALLS`): `<name>.files.txt` and
@@ -164,7 +171,9 @@ refused: the SKSE loader and ENB/ReShade files legitimately go there).
 - Writes go to a temp file swapped in, so a hardlinked file is replaced, not written through; each
   file is re-hashed (a mismatch exits 1). Plugins are copied but **never activated**.
 - Mod Organizer 2 configured: it installs a NEW mod folder `<MO2 mods>/<name>/` (enable it in MO2);
-  game-folder files are held back unless `--game-root-files`. Vortex present: it warns that Vortex
+  game-folder files are held back unless `--game-root-files`. An existing folder is refused unless
+  `--update`, which first moves the whole old folder into the backups (the manifest names it) and
+  carries over the user's configs and MO2's `meta.ini`. Vortex present: it warns that Vortex
   may later overwrite or purge these files.
 
 ## Where these tools look, and what happens when there is more than one install

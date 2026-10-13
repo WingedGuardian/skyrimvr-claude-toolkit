@@ -2,12 +2,14 @@
 """mod-install -- install one mod archive by hand, recorded and reversible. A DRY RUN unless --apply.
 
     python tools/mod-install.py <archive> [--name NAME] [--group PREFIX] [--skip GLOB,GLOB]
-                                [--overwrite-config] [--game-root-files] [--data DIR] [--apply]
+                                [--overwrite-config] [--game-root-files] [--update] [--data DIR] [--apply]
 
 The dry run prints archive-triage's report (every destination, anything outside Data/ flagged), then the plan:
-one line per file with its action and its FULL destination. Read it before --apply. Nothing outside Data/ is
-refused -- some mods legitimately install into the game folder (the SKSE loader, ENB or ReShade DLLs) -- so the
-reader checks those lines.
+one line per file with its action and its FULL destination. Read every line before --apply. Nothing is enforced
+here -- nothing outside Data/ is refused, because some mods legitimately install into the game folder (the SKSE
+loader, ENB or ReShade DLLs) -- so the reader is the check. After --apply, check the result: exit 0, the
+manifest's "# STATUS: complete, N file(s), 0 verify mismatch(es)" line, and archive-triage on the same archive
+showing the installed files as SAME.
 
 What --apply guarantees:
   * Extraction happens in a temporary staging folder, never in place, and every planned file must be staged
@@ -29,9 +31,12 @@ Where it installs:
   * Default: the game's Data/ (and the game folder for game-folder files), from $SKYRIM_GAME_ROOT, else
     skyrim-paths.env, else the toolkit folder. --data DIR installs into DIR as the Data folder instead.
   * Mod Organizer 2 (SKYRIM_MO2_MODS configured): a NEW mod folder <MO2 mods>/<NAME>/ with the Data/-relative
-    layout inside it. Enable it in MO2 afterwards. An existing folder of that name is refused (pick another
-    --name). Game-folder files cannot go through MO2's virtual Data/: they are listed and skipped unless
-    --game-root-files, which writes them to the REAL game folder.
+    layout inside it. Enable it in MO2 afterwards. An existing, non-empty folder of that name is refused unless
+    --update: then the WHOLE old folder is first moved (verified, byte for byte) to
+    <records>/backups/<NAME>-<stamp>/mod-folder/, the manifest names it, and the new files are installed in its
+    place. The user's existing configs are carried over (the archive's copy goes beside them as .new, unless
+    --overwrite-config), and so is MO2's meta.ini. Game-folder files cannot go through MO2's virtual Data/:
+    they are listed and skipped unless --game-root-files, which writes them to the REAL game folder.
   * Vortex (Data/vortex.deployment.json present): a warning that Vortex may later overwrite or purge files it
     does not own. Not a refusal.
 
@@ -39,7 +44,8 @@ FOMOD and option archives: files are grouped by the option folder in front of th
 more than one group, pick ONE with --group (the exact prefix, or "(root)"); they are alternatives.
 
 Exit: 0 done (or dry run) | 1 a written file did not re-hash to its staged copy | 2 bad usage, a refused name,
-an ambiguous FOMOD, an existing MO2 mod folder, or a 7-Zip / staging failure (nothing written).
+an ambiguous FOMOD, an existing MO2 mod folder without --update, --update without MO2, or a 7-Zip / staging
+failure (nothing written).
 """
 
 from __future__ import annotations
@@ -169,7 +175,7 @@ def main(argv) -> int:
     except (AttributeError, ValueError):
         pass
     args = list(argv)
-    flags = {f: f in args for f in ("--apply", "--overwrite-config", "--game-root-files")}
+    flags = {f: f in args for f in ("--apply", "--overwrite-config", "--game-root-files", "--update")}
     args = [a for a in args if a not in flags]
     try:
         name, group, skip_s, data_arg = (take_opt(args, f) for f in ("--name", "--group", "--skip", "--data"))
@@ -182,6 +188,7 @@ def main(argv) -> int:
               file=sys.stderr)
         return 2
     apply_, overwrite_cfg, root_files = flags["--apply"], flags["--overwrite-config"], flags["--game-root-files"]
+    update = flags["--update"]
     skip = [s for s in (skip_s or "").split(",") if s]
     arc = os.path.abspath(args[0].strip())
     name = name if name is not None else os.path.splitext(os.path.basename(arc))[0]
@@ -201,14 +208,22 @@ def main(argv) -> int:
         print("ERROR: {}".format(e), file=sys.stderr)
         return 2
     mods = "" if data_arg else mo2_mods()
+    replacing = None
+    if update and not mods:
+        print("ERROR: --update replaces a Mod Organizer 2 mod folder; it needs SKYRIM_MO2_MODS configured (and no "
+              "--data). Without MO2, an install over existing files already backs each one up.", file=sys.stderr)
+        return 2
     if data_arg:
         data = Path(data_arg)
     elif mods:
         data = Path(mods) / name
         if data.exists() and any(data.iterdir()):
-            print("ERROR: the MO2 mod folder {} already exists and is not empty. This installs a NEW mod: pick "
-                  "another --name, or remove that mod in MO2 first.".format(data), file=sys.stderr)
-            return 2
+            if not update:
+                print("ERROR: the MO2 mod folder {} already exists and is not empty. To replace it with this archive,"
+                      " re-run with --update (the whole old folder is backed up first); to install beside it, pick "
+                      "another --name.".format(data), file=sys.stderr)
+                return 2
+            replacing = data
     else:
         data = game / "Data"
         if not data.is_dir():
@@ -219,7 +234,10 @@ def main(argv) -> int:
 
     print("7-Zip: {} ({})".format(sevenz, how))
     print("game:  {} ({}; runtime {})".format(game, source, runtime))
-    if mods:
+    if replacing is not None:
+        print("Mod Organizer 2: UPDATING the existing mod {} in place. The whole old folder is moved to the backup"
+              " area first; your configs and MO2's meta.ini are carried over.".format(data))
+    elif mods:
         print("Mod Organizer 2: installing as a NEW mod into {} (enable it in MO2 afterwards)".format(data))
     else:
         print("installing into: {}".format(data))
@@ -267,10 +285,37 @@ def main(argv) -> int:
     if not apply_:
         print("DRY RUN -- nothing written. Re-run with --apply.")
         return 0
-    return install(sevenz, arc, name, group, data, plan)
+    return install(sevenz, arc, name, group, data, plan, replacing)
 
 
-def install(sevenz, arc, name, group, data: Path, plan) -> int:
+def tree_hashes(root: Path):
+    return {q.relative_to(root).as_posix(): sha(q) for q in sorted(root.rglob("*")) if q.is_file()}
+
+
+def move_verified(src: Path, dst: Path) -> int:
+    """Move a folder to dst, keeping every byte: a rename on the same volume; across volumes a copy, verified file
+    by file against the original's hashes, and only then is the original removed. Returns the file count."""
+    before = tree_hashes(src)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.rename(str(src), str(dst))
+    except OSError:
+        shutil.copytree(str(src), str(dst))
+        if tree_hashes(dst) != before:
+            raise OSError("the copy of {} in {} does not match the original; the original is untouched".format(
+                src, dst))
+        shutil.rmtree(str(src))                  # a verified move: every byte of the original is in dst
+    if tree_hashes(dst) != before:
+        raise OSError("the moved folder {} does not match what was there before".format(dst))
+    return len(before)
+
+
+# Files of the OLD mod folder carried into the replacement when the archive has none: MO2's own record of the mod
+# (Nexus id, version, notes), which lives in the mod folder and is in no archive.
+CARRY_OVER = ("meta.ini",)
+
+
+def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
     todo = [p for p in plan if p[2] != "SKIP-GAME-ROOT"]
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     records = records_dir()
@@ -307,8 +352,24 @@ def install(sevenz, arc, name, group, data: Path, plan) -> int:
                   "# installed into: {}".format(data),
                   "# overwritten originals backed up under: {}".format(backup),
                   "# format: <sha256>  <file written>   (uninstall: delete these, restore the backups)"]
+        old_folder = backup / "mod-folder" / data.name if replacing is not None else None
+        if old_folder is not None:
+            header.append("# UPDATE: the previous mod folder {} is kept whole at {}".format(replacing, old_folder))
         planned = ["PLANNED  {}".format(target_of(p)) for p in todo]
         manifest.write_text("\n".join(header + ["# STATUS: in progress"] + planned) + "\n", encoding="utf-8")
+
+        if old_folder is not None:
+            n_old = move_verified(replacing, old_folder)
+            header.append("# UPDATE: {} file(s) were in the previous mod folder".format(n_old))
+            replacing.mkdir(parents=True, exist_ok=True)
+            # The user's configs stay (the archive's copy goes beside them as .new), and so does MO2's meta.ini.
+            keep = [q[1] for q in todo if q[2] == "CONFIG-NEW"]
+            keep += [replacing / n for n in CARRY_OVER if not any(q[1] == replacing / n for q in todo)]
+            for dest in keep:
+                src_old = old_folder / dest.relative_to(replacing)
+                if src_old.is_file():
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(src_old), str(dest))
 
         written, bad = [], 0
         for p in todo:
@@ -327,7 +388,9 @@ def install(sevenz, arc, name, group, data: Path, plan) -> int:
         status = "# STATUS: complete, {} file(s), {} verify mismatch(es)".format(len(written), bad)
         manifest.write_text("\n".join(header + [status] + written) + "\n", encoding="utf-8")
         print("INSTALLED {} file(s), verify mismatches={}; manifest {}".format(len(written), bad, manifest))
-        if backup.is_dir():
+        if old_folder is not None:
+            print("the previous mod folder is kept whole at {}".format(old_folder))
+        elif backup.is_dir():
             print("originals backed up to {}".format(backup))
         print("Plugins were NOT activated. Enable any new plugin in your mod manager.")
         return 1 if bad else 0

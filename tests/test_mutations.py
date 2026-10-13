@@ -1194,6 +1194,17 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
            "test_mo2_refuses_an_existing_mod_folder"),
           ("vortex-unwarned", '    if (game / "Data" / VORTEX_MARKER).is_file():', "    if False:",
            "test_vortex_is_warned_about_not_refused"),
+          ("mo2-existing-replaced-without-update", "            if not update:", "            if False:",
+           "test_mo2_refuses_an_existing_mod_folder"),
+          ("mo2-update-no-whole-backup", "            n_old = move_verified(replacing, old_folder)",
+           "            n_old = 0; shutil.rmtree(str(replacing))",
+           "test_mo2_update_replaces_the_folder_after_keeping_the_old_one_whole"),
+          ("mo2-update-configs-lost", '            keep = [q[1] for q in todo if q[2] == "CONFIG-NEW"]',
+           "            keep = []", "test_mo2_update_replaces_the_folder_after_keeping_the_old_one_whole"),
+          ("mo2-update-meta-ini-lost", 'CARRY_OVER = ("meta.ini",)', "CARRY_OVER = ()",
+           "test_mo2_update_replaces_the_folder_after_keeping_the_old_one_whole"),
+          ("update-without-mo2-ignored", "    if update and not mods:", "    if False:",
+           "test_update_without_mo2_is_refused"),
       ]],
 
     # --- nexus.sh / nexus-render ---------------------------------------------
