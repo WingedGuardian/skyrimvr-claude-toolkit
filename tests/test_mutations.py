@@ -7783,3 +7783,22 @@ MUTATIONS += [pytest.param(
     "tools/skyguard/targets.py", "    if paths.POSIX_HOST and (not cwd or cwd.startswith(\"/\")):\n", "    if False:\n",
     "tests/test_skyguard_deletes.py::test_unknown_dialect_on_a_posix_host_places_slash_paths",
     id="linux-ci-posix-unknown-dialect")]
+
+# fix-unclear triage (pre-tag): older review findings closed here, each with the twin that proves its test bites.
+MUTATIONS += [
+    # Plan 2 minor: `0 in (None, False)` is True in Python, so a numeric tool_name fell back to "unknown" where jq
+    # (`// "unknown"`: null and false only) prints the number.
+    pytest.param("tools/skyguard/adapters/claude.py", "if raw_name is None or raw_name is False else",
+                 "if raw_name in (None, False) else",
+                 "tests/test_skyguard_claude_adapter.py::test_tool_name_falls_back_only_where_jq_does[0-0]",
+                 id="fixu-claude-tool-name-zero-is-not-unknown"),
+    # Plan 2 minor: the `_SELF` twins covered protect-bash, backup and session-kb-guard but not the snapshot wrapper.
+    pytest.param(".claude/hooks/snapshot-before-tool.sh",
+                 '_SELF="${BASH_SOURCE[0]//' + BS * 2 + '//}"', '_SELF="${BASH_SOURCE[0]//' + BS + '//}"',
+                 "tests/test_hooks.py::test_nonblocking_hooks_find_their_engine_however_launched[forward-slash]",
+                 id="fixu-snapshot-wrapper-self-path-normalisation"),
+    pytest.param(".claude/hooks/protect-files.sh",
+                 '_SELF="${BASH_SOURCE[0]//' + BS * 2 + '//}"', '_SELF="${BASH_SOURCE[0]//' + BS + '//}"',
+                 "tests/test_hooks.py::test_protect_files_works_however_it_is_launched[forward-slash]",
+                 id="fixu-protect-files-wrapper-self-path-normalisation"),
+]
