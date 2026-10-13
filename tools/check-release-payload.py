@@ -75,6 +75,9 @@ CORE_REQUIRED = (
     "tools/skydoctor.cmd",
     "GUARD-FILES.sha256",
     "scripts/gen-guard-hashes.py",
+    # Bundled diagnostics README lists as "no install beyond Python 3", and the path discovery they import.
+    "tools/skyrim_paths.py",
+    "tools/skse-load-status.py",
 )
 # Absent: dev-only trees, the user's own files, and runtime state. A path, or a file NAME anywhere.
 ABSENT_PATHS = (

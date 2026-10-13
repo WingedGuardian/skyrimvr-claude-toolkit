@@ -183,6 +183,9 @@ BREAKS = {
     "skyguard-launcher-missing": (lambda r: (r / "tools" / "skyguard.sh").unlink(), "tools/skyguard.sh present"),
     "unlock-cmd-missing": (lambda r: (r / "tools" / "skyguard-unlock.cmd").unlink(), "tools/skyguard-unlock.cmd present"),
     "skydoctor-missing": (lambda r: (r / "tools" / "skydoctor").unlink(), "tools/skydoctor present"),
+    "skyrim-paths-missing": (lambda r: (r / "tools" / "skyrim_paths.py").unlink(), "tools/skyrim_paths.py present"),
+    "skse-load-status-missing": (lambda r: (r / "tools" / "skse-load-status.py").unlink(),
+                                 "tools/skse-load-status.py present"),
     "guard-manifest-missing": (lambda r: (r / "GUARD-FILES.sha256").unlink(), "GUARD-FILES.sha256 present"),
     "guard-file-edited": (lambda r: (r / "tools" / "skyguard" / "engine.py").write_text(
         (r / "tools" / "skyguard" / "engine.py").read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8"),

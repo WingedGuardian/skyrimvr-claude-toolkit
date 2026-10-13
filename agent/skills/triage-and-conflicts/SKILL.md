@@ -1,6 +1,6 @@
 ---
 name: triage-and-conflicts
-description: Which plugin actually wins a record (skyrim-winner, full load order via xEdit), Papyrus log triage, CrashLogger crash-dump triage, ESP cross-reference snapshots around bulk edits, and how these tools pick a folder when more than one Skyrim install exists. Use for override/conflict questions, Papyrus.N.log or crash-log analysis, and before any bulk ESP operation.
+description: Which plugin actually wins a record (skyrim-winner, full load order via xEdit), Papyrus log triage, CrashLogger crash-dump triage, which SKSE plugin DLLs loaded (skse-load-status), ESP cross-reference snapshots around bulk edits, and how these tools pick a folder when more than one Skyrim install exists. Use for override/conflict questions, Papyrus.N.log or crash-log analysis, and before any bulk ESP operation.
 ---
 
 # Triage and conflicts
@@ -82,14 +82,33 @@ Same invariants as `papyrus-triage`: denominator first, rows summing to independ
 totals, and the not-shown row printing at zero. Both are mutation-tested — dropping logs during
 parsing produces `ACCOUNTING MISMATCH` and exit 1.
 
+## skse-load-status — what SKSE did with each plugin DLL
+
+```bash
+python tools/skse-load-status.py                  # every DLL SKSE checked at the last launch
+python tools/skse-load-status.py spell            # filter: DLL file name OR the name it reports
+python tools/skse-load-status.py --log <file>     # a specific log
+```
+
+Many SKSE plugins carry no Windows version resource, so a DLL's file properties cannot say which
+build is installed. SKSE's own log can: per DLL, the version the plugin **reports about itself**
+(printed raw, as logged -- authors encode it differently, so compare it with a known build, never
+with a Nexus version string) and the verdict: loaded, **reported as incompatible** (during query or
+load), **not an SKSE plugin**, or an SKSE64 error such as an outdated Address Library.
+
+It reads `sksevr.log` (VR) or `skse64.log` (SE/AE, including the GOG and Epic folders), newest wins,
+and always names the file it read and how old it is: the log describes the **last launch**, not the
+DLLs on disk now. Rows must sum to the plugins checked; a mismatch prints `ACCOUNTING MISMATCH` and
+exits 1. Override the folder with `$SKSE_LOG_DIR`.
+
 ## Where these tools look, and what happens when there is more than one install
 
-`papyrus-triage` and `crash-triage` discover their folders through `tools/skyrim_paths.py`
+`papyrus-triage`, `crash-triage` and `skse-load-status` discover their folders through `tools/skyrim_paths.py`
 rather than hardcoding a path. A machine can easily carry `Documents/My Games/Skyrim`,
 `.../Skyrim Special Edition` **and** `.../Skyrim VR` at once, and the wrong one **reads
 perfectly** — you get a complete report about an install you are not modding.
 
-So the picker prefers **Skyrim VR → Skyrim Special Edition → Skyrim**, and whenever more than
+So the picker prefers **Skyrim VR → Skyrim Special Edition (then its GOG and Epic folders) → Skyrim**, and whenever more than
 one candidate exists it prints every rival it ignored, to stderr, naming the override:
 
 ```
@@ -99,7 +118,7 @@ one candidate exists it prints every rival it ignored, to stderr, naming the ove
   ...  If this picked wrong, set SKSE_CRASH_DIR.
 ```
 
-Overrides: `$PAPYRUS_LOG_DIR`, `$SKSE_CRASH_DIR`, and `$PLUGINS_TXT` (for the xelib load-order
+Overrides: `$PAPYRUS_LOG_DIR`, `$SKSE_CRASH_DIR`, `$SKSE_LOG_DIR`, and `$PLUGINS_TXT` (for the xelib load-order
 reader, which faces the same hazard under `%LOCALAPPDATA%`).
 
 ## ESP Cross-Reference Integrity (`tools/esp-verify-wrapper.sh`)

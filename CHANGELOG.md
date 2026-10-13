@@ -4,6 +4,7 @@
 
 ### Added
 
+- **`skse-load-status`:** lists what SKSE did with each plugin DLL at the last launch (loaded, incompatible, not an SKSE plugin, SKSE64 errors) and the version each plugin reports, from `sksevr.log` or `skse64.log`; its rows must sum to the plugins checked.
 - **`mod-release-review` skill:** a review before publishing a Skyrim mod, scoped to what changed since the last published version; it changes nothing while reviewing and brings every finding to the author before any fix.
 - **In-place sed guard (S-SED-CRLF):** `sed -i` without `-b` on a file in the install, config or MO2 folder (or a game INI or load-order file by name) is refused, because Git for Windows' sed rewrites every CRLF line ending to LF; use `sed -i -b`. It fires only when sed is the program that runs, not on text that mentions it.
 - **Skyrim AI Assistant Toolkit:** for coding agents (Claude Code, Codex, …), not an AI NPC mod (SkyrimNet, Mantella, CHIM).

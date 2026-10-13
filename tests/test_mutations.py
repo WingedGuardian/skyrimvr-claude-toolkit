@@ -977,6 +977,51 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
         id="game-dir-warning-silenced",
     ),
 
+    # --- skse-load-status ---------------------------------------------------
+    pytest.param(
+        # Count verdicts from the rows instead of as each result line is applied: the sum is then x == x,
+        # and a plugin given two verdicts reads as a clean log.
+        "tools/skse-load-status.py",
+        "    kinds = Counter(verdicts)",
+        '    kinds = Counter(r["kind"] for r in rows if r["status"] != NO_RESULT)',
+        "tests/test_skse_load_status.py::test_two_verdicts_for_one_plugin_is_an_accounting_mismatch",
+        id="skse-status-accounting-tautological",
+    ),
+    pytest.param(
+        # Require the version block on every verdict: VR's "does not appear to be an SKSE plugin" line has none,
+        # so that plugin silently becomes "no result line".
+        "tools/skse-load-status.py",
+        r'    r"(?:\((?P<data>[0-9A-Fa-f]{8}) (?P<name>.*) (?P<ver>[0-9A-Fa-f]{8})\) )?"',
+        r'    r"\((?P<data>[0-9A-Fa-f]{8}) (?P<name>.*) (?P<ver>[0-9A-Fa-f]{8})\) "',
+        "tests/test_skse_load_status.py::test_vr_log_every_verdict_and_the_rows_sum",
+        id="skse-status-version-block-required",
+    ),
+    pytest.param(
+        # Take an unknown flag as the filter: "-x" then matches nothing and reads as "not installed".
+        "tools/skse-load-status.py",
+        "    if flags or len(args) > 1:",
+        "    if len(args) > 1:",
+        "tests/test_skse_load_status.py::test_bad_usage_is_exit_2",
+        id="skse-status-unknown-flag-as-filter",
+    ),
+    pytest.param(
+        # Pair a verdict with the plugin checked last (the VR order): every SE/AE "loaded correctly" line, printed
+        # after all checks, lands on the wrong plugin.
+        "tools/skse-load-status.py",
+        '        row = by_name.get(basename(m.group("dll")).lower())',
+        "        row = rows[-1] if rows else None",
+        "tests/test_skse_load_status.py::test_se_verdicts_printed_after_all_checks_are_matched_by_name",
+        id="skse-status-verdict-by-position",
+    ),
+    pytest.param(
+        # Drop the GOG / Epic folders: a GOG SE/AE install's log is never found.
+        "tools/skyrim_paths.py",
+        '''GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition", "Skyrim Special Edition GOG",''',
+        '''GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition",''',
+        "tests/test_skse_load_status.py::test_discovery_finds_a_gog_se_folder",
+        id="game-dirs-without-gog",
+    ),
+
     # --- what the v3.9 release review found ---------------------------------
     # Put back the single-character separator class. Doubled separators name the same
     # directory and are the canonical Python/PowerShell spelling, and every one of them
