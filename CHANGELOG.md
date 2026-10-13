@@ -280,7 +280,6 @@
 - **Spriggit bytes:** a round trip may reorder records without changing the re-serialized content.
 - **Python 3.8/3.9:** engine compatibility is retained but these versions are outside the tested range.
 - **Live release checks:** a clean suite and review do not substitute for the remaining manual and live-agent batch.
-- **Linux skip ceiling:** remains an estimate until the real CI leg runs.
 - **Container release legs:** require Docker and a separate build/round-trip check.
 
 ### Upgrading from 3.x

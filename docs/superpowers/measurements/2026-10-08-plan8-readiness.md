@@ -100,7 +100,7 @@ The final-review fixes (`878ed80`, `8196e33`) and this report's correction were 
 3. **Game prerequisites:** record actual runtime/SKSEVR identities, active manager profile and winning files before live P6/P7 checks. Public archive hashes/layouts were verified without executing or installing their contents. Third-party mods are installed by the user through their manager, with rollback; archive inspection does not establish runtime compatibility.
 4. **T14b latency:** each normal-priority worst-case load run requires explicit user approval. None was performed here.
 5. **Host decisions:** Git for Windows update/pin requires a quiet user-authorized moment. The global Spriggit 0.40.0 update decision remains the user's. Docker legs need Docker Desktop already running; it was unavailable and was not started.
-6. **Publication:** push/tag/release/upload/repository rename and CI-secret changes remain unauthorized. The user must supply the required LEAK_TOKENS secret when publication is separately authorized. Real Linux CI needs that later push; its 305 skip ceiling remains an estimate until measured.
+6. **Publication:** push/tag/release/upload/repository rename and CI-secret changes remain unauthorized. The user must supply the required LEAK_TOKENS secret when publication is separately authorized. Real Linux CI needed that later push; its 305 skip ceiling was an estimate. Measured since (2026-10-12, CI run 38277736359 on `aaac5d5`): every Linux leg (Python 3.10–3.13) skipped 506, and `0d2b588` set the Linux ceiling to 512.
 
 ## Known limits
 
