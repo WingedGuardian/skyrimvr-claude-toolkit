@@ -1,0 +1,24 @@
+Skyrim SSE v1.6.1170
+CrashLoggerSSE v1-24-0-0
+SYNTHETIC FIXTURE (fix-limits 11) -- hand-built from CrashLoggerSSE v1.24.0 src/Crash/CrashHandler.cpp, not a real dump.
+A __fastfail (int 0x29) raises STATUS_STACK_BUFFER_OVERRUN 0xC0000409, which v1.24.0 catches through its vectored
+handler (VectoredExceptions -> UnhandledExceptions). print_exception names only the codes in its EXCEPTION_CASE list
+and C++ throws; 0xC0000409 is not among them, so the type is the empty string and the line has NO quoted type:
+"Unhandled exception{} at 0x{:012X}{}" with {} = "", the address, and " MODULE+OFFSET<TAB>instruction" (Zydis Intel).
+Parameter[0] is the fast-fail code (7 = FAST_FAIL_FATAL_APP_EXIT, the code abort() passes).
+
+Unhandled exception at 0x7FFE5A3B1E2D ucrtbase.dll+00A1E2D	int 0x29
+Exception Flags: 0x00000001 (Non-continuable)
+Number of Parameters: 1
+Exception Thread ID: 4242
+Exception Information Parameters:
+	Parameter[0]: 0x000000000007
+
+CALL STACK ([P]robable / [S]tack scan):
+	[ 0][P] 0x7FFE5A3B1E2D    ucrtbase.dll+00A1E2D	int 0x29
+	[ 1][P] 0x7FFE5A3A2B11    ucrtbase.dll+0092B11	call 0x00007FFE5A3B1E00
+	[ 2][P] 0x7FFE11220345    SomePlugin.dll+0020345	call qword ptr [0x00007FFE11240010]
+	[ 3][S] 0x7FF700001234    SkyrimSE.exe+0001234	mov rcx, rax
+
+REGISTERS:
+	RAX 0x0

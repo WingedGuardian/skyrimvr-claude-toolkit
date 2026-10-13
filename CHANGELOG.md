@@ -135,6 +135,7 @@
 
 ### Fixed
 
+- **CrashLogger `__fastfail` dumps:** `crash-triage.py` reads an exception line with no quoted type, which CrashLoggerSSE writes for every code outside its named list, including the `__fastfail` / fail-fast dumps 1.24.0 added; such a dump was counted as "no exception". It is labelled `__fastfail` (instruction `int 0x29`) or `(unnamed exception code)`.
 - **Spriggit in CI:** the .NET 10 job now runs the pinned Spriggit, round-tripping a committed synthetic plugin (serialize, deserialize, serialize again) and requiring the same records back; it only restored and listed the tool.
 - **ReSaver lib jars:** every file of the pinned archive's `lib/` now has a pinned SHA-256 beside `ReSaver.jar`'s, and `bash tools/resaver-cli.sh verify` checks `ReSaver.jar` and `lib/` against them (required files present, any present file the pinned bytes, no unknown jar on the classpath); only `ReSaver.jar` was pinned, and nothing checked it.
 - **Devcontainer version checks:** the JDK and .NET SDK checks capture the version output before testing it; piped into `grep -q` under `pipefail` they could fail a correct image build when grep exited first and the writer died of SIGPIPE. Not yet built in Docker (Docker legs).
@@ -297,7 +298,7 @@
 - **Migration concurrency:** simultaneous runs can race and one may fail.
 - **Animated NIFs:** Blender round trips can drop controllers.
 - **Spriggit bytes:** a round trip may reorder records without changing the re-serialized content.
-- **CrashLogger `__fastfail` dumps:** CrashLogger 1.24.0 added this dump class and no real one has been run through `crash-triage.py`; a dump it cannot read is counted as unparsed, not given a signature, so read that dump by hand.
+- **CrashLogger `__fastfail` dumps:** `crash-triage.py` is checked against a synthetic dump built from CrashLoggerSSE 1.24.0's source, not a real one; read the first real fastfail dump by hand once to confirm.
 - **Python 3.8/3.9:** engine compatibility is retained but these versions are outside the tested range.
 - **Live release checks:** a clean suite and review do not substitute for the remaining manual and live-agent batch.
 - **Container release legs:** require Docker and a separate build/round-trip check.

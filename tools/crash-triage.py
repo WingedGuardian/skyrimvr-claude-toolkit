@@ -31,7 +31,11 @@ import skyrim_paths  # noqa: E402
 
 # "Unhandled exception "TYPE" at 0xADDR MODULE+OFFSET<TAB>instruction |  symbol)"
 EXC_RE = re.compile(
-    r'^Unhandled exception "(?P<type>[^"]+)"'
+    # The quoted TYPE is OPTIONAL. CrashLoggerSSE names only a fixed list of codes (its EXCEPTION_CASE list and C++
+    # throws); any other code prints an empty type: `Unhandled exception at 0x... MODULE+OFFSET`. 1.24.0 made that
+    # common -- it logs __fastfail / fail-fast (0xC0000409 / 0xC0000602), neither on the list -- and requiring the
+    # quotes counted every such dump as "no exception". Without a type the address must follow.
+    r'^Unhandled exception(?: "(?P<type>[^"]+)"|(?=\s+at\s+0x))'
     r'(?:\s+at\s+0x(?P<addr>[0-9A-Fa-f]+))?'
     # MODULE+OFFSET is OPTIONAL. A jump to an address inside no loaded module
     # leaves CrashLogger nothing to attribute, and the line simply ends after the
@@ -137,9 +141,16 @@ def parse(path: Path):
                     break
             break
 
+    instr = (exc.group("instr") or "").strip()
+    etype = exc.group("type")
+    if not etype:
+        # An unnamed code. `int 0x29` is the __fastfail instruction (Zydis Intel syntax; `int 29h` elsewhere).
+        etype = ("__fastfail" if re.fullmatch(r"int\s+(?:0x29|29h)", instr, re.I)
+                 else "(unnamed exception code)")
+
     return {
         "file": path.name,
-        "type": exc.group("type"),
+        "type": etype,
         # No module means the address is all we have. Naming it that way keeps
         # these grouped together and readable, instead of pretending to a module.
         "module": exc.group("module") or "(no module)",

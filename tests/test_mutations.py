@@ -8115,3 +8115,17 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tests/fixtures/spriggit/make_fixture.py", "FORM_VERSION = 44", "FORM_VERSION = 43",
      _FL4 + "test_the_committed_fixture_is_what_its_generator_builds", "fl4-fixture-drifts-from-its-generator"),
 ]]
+
+# fix-limits 11: a CrashLoggerSSE dump with no quoted exception type (1.24's __fastfail) parses, and is labelled.
+_FL11 = "tests/test_triage.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/crash-triage.py", r"""r'^Unhandled exception(?: "(?P<type>[^"]+)"|(?=\s+at\s+0x))'""",
+     r"""r'^Unhandled exception "(?P<type>[^"]+)"'""",
+     _FL11 + "test_crash_parses_a_fastfail_dump_with_no_quoted_exception_type", "fl11-type-required-again"),
+    ("tools/crash-triage.py", r"""|(?=\s+at\s+0x))'""", r"""|)'""",
+     _FL11 + "test_a_line_that_only_starts_like_an_exception_is_not_one", "fl11-no-address-required-without-type"),
+    ("tools/crash-triage.py", '        etype = ("__fastfail" if', '        etype = ("(unnamed exception code)" if',
+     _FL11 + "test_crash_parses_a_fastfail_dump_with_no_quoted_exception_type", "fl11-fastfail-not-named"),
+    ("tools/crash-triage.py", '                 else "(unnamed exception code)")', '                 else "__fastfail")',
+     _FL11 + "test_an_unnamed_code_that_is_not_a_fastfail_is_parsed_and_labelled_unnamed", "fl11-every-unnamed-is-fastfail"),
+]]

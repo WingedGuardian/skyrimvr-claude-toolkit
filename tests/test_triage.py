@@ -770,3 +770,52 @@ def test_crash_caps_a_runaway_near_miss_listing(tmp_path):
     both = r.stdout + r.stderr
     assert both.count("    !! ") == 10, both
     assert "and 15 more" in both, both
+
+
+# --------------------------------------------------------------------------
+# crash-triage -- CrashLoggerSSE 1.24 __fastfail dumps (fix-limits 11)
+#
+# 1.24.0 logs __fastfail / fail-fast exceptions (0xC0000409 / 0xC0000602) through a vectored handler. Its
+# print_exception names only a fixed list of codes, so these get NO quoted type on the exception line. The fixture is
+# SYNTHETIC (built from the v1.24.0 source; its header says so): no real fastfail dump has been run through here.
+# --------------------------------------------------------------------------
+
+FASTFAIL = REPO / "tests" / "fixtures" / "crashlogger" / "crash-2026-10-13-12-00-00.log"
+
+
+def test_the_fastfail_fixture_says_it_is_synthetic():
+    assert "SYNTHETIC FIXTURE" in FASTFAIL.read_text(encoding="utf-8").splitlines()[2]
+
+
+def test_crash_parses_a_fastfail_dump_with_no_quoted_exception_type():
+    r = run(CRASH, str(FASTFAIL))
+    assert "parsed        : 1" in r.stdout and "no exception  : 0" in r.stdout, r.stdout
+    assert "ucrtbase.dll+00A1E2D" in r.stdout and "__fastfail" in r.stdout, r.stdout
+    assert "SomePlugin.dll+0020345" in r.stdout and "SkyrimSE.exe+0001234" not in r.stdout, r.stdout
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_an_unnamed_code_that_is_not_a_fastfail_is_parsed_and_labelled_unnamed(tmp_path):
+    p = tmp_path / "crash-2026-10-13-12-00-01.log"
+    p.write_text(FASTFAIL.read_text(encoding="utf-8").replace("\tint 0x29", "\tud2"), encoding="utf-8")
+    r = run(CRASH, str(p))
+    assert "parsed        : 1" in r.stdout and "(unnamed exception code)" in r.stdout, r.stdout
+    assert "__fastfail" not in r.stdout, r.stdout
+
+
+def test_a_quoted_type_still_parses_as_before():
+    """The optional type must not swallow a named one: the 1.2x C++ fixture keeps its type."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("crash_triage_for_test", CRASH)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    hit = m.EXC_RE.match('Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x7FF6A10000 SkyrimVR.exe+0B84F05\tmov')
+    assert hit.group("type") == "EXCEPTION_ACCESS_VIOLATION" and hit.group("offset") == "0B84F05"
+
+
+def test_a_line_that_only_starts_like_an_exception_is_not_one(tmp_path):
+    """Without a quoted type the address must follow, or any `Unhandled exception ...` text would parse."""
+    p = tmp_path / "crash-2026-10-13-12-00-02.log"
+    p.write_text("Skyrim SSE v1.6.1170\nUnhandled exception handler installed\n", encoding="utf-8")
+    r = run(CRASH, str(p))
+    assert "no exception  : 1" in r.stdout and "parsed        : 0" in r.stdout, r.stdout
