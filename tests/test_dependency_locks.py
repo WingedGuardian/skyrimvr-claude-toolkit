@@ -1,6 +1,7 @@
 """Read-only dependency/configuration gates also run under ordinary CI pytest."""
 import hashlib
 import json
+import re
 import os
 import subprocess
 import sys
@@ -171,3 +172,46 @@ def test_ci_keeps_the_fomod_smoke_control_that_must_go_red():
     passed_branch = run.split("then", 1)[1].split("fi", 1)[0]
     assert "exit 1" in passed_branch, "a smoke that PASSES on 4.3.6 must fail the job: " + run
     assert 'grep -q "created an element"' in run, run
+
+
+# fix-limits 6: under `SHELL [... "-o", "pipefail" ...]` a `prog | grep -q PATTERN` fails whenever grep exits on its
+# first match before `prog` finishes writing: `prog` dies of SIGPIPE, pipefail reports it, and the build fails though
+# the version was right. Capture the output first, then test it.
+_GREP_Q_PIPE = re.compile(r"\|\s*grep\s+(?:-[A-Za-z]*q[A-Za-z]*|--quiet|--silent)\b")
+
+
+def _dockerfile_commands(text):
+    """Each RUN instruction as one string (continuation lines joined), comments dropped."""
+    out, cur = [], None
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        if cur is None and line.startswith("RUN "):
+            cur = line
+        elif cur is not None:
+            cur += "\n" + line
+        if cur is not None and not line.rstrip().endswith("\\"):
+            out.append(cur)
+            cur = None
+    return out
+
+
+def test_no_dockerfile_run_pipes_into_a_quiet_grep_under_pipefail():
+    text = (REPO / ".devcontainer/Dockerfile").read_text(encoding="utf-8")
+    assert '"pipefail"' in text                         # the condition that makes the pipe fragile
+    bad = [c.splitlines()[0] for c in _dockerfile_commands(text) if _GREP_Q_PIPE.search(c)]
+    assert not bad, bad
+
+
+def test_the_jdk_and_sdk_version_checks_still_run_and_test_captured_output():
+    text = (REPO / ".devcontainer/Dockerfile").read_text(encoding="utf-8")
+    assert 'java_version="$(/usr/local/jdk/bin/java -version 2>&1)"' in text
+    assert '[[ "$java_version" == *"\\"$JDK_VERSION\\""* ]]' in text
+    assert 'sdks="$(/usr/local/dotnet/dotnet --list-sdks)"' in text
+    assert "[[ $'\\n'\"$sdks\" == *$'\\n'\"${DOTNET_SDK_VERSION} \"* ]]" in text
+
+
+def test_the_pipe_check_sees_a_quiet_grep_in_any_spelling():
+    for c in ('RUN x | grep -q "y"', "RUN x |grep -qE y", "RUN x | grep --quiet y", "RUN a \\\n    && x | grep -iq y"):
+        assert _GREP_Q_PIPE.search(c), c
+    assert not _GREP_Q_PIPE.search('RUN v="$(x)" && [[ "$v" == *y* ]]')

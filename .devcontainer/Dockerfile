@@ -13,7 +13,9 @@
 # extended support runs to 2028-06-30. amd64 and arm64 are both covered (the base image is multi-arch).
 FROM mcr.microsoft.com/devcontainers/python:3.0.6-3.11-bookworm@sha256:aea59f6834231486ee510ed90fc89659762e8ac246bb5e5fc49809ab736a0b94
 
-# Use bash for all RUN commands; a failed command anywhere in a pipeline fails the step.
+# Use bash for all RUN commands; a failed command anywhere in a pipeline fails the step. So a version check never
+# pipes into `grep -q`: grep exits at its first match, the writer can die of SIGPIPE, and pipefail fails a correct
+# build. Capture the output, then test it (tests/test_dependency_locks.py).
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # --- Microsoft Build of OpenJDK 21 (ReSaver CLI; the JDK the Windows docs recommend) ---
@@ -32,7 +34,8 @@ RUN case "$(dpkg --print-architecture)" in \
     && mkdir -p /usr/local/jdk \
     && tar -xzf /tmp/jdk.tar.gz -C /usr/local/jdk --strip-components=1 --no-same-owner \
     && rm /tmp/jdk.tar.gz \
-    && /usr/local/jdk/bin/java -version 2>&1 | grep -q "\"$JDK_VERSION\""
+    && java_version="$(/usr/local/jdk/bin/java -version 2>&1)" \
+    && [[ "$java_version" == *"\"$JDK_VERSION\""* ]]
 ENV JAVA_HOME=/usr/local/jdk
 ENV PATH="/usr/local/jdk/bin:$PATH"
 
@@ -67,7 +70,8 @@ RUN case "$(dpkg --print-architecture)" in \
     && mkdir -p /usr/local/dotnet \
     && tar -xzf /tmp/dotnet.tar.gz -C /usr/local/dotnet --no-same-owner \
     && rm /tmp/dotnet.tar.gz \
-    && /usr/local/dotnet/dotnet --list-sdks | grep -q "^${DOTNET_SDK_VERSION} "
+    && sdks="$(/usr/local/dotnet/dotnet --list-sdks)" \
+    && [[ $'\n'"$sdks" == *$'\n'"${DOTNET_SDK_VERSION} "* ]]
 
 ENV DOTNET_ROOT=/usr/local/dotnet
 ENV PATH="$PATH:/usr/local/dotnet"

@@ -135,6 +135,7 @@
 
 ### Fixed
 
+- **Devcontainer version checks:** the JDK and .NET SDK checks capture the version output before testing it; piped into `grep -q` under `pipefail` they could fail a correct image build when grep exited first and the writer died of SIGPIPE. Not yet built in Docker (Docker legs).
 - **Garbled snapshot rate stamp:** an unreadable `.last_snapshot` still makes that call compare every script despite the 60-second rate limit and rewrite the stamp, and now says so once in the audit log (`RATE-STAMP`); it was silent.
 - **Adapted agents in the health reports:** `hook-canary` and `skydoctor` now report each agent adapted through ADAPTING.md (one row per `tools/adapters/<name>/adapter.py`, named by its `AGENT_NAME` slot) from the heartbeats its adapter and the engine write; they knew only Claude Code and Codex.
 - **Hook health under simultaneous calls:** two calls of one hook at the same moment can take the same invocation number (measured: 5 of 12 calls fired four at a time); `hook-canary` and `skydoctor` now order such calls by their timestamps, so a completion after a failure clears it at once instead of one call later. A call still never clears its own failure.
@@ -300,7 +301,6 @@
 - **Python 3.8/3.9:** engine compatibility is retained but these versions are outside the tested range.
 - **Live release checks:** a clean suite and review do not substitute for the remaining manual and live-agent batch.
 - **Container release legs:** require Docker and a separate build/round-trip check.
-- **Devcontainer JDK check:** the image build checks the JDK with `java -version | grep -q` under `pipefail`, so it can fail the build even when the JDK is right (it fails closed: no image); rebuild. Docker legs only.
 
 ### Upgrading from 3.x
 

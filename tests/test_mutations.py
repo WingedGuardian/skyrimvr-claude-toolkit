@@ -8081,3 +8081,12 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/snapshot.py", "            last, rl_ns = 0, 0\n", "            return None\n",
      _FL7, "fl7-garbled-stamp-skips-the-comparison"),
 ]]
+
+# fix-limits 6: the devcontainer's version checks capture output before testing it, never `| grep -q` under pipefail.
+_FL6 = "tests/test_dependency_locks.py::test_no_dockerfile_run_pipes_into_a_quiet_grep_under_pipefail"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (".devcontainer/Dockerfile", '    && java_version="$(/usr/local/jdk/bin/java -version 2>&1)" \\\n    && [[ "$java_version" == *"\\"$JDK_VERSION\\""* ]]',
+     '    && /usr/local/jdk/bin/java -version 2>&1 | grep -q "\\"$JDK_VERSION\\""', _FL6, "fl6-jdk-check-pipes-into-grep-q"),
+    (".devcontainer/Dockerfile", '    && sdks="$(/usr/local/dotnet/dotnet --list-sdks)" \\\n    && [[ $\'\\n\'"$sdks" == *$\'\\n\'"${DOTNET_SDK_VERSION} "* ]]',
+     '    && /usr/local/dotnet/dotnet --list-sdks | grep -q "^${DOTNET_SDK_VERSION} "', _FL6, "fl6-sdk-check-pipes-into-grep-q"),
+]]
