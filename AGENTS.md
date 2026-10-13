@@ -52,6 +52,7 @@ any agent can read one directly. Read the skill BEFORE the work:
 | write or run an xelib / XEditLib script | skill `xelib` |
 | edit an ESP with Spriggit, or compile Papyrus | skill `skyrim-context` |
 | touch a mesh (`.nif`) | skill `skyrim-nif` |
+| publish a new version of your own mod | skill `mod-release-review` |
 | work with archives, audio, MCM menus or saves | skills `skyrim-bsa`, `skyrim-audio`, `skyrim-mcm`, `skyrim-save` |
 | install or verify an optional tool, or set up the Nexus API key | `docs/installing-tools.md` |
 | use the Linux devcontainer | `docs/container-vs-windows.md` |
