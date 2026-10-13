@@ -135,6 +135,7 @@
 
 ### Fixed
 
+- **Adapted agents in the health reports:** `hook-canary` and `skydoctor` now report each agent adapted through ADAPTING.md (one row per `tools/adapters/<name>/adapter.py`, named by its `AGENT_NAME` slot) from the heartbeats its adapter and the engine write; they knew only Claude Code and Codex.
 - **Hook health under simultaneous calls:** two calls of one hook at the same moment can take the same invocation number (measured: 5 of 12 calls fired four at a time); `hook-canary` and `skydoctor` now order such calls by their timestamps, so a completion after a failure clears it at once instead of one call later. A call still never clears its own failure.
 - **Shadow-mode audit record:** a call `guards off` lets through is logged as one line, `skyguard SHADOW: <code> (deny) not enforced: ...` with the rule's message folded in; it was logged as the rule's DENY or ASK line followed by a separate SHADOW line, so the first line claimed a refusal for a call that ran. A refusal that stands still writes its rule line as before.
 - **Guards-off reason:** `guards off --reason "why"` records the reason `skydoctor` and the session-start banner show (one line, at most 120 characters, still shown as untrusted data); without it the reason stays "guards off". A reason could not be given before.
@@ -281,7 +282,7 @@
 - **Lift visibility:** agent context, audit and skydoctor are covered; interactive user visibility remains unmeasured.
 - **Relocking needs hooks:** no background service relocks an expired lift.
 - **Agent unlock session:** Codex and Claude PowerShell do not receive the session binding used by Claude Bash; the user must unlock from their own terminal.
-- **Adapted agents:** `hook-canary` and `skydoctor` know only Claude Code and Codex; an agent adapted through ADAPTING.md writes heartbeats that nothing checks yet.
+- **Adapted agents:** `hook-canary` and `skydoctor` read an adapted agent's heartbeats, which prove its adapter reached and delivered verdicts; coverage against that agent's transcript is not measured, so only the live canaries of ADAPTING.md prove its hook runs for every tool.
 - **Raw unlock-all:** does not record a per-file lift list.
 - **State replacement:** bounded PermissionError retries handle transient Windows readers; persistent sharing failures can still fail.
 - **Shell delete recovery:** no general backup is made before deletion.

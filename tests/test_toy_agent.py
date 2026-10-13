@@ -218,3 +218,80 @@ def test_this_module_has_no_skips():
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr in ("skip", "skipif", "xfail"):
             raise AssertionError("a skipped toy-agent test is a green that examined nothing")
+
+
+# ---- fix-limits 3: hook-canary / skydoctor certify an adapted agent from what its adapter declares ---------------
+# The adapter file (tools/adapters/<dir>/adapter.py) declares the agent's name in its AGENT_NAME slot; its heartbeats
+# land in .claude/backups/.hook-heartbeat/adapted/<name>/ (the template's pre-tool.* records plus the engine's
+# neutral-pre-tool.evaluated). The health report reads exactly those.
+
+NAMES = {"json-deny": "toy-json", "exit2": "toy-exit2"}
+
+
+def _health_mod():
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import health
+    return health
+
+
+def _report(root):
+    import io
+    out = io.StringIO()
+    code = _health_mod().report(root, as_json=True, out=out)
+    data = json.loads(out.getvalue())
+    return code, [r for r in data["rows"] if r["agent"].startswith("adapted/")], data
+
+
+@pytest.mark.parametrize("profile", sorted(PROFILES))
+def test_the_health_report_certifies_an_adapted_agent_from_its_heartbeats(tmp_path, profile):
+    root, adapter = staged(tmp_path, profile)
+    (root / "Data").mkdir()
+    r = drive(root, adapter, profile, [{"op": "write", "path": str(root / "notes.txt")},
+                                       {"op": "write", "path": str(root / "Data" / "Decoy.esp")}])
+    assert not r[0]["blocked"] and r[1]["blocked"]
+    code, rows, _ = _report(root)
+    assert [(x["agent"], x["hook"], x["state"]) for x in rows] == [("adapted/" + NAMES[profile], "pre-tool", "HEALTHY")], rows
+    assert code == 0
+
+
+def test_an_adapted_agent_that_never_ran_is_listed_not_exercised(tmp_path):
+    root, _adapter = staged(tmp_path, "json-deny")
+    code, rows, _ = _report(root)
+    assert [(x["agent"], x["state"]) for x in rows] == [("adapted/toy-json", "NOT EXERCISED")], rows
+    assert code == 0
+
+
+def test_a_broken_engine_reads_degraded_for_the_adapted_agent_and_a_later_good_call_clears_it(tmp_path):
+    root, adapter = staged(tmp_path, "json-deny")
+    run_py = root / "tools" / "skyguard" / "run.py"
+    good = run_py.read_bytes()
+    run_py.write_text(FAULT_SOURCES["engine-crash"], encoding="utf-8", newline="\n")
+    drive(root, adapter, "json-deny", [{"op": "write", "path": str(root / "notes.txt")}],
+          env={"SKYGUARD_ADAPTER_TIMEOUT_S": "5"})
+    code, rows, _ = _report(root)
+    assert rows[0]["state"] == "DEGRADED" and code == 1, rows
+    run_py.write_bytes(good)
+    drive(root, adapter, "json-deny", [{"op": "write", "path": str(root / "notes.txt")}])
+    code, rows, _ = _report(root)
+    assert rows[0]["state"] == "HEALTHY" and "recovered" in rows[0]["detail"] and code == 0, rows
+
+
+def test_skydoctor_reports_the_adapted_agent(tmp_path):
+    import time as _time
+    root, adapter = staged(tmp_path, "json-deny")
+    drive(root, adapter, "json-deny", [{"op": "write", "path": str(root / "notes.txt")}])
+    _health_mod()
+    from skyguard import doctor
+    rows = doctor._layer3_adapted(root, _time.time())
+    assert [(x.section, x.item, x.status) for x in rows] == [("Layer 3 adapted", "toy-json pre-tool", "live")], rows
+    assert "self-verified" in rows[0].reason and "HEALTHY" in rows[0].reason
+
+
+def test_skydoctors_full_report_carries_the_adapted_rows(tmp_path):
+    import time as _time
+    root, adapter = staged(tmp_path, "json-deny")
+    _health_mod()
+    from skyguard import doctor
+    rows, _cleared = doctor.collect(root, now=_time.time(), toolchain=False, codex_config=str(tmp_path / "none.toml"),
+                                    home=str(tmp_path / "home"))
+    assert [(x.item, x.status) for x in rows if x.section == "Layer 3 adapted"] == [("toy-json pre-tool", "unknown")]

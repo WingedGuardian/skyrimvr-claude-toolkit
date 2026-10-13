@@ -62,6 +62,16 @@ _SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 # The hook whose record counts as "this call was guarded", per agent. Claude runs several hooks per call
 # (protect-*, backup, snapshot), so only the two guards are counted -- once each per matched tool.
 COUNTING_HOOKS = {"claude": ("protect-bash", "protect-files", "protect-mcp"), "codex": ("pre-tool",)}
+# fix-limits 3: an agent adapted through ADAPTING.md declares itself by its adapter file,
+# tools/adapters/<folder>/adapter.py, whose AGENT_NAME slot names its heartbeat folder
+# .claude/backups/.hook-heartbeat/adapted/<name>/ (tools/adapting/adapter_template.py, _hb_dir). The template writes
+# `pre-tool.<stage>` there and the neutral entry writes the engine's `neutral-pre-tool.evaluated` beside it; those are
+# the records read for it. Coverage against a transcript is not measured for it: no reader knows its transcript.
+ADAPTED_DIR = "adapted"
+ADAPTED_HOOKS = ("pre-tool",)
+ADAPTED_EVALUATED = "neutral-pre-tool"          # tools/skyguard/neutral.py TELEMETRY_ROLE (asserted by a test)
+ADAPTERS_REL = Path("tools") / "adapters"
+_AGENT_NAME = re.compile(r"""^AGENT_NAME\s*=\s*(?:"([^"\\\n]*)"|'([^'\\\n]*)')""", re.MULTILINE)
 # Tools the INSTALLED Claude matchers cover (.claude/settings.json: Bash|PowerShell|Monitor -> protect-bash,
 # Edit|Write|NotebookEdit -> protect-files; Plan 5), and every MCP tool whose name contains devbench in any case,
 # or dev-bench / dev_bench / dev.bench -> protect-mcp (Plan 8 T6: was the prefix mcp__devbench). The pattern is the
@@ -212,13 +222,45 @@ def _stamp(t):
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t))
 
 
-def hook_state(d, hook, now, stale_s=7200, kill_s=150):
-    """-> (state, detail). The rules run in the order they are numbered."""
+def adapted_agents(root):
+    """-> [(name, heartbeat folder name or None)], one per tools/adapters/<folder>/adapter.py, by folder name.
+
+    The name is the adapter's AGENT_NAME slot: the first `AGENT_NAME = "<literal>"` line before `# SLOTS-END` (the
+    file is read, never imported or run). Its folder is that name with every character but [A-Za-z0-9._-] made `_`,
+    exactly as the template's _hb_dir does. With no literal there, the records cannot be located: (folder text, None)."""
+    try:
+        dirs = sorted(p for p in (Path(root) / ADAPTERS_REL).iterdir() if (p / "adapter.py").is_file())
+    except OSError:
+        return []
+    out = []
+    for d in dirs:
+        try:
+            text = (d / "adapter.py").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        m = _AGENT_NAME.search(text.split("# SLOTS-END", 1)[0])
+        if m:
+            name = m.group(1) if m.group(1) is not None else m.group(2)
+            out.append((name, re.sub(r"[^A-Za-z0-9._-]", "_", name)))
+        else:
+            out.append((d.name + " (no AGENT_NAME literal)", None))
+    return out
+
+
+def _files(agent):
+    """The record-name overrides an agent's hooks need (hook_state `files`): an adapted agent's evaluation is the
+    neutral entry's own record."""
+    return {"evaluated": ADAPTED_EVALUATED} if agent.startswith(ADAPTED_DIR + "/") else None
+
+
+def hook_state(d, hook, now, stale_s=7200, kill_s=150, files=None):
+    """-> (state, detail). The rules run in the order they are numbered. `files` maps a stage to the record name
+    that holds it when that is not `hook` (an adapted agent's `evaluated`)."""
     d = Path(d)
     recs = {}
     try:
         for stage in STAGES:
-            r = read(d / "{}.{}".format(hook, stage), stage)
+            r = read(d / "{}.{}".format((files or {}).get(stage, hook), stage), stage)
             if r is not None:
                 recs[stage] = r
     except Unmeasurable as e:
@@ -389,6 +431,8 @@ def _installed(root):
             out["claude"] = have
     if (root / ".codex" / "hooks.json").is_file():
         out["codex"] = list(CODEX_HOOKS)
+    for name, folder in adapted_agents(root):                  # fix-limits 3: what each adapter declares
+        out["{}/{}".format(ADAPTED_DIR, folder if folder is not None else name)] = list(ADAPTED_HOOKS)
     return out
 
 
@@ -438,11 +482,14 @@ def report(root, stale_min=120, as_json=False, now=None, out=None, codex_config=
         for h in hooks:
             if unreadable:
                 state, detail = "UNMEASURABLE", "telemetry directory is not readable"
+            elif agent.endswith(" (no AGENT_NAME literal)"):
+                state, detail = "UNMEASURABLE", ("its adapter.py has no AGENT_NAME literal in the slots, so the "
+                                                 "folder its heartbeats go to is unknown")
             elif unwritable:
                 # the wrappers swallow a failed write, so a frozen directory would read HEALTHY/STALE forever
                 state, detail = "UNMEASURABLE", "telemetry directory is not writable -- hooks cannot record here"
             else:
-                state, detail = hook_state(d, h, now, stale_s=stale_min * 60)
+                state, detail = hook_state(d, h, now, stale_s=stale_min * 60, files=_files(agent))
                 if (agent == "codex" and state == "NOT EXERCISED" and trust["overall"] == "trusted"
                         and not any(_has_records(d, x) for x in hooks)):
                     # Approved, yet NO Codex hook has left a single stage record: the entry never started (one
@@ -457,7 +504,7 @@ def report(root, stale_min=120, as_json=False, now=None, out=None, codex_config=
                          "latency_n": n, "p50_ms": p50, "p95_ms": p95})
     coverage_rows = {}
     for agent in installed:
-        if not unreadable:
+        if not unreadable and agent in COUNTING_HOOKS:   # an adapted agent has no transcript reader: not measured
             coverage_rows[agent] = [dict(zip(("session", "surface", "hooked", "called", "state", "why"), r))
                                     for r in _coverage_rows(root, agent, coverage_last)]
     legacy = []
@@ -498,6 +545,12 @@ def report(root, stale_min=120, as_json=False, now=None, out=None, codex_config=
         _print_trust(trust, rows, out)
     for agent, rs in coverage_rows.items():
         _print_coverage(agent, rs, out)
+    adapted = [a for a in installed if a.startswith(ADAPTED_DIR + "/")]
+    if adapted:
+        print("-" * 62, file=out)
+        print("ADAPTED AGENTS ({}): self-verified (ADAPTING.md section 7). Their rows prove the adapter reached and "
+              "delivered verdicts; coverage is not measured, so only the live canaries prove the hook runs for "
+              "every tool.".format(", ".join(a.split("/", 1)[1] for a in adapted)), file=out)
     print("-" * 62, file=out)
     print("healthy: {HEALTHY}   stale: {STALE}   degraded: {DEGRADED}   unmeasurable: {UNMEASURABLE}   "
           "not-exercised: {NOT EXERCISED}   never-invoked: {NEVER INVOKED}".format(**counts), file=out)

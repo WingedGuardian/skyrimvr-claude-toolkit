@@ -13,6 +13,7 @@ One report. Every line is `<item> | live | not live | unknown | <reason>`, and t
                    status but NOT COUNTED in the exit code: they are permanent, so counting them would make 0 unreachable.
   Layer 3 claude   per hook: wired in .claude/settings.json + Plan 4's health.hook_state; the disableAllHooks switch.
   Layer 3 codex    codex_trust; .codex/rules/skyrim.rules present; per-session coverage.
+  Layer 3 adapted  per adapter in tools/adapters/ (ADAPTING.md): its AGENT_NAME's heartbeats, read by health.hook_state.
   Guards           on/off, who, why, until; the state file itself (`STATE-REJECTED <reason>` when it cannot be trusted).
   Integrity        the guard files against GUARD-FILES.sha256 (session.py's own check).
 
@@ -449,6 +450,25 @@ def _layer3_codex(root, codex_config):
     return rows
 
 
+def _layer3_adapted(root, now):
+    """fix-limits 3: one row per agent adapted through ADAPTING.md, as its adapter declares it (health.adapted_agents),
+    from the heartbeats its adapter and the neutral entry write. No adapter -> no rows: nothing was claimed."""
+    S = "Layer 3 adapted"
+    rows = []
+    hb = Path(root) / health.HB_REL / health.ADAPTED_DIR
+    for name, folder in health.adapted_agents(root):
+        for h in health.ADAPTED_HOOKS:
+            item = "%s %s" % (session._clean(name, 40), h)
+            if folder is None:
+                rows.append(Row(S, item, UNKNOWN, "its adapter.py has no AGENT_NAME literal in the slots, so its "
+                                "heartbeats cannot be located"))
+                continue
+            st, detail = health.hook_state(hb / folder, h, now, files={"evaluated": health.ADAPTED_EVALUATED})
+            rows.append(Row(S, item, HOOK_STATUS.get(st, UNKNOWN), "self-verified adapter (ADAPTING.md section 7); "
+                            "%s: %s; coverage is not measured" % (st, _txt(detail, 120))))
+    return rows
+
+
 # ---- Guards / Integrity ------------------------------------------------------------------------------------------
 
 def _guards(st, sf_exists, now):
@@ -541,6 +561,7 @@ def collect(root, now=None, toolchain=None, codex_config=None, home=None):
     rows += _guarded("Layer 2", _layer2, root, st, now, cleared)
     rows += _guarded("Layer 3 claude", _layer3_claude, root, now, home)
     rows += _guarded("Layer 3 codex", _layer3_codex, root, codex_config)
+    rows += _guarded("Layer 3 adapted", _layer3_adapted, root, now)
     rows += _guarded("Guards", _guards, st, os.path.lexists(str(sf)), now)
     rows += _guarded("Integrity", _integrity, root)
     return rows, cleared

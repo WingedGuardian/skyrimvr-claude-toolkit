@@ -236,10 +236,14 @@ calls your adapter, on your surface, for every tool, and honours your block shap
 canaries (`proof.live_canary_blocked` and `proof.live_shell_canary_blocked` in the report). A report without both
 stays **partially supported: Layers 0-2**, and so does an agent with no shell tool.
 
-No toolkit command certifies an adapted agent yet: `tools/hook-canary.sh` and the engine's health report know
-only the two named agents. Your adapter writes heartbeats to
-`.claude/backups/.hook-heartbeat/adapted/<name>/` so that a later toolkit release, or the user, can; the
-engine's own record for your calls is `neutral-pre-tool`, kept apart from the Codex hook's.
+`tools/hook-canary.sh` and `bash tools/skydoctor` read your adapter's heartbeats. Each
+`tools/adapters/<name>/adapter.py` declares its agent by the `AGENT_NAME` string literal in its slots; the template
+writes `pre-tool.*` records to `.claude/backups/.hook-heartbeat/adapted/<AGENT_NAME>/`, beside the engine's own
+`neutral-pre-tool.evaluated` (kept apart from the Codex hook's), and both reports read exactly those (row
+`adapted/<AGENT_NAME> pre-tool`). Keep `AGENT_NAME` a plain string literal: anything else leaves the records
+unlocatable, and the reports say so. A HEALTHY row proves only that your adapter reached and delivered verdicts.
+Coverage against your agent's transcript is not measured, so it does not prove your agent calls the adapter for every
+tool: the live canaries remain that proof.
 Until section 7 passes, say **partially supported: Layers 0-2**.
 
 ## 8. Surfaces
@@ -270,7 +274,7 @@ List every gap in the report. These are the ones the toolkit already knows about
 - The MCP judge reads every string in a DevBench call, whatever the tool, for a refused console command (`smp reset`); the save-over-a-save confirmation reads only the `console`, `game` and `papyrus` tools and scenario steps (`steps`), so a save made by a `replay` of a recording is not confirmed | [src: tools/skyguard/mcp_rules.py::for s in _strings(args):] [src: tools/skyguard/mcp_rules.py::elif tool == "game"]
 - Ops that take a backup are exactly `update`, `delete` and `move_from` | [src: tools/skyguard/engine.py::_BACKUP_OPS = ("update", "delete", "move_from")]
 - The engine's own telemetry role for the neutral entry is `neutral-pre-tool` | [src: tools/skyguard/neutral.py::TELEMETRY_ROLE = "neutral-pre-tool"]
-- The engine's own health tooling knows only the agents `claude` and `codex`; it does not certify an adapted agent | [src: tools/skyguard/health.py::COUNTING_HOOKS]
+- The health tooling (`hook-canary`, `skydoctor`) reads an adapted agent's heartbeats from the folder its adapter's `AGENT_NAME` slot names, and measures no transcript coverage for it | [src: tools/skyguard/health.py::def adapted_agents] [src: tools/skyguard/health.py::an adapted agent has no transcript reader] [src: tools/skyguard/doctor.py::def _layer3_adapted]
 - The conformance tool refuses `--command` without `--port`, because a custom command is not the file whose identity it hashes | [src: tools/adapter_conformance.py::--command needs --port]
 - A report's status is derived by the validator and never read from the report | [src: tools/adapter_conformance.py::The ONLY place a status string is produced]
 - Unless a failed hook blocks, the validator keeps the status partial while the agent's hook timeout is below the adapter's deadline plus a margin | [src: tools/adapter_conformance.py::HOOK_TIMEOUT_MARGIN_S = 5] [src: tools/adapting/adapter_template.py::ADAPTER_TIMEOUT_S = 25]

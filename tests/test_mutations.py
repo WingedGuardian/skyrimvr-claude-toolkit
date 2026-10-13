@@ -8043,3 +8043,32 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "        elif ds is not None and fs is not None:",
      _FL8 + "test_a_concurrent_completion_after_a_failure_with_the_same_sequence_clears_it", "fl8-equal-sequence-never-clears"),
 ]]
+
+# fix-limits 3: hook-canary / skydoctor read an adapted agent's heartbeats from what its adapter declares. One twin
+# per clause.
+_FL3H = "tests/test_skyguard_health.py::"
+_FL3T = "tests/test_toy_agent.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/health.py", "    for name, folder in adapted_agents(root):                  # fix-limits 3",
+     "    for name, folder in []:                  # fix-limits 3",
+     _FL3T + "test_an_adapted_agent_that_never_ran_is_listed_not_exercised", "fl3-adapters-not-installed"),
+    ("tools/skyguard/health.py", '    return {"evaluated": ADAPTED_EVALUATED} if agent.startswith(ADAPTED_DIR + "/") else None',
+     "    return None", _FL3T + "test_the_health_report_certifies_an_adapted_agent_from_its_heartbeats[json-deny]",
+     "fl3-engine-evaluation-not-read"),
+    ("tools/skyguard/health.py", '"{}.{}".format((files or {}).get(stage, hook), stage)', '"{}.{}".format(hook, stage)',
+     _FL3H + "test_an_adapted_agent_is_read_with_the_engines_evaluated_record", "fl3-hook-state-ignores-files"),
+    ("tools/skyguard/health.py", '            out.append((name, re.sub(r"[^A-Za-z0-9._-]", "_", name)))',
+     "            out.append((name, name))", _FL3H + "test_an_adapter_declares_its_agent_by_its_agent_name_slot",
+     "fl3-name-not-sanitised-like-the-template"),
+    ("tools/skyguard/health.py", '_AGENT_NAME.search(text.split("# SLOTS-END", 1)[0])', "_AGENT_NAME.search(text)",
+     _FL3H + "test_an_adapter_without_a_readable_name_is_still_listed_under_its_folder", "fl3-name-read-outside-slots"),
+    ("tools/skyguard/health.py", '            elif agent.endswith(" (no AGENT_NAME literal)"):', "            elif False:",
+     _FL3H + "test_a_nameless_adapter_reads_unmeasurable_in_the_report", "fl3-nameless-not-unmeasurable"),
+    ("tools/skyguard/health.py", "        if not unreadable and agent in COUNTING_HOOKS:", "        if not unreadable:",
+     _FL3H + "test_an_adapted_agent_gets_no_transcript_coverage_even_with_session_files", "fl3-coverage-for-adapted"),
+    ("tools/skyguard/doctor.py", '    rows += _guarded("Layer 3 adapted", _layer3_adapted, root, now)\n', "",
+     _FL3T + "test_skydoctors_full_report_carries_the_adapted_rows", "fl3-doctor-omits-adapted"),
+    ("tools/skyguard/doctor.py", '            st, detail = health.hook_state(hb / folder, h, now, files={"evaluated": health.ADAPTED_EVALUATED})',
+     "            st, detail = health.hook_state(hb / folder, h, now)",
+     _FL3T + "test_skydoctor_reports_the_adapted_agent", "fl3-doctor-ignores-engine-evaluation"),
+]]

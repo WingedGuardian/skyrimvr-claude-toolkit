@@ -260,3 +260,72 @@ def test_a_call_never_clears_its_own_failure_whatever_the_stamps_say(tmp_path):
     _w(tmp_path, "h", "failed", "{} 5.9-9 killed run 4.1-1 never finished".format(NOW - 10))
     _complete(tmp_path, NOW - 5, inv="5.9-9")
     assert health.hook_state(tmp_path, "h", NOW)[0] == "DEGRADED"
+
+
+# ---- fix-limits 3: the adapted agents an install declares ---------------------------------------------------------
+
+def _adapter(root, folder, name_line):
+    d = root / "tools" / "adapters" / folder
+    d.mkdir(parents=True)
+    (d / "adapter.py").write_text("# SLOTS-BEGIN\n" + name_line + "\n# SLOTS-END\nAGENT_NAME = 'not-this-one'\n",
+                                  encoding="utf-8")
+
+
+def test_an_adapter_declares_its_agent_by_its_agent_name_slot(tmp_path):
+    _adapter(tmp_path, "mine", 'AGENT_NAME = "my-agent"   # names the heartbeat folder')
+    _adapter(tmp_path, "odd", "AGENT_NAME = 'we ird/name'")
+    assert health.adapted_agents(tmp_path) == [("my-agent", "my-agent"), ("we ird/name", "we_ird_name")]
+
+
+def test_an_adapter_without_a_readable_name_is_still_listed_under_its_folder(tmp_path):
+    _adapter(tmp_path, "nameless", "AGENT_NAME = compute()")
+    assert health.adapted_agents(tmp_path) == [("nameless (no AGENT_NAME literal)", None)]
+
+
+def test_no_adapters_folder_means_no_adapted_agents(tmp_path):
+    assert health.adapted_agents(tmp_path) == []
+
+
+def test_the_adapted_hook_set_comes_from_the_template_it_was_copied_from():
+    """health's names for an adapted agent's records are the ones the template and the neutral entry write."""
+    tpl = (REPO / "tools" / "adapting" / "adapter_template.py").read_text(encoding="ascii")
+    from skyguard import neutral
+    assert '"pre-tool." + stage' in tpl and health.ADAPTED_HOOKS == ("pre-tool",)
+    assert health.ADAPTED_EVALUATED == neutral.TELEMETRY_ROLE
+    assert '".hook-heartbeat", "adapted"' in tpl and health.ADAPTED_DIR == "adapted"
+
+
+def test_an_adapted_agent_is_read_with_the_engines_evaluated_record(tmp_path):
+    d = tmp_path / ".claude" / "backups" / ".hook-heartbeat" / "adapted" / "a"
+    _w(d, "pre-tool", "invoked", "{} 1.5-1".format(NOW - 6))
+    _w(d, "neutral-pre-tool", "evaluated", "{} 1.5-1 evaluated allow -".format(NOW - 5))
+    _w(d, "pre-tool", "emitted", "{} 1.5-1 allow".format(NOW - 4))
+    assert health.hook_state(d, "pre-tool", NOW, files={"evaluated": "neutral-pre-tool"})[0] == "HEALTHY"
+    assert health.hook_state(d, "pre-tool", NOW)[0] == "NOT EXERCISED"     # the default names find no evaluation
+
+
+def _report_json(root):
+    import io
+    import json
+    out = io.StringIO()
+    code = health.report(root, as_json=True, now=NOW, out=out)
+    return code, json.loads(out.getvalue())
+
+
+def test_a_nameless_adapter_reads_unmeasurable_in_the_report(tmp_path):
+    _adapter(tmp_path, "nameless", "AGENT_NAME = compute()")
+    code, data = _report_json(tmp_path)
+    rows = [(r["agent"], r["state"]) for r in data["rows"]]
+    assert rows == [("adapted/nameless (no AGENT_NAME literal)", "UNMEASURABLE")] and code == 2, data
+
+
+def test_an_adapted_agent_gets_no_transcript_coverage_even_with_session_files(tmp_path):
+    _adapter(tmp_path, "mine", 'AGENT_NAME = "my-agent"')
+    d = tmp_path / ".claude" / "backups" / ".hook-heartbeat" / "adapted" / "my-agent"
+    _w(d / "sessions", "s1", "log", "{} start startup t.jsonl".format(NOW - 9))
+    _w(d, "pre-tool", "invoked", "{} 1.5-1".format(NOW - 6))
+    _w(d, "neutral-pre-tool", "evaluated", "{} 1.5-1 evaluated allow -".format(NOW - 5))
+    _w(d, "pre-tool", "emitted", "{} 1.5-1 allow".format(NOW - 4))
+    code, data = _report_json(tmp_path)
+    assert "adapted/my-agent" not in data["coverage"] and code == 0, data
+    assert [(r["agent"], r["state"]) for r in data["rows"]] == [("adapted/my-agent", "HEALTHY")]
