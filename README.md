@@ -633,7 +633,7 @@ MIT -- see [LICENSE](LICENSE).
 - [Spooky's AutoMod Toolkit](https://github.com/SpookyPirate/spookys-automod-toolkit) -- the CLI backend for the toolkit's NIF/BSA/audio/MCM/ESP operations
 - [PyNifly](https://github.com/BadDogSkyrim/PyNifly) -- NIF read/write and animation authoring (wraps [nifly](https://github.com/ousnius/nifly))
 - [PyFFI](https://github.com/niftools/pyffi) -- LE-format NIF geometry editing
-- [Blender](https://www.blender.org/) and [NifSkope](https://github.com/niftools/nifskope) -- mesh repair and independent render verification
+- [Blender](https://www.blender.org/) and [NifSkope](https://github.com/hexabits/nifskope) (v2.0.dev9, the maintained hexabits fork) -- mesh repair and independent render verification
 - [FallrimTools / ReSaver](https://www.nexusmods.com/skyrimspecialedition/mods/5031) -- save-file (.ess) parsing library driven headlessly by the ReSaver CLI
 - [DevBench](https://www.nexusmods.com/skyrimspecialedition/mods/181326) by alandtse ([source](https://github.com/alandtse/devbench)) -- the live in-game REST/MCP channel the `devbench-cli.sh` wrapper drives
 - [@aaronputty](https://github.com/aaronputty) ([fork](https://github.com/aaronputty/putty-skyrim-claude-toolkit)) -- the MO2 path-detection insight that shaped v3.4, and the devcontainer + `docs/container-vs-windows.md` foundation for v3.5
