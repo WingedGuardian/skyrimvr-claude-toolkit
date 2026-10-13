@@ -364,10 +364,10 @@ file the engine cannot verify is read as guards on and the lock on, with a `STAT
 
 ### Shadow mode: `guards off`
 
-`bash tools/skyguard.sh guards off --session <id>` (`tools\skyguard.cmd ...` from cmd or PowerShell) switches the
+`bash tools/skyguard.sh guards off --session <id> [--reason "why"]` (`tools\skyguard.cmd ...` from cmd or PowerShell) switches the
 guards to **shadow mode** for that one session, for an hour or until the next session starts, whichever is first: every rule still runs, but a refusal or a confirmation prompt becomes an allow plus a warning (`Guards OFF: this would have been
 denied (<rule>).`, or for a confirmation prompt `Guards OFF: this would have asked you first (<rule>); it ran without asking.`), and every call is logged as `SHADOW` in `.claude/backups/AUDIT_LOG.txt`. `guards on` ends it;
-`guards status` shows it. Backups and snapshots still run. **Never shadowed:** a broken guard (`GUARD INERT`),
+`guards status` shows it. The reason (one line, at most 120 characters; `guards off` when none is given) is what `skydoctor` and the next session-start banner show, as untrusted data. Backups and snapshots still run. **Never shadowed:** a broken guard (`GUARD INERT`),
 Codex's `.rules` file, the Layer 2 lock, the refusals of hand-unlocking a lock target and of `lock disable`, and the
 refusals of writes into `.skyguard/`.
 

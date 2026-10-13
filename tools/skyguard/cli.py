@@ -1,7 +1,7 @@
 """The `skyguard` command line: `lock`, `guards` and `doctor` (Plan 6 Task 8).
 
     python tools/skyguard lock <lock|unlock [file...]|status [--json]|disable|enable> [--root R] [--session S]
-    python tools/skyguard guards <on|off|status> [--root R] [--session S]   shadow mode (engine.shadow, R8)
+    python tools/skyguard guards <on|off|status> [--root R] [--session S] [--reason TEXT]   shadow mode (R8)
     python tools/skyguard doctor [--root R] [--json]  the hook health report (tools/skyguard/health.py)
     python tools/skyguard snapshot <list|restore <id> [--path F] [--to DIR | --in-place]> [--project P]
                                                      script and recovery snapshots (tools/skyguard/snapcli.py)
@@ -13,7 +13,21 @@ from __future__ import annotations
 import sys
 
 USAGE = "usage: skyguard <lock|guards|doctor|snapshot> ... (see tools/skyguard/cli.py)"
-GUARDS_USAGE = "usage: guards <off|on|status> [--project P] [--session S]"
+GUARDS_USAGE = "usage: guards <off|on|status> [--project P] [--session S] [--reason TEXT (off only)]"
+REASON_MAX = 120          # characters; skydoctor shows 60 of them and the session-start banner 80, both sanitised
+
+
+def _reason_problem(text: str) -> str:
+    """'' when `text` is a usable `guards off --reason`: one line, no control or line-separator characters, not blank,
+    at most REASON_MAX characters. The text is stored as given; every reader (skydoctor, the session-start banner)
+    still passes it through session._clean, so a recorded reason stays data, never an instruction."""
+    if not text.strip():
+        return "the reason is blank"
+    if len(text) > REASON_MAX:
+        return "the reason is longer than %d characters" % REASON_MAX
+    if any(ord(c) < 32 or 127 <= ord(c) <= 159 or c in "\u2028\u2029" for c in text):
+        return "the reason must be one line of plain text (no line breaks, tabs or control characters)"
+    return ""
 
 
 def _clip(s: str, n: int = 190) -> str:
@@ -48,6 +62,7 @@ def guards_main(argv, out) -> int:
     ap.add_argument("action", nargs="?", choices=("off", "on", "status"))
     ap.add_argument("--project", "--root", dest="project", default=None)
     ap.add_argument("--session", default=None)
+    ap.add_argument("--reason", default=None)
     try:
         a = ap.parse_args(argv)
     except SystemExit:
@@ -56,6 +71,12 @@ def guards_main(argv, out) -> int:
     if not a.action:
         print(GUARDS_USAGE, file=out)
         return 2
+    if a.reason is not None:
+        problem = "--reason is taken only by `guards off`" if a.action != "off" else _reason_problem(a.reason)
+        if problem:
+            print(_clip("Refused: %s; nothing was changed." % problem), file=out)
+            print(GUARDS_USAGE, file=out)
+            return 2
     # The engine reads <--project>/.skyguard/state.json, and the hooks pass --project "$CLAUDE_PROJECT_DIR": resolve
     # the same folder here (explicit flag, else the agent's own project dir, else this toolkit's root).
     root = a.project or os.environ.get("CLAUDE_PROJECT_DIR") or lock.default_root()
@@ -109,7 +130,7 @@ def guards_main(argv, out) -> int:
             print("A lift would never be honoured; check the session id, --project and SKYGUARD_AGENT. Nothing was written.",
                   file=out)
             return 2
-        lift = {"kind": "guards", "reason": "guards off", "session_id": session,
+        lift = {"kind": "guards", "reason": a.reason.strip() if a.reason is not None else "guards off", "session_id": session,
                 "agent": os.environ.get(lock.ENV_AGENT, "cli") or "cli", "created": now,
                 "expires_at": now + lock.LIFT_SECONDS}
         _guards_write(root, lambda x: not (x["kind"] == "guards" and x["session_id"] == session), add=lift, now=now)

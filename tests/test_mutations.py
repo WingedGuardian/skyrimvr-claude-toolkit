@@ -7979,3 +7979,26 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/shellparse.py", 'if self.cd != "?" or _is_abs(s)]', 'if self.cd != "?"]',
      _FA_PAIR + "find-abs-start-after-unknown-cd]", "fixu-find-abs-start-after-unknown-cd"),
 ]]
+
+# fix-limits 1: `guards off --reason TEXT` records the reason; a reason that is not one short plain line is refused
+# before anything is written. One twin per clause of cli._reason_problem and of the CLI's use of it.
+_FL1 = "tests/test_skyguard_shadow.py::"
+_FL1_BAD = _FL1 + "test_guards_off_refuses_a_reason_that_is_not_one_short_line_and_writes_nothing["
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/cli.py", "    if not text.strip():\n        return", "    if False:\n        return",
+     _FL1_BAD + "blank]", "fl1-reason-blank-accepted"),
+    ("tools/skyguard/cli.py", "    if len(text) > REASON_MAX:", "    if False:",
+     _FL1_BAD + "too-long]", "fl1-reason-length-unbounded"),
+    ("tools/skyguard/cli.py", "    if any(ord(c) < 32 or 127", "    if any(False or 127",
+     _FL1_BAD + "newline]", "fl1-reason-c0-controls-accepted"),
+    ("tools/skyguard/cli.py", " or 127 <= ord(c) <= 159 or ", " or ",
+     _FL1_BAD + "c1-nel]", "fl1-reason-c1-controls-accepted"),
+    ("tools/skyguard/cli.py", "u2028" + BS + "u2029", "u2029",
+     _FL1_BAD + "line-sep]", "fl1-reason-line-separator-accepted"),
+    ("tools/skyguard/cli.py", BS + "u2028" + BS + "u2029\"", BS + "u2028\"",
+     _FL1_BAD + "para-sep]", "fl1-reason-paragraph-separator-accepted"),
+    ("tools/skyguard/cli.py", '"reason": a.reason.strip() if a.reason is not None else "guards off"',
+     '"reason": "guards off"', _FL1 + "test_guards_off_records_the_reason_given_with_reason", "fl1-reason-not-recorded"),
+    ("tools/skyguard/cli.py", 'problem = "--reason is taken only by `guards off`" if a.action != "off" else ',
+     "problem = ", _FL1 + "test_a_reason_is_refused_for_on_and_status", "fl1-reason-accepted-by-on-and-status"),
+]]

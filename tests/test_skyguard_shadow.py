@@ -524,6 +524,43 @@ def test_guards_off_without_a_visible_session_start_writes_nothing_and_says_so(t
     assert "start" in lines[0].lower() and SID in lines[0]
 
 
+# ---- `guards off --reason` (CHANGELOG v4.0.0 known limit "Guards-off reason", fixed before the tag) --------------
+
+def test_guards_off_records_the_reason_given_with_reason(tmp_path):
+    code, text, sf = _cli(tmp_path, "off", "--reason", "testing the decoy write")
+    assert code == 0, text
+    assert [x["reason"] for x in state.read(str(sf)).lifts] == ["testing the decoy write"]
+
+
+def test_guards_off_without_a_reason_still_records_guards_off(tmp_path):
+    code, text, sf = _cli(tmp_path, "off")
+    assert code == 0 and [x["reason"] for x in state.read(str(sf)).lifts] == ["guards off"], text
+
+
+_BAD_REASONS = {"newline": "two" + chr(10) + "lines", "cr": "carriage" + chr(13) + "return", "tab": "tab" + chr(9) + "here",
+                "nul": "nul" + chr(0), "del": "del" + chr(127), "c1-nel": "nel" + chr(0x85),
+                "line-sep": "sep" + chr(0x2028) + "line", "para-sep": "sep" + chr(0x2029) + "para",
+                "too-long": "x" * 121, "blank": "   "}
+
+
+@pytest.mark.parametrize("bad", list(_BAD_REASONS.values()), ids=list(_BAD_REASONS))
+def test_guards_off_refuses_a_reason_that_is_not_one_short_line_and_writes_nothing(tmp_path, bad):
+    code, text, sf = _cli(tmp_path, "off", "--reason", bad)
+    assert code == 2 and not sf.exists(), text
+    assert "reason" in text.lower() and all(len(x) <= 200 for x in text.splitlines())
+
+
+def test_a_reason_of_exactly_the_cap_is_accepted(tmp_path):
+    code, text, sf = _cli(tmp_path, "off", "--reason", "y" * 120)
+    assert code == 0 and state.read(str(sf)).lifts[0]["reason"] == "y" * 120, text
+
+
+def test_a_reason_is_refused_for_on_and_status(tmp_path):
+    for action in ("on", "status"):
+        code, text, _ = _cli(tmp_path, action, "--reason", "why")
+        assert code == 2 and "reason" in text.lower(), (action, text)
+
+
 def test_a_start_line_of_another_agents_heartbeat_dir_counts_when_the_agent_is_unnamed_but_not_a_wrong_named_one(tmp_path):
     root = tmp_path / "root"
     root.mkdir()

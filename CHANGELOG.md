@@ -135,6 +135,7 @@
 
 ### Fixed
 
+- **Guards-off reason:** `guards off --reason "why"` records the reason `skydoctor` and the session-start banner show (one line, at most 120 characters, still shown as untrusted data); without it the reason stays "guards off". A reason could not be given before.
 - **Write targets held in a variable:** a write, copy, move or tee whose target comes from a literal assigned earlier in the same command (`P=Data/X.esp; echo x > "$P"`, `$p = '...'; Set-Content $p`) gets the same verdict as the literal form, for plugins, saves, INIs, load order, SKSE INIs, install files, guard state, Papyrus output and git discards. These were allowed.
 - **Name-filtered deletes started above a protected folder:** `find <folder above the install> -name X -delete` (also `-iname`, `-exec rm`, `-execdir`, `-exec mv`), `fd ... -x/-X rm` and PowerShell `Get-ChildItem ... | ForEach-Object { Remove-Item $_ }` are judged as reaching the whole subtree. They were allowed; a `-maxdepth` that provably cannot reach the folder still is.
 - **`sed -bi`:** recognised as an in-place edit; the write scan did not see it as a write.
@@ -262,7 +263,6 @@
 - **Empty paths files:** can lose non-install protection folders if neither paths file retains them.
 - **Broken legacy file:** beside a valid root file it is reported, but does not itself stop the guard.
 - **Neutral shadow mode:** the neutral entry does not honour a guards-off lift.
-- **Guards-off reason:** `guards off` takes no reason (`guards off "why"` exits 2 with "unrecognized arguments"); the reason `skydoctor` and the session-start banner show is always "guards off".
 - **Shadow-mode audit lines:** a shadowed call is logged as the rule's DENY or ASK line followed by `skyguard SHADOW: <code> (deny)` (or `(ask)`); the call was allowed, so read the two lines together.
 - **Neutral other kind:** reported UNJUDGED.
 - **DevBench replay:** its contents are not judged.

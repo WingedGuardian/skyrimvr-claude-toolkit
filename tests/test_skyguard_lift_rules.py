@@ -99,6 +99,14 @@ def test_on_codex_the_disable_ask_is_rendered_as_a_deny():
     assert body["permissionDecisionReason"].endswith(reason)
 
 
+@pytest.mark.parametrize("cmd", ['bash tools/skyguard.sh guards off --session s --reason "decoy test"',
+                                 'python tools/skyguard guards off --reason "decoy test" --session s'])
+def test_guards_off_with_a_reason_is_still_the_lift_note(cmd):
+    """fix-limits 1: `--reason` must not hide the D6 lift from S-LIFT-NOTE."""
+    (decision, ctx), _ = shell(cmd)
+    assert decision == "advise" and "the guards" in ctx, (decision, ctx)
+
+
 def test_the_note_on_codex_is_context_not_a_refusal():
     (decision, ctx), _ = shell("python tools/skyguard guards off --session s", "powershell")
     assert decision == "advise"
