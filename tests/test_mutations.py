@@ -7783,3 +7783,38 @@ MUTATIONS += [pytest.param(
     "tools/skyguard/targets.py", "    if paths.POSIX_HOST and (not cwd or cwd.startswith(\"/\")):\n", "    if False:\n",
     "tests/test_skyguard_deletes.py::test_unknown_dialect_on_a_posix_host_places_slash_paths",
     id="linux-ci-posix-unknown-dialect")]
+# P8-SED: S-SED-CRLF (deny) -- sed -i without -b rewrites every CRLF line to LF (Git for Windows' sed, MEASURED).
+# One twin per clause of the condition; each names the test that must go red.
+_SEDT = "tests/test_skyguard_shell.py::"
+_SEDB = "tests/test_skyguard_writes.py::test_sed_binary["
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/writes.py", "        text_mode = bool(sed_files) and not sed_binary(e.argv)\n",
+     "        text_mode = False\n", _SEDT + "test_sed_crlf_in_the_install_area_denies", "rule-S-SED-CRLF-anchor"),
+    ("tools/skyguard/writes.py", "        text_mode = bool(sed_files) and not sed_binary(e.argv)\n",
+     "        text_mode = bool(sed_files)\n", _SEDT + "test_sed_crlf_binary_mode_is_allowed", "rule-S-SED-CRLF-binary"),
+    ("tools/skyguard/writes.py", "            if text_mode and w in sed_files and (kind or",
+     "            if text_mode and (kind or", _SEDT + "test_sed_crlf_judges_only_the_files_sed_edits",
+     "rule-S-SED-CRLF-sed-operands"),
+    ("tools/skyguard/writes.py", "w in sed_files and (kind or in_zone):", "w in sed_files and (in_zone):",
+     _SEDT + "test_sed_crlf_names_a_game_ini_wherever_it_resolves", "rule-S-SED-CRLF-game-file-by-name"),
+    ("tools/skyguard/writes.py", "in_zone = targets.zone(a, roots) in SED_ZONES if a is not None else False",
+     "in_zone = a is not None", _SEDT + "test_sed_crlf_outside_the_install_area_is_silent", "rule-S-SED-CRLF-zone"),
+    ("tools/skyguard/writes.py", "in_zone = targets.zone(a, roots) in SED_ZONES if a is not None else False",
+     "in_zone = False", _SEDT + "test_sed_crlf_in_the_install_area_denies", "rule-S-SED-CRLF-zone-any-file"),
+    ("tools/skyguard/shell_rules.py", "    if wr.sed_crlf:  ", "    if False:  ",
+     _SEDT + "test_sed_crlf_in_the_install_area_denies", "rule-S-SED-CRLF-wired"),
+    ("tools/skyguard/writes.py", '        if w == "--binary":\n            return True\n', "",
+     _SEDB + "binary-long]", "rule-S-SED-CRLF-binary-long"),
+    ("tools/skyguard/writes.py", '                if c == "b":\n                    return True\n', "",
+     _SEDB + "bi-cluster]", "rule-S-SED-CRLF-binary-short"),
+    ("tools/skyguard/writes.py", "                if c in _SED_ATTACHED:\n                    break\n", "",
+     _SEDT + "test_sed_crlf_backup_suffix_b_is_not_binary", "rule-S-SED-CRLF-attached-value"),
+    ("tools/skyguard/writes.py", '        if w == "--":\n            return False\n', "",
+     _SEDB + "dashdash]", "rule-S-SED-CRLF-end-of-options"),
+    ("tools/skyguard/writes.py",
+     '        if w in _SED_VALUED:\n            k += 2\n            continue\n        if w.startswith("-") and not w.startswith("--"):',
+     '        if w.startswith("-") and not w.startswith("--"):', _SEDB + "f-valued]", "rule-S-SED-CRLF-option-value"),
+    # -bi is in-place too: before P8-SED the write scan did not see it as a write at all
+    ("tools/skyguard/writes.py", 'r"-[nrEsuzb]*i', 'r"-[nrEsuz]*i', _SEDT + "test_sed_crlf_binary_mode_is_allowed",
+     "rule-S-SED-CRLF-bi-is-in-place"),
+]]

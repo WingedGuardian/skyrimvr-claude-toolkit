@@ -158,10 +158,67 @@ def test_rule9_redirect(tmp_path):
 
 def test_rule10_sed(tmp_path):
     # Task 9: only a backslash path in the REPLACEMENT, on an install/config file; it replaces S-WRITE-INSTALL.
-    cmd = f"sed -i 's/a/C:\\x\\y/' \"{GAME}/Data/x.txt\""
+    # P8-SED: -b added -- without it S-SED-CRLF refuses first (test_sed_crlf_* below).
+    cmd = f"sed -i -b 's/a/C:\\x\\y/' \"{GAME}/Data/x.txt\""
     assert advice(cmd, tmp_path) == rules.message("S-SED-WINPATH")
-    assert advice(f'sed -i s/a/b/ "{GAME}/Data/x.txt"', tmp_path) == rules.message("S-WRITE-INSTALL", file="x.txt")
+    assert advice(f'sed -i -b s/a/b/ "{GAME}/Data/x.txt"', tmp_path) == rules.message("S-WRITE-INSTALL", file="x.txt")
     assert advice("sed -i s/a/b/ /tmp/x.txt", tmp_path) == ""
+
+
+# ---- P8-SED: S-SED-CRLF -- sed -i without -b rewrites every CRLF line to LF (Git for Windows' sed, MEASURED) --------
+def _crlf(f):
+    return rules.message("S-SED-CRLF", file=f)
+
+
+def _denied(cmd, tmp_path, shell="bash"):
+    r = paths.roots("/x/install", "", {"SKYRIM_GAME_ROOT": GAME})
+    v = shell_rules.decide(cmd, r, audit.Audit(str(tmp_path)), shell=shell)
+    return v.reason if v.decision == "deny" else ""
+
+
+def test_sed_crlf_in_the_install_area_denies(tmp_path):
+    assert _denied(f'sed -i "s/a/b/" "{GAME}/Data/SKSE/Plugins/x.ini"', tmp_path) == _crlf("x.ini")
+    assert _denied(f"sed -i 's/a/b/' \"{GAME}/Data/a.txt\"", tmp_path) == _crlf("a.txt")
+
+
+def test_sed_crlf_names_a_game_ini_wherever_it_resolves(tmp_path):
+    assert _denied('sed -i s/a/b/ "$CFG/Skyrim.ini"', tmp_path) == _crlf("Skyrim.ini")
+
+
+def test_sed_crlf_outside_the_install_area_is_silent(tmp_path):
+    assert run("sed -i s/a/b/ /tmp/notes.txt", tmp_path).decision == "allow"
+
+
+def test_sed_crlf_binary_mode_is_allowed(tmp_path):
+    for flag in ("-i -b", "--binary -i", "-bi", "-nbi"):
+        v = run(f'sed {flag} "s/a/b/" "{GAME}/Data/a.txt"', tmp_path)
+        assert v.decision == "allow" and v.context == rules.message("S-WRITE-INSTALL", file="a.txt"), flag
+
+
+def test_sed_crlf_backup_suffix_b_is_not_binary(tmp_path):
+    assert _denied(f'sed -ib "s/a/b/" "{GAME}/Data/a.txt"', tmp_path) == _crlf("a.txt")
+
+
+def test_sed_crlf_text_that_only_mentions_sed_is_silent(tmp_path):
+    """Coordinator's live case: the install's text rule refused a python heredoc whose BODY said `sed -i`."""
+    body = f"cd C:/work && python - <<'EOF'\nprint(\"sed -i s/a/b/ {GAME}/Data/a.txt\")\nEOF"
+    assert run(body, tmp_path).decision == "allow"
+    assert run(f'echo "never sed -i {GAME}/Data/a.txt"', tmp_path).decision == "allow"
+
+
+def test_sed_crlf_powershell_runs_the_same_sed(tmp_path):
+    assert _denied(f"sed -i 's/a/b/' \"{GAME}/Data/a.txt\"", tmp_path, "powershell") == _crlf("a.txt")
+
+
+def test_sed_crlf_judges_only_the_files_sed_edits(tmp_path):
+    """sed's own redirect writes its stream as-is; only the -i operands are rewritten in text mode."""
+    v = run(f'sed -i s/a/b/ /tmp/x.txt 2> "{GAME}/Data/log.txt"', tmp_path)
+    assert v.decision == "allow" and v.context == rules.message("S-WRITE-INSTALL", file="log.txt")
+
+
+def test_sed_crlf_leaves_a_plugin_to_the_plugin_rule(tmp_path):
+    v = run(f'sed -i s/a/b/ "{GAME}/Data/X.esp"', tmp_path)
+    assert v.decision == "deny" and v.reason == rules.message("S-WRITE-PLUGIN", file="X.esp")
 
 
 def test_rule11_plugin_files(tmp_path):

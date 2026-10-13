@@ -87,6 +87,7 @@ def _c(cmd, shell="bash"):
     ("sed -i.bak -e s/a/b/ f", "bash", [["f"]]),
     ("sed -Ei s/a/b/ f", "bash", [["f"]]),
     ("sed --in-place=.b s/a/b/ f", "bash", [["f"]]),
+    ("sed -bi s/a/b/ f", "bash", [["f"]]),                    # P8-SED: binary + in-place is still a write
     ("sed s/a/b/ f", "bash", [[]]),
     ("sed -n p f", "bash", [[]]),
     ("dd if=a of=b bs=1", "bash", [["b"]]),
@@ -231,3 +232,21 @@ def test_the_shell_write_deny_matches_the_write_tool_on_the_same_name():
         tool = write_rules.decide(GAME + "/Data/" + name, a).decision == "deny"
         shell = decide('echo x > "' + name + '"', cwd="C:/w")[0][0] == "deny"
         assert tool is shell, name
+
+
+# ---- P8-SED: is sed in binary mode? (S-SED-CRLF). Each case MEASURED with Git for Windows' sed 4.9 on a CRLF file.
+@pytest.mark.parametrize("argv,binary", [
+    (["-i", "-b", "s/a/b/", "f"], True),
+    (["--binary", "-i", "s/a/b/", "f"], True),
+    (["-bi", "s/a/b/", "f"], True),
+    (["-nbi", "s/a/b/p", "f"], True),
+    (["-i", "s/a/b/", "-b", "f"], True),             # GNU getopt permutes
+    (["-i", "s/a/b/", "f"], False),
+    (["-ib", "s/a/b/", "f"], False),                 # -i's backup suffix "b", not binary
+    (["-i", "-es/b/c/", "f"], False),                # an attached -e script
+    (["-i", "-f", "-b", "f"], False),                # -f's value: a script file named -b
+    (["-i", "--", "s/a/b/", "-b"], False),           # after --, an operand
+], ids=["b", "binary-long", "bi-cluster", "nbi-cluster", "permuted", "none", "ib-suffix", "e-attached", "f-valued",
+        "dashdash"])
+def test_sed_binary(argv, binary):
+    assert writes.sed_binary(argv) is binary

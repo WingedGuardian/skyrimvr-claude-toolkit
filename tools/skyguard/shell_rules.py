@@ -238,6 +238,8 @@ def _ordered(command, parsed, dels, own, roots, audit, cwd, shell, env) -> Verdi
         return Verdict("deny", reason)
     if wr.move_root:                                         # rt-fix-b: moving the install or its folders away
         return deny("S-MOVE-ROOT", wr.move_root)
+    if wr.sed_crlf:                                          # P8-SED: sed -i without -b turns CRLF into LF
+        return deny("S-SED-CRLF", wr.sed_crlf)
     champ = anchored.champollion(command, parsed, roots, cwd, env)
     if champ:
         return deny("S-CHAMPOLLION", champ)

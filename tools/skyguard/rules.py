@@ -241,6 +241,16 @@ RULES = {
         "Note: sed's replacement contains a backslash path, which sed mangles; use forward slashes."
     ),
     },
+    'S-SED-CRLF': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: sed -i without -b rewrites every CRLF line ending in {file} to LF on Windows.\n'
+        'Use sed -i -b; with -b, a pattern ending in $ must also match the CR in front of it.'
+    ),
+    },
     'S-AUTOMOD-ESP': {
         "decision": 'advise',
         "hook": 'protect-bash',
