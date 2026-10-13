@@ -56,6 +56,11 @@ EXECUTED_BASH = {
     "if-then-pipe-powershell": "if true; then " + PRINT_DELETE + "; fi | powershell -",
     "for-do-pipe-powershell": "for i in 1; do " + PRINT_DELETE + "; done | powershell -Command -",
     "assignment-then-pipe-powershell": "X=1; " + PRINT_DELETE + " | powershell -",
+    # fix-limits 12: false / break / continue are structure too, but never a way past an executor.
+    "while-false-pipe-powershell": "while false; do " + PRINT_DELETE + "; done | powershell -",
+    "until-true-pipe-bash": "until true; do " + PRINT_DELETE + "; done | bash",
+    "break-loop-pipe-pwsh": "for i in 1; do " + PRINT_DELETE + "; break; done | pwsh -Command -",
+    "false-then-eval": "false || eval \"$(" + PRINT_DELETE + ")\"",
 }
 EXECUTED_PS = {
     "pipe-iex": PRINT_DELETE + " | iex",
@@ -92,6 +97,12 @@ INERT = {
     "group-pipe-head": ("bash", "{ " + PRINT_DELETE + "; } | head"),
     "for-do-inspect": ("bash", "for i in 1; do " + PRINT_DELETE + "; done"),
     "while-do-inspect": ("bash", "while true; do " + PRINT_DELETE + "; done"),
+    # fix-limits 12: `false`, `break` and `continue` print nothing and run nothing.
+    "while-false-inspect": ("bash", "while false; do " + PRINT_DELETE + "; done"),
+    "until-true-inspect": ("bash", "until true; do " + PRINT_DELETE + "; done"),
+    "break-in-loop-inspect": ("bash", "for i in 1 2; do " + PRINT_DELETE + "; break; done"),
+    "continue-in-loop-inspect": ("bash", "for i in 1 2; do " + PRINT_DELETE + "; continue; done"),
+    "false-or-inspect": ("bash", "false || " + PRINT_DELETE),
     "case-inspect": ("bash", "case x in x|y) " + PRINT_DELETE + ";; esac"),
     "ps-variable-shown": ("powershell", "$o = " + PRINT_DELETE + "; $o"),
     "ps-if-block": ("powershell", "if ($true) { " + PRINT_DELETE + " }"),

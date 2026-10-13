@@ -414,6 +414,8 @@ def _python_inspection_text(program: str, code: str) -> str:
 # through xargs, and the inspection's stdout is not redirected to a script file. Anything else: not inert.
 _INERT_PROGRAMS = frozenset((
     "cd", "pushd", "popd", "set-location", "push-location", "pop-location", "true",
+    # fix-limits 12: loop structure that prints nothing and runs nothing (`while false; do P; done` was refused).
+    "false", "break", "continue",
     "head", "tail", "grep", "egrep", "fgrep", "rg", "findstr", "select-string", "sort", "uniq", "wc", "cut", "nl",
     "less", "more", "cat", "get-content", "echo", "printf", "write-output", "write-host",
     "select-object", "measure-object", "out-host", "out-null", "out-string", "format-table", "format-list",

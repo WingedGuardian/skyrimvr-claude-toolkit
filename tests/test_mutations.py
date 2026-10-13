@@ -8129,3 +8129,14 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/crash-triage.py", '                 else "(unnamed exception code)")', '                 else "__fastfail")',
      _FL11 + "test_an_unnamed_code_that_is_not_a_fastfail_is_parsed_and_labelled_unnamed", "fl11-every-unnamed-is-fastfail"),
 ]]
+
+# fix-limits 12: `false`, `break` and `continue` are inert loop structure around an inspection. One twin per word.
+_FL12 = "tests/test_state_output_routes.py::test_inspection_whose_output_runs_nowhere_stays_allowed["
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/self_rules.py", '    "false", "break", "continue",\n', '    "break", "continue",\n',
+     _FL12 + "while-false-inspect]", "fl12-false-not-inert"),
+    ("tools/skyguard/self_rules.py", '    "false", "break", "continue",\n', '    "false", "continue",\n',
+     _FL12 + "break-in-loop-inspect]", "fl12-break-not-inert"),
+    ("tools/skyguard/self_rules.py", '    "false", "break", "continue",\n', '    "false", "break",\n',
+     _FL12 + "continue-in-loop-inspect]", "fl12-continue-not-inert"),
+]]
