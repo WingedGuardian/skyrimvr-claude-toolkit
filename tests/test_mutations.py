@@ -1246,6 +1246,21 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
            "test_an_http_error_is_could_not_check_exit_3"),
       ]],
 
+    # --- bench-vr -------------------------------------------------------------
+    *[pytest.param("tools/bench-vr.py", find, replace, "tests/test_bench_vr.py::" + test, id="bench-vr-" + tid)
+      for tid, find, replace, test in [
+          ("restore-only-on-success", "    finally:\n        for what, cmd in reversed(restore):",
+           "    else:\n        for what, cmd in reversed(restore):",
+           "test_a_failure_partway_still_restores_everything"),
+          ("window-one-kept", "    return [x for w in windows[1:] for x in w]", "    return [x for w in windows[0:] for x in w]",
+           "test_window_one_is_discarded"),
+          ("re-enters-current-cell",
+           '            if cmd.lower().startswith("coc ") and here.lower() == cmd[4:].lower():', "            if False:",
+           "test_the_current_cell_is_never_re_entered"),
+          ("measures-with-no-save", '    if not isinstance(h.get("frame"), int) or h["frame"] < 0:', "    if False:",
+           "test_no_save_loaded_is_refused"),
+      ]],
+
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(
         # Drop the previous copy on a replacement: the last launch's log is gone, which is the loss the mirror exists

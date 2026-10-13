@@ -92,3 +92,29 @@ a value or swapping a mechanism is another DevBench call — not another edit �
 Reserve manual testing for the final confirmation gate. See KNOWLEDGEBASE.md for the hazards
 (`game save` deadlock, paused-state semantics, heavy console commands) — read them before your first
 live session.
+
+## bench-vr — frame rate before and after a change
+
+```bash
+python tools/bench-vr.py run --label before --coc RiverwoodSleepingGiantInn --coc WhiterunOrigin
+# make the change, restart the game, return to the same point, then:
+python tools/bench-vr.py run --label after  --coc RiverwoodSleepingGiantInn --coc WhiterunOrigin
+python tools/bench-vr.py compare <before.json> <after.json>
+```
+
+It pins timescale 0, one game hour, one forced weather and god mode, travels to each location, and
+derives fps from the off-thread `/api/health` frame counter (a stall shows as ~0 fps, not a gap).
+**Window 1 at each location is discarded**; windows 2+ are pooled. God mode, timescale and game hour
+are put back even when the run fails (anything it could not restore is printed with its command);
+the forced weather is not, so measure where reverting is easy. `compare` refuses two runs taken under
+different conditions. Results go to `.claude/backups/bench-vr/`. Default location: one vanilla
+`coc WhiterunOrigin`. Trust a number only when nothing caps it: a refresh cap (a headset's frame
+synthesis or a fixed-rate mode) makes every location read the same value, and then any change
+"reproduces" it -- an interior reading above the exteriors is what shows nothing is capping.
+
+**Cautions, each one measured on a live game:**
+- **Never `coc` into the cell the player is already in.** Re-entering it re-fires its Story Manager
+  checks, which crashed the game. bench-vr skips that location's travel and measures it in place.
+- **Toggling shader-framework features live is not free.** Turning Light Limit Fix OFF at runtime hung
+  the GPU (driver reset, game aborted). Disabling many features at once collapsed rendering to ~0.5 fps
+  until they were re-enabled. One change per launch, measured before and after, is the safe way.

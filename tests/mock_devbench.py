@@ -13,6 +13,7 @@ genuinely starved main thread.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -33,7 +34,7 @@ def _tick() -> int:
 def health_body() -> dict:
     n = _tick()
     common = {"pid": 4242, "port": PORT, "exe": "SkyrimVR.exe", "vr": True}
-    if MODE == "running":
+    if MODE in ("running", "bench"):
         return {"ok": True, "lastLifecycle": "postLoadGame", "frame": 1000 + n * 90,
                 "lastTaskFrame": 990 + n * 90, "pendingTasks": 0, **common}
     if MODE == "paused":
@@ -72,13 +73,44 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"tools": ["ping", "inspect"]})
         self._send(404, {"error": "not found"})
 
+    def _bench(self, body: dict):
+        """Mode "bench", for tests/test_bench_vr.py: a console that answers the commands bench-vr.py sends and
+        logs each one (one per line) to $MOCK_LOG. $MOCK_FAIL_ON=<text> makes the console exec of a command that
+        contains it answer HTTP 500, once, so a run can be failed partway. $MOCK_CELL is the current cell."""
+        if self.path == "/api/tool/inspect":
+            return self._send(200, {"cell": {"editorId": os.environ.get("MOCK_CELL", "SomeInterior")},
+                                    "weather": {"editorId": "SkyrimCloudySN_A"}})
+        if self.path != "/api/tool/console":
+            return self._send(200, {"ok": True})
+        if body.get("action") == "exec":
+            cmd = str(body.get("command"))
+            with open(os.environ["MOCK_LOG"], "a", encoding="utf-8") as fh:
+                fh.write(cmd + "\n")
+            fail = os.environ.get("MOCK_FAIL_ON")
+            if fail and fail in cmd and not _state.get("failed"):
+                _state["failed"] = True
+                return self._send(500, {"error": "injected failure", "code": 500})
+            _state["last"] = cmd
+            return self._send(200, {"ok": True})
+        last = _state.get("last", "")
+        answers = {"show timescale": ["TimeScale = 20.00"], "show gamehour": ["GameHour = 9.50"],
+                   "tgm": ["God Mode -> On"]}
+        lines = answers.get(last, ["Cell 'NoSuchCell' not found"] if "NoSuchCell" in last else [])
+        return self._send(200, {"lines": lines})
+
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except ValueError:
+            body = {}
         if MODE == "busy504":
             return self._send(504, {"error": "main thread did not run task in time",
                                     "code": 504})
         if MODE == "badarg400":
             return self._send(400, {"error": "kind must be a string", "code": 400})
+        if MODE == "bench":
+            return self._bench(body)
         if self.path == "/api/tool/ping":
             return self._send(200, {"ok": True})
         if self.path == "/api/tool/inspect":

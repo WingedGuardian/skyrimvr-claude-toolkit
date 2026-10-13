@@ -192,6 +192,7 @@ BREAKS = {
     "mod-install-missing": (lambda r: (r / "tools" / "mod-install.py").unlink(), "tools/mod-install.py present"),
     "nexus-sh-missing": (lambda r: (r / "tools" / "nexus.sh").unlink(), "tools/nexus.sh present"),
     "nexus-render-missing": (lambda r: (r / "tools" / "nexus-render.py").unlink(), "tools/nexus-render.py present"),
+    "bench-vr-missing": (lambda r: (r / "tools" / "bench-vr.py").unlink(), "tools/bench-vr.py present"),
     "guard-manifest-missing": (lambda r: (r / "GUARD-FILES.sha256").unlink(), "GUARD-FILES.sha256 present"),
     "guard-file-edited": (lambda r: (r / "tools" / "skyguard" / "engine.py").write_text(
         (r / "tools" / "skyguard" / "engine.py").read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8"),

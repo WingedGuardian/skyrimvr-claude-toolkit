@@ -83,6 +83,7 @@ CORE_REQUIRED = (
     "tools/mod-install.py",
     "tools/nexus.sh",
     "tools/nexus-render.py",
+    "tools/bench-vr.py",
 )
 # Absent: dev-only trees, the user's own files, and runtime state. A path, or a file NAME anywhere.
 ABSENT_PATHS = (
