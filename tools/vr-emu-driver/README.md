@@ -19,6 +19,8 @@ machine.
 Code published with no licence grants no right to redistribute it, so the toolkit can't ship it,
 neither as source nor as a binary. `build.py` fetches it from its own repository at a pinned
 commit, for your own use on your own machine. If upstream ever adds a licence, this can be revisited.
+A licence has been requested upstream:
+[DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit#1](https://github.com/DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit/issues/1).
 The r57zone header suggests the code passed through one of r57zone's OpenVR driver projects, some
 of which are GPL-3.0; nothing in either fork says which, so this is unresolved provenance, not a
 grant.

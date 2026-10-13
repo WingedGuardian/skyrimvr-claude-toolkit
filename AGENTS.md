@@ -223,7 +223,8 @@ the working directory the agent reports.
 - Papyrus scripts (`.psc`, `.pex`) -- a `.pex` loads at game startup ONLY
 - Load order files -- the mod manager owns them and may overwrite a direct edit
 - Redirects, `tee`, `sed -i` and other shell writes into `Data/`, the config folder or MO2 (a `cp`/`mv`
-  there is silent), and a copy onto a plugin where the game loads it
+  there is silent), a copy onto a plugin where the game loads it, and any write, copy or move onto a
+  file directly in the game folder (its exe and dlls, `openvr_api.dll`, loader INIs)
 - A decompiler writing its output into the install; `sed -i` with a backslash path, on a file in the install
 - AutoMod write commands without `--dry-run`
 

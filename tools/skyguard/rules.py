@@ -193,6 +193,19 @@ RULES = {
         'Note: this writes {file} in the Skyrim install; a > redirect empties it first.'
     ),
     },
+    # Batch-3 ruling (2026-10-13): a write, copy or move onto a FILE DIRECTLY IN the install root (the game's own exe and
+    # dlls, openvr_api.dll, a loader .ini, an ENB/ReShade dll) was silent; v3 asked about any copy into the game folder.
+    # An advisory, never an ask or a deny.
+    'S-WRITE-ROOT': {
+        "decision": 'advise',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Note: this writes {file} in the game folder, outside Data/; no mod manager tracks it, so copy it first.\n'
+        "For a mod's own files, use tools/mod-install.py (backups and a manifest)."
+    ),
+    },
     # Plan 8 T6 (rt-fix-b concern 3): an archive writer (Compress-Archive, 7z, zip, tar -c) into the same area. It got
     # the S-WRITE-INSTALL note, whose redirect sentence is false for it.
     'S-WRITE-ARCHIVE': {

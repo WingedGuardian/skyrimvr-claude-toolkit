@@ -3222,6 +3222,42 @@ _WRITE_CLAUSES = [
 MUTATIONS += [pytest.param(f, find, rep, _t08(row), id=i) for i, f, find, rep, row in _WRITE_CLAUSES]
 
 
+# ---- Batch-3 ruling: S-WRITE-ROOT, one twin per clause, each naming the B3 row (in-process,
+# tests/test_skyguard_writes.py::test_b3_row) or unit test it must turn red.
+def _b3(row):
+    return "tests/test_skyguard_writes.py::test_b3_row[b3root-" + row + "]"
+
+
+_ROOT_CLAUSES = [
+    ("rule-S-WRITE-ROOT-write-primitive",
+     "            elif not sed_note and a is not None and in_install_root(a, roots):\n",
+     "            elif False:\n", _b3("redirect-loader-ini")),
+    ("rule-S-WRITE-ROOT-copy-named", "                if not _looks_like_dir(dst) and in_install_root(root_dst, roots):",
+     "                if False:", _b3("cp-dll")),
+    ("rule-S-WRITE-ROOT-copy-into-folder", '                if is_install_root(root_dst.rstrip("/"), roots):',
+     "                if False:", _b3("cp-into-root-folder")),
+    ("rule-S-WRITE-ROOT-literal-code",
+     "        elif a is not None and in_install_root(a, roots):\n            notes[\"S-WRITE-ROOT\"].append(_name(word))",
+     "        elif False:\n            notes[\"S-WRITE-ROOT\"].append(_name(word))",
+     "tests/test_skyguard_writes.py::test_a_root_write_in_interpreter_code_is_noted"),
+    ("rule-S-WRITE-ROOT-root-only", "    return rel is not None and len(rel) == 1 and not root_exempt(rel[0])",
+     "    return rel is not None and len(rel) >= 1 and not root_exempt(rel[0])", _b3("ctl-subfolder")),
+    ("rule-S-WRITE-ROOT-toolkit-markdown-exempt",
+     '    return name.startswith(".") or name.lower().endswith(ROOT_EXEMPT_EXT)',
+     '    return name.startswith(".")', _b3("ctl-markdown")),
+    ("rule-S-WRITE-ROOT-dotfile-exempt",
+     '    return name.startswith(".") or name.lower().endswith(ROOT_EXEMPT_EXT)',
+     "    return name.lower().endswith(ROOT_EXEMPT_EXT)", _b3("ctl-dotfile")),
+    ("rule-S-WRITE-ROOT-folder-is-not-a-file",
+     "                if not _looks_like_dir(dst) and in_install_root(root_dst, roots):",
+     "                if in_install_root(root_dst, roots):", _b3("ctl-folder")),
+    ("rule-S-WRITE-ROOT-rename-in-source-folder",
+     '            if e.program == "move-item" and srcs and not re.search(r"[/' + BS * 2 + ']", dst):',
+     "            if False:", _b3("ctl-rename-in-data")),
+]
+MUTATIONS += [pytest.param(_WR, find, rep, test, id=i) for i, find, rep, test in _ROOT_CLAUSES]
+
+
 # ---- Plan 5 Task 9: every advice anchored to the executed program. Each names the t09 row it must turn red, fired
 # in-process by tests/test_skyguard_t09.py::test_t09_row.
 def _t09(row):

@@ -335,3 +335,38 @@ def test_an_interpreter_literal_write_follows_the_cd_before_it():
     want = decide("echo x > Data/notes.txt", cwd=INSTALL)
     assert want[1] == {"S-WRITE-INSTALL"}
     assert decide("cd Data && " + _PYW.format("notes.txt"), cwd=INSTALL) == want
+
+
+# --------------------------------------------------------------------------- S-WRITE-ROOT (batch-3 ruling)
+
+B3_ROWS = [r for r in (json.loads(x) for x in (REPO / "tests" / "guard_corpus" / "intended.jsonl")
+                       .read_text(encoding="utf-8").split("\n") if x.strip()) if r["task"] == "B3"]
+
+
+def test_there_are_b3_rows_for_each_shape_and_control():
+    assert len(B3_ROWS) >= 18 and sum(r["decision"] == "allow" for r in B3_ROWS) >= 8
+
+
+@pytest.mark.parametrize("row", B3_ROWS, ids=[r["id"] for r in B3_ROWS])
+def test_b3_row(row):
+    """The S-WRITE-ROOT intended rows, in-process (the corpus test fires the same rows through the real wrapper)."""
+    p = row["payload"]
+    fill = lambda s: s.replace("<install>", INSTALL)      # noqa: E731
+    got, fired = decide(fill(p["tool_input"]["command"]), row["layout"], fill(p.get("cwd", "")),
+                        SHELL[p["tool_name"]])
+    assert (got, fired) == ((row["decision"], row["text"]), set(row["rules"]))
+
+
+def test_a_same_command_variable_naming_a_root_file_is_resolved():
+    got, fired = decide('T="' + INSTALL + '/openvr_api.dll"; cp x.dll "$T"')
+    assert fired == {"S-WRITE-ROOT"} and "openvr_api.dll" in got[1]
+
+
+def test_a_root_write_in_interpreter_code_is_noted():
+    got, fired = decide('python -c "open(\'' + INSTALL + '/dxgi.dll\', \'wb\').write(b\'x\')"')
+    assert fired == {"S-WRITE-ROOT"}, (got, fired)
+
+
+def test_a_write_in_data_keeps_its_own_note_and_gets_no_root_note():
+    got, fired = decide('echo x > "' + INSTALL + '/Data/notes.txt"')
+    assert fired == {"S-WRITE-INSTALL"}

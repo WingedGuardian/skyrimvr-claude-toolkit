@@ -36,6 +36,10 @@ RULES:
     (not the rest of the install: priced, 18 of 23 legacy redirect notes were the user's own scripts and notes).
   - S-WRITE-ARCHIVE (advise; Plan 8 T6): the same area, written by an archive writer (Compress-Archive, 7z, zip,
     tar -c), whose file is replaced or added to -- not emptied by a redirect, as the S-WRITE-INSTALL note says.
+  - S-WRITE-ROOT (advise; batch-3 ruling 2026-10-13): a write primitive, a copy or a move onto a FILE DIRECTLY IN the
+    install root (the game's exe and dlls, openvr_api.dll, a loader .ini, ENB/ReShade files), or a copy into the root
+    folder itself, which takes the source's name. Not Data/ or any subfolder; not the toolkit's own Markdown there.
+    A file class (an INI, the load order, a save, a plugin) keeps its own rule.
 READING a plugin or plugins.txt is silent (R11).
 
 NOT SAFE BY DEFAULT. If the parser could not read the command (ok=False, R4) the whole text is checked per
@@ -503,6 +507,29 @@ def in_install_area(abs_path: str, roots) -> bool:
     return bool(rel) and rel[0] == "data"
 
 
+# S-WRITE-ROOT: Markdown in the root is the toolkit's own (CLAUDE.md, AGENTS.md, KNOWLEDGEBASE.local.md, which the
+# instructions tell the agent to append to), and a dotfile (.gitignore) is a repository's, not the game's: a note on
+# every such write would be noise (priced: 2 of 8 first-draft hits were a .gitignore).
+ROOT_EXEMPT_EXT = (".md",)
+
+
+def root_exempt(name: str) -> bool:
+    return name.startswith(".") or name.lower().endswith(ROOT_EXEMPT_EXT)
+
+
+def in_install_root(abs_path: str, roots) -> bool:
+    """S-WRITE-ROOT: a file directly in the install's root folder (not Data/, not any subfolder)."""
+    if targets.zone(abs_path, roots) != "install":
+        return False
+    rel = _rel(abs_path, roots.install_dirs)
+    return rel is not None and len(rel) == 1 and not root_exempt(rel[0])
+
+
+def is_install_root(abs_path: str, roots) -> bool:
+    """The install root folder itself (a copy destination that takes the source's name)."""
+    return targets.zone(abs_path, roots) == "install" and _rel(abs_path, roots.install_dirs) == []
+
+
 def _looks_like_dir(word: str) -> bool:
     if word.endswith(("/", "\\")):
         return True
@@ -606,7 +633,7 @@ def move_sources(e) -> List[str]:
 # redirect note). A redirect on the same exec (`7z a x.7z d > log.txt`) is still S-WRITE-INSTALL.
 ARCHIVE_PROGRAMS = frozenset(("compress-archive", "7z", "7za", "7zr", "7z.exe", "zip", "tar"))
 ADVICE_ORDER = ("S-COPY-PLUGIN", "S-WRITE-LOADORDER", "S-WRITE-INI", "S-WRITE-SKSE-INI", "S-WRITE-ARCHIVE",
-                "S-WRITE-INSTALL",
+                "S-WRITE-INSTALL", "S-WRITE-ROOT",
                 "S-SED-WINPATH")
 
 
@@ -677,6 +704,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 notes[RULE_OF_CLASS[kind]].append(_name(w))
             elif not sed_note and a is not None and in_install_area(a, roots):
                 notes["S-WRITE-ARCHIVE" if w in archives else "S-WRITE-INSTALL"].append(_name(w))
+            elif not sed_note and a is not None and in_install_root(a, roots):
+                notes["S-WRITE-ROOT"].append(_name(w))
         for w in move_sources(e):
             a = targets.resolve_operand(e, w, cwd, env)
             if is_protected_folder(a, roots):
@@ -700,6 +729,24 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if kind and kind != "plugin":
                 notes[RULE_OF_CLASS[kind]].append(_name(dst))      # cp x plugins.txt: a write of the load order
                 continue
+            # S-WRITE-ROOT: a file copied or moved directly into the install root, named or taking its source's name.
+            # A destination that names a folder (no extension: `Data`, `bindings`) is not a root FILE (priced: 3 of
+            # 8 first-draft hits). A bare new name in a move made from Rename-Item lives in the SOURCE's folder, not
+            # the cwd (priced: 1 of 8, a .disabled rename inside Data/SKSE/Plugins).
+            root_dst = a_dst
+            if e.program == "move-item" and srcs and not re.search(r"[/\\]", dst):
+                a_src = targets.resolve_operand(e, srcs[0], cwd, env)
+                root_dst = posixpath.join(posixpath.dirname(a_src), dst) if a_src else None
+            if not kind and root_dst is not None:
+                if not _looks_like_dir(dst) and in_install_root(root_dst, roots):
+                    notes["S-WRITE-ROOT"].append(_name(dst))
+                    continue
+                if is_install_root(root_dst.rstrip("/"), roots):
+                    names = [_name(x) for x in srcs if not root_exempt(_name(x)) and not _looks_like_dir(x)
+                             and file_class(x) != "plugin"]
+                    notes["S-WRITE-ROOT"].extend(names)
+                    if names:
+                        continue
             if kind == "plugin":
                 cand, name = dst, _name(dst)
             elif _looks_like_dir(dst):
@@ -735,6 +782,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             notes[RULE_OF_CLASS[kind]].append(_name(word))
         elif a is not None and in_install_area(a, roots):
             notes["S-WRITE-INSTALL"].append(_name(word))
+        elif a is not None and in_install_root(a, roots):
+            notes["S-WRITE-ROOT"].append(_name(word))
 
     texts = [command] if not parsed.ok else _opaque_texts(parsed.execs)
     for t in texts:
