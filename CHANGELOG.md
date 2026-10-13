@@ -4,6 +4,7 @@
 
 ### Added
 
+- **`mod-install`:** a manual mod install, dry run unless `--apply`: archive-triage's report and the full plan first, then backups of every replaced file and a SHA-256 manifest, existing configs kept with `<file>.new` beside them, hardlink-safe writes re-hashed after writing, plugins never activated, one FOMOD option group at a time; under Mod Organizer 2 it installs a new mod folder, and with Vortex present it warns.
 - **GOG and Epic SE/AE folders:** the guard (DevBench-save checks, the plugins.txt lookup), the xelib load-order reader and the triage tools now also look under `Skyrim Special Edition GOG` and `Skyrim Special Edition EPIC`, after the Steam folder; one list in `tools/skyguard/paths.py`.
 - **`mirror-launch-logs`:** a one-shot, append-only copy of the SKSE, crash and Papyrus logs into `.claude/backups/log-mirror/`; a grown log costs only its new bytes, and a truncated or replaced one keeps the previous copy instead of overwriting it.
 - **`archive-triage`:** shows what a mod archive would change before it is installed (NEW / SAME / CHANGED / NO CRC by CRC against the installed file), every destination plainly with any outside `Data/` flagged, FOMOD options as separate groups, and on VR a DLL build-marker heuristic; read-only, through 7-Zip.

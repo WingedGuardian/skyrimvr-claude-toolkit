@@ -6,11 +6,13 @@ refuses a file it cannot open (exit 2). It answers the two commands archive-tria
 
     l -slt -ba [switches] <archive>          one block per entry, CRLF line ends as 7-Zip writes them on Windows
     e -so [switches] <archive> -- <entry>    the entry's bytes on stdout
+    x [switches] -o<dir> <archive> @<list>   the listed entries written under <dir> (FAKE_7Z_DROP=<entry> skips one)
 
 The tests/bin shims are bash PATH shims; a Python tool on Windows cannot execute one, so each test writes a tiny
 launcher (7z.cmd / 7z) that runs this file, and points SEVENZIP at it.
 """
 import json
+import os
 import sys
 import zlib
 
@@ -38,6 +40,22 @@ def main(argv):
                      "Size = {}".format(len(data)), "Attributes = " + e.get("attributes", " 01800000"),
                      "CRC = " + ("" if e.get("folder") else crc)]
             out.write(("\r\n".join(block) + "\r\n\r\n").encode("utf-8"))
+        return 0
+    if cmd == "x":
+        # x -y -spd -scsUTF-8 -o<dir> <archive> @<list file>: write each listed entry under <dir>
+        outdir = next(a[2:] for a in rest if a.startswith("-o"))
+        listfile = next(a[1:] for a in argv[1:] if a.startswith("@"))
+        with open(listfile, encoding="utf-8") as fh:
+            wanted = [ln for ln in fh.read().split("\n") if ln]
+        by_path = {e["path"]: e for e in entries}
+        for name in wanted:
+            e = by_path.get(name)
+            if e is None or os.environ.get("FAKE_7Z_DROP") == name:
+                continue                                  # 7-Zip skips a name it does not have
+            dest = os.path.join(outdir, *[s for s in name.replace("\\", "/").split("/") if s])
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as out_f:
+                out_f.write(e.get("data", "").encode("utf-8"))
         return 0
     if cmd == "e":
         for e in entries:

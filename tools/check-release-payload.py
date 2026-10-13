@@ -80,6 +80,7 @@ CORE_REQUIRED = (
     "tools/skse-load-status.py",
     "tools/archive-triage.py",
     "tools/mirror-launch-logs.py",
+    "tools/mod-install.py",
 )
 # Absent: dev-only trees, the user's own files, and runtime state. A path, or a file NAME anywhere.
 ABSENT_PATHS = (

@@ -1169,6 +1169,33 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
         id="archive-triage-unmapped-hidden-by-default",
     ),
 
+    # --- mod-install ----------------------------------------------------------
+    *[pytest.param("tools/mod-install.py", find, replace, "tests/test_mod_install.py::" + test, id="mod-install-" + tid)
+      for tid, find, replace, test in [
+          ("config-overwritten", "            if dest.name.lower().endswith(CFG_EXT) and not overwrite_cfg:",
+           "            if False:", "test_an_existing_config_gets_a_new_file_beside_it"),
+          ("no-backup", "                shutil.copy2(str(target), str(b))", "                pass",
+           "test_apply_installs_backs_up_and_writes_a_manifest"),
+          ("writes-through-hardlink", "        os.replace(tmp, str(target))", "        shutil.copyfile(tmp, str(target))",
+           "test_a_hardlinked_file_is_replaced_not_written_through"),
+          ("rehash-mismatch-ignored", "                bad += 1", "                pass",
+           "test_a_written_file_that_does_not_rehash_is_exit_1"),
+          ("name-unchecked", "    bad = sorted(c for c in set(name) if c in NAME_BAD or ord(c) < 32 or ord(c) == 127)",
+           "    bad = []", "test_a_name_that_cannot_be_a_file_name_is_refused"),
+          ("unstaged-file-not-checked-first", "            if not src.is_file():", "            if False:",
+           "test_a_file_7zip_did_not_stage_stops_before_any_write"),
+          ("fomod-groups-merged", "        if len(groups) > 1:", "        if False:",
+           "test_an_option_archive_needs_one_group"),
+          ("mo2-ignored", '    mods = "" if data_arg else mo2_mods()', '    mods = ""',
+           "test_mo2_installs_a_new_mod_folder_and_holds_back_game_root_files"),
+          ("mo2-game-root-without-flag", '        if base == "game" and mo2 and not root_files:', "        if False:",
+           "test_mo2_installs_a_new_mod_folder_and_holds_back_game_root_files"),
+          ("mo2-existing-folder-merged", "        if data.exists() and any(data.iterdir()):", "        if False:",
+           "test_mo2_refuses_an_existing_mod_folder"),
+          ("vortex-unwarned", '    if (game / "Data" / VORTEX_MARKER).is_file():', "    if False:",
+           "test_vortex_is_warned_about_not_refused"),
+      ]],
+
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(
         # Drop the previous copy on a replacement: the last launch's log is gone, which is the loss the mirror exists

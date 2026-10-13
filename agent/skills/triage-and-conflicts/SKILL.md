@@ -1,6 +1,6 @@
 ---
 name: triage-and-conflicts
-description: Which plugin actually wins a record (skyrim-winner, full load order via xEdit), Papyrus log triage, CrashLogger crash-dump triage, which SKSE plugin DLLs loaded (skse-load-status), what a mod archive would change before install (archive-triage), keeping logs a relaunch would overwrite (mirror-launch-logs), ESP cross-reference snapshots around bulk edits, and how these tools pick a folder when more than one Skyrim install exists. Use for override/conflict questions, Papyrus.N.log or crash-log analysis, and before any bulk ESP operation.
+description: Which plugin actually wins a record (skyrim-winner, full load order via xEdit), Papyrus log triage, CrashLogger crash-dump triage, which SKSE plugin DLLs loaded (skse-load-status), what a mod archive would change before install (archive-triage), a recorded manual install (mod-install), keeping logs a relaunch would overwrite (mirror-launch-logs), ESP cross-reference snapshots around bulk edits, and how these tools pick a folder when more than one Skyrim install exists. Use for override/conflict questions, Papyrus.N.log or crash-log analysis, and before any bulk ESP operation.
 ---
 
 # Triage and conflicts
@@ -142,6 +142,30 @@ groups, and they are alternatives, not all installed.
 
 Entry names are printed with control characters escaped, and the rows must sum to the entries
 listed (`accounting OK`; a mismatch exits 1). An archive 7-Zip cannot list exits 2.
+
+## mod-install — a manual install, recorded and reversible
+
+```bash
+python tools/mod-install.py <archive>                      # DRY RUN: the triage report, then the plan
+python tools/mod-install.py <archive> --group "Option A"   # an option (FOMOD) archive: pick ONE group
+python tools/mod-install.py <archive> --apply              # write it
+```
+
+Prefer the user's mod manager; use this when the user installs by hand, and only after they have
+read the dry run. It is a dry run unless `--apply`, and it prints every destination in full: read
+each one, and tell the user about anything flagged `outside Data/` before applying (it is not
+refused: the SKSE loader and ENB/ReShade files legitimately go there).
+
+- Every replaced file is backed up and every written file recorded with its SHA-256, under
+  `.claude/backups/manual-installs/` (or `$SKYRIM_MANUAL_INSTALLS`): `<name>.files.txt` and
+  `backups/<name>-<stamp>/`. That is the uninstall.
+- An existing `.ini`/`.toml`/`.json` is kept; the archive's copy lands beside it as `<file>.new` to
+  merge (`--overwrite-config` to replace it, backed up).
+- Writes go to a temp file swapped in, so a hardlinked file is replaced, not written through; each
+  file is re-hashed (a mismatch exits 1). Plugins are copied but **never activated**.
+- Mod Organizer 2 configured: it installs a NEW mod folder `<MO2 mods>/<name>/` (enable it in MO2);
+  game-folder files are held back unless `--game-root-files`. Vortex present: it warns that Vortex
+  may later overwrite or purge these files.
 
 ## Where these tools look, and what happens when there is more than one install
 
