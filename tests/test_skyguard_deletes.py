@@ -135,6 +135,10 @@ def test_git_targets(cmd, want):
     ("robocopy a b /MOVE", ["a"]),
     ("robocopy a b //MIR", ["b"]),
     ("robocopy a b /E", None),
+    # fix-limits 14: exclusion lists are not the source or the destination
+    ("robocopy a b /XF x.esp /MIR", ["b"]),
+    ("robocopy a b /XD keep /MIR", ["b"]),
+    ("robocopy a b /XF x.esp y.esp /MOVE", ["a"]),
 ])
 def test_robocopy_targets(cmd, want):
     assert _ops(cmd) == [want]
@@ -566,6 +570,14 @@ _FIND_ABOVE = [   # (id, shell, command, filterless control)
      "find '" + _ABOVE + "' -exec rm {} +"),
     ("find-after-literal-cd-above", "bash", "cd '" + _ABOVE + "' && find . -name Skyrim.esm -delete",
      "cd '" + _ABOVE + "' && find . -delete"),
+    # fix-limits 14: a cd whose folder is a same-command literal is followed like the literal cd
+    ("find-after-variable-cd-above", "bash", 'D="' + _ABOVE + '"; cd "$D" && find . -name Skyrim.esm -delete',
+     "cd '" + _ABOVE + "' && find . -delete"),
+    ("find-after-variable-subdir-cd-above", "bash", 'D="C:/"; cd "${D}GOG Games" && find . -name Skyrim.esm -delete',
+     "cd '" + _ABOVE + "' && find . -delete"),
+    ("ps-foreach-after-variable-set-location", "powershell",
+     "$d = '" + _ABOVE + "'; Set-Location $d; Get-ChildItem . -Recurse -Filter Skyrim.esm | ForEach-Object { Remove-Item $_ }",
+     "Get-ChildItem '" + _ABOVE + "' -Recurse -Filter Skyrim.esm | Remove-Item"),
     ("find-abs-start-after-unknown-cd", "bash", 'cd "$X" && find \'' + _ABOVE + "' -name Skyrim.esm -delete",
      'cd "$X" && find \'' + _ABOVE + "' -delete"),
     ("ps-foreach-remove", "powershell",
@@ -597,6 +609,12 @@ def test_a_filtered_search_above_the_install_is_judged_as_its_filterless_control
     pytest.param("bash", 'S="C:/scratch"; cd "$S/tools" && find . -name "*.rej" -delete', "C:/w",
                  id="find-after-unknown-cd"),
     pytest.param("bash", "fd Skyrim.esm '" + _ABOVE + "' -x cat", "C:/w", id="fd-above-exec-cat"),
+    # fix-limits 14: a variable cd into a folder that holds no protected root stays allowed
+    pytest.param("bash", 'S="C:/scratch"; cd "$S" && find . -name "*.esp" -delete', "C:/w",
+                 id="find-after-variable-cd-outside"),
+    # an assignment in a branch does not certainly reach the cd: not followed, as before
+    pytest.param("bash", 'if x; then D="C:/scratch"; fi; cd "$D" && find . -name "*.rej" -delete', "C:/w",
+                 id="find-after-branch-assigned-cd"),
     pytest.param("powershell", "Get-ChildItem . -Recurse -Filter *.pyc | ForEach-Object { Remove-Item $_ }", "C:/w",
                  id="ps-foreach-outside"),
 ])

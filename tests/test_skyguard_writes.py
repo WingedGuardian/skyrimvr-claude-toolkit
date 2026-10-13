@@ -109,6 +109,11 @@ def test_write_targets(cmd, shell, want):
     ("Move-Item a", "powershell", [(".", ("a",))]),
     ("copy /y a b", "cmd", [("b", ("a",))]),
     ("robocopy src dst a.esp b.esp /MT", "cmd", [("dst/a.esp", ("a.esp",)), ("dst/b.esp", ("b.esp",))]),
+    # fix-limits 14: /XF and /XD take a LIST of exclusions (up to the next option); they are never copied
+    ("robocopy src dst /XF *.esp *.esm /E", "cmd", []),
+    ("robocopy src dst c.txt /XF a.esp /XD Data /E", "cmd", [("dst/c.txt", ("c.txt",))]),
+    ("robocopy src dst /xd Data Scripts c.txt", "cmd", []),
+    ("robocopy src dst /XF a.esp /IF c.txt", "cmd", [("dst/c.txt", ("c.txt",))]),
     ("[IO.File]::Copy('a','b')", "powershell", [("b", ("a",))]),
 ])
 def test_copy_targets(cmd, shell, want):

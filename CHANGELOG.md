@@ -135,6 +135,8 @@
 
 ### Fixed
 
+- **`cd` through a variable:** a `cd` / `Set-Location` whose folder comes from a literal assigned earlier in the same command (`D=...; cd "$D"`) is followed like the literal `cd`, so a name-filtered `find . -delete` after it is judged from that folder; it was judged from the folder before the `cd`.
+- **robocopy exclusions:** the `/XF` and `/XD` lists are read as exclusions, not as files to copy, so an excluded `*.esp` no longer raises the copy-onto-plugin note.
 - **CrashLogger `__fastfail` dumps:** `crash-triage.py` reads an exception line with no quoted type, which CrashLoggerSSE writes for every code outside its named list, including the `__fastfail` / fail-fast dumps 1.24.0 added; such a dump was counted as "no exception". It is labelled `__fastfail` (instruction `int 0x29`) or `(unnamed exception code)`.
 - **Spriggit in CI:** the .NET 10 job now runs the pinned Spriggit, round-tripping a committed synthetic plugin (serialize, deserialize, serialize again) and requiring the same records back; it only restored and listed the tool.
 - **ReSaver lib jars:** every file of the pinned archive's `lib/` now has a pinned SHA-256 beside `ReSaver.jar`'s, and `bash tools/resaver-cli.sh verify` checks `ReSaver.jar` and `lib/` against them (required files present, any present file the pinned bytes, no unknown jar on the classpath); only `ReSaver.jar` was pinned, and nothing checked it.
@@ -254,8 +256,6 @@
 - **Pattern-based coverage:** the guard is an accident barrier, not a sandbox.
 - **Encoded Bash program names:** some ANSI-C quoted spellings are not classified; this gap predates v4.
 - **Interpreter literal writes:** a file name written by inline interpreter code (`python -c "open('X.esp','w')"`, Node `writeFileSync`) is judged by its file class alone, not by where it lands, so writing a plugin-named file outside the game is refused too; `cp` to the same place is judged by its destination and is allowed.
-- **`cd` through a variable:** a `cd` whose folder comes from a same-command variable is not followed, so a name-filtered `find . -delete` after it is judged like `rm NAME` in the folder before the `cd`.
-- **robocopy exclusions:** `/XF` patterns are read as copy sources, so an excluded `*.esp` can still raise the copy-onto-plugin note (a note only, never a refusal).
 - **Backslashes in Bash guard messages:** an unquoted Windows path is named the way Bash reads it, backslashes removed (`Data\MyMod.esp` is shown as `DataMyMod.esp`, which is also the file Bash would write); quote Windows paths or use forward slashes.
 - **Interpreter state writes:** code can write or link guard state through forms the shell scanner does not recognize.
 - **Archive extraction:** unpacking into guard state is not covered.

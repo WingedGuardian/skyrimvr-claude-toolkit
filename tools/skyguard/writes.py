@@ -65,7 +65,7 @@ import re
 from typing import List, Mapping, NamedTuple, Optional, Tuple
 
 from . import shellparse, targets
-from .deletes import _plain_operands, interpreter_code, substituted
+from .deletes import _plain_operands, interpreter_code, robocopy_positionals, substituted
 from .grep import _compile
 from .shellparse import ps_param
 
@@ -444,7 +444,7 @@ def copy_targets(e) -> List[Tuple[str, Tuple[str, ...]]]:
             return []
         return [(words[-1], tuple(words[:-1]))] if len(words) > 1 else [(".", tuple(words))]
     if p == "robocopy":
-        pos = [w for w in argv if not (w.startswith("/") and re.fullmatch(r"/{1,2}[A-Za-z]+(:\S*)?", w))]
+        pos = robocopy_positionals(argv)        # fix-limits 14: /XF and /XD lists are exclusions, not files
         return [(pos[1].rstrip("/\\") + "/" + f, (f,)) for f in pos[2:]] if len(pos) > 2 else []
     if p in COPY_PROGRAMS:
         target, words, k = None, [], 0

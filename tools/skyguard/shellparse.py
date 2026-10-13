@@ -498,6 +498,17 @@ class _Scanner:
     def track_cd(self, f: _Frame, cmd: _Cmd) -> None:
         pass
 
+    def cd_word(self, cmd: _Cmd, w: _Word, lit: bool) -> str:
+        """The folder a cd word names (_cd_value). fix-limits 14: a word that is dynamic only through same-command
+        literal assignments (`D=/x; cd "$D/sub"`) is that literal, resolved exactly as Exec.subst resolves an argv
+        word (the same lookup, poison and IFS rules); any other dynamic word stays "?"."""
+        v = _cd_value(w, lit)
+        if v != "?" or not w.dyn or not self.vars or self.unsure or self.ctx.poisoned():
+            return v
+        split_safe = self.DIALECT != "bash" or self.ctx.writes("IFS") == 0
+        s = assign.expand_word(w.raw, self.DIALECT, lambda name: self.lookup(cmd, name), split_safe)
+        return s if s and s != "-" else v
+
     # -- Task 7b: literal assignments in the ROOT command's top-level statement list (see assign.py)
     def assignments(self, cmd: _Cmd) -> List[Tuple[str, str]]:
         return []
@@ -675,7 +686,7 @@ class _Bash(_Scanner):
         elif not args:
             new = "~"
         else:
-            new = _cd_value(args[0], args[0].bs)
+            new = self.cd_word(cmd, args[0], args[0].bs)
         f.cd = _join_cd(f.cd, new)
 
     # -- the main loop
@@ -1232,7 +1243,7 @@ class _Pwsh(_Scanner):
             new = "?" if cmd.stage > 0 else "~"           # I1: `Get-Item X | Set-Location`: the path is pipe input
         else:
             src = [w for w in cmd.words[1:] if "".join(w.b) == vals[0]]
-            new = _cd_value(src[0], False) if src else vals[0]
+            new = self.cd_word(cmd, src[0], False) if src else vals[0]
         f.cd = _join_cd(f.cd, new)
 
     def run(self) -> None:

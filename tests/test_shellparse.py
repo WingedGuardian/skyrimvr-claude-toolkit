@@ -1006,3 +1006,22 @@ def test_cmd_c_quote_rule(line, s_flag, want):
 def test_cmd_c_s_switch_always_strips():
     assert "q x" not in progs("cmd //s //c '\"rd /s /q X\"'")
     assert "q x" in progs("cmd //c '\"rd /s /q X\"'")         # without /S cmd may keep the quotes: both readings
+
+
+# fix-limits 14: a cd whose folder is a same-command literal (Exec.subst's resolution) moves the cwd the parser models.
+@pytest.mark.parametrize("dialect,command,want", [
+    ("bash", 'D=/a/b; cd "$D" && rm x', "/a/b"),
+    ("bash", 'D=/a; cd "$D/b" && rm x', "/a/b"),
+    ("bash", "D=/a/b; cd $D; rm x", "/a/b"),
+    ("bash", 'cd "$UNSET" && rm x', "?"),
+    ("bash", 'if y; then D=/a; fi; cd "$D" && rm x', "?"),
+    ("bash", 'D=/a; eval "D=/b"; cd "$D" && rm x', "?"),
+    ("bash", 'D=/a; source x.sh; cd "$D" && rm x', "?"),          # poisoned: sourced code may reassign D
+    ("bash", 'D=/a; done; cd "$D" && rm x', "?"),                 # a stray closer: the statement list is unknown
+    ("powershell", "$d = '/a/b'; Set-Location $d; Remove-Item x", "/a/b"),
+    ("powershell", "Set-Location $d; Remove-Item x", "?"),
+])
+def test_a_cd_through_a_same_command_literal_is_followed(dialect, command, want):
+    p = parse(command, dialect)
+    (rm,) = [e for e in p.execs if e.program in ("rm", "remove-item")]
+    assert rm.cd_before == want, (command, rm.cd_before)

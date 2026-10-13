@@ -273,9 +273,27 @@ def _git_targets(argv) -> Optional[List[str]]:
     return [s if s is UNRESOLVED or _is_abs(s) else root + "/" + s for s in specs] if specs else [root]
 
 
+_ROBO_FLAG = re.compile(r"/{1,2}[A-Za-z]+(:\S*)?")
+_ROBO_LISTS = frozenset(("XF", "XD"))
+
+
+def robocopy_positionals(argv) -> List[str]:
+    """robocopy's source, destination and file words, in order. Option words are dropped, and so is every word of the
+    exclusion lists /XF and /XD take (all words after them up to the next option): fix-limits 14, an excluded
+    `*.esp` was read as a file to copy."""
+    out, excluding = [], False
+    for w in argv:
+        if w.startswith("/") and _ROBO_FLAG.fullmatch(w):
+            excluding = w.lstrip("/").split(":")[0].upper() in _ROBO_LISTS
+            continue
+        if not excluding:
+            out.append(w)
+    return out
+
+
 def _robocopy_targets(argv) -> List[str]:
-    pos = [w for w in argv if not (w.startswith("/") and re.fullmatch(r"/{1,2}[A-Za-z]+(:\S*)?", w))]
-    flags = {w.lstrip("/").split(":")[0].upper() for w in argv if w not in pos}
+    pos = robocopy_positionals(argv)
+    flags = {w.lstrip("/").split(":")[0].upper() for w in argv if w.startswith("/") and _ROBO_FLAG.fullmatch(w)}
     out = []
     if flags & {"MIR", "PURGE"} and len(pos) > 1:
         out.append(pos[1])

@@ -8140,3 +8140,24 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/self_rules.py", '    "false", "break", "continue",\n', '    "false", "break",\n',
      _FL12 + "continue-in-loop-inspect]", "fl12-continue-not-inert"),
 ]]
+
+# fix-limits 14: a cd through a same-command literal is followed; robocopy's /XF and /XD lists are exclusions.
+_FL14P = "tests/test_shellparse.py::test_a_cd_through_a_same_command_literal_is_followed["
+_FL14R = "tests/test_skyguard_writes.py::test_copy_targets["
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/shellparse.py", "            new = self.cd_word(cmd, args[0], args[0].bs)",
+     "            new = _cd_value(args[0], args[0].bs)", _FL14P + 'bash-D=/a/b; cd "$D" && rm x-/a/b]', "fl14-bash-cd-not-resolved"),
+    ("tools/skyguard/shellparse.py", "            new = self.cd_word(cmd, src[0], False) if src",
+     "            new = _cd_value(src[0], False) if src",
+     _FL14P + "powershell-$d = '/a/b'; Set-Location $d; Remove-Item x-/a/b]", "fl14-ps-set-location-not-resolved"),
+    ("tools/skyguard/shellparse.py", " or self.unsure or self.ctx.poisoned():", " or self.unsure:",
+     _FL14P + 'bash-D=/a; source x.sh; cd "$D" && rm x-?]', "fl14-cd-resolved-in-a-poisoned-command"),
+    ("tools/skyguard/shellparse.py", " or self.unsure or self.ctx.poisoned():", " or self.ctx.poisoned():",
+     _FL14P + 'bash-D=/a; done; cd "$D" && rm x-?]', "fl14-cd-resolved-after-a-stray-closer"),
+    ("tools/skyguard/deletes.py", '_ROBO_LISTS = frozenset(("XF", "XD"))', '_ROBO_LISTS = frozenset(("XD",))',
+     _FL14R + "robocopy src dst /XF *.esp *.esm /E-cmd-want11]", "fl14-robocopy-xf-read-as-files"),
+    ("tools/skyguard/deletes.py", '_ROBO_LISTS = frozenset(("XF", "XD"))', '_ROBO_LISTS = frozenset(("XF",))',
+     _FL14R + "robocopy src dst /xd Data Scripts c.txt-cmd-want13]", "fl14-robocopy-xd-read-as-files"),
+    ("tools/skyguard/deletes.py", '            excluding = w.lstrip("/")', '            excluding = excluding or w.lstrip("/")',
+     _FL14R + "robocopy src dst /XF a.esp /IF c.txt-cmd-want14]", "fl14-robocopy-list-never-ends"),
+]]
