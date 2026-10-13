@@ -7828,3 +7828,19 @@ _RETARGET = ("messages-no-echo", "messages-two-lines")
 assert sum(p.id in _RETARGET for p in MUTATIONS) == len(_RETARGET)
 MUTATIONS[:] = [pytest.param(*p.values[:3], _FAST_ECHO, marks=p.marks, id=p.id) if p.id in _RETARGET else p
                 for p in MUTATIONS]
+# P8-SED follow-up: every twin anchored on test_guard_corpus.py::test_intended_rows_reproduce, which fires all 982
+# intended rows through the real wrapper (0.43 s a row). MEASURED before, serial, below-normal: four of the eight
+# ran 457 s or hit a 580 s limit against the runner's 600 s cap; the others were killed early only because the
+# wrapper and the engine disagreed on the first broken row. All eight break the engine path the wrapper runs
+# (record.py's check, deletes/shellparse/shell_rules, run.py, engine.py), so they anchor on the in-process twin of
+# the same check, which calls run.py's main() per row (~4 s). The wrapper-fired test stays in the suite.
+# Appended in-place override ([:]): the decorator above holds this list object, and the original blocks stay as
+# they are.
+_FAST_IR = "tests/test_guard_corpus.py::test_intended_rows_reproduce_in_process"
+_RETARGET_IR = ("corpus-intended-text-exact", "rule-S-DEL-UNKNOWN-DIR-whole-folder", "rule-S-SHELL-UNREAD-denies",
+                "rule-S-SHELL-UNREAD-pipe-into-shell", "rule-W-INSTALL-wired", "rule-S-DEVBENCH-SAVE-roots",
+                "merge-engine-drops-cwd", "merge-engine-write-drops-roots")
+assert sorted(p.id for p in MUTATIONS if p.values[3] == "tests/test_guard_corpus.py::test_intended_rows_reproduce") \
+    == sorted(_RETARGET_IR)
+MUTATIONS[:] = [pytest.param(*p.values[:3], _FAST_IR, marks=p.marks, id=p.id) if p.id in _RETARGET_IR else p
+                for p in MUTATIONS]
