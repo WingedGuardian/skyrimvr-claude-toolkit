@@ -8072,3 +8072,12 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "            st, detail = health.hook_state(hb / folder, h, now)",
      _FL3T + "test_skydoctor_reports_the_adapted_agent", "fl3-doctor-ignores-engine-evaluation"),
 ]]
+
+# fix-limits 7: a garbled `.last_snapshot` compares now (despite the window), is rewritten, and is said once.
+_FL7 = "tests/test_skyguard_side_effects.py::test_a_garbled_rate_stamp_compares_now_rewrites_it_and_says_so_once[word]"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/snapshot.py", '            audit.log(HOOK, "RATE-STAMP", ', '            (lambda *a: None)(HOOK, "RATE-STAMP", ',
+     _FL7, "fl7-garbled-stamp-silent"),
+    ("tools/skyguard/snapshot.py", "            last, rl_ns = 0, 0\n", "            return None\n",
+     _FL7, "fl7-garbled-stamp-skips-the-comparison"),
+]]

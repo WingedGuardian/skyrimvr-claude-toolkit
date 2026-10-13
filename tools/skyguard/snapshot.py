@@ -507,8 +507,13 @@ def _take_locked(root, store, audit, command, now, deadline, rate, prune_due, wa
         try:
             last = int(rl.read_bytes().decode("utf-8", "replace").strip() or "0")
             rl_ns = rl.stat().st_mtime_ns
-        except (OSError, ValueError):
+        except (OSError, ValueError) as e:
+            # fix-limits 7: an unreadable stamp reads as "never compared", so this call compares in full despite the
+            # window and the write below repairs it -- said once, because the next call reads the repaired stamp.
             last, rl_ns = 0, 0
+            audit.log(HOOK, "RATE-STAMP", ".last_snapshot is {} -- this call compared every script despite the {} s "
+                      "rate limit and rewrites it".format(
+                          "not a whole number of seconds" if isinstance(e, ValueError) else "unreadable", rate))
         if int(now) - last < rate and not any(m > rl_ns for _s, m in seen.values()):
             return None
     idx = _read_json(store / INDEX)

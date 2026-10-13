@@ -201,6 +201,28 @@ def test_snapshot_equal_mtime_is_not_newer(tmp_path):
     assert len(log_text(tmp_path).splitlines()) == 1
 
 
+@pytest.mark.parametrize("garbage", [b"garbled", b"12x\n", b"\xff\xfe"], ids=["word", "digits-then-junk", "bytes"])
+def test_a_garbled_rate_stamp_compares_now_rewrites_it_and_says_so_once(tmp_path, garbage):
+    """fix-limits 7: an unreadable `.last_snapshot` reads as "no comparison yet": this call compares in full despite
+    the 60-second window and rewrites the stamp, and the audit log says so -- once, because the rewrite repairs it."""
+    src = install(tmp_path)
+    f = src / "a.psc"
+    f.write_text("x")
+    snap(tmp_path, "make 1")
+    rl = tmp_path / ".claude" / "backups" / "auto_snapshots" / ".last_snapshot"
+    t = time.time() - 10
+    rl.write_bytes(garbage)
+    os.utime(str(rl), (t, t))
+    f.write_text("y")
+    os.utime(str(f), (t - 5, t - 5))               # inside the window and not newer: a valid stamp would skip this
+    snap(tmp_path, "make 2")
+    assert len(snaps(tmp_path)) == 2 and re.fullmatch(rb"\d+\n", rl.read_bytes())
+    notes = [x for x in log_text(tmp_path).splitlines() if "RATE-STAMP" in x]
+    assert len(notes) == 1 and ".last_snapshot" in notes[0], log_text(tmp_path)
+    snap(tmp_path, "make 3")                       # repaired: the window applies again, and nothing more is said
+    assert len([x for x in log_text(tmp_path).splitlines() if "RATE-STAMP" in x]) == 1
+
+
 def test_snapshot_nothing_changed_writes_no_snapshot(tmp_path):
     """A walk that finds every file as the index has it takes no snapshot and logs nothing (it still records the
     walk, so the rate limit counts from it)."""
