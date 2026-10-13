@@ -134,3 +134,40 @@ def test_xeditlib_and_koffi_are_locked_so_npm_ci_installs_them():
     for entry in (x, lock["node_modules/koffi"]):
         assert entry["integrity"].startswith("sha512-") and entry["resolved"].startswith("https://")
     assert lock[""]["optionalDependencies"] == opt     # the lock was generated from this package.json
+
+
+def _steps_named(steps, needle):
+    return [i for i, s in enumerate(steps) if needle in str(s.get("run", ""))]
+
+
+def test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them():
+    """Plan 8 T6c review: nothing asserted that ci.yml keeps its `npm ci` installs. Without them the FOMOD smoke
+    and xeditlib-dependent tests run against no node_modules (TOOLKIT_REQUIRE_NODE_DEPS=1 then fails the leg, but a
+    step dropped together with that env var would skip the smoke silently)."""
+    yaml = pytest.importorskip("yaml")
+    jobs = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text())["jobs"]
+    for job, consumer in (("node", "npm test"), ("behavior", "tests/run_harness_tests.py tests/ -v")):
+        steps = jobs[job]["steps"]
+        install = [i for i in _steps_named(steps, "npm ci --ignore-scripts")
+                   if "if" not in steps[i] and str(steps[i]["run"]).strip().startswith("npm ci")]
+        users = _steps_named(steps, consumer)
+        assert install, "%s: no unconditional `npm ci --ignore-scripts` step" % job
+        assert users, "%s: no step runs %r" % (job, consumer)
+        assert install[0] < users[0], "%s: `npm ci` must run before %r" % (job, consumer)
+        for i in users:
+            assert str(steps[i].get("env", {}).get("TOOLKIT_REQUIRE_NODE_DEPS")) == "1", (job, steps[i].get("name"))
+
+
+def test_ci_keeps_the_fomod_smoke_control_that_must_go_red():
+    """The FOMOD smoke's control installs the injectable fast-xml-parser 4.3.6 and FAILS the job if the smoke passes
+    there. Losing the step, the pinned bad version or the inverted exit leaves a smoke nobody has watched go red."""
+    yaml = pytest.importorskip("yaml")
+    steps = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text())["jobs"]["node"]["steps"]
+    control = [s for s in steps if "fomod-xmlbuilder.test.js" in str(s.get("run", "")) and "if" not in s]
+    assert len(control) == 1, [s.get("name") for s in control]
+    run = control[0]["run"]
+    assert "npm install --ignore-scripts --no-audit --no-fund fast-xml-parser@4.3.6" in run, run
+    assert "TOOLKIT_REQUIRE_NODE_DEPS=1 node --test fomod-xmlbuilder.test.js" in run, run
+    passed_branch = run.split("then", 1)[1].split("fi", 1)[0]
+    assert "exit 1" in passed_branch, "a smoke that PASSES on 4.3.6 must fail the job: " + run
+    assert 'grep -q "created an element"' in run, run

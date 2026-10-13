@@ -7802,3 +7802,23 @@ MUTATIONS += [
                  "tests/test_hooks.py::test_protect_files_works_however_it_is_launched[forward-slash]",
                  id="fixu-protect-files-wrapper-self-path-normalisation"),
 ]
+# Plan 8 T6c review: ci.yml's `npm ci` installs and the FOMOD control step had no structural assertion, and the
+# exact-pin test had no twin for "exact, but not the version the lock resolves".
+_DL = "tests/test_dependency_locks.py::"
+_NPM_CI = "        run: npm ci --ignore-scripts --no-audit --no-fund\n"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (".github/workflows/ci.yml", "      - name: Install Node dependencies for the FOMOD smoke\n" + _NPM_CI, "",
+     _DL + "test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them", "fixu-ci-behavior-npm-ci-dropped"),
+    (".github/workflows/ci.yml", "      - name: Install dependencies\n" + _NPM_CI, "",
+     _DL + "test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them", "fixu-ci-node-npm-ci-dropped"),
+    (".github/workflows/ci.yml", '          TOOLKIT_REQUIRE_HARNESS: "1"\n          TOOLKIT_REQUIRE_NODE_DEPS: "1"\n',
+     '          TOOLKIT_REQUIRE_HARNESS: "1"\n',
+     _DL + "test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them", "fixu-ci-suite-node-deps-not-required"),
+    (".github/workflows/ci.yml", "fast-xml-parser@4.3.6", "fast-xml-parser@5.7.3",
+     _DL + "test_ci_keeps_the_fomod_smoke_control_that_must_go_red", "fixu-ci-fomod-control-on-a-safe-version"),
+    (".github/workflows/ci.yml", 'injectable fast-xml-parser 4.3.6: it cannot fail"; exit 1',
+     'injectable fast-xml-parser 4.3.6: it cannot fail"',
+     _DL + "test_ci_keeps_the_fomod_smoke_control_that_must_go_red", "fixu-ci-fomod-control-pass-not-fatal"),
+    ("package.json", '"zod": "3.25.76"', '"zod": "3.25.75"',
+     _DL + "test_package_json_pins_exact_versions_that_the_lock_resolves_to", "fixu-package-json-exact-but-not-the-lock"),
+]]
