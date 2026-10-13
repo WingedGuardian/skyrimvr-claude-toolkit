@@ -313,11 +313,12 @@ class _Here:
 
 class _Cmd:
     __slots__ = ("words", "redirs", "heredocs", "start", "end", "cd", "key", "stage", "skip", "redir_op",
-                 "drop_next", "call", "frame", "after_time", "coproc", "kv", "lst", "seq", "valid")
+                 "drop_next", "call", "frame", "after_time", "coproc", "kv", "lst", "seq", "valid", "redir_words")
 
     def __init__(self, f, start: int):
         self.words: List[_Word] = []
         self.redirs: List[Tuple[str, str]] = []
+        self.redir_words: List[_Word] = []      # fix-unclear 4b: each redirect target's word, for Exec.subst
         self.heredocs: List[_Here] = []
         self.start = start
         self.end = start
@@ -464,6 +465,7 @@ class _Scanner:
                 cmd.heredocs.append(_Here("", False, True, "".join(w.b)))
             else:
                 cmd.redirs.append((op, "".join(w.b)))
+                cmd.redir_words.append(w)
             return
         if self.keyword(f, cmd, w):
             return
@@ -1867,6 +1869,15 @@ def _program_candidates(word: str, dialect: str, root: str) -> List[str]:
     return out
 
 
+# fd's value-taking options (fd 10): their value is never the pattern or a search path.
+_FD_VALUED = frozenset(("-e", "--extension", "-t", "--type", "-E", "--exclude", "-d", "--max-depth", "--min-depth",
+                        "--exact-depth", "-S", "--size", "--changed-within", "--changed-before", "--change-newer-than",
+                        "--change-older-than", "--newer", "--older", "-o", "--owner", "-c", "--color", "-j",
+                        "--threads", "--max-results", "--base-directory", "--path-separator", "--ignore-file",
+                        "--format", "--batch-size", "--max-buffer-time", "--and", "--hyperlink"))
+_FD_PLACEHOLDERS = frozenset(("{}", "{/}", "{//}", "{.}", "{/.}"))
+
+
 class _Resolver:
     """Turns one simple command's words into Execs: wrappers unwrapped, -c strings and heredocs re-parsed."""
 
@@ -2261,6 +2272,8 @@ class _Resolver:
             # its destructive binary, on every dialect (it was bash only, so Codex's PowerShell let -delete through).
             if p == "find":
                 return self._find(k)
+            if p in ("fd", "fdfind"):
+                return self._fd(k)
             if self.d == "powershell":
                 if p == "invoke-expression":
                     self.emit(p, k + 1)
@@ -2461,6 +2474,59 @@ class _Resolver:
         self.emit("cmd", k + 1)
         return self.made
 
+    def _fd(self, k):
+        """fix-unclear: `fd [opts] [pattern] [path...] -x|-X CMD`. fd always walks each search path recursively, and the
+        pattern only narrows the matches, so the command it runs reaches every path's whole subtree: each {}-style
+        placeholder (or, with none, the end of CMD) becomes the search paths themselves. Unknown flags take no value;
+        a value-taking flag must be in _FD_VALUED, or its value is read as the pattern/a path (stricter, never looser)."""
+        v, n = self.v, len(self.v)
+        self.emit(program_name(v[k], self.d, self.y[k]), k + 1)
+        j, pos, posq, sp, spq, cmds = k + 1, [], [], [], [], []
+        while j < n:
+            w = v[j]
+            if w in ("-x", "--exec", "-X", "--exec-batch"):
+                a = j = j + 1
+                while j < n and v[j] not in (";", "\\;"):
+                    j += 1
+                cmds.append((a, j))
+                j += 1
+                continue
+            if w == "--search-path" and j + 1 < n:              # a search path, never the pattern
+                sp.append(v[j + 1])
+                spq.append(self.q[j + 1])
+                j += 2
+                continue
+            if w in _FD_VALUED:
+                j += 2
+                continue
+            if w.startswith("-") and w != "-":
+                j += 1
+                continue
+            pos.append(w)
+            posq.append(self.q[j])
+            j += 1
+        paths, pq = pos[1:] + sp, posq[1:] + spq
+        if not paths:
+            paths, pq = ["."], [False]
+        for a, b in cmds:
+            iv, iq, iy, hit = [], [], [], False
+            for x in range(a, b):
+                if v[x] in _FD_PLACEHOLDERS:
+                    iv, iq, iy, hit = iv + paths, iq + pq, iy + [False] * len(paths), True
+                else:
+                    iv.append(v[x])
+                    iq.append(self.q[x])
+                    iy.append(self.y[x])
+            if iv and not hit:
+                iv, iq, iy = iv + paths, iq + pq, iy + [False] * len(paths)
+            if iv:
+                if self.depth + 1 > MAX_DEPTH:
+                    raise ParseError("nesting deeper than %d" % MAX_DEPTH)
+                r = _Resolver("bash", iv, iq, iy, (), self.cd, "", self.seg, [], self.depth + 1, self.ctx,
+                              self.recurse, False)
+                self.made += r.run()
+        return self.made
+
     def _find(self, k):
         v, n = self.v, len(self.v)
         self.emit("find", k + 1)
@@ -2475,6 +2541,19 @@ class _Resolver:
         if not starts:
             starts, sq = ["."], [False]
         items, negated = starts, False   # RT-A: what {} / -delete reach: the start, or start/NAME under a -name filter
+        # fix-unclear (find above a root): a -name filter only NARROWS which files match; a recursive find still reaches
+        # the start's whole subtree. So a DELETE (or a move away) also names the start itself, which the delete rules
+        # judge as covering every protected root below it -- the same verdict as the filterless `find P -delete`.
+        # Only `-maxdepth 0|1` provably stays at start/NAME (the start itself is then still a match candidate).
+        deep = not any(v[x] == "-maxdepth" and v[x + 1] in ("0", "1") for x in range(j, n - 1))
+
+        def reach(names, names_q):
+            if names is starts or not deep:
+                return list(names), list(names_q)
+            # A relative start after a cd the parser could not follow (cd "?") is judged as start/NAME alone, like
+            # `rm NAME` there (priced: `cd "$S/x"; find . -name '*.rej' -delete` would read as a whole unknown folder).
+            keep = [i for i, s in enumerate(starts) if self.cd != "?" or _is_abs(s)]
+            return list(names) + [starts[i] for i in keep], list(names_q) + [sq[i] for i in keep]
         while j < n:
             w = v[j]
             if w in ("!", "\\!", "-not", "-o", "-or", ","):
@@ -2484,7 +2563,8 @@ class _Resolver:
                 j += 2
                 continue
             if w == "-delete":
-                e = Exec("find.delete", tuple(items), tuple(sq), self.redirs, self.d, self.cd, self.stdin,
+                ri, rq = reach(items, sq)
+                e = Exec("find.delete", tuple(ri), tuple(rq), self.redirs, self.d, self.cd, self.stdin,
                          self.seg, "", self.ctx.subst)
                 self.ctx.out.append(e)
                 self.made.append(e)
@@ -2493,11 +2573,15 @@ class _Resolver:
             if w in ("-exec", "-execdir", "-ok", "-okdir"):
                 j += 1
                 iv, iq, iy = [], [], []
+                from . import deletes                       # deferred: deletes imports this module
+                runs = program_name(v[j], "bash") if j < n else ""
+                ri, rq = (reach(items, sq) if runs in deletes.DELETE_PROGRAMS | deletes.MOVE_PROGRAMS
+                          else (items, sq))
                 while j < n and v[j] not in (";", "\\;") and not (v[j] == "+" and v[j - 1] == "{}"):
                     if v[j] == "{}":
-                        iv += items
-                        iq += sq
-                        iy += [False] * len(items)
+                        iv += ri
+                        iq += rq
+                        iy += [False] * len(ri)
                     else:
                         iv.append(v[j])
                         iq.append(self.q[j])
@@ -2585,7 +2669,8 @@ def _subst(sc: _Scanner, rec: _Cmd, ws, vals) -> Tuple[Tuple[str, str], ...]:
         return ()                                   # fix round 1: when in doubt, nothing in the command resolves
     got: dict = {}
     split_safe = sc.DIALECT != "bash" or sc.ctx.writes("IFS") == 0
-    for w, val in zip(ws, vals):
+    # fix-unclear 4b: a redirect target is a word too (`P=X.esp; echo x > "$P"`), resolved by the same rules.
+    for w, val in list(zip(ws, vals)) + [(w, "".join(w.b)) for w in rec.redir_words]:
         if "$" not in val:
             continue
         s = assign.expand_word(w.raw, sc.DIALECT, lambda name: sc.lookup(rec, name), split_safe)

@@ -124,7 +124,10 @@ def test_bash_script_file_runs_the_script():
 
 
 @pytest.mark.parametrize("cmd,starts", [
-    ("find Data -name '*.tmp' -delete", ("Data/*.tmp",)),    # RT-A: a -name filter narrows the items to start/NAME
+    # RT-A: a -name filter names start/NAME; fix-unclear: a recursive find still reaches the start's whole subtree,
+    # so the start follows it (only -maxdepth 0|1 provably stops at start/NAME)
+    ("find Data -name '*.tmp' -delete", ("Data/*.tmp", "Data")),
+    ("find Data -maxdepth 1 -name '*.tmp' -delete", ("Data/*.tmp",)),
     ("find Data -type f -delete", ("Data",)),
     ("find a b -type f -delete", ("a", "b")),
     ("find -L Data -delete", ("Data",)),
@@ -141,8 +144,9 @@ def test_find_delete_is_a_delete_on_the_start_paths(cmd, starts):
     "find Data -ok rm -rf {} " + BS + ";",
 ])
 def test_find_exec_runs_its_command_on_the_start_paths(cmd):
-    # RT-A: under a -name filter {} is start/NAME, otherwise the start itself
-    assert find(cmd, "rm").argv == ("-rf", "Data/x" if "-name" in cmd else "Data")
+    # RT-A: under a -name filter {} is start/NAME, otherwise the start itself; fix-unclear: for a delete (or a move)
+    # the start follows start/NAME, since the recursive search reaches its whole subtree
+    assert find(cmd, "rm").argv == (("-rf", "Data/x", "Data") if "-name" in cmd else ("-rf", "Data"))
 
 
 def test_find_exec_shell_string_is_reparsed():

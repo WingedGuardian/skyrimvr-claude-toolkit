@@ -63,6 +63,13 @@ def test_tool_name_empty_string_stays_empty():
     assert claude.extract("{}")["tool_name"] == "unknown"
 
 
+@pytest.mark.parametrize("raw,want", [("0", "0"), ("0.0", "0.0"), ("false", "unknown"), ("null", "unknown")])
+def test_tool_name_falls_back_only_where_jq_does(raw, want):
+    """`jq -r '.tool_name // "unknown"'` falls back on null and false ONLY. Python's `0 in (None, False)` is True
+    (0 == False), so a numeric zero used to become "unknown" where the bash hook printed "0"."""
+    assert claude.extract('{"tool_name": %s}' % raw)["tool_name"] == want
+
+
 def test_numeric_command_is_its_json_text():
     assert claude.extract('{"tool_input": {"command": 12}}')["command"] == "12"
     assert claude.extract('{"tool_input": {"command": 1.5}}')["command"] == "1.5"

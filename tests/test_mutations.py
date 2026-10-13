@@ -3883,6 +3883,8 @@ def test_guard_actually_bites(tmp_path, relpath, find, replace, test_id):
     why = _anchor_skipped_off_windows(result.returncode, result.stdout)
     if why:
         pytest.skip("the anchor test is skipped on this platform, so it cannot kill this twin: " + why)
+    unjudged = _unjudged_twin_message(result.returncode, result.stdout)   # Windows: still red, but never a "survivor"
+    assert not unjudged, unjudged
     # EXIT 1 SPECIFICALLY, not merely non-zero.
     #
     # pytest exits 1 for "a test failed", but 2 for a collection error, 4 for a
@@ -7844,3 +7846,136 @@ assert sorted(p.id for p in MUTATIONS if p.values[3] == "tests/test_guard_corpus
     == sorted(_RETARGET_IR)
 MUTATIONS[:] = [pytest.param(*p.values[:3], _FAST_IR, marks=p.marks, id=p.id) if p.id in _RETARGET_IR else p
                 for p in MUTATIONS]
+
+# fix-unclear triage (pre-tag): older review findings closed here, each with the twin that proves its test bites.
+MUTATIONS += [
+    # Plan 2 minor: `0 in (None, False)` is True in Python, so a numeric tool_name fell back to "unknown" where jq
+    # (`// "unknown"`: null and false only) prints the number.
+    pytest.param("tools/skyguard/adapters/claude.py", "if raw_name is None or raw_name is False else",
+                 "if raw_name in (None, False) else",
+                 "tests/test_skyguard_claude_adapter.py::test_tool_name_falls_back_only_where_jq_does[0-0]",
+                 id="fixu-claude-tool-name-zero-is-not-unknown"),
+    # Plan 2 minor: the `_SELF` twins covered protect-bash, backup and session-kb-guard but not the snapshot wrapper.
+    pytest.param(".claude/hooks/snapshot-before-tool.sh",
+                 '_SELF="${BASH_SOURCE[0]//' + BS * 2 + '//}"', '_SELF="${BASH_SOURCE[0]//' + BS + '//}"',
+                 "tests/test_hooks.py::test_nonblocking_hooks_find_their_engine_however_launched[forward-slash]",
+                 id="fixu-snapshot-wrapper-self-path-normalisation"),
+    pytest.param(".claude/hooks/protect-files.sh",
+                 '_SELF="${BASH_SOURCE[0]//' + BS * 2 + '//}"', '_SELF="${BASH_SOURCE[0]//' + BS + '//}"',
+                 "tests/test_hooks.py::test_protect_files_works_however_it_is_launched[forward-slash]",
+                 id="fixu-protect-files-wrapper-self-path-normalisation"),
+]
+# Plan 8 T6c review: ci.yml's `npm ci` installs and the FOMOD control step had no structural assertion, and the
+# exact-pin test had no twin for "exact, but not the version the lock resolves".
+_DL = "tests/test_dependency_locks.py::"
+_NPM_CI = "        run: npm ci --ignore-scripts --no-audit --no-fund\n"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (".github/workflows/ci.yml", "      - name: Install Node dependencies for the FOMOD smoke\n" + _NPM_CI, "",
+     _DL + "test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them", "fixu-ci-behavior-npm-ci-dropped"),
+    (".github/workflows/ci.yml", "      - name: Install dependencies\n" + _NPM_CI, "",
+     _DL + "test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them", "fixu-ci-node-npm-ci-dropped"),
+    (".github/workflows/ci.yml", '          TOOLKIT_REQUIRE_HARNESS: "1"\n          TOOLKIT_REQUIRE_NODE_DEPS: "1"\n',
+     '          TOOLKIT_REQUIRE_HARNESS: "1"\n',
+     _DL + "test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them", "fixu-ci-suite-node-deps-not-required"),
+    (".github/workflows/ci.yml", "fast-xml-parser@4.3.6", "fast-xml-parser@5.7.3",
+     _DL + "test_ci_keeps_the_fomod_smoke_control_that_must_go_red", "fixu-ci-fomod-control-on-a-safe-version"),
+    (".github/workflows/ci.yml", 'injectable fast-xml-parser 4.3.6: it cannot fail"; exit 1',
+     'injectable fast-xml-parser 4.3.6: it cannot fail"',
+     _DL + "test_ci_keeps_the_fomod_smoke_control_that_must_go_red", "fixu-ci-fomod-control-pass-not-fatal"),
+    ("package.json", '"zod": "3.25.76"', '"zod": "3.25.75"',
+     _DL + "test_package_json_pins_exact_versions_that_the_lock_resolves_to", "fixu-package-json-exact-but-not-the-lock"),
+]]
+
+
+def _unjudged_twin_message(returncode: int, stdout: str) -> str:
+    """Plan 8 FINAL (T6 test infra): with PowerShell missing, the pwsh/powershell anchors SKIP, exit 0, and the gate
+    reported each twin as "The test still PASSED -- it does not guard this bug": 24 false survivors. On Windows (where
+    `_anchor_skipped_off_windows` excuses nothing) a twin whose anchor ran nothing but skips is still red, but it says
+    what happened: NOT JUDGED, with the anchor's own skip reason. "" when the anchor ran anything."""
+    reason = _anchor_skipped_off_windows(returncode, stdout, platform="any")
+    if not reason:
+        return ""
+    return ("NOT JUDGED (not a survivor): the anchor test was SKIPPED, so this twin could not be killed or survive. "
+            "Skip reason: " + reason + ". Provide what the anchor needs (e.g. pwsh / Windows PowerShell on PATH) "
+            "and re-run.")
+
+
+def test_a_skip_only_anchor_is_reported_unjudged_not_as_a_survivor():
+    out = ("s                                                                        [100%]\n"
+           "SKIPPED [1] tests/test_codex_entry.py:45: pwsh not installed (Windows only)\n1 skipped in 0.10s\n")
+    msg = _unjudged_twin_message(0, out)
+    assert msg.startswith("NOT JUDGED") and "pwsh not installed" in msg
+    assert _unjudged_twin_message(0, ".\n1 passed in 0.1s\n") == ""           # a real survivor keeps its own message
+    assert _unjudged_twin_message(1, "F\n1 failed in 0.1s\n") == ""           # a kill is a kill
+    assert _unjudged_twin_message(5, "no tests ran in 0.1s\n") == ""          # a stale anchor keeps its own message
+
+
+MUTATIONS.append(pytest.param(
+    "tests/test_mutations.py", '    reason = _anchor_skipped_off_windows(returncode, stdout, platform=' + '"any")',   # split: unique
+    '    reason = ""', "tests/test_mutations.py::test_a_skip_only_anchor_is_reported_unjudged_not_as_a_survivor",
+    id="fixu-skip-only-anchor-reported-as-survivor"))
+
+# fix-unclear 4b (v4 regression vs 3.x): a write target held in a same-command literal is judged as its literal,
+# through the delete rules' Exec.subst. One twin per clause.
+_W4B = "tests/test_skyguard_writes.py::"
+_W4B_PAIR = _W4B + "test_a_same_command_literal_target_is_judged_as_its_literal["
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/shellparse.py",
+     '    for w, val in list(zip(ws, vals)) + [(w, "".join(w.b)) for w in rec.redir_words]:',
+     "    for w, val in zip(ws, vals):",
+     _W4B + "test_the_parser_substitutes_redirect_targets_too", "fixu4b-parser-subst-skips-redirect-targets"),
+    ("tools/skyguard/shellparse.py", "                cmd.redir_words.append(w)\n", "",
+     _W4B + "test_the_parser_substitutes_redirect_targets_too", "fixu4b-parser-forgets-redirect-words"),
+    ("tools/skyguard/deletes.py",
+     "                      redirects=tuple((op, sub.get(w, w)) for op, w in e.redirects))   # fix-unclear 4b",
+     "                      redirects=e.redirects)",
+     _W4B_PAIR + "redirect-esp]", "fixu4b-substituted-leaves-redirects"),
+    ("tools/skyguard/writes.py", "        e = substituted(e)\n        sed_files", "        sed_files",
+     _W4B_PAIR + "cp-esp]", "fixu4b-writes-ignore-subst"),
+    ("tools/skyguard/anchored.py",
+     '        e = substituted(e)                      # fix-unclear 4b: `P=Out.psc; caprica -o "$P"` is that literal\n',
+     "", _W4B_PAIR + "psc-out]", "fixu4b-psc-out-ignores-subst"),
+    ("tools/skyguard/anchored.py",
+     "        e = substituted(e)                      # fix-unclear 4b: a same-command literal operand is that literal\n",
+     "", _W4B_PAIR + "champollion]", "fixu4b-champollion-ignores-subst"),
+    ("tools/skyguard/anchored.py",
+     '        e = substituted(e)                      # fix-unclear 4b: `R=<install>; git -C "$R" checkout -- .`\n',
+     "", _W4B_PAIR + "git-discard]", "fixu4b-git-discard-ignores-subst"),
+]]
+
+# fix-unclear (find above a root): a name-filtered recursive search started above a protected root reaches its whole
+# subtree (find -delete / -exec rm|mv, fd -x|-X, ForEach-Object's $_). One twin per clause.
+_FA = "tests/test_skyguard_deletes.py::"
+_FA_PAIR = _FA + "test_a_filtered_search_above_the_install_is_judged_as_its_filterless_control["
+_FA_PARSE = _FA + "test_the_find_parse_keeps_the_start_beside_the_narrowed_name"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/shellparse.py",
+     '        deep = not any(v[x] == "-maxdepth" and v[x + 1] in ("0", "1") for x in range(j, n - 1))',
+     "        deep = False", _FA_PAIR + "find-name-delete]", "fixu-find-reach-never-deep"),
+    ("tools/skyguard/shellparse.py", 'v[x + 1] in ("0", "1") for x in range(j, n - 1))',
+     'False for x in range(j, n - 1))', _FA_PARSE, "fixu-find-maxdepth1-not-narrowed"),
+    ("tools/skyguard/shellparse.py", "                ri, rq = reach(items, sq)\n", "                ri, rq = items, sq\n",
+     _FA_PAIR + "find-name-delete]", "fixu-find-delete-ignores-reach"),
+    ("tools/skyguard/shellparse.py", "if runs in deletes.DELETE_PROGRAMS | deletes.MOVE_PROGRAMS",
+     "if False", _FA_PAIR + "find-exec-rm]", "fixu-find-exec-delete-ignores-reach"),
+    ("tools/skyguard/shellparse.py", "if runs in deletes.DELETE_PROGRAMS | deletes.MOVE_PROGRAMS",
+     "if runs in deletes.DELETE_PROGRAMS", _FA_PAIR + "find-exec-mv-away]", "fixu-find-exec-move-ignores-reach"),
+    ("tools/skyguard/shellparse.py", '            if p in ("fd", "fdfind"):\n                return self._fd(k)\n', "",
+     _FA_PAIR + "fd-exec-batch-rm]", "fixu-fd-not-parsed"),
+    ("tools/skyguard/shellparse.py", "            if iv and not hit:", "            if False:",
+     _FA_PAIR + "fd-exec-batch-rm]", "fixu-fd-no-placeholder-gets-no-paths"),
+    ("tools/skyguard/shellparse.py", "                if v[x] in _FD_PLACEHOLDERS:", "                if False:",
+     _FA_PAIR + "fd-exec-mv-away]", "fixu-fd-placeholder-not-replaced"),
+    ("tools/skyguard/shellparse.py", "                sp.append(v[j + 1])\n", "",
+     _FA_PAIR + "fd-search-path-rm]", "fixu-fd-search-path-dropped"),
+    ("tools/skyguard/deletes.py", ' or (e.dialect == "powershell" and _PS_PIPE_ITEM.match(w))) \\', ") \\",
+     _FA_PAIR + "ps-foreach-remove]", "fixu-ps-foreach-item-not-piped"),
+    ("tools/skyguard/deletes.py", r'_PS_PIPE_ITEM = re.compile(r"\$(?:_|psitem)(?:\.\w+)?$", re.IGNORECASE)',
+     r'_PS_PIPE_ITEM = re.compile(r"\$(?:_|psitem)$", re.IGNORECASE)',
+     _FA_PAIR + "ps-foreach-psitem-fullname]", "fixu-ps-foreach-item-property-not-piped"),
+    ("tools/skyguard/shellparse.py", 'if self.cd != "?" or _is_abs(s)]', "if True]",
+     _FA + "test_a_filtered_search_that_cannot_reach_a_root_stays_allowed[find-after-unknown-cd]",
+     "fixu-find-reach-after-unknown-cd"),
+    ("tools/skyguard/shellparse.py", 'if self.cd != "?" or _is_abs(s)]', 'if self.cd != "?"]',
+     _FA_PAIR + "find-abs-start-after-unknown-cd]", "fixu-find-abs-start-after-unknown-cd"),
+]]

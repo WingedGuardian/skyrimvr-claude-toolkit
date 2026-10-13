@@ -545,3 +545,69 @@ def test_gnu_find_deletes_are_judged_on_every_dialect(shell, command, name):
 def test_a_find_that_deletes_nothing_protected_stays_allowed(shell, command):
     """The twins: find.exe's own text search, a GNU search, and a delete outside the protected folders."""
     assert decide(command.replace("<i>", INSTALL), shell=shell) == (("allow", ""), set())
+
+
+# ---- fix-unclear: a recursive search started ABOVE a protected root reaches its whole subtree; a name filter only
+# narrows which files match, so the verdict is the filterless control's.
+_ABOVE = "C:/GOG Games"                  # GAME's parent
+_FIND_ABOVE = [   # (id, shell, command, filterless control)
+    ("find-name-delete", "bash", "find '" + _ABOVE + "' -name Skyrim.esm -delete", "find '" + _ABOVE + "' -delete"),
+    ("find-iname-delete", "bash", "find '" + _ABOVE + "' -iname '*.esm' -delete", "find '" + _ABOVE + "' -delete"),
+    ("find-maxdepth2-delete", "bash", "find '" + _ABOVE + "' -maxdepth 2 -name Skyrim.esm -delete",
+     "find '" + _ABOVE + "' -delete"),
+    ("find-exec-rm", "bash", "find '" + _ABOVE + "' -name Skyrim.esm -exec rm {} +",
+     "find '" + _ABOVE + "' -exec rm {} +"),
+    ("find-exec-mv-away", "bash", "find '" + _ABOVE + "' -name Skyrim.esm -exec mv {} /tmp \\;",
+     "find '" + _ABOVE + "' -exec mv {} /tmp \\;"),
+    ("fd-exec-batch-rm", "bash", "fd Skyrim.esm '" + _ABOVE + "' -X rm", "find '" + _ABOVE + "' -exec rm {} +"),
+    ("fd-exec-mv-away", "bash", "fd Skyrim.esm '" + _ABOVE + "' -x mv {} /tmp",
+     "find '" + _ABOVE + "' -exec mv {} /tmp \\;"),
+    ("fd-search-path-rm", "bash", "fd -e esm --search-path '" + _ABOVE + "' -x rm {}",
+     "find '" + _ABOVE + "' -exec rm {} +"),
+    ("find-after-literal-cd-above", "bash", "cd '" + _ABOVE + "' && find . -name Skyrim.esm -delete",
+     "cd '" + _ABOVE + "' && find . -delete"),
+    ("find-abs-start-after-unknown-cd", "bash", 'cd "$X" && find \'' + _ABOVE + "' -name Skyrim.esm -delete",
+     'cd "$X" && find \'' + _ABOVE + "' -delete"),
+    ("ps-foreach-remove", "powershell",
+     "Get-ChildItem '" + _ABOVE + "' -Recurse -Filter Skyrim.esm | ForEach-Object { Remove-Item $_ }",
+     "Get-ChildItem '" + _ABOVE + "' -Recurse -Filter Skyrim.esm | Remove-Item"),
+    ("ps-foreach-psitem-fullname", "powershell",
+     "Get-ChildItem '" + _ABOVE + "' -Recurse | % { Remove-Item $PSItem.FullName }",
+     "Get-ChildItem '" + _ABOVE + "' -Recurse | Remove-Item"),
+]
+
+
+@pytest.mark.parametrize("shell,command,control", [pytest.param(*r[1:], id=r[0]) for r in _FIND_ABOVE])
+def test_a_filtered_search_above_the_install_is_judged_as_its_filterless_control(shell, command, control):
+    want = decide(control, cwd="C:/w", shell=shell)
+    assert want[0][0] == "deny", ("the control must be refused, or this pair proves nothing", control)
+    assert decide(command, cwd="C:/w", shell=shell)[0][0] == "deny", command
+
+
+@pytest.mark.parametrize("shell,command,cwd", [
+    pytest.param("bash", "find . -name '*.pyc' -delete", "C:/w", id="find-outside"),   # holds no protected root
+    pytest.param("bash", "find /tmp -name x.esm -delete", "C:/w", id="find-tmp"),
+    pytest.param("bash", "find '" + _ABOVE + "' -maxdepth 1 -name Skyrim.esm -delete", "C:/w",
+                 id="find-above-maxdepth1"),                                     # provably direct children only
+    pytest.param("bash", "find '" + _ABOVE + "' -name Skyrim.esm -exec cat {} +", "C:/w",
+                 id="find-above-exec-cat"),                                      # not a delete or a move
+    pytest.param("bash", "fd -e pyc . -x rm", "C:/w", id="fd-outside-rm"),
+    # priced (1 real item): after a cd the parser cannot follow, `find . -name X -delete` is `rm X` there, not a wipe
+    # of an unknown folder (S-DEL-UNKNOWN-DIR)
+    pytest.param("bash", 'S="C:/scratch"; cd "$S/tools" && find . -name "*.rej" -delete', "C:/w",
+                 id="find-after-unknown-cd"),
+    pytest.param("bash", "fd Skyrim.esm '" + _ABOVE + "' -x cat", "C:/w", id="fd-above-exec-cat"),
+    pytest.param("powershell", "Get-ChildItem . -Recurse -Filter *.pyc | ForEach-Object { Remove-Item $_ }", "C:/w",
+                 id="ps-foreach-outside"),
+])
+def test_a_filtered_search_that_cannot_reach_a_root_stays_allowed(shell, command, cwd):
+    assert decide(command, cwd=cwd, shell=shell)[0][0] == "allow", command
+
+
+def test_the_find_parse_keeps_the_start_beside_the_narrowed_name():
+    ex = shellparse.parse("find /a -name x.esm -delete", "bash").execs
+    assert [e.argv for e in ex if e.program == "find.delete"] == [("/a/x.esm", "/a")]
+    ex = shellparse.parse("find /a -maxdepth 1 -name x.esm -delete", "bash").execs
+    assert [e.argv for e in ex if e.program == "find.delete"] == [("/a/x.esm",)]
+    ex = shellparse.parse("find /a -name x.esm -exec cp {} /b \\;", "bash").execs
+    assert {e.argv for e in ex if e.program == "cp"} == {("/a/x.esm", "/b")}     # a copy still names the file

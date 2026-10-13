@@ -52,8 +52,9 @@ backstop); a copy whose unresolved destination does not name a Data folder gets 
 `touch` and `truncate` are not write primitives; a copy or move onto an ordinary (non-plugin, non-config) file in
 Data/ gets no note (S-MOVE-INSTALL was removed in Task 9 fix round 1: 107 of 107 hits in history were the user's
 deliberate deploys); on a parse failure the S-WRITE-INSTALL note is not attempted;
-a redirect onto a variable assigned in the same command (`P=X.esp; echo x > "$P"`) is unresolved, so it gets no
-deny (the write rules do not read Exec.subst; Task 7b wired it to the delete and registry rules only); `install` (`install -m644 a X.esp`) and `ln -sf a X.esp` are not
+a target held in a variable that is NOT a same-command literal (unassigned here, assigned in a branch, written
+twice; assign.py's rules) stays unresolved -- one that is (`P=X.esp; echo x > "$P"`) is judged as its literal, via
+the delete rules' Exec.subst (fix-unclear 4b); `install` (`install -m644 a X.esp`) and `ln -sf a X.esp` are not
 copy primitives.
 """
 from __future__ import annotations
@@ -64,7 +65,7 @@ import re
 from typing import List, Mapping, NamedTuple, Optional, Tuple
 
 from . import shellparse, targets
-from .deletes import _plain_operands, interpreter_code
+from .deletes import _plain_operands, interpreter_code, substituted
 from .grep import _compile
 from .shellparse import ps_param
 
@@ -647,6 +648,9 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     notes = {k: [] for k in ADVICE_ORDER}
 
     for e in parsed.execs:
+        # fix-unclear 4b: a target held in a same-command literal (`P=X.esp; echo x > "$P"`, `$p = ...; Set-Content
+        # $p`) is judged as its literal -- the delete rules' own resolver (Exec.subst), argv and redirects alike.
+        e = substituted(e)
         sed_files = set(_sed_files(e.argv)) if e.program == "sed" else set()
         winpath = bool(sed_files) and any(sed_win_replacement(s) for s in _sed_scripts(e.argv))
         text_mode = bool(sed_files) and not sed_binary(e.argv)

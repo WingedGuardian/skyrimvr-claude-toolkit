@@ -91,7 +91,9 @@ def extract(payload_text: str) -> dict:
         d = None
     d = d if isinstance(d, dict) else {}
     ti = d.get("tool_input") if isinstance(d.get("tool_input"), dict) else {}
-    tool_name = "unknown" if d.get("tool_name") in (None, False) else _sub(d.get("tool_name"))
+    raw_name = d.get("tool_name")
+    # jq's `// "unknown"` falls back on null and false only. Identity, not `in (None, False)`: 0 == False in Python.
+    tool_name = "unknown" if raw_name is None or raw_name is False else _sub(raw_name)
     cwd = d.get("cwd")
     return {
         "empty": empty,

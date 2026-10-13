@@ -65,7 +65,7 @@ import re
 from typing import List, Mapping, Optional, Tuple
 
 from . import shellparse, targets
-from .deletes import interpreter_code
+from .deletes import interpreter_code, substituted
 from .grep import grep
 from .shellparse import ps_param
 
@@ -216,6 +216,7 @@ def psc_out(command: str, parsed) -> str:
         m = re.search(r"[^\s\"'/\\]{0,255}\.psc", command, re.IGNORECASE) if grep(PSC_OUT_TEXT, command) else None
         return m.group(0) if m else ""
     for e in parsed.execs:
+        e = substituted(e)                      # fix-unclear 4b: `P=Out.psc; caprica -o "$P"` is that literal
         if e.program == "?":
             if grep(PSC_OUT_TEXT, e.segment):
                 m = re.search(r"[^\s\"'/\\]{0,255}\.psc", e.segment, re.IGNORECASE)
@@ -286,6 +287,7 @@ def champollion(command: str, parsed, roots, cwd: str, env: Mapping[str, str]) -
             continue
         if e.program != "champollion":
             continue
+        e = substituted(e)                      # fix-unclear 4b: a same-command literal operand is that literal
         for w in _champollion_operands(e.argv):
             a = targets.resolve_operand(e, w, cwd, env)
             if a is None:
@@ -453,6 +455,7 @@ def git_discard(parsed, roots, cwd: str, env: Mapping[str, str]) -> str:
     for e in parsed.execs:
         if e.program != "git":
             continue
+        e = substituted(e)                      # fix-unclear 4b: `R=<install>; git -C "$R" checkout -- .`
         split = _git_split(e.argv)
         if split is None or not _git_discards(split[1], split[2]):
             continue
