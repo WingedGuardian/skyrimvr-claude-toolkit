@@ -135,6 +135,7 @@
 
 ### Fixed
 
+- **ReSaver lib jars:** every file of the pinned archive's `lib/` now has a pinned SHA-256 beside `ReSaver.jar`'s, and `bash tools/resaver-cli.sh verify` checks `ReSaver.jar` and `lib/` against them (required files present, any present file the pinned bytes, no unknown jar on the classpath); only `ReSaver.jar` was pinned, and nothing checked it.
 - **Devcontainer version checks:** the JDK and .NET SDK checks capture the version output before testing it; piped into `grep -q` under `pipefail` they could fail a correct image build when grep exited first and the writer died of SIGPIPE. Not yet built in Docker (Docker legs).
 - **Garbled snapshot rate stamp:** an unreadable `.last_snapshot` still makes that call compare every script despite the 60-second rate limit and rewrite the stamp, and now says so once in the audit log (`RATE-STAMP`); it was silent.
 - **Adapted agents in the health reports:** `hook-canary` and `skydoctor` now report each agent adapted through ADAPTING.md (one row per `tools/adapters/<name>/adapter.py`, named by its `AGENT_NAME` slot) from the heartbeats its adapter and the engine write; they knew only Claude Code and Codex.
@@ -296,7 +297,6 @@
 - **Animated NIFs:** Blender round trips can drop controllers.
 - **Spriggit bytes:** a round trip may reorder records without changing the re-serialized content.
 - **Spriggit in CI:** CI restores the pinned Spriggit with the .NET 10 SDK but never runs it; the serialize/deserialize round trip on .NET 10 was checked by hand, not by CI.
-- **ReSaver lib jars:** only `ReSaver.jar` has a pinned SHA-256; the `lib/` jars from the same archive are not hashed, so take them from the archive you checked.
 - **CrashLogger `__fastfail` dumps:** CrashLogger 1.24.0 added this dump class and no real one has been run through `crash-triage.py`; a dump it cannot read is counted as unparsed, not given a signature, so read that dump by hand.
 - **Python 3.8/3.9:** engine compatibility is retained but these versions are outside the tested range.
 - **Live release checks:** a clean suite and review do not substitute for the remaining manual and live-agent batch.

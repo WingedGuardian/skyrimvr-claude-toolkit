@@ -8090,3 +8090,16 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (".devcontainer/Dockerfile", '    && sdks="$(/usr/local/dotnet/dotnet --list-sdks)" \\\n    && [[ $\'\\n\'"$sdks" == *$\'\\n\'"${DOTNET_SDK_VERSION} "* ]]',
      '    && /usr/local/dotnet/dotnet --list-sdks | grep -q "^${DOTNET_SDK_VERSION} "', _FL6, "fl6-sdk-check-pipes-into-grep-q"),
 ]]
+
+# fix-limits 5: `resaver-cli.sh verify` checks ReSaver.jar and every lib/ file against the pinned SHA-256s.
+_FL5 = "tests/test_resaver_cli_verify.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/resaver-cli.sh", '      [ "$kind" = required ] && problems+=("$rel is missing")', "      true",
+     _FL5 + "test_a_missing_required_jar_is_named_and_a_missing_optional_one_is_not", "fl5-missing-required-jar-passes"),
+    ("tools/resaver-cli.sh", '    [ "$got" = "$want" ] || problems+=', '    true || problems+=',
+     _FL5 + "test_a_lib_jar_with_other_bytes_is_named", "fl5-hash-never-compared"),
+    ("tools/resaver-cli.sh", "'$3 == r { f = 1 } END { exit !f }'", "'{ f = 1 } END { exit !f }'",
+     _FL5 + "test_an_unknown_jar_on_the_classpath_is_named_but_another_file_is_not", "fl5-unknown-jar-accepted"),
+    ("tools/resaver-cli.sh", "*.jar) ;; *) continue ;; esac", "*) ;; esac",
+     _FL5 + "test_an_unknown_jar_on_the_classpath_is_named_but_another_file_is_not", "fl5-non-jar-files-flagged"),
+]]

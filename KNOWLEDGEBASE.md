@@ -958,7 +958,7 @@ to stock parsing automatically (basic ops unaffected).
 
 **Name resolution:** ReSaver works in FormIDs. Resolve FormID → EditorID on demand with `tools/resaver-resolve-names.js` (xeditlib-backed) so dumps and reference reports are human-readable.
 
-**Requirements:** a JDK plus ReSaver's `ReSaver.jar` + its `lib/` folder in `tools/resaver-cli/`. The wrapper auto-compiles its small driver on first run.
+**Requirements:** a JDK plus ReSaver's `ReSaver.jar` + its `lib/` folder in `tools/resaver-cli/`; `bash tools/resaver-cli.sh verify` checks both against the pinned SHA-256s. The wrapper auto-compiles its small driver on first run.
 
 ## Co-save (.skse) Structural Survey (cosave-info)
 

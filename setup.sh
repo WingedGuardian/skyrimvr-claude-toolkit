@@ -1113,7 +1113,7 @@ echo "  Blender      -- NIF repair + render-to-PNG (headless): 4.2.9 LTS (SHA-25
 echo "                  + the PyNifly Blender add-on, the same 27.2.0 io_scene_nifly.zip"
 echo "  NifSkope     -- independent visual NIF render gate: v2.0.dev9 from the hexabits fork (SHA-256 in Pinned downloads)"
 echo "  ReSaver CLI  -- headless .ess parse/cross-ref/clean: ReSaver 6.0.643 (FallrimTools, Nexus mod 5031); drop"
-echo "                  ReSaver.jar + lib/ into tools/resaver-cli/ and check ReSaver.jar's SHA-256 in Pinned downloads;"
+echo "                  ReSaver.jar + lib/ into tools/resaver-cli/, then bash tools/resaver-cli.sh verify;"
 echo "                  needs JDK 17+ (21 tested); the wrapper auto-compiles its driver on first run (tools/resaver-cli.sh)"
 echo "  cosave-info  -- read-only SKSE .skse co-save survey (bundled): bash tools/cosave-cli.sh <save.skse>"
 echo "  DevBench     -- LIVE in-game inspect/console/Papyrus while you play:"

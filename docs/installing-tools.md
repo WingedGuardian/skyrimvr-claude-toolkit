@@ -84,6 +84,38 @@ compare the hash of the file named in the *File* column — `ReSaver.jar` (its m
 `Implementation-Build: 643`) and `bsarch.exe` (it prints `BSArch v1.0`). Those two hashes are of the tested files
 themselves.
 
+**ReSaver's `lib/`.** The same archive's `target/lib/` becomes `tools/resaver-cli/lib/`, and every jar there is on
+the driver's classpath, so each file is pinned too. *Required* files are the ones the driver was tested with; the
+others (the GUI's JavaFX, picocli, the build's JUnit) may be left out, but a file that is present must be the
+pinned one, and a jar not in this table must not be there. `bash tools/resaver-cli.sh verify` checks
+`ReSaver.jar` and `lib/` against these hashes (it needs no JDK). MEASURED 2026-10-13: hashed from an extraction of
+`Resaver 6.0.643-5031-6-0-643-1694115572.7z` whose `ReSaver.jar` matches the row above; the four required jars are
+byte-identical to the tested install's.
+
+| `lib/` file | Required | SHA-256 |
+|---|---|---|
+| `annotations-16.0.2.jar` | yes | `245abad9a39eab1266ac9a8796980f462577e708ef3f6d43be2e008e4b72b9b4` |
+| `j2html-1.5.0.jar` | yes | `de40093737108d75f5bf832cce596308e8f90c36d36383b7aec40dff224d1e64` |
+| `juniversalchardet-1.0.3.jar` | yes | `757bfe906193b8b651e79dc26cd67d6b55d0770a2cdfb0381591504f779d4a76` |
+| `lz4-pure-java-1.7.0.jar` | yes | `452da15ae42910d6475a0b9d73a404cbfd37d8ebe29558ad54439fe4b0d4e089` |
+| `apiguardian-api-1.1.2.jar` | no | `b509448ac506d607319f182537f0b35d71007582ec741832a1f111e5b5b70b38` |
+| `javafx-base-11-win.jar` | no | `901e382f96b53c91a949f91b07201ec5433bf3c864186cb50446a6b0951aa778` |
+| `javafx-base-11.jar` | no | `df7ef2e994be4a86153be0aaf0dcafa697ba4be0db55caefb8bda85e02d66ead` |
+| `javafx-controls-11-win.jar` | no | `af625a0b813f051bcb5bd1f00a35af61648264d7b792aabcff032f57dfbfa9a4` |
+| `javafx-controls-11.jar` | no | `dec3f34ca06ca9be71ce8c72646a31eb751b1df5a2b354dcd10fb64df842da4f` |
+| `javafx-graphics-11-win.jar` | no | `5a278411a777a1215b1b6c0c6c2192c94857fe0253a6de805c67a9c9d29d29d1` |
+| `javafx-graphics-11.jar` | no | `6b846071b1fdae103f1b0e80c988d9d0b9cae37391b00f8ea3dc11e1e8e021b0` |
+| `javafx-swing-11-win.jar` | no | `585ec5d61cbbe53df15e2713527b79364ac281de4fbc11d862a04c52f8ecc578` |
+| `javafx-swing-11.jar` | no | `ba599dc31f2f8f098346198ce0125c2aee5358f89e13e7f59cdb290ab6807f59` |
+| `junit-jupiter-5.8.2.module` | no | `d9df47b3c7431883ab1f1f1d820c2980ebcbd753edc4c82b99bf5ec2c533ad2e` |
+| `junit-jupiter-api-5.8.2.jar` | no | `1808ee87e0f718cd6e25f3b75afc17956ac8a3edc48c7e9bab9f19f9a79e3801` |
+| `junit-jupiter-engine-5.8.2.jar` | no | `753b7726cdd158bb34cedb94c161e2291896f47832a1e9eda53d970020a8184e` |
+| `junit-jupiter-params-5.8.2.jar` | no | `d1c22d6fe5483568c08c8913f34abd2303490c3480ce6c18a2ea31c65e44102a` |
+| `junit-platform-commons-1.8.2.jar` | no | `d2e015fca7130e79af2f4608dc54415e4b10b592d77333decb4b1a274c185050` |
+| `junit-platform-engine-1.8.2.jar` | no | `0b7d000f8c3e8e5f7d6b819649936e7b9938314e87c8f983805218ea57567e59` |
+| `opentest4j-1.2.0.jar` | no | `58812de60898d976fb81ef3b62da05c6604c18fd4a249f5044282479fc286af2` |
+| `picocli-4.6.3.jar` | no | `b0a5159e926de8084ff066025142270443533656bc599b8bb31d14d11fd138a4` |
+
 ## Why some tools have wrappers
 
 1. **AutoMod** — `tools/automod-cli.sh` invokes the **prebuilt `spookys-automod.dll`** directly rather than `dotnet run`. This fixes the per-call recompile / MSB1025 failures that the old `dotnet run` form produced; rebuild once with `--rebuild` after changing AutoMod source.
