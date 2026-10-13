@@ -115,6 +115,7 @@ ADAPTER_REQUIRED = (
     "tools/adapting/examples/json_deny.slots.py",
     "tools/adapting/examples/exit2.slots.py",
     "tools/hook-canary.sh",
+    "tools/skyguard/doctor.py",
     "tools/skyguard/run.py",
     "tools/skyguard/engine.py",
     "tools/skyguard/health.py",
