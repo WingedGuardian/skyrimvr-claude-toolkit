@@ -10,7 +10,7 @@
 | Plan 4 in master | yes (`git merge-base --is-ancestor plan4 master`) |
 | Plan 5 in master | **NO** -- `plan5` is not yet an ancestor of `master`. plan6 was cut from `plan5` (544efd4) by ledger ruling (saves the Task 17 wait); it must merge after plan5, with clean ancestry. |
 | `price.py` and `intended.jsonl` | `scripts/guard-corpus/price.py` and `tests/guard_corpus/intended.jsonl` both present. |
-| Plan 5 Task 16 numbers | exist (commit `9391c58`, section "Inputs for the side-effects plan" in `2026-10-XX-plan5-pricing.md`); cited below, not re-measured |
+| Plan 5 Task 16 numbers | exist (commit `9391c58`, section "Inputs for the side-effects plan" in `2026-10-02-plan5-pricing.md`); cited below, not re-measured |
 | Task 5 committed (mechanism decision) | yes (`8284208`; user ruling in the ledger: M-D, default OFF, R3) |
 | No heavy run in progress | the two runs below were sequential; other agents' sessions were active |
 

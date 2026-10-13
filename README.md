@@ -324,7 +324,7 @@ half-locked (`drift`) or read-only but not locked by the toolkit, plus the files
 - **Without Python:** double-click `tools\skyguard-unlock.cmd`. It unlocks every target (no lift is recorded), re-checks
   every file, prints `NOT unlocked` and exits non-zero if one is still locked; `lock lock`, or the next session start,
   locks them again. MEASURED on the shipped script with Python off `PATH` (only `C:\Windows\System32` on it): 6 of 6
-  masters unlocked, no toolkit deny entry left (`docs/superpowers/measurements/2026-10-XX-plan6-e2e.md`, row 9).
+  masters unlocked, no toolkit deny entry left (`docs/superpowers/measurements/2026-10-05-plan6-e2e.md`, row 9).
 - **Last resort, by hand,** for one file `F`, in this order: `icacls "F" /remove:d *<your SID>` and then
   `attrib -R "F"`. Your SID is the `S-1-5-21-...` value `whoami /user` prints (call `System32\whoami.exe`, not Git's).
   `/remove:d` removes every explicit deny entry for your account on that file. Afterwards `icacls "F"` should list no
@@ -352,7 +352,7 @@ you run `lock lock`. An unlock there can therefore outlast its hour.
 to `.claude/backups/AUDIT_LOG.txt` and put in the model's context, the lift notes and session-start banners go to the
 model's context, and `bash tools/skydoctor` shows every lift. None of them is sent through a channel that is shown to
 you: the toolkit's hooks emit model context (`additionalContext`) only (MEASURED in headless Claude, `claude -p`:
-every note arrived as `additionalContext`; `docs/superpowers/measurements/2026-10-XX-plan6-e2e.md`). The interactive
+every note arrived as `additionalContext`; `docs/superpowers/measurements/2026-10-05-plan6-e2e.md`). The interactive
 Claude screen has not been checked, and for Codex it is unmeasured, so the toolkit claims only that **every lift is
 reported to the agent, recorded in the state file, and shown by `skydoctor`**, not that it is shown to you.
 
@@ -429,7 +429,7 @@ are not classified; this gap also exists in v3.9.1. The guard does not provide a
   live install, **137.7 ms** with all 11,898 hard-linked, against a gate of 150 ms; the slowest single call shape is
   148.5 / 150.7 ms at p95. Charging the recovery snapshot's once-a-minute re-read (13.8 ms) to every walking call
   outside the rate window, a conservative sensitivity check rather than the gate, gives 143.7 ms and **151.5 ms, 1.5 ms
-  over the gate** on the fully linked tree (`docs/superpowers/measurements/2026-10-XX-plan6-pricing.md`, Task 18 step
+  over the gate** on the fully linked tree (`docs/superpowers/measurements/2026-10-04-plan6-pricing.md`, Task 18 step
   3). The first session builds its baseline over about 100 s of work spread across the session start and the first
   calls.
 - **Recovery snapshots** also copy, before a shell command that may change them, your `plugins.txt`, `loadorder.txt`
