@@ -4,6 +4,7 @@
 
 ### Added
 
+- **GOG and Epic SE/AE folders:** the guard (DevBench-save checks, the plugins.txt lookup), the xelib load-order reader and the triage tools now also look under `Skyrim Special Edition GOG` and `Skyrim Special Edition EPIC`, after the Steam folder; one list in `tools/skyguard/paths.py`.
 - **`mirror-launch-logs`:** a one-shot, append-only copy of the SKSE, crash and Papyrus logs into `.claude/backups/log-mirror/`; a grown log costs only its new bytes, and a truncated or replaced one keeps the previous copy instead of overwriting it.
 - **`archive-triage`:** shows what a mod archive would change before it is installed (NEW / SAME / CHANGED / NO CRC by CRC against the installed file), every destination plainly with any outside `Data/` flagged, FOMOD options as separate groups, and on VR a DLL build-marker heuristic; read-only, through 7-Zip.
 - **Shared tool plumbing:** `tools/skyrim_paths.py` finds the game folder the way the guard's tool lookups do (`$SKYRIM_GAME_ROOT`, then `skyrim-paths.env`, then the toolkit folder) and finds 7-Zip (`$SEVENZIP`, then `7z`/`7zz`/`7za` on PATH, then Program Files); 7-Zip 26.00 is pinned with SHA-256 in `docs/installing-tools.md`.

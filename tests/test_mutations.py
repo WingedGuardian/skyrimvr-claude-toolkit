@@ -1014,12 +1014,36 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
         id="skse-status-verdict-by-position",
     ),
     pytest.param(
-        # Drop the GOG / Epic folders: a GOG SE/AE install's log is never found.
-        "tools/skyrim_paths.py",
-        '''GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition", "Skyrim Special Edition GOG",''',
-        '''GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition",''',
+        # Drop the GOG / Epic folders from the one list: a GOG SE/AE install's SKSE log is never found by the tools.
+        "tools/skyguard/paths.py",
+        'GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition", "Skyrim Special Edition GOG", "Skyrim Special Edition EPIC",',
+        'GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition",',
         "tests/test_skse_load_status.py::test_discovery_finds_a_gog_se_folder",
         id="game-dirs-without-gog",
+    ),
+    pytest.param(
+        # The same, judged by the guard: a DevBench save over an existing GOG save is no longer recognised.
+        "tools/skyguard/paths.py",
+        'GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition", "Skyrim Special Edition GOG", "Skyrim Special Edition EPIC",',
+        'GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition",',
+        "tests/test_skyguard_mcp.py::test_the_gog_and_epic_se_folders_are_documents_fallbacks",
+        id="guard-game-dirs-without-gog",
+    ),
+    pytest.param(
+        # GOG before Steam SE: a stale GOG plugins.txt would outrank the Steam one.
+        "tools/skyguard/paths.py",
+        'GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition", "Skyrim Special Edition GOG", "Skyrim Special Edition EPIC",',
+        'GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition GOG", "Skyrim Special Edition", "Skyrim Special Edition EPIC",',
+        "tests/test_paths_precedence.py::test_python_lookup",
+        id="guard-game-dirs-gog-before-steam",
+    ),
+    pytest.param(
+        # The JS twin of the list loses the GOG / Epic folders: Python and Node disagree on plugins.txt.
+        "tools/xelib/active-plugins.js",
+        "const GAME_FOLDERS = ['Skyrim VR', 'Skyrim Special Edition', 'Skyrim Special Edition GOG',",
+        "const GAME_FOLDERS = ['Skyrim VR', 'Skyrim Special Edition',",
+        "tests/test_paths_precedence.py::test_node_agrees_with_python",
+        id="js-game-dirs-without-gog",
     ),
     pytest.param(
         # A SKYRIM_GAME_ROOT the guard's reader refuses quietly becomes "the toolkit folder".

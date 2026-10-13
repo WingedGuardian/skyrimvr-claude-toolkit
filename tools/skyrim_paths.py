@@ -18,12 +18,10 @@ import os
 import sys
 from pathlib import Path
 
-# Priority order. VR first: this toolkit is VR-first, and where both exist the
-# rival is usually the leftover. The GOG and Epic builds of SE/AE write under
-# their own folder names (SKSE64's SAVE_FOLDER_NAME, skse64_common/skse_version.h
-# in ianpatt/skse64), so a Steam-only list misses them entirely.
-GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition", "Skyrim Special Edition GOG",
-                "Skyrim Special Edition EPIC", "Skyrim")
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # tools/, for the guard's paths module
+# Priority order, VR first (where both exist the rival is usually the leftover), then SE/AE including its GOG
+# and Epic folders. ONE list, owned by the guard: a second copy here would drift from the one the guard uses.
+from skyguard.paths import GAME_FOLDERS  # noqa: E402
 
 
 def my_games() -> Path:

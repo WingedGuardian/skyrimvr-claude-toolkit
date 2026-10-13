@@ -19,8 +19,10 @@ const fs = require('fs');
 const path = require('path');
 
 // Candidate per-game folders under %LOCALAPPDATA%, in priority order. VR is first because
-// that is the case the SSE-mode loader gets wrong; SE/AE/LE fall through.
-const GAME_FOLDERS = ['Skyrim VR', 'Skyrim Special Edition', 'Skyrim'];
+// that is the case the SSE-mode loader gets wrong; SE/AE (Steam, then GOG, then Epic) and LE fall through.
+// Mirrors tools/skyguard/paths.py GAME_FOLDERS; tests/fixtures/paths_precedence.json holds the two together.
+const GAME_FOLDERS = ['Skyrim VR', 'Skyrim Special Edition', 'Skyrim Special Edition GOG',
+    'Skyrim Special Edition EPIC', 'Skyrim'];
 
 function localAppData() {
     return process.env.LOCALAPPDATA

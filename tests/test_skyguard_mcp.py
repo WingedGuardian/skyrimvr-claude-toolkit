@@ -228,6 +228,15 @@ def test_documents_is_the_fallback_when_no_config_dir_has_saves(tmp_path):
     assert mcp_rules.save_exists("Existing", r, ENV0) is None
 
 
+@pytest.mark.parametrize("game", ["Skyrim Special Edition GOG", "Skyrim Special Edition EPIC"])
+def test_the_gog_and_epic_se_folders_are_documents_fallbacks(tmp_path, game):
+    """GOG and Epic SE/AE keep their saves under their own My Games folder (SKSE64's SAVE_FOLDER_NAME): a DevBench
+    save over an existing save there must still be recognised as one."""
+    env = _home(tmp_path, game)
+    r = paths.roots("C:/t11/x", "", {})
+    assert mcp_rules.save_exists("Existing", r, env) is True
+
+
 def test_a_declared_config_dir_outranks_documents(tmp_path, cfg):
     env = _home(tmp_path)
     other = tmp_path / "cfg2" / "Saves"

@@ -459,7 +459,12 @@ def roots(root_posix: str, root_win: str, env: EnvLike) -> Roots:
 # ---------------------------------------------------------------------------------------------------------
 # plugins.txt lookup (tools; the Codex precedence, kept in step with tools/xelib/active-plugins.js)
 # ---------------------------------------------------------------------------------------------------------
-GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition", "Skyrim")
+# The per-game folder names under Documents/My Games and %LOCALAPPDATA%, in priority order. THE one list: the triage
+# tools' tools/skyrim_paths.py imports it, and tools/xelib/active-plugins.js mirrors it (tests/fixtures/
+# paths_precedence.json holds the two to the same answers). VR first; the GOG and Epic builds of SE/AE write under
+# their own names (SKSE64's SAVE_FOLDER_NAME, skse64_common/skse_version.h in ianpatt/skse64), after the Steam one.
+GAME_FOLDERS = ("Skyrim VR", "Skyrim Special Edition", "Skyrim Special Edition GOG", "Skyrim Special Edition EPIC",
+                "Skyrim")
 
 
 def plugins_txt(environ: Mapping[str, str], default_paths_files=()) -> str:
