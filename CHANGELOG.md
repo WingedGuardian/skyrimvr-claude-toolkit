@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`mod-release-review` skill:** a review before publishing a Skyrim mod, scoped to what changed since the last published version; it changes nothing while reviewing and brings every finding to the author before any fix.
+- **In-place sed guard (S-SED-CRLF):** `sed -i` without `-b` on a file in the install, config or MO2 folder (or a game INI or load-order file by name) is refused, because Git for Windows' sed rewrites every CRLF line ending to LF; use `sed -i -b`. It fires only when sed is the program that runs, not on text that mentions it.
 - **Skyrim AI Assistant Toolkit:** for coding agents (Claude Code, Codex, …), not an AI NPC mod (SkyrimNet, Mantella, CHIM).
 - **Codex CLI support on Windows:** generated instructions, skills, hook definitions and an entry script.
 - **Codex hook approval:** run `/hooks` after setup.
@@ -133,6 +135,10 @@
 
 ### Fixed
 
+- **Write targets held in a variable:** a write, copy, move or tee whose target comes from a literal assigned earlier in the same command (`P=Data/X.esp; echo x > "$P"`, `$p = '...'; Set-Content $p`) gets the same verdict as the literal form, for plugins, saves, INIs, load order, SKSE INIs, install files, guard state, Papyrus output and git discards. These were allowed.
+- **Name-filtered deletes started above a protected folder:** `find <folder above the install> -name X -delete` (also `-iname`, `-exec rm`, `-execdir`, `-exec mv`), `fd ... -x/-X rm` and PowerShell `Get-ChildItem ... | ForEach-Object { Remove-Item $_ }` are judged as reaching the whole subtree. They were allowed; a `-maxdepth` that provably cannot reach the folder still is.
+- **`sed -bi`:** recognised as an in-place edit; the write scan did not see it as a write.
+- **`toolkit-setup` neutrality:** the skill is now checked by the instruction-neutrality test the README said covered it.
 - **Artifact bytecode:** payload verification avoids creating machine-specific bytecode in the extracted archive before scanning it for leaks.
 - **Virtual environment verification:** scrubbed checks recognize the measured interpreter directory alongside its base Python installation.
 - **Leak-scan allowance floor:** an allowance that is the home folder, a folder above it or a drive root is never applied.
@@ -239,7 +245,8 @@
 - **Pattern-based coverage:** the guard is an accident barrier, not a sandbox.
 - **Encoded Bash program names:** some ANSI-C quoted spellings are not classified; this gap predates v4.
 - **Interpreter literal writes:** a file name written by inline interpreter code (`python -c "open('X.esp','w')"`, Node `writeFileSync`) is judged by its file class alone, not by where it lands, so writing a plugin-named file outside the game is refused too; `cp` to the same place is judged by its destination and is allowed.
-- **`find -name` deletes:** a `find` delete is judged against its start folder joined with the `-name` value, not every folder `find` descends into; started in a folder above the install (`find <parent folder> -name Skyrim.esm -delete`), it is not refused.
+- **`cd` through a variable:** a `cd` whose folder comes from a same-command variable is not followed, so a name-filtered `find . -delete` after it is judged like `rm NAME` in the folder before the `cd`.
+- **robocopy exclusions:** `/XF` patterns are read as copy sources, so an excluded `*.esp` can still raise the copy-onto-plugin note (a note only, never a refusal).
 - **Backslashes in Bash guard messages:** an unquoted Windows path is named the way Bash reads it, backslashes removed (`Data\MyMod.esp` is shown as `DataMyMod.esp`, which is also the file Bash would write); quote Windows paths or use forward slashes.
 - **Interpreter state writes:** code can write or link guard state through forms the shell scanner does not recognize.
 - **Archive extraction:** unpacking into guard state is not covered.
