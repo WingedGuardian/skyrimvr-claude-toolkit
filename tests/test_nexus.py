@@ -228,8 +228,11 @@ def test_a_network_failure_is_could_not_check_exit_3(kit):
     assert r.returncode == 3 and "RESULT: COULD-NOT-CHECK" in r.stdout, r.stdout + r.stderr
 
 
-def test_no_key_is_could_not_check_exit_3_and_calls_nothing(kit):
-    r = run(kit, "find", "x", key="")
+@pytest.mark.parametrize("args", [["find", "x"], ["mod", "1"], ["validate"], ["raw", "/users/validate.json"],
+                                  ["page", "1"], ["contents", "1"]])
+def test_no_key_is_could_not_check_exit_3_and_calls_nothing(kit, args):
+    """Every command, the older mod / validate / raw included (they used to exit 1)."""
+    r = run(kit, *args, key="")
     assert r.returncode == 3 and "No Nexus API key" in r.stderr and "RESULT: COULD-NOT-CHECK" in r.stdout
     assert calls(kit) == []
 

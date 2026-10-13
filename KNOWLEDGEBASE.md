@@ -1754,7 +1754,7 @@ the override chain, conflict resolution, or the full load order.
 The same logic applies to any tool that resolves the game path from the registry rather than from an
 explicit file path.
 
-### Never hand-install a mod into `Data/` on a managed install
+### Never bare-copy a mod into `Data/` on a managed install
 
 A dev tool and a mod are different things, and the line matters here. Dev tools (Spriggit, xelib,
 Champollion, ReSaver, …) live outside the game and can be installed freely. **A mod — anything that
@@ -1770,6 +1770,12 @@ in by hand is the wrong move on any Vortex or MO2 install:
 
 So: install it through the mod manager, or tell the user to. "It's just one DLL" is how an install
 becomes unreproducible.
+
+When the user installs by hand anyway, use `tools/mod-install.py`, never a bare copy: its dry run
+shows every destination (anything outside `Data/` flagged), and `--apply` backs up what it replaces
+and writes a SHA-256 manifest, which is the record a bare copy lacks. Under MO2 it installs a new mod
+folder in MO2's `mods/` (enable it in MO2) instead of writing to the real `Data/`. Read the
+destinations before `--apply`, and check the result after it (skill `triage-and-conflicts`).
 
 ---
 

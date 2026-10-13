@@ -253,10 +253,10 @@ Coverage and gaps: `docs/guard-coverage.md`.
 - **Always review changes before applying** -- modded installs are delicate
 - Never modify ESP/ESM files directly -- use xelib programmatically or Spriggit
 - Vortex manages load order -- direct edits to loadorder.txt/plugins.txt may be overwritten
-- **Never hand-install a third-party mod into `Data/` -- that is the mod manager's job**, SKSE DLLs
-  (DevBench too) included: copied-in files are untracked, a deploy or purge can clobber or orphan
-  them, and MO2's conflict view never shows them. Tell the user; they install it. (The user's **own**
-  in-development mod files in `Data/` are fine.)
+- **Never bare-copy a third-party mod into `Data/`**, SKSE DLLs (DevBench too) included: untracked
+  files get clobbered or orphaned by a deploy or purge. Prefer the user's mod manager; a manual
+  install goes through `tools/mod-install.py`: dry run first, read every destination, then `--apply`
+  (backups + manifest) and check the result. (The user's **own** in-development mod files are fine.)
 - **Delete to the Recycle Bin, never permanently.** Windows: `Microsoft.VisualBasic.FileIO.FileSystem`
   `DeleteFile`/`DeleteDirectory` with `SendToRecycleBin`, not `rm`/`Remove-Item`. A permanent delete
   needs the user's OK; a tool's own temp files are exempt. The guard judges a Recycle-Bin delete like any delete.
