@@ -783,3 +783,126 @@ def test_a_resume_after_the_lift_still_ends_it(tmp_path):
     with open(str(f), "a", encoding="utf-8") as fh:
         fh.write("{:.6f} start resume t.jsonl\n".format(lift["created"] + 5))
     assert hook(lift["created"] + 10).decision == "deny"
+
+
+# ---- fix-limits 2: a shadowed call is ONE audit record ---------------------------------------------------------
+# Before: the rule's own `DENY`/`ASK` line was written as it fired, then `skyguard SHADOW: <code> (deny)` -- a reader
+# of the first line saw a refusal for a call that ran. While a guards lift is on record the rule lines are held and
+# shadow() writes them: folded into the one SHADOW line when the call is let through, verbatim otherwise.
+
+_REFUSAL_LINE = __import__("re").compile(r"\] \S+ (DENY|ASK): ")
+
+
+def _held_audit(project):
+    au = Audit(str(project))
+    engine.hold_if_shadowing(str(project), au)
+    return au
+
+
+def test_a_converted_call_writes_one_record_naming_the_rule_and_its_line(tmp_path):
+    project, hb = _env(tmp_path, [_lift()])
+    au = _held_audit(project)
+    au.rule("protect-bash", "S-WRITE-PLUGIN", "deny", "Blocked: this writes X.esp.")
+    au.rule("protect-bash", "S-NOTE", "advise", "Note: a note that stays its own line.")
+    assert _log(tmp_path) == ""                                   # held while the decision is open
+    v = engine.shadow(_deny(), str(project), SID, str(hb), au, now=NOW)
+    assert v.decision == "allow"
+    lines = _log(tmp_path).splitlines()
+    assert not [x for x in lines if _REFUSAL_LINE.search(x)], lines
+    shadow_lines = [x for x in lines if "SHADOW" in x]
+    assert len(shadow_lines) == 1, lines
+    assert "SHADOW: write.DENY_PLUGIN (deny)" in shadow_lines[0] and "not enforced" in shadow_lines[0]
+    assert "protect-bash deny: Blocked: this writes X.esp." in shadow_lines[0]
+    assert lines.index(shadow_lines[0]) > next(i for i, x in enumerate(lines) if "ADVISE: Note: a note" in x)
+
+
+def test_an_ask_is_folded_the_same_way(tmp_path):
+    project, hb = _env(tmp_path, [_lift()])
+    au = _held_audit(project)
+    au.rule("protect-bash", "S-ASK-X", "ask", "Confirm: this asks.")
+    engine.shadow(_deny(code="shell.ASK_X", decision="ask"), str(project), SID, str(hb), au, now=NOW)
+    lines = _log(tmp_path).splitlines()
+    assert len(lines) == 1 and "SHADOW: shell.ASK_X (ask)" in lines[0] and "protect-bash ask: Confirm" in lines[0], lines
+
+
+def test_a_kept_refusal_writes_its_rule_line_verbatim_beside_the_kept_line(tmp_path):
+    project, hb = _env(tmp_path, [_lift()])
+    au = _held_audit(project)
+    au.rule("protect-bash", "S-LIFT-RAW", "deny", "Blocked: a lift rule.")
+    v = engine.shadow(_deny(code="shell.S-LIFT-RAW"), str(project), SID, str(hb), au, now=NOW)
+    assert v.decision == "deny"
+    lines = _log(tmp_path).splitlines()
+    assert "protect-bash DENY: Blocked: a lift rule." in lines[0] and "SHADOW: shell.S-LIFT-RAW kept" in lines[1], lines
+
+
+def test_a_lift_that_is_not_honoured_releases_the_rule_line_unchanged(tmp_path):
+    project, hb = _env(tmp_path, [_lift(session_id="someone-else")])
+    au = _held_audit(project)
+    au.rule("protect-bash", "S-WRITE-PLUGIN", "deny", "Blocked: this writes X.esp.")
+    v = engine.shadow(_deny(), str(project), SID, str(hb), au, now=NOW)
+    assert v.decision == "deny"
+    assert _log(tmp_path).splitlines()[-1].endswith("protect-bash DENY: Blocked: this writes X.esp.")
+
+
+def test_without_a_guards_lift_on_record_nothing_is_held(tmp_path):
+    project, _hb = _env(tmp_path, None)
+    au = _held_audit(project)
+    au.rule("protect-bash", "S-WRITE-PLUGIN", "deny", "Blocked: now.")
+    assert "protect-bash DENY: Blocked: now." in _log(tmp_path)   # written as it fires, as before
+
+
+def test_held_lines_are_written_even_when_shadow_itself_fails(tmp_path, monkeypatch):
+    project, hb = _env(tmp_path, [_lift()])
+    au = _held_audit(project)
+    au.rule("protect-bash", "S-WRITE-PLUGIN", "deny", "Blocked: kept on failure.")
+    monkeypatch.setattr(engine._state, "honoured", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    assert engine.shadow(_deny(), str(project), SID, str(hb), au, now=NOW).decision == "deny"
+    assert "protect-bash DENY: Blocked: kept on failure." in _log(tmp_path)
+
+
+def test_the_claude_entry_writes_one_record_for_a_shadowed_bash_call(tmp_path):
+    project = tmp_path / "root"
+    project.mkdir()
+    _start(project)
+    code, text, _sf = _cli(tmp_path, "off")
+    assert code == 0, text
+    (project / "Data").mkdir()
+    bash = {"tool_name": "Bash", "session_id": SID, "tool_input": {"command": "echo x > Data/Decoy.esp"}}
+    _run_role(project, "protect-bash", bash)
+    lines = (project / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8").splitlines()
+    assert not [x for x in lines if _REFUSAL_LINE.search(x)], lines
+    rec = [x for x in lines if "SHADOW" in x]
+    assert len(rec) == 1 and "(deny)" in rec[0] and "not enforced" in rec[0] and "protect-bash deny:" in rec[0], lines
+
+
+def test_the_codex_entry_writes_one_record_for_a_shadowed_call(tmp_path):
+    import subprocess
+    now = time.time()
+    project = tmp_path / "proj"
+    hb = tmp_path / "hb"
+    state.write(str(project / ".skyguard" / "state.json"), {"v": 1, "persistent": {}, "lifts": [
+        {"kind": "guards", "reason": "t", "session_id": SID, "agent": "codex", "created": now - 30,
+         "expires_at": now + H}]})
+    f = hb / "sessions" / (SID + ".log")
+    f.parent.mkdir(parents=True)
+    f.write_text("{:.6f} start startup t.jsonl\n".format(now - 60), encoding="utf-8")
+    argv = [sys.executable, "-B", str(REPO / "tools" / "skyguard" / "run.py"), "codex", "pre-tool", "--root", str(project),
+            "--project", str(project), "--telemetry", str(hb)]
+    r = subprocess.run(argv, input=_patch("*** Add File: Data/a.esp\n+x").encode("utf-8"), capture_output=True, timeout=60)
+    assert r.returncode == 0 and "Guards OFF: this would have been denied" in r.stdout.decode("utf-8")
+    lines = (project / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8").splitlines()
+    assert not [x for x in lines if _REFUSAL_LINE.search(x)], lines
+    rec = [x for x in lines if "SHADOW" in x]
+    assert len(rec) == 1 and "not enforced" in rec[0], lines
+
+
+def test_a_record_that_cannot_be_written_leaves_the_refusal_and_its_rule_line(tmp_path, monkeypatch):
+    project, hb = _env(tmp_path, [_lift()])
+    au = _held_audit(project)
+    au.rule("protect-bash", "S-WRITE-PLUGIN", "deny", "Blocked: the record failed.")
+
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+    monkeypatch.setattr(au, "log_strict", boom)
+    assert engine.shadow(_deny(), str(project), SID, str(hb), au, now=NOW).decision == "deny"
+    assert "protect-bash DENY: Blocked: the record failed." in _log(tmp_path)

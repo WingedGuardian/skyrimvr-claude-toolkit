@@ -238,6 +238,9 @@ def main(argv=None) -> int:
     else:
         _session_line(a, p["session_id"], tool=p["tool_name"])
     audit = Audit(a.project)
+    decides = a.role in DECISION_ROLES
+    if decides:                      # fix-limits 2: shadow() below writes this call's rule lines as one record
+        engine.hold_if_shadowing(a.project, audit)
     if a.role == "protect-bash":
         req = adapter.to_request(p, "shell")
         if p.get("ws_monitor"):

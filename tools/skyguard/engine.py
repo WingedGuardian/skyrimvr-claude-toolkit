@@ -349,7 +349,38 @@ def _relock_due(project, st, now, audit) -> None:
     audit.log("skyguard", "RELOCK", "lock lift expired: " + what + ("" if res.exit == 0 else " (exit {})".format(res.exit)))
 
 
+def hold_if_shadowing(project, audit) -> None:
+    """fix-limits 2: while a guards lift is on record (honoured or not -- that is shadow()'s question), hold this call's
+    rule lines until shadow() decides, so a call it lets through is ONE audit record. With no guards lift nothing is
+    held and every line is written as it fires, exactly as before. Never raises; a failure just means no holding."""
+    try:
+        sf = Path(project) / ".skyguard" / "state.json"
+        if sf.is_file() and any(x["kind"] == "guards" for x in _state.read(str(sf)).lifts):
+            audit.hold()
+    except Exception:  # noqa: BLE001 -- holding is presentation only; it must never change or block a decision
+        pass
+
+
+def _release(audit) -> None:
+    """Write the held rule lines as they fired (fix-limits 2), before shadow mode adds a line of its own."""
+    release = getattr(audit, "release", None)
+    if release is not None:
+        try:
+            release()
+        except Exception:  # noqa: BLE001 -- presentation only
+            pass
+
+
 def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
+    """See _shadow. Whatever rule lines are still held when it returns (a refusal that stands, an allow, a failure)
+    are written exactly as they fired."""
+    try:
+        return _shadow(v, project, session_id, telemetry, audit, now)
+    finally:
+        _release(audit)
+
+
+def _shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
     """R8, shadow mode: the ONE place a refusal can be turned into an allow. Called on the finished verdict
     (after combine, after the side effects) by every agent's decision path.
 
@@ -369,6 +400,7 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
             v = codes.classify(v)
         st = _state.read(str(Path(project) / ".skyguard" / "state.json"))
         if st.rejected:
+            _release(audit)
             if _state_reject_is_new(project, st.reason):
                 audit.log("skyguard", "STATE-REJECTED", st.reason)
             return v
@@ -382,9 +414,11 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
             return v
         # From here a guards lift is honoured: EVERY call writes a SHADOW line (spec; closes Table M's silence row).
         if not refusal:
+            _release(audit)
             audit.log_strict("skyguard", "SHADOW", "allow")
             return v
         if v.code in NEVER_SHADOW:                          # Plan 6 Task 11: guards off never lifts the lock
+            _release(audit)
             audit.log_strict("skyguard", "SHADOW", "{} kept ({}; a lift rule)".format(v.code, v.decision))
             return v
         # Plan 6 final fix (lane A C1): the call ALSO carries a NEVER_SHADOW refusal that a decoy outranked. Shadow mode
@@ -393,16 +427,30 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
         # (reading it here too made each of the two a silent backstop of the other, so neither could be proved needed).
         kept = _carried(v)
         if kept is not None:
+            _release(audit)
             audit.log_strict("skyguard", "SHADOW", "{} kept ({}; a lift rule, beside {})".format(
                 kept.code, kept.decision, v.code))
             return kept._replace(status=v.status, never=None)
         if v.status == "failed" or codes._inert(v.code) or v.code == "unknown":
+            _release(audit)
             audit.log_strict("skyguard", "SHADOW", "{} kept ({})".format(v.code, v.decision))
             return v
         first = (v.reason.split("\n", 1)[0] if v.reason else "")[:_LINE_MAX]
         head = SHADOW_ASK_HEAD if v.decision == "ask" else SHADOW_HEAD
         context = head.format(v.code) + ("\n" + first if first else "")
-        audit.log_strict("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))   # raises -> the refusal stands
+        # fix-limits 2: ONE record for the call -- the rule lines held for it are folded in, so no DENY/ASK line is
+        # left claiming a refusal for a call that ran.
+        take = getattr(audit, "take_refusals", None)
+        refusals = take() if take is not None else []
+        record = "{} ({}) not enforced: guards off let the call run".format(v.code, v.decision) + (
+            "; the rule's line: " + " | ".join("{} {}: {}".format(h, lv.lower(), m) for h, lv, _d, m in refusals)
+            if refusals else "")
+        try:
+            audit.log_strict("skyguard", "SHADOW", record)   # raises -> the refusal stands
+        except Exception:
+            for h, lv, _d, m in refusals:                    # ... and its lines are written as they fired
+                audit.log(h, lv, m)
+            raise
         return Verdict("allow", "", context, v.status, v.code)
     except Exception:  # noqa: BLE001 -- shadow mode must never be able to break or loosen a decision by failing
         return v
@@ -410,6 +458,7 @@ def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
 
 def pre_tool(req, project, roots_fn, audit, telemetry="", now=None, deadline=None) -> Verdict:
     """All Codex PreToolUse work: the rules, then the side effects, then shadow mode on the finished verdict."""
+    hold_if_shadowing(project, audit)
     if req.failure:
         audit.log("codex-pre-tool", "REFUSE", req.failure)
         v = _failed(INERT_TRANSLATE.format(req.failure), "codex.TRANSLATE")

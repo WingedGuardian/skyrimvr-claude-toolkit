@@ -4049,7 +4049,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SH + "test_an_inert_rule_code_stays_a_deny_even_when_the_status_reads_evaluated", "l2-shadow-inert-code-still-denies"),
     (_EN, _INERT_IF, '        if v.status == "failed" or codes._inert(v.code):',
      _SH + "test_an_unclassifiable_refusal_is_not_converted", "l2-shadow-unknown-converted"),
-    (_EN, '        audit.log_strict("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))', "        pass",
+    (_EN, '            audit.log_strict("skyguard", "SHADOW", record)   # raises', "            pass  # raises",
      _SH + "test_every_converted_verdict_writes_a_shadow_audit_line_naming_the_rule", "l2-shadow-logs"),
     (_EN, "    v = side_effects(req, project, audit, v, roots_fn, deadline)\n    return shadow(", "    v = v\n    return shadow(",
      _SH + "test_the_backup_of_a_shadowed_delete_is_still_taken", "l2-shadow-side-effects-run"),
@@ -4126,8 +4126,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 
 # Plan 6 Task 9 review fix round.
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
-    (_EN, '        audit.log_strict("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))',
-     '        audit.log("skyguard", "SHADOW", "{} ({})".format(v.code, v.decision))',
+    (_EN, '            audit.log_strict("skyguard", "SHADOW", record)   # raises',
+     '            audit.log("skyguard", "SHADOW", record)   # raises',
      _SH + "test_a_refusal_is_not_converted_when_its_shadow_line_cannot_be_written", "l2-shadow-line-must-land"),
     (_ST, "        if best is None or t > best:", "        if True:",
      _SH + "test_a_forged_early_start_line_cannot_revive_a_pre_resume_lift", "l2-state-start-max"),
@@ -8001,4 +8001,34 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '"reason": "guards off"', _FL1 + "test_guards_off_records_the_reason_given_with_reason", "fl1-reason-not-recorded"),
     ("tools/skyguard/cli.py", 'problem = "--reason is taken only by `guards off`" if a.action != "off" else ',
      "problem = ", _FL1 + "test_a_reason_is_refused_for_on_and_status", "fl1-reason-accepted-by-on-and-status"),
+]]
+
+# fix-limits 2: a call shadow mode lets through is ONE audit record -- the rule lines are held while a guards lift is on
+# record and folded into the SHADOW line; every other outcome writes them as they fired. One twin per clause.
+_FL2 = "tests/test_skyguard_shadow.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/engine.py", "            audit.hold()\n", "            pass\n",
+     _FL2 + "test_a_converted_call_writes_one_record_naming_the_rule_and_its_line", "fl2-never-held"),
+    ("tools/skyguard/engine.py", '        if sf.is_file() and any(x["kind"] == "guards" for x in _state.read(str(sf)).lifts):',
+     "        if True:", _FL2 + "test_without_a_guards_lift_on_record_nothing_is_held", "fl2-held-without-a-lift"),
+    ("tools/skyguard/engine.py", "        refusals = take() if take is not None else []", "        refusals = []",
+     _FL2 + "test_a_converted_call_writes_one_record_naming_the_rule_and_its_line", "fl2-not-folded"),
+    ("tools/skyguard/engine.py", "            for h, lv, _d, m in refusals:                    # ...",
+     "            for h, lv, _d, m in []:                    # ...",
+     _FL2 + "test_a_record_that_cannot_be_written_leaves_the_refusal_and_its_rule_line", "fl2-failed-record-drops-lines"),
+    ("tools/skyguard/engine.py", "    finally:\n        _release(audit)\n", "    finally:\n        pass\n",
+     _FL2 + "test_held_lines_are_written_even_when_shadow_itself_fails", "fl2-failure-drops-held-lines"),
+    ("tools/skyguard/engine.py", "            _release(audit)\n            audit.log_strict(\"skyguard\", \"SHADOW\", \"{} kept ({}; a lift rule)\"",
+     "            audit.log_strict(\"skyguard\", \"SHADOW\", \"{} kept ({}; a lift rule)\"",
+     _FL2 + "test_a_kept_refusal_writes_its_rule_line_verbatim_beside_the_kept_line", "fl2-kept-line-before-rule-line"),
+    ("tools/skyguard/engine.py", "    hold_if_shadowing(project, audit)\n    if req.failure:", "    if req.failure:",
+     _FL2 + "test_the_codex_entry_writes_one_record_for_a_shadowed_call", "fl2-codex-entry-not-held"),
+    ("tools/skyguard/run.py", "        engine.hold_if_shadowing(a.project, audit)\n", "        pass\n",
+     _FL2 + "test_the_claude_entry_writes_one_record_for_a_shadowed_bash_call", "fl2-claude-entry-not-held"),
+    ("tools/skyguard/audit.py", "            else:\n                self.log(hook, level, msg)\n        return refusals",
+     "        return refusals", _FL2 + "test_a_converted_call_writes_one_record_naming_the_rule_and_its_line",
+     "fl2-fold-drops-the-notes"),
+    ("tools/skyguard/audit.py", "        if self._held is not None:\n            self._held.append",
+     "        if False:\n            self._held.append",
+     _FL2 + "test_a_converted_call_writes_one_record_naming_the_rule_and_its_line", "fl2-rule-never-holds"),
 ]]
