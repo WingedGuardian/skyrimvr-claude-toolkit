@@ -8161,3 +8161,17 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/deletes.py", '            excluding = w.lstrip("/")', '            excluding = excluding or w.lstrip("/")',
      _FL14R + "robocopy src dst /XF a.esp /IF c.txt-cmd-want14]", "fl14-robocopy-list-never-ends"),
 ]]
+
+# fix-limits 9: a file named by interpreter code is resolved where the code runs and judged as a shell write there.
+_FL9 = "tests/test_skyguard_writes.py::"
+_FL9P = _FL9 + "test_an_interpreter_literal_write_is_judged_like_the_shell_write_to_the_same_place["
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/writes.py", '        base = cwd if e is None else (targets.exec_cwd(e, cwd, env) or "")',
+     "        base = cwd", _FL9 + "test_an_interpreter_literal_write_follows_the_cd_before_it", "fl9-literal-ignores-the-cd"),
+    ("tools/skyguard/writes.py", '        kind = file_class(word, a or "")\n        if kind == "plugin":\n            plugin.append(_name(word))\n        elif is_save(a, roots):',
+     '        kind = file_class(word)\n        if kind == "plugin":\n            plugin.append(_name(word))\n        elif is_save(a, roots):',
+     _FL9P + "python-Data/SKSE/Plugins/x.ini-C:/t7/Skyrim VR-echo x > Data/SKSE/Plugins/x.ini]", "fl9-class-by-name-only"),
+    ("tools/skyguard/writes.py", '        elif a is not None and in_install_area(a, roots):\n            notes["S-WRITE-INSTALL"].append(_name(word))',
+     '        elif False:\n            notes["S-WRITE-INSTALL"].append(_name(word))',
+     _FL9P + "node-Data/notes.txt-C:/t7/Skyrim VR-echo x > Data/notes.txt]", "fl9-no-install-note"),
+]]

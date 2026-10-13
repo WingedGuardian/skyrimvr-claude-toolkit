@@ -310,3 +310,28 @@ def test_the_parser_substitutes_redirect_targets_too():
     assert deletes.substituted(e).redirects == ((">", "X.esp"),)
     ps = shellparse.parse("$p = 'X.esp'; 'x' > $p", "powershell").execs[-1]
     assert deletes.substituted(ps).redirects == ((">", "X.esp"),), ps
+
+
+# ---- fix-limits 9: a file named by inline interpreter code is judged where it lands, as a shell write to it is -------
+_PYW = "python -c \"open('{}', 'w').write('x')\""
+_NODEW = "node -e \"require('fs').writeFileSync('{}', 'x')\""
+
+
+@pytest.mark.parametrize("target,cwd,shell_form", [
+    ("Data/SKSE/Plugins/x.ini", INSTALL, "echo x > Data/SKSE/Plugins/x.ini"),        # class by where it lands
+    ("Data/notes.txt", INSTALL, "echo x > Data/notes.txt"),                          # any file in the install
+    ("notes.txt", INSTALL + "/Data", "echo x > notes.txt"),                          # relative to the cwd
+    ("C:/w/notes.txt", INSTALL, "echo x > C:/w/notes.txt"),                          # outside: nothing
+    ("C:/Temp/x.esp", "C:/w", "echo x > C:/Temp/x.esp"),                            # a plugin's raw write: anywhere
+    ("plugins.txt", "C:/w", "echo x > plugins.txt"),                                  # the load order, by name
+])
+@pytest.mark.parametrize("form", [_PYW, _NODEW], ids=["python", "node"])
+def test_an_interpreter_literal_write_is_judged_like_the_shell_write_to_the_same_place(target, cwd, shell_form, form):
+    want = decide(shell_form, cwd=cwd)
+    assert decide(form.format(target), cwd=cwd) == want, (target, want)
+
+
+def test_an_interpreter_literal_write_follows_the_cd_before_it():
+    want = decide("echo x > Data/notes.txt", cwd=INSTALL)
+    assert want[1] == {"S-WRITE-INSTALL"}
+    assert decide("cd Data && " + _PYW.format("notes.txt"), cwd=INSTALL) == want

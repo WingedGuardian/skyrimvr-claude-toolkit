@@ -715,20 +715,26 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
 
     # routes red team: a file written by name in interpreter code (`python -c "open('X.esp','wb')"`, node
     # writeFileSync) or by a .NET call in PowerShell text (WebClient.DownloadFile, FileStream, [IO.File]::Open).
-    # Only literal names; judged by file class alone (where a literal in code lands is not resolved).
-    lit = text_write_targets_ps(command)
+    # Only literal names. fix-limits 9: each is resolved where the code runs (the exec's cwd, after any cd before it)
+    # and judged exactly as a shell write to that place is: a plugin's raw write anywhere, a save, a file class by
+    # where it lands (an SKSE INI), any other file in the install area. It was judged by its name alone.
+    lit = [(None, w) for w in text_write_targets_ps(command)]
     for e in parsed.execs:
         code = interpreter_code(e)
         if code:
-            lit += text_write_targets(code)
-    for word in lit:
-        kind = file_class(word)
+            lit += [(e, w) for w in text_write_targets(code)]
+    for e, word in lit:
+        base = cwd if e is None else (targets.exec_cwd(e, cwd, env) or "")
+        a = targets.resolve(word, base, "cmd", env)                     # a literal: nothing in it expands
+        kind = file_class(word, a or "")
         if kind == "plugin":
             plugin.append(_name(word))
+        elif is_save(a, roots):
+            saves.append(_name(word))
         elif kind:
             notes[RULE_OF_CLASS[kind]].append(_name(word))
-        elif is_save(targets.resolve(word, cwd, "cmd", env), roots):     # a literal: nothing in it expands
-            saves.append(_name(word))
+        elif a is not None and in_install_area(a, roots):
+            notes["S-WRITE-INSTALL"].append(_name(word))
 
     texts = [command] if not parsed.ok else _opaque_texts(parsed.execs)
     for t in texts:
