@@ -48,7 +48,7 @@ any agent can read one directly. Read the skill BEFORE the work:
 | When you are about to… | Read |
 |---|---|
 | use the running game (inspect, console, Papyrus calls, scenarios) | skill `devbench` |
-| ask which plugin wins a record, triage Papyrus, crash or SKSE logs, or bulk-edit ESPs | skill `triage-and-conflicts` |
+| ask which plugin wins a record, triage Papyrus, crash or SKSE logs or a mod archive, or bulk-edit ESPs | skill `triage-and-conflicts` |
 | write or run an xelib / XEditLib script | skill `xelib` |
 | edit an ESP with Spriggit, or compile Papyrus | skill `skyrim-context` |
 | touch a mesh (`.nif`) | skill `skyrim-nif` |

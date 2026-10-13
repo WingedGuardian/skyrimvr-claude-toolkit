@@ -4,6 +4,7 @@
 
 ### Added
 
+- **`archive-triage`:** shows what a mod archive would change before it is installed (NEW / SAME / CHANGED / NO CRC by CRC against the installed file), every destination plainly with any outside `Data/` flagged, FOMOD options as separate groups, and on VR a DLL build-marker heuristic; read-only, through 7-Zip.
 - **Shared tool plumbing:** `tools/skyrim_paths.py` finds the game folder the way the guard's tool lookups do (`$SKYRIM_GAME_ROOT`, then `skyrim-paths.env`, then the toolkit folder) and finds 7-Zip (`$SEVENZIP`, then `7z`/`7zz`/`7za` on PATH, then Program Files); 7-Zip 26.00 is pinned with SHA-256 in `docs/installing-tools.md`.
 - **`skse-load-status`:** lists what SKSE did with each plugin DLL at the last launch (loaded, incompatible, not an SKSE plugin, SKSE64 errors) and the version each plugin reports, from `sksevr.log` or `skse64.log`; its rows must sum to the plugins checked.
 - **`mod-release-review` skill:** a review before publishing a Skyrim mod, scoped to what changed since the last published version; it changes nothing while reviewing and brings every finding to the author before any fix.

@@ -1046,6 +1046,80 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
         id="sevenzip-wrong-override-falls-through",
     ),
 
+    # --- archive-triage -----------------------------------------------------
+    pytest.param(
+        # Read "D" anywhere in the attributes: a file whose hex word contains a D vanishes as a "folder".
+        "tools/archive-triage.py",
+        '    return any("D" in t for t in letters)',
+        '    return "D" in entry.get("Attributes", "")',
+        "tests/test_archive_triage.py::test_a_file_whose_hex_attributes_contain_d_is_not_dropped_as_a_folder",
+        id="archive-triage-hex-d-is-a-folder",
+    ),
+    pytest.param(
+        # Print archive names raw: a CR or an escape sequence in an entry name acts on the terminal.
+        "tools/archive-triage.py",
+        '        if unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp"):',
+        "        if False:",
+        "tests/test_archive_triage.py::test_control_characters_in_entry_names_are_escaped",
+        id="archive-triage-control-chars-raw",
+    ),
+    pytest.param(
+        # Split the listing on every line break, a CR inside an entry name included.
+        "tools/archive-triage.py",
+        '    for ln in out.split("\\n") + [""]:',
+        '    for ln in out.splitlines() + [""]:',
+        "tests/test_archive_triage.py::test_control_characters_in_entry_names_are_escaped",
+        id="archive-triage-cr-splits-an-entry",
+    ),
+    pytest.param(
+        # Treat every destination as inside Data/: the SKSE loader, an ENB DLL or a `..` entry is no longer flagged.
+        "tools/archive-triage.py",
+        "    return dest, inside",
+        "    return dest, True",
+        "tests/test_archive_triage.py::test_destinations_outside_data_are_shown_and_flagged_not_refused",
+        id="archive-triage-outside-data-unflagged",
+    ),
+    pytest.param(
+        # Compare an empty CRC as a value: a listing without CRCs reads as CHANGED, a claim nobody measured.
+        "tools/archive-triage.py",
+        '            kind = "NO CRC" if not HEX8.fullmatch(crc) else ("SAME" if crc == crc_of(dest) else "CHANGED")',
+        '            kind = "SAME" if crc == crc_of(dest) else "CHANGED"',
+        "tests/test_archive_triage.py::test_a_missing_crc_is_no_crc_never_changed",
+        id="archive-triage-no-crc-as-changed",
+    ),
+    pytest.param(
+        # Run the VR-marker heuristic on SE/AE, where "no VR markers" means nothing.
+        "tools/archive-triage.py",
+        '    markers = None if runtime == "SE/AE" else [m.decode() for m in VR_MARKERS if m in b]',
+        "    markers = [m.decode() for m in VR_MARKERS if m in b]",
+        "tests/test_archive_triage.py::test_the_vr_heuristic_is_skipped_on_se_and_says_so",
+        id="archive-triage-vr-heuristic-on-se",
+    ),
+    pytest.param(
+        # Count every classified entry as NEW: the per-kind accounting must catch a counter that stops matching.
+        "tools/archive-triage.py",
+        '        out["tally"][kind] += 1',
+        '        out["tally"]["NEW"] += 1',
+        "tests/test_archive_triage.py::test_new_same_changed_and_the_rows_sum",
+        id="archive-triage-tally-not-independent",
+    ),
+    pytest.param(
+        # Exit 0 when an archive could not be listed: a batch run reads as clean.
+        "tools/archive-triage.py",
+        "    return 2 if unreadable else 0",
+        "    return 0",
+        "tests/test_archive_triage.py::test_an_unreadable_archive_is_exit_2_and_the_others_still_run",
+        id="archive-triage-unreadable-exit-0",
+    ),
+    pytest.param(
+        # Keep the trailing CR on a path from a Windows-written list: every archive is "not found".
+        "tools/archive-triage.py",
+        "    for a in (x.strip() for x in args if x.strip()):",
+        "    for a in (x for x in args if x.strip()):",
+        "tests/test_archive_triage.py::test_an_archive_argument_with_a_trailing_cr_is_found",
+        id="archive-triage-trailing-cr-kept",
+    ),
+
     # --- what the v3.9 release review found ---------------------------------
     # Put back the single-character separator class. Doubled separators name the same
     # directory and are the canonical Python/PowerShell spelling, and every one of them
