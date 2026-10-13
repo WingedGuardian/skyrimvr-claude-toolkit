@@ -238,6 +238,9 @@
 - **PowerShell policy:** AllSigned may prevent hook launch.
 - **Pattern-based coverage:** the guard is an accident barrier, not a sandbox.
 - **Encoded Bash program names:** some ANSI-C quoted spellings are not classified; this gap predates v4.
+- **Interpreter literal writes:** a file name written by inline interpreter code (`python -c "open('X.esp','w')"`, Node `writeFileSync`) is judged by its file class alone, not by where it lands, so writing a plugin-named file outside the game is refused too; `cp` to the same place is judged by its destination and is allowed.
+- **`find -name` deletes:** a `find` delete is judged against its start folder joined with the `-name` value, not every folder `find` descends into; started in a folder above the install (`find <parent folder> -name Skyrim.esm -delete`), it is not refused.
+- **Backslashes in Bash guard messages:** an unquoted Windows path is named the way Bash reads it, backslashes removed (`Data\MyMod.esp` is shown as `DataMyMod.esp`, which is also the file Bash would write); quote Windows paths or use forward slashes.
 - **Interpreter state writes:** code can write or link guard state through forms the shell scanner does not recognize.
 - **Archive extraction:** unpacking into guard state is not covered.
 - **Computed shell destinations:** can escape recognized self-protection.
@@ -272,12 +275,15 @@
 - **State replacement:** bounded PermissionError retries handle transient Windows readers; persistent sharing failures can still fail.
 - **Shell delete recovery:** no general backup is made before deletion.
 - **Backup scope:** script writes outside the snapshot paths are not automatically backed up.
+- **Snapshot rate limit:** a garbled `.last_snapshot` reads as 0, so that call snapshots despite the 60-second rate limit; the snapshot rewrites the file.
+- **Hook health under simultaneous calls:** two calls of one hook at the same moment can take the same invocation number, so after a failure `hook-canary` and `skydoctor` can report the hook DEGRADED one call longer than necessary; the next call clears it.
 - **Instruction expansion:** unusually long install paths may exceed the instruction budget; setup warns.
 - **Migration scope:** edited hooks and skills are snapshotted rather than migrated.
 - **Migration line endings:** carried notes use LF; the backup retains the original bytes.
 - **Migration concurrency:** simultaneous runs can race and one may fail.
 - **Animated NIFs:** Blender round trips can drop controllers.
 - **Spriggit bytes:** a round trip may reorder records without changing the re-serialized content.
+- **CrashLogger `__fastfail` dumps:** CrashLogger 1.24.0 added this dump class and no real one has been run through `crash-triage.py`; a dump it cannot read is counted as unparsed, not given a signature, so read that dump by hand.
 - **Python 3.8/3.9:** engine compatibility is retained but these versions are outside the tested range.
 - **Live release checks:** a clean suite and review do not substitute for the remaining manual and live-agent batch.
 - **Container release legs:** require Docker and a separate build/round-trip check.
