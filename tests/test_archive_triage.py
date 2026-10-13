@@ -49,6 +49,12 @@ _spec.loader.exec_module(triage)
     # Not installed content.
     ("fomod/ModuleConfig.xml", (None, None, None)),
     ("readme.txt", (None, None, None)),
+    # Game-folder content: ENB / ReShade folders and files, and the Root/ folder convention.
+    ("Main/enbseries/effect.fx", ("Main", "enbseries/effect.fx", "game")),
+    ("reshade-shaders/Shaders/x.fx", ("", "reshade-shaders/Shaders/x.fx", "game")),
+    ("Preset A/enblocal.ini", ("Preset A", "enblocal.ini", "game")),
+    ("Root/skse64_loader.exe", ("", "skse64_loader.exe", "game")),
+    ("Core/Root/Tools/thing.cfg", ("Core", "Tools/thing.cfg", "game")),
 ])
 def test_map_entry(path, expected):
     assert triage.map_entry(path) == expected
@@ -139,8 +145,36 @@ def test_all_lists_every_file_and_every_skipped_entry(tmp_path, sevenz):
     game = make_game(tmp_path, files=INSTALLED)
     r = run(make_archive(tmp_path, "ExampleMod.7z", ENTRIES), "--all", sevenz=sevenz, game=game)
     for shown in ("SAME    Data/textures/exm/a.dds", "NEW     Data/textures/exm/b.dds",
-                  "SAME    Data/SKSE/Plugins/ExampleFramework.ini", "-       ExampleMod/readme.txt"):
+                  "SAME    Data/SKSE/Plugins/ExampleFramework.ini"):
         assert shown in r.stdout, r.stdout
+
+
+def test_everything_outside_data_is_listed_by_default(tmp_path, sevenz):
+    """Outside Data/ is never summarised: ENB folders, a Root/ folder and entries under no Data root are each listed
+    and flagged. Only the FOMOD installer's own files are summarised (and listed with --all)."""
+    game = make_game(tmp_path)
+    enb = [{"path": "Main/enbseries/fx{}.fx".format(i), "data": str(i)} for i in range(12)]
+    arc = make_archive(tmp_path, "x.7z", enb + [
+        {"path": "Main/Root/Tools/thing.cfg", "data": "c"},
+        {"path": "Main/readme.txt", "data": "r"},
+        {"path": "Main/odd-folder/file.bin", "data": "b"},
+        {"path": "fomod/ModuleConfig.xml", "data": "<config/>"},
+        {"path": "Main/Data/textures/a.dds", "data": "t1"},
+        {"path": "Main/Data/textures/b.dds", "data": "t2"},
+    ])
+    r = run(arc, sevenz=sevenz, game=game)
+    assert r.returncode == 0, r.stdout + r.stderr
+    for i in range(12):
+        line = row(r.stdout, "fx{}.fx".format(i) + "  !!")
+        assert str(game / "enbseries" / "fx{}.fx".format(i)) in line and "outside Data/ -- check this is intended" in line
+    assert "outside Data/" in row(r.stdout, "thing.cfg") and str(game / "Tools" / "thing.cfg") in r.stdout
+    for name in ("Main/readme.txt", "Main/odd-folder/file.bin"):
+        line = row(r.stdout, name)
+        assert line.lstrip().startswith("?") and "outside Data/ -- check this is intended" in line, r.stdout
+    assert "ModuleConfig.xml" not in r.stdout
+    assert "not under a Data root: 3 (1 of them the FOMOD installer's own files)" in r.stdout, r.stdout
+    assert "NEW     2 file(s) -> Data/textures/" in r.stdout, "in-Data assets stay summarised"
+    assert "-       fomod/ModuleConfig.xml" in run(arc, "--all", sevenz=sevenz, game=game).stdout
 
 
 def test_a_missing_crc_is_no_crc_never_changed(tmp_path, sevenz):

@@ -1143,6 +1143,31 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
         "tests/test_archive_triage.py::test_an_archive_argument_with_a_trailing_cr_is_found",
         id="archive-triage-trailing-cr-kept",
     ),
+    pytest.param(
+        # Forget ENB / ReShade folders: enbseries/ content no longer maps to the game folder, so it is not flagged.
+        "tools/archive-triage.py",
+        "        if sl in GAME_ROOT_DIRS and i + 1 < len(segs):",
+        "        if False:",
+        "tests/test_archive_triage.py::test_everything_outside_data_is_listed_by_default",
+        id="archive-triage-enb-folders-unmapped",
+    ),
+    pytest.param(
+        # Summarise outside-Data assets per folder like in-Data ones: twelve ENB files become one line.
+        "tools/archive-triage.py",
+        '            listed = [x for x in items if show_all or not x["inside"] or x["shown"].lower().endswith(CODE_EXT)]',
+        '            listed = [x for x in items if show_all or x["shown"].lower().endswith(CODE_EXT)]',
+        "tests/test_archive_triage.py::test_everything_outside_data_is_listed_by_default",
+        id="archive-triage-outside-data-summarised",
+    ),
+    pytest.param(
+        # List entries under no Data root only with --all: a readme or unknown folder bound for the game root is
+        # hidden by default.
+        "tools/archive-triage.py",
+        "            if not is_fomod_meta(u):",
+        "            if show_all and not is_fomod_meta(u):",
+        "tests/test_archive_triage.py::test_everything_outside_data_is_listed_by_default",
+        id="archive-triage-unmapped-hidden-by-default",
+    ),
 
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(

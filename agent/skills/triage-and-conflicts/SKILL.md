@@ -128,7 +128,8 @@ where it would land, and compares CRCs with what is installed: **NEW**, **SAME**
 **NO CRC** (the listing had none; never guessed as CHANGED). FOMOD option folders show as separate
 groups, and they are alternatives, not all installed.
 
-- **Every destination is shown**, and one **outside `Data/`** is flagged `outside Data/ -- check this
+- **Every destination outside `Data/` is listed one by one** (never summarised: game-folder binaries,
+  `enbseries/`, `reshade-shaders/`, a `Root/` folder, and entries under no Data root), each flagged `outside Data/ -- check this
   is intended`. Some mods legitimately install there (the SKSE loader, ENB or ReShade DLLs); read the
   list and decide, and tell the user before anything lands outside `Data/`.
 - **CHANGED on a plugin** is an update's change OR the user's own edit of the installed copy: the tool

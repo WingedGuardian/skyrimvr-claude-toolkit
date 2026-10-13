@@ -12,6 +12,10 @@ where each entry would land, and compares the CRC with the file already there:
 Destinations are shown plainly, and every destination OUTSIDE Data/ is flagged
 "outside Data/ -- check this is intended". That is visibility, not refusal: some mods legitimately install
 outside Data/ (the SKSE loader, ENB or ReShade DLLs in the game folder), and the reader decides.
+Everything outside Data/ is always listed one by one, never summarised: binaries at an option folder's root,
+enbseries/ and reshade-shaders/, ENB/ReShade ini files, a Root/ folder, and any entry that is not under a Data
+root at all (a readme, an unknown folder), whose destination depends on the installer. Only a FOMOD
+installer's own fomod/ files are summarised.
 
 CHANGED on a plugin (.esp/.esm/.esl) means EITHER the update changed it OR the installed copy was edited by
 hand (in xEdit, say) -- this tool cannot tell those apart. Compare against the installed version's ORIGINAL
@@ -29,8 +33,8 @@ Usage:
 
     --data DIR   compare against DIR instead of <game>/Data (e.g. one mod's folder under Mod Organizer 2's
                  mods/, which is where MO2 keeps installed files)
-    --all        list every file; by default code and config files are listed one by one and other assets
-                 are summarised per destination folder
+    --all        list every file; by default code and config files and everything outside Data/ are listed
+                 one by one, and other assets inside Data/ are summarised per destination folder
 
 7-Zip: $SEVENZIP, else 7z / 7zz / 7za on PATH, else Program Files (tools/skyrim_paths.py; pinned version in
 docs/installing-tools.md). The game folder: $SKYRIM_GAME_ROOT, else skyrim-paths.env, else the toolkit folder.
@@ -64,6 +68,11 @@ ROOT_FILE_EXT = PLUGIN_EXT + (".bsa", ".ini")
 # Binaries at an option folder's root that are not under a Data root land in the GAME folder when installed as
 # packaged (the SKSE loader, ENB / ReShade DLLs) -- shown, and flagged as outside Data/.
 GAME_FILE_EXT = (".exe", ".dll", ".asi")
+# Folders and files that belong in the GAME folder, not Data/: ENB and ReShade content, and the "Root/" folder
+# convention (MO2's Root Builder) for "everything in here goes into the game folder".
+GAME_ROOT_DIRS = {"enbseries", "reshade-shaders", "reshade-presets"}
+GAME_ROOT_FOLDER = "root"
+GAME_ROOT_FILES = {"enblocal.ini", "enbseries.ini", "reshade.ini", "reshadepreset.ini"}
 CODE_EXT = PLUGIN_EXT + GAME_FILE_EXT + (".pex", ".ini", ".toml", ".json", ".bsa", ".ba2")
 ARCHIVE_EXT = (".7z", ".zip", ".rar")
 KINDS = ("NEW", "SAME", "CHANGED", "NO CRC")
@@ -131,6 +140,12 @@ def map_entry(path):
     segs = [s for s in re.split(r"[\\/]", path) if s]
     for i, s in enumerate(segs):
         sl = s.lower()
+        if sl == GAME_ROOT_FOLDER and i + 1 < len(segs):
+            return "/".join(segs[:i]), "/".join(segs[i + 1:]), "game"
+        if sl in GAME_ROOT_DIRS and i + 1 < len(segs):
+            return "/".join(segs[:i]), "/".join(segs[i:]), "game"
+        if i == len(segs) - 1 and sl in GAME_ROOT_FILES:
+            return "/".join(segs[:i]), s, "game"
         if sl == "data" and i + 1 < len(segs):
             return "/".join(segs[:i]), "/".join(segs[i + 1:]), "data"
         if sl in ROOTS and i + 1 < len(segs):
@@ -147,6 +162,12 @@ def map_entry(path):
         if i == len(segs) - 1 and sl.endswith(GAME_FILE_EXT):
             return "/".join(segs[:i]), s, "game"
     return None, None, None
+
+
+def is_fomod_meta(path) -> bool:
+    """A FOMOD installer's own file (fomod/ModuleConfig.xml, info.xml, its images): read by the installer, never
+    installed."""
+    return any(s.lower() == "fomod" for s in re.split(r"[\\/]", path)[:-1])
 
 
 def destination(rel, base, data: Path, game: Path):
@@ -266,9 +287,17 @@ def show(t, runtime, show_all):
             v += " [VR-only heuristic; the game runtime was not identified]"
         print("  DLL {} [{}]  {}  (SKSE exports: {})".format(clean(d["entry"]), clean(d["group"]), v, ex))
     if t["unmapped"]:
-        print("  not installed by this mapping (docs, fomod/, images): {}".format(len(t["unmapped"])))
-        if show_all:
-            for u in t["unmapped"]:
+        # Not under a Data root and not known game-folder content: where it lands depends on the installer (a mod
+        # manager may put it in the game folder, outside Data/). Listed by default; only the FOMOD installer's own
+        # files, which no installer copies, are summarised.
+        installer = [u for u in t["unmapped"] if is_fomod_meta(u)]
+        print("  not under a Data root: {} ({} of them the FOMOD installer's own files)".format(
+            len(t["unmapped"]), len(installer)))
+        for u in t["unmapped"]:
+            if not is_fomod_meta(u):
+                print("     ?       {}  !! not under a Data root: installed as packaged it lands {}".format(
+                    clean(u), OUTSIDE))
+            elif show_all:
                 print("     -       {}".format(clean(u)))
     if outside:
         print("  !! {} destination(s) {}".format(len(outside), OUTSIDE))
