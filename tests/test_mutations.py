@@ -1120,6 +1120,49 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
         id="archive-triage-trailing-cr-kept",
     ),
 
+    # --- mirror-launch-logs -------------------------------------------------
+    pytest.param(
+        # Drop the previous copy on a replacement: the last launch's log is gone, which is the loss the mirror exists
+        # to prevent.
+        "tools/mirror-launch-logs.py",
+        '                kept, status = _keep_previous(destination), "REPLACED"',
+        '                kept, status = destination.unlink(), "REPLACED"',
+        "tests/test_mirror_launch_logs.py::test_a_truncated_or_replaced_log_keeps_the_previous_copy",
+        id="mirror-logs-replacement-loses-the-copy",
+    ),
+    pytest.param(
+        # Compare only the first 4 KB: a replaced log that starts the same is taken for an append.
+        "tools/mirror-launch-logs.py",
+        "    for pos in sorted({0, max(0, old_size - SAMPLE)}):",
+        "    for pos in [0]:",
+        "tests/test_mirror_launch_logs.py::test_a_truncated_or_replaced_log_keeps_the_previous_copy",
+        id="mirror-logs-head-only-identity",
+    ),
+    pytest.param(
+        # Touch an unchanged copy instead of leaving it alone.
+        "tools/mirror-launch-logs.py",
+        "            if same and old_size == size:",
+        "            if False:",
+        "tests/test_mirror_launch_logs.py::test_new_then_unchanged_does_not_rewrite_the_copy",
+        id="mirror-logs-unchanged-not-detected",
+    ),
+    pytest.param(
+        # Report a copy cut short by a mid-read truncation as complete.
+        "tools/mirror-launch-logs.py",
+        '                    status = "SHORT"',
+        "                    status = status",
+        "tests/test_mirror_launch_logs.py::test_a_log_that_shrinks_mid_read_is_short_and_kept_on_the_next_pass",
+        id="mirror-logs-short-read-unreported",
+    ),
+    pytest.param(
+        # Mirror a file once per folder it is found through: the crash folder is usually the SKSE folder.
+        "tools/mirror-launch-logs.py",
+        "                if p.is_file() and key not in seen:",
+        "                if p.is_file():",
+        "tests/test_mirror_launch_logs.py::test_the_command_mirrors_each_log_once_then_finds_nothing_new",
+        id="mirror-logs-duplicate-sources",
+    ),
+
     # --- what the v3.9 release review found ---------------------------------
     # Put back the single-character separator class. Doubled separators name the same
     # directory and are the canonical Python/PowerShell spelling, and every one of them

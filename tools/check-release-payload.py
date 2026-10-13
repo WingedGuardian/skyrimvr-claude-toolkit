@@ -79,6 +79,7 @@ CORE_REQUIRED = (
     "tools/skyrim_paths.py",
     "tools/skse-load-status.py",
     "tools/archive-triage.py",
+    "tools/mirror-launch-logs.py",
 )
 # Absent: dev-only trees, the user's own files, and runtime state. A path, or a file NAME anywhere.
 ABSENT_PATHS = (

@@ -100,6 +100,7 @@ None of these are bundled; setup walks you through any you pick.
 - **papyrus-triage / crash-triage** -- Papyrus log and CrashLogger dump triage. No install beyond Python 3; bundled (`tools/papyrus-triage.py`, `tools/crash-triage.py`).
 - **skse-load-status** -- what SKSE did with each plugin DLL at the last launch (loaded, incompatible, not an SKSE plugin) and the version each reports about itself, from `sksevr.log` / `skse64.log`. No install beyond Python 3; bundled (`tools/skse-load-status.py`).
 - **archive-triage** -- what a mod archive would change before you install it: each file NEW / SAME / CHANGED against what is installed, every destination shown and any outside `Data/` flagged; read-only. Bundled (`tools/archive-triage.py`); needs **7-Zip 26.00** (pinned in docs/installing-tools.md).
+- **mirror-launch-logs** -- one-shot, append-only copy of the SKSE, crash and Papyrus logs into `.claude/backups/log-mirror/`, so the next launch cannot rotate the evidence away; a replaced log keeps its previous copy. No install beyond Python 3; bundled (`tools/mirror-launch-logs.py`).
 - **skyrim-winner** -- which plugin wins a record, per the full load order. Bundled (`tools/skyrim-winner.sh`) but needs **xeditlib** installed to do anything.
 - **cosave-info** -- read-only structural survey of an SKSE `.skse` co-save → JSON (which mods stashed co-save data + how much). No install beyond Python 3; bundled (`tools/cosave-cli.sh`).
 

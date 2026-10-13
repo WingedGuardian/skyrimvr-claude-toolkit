@@ -1,6 +1,6 @@
 ---
 name: triage-and-conflicts
-description: Which plugin actually wins a record (skyrim-winner, full load order via xEdit), Papyrus log triage, CrashLogger crash-dump triage, which SKSE plugin DLLs loaded (skse-load-status), what a mod archive would change before install (archive-triage), ESP cross-reference snapshots around bulk edits, and how these tools pick a folder when more than one Skyrim install exists. Use for override/conflict questions, Papyrus.N.log or crash-log analysis, and before any bulk ESP operation.
+description: Which plugin actually wins a record (skyrim-winner, full load order via xEdit), Papyrus log triage, CrashLogger crash-dump triage, which SKSE plugin DLLs loaded (skse-load-status), what a mod archive would change before install (archive-triage), keeping logs a relaunch would overwrite (mirror-launch-logs), ESP cross-reference snapshots around bulk edits, and how these tools pick a folder when more than one Skyrim install exists. Use for override/conflict questions, Papyrus.N.log or crash-log analysis, and before any bulk ESP operation.
 ---
 
 # Triage and conflicts
@@ -100,6 +100,20 @@ It reads `sksevr.log` (VR) or `skse64.log` (SE/AE, including the GOG and Epic fo
 and always names the file it read and how old it is: the log describes the **last launch**, not the
 DLLs on disk now. Rows must sum to the plugins checked; a mismatch prints `ACCOUNTING MISMATCH` and
 exits 1. Override the folder with `$SKSE_LOG_DIR`.
+
+## mirror-launch-logs — keep the logs the next launch would overwrite
+
+```bash
+python tools/mirror-launch-logs.py                # after a session, or before the next launch
+```
+
+The game and its plugins overwrite their logs every launch (`Papyrus.0.log` rotates, the SKSE log
+starts empty). This copies the SKSE folder's logs and crash dumps and the Papyrus logs into
+`.claude/backups/log-mirror/` (never shipped), one shot, no background process. A grown log costs only
+its new bytes, an unchanged one no write; a truncated or replaced one keeps the previous copy as
+`<name>.replaced-<time>`, so nothing is overwritten or deleted. A log that shrinks while it is being
+read is reported `SHORT` (exit 1); run it again. Run it before triaging a problem from an earlier
+launch, then point `papyrus-triage` or `crash-triage` at the mirrored file.
 
 ## archive-triage — what a mod archive would change, before it is installed
 
