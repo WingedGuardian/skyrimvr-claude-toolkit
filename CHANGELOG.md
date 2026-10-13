@@ -135,6 +135,7 @@
 
 ### Fixed
 
+- **Hook health under simultaneous calls:** two calls of one hook at the same moment can take the same invocation number (measured: 5 of 12 calls fired four at a time); `hook-canary` and `skydoctor` now order such calls by their timestamps, so a completion after a failure clears it at once instead of one call later. A call still never clears its own failure.
 - **Shadow-mode audit record:** a call `guards off` lets through is logged as one line, `skyguard SHADOW: <code> (deny) not enforced: ...` with the rule's message folded in; it was logged as the rule's DENY or ASK line followed by a separate SHADOW line, so the first line claimed a refusal for a call that ran. A refusal that stands still writes its rule line as before.
 - **Guards-off reason:** `guards off --reason "why"` records the reason `skydoctor` and the session-start banner show (one line, at most 120 characters, still shown as untrusted data); without it the reason stays "guards off". A reason could not be given before.
 - **Write targets held in a variable:** a write, copy, move or tee whose target comes from a literal assigned earlier in the same command (`P=Data/X.esp; echo x > "$P"`, `$p = '...'; Set-Content $p`) gets the same verdict as the literal form, for plugins, saves, INIs, load order, SKSE INIs, install files, guard state, Papyrus output and git discards. These were allowed.
@@ -286,7 +287,6 @@
 - **Shell delete recovery:** no general backup is made before deletion.
 - **Backup scope:** script writes outside the snapshot paths are not automatically backed up.
 - **Snapshot rate limit:** a garbled `.last_snapshot` reads as 0, so that call snapshots despite the 60-second rate limit; the snapshot rewrites the file.
-- **Hook health under simultaneous calls:** two calls of one hook at the same moment can take the same invocation number, so after a failure `hook-canary` and `skydoctor` can report the hook DEGRADED one call longer than necessary; the next call clears it.
 - **Instruction expansion:** unusually long install paths may exceed the instruction budget; setup warns.
 - **Migration scope:** edited hooks and skills are snapshotted rather than migrated.
 - **Migration line endings:** carried notes use LF; the backup retains the original bytes.

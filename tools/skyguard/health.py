@@ -241,10 +241,18 @@ def hook_state(d, hook, now, stale_s=7200, kill_s=150):
     # 3. a failure is current unless a completed evaluation is STRICTLY newer (equal stamps prove no order).
     #    "Newer" is the wrapper's per-hook invocation sequence when both ids carry one (`<seq>.<pid>-<rand>`):
     #    a clock stepped BACK cannot hide a failure that way. Ids without a sequence fall back to the stamps.
+    #    fix-limits 8: the wrappers take <seq> from the previous record with no lock, so two calls at the same moment
+    #    can share one. Equal sequences on DIFFERENT ids are concurrent calls, ordered only by their stamps; the SAME
+    #    id never clears its own failure (a killed-run or empty-payload record is written under the current call).
     cleared = False
     if failed and done is not None:
         ds, fs = _seq(recs["evaluated"][1]), _seq(failed[1])
-        cleared = ds > fs if (ds is not None and fs is not None) else done > failed[0]
+        if recs["evaluated"][1] == failed[1]:
+            cleared = False
+        elif ds is not None and fs is not None and ds != fs:
+            cleared = ds > fs
+        else:
+            cleared = done > failed[0]
     if failed and not cleared:
         stage = failed[2][0]
         text = " ".join(failed[2][1:])

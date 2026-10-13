@@ -732,6 +732,28 @@ def test_a_killed_run_is_reported_and_stays_degraded_until_a_newer_completion(tm
     assert state == "HEALTHY" and "recovered" in detail and "killed" in detail, (state, detail)
 
 
+def test_two_calls_that_took_the_same_sequence_are_ordered_by_their_stamps(tmp_path):
+    """fix-limits 8, through the real wrapper: the race is two calls reading the same previous `invoked` record. It is
+    reproduced deterministically by restoring that record between them: a failing call (empty payload) and a later
+    good call then both take sequence 2. The later completion must clear the earlier failure."""
+    h = _health()
+    root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})
+    _good_call(root)
+    inv = _hb_dir(root) / "protect-bash.invoked"
+    before = inv.read_bytes()
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
+    r = subprocess.run([_bash(), str(root / ".claude" / "hooks" / "protect-bash.sh")], input="", capture_output=True,
+                       text=True, env=env, timeout=60)
+    assert r.returncode == 0 and _rec(root, "protect-bash.sh", "failed")[2] == "receipt"
+    failed_inv = _rec(root, "protect-bash.sh", "failed")[1]
+    inv.write_bytes(before)                      # the second call read the record before the first one rewrote it
+    _good_call(root)
+    done_inv = _rec(root, "protect-bash.sh", "evaluated")[1]
+    assert failed_inv.split(".")[0] == done_inv.split(".")[0] == "2" and failed_inv != done_inv, (failed_inv, done_inv)
+    state, detail = h.hook_state(_hb_dir(root), "protect-bash", time.time())
+    assert state == "HEALTHY" and "recovered" in detail, (state, detail)
+
+
 def test_a_run_still_inside_the_grace_period_is_not_called_killed(tmp_path):
     """Parallel tool calls: another invocation that started a few seconds ago may simply still be running."""
     root = install_hooks(tmp_path / "install", names={"protect-bash.sh"})

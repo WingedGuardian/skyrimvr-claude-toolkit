@@ -236,3 +236,27 @@ def test_a_kb_guard_that_snapshotted_nothing_is_partial(tmp_path):
 
 def test_a_clean_kb_guard_is_evaluated(tmp_path):
     assert _session(tmp_path, "exit 0\n")[1:] == ("evaluated", "session")
+
+
+# ---- fix-limits 8: two calls of one hook at the same moment take the same sequence number -----------------------
+# The wrappers compute <seq> as the previous `invoked` record's seq + 1 with no lock, so two concurrent calls can both
+# take N+1. Equal sequences with DIFFERENT invocation ids are concurrent calls: only their stamps can order them.
+
+def test_a_concurrent_completion_after_a_failure_with_the_same_sequence_clears_it(tmp_path):
+    _w(tmp_path, "h", "failed", "{} 5.111-1 receipt NO PAYLOAD".format(NOW - 10))
+    _complete(tmp_path, NOW - 5, inv="5.222-2")
+    state, detail = health.hook_state(tmp_path, "h", NOW)
+    assert state == "HEALTHY" and "recovered" in detail, (state, detail)
+
+
+def test_a_concurrent_completion_before_the_failure_does_not_clear_it(tmp_path):
+    _complete(tmp_path, NOW - 10, inv="5.222-2")
+    _w(tmp_path, "h", "failed", "{} 5.111-1 receipt NO PAYLOAD".format(NOW - 5))
+    assert health.hook_state(tmp_path, "h", NOW)[0] == "DEGRADED"
+
+
+def test_a_call_never_clears_its_own_failure_whatever_the_stamps_say(tmp_path):
+    """The killed-run and empty-payload records are written under the CURRENT call's id on purpose."""
+    _w(tmp_path, "h", "failed", "{} 5.9-9 killed run 4.1-1 never finished".format(NOW - 10))
+    _complete(tmp_path, NOW - 5, inv="5.9-9")
+    assert health.hook_state(tmp_path, "h", NOW)[0] == "DEGRADED"

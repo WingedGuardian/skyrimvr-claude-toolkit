@@ -1132,15 +1132,15 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
     # Compare stamps only and a clock stepped back makes a later failure look older than an earlier success.
     pytest.param(
         "tools/skyguard/health.py",
-        "cleared = ds > fs if (ds is not None and fs is not None) else done > failed[0]",
-        "cleared = done > failed[0]",
+        "            cleared = ds > fs\n",          # fix-limits 8 moved the comparison into its own branch
+        "            cleared = done > failed[0]\n",
         "tests/test_skyguard_health.py::test_a_clock_stepped_back_cannot_hide_a_failure",
         id="health-orders-by-invocation-sequence",
     ),
     pytest.param(
         "tools/skyguard/health.py",
-        "cleared = ds > fs if",
-        "cleared = ds >= fs if",
+        "        if recs[\"evaluated\"][1] == failed[1]:\n            cleared = False",   # fix-limits 8: the same id
+        "        if recs[\"evaluated\"][1] == failed[1]:\n            cleared = True",
         "tests/test_skyguard_health.py::test_the_same_sequence_proves_no_recovery",
         id="health-same-sequence-is-not-recovery",
     ),
@@ -8031,4 +8031,15 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/audit.py", "        if self._held is not None:\n            self._held.append",
      "        if False:\n            self._held.append",
      _FL2 + "test_a_converted_call_writes_one_record_naming_the_rule_and_its_line", "fl2-rule-never-holds"),
+]]
+
+# fix-limits 8: equal sequences on different invocation ids are concurrent calls, ordered by their stamps; the same id
+# never clears its own failure. One twin per clause.
+_FL8 = "tests/test_skyguard_health.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/health.py", '        if recs["evaluated"][1] == failed[1]:', "        if False:",
+     _FL8 + "test_a_call_never_clears_its_own_failure_whatever_the_stamps_say", "fl8-same-id-may-clear-itself"),
+    ("tools/skyguard/health.py", "        elif ds is not None and fs is not None and ds != fs:",
+     "        elif ds is not None and fs is not None:",
+     _FL8 + "test_a_concurrent_completion_after_a_failure_with_the_same_sequence_clears_it", "fl8-equal-sequence-never-clears"),
 ]]
