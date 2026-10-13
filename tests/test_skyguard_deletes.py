@@ -608,6 +608,9 @@ def test_a_filtered_search_above_the_install_is_judged_as_its_filterless_control
     # of an unknown folder (S-DEL-UNKNOWN-DIR)
     pytest.param("bash", 'S="C:/scratch"; cd "$S/tools" && find . -name "*.rej" -delete', "C:/w",
                  id="find-after-unknown-cd"),
+    # fix-limits 14 resolves the cd above (a same-command literal); a cd through a variable the command never assigns
+    # is still one the parser cannot follow
+    pytest.param("bash", 'cd "$OUTER/tools" && find . -name "*.rej" -delete', "C:/w", id="find-after-unresolvable-cd"),
     pytest.param("bash", "fd Skyrim.esm '" + _ABOVE + "' -x cat", "C:/w", id="fd-above-exec-cat"),
     # fix-limits 14: a variable cd into a folder that holds no protected root stays allowed
     pytest.param("bash", 'S="C:/scratch"; cd "$S" && find . -name "*.esp" -delete', "C:/w",
