@@ -1,0 +1,37 @@
+{
+ "files": [
+  {
+   "file_id": 11,
+   "name": "Example Framework SE",
+   "version": "3.6.2",
+   "category_name": "MAIN",
+   "uploaded_timestamp": 1756000000,
+   "uploaded_time": "2026-08-24T00:00:00.000+00:00",
+   "size_kb": 512,
+   "description": "For SE/AE only.",
+   "content_preview_link": "https://file-metadata.example.invalid/11.json"
+  },
+  {
+   "file_id": 12,
+   "name": "Example Framework VR",
+   "version": "3.6.3",
+   "category_name": "MAIN",
+   "uploaded_timestamp": 1756100000,
+   "uploaded_time": "2026-08-25T00:00:00.000+00:00",
+   "size_kb": 530,
+   "description": "VR version.",
+   "content_preview_link": "https://file-metadata.example.invalid/12.json"
+  },
+  {
+   "file_id": 13,
+   "name": "Old upload",
+   "version": null,
+   "category_name": null,
+   "uploaded_timestamp": null,
+   "uploaded_time": null,
+   "size_kb": null,
+   "description": null,
+   "content_preview_link": null
+  }
+ ]
+}

@@ -1,0 +1,26 @@
+{
+ "children": [
+  {
+   "type": "directory",
+   "name": "SKSE",
+   "children": [
+    {
+     "type": "directory",
+     "name": "Plugins",
+     "children": [
+      {
+       "type": "file",
+       "name": "ExampleFramework.dll",
+       "size": "512 kB"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "file",
+   "name": "ExampleFramework.esp",
+   "size": null
+  }
+ ]
+}

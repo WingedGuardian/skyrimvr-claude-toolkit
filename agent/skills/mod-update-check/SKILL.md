@@ -1,0 +1,151 @@
+---
+name: mod-update-check
+description: Use before updating, installing or adding a Skyrim mod on an existing install, or when the user hands over a list of mods to evaluate. A two-stage review -- a desk review of the Nexus page and changelog, then a file review of the archive including whether the installed copy is pristine -- ending in a verdict per mod (SAFE / RISKY / NO-VR-BUILD and the rest of the rubric). Covers mid-playthrough save safety and Skyrim VR compatibility of SKSE DLLs.
+---
+
+# Mod update check
+
+Every mod is judged **against the user's save, load order and install**, never in the abstract.
+Assume the current playthrough continues unless the user says otherwise: most updates happen
+mid-playthrough, and that is where they do damage.
+
+**Read first:** `KNOWLEDGEBASE.md` → *Updating or Adding Mods on an Existing Save: Safety Rubric*.
+The rubric maps what an update CHANGES to its save footprint and a verdict. This skill is the
+procedure; the rubric is the law.
+
+**Source-of-truth order:** what is on disk (`Data/`, the SKSE log, the load order) > the Nexus API >
+the mod manager's records. A manager tracks what it installed, not what was copied in by hand or
+reverted later, so never present its version number as fact.
+
+## The two stages
+
+| | Stage 1: desk review | Stage 2: file review |
+|---|---|---|
+| Input | mod page, changelog, file list, the install | the actual archive, compared with what is installed |
+| Cost | about a minute per mod, no downloads | per mod, needs the archive |
+| Runs on | every mod in the list | only mods Stage 1 could not close |
+| Ends with | a record with a verdict, OR one specific Stage-2 question | a final verdict and install steps |
+
+## Stage 1: desk review (per mod)
+
+1. **Known-bad list:** if the user keeps a list of VR-broken mods or versions (in
+   `KNOWLEDGEBASE.local.md`), a hit closes the mod as `DON'T`.
+2. **Identify it:** `bash tools/nexus.sh find "<name>"` lists candidate ids. Ports, backports and
+   "NG" rewrites share names: pick by author and page, and say which one you picked.
+3. **Read the page:** `bash tools/nexus.sh page <modId> --since <installed version>` prints the
+   summary, author-declared requirements, the description, the file list with each file's notes, and
+   **every** changelog newer than the installed version. Without `--since` it shows only the newest
+   8, which can hide a whole rewrite. `--full` prints the whole description. Look for requirements,
+   VR support, "new game", "uninstall", ESL notes and patches. A part that could not be fetched says
+   "could NOT fetch", which is not "none". `RESULT: COULD-NOT-CHECK` (exit 3) means nothing was
+   compared: never report it as "no update".
+4. **Find it on disk:**
+   - DLLs: `python tools/skse-load-status.py <filter>` gives the version each DLL reports to SKSE and
+     its load result at the last launch (many DLLs carry no file version).
+   - Plugins: present in `Data/`, active in the load order, and where?
+   - Scripts: `Data/Scripts/*.pex`.
+   Not on disk = a new mod.
+5. **VR path** (VR installs, anything with a DLL): does a VR or multi-runtime build exist (in this
+   mod, a separate VR page, or a port)? None = `NO-VR-BUILD`. A page *claiming* VR is provisional:
+   only the archive's DLL and then the SKSE log line prove it loads. Look for an **old-named sibling**
+   DLL on disk too: SKSE loads both.
+6. **Map the changelog and file list onto rubric rows.** "The author says it is safe to update" is
+   evidence, not a verdict.
+7. **Fit with this install:** requirements present, at the needed version? Overlap with something
+   already installed (same system, same records)? `bash tools/skyrim-winner.sh conflicts <plugin>`
+   once the plugin is available.
+8. **Write the record** (below).
+
+### Stage 1 may CLOSE a mod only as
+
+- `UP-TO-DATE`, `DON'T` (known-bad list, author warning, or proven conflict), `NO-VR-BUILD`;
+- `SAFE`, only when **every** changed file is a no-footprint rubric row, any DLL is proven
+  loadable on this runtime, and no DLL-plus-`.pex` pairing or co-save format change is involved.
+
+Everything else gets a provisional verdict **plus one specific Stage-2 question**. Plugin and `.pex`
+changes go to Stage 2 by default, because changelogs leave things out.
+
+## The record (one per mod, every field filled)
+
+```
+### <Mod name> — Nexus <id> (<author>)  ·  <VERDICT>  ·  Stage 2: <not needed | NEEDED: the question>
+- On disk:   <version + files: DLL load result / plugin active? position / scripts> | NOT INSTALLED
+- Latest:    <version, date>  ·  VR: <build exists? which file>  ·  Known-bad list: <hit | none>
+- Changes:   <rubric rows this update hits, from the changelog and file list>
+- Fit:       <requirements met? overlaps or conflicts?>
+- Why:       <one or two sentences tying the verdict to the rows above>
+- Steps:     <exact steps, or "none">
+```
+
+Verdicts. Update: `SAFE` · `SAFE-WITH-STEPS` · `RISKY` (one at a time, checkpoint save between) ·
+`DON'T` · `UNCLEAR` (not proven safe, never "probably fine") · `NO-VR-BUILD` · `UP-TO-DATE`.
+New mod: `ADD-OK` · `ADD-WITH-STEPS` · `NEW-GAME-ONLY` · `NO-VR-BUILD`. A mod that cannot run on VR
+is `NO-VR-BUILD`, not `DON'T`; look for a port before closing it. A replacement (a VR port, a
+rewrite) gets its own record with an `ADD-*` verdict, cross-referenced.
+
+For a list, keep every record in one file the user can see, with a summary table (mod · verdict ·
+Stage 2?) at the top, so the review survives across sessions.
+
+## Stage 2: file review (only for mods Stage 1 left open)
+
+1. **Get the archive:** ask the user for it (or where their downloads are). Before asking,
+   `bash tools/nexus.sh contents <modId> [version]` may list each file's contents from the Nexus
+   content preview. A refusal of the client is reported as such, with the link to open in a
+   browser; it is not "no preview".
+2. **Compare it with the install:** `python tools/archive-triage.py <archive>` lists every
+   destination as NEW / SAME / CHANGED / NO CRC, flags everything outside `Data/`, and checks DLLs.
+   For a FOMOD, work out which option the installed copy used and keep it.
+3. **Is the INSTALLED copy pristine? (every ESP/ESM/ESL)** Users fix conflicts by editing plugins in
+   xEdit, and an update silently overwrites those fixes. Hash the installed plugin against the SAME
+   version's original archive (not the mod manager's staging copy: a hardlinked staging file changes
+   together with the installed one). Compare against every version available, not only the one the
+   manager claims. Different from all of them = a record-level diff (xelib or Spriggit) of installed
+   vs the nearest original lists the candidate user edits; a difference a later official version also
+   has is an untracked update, not an edit. Re-apply the edits onto the new version, or hold the
+   update. Never overwrite an edited plugin without listing what is lost. No original archive for
+   the installed version: say so, and treat the plugin as possibly edited.
+4. **Per changed file type:**
+   - Plugin: removed or renumbered FormIDs, ESL flag, masters, new or changed quests (Start Game
+     Enabled, aliases), with xelib or Spriggit (`tools/esp-verify-wrapper.sh` around any bulk
+     operation), then `bash tools/skyrim-winner.sh conflicts <plugin>`.
+   - `.pex`: decompile old and new (Champollion) and diff properties (an added one is the unresolved
+     rubric row), states and removed scripts. Look for a version-migration path.
+   - DLL: VR build, version, and the SKSE log line after install. Native-function changes: diff the
+     `.psc` signatures and find callers in `Data/Scripts/*.pex`.
+   - Stateful DLL? `bash tools/cosave-cli.sh <save>.skse` on the `.skse` beside the save being
+     continued lists who writes co-save records.
+5. **Final record:** verdict, install steps, and the after-install check.
+
+## Rollout: in waves, with play between them
+
+Never install a whole approved list at once. Small waves: DLL-only updates first, then single
+plugin updates, then scripted or quest mods one at a time. Activating a plugin that is on disk but
+inactive counts as adding it. Between waves the user plays and confirms the game is healthy, so a
+problem traces back to one small wave.
+
+Before each wave: the user backs up the save they continue (the `.ess` **and** its `.skse`) and the
+load order. If the user installs by hand, `python tools/mod-install.py <archive>` is a dry run first,
+then backs up what it replaces and records what it wrote.
+
+## After installing (every wave)
+
+The SKSE log line for each touched DLL (`python tools/skse-load-status.py <filter>`). The Papyrus
+log for `does not match existing signature`, `Cannot open store`, and `Replacing native function`
+(a stale duplicate plugin): `python tools/papyrus-triage.py`. A load in game, by the user or through
+DevBench (skill `devbench`). RISKY items one at a time, with a checkpoint save between.
+
+## Record what you learn
+
+A mod or version that is broken on VR, or a coupling between mods, goes in
+`KNOWLEDGEBASE.local.md`, so the next review's Stage 1 finds it.
+
+## Mistakes this procedure exists to stop
+
+| Mistake | Reality |
+|---|---|
+| "DLL-only, update whenever" | Only for the save. On VR it must be a VR build, and SKSE refuses another runtime's DLL silently. |
+| Trusting the mod manager's attribution | A manager can file a DLL under the wrong mod when files are dropped over each other. The bytes and the SKSE log line decide. |
+| Updating a fork without removing the old DLL | SKSE loads both, and the older one can override the newer one's functions. |
+| "Author says safe" = SAFE | Evidence only. Map the changed files onto the rubric. |
+| A new Start-Game-Enabled quest "will just start" | Not always on an existing save. Check it is running (DevBench) before relying on it. |
+| COULD-NOT-CHECK read as "no update" | Nothing was compared. Fix the key or the network and run it again. |

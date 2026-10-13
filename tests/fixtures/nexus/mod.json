@@ -1,0 +1,9 @@
+{
+ "name": "Example Framework",
+ "version": "3.6.2",
+ "author": "Some Author",
+ "status": "published",
+ "updated_time": "2026-09-01T10:00:00.000+00:00",
+ "summary": "An example [b]framework[/b] &amp; tools.",
+ "description": "Requires Example Library.<br/>Safe on existing saves.<br />[size=4]Skyrim VR[/size] users: get the VR file.<br><br><br><br>Uninstalling mid-playthrough is not supported."
+}

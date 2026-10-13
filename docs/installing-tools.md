@@ -58,6 +58,7 @@ Install them into the `tools/` folder in your game directory; the setup prompt w
   - Verify: `7z` (or `7zz`) with no arguments prints `7-Zip 26.00` on its first line.
 - **`tools/nexus.sh`** — built-in Nexus API helper (no install). Needs your Nexus key (see *Nexus API key* below).
   - Verify: `bash tools/nexus.sh mod <id>` prints a mod's name/version.
+  - Also: `find "<name>"`, `page <id> --since <version>`, `contents <id>` (skill `mod-update-check`). Any failure prints `RESULT: COULD-NOT-CHECK` and exits 3.
 
 ## Pinned downloads
 

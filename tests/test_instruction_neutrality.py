@@ -66,6 +66,7 @@ NEUTRAL_FILES = [
     "agent/instructions/core.md",
     "agent/skills/devbench/SKILL.md",
     "agent/skills/mod-release-review/SKILL.md",
+    "agent/skills/mod-update-check/SKILL.md",
     "agent/skills/toolkit-setup/SKILL.md",
     "agent/skills/triage-and-conflicts/SKILL.md",
     "agent/skills/xelib/SKILL.md",

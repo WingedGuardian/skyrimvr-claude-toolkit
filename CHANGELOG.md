@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`mod-update-check` skill:** a two-stage review before updating or adding a mod -- a desk review of the Nexus page and changelog, then a file review including whether the installed plugin is pristine -- with the verdicts of the knowledgebase's safety rubric (SAFE, RISKY, NO-VR-BUILD, ...).
+- **`nexus.sh find`, `page`, `contents`:** a Nexus name search, the mod page with requirements and every changelog since a version, and file contents from Nexus previews (no browser impersonation: a refusal is reported with the link). Every Nexus failure, a missing key included, is `RESULT: COULD-NOT-CHECK` with exit 3.
 - **`mod-install`:** a manual mod install, dry run unless `--apply`: archive-triage's report and the full plan first, then backups of every replaced file and a SHA-256 manifest, existing configs kept with `<file>.new` beside them, hardlink-safe writes re-hashed after writing, plugins never activated, one FOMOD option group at a time; under Mod Organizer 2 it installs a new mod folder, and with Vortex present it warns.
 - **GOG and Epic SE/AE folders:** the guard (DevBench-save checks, the plugins.txt lookup), the xelib load-order reader and the triage tools now also look under `Skyrim Special Edition GOG` and `Skyrim Special Edition EPIC`, after the Steam folder; one list in `tools/skyguard/paths.py`.
 - **`mirror-launch-logs`:** a one-shot, append-only copy of the SKSE, crash and Papyrus logs into `.claude/backups/log-mirror/`; a grown log costs only its new bytes, and a truncated or replaced one keeps the previous copy instead of overwriting it.

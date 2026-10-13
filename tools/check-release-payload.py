@@ -81,6 +81,8 @@ CORE_REQUIRED = (
     "tools/archive-triage.py",
     "tools/mirror-launch-logs.py",
     "tools/mod-install.py",
+    "tools/nexus.sh",
+    "tools/nexus-render.py",
 )
 # Absent: dev-only trees, the user's own files, and runtime state. A path, or a file NAME anywhere.
 ABSENT_PATHS = (

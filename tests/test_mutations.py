@@ -1196,6 +1196,36 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
            "test_vortex_is_warned_about_not_refused"),
       ]],
 
+    # --- nexus.sh / nexus-render ---------------------------------------------
+    *[pytest.param(path, find, replace, "tests/test_nexus.py::" + test, id="nexus-" + tid)
+      for tid, path, find, replace, test in [
+          ("vkey-trailing-zero", "tools/nexus-render.py", '    while len(parts) > 1 and parts[-1] == (0, ""):',
+           "    while False:", "test_vkey_treats_trailing_zeros_and_a_leading_v_as_equal"),
+          ("vkey-as-strings", "tools/nexus-render.py",
+           "        parts.append((int(m.group(1)) if m.group(1) else -1, m.group(2).lower()))",
+           "        parts.append((m.group(1), m.group(2).lower()))", "test_vkey_orders_versions_numerically"),
+          ("changelogs-string-sorted", "tools/nexus-render.py", "    vers = sorted(logs, key=vkey, reverse=True)",
+           "    vers = sorted(logs, reverse=True)",
+           "test_changelogs_since_the_installed_version_are_all_shown_newest_first"),
+          ("nulls-printed-as-none", "tools/nexus-render.py", "    return default if v is None else str(v)",
+           "    return str(v)", "test_find_tolerates_null_fields"),
+          ("requirements-failure-as-none", "tools/nexus-render.py",
+           '        print("  (could NOT fetch requirements -- not the same as none)")',
+           '        print("  (none declared -- the description may still list some)")',
+           "test_page_says_requirements_could_not_be_fetched_not_none"),
+          ("changelog-failure-as-none", "tools/nexus-render.py",
+           '        logs = None if os.environ.get("LOG_STATUS") == "failed" else (load_env("LOG", required=False) or {})',
+           '        logs = load_env("LOG", required=False) or {}',
+           "test_a_missing_changelog_does_not_fail_the_page_but_is_not_called_none"),
+          ("403-as-generic-failure", "tools/nexus-render.py", "        if e.code == 403:", "        if False:",
+           "test_fetch_never_sends_a_browser_user_agent"),
+          ("browser-user-agent", "tools/nexus-render.py", 'UA = "skyrim-ai-assistant-toolkit-nexus/1',
+           'UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) skyrim-ai-assistant-toolkit-nexus/1',
+           "test_fetch_never_sends_a_browser_user_agent"),
+          ("http-status-ignored", "tools/nexus.sh", '    if [ "$code" != "200" ]; then', "    if false; then",
+           "test_an_http_error_is_could_not_check_exit_3"),
+      ]],
+
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(
         # Drop the previous copy on a replacement: the last launch's log is gone, which is the loss the mirror exists

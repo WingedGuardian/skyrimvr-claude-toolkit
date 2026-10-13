@@ -1,0 +1,22 @@
+{
+ "data": {
+  "mods": {
+   "nodes": [
+    {
+     "modId": 101,
+     "name": "Example Framework",
+     "version": "3.6.2",
+     "author": "Some Author",
+     "updatedAt": "2026-09-01T10:00:00Z"
+    },
+    {
+     "modId": 202,
+     "name": "Example Framework NG",
+     "version": null,
+     "author": null,
+     "updatedAt": null
+    }
+   ]
+  }
+ }
+}

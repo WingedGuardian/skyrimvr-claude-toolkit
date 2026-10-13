@@ -1,0 +1,20 @@
+{
+ "data": {
+  "mod": {
+   "modRequirements": {
+    "nexusRequirements": {
+     "nodes": [
+      {
+       "modName": "Example Library",
+       "notes": "<b>needed</b> for the scripts"
+      },
+      {
+       "modName": "Address Library",
+       "notes": null
+      }
+     ]
+    }
+   }
+  }
+ }
+}
