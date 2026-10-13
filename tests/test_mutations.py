@@ -7818,3 +7818,13 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/writes.py", 'r"-[nrEsuzb]*i', 'r"-[nrEsuz]*i', _SEDT + "test_sed_crlf_binary_mode_is_allowed",
      "rule-S-SED-CRLF-bi-is-in-place"),
 ]]
+# P8-SED item 2: messages-no-echo and messages-two-lines break a message INSIDE the engine, but their anchor fired all
+# 1,258 corpus rows through the real wrapper (0.43 s a row, MEASURED: ~540 s; the twin timed out at 595 s against the
+# 600 s cap). Retarget them to the in-process twin of the same contract check (~2 s). The wrapper-fired test stays in
+# the suite; it only stops being the anchor. An appended override keeps the Task 13 block untouched; in place ([:]),
+# because the parametrize decorator above already holds this list object.
+_FAST_ECHO = "tests/test_rule_messages.py::test_no_engine_message_echoes_its_command"
+_RETARGET = ("messages-no-echo", "messages-two-lines")
+assert sum(p.id in _RETARGET for p in MUTATIONS) == len(_RETARGET)
+MUTATIONS[:] = [pytest.param(*p.values[:3], _FAST_ECHO, marks=p.marks, id=p.id) if p.id in _RETARGET else p
+                for p in MUTATIONS]

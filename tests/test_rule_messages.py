@@ -248,6 +248,44 @@ def test_no_message_echoes_its_command(fired_corpus):
     assert not bad, "\n".join(bad)
 
 
+@pytest.fixture(scope="module")
+def engine_corpus():
+    """Every legacy and intended row, decided IN-PROCESS by the engine (record.engine_verdict, what the wrapper runs,
+    without the wrapper). MEASURED 2026-10-12: ~2 s for 1,258 rows, against ~540 s through the wrapper (0.43 s a row:
+    a bash and a python start each). {row id: (decision, text, payload)}."""
+    import importlib.util
+    import tempfile
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("record", REPO / "scripts" / "guard-corpus" / "record.py")
+    rec = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rec)
+    out = {}
+    with tempfile.TemporaryDirectory() as td:
+        inst = {n: rec.make_install(Path(td), REPO / ".claude" / "hooks", n) for n in rec.LAYOUTS}
+        for r in _corpus_rows():
+            payload = rec.row_payload(r, inst[r["layout"]])
+            got = rec.engine_verdict(inst[r["layout"]], r["hook"], payload)
+            out[r["id"]] = (got["decision"], got["text"], payload)
+    return out
+
+
+def test_no_engine_message_echoes_its_command(engine_corpus):
+    """The same contract as test_no_message_echoes_its_command, held to the ENGINE's text for every row. It is the
+    fast anchor for the mutation twins that break a message inside the engine (messages-no-echo, messages-two-lines);
+    the wrapper-fired test above stays, because only it sees text the wrapper itself adds."""
+    assert len(engine_corpus) >= 150
+    spoken = 0
+    bad = []
+    for rid, (decision, text, payload) in sorted(engine_corpus.items()):
+        if decision == "allow":
+            assert text == "", rid
+            continue
+        spoken += 1
+        bad += ["%s: %s" % (rid, p) for p in contract_problems(rid, text, payload)]
+    assert spoken >= 100, spoken
+    assert not bad, "\n".join(bad)
+
+
 def test_the_contract_check_can_fail():
     """Each clause bites on a planted message: an echo, a third line, a long line."""
     cmd = {"tool_input": {"command": "bash tools/resaver-cli.sh reset-havok-for-the-whole-save.ess --apply"}}
