@@ -34,10 +34,21 @@ bash tools/devbench-cli.sh notify "Test 3 of 5: swing now"   # HUD narration
 bash tools/devbench-cli.sh tool menu '{"action":"accept"}'   # raw: any tool, any JSON
 ```
 
-**Hard requirement — this is NOT headless.** The server only exists while the game is genuinely
-running with a save loaded. In VR that means the headset is on (Skyrim VR errors at VR-init without
-it). When the game is closed the port is dead — fall back to the offline tools (xelib, Spriggit,
-ReSaver, PyNifly).
+**Hard requirement: the game must be running.** The server only exists while the game is genuinely
+running with a save loaded. In VR that normally means the headset is on (Skyrim VR errors at VR-init
+without one) -- or headless mode, below. When the game is closed the port is dead — fall back to the
+offline tools (xelib, Spriggit, ReSaver, PyNifly).
+
+**Headless Skyrim VR (no headset): `bash tools/vr-headless.sh on`.** It points the game at SteamVR's
+null driver (replacing an OpenComposite `openvr_api.dll` with SteamVR's own), so the game boots and
+DevBench is drivable with nobody in the headset. Close SteamVR first; then start SteamVR, let it
+settle (if room setup opens, wait for it to close: launching while it runs gets the game evicted),
+and launch the game. `bash tools/vr-headless.sh off` restores both files byte-exact and verifies
+them; it is safe to repeat and after a crash, so run it before the user plays again. **Valid only for
+pose-independent tests** -- scripts, records, console, frame rate. Anything that depends on where the
+head and hands are (HIGGS, VRIK, PLANCK, hand collision) needs the real headset. `emu on|off` swaps in
+a pose-emulating driver (its hands track) once the user has built it (`tools/vr-emu-driver/README.md`:
+fetched from a pinned upstream commit, never shipped). Skyrim VR only.
 
 **Port is deterministic per runtime: SE/AE `8920`, VR `8921`** (DevBench iterates if the port is busy
 and writes the bound port to `Data/SKSE/Plugins/devbench/runtime.json`, which the wrapper reads).

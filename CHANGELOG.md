@@ -4,6 +4,7 @@
 
 ### Added
 
+- **`vr-headless` (Skyrim VR):** `on` / `off` / `status` / `emu on|off` for running the game with no headset on SteamVR's null driver. Steam and SteamVR are found through the registry and `libraryfolders.vdf`; both changed files are backed up, hashed and recorded before the first change, any failure puts them back, and `off` restores byte-exact and verifies (safe to repeat, safe after a crash). SE/AE is refused. The optional emulator driver is built locally by `tools/vr-emu-driver/build.py` from a pinned upstream commit; no binary or upstream source is shipped.
 - **`bench-vr`:** frame rate at fixed locations through DevBench (port from `runtime.json`), before and after a change, plus `compare`, which refuses runs under different conditions. Window 1 per location is discarded; god mode, timescale and game hour are restored in a `finally`; it never re-enters the current cell. The devbench skill gains its cautions (live shader-feature toggles, re-entering the current cell).
 - **`mod-install --update` across drives:** the copy-verify-remove move is tested, and a copy that does not match now aborts with the original untouched (exit 2) instead of a traceback.
 - **`mod-install --update` (Mod Organizer 2):** replaces an existing mod folder in place after moving the whole old folder into the manual-installs backups, named in the manifest; the user's configs and MO2's `meta.ini` are carried over. Without `--update` an existing folder is still refused, and the message names `--update`.

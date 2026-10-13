@@ -33,3 +33,8 @@ __pycache__/
 # "extract the new zip over your install", so any file the toolkit ships is replaced.
 # A file that is both shipped by us and appended to by you loses your work on update.
 KNOWLEDGEBASE.local.md
+
+# The pose-emulating null driver is BUILT on the user's machine from pinned upstream source and never shipped:
+# no licence grants its redistribution (tools/vr-emu-driver/README.md).
+tools/vr-emu-driver/build/
+tools/vr-emu-driver/work/

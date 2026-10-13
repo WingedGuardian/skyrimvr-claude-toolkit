@@ -1261,6 +1261,23 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
            "test_no_save_loaded_is_refused"),
       ]],
 
+    # --- vr-headless ----------------------------------------------------------
+    *[pytest.param("tools/vr-headless.py", find, replace, "tests/test_vr_headless.py::" + test, id="vr-headless-" + tid)
+      for tid, find, replace, test in [
+          ("no-restore-on-failure", "        problems = restore_entries(entries)\n        if problems:\n            print(\"ERROR: `on`",
+           "        problems = []\n        if problems:\n            print(\"ERROR: `on`",
+           "test_a_failure_midway_restores_both_files"),
+          ("backup-unverified", "            if not bak.is_file() or sha(bak) != want:", "            if not bak.is_file():",
+           "test_off_refuses_a_backup_that_does_not_verify_and_keeps_the_state"),
+          ("se-not-refused", '    if not (game / "SkyrimVR.exe").is_file():', "    if False:",
+           "test_se_and_ae_are_refused"),
+          ("state-recorded-after-change", "    save_state(state)                              # recorded BEFORE the first change",
+           "    pass                              # recorded BEFORE the first change",
+           "test_backups_are_taken_and_recorded_before_the_first_change"),
+          ("steamvr-running-ignored", "    if steamvr_running() and not force:", "    if False:",
+           "test_steamvr_running_is_refused_unless_forced"),
+      ]],
+
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(
         # Drop the previous copy on a replacement: the last launch's log is gone, which is the loss the mirror exists

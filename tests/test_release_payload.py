@@ -193,6 +193,9 @@ BREAKS = {
     "nexus-sh-missing": (lambda r: (r / "tools" / "nexus.sh").unlink(), "tools/nexus.sh present"),
     "nexus-render-missing": (lambda r: (r / "tools" / "nexus-render.py").unlink(), "tools/nexus-render.py present"),
     "bench-vr-missing": (lambda r: (r / "tools" / "bench-vr.py").unlink(), "tools/bench-vr.py present"),
+    "vr-headless-missing": (lambda r: (r / "tools" / "vr-headless.py").unlink(), "tools/vr-headless.py present"),
+    "emu-build-shipped": (_mkdir("tools/vr-emu-driver/build"), "tools/vr-emu-driver/build NOT shipped"),
+    "emu-work-shipped": (_mkdir("tools/vr-emu-driver/work"), "tools/vr-emu-driver/work NOT shipped"),
     "guard-manifest-missing": (lambda r: (r / "GUARD-FILES.sha256").unlink(), "GUARD-FILES.sha256 present"),
     "guard-file-edited": (lambda r: (r / "tools" / "skyguard" / "engine.py").write_text(
         (r / "tools" / "skyguard" / "engine.py").read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8"),

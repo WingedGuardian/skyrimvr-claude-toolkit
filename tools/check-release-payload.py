@@ -84,6 +84,9 @@ CORE_REQUIRED = (
     "tools/nexus.sh",
     "tools/nexus-render.py",
     "tools/bench-vr.py",
+    "tools/vr-headless.sh",
+    "tools/vr-headless.py",
+    "tools/vr-emu-driver/build.py",
 )
 # Absent: dev-only trees, the user's own files, and runtime state. A path, or a file NAME anywhere.
 ABSENT_PATHS = (
@@ -99,6 +102,9 @@ ABSENT_PATHS = (
     ".claude/settings.local.json",
     "node_modules",
     ".venv",
+    # Built on the user's machine from source the toolkit may not redistribute (tools/vr-emu-driver/README.md).
+    "tools/vr-emu-driver/build",
+    "tools/vr-emu-driver/work",
 )
 ABSENT_NAMES = ("skyrim-paths.env", ".nexus_api_key")
 # Any dotenv-style file (review M8): a committed `.env` / `x.env` / `.env.local` is where secrets live.
