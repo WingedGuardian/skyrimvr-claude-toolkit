@@ -32,7 +32,14 @@ $script:Role = ''
 if ($args.Count -ge 1) { $script:Role = [string]$args[0] }
 $script:Known = ($script:Role -ceq 'pre-tool') -or ($script:Role -ceq 'session-start')
 $script:Emitted = $false
+# The clock starts at this PROCESS's start, not this line: Codex's timeout runs from the spawn, and under load
+# Windows PowerShell 5.1 can spend seconds starting before the first line runs (T14b 2026-10-14: a call ended
+# 51.3 s after the spawn against definition timeout - 10 = 50). Never later than now, should the read fail.
 $script:T0ms = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+try {
+    $st = ([DateTimeOffset][System.Diagnostics.Process]::GetCurrentProcess().StartTime).ToUnixTimeMilliseconds()
+    if ($st -le $script:T0ms -and $st -gt $script:T0ms - 120000) { $script:T0ms = $st }
+} catch { }
 $script:T0 = ''
 $script:Inv = ''
 $script:HB = ''

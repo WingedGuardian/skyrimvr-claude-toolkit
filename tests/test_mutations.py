@@ -2000,6 +2000,11 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
          'f="${f}000"; f="${f:0:3}"', 'f="000"',
          "tests/test_hook_deadline.py::test_a_sub_second_probe_budget_is_honoured",
          "python-fallback-probe-whole-seconds-only"),
+        # the Codex PowerShell entry's clock starts at process start, not at its first line (T14b 2026-10-14)
+        ("agent/guards/adapters/codex/skyguard-entry.ps1",
+         "if ($st -le $script:T0ms -and $st -gt $script:T0ms - 120000) { $script:T0ms = $st }", "",
+         "tests/test_codex_entry.py::test_the_deadline_clock_starts_when_powershell_starts_not_when_the_script_does",
+         "codex-ps-clock-starts-at-the-first-line"),
         # 6: no re-probe after run.py's own watchdog
         ("agent/guards/adapters/claude/protect-files.sh",
          '[ "$RC" -ne 124 ] && [ -z "$WD" ] && ', '[ "$RC" -ne 124 ] && ',
