@@ -411,7 +411,22 @@ def test_a_probe_gets_only_the_time_left_before_the_deadline(tmp_path):
             _kill(int(pidfile.read_text()))
 
 
+def _start_overhead() -> float:
+    """Worst of three: bash starting two Pythons, the shim chain's own cost on THIS machine right now."""
+    worst = 0.0
+    for _ in range(3):
+        t = time.perf_counter()
+        subprocess.run([BASH, "-c", f'"{REAL_PY}" -c pass; "{REAL_PY}" -c pass'], capture_output=True, check=False)
+        worst = max(worst, time.perf_counter() - t)
+    return worst
+
+
 def test_a_sub_second_probe_budget_is_honoured(tmp_path):
+    # The gap is 0.5 s plus process starts and the kill landing. A fixed 2 s failed on a slow CI runner
+    # (4.01 s, windows-latest 3.13, run 38489393645), so the bound scales with the measured start cost.
+    # It is capped at 10 s: a dropped fraction turns 0.5 into the 15 s default, which must stay red.
+    overhead = _start_overhead()
+    bound = min(0.5 + 3 * overhead + 2.0, 10.0)
     root = _install(tmp_path, MISSING)
     stamps = tmp_path / "stamps.log"
     pidfile = tmp_path / "probe.pid"
@@ -432,7 +447,7 @@ def test_a_sub_second_probe_budget_is_honoured(tmp_path):
             n, v = line.split()
             t.setdefault(n, float(v))
         gap = t["python3"] - t["python"]
-        assert gap < 2.0, f"a 0.5 s probe held the chain {gap:.2f} s"
+        assert gap < bound, f"a 0.5 s probe held the chain {gap:.2f} s (bound {bound:.2f} s, start cost {overhead:.2f} s)"
     finally:
         if pidfile.is_file():
             _kill(int(pidfile.read_text()))
