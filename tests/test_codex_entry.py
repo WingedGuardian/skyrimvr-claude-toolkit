@@ -281,6 +281,23 @@ def test_a_hung_engine_is_a_deny(tmp_path, entry):
     assert took < 10, f"the wrapper's deadline did not end the call ({took:.1f} s)"
 
 
+@pytest.mark.parametrize("entry", [p for p in ENTRIES if p.values[0] != "bash"])
+def test_the_deadline_clock_starts_when_powershell_starts_not_when_the_script_does(tmp_path, entry):
+    # Codex's timeout runs from the spawn. Under load Windows PowerShell 5.1 spent seconds starting before the
+    # script's first line, and a clock taken there let the call end past definition timeout - 10 s (T14b,
+    # 2026-10-14: 51.3 s against 50). A delay inside the same process stands in for that start-up time.
+    root = _install(tmp_path)
+    script = root / ".codex" / "hooks" / "skyguard-entry.ps1"
+    e = dict(os.environ)
+    e.pop("SKYGUARD_WRAPPER_TIMEOUT_S", None)
+    spawned = time.time()
+    subprocess.run([_ps_exe(entry), "-NoProfile", "-NonInteractive",
+                    "-ExecutionPolicy", "Bypass", "-Command", f"Start-Sleep -Seconds 8; & '{script}' pre-tool"],
+                   input=_benign(root), capture_output=True, env=e, timeout=90)
+    t0 = float(_rec(root, "pre-tool", "invoked").split()[0])
+    assert t0 - spawned < 4, f"the clock started {t0 - spawned:.1f} s after the spawn"
+
+
 def _alive(pid: int) -> bool:
     out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True).stdout
     return str(pid) in out
