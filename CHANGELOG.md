@@ -273,6 +273,7 @@
 - **Codex subfolders:** Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you.
 - **PowerShell policy:** AllSigned may prevent hook launch.
 - **Pattern-based coverage:** the guard is an accident barrier, not a sandbox.
+- **Save approvals:** the guard ignores approval text that reaches the transcript through a tool result or the agent's own output. An agent that deliberately forges a user approval line in its own transcript file is out of scope.
 - **Encoded Bash program names:** some ANSI-C quoted spellings are not classified; this gap predates v4.
 - **Backslashes in Bash guard messages:** an unquoted Windows path is named the way Bash reads it, backslashes removed (`Data\MyMod.esp` is shown as `DataMyMod.esp`, which is also the file Bash would write); quote Windows paths or use forward slashes.
 - **Interpreter state writes:** code can write or link guard state through forms the shell scanner does not recognize.
