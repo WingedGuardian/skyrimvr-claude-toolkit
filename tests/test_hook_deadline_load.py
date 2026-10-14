@@ -728,7 +728,7 @@ def test_matrix_cell(tmp_path, level, entry, path):
                 over += 1
                 if STOP_AFTER and over >= STOP_AFTER:
                     _record({"kind": "stopped", "label": LABEL, "entry": entry, "path": path, "level": level,
-                             "after_runs": i + 1, "of": n, "over_deadline_runs": over})
+                             "after_runs": i + 1, "of": n, "over_deadline_runs": over, "ts": time.strftime("%H:%M:%S")})
                     break
     assert worst < deadline - MARGIN_S and not problems, \
         f"{entry} {path} at {level:g}x: worst {worst:.1f} s against {deadline} - {MARGIN_S} s; {problems}"
