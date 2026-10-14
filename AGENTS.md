@@ -214,6 +214,8 @@ the working directory the agent reports.
   inside `Data/Scripts/` -- both have destroyed sources
 - DevBench `smp reset` (measured to crash a large load order), by MCP, `curl` or `devbench-cli.sh`
 - Decoded text run as commands (`base64 -d | bash`), which the guard cannot read
+- **More than two saves changed at once**, or saves named by a wildcard, until the user types the
+  `SAVE_ACCESS_APPROVAL` line the refusal shows (skill `skyrim-save`)
 - A command the guard cannot read: empty or not text ("GUARD INERT"), or unparseable while it contains
   a deletion and names a protected folder -- it refuses rather than shrugs
 
@@ -227,13 +229,12 @@ the working directory the agent reports.
   file directly in the game folder (its exe and dlls, `openvr_api.dll`, loader INIs)
 - A decompiler writing its output into the install; `sed -i` with a backslash path, on a file in the install
 - AutoMod write commands without `--dry-run`
+- Changing one or two saves (a save and its `.skse` are one): both are backed up, verified, first;
+  a failed backup refuses
 
 Naming a plugin or INI in a read-only command is silent: notes fire on the program that writes.
 
-### ASKS THE USER -- seven rules
-- A ReSaver write operation (`clean`, `reset-havok`, `set-global`, ...) with `--apply`: it rewrites the save
-- A DevBench save (`game` tool or console `save <name>`) over an existing save: the old one is not kept
-- A shell write, copy or move onto a save in `Saves/`, and an edit-tool write to one (two rules)
+### ASKS THE USER -- three rules
 - git that throws away uncommitted changes in a protected folder (`checkout -- x`, `restore`,
   `reset --hard`)
 - `lock disable` (the file lock off for good), and `snapshot restore --in-place` or
@@ -389,8 +390,8 @@ Generated into `AGENTS.md` only; everything above is shared. Other agents: this 
   folders is refused; edits inside the game get advice. Files an `apply_patch` changes or deletes are
   backed up to `.claude/backups/` first, and recent `.psc`/`.pex` are snapshotted before shell commands.
   A file written by a script you run is not backed up.
-- **DevBench MCP** (server name contains `devbench`): `smp reset` and a save over an existing save are
-  refused; for the save, ask the user to run it.
+- **DevBench MCP** (server name contains `devbench`): `smp reset` is refused; a save over an existing
+  save is backed up first, then runs.
 - **Not checked:** commands the user types with `!` in the Codex TUI (they bypass hooks), and other MCP
   tools (only logged).
 - **Skills** are in `.agents/skills/<name>/SKILL.md`: read the file when `core.md` points at it by name.
