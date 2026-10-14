@@ -1606,10 +1606,19 @@ DevBench (alandtse, Nexus SE 181326) exposes the **running** game over a localho
 Everything below was learned during live sessions on a heavy (700+ plugin) VR load order. Read this
 before your first live session — several of these cost a force-killed game to discover.
 
-### Versions and what changed in 1.16-1.24 (read from the changelog/README, 2026-10-05; not run live)
-- Latest seen: **1.24.0** (2026-10-04). Toolkit floor stays **1.11.0** (`alive`; off-thread since 1.12.0).
-  No removals or renames in 1.16-1.24: ports, `POST /api/tool/<tool>`, `/api/health` fields, `/api/tools`,
-  console exec/capture/read and the 400/504 meanings are all unchanged.
+### Versions and what changed in 1.16-1.28 (read from the changelog/README, 2026-10-05; 1.25-1.28 added 2026-10-14; not run live)
+- Latest seen: **1.28.0** (2026-10-11; the recorded API/docs reference moved from 1.24.0 on 2026-10-14).
+  Toolkit floor stays **1.11.0** (`alive`; off-thread since 1.12.0).
+  No removals or renames in 1.16-1.28: ports, `POST /api/tool/<tool>`, `/api/health` fields, `/api/tools`,
+  console exec/capture/read and the 400/504 meanings are all unchanged (1.25-1.28 checked by diffing the
+  README and `bridge/src/tools-fallback.json` at v1.24.0 against v1.28.0; no new tool, no removed argument).
+  **One behaviour change: Papyrus `call` omitted optionals (1.25, #118)** -- see *Papyrus `call` gotchas*.
+  1.25-1.28 otherwise add: `camera frame`/`camAngles` (1.25); `inspect` actor alive/loaded3D (1.25), `lights`
+  and per-hand `hands` (1.26-1.27), attack state/stamina (1.28); `game setTimeScale` returns a
+  `generation`/`state` snapshot and waits `waitMs` instead of 504-ing while the engine ramps, unless
+  `requireReached:true` (1.26); `console exec capture:true` returns `lines` itself (1.28, #130); papyrus `null`
+  for `None` (#129) and forms behind custom scripts (#128) (1.28); injected keys carry an empty user event (1.28, #127).
+  CommonLibSSE-NG was not bumped in 1.25-1.28 (the Address Library note below still holds).
 - **Update the VR Address Library first.** DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0. Newest VR
   Address Library seen: **0.276.1** (2026-10-04).
 - New: `game loadLast` / `advanceTime` (1.17) / `setTimeScale` / `getTimeScale` (1.22, 0.1..3.0, leased, 409
@@ -1693,9 +1702,15 @@ before your first live session — several of these cost a force-killed game to 
   `{"form":"0x14"}` (or an EditorID), or `"selected"` for the console/crosshair ref (set via `prid`).
 - Unlike console `cgf`, **the return value comes back** (`{called, returned, returnedType}`) — this is
   what makes read-modify-read loops possible without a play-session round trip.
-- **Omitted trailing optional params are padded with neutral defaults** (`None`/`0`/`0.0`/`false`/`""`).
-  For reference ops (`MoveTo`, `Disable`, `Kill`) a short arg list therefore **silently no-ops** —
-  pass every optional whose real default isn't neutral (e.g. `StringUtil.Substring`'s `-1`).
+- **Omitted trailing optional params: DevBench <= 1.24 padded them with neutral defaults**
+  (`None`/`0`/`0.0`/`false`/`""`), so for reference ops (`MoveTo`, `Disable`, `Kill`) a short arg list
+  **silently no-opped**. **Since 1.25 (#118, read from the changelog/README, not run live)** an omitted
+  param is filled only from a table of known vanilla/SKSE defaults (`PlaceAtMe` `aiCount=1`, `MoveTo`
+  `abMatchRotation=true`); any other omitted param **refuses the call with 400 and nothing runs**. Pass every
+  param explicitly, or send `fillNeutral:true` for the old padding. The answer lists fills under `filledArgs`
+  (`source: table|neutral`) and a `warning` for neutral guesses. Still pass explicit values for non-neutral
+  defaults (e.g. `StringUtil.Substring`'s `-1`). Do not assume which build is installed: a 1.11-1.24
+  install still pads silently.
 - Array returns may not serialize (an array-returning function can come back as `none`) — probe with a
   scalar-returning function instead of concluding the state is absent.
 

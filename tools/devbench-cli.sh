@@ -203,7 +203,8 @@ case "$CMD" in
       post console '{"action":"read"}' | pretty
       # NOTE: many commands (addmusic/removemusic/...) produce NO console output, so count:0 can be
       # genuine. On DevBench < 1.19 it was also what an empty capture buffer returned (fixed in 1.19, #96;
-      # capture reworked again in 1.24, #117) -- either way, judge the result by re-reading state.
+      # capture reworked again in 1.24, #117; 1.28, #130, also returns the lines from the exec call itself,
+      # which `read` repeats) -- either way, judge the result by re-reading state.
       ;;
 
   call)
@@ -216,8 +217,10 @@ case "$CMD" in
           payload="{\"action\":\"call\",\"script\":\"$script\",\"function\":\"$func\",\"args\":$args}"
       fi
       post papyrus "$payload" | pretty
-      # NOTE: omitted TRAILING optional params are padded with neutral defaults (None/0/false/"").
-      # For reference ops (MoveTo/Disable/Kill) a short arg list silently no-ops -- pass them explicitly.
+      # NOTE: DevBench <= 1.24 padded omitted TRAILING optional params with neutral defaults (None/0/false/""),
+      # so a short arg list silently no-opped reference ops (MoveTo/Disable/Kill). Since 1.25 (#118) only known
+      # vanilla/SKSE defaults are filled and any other omitted param is refused with 400 (nothing runs):
+      # pass every param explicitly, or send fillNeutral:true through `tool papyrus '{...}'` for the old padding.
       ;;
 
   describe)

@@ -38,6 +38,10 @@ of the tag**, versions only. A new DRIFT row (the plan's "BROKEN") stops the rel
 
 - DevBench: the recorded reference is 1.24.0; upstream showed 1.27.0. The sighting does not change the reference or
   authorize an upgrade. A bump is deliberate and tested.
+  - Update 2026-10-14 (the rows above are left as measured): the user ruled "bump devbench accordingly" and the
+    recorded reference moved to 1.28.0 (2026-10-11), read from the upstream changelog, README and tool
+    descriptions, not runtime-tested. The 2026-10-08 DEVBENCH rows therefore no longer describe the tree; the
+    refresh before the tag will read 1.28.0 against the then-latest upstream.
 - Codex CLI 0.160.0 -> 0.161.0 and Claude Code 2.1.289 -> 2.1.294: the payload fixtures need re-capturing and
   conformance re-running on current agents.
 - Git for Windows 2.48.1: moves with the planned Git update (inventory-runtimes MANUAL_STEPS).

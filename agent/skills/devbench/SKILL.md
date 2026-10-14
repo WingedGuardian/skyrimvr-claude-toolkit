@@ -60,8 +60,8 @@ quests|effects|refs`) · `papyrus` (list/describe/**call**) · `menu` (list/desc
 `game` (save/load/list) · `scenario` (timed steps with `waitFor`/`waitUntil`, not guessed sleeps) ·
 `camera` · `record`/`replay`.
 
-**Newer tools (from the DevBench 1.16–1.24 changelog and README; this toolkit has not exercised them
-against a live game).** `game` gained `loadLast` (fire-and-forget; reload the latest save), `advanceTime`
+**Newer tools (from the DevBench 1.16–1.28 changelog, README and tool descriptions; this toolkit has not
+exercised them against a live game).** `game` gained `loadLast` (fire-and-forget; reload the latest save), `advanceTime`
 (1.17), `setTimeScale` / `getTimeScale` (1.22; scale 0.1..3.0, leased, refused with 409 while a
 recording runs) · `wait` and `sleep` (1.16; step pacing, incl. in-game hours) · `input` (1.18-1.24;
 `capabilities` / `observe` / `keyboard` / `vrTrackedSet`: **synthetic input, VR-specific and mutating**
@@ -75,15 +75,33 @@ bridge named anything else.
 
 **Versions.** The toolkit's wrapper needs **1.11.0+** for `alive` (off-thread health since 1.12.0; older
 builds fall back to a frame diff). Everything it documents (ports, `POST /api/tool/<tool>`,
-`/api/health`, `/api/tools`, console exec/capture/read, 400/504 meanings) is unchanged in 1.24.0 per the
-changelog, which is the newest release this was read against (2026-10-04). **Keep the VR Address Library
+`/api/health`, `/api/tools`, console exec/capture/read, 400/504 meanings) is unchanged in 1.28.0 per the
+changelog and a diff of the tool descriptions against 1.24.0, which is the newest release this was read
+against (2026-10-11); the one behaviour that did change is the Papyrus `call` rule below. **Keep the VR Address Library
 current before updating DevBench:** DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0 and needs a current
 Address Library. The newest VR Address Library seen when this was written is **0.276.1** (2026-10-04);
 a stale Address Library is the usual reason an SKSE plugin fails to load.
 **Console capture:** 1.19 fixed capture when the output buffer is empty (#96) and 1.24 changed how
-console output is captured (#117). The wrapper's exec+sleep+read pair still works; `count:0` was
-common on older builds and is no longer assumed normal -- many commands still print nothing, so verify
-by re-reading state. 1.24 also warns on unknown request keys; the wrapper sends only documented keys.
+console output is captured (#117). 1.28 (#130) makes `console exec` with `capture:true` return the
+output itself as `lines` (plus `completed` and `lossPossible`); a following `read` returns the same output
+again, so the wrapper's exec+sleep+read pair still works unchanged. `count:0` was common on older builds
+and is no longer assumed normal -- many commands still print nothing, so verify by re-reading state.
+1.24 also warns on unknown request keys; the wrapper sends only documented keys.
+
+**Papyrus `call` changed in 1.25 (#118) -- omitted optional arguments.** Through 1.24 a short argument
+list was padded with neutral values (`None`/`0`/`false`/`""`), which silently turned reference ops such as
+`MoveTo`/`Disable`/`Kill` into no-ops. Since 1.25 an omitted trailing argument is filled from a table of
+known vanilla/SKSE defaults (`PlaceAtMe` `aiCount=1`, `MoveTo` `abMatchRotation=true`, ...) and **any other
+omitted argument refuses the call with 400 and nothing runs**. Pass every argument explicitly, or add
+`"fillNeutral":true` (raw `tool papyrus`) to accept the old neutral padding; the answer lists every fill
+under `filledArgs` and warns about any neutral guess. 1.28 also accepts `null` for `None` (object and array
+parameters only; 400 otherwise, #129), resolves forms behind custom scripts such as a quest script (#128),
+and a 504 now says whether the call was already dispatched (it may still run).
+**Other changes since 1.24 that nothing here depends on:** `game setTimeScale` returns a terminal snapshot
+with a `generation` and `state` and waits up to `waitMs` (default 2000); a request still ramping is an
+answer, not a 504, unless `requireReached:true` (1.26+); `inspect` gained `lights`, per-hand `hands` data
+and, on actor refs, alive/3D-loaded/attack-state/stamina (1.25-1.28); `camera` gained `frame` and
+`camAngles` (1.25); synthetic keys carry an empty user event so menus receive them (1.28, #127).
 
 **Check `alive` first, and believe it over `ping`.** Every tool call above runs *on the game's main
 thread* and 504s after 5s if that thread is stuck — so tool calls fail in exactly the situation you
