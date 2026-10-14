@@ -123,6 +123,14 @@ byte-identical to the tested install's.
 | `opentest4j-1.2.0.jar` | no | `58812de60898d976fb81ef3b62da05c6604c18fd4a249f5044282479fc286af2` |
 | `picocli-4.6.3.jar` | no | `b0a5159e926de8084ff066025142270443533656bc599b8bb31d14d11fd138a4` |
 
+## Git for Windows
+
+The hooks and `setup.sh` run under Git Bash, which comes with Git for Windows. This toolkit is tested with Git for Windows 2.55.0.5 (release `v2.55.0.windows.5`). Git is system software: an agent installs it only when your setup prompt authorizes exactly `git=Git.Git==2.55.0.5`, so normally you install it yourself. For you to run, in Windows Terminal:
+`winget install --id Git.Git --exact --version 2.55.0.5 --no-upgrade`
+or download `Git-2.55.0.5-64-bit.exe` from <https://github.com/git-for-windows/git/releases/tag/v2.55.0.windows.5> and check that its SHA-256 is `d065a4e23c3d9a6b5073d609b5be0830227ec3ca053c083ba385061ddfaf94c6` before running it. MEASURED 2026-10-13: downloaded and hashed, equal to the digest GitHub publishes for that release asset and to the installer hash in winget's `Git.Git` 2.55.0.5 manifest; the installer's Authenticode signature is valid.
+
+**Git for Windows 2.55 changed `$OSTYPE`.** From 2.55 (bash 5.3 on the MSYS2 3.6 runtime) Git Bash reports `$OSTYPE` as `cygwin`; 2.54 and earlier report `msys`. `uname -s` still starts with `MINGW`. The hooks support both from toolkit commit `d908198` (2026-10-11, first released in v4.0.0): they treat `cygwin` as Git Bash when the MSYS runtime (`/usr/bin/msys-2.0.dll`) is present. A v4 development checkout from `d6b1ca1` up to, not including, `d908198` fails closed under Git 2.55 -- nothing is let through, but every hook call reports GUARD INERT -- so **update the toolkit before you update Git**. v3.9.1's hooks do not read `$OSTYPE` (READ from its source; not run under Git 2.55).
+
 ## Why some tools have wrappers
 
 1. **AutoMod** — `tools/automod-cli.sh` invokes the **prebuilt `spookys-automod.dll`** directly rather than `dotnet run`. This fixes the per-call recompile / MSB1025 failures that the old `dotnet run` form produced; rebuild once with `--rebuild` after changing AutoMod source.

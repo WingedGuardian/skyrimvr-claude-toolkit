@@ -116,7 +116,7 @@ None of these are bundled; setup walks you through any you pick.
 
 Follow the official installation guide for [Claude Code](https://code.claude.com/docs/en/setup) or [Codex CLI](https://developers.openai.com/codex/cli/). Codex hook support here is for the Windows CLI; the desktop app and IDE extensions are not claimed.
 
-The toolkit's tested Python range is **3.10–3.13**. Optional xelib tools use **Node 24.19.0**; Spriggit and AutoMod use the **.NET 10 SDK**. [Installing tools](docs/installing-tools.md) lists the exact tested versions and verification steps. The setup prompt below does not authorize host-software installation.
+The toolkit's tested Python range is **3.10–3.13**. The hooks run under Git Bash, tested with Git for Windows **2.55.0.5** (Git 2.55 needs this toolkit version or later: see [Installing tools](docs/installing-tools.md#git-for-windows)). Optional xelib tools use **Node 24.19.0**; Spriggit and AutoMod use the **.NET 10 SDK**. [Installing tools](docs/installing-tools.md) lists the exact tested versions and verification steps. The setup prompt below does not authorize host-software installation.
 
    Install Node.js **24.19.0**, the version this toolkit was tested with. For you to run, in Windows Terminal:
    `winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade`

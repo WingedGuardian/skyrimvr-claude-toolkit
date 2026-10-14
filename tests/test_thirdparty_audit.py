@@ -157,6 +157,19 @@ def test_a_pin_ahead_of_upstream_is_drift():
     assert ta.version_status("v1.11.2", "1.11.2")[0] == ta.OK
 
 
+# Git for Windows tags a release v<git>.windows.<n> and names its installer Git-<git>-64-bit.exe when n is 1 and
+# Git-<git>.<n>-64-bit.exe otherwise; the pin is the installer's version, so the tag must compare in that form.
+@pytest.mark.parametrize("pinned,latest,status", [
+    ("2.55.0.5", "v2.55.0.windows.5", ta.OK),
+    ("2.48.1", "v2.48.1.windows.1", ta.OK),
+    ("2.55.0.5", "v2.55.0.windows.6", ta.NEWER),
+    ("2.55.0.5", "v2.56.0.windows.2", ta.NEWER),
+    ("2.55.0.5", "v2.55.0.windows.4", ta.DRIFT),
+])
+def test_a_git_for_windows_tag_compares_as_its_installer_version(pinned, latest, status):
+    assert ta.version_status(pinned, latest)[0] == status
+
+
 # ------------------------------------------------------------------ 2. a documented path the release no longer ships
 
 def test_a_documented_path_the_release_no_longer_ships_is_drift(tmp_path):
@@ -833,3 +846,53 @@ def test_a_doc_stating_another_jdk_than_the_image_is_drift(tmp_path):
     files["docs/container-vs-windows.md"] = files["docs/container-vs-windows.md"].replace("JDK 17", "JDK 21.0.12")
     rows, _ = audit(make_repo(tmp_path / "ok", files), tmp_path / "c", ["Microsoft OpenJDK"])
     assert not [r for r in by(rows, ta.DRIFT) if r.check == "install refs"]
+
+
+# ------------------------------------------------------------------ Git for Windows: one tested version, every path
+# The Git for Windows the suites run under (MEASURED 2026-10-13 on the dev machine: `git --version` prints
+# 2.55.0.windows.5), and its installer's SHA-256: downloaded and hashed, equal to the digest GitHub publishes for the
+# release asset and to the InstallerSha256 in winget's Git.Git 2.55.0.5 manifest; Authenticode signature valid.
+TESTED_GIT, TESTED_GIT_TAG = "2.55.0.5", "v2.55.0.windows.5"
+TESTED_GIT_SHA = "d065a4e23c3d9a6b5073d609b5be0830227ec3ca053c083ba385061ddfaf94c6"
+GIT_SPEC = next(s for s in ta.REGISTRY if s["name"] == "Git for Windows")
+
+
+def _inventory():
+    spec = importlib.util.spec_from_file_location("inventory_runtimes", REPO / "tools" / "inventory-runtimes.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_every_git_for_windows_pin_names_the_tested_version():
+    """Each delivery path names the one tested Git: the manual steps the toolkit-setup skill prints (version,
+    release tag and hash), the version setup.sh reports as tested, and the docs' install line. Red while any of
+    them still says an older Git (2.48.1 until 2026-10-13)."""
+    repo = ta.Repo(REPO)
+    sites = [ta.read_pin_site(repo, s) for s in GIT_SPEC["pins"]]
+    assert sites and all(v == TESTED_GIT for _label, v in sites), sites
+    live = [h for ref in GIT_SPEC["refs"] for h in ta.scan_refs(repo, ref) if h[2] != "history"]
+    assert {h[0] for h in live} >= {"tools/inventory-runtimes.py", "setup.sh", "docs/installing-tools.md",
+                                    "README.md"}, live
+    assert [h for h in live if h[2] != TESTED_GIT] == [], live
+    steps = _inventory().MANUAL_STEPS["git"]
+    assert "Git for Windows %s " % TESTED_GIT in steps and "Git-%s-64-bit.exe" % TESTED_GIT in steps, steps
+    assert "/releases/download/%s/" % TESTED_GIT_TAG in steps and TESTED_GIT_SHA in steps, steps
+
+
+GIT_STEPS = ('    "git": "Install Git for Windows 2.55.0.5 (it includes Git Bash): download Git-2.55.0.5-64-bit.exe from "\n'
+             '           "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/ -- " + _VERIFY\n'
+             '           + "%s -- and run it. Then open a new terminal.",\n')
+GIT_RELEASE_URL = "https://api.github.com/repos/git-for-windows/git/releases/tags/v2.55.0.windows.5"
+GIT_LATEST_URL = "https://api.github.com/repos/git-for-windows/git/releases/latest"
+
+
+@pytest.mark.parametrize("sha,want", [(TESTED_GIT_SHA, ta.OK), ("f" * 64, ta.DRIFT)])
+def test_the_pinned_git_installer_hash_is_the_one_github_publishes(tmp_path, sha, want):
+    release = json.dumps({"tag_name": TESTED_GIT_TAG, "assets": [
+        {"name": "Git-2.55.0.5-64-bit.exe", "digest": "sha256:" + TESTED_GIT_SHA}]}).encode()
+    repo = make_repo(tmp_path, {"tools/inventory-runtimes.py": GIT_STEPS % sha})
+    cache = make_cache(tmp_path, extra=[(GIT_RELEASE_URL, 200, release), (GIT_LATEST_URL, 200, release)])
+    rows, _code = audit(repo, cache, ["Git for Windows"])
+    assert [r.status for r in rows if r.check == "pinned hash"] == [want], [r.as_dict() for r in rows]
+    assert [r.status for r in rows if r.check == "version"] == [ta.OK], [r.as_dict() for r in rows]

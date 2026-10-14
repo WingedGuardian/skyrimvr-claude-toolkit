@@ -6936,6 +6936,29 @@ _T15B_CLAUSES = [
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T15B_CLAUSES]
 
+# Git for Windows 2.55.0.5 pin (2026-10-13): every delivery path names the tested Git, and the audit reads all of
+# them. One twin per path and per audit clause the pin test leans on.
+_GIT_PIN = _TPT + "test_every_git_for_windows_pin_names_the_tested_version"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("setup.sh", "(tested with Git for Windows 2.55.0.5)", "(tested with Git for Windows 2.48.1)", _GIT_PIN,
+     "git-pin-setup-says-an-older-git"),
+    ("tools/inventory-runtimes.py", "d065a4e23c3d9a6b5073d609b5be0830227ec3ca053c083ba385061ddfaf94c6",
+     "ce45e23275049f4b36edd90d5fd986a1e230efb6c511e9260a90176ce8e825df", _GIT_PIN, "git-pin-manual-steps-old-hash"),
+    ("tools/inventory-runtimes.py", "releases/download/v2.55.0.windows.5/", "releases/download/v2.48.1.windows.1/",
+     _GIT_PIN, "git-pin-manual-steps-old-release"),
+    (_TPA, '              {"pattern": r"tested with Git for Windows \\*{0,2}(?P<v>\\d+(?:\\.\\d+){2,3})"}],',
+     "              ],", _GIT_PIN, "git-pin-audit-stops-reading-setup"),
+    (_TPA, r'r"Git-(?P<v>\d+(?:\.\d+){2,3})-64-bit\.exe")],', r'r"Git-(?P<v>\d+\.\d+\.\d+)-64-bit\.exe")],', _GIT_PIN,
+     "git-pin-site-reads-three-parts-only"),
+    (_TPA, '    return (m.group(1) + ("" if m.group(2) == "1" else "." + m.group(2))) if m else v', "    return v",
+     _TPT + "test_a_git_for_windows_tag_compares_as_its_installer_version[2.55.0.5-v2.55.0.windows.5-OK]",
+     "git-tag-compares-as-a-tag"),
+    (_TPA, '         "published": "https://api.github.com/repos/git-for-windows/git/releases/tags/{tag}"}]})],',
+     '         "published": "https://api.github.com/repos/git-for-windows/git/releases/tags/{tag}"}]})][:0],',
+     _TPT + "test_the_pinned_git_installer_hash_is_the_one_github_publishes[" + "f" * 64 + "-DRIFT]",
+     "git-installer-hash-unchecked"),
+]]
+
 # Merge of master into plan6 (2026-10-05): one twin per guard the merge itself added; each names the test that must go red.
 _MM_SR = "tests/test_skyguard_self_rules.py::"
 _MM_RP = "tests/test_release_payload.py::test_every_check_can_fail_on_its_own_line"

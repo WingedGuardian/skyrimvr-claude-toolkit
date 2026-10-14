@@ -154,7 +154,7 @@ hint_jdk() {
 echo "Checking the shell..."
 case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*)
-        echo "  Git Bash: $(git --version 2>/dev/null | tr -d '\r') (tested with Git for Windows 2.48.1)" ;;
+        echo "  Git Bash: $(git --version 2>/dev/null | tr -d '\r') (tested with Git for Windows 2.55.0.5)" ;;
     *)
         case "$GAME_DIR" in
             /mnt/[a-zA-Z]/*)
