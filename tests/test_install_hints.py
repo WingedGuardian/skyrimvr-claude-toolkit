@@ -101,7 +101,7 @@ GOOD_MANUAL = ("Manual step, for you to run (an agent may not install this): "
     (GOOD_ALLOWED, False),
     (GOOD_MANUAL, False),
     ("For you to run: winget install --id Python.Python.3.12 --exact --version 3.12.10 --no-upgrade", False),
-    ("For you to run: winget install --id Git.Git --exact --version 2.48.1 --no-upgrade", False),
+    ("For you to run: winget install --id Git.Git --exact --version 2.55.0.5 --no-upgrade", False),
     (GOOD_ALLOWED.replace(" --no-upgrade", ""), True),                    # the upgrade guard dropped
     (GOOD_ALLOWED.replace("--exact ", ""), True),
     (GOOD_ALLOWED.replace("--id ", ""), True),

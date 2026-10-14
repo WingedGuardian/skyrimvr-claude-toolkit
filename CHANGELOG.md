@@ -97,6 +97,7 @@
 - **Node 24 LTS:** xelib tooling requires Node 24; the tested pin is 24.19.0.
 - **.NET 10 SDK:** Spriggit and AutoMod use .NET 10; the tested SDK pin is 10.0.401.
 - **Spriggit 0.41.0:** replaces the 0.40.0 pin.
+- **Git for Windows 2.55.0.5:** replaces the 2.48.1 pin in the manual install steps (version, release and SHA-256), the version `setup.sh` reports as tested and the docs. Git 2.55 reports `$OSTYPE` as `cygwin`; the hooks handle it (`docs/installing-tools.md`, *Git for Windows*). The third-party audit now checks the Git installer's SHA-256 against the one GitHub publishes, and compares a `vX.Y.Z.windows.N` release tag as its installer version.
 - **Serializer version:** `--PackageVersion` follows the installed `spriggit --version`.
 - **AutoMod rebuild:** `bash tools/automod-cli.sh --rebuild` moves a clean clone to the pinned commit and builds the CLI for net10.0.
 - **AutoMod local edits:** the wrapper leaves a modified clone alone and gives instructions.

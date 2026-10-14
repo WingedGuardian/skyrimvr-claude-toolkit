@@ -415,7 +415,11 @@ def zip_names(f, url):
 def norm(v):
     v = str(v).strip()
     v = re.sub(r"^(?:rust-|release-|xedit-|pyffi-)", "", v)
-    return re.sub(r"^[vV](?=\d)", "", v)
+    v = re.sub(r"^[vV](?=\d)", "", v)
+    # Git for Windows tags v2.55.0.windows.5 and names that installer Git-2.55.0.5-64-bit.exe (.windows.1 -> no
+    # fourth part): a tag compares in the installer's form, which is what the pin records.
+    m = re.fullmatch(r"(\d+\.\d+\.\d+)\.windows\.(\d+)", v)
+    return (m.group(1) + ("" if m.group(2) == "1" else "." + m.group(2))) if m else v
 
 
 def vkey(v):
@@ -715,12 +719,17 @@ REGISTRY = [
     {"name": "Wrye Bash", "upstream": ("github", "wrye-bash/wrye-bash"),
      "not_delivered": "the user's own tool; no shipped instruction installs it"},
     {"name": "Git for Windows", "pins": [("regex", "tools/inventory-runtimes.py",
-                                          r"Git-(?P<v>\d+\.\d+\.\d+)-64-bit\.exe")],
+                                          r"Git-(?P<v>\d+(?:\.\d+){2,3})-64-bit\.exe")],
      "upstream": ("github", "git-for-windows/git"),
-     "refs": [{"pattern": r"Git\.Git --exact --version[ =]+(?P<v>\d+\.\d+\.\d+)"},
-              {"pattern": r"Git-(?P<v>\d+\.\d+\.\d+)-64-bit\.exe"}],
-     "newer_note": "the Git these suites ran under on the dev machine; Plan 8 Q6 updates Git before T14b -- move "
-                   "this pin (inventory-runtimes MANUAL_STEPS) with it"},
+     "refs": [{"pattern": r"Git\.Git --exact --version[ =]+(?P<v>\d+(?:\.\d+){2,3})"},
+              {"pattern": r"Git-(?P<v>\d+(?:\.\d+){2,3})-64-bit\.exe"},
+              {"pattern": r"tested with Git for Windows \*{0,2}(?P<v>\d+(?:\.\d+){2,3})"}],
+     "checks": [("hashes", {"items": [{
+         "label": "Git for Windows installer", "file": "tools/inventory-runtimes.py",
+         "pattern": r"git-for-windows/git/releases/download/(?P<tag>v[\w.]+)/[^\n]*\n[^\n]*?(?P<sha>[0-9a-f]{64})",
+         "published": "https://api.github.com/repos/git-for-windows/git/releases/tags/{tag}"}]})],
+     "newer_note": "the Git these suites run under on the dev machine: a bump is deliberate and tested -- move every "
+                   "pin (inventory-runtimes MANUAL_STEPS: version, release tag, SHA-256; setup.sh; the docs) together"},
     {"name": "Codex CLI", "pins": [("dirs", "tests/fixtures/codex/*"), ("dirs", "tests/fixtures/payloads/codex/*"),
                                    ("regex", "tools/skyguard/codex_trust.py", r"MEASURED on codex-cli (?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("npm", "@openai/codex"),
