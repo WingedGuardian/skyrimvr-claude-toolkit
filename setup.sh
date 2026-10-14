@@ -1119,7 +1119,7 @@ echo "  cosave-info  -- read-only SKSE .skse co-save survey (bundled): bash tool
 echo "  DevBench     -- LIVE in-game inspect/console/Papyrus while you play:"
 echo "                  Nexus mod 181326 (alandtse). This one is a MOD, not a tools/ utility --"
 echo "                  install it with your mod manager (Vortex/MO2), not by hand into Data/."
-echo "                  Needs DevBench 1.11.0+; recorded API/docs reference: 1.24.0 (2026-10-04)."
+echo "                  Needs DevBench 1.11.0+; recorded API/docs reference: 1.28.0 (2026-10-11)."
 echo "                  Update the VR Address Library FIRST (0.276.1 metadata reference, 2026-10-08):"
 echo "                  DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0. Reference dates do not recommend an upgrade."
 echo "                  dev-only, no gameplay change, no save data. Drive it via tools/devbench-cli.sh"

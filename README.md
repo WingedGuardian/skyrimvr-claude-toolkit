@@ -122,9 +122,10 @@ The toolkit's tested Python range is **3.10–3.13**. Optional xelib tools use *
    `winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade`
 
 DevBench is an optional SKSE mod installed through your mod manager. Its documented minimum is **1.11.0**;
-the newest release the docs were read against is **1.24.0** (2026-10-04, the recorded API/docs reference).
-The public metadata audit on **2026-10-08** found a newer release that has not been runtime-tested here;
-the recorded API/docs reference remains 1.24.0. The VR Address Library metadata reference is
+the newest release the docs were read against is **1.28.0** (2026-10-11, the recorded API/docs reference).
+It has been read against the upstream changelog and tool descriptions, not runtime-tested here. One behaviour
+changed in 1.25.0: a Papyrus `call` with an omitted optional argument is refused (400) unless the argument is passed or
+`fillNeutral:true` is sent. The VR Address Library metadata reference is
 **newest seen: 0.276.1** (2026-10-08). These sightings do not change pins or recommend an upgrade;
 follow [installing-tools.md](docs/installing-tools.md) for verification and installation guidance.
 

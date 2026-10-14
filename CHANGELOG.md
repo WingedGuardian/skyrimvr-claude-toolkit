@@ -146,6 +146,9 @@
 - **Shipped identity scrub:** examples and dated reports use neutral paths.
 - **Corpus fixture bytes:** non-shipped corpus fixtures preserve historical input bytes.
 - **Freeze baseline:** a tag on HEAD cannot serve as its own comparison baseline.
+- **DevBench reference 1.28.0:** the recorded API/docs reference moves from 1.24.0 to 1.28.0 (2026-10-11); the documented minimum stays 1.11.0.
+- **DevBench Papyrus `call`:** documented that since 1.25 an omitted optional argument is refused (400) unless it is a known vanilla/SKSE default or `fillNeutral:true` is sent; before 1.25 it was padded silently.
+- **DevBench console capture:** documented that 1.28 returns the captured lines from `exec` itself; the wrapper's exec-then-read pair is unchanged.
 
 ### Fixed
 
