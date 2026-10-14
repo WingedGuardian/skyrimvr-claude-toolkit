@@ -20,6 +20,8 @@ REMOVED = frozenset({
     "S-REDIRECT-INSTALL",   # Task 8: replaced by the S-WRITE-* rules, which fire on the program that writes
     "S-MOVE-INSTALL",       # Task 9 fix round 1: 107 of 107 hits in history were the user's deliberate deploys
 })
+# (Not legacy ids, so not listed above: S-WRITE-SAVE and W-SAVE, the asks about a save write, went with the save
+# policy, user ruling 2026-10-13 -- saves.py's S-SAVE-* rules decide every save change, by any route. Never reused.)
 
 # DevBench console commands that are refused (Task 11, R14). DATA, compared on whitespace-split lower-case words, so the
 # entry is the WHOLE command: `smp reset` is listed, `smp reset <anything>` is not. The only command MEASURED to crash
@@ -291,14 +293,16 @@ RULES = {
         'Note: loose files override {file}; check for loose copies before trusting it.'
     ),
     },
+    # The save policy (2026-10-13): ReSaver --apply on a save the guard can place is backed up and allowed (saves.py);
+    # one it cannot place (a bare name with no cwd, a wildcard, no .ess at all) cannot be backed up, so it is refused.
     'S-RESAVER-APPLY': {
-        "decision": 'ask',
+        "decision": 'deny',
         "hook": 'protect-bash',
         "legacy": False,
         "prefixes": [],
         "template": (
-        'ReSaver will MODIFY a save file ({op} on {save}). '
-        'Approve only if you asked for this save to be changed.'
+        'Blocked: ReSaver {op} --apply writes {save}, which the guard cannot place to back it up first.\n'
+        'Give the save as a full path.'
     ),
     },
     'S-EXTERNAL-OUT': {
@@ -310,16 +314,49 @@ RULES = {
         'Note: {op} writes its output into the Skyrim install; check it landed where you meant.'
     ),
     },
-    # routes red team (rt-fix-b): a shell write, copy or move ONTO a save in the settings folder replaces it; the old
-    # save is not kept (as S-DEVBENCH-SAVE and S-RESAVER-APPLY, a change to a save asks).
-    'S-WRITE-SAVE': {
-        "decision": 'ask',
+    # The save policy (user ruling 2026-10-13, saves.py): any call that changes saves -- a write, copy onto, edit,
+    # move, rename, delete, DevBench save or ReSaver --apply -- by any route (shell, edit tools, patch, MCP).
+    # 1 or 2 saves: each pair (.ess + .skse) is backed up and verified by the hook first, then the call is allowed.
+    'S-SAVE-BACKUP': {
+        "decision": 'advise',
         "hook": 'protect-bash',
         "legacy": False,
         "prefixes": [],
         "template": (
-        'This replaces the save {file}; the old save is not kept.\n'
-        'Approve only if you asked for this save to be changed.'
+        'Note: the guard backs up {file} before this runs ({op}).'
+    ),
+    },
+    # More than 2, or a wildcard: the user's typed SAVE_ACCESS_APPROVAL line (approvals.py) is required.
+    'S-SAVE-APPROVAL': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        "Blocked: this {op} {n} saves ({file}); more than 2, or a wildcard, needs the user's typed approval.\n"
+        'If they agree, the user types this line: SAVE_ACCESS_APPROVAL {save}'
+    ),
+    },
+    # A wildcard the guard cannot list (in a folder name, or an unreadable folder): no backup is possible.
+    'S-SAVE-UNKNOWN': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: the guard cannot list the saves this {op} ({file}), so it cannot back them up first.\n'
+        'Name each save, or put the wildcard in the file name only.'
+    ),
+    },
+    # The backup itself failed (no space, unreadable, a copy that does not verify, the store busy): fail closed.
+    'S-SAVE-BACKUP-FAILED': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: the backup of {file} failed ({op}), so the command did not run.\n'
+        'The save is unchanged; fix the cause, then retry.'
     ),
     },
     # routes red team (rt-fix-b): moving or renaming the install, its Data folder, the settings folder, its Saves
@@ -356,14 +393,16 @@ RULES = {
         'Use a targeted command instead, or run it yourself.'
     ),
     },
+    # The save policy (2026-10-13): a DevBench save over an EXISTING save is backed up and allowed (saves.py); one
+    # whose save the guard cannot tell (no plain name, no Saves folder) cannot be backed up, so it is refused.
     'S-DEVBENCH-SAVE': {
-        "decision": 'ask',
+        "decision": 'deny',
         "hook": 'protect-bash',
         "legacy": False,
         "prefixes": [],
         "template": (
         '{op}\n'
-        'Yes goes ahead; the save it overwrites is copied first when it can be (skyguard snapshot list).'
+        'The guard cannot back that save up first, so the call is refused; use a plain save name.'
     ),
     },
     # Plan 6 Task 11 (D6, R7): the lift rules (lift_rules.py). The CLI lifts are D6's: allowed, with a note. A
@@ -492,18 +531,6 @@ RULES = {
         "prefixes": [],
         "template": (
         'Note: this changes {file}, part of the safety guards themselves.'
-    ),
-    },
-    # routes red team (rt-fix-b): an Edit/Write (or apply_patch) onto a save in the settings folder rewrites a binary
-    # save as text; the old save is not kept.
-    'W-SAVE': {
-        "decision": 'ask',
-        "hook": 'protect-files',
-        "legacy": False,
-        "prefixes": [],
-        "template": (
-        'This edit replaces the save {file}; the old save is not kept.\n'
-        'Approve only if you asked for this save to be changed.'
     ),
     },
     'W-INI': {

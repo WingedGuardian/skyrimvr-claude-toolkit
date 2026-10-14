@@ -25,7 +25,8 @@ DEL_CONFIG = ("Blocked: this deletes {} in the Skyrim settings folder.\n"
               "Your INIs and controlmap there cannot be restored by a mod manager.")
 DEL_UNRESOLVED = ("Blocked: this deletes a path the guard cannot work out, in a command that names a protected Skyrim "
                   "folder.\nWrite the full path, or run it yourself.")
-W_SAVE = "This edit replaces the save {}; the old save is not kept.\nApprove only if you asked for this save to be changed."
+# The save policy (user ruling 2026-10-13): one existing save is backed up by the hook, then the call runs, on Codex too.
+SAVE_NOTE = "Note: the guard backs up {} before this runs (restore: tools/skyguard.sh snapshot list --kind save)."
 CRASH = ("Blocked: 'smp reset' crashes a large load order in the live game.\n"
          "Use a targeted command instead, or run it yourself.")
 INERT = "GUARD INERT: the agent's hook could not read this call ({}), so it checked NOTHING. This is a refusal, not a verdict."
@@ -81,7 +82,7 @@ ROWS = [
     ("rt-codex-patch-delete-ini", "apply_patch", _patch("*** Delete File: <config>/Skyrim.ini"), None,
      "deny", {"S-DEL-CONFIG"}, DEL_CONFIG.format("Skyrim.ini")),
     ("rt-codex-patch-delete-save", "apply_patch", _patch("*** Delete File: <config>/Saves/Existing.ess"), None,
-     "deny", {"S-DEL-CONFIG"}, DEL_CONFIG.format("Existing.ess")),
+     "allow", {"S-SAVE-BACKUP"}, SAVE_NOTE.format("Existing")),
     ("rt-codex-patch-delete-dot", "apply_patch", _patch("*** Delete File: ."), None,
      "deny", {"S-DEL-INSTALL"}, DEL_INSTALL.format("Game")),
     ("rt-codex-patch-delete-dir", "apply_patch", _patch("*** Delete File: Data"), None,
@@ -140,16 +141,16 @@ ROWS = [
     # A Delete of a path the guard cannot place (an 8.3 short name) that reaches the install.
     ("rt-codex-patch-delete-unresolved", "apply_patch", _patch("*** Delete File: <install>/DATA~1/x.esp"), None,
      "deny", {"S-DEL-UNRESOLVED"}, DEL_UNRESOLVED),
-    # rt-fix-b W-SAVE: a patch that adds (replaces) a save in the settings folder asks (the Codex render refuses).
+    # A patch that adds (replaces) a save in the settings folder: backed up first, then allowed (was W-SAVE's ask).
     ("rt-codex-patch-add-save", "apply_patch", _patch("*** Add File: <config>/Saves/Existing.ess", "+x"), None,
-     "ask", {"W-SAVE"}, W_SAVE.format("Existing.ess")),
+     "allow", {"S-SAVE-BACKUP"}, SAVE_NOTE.format("Existing")),
     # rt-fix-b (routes s115/s116): the DevBench judge Claude's protect-mcp uses, on Codex too.
     ("rt-codex-mcp-crash", "mcp__devbench-vr__console", {"command": "smp reset"}, None,
      "deny", {"S-DEVBENCH-CRASH"}, CRASH),
     ("rt-codex-mcp-list-input", "mcp__devbench-vr__console", ["smp reset"], None,
      "deny", {"S-DEVBENCH-CRASH"}, CRASH),
     ("rt-codex-mcp-save", "mcp__devbench-vr__game", {"action": "save", "name": "Existing"}, None,
-     "ask", {"S-DEVBENCH-SAVE"}, "Overwrites save Existing.\nYes goes ahead; the save it overwrites is copied first when it can be (skyguard snapshot list)."),
+     "allow", {"S-SAVE-BACKUP"}, SAVE_NOTE.format("Existing")),
     ("rt-codex-mcp-other-server", "mcp__probe__echo", {"text": "smp reset"}, None, "allow", set(), ""),
     ("rt-codex-mcp-help", "mcp__devbench-vr__console", {"command": "help"}, None, "allow", set(), ""),
     # Plan 8 T6 (rt-fix-b concern 4, routes harness s130): a command under `script` was never read, so the call was

@@ -588,7 +588,10 @@ class Scan(NamedTuple):
     deny: str                               # basename of a plugin a write primitive targets ("" for none)
     advice: Tuple[Tuple[str, str], ...]     # (rule id, file phrase) in rule order, one per rule
     move_root: str = ""                     # S-MOVE-ROOT: basename of a protected folder a move takes away
-    save: str = ""                          # S-WRITE-SAVE: basename of a save a write / copy / move replaces
+    # The save policy (saves.py): (resolved path, op) for each save in the settings folder a write, copy onto, move
+    # or rename CHANGES -- op "write" (written or replaced) or "move" (taken from where it is). Not a decision here:
+    # saves.judge decides the call on every save it changes, together.
+    save_targets: Tuple[Tuple[str, str], ...] = ()
     sed_crlf: str = ""                      # S-SED-CRLF: basename of a file sed -i rewrites without -b
 
 
@@ -673,7 +676,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     env = os.environ if env is None else env
     plugin: List[str] = []
     moved: List[str] = []
-    saves: List[str] = []
+    saves: List[Tuple[str, str]] = []
     crlf: List[str] = []
     notes = {k: [] for k in ADVICE_ORDER}
 
@@ -694,7 +697,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             # S-SED-WINPATH (Task 9): sed -i on an install/config/MO2 file whose replacement holds a backslash path.
             # It REPLACES the S-WRITE-INSTALL note for that file (one note per write, not two).
             if is_save(a, roots):
-                saves.append(_name(w))                              # replaces the S-WRITE-INSTALL note: an ask
+                saves.append((a, "write"))                          # replaces the S-WRITE-INSTALL note (saves.py)
                 continue
             # S-SED-CRLF (P8-SED): a game file by name, or any file in the install / config / MO2 area.
             in_zone = targets.zone(a, roots) in SED_ZONES if a is not None else False
@@ -713,17 +716,19 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             a = targets.resolve_operand(e, w, cwd, env)
             if is_protected_folder(a, roots):
                 moved.append(posixpath.basename(a.rstrip("/")) or a)
+            elif is_save(a, roots):
+                saves.append((a, "move"))                           # a save moved or renamed away (saves.py)
         for dst, srcs in copy_targets(e):
             # The destination as written AND where it resolves (`cp a.ini x.ini` run inside Data/SKSE/Plugins).
             a_dst = targets.resolve_operand(e, dst, cwd, env)
             # A save replaced: the destination itself, or a folder destination that takes a save's name.
             if is_save(a_dst, roots):
-                saves.append(_name(dst))
+                saves.append((a_dst, "write"))
                 continue
             if a_dst is not None and _looks_like_dir(dst):
                 hit = next((s for s in srcs if s.lower().endswith(SAVE_EXTS)), None)
                 if hit is not None and is_save(a_dst.rstrip("/") + "/" + _name(hit), roots):
-                    saves.append(_name(hit))
+                    saves.append((a_dst.rstrip("/") + "/" + _name(hit), "write"))
                     continue
             kind = file_class(dst, a_dst or "")
             if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):
@@ -779,7 +784,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         if kind == "plugin":
             plugin.append(_name(word))
         elif is_save(a, roots):
-            saves.append(_name(word))
+            saves.append((a, "write"))
         elif kind:
             notes[RULE_OF_CLASS[kind]].append(_name(word))
         elif a is not None and in_install_area(a, roots):
@@ -794,7 +799,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 plugin.append(_name(word))
             else:
                 notes[RULE_OF_CLASS[kind]].append(_name(word))
-    extra = dict(move_root=_phrase(moved) if moved else "", save=_phrase(saves) if saves else "",
+    extra = dict(move_root=_phrase(moved) if moved else "", save_targets=tuple(dict.fromkeys(saves)),
                  sed_crlf=_phrase(crlf) if crlf else "")
     if plugin:
         return Scan(_phrase(plugin), (), **extra)

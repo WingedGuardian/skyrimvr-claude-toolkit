@@ -178,17 +178,14 @@ def _write_replace(path, data):
         raise
 
 
-def _store_blob(blobs, src, deadline=None):
+def _store_blob(blobs, src):
     """Copy `src` into the store under its sha256 (backup.py's hashed part-file copy). -> sha256, or None when the file
     could not be read or changed size while it was copied (the index keeps its old entry, so the next walk retries).
-    With a `deadline` (backup._clock time) a copy that reaches it raises backup.CopyTimeout, its part file removed."""
+    (A save is stored by recovery._store_verified instead: fsynced, read back, and inside the hook's deadline.)"""
     part = blobs / ".part-{}".format(os.getpid())
     try:
-        want, copied, digest = backup._copy_hashed(src, part, fsync=False, deadline=deadline)   # see backup._copy_hashed
+        want, copied, digest = backup._copy_hashed(src, part, fsync=False)   # see backup._copy_hashed
         on_disk = os.stat(str(part)).st_size
-    except backup.CopyTimeout:
-        backup._discard(part)
-        raise
     except OSError:
         backup._discard(part)
         return None
@@ -309,7 +306,9 @@ def materialise(project, name, dest, only=None):
 
 def write_blobs(store, pairs):
     """Copy each (target, sha256) blob of `store` to its target. Each file is written to a part file and swapped in, so
-    a hard-linked target (Vortex) is replaced, never written through. -> files written; OSError at the first failure."""
+    a hard-linked target (Vortex) is replaced, never written through. The part file is hashed BEFORE it replaces the
+    target (the save policy: a restore is hash-verified at the file it writes, not only at the blob it reads). -> files
+    written; OSError at the first failure, the target untouched."""
     store = Path(store)
     n = 0
     for target, sha in pairs:
@@ -318,6 +317,8 @@ def write_blobs(store, pairs):
         part = Path("{}.restore-part-{}".format(target, os.getpid()))
         try:
             shutil.copyfile(str(store / "blobs" / sha), str(part))
+            if backup._sha256(part) != sha:
+                raise OSError("the copy of {} does not hash to {}".format(target.name, sha))
             os.replace(str(part), str(target))
         except OSError:
             backup._discard(part)

@@ -14,11 +14,13 @@ reset of a 700+ plugin order. Compared on whitespace-split lower-case words, so 
 `smp reset <anything>` is a different (unmeasured) command and passes. A console line may hold several commands
 (`;` or a newline): each is judged.
 
-S-DEVBENCH-SAVE (ask). The `game` tool is told to save (`action: save`, `name`), or the console is given `save <name>`
-(DevBench routes a console save through the same path), and `<config dir>/Saves/<name>.ess` EXISTS: the save would be
-overwritten (recovery.py snapshots the old one first, Plan 6 Task 15). Asks only for an existing save; a NEW name passes. This is the only
-filesystem read in the rules. When the save folder cannot be found (no declared config dir has a Saves folder), or the
-name is missing or is not a plain file name, the answer is not knowable and the rule ASKS (not safe by default).
+DEVBENCH SAVES (the save policy, user ruling 2026-10-13). The `game` tool is told to save (`action: save`, `name`), or
+the console is given `save <name>` (DevBench routes a console save through the same path), and `<config dir>/Saves/
+<name>.ess` EXISTS: the save would be overwritten. judge() reports it as an S-DEVBENCH-SAVE hit and adds every such hit
+to `found`; saves.py then backs that pair up and allows the call (or asks the user for more than two). A NEW name
+passes. This is the only filesystem read in these rules. When the save folder cannot be found (no declared config dir
+has a Saves folder), or the name is missing or is not a plain file name, the save cannot be backed up and
+S-DEVBENCH-SAVE DENIES (not safe by default).
 
 KNOWN LIMITS (recorded in the pricing ledger, not handled):
   - `curl ... -d @body.json`, `--data-binary @-` and a body held in a variable that is not a same-command literal:
@@ -201,8 +203,16 @@ def save_exists(name: str, roots, env=None, memo: Optional[dict] = None) -> Opti
     return (name + ".ess").casefold() in memo[folder]
 
 
-def _save_hit(name, roots, env=None, memo=None) -> Hit:
-    """The ask for a save named `name` (raw, may be unusable), or an empty hit when it is a new save."""
+def _save_hit(name, roots, env=None, memo=None, found=None) -> Hit:
+    """The hit for a save named `name` (raw, may be unusable), or an empty hit when it is a new save. Each non-empty
+    hit is also added to `found` as (hit, clean name or None), so saves.py sees EVERY save a call writes."""
+    hit = _save_hit_of(name, roots, env, memo)
+    if found is not None and hit[0]:
+        found.append((hit, _clean_name(name)))
+    return hit
+
+
+def _save_hit_of(name, roots, env=None, memo=None) -> Hit:
     clean = _clean_name(name)
     if clean is None:
         return ("S-DEVBENCH-SAVE", {"op": "Cannot tell which save this overwrites."})
@@ -217,7 +227,8 @@ def _save_hit(name, roots, env=None, memo=None) -> Hit:
 _CONSOLE_FUNCTIONS = ("executecommand", "executeconsole", "executeconsolecommand", "runconsolecommand")
 
 
-def judge(tool: str, args, roots, memo: Optional[dict] = None, env=None, depth: int = 0) -> Optional[Hit]:
+def judge(tool: str, args, roots, memo: Optional[dict] = None, env=None, depth: int = 0,
+          found: Optional[list] = None) -> Optional[Hit]:
     """The decision for one DevBench tool call, as (rule id, fields), or None for allow. The first deny wins over
     any ask. Any string anywhere in the call that the console would run as a deny-listed command denies (rt-fix-b:
     a list or an unknown key, a scenario step, a papyrus ExecuteCommand argument)."""
@@ -239,60 +250,25 @@ def judge(tool: str, args, roots, memo: Optional[dict] = None, env=None, depth: 
             lines = list(_strings(args.get("args")))
         elif fn == "savegame":                    # Game.SaveGame(name) writes the same file a console save does
             a = args.get("args")
-            hit = _save_hit(a[0] if isinstance(a, list) and a else None, roots, env, memo)
+            hit = _save_hit(a[0] if isinstance(a, list) and a else None, roots, env, memo, found)
             ask = hit if hit[0] else None
     elif tool == "game":
         action = args.get("action")
         if isinstance(action, str) and action.strip().lower() == "save":
-            hit = _save_hit(args.get("name"), roots, env, memo)
+            hit = _save_hit(args.get("name"), roots, env, memo, found)
             ask = hit if hit[0] else None
     for line in lines:
         name = _console_save_name(line)
         if name is not None and ask is None:
-            hit = _save_hit(name, roots, env, memo)
+            hit = _save_hit(name, roots, env, memo, found)
             ask = hit if hit[0] else None
     if depth < 8:
         for stool, sargs in _steps(args):
-            hit = judge(stool, sargs, roots, memo, env, depth + 1)
+            hit = judge(stool, sargs, roots, memo, env, depth + 1, found)
             if hit and hit[0] == "S-DEVBENCH-CRASH":
                 return hit
             ask = ask or hit
     return ask
-
-
-def save_name(tool: str, args) -> Optional[str]:
-    """The raw name a DevBench call saves under ("" when it names none), or None when the call saves nothing -- read as
-    judge() reads it. recovery.py snapshots that save before the call (Plan 6 Task 15); tests hold the two in step."""
-    if not isinstance(args, dict):
-        return None
-    t = tool.lower()
-    if t == "console":
-        c = args.get("command")
-        return _console_save_name(c) if isinstance(c, str) else None
-    if t == "game":
-        act = args.get("action")
-        if isinstance(act, str) and act.strip().lower() == "save":
-            n = args.get("name")
-            return n if isinstance(n, str) else ""
-    return None
-
-
-def shell_save_names(command: str, parsed) -> list:
-    """The raw save names of the DevBench calls a shell command makes (curl, Invoke-RestMethod, devbench-cli), found as
-    scan_shell finds the calls. Opaque or unparsed commands yield nothing (no name can be read from them)."""
-    if not any(w in command.lower() for w in _SHELL_WORDS):
-        return []
-    names = []
-    for raw in parsed.execs:
-        if raw.program == "?":
-            continue
-        ex = deletes.substituted(raw)
-        route = _web_call if ex.program in _WEB_PROGRAMS else (_cli_call if ex.program == "devbench-cli" else None)
-        for tool, args in (route(ex, command) if route else []):
-            n = save_name(tool, args)
-            if n is not None:
-                names.append(n)
-    return names
 
 
 # ------------------------------------------------------------------------------------------------------ MCP route
@@ -328,13 +304,17 @@ def decide(name: str, args, audit, roots=None, env=None) -> Verdict:
     parts = name.split("__")
     if not is_devbench(name):
         return Verdict()
-    hit = judge(parts[-1], args, roots, None, env)
-    if hit is None:
+    found: list = []
+    hit = judge(parts[-1], args, roots, None, env, found=found)
+    if hit is not None and hit[0] != "S-DEVBENCH-SAVE":
+        rid, fields = hit
+        reason = rules.message(rid, **fields)
+        audit.rule(HOOK, rid, rules.RULES[rid]["decision"], reason)
+        return Verdict(rules.RULES[rid]["decision"], reason)
+    if not found:
         return Verdict()
-    rid, fields = hit
-    reason = rules.message(rid, **fields)
-    audit.rule(HOOK, rid, rules.RULES[rid]["decision"], reason)
-    return Verdict(rules.RULES[rid]["decision"], reason)
+    from . import saves                         # the save policy decides every save the call writes, together
+    return saves.judge(saves.devbench_change(found, roots, env), Verdict(), audit, HOOK)
 
 
 # ----------------------------------------------------------------------------------------------- curl / CLI route
@@ -467,7 +447,7 @@ def _cli_call(e, text: str) -> list:
     return []
 
 
-def scan_shell(command: str, parsed, roots, env=None) -> Optional[Hit]:
+def scan_shell(command: str, parsed, roots, env=None, found: Optional[list] = None) -> Optional[Hit]:
     """The first deny, else the first ask, among the DevBench calls a shell command makes. Not safe by default
     (R4): where the parse failed or a program is opaque, a deny-listed command next to the console endpoint in the
     TEXT denies. Interpreter code is NOT read (see KNOWN LIMITS)."""
@@ -488,7 +468,7 @@ def scan_shell(command: str, parsed, roots, env=None) -> Optional[Hit]:
         elif e.program == "devbench-cli":
             calls = _cli_call(e, command)
         for tool, args in calls:
-            hit = judge(tool, args, roots, memo, env)
+            hit = judge(tool, args, roots, memo, env, found=found)
             if hit is None:
                 continue
             if hit[0] == "S-DEVBENCH-CRASH":

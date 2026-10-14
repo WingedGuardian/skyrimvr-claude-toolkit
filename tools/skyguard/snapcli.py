@@ -144,7 +144,8 @@ def _recovery_rows(project, kind):
             continue
         names = [os.path.basename(e["src"]) for e in g["files"]]
         if kind == "save":
-            what = " + ".join(names) + ", " + _mb(sum(e["size"] for e in g["files"]))
+            gone = [os.path.basename(m) for m in g["files"][0].get("missing", []) if isinstance(m, str)]
+            what = " + ".join(names) + "".join(", no " + m for m in gone) + ", " + _mb(sum(e["size"] for e in g["files"]))
         else:
             what = "{} changed: {}".format(len(names), ", ".join(names))
         if not g["complete"]:
@@ -157,7 +158,8 @@ def cmd_list(project, kind, out):
     print("Snapshots under {} (newest first):".format(Path(project) / ".claude" / "backups"), file=out)
     sections = (("scripts", "Scripts (.psc / .pex)", lambda: _script_rows(project)),
                 ("config", "Load order and INIs", lambda: _recovery_rows(project, "config")),
-                ("save", "Saves (taken before ReSaver --apply or a DevBench save)", lambda: _recovery_rows(project, "save")))
+                ("save", "Saves (each pair backed up before a command changed it; kept forever)",
+                 lambda: _recovery_rows(project, "save")))
     for key, title, rows_of in sections:
         if kind and kind != key:
             continue
@@ -335,6 +337,12 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
     print("Restored {} file(s) from snapshot {} to {}{}{}".format(
         n, sid, dest, " (each replaced file was backed up first)" if in_place and n else "",
         "; {} already matched and were left as they are".format(len(unchanged)) if unchanged else ""), file=out)
+    # The save policy: a pair backed up without its co-save says so -- a co-save there now is NOT from this backup.
+    if recovery._ID.match(sid) and sid.split("-")[1:2] == ["save"]:
+        for m in sorted({m for e in recovery.resolve(store, sid).values() for m in e.get("missing", [])
+                         if isinstance(m, str)}):
+            print("  note: {} did not exist when this save was backed up; any {} there now was left as it is".format(
+                os.path.basename(m), os.path.basename(m)), file=out)
     if skipped:
         print("{} file(s) were NOT restored: their folder is no longer configured (listed above).".format(len(skipped)),
               file=out)
