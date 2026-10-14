@@ -274,7 +274,8 @@ def judge(change: Change, rest: Verdict, audit=None, hook: str = "protect-bash")
         reason = _render(rid, fields)
         if audit is not None:
             audit.rule(hook, rid, "deny", reason)
-        return Verdict("deny", reason, "", rest.status, "", rest.never, plan)
+        from . import codes                     # codes reads the rule modules, which import this one
+        return Verdict("deny", reason, "", rest.status, code=codes.rule_code(rid), never=rest.never, saves=plan)
 
     if change.unknown:
         return refuse(*change.unknown[0])
@@ -343,7 +344,7 @@ def enforce(v: Verdict, project: str, audit, hook: str, command: str = "", trans
     except recovery.SaveBackupFailed as e:
         reason = _render("S-SAVE-BACKUP-FAILED", (("file", _phrase([p.stem for p in ex])), ("op", str(e))))
         audit.rule(hook, "S-SAVE-BACKUP-FAILED", "deny", reason)
-        return codes.classify(Verdict("deny", reason, "", rest.status))
+        return Verdict("deny", reason, "", rest.status, code=codes.rule_code("S-SAVE-BACKUP-FAILED"))
     note = _render("S-SAVE-BACKUP", (("file", _phrase([p.stem for p in ex])), ("op", NOTE_BEFORE)))
     if approved:
         audit.log(hook, "SAVE-APPROVED", "{} save(s) the user approved, backed up first: {}".format(

@@ -383,4 +383,6 @@ def test_run_judges_monitor_in_the_unknown_dialect(tmp_path):
     bash = _run("protect-bash", json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}), tmp_path)
     mon = _run("protect-bash", json.dumps({"tool_name": "Monitor", "tool_input": {"command": cmd}}), tmp_path)
     assert json.loads(bash.stdout) == {}
-    assert json.loads(mon.stdout)["hookSpecificOutput"]["permissionDecision"] == "ask"
+    # The save policy (2026-10-13): the ReSaver --apply the PowerShell reading sees names a save it cannot place (no
+    # cwd), so it cannot be backed up first -- refused (it used to ask).
+    assert json.loads(mon.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"

@@ -284,8 +284,23 @@ _VAR_PAIRS = [   # (shell, direct, variable form)
 _VAR_IDS = ['redirect-esp', 'append-bsa', 'tee-esm', 'cp-esp', 'mv-esp', 'joined-esp', 'redirect-save', 'append-ini', 'append-loadorder', 'redirect-install-file', 'psc-out', 'champollion', 'git-discard', 'ps-set-content-esp', 'ps-out-file-esp', 'ps-redirect-esp', 'ps-copy-item-esp', 'ps-set-content-save']
 
 
+def _save_targets(command, shell):
+    """The saves a command changes (the save policy, saves.py). Its decision depends on whether the save exists on
+    THIS disk, so a save pair is compared on the save it finds, not on the decision."""
+    r = paths.roots(INSTALL, "", LAYOUT_ENV["declared"])
+    a = audit.Audit("")
+    a.raw = lambda line: None
+    v = shell_rules.decide(command, r, a, cwd="C:/w", shell=shell, env=os.environ)
+    return tuple(v.saves.change.targets) if v.saves is not None else ()
+
+
 @pytest.mark.parametrize("shell,direct,var", _VAR_PAIRS, ids=_VAR_IDS)
 def test_a_same_command_literal_target_is_judged_as_its_literal(shell, direct, var):
+    saved = _save_targets(direct, shell)
+    if "Saves/" in direct:
+        assert saved, ("the direct form must be caught, or this pair proves nothing", direct)
+        assert _save_targets(var, shell) == saved, var
+        return
     want = decide(direct, cwd="C:/w", shell=shell)
     assert want[0][0] != "allow", ("the direct form must be caught, or this pair proves nothing", direct)
     assert decide(var, cwd="C:/w", shell=shell) == want, var

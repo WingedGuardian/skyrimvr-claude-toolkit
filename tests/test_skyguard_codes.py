@@ -19,7 +19,7 @@ CORPUS = REPO / "tests" / "guard_corpus" / "intended.jsonl"
 def test_positional_construction_is_unchanged():
     # The first five positions are unchanged; Plan 6 final fix (lane A C1) appended `never` (default None).
     assert Verdict("deny", "x")[:5] == ("deny", "x", "", "evaluated", "")
-    assert Verdict("deny", "x").never is None and Verdict()._fields[5:] == ("never",)
+    assert Verdict("deny", "x").never is None and Verdict()._fields[5:] == ("never", "saves")
     assert Verdict()._fields[:3] == ("decision", "reason", "context")
     assert STATUSES == ("evaluated", "partial", "failed")
 

@@ -14,7 +14,7 @@ from conftest import BASH, REPO
 from test_recovery_snapshots import Install, put, sha
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import audit as audit_mod, backup, cli, recovery, snapshot  # noqa: E402
+from skyguard import audit as audit_mod, backup, cli, recovery, shell_rules, snapshot  # noqa: E402
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ def tree(root):
 
 def test_list_shows_script_config_and_save_snapshots(inst):
     take_all(inst)
-    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
     rc, text = cli_run(inst, "list")
     assert rc == 0
     for sid in ids(inst, "scripts") + ids(inst, "config") + ids(inst, "save"):
@@ -101,7 +101,7 @@ def test_a_config_restore_is_the_state_at_that_snapshot_not_later(inst):
 
 
 def test_a_save_restore_gives_back_the_save_and_its_cosave(inst):
-    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
     put(inst.saves / "Quick.ess", b"what resaver wrote")
     out = inst.game.parent / "out"
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--to", str(out))
@@ -234,7 +234,7 @@ def _low_disk(monkeypatch, room):
 def test_in_place_save_restore_refuses_when_its_backup_would_fill_the_drive(inst, monkeypatch):
     """Final review B-M6: the live save (up to 192 MB) was backed up with no free-space reserve, on a drive the user
     keeps ~88% full. The backup now keeps the recovery store's reserve; when it cannot, nothing is restored."""
-    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
     put(inst.saves / "Quick.ess", b"what resaver wrote")
     _low_disk(monkeypatch, 10)
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
@@ -253,7 +253,7 @@ def test_the_save_reserve_applies_to_saves_only(inst, monkeypatch):
 
 
 def test_in_place_save_restore_with_room_backs_the_save_up(inst, monkeypatch):
-    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
     put(inst.saves / "Quick.ess", b"what resaver wrote")
     _low_disk(monkeypatch, 10 * 1024 * 1024)
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
@@ -337,7 +337,7 @@ def test_an_unreadable_stored_copy_is_a_refusal_not_a_traceback(inst, monkeypatc
 @pytest.mark.parametrize("cmd", ["bash tools/skyguard.sh snapshot restore 20261005_120000-config --in-place",
                                  "python tools/skyguard snapshot restore --in-place 20261005_120000"])
 def test_the_guard_asks_before_an_in_place_restore(inst, cmd):
-    v = recovery.shell_rules.decide(cmd, inst.roots, inst.audit, env={})
+    v = shell_rules.decide(cmd, inst.roots, inst.audit, env={})
     assert v.decision == "ask" and "S-RESTORE-INPLACE" in [r for r, _d in inst.audit.fired]
 
 
@@ -353,7 +353,7 @@ def test_the_guard_asks_before_an_in_place_restore(inst, cmd):
 def test_the_guard_asks_for_every_spelling_of_an_in_place_restore(inst, cmd, shell):
     """Fix round 2, N1 (MEASURED by the re-reviewer: `--in`, `--in-p` and `snapshot --in-place restore` restored in place
     while the rule said allow). N2: the .cmd and python launcher forms."""
-    v = recovery.shell_rules.decide(cmd, inst.roots, inst.audit, shell=shell, env={})
+    v = shell_rules.decide(cmd, inst.roots, inst.audit, shell=shell, env={})
     assert v.decision == "ask", v
 
 
@@ -386,7 +386,7 @@ def test_a_recovery_id_with_a_trailing_newline_is_not_an_id():
 
 
 def test_the_guard_lets_a_restore_to_a_new_folder_through(inst):
-    v = recovery.shell_rules.decide("bash tools/skyguard.sh snapshot restore 20261005_120000-config --to out",
+    v = shell_rules.decide("bash tools/skyguard.sh snapshot restore 20261005_120000-config --to out",
                                     inst.roots, inst.audit, env={})
     assert v.decision == "allow"
 

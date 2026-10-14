@@ -57,13 +57,23 @@ def _claude(tool, command):
     return v.decision, {rid for rid, _ in audit.fired}
 
 
-def test_a_powershell_save_overwrite_asks_on_a_posix_host(posix):
-    assert _claude("PowerShell", "Set-Content '{}/Saves/Existing.ess' x".format(CFG)) == ("ask", {"S-WRITE-SAVE"})
+def _save_targets(tool, command):
+    """The saves the call changes, as the save policy reads them (saves.py): (path, op). Nothing exists on disk here,
+    so no backup is due; what matters is that the guard SEES the save under a POSIX install."""
+    p = claude.extract(json.dumps({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/home/u",
+                                   "tool_input": {"command": command}}))
+    v = engine.evaluate_shell(claude.to_request(p, "shell"), _roots(), Audit(GAME))
+    return [tuple(t) for t in v.saves.change.targets] if v.saves is not None else []
 
 
-def test_a_python_save_overwrite_through_bash_asks_on_a_posix_host(posix):
+def test_a_powershell_save_overwrite_is_seen_on_a_posix_host(posix):
+    got = _save_targets("PowerShell", "Set-Content '{}/Saves/Existing.ess' x".format(CFG))
+    assert got == [(CFG + "/Saves/Existing.ess", "write")]
+
+
+def test_a_python_save_overwrite_through_bash_is_seen_on_a_posix_host(posix):
     cmd = "python -c \"open('{}/Saves/Existing.ess','wb').write(b'x')\"".format(CFG)
-    assert _claude("Bash", cmd) == ("ask", {"S-WRITE-SAVE"})
+    assert _save_targets("Bash", cmd) == [(CFG + "/Saves/Existing.ess", "write")]
 
 
 def test_a_powershell_delete_in_the_install_is_denied_on_a_posix_host(posix):

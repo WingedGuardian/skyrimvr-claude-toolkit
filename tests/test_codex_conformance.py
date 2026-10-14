@@ -135,12 +135,25 @@ def _derived():
             out.append(_variant(f, "derived:{}:Remove-Item".format(label), rm,
                                 {"verdict": "deny", "code": "shell.S-DEL-INSTALL"}))   # Plan 5: S-DEL-INSTALL replaced DENY_INSTALL
 
+            # The save policy (user ruling 2026-10-13): ReSaver --apply on a save the hook can place is backed up and
+            # verified by the hook, then allowed -- on Codex too, where the old ask could only refuse. One it cannot
+            # place (a wildcard) cannot be backed up, so it is refused.
             def resaver(p):
                 p["tool_input"]["command"] = "bash tools/resaver-cli.sh reset-havok save.ess --apply"
             out.append(_variant(f, "derived:{}:resaver-apply".format(label), resaver,
-                                {"verdict": "deny", "code": "shell.S-RESAVER-APPLY",   # Plan 5: was ASK_RESAVER
-                                 "reason_prefix": "NEEDS YOUR CONFIRMATION"}))
+                                {"verdict": "advise", "code": "shell.S-SAVE-BACKUP"}, _seed_save))
+
+            def resaver_pattern(p):
+                p["tool_input"]["command"] = "bash tools/resaver-cli.sh reset-havok '*.ess' --apply"
+            out.append(_variant(f, "derived:{}:resaver-apply-pattern".format(label), resaver_pattern,
+                                {"verdict": "deny", "code": "shell.S-RESAVER-APPLY", "reason_prefix": "Blocked: ReSaver"}))
     return out
+
+
+def _seed_save(root: Path) -> None:
+    """A save and its co-save in the cwd, where ReSaver resolves `save.ess` (the save policy backs both up)."""
+    for ext, body in (("ess", b"save"), ("skse", b"cosave")):
+        (root / ("save." + ext)).write_bytes(body)
 
 
 def _seed_ini(root: Path) -> None:

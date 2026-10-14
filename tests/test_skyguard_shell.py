@@ -257,20 +257,22 @@ def test_rule15_automod_archive_write(tmp_path):
     assert advice("automod archive list a.bsa", tmp_path) == ""
 
 
-NEW_RESAVER = ("ReSaver will MODIFY a save file (reset-havok on s.ess). "
-               "Approve only if you asked for this save to be changed.")
+# The save policy (user ruling 2026-10-13): ReSaver --apply on a save the guard can place is backed up and allowed
+# (tests/test_save_policy.py); a bare name with no cwd cannot be placed, so it cannot be backed up and is refused.
+NEW_RESAVER = ("Blocked: ReSaver reset-havok --apply writes s.ess, which the guard cannot place to back it up first.\n"
+               "Give the save as a full path.")
 
 
-def test_rule16_resaver_apply_asks(tmp_path):
+def test_rule16_resaver_apply_on_a_save_it_cannot_place_is_refused(tmp_path):
     cmd = "bash tools/resaver-cli.sh reset-havok s.ess --apply"
     v = run(cmd, tmp_path)
-    assert (v.decision, v.reason, v.context) == ("ask", NEW_RESAVER, "")
+    assert (v.decision, v.reason, v.context) == ("deny", NEW_RESAVER, "")
     assert run(cmd.replace(" --apply", ""), tmp_path)[:3] == ("allow", "", "")
 
 
-def test_rule16_ask_drops_earlier_advice(tmp_path):
+def test_rule16_refusal_drops_earlier_advice(tmp_path):
     v = run("echo x >> plugins.txt; bash tools/resaver-cli.sh reset-havok s.ess --apply", tmp_path)
-    assert v.decision == "ask" and v.context == ""
+    assert v.decision == "deny" and v.context == ""
     assert v.reason == NEW_RESAVER
 
 
@@ -288,7 +290,7 @@ def test_resaver_rows(tmp_path, row):
     a = audit.Audit(str(tmp_path))
     shell = {"Bash": "bash", "PowerShell": "powershell"}.get(row["payload"].get("tool_name"), "")
     v = shell_rules.decide(row["payload"]["tool_input"]["command"], r, a, shell=shell)
-    assert v.decision == ("ask" if row["decision"] == "ask" else "allow")
+    assert v.decision == ("allow" if row["decision"] in ("allow", "advise") else row["decision"])
     assert v.reason == row["text"]
     assert {rid for rid, _ in a.fired if rid == "S-RESAVER-APPLY"} == set(row["rules"])
 
@@ -315,14 +317,14 @@ def test_resaver_save_named_by_the_find_segment():
     assert shell_rules.resaver_apply(cmd, "bash") == ("reset-havok", "Quick.ess")
 
 
-def test_resaver_without_a_save_name_still_asks(tmp_path):
+def test_resaver_without_a_save_name_is_refused(tmp_path):
     v = run("bash tools/resaver-cli.sh reset-havok --apply", tmp_path)
-    assert v.decision == "ask" and "(reset-havok on the save)" in v.reason
+    assert v.decision == "deny" and "reset-havok --apply writes a save it does not name," in v.reason
 
 
 def test_resaver_save_is_reduced_to_its_basename(tmp_path):
-    v = run("bash tools/resaver-cli.sh reset-havok 'C:/My Saves/Save 12.ess' --apply", tmp_path)
-    assert "(reset-havok on Save 12.ess)" in v.reason
+    v = run("bash tools/resaver-cli.sh reset-havok 'C:/My Saves/Save*12.ess' --apply", tmp_path)
+    assert v.decision == "deny" and "reset-havok --apply writes Save*12.ess," in v.reason
 
 
 def test_rule17_external_tool_output_into_game(tmp_path):
@@ -462,7 +464,7 @@ def test_ask_path_writes_the_ask_audit_line(tmp_path):
     cmd = "bash tools/resaver-cli.sh reset-havok s.ess --apply"
     run(cmd, tmp_path)
     log = (tmp_path / ".claude/backups/AUDIT_LOG.txt").read_text(encoding="utf-8")
-    assert "protect-bash ASK: " + NEW_RESAVER in log
+    assert "protect-bash DENY: " + NEW_RESAVER.split("\n")[0] in log
 
 
 def test_rule_trace_records_the_rule_id(tmp_path):
@@ -475,7 +477,7 @@ def test_rule_trace_records_the_rule_id(tmp_path):
     assert a.fired == [("S-WRITE-LOADORDER", "advise")]
     a = audit.Audit(str(tmp_path))
     shell_rules.decide("bash tools/resaver-cli.sh reset-havok s.ess --apply", r, a)
-    assert a.fired == [("S-RESAVER-APPLY", "ask")]
+    assert a.fired == [("S-RESAVER-APPLY", "deny")]
     a = audit.Audit(str(tmp_path))
     shell_rules.decide("", r, a)
     assert a.fired == [("S-INERT-NOCMD", "deny")]

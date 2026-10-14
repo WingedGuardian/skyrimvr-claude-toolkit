@@ -40,8 +40,9 @@ def installs():
 
 def test_there_are_rtb_rows():
     assert len(ROWS) >= 100, len(ROWS)
-    assert {r["decision"] for r in ROWS} == {"allow", "ask", "deny"}
-    for rid in ("S-WRITE-SAVE", "S-MOVE-ROOT", "S-GIT-DISCARD", "W-SAVE", "W-INERT-NOPATH", "S-WRITE-PLUGIN",
+    # The save policy (2026-10-13): the save rows now advise (backed up first) instead of asking.
+    assert {r["decision"] for r in ROWS} == {"allow", "advise", "ask", "deny"}
+    for rid in ("S-SAVE-BACKUP", "S-MOVE-ROOT", "S-GIT-DISCARD", "W-INERT-NOPATH", "S-WRITE-PLUGIN",
                 "S-DEVBENCH-CRASH", "S-DEVBENCH-SAVE"):
         assert any(rid in r["rules"] for r in ROWS), rid
 

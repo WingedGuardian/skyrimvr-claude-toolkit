@@ -558,8 +558,11 @@ def _t4_rows():
 
 @pytest.mark.parametrize("row", _t4_rows(), ids=[r["id"] for r in _t4_rows()])
 def test_t04_rows_come_out_as_executed_commands(row):
-    """Every T4 intended row's decision, reproduced from execs alone: the shapes Task 6 re-bases ReSaver onto."""
-    assert _resaver_from_parser(row["payload"]["tool_input"]["command"]) is (row["decision"] == "ask")
+    """Every T4 intended row's decision, reproduced from execs alone: the shapes Task 6 re-bases ReSaver onto. Since
+    the save policy (2026-10-13) a detected --apply is refused when the save cannot be placed (every T4 row but one, which
+    has no cwd), and allowed when it writes a NEW save at an absolute path (t04-quoted-spaces)."""
+    detected = row["decision"] == "deny" or row["id"] == "t04-quoted-spaces"
+    assert _resaver_from_parser(row["payload"]["tool_input"]["command"]) is detected
 
 
 def test_t04_rows_parse():

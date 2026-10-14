@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import Tuple
 
-from . import codes, engine, mcp_rules
+from . import codes, engine, mcp_rules, saves
 from .request import Request
 from .verdict import DECISIONS, STATUSES, Verdict
 
@@ -168,8 +168,11 @@ def _decide(req: Request, project: str, roots_fn, audit) -> Verdict:
     if req.kind == "mcp":
         if req.mcp_tool not in ("", "unknown") and not mcp_rules.judged_server(req.mcp_tool):
             return Verdict("allow", "", UNJUDGED_MCP, status="partial", code="neutral.UNJUDGED_MCP")
-        # The same judge Claude's protect-mcp role uses (engine.evaluate_mcp -> mcp_rules).
-        return engine.evaluate_mcp(req.mcp_tool, mcp_args(req.mcp_args), audit, roots=_soft_roots(roots_fn))
+        # The same judge Claude's protect-mcp role uses (engine.evaluate_mcp -> mcp_rules), and the same save policy:
+        # an existing save the call overwrites is backed up first (saves.enforce), or the call is refused.
+        v = engine.evaluate_mcp(req.mcp_tool, mcp_args(req.mcp_args), audit, roots=_soft_roots(roots_fn))
+        return saves.enforce(v, project, audit, "neutral", command=req.mcp_tool, agent=req.agent,
+                             session_id=req.session_id)
     v = codes.classify(engine.pre_tool(req, project, roots_fn, audit))
     text = REWORD.get(v.code)
     return v._replace(reason=text) if text and v.decision == "deny" else v

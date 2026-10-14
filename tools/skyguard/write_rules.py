@@ -46,7 +46,9 @@ def papyrus_zone(abs_path: str, roots) -> bool:
     return rel is not None and rel[:2] == ["data", "scripts"]
 
 
-def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdict:
+def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str = "write") -> Verdict:
+    """op: what the call does to the file, for the save policy (saves.py): `write` (an edit, a write, a patch that
+    adds or updates it), `delete` or `move` (a patch that deletes it or moves it away)."""
     if file_path == "":
         audit.rule(HOOK, "W-INERT-NOPATH", "deny", NO_PATH_LOG, level="REFUSE")
         return Verdict("deny", NO_PATH_DENY)
@@ -95,10 +97,11 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdic
         from .writes import in_install_area, is_save
         a = targets.resolve(file_path, cwd, "bash", os.environ if env is None else env)
         if is_save(a, roots):
-            # rt-fix-b: a save rewritten through Edit/Write (or a Codex patch) is a binary file replaced by text.
-            text = rules.message("W-SAVE", file=file_path)
-            audit.rule(HOOK, "W-SAVE", "ask", text)
-            return Verdict("ask", text)
+            # The save policy (user ruling 2026-10-13): a save changed through Edit/Write or a patch is backed up
+            # first (saves.enforce); saves.judge decides it with every other save the call changes.
+            from . import saves
+            return saves.judge(saves.Change((saves.Target(a, op if op in saves.OPS else "write"),)), Verdict(),
+                               audit, HOOK)
         papyrus = a is not None and papyrus_zone(a, roots)
         install = a is not None and in_install_area(a, roots)
     else:

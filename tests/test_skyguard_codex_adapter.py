@@ -488,18 +488,16 @@ def _run_with_saves(tmp_path, raw):
     return v, audit
 
 
-def test_a_devbench_ask_is_refused_with_the_confirmation_on_codex(tmp_path):
-    """Merge of rt-fix-b (2026-10-05): Codex cannot ask, so -- as for every other ask on Codex (W-SAVE, ReSaver --apply)
-    -- the render refuses and names the confirmation the user must give; the model still reads why. (Task 17 had
-    downgraded this ask to an allow with the text as advice; the merge kept rt-fix-b's stricter route.)"""
+def test_a_devbench_save_over_an_existing_save_is_backed_up_then_allowed_on_codex(tmp_path):
+    """The save policy (user ruling 2026-10-13): Codex cannot ask, so the old ask was a refusal there. Now the save is
+    backed up and verified by the pre-tool hook (saves.enforce), and only then is the call allowed, on Codex too."""
     v, audit = _run_with_saves(tmp_path, _pre("mcp__devbench-vr__game", {"action": "save", "name": "Existing"}))
-    assert v.decision == "ask"
-    assert "Existing" in v.reason and v.reason.count("\n") <= 1
-    assert v.code == "shell.S-DEVBENCH-SAVE"
-    assert ("S-DEVBENCH-SAVE", "ask") in audit.fired
-    out = json.loads(codex.render(v))["hookSpecificOutput"]
-    assert out["permissionDecision"] == "deny"
-    assert out["permissionDecisionReason"] == codex.ASK_PREFIX + v.reason
+    assert v.decision == "allow" and v.code == "shell.S-SAVE-BACKUP" and "Existing" in v.context
+    assert ("S-SAVE-BACKUP", "advise") in audit.fired
+    from skyguard import recovery
+    saved = [e for e in recovery.read_manifest(recovery.store_dir(str(tmp_path)))[0] if e["kind"] == "save"]
+    assert [e["src"].replace(chr(92), "/").rsplit("/", 1)[-1] for e in saved] == ["Existing.ess"]
+    assert "permissionDecision" not in json.loads(codex.render(v) or "{}").get("hookSpecificOutput", {})
 
 
 def test_a_devbench_save_to_a_new_name_is_silent_on_codex(tmp_path):
