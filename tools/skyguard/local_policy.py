@@ -346,6 +346,10 @@ def _coverage(decision, facts, roles=(), *, controlled=False, declared=False):
     if not isinstance(facts, dict) or facts.get("unresolved"):
         return refuse("save preservation scope has no qualified portable plan")
     kind, operation = decision["kind"], decision.get("op")
+    count = decision.get("count")
+    if "count" in decision and (type(count) is not int or count < 0 or
+                                kind == "backup" and count > 2):
+        raise ValueError("registered policy returned an invalid or contradictory logical count")
     if controlled and operation in ("controlled-prepare", "controlled-load"):
         if facts.get("helper") is not True or facts.get("recheck") is not True:
             return refuse("controlled scope requires a dependency and membership recheck")

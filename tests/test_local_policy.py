@@ -24,6 +24,21 @@ def register(root, source):
     return script
 
 
+@pytest.mark.parametrize('count', [True, False, -1, 1.5, '1', 3, None, [1]])
+def test_registered_policy_cannot_drop_malformed_or_contradictory_backup_counts(tmp_path, count):
+    save = tmp_path / 'profile/Saves/Source.ess'
+    save.parent.mkdir(parents=True)
+    save.write_bytes(b'unchanged')
+    (tmp_path / 'skyrim-paths.env').write_text("SKYRIM_CONFIG_DIR='" + save.parent.parent.as_posix() + "'\n")
+    register(tmp_path, "def decide(payload): return {'kind':'backup','op':'write','affected':[payload['tool_input']['file_path']],"
+                       "'count':" + repr(count) + "}\n")
+    outcome, _ = portable.check(contracts.Action('future', 'edit', 'files', cwd=str(tmp_path),
+             paths=(str(save),), operations=('write',)), tmp_path)
+    assert outcome.result.decision == 'deny' and outcome.result.evaluation == 'failed', outcome
+    assert not outcome.transactions and not (tmp_path / '.modding-agent-harness/backups/saves/transactions').exists()
+    assert save.read_bytes() == b'unchanged'
+
+
 @pytest.mark.parametrize("kind", ["backup", "needs_files", "needs_set"])
 def test_inspection_reports_requirements_without_authorizing_or_preserving(tmp_path, kind):
     from modding_harness import dispatch, profiles

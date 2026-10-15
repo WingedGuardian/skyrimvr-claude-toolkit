@@ -8849,6 +8849,15 @@ MUTATIONS.append(pytest.param("tools/skyguard/save_profile.py", '        suffix 
     'tests/test_save_profile.py::test_backup_suffix_stays_attached_to_both_logical_members[.bak]',
     id='legacy-backup-suffix-membership'))
 
+MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after,
+    "tests/test_local_policy.py::test_registered_policy_cannot_drop_malformed_or_contradictory_backup_counts[" + case + "]",
+    id="local-policy-backup-count-" + name) for before, after, case, name in (
+    ('    if "count" in decision and (type(count) is not int or count < 0 or\n                                kind == "backup" and count > 2):',
+     '    if False:', '3', 'contradictory-threshold'),
+    ('    if "count" in decision and (type(count) is not int or count < 0 or',
+     '    if "count" in decision and (not isinstance(count, int) or count < 0 or', 'True', 'boolean'),
+)]
+
 MUTATIONS += [pytest.param("tools/skyguard/ordered_upgrade.py", before, after, test,
     id="ordered-policy-" + name) for before, after, test, name in (
     ('    if rollback[local_policy.LEGACY] != local_policy.TRANSFER_POLICY_SHA256:', '    if False:',

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Registered legacy policies with malformed logical counts, or an ordinary
+  backup decision claiming more than two saves, refuse before preservation.
+  Boolean, negative, fractional and nonnumeric counts cannot silently disappear.
 - `upgrade-stage --integrate-local-policy` prepares a reproducible ordered
   migration for the exact reviewed Windows personal policy and complete native
   groups. It retains private sources/helpers and unrelated settings, requires the
