@@ -436,7 +436,11 @@ def intended_row_problems(row: dict) -> list[str]:
         out.append("empty why")
     if not str(row.get("task") or "").strip():
         out.append("empty task")
-    if (row.get("decision") == "allow") == bool(row.get("rules")):
+    unguarded = row.get("evaluation") == "unguarded"
+    if unguarded and (row.get("decision") not in ("allow", "advise") or row.get("rules")):
+        out.append("an unguarded row must allow or advise without claiming a policy rule")
+    if (row.get("decision") == "allow" and row.get("rules") or
+            row.get("decision") != "allow" and not row.get("rules") and not unguarded):
         out.append("an allow row must name no rules, and any other row must name at least one")
     return out
 

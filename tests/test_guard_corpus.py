@@ -107,6 +107,21 @@ def test_hook_reproduces_the_recorded_decision_and_rules(installs, row):
     assert got["rules"] == rec.legacy_rule_ids(row["text"], TEMPLATES), (row["text"], got["rules"])
 
 
+def test_live_legacy_rows_reproduce_in_process(intended_installs):
+    """Replay the unchanged frozen decisions through one production invocation per row."""
+    rec, inst = intended_installs
+    failures = []
+    for row in LIVE:
+        if rec.windows_only(row['id']):
+            continue
+        got = rec.fire_full_inprocess(inst[row['layout']], row)
+        expected_rules = rec.legacy_rule_ids(row['text'], TEMPLATES)
+        if got['decision'] != row['decision'] or got['rules'] != expected_rules:
+            failures.append(f"{row['id']}: expected {row['decision']} {sorted(expected_rules)}, "
+                            f"got {got['decision']} {sorted(got['rules'])}")
+    assert not failures, '\n'.join(failures)
+
+
 def test_every_legacy_text_resolves_to_a_rule_set():
     """The frozen text must map to ids, or the check above compares nothing: a non-allow row maps to at least
     one rule, an allow row to none."""
@@ -160,6 +175,17 @@ def test_an_intended_row_without_why_or_task_is_rejected():
     assert rec.intended_row_problems(dict(row, why="  "))
     assert rec.intended_row_problems(dict(row, task=""))
     assert rec.intended_row_problems({k: v for k, v in row.items() if k != "why"})
+
+
+def test_unknown_advice_is_an_explicit_coverage_gap_not_a_fabricated_rule():
+    rec = _rec()
+    row = {'id': 'unknown', 'layout': 'declared', 'hook': 'protect-mcp.sh', 'payload': {},
+           'decision': 'advise', 'rules': [], 'text': 'WARN AND ALLOW: this tool surface was not evaluated',
+           'task': 'V4-UNKNOWN', 'why': 'Approved unknown-tool policy', 'evaluation': 'unguarded'}
+    assert rec.intended_row_problems(row) == []
+    assert rec.intended_row_problems({key: value for key, value in row.items() if key != 'evaluation'})
+    assert rec.intended_row_problems(dict(row, decision='deny'))
+    assert rec.intended_row_problems(dict(row, rules=['M-DEV-SMP-RESET']))
 
 
 def test_every_windows_only_row_is_an_intended_row():
@@ -218,6 +244,14 @@ def test_supersessions_are_live(installs):
     rec, inst = installs
     problems = rec.supersession_problems(INTENDED_ROWS, ROWS, TEMPLATES, _current(rec, inst))
     assert problems == []
+
+
+def test_supersessions_are_live_in_process(intended_installs):
+    rec, inst = intended_installs
+    def current(row):
+        got = rec.fire_full_inprocess(inst[row['layout']], row)
+        return {'decision': got['decision'], 'rules': got['rules']}
+    assert rec.supersession_problems(INTENDED_ROWS, ROWS, TEMPLATES, current) == []
 
 
 def _a_denied_legacy_row():
