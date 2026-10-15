@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Portable Action v1 dispatcher and generic recovery entry, with synchronous save
+  preservation and local restrictions before permission. Generated OpenCode V1
+  plugin shares X4's pinned process transport; host enforcement remains unmeasured.
+  Unknown calls warn and allow with private receipts and sparse warnings.
+- House Carl freshness now includes complete plugin bytes, detecting same-size
+  changes with preserved timestamps. New-output publication refuses concurrent
+  creators. Permanent backups use durable verified copying and a 2 GiB reserve.
+
 - Optional House Carl 2.0.5 integration for Claude and Codex: pinned, hash-verified upstream download, isolated MCP client and one shared CLI/MCP gateway. Wrye-managed asterisk order and native MO2 profile inputs are independent of deployment. Ordinary plugin edits use verified permanent backups, private staging, independent xEdit checks, atomic publication, transaction receipts and conflict-aware restore. New patches remain inactive. Compaction, merging, runtime FormIDs, native pairing and facegen provenance remain unavailable. See `docs/housecarl.md` for setup and qualification limits.
 
 ## v4.0.0 — 2026-10-08

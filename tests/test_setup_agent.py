@@ -84,6 +84,19 @@ def test_help_exits_0_and_writes_nothing(game_dir):
     assert tree(game_dir) == before
 
 
+@pytest.mark.parametrize("agent", ["generic", "opencode"])
+def test_portable_targets_configure_shared_instructions_without_codex_trust(game_dir, agent):
+    before = (game_dir / ".codex/hooks.json").read_bytes()
+    result = run_setup(game_dir, shim_path=True, args=("--agent", agent))
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr
+    assert configured(game_dir, "AGENTS.md")
+    assert (game_dir / ".codex/hooks.json").read_bytes() == before
+    assert "does not prove a host intercepted" in result.stdout
+    if agent == "opencode":
+        assert "Running-host blocking, Desktop and V2 remain unqualified" in result.stdout
+    assert not (game_dir / ".codex/trusted.json").exists()
+
+
 @posix_only
 def test_codex_by_name_off_windows_is_refused_before_anything_is_written(game_dir):
     before = tree(game_dir)

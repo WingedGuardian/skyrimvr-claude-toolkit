@@ -92,6 +92,13 @@ CORE_REQUIRED = (
     "tools/resaver-cli/ResaverCLI.java",
     "tools/resaver_cli_cache.py",
     "tools/modding-harness.lock.json",
+    "tools/agent-harness.py",
+    "tools/skyguard/portable.py",
+    "tools/skyguard/local_policy.py",
+    "tools/skyguard/adapters/opencode.py",
+    ".opencode/plugins/skyguard.js",
+    ".opencode/hooks/skyguard_adapter.py",
+    ".opencode/SKYRIM-OPENCODE.md",
     "tools/housecarl.py",
     "tools/housecarl-verify.js",
     "tools/housecarl-requirements.lock",
@@ -345,7 +352,7 @@ def check_shared_core(root: Path):
             raise ValueError("invalid shared-core pin/manifest")
         files = lock["files"]
         required = {"tools/modding_harness/" + name for name in (
-            "__init__.py", "contracts.py", "profiles.py", "preservation.py", "durable.py", "approval.py", "locking.py", "discovery.py", "workspace.py", "LICENSE")}
+            "__init__.py", "contracts.py", "profiles.py", "preservation.py", "durable.py", "approval.py", "locking.py", "discovery.py", "workspace.py", "dispatch.py", "generic.py", "telemetry.py", "transport.py", "patches.py", "opencode_plugin.mjs", "LICENSE")}
         if not required <= files.keys():
             raise ValueError("shared-core public/runtime files missing from manifest")
         core = root / "tools/modding_harness"

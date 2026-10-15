@@ -17,10 +17,12 @@ set -e
 # --- Options: checked before anything is written ----------------------------------------------------------
 # An unknown option or --agent value is a usage error (exit 2) and nothing is touched.
 usage() {
-    echo "usage: bash setup.sh [--agent claude|codex|all|auto] [--lock]"
+    echo "usage: bash setup.sh [--agent claude|codex|all|auto|generic|opencode] [--lock]"
     echo "  --agent auto    the default: every agent found on PATH (claude, codex); all of them when none is found"
     echo "  --agent claude  configure Claude Code only"
     echo "  --agent codex   configure Codex only (Windows only)"
+    echo "  --agent generic configure the neutral instructions/runtime; host interception must be supplied"
+    echo "  --agent opencode configure the OpenCode V1 CLI target (running-host blocking unqualified)"
     echo "  --agent all     configure both (\`both\` means the same)"
     echo "  --lock          also lock the vanilla masters and archives read-only (off unless you ask)"
 }
@@ -40,9 +42,9 @@ while [ $# -gt 0 ]; do
     esac
 done
 case "$AGENT_ARG" in
-    claude|codex|all|auto) ;;
+    claude|codex|all|auto|generic|opencode) ;;
     both) AGENT_ARG="all" ;;
-    *) echo "setup.sh: --agent must be claude, codex, all (or both) or auto, not '$AGENT_ARG'. Nothing was changed." >&2
+    *) echo "setup.sh: --agent must be claude, codex, all (or both), auto, generic or opencode, not '$AGENT_ARG'. Nothing was changed." >&2
        usage >&2; exit 2 ;;
 esac
 
@@ -72,19 +74,23 @@ AGENTS_FOUND=""
 if [ "$AGENT_ARG" = "auto" ]; then
     which claude >/dev/null 2>&1 && AGENTS_FOUND="claude"
     if [ -n "$CODEX_WIN" ] && which codex >/dev/null 2>&1; then AGENTS_FOUND="${AGENTS_FOUND:+$AGENTS_FOUND }codex"; fi
+    if which opencode >/dev/null 2>&1; then AGENTS_FOUND="${AGENTS_FOUND:+$AGENTS_FOUND }opencode"; fi
     case "$AGENTS_FOUND" in
         claude) AGENT_SEL="claude" ;;
         codex) AGENT_SEL="codex" ;;
+        opencode) AGENT_SEL="opencode" ;;
         *) AGENT_SEL="all" ;;
     esac
 else
     AGENT_SEL="$AGENT_ARG"
 fi
-DO_CLAUDE=""; DO_CODEX=""
+DO_CLAUDE=""; DO_CODEX=""; DO_PORTABLE=""; DO_OPENCODE=""
 case "$AGENT_SEL" in
     claude) DO_CLAUDE=1 ;;
     codex) DO_CODEX=1 ;;
-    all) DO_CLAUDE=1; DO_CODEX=1 ;;
+    generic) DO_PORTABLE=1 ;;
+    opencode) DO_OPENCODE=1 ;;
+    all) DO_CLAUDE=1; DO_CODEX=1; DO_OPENCODE=1 ;;
 esac
 if [ "$AGENT_SEL" = "codex" ] && [ -z "$CODEX_WIN" ]; then
     echo "setup.sh: --agent codex: the toolkit's Codex support is Windows-only (Codex on Linux, macOS or WSL is" >&2
@@ -115,7 +121,8 @@ if [ ! -f "$GAME_DIR/SkyrimVR.exe" ] && [ ! -f "$GAME_DIR/SkyrimSE.exe" ]; then
 fi
 
 # --- Verify toolkit files are present ---
-if [ ! -f "$GAME_DIR/KNOWLEDGEBASE.md" ] || [ ! -f "$GAME_DIR/.claude/hooks/protect-bash.sh" ]; then
+if [ ! -f "$GAME_DIR/KNOWLEDGEBASE.md" ] || [ ! -f "$GAME_DIR/tools/skyguard/run.py" ] || \
+   [ ! -f "$GAME_DIR/tools/agent-harness.py" ]; then
     echo "ERROR: Toolkit files not found in this directory."
     echo "Make sure you extracted the toolkit zip into your Skyrim folder first."
     exit 1
@@ -878,7 +885,7 @@ DOC_PLACEHOLDERS='{{GAME_ROOT}}\|{{CONFIG_DIR}}\|{{LOADORDER_DIR}}\|{{SKYRIM_FOL
 for DOC in CLAUDE.md AGENTS.md; do
 case "$DOC" in
     CLAUDE.md) DOC_ON="$DO_CLAUDE" ;;
-    *) DOC_ON="$DO_CODEX" ;;
+    *) DOC_ON="${DO_CODEX}${DO_PORTABLE}${DO_OPENCODE}" ;;
 esac
 echo ""
 if [ -z "$DOC_ON" ]; then
@@ -1131,6 +1138,25 @@ echo "You're ready to go! Start your agent in this folder and ask it about your 
 # --agent codex names Codex alone: Codex left unconfigured means the run did nothing it was asked for.
 # --lock asked for the lock: a lock that did not apply is said above and reported here too.
 SETUP_RC=0
+if [ -n "$DO_PORTABLE" ] || [ -n "$DO_OPENCODE" ]; then
+    echo ""
+    echo "Neutral runtime: tools/agent-harness.py (capabilities, check, coverage, save-list, save-restore)."
+    echo "A process receipt or installed file does not prove a host intercepted or blocked a call."
+    if [ "$AGENTS_DOC_STATE" != "configured" ] || [ -z "$PY_FOUND" ]; then
+        echo "!! Neutral instructions/runtime prerequisites are not configured; see above."
+        SETUP_RC=1
+    fi
+fi
+if [ -n "$DO_OPENCODE" ]; then
+    if [ -f "$GAME_DIR/.opencode/plugins/skyguard.js" ] && [ -f "$GAME_DIR/.opencode/hooks/skyguard_adapter.py" ] && \
+       [ -f "$GAME_DIR/tools/modding_harness/opencode_plugin.mjs" ]; then
+        echo "OpenCode V1 plugin files present. Running-host blocking, Desktop and V2 remain unqualified."
+        echo "See .opencode/SKYRIM-OPENCODE.md; verify the loaded banner and qualify actual blocking."
+    else
+        echo "!! OpenCode V1 plugin files are missing; this host has no toolkit interception here."
+        if [ "$AGENT_SEL" = "opencode" ]; then SETUP_RC=1; fi
+    fi
+fi
 if [ "$AGENT_SEL" = "codex" ] && { [ "$CODEX_STATE" != "configured" ] || [ "$AGENTS_DOC_STATE" != "configured" ]; }; then
     echo ""
     echo "!! --agent codex: Codex is NOT configured (see above), so this run did not do what it was asked."

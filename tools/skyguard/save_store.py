@@ -87,7 +87,12 @@ def restore(project, sid, wanted, to, in_place, out):
             if folder is None or any(profiles.canonical(Path(r["path"]).parent) != profiles.canonical(folder)
                                      for g in groups for r in g["members"]):
                 raise ValueError("in-place save restore is limited to the configured Saves folder")
-        result = target.restore(sid[len(PREFIX):], to or None, selected, in_place)
+        result = restore_result(project, sid, wanted, to, in_place)
+        if "result" in result:
+            from .audit import Audit
+            Audit(str(project)).log("save-restore", "FAILED", "restore failed: " + result["result"]["reason"])
+            print("REFUSED: " + result["result"]["reason"], file=out)
+            return 2
     except (OSError, ValueError) as exc:
         from .audit import Audit
         Audit(str(project)).log("save-restore", "FAILED", "restore failed: {}".format(exc))
@@ -100,3 +105,46 @@ def restore(project, sid, wanted, to, in_place, out):
         if rec["missing"]:
             print("  {} did not exist when this save was backed up".format(Path(rec["path"]).name), file=out)
     return 0
+
+
+def restore_result(project, sid, wanted=(), to=None, in_place=False, *, host="generic",
+                   session_id="", transcript="", command=""):
+    """Structured neutral recovery; legacy CLI delegates here for the same policy."""
+    import time
+    from modding_harness import contracts
+    from . import mcp_rules, paths, portable, snapcli
+    target = store(project)
+    ident = sid[len(PREFIX):] if sid.startswith(PREFIX) else sid
+    manifest = target.inspect(ident)
+    members = [r for group in manifest["groups"] for r in group["members"]]
+    selected = []
+    for item in wanted:
+        hits = [r["path"] for r in members if snapcli._matches(r["path"], item)]
+        if not hits:
+            raise ValueError("--path matches no member: " + item)
+        selected.extend(hits)
+    groups = [group for group in manifest["groups"] if not selected or
+              any(r["path"] in selected for r in group["members"])]
+    if in_place:
+        cfg = paths.read_install(str(project), os.environ)
+        main = paths.main_worktree(str(project))
+        if main:
+            cfg = paths.merge_configs(cfg, paths.read_install(main, {}))
+        roots = paths.roots(str(project), str(project), cfg)
+        folder = mcp_rules.saves_folder(roots, os.environ)
+        if folder is None or any(profiles.canonical(Path(r["path"]).parent) != profiles.canonical(folder)
+                                 for group in groups for r in group["members"]):
+            raise ValueError("in-place save restore is limited to the configured Saves folder")
+        target.verify(groups)
+        affected = tuple(r["path"] for group in groups for r in group["members"])
+        action = contracts.Action(host, "save-restore", "files", cwd=str(Path(project).resolve()),
+                                  session_id=session_id, command=command or "save-restore " + ident,
+                                  paths=affected, operations=("write",) * len(affected))
+        checked, count = portable.check(action, project, transcript=transcript,
+                                        deadline=time.monotonic() + 40, helper=True)
+        if checked.result.decision != "allow":
+            return portable.reply(checked, count)
+        result = target.restore(ident, selected=selected, in_place=True)
+        result["pre_restore_transactions"] = list(checked.transactions)
+        return result
+    return target.restore(ident, to or None, selected)

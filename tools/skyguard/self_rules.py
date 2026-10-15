@@ -85,13 +85,15 @@ def install_kind(rel: List[str]) -> str:
         return ""
     if rel[0] == ".skyguard":
         return STATE
-    if rel == [".modding-agent-harness", "config.json"]:
+    if rel in ([".modding-agent-harness", "config.json"], [".modding-agent-harness", "local-policies.json"]):
         return STATE
     if (rel[:3] in ([".claude", "backups", "recovery_snapshots"],
                      [".claude", "backups", "save-backups"])
             or rel[:3] == [".modding-agent-harness", "backups", "saves"]):
         return STATE
     if rel[0] == ".codex":
+        return GUARD
+    if rel == ["tools", "agent-harness.py"] or rel[:2] in ([".opencode", "hooks"], [".opencode", "plugins"]):
         return GUARD
     if rel[:2] in ([".claude", "hooks"], ["tools", "skyguard"], ["tools", "modding_harness"],
                    ["agent", "guards"]) and len(rel) >= 2:

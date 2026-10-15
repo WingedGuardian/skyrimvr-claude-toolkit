@@ -303,8 +303,15 @@ def test_a_git_restore_of_a_guard_file_outside_the_install_is_the_guard_rule(com
 
 
 def test_a_user_level_write_tool_is_a_guard_file():
-    (_, text), fired = write("~/.claude/settings.json", cwd="C:/work", env=UENV)
+    (_, text), fired = write(HOME + "/.claude/settings.json", cwd="C:/work", env=UENV)
     assert fired == {"W-SELF-GUARD"}
+
+
+def test_native_file_tool_tilde_is_a_literal_directory_name():
+    # Shell operands expand ~; native file tools do not. This file is under
+    # C:/work/~ rather than the user's actual hook configuration folder.
+    (_, text), fired = write("~/.claude/settings.json", cwd="C:/work", env=UENV)
+    assert not fired
 
 
 @pytest.mark.parametrize("command", [

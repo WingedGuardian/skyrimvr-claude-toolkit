@@ -1,5 +1,40 @@
 # ADAPTING.md: you are an agent this toolkit does not support yet
 
+The 4.0 neutral entry is `python tools/agent-harness.py check`, with Action v1 JSON
+on stdin and a structured result on stdout. It needs `tools/skyguard/` and the
+pinned `tools/modding_harness/`, independently of named-agent hook directories.
+`capabilities` states qualification limits and `coverage --session-id ID` reports
+private process receipts. The host must honor a refusal before executing a call.
+`save-list` and `save-restore ID --to DIR` recover neutral transactions; selecting
+an ESS or SKSE member selects its complete pair. `--in-place` preserves the current
+pair first. More than two existing saves need a canonical human grant bound to
+the helper command, paths and count. Unknown approval readers cannot grant it.
+Both legacy formats remain readable through `tools/skyguard.sh snapshot`.
+
+The generated `.opencode/plugins/skyguard.js` follows the OpenCode V1 1.18.34
+source contract and imports the same pinned process transport as X4. Its Node
+fixtures qualify translation and failure handling only; running-host blocking,
+Desktop and V2 remain unqualified. See `.opencode/SKYRIM-OPENCODE.md`. Existing
+Claude/Codex entrypoints remain available during the dispatcher transition.
+
+An existing `.claude/hooks/protect-save-access.py` is a local policy, never a
+replaceable toolkit default. Portable mutations refuse until it is registered
+in `.modding-agent-harness/local-policies.json` as version 1, kind
+`legacy-skyrim-save-guard-v1`, path `.claude/hooks/protect-save-access.py`, and
+its full SHA-256. The bridge runs only its pure `decide` entry before permanent
+preservation. Changed bytes, a crash, output, or a missed deadline refuse the
+call. It cannot grant bulk approval or bypass game rules. Its structured DevBench
+checks retain the local refusal of generic runtime save/load; the separately
+pinned controlled loader retains its own independent gate. Fresh installations
+without that personal policy do not acquire it. Registration is part of a
+reviewed upgrade, never inferred from a hook trust record.
+
+`upgrade-preview --candidate FILE [--previous FILE]` compares version 1 inventories
+(`{"v":1,"files":{"relative/path":"sha256"}}`) without writing anything.
+Unknown or modified installed bytes are collisions to preserve; previous
+ownership is accepted only for matching bytes. A preview does not approve an
+upgrade or establish host interception.
+
 This file is written to you, the coding agent. If you are Claude Code or the Codex CLI, stop: the toolkit
 is already wired for you (see `README.md`). Otherwise you can wire it into yourself. Be honest about how
 far you get: the toolkit gives you Layers 0 and 1 without any hook (Layer 2, the vanilla-file lock, is off by default), and Layer 3
