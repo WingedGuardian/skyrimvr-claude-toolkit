@@ -1,7 +1,7 @@
 {
   "v": 1,
   "project": "modding-agent-harness",
-  "revision": "cf236f5c8f087c8c79c97b53b9c9f493ec09144c",
+  "revision": "d735091c31aef927204913e350ada76ca8631557",
   "api_version": 1,
   "files": {
     "tools/modding_harness/LICENSE": "07a5c5e4aac6c4eda67565a716c8f4967dc318abe03098e5dee6a8fa7672d619",
@@ -21,7 +21,7 @@
     "tools/modding_harness/profiles.py": "4b2cd89e0468a24eba1eeac22318cb86f84f1d4fb06cdac5ccb8e6688a2e33a0",
     "tools/modding_harness/telemetry.py": "fdfd78ad65dd681fe311bf35b459d6969f032edf6b7bde177ec3b76d2e396f40",
     "tools/modding_harness/transport.py": "1548c1dae6f9461e88ec634311f36e149476d5efaaba377fcb005f887e996c43",
-    "tools/modding_harness/upgrade.py": "2296ad87fa66e909f8dc92677f891f8f71330a89fc8415046119661204389233",
+    "tools/modding_harness/upgrade.py": "4db2482d32cd29371b4a335b98d73443dc96cc75ea10f9e177b8d379645ff8a9",
     "tools/modding_harness/workspace.py": "264d871f6eca26dd91d8616cdcc1424d0d101d436c3aec01f4d52d4b67ba7d64"
   }
 }

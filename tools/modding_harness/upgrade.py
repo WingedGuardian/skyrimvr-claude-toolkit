@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 import re
 import os
 import shutil
+import stat
 import time
 import uuid
 
@@ -131,8 +132,13 @@ def _entry(root, name):
     for parent in (path, *path.parents):
         if parent == root:
             break
-        if parent.is_symlink():
-            raise ValueError("upgrade entry traverses a symbolic link")
+        try:
+            identity = parent.lstat()
+        except FileNotFoundError:
+            continue
+        if (stat.S_ISLNK(identity.st_mode) or
+                getattr(identity, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+            raise ValueError("upgrade entry traverses a symbolic link or redirected reparse point")
     if not path.resolve().is_relative_to(root):
         raise ValueError("upgrade entry resolves outside the install")
     if path.exists() and not path.is_file():
