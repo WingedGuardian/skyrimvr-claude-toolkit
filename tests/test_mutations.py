@@ -8756,3 +8756,12 @@ MUTATIONS += [pytest.param("tools/skyguard/save_store.py",
     '        if checked.result.decision != "allow":', '        if False:',
     "tests/test_legacy_save_store.py::test_recovery_format_in_place_obeys_local_restriction_before_current_preservation",
     id="legacy-recovery-cannot-bypass-local-restriction")]
+
+MUTATIONS += [pytest.param("tools/skyguard/save_store.py", before, after,
+    "tests/test_portable_profile.py::test_neutral_restore_carries_one_deadline_through_every_copy[" + case + "]",
+    id="neutral-restore-total-deadline-" + case) for before, after, case in (
+    ('        result = target.restore(ident, selected=selected, in_place=True, deadline=deadline)',
+     '        result = target.restore(ident, selected=selected, in_place=True)', 'True'),
+    ('    return target.restore(ident, to or None, selected, deadline=deadline)',
+     '    return target.restore(ident, to or None, selected)', 'False'),
+)]

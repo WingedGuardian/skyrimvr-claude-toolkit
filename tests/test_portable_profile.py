@@ -68,6 +68,24 @@ def test_generic_upgrade_stage_keeps_private_install_bytes_and_refuses_bundle_re
     assert subprocess.run(args, capture_output=True, timeout=45).returncode == 2
 
 
+@pytest.mark.parametrize("in_place", [False, True])
+def test_neutral_restore_carries_one_deadline_through_every_copy(install, tmp_path, monkeypatch, in_place):
+    from modding_harness import durable
+    root, files = install
+    transaction = save_store.store(root).backup([files[0]])["id"]
+    for member in files[0]:
+        member.write_bytes(b"current")
+    real, seen = durable.copy_verified, []
+    def observe(source, target, deadline=None):
+        seen.append(deadline)
+        return real(source, target, deadline)
+    monkeypatch.setattr(durable, "copy_verified", observe)
+    result = save_store.restore_result(root, transaction, to=None if in_place else tmp_path / "out", in_place=in_place)
+    assert len(result["published"]) == 2
+    assert seen and all(deadline is not None for deadline in seen)
+    assert len(set(seen)) == 1, "pre-preservation and restore must share one total budget"
+
+
 def test_bulk_is_one_scope_and_only_qualified_human_evidence_can_grant_it(install):
     root, files = install
     all_members = [path for pair in files for path in pair]

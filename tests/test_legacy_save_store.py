@@ -27,14 +27,21 @@ def legacy(tmp_path):
     return project, root, row
 
 
-def test_legacy_pair_import_restore_keeps_old_store_and_both_members(legacy, tmp_path):
+def test_legacy_pair_import_restore_keeps_old_store_and_both_members(legacy, tmp_path, monkeypatch):
+    from modding_harness import durable
     project, root, row = legacy
     before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    real, seen = durable.copy_verified, []
+    def observe(source, target, deadline=None):
+        seen.append(deadline)
+        return real(source, target, deadline)
+    monkeypatch.setattr(durable, "copy_verified", observe)
     output = io.StringIO()
     assert snapcli.cmd_restore(project, "local-" + row["id"], ["A.skse"], str(tmp_path / "out"), False, output) == 0
     assert sorted(p.name for p in (tmp_path / "out").rglob("*") if p.is_file()) == ["A.ess", "A.skse"]
     assert {p: p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
     assert save_store.rows(project)[0]
+    assert seen and None not in seen and len(set(seen)) == 1
 
 
 @pytest.mark.parametrize("defect", ["corrupt", "outside", "missing-authority", "duplicate"])
@@ -109,11 +116,16 @@ def test_legacy_writer_copy_deadline_cleans_partial_candidate(recovery_legacy, m
     assert not list((root / "blobs").glob('.part-save-*'))
 
 
-def test_recovery_format_in_place_preserves_complete_current_pair(recovery_legacy):
-    from modding_harness import workspace
+def test_recovery_format_in_place_preserves_complete_current_pair(recovery_legacy, monkeypatch):
+    from modding_harness import durable, workspace
     project, root, sid, ess, skse = recovery_legacy
     ess.write_bytes(b"current ESS")
     skse.write_bytes(b"current SKSE")
+    real, seen = durable.copy_verified, []
+    def observe(source, target, deadline=None):
+        seen.append(deadline)
+        return real(source, target, deadline)
+    monkeypatch.setattr(durable, "copy_verified", observe)
     out = io.StringIO()
     assert snapcli.cmd_restore(project, sid, [ess.name], None, True, out) == 0, out.getvalue()
     assert ess.read_bytes() == b"legacy ESS" and skse.read_bytes() == b"legacy SKSE"
@@ -123,6 +135,7 @@ def test_recovery_format_in_place_preserves_complete_current_pair(recovery_legac
     assert {Path(r["path"]).name: (store.root / "blobs" / r["sha256"]).read_bytes()
             for group in prebackup["groups"] for r in group["members"]} == {
                 "A.ess": b"current ESS", "A.skse": b"current SKSE"}
+    assert seen and None not in seen and len(set(seen)) == 1
 
 
 def test_recovery_format_in_place_obeys_local_restriction_before_current_preservation(recovery_legacy, monkeypatch):

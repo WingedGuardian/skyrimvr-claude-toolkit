@@ -66,7 +66,9 @@ def rows(project):
     return result, bad
 
 
-def restore(project, sid, wanted, to, in_place, out):
+def restore(project, sid, wanted, to, in_place, out, *, deadline=None):
+    import time
+    deadline = time.monotonic() + 40 if deadline is None else deadline
     from . import mcp_rules, paths, snapcli
     target = store(project)
     try:
@@ -87,7 +89,7 @@ def restore(project, sid, wanted, to, in_place, out):
             if folder is None or any(profiles.canonical(Path(r["path"]).parent) != profiles.canonical(folder)
                                      for g in groups for r in g["members"]):
                 raise ValueError("in-place save restore is limited to the configured Saves folder")
-        result = restore_result(project, sid, wanted, to, in_place)
+        result = restore_result(project, sid, wanted, to, in_place, deadline=deadline)
         if "result" in result:
             from .audit import Audit
             Audit(str(project)).log("save-restore", "FAILED", "restore failed: " + result["result"]["reason"])
@@ -108,9 +110,10 @@ def restore(project, sid, wanted, to, in_place, out):
 
 
 def restore_result(project, sid, wanted=(), to=None, in_place=False, *, host="generic",
-                   session_id="", transcript="", command=""):
+                   session_id="", transcript="", command="", deadline=None):
     """Structured neutral recovery; legacy CLI delegates here for the same policy."""
     import time
+    deadline = time.monotonic() + 40 if deadline is None else deadline
     from modding_harness import contracts
     from . import mcp_rules, paths, portable, snapcli
     target = store(project)
@@ -135,16 +138,16 @@ def restore_result(project, sid, wanted=(), to=None, in_place=False, *, host="ge
         if folder is None or any(profiles.canonical(Path(r["path"]).parent) != profiles.canonical(folder)
                                  for group in groups for r in group["members"]):
             raise ValueError("in-place save restore is limited to the configured Saves folder")
-        target.verify(groups)
+        target.verify(groups, deadline)
         affected = tuple(r["path"] for group in groups for r in group["members"])
         action = contracts.Action(host, "save-restore", "files", cwd=str(Path(project).resolve()),
                                   session_id=session_id, command=command or "save-restore " + ident,
                                   paths=affected, operations=("write",) * len(affected))
         checked, count = portable.check(action, project, transcript=transcript,
-                                        deadline=time.monotonic() + 40, helper=True)
+                                        deadline=deadline, helper=True)
         if checked.result.decision != "allow":
             return portable.reply(checked, count)
-        result = target.restore(ident, selected=selected, in_place=True)
+        result = target.restore(ident, selected=selected, in_place=True, deadline=deadline)
         result["pre_restore_transactions"] = list(checked.transactions)
         return result
-    return target.restore(ident, to or None, selected)
+    return target.restore(ident, to or None, selected, deadline=deadline)

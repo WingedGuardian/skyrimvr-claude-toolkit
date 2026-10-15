@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 from modding_harness.profiles import canonical
@@ -70,6 +71,7 @@ def group(project, row):
 
 def restore(project, sid, wanted, to, in_place, out):
     from . import save_store
+    deadline = time.monotonic() + 40
     try:
         match = ID.fullmatch(sid)
         rows, _bad = records(project)
@@ -79,12 +81,12 @@ def restore(project, sid, wanted, to, in_place, out):
         members = group(project, selected)
         target = save_store.store(project, [r["original"] for r in members])
         manifest = target.import_records([members], {"profile": "skyrim", "legacy_store": "save-backups",
-                                                    "legacy_id": selected["id"]})
+                                                    "legacy_id": selected["id"]}, deadline)
     except (OSError, ValueError) as exc:
         print("REFUSED: legacy save evidence could not be preserved: {}".format(exc), file=out)
         return 2
     print("Imported verified legacy evidence as core-{}; legacy store preserved.".format(manifest["id"]), file=out)
-    return save_store.restore(project, "core-" + manifest["id"], wanted, to, in_place, out)
+    return save_store.restore(project, "core-" + manifest["id"], wanted, to, in_place, out, deadline=deadline)
 
 
 def recovery_restore(project, sid, wanted, to, in_place, out):
@@ -94,6 +96,7 @@ def recovery_restore(project, sid, wanted, to, in_place, out):
     authority too: do not infer an absent co-save merely from an omitted line.
     """
     from . import recovery, save_store, snapcli
+    deadline = time.monotonic() + 40
     try:
         legacy = recovery.store_dir(project)
         state = recovery.resolve(legacy, sid)
@@ -141,9 +144,9 @@ def recovery_restore(project, sid, wanted, to, in_place, out):
                 if why:
                     raise ValueError(why)
         target = save_store.store(project, [r["original"] for group in complete for r in group])
-        manifest = target.import_records(complete, {"profile": "skyrim", "legacy_store": "recovery_snapshots", "legacy_id": sid})
+        manifest = target.import_records(complete, {"profile": "skyrim", "legacy_store": "recovery_snapshots", "legacy_id": sid}, deadline)
     except (OSError, ValueError) as exc:
         print("REFUSED: legacy save evidence could not be preserved: {}".format(exc), file=out)
         return 2
     print("Imported verified legacy recovery evidence as core-{}; legacy store preserved.".format(manifest["id"]), file=out)
-    return save_store.restore(project, "core-" + manifest["id"], wanted, to, in_place, out)
+    return save_store.restore(project, "core-" + manifest["id"], wanted, to, in_place, out, deadline=deadline)

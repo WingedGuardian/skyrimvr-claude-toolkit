@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Neutral and both legacy restore routes now carry one total deadline through
+  import, verification, current-save preservation and final publication.
 - Existing Claude/Codex deciding entrypoints now use the ordered shared dispatcher,
   retaining declared call identity and original unresolved-save explanations.
   Both legacy save stores import verified complete-pair evidence into guarded
