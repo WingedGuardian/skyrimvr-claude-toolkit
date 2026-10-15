@@ -657,6 +657,9 @@ def prune(store, now, audit, deadline=None):
     references is unknown. With a `deadline` (a `_walk_clock()` time) it stops between deletions -- it is restartable,
     so stopping only defers the rest (review M1). -> blobs and part files removed."""
     store = Path(store)
+    if (store / "transactions").exists() or (store / "MANIFEST.jsonl").exists():
+        audit.log(HOOK, "PRUNE-SKIPPED", "another store format; no script snapshot or blob was pruned")
+        return 0
 
     def late():
         return deadline is not None and _walk_clock() >= deadline

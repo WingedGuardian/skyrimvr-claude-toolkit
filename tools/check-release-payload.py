@@ -334,7 +334,7 @@ def check_shared_core(root: Path):
             raise ValueError("invalid shared-core pin/manifest")
         files = lock["files"]
         required = {"tools/modding_harness/" + name for name in (
-            "__init__.py", "contracts.py", "profiles.py", "preservation.py", "durable.py", "approval.py", "locking.py", "discovery.py", "LICENSE")}
+            "__init__.py", "contracts.py", "profiles.py", "preservation.py", "durable.py", "approval.py", "locking.py", "discovery.py", "workspace.py", "LICENSE")}
         if not required <= files.keys():
             raise ValueError("shared-core public/runtime files missing from manifest")
         core = root / "tools/modding_harness"

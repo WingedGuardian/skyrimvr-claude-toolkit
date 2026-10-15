@@ -10,7 +10,13 @@ from .preservation import DEFAULT_RESERVE, SaveStore
 def settings(workspace):
     root = Path(workspace).resolve()
     path = root / ".modding-agent-harness/config.json"
-    data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data = {}
+    if path.exists():
+        with open(path, "rb") as stream:
+            raw = stream.read(65537)
+        if len(raw) > 65536:
+            raise ValueError("neutral harness configuration exceeds its 64 KiB byte budget")
+        data = json.loads(raw.decode("utf-8"))
     if not isinstance(data, dict) or set(data) - {"v", "save_store", "save_reserve_bytes"} or data.get("v", 1) != 1:
         raise ValueError("unsupported neutral harness configuration")
     destination = data.get("save_store")
@@ -33,10 +39,7 @@ def summaries(store):
     rows, unreadable = [], []
     for path in sorted((store.root / "transactions").glob("*.json")):
         try:
-            data = json.loads(path.read_text(encoding="ascii"))
-            if (data.get("v") != 1 or data.get("id") != path.stem or data.get("complete") is not True
-                    or not isinstance(data.get("groups"), list) or not data["groups"]):
-                raise ValueError("incomplete transaction")
+            data = store.inspect(path.stem)
             rows.append(data)
         except (OSError, ValueError, AttributeError):
             unreadable.append(path.name)

@@ -72,21 +72,18 @@ The guard judges every save in the settings folder's `Saves` (and the save ReSav
 DevBench save overwrites) that a call CHANGES: written or edited, copied onto, moved or renamed, deleted.
 
 - **One or two saves:** no prompt. Before the tool runs, the hook copies BOTH files of each save into
-  `.claude/backups/recovery_snapshots/`, reads each copy back to its SHA-256, records it, and only then allows the
+  `.modding-agent-harness/backups/saves/`, reads each copy back to its SHA-256, records it, and only then allows the
   call (a note says so). A missing co-save is recorded as missing. If the backup fails (no room, unreadable, a copy
   that does not verify, the store busy), the call is refused and nothing changes. The backups are never pruned.
 - **More than two, or any wildcard:** refused until the USER types one line in their own message (it is never read
   from a tool result, a file or your own text, so you cannot supply it -- show them the line the refusal prints):
 
-  ```
-  SAVE_ACCESS_APPROVAL {"op": "delete", "files": ["Save1", "Save2", "Save3"]}
-  SAVE_ACCESS_APPROVAL {"op": "delete", "pattern": "Autosave*.ess", "count": 7}
-  ```
-
   `op` is `write` (a write, copy onto, edit, ReSaver `--apply`, DevBench save), `move` (a move or rename) or
-  `delete`. A file is named by its name or stem (`Save1`, `Save1.ess`, a full path); naming either file of a save
-  covers both. A `pattern` grant covers only a command whose wildcard is that exact file-name pattern, matching
-  exactly `count` saves when it runs. A grant lasts the session; every approved save is still backed up first.
+  `delete`. The version 1 grant binds the current `session_id`, operation and canonical full `paths`, including
+  both members of every pair. Wildcards also bind the exact `command_sha256` and logical save `count`.
+  Show the complete line printed by the deciding hook; do not construct an approval yourself. Old basename-only
+  and pattern/count grants require a new canonical grant. A matching grant can be reused in that session;
+  changed membership or command scope invalidates it. Every approved save is still backed up first.
 - **Free, any number:** reading, hashing, listing, and copying saves OUT of `Saves`.
 - **Still refused:** deleting or moving the `Saves` folder itself; a loop over saves (`for f in ...; do rm "$f"`),
   which cannot be counted -- name the files, or use a wildcard the guard can list; a save it cannot place (a bare
@@ -101,3 +98,12 @@ bash tools/skyguard.sh snapshot list --kind save                    # <stamp>-sa
 bash tools/skyguard.sh snapshot restore <id> --to <folder>          # a copy, live files untouched
 bash tools/skyguard.sh snapshot restore <id> --in-place             # over the live save (the user approves this)
 ```
+
+New IDs are `core-<uuid>`. The listing also reads the older recovery-snapshot store and installed
+`save-backups` records (`local-<id>`); recovery verifies imported bytes and preserves both legacy stores.
+Selecting either member selects its complete pair. Restore copies are published without clobbering concurrent
+destinations; in-place recovery first preserves the complete current pair and journals each publication.
+The default destination and 2 GiB reserve can be configured in the workspace's
+`.modding-agent-harness/config.json` with `v: 1`, `save_store` and `save_reserve_bytes`.
+The store must stay separate from save roots. Store files and ancestor moves/deletes are protected;
+there is no automatic save-backup pruning. Runtime save/load restrictions still apply independently.

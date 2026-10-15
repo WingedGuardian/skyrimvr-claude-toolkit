@@ -204,7 +204,7 @@ def main(argv=None) -> int:
     if len(args) == 2 and args[0] == "--selftest":
         # Reaching here means every engine module above imported. The wrappers' fallback chain uses this
         # to prove a candidate interpreter can run the ENGINE, not merely that it exits 0.
-        if sys.version_info[:2] < (3, 8):
+        if sys.version_info[:2] < (3, 10):
             return 1
         _emit("skyguard-selftest:{}\n".format(args[1]))
         return 0

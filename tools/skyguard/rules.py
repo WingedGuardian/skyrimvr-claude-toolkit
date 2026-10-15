@@ -334,7 +334,7 @@ RULES = {
         "prefixes": [],
         "template": (
         "Blocked: this {op} {n} saves ({file}); more than 2, or a wildcard, needs the user's typed approval.\n"
-        'If they agree, the user types this line: SAVE_ACCESS_APPROVAL {save}'
+        'A canonical full-path/session grant is required; the deciding hook prints its exact scope.'
     ),
     },
     # A wildcard the guard cannot list (in a folder name, or an unreadable folder): no backup is possible.

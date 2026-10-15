@@ -163,7 +163,7 @@ function Invoke-Proc([string[]]$cmd, [string[]]$more, [byte[]]$in, [int]$ms) {
 # (tests/test_codex_entry.py::test_fallback_chain_matches_the_claude_wrappers). The configured $PY is the
 # only thing the hot path touches; probing runs ONLY once it has failed. Order: py -3 / python / python3
 # that resolve and are not a Store alias, then the usual install locations (newest version first), then a
-# Store alias, last. A candidate is accepted only if it is Python >= 3.8 AND runs the engine's own
+# Store alias, last. A candidate is accepted only if it is Python >= 3.10 AND runs the engine's own
 # `run.py --selftest <nonce>` and echoes the nonce (a stub printing {} would otherwise read as ALLOW).
 # Each probe gets min(SKYGUARD_PROBE_TIMEOUT, the time left), default 15 s, sub-second allowed, and no probe
 # runs in the last 10 s before the wrapper's own limit (the engine needs them) -- the Claude chain's budget.
@@ -226,7 +226,7 @@ function Test-PyGood([string[]]$c) {
     $ms = Get-ProbeMs
     if ($ms -le 0) { Add-Probe $c 'skipped:no-time-left' $t0; return $false }
     try {
-        $r = Invoke-Proc $c @('-c', 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)') ([byte[]]@()) $ms
+        $r = Invoke-Proc $c @('-c', 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)') ([byte[]]@()) $ms
     } catch { Add-Probe $c 'rejected:cannot-start' $t0; return $false }
     if ($r.TimedOut) { Add-Probe $c ('rejected:version-check-timeout-' + $ms + 'ms') $t0; return $false }
     if ($r.Code -ne 0) { Add-Probe $c ('rejected:version-check-exit-' + $r.Code) $t0; return $false }

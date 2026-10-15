@@ -540,6 +540,15 @@ def prune(store, now, audit, deadline=None):
     removed."""
     store = Path(store)
     mpath = store / MANIFEST
+    # A missing/empty authority is not proof that every blob is an orphan. In
+    # particular, never apply the legacy collector to neutral permanent saves.
+    try:
+        unknown = (store / "transactions").exists() or not mpath.is_file() or mpath.stat().st_size == 0
+    except OSError:
+        unknown = True
+    if unknown:
+        audit.log(HOOK, "PRUNE-SKIPPED", "no nonempty legacy recovery manifest; no blob was pruned")
+        return 0
 
     def late():
         return deadline is not None and time.monotonic() >= deadline

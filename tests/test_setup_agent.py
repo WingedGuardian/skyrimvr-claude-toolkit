@@ -540,7 +540,6 @@ def test_the_jdk_check(game_dir, tmp_path, line, javac, expect):
 @pytest.mark.parametrize("version,expect", [
     ("3.12.10", "is inside the tested range 3.10-3.13"),
     ("3.13.1", "is inside the tested range 3.10-3.13"),
-    ("3.9.18", "OLDER than the tested range"),
     ("3.14.0", "outside the tested range 3.10-3.13 (newer than tested)"),
 ])
 def test_the_python_range_message(game_dir, version, expect):
@@ -549,6 +548,14 @@ def test_the_python_range_message(game_dir, version, expect):
     assert r.returncode == 0
     lines = [ln for ln in r.stdout.splitlines() if expect in ln]
     assert len(lines) == 1 and ("Python %s " % version) in lines[0], r.stdout[:3000]
+
+
+def test_python_39_is_refused_before_configuring_shared_harness(game_dir):
+    r = run_setup(game_dir, shim_path=True, env_overrides={
+        "FAKE_PYTHON_EXE": "C:/Py/python.exe", "FAKE_PYTHON_VERSION": "3.9.18"})
+    assert "safety hooks need Python 3.10 or newer" in r.stdout
+    assert "Python 3.10+ not found" in r.stdout
+    assert "Hooks will use: C:/Py/python.exe" not in r.stdout
 
 
 # --------------------------------------------------------------------------------- the instruction budget --

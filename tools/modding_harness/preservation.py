@@ -66,18 +66,48 @@ class SaveStore:
         """groups contains complete, profile-resolved logical saves, including absent members."""
         if known_writer_active:
             raise PreservationFailed("active native save writer requires a qualified quiescent route")
+        return self._preserve(groups, metadata, deadline)
+
+    def import_records(self, groups, metadata=None, deadline=None):
+        """Preserve legacy recovery evidence without reading or authorizing live saves.
+
+        Each member supplies original/source/missing and, when present, expected
+        SHA-256/size from the legacy authority. The complete copied source set is
+        revalidated before those original recovery destinations are recorded.
+        """
+        imported, sources = {}, []
+        for group in groups:
+            members = []
+            for record in group:
+                if (not isinstance(record, dict) or not isinstance(record.get("original"), str)
+                        or not os.path.isabs(record["original"]) or not isinstance(record.get("source"), str)
+                        or not os.path.isabs(record["source"]) or type(record.get("missing")) is not bool):
+                    raise ValueError("invalid legacy recovery member")
+                if not record["missing"] and (type(record.get("size")) is not int or record["size"] < 0
+                        or not isinstance(record.get("sha256"), str) or len(record["sha256"]) != 64
+                        or any(c not in "0123456789abcdef" for c in record["sha256"])):
+                    raise ValueError("invalid legacy hash/size evidence")
+                source = str(Path(record["source"]).absolute())
+                if source in imported:
+                    raise ValueError("duplicate legacy recovery source")
+                imported[source] = dict(record)
+                members.append(source)
+            sources.append(members)
+        return self._preserve(sources, metadata, deadline, imported)
+
+    def _preserve(self, groups, metadata, deadline, imported=None):
         try:
             durable.check_deadline(deadline)
             self.root.mkdir(parents=True, exist_ok=True)
             wait = 5.0 if deadline is None else max(0, min(5.0, deadline - time.monotonic()))
             with exclusive(self.root / ".lock", wait):
-                return self._backup_locked(groups, metadata, deadline)
+                return self._backup_locked(groups, metadata, deadline, imported)
         except (OSError, ValueError) as exc:
             if isinstance(exc, PreservationFailed):
                 raise
             raise PreservationFailed(str(exc)) from exc
 
-    def _backup_locked(self, groups, metadata, deadline):
+    def _backup_locked(self, groups, metadata, deadline, imported=None):
         transaction = uuid.uuid4().hex
         staged = []
         try:
@@ -145,9 +175,23 @@ class SaveStore:
             # Recheck the COMPLETE set after all members are copied, including
             # missing members appearing and same-size/mtime rewrites of earlier files.
             self.revalidate(records, deadline)
+            if imported is not None:
+                destinations = set()
+                for group in records:
+                    for rec in group["members"]:
+                        expected = imported[rec["path"]]
+                        if (rec["missing"] != expected["missing"] or not rec["missing"] and
+                                (rec["sha256"] != expected.get("sha256") or rec["size"] != expected.get("size"))):
+                            raise PreservationFailed("legacy evidence does not match preserved source")
+                        original = canonical(expected["original"])
+                        if original in destinations:
+                            raise PreservationFailed("ambiguous legacy recovery destinations")
+                        destinations.add(original)
+                        rec.update(preserved_from=rec["path"], path=expected["original"], canonical=original)
             if shutil.disk_usage(self.root).free < self.reserve:
                 raise PreservationFailed("destination free-space reserve changed during preservation")
             manifest = {"v": 1, "id": transaction, "utc": datetime.now(timezone.utc).isoformat(),
+                        "purpose": "recovery-import" if imported is not None else "pre-mutation",
                         "groups": records, "metadata": metadata or {}, "destination": str(self.root),
                         "logical_bytes": total, "required_bytes": required, "stored_bytes": used, "deduplicated_bytes": deduplicated,
                         "reserve_bytes": self.reserve, "complete": True}
@@ -182,6 +226,22 @@ class SaveStore:
                     raise PreservationFailed("save changed before transaction committed: " + path)
 
     def load(self, transaction, deadline=None):
+        manifest = self.inspect(transaction)
+        self.verify(manifest["groups"], deadline)
+        return manifest
+
+    def verify(self, groups, deadline=None):
+        # Bound by the destination store rather than any manifest-supplied path.
+        for group in groups:
+            for rec in group["members"]:
+                if not rec["missing"]:
+                    sha = rec["sha256"]
+                    blob = self.root / "blobs" / sha
+                    if blob.is_symlink() or blob.stat().st_size != rec["size"] or durable.digest(blob, deadline) != sha:
+                        raise PreservationFailed("preserved member failed verification")
+
+    def inspect(self, transaction):
+        """Validate record structure without claiming current blob verification."""
         if not isinstance(transaction, str) or len(transaction) != 32:
             raise ValueError("invalid transaction id")
         try:
@@ -189,23 +249,31 @@ class SaveStore:
         except ValueError:
             raise ValueError("invalid transaction id") from None
         manifest = json.loads((self.root / "transactions" / (transaction + ".json")).read_text(encoding="ascii"))
-        if (manifest.get("v") != 1 or manifest.get("id") != transaction
-                or manifest.get("complete") is not True or not manifest.get("groups")):
+        if (not isinstance(manifest, dict) or type(manifest.get("v")) is not int
+                or manifest.get("v") != 1 or manifest.get("id") != transaction
+                or manifest.get("complete") is not True or not isinstance(manifest.get("groups"), list)
+                or not manifest["groups"]):
             raise ValueError("incomplete preservation transaction")
-        seen = set()
+        seen, logical = set(), set()
         for group in manifest["groups"]:
-            if not group.get("members"):
+            if (not isinstance(group, dict) or type(group.get("logical_save")) is not int
+                    or group["logical_save"] in logical or not isinstance(group.get("members"), list)
+                    or not group["members"]):
                 raise ValueError("empty logical save")
+            logical.add(group["logical_save"])
             for rec in group["members"]:
-                if not isinstance(rec.get("path"), str) or rec["path"] in seen:
+                if (not isinstance(rec, dict) or not isinstance(rec.get("path"), str)
+                        or not os.path.isabs(rec["path"]) or not isinstance(rec.get("canonical"), str)
+                        or not os.path.isabs(rec["canonical"]) or rec["canonical"] in seen):
                     raise ValueError("invalid member path")
-                seen.add(rec["path"])
+                seen.add(rec["canonical"])
                 if rec.get("missing") is False:
                     sha = rec.get("sha256", "")
-                    if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
+                    if (not isinstance(sha, str) or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha)
+                            or type(rec.get("size")) is not int or rec["size"] < 0
+                            or not isinstance(rec.get("identity"), list) or len(rec["identity"]) != 5
+                            or not all(type(value) is int for value in rec["identity"])):
                         raise ValueError("invalid blob identity")
-                    if durable.digest(self.root / "blobs" / sha, deadline) != sha:
-                        raise PreservationFailed("preserved member failed verification")
                 elif rec.get("missing") is not True:
                     raise ValueError("missing member status")
         return manifest
@@ -219,13 +287,14 @@ class SaveStore:
         """
         if in_place and destination is not None:
             raise ValueError("choose in-place or a destination")
-        manifest = self.load(transaction, deadline)
+        manifest = self.inspect(transaction)
         wanted = {canonical(path) for path in selected}
         groups = [g for g in manifest["groups"] if not wanted or
                   any(rec["canonical"] in wanted for rec in g["members"])]
         matched = {rec["canonical"] for g in groups for rec in g["members"]}
         if wanted - matched:
             raise ValueError("selected member is not in the transaction")
+        self.verify(groups, deadline)
         operation = uuid.uuid4().hex
         journal = self.root / "restores" / operation
         base = Path(destination) if destination else self.root / "restored" / operation

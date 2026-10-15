@@ -85,6 +85,8 @@ def install_kind(rel: List[str]) -> str:
         return ""
     if rel[0] == ".skyguard":
         return STATE
+    if rel == [".modding-agent-harness", "config.json"]:
+        return STATE
     if (rel[:3] in ([".claude", "backups", "recovery_snapshots"],
                      [".claude", "backups", "save-backups"])
             or rel[:3] == [".modding-agent-harness", "backups", "saves"]):
@@ -121,6 +123,12 @@ _SAVE_HOLDERS = ([".claude"], [".claude", "backups"],
 
 
 def save_store_target(abs_path, roots, holder=False):
+    if roots is not None:
+        from modding_harness import workspace
+        from modding_harness.preservation import protects
+        for root in roots.install_dirs:
+            if protects(abs_path, [workspace.settings(root)["destination"]], ancestor=holder):
+                return True
     rel = _rel(abs_path, roots.install_dirs) if roots is not None else None
     if rel is None:
         return False

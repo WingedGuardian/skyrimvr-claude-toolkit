@@ -30,7 +30,7 @@ import sys
 import unicodedata
 
 # Plan 8 T6 fix round 1 (review M2): the tested range is 3.10-3.13 (user ruling 2026-10-05), so 3.10 is the floor
-# the inventory reports and the authorization parser accepts. (The engine itself still starts on 3.8: run.py.)
+# the inventory reports and the authorization parser accepts. The shared harness and engine require 3.10+.
 PYTHON_FLOOR = (3, 10)
 RUNTIMES = ("python", "git", "node")
 LAUNCH_TIMEOUT = 10

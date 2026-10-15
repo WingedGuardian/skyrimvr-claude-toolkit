@@ -7,6 +7,7 @@ import pytest
 
 from test_recovery_snapshots import Install, put
 from skyguard import backup, engine, recovery, snapcli, snapshot
+from skyguard import save_store, shell_rules
 
 
 @pytest.fixture
@@ -63,6 +64,25 @@ def test_index_failure_cannot_reuse_save_id(inst, monkeypatch):
 def test_backup_store_write_cannot_pass_the_whitelist(inst, relative):
     verdict = engine.evaluate_write(str(inst.game / relative), inst.audit, inst.roots, str(inst.game))
     assert verdict.decision == "deny"
+
+
+def test_configured_external_save_store_and_its_ancestor_are_protected(inst, tmp_path):
+    import json
+    destination = tmp_path / "permanent" / "saves"
+    put(inst.game / ".modding-agent-harness/config.json",
+        json.dumps({"v": 1, "save_store": str(destination)}).encode())
+    verdict = engine.evaluate_write(str(destination / "blobs" / "file"), inst.audit, inst.roots, str(inst.game))
+    assert verdict.decision == "deny"
+    verdict = shell_rules.decide('rm -r "{}"'.format(destination.parent), inst.roots, inst.audit, cwd=str(inst.game))
+    assert verdict.decision == "deny"
+
+
+def test_both_legacy_collectors_leave_neutral_permanent_blobs_alone(inst):
+    target = save_store.store(inst.game)
+    record = target.backup([[(inst.saves / "Quick.ess"), (inst.saves / "Quick.skse")]])
+    for collector in (snapshot.prune, recovery.prune):
+        assert collector(target.root, 10**10, inst.audit) == 0
+    assert target.load(record["id"])["complete"]
 
 
 def test_restore_member_selection_never_creates_mixed_pair(inst):

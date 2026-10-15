@@ -211,16 +211,16 @@ echo ""
 echo "Checking for Python 3..."
 PY_FOUND=""
 for c in "py -3" "python" "python3"; do
-    # >= 3.8 is the safety engine's floor: a 3.6 that passed a bare "is it 3?" probe made every hook
+    # >= 3.10 is the shared harness floor: an older Python that passes a bare "is it 3?" probe makes hooks
     # deny "engine failed" with nothing saying why.
-    if $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,8) else 1)' >/dev/null 2>&1; then
+    if $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,10) else 1)' >/dev/null 2>&1; then
         PY_FOUND="$c"; echo "  Found Python 3: '$c' -> $($c --version 2>&1)"; break
     fi
 done
 if [ -z "$PY_FOUND" ]; then
     for c in "py -3" "python" "python3"; do
         if $c -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1; then
-            echo "  Python 3 found ('$c' -> $($c --version 2>&1)) but it is too old: the safety hooks need Python 3.8 or newer."
+            echo "  Python 3 found ('$c' -> $($c --version 2>&1)) but it is too old: the safety hooks need Python 3.10 or newer."
             echo "  Install a current Python and re-run (it installs beside the old one; the tested range is 3.10-3.13):"
             hint_python
             break
@@ -228,7 +228,7 @@ if [ -z "$PY_FOUND" ]; then
     done
 fi
 if [ -z "$PY_FOUND" ]; then
-    echo "  Python 3.8+ not found. It's needed for cosave-info and the save-analysis scripts (and PyFFI/PyNifly if you use them)."
+    echo "  Python 3.10+ not found. It's needed for the safety hooks and shared save-preservation harness."
     echo "  Install it and re-run -- the bundled tools try 'py -3', 'python', then 'python3':"
     hint_python
 fi
@@ -250,7 +250,7 @@ PY_STORE=""
 PY_HOOK_CAND=""; PY_STORE_CAND=""
 if [ -n "$PY_FOUND" ]; then
     for c in "py -3" "python" "python3"; do
-        $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,8) else 1)' >/dev/null 2>&1 || continue
+        $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,10) else 1)' >/dev/null 2>&1 || continue
         exe=$($c -c 'import sys; print(sys.executable)' 2>/dev/null | tr -d '\r' | tr '\134' '/') || exe=""
         [ -n "$exe" ] || continue
         case "$exe" in
@@ -267,17 +267,13 @@ if [ -n "$PY_FOUND" ]; then
         echo "  Hooks will use: $PYTHON_PATH"
     fi
 fi
-# The TESTED range (user ruling 2026-10-05): CI runs 3.10-3.13. 3.8 and 3.9 still run the engine, and a newer
-# Python usually does too, so outside the range is a clear note, never a refusal.
+# The tested range is 3.10-3.13. Older versions cannot run the shared harness;
+# a newer Python remains usable with an explicit untested-version note.
 if [ -n "$PY_HOOK_CAND" ]; then
     PY_VER=$($PY_HOOK_CAND --version 2>&1 | tr -d '\r' | sed -n 's/^Python \([0-9][0-9]*\.[0-9][0-9]*[.0-9]*\).*/\1/p' | head -n1)
     PY_MAJ="${PY_VER%%.*}"; PY_MIN="${PY_VER#*.}"; PY_MIN="${PY_MIN%%.*}"
     case "$PY_MAJ.$PY_MIN" in
         3.10|3.11|3.12|3.13) echo "  Python $PY_VER is inside the tested range 3.10-3.13." ;;
-        3.8|3.9)
-            echo "  NOTE: Python $PY_VER runs the safety hooks (their floor is 3.8) but is OLDER than the tested range"
-            echo "  3.10-3.13. If anything misbehaves, install a tested Python beside it and re-run setup.sh:"
-            hint_python ;;
         *)
             if [ -n "$PY_VER" ]; then
                 echo "  NOTE: Python $PY_VER is outside the tested range 3.10-3.13 (newer than tested). The hooks will"
@@ -382,7 +378,7 @@ MIG_ENV="$GAME_DIR/.claude/backups/migrate-3x/carried-paths.env"
 if [ ! -f "$GAME_DIR/tools/migrate-3x.py" ]; then
     echo "  tools/migrate-3x.py is missing -- skipped (re-extract the toolkit zip to restore it)."
 elif [ -z "$PY_FOUND" ]; then
-    echo "  Migration skipped: it needs Python 3.8+. Your files from before the update are in"
+    echo "  Migration skipped: it needs Python 3.10+. Your files from before the update are in"
     echo "  .claude/backups/ (pre-update-* if you ran tools/pre-update-snapshot.sh). Re-run setup.sh after installing Python."
 else
     MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B "$PY_ROOT/tools/migrate-3x.py" \
@@ -824,7 +820,7 @@ elif grep -q '{{CODEX_ROOT' "$CODEX_DEFS"; then
         echo "  NOT CONFIGURED: the toolkit's Codex support is Windows-only (Codex on Linux or WSL is not"
         echo "  supported). Claude Code is configured as usual."
     elif [ -z "$PY_FOUND" ]; then
-        echo "  NOT CONFIGURED: rendering the Codex hooks needs Python 3.8+. Install it and re-run setup.sh."
+        echo "  NOT CONFIGURED: rendering the Codex hooks needs Python 3.10+. Install it and re-run setup.sh."
     else
         # Windows-form paths and no MSYS argument conversion: Git Bash would otherwise rewrite the POSIX
         # root (/c/...) into C:/... on its way to a native python, and the definition would change.
@@ -1011,7 +1007,7 @@ if [ -n "$WANT_LOCK" ]; then
     echo "Applying the Layer 2 lock (--lock)..."
     if [ -z "$PY_FOUND" ]; then
         LOCK_RC=2
-        echo "  !! LOCK NOT APPLIED: it needs Python 3.8+. Install it and re-run: bash setup.sh --lock"
+        echo "  !! LOCK NOT APPLIED: it needs Python 3.10+. Install it and re-run: bash setup.sh --lock"
     else
         MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B "$PY_ROOT/tools/skyguard" lock lock \
             --root "$PY_ROOT" && LOCK_RC=0 || LOCK_RC=$?
