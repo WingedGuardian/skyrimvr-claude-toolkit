@@ -72,6 +72,73 @@ def test_legacy_missing_counterpart_stays_explicit(legacy, tmp_path):
     assert not list((tmp_path / "out").rglob("*.skse"))
 
 
+@pytest.mark.parametrize("cosave", [False, True])
+def test_save_backups_format_retains_backup_suffix_and_complete_pair_authority(legacy, tmp_path, cosave):
+    project, root, row = legacy
+    row["originals"] = [name + ".bak" for name in row["originals"]]
+    for kind, name in zip(("ess", "skse"), row["originals"]):
+        row[kind]["original"] = name
+    if not cosave:
+        row["skse"] = None
+    (root / "manifest.jsonl").write_text(json.dumps(row) + "\n")
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    output = tmp_path / "restored-backups"
+    messages = io.StringIO()
+    assert snapcli.cmd_restore(project, "local-" + row["id"], ["A.skse.bak"], str(output), False, messages) == 0, messages.getvalue()
+    expected = {"A.ess.bak": b"old ESS"}
+    if cosave:
+        expected["A.skse.bak"] = b"old SKSE"
+    assert {path.name: path.read_bytes() for path in output.rglob("*") if path.is_file()} == expected
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("cosave", [False, True])
+def test_recovery_writer_backup_suffix_snapshot_can_be_imported(recovery_legacy, tmp_path, cosave):
+    from skyguard import audit, recovery
+    project, root, _sid, ess, _skse = recovery_legacy
+    source, counterpart = ess.parent / "B.ess.bak", ess.parent / "B.skse.bak"
+    source.write_bytes(b"legacy backup ESS")
+    if cosave:
+        counterpart.write_bytes(b"legacy backup SKSE")
+    sid, = recovery.backup_saves(project, audit.Audit(str(project)), [(str(source), str(counterpart))], "private suffix fixture")
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    output = tmp_path / "restored-backups"
+    messages = io.StringIO()
+    assert snapcli.cmd_restore(project, sid, ["B.skse.bak"], str(output), False, messages) == 0, messages.getvalue()
+    expected = {"B.ess.bak": b"legacy backup ESS"}
+    if cosave:
+        expected["B.skse.bak"] = b"legacy backup SKSE"
+    assert {path.name: path.read_bytes() for path in output.rglob("*") if path.is_file()} == expected
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("counterpart", ["A.skse", "A.skse.other", "B.skse.bak", "A.ess.bak"])
+def test_legacy_backup_suffix_cannot_claim_a_different_pair(legacy, counterpart):
+    project, _root, row = legacy
+    row["originals"] = [row["originals"][0] + ".bak", str(Path(row["originals"][1]).with_name(counterpart))]
+    for kind, name in zip(("ess", "skse"), row["originals"]):
+        row[kind]["original"] = name
+    with pytest.raises(ValueError, match="complete logical pair"):
+        legacy_saves.group(project, row)
+
+
+@pytest.mark.parametrize("counterpart", ["A.skse", "A.skse.other", "B.skse.bak", "A.ess.bak"])
+def test_recovery_backup_suffix_missing_authority_cannot_claim_a_different_pair(recovery_legacy, tmp_path, counterpart):
+    from skyguard import recovery
+    project, root, sid, ess, _skse = recovery_legacy
+    row = next(row for row in recovery.read_manifest(root)[0] if row["src"] == str(ess))
+    source = str(ess) + ".bak"
+    row.update(src=source, lines=1, state=[source], missing=[str(ess.with_name(counterpart))])
+    (root / recovery.MANIFEST).write_text(json.dumps(row) + "\n")
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    output = tmp_path / "refused-output"
+    messages = io.StringIO()
+    assert snapcli.cmd_restore(project, sid, [], str(output), False, messages) == 2
+    assert not output.exists()
+    assert not save_store.rows(project)[0]
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+
+
 @pytest.fixture
 def recovery_legacy(tmp_path, monkeypatch):
     from skyguard import audit, recovery

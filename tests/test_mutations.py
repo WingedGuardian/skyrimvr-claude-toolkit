@@ -8802,4 +8802,37 @@ MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test
     ('                    hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256):', '                    True):',
      'tests/test_local_policy.py::test_unqualified_policy_cannot_relabel_its_own_transfer_requirements',
      'transfer-source-qualification'),
+    ('    if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:',
+     '    if registered is None:',
+     'tests/test_save_profile.py::test_unqualified_policy_cannot_enable_additional_backup_membership',
+     'backup-suffix-source-qualification'),
+    ('        if registration(project) != registered:\n            raise ValueError("registered policy changed during save preservation")',
+     '        if False:\n            raise ValueError("registered policy changed during save preservation")',
+     'tests/test_save_profile.py::test_policy_change_after_backup_refuses_permission_and_keeps_verified_backup',
+     'backup-suffix-late-source-change'),
+    ('                   helper=plan.helper or helper, recheck=recheck)',
+     '                   helper=plan.helper, recheck=recheck)',
+     'tests/test_save_profile.py::test_bulk_backup_helper_requires_command_bound_human_scope',
+     'backup-suffix-helper-command-binding'),
+)]
+
+MUTATIONS.append(pytest.param("tools/skyguard/save_profile.py", '        suffix = legacy_suffix(path)',
+    '        suffix = None',
+    'tests/test_save_profile.py::test_backup_suffix_stays_attached_to_both_logical_members[.bak]',
+    id='legacy-backup-suffix-membership'))
+
+MUTATIONS += [pytest.param("tools/skyguard/legacy_saves.py", before, after, test,
+    id="legacy-backup-suffix-reader-" + name) for before, after, test, name in (
+    ('            or save_profile.member_kind(originals[0]) != "ess"',
+     '            or Path(originals[0]).suffix.lower() != ".ess"',
+     'tests/test_legacy_save_store.py::test_save_backups_format_retains_backup_suffix_and_complete_pair_authority[True]',
+     'save-backups'),
+    ('            if (not path.is_absolute() or save_profile.member_kind(path) is None or',
+     '            if (not path.is_absolute() or path.suffix.lower() not in (".ess", ".skse") or',
+     'tests/test_legacy_save_store.py::test_recovery_writer_backup_suffix_snapshot_can_be_imported[False]',
+     'recovery'),
+    ('            or canonical(save_profile.literal_members(originals[0])[1]) != canonical(originals[1])):',
+     '            or False):',
+     'tests/test_legacy_save_store.py::test_legacy_backup_suffix_cannot_claim_a_different_pair[A.skse.other]',
+     'same-logical-pair'),
 )]

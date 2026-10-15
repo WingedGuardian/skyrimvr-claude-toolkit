@@ -8,6 +8,7 @@ from pathlib import Path
 
 from modding_harness import profiles, workspace
 from modding_harness.preservation import PreservationFailed, protects
+from . import save_profile
 
 PREFIX = "core-"
 ID = re.compile(r"^core-[0-9a-f]{32}$")
@@ -26,14 +27,14 @@ def store(project, members=()):
     fallback = mcp_rules.saves_folder(roots, os.environ)
     if fallback:
         folders.append(Path(fallback))
-    target = workspace.save_store(project, profiles.skyrim(folders))
+    target = workspace.save_store(project, save_profile.skyrim(folders))
     if any(protects(path, [target.root], ancestor=True) for path in members):
         raise ValueError("save source overlaps the permanent save store")
     return target
 
 
 def backup_pairs(project, audit, pairs, command, agent="", session_id="", deadline=None):
-    profile = profiles.skyrim()
+    profile = save_profile.skyrim()
     groups = []
     for ess, skse in pairs:
         members = profile.members(ess)

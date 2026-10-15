@@ -9,6 +9,7 @@ from pathlib import Path
 
 from modding_harness.profiles import canonical
 from modding_harness.preservation import contains
+from . import save_profile
 
 ID = re.compile(r"^local-([A-Za-z0-9_-]{1,120})$")
 
@@ -44,9 +45,9 @@ def group(project, row):
     originals = row.get("originals")
     if ("ess" not in row or "skse" not in row or not isinstance(originals, list) or len(originals) != 2
             or not all(isinstance(p, str) and os.path.isabs(p) for p in originals)
-            or Path(originals[0]).suffix.lower() != ".ess"
-            or Path(originals[1]).suffix.lower() != ".skse"
-            or canonical(Path(originals[0]).with_suffix(".skse")) != canonical(originals[1])):
+            or save_profile.member_kind(originals[0]) != "ess"
+            or save_profile.member_kind(originals[1]) != "skse"
+            or canonical(save_profile.literal_members(originals[0])[1]) != canonical(originals[1])):
         raise ValueError("legacy record does not describe a complete logical pair")
     result = []
     for kind, original in zip(("ess", "skse"), originals):
@@ -115,13 +116,13 @@ def recovery_restore(project, sid, wanted, to, in_place, out):
         for original, row in state.items():
             path = Path(original)
             missing = row.get("missing")
-            if (not path.is_absolute() or path.suffix.lower() not in (".ess", ".skse") or
+            if (not path.is_absolute() or save_profile.member_kind(path) is None or
                     not isinstance(missing, list) or not all(isinstance(p, str) and Path(p).is_absolute() for p in missing)):
                 raise ValueError("legacy snapshot is not complete save-pair authority")
-            stem = canonical(path.with_suffix(""))
+            stem = canonical(save_profile.literal_members(path)[0])
             group = groups.setdefault(stem, {})
             for name, absent in [(original, False), *((name, True) for name in missing)]:
-                if canonical(Path(name).with_suffix("")) != stem or Path(name).suffix.lower() not in (".ess", ".skse"):
+                if save_profile.member_kind(name) is None or canonical(save_profile.literal_members(name)[0]) != stem:
                     raise ValueError("legacy missing-member authority names a different save")
                 key = canonical(name)
                 entry = {"original": name, "source": str((legacy / ".recorded-missing" / sid / Path(name).name).absolute()),
@@ -135,7 +136,7 @@ def recovery_restore(project, sid, wanted, to, in_place, out):
         complete = []
         for group in groups.values():
             members = list(group.values())
-            if len(members) != 2 or {Path(r["original"]).suffix.lower() for r in members} != {".ess", ".skse"}:
+            if len(members) != 2 or {save_profile.member_kind(r["original"]) for r in members} != {"ess", "skse"}:
                 raise ValueError("legacy snapshot omits save counterpart authority")
             complete.append(members)
         if in_place:

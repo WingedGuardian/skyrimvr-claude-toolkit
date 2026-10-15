@@ -11,8 +11,8 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from modding_harness import contracts, dispatch, profiles, telemetry
-from . import codes, engine, local_policy, mcp_rules, paths, saves
+from modding_harness import contracts, dispatch, telemetry
+from . import codes, engine, local_policy, mcp_rules, paths, saves, save_profile
 from .audit import Audit
 from .request import Request
 from .verdict import Verdict
@@ -71,9 +71,9 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
         fallback = mcp_rules.saves_folder(roots, os.environ)
         if fallback:
             folders.append(Path(fallback))
-        profile = profiles.skyrim(folders)
+        profile = save_profile.skyrim(folders)
     else:
-        profile = profiles.skyrim()
+        profile = save_profile.skyrim()
 
     def policy(_action):
         if not _legacy:
@@ -104,6 +104,7 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
         else:
             result = contracts.Result(value.decision, value.status, reason=value.reason,
                                       warnings=(value.context,) if value.context else ())
+        plan = local_policy.supplement_native_backups(action, project, plan, profile, helper=helper, deadline=deadline)
         save_plan[0] = plan
         return dispatch.Evaluation(result, plan)
 

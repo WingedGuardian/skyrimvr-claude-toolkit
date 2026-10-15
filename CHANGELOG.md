@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Qualified native file changes to legacy backup-suffixed saves preserve both
+  members, including `.ess.bak`/`.skse.bak`, in the neutral store. Pair selection
+  and restoration retain the suffix and missing-member state; bulk helpers keep
+  command-bound human approval and recheck the registered policy after copying.
+  Both legacy readers use the same pair-name rules when importing suffixed
+  evidence; old manifests and blobs remain unchanged.
 - The reviewed legacy save policy's literal move/rename checks now preserve the
   source as a move and an overwritten destination as a write. Other source
   revisions retain strict operation matching until qualified. Internal policy

@@ -6,7 +6,7 @@ permission or replace the portable profile's save scope and approval checks.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import hashlib
 import json
 from pathlib import Path
@@ -17,6 +17,7 @@ import time
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from modding_harness import contracts, profiles, transport
+from skyguard import save_profile
 
 CONFIG = ".modding-agent-harness/local-policies.json"
 LEGACY = ".claude/hooks/protect-save-access.py"
@@ -99,6 +100,40 @@ def plan_facts(plan):
             "recheck": callable(plan.recheck), "unresolved": plan.unresolved}
 
 
+def supplement_native_backups(action, project, plan, profile, *, helper=False, deadline=None):
+    """Retain qualified legacy requirements that the base game parser omits.
+
+    This only adds preservation for literal native file operations; it cannot
+    clear an unresolved game plan or grant permission. The real local policy
+    still evaluates before the dispatcher can copy or allow anything.
+    """
+    if action.surface != "files" or plan.unresolved:
+        return plan
+    selected = [(path, operation) for path, operation in zip(action.paths, action.operations)
+                if operation in ("write", "move", "delete") and save_profile.legacy_suffix(path) is not None]
+    if not selected:
+        return plan
+    registered = registration(project)
+    if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:
+        return plan
+    from modding_harness.dispatch import Mutation
+    def extra():
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("legacy preservation scope budget expired")
+        rows = [Mutation(path, operation) for path, operation in selected
+                if any(member.is_file() for member in profile.members(path))]
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("legacy preservation scope budget expired")
+        return rows
+    def recheck():
+        original = plan.recheck() if plan.recheck is not None else plan.mutations
+        if registration(project) != registered:
+            raise ValueError("registered policy changed during save preservation")
+        return tuple(dict.fromkeys((*original, *extra())))
+    return replace(plan, mutations=tuple(dict.fromkeys((*plan.mutations, *extra()))),
+                   helper=plan.helper or helper, recheck=recheck)
+
+
 def _transfer_roles(namespace, payload):
     args = payload["tool_input"]
     text = args.get("command", args.get("cmd", "")) if isinstance(args, dict) else args
@@ -127,7 +162,7 @@ def _coverage(decision, facts, roles=()):
         return refuse("the legacy helper's save membership is unresolved")
     if kind == "needs_set" and (facts.get("wildcard") is not True or facts.get("recheck") is not True):
         return refuse("a command-bound set approval and membership recheck are required")
-    profile = profiles.skyrim()
+    profile = save_profile.skyrim()
     def key(path):
         if not isinstance(path, str) or not Path(path).is_absolute():
             raise ValueError("local policy returned a nonliteral absolute save identity")
