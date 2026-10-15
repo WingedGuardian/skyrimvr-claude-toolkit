@@ -15,6 +15,7 @@ from test_recovery_snapshots import Install, put, sha
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit as audit_mod, backup, cli, recovery, shell_rules, snapshot  # noqa: E402
+from modding_harness import workspace
 
 
 @pytest.fixture
@@ -47,6 +48,8 @@ def take_all(inst, command="make"):
 def ids(inst, kind):
     if kind == "scripts":
         return [n[:-len("__snapshot.json")] for n in snapshot.manifest_names(snapshot.store_dir(str(inst.game)))]
+    if kind == "save":
+        return ["core-" + row["id"] for row in workspace.summaries(inst.save_store)[0]]
     return [g["id"] for g in recovery.snapshots(inst.store) if g["kind"] == kind]
 
 
@@ -238,9 +241,9 @@ def test_in_place_save_restore_refuses_when_its_backup_would_fill_the_drive(inst
     put(inst.saves / "Quick.ess", b"what resaver wrote")
     _low_disk(monkeypatch, 10)
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
-    assert rc == 2 and "could not back up" in text, text
+    assert rc == 2 and "insufficient destination space" in text, text
     assert (inst.saves / "Quick.ess").read_bytes() == b"what resaver wrote", "no backup, so no replace"
-    assert "would leave under" in inst.log() and "NO BACKUP EXISTS" in inst.log()
+    assert "restore failed" in inst.log() and "insufficient destination space" in inst.log()
 
 
 def test_the_save_reserve_applies_to_saves_only(inst, monkeypatch):
@@ -258,7 +261,10 @@ def test_in_place_save_restore_with_room_backs_the_save_up(inst, monkeypatch):
     _low_disk(monkeypatch, 10 * 1024 * 1024)
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
     assert rc == 0 and (inst.saves / "Quick.ess").read_bytes() == b"quick save bytes", text
-    assert any(e["src"].endswith("Quick.ess") for e in _backups(inst).values())
+    prebackup = workspace.summaries(inst.save_store)[0][-1]
+    members = prebackup["groups"][0]["members"]
+    assert {os.path.basename(e["path"]) for e in members} == {"Quick.ess", "Quick.skse"}
+    assert all((inst.save_store.root / "blobs" / e["sha256"]).is_file() for e in members)
 
 
 def forge_recovery(inst, victim, sid):

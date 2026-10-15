@@ -155,6 +155,7 @@ def _recovery_rows(project, kind):
 
 
 def cmd_list(project, kind, out):
+    from . import save_store, legacy_saves
     print("Snapshots under {} (newest first):".format(Path(project) / ".claude" / "backups"), file=out)
     sections = (("scripts", "Scripts (.psc / .pex)", lambda: _script_rows(project)),
                 ("config", "Load order and INIs", lambda: _recovery_rows(project, "config")),
@@ -170,6 +171,23 @@ def cmd_list(project, kind, out):
         if not rows:
             print("  (none)", file=out)
     bad = recovery.read_manifest(recovery.store_dir(project))[1]
+    if kind in (None, "save"):
+        try:
+            rows, unreadable = save_store.rows(project)
+            print("\nNeutral permanent save store: {}".format(save_store.store(project).root), file=out)
+            for sid, what, _cmd in reversed(rows):
+                print("  {} {}".format(sid, what), file=out)
+            if unreadable:
+                print("  {} unreadable transaction record(s): {}".format(len(unreadable), ", ".join(unreadable)), file=out)
+            legacy, bad_legacy = legacy_saves.records(project)
+            print("\nLegacy installed save-backups (read-only compatibility):", file=out)
+            for row in legacy:
+                print("  local-{} {}".format(row["id"], " + ".join(Path(p).name for p in row["originals"])), file=out)
+            if bad_legacy:
+                print("  {} unreadable/ambiguous legacy record(s) were excluded".format(bad_legacy), file=out)
+        except (OSError, ValueError) as exc:
+            print("COULD NOT LIST neutral save store: {}".format(exc), file=out)
+            return 2
     if bad and kind in (None, "config", "save"):
         print("\n{} unreadable line(s) in the recovery manifest were skipped".format(bad), file=out)
     print("\nRestore one (to a NEW folder; live files are written only with --in-place, each backed up first):", file=out)
@@ -244,6 +262,13 @@ def _new_folder(project, sid):
 
 
 def cmd_restore(project, sid, wanted, to, in_place, out):
+    from . import save_store, legacy_saves
+    if legacy_saves.ID.fullmatch(sid):
+        return legacy_saves.restore(project, sid, wanted, to, in_place, out)
+    if save_store.ID.fullmatch(sid):
+        return save_store.restore(project, sid, wanted, to, in_place, out)
+    if recovery._ID.fullmatch(sid) and sid.split("-")[1:2] == ["save"]:
+        return legacy_saves.recovery_restore(project, sid, wanted, to, in_place, out)
     from .audit import Audit
     try:
         store, files, shown, live = _plan(project, sid)
@@ -316,7 +341,7 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
         dest = str(base)
         unchanged, skipped = [], []
     try:
-        n = snapshot.write_blobs(store, pairs)
+        n = snapshot.write_blobs(store, pairs, replace=in_place)
     except OSError as e:
         print("FAILED part-way restoring snapshot {} to {}: {}".format(sid, dest, e), file=out)
         audit.log(HOOK, "FAILED", "restore of {} to {} stopped: {}".format(sid, dest, e))
@@ -337,12 +362,6 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
     print("Restored {} file(s) from snapshot {} to {}{}{}".format(
         n, sid, dest, " (each replaced file was backed up first)" if in_place and n else "",
         "; {} already matched and were left as they are".format(len(unchanged)) if unchanged else ""), file=out)
-    # The save policy: a pair backed up without its co-save says so -- a co-save there now is NOT from this backup.
-    if recovery._ID.match(sid) and sid.split("-")[1:2] == ["save"]:
-        for m in sorted({m for e in recovery.resolve(store, sid).values() for m in e.get("missing", [])
-                         if isinstance(m, str)}):
-            print("  note: {} did not exist when this save was backed up; any {} there now was left as it is".format(
-                os.path.basename(m), os.path.basename(m)), file=out)
     if skipped:
         print("{} file(s) were NOT restored: their folder is no longer configured (listed above).".format(len(skipped)),
               file=out)

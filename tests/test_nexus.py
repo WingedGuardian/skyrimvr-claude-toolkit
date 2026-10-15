@@ -56,6 +56,8 @@ def kit(tmp_path):
     tools.mkdir(parents=True)
     for name in ("nexus.sh", "nexus-render.py"):
         shutil.copy2(REPO / "tools" / name, tools / name)
+    shutil.copytree(REPO / "tools/modding_harness", tools / "modding_harness",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     fake = tmp_path / "bin"
     fake.mkdir()
     (fake / "curl").write_bytes(FAKE_CURL.encode("utf-8"))
@@ -68,11 +70,19 @@ def run(kit, *args, key=KEY, **env):
     e.pop("NEXUS_API_KEY", None)
     if key:
         e["NEXUS_API_KEY"] = key
-    e["PATH"] = str(kit.parent.parent / "bin") + os.pathsep + e.get("PATH", "")
+    e["PATH"] = str(kit.parent.parent / "bin").replace("\\", "/") + os.pathsep + e.get("PATH", "")
     e["FAKE_NEXUS_DIR"] = str(FIX)
     e["FAKE_CURL_LOG"] = str(kit.parent.parent / "curl.log")
     e.update({k: str(v) for k, v in env.items()})
-    r = subprocess.run([BASH, str(kit / "nexus.sh"), *args], capture_output=True, timeout=120, env=e)
+    # Git for Windows' bin/bash launcher prepends /mingw64/bin to inherited PATH,
+    # ahead of a fake curl. Bind and verify the fake INSIDE the started shell so
+    # a fixture can never fall through to the real network client.
+    shell = ('testbin="$1"; shift; '
+             'if command -v cygpath >/dev/null 2>&1; then testbin=$(cygpath -u "$testbin"); fi; '
+             'export PATH="$testbin:$PATH"; '
+             '[ "$(command -v curl)" = "$testbin/curl" ] || exit 97; source "$@"')
+    r = subprocess.run([BASH, "-c", shell, "--", str(kit.parent.parent / "bin"),
+                        str(kit / "nexus.sh"), *args], capture_output=True, timeout=120, env=e)
     return subprocess.CompletedProcess(r.args, r.returncode, r.stdout.decode("utf-8", "replace"),
                                        r.stderr.decode("utf-8", "replace"))
 

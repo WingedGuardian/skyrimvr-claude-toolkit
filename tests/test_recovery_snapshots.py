@@ -17,6 +17,8 @@ from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit as audit_mod, mcp_rules, paths, recovery, saves as saves_mod, shell_rules  # noqa: E402
+from skyguard import save_store
+from modding_harness import workspace
 
 DAY = 86400
 
@@ -61,6 +63,10 @@ class Install:
     def store(self):
         return recovery.store_dir(str(self.game))
 
+    @property
+    def save_store(self):
+        return save_store.store(self.game)
+
     def log(self):
         p = self.game / ".claude" / "backups" / "AUDIT_LOG.txt"
         return p.read_bytes().decode("utf-8") if p.is_file() else ""
@@ -68,6 +74,12 @@ class Install:
     def lines(self):
         entries, bad = recovery.read_manifest(self.store)
         assert bad == 0
+        for manifest in workspace.summaries(self.save_store)[0]:
+            for group in manifest["groups"]:
+                absent = [r["path"] for r in group["members"] if r["missing"]]
+                entries.extend(dict(src=r["path"], sha256=r["sha256"], size=r["size"], kind="save",
+                                    snap="core-" + manifest["id"], missing=absent)
+                               for r in group["members"] if not r["missing"])
         return entries
 
     def run(self, command, now=None, cwd="", shell="bash", deadline=None):
@@ -356,7 +368,7 @@ def test_a_save_that_would_fill_the_drive_is_skipped_and_says_why(inst, monkeypa
     monkeypatch.setattr(recovery.shutil, "disk_usage",
                         lambda p: real(p)._replace(free=recovery.SAVE_RESERVE_BYTES + 10))
     v = inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
-    assert v.decision == "deny" and "would leave under" in v.reason
+    assert v.decision == "deny" and "insufficient destination space" in v.reason
     assert inst.stored("save") == {}
 
 
@@ -365,9 +377,9 @@ def test_a_save_copy_that_runs_out_of_time_is_partial_never_silent(inst, monkeyp
     monkeypatch.setattr(recovery.backup, "_clock", lambda: float(next(ticks)))
     monkeypatch.setattr(recovery.backup, "CHUNK", 4)    # several chunks, one tick each
     v = inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game), deadline=6.0)
-    assert v.decision == "deny" and "did not finish inside the hook's time" in v.reason
+    assert v.decision == "deny" and "deadline reached" in v.reason
     assert inst.stored("save") == {}
-    assert not [p for p in (inst.store / "blobs").iterdir() if ".part-" in p.name], "no part file is left behind"
+    assert not list((inst.save_store.root / "staging").glob("*.part")), "no part file is left behind"
 
 
 # ---------------------------------------------------------------- the real entry points, and the ordering
@@ -399,7 +411,7 @@ def test_the_save_is_copied_by_the_hook_before_the_command_can_change_it(inst, a
     put(inst.saves / "Quick.ess", b"what resaver wrote")
     held = inst.stored("save")
     assert held["Quick.ess"] == sha(b"quick save bytes")
-    assert (inst.store / "blobs" / held["Quick.ess"]).read_bytes() == b"quick save bytes"
+    assert (inst.save_store.root / "blobs" / held["Quick.ess"]).read_bytes() == b"quick save bytes"
     if agent == "codex":
         assert "plugins.txt" in inst.stored("config")          # the side effects still take the load order
 
@@ -536,7 +548,8 @@ def test_old_save_snapshots_are_kept_forever(inst):
     recovery.prune(inst.store, time.time() + 3650 * DAY, inst.audit)
     assert [e["sha256"] for e in inst.lines() if e["src"].endswith("Quick.ess")] == \
         [sha(b"quick save bytes"), sha(b"rewritten")]
-    assert all((inst.store / "blobs" / e["sha256"]).is_file() for e in inst.lines())
+    assert all(((inst.save_store.root if e["kind"] == "save" else inst.store) / "blobs" / e["sha256"]).is_file()
+               for e in inst.lines())
 
 
 def test_an_unreadable_manifest_line_stops_blob_pruning_and_is_kept(inst):

@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- The installed-policy bridge now normalizes worker warnings before dispatch and
+  requires the portable plan to retain every legacy backup and approval
+  requirement. Unrecognized save-changing helpers refuse before preservation;
+  ordinary edits preserve the complete pair once. Controlled-loader migration
+  remains unqualified, so the original personal handler must stay active.
+- Neutral and both legacy restore routes now carry one total deadline through
+  import, verification, current-save preservation and final publication.
+- Existing Claude/Codex deciding entrypoints now use the ordered shared dispatcher,
+  retaining declared call identity and original unresolved-save explanations.
+  Both legacy save stores import verified complete-pair evidence into guarded
+  neutral recovery; in-place replacement respects local restrictions first.
+- Shared standing preferences are reinjected through OpenCode system transforms.
+  Mutation preflight checks every source anchor and referenced base test symbol;
+  moved preservation controls target the writer their tests actually exercise.
+- Portable Action v1 dispatcher and generic recovery entry, with synchronous save
+  preservation and local restrictions before permission. Generated OpenCode V1
+  plugin shares X4's pinned process transport; host enforcement remains unmeasured.
+  Unknown calls warn and allow with private receipts and sparse warnings.
+- House Carl freshness now includes complete plugin bytes, detecting same-size
+  changes with preserved timestamps. New-output publication refuses concurrent
+  creators. Permanent backups use durable verified copying and a 2 GiB reserve.
+
 - Optional House Carl 2.0.5 integration for Claude and Codex: pinned, hash-verified upstream download, isolated MCP client and one shared CLI/MCP gateway. Wrye-managed asterisk order and native MO2 profile inputs are independent of deployment. Ordinary plugin edits use verified permanent backups, private staging, independent xEdit checks, atomic publication, transaction receipts and conflict-aware restore. New patches remain inactive. Compaction, merging, runtime FormIDs, native pairing and facegen provenance remain unavailable. See `docs/housecarl.md` for setup and qualification limits.
 
 ## v4.0.0 — 2026-10-08

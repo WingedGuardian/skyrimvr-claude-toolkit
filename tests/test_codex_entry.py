@@ -71,6 +71,8 @@ def _install(tmp_path: Path, py: str = REAL_PY) -> Path:
         (hooks / name).write_text(text, encoding="ascii", newline="\n")
     shutil.copytree(REPO / "tools" / "skyguard", root / "tools" / "skyguard",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(REPO / "tools/modding_harness", root / "tools/modding_harness",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(REPO / "tools" / "kb-guard.sh", root / "tools" / "kb-guard.sh")
     return root
 
@@ -581,7 +583,7 @@ def test_fallback_chain_matches_the_claude_wrappers():
     # and the Store alias is tried last in both
     assert ps.index("if ($null -ne $alias -and") > ps.index("$script:PyPosix)")
     assert claude.index('if [ -n "$PY_ALIAS" ] && py_good') > claude.index("/usr/local/bin/python3")
-    # the same acceptance test: >= 3.8 and the engine's own --selftest nonce. The PowerShell entry checks
-    # the version in its own process; the bash chain in ONE (run.py --selftest refuses < 3.8 itself).
-    assert "sys.version_info[:2] >= (3, 8)" in ps and "--selftest" in ps
+    # the same acceptance test: >= 3.10 and the engine's own --selftest nonce. The PowerShell entry checks
+    # the version in its own process; the bash chain in ONE (run.py --selftest refuses < 3.10 itself).
+    assert "sys.version_info[:2] >= (3, 10)" in ps and "--selftest" in ps
     assert "--selftest" in claude and "version_info" not in claude

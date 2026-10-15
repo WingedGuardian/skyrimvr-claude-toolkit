@@ -304,26 +304,42 @@ def materialise(project, name, dest, only=None):
     return write_blobs(store, [(Path(dest).joinpath(*rel.split("/")), sha) for rel, sha in sorted(files.items())])
 
 
-def write_blobs(store, pairs):
+def write_blobs(store, pairs, replace=False):
     """Copy each (target, sha256) blob of `store` to its target. Each file is written to a part file and swapped in, so
     a hard-linked target (Vortex) is replaced, never written through. The part file is hashed BEFORE it replaces the
     target (the save policy: a restore is hash-verified at the file it writes, not only at the blob it reads). -> files
     written; OSError at the first failure, the target untouched."""
-    store = Path(store)
+    from modding_harness import durable
+    import uuid
+    store, staged = Path(store), []
+    operation = uuid.uuid4().hex
+    journal = store / "restore-journals" / operation
+    journal.mkdir(parents=True, exist_ok=False)
+    durable.atomic_json(journal / "plan.json", {"targets": [str(t) for t, _ in pairs], "replace": replace})
     n = 0
-    for target, sha in pairs:
-        target = Path(target)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        part = Path("{}.restore-part-{}".format(target, os.getpid()))
-        try:
-            shutil.copyfile(str(store / "blobs" / sha), str(part))
+    try:
+        for target, sha in pairs:
+            target = Path(target)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            part = target.with_name(target.name + ".restore-part-" + uuid.uuid4().hex)
+            staged.append((part, target))
+            durable.copy_verified(store / "blobs" / sha, part)
             if backup._sha256(part) != sha:
                 raise OSError("the copy of {} does not hash to {}".format(target.name, sha))
-            os.replace(str(part), str(target))
-        except OSError:
+        for part, target in staged:
+            if replace:
+                os.replace(str(part), str(target))
+                durable.sync_dir(target.parent)
+            else:
+                durable.publish_new(part, target)
+            n += 1
+            durable.atomic_json(journal / ("{}-published.json".format(n)), {"path": str(target)})
+        durable.atomic_json(journal / "complete.json", {"written": n})
+    except OSError as exc:
+        raise OSError("{}; {} file(s) published; restore journal {}".format(exc, n, journal)) from exc
+    finally:
+        for part, _ in staged:
             backup._discard(part)
-            raise
-        n += 1
     return n
 
 
@@ -641,6 +657,9 @@ def prune(store, now, audit, deadline=None):
     references is unknown. With a `deadline` (a `_walk_clock()` time) it stops between deletions -- it is restartable,
     so stopping only defers the rest (review M1). -> blobs and part files removed."""
     store = Path(store)
+    if (store / "transactions").exists() or (store / "MANIFEST.jsonl").exists():
+        audit.log(HOOK, "PRUNE-SKIPPED", "another store format; no script snapshot or blob was pruned")
+        return 0
 
     def late():
         return deadline is not None and _walk_clock() >= deadline

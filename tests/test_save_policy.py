@@ -20,6 +20,8 @@ from conftest import REPO
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import (audit as audit_mod, backup, engine, mcp_rules, paths, recovery, rules,  # noqa: E402
                       saves, shell_rules, snapcli, snapshot, write_rules)
+from skyguard import save_store
+from modding_harness import approval as scoped_approval, durable, preservation, workspace
 from skyguard.adapters import codex  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
 
@@ -54,10 +56,18 @@ class Inst:
 
     def enforce(self, v, transcript="", agent="claude", deadline=None):
         return saves.enforce(v, str(self.game), self.audit, "protect-bash", command="test", transcript=transcript,
-                             agent=agent, deadline=deadline)
+                             agent=agent, session_id="s1", deadline=deadline)
+
+    def store(self):
+        return save_store.store(self.game)
 
     def saved(self):
-        return [e for e in recovery.read_manifest(recovery.store_dir(str(self.game)))[0] if e["kind"] == "save"]
+        return saved(self.game)
+
+    def grant(self, names=("Save1", "Save2", "Save3"), op="delete", wildcard=False, count=3, command="test"):
+        return scoped_approval.example("s1", op,
+            [self.saves / (name + ext) for name in names for ext in (".ess", ".skse")],
+            command, wildcard, count)
 
     def transcript(self, *lines, name="t.jsonl", typed=True):
         rows = []
@@ -76,6 +86,44 @@ class Inst:
 @pytest.fixture
 def inst(tmp_path):
     return Inst(tmp_path)
+
+
+def test_workspace_root_save_does_not_make_the_whole_workspace_a_save_folder(tmp_path):
+    game = tmp_path / "workspace"
+    game.mkdir()
+    ess, skse = game / "Copied.ess", game / "Copied.skse"
+    ess.write_bytes(b"copied private fixture")
+    ids = save_store.backup_pairs(game, audit_mod.Audit(str(game)), [(ess, skse)], "offline edit")
+    assert len(ids) == 1
+    manifest = save_store.store(game).load(ids[0][len(save_store.PREFIX):])
+    assert manifest["groups"][0]["members"][1]["missing"]
+
+
+def test_configured_store_cannot_live_in_a_save_root_or_hold_a_source(tmp_path, monkeypatch):
+    game = tmp_path / "workspace"
+    game.mkdir()
+    config = game / ".modding-agent-harness/config.json"
+    config.parent.mkdir()
+    cfg = tmp_path / "config"
+    monkeypatch.setenv("SKYRIM_CONFIG_DIR", str(cfg))
+    config.write_text(json.dumps({"save_store": str(cfg / "Saves/history")}))
+    with pytest.raises(ValueError, match="separate from save roots"):
+        save_store.store(game)
+    config.write_text("{}")
+    with pytest.raises(ValueError, match="overlaps"):
+        save_store.store(game, [game / ".modding-agent-harness/backups/saves/inside.ess"])
+
+
+def saved(project):
+    records = []
+    for manifest in workspace.summaries(save_store.store(project))[0]:
+        for group in manifest["groups"]:
+            missing = [r["path"] for r in group["members"] if r["missing"]]
+            for member in group["members"]:
+                if not member["missing"]:
+                    records.append(dict(src=member["path"], snap="core-" + manifest["id"],
+                                        group=group["logical_save"], sha256=member["sha256"], missing=missing))
+    return records
 
 
 def stems(v):
@@ -118,17 +166,21 @@ def test_two_saves_are_allowed_and_three_need_approval(inst):
         save='{"op": "delete", "files": ["Save1", "Save2", "Save3"]}')
 
 
-def test_the_approval_message_is_two_plain_lines_naming_the_exact_line_to_type(inst):
+def test_the_deciding_hook_names_canonical_scope_instead_of_a_basename_grant(inst):
     v = inst.shell("rm " + " ".join(inst.p(s + ".ess") for s in ("Save1", "Save2", "Save3")))
-    first, second = v.reason.split("\n")
-    assert second.startswith("If they agree, the user types this line: SAVE_ACCESS_APPROVAL {")
-    assert json.loads(second.split("SAVE_ACCESS_APPROVAL ", 1)[1]) == {"op": "delete", "files": ["Save1", "Save2", "Save3"]}
-    assert "rm " not in v.reason and inst.S not in v.reason
+    assert "canonical full-path/session grant" in v.reason
+    guarded = inst.enforce(v)
+    line = guarded.reason.split("SAVE_ACCESS_APPROVAL ", 1)[1]
+    expected = json.loads(inst.grant().split("SAVE_ACCESS_APPROVAL ", 1)[1])
+    assert json.loads(line) == expected
 
 
 def test_a_wildcard_needs_approval_even_when_it_matches_one_save(inst):
     v = inst.shell('rm "' + inst.S + '/"Sing*.ess')
-    assert v.decision == "deny" and '"pattern": "Sing*.ess", "count": 1' in v.reason
+    assert v.decision == "deny"
+    scoped = inst.enforce(v)
+    grant = json.loads(scoped.reason.split("SAVE_ACCESS_APPROVAL ", 1)[1])
+    assert grant["count"] == 1 and len(grant["paths"]) == 2 and len(grant["command_sha256"]) == 64
 
 
 def test_a_wildcard_in_a_folder_name_cannot_be_listed(inst):
@@ -342,17 +394,17 @@ def test_enforce_backs_up_both_files_verified_before_it_allows(inst):
     lines = inst.saved()
     assert sorted(Path(e["src"]).name for e in lines) == ["Save1.ess", "Save1.skse"]
     assert len({e["snap"] for e in lines}) == 1 and all(e["missing"] == [] for e in lines)
-    blobs = recovery.store_dir(str(inst.game)) / "blobs"
+    blobs = inst.store().root / "blobs"
     for e in lines:
         assert backup._sha256(blobs / e["sha256"]) == e["sha256"] == backup._sha256(Path(e["src"]))
     assert "SAVE-BACKUP" in (inst.game / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8")
 
 
-def test_two_saves_are_two_snapshots_each_restorable_as_a_pair(inst):
+def test_two_saves_are_one_transaction_with_two_complete_groups(inst):
     inst.enforce(inst.shell("rm " + inst.p("Save1.ess") + " " + inst.p("Save2.skse")))
     by = {}
     for e in inst.saved():
-        by.setdefault(e["snap"], []).append(Path(e["src"]).name)
+        by.setdefault((e["snap"], e["group"]), []).append(Path(e["src"]).name)
     assert sorted(sorted(x) for x in by.values()) == [["Save1.ess", "Save1.skse"], ["Save2.ess", "Save2.skse"]]
 
 
@@ -380,59 +432,57 @@ def failed(v):
 
 
 def test_a_backup_that_would_fill_the_drive_denies(inst, monkeypatch):
-    monkeypatch.setattr(recovery, "SAVE_RESERVE_BYTES", 1 << 60)
+    monkeypatch.setattr(workspace, "DEFAULT_RESERVE", 1 << 60)
     v = inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
-    assert failed(v) and "free on the backup drive" in v.reason and inst.saved() == []
+    assert failed(v) and "insufficient destination space" in v.reason and inst.saved() == []
 
 
 def test_an_unreadable_save_denies(inst, monkeypatch):
-    real = backup._copy_hashed
+    real = durable.copy_verified
 
-    def boom(src, part, fsync=True, deadline=None):
+    def boom(src, part, deadline=None):
         if str(src).endswith(".skse"):
-            raise PermissionError("locked")
-        return real(src, part, fsync, deadline)
-    monkeypatch.setattr(backup, "_copy_hashed", boom)
+            raise PermissionError("Save1.skse could not be read")
+        return real(src, part, deadline)
+    monkeypatch.setattr(durable, "copy_verified", boom)
     v = inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
     assert failed(v) and "Save1.skse could not be read" in v.reason and inst.saved() == []
 
 
 def test_a_copy_that_does_not_verify_denies(inst, monkeypatch):
-    real = backup._sha256
-    monkeypatch.setattr(backup, "_sha256", lambda p: "0" * 64 if ".part-save-" in str(p) else real(p))
+    real = durable.digest
+    monkeypatch.setattr(durable, "digest", lambda p, deadline=None: "0" * 64 if str(p).endswith(".part") else real(p, deadline))
     v = inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
-    assert failed(v) and "does not hash to what was read" in v.reason and inst.saved() == []
+    assert failed(v) and "failed size/hash verification" in v.reason and inst.saved() == []
 
 
-def test_a_damaged_stored_copy_is_replaced_not_trusted(inst):
+def test_a_damaged_reused_blob_refuses_and_is_retained_for_diagnosis(inst):
     v0 = inst.shell("rm " + inst.p("Save1.ess"))
-    blobs = recovery.store_dir(str(inst.game)) / "blobs"
+    blobs = inst.store().root / "blobs"
     blobs.mkdir(parents=True)
     good = backup._sha256(inst.saves / "Save1.ess")
     (blobs / good).write_bytes(b"torn")
-    assert inst.enforce(v0).decision == "allow"
-    assert backup._sha256(blobs / good) == good
+    assert failed(inst.enforce(v0))
+    assert (blobs / good).read_bytes() == b"torn" and not inst.saved()
 
 
 def test_a_copy_that_runs_out_of_time_denies(inst, monkeypatch):
-    clock = iter([0.0] + [100.0] * 1000)
-    monkeypatch.setattr(backup, "_clock", lambda: next(clock))
-    v = inst.enforce(inst.shell("rm " + inst.p("Save1.ess")), deadline=50.0)
+    v = inst.enforce(inst.shell("rm " + inst.p("Save1.ess")), deadline=0.0)
     assert failed(v) and inst.saved() == []
 
 
 def test_a_busy_store_denies(inst, monkeypatch):
     def busy(*a, **k):
         raise OSError("held")
-    monkeypatch.setattr(backup, "_exclusive", busy)
+    monkeypatch.setattr(preservation, "exclusive", busy)
     v = inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
-    assert failed(v) and "lock" in v.reason
+    assert failed(v) and "held" in v.reason
 
 
 def test_a_manifest_that_cannot_be_written_denies(inst, monkeypatch):
     def nope(path, line):
-        raise OSError("disk")
-    monkeypatch.setattr(backup, "_append_line", nope)
+        raise OSError("manifest disk failure")
+    monkeypatch.setattr(durable, "atomic_json", nope)
     v = inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
     assert failed(v) and "manifest" in v.reason
 
@@ -452,9 +502,9 @@ def three(inst):
 
 
 def test_a_typed_approval_lifts_the_bulk_refusal_and_everything_is_backed_up(inst):
-    v = inst.enforce(three(inst), transcript=inst.transcript(APPROVE3))
+    v = inst.enforce(three(inst), transcript=inst.transcript(inst.grant()))
     assert (v.decision, v.context) == ("allow", NOTE.format("Save1, Save2, Save3"))
-    assert len({e["snap"] for e in inst.saved()}) == 3 and len(inst.saved()) == 6
+    assert len({e["snap"] for e in inst.saved()}) == 1 and len(inst.saved()) == 6
 
 
 def test_with_no_approval_the_bulk_change_stays_refused_and_nothing_is_copied(inst):
@@ -477,8 +527,8 @@ def test_an_approval_covers_exactly_its_files_and_op(inst, line):
 
 def test_a_pattern_approval_needs_the_exact_pattern_and_count(inst):
     cmd = 'rm "' + inst.S + '/"Save*.ess'
-    ok = inst.transcript('SAVE_ACCESS_APPROVAL {"op": "delete", "pattern": "save*.ESS", "count": 3}', name="ok.jsonl")
-    bad = inst.transcript('SAVE_ACCESS_APPROVAL {"op": "delete", "pattern": "Save*.ess", "count": 2}', name="bad.jsonl")
+    ok = inst.transcript(inst.grant(wildcard=True), name="ok.jsonl")
+    bad = inst.transcript(inst.grant(wildcard=True, count=2), name="bad.jsonl")
     files = inst.transcript(APPROVE3, name="files.jsonl")
     assert inst.enforce(inst.shell(cmd), transcript=bad).decision == "deny"
     assert inst.enforce(inst.shell(cmd), transcript=files).decision == "deny"        # a wildcard needs its own grant
@@ -486,10 +536,9 @@ def test_a_pattern_approval_needs_the_exact_pattern_and_count(inst):
     assert len(inst.saved()) == 6
 
 
-def test_a_subset_of_approved_files_is_still_approved(inst):
-    """A grant names files: a later command over some of them (and three of them at most) is covered."""
-    tr = inst.transcript('SAVE_ACCESS_APPROVAL {"op": "delete", "files": ["Save1", "Save2", "Save3", "Single"]}')
-    assert inst.enforce(three(inst), transcript=tr).decision == "allow"
+def test_a_changed_resolved_scope_needs_a_new_canonical_grant(inst):
+    tr = inst.transcript(inst.grant(names=("Save1", "Save2", "Save3", "Single")))
+    assert inst.enforce(three(inst), transcript=tr).decision == "deny"
 
 
 def test_bulk_refusals_are_never_shadowed():
@@ -516,9 +565,9 @@ def test_guards_off_does_not_lift_a_bulk_save_change(inst, tmp_path):
 
 
 def test_codex_bulk_change_reads_only_the_tui_users_approval(inst):
-    meta = {"type": "session_meta", "payload": {"originator": "codex-tui"}}
+    meta = {"type": "session_meta", "payload": {"originator": "codex-tui", "id": "s1"}}
     item = {"type": "event_msg", "payload": {"type": "item_completed", "item": {
-        "type": "UserMessage", "content": [{"type": "text", "text": APPROVE3}]}}}
+        "type": "UserMessage", "content": [{"type": "text", "text": inst.grant()}]}}}
     tr = inst.game / "rollout.jsonl"
     tr.write_text(json.dumps(meta) + "\n" + json.dumps(item) + "\n", encoding="utf-8")
     cmd = {"command": "rm " + " ".join(inst.p(s + ".ess") for s in ("Save1", "Save2", "Save3"))}
@@ -532,7 +581,7 @@ def test_codex_bulk_change_reads_only_the_tui_users_approval(inst):
 
 def test_save_snapshots_are_never_pruned(inst):
     inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
-    store = recovery.store_dir(str(inst.game))
+    store = inst.store().root
     later = recovery.time.time() + 3650 * recovery.DAY
     recovery.prune(store, later, inst.audit)
     assert len(inst.saved()) == 2
@@ -573,7 +622,7 @@ def test_a_restore_puts_both_files_of_the_pair_back_verified(inst, tmp_path):
 def test_a_restore_refuses_a_damaged_backup_and_writes_nothing(inst, tmp_path):
     inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
     sid, sha = _snap(inst), inst.saved()[0]["sha256"]
-    (recovery.store_dir(str(inst.game)) / "blobs" / sha).write_bytes(b"rot")
+    (inst.store().root / "blobs" / sha).write_bytes(b"rot")
     import io
     out = tmp_path / "restored"
     assert snapcli.cmd_restore(str(inst.game), sid, [], str(out), False, io.StringIO()) == 2
@@ -582,7 +631,7 @@ def test_a_restore_refuses_a_damaged_backup_and_writes_nothing(inst, tmp_path):
 
 def test_a_restore_that_does_not_verify_at_its_target_writes_nothing(inst, tmp_path, monkeypatch):
     inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
-    store, sha = recovery.store_dir(str(inst.game)), inst.saved()[0]["sha256"]
+    store, sha = inst.store().root, inst.saved()[0]["sha256"]
     real = backup._sha256
     monkeypatch.setattr(backup, "_sha256", lambda p: "0" * 64 if ".restore-part-" in str(p) else real(p))
     target = tmp_path / "t" / "Save1.ess"
@@ -622,7 +671,7 @@ def test_claude_protect_bash_backs_up_before_it_answers(tmp_path):
     got = rec.fire_inprocess(install, "protect-bash.sh", {"tool_name": "Bash", "session_id": "s",
                                                           "tool_input": {"command": 'rm "' + S + '/Pair.ess"'}})
     assert got["decision"] == "advise" and "Pair" in got["text"]
-    lines = [e for e in recovery.read_manifest(recovery.store_dir(str(install)))[0] if e["kind"] == "save"]
+    lines = saved(install)
     assert sorted(Path(e["src"]).name for e in lines) == ["Pair.ess", "Pair.skse"]
 
 
@@ -633,7 +682,7 @@ def test_claude_protect_files_backs_up_before_it_answers(tmp_path):
     got = rec.fire_inprocess(install, "protect-files.sh", {"tool_name": "Write", "session_id": "s",
                                                            "tool_input": {"file_path": S + "/Pair.skse", "content": "x"}})
     assert got["decision"] == "advise" and "Pair" in got["text"]
-    lines = [e for e in recovery.read_manifest(recovery.store_dir(str(install)))[0] if e["kind"] == "save"]
+    lines = saved(install)
     assert sorted(Path(e["src"]).name for e in lines) == ["Pair.ess", "Pair.skse"]
 
 
@@ -656,10 +705,24 @@ def test_a_backup_that_raises_inside_the_hook_denies(tmp_path, monkeypatch):
 
     def boom(*a, **k):
         raise RuntimeError("x")
-    monkeypatch.setattr(run.saves, "enforce", boom)
+    from modding_harness.preservation import SaveStore
+    monkeypatch.setattr(SaveStore, "backup", boom)
     S = (install / "cfg" / "Saves").as_posix()
     got = rec.fire_inprocess(install, "protect-bash.sh", {"tool_name": "Bash", "session_id": "s",
                                                           "tool_input": {"command": 'rm "' + S + '/Pair.ess"'}})
+    assert got["decision"] == "deny" and got["text"].startswith("Blocked: the backup of the saves failed")
+
+
+def test_a_dispatcher_that_raises_inside_the_hook_denies(tmp_path, monkeypatch):
+    from skyguard import portable
+    rec = _rec()
+    install = rec.make_install(tmp_path, REPO / ".claude/hooks", "saves-bulk")
+    def fail(*args, **kwargs):
+        raise RuntimeError("dispatcher failed before returning a verdict")
+    monkeypatch.setattr(portable, "legacy_pre_tool", fail)
+    folder = (install / "cfg/Saves").as_posix()
+    got = rec.fire_inprocess(install, "protect-bash.sh", {"tool_name": "Bash", "session_id": "s",
+                             "tool_input": {"command": 'rm "' + folder + '/Pair.ess"'}})
     assert got["decision"] == "deny" and got["text"].startswith("Blocked: the backup of the saves failed")
 
 

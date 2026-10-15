@@ -151,7 +151,8 @@ ROWS = [
      "deny", {"S-DEVBENCH-CRASH"}, CRASH),
     ("rt-codex-mcp-save", "mcp__devbench-vr__game", {"action": "save", "name": "Existing"}, None,
      "allow", {"S-SAVE-BACKUP"}, SAVE_NOTE.format("Existing")),
-    ("rt-codex-mcp-other-server", "mcp__probe__echo", {"text": "smp reset"}, None, "allow", set(), ""),
+    ("rt-codex-mcp-other-server", "mcp__probe__echo", {"text": "smp reset"}, None, "allow", set(),
+     "WARN AND ALLOW: this tool surface was not evaluated"),
     ("rt-codex-mcp-help", "mcp__devbench-vr__console", {"command": "help"}, None, "allow", set(), ""),
     # Plan 8 T6 (rt-fix-b concern 4, routes harness s130): a command under `script` was never read, so the call was
     # allowed unexamined. It is command text now; a call carrying two command fields is refused (one would go unread).

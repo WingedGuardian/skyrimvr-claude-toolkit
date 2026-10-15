@@ -1740,7 +1740,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
     # wording the spec fixes is no longer held by anything.
     pytest.param(
         "scripts/guard-corpus/record.py",
-        'if got["text"] != row["text"]:',
+        'if got["text"] != expected:',
         "if False:",
         "tests/test_guard_corpus.py::test_intended_rows_reproduce",
         id="corpus-intended-text-exact",
@@ -1786,11 +1786,11 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
                  "tests/test_instruction_neutrality.py::test_core_tells_every_agent_to_read_my_preferences",
                  id="core-keeps-the-preferences-fallback"),
     # --- preferences injection (Plan 3, D15) --------------------------------
-    pytest.param("tools/skyguard/prefs.py", "if not fenced[i] and _HEADING.match(line)), None)",
+    pytest.param("tools/modding_harness/preferences.py", "if not fenced[i] and _HEADING.match(line)), None)",
                  "if _HEADING.match(line)), None)",
                  "tests/test_skyguard_prefs.py::test_heading_inside_a_code_fence_is_not_the_section",
                  id="prefs-ignore-a-fenced-heading"),
-    pytest.param("tools/skyguard/prefs.py", "    if len(data) > CAP:", "    if False:",
+    pytest.param("tools/modding_harness/preferences.py", "    if len(data) > CAP:", "    if False:",
                  "tests/test_skyguard_prefs.py::test_long_section_is_capped_on_a_character_boundary",
                  id="prefs-are-capped"),
     pytest.param("tools/skyguard/session.py",
@@ -1838,12 +1838,12 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
     ),
     # --- apply_patch parser (Plan 4 Task 3 fix round): each clause has its own twin ---------------
     pytest.param(
-        "tools/skyguard/patch_paths.py", "        line = raw.strip()", "        line = raw",
+        'tools/modding_harness/patches.py', '        trimmed = line.strip(_RUST_WS)', '        trimmed = line',
         "tests/test_patch_paths.py::test_indented_headers_are_headers_like_codex_reads_them",
         id="patch-headers-are-matched-on-the-trimmed-line",
     ),
     pytest.param(
-        "tools/skyguard/patch_paths.py", '        if not line.startswith("***"):', '        if not line.startswith("*** "):',
+        'tools/modding_harness/patches.py', '            self.fail(f"{trimmed!r} is not a valid hunk header")', '            return',
         "tests/test_patch_paths.py::test_any_other_star_line_is_refused",
         id="patch-any-star-line-is-refused",
     ),
@@ -2025,10 +2025,10 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
     ),
     pytest.param(
         "setup.sh",
-        r"""sys.version_info[:2]>=(3,8) else 1)' >/dev/null 2>&1; then""",
-        r"""sys.version_info[0]==3 else 1)' >/dev/null 2>&1; then""",
-        "tests/test_python_path.py::test_setup_refuses_a_python_older_than_3_8",
-        id="setup-accepts-python-older-than-3-8",
+        "sys.version_info[:2]>=(3,10) else 1)' >/dev/null 2>&1; then",
+        "sys.version_info[:2]>=(3,0) else 1)' >/dev/null 2>&1; then",
+        'tests/test_python_path.py::test_setup_refuses_a_python_older_than_3_10',
+        id="setup-accepts-python-older-than-3-10",
     ),
     pytest.param(
         ".claude/hooks/protect-bash.sh",
@@ -2074,16 +2074,16 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
         id='codex-shell-patch-paths-dropped',
     ),
     pytest.param(
-        'tools/skyguard/engine.py',
-        '    if req.failure:',
-        '    if False:',
+        'tools/skyguard/portable.py',
+        '    elif req.failure or req.event != "pre_tool":',
+        '    elif req.event != "pre_tool":',
         'tests/test_skyguard_codex_adapter.py::test_an_untranslatable_request_is_a_failed_deny',
         id='codex-untranslatable-request-allowed',
     ),
     pytest.param(
-        'tools/skyguard/engine.py',
-        '    elif req.event != "pre_tool":',
-        '    elif False:',
+        'tools/skyguard/portable.py',
+        '    elif req.failure or req.event != "pre_tool":',
+        '    elif req.failure:',
         'tests/test_skyguard_codex_adapter.py::test_an_unexpected_event_is_a_failed_deny',
         id='codex-unexpected-event-allowed',
     ),
@@ -2531,8 +2531,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
         # A delete patch stops being read: `apply_patch` deleting a plugin parses as an unknown header (or,
         # worse, as nothing) and the plugin rule never sees the path. Killed through a DERIVED variant: the
         # captured Delete shape with only its path replaced by Data/Decoy.esp.
-        ("tools/skyguard/patch_paths.py",
-         ''', ("*** Delete File:", "delete"))''', ")",
+        ('tools/modding_harness/patches.py',
+         '            ops.append((h["op"], h["path"]))', '            if h["op"] != "delete": ops.append((h["op"], h["path"]))',
          "tests/test_codex_conformance.py::test_conformance[derived:codex-PreToolUse-apply_patch-3:Data/Decoy.esp]",
          "codex-adapter-drops-delete-paths"),
         # The adapter emits an ALLOW where the rule said deny. The wrapper refuses a non-deny decision (an
@@ -3393,7 +3393,7 @@ _T9_CLAUSES = [
      '    if False:\n        return True\n    rel = _rel(', "papyrus-mo2"),
     ("rule-W-INSTALL-zone", _WRR, "        install = a is not None and in_install_area(a, roots)",
      "        install = grep(LEGACY_INSTALL_TEXT, file_path)", "install-relative-outside"),
-    ("rule-W-INSTALL-cwd", _WRR, 'a = targets.resolve(file_path, cwd, "bash", os.environ', 'a = targets.resolve(file_path, "", "bash", os.environ',
+    ("rule-W-INSTALL-cwd", _WRR, 'a = targets.resolve_literal(file_path, cwd, os.environ', 'a = targets.resolve_literal(file_path, "", os.environ',
      "install-relative-inside"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, _t09(row), id=i) for i, f, find, rep, row in _T9_CLAUSES]
@@ -4435,7 +4435,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SH + "test_an_unclassifiable_refusal_is_not_converted", "l2-shadow-unknown-converted"),
     (_EN, '            audit.log_strict("skyguard", "SHADOW", record)   # raises', "            pass  # raises",
      _SH + "test_every_converted_verdict_writes_a_shadow_audit_line_naming_the_rule", "l2-shadow-logs"),
-    (_EN, "    v = side_effects(req, project, audit, v, roots_fn, deadline)\n    return shadow(", "    v = v\n    return shadow(",
+    ('tools/skyguard/portable.py', '    side = (engine.side_effects(req, str(project), audit, value, lambda: roots, deadline)', '    side = ((lambda *args: value)(req, str(project), audit, value, lambda: roots, deadline)',
      _SH + "test_the_backup_of_a_shadowed_delete_is_still_taken", "l2-shadow-side-effects-run"),
     (_EN, "_state.honoured(st, session_id, now, start)", "st.lifts",
      _SH + "test_another_sessions_lift_is_not_honoured", "l2-shadow-session-bound"),
@@ -4515,7 +4515,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SH + "test_a_refusal_is_not_converted_when_its_shadow_line_cannot_be_written", "l2-shadow-line-must-land"),
     (_ST, "        if best is None or t > best:", "        if True:",
      _SH + "test_a_forged_early_start_line_cannot_revive_a_pre_resume_lift", "l2-state-start-max"),
-    ("tools/skyguard/run.py", "    if a.role in DECISION_ROLES:", "    if True:",
+    ("tools/skyguard/run.py", '    if a.role in DECISION_ROLES and not getattr(a, "ordered_dispatch", False):', "    if True:",
      _SH + "test_a_tool_call_logs_one_shadow_line_not_one_per_hook", "l2-shadow-decision-roles-only"),
     (_EN, "        if _state_reject_is_new(project, st.reason):", "        if True:",
      _SH + "test_a_state_rejection_is_logged_once_per_reason_not_once_per_call", "l2-shadow-reject-once"),
@@ -4782,11 +4782,11 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "rule-S-SELF-STATE-class"),
     (_SF, '    if rel[0] == ".codex":\n        return GUARD', "    if False:\n        return GUARD",
      _p12row("guard-codex-config"), "rule-S-SELF-GUARD-codex"),
-    (_SF, '([".claude", "hooks"], ["tools", "skyguard"], ["agent", "guards"])', '(["tools", "skyguard"], ["agent", "guards"])',
+    (_SF, '[".claude", "hooks"]', '[".claude", "unprotected"]',
      _p12row("guard-hook-redirect"), "rule-S-SELF-GUARD-hooks"),
-    (_SF, '([".claude", "hooks"], ["tools", "skyguard"], ["agent", "guards"])', '([".claude", "hooks"], ["agent", "guards"])',
+    (_SF, '["tools", "skyguard"]', '["tools", "unprotected"]',
      _p12row("guard-engine-file"), "rule-S-SELF-GUARD-engine"),
-    (_SF, '([".claude", "hooks"], ["tools", "skyguard"], ["agent", "guards"])', '([".claude", "hooks"], ["tools", "skyguard"])',
+    (_SF, '["agent", "guards"]', '["agent", "unprotected"]',
      _p12row("guard-agent-guards"), "rule-S-SELF-GUARD-agent-guards"),
     (_SF, '(_settings(rel[1]) or rel[1] == "skyrim-paths.env")', '(rel[1] == "skyrim-paths.env")',
      _p12row("guard-settings-sed"), "rule-S-SELF-GUARD-settings"),
@@ -4849,7 +4849,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      'NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE",))',
      _SFT + "test_guards_off_does_not_open_the_state_file[write]", "rule-W-SELF-STATE-never-shadowed"),
     # l2-self-applypatch-move: the `*** Move to:` path dropped from the patch's path list.
-    ("tools/skyguard/patch_paths.py", '                out.append(("move_to", path))', "                pass",
+    ('tools/modding_harness/patches.py', '            ops += [("move_from", h["path"]), ("move_to", h["move"])]', '            ops += [("move_from", h["path"])]',
      _SFT + "test_apply_patch_move_to_into_the_state_is_denied", "l2-self-applypatch-move"),
     # ---- GUARD-FILES.sha256: the drift gate bites, setup.sh's rewritten file stays out
     ("tools/skyguard/verdict.py", "from __future__ import annotations", "from __future__ import annotations  # edited",
@@ -4876,8 +4876,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '    if own and own[0] == self_rules.STATE and not dels.hit:\n        return deny("S-SELF-STATE", own[1])\n'
      '    # Plan 6 final fix',
      _SFT + "test_guards_off_does_not_let_the_lock_manifest_be_deleted", "rule-S-SELF-STATE-delete-before-del-install"),
-    (_SF, '    return rel is not None and rel[:1] == [".skyguard"]', '    return rel is not None and (rel == [] or rel[:1] == [".skyguard"])',
-     _SFT + "test_a_delete_of_the_whole_install_stays_s_del_install", "rule-S-SELF-STATE-delete-not-the-install"),
+    ('tools/skyguard/self_rules.py', '            if placed and save_store_target(placed, roots, holder):', '            if False:', 'tests/test_skyguard_self_rules.py::test_a_delete_of_the_whole_install_cannot_destroy_permanent_backups', 'save-store-install-ancestor-protection'),
     # ---- fix round 1, C1: the guard hash is the REPO form of a configured file
     ("tools/skyguard/guard_hash.py", "    if not slots:\n        return data, {}", "    if True:\n        return data, {}",
      _SFT + "test_a_configured_install_banners_nothing_and_a_real_edit_is_named", "l2-self-hash-normalises-setup-slots"),
@@ -4950,7 +4949,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # the recorded sha256 is not the hash of the bytes copied
     (_BK, "                h.update(chunk)", "                pass",
      _BKT + "test_the_manifest_line_records_the_copy", "l2-backup-manifest-sha"),
-    (_BK, "        os.write(fd, line)", "        [os.write(fd, line[i:i + 1]) for i in range(len(line))]",
+    (_BK, '            durable.write_all(fd, line)', '            for byte in line: durable.write_all(fd, bytes([byte]))',
      _BKT + "test_the_manifest_append_is_one_write_of_one_line", "l2-backup-manifest-one-write"),
     (_BK, "(backup: {d})\\n\".format(t=ts, n=tool_name, p=file_path, d=dest.name)",
      "(backup: {d})\\n\".format(t=ts, n=tool_name, p=file_path, d=base.name)",
@@ -5165,8 +5164,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SNT + "test_materialise_refuses_a_path_that_leaves_its_target[backslash]", "l2-snap-r1-materialise-backslash"),
     (_SN, "        if not isinstance(sha, str) or not _BLOB.match(sha) or", "        if",
      _SNT + "test_materialise_refuses_a_malformed_hash", "l2-snap-r1-materialise-hash-shape"),
-    (_SN, 'shutil.copyfile(str(store / "blobs" / sha), str(part))\n            if backup._sha256(part) != sha:',
-     'shutil.copyfile(str(store / "blobs" / sha), str(target))\n            part = target\n            if backup._sha256(part) != sha:',
+    (_SN, '                os.replace(str(part), str(target))',
+     '                shutil.copyfile(str(part), str(target))\n                part.unlink()',
      _SNT + "test_materialise_replaces_a_hard_linked_target_instead_of_writing_through",
      "l2-snap-r1-materialise-no-write-through"),
     # ---- M1, M2, M3, M5, M6
@@ -5382,9 +5381,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # The pair: the backup takes both files whichever one was named (recovery.pair_members), and the count calls a
     # save that has no co-save an existing save.
     ("tools/skyguard/recovery.py", "    for p in (ess, skse):", "    for p in (ess,):",
-     _RCT + "test_resaver_apply_snapshots_the_named_save_and_its_cosave_only", "l2-rec-cosave"),
+     'tests/test_legacy_save_store.py::test_legacy_writer_retains_both_pair_members', "l2-rec-cosave"),
     ("tools/skyguard/recovery.py", "    for p in (ess, skse):", "    for p in (skse,):",
-     "tests/test_save_policy.py::test_a_cosave_named_alone_counts_its_whole_pair", "l2-rec-cosave-names-its-save"),
+     'tests/test_legacy_save_store.py::test_legacy_writer_retains_both_pair_members', "l2-rec-cosave-names-its-save"),
     ("tools/skyguard/saves.py", "        le, ls = _listed(ess), _listed(skse)", "        le, ls = None, _listed(skse)",
      "tests/test_save_policy.py::test_a_missing_cosave_is_recorded_as_missing_not_an_error", "save-count-a-save-alone-exists"),
     ("tools/skyguard/saves.py", "            if j:\n                cands.append(j)", "            if False:\n                cands.append(j)",
@@ -5407,15 +5406,15 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # ---- the time box: never past the hook's budget, and never silent (a copy cut short DENIES)
     (_RC, "        want, copied, digest = backup._copy_hashed(src, part, fsync=True, deadline=deadline)",
      "        want, copied, digest = backup._copy_hashed(src, part, fsync=True)",
-     _RCT + "test_a_save_copy_that_runs_out_of_time_is_partial_never_silent", "l2-rec-save-deadline"),
+     'tests/test_legacy_save_store.py::test_legacy_writer_copy_deadline_cleans_partial_candidate', "l2-rec-save-deadline"),
     ("tools/skyguard/saves.py", "                                    agent=agent, session_id=session_id, deadline=deadline)",
      "                                    agent=agent, session_id=session_id)",
      _RCT + "test_a_save_copy_that_runs_out_of_time_is_partial_never_silent", "l2-rec-save-caller-deadline"),
     ("tools/skyguard/backup.py", "                if deadline is not None and _clock() >= deadline:", "                if False:",
-     _RCT + "test_a_save_copy_that_runs_out_of_time_is_partial_never_silent", "l2-rec-copy-deadline"),
+     'tests/test_legacy_save_store.py::test_legacy_writer_copy_deadline_cleans_partial_candidate', "l2-rec-copy-deadline"),
     (_RC, "    except backup.CopyTimeout:\n        backup._discard(part)\n        raise SaveBackupFailed(",
      "    except backup.CopyTimeout:\n        raise SaveBackupFailed(",
-     _RCT + "test_a_save_copy_that_runs_out_of_time_is_partial_never_silent", "l2-rec-timeout-is-partial"),
+     'tests/test_legacy_save_store.py::test_legacy_writer_copy_deadline_cleans_partial_candidate', "l2-rec-timeout-is-partial"),
     # ---- the state a snapshot stands for, and pruning
     (_RC, "    for e in entries[:mine[-1] + 1]:", "    for e in entries:",
      _RCT + "test_resolve_gives_the_full_state_at_a_snapshot", "l2-rec-resolve-at-id"),
@@ -5439,8 +5438,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "l2-rec-claude-bash-wired"),
     ("tools/skyguard/run.py", '        v = _saves(a, p, audit, v, "{} {}".format(p["tool_name"], p["file_path"]))', "        pass",
      "tests/test_save_policy.py::test_claude_protect_files_backs_up_before_it_answers", "l2-rec-claude-files-wired"),
-    ("tools/skyguard/engine.py", '        v = saves.enforce(v, project, audit, "codex-pre-tool",',
-     '        v = (lambda v, *a, **k: v)(v, project, audit, "codex-pre-tool",',
+    ("tools/skyguard/portable.py", ').pre(action, transcript, deadline)',
+     ').pre(action, transcript, deadline, preserve=False)',
      _RCT + "test_the_save_is_copied_by_the_hook_before_the_command_can_change_it[codex-pre-tool]",
      "l2-rec-codex-enforce-wired"),
     ("tools/skyguard/engine.py", "            recovery.run(project, req.command, False, audit,",
@@ -5569,7 +5568,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SCT + "test_no_skyguard_subcommand_takes_an_abbreviated_option[lock-json]", "l2-restore-fr2-no-abbrev-lock-status"),
     # No twin for the common parent parser's allow_abbrev: a parent only lends its arguments; the subparser's own
     # setting decides (the status subparser's twin above covers it).
-    (_RC, '(?:-' + BS + 'd+)?' + BS + 'Z")', '(?:-' + BS + 'd+)?$")',
+    (_RC, '(?:-(?:\\d+|[0-9a-f]{32}))?\\Z")', '(?:-(?:\\d+|[0-9a-f]{32}))?$")',
      _SCT + "test_a_recovery_id_with_a_trailing_newline_is_not_an_id", "l2-rec-fr2-id-anchor"),
 ]]
 
@@ -6998,8 +6997,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _MM_SR + "test_a_recycle_bin_delete_of_the_state_is_s_self_state_in_every_spelling[shell-application-movehere]",
      "p6mm-self-state-recycle-misses-movehere"),
     # the payload checker's guard-manifest section, and a Plan 6 launcher in its required list.
-    ("tools/check-release-payload.py", '            "adapter": check_adapter, "guards": check_guards}',
-     '            "adapter": check_adapter}', _MM_RP + "[guard-file-edited]", "p6mm-payload-guards-section-dropped"),
+    ("tools/check-release-payload.py", '            "adapter": check_adapter, "guards": check_guards, "shared-core": check_shared_core}',
+     '            "adapter": check_adapter, "shared-core": check_shared_core}', _MM_RP + "[guard-file-edited]", "p6mm-payload-guards-section-dropped"),
     ("tools/check-release-payload.py", '    "tools/skydoctor",\n', "", _MM_RP + "[skydoctor-missing]",
      "p6mm-payload-skydoctor-not-required"),
 ]]
@@ -7077,7 +7076,7 @@ _T6D_CLAUSES_R1 = [
     ('t6d-resaver-linux-gets-windows-separator', 'tools/resaver-cli.sh', "  *) S=':' ;;", "  *) S=';' ;;", 'tests/test_resaver_cli_classpath.py::test_the_classpath_separator_is_the_platforms'),
     ('t6d-resaver-windows-gets-linux-separator', 'tools/resaver-cli.sh', "  MINGW*|MSYS*|CYGWIN*|Windows*) S=';' ;;", "  MINGW*|MSYS*|CYGWIN*|Windows*) S=':' ;;", 'tests/test_resaver_cli_classpath.py::test_the_classpath_separator_is_the_platforms'),
     ('t6d-resaver-seam-outside-test-mode', 'tools/resaver-cli.sh', '[ "${TOOLKIT_TEST_MODE:-}" = 1 ] && [ -n "${RESAVER_CLI_UNAME:-}" ] && UNAME="$RESAVER_CLI_UNAME"', '[ -n "${RESAVER_CLI_UNAME:-}" ] && UNAME="$RESAVER_CLI_UNAME"', 'tests/test_resaver_cli_classpath.py::test_the_platform_seam_is_ignored_outside_test_mode'),
-    ('t6d-resaver-jdk-change-ignored', 'tools/resaver-cli.sh', '[ "$(cat "$STAMP" 2>/dev/null)" = "${JV:-?}" ] || JDK_CHANGED=1', 'true', 'tests/test_resaver_cli_classpath.py::test_a_jdk_change_recompiles_the_driver'),
+    ('t6d-resaver-jdk-change-ignored', 'tools/resaver_cli_cache.py', 'records.update(jdk=jdk, compiler=compiler,', 'records.update(jdk="ignored", compiler=compiler,', 'tests/test_resaver_cli_classpath.py::test_a_jdk_change_recompiles_the_driver'),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T6D_CLAUSES_R1]
 
@@ -7361,7 +7360,7 @@ MUTATIONS += [
 # Rows 18-20, prefs: an unclosed fence is plain text, a fence closes only on its own character, the `(...)` variant
 # heading is the section, a near-miss heading is said and audited, the read is bounded, a section beyond the bound
 # says why it is missing, and a section cut by the bound is marked as cut.
-_P8P = "tools/skyguard/prefs.py"
+_P8P = "tools/modding_harness/preferences.py"
 _P8PT = "tests/test_skyguard_prefs.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_P8P, "            end = _next_closer(closers, i, m.group(1))\n",
@@ -7607,7 +7606,7 @@ _T7 = [
     ("setup.sh", '    if [ -n "$CODEX_WIN" ] && which codex >/dev/null 2>&1; then', "    if false; then",
      _T7S + "test_auto_configures_the_agents_found_on_path[codex-only]", "t7-auto-detects-codex"),
     # an unselected agent's files are kept as extracted
-    ("setup.sh", '    *) DOC_ON="$DO_CODEX" ;;', "    *) DOC_ON=1 ;;",
+    ("setup.sh", '    *) DOC_ON="${DO_CODEX}${DO_PORTABLE}${DO_OPENCODE}" ;;', "    *) DOC_ON=1 ;;",
      _T7S + "test_each_value_configures_exactly_its_agents[claude]", "t7-agents-md-only-for-codex"),
     ("setup.sh", '    CLAUDE.md) DOC_ON="$DO_CLAUDE" ;;', "    CLAUDE.md) DOC_ON=1 ;;",
      _T7S + "test_each_value_configures_exactly_its_agents[codex]", "t7-claude-md-only-for-claude"),
@@ -7815,10 +7814,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_P8R1_SR, "            a = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), w)",
      "            a = targets.resolve_operand(e, w, cwd, env)",
      _P8R1 + "test_a_stream_of_a_guard_file_is_the_guard_file[hook-data]", "p8r1-stream-shell-wired"),
-    ("tools/skyguard/write_rules.py",
-     '        a = self_rules.resolve_own(lambda x: targets.resolve(x, cwd, "bash", env_), file_path)',
-     '        a = targets.resolve(file_path, cwd, "bash", env_)',
-     _P8R1 + "test_the_write_tool_on_a_guard_file_stream_gets_the_note", "p8r1-stream-write-tool-wired"),
+    ('tools/skyguard/portable.py', '    restrictions = (local_policy.restriction(project, deadline, lambda: save_plan[0]), *local_restrictions)', '    restrictions = tuple(local_restrictions)', 'tests/test_local_policy.py::test_registered_policy_denies_before_any_permanent_save_backup', 'registered-local-policy-before-preservation'),
 ]]
 
 # ---- Plan 8 T8 fix round 2 (lane p8-paths): re-review N1, N2, N4. One twin per clause. ---------------------------
@@ -8446,7 +8442,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/engine.py", "            _release(audit)\n            audit.log_strict(\"skyguard\", \"SHADOW\", \"{} kept ({}; a lift rule)\"",
      "            audit.log_strict(\"skyguard\", \"SHADOW\", \"{} kept ({}; a lift rule)\"",
      _FL2 + "test_a_kept_refusal_writes_its_rule_line_verbatim_beside_the_kept_line", "fl2-kept-line-before-rule-line"),
-    ("tools/skyguard/engine.py", "    hold_if_shadowing(project, audit)\n    if req.failure:", "    if req.failure:",
+    ('tools/skyguard/portable.py', '    engine.hold_if_shadowing(project, audit)\n    captured = []', '    captured = []',
      _FL2 + "test_the_codex_entry_writes_one_record_for_a_shadowed_call", "fl2-codex-entry-not-held"),
     ("tools/skyguard/run.py", "        engine.hold_if_shadowing(a.project, audit)\n", "        pass\n",
      _FL2 + "test_the_claude_entry_writes_one_record_for_a_shadowed_bash_call", "fl2-claude-entry-not-held"),
@@ -8632,7 +8628,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SPT + "test_a_save_and_its_cosave_are_one_save", "rule-S-SAVE-BACKUP-pair"),
     (_SV, "    if change.unknown:\n        return refuse(*change.unknown[0])", "    if False:\n        return refuse(*change.unknown[0])",
      _SPT + "test_resaver_apply_on_a_save_it_cannot_place_is_refused[pattern]", "rule-S-RESAVER-APPLY-unplaced-refused"),
-    (_SV, "        if WILD.search(folder):\n            unknown.append(name)", "        if False:\n            unknown.append(name)",
+    (_SV, "        if not t.literal and WILD.search(folder):\n            unknown.append(name)", "        if False:\n            unknown.append(name)",
      _SPT + "test_a_wildcard_in_a_folder_name_cannot_be_listed", "rule-S-SAVE-UNKNOWN-folder"),
     (_SV, "        except OSError:\n            unknown.append(name)\n            continue", "        except OSError:\n            continue",
      _SPT + "test_a_wildcard_in_a_folder_that_cannot_be_read_cannot_be_listed", "rule-S-SAVE-UNKNOWN-unlistable"),
@@ -8641,16 +8637,16 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SV, "    if not ex or rest.decision in (\"deny\", \"ask\"):\n        return rest._replace(saves=plan)",
      "    if not ex or rest.decision in (\"deny\", \"ask\"):\n        return rest",
      _SPT + "test_a_save_change_beside_another_rules_deny_still_carries_its_plan", "rule-S-SAVE-BACKUP-plan-rides-a-deny"),
-    (_SV, '    return json.dumps({"op": op, "pattern": pat, "count": n}, ensure_ascii=False)',
-     '    return json.dumps({"op": op, "files": [pat]}, ensure_ascii=False)',
+    ('tools/modding_harness/approval.py', '        grant.update(count=logical_count, command_sha256=hashlib.sha256(command.encode("utf-8")).hexdigest())',
+     '        grant.update(count=logical_count)',
      _SPT + "test_a_wildcard_needs_approval_even_when_it_matches_one_save", "rule-S-SAVE-APPROVAL-pattern-line"),
     # ---- the hook: the backup is taken, verified, BEFORE the allow; a failure denies; approval is per file and op
-    (_SV, "        ids = recovery.backup_saves(", "        ids = [] or (lambda *a, **k: [])(",
+    (_SV, '        ids = save_store.backup_pairs(', '        ids = [] or (lambda *args, **kwargs: [])(',
      _SPT + "test_enforce_backs_up_both_files_verified_before_it_allows", "rule-S-SAVE-BACKUP-taken"),
-    (_SV, '        return Verdict("deny", reason, "", rest.status, code=codes.rule_code("S-SAVE-BACKUP-FAILED"))',
-     "        return codes.classify(rest)",
+    (_SV, '        return Verdict("deny", reason, "", rest.status, code=codes.rule_code("S-SAVE-BACKUP-FAILED"))\n    # Recount',
+     '        return codes.classify(rest)\n    # Recount',
      _SPT + "test_a_backup_that_would_fill_the_drive_denies", "rule-S-SAVE-BACKUP-FAILED-denies"),
-    (_SV, "        if not _covered(c, g):\n            return v", "        if False:\n            return v",
+    (_SV, '    if needs_approval(c):\n        grants, why = scoped_approval.read', '    if False:\n        grants, why = scoped_approval.read',
      _SPT + "test_with_no_approval_the_bulk_change_stays_refused_and_nothing_is_copied", "rule-S-SAVE-APPROVAL-enforced"),
     (_SV, "        approved = True\n", "        approved = True\n        return codes.classify(rest)\n",
      _SPT + "test_a_typed_approval_lifts_the_bulk_refusal_and_everything_is_backed_up", "rule-S-SAVE-APPROVAL-still-backed-up"),
@@ -8674,9 +8670,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SPT + "test_guards_off_does_not_lift_a_bulk_save_change", "save-never-shadowed"),
     ("tools/skyguard/run.py", '        audit.rule(a.role, "S-SAVE-BACKUP-FAILED", "deny", reason)\n        return Verdict("deny", reason, code=',
      '        audit.rule(a.role, "S-SAVE-BACKUP-FAILED", "deny", reason)\n        return v or Verdict("deny", reason, code=',
-     _SPT + "test_a_backup_that_raises_inside_the_hook_denies", "rule-S-SAVE-BACKUP-FAILED-hook-raises"),
-    ("tools/skyguard/neutral.py", '        return saves.enforce(v, project, audit, "neutral",',
-     '        return v if True else saves.enforce(v, project, audit, "neutral",',
+     _SPT + "test_a_dispatcher_that_raises_inside_the_hook_denies", "rule-S-SAVE-BACKUP-FAILED-hook-raises"),
+    ("tools/skyguard/neutral.py", '        return portable.legacy_pre_tool(req, project, roots_fn, audit, precomputed=v)',
+     '        return v',
      _SPT + "test_the_neutral_mcp_route_backs_up_before_it_answers", "save-neutral-mcp-enforced"),
     # ---- where a save change is found: the delete, move and recycle routes no longer read it as S-DEL-CONFIG
     ("tools/skyguard/deletes.py", "                if is_save(b, roots):\n                    saves.append(b)",
@@ -8694,26 +8690,26 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '            elif False:\n                saves.append((a, "move"))', _SPT + "test_every_change_shape_is_one_backed_up_save[mv-out]",
      "rule-S-SAVE-BACKUP-move"),
     # ---- recovery.backup_saves: both files, verified, recorded, one snapshot per pair, never pruned
-    ("tools/skyguard/recovery.py", "        if backup._sha256(part) != digest:", "        if False:",
+    ('tools/modding_harness/durable.py', '    if count != before[2] or digest(target, deadline) != value:', '    if False:',
      _SPT + "test_a_copy_that_does_not_verify_denies", "rule-S-SAVE-BACKUP-FAILED-verify"),
-    ("tools/skyguard/recovery.py", "        if dest.is_file() and backup._sha256(dest) == digest:", "        if dest.is_file():",
-     _SPT + "test_a_damaged_stored_copy_is_replaced_not_trusted", "save-backup-reverifies-a-stored-copy"),
-    ("tools/skyguard/recovery.py", '            e["missing"] = sorted(missing)', '            e["missing"] = []',
+    ('tools/modding_harness/durable.py', '    value = hashlib.sha256()', '    if Path(path).parent.name == "blobs": return Path(path).name\n    value = hashlib.sha256()',
+     'tests/test_save_policy.py::test_a_damaged_reused_blob_refuses_and_is_retained_for_diagnosis', "save-backup-reverifies-a-stored-copy"),
+    ('tools/modding_harness/preservation.py', '                    rec = {"path": path, "canonical": real, "missing": ident is None}', '                    rec = {"path": path, "canonical": real, "missing": False}',
      _SPT + "test_a_missing_cosave_is_recorded_as_missing_not_an_error", "save-backup-records-missing-cosave"),
-    ("tools/skyguard/recovery.py", '        sid = _new_id(idx, ts, "save")\n        ids.append(sid)',
-     '        sid = ids[0] if ids else _new_id(idx, ts, "save")\n        ids.append(sid)',
-     _SPT + "test_two_saves_are_two_snapshots_each_restorable_as_a_pair", "save-backup-one-snapshot-per-pair"),
-    ("tools/skyguard/recovery.py", '    except OSError:\n        raise SaveBackupFailed("the backup manifest could not be written")',
-     "    except OSError:\n        pass", _SPT + "test_a_manifest_that_cannot_be_written_denies",
+    ('tools/modding_harness/preservation.py', '                records.append({"logical_save": group_index, "members": members})',
+     '                if not records: records.append({"logical_save": group_index, "members": members})',
+     'tests/test_save_policy.py::test_two_saves_are_one_transaction_with_two_complete_groups', "save-backup-one-snapshot-per-pair"),
+    ('tools/modding_harness/preservation.py', '            durable.atomic_json(self.root / "transactions" / (transaction + ".json"), manifest)',
+     '            pass', _SPT + "test_a_manifest_that_cannot_be_written_denies",
      "rule-S-SAVE-BACKUP-FAILED-manifest"),
-    ("tools/skyguard/recovery.py", "        raise SaveBackupFailed(\"another session held the backup store's lock\")",
-     "        return []", _SPT + "test_a_busy_store_denies", "rule-S-SAVE-BACKUP-FAILED-lock"),
-    ("tools/skyguard/recovery.py", "        raise SaveBackupFailed(\"{} could not be read or copied ({})\".format(name, e.__class__.__name__))",
-     "        return digest", _SPT + "test_an_unreadable_save_denies", "rule-S-SAVE-BACKUP-FAILED-unreadable"),
+    ('tools/modding_harness/preservation.py', '            with exclusive(self.root / ".lock", wait):',
+     '            with __import__("contextlib").nullcontext():', _SPT + "test_a_busy_store_denies", "rule-S-SAVE-BACKUP-FAILED-lock"),
+    ('tools/modding_harness/preservation.py', '            raise PreservationFailed(str(exc)) from exc\n        finally:',
+     '            return None\n        finally:', _SPT + "test_an_unreadable_save_denies", "rule-S-SAVE-BACKUP-FAILED-unreadable"),
     ("tools/skyguard/snapshot.py", "            if backup._sha256(part) != sha:\n                raise OSError(",
      "            if False:\n                raise OSError(", _SPT + "test_a_restore_that_does_not_verify_at_its_target_writes_nothing",
      "save-restore-verifies-its-target"),
-    ("tools/skyguard/snapcli.py", '    if recovery._ID.match(sid) and sid.split("-")[1:2] == ["save"]:', "    if False:",
+    ('tools/skyguard/save_store.py', '    for rec in (r for g in groups for r in g["members"]):\n        if rec["missing"]:', '    for rec in (r for g in groups for r in g["members"]):\n        if False:',
      _SPT + "test_a_restore_of_a_pair_without_its_cosave_says_so", "save-restore-names-a-missing-cosave"),
     # ---- approvals.py: only what the USER typed
     (_AP, '_LINE = re.compile(r"^[ \\t]*" + KEY', '_LINE = re.compile(r"[ \\t]*" + KEY',
@@ -8752,6 +8748,39 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "save-approval-count-is-a-number"),
     (_AP, "                if isinstance(f, str) and op in OPS and stem(f):", "                if isinstance(f, str) and stem(f):",
      _SAT + "test_a_malformed_approval_grants_nothing[{\"op\": \"erase\", \"files\": [\"a\"]}]", "save-approval-known-op"),
-    ("tools/skyguard/saves.py", "        g = approvals.read(transcript, agent)", "        g = approvals.read(transcript, \"claude\")",
+    ('tools/modding_harness/dispatch.py', '                grants, why = approval.read(transcript, action.host, action.session_id)', '                grants, why = approval.read(transcript, "claude", action.session_id)',
      _SPT + "test_codex_bulk_change_reads_only_the_tui_users_approval", "save-approval-reads-its-agents-transcript"),
 ]]
+
+MUTATIONS += [pytest.param("tools/skyguard/save_store.py",
+    '        if checked.result.decision != "allow":', '        if False:',
+    "tests/test_legacy_save_store.py::test_recovery_format_in_place_obeys_local_restriction_before_current_preservation",
+    id="legacy-recovery-cannot-bypass-local-restriction")]
+
+MUTATIONS += [pytest.param("tools/skyguard/save_store.py", before, after,
+    "tests/test_portable_profile.py::test_neutral_restore_carries_one_deadline_through_every_copy[" + case + "]",
+    id="neutral-restore-total-deadline-" + case) for before, after, case in (
+    ('        result = target.restore(ident, selected=selected, in_place=True, deadline=deadline)',
+     '        result = target.restore(ident, selected=selected, in_place=True)', 'True'),
+    ('    return target.restore(ident, to or None, selected, deadline=deadline)',
+     '    return target.restore(ident, to or None, selected)', 'False'),
+)]
+
+MUTATIONS += [pytest.param(path, before, after,
+    "tests/test_portable_profile.py::test_concrete_file_and_api_save_targets_are_literal_with_bracketed_paths[" + surface + "]",
+    id="save-target-literal-provenance-" + surface) for path, before, after, surface in (
+    ('tools/skyguard/write_rules.py', 'saves.Target(a, op if op in saves.OPS else "write", True)',
+     'saves.Target(a, op if op in saves.OPS else "write")', 'files'),
+    ('tools/skyguard/saves.py', 'Target(_join(folder, clean + EXTS[0]), "write", True)',
+     'Target(_join(folder, clean + EXTS[0]), "write")', 'mcp'),
+)]
+
+MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test,
+    id="local-policy-" + name) for before, after, test, name in (
+    ('        if result["kind"] != "allow":', '        if False:',
+     'tests/test_local_policy.py::test_legacy_preservation_requirements_cannot_disappear_in_unrecognized_helpers[backup]',
+     'preservation-requirement-retained'),
+    ('            result["warnings"] = tuple(warnings)', '            result["warnings"] = warnings',
+     'tests/test_local_policy.py::test_registered_allowed_file_edit_preserves_pair_once[allow]',
+     'worker-warning-tuple'),
+)]

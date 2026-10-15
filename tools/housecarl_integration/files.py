@@ -11,6 +11,8 @@ import time
 import uuid
 
 from . import Refusal
+from modding_harness import durable
+from modding_harness.preservation import DEFAULT_RESERVE
 
 
 def sha(path):
@@ -85,14 +87,21 @@ def backup(path, store):
     ident = time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex
     folder = store / ident
     folder.mkdir(parents=True)
-    before = sha(path)
     dest = folder / path.name
-    shutil.copyfile(path, dest)
-    if sha(dest) != before or sha(path) != before:
-        raise Refusal("Backup hash verification failed; publication is prohibited.")
+    if shutil.disk_usage(folder).free < path.stat().st_size + DEFAULT_RESERVE:
+        raise Refusal("Backup would cross the permanent store's 2 GiB free-space reserve.")
+    try:
+        copied = durable.copy_verified(path, dest, time.monotonic() + 60)
+    except (OSError, TimeoutError) as exc:
+        raise Refusal("Backup hash verification or durable copy failed; publication is prohibited.") from exc
+    if shutil.disk_usage(folder).free < DEFAULT_RESERVE:
+        raise Refusal("Backup crossed the permanent store's 2 GiB free-space reserve; publication is prohibited.")
+    before = copied["sha256"]
     record = {"id": ident, "source": str(path.resolve()), "backup": str(dest.resolve()),
               "sha256": before, "size": dest.stat().st_size, "created": time.time()}
     json_write(folder / "manifest.json", record)
+    durable.sync_dir(folder)
+    durable.sync_dir(store)
     return record
 
 
@@ -115,7 +124,11 @@ def publish(candidate, target, expected):
             raise Refusal("Staged publication hash mismatch; target untouched.")
         if (sha(target) if target.exists() else None) != expected:
             raise Refusal("Target changed before commit; target untouched.")
-        os.replace(part, target)
+        if expected is None:
+            durable.publish_new(part, target)
+        else:
+            os.replace(part, target)
+            durable.sync_dir(target.parent)
         if sha(target) != digest:
             raise Refusal("POST-COMMIT verification failed; preserve the receipt and backup for recovery.")
         return digest

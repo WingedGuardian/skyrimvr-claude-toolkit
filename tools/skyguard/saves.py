@@ -32,7 +32,6 @@ and stays whatever the delete rules decide (S-DEL-UNRESOLVED when it names a pro
 from __future__ import annotations
 
 import fnmatch
-import json
 import os
 import re
 from typing import Dict, List, NamedTuple, Optional, Tuple
@@ -54,6 +53,7 @@ NEVER_SHADOW = frozenset(("shell.S-SAVE-APPROVAL", "shell.S-SAVE-UNKNOWN", "shel
 class Target(NamedTuple):
     path: str                             # the resolved file (a wildcard stays in its file name)
     op: str                               # write | move | delete
+    literal: bool = False                 # concrete file-tool / structured API identity, not shell text
 
 
 class Change(NamedTuple):
@@ -129,7 +129,7 @@ def devbench_change(found, roots, env) -> Change:
     folder = mcp_rules.saves_folder(roots, env) if roots is not None else None
     for (rid, fields), clean in found:
         if clean is not None and folder is not None and fields.get("op", "").startswith("Overwrites save"):
-            out.append(Target(_join(folder, clean + EXTS[0]), "write"))
+            out.append(Target(_join(folder, clean + EXTS[0]), "write", True))
         else:
             unknown.append((rid, tuple(sorted(fields.items()))))
     return Change(tuple(dict.fromkeys(out)), tuple(dict.fromkeys(unknown)))
@@ -198,10 +198,10 @@ def count(change: Change) -> Count:
 
     for t in change.targets:
         folder, name = os.path.split(t.path)
-        if WILD.search(folder):
+        if not t.literal and WILD.search(folder):
             unknown.append(name)
             continue
-        if not WILD.search(name):
+        if t.literal or not WILD.search(name):
             f, stem = _split(t.path)
             add(f, stem, t.op)
             continue
@@ -240,20 +240,6 @@ def _phrase(stems: List[str]) -> str:
     return ", ".join(uniq[:3]) + (" and %d more" % (len(uniq) - 3) if len(uniq) > 3 else "")
 
 
-def _approval_example(c: Count) -> str:
-    """The line the user types, exactly, when it fits the message; else its shape."""
-    if c.patterns:
-        (pat, op), keys = next(iter(c.patterns.items()))
-        n = len([k for k in keys if any(_key(os.path.dirname(p.ess), p.stem) == k for p in _existing(c))])
-        return json.dumps({"op": op, "pattern": pat, "count": n}, ensure_ascii=False)
-    ex = _existing(c)
-    op = ex[0].ops[0] if ex else "write"
-    text = json.dumps({"op": op, "files": [p.stem for p in ex]}, ensure_ascii=False)
-    if len(text) <= rules.FIELD_MAX:
-        return text
-    return '{"op": "%s", "files": [each of the %d saves]}' % (op, len(ex))
-
-
 def _ops_verb(items) -> str:
     """The verb for what a call does to these saves (Pairs carry `ops`, Targets one `op`)."""
     ops = {o for x in items for o in (x.ops if isinstance(x, Pair) else (x.op,))}
@@ -286,7 +272,7 @@ def judge(change: Change, rest: Verdict, audit=None, hook: str = "protect-bash")
     if needs_approval(c):
         names = [p.stem for p in ex] or [pat for pat, _op in c.patterns]
         return refuse("S-SAVE-APPROVAL", (("op", _ops_verb(c.pairs)), ("n", str(len(ex))),
-                                          ("file", _phrase(names)), ("save", _approval_example(c))))
+                                          ("file", _phrase(names))))
     if not ex or rest.decision in ("deny", "ask"):
         return rest._replace(saves=plan)
     note = _render("S-SAVE-BACKUP", (("file", _phrase([p.stem for p in ex])), ("op", NOTE_BEFORE)))
@@ -319,7 +305,8 @@ def enforce(v: Verdict, project: str, audit, hook: str, command: str = "", trans
     """Run in the deciding PreToolUse hook, BEFORE the tool can run. Backs up every save the call changes, verified,
     and only then lets judge's allow (or the user-approved bulk change) stand. Any failure DENIES (fail closed).
     A verdict with no save plan is returned unchanged."""
-    from . import codes, recovery
+    from . import codes, save_store
+    from modding_harness import approval as scoped_approval, profiles
     plan = v.saves
     if plan is None:
         return v
@@ -332,18 +319,34 @@ def enforce(v: Verdict, project: str, audit, hook: str, command: str = "", trans
     ex = _existing(c)
     approved = False
     if needs_approval(c):
-        g = approvals.read(transcript, agent)
-        if not _covered(c, g):
-            return v
+        grants, why = scoped_approval.read(transcript, agent, session_id)
+        wanted = {op: [p for pair in ex if op in pair.ops for p in profiles.skyrim().members(pair.ess)]
+                  for op in {op for pair in ex for op in pair.ops}}
+        if not wanted or not all(any(grant.matches(session_id, op, members, command, bool(c.patterns),
+                                                  len([p for p in ex if op in p.ops])) for grant in grants)
+                                 for op, members in wanted.items()):
+            examples = [scoped_approval.example(session_id, op, members, command, bool(c.patterns),
+                                               len([p for p in ex if op in p.ops]))
+                        for op, members in sorted(wanted.items())]
+            audit.log(hook, "SAVE-APPROVAL-MISSING", why or "scope changed")
+            reason = v.reason + "\nIf approved, the user types:\n" + "\n".join(examples)
+            if agent not in ("claude", "codex") or not session_id:
+                reason += "\nThis host/session has no qualified approval reader; bulk changes remain refused."
+            return v._replace(reason=reason)
         approved = True
     if not ex:
         return codes.classify(rest) if approved else v
     try:
-        ids = recovery.backup_saves(project, audit, [(p.ess, p.skse) for p in ex], command or hook,
+        ids = save_store.backup_pairs(project, audit, [(p.ess, p.skse) for p in ex], command or hook,
                                     agent=agent, session_id=session_id, deadline=deadline)
-    except recovery.SaveBackupFailed as e:
+    except (OSError, ValueError) as e:
         reason = _render("S-SAVE-BACKUP-FAILED", (("file", _phrase([p.stem for p in ex])), ("op", str(e))))
         audit.rule(hook, "S-SAVE-BACKUP-FAILED", "deny", reason)
+        return Verdict("deny", reason, "", rest.status, code=codes.rule_code("S-SAVE-BACKUP-FAILED"))
+    # Recount after preservation so aliases, wildcard membership and absent
+    # counterparts appearing during a multi-save transaction cannot use old scope.
+    if count(change) != c:
+        reason = "save membership changed during preservation; run the guard again"
         return Verdict("deny", reason, "", rest.status, code=codes.rule_code("S-SAVE-BACKUP-FAILED"))
     note = _render("S-SAVE-BACKUP", (("file", _phrase([p.stem for p in ex])), ("op", NOTE_BEFORE)))
     if approved:

@@ -266,6 +266,24 @@ def resolve(word: str, cwd: str, dialect: str, env: Mapping[str, str]) -> Option
     return _final(_resolve(word, cwd, dialect, env), env)
 
 
+def resolve_literal(word: str, cwd: str, env: Mapping[str, str]) -> Optional[str]:
+    """A native file-tool/patch operand: preserve spaces, `$`, `~` and quotes.
+
+    Shell expansion belongs to resolve(). A literal filename that resembles an
+    environment variable must never disappear from save preservation.
+    """
+    p = word.replace("\\", "/")
+    absolute = paths.norm_abs(p, msys=False)
+    if absolute is None and not re.match(r"[A-Za-z]:", p):
+        base = normalise_cwd(cwd)
+        if base and p.startswith("/"):
+            root = _drive_root(base)
+            absolute = paths.norm_abs(root + p.lstrip("/")) if root else None
+        elif base:
+            absolute = paths.norm_abs(paths._join(base, p))
+    return _final(absolute, env)
+
+
 def exec_cwd(e, cwd: str, env: Mapping[str, str]) -> Optional[str]:
     """The directory an Exec runs in: the payload cwd moved by its cd_before. None when unknowable."""
     base = normalise_cwd(cwd)

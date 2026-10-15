@@ -178,7 +178,8 @@ def test_a_link_elsewhere_is_not(command, shell):
         "new-item-type-alias", "dotnet-file-symlink", "dotnet-file-hardlink", "dotnet-directory-symlink"])
 def test_more_link_spellings_to_a_guard_file_get_the_note(command, shell):
     got = _full(command, shell)
-    assert got is not None and got[0] == self_rules.GUARD and got[2] == self_rules.LINKS, got
+    expected = self_rules.STATE if command.startswith("cp -al .claude ") else self_rules.GUARD
+    assert got is not None and got[0] == expected and got[2] == self_rules.LINKS, got
 
 
 @pytest.mark.parametrize("command,shell", [

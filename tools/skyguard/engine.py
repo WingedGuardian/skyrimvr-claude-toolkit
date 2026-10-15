@@ -109,16 +109,7 @@ def patch_target(path: str, cwd: str) -> Optional[str]:
     """Where an apply_patch path lands, read LITERALLY: apply_patch expands nothing (`$HOME/x` and `~/x` are folder
     names under the cwd), and `/x` is the root of the cwd's drive (Codex runs Windows paths). None when unknowable
     (no usable cwd for a relative path, a drive-relative `C:x`, an 8.3 short name)."""
-    p = path.strip().replace("\\", "/")
-    a = _paths.norm_abs(p, msys=False)
-    if a is None and not re.match(r"[A-Za-z]:", p):
-        base = targets.normalise_cwd(cwd)
-        if base and p.startswith("/"):
-            root = targets._drive_root(base)
-            a = _paths.norm_abs(root + p.lstrip("/")) if root else None
-        elif base:
-            a = _paths.norm_abs(_paths._join(base, p))
-    return targets._final(a, os.environ)
+    return targets.resolve_literal(path, cwd, os.environ)
 
 
 def _patch_delete(path: str, dest: Optional[str], roots, cwd: str, audit) -> Optional[Verdict]:
@@ -307,6 +298,7 @@ NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE", "write.W-SELF-STA
 # The save policy (user ruling 2026-10-13): a bulk save change needs the USER's typed approval, and a save that cannot
 # be backed up is never changed. `guards off` is a lift the agent may take itself, so it lifts neither.
 NEVER_SHADOW = NEVER_SHADOW | saves.NEVER_SHADOW
+NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SAVE-STORE", "write.W-SAVE-STORE"))
 
 
 def _reject_marker(project) -> Path:
@@ -470,19 +462,7 @@ def _shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
         return v
 
 
-def pre_tool(req, project, roots_fn, audit, telemetry="", now=None, deadline=None) -> Verdict:
-    """All Codex PreToolUse work: the rules, then the side effects, then shadow mode on the finished verdict."""
-    hold_if_shadowing(project, audit)
-    if req.failure:
-        audit.log("codex-pre-tool", "REFUSE", req.failure)
-        v = _failed(INERT_TRANSLATE.format(req.failure), "codex.TRANSLATE")
-    elif req.event != "pre_tool":
-        v = _failed(INERT_TRANSLATE.format("unexpected event {!r}".format(req.event)), "codex.TRANSLATE")
-    else:
-        v = _rules(req, roots_fn, audit)
-        # The save policy: every save the call changes is backed up and verified before the call may run.
-        v = saves.enforce(v, project, audit, "codex-pre-tool", command=req.command or " ".join(req.paths),
-                          transcript=req.transcript_path, agent=req.agent, session_id=req.session_id,
-                          deadline=deadline)
-    v = side_effects(req, project, audit, v, roots_fn, deadline)
-    return shadow(v, project, req.session_id, telemetry, audit, now=now)
+def pre_tool(req, project, roots_fn, audit, telemetry="", now=None, deadline=None, *, metadata=None) -> Verdict:
+    """Legacy parser/verdict compatibility over the shared synchronous dispatcher."""
+    from . import portable
+    return portable.legacy_pre_tool(req, project, roots_fn, audit, telemetry, now, deadline, metadata=metadata)

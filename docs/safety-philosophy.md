@@ -58,6 +58,13 @@ Destructive changes are blocked outright. Everything else that is consequential 
 
 Saves follow their own rule (user ruling 2026-10-13), because a save is the one thing a mod manager cannot give back. A command that changes one or two saves -- writes, copies onto, edits, moves, renames or deletes them, a DevBench save over an existing one, ReSaver `--apply` -- runs WITHOUT a prompt, but only after the deciding hook has copied both files of each pair (the `.ess` and its `.skse` co-save count as one save), read each copy back to its SHA-256 and recorded it; if that backup fails the command is refused. More than two saves, or a wildcard, is refused until you type the `SAVE_ACCESS_APPROVAL` line the refusal shows -- read only from what you typed, never from anything the agent read. Those backups are never pruned. Reading, hashing, listing and copying saves out are free; deleting or moving the whole `Saves` folder stays refused.
 
+New save transactions live in `.modding-agent-harness/backups/saves/`, independent of the coding agent.
+Version 1 approvals bind canonical full paths and session/operation; wildcards also bind the command hash
+and logical save count. Legacy basename-only grants do not qualify. The neutral configuration file can
+select another backup destination and reserve; the store cannot include a save root. Both older Skyrim
+save formats remain readable, and legacy recovery leaves their evidence intact. Restore defaults to a
+new directory, expands a member selection to its pair, verifies chosen blobs and journals publication.
+
 ⚠ This inverted in v3.8.3 and this page said the opposite until v3.9. A guard that prompts on routine work gets approved by reflex and then protects nothing; the X4 toolkit measured 40 such prompts across 13,282 commands, every one of them noise. So the honest summary is: **few prompts, a short deny list, and a lot of advice** -- not "nothing happens without your approval".
 
 ### 2. Reversibility

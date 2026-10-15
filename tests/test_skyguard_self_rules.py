@@ -80,6 +80,22 @@ def _roots():
     return paths.roots("C:/p6t12/Skyrim VR", "", {"SKYRIM_GAME_ROOT": GAME})
 
 
+def test_empty_recycle_argument_is_not_the_install_ancestor():
+    from skyguard import shellparse
+    command = "powershell -Command \"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('',1,2)\""
+    parsed = shellparse.parse(command, "bash")
+    assert self_rules.shell_save_store_hit(command, parsed, _roots(), GAME, ENV0) == ""
+
+
+@pytest.mark.parametrize("relative", [".modding-agent-harness/upgrades/operation/rollback/tool.py",
+                                      ".modding-agent-harness/upgrade.lock"])
+def test_permanent_upgrade_evidence_is_not_agent_mutable(relative):
+    (decision, _), fired = shell('rm "' + GAME + '/' + relative + '"')
+    assert decision == 'deny' and fired == {'S-SAVE-STORE'}
+    (decision, _), fired = write(GAME + '/' + relative)
+    assert decision == 'deny' and fired == {'W-SAVE-STORE'}
+
+
 def shell(command, shell_name="bash", cwd=GAME, env=None):
     a = _audit()
     v = shell_rules.decide(command, _roots(), a, cwd=cwd, shell=shell_name, env=ENV0 if env is None else env)
@@ -192,10 +208,10 @@ def test_a_recycle_bin_delete_of_the_state_is_s_self_state_in_every_spelling(com
     assert decision == "deny" and fired == {"S-SELF-STATE"}, (decision, fired)
 
 
-def test_a_delete_of_the_whole_install_stays_s_del_install():
-    """I1 is about the state, not the install: deleting the whole install (which holds .skyguard) keeps its own rule."""
+def test_a_delete_of_the_whole_install_cannot_destroy_permanent_backups():
+    """The 4.0 policy protects registered save-store ancestors even with guards off."""
     (decision, _), fired = shell("rm -rf \"" + GAME + "\"")
-    assert decision == "deny" and fired == {"S-DEL-INSTALL"}
+    assert decision == "deny" and fired == {"S-SAVE-STORE"}
 
 
 @pytest.mark.parametrize("route", ["shell", "write"])
@@ -303,8 +319,15 @@ def test_a_git_restore_of_a_guard_file_outside_the_install_is_the_guard_rule(com
 
 
 def test_a_user_level_write_tool_is_a_guard_file():
-    (_, text), fired = write("~/.claude/settings.json", cwd="C:/work", env=UENV)
+    (_, text), fired = write(HOME + "/.claude/settings.json", cwd="C:/work", env=UENV)
     assert fired == {"W-SELF-GUARD"}
+
+
+def test_native_file_tool_tilde_is_a_literal_directory_name():
+    # Shell operands expand ~; native file tools do not. This file is under
+    # C:/work/~ rather than the user's actual hook configuration folder.
+    (_, text), fired = write("~/.claude/settings.json", cwd="C:/work", env=UENV)
+    assert not fired
 
 
 @pytest.mark.parametrize("command", [

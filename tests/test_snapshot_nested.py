@@ -704,13 +704,19 @@ def test_materialise_refuses_a_malformed_hash(tmp_path):
 
 @needs_windows
 def test_materialise_replaces_a_hard_linked_target_instead_of_writing_through(tmp_path):
+    """Explicit replacement breaks the Vortex link; default materialisation refuses it."""
     put(tmp_path, "Data/Scripts/a.pex", b"snapshot content")
     snap(tmp_path)
     out = tmp_path / "out"
     staging = put(tmp_path, "staging/a.pex", b"staging must stay")
     (out / "Data" / "Scripts").mkdir(parents=True)
     os.link(str(staging), str(out / "Data" / "Scripts" / "a.pex"))
-    snapshot.materialise(str(tmp_path), snapshot.manifest_names(store(tmp_path))[-1], str(out))
+    name = snapshot.manifest_names(store(tmp_path))[-1]
+    with pytest.raises(OSError):
+        snapshot.materialise(str(tmp_path), name, str(out))
+    assert (out / "Data" / "Scripts" / "a.pex").read_bytes() == b"staging must stay"
+    files = snapshot.resolve(store(tmp_path), name)
+    snapshot.write_blobs(store(tmp_path), [(out / rel, sha) for rel, sha in files.items()], replace=True)
     assert (out / "Data" / "Scripts" / "a.pex").read_bytes() == b"snapshot content"
     assert staging.read_bytes() == b"staging must stay"
 

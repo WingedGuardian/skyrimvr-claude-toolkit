@@ -78,7 +78,7 @@ def pristine(tmp_path_factory):
     if (root / "scripts" / "layer2-spike").is_dir():
         shutil.rmtree(root / "scripts" / "layer2-spike")
     for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", ".claude/backups",
-                 "KNOWLEDGEBASE.local.md", ".superpowers", ".skyguard"):
+                 "KNOWLEDGEBASE.local.md", ".superpowers", ".skyguard", "tools/resaver-cli/tests"):
         p = root / junk
         if p.is_dir():
             shutil.rmtree(p)

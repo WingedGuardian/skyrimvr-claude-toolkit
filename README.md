@@ -86,7 +86,7 @@ The clearest example: **xeditlib**. XEditLib.dll is the engine inside SSEEdit/xE
 - **Log triage that cannot quietly drop rows** -- `papyrus-triage` buckets and attributes a Papyrus log; `crash-triage` reduces ~5,500-line CrashLogger dumps to ranked signatures and labels the ones your knowledgebase already ruled on. Both print the denominator first, sum their rows against independently counted totals, and print the not-shown row even when it is zero -- and both are mutation-tested, so a check that stopped biting fails CI.
 - **Dry-run workflow** -- All ESP and asset changes go through a preview pass first. Claude shows you exactly what it will do before touching anything.
 - **Claude Code skills** -- Slash commands like `/inspect-esp MyMod.esp`, `/port-to-vr`, and `/create-mod` that trigger guided workflows. Auto-loading context that injects critical Skyrim gotchas when Claude works with game files.
-- **Requirements** -- **Python 3 is required** for the safety hooks (they are thin wrappers over a Python engine in `tools/skyguard/`; without Python they refuse every command until it is installed and `setup.sh` is re-run). `jq` is optional. Node.js is needed only for xeditlib.
+- **Requirements** -- **Python 3.10+ is required** for the safety hooks and offline shared harness (tested on 3.10–3.13; without a suitable Python they refuse commands until it is installed and `setup.sh` is re-run). `jq` is optional. Node.js is needed only for xeditlib.
 - **Auto-setup** -- One prompt installs prerequisites, configures paths, sets up hooks, and optionally installs modding tools. No manual configuration.
 
 ### Optional tools (install as needed)

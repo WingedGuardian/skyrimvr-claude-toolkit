@@ -51,7 +51,10 @@ import os
 import re
 import shutil
 import time
+import uuid
 from pathlib import Path
+
+from modding_harness import durable
 
 from . import backup, snapshot
 
@@ -71,7 +74,7 @@ KEEP_DAYS = 14
 PRUNE_EVERY = DAY
 PRUNE_BOX = 0.5
 _BLOB = re.compile(r"^[0-9a-f]{64}$")
-_ID = re.compile(r"^\d{8}_\d{6}-(config|save)(?:-\d+)?\Z")   # \Z: `$` also matches before a final newline
+_ID = re.compile(r"^\d{8}_\d{6}-(config|save)(?:-(?:\d+|[0-9a-f]{32}))?\Z")
 _MB = 1024 * 1024
 
 
@@ -145,6 +148,10 @@ def _read_index(store):
 def _new_id(idx, ts, kind):
     """`<stamp>-<kind>`, with `-2`, `-3` ... when the previous snapshot of that kind took the same second."""
     base = "{}-{}".format(ts, kind)
+    if kind == "save":
+        sid = base + "-" + uuid.uuid4().hex
+        idx["last"][kind] = sid
+        return sid
     last = idx["last"].get(kind, "")
     n = 1
     if last == base:
@@ -362,12 +369,28 @@ def backup_saves(project, audit, pairs, command, agent="", session_id="", deadli
 
 def _backup_locked(store, audit, plan, command, agent, session_id, deadline, now):
     blobs = store / "blobs"
+    # Capture identities before copying any member, then revalidate the whole set
+    # after every copy. Size/mtime alone cannot detect metadata-preserving writes.
+    before = {f: durable.identity(f) for have, _missing in plan for f in have}
     stored = []
     for have, missing in plan:
         stored.append(([(f, _store_verified(blobs, f, deadline)) for f in have], missing))
+    try:
+        for got, missing in stored:
+            for f, sha in got:
+                if (durable.identity(f) != before[f] or durable.digest(f, deadline) != sha
+                        or durable.identity(f) != before[f]):
+                    raise SaveBackupFailed("{} changed before the complete save was preserved".format(f))
+            for f in missing:
+                if os.path.lexists(f) or _listed(*os.path.split(f)):
+                    raise SaveBackupFailed("the missing save counterpart {} appeared during preservation".format(f))
+    except OSError as exc:
+        raise SaveBackupFailed("the complete save could not be revalidated ({})".format(exc)) from exc
     idx = _read_index(store)
     ts = audit.stamp()
     lines, ids = [], []
+    if shutil.disk_usage(str(store)).free < SAVE_RESERVE_BYTES:
+        raise SaveBackupFailed("the backup drive lost its free-space reserve during preservation")
     for got, missing in stored:
         sid = _new_id(idx, ts, "save")
         ids.append(sid)
@@ -380,7 +403,14 @@ def _backup_locked(store, audit, plan, command, agent, session_id, deadline, now
     data = b"".join((json.dumps(e, ensure_ascii=True) + "\n").encode("ascii") for e in lines)
     try:
         backup._append_line(store / MANIFEST, data)
-    except OSError:
+        # Windows _commit (os.fsync) requires a write-capable descriptor.
+        with open(store / MANIFEST, "r+b") as manifest:
+            os.fsync(manifest.fileno())
+        durable.sync_dir(store)
+        for sid in ids:
+            if not resolve(store, sid):
+                raise ValueError("empty save snapshot")
+    except (OSError, ValueError):
         raise SaveBackupFailed("the backup manifest could not be written")
     try:
         snapshot._write_replace(store / INDEX, json.dumps(idx, ensure_ascii=True, sort_keys=True).encode("ascii"))
@@ -510,6 +540,15 @@ def prune(store, now, audit, deadline=None):
     removed."""
     store = Path(store)
     mpath = store / MANIFEST
+    # A missing/empty authority is not proof that every blob is an orphan. In
+    # particular, never apply the legacy collector to neutral permanent saves.
+    try:
+        unknown = (store / "transactions").exists() or not mpath.is_file() or mpath.stat().st_size == 0
+    except OSError:
+        unknown = True
+    if unknown:
+        audit.log(HOOK, "PRUNE-SKIPPED", "no nonempty legacy recovery manifest; no blob was pruned")
+        return 0
 
     def late():
         return deadline is not None and time.monotonic() >= deadline

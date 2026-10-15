@@ -222,7 +222,7 @@ def test_an_unexpected_event_is_a_failed_deny(tmp_path):
 
 def test_an_mcp_tool_is_allowed_and_recorded(tmp_path):
     v = _run(tmp_path, _pre("mcp__probe__echo", {"text": "hi"}))
-    assert (v.decision, v.status) == ("allow", "evaluated")
+    assert (v.decision, v.status) == ("allow", "partial")
     lines = (tmp_path / ".claude" / "backups" / "codex-unhooked-tools.log").read_text().splitlines()
     assert len(lines) == 1 and "mcp__probe__echo" in lines[0]
 
@@ -474,7 +474,7 @@ def test_an_ordinary_devbench_call_is_allowed_silently(tmp_path):
 
 def test_only_devbench_servers_are_judged_on_codex(tmp_path):
     v = _run(tmp_path, _pre("mcp__probe__console", {"action": "exec", "command": "smp reset"}))
-    assert (v.decision, v.context) == ("allow", "")
+    assert v.decision == "allow" and "WARN AND ALLOW" in v.context and v.status == "partial"
     assert "mcp__probe__console" in _unhooked_log(tmp_path)
 
 
@@ -494,9 +494,13 @@ def test_a_devbench_save_over_an_existing_save_is_backed_up_then_allowed_on_code
     v, audit = _run_with_saves(tmp_path, _pre("mcp__devbench-vr__game", {"action": "save", "name": "Existing"}))
     assert v.decision == "allow" and v.code == "shell.S-SAVE-BACKUP" and "Existing" in v.context
     assert ("S-SAVE-BACKUP", "advise") in audit.fired
-    from skyguard import recovery
-    saved = [e for e in recovery.read_manifest(recovery.store_dir(str(tmp_path)))[0] if e["kind"] == "save"]
-    assert [e["src"].replace(chr(92), "/").rsplit("/", 1)[-1] for e in saved] == ["Existing.ess"]
+    from skyguard import save_store
+    store = save_store.store(tmp_path)
+    manifests = list((store.root / "transactions").glob("*.json"))
+    assert len(manifests) == 1
+    members = [member for group in store.load(manifests[0].stem)["groups"] for member in group["members"]]
+    assert [Path(member["path"]).name for member in members if not member["missing"]] == ["Existing.ess"]
+    assert [Path(member["path"]).name for member in members if member["missing"]] == ["Existing.skse"]
     assert "permissionDecision" not in json.loads(codex.render(v) or "{}").get("hookSpecificOutput", {})
 
 

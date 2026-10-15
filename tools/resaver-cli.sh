@@ -32,13 +32,13 @@
 #   verify                        check ReSaver.jar and lib/ against the pinned SHA-256s below (no JDK needed)
 #
 # Notes: writes NEVER overwrite the input save. Always review dry-run output before --apply.
-#   Every --apply is VERIFY-GATED: the output is re-read and compared to the written model; on ANY
-#   unintended divergence the output is DELETED and the op fails (fail-to-write beats silent corruption).
+#   Every --apply is VERIFY-GATED: a private candidate is re-read and compared to the written model.
+#   Failed candidates are quarantined in their owned staging directory; existing destinations stay intact.
 # Names: ResaverCLI emits Plugin:FORMID; resolve to EditorIDs on demand via tools/resaver-resolve-names.js.
 #
 # Requires ReSaver 6.0.643 (FallrimTools, Nexus mod 5031; ReSaver.jar's SHA-256 is in docs/installing-tools.md
 # *Pinned downloads*) with its lib/ in tools/resaver-cli/, and JDK 17+ (JDK 21 LTS recommended). The wrapper
-# compiles its small driver on first run, and again whenever the JDK's major version changes.
+# compiles its driver in an isolated cache keyed by source/library bytes and the full JDK/compiler identity.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd -W 2>/dev/null)"
@@ -138,63 +138,41 @@ fi
 # is JDK 23+. Hardcoding them makes the tool fail to start on JDK 17-22, so gate by version.
 JV=$(java -version 2>&1 | awk -F'"' '/version/{print $2}' | awk -F'[._]' '{if($1=="1")print $2; else print $1}')
 FLAGS=""
+# ReSaver uses parallel streams. Keep the default modest for agents sharing a
+# machine with the game and other jobs; an operator can set a numeric worker count.
+WORKERS="${RESAVER_CLI_WORKERS:-2}"
+case "$WORKERS" in ''|*[!0-9]*) echo '{"ok":false,"error":"RESAVER_CLI_WORKERS must be a positive integer"}'; exit 2;; esac
+if [ "$WORKERS" -lt 1 ]; then echo '{"ok":false,"error":"RESAVER_CLI_WORKERS must be positive"}'; exit 2; fi
+FLAGS="-Djava.util.concurrent.ForkJoinPool.common.parallelism=$WORKERS"
 [ "${JV:-0}" -ge 17 ] 2>/dev/null && FLAGS="$FLAGS --enable-native-access=ALL-UNNAMED"
 [ "${JV:-0}" -ge 23 ] 2>/dev/null && FLAGS="$FLAGS --sun-misc-unsafe-memory-access=allow"
 
-# Compile the driver once, when the source is newer than the class, or when the JDK's major version differs from
-# the one that compiled it (a class built by JDK 24 does not load on the pinned JDK 21: UnsupportedClassVersionError).
-# The stamp also stands for the overlay's classes, which the same JDK compiled.
-STAMP="$TOOL/.compiled-by-jdk"
-JDK_CHANGED=0
-[ "$(cat "$STAMP" 2>/dev/null)" = "${JV:-?}" ] || JDK_CHANGED=1
-if [ ! -f "$TOOL/ResaverCLI.class" ] || [ "$TOOL/ResaverCLI.java" -nt "$TOOL/ResaverCLI.class" ]; then
-  javac -cp "$CP" -d "$TOOL" "$TOOL/ResaverCLI.java" >&2 || { echo '{"ok":false,"error":"compile failed"}'; exit 1; }
-  printf '%s\n' "${JV:-?}" > "$STAMP" 2>/dev/null || true
-elif [ "$JDK_CHANGED" = 1 ]; then
-  # The class exists and may still load; a failed rebuild (no javac on PATH, say) warns instead of stopping.
-  if javac -cp "$CP" -d "$TOOL" "$TOOL/ResaverCLI.java" >&2; then
-    printf '%s\n' "${JV:-?}" > "$STAMP" 2>/dev/null || true
-  else
-    echo "[resaver-cli] WARN: could not recompile the driver for JDK ${JV:-?}; trying the existing class." >&2
-  fi
-fi
-
-# Op-aware classpath (corruption safety). The analysis overlay carries modified-ReSaver parser fixes
-# (ChangeFormExtraDataData cases 16/135 + RECENT, ChangeFormQust A1, ChangeFormRefr extra-data). It is
-# prepended ONLY for read/diagnostic ops. Every WRITE-capable op (and any unknown op) runs the STOCK jar
-# so ChangeForm.write() emits rawData verbatim — an authored fix can never reach updateRawData/writeESS.
-# Default = stock (safe).
+# Fingerprinted compilation: source bytes, all JARs, full JDK/compiler identity,
+# overlay sources and flags. Compilation is isolated and activation verified.
+# A write cannot fall back to a stale or unverified class.
 OP="${1:-}"
+READ=()
 case "$OP" in
   info|dump|changeform|find-refs|find|worries|extradata-scan|recon|changeform-diff|freeze-report|globaldata|globaldata-diff)
-    EDD_SRC="$OVERLAY/resaver/ess/ChangeFormExtraDataData.java"
-    QUST_SRC="$OVERLAY/resaver/ess/ChangeFormQust.java"
-    REFR_SRC="$OVERLAY/resaver/ess/ChangeFormRefr.java"
-    EDD_CLS="$OVERLAY/resaver/ess/ChangeFormExtraDataData.class"
-    QUST_CLS="$OVERLAY/resaver/ess/ChangeFormQust.class"
-    REFR_CLS="$OVERLAY/resaver/ess/ChangeFormRefr.class"
-    OVERLAY_OK=1
-    if [ -f "$EDD_SRC" ]; then
-      if [ ! -f "$EDD_CLS" ] || [ ! -f "$QUST_CLS" ] || [ ! -f "$REFR_CLS" ] \
-         || [ "$EDD_SRC" -nt "$EDD_CLS" ] || [ "$QUST_SRC" -nt "$QUST_CLS" ] || [ "$REFR_SRC" -nt "$REFR_CLS" ] \
-         || [ "$JDK_CHANGED" = 1 ]; then
-        if ! javac -cp "$CP" -d "$OVERLAY" "$EDD_SRC" "$QUST_SRC" "$REFR_SRC" >&2; then
-          # Almost always a ReSaver.jar version mismatch. Degrade gracefully to stock parsing rather
-          # than hard-failing basic reads — enhanced changeform coverage is disabled, everything else works.
-          echo "[resaver-cli] WARN: analysis-overlay failed to compile against your ReSaver.jar (likely a version mismatch) — falling back to STOCK parsing for this read op. See tools/resaver-cli/analysis-overlay/NOTICE.md." >&2
-          OVERLAY_OK=0
-        fi
-      fi
-    else
-      OVERLAY_OK=0   # overlay not installed (older layout) — stock is fine
-    fi
-    if [ "$OVERLAY_OK" = "1" ]; then RUNCP="$OVERLAY$S$TOOL$S$CP"; else RUNCP="$TOOL$S$CP"; fi
-    ;;
-  *)
-    RUNCP="$TOOL$S$CP"           # stock only — overlay structurally excluded from write ops
-    ;;
+    READ=(--read-only) ;;
+  set-global|set-var|clean|reset-havok|cleanse-formlists|remove-created|verify-roundtrip)
+    if ! bash "$0" verify >&2; then
+      echo '{"ok":false,"error":"write requires the pinned ReSaver.jar and libraries; verification failed"}'
+      exit 1
+    fi ;;
 esac
-
-[ "${RESAVER_CLI_DEBUG:-}" = "1" ] && echo "[resaver-cli] op=$OP jdk=$JV overlay=${OVERLAY_OK:-n/a} classpath=$RUNCP" >&2
-
-exec java $FLAGS -cp "$RUNCP" ResaverCLI "$@"
+JDK_ID=$(java -version 2>&1) || { echo '{"ok":false,"error":"java unavailable"}'; exit 1; }
+COMPILER_ID=$(javac -version 2>&1) || { echo '{"ok":false,"error":"javac unavailable; refusing unverified cached code"}'; exit 1; }
+PY=()
+for candidate in python python3; do
+  if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' >/dev/null 2>&1; then
+    PY=("$candidate"); break
+  fi
+done
+if [ "${#PY[@]}" -eq 0 ] && py -3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' >/dev/null 2>&1; then PY=(py -3); fi
+if [ "${#PY[@]}" -eq 0 ]; then echo '{"ok":false,"error":"Python 3.10+ required for verified compilation cache"}'; exit 1; fi
+BASH_PATH="$BASH"
+if command -v cygpath >/dev/null 2>&1; then BASH_PATH=$(cygpath -w "$BASH_PATH"); fi
+exec "${PY[@]}" -B "$HERE/resaver_cli_cache.py" --tool "$TOOL" --classpath "$CP" --bash "$BASH_PATH" \
+     --jdk "$JDK_ID" --compiler "$COMPILER_ID" --separator "$S" "${READ[@]}" \
+     --run --jvm-flags="$FLAGS" -- "$@"

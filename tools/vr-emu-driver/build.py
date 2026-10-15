@@ -3,10 +3,9 @@
 
     python tools/vr-emu-driver/build.py [--work DIR]
 
-Why it is built here and not shipped: at the pinned commit the driver's source repository carries no licence
-file and the fork it came from has none (see README.md beside this file), so the toolkit does not redistribute
-its source or a binary. This script fetches exactly one pinned
-commit for your own use, applies a one-line fix, and compiles it.
+The toolkit retains local-build delivery at its tested source pin. Upstream's
+2026-10-14 licensing response is recorded in README.md; no newer runtime source
+or AutoHotKey component is adopted by this builder.
 
 Steps, each checked:
   1. git and the MSVC build tools (Visual Studio 2022 Build Tools, "Desktop development with C++") are present.
@@ -31,6 +30,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -61,12 +61,27 @@ def run(cmd, cwd=None):
 
 def fetch(repo, commit, dest: Path, sparse=None):
     """A checkout of exactly `commit`, verified."""
-    if not (dest / ".git").is_dir():
+    if dest.is_symlink():
+        raise BuildError("refusing a linked source cache: {}".format(dest))
+    existing = dest.exists()
+    if existing:
+        if not (dest / ".git").is_dir():
+            raise BuildError("existing source directory is not this builder's Git cache: {}".format(dest))
+        dirty = run(["git", "-C", str(dest), "status", "--porcelain", "--untracked-files=all"])
+        if dirty:
+            raise BuildError("source cache has local changes; preserve them before building: {}".format(dest))
+        head = run(["git", "-C", str(dest), "rev-parse", "HEAD"])
+        if head.lower() != commit.lower():
+            raise BuildError("existing source cache is at {}; refusing to discard or switch its checkout. "
+                             "Use a fresh --work directory: {}".format(head, dest))
+        verify_head(head, commit, repo)
+        return
+    else:
         run(["git", "clone", "--no-checkout", "--filter=blob:none", repo, str(dest)])
     if sparse:
         run(["git", "-C", str(dest), "sparse-checkout", "set", *sparse])
     run(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", commit])
-    run(["git", "-C", str(dest), "-c", "advice.detachedHead=false", "checkout", "--force", commit])
+    run(["git", "-C", str(dest), "-c", "advice.detachedHead=false", "checkout", "--detach", commit])
     verify_head(run(["git", "-C", str(dest), "rev-parse", "HEAD"]), commit, repo)
 
 
@@ -106,23 +121,31 @@ def main(argv) -> int:
     if os.name != "nt":
         print("ERROR: the driver builds with MSVC on Windows only", file=sys.stderr)
         return 2
-    work = Path(argv[argv.index("--work") + 1]) if "--work" in argv else HERE / "work"
     try:
+        import argparse
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--work", type=Path, default=HERE / "work")
+        work = parser.parse_args(argv).work.resolve()
         if not shutil.which("git"):
             raise BuildError("git not found on PATH")
         bat = vcvars()
         work.mkdir(parents=True, exist_ok=True)
         fetch(DRIVER_REPO, DRIVER_COMMIT, work / "driver")
         fetch(OPENVR_REPO, OPENVR_COMMIT, work / "openvr", sparse=["headers"])
-        src = work / "src"
-        if src.exists():
-            shutil.rmtree(str(src))                  # the script's own staging copy, rebuilt every run
-        shutil.copytree(str(work / "driver"), str(src), ignore=shutil.ignore_patterns(".git"))
+        # Exclusive, fresh staging; never delete work/src or overwrite a caller's
+        # build.bat. Keep failed staging for diagnosis rather than guessing ownership.
+        src = Path(tempfile.mkdtemp(prefix="owned-build-", dir=work)).resolve()
+        if src.parent != work:
+            raise BuildError("staging resolved outside the selected work directory")
+        (src / ".toolkit-build-owner.json").write_text(json.dumps({"v": 1, "builder": str(HERE),
+                                                                 "driver_commit": DRIVER_COMMIT}), encoding="utf-8")
+        shutil.copytree(str(work / "driver"), str(src), dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns(".git", ".toolkit-build-owner.json"))
         target = src / PATCH["file"]
         target.write_bytes(apply_patch(target.read_bytes().decode("utf-8")).encode("utf-8"))
         out = src / "out"
         out.mkdir(exist_ok=True)
-        script = work / "build.bat"
+        script = src / "build.bat"
         script.write_text("@echo off\r\ncall \"{}\" >nul\r\ncd /d \"{}\"\r\ncl /nologo /LD /O2 /MT /EHsc /std:c++17 "
                           "/D_WINDOWS /DWIN32 /I\"{}\" {} /Foout\\ /Feout\\driver_null.dll /link user32.lib\r\n"
                           .format(bat, src, work / "openvr" / "headers", " ".join(SOURCES)), encoding="utf-8")

@@ -27,6 +27,14 @@ import java.nio.Buffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.LinkOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.channels.FileChannel;
+import java.security.MessageDigest;
+import java.io.InputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 
 /**
@@ -49,17 +57,39 @@ import java.util.*;
  * Writes NEVER overwrite the input; dry-run unless --apply; output goes to a NEW file.
  */
 public class ResaverCLI {
+    static InputIdentity inputIdentity;
+    static ModelEnvelope modelBefore;
+    static String activeOperation;
+    static Path callerDirectory = Paths.get("").toAbsolutePath();
 
     public static void main(String[] args) {
+        System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
+        System.setErr(new PrintStream(System.err, true, StandardCharsets.UTF_8));
         java.util.logging.Logger.getLogger("").setLevel(java.util.logging.Level.SEVERE);
         try {
+            if (args.length == 2 && args[0].equals("--arguments-file")) {
+                // Windows' JDK launcher can lose characters outside the ANSI
+                // code page. The wrapper passes only ASCII native arguments;
+                // actual arguments and cwd travel as explicit UTF-8/base64 data.
+                List<String> lines = Files.readAllLines(Paths.get(args[1]), StandardCharsets.US_ASCII);
+                if (lines.isEmpty()) throw new IllegalArgumentException("empty wrapper argument file");
+                Base64.Decoder decoder = Base64.getDecoder();
+                callerDirectory = Paths.get(new String(decoder.decode(lines.get(0)), StandardCharsets.UTF_8));
+                if (!callerDirectory.isAbsolute()) throw new IllegalArgumentException("wrapper cwd must be absolute");
+                args = lines.subList(1, lines.size()).stream()
+                        .map(line -> new String(decoder.decode(line), StandardCharsets.UTF_8)).toArray(String[]::new);
+            }
             if (args.length < 2) { err("need <op> <save> [...]"); return; }
             String op = args[0];
-            Path save = Paths.get(args[1]);
+            activeOperation = op;
+            Path save = callerPath(args[1]);
+            if (isWrite(op)) inputIdentity = new InputIdentity(save);
             ESS.Result result = ESS.readESS(save, new ModelBuilder(new ProgressModel(1)));
             ESS ess = result.ESS;
             Papyrus pap = ess.getPapyrus();
             PapyrusContext ctx = pap.getContext();
+            if (inputIdentity != null) inputIdentity.verify();
+            if (isWrite(op)) modelBefore = new ModelEnvelope(ess);
 
             switch (op) {
                 case "info":       info(ess, pap); break;
@@ -86,6 +116,119 @@ public class ResaverCLI {
         } catch (Throwable t) {
             System.out.println("{\"ok\":false,\"error\":" + jstr(t.toString()) + "}");
             t.printStackTrace(System.err);
+            System.exit(t instanceof IllegalArgumentException ? 2 : 1);
+        }
+    }
+
+    static Path callerPath(String value) {
+        Path path = Paths.get(value);
+        return (path.isAbsolute() ? path : callerDirectory.resolve(path)).normalize();
+    }
+
+    static boolean isWrite(String op) {
+        return Arrays.asList("set-global", "set-var", "clean", "reset-havok", "cleanse-formlists", "remove-created").contains(op);
+    }
+
+    static Path cosavePath(Path ess) {
+        String name = ess.getFileName().toString();
+        if (!name.toLowerCase(Locale.ROOT).endsWith(".ess"))
+            throw new IllegalArgumentException("save output must end in .ess");
+        return ess.resolveSibling(name.substring(0, name.length() - 4) + ".skse");
+    }
+
+    static byte[] fileDigest(Path path) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream in = Files.newInputStream(path)) {
+            byte[] buffer = new byte[1024 * 1024];
+            for (int n; (n = in.read(buffer)) != -1;) digest.update(buffer, 0, n);
+        }
+        return digest.digest();
+    }
+
+    static final class InputIdentity {
+        final Map<Path, byte[]> members = new LinkedHashMap<>();
+        final Map<Path, String> identities = new LinkedHashMap<>();
+        InputIdentity(Path save) throws Exception {
+            Path absolute = save.toAbsolutePath().normalize();
+            for (Path p : Arrays.asList(absolute, cosavePath(absolute))) {
+                if (Files.isSymbolicLink(p)) throw new IllegalArgumentException("linked save input is not supported");
+                members.put(p, Files.exists(p) ? fileDigest(p) : null);
+                identities.put(p, Files.exists(p) ? fileIdentity(p) : null);
+            }
+        }
+        void verify() throws Exception {
+            for (Map.Entry<Path, byte[]> e : members.entrySet()) {
+                if (Files.isSymbolicLink(e.getKey()) || (e.getValue() == null
+                        ? Files.exists(e.getKey(), LinkOption.NOFOLLOW_LINKS)
+                        : !Files.exists(e.getKey()) || !Objects.equals(identities.get(e.getKey()), fileIdentity(e.getKey()))
+                          || !Arrays.equals(e.getValue(), fileDigest(e.getKey()))
+                          || !Objects.equals(identities.get(e.getKey()), fileIdentity(e.getKey()))))
+                    throw new IllegalStateException("input save membership/bytes changed: " + e.getKey());
+            }
+        }
+    }
+
+    static String fileIdentity(Path path) throws Exception {
+        BasicFileAttributes a = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        return path.toRealPath() + "|" + a.fileKey() + "|" + a.size() + "|" + a.lastModifiedTime();
+    }
+
+    static String bytesDigest(byte[] bytes) throws Exception {
+        return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
+    /** Baseline-to-model fence, separate from model-to-readback verification. */
+    static final class ModelEnvelope {
+        final Map<String, String> tables = new LinkedHashMap<>();
+        final Map<String, String> forms = new LinkedHashMap<>();
+        final Map<String, String> types = new HashMap<>();
+        final Map<String, Float> globals;
+        final int[] formids, visited;
+        final byte[] cosave;
+        ModelEnvelope(ESS ess) throws Exception {
+            for (String name : new String[]{"TABLE1", "TABLE2", "TABLE3"}) {
+                List<GlobalData> entries = gdTable(ess, name);
+                if (entries == null) throw new IllegalStateException("global table unavailable: " + name);
+                for (int i = 0; i < entries.size(); i++) {
+                    GlobalData g = entries.get(i);
+                    tables.put(name + ":" + i + ":" + g.getType(), bytesDigest(completeGlobalBytes(g)));
+                }
+            }
+            for (ChangeForm f : ess.getChangeForms()) {
+                String key = str(f.getRefID());
+                forms.put(key, str(f.getChangeFlags()) + ":" + f.getVersion() + ":" + bytesDigest(cfBytes(f)));
+                types.put(key, str(f.getType()));
+            }
+            globals = globalsMap(ess);
+            formids = ess.getFormIDs().clone();
+            visited = ess.getVisitedWorldspaceArray().clone();
+            cosave = ess.getCosave() == null ? null : ess.getCosave().clone();
+        }
+        void verifyAfter(ESS ess, String operation) throws Exception {
+            ModelEnvelope after = new ModelEnvelope(ess);
+            if (!tables.keySet().equals(after.tables.keySet()) || !forms.keySet().equals(after.forms.keySet()))
+                throw new IllegalStateException("operation unexpectedly added/removed global blocks or ChangeForms");
+            String permittedTable = operation.equals("set-global") ? ":3"
+                    : Arrays.asList("set-var", "clean", "remove-created").contains(operation) ? ":1001" : "none";
+            for (String key : tables.keySet())
+                if (!tables.get(key).equals(after.tables.get(key)) && !key.endsWith(permittedTable))
+                    throw new IllegalStateException("operation changed an unrelated global block: " + key);
+            String permittedForm = operation.equals("reset-havok") ? "REFR"
+                    : operation.equals("cleanse-formlists") ? "FLST" : "none";
+            for (String key : forms.keySet())
+                if (!forms.get(key).equals(after.forms.get(key)) && !permittedForm.equals(types.get(key)))
+                    throw new IllegalStateException("operation changed an unrelated ChangeForm: " + key);
+            if (!operation.equals("set-global") && !globals.equals(after.globals))
+                throw new IllegalStateException("operation changed unrelated globals");
+            if (operation.equals("set-global")) {
+                if (!globals.keySet().equals(after.globals.keySet()))
+                    throw new IllegalStateException("set-global changed global identities");
+                long changed = globals.keySet().stream().filter(k -> !globals.get(k).equals(after.globals.get(k))).count();
+                if (changed > 1) throw new IllegalStateException("set-global changed more than one global");
+            }
+            if (!Arrays.equals(formids, after.formids) || !Arrays.equals(visited, after.visited)
+                    || !Arrays.equals(cosave, after.cosave))
+                throw new IllegalStateException("operation changed FormID/worldspace arrays or cosave bytes");
         }
     }
 
@@ -425,6 +568,7 @@ public class ResaverCLI {
         if (pos.size() < 2) { err("set-global needs <target> <value> [<out.ess>] [--apply]"); return; }
         String target = pos.get(0);
         float newVal = Float.parseFloat(pos.get(1));
+        if (!Float.isFinite(newVal)) throw new IllegalArgumentException("global value must be finite");
         boolean apply = has(args, "--apply");
         String out = pos.size() > 2 ? pos.get(2) : null;
 
@@ -434,16 +578,16 @@ public class ResaverCLI {
         }
         StringBuilder b = new StringBuilder();
         b.append("{\"ok\":true,\"op\":\"set-global\",\"target\":").append(jstr(target)).append(",\"apply\":").append(apply);
-        if (match == null) { b.append(",\"found\":false}"); System.out.println(b); return; }
+        if (match == null) {
+            if (apply) { err("global target not found; nothing was written"); return; }
+            b.append(",\"found\":false}"); System.out.println(b); return;
+        }
         b.append(",\"found\":true,\"global\":").append(jstr(str(match)))
          .append(",\"oldValue\":").append(match.getValue()).append(",\"newValue\":").append(newVal);
         if (!apply) { b.append(",\"dryRun\":true}"); System.out.println(b); return; }
-        if (out == null) { b.append(",\"error\":\"--apply needs <out.ess>\"}"); System.out.println(b); return; }
+        if (out == null) { err("--apply needs <out.ess>"); return; }
         match.setValue(newVal);
-        Path outPath = Paths.get(out);
-        ESS.writeESS(ess, outPath, false);
-        b.append(",\"out\":").append(jstr(outPath.toString())).append("}");
-        System.out.println(b);
+        finishWrite(b, ess, apply, out);
     }
 
     // toString() = "([name] )?PLUGIN:FORMIDHEX = value"; match target = formidHex | Plugin:formid
@@ -472,8 +616,7 @@ public class ResaverCLI {
         StringBuilder b = new StringBuilder();
         b.append("{\"ok\":true,\"op\":\"set-var\",\"target\":").append(jstr(eidHex));
         if (!(target instanceof HasVariables)) {
-            b.append(",\"found\":").append(target != null).append(",\"error\":\"target has no variables\"}");
-            System.out.println(b); return;
+            err("target not found or has no variables"); return;
         }
         HasVariables hv = (HasVariables) target;
         List<Variable> vars = hv.getVariables();
@@ -494,20 +637,17 @@ public class ResaverCLI {
         String val = pos.get(2);
         boolean apply = has(args, "--apply");
         String out = pos.size() > 3 ? pos.get(3) : null;
-        if (index < 0 || index >= vars.size()) { b.append(",\"error\":\"index out of range\"}"); System.out.println(b); return; }
+        if (index < 0 || index >= vars.size()) { err("index out of range"); return; }
         Variable old = vars.get(index);
         String type = flagVal(args, "--type");
         Variable nv = buildVar(old, type, val, ctx);
-        if (nv == null) { b.append(",\"error\":\"unsupported var type (primitives int/float/bool/str only)\"}"); System.out.println(b); return; }
+        if (nv == null) { err("unsupported var type (primitives int/float/bool/str only)"); return; }
         b.append(",\"index\":").append(index).append(",\"oldValue\":").append(jstr(str(old)))
          .append(",\"newValue\":").append(jstr(str(nv))).append(",\"apply\":").append(apply);
         if (!apply) { b.append(",\"dryRun\":true}"); System.out.println(b); return; }
-        if (out == null) { b.append(",\"error\":\"--apply needs <out.ess>\"}"); System.out.println(b); return; }
+        if (out == null) { err("--apply needs <out.ess>"); return; }
         hv.setVariable(index, nv);
-        Path outPath = Paths.get(out);
-        ESS.writeESS(ess, outPath, false);
-        b.append(",\"out\":").append(jstr(outPath.toString())).append("}");
-        System.out.println(b);
+        finishWrite(b, ess, apply, out);
     }
 
     static Variable buildVar(Variable old, String type, String val, PapyrusContext ctx) {
@@ -558,20 +698,17 @@ public class ResaverCLI {
         if (undef) rUndef = pap.removeUndefinedElements().size();
         if (term)  rTerm  = pap.terminateUndefinedThreads().size();
         if (out == null) { err("clean --apply needs <out.ess>"); return; }
-        Path outPath = Paths.get(out);
-        ESS.writeESS(ess, outPath, false);
         b.append(",\"removedUnattached\":").append(rUnatt)
          .append(",\"removedUndefined\":").append(rUndef)
-         .append(",\"terminatedThreads\":").append(rTerm)
-         .append(",\"out\":").append(jstr(outPath.toString())).append("}");
-        System.out.println(b);
+         .append(",\"terminatedThreads\":").append(rTerm);
+        finishWrite(b, ess, apply, out);
     }
 
     // ========== CORRUPTION-SAFETY CORE ==========
     // We author NO serialization. Writes delegate to ReSaver's own ESS methods + ESS.writeESS.
     // Every --apply is VERIFY-GATED: re-read the output and confirm it equals the in-memory model
-    // that produced it; on ANY divergence DELETE the output and fail. Fail-to-write beats silent
-    // corruption. ChangeForm.write() emits original rawData verbatim unless updateRawData() was
+    // that produced it; on ANY divergence retain the owned candidate and fail. Existing destinations stay intact.
+    // ChangeForm.write() emits original rawData verbatim unless updateRawData() was
     // explicitly called (so unmodified forms are byte-faithful by construction).
 
     /** Op-agnostic invariant: re-read(output) MUST equal the in-memory model that wrote it.
@@ -597,7 +734,7 @@ public class ResaverCLI {
         if (onlyB>0) d.append("onlyInActual=").append(onlyB).append("; ");
         if (readErr>0) d.append("bodyReadErrors=").append(readErr).append("; ");
         Map<String,Float> ga = globalsMap(expected), gb = globalsMap(actual);
-        if (ga.size() != gb.size()) d.append("globalCount ").append(ga.size()).append("->").append(gb.size()).append("; ");
+        if (!ga.keySet().equals(gb.keySet())) d.append("global identities differ; ");
         int gDiff=0; for (String k : ga.keySet()) { Float vb = gb.get(k); if (vb!=null && !ga.get(k).equals(vb)) gDiff++; }
         if (gDiff>0) d.append("globalValueDiff=").append(gDiff).append("; ");
         Papyrus pa = expected.getPapyrus(), pb = actual.getPapyrus();
@@ -611,40 +748,100 @@ public class ResaverCLI {
     static byte[] cfBytes(ChangeForm c) { ByteBuffer b=c.getBodyData(); if (b==null) return new byte[0]; ((Buffer)b).position(0); byte[] r=new byte[b.remaining()]; b.get(r); return r; }
     static Map<String,Float> globalsMap(ESS e) { Map<String,Float> m=new HashMap<>(); for (GlobalVariable g : e.getGlobals().getVariables()){ String s=str(g); int i=s.indexOf(" = "); m.put(i<0?s:s.substring(0,i), g.getValue()); } return m; }
 
-    /** After writeESS, re-read the output and confirm it equals the in-memory model.
-     *  On ANY divergence or read failure, DELETE the output (+ cosave) and return the divergence. */
+    /** Re-read an owned candidate and compare it with the model. Never delete paths supplied by a caller. */
     static String verifyWrite(ESS expected, Path outPath) {
         try {
             ESS reread = ESS.readESS(outPath, new ModelBuilder(new ProgressModel(1))).ESS;
+            // The pinned library compares complete serialized Papyrus and cosave
+            // bytes using explicit exceptions, independent of JVM assertions.
+            ESS.verifyIdentical(expected, reread);
             String diff = compareModels(expected, reread);
-            if (diff == null) return null;
-            deleteOutput(outPath);
-            return diff;
+            if (diff != null) return diff;
+            for (String table : new String[]{"TABLE1", "TABLE2", "TABLE3"}) {
+                List<GlobalData> a = gdTable(expected, table), c = gdTable(reread, table);
+                if (a == null || c == null || a.size() != c.size()) return table + " unavailable or count differs";
+                for (int i = 0; i < a.size(); i++)
+                    if (!Arrays.equals(completeGlobalBytes(a.get(i)), completeGlobalBytes(c.get(i))))
+                        return table + " serialized block differs at " + i;
+            }
+            return null;
         } catch (Throwable t) {
-            deleteOutput(outPath);
             return "re-read FAILED: " + t;
         }
     }
-    static void deleteOutput(Path outPath) {
-        try { Files.deleteIfExists(outPath); } catch (Throwable ignore) {}
-        try {
-            String fn = outPath.getFileName().toString();
-            if (fn.toLowerCase().endsWith(".ess"))
-                Files.deleteIfExists(outPath.resolveSibling(fn.substring(0, fn.length()-4) + ".skse"));
-        } catch (Throwable ignore) {}
+
+    static byte[] completeGlobalBytes(GlobalData block) {
+        ByteBuffer data = ByteBuffer.allocate(block.calculateSize()).order(ByteOrder.LITTLE_ENDIAN);
+        block.write(data);
+        if (data.hasRemaining()) throw new IllegalStateException("global block serialized an unexpected size");
+        return data.array();
+    }
+
+    static void requireNewPair(Path output) throws Exception {
+        for (Path p : Arrays.asList(output, cosavePath(output)))
+            if (Files.exists(p, LinkOption.NOFOLLOW_LINKS))
+                throw new IllegalArgumentException("refusing existing destination pair member: " + p);
+    }
+
+    static void syncFile(Path path) throws Exception {
+        try (FileChannel file = FileChannel.open(path, StandardOpenOption.WRITE)) { file.force(true); }
+    }
+
+    static void publishNew(Path source, Path target) throws Exception {
+        // createLink is exclusive on supported filesystems. No check-then-rename
+        // fallback: an unsupported filesystem must refuse rather than clobber.
+        Files.createLink(target, source);
+        Files.delete(source);
     }
 
     /** Shared dry-run/apply tail with the MANDATORY verify gate. */
     static void finishWrite(StringBuilder b, ESS ess, boolean apply, String out) throws Exception {
         if (!apply) { b.append(",\"dryRun\":true,\"wroteFile\":false}"); System.out.println(b); return; }
-        if (out == null) { b.append(",\"error\":\"--apply needs <out.ess>\",\"wroteFile\":false}"); System.out.println(b); return; }
-        Path outPath = Paths.get(out);
-        if (Files.exists(outPath)) { b.append(",\"error\":\"refusing to overwrite existing file; choose a NEW out.ess\",\"wroteFile\":false}"); System.out.println(b); return; }
-        ESS.writeESS(ess, outPath, false);
-        String diff = verifyWrite(ess, outPath);
-        if (diff != null) {
-            b.append(",\"verified\":false,\"corruptionGuard\":\"OUTPUT DELETED\",\"divergence\":").append(jstr(diff)).append(",\"wroteFile\":false}");
-            System.out.println(b); return;
+        if (out == null) { err("--apply needs <out.ess>"); return; }
+        Path outPath = callerPath(out);
+        requireNewPair(outPath);
+        if (inputIdentity == null) throw new IllegalStateException("write input identity was not captured");
+        if (modelBefore == null) throw new IllegalStateException("write model baseline was not captured");
+        modelBefore.verifyAfter(ess, activeOperation);
+        inputIdentity.verify();
+        Files.createDirectories(outPath.getParent());
+        Path stage = Files.createTempDirectory(outPath.getParent(), ".resaver-staging-");
+        Path candidate = stage.resolve(outPath.getFileName());
+        List<String> published = new ArrayList<>();
+        List<Path> journal = new ArrayList<>();
+        try {
+            Path plan = stage.resolve("TRANSACTION.json");
+            Files.writeString(plan, "{\"op\":" + jstr(activeOperation) + ",\"destination\":" + jstr(outPath.toString()) + "}",
+                              StandardOpenOption.CREATE_NEW);
+            syncFile(plan);
+            journal.add(plan);
+            ESS.writeESS(ess, candidate, false);
+            syncFile(candidate);
+            if (Files.exists(cosavePath(candidate))) syncFile(cosavePath(candidate));
+            String diff = verifyWrite(ess, candidate);
+            if (diff != null) throw new IllegalStateException("candidate verification failed: " + diff);
+            inputIdentity.verify();
+            requireNewPair(outPath);
+            // Both members have been checked before either can become visible.
+            // Publication is per file; a concurrent creator can cause a partial
+            // publication, which is recorded and never labelled successful.
+            for (Path member : Arrays.asList(candidate, cosavePath(candidate))) {
+                if (!Files.exists(member)) continue;
+                Path destination = outPath.resolveSibling(member.getFileName());
+                publishNew(member, destination);
+                published.add(destination.toString());
+                Path progress = stage.resolve("published-" + published.size() + ".json");
+                Files.writeString(progress, "{\"path\":" + jstr(destination.toString()) + "}", StandardOpenOption.CREATE_NEW);
+                syncFile(progress);
+                journal.add(progress);
+            }
+            for (Path event : journal) Files.delete(event);
+            Files.delete(stage);
+        } catch (Exception failure) {
+            String note = "failed candidate retained at " + stage + "; published=" + published + "; " + failure;
+            try { Files.writeString(stage.resolve("FAILURE.txt"), note, StandardOpenOption.CREATE_NEW); }
+            catch (Exception ignored) { /* original error still names all published files and owned staging */ }
+            throw new IllegalStateException(note, failure);
         }
         b.append(",\"verified\":true,\"wroteFile\":true,\"out\":").append(jstr(outPath.toString())).append("}");
         System.out.println(b);
@@ -658,8 +855,7 @@ public class ResaverCLI {
         b.append("{\"ok\":true,\"op\":\"verify-roundtrip\"");
         try {
             ESS.writeESS(ess, tmp, false);
-            ESS reread = ESS.readESS(tmp, new ModelBuilder(new ProgressModel(1))).ESS;
-            String diff = compareModels(ess, reread);
+            String diff = verifyWrite(ess, tmp);
             b.append(",\"identical\":").append(diff==null);
             if (diff != null) b.append(",\"divergence\":").append(jstr(diff));
             b.append(",\"changeForms\":").append(ess.getChangeForms().size());
@@ -874,7 +1070,7 @@ public class ResaverCLI {
         String saveB = arg(args, 2, null);
         if (saveB == null) { err("changeform-diff needs <saveB> [refidHex|--quests]"); return; }
         boolean quests = has(args, "--quests");
-        ESS essB = ESS.readESS(Paths.get(saveB), new ModelBuilder(new ProgressModel(1))).ESS;
+        ESS essB = ESS.readESS(callerPath(saveB), new ModelBuilder(new ProgressModel(1))).ESS;
         Map<String,ChangeForm> ia = indexCF(essA), ib = indexCF(essB);
         StringBuilder b = new StringBuilder();
         b.append("{\"ok\":true,\"op\":\"changeform-diff\",\"saveB\":").append(jstr(saveB));
@@ -1213,7 +1409,7 @@ public class ResaverCLI {
     static void globalDataDiff(ESS essA, String[] args) throws Exception {
         String saveB = arg(args, 2, null);
         if (saveB == null) { err("globaldata-diff needs <saveB>"); return; }
-        ESS essB = ESS.readESS(Paths.get(saveB), new ModelBuilder(new ProgressModel(1))).ESS;
+        ESS essB = ESS.readESS(callerPath(saveB), new ModelBuilder(new ProgressModel(1))).ESS;
         Map<Integer,byte[]> ma = new LinkedHashMap<>(), mb = new LinkedHashMap<>();
         Map<Integer,Integer> sa = new LinkedHashMap<>(), sb = new LinkedHashMap<>();
         for (GlobalData gd : gdBlocks(essA)) { ma.put(gd.getType(), gdBytes(gd)); sa.put(gd.getType(), gdSize(gd)); }
@@ -1247,7 +1443,7 @@ public class ResaverCLI {
         System.out.println(b);
     }
 
-    static void err(String m) { System.out.println("{\"ok\":false,\"error\":" + jstr(m) + "}"); }
+    static void err(String m) { throw new IllegalArgumentException(m); }
     static void kv(StringBuilder b, String k, String v) { b.append(",\"").append(k).append("\":").append(jstr(v)); }
     static void kvn(StringBuilder b, String k, long v) { b.append(",\"").append(k).append("\":").append(v); }
 
