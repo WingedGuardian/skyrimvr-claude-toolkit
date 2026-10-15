@@ -1126,6 +1126,9 @@ echo "                  dev-only, no gameplay change, no save data. Drive it via
 echo "                  (bundled wrapper). Lets your agent test its own fixes in the running game instead"
 echo "                  of asking you to launch, trigger, and report back."
 echo ""
+echo "  House Carl   -- optional record queries and validated plugin authoring for both agents."
+echo "                  Separate setup: docs/housecarl.md (pinned backend, private environment, explicit order authority)."
+echo ""
 echo "You're ready to go! Start your agent in this folder and ask it about your mods."
 
 # --- Exit status: 0, or 1 when something this run was explicitly asked to do did not happen ---

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Optional House Carl 2.0.5 integration for Claude and Codex: pinned, hash-verified upstream download, isolated MCP client and one shared CLI/MCP gateway. Wrye-managed asterisk order and native MO2 profile inputs are independent of deployment. Ordinary plugin edits use verified permanent backups, private staging, independent xEdit checks, atomic publication, transaction receipts and conflict-aware restore. New patches remain inactive. Compaction, merging, runtime FormIDs, native pairing and facegen provenance remain unavailable. See `docs/housecarl.md` for setup and qualification limits.
+
 ## v4.0.0 — 2026-10-08
 
 ### Added

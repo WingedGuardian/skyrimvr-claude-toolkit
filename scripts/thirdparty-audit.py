@@ -582,6 +582,18 @@ def hashes(tool, published=None):
                                   "published": published}]})
 
 REGISTRY = [
+    {"name": "House Carl", "pins": [("regex", PINNED_DOWNLOADS, table_row("House Carl")),
+                                    ("regex", "tools/housecarl_integration/__init__.py", r'UPSTREAM_VERSION = "(?P<v>\d+\.\d+\.\d+)"')],
+     "upstream": ("github", "Avick3110/houseCARL"),
+     "checks": [hashes("House Carl", "https://api.github.com/repos/Avick3110/houseCARL/releases/tags/v{v}")]},
+    {"name": "House Carl MCP SDK", "pins": [("regex", "tools/housecarl-requirements.txt", r"(?m)^mcp==(?P<v>\d+\.\d+\.\d+)"),
+                                             ("regex", "tools/housecarl_integration/__init__.py", r'MCP_VERSION = "(?P<v>\d+\.\d+\.\d+)"'),
+                                             ("regex", "tools/housecarl-requirements.lock", r"(?m)^mcp==(?P<v>\d+\.\d+\.\d+)")],
+     "upstream": ("pypi", "mcp")},
+    {"name": "House Carl TOML support", "pins": [("regex", "tools/housecarl-requirements.txt", r"(?m)^tomlkit==(?P<v>\d+\.\d+\.\d+)"),
+                                                  ("regex", "tools/housecarl_integration/__init__.py", r'TOMLKIT_VERSION = "(?P<v>\d+\.\d+\.\d+)"'),
+                                                  ("regex", "tools/housecarl-requirements.lock", r"(?m)^tomlkit==(?P<v>\d+\.\d+\.\d+)")],
+     "upstream": ("pypi", "tomlkit")},
     {"name": "Spriggit", "pins": [("json", ".config/dotnet-tools.json", ["tools", "spriggit.cli", "version"])],
      "upstream": ("nuget", "spriggit.cli"),
      "refs": [{"pattern": r"dotnet tool install\b[^\n`\"]*?Spriggit\.CLI\b(?P<tail>[^\n`\"]*)",
@@ -1245,6 +1257,7 @@ def pin_of(repo, spec):
 
 DELIVERY_SUFFIXES = (".md", ".txt", ".sh", ".ps1", ".cmd", ".bat", ".py", ".json", ".yml", ".yaml", ".js", ".example")
 DELIVERY_SKIP_DIRS = {".git", "node_modules", "tests", ".superpowers", ".pytest_cache", "__pycache__", ".venv"}
+DELIVERY_PRIVATE_PATHS = (".skyguard", ".claude/backups", ".claude/settings.local.json", "KNOWLEDGEBASE.local.md")
 # Files that only record history (file-scoped; nothing in them is an instruction), plus this file's own rule text.
 DELIVERY_HISTORY_FILES = ("CHANGELOG.md", "docs/superpowers/*", "scripts/thirdparty-audit.py")
 SHA256_HEX = re.compile(r"\b[0-9a-f]{64}\b")
@@ -1452,11 +1465,14 @@ def delivery_files(repo):
     folders never ship) and DELIVERY_HISTORY_FILES."""
     out = []
     for dirpath, dirnames, filenames in os.walk(repo.root):
-        dirnames[:] = sorted(d for d in dirnames if d not in DELIVERY_SKIP_DIRS)
+        dirnames[:] = sorted(d for d in dirnames if d not in DELIVERY_SKIP_DIRS and
+                             (Path(dirpath) / d).relative_to(repo.root).as_posix() not in DELIVERY_PRIVATE_PATHS)
         for name in sorted(filenames):
             if not (name.endswith(DELIVERY_SUFFIXES) or name == "Dockerfile" or name.startswith("Dockerfile.")):
                 continue
             rel = (Path(dirpath) / name).relative_to(repo.root).as_posix()
+            if rel in DELIVERY_PRIVATE_PATHS:
+                continue
             if not any(fnmatch.fnmatch(rel, x) for x in DELIVERY_HISTORY_FILES):
                 out.append(rel)
     return out
