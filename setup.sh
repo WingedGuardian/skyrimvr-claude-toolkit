@@ -615,6 +615,17 @@ for hook in .codex/hooks/skyguard-entry.ps1 .codex/hooks/skyguard-entry.sh; do
     sed -i "s|{{BASH_PATH}}|$H_SED|g" "$GAME_DIR/$hook"
 done
 
+# PowerShell 5.1 reads BOM-less scripts with its legacy code page. Preserve the
+# UTF-8 interpreter/Bash paths just inserted above, including non-ASCII names.
+if [ -f "$GAME_DIR/.codex/hooks/skyguard-entry.ps1" ] && [ -n "$PY_FOUND" ]; then
+    if ! MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B \
+        "$GAME_ROOT_WIN/tools/skyguard/upgrade_render.py" encode-powershell \
+        "$GAME_ROOT_WIN/.codex/hooks/skyguard-entry.ps1"; then
+        echo "  NOT CONFIGURED: PowerShell hook encoding failed; repair it before approving the hooks."
+        exit 1
+    fi
+fi
+
 # --- Record the resolved paths where the guard can read them ---
 #
 # protect-bash.sh decides "is this path inside the install" by resolving a real root,

@@ -110,11 +110,14 @@ def atomic_json(path, data):
     import json
     path = Path(path)
     part = path.with_name(".part-" + uuid.uuid4().hex)
+    encoded = (json.dumps(data, ensure_ascii=True, sort_keys=True, allow_nan=False) + "\n").encode("ascii")
     try:
-        with open(part, "xb") as stream:
-            stream.write((json.dumps(data, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii"))
+        with open(part, "xb", buffering=0) as stream:
+            write_all(stream.fileno(), encoded)
             stream.flush()
             os.fsync(stream.fileno())
+        if part.stat().st_size != len(encoded) or digest(part) != hashlib.sha256(encoded).hexdigest():
+            raise OSError("metadata staging failed size/hash verification")
         publish_new(part, path)
     finally:
         part.unlink(missing_ok=True)

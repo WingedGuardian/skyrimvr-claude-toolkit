@@ -40,9 +40,13 @@ def add_arguments(subparsers):
     stage.add_argument("--source", required=True, type=Path)
     stage.add_argument("--destination", required=True, type=Path)
     stage.add_argument("--owned-command", action="append", default=[])
+    stage.add_argument("--owned-pre-groups", type=Path,
+                       help="version 1 JSON containing verified complete prior PreToolUse groups")
     stage.add_argument("--local-file", action="append", default=[])
     stage.add_argument("--integrate-local-policy", action="store_true",
                        help="prepare this profile's qualified local-policy migration for explicit review")
+    stage.add_argument("--render-config", type=Path,
+                       help="profile-specific JSON for rendering independent candidate bytes before review")
     applying = subparsers.add_parser("upgrade-apply")
     applying.add_argument("--bundle", required=True, type=Path)
     applying.add_argument("--review-sha256", required=True)
@@ -55,7 +59,8 @@ def add_arguments(subparsers):
                             help="host/editor writers have been stopped; this flag does not stop them")
 
 
-def handle(args, root, *, local_files=(), review_builder=None):
+def handle(args, root, *, local_files=(), review_builder=None, candidate_preparer=None, candidate_validator=None,
+           generated_paths=(), owned_pre_groups=None):
     from . import transport
     def read(path):
         with Path(path).open("rb") as stream:
@@ -65,18 +70,35 @@ def handle(args, root, *, local_files=(), review_builder=None):
         return upgrade.preview(root, read(args.candidate), read(args.previous) if args.previous else None,
                                deadline=time.monotonic() + 20)
     if args.command == "upgrade-stage":
+        references = dict(owned_pre_groups or {})
+        if args.owned_pre_groups is not None:
+            supplied = read(args.owned_pre_groups)
+            if (set(supplied) != {"v", "files"} or type(supplied["v"]) is not int or supplied["v"] != 1
+                    or not isinstance(supplied["files"], dict)):
+                raise ValueError("expected complete prior pre-handler references version 1")
+            for name, groups in supplied["files"].items():
+                upgrade.pre_group_keys(groups)
+                references[name] = (*references.get(name, ()), *groups)
         if args.integrate_local_policy and review_builder is None:
             raise ValueError("this profile provides no qualified local-policy migration")
+        transform = None
+        if args.render_config is not None:
+            if candidate_preparer is None:
+                raise ValueError("this profile provides no candidate renderer")
+            config = read(args.render_config)
+            transform = lambda installed, staged, files: candidate_preparer(installed, staged, files, config)
         bundle = upgrade.stage_review_bundle(root, args.source, args.destination, read(args.candidate),
             read(args.previous) if args.previous else None, owned_commands=args.owned_command,
             local_files=(*local_files, *args.local_file),
-            review_builder=review_builder if args.integrate_local_policy else None)
+            review_builder=review_builder if args.integrate_local_policy else None, candidate_transform=transform,
+            generated_paths=generated_paths if transform is not None else (), owned_pre_groups=references)
         return {"bundle": str(args.destination.resolve()), "complete": True, "collisions": bundle["plan"]["collisions"],
                 "application_authorized": False, "ordered_dispatch_review_required": bundle["ordered_dispatch_review_required"],
-                "ordered_integration_available": "ordered_integration" in bundle}
+                "ordered_integration_available": "ordered_integration" in bundle,
+                "rendered_files": bundle.get("rendered_files", []), "generated_files": bundle.get("generated_files", [])}
     if args.command == "upgrade-apply":
         return apply(root, args.bundle, args.review_sha256, read(args.choices) if args.choices else {},
-                     quiescent=args.quiescent, review_builder=review_builder)
+                     quiescent=args.quiescent, review_builder=review_builder, candidate_validator=candidate_validator)
     if args.command == "upgrade-rollback":
         return rollback(root, args.operation, quiescent=args.quiescent)
     raise ValueError("not a shared upgrade command")
@@ -114,7 +136,7 @@ def _writable_target(path):
 
 
 def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reserve=DEFAULT_RESERVE, deadline=None,
-          review_builder=None):
+          review_builder=None, candidate_validator=None):
     """Apply an explicitly selected review; collisions never gain guessed ownership.
 
     choices maps collision paths to keep/candidate. Project settings may select
@@ -152,6 +174,8 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
     local = review.get("observed_local_files")
     if not isinstance(local, dict):
         raise ValueError("local configuration observations are missing")
+    if not upgrade.PROJECT_SETTINGS.keys() <= local.keys():
+        raise ValueError("native hook settings need a fresh combined review bundle")
     upgrade.inventory({"v": 1, "files": dict.fromkeys(local, "0" * 64)})
     for name, expected in local.items():
         if expected is not None and (not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None):
@@ -172,9 +196,10 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
             for name, digest in entries.items():
                 if durable.digest(upgrade._entry(bundle, folder + "/" + name), deadline) != digest:
                     raise ValueError("staged policy review bytes changed: " + name)
-        if (".claude/settings.json" in candidate and
-                durable.digest(upgrade._entry(bundle, "merged-settings.json"), deadline) != review.get("merged_settings_sha256")):
-            raise ValueError("merged settings changed before ordered policy review")
+        for name, merged in upgrade.PROJECT_SETTINGS.items():
+            expected = review.get("merged_settings_hashes", {}).get(name)
+            if name in candidate and durable.digest(upgrade._entry(bundle, merged), deadline) != expected:
+                raise ValueError("merged settings changed before ordered policy review")
         proposal = review_builder(bundle, review)
         expected_proof, expected_bytes = upgrade.policy_proposal(proposal, rollback, candidate)
         upgrade.validate_ordered_settings(bundle, proposal)
@@ -220,16 +245,18 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
             incoming = upgrade._entry(bundle, "reviewed/" + name)
             digest = integrated[name]
         elif selected == "merged_settings":
-            if name != ".claude/settings.json" or review.get("ordered_dispatch_review_required"):
+            if name not in upgrade.PROJECT_SETTINGS or review.get("ordered_dispatch_review_required"):
                 raise ValueError("custom pre-handlers require ordered-policy integration before application")
-            incoming = upgrade._entry(bundle, "merged-settings.json")
-            digest = review.get("merged_settings_sha256")
+            incoming = upgrade._entry(bundle, upgrade.PROJECT_SETTINGS[name])
+            digest = review.get("merged_settings_hashes", {}).get(name)
+            if digest is None and name == ".claude/settings.json":
+                digest = review.get("merged_settings_sha256")
             if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
                 raise ValueError("merged settings lack reviewed hash authority")
         else:
             if name not in candidate or row.get("candidate_sha256") != candidate[name]:
                 raise ValueError("candidate authority missing: " + name)
-            if name == ".claude/settings.json" and expected is not None:
+            if name in upgrade.PROJECT_SETTINGS and expected is not None:
                 raise ValueError("existing project settings require an explicit merged_settings selection")
             incoming = upgrade._entry(bundle, "candidate/" + name)
             digest = candidate[name]
@@ -252,6 +279,8 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
         resulting.update({row["path"]: row["after"] for row in changes})
         if any(resulting.get(name) != digest for name, digest in integration["requires"].items()):
             raise ValueError("ordered-policy migration requires the reviewed candidate runtime")
+    if candidate_validator is not None:
+        candidate_validator(root, tuple(dict(row) for row in changes))
     # Hook definitions are published after their runtime. Review is still needed.
     changes.sort(key=lambda row: (2 if row["path"] in (".claude/settings.json", ".claude/settings.local.json", ".codex/hooks.json")
                                  else 1 if row["path"] == ".modding-agent-harness/local-policies.json" else 0, row["path"]))

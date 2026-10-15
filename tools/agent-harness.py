@@ -42,8 +42,11 @@ def main(argv=None):
             result = {"context": preferences.render(root),
                       "scope": "explicit My preferences section only; unclassified notes remain notes"}
         elif args.command in installation.COMMANDS:
+            from skyguard import upgrade_render
             result = installation.handle(args, root, local_files=(".claude/hooks/protect-save-access.py",
-                ".claude/hooks/save-access-entry.ps1", ".claude/hooks/restore-save-backup.py", ".claude/hooks/test_protect_save_access.py"))
+                ".claude/hooks/save-access-entry.ps1", ".claude/hooks/restore-save-backup.py", ".claude/hooks/test_protect_save_access.py",
+                "skyrim-paths.env", ".claude/skyrim-paths.env"), candidate_preparer=upgrade_render.prepare,
+                candidate_validator=upgrade_render.validate)
         elif args.command == "save-list":
             from modding_harness import workspace
             target = save_store.store(root)

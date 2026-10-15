@@ -17,12 +17,14 @@ from . import durable
 from .preservation import DEFAULT_RESERVE, contains
 
 REVIEWABLE_SETTINGS = frozenset((".claude/settings.json", ".claude/settings.local.json",
-                                ".modding-agent-harness/local-policies.json"))
+                                ".codex/hooks.json", ".modding-agent-harness/local-policies.json"))
+GENERATED_CONFIGS = frozenset((".codex/hooks.json",))
+PROJECT_SETTINGS = {".claude/settings.json": "merged-settings.json", ".codex/hooks.json": "merged-codex-hooks.json"}
 
 
 def json_bytes(value):
     import json
-    return (json.dumps(value, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii")
+    return (json.dumps(value, ensure_ascii=True, sort_keys=True, allow_nan=False) + "\n").encode("ascii")
 
 
 def policy_proposal(value, rollback, candidate):
@@ -56,6 +58,7 @@ def policy_proposal(value, rollback, candidate):
 
 
 def read_settings(base, name):
+    import json
     from . import transport
     path = _entry(base, name)
     if not path.exists():
@@ -64,7 +67,9 @@ def read_settings(base, name):
         raw = stream.read(1024 * 1024 + 1)
     if len(raw) > 1024 * 1024:
         raise ValueError("settings exceed review parser limit")
-    return transport.load(raw)
+    value = transport.load(raw.decode("utf-8-sig"))
+    json.dumps(value, allow_nan=False)  # NaN/Infinity are not JSON settings.
+    return value
 
 
 def validate_ordered_settings(bundle, proposal):
@@ -74,13 +79,12 @@ def validate_ordered_settings(bundle, proposal):
     Recognizing a command string alone does not establish equivalent behavior.
     """
     import copy
-    project, local = ".claude/settings.json", ".claude/settings.local.json"
+    local = ".claude/settings.local.json"
     def pre(value):
         hooks = value.get("hooks", {})
         if not isinstance(hooks, dict) or not isinstance(hooks.get("PreToolUse", []), list):
             raise ValueError("malformed ordered pre-tool settings")
         return hooks.get("PreToolUse", [])
-    candidate = pre(read_settings(bundle / "candidate", project))
     def unrelated(settings):
         value = copy.deepcopy(settings)
         hooks = value.get("hooks", {})
@@ -88,14 +92,15 @@ def validate_ordered_settings(bundle, proposal):
         if not hooks:
             value.pop("hooks", None)
         return value
-    for name in (project, local):
+    for name in (*PROJECT_SETTINGS, local):
         settings = proposal["files"].get(name)
         if settings is None:
             settings = read_settings(bundle / "rollback", name)
-        if pre(settings) != (candidate if name == project else []):
+        candidate = pre(read_settings(bundle / "candidate", name)) if name in PROJECT_SETTINGS else []
+        if pre(settings) != candidate:
             raise ValueError("unresolved custom pre-handlers remain in ordered-policy settings")
         if name in proposal["files"]:
-            baseline = (read_settings(bundle, "merged-settings.json") if name == project
+            baseline = (read_settings(bundle, PROJECT_SETTINGS[name]) if name in PROJECT_SETTINGS
                         else read_settings(bundle / "rollback", name))
             if unrelated(settings) != unrelated(baseline):
                 raise ValueError("ordered-policy edit changes unrelated settings or handlers")
@@ -180,7 +185,21 @@ def preview(root, candidate, previous=None, *, keep_local=(), deadline=None):
                        "revalidate installed bytes before applying a separately approved upgrade"]}
 
 
-def merge_settings(existing, candidate, owned_commands=()):
+def pre_group_keys(groups):
+    if not isinstance(groups, (list, tuple)) or len(groups) > 1024:
+        raise ValueError("complete pre-handler references must be a bounded list")
+    encoded = []
+    for group in groups:
+        if (not isinstance(group, dict) or not isinstance(group.get("hooks"), list) or
+                any(not isinstance(handler, dict) for handler in group["hooks"])):
+            raise ValueError("malformed complete pre-handler reference")
+        encoded.append(json_bytes(group))
+    if sum(map(len, encoded)) > 1024 * 1024:
+        raise ValueError("complete pre-handler references exceed parser budget")
+    return set(encoded)
+
+
+def merge_settings(existing, candidate, owned_commands=(), *, owned_pre_groups=()):
     """Preserve unrelated settings and handlers, replacing only exact owned commands.
 
     Host hook ordering is not synchronization. Returned custom pre-handlers must
@@ -198,24 +217,33 @@ def merge_settings(existing, candidate, owned_commands=()):
     if not isinstance(old_hooks, dict) or not isinstance(new_hooks, dict):
         raise ValueError("hooks must be an object")
     hooks, custom_pre = {}, []
+    referenced_pre = pre_group_keys(owned_pre_groups)
     for event in sorted(old_hooks.keys() | new_hooks.keys()):
+        additions = new_hooks.get(event, [])
+        if not isinstance(additions, list):
+            raise ValueError("candidate hook groups must be a list")
+        known_pre = referenced_pre | pre_group_keys(additions) if event == "PreToolUse" else set()
         kept = []
         for group in old_hooks.get(event, []):
             if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
                 raise ValueError("malformed installed hook group")
+            if event == "PreToolUse" and json_bytes(group) in known_pre:
+                continue
             rest = []
             for handler in group["hooks"]:
                 if not isinstance(handler, dict):
                     raise ValueError("malformed installed hook handler")
-                if handler.get("command") not in owned:
+                # Each host platform's executable command needs independent
+                # ownership. A familiar POSIX command cannot retire a personal
+                # commandWindows policy that happens to share its handler.
+                known = event != "PreToolUse" and handler.get("command") in owned and (
+                    "commandWindows" not in handler or handler["commandWindows"] in owned)
+                if not known:
                     rest.append(copy.deepcopy(handler))
                     if event == "PreToolUse":
                         custom_pre.append(copy.deepcopy(handler))
             if rest:
                 kept.append({**copy.deepcopy(group), "hooks": rest})
-        additions = new_hooks.get(event, [])
-        if not isinstance(additions, list):
-            raise ValueError("candidate hook groups must be a list")
         for group in additions:
             if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
                 raise ValueError("malformed candidate hook group")
@@ -234,7 +262,7 @@ def merge_settings(existing, candidate, owned_commands=()):
 
 def stage_review_bundle(root, source, destination, candidate, previous=None, *, keep_local=(),
                         owned_commands=(), local_files=(), reserve=DEFAULT_RESERVE, deadline=None,
-                        review_builder=None):
+                        review_builder=None, candidate_transform=None, generated_paths=(), owned_pre_groups=None):
     """Prepare independent candidate/rollback bytes without changing an install.
 
     This is a review artifact, not an installer or an authorization. Conflicting
@@ -252,13 +280,21 @@ def stage_review_bundle(root, source, destination, candidate, previous=None, *, 
     if destination.exists() or destination.is_symlink():
         raise FileExistsError("review bundle destination already exists")
     files = inventory(candidate)
+    generated_paths = tuple(generated_paths)
+    if set(generated_paths) - GENERATED_CONFIGS or generated_paths and candidate_transform is None:
+        raise ValueError("unsupported generated configuration or missing profile renderer")
     plan = preview(root, candidate, previous, keep_local=keep_local, deadline=deadline)
     owned = tuple(owned_commands)
+    if owned_pre_groups is not None and (not isinstance(owned_pre_groups, dict) or set(owned_pre_groups) - PROJECT_SETTINGS.keys()):
+        raise ValueError("pre-handler references must be scoped to a native settings file")
+    references_by_file = owned_pre_groups or {}
+    for groups in references_by_file.values():
+        pre_group_keys(groups)
     if any(not isinstance(command, str) or not command or len(command) > 32768 for command in owned) or len(owned) > 1024:
         raise ValueError("invalid verified owned command list")
-    extra = (".claude/settings.local.json", "KNOWLEDGEBASE.local.md", "X4-NOTES.md",
+    extra = (*PROJECT_SETTINGS, ".claude/settings.local.json", "KNOWLEDGEBASE.local.md", "X4-NOTES.md",
              ".modding-agent-harness/config.json", ".modding-agent-harness/local-policies.json",
-             ".codex/config.toml", ".opencode/opencode.jsonc", *local_files)
+             ".codex/config.toml", ".opencode/opencode.jsonc", *local_files, *generated_paths)
     originals = {row["path"]: row["installed_sha256"] for row in plan["files"] if row["installed_sha256"] is not None}
     inventory({"v": 1, "files": dict.fromkeys((*files, *originals, *extra), "0" * 64)})
     for name in extra:
@@ -291,28 +327,95 @@ def stage_review_bundle(root, source, destination, candidate, previous=None, *, 
         return copied
     incoming = copy_set(source, files, "candidate")
     rollback = copy_set(root, originals, "rollback")
+    rendered, generated = [], []
+    if candidate_transform is not None:
+        updates = candidate_transform(root, destination / "candidate", dict(incoming))
+        if (not isinstance(updates, dict) or set(updates) - (incoming.keys() | set(generated_paths)) or
+                any(type(data) is not bytes or len(data) > 8 * 1024 * 1024 for data in updates.values()) or
+                sum(map(len, updates.values())) > 16 * 1024 * 1024):
+            raise ValueError("candidate rendering requires bounded bytes for inventoried or declared generated files")
+        if shutil.disk_usage(destination).free < sum(map(len, updates.values())) + reserve:
+            raise OSError("insufficient space for independent rendered candidate bytes")
+        for name, data in sorted(updates.items()):
+            durable.check_deadline(deadline)
+            target = _entry(destination / "candidate", name)
+            if name not in incoming:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open("xb", buffering=0) as stream:
+                    durable.write_all(stream.fileno(), data)
+                    os.fsync(stream.fileno())
+                durable.sync_dir(target.parent)
+                import hashlib
+                expected = hashlib.sha256(data).hexdigest()
+                if durable.digest(target, deadline) != expected:
+                    raise OSError("generated candidate failed readback")
+                incoming[name] = expected
+                rendered.append(name)
+                generated.append(name)
+                continue
+            if durable.digest(target, deadline) != incoming[name]:
+                raise OSError("candidate changed before target rendering")
+            before = durable.identity(target)
+            if target.stat().st_nlink != 1:
+                raise ValueError("rendered candidates must be independent files")
+            mode = target.stat().st_mode & 0o777
+            part = target.with_name(".render-" + uuid.uuid4().hex)
+            try:
+                with part.open("xb", buffering=0) as stream:
+                    durable.write_all(stream.fileno(), data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.chmod(part, mode)
+                if durable.identity(target) != before or durable.digest(target, deadline) != incoming[name]:
+                    raise OSError("candidate changed during target rendering")
+                # This is our independent private candidate, never an installed
+                # target. Preserve a read-only source's mode on the final copy.
+                if not mode & 0o222:
+                    os.chmod(target, mode | 0o200)
+                os.replace(part, target)
+                durable.sync_dir(target.parent)
+            except BaseException:
+                if target.exists() and durable.identity(target)[:2] == before[:2]:
+                    os.chmod(target, mode)
+                raise
+            finally:
+                if part.exists():
+                    os.chmod(part, part.stat().st_mode | 0o200)
+                    part.unlink()
+            import hashlib
+            expected = hashlib.sha256(data).hexdigest()
+            if durable.digest(target, deadline) != expected:
+                raise OSError("rendered candidate failed readback")
+            incoming[name] = expected
+            rendered.append(name)
+        plan = preview(root, {"v": 1, "files": incoming}, previous, keep_local=keep_local, deadline=deadline)
     def settings(base, name):
-        path = _entry(base, name)
-        if not path.exists():
-            return {}
-        if path.stat().st_size > 1024 * 1024:
-            raise ValueError("settings exceed review parser limit")
-        value = json.loads(path.read_bytes())
-        if not isinstance(value, dict):
-            raise ValueError("settings must be an object")
-        return value
-    project_name, local_name = ".claude/settings.json", ".claude/settings.local.json"
+        return read_settings(base, name)
+    local_name = ".claude/settings.local.json"
     settings_review = {}
     merged_settings_sha256 = None
-    if project_name in files:
-        merged = merge_settings(settings(destination / "rollback", project_name), settings(destination / "candidate", project_name), owned)
-        durable.atomic_json(destination / "merged-settings.json", merged["settings"])
-        merged_settings_sha256 = durable.digest(destination / "merged-settings.json", deadline)
-        settings_review[project_name] = {key: value for key, value in merged.items() if key != "settings"}
+    merged_settings_hashes = {}
+    for project_name, merged_name in PROJECT_SETTINGS.items():
+        if project_name in incoming or project_name in originals:
+            installed_settings = settings(destination / "rollback", project_name)
+            references = tuple(references_by_file.get(project_name, ()))
+            # The entire installed file matches an immutable prior inventory;
+            # its complete old groups are qualified without guessing by name.
+            if previous is not None and rollback.get(project_name) is not None and inventory(previous).get(project_name) == rollback[project_name]:
+                old_hooks = installed_settings.get("hooks", {})
+                if not isinstance(old_hooks, dict):
+                    raise ValueError("malformed previous hook settings")
+                references += tuple(old_hooks.get("PreToolUse", []))
+            merged = merge_settings(installed_settings, settings(destination / "candidate", project_name), owned,
+                                    owned_pre_groups=references)
+            durable.atomic_json(destination / merged_name, merged["settings"])
+            merged_settings_hashes[project_name] = durable.digest(destination / merged_name, deadline)
+            settings_review[project_name] = {key: value for key, value in merged.items() if key != "settings"}
+    merged_settings_sha256 = merged_settings_hashes.get(".claude/settings.json")
     if local_name in originals:
         local = merge_settings(settings(destination / "rollback", local_name), {}, ())
         settings_review[local_name] = {key: value for key, value in local.items() if key != "settings"}
-    if plan != preview(root, candidate, previous, keep_local=keep_local, deadline=deadline):
+    if plan != preview(root, {"v": 1, "files": incoming}, previous, keep_local=keep_local, deadline=deadline):
         raise OSError("installed files changed during review staging")
     for base, entries in ((root, originals), (source, files)):
         for name, expected in entries.items():
@@ -325,10 +428,15 @@ def stage_review_bundle(root, source, destination, candidate, previous=None, *, 
               "candidate_modes": {name: (destination / "candidate" / name).stat().st_mode & 0o777 for name in incoming},
               "observed_local_files": {name: originals.get(name) for name in extra},
               "merged_settings_sha256": merged_settings_sha256,
+              "merged_settings_hashes": merged_settings_hashes,
               "ordered_dispatch_review_required": any(r["ordered_dispatch_review_required"] for r in settings_review.values()),
               "contains_private_installed_bytes": bool(rollback), "application_authorized": False,
               "limits": ["collisions and instruction merges require explicit review", "no host trust was changed",
                          "rollback bytes are evidence; no automatic deployment or rollback is performed"]}
+    if candidate_transform is not None:
+        result["source_files"] = files
+        result["rendered_files"] = rendered
+        result["generated_files"] = generated
     if review_builder is not None:
         proposal = review_builder(destination, result)
         if proposal is not None:
@@ -364,6 +472,10 @@ def stage_review_bundle(root, source, destination, candidate, previous=None, *, 
                 if (durable.digest(path, deadline) if path.exists() else None) != expected:
                     raise OSError("local configuration changed during ordered review")
             durable.check_deadline(deadline)
+    for name, expected in result["observed_local_files"].items():
+        path = _entry(root, name)
+        if (durable.digest(path, deadline) if path.exists() else None) != expected:
+            raise OSError("local configuration changed before review completion")
     durable.atomic_json(destination / "complete.json", result)
     return result
 

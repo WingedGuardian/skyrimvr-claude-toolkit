@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Shared transaction/review/journal metadata completes short writes and verifies
+  staging bytes before publication. Save preservation retains its independent
+  final manifest verification. Native pre-tool ownership compares complete,
+  host-scoped groups, preserving changed matcher/timeout/Windows/async fields.
+- Private upgrade staging renders destination instructions, MO2 paths and hook
+  transports before hashing the review. Native settings are reviewed together;
+  unresolved custom Claude or Codex pre-tool handlers prevent application.
+  Setup and candidate preparation preserve Unicode interpreter paths in Windows
+  PowerShell 5.1 using an explicit UTF-8 marker, without reporting it as guard drift.
 - The installed-policy bridge now normalizes worker warnings before dispatch and
   requires the portable plan to retain every legacy backup and approval
   requirement. Unrecognized save-changing helpers refuse before preservation;

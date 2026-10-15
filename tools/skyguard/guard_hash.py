@@ -9,6 +9,8 @@ So a file is hashed in its REPO form: in the files setup.sh configures (CONFIGUR
 back to its token before hashing -- and only when the line has the exact shape setup.sh writes (the whole line is
 `PY='<a single-quoted value>'`, with the shell's '\'' escape or PowerShell's '' escape inside). Anything else on that
 line (`PY=/tmp/fake`, a trailing command, a second PY line) is left as it is and therefore hashes as a difference.
+The configured PowerShell entry may carry a leading UTF-8 BOM so PowerShell 5.1
+reads non-ASCII paths correctly; that encoding marker is normalized too.
 
 The value a slot held is returned too. setup.sh writes ONE interpreter (and one bash) into every file, so the caller
 compares them across files (consistent_values): a file whose value disagrees with the others was edited after setup
@@ -48,6 +50,10 @@ def normalised(rel: str, data: bytes) -> Tuple[bytes, Dict[str, str]]:
     slots = CONFIGURED.get(rel.replace("\\", "/"))
     if not slots:
         return data, {}
+    if rel.replace("\\", "/").endswith(".ps1") and data.startswith(b"\xef\xbb\xbf"):
+        # An encoding marker makes UTF-8 paths readable by PowerShell 5.1; it
+        # adds no command or policy. Keep the canonical source hash stable.
+        data = data[3:]
     lines = data.split(b"\n")
     done, values = set(), {}
     for i, raw in enumerate(lines):

@@ -47,19 +47,58 @@ upgrade or establish host interception.
 `upgrade-stage --installed-root DIR --source DIR --candidate FILE --destination DIR`
 prepares a private review bundle with independent candidate and rollback copies,
 merged project settings and local-setting review. Add `--previous FILE` and exact
-verified `--owned-command COMMAND` values where available. Existing personal save
+verified `--owned-command COMMAND` values for lifecycle handlers where available.
+Pre-tool retirement uses complete groups: exact current candidate groups and
+unchanged files matching the previous inventory qualify automatically. Otherwise
+`--owned-pre-groups FILE` supplies `{"v":1,"files":{".claude/settings.json":[...]}}`
+(or `.codex/hooks.json`) from verified previous definitions. Matcher, timeout,
+Windows command and asynchronous changes remain custom; command text alone is
+insufficient. Existing personal save
 guard sources are retained; `--local-file PATH` includes other local policy files.
 This command changes no installed files and performs no deployment or hook review.
 The bundle contains private notes/settings and must stay out of release artifacts.
+
+Add `--render-config FILE` to render the independently copied instructions and
+hook transports for the destination before review. The source and installed
+files stay unchanged. The JSON object supplies actual absolute paths, for example:
+
+```json
+{
+  "v": 1,
+  "config_dir": "C:/Profiles/Skyrim VR",
+  "loadorder_dir": "C:/LoadOrder/Skyrim VR",
+  "skyrim_folder": "Skyrim VR",
+  "python": "C:/Tools/Python/python.exe",
+  "bash": "C:/Program Files/Git/bin/bash.exe",
+  "mod_manager": {"kind": "stock"}
+}
+```
+
+The destination supplies the toolkit root used by hook definitions. Instructions
+use the retained `SKYRIM_GAME_ROOT`, or the optional absolute `game_root` field;
+without either they use the destination's usual in-game layout. This distinction
+keeps a separate worktree from being mistaken for the game. `stock` covers Vortex/manual deployment.
+For MO2, use `kind: "mo2"` and supply `instance`, `profile`, `mods`, `overwrite`
+and `profile_dir`; all except the profile name are absolute paths. Both config
+and load-order directories must name that profile. Values conflicting with
+retained installation paths refuse. The existing Codex definition renderer keeps
+its command normalization; unsafe roots refuse. Interpreter literals use their
+shell's quoting, and Unicode PowerShell scripts carry an explicit UTF-8 marker
+for Windows PowerShell 5.1. Unresolved placeholders or oversized agent
+instructions refuse application before installed writes. This renders selected
+candidate files; it does not select a complete payload or establish host trust.
 
 After reviewing the bundle, `upgrade-apply --installed-root DIR --bundle DIR
 --review-sha256 SHA256 --choices FILE --quiescent` applies its selected files.
 SHA256 is the hash of the exact `complete.json` reviewed. The choices file is a
 JSON object mapping every collision path to `keep` or `candidate`; project
-`.claude/settings.json` can instead select `merged_settings`. Omit `--choices`
+`.claude/settings.json` and `.codex/hooks.json` instead select `merged_settings`
+when replacing existing definitions. Omit `--choices`
 only when no collision needs a choice. Custom pre-tool handlers must first be
 integrated into the ordered dispatcher and reviewed; an unresolved handler
-refuses application. Local policy or configuration changes invalidate review.
+in either native configuration refuses application, even when its file is kept.
+Local policy or configuration changes invalidate review. Restage older bundles
+that lack the combined native-settings observations.
 Stop host/editor writers before using `--quiescent`: the flag asserts that
 condition and does not stop them. The upgrade lock coordinates upgraders only;
 replacing existing files cannot exclude arbitrary foreign writers atomically.
