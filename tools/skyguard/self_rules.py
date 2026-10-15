@@ -94,7 +94,7 @@ def install_kind(rel: List[str]) -> str:
     if rel[:2] in ([".claude", "hooks"], ["tools", "skyguard"], ["tools", "modding_harness"],
                    ["agent", "guards"]) and len(rel) >= 2:
         return GUARD
-    if rel == ["tools", "modding-harness.lock.json"]:
+    if rel in (["tools", "modding-harness.lock.json"], ["tools", "resaver_cli_cache.py"]):
         return GUARD
     if rel[0] == ".claude" and len(rel) == 2 and (_settings(rel[1]) or rel[1] == "skyrim-paths.env"):
         return GUARD

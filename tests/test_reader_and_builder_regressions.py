@@ -39,6 +39,12 @@ def test_truncated_plugin_list_never_returns_partial_counts():
     assert reader.read_plugins(b"", b"\x00" * 5 + b"\x01\x01\x00A\x00\x00") == (["A"], [])
 
 
+def test_raw_hit_contexts_are_bounded_but_counts_are_complete():
+    reader = module("save_reader_hit_regression", "scripts/read-save.py")
+    result = reader.search_string(b"probe " * 1000, "probe")
+    assert result.total == 1000 and len(result) == 50
+
+
 def test_builder_refuses_dirty_existing_source_without_discarding_edits(tmp_path):
     builder = module("driver_build_regression", "tools/vr-emu-driver/build.py")
     source = tmp_path / "driver"

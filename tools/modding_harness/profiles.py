@@ -28,8 +28,9 @@ class GameProfile:
         result = []
         for ext in self.extensions:
             expected = path.with_name(stem + ext)
-            # Windows files are case-insensitive; POSIX case variants are distinct.
-            if os.name == "nt" and path.parent.is_dir():
+            # A pair needs one unambiguous physical member per suffix. Do not
+            # silently collapse distinct case variants on a POSIX/case-enabled root.
+            if path.parent.is_dir():
                 hits = [p for p in path.parent.iterdir() if p.name.casefold() == expected.name.casefold()]
                 if len(hits) > 1:
                     raise ValueError("ambiguous save member identity")

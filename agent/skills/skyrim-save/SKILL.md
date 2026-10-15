@@ -61,7 +61,8 @@ SSE/VR saves use LZ4 compression. General layout of the decompressed data:
 
 - **Read ops:** `info|dump|find|find-refs|worries|recon|changeform|extradata-scan|changeform-diff|freeze-report|globaldata|globaldata-diff`. The op list with arguments is the header comment of `tools/resaver-cli.sh`.
 - **Write ops:** `set-global|set-var|clean|reset-havok|cleanse-formlists|remove-created`. Each is a dry run unless `--apply`, and always writes a NEW file.
-- `verify-roundtrip` is a self-test. Every `--apply` is verify-gated: the file is re-read and must equal the model, or the output is deleted and the op fails.
+- `verify-roundtrip` is a self-test. Every `--apply` checks its operation's permitted changes, writes in a private staging directory, and re-reads the complete serialized Papyrus/global data and co-save before publishing a new pair. Failed candidates remain in the named staging directory; existing destinations are preserved. A partial publication is a failure and names its journal.
+- The pinned ReSaver script-instance setter rejects variable index zero. A preview lists the library's indexes; do not bypass its setter with reflection or direct file edits. Other supported primitive indexes use the same verified pipeline.
 - Resolve FormID to EditorID with `tools/resaver-resolve-names.js`.
 
 ## Changing a save: what the guard does

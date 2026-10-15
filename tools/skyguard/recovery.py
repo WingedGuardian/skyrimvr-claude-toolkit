@@ -389,6 +389,8 @@ def _backup_locked(store, audit, plan, command, agent, session_id, deadline, now
     idx = _read_index(store)
     ts = audit.stamp()
     lines, ids = [], []
+    if shutil.disk_usage(str(store)).free < SAVE_RESERVE_BYTES:
+        raise SaveBackupFailed("the backup drive lost its free-space reserve during preservation")
     for got, missing in stored:
         sid = _new_id(idx, ts, "save")
         ids.append(sid)

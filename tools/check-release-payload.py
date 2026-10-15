@@ -37,6 +37,7 @@ Exit 0 = every check passed, 1 = at least one failed (each named), 2 = bad usage
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import sys
@@ -87,6 +88,10 @@ CORE_REQUIRED = (
     "tools/vr-headless.sh",
     "tools/vr-headless.py",
     "tools/vr-emu-driver/build.py",
+    "tools/resaver-cli.sh",
+    "tools/resaver-cli/ResaverCLI.java",
+    "tools/resaver_cli_cache.py",
+    "tools/modding-harness.lock.json",
 )
 # Absent: dev-only trees, the user's own files, and runtime state. A path, or a file NAME anywhere.
 ABSENT_PATHS = (
@@ -102,9 +107,12 @@ ABSENT_PATHS = (
     ".claude/settings.local.json",
     "node_modules",
     ".venv",
-    # Built on the user's machine from source the toolkit may not redistribute (tools/vr-emu-driver/README.md).
+    # The driver retains local-build delivery (tools/vr-emu-driver/README.md).
     "tools/vr-emu-driver/build",
     "tools/vr-emu-driver/work",
+    "tools/resaver-cli/tests",
+    "tools/resaver-cli/.compiled",
+    ".modding-agent-harness",
 )
 ABSENT_NAMES = ("skyrim-paths.env", ".nexus_api_key")
 # Any dotenv-style file (review M8): a committed `.env` / `x.env` / `.env.local` is where secrets live.
@@ -316,8 +324,42 @@ def check_guards(root: Path):
         if problems else (None if named else "the manifest names no file"))
 
 
+def check_shared_core(root: Path):
+    """Independent byte/inventory verification; never import the vendored runtime."""
+    try:
+        lock = json.loads((root / "tools/modding-harness.lock.json").read_text(encoding="ascii"))
+        if (lock.get("v") != 1 or lock.get("api_version") != 1
+                or not re.fullmatch(r"[0-9a-f]{40}", lock.get("revision", ""))
+                or not isinstance(lock.get("files"), dict) or not lock["files"]):
+            raise ValueError("invalid shared-core pin/manifest")
+        files = lock["files"]
+        required = {"tools/modding_harness/" + name for name in (
+            "__init__.py", "contracts.py", "profiles.py", "preservation.py", "durable.py", "approval.py", "locking.py", "LICENSE")}
+        if not required <= files.keys():
+            raise ValueError("shared-core public/runtime files missing from manifest")
+        core = root / "tools/modding_harness"
+        if not core.resolve().is_relative_to(root.resolve()):
+            raise ValueError("shared core resolves outside payload")
+        actual = {p.relative_to(root).as_posix() for p in core.rglob("*") if p.is_file()}
+        if actual != set(files):
+            raise ValueError("shared-core file inventory differs from manifest")
+        for rel, expected in files.items():
+            if (not rel.startswith("tools/modding_harness/") or "\\" in rel or ":" in rel
+                    or any(part in ("", ".", "..") for part in rel.split("/"))
+                    or not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected)):
+                raise ValueError("unsafe shared-core manifest entry")
+            path = root / rel
+            if (path.is_symlink() or not path.resolve().is_relative_to(core.resolve())
+                    or hashlib.sha256(path.read_bytes()).hexdigest() != expected):
+                raise ValueError("shared-core bytes differ: " + rel)
+    except (OSError, ValueError, TypeError) as exc:
+        yield "pinned shared-core bytes and inventory", str(exc)
+        return
+    yield "pinned shared-core bytes and inventory ({} files)".format(len(files)), None
+
+
 SECTIONS = {"build": check_build, "shape": check_shape, "hooks": check_hooks, "codex": check_codex,
-            "adapter": check_adapter, "guards": check_guards}
+            "adapter": check_adapter, "guards": check_guards, "shared-core": check_shared_core}
 
 
 # ------------------------------------------------------------------ leaks

@@ -9,12 +9,14 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import durable
 from .profiles import canonical
+from .locking import exclusive
 
 DEFAULT_RESERVE = 2 * 1024 ** 3
 
@@ -64,6 +66,18 @@ class SaveStore:
         """groups contains complete, profile-resolved logical saves, including absent members."""
         if known_writer_active:
             raise PreservationFailed("active native save writer requires a qualified quiescent route")
+        try:
+            durable.check_deadline(deadline)
+            self.root.mkdir(parents=True, exist_ok=True)
+            wait = 5.0 if deadline is None else max(0, min(5.0, deadline - time.monotonic()))
+            with exclusive(self.root / ".lock", wait):
+                return self._backup_locked(groups, metadata, deadline)
+        except (OSError, ValueError) as exc:
+            if isinstance(exc, PreservationFailed):
+                raise
+            raise PreservationFailed(str(exc)) from exc
+
+    def _backup_locked(self, groups, metadata, deadline):
         transaction = uuid.uuid4().hex
         staged = []
         try:
@@ -78,18 +92,45 @@ class SaveStore:
             for name in ("blobs", "transactions", "staging"):
                 (self.root / name).mkdir(parents=True, exist_ok=True)
             total = sum(ident[2] for state in states for _, _, ident in state if ident is not None)
-            if shutil.disk_usage(self.root).free - total < self.reserve:
+            source_hashes, needed = {}, {}
+            for state in states:
+                for path, _real, ident in state:
+                    if ident is None:
+                        continue
+                    sha = durable.digest(path, deadline)
+                    if durable.identity(path) != ident:
+                        raise PreservationFailed("source changed during capacity planning")
+                    source_hashes[path] = sha
+                    blob = self.root / "blobs" / sha
+                    if blob.exists():
+                        if durable.digest(blob, deadline) != sha:
+                            raise PreservationFailed("reused backup blob is corrupt: {}".format(blob))
+                    else:
+                        needed[sha] = ident[2]
+            required = sum(needed.values())
+            if shutil.disk_usage(self.root).free - required < self.reserve:
                 raise PreservationFailed("insufficient destination space for {} bytes plus {} reserve at {}".format(
-                    total, self.reserve, self.root))
+                    required, self.reserve, self.root))
             records, used, deduplicated = [], 0, 0
             for group_index, state in enumerate(states):
                 members = []
                 for path, real, ident in state:
                     rec = {"path": path, "canonical": real, "missing": ident is None}
                     if ident is not None:
+                        sha = source_hashes[path]
+                        blob = self.root / "blobs" / sha
+                        if blob.exists():
+                            if durable.digest(blob, deadline) != sha:
+                                raise PreservationFailed("reused backup blob is corrupt: {}".format(blob))
+                            rec.update(sha256=sha, size=ident[2], identity=list(ident))
+                            deduplicated += ident[2]
+                            members.append(rec)
+                            continue
                         candidate = self.root / "staging" / (uuid.uuid4().hex + ".part")
                         staged.append(candidate)
                         info = durable.copy_verified(path, candidate, deadline)
+                        if info["sha256"] != sha or info["identity"] != list(ident):
+                            raise PreservationFailed("source changed after capacity planning")
                         blob = self.root / "blobs" / info["sha256"]
                         try:
                             durable.publish_new(candidate, blob)
@@ -104,12 +145,16 @@ class SaveStore:
             # Recheck the COMPLETE set after all members are copied, including
             # missing members appearing and same-size/mtime rewrites of earlier files.
             self.revalidate(records, deadline)
+            if shutil.disk_usage(self.root).free < self.reserve:
+                raise PreservationFailed("destination free-space reserve changed during preservation")
             manifest = {"v": 1, "id": transaction, "utc": datetime.now(timezone.utc).isoformat(),
                         "groups": records, "metadata": metadata or {}, "destination": str(self.root),
-                        "required_bytes": total, "stored_bytes": used, "deduplicated_bytes": deduplicated,
+                        "logical_bytes": total, "required_bytes": required, "stored_bytes": used, "deduplicated_bytes": deduplicated,
                         "reserve_bytes": self.reserve, "complete": True}
             durable.check_deadline(deadline)
             durable.atomic_json(self.root / "transactions" / (transaction + ".json"), manifest)
+            if shutil.disk_usage(self.root).free < self.reserve:
+                raise PreservationFailed("destination free-space reserve unavailable after commit")
             if self.load(transaction, deadline) != manifest:
                 raise PreservationFailed("committed transaction failed readback")
             return manifest
