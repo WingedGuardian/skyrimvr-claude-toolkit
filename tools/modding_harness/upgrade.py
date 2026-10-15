@@ -14,7 +14,7 @@ import time
 import uuid
 
 from . import durable
-from .preservation import DEFAULT_RESERVE
+from .preservation import DEFAULT_RESERVE, contains
 
 
 def inventory(value):
@@ -146,6 +146,99 @@ def merge_settings(existing, candidate, owned_commands=()):
     return {"settings": merged, "custom_pre_handlers": custom_pre,
             "ordered_dispatch_review_required": bool(custom_pre),
             "host_enforcement": "unqualified by this merge"}
+
+
+def stage_review_bundle(root, source, destination, candidate, previous=None, *, keep_local=(),
+                        owned_commands=(), local_files=(), reserve=DEFAULT_RESERVE, deadline=None):
+    """Prepare independent candidate/rollback bytes without changing an install.
+
+    This is a review artifact, not an installer or an authorization. Conflicting
+    instructions remain explicit collisions. Project and local Claude settings
+    are reviewed together; a retained custom pre-handler requires ordered-policy
+    review even when it comes only from settings.local.json.
+    """
+    import json
+    deadline = time.monotonic() + 60 if deadline is None else deadline
+    root, source = Path(root).resolve(), Path(source).resolve()
+    destination = Path(destination).absolute()
+    if (not source.is_dir() or reserve < 0 or contains(root, destination) or contains(source, destination)
+            or contains(destination, root) or contains(destination, source)):
+        raise ValueError("review bundle must be separate from installed and candidate roots")
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError("review bundle destination already exists")
+    files = inventory(candidate)
+    plan = preview(root, candidate, previous, keep_local=keep_local, deadline=deadline)
+    owned = tuple(owned_commands)
+    if any(not isinstance(command, str) or not command or len(command) > 32768 for command in owned) or len(owned) > 1024:
+        raise ValueError("invalid verified owned command list")
+    extra = (".claude/settings.local.json", "KNOWLEDGEBASE.local.md", "X4-NOTES.md",
+             ".modding-agent-harness/config.json", ".modding-agent-harness/local-policies.json", *local_files)
+    originals = {row["path"]: row["installed_sha256"] for row in plan["files"] if row["installed_sha256"] is not None}
+    inventory({"v": 1, "files": dict.fromkeys((*files, *originals, *extra), "0" * 64)})
+    for name in extra:
+        path = _entry(root, name)
+        if path.exists():
+            originals[name] = durable.digest(path, deadline)
+    # Validate candidate identity before creating even an incomplete bundle.
+    required = 0
+    for name, expected in files.items():
+        path = _entry(source, name)
+        if not path.is_file() or durable.digest(path, deadline) != expected:
+            raise ValueError("candidate inventory does not match source: " + name)
+        required += path.stat().st_size
+    required += sum(_entry(root, name).stat().st_size for name in originals)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if shutil.disk_usage(destination.parent).free < required + reserve:
+        raise OSError("insufficient space for independent candidate and rollback copies")
+    destination.mkdir(exist_ok=False)
+    def copy_set(base, entries, folder):
+        copied = {}
+        for name, expected in sorted(entries.items()):
+            durable.check_deadline(deadline)
+            target = destination / folder / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            info = durable.copy_verified(_entry(base, name), target, deadline)
+            if info["sha256"] != expected:
+                raise OSError("source changed while preparing review bundle: " + name)
+            copied[name] = info["sha256"]
+        return copied
+    incoming = copy_set(source, files, "candidate")
+    rollback = copy_set(root, originals, "rollback")
+    def settings(base, name):
+        path = _entry(base, name)
+        if not path.exists():
+            return {}
+        if path.stat().st_size > 1024 * 1024:
+            raise ValueError("settings exceed review parser limit")
+        value = json.loads(path.read_bytes())
+        if not isinstance(value, dict):
+            raise ValueError("settings must be an object")
+        return value
+    project_name, local_name = ".claude/settings.json", ".claude/settings.local.json"
+    settings_review = {}
+    if project_name in files:
+        merged = merge_settings(settings(destination / "rollback", project_name), settings(destination / "candidate", project_name), owned)
+        durable.atomic_json(destination / "merged-settings.json", merged["settings"])
+        settings_review[project_name] = {key: value for key, value in merged.items() if key != "settings"}
+    if local_name in originals:
+        local = merge_settings(settings(destination / "rollback", local_name), {}, ())
+        settings_review[local_name] = {key: value for key, value in local.items() if key != "settings"}
+    if plan != preview(root, candidate, previous, keep_local=keep_local, deadline=deadline):
+        raise OSError("installed files changed during review staging")
+    for base, entries in ((root, originals), (source, files)):
+        for name, expected in entries.items():
+            if durable.digest(_entry(base, name), deadline) != expected:
+                raise OSError("review source changed before bundle completion: " + name)
+    if shutil.disk_usage(destination).free < reserve:
+        raise OSError("free-space reserve changed during review staging")
+    result = {"v": 1, "mode": "review bundle only; install unchanged", "plan": plan,
+              "candidate_files": incoming, "rollback_files": rollback, "settings_review": settings_review,
+              "ordered_dispatch_review_required": any(r["ordered_dispatch_review_required"] for r in settings_review.values()),
+              "contains_private_installed_bytes": bool(rollback), "application_authorized": False,
+              "limits": ["collisions and instruction merges require explicit review", "no host trust was changed",
+                         "rollback bytes are evidence; no automatic deployment or rollback is performed"]}
+    durable.atomic_json(destination / "complete.json", result)
+    return result
 
 
 def preserve_notes(root, candidate_sha256, *, reserve=DEFAULT_RESERVE, deadline=None):

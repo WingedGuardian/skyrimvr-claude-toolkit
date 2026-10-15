@@ -47,6 +47,27 @@ def test_pair_is_one_group_and_local_refusal_precedes_preservation(install):
     assert {Path(member["path"]).name for member in transaction["groups"][0]["members"]} == {"0.ess", "0.skse"}
 
 
+def test_generic_upgrade_stage_keeps_private_install_bytes_and_refuses_bundle_reuse(tmp_path):
+    import hashlib
+    import subprocess
+    installed, source, bundle = tmp_path / "installed", tmp_path / "source", tmp_path / "review"
+    installed.mkdir()
+    source.mkdir()
+    (installed / "AGENTS.md").write_bytes(b"private instructions")
+    (source / "AGENTS.md").write_bytes(b"candidate instructions")
+    inventory = tmp_path / "candidate.json"
+    inventory.write_text(json.dumps({"v": 1, "files": {"AGENTS.md": hashlib.sha256(b"candidate instructions").hexdigest()}}))
+    args = [sys.executable, "-B", str(REPO / "tools/agent-harness.py"), "upgrade-stage", "--installed-root", str(installed),
+            "--source", str(source), "--candidate", str(inventory), "--destination", str(bundle)]
+    first = subprocess.run(args, capture_output=True, timeout=45)
+    assert first.returncode == 0, first.stderr
+    result = json.loads(first.stdout)
+    assert result["complete"] and not result["application_authorized"] and result["collisions"] == 1
+    assert (installed / "AGENTS.md").read_bytes() == b"private instructions"
+    assert (bundle / "rollback/AGENTS.md").read_bytes() == b"private instructions"
+    assert subprocess.run(args, capture_output=True, timeout=45).returncode == 2
+
+
 def test_bulk_is_one_scope_and_only_qualified_human_evidence_can_grant_it(install):
     root, files = install
     all_members = [path for pair in files for path in pair]

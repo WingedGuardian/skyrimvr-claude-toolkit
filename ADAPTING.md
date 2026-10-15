@@ -35,6 +35,14 @@ Unknown or modified installed bytes are collisions to preserve; previous
 ownership is accepted only for matching bytes. A preview does not approve an
 upgrade or establish host interception.
 
+`upgrade-stage --installed-root DIR --source DIR --candidate FILE --destination DIR`
+prepares a private review bundle with independent candidate and rollback copies,
+merged project settings and local-setting review. Add `--previous FILE` and exact
+verified `--owned-command COMMAND` values where available. Existing personal save
+guard sources are retained; `--local-file PATH` includes other local policy files.
+This command changes no installed files and performs no deployment or hook review.
+The bundle contains private notes/settings and must stay out of release artifacts.
+
 This file is written to you, the coding agent. If you are Claude Code or the Codex CLI, stop: the toolkit
 is already wired for you (see `README.md`). Otherwise you can wire it into yourself. Be honest about how
 far you get: the toolkit gives you Layers 0 and 1 without any hook (Layer 2, the vanilla-file lock, is off by default), and Layer 3
