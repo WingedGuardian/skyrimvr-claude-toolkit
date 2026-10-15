@@ -207,7 +207,8 @@ def test_no_driver_binary_or_upstream_source_is_tracked():
     if r.returncode != 0:
         pytest.skip("COULD NOT CHECK: not a git work tree")
     tracked = sorted(r.stdout.split())
-    assert tracked == ["tools/vr-emu-driver/README.md", "tools/vr-emu-driver/build.py"], tracked
+    allowed = {"tools/vr-emu-driver/README.md", "tools/vr-emu-driver/build.py", "tools/vr-emu-driver/UPSTREAM-LICENSE.txt"}
+    assert set(tracked) <= allowed and "tools/vr-emu-driver/build.py" in tracked, tracked
 
 
 def test_the_shell_wrapper_runs_the_tool():

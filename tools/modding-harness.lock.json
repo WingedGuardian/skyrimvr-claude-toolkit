@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "project": "modding-agent-harness",
+  "revision": "546561fc9f625ee179fcaaf005f8fe0adf988f3e",
+  "api_version": 1,
+  "files": {
+    "tools/modding_harness/LICENSE": "07a5c5e4aac6c4eda67565a716c8f4967dc318abe03098e5dee6a8fa7672d619",
+    "tools/modding_harness/__init__.py": "a8fde02ae542cf24e1e7652e171e0744e1009fb9e5ebe55486dec866456f1cf3",
+    "tools/modding_harness/approval.py": "38da9d76701c57a241598899f5542b43fd54ec4be9bee34a94633f81d26fb897",
+    "tools/modding_harness/contracts.py": "306a5bb0cf7fc8cb02a51b9919a3200e1a647675b579141abd3e06b152b8a5ec",
+    "tools/modding_harness/durable.py": "784349d4079bab8cca5f936cd6faab7ac0bbaf4c97f6216535ba912ca8897109",
+    "tools/modding_harness/locking.py": "42c8d3322567e6225cf74429aeb0b8b5361edf92986f3e488a8fb2433f9e476a",
+    "tools/modding_harness/preservation.py": "7619d6aa1f1ed2871382bacb9e27f9ea42688ef268f94a1d2e9ac5a43626a695",
+    "tools/modding_harness/profiles.py": "bde6c12fcddc981cf2fefa0c820730cd45ce1a7ea727fee0eedbb1e8d6570827"
+  }
+}

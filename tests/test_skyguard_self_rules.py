@@ -192,10 +192,10 @@ def test_a_recycle_bin_delete_of_the_state_is_s_self_state_in_every_spelling(com
     assert decision == "deny" and fired == {"S-SELF-STATE"}, (decision, fired)
 
 
-def test_a_delete_of_the_whole_install_stays_s_del_install():
-    """I1 is about the state, not the install: deleting the whole install (which holds .skyguard) keeps its own rule."""
+def test_a_delete_of_the_whole_install_cannot_destroy_permanent_backups():
+    """The 4.0 policy protects registered save-store ancestors even with guards off."""
     (decision, _), fired = shell("rm -rf \"" + GAME + "\"")
-    assert decision == "deny" and fired == {"S-DEL-INSTALL"}
+    assert decision == "deny" and fired == {"S-SAVE-STORE"}
 
 
 @pytest.mark.parametrize("route", ["shell", "write"])

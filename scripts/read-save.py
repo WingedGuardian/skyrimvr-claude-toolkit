@@ -123,7 +123,7 @@ def read_plugins(data, decompressed):
     regular = []
     light = []
     if decompressed is None:
-        return regular, light
+        raise ValueError('plugin table unavailable: decompression failed')
 
     try:
         # Regular plugins: count at byte 5, names start at byte 6
@@ -134,9 +134,9 @@ def read_plugins(data, decompressed):
         for _ in range(reg_count):
             name_len = struct.unpack_from('<H', decompressed, offset)[0]
             offset += 2
-            if name_len > 500:
-                break
-            name = decompressed[offset:offset + name_len].decode('utf-8', errors='replace')
+            if name_len > 500 or offset + name_len > len(decompressed):
+                raise ValueError('regular plugin name is truncated or outside the supported table format')
+            name = decompressed[offset:offset + name_len].decode('utf-8')
             regular.append(name)
             offset += name_len
 
@@ -144,17 +144,17 @@ def read_plugins(data, decompressed):
         light_count = struct.unpack_from('<H', decompressed, offset)[0]
         offset += 2
 
-        for _ in range(min(light_count, 4096)):
+        for _ in range(light_count):
             name_len = struct.unpack_from('<H', decompressed, offset)[0]
             offset += 2
-            if name_len > 500:
-                break
-            name = decompressed[offset:offset + name_len].decode('utf-8', errors='replace')
+            if name_len > 500 or offset + name_len > len(decompressed):
+                raise ValueError('light plugin name is truncated or outside the supported table format')
+            name = decompressed[offset:offset + name_len].decode('utf-8')
             light.append(name)
             offset += name_len
 
-    except (struct.error, IndexError):
-        pass
+    except (struct.error, IndexError, UnicodeDecodeError) as exc:
+        raise ValueError('plugin table is incomplete or malformed') from exc
 
     return regular, light
 
@@ -216,6 +216,8 @@ def search_hex(decompressed, hex_string):
     """Search for a hex byte pattern in the decompressed save."""
     results = []
     needle = bytes.fromhex(hex_string)
+    if not needle:
+        raise ValueError('hex search pattern cannot be empty')
     start = 0
 
     while True:
@@ -245,7 +247,7 @@ def cmd_info(args):
     info['fileSize'] = len(data)
     info['compressionOffset'] = comp_offset
 
-    if decompressed:
+    if decompressed is not None:
         info['decompressedSize'] = len(decompressed)
         regular, light = read_plugins(data, decompressed)
         info['regularPlugins'] = len(regular)
@@ -257,6 +259,7 @@ def cmd_info(args):
         info['error'] = 'Failed to decompress save'
 
     print(json.dumps(info, indent=2))
+    return 2 if decompressed is None else 0
 
 
 def cmd_plugins(args):
@@ -264,8 +267,8 @@ def cmd_plugins(args):
     _, decompressed, _ = decompress_save(data)
 
     if decompressed is None:
-        print(json.dumps({'error': 'Failed to decompress save'}))
-        return
+        print(json.dumps({'error': 'Failed to decompress save', 'complete': False}))
+        return 2
 
     regular, light = read_plugins(data, decompressed)
     result = {
@@ -276,6 +279,7 @@ def cmd_plugins(args):
         'light': light
     }
     print(json.dumps(result, indent=2))
+    return 0
 
 
 def cmd_search(args):
@@ -283,8 +287,8 @@ def cmd_search(args):
     _, decompressed, _ = decompress_save(data)
 
     if decompressed is None:
-        print(json.dumps({'error': 'Failed to decompress save'}))
-        return
+        print(json.dumps({'error': 'Failed to decompress save', 'complete': False}))
+        return 2
 
     if args.string:
         results = search_string(decompressed, args.string)
@@ -316,7 +320,8 @@ def cmd_search(args):
 
     else:
         print('Error: specify --string, --formid, or --hex', file=sys.stderr)
-        sys.exit(1)
+        return 2
+    return 0
 
 
 def main():
@@ -340,13 +345,17 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == 'info':
-        cmd_info(args)
-    elif args.command == 'plugins':
-        cmd_plugins(args)
-    elif args.command == 'search':
-        cmd_search(args)
+    try:
+        if args.command == 'info':
+            return cmd_info(args)
+        elif args.command == 'plugins':
+            return cmd_plugins(args)
+        elif args.command == 'search':
+            return cmd_search(args)
+    except (OSError, ValueError, struct.error) as exc:
+        print(json.dumps({'error': str(exc), 'complete': False}))
+        return 2
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

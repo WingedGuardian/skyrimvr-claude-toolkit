@@ -258,7 +258,9 @@ def test_in_place_save_restore_with_room_backs_the_save_up(inst, monkeypatch):
     _low_disk(monkeypatch, 10 * 1024 * 1024)
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
     assert rc == 0 and (inst.saves / "Quick.ess").read_bytes() == b"quick save bytes", text
-    assert any(e["src"].endswith("Quick.ess") for e in _backups(inst).values())
+    prebackup = recovery.snapshots(inst.store)[-1]
+    assert {os.path.basename(e["src"]) for e in prebackup["files"]} == {"Quick.ess", "Quick.skse"}
+    assert all((inst.store / "blobs" / e["sha256"]).is_file() for e in prebackup["files"])
 
 
 def forge_recovery(inst, victim, sid):

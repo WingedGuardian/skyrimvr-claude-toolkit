@@ -307,6 +307,7 @@ NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE", "write.W-SELF-STA
 # The save policy (user ruling 2026-10-13): a bulk save change needs the USER's typed approval, and a save that cannot
 # be backed up is never changed. `guards off` is a lift the agent may take itself, so it lifts neither.
 NEVER_SHADOW = NEVER_SHADOW | saves.NEVER_SHADOW
+NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SAVE-STORE", "write.W-SAVE-STORE"))
 
 
 def _reject_marker(project) -> Path:

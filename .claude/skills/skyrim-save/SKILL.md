@@ -38,9 +38,9 @@ python scripts/read-save.py search "<save.ess>" --hex "DEADBEEF"
 
 ## Common Debugging Use Cases
 
-- **Orphaned scripts**: Search for a script name from a removed mod. If it still appears, the save has orphaned instances.
-- **Effect accumulation**: Search for a spell's FormID and count occurrences. More than expected = stacking bug.
-- **Mod footprint**: Search for a mod's prefix (e.g., "MyMod_") to see how many references it left in the save.
+- **Orphaned scripts**: A raw script-name hit is an investigation lead. Use structured ReSaver instance/reference data to determine whether instances are orphaned.
+- **Effect accumulation**: Raw FormID byte counts do not establish active effects or stacking. Check the structured records and runtime state.
+- **Mod footprint**: Search for a mod's prefix (e.g., "MyMod_") to locate candidate bytes; these are not semantic reference counts.
 - **Save bloat**: Compare `decompressedSize` across saves to detect growth over time.
 
 ## Save File Structure

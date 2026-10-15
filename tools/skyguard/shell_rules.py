@@ -183,6 +183,9 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     dels = deletes.scan(command, parsed, roots, cwd, env)
     # Plan 6 Task 12 (R12): a write -- or a delete (fix round 1, I1) -- into .skyguard/** is the CLI's alone. Checked before
     # the delete deny, because S-DEL-INSTALL is shadowed by guards off and S-SELF-STATE is not.
+    store_hit = self_rules.shell_save_store_hit(command, parsed, roots, cwd, env)
+    if store_hit:
+        return deny("S-SAVE-STORE", store_hit)
     own = self_rules.shell_scan(command, parsed, roots, cwd, env)
     if own and own[0] == self_rules.STATE:
         return deny("S-SELF-STATE", own[1])
