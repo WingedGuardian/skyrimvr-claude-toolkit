@@ -53,6 +53,7 @@ NEVER_SHADOW = frozenset(("shell.S-SAVE-APPROVAL", "shell.S-SAVE-UNKNOWN", "shel
 class Target(NamedTuple):
     path: str                             # the resolved file (a wildcard stays in its file name)
     op: str                               # write | move | delete
+    literal: bool = False                 # concrete file-tool / structured API identity, not shell text
 
 
 class Change(NamedTuple):
@@ -128,7 +129,7 @@ def devbench_change(found, roots, env) -> Change:
     folder = mcp_rules.saves_folder(roots, env) if roots is not None else None
     for (rid, fields), clean in found:
         if clean is not None and folder is not None and fields.get("op", "").startswith("Overwrites save"):
-            out.append(Target(_join(folder, clean + EXTS[0]), "write"))
+            out.append(Target(_join(folder, clean + EXTS[0]), "write", True))
         else:
             unknown.append((rid, tuple(sorted(fields.items()))))
     return Change(tuple(dict.fromkeys(out)), tuple(dict.fromkeys(unknown)))
@@ -197,10 +198,10 @@ def count(change: Change) -> Count:
 
     for t in change.targets:
         folder, name = os.path.split(t.path)
-        if WILD.search(folder):
+        if not t.literal and WILD.search(folder):
             unknown.append(name)
             continue
-        if not WILD.search(name):
+        if t.literal or not WILD.search(name):
             f, stem = _split(t.path)
             add(f, stem, t.op)
             continue

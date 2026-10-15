@@ -47,6 +47,40 @@ def test_pair_is_one_group_and_local_refusal_precedes_preservation(install):
     assert {Path(member["path"]).name for member in transaction["groups"][0]["members"]} == {"0.ess", "0.skse"}
 
 
+@pytest.mark.parametrize('surface', ['files', 'mcp'])
+def test_concrete_file_and_api_save_targets_are_literal_with_bracketed_paths(tmp_path, surface):
+    root = tmp_path / 'game [VR]'
+    root.mkdir()
+    config = root / 'profile [one]'
+    saves = config / 'Saves'
+    saves.mkdir(parents=True)
+    (root / 'skyrim-paths.env').write_text("SKYRIM_CONFIG_DIR='" + config.as_posix() + "'\n")
+    stem = 'Save[1]' if surface == 'files' else 'Save1'
+    pair = [saves / (stem + ext) for ext in ('.ess', '.skse')]
+    for member in pair:
+        member.write_bytes(member.name.encode())
+    request = action(root, pair[:1]) if surface == 'files' else contracts.Action(
+        'future-agent', 'mcp__devbench-vr__game', 'mcp', cwd=str(root), session_id='s',
+        provenance={'arguments': {'action': 'save', 'name': stem}})
+    outcome, _ = portable.check(request, root)
+    assert outcome.result.decision == 'allow', outcome.result.reason
+    assert outcome.result.preservation == 'verified' and len(outcome.transactions) == 1
+    record = save_store.store(root).load(outcome.transactions[0])
+    assert {Path(m['path']).name for g in record['groups'] for m in g['members']} == {stem + ext for ext in ('.ess', '.skse')}
+
+
+def test_literal_save_identity_does_not_relax_unqualified_shell_patterns(tmp_path):
+    from skyguard import saves
+    folder = tmp_path / 'profile [one]' / 'Saves'
+    folder.mkdir(parents=True)
+    target = folder / 'Save[1].ess'
+    target.write_bytes(b'fixture')
+    shell = saves.count(saves.Change((saves.Target(str(target), 'write'),)))
+    assert shell.unknown and not shell.pairs
+    native = saves.count(saves.Change((saves.Target(str(target), 'write', True),)))
+    assert not native.unknown and not native.patterns and len(native.pairs) == 1
+
+
 def test_generic_upgrade_stage_keeps_private_install_bytes_and_refuses_bundle_reuse(tmp_path):
     import hashlib
     import subprocess

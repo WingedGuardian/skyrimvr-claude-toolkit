@@ -105,7 +105,7 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
             # The save policy (user ruling 2026-10-13): a save changed through Edit/Write or a patch is backed up
             # first (saves.enforce); saves.judge decides it with every other save the call changes.
             from . import saves
-            return saves.judge(saves.Change((saves.Target(a, op if op in saves.OPS else "write"),)), Verdict(),
+            return saves.judge(saves.Change((saves.Target(a, op if op in saves.OPS else "write", True),)), Verdict(),
                                audit, HOOK)
         papyrus = a is not None and papyrus_zone(a, roots)
         install = a is not None and in_install_area(a, roots)

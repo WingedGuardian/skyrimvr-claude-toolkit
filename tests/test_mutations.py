@@ -8628,7 +8628,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SPT + "test_a_save_and_its_cosave_are_one_save", "rule-S-SAVE-BACKUP-pair"),
     (_SV, "    if change.unknown:\n        return refuse(*change.unknown[0])", "    if False:\n        return refuse(*change.unknown[0])",
      _SPT + "test_resaver_apply_on_a_save_it_cannot_place_is_refused[pattern]", "rule-S-RESAVER-APPLY-unplaced-refused"),
-    (_SV, "        if WILD.search(folder):\n            unknown.append(name)", "        if False:\n            unknown.append(name)",
+    (_SV, "        if not t.literal and WILD.search(folder):\n            unknown.append(name)", "        if False:\n            unknown.append(name)",
      _SPT + "test_a_wildcard_in_a_folder_name_cannot_be_listed", "rule-S-SAVE-UNKNOWN-folder"),
     (_SV, "        except OSError:\n            unknown.append(name)\n            continue", "        except OSError:\n            continue",
      _SPT + "test_a_wildcard_in_a_folder_that_cannot_be_read_cannot_be_listed", "rule-S-SAVE-UNKNOWN-unlistable"),
@@ -8764,4 +8764,13 @@ MUTATIONS += [pytest.param("tools/skyguard/save_store.py", before, after,
      '        result = target.restore(ident, selected=selected, in_place=True)', 'True'),
     ('    return target.restore(ident, to or None, selected, deadline=deadline)',
      '    return target.restore(ident, to or None, selected)', 'False'),
+)]
+
+MUTATIONS += [pytest.param(path, before, after,
+    "tests/test_portable_profile.py::test_concrete_file_and_api_save_targets_are_literal_with_bracketed_paths[" + surface + "]",
+    id="save-target-literal-provenance-" + surface) for path, before, after, surface in (
+    ('tools/skyguard/write_rules.py', 'saves.Target(a, op if op in saves.OPS else "write", True)',
+     'saves.Target(a, op if op in saves.OPS else "write")', 'files'),
+    ('tools/skyguard/saves.py', 'Target(_join(folder, clean + EXTS[0]), "write", True)',
+     'Target(_join(folder, clean + EXTS[0]), "write")', 'mcp'),
 )]
