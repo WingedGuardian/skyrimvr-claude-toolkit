@@ -40,5 +40,13 @@ For an existing native definition, replacing it uses an explicit
 `merged_settings` choice. The core reviews both definition files and also
 `.claude/settings.local.json`. Unresolved pre-tool handlers in any reviewed
 configuration refuse application even when that file is kept. Unknown post-tool
-handlers and unrelated settings remain in the merged proposal. The game profile
-does not yet enable automatic personal-policy retirement.
+handlers and unrelated settings remain in the merged proposal.
+
+For the exact reviewed Windows policy, `upgrade-stage --integrate-local-policy`
+can stage a reproducible proposal containing the source-hash registration and
+both native definitions. It validates complete groups, retains every private
+source/helper and requires the full candidate guard runtime. It also reviews
+local settings; unknown pre-handlers remain a refusal. Each proposed file needs
+an explicit `reviewed_settings` choice. See ADAPTING.md for the retained-handler
+and native host qualification requirements. This option performs no deployment
+or host trust changes.

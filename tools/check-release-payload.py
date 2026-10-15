@@ -96,6 +96,7 @@ CORE_REQUIRED = (
     "tools/skyguard/portable.py",
     "tools/skyguard/local_policy.py",
     "tools/skyguard/save_profile.py",
+    "tools/skyguard/ordered_upgrade.py",
     "tools/skyguard/adapters/opencode.py",
     ".opencode/plugins/skyguard.js",
     ".opencode/hooks/skyguard_adapter.py",

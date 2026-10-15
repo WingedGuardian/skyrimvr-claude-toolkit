@@ -8849,6 +8849,27 @@ MUTATIONS.append(pytest.param("tools/skyguard/save_profile.py", '        suffix 
     'tests/test_save_profile.py::test_backup_suffix_stays_attached_to_both_logical_members[.bak]',
     id='legacy-backup-suffix-membership'))
 
+MUTATIONS += [pytest.param("tools/skyguard/ordered_upgrade.py", before, after, test,
+    id="ordered-policy-" + name) for before, after, test, name in (
+    ('    if rollback[local_policy.LEGACY] != local_policy.TRANSFER_POLICY_SHA256:', '    if False:',
+     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[policy]',
+     'source-qualification'),
+    ('    if hashlib.sha256(normalized.encode("utf-8")).hexdigest() != WRAPPER_NORMALIZED_SHA256:', '    if False:',
+     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[wrapper]',
+     'wrapper-qualification'),
+    ('        if any(upgrade.json_bytes(group) not in keys for group in merged.get("hooks", {}).get("PreToolUse", [])):',
+     '        if False:',
+     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[windows-command]',
+     'complete-native-group'),
+    ('    if not required <= candidate.keys():', '    if False:',
+     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[missing-runtime]',
+     'complete-runtime'),
+    ('    if review["observed_local_files"].get(local_policy.CONFIG) is not None and upgrade.json_bytes(existing) != upgrade.json_bytes(registration):',
+     '    if existing and upgrade.json_bytes(existing) != upgrade.json_bytes(registration):',
+     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[empty-registration]',
+     'existing-empty-registration'),
+)]
+
 MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test,
     id="local-policy-finite-" + name) for before, after, test, name in (
     ('    return replace(plan, mutations=mutations, wildcard=wildcard, helper=True, recheck=recheck)',

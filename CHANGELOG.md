@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `upgrade-stage --integrate-local-policy` prepares a reproducible ordered
+  migration for the exact reviewed Windows personal policy and complete native
+  groups. It retains private sources/helpers and unrelated settings, requires the
+  complete candidate runtime and explicit reviewed-file choices, and publishes
+  runtime before registration and native definitions. Unknown versions/groups
+  refuse; staging and application do not establish host trust.
 - Finite requirements from the reviewed personal policy supplement shell save
   scope, including backup-suffixed writes and the legacy restore helper. Move
   sources and written destinations retain separate roles. Requirements are

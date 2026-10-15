@@ -51,8 +51,17 @@ without that personal policy do not acquire it. Registration is part of a
 reviewed upgrade, never inferred from a hook trust record.
 Keep the existing parallel handler active until the complete replacement,
 including any controlled loader and helper routes in use, is qualified. The
-shared core supports explicit ordered-policy proposals, but this profile does
-not yet expose `--integrate-local-policy` as a supported migration.
+profile supports `upgrade-stage --integrate-local-policy` for the exact reviewed
+Windows policy, wrapper and native groups. It needs the complete candidate guard
+runtime and both destination-rendered native definitions. Unknown source versions,
+changed matcher/timeout/Windows/async fields, unrelated local pre-handlers and an
+unqualified existing registration refuse the proposal. The wrapper permits only
+its documented literal interpreter-path and UTF-8/line-ending normalization.
+All policy/helper sources and unrelated settings/post-handlers are retained.
+Every proposed file needs an explicit `reviewed_settings` choice; application
+reproduces the proposal from retained bytes and binds every required runtime file.
+Runtime is published before registration, then native definitions. A staged review
+changes no installed file and establishes no native host trust or interception.
 
 `upgrade-preview --candidate FILE [--previous FILE]` compares version 1 inventories
 (`{"v":1,"files":{"relative/path":"sha256"}}`) without writing anything.
