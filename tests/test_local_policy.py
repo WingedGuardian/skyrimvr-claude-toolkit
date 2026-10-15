@@ -107,6 +107,41 @@ def test_inspection_detects_policy_change_after_worker_returns(tmp_path, monkeyp
         local_policy.inspect_policy(contracts.Action("future", "shell", "shell", command="fixture"), tmp_path)
 
 
+def test_qualified_transfer_roles_preserve_move_source_and_written_destination(tmp_path):
+    from modding_harness import dispatch
+    source, destination = tmp_path / "source.ess", tmp_path / "destination.ess"
+    source.write_bytes(b"source")
+    destination.write_bytes(b"destination")
+    namespace = {"transfer_form": lambda text, args: {"parsed": text},
+                 "resolve_transfer": lambda form: ([str(source)], [str(destination)]),
+                 "is_save": lambda path: path.endswith(".ess")}
+    roles = local_policy._transfer_roles(namespace, {"tool_input": {"command": "literal move"}})
+    assert roles == ((str(source), "move"), (str(destination), "write"))
+    decision = {"kind": "backup", "op": "move", "affected": [str(source), str(destination)]}
+    plan = dispatch.SavePlan((dispatch.Mutation(str(source), "move"), dispatch.Mutation(str(destination), "write")))
+    assert local_policy._coverage(decision, local_policy.plan_facts(plan), roles) is None
+    assert local_policy._coverage(decision, local_policy.plan_facts(plan)).decision == "deny"
+    missing = dispatch.SavePlan((dispatch.Mutation(str(source), "move"),))
+    assert local_policy._coverage(decision, local_policy.plan_facts(missing), roles).decision == "deny"
+
+
+def test_unqualified_policy_cannot_relabel_its_own_transfer_requirements(tmp_path):
+    from modding_harness import dispatch
+    source, destination = tmp_path / "source.ess", tmp_path / "destination.ess"
+    source.write_bytes(b"source")
+    destination.write_bytes(b"destination")
+    decision = {"kind": "backup", "op": "move", "affected": [str(source), str(destination)]}
+    code = "def decide(payload): return " + repr(decision) + "\n"
+    code += "def transfer_form(text,args): return {}\n"
+    code += "def resolve_transfer(form): return ([" + repr(str(source)) + "],[" + repr(str(destination)) + "])\n"
+    code += "def is_save(path): return True\n"
+    register(tmp_path, code)
+    plan = dispatch.SavePlan((dispatch.Mutation(str(source), "move"), dispatch.Mutation(str(destination), "write")))
+    result = local_policy.restriction(tmp_path, plan_provider=lambda: plan)(
+        contracts.Action("future", "shell", "shell", shell="bash", command="fixture"))
+    assert result.decision == "deny" and "does not cover" in result.reason
+
+
 def test_registered_policy_denies_before_any_permanent_save_backup(tmp_path):
     root = tmp_path / "toolkit"
     root.mkdir()

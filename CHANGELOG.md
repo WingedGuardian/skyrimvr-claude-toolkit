@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The reviewed legacy save policy's literal move/rename checks now preserve the
+  source as a move and an overwritten destination as a write. Other source
+  revisions retain strict operation matching until qualified. Internal policy
+  inspection reports requirements without granting execution or taking backups.
 - Shared transaction/review/journal metadata completes short writes and verifies
   staging bytes before publication. Save preservation retains its independent
   final manifest verification. Native pre-tool ownership compares complete,

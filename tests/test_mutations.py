@@ -8796,4 +8796,10 @@ MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test
      '    if False:\n        raise ValueError("local policy registration changed during inspection")',
      'tests/test_local_policy.py::test_inspection_detects_policy_change_after_worker_returns',
      'inspection-source-recheck'),
+    ('((sources, "move"), (destinations, "write"))', '((sources, "move"), (destinations, "move"))',
+     'tests/test_local_policy.py::test_qualified_transfer_roles_preserve_move_source_and_written_destination',
+     'move-destination-is-write'),
+    ('                    hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256):', '                    True):',
+     'tests/test_local_policy.py::test_unqualified_policy_cannot_relabel_its_own_transfer_requirements',
+     'transfer-source-qualification'),
 )]

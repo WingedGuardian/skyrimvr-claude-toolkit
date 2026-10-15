@@ -21,6 +21,9 @@ from modding_harness import contracts, profiles, transport
 CONFIG = ".modding-agent-harness/local-policies.json"
 LEGACY = ".claude/hooks/protect-save-access.py"
 KIND = "legacy-skyrim-save-guard-v1"
+# Only this reviewed legacy version has qualified pure transfer helpers. A
+# registration for different source bytes remains a restrictive policy only.
+TRANSFER_POLICY_SHA256 = "30777ba84ec4dcf66b6be4c9b0d40ea6eb8e3075aa3561bb0493b8b9bb1351a2"
 
 
 def registration(project):
@@ -96,7 +99,19 @@ def plan_facts(plan):
             "recheck": callable(plan.recheck), "unresolved": plan.unresolved}
 
 
-def _coverage(decision, facts):
+def _transfer_roles(namespace, payload):
+    args = payload["tool_input"]
+    text = args.get("command", args.get("cmd", "")) if isinstance(args, dict) else args
+    form = namespace["transfer_form"](text, args)
+    resolved = namespace["resolve_transfer"](form)
+    if resolved is None:
+        return ()
+    sources, destinations = resolved
+    return tuple((path, operation) for paths, operation in ((sources, "move"), (destinations, "write"))
+                 for path in paths if namespace["is_save"](path))
+
+
+def _coverage(decision, facts, roles=()):
     """Prove the portable plan retains a legacy non-allow requirement."""
     def refuse(why):
         return contracts.Result("deny", "evaluated", reason="Installed local policy: " + why +
@@ -123,12 +138,18 @@ def _coverage(decision, facts):
         identity, exists = key(row["path"])
         if exists:
             covered.setdefault(identity, set()).add(row["operation"])
+    mapped = {}
+    for path, role in roles:
+        if role not in ("move", "write"):
+            raise ValueError("unqualified legacy transfer role")
+        identity, _exists = key(path)
+        mapped.setdefault(identity, set()).add(role)
     needed = {}
     for path in targets:
         identity, exists = key(path)
         if exists:
-            needed[identity] = operation
-    if any(operation not in covered.get(identity, ()) for identity in needed):
+            needed[identity] = mapped.get(identity, {operation})
+    if any(not required <= covered.get(identity, set()) for identity, required in needed.items()):
         return refuse("portable preservation does not cover every legacy save and operation")
     if kind == "needs_files":
         count = decision.get("count")
@@ -179,7 +200,11 @@ def evaluate(action, project, facts=None, *, requirements=None):
             if requirements is not None:
                 requirements.append({key: result[key] for key in ("kind", "op", "affected", "set", "count") if key in result})
                 continue
-            refused = _coverage(result, facts)
+            roles = ()
+            if (file_operation is None and result.get("op") in ("move", "rename") and
+                    hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256):
+                roles = _transfer_roles(namespace, payload)
+            refused = _coverage(result, facts, roles)
             if refused is not None:
                 return refused
     # Save authorization and preservation remain the portable dispatcher's job.
