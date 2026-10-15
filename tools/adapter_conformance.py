@@ -84,6 +84,9 @@ def make_install(adapter_dir: Path, dest: Path, repo: Path = REPO) -> Path:
     dest = Path(dest)
     shutil.copytree(Path(repo) / "tools" / "skyguard", dest / "tools" / "skyguard",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    if (Path(repo) / "tools" / "modding_harness").is_dir():    # the engine imports it
+        shutil.copytree(Path(repo) / "tools" / "modding_harness", dest / "tools" / "modding_harness",
+                        ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(adapter_dir, dest / "tools" / "adapters" / Path(adapter_dir).name,
                     ignore=shutil.ignore_patterns("__pycache__"))
     (dest / ".claude").mkdir(exist_ok=True)

@@ -164,6 +164,8 @@ def test_internal_error_exits_1_with_empty_stdout(tmp_path):
     import shutil
     pkg = tmp_path / "skyguard"
     shutil.copytree(REPO / "tools" / "skyguard", pkg, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(REPO / "tools" / "modding_harness", tmp_path / "modding_harness",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     proj = tmp_path / "proj"
     proj.mkdir()
     cmd = [sys.executable, str(pkg / "run.py"), "claude", "protect-bash", "--root", "C:/x", "--project", str(proj)]

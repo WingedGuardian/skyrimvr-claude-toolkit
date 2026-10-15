@@ -40,6 +40,8 @@ def _install(tmp_path: Path, py: str) -> Path:
             (root / rel).write_text(text, encoding="utf-8", newline="\n")
     shutil.copytree(REPO / "tools" / "skyguard", root / "tools" / "skyguard",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(REPO / "tools" / "modding_harness", root / "tools" / "modding_harness",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     return root
 
 

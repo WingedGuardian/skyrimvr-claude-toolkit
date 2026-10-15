@@ -28,6 +28,7 @@ def adapting_references():
     """Every repo file ADAPTING.md tells the agent to use (`tools/...` in backticks) or cites as evidence."""
     text = (REPO / "ADAPTING.md").read_text(encoding="utf-8")
     out = {p for p in re.findall(r"`((?:tools|tests|agent|docs)/[A-Za-z0-9_./-]+\.[a-z]+)`", text) if "<" not in p}
+    out.update(re.findall(r"\]\(((?:tools|tests|agent|docs)/[A-Za-z0-9_./-]+\.[a-z]+)\)", text))
     for kind, target in CITE.findall(text):
         out.add(SPEC if kind == "spec" else re.split(r"::|#", target)[0].strip())
     return sorted(out)

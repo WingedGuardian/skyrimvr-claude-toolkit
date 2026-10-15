@@ -139,6 +139,8 @@ DOTENV_GLOBS = (".env", "*.env", ".env.*", "*.env.local")
 
 ADAPTER_REQUIRED = (
     "ADAPTING.md",
+    "docs/upgrading-native-hooks.md",
+    "tools/modding_harness/patches.py",
     "tools/adapting/adapter_template.py",
     "tools/adapting/capability-report.template.json",
     "tools/adapter_conformance.py",

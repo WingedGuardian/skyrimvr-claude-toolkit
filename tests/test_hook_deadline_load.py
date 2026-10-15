@@ -233,6 +233,9 @@ def _claude_install(tmp: Path, py: str) -> Path:
                                                                   encoding="utf-8", newline="\n")
     shutil.copytree(SRC / "tools" / "skyguard", root / "tools" / "skyguard",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    if (SRC / "tools" / "modding_harness").is_dir():    # the engine imports it; the pre-fix tree has none
+        shutil.copytree(SRC / "tools" / "modding_harness", root / "tools" / "modding_harness",
+                        ignore=shutil.ignore_patterns("__pycache__"))
     return root
 
 
@@ -245,6 +248,9 @@ def _codex_install(tmp: Path, py: str) -> Path:
         (root / ".codex" / "hooks" / name).write_text(text, encoding="ascii", newline="\n")
     shutil.copytree(SRC / "tools" / "skyguard", root / "tools" / "skyguard",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    if (SRC / "tools" / "modding_harness").is_dir():    # the engine imports it; the pre-fix tree has none
+        shutil.copytree(SRC / "tools" / "modding_harness", root / "tools" / "modding_harness",
+                        ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(SRC / "tools" / "kb-guard.sh", root / "tools" / "kb-guard.sh")
     return root
 
@@ -575,6 +581,9 @@ def _matrix_install(tmp: Path, entry: str, path: str) -> Path:
             text = text.replace("{{PYTHON_PATH}}", py).replace("{{BASH_PATH}}", BASH.replace(BS, "/"))
             (root / ".codex" / "hooks" / f).write_text(text, encoding="ascii", newline="\n")
     shutil.copytree(SRC / "tools" / "skyguard", root / "tools" / "skyguard", ignore=shutil.ignore_patterns("__pycache__"))
+    if (SRC / "tools" / "modding_harness").is_dir():    # the engine imports it; the pre-fix tree has none
+        shutil.copytree(SRC / "tools" / "modding_harness", root / "tools" / "modding_harness",
+                        ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(SRC / "tools" / "kb-guard.sh", root / "tools" / "kb-guard.sh")
     for f in ("KNOWLEDGEBASE.md", "CLAUDE.md"):
         if (SRC / f).is_file():

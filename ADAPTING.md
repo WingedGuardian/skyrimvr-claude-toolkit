@@ -11,17 +11,18 @@ pair first. More than two existing saves need a canonical human grant bound to
 the helper command, paths and count. Unknown approval readers cannot grant it.
 Both legacy formats remain readable through `tools/skyguard.sh snapshot`.
 
-The generated `.opencode/plugins/skyguard.js` follows the OpenCode V1 1.18.34
-source contract and imports the same pinned process transport as X4. Its Node
+The generated `.opencode/plugins/skyguard.js` follows the OpenCode V1 1.18.34 source contract (running-host enforcement unmeasured)
+and imports the same pinned process transport as X4. Its Node
 fixtures qualify translation and failure handling only; running-host blocking,
 Desktop and V2 remain unqualified. See `.opencode/SKYRIM-OPENCODE.md`. Existing
 Claude/Codex entrypoints remain available during the dispatcher transition.
 
-An existing `.claude/hooks/protect-save-access.py` is a local policy, never a
+An existing installed `protect-save-access.py` is a local policy, never a
 replaceable toolkit default. Portable mutations refuse until it is registered
 in `.modding-agent-harness/local-policies.json` as version 1, kind
-`legacy-skyrim-save-guard-v1`, path `.claude/hooks/protect-save-access.py`, and
-its full SHA-256. The bridge runs only its pure `decide` entry before permanent
+`legacy-skyrim-save-guard-v1`, its exact installed relative path, and
+its full SHA-256; see [native hook upgrade formats](docs/upgrading-native-hooks.md).
+The bridge runs only its pure `decide` entry before permanent
 preservation. Changed bytes, a crash, output, or a missed deadline refuse the
 call. It cannot grant bulk approval or bypass game rules. Its structured DevBench
 checks retain the local refusal of generic runtime save/load; the separately
@@ -50,8 +51,9 @@ merged project settings and local-setting review. Add `--previous FILE` and exac
 verified `--owned-command COMMAND` values for lifecycle handlers where available.
 Pre-tool retirement uses complete groups: exact current candidate groups and
 unchanged files matching the previous inventory qualify automatically. Otherwise
-`--owned-pre-groups FILE` supplies `{"v":1,"files":{".claude/settings.json":[...]}}`
-(or `.codex/hooks.json`) from verified previous definitions. Matcher, timeout,
+`--owned-pre-groups FILE` supplies complete groups scoped to their native definition
+file, using the [native hook upgrade formats](docs/upgrading-native-hooks.md),
+from verified previous definitions. Matcher, timeout,
 Windows command and asynchronous changes remain custom; command text alone is
 insufficient. Existing personal save
 guard sources are retained; `--local-file PATH` includes other local policy files.
@@ -92,7 +94,7 @@ After reviewing the bundle, `upgrade-apply --installed-root DIR --bundle DIR
 --review-sha256 SHA256 --choices FILE --quiescent` applies its selected files.
 SHA256 is the hash of the exact `complete.json` reviewed. The choices file is a
 JSON object mapping every collision path to `keep` or `candidate`; project
-`.claude/settings.json` and `.codex/hooks.json` instead select `merged_settings`
+hook definitions for both supported native hosts instead select `merged_settings`
 when replacing existing definitions. Omit `--choices`
 only when no collision needs a choice. Custom pre-tool handlers must first be
 integrated into the ordered dispatcher and reviewed; an unresolved handler
@@ -211,15 +213,18 @@ cannot extract must not be sent as an empty `write`: the engine denies it, and s
 
 What each kind means to the engine:
 
-- `shell`, `write`: judged by the shell and write rules, and backed up (above) whatever the decision.
+- `shell`, `write`: judged by the shell and write rules. Recognized save mutations
+  use the permanent preservation policy above; ordinary config/script snapshots
+  remain a separate mechanism.
 - `mcp`: judged by the same DevBench rules Claude's MCP hook uses. A call that would crash the game is denied; a
-  call that saves over an existing save returns **`ask`**, which falls under the ask rule below. Any other
-  call is allowed. Name the tool as the three parts `mcp`, `<server>`, `<tool>` joined by a double underscore:
+  recognized save overwrite follows the same preservation and bulk-approval policy
+  as other save changes. A registered local policy can further refuse runtime save/load.
+  Other calls use the DevBench rules. Name the tool as the three parts `mcp`, `<server>`, `<tool>` joined by a double underscore:
   the name after the leading `mcp` part must contain `devbench` (ignoring case, hyphens, underscores, dots and spaces) to be judged.
   A call to any other server is allowed with `status`
-  `partial` and the context `NOT JUDGED: only a DevBench MCP server is guarded`; treat it as you treat `other`.
+  `partial` and the context `NOT JUDGED: only a DevBench MCP server is guarded; WARN AND ALLOW`; treat it as you treat `other`.
 - `other`: **allowed, and never judged.** The answer carries `status` `partial` and the context
-  `NOT JUDGED: this tool kind is not guarded`. Show or log that context; do not report the call as checked.
+  `NOT JUDGED: this tool kind is not guarded; WARN AND ALLOW`. Show or log that context; do not report the call as checked.
 
 Answer (stdout): the line `SKYGUARD-OK`, then one line of JSON:
 `{"v":1,"decision":"allow|ask|deny","reason":...,"context":...,"status":"evaluated|partial|failed","code":...}`.
@@ -240,7 +245,7 @@ Copy their *mechanism*, not their wording. Every row is cited.
 | Codex blocks a tool call on exactly one thing: a parsed JSON `permissionDecision: "deny"`. `ask`, exit 2, exit 1, malformed JSON, a timeout and a missing script all let the command run | MEASURED | [spec: E17] [measured: docs/superpowers/measurements/2026-10-02-plan4-codex-derisk.md#EXIT2ME] |
 | Codex skips a project's unapproved hooks silently | MEASURED | [spec: E2] |
 | Codex shell commands arrive as tool `Bash` although they run under PowerShell | MEASURED | [spec: E3] |
-| Codex `apply_patch` carries paths only inside the patch text | MEASURED | [spec: E4] [src: tools/skyguard/patch_paths.py::def parse_patch] |
+| Codex `apply_patch` carries paths only inside the patch text | MEASURED | [spec: E4] [src: tools/modding_harness/patches.py::def parse_patch] [src: tools/skyguard/patch_paths.py::from modding_harness.patches import] |
 | A user-typed `!` command in the Codex prompt fires no pre-tool hook | MEASURED | [src: tools/skyguard/adapters/codex.py::fires no PreToolUse] |
 | The Codex adapter turns every `ask` into a deny that says the user must run it themselves | READ | [src: tools/skyguard/adapters/codex.py::def render] |
 | The Claude adapter passes `ask` and `deny` through | READ | [src: tools/skyguard/adapters/claude.py::def render] |
@@ -380,7 +385,7 @@ List every gap in the report. These are the ones the toolkit already knows about
 - The neutral entry refuses `agent` values `claude` and `codex` | [src: tools/skyguard/neutral.py::must not be claude or codex]
 - The neutral entry allows kind `other` and labels it not judged | [src: tools/skyguard/neutral.py::NOT JUDGED]
 - The neutral entry sends kind `mcp` to the DevBench rules | [src: tools/skyguard/neutral.py::engine.evaluate_mcp]
-- The neutral entry allows an MCP call to any other server and labels it not judged, status `partial` | [src: tools/skyguard/neutral.py::UNJUDGED_MCP = "NOT JUDGED: only a DevBench MCP server is guarded"]
+- The neutral entry allows an MCP call to any other server and labels it not judged, status `partial` | [src: tools/skyguard/neutral.py::UNJUDGED_MCP = "NOT JUDGED: only a DevBench MCP server is guarded; WARN AND ALLOW"]
 - Only an MCP server whose name contains `devbench`, ignoring case and `-` `_` `.` (`DevBench-vr`, `dev-bench`, `skyrim-devbench`), is judged, so a DevBench server registered under any other name is allowed unjudged; an adapter must map such a server to such a name itself. | [src: tools/skyguard/mcp_rules.py::"devbench" in re.sub(]
 - The MCP judge reads every string in a DevBench call, whatever the tool, for a refused console command (`smp reset`); the save-over-a-save confirmation reads only the `console`, `game` and `papyrus` tools and scenario steps (`steps`), so a save made by a `replay` of a recording is not confirmed | [src: tools/skyguard/mcp_rules.py::for s in _strings(args):] [src: tools/skyguard/mcp_rules.py::elif tool == "game"]
 - Ops that take a backup are exactly `update`, `delete` and `move_from` | [src: tools/skyguard/engine.py::_BACKUP_OPS = ("update", "delete", "move_from")]
