@@ -66,6 +66,20 @@ def test_generic_upgrade_stage_keeps_private_install_bytes_and_refuses_bundle_re
     assert (installed / "AGENTS.md").read_bytes() == b"private instructions"
     assert (bundle / "rollback/AGENTS.md").read_bytes() == b"private instructions"
     assert subprocess.run(args, capture_output=True, timeout=45).returncode == 2
+    choices = tmp_path / 'choices.json'
+    choices.write_text(json.dumps({'AGENTS.md': 'candidate'}))
+    review_sha = hashlib.sha256((bundle / 'complete.json').read_bytes()).hexdigest()
+    applying = [sys.executable, '-B', str(REPO / 'tools/agent-harness.py'), 'upgrade-apply',
+                '--installed-root', str(installed), '--bundle', str(bundle), '--review-sha256', review_sha,
+                '--choices', str(choices), '--quiescent']
+    applied = subprocess.run(applying, capture_output=True, timeout=45)
+    assert applied.returncode == 0, applied.stdout
+    receipt = json.loads(applied.stdout)
+    assert receipt['host_review_required'] and (installed / 'AGENTS.md').read_bytes() == b'candidate instructions'
+    rolled = subprocess.run([sys.executable, '-B', str(REPO / 'tools/agent-harness.py'), 'upgrade-rollback',
+        receipt['operation'], '--installed-root', str(installed), '--quiescent'], capture_output=True, timeout=45)
+    assert rolled.returncode == 0, rolled.stdout
+    assert (installed / 'AGENTS.md').read_bytes() == b'private instructions'
 
 
 @pytest.mark.parametrize("in_place", [False, True])

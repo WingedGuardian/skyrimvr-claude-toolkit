@@ -87,6 +87,8 @@ def install_kind(rel: List[str]) -> str:
         return STATE
     if rel in ([".modding-agent-harness", "config.json"], [".modding-agent-harness", "local-policies.json"]):
         return STATE
+    if rel[:2] == [".modding-agent-harness", "upgrades"] or rel == [".modding-agent-harness", "upgrade.lock"]:
+        return STATE
     if (rel[:3] in ([".claude", "backups", "recovery_snapshots"],
                      [".claude", "backups", "save-backups"])
             or rel[:3] == [".modding-agent-harness", "backups", "saves"]):
@@ -137,6 +139,8 @@ def save_store_target(abs_path, roots, holder=False):
     return (rel[:3] in ([".claude", "backups", "recovery_snapshots"],
                         [".claude", "backups", "save-backups"],
                         [".modding-agent-harness", "backups", "saves"])
+            or rel[:2] == [".modding-agent-harness", "upgrades"]
+            or rel == [".modding-agent-harness", "upgrade.lock"]
             or holder and (not rel or rel in _SAVE_HOLDERS))
 
 

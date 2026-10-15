@@ -1,7 +1,7 @@
 {
   "v": 1,
   "project": "modding-agent-harness",
-  "revision": "a57e19ad016cf7e3aa7e180b78b9eca37f54018b",
+  "revision": "68e3da9ff2b447facdf585419c83f929ce3c8e8c",
   "api_version": 1,
   "files": {
     "tools/modding_harness/LICENSE": "07a5c5e4aac6c4eda67565a716c8f4967dc318abe03098e5dee6a8fa7672d619",
@@ -12,6 +12,7 @@
     "tools/modding_harness/dispatch.py": "d9812a304b8af5bc6c30592d2f0d9d84bf1b65c33399f0a8a80ea73127d07ee4",
     "tools/modding_harness/durable.py": "784349d4079bab8cca5f936cd6faab7ac0bbaf4c97f6216535ba912ca8897109",
     "tools/modding_harness/generic.py": "662227e3d75048529066905cb742cd07936bd1958424bd634a7d10d60f49176f",
+    "tools/modding_harness/installation.py": "a70c8a51a2daa14bae4e3fc5110487805298e36ddbfbca934b87941969290a0d",
     "tools/modding_harness/locking.py": "42c8d3322567e6225cf74429aeb0b8b5361edf92986f3e488a8fb2433f9e476a",
     "tools/modding_harness/opencode_plugin.mjs": "56e62cfb45b6e0e2fb5166f315176c183572bd7b7cbf733852b3d467e9ea21e4",
     "tools/modding_harness/patches.py": "b3b122f53f0408938626f376afbdff193b8f8675c7986d3b131a5da4589f320d",
@@ -20,7 +21,7 @@
     "tools/modding_harness/profiles.py": "4b2cd89e0468a24eba1eeac22318cb86f84f1d4fb06cdac5ccb8e6688a2e33a0",
     "tools/modding_harness/telemetry.py": "fdfd78ad65dd681fe311bf35b459d6969f032edf6b7bde177ec3b76d2e396f40",
     "tools/modding_harness/transport.py": "1548c1dae6f9461e88ec634311f36e149476d5efaaba377fcb005f887e996c43",
-    "tools/modding_harness/upgrade.py": "4f9ebf0203fb8ffa03db0d746e42bce044d8fa511a514a00cd8e95daba1e23c4",
+    "tools/modding_harness/upgrade.py": "106a7d277d4a294e2402008ad12d153e1a135931a69e9d3db0333f16804d7609",
     "tools/modding_harness/workspace.py": "264d871f6eca26dd91d8616cdcc1424d0d101d436c3aec01f4d52d4b67ba7d64"
   }
 }

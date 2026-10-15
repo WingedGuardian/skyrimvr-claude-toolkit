@@ -7,7 +7,7 @@ import sys
 import time
 
 sys.dont_write_bytecode = True
-from modding_harness import contracts, generic, telemetry
+from modding_harness import contracts, generic, installation, telemetry
 from skyguard import portable, save_store
 
 
@@ -20,18 +20,7 @@ def main(argv=None):
     coverage.add_argument("--session-id", required=True)
     sub.add_parser("capabilities")
     sub.add_parser("preferences")
-    upgrade = sub.add_parser("upgrade-preview")
-    upgrade.add_argument("--candidate", required=True, type=Path)
-    upgrade.add_argument("--previous", type=Path)
-    upgrade.add_argument("--installed-root", type=Path)
-    stage = sub.add_parser("upgrade-stage")
-    stage.add_argument("--candidate", required=True, type=Path)
-    stage.add_argument("--previous", type=Path)
-    stage.add_argument("--installed-root", type=Path)
-    stage.add_argument("--source", required=True, type=Path)
-    stage.add_argument("--destination", required=True, type=Path)
-    stage.add_argument("--owned-command", action="append", default=[])
-    stage.add_argument("--local-file", action="append", default=[])
+    installation.add_arguments(sub)
     sub.add_parser("save-list")
     restore = sub.add_parser("save-restore")
     restore.add_argument("transaction")
@@ -52,23 +41,9 @@ def main(argv=None):
             from modding_harness import preferences
             result = {"context": preferences.render(root),
                       "scope": "explicit My preferences section only; unclassified notes remain notes"}
-        elif args.command in ("upgrade-preview", "upgrade-stage"):
-            from modding_harness import transport, upgrade
-            def read_manifest(path):
-                with path.open("rb") as stream:
-                    return transport.load(stream.read(1024 * 1024 + 1))
-            candidate = read_manifest(args.candidate)
-            previous = read_manifest(args.previous) if args.previous else None
-            if args.command == "upgrade-preview":
-                result = upgrade.preview(args.installed_root or root, candidate, previous, deadline=time.monotonic() + 20)
-            else:
-                bundle = upgrade.stage_review_bundle(args.installed_root or root, args.source, args.destination,
-                    candidate, previous, owned_commands=args.owned_command,
-                    local_files=(".claude/hooks/protect-save-access.py", ".claude/hooks/save-access-entry.ps1",
-                                 ".claude/hooks/restore-save-backup.py", ".claude/hooks/test_protect_save_access.py", *args.local_file))
-                result = {"bundle": str(args.destination.resolve()), "complete": True,
-                          "collisions": bundle["plan"]["collisions"], "application_authorized": False,
-                          "ordered_dispatch_review_required": bundle["ordered_dispatch_review_required"]}
+        elif args.command in installation.COMMANDS:
+            result = installation.handle(args, root, local_files=(".claude/hooks/protect-save-access.py",
+                ".claude/hooks/save-access-entry.ps1", ".claude/hooks/restore-save-backup.py", ".claude/hooks/test_protect_save_access.py"))
         elif args.command == "save-list":
             from modding_harness import workspace
             target = save_store.store(root)
@@ -90,10 +65,11 @@ def main(argv=None):
             outcome, count = portable.check(action, root, transcript=args.transcript, deadline=time.monotonic() + 20)
             result = portable.reply(outcome, count)
     except (OSError, ValueError, UnicodeError, RecursionError) as exc:
-        if args.command == "upgrade-stage":
-            exit_status = 2
-        result = {"api_version": 1, "result": contracts.Result("deny", "failed", reason=
-                  "Skyrim adapter failed: " + type(exc).__name__).as_dict(), "transactions": []}
+        if args.command in installation.COMMANDS:
+            result, exit_status = installation.failure(args.command, exc, "Skyrim adapter failed")
+        else:
+            result = {"api_version": 1, "result": contracts.Result("deny", "failed", reason=
+                      "Skyrim adapter failed: " + type(exc).__name__).as_dict(), "transactions": []}
     sys.stdout.buffer.write((json.dumps(result, ensure_ascii=True) + "\n").encode("ascii"))
     return exit_status
 

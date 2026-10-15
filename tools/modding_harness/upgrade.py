@@ -172,7 +172,8 @@ def stage_review_bundle(root, source, destination, candidate, previous=None, *, 
     if any(not isinstance(command, str) or not command or len(command) > 32768 for command in owned) or len(owned) > 1024:
         raise ValueError("invalid verified owned command list")
     extra = (".claude/settings.local.json", "KNOWLEDGEBASE.local.md", "X4-NOTES.md",
-             ".modding-agent-harness/config.json", ".modding-agent-harness/local-policies.json", *local_files)
+             ".modding-agent-harness/config.json", ".modding-agent-harness/local-policies.json",
+             ".codex/config.toml", ".opencode/opencode.jsonc", *local_files)
     originals = {row["path"]: row["installed_sha256"] for row in plan["files"] if row["installed_sha256"] is not None}
     inventory({"v": 1, "files": dict.fromkeys((*files, *originals, *extra), "0" * 64)})
     for name in extra:
@@ -200,6 +201,7 @@ def stage_review_bundle(root, source, destination, candidate, previous=None, *, 
             info = durable.copy_verified(_entry(base, name), target, deadline)
             if info["sha256"] != expected:
                 raise OSError("source changed while preparing review bundle: " + name)
+            os.chmod(target, _entry(base, name).stat().st_mode & 0o777)
             copied[name] = info["sha256"]
         return copied
     incoming = copy_set(source, files, "candidate")
@@ -216,9 +218,11 @@ def stage_review_bundle(root, source, destination, candidate, previous=None, *, 
         return value
     project_name, local_name = ".claude/settings.json", ".claude/settings.local.json"
     settings_review = {}
+    merged_settings_sha256 = None
     if project_name in files:
         merged = merge_settings(settings(destination / "rollback", project_name), settings(destination / "candidate", project_name), owned)
         durable.atomic_json(destination / "merged-settings.json", merged["settings"])
+        merged_settings_sha256 = durable.digest(destination / "merged-settings.json", deadline)
         settings_review[project_name] = {key: value for key, value in merged.items() if key != "settings"}
     if local_name in originals:
         local = merge_settings(settings(destination / "rollback", local_name), {}, ())
@@ -233,6 +237,9 @@ def stage_review_bundle(root, source, destination, candidate, previous=None, *, 
         raise OSError("free-space reserve changed during review staging")
     result = {"v": 1, "mode": "review bundle only; install unchanged", "plan": plan,
               "candidate_files": incoming, "rollback_files": rollback, "settings_review": settings_review,
+              "candidate_modes": {name: (destination / "candidate" / name).stat().st_mode & 0o777 for name in incoming},
+              "observed_local_files": {name: originals.get(name) for name in extra},
+              "merged_settings_sha256": merged_settings_sha256,
               "ordered_dispatch_review_required": any(r["ordered_dispatch_review_required"] for r in settings_review.values()),
               "contains_private_installed_bytes": bool(rollback), "application_authorized": False,
               "limits": ["collisions and instruction merges require explicit review", "no host trust was changed",

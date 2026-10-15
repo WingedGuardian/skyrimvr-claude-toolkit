@@ -43,6 +43,25 @@ guard sources are retained; `--local-file PATH` includes other local policy file
 This command changes no installed files and performs no deployment or hook review.
 The bundle contains private notes/settings and must stay out of release artifacts.
 
+After reviewing the bundle, `upgrade-apply --installed-root DIR --bundle DIR
+--review-sha256 SHA256 --choices FILE --quiescent` applies its selected files.
+SHA256 is the hash of the exact `complete.json` reviewed. The choices file is a
+JSON object mapping every collision path to `keep` or `candidate`; project
+`.claude/settings.json` can instead select `merged_settings`. Omit `--choices`
+only when no collision needs a choice. Custom pre-tool handlers must first be
+integrated into the ordered dispatcher and reviewed; an unresolved handler
+refuses application. Local policy or configuration changes invalidate review.
+Stop host/editor writers before using `--quiescent`: the flag asserts that
+condition and does not stop them. The upgrade lock coordinates upgraders only;
+replacing existing files cannot exclude arbitrary foreign writers atomically.
+The receipt gives an operation ID and permanent rollback journal. Exit 2 is a
+refusal; exit 1 reports a partial failure with its journal and published paths.
+Inspect that evidence before recovery. `upgrade-rollback ID --installed-root
+DIR --quiescent` restores previous files only when the upgrade's published
+bytes and identity still match, retaining new files in the journal. Local notes
+remain preserved. Installation and rollback both require separate host hook
+review before claiming enforcement.
+
 This file is written to you, the coding agent. If you are Claude Code or the Codex CLI, stop: the toolkit
 is already wired for you (see `README.md`). Otherwise you can wire it into yourself. Be honest about how
 far you get: the toolkit gives you Layers 0 and 1 without any hook (Layer 2, the vanilla-file lock, is off by default), and Layer 3

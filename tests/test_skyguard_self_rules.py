@@ -87,6 +87,15 @@ def test_empty_recycle_argument_is_not_the_install_ancestor():
     assert self_rules.shell_save_store_hit(command, parsed, _roots(), GAME, ENV0) == ""
 
 
+@pytest.mark.parametrize("relative", [".modding-agent-harness/upgrades/operation/rollback/tool.py",
+                                      ".modding-agent-harness/upgrade.lock"])
+def test_permanent_upgrade_evidence_is_not_agent_mutable(relative):
+    (decision, _), fired = shell('rm "' + GAME + '/' + relative + '"')
+    assert decision == 'deny' and fired == {'S-SAVE-STORE'}
+    (decision, _), fired = write(GAME + '/' + relative)
+    assert decision == 'deny' and fired == {'W-SAVE-STORE'}
+
+
 def shell(command, shell_name="bash", cwd=GAME, env=None):
     a = _audit()
     v = shell_rules.decide(command, _roots(), a, cwd=cwd, shell=shell_name, env=ENV0 if env is None else env)
