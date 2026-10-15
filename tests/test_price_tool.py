@@ -6,6 +6,7 @@ rule reads non-zero for that rule and zero for every other, and an out-dir insid
 import importlib.util
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -50,8 +51,11 @@ def history(tmp_path):
 
 
 def _scratch_engine(tmp_path, name, edits):
-    dest = tmp_path / name
+    dest = tmp_path / name / "skyguard"
     shutil.copytree(SKYGUARD, dest, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(SKYGUARD.parent / "modding_harness", dest.parent / "modding_harness",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy2(SKYGUARD.parent / "modding-harness.lock.json", dest.parent / "modding-harness.lock.json")
     for rel, old, new in edits:
         p = dest / rel
         text = p.read_bytes().decode("utf-8")
@@ -207,15 +211,89 @@ def test_parse_failures_are_reported_per_tool_when_the_engine_has_the_parser(tmp
 
 def test_two_engine_dirs_load_separately(tmp_path):
     edits = [("shell_rules.py", "    advice = Advice()\n",
-              '    advice = Advice()\n    return Verdict("deny", __file__)\n')]
+              '    advice = Advice()\n    return Verdict("deny", __file__ + "|" + __import__("modding_harness").PRICING_ENGINE_SENTINEL)\n')]
     a = _scratch_engine(tmp_path, "engA", edits)
     b = _scratch_engine(tmp_path, "engB", edits)
+    for engine, marker in ((a, "engA"), (b, "engB")):
+        with (engine.parent / "modding_harness/__init__.py").open("a", encoding="utf-8") as stream:
+            stream.write('\nPRICING_ENGINE_SENTINEL = ' + repr(marker) + '\n')
     items = tmp_path / "items.jsonl"
     items.write_text(json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": ""}) + "\n")
     ra = price.run_engine(price.stage_tree(a, tmp_path / "ta"), items, tmp_path / "ra.jsonl", "C:/g", "C:/g")[0]
     rb = price.run_engine(price.stage_tree(b, tmp_path / "tb"), items, tmp_path / "rb.jsonl", "C:/g", "C:/g")[0]
     assert "ta" in Path(ra["text"]).parts and "tb" in Path(rb["text"]).parts
     assert ra["text"] != rb["text"]
+    assert ra["text"].endswith("|engA") and rb["text"].endswith("|engB")
+
+
+def _committed_engine(tmp_path, monkeypatch, module, with_core=True):
+    repository = tmp_path / "repository"
+    tools = repository / "tools"
+    tools.mkdir(parents=True)
+    for name in (("skyguard", "modding_harness") if with_core else ("skyguard",)):
+        shutil.copytree(SKYGUARD.parent / name, tools / name, ignore=shutil.ignore_patterns("__pycache__"))
+    if with_core:
+        shutil.copy2(SKYGUARD.parent / "modding-harness.lock.json", tools / "modding-harness.lock.json")
+    def git(*args):
+        subprocess.run(["git", "-c", "core.autocrlf=false", "-C", str(repository), *args],
+                       check=True, capture_output=True)
+    git("init", "-q")
+    git("add", "tools")
+    git("-c", "user.name=Pricing Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture")
+    monkeypatch.setattr(module, "REPO", repository)
+    return tools
+
+
+@pytest.mark.parametrize("with_core", [True, False])
+def test_export_uses_its_committed_optional_runtime_not_working_or_current_bytes(tmp_path, monkeypatch, with_core):
+    tools = _committed_engine(tmp_path, monkeypatch, price, with_core)
+    if with_core:
+        original = (tools / "modding_harness/__init__.py").read_bytes()
+        lock = (tools / "modding-harness.lock.json").read_bytes()
+        (tools / "modding_harness/__init__.py").write_text("DIRTY = True\n")
+    staged = price.export_base("HEAD", tmp_path / "export")
+    assert (staged / "skyguard/shell_rules.py").is_file()
+    if with_core:
+        assert (staged / "modding_harness/__init__.py").read_bytes() == original
+        assert (staged / "modding-harness.lock.json").read_bytes() == lock
+    else:
+        assert not (staged / "modding_harness").exists()
+        assert not (staged / "modding-harness.lock.json").exists()
+
+
+@pytest.mark.parametrize("route", ["working", "committed"])
+def test_actual_runtime_omission_regressions_produce_engine_errors(tmp_path, monkeypatch, route):
+    """Run the real driver before/after dropping the dependency in an owned script copy."""
+    folder = tmp_path / "pricing-script"
+    folder.mkdir()
+    source = (REPO / "scripts/guard-corpus/price.py").read_text(encoding="utf-8")
+    path = folder / "price.py"
+    shutil.copy2(REPO / "scripts/guard-corpus/engine_eval.py", folder / "engine_eval.py")
+    def load(text):
+        path.write_text(text, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("owned_pricing_control", path)
+        module = importlib.util.module_from_spec(spec)
+        # -B disables bytecode; a same-length, same-second mutant cannot reuse it.
+        spec.loader.exec_module(module)
+        return module
+    baseline = load(source)
+    tools = _committed_engine(tmp_path, monkeypatch, baseline)
+    items = tmp_path / "items.jsonl"
+    items.write_text(json.dumps({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "untouched.py")},
+                                "cwd": str(tmp_path)}) + "\n")
+    def evaluate(module, label):
+        staged = (module.stage_tree(tools / "skyguard", tmp_path / label) if route == "working"
+                  else module.export_base("HEAD", tmp_path / label))
+        return module.run_engine(staged, items, tmp_path / (label + ".jsonl"), str(tmp_path / "fake-game"), "")[0]
+    assert evaluate(baseline, "baseline")["decision"] == "allow"
+    before, after = ((
+        '    for name in ("modding_harness", "modding-harness.lock.json"):', '    for name in ():')
+        if route == "working" else ('f"{rev}:tools", *names]', 'f"{rev}:tools", "skyguard"]'))
+    assert source.count(before) == 1
+    mutant = load(source.replace(before, after))
+    monkeypatch.setattr(mutant, "REPO", tools.parent)
+    result = evaluate(mutant, "mutant")
+    assert result["decision"] == "error" and "modding_harness" in result["text"]
 
 
 def test_only_this_tools_stale_files_are_cleared(tmp_path, history):

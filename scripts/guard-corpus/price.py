@@ -3,9 +3,10 @@
 
     price.py --base <rev> [--new <dir>] --history ~/.claude/projects --out-dir <outside repo> [--only-rule ID]
 
-The base tree is `git archive <rev>:tools/skyguard` (or --base-dir for an already-exported tree); the new
-tree is --new (a skyguard package directory; default: this checkout's tools/skyguard). Each engine runs in
-its own subprocess (engine_eval.py, PYTHONPATH = that tree), so two versions of one package never share an
+The base tree is exported from `<rev>:tools` (or --base-dir for an already-exported tree); the new
+tree is --new (a skyguard package directory; default: this checkout's tools/skyguard). Keep its matching
+`modding_harness` sibling and lock beside a detached package: each engine stages its own dependencies.
+Each engine runs in its own subprocess (engine_eval.py, PYTHONPATH = that tree), so two versions never share an
 interpreter. Items are deduplicated on (tool_name, command|file_path|mcp-input, cwd).
 
 A rule "newly fires" for an item when its id is in new.fired and not in old.fired. Counted per rule and per
@@ -56,21 +57,31 @@ def check_out_dir(out_dir: Path) -> Path:
 
 
 def export_base(rev: str, dest: Path) -> Path:
-    """`git archive <rev>:tools/skyguard` into dest/skyguard; returns dest (the PYTHONPATH entry)."""
-    r = subprocess.run(["git", "-C", str(REPO), "archive", "--format=tar", f"{rev}:tools/skyguard"],
+    """Export the guard and its own committed optional runtime, never the current checkout's core."""
+    listed = subprocess.run(["git", "-C", str(REPO), "ls-tree", "--name-only", f"{rev}:tools", "--",
+                             "skyguard", "modding_harness", "modding-harness.lock.json"], capture_output=True)
+    names = listed.stdout.decode("utf-8").splitlines()
+    if listed.returncode or "skyguard" not in names:
+        raise SystemExit(f"cannot find skyguard in {rev}:tools")
+    r = subprocess.run(["git", "-C", str(REPO), "archive", "--format=tar", f"{rev}:tools", *names],
                        capture_output=True)
     if r.returncode != 0:
-        raise SystemExit(f"git archive {rev}:tools/skyguard failed: {r.stderr.decode(errors='replace')[:300]}")
-    pkg = dest / "skyguard"
-    pkg.mkdir(parents=True)
+        raise SystemExit(f"git archive {rev}:tools failed: {r.stderr.decode(errors='replace')[:300]}")
+    dest.mkdir(parents=True)
     with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tf:
-        tf.extractall(pkg)
+        tf.extractall(dest)
     return dest
 
 
 def stage_tree(src: Path, dest: Path) -> Path:
-    """Copy a skyguard package directory to dest/skyguard (its own directory name does not matter)."""
+    """Copy a package and its matching sibling runtime (the package name does not matter)."""
     shutil.copytree(src, dest / "skyguard", ignore=shutil.ignore_patterns("__pycache__"))
+    for name in ("modding_harness", "modding-harness.lock.json"):
+        dependency = src.parent / name
+        if dependency.is_dir():
+            shutil.copytree(dependency, dest / name, ignore=shutil.ignore_patterns("__pycache__"))
+        elif dependency.is_file():
+            shutil.copy2(dependency, dest / name)
     return dest
 
 

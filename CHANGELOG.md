@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Guard-rule pricing stages each engine's matching shared runtime and lock.
+  Historical exports use that commit's bytes, keeping detached old/new engines
+  independent and preventing missing-core errors from contaminating the report.
 - Registered legacy policies with malformed logical counts, or an ordinary
   backup decision claiming more than two saves, refuse before preservation.
   Boolean, negative, fractional and nonnumeric counts cannot silently disappear.
