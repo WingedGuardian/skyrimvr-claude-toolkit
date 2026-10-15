@@ -99,7 +99,7 @@ def _resolve(path: str, cwd: str, cd_dir, platform: str) -> str:
     base = cwd
     if cd_dir:
         base = cd_dir if mod.isabs(cd_dir) or not cwd else mod.join(cwd, cd_dir)
-    p = path.strip()
+    p = path
     if not mod.isabs(p) and base:
         p = mod.join(base, p)
     return mod.normpath(p).replace("\\", "/") if (mod.isabs(p) or base) else p.replace("\\", "/")

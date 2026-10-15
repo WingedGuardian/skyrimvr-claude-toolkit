@@ -61,13 +61,13 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
     # RESOLVES -- before the silent whitelist below, which used to cover .claude/hooks and .claude/backups. With no
     # roots (an old caller, an unreadable paths file on Codex) the path's own words decide (self_rules.text_kind).
     env_ = os.environ if env is None else env
-    placed = targets.resolve(file_path, cwd, "bash", env_) if roots is not None else None
+    placed = targets.resolve_literal(file_path, cwd, env_) if roots is not None else None
     if placed and self_rules.save_store_target(placed, roots, holder=op in ("delete", "move")):
         reason = rules.message("W-SAVE-STORE", file=file_path)
         audit.rule(HOOK, "W-SAVE-STORE", "deny", reason)
         return Verdict("deny", reason)
     if roots is not None:
-        a = self_rules.resolve_own(lambda x: targets.resolve(x, cwd, "bash", env_), file_path)   # T8 r1 P1: streams
+        a = self_rules.resolve_own(lambda x: targets.resolve_literal(x, cwd, env_), file_path)   # T8 r1 P1: streams
         # An unresolved path (relative, no cwd) fails closed for the STATE class only, as on the shell.
         own = self_rules.kind_of(a, roots, env_, holder=op in ("delete", "move")) if a is not None else (
             self_rules.STATE if self_rules.text_kind(file_path) == self_rules.STATE else "")
@@ -100,7 +100,7 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
 
     if roots is not None:
         from .writes import in_install_area, is_save
-        a = targets.resolve(file_path, cwd, "bash", os.environ if env is None else env)
+        a = targets.resolve_literal(file_path, cwd, os.environ if env is None else env)
         if is_save(a, roots):
             # The save policy (user ruling 2026-10-13): a save changed through Edit/Write or a patch is backed up
             # first (saves.enforce); saves.judge decides it with every other save the call changes.

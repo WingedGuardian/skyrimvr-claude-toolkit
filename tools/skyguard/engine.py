@@ -109,16 +109,7 @@ def patch_target(path: str, cwd: str) -> Optional[str]:
     """Where an apply_patch path lands, read LITERALLY: apply_patch expands nothing (`$HOME/x` and `~/x` are folder
     names under the cwd), and `/x` is the root of the cwd's drive (Codex runs Windows paths). None when unknowable
     (no usable cwd for a relative path, a drive-relative `C:x`, an 8.3 short name)."""
-    p = path.strip().replace("\\", "/")
-    a = _paths.norm_abs(p, msys=False)
-    if a is None and not re.match(r"[A-Za-z]:", p):
-        base = targets.normalise_cwd(cwd)
-        if base and p.startswith("/"):
-            root = targets._drive_root(base)
-            a = _paths.norm_abs(root + p.lstrip("/")) if root else None
-        elif base:
-            a = _paths.norm_abs(_paths._join(base, p))
-    return targets._final(a, os.environ)
+    return targets.resolve_literal(path, cwd, os.environ)
 
 
 def _patch_delete(path: str, dest: Optional[str], roots, cwd: str, audit) -> Optional[Verdict]:

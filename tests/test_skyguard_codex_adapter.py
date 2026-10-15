@@ -494,9 +494,13 @@ def test_a_devbench_save_over_an_existing_save_is_backed_up_then_allowed_on_code
     v, audit = _run_with_saves(tmp_path, _pre("mcp__devbench-vr__game", {"action": "save", "name": "Existing"}))
     assert v.decision == "allow" and v.code == "shell.S-SAVE-BACKUP" and "Existing" in v.context
     assert ("S-SAVE-BACKUP", "advise") in audit.fired
-    from skyguard import recovery
-    saved = [e for e in recovery.read_manifest(recovery.store_dir(str(tmp_path)))[0] if e["kind"] == "save"]
-    assert [e["src"].replace(chr(92), "/").rsplit("/", 1)[-1] for e in saved] == ["Existing.ess"]
+    from skyguard import save_store
+    store = save_store.store(tmp_path)
+    manifests = list((store.root / "transactions").glob("*.json"))
+    assert len(manifests) == 1
+    members = [member for group in store.load(manifests[0].stem)["groups"] for member in group["members"]]
+    assert [Path(member["path"]).name for member in members if not member["missing"]] == ["Existing.ess"]
+    assert [Path(member["path"]).name for member in members if member["missing"]] == ["Existing.skse"]
     assert "permissionDecision" not in json.loads(codex.render(v) or "{}").get("hookSpecificOutput", {})
 
 
