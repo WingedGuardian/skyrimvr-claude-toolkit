@@ -2085,3 +2085,35 @@ hardcoded `-ge 4` that was one release stale the moment it shipped.
 where `.github` actually lives, and the header already says that is the intent. Then prove it by
 mutation: change `release.yml`'s floor and require the named check to go red. A derivation that
 cannot be shown to follow its source is a hardcoded value with extra steps.
+
+## Deadline clocks start at the spawn, not at the script's first line (T14b, 2026-10-15)
+
+MEASURED at 4x CPU load (16 burners pinned to 4 of 28 cores): the Codex Windows PowerShell 5.1 entry refused a hung engine **51.3 s after the spawn**
+against a 50 s margin (definition timeout 60 s). Its own clock started at the script's first line, after seconds of PowerShell start-up. Codex's
+timeout runs from the spawn, so any wrapper must date its deadline from its own **process start time** (`Process.StartTime`, guarded: never later
+than now, ignored if the read fails or is implausible). Test it by delaying inside the same process before the script runs, not by sleeping in the test.
+
+## A hang before the watchdog fails open, and it does not need load (T14b, 2026-10-15)
+
+MEASURED on the pre-fix tree `544efd4`: a hang before `run.py` arms its own timer ran to the harness cap (80 s; 140 s for session-kb-guard) on all six
+Claude wrappers at idle, 1x and 2x alike, and for the three gate hooks all 9 runs at every level failed open (the agent gave up at 60 s and the command
+ran). A load gate that sweeps only load levels, or only the failure paths that load makes worse, would not have shown it. Run every failure path at
+idle too.
+
+## A "kill latency" probe measures process start-up, not the bound (T14b, 2026-10-15)
+
+MEASURED: a 3 s bound on a native sleeper ended in 3.4-5.4 s at 2x on the pre-fix tree and in 3.7-10.6 s at 4x and 8x on both trees. The extra time is
+process start under load. It does not separate a working bound from a broken one; the scenario cells do. The investigation's 18-227 s kill times did not
+reproduce here (INFERRED: the Git 2.55 / MSYS update may have changed it; not tested).
+
+## Mutation anchors that quote a pinned value go stale when the pin moves (2026-10-14)
+
+The Git pin move changed an installer SHA-256 and added its own mutation twin, but an older mutation still named the previous checksum. The branch's
+targeted test run was green; the merged full suite failed `test_every_mutation_anchor_occurs_exactly_once[t6d-manual-steps-lose-their-hash]`. After any
+pin bump, grep `tests/` for the old value and run the anchor test (about 6 s for 2,521 anchors).
+
+## Long unattended work: use a detached process, not the agent's background shell (2026-10-14)
+
+OBSERVED: Claude Code stopped a background `until ...; sleep` wait when the machine ran low on memory (a game was running); the detached
+`pwsh -File` queue it was watching was unaffected. Launch overnight queues as detached processes that write their own log, and keep the agent's
+background shell for short waits.

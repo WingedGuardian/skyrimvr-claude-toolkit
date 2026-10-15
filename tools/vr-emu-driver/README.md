@@ -13,7 +13,7 @@ machine.
 | Source | [DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit](https://github.com/DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit), commit `59be19d13287e2088c515b696a964381784a3356` ("null driver testing", 2026-10-05) |
 | Forked from | [ar-zadeh/VR-Emulator-Driver](https://github.com/ar-zadeh/VR-Emulator-Driver) |
 | Based on | Valve's OpenVR sample driver: the files carry `Copyright (c) Valve Corporation, All rights reserved` and `Changed by r57zone (https://github.com/r57zone)` |
-| Licence | Upstream added a BSD-3-Clause `LICENSE.txt` and closed the licensing request on 2026-10-14. The owner separately identifies the AutoHotKey side as GPL-3.0. This builder does not use AutoHotKey. |
+| Licence | Upstream added a BSD-3-Clause `LICENSE.txt` and closed the licensing request on 2026-10-14. The owner separately identifies the AutoHotKey side as GPL-3.0. This builder does not use AutoHotKey. The pinned commit predates that file, and the parent fork ([ar-zadeh/VR-Emulator-Driver](https://github.com/ar-zadeh/VR-Emulator-Driver)) still has no licence. |
 | Headers | Valve's [OpenVR](https://github.com/ValveSoftware/openvr) `v1.26.7` (commit `751538d6cbde9d060e5906c1d45c8cedeaf0ee18`), BSD-3-Clause; fetched at build time as well |
 
 The toolkit keeps its existing local-build delivery and tested pin. The licence response is resolved:
@@ -21,6 +21,9 @@ The toolkit keeps its existing local-build delivery and tested pin. The licence 
 The newer upstream head also contains runtime changes; the licensing response is not evidence
 that those changes have passed this toolkit's runtime qualification. They are not adopted here.
 `UPSTREAM-LICENSE.txt` records the notice supplied in that response, separately from the pin.
+Upstream has since published v2.0.1 (`32ec302`); the pin stays on the tested commit. Shipping a prebuilt copy would be a
+separate decision and would also have to settle the parent fork's provenance: the r57zone header suggests one of
+r57zone's OpenVR driver projects, some of which are GPL-3.0, and nothing in either fork says which.
 
 ## The one local change
 

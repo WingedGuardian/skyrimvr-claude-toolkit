@@ -109,7 +109,7 @@ None of these are bundled; setup walks you through any you pick.
 - **mod-install** -- a manual mod install that is a dry run unless `--apply`: every destination shown, every replaced file backed up, a SHA-256 manifest to undo it, existing configs kept with the new copy beside them as `.new`, hardlink-safe writes, plugins never activated; installs into a new mod folder under Mod Organizer 2 (`--update` replaces an existing one after keeping the old folder whole). Bundled (`tools/mod-install.py`); needs **7-Zip 26.00**.
 - **nexus.sh `find` / `page` / `contents`** -- the desk review before an update (skill `mod-update-check`): name search, the page with author-declared requirements and every changelog since your installed version (sorted by version, not as text), and file contents from Nexus previews where Nexus serves them to the tool. Failures print `RESULT: COULD-NOT-CHECK` (exit 3), never a blank answer. Bundled (`tools/nexus.sh`, `tools/nexus-render.py`); needs your Nexus key.
 - **bench-vr** -- frame rate at fixed locations through DevBench, before and after a change, with `compare`; it pins timescale, hour, weather and god mode, discards each location's first window, and puts back what it changed even on failure. Read-only otherwise. Bundled (`tools/bench-vr.py`); needs DevBench and a running game.
-- **vr-headless** (Skyrim VR only) -- boots the game on SteamVR's null driver with no headset, so DevBench tests that do not depend on head or hand position can run unattended; `off` restores `openvr_api.dll` and `steamvr.vrsettings` byte-exact and verifies them. An optional pose-emulating driver is built on your machine from a pinned upstream commit (`tools/vr-emu-driver/README.md`: its source has no licence, so the toolkit ships no copy). Bundled (`tools/vr-headless.sh`).
+- **vr-headless** (Skyrim VR only) -- boots the game on SteamVR's null driver with no headset, so DevBench tests that do not depend on head or hand position can run unattended; `off` restores `openvr_api.dll` and `steamvr.vrsettings` byte-exact and verifies them. An optional pose-emulating driver is built on your machine from a pinned upstream commit (`tools/vr-emu-driver/README.md`: the pinned commit has no licence file and its parent fork has none, so the toolkit ships no copy). Bundled (`tools/vr-headless.sh`).
 - **skyrim-winner** -- which plugin wins a record, per the full load order. Bundled (`tools/skyrim-winner.sh`) but needs **xeditlib** installed to do anything.
 - **cosave-info** -- read-only structural survey of an SKSE `.skse` co-save → JSON (which mods stashed co-save data + how much). No install beyond Python 3; bundled (`tools/cosave-cli.sh`).
 
@@ -321,6 +321,8 @@ rows were blocked (`-Force`, `cp -f`, `sed -i` and `mv` over a file got through)
   purge, a game-file collision backup and restore) on a copy: every replayed step passed (the symlink-deploy step
   could not be run), and a collided file that became multi-link is reported rather than relocked. Under the pre-committed decision table, "not run" means **opt-in on
   every edition**; the default flips to on only after those results are in.
+  Ruling 2026-10-14: v4.0.0 ships the lock **off by default**, and Steam "Verify integrity" on a locked file is deliberately
+  left untested. Treat it as unsupported: unlock first.
 - **`guards off` does not cancel the lock**, and the lock cannot say why it refused: the OS reports only "access
   denied" (see below).
 

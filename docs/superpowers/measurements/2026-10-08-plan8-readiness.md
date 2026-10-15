@@ -93,7 +93,35 @@ Four earlier full-gate attempts on this commit were stopped by the resource watc
 
 The final-review fixes (`878ed80`, `8196e33`) and this report's correction were checked with targeted suites, their own mutation twins and historical pricing against `d6296d1` only. The table above is a result for `86f2633`, not for them: the full gate must be rerun on the final commit.
 
+## Update 2026-10-15 (documentation only; version unchanged at 4.0.0)
+
+Not a re-certification: the numbers above stay as measured on their dated trees. This records what changed on the unpushed integration branch
+`v4-batch` (master is still `1498c80`) and what it measured. The final gate (full suite, mutations, pricing, cold artifact, release review) has
+**not** been rerun on it.
+
+- **Merged since `1498c80`:** the backup-first save policy (`save-backup`), the Git for Windows 2.55.0.5 pin (`git-pin`), the T14b
+  load matrix, the sub-second probe timing-test calibration, the Codex PowerShell deadline-clock fix, the DevBench reference move 1.24.0 to 1.28.0,
+  and one mutation re-anchor.
+- **Full local suite on the merge** (no mutations, 4 workers, below-normal priority): 10,352 passed, 203 skipped, 1 failed. The failure was a mutation
+  anchored on the previous Git installer checksum; it is re-anchored and all 2,522 mutation-anchor checks pass. The suite was not rerun in full.
+- **Pricing against `1498c80`:** 88,191 historical tool calls, zero engine errors in either version, 69 parse failures in both, zero reason moves.
+  22 decisions changed and all were read: 7 ReSaver `--apply` calls with the save held in a variable are now refused (accepted ruling), one
+  32-save move needs the typed approval, six ReSaver runs on scratch copies, one sandbox call and one test script that only names ReSaver in a
+  string no longer ask, and removing a save that does not exist is no longer refused.
+- **T14b latency and deadline matrix:** done, see `2026-10-15-plan8-latency-deadline.md`. The pre-fix tree fails open on a hang before the engine's
+  timer (all six Claude hooks, at idle too); the candidate has no late or open run at idle, 1x and 2x; the one 4x miss (Codex PowerShell 5.1,
+  51.3 s against 50 s) is fixed and rechecked. Idle p95 is under 0.5 s for every hook. The 3 s kill probe does not tell the two trees apart.
+- **DevBench 1.28.0:** documentation and reference only; none of 1.25 to 1.28 was run against the live game. Four live checks are in the manual
+  batch (a refused Papyrus call with an omitted argument and `fillNeutral`, console `exec` capture returning lines, `alive`/`health` fields on port
+  8921, `game setTimeScale` returning a snapshot).
+- **Pose-emulating driver licence:** the owner added a BSD-3-Clause `LICENSE.txt` on 2026-10-14 (GPL-3.0 for their separate AutoHotkey script). The
+  toolkit's pinned commit predates it and its parent fork has no licence, so the driver is still built locally and never shipped; the pin did not move.
+- **Rulings 2026-10-14:** Layer 2 ships off by default; Steam "Verify integrity" on a locked file stays untested and is documented as unsupported.
+  Spriggit is already pinned at 0.41.0, the latest stable release.
+
 ## Remaining user and host work
+
+Items 4 and 5 below are superseded by the 2026-10-15 update above (T14b run with the user's approval; Git 2.55.0.5 installed and pinned). The rest stands.
 
 1. **Current Codex E2E:** complete the prepared isolated device-login flow in a fresh owned non-temporary home. No existing credentials are copied and no global trust is edited. Then recapture scratch-install E2E on the current installed CLI; historical captures used a different CLI version. Interactive approval, context/lifts and subfolder behavior need their own observations. Claude's quota-consuming E2E half remains deferred unless authorized.
 2. **Manual batch:** the refreshed T17 draft remains preparation, not an executable certified test session. User-owned TUI, manager/GUI and headset checks are unrun. Missing scoped Steam stand-in/collectors and actual runtime/profile binding must be prepared and validated before presenting those sections for execution; do not improvise the historical draft.

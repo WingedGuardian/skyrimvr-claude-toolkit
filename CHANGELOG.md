@@ -125,6 +125,7 @@
 - **CI tripwires:** the legs include collection and skip tripwires.
 - **Setup smoke matrix:** CI exercises the agent-selection values.
 - **Merge-marker gate:** contributor tests reject committed conflict markers.
+- **Hook latency and deadline matrix:** `tests/test_hook_deadline_load.py` (opt-in, `SKYGUARD_LOAD_TEST=1`) runs every hook (six Claude wrappers, Codex bash, Windows PowerShell 5.1, pwsh) through five scenarios (healthy, fallback, engine failure, hang before and after the engine's own timer) at idle and under CPU load pinned to a core subset, and fails on any run within 10 s of the hook's timeout or any gate that lets a command through. Measured against the pre-fix tree (red) and the candidate (green) in `docs/superpowers/measurements/2026-10-15-plan8-latency-deadline.md`.
 
 ### Changed
 
