@@ -83,8 +83,6 @@ requirements*.txt  text eol=lf
 # This file itself: an autocrlf checkout must not rewrite it either (a mutation anchor reads its lines).
 .gitattributes     text eol=lf
 
-# Maintainer-only native fixture authoring; no private save bytes ship with it.
-tools/resaver-cli/tests/ export-ignore
 # OpenCode V1 generated entrypoints and their canonical sources.
 .opencode/** text eol=lf
 agent/targets/opencode/** text eol=lf

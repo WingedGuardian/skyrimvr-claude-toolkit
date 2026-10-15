@@ -89,6 +89,24 @@ def test_tests_and_github_are_not_shipped(tmp_path):
     assert not [n for n in names if "/tests/" in n or "/.github/" in n], names
 
 
+def test_native_fixture_authoring_is_excluded_without_hiding_runtime_or_siblings(tmp_path):
+    repo = _repo(tmp_path)
+    paths = ("tools/resaver-cli/tests/NativeSafetyProbe.java",
+             "tools/resaver-cli/tests-extra/keep.java", "tools/resaver-cli/ResaverCLI.java")
+    for rel in paths:
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"fixture source\n")
+    _git(repo, "add", "--", *paths)
+    _git(repo, "commit", "-q", "-m", "native fixture authoring")
+    result, output = _build(repo, "HEAD", "--version", "1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    names = _names(_zip(output))
+    root = "skyrim-ai-assistant-toolkit-1/"
+    assert root + paths[0] not in names
+    assert root + paths[1] in names and root + paths[2] in names
+
+
 def test_the_layer2_spike_folder_is_excluded_by_prefix_not_its_siblings(tmp_path):
     """scripts/layer2-spike/ (developer-only Layer 2 lock probes) stays in the repo and out of the zip. The rule is
     a PATH PREFIX (the folder itself, or anything under it), never a top-level name: scripts/ still ships, and a
@@ -220,7 +238,7 @@ def test_the_excludes_are_one_list_the_tests_can_read():
     spec = importlib.util.spec_from_file_location("build_release_zip", BUILDER_PY)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    assert set(mod.EXCLUDE) == {"tests", ".github", "scripts/layer2-spike"}, mod.EXCLUDE
+    assert set(mod.EXCLUDE) == {"tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests"}, mod.EXCLUDE
 
 
 @pytest.mark.parametrize("args", [[], ["HEAD"], ["HEAD", "out", "--bogus"]])

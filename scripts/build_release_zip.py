@@ -46,7 +46,9 @@ from pathlib import Path
 # top-level name match, so excluding scripts/layer2-spike leaves the rest of scripts/ shipping. One list: the
 # payload checker asserts their absence on the zip. tests/ holds tests/fixtures/routes-harness/ among others;
 # .github/ is CI; scripts/layer2-spike/ is the Plan 6 Layer 2 lock research probes (developer-only, kept in the repo).
-EXCLUDE = ("tests", ".github", "scripts/layer2-spike")
+# Native fixture authors are also maintainer-only. Exclude them explicitly here,
+# never through export-ignore: the archive proof must account for every omission.
+EXCLUDE = ("tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests")
 
 
 def is_excluded(path: str) -> bool:
