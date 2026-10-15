@@ -25,9 +25,18 @@ its full SHA-256. The bridge runs only its pure `decide` entry before permanent
 preservation. Changed bytes, a crash, output, or a missed deadline refuse the
 call. It cannot grant bulk approval or bypass game rules. Its structured DevBench
 checks retain the local refusal of generic runtime save/load; the separately
-pinned controlled loader retains its own independent gate. Fresh installations
+pinned controlled loader retains its own independent gate, but its route through
+this bridge is not yet qualified. Legacy backup and approval decisions must be
+covered by the already computed portable save plan, including logical pair
+identities, operations, bulk thresholds and wildcard membership rechecks.
+Unresolved legacy helpers refuse before preservation; caller-supplied provenance
+cannot supply a preservation plan. Fresh installations
 without that personal policy do not acquire it. Registration is part of a
 reviewed upgrade, never inferred from a hook trust record.
+Keep the existing parallel handler active until the complete replacement,
+including any controlled loader and helper routes in use, is qualified. The
+shared core supports explicit ordered-policy proposals, but this profile does
+not yet expose `--integrate-local-policy` as a supported migration.
 
 `upgrade-preview --candidate FILE [--previous FILE]` compares version 1 inventories
 (`{"v":1,"files":{"relative/path":"sha256"}}`) without writing anything.

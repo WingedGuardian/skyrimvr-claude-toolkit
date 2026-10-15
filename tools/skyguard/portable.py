@@ -52,6 +52,7 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
     audit = _legacy.audit if _legacy else Audit(str(project))
     req = _legacy.request if _legacy else request(action, transcript)
     last = [Verdict()]
+    save_plan = [None]
     known = req.kind in ("shell", "write") or req.kind == "mcp" and mcp_rules.judged_server(req.mcp_tool)
     if _legacy:
         roots = _legacy.roots or paths.Roots("", "")
@@ -103,9 +104,10 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
         else:
             result = contracts.Result(value.decision, value.status, reason=value.reason,
                                       warnings=(value.context,) if value.context else ())
+        save_plan[0] = plan
         return dispatch.Evaluation(result, plan)
 
-    restrictions = (local_policy.restriction(project, deadline), *local_restrictions)
+    restrictions = (local_policy.restriction(project, deadline, lambda: save_plan[0]), *local_restrictions)
     outcome = dispatch.Dispatcher(project, profile, policy, restrictions).pre(action, transcript, deadline)
     result = outcome.result
     # Ordinary config/script snapshots remain non-blocking and distinct from

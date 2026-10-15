@@ -16,6 +16,90 @@ import uuid
 from . import durable
 from .preservation import DEFAULT_RESERVE, contains
 
+REVIEWABLE_SETTINGS = frozenset((".claude/settings.json", ".claude/settings.local.json",
+                                ".modding-agent-harness/local-policies.json"))
+
+
+def json_bytes(value):
+    import json
+    return (json.dumps(value, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii")
+
+
+def policy_proposal(value, rollback, candidate):
+    """Bind a profile's explicit settings edits to independently retained policy sources.
+
+    This is proposal validation, never proof that a host enforces the policy.
+    The profile must reproduce the proposal at application time.
+    """
+    import hashlib
+    if (not isinstance(value, dict) or set(value) != {"v", "kind", "files", "sources", "requires"}
+            or type(value["v"]) is not int or value["v"] != 1
+            or not isinstance(value["kind"], str) or not 1 <= len(value["kind"]) <= 128):
+        raise ValueError("invalid ordered-policy proposal")
+    files, sources = value["files"], inventory({"v": 1, "files": value["sources"]})
+    requires = inventory({"v": 1, "files": value["requires"]})
+    if (not isinstance(files, dict) or not files or not set(files) <= REVIEWABLE_SETTINGS
+            or not sources or set(sources) & set(files)
+            or any(rollback.get(name) != digest for name, digest in sources.items())):
+        raise ValueError("policy proposal lacks retained source authority or edits unrelated settings")
+    if (not requires or set(requires) & (set(sources) | REVIEWABLE_SETTINGS)
+            or any(candidate.get(name) != digest for name, digest in requires.items())):
+        raise ValueError("policy proposal lacks candidate runtime requirements")
+    if any(not isinstance(data, dict) for data in files.values()):
+        raise ValueError("reviewed settings must be JSON objects")
+    encoded = {name: json_bytes(data) for name, data in files.items()}
+    if any(len(data) > 1024 * 1024 for data in encoded.values()):
+        raise ValueError("reviewed settings exceed parser budget")
+    proof = {"v": 1, "kind": value["kind"], "sources": sources, "requires": requires,
+             "files": {name: hashlib.sha256(data).hexdigest() for name, data in encoded.items()}}
+    return proof, encoded
+
+
+def read_settings(base, name):
+    from . import transport
+    path = _entry(base, name)
+    if not path.exists():
+        return {}
+    with path.open("rb") as stream:
+        raw = stream.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise ValueError("settings exceed review parser limit")
+    return transport.load(raw)
+
+
+def validate_ordered_settings(bundle, proposal):
+    """No custom pre-tool handler may survive an ordered migration unnoticed.
+
+    Compare complete groups, including matcher, timeout and asynchronous fields.
+    Recognizing a command string alone does not establish equivalent behavior.
+    """
+    import copy
+    project, local = ".claude/settings.json", ".claude/settings.local.json"
+    def pre(value):
+        hooks = value.get("hooks", {})
+        if not isinstance(hooks, dict) or not isinstance(hooks.get("PreToolUse", []), list):
+            raise ValueError("malformed ordered pre-tool settings")
+        return hooks.get("PreToolUse", [])
+    candidate = pre(read_settings(bundle / "candidate", project))
+    def unrelated(settings):
+        value = copy.deepcopy(settings)
+        hooks = value.get("hooks", {})
+        hooks.pop("PreToolUse", None)
+        if not hooks:
+            value.pop("hooks", None)
+        return value
+    for name in (project, local):
+        settings = proposal["files"].get(name)
+        if settings is None:
+            settings = read_settings(bundle / "rollback", name)
+        if pre(settings) != (candidate if name == project else []):
+            raise ValueError("unresolved custom pre-handlers remain in ordered-policy settings")
+        if name in proposal["files"]:
+            baseline = (read_settings(bundle, "merged-settings.json") if name == project
+                        else read_settings(bundle / "rollback", name))
+            if unrelated(settings) != unrelated(baseline):
+                raise ValueError("ordered-policy edit changes unrelated settings or handlers")
+
 
 def inventory(value):
     if not isinstance(value, dict) or type(value.get("v")) is not int or value["v"] != 1:
@@ -149,7 +233,8 @@ def merge_settings(existing, candidate, owned_commands=()):
 
 
 def stage_review_bundle(root, source, destination, candidate, previous=None, *, keep_local=(),
-                        owned_commands=(), local_files=(), reserve=DEFAULT_RESERVE, deadline=None):
+                        owned_commands=(), local_files=(), reserve=DEFAULT_RESERVE, deadline=None,
+                        review_builder=None):
     """Prepare independent candidate/rollback bytes without changing an install.
 
     This is a review artifact, not an installer or an authorization. Conflicting
@@ -244,6 +329,41 @@ def stage_review_bundle(root, source, destination, candidate, previous=None, *, 
               "contains_private_installed_bytes": bool(rollback), "application_authorized": False,
               "limits": ["collisions and instruction merges require explicit review", "no host trust was changed",
                          "rollback bytes are evidence; no automatic deployment or rollback is performed"]}
+    if review_builder is not None:
+        proposal = review_builder(destination, result)
+        if proposal is not None:
+            proof, encoded = policy_proposal(proposal, rollback, incoming)
+            validate_ordered_settings(destination, proposal)
+            observed = result["observed_local_files"]
+            if any(observed.get(name) != digest for name, digest in proof["sources"].items()):
+                raise ValueError("ordered policy sources must be captured as observed local files")
+            if shutil.disk_usage(destination).free < sum(map(len, encoded.values())) + reserve:
+                raise OSError("insufficient space for independent ordered-policy proposals")
+            for name, data in encoded.items():
+                target = _entry(destination / "reviewed", name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open("xb") as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                durable.sync_dir(target.parent)
+                if durable.digest(target, deadline) != proof["files"][name]:
+                    raise OSError("ordered-policy proposal failed readback")
+                if name not in {row["path"] for row in plan["files"]}:
+                    if name not in observed:
+                        raise ValueError("reviewed settings were not captured before proposal")
+                    plan["files"].append({"path": name, "action": "reviewed_edit",
+                        "installed_sha256": observed[name], "candidate_sha256": None, "previous_sha256": None})
+            result["ordered_integration"] = proof
+            # A profile proposal must not obscure a concurrent policy/config edit.
+            for name, expected in originals.items():
+                if durable.digest(_entry(root, name), deadline) != expected:
+                    raise OSError("installed policy changed during ordered review")
+            for name, expected in observed.items():
+                path = _entry(root, name)
+                if (durable.digest(path, deadline) if path.exists() else None) != expected:
+                    raise OSError("local configuration changed during ordered review")
+            durable.check_deadline(deadline)
     durable.atomic_json(destination / "complete.json", result)
     return result
 

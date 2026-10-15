@@ -41,6 +41,8 @@ def add_arguments(subparsers):
     stage.add_argument("--destination", required=True, type=Path)
     stage.add_argument("--owned-command", action="append", default=[])
     stage.add_argument("--local-file", action="append", default=[])
+    stage.add_argument("--integrate-local-policy", action="store_true",
+                       help="prepare this profile's qualified local-policy migration for explicit review")
     applying = subparsers.add_parser("upgrade-apply")
     applying.add_argument("--bundle", required=True, type=Path)
     applying.add_argument("--review-sha256", required=True)
@@ -53,7 +55,7 @@ def add_arguments(subparsers):
                             help="host/editor writers have been stopped; this flag does not stop them")
 
 
-def handle(args, root, *, local_files=()):
+def handle(args, root, *, local_files=(), review_builder=None):
     from . import transport
     def read(path):
         with Path(path).open("rb") as stream:
@@ -63,13 +65,18 @@ def handle(args, root, *, local_files=()):
         return upgrade.preview(root, read(args.candidate), read(args.previous) if args.previous else None,
                                deadline=time.monotonic() + 20)
     if args.command == "upgrade-stage":
+        if args.integrate_local_policy and review_builder is None:
+            raise ValueError("this profile provides no qualified local-policy migration")
         bundle = upgrade.stage_review_bundle(root, args.source, args.destination, read(args.candidate),
             read(args.previous) if args.previous else None, owned_commands=args.owned_command,
-            local_files=(*local_files, *args.local_file))
+            local_files=(*local_files, *args.local_file),
+            review_builder=review_builder if args.integrate_local_policy else None)
         return {"bundle": str(args.destination.resolve()), "complete": True, "collisions": bundle["plan"]["collisions"],
-                "application_authorized": False, "ordered_dispatch_review_required": bundle["ordered_dispatch_review_required"]}
+                "application_authorized": False, "ordered_dispatch_review_required": bundle["ordered_dispatch_review_required"],
+                "ordered_integration_available": "ordered_integration" in bundle}
     if args.command == "upgrade-apply":
-        return apply(root, args.bundle, args.review_sha256, read(args.choices) if args.choices else {}, quiescent=args.quiescent)
+        return apply(root, args.bundle, args.review_sha256, read(args.choices) if args.choices else {},
+                     quiescent=args.quiescent, review_builder=review_builder)
     if args.command == "upgrade-rollback":
         return rollback(root, args.operation, quiescent=args.quiescent)
     raise ValueError("not a shared upgrade command")
@@ -106,7 +113,8 @@ def _writable_target(path):
         raise ValueError("read-only installed target requires separate review: " + str(path))
 
 
-def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reserve=DEFAULT_RESERVE, deadline=None):
+def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reserve=DEFAULT_RESERVE, deadline=None,
+          review_builder=None):
     """Apply an explicitly selected review; collisions never gain guessed ownership.
 
     choices maps collision paths to keep/candidate. Project settings may select
@@ -131,8 +139,6 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
     review = json.loads(raw)
     if not isinstance(review, dict) or type(review.get("v")) is not int or review["v"] != 1:
         raise ValueError("unsupported upgrade review")
-    if review.get("ordered_dispatch_review_required"):
-        raise ValueError("custom pre-handlers require ordered-policy integration before application")
     plan = review.get("plan", {})
     if (not isinstance(plan, dict) or plan.get("v") != 1 or not isinstance(plan.get("root"), str)
             or Path(plan["root"]).resolve() != root or not isinstance(plan.get("files"), list)):
@@ -157,6 +163,32 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
             if _current(root, name, deadline) != applied.get(name, expected):
                 raise ValueError("local configuration or policy source changed since review: " + name)
     choices = dict(choices or {})
+    integration = review.get("ordered_integration")
+    integrated = {}
+    if integration is not None:
+        if review_builder is None:
+            raise ValueError("ordered-policy proposal requires this profile's validator")
+        for folder, entries in (("candidate", candidate), ("rollback", rollback)):
+            for name, digest in entries.items():
+                if durable.digest(upgrade._entry(bundle, folder + "/" + name), deadline) != digest:
+                    raise ValueError("staged policy review bytes changed: " + name)
+        if (".claude/settings.json" in candidate and
+                durable.digest(upgrade._entry(bundle, "merged-settings.json"), deadline) != review.get("merged_settings_sha256")):
+            raise ValueError("merged settings changed before ordered policy review")
+        proposal = review_builder(bundle, review)
+        expected_proof, expected_bytes = upgrade.policy_proposal(proposal, rollback, candidate)
+        upgrade.validate_ordered_settings(bundle, proposal)
+        if integration != expected_proof:
+            raise ValueError("ordered-policy proposal no longer matches this profile")
+        if any(local.get(name) != digest for name, digest in integration["sources"].items()):
+            raise ValueError("ordered policy sources were not independently observed")
+        for name, data in expected_bytes.items():
+            if (choices.get(name) != "reviewed_settings" or
+                    durable.digest(upgrade._entry(bundle, "reviewed/" + name), deadline) != integration["files"][name]):
+                raise ValueError("explicit reviewed_settings choices and unchanged policy edits are required")
+        integrated = integration["files"]
+    if review.get("ordered_dispatch_review_required") and not integrated:
+        raise ValueError("custom pre-handlers require ordered-policy integration before application")
     rows = {row["path"]: row for row in plan["files"]}
     if len(rows) != len(plan["files"]) or set(choices) - rows.keys() or candidate.keys() - rows.keys():
         raise ValueError("ambiguous review paths or unknown selection")
@@ -174,13 +206,20 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
         if action == "preserve_collision" and name not in choices:
             raise ValueError("unresolved installed collision: " + name)
         selected = choices.get(name, default)
-        if selected not in ("keep", "candidate", "merged_settings"):
+        if selected not in ("keep", "candidate", "merged_settings", "reviewed_settings"):
             raise ValueError("unknown upgrade selection")
         if selected == "keep":
             continue
-        if name in LOCAL_ONLY:
+        if integration is not None and name in integration["sources"]:
+            raise ValueError("registered local policy sources must remain unchanged")
+        if name in LOCAL_ONLY and not (selected == "reviewed_settings" and name in integrated):
             raise ValueError("local settings/notes must be retained: " + name)
-        if selected == "merged_settings":
+        if selected == "reviewed_settings":
+            if name not in integrated:
+                raise ValueError("settings edit has no qualified ordered-policy authority")
+            incoming = upgrade._entry(bundle, "reviewed/" + name)
+            digest = integrated[name]
+        elif selected == "merged_settings":
             if name != ".claude/settings.json" or review.get("ordered_dispatch_review_required"):
                 raise ValueError("custom pre-handlers require ordered-policy integration before application")
             incoming = upgrade._entry(bundle, "merged-settings.json")
@@ -204,9 +243,18 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
         if expected is not None and durable.digest(upgrade._entry(bundle, "rollback/" + name), deadline) != expected:
             raise ValueError("rollback bytes changed: " + name)
         changes.append({"path": name, "before": expected, "after": digest, "source": str(incoming),
-                        "mode": modes[name], "before_mode": upgrade._entry(root, name).stat().st_mode & 0o777 if expected else None})
+                        "mode": (upgrade._entry(root, name).stat().st_mode & 0o777 if expected is not None
+                                 else 0o600) if selected == "reviewed_settings" else modes[name],
+                        "before_mode": upgrade._entry(root, name).stat().st_mode & 0o777 if expected else None,
+                        "reviewed_settings": selected == "reviewed_settings"})
+    if integration is not None:
+        resulting = {name: row.get("installed_sha256") for name, row in rows.items()}
+        resulting.update({row["path"]: row["after"] for row in changes})
+        if any(resulting.get(name) != digest for name, digest in integration["requires"].items()):
+            raise ValueError("ordered-policy migration requires the reviewed candidate runtime")
     # Hook definitions are published after their runtime. Review is still needed.
-    changes.sort(key=lambda row: (row["path"] in (".claude/settings.json", ".codex/hooks.json"), row["path"]))
+    changes.sort(key=lambda row: (2 if row["path"] in (".claude/settings.json", ".claude/settings.local.json", ".codex/hooks.json")
+                                 else 1 if row["path"] == ".modding-agent-harness/local-policies.json" else 0, row["path"]))
     state = root / ".modding-agent-harness"
     upgrade._entry(root, ".modding-agent-harness/upgrade.lock")
     state.mkdir(parents=True, exist_ok=True)
@@ -225,7 +273,8 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
         journal = state / "upgrades" / operation
         upgrade._entry(root, ".modding-agent-harness/upgrades/" + operation + "/plan.json")
         journal.mkdir(parents=True, exist_ok=False)
-        durable.atomic_json(journal / "plan.json", {"v": 1, "root": str(root), "review_sha256": expected_sha256, "changes": changes})
+        durable.atomic_json(journal / "plan.json", {"v": 1, "root": str(root), "review_sha256": expected_sha256,
+                                                  "changes": changes, "ordered_integration": integration})
         staged, published = [], []
         try:
             # Preserve every old file before replacing any target.
@@ -303,6 +352,21 @@ def rollback(root, operation, *, quiescent=False, deadline=None):
     if plan.get("root") != str(root) or not isinstance(plan.get("changes"), list):
         raise ValueError("rollback plan belongs to a different root")
     rows = plan["changes"]
+    integration = plan.get("ordered_integration")
+    integrated = {}
+    if integration is not None:
+        if (not isinstance(integration, dict) or type(integration.get("v")) is not int or integration["v"] != 1
+                or not isinstance(integration.get("kind"), str)):
+            raise ValueError("invalid ordered-policy rollback authority")
+        integrated = upgrade.inventory({"v": 1, "files": integration.get("files")})
+        if not integrated or not set(integrated) <= upgrade.REVIEWABLE_SETTINGS:
+            raise ValueError("ordered-policy rollback targets unrelated settings")
+        sources = upgrade.inventory({"v": 1, "files": integration.get("sources")})
+        if not sources or set(sources) & set(integrated):
+            raise ValueError("ordered-policy rollback lacks retained policy sources")
+        requires = upgrade.inventory({"v": 1, "files": integration.get("requires")})
+        if not requires or set(requires) & (set(sources) | upgrade.REVIEWABLE_SETTINGS):
+            raise ValueError("invalid ordered-policy runtime rollback authority")
     upgrade.inventory({"v": 1, "files": {row["path"]: row["after"] for row in rows}})
     if len({row["path"] for row in rows}) != len(rows):
         raise ValueError("ambiguous rollback paths")
@@ -318,11 +382,22 @@ def rollback(root, operation, *, quiescent=False, deadline=None):
     actions = []
     state = root / ".modding-agent-harness"
     with exclusive(upgrade._entry(root, ".modding-agent-harness/upgrade.lock"), max(0, min(5, deadline - time.monotonic()))):
+        def check_sources():
+            if integration is not None:
+                for name, expected in sources.items():
+                    if _current(root, name, deadline) != expected:
+                        raise ValueError("local policy source changed before rollback")
+                changed = {row["path"] for row in rows}
+                for name, expected in requires.items():
+                    if name not in changed and _current(root, name, deadline) != expected:
+                        raise ValueError("retained ordered-policy runtime changed before rollback")
+        check_sources()
         for row in rows:
             name = row["path"]
             target = upgrade._entry(root, name)
             stores = (workspace.settings(root)["destination"], root / ".claude/backups", root / ".modding-agent-harness/upgrades")
-            if protects(target, stores, ancestor=True) or name in LOCAL_ONLY:
+            reviewed = row.get("reviewed_settings") is True and integrated.get(name) == row["after"]
+            if protects(target, stores, ancestor=True) or name in LOCAL_ONLY and not reviewed:
                 raise ValueError("rollback cannot write protected recovery data or local configuration")
             current = _current(root, name, deadline)
             if current == row["before"]:
@@ -344,6 +419,7 @@ def rollback(root, operation, *, quiescent=False, deadline=None):
         try:
             for row in reversed(actions):
                 durable.check_deadline(deadline)
+                check_sources()
                 target = upgrade._entry(root, row["path"])
                 if (_current(root, row["path"], deadline) != row["after"] or
                         list(durable.identity(target)[:2]) != intents[row["path"]][:2]):
@@ -365,6 +441,7 @@ def rollback(root, operation, *, quiescent=False, deadline=None):
                             list(durable.identity(target)[:2]) != intents[row["path"]][:2]):
                         raise OSError("target changed before rollback publication")
                     _writable_target(target)
+                    check_sources()
                     os.replace(part, target)
                     durable.sync_dir(target.parent)
                     restored.append(row["path"])

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The installed-policy bridge now normalizes worker warnings before dispatch and
+  requires the portable plan to retain every legacy backup and approval
+  requirement. Unrecognized save-changing helpers refuse before preservation;
+  ordinary edits preserve the complete pair once. Controlled-loader migration
+  remains unqualified, so the original personal handler must stay active.
 - Neutral and both legacy restore routes now carry one total deadline through
   import, verification, current-save preservation and final publication.
 - Existing Claude/Codex deciding entrypoints now use the ordered shared dispatcher,

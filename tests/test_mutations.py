@@ -7814,7 +7814,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_P8R1_SR, "            a = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), w)",
      "            a = targets.resolve_operand(e, w, cwd, env)",
      _P8R1 + "test_a_stream_of_a_guard_file_is_the_guard_file[hook-data]", "p8r1-stream-shell-wired"),
-    ('tools/skyguard/portable.py', '    restrictions = (local_policy.restriction(project, deadline), *local_restrictions)', '    restrictions = tuple(local_restrictions)', 'tests/test_local_policy.py::test_registered_policy_denies_before_any_permanent_save_backup', 'registered-local-policy-before-preservation'),
+    ('tools/skyguard/portable.py', '    restrictions = (local_policy.restriction(project, deadline, lambda: save_plan[0]), *local_restrictions)', '    restrictions = tuple(local_restrictions)', 'tests/test_local_policy.py::test_registered_policy_denies_before_any_permanent_save_backup', 'registered-local-policy-before-preservation'),
 ]]
 
 # ---- Plan 8 T8 fix round 2 (lane p8-paths): re-review N1, N2, N4. One twin per clause. ---------------------------
@@ -8773,4 +8773,14 @@ MUTATIONS += [pytest.param(path, before, after,
      'saves.Target(a, op if op in saves.OPS else "write")', 'files'),
     ('tools/skyguard/saves.py', 'Target(_join(folder, clean + EXTS[0]), "write", True)',
      'Target(_join(folder, clean + EXTS[0]), "write")', 'mcp'),
+)]
+
+MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test,
+    id="local-policy-" + name) for before, after, test, name in (
+    ('        if result["kind"] != "allow":', '        if False:',
+     'tests/test_local_policy.py::test_legacy_preservation_requirements_cannot_disappear_in_unrecognized_helpers[backup]',
+     'preservation-requirement-retained'),
+    ('            result["warnings"] = tuple(warnings)', '            result["warnings"] = warnings',
+     'tests/test_local_policy.py::test_registered_allowed_file_edit_preserves_pair_once[allow]',
+     'worker-warning-tuple'),
 )]
