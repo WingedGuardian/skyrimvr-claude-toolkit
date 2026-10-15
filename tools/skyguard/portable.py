@@ -105,6 +105,7 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
             result = contracts.Result(value.decision, value.status, reason=value.reason,
                                       warnings=(value.context,) if value.context else ())
         plan = local_policy.supplement_native_backups(action, project, plan, profile, helper=helper, deadline=deadline)
+        plan = local_policy.supplement_controlled(action, project, plan, profile, deadline)
         save_plan[0] = plan
         return dispatch.Evaluation(result, plan)
 

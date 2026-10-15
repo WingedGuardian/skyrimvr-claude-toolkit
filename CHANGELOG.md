@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The exact reviewed personal controller's prepare/load requests retain their
+  complete save scope in the portable dispatcher. Request bytes, controller
+  identity, registered policy and membership are rechecked after preservation.
+  The controller retains its independent runtime gates. Fixture qualification
+  does not run the controller or authorize retiring the installed handler.
 - Qualified native file changes to legacy backup-suffixed saves preserve both
   members, including `.ess.bak`/`.skse.bak`, in the neutral store. Pair selection
   and restoration retain the suffix and missing-member state; bulk helpers keep
@@ -24,8 +29,8 @@
 - The installed-policy bridge now normalizes worker warnings before dispatch and
   requires the portable plan to retain every legacy backup and approval
   requirement. Unrecognized save-changing helpers refuse before preservation;
-  ordinary edits preserve the complete pair once. Controlled-loader migration
-  remains unqualified, so the original personal handler must stay active.
+  ordinary edits preserve the complete pair once. Full personal-handler migration
+  remains incomplete, so the original handler must stay active.
 - Neutral and both legacy restore routes now carry one total deadline through
   import, verification, current-save preservation and final publication.
 - Existing Claude/Codex deciding entrypoints now use the ordered shared dispatcher,

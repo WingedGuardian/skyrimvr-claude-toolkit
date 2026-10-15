@@ -10,6 +10,7 @@ from dataclasses import asdict, replace
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -25,6 +26,7 @@ KIND = "legacy-skyrim-save-guard-v1"
 # Only this reviewed legacy version has qualified pure transfer helpers. A
 # registration for different source bytes remains a restrictive policy only.
 TRANSFER_POLICY_SHA256 = "30777ba84ec4dcf66b6be4c9b0d40ea6eb8e3075aa3561bb0493b8b9bb1351a2"
+CONTROLLED_LOAD_SHA256 = "22e0b8b1c004bc4ee79946836a6ce0abb60c4ca9b06ded20b8e659e61dc8102b"
 
 
 def registration(project):
@@ -134,6 +136,86 @@ def supplement_native_backups(action, project, plan, profile, *, helper=False, d
                    helper=plan.helper or helper, recheck=recheck)
 
 
+def _controlled_scope(action, project):
+    """Bind data consumed by the reviewed controller; never run its entrypoint."""
+    from skyguard import shellparse
+    parsed = shellparse.parse(action.command, action.shell)
+    if not parsed.ok or parsed.unread or parsed.codes or len(parsed.execs) != 1:
+        raise ValueError("controlled loader requires one literal invocation")
+    call = parsed.execs[0]
+    if (not re.fullmatch(r"python(?:\d+(?:\.\d+)*)?|py", call.program) or
+            len(call.argv) != 4 or call.argv[1] not in ("prepare", "load") or
+            call.argv[2] != "--request" or call.redirects or call.stdin_from or call.cd_before):
+        raise ValueError("controlled loader requires its exact action and request")
+    helper = Path(project).resolve() / ".claude/scripts/guarded-runtime-load.py"
+    candidate, request = Path(call.argv[0]), Path(call.argv[3])
+    if not candidate.is_absolute() or profiles.canonical(candidate) != profiles.canonical(helper) or not request.is_absolute():
+        raise ValueError("controlled loader requires the installed controller and an absolute request")
+    bindings, contents = [], []
+    for path, budget in ((helper, 512 * 1024), (request, 65536)):
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("controlled dependency is not a regular file")
+        with path.open("rb") as stream:
+            raw = stream.read(budget + 1)
+        if len(raw) > budget:
+            raise ValueError("controlled dependency exceeds its byte budget")
+        bindings.append((profiles.canonical(path), hashlib.sha256(raw).hexdigest()))
+        contents.append(raw)
+    if bindings[0][1] != CONTROLLED_LOAD_SHA256:
+        raise ValueError("controlled loader code differs from the qualified version")
+    data = json.loads(contents[1].decode("utf-8-sig"))
+    if not isinstance(data, dict) or type(data.get("schema")) is not int or data["schema"] != 1:
+        raise ValueError("unsupported controlled request schema")
+    selected = []
+    for field in ("source", "test"):
+        name = data.get(field)
+        if not isinstance(name, str) or not Path(name).is_absolute() or not re.fullmatch(r"[A-Za-z0-9_-]+\.ess", Path(name).name, re.I):
+            raise ValueError("controlled request needs literal absolute ESS identities")
+        selected.append(name)
+    source, test = map(Path, selected)
+    if profiles.canonical(source) == profiles.canonical(test) or not test.stem.startswith("ShinsoObserver_Headless_"):
+        raise ValueError("controlled request requires a separate named test pair")
+    if not source.is_file() or call.argv[1] == "load" and not test.is_file():
+        raise ValueError("controlled request source or test is absent")
+    if call.argv[1] == "prepare" and (test.exists() or test.with_suffix(".skse").exists()):
+        raise ValueError("controlled preparation refuses an existing test pair")
+    return "controlled-" + call.argv[1], tuple(selected if call.argv[1] == "prepare" else selected[1:]), tuple(bindings)
+
+
+def supplement_controlled(action, project, plan, profile, deadline=None):
+    if action.surface != "shell" or plan.unresolved or "guarded-runtime-load.py" not in action.command.casefold():
+        return plan
+    registered = registration(project)
+    if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:
+        return plan
+    report = inspect_policy(action, project, deadline)
+    requirements = report["requirements"]
+    if report["refusal"] is not None or not any(row["op"] in ("controlled-prepare", "controlled-load") for row in requirements):
+        return plan
+    scope = _controlled_scope(action, project)
+    operation, selected, _bindings = scope
+    if (len(requirements) != 1 or requirements[0]["kind"] != "backup" or
+            requirements[0]["op"] != operation or
+            sorted(map(profiles.canonical, requirements[0].get("affected", ()))) != sorted(map(profiles.canonical, selected))):
+        raise ValueError("controlled requirements differ from the qualified request")
+    from modding_harness.dispatch import Mutation
+    def current():
+        return tuple(Mutation(path, "write") for path in selected if any(member.is_file() for member in profile.members(path)))
+    def recheck():
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("controlled preservation budget expired")
+        if (registration(project) != registered or _controlled_scope(action, project) != scope or
+                inspect_policy(action, project, deadline) != report):
+            raise ValueError("controlled policy, request or scope changed during preservation")
+        original = plan.recheck() if plan.recheck is not None else plan.mutations
+        return tuple(dict.fromkeys((*original, *current())))
+    # Re-evaluate against the exact bound data, then retain that binding until
+    # preservation finishes. The controller still enforces its runtime gates.
+    if inspect_policy(action, project, deadline) != report or _controlled_scope(action, project) != scope:
+        raise ValueError("controlled request changed during inspection")
+    return replace(plan, mutations=tuple(dict.fromkeys((*plan.mutations, *current()))), helper=True, recheck=recheck)
+
+
 def _transfer_roles(namespace, payload):
     args = payload["tool_input"]
     text = args.get("command", args.get("cmd", "")) if isinstance(args, dict) else args
@@ -146,7 +228,7 @@ def _transfer_roles(namespace, payload):
                  for path in paths if namespace["is_save"](path))
 
 
-def _coverage(decision, facts, roles=()):
+def _coverage(decision, facts, roles=(), *, controlled=False):
     """Prove the portable plan retains a legacy non-allow requirement."""
     def refuse(why):
         return contracts.Result("deny", "evaluated", reason="Installed local policy: " + why +
@@ -154,6 +236,10 @@ def _coverage(decision, facts, roles=()):
     if not isinstance(facts, dict) or facts.get("unresolved"):
         return refuse("save preservation scope has no qualified portable plan")
     kind, operation = decision["kind"], decision.get("op")
+    if controlled and operation in ("controlled-prepare", "controlled-load"):
+        if facts.get("helper") is not True or facts.get("recheck") is not True:
+            return refuse("controlled scope requires a dependency and membership recheck")
+        operation = "write"
     operation = {"copy": "write", "restore": "write", "rename": "move"}.get(operation, operation)
     if operation not in ("write", "move", "delete"):
         return refuse("this legacy save operation has not been qualified in the portable dispatcher")
@@ -239,7 +325,12 @@ def evaluate(action, project, facts=None, *, requirements=None):
             if (file_operation is None and result.get("op") in ("move", "rename") and
                     hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256):
                 roles = _transfer_roles(namespace, payload)
-            refused = _coverage(result, facts, roles)
+            controlled = False
+            if result.get("op") in ("controlled-prepare", "controlled-load") and hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256:
+                operation, selected, _bindings = _controlled_scope(action, project)
+                controlled = (result["kind"] == "backup" and result["op"] == operation and
+                              sorted(map(profiles.canonical, result.get("affected", ()))) == sorted(map(profiles.canonical, selected)))
+            refused = _coverage(result, facts, roles, controlled=controlled)
             if refused is not None:
                 return refused
     # Save authorization and preservation remain the portable dispatcher's job.
