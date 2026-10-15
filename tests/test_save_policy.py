@@ -705,10 +705,24 @@ def test_a_backup_that_raises_inside_the_hook_denies(tmp_path, monkeypatch):
 
     def boom(*a, **k):
         raise RuntimeError("x")
-    monkeypatch.setattr(run.saves, "enforce", boom)
+    from modding_harness.preservation import SaveStore
+    monkeypatch.setattr(SaveStore, "backup", boom)
     S = (install / "cfg" / "Saves").as_posix()
     got = rec.fire_inprocess(install, "protect-bash.sh", {"tool_name": "Bash", "session_id": "s",
                                                           "tool_input": {"command": 'rm "' + S + '/Pair.ess"'}})
+    assert got["decision"] == "deny" and got["text"].startswith("Blocked: the backup of the saves failed")
+
+
+def test_a_dispatcher_that_raises_inside_the_hook_denies(tmp_path, monkeypatch):
+    from skyguard import portable
+    rec = _rec()
+    install = rec.make_install(tmp_path, REPO / ".claude/hooks", "saves-bulk")
+    def fail(*args, **kwargs):
+        raise RuntimeError("dispatcher failed before returning a verdict")
+    monkeypatch.setattr(portable, "legacy_pre_tool", fail)
+    folder = (install / "cfg/Saves").as_posix()
+    got = rec.fire_inprocess(install, "protect-bash.sh", {"tool_name": "Bash", "session_id": "s",
+                             "tool_input": {"command": 'rm "' + folder + '/Pair.ess"'}})
     assert got["decision"] == "deny" and got["text"].startswith("Blocked: the backup of the saves failed")
 
 

@@ -462,19 +462,7 @@ def _shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
         return v
 
 
-def pre_tool(req, project, roots_fn, audit, telemetry="", now=None, deadline=None) -> Verdict:
-    """All Codex PreToolUse work: the rules, then the side effects, then shadow mode on the finished verdict."""
-    hold_if_shadowing(project, audit)
-    if req.failure:
-        audit.log("codex-pre-tool", "REFUSE", req.failure)
-        v = _failed(INERT_TRANSLATE.format(req.failure), "codex.TRANSLATE")
-    elif req.event != "pre_tool":
-        v = _failed(INERT_TRANSLATE.format("unexpected event {!r}".format(req.event)), "codex.TRANSLATE")
-    else:
-        v = _rules(req, roots_fn, audit)
-        # The save policy: every save the call changes is backed up and verified before the call may run.
-        v = saves.enforce(v, project, audit, "codex-pre-tool", command=req.command or " ".join(req.paths),
-                          transcript=req.transcript_path, agent=req.agent, session_id=req.session_id,
-                          deadline=deadline)
-    v = side_effects(req, project, audit, v, roots_fn, deadline)
-    return shadow(v, project, req.session_id, telemetry, audit, now=now)
+def pre_tool(req, project, roots_fn, audit, telemetry="", now=None, deadline=None, *, metadata=None) -> Verdict:
+    """Legacy parser/verdict compatibility over the shared synchronous dispatcher."""
+    from . import portable
+    return portable.legacy_pre_tool(req, project, roots_fn, audit, telemetry, now, deadline, metadata=metadata)

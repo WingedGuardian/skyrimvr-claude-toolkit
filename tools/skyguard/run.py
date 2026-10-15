@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import faulthandler
+import json
 import os
 import sys
 import time
@@ -132,16 +133,37 @@ def _saves(a, p, audit, v, what):
     """The save policy (saves.enforce): every save the call changes is backed up and verified HERE, in the deciding
     PreToolUse hook, before its decision is returned -- so the tool cannot run first. A backup that fails, or that
     raises, denies."""
-    if v.saves is None:
-        return v
     try:
-        return saves.enforce(v, a.project, audit, a.role, command=what, transcript=p.get("transcript_path", ""),
-                             agent="claude", session_id=p.get("session_id", ""), deadline=_recovery_deadline())
+        from skyguard import portable
+        kind = {"protect-bash": "shell", "protect-files": "write", "protect-mcp": "mcp"}[a.role]
+        req = claude.to_request(p, kind)._replace(transcript_path=p.get("transcript_path", ""))
+        if kind == "mcp":
+            import json
+            req = req._replace(mcp_tool=p["tool_name"], mcp_args=json.dumps(p["mcp_input"]))
+        def roots():
+            env = _declared_env(a)
+            if env is None:
+                raise engine.RootsUnavailable(ENV_UNREADABLE)
+            return paths.roots(a.root, a.root_win, env)
+        a.ordered_dispatch = True
+        return portable.legacy_pre_tool(req, a.project, roots, audit, a.telemetry,
+                                         deadline=_recovery_deadline(), precomputed=v, side_effects=False,
+                                         metadata=p.get("receipt_identity", {}))
     except Exception as e:  # noqa: BLE001 -- fail closed: no verified backup, no save change
         reason = saves.rules.message("S-SAVE-BACKUP-FAILED", file="the saves", op="the guard raised " +
                                      e.__class__.__name__)
         audit.rule(a.role, "S-SAVE-BACKUP-FAILED", "deny", reason)
         return Verdict("deny", reason, code="shell.S-SAVE-BACKUP-FAILED")
+
+
+def _receipt_identity(raw):
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return {}
+        return {key: data[key] for key in ("tool_use_id", "host_version") if isinstance(data.get(key), str)}
+    except (ValueError, RecursionError):
+        return {}
 
 
 def _codex(a, raw: str) -> int:
@@ -166,7 +188,7 @@ def _codex(a, raw: str) -> int:
         return paths.roots(a.root, a.root_win, env)
 
     v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit, telemetry=a.telemetry,
-                                       deadline=_recovery_deadline()))
+                                       deadline=_recovery_deadline(), metadata=_receipt_identity(raw)))
     _telemetry(a, v)
     if v.decision != "allow":
         # A refused call leaves no item in the agent's transcript, so the canary must not count its hook
@@ -245,6 +267,7 @@ def main(argv=None) -> int:
     if a.agent == "codex":
         return _codex(a, raw)
     p = adapter.extract(raw)
+    p["receipt_identity"] = _receipt_identity(raw)
     if a.role == "session-kb-guard":
         _session_line(a, p["session_id"], source=p["source"], transcript=p["transcript_path"])
     else:
@@ -302,7 +325,7 @@ def main(argv=None) -> int:
         session.export_env(p["session_id"], "claude")   # later Bash calls get SKYGUARD_SESSION_ID (Task 10)
         _emit(out)
         return 0
-    if a.role in DECISION_ROLES:     # one SHADOW line per tool call: backup / snapshot hooks make no decision
+    if a.role in DECISION_ROLES and not getattr(a, "ordered_dispatch", False):
         v = engine.shadow(v, a.project, p["session_id"], a.telemetry, audit)   # R8: the one exit
     v = codes.classify(v)
     _telemetry(a, v)

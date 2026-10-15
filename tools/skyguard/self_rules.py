@@ -153,6 +153,10 @@ def shell_save_store_hit(command, parsed, roots, cwd="", env=None):
             if placed and save_store_target(placed, roots, holder):
                 return placed
     for word, how in deletes.recycle_targets(deletes.recycle_text(command, parsed)):
+        # A concatenation hole can look like an empty quoted argument. It is
+        # unresolved, never the cwd (which might contain the entire save store).
+        if not word.strip():
+            continue
         placed = _recycle_abs(word, how, targets.normalise_cwd(cwd), env)
         if placed and save_store_target(placed, roots, True):
             return placed

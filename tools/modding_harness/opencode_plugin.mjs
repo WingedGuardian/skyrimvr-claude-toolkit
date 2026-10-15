@@ -288,7 +288,17 @@ return async ({ directory }) => {
     },
 
     "experimental.chat.system.transform": async (_input, output) => {
-      if (output && Array.isArray(output.system)) output.system.push(BANNER)
+      if (output && Array.isArray(output.system)) {
+        output.system.push(BANNER)
+        if (existsSync(join(directory, "KNOWLEDGEBASE.local.md"))) {
+          try {
+            const verdict = await ask("session", { tool: "preferences" }, {})
+            if (verdict.context) output.system.push(verdict.context)
+          } catch {
+            output.system.push("PREFERENCES: NOT INJECTED -- read KNOWLEDGEBASE.local.md yourself.")
+          }
+        }
+      }
     },
   }
 }

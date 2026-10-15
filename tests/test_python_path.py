@@ -161,14 +161,14 @@ def test_a_path_with_a_single_quote_survives_the_quoting(game_dir):
     assert "Updated interpreter" not in again.stdout and "Already configured" in again.stdout
 
 
-def test_setup_refuses_a_python_older_than_3_8(game_dir):
-    """The engine's floor is 3.8. A 3.6 used to pass setup's "is it Python 3?" probe and then every
+def test_setup_refuses_a_python_older_than_3_10(game_dir):
+    """The harness floor is 3.10. A 3.6 used to pass setup's "is it Python 3?" probe and then every
     hook denied "engine failed" -- a full outage that nothing explained."""
     result = run_setup(game_dir, env_overrides={"FAKE_PYTHON_EXE": "C:/Py36/python.exe", "FAKE_PYTHON_OLD": "1"},
                        shim_path=True)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 1, result.stderr
     out = result.stdout
-    assert "3.8" in out and "too old" in out, out[-1500:]
+    assert "3.10" in out and "too old" in out, out[-1500:]
     assert "NOT CONFIGURED" in out
     assert all("{{PYTHON_PATH}}" in (game_dir / ".claude" / "hooks" / h).read_text(encoding="utf-8")
                for h in ("protect-bash.sh", "protect-files.sh"))

@@ -84,3 +84,27 @@ def test_structured_runtime_calls_cannot_bypass_registered_local_save_load_restr
     assert result.decision == "deny" and "runtime save/load" in result.reason
     read = contracts.Action("future", "mcp__devbench__game", "mcp", provenance={"arguments": {"action": "status"}})
     assert local_policy.restriction(tmp_path)(read).decision == "allow"
+
+
+@pytest.mark.parametrize("host,role", [("codex", "pre-tool"), ("claude", "protect-mcp")])
+def test_named_host_entrypoints_apply_local_restrictions_before_permission_and_keep_call_identity(tmp_path, host, role):
+    import subprocess
+    from modding_harness.telemetry import Telemetry
+    register(tmp_path, "def decide(payload): return {'kind':'allow'}\n")
+    saves = tmp_path / "config/Saves"
+    saves.mkdir(parents=True)
+    (tmp_path / "skyrim-paths.env").write_text("SKYRIM_CONFIG_DIR='" + saves.parent.as_posix() + "'\n")
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "mcp__devbench__game",
+               "tool_input": {"action": "save", "name": "new-fixture"}, "cwd": str(tmp_path),
+               "session_id": "s", "tool_use_id": "c", "host_version": "fixture-declared-version"}
+    command = [sys.executable, "-B", str(REPO / "tools/skyguard/run.py"), host, role,
+               "--project", str(tmp_path), "--root", str(tmp_path)]
+    completed = subprocess.run(command, input=json.dumps(payload), capture_output=True, text=True, timeout=30)
+    assert completed.returncode == 0, completed.stderr
+    body = completed.stdout.removeprefix("SKYGUARD-OK\n")
+    result = json.loads(body)["hookSpecificOutput"]
+    assert result["permissionDecision"] == "deny" and "runtime save/load" in result["permissionDecisionReason"]
+    assert not (tmp_path / ".modding-agent-harness/backups/saves").exists()
+    report = Telemetry(tmp_path).report("s")
+    assert report["receipts"] == 1 and report["uncorrelated_receipts"] == 0
+    assert report["caller_declarations"][0]["version"] == "fixture-declared-version"

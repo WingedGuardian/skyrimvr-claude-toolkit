@@ -5,12 +5,16 @@ import time
 from pathlib import Path
 
 from modding_harness import contracts, transport, telemetry
-from .. import patch_paths, portable
+from .. import patch_paths, portable, prefs
 
 
 def handle(raw, project, event="pre"):
     try:
         action = transport.normalize("opencode", raw, shell_patch=patch_paths.shell_patch)
+        if event == "session":
+            text = prefs.render(project)
+            return {"v": 1, "decision": "advise" if text else "allow", "inert": False,
+                    "reason": None, "context": text or None}
         if event == "post":
             result = contracts.Result(validation="not_run")
             telemetry.Telemetry(project).record(action, "post", result, source="Skyrim OpenCode V1 adapter")

@@ -267,6 +267,8 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
         return legacy_saves.restore(project, sid, wanted, to, in_place, out)
     if save_store.ID.fullmatch(sid):
         return save_store.restore(project, sid, wanted, to, in_place, out)
+    if recovery._ID.fullmatch(sid) and sid.split("-")[1:2] == ["save"]:
+        return legacy_saves.recovery_restore(project, sid, wanted, to, in_place, out)
     from .audit import Audit
     try:
         store, files, shown, live = _plan(project, sid)
@@ -278,12 +280,6 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
         print("REFUSED: --path {} matches no file in snapshot {}. Nothing was restored.".format(
             ", ".join(missing), sid), file=out)
         return 2
-    is_save = bool(recovery._ID.match(sid)) and ("-save-" in sid or sid.endswith("-save"))
-    save_state = recovery.resolve(store, sid) if is_save else None
-    if save_state:
-        # A member selection names the logical save, never half a live pair.
-        stems = {os.path.normcase(str(Path(live[k]).with_suffix(""))) for k in keys}
-        keys = [k for k in shown if os.path.normcase(str(Path(live[k]).with_suffix(""))) in stems]
     chosen = {k: files[k] for k in keys}
     try:
         bad = snapshot.check_blobs(store, sid, chosen)
@@ -307,12 +303,6 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
         return 2
     audit = Audit(str(project))
     if in_place:
-        if save_state:
-            unexpected = [p for e in save_state.values() for p in e.get("missing", []) if os.path.lexists(p)]
-            if unexpected:
-                print("REFUSED: unexpected save counterpart {} exists now but was absent in this snapshot. "
-                      "Restore to a new directory instead. Nothing was restored.".format(unexpected[0]), file=out)
-                return 2
         odd = [(k, why) for k in keys for why in [_allowed(project, sid, k, live[k])] if why]
         # Final review B-M4: a FULL config restore holds every path ever recorded; one whose folder is no longer
         # configured is skipped and named, not a reason to refuse the rest. Anything else still refuses everything.
@@ -335,23 +325,11 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
         pairs = [(live[k], chosen[k]) for k in keys if k not in same]
         unchanged = [live[k] for k in same]
         dest = "the live files"
-        if save_state and pairs:
-            logical = {}
-            for k in keys:
-                stem = str(Path(live[k]).with_suffix(""))
-                logical[os.path.normcase(stem)] = (stem + ".ess", stem + ".skse")
-            try:
-                recovery.backup_saves(str(project), audit, list(logical.values()), "skyguard snapshot restore")
-            except recovery.SaveBackupFailed as exc:
-                audit.log(HOOK, "FAILED", "{} -- NO BACKUP EXISTS for this restore".format(exc))
-                print("REFUSED: could not back up complete current save: {}. Nothing was restored.".format(exc), file=out)
+        for target, _sha in pairs:
+            if target.is_file() and backup.take(str(project), "skyguard snapshot restore", str(target), audit) is None:
+                print("REFUSED: could not back up {} before replacing it. Nothing was restored.".format(target),
+                      file=out)
                 return 2
-        else:
-            for target, _sha in pairs:
-                if target.is_file() and backup.take(str(project), "skyguard snapshot restore", str(target), audit) is None:
-                    print("REFUSED: could not back up {} before replacing it. Nothing was restored.".format(target),
-                          file=out)
-                    return 2
     else:
         base = Path(to) if to else _new_folder(project, sid)
         pairs = [(base.joinpath(*k.split("/")), chosen[k]) for k in keys]
@@ -384,12 +362,6 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
     print("Restored {} file(s) from snapshot {} to {}{}{}".format(
         n, sid, dest, " (each replaced file was backed up first)" if in_place and n else "",
         "; {} already matched and were left as they are".format(len(unchanged)) if unchanged else ""), file=out)
-    # The save policy: a pair backed up without its co-save says so -- a co-save there now is NOT from this backup.
-    if recovery._ID.match(sid) and sid.split("-")[1:2] == ["save"]:
-        for m in sorted({m for e in recovery.resolve(store, sid).values() for m in e.get("missing", [])
-                         if isinstance(m, str)}):
-            print("  note: {} did not exist when this save was backed up; any {} there now was left as it is".format(
-                os.path.basename(m), os.path.basename(m)), file=out)
     if skipped:
         print("{} file(s) were NOT restored: their folder is no longer configured (listed above).".format(len(skipped)),
               file=out)

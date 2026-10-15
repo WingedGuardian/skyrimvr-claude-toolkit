@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Existing Claude/Codex deciding entrypoints now use the ordered shared dispatcher,
+  retaining declared call identity and original unresolved-save explanations.
+  Both legacy save stores import verified complete-pair evidence into guarded
+  neutral recovery; in-place replacement respects local restrictions first.
+- Shared standing preferences are reinjected through OpenCode system transforms.
+  Mutation preflight checks every source anchor and referenced base test symbol;
+  moved preservation controls target the writer their tests actually exercise.
 - Portable Action v1 dispatcher and generic recovery entry, with synchronous save
   preservation and local restrictions before permission. Generated OpenCode V1
   plugin shares X4's pinned process transport; host enforcement remains unmeasured.

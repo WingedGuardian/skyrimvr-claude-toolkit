@@ -99,3 +99,13 @@ def test_missing_adapter_refuses_known_tools_and_unknown_receipt_failure_warns(t
     assert "GUARD INERT" in result[0]["error"]
     assert "error" not in result[1]
     assert "coverage receipt unavailable" in result[2]["output"]["output"]
+
+
+def test_system_context_reinjects_preferences_after_each_transform(tmp_path):
+    root, _ = run_plugin(tmp_path, [])
+    (root / "KNOWLEDGEBASE.local.md").write_text("## My preferences\nKeep my working notes.\n## Other\nUnclassified evidence.")
+    transform = {"hook": "experimental.chat.system.transform", "input": {}, "output": {"system": []}}
+    _, result = run_plugin(tmp_path, [transform, transform])
+    for row in result:
+        context = "\n".join(row["output"]["system"])
+        assert "Keep my working notes." in context and "Unclassified evidence." not in context

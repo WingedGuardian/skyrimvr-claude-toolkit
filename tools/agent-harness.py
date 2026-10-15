@@ -19,6 +19,7 @@ def main(argv=None):
     coverage = sub.add_parser("coverage")
     coverage.add_argument("--session-id", required=True)
     sub.add_parser("capabilities")
+    sub.add_parser("preferences")
     upgrade = sub.add_parser("upgrade-preview")
     upgrade.add_argument("--candidate", required=True, type=Path)
     upgrade.add_argument("--previous", type=Path)
@@ -37,6 +38,10 @@ def main(argv=None):
     try:
         if args.command == "coverage":
             result = telemetry.Telemetry(root).report(args.session_id)
+        elif args.command == "preferences":
+            from modding_harness import preferences
+            result = {"context": preferences.render(root),
+                      "scope": "explicit My preferences section only; unclassified notes remain notes"}
         elif args.command == "upgrade-preview":
             from modding_harness import transport, upgrade
             def read_manifest(path):

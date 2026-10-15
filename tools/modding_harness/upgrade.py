@@ -8,8 +8,13 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 import re
+import os
+import shutil
+import time
+import uuid
 
 from . import durable
+from .preservation import DEFAULT_RESERVE
 
 
 def inventory(value):
@@ -141,3 +146,66 @@ def merge_settings(existing, candidate, owned_commands=()):
     return {"settings": merged, "custom_pre_handlers": custom_pre,
             "ordered_dispatch_review_required": bool(custom_pre),
             "host_enforcement": "unqualified by this merge"}
+
+
+def preserve_notes(root, candidate_sha256, *, reserve=DEFAULT_RESERVE, deadline=None):
+    """Verify an independent legacy KB copy before an installer replaces it.
+
+    Existing local notes are never edited. A new local file links the retained
+    evidence under an empty preference section; old prose is not guessed policy.
+    """
+    deadline = time.monotonic() + 30 if deadline is None else deadline
+    if not isinstance(candidate_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", candidate_sha256) is None:
+        raise ValueError("candidate knowledgebase needs a full SHA-256")
+    root = Path(root).resolve()
+    if not root.is_dir() or reserve < 0:
+        raise ValueError("notes destination must be an existing directory with a nonnegative reserve")
+    source = _entry(root, "KNOWLEDGEBASE.md")
+    if not source.exists():
+        return {"preserved": False, "reason": "no legacy knowledgebase"}
+    before = durable.identity(source)
+    digest = durable.digest(source, deadline)
+    if durable.identity(source) != before:
+        raise OSError("legacy notes changed while preparing preservation")
+    if digest == candidate_sha256:
+        return {"preserved": False, "reason": "installed knowledgebase already matches candidate"}
+    saved = _entry(root, "KNOWLEDGEBASE.pre-4.0-" + digest + ".md")
+    if saved.exists():
+        if saved.stat().st_nlink != 1 or durable.digest(saved, deadline) != digest:
+            raise OSError("retained legacy notes are linked or corrupt; refuse replacement")
+    else:
+        if shutil.disk_usage(root).free < before[2] + reserve:
+            raise OSError("insufficient destination space for independent legacy notes preservation")
+        part = saved.with_name(".notes-part-" + uuid.uuid4().hex)
+        try:
+            copied = durable.copy_verified(source, part, deadline)
+            if copied["sha256"] != digest:
+                raise OSError("legacy notes changed during preservation")
+            durable.publish_new(part, saved)
+        finally:
+            part.unlink(missing_ok=True)
+    if (durable.identity(source) != before or durable.digest(source, deadline) != digest or
+            durable.digest(saved, deadline) != digest or shutil.disk_usage(root).free < reserve):
+        raise OSError("legacy notes preservation failed final verification")
+    local = root / "KNOWLEDGEBASE.local.md"
+    created = False
+    if not local.exists():
+        data = ("# Local knowledge\n\n## My preferences\n\n## Imported legacy notes\n\n"
+                "The prior knowledgebase is preserved verbatim in [" + saved.name + "](" + saved.name +
+                "). Review it as evidence; unclassified notes are not standing preferences.\n").encode("utf-8")
+        part = root / (".notes-part-" + uuid.uuid4().hex)
+        try:
+            with part.open("xb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            try:
+                durable.publish_new(part, local)
+                created = True
+            except FileExistsError:
+                pass  # A concurrent user's local file remains theirs.
+        finally:
+            part.unlink(missing_ok=True)
+    return {"preserved": True, "legacy_sha256": digest, "snapshot": str(saved),
+            "local_notes": str(local), "created_local_notes": created,
+            "classification": "unclassified evidence; no preferences inferred"}

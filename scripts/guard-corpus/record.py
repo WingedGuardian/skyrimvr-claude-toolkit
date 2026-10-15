@@ -123,6 +123,8 @@ def make_install(base: Path, hooks_src: Path, layout: str) -> Path:
     if (REPO / "tools" / "skyguard").is_dir():
         shutil.copytree(REPO / "tools" / "skyguard", root / "tools" / "skyguard",
                         ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(REPO / "tools" / "modding_harness", root / "tools" / "modding_harness",
+                        ignore=shutil.ignore_patterns("__pycache__"))
     if layout == "saves":
         (root / "cfg" / "Saves").mkdir(parents=True)
         (root / "cfg" / "Saves" / "Existing.ess").write_bytes(b"x")
@@ -248,6 +250,7 @@ def fire_inprocess(install: Path, hook: str, payload) -> dict:
     Roots as engine_verdict passes them. NOT covered: the wrapper's own decisions (a payload it refuses before
     the engine runs, GUARD INERT texts) -- fire() remains the check for those."""
     import faulthandler
+    import time
     run = _run_module()
     stdin = "" if payload is None else (payload if isinstance(payload, str) else json.dumps(payload))
     root = install.as_posix()
@@ -260,6 +263,10 @@ def fire_inprocess(install: Path, hook: str, payload) -> dict:
     try:
         os.environ.clear()
         os.environ.update(env)
+        # Each wrapper launches a new engine process. Reusing the module must
+        # also reset that process's preservation/watchdog start, rather than
+        # charging later rows for the time spent evaluating earlier rows.
+        run._T0 = time.monotonic()
         sys.stdin, sys.stdout = _Stream(stdin.encode("utf-8")), out
         rc = run.main(["claude", hook[:-len(".sh")], "--root", root, "--root-win", root if os.name == "nt" else "",
                        "--project", str(install)])
@@ -355,11 +362,17 @@ def engine_verdict(install: Path, hook: str, payload) -> dict:
         # Plan 5 Task 9: the write guard's zone notes need the roots, as run.py passes them.
         env = paths.read_install(root_win or root, environ)
         v = ee.call(write_rules.decide, (p["file_path"], audit), cwd=cwd, roots=paths.roots(root, root_win, env))
-    # The save policy: the hook backs up every save the call changes, and reads the user's approval, before its
-    # decision stands (saves.enforce, as run.py calls it). The backup lands in this install's own store.
-    from skyguard import saves
-    v = saves.enforce(v, str(install), audit, hook[:-len(".sh")], command=p["command"] or p["file_path"],
-                      transcript=p.get("transcript_path", ""), agent="claude", session_id=p.get("session_id", ""))
+    # The same ordered dispatcher as run.py: game rules, local restrictions,
+    # approval and verified preservation. The separate evaluation above still
+    # supplies its rule trace; this is not a second legacy save-policy path.
+    from skyguard import portable
+    kind = {"protect-bash.sh": "shell", "protect-mcp.sh": "mcp"}.get(hook, "write")
+    req = claude.to_request(p, kind)._replace(transcript_path=p.get("transcript_path", ""))
+    if kind == "mcp":
+        req = req._replace(mcp_tool=p["tool_name"], mcp_args=json.dumps(p["mcp_input"]))
+    env = paths.read_install(root_win or root, environ)
+    v = portable.legacy_pre_tool(req, str(install), lambda: paths.roots(root, root_win, env), audit,
+                                 precomputed=v, side_effects=False)
     if v.decision in ("deny", "ask"):
         decision, text = v.decision, v.reason
     elif v.context:

@@ -80,6 +80,13 @@ def _roots():
     return paths.roots("C:/p6t12/Skyrim VR", "", {"SKYRIM_GAME_ROOT": GAME})
 
 
+def test_empty_recycle_argument_is_not_the_install_ancestor():
+    from skyguard import shellparse
+    command = "powershell -Command \"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('',1,2)\""
+    parsed = shellparse.parse(command, "bash")
+    assert self_rules.shell_save_store_hit(command, parsed, _roots(), GAME, ENV0) == ""
+
+
 def shell(command, shell_name="bash", cwd=GAME, env=None):
     a = _audit()
     v = shell_rules.decide(command, _roots(), a, cwd=cwd, shell=shell_name, env=ENV0 if env is None else env)

@@ -222,7 +222,7 @@ def test_an_unexpected_event_is_a_failed_deny(tmp_path):
 
 def test_an_mcp_tool_is_allowed_and_recorded(tmp_path):
     v = _run(tmp_path, _pre("mcp__probe__echo", {"text": "hi"}))
-    assert (v.decision, v.status) == ("allow", "evaluated")
+    assert (v.decision, v.status) == ("allow", "partial")
     lines = (tmp_path / ".claude" / "backups" / "codex-unhooked-tools.log").read_text().splitlines()
     assert len(lines) == 1 and "mcp__probe__echo" in lines[0]
 
@@ -474,7 +474,7 @@ def test_an_ordinary_devbench_call_is_allowed_silently(tmp_path):
 
 def test_only_devbench_servers_are_judged_on_codex(tmp_path):
     v = _run(tmp_path, _pre("mcp__probe__console", {"action": "exec", "command": "smp reset"}))
-    assert (v.decision, v.context) == ("allow", "")
+    assert v.decision == "allow" and "WARN AND ALLOW" in v.context and v.status == "partial"
     assert "mcp__probe__console" in _unhooked_log(tmp_path)
 
 

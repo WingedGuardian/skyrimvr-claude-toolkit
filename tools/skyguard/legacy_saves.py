@@ -85,3 +85,65 @@ def restore(project, sid, wanted, to, in_place, out):
         return 2
     print("Imported verified legacy evidence as core-{}; legacy store preserved.".format(manifest["id"]), file=out)
     return save_store.restore(project, "core-" + manifest["id"], wanted, to, in_place, out)
+
+
+def recovery_restore(project, sid, wanted, to, in_place, out):
+    """Import the other 3.x save format, then use the same guarded recovery path.
+
+    The legacy manifest and blobs remain unchanged. Recorded absent members are
+    authority too: do not infer an absent co-save merely from an omitted line.
+    """
+    from . import recovery, save_store, snapcli
+    try:
+        legacy = recovery.store_dir(project)
+        state = recovery.resolve(legacy, sid)
+        if in_place:
+            for original in state:
+                why = snapcli._allowed(project, sid, "", Path(original))
+                if why:
+                    raise ValueError(why)
+        rows = [row for row in recovery.read_manifest(legacy)[0] if row["snap"] == sid]
+        names = set(state)
+        if (not rows or len(rows) != len(state) or any(row["kind"] != "save" or
+                row["lines"] != len(rows) or len(row["state"]) != len(names) or
+                set(row["state"]) != names for row in rows)):
+            raise ValueError("ambiguous or incomplete legacy save snapshot")
+        groups = {}
+        for original, row in state.items():
+            path = Path(original)
+            missing = row.get("missing")
+            if (not path.is_absolute() or path.suffix.lower() not in (".ess", ".skse") or
+                    not isinstance(missing, list) or not all(isinstance(p, str) and Path(p).is_absolute() for p in missing)):
+                raise ValueError("legacy snapshot is not complete save-pair authority")
+            stem = canonical(path.with_suffix(""))
+            group = groups.setdefault(stem, {})
+            for name, absent in [(original, False), *((name, True) for name in missing)]:
+                if canonical(Path(name).with_suffix("")) != stem or Path(name).suffix.lower() not in (".ess", ".skse"):
+                    raise ValueError("legacy missing-member authority names a different save")
+                key = canonical(name)
+                entry = {"original": name, "source": str((legacy / ".recorded-missing" / sid / Path(name).name).absolute()),
+                         "missing": absent}
+                if not absent:
+                    entry.update(source=str((legacy / "blobs" / row["sha256"]).absolute()),
+                                 sha256=row["sha256"], size=row["size"])
+                if key in group and group[key] != entry:
+                    raise ValueError("contradictory legacy save member authority")
+                group[key] = entry
+        complete = []
+        for group in groups.values():
+            members = list(group.values())
+            if len(members) != 2 or {Path(r["original"]).suffix.lower() for r in members} != {".ess", ".skse"}:
+                raise ValueError("legacy snapshot omits save counterpart authority")
+            complete.append(members)
+        if in_place:
+            for member in (r for group in complete for r in group):
+                why = snapcli._allowed(project, sid, "", Path(member["original"]))
+                if why:
+                    raise ValueError(why)
+        target = save_store.store(project, [r["original"] for group in complete for r in group])
+        manifest = target.import_records(complete, {"profile": "skyrim", "legacy_store": "recovery_snapshots", "legacy_id": sid})
+    except (OSError, ValueError) as exc:
+        print("REFUSED: legacy save evidence could not be preserved: {}".format(exc), file=out)
+        return 2
+    print("Imported verified legacy recovery evidence as core-{}; legacy store preserved.".format(manifest["id"]), file=out)
+    return save_store.restore(project, "core-" + manifest["id"], wanted, to, in_place, out)

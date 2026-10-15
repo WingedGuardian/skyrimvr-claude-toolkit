@@ -225,7 +225,7 @@ def test_kind_other_is_allowed_but_never_reads_as_a_verdict(tmp_path):
     text, v = neutral.handle(req(kind="other", paths=[], tool_name="web_fetch"), str(tmp_path),
                              _roots(tmp_path), Audit(str(tmp_path)))
     assert (v.decision, v.code, v.context) == ("allow", "neutral.UNJUDGED", neutral.UNJUDGED)
-    assert neutral.UNJUDGED == "NOT JUDGED: this tool kind is not guarded"
+    assert neutral.UNJUDGED == "NOT JUDGED: this tool kind is not guarded; WARN AND ALLOW"
     assert json.loads(text.split("\n", 1)[1])["code"] == "neutral.UNJUDGED"
     assert not _unhooked_log(tmp_path).exists()
 
