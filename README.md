@@ -6,6 +6,11 @@ A modding workspace with engine knowledge, coding-agent instructions, safety hoo
 
 Optional modding tools are installed separately. The toolkit configures paths and hooks through `setup.sh`; check the canary after real agent calls to confirm that the hooks ran.
 
+[House Carl integration](docs/housecarl.md) adds reusable record queries, SkyPatcher/config diagnostics
+and ordinary plugin authoring through a shared CLI/MCP gateway. Wrye Bash order and mod deployment
+are configured separately. Existing-plugin edits use verified backups, isolated staging and independent
+xEdit validation. The upstream server is an optional, separately installed dependency.
+
 | Agent | Integration |
 |---|---|
 | Claude Code | Generated instructions, skills and hooks |

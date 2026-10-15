@@ -537,6 +537,23 @@ def _integrity(root):
 
 # ---- the report --------------------------------------------------------------------------------------------------
 
+def _housecarl(root):
+    if not (Path(root) / ".skyguard/housecarl/config.json").exists():
+        return []  # Optional absence does not make core setup incomplete.
+    try:
+        from housecarl_integration.gateway import load_config
+        from housecarl_integration.order import capture
+        from housecarl_integration.runtime import verify_installation
+        config = load_config(root)
+        count = verify_installation(config)
+        snapshot = capture(config)
+        return [Row("Optional integrations", "House Carl", UNKNOWN,
+                    "%d backend files verified; %d plugins via %s; host discovery and real tool use are separate checks" %
+                    (count, len(snapshot.names), config["authority"]), counted=False)]
+    except Exception as exc:  # noqa: BLE001 -- optional failure must not hide core diagnostic rows
+        return [Row("Optional integrations", "House Carl", NOT_LIVE, _txt(exc), counted=False)]
+
+
 def collect(root, now=None, toolchain=None, codex_config=None, home=None):
     """-> (rows, the expired lifts this call cleared). `toolchain`: None runs tools/toolchain-check.sh, False skips
     it (reported as unknown), a callable(root) -> (rc, output) replaces it."""
@@ -564,6 +581,7 @@ def collect(root, now=None, toolchain=None, codex_config=None, home=None):
     rows += _guarded("Layer 3 adapted", _layer3_adapted, root, now)
     rows += _guarded("Guards", _guards, st, os.path.lexists(str(sf)), now)
     rows += _guarded("Integrity", _integrity, root)
+    rows += _housecarl(root)
     return rows, cleared
 
 

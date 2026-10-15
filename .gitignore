@@ -19,6 +19,7 @@ tools/.nexus_api_key
 
 # Python virtualenv + test caches (dev only)
 .venv/
+.skyguard/
 __pycache__/
 .pytest_cache/
 

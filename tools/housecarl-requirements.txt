@@ -1,0 +1,3 @@
+# Optional integration, installed only into .skyguard/housecarl/venv.
+mcp==2.3.0
+tomlkit==0.14.0
