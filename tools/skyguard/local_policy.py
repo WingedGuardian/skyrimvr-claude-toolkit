@@ -255,17 +255,59 @@ def _declared_choice(action, transcript, operation, profile):
     return next(iter(choices.values())) if len(choices) == 1 else None
 
 
-def supplement_declared(action, project, plan, profile, transcript="", deadline=None):
-    if (action.surface != "shell" or plan.unresolved or plan.mutations or plan.wildcard or plan.helper or
-            plan.recheck is not None):
+def _finite_plan(action, project, plan, profile, registered, report, deadline):
+    from modding_harness.dispatch import Mutation
+    requirement, = report["requirements"]
+    operation = {"copy": "write", "restore": "write", "rename": "move"}.get(requirement["op"], requirement["op"])
+    selected = requirement.get("set") if requirement["kind"] == "needs_set" else requirement.get("affected")
+    if operation not in ("write", "move", "delete") or not isinstance(selected, list):
+        return plan
+    def identity(path):
+        return tuple(profiles.canonical(member) for member in profile.members(path))
+    def current(original):
+        rows = list(original)
+        covered = {(identity(row.path), row.operation) for row in original}
+        roles = {}
+        for path, role in requirement.get("roles", ()):
+            roles.setdefault(identity(path), set()).add(role)
+        for path in selected:
+            members = profile.members(path)
+            if not any(member.is_file() for member in members):
+                continue
+            key = identity(path)
+            for role in sorted(roles.get(key, {operation})):
+                if (key, role) not in covered:
+                    rows.append(Mutation(str(members[0]), role))
+                    covered.add((key, role))
+        return tuple(rows)
+    mutations = current(plan.mutations)
+    wildcard = plan.wildcard or requirement["kind"] == "needs_set"
+    if mutations == plan.mutations and wildcard == plan.wildcard:
+        return plan
+    def recheck():
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("finite preservation budget expired")
+        if registration(project) != registered or inspect_policy(action, project, deadline) != report:
+            raise ValueError("finite legacy requirements changed during preservation")
+        original = plan.recheck() if plan.recheck is not None else plan.mutations
+        return current(original)
+    return replace(plan, mutations=mutations, wildcard=wildcard, helper=True, recheck=recheck)
+
+
+def supplement_shell_scope(action, project, plan, profile, transcript="", deadline=None):
+    if action.surface != "shell" or plan.unresolved:
         return plan
     registered = registration(project)
     if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:
         return plan
     report = inspect_policy(action, project, deadline)
     requirements = report["requirements"]
-    if (report["refusal"] is not None or len(requirements) != 1 or
-            requirements[0]["kind"] != "needs_set" or requirements[0].get("set") is not None):
+    if report["refusal"] is not None or len(requirements) != 1:
+        return plan
+    requirement, = requirements
+    if requirement["kind"] != "needs_set" or isinstance(requirement.get("set"), list):
+        return _finite_plan(action, project, plan, profile, registered, report, deadline)
+    if plan.mutations or plan.wildcard or plan.helper or plan.recheck is not None:
         return plan
     operation = {"copy": "write", "restore": "write", "rename": "move"}.get(requirements[0]["op"], requirements[0]["op"])
     if operation not in ("write", "move", "delete"):
@@ -393,7 +435,11 @@ def evaluate(action, project, facts=None, *, requirements=None):
                 result = dict(result, op=file_operation)
             # Inspection collects requirements, never an execution verdict.
             if requirements is not None:
-                requirements.append({key: result[key] for key in ("kind", "op", "affected", "set", "count") if key in result})
+                requirement = {key: result[key] for key in ("kind", "op", "affected", "set", "count") if key in result}
+                if (file_operation is None and result.get("op") in ("move", "rename") and
+                        hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256):
+                    requirement["roles"] = [list(role) for role in _transfer_roles(namespace, payload)]
+                requirements.append(requirement)
                 continue
             roles = ()
             if (file_operation is None and result.get("op") in ("move", "rename") and
@@ -478,10 +524,14 @@ def inspect_policy(action, project, deadline=None):
             not isinstance(report["requirements"], list)):
         raise ValueError("local policy worker returned malformed inspection")
     for row in report["requirements"]:
-        if (not isinstance(row, dict) or set(row) - {"kind", "op", "affected", "set", "count"} or
+        if (not isinstance(row, dict) or set(row) - {"kind", "op", "affected", "set", "count", "roles"} or
                 row.get("kind") not in ("backup", "needs_files", "needs_set") or
                 not isinstance(row.get("op"), str)):
             raise ValueError("local policy worker returned malformed preservation requirements")
+        if "roles" in row and (not isinstance(row["roles"], list) or any(
+                not isinstance(role, list) or len(role) != 2 or not isinstance(role[0], str) or
+                not Path(role[0]).is_absolute() or role[1] not in ("move", "write") for role in row["roles"])):
+            raise ValueError("local policy worker returned malformed transfer roles")
         paths = row.get("set") if row["kind"] == "needs_set" else row.get("affected")
         if "count" in row and (type(row["count"]) is not int or row["count"] < 0):
             raise ValueError("local policy worker returned malformed logical count")

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Finite requirements from the reviewed personal policy supplement shell save
+  scope, including backup-suffixed writes and the legacy restore helper. Move
+  sources and written destinations retain separate roles. Requirements are
+  rechecked after copying; independent game-policy refusals remain effective.
 - Qualified human declarations can supply an otherwise unresolved legacy helper
   scope. They bind complete pair paths, operation, count, current session and full
   command hash, including for one save. Ambiguous/incomplete grants refuse;

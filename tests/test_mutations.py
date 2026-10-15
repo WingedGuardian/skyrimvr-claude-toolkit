@@ -8799,7 +8799,8 @@ MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test
     ('((sources, "move"), (destinations, "write"))', '((sources, "move"), (destinations, "move"))',
      'tests/test_local_policy.py::test_qualified_transfer_roles_preserve_move_source_and_written_destination',
      'move-destination-is-write'),
-    ('                    hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256):', '                    True):',
+    ('            if (file_operation is None and result.get("op") in ("move", "rename") and\n                    hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256):',
+     '            if (file_operation is None and result.get("op") in ("move", "rename") and\n                    True):',
      'tests/test_local_policy.py::test_unqualified_policy_cannot_relabel_its_own_transfer_requirements',
      'transfer-source-qualification'),
     ('    if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:\n        return plan\n    from modding_harness.dispatch import Mutation',
@@ -8847,6 +8848,26 @@ MUTATIONS.append(pytest.param("tools/skyguard/save_profile.py", '        suffix 
     '        suffix = None',
     'tests/test_save_profile.py::test_backup_suffix_stays_attached_to_both_logical_members[.bak]',
     id='legacy-backup-suffix-membership'))
+
+MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test,
+    id="local-policy-finite-" + name) for before, after, test, name in (
+    ('    return replace(plan, mutations=mutations, wildcard=wildcard, helper=True, recheck=recheck)',
+     '    return plan',
+     'tests/test_finite_policy.py::test_finite_legacy_scope_preserves_all_required_members_once[restore]',
+     'requirements-retained'),
+    ('                    requirement["roles"] = [list(role) for role in _transfer_roles(namespace, payload)]',
+     '                    requirement["roles"] = []',
+     'tests/test_finite_policy.py::test_finite_legacy_scope_preserves_all_required_members_once[suffix-move]',
+     'qualified-transfer-roles'),
+    ('        if registration(project) != registered or inspect_policy(action, project, deadline) != report:',
+     '        if False:',
+     'tests/test_finite_policy.py::test_finite_requirement_change_after_backup_refuses_and_retains_original_bytes',
+     'requirement-recheck'),
+    ('    if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:\n        return plan\n    report = inspect_policy(action, project, deadline)\n    requirements = report["requirements"]\n    if report["refusal"] is not None or len(requirements) != 1:',
+     '    if registered is None:\n        return plan\n    report = inspect_policy(action, project, deadline)\n    requirements = report["requirements"]\n    if report["refusal"] is not None or len(requirements) != 1:',
+     'tests/test_finite_policy.py::test_unqualified_policy_cannot_add_finite_shell_scope',
+     'source-qualification'),
+)]
 
 MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test,
     id="local-policy-declared-" + name) for before, after, test, name in (

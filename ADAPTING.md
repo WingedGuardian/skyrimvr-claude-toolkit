@@ -31,8 +31,12 @@ policy/controller hashes, its prepare/load requests add complete preservation
 scope; request bytes, controller identity, policy and membership are rechecked
 after copying. These are fixture-qualified preflight checks, not a live controller
 or runtime-saving qualification. Legacy backup and approval decisions must be
-covered by the already computed portable save plan, including logical pair
-identities, operations, bulk thresholds and wildcard membership rechecks.
+covered by the portable save plan, including logical pair identities, operations,
+bulk thresholds and wildcard membership rechecks. The exact reviewed source can
+add finite shell requirements omitted by the game parser, including the legacy
+restore helper and suffixed backup writes. Qualified transfer roles distinguish a
+move source from a written destination. Requirements and membership are rechecked
+after preservation. These additions cannot relax an independent game-policy denial.
 For that reviewed policy, an unresolved helper may use one unambiguous canonical
 human declaration binding the current session, full command SHA-256, operation,
 logical-save count and every absolute pair-member path. Include an absent co-save
