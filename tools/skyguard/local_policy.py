@@ -139,7 +139,7 @@ def _coverage(decision, facts):
     return None
 
 
-def evaluate(action, project, facts=None):
+def evaluate(action, project, facts=None, *, requirements=None):
     registered = registration(project)
     if registered is None:
         return contracts.Result(evaluation="evaluated")
@@ -175,6 +175,10 @@ def evaluate(action, project, facts=None):
         if result["kind"] != "allow":
             if file_operation is not None:
                 result = dict(result, op=file_operation)
+            # Inspection collects requirements, never an execution verdict.
+            if requirements is not None:
+                requirements.append({key: result[key] for key in ("kind", "op", "affected", "set", "count") if key in result})
+                continue
             refused = _coverage(result, facts)
             if refused is not None:
                 return refused
@@ -218,6 +222,53 @@ def restriction(project, deadline=None, plan_provider=None):
     return check
 
 
+def inspect_policy(action, project, deadline=None):
+    """Inspect the pure policy once; this report cannot authorize execution.
+
+    No approval reader, backup implementation or dispatcher runs here. Only
+    preservation requirements cross the worker boundary; command metadata is
+    excluded. A future planner must qualify every requirement before using it.
+    """
+    registered = registration(project)
+    if registered is None:
+        return {"v": 1, "mode": "inspection-only", "evaluation": "absent", "refusal": None,
+                "requirements": [], "source_sha256": None}
+    remaining = min(10, deadline - time.monotonic()) if deadline is not None else 10
+    if remaining <= 0:
+        raise TimeoutError("local policy budget expired")
+    data = json.dumps({"v": 1, "action": asdict(action), "save_plan": None, "inspection": True},
+                      ensure_ascii=True).encode("ascii")
+    if len(data) > 2 * 1024 * 1024:
+        raise ValueError("local policy input exceeds its byte budget")
+    completed = subprocess.run([sys.executable, "-I", "-B", str(Path(__file__).resolve()), str(project)],
+                               input=data, capture_output=True, timeout=remaining)
+    if completed.returncode or len(completed.stdout) > 65536:
+        raise ValueError("local policy worker did not return a bounded inspection")
+    report = transport.load(completed.stdout)
+    if (set(report) != {"v", "mode", "evaluation", "refusal", "requirements"} or
+            type(report["v"]) is not int or report["v"] != 1 or report["mode"] != "inspection-only" or
+            report["evaluation"] != "evaluated" or
+            report["refusal"] is not None and not isinstance(report["refusal"], str) or
+            not isinstance(report["requirements"], list)):
+        raise ValueError("local policy worker returned malformed inspection")
+    for row in report["requirements"]:
+        if (not isinstance(row, dict) or set(row) - {"kind", "op", "affected", "set", "count"} or
+                row.get("kind") not in ("backup", "needs_files", "needs_set") or
+                not isinstance(row.get("op"), str)):
+            raise ValueError("local policy worker returned malformed preservation requirements")
+        paths = row.get("set") if row["kind"] == "needs_set" else row.get("affected")
+        if "count" in row and (type(row["count"]) is not int or row["count"] < 0):
+            raise ValueError("local policy worker returned malformed logical count")
+        if paths is None and row["kind"] == "needs_set":
+            continue  # An explicitly unresolved helper remains unresolved.
+        if not isinstance(paths, list) or not all(isinstance(path, str) and Path(path).is_absolute() for path in paths):
+            raise ValueError("local policy worker returned nonliteral preservation requirements")
+    if registration(project) != registered:
+        raise ValueError("local policy registration changed during inspection")
+    report["source_sha256"] = hashlib.sha256(registered[1]).hexdigest()
+    return report
+
+
 if __name__ == "__main__":
     try:
         import contextlib
@@ -232,13 +283,24 @@ if __name__ == "__main__":
         if len(data) > 2 * 1024 * 1024:
             raise ValueError("worker input too large")
         envelope = transport.load(data)
-        if set(envelope) != {"v", "action", "save_plan"} or type(envelope["v"]) is not int or envelope["v"] != 1:
+        fields = {"v", "action", "save_plan"}
+        inspection = "inspection" in envelope
+        if (set(envelope) != fields | ({"inspection"} if inspection else set()) or
+                inspection and envelope["inspection"] is not True or
+                type(envelope["v"]) is not int or envelope["v"] != 1):
             raise ValueError("unsupported internal policy envelope")
         action = contracts.Action(**envelope["action"])
+        requirements = [] if inspection else None
         with contextlib.redirect_stdout(NoPolicyOutput()), contextlib.redirect_stderr(NoPolicyOutput()):
-            result = evaluate(action, Path(sys.argv[1]), envelope["save_plan"])
+            result = evaluate(action, Path(sys.argv[1]), envelope["save_plan"], requirements=requirements)
         if len(result.reason.encode("utf-8")) > 8192:
             raise ValueError("local policy reason exceeds its byte budget")
-        sys.stdout.buffer.write((json.dumps(result.as_dict(), ensure_ascii=True) + "\n").encode("ascii"))
+        reply = ({"v": 1, "mode": "inspection-only", "evaluation": result.evaluation,
+                  "refusal": result.reason if result.decision != "allow" else None,
+                  "requirements": requirements} if inspection else result.as_dict())
+        encoded = (json.dumps(reply, ensure_ascii=True) + "\n").encode("ascii")
+        if len(encoded) > 65536:
+            raise ValueError("local policy output exceeds its byte budget")
+        sys.stdout.buffer.write(encoded)
     except Exception:
         raise SystemExit(2)

@@ -24,6 +24,89 @@ def register(root, source):
     return script
 
 
+@pytest.mark.parametrize("kind", ["backup", "needs_files", "needs_set"])
+def test_inspection_reports_requirements_without_authorizing_or_preserving(tmp_path, kind):
+    from modding_harness import dispatch, profiles
+    save = tmp_path / "fixture.ess"
+    save.write_bytes(b"unchanged")
+    decision = {"kind": kind, "op": "write", "affected": [str(save)], "set": None,
+                "count": 3 if kind == "needs_files" else 1, "command": "PRIVATE_COMMAND_METADATA"}
+    source = "def decide(payload): return " + repr(decision) + "\n"
+    source += "if __name__ == '__main__': raise RuntimeError('legacy main must never run')\n"
+    script = register(tmp_path, source)
+    action = contracts.Action("future", "shell", "shell", command="fixture", shell="bash")
+    report = local_policy.inspect_policy(action, tmp_path)
+    assert report["mode"] == "inspection-only" and report["evaluation"] == "evaluated"
+    assert report["refusal"] is None and len(report["requirements"]) == 1
+    assert report["requirements"][0]["kind"] == kind
+    assert report["source_sha256"] == hashlib.sha256(script.read_bytes()).hexdigest()
+    assert "PRIVATE_COMMAND_METADATA" not in json.dumps(report)
+    # It is deliberately not a Result: accidentally returning an inspection from
+    # a restriction cannot satisfy the dispatcher's versioned verdict contract.
+    outcome = dispatch.Dispatcher(tmp_path, profiles.skyrim(),
+        lambda _action: dispatch.Evaluation(contracts.Result(evaluation="evaluated")),
+        (lambda _action: report,)).pre(action)
+    assert outcome.result.decision == "deny" and not outcome.transactions
+    result = local_policy.restriction(tmp_path)(action)
+    assert result.decision == "deny"  # The normal path still requires real plan coverage.
+    assert save.read_bytes() == b"unchanged"
+    assert not (tmp_path / ".modding-agent-harness/backups").exists()
+
+
+@pytest.mark.parametrize("decision", [{"kind": "deny", "reason": "retained personal restriction"},
+                                       {"kind": "allow"}])
+def test_inspection_keeps_allow_and_deny_distinct_without_creating_a_permission(tmp_path, decision):
+    register(tmp_path, "def decide(payload): return " + repr(decision) + "\n")
+    report = local_policy.inspect_policy(contracts.Action("future", "shell", "shell", command="fixture"), tmp_path)
+    assert report["requirements"] == []
+    assert report["refusal"] == (decision.get("reason") if decision["kind"] == "deny" else None)
+    assert "decision" not in report and "result" not in report
+
+
+@pytest.mark.parametrize("fault", ["output", "changed_source", "relative_requirement", "count_boolean", "large_output", "expired"])
+def test_inspection_refuses_incomplete_or_changed_worker_evidence(tmp_path, fault):
+    decision = {"kind": "needs_set", "op": "write", "set": [str(tmp_path / "fixture.ess")], "count": 1}
+    if fault == "relative_requirement":
+        decision["set"] = ["relative.ess"]
+    elif fault == "count_boolean":
+        decision.update(set=None, count=True)
+    source = "def decide(payload): return " + repr(decision) + "\n"
+    if fault == "output":
+        source = "def decide(payload):\n print('forbidden policy output')\n return {'kind':'allow'}\n"
+    elif fault == "large_output":
+        source = "def decide(payload): return {'kind':'needs_set','op':'write','set':['/" + "x" * 70000 + ".ess']}\n"
+    script = register(tmp_path, source)
+    if fault == "changed_source":
+        script.write_text(source + "# later edit\n")
+    with pytest.raises((ValueError, TimeoutError)):
+        local_policy.inspect_policy(contracts.Action("future", "shell", "shell", command="fixture"), tmp_path,
+                                    deadline=time.monotonic() - 1 if fault == "expired" else None)
+
+
+@pytest.mark.parametrize("mode", [False, 1, "true", None])
+def test_only_explicit_internal_inspection_mode_is_accepted_by_worker(tmp_path, mode):
+    import subprocess
+    register(tmp_path, "def decide(payload): return {'kind':'allow'}\n")
+    payload = {"v": 1, "action": {"host": "future", "tool": "shell", "surface": "shell"},
+               "save_plan": None, "inspection": mode}
+    result = subprocess.run([sys.executable, "-I", "-B", str(REPO / "tools/skyguard/local_policy.py"), str(tmp_path)],
+                            input=json.dumps(payload).encode(), capture_output=True, timeout=20)
+    assert result.returncode != 0 and not result.stdout
+
+
+def test_inspection_detects_policy_change_after_worker_returns(tmp_path, monkeypatch):
+    script = register(tmp_path, "def decide(payload): return {'kind':'allow'}\n")
+    run = local_policy.subprocess.run
+    def changed_after_worker(*args, **kwargs):
+        completed = run(*args, **kwargs)
+        assert completed.returncode == 0
+        script.write_text("def decide(payload): return {'kind':'deny'}\n")
+        return completed
+    monkeypatch.setattr(local_policy.subprocess, "run", changed_after_worker)
+    with pytest.raises(ValueError):
+        local_policy.inspect_policy(contracts.Action("future", "shell", "shell", command="fixture"), tmp_path)
+
+
 def test_registered_policy_denies_before_any_permanent_save_backup(tmp_path):
     root = tmp_path / "toolkit"
     root.mkdir()
