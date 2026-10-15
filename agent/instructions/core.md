@@ -46,6 +46,7 @@ any agent can read one directly. Read the skill BEFORE the work:
 
 | When you are about to… | Read |
 |---|---|
+| query records, check SkyPatcher/configs, or edit plugins through House Carl | skill `toolkit-housecarl` (optional gateway) |
 | use the running game (inspect, console, Papyrus calls, scenarios) | skill `devbench` |
 | ask which plugin wins a record, triage Papyrus, crash or SKSE logs or a mod archive, or bulk-edit ESPs | skill `triage-and-conflicts` |
 | write or run an xelib / XEditLib script | skill `xelib` |
@@ -158,7 +159,7 @@ This prevents accidental ESP corruption. The guards block direct ESP writes, but
 
 ## Spriggit ESP Workflow (Preferred for Editing)
 
-For **creating or editing ESP records**, prefer Spriggit over xelib. Spriggit serializes ESP files to human-readable YAML that you can edit directly as text — no FFI, no scripting layer, and the YAML diffs cleanly in git.
+Outside the installed House Carl gateway, prefer Spriggit for ESP edits. It serializes plugins to human-readable YAML — no FFI, no scripting layer, and the YAML diffs cleanly in git.
 
 **Serialize → edit the YAML → the user reviews it → deserialize**, always through `bash tools/spriggit-cli.sh` (raw
 `spriggit` fails on nested paths). Spriggit **silently drops unknown YAML fields**: serialize with `-u`, round-trip

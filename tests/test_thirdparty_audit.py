@@ -684,6 +684,14 @@ def test_only_history_files_are_skipped(tmp_path):
     assert [f[0] for f in findings(tmp_path / "b", {"docs/x.md": line})[0]] == ["docs/x.md"]
 
 
+def test_private_backups_and_optional_backend_state_are_not_delivery_surfaces(tmp_path):
+    line = "Run `pip install lz4`.\n"
+    files = {".claude/backups/old/README.md": line, ".skyguard/housecarl/upstream/README.md": line,
+             "KNOWLEDGEBASE.local.md": line, "tools/actual.md": line}
+    assert [f[0] for f in findings(tmp_path, files)[0]] == ["tools/actual.md"]
+    assert (tmp_path / "repo/.claude/backups/old/README.md").read_text() == line
+
+
 def test_an_exempt_line_is_reported_with_its_reason_and_an_unused_exemption_is_stale(tmp_path):
     files = {"README.md": "`npm install -g @anthropic-ai/claude-code`\n"}
     ex = [("README.md", "npm", r"@anthropic-ai/claude-code", "the agent updates itself"),

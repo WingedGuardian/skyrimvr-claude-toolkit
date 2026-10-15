@@ -2,6 +2,10 @@
 
 None of the modding tools are bundled — install only the ones you need. Per tool: what it is, how to acquire it, and a quick verify.
 
+**House Carl 2.0.5** is an optional record/query backend with a shared Claude/Codex gateway, Wrye-managed
+or MO2-profile inputs, and verified staged plugin edits. Setup, pinned archive hash, prerequisites and
+capability limits: [House Carl integration](housecarl.md). Start with `python tools/housecarl.py --help`.
+
 **Every install here is ONE exact version — the one this toolkit was tested with — and every one can be verified** (user ruling, v4: not older, not newer). Packages install from a lock or an exact pin; downloads are checked against the SHA-256 in [Pinned downloads](#pinned-downloads) before you unpack them. If a hash does not match, stop: you have a different file than the one that was tested.
 
 Install them into the `tools/` folder in your game directory; the setup prompt walks through this. See the [xeditlib](https://github.com/WingedGuardian/xeditlib) repo for XEditLib setup. NifSkope and Blender (used for NIF render-verification and mesh repair) are large external GUI apps installed separately, not bundled.
@@ -68,6 +72,7 @@ ignoring case). A different hash means a different file than the one tested — 
 
 | Tool | Version | File | SHA-256 | From |
 |---|---|---|---|---|
+| House Carl | 2.0.5 | `houseCARL-2.0.5.zip` | `c3d3ca7e124d92c65f7a1b935b4a598e8d69f2f1fe900224bab5d1b352f0df19` | <https://github.com/Avick3110/houseCARL/releases/download/v2.0.5/houseCARL-2.0.5.zip> |
 | Champollion | v1.3.2 | `Champollion.v1.3.2.zip` | `ea53054276ac8006ccd3b323286bfbc6e34a454fa419d08da9bd440cbd31b383` | <https://github.com/Orvid/Champollion/releases/download/v1.3.2/Champollion.v1.3.2.zip> |
 | Caprica | v0.3.0 | `Caprica.v0.3.0.7z` | `0037e54cf3a1021e976278d9a637e8ae541aaf9ebeb8d274b6c2cfe32f4ee559` | <https://github.com/Orvid/Caprica/releases/download/v0.3.0/Caprica.v0.3.0.7z> |
 | PyNifly | 27.2.0 | `io_scene_nifly.zip` | `920a17c8c4001c4f2a12eff85aad8e54fd19ebcf7e828624733f1fb2bba972da` | <https://github.com/BadDogSkyrim/PyNifly/releases/download/V27.2.0/io_scene_nifly.zip> |

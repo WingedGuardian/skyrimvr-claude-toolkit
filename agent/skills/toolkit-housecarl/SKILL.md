@@ -1,0 +1,47 @@
+---
+name: toolkit-housecarl
+description: Query Skyrim plugin records, compare winners and fields, inspect SkyPatcher/config references, or author patches and ordinary plugin edits through the installed House Carl gateway. Use for supported SE/AE/VR data-layer work; use DevBench for observed runtime behavior and existing toolkit tools for saves, mesh authoring and compilation.
+---
+
+# House Carl through the toolkit
+
+Run `python tools/housecarl.py doctor` first when context is unclear. It names the configured authority,
+exact source and capabilities. Wrye-managed order comes from its persisted `plugins.txt`, with the game's
+implicit-master and master-block rules. Deployment ownership is a separate fact. Never repair or replace
+the user's order to make the backend agree.
+
+Use the registered `housecarl` gateway, or the same operation through:
+
+```text
+python tools/housecarl.py call housecarl_records --arguments-file <request.json>
+```
+
+Put the tool's arguments, not a JSON-RPC envelope, in the request file. CLI output carries `context`
+and `result`; the latter contains the upstream MCP content. A refusal exits 2. Consult tool schemas before
+constructing calls. `project.form=tree` compares overrides; `chain` is for graph walks.
+
+For a record schema or Papyrus/distributor grammar, locate the installed package from `doctor` or
+the gateway configuration at `.skyguard/housecarl/config.json`: the server's parent directory is
+beside `skills/`. Read the relevant upstream SKILL.md and search only the required references.
+The seven specialist directories are `mutagen-reference`, `papyrus-reference`, `skypatcher-authoring`,
+`spid-authoring`, `kid-authoring`, `open-animation-replacer` and `skse-plugin-authoring`.
+Do not copy those separately licensed corpora into toolkit source or a release.
+
+Use plugin-qualified `XXXXXX:Plugin.esp` identities. Runtime addresses are unqualified here.
+Keep the distinction between file state, modeled SkyPatcher effects and observed in-game state.
+An unresolved reference in a commented example is not an active broken setting. Facegen provenance
+and native script/DLL pairing are unavailable until their provider/runtime information is qualified.
+
+For authorized ordinary edits, use `apply`, `create`, `remove`, `forward`, `copy` or `create_plugin`.
+Specify a new `patch` by default. Existing-plugin `in_place` names the exact target. The gateway backs
+up, stages and independently validates edits before publication; upstream acknowledgement does not
+replace that protection. Do not invoke the raw server to bypass a refusal. Existing-file edits change
+the active file only, so manager redeployment may replace them. New patches are staged and require
+manual activation. Never edit activation files on the user's behalf.
+
+Inspect the returned receipt and changed records. Keep its backup permanently. Restore with
+`python tools/housecarl.py restore <transaction-id>`; a changed destination refuses rather than
+overwriting later work. Compaction, merges and other identity-renumbering operations are outside
+this integration. Existing tools retain compilation, archive writes and NIF authoring.
+
+Installation, supported providers and qualification limits: `docs/housecarl.md`.

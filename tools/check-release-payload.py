@@ -92,6 +92,17 @@ CORE_REQUIRED = (
     "tools/resaver-cli/ResaverCLI.java",
     "tools/resaver_cli_cache.py",
     "tools/modding-harness.lock.json",
+    "tools/housecarl.py",
+    "tools/housecarl-verify.js",
+    "tools/housecarl-requirements.lock",
+    "tools/housecarl-requirements.txt",
+    "tools/housecarl_integration/__init__.py",
+    "tools/housecarl_integration/files.py",
+    "tools/housecarl_integration/gateway.py",
+    "tools/housecarl_integration/order.py",
+    "tools/housecarl_integration/runtime.py",
+    "tools/housecarl_integration/setup.py",
+    "docs/housecarl.md",
 )
 # Absent: dev-only trees, the user's own files, and runtime state. A path, or a file NAME anywhere.
 ABSENT_PATHS = (

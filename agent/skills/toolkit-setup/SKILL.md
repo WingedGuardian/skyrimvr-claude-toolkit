@@ -40,6 +40,10 @@ words, that you may install a named runtime at an exact version, you do **not** 
    `PATH` yet, say so and ask the user to open a new terminal; do not retry installs.
 5. **Then** run `bash setup.sh` (Windows: from Git Bash). Never pass it a flag that installs software.
 
+House Carl is a separate optional install, not part of core setup. For an authorized integration,
+follow `docs/housecarl.md` and skill `toolkit-housecarl`; identify the load-order authority separately
+from deployment, then use its explicit setup command. Missing .NET prerequisites remain manual steps.
+
 ## What an install command looks like
 
 <!-- install-form -->
