@@ -258,6 +258,8 @@ def fire_inprocess(install: Path, hook: str, payload) -> dict:
     for k in ENV_KEYS:
         env.pop(k, None)
     env.update(home_env(install))
+    original_audit = run.Audit
+    trace = original_audit(str(install))
     saved = dict(os.environ), sys.stdin, sys.stdout
     out = _Stream()
     try:
@@ -267,6 +269,7 @@ def fire_inprocess(install: Path, hook: str, payload) -> dict:
         # also reset that process's preservation/watchdog start, rather than
         # charging later rows for the time spent evaluating earlier rows.
         run._T0 = time.monotonic()
+        run.Audit = lambda *args, **kwargs: trace
         sys.stdin, sys.stdout = _Stream(stdin.encode("utf-8")), out
         rc = run.main(["claude", hook[:-len(".sh")], "--root", root, "--root-win", root if os.name == "nt" else "",
                        "--project", str(install)])
@@ -275,20 +278,17 @@ def fire_inprocess(install: Path, hook: str, payload) -> dict:
         os.environ.clear()
         os.environ.update(saved[0])
         sys.stdin, sys.stdout = saved[1], saved[2]
+        run.Audit = original_audit
     if rc != 0:
         raise RuntimeError(f"{hook} (in process) returned {rc}")
-    return classify(out.buffer.getvalue().decode("utf-8"))
+    return {**classify(out.buffer.getvalue().decode("utf-8")), "rules": {rid for rid, _ in trace.fired}}
 
 
 def fire_full_inprocess(install: Path, row: dict) -> dict:
-    """fire_full through fire_inprocess: run.py's decision and text, plus the engine's rule ids."""
+    """Capture decision/text/rule ids from ONE invocation, not a second tool event."""
     payload = row_payload(row, install)
     got = fire_inprocess(install, row["hook"], payload)
-    eng = engine_verdict(install, row["hook"], payload)
-    if eng["decision"] != got["decision"]:
-        raise RuntimeError(f"{row['id']}: run.py says {got['decision']} but the in-process engine says "
-                           f"{eng['decision']}; the rule ids would describe a different verdict")
-    return {**got, "rules": eng["rules"], "workspace": str(install)}
+    return {**got, "workspace": str(install)}
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -371,15 +371,20 @@ def engine_verdict(install: Path, hook: str, payload) -> dict:
     if kind == "mcp":
         req = req._replace(mcp_tool=p["tool_name"], mcp_args=json.dumps(p["mcp_input"]))
     env = paths.read_install(root_win or root, environ)
-    v = portable.legacy_pre_tool(req, str(install), lambda: paths.roots(root, root_win, env), audit,
-                                 precomputed=v, side_effects=False)
+    from unittest.mock import patch
+    # This is a rule-trace sidechannel, not another host tool observation. It
+    # must not inflate receipts or consume sparse-warning announcements.
+    with patch.object(portable.telemetry.Telemetry, "record", return_value=1):
+        v = portable.legacy_pre_tool(req, str(install), lambda: paths.roots(root, root_win, env), audit,
+                                     precomputed=v, side_effects=False)
     if v.decision in ("deny", "ask"):
         decision, text = v.decision, v.reason
     elif v.context:
         decision, text = "advise", v.context
     else:
         decision, text = "allow", ""
-    return {"decision": decision, "text": text, "rules": {rid for rid, _ in audit.trace}, "workspace": str(install)}
+    return {"decision": decision, "text": text, "rules": {rid for rid, _ in audit.trace}, "workspace": str(install),
+            "unguarded": kind == "mcp" and not mcp_rules.judged_server(req.mcp_tool)}
 
 
 def fire_full(install: Path, row: dict) -> dict:
@@ -387,7 +392,8 @@ def fire_full(install: Path, row: dict) -> dict:
     payload = row_payload(row, install)
     got = fire(install, row["hook"], payload)
     eng = engine_verdict(install, row["hook"], payload)
-    if eng["decision"] != got["decision"]:
+    sparse_unknown = eng.get("unguarded") and {eng["decision"], got["decision"]} <= {"allow", "advise"}
+    if eng["decision"] != got["decision"] and not sparse_unknown:
         raise RuntimeError(f"{row['id']}: wrapper says {got['decision']} but the in-process engine says "
                            f"{eng['decision']}; the rule ids would describe a different verdict")
     return {**got, "rules": eng["rules"], "workspace": str(install)}

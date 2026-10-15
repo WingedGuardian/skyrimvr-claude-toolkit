@@ -9,6 +9,7 @@ intended.jsonl is the spec for the new behaviour, authored by hand: decision, ru
 through the real wrapper. It is never recorded from the engine (see tests/guard_corpus/README.md).
 """
 import importlib.util
+import contextlib
 import json
 import tempfile
 from pathlib import Path
@@ -40,8 +41,8 @@ SUPERSEDED = {r["supersedes"] for r in INTENDED_ROWS if r.get("supersedes")}
 LIVE = [r for r in ROWS if r["id"] not in SUPERSEDED]
 
 
-@pytest.fixture(scope="module")
-def installs():
+@contextlib.contextmanager
+def _isolated_installs():
     rec = _rec()
     if rec.needs_missing_jq(REPO / ".claude" / "hooks"):
         pytest.skip("the shipped hooks still need jq, and it is not installed")
@@ -49,9 +50,45 @@ def installs():
         yield rec, {name: rec.make_install(Path(td), REPO / ".claude" / "hooks", name) for name in rec.LAYOUTS}
 
 
+@pytest.fixture(scope="module")
+def installs():
+    with _isolated_installs() as value:
+        yield value
+
+
+@pytest.fixture
+def intended_installs():
+    """Each exact-message epoch starts with fresh unknown-tool counters."""
+    with _isolated_installs() as value:
+        yield value
+
+
 def test_corpus_is_not_trivially_small():
     assert len(ROWS) >= 150, len(ROWS)
     assert {r["decision"] for r in ROWS} >= {"allow", "advise", "ask", "deny"}
+
+
+def test_one_inprocess_corpus_call_records_one_receipt(tmp_path):
+    import sys
+    sys.path.insert(0, str(REPO / 'tools'))
+    from modding_harness import telemetry
+    rec = _rec()
+    install = rec.make_install(tmp_path, REPO / '.claude/hooks', 'declared')
+    row = {'id': 'single-receipt', 'hook': 'protect-mcp.sh', 'payload': {
+        'tool_name': 'mcp__other__console', 'session_id': 'single-receipt', 'tool_input': {'command': 'status'}}}
+    rec.fire_full_inprocess(install, row)
+    assert telemetry.Telemetry(install).report('single-receipt')['receipts'] == 1
+
+
+def test_rule_trace_sidechannel_does_not_create_a_tool_receipt(tmp_path):
+    import sys
+    sys.path.insert(0, str(REPO / 'tools'))
+    from modding_harness import telemetry
+    rec = _rec()
+    install = rec.make_install(tmp_path, REPO / '.claude/hooks', 'declared')
+    rec.engine_verdict(install, 'protect-mcp.sh', {'tool_name': 'mcp__other__console',
+                       'session_id': 'pure-trace', 'tool_input': {'command': 'status'}})
+    assert telemetry.Telemetry(install).report('pure-trace')['evidence'] == 'unavailable'
 
 
 def test_corpus_inputs_are_exactly_what_the_recorder_generates():
@@ -130,9 +167,9 @@ def test_every_windows_only_row_is_an_intended_row():
     assert set(_rec().WINDOWS_ONLY) <= {r["id"] for r in INTENDED_ROWS}
 
 
-def test_intended_rows_reproduce(installs):
+def test_intended_rows_reproduce(intended_installs):
     """Each hand-authored row: decision + rule ids + EXACT text, through the real wrapper."""
-    rec, inst = installs
+    rec, inst = intended_installs
     # Self-check first: the comparison must be able to fail on each of its three parts. With intended.jsonl
     # empty this is the only thing that proves the check is not decoration.
     good = {"decision": "deny", "rules": ["S-DEL-INSTALL"], "text": "Blocked: exact."}
@@ -149,12 +186,12 @@ def test_intended_rows_reproduce(installs):
     assert not failures, "\n".join(failures)
 
 
-def test_intended_rows_reproduce_in_process(installs):
+def test_intended_rows_reproduce_in_process(intended_installs):
     """test_intended_rows_reproduce with run.py's main() called IN PROCESS (record.fire_inprocess): the same rows,
     decision + rule ids + exact text, through adapter, run.py, engine.py and the rules, without the bash wrapper.
     MEASURED 2026-10-12: ~4 s for 982 rows against ~420 s through the wrapper. It is the anchor for the mutation
     twins that break the engine path; the wrapper-fired test above stays for what only the wrapper does."""
-    rec, inst = installs
+    rec, inst = intended_installs
     good = {"decision": "deny", "rules": ["S-DEL-INSTALL"], "text": "Blocked: exact."}
     assert rec.intended_problems(good, dict(good, rules={"S-DEL-INSTALL"})) == []
     assert rec.intended_problems(good, {"decision": "ask", "rules": {"S-DEL-INSTALL"}, "text": good["text"]})
