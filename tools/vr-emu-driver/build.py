@@ -3,8 +3,9 @@
 
     python tools/vr-emu-driver/build.py [--work DIR]
 
-Why it is built here and not shipped: the driver's source repository grants no licence (see README.md beside
-this file), so the toolkit may not redistribute its source or a binary. This script fetches exactly one pinned
+Why it is built here and not shipped: at the pinned commit the driver's source repository carries no licence
+file and the fork it came from has none (see README.md beside this file), so the toolkit does not redistribute
+its source or a binary. This script fetches exactly one pinned
 commit for your own use, applies a one-line fix, and compiles it.
 
 Steps, each checked:
