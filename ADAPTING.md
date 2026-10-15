@@ -26,12 +26,23 @@ The bridge runs only its pure `decide` entry before permanent
 preservation. Changed bytes, a crash, output, or a missed deadline refuse the
 call. It cannot grant bulk approval or bypass game rules. Its structured DevBench
 checks retain the local refusal of generic runtime save/load; the separately
-pinned controlled loader retains its own independent gate, but its route through
-this bridge is not yet qualified. Legacy backup and approval decisions must be
+pinned controlled loader retains its own independent gate. For the exact reviewed
+policy/controller hashes, its prepare/load requests add complete preservation
+scope; request bytes, controller identity, policy and membership are rechecked
+after copying. These are fixture-qualified preflight checks, not a live controller
+or runtime-saving qualification. Legacy backup and approval decisions must be
 covered by the already computed portable save plan, including logical pair
 identities, operations, bulk thresholds and wildcard membership rechecks.
-Unresolved legacy helpers refuse before preservation; caller-supplied provenance
-cannot supply a preservation plan. Fresh installations
+For that reviewed policy, an unresolved helper may use one unambiguous canonical
+human declaration binding the current session, full command SHA-256, operation,
+logical-save count and every absolute pair-member path. Include an absent co-save
+too. Even one declared save requires this grant; it is read again after verified
+preservation. The human declaration specifies the opaque command's intended
+scope; it does not prove what its implementation will do. An incomplete pair,
+ambiguous declarations, an unknown approval reader or changed membership refuses.
+Legacy basename/short-hash grants and caller-supplied provenance cannot supply a
+preservation plan. Without qualified evidence the helper refuses before backup.
+Fresh installations
 without that personal policy do not acquire it. Registration is part of a
 reviewed upgrade, never inferred from a hook trust record.
 Keep the existing parallel handler active until the complete replacement,

@@ -21,6 +21,14 @@ Registration alone does not qualify retiring its parallel native handler.
 Keep it until controlled-load, helper and transfer routes have passed the
 replacement qualification described in ADAPTING.md.
 
+The exact reviewed policy's controlled request scopes and canonical declared
+helper scopes have fixture qualification. Other policy revisions remain
+restrictive until qualified. This does not change host trust, execute the
+controller, or establish that removing the native handler is safe. A declaration
+for an opaque helper requires full absolute pair paths, operation, logical count,
+current session and full command hash from a qualified human reader; it never
+comes from tool arguments or agent-authored provenance.
+
 `--owned-pre-groups FILE` reads a versioned object whose `files` maps
 `.claude/settings.json` and/or `.codex/hooks.json` to lists of complete verified
 previous `PreToolUse` groups. Each group must match in full, including matcher,

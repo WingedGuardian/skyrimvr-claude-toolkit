@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Qualified human declarations can supply an otherwise unresolved legacy helper
+  scope. They bind complete pair paths, operation, count, current session and full
+  command hash, including for one save. Ambiguous/incomplete grants refuse;
+  approval and policy are rechecked after preservation. Agent provenance cannot
+  provide this scope, and other policy source revisions remain restrictive.
 - The exact reviewed personal controller's prepare/load requests retain their
   complete save scope in the portable dispatcher. Request bytes, controller
   identity, registered policy and membership are rechecked after preservation.

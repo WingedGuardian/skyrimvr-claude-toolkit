@@ -1,12 +1,12 @@
 """Restrictive installed save-policy bridge, evaluated before permanent backup.
 
 Registration binds exact source bytes. Only the legacy guard's pure ``decide``
-entry is called; its backup/approval ``main`` never runs. It cannot grant a
-permission or replace the portable profile's save scope and approval checks.
+entry is called; its backup/approval ``main`` never runs. Qualified requirements
+may add preservation scope; permission and human approval remain dispatcher-owned.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 from pathlib import Path
@@ -17,7 +17,8 @@ import time
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from modding_harness import contracts, profiles, transport
+from modding_harness import approval, contracts, profiles, transport
+from modding_harness.dispatch import SavePlan
 from skyguard import save_profile
 
 CONFIG = ".modding-agent-harness/local-policies.json"
@@ -27,6 +28,13 @@ KIND = "legacy-skyrim-save-guard-v1"
 # registration for different source bytes remains a restrictive policy only.
 TRANSFER_POLICY_SHA256 = "30777ba84ec4dcf66b6be4c9b0d40ea6eb8e3075aa3561bb0493b8b9bb1351a2"
 CONTROLLED_LOAD_SHA256 = "22e0b8b1c004bc4ee79946836a6ce0abb60c4ca9b06ded20b8e659e61dc8102b"
+
+
+@dataclass(frozen=True)
+class DeclaredSavePlan(SavePlan):
+    # Only the qualified human reader supplies this field. Action provenance
+    # never enters the trusted dispatcher-plan closure.
+    declared_members: tuple[str, ...] = ()
 
 
 def registration(project):
@@ -97,9 +105,12 @@ def plan_facts(plan):
     """
     if plan is None:
         return None
-    return {"mutations": [asdict(row) for row in plan.mutations],
+    facts = {"mutations": [asdict(row) for row in plan.mutations],
             "wildcard": plan.wildcard, "helper": plan.helper,
             "recheck": callable(plan.recheck), "unresolved": plan.unresolved}
+    if isinstance(plan, DeclaredSavePlan):
+        facts["declared_members"] = list(plan.declared_members)
+    return facts
 
 
 def supplement_native_backups(action, project, plan, profile, *, helper=False, deadline=None):
@@ -216,6 +227,63 @@ def supplement_controlled(action, project, plan, profile, deadline=None):
     return replace(plan, mutations=tuple(dict.fromkeys((*plan.mutations, *current()))), helper=True, recheck=recheck)
 
 
+def _declared_choice(action, transcript, operation, profile):
+    """One unambiguous complete scope from qualified, command-bound grants."""
+    from modding_harness.dispatch import Mutation
+    grants, _why = approval.read(transcript, action.host, action.session_id)
+    choices = {}
+    for grant in grants:
+        if grant.operation != operation:
+            continue
+        try:
+            groups = {}
+            for path in grant.paths:
+                members = profile.members(path)
+                if not any(member.is_file() for member in members):
+                    raise ValueError("declared scope names no existing save")
+                key = tuple(profiles.canonical(member) for member in members)
+                groups[key] = members
+            complete = tuple(sorted({member for key in groups for member in key}))
+            if not groups or not grant.matches(action.session_id, operation, complete, action.command, True, len(groups)):
+                continue
+            mutations = tuple(Mutation(str(groups[key][0]), operation) for key in sorted(groups))
+            choices[complete] = (mutations, complete)
+        except (OSError, ValueError):
+            continue
+    # Different scopes for the same opaque command cannot be resolved by
+    # guessing which one its unparsed implementation will use.
+    return next(iter(choices.values())) if len(choices) == 1 else None
+
+
+def supplement_declared(action, project, plan, profile, transcript="", deadline=None):
+    if (action.surface != "shell" or plan.unresolved or plan.mutations or plan.wildcard or plan.helper or
+            plan.recheck is not None):
+        return plan
+    registered = registration(project)
+    if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:
+        return plan
+    report = inspect_policy(action, project, deadline)
+    requirements = report["requirements"]
+    if (report["refusal"] is not None or len(requirements) != 1 or
+            requirements[0]["kind"] != "needs_set" or requirements[0].get("set") is not None):
+        return plan
+    operation = {"copy": "write", "restore": "write", "rename": "move"}.get(requirements[0]["op"], requirements[0]["op"])
+    if operation not in ("write", "move", "delete"):
+        return plan
+    choice = _declared_choice(action, transcript, operation, profile)
+    if choice is None:
+        return plan
+    def recheck():
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("declared preservation budget expired")
+        if (registration(project) != registered or inspect_policy(action, project, deadline) != report or
+                _declared_choice(action, transcript, operation, profile) != choice):
+            raise ValueError("declared human scope or policy changed during preservation")
+        return choice[0]
+    return DeclaredSavePlan(mutations=choice[0], wildcard=True, helper=True, recheck=recheck,
+                            known_writer_active=plan.known_writer_active, declared_members=choice[1])
+
+
 def _transfer_roles(namespace, payload):
     args = payload["tool_input"]
     text = args.get("command", args.get("cmd", "")) if isinstance(args, dict) else args
@@ -228,7 +296,7 @@ def _transfer_roles(namespace, payload):
                  for path in paths if namespace["is_save"](path))
 
 
-def _coverage(decision, facts, roles=(), *, controlled=False):
+def _coverage(decision, facts, roles=(), *, controlled=False, declared=False):
     """Prove the portable plan retains a legacy non-allow requirement."""
     def refuse(why):
         return contracts.Result("deny", "evaluated", reason="Installed local policy: " + why +
@@ -244,6 +312,9 @@ def _coverage(decision, facts, roles=(), *, controlled=False):
     if operation not in ("write", "move", "delete"):
         return refuse("this legacy save operation has not been qualified in the portable dispatcher")
     targets = decision.get("set") if kind == "needs_set" else decision.get("affected")
+    explicit = kind == "needs_set" and targets is None and declared and facts.get("helper") is True
+    if explicit:
+        targets = facts.get("declared_members")
     if not isinstance(targets, list):
         return refuse("the legacy helper's save membership is unresolved")
     if kind == "needs_set" and (facts.get("wildcard") is not True or facts.get("recheck") is not True):
@@ -259,6 +330,9 @@ def _coverage(decision, facts, roles=(), *, controlled=False):
         identity, exists = key(row["path"])
         if exists:
             covered.setdefault(identity, set()).add(row["operation"])
+    if explicit and (not covered or {profiles.canonical(path) for path in targets} !=
+                     {member for identity in covered for member in identity}):
+        return refuse("declared helper scope must include every complete pair")
     mapped = {}
     for path, role in roles:
         if role not in ("move", "write"):
@@ -330,7 +404,8 @@ def evaluate(action, project, facts=None, *, requirements=None):
                 operation, selected, _bindings = _controlled_scope(action, project)
                 controlled = (result["kind"] == "backup" and result["op"] == operation and
                               sorted(map(profiles.canonical, result.get("affected", ()))) == sorted(map(profiles.canonical, selected)))
-            refused = _coverage(result, facts, roles, controlled=controlled)
+            refused = _coverage(result, facts, roles, controlled=controlled,
+                                declared=hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256)
             if refused is not None:
                 return refused
     # Save authorization and preservation remain the portable dispatcher's job.

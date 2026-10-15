@@ -62,11 +62,11 @@ if mode!='none':
  def changed(store,*args,**kwargs):
   result=original(store,*args,**kwargs)
   target=root/({'request':'request.json','controller':'.claude/scripts/guarded-runtime-load.py',
-                'policy':'.claude/hooks/protect-save-access.py'}[mode])
-  target.write_bytes(target.read_bytes()+b' ')
+                'policy':'.claude/hooks/protect-save-access.py','grant':'human.jsonl'}[mode])
+  target.write_bytes(b'{}' if mode=='grant' else target.read_bytes()+b' ')
   return result
  SaveStore.backup=changed
-outcome,count=portable.check(contracts.Action(**json.load(sys.stdin)),root,deadline=time.monotonic()+20)
+outcome,count=portable.check(contracts.Action(**json.load(sys.stdin)),root,transcript=str(root/'human.jsonl'),deadline=time.monotonic()+20)
 print(json.dumps(portable.reply(outcome,count)))
 ''')
     def run(operation="prepare", *, mode="none", action=None, shell="bash"):

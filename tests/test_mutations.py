@@ -8848,6 +8848,26 @@ MUTATIONS.append(pytest.param("tools/skyguard/save_profile.py", '        suffix 
     'tests/test_save_profile.py::test_backup_suffix_stays_attached_to_both_logical_members[.bak]',
     id='legacy-backup-suffix-membership'))
 
+MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test,
+    id="local-policy-declared-" + name) for before, after, test, name in (
+    ('            if not groups or not grant.matches(action.session_id, operation, complete, action.command, True, len(groups)):',
+     '            if not groups or not grant.matches(action.session_id, operation, complete, action.command, False, len(groups)):',
+     'tests/test_declared_scope.py::test_unbound_grant_cannot_create_a_declared_plan',
+     'command-binding'),
+    ('                _declared_choice(action, transcript, operation, profile) != choice):',
+     '                False):',
+     'tests/test_declared_scope.py::test_declared_helper_rechecks_human_evidence_after_preserving_bytes',
+     'human-recheck'),
+    ('                                declared=hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256)',
+     '                                declared=True)',
+     'tests/test_declared_scope.py::test_unqualified_policy_cannot_use_a_declared_game_plan',
+     'source-qualification'),
+    ('    return next(iter(choices.values())) if len(choices) == 1 else None',
+     '    return next(iter(choices.values())) if choices else None',
+     'tests/test_declared_scope.py::test_different_complete_declarations_for_the_same_opaque_command_are_ambiguous',
+     'ambiguous-declarations'),
+)]
+
 MUTATIONS += [pytest.param("tools/skyguard/legacy_saves.py", before, after, test,
     id="legacy-backup-suffix-reader-" + name) for before, after, test, name in (
     ('            or save_profile.member_kind(originals[0]) != "ess"',
