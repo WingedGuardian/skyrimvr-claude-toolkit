@@ -54,6 +54,7 @@ refuses application. Local policy or configuration changes invalidate review.
 Stop host/editor writers before using `--quiescent`: the flag asserts that
 condition and does not stop them. The upgrade lock coordinates upgraders only;
 replacing existing files cannot exclude arbitrary foreign writers atomically.
+Read-only installed targets refuse during preflight; their protection is retained.
 The receipt gives an operation ID and permanent rollback journal. Exit 2 is a
 refusal; exit 1 reports a partial failure with its journal and published paths.
 Inspect that evidence before recovery. `upgrade-rollback ID --installed-root

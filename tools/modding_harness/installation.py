@@ -98,6 +98,14 @@ def _current(root, name, deadline):
     return durable.digest(path, deadline) if path.exists() else None
 
 
+def _writable_target(path):
+    # Windows rejects replacing read-only files even with a writable parent.
+    # Treat the recorded read-only mode conservatively on every platform; an
+    # upgrade must never silently lift an existing file's protection.
+    if path.exists() and not path.stat().st_mode & 0o222:
+        raise ValueError("read-only installed target requires separate review: " + str(path))
+
+
 def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reserve=DEFAULT_RESERVE, deadline=None):
     """Apply an explicitly selected review; collisions never gain guessed ownership.
 
@@ -187,6 +195,7 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
             incoming = upgrade._entry(bundle, "candidate/" + name)
             digest = candidate[name]
         target = upgrade._entry(root, name)
+        _writable_target(target)
         stores = (workspace.settings(root)["destination"], root / ".claude/backups", root / ".modding-agent-harness/upgrades")
         if protects(target, stores, ancestor=True):
             raise ValueError("upgrade cannot write recovery data or its ancestor")
@@ -206,6 +215,8 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
         for name, row in rows.items():
             if _current(root, name, deadline) != row.get("installed_sha256"):
                 raise ValueError("installed bytes changed before upgrade lock: " + name)
+        for row in changes:
+            _writable_target(upgrade._entry(root, row["path"]))
         required = sum(Path(row["source"]).stat().st_size +
                        (upgrade._entry(root, row["path"]).stat().st_size if row["before"] is not None else 0) for row in changes)
         if shutil.disk_usage(root).free < required + reserve:
@@ -237,6 +248,7 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
                 os.chmod(part, row["mode"])
                 if _current(root, row["path"], deadline) != row["before"]:
                     raise OSError("installed target changed before publication")
+                _writable_target(target)
                 if row["path"] == "KNOWLEDGEBASE.md" and row["before"] is not None:
                     upgrade.preserve_notes(root, row["after"], reserve=reserve, deadline=deadline)
                 check_local(published)
@@ -318,6 +330,7 @@ def rollback(root, operation, *, quiescent=False, deadline=None):
             if (current != row["after"] or name not in intents or
                     list(durable.identity(target)[:2]) != intents[name][:2]):
                 raise ValueError("rollback would overwrite a foreign or changed file: " + name)
+            _writable_target(target)
             if row["before"] is not None:
                 prior = upgrade._entry(root, relative + "/rollback/" + name)
                 if (durable.digest(prior, deadline) != row["before"] or type(row.get("before_mode")) is not int
@@ -335,6 +348,7 @@ def rollback(root, operation, *, quiescent=False, deadline=None):
                 if (_current(root, row["path"], deadline) != row["after"] or
                         list(durable.identity(target)[:2]) != intents[row["path"]][:2]):
                     raise OSError("target changed during rollback")
+                _writable_target(target)
                 if row["before"] is None:
                     saved = receipt / "retained" / row["path"]
                     saved.parent.mkdir(parents=True, exist_ok=True)
@@ -350,6 +364,7 @@ def rollback(root, operation, *, quiescent=False, deadline=None):
                     if (_current(root, row["path"], deadline) != row["after"] or
                             list(durable.identity(target)[:2]) != intents[row["path"]][:2]):
                         raise OSError("target changed before rollback publication")
+                    _writable_target(target)
                     os.replace(part, target)
                     durable.sync_dir(target.parent)
                     restored.append(row["path"])
