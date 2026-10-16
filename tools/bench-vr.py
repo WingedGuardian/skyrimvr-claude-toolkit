@@ -30,14 +30,15 @@ is sent to the console from a locations file.
 Port: --port, else $DEVBENCH_PORT, else Data/SKSE/Plugins/devbench/runtime.json (the port DevBench bound), else the
 per-runtime default (VR 8921, SE/AE 8920). Results: <toolkit>/.claude/backups/bench-vr/ (never shipped) or --out.
 
-Exit: 0 measured (or compared) | 1 the run failed partway (what was changed has been put back) or a value could
-not be restored | 2 bad usage, DevBench not answering or no save loaded, conditions that differ in `compare`.
+Exit: 0 measured (or compared) | 1 incomplete measurement/comparison or a value could not be restored |
+2 bad usage, DevBench unavailable/no save loaded, differing comparison conditions or no joint measurements.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import statistics
@@ -177,6 +178,11 @@ def run(a) -> int:
     if a.windows < 2:
         print("ERROR: --windows must be at least 2: window 1 is always discarded", file=sys.stderr)
         return 2
+    for name, value, positive in (("window", a.window, True), ("interval", a.interval, True),
+                                  ("settle", a.settle, False)):
+        if not math.isfinite(value) or value < 0 or (positive and value == 0):
+            print("ERROR: --{} must be finite and {}".format(name, "positive" if positive else "nonnegative"), file=sys.stderr)
+            return 2
     try:
         locs = parse_locations(a.coc or (Path(a.locations).read_text(encoding="utf-8").splitlines()
                                          if a.locations else DEFAULT_LOCATIONS))
@@ -232,6 +238,7 @@ def run(a) -> int:
                 if any("not found" in ln.lower() or "invalid" in ln.lower() for ln in lines):
                     print("  SKIPPED, the console said: {}".format(lines))
                     result["results"][name] = {"error": lines}
+                    status = 1
                     continue
                 for _ in range(120):
                     hh = bench.health()
@@ -251,6 +258,9 @@ def run(a) -> int:
             pooled = stats(pooled_after_first(windows))
             result["results"][name] = {"windows": [stats(w) for w in windows], "pooled_excluding_window1": pooled,
                                        "cell": current_cell(bench)}
+            if not pooled["samples"]:
+                result["results"][name]["error"] = "no retained frame-rate samples"
+                status = 1
             print("  POOLED (windows 2+): median {} fps  p5 {}  stalls {}".format(
                 pooled.get("median"), pooled.get("p5"), pooled.get("stalls_under_5fps")))
     except (DevBenchError, KeyboardInterrupt) as e:
@@ -290,16 +300,19 @@ def compare(before_path, after_path) -> int:
               .format(", ".join(diff)), file=sys.stderr)
         return 2
     print("{} -> {}".format(a.get("label"), b.get("label")))
+    compared, missing = 0, 0
     for loc in a["conditions"]["locations"]:
         pa = (a["results"].get(loc) or {}).get("pooled_excluding_window1") or {}
         pb = (b["results"].get(loc) or {}).get("pooled_excluding_window1") or {}
         if not pa.get("samples") or not pb.get("samples"):
             print("  {:<28} not measured in both runs".format(loc))
+            missing += 1
             continue
+        compared += 1
         d = pb["median"] - pa["median"]
         print("  {:<28} median {:>7} -> {:>7}  ({:+.2f}, {:+.1f}%)   p5 {} -> {}".format(
             loc, pa["median"], pb["median"], d, 100.0 * d / pa["median"] if pa["median"] else 0.0, pa["p5"], pb["p5"]))
-    return 0
+    return 2 if not compared else (1 if missing else 0)
 
 
 def main(argv) -> int:

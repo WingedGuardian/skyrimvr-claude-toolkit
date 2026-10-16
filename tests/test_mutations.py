@@ -81,7 +81,23 @@ SPRIGGIT_RACE_MUTATIONS = [pytest.param("tools/spriggit_publish.py", before, aft
          'test_change_during_retirement_is_restored_with_its_bytes', 'retired-state'),
     )]
 
-MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + [
+EVIDENCE_STATUS_MUTATIONS = [pytest.param(path, before, after, test, id="evidence-status-" + name)
+    for path, before, after, test, name in (
+        ('scripts/check_ci_leg.py', 'and re.search(r"\\sPASSED(?:\\s+\\[\\s*\\d+%\\])?\\s*$", line)',
+         'and " PASSED" in line', 'tests/test_ci_leg.py::test_pass_text_inside_case_or_skip_reason_is_not_an_outcome', 'ci-outcome'),
+        ('tools/bench-vr.py', '        if not math.isfinite(value) or value < 0 or (positive and value == 0):',
+         '        if False:', 'tests/test_bench_vr.py::test_invalid_timing_is_refused_before_contacting_devbench', 'finite-inputs'),
+        ('tools/bench-vr.py', '            if not pooled["samples"]:', '            if False:',
+         'tests/test_bench_vr.py::test_empty_retained_windows_are_a_failed_measurement_and_restore', 'empty-window'),
+        ('tools/bench-vr.py', '    return 2 if not compared else (1 if missing else 0)', '    return 0',
+         'tests/test_bench_vr.py::test_comparison_without_any_joint_measurement_is_not_success', 'empty-comparison'),
+        ('tools/nexus-render.py', '        partial = bool(req.get("errors")) or len(usable) != len(nodes)',
+         '        partial = False', 'tests/test_nexus.py::test_requirements_graphql_errors_are_partial_even_with_a_nodes_list', 'partial-requirements'),
+        ('scripts/guard-corpus/intent_diff.py', '        if prev is not None:', '        if prev is not None and sup is None:',
+         'tests/test_intent_diff.py::test_existing_row_uses_previous_decision_even_when_it_supersedes_legacy', 'previous-intent'),
+    )]
+
+MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + [
     pytest.param("tools/" + name,
                  'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'" set "SG_FILE_PY=%SG_FILE_PY:~1,-1%"',
                  "rem outer quote decoding removed",

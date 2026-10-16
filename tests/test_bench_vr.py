@@ -128,6 +128,47 @@ def test_one_window_is_refused_because_nothing_would_be_left():
     assert r.returncode == 2 and "at least 2" in r.stderr
 
 
+@pytest.mark.parametrize("option,value", [
+    ("--window", "0"), ("--window", "-1"), ("--window", "nan"), ("--window", "inf"),
+    ("--interval", "0"), ("--interval", "-1"), ("--interval", "nan"), ("--interval", "inf"),
+    ("--settle", "-1"), ("--settle", "nan"), ("--settle", "inf"),
+])
+def test_invalid_timing_is_refused_before_contacting_devbench(monkeypatch, option, value):
+    def unexpected(*args, **kwargs):
+        pytest.fail("invalid input contacted DevBench")
+    monkeypatch.setattr(bench, "Bench", unexpected)
+    assert bench.main(["run", "--label", "invalid", option + "=" + value, "--port", "1"]) == 2
+
+
+def test_empty_retained_windows_are_a_failed_measurement_and_restore(tmp_path, monkeypatch):
+    calls = []
+    class EmptyBench:
+        def __init__(self, port):
+            pass
+        def health(self):
+            return {"frame": 1}
+        def tool(self, *args):
+            return {"cell": {"editorId": "WhiterunOrigin"}}
+        def console(self, command, **kwargs):
+            calls.append(command)
+            return ["value = 20"]
+    monkeypatch.setattr(bench, "Bench", EmptyBench)
+    monkeypatch.setattr(bench, "sample", lambda *args: [])
+    monkeypatch.setattr(bench.time, "sleep", lambda *args: None)
+    assert bench.main(["run", "--label", "empty", "--port", "1", "--out", str(tmp_path), *FAST]) == 1
+    assert calls[-3:] == ["tgm", "set gamehour to 20", "set timescale to 20"]
+    assert "error" in result_file(tmp_path)["results"]["WhiterunOrigin"]
+
+
+def test_comparison_without_any_joint_measurement_is_not_success(tmp_path):
+    a = _result(tmp_path, "a.json", "before", 70.0)
+    b = _result(tmp_path, "b.json", "after", 77.0)
+    data = json.loads(b.read_text())
+    data["results"]["A"]["pooled_excluding_window1"] = {"samples": 0}
+    b.write_text(json.dumps(data))
+    assert bench.compare(a, b) == 2
+
+
 def test_devbench_not_running_is_refused_cleanly(tmp_path):
     r = run("run", "--label", "x", "--port", "9", "--out", tmp_path / "out")
     assert r.returncode == 2 and "DevBench is not answering" in r.stderr, r.stderr

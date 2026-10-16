@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Benchmark timing must be finite and valid before any DevBench contact; empty
+  retained windows and missing comparisons cannot report success. CI reads the
+  trailing test outcome, Nexus requirements disclose GraphQL partial results,
+  and changed corpus rows show their actual previous decision.
 - Spriggit publication rechecks destination identity and bytes after staging,
   uses exclusive publication and rollback renames, and retains previous output
   after success. A concurrent writer cannot be erased by backup cleanup; a

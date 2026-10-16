@@ -38,6 +38,21 @@ def test_a_good_leg_passes(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+@pytest.mark.parametrize("line", [
+    "tests/test_a.py::test_one[ PASSED] SKIPPED (fixture) [ 10%]",
+    "tests/test_a.py::test_one SKIPPED (reason says PASSED) [ 10%]",
+])
+def test_pass_text_inside_case_or_skip_reason_is_not_an_outcome(tmp_path, line):
+    text = _log(drop=("tests/test_a.py",)) + line + "\n"
+    result = _run(tmp_path, "log", text)
+    assert result.returncode == 1 and "required module test_a.py has no PASSED" in result.stdout
+
+
+def test_forbidden_module_skip_with_pass_text_is_still_skipped(tmp_path):
+    result = _run(tmp_path, "log", _log(extra=("tests/test_load.py::test_x[ PASSED] SKIPPED (opt-in) [ 40%]",)))
+    assert result.returncode == 0, result.stdout
+
+
 @pytest.mark.parametrize("text,leg,why", [
     (_log(collected=9), "Windows", "collected < floor"),
     (_log(skipped=4), "Windows", "skipped > ceiling"),

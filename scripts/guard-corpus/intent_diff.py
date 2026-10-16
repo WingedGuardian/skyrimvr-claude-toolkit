@@ -54,10 +54,10 @@ def table(old: list[dict], new: list[dict], legacy: list[dict]) -> list[list[str
     for r in changed_rows(old, new):
         prev = before.get(r["id"])
         sup = legacy_by_id.get(r.get("supersedes") or "")
-        if sup is not None:
-            was = f"{sup['decision']} (legacy {sup['id']})"
-        elif prev is not None:
+        if prev is not None:
             was = f"{prev['decision']} (previous)"
+        elif sup is not None:
+            was = f"{sup['decision']} (legacy {sup['id']})"
         else:
             was = "-"
         out.append([r["id"], shape(r["payload"]), was, r["decision"], ",".join(r["rules"]) or "-",

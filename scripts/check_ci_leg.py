@@ -74,11 +74,13 @@ def check_log(lines, spec, leg):
     if xfailed > spec["xfail_ceiling"]:
         problems.append("{} xfailed > ceiling {}".format(xfailed, spec["xfail_ceiling"]))
     required = list(spec["required_modules"]["all"]) + list(spec["required_modules"].get(leg, []))
+    def passed(line, module):
+        return line.startswith("tests/" + module + "::") and re.search(r"\sPASSED(?:\s+\[\s*\d+%\])?\s*$", line)
     for mod in required:
-        if not any(l.startswith("tests/" + mod + "::") and " PASSED" in l for l in lines):
+        if not any(passed(l, mod) for l in lines):
             problems.append("required module {} has no PASSED test on the {} leg".format(mod, leg))
     for mod in spec["forbidden_passing"]:
-        if any(l.startswith("tests/" + mod + "::") and " PASSED" in l for l in lines):
+        if any(passed(l, mod) for l in lines):
             problems.append("{} RAN in CI; it is opt-in and local only".format(mod))
     return (1 if problems else 0), (problems or notes)
 

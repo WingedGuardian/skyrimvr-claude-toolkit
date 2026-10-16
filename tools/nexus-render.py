@@ -152,10 +152,16 @@ def cmd_page(dom, mid, since, full):
     try:
         req = load_env("REQ", required=False)
         nodes = req["data"]["mod"]["modRequirements"]["nexusRequirements"]["nodes"]
-        for r in nodes:
+        if not isinstance(nodes, list):
+            raise ValueError("requirements nodes are not a list")
+        usable = [r for r in nodes if isinstance(r, dict) and isinstance(r.get("modName"), str) and r["modName"].strip()]
+        partial = bool(req.get("errors")) or len(usable) != len(nodes)
+        for r in usable:
             notes = " ".join(clean(r.get("notes")).split())[:160]
             print("  - {}{}".format(s(r.get("modName")), "  ({})".format(notes) if notes else ""))
-        if not nodes:
+        if partial:
+            print("  (PARTIAL: could NOT fetch all requirements -- missing results are not none)")
+        elif not nodes:
             print("  (none declared -- the description may still list some)")
     except (ValueError, KeyError, TypeError):
         print("  (could NOT fetch requirements -- not the same as none)")

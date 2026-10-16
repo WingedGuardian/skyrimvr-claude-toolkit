@@ -154,6 +154,18 @@ def test_page_says_requirements_could_not_be_fetched_not_none():
     assert "could NOT fetch requirements -- not the same as none" in out
 
 
+@pytest.mark.parametrize("nodes", [[], [{"modName": "Known dependency", "notes": "retained"}]])
+def test_requirements_graphql_errors_are_partial_even_with_a_nodes_list(nodes):
+    req = {"data": {"mod": {"modRequirements": {"nexusRequirements": {"nodes": nodes}}}},
+           "errors": [{"message": "fixture unavailable"}]}
+    out = render("page", "skyrimspecialedition", "101", INFO=fx("mod.json"), FILES=fx("files.json"),
+                 REQ=json.dumps(req)).stdout
+    assert "PARTIAL: could NOT fetch all requirements" in out
+    assert "none declared" not in out
+    if nodes:
+        assert "Known dependency" in out and "retained" in out
+
+
 def test_page_with_no_mod_record_is_exit_2():
     r = render("page", "skyrimspecialedition", "9", INFO="{}", FILES=fx("files.json"))
     assert r.returncode == 2 and "no mod record" in r.stderr
