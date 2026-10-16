@@ -940,11 +940,12 @@ class _Bash(_Scanner):
                 elif nx == "c" and j < n and t[j] != "'":
                     control = t[j]
                     j += 1
-                    if control == "\\" and j < n and t[j] == "\\":
+                    doubled = control == "\\" and j < n and t[j] == "\\"
+                    if doubled:
                         j += 1
                     raw = control.encode("utf-8", "surrogateescape")
                     data = bytes((127 if raw[0] == 63 else raw[0] & 31,)) + raw[1:]
-                    if control == "\\" and j < n and t[j] == "'":
+                    if control == "\\" and not doubled and j < n and t[j] == "'":
                         data += b"'"
                         j += 1
                 else:

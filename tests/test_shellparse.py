@@ -33,6 +33,7 @@ BS = chr(92)
     r"a\c\b", r"a\c\\\b", r"a\c\\\\b", r"a\c\'b", r'a\c\"b', "a\\céb",
     r"\uD800", r"\U00110000", r"\U7fffffff", r"Fixture.\x65sp\Uffffffff",
     r"Fixture.\x65sp\U80000000",
+    r"a\c\\", r"a\c\\\\",
 ])
 def test_ansi_c_arguments_match_stdout_only_bash_oracle(quoted):
     # Hardcoded literals only. The oracle prints an argument; it writes no files.
