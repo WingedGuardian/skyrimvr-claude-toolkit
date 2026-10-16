@@ -198,11 +198,12 @@ def _start_relock(root, sf):
         except (OSError, ValueError) as exc:
             failure = "Vanilla-file relock FAILED: " + type(exc).__name__
         current = state.read(str(sf))
-        if not current.rejected and current.lifts:
+        if not current.rejected and (current.lifts or failure):
             # Expired records grant no permission; they retain exactly what a
             # later tool call must retry after a failed filesystem operation.
-            keep = [dict(x, expires_at=min(x["expires_at"], time.time()))
-                    for x in current.lifts if x["kind"] == "lock"] if failure else []
+            now = time.time()
+            keep = [{"kind": "lock", "reason": "session relock retry", "session_id": "session-relock",
+                     "agent": "system", "created": now, "expires_at": now}] if failure else []
             persistent = {"lock_disabled": dict(current.lock_disabled)} if current.lock_disabled else {}
             state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
         return st, lifted, drift, failure

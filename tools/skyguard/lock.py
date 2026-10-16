@@ -707,6 +707,21 @@ def _prior(st: FileState, path) -> dict:
 # ---- lock ------------------------------------------------------------------------------------------------------
 
 def lock_all(root, only=None) -> Result:
+    g = _guard(root)
+    if isinstance(g, Result):
+        return g
+    try:
+        sf = _skyguard_dir(root) / "state.json"
+        _assert_sandbox(sf)
+        with _state.locked(sf):
+            return _lock_all(root, only=only)
+    except Refused as exc:
+        return _res(2, str(exc))
+    except (OSError, ValueError) as exc:
+        return _res(2, "Lock operation did not complete (%s); inspect lock status." % type(exc).__name__)
+
+
+def _lock_all(root, only=None) -> Result:
     """Lock the derived target set. only: a predicate on a target's NAME -- lock just those (relock_expired); every
     other record in the manifest is kept as it is."""
     g = _guard(root)
@@ -885,6 +900,7 @@ def unlock(root, names, session, now=None) -> Result:
         _assert_sandbox(sf)
         with _state.locked(sf):                             # read-modify-write under the one state lock
             cur = _state.read(str(sf))
+            manifest, mstatus = _read_manifest(root)
             lift = {"kind": "lock", "reason": "lock unlock " + (_names_list(chosen, 3) if names else "all"),
                     "session_id": session,
                     "agent": "user" if session == USER_SESSION else (os.environ.get(ENV_AGENT, "cli") or "cli"),
@@ -894,10 +910,19 @@ def unlock(root, names, session, now=None) -> Result:
             persistent = {"lock_disabled": cur.lock_disabled} if cur.lock_disabled else {}
             lifts = _live_lifts(list(cur.lifts) + [lift], now)
             _state.write(str(sf), {"v": 1, "lifts": lifts, "persistent": persistent})
+            try:
+                return _unlock_files(root, data_dir, t, names, chosen, manifest)
+            except (OSError, ValueError) as exc:
+                return _res(1, "Unlock may be partial (%s); inspect lock status." % type(exc).__name__,
+                            "The recorded lift is retained for relock.")
     except Refused as e:
         return _res(2, str(e))
     except (ValueError, OSError) as e:
         return _res(2, "Could not record the lift (%s); nothing was unlocked." % e.__class__.__name__)
+
+
+def _unlock_files(root, data_dir, t, names, chosen, manifest):
+    """Undo file permissions while unlock() still owns the state writer lock."""
     done, failed, kept, settled = [], [], [], set()
     todo = [(data_dir / n, n) for n in chosen]
     if not names:
@@ -1076,12 +1101,15 @@ def enable(root, session=None) -> Result:
     if not supported():
         return _res(3, "Layer 2 lock: unsupported on this platform (Windows only in v4.0.0).")
     try:
-        _write_persistent(root, session, False)
+        sf = _skyguard_dir(root) / "state.json"
+        _assert_sandbox(sf)
+        with _state.locked(sf):
+            _write_persistent(root, session, False)
+            return lock_all(root)
     except Refused as e:
         return _res(2, str(e))
     except (ValueError, OSError) as e:
         return _res(2, "Could not clear the disable (%s)." % e.__class__.__name__)
-    return lock_all(root)
 
 
 # ---- CLI -------------------------------------------------------------------------------------------------------

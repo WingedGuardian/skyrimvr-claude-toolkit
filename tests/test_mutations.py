@@ -122,8 +122,8 @@ RELOCK_RETRY_MUTATIONS = [pytest.param(path, before, after, "tests/test_relock_r
      'not state.lift_expired(x, now)', "test_unrelated_guard_write_keeps_expired_lock_obligation", "guard-writer"),
     ("tools/skyguard/doctor.py", 'x["kind"] != "lock" and _expired(x, now)', '_expired(x, now)',
      "test_doctor_does_not_report_failed_relock_as_cleared", "doctor-writer"),
-    ("tools/skyguard/session.py", 'for x in current.lifts if x["kind"] == "lock"] if failure else []',
-     'for x in current.lifts if x["kind"] == "lock"] if False else []',
+    ("tools/skyguard/session.py", '"agent": "system", "created": now, "expires_at": now}] if failure else []',
+     '"agent": "system", "created": now, "expires_at": now}] if False else []',
      "test_failed_session_relock_keeps_an_expired_retry_without_success_claim", "session-writer"),
 )]
 RELOCK_RETRY_MUTATIONS += [pytest.param("tools/skyguard/health.py",
@@ -4553,7 +4553,7 @@ _SST = "tests/test_skyguard_session_start.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SS, '        if source == "compact":\n            return [disabled] if disabled else []', '        if False:\n            return []',
      _SST + "test_compact_does_not_clear_or_report_lifts", "l2-sess-compact-shortcut"),
-    (_SS, "        if not current.rejected and current.lifts:", "        if False:",
+    (_SS, "        if not current.rejected and (current.lifts or failure):", "        if False:",
      _SST + "test_a_guards_lift_is_reported_and_cleared_at_start", "l2-sess-clear"),
     (_SS, '        try:\n            failure = _relock(root) if engaged else ""', '        try:\n            failure = ""',
      _SST + "test_relock_happens_before_the_report_and_names_the_lifted_files", "l2-sess-relock"),

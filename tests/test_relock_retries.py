@@ -83,3 +83,37 @@ def test_session_filesystem_exception_still_expires_and_keeps_retry(pending, mon
     assert "FAILED" in "\n".join(session.layer2_start(root))
     kept = state.read(sf).lifts
     assert len(kept) == 1 and state.lift_expired(kept[0], time.time())
+
+
+def test_failed_session_drift_relock_records_retry_without_an_earlier_lift(pending, monkeypatch):
+    root, sf, lift, now = pending
+    state.write(sf, {"v": 1, "lifts": [], "persistent": {}})
+    monkeypatch.setattr(session, "_engaged", lambda root: True)
+    monkeypatch.setattr(session, "_scan", lambda *a: ([], ["Skyrim.esm"]))
+    monkeypatch.setattr(session, "_relock", lambda root: "Vanilla-file relock FAILED: fixture")
+    monkeypatch.setattr(session, "_guard_drift", lambda root: None)
+    assert "relock pending" in "\n".join(session.layer2_start(root))
+    kept = state.read(sf).lifts
+    assert len(kept) == 1 and state.lift_expired(kept[0], time.time())
+    monkeypatch.setattr(lock, "lock_all", lambda *a, **kw: lock.Result(0, ["locked"], {"locked": ["Skyrim.esm"]}))
+    assert lock.relock_expired(root).exit == 0 and state.read(sf).lifts == []
+
+
+@pytest.mark.parametrize("operation", ["lock", "unlock", "enable"])
+def test_file_permission_operations_hold_the_state_writer_lock(pending, monkeypatch, operation):
+    from types import SimpleNamespace
+    root, sf, lift, now = pending
+    monkeypatch.setattr(lock, "_guard", lambda root: (root / "Data", SimpleNamespace(edition="vr")))
+    monkeypatch.setattr(lock, "_read_manifest", lambda root: ({}, "ok"))
+    monkeypatch.setattr(lock, "_resolve_names", lambda *a: ["Skyrim.esm"])
+    monkeypatch.setattr(lock, "relock_expired", lambda *a, **kw: None)
+    called = []
+    def fake(*a, **kw):
+        assert os.path.normcase(os.path.abspath(str(sf))) in state._HELD
+        called.append(True)
+        return lock.Result(0, ["fixture"], {})
+    monkeypatch.setattr(lock, "_lock_all", fake)
+    monkeypatch.setattr(lock, "_unlock_files", fake)
+    result = lock.unlock(root, ["Skyrim.esm"], "fixture", now=now) if operation == "unlock" else (
+        lock.enable(root) if operation == "enable" else lock.lock_all(root))
+    assert result.exit == 0 and called == [True]
