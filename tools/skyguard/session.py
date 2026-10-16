@@ -294,7 +294,7 @@ def run(project, source, bash, audit):
 
 def run_status(project, source, bash, audit, root=None):
     """-> (text, status, code). status is what the engine reports to the canary: `failed` when the guard did
-    not run at all, `partial` when it ran but snapshotted nothing (kb-guard exit 2), else `evaluated`.
+    not run at all, `partial` when snapshot coverage is incomplete, else `evaluated`.
     `root`: the install the guard reads its paths file from (run.py's --root); the legacy-location notice is keyed on
     it, not on the session's project folder (T8 review M2). None: the project (the two normally coincide)."""
     banners = "\n".join(layer2_start(project, source))
@@ -312,10 +312,12 @@ def run_status(project, source, bash, audit, root=None):
     raw = r.stdout.rstrip(b"\n")
     output = raw.decode("utf-8", "replace")
     lines = ([banners] if banners else []) + ([output] if output else [])
-    if r.returncode == 2:
-        lines.append("KB GUARD: the above means NOTHING was snapshotted this session -- unchecked, not clean.")
+    incomplete = (r.returncode != 0 and not (r.returncode == 1 and "KB GUARD -- ALARM:" in output
+                                           and "KB GUARD: FAILED to store" not in output))
+    if incomplete:
+        lines.append("KB GUARD: snapshot coverage is incomplete this session -- unchecked, not clean.")
     flat = raw.replace(b"\n", b" ")[:200]        # bash: tr '\n' ' ' | head -c 200
     audit.raw(b"[" + audit.stamp().encode() + b"] " + HOOK.encode() + b" rc=" + str(r.returncode).encode()
               + b" " + flat + b"\n")
-    status, code = ("partial", "session.NOT_SNAPSHOTTED") if r.returncode == 2 else ("evaluated", "session")
+    status, code = ("partial", "session.NOT_SNAPSHOTTED") if incomplete else ("evaluated", "session")
     return _with_prefs("\n".join(lines), project, audit), status, code

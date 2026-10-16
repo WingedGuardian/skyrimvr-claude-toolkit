@@ -24,7 +24,7 @@
 # on top of it. Recovery is always "the previous copy is in the store".
 #
 # Usage:  bash tools/kb-guard.sh [--verbose]
-# Exit:   0 = checked · 1 = ALARM (a watched file shrank or vanished) · 2 = cannot check
+# Exit:   0 = checked · 1 = completed ALARM · 2 = cannot check or preserve every watched file
 
 set -uo pipefail
 
@@ -291,7 +291,7 @@ if [ -n "$alarms" ]; then
     echo "  Extracting a toolkit update over an install replaces every file the"
     echo "  toolkit ships. Keep your own findings in KNOWLEDGEBASE.local.md, which"
     echo "  is never shipped."
-    exit 1
+    [ -z "$failed" ] && exit 1
 fi
 
 if [ "$checked" -eq 0 ]; then
@@ -306,7 +306,7 @@ if [ -n "$failed" ]; then
     [ -n "$copied" ] && echo "KB GUARD: did store --$copied"
     printf '%s' "$notes"
     [ -n "$notes" ] && echo
-    exit 1
+    exit 2
 fi
 
 if [ -n "$copied" ]; then

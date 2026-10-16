@@ -435,7 +435,7 @@ def read_only(command):
             continue
         if program == "env" and not args:
             continue
-        if program == "find" and not any(a in ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf")
+        if program == "find" and not any(a in ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls")
                                           for a in args):
             continue
         if program == "git" and args and not any(a == "--output" or a.startswith("--output=") for a in args):

@@ -73,7 +73,7 @@ def test_a_nested_pex_is_snapshotted(tmp_path):
     "git status && python change.py", "echo $(python change.py)",
     "Get-Content notes.txt; Set-Content Data/Scripts/a.pex x",
     "Get-Content notes.txt | ForEach-Object { Set-Content Data/Scripts/a.pex x }",
-    "find . -delete", "find . -fprint output.txt", "git diff --output=report.txt",
+    "find . -delete", "find . -fprint output.txt", "find . -fls Data/Scripts/a.pex", "git diff --output=report.txt",
     "git branch new-branch", "git remote add mine https://example.invalid/repo",
 ])
 def test_read_prefix_does_not_skip_a_mutating_command_snapshot(tmp_path, command):

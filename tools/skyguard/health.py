@@ -406,7 +406,21 @@ def _coverage_rows(project, agent, last=5):
             called = sum(counts.values())
             # A refused call is recorded by the hook but leaves no transcript item: exclude it from both sides.
             refused = per_hook.get("refused", {})
-            hooked = sum(max(0, n - refused.get(tool, 0)) for tool, n in hooked_by.items())
+            def category(tool):
+                # A shell-carried patch can be logged as Bash and appear as a
+                # FileChange item. Keep that attribution, but never let native
+                # receipts cover another MCP server/tool or an unknown tool.
+                if tool.rsplit(".", 1)[-1].lower() in ("bash", "shell", "shell_command", "exec_command", "apply_patch", "applypatch"):
+                    return "native-shell-or-patch"
+                return tool
+            expected, observed = {}, {}
+            for tool, n in counts.items():
+                key = category(tool)
+                expected[key] = expected.get(key, 0) + n
+            for tool, n in hooked_by.items():
+                key = category(tool)
+                observed[key] = observed.get(key, 0) + max(0, n - refused.get(tool, 0))
+            hooked = sum(min(n, observed.get(key, 0)) for key, n in expected.items())
         short = hooked < called
         state = "NOT EXERCISED" if called == 0 else "DEGRADED" if short else "HEALTHY"
         rows.append((sid, surface, hooked, called, state, ""))

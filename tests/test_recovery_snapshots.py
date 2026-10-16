@@ -118,6 +118,11 @@ def test_a_command_snapshots_the_load_order_and_the_game_inis_from_the_configure
     assert sorted(got) == ["Skyrim.ini", "SkyrimVR.ini", "loadorder.txt", "plugins.txt", "skyrimprefs.INI"]
     assert got["plugins.txt"] == sha(b"*Skyrim.esm\n*Mine.esp\n")
     assert (inst.store / "blobs" / sha(b"*Skyrim.esm\n*Mine.esp\n")).read_bytes() == b"*Skyrim.esm\n*Mine.esp\n"
+
+
+def test_find_file_listing_keeps_config_recovery_before_writing(inst):
+    inst.run("find . -fls Skyrim.ini")
+    assert inst.stored("config")["Skyrim.ini"] == sha(b"[General]\n")
     assert "RECOVERY-SNAPSHOT" in inst.log()
 
 

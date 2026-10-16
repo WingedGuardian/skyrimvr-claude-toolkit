@@ -102,7 +102,19 @@ COMPOUND_SNAPSHOT_MUTATIONS = [pytest.param("tools/skyguard/snapshot.py",
     '    return True\n    parsed = shellparse.parse(command, "bash" if bash_prefix else "powershell")',
     'tests/test_snapshot_nested.py::test_read_prefix_does_not_skip_a_mutating_command_snapshot', id='snapshot-complete-command')]
 
-MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + [
+PRESERVATION_STATUS_MUTATIONS = [pytest.param(path, before, after, test,
+    id="preservation-status-" + name) for path, before, after, test, name in (
+    ("tools/skyguard/health.py",
+     '            hooked = sum(min(n, observed.get(key, 0)) for key, n in expected.items())',
+     '            hooked = min(called, sum(observed.values()))',
+     'tests/test_skyguard_coverage.py::test_shell_receipts_cannot_cover_unobserved_mcp_calls', 'mcp-attribution'),
+    ("tools/kb-guard.sh", '    [ -z "$failed" ] && exit 1', '    exit 1',
+     'tests/test_kb_guard.py::test_an_alarm_cannot_mask_another_files_failed_snapshot', 'mixed-alarm'),
+    ("tools/skyguard/snapshot.py", '"-fprintf", "-fls")', '"-fprintf")',
+     'tests/test_snapshot_nested.py::test_read_prefix_does_not_skip_a_mutating_command_snapshot', 'find-fls'),
+)]
+
+MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + PRESERVATION_STATUS_MUTATIONS + [
     pytest.param("tools/" + name,
                  'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'" set "SG_FILE_PY=%SG_FILE_PY:~1,-1%"',
                  "rem outer quote decoding removed",
@@ -4190,8 +4202,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in MUTATIONS_TASK13]
 # Plan 4 final fix pass.
 _ADP = "tests/test_skyguard_codex_adapter.py::"
 MUTATIONS_FINAL = [
-    ("tools/skyguard/health.py", "            hooked = sum(max(0, n - refused.get(tool, 0)) for tool, n in hooked_by.items())",
-     "            hooked = sum(hooked_by.values())",
+    ("tools/skyguard/health.py", "                observed[key] = observed.get(key, 0) + max(0, n - refused.get(tool, 0))",
+     "                observed[key] = observed.get(key, 0) + n",
      _COV + "test_coverage_excludes_refused_calls_from_hooked", "coverage-refused-calls-are-not-hooked"),
     ("tools/skyguard/run.py", '    if v.decision != "allow":', "    if False:",
      _COV + "test_the_engine_records_a_refusal_in_the_session_line_and_an_allow_does_not",

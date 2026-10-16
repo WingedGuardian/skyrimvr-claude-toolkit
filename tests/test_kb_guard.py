@@ -236,6 +236,25 @@ def test_a_copy_that_could_not_be_written_is_never_reported_as_unchanged(tmp_pat
     assert "FAILED" in combined or "NOT RUN" in combined, combined
 
 
+def test_an_alarm_cannot_mask_another_files_failed_snapshot(tmp_path):
+    root = make_install(tmp_path)
+    original = "irreplaceable notes\n" * 200
+    write(root, KB, original)
+    write(root, "CLAUDE.md", "old instructions\n")
+    assert run_guard(root).returncode == 0
+    (root / KB).unlink()
+    write(root, "CLAUDE.md", "changed instructions\n")
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    (shim / "cp").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8", newline="\n")
+    (shim / "cp").chmod(0o755)
+    result = run_guard(root, extra_path=shim)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "KB GUARD -- ALARM:" in result.stdout
+    assert "KB GUARD: FAILED to store" in result.stdout
+    assert any(p.read_text(encoding="utf-8") == original for p in stored_copies(root))
+
+
 def test_the_hook_never_fails_the_session_even_when_the_guard_alarms(tmp_path):
     """SessionStart output is injected into Claude's context and a non-zero exit
     is visible to the user. The guard is allowed to be loud; it is not allowed to

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Coverage receipts for native shell/patch tools cannot cover missing MCP calls;
+  MCP tools are counted individually. Failed knowledgebase preservation remains
+  partial even when another watched file also raises a completed loss alarm.
+- GNU find's file-writing `-fls` action retains recovery snapshots.
 - Script/config snapshots inspect every command in a parsed shell call before
   skipping known reads. A read-only prefix, newline, pipeline or later mutator
   can no longer suppress recovery snapshots. Incomplete syntax takes a snapshot.
