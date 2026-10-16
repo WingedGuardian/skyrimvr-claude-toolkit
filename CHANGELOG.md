@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Setup and safety guidance describe permanent one/two-save preservation and
+  bulk approval, distinguish ReSaver candidate quarantine from publication,
+  and reconcile optional runtime requirements and reviewed upgrades.
 - Claude blocking wrappers validate the complete PreToolUse verdict schema before
   reporting successful emission. Malformed bodies, NUL bytes and failed or
   unacknowledged validation refuse under the existing outer hook deadline.
@@ -583,7 +586,7 @@
   the inert-hook incident is blind to it.
 
 - **Updating the toolkit destroyed your own knowledgebase notes, and the README said
-  it did not.** The documented update path is "extract the new zip over your install",
+  it did not.** At that release the documented update path was "extract the new zip over your install",
   so every file this toolkit ships is replaced — including the 177,459-byte
   `KNOWLEDGEBASE.md` that Claude was instructed, by this toolkit, to append your
   findings to. A toolkit must never ship a file it also asks you to edit.

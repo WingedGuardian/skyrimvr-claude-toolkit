@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -117,8 +118,10 @@ def _toolkit(tmp_path: Path) -> Path:
     (root / "tools").mkdir(parents=True)
     (root / ".config").mkdir()
     (root / ".config" / "dotnet-tools.json").write_bytes((REPO / ".config" / "dotnet-tools.json").read_bytes())
-    for name in ("automod-cli.sh", "resaver-cli.sh", "hook-canary.sh"):
+    for name in ("automod-cli.sh", "resaver-cli.sh", "resaver_cli_cache.py", "hook-canary.sh"):
         (root / "tools" / name).write_bytes((REPO / "tools" / name).read_bytes())
+    shutil.copytree(REPO / "tools/modding_harness", root / "tools/modding_harness",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     (root / "tools" / "resaver-cli").mkdir()
     (root / "tools" / "resaver-cli" / "ResaverCLI.java").write_bytes(
         (REPO / "tools" / "resaver-cli" / "ResaverCLI.java").read_bytes())
@@ -140,7 +143,10 @@ def _bins(tmp_path: Path) -> Path:
     # what our ResaverCLI driver prints for an op it was not given (tools/resaver-cli/ResaverCLI.java)
     _script(b / "java", 'if [ "$1" = "-version" ]; then echo \'openjdk version "21.0.4"\' >&2; exit 0; fi\n'
                         'echo \'{"ok":false,"error":"need <op> <save> [...]"}\'\n')
-    _script(b / "javac", "exit 1\n")
+    _script(b / "javac", 'if [ "$1" = "-version" ]; then echo "javac 21 fixture"; exit 0; fi\n'
+            'if [ "${FIXTURE_JAVAC_FAIL:-0}" = 1 ]; then exit 7; fi\n'
+            'while [ $# -gt 0 ]; do if [ "$1" = "-d" ]; then mkdir -p "$2"; '
+            'printf "fixture-class" > "$2/ResaverCLI.class"; exit 0; fi; shift; done\nexit 2\n')
     return b
 
 
@@ -159,6 +165,7 @@ def _run_wrappers(tmp_path: Path, root: Path, shadow_bash: bool = False):
     env["AUTOMOD_DOTNET"] = str(b / "dotnet").replace("\\", "/")
     env["AUTOMOD_TEST_PIN_COMMIT"] = PIN_SHA
     env["TOOLKIT_TEST_MODE"] = "1"
+    env["FIXTURE_JAVAC_FAIL"] = "1" if (root / "tools/resaver-cli/fixture-javac-fails").exists() else "0"
     p = subprocess.run([BASH, str(TOOL)], capture_output=True, text=True, env=env, timeout=120)
     return p.stdout
 
@@ -189,6 +196,8 @@ def _resaver_installed(root: Path, compiled: bool = True, lib: bool = True) -> N
         cls = rs / "ResaverCLI.class"
         cls.write_bytes(b"\xca\xfe")
         os.utime(cls, (os.stat(rs / "ResaverCLI.java").st_mtime + 60,) * 2)
+    else:
+        (rs / "fixture-javac-fails").write_bytes(b"owned compiler failure")
 
 
 def test_automod_cloned_but_not_built_is_not_ok(tmp_path):
@@ -237,7 +246,7 @@ def test_resaver_whose_driver_cannot_compile_is_not_ok(tmp_path):
     _resaver_installed(root, compiled=False)
     out = _run_wrappers(tmp_path, root)
     line = _line(out, "resaver-cli")
-    assert " ok " not in line and "compile failed" in line, out
+    assert " ok " not in line and "javac failed with exit 7" in line, out
     assert "resaver-cli" in _failed(out), out
 
 

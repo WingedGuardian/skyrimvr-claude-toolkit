@@ -35,7 +35,7 @@ Six thin wrappers over the Python engine `tools/skyguard/` intercept Claude's to
 
 - **protect-bash.sh** -- Blocks destructive commands; **advises** on file operations in the game directory (a note to Claude, not a prompt to you)
 - **protect-files.sh** -- Blocks writes to plugin/archive binaries through the Edit/Write tools; **advises** on all other edits in the install
-- **protect-mcp.sh** -- Guards the DevBench MCP tools (and the curl / `devbench-cli.sh` route to the same tools): denies the one console command measured to crash a large load order (`smp reset`), and asks before a save would overwrite an existing save
+- **protect-mcp.sh** -- Guards the DevBench MCP tools (and the curl / `devbench-cli.sh` route to the same tools): denies the one console command measured to crash a large load order (`smp reset`). Recognized changes to one or two saves require verified permanent save-pair backups before proceeding; bulk access needs the bound human approval described below.
 - **backup-before-edit.sh** -- Copies a file before Claude modifies it **through the Edit/Write/NotebookEdit tools**. ⚠ Anything written by a script run through Bash is invisible to it -- that is a property of hooks, not a bug here. MEASURED: zero backups of a 177,459-byte `KNOWLEDGEBASE.md` across seven months, because it is written by a script. `session-kb-guard.sh` below covers that channel.
 - **snapshot-before-tool.sh** -- Snapshots Papyrus source/compiled scripts before shell commands
 - **session-kb-guard.sh** -- At SessionStart, copies the files nothing can rebuild
@@ -81,7 +81,7 @@ The "safety improvement loop" instruction in CLAUDE.md asks Claude to evaluate w
 
 ## Customizing Safety
 
-The hook scripts are designed to be customized -- but ⚠ **they are shipped files, so extracting an update replaces them and your edits are lost.** Keep a copy of any hook you change, or put your rules in a separate hook and register it in `.claude/settings.json` (also shipped -- copy it too). To customise:
+The guards can be customized, but their shipped files can be replaced during an update. Keep personal rules in separate local files. Use the reviewed upgrade workflow in `ADAPTING.md`: stage the candidate, retain custom instructions and settings as explicit collisions, and integrate existing pre-tool handlers into the ordered dispatcher before applying. Keep the old handlers active until that replacement is qualified. Extracting directly over the installation can overwrite those files. To customise:
 
 - **Whitelist paths** you want Claude to edit freely (e.g., a working directory for scripts)
 - **Add new patterns** to the bash guard for commands specific to your workflow

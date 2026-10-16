@@ -909,9 +909,13 @@ SSE, AE, and VR saves all use the same `.ess` format with LZ4 compression. The c
 
 ### What Cannot Be Done (Without Full Parser)
 
+These are limits of raw byte-scanning, not of the ReSaver CLI below. Use its
+structured parse and reference index for Papyrus data, record browsing and edits;
+byte-pattern matches alone do not establish parsed references or orphan counts.
+
 - Parse structured Papyrus instance data (variable values, active effect state)
 - Edit and write back a valid save (requires full format understanding)
-- Browse by record type (use ReSaver for that — Java GUI)
+- Browse by record type (use the structured ReSaver CLI or its Java GUI)
 
 ### Common Debugging Use Cases
 
@@ -952,7 +956,7 @@ ops always run the STOCK jar** so an authored parse fix can never reach `ChangeF
 corruption safety. If the overlay can't compile against your ReSaver version, the wrapper falls back
 to stock parsing automatically (basic ops unaffected).
 
-**Write safety:** every write op is **dry-run by default** and only applies with `--apply`. An applied write always goes to a **NEW file** — it never overwrites the input save. Every `--apply` is additionally **verify-gated**: the output is re-read and compared to the written model, and on any unintended divergence the file is deleted and the op fails (fail-to-write beats silent corruption). As always, **loading the result in-game is the final validation gate.**
+**Write safety:** every write op is **dry-run by default** and only applies with `--apply`. An applied write always goes to a **NEW file** — it never overwrites the input save. Every `--apply` is additionally **verify-gated**: a private candidate is re-read and compared to the written model. Failed candidates are quarantined in their owned staging directory with recovery evidence; existing destinations stay intact and no successful publication is reported. As always, **loading the result in-game is the final validation gate.**
 
 **Performance:** a full structured parse of a ~45MB save runs in about **2.4s**, including building the cross-reference index — fast enough to use interactively during debugging.
 
@@ -2057,7 +2061,14 @@ hook processes left suspended, `UserProcessorTime = 00:00:00`, OPEN with no know
 `durationMs` is measured differently for a cancellation than for a success. **That question is
 unresolved** — do not treat the fork count as the explanation.
 
-## KNOWN, NOT FIXED: verify-release.sh's hook floor is never actually derived
+## SUPERSEDED: verify-release.sh's historical hook-floor derivation defect
+
+The current verifier no longer reads that missing extracted-tree workflow or
+falls back to five hooks. Both release paths call `tools/check-release-payload.py`.
+Its explicit Claude/Codex floors are checked against the actual shipped tree by
+`tests/test_release_payload.py`; this is a shared checked inventory, not a claim
+that a workflow floor is derived at runtime. The finding below records the old
+implementation and is retained as history.
 
 Found by the v3.9.1 release review, 2026-09-09. **Deferred deliberately — fix this before
 `verify-release.sh` certifies another release.**
