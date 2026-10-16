@@ -14,14 +14,15 @@ if defined SG_FILE_PY set "SG_FILE_PY=%SG_FILE_PY:'\''='%"
 if defined SG_FILE_PY if exist "%SG_FILE_PY%" set "SKYGUARD_PYTHON=%SG_FILE_PY%"
 if defined SKYGUARD_PYTHON goto custom
 :probe
-"%COMSPEC%" /d /c py -3 -c "import sys; sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)" >nul 2>nul
+"%COMSPEC%" /d /c py -3 -c "import sys; sys.exit(sys.version_info[:2].__lt__((3, 10)))" >nul 2>nul
 if not errorlevel 1 goto usepy
-"%COMSPEC%" /d /c python -c "import sys; sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)" >nul 2>nul
+"%COMSPEC%" /d /c python -c "import sys; sys.exit(sys.version_info[:2].__lt__((3, 10)))" >nul 2>nul
 if not errorlevel 1 goto usepython
 echo skyguard: no working Python 3.10+ found; for the lock, run tools\skyguard-unlock.cmd 1>&2
 exit /b 2
 :custom
-"%COMSPEC%" /d /s /c ""%SKYGUARD_PYTHON%" -c "import sys; sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)"" >nul 2>nul
+rem __lt__ avoids CMD treating a comparison operator as redirection in a .cmd shim.
+"%COMSPEC%" /d /s /c ""%SKYGUARD_PYTHON%" -c "import sys; sys.exit(sys.version_info[:2].__lt__((3, 10)))"" >nul 2>nul
 if errorlevel 1 goto probe
 "%SKYGUARD_PYTHON%" -B "%HERE%skyguard" %*
 exit /b %errorlevel%
