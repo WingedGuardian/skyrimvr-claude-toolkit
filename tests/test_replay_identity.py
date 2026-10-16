@@ -1,5 +1,6 @@
 """Resume qualification uses real hooks in an owned tiny repository, never user history or installs."""
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -135,6 +136,63 @@ def test_environment_binding_keeps_secret_values_out_of_the_identity(replay_fixt
     assert secret not in (f["out"] / "replay.identity.json").read_text(encoding="utf-8")
     monkeypatch.setenv("REPLAY_FAKE_TOKEN", secret + "changed")
     assert f["run"]().returncode == 2
+
+
+@pytest.mark.parametrize("change", ["add", "remove"])
+def test_empty_runtime_directory_changes_require_new_evidence(replay_fixture, change):
+    f = replay_fixture
+    path = f["root"] / "tools/skyguard/decision-flag"
+    helper = f["helper"]
+    helper.write_text(helper.read_text(encoding="utf-8").replace('from modding_harness import DECISION\n',
+        'from modding_harness import DECISION\n'
+        'if (Path(__file__).parent / "decision-flag").is_dir(): DECISION = "deny"\n'), encoding="utf-8")
+    if change == "remove":
+        path.mkdir()
+    first = f["run"]()
+    assert first.returncode == (1 if change == "remove" else 0), first.stderr
+    before = (f["out"] / "results.jsonl").read_bytes()
+    if change == "add":
+        path.mkdir()
+    else:
+        path.rmdir()
+    resumed = f["run"]()
+    assert resumed.returncode == 2 and "fresh --out-dir" in resumed.stderr, resumed.stdout + resumed.stderr
+    assert (f["out"] / "results.jsonl").read_bytes() == before
+    fresh = f["run"](out=f["out"].parent / "fresh-evidence")
+    assert fresh.returncode == (1 if change == "add" else 0), fresh.stdout + fresh.stderr
+
+
+def _directory_alias(link, target):
+    # Both endpoints belong to this test's private fixture. Junctions avoid requesting symlink privileges.
+    if os.name == "nt":
+        powershell = Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        result = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-Command",
+            "$ErrorActionPreference='Stop'; New-Item -ItemType Junction -Path $env:REPLAY_LINK "
+            "-Target $env:REPLAY_TARGET | Out-Null"],
+            env=dict(os.environ, REPLAY_LINK=str(link), REPLAY_TARGET=str(target)), capture_output=True, timeout=20,
+            creationflags=subprocess.CREATE_NO_WINDOW)
+        assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+def test_linked_runtime_directory_contents_are_bound_and_cycles_refuse(replay_fixture):
+    f = replay_fixture
+    target = f["out"].parent / "owned-linked-target"
+    target.mkdir()
+    source = target / "data.txt"
+    source.write_text("before", encoding="utf-8")
+    alias = f["root"] / "tools/skyguard/linked-data"
+    _directory_alias(alias, target)
+    assert f["run"]().returncode == 0
+    source.write_text("changed", encoding="utf-8")
+    assert f["run"]().returncode == 2
+    # A second alias creates a true ancestor cycle. Refuse it before copytree can recurse.
+    _directory_alias(target / "cycle", f["root"] / "tools/skyguard")
+    fresh = f["out"].parent / "cycle-output"
+    result = f["run"](out=fresh)
+    assert result.returncode == 2 and "bind replay inputs" in result.stderr, result.stdout + result.stderr
+    assert not (fresh / "results.jsonl").exists()
 
 
 def test_input_changes_during_replay_permanently_invalidate_that_cache(replay_fixture):

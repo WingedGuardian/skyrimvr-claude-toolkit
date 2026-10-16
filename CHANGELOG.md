@@ -3,7 +3,9 @@
 ## Unreleased
 
 - Resumed corpus replay binds cached rows to frozen items, both hook trees,
-  copied engine/runtime bytes, recording helpers and effective environment.
+  copied engine/runtime files and directories, recording helpers and effective environment.
+  Linked runtime directories are traversed as the staging copy traverses them;
+  cyclic sources refuse before staging.
   Changed or unqualified caches are retained and require a fresh output
   directory. Input drift invalidates the run; matching engine errors cannot
   count as successful agreement.

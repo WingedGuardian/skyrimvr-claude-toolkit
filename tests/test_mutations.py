@@ -9049,3 +9049,5 @@ MUTATIONS += [
     pytest.param('scripts/guard-corpus/replay.py', '_digest(json.dumps(inherited, sort_keys=True).encode("utf-8"))', '"unbound"', 'tests/test_replay_identity.py::test_environment_binding_keeps_secret_values_out_of_the_identity', id='review-replay-identity-environment'),
     pytest.param('scripts/guard-corpus/replay.py', '    return 2 if summary["errors"] else 0 if agree == len(items) else 1', '    return 0 if agree == len(items) else 1', 'tests/test_replay_identity.py::test_identical_engine_errors_are_nonanswers_and_are_retried', id='review-replay-identity-errors'),
 ]
+
+MUTATIONS += [pytest.param("scripts/guard-corpus/replay.py", '        out[relative + "/"] = {"kind": "directory", "mode": before.st_mode, "mtime_ns": before.st_mtime_ns}', "        pass", "tests/test_replay_identity.py::test_empty_runtime_directory_changes_require_new_evidence", id="review-replay-empty-directory-identity")]

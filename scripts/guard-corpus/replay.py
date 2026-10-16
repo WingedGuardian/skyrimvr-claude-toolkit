@@ -45,13 +45,35 @@ def _tree_identity(root: Path) -> dict:
     if not root.is_dir():
         return {"<absent>": "absent"}
     out = {}
-    def failed(error):
-        raise error
-    for directory, names, files in os.walk(root, onerror=failed):
-        names[:] = sorted(name for name in names if name != "__pycache__")
-        for name in sorted(files):
-            path = Path(directory) / name
-            out[path.relative_to(root).as_posix()] = _digest(path.read_bytes())
+    def visit(directory, relative, ancestors):
+        try:
+            physical = os.path.normcase(str(directory.resolve(strict=True)))
+        except RuntimeError:
+            raise ValueError("cyclic runtime source") from None
+        if physical in ancestors:
+            raise ValueError("cyclic runtime source")
+        before = directory.stat()
+        out[relative + "/"] = {"kind": "directory", "mode": before.st_mode, "mtime_ns": before.st_mtime_ns}
+        # copytree follows directory links by default and copies empty directories too.
+        for path in sorted(directory.iterdir()):
+            if path.name == "__pycache__":
+                continue
+            name = relative + "/" + path.name if relative else path.name
+            if path.is_dir():
+                visit(path, name, ancestors | {physical})
+            else:
+                start = path.stat()
+                content = path.read_bytes()
+                end = path.stat()
+                if (start.st_dev, start.st_ino, start.st_size, start.st_mode, start.st_mtime_ns) != (
+                        end.st_dev, end.st_ino, end.st_size, end.st_mode, end.st_mtime_ns):
+                    raise ValueError("runtime file changed during observation")
+                out[name] = {"sha256": _digest(content), "mode": end.st_mode, "mtime_ns": end.st_mtime_ns}
+        after = directory.stat()
+        if (before.st_dev, before.st_ino, before.st_mode, before.st_mtime_ns) != (
+                after.st_dev, after.st_ino, after.st_mode, after.st_mtime_ns):
+            raise ValueError("runtime directory changed during observation")
+    visit(root, "", set())
     return out
 
 
@@ -231,7 +253,7 @@ def run(old: Path, new: Path, history: Path, out_dir: Path, jobs: int, limit: in
         try:
             if _cache_identity(old, new, frozen.read_bytes()) != identity:
                 return _invalidate(out_dir, "inputs changed during engine staging")
-        except OSError:
+        except (OSError, ValueError):
             return _invalidate(out_dir, "replay inputs became unreadable during staging")
         pats = {id(io): _install_patterns(io), id(ino): _install_patterns(ino)}
 
@@ -263,7 +285,7 @@ def run(old: Path, new: Path, history: Path, out_dir: Path, jobs: int, limit: in
     try:
         if _cache_identity(old, new, frozen.read_bytes()) != identity:
             return _invalidate(out_dir, "inputs changed during replay")
-    except OSError:
+    except (OSError, ValueError):
         return _invalidate(out_dir, "replay inputs became unreadable")
 
     matrix = collections.Counter()
