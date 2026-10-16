@@ -784,11 +784,15 @@ MAX_LIFTS = 100
 
 
 def _live_lifts(lifts, now):
-    """The lifts worth keeping: not yet expired, and at most MAX_LIFTS (the newest). Without this every unlock
-    appends a lift for good and state.json hits state.MAX_BYTES after ~300, after which EVERY unlock fails."""
-    live = [x for x in lifts if x["expires_at"] > now]
+    """Prune old permissions, preserving expired lock obligations until relock succeeds.
+
+    Pending retries are never silently evicted. The state byte limit refuses a
+    further unlock rather than forgetting a file that still needs relocking.
+    """
+    pending = [x for x in lifts if x["kind"] == "lock" and _state.lift_expired(x, now)]
+    live = [x for x in lifts if not _state.lift_expired(x, now)]
     live.sort(key=lambda x: x["created"])
-    return live[-MAX_LIFTS:]
+    return pending + live[-MAX_LIFTS:]
 
 
 def _interactive() -> bool:
@@ -875,6 +879,8 @@ def unlock(root, names, session, now=None) -> Result:
         chosen = [n for n in universe.values() if os.path.lexists(str(data_dir / n))]
     now = time.time() if now is None else now
     try:
+        # A failure retains its expired record through the writer below.
+        relock_expired(root, now=now, wait=_state.LOCK_WAIT)
         sf = _skyguard_dir(root) / "state.json"
         _assert_sandbox(sf)
         with _state.locked(sf):                             # read-modify-write under the one state lock
@@ -939,7 +945,7 @@ HOOK_STATE_WAIT = 0.2      # the per-call hook path never blocks on the state lo
 
 
 def relock_expired(root, now=None, wait=HOOK_STATE_WAIT):
-    """Relock what an EXPIRED lock lift opened, and clear that lift. -> None when no lock lift is due, else a Result
+    """Relock what an EXPIRED lock lift opened; retire it after success. -> None when none is due, else a Result
     whose data["relocked"] names the files locked again. Called by engine.shadow on every guarded hook call (a time
     compare when nothing is due); session start stays the backstop. A file a LIVE lock lift (any session) still
     covers stays open; nothing is relocked while the lock is persistently disabled or was never applied."""
@@ -960,20 +966,25 @@ def relock_expired(root, now=None, wait=HOOK_STATE_WAIT):
         live = [x for x in st.lifts if x["kind"] == "lock" and not _state.lift_expired(x, now)]
         keep = [x for x in st.lifts if not (x["kind"] == "lock" and _state.lift_expired(x, now))]
         persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
-        _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})   # cleared first: one relock, not one per call
-    if st.lock_disabled or not supported() or not (Path(root) / ".skyguard" / "lock.json").is_file():
-        return _res(0, "An expired lock lift was cleared; nothing relocked (the lock is %s)."
-                    % ("disabled" if st.lock_disabled else "not applied"), data={"relocked": []})
-    if any(x.get("files") is None for x in live):
-        return _res(0, "An expired lock lift was cleared; a live lift still opens every file.", data={"relocked": []})
-    covered = {f.lower() for x in live for f in x["files"]}
-    want = None if any(x.get("files") is None for x in due) else {f.lower() for x in due for f in x["files"]}
+        # Serialize the filesystem operation with new lifts and persistent
+        # disable decisions. Retire the obligation only after success.
+        if st.lock_disabled or not supported() or not (Path(root) / ".skyguard" / "lock.json").is_file():
+            _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
+            return _res(0, "An expired lock lift was cleared; nothing relocked (the lock is %s)."
+                        % ("disabled" if st.lock_disabled else "not applied"), data={"relocked": []})
+        if any(x.get("files") is None for x in live):
+            _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
+            return _res(0, "An expired lock lift was cleared; a live lift still opens every file.", data={"relocked": []})
+        covered = {f.lower() for x in live for f in x["files"]}
+        want = None if any(x.get("files") is None for x in due) else {f.lower() for x in due for f in x["files"]}
 
-    def only(name):
-        return name.lower() not in covered and (want is None or name.lower() in want)
+        def only(name):
+            return name.lower() not in covered and (want is None or name.lower() in want)
 
-    res = lock_all(root, only=only)
-    return Result(res.exit, res.lines, dict(res.data, relocked=[n for n in res.data.get("locked", []) if only(n)]))
+        res = lock_all(root, only=only)
+        if res.exit == 0:
+            _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
+        return Result(res.exit, res.lines, dict(res.data, relocked=[n for n in res.data.get("locked", []) if only(n)]))
 
 
 # ---- status ----------------------------------------------------------------------------------------------------

@@ -410,7 +410,8 @@ def _coverage_rows(project, agent, last=5):
                 # A shell-carried patch can be logged as Bash and appear as a
                 # FileChange item. Keep that attribution, but never let native
                 # receipts cover another MCP server/tool or an unknown tool.
-                if tool.rsplit(".", 1)[-1].lower() in ("bash", "shell", "shell_command", "exec_command", "apply_patch", "applypatch"):
+                native_name = tool[len("functions."):] if tool.startswith("functions.") else tool
+                if native_name.lower() in ("bash", "shell", "shell_command", "exec_command", "apply_patch", "applypatch"):
                     return "native-shell-or-patch"
                 return tool
             expected, observed = {}, {}

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Failed vanilla-file relocks retain expired retry records across session start,
+  guard changes and doctor cleanup. Relocking holds the state writer lock;
+  new lifts cannot interleave with that operation, and failures report pending.
 - Coverage receipts for native shell/patch tools cannot cover missing MCP calls;
   MCP tools are counted individually. Failed knowledgebase preservation remains
   partial even when another watched file also raises a completed loss alarm.

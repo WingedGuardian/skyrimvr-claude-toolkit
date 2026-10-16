@@ -114,7 +114,25 @@ PRESERVATION_STATUS_MUTATIONS = [pytest.param(path, before, after, test,
      'tests/test_snapshot_nested.py::test_read_prefix_does_not_skip_a_mutating_command_snapshot', 'find-fls'),
 )]
 
-MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + PRESERVATION_STATUS_MUTATIONS + [
+RELOCK_RETRY_MUTATIONS = [pytest.param(path, before, after, "tests/test_relock_retries.py::" + test,
+    id="relock-retry-" + name) for path, before, after, test, name in (
+    ("tools/skyguard/lock.py", "        if res.exit == 0:", "        if True:",
+     "test_failed_expiry_relock_is_retried_until_success", "success-before-retire"),
+    ("tools/skyguard/cli.py", '(x["kind"] == "lock" or not state.lift_expired(x, now))',
+     'not state.lift_expired(x, now)', "test_unrelated_guard_write_keeps_expired_lock_obligation", "guard-writer"),
+    ("tools/skyguard/doctor.py", 'x["kind"] != "lock" and _expired(x, now)', '_expired(x, now)',
+     "test_doctor_does_not_report_failed_relock_as_cleared", "doctor-writer"),
+    ("tools/skyguard/session.py", 'for x in current.lifts if x["kind"] == "lock"] if failure else []',
+     'for x in current.lifts if x["kind"] == "lock"] if False else []',
+     "test_failed_session_relock_keeps_an_expired_retry_without_success_claim", "session-writer"),
+)]
+RELOCK_RETRY_MUTATIONS += [pytest.param("tools/skyguard/health.py",
+    'native_name = tool[len("functions."):] if tool.startswith("functions.") else tool',
+    'native_name = tool.rsplit(".", 1)[-1]',
+    "tests/test_skyguard_coverage.py::test_mcp_native_looking_tool_names_keep_their_identity",
+    id="coverage-dotted-mcp-keeps-identity")]
+
+MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + PRESERVATION_STATUS_MUTATIONS + RELOCK_RETRY_MUTATIONS + [
     pytest.param("tools/" + name,
                  'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'" set "SG_FILE_PY=%SG_FILE_PY:~1,-1%"',
                  "rem outer quote decoding removed",
@@ -4535,17 +4553,17 @@ _SST = "tests/test_skyguard_session_start.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SS, '        if source == "compact":\n            return [disabled] if disabled else []', '        if False:\n            return []',
      _SST + "test_compact_does_not_clear_or_report_lifts", "l2-sess-compact-shortcut"),
-    (_SS, "                    if not st.rejected and st.lifts:", "                    if False:",
+    (_SS, "        if not current.rejected and current.lifts:", "        if False:",
      _SST + "test_a_guards_lift_is_reported_and_cleared_at_start", "l2-sess-clear"),
-    (_SS, '        failure = _relock(root) if engaged else ""', '        failure = ""',
+    (_SS, '        try:\n            failure = _relock(root) if engaged else ""', '        try:\n            failure = ""',
      _SST + "test_relock_happens_before_the_report_and_names_the_lifted_files", "l2-sess-relock"),
-    (_SS, "        lifted, drift = _scan(root, st.lifts) if engaged else ([], [])", "        lifted, drift = [], []",
+    (_SS, "\n        lifted, drift = _scan(root, st.lifts) if engaged else ([], [])", "\n        lifted, drift = [], []",
      _SST + "test_relock_happens_before_the_report_and_names_the_lifted_files", "l2-sess-scan"),
     (_SS, "        elif p.name in manifest:", "        elif False:",
      _SST + "test_drift_is_a_file_unlocked_with_no_lift_record", "l2-sess-drift"),
     (_SS, "            banners.append(disabled)", "            pass",
      _SST + "test_a_terminal_disable_is_honoured_and_shown_every_session", "l2-sess-disabled-banner"),
-    (_SS, "        engaged = _engaged(root) and not disabled", "        engaged = _engaged(root)",
+    (_SS, "        engaged = _engaged(root) and not st.lock_disabled", "        engaged = _engaged(root)",
      _SST + "test_a_terminal_disable_is_honoured_and_shown_every_session", "l2-sess-disabled-honoured"),
     (_SS, '.is_file()\n', ' or True\n',
      _SST + "test_the_lock_is_not_applied_when_it_was_never_engaged", "l2-sess-engaged"),
@@ -4630,8 +4648,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SST + "test_an_agent_session_cannot_be_exported_as_the_reserved_id", "l2-sess-env-reserved"),
     # Review Focus 4: move the relock to AFTER the drift banner is written. The test reads file attributes inside the
     # banner's own call, so a relock that happens later leaves the file open at that moment and it goes red.
-    (_SS, _RELOCK_LINE + _STEP3 + _TO_DRIFT, _STEP3 + _TO_DRIFT + _RELOCK_LINE,
-     _SST + "test_the_files_are_already_relocked_when_the_banner_is_written", "l2-sess-relock-after-banner"),
+    (_SS, '        try:\n            failure = _relock(root) if engaged else ""', '        try:\n            failure = ""',
+     _SST + "test_the_files_are_already_relocked_when_the_banner_is_written", "l2-sess-report-requires-relock"),
 ]]
 
 

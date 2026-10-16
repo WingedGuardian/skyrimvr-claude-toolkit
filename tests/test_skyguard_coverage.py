@@ -427,6 +427,20 @@ def test_receipt_for_another_mcp_server_cannot_cover_the_requested_tool(tmp_path
     assert _cov(tmp_path, "codex") == [(SID, "exec", 0, 1, "DEGRADED")]
 
 
+@pytest.mark.parametrize("tool", ["tools.bash", "tools.apply_patch", "exec_command"])
+def test_mcp_native_looking_tool_names_keep_their_identity(tmp_path, tool):
+    def rename(rows):
+        for row in rows:
+            item = row.get("payload", {}).get("item", {})
+            if item.get("type") == "McpToolCall":
+                item["tool"] = tool
+    rollout = _rewrite(EXEC_MCP, tmp_path / "named-mcp.jsonl", rename)
+    _session(tmp_path, "codex", SID, rollout, ["Bash", "apply_patch"])
+    assert _cov(tmp_path, "codex")[0][2:] == (0, 1, "DEGRADED")
+    _session(tmp_path, "codex", SID, rollout, ["mcp__probe__" + tool])
+    assert _cov(tmp_path, "codex")[0][2:] == (1, 1, "HEALTHY")
+
+
 def test_exact_mcp_receipt_and_shell_carried_filechange_remain_healthy(tmp_path):
     _session(tmp_path, "codex", SID, EXEC_MCP, ["mcp__probe__echo"])
     assert _cov(tmp_path, "codex") == [(SID, "exec", 1, 1, "HEALTHY")]

@@ -36,8 +36,8 @@ def _clip(s: str, n: int = 190) -> str:
 
 def _guards_write(root, keep, add=None, now=None):
     """Rewrite state.json through state.write (the only sanctioned writer): `keep(lift)` filters the existing lifts,
-    `add` is appended. Expired lifts are dropped here too, so the file cannot grow without bound. The lock's
-    persistent block is carried through untouched."""
+    `add` is appended. Expired guard permissions are pruned; lock retry records
+    and the persistent block are carried through until the lock handles them."""
     import time
     from pathlib import Path
     from . import lock, state
@@ -46,7 +46,7 @@ def _guards_write(root, keep, add=None, now=None):
     lock._assert_sandbox(sf)
     with state.locked(sf):                                  # read-modify-write under the one state lock
         cur = state.read(str(sf))
-        lifts = [x for x in cur.lifts if x["expires_at"] > now and keep(x)] + ([add] if add else [])
+        lifts = [x for x in cur.lifts if (x["kind"] == "lock" or not state.lift_expired(x, now)) and keep(x)] + ([add] if add else [])
         persistent = {"lock_disabled": cur.lock_disabled} if cur.lock_disabled else {}
         state.write(str(sf), {"v": 1, "lifts": lifts, "persistent": persistent})
 
