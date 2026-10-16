@@ -1174,7 +1174,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
       for tid, find, replace, test in [
           ("config-overwritten", "            if dest.name.lower().endswith(CFG_EXT) and not overwrite_cfg:",
            "            if False:", "test_an_existing_config_gets_a_new_file_beside_it"),
-          ("no-backup", "                shutil.copy2(str(target), str(b))", "                pass",
+          ("no-backup", '            if target.is_file():                     # OVERWRITE, or an older <file>.new: keep the original first',
+           '            if False:',
            "test_apply_installs_backs_up_and_writes_a_manifest"),
           ("writes-through-hardlink", "        os.replace(tmp, str(target))", "        shutil.copyfile(tmp, str(target))",
            "test_a_hardlinked_file_is_replaced_not_written_through"),
@@ -3795,8 +3796,8 @@ _T11_CLAUSES = [
      _T11 + "test_the_save_action_is_read_leniently[args1]"),
     ("rule-S-DEVBENCH-SAVE-action-string", _MC, '        if isinstance(action, str) and action.strip()', "        if action.strip()",
      _T11 + "test_other_game_actions_never_ask[7]"),
-    ("rule-S-DEVBENCH-SAVE-console", _MC, "        name = _console_save_name(line)",
-     "        name = None", _t11row("t11-mcp-console-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-console", _MC, "        for name in _console_save_names(line):",
+     "        for name in ():", _t11row("t11-mcp-console-save-existing")),
     ("rule-S-DEVBENCH-SAVE-console-case", _MC, '        if words and words[0].lower() in SAVE_COMMANDS:',
      '        if words and words[0] in SAVE_COMMANDS:', _T11 + "test_the_console_save_word_is_case_insensitive"),
     ("rule-S-DEVBENCH-SAVE-console-whole-word", _MC, '        if words and words[0].lower() in SAVE_COMMANDS:',
@@ -5376,7 +5377,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # ---- the save a command changes (the save policy, user ruling 2026-10-13: saves.py finds it, recovery.backup_saves
     # keeps it). No twin, said so: the old rate limit, unchanged-skip and size bound are GONE by policy (every change is
     # backed up), and save_name / shell_save_names went with them (judge() reports every save it sees, `found`).
-    ("tools/skyguard/shell_rules.py", "    resaver = resaver_writes(command, shell, parsed)", "    resaver = None",
+    ("tools/skyguard/shell_rules.py", "    resaver = resaver_write_calls(command, shell, parsed)", "    resaver = None",
      _RCT + "test_resaver_apply_snapshots_the_named_save_and_its_cosave_only", "l2-rec-resaver"),
     # The pair: the backup takes both files whichever one was named (recovery.pair_members), and the count calls a
     # save that has no co-save an existing save.
@@ -5490,8 +5491,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # by the rules' own parse (saves.shell_change), and recovery.run takes no save, so no first-word skip is left to put
     # back. test_a_read_only_looking_prefix_does_not_hide_the_save still pins the behaviour.
     # I2: the save ReSaver WRITES (its out), not the input
-    ("tools/skyguard/shell_rules.py", "RESAVER_TEXT_SAVE.findall(e.segment)\n            return t[0], ws[1:] or ws",
-     "RESAVER_TEXT_SAVE.findall(e.segment)\n            return t[0], ws[:1]",
+    ("tools/skyguard/shell_rules.py", "calls.append((_resaver_op(e), ws[1:] or ws, e))",
+     "calls.append((_resaver_op(e), ws[:1], e))",
      _RCT + "test_resaver_keeps_the_save_it_writes_not_the_one_it_reads", "l2-rec-fr1-i2-out"),
     ("tools/skyguard/saves.py", '        pairs.append(Pair(le or ess, ls or skse, stem, tuple(d["ops"]), bool(le or ls)))',
      '        pairs.append(Pair(le or ess, ls or skse, stem, tuple(d["ops"]), True))',
@@ -5796,8 +5797,8 @@ _RTB_CLAUSES = [
     ("rule-S-SAVE-BACKUP-wired", _SHR, "    return saves.judge(change, v, audit, HOOK)", "    return v", _rtb("save-redirect")),
     ("rule-S-SAVE-BACKUP-write", _WR, "            if is_save(a, roots):", "            if False:", _rtb("save-redirect")),
     ("rule-S-SAVE-BACKUP-copy-onto", _WR, "            if is_save(a_dst, roots):", "            if False:", _rtb("save-cp")),
-    ("rule-S-SAVE-BACKUP-copy-into-folder", _WR, "                if hit is not None and is_save(",
-     "                if False and is_save(",
+    ("rule-S-SAVE-BACKUP-copy-into-folder", _WR, "                if save_dests:",
+     "                if False:",
      "tests/test_save_policy.py::test_a_copy_into_the_saves_folder_that_takes_a_saves_name_is_a_change"),
     ("rule-S-SAVE-BACKUP-interpreter-literal", _WR, '        elif is_save(a, roots):\n            saves.append((a, "write"))',
      '        elif False:\n            saves.append((a, "write"))', _rtb("save-python")),   # fix-limits 9 moved it
@@ -6251,7 +6252,7 @@ _P5F_CLAUSES = [
     # (id, file, find, replace, test that must go red)
     # D1: the Recycle-Bin delete (VB FileSystem::DeleteFile/DeleteDirectory, Shell.Application Namespace(10).MoveHere).
     ("p5f-recycle-bin-delete-not-judged", _DL,
-     "    for w, how in (recycle_targets(recycle_text(command, parsed)) if resolved is None else ()):",
+     "    for w, how in recycle_targets(recycle_text(command, parsed)):",
      "    for w, how in ():",
      _p5f("vb-deletedirectory-ps")),
     ("p5f-recycle-bin-shell-application-not-matched", _DL,

@@ -149,7 +149,9 @@ def resaver_write_calls(command: str, shell: str = "", parsed=None):
     calls = []
     for e in parsed.execs:
         e = deletes.substituted(e)
-        if e.program != "?" and _is_resaver(e) and _resaver_op(e):
+        # An opaque program may be the ReSaver named elsewhere in the command.
+        # Do not let one known call suppress another call's conservative scope.
+        if (_is_resaver(e) or e.program == "?") and _resaver_op(e):
             ws = [a for a in e.argv if a.lower().endswith(".ess")] or RESAVER_TEXT_SAVE.findall(e.segment)
             calls.append((_resaver_op(e), ws[1:] or ws, e))
     if calls:

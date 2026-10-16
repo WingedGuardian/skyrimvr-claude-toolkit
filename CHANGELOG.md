@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Manual installs reject colliding final destinations before writing, including
+  config `.new` paths and Windows aliases. Exclusive operation directories retain
+  original backups and manifests across repeated installs, and backup hashes are
+  verified before replacement. The named manifest remains a latest-operation copy.
 - Save preservation collects every DevBench save statement and argument string,
   every compound ReSaver output, every copy destination, and Recycle Bin saves
   following another refusal. ReSaver outputs retain each execution's directory;

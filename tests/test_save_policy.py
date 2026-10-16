@@ -392,6 +392,22 @@ def test_compound_resaver_outputs_keep_each_executions_directory(inst, tmp_path)
         [str(other / "Save1.ess").replace("\\", "/").casefold(), (inst.S + "/Save2.ess").casefold()])
 
 
+def test_known_resaver_does_not_hide_later_opaque_resaver_outputs(inst):
+    command = ("bash tools/resaver-cli.sh reset-havok input.ess " + inst.p("Save1.ess") + " --apply; "
+               "R=$(echo tools/resaver-cli.sh); $R reset-havok input.ess " + inst.p("Save2.ess") + " --apply")
+    v = inst.shell(command)
+    assert stems(v) == ["Save1", "Save2"]
+    assert inst.enforce(v).decision == "allow" and len(inst.saved()) == 4
+
+
+def test_opaque_resaver_after_unknown_cd_keeps_unresolved_scope(inst):
+    command = ("bash tools/resaver-cli.sh reset-havok input.ess " + inst.p("Save1.ess") + " --apply; "
+               "cd $UNRESOLVED; R=$(echo tools/resaver-cli.sh); $R reset-havok input.ess Save2.ess --apply")
+    v = inst.shell(command)
+    assert v.decision == "deny" and v.saves.change.unknown
+    assert inst.enforce(v).decision == "deny" and inst.saved() == []
+
+
 @pytest.mark.parametrize("program", ["cp", "mv"])
 def test_copy_folder_collects_every_save_destination(inst, tmp_path, program):
     source = tmp_path / "incoming"
