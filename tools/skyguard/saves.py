@@ -36,7 +36,7 @@ import os
 import re
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-from . import approvals, mcp_rules, paths, rules
+from . import approvals, mcp_rules, paths, rules, targets
 from .verdict import Verdict
 
 OPS = approvals.OPS                       # write | move | delete
@@ -139,8 +139,9 @@ def shell_change(dels, wr, resaver, dev_found, cwd, shell, roots, env) -> Change
     """Every save a shell command changes: deletes.scan's, writes.scan's, ReSaver's and DevBench's."""
     t = [Target(p, "delete") for p in dels.saves] + [Target(p, op) for p, op in wr.save_targets]
     c = Change(tuple(t))
-    if resaver is not None:
-        c = merge([c, resaver_change(resaver[0], resaver[1], cwd, shell, roots, env)])
+    for op, words, execution in resaver or ():
+        base = cwd if execution is None else (targets.exec_cwd(execution, cwd, env) or "")
+        c = merge([c, resaver_change(op, words, base, shell, roots, env)])
     if dev_found:
         c = merge([c, devbench_change(dev_found, roots, env)])
     return c

@@ -803,7 +803,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     # D1: Recycle-Bin deletes, found in the text (RECYCLE_CALL). .NET resolves a relative path against the process
     # directory, which is the payload cwd (Set-Location does not move it).
     base = targets.normalise_cwd(cwd)
-    for w, how in (recycle_targets(recycle_text(command, parsed)) if resolved is None else ()):
+    for w, how in recycle_targets(recycle_text(command, parsed)):
         a = None
         if how == "single":
             a = literal_abs(w, base, "powershell")
@@ -814,9 +814,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if is_save(b, roots):
                 saves.append(b)
                 continue
-            if kind:
+            if kind and resolved is None:
                 resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
-                break
             continue
         unresolved_any = True
         if unresolved_reach is None and raw_reaches(w, base, "powershell", roots):

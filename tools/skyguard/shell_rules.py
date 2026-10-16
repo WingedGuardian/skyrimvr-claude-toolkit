@@ -128,21 +128,34 @@ def resaver_target(command: str, shell: str = "", parsed=None):
 
 
 def resaver_writes(command: str, shell: str = "", parsed=None):
-    """(operation, [the saves it WRITES, as written]) on the same decision as resaver_target. Task 15 fix round 1 (I2):
+    """(first operation, [ALL saves WRITTEN, as written]) for compatibility callers.
+
     the toolkit's ReSaver CLI writes `<out.ess>` -- the .ess after the input -- and never the input
     (tools/resaver-cli/ResaverCLI.java:49); set-global, set-var and clean write it with no existence check. A ReSaver
     given ONE .ess is taken to write that one (another front end writing in place). The text fallback reads the same
     shape from the raw text."""
-    parsed = shellparse.parse(command, shell) if parsed is None and "resaver" in command.lower() else parsed
+    calls = resaver_write_calls(command, shell, parsed)
+    return (calls[0][0], [w for _, words, _ in calls for w in words]) if calls else None
+
+
+def resaver_write_calls(command: str, shell: str = "", parsed=None):
+    """Every write call, retaining its execution context so relative outputs follow that call's cd."""
+    if "resaver" not in command.lower():
+        return []
+    parsed = shellparse.parse(command, shell) if parsed is None else parsed
     t = resaver_target(command, shell, parsed)
     if t is None:
-        return None
+        return []
+    calls = []
     for e in parsed.execs:
+        e = deletes.substituted(e)
         if e.program != "?" and _is_resaver(e) and _resaver_op(e):
             ws = [a for a in e.argv if a.lower().endswith(".ess")] or RESAVER_TEXT_SAVE.findall(e.segment)
-            return t[0], ws[1:] or ws
+            calls.append((_resaver_op(e), ws[1:] or ws, e))
+    if calls:
+        return calls
     ws = RESAVER_TEXT_SAVE.findall(command)
-    return t[0], ws[1:] or ws
+    return [(t[0], ws[1:] or ws, None)]
 
 
 def resaver_apply(command: str, shell: str = "", parsed=None):
@@ -203,7 +216,7 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
         v = v._replace(never=Verdict("ask", perm))
     # The save policy (user ruling 2026-10-13): every save the command changes -- deleted, written, copied onto,
     # moved, rewritten by ReSaver --apply or saved over by DevBench -- is judged together, after the other rules.
-    resaver = resaver_writes(command, shell, parsed)
+    resaver = resaver_write_calls(command, shell, parsed)
     dev: list = []
     mcp_rules.scan_shell(command, parsed, roots, env, found=dev)      # its own prefilter skips most commands
     change = saves.shell_change(dels, wr, resaver, dev, cwd, shell, roots, env)

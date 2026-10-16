@@ -340,6 +340,86 @@ def test_a_devbench_save_under_a_new_name_is_free(inst):
     assert mcp(inst, {"action": "save", "name": "Brand New"})[:3] == ("allow", "", "")
 
 
+@pytest.mark.parametrize("route", ["mcp", "cli", "rest", "papyrus"])
+@pytest.mark.parametrize("names", [("New", "Save2"), ("Save1", "Save2"),
+                                   ("Save1", "Save2", "Save3")])
+def test_every_console_save_statement_is_preserved(inst, route, names):
+    command = "; ".join("save " + name for name in names)
+    args = {"command": command}
+    if route == "mcp":
+        v = mcp_rules.decide("mcp__devbench-vr__console", args, inst.audit, roots=inst.roots, env={})
+    elif route == "papyrus":
+        v = mcp_rules.decide("mcp__devbench-vr__papyrus",
+                            {"function": "ExecuteCommand", "args": [command]},
+                            inst.audit, roots=inst.roots, env={})
+    elif route == "cli":
+        v = inst.shell("bash tools/devbench-cli.sh exec '" + command + "'")
+    else:
+        v = inst.shell("curl http://localhost:8920/api/tool/console -d '" + json.dumps(args) + "'")
+    expected = sorted(n for n in names if n != "New")
+    assert stems(v) == expected
+    guarded = inst.enforce(v)
+    assert guarded.decision == ("deny" if len(expected) > 2 else "allow")
+    assert sorted(Path(row["src"]).name for row in inst.saved()) == (
+        [] if len(expected) > 2 else sorted(n + ext for n in expected for ext in (".ess", ".skse")))
+
+
+def test_every_console_string_is_collected_after_the_first_hit(inst):
+    v = mcp_rules.decide("mcp__devbench-vr__console",
+                        {"command": ["save Save1", "save Save2", "save Save3"]},
+                        inst.audit, roots=inst.roots, env={})
+    assert stems(v) == ["Save1", "Save2", "Save3"]
+    assert inst.enforce(v).decision == "deny" and inst.saved() == []
+
+
+@pytest.mark.parametrize("count", [2, 3])
+def test_every_compound_resaver_output_is_preserved(inst, count):
+    command = "; ".join("bash tools/resaver-cli.sh reset-havok input.ess " +
+                        inst.p("Save%d.ess" % n) + " --apply" for n in range(1, count + 1))
+    v = inst.shell(command)
+    assert stems(v) == ["Save%d" % n for n in range(1, count + 1)]
+    assert inst.enforce(v).decision == ("allow" if count == 2 else "deny")
+    assert len(inst.saved()) == (4 if count == 2 else 0)
+
+
+def test_compound_resaver_outputs_keep_each_executions_directory(inst, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "Save1.ess").write_bytes(b"different private save")
+    v = inst.shell('cd "' + other.as_posix() + '"; bash tools/resaver-cli.sh reset-havok input.ess Save1.ess --apply; '
+                   'cd "' + inst.S + '"; bash tools/resaver-cli.sh reset-havok input.ess Save2.ess --apply')
+    assert sorted(t.path.casefold() for t in v.saves.change.targets) == sorted(
+        [str(other / "Save1.ess").replace("\\", "/").casefold(), (inst.S + "/Save2.ess").casefold()])
+
+
+@pytest.mark.parametrize("program", ["cp", "mv"])
+def test_copy_folder_collects_every_save_destination(inst, tmp_path, program):
+    source = tmp_path / "incoming"
+    source.mkdir()
+    for n in range(1, 4):
+        (source / ("Save%d.ess" % n)).write_bytes(b"incoming")
+    command = program + " " + " ".join('"' + (source / ("Save%d.ess" % n)).as_posix() + '"'
+                                        for n in range(1, 4)) + ' "' + inst.S + '/"'
+    v = inst.shell(command)
+    assert stems(v) == ["Save1", "Save2", "Save3"]
+    assert inst.enforce(v).decision == "deny" and inst.saved() == []
+
+
+@pytest.mark.parametrize("first_recycled", [False, True])
+def test_recycle_saves_are_collected_beside_another_deny(inst, first_recycled):
+    def recycle(path):
+        return "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('" + path + "','OnlyErrorDialogs','SendToRecycleBin')"
+    first = recycle(inst.game.as_posix() + "/owned.dll") if first_recycled else (
+        'Remove-Item "' + inst.game.as_posix() + '/owned.dll"')
+    v = inst.shell(first + "; " + recycle(inst.S + "/Save1.ess") + "; " + recycle(inst.S + "/Save2.ess"),
+                   shell="powershell")
+    assert v.decision == "deny" and stems(v) == ["Save1", "Save2"]
+    # Guards-off can shadow the unrelated denial; the complete preservation plan must survive it.
+    lifted = saves.judge(v.saves.change, Verdict(), inst.audit, "protect-bash")
+    assert inst.enforce(lifted).decision == "allow"
+    assert len(inst.saved()) == 4
+
+
 # ---------------------------------------------------------------- edit tools and patches
 
 

@@ -726,9 +726,11 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 saves.append((a_dst, "write"))
                 continue
             if a_dst is not None and _looks_like_dir(dst):
-                hit = next((s for s in srcs if s.lower().endswith(SAVE_EXTS)), None)
-                if hit is not None and is_save(a_dst.rstrip("/") + "/" + _name(hit), roots):
-                    saves.append((a_dst.rstrip("/") + "/" + _name(hit), "write"))
+                save_dests = [a_dst.rstrip("/") + "/" + _name(s) for s in srcs
+                              if s.lower().endswith(SAVE_EXTS)]
+                save_dests = [p for p in save_dests if is_save(p, roots)]
+                if save_dests:
+                    saves.extend((p, "write") for p in save_dests)
                     continue
             kind = file_class(dst, a_dst or "")
             if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):

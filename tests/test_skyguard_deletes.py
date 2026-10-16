@@ -410,6 +410,11 @@ def test_moving_a_file_out_of_the_install_is_a_delete(cmd, shell):
 ], ids=["mv-install", "move-item-data"])
 def test_moving_a_root_folder_away_names_the_move_not_a_delete(cmd, shell):
     (decision, reason), fired = decide(cmd, shell=shell)
+    if cmd.startswith(f'mv "{INSTALL}"'):
+        # The install itself contains permanent recovery; moving its ancestor is forbidden first.
+        assert (decision, fired) == ("deny", {"S-SAVE-STORE"})
+        assert "permanent save backup store" in reason
+        return
     assert (decision, fired) == ("deny", {"S-MOVE-ROOT"}), (cmd, reason, fired)
     assert "moves" in reason and "deletes" not in reason
 

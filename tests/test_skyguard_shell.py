@@ -77,7 +77,8 @@ def test_rule1_no_destroyer_no_fire(tmp_path):
 
 def test_rule2_install_delete_denied_with_exact_text(tmp_path):
     v = run(f'rm -rf "{GAME}"', tmp_path)
-    assert (v.decision, v.reason) == ("deny", del_install("The Elder Scrolls V Skyrim VR"))
+    # The install also holds permanent save recovery: its stronger refusal wins.
+    assert (v.decision, v.reason) == ("deny", rules.message("S-SAVE-STORE", file="The Elder Scrolls V Skyrim VR"))
 
 
 def test_rule2_destroyer_elsewhere_allowed(tmp_path):
@@ -346,7 +347,7 @@ def test_audit_lines_logged(tmp_path):
     run(f'rm -rf "{GAME}"', tmp_path)
     log = (tmp_path / ".claude/backups/AUDIT_LOG.txt").read_text(encoding="utf-8")
     assert "protect-bash ADVISE: " + rules.message("S-WRITE-LOADORDER", file="plugins.txt") in log
-    assert "protect-bash DENY: " + del_install("The Elder Scrolls V Skyrim VR") in log
+    assert "protect-bash DENY: " + rules.message("S-SAVE-STORE", file="The Elder Scrolls V Skyrim VR") in log
 
 
 LAYOUT_ENV = {

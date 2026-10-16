@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Save preservation collects every DevBench save statement and argument string,
+  every compound ReSaver output, every copy destination, and Recycle Bin saves
+  following another refusal. ReSaver outputs retain each execution's directory;
+  all affected pairs count together for backup and bulk approval.
 - Guard-rule pricing stages each engine's matching shared runtime and lock.
   Historical exports use that commit's bytes, keeping detached old/new engines
   independent and preventing missing-core errors from contaminating the report.

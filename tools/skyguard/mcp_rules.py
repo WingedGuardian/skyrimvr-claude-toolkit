@@ -105,13 +105,12 @@ def deny_op(command: str) -> str:
 SAVE_COMMANDS = ("save", "savegame")
 
 
-def _console_save_name(command: str) -> Optional[str]:
-    """The name in a console `save <name>` (any statement), "" for a bare `save`, None when there is no save."""
+def _console_save_names(command: str):
+    """Every console save statement's name, including an empty name for a bare `save`."""
     for stmt in _statements(command):
         words = stmt.split()
         if words and words[0].lower() in SAVE_COMMANDS:
-            return " ".join(words[1:])
-    return None
+            yield " ".join(words[1:])
 
 
 def _strings(obj, depth: int = 0):
@@ -258,10 +257,10 @@ def judge(tool: str, args, roots, memo: Optional[dict] = None, env=None, depth: 
             hit = _save_hit(args.get("name"), roots, env, memo, found)
             ask = hit if hit[0] else None
     for line in lines:
-        name = _console_save_name(line)
-        if name is not None and ask is None:
+        for name in _console_save_names(line):
             hit = _save_hit(name, roots, env, memo, found)
-            ask = hit if hit[0] else None
+            if ask is None and hit[0]:
+                ask = hit
     if depth < 8:
         for stool, sargs in _steps(args):
             hit = judge(stool, sargs, roots, memo, env, depth + 1, found)
