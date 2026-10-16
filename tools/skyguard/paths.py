@@ -143,7 +143,7 @@ def norm_abs(path: str, msys: bool = True) -> Optional[str]:
         return "//" + bits[0] + "/" + bits[1] + ("/" + rest if rest else "")
     if p.startswith("/") and msys:
         m = _MSYS_DRIVE.match(p)
-        if m:
+        if m and not POSIX_HOST:
             return m.group(1).lower() + ":/" + _fold(p[m.end():])
         return "/" + _fold(p[1:])
     if p.startswith("/") and POSIX_HOST:

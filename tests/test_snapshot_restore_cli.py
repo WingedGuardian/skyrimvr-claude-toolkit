@@ -57,6 +57,66 @@ def tree(root):
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
 
+@pytest.mark.parametrize("initially_present", [False, True])
+def test_script_restore_refuses_a_target_changed_while_candidates_are_staged(inst, monkeypatch, initially_present):
+    from modding_harness import durable
+    take_all(inst)
+    sid = ids(inst, "scripts")[0]
+    target = inst.game / "Data/Scripts/a.pex"
+    if initially_present:
+        target.write_bytes(b"current before restore")
+    else:
+        target.unlink()
+    original = durable.copy_verified
+    def racing_copy(source, candidate, deadline=None):
+        result = original(source, candidate, deadline)
+        if ".restore-part-" in str(candidate):
+            target.write_bytes(b"another writer's current bytes")
+        return result
+    monkeypatch.setattr(durable, "copy_verified", racing_copy)
+    rc, output = cli_run(inst, "restore", sid, "--path", "Data/Scripts/a.pex", "--in-place")
+    assert rc != 0, output
+    assert target.read_bytes() == b"another writer's current bytes"
+
+
+def test_script_restore_refuses_a_target_changed_during_its_prebackup(inst, monkeypatch):
+    take_all(inst)
+    sid = ids(inst, "scripts")[0]
+    target = inst.game / "Data/Scripts/a.pex"
+    target.write_bytes(b"current before restore")
+    original = backup.take
+    def racing_backup(*args, **kwargs):
+        result = original(*args, **kwargs)
+        target.write_bytes(b"another writer after backup")
+        return result
+    monkeypatch.setattr(backup, "take", racing_backup)
+    rc, output = cli_run(inst, "restore", sid, "--path", "Data/Scripts/a.pex", "--in-place")
+    assert rc != 0, output
+    assert target.read_bytes() == b"another writer after backup"
+
+
+def test_absent_script_restore_does_not_clobber_a_creator_at_publication(inst, monkeypatch):
+    from modding_harness import durable
+    take_all(inst)
+    sid = ids(inst, "scripts")[0]
+    target = inst.game / "Data/Scripts/a.pex"
+    target.unlink()
+    original_replace, original_publish = snapshot.os.replace, durable.publish_new
+    def replace(source, destination):
+        if ".restore-part-" in str(source):
+            target.write_bytes(b"foreign creator at publication")
+        return original_replace(source, destination)
+    def publish(source, destination):
+        if ".restore-part-" in str(source):
+            target.write_bytes(b"foreign creator at publication")
+        return original_publish(source, destination)
+    monkeypatch.setattr(snapshot.os, "replace", replace)
+    monkeypatch.setattr(durable, "publish_new", publish)
+    rc, output = cli_run(inst, "restore", sid, "--path", "Data/Scripts/a.pex", "--in-place")
+    assert rc == 1, output
+    assert target.read_bytes() == b"foreign creator at publication"
+
+
 # ---------------------------------------------------------------- list
 
 

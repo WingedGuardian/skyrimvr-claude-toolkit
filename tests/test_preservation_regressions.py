@@ -104,8 +104,9 @@ def test_restore_refuses_a_counterpart_absent_from_backup(inst):
     put(inst.saves / "Quick.skse", b"SKSE-B")
     output = io.StringIO()
     assert snapcli.cmd_restore(str(inst.game), sid, [], "", True, output) == 2
-    assert "unexpected save counterpart" in output.getvalue()
+    assert "unexpected counterpart at restore destination" in output.getvalue()
     assert (inst.saves / "Quick.ess").read_bytes() == b"ESS-B"
+    assert (inst.saves / "Quick.skse").read_bytes() == b"SKSE-B"
 
 
 def test_new_directory_restore_never_clobbers_a_concurrent_file(inst, tmp_path, monkeypatch):

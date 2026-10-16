@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Script/config restore records target identity and content before backup,
+  verifies those backups, and rechecks targets after staging. Initially absent
+  targets use no-clobber publication. Stop other writers during in-place restore;
+  existing-file replacement is not a filesystem compare-and-swap.
+- Custom Codex definitions alone no longer make a 3.x installation look like
+  4.x during migration. POSIX single-letter roots retain their native meaning,
+  and permanent-store refusals are included in the Codex rule inventory.
 - Independent release proof rejects duplicate ZIP members and altered binary or
   undeclared bytes. Line-ending conversion requires the selected commit's text
   attributes and nonbinary contents; it cannot hide payload corruption.

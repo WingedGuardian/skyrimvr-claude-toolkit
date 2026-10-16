@@ -49,6 +49,18 @@ def test_on_windows_a_slash_path_is_still_the_cwd_drives_root(windows):
     assert paths.norm_abs("/x", msys=False) is None
 
 
+@pytest.mark.parametrize("root", ["/c/profile", "/x/profile", "/a"])
+def test_single_letter_posix_root_and_native_file_use_the_same_zone(posix, root):
+    roots = paths.roots(GAME, "", {"SKYRIM_CONFIG_DIR": root})
+    assert paths.norm_abs(root, msys=True) == root
+    target = targets.resolve(root + "/Saves/Existing.ess", "/home/u", "cmd", {})
+    assert targets.zone(target, roots) == "config"
+
+
+def test_git_bash_drive_alias_is_still_windows_specific(windows):
+    assert paths.norm_abs("/c/profile", msys=True) == "c:/profile"
+
+
 def _claude(tool, command):
     p = claude.extract(json.dumps({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/home/u",
                                    "tool_input": {"command": command}}))
@@ -63,7 +75,7 @@ def _save_targets(tool, command):
     p = claude.extract(json.dumps({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/home/u",
                                    "tool_input": {"command": command}}))
     v = engine.evaluate_shell(claude.to_request(p, "shell"), _roots(), Audit(GAME))
-    return [tuple(t) for t in v.saves.change.targets] if v.saves is not None else []
+    return [(t.path, t.op) for t in v.saves.change.targets] if v.saves is not None else []
 
 
 def test_a_powershell_save_overwrite_is_seen_on_a_posix_host(posix):

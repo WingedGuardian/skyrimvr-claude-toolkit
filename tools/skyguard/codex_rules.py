@@ -49,6 +49,8 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
     # The save policy (user ruling 2026-10-13): every save change is counted, backed up and verified by the hook.
     "shell.S-SAVE-APPROVAL": ("hook_only", _PATH + " (and the count and the user's typed approval are read at run time)"),
     "shell.S-SAVE-UNKNOWN": ("hook_only", _PATH + " (a wildcard the hook lists at run time)"),
+    "shell.S-SAVE-STORE": ("hook_only", _PATH + " (including ancestors of permanent recovery data)"),
+    "write.W-SAVE-STORE": ("hook_only", "a file write to permanent recovery data, not a command"),
     "shell.S-SAVE-BACKUP-FAILED": ("hook_only", "the backup's own failure at run time, not a command"),
     # Plan 6 Task 11: hook_only. A `forbidden` prefix could also refuse the USER's own `!` command (not measured),
     # and running skyguard-unlock.cmd / `lock disable` themselves is what a Codex user is told to do; the operand of

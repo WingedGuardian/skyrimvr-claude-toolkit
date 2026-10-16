@@ -103,6 +103,20 @@ def edited_claude(variant="stock") -> bytes:
     return text.encode("utf-8")
 
 
+@pytest.mark.parametrize("custom", ["{}", '{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo personal hook"}]}]}}',
+                                   "not JSON"])
+def test_custom_codex_definition_does_not_hide_a_three_x_migration(tmp_path, custom):
+    root = make_391(tmp_path / "i")
+    (root / "CLAUDE.md").write_bytes(edited_claude())
+    (root / ".codex").mkdir()
+    definition = root / ".codex/hooks.json"
+    definition.write_text(custom)
+    rc, output = run_inproc(root)
+    assert rc == 0, output
+    assert edited_claude() in (root / "KNOWLEDGEBASE.local.md").read_bytes(), output
+    assert definition.read_text() == custom
+
+
 USER_SETTINGS = {
     "permissions": {"allow": ["Bash(git status)"]},
     "hooks": {

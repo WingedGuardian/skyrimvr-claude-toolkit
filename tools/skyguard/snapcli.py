@@ -328,11 +328,19 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
         pairs = [(live[k], chosen[k]) for k in keys if k not in same]
         unchanged = [live[k] for k in same]
         dest = "the live files"
-        for target, _sha in pairs:
-            if target.is_file() and backup.take(str(project), "skyguard snapshot restore", str(target), audit) is None:
-                print("REFUSED: could not back up {} before replacing it. Nothing was restored.".format(target),
-                      file=out)
-                return 2
+        try:
+            expected = {str(target): snapshot.restore_target_state(target) for target, _sha in pairs}
+            for target, _sha in pairs:
+                state = expected[str(target)]
+                if state is not None:
+                    saved = backup.take(str(project), "skyguard snapshot restore", str(target), audit)
+                    if saved is None or backup._sha256(saved) != state["sha256"]:
+                        raise OSError("could not verify the pre-restore backup of " + str(target))
+                if snapshot.restore_target_state(target) != state:
+                    raise OSError("restore target changed during prebackup: " + str(target))
+        except OSError as exc:
+            print("REFUSED: {}. Nothing was restored.".format(exc), file=out)
+            return 2
     else:
         base = Path(to) if to else _new_folder(project, sid)
         pairs = [(base.joinpath(*k.split("/")), chosen[k]) for k in keys]
@@ -343,8 +351,9 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
             return 2
         dest = str(base)
         unchanged, skipped = [], []
+        expected = None
     try:
-        n = snapshot.write_blobs(store, pairs, replace=in_place)
+        n = snapshot.write_blobs(store, pairs, replace=in_place, expected=expected)
     except OSError as e:
         print("FAILED part-way restoring snapshot {} to {}: {}".format(sid, dest, e), file=out)
         audit.log(HOOK, "FAILED", "restore of {} to {} stopped: {}".format(sid, dest, e))

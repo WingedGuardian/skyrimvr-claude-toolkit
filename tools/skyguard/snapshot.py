@@ -304,18 +304,45 @@ def materialise(project, name, dest, only=None):
     return write_blobs(store, [(Path(dest).joinpath(*rel.split("/")), sha) for rel, sha in sorted(files.items())])
 
 
-def write_blobs(store, pairs, replace=False):
+def restore_target_state(path):
+    """Identity and content a restore may replace; an absent path remains explicitly absent."""
+    from modding_harness import durable
+    path = Path(path)
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    if (not stat.S_ISREG(info.st_mode) or path.is_symlink() or
+            getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+        raise OSError("restore target is not an ordinary unlinked file: " + str(path))
+    before = durable.identity(path)
+    digest = backup._sha256(path)
+    if durable.identity(path) != before:
+        raise OSError("restore target changed while inspecting: " + str(path))
+    return {"identity": list(before), "sha256": digest}
+
+
+def write_blobs(store, pairs, replace=False, expected=None):
     """Copy each (target, sha256) blob of `store` to its target. Each file is written to a part file and swapped in, so
     a hard-linked target (Vortex) is replaced, never written through. The part file is hashed BEFORE it replaces the
     target (the save policy: a restore is hash-verified at the file it writes, not only at the blob it reads). -> files
-    written; OSError at the first failure, the target untouched."""
+    written; OSError reports how many files were published. Quiesce other writers for in-place restore:
+    identity/hash rechecks are not a filesystem compare-and-swap. Initially absent paths never replace a creator."""
     from modding_harness import durable
     import uuid
+    pairs = list(pairs)
+    if replace:
+        expected = ({str(t): restore_target_state(t) for t, _ in pairs} if expected is None else expected)
+        if set(expected) != {str(t) for t, _ in pairs}:
+            raise OSError("restore observations do not cover the complete target set")
+    else:
+        expected = {str(t): None for t, _ in pairs}
     store, staged = Path(store), []
     operation = uuid.uuid4().hex
     journal = store / "restore-journals" / operation
     journal.mkdir(parents=True, exist_ok=False)
-    durable.atomic_json(journal / "plan.json", {"targets": [str(t) for t, _ in pairs], "replace": replace})
+    durable.atomic_json(journal / "plan.json", {"targets": [str(t) for t, _ in pairs], "replace": replace,
+                                             "observed": expected})
     n = 0
     try:
         for target, sha in pairs:
@@ -326,8 +353,14 @@ def write_blobs(store, pairs, replace=False):
             durable.copy_verified(store / "blobs" / sha, part)
             if backup._sha256(part) != sha:
                 raise OSError("the copy of {} does not hash to {}".format(target.name, sha))
+        if replace:
+            for _, target in staged:
+                if restore_target_state(target) != expected[str(target)]:
+                    raise OSError("restore target changed after its prebackup: " + str(target))
         for part, target in staged:
-            if replace:
+            if replace and expected[str(target)] is not None:
+                if restore_target_state(target) != expected[str(target)]:
+                    raise OSError("restore target changed before publication: " + str(target))
                 os.replace(str(part), str(target))
                 durable.sync_dir(target.parent)
             else:
