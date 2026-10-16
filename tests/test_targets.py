@@ -233,7 +233,8 @@ def test_scratch_globs_are_validated_data():
         paths._scratch_names(["**/*.pyc"])
 
 
-def test_roots_dirs_are_normalised_and_deduped():
+def test_roots_dirs_are_normalised_and_deduped(monkeypatch):
+    monkeypatch.setattr(paths, "POSIX_HOST", False)
     r = paths.roots("/c/GOG Games/The Elder Scrolls V Skyrim VR", CWD_WIN, {"SKYRIM_GAME_ROOT": GAME + "/"})
     assert r.install_dirs == (GAMEN,)
 

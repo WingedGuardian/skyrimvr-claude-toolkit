@@ -59,7 +59,16 @@ PROBE_RESULT_MUTATIONS = [pytest.param(
     "codex/skyguard-entry.sh",
 ) for field in ("OUT", "RC", "NUL", "WD")]
 
-MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + [
+ANSI_C_MUTATIONS = [pytest.param("tools/skyguard/shellparse.py", before, after,
+    "tests/test_shellparse.py::test_ansi_c_arguments_match_stdout_only_bash_oracle", id="ansi-c-" + name)
+    for before, after, name in (
+        ('                elif nx in "01234567xuU":', '                elif False:', 'numeric-escapes'),
+        ('                    data = ("\\\\" + nx).encode("utf-8", "surrogateescape")',
+         '                    data = nx.encode("utf-8", "surrogateescape")', 'unknown-backslash'),
+        ('                truncated = bool(separator)', '                truncated = False', 'nul-truncation'),
+    )]
+
+MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + [
     pytest.param("tools/" + name,
                  'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'" set "SG_FILE_PY=%SG_FILE_PY:~1,-1%"',
                  "rem outer quote decoding removed",

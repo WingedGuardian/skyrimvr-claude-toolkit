@@ -884,20 +884,57 @@ class _Bash(_Scanner):
     def _ansi(self, f, w):
         t, n = self.t, self.n
         j = self.i + 2
-        out = []
+        # Bash ANSI-C quotes contain bytes. Decode byte escapes together (not
+        # individually) so UTF-8 paths and escaped ASCII extensions stay literal.
+        out = bytearray()
+        truncated = False
         while j < n:
             c = t[j]
             if c == "'":
                 w.quoted = True
-                w.add("".join(out))
+                w.add(out.decode("utf-8", "surrogateescape"))
                 self.i = j + 1
                 return
             if c == "\\" and j + 1 < n:
-                out.append(_ANSI.get(t[j + 1], t[j + 1]))
+                nx = t[j + 1]
                 j += 2
-                continue
-            out.append(c)
-            j += 1
+                if nx in _ANSI:
+                    data = _ANSI[nx].encode("utf-8")
+                elif nx in "01234567xuU":
+                    if nx in "01234567":
+                        start, maximum, digits, base = j - 1, 3, "01234567", 8
+                    else:
+                        start, maximum, digits, base = j, {"x": 2, "u": 4, "U": 8}[nx], "0123456789abcdefABCDEF", 16
+                    end = start
+                    while end < n and end - start < maximum and t[end] in digits:
+                        end += 1
+                    if end == start:
+                        data = ("\\" + nx).encode("utf-8")
+                    else:
+                        value = int(t[start:end], base)
+                        j = end
+                        if nx in "uU":
+                            if value > 0x10ffff or 0xd800 <= value <= 0xdfff:
+                                raise ParseError("non-scalar ANSI-C Unicode escape")
+                            data = chr(value).encode("utf-8")
+                        else:
+                            data = bytes((value & 255,))
+                elif nx == "c" and j < n:
+                    control = t[j]
+                    j += 1
+                    if ord(control) > 127:
+                        raise ParseError("non-ASCII ANSI-C control escape")
+                    data = bytes((127 if control == "?" else ord(control.upper()) & 31,))
+                else:
+                    # Unrecognized escapes retain the backslash in Bash.
+                    data = ("\\" + nx).encode("utf-8", "surrogateescape")
+            else:
+                data = c.encode("utf-8", "surrogateescape")
+                j += 1
+            if not truncated:
+                before_nul, separator, _ = data.partition(b"\0")
+                out.extend(before_nul)
+                truncated = bool(separator)
         raise ParseError("unterminated $' quote")
 
     def _backtick(self, f):

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Bash ANSI-C quoted paths decode hexadecimal, octal, Unicode and control
+  escapes before policy evaluation. Escaped save names retain pair backups and
+  bulk approval limits; escaped plugin extensions retain raw-write refusal.
+  Unknown escapes keep their backslashes and NUL ends only that quoted portion.
 - Script/config restore records target identity and content before backup,
   verifies those backups, and rechecks targets after staging. Initially absent
   targets use no-clobber publication. Stop other writers during in-place restore;

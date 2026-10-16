@@ -9,6 +9,7 @@
 
 Every test uses fake saves in tmp_path. No real save is read or written.
 """
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -305,6 +306,33 @@ def test_every_change_shape_is_one_backed_up_save(inst, cmd, shell, want_ops):
     v = inst.shell(text, shell=shell)
     assert (v.decision, v.context) == ("allow", NOTE.format("Save1")), text
     assert ops(v) == want_ops
+
+
+@pytest.mark.parametrize("escape", [r"\x65", r"\145", r"\u0065", r"\U00000065"])
+def test_ansi_c_save_suffix_keeps_complete_verified_pair(inst, escape):
+    command = "printf x > $'" + inst.S + "/Save1." + escape + "ss'"
+    verdict = inst.shell(command)
+    assert stems(verdict) == ["Save1"]
+    result = inst.enforce(verdict)
+    assert result.decision == "allow"
+    assert len(inst.saved()) == 2
+    assert sorted(row["sha256"] for row in inst.saved()) == sorted(
+        hashlib.sha256((inst.saves / ("Save1" + suffix)).read_bytes()).hexdigest() for suffix in (".ess", ".skse"))
+
+
+def test_ansi_c_bulk_save_changes_keep_approval_boundary(inst):
+    command = "; ".join("printf x > $'" + inst.S + "/Save" + str(i) + r".\x65ss'" for i in (1, 2, 3))
+    verdict = inst.shell(command)
+    assert stems(verdict) == ["Save1", "Save2", "Save3"]
+    assert inst.enforce(verdict).decision == "deny"
+    assert not inst.saved()
+
+
+@pytest.mark.parametrize("escape", [r"\x65", r"\145", r"\u0065", r"\U00000065"])
+def test_ansi_c_plugin_suffix_remains_a_raw_binary_write_refusal(inst, escape):
+    verdict = inst.shell("printf x > $'" + inst.game.as_posix() + "/Data/plugin." + escape + "sp'")
+    assert verdict.decision == "deny"
+    assert "raw" in verdict.reason.lower() or "text" in verdict.reason.lower()
 
 
 def test_a_save_change_beside_another_rules_deny_still_carries_its_plan(inst):

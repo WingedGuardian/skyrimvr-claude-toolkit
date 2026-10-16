@@ -6,17 +6,37 @@ names has a row here, and test_mutations.py deletes each branch and names the ro
 import base64
 import json
 import random
+import os
+import subprocess
 import sys
 
 import pytest
 
-from conftest import REPO
+from conftest import BASH, REPO
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import shellparse as sp  # noqa: E402
 from skyguard.shellparse import parse  # noqa: E402
 
 BS = chr(92)
+
+
+@pytest.mark.parametrize("quoted", [
+    r"Data/test.\x65sp", r"Data/test.\145sp", r"Data/test.\u0065sp",
+    r"Data/test.\U00000065sp", r"Saves/test.\x65ss", r"Saves/test.\145ss",
+    r"\x6\x65\x123", r"\1\12\123\777", r"a\q\z\8\9b",
+    r"a\cA\ca\c?\c_b", r"a\0ignored", r"a\x00ignored",
+    r"a\u0000ignored", r"\xC3\xA9", r"\u00e9\U0001f600",
+    r"a\n\r\t\a\b\e\E\f\v\\\'\"\?b", r"a\x\u\Uend",
+])
+def test_ansi_c_arguments_match_stdout_only_bash_oracle(quoted):
+    # Hardcoded literals only. The oracle prints an argument; it writes no files.
+    command = "printf '%s' $'" + quoted + "'"
+    result = subprocess.run([BASH, "--noprofile", "--norc", "-s"], input=command.encode("utf-8"),
+                            capture_output=True, timeout=10,
+                            env=dict(os.environ, LC_ALL="C.UTF-8"))
+    assert result.returncode == 0, result.stderr
+    assert find(command, "printf").argv[1] == result.stdout.decode("utf-8", "surrogateescape")
 
 
 def progs(cmd, shell="bash"):
@@ -559,9 +579,9 @@ def _t4_rows():
 @pytest.mark.parametrize("row", _t4_rows(), ids=[r["id"] for r in _t4_rows()])
 def test_t04_rows_come_out_as_executed_commands(row):
     """Every T4 intended row's decision, reproduced from execs alone: the shapes Task 6 re-bases ReSaver onto. Since
-    the save policy (2026-10-13) a detected --apply is refused when the save cannot be placed (every T4 row but one, which
-    has no cwd), and allowed when it writes a NEW save at an absolute path (t04-quoted-spaces)."""
-    detected = row["decision"] == "deny" or row["id"] == "t04-quoted-spaces"
+    the save policy (2026-10-13) a detected --apply is refused when the save cannot be placed and allowed when
+    a new output resolves through an absolute path or a known preceding cd. Policy and detection are separate."""
+    detected = row["decision"] == "deny" or row["id"] in ("t04-quoted-spaces", "t04-heredoc-sh-s")
     assert _resaver_from_parser(row["payload"]["tool_input"]["command"]) is detected
 
 
