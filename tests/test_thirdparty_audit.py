@@ -189,6 +189,32 @@ def test_a_documented_path_the_release_ships_is_ok(tmp_path):
     assert any(r.check == "upstream path" and r.status == ta.OK for r in rows)
 
 
+@pytest.mark.parametrize("wrong_release", [False, True])
+def test_addon_download_url_must_belong_to_the_release_whose_checksum_is_published(tmp_path, wrong_release):
+    root = pynifly_repo(tmp_path, "io_scene_nifly/NiflyDLL.dll")
+    path = root / "docs/installing-tools.md"
+    if wrong_release:
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "/download/V27.2.0/io_scene_nifly.zip", "/download/V27.1.0/io_scene_nifly.zip"), encoding="utf-8")
+    rows, code = audit(root, make_cache(tmp_path), ["PyNifly"])
+    hashes = [r for r in rows if r.check == "pinned hash"]
+    assert [r.status for r in hashes] == [ta.OK, ta.DRIFT if wrong_release else ta.OK]
+    assert code == (1 if wrong_release else 0), [r.as_dict() for r in rows]
+
+
+@pytest.mark.parametrize("published_url", [None, "https://github.com/example/tool/releases/download/v2/selected.zip"])
+def test_release_asset_download_url_is_bound_including_repeated_filenames(published_url):
+    item = {"label": "selected", "published_format": "github-release"}
+    entry = {"name": "selected.zip", "digest": "sha256:" + SHA_A}
+    if published_url is not None:
+        entry["browser_download_url"] = published_url
+    response = ta.Response(200, json.dumps({"assets": [entry]}).encode())
+    api = "https://api.github.com/repos/example/tool/releases/tags/v2"
+    for version in ("v1", "v2"):
+        fields = {"url": "https://github.com/example/tool/releases/download/" + version + "/selected.zip"}
+        assert ta._published_checksum(response, api, item, fields, 64) == (SHA_A if version == "v2" else None)
+
+
 def test_a_historical_path_mention_is_not_an_instruction(tmp_path):
     text = (PYNIFLY_DOC.format(path="io_scene_nifly/NiflyDLL.dll")
             + "Releases before 29.x need an explicit load first:\n"

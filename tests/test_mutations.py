@@ -9037,3 +9037,5 @@ MUTATIONS += [
     pytest.param('scripts/guard-corpus/price.py', '        if _sample_stamp(source) != expected:', '        if False:', 'tests/test_price_tool.py::test_modified_owned_samples_are_preserved_and_cannot_be_overwritten', id='review-price-modified-owned-retired'),
     pytest.param('scripts/guard-corpus/price.py', '    _retire_samples(out_dir, owned)', '    for direction in DIRECTIONS:\n        for stale in out_dir.glob(f"*__{direction}.jsonl"):\n            stale.unlink()', 'tests/test_price_tool.py::test_only_this_tools_stale_files_are_cleared', id='review-price-unowned-glob-cleanup'),
 ]
+
+MUTATIONS += [pytest.param("scripts/thirdparty-audit.py", '                    if urllib.parse.unquote(fields["url"]) != urllib.parse.unquote(download):', "                    if False:", "tests/test_thirdparty_audit.py::test_addon_download_url_must_belong_to_the_release_whose_checksum_is_published", id="review-published-hash-wrong-release-url")]

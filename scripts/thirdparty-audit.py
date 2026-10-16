@@ -1169,6 +1169,20 @@ def _published_checksum(response, url, item, fields, digits):
             if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
                 raise CouldNotCheck("invalid release asset metadata")
             if entry["name"] == artifact:
+                if fields.get("url"):
+                    download = entry.get("browser_download_url")
+                    if download is None:
+                        release = re.fullmatch(r"/repos/([^/]+/[^/]+)/releases/tags/([^/]+)",
+                                               urllib.parse.urlsplit(url).path)
+                        if not release:
+                            raise CouldNotCheck("cannot associate release metadata with its download URL")
+                        download = "https://github.com/%s/releases/download/%s/%s" % (
+                            release[1], urllib.parse.unquote(release[2]), artifact)
+                    if not isinstance(download, str) or not download.startswith("https://"):
+                        raise CouldNotCheck("invalid published download URL for " + artifact)
+                    # Repeated asset names are common across tags; bind the complete documented download.
+                    if urllib.parse.unquote(fields["url"]) != urllib.parse.unquote(download):
+                        continue
                 digest = entry.get("digest")
                 if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
                     raise CouldNotCheck("no published SHA-256 for " + artifact)
