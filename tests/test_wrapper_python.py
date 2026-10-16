@@ -115,7 +115,7 @@ def test_the_cmd_twins_probe_python_when_no_interpreter_is_recorded(tmp_path, na
     stub_dir.mkdir()
     marker = tmp_path / "fallback-probe.txt"
     (stub_dir / "py.cmd").write_text(
-        '@echo off\r\n@echo %* > "%FALLBACK_MARKER%"\r\n@exit /b 0\r\n', encoding="ascii")
+        '@echo off\r\n@echo %* >> "%FALLBACK_MARKER%"\r\n@exit /b 0\r\n', encoding="ascii")
     env = {k: v for k, v in os.environ.items() if k != "SKYGUARD_PYTHON"}
     env.update(PATH=str(stub_dir), FALLBACK_MARKER=str(marker))
     comspec = os.environ.get("COMSPEC", r"C:\Windows\System32\cmd.exe")
@@ -123,4 +123,6 @@ def test_the_cmd_twins_probe_python_when_no_interpreter_is_recorded(tmp_path, na
                             capture_output=True, text=True, timeout=30, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert marker.exists(), "no recorded interpreter prevented the Python fallback probe"
-    assert marker.read_text().strip() == '-3 -c "import sys"'
+    attempts = marker.read_text().splitlines()
+    assert attempts[0].startswith('-3 -c ') and "(3, 10)" in attempts[0]
+    assert attempts[-1].startswith('-3 -B '), attempts

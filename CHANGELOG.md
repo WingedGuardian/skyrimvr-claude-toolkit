@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Doctor and guard CLI launchers require Python 3.10+, skip older candidates
+  and disable Python Install Manager's automatic installation while probing.
 - Failed vanilla-file relocks retain expired retry records across session start,
   guard changes and doctor cleanup. Relocking holds the state writer lock;
   new lifts cannot interleave with that operation, and failures report pending.

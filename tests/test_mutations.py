@@ -137,7 +137,17 @@ RELOCK_RETRY_MUTATIONS += [pytest.param("tools/skyguard/lock.py",
     "tests/test_relock_retries.py::test_live_lift_cap_preserves_each_files_relock_obligation",
     id="relock-retry-live-cap-preserves-scope")]
 
-MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + PRESERVATION_STATUS_MUTATIONS + RELOCK_RETRY_MUTATIONS + [
+CLI_FLOOR_MUTATIONS = [pytest.param(path, before, after, "tests/test_cli_python_floor.py::" + test,
+    id="cli-floor-" + name) for path, before, after, test, name in (
+    ("tools/skydoctor", "sys.version_info[:2] >= (3, 10)", "sys.version_info[:2] >= (3, 8)",
+     "test_bash_cli_skips_python39_and_disables_manager_installation[skydoctor]", "doctor-minimum"),
+    ("tools/skydoctor", "export PYTHON_MANAGER_AUTOMATIC_INSTALL=false", "export PYTHON_MANAGER_AUTOMATIC_INSTALL=true",
+     "test_bash_cli_skips_python39_and_disables_manager_installation[skydoctor]", "no-auto-install"),
+    ("tools/skydoctor.cmd", "if errorlevel 1 goto probe", "rem incompatible interpreter accepted",
+     "test_cmd_cli_skips_python39_and_disables_manager_installation[skydoctor.cmd]", "cmd-minimum"),
+)]
+
+MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + PRESERVATION_STATUS_MUTATIONS + RELOCK_RETRY_MUTATIONS + CLI_FLOOR_MUTATIONS + [
     pytest.param("tools/" + name,
                  'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'" set "SG_FILE_PY=%SG_FILE_PY:~1,-1%"',
                  "rem outer quote decoding removed",
