@@ -4515,7 +4515,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 ]]
 
 
-# Plan 6 Task 9: engine shadow mode (R8). One mutation per clause of engine.shadow plus the two wirings (Claude exit, Codex).
+# Plan 6 Task 9: engine shadow mode (R8). Cover ordered policy, Claude fallback and Codex wiring separately.
 _EN = "tools/skyguard/engine.py"
 _SH = "tests/test_skyguard_shadow.py::"
 _INERT_IF = '        if v.status == "failed" or codes._inert(v.code) or v.code == "unknown":'
@@ -4538,9 +4538,16 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SH + "test_an_unverifiable_state_reads_as_guards_on_with_a_log_line", "l2-shadow-rejected-logs"),
     (_EN, "    except Exception:  # noqa: BLE001 -- shadow mode", "    except OSError:  # noqa: BLE001 -- shadow mode",
      _SH + "test_a_failure_inside_shadow_mode_keeps_the_original_deny", "l2-shadow-fails-closed"),
-    ("tools/skyguard/run.py", "        v = engine.shadow(v, a.project, p[\"session_id\"], a.telemetry, audit)",
-     "        pass", _SH + "test_every_denied_or_asked_corpus_row_is_shadowed_except_the_inert_ones",
+    ("tools/skyguard/portable.py",
+     '        value = engine.shadow(codes.classify(value), str(project), req.session_id,\n'
+     '                              _legacy.telemetry if _legacy else "", audit, now=_legacy.now if _legacy else None,\n'
+     '                              **shadow_options)',
+     '        value = codes.classify(value)',
+     _SH + "test_every_denied_or_asked_corpus_row_is_shadowed_except_the_inert_ones",
      "l2-shadow-claude-exit"),
+    ("tools/skyguard/run.py", "        v = engine.shadow(v, a.project, p[\"session_id\"], a.telemetry, audit)",
+     "        pass", _SH + "test_a_websocket_monitor_uses_the_legacy_shadow_fallback[guards-off]",
+     "l2-shadow-claude-fallback-monitor"),
     ("tools/skyguard/run.py", "audit, telemetry=a.telemetry,", "audit,",
      _SH + "test_the_codex_hook_entry_point_honours_the_lift", "l2-shadow-codex-wired"),
 ]]

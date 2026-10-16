@@ -215,13 +215,19 @@ def test_a_scan_lists_each_saves_folder_once(cfg, monkeypatch):
 
 def test_the_first_existing_saves_folder_wins(tmp_path, cfg):
     """A declared config dir with no Saves folder is skipped; the first one that HAS a Saves folder is the only one read."""
+    def configured(*directories):
+        # Build both comparison and physical I/O roots through the production
+        # constructor; replacing just config_dirs leaves the physical roots stale.
+        config = paths.PathsConfig({}, {"SKYRIM_CONFIG_DIR": directories}, ())
+        return paths.roots("C:/t11/x", "", config)
+
     empty = tmp_path / "other"
     (empty / "Saves").mkdir(parents=True)
     r = paths.roots("C:/t11/x", "", {"SKYRIM_CONFIG_DIR": empty.as_posix()})
     assert mcp_rules.save_exists("Existing", r, ENV0) is False
-    r = r._replace(config_dirs=(tmp_path.as_posix() + "/none",) + r.config_dirs + (cfg,))
+    r = configured(tmp_path.as_posix() + "/none", empty.as_posix(), cfg)
     assert mcp_rules.save_exists("Existing", r, ENV0) is False               # `other` has a Saves folder: it wins
-    r = r._replace(config_dirs=(tmp_path.as_posix() + "/none", cfg, empty.as_posix()))
+    r = configured(tmp_path.as_posix() + "/none", cfg, empty.as_posix())
     assert mcp_rules.save_exists("Existing", r, ENV0) is True                # `none` skipped, `cfg` wins
 
 
