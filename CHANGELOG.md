@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Published dependency checksums are bound to the selected artifact's exact
+  filename, version and architecture. A digest belonging to another asset
+  cannot validate the pinned download; missing or conflicting metadata stays
+  explicitly unchecked.
 - Doctor and guard CLI launchers require Python 3.10+, skip older candidates
   and disable Python Install Manager's automatic installation while probing.
 - Failed vanilla-file relocks retain expired retry records across session start,

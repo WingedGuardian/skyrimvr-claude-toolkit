@@ -758,6 +758,97 @@ def test_a_pinned_hash_is_checked_by_downloading_when_upstream_publishes_none(tm
         assert [r.status for r in rows if r.check == "pinned hash"] == [want], [r.as_dict() for r in rows]
 
 
+@pytest.mark.parametrize("family,index", [
+    ("Node.js", 0), ("Node.js", 1), (".NET SDK", 0), (".NET SDK", 1),
+    ("Microsoft OpenJDK", 0), ("Microsoft OpenJDK", 1),
+    ("Blender (4.2 LTS)", 0), ("PyNifly", 0), ("PyNifly", 1), ("House Carl", 0), ("7-Zip", 0), ("7-Zip", 1),
+])
+@pytest.mark.parametrize("swapped", [False, True])
+def test_published_hash_belongs_to_the_exact_artifact(tmp_path, family, index, swapped):
+    spec = next(row for row in ta.REGISTRY if row["name"] == family)
+    items = [item for kind, args in spec["checks"] if kind == "hashes" for item in args["items"]]
+    item = items[index]
+    repo = ta.Repo(REPO)
+    import re
+    match = re.search(item["pattern"], repo.read(item["file"]))
+    fields = match.groupdict()
+    want, version = fields["sha"], fields["v"]
+    other = ("e" if want[0] != "e" else "f") * len(want)
+    correct, alternate = (other, want) if swapped else (want, other)
+    if family == "Node.js":
+        arch = "x64" if index == 0 else "arm64"
+        artifact = f"node-v{version}-linux-{arch}.tar.gz"
+        body = f"{correct}  {artifact}\n{alternate}  unrelated-platform.tar.gz\n"
+    elif family == ".NET SDK":
+        arch = "x64" if index == 0 else "arm64"
+        artifact = f"dotnet-sdk-{version}-linux-{arch}.tar.gz"
+        body = json.dumps({"releases": [{"sdk": {"version": version, "files": [
+            {"url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/" + version + "/" + artifact, "hash": correct},
+            {"url": "https://example.invalid/unrelated-platform.tar.gz", "hash": alternate}]}}]})
+    elif family == "Microsoft OpenJDK":
+        arch = "x64" if index == 0 else "aarch64"
+        artifact = f"microsoft-jdk-{version}-linux-{arch}.tar.gz"
+        body = f"{correct}  {artifact}\n{alternate}  unrelated-platform.tar.gz\n"
+    else:
+        artifact = fields["url"].rsplit("/", 1)[-1]
+        if family == "Blender (4.2 LTS)":
+            body = f"{correct}  {artifact}\n{alternate}  unrelated-platform.tar.gz\n"
+        else:
+            body = json.dumps({"assets": [{"name": artifact, "digest": "sha256:" + correct},
+                                           {"name": "unrelated-platform.zip", "digest": "sha256:" + alternate}]})
+    url = item["published"].format(**fields)
+    cache = make_cache(tmp_path, extra=[(url, 200, body.encode())])
+    rows = []
+    ta.check_hashes(ta.Fetcher(cache, offline=True, env={}), repo, family, version, None,
+                    {"items": [item]}, rows, {}, [])
+    assert [row.status for row in rows] == [ta.DRIFT if swapped else ta.OK], [row.as_dict() for row in rows]
+
+
+@pytest.mark.parametrize("fmt,body", [
+    ("github-release", '{"assets":[{"name":"selected.zip"}]}'),
+    ("github-release", '{"assets":{}}'),
+    ("github-release", '{"assets":[false]}'),
+    ("github-release", '{"assets":[{"name":"selected.zip","digest":"sha256:no"}]}'),
+    ("github-release", json.dumps({"assets": [
+        {"name": "selected.zip", "digest": "sha256:" + SHA_A},
+        {"name": "selected.zip", "digest": "sha256:" + SHA_B}]})),
+    ("dotnet", '{"releases":[{"sdk":{"files":[{"url":"https://example.invalid/selected.zip"}]}}]}'),
+    ("dotnet", '{"releases":false}'),
+    ("checksums", SHA_A),  # A bare digest cannot validate an artifact in a multi-file manifest.
+    ("checksums", SHA_A + "  selected.zip\n" + SHA_B + "  selected.zip\n"),
+    ("unknown", SHA_A + "  selected.zip\n"),
+])
+def test_ambiguous_or_unreadable_published_hash_is_unchecked(fmt, body):
+    item = {"label": "selected", "artifact": "selected.zip", "published_format": fmt}
+    with pytest.raises(ta.CouldNotCheck):
+        ta._published_checksum(ta.Response(200, body.encode()), "https://example.invalid/SUMS", item, {}, 64)
+
+
+@pytest.mark.parametrize("fmt,body", [
+    ("github-release", '{"assets":[]}'),
+    ("dotnet", '{"releases":[]}'),
+    ("checksums", SHA_A + "  other.zip\n"),
+])
+def test_an_absent_artifact_does_not_borrow_another_artifacts_hash(fmt, body):
+    item = {"label": "selected", "artifact": "selected.zip", "published_format": fmt}
+    assert ta._published_checksum(ta.Response(200, body.encode()), "https://example.invalid/SUMS", item, {}, 64) is None
+
+
+@pytest.mark.parametrize("filename", ["selected.zip", "*selected.zip", "./selected.zip"])
+def test_checksum_manifest_supported_filename_forms(filename):
+    item = {"label": "selected", "artifact": "selected.zip", "published_format": "checksums"}
+    body = (SHA_A.upper() + "  " + filename + "\n").encode()
+    assert ta._published_checksum(ta.Response(200, body), "https://example.invalid/SUMS", item, {}, 64) == SHA_A
+
+
+def test_a_bare_sidecar_hash_is_bound_to_its_artifact_specific_url():
+    item = {"label": "selected", "artifact": "selected.zip", "published_format": "checksums", "single_file": True}
+    response = ta.Response(200, (SHA_A + "\n").encode())
+    assert ta._published_checksum(response, "https://example.invalid/selected.zip.sha256sum.txt", item, {}, 64) == SHA_A
+    with pytest.raises(ta.CouldNotCheck):
+        ta._published_checksum(response, "https://example.invalid/other.zip.sha256sum.txt", item, {}, 64)
+
+
 def test_the_newest_main_nexus_file_is_the_upstream_version(tmp_path):
     url = "https://api.nexusmods.com/v1/games/g/mods/1/files.json"
     files = {"files": [{"category_name": "MAIN", "version": "6.0.636"}, {"category_name": "MAIN", "version": "6.0.643"},
@@ -898,7 +989,8 @@ GIT_LATEST_URL = "https://api.github.com/repos/git-for-windows/git/releases/late
 @pytest.mark.parametrize("sha,want", [(TESTED_GIT_SHA, ta.OK), ("f" * 64, ta.DRIFT)])
 def test_the_pinned_git_installer_hash_is_the_one_github_publishes(tmp_path, sha, want):
     release = json.dumps({"tag_name": TESTED_GIT_TAG, "assets": [
-        {"name": "Git-2.55.0.5-64-bit.exe", "digest": "sha256:" + TESTED_GIT_SHA}]}).encode()
+        {"name": "Git-2.55.0.5-64-bit.exe", "digest": "sha256:" + TESTED_GIT_SHA},
+        {"name": "unrelated-installer.exe", "digest": "sha256:" + "f" * 64}]}).encode()
     repo = make_repo(tmp_path, {"tools/inventory-runtimes.py": GIT_STEPS % sha})
     cache = make_cache(tmp_path, extra=[(GIT_RELEASE_URL, 200, release), (GIT_LATEST_URL, 200, release)])
     rows, _code = audit(repo, cache, ["Git for Windows"])
