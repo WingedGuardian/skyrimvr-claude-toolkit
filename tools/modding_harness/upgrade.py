@@ -98,12 +98,12 @@ def validate_ordered_settings(bundle, proposal):
         if settings is None:
             settings = read_settings(bundle / "rollback", name)
         candidate = pre(read_settings(bundle / "candidate", name)) if name in PROJECT_SETTINGS else []
-        if pre(settings) != candidate:
+        if json_bytes(pre(settings)) != json_bytes(candidate):
             raise ValueError("unresolved custom pre-handlers remain in ordered-policy settings")
         if name in proposal["files"]:
             baseline = (read_settings(bundle, PROJECT_SETTINGS[name]) if name in PROJECT_SETTINGS
                         else read_settings(bundle / "rollback", name))
-            if unrelated(settings) != unrelated(baseline):
+            if json_bytes(unrelated(settings)) != json_bytes(unrelated(baseline)):
                 raise ValueError("ordered-policy edit changes unrelated settings or handlers")
 
 

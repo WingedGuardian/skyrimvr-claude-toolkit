@@ -10,6 +10,8 @@ import pytest
 
 from conftest import REPO
 
+sys.path.insert(0, str(REPO / "tools"))
+
 
 DRIVER = r'''
 import { readFileSync } from 'node:fs';
@@ -46,9 +48,11 @@ def run_plugin(tmp_path, steps, env=None):
     driver.write_text(DRIVER)
     case = tmp_path / "case.json"
     case.write_text(json.dumps({"directory": str(root), "steps": steps}))
+    child_env = dict(os.environ, SKYRIM_PYTHON=sys.executable)
+    child_env.update(env or {})
     result = subprocess.run([node, str(driver), str(root / ".opencode/plugins/skyguard.js"), str(case)],
                             capture_output=True, text=True, timeout=60,
-                            env=dict(os.environ, SKYRIM_PYTHON=sys.executable, **(env or {})))
+                            env=child_env)
     assert result.returncode == 0, result.stderr
     return root, json.loads(result.stdout)
 
@@ -99,6 +103,48 @@ def test_missing_adapter_refuses_known_tools_and_unknown_receipt_failure_warns(t
     assert "GUARD INERT" in result[0]["error"]
     assert "error" not in result[1]
     assert "coverage receipt unavailable" in result[2]["output"]["output"]
+
+
+@pytest.mark.parametrize("failure", ["no-python", "no-adapter", "nonzero", "bad-json", "timeout"])
+def test_profile_known_devbench_tools_refuse_failed_transport(tmp_path, failure):
+    root, _ = run_plugin(tmp_path, [])
+    adapter = root / ".opencode/hooks/skyguard_adapter.py"
+    body = {"nonzero": "print('SKYGUARD-OPENCODE {\"decision\":\"allow\"}'); raise SystemExit(7)\n",
+            "bad-json": "print('SKYGUARD-OPENCODE broken')\n", "timeout": "import time; time.sleep(5)\n"}
+    if failure == "no-adapter":
+        adapter.unlink()
+    elif failure in body:
+        adapter.write_text(body[failure])
+    known = ["write", "mcp__devbench-vr__console", "mcp__my__Dev-Bench__game"]
+    unknown = ["mcp__future__tool", "future-tool"]
+    steps = [step for tool in known + unknown for step in (before(tool, {}, tool), after(tool, {}, tool))]
+    _, results = run_plugin(tmp_path, steps, env={
+        "SKYRIM_PYTHON": str(root / "missing-python") if failure == "no-python" else sys.executable,
+        "SKYRIM_NO_PYTHON_FALLBACK": "1", "SKYRIM_OPENCODE_TIMEOUT_S": "0.8"})
+    for index, tool in enumerate(known + unknown):
+        pre, post = results[index * 2:index * 2 + 2]
+        if tool in known:
+            assert "GUARD INERT" in pre.get("error", ""), (failure, tool, pre)
+            assert "WARN AND ALLOW" not in post["output"]["output"]
+        else:
+            assert "error" not in pre
+            assert "WARN AND ALLOW" in post["output"]["output"]
+            assert "coverage receipt unavailable" in post["output"]["output"]
+
+
+def test_healthy_devbench_transport_preserves_the_save_pair(tmp_path):
+    root, _ = run_plugin(tmp_path, [])
+    folder = tmp_path / "config/Saves"
+    folder.mkdir(parents=True)
+    (root / "skyrim-paths.env").write_text("SKYRIM_CONFIG_DIR='" + folder.parent.as_posix() + "'\n")
+    for suffix in (".ess", ".skse"):
+        (folder / ("Existing" + suffix)).write_bytes(suffix.encode())
+    _, results = run_plugin(tmp_path, [before("mcp__devbench-vr__console", {"command": "save Existing"})])
+    assert "error" not in results[0], results
+    records = list((root / ".modding-agent-harness/backups/saves/transactions").glob("*.json"))
+    assert len(records) == 1
+    manifest = json.loads(records[0].read_text())
+    assert len(manifest["groups"][0]["members"]) == 2
 
 
 def test_system_context_reinjects_preferences_after_each_transform(tmp_path):

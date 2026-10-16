@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The pinned shared runtime now protects absent restore destinations from new
+  writers, preserves JSON types during policy migration, and refuses selected
+  read-only upgrade candidates before publication. OpenCode transport failures
+  refuse Skyrim's known DevBench tools; unknown tools keep warnings and receipts.
 - Manual installs reject colliding final destinations before writing, including
   config `.new` paths and Windows aliases. Exclusive operation directories retain
   original backups and manifests across repeated installs, and backup hashes are

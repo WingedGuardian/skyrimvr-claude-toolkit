@@ -269,9 +269,11 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
             raise ValueError("staged candidate bytes changed: " + name)
         if expected is not None and durable.digest(upgrade._entry(bundle, "rollback/" + name), deadline) != expected:
             raise ValueError("rollback bytes changed: " + name)
-        changes.append({"path": name, "before": expected, "after": digest, "source": str(incoming),
-                        "mode": (upgrade._entry(root, name).stat().st_mode & 0o777 if expected is not None
-                                 else 0o600) if selected == "reviewed_settings" else modes[name],
+        mode = ((upgrade._entry(root, name).stat().st_mode & 0o777 if expected is not None
+                 else 0o600) if selected == "reviewed_settings" else modes[name])
+        if not mode & 0o222:
+            raise ValueError("read-only candidate mode requires separate review: " + name)
+        changes.append({"path": name, "before": expected, "after": digest, "source": str(incoming), "mode": mode,
                         "before_mode": upgrade._entry(root, name).stat().st_mode & 0o777 if expected else None,
                         "reviewed_settings": selected == "reviewed_settings"})
     if integration is not None:

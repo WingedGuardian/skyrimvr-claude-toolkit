@@ -26,6 +26,19 @@ function inertError(cause) {
   return e
 }
 
+function isJudgedTool(tool) {
+  if (JUDGED.has(tool)) return true
+  if (options.isJudgedTool === undefined) return false
+  try {
+    if (typeof options.isJudgedTool !== "function") throw new TypeError()
+    const known = options.isJudgedTool(tool)
+    if (typeof known !== "boolean") throw new TypeError()
+    return known
+  } catch {
+    throw inertError("the profile's tool classifier failed")
+  }
+}
+
 function timeoutSeconds() {
   const raw = envVar("OPENCODE_TIMEOUT_S")
   if (raw === undefined || raw.trim() === "") return 60
@@ -253,7 +266,7 @@ return async ({ directory }) => {
       try {
         v = await ask("pre", input, output.args)
       } catch (e) {
-        if (!JUDGED.has(input.tool)) {
+        if (!isJudgedTool(input.tool)) {
           // Unknown surfaces retain warn-and-allow even when the receipt service
           // is unavailable. Do not claim a durable receipt in this fallback.
           const key = JSON.stringify([input.sessionID ?? "", input.tool])

@@ -281,8 +281,9 @@ class SaveStore:
     def restore(self, transaction, destination=None, selected=(), in_place=False, deadline=None):
         """Restore complete logical groups, with immutable progress events.
 
-        New-directory publication is no-clobber. In-place replacement preserves the
-        complete current group and revalidates it; callers must quiesce native writers.
+        Previously absent destinations use no-clobber publication in both modes.
+        In-place replacement preserves and revalidates complete current groups,
+        including groups without any existing member; callers must quiesce native writers.
         Multi-file publication is journalled, not claimed to be atomic.
         """
         if in_place and destination is not None:
@@ -298,7 +299,9 @@ class SaveStore:
         operation = uuid.uuid4().hex
         journal = self.root / "restores" / operation
         base = Path(destination) if destination else self.root / "restored" / operation
-        targets = []
+        current = [_state([rec["path"] for rec in group["members"]]) for group in groups] if in_place else []
+        initially_present = {path for state in current for path, _real, ident in state if ident is not None}
+        targets, missing_targets = [], []
         for gi, group in enumerate(groups):
             for rec in group["members"]:
                 # Separate groups avoid collapsing equal basenames from distinct roots.
@@ -306,6 +309,7 @@ class SaveStore:
                 if rec["missing"]:
                     if os.path.lexists(target):
                         raise PreservationFailed("unexpected counterpart at restore destination: {}".format(target))
+                    missing_targets.append(target)
                 else:
                     if not in_place and os.path.lexists(target):
                         raise FileExistsError(str(target))
@@ -317,7 +321,9 @@ class SaveStore:
         journal.mkdir(parents=True, exist_ok=False)
         durable.atomic_json(journal / "0000-plan.json", {
             "transaction": transaction, "prebackup": before["id"] if before else None,
-            "targets": [str(target) for _, target in targets], "in_place": in_place})
+            "targets": [str(target) for _, target in targets], "in_place": in_place,
+            "initially_missing": [path for state in current for path, _real, ident in state if ident is None],
+            "missing_targets": [str(target) for target in missing_targets]})
         candidates, published = [], []
         try:
             for rec, target in targets:
@@ -329,15 +335,20 @@ class SaveStore:
                     raise PreservationFailed("restore candidate hash mismatch")
             if before:
                 self.revalidate(before["groups"], deadline)
+            if current != [_state([path for path, _real, _ident in state]) for state in current]:
+                raise PreservationFailed("restore destination membership or identity changed during staging")
             for index, (part, target) in enumerate(candidates, 1):
                 durable.check_deadline(deadline)
-                if in_place:
+                if in_place and str(target.absolute()) in initially_present:
                     os.replace(part, target)
                     durable.sync_dir(target.parent)
                 else:
                     durable.publish_new(part, target)
                 published.append(str(target))
                 durable.atomic_json(journal / ("{:04d}-published.json".format(index)), {"path": str(target)})
+            for target in missing_targets:
+                if os.path.lexists(target):
+                    raise PreservationFailed("unexpected counterpart appeared during restore: {}".format(target))
             durable.atomic_json(journal / "complete.json", {"published": published})
             return {"operation": operation, "destination": str(base) if not in_place else None,
                     "published": published, "journal": str(journal)}
