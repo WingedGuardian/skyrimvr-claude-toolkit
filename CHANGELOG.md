@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Resumed corpus replay binds cached rows to frozen items, both hook trees,
+  copied engine/runtime bytes, recording helpers and effective environment.
+  Changed or unqualified caches are retained and require a fresh output
+  directory. Input drift invalidates the run; matching engine errors cannot
+  count as successful agreement.
 - Rule-pricing samples carry an ownership manifest. Previous unchanged samples
   are retained in an archive, modified or unowned files stay untouched, and
   filename collisions refuse replacement. Keep the output directory quiescent

@@ -9039,3 +9039,13 @@ MUTATIONS += [
 ]
 
 MUTATIONS += [pytest.param("scripts/thirdparty-audit.py", '                    if urllib.parse.unquote(fields["url"]) != urllib.parse.unquote(download):', "                    if False:", "tests/test_thirdparty_audit.py::test_addon_download_url_must_belong_to_the_release_whose_checksum_is_published", id="review-published-hash-wrong-release-url")]
+
+# Resumable results are evidence for one exact instrument, never only an item index.
+MUTATIONS += [
+    pytest.param('scripts/guard-corpus/replay.py', '"modding_harness": _tree_identity(rec.REPO / "tools/modding_harness")', '"modding_harness": {}', 'tests/test_replay_identity.py::test_changed_inputs_refuse_cached_rows_without_overwriting_evidence[runtime]', id='review-replay-identity-core'),
+    pytest.param('scripts/guard-corpus/replay.py', '"skyguard": _tree_identity(rec.REPO / "tools/skyguard")', '"skyguard": {}', 'tests/test_replay_identity.py::test_changed_inputs_refuse_cached_rows_without_overwriting_evidence[helper]', id='review-replay-identity-engine'),
+    pytest.param('scripts/guard-corpus/replay.py', '_digest(Path(rec.__file__).read_bytes())', '"unbound"', 'tests/test_replay_identity.py::test_changed_inputs_refuse_cached_rows_without_overwriting_evidence[record]', id='review-replay-identity-record'),
+    pytest.param('scripts/guard-corpus/replay.py', '"items_sha256": _digest(frozen)', '"items_sha256": "unbound"', 'tests/test_replay_identity.py::test_changed_inputs_refuse_cached_rows_without_overwriting_evidence[items]', id='review-replay-identity-items'),
+    pytest.param('scripts/guard-corpus/replay.py', '_digest(json.dumps(inherited, sort_keys=True).encode("utf-8"))', '"unbound"', 'tests/test_replay_identity.py::test_environment_binding_keeps_secret_values_out_of_the_identity', id='review-replay-identity-environment'),
+    pytest.param('scripts/guard-corpus/replay.py', '    return 2 if summary["errors"] else 0 if agree == len(items) else 1', '    return 0 if agree == len(items) else 1', 'tests/test_replay_identity.py::test_identical_engine_errors_are_nonanswers_and_are_retried', id='review-replay-identity-errors'),
+]

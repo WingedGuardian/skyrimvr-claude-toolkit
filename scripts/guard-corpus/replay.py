@@ -8,15 +8,20 @@ wired to that decide anything. The side-effect hooks (snapshot-before-tool, back
 no decision and are not replayed.
 
 Raw commands can hold secrets and private paths, so they go ONLY to --out-dir, which must be outside
-the repo. The script prints counts only.
+the repo. The script prints counts only. Resuming requires the same frozen items, hook/engine/helper
+bytes, effective environment and interpreter executables. Keep sources, runtime support files and
+the output directory quiescent during a run. Changed or legacy caches require a fresh output directory.
 """
 from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import importlib.util
 import json
+import os
 import re
+import shutil
 import sys
 import tempfile
 import threading
@@ -30,6 +35,56 @@ rec = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rec)
 
 FILE_TOOLS = ("Edit", "Write", "MultiEdit")
+
+
+def _digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _tree_identity(root: Path) -> dict:
+    if not root.is_dir():
+        return {"<absent>": "absent"}
+    out = {}
+    def failed(error):
+        raise error
+    for directory, names, files in os.walk(root, onerror=failed):
+        names[:] = sorted(name for name in names if name != "__pycache__")
+        for name in sorted(files):
+            path = Path(directory) / name
+            out[path.relative_to(root).as_posix()] = _digest(path.read_bytes())
+    return out
+
+
+def _cache_identity(old: Path, new: Path, frozen: bytes) -> dict:
+    copied = {"old-hooks": {p.name: _digest(p.read_bytes()) for p in sorted(old.glob("*.sh"))},
+              "new-hooks": {p.name: _digest(p.read_bytes()) for p in sorted(new.glob("*.sh"))},
+              "skyguard": _tree_identity(rec.REPO / "tools/skyguard"),
+              "modding_harness": _tree_identity(rec.REPO / "tools/modding_harness")}
+    drivers = {"replay": _digest(Path(__file__).read_bytes()), "record": _digest(Path(rec.__file__).read_bytes()),
+               "game-root": _digest((rec.REPO / "tests/guard_corpus/game-root.txt").read_bytes()),
+               "loaded-game-root": _digest(rec.GAME.encode("utf-8"))}
+    # record.fire replaces these values for each private install. All other inherited values can affect a hook.
+    replaced = {*rec.ENV_KEYS, "CLAUDE_PROJECT_DIR", *rec.home_env(Path("<install>"))}
+    inherited = {key: value for key, value in os.environ.items() if key not in replaced}
+    executables = {}
+    for name, raw in (("python", sys.executable), ("bash", rec.bash()), ("jq", shutil.which("jq"))):
+        path = Path(raw).resolve() if raw else None
+        executables[name] = {"path": str(path) if path else "absent",
+                             "sha256": _digest(path.read_bytes()) if path else "absent"}
+    return {"version": 1, "items_sha256": _digest(frozen), "copied": copied, "drivers": drivers,
+            "environment_sha256": _digest(json.dumps(inherited, sort_keys=True).encode("utf-8")),
+            "cwd": str(Path.cwd().resolve()), "python_version": sys.version, "executables": executables}
+
+
+def _refuse(message: str) -> int:
+    print("REFUSING replay: " + message + "; preserve this output and use a fresh --out-dir", file=sys.stderr)
+    return 2
+
+
+def _invalidate(out_dir: Path, message: str) -> int:
+    with (out_dir / "replay.invalid").open("x", encoding="utf-8") as stream:
+        stream.write(message + "\n")
+    return _refuse(message)
 
 
 def _wide_item(name: str, inp: dict, cwd):
@@ -112,30 +167,72 @@ def run(old: Path, new: Path, history: Path, out_dir: Path, jobs: int, limit: in
     if rec.needs_missing_jq(old):
         raise SystemExit("the old hooks need jq and it is not installed")
     out_dir.mkdir(parents=True, exist_ok=True)
+    if (out_dir / "replay.invalid").exists():
+        return _refuse("this replay was invalidated by changing inputs")
+    if type(jobs) is not int or jobs < 1 or (limit is not None and (type(limit) is not int or limit < 1)):
+        return _refuse("jobs and any limit must be positive integers")
     # The item list is frozen on the first run, so a resumed run replays the same N while history grows.
     frozen = out_dir / "items.json"
-    if frozen.is_file():
-        snap = json.loads(frozen.read_text(encoding="utf-8"))
-    else:
-        items, counts = extract(history)
-        snap = {"items": items, "counts": counts}
-        frozen.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+    identity_path = out_dir / "replay.identity.json"
+    done_path = out_dir / "results.jsonl"
+    try:
+        if frozen.is_file():
+            snap = json.loads(frozen.read_text(encoding="utf-8"))
+        elif identity_path.exists() or done_path.exists():
+            return _refuse("frozen items are missing from an existing cache")
+        else:
+            items, counts = extract(history)
+            snap = {"items": items, "counts": counts}
+            with frozen.open("x", encoding="utf-8") as stream:
+                stream.write(json.dumps(snap, ensure_ascii=False))
+        if not isinstance(snap, dict) or not isinstance(snap.get("items"), list) or not isinstance(snap.get("counts"), dict):
+            return _refuse("invalid frozen item snapshot")
+        identity = _cache_identity(old, new, frozen.read_bytes())
+        if identity_path.exists():
+            previous = json.loads(identity_path.read_text(encoding="utf-8"))
+            if (not isinstance(previous, dict) or type(previous.get("version")) is not int or previous != identity):
+                return _refuse("engine, driver, runtime, environment or frozen items changed")
+        elif done_path.exists():
+            return _refuse("existing results have no qualified engine identity")
+        else:
+            with identity_path.open("x", encoding="utf-8") as stream:
+                stream.write(json.dumps(identity, sort_keys=True, indent=2) + "\n")
+    except (OSError, ValueError) as exc:
+        return _refuse("could not bind replay inputs (" + type(exc).__name__ + ")")
+    epoch = _digest(json.dumps(identity, sort_keys=True).encode("utf-8"))
     items, counts = snap["items"], snap["counts"]
     if limit:
         items = items[:limit]
     # Results are appended as they complete, so an interrupted run resumes instead of restarting.
-    done_path = out_dir / "results.jsonl"
     done = {}
-    if done_path.is_file():
-        for line in done_path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                r = json.loads(line)
-                # A crash or timeout (e.g. under machine load) is retried on resume, not frozen in.
-                if "error" not in (r["old"]["decision"], r["new"]["decision"]):
-                    done[r["k"]] = (r["old"], r["new"])
+    if not items:
+        return _refuse("no replay items are available")
+    try:
+        if done_path.is_file():
+            for line in done_path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    r = json.loads(line)
+                    if (not isinstance(r, dict) or r.get("epoch") != epoch or type(r.get("k")) is not int or
+                            not 0 <= r["k"] < len(snap["items"])):
+                        return _refuse("cached row is not bound to this replay")
+                    for side in ("old", "new"):
+                        v = r.get(side)
+                        if (not isinstance(v, dict) or v.get("decision") not in ("allow", "advise", "ask", "deny", "error") or
+                                not isinstance(v.get("text"), str)):
+                            return _refuse("cached row has an invalid verdict")
+                    # A crash or timeout is retried on resume, not frozen in.
+                    if "error" not in (r["old"]["decision"], r["new"]["decision"]):
+                        done[r["k"]] = (r["old"], r["new"])
+    except (OSError, ValueError):
+        return _refuse("cached results could not be read")
     with tempfile.TemporaryDirectory() as td:
         io = rec.make_install(Path(td) / "old", old, "declared")
         ino = rec.make_install(Path(td) / "new", new, "declared")
+        try:
+            if _cache_identity(old, new, frozen.read_bytes()) != identity:
+                return _invalidate(out_dir, "inputs changed during engine staging")
+        except OSError:
+            return _invalidate(out_dir, "replay inputs became unreadable during staging")
         pats = {id(io): _install_patterns(io), id(ino): _install_patterns(ino)}
 
         def one(install, item):
@@ -148,12 +245,12 @@ def run(old: Path, new: Path, history: Path, out_dir: Path, jobs: int, limit: in
 
         lock = threading.Lock()
         todo = [k for k in range(len(items)) if k not in done]
-        print(f"{len(items)} items, {len(done)} already done, {len(todo)} to run", flush=True)
+        print(f"{len(items)} items, {len(items) - len(todo)} already done, {len(todo)} to run", flush=True)
 
         def both(k):
             o, n = one(io, items[k]), one(ino, items[k])
             with lock:
-                fh.write(json.dumps({"k": k, "old": o, "new": n}, ensure_ascii=False) + "\n")
+                fh.write(json.dumps({"epoch": epoch, "k": k, "old": o, "new": n}, ensure_ascii=False) + "\n")
                 fh.flush()
                 done[k] = (o, n)
                 if len(done) % 1000 == 0:
@@ -162,6 +259,12 @@ def run(old: Path, new: Path, history: Path, out_dir: Path, jobs: int, limit: in
         with done_path.open("a", encoding="utf-8", newline="\n") as fh, ThreadPoolExecutor(max_workers=jobs) as ex:
             list(ex.map(both, todo))
         results = [done[k] for k in range(len(items))]
+
+    try:
+        if _cache_identity(old, new, frozen.read_bytes()) != identity:
+            return _invalidate(out_dir, "inputs changed during replay")
+    except OSError:
+        return _invalidate(out_dir, "replay inputs became unreadable")
 
     matrix = collections.Counter()
     agree = 0
@@ -173,6 +276,7 @@ def run(old: Path, new: Path, history: Path, out_dir: Path, jobs: int, limit: in
             else:
                 dis.write(json.dumps({**item, "old": o, "new": n}, ensure_ascii=False) + "\n")
     summary = {"N": len(items), "agree": agree, "disagree": len(items) - agree, "raw_tool_calls": counts,
+               "errors": sum("error" in (old["decision"], new["decision"]) for old, new in results),
                "matrix": [{"hook": h, "old": o, "new": n, "count": c} for (h, o, n), c in sorted(matrix.items())]}
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(f"N={summary['N']} agree={agree} disagree={summary['disagree']}")
@@ -181,7 +285,7 @@ def run(old: Path, new: Path, history: Path, out_dir: Path, jobs: int, limit: in
     for (h, o, n), c in sorted(matrix.items()):
         print(f"{h:<18}{o:<8}{n:<8}{c}")
     print(f"disagreements -> {out_dir / 'disagreements.jsonl'}")
-    return 0 if agree == len(items) else 1
+    return 2 if summary["errors"] else 0 if agree == len(items) else 1
 
 
 if __name__ == "__main__":
