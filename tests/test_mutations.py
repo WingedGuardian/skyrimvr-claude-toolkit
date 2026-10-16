@@ -131,6 +131,11 @@ RELOCK_RETRY_MUTATIONS += [pytest.param("tools/skyguard/health.py",
     'native_name = tool.rsplit(".", 1)[-1]',
     "tests/test_skyguard_coverage.py::test_mcp_native_looking_tool_names_keep_their_identity",
     id="coverage-dotted-mcp-keeps-identity")]
+RELOCK_RETRY_MUTATIONS += [pytest.param("tools/skyguard/lock.py",
+    '    pending += [dict(x, expires_at=min(x["expires_at"], now)) for x in evicted if x["kind"] == "lock"]',
+    '    pending += []',
+    "tests/test_relock_retries.py::test_live_lift_cap_preserves_each_files_relock_obligation",
+    id="relock-retry-live-cap-preserves-scope")]
 
 MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + PRESERVATION_STATUS_MUTATIONS + RELOCK_RETRY_MUTATIONS + [
     pytest.param("tools/" + name,

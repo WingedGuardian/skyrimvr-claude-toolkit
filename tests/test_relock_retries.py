@@ -117,3 +117,33 @@ def test_file_permission_operations_hold_the_state_writer_lock(pending, monkeypa
     result = lock.unlock(root, ["Skyrim.esm"], "fixture", now=now) if operation == "unlock" else (
         lock.enable(root) if operation == "enable" else lock.lock_all(root))
     assert result.exit == 0 and called == [True]
+
+
+def test_live_lift_cap_preserves_each_files_relock_obligation(pending, monkeypatch):
+    root, sf, lift, now = pending
+    first = dict(lift, created=now, expires_at=now + 600)
+    later = [dict(first, files=["Update.esm"], created=now + i + 1, expires_at=now + 700)
+             for i in range(lock.MAX_LIFTS)]
+    kept = lock._live_lifts([first] + later, now + lock.MAX_LIFTS)
+    assert len(kept) <= lock.MAX_LIFTS
+    assert any(x.get("files") is None or "Skyrim.esm" in x["files"] for x in kept)
+    state.write(sf, {"v": 1, "lifts": kept, "persistent": {}})
+    touched = []
+    def fake(root, only):
+        touched.extend(name for name in ("Skyrim.esm", "Update.esm") if only(name))
+        return lock.Result(0, ["fixture"], {"locked": list(touched)})
+    monkeypatch.setattr(lock, "lock_all", fake)
+    assert lock.relock_expired(root, now + lock.MAX_LIFTS + 1).exit == 0
+    assert touched == ["Skyrim.esm"]  # Update's retained live permission still holds.
+    assert all(not state.lift_expired(x, now + lock.MAX_LIFTS + 1) for x in state.read(sf).lifts)
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_pending_retry_coalescing_preserves_the_union_and_full_scope(pending, full):
+    root, sf, lift, now = pending
+    other = dict(lift, files=["Update.esm"])
+    if full:
+        other.pop("files")
+    rows = lock._live_lifts([lift, other], now)
+    assert len(rows) == 1 and state.lift_expired(rows[0], now)
+    assert rows[0].get("files") is None if full else set(rows[0]["files"]) == {"Skyrim.esm", "Update.esm"}

@@ -801,13 +801,24 @@ MAX_LIFTS = 100
 def _live_lifts(lifts, now):
     """Prune old permissions, preserving expired lock obligations until relock succeeds.
 
-    Pending retries are never silently evicted. The state byte limit refuses a
-    further unlock rather than forgetting a file that still needs relocking.
+    Pending retries occupy one reserved slot, with the union of their scopes.
+    Evicted lock permissions expire immediately instead of losing their files.
     """
     pending = [x for x in lifts if x["kind"] == "lock" and _state.lift_expired(x, now)]
     live = [x for x in lifts if not _state.lift_expired(x, now)]
     live.sort(key=lambda x: x["created"])
-    return pending + live[-MAX_LIFTS:]
+    limit = MAX_LIFTS - 1 if pending or any(x["kind"] == "lock" for x in live[:-MAX_LIFTS]) else MAX_LIFTS
+    evicted, live = live[:-limit], live[-limit:]
+    pending += [dict(x, expires_at=min(x["expires_at"], now)) for x in evicted if x["kind"] == "lock"]
+    if len(pending) > 1:
+        merged = dict(pending[0], reason="expired lock retry", session_id="lock-relock", agent="system",
+                      created=min(x["created"] for x in pending), expires_at=min(now, *(x["expires_at"] for x in pending)))
+        if any(x.get("files") is None for x in pending):
+            merged.pop("files", None)
+        else:
+            merged["files"] = sorted({name.lower(): name for x in pending for name in x["files"]}.values())
+        pending = [merged]
+    return pending + live
 
 
 def _interactive() -> bool:
