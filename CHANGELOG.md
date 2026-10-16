@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Spriggit publication rechecks destination identity and bytes after staging,
+  uses exclusive publication and rollback renames, and retains previous output
+  after success. A concurrent writer cannot be erased by backup cleanup; a
+  blocked rollback names the retained recovery path.
 - Bash ANSI-C quoted paths decode hexadecimal, octal, Unicode and control
   escapes before policy evaluation. Escaped save names retain pair backups and
   bulk approval limits; escaped plugin extensions retain raw-write refusal.

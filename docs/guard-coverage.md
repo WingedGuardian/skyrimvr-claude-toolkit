@@ -4,6 +4,12 @@ Plan 5 Task 14. This is the inventory the guards are judged against: for each ro
 mutate the install or the machine, which hook sees it and what that hook does not catch. A hook that "sees" a
 route is not a hook that stops everything on it; the last column says what slips through.
 
+Bash ANSI-C quoted paths are interpreted as UTF-8 bytes, including hexadecimal,
+octal, Unicode, control and unknown escapes, and NUL truncation. ASCII Unicode
+escapes and dropped out-of-range Unicode escapes are covered by Bash-oracle and
+save/plugin policy tests. Non-ASCII Unicode escapes depend on the shell locale;
+their different spelling in a non-UTF-8 locale is not qualified by this parser.
+
 `tests/test_guard_coverage.py` parses this file and the shipped `agent/targets/claude/settings.json` and fails
 if the two disagree (a route marked guarded that no matcher fires on, a route marked uncovered that a
 matcher now fires on, a matcher naming a tool this table lacks, or a summary count that is wrong).

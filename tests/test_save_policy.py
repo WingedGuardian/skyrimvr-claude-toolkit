@@ -308,9 +308,10 @@ def test_every_change_shape_is_one_backed_up_save(inst, cmd, shell, want_ops):
     assert ops(v) == want_ops
 
 
+@pytest.mark.parametrize("tail", ["", r"\0\uD800", r"\0\Uffffffff", r"\Uffffffff", r"\U80000000"])
 @pytest.mark.parametrize("escape", [r"\x65", r"\145", r"\u0065", r"\U00000065"])
-def test_ansi_c_save_suffix_keeps_complete_verified_pair(inst, escape):
-    command = "printf x > $'" + inst.S + "/Save1." + escape + "ss'"
+def test_ansi_c_save_suffix_keeps_complete_verified_pair(inst, escape, tail):
+    command = "printf x > $'" + inst.S + "/Save1." + escape + "ss" + tail + "'"
     verdict = inst.shell(command)
     assert stems(verdict) == ["Save1"]
     result = inst.enforce(verdict)
@@ -328,9 +329,10 @@ def test_ansi_c_bulk_save_changes_keep_approval_boundary(inst):
     assert not inst.saved()
 
 
+@pytest.mark.parametrize("tail", ["", r"\0\uD800", r"\0\Uffffffff", r"\Uffffffff", r"\U80000000"])
 @pytest.mark.parametrize("escape", [r"\x65", r"\145", r"\u0065", r"\U00000065"])
-def test_ansi_c_plugin_suffix_remains_a_raw_binary_write_refusal(inst, escape):
-    verdict = inst.shell("printf x > $'" + inst.game.as_posix() + "/Data/plugin." + escape + "sp'")
+def test_ansi_c_plugin_suffix_remains_a_raw_binary_write_refusal(inst, escape, tail):
+    verdict = inst.shell("printf x > $'" + inst.game.as_posix() + "/Data/plugin." + escape + "sp" + tail + "'")
     assert verdict.decision == "deny"
     assert "raw" in verdict.reason.lower() or "text" in verdict.reason.lower()
 

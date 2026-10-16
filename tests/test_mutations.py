@@ -16,6 +16,7 @@ under pytest's tmp_path, and pytest is re-invoked inside that copy.
 from __future__ import annotations
 
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -66,9 +67,21 @@ ANSI_C_MUTATIONS = [pytest.param("tools/skyguard/shellparse.py", before, after,
         ('                    data = ("\\\\" + nx).encode("utf-8", "surrogateescape")',
          '                    data = nx.encode("utf-8", "surrogateescape")', 'unknown-backslash'),
         ('                truncated = bool(separator)', '                truncated = False', 'nul-truncation'),
+        ('    if value >= 0x80000000:', '    if False:', 'dropped-unicode-tail'),
     )]
 
-MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + [
+SPRIGGIT_RACE_MUTATIONS = [pytest.param("tools/spriggit_publish.py", before, after,
+    "tests/test_spriggit_publication_races.py::" + test, id="spriggit-race-" + name)
+    for before, after, test, name in (
+        ('            _rename_new(stage, target)', '            os.replace(stage, target)',
+         'test_new_destination_at_publication_is_not_clobbered', 'exclusive-publication'),
+        ('                    _rename_new(backup, target)', '                    os.replace(backup, target)',
+         'test_publication_failure_with_new_destination_keeps_both_versions', 'exclusive-rollback'),
+        ('            if moved and _state(backup) != observed:', '            if False:',
+         'test_change_during_retirement_is_restored_with_its_bytes', 'retired-state'),
+    )]
+
+MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + [
     pytest.param("tools/" + name,
                  'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'" set "SG_FILE_PY=%SG_FILE_PY:~1,-1%"',
                  "rem outer quote decoding removed",
@@ -4272,7 +4285,8 @@ def test_guard_actually_bites(tmp_path, relpath, find, replace, test_id):
     work = _mutate(tmp_path, relpath, find, replace)
     result = subprocess.run(
         [sys.executable, "-m", "pytest", test_id, "-q", "--no-header", "-p", "no:cacheprovider", "-rs"],
-        cwd=str(work), capture_output=True, text=True, timeout=600,
+        cwd=str(work), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+        env=dict(os.environ, PYTHONIOENCODING="utf-8"),
     )
     why = _anchor_skipped_off_windows(result.returncode, result.stdout)
     if why:

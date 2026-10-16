@@ -28,6 +28,11 @@ BS = chr(92)
     r"a\cA\ca\c?\c_b", r"a\0ignored", r"a\x00ignored",
     r"a\u0000ignored", r"\xC3\xA9", r"\u00e9\U0001f600",
     r"a\n\r\t\a\b\e\E\f\v\\\'\"\?b", r"a\x\u\Uend",
+    r"a\c\\b", r"a\c", r"Data/test.\x65sp\0\uD800",
+    r"Data/test.\x65sp\0\Uffffffff", "Data/test.\\x65sp\\0\\cé",
+    r"a\c\b", r"a\c\\\b", r"a\c\\\\b", r"a\c\'b", r'a\c\"b', "a\\céb",
+    r"\uD800", r"\U00110000", r"\U7fffffff", r"Fixture.\x65sp\Uffffffff",
+    r"Fixture.\x65sp\U80000000",
 ])
 def test_ansi_c_arguments_match_stdout_only_bash_oracle(quoted):
     # Hardcoded literals only. The oracle prints an argument; it writes no files.

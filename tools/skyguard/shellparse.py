@@ -576,6 +576,20 @@ _CMDLIKE = re.compile(r"[\s(]*[A-Za-z_./][A-Za-z0-9_./-]{0,255}[ \t]+(?:-[A-Za-z
 _SUBST_START = re.compile(r"\$\(|`|[<>]\(")
 _ANSI = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f",
          "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?"}
+
+
+def _ansi_utf8(value):
+    """Bash's UTF-8 byte encoding, including its legacy non-scalar values."""
+    if value >= 0x80000000:
+        return b""  # Bash drops out-of-range \U escapes, retaining the suffix.
+    if value < 0x80:
+        return bytes((value,))
+    size = next(size for size, limit in ((2, 0x800), (3, 0x10000), (4, 0x200000),
+                                        (5, 0x4000000), (6, 0x80000000)) if value < limit)
+    return bytes((((0xff << (8 - size)) & 255) | (value >> (6 * (size - 1))),)) + bytes(
+        0x80 | ((value >> (6 * index)) & 63) for index in reversed(range(size - 1)))
+
+
 _BASH_REDIR_OPS = ("<<<", "<<-", "<<", "<>", "<&", "<", ">>", ">&", ">|", ">")
 _FD_WORD = re.compile(r"[0-9]{1,3}|\{[A-Za-z_][A-Za-z0-9_]{0,63}\}")
 _FUNC_NAME = re.compile(r"[A-Za-z0-9_:.+-]{1,256}")
@@ -895,6 +909,12 @@ class _Bash(_Scanner):
                 w.add(out.decode("utf-8", "surrogateescape"))
                 self.i = j + 1
                 return
+            if truncated:
+                # Bash ignores this quoted portion after its first NUL. Only
+                # locate the closing quote; invalid discarded escapes cannot
+                # erase an already known command/path from the parse.
+                j += 2 if c == "\\" and j + 1 < n else 1
+                continue
             if c == "\\" and j + 1 < n:
                 nx = t[j + 1]
                 j += 2
@@ -914,17 +934,19 @@ class _Bash(_Scanner):
                         value = int(t[start:end], base)
                         j = end
                         if nx in "uU":
-                            if value > 0x10ffff or 0xd800 <= value <= 0xdfff:
-                                raise ParseError("non-scalar ANSI-C Unicode escape")
-                            data = chr(value).encode("utf-8")
+                            data = _ansi_utf8(value)
                         else:
                             data = bytes((value & 255,))
-                elif nx == "c" and j < n:
+                elif nx == "c" and j < n and t[j] != "'":
                     control = t[j]
                     j += 1
-                    if ord(control) > 127:
-                        raise ParseError("non-ASCII ANSI-C control escape")
-                    data = bytes((127 if control == "?" else ord(control.upper()) & 31,))
+                    if control == "\\" and j < n and t[j] == "\\":
+                        j += 1
+                    raw = control.encode("utf-8", "surrogateescape")
+                    data = bytes((127 if raw[0] == 63 else raw[0] & 31,)) + raw[1:]
+                    if control == "\\" and j < n and t[j] == "'":
+                        data += b"'"
+                        j += 1
                 else:
                     # Unrecognized escapes retain the backslash in Bash.
                     data = ("\\" + nx).encode("utf-8", "surrogateescape")

@@ -10,10 +10,17 @@ Publication rejects missing/empty files, linked artifacts and directory results 
 nonempty YAML. This is structural artifact validation, **not** proof of valid plugin content.
 Input/output overlap and linked destinations are rejected. Output is copied to a unique
 staging directory beside the destination, validated, then renamed into place. An existing
-destination is renamed aside first and restored if publication fails. Old YAML never overlays
+destination's identity and bytes are captured before staging and rechecked before publication.
+It is renamed aside first and restored if publication fails. All publication and rollback
+renames refuse an existing destination, including an empty directory. Unsupported exclusive
+rename primitives/filesystems refuse; there is no overwriting fallback. Old YAML never overlays
 the new result. A process crash between renames can leave `.spriggit-previous-*`; preserve it
 and inspect before recovery. Concurrent publication to the same destination is rejected.
-Post-commit cleanup failures are warnings naming retained artifacts, not failed publication.
+The previous output is retained after success and its path is printed. This also preserves
+bytes written through an old handle. If a new writer prevents rollback, both its destination
+and the previous output remain and the failure names the recovery path. Stop other writers
+while publishing: the existing-artifact checks are not a filesystem compare-and-swap.
+Operation-owned staging cleanup failures are warnings naming retained artifacts.
 After a crash, inspect a retained `.spriggit-lock-*` before removing it; no stale lock is stolen.
 The held-lock error names this destination's debris (`.spriggit-previous-<key>-*` holds the OLD
 output -- for a deserialize, the previous plugin).
