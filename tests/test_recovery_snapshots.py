@@ -127,6 +127,16 @@ def test_a_read_only_command_takes_no_recovery_snapshot(inst, cmd):
     assert not inst.store.exists() or inst.lines() == []
 
 
+@pytest.mark.parametrize("command,shell", [
+    ("cat notes.txt; printf x > Skyrim.ini", "bash"),
+    ("Get-Content notes.txt; Set-Content Skyrim.ini x", "powershell"),
+    ("Get-Content notes.txt | ForEach-Object { Set-Content Skyrim.ini x }", "powershell"),
+])
+def test_a_read_prefix_keeps_config_recovery_before_later_writes(inst, command, shell):
+    inst.run(command, shell=shell)
+    assert "Skyrim.ini" in inst.stored("config")
+
+
 def test_a_manifest_line_has_the_task_13_shape(inst):
     inst.run("make")
     e = next(x for x in inst.lines() if x["src"].endswith("plugins.txt"))

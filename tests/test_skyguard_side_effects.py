@@ -117,7 +117,7 @@ def snap(tmp_path, command, now=None):
     snapshot.run(str(tmp_path), command, False, audit_mod.Audit(str(tmp_path)), now)
 
 
-@pytest.mark.parametrize("cmd", ["ls x", "git status", "ls x\nls y", "make\nls y", "  cat f", "git config --get a"])
+@pytest.mark.parametrize("cmd", ["ls x", "git status", "ls x\nls y", "  cat f", "git config --get a"])
 def test_snapshot_skips_read_only(tmp_path, cmd):
     (install(tmp_path) / "a.psc").write_text("x")
     snap(tmp_path, cmd)
@@ -352,7 +352,7 @@ def test_backup_equivalent_to_real_bash(tmp_path, name):
 
 
 @needs_jq
-@pytest.mark.parametrize("command", ["ls x", "make\nls y", "git status"])
+@pytest.mark.parametrize("command", ["ls x", "git status"])
 def test_snapshot_skip_equivalent_to_real_bash(tmp_path, command):
     inst_b = record.make_install(tmp_path / "bash", HOOKS, "declared")
     py = tmp_path / "py"

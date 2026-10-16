@@ -411,8 +411,46 @@ def _write_manifest(store, ts, now, command, files, partial, head_base):
 
 
 def read_only(command):
-    """A read-only verb takes no snapshot (recovery.py asks the same question, so both stores agree)."""
-    return any(grep(p, command, icase=False) for p in SKIP) or grep(SKIP_POWERSHELL, command, icase=True)
+    """Skip only when the complete parsed command consists of known reads.
+
+    This classifies ordinary builtins, not shell functions, aliases or programs'
+    runtime configuration. Unknown or incomplete syntax takes a snapshot.
+    """
+    from . import shellparse
+    bash_prefix = any(grep(p, command, icase=False) for p in SKIP)
+    if not (bash_prefix or grep(SKIP_POWERSHELL, command, icase=True)):
+        return False
+    parsed = shellparse.parse(command, "bash" if bash_prefix else "powershell")
+    if not parsed.ok or not parsed.execs:
+        return False
+    reads = {"ls", "cat", "head", "tail", "grep", "wc", "file", "stat", "pwd", "echo", "date", "whoami",
+             "which", "type", "printenv", "get-childitem", "get-content", "get-item", "get-itemproperty",
+             "get-date", "get-process", "get-command", "get-location", "get-filehash", "get-acl", "get-culture",
+             "get-variable", "get-module", "get-service", "select-string", "test-path", "resolve-path", "measure-object"}
+    for call in parsed.execs:
+        if any(">" in op for op, _ in call.redirects):
+            return False
+        program, args = call.program, call.argv
+        if program in reads:
+            continue
+        if program == "env" and not args:
+            continue
+        if program == "find" and not any(a in ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf")
+                                          for a in args):
+            continue
+        if program == "git" and args and not any(a == "--output" or a.startswith("--output=") for a in args):
+            sub, rest = args[0], args[1:]
+            if sub in ("status", "log", "diff", "show"):
+                continue
+            if sub == "remote" and all(a in ("-v", "--verbose") for a in rest):
+                continue
+            if sub == "branch" and all(a in ("-a", "-r", "-v", "-vv", "--all", "--remotes", "--verbose", "--list")
+                                        or ("--list" in rest and not a.startswith("-")) for a in rest):
+                continue
+            if sub == "config" and rest and rest[0] in ("--get", "--get-all", "--get-regexp", "--get-urlmatch"):
+                continue
+        return False
+    return True
 
 
 def run(project, command, payload_empty, audit, now=None):

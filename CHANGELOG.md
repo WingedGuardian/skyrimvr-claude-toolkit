@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Script/config snapshots inspect every command in a parsed shell call before
+  skipping known reads. A read-only prefix, newline, pipeline or later mutator
+  can no longer suppress recovery snapshots. Incomplete syntax takes a snapshot.
 - The generic adapter requires the complete typed neutral verdict, including
   an exact integer protocol version, status and text fields. Its conformance
   matrix includes malformed versions, incomplete results and wrong field types.

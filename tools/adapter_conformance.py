@@ -41,11 +41,11 @@ FAULTS = {
     "engine-silent": "pass\n",
     "engine-garbage": _W + "w(b'hello\\n')\n",
     "engine-marker-garbage": _W + "w(b'SKYGUARD-OK\\nnot json\\n')\n",
-    "engine-wrong-version": _W + "w(b'SKYGUARD-OK\\n{\"v\":2,\"decision\":\"allow\"}\\n')\n",
+    "engine-wrong-version": _W + "w(b'SKYGUARD-OK\\n{\"v\":2,\"decision\":\"allow\",\"reason\":\"\",\"context\":\"\",\"status\":\"evaluated\",\"code\":\"allow\"}\\n')\n",
     "engine-allow-but-exit-1": ALLOW_V1 + "\nraise SystemExit(1)\n",
     # Valid verdict JSON with no marker, behind 12 filler bytes so that a missing marker CHECK still parses it.
-    "engine-no-marker": _W + "w(b'            {\"v\":1,\"decision\":\"allow\",\"reason\":\"\",\"context\":\"\"}\\n')\n",
-    "engine-unknown-decision": _W + "w(b'SKYGUARD-OK\\n{\"v\":1,\"decision\":\"maybe\",\"reason\":\"\",\"context\":\"\"}\\n')\n",
+    "engine-no-marker": _W + "w(b'            {\"v\":1,\"decision\":\"allow\",\"reason\":\"\",\"context\":\"\",\"status\":\"evaluated\",\"code\":\"allow\"}\\n')\n",
+    "engine-unknown-decision": _W + "w(b'SKYGUARD-OK\\n{\"v\":1,\"decision\":\"maybe\",\"reason\":\"\",\"context\":\"\",\"status\":\"evaluated\",\"code\":\"allow\"}\\n')\n",
     "engine-hang": "import time; time.sleep(60)\n",
     "engine-missing": None,
 }

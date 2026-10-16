@@ -97,7 +97,12 @@ EVIDENCE_STATUS_MUTATIONS = [pytest.param(path, before, after, test, id="evidenc
          'tests/test_intent_diff.py::test_existing_row_uses_previous_decision_even_when_it_supersedes_legacy', 'previous-intent'),
     )]
 
-MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + [
+COMPOUND_SNAPSHOT_MUTATIONS = [pytest.param("tools/skyguard/snapshot.py",
+    '    parsed = shellparse.parse(command, "bash" if bash_prefix else "powershell")',
+    '    return True\n    parsed = shellparse.parse(command, "bash" if bash_prefix else "powershell")',
+    'tests/test_snapshot_nested.py::test_read_prefix_does_not_skip_a_mutating_command_snapshot', id='snapshot-complete-command')]
+
+MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + [
     pytest.param("tools/" + name,
                  'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'" set "SG_FILE_PY=%SG_FILE_PY:~1,-1%"',
                  "rem outer quote decoding removed",

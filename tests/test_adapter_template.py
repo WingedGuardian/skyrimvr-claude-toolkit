@@ -249,6 +249,30 @@ def test_the_cli_says_out_loud_that_unlisted_tools_are_not_guarded(tmp_path):
 FAULT_IDS = ["fault:" + name for name in (*_conf().VERDICT_FAULTS, *_conf().FAULTS)]
 
 
+@pytest.mark.parametrize("name,field", [("engine-wrong-version", "v"), ("engine-unknown-decision", "decision"),
+                                      ("engine-no-marker", None)])
+def test_protocol_fault_fixture_has_only_its_named_defect(name, field):
+    source = ast.parse(_conf().FAULTS[name])
+    writes = [node for node in ast.walk(source) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+              and node.func.id == "w"]
+    assert len(writes) == 1
+    payload = ast.literal_eval(writes[0].args[0])
+    marker = b"SKYGUARD-OK\n"
+    if field is None:
+        assert not payload.startswith(marker)
+    else:
+        assert payload.startswith(marker)
+        payload = payload[len(marker):]
+    verdict = json.loads(payload)
+    valid = dict(v=1, decision="allow", reason="", context="", status="evaluated", code="allow")
+    assert verdict.keys() == valid.keys()
+    for key, value in valid.items():
+        if key != field:
+            assert type(verdict[key]) is type(value) and verdict[key] == value
+    if field is not None:
+        assert verdict[field] != valid[field]
+
+
 @pytest.mark.parametrize("change", [{"v": True}, {"v": 1.0}, {"reason": []}, {"context": {}},
                                    {"status": []}, {"status": "unknown"}, {"code": None}, None])
 def test_incomplete_or_wrongly_typed_engine_verdict_is_a_visible_refusal(tmp_path, change):

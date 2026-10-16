@@ -66,6 +66,22 @@ def test_a_nested_pex_is_snapshotted(tmp_path):
     assert stored(tmp_path, ("Data/Scripts/sub/deep/Nested.pex", b"nested pex"))
 
 
+@pytest.mark.parametrize("command", [
+    "cat notes.txt; printf x > Data/Scripts/a.pex",
+    "make\nls y",
+    "cat 'unfinished",
+    "git status && python change.py", "echo $(python change.py)",
+    "Get-Content notes.txt; Set-Content Data/Scripts/a.pex x",
+    "Get-Content notes.txt | ForEach-Object { Set-Content Data/Scripts/a.pex x }",
+    "find . -delete", "find . -fprint output.txt", "git diff --output=report.txt",
+    "git branch new-branch", "git remote add mine https://example.invalid/repo",
+])
+def test_read_prefix_does_not_skip_a_mutating_command_snapshot(tmp_path, command):
+    put(tmp_path, "Data/Scripts/a.pex", b"before command")
+    snap(tmp_path, command)
+    assert stored(tmp_path, ("Data/Scripts/a.pex", b"before command"))
+
+
 def test_a_psc_older_than_seven_days_is_snapshotted(tmp_path):
     put(tmp_path, "Data/Scripts/Source/Old.psc", b"eight days old", age_days=8)
     snap(tmp_path)
