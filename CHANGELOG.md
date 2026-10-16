@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Claude blocking wrappers validate the complete PreToolUse verdict schema before
+  reporting successful emission. Malformed bodies, NUL bytes and failed or
+  unacknowledged validation refuse under the existing outer hook deadline.
 - Resumed corpus replay binds cached rows to frozen items, both hook trees,
   copied engine/runtime files and directories, recording helpers and effective environment.
   Linked runtime directories are traversed as the staging copy traverses them;

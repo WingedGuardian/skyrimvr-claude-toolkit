@@ -244,7 +244,8 @@ def test_a_candidate_costs_one_probe_process(tmp_path):
     calls = _log_lines(log)
     assert [c for c in calls if "version_info" in c or " -c " in c] == [], calls
     assert len([c for c in calls if "--selftest" in c]) == 1, calls
-    assert len(calls) == 2, calls          # the probe and the engine run, nothing else
+    assert len(calls) == 3, calls          # one probe, engine, complete-output validation
+    assert len([c for c in calls if "/claude_output.py " in c]) == 1, calls
 
 
 def test_run_py_selftest_refuses_an_old_python():
@@ -270,7 +271,7 @@ def test_a_verified_fallback_is_remembered_and_not_probed_again(tmp_path):
     assert _reason(r2).startswith(BLOCKED), r2.stdout
     calls = _log_lines(log)
     assert not any("--selftest" in c for c in calls), calls
-    assert len(calls) == 1 and "--nonce" in calls[0], calls
+    assert len(calls) == 2 and "--nonce" in calls[0] and "/claude_output.py " in calls[1], calls
     assert "(verified earlier)" in _failed(root, "protect-files")
 
 

@@ -2,7 +2,9 @@
 
 A moved or upgraded Python used to make every blocking hook refuse everything until setup.sh was
 re-run: honest, but a full outage. The chain keeps the hooks deciding and REPORTS the degradation.
-It runs only once the configured interpreter has failed, so a healthy call costs nothing extra.
+It runs only once the configured interpreter has failed, so it adds no healthy-call fallback probe.
+Blocking wrappers separately validate engine output in one bounded interpreter call under the same
+outer deadline before reporting a successful emission.
 
 Every test goes through the real wrapper, rendered from the SOURCE (`agent/guards/adapters/claude/`)
 by the generator, with controlled shims on PATH. The machine's own Pythons are kept out of the way
@@ -88,6 +90,74 @@ def _reason(r: subprocess.CompletedProcess) -> str:
 def _failed(root: Path, hook: str) -> str:
     p = root / ".claude" / "backups" / ".hook-heartbeat" / "claude" / f"{hook}.failed"
     return p.read_text(encoding="utf-8") if p.is_file() else ""
+
+
+_BAD_CLAUDE_OUTPUT = [
+    b'{', b'{} garbage', b'{"hookSpecificOutput":null}',
+    b'{"hookSpecificOutput":{}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PostToolUse","permissionDecision":"deny","permissionDecisionReason":"x"}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"maybe","permissionDecisionReason":"x"}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":false}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":7}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":false}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":NaN}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"\\ud800"}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"\xff"}}',
+    b'{"hookSpecificOutput":{},"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"x"}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"x","unknown":true}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"note"}}\x00',
+]
+
+
+@pytest.mark.parametrize("hook", ["protect-bash.sh", "protect-files.sh", "protect-mcp.sh"])
+@pytest.mark.parametrize("body", _BAD_CLAUDE_OUTPUT)
+def test_blocking_wrapper_rejects_incomplete_or_wrong_schema_engine_output(tmp_path, hook, body):
+    root = _install(tmp_path, REAL_PY)
+    (root / "tools/skyguard/run.py").write_text(
+        "import sys\nsys.stdout.buffer.write(" + repr(body) + ")\n", encoding="utf-8")
+    result = _fire(root, [], hook, _esp_write(root))
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny", output
+    assert "GUARD INERT" in output["hookSpecificOutput"]["permissionDecisionReason"], output
+    assert " emission " in _failed(root, hook[:-3])
+
+
+@pytest.mark.parametrize("hook", ["protect-bash.sh", "protect-files.sh", "protect-mcp.sh"])
+@pytest.mark.parametrize("body", [b'{}', b'  {}  ',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"note"}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"confirm"}}',
+    b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"blocked"}}'])
+def test_blocking_wrapper_preserves_complete_engine_verdicts(tmp_path, hook, body):
+    root = _install(tmp_path, REAL_PY)
+    (root / "tools/skyguard/run.py").write_text(
+        "import sys\nsys.stdout.buffer.write(" + repr(body) + ")\n", encoding="utf-8")
+    result = _fire(root, [], hook, _esp_write(root))
+    assert result.returncode == 0 and json.loads(result.stdout) == json.loads(body), result.stdout
+    assert " emission " not in _failed(root, hook[:-3])
+
+
+@pytest.mark.parametrize("hook", ["protect-bash.sh", "protect-files.sh", "protect-mcp.sh"])
+@pytest.mark.parametrize("fault", ["missing", "wrong-nonce", "nonzero", "nul", "timeout"])
+def test_output_validator_fault_is_an_on_time_emission_refusal(tmp_path, hook, fault):
+    import time
+    root = _install(tmp_path, REAL_PY)
+    (root / "tools/skyguard/run.py").write_text("print('{}')\n", encoding="utf-8")
+    validator = root / "tools/skyguard/claude_output.py"
+    if fault == "missing":
+        validator.unlink()
+    else:
+        bodies = {"wrong-nonce": "print('skyguard-claude-output:wrong')\n",
+                  "nonzero": "import sys\nsys.stdout.write('skyguard-claude-output:'+sys.argv[1]); sys.exit(7)\n",
+                  "nul": "import sys\nsys.stdout.buffer.write(('skyguard-claude-output:'+sys.argv[1]).encode()+b'\\x00')\n",
+                  "timeout": "import time\ntime.sleep(25)\n"}
+        validator.write_text(bodies[fault], encoding="utf-8")
+    start = time.monotonic()
+    result = _fire(root, [], hook, _esp_write(root), {"SKYGUARD_HOOK_TIMEOUT_S": "20"})
+    assert result.returncode == 0 and "GUARD INERT" in _reason(result), result.stdout
+    assert " emission " in _failed(root, hook[:-3])
+    assert time.monotonic() - start < 18, "validation exceeded the wrapper's outer deadline headroom"
 
 
 def test_a_missing_configured_python_falls_back_and_still_decides(tmp_path):

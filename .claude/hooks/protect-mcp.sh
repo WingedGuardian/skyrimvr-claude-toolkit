@@ -10,8 +10,8 @@
 #
 # Hot path = bash BUILTINS ONLY. Every `$(...)`, pipe stage or external command is a fork, and a fork
 # costs 10-70 ms on Git Bash: MEASURED 2026-10-02, the wrapper's own forks were ~390 ms of a 545 ms
-# median. So: parameter expansion, not dirname; `cd` in this shell, not in a subshell; printf's %()T,
-# not date; mkdir only when the directory is missing. The remaining forks are `$(cat)` and the engine.
+# median, before output-schema validation. So: parameter expansion, not dirname; `cd` in this shell; printf's %()T,
+# not date; mkdir only when the directory is missing. Calls also use a bounded output-schema validator.
 
 HOOK_NAME="protect-mcp"
 HOOK_TIMEOUT_S=60     # this hook's timeout in agent/targets/claude/settings.json (tests/test_hook_deadline.py)
@@ -316,7 +316,13 @@ fi
 if [ "$RC" -ne 0 ]; then
     inert engine "engine failed (exit $RC) -- run: bash tools/hook-canary.sh" "exit $RC"
 fi
-case "$OUT" in
-    "{"*) printf '%s\n' "$OUT"; _done; exit 0 ;;
-esac
-inert emission "engine failed (exit $RC) -- run: bash tools/hook-canary.sh" "engine output was not a JSON verdict"
+# Validate the complete output under the SAME outer deadline before marking emission successful.
+# This adds one bounded interpreter call; it does not probe the fallback chain or extend the hook budget.
+[ -z "$NUL" ] || inert emission "engine output contained a NUL byte -- run: bash tools/hook-canary.sh" "engine output contained a NUL byte"
+ENGINE_OUT="$OUT"; SAVED_INPUT="$INPUT"; INPUT="$OUT"
+_bounded "$ENGINE_MS" in "${PYC[@]}" -B "${ROOT_WIN:-$ROOT}/tools/skyguard/claude_output.py" "$NONCE"
+INPUT="$SAVED_INPUT"
+if [ "$RC" -eq 0 ] && [ -z "$NUL" ] && [ "$OUT" = "skyguard-claude-output:$NONCE" ]; then
+    printf '%s\n' "$ENGINE_OUT"; _done; exit 0
+fi
+inert emission "engine output was not a complete PreToolUse JSON verdict -- run: bash tools/hook-canary.sh" "engine output validation failed (exit $RC)"

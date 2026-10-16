@@ -219,14 +219,14 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     pytest.param("scripts/build-nexus-pack.sh", ' || die "cannot read release slug from package.json"', "",
                  "tests/test_nexus_pack.py::test_a_failed_product_slug_read_refuses_before_a_download",
                  id="review-nexus-product-slug-read-refuses"),
-    pytest.param("tools/skyguard/session.py", "                with state.locked(str(sf)):", "                if True:",
+    pytest.param("tools/skyguard/session.py", "    with state.locked(str(sf)):", "    if True:",
                  "tests/test_skyguard_session_start.py::test_session_reads_the_state_to_be_rewritten_under_the_writer_lock",
                  id="review-session-state-read-locked"),
-    pytest.param("tools/skyguard/session.py", "                    st = state.read(str(sf))", "                    pass",
+    pytest.param("tools/skyguard/session.py", "    lock._assert_sandbox(sf)\n    with state.locked(str(sf)):\n        st = state.read(str(sf))", "    st = state.read(str(sf))\n    lock._assert_sandbox(sf)\n    with state.locked(str(sf)):",
                  "tests/test_skyguard_session_start.py::test_session_start_preserves_a_newer_persistent_decision[True]",
                  id="review-session-state-refresh"),
-    pytest.param("tools/skyguard/session.py", 'if source != "compact" and not st.rejected and st.lifts:',
-                 'if not st.rejected and st.lifts:',
+    pytest.param("tools/skyguard/session.py", 'if source != "compact" and not st.rejected and (st.lifts or _engaged(root)):',
+                 'if not st.rejected and (st.lifts or _engaged(root)):',
                  "tests/test_skyguard_session_start.py::test_compact_does_not_clear_or_report_lifts",
                  id="review-session-compact-state-read-only"),
     pytest.param("tools/skyguard/mcp_rules.py", "    if not is_devbench(name):\n        return Verdict()",
@@ -334,8 +334,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     # stdout then reaches the runtime as "no decision" -- an allow -- instead of being refused.
     pytest.param(
         ".claude/hooks/protect-bash.sh",
-        '    "{"*) printf',
-        '    *) printf',
+        'if [ "$RC" -eq 0 ] && [ -z "$NUL" ] && [ "$OUT" = "skyguard-claude-output:$NONCE" ]; then',
+        'if true; then',
         "tests/test_hooks.py::test_wrapper_denies_on_non_json_output",
         id="wrapper-passes-non-json-engine-output-through",
     ),
@@ -7073,8 +7073,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_TPA, '    return (m.group(1) + ("" if m.group(2) == "1" else "." + m.group(2))) if m else v', "    return v",
      _TPT + "test_a_git_for_windows_tag_compares_as_its_installer_version[2.55.0.5-v2.55.0.windows.5-OK]",
      "git-tag-compares-as-a-tag"),
-    (_TPA, '         "published": "https://api.github.com/repos/git-for-windows/git/releases/tags/{tag}"}]})],',
-     '         "published": "https://api.github.com/repos/git-for-windows/git/releases/tags/{tag}"}]})][:0],',
+    (_TPA, '         "published_format": "github-release", "artifact": "Git-{pinned}-64-bit.exe"}]})],',
+     '         "published_format": "github-release", "artifact": "Git-{pinned}-64-bit.exe"}]})][:0],',
      _TPT + "test_the_pinned_git_installer_hash_is_the_one_github_publishes[" + "f" * 64 + "-DRIFT]",
      "git-installer-hash-unchecked"),
 ]]
@@ -9051,3 +9051,24 @@ MUTATIONS += [
 ]
 
 MUTATIONS += [pytest.param("scripts/guard-corpus/replay.py", '        out[relative + "/"] = {"kind": "directory", "mode": before.st_mode, "mtime_ns": before.st_mtime_ns}', "        pass", "tests/test_replay_identity.py::test_empty_runtime_directory_changes_require_new_evidence", id="review-replay-empty-directory-identity")]
+
+# A transport success is not a verdict until complete, nonce-bound validation succeeds.
+MUTATIONS += [pytest.param("agent/guards/adapters/claude/" + hook, before, after,
+    "tests/test_python_fallback.py::" + test, id="review-claude-output-" + name + "-" + hook)
+    for hook in ("protect-bash.sh", "protect-files.sh", "protect-mcp.sh")
+    for before, after, test, name in (
+        ('if [ "$RC" -eq 0 ] && [ -z "$NUL" ] && [ "$OUT" = "skyguard-claude-output:$NONCE" ]; then',
+         'if true; then', 'test_blocking_wrapper_rejects_incomplete_or_wrong_schema_engine_output', 'schema'),
+        ('[ -z "$NUL" ] || inert emission "engine output contained a NUL byte -- run: bash tools/hook-canary.sh" "engine output contained a NUL byte"',
+         ': # incorrectly discard the engine NUL flag',
+         'test_blocking_wrapper_rejects_incomplete_or_wrong_schema_engine_output', 'engine-nul'),
+        ('if [ "$RC" -eq 0 ] && [ -z "$NUL" ] && [ "$OUT" = "skyguard-claude-output:$NONCE" ]; then',
+         'if [ -z "$NUL" ] && [ "$OUT" = "skyguard-claude-output:$NONCE" ]; then',
+         'test_output_validator_fault_is_an_on_time_emission_refusal[nonzero-' + hook + ']', 'exit-code'),
+        ('if [ "$RC" -eq 0 ] && [ -z "$NUL" ] && [ "$OUT" = "skyguard-claude-output:$NONCE" ]; then',
+         'if [ "$RC" -eq 0 ] && [ -z "$NUL" ]; then',
+         'test_output_validator_fault_is_an_on_time_emission_refusal[wrong-nonce-' + hook + ']', 'nonce'),
+        ('if [ "$RC" -eq 0 ] && [ -z "$NUL" ] && [ "$OUT" = "skyguard-claude-output:$NONCE" ]; then',
+         'if [ "$RC" -eq 0 ] && [ "$OUT" = "skyguard-claude-output:$NONCE" ]; then',
+         'test_output_validator_fault_is_an_on_time_emission_refusal[nul-' + hook + ']', 'validator-nul'),
+    )]
