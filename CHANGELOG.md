@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Mod-update review establishes the current kept-save, new-game or disposable-test situation and standing user rulings before proposing changes. Read local preferences and current session context; ask only about material facts that remain unknown. Carries the `step0-situation` branch forward without assuming session hooks run on every coding agent.
+
 - Save-approval hook reasons stay within two short lines. The neutral check adds
   a read-only `--preview` for complete canonical scope without preservation,
   receipts or state changes. Installed personal policies require normal deciding

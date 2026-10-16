@@ -21,6 +21,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -4348,20 +4350,85 @@ def _mutate(tmp_path: Path, relpath: str, find: str, replace: str) -> Path:
     return work
 
 
+def _anchor_outcomes(report: Path) -> dict[tuple[str, str, str], str]:
+    """Read testcase failures, including call-time exceptions; reject pytest errors."""
+    try:
+        root = ET.parse(report).getroot()
+        suites = [root] if root.tag == "testsuite" else list(root)
+        assert root.tag in ("testsuite", "testsuites") and suites, "missing test suites"
+        outcomes = {}
+        for suite in suites:
+            cases = suite.findall("testcase")
+            assert suite.tag == "testsuite", "invalid suite"
+            counts = {key: int(suite.attrib[key]) for key in ("tests", "failures", "errors", "skipped")}
+            assert counts == {"tests": len(cases),
+                              "failures": sum(len(c.findall("failure")) for c in cases),
+                              "errors": sum(len(c.findall("error")) for c in cases),
+                              "skipped": sum(len(c.findall("skipped")) for c in cases)}, "incomplete report"
+            assert not counts["errors"] and suite.find("error") is None, "test execution error"
+            for case in cases:
+                identity = tuple(case.get(key, "") for key in ("file", "classname", "name"))
+                assert all(identity) and identity not in outcomes, "invalid or duplicate testcase"
+                assert sum(len(case.findall(key)) for key in ("failure", "error", "skipped")) <= 1, "conflicting outcomes"
+                outcomes[identity] = ("failed" if case.find("failure") is not None else
+                                      "skipped" if case.find("skipped") is not None else "passed")
+        assert outcomes, "no executed testcases"
+        return outcomes
+    except (OSError, ET.ParseError, KeyError, ValueError) as exc:
+        raise AssertionError(f"unqualified anchor report: {exc}") from exc
+
+
+def _run_mutation_anchor(work: Path, test_id: str, scratch: Path, report: Path):
+    return subprocess.run(
+        [sys.executable, "-B", "-m", "pytest", test_id, "-q", "--no-header",
+         "-p", "no:cacheprovider", "-rs", "--basetemp", str(scratch),
+         "-o", "junit_family=legacy", "--junitxml", str(report)],
+        cwd=str(work), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+        env=dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONDONTWRITEBYTECODE="1"),
+    )
+
+
 @pytest.mark.parametrize("relpath,find,replace,test_id", MUTATIONS)
 def test_guard_actually_bites(tmp_path, relpath, find, replace, test_id):
     """Revert one fix; the test guarding it must fail."""
     work = _mutate(tmp_path, relpath, find, replace)
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", test_id, "-q", "--no-header", "-p", "no:cacheprovider", "-rs"],
-        cwd=str(work), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
-        env=dict(os.environ, PYTHONIOENCODING="utf-8"),
-    )
-    why = _anchor_skipped_off_windows(result.returncode, result.stdout)
-    if why:
-        pytest.skip("the anchor test is skipped on this platform, so it cannot kill this twin: " + why)
-    unjudged = _unjudged_twin_message(result.returncode, result.stdout)   # Windows: still red, but never a "survivor"
-    assert not unjudged, unjudged
+    target = work / relpath
+    mutant_bytes = target.read_bytes()
+    pristine_bytes = (REPO / relpath).read_bytes()
+    # The inherited evidence TEMP may flatten into >255-character backup
+    # components. Both legs use the SAME short, uniquely owned fixture path.
+    with tempfile.TemporaryDirectory(prefix="anchor-", dir=tmp_path.parent) as owned:
+        private = Path(owned)
+        assert private.resolve().parent == tmp_path.parent.resolve()
+        scratch = private / "tests"
+        target.write_bytes(pristine_bytes)
+        try:
+            baseline = _run_mutation_anchor(work, test_id, scratch, private / "baseline.xml")
+        finally:
+            target.write_bytes(mutant_bytes)
+        why = _anchor_skipped_off_windows(baseline.returncode, baseline.stdout)
+        if why:
+            pytest.skip("the pristine anchor is skipped on this platform: " + why)
+        unjudged = _unjudged_twin_message(baseline.returncode, baseline.stdout)
+        assert not unjudged, unjudged
+        assert baseline.returncode == 0, (
+            f"PRISTINE ANCHOR DID NOT PASS: {test_id}; no mutant kill can be measured.\n"
+            f"--- pristine stdout ---\n{baseline.stdout[-4000:]}\n"
+            f"--- pristine stderr ---\n{baseline.stderr[-2000:]}"
+        )
+        pristine = _anchor_outcomes(private / "baseline.xml")
+        passed = {identity for identity, outcome in pristine.items() if outcome == "passed"}
+        assert passed and not any(outcome == "failed" for outcome in pristine.values()), "pristine anchor did not execute cleanly"
+        result = _run_mutation_anchor(work, test_id, scratch, private / "mutant.xml")
+        why = _anchor_skipped_off_windows(result.returncode, result.stdout)
+        if why:
+            pytest.skip("the anchor test is skipped on this platform, so it cannot kill this twin: " + why)
+        unjudged = _unjudged_twin_message(result.returncode, result.stdout)   # Windows: still red, but never a "survivor"
+        assert not unjudged, unjudged
+        # Read before cleanup. A setup/teardown error can also exit1 and is not
+        # evidence of a failure in a previously passing testcase.
+        mutated = _anchor_outcomes(private / "mutant.xml") if result.returncode in (0, 1) else {}
+    failed = {identity for identity, outcome in mutated.items() if outcome == "failed"}
     # EXIT 1 SPECIFICALLY, not merely non-zero.
     #
     # pytest exits 1 for "a test failed", but 2 for a collection error, 4 for a
@@ -4385,6 +4452,7 @@ def test_guard_actually_bites(tmp_path, relpath, find, replace, test_id):
         + f"--- mutation ---\n{find!r} -> {replace!r}\n"
         f"--- pytest output ---\n{result.stdout[-2000:]}"
     )
+    assert failed and failed <= passed, "mutant must fail a testcase that actually passed in its pristine leg"
 
 
 # Merge of Plans 4+5 (2026-10-04). One entry per guard the merge itself added; each names the test that must go red.
@@ -5665,7 +5733,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/lift_rules.py", '    return len(head) >= 4 and "--in-place".startswith(head)',
      '    return word == "--in-place"', _SCR + "[abbrev-in]", "rule-S-RESTORE-INPLACE-flag-spellings"),
     (_SC, 'prog="skyguard snapshot", add_help=False, allow_abbrev=False)', 'prog="skyguard snapshot", add_help=False)',
-     _SCT + "test_the_cli_refuses_an_abbreviated_in_place[--in]", "l2-restore-fr2-no-abbrev-snapshot"),
+     "tests/test_snapshot_parser.py::test_snapshot_parser_refuses_abbreviations_before_dispatch[--in]", "l2-restore-fr2-no-abbrev-snapshot"),
     ("tools/skyguard/cli.py", 'prog="skyguard guards", add_help=False, allow_abbrev=False)',
      'prog="skyguard guards", add_help=False)',
      _SCT + "test_no_skyguard_subcommand_takes_an_abbreviated_option[guards]", "l2-restore-fr2-no-abbrev-guards"),
@@ -7387,7 +7455,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _FXB1 + "test_a_restore_through_a_junction_into_the_state_is_refused", "fixA-b1-realpath"),
     # ...backup-before-edit no longer copies the state...
     ("tools/skyguard/backup.py", r', r"[/\\]\.skyguard[/\\]")', ")",
-     _FXB1 + "test_the_state_folder_is_not_backed_up_at_all", "fixA-b1-skip-state"),
+     "tests/test_backup_filter_decision.py::test_state_filter_runs_before_backup_copy", "fixA-b1-skip-state"),
     # ...and the guard asks before `restore-from-backup --restore` (S-RESTORE-INPLACE)...
     ("tools/skyguard/lift_rules.py", "    return restore_backup(parsed)", "    return False",
      _FXB1 + "test_the_guard_asks_before_a_backup_restore[sh]", "fixA-b1-guard-wired"),
