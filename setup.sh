@@ -4,10 +4,11 @@
 # This script is designed to be run FROM your Skyrim folder, after
 # extracting the toolkit zip into it. It configures everything in-place.
 #
-# Usage: bash setup.sh [--agent claude|codex|all|auto] [--lock]
+# Usage: bash setup.sh [--agent claude|codex|all|auto|generic|opencode] [--lock]
 #   --agent auto    (the default) every agent found on PATH; when none is found, all of them
 #   --agent claude  Claude Code only      --agent codex  Codex only (Windows only)
-#   --agent all     both (`both` is accepted as another name for it)
+#   --agent all     every named adapter (`both` is accepted as another name for it)
+#   --agent generic portable instructions only; --agent opencode OpenCode V1 plugin files
 #   --lock          also apply the Layer 2 read-only lock to the vanilla masters and archives.
 #                   OFF unless you pass it (bash tools/skyguard.sh lock unlock <file> lifts it again).
 # Setup never installs software. Every install command it prints is for you to run.
@@ -619,8 +620,8 @@ done
 # UTF-8 interpreter/Bash paths just inserted above, including non-ASCII names.
 if [ -f "$GAME_DIR/.codex/hooks/skyguard-entry.ps1" ] && [ -n "$PY_FOUND" ]; then
     if ! MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B \
-        "$GAME_ROOT_WIN/tools/skyguard/upgrade_render.py" encode-powershell \
-        "$GAME_ROOT_WIN/.codex/hooks/skyguard-entry.ps1"; then
+        "$PY_ROOT/tools/skyguard/upgrade_render.py" encode-powershell \
+        "$PY_ROOT/.codex/hooks/skyguard-entry.ps1"; then
         echo "  NOT CONFIGURED: PowerShell hook encoding failed; repair it before approving the hooks."
         exit 1
     fi

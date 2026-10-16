@@ -171,6 +171,37 @@ def test_legacy_writer_retains_both_pair_members(recovery_legacy):
     assert set(recovery.resolve(root, sid)) == {str(ess), str(skse)}
 
 
+def test_legacy_save_snapshots_keep_superseded_bytes_forever(recovery_legacy):
+    import time
+    from skyguard import audit, recovery
+    project, root, first, ess, skse = recovery_legacy
+    ess.write_bytes(b"second legacy ESS")
+    second, = recovery.backup_saves(project, audit.Audit(str(project)), [(str(ess), str(skse))], "second legacy state")
+    before, bad = recovery.read_manifest(root)
+    assert bad == 0 and {row["snap"] for row in before} == {first, second}
+    assert len(before) == 4
+    assert not (root / "transactions").exists(), "this control exercises the legacy collector"
+    recovery.prune(root, time.time() + 3650 * 86400, audit.Audit(str(project)))
+    after, bad = recovery.read_manifest(root)
+    assert bad == 0 and after == before
+    for row in before:
+        assert hashlib.sha256((root / "blobs" / row["sha256"]).read_bytes()).hexdigest() == row["sha256"]
+    assert (root / "blobs" / hashlib.sha256(b"legacy ESS").hexdigest()).read_bytes() == b"legacy ESS"
+
+
+def test_legacy_writer_reserves_space_for_the_complete_pair(recovery_legacy, monkeypatch):
+    from skyguard import audit, recovery
+    project, root, _sid, ess, skse = recovery_legacy
+    before = (root / recovery.MANIFEST).read_bytes()
+    real = recovery.shutil.disk_usage
+    monkeypatch.setattr(recovery.shutil, "disk_usage",
+                        lambda path: real(path)._replace(free=recovery.SAVE_RESERVE_BYTES + 10))
+    assert ess.stat().st_size + skse.stat().st_size > 10
+    with pytest.raises(recovery.SaveBackupFailed, match="would leave under"):
+        recovery.backup_saves(project, audit.Audit(str(project)), [(str(ess), str(skse))], "low space legacy pair")
+    assert (root / recovery.MANIFEST).read_bytes() == before
+
+
 def test_legacy_writer_copy_deadline_cleans_partial_candidate(recovery_legacy, monkeypatch):
     from skyguard import backup, recovery
     project, root, sid, ess, skse = recovery_legacy

@@ -399,6 +399,22 @@ def fire_full(install: Path, row: dict) -> dict:
     return {**got, "rules": eng["rules"], "workspace": str(install)}
 
 
+def canonical_scope_expected(row: dict, workspace: Path) -> dict:
+    """Hand-authored scope oracle, exercised against the structured preview.
+
+    No production approval builder or actual verdict supplies these fields.
+    """
+    scope = row["canonical_scope"]
+    root = Path(workspace)
+    grant = {"v": 1, "session_id": row["payload"]["session_id"], "op": scope["op"],
+             "paths": sorted(os.path.normcase(os.path.realpath(root / "cfg/Saves" / (name + ext)))
+                             for name in scope["names"] for ext in SAVE_EXTS)}
+    if scope.get("wildcard"):
+        command = row_payload(row, root)["tool_input"]["command"]
+        grant.update(count=len(scope["names"]), command_sha256=hashlib.sha256(command.encode()).hexdigest())
+    return grant
+
+
 def intended_problems(row: dict, got: dict) -> list[str]:
     """How an intended row differs from what the engine did. Decision, rule ids AND exact text."""
     out = []
@@ -407,18 +423,8 @@ def intended_problems(row: dict, got: dict) -> list[str]:
     if set(got["rules"]) != set(row["rules"]):
         out.append(f"rules: intended {sorted(row['rules'])}, got {sorted(got['rules'])}")
     expected = row["text"]
-    if "canonical_scope" in row:
-        # Hand-authored names/operation in the row are the oracle. Do not call
-        # the production approval builder or infer scope from the actual verdict.
-        scope = row["canonical_scope"]
-        root = Path(got["workspace"])
-        grant = {"v": 1, "session_id": row["payload"]["session_id"], "op": scope["op"],
-                 "paths": sorted(os.path.normcase(os.path.realpath(root / "cfg/Saves" / (name + ext)))
-                                 for name in scope["names"] for ext in SAVE_EXTS)}
-        if scope.get("wildcard"):
-            command = row_payload(row, root)["tool_input"]["command"]
-            grant.update(count=len(scope["names"]), command_sha256=hashlib.sha256(command.encode()).hexdigest())
-        expected += "\nIf approved, the user types:\nSAVE_ACCESS_APPROVAL " + json.dumps(grant, ensure_ascii=True)
+    # Full canonical_scope metadata is checked separately against the structured
+    # preview by test_approval_preview; host reasons retain the two-line contract.
     if got["text"] != expected:
         out.append(f"text: intended {expected!r}, got {got['text']!r}")
     return out

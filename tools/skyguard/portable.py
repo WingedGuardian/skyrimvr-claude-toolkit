@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from modding_harness import contracts, dispatch, telemetry
-from . import codes, engine, local_policy, mcp_rules, paths, saves, save_profile
+from . import codes, engine, local_policy, mcp_rules, paths, rules, saves, save_profile
 from .audit import Audit
 from .request import Request
 from .verdict import Verdict
@@ -48,8 +48,27 @@ def mutations(change):
     return tuple(dispatch.Mutation(pair.ess, op) for pair in saves._existing(counted) for op in pair.ops), counted
 
 
-def check(action, project, *, transcript="", deadline=None, local_restrictions=(), helper=False, _legacy=None):
-    audit = _legacy.audit if _legacy else Audit(str(project))
+class _PreviewAudit(Audit):
+    """Retain in-memory rule ordering without audit or strict-shadow appends."""
+    def raw(self, line):
+        pass
+
+    def log_strict(self, hook, level, msg):
+        pass
+
+
+def check(action, project, *, transcript="", deadline=None, local_restrictions=(), helper=False, _legacy=None,
+          preview=False):
+    """Preview reads current policy/scope but grants no execution or preservation authority.
+
+    Arbitrary installed policy workers and caller restriction callbacks are not
+    read-only qualified. A preview refuses those rather than running or omitting
+    their requirements. Normal deciding calls retain the original path.
+    """
+    if preview and (_legacy is not None or local_restrictions):
+        return dispatch.Outcome(contracts.Result("deny", "partial", reason=
+            "PREVIEW ONLY: legacy/caller restriction callbacks are not read-only qualified; use the normal deciding check.")), None
+    audit = _PreviewAudit(str(project)) if preview else (_legacy.audit if _legacy else Audit(str(project)))
     req = _legacy.request if _legacy else request(action, transcript)
     last = [Verdict()]
     save_plan = [None]
@@ -67,7 +86,7 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
     else:
         roots = paths.Roots("", "")
     if known:
-        folders = [Path(folder) / "Saves" for folder in roots.config_dirs]
+        folders = [Path(folder) / "Saves" for folder in roots.physical_config_dirs or roots.config_dirs]
         fallback = mcp_rules.saves_folder(roots, os.environ)
         if fallback:
             folders.append(Path(fallback))
@@ -91,8 +110,10 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
             value = rest
         # Resolve the toolkit's existing, session-bound shadow policy exactly
         # once. A later shadow pass must not relax a refused preservation.
+        shadow_options = {"readonly": True} if preview else {}
         value = engine.shadow(codes.classify(value), str(project), req.session_id,
-                              _legacy.telemetry if _legacy else "", audit, now=_legacy.now if _legacy else None)
+                              _legacy.telemetry if _legacy else "", audit, now=_legacy.now if _legacy else None,
+                              **shadow_options)
         last[0] = value
         if req.tool_name == "write_stdin" and req.kind == "other" and value.decision == "allow":
             result = contracts.Result(evaluation="partial", reason=
@@ -104,14 +125,28 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
         else:
             result = contracts.Result(value.decision, value.status, reason=value.reason,
                                       warnings=(value.context,) if value.context else ())
-        plan = local_policy.supplement_native_backups(action, project, plan, profile, helper=helper, deadline=deadline)
-        plan = local_policy.supplement_controlled(action, project, plan, profile, deadline)
-        plan = local_policy.supplement_shell_scope(action, project, plan, profile, transcript, deadline)
+        if not preview:
+            plan = local_policy.supplement_native_backups(action, project, plan, profile, helper=helper, deadline=deadline)
+            plan = local_policy.supplement_controlled(action, project, plan, profile, deadline)
+            plan = local_policy.supplement_shell_scope(action, project, plan, profile, transcript, deadline)
         save_plan[0] = plan
         return dispatch.Evaluation(result, plan)
 
-    restrictions = (local_policy.restriction(project, deadline, lambda: save_plan[0]), *local_restrictions)
-    outcome = dispatch.Dispatcher(project, profile, policy, restrictions).pre(action, transcript, deadline)
+    def preview_restriction(_action):
+        local_surface = action.surface in ("files", "shell", "mcp") and not (
+            action.surface == "files" and not any(op != "read" for op in action.operations))
+        if local_surface and local_policy.registration(project) is not None:
+            return contracts.Result("deny", "partial", reason=
+                "PREVIEW ONLY: installed local policy workers are not read-only qualified; use normal check for exact scope (it may write runtime state/backups).")
+        return contracts.Result(evaluation="evaluated")
+
+    restrictions = ((preview_restriction,) if preview else
+                    (local_policy.restriction(project, deadline, lambda: save_plan[0]), *local_restrictions))
+    outcome = dispatch.Dispatcher(project, profile, policy, restrictions).pre(action, transcript, deadline,
+                                                                          preserve=not preview)
+    if preview:
+        return replace(outcome, result=replace(outcome.result, warnings=outcome.result.warnings +
+            ("PREVIEW ONLY: no operation is authorized; no backup, receipt or runtime state was written",))), None
     result = outcome.result
     # Ordinary config/script snapshots remain non-blocking and distinct from
     # the permanent save preservation that has already decided this call.
@@ -187,11 +222,11 @@ def legacy_pre_tool(req, project, roots_fn, audit, telemetry_path="", now=None, 
         if value.decision == "deny":
             audit.log("portable-pre-tool", "SAVE-APPROVED", "canonical typed grant verified; saves preserved before permission")
     elif result.decision == "deny" and result.preservation == "required":
-        from modding_harness import approval
-        grants = [line for line in result.reason.splitlines() if line.startswith(approval.KEY + " ")]
-        reason = value.reason + "\nIf approved, the user types:\n" + "\n".join(grants)
+        first = value.reason.split("\n", 1)[0] if value.reason else (
+            "Blocked: this save change needs the user's typed SAVE_ACCESS_APPROVAL.")
+        reason = first + "\n" + rules.RULES["S-SAVE-APPROVAL"]["template"].split("\n", 1)[1]
         if req.agent not in ("claude", "codex") or not req.session_id:
-            reason += "\nThis host/session has no qualified approval reader; bulk changes remain refused."
+            reason = first + "\nThis host/session has no qualified approval reader; bulk changes remain refused (ADAPTING.md)."
         answer = answer._replace(code=codes.rule_code("S-SAVE-APPROVAL"),
                                  reason=reason)
     elif result.preservation == "failed":

@@ -39,6 +39,19 @@ def test_every_rule_constant_codes_to_itself(code, template):
     assert codes.matches(text, whole) == [code]
 
 
+def _assert_corpus_code(row):
+    if row.get("evaluation") == "unguarded":
+        # Unknown-tool warnings intentionally name no game rule. They must not
+        # acquire a rule code, or be used to exempt a real evaluated verdict.
+        assert row["decision"] == "advise" and row.get("rules") == [], row["id"]
+        assert row["text"] == "WARN AND ALLOW: this tool surface was not evaluated", row["id"]
+        assert codes.matches(row["text"], False) == [], row["id"]
+        return False
+    found = codes.matches(row["text"], row["decision"] in ("deny", "ask"))
+    assert len(found) == 1, (row["id"], found)
+    return True
+
+
 def test_every_corpus_row_maps_to_exactly_one_code():
     """Runs over every recorded verdict text; an ambiguous template pair would show up here."""
     seen = 0
@@ -49,10 +62,21 @@ def test_every_corpus_row_maps_to_exactly_one_code():
         row = json.loads(line)
         if row["decision"] == "allow" or not row["text"]:
             continue
-        found = codes.matches(row["text"], row["decision"] in ("deny", "ask"))
-        assert len(found) == 1, (row["id"], found)
-        seen += 1
+        seen += _assert_corpus_code(row)
     assert seen >= 50, "corpus suspiciously small: {} coded rows".format(seen)
+
+
+@pytest.mark.parametrize("change", [
+    {"evaluation": "evaluated"}, {"decision": "deny"},
+    {"rules": ["S-DEL-INSTALL"]}, {"text": "a real rule cannot hide as unknown"},
+])
+def test_unknown_corpus_warning_exemption_cannot_hide_an_evaluated_rule(change):
+    row = {"id": "owned-unknown", "evaluation": "unguarded", "decision": "advise", "rules": [],
+           "text": "WARN AND ALLOW: this tool surface was not evaluated"}
+    assert _assert_corpus_code(row) is False
+    row.update(change)
+    with pytest.raises(AssertionError):
+        _assert_corpus_code(row)
 
 
 @pytest.mark.parametrize("rid", sorted(r for r, v in rules.RULES.items() if not v["legacy"]))

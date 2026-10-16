@@ -352,6 +352,20 @@ def test_without_roots_the_path_words_decide():
     assert not fired & set(SELF_IDS)
 
 
+@pytest.mark.parametrize("holder", ["tools", "agent"])
+def test_non_store_guard_holder_move_keeps_its_guard_advice(tmp_path, holder):
+    """Legacy .claude holders now stop at save-store policy; these still use guard holders."""
+    root = tmp_path / "install"
+    root.mkdir()
+    own_roots = paths.roots(root.as_posix(), "", {})
+    command = 'mv "{0}/{1}" "{0}/{1}-off"'.format(root.as_posix(), holder)
+    a = _audit()
+    v = shell_rules.decide(command, own_roots, a, cwd=root.as_posix(), shell="bash", env=ENV0)
+    assert v.decision == "allow"
+    assert v.context == "Note: this command edits {}, part of the safety guards themselves.".format(holder)
+    assert {rid for rid, _ in a.fired} == {"S-SELF-GUARD"}
+
+
 def test_a_declared_game_root_is_covered_as_well_as_the_hook_root():
     _, fired = shell("echo x > \"C:/p6t12/Skyrim VR/.skyguard/state.json\"", cwd="C:/work")
     assert fired == {"S-SELF-STATE"}

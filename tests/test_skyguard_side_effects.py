@@ -136,7 +136,7 @@ def test_snapshot_skips_powershell_reads(tmp_path, cmd):
 
 
 @pytest.mark.parametrize("cmd", ["Remove-Item a.psc", "Set-Content a.txt x", "Get-ChildItem; Remove-Item a",
-                                 "Getaway-Thing", "Copy-Item a b", "Select-Stringy x", "Test-PathX"])
+                                 "Getaway-Thing", "Copy-Item a b", "Select-Stringy x", "Test-PathX", "Get-DateX"])
 def test_snapshot_does_not_skip_powershell_writes(tmp_path, cmd):
     """A mutating verb, or a lookalike that merely starts with a read verb, still snapshots."""
     (install(tmp_path) / "a.psc").write_text("x")

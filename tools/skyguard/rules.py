@@ -334,7 +334,7 @@ RULES = {
         "prefixes": [],
         "template": (
         "Blocked: this {op} {n} saves ({file}); more than 2, or a wildcard, needs the user's typed approval.\n"
-        'A canonical full-path/session grant is required; the deciding hook prints its exact scope.'
+        'Scope: python tools/agent-harness.py check --preview; with local policy use check (writes state). See ADAPTING.md; only the user types SAVE_ACCESS_APPROVAL.'
     ),
     },
     # A wildcard the guard cannot list (in a folder name, or an unreadable folder): no backup is possible.
@@ -461,11 +461,11 @@ RULES = {
     # config are priced (ask or advise). The W- twins say the same in different words: one text, one code.
     'S-SAVE-STORE': {
         "decision": "deny", "hook": "protect-bash", "legacy": False, "prefixes": [],
-        "template": "Blocked: {file} is a permanent save backup store or its ancestor. Recovery data cannot be overwritten, deleted, moved or aliased by this call."
+        "template": "Blocked: {file} is a permanent save backup store or its ancestor.\nRecovery data cannot be overwritten, deleted, moved or aliased by this call."
     },
     'W-SAVE-STORE': {
         "decision": "deny", "hook": "protect-files", "legacy": False, "prefixes": [],
-        "template": "Blocked: this write targets {file}, a permanent save backup store or its ancestor. Recovery data cannot be overwritten, deleted, moved or aliased by this call."
+        "template": "Blocked: this write targets {file}, a permanent save backup store or its ancestor.\nRecovery data cannot be overwritten, deleted, moved or aliased by this call."
     },
     'S-SELF-STATE': {
         "decision": 'deny',

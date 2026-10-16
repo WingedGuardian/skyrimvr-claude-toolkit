@@ -255,7 +255,7 @@ def test_supersessions_are_live_in_process(intended_installs):
 
 
 def _a_denied_legacy_row():
-    return next(r for r in ROWS if r["decision"] == "deny" and r["layout"] == "declared"
+    return next(r for r in LIVE if r["decision"] == "deny" and r["layout"] == "declared"
                 and not r.get("payload_note"))
 
 

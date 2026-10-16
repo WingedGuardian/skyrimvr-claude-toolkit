@@ -190,7 +190,7 @@ def test_two_saves_are_allowed_and_three_need_approval(inst):
 
 def test_the_deciding_hook_names_canonical_scope_instead_of_a_basename_grant(inst):
     v = inst.shell("rm " + " ".join(inst.p(s + ".ess") for s in ("Save1", "Save2", "Save3")))
-    assert "canonical full-path/session grant" in v.reason
+    assert "check --preview" in v.reason and "only the user types SAVE_ACCESS_APPROVAL" in v.reason
     guarded = inst.enforce(v)
     line = guarded.reason.split("SAVE_ACCESS_APPROVAL ", 1)[1]
     expected = json.loads(inst.grant().split("SAVE_ACCESS_APPROVAL ", 1)[1])

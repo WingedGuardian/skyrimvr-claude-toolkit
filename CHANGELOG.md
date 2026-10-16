@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Save-approval hook reasons stay within two short lines. The neutral check adds
+  a read-only `--preview` for complete canonical scope without preservation,
+  receipts or state changes. Installed personal policies require normal deciding
+  check instead; it retains their restrictions and may write internal recovery data.
+  Neither command executes the proposed operation; preview never authorizes it.
+
 - Setup and safety guidance describe permanent one/two-save preservation and
   bulk approval, distinguish ReSaver candidate quarantine from publication,
   and reconcile optional runtime requirements and reviewed upgrades.

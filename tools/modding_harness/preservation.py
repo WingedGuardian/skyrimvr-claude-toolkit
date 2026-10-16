@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import durable
-from .profiles import canonical
+from .profiles import canonical, comparison_key
 from .locking import exclusive
 
 DEFAULT_RESERVE = 2 * 1024 ** 3
@@ -27,14 +27,26 @@ class PreservationFailed(OSError):
 
 def contains(parent, child):
     try:
-        return os.path.commonpath((canonical(parent), canonical(child))) == canonical(parent)
+        parent, child = canonical(parent), canonical(child)
+        return os.path.commonpath((parent, child)) == parent
     except ValueError:
         return False
 
 
 def protects(path, stores, ancestor=False):
     """A recognized mutation may neither change a store nor move/delete its ancestor."""
-    return any(contains(store, path) or (ancestor and contains(path, store)) for store in stores)
+    resolved = None
+    for store in stores:
+        try:
+            store = canonical(store)
+            if resolved is None:
+                resolved = canonical(path)
+            shared = os.path.commonpath((store, resolved))
+            if shared == store or (ancestor and shared == resolved):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _state(members):
@@ -215,7 +227,7 @@ class SaveStore:
         for group in groups:
             for rec in group["members"]:
                 path = rec["path"]
-                if canonical(path) != rec["canonical"]:
+                if canonical(path) != comparison_key(rec["canonical"]):
                     raise PreservationFailed("save path resolution changed: " + path)
                 if rec["missing"]:
                     if os.path.lexists(path):
@@ -264,9 +276,9 @@ class SaveStore:
             for rec in group["members"]:
                 if (not isinstance(rec, dict) or not isinstance(rec.get("path"), str)
                         or not os.path.isabs(rec["path"]) or not isinstance(rec.get("canonical"), str)
-                        or not os.path.isabs(rec["canonical"]) or rec["canonical"] in seen):
+                        or not os.path.isabs(rec["canonical"]) or comparison_key(rec["canonical"]) in seen):
                     raise ValueError("invalid member path")
-                seen.add(rec["canonical"])
+                seen.add(comparison_key(rec["canonical"]))
                 if rec.get("missing") is False:
                     sha = rec.get("sha256", "")
                     if (not isinstance(sha, str) or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha)
@@ -291,8 +303,8 @@ class SaveStore:
         manifest = self.inspect(transaction)
         wanted = {canonical(path) for path in selected}
         groups = [g for g in manifest["groups"] if not wanted or
-                  any(rec["canonical"] in wanted for rec in g["members"])]
-        matched = {rec["canonical"] for g in groups for rec in g["members"]}
+                  any(comparison_key(rec["canonical"]) in wanted for rec in g["members"])]
+        matched = {comparison_key(rec["canonical"]) for g in groups for rec in g["members"]}
         if wanted - matched:
             raise ValueError("selected member is not in the transaction")
         self.verify(groups, deadline)

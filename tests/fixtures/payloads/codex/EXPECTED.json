@@ -15,7 +15,7 @@
   "0.160.0/codex-PreToolUse-apply_patch-3.json": {"verdict": "allow", "code": "allow"},
   "0.160.0/codex-PreToolUse-apply_patch-4.json": {"verdict": "allow", "code": "allow"},
   "0.160.0/codex-PreToolUse-apply_patch-5.json": {"verdict": "deny", "code": "shell.S-DEL-INSTALL"},
-  "0.160.0/codex-PreToolUse-mcp__probe__echo-1.json": {"verdict": "allow", "code": "allow"},
+  "0.160.0/codex-PreToolUse-mcp__probe__echo-1.json": {"verdict": "advise", "code": "allow"},
   "0.160.0/codex-SessionStart-none-1.json": {"verdict": "allow", "code": "session.NOT_SNAPSHOTTED"},
   "0.160.0/codex-SessionStart-none-2.json": {"verdict": "allow", "code": "session.NOT_SNAPSHOTTED"}
 }

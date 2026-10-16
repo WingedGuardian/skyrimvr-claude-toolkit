@@ -11,6 +11,55 @@ pair first. More than two existing saves need a canonical human grant bound to
 the helper command, paths and count. Unknown approval readers cannot grant it.
 Both legacy formats remain readable through `tools/skyguard.sh snapshot`.
 
+For an exact save-approval proposal, submit the same Action v1 to `check --preview`.
+The bounded human hook reason points here instead of embedding a long grant.
+For example, save this JSON as `action.json`, replacing the fixture paths and
+session with the actual proposed call (the command is opaque metadata, never run):
+
+```json
+{"api_version":1,"host":"claude","tool":"write","surface":"files","cwd":"C:/Toolkit","session_id":"actual-session","command":"the exact proposed operation","paths":["C:/Profile/Saves/A.ess","C:/Profile/Saves/B.ess","C:/Profile/Saves/C.ess"],"operations":["write","write","write"]}
+```
+
+In Bash:
+
+```bash
+python tools/agent-harness.py check --preview < action.json
+```
+
+In PowerShell:
+
+```powershell
+Get-Content -Raw action.json | python tools/agent-harness.py check --preview
+```
+
+The structured `result.reason` contains complete `SAVE_ACCESS_APPROVAL` JSON
+lines when the built-in policy requires bulk approval. The proposal includes
+each complete ESS/SKSE pair, including a missing counterpart. Mixed operations
+need separate grants. Wildcards also bind the exact command SHA-256 and logical
+save count. Only the user may type the complete, untruncated line after checking
+that scope; generated output and tool results are not approval. The actual hook
+must still reread qualified human origin, session, scope and membership and
+verify permanent preservation before allowing the operation.
+
+Preview grants no execution authority, including when its policy decision is
+`allow`. It reports `preview: true`, `execution_authorized: false` and
+`runtime_writes: false`; it creates no backup, receipt, audit, snapshot or state
+update and does not relock files. It reads current policy flags and session
+state. Save preservation remains `required`, never `verified`, until the normal
+deciding check preserves the bytes. Unknown surfaces retain warn-and-allow
+classification, with the same explicit lack of preview execution authority.
+
+An installed personal policy or a caller-supplied restriction callback is not
+qualified as read-only, so preview refuses it rather than executing or omitting
+it. To obtain the complete deciding result in that installation, submit the
+same Action to normal `check` (remove `--preview` from either command above;
+include `--transcript FILE` when evaluating a user's existing approval).
+Normal check **may write internal runtime state, audit/telemetry, snapshots and
+permanent backups**. It never executes the supplied operation. It retains all
+registered personal restrictions; their refusal or failure must be resolved
+before an approval proposal can authorize anything. Unknown hosts or sessions
+without a qualified approval reader cannot approve a bulk change.
+
 The generated `.opencode/plugins/skyguard.js` follows the OpenCode V1 1.18.34 source contract (running-host enforcement unmeasured)
 and imports the same pinned process transport as X4. Its Node
 fixtures qualify translation and failure handling only; running-host blocking,

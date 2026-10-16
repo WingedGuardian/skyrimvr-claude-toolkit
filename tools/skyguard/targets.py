@@ -274,9 +274,11 @@ def resolve_literal(word: str, cwd: str, env: Mapping[str, str]) -> Optional[str
     """
     p = word.replace("\\", "/")
     absolute = paths.norm_abs(p, msys=False)
-    if absolute is None and not re.match(r"[A-Za-z]:", p):
+    if absolute is None:
         base = normalise_cwd(cwd)
-        if base and p.startswith("/"):
+        if re.match(r"[A-Za-z]:", p):
+            absolute = _drive_relative(p, base, "cmd")
+        elif base and p.startswith("/"):
             root = _drive_root(base)
             absolute = paths.norm_abs(root + p.lstrip("/")) if root else None
         elif base:
@@ -302,6 +304,52 @@ def exec_cwd(e, cwd: str, env: Mapping[str, str]) -> Optional[str]:
 
 def resolve_operand(e, word: str, cwd: str, env: Mapping[str, str]) -> Optional[str]:
     return resolve(word, exec_cwd(e, cwd, env) or "", e.dialect, env)
+
+
+def physical(word: str, cwd: str, dialect: str, env: Mapping[str, str], *, literal=False) -> Optional[str]:
+    """The save's I/O identity, alongside resolve's conservative comparison key.
+
+    Ordinary Win32 paths retain the established resolver. An explicit namespace
+    in the operand or its cwd must retain its physical spelling through I/O.
+    None is an unqualified identity, never permission to use the comparison key.
+    """
+    compared = resolve_literal(word, cwd, env) if literal else resolve(word, cwd, dialect, env)
+    if compared is None:
+        return None
+    base = paths.physical_abs(cwd) if cwd else None
+    try:
+        w = word if literal else _expand(
+            _PS_PROVIDER.sub("", word, count=1) if dialect == "powershell" and "::" in word else word,
+            dialect, env, base)
+    except _Unresolvable:
+        return None
+    s = w.replace("\\", "/")
+    if s[:4] in ("//?/", "//./"):
+        return paths.physical_abs(w)
+    raw_base = bool(base and base.replace("\\", "/")[:4] in ("//?/", "//./"))
+    if raw_base:
+        if re.match(r"[A-Za-z]:(?!/)", s):
+            if dialect == "bash":
+                return compared
+            return paths.physical_abs(paths._join(base, s[2:])) if s[2:] else base
+        if not s.startswith("/") and not re.match(r"[A-Za-z]:", s):
+            return paths.physical_abs(paths._join(base, s))
+    # An unsupported namespace cwd cannot be replaced with its folded peer.
+    if cwd and cwd.replace("\\", "/")[:4] in ("//?/", "//./") and base is None:
+        return None
+    return compared
+
+
+def physical_cwd(e, cwd: str, env: Mapping[str, str]) -> Optional[str]:
+    if e.cd_before == "?":
+        return None
+    if not e.cd_before:
+        return paths.physical_abs(cwd) if cwd else None
+    return physical(e.cd_before, cwd, e.dialect, env)
+
+
+def physical_operand(e, word: str, cwd: str, env: Mapping[str, str]) -> Optional[str]:
+    return physical(word, physical_cwd(e, cwd, env) or "", e.dialect, env)
 
 
 def _under(path: str, root: str) -> bool:

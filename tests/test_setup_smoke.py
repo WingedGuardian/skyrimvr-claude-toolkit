@@ -6,12 +6,13 @@ tests/test_setup_agent.py); the rest is the structure of the job, so a value or 
 from __future__ import annotations
 
 import subprocess
+import re
 
 import pytest
 
 from conftest import BASH, REPO
 
-VALUES = ["claude", "codex", "all", "both", "auto"]
+VALUES = ["claude", "codex", "all", "both", "auto", "generic", "opencode"]
 
 
 def _job():
@@ -33,7 +34,12 @@ def test_the_ci_job_runs_every_agent_value_on_both_oses():
 def test_setup_main_values_match_the_smoke_values():
     """Every value setup.sh accepts is smoked, and nothing else."""
     text = (REPO / "setup.sh").read_text(encoding="utf-8")
-    assert "    claude|codex|all|auto) ;;\n    both) AGENT_ARG=\"all\" ;;" in text
+    accepted = re.search(r'case "\$AGENT_ARG" in\n\s*([a-z|]+)\) ;;\n\s*both\) AGENT_ARG="all" ;;', text)
+    assert accepted, "setup's accepted-agent branch could not be inspected"
+    assert set(accepted.group(1).split("|")) | {"both"} == set(VALUES)
+    smoke = (REPO / "scripts/setup-smoke.sh").read_text(encoding="utf-8")
+    smoked = re.search(r'case "\$AGENT" in ([a-z|]+)\) ;;', smoke)
+    assert smoked and set(smoked.group(1).split("|")) == set(VALUES)
 
 
 def _run(tmp_path, value):
@@ -41,10 +47,11 @@ def _run(tmp_path, value):
                           capture_output=True, text=True, timeout=600)
 
 
-def test_the_smoke_script_passes_on_the_real_setup(tmp_path):
-    r = _run(tmp_path, "claude")
+@pytest.mark.parametrize("value", ["claude", "generic", "opencode"])
+def test_the_smoke_script_passes_on_the_real_setup(tmp_path, value):
+    r = _run(tmp_path, value)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-2000:]
-    assert "setup-smoke [claude]: 0 failure(s)" in r.stdout
+    assert "setup-smoke [%s]: 0 failure(s)" % value in r.stdout
     assert "second run changed nothing" in r.stdout and "--agent nonsense wrote nothing" in r.stdout
 
 
@@ -56,9 +63,9 @@ def test_the_smoke_script_fails_when_setup_ignores_the_agent(tmp_path):
                                                               ".pytest_cache"))
     s = repo / "setup.sh"
     text = s.read_text(encoding="utf-8")
-    anchor = 'DO_CLAUDE=""; DO_CODEX=""\n'
+    anchor = 'DO_CLAUDE=""; DO_CODEX=""; DO_PORTABLE=""; DO_OPENCODE=""\n'
     assert text.count(anchor) == 1
-    s.write_text(text.replace(anchor, 'DO_CLAUDE=""; DO_CODEX=""; AGENT_SEL=all\n'), encoding="utf-8", newline="\n")
+    s.write_text(text.replace(anchor, anchor + 'AGENT_SEL=all\n'), encoding="utf-8", newline="\n")
     r = subprocess.run([BASH, str(repo / "scripts" / "setup-smoke.sh"), "claude", str(tmp_path / "w")],
                        capture_output=True, text=True, timeout=600)
     assert r.returncode == 1, r.stdout[-3000:]

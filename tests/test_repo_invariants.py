@@ -10,6 +10,8 @@ import re
 import sys
 import subprocess
 
+import pytest
+
 from conftest import BASH, REPO
 
 PROMPT_START = "I just installed the Skyrim modding toolkit"
@@ -390,11 +392,21 @@ def test_every_registered_hook_has_a_timeout_that_is_not_the_old_five_seconds():
     assert not problems, "\n  " + "\n  ".join(problems)
 
 
+def _assert_knowledgebase_shipping_membership(root):
+    local = "KNOWLEDGEBASE.local.md"
+    result = subprocess.run(["git", "ls-files", "-z", "--", "KNOWLEDGEBASE.md", local],
+                            cwd=str(root), capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    tracked = set(result.stdout.split("\0"))
+    assert "KNOWLEDGEBASE.md" in tracked, "the toolkit's knowledgebase is not tracked for release"
+    assert local not in tracked, local + " is tracked and would ship over the user's own notes"
+
+
 def test_the_users_knowledgebase_is_never_shipped_and_is_where_writes_go():
     """A toolkit must not ship a file it also asks the user to edit.
 
-    The documented update path is "extract the new zip over your install", so every
-    file this repo ships is REPLACED on update. `KNOWLEDGEBASE.md` was both shipped by
+    The historical update path was "extract the new zip over your install", so every
+    shipped file could be REPLACED on update. `KNOWLEDGEBASE.md` was both shipped by
     us and appended to by the user on our own standing instruction, so an update
     silently destroyed their accumulated notes -- while the README promised the
     opposite ("Your knowledgebase additions are preserved"). A reassurance that fires
@@ -442,17 +454,43 @@ def test_the_users_knowledgebase_is_never_shipped_and_is_where_writes_go():
     # ...and the toolkit's own knowledgebase must still SHIP. Dropping it would make
     # the assertion above pass for the wrong reason.
     assert (REPO / "KNOWLEDGEBASE.md").is_file(), "the toolkit's KNOWLEDGEBASE.md is gone"
-    assert not (REPO / local).exists(), (
-        local + " exists in the repo. It is the USER's file; if it is here it will be "
-        "tracked and shipped, overwriting theirs on update")
+    # A user's ignored local file may exist in a working checkout. Releases use
+    # committed objects; disk existence is not evidence that the file ships.
+    # Exported/mutation source fixtures have no index; the guidance/ignore and
+    # actual payload-checker requirements above still apply to those copies.
+    if (REPO / ".git").exists():
+        _assert_knowledgebase_shipping_membership(REPO)
+
+
+@pytest.mark.parametrize("tracked", [False, True], ids=["ignored-local", "tracked-local"])
+def test_knowledgebase_membership_allows_local_notes_but_refuses_shipping_them(tmp_path, tracked):
+    from test_release_build import _build, _git, _names, _repo, _zip
+    root = _repo(tmp_path)
+    (root / "KNOWLEDGEBASE.md").write_bytes(b"toolkit knowledge\n")
+    with (root / ".gitignore").open("a", encoding="utf-8") as stream:
+        stream.write("KNOWLEDGEBASE.local.md\n")
+    _git(root, "add", "--", "KNOWLEDGEBASE.md", ".gitignore")
+    _git(root, "commit", "-q", "-m", "knowledgebase fixture")
+    local = root / "KNOWLEDGEBASE.local.md"
+    local.write_bytes(b"owned private findings\n")
+    if tracked:
+        _git(root, "add", "-f", "--", local.name)
+        with pytest.raises(AssertionError, match="tracked and would ship"):
+            _assert_knowledgebase_shipping_membership(root)
+    else:
+        _assert_knowledgebase_shipping_membership(root)
+        result, output = _build(root, "HEAD", "--version", "notes-fixture")
+        assert result.returncode == 0, result.stdout + result.stderr
+        names = _names(_zip(output))
+        assert "skyrim-ai-assistant-toolkit-notes-fixture/KNOWLEDGEBASE.md" in names
+        assert not any(name.endswith("/KNOWLEDGEBASE.local.md") for name in names)
+    assert local.read_bytes() == b"owned private findings\n"
 
 
 # ---------------------------------------------------------------- the Codex payload (Plan 4 Task 11)
 
 import shutil  # noqa: E402
 import sys  # noqa: E402
-
-import pytest  # noqa: E402
 
 from conftest import copy_repo  # noqa: E402
 

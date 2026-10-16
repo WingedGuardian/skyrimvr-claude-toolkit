@@ -764,7 +764,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if a is not None:
                 kind, b = place(a)
                 if is_save(b, roots):
-                    saves.append(b)                       # the save policy (saves.py), not S-DEL-CONFIG
+                    actual = targets.physical_operand(e, w, cwd, env)
+                    saves.append(actual if a == b and actual else "")
                 elif kind and resolved is None:
                     resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
                 continue
@@ -774,7 +775,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 lit = literal_abs(w, ecwd, e.dialect)
                 kind = protected_kind(lit, roots) if lit else ""
                 if kind and is_save(lit, roots):
-                    saves.append(lit)
+                    actual_base = targets.physical_cwd(e, cwd, env) or ""
+                    saves.append(targets.physical(w, actual_base, e.dialect, env, literal=True) or "")
                     continue
                 if kind:
                     if resolved is None:
@@ -812,7 +814,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         if a is not None:
             kind, b = place(a)
             if is_save(b, roots):
-                saves.append(b)
+                actual = targets.physical(w, cwd, "powershell", env, literal=how == "single")
+                saves.append(actual if a == b and actual else "")
                 continue
             if kind and resolved is None:
                 resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)

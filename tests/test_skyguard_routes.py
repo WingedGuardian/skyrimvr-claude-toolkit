@@ -16,6 +16,8 @@ from skyguard import paths  # noqa: E402
 RUN = REPO / "tools" / "skyguard" / "run.py"
 DEL_INSTALL = ("Blocked: this deletes {} inside the Skyrim install.\n"
                "A mod manager cannot restore your own files there; if you mean it, run it yourself.")
+DEL_STORE = ("Blocked: {} is a permanent save backup store or its ancestor.\n"
+             "Recovery data cannot be overwritten, deleted, moved or aliased by this call.")
 DEL_UNRESOLVED = ("Blocked: this deletes a path the guard cannot work out, in a command that names a protected Skyrim "
                   "folder.\nWrite the full path, or run it yourself.")
 DEL_CONFIG = ("Blocked: this deletes {} in the Skyrim settings folder.\n"
@@ -84,7 +86,9 @@ def test_a_worktree_outside_the_install_still_guards_it(worktree, tmp_path):
     assert paths.main_worktree(out.as_posix()) == main
     got = _fire(out.as_posix(), "protect-bash", {"tool_name": "Bash", "cwd": out.as_posix(),
                                                  "tool_input": {"command": "rm -rf '{}'".format(main)}})
-    assert got == ("deny", DEL_INSTALL.format("Game"))
+    # The whole install also contains its permanent recovery store; that
+    # refusal deliberately takes precedence over ordinary install deletion.
+    assert got == ("deny", DEL_STORE.format("Game"))
 
 
 @pytest.mark.parametrize("dotgit", ["gitdir: ../somewhere/else\n", "not a gitdir line\n", ""])

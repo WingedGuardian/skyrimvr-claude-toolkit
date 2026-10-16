@@ -16,6 +16,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser("check")
     check.add_argument("--transcript", default="")
+    check.add_argument("--preview", action="store_true", help="read-only policy/scope report; never execution authority")
     coverage = sub.add_parser("coverage")
     coverage.add_argument("--session-id", required=True)
     sub.add_parser("capabilities")
@@ -65,8 +66,11 @@ def main(argv=None):
                       "save_recovery": "save-list/save-restore; guarded in-place; both legacy formats remain readable via snapshot"}
         else:
             action = generic.parse(sys.stdin.buffer.read(1024 * 1024 + 1))
-            outcome, count = portable.check(action, root, transcript=args.transcript, deadline=time.monotonic() + 20)
+            outcome, count = portable.check(action, root, transcript=args.transcript, deadline=time.monotonic() + 20,
+                                             preview=args.preview)
             result = portable.reply(outcome, count)
+            if args.preview:
+                result.update(preview=True, execution_authorized=False, runtime_writes=False)
     except (OSError, ValueError, UnicodeError, RecursionError) as exc:
         if args.command in installation.COMMANDS:
             result, exit_status = installation.failure(args.command, exc, "Skyrim adapter failed")

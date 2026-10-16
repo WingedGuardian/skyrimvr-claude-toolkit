@@ -158,6 +158,29 @@ def _join(base: str, rel: str) -> str:
     return base + "/" + rel
 
 
+def physical_abs(path: str, msys: bool = True) -> Optional[str]:
+    """Resolve an I/O spelling without applying Win32 trimming to a raw namespace.
+
+    norm_abs is a policy comparison key. In particular, its trailing-dot/space
+    folding must never select the object whose bytes we preserve. Only DOS-drive
+    and UNC namespaces are supported here; ambiguous device/dot-segment paths
+    return None so save preservation refuses rather than guessing another file.
+    """
+    p = path.replace("\\", "/")
+    if p[:4] not in ("//?/", "//./"):
+        return norm_abs(path, msys=msys)
+    tail = p[4:]
+    if tail[:4].lower() == "unc/":
+        parts = tail[4:].split("/")
+        supported = len(parts) >= 2 and all(parts[:2])
+    else:
+        supported = bool(_DRIVE_ABS.match(tail))
+        parts = tail[3:].split("/")
+    if os.name != "nt" or not supported or any(c in (".", "..") for c in parts):
+        return None
+    return p.replace("/", "\\")
+
+
 # ---------------------------------------------------------------------------------------------------------
 # skyrim-paths.env, read as data
 # ---------------------------------------------------------------------------------------------------------
@@ -364,6 +387,7 @@ class Roots(NamedTuple):
     mo2_dirs: Tuple[str, ...] = ()
     malformed: Tuple[Tuple[str, str], ...] = ()
     loadorder_dirs: Tuple[str, ...] = ()      # SKYRIM_LOADORDER_DIR, normalised: recovery snapshots only (Plan 6 Task 15)
+    physical_config_dirs: Tuple[str, ...] = ()  # I/O roots; namespace spelling is never a comparison key
 
 
 def _add(acc: List[str], value: str) -> None:
@@ -453,7 +477,15 @@ def roots(root_posix: str, root_win: str, env: EnvLike) -> Roots:
     lo: List[str] = []
     for v in _values(env, "SKYRIM_LOADORDER_DIR"):
         _add_dir(lo, v)
-    return Roots("|".join(game), "|".join(config), tuple(install), tuple(cfg), tuple(mo2), bad, tuple(lo))
+    physical_cfg = []
+    for v in _values(env, "SKYRIM_CONFIG_DIR"):
+        d = physical_abs(v)
+        if d is None:
+            bad += ((PATHS_FILE, "SKYRIM_CONFIG_DIR"),)
+        elif d not in physical_cfg:
+            physical_cfg.append(d)
+    return Roots("|".join(game), "|".join(config), tuple(install), tuple(cfg), tuple(mo2), bad, tuple(lo),
+                 tuple(physical_cfg))
 
 
 # ---------------------------------------------------------------------------------------------------------

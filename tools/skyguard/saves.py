@@ -97,17 +97,20 @@ def resaver_change(op, words, cwd, shell, roots, env) -> Change:
     folder = mcp_rules.saves_folder(roots, env) if roots is not None else None
     for word in words:
         name = re.split(r"[/\\]", word)[-1] or word
-        if WILD.search(word):
+        if WILD.search(os.path.splitdrive(word)[1]):
             unknown.append(("S-RESAVER-APPLY", (("op", op), ("save", name))))
             continue
-        n = paths.norm_abs(word, msys=(shell != "powershell"))
+        n = paths.physical_abs(word, msys=(shell != "powershell"))
+        if n is None and paths.norm_abs(word, msys=(shell != "powershell")) is not None:
+            unknown.append(("S-RESAVER-APPLY", (("op", op), ("save", name))))
+            continue
         cands = [n] if n else []
         if not n:
-            base = paths.norm_abs(cwd) if cwd else None
+            base = paths.physical_abs(cwd) if cwd else None
             if base is None:
                 unknown.append(("S-RESAVER-APPLY", (("op", op), ("save", name))))   # relative, and no cwd to place it
                 continue
-            j = paths.norm_abs(base + "/" + word.replace("\\", "/"))
+            j = paths.physical_abs(base + "/" + word.replace("\\", "/"))
             if j:
                 cands.append(j)
             if folder:
@@ -198,8 +201,12 @@ def count(change: Change) -> Count:
         return k
 
     for t in change.targets:
+        name = os.path.split(t.path)[1] if t.path else ""
+        if not name or (not WILD.search(name) and not name.lower().endswith(EXTS)):
+            unknown.append("unqualified save path")
+            continue
         folder, name = os.path.split(t.path)
-        if not t.literal and WILD.search(folder):
+        if not t.literal and WILD.search(os.path.splitdrive(folder)[1]):
             unknown.append(name)
             continue
         if t.literal or not WILD.search(name):

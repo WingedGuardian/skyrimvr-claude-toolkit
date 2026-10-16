@@ -3,13 +3,13 @@
 # WROTE, then that a second run changes nothing and that a bad value writes nothing. CI runs it once per value and
 # OS (.github/workflows/ci.yml, job setup-smoke); tests/test_setup_smoke.py runs it locally.
 #
-#   bash scripts/setup-smoke.sh <claude|codex|all|both|auto> [work-dir]
+#   bash scripts/setup-smoke.sh <claude|codex|all|both|auto|generic|opencode> [work-dir]
 #
 # work-dir (default: a new folder under ${TMPDIR:-/tmp}) must not exist or be empty; nothing in it is deleted.
 # Exit 0 = every check passed, 1 = a check failed (each failure is printed), 2 = usage.
 set -u
 AGENT="${1:-}"
-case "$AGENT" in claude|codex|all|both|auto) ;; *) echo "usage: setup-smoke.sh <claude|codex|all|both|auto> [work-dir]" >&2; exit 2 ;; esac
+case "$AGENT" in claude|codex|all|both|auto|generic|opencode) ;; *) echo "usage: setup-smoke.sh <claude|codex|all|both|auto|generic|opencode> [work-dir]" >&2; exit 2 ;; esac
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${2:-$(mktemp -d "${TMPDIR:-/tmp}/setup-smoke-XXXXXX")}"
 GAME="$WORK/Skyrim VR"
@@ -48,14 +48,26 @@ sel=$(printf '%s\n' "$out" | sed -n 's/.*-> configuring: \([a-z]*\) (--agent aut
 case "$AGENT" in auto) ;; both) [ "$sel" = all ] || fail "--agent both configured '$sel', not all" ;;
     *) [ "$sel" = "$AGENT" ] || fail "--agent $AGENT configured '$sel'" ;; esac
 case "$sel" in claude) WANT_C=1; WANT_X="" ;; codex) WANT_C=""; WANT_X=1 ;; all) WANT_C=1; WANT_X=1 ;;
+    generic|opencode) WANT_C=""; WANT_X="" ;;
     *) fail "no 'configuring:' line in the output"; WANT_C=""; WANT_X="" ;; esac
-# AGENTS.md serves Codex AND every other agent, so it is filled whenever Codex is selected, on any OS; only Codex's
+# AGENTS.md serves Codex and portable agents, so it is filled for each selected one, on any OS; only Codex's
 # hooks (.codex/hooks.json) are Windows-only.
+WANT_AGENTS="$WANT_X"
+case "$sel" in generic|opencode) WANT_AGENTS=1 ;; esac
 WANT_HOOKS="$WANT_X"; [ -n "$WIN" ] || WANT_HOOKS=""
 if has_marks CLAUDE.md; then [ -z "$WANT_C" ] && ok "CLAUDE.md left as extracted" || fail "CLAUDE.md not filled in"
 else [ -n "$WANT_C" ] && ok "CLAUDE.md filled in" || fail "CLAUDE.md filled in for an unselected agent"; fi
-if has_marks AGENTS.md; then [ -z "$WANT_X" ] && ok "AGENTS.md left as extracted" || fail "AGENTS.md not filled in"
-else [ -n "$WANT_X" ] && ok "AGENTS.md filled in" || fail "AGENTS.md filled in for an unselected agent"; fi
+if has_marks AGENTS.md; then [ -z "$WANT_AGENTS" ] && ok "AGENTS.md left as extracted" || fail "AGENTS.md not filled in"
+else [ -n "$WANT_AGENTS" ] && ok "AGENTS.md filled in" || fail "AGENTS.md filled in for an unselected agent"; fi
+case "$sel" in all|opencode)
+    printf '%s\n' "$out" | grep -q 'Running-host blocking, Desktop and V2 remain unqualified' \
+        && ok "OpenCode files present; host blocking remains unqualified" \
+        || fail "OpenCode readiness/qualification disclosure missing" ;;
+esac
+case "$sel" in generic|opencode)
+    printf '%s\n' "$out" | grep -q 'does not prove a host intercepted' \
+        && ok "portable setup does not claim interception" || fail "portable interception disclosure missing" ;;
+esac
 if grep -q '{{CODEX_ROOT' "$GAME/.codex/hooks.json"; then
     [ -z "$WANT_HOOKS" ] && ok ".codex/hooks.json left unrendered" || fail ".codex/hooks.json not rendered"
     printf '%s\n' "$out" | grep -q "Codex:       NOT CONFIGURED" && ok "says Codex is not configured" \

@@ -377,16 +377,18 @@ def _release(audit) -> None:
             pass
 
 
-def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
+def shadow(v, project, session_id, telemetry, audit, now=None, *, readonly=False) -> Verdict:
     """See _shadow. Whatever rule lines are still held when it returns (a refusal that stands, an allow, a failure)
     are written exactly as they fired."""
     try:
+        if readonly:
+            return _shadow(v, project, session_id, telemetry, audit, now, readonly=True)
         return _shadow(v, project, session_id, telemetry, audit, now)
     finally:
         _release(audit)
 
 
-def _shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
+def _shadow(v, project, session_id, telemetry, audit, now=None, *, readonly=False) -> Verdict:
     """R8, shadow mode: the ONE place a refusal can be turned into an allow. Called on the finished verdict
     (after combine, after the side effects) by every agent's decision path.
 
@@ -407,14 +409,16 @@ def _shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
         st = _state.read(str(Path(project) / ".skyguard" / "state.json"))
         if st.rejected:
             _release(audit)
-            if _state_reject_is_new(project, st.reason):
+            if not readonly and _state_reject_is_new(project, st.reason):
                 audit.log("skyguard", "STATE-REJECTED", st.reason)
             return v
-        _state_reject_clear(project)
+        if not readonly:
+            _state_reject_clear(project)
         if not st.lifts:
             return v
         now = time.time() if now is None else now
-        _relock_due(project, st, now, audit)          # Plan 6 final fix: a lock lift's expiry relocks (A-I3 / C-I1)
+        if not readonly:
+            _relock_due(project, st, now, audit)      # Plan 6 final fix: a lock lift's expiry relocks (A-I3 / C-I1)
         start = _state.session_start(telemetry, session_id) if telemetry else None
         if not [x for x in _state.honoured(st, session_id, now, start) if x["kind"] == "guards"]:
             return v

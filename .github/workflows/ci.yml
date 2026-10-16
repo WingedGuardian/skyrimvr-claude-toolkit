@@ -292,7 +292,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        agent: [claude, codex, all, both, auto]
+        agent: [claude, codex, all, both, auto, generic, opencode]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:

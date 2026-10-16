@@ -178,7 +178,7 @@ def _documents(env) -> list:
 def saves_folder(roots, env) -> Optional[str]:
     """The first existing Saves folder: each declared config dir, then <Documents>/My Games/<game>/ for every game
     folder name (VR, SE, base). None when there is none."""
-    cands = [os.path.join(d, "Saves") for d in roots.config_dirs]
+    cands = [os.path.join(d, "Saves") for d in roots.physical_config_dirs or roots.config_dirs]
     for docs in _documents(env):
         cands += [os.path.join(docs, "My Games", g, "Saves") for g in paths.GAME_FOLDERS]
     return next((c for c in cands if os.path.isdir(c)), None)

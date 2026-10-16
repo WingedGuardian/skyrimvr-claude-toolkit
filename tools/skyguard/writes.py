@@ -51,7 +51,9 @@ exec's program is opaque, its own words get the same segment check, and so -- wh
 of the nearest upstream program that is not a shell (`printf 'echo x > X.esp' | sh`). Not every exec's words: a
 hook-test harness passing a write as DATA to a function beside an opaque `bash "$H"` is not a write (priced: 2).
 
-KNOWN LIMITS (recorded, not handled): `perl -i`, interpreter code (`python -c "open('X.esp','w')"`) and opaque
+Literal Python open/Path/truncate writes are read as Python syntax, including escaped and raw strings;
+the Node literal-call and PowerShell method-call readers keep their own language rules.
+KNOWN LIMITS (recorded, not handled): `perl -i`, interpreter code that computes its filename, and opaque
 scripts that write a plugin get no message (R11: the Write-tool deny remains, and Plan 6's read-only lock is the
 backstop); a copy whose unresolved destination does not name a Data folder gets no note (`"$D/My.esp"`);
 `touch` and `truncate` are not write primitives; a copy or move onto an ordinary (non-plugin, non-config) file in
@@ -64,12 +66,14 @@ copy primitives.
 """
 from __future__ import annotations
 
+import ast
 import os
 import posixpath
 import re
+from pathlib import Path
 from typing import List, Mapping, NamedTuple, Optional, Tuple
 
-from . import shellparse, targets
+from . import paths, shellparse, targets
 from .deletes import _plain_operands, interpreter_code, robocopy_positionals, substituted
 from .grep import _compile
 from .shellparse import ps_param
@@ -407,7 +411,70 @@ def text_write_targets_ps(text: str) -> List[str]:
     return [m.group(1) for m in _PS_METHOD_WRITE.finditer(text)]
 
 
-def text_write_targets(code: str) -> List[str]:
+def _python_write_targets(code: str) -> List[str]:
+    """Read literal Python write arguments as Python, without running any code.
+
+    Regex captures are source spellings: a doubled backslash is one backslash
+    in the filename. Keep this decoder separate from JavaScript and PowerShell.
+    Dynamic expressions remain outside the literal-only analysis.
+    """
+    if len(code) > 1024 * 1024:
+        raise ValueError("Python literal write scope exceeds the analysis limit")
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        # The invoked Python can have a different syntax version from this guard.
+        raise ValueError("Python literal write scope could not be parsed") from None
+    except (RecursionError, MemoryError):
+        raise ValueError("Python literal write scope could not be parsed") from None
+
+    def literal(node):
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+    def path_argument(node):
+        if not isinstance(node, ast.Call) or not node.args:
+            return None
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == "Path" or (
+                isinstance(func, ast.Attribute) and func.attr == "Path" and
+                isinstance(func.value, ast.Name) and func.value.id == "pathlib"):
+            parts = [literal(arg) for arg in node.args]
+            if node.keywords or any(part is None for part in parts):
+                return None
+            return str(Path(*parts))
+        return None
+
+    def writing(call, index):
+        mode = next((literal(k.value) for k in call.keywords if k.arg == "mode"),
+                    literal(call.args[index]) if len(call.args) > index else "r")
+        return isinstance(mode, str) and any(c in mode for c in "wax+")
+
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func, name = node.func, ""
+        if isinstance(func, ast.Name):
+            name = func.id
+        elif isinstance(func, ast.Attribute):
+            parent = path_argument(func.value)
+            if parent is not None and (func.attr in ("write_bytes", "write_text") or
+                                       func.attr == "open" and writing(node, 0)):
+                out.append(parent)
+            if isinstance(func.value, ast.Name) and func.value.id in ("io", "builtins", "os"):
+                name = func.value.id + "." + func.attr
+        keyword = "path" if name == "os.truncate" else "file"
+        argument = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == keyword), None)
+        value = literal(argument)
+        if value is not None and (name == "os.truncate" or
+                name in ("open", "io.open", "builtins.open") and writing(node, 1)):
+            out.append(value)
+    return out
+
+
+def text_write_targets(code: str, *, python_literals: bool = False) -> List[str]:
+    if python_literals:
+        return _python_write_targets(code)
     out = []
     for rx in _INTERP_WRITE:
         out += [m.group(2) for m in rx.finditer(code)]
@@ -697,7 +764,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             # S-SED-WINPATH (Task 9): sed -i on an install/config/MO2 file whose replacement holds a backslash path.
             # It REPLACES the S-WRITE-INSTALL note for that file (one note per write, not two).
             if is_save(a, roots):
-                saves.append((a, "write"))                          # replaces the S-WRITE-INSTALL note (saves.py)
+                saves.append((targets.physical_operand(e, w, cwd, env) or "", "write"))
                 continue
             # S-SED-CRLF (P8-SED): a game file by name, or any file in the install / config / MO2 area.
             in_zone = targets.zone(a, roots) in SED_ZONES if a is not None else False
@@ -717,20 +784,22 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if is_protected_folder(a, roots):
                 moved.append(posixpath.basename(a.rstrip("/")) or a)
             elif is_save(a, roots):
-                saves.append((a, "move"))                           # a save moved or renamed away (saves.py)
+                saves.append((targets.physical_operand(e, w, cwd, env) or "", "move"))
         for dst, srcs in copy_targets(e):
             # The destination as written AND where it resolves (`cp a.ini x.ini` run inside Data/SKSE/Plugins).
             a_dst = targets.resolve_operand(e, dst, cwd, env)
             # A save replaced: the destination itself, or a folder destination that takes a save's name.
             if is_save(a_dst, roots):
-                saves.append((a_dst, "write"))
+                saves.append((targets.physical_operand(e, dst, cwd, env) or "", "write"))
                 continue
             if a_dst is not None and _looks_like_dir(dst):
                 save_dests = [a_dst.rstrip("/") + "/" + _name(s) for s in srcs
                               if s.lower().endswith(SAVE_EXTS)]
                 save_dests = [p for p in save_dests if is_save(p, roots)]
                 if save_dests:
-                    saves.extend((p, "write") for p in save_dests)
+                    physical_dst = targets.physical_operand(e, dst, cwd, env)
+                    saves.extend((paths.physical_abs(physical_dst.rstrip("/\\") + "/" + _name(p))
+                                  if physical_dst else "", "write") for p in save_dests)
                     continue
             kind = file_class(dst, a_dst or "")
             if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):
@@ -778,15 +847,16 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     for e in parsed.execs:
         code = interpreter_code(e)
         if code:
-            lit += [(e, w) for w in text_write_targets(code)]
+            lit += [(e, w) for w in text_write_targets(code, python_literals=bool(shellparse._PYTHON.fullmatch(e.program)))]
     for e, word in lit:
         base = cwd if e is None else (targets.exec_cwd(e, cwd, env) or "")
-        a = targets.resolve(word, base, "cmd", env)                     # a literal: nothing in it expands
+        a = targets.resolve_literal(word, base, env)                    # a literal: nothing in it expands
         kind = file_class(word, a or "")
         if kind == "plugin":
             plugin.append(_name(word))
         elif is_save(a, roots):
-            saves.append((a, "write"))
+            actual_base = cwd if e is None else (targets.physical_cwd(e, cwd, env) or "")
+            saves.append((targets.physical(word, actual_base, "cmd", env, literal=True) or "", "write"))
         elif kind:
             notes[RULE_OF_CLASS[kind]].append(_name(word))
         elif a is not None and in_install_area(a, roots):
