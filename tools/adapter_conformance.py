@@ -49,6 +49,17 @@ FAULTS = {
     "engine-hang": "import time; time.sleep(60)\n",
     "engine-missing": None,
 }
+for _name, _changes in (
+        ("bool-version", {"v": True}), ("float-version", {"v": 1.0}),
+        ("reason-type", {"reason": []}), ("context-type", {"context": {}}),
+        ("status-type", {"status": []}), ("status-unknown", {"status": "unknown"}),
+        ("code-type", {"code": None}), ("incomplete-verdict", None)):
+    _verdict = dict(v=1, decision="allow", reason="", context="", status="evaluated", code="allow")
+    if _changes is None:
+        _verdict = {"v": 1, "decision": "allow"}
+    else:
+        _verdict.update(_changes)
+    FAULTS["engine-" + _name] = _W + "w(" + repr(("SKYGUARD-OK\n" + json.dumps(_verdict) + "\n").encode("ascii")) + ")\n"
 # Faults that make the engine DECIDE something the payload does not suggest: the adapter must obey the verdict,
 # not its own opinion of the payload. Both are valid, well-formed engine answers.
 VERDICT_FAULTS = ("engine-deny-nonce", "engine-allow-valid")

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The generic adapter requires the complete typed neutral verdict, including
+  an exact integer protocol version, status and text fields. Its conformance
+  matrix includes malformed versions, incomplete results and wrong field types.
 - Benchmark timing must be finite and valid before any DevBench contact; empty
   retained windows and missing comparisons cannot report success. CI reads the
   trailing test outcome, Nexus requirements disclose GraphQL partial results,

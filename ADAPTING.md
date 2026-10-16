@@ -336,9 +336,12 @@ Copy their *mechanism*, not their wording. Every row is cited.
    placeholder `{ROOT}` stands for the scratch install, and `payload_hex` gives raw bytes. Quote a shell path that
    may contain a space. The decoy is always a file that does not exist, in `Data/`.
 
-   Beyond your cases the tool replaces the engine with ten broken ones (`engine-crash`, `engine-silent`,
+   Beyond your cases the tool replaces the engine with eighteen broken ones (`engine-crash`, `engine-silent`,
    `engine-garbage`, `engine-marker-garbage`, `engine-wrong-version`, `engine-allow-but-exit-1`,
-   `engine-no-marker`, `engine-unknown-decision`, `engine-hang`, `engine-missing`) and requires a block whose reason is visible, then with two valid ones: `engine-deny-nonce`
+   `engine-no-marker`, `engine-unknown-decision`, `engine-hang`, `engine-missing`,
+   `engine-bool-version`, `engine-float-version`, `engine-reason-type`, `engine-context-type`,
+   `engine-status-type`, `engine-status-unknown`, `engine-code-type`, `engine-incomplete-verdict`)
+   and requires a block whose reason is visible, then with two valid ones: `engine-deny-nonce`
    (a deny for a harmless payload: the adapter must block and the engine's own reason must reach the agent) and
    `engine-allow-valid` (an allow for the decoy: the adapter must obey the engine, not its own opinion of the
    payload).

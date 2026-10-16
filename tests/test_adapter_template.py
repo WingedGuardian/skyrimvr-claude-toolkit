@@ -246,9 +246,24 @@ def test_the_cli_says_out_loud_that_unlisted_tools_are_not_guarded(tmp_path):
     assert note and "write_file" in note[0] and "run_shell" in note[0]
 
 
-FAULT_IDS = ["fault:engine-deny-nonce", "fault:engine-allow-valid",
-"fault:engine-crash", "fault:engine-silent", "fault:engine-garbage", "fault:engine-marker-garbage",
-             "fault:engine-wrong-version", "fault:engine-allow-but-exit-1", "fault:engine-hang", "fault:engine-missing"]
+FAULT_IDS = ["fault:" + name for name in (*_conf().VERDICT_FAULTS, *_conf().FAULTS)]
+
+
+@pytest.mark.parametrize("change", [{"v": True}, {"v": 1.0}, {"reason": []}, {"context": {}},
+                                   {"status": []}, {"status": "unknown"}, {"code": None}, None])
+def test_incomplete_or_wrongly_typed_engine_verdict_is_a_visible_refusal(tmp_path, change):
+    c = _conf()
+    root = c.make_install(_toy(tmp_path, JSON_SLOTS), tmp_path / "inst")
+    verdict = dict(v=1, decision="allow", reason="", context="", status="evaluated", code="allow")
+    if change is None:
+        verdict = {"v": 1, "decision": "allow"}
+    else:
+        verdict.update(change)
+    data = ("SKYGUARD-OK\n" + json.dumps(verdict) + "\n").encode("utf-8")
+    (root / "tools/skyguard/run.py").write_text("import sys\nsys.stdout.buffer.write(" + repr(data) + ")\n")
+    result = _run_adapter(root, "toy", b'{"tool":"write_file","args":{"path":"notes.txt"}}')
+    out = json.loads(result.stdout)
+    assert out["toy_decision"] == "block" and "GUARD INERT" in result.stdout.decode()
 
 
 def _by(rows):
@@ -562,7 +577,7 @@ def test_every_fault_row_goes_red_when_the_machinery_fails_open(tmp_path):
     assert old in src
     p.write_text(src.replace(old, '        return _checked(render_allow("x"))\n    except BaseException:'), newline="\n")
     rows = _by(c.run_conformance(d, JSON_PROFILE, _json_cases()))
-    for fid in FAULT_IDS[2:]:                  # the 8 engine-break faults (the two verdict faults are not about failure)
+    for fid in FAULT_IDS[2:]:                  # engine-break faults; the first two check verdict fidelity
         assert not rows[fid].ok, fid
     assert not rows["case:garbage-payload"].ok and not rows["case:empty-payload"].ok
     assert not rows["template-identical"].ok
