@@ -241,11 +241,17 @@ def _blobs(oids):
 def prove(zip_bytes: bytes, sha: str, name: str):
     """Post-build proof (re-review N2), independent of how the archive was made: the zip's file list is the
     commit's tree minus EXCLUDE (plus BUILD-INFO), and every member's bytes are its blob's -- the only change
-    allowed is the committed line-ending rule (CRLF <-> LF). Returns the problems (empty = proven)."""
+    allowed is a declared text line-ending rule (CRLF <-> LF). Duplicate members and binary conversions
+    refuse. Returns the problems (empty = proven)."""
     want = expected_files(sha)
     got = {}
+    problems, seen = [], set()
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         for zi in zf.infolist():
+            identity = zi.filename.rstrip("/")
+            if identity in seen:
+                problems.append("duplicate zip member: " + zi.filename)
+            seen.add(identity)
             if zi.is_dir():
                 continue
             rel = zi.filename[len(name) + 1:] if zi.filename.startswith(name + "/") else None
@@ -253,12 +259,25 @@ def prove(zip_bytes: bytes, sha: str, name: str):
                 got["<outside the root> " + zi.filename] = b""
             elif rel != BUILD_INFO:
                 got[rel] = zf.read(zi)
-    problems = ["missing from the zip: " + p for p in sorted(set(want) - set(got))]
+    problems += ["missing from the zip: " + p for p in sorted(set(want) - set(got))]
     problems += ["not in the commit: " + p for p in sorted(set(got) - set(want))]
     blobs = _blobs(want[p] for p in want if p in got)
+    raw = _git("check-attr", "--source", sha, "-z", "--stdin", "text", "eol", text=False,
+               stdin=b"".join(p.encode("utf-8") + b"\0" for p in sorted(set(want) & set(got)))).stdout.split(b"\0")
+    attributes = {}
+    for index in range(0, len(raw) - 2, 3):
+        attributes.setdefault(raw[index].decode("utf-8"), {})[raw[index + 1]] = raw[index + 2]
     for p in sorted(set(want) & set(got)):
-        if got[p].replace(b"\r\n", b"\n") != blobs[want[p]].replace(b"\r\n", b"\n"):
-            problems.append("bytes differ from the committed blob: " + p)
+        original = blobs[want[p]]
+        if got[p] == original:
+            continue
+        attrs = attributes.get(p, {})
+        text = (attrs.get(b"text") != b"unset" and
+                (attrs.get(b"text") in (b"set", b"auto") or attrs.get(b"eol") in (b"lf", b"crlf")))
+        if (text and b"\0" not in got[p] and b"\0" not in original and
+                got[p].replace(b"\r\n", b"\n") == original.replace(b"\r\n", b"\n")):
+            continue
+        problems.append("bytes differ from the committed blob: " + p)
     return problems
 
 

@@ -6615,14 +6615,18 @@ _T10FR2 = [
      "    problems = token_problems()\n    if False:", _RP + "test_a_vague_token_is_rejected_by_number_never_text"),
     # N2 the post-build proof
     ("t10fr2-proof-misses-dropped-files", _BZ,
-     '    problems = ["missing from the zip: " + p for p in sorted(set(want) - set(got))]', "    problems = []",
+     '    problems += ["missing from the zip: " + p for p in sorted(set(want) - set(got))]', "    problems += []",
      _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
     ("t10fr2-proof-misses-extra-files", _BZ,
      '    problems += ["not in the commit: " + p for p in sorted(set(got) - set(want))]', "    problems += []",
      _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
     ("t10fr2-proof-misses-altered-bytes", _BZ,
-     '        if got[p].replace(b"' + BS + 'r' + BS + 'n", b"' + BS + 'n") != blobs[want[p]].replace(b"' + BS + 'r' + BS
-     + 'n", b"' + BS + 'n"):', "        if False:", _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
+     '        problems.append("bytes differ from the committed blob: " + p)', "        pass",
+     _RB + "test_the_post_build_proof_catches_a_missing_or_altered_member"),
+    ("t10fr2-proof-duplicate-accepted", _BZ, "            if identity in seen:", "            if False:",
+     _RB + "test_the_post_build_proof_rejects_duplicate_members_even_if_last_is_correct"),
+    ("t10fr2-proof-binary-normalized", _BZ, '        if (text and b"\\0" not in got[p] and b"\\0" not in original and',
+     '        if (True and', _RB + "test_the_post_build_proof_does_not_normalize_binary_or_undeclared_bytes"),
     ("t10fr2-proof-not-wired", _BZ, "    if problems:\n        raise Refused(5,", "    if False:\n        raise Refused(5,",
      _RB + "test_a_build_whose_archive_differs_is_refused_and_writes_nothing"),
     # N5 attributes parsed, not substring-matched

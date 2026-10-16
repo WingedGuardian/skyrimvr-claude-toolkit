@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Independent release proof rejects duplicate ZIP members and altered binary or
+  undeclared bytes. Line-ending conversion requires the selected commit's text
+  attributes and nonbinary contents; it cannot hide payload corruption.
 - Save restore wrappers inherit the main worktree's configured save roots.
   Failed emulator recovery retains its registration and refuses another enable
   until recovery succeeds. Manual-install preflight also detects file/ancestor
