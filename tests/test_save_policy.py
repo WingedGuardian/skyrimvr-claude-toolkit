@@ -99,6 +99,27 @@ def test_workspace_root_save_does_not_make_the_whole_workspace_a_save_folder(tmp
     assert manifest["groups"][0]["members"][1]["missing"]
 
 
+def test_worktree_restore_wrappers_use_the_main_configured_save_folder(inst, tmp_path):
+    import io
+    (inst.game / "skyrim-paths.env").write_text("SKYRIM_CONFIG_DIR='" + inst.cfg.as_posix() + "'\n")
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    gitdir = inst.game / ".git/worktrees/linked"
+    gitdir.mkdir(parents=True)
+    (linked / ".git").write_text("gitdir: " + gitdir.as_posix() + "\n")
+    pair = [inst.saves / ("Save1" + ext) for ext in (".ess", ".skse")]
+    sid, = save_store.backup_pairs(linked, inst.audit, [pair], "private worktree fixture")
+    original = [p.read_bytes() for p in pair]
+    for p in pair:
+        p.write_bytes(b"current")
+    output = io.StringIO()
+    assert save_store.restore(linked, sid, [], None, True, output) == 0, output.getvalue()
+    assert [p.read_bytes() for p in pair] == original
+    assert snapcli._allowed(linked, "20261015_120000-save", "unused", pair[0]) == ""
+    transactions = workspace.summaries(save_store.store(linked))[0]
+    assert len(transactions) >= 2
+
+
 def test_configured_store_cannot_live_in_a_save_root_or_hold_a_source(tmp_path, monkeypatch):
     game = tmp_path / "workspace"
     game.mkdir()

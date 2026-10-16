@@ -85,6 +85,9 @@ def restore(project, sid, wanted, to, in_place, out, *, deadline=None):
                   any(r["path"] in selected for r in g["members"])]
         if in_place:
             cfg = paths.read_install(str(project), os.environ)
+            main = paths.main_worktree(str(project))
+            if main:
+                cfg = paths.merge_configs(cfg, paths.read_install(main, {}))
             roots = paths.roots(str(project), str(project), cfg)
             folder = mcp_rules.saves_folder(roots, os.environ)
             if folder is None or any(profiles.canonical(Path(r["path"]).parent) != profiles.canonical(folder)

@@ -19,7 +19,7 @@ written. If any step fails, everything is put back from those copies before the 
 
 `off` restores both files byte-exact from the backups and verifies each hash. With no state file it has nothing to
 do and says so, so it is safe to run again, or after a crash or a reboot. A restore that does not verify keeps the
-state file and the backups, and exits 2.
+state file and the backups, and exits 3. Run `off` again once the reported problem is resolved.
 
 Close SteamVR first: it rewrites steamvr.vrsettings when it exits. `on` refuses while vrserver.exe runs (--force
 overrides).
@@ -262,6 +262,8 @@ def restore_entries(entries) -> list:
 def cmd_on(force=False) -> int:
     p = paths()
     st = load_state()
+    if st and st.get("emu_recovery_pending"):
+        raise Refused("emulator recovery is incomplete; run `off` to retry the retained backup first")
     if st and st.get("mode") == "on":
         print("already headless (since {}); `off` restores normal VR".format(st.get("since")))
         return 0
@@ -338,6 +340,8 @@ def cmd_emu(arg) -> int:
         if not st or st.get("mode") != "on":
             raise Refused("turn headless on first (`on`); `off` then restores the emulator swap too")
         if st.get("emu"):
+            if st.get("emu_recovery_pending"):
+                raise Refused("emulator recovery is incomplete; run `emu off` or `off` to retry it")
             print("emulator driver already live")
             return 0
         bak = state_dir() / st["since"] / "driver_null.dll"
@@ -350,10 +354,16 @@ def cmd_emu(arg) -> int:
                 raise OSError("driver_null.dll does not match the built emulator after the copy")
         except OSError as e:
             problems = restore_entries([entry])
+            if problems:
+                st["emu_recovery_pending"] = True
+                save_state(st)
+                print("ERROR: `emu on` failed ({}); recovery is incomplete; state and backup kept: {}".format(
+                    e, "; ".join(problems)), file=sys.stderr)
+                return 3
             st.pop("emu", None)
+            st.pop("emu_recovery_pending", None)
             save_state(st)
-            raise Refused("`emu on` failed ({}){}".format(e, "; restore problems: " + "; ".join(problems)
-                                                         if problems else "; the stock driver is restored"))
+            raise Refused("`emu on` failed ({}); the stock driver is restored".format(e))
         print("emulator driver installed in place of SteamVR's null driver")
         return 0
     if arg == "off":
@@ -366,6 +376,7 @@ def cmd_emu(arg) -> int:
                 print("ERROR: " + pr, file=sys.stderr)
             return 3
         st.pop("emu")
+        st.pop("emu_recovery_pending", None)
         save_state(st)
         print("stock null driver restored -- hash verified")
         return 0
@@ -383,7 +394,8 @@ def cmd_status() -> int:
         "SteamVR's" if p["valve_dll"].is_file() and sha(live) == sha(p["valve_dll"]) else "a Valve/other build"))
     print("openvr_api: {}".format(kind))
     print("state     : {}".format("none (normal VR)" if not st else "{} since {}{}".format(
-        st.get("mode"), st.get("since"), ", emulator driver live" if st.get("emu") else "")))
+        st.get("mode"), st.get("since"), ", emulator recovery pending" if st.get("emu_recovery_pending") else
+        (", emulator driver live" if st.get("emu") else ""))))
     print("emulator  : {}".format("built" if EMU_BUILD.is_file() else "not built (python tools/vr-emu-driver/build.py)"))
     return 0
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Save restore wrappers inherit the main worktree's configured save roots.
+  Failed emulator recovery retains its registration and refuses another enable
+  until recovery succeeds. Manual-install preflight also detects file/ancestor
+  collisions when other archive entries sort between them.
 - The pinned shared runtime now protects absent restore destinations from new
   writers, preserves JSON types during policy migration, and refuses selected
   read-only upgrade candidates before publication. OpenCode transport failures

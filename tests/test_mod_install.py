@@ -156,6 +156,15 @@ def test_failed_backup_verification_leaves_installed_original_untouched(tmp_path
     assert len(manifests) == 1 and "# STATUS: in progress" in manifests[0].read_text()
 
 
+def test_target_ancestor_collision_is_found_with_an_intervening_sibling(tmp_path, sevenz, game, monkeypatch):
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    entries = [("Scripts/a", "Scripts/a", "data"), ("Scripts/a-b", "Scripts/a-b", "data"),
+               ("Data/Scripts/a/b", "Scripts/a/b", "data")]
+    plan = mod.plan_files(entries, game / "Data", game, False, False, False)
+    assert "destination collision" in mod.destination_problem(plan)
+    assert not (game / "Data/Scripts").exists()
+
+
 def test_an_existing_config_gets_a_new_file_beside_it(tmp_path, sevenz, game):
     ini = game / "Data" / "SKSE" / "Plugins" / "ExampleFramework.ini"
     run(archive(tmp_path, ENTRIES), "--apply", env=env_for(tmp_path, sevenz, game))

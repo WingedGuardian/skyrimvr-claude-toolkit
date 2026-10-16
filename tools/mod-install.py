@@ -183,11 +183,13 @@ def destination_problem(plan):
             return "destination collision: {!r} and {!r} map to {} / {}".format(
                 inner, row[0], old_target, target)
         seen[key] = row[0], target
-    ordered = sorted(seen)
-    for parent, child in zip(ordered, ordered[1:]):
-        if child.startswith(parent + "/"):
-            return "destination collision: {!r} and {!r} require a file and its child at {}".format(
-                seen[parent][0], seen[child][0], seen[parent][1])
+    for child in seen:
+        parts = child.split("/")
+        for index in range(1, len(parts)):
+            parent = "/".join(parts[:index])
+            if parent in seen:
+                return "destination collision: {!r} and {!r} require a file and its child at {}".format(
+                    seen[parent][0], seen[child][0], seen[parent][1])
     return ""
 
 

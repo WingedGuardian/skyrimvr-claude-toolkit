@@ -79,6 +79,9 @@ def _allowed(project, sid, key, target):
         return "" if ok else "not a .psc/.pex under the script folders of this install"
     try:
         cfg = paths.read_install(str(project), os.environ)
+        main = paths.main_worktree(str(project))
+        if main:
+            cfg = paths.merge_configs(cfg, paths.read_install(main, {}))
     except (OSError, ValueError):
         return "the configured roots cannot be read"
     roots = paths.roots(str(project), str(project), cfg)
