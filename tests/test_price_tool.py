@@ -302,4 +302,54 @@ def test_only_this_tools_stale_files_are_cleared(tmp_path, history):
     (out / "S-OLD__newly-deny.jsonl").write_text("stale")
     (out / "mine__notes.jsonl").write_text("keep")
     _run(tmp_path, SKYGUARD, SKYGUARD, history)
-    assert not (out / "S-OLD__newly-deny.jsonl").exists() and (out / "mine__notes.jsonl").exists()
+    assert (out / "S-OLD__newly-deny.jsonl").read_text() == "stale"
+    assert (out / "mine__notes.jsonl").read_text() == "keep"
+
+
+def test_previous_owned_samples_are_archived_and_current_manifest_is_exact(tmp_path, history):
+    new = _scratch_engine(tmp_path, "scratch", [
+        ("targets.py", r'(loadorder\.txt|plugins\.txt)"', r'(plugins\.txt)"')])
+    _, out = _run(tmp_path, SKYGUARD, new, history)
+    key = "S-WRITE-LOADORDER__no-longer-advise.jsonl"
+    original = (out / key).read_bytes()
+    ownership = json.loads((out / ".price-owned.json").read_text())
+    assert set(ownership["files"]) == {key}
+    assert ownership["files"][key]["sha256"] == __import__("hashlib").sha256(original).hexdigest()
+    price.price(tmp_path / "b", tmp_path / "b", history, out)
+    assert not (out / key).exists()
+    assert [p.read_bytes() for p in out.glob(".price-previous-*/" + key)] == [original]
+    assert json.loads((out / ".price-owned.json").read_text())["files"] == {}
+
+
+def test_modified_owned_samples_are_preserved_and_cannot_be_overwritten(tmp_path, history):
+    new = _scratch_engine(tmp_path, "scratch", [
+        ("targets.py", r'(loadorder\.txt|plugins\.txt)"', r'(plugins\.txt)"')])
+    _, out = _run(tmp_path, SKYGUARD, new, history)
+    path = out / "S-WRITE-LOADORDER__no-longer-advise.jsonl"
+    path.write_text("foreign edit")
+    with pytest.raises((SystemExit, FileExistsError)):
+        price.price(tmp_path / "b", tmp_path / "n", history, out)
+    assert path.read_text() == "foreign edit"
+
+
+def test_unowned_sample_collision_is_preserved(tmp_path, history):
+    out = tmp_path / "out"
+    out.mkdir()
+    target = out / "S-WRITE-LOADORDER__no-longer-advise.jsonl"
+    target.write_text("foreign sample")
+    new = _scratch_engine(tmp_path, "scratch", [
+        ("targets.py", r'(loadorder\.txt|plugins\.txt)"', r'(plugins\.txt)"')])
+    with pytest.raises((SystemExit, FileExistsError)):
+        _run(tmp_path, SKYGUARD, new, history)
+    assert target.read_text() == "foreign sample"
+
+
+@pytest.mark.parametrize("files", [{"../foreign.jsonl": {"sha256": "a" * 64, "size": 1}},
+                                  {"S-A__newly-deny.jsonl": {"sha256": "bad", "size": 1}}])
+def test_invalid_sample_ownership_is_refused_before_writing_outputs(tmp_path, history, files):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / ".price-owned.json").write_text(json.dumps({"version": 1, "tool": "guard-corpus-price", "files": files}))
+    with pytest.raises(SystemExit, match="ownership"):
+        _run(tmp_path, SKYGUARD, SKYGUARD, history)
+    assert not (out / "items.jsonl").exists()

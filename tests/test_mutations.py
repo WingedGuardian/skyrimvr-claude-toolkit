@@ -1866,8 +1866,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
                  "## INI Config Hierarchy (edit them with the Edit tool)",
                  "tests/test_instruction_neutrality.py::test_core_is_agent_neutral",
                  id="core-stays-agent-neutral"),
-    pytest.param("agent/skills/devbench/SKILL.md", "# DevBench â€” the live in-game test channel",
-                 "# DevBench â€” the live in-game test channel ($CLAUDE_PROJECT_DIR)",
+    pytest.param("agent/skills/devbench/SKILL.md", "# DevBench — the live in-game test channel",
+                 "# DevBench — the live in-game test channel ($CLAUDE_PROJECT_DIR)",
                  "tests/test_instruction_neutrality.py::test_new_skills_are_agent_neutral",
                  id="new-skills-stay-agent-neutral"),
     # Drop the fallback instruction: an agent with no session hook never sees the user's preferences.
@@ -9030,3 +9030,10 @@ MUTATIONS += [pytest.param("tools/skyguard/legacy_saves.py", before, after, test
      'tests/test_legacy_save_store.py::test_legacy_backup_suffix_cannot_claim_a_different_pair[A.skse.other]',
      'same-logical-pair'),
 )]
+
+# Sample retirement must prove ownership; matching filenames alone are not permission to replace.
+MUTATIONS += [
+    pytest.param('scripts/guard-corpus/price.py', '                    files[key] = (out_dir / key).open("x", encoding="utf-8", newline="\\n")', '                    files[key] = (out_dir / key).open("w", encoding="utf-8", newline="\\n")', 'tests/test_price_tool.py::test_unowned_sample_collision_is_preserved', id='review-price-unowned-sample-clobber'),
+    pytest.param('scripts/guard-corpus/price.py', '        if _sample_stamp(source) != expected:', '        if False:', 'tests/test_price_tool.py::test_modified_owned_samples_are_preserved_and_cannot_be_overwritten', id='review-price-modified-owned-retired'),
+    pytest.param('scripts/guard-corpus/price.py', '    _retire_samples(out_dir, owned)', '    for direction in DIRECTIONS:\n        for stale in out_dir.glob(f"*__{direction}.jsonl"):\n            stale.unlink()', 'tests/test_price_tool.py::test_only_this_tools_stale_files_are_cleared', id='review-price-unowned-glob-cleanup'),
+]

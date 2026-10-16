@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Rule-pricing samples carry an ownership manifest. Previous unchanged samples
+  are retained in an archive, modified or unowned files stay untouched, and
+  filename collisions refuse replacement. Keep the output directory quiescent
+  during a run; retained samples and archives still contain private tool calls.
 - Published dependency checksums are bound to the selected artifact's exact
   filename, version and architecture. A digest belonging to another asset
   cannot validate the pinned download; missing or conflicting metadata stays
