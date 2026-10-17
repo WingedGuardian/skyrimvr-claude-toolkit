@@ -17,6 +17,7 @@ import sys
 from .. import patch_paths
 from ..request import Request
 from ..verdict import Verdict
+from modding_harness.transport import execution_cwd_known
 
 AGENT = "codex"
 INSTRUCTION_LIMIT_BYTES = 32768     # E7: AGENTS.md past this is silently truncated
@@ -178,6 +179,7 @@ def to_request(raw: str, platform: str = sys.platform) -> Request:
         if key == "chars" and not cmd.strip():
             # write_stdin with nothing but Enter (or nothing: Codex polls a running process this way) types no command.
             return Request(event="pre_tool", kind="other", **common)
+        common["execution_cwd_known"] = execution_cwd_known(AGENT, d, platform=platform)
         # Bash, and any other tool carrying a command (`exec_command {cmd}`, write_stdin `chars` typed into a live
         # shell, a future renamed shell tool): the shell rules, and a patch run through it is a patch.
         sp = patch_paths.shell_patch(cmd)

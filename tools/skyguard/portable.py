@@ -38,7 +38,8 @@ def request(action, transcript=""):
                    command=action.command, paths=tuple(paths_), ops=tuple(ops),
                    mcp_tool=action.tool if kind == "mcp" else "", mcp_args=json.dumps(arguments),
                    cwd=action.cwd, tool_name=action.tool, session_id=action.session_id,
-                   transcript_path=transcript)
+                   transcript_path=transcript,
+                   execution_cwd_known=action.provenance.get("execution_cwd_known", True) is not False)
 
 
 def mutations(change):

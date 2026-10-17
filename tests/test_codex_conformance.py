@@ -127,7 +127,11 @@ def _derived():
                 def edit(p, c=cmd):
                     p["tool_input"]["command"] = _with_paths(c, "Data/Skyrim.esm")
                 out.append(_variant(f, "derived:{}:Data/Skyrim.esm".format(label), edit,
-                                    {"verdict": "deny", "code": "write.DENY_PLUGIN"}))
+                                    {"verdict": "deny", "code": "engine.INERT_EXECUTION_CWD", "inert": True}))
+                def absolute_plugin(p):
+                    p["tool_input"]["command"] = 'Set-Content -LiteralPath "{}/Data/Skyrim.esm" -Value x'.format(p["cwd"])
+                out.append(_variant(f, "derived:{}:absolute-plugin-write".format(label), absolute_plugin,
+                                    {"verdict": "deny", "code": "shell.DENY_WRITE_PLUGIN"}))
                 continue
 
             def rm(p):
@@ -223,7 +227,9 @@ def _run_one(entry, tmp_path, fixture: Path, edit, expect: dict, setup, cwd_sub:
     if role == "pre-tool":
         if want["verdict"] == "deny":
             body = json.loads(r.stdout)["hookSpecificOutput"]
-            assert "GUARD INERT" not in body["permissionDecisionReason"], (where, "a refusal, not the rule", body)
+            assert ("GUARD INERT" in body["permissionDecisionReason"]) is bool(expect.get("inert")), (where, body)
+            if expect.get("inert"):
+                assert status == "failed", (where, status)
             if expect.get("reason_prefix"):
                 assert body["permissionDecisionReason"].startswith(expect["reason_prefix"]), (where, body)
         if want["verdict"] == "advise":

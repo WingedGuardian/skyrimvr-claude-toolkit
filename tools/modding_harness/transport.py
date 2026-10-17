@@ -20,6 +20,40 @@ class BadPayload(ValueError):
     pass
 
 
+UNKNOWN_EXECUTION_CWD = (
+    "GUARD INERT: Codex supplied a session directory but no absolute execution workdir. "
+    "This recognized mutation has an unresolved target. Use absolute mutation paths; "
+    "an in-command directory change cannot prove the missing workdir. This call was not allowed.")
+
+
+def execution_path_absolute(path, *, platform=sys.platform):
+    """An execution path independent of an omitted cwd and Windows drive.
+
+    Windows /name and /c/name are not drive-qualified native paths. Do not
+    interpret them as MSYS mounts when deciding PowerShell or native patches.
+    """
+    if not isinstance(path, str) or not path.strip():
+        return False
+    if platform.startswith("win"):
+        return bool(ntpath.splitdrive(path)[0]) and ntpath.isabs(path)
+    return posixpath.isabs(path)
+
+
+def execution_cwd_known(host, payload, *, platform=sys.platform):
+    """A native Codex shell's top-level cwd is session context, not tool workdir.
+
+    Measured on 0.162.1: exec_command(workdir=...) becomes Bash {command} in
+    PreToolUse, losing workdir. No inferred directory may authorize a mutation.
+    Other transports retain their existing contract. This is a restriction,
+    never proof that a host intercepted or actually executed a call.
+    """
+    if host != "codex":
+        return True
+    ti = payload.get("tool_input", {})
+    wd = ti.get("workdir") if isinstance(ti, dict) else None
+    return execution_path_absolute(wd, platform=platform)
+
+
 def _text(data, key, default=""):
     value = data.get(key, default)
     if not isinstance(value, str):
@@ -136,6 +170,7 @@ def normalize(host, payload, *, platform=sys.platform, default_shell="", shell_p
     if shell not in ("bash", "powershell") and tool != "Monitor":
         raise BadPayload("the actual shell must be declared as bash or powershell")
     common.update(surface="shell", shell=shell, command=command)
+    common["provenance"]["execution_cwd_known"] = execution_cwd_known(host, data, platform=platform)
     if shell_patch is not None:
         found = shell_patch(command)
         if found is not None:

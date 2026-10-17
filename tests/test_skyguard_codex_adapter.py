@@ -201,6 +201,9 @@ def test_a_backup_is_taken_even_when_the_write_is_denied(tmp_path):
 def test_a_shell_patch_is_checked_as_shell_and_as_write(tmp_path):
     cmd = "cd Data && apply_patch <<'P'\n*** Begin Patch\n*** Add File: z.esp\n+x\n*** End Patch\nP"
     v = _run(tmp_path, _pre("Bash", {"command": cmd}))
+    assert (v.decision, v.code) == ("deny", "engine.INERT_EXECUTION_CWD")
+    # An explicitly reported execution directory retains the game-policy path.
+    v = _run(tmp_path, _pre("Bash", {"command": cmd, "workdir": str(tmp_path)}))
     assert (v.decision, v.code) == ("deny", "write.DENY_PLUGIN")
 
 
@@ -423,7 +426,7 @@ def test_an_unknown_tool_with_no_command_key_is_still_other():
 @pytest.mark.parametrize("cmd,code", [
     ('Remove-Item -Recurse -Force "{g}/Data/meshes"', "shell.S-DEL-INSTALL"),
     ('rm -rf "{g}/Data/meshes"', "shell.S-DEL-INSTALL"),
-    ("Remove-Item -Recurse Data", "shell.S-DEL-INSTALL"),                       # relative to the session cwd
+    ("Remove-Item -Recurse Data", "engine.INERT_EXECUTION_CWD"),  # session cwd cannot place a native mutation
     ('Remove-Item "{c}/Skyrim.ini"', "shell.S-DEL-CONFIG"),
     ('rm "{c}/SkyrimPrefs.ini"', "shell.S-DEL-CONFIG"),   # (`rm -f` is ambiguous in PowerShell: it does not run)
 ])

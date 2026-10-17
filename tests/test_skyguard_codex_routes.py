@@ -18,6 +18,7 @@ sys.path.insert(0, str(REPO / "tools"))
 from skyguard import engine, paths  # noqa: E402
 from skyguard.adapters import codex  # noqa: E402
 from skyguard.audit import Audit  # noqa: E402
+from modding_harness.transport import UNKNOWN_EXECUTION_CWD  # noqa: E402
 
 DEL_INSTALL = ("Blocked: this deletes {} inside the Skyrim install.\n"
                "A mod manager cannot restore your own files there; if you mean it, run it yourself.")
@@ -99,14 +100,14 @@ ROWS = [
     # The shell-heredoc form reaches the same judgement (s191).
     ("rt-codex-shell-patch-delete", "Bash",
      {"command": "apply_patch <<'EOF'\n*** Begin Patch\n*** Delete File: <install>/SkyrimVR.exe\n*** End Patch\nEOF"},
-     None, "deny", {"S-DEL-INSTALL"}, DEL_INSTALL.format("SkyrimVR.exe")),
+     None, "deny", {"S-DEL-INSTALL"}, UNKNOWN_EXECUTION_CWD),
     # s197/s199: other spellings of the shell form run the same program (Windows: case-insensitive PATH lookup).
     ("rt-codex-shell-patch-upper", "Bash",
      {"command": "APPLY_PATCH <<'EOF'\n*** Begin Patch\n*** Delete File: Data/Plugin.esp\n*** End Patch\nEOF"},
-     None, "deny", {"S-DEL-INSTALL"}, DEL_INSTALL.format("Plugin.esp")),
+     None, "deny", {"S-DEL-INSTALL"}, UNKNOWN_EXECUTION_CWD),
     ("rt-codex-shell-patch-quoted", "Bash",
      {"command": "'apply_patch' <<'EOF'\n*** Begin Patch\n*** Delete File: Data/Plugin.esp\n*** End Patch\nEOF"},
-     None, "deny", {"S-DEL-INSTALL"}, DEL_INSTALL.format("Plugin.esp")),
+     None, "deny", {"S-DEL-INSTALL"}, UNKNOWN_EXECUTION_CWD),
     # s200/s202: a patch body beside a spelling the parser cannot attribute is refused, never read as plain shell.
     ("rt-codex-shell-patch-variable", "Bash",
      {"command": "a=apply_patch; $a <<'EOF'\n*** Begin Patch\n*** Delete File: Data/Plugin.esp\n*** End Patch\nEOF"},
@@ -237,11 +238,22 @@ def test_deep_nesting_is_refused_by_name_not_by_a_crash(inst):
     assert codex.to_request(raw, "win32").failure == "payload nested too deeply"
 
 
+# A synthetic explicit workdir is a separate contract control, never inserted
+# into a historical native capture. These twins still require the game rule.
+for _id, _file in (("rt-codex-shell-patch-delete", "SkyrimVR.exe"),
+                   ("rt-codex-shell-patch-upper", "Plugin.esp"),
+                   ("rt-codex-shell-patch-quoted", "Plugin.esp")):
+    _row = next(row for row in ROWS if row[0] == _id)
+    ROWS.append((_id + "-explicit-workdir", _row[1], dict(_row[2], workdir="<install>"), _row[3],
+                 "deny", {"S-DEL-INSTALL"}, DEL_INSTALL.format(_file)))
+
 # Linux CI run 38187755448: rows whose input only a Windows host can produce. Off Windows the install is a POSIX path,
 # and these splice it into a Windows-only spelling. Their POSIX re-spellings are covered by tests/test_posix_host_paths.py.
 WINDOWS_ONLY_ROWS = {
     "rt-codex-patch-delete-verbatim": "the //?/ verbatim prefix is a Win32 namespace; on POSIX `//?/` is a folder named ?",
     "rt-codex-workdir": "a POSIX workdir under a drive-letter cwd (C:/Temp/rtB); py3.13 ntpath joins it onto C:",
+    **{name + "-explicit-workdir": "synthetic Windows native workdir; portable context controls are separate"
+       for name in ("rt-codex-shell-patch-delete", "rt-codex-shell-patch-upper", "rt-codex-shell-patch-quoted")},
 }
 
 

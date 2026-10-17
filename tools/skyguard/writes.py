@@ -739,6 +739,55 @@ def _opaque_texts(execs) -> List[str]:
     return out
 
 
+def unplaced_mutation(command: str, parsed, env: Mapping[str, str]) -> bool:
+    """Known mutations requiring a directory the native host did not report.
+
+    Reuse the policy's operand readers with an unknown initial directory.
+    Literal absolute paths still resolve; read operands never enter this set.
+    Directory changes may fail and the parser does not prove success paths.
+    Opaque programs retain their existing
+    coverage limits: this does not claim to enumerate arbitrary script effects.
+    """
+    from . import anchored, deletes, patch_paths
+    from modding_harness.transport import execution_path_absolute
+    if not parsed.ok:
+        return True
+    for original in parsed.execs:
+        e = substituted(original)._replace(cd_before="")
+        words = list(deletes.operands(e) or ()) + write_targets(e) + move_sources(e)
+        words += [dst for dst, _sources in copy_targets(e)]
+        for word in words:
+            placed = targets.resolve_operand(e, word, "", env) if word is not None else None
+            if not execution_path_absolute(placed):
+                return True
+        if e.program == "git":
+            split = anchored._git_split(e.argv)
+            if split and anchored._git_discards(split[1], split[2]):
+                base = targets.exec_cwd(e, "", env)
+                for directory in split[0]:
+                    base = targets.resolve(directory, base or "", e.dialect, env)
+                if not execution_path_absolute(base):
+                    return True
+        code = interpreter_code(e)
+        if code:
+            base = targets.exec_cwd(e, "", env) or ""
+            if any(not execution_path_absolute(targets.resolve_literal(w, base, env)) for w in
+                   text_write_targets(code, python_literals=bool(shellparse._PYTHON.fullmatch(e.program)))):
+                return True
+    # .NET static APIs resolve against the process directory, not Set-Location.
+    if any(not execution_path_absolute(targets.resolve_literal(w, "", env)) for w in text_write_targets_ps(command)):
+        return True
+    if any(not execution_path_absolute(targets.resolve_literal(w, "", env)) for w, _how in
+           deletes.recycle_targets(deletes.recycle_text(command, parsed))):
+        return True
+    found = patch_paths.shell_patch(command)
+    if found:
+        body, directory = found
+        if any(not execution_path_absolute(path) for _op, path in patch_paths.parse_patch(body)):
+            return True
+    return False
+
+
 def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, str]] = None) -> Scan:
     env = os.environ if env is None else env
     plugin: List[str] = []

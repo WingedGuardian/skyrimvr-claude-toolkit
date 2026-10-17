@@ -36,6 +36,11 @@ def evaluate_shell(req, roots, audit) -> Verdict:
         parsed = shellparse.parse(command, shell) if isinstance(command, str) else None
     except Exception:
         parsed = None                  # decide() parses (and fails) as before; the answer below is partial either way
+    if not req.execution_cwd_known:
+        from . import writes
+        from modding_harness.transport import UNKNOWN_EXECUTION_CWD
+        if parsed is None or writes.unplaced_mutation(command, parsed, os.environ):
+            return Verdict("deny", UNKNOWN_EXECUTION_CWD, status="failed", code="engine.INERT_EXECUTION_CWD")
     v = codes.classify(shell_rules.decide(command, roots, audit, cwd=req.cwd or "", shell=shell, parsed=parsed))
     # D-P4-2 (Plan 4 Verdict.status, Plan 5 Task 17): the rules ran, but on a command the parser could not read
     # completely (a quote or heredoc it could not close) or whose program is a variable. The answer stands; the
