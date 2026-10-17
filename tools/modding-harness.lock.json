@@ -1,7 +1,7 @@
 {
   "v": 1,
   "project": "modding-agent-harness",
-  "revision": "023faceae6e426016786a8df99749193c82070ab",
+  "revision": "4f44a3ce8a57dd38f7f50ae376e1f6b4d3b5e807",
   "api_version": 1,
   "files": {
     "tools/modding_harness/LICENSE": "07a5c5e4aac6c4eda67565a716c8f4967dc318abe03098e5dee6a8fa7672d619",
@@ -14,7 +14,7 @@
     "tools/modding_harness/generic.py": "662227e3d75048529066905cb742cd07936bd1958424bd634a7d10d60f49176f",
     "tools/modding_harness/installation.py": "cfab92a3af0e1cc3cc8459b98bb6d10a3f9295341cee642edfc1c433b8b7e223",
     "tools/modding_harness/locking.py": "42c8d3322567e6225cf74429aeb0b8b5361edf92986f3e488a8fb2433f9e476a",
-    "tools/modding_harness/opencode_plugin.mjs": "5e2baaf00d9a0f0718f6959b084334b0549385f1c3381571ec19c3a9cb2a3b43",
+    "tools/modding_harness/opencode_plugin.mjs": "e94a99de83c99b43ca7941a7f4690641254bb91e3a6b3710ff585503ace0639a",
     "tools/modding_harness/patches.py": "b3b122f53f0408938626f376afbdff193b8f8675c7986d3b131a5da4589f320d",
     "tools/modding_harness/preferences.py": "e5efda32f1192a8a0975b17447d275ea509eca7cab7d69d15a83e4b531b9d158",
     "tools/modding_harness/preservation.py": "fa17427eea2e4e98dee1e68279ea74838f82bef959f84174e4878e0faa20cd2c",

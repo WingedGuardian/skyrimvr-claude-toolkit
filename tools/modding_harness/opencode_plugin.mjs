@@ -188,11 +188,15 @@ function parse(text) {
   return v
 }
 
-function runAdapter(adapter, event, payload) {
+function transportWindow(startedAt = performance.now()) {
   const limit = timeoutSeconds()
   if (limit > 300) throw inertError("X4_OPENCODE_TIMEOUT_S must be at most 300 seconds")
   const cleanup = Math.min(1500, limit * 250)
-  const deadline = performance.now() + limit * 1000 - cleanup
+  return { limit, cleanup, deadline: startedAt + limit * 1000 - cleanup }
+}
+
+function runAdapter(adapter, event, payload, startedAt) {
+  const { limit, cleanup, deadline } = transportWindow(startedAt)
   const py = findPython(deadline)
   const remaining = deadline - performance.now()
   if (remaining <= 0) throw inertError("the guard transport budget expired while finding Python")
@@ -242,44 +246,105 @@ function runAdapter(adapter, event, payload) {
   })
 }
 
-return async ({ directory }) => {
+return async ({ directory, client }) => {
   const adapter = options.adapter
   const advisories = new Map()
   const failedUnknown = new Map()
+  const failedCatalog = new Map()
   const routedCalls = new Map()
   // PER PLUGIN INSTANCE (FX-G4 / reviewer G-M3): a module-global let one project's `config` decide
   // the grammar for every other OpenCode instance that loaded this module.
   let configShell = null
   let mcpServers = []
+  // Used only to refuse a previously identifiable known route when a fresh
+  // query fails. Old observations never authorize or identify a new call.
+  const seenMcpServers = new Map()
   const callKey = input => JSON.stringify([input.sessionID ?? "", input.callID ?? ""])
+  const serverRow = server => ({ server, prefix: server.replace(/[^a-zA-Z0-9_-]/g, "_") + "_" })
+  const MCP_STATES = new Set(["connected", "disabled", "failed", "needs_auth", "needs_client_registration"])
+  const remember = (key, note) => {
+    if (note) advisories.set(key, advisories.has(key) ? advisories.get(key) + "\n\n" + note : note)
+  }
 
-  function routeInput(input) {
+  function routeFrom(input, servers) {
     const tool = input.tool
     if (typeof tool !== "string" || JUDGED.has(tool)) return input
     // V1 1.18.34 McpCatalog.toolName emits sanitize(server) + "_" + sanitize(tool).
-    // Use the host's configured server names, never a guessed underscore split.
-    // A configured native prefix takes precedence even when it begins `mcp__`:
+    // Use authoritative configured or live server names, never a guessed split.
+    // An authoritative native prefix takes precedence even when it begins `mcp__`:
     // that is also a valid V1 server name. Legacy canonical names are preserved
-    // only when no configured native prefix matches. The suffix below is the
+    // only when no authoritative native prefix matches. The suffix below is the
     // host-sanitized tool spelling; provenance does not claim to undo sanitizing.
-    const candidates = mcpServers.filter(row => tool.startsWith(row.prefix) && tool.length > row.prefix.length)
+    const candidates = servers.filter(row => tool.startsWith(row.prefix) && tool.length > row.prefix.length)
       .map(row => ({ ...input, tool: `mcp__${row.server}__${tool.slice(row.prefix.length)}`,
         nativeTool: tool, mcpIdentity: { server: row.server, tool: tool.slice(row.prefix.length),
-          source: "OpenCode V1 configured server prefix" } }))
+          source: row.source || "OpenCode V1 configured server prefix" } }))
     if (candidates.length > 1) {
       // Prefix overlap and sanitized-name collisions cannot establish which server
       // owns the call. Do not pick a longest prefix to bypass a known game policy.
-      if (candidates.some(row => isJudgedTool(row.tool))) throw inertError("ambiguous configured MCP tool identity")
+      if (candidates.some(row => isJudgedTool(row.tool))) throw inertError("ambiguous MCP tool identity")
       return input
     }
     return candidates.length === 1 ? candidates[0] : input
   }
 
-  const ask = (event, input, args) =>
+  async function routeInput(input, startedAt) {
+    if (typeof input.tool !== "string" || JUDGED.has(input.tool)) return input
+    let live = []
+    let unavailable = false
+    let controller
+    let timer
+    try {
+      const mcp = client?.mcp
+      // Hosts without this API retain the existing configured-prefix contract.
+      // That fallback does not claim dynamic-server discovery.
+      if (typeof mcp?.status !== "function") return routeFrom(input, mcpServers)
+      const remaining = transportWindow(startedAt).deadline - performance.now()
+      if (remaining <= 0) throw new Error("catalog budget expired")
+      controller = new AbortController()
+      // The same-instance V1 SDK accepts RequestInit.signal and fields style.
+      // Race as well as abort: an implementation ignoring abort must not hang
+      // a guard, nor may its late response update this call's identity.
+      const result = await Promise.race([
+        Promise.resolve().then(() => mcp.status({ query: { directory },
+          signal: controller.signal, throwOnError: true, responseStyle: "fields" })),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("catalog lookup timed out")),
+            Math.max(1, Math.min(1000, Math.floor(remaining))))
+        }),
+      ])
+      const data = result?.data
+      if (!result || result.error || !data || typeof data !== "object" || Array.isArray(data)) throw new Error("invalid catalog")
+      // Validate the complete reply before trusting any partial server list.
+      for (const [server, state] of Object.entries(data)) {
+        if (!server || !state || typeof state !== "object" || Array.isArray(state) || !MCP_STATES.has(state.status)) throw new Error("invalid catalog member")
+        if (state.status === "connected") live.push({ ...serverRow(server), source: "OpenCode V1 live connected server prefix" })
+      }
+    } catch {
+      unavailable = true
+    } finally {
+      clearTimeout(timer)
+      controller?.abort()
+    }
+    const servers = new Map(mcpServers.map(row => [row.server, row]))
+    if (unavailable) {
+      for (const row of seenMcpServers.values()) servers.set(row.server, row)
+      const known = routeFrom(input, [...servers.values()])
+      if (isJudgedTool(known.tool)) throw inertError("the live MCP server catalog was unavailable; native identity was not verified")
+      return { ...input, nativeTool: input.tool, mcpCatalogUnavailable: true }
+    }
+    for (const row of live) {
+      servers.set(row.server, row)
+      seenMcpServers.set(row.server, row)
+    }
+    return routeFrom(input, [...servers.values()])
+  }
+
+  const ask = (event, input, args, startedAt) =>
     runAdapter(adapter, event, { v: 1, tool: input.tool, args: args ?? {}, directory,
       session_id: input.sessionID ?? "", call_id: input.callID ?? "",
       ...(input.mcpIdentity ? { native_tool: input.nativeTool, mcp_identity: input.mcpIdentity } : {}),
-      shell: input.tool === "bash" ? shellName(configShell) : "" })
+      shell: input.tool === "bash" ? shellName(configShell) : "" }, startedAt)
 
   return {
     // OpenCode hands every plugin its config at load (READ plugin/index.ts: hook.config?.(cfg)); its
@@ -287,18 +352,30 @@ return async ({ directory }) => {
     config: async (cfg) => {
       configShell = cfg && typeof cfg.shell === "string" && cfg.shell.trim() ? cfg.shell.trim() : null
       const servers = cfg && cfg.mcp && typeof cfg.mcp === "object" && !Array.isArray(cfg.mcp) ? cfg.mcp : {}
-      mcpServers = Object.entries(servers)
+      const configured = Object.entries(servers)
         .filter(([server, value]) => server && value && typeof value === "object" && !Array.isArray(value) &&
-          value.enabled !== false && (value.type === "local" || value.type === "remote"))
-        .map(([server]) => ({ server, prefix: server.replace(/[^a-zA-Z0-9_-]/g, "_") + "_" }))
+          (value.type === "local" || value.type === "remote"))
+      mcpServers = configured.filter(([, value]) => value.enabled !== false).map(([server]) => serverRow(server))
+      seenMcpServers.clear()
+      // An initially disabled known server is still identifiable if its later
+      // connect succeeds but status becomes unavailable. This is refusal-only.
+      for (const [server] of configured) seenMcpServers.set(server, serverRow(server))
     },
 
     "tool.execute.before": async (input, output) => {
       const key = callKey(input)
-      const routed = routeInput(input)
+      const startedAt = performance.now()
+      const routed = await routeInput(input, startedAt)
+      if (routed.mcpCatalogUnavailable) {
+        const failureKey = JSON.stringify([input.sessionID ?? "", input.tool])
+        const count = (failedCatalog.get(failureKey) || 0) + 1
+        failedCatalog.set(failureKey, count)
+        if (Number.isInteger(Math.log2(count))) remember(key,
+          `${label} WARN AND ALLOW: MCP CATALOG UNAVAILABLE for unknown tool ${input.tool}; native MCP policy was not established (${count} occurrence(s) in this plugin instance).`)
+      }
       let v
       try {
-        v = await ask("pre", routed, output.args)
+        v = await ask("pre", routed, output.args, startedAt)
       } catch (e) {
         if (!isJudgedTool(routed.tool)) {
           // Unknown surfaces retain warn-and-allow even when the receipt service
@@ -306,16 +383,16 @@ return async ({ directory }) => {
           const unknownKey = JSON.stringify([input.sessionID ?? "", input.tool])
           const count = (failedUnknown.get(unknownKey) || 0) + 1
           failedUnknown.set(unknownKey, count)
-          if (routed.mcpIdentity) routedCalls.set(key, routed)
-          if (Number.isInteger(Math.log2(count))) advisories.set(key,
+          if (routed.mcpIdentity || routed.mcpCatalogUnavailable) routedCalls.set(key, routed)
+          if (Number.isInteger(Math.log2(count))) remember(key,
             `${label} WARN AND ALLOW: unknown tool ${input.tool}; coverage receipt unavailable (${count} occurrence(s) in this plugin instance).`)
           return
         }
         throw e && e.x4inert ? e : inertError(`the plugin failed (${e && e.message ? e.message : e})`)
       }
       if (v.decision === "deny") throw new Error(v.reason || label + " GUARD: refused, with no reason given")
-      if (routed.mcpIdentity) routedCalls.set(key, routed)
-      if (v.decision === "advise" && v.context) advisories.set(key, v.context)
+      if (routed.mcpIdentity || routed.mcpCatalogUnavailable) routedCalls.set(key, routed)
+      if (v.decision === "advise" && v.context) remember(key, v.context)
     },
 
     "tool.execute.after": async (input, output) => {
