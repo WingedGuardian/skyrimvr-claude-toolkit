@@ -246,12 +246,39 @@ return async ({ directory }) => {
   const adapter = options.adapter
   const advisories = new Map()
   const failedUnknown = new Map()
+  const routedCalls = new Map()
   // PER PLUGIN INSTANCE (FX-G4 / reviewer G-M3): a module-global let one project's `config` decide
   // the grammar for every other OpenCode instance that loaded this module.
   let configShell = null
+  let mcpServers = []
+  const callKey = input => JSON.stringify([input.sessionID ?? "", input.callID ?? ""])
+
+  function routeInput(input) {
+    const tool = input.tool
+    if (typeof tool !== "string" || JUDGED.has(tool)) return input
+    // V1 1.18.34 McpCatalog.toolName emits sanitize(server) + "_" + sanitize(tool).
+    // Use the host's configured server names, never a guessed underscore split.
+    // A configured native prefix takes precedence even when it begins `mcp__`:
+    // that is also a valid V1 server name. Legacy canonical names are preserved
+    // only when no configured native prefix matches. The suffix below is the
+    // host-sanitized tool spelling; provenance does not claim to undo sanitizing.
+    const candidates = mcpServers.filter(row => tool.startsWith(row.prefix) && tool.length > row.prefix.length)
+      .map(row => ({ ...input, tool: `mcp__${row.server}__${tool.slice(row.prefix.length)}`,
+        nativeTool: tool, mcpIdentity: { server: row.server, tool: tool.slice(row.prefix.length),
+          source: "OpenCode V1 configured server prefix" } }))
+    if (candidates.length > 1) {
+      // Prefix overlap and sanitized-name collisions cannot establish which server
+      // owns the call. Do not pick a longest prefix to bypass a known game policy.
+      if (candidates.some(row => isJudgedTool(row.tool))) throw inertError("ambiguous configured MCP tool identity")
+      return input
+    }
+    return candidates.length === 1 ? candidates[0] : input
+  }
+
   const ask = (event, input, args) =>
     runAdapter(adapter, event, { v: 1, tool: input.tool, args: args ?? {}, directory,
       session_id: input.sessionID ?? "", call_id: input.callID ?? "",
+      ...(input.mcpIdentity ? { native_tool: input.nativeTool, mcp_identity: input.mcpIdentity } : {}),
       shell: input.tool === "bash" ? shellName(configShell) : "" })
 
   return {
@@ -259,44 +286,64 @@ return async ({ directory }) => {
     // `shell` decides which shell runs a `bash` call, so it decides the grammar it is judged in.
     config: async (cfg) => {
       configShell = cfg && typeof cfg.shell === "string" && cfg.shell.trim() ? cfg.shell.trim() : null
+      const servers = cfg && cfg.mcp && typeof cfg.mcp === "object" && !Array.isArray(cfg.mcp) ? cfg.mcp : {}
+      mcpServers = Object.entries(servers)
+        .filter(([server, value]) => server && value && typeof value === "object" && !Array.isArray(value) &&
+          value.enabled !== false && (value.type === "local" || value.type === "remote"))
+        .map(([server]) => ({ server, prefix: server.replace(/[^a-zA-Z0-9_-]/g, "_") + "_" }))
     },
 
     "tool.execute.before": async (input, output) => {
+      const key = callKey(input)
+      const routed = routeInput(input)
       let v
       try {
-        v = await ask("pre", input, output.args)
+        v = await ask("pre", routed, output.args)
       } catch (e) {
-        if (!isJudgedTool(input.tool)) {
+        if (!isJudgedTool(routed.tool)) {
           // Unknown surfaces retain warn-and-allow even when the receipt service
           // is unavailable. Do not claim a durable receipt in this fallback.
-          const key = JSON.stringify([input.sessionID ?? "", input.tool])
-          const count = (failedUnknown.get(key) || 0) + 1
-          failedUnknown.set(key, count)
-          if (Number.isInteger(Math.log2(count))) advisories.set(input.callID,
+          const unknownKey = JSON.stringify([input.sessionID ?? "", input.tool])
+          const count = (failedUnknown.get(unknownKey) || 0) + 1
+          failedUnknown.set(unknownKey, count)
+          if (routed.mcpIdentity) routedCalls.set(key, routed)
+          if (Number.isInteger(Math.log2(count))) advisories.set(key,
             `${label} WARN AND ALLOW: unknown tool ${input.tool}; coverage receipt unavailable (${count} occurrence(s) in this plugin instance).`)
           return
         }
         throw e && e.x4inert ? e : inertError(`the plugin failed (${e && e.message ? e.message : e})`)
       }
       if (v.decision === "deny") throw new Error(v.reason || label + " GUARD: refused, with no reason given")
-      if (v.decision === "advise" && v.context) advisories.set(input.callID, v.context)
+      if (routed.mcpIdentity) routedCalls.set(key, routed)
+      if (v.decision === "advise" && v.context) advisories.set(key, v.context)
     },
 
     "tool.execute.after": async (input, output) => {
       const notes = []
-      const pre = advisories.get(input.callID)
-      advisories.delete(input.callID)
+      const key = callKey(input)
+      const saved = routedCalls.get(key)
+      routedCalls.delete(key)
+      const mismatch = saved && saved.nativeTool !== input.tool
+      const routed = saved && !mismatch ? saved : input
+      const pre = mismatch ? null : advisories.get(key)
+      advisories.delete(key)
+      if (mismatch) notes.push(`${label} COVERAGE MISMATCH: post tool identity differs from pre; no qualified correlation.`)
       if (pre) notes.push(pre)
       {
         try {
-          const v = await ask("post", input, input.args)
+          const v = await ask("post", routed, input.args)
           if (v.decision === "advise" && v.context) notes.push(v.context)
         } catch (e) {
           if (WRITES.has(input.tool)) notes.push(`${label} VALIDATION DID NOT RUN: ${e && e.message ? e.message : e}`)
         }
       }
-      if (notes.length && output && typeof output.output === "string") {
-        output.output += `\n\n[${label} guards] ` + notes.join("\n\n")
+      if (notes.length && output) {
+        const notice = `[${label} guards] ` + notes.join("\n\n")
+        if (typeof output.output === "string") output.output += "\n\n" + notice
+        // V1 invokes MCP after hooks with the raw CallToolResult, before it
+        // converts content into the ordinary output string. Preserve its text,
+        // attachments and structured result, adding a separate valid text block.
+        else if (Array.isArray(output.content)) output.content.push({ type: "text", text: notice })
       }
     },
 

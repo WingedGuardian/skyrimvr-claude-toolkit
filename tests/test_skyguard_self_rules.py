@@ -484,7 +484,14 @@ def test_a_configured_install_banners_nothing_and_a_real_edit_is_named(tmp_path)
 ], ids=["other-interpreter", "unquoted", "trailing-command", "untouched"])
 def test_an_edit_on_the_configured_line_still_shows(tmp_path, line, named):
     root = tmp_path / "inst"
-    text = _gen().render()
+    # This component fixture covers every configured hook, without runtime code
+    # entries whose self-drift could falsely kill a mutation. The separate full
+    # checkout/setup/session tests retain complete manifest integration coverage.
+    gen = _gen()
+    text = "\n".join(["# release " + gen.release()] + [
+        "%s  %s" % (gen._sha(REPO / rel, rel), rel)
+        for rel in sorted(guard_hash.CONFIGURED)
+    ]) + "\n"
     for ln in text.splitlines()[1:]:
         rel = ln.split("  ", 1)[1]
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -496,7 +503,8 @@ def test_an_edit_on_the_configured_line_still_shows(tmp_path, line, named):
     hook = root / ".claude" / "hooks" / "protect-files.sh"
     if line is not None:
         body = hook.read_text(encoding="utf-8").replace("PY='C:/Python310/python.exe'", line)
-        hook.write_text(body, encoding="utf-8")
+        hook.write_bytes(body.encode("utf-8"))
+        assert hook.read_bytes() == body.encode("utf-8"), "fixture must preserve exact line endings"
     differ = session._guard_drift(str(root))[1]
     assert differ == (["protect-files.sh"] if named else []), differ
 

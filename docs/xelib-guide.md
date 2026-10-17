@@ -2,7 +2,7 @@
 
 ## What is xelib?
 
-[xeditlib](https://github.com/WingedGuardian/xeditlib) is a Node.js wrapper around `XEditLib.dll`, the same engine that powers xEdit/TES5Edit/SSEEdit. It gives you programmatic access to all 163 xEdit functions from JavaScript.
+[xeditlib](https://github.com/WingedGuardian/xeditlib) is a Node.js wrapper around `XEditLib.dll`, the same engine that powers xEdit/TES5Edit/SSEEdit. It provides JavaScript bindings for record operations and diagnostics. Qualification here covers diagnostic readers and their negative paths; qualify record-editing operations separately before using them on real plugins.
 
 This means you can read, inspect, diff, and modify ESP/ESM files with code instead of clicking through the xEdit GUI.
 
@@ -14,7 +14,7 @@ Run this **from the toolkit root** (the folder containing `tools/` and `examples
 npm ci --ignore-scripts --no-audit --no-fund
 ```
 
-That installs exactly the shipped `package-lock.json`: xeditlib v1.0.1 (commit `19bef09`) with koffi 2.15.1, the pair this toolkit was tested with, each checked against its integrity hash; see `docs/installing-tools.md` for why both are pinned and how to verify them.
+That installs exactly the shipped `package-lock.json`: xeditlib v1.0.2 (commit `06f73ea`) with koffi 2.15.1, the pair this toolkit was tested with, each checked against its integrity hash; see `docs/installing-tools.md` for why both are pinned and how to verify them.
 
 Installing at the root puts `node_modules/xeditlib` where Node's upward module lookup can find it
 from every bundled script — `tools/xelib/*.js`, `tools/resaver-resolve-names.js`, and `examples/*.js`
@@ -22,7 +22,7 @@ all `require('xeditlib')` and resolve it from here. (Install it somewhere deeper
 throw `MODULE_NOT_FOUND`.)
 
 This installs:
-- `xelib.js` -- The Node.js wrapper (all 163 functions with correct FFI signatures)
+- `xelib.js` -- The Node.js wrapper for record operations and diagnostics
 - `XEditLib.dll` + the `*.Hardcoded.dat` game-data files -- the Delphi-compiled binary and its data.
   `xelib.js` loads the DLL relative to its own package folder, and XEditLib finds the `.dat` files
   next to the DLL, so **the scripts work regardless of your current working directory** once the

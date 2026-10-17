@@ -138,3 +138,55 @@ def test_existing_platform_skip_is_handled_before_report_qualification(tmp_path,
                                              "VALUE = 2", "tests/test_owned.py::test_value")
     assert len(calls) == (1 if leg == "baseline" else 2)
     assert all(not path.exists() for path in calls)
+
+
+def test_node_backed_anchor_keeps_locked_dependencies_and_required_flag_for_both_legs(tmp_path, monkeypatch):
+    repo = tmp_path / "pristine"
+    modules = repo / "node_modules"
+    modules.mkdir(parents=True)
+    marker = modules / "owned-dependency.txt"
+    marker.write_bytes(b"unchanged locked dependency fixture")
+    (repo / "value.py").write_bytes(b"VALUE = 1\n")
+    monkeypatch.setattr(instrument, "REPO", repo)
+    monkeypatch.setenv("TOOLKIT_REQUIRE_NODE_DEPS", "1")
+    monkeypatch.setenv("NODE_PATH", str(tmp_path / "unrelated-dependencies"))
+    calls = []
+
+    def run(args, **kwargs):
+        work = Path(kwargs["cwd"])
+        assert not (work / "node_modules").exists(), "mutation copies still exclude dependencies"
+        assert kwargs["env"]["NODE_PATH"] == str(modules)
+        assert kwargs["env"]["TOOLKIT_REQUIRE_NODE_DEPS"] == "1"
+        assert kwargs["env"]["PYTHONDONTWRITEBYTECODE"] == "1"
+        value = (work / "value.py").read_bytes()
+        calls.append(value)
+        _report(Path(args[args.index("--junitxml") + 1]), "passed" if len(calls) == 1 else "failed")
+        return subprocess.CompletedProcess(args, 0 if len(calls) == 1 else 1, "owned fixture", "")
+
+    monkeypatch.setattr(instrument.subprocess, "run", run)
+    instrument.test_guard_actually_bites(tmp_path / "row", "value.py", "VALUE = 1", "VALUE = 2",
+        "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests")
+    assert calls == [b"VALUE = 1\n", b"VALUE = 2\n"]
+    assert marker.read_bytes() == b"unchanged locked dependency fixture"
+
+
+@pytest.mark.parametrize("test_id", [
+    "tests/test_owned.py::test_value",
+    "tests/test_repo_invariants.py::test_setup_prompt_is_identical_everywhere",
+    "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests_extra",
+])
+def test_other_anchors_keep_their_existing_dependency_environment(tmp_path, monkeypatch, test_id):
+    monkeypatch.setattr(instrument, "REPO", tmp_path / "pristine")
+    monkeypatch.setenv("NODE_PATH", "owned-existing-node-path")
+    monkeypatch.setenv("TOOLKIT_REQUIRE_NODE_DEPS", "1")
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(kwargs["env"])
+        return subprocess.CompletedProcess(args, 0, "owned fixture", "")
+
+    monkeypatch.setattr(instrument.subprocess, "run", run)
+    instrument._run_mutation_anchor(tmp_path / "work", test_id, tmp_path / "scratch", tmp_path / "report.xml")
+    assert len(calls) == 1
+    assert calls[0]["NODE_PATH"] == "owned-existing-node-path"
+    assert calls[0]["TOOLKIT_REQUIRE_NODE_DEPS"] == "1"

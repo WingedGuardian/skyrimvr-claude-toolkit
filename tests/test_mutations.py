@@ -2029,7 +2029,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         # ... while time is left, it does let the kill land (no engine still running at the answer)
         ("agent/guards/adapters/claude/protect-files.sh",
          '            while kill -0 "$cpid" 2>/dev/null; do', "            while false; do",
-         "tests/test_hook_deadline.py::test_with_time_left_the_wrapper_answers_only_once_the_killed_child_is_gone",
+         "tests/test_bounded_kill_wait.py::test_bounded_waits_for_kill_within_both_deadlines",
          "deadline-kill-allowed-to-land-while-time-is-left"),
         ("agent/guards/adapters/claude/protect-files.sh",
          "HOOK_TIMEOUT_S=60 ", "HOOK_TIMEOUT_S=90 ",
@@ -2490,7 +2490,9 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         "agent/targets/codex/hooks.json",
         '"timeout": 60,',
         '"timeout": 61,',
-        "tests/test_codex_definitions.py::test_codex_hook_definitions_are_frozen",
+        # Copies omit .git. The independent measured vectors pin every definition
+        # field without inventing release history; the real freeze gate stays intact.
+        "tests/test_codex_definitions.py::test_the_template_hashes_to_the_measured_vectors",
         id="codex-definitions-are-frozen",
     ),
 ] + [
@@ -4379,12 +4381,32 @@ def _anchor_outcomes(report: Path) -> dict[tuple[str, str, str], str]:
 
 
 def _run_mutation_anchor(work: Path, test_id: str, scratch: Path, report: Path):
+    environment = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONDONTWRITEBYTECODE="1")
+    if test_id == "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests":
+        # Mutation copies deliberately omit node_modules. This anchor also runs
+        # the mandatory FOMOD smoke, so both legs need the pristine install's
+        # locked dependencies. Keep required-dependency checks enabled and leave
+        # every other anchor's dependency environment unchanged.
+        environment["NODE_PATH"] = str(REPO / "node_modules")
+    if test_id.startswith("tests/test_verify_release.py::"):
+        # The artifact fixture filters by the origin's real tracked membership.
+        # Copies omit .git; pass only that inventory, never an index or history.
+        git_env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
+        git_env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        tracked = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z"],
+                                 check=True, capture_output=True, timeout=60, env=git_env).stdout
+        inventory = report.parent / "tracked-files.nul"
+        if inventory.exists():
+            assert inventory.read_bytes() == tracked, "source inventory changed between mutation twins"
+        else:
+            inventory.write_bytes(tracked)
+        environment["TOOLKIT_TEST_TRACKED_FILES"] = str(inventory)
     return subprocess.run(
         [sys.executable, "-B", "-m", "pytest", test_id, "-q", "--no-header",
          "-p", "no:cacheprovider", "-rs", "--basetemp", str(scratch),
          "-o", "junit_family=legacy", "--junitxml", str(report)],
         cwd=str(work), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
-        env=dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONDONTWRITEBYTECODE="1"),
+        env=environment,
     )
 
 
@@ -5025,9 +5047,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _SFT + "test_apply_patch_move_to_into_the_state_is_denied", "l2-self-applypatch-move"),
     # ---- GUARD-FILES.sha256: the drift gate bites, setup.sh's rewritten file stays out
     ("tools/skyguard/verdict.py", "from __future__ import annotations", "from __future__ import annotations  # edited",
-     _SFT + "test_the_committed_manifest_is_current", "l2-self-manifest-drift"),
+     "tests/test_guard_manifest_components.py::test_manifest_matches_actual_guard_bytes", "l2-self-manifest-drift"),
     ("scripts/gen-guard-hashes.py", 'SETUP_WRITES = frozenset((".codex/hooks.json",))', "SETUP_WRITES = frozenset()",
-     _SFT + "test_the_manifest_names_exactly_the_tracked_guard_files", "l2-self-manifest-setup-writes"),
+     "tests/test_guard_manifest_components.py::test_guard_inventory_excludes_setup_writes_from_owned_tracked_tree", "l2-self-manifest-setup-writes"),
     # ---- fix round 1, I1: every delete route into .skyguard/** is S-SELF-STATE (never shadowed)
     (_SF, "    words = [w for w in (deletes.operands(e) or []) if isinstance(w, str)]", "    words = []",
      _p12row("state-del-rm"), "rule-S-SELF-STATE-delete-rm"),
@@ -7247,7 +7269,7 @@ _T6D_CLAUSES = [
     ('t6d-only-markdown-files-scanned', 'scripts/thirdparty-audit.py', 'DELIVERY_SUFFIXES = (".md", ".txt", ".sh", ".ps1", ".cmd", ".bat", ".py", ".json", ".yml", ".yaml", ".js", ".example")', 'DELIVERY_SUFFIXES = (".md", ".txt")', 'tests/test_thirdparty_audit.py::test_an_unverified_download_is_found_in_every_shipped_text_type'),
     ('t6d-wording-history-skip-returns', 'scripts/thirdparty-audit.py', '            for rule, (applies, finder) in DELIVERY_RULES.items():\n                if not applies(rel):\n                    continue\n                for problem in finder(line, repo, window):', '            for rule, (applies, finder) in DELIVERY_RULES.items():\n                if not applies(rel) or HISTORY.search(line):\n                    continue\n                for problem in finder(line, repo, window):', 'tests/test_thirdparty_audit.py::test_no_wording_silences_an_install_line'),
     ('t6d-doc-jdk-major-not-held', 'scripts/thirdparty-audit.py', '              {"pattern": r"\\b(?:Open)?JDK (?P<v>\\d{2})\\b(?![+.\\d])", "compare": "major",', '              {"pattern": r"(?!)(?P<v>x)", "compare": "major",', 'tests/test_thirdparty_audit.py::test_a_doc_stating_another_jdk_than_the_image_is_drift'),
-    ('t6d-package-json-xeditlib-loses-its-commit', 'package.json', '"xeditlib": "https://codeload.github.com/WingedGuardian/xeditlib/tar.gz/19bef0976738a9db0760d45975263e2d7eb76062"', '"xeditlib": "github:WingedGuardian/xeditlib"', 'tests/test_dependency_locks.py::test_xeditlib_and_koffi_are_locked_so_npm_ci_installs_them'),
+    ('t6d-package-json-xeditlib-loses-its-commit', 'package.json', '"xeditlib": "https://codeload.github.com/WingedGuardian/xeditlib/tar.gz/06f73eac215970c427ede049a9198c8002c43c65"', '"xeditlib": "github:WingedGuardian/xeditlib"', 'tests/test_dependency_locks.py::test_xeditlib_and_koffi_are_locked_so_npm_ci_installs_them'),
     ('t6d-readme-xeditlib-back-to-unpinned', 'README.md', 'toolkit root: `npm ci --ignore-scripts --no-audit --no-fund`)', 'toolkit root: `npm install github:WingedGuardian/xeditlib`)', 'tests/test_thirdparty_audit.py::test_the_shipped_tree_has_no_unpinned_delivery_path'),
     ('t6d-manual-steps-lose-their-hash', 'tools/inventory-runtimes.py', '+ "d065a4e23c3d9a6b5073d609b5be0830227ec3ca053c083ba385061ddfaf94c6 -- and run it. Then open a new terminal.",', '+ "-- and run it. Then open a new terminal.",', 'tests/test_thirdparty_audit.py::test_the_shipped_tree_has_no_unpinned_delivery_path'),
     ('t6d-container-doc-states-jdk-17-again', 'docs/container-vs-windows.md', 'ReSaver CLI (JDK 21.0.12 is in the image)', 'ReSaver CLI (JDK 17 is in the image)', 'tests/test_thirdparty_audit.py::test_the_real_tree_install_refs_agree_with_their_pins'),
@@ -7274,7 +7296,7 @@ MUTATIONS += [
                  "tests/test_ci_leg.py::test_a_node_id_mentioning_collected_is_not_the_collect_line",
                  id="ci-leg-collect-line-anchored"),
     # Linux-read files stay LF in an autocrlf checkout.
-    pytest.param(".gitattributes", ".devcontainer/**   text eol=lf", "",
+    pytest.param(".gitattributes", ".devcontainer/**   text eol=lf", ".devcontainer/**   text eol=crlf",
                  "tests/test_gen_agent_trees.py::test_files_linux_tools_read_are_pinned_lf", id="eol-devcontainer-lf"),
     # CI run 38178385999: unpinned text files checked out CRLF on windows-latest and the release build refused
     # the pristine checkout as dirty. The catch-all gives every text file an eol.
@@ -8337,9 +8359,6 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 _WINDOWS_ONLY_TWINS = {
     "deadline-kill-by-windows-pid": "taskkill by /proc/<pid>/winpid runs only under MSYS/Cygwin; POSIX takes kill -KILL",
     "deadline-kill-is-not-waited-for": "taskkill by /proc/<pid>/winpid runs only under MSYS/Cygwin; POSIX takes kill -KILL",
-    "deadline-kill-allowed-to-land-while-time-is-left":
-        "off Windows the kill is a synchronous SIGKILL, so whether the child is gone at the answer is a race "
-        "(killed in 1 of 4 Linux runs); the wait exists for the asynchronous taskkill",
     "l2-backup-manifest-lock": "POSIX O_APPEND writes are atomic; the lost-line race is the Windows CRT's "
                                "seek-then-write O_APPEND emulation",
     "engine-reads-declared-env-from-the-windows-root": "the wrappers set ROOT_WIN only under Git Bash (msys*, or cygwin* with the MSYS runtime); off "
