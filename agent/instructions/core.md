@@ -266,6 +266,8 @@ Coverage and gaps: `docs/guard-coverage.md`.
 - **Never push CPU, RAM, free disk, disk I/O or GPU past 80% of the machine**, counting what already
   runs (games, other sessions). Measure first; if it won't fit, wait, shrink or ask. Stress tests: never
   one worker per core, idle priority, time-boxed.
+- **Exempt: the game** and Steam/SteamVR, OpenComposite, DevBench, House Carl: no caps, throttling or
+  watchdog kills for them; other jobs count them as load.
 
 ### Safety improvement loop
 After every session, near-miss or surprise, ask whether a new guard rule, protection or knowledgebase entry would have caught it -- proactively, when you notice a gap. Record proposals in a "Hook Candidates" section of `KNOWLEDGEBASE.local.md`.

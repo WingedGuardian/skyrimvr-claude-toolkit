@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Agent instructions exempt the game and what it needs to run (Steam/SteamVR,
+  OpenComposite, DevBench, House Carl) from the machine resource limits: no caps,
+  throttling or watchdog kills for them; other heavy jobs count them as load.
+
 - The shell guard's save-store check reads each install's workspace config and
   resolves its store once per decision instead of once per operand. Long
   commands with many operands had become 20-70x slower and could approach the
