@@ -260,9 +260,9 @@ Coverage and gaps: `docs/guard-coverage.md`.
   files get clobbered or orphaned by a deploy or purge. Prefer the user's mod manager; a manual
   install goes through `tools/mod-install.py`: dry run first, read every destination, then `--apply`
   (backups + manifest) and check the result. (The user's **own** in-development mod files are fine.)
-- **Delete to the Recycle Bin, never permanently.** Windows: `Microsoft.VisualBasic.FileIO.FileSystem`
-  `DeleteFile`/`DeleteDirectory` with `SendToRecycleBin`, not `rm`/`Remove-Item`. A permanent delete
-  needs the user's OK; a tool's own temp files are exempt. The guard judges a Recycle-Bin delete like any delete.
+- **Delete to the Recycle Bin, never permanently.** Windows: the shell delete (`SHFileOperation` with
+  `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), not `rm`/`Remove-Item`. Only scratch made in the same run may go
+  outright; too big for the bin -> ask first. The guard judges a Recycle-Bin delete like any delete.
 - **Never push CPU, RAM, free disk, disk I/O or GPU past 80% of the machine**, counting what already
   runs (games, other sessions). Measure first; if it won't fit, wait, shrink or ask. Stress tests: never
   one worker per core, idle priority, time-boxed.

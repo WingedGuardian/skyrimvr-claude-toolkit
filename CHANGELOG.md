@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The Recycle Bin rule names the undoable shell delete (`SHFileOperation` with
+  `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), which still prompts for an item too big
+  for the bin. Only scratch a tool made in the same run may be deleted outright;
+  the blanket temp-file exemption is withdrawn.
+
 - Agent instructions exempt the game and what it needs to run (Steam/SteamVR,
   OpenComposite, DevBench, House Carl) from the machine resource limits: no caps,
   throttling or watchdog kills for them; other heavy jobs count them as load.
