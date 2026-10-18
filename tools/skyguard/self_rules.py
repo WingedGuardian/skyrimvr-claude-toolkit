@@ -126,12 +126,38 @@ _SAVE_HOLDERS = ([".claude"], [".claude", "backups"],
                  [".modding-agent-harness"], [".modding-agent-harness", "backups"])
 
 
-def save_store_target(abs_path, roots, holder=False):
+class _StoreCache:
+    """One decision's store lookups. CI run 39145224156: an 80 KB command with ~1300 operands re-read the workspace
+    config and re-resolved the same store and paths through the filesystem per operand (20-70x slower than 1498c80,
+    over the 2 s timing ceiling). Within one decision the answers cannot differ, so each is computed once. Failures
+    are never cached: a malformed config or an unresolvable path raises exactly where and as often as before."""
+
+    def __init__(self):
+        self.destinations = {}
+        self.keys = {}
+
+    def destination(self, root):
+        if root not in self.destinations:
+            from modding_harness import workspace
+            self.destinations[root] = workspace.settings(root)["destination"]
+        return self.destinations[root]
+
+    def canonical(self, path):
+        key = str(path)
+        if key not in self.keys:
+            from modding_harness.profiles import canonical
+            self.keys[key] = canonical(path)
+        return self.keys[key]
+
+
+def save_store_target(abs_path, roots, holder=False, cache=None):
     if roots is not None:
         from modding_harness import workspace
-        from modding_harness.preservation import protects
+        from modding_harness.preservation import canonical, protects
         for root in roots.install_dirs:
-            if protects(abs_path, [workspace.settings(root)["destination"]], ancestor=holder):
+            store = cache.destination(root) if cache is not None else workspace.settings(root)["destination"]
+            if protects(abs_path, [store], ancestor=holder,
+                        resolve=cache.canonical if cache is not None else canonical):
                 return True
     rel = _rel(abs_path, roots.install_dirs) if roots is not None else None
     if rel is None:
@@ -148,13 +174,14 @@ def shell_save_store_hit(command, parsed, roots, cwd="", env=None):
     """Recognized store mutations, including an ancestor moved/deleted or aliased."""
     from . import deletes
     env = os.environ if env is None else env
+    cache = _StoreCache()
     for e in parsed.execs:
         e = deletes.substituted(e)
         candidates = [(w, holder) for w, holder, _op in _routes(e)]
         candidates += [(w, True) for w in (deletes.operands(e) or []) if isinstance(w, str)]
         for word, holder in candidates:
             placed = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), word)
-            if placed and save_store_target(placed, roots, holder):
+            if placed and save_store_target(placed, roots, holder, cache):
                 return placed
     for word, how in deletes.recycle_targets(deletes.recycle_text(command, parsed)):
         # A concatenation hole can look like an empty quoted argument. It is
@@ -162,7 +189,7 @@ def shell_save_store_hit(command, parsed, roots, cwd="", env=None):
         if not word.strip():
             continue
         placed = _recycle_abs(word, how, targets.normalise_cwd(cwd), env)
-        if placed and save_store_target(placed, roots, True):
+        if placed and save_store_target(placed, roots, True, cache):
             return placed
     return ""
 

@@ -214,6 +214,19 @@ def test_a_delete_of_the_whole_install_cannot_destroy_permanent_backups():
     assert decision == "deny" and fired == {"S-SAVE-STORE"}
 
 
+def test_a_many_operand_command_reads_each_store_config_once(monkeypatch):
+    """CI run 39145224156: the store check re-read the workspace config and re-resolved the store for EVERY operand,
+    20-70x slower than 1498c80 and over the 2 s timing ceiling on GitHub's Windows runners, yet under it on a fast
+    machine. Counting config reads is speed-independent: one decision reads each install root's config once."""
+    from modding_harness import workspace
+    reads = []
+    real = workspace.settings
+    monkeypatch.setattr(workspace, "settings", lambda root: reads.append(root) or real(root))
+    words = " ".join("x{}.txt".format(i) for i in range(300))
+    shell("rm -f " + words, cwd="C:/work")
+    assert 0 < len(reads) <= len(_roots().install_dirs), len(reads)
+
+
 @pytest.mark.parametrize("route", ["shell", "write"])
 def test_the_ask_branch_works_if_a_later_pricing_flips_the_guard_rule_back(monkeypatch, route):
     """Review M3: the registry holds the priced decision; the `ask` branch must work, not merely exist."""

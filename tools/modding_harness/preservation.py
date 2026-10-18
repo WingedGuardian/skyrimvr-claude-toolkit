@@ -33,14 +33,16 @@ def contains(parent, child):
         return False
 
 
-def protects(path, stores, ancestor=False):
-    """A recognized mutation may neither change a store nor move/delete its ancestor."""
+def protects(path, stores, ancestor=False, resolve=canonical):
+    """A recognized mutation may neither change a store nor move/delete its ancestor.
+
+    resolve defaults to canonical; a caller checking many paths in one decision may pass a memoized canonical."""
     resolved = None
     for store in stores:
         try:
-            store = canonical(store)
+            store = resolve(store)
             if resolved is None:
-                resolved = canonical(path)
+                resolved = resolve(path)
             shared = os.path.commonpath((store, resolved))
             if shared == store or (ancestor and shared == resolved):
                 return True

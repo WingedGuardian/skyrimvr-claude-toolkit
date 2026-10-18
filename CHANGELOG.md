@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The shell guard's save-store check reads each install's workspace config and
+  resolves its store once per decision instead of once per operand. Long
+  commands with many operands had become 20-70x slower and could approach the
+  agent's hook timeout, after which a refusal is discarded.
+
 - `scripts/read-save.py` needs `lz4` only to decompress a save body. Malformed
   input now reports its JSON error, and plugin parsing and search helpers load,
   without the tools lock installed; a save that does need decompression still

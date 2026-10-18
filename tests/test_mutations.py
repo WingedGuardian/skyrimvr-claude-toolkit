@@ -5072,7 +5072,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '    if own and own[0] == self_rules.STATE and not dels.hit:\n        return deny("S-SELF-STATE", own[1])\n'
      '    # Plan 6 final fix',
      _SFT + "test_guards_off_does_not_let_the_lock_manifest_be_deleted", "rule-S-SELF-STATE-delete-before-del-install"),
-    ('tools/skyguard/self_rules.py', '            if placed and save_store_target(placed, roots, holder):', '            if False:', 'tests/test_skyguard_self_rules.py::test_a_delete_of_the_whole_install_cannot_destroy_permanent_backups', 'save-store-install-ancestor-protection'),
+    ('tools/skyguard/self_rules.py', '            if placed and save_store_target(placed, roots, holder, cache):', '            if False:', 'tests/test_skyguard_self_rules.py::test_a_delete_of_the_whole_install_cannot_destroy_permanent_backups', 'save-store-install-ancestor-protection'),
     # ---- fix round 1, C1: the guard hash is the REPO form of a configured file
     ("tools/skyguard/guard_hash.py", "    if not slots:\n        return data, {}", "    if True:\n        return data, {}",
      _SFT + "test_a_configured_install_banners_nothing_and_a_real_edit_is_named", "l2-self-hash-normalises-setup-slots"),
@@ -9321,3 +9321,8 @@ MUTATIONS[:] = [
     if p.id in _LATE_WINDOWS_ONLY else p
     for p in MUTATIONS
 ]
+
+# CI run 39145224156: the per-operand store-config re-read (20-70x slowdown) must not come back unnoticed on a fast machine.
+MUTATIONS += [pytest.param("tools/skyguard/self_rules.py", "    cache = _StoreCache()\n", "    cache = None\n",
+                           "tests/test_skyguard_self_rules.py::test_a_many_operand_command_reads_each_store_config_once",
+                           id="save-store-config-read-once-per-decision")]
