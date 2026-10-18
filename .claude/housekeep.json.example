@@ -12,5 +12,9 @@
   "min_bytes": 1048576,
   "gzip_after_days": 7,
   "recycle_after_days": 90,
-  "free_floor_gib": 0
+  "free_floor_gib": 0,
+  "temp_after_hours": 24,
+  "sweep_every_hours": 6,
+  "codex_sessions_warn_gib": 5,
+  "worktrees_warn": 10
 }

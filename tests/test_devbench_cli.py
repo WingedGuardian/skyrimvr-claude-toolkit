@@ -18,13 +18,12 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 import pytest
 
-from conftest import BASH, REPO
+from conftest import BASH, REPO, scratch_dir
 
 CLI = REPO / "tools" / "devbench-cli.sh"
 MOCK = Path(__file__).resolve().parent / "mock_devbench.py"
@@ -59,7 +58,7 @@ def _path_without_jq() -> str:
 
     global _nojq_dir
     if _nojq_dir is None:
-        _nojq_dir = Path(tempfile.mkdtemp(prefix="toolkit-nojq-"))
+        _nojq_dir = Path(scratch_dir("toolkit-nojq-"))
         for name in NEEDED:
             real = shutil.which(name)
             if real:

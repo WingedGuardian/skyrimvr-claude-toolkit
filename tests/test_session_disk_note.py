@@ -1,0 +1,67 @@
+"""Session start shows the last disk-housekeeping note and launches the next sweep detached (tools/skyguard/run.py).
+
+Both agents' session-start roles go through run.py, so one choke point serves Claude Code and Codex.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+
+from conftest import REPO
+
+RUN = REPO / "tools" / "skyguard" / "run.py"
+NOTE = "DISK: removed 3 leftover temp dir(s), free space +2.0 GiB -- python tools/housekeep.py report"
+
+sys.path.insert(0, str(REPO / "tools"))
+from skyguard import run  # noqa: E402
+
+
+def _start(tmp_path, agent, role, payload):
+    return subprocess.run([sys.executable, str(RUN), agent, role, "--project", str(tmp_path), "--root",
+                           str(tmp_path), "--bash", "bash", "--telemetry", str(tmp_path / "hb")],
+                          input=payload.encode("utf-8"), capture_output=True, timeout=60)
+
+
+def _note(proj, text=NOTE):
+    p = proj / run.DISK_NOTE
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text + "\n", encoding="utf-8")
+
+
+def test_the_claude_session_start_shows_the_disk_note(tmp_path):
+    _note(tmp_path)
+    r = _start(tmp_path, "claude", "session-kb-guard", '{"session_id": "s1", "source": "startup"}')
+    assert r.returncode == 0, r.stderr
+    assert NOTE in r.stdout.decode("utf-8")
+
+
+def test_the_codex_session_start_shows_the_disk_note(tmp_path):
+    _note(tmp_path)
+    r = _start(tmp_path, "codex", "session-start", json.dumps({"hook_event_name": "SessionStart", "source": "startup"}))
+    assert r.returncode == 0, r.stderr
+    assert NOTE in r.stdout.decode("utf-8")
+
+
+def test_no_note_adds_nothing_to_the_banner(tmp_path):
+    with_note = tmp_path / "a"
+    without = tmp_path / "b"
+    with_note.mkdir()
+    without.mkdir()
+    _note(with_note)                                                # twin: the same start with a note does show it
+    payload = '{"session_id": "s1", "source": "startup"}'
+    assert "DISK:" not in _start(without, "claude", "session-kb-guard", payload).stdout.decode("utf-8")
+    assert "DISK:" in _start(with_note, "claude", "session-kb-guard", payload).stdout.decode("utf-8")
+
+
+def test_a_sweep_is_launched_detached_outside_tests_and_never_inside_them(tmp_path, monkeypatch):
+    launched = []
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
+    assert run._disk_note(str(tmp_path)) == ""
+    assert launched == [], "under pytest the hook must not sweep the real temp dir"
+    monkeypatch.setenv("SKYGUARD_SWEEP_IN_TESTS", "1")              # twin: what a real session does
+    run._disk_note(str(tmp_path))
+    (argv, kw), = launched
+    assert argv[-3:] == [str(REPO / "tools" / "housekeep.py"), "session", str(tmp_path / run.DISK_NOTE)]
+    assert kw["stdout"] == subprocess.DEVNULL and (kw["creationflags"] if os.name == "nt" else kw["start_new_session"])

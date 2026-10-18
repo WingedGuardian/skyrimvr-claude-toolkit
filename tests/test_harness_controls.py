@@ -258,6 +258,20 @@ def test_harness_evidence_falls_back_when_workspace_readonly(tmp_path):
     assert root.is_dir()
 
 
+def test_harness_evidence_keeps_only_the_newest_runs(tmp_path):
+    spec = importlib.util.spec_from_file_location("launcher", REPO / "tests/run_harness_tests.py")
+    launcher = importlib.util.module_from_spec(spec); spec.loader.exec_module(launcher)
+    for i in range(14):
+        d = tmp_path / f"harness-{i:02d}"
+        d.mkdir()
+        (d / "command.json").write_text("[]")
+        os.utime(d, (1_000_000 + i, 1_000_000 + i))
+    (tmp_path / "other-keep").mkdir()                       # not a harness folder: never touched
+    launcher.prune_evidence(tmp_path, keep=10)
+    left = sorted(p.name for p in tmp_path.iterdir())
+    assert left == [f"harness-{i:02d}" for i in range(4, 14)] + ["other-keep"]
+
+
 def test_spriggit_unwritable_destination_fails_before_serializing(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location("publisher", REPO / "tools/spriggit_publish.py")
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)

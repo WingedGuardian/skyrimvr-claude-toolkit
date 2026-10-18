@@ -11,10 +11,20 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+// Every temp dir a test makes is removed when node exits. Without this each run left 4-80 folders in the
+// system temp dir, and 14,018 had built up by 2026-10-18.
+const scratchDirs = [];
+process.on('exit', () => { for (const d of scratchDirs) fs.rmSync(d, { recursive: true, force: true }); });
+function scratch(prefix) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  scratchDirs.push(d);
+  return d;
+}
+
 const { readActivePlugins, defaultPluginsTxt, findPluginsTxt } = require('./active-plugins');
 
 function tmpPluginsTxt(contents) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-plugins-'));
+  const dir = scratch('toolkit-plugins-');
   const file = path.join(dir, 'plugins.txt');
   fs.writeFileSync(file, contents, 'utf8');
   return file;
@@ -78,7 +88,7 @@ test('PLUGINS_TXT overrides path discovery', () => {
 // second candidate is therefore a bug, not a detail.
 
 function fakeLocalAppData(games) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-localappdata-'));
+  const base = scratch('toolkit-localappdata-');
   for (const [game, contents] of Object.entries(games)) {
     fs.mkdirSync(path.join(base, game), { recursive: true });
     fs.writeFileSync(path.join(base, game, 'plugins.txt'), contents, 'utf8');
@@ -161,7 +171,7 @@ test('an explicit base wins over SKYRIM_LOADORDER_DIR and a paths file', () => {
     'Skyrim VR': '*Skyrim.esm\n',
     'Skyrim Special Edition': '*Skyrim.esm\n',
   });
-  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-loadorder-'));
+  const elsewhere = scratch('toolkit-loadorder-');
   const config = path.join(elsewhere, 'skyrim-paths.env');
   fs.writeFileSync(config, "SKYRIM_LOADORDER_DIR='" + elsewhere.replace(/\\/g, '/') + "'\n");
   const saved = {};

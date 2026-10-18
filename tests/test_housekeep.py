@@ -339,3 +339,124 @@ def test_a_launch_only_plan_never_scans_agent_output_and_still_sums(tree):
 def test_cli_refuses_an_unknown_config_key(tmp_path):
     (tmp_path / "c.json").write_text('{"agent_outptu": []}', encoding="utf-8")
     assert hk.main(["--config", str(tmp_path / "c.json"), "report"]) == 2
+
+
+# --------------------------------------------------------------------------- temp sweep (the one permanent delete)
+
+def stale(d, days=3):
+    t = time.time() - days * DAY
+    for p in sorted(d.rglob("*"), key=lambda p: -len(p.parts)) + [d]:
+        os.utime(p, (t, t))
+    return d
+
+
+def tdir(temp, name, days=3):
+    d = temp / name
+    (d / "sub").mkdir(parents=True)
+    (d / "sub" / "f.txt").write_text("x", encoding="utf-8")
+    return stale(d, days)
+
+
+def sweep_cfg():
+    cfg = hk.load_config(None)
+    cfg["temp_prefixes"] = ["skyrim-harness-", "t11-nohome-"]
+    return cfg
+
+
+def test_the_sweep_deletes_a_stale_toolkit_temp_dir_and_keeps_a_foreign_one(tmp_path):
+    ours = tdir(tmp_path, "skyrim-harness-abc123")
+    theirs = tdir(tmp_path, "someone-else-abc123")        # twin: same age, a name the toolkit never makes
+    res = hk.sweep_temp(sweep_cfg(), temp=tmp_path)
+    assert not ours.exists()
+    assert theirs.exists()
+    assert res["rows"]["deleted"] == 1
+
+
+def test_the_sweep_keeps_a_dir_whose_child_changed_recently(tmp_path):
+    busy = tdir(tmp_path, "t11-nohome-busy01")
+    (busy / "new.txt").write_text("y", encoding="utf-8")   # a direct child written now
+    os.utime(busy, (time.time() - 3 * DAY,) * 2)            # the dir's own mtime still says old
+    idle = tdir(tmp_path, "t11-nohome-idle01")              # twin: nothing recent
+    res = hk.sweep_temp(sweep_cfg(), temp=tmp_path)
+    assert busy.exists() and not idle.exists()
+    assert res["rows"]["kept: changed recently"] == 1
+
+
+@pytest.mark.skipif(os.name != "nt", reason="only Windows refuses to rename a dir with an open file inside")
+def test_the_sweep_keeps_a_dir_a_process_has_a_file_open_in(tmp_path):
+    held = tdir(tmp_path, "skyrim-harness-held01")
+    free = tdir(tmp_path, "skyrim-harness-free01")          # twin: nothing open
+    with open(held / "sub" / "f.txt", encoding="utf-8"):
+        res = hk.sweep_temp(sweep_cfg(), temp=tmp_path)
+    assert held.exists() and not free.exists()
+    assert res["rows"]["kept: in use"] == 1
+
+
+def test_the_sweep_keeps_the_newest_pytest_run_and_removes_older_runs_and_garbage(tmp_path):
+    base = tmp_path / "pytest-of-someone"
+    old = tdir(base, "pytest-9")
+    newest = tdir(base, "pytest-10")                         # numerically newest, though just as stale
+    garbage = tdir(base, "garbage-0d1e")
+    hk.sweep_temp(sweep_cfg(), temp=tmp_path)
+    assert newest.exists()
+    assert not old.exists() and not garbage.exists()
+
+
+def test_the_sweep_removes_read_only_files_and_its_rows_sum(tmp_path):
+    ro = tdir(tmp_path, "skyrim-harness-ro0001")
+    os.chmod(ro / "sub" / "f.txt", 0o444)
+    stale(ro)
+    tdir(tmp_path, "t11-nohome-young1", days=0)
+    res = hk.sweep_temp(sweep_cfg(), temp=tmp_path)
+    assert not ro.exists()
+    assert sum(res["rows"].values()) == 2 and res["rows"]["deleted"] == 1
+
+
+def test_the_sweep_never_follows_a_link_out_of_temp(tmp_path):
+    temp, outside = tmp_path / "temp", tmp_path / "precious"
+    temp.mkdir()
+    (outside / "keep.txt").parent.mkdir(parents=True)
+    (outside / "keep.txt").write_text("keep", encoding="utf-8")
+    link = temp / "skyrim-harness-link01"
+    try:
+        if os.name == "nt":
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)], check=True, capture_output=True)
+        else:
+            os.symlink(outside, link)
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("cannot make a directory link here")
+    stale(outside)
+    hk.sweep_temp(sweep_cfg(), temp=temp)
+    assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, monkeypatch):
+    cfg = sweep_cfg()
+    cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
+               sweep_every_hours=0)
+    monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(tmp_path / "temp"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    (tmp_path / "temp").mkdir()
+    state = tmp_path / "state" / "note.txt"
+    assert hk.session(cfg, state) == 0
+    assert state.read_text(encoding="utf-8") == ""
+    tdir(tmp_path / "temp", "skyrim-harness-sess01")
+    assert hk.session(cfg, state) == 0
+    assert state.read_text(encoding="utf-8").startswith("DISK: removed 1 leftover temp dir(s)")
+
+
+def test_session_runs_at_most_once_per_interval(tmp_path, monkeypatch):
+    cfg = sweep_cfg()
+    cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
+               sweep_every_hours=6)
+    monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(tmp_path / "temp"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    (tmp_path / "temp").mkdir()
+    state = tmp_path / "note.txt"
+    state.write_text("", encoding="utf-8")                   # a sweep ran just now
+    left = tdir(tmp_path / "temp", "skyrim-harness-thr001")
+    hk.session(cfg, state)
+    assert left.exists()
+    os.utime(state, (time.time() - 7 * 3600,) * 2)           # twin: the last sweep was 7 hours ago
+    hk.session(cfg, state)
+    assert not left.exists()

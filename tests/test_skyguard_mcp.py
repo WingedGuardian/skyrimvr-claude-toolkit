@@ -8,11 +8,10 @@ Two halves, as in test_skyguard_t09:
 import json
 import os
 import sys
-import tempfile
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, scratch_dir
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, mcp_rules, paths, rules, shell_rules, shellparse  # noqa: E402
@@ -32,7 +31,7 @@ ROWS = _rows()
 
 
 # Documents lives under USERPROFILE: every test points it at an EMPTY folder (never the machine's own) unless it builds one.
-NOHOME = tempfile.mkdtemp(prefix="t11-nohome-")
+NOHOME = scratch_dir("t11-nohome-")
 ENV0 = {"USERPROFILE": NOHOME}
 
 
