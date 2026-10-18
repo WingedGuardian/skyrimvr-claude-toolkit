@@ -29,11 +29,13 @@ KIND = "legacy-skyrim-save-guard-v1"
 TRANSFER_POLICY_SHA256 = "30777ba84ec4dcf66b6be4c9b0d40ea6eb8e3075aa3561bb0493b8b9bb1351a2"
 AUDIT_POLICY_SHA256 = "27456e7cb314fb9178f9c77cc97758e4fab578b76776c6953931caabf55ea280"
 HELPER_BOUNDARY_POLICY_SHA256 = "7ae79ca237192d414615c950e7494c39ee2d014a01149e23d80d2d9cc651e601"
+SOURCE_EFFECTS_POLICY_SHA256 = "ccf479961b6cf0af98b68d741d8b31f7d3f9c59dce57e41b8e643fe3dc513297"
 # These exact versions retain the reviewed transfer/controller contracts. The
 # audit version adds only its independently qualified, confined read/report route.
 # The boundary version additionally distinguishes unrelated helper-name prefixes.
 # Other registered policies remain restrictive; they do not gain these helpers.
-QUALIFIED_POLICY_SHA256 = frozenset((TRANSFER_POLICY_SHA256, AUDIT_POLICY_SHA256, HELPER_BOUNDARY_POLICY_SHA256))
+QUALIFIED_POLICY_SHA256 = frozenset((TRANSFER_POLICY_SHA256, AUDIT_POLICY_SHA256, HELPER_BOUNDARY_POLICY_SHA256,
+                                    SOURCE_EFFECTS_POLICY_SHA256))
 CONTROLLED_LOAD_SHA256 = "22e0b8b1c004bc4ee79946836a6ce0abb60c4ca9b06ded20b8e659e61dc8102b"
 
 
@@ -435,6 +437,10 @@ def evaluate(action, project, facts=None, *, requirements=None):
     else:
         payloads = []
     for payload, file_operation in payloads:
+        # Only this exact reviewed successor opts into canonical shell provenance.
+        # Keep arbitrary registered policies' original input shape unchanged.
+        if hashlib.sha256(source).hexdigest() == SOURCE_EFFECTS_POLICY_SHA256:
+            payload = dict(payload, shell=action.shell)
         result = decide(payload)
         if not isinstance(result, dict) or result.get("kind") not in (
                 "allow", "deny", "backup", "needs_files", "needs_set"):

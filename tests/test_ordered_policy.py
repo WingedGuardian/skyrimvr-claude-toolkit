@@ -17,7 +17,23 @@ from modding_harness import contracts
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="reviewed personal native policy is Windows-specific")
 
 
-@pytest.fixture(params=['original', 'audit', 'helper-boundary'])
+def test_unqualified_personal_policy_keeps_original_payload_shape(tmp_path):
+    policy = tmp_path / local_policy.LEGACY
+    policy.parent.mkdir(parents=True)
+    policy.write_text("def decide(payload):\n"
+                      " if set(payload) != {'tool_name','tool_input','cwd','session_id'}:\n"
+                      "  return {'kind':'deny','reason':'unexpected payload contract change'}\n"
+                      " return {'kind':'allow'}\n")
+    registration = tmp_path / local_policy.CONFIG
+    registration.parent.mkdir(parents=True)
+    registration.write_text(json.dumps({'v': 1, 'kind': local_policy.KIND,
+        'path': local_policy.LEGACY, 'sha256': hashlib.sha256(policy.read_bytes()).hexdigest()}))
+    action = contracts.Action('future', 'Bash', 'shell', shell='bash', cwd=str(tmp_path), command='echo contract')
+    result = local_policy.evaluate(action, tmp_path)
+    assert result.decision == 'allow', result
+
+
+@pytest.fixture(params=['original', 'audit', 'helper-boundary', 'source-effects'])
 def ordered(tmp_path, request):
     root, source, bundle = tmp_path / "installed", tmp_path / "source", tmp_path / "review"
     root.mkdir()
@@ -44,7 +60,8 @@ def ordered(tmp_path, request):
     controller.write_text("raise RuntimeError('inert controller must never execute')\n")
     module = source / "tools/skyguard/local_policy.py"
     qualified_hash = {'original': local_policy.TRANSFER_POLICY_SHA256, 'audit': local_policy.AUDIT_POLICY_SHA256,
-                      'helper-boundary': local_policy.HELPER_BOUNDARY_POLICY_SHA256}[request.param]
+                      'helper-boundary': local_policy.HELPER_BOUNDARY_POLICY_SHA256,
+                      'source-effects': local_policy.SOURCE_EFFECTS_POLICY_SHA256}[request.param]
     module.write_text(module.read_text().replace(qualified_hash, hashlib.sha256(policy.read_bytes()).hexdigest())
                       .replace(local_policy.CONTROLLED_LOAD_SHA256, hashlib.sha256(controller.read_bytes()).hexdigest()))
     command = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + root.as_posix() + '/.claude/hooks/save-access-entry.ps1"'
