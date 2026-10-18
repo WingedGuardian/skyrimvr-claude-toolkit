@@ -102,6 +102,8 @@ def test_corpus_inputs_are_exactly_what_the_recorder_generates():
 def test_hook_reproduces_the_recorded_decision_and_rules(installs, row):
     """A legacy row that is not superseded: same decision, same rule-id set. Never the text."""
     rec, inst = installs
+    if rec.windows_only(row["id"]):
+        pytest.skip(rec.windows_only(row["id"]))
     got = rec.fire_full(inst[row["layout"]], row)
     assert got["decision"] == row["decision"]
     assert got["rules"] == rec.legacy_rule_ids(row["text"], TEMPLATES), (row["text"], got["rules"])
@@ -189,8 +191,9 @@ def test_unknown_advice_is_an_explicit_coverage_gap_not_a_fabricated_rule():
 
 
 def test_every_windows_only_row_is_an_intended_row():
-    """record.WINDOWS_ONLY skips by id off Windows: a stale id would skip nothing, a typo would hide nothing."""
-    assert set(_rec().WINDOWS_ONLY) <= {r["id"] for r in INTENDED_ROWS}
+    """record.WINDOWS_ONLY skips by id off Windows: a stale id would skip nothing, a typo would hide nothing.
+    Legacy ids count only while LIVE (a superseded legacy row is never fired, so skipping it would hide nothing)."""
+    assert set(_rec().WINDOWS_ONLY) <= {r["id"] for r in INTENDED_ROWS} | {r["id"] for r in LIVE}
 
 
 def test_intended_rows_reproduce(intended_installs):

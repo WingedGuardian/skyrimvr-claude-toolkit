@@ -28,6 +28,14 @@ LAYOUT_ENV = {
 SHELL = {"Bash": "bash", "PowerShell": "powershell"}
 
 
+@pytest.fixture(autouse=True)
+def _windows_host(monkeypatch):
+    """The rows and helpers here read Windows roots and Git Bash `/c/` aliases. Since 4ebdd1c a POSIX host reads
+    `/c/...` natively, so pin the host (CI run 39145224156); the two tests that exercise a host reading set their
+    own, which overrides this."""
+    monkeypatch.setattr(paths, "POSIX_HOST", False)
+
+
 def _rows():
     text = (REPO / "tests" / "guard_corpus" / "intended.jsonl").read_text(encoding="utf-8")
     return [r for r in (json.loads(x) for x in text.split("\n") if x.strip()) if r["task"] == "T7"]

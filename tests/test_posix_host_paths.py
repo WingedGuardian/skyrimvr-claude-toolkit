@@ -92,6 +92,35 @@ def test_a_powershell_delete_in_the_install_is_denied_on_a_posix_host(posix):
     assert _claude("PowerShell", "Remove-Item -Recurse '{}/Data'".format(GAME)) == ("deny", {"S-DEL-INSTALL"})
 
 
+SPACED = "/home/u/My Games/Skyrim VR"
+
+
+@pytest.mark.parametrize("command,rule", [
+    ('rm -rf "{g}"', "S-SAVE-STORE"),                       # the install is an ancestor of the backup store
+    ('rm -r -f "{g}/Data"', "S-DEL-INSTALL"),
+    ('erase "{g}/x.txt"', "S-DEL-INSTALL"),
+    ("cd {e} && rm -rf Data", "S-DEL-INSTALL"),
+    ("pushd {e} && rm -rf Data", "S-DEL-INSTALL"),
+    ("cd '/home/u/My Games' && rm -rf Skyrim\\ VR", "S-SAVE-STORE"),
+    ("rm -rf /home/*/My*/Sky*/Data", "S-DEL-UNRESOLVED"),
+])
+def test_a_bash_delete_in_a_posix_install_is_denied_on_a_posix_host(posix, command, rule):
+    """The POSIX re-spellings of the corpus rows record.WINDOWS_ONLY skips off Windows for their Git Bash `/c/`
+    alias (CI run 39145224156): same decision, same rule, so the skip loses no Linux coverage."""
+    cmd = command.format(g=SPACED, e=SPACED.replace(" ", "\\ "))
+    p = claude.extract(json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": "/home/u/work",
+                                   "tool_input": {"command": cmd}}))
+    audit = Audit(SPACED)
+    v = engine.evaluate_shell(claude.to_request(p, "shell"),
+                              paths.roots(SPACED, "", {"SKYRIM_CONFIG_DIR": CFG}), audit)
+    assert (v.decision, {rid for rid, _ in audit.fired}) == ("deny", {rule})
+
+
+def test_a_git_bash_drive_alias_is_an_ordinary_folder_on_a_posix_host(posix):
+    """`/c/...` is drive C: only under Git Bash on Windows; on a POSIX host it is just a folder (4ebdd1c)."""
+    assert paths.norm_abs("/c/GOG Games/x", msys=True) == "/c/GOG Games/x"
+
+
 def test_an_apply_patch_delete_by_absolute_posix_path_is_denied_on_a_posix_host(posix):
     raw = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": "/home/u",
                       "tool_input": {"command": "*** Begin Patch\n*** Delete File: {}/SkyrimVR.exe\n*** End Patch"

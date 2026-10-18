@@ -20,6 +20,14 @@ ENV = {"HOME": "/c/Users/me", "USERPROFILE": "C:" + BS + "Users" + BS + "me"}
 CWD_WIN = GAME.replace("/", BS)
 
 
+@pytest.fixture(autouse=True)
+def _windows_host(monkeypatch):
+    """Every spelling here is the WINDOWS reading (Git Bash `/c/`, `~` -> C:/Users/...). Since 4ebdd1c a POSIX host
+    reads `/c/...` natively (tests/test_posix_host_paths.py), so pin the host or the Linux leg tests nothing of this
+    module (CI run 39145224156). Pinned, both CI legs exercise the Windows branch, mutation twins included."""
+    monkeypatch.setattr(paths, "POSIX_HOST", False)
+
+
 def w(s):
     """Write a Windows path with '/' in the test source and get backslashes, so no escape can eat one."""
     return s.replace("/", BS)

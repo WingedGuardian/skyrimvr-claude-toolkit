@@ -384,7 +384,10 @@ def test_corpus_has_rows_in_both_layouts():
 
 
 @pytest.mark.parametrize("cid,layout,cmd,decision,text", CORPUS, ids=[c[0] for c in CORPUS])
-def test_port_matches_recorded_bash_verdict(tmp_path, cid, layout, cmd, decision, text):
+def test_port_matches_recorded_bash_verdict(tmp_path, monkeypatch, cid, layout, cmd, decision, text):
+    # Every row was recorded from the bash hooks under Git Bash on Windows, where `/c/...` is drive C:. A POSIX host
+    # reads it natively since 4ebdd1c, so pin the recording host (CI run 39145224156: dialect-msys-1/9 flipped).
+    monkeypatch.setattr(paths, "POSIX_HOST", False)
     r = paths.roots("/x/install", "", LAYOUT_ENV[layout])
     v = shell_rules.decide(cmd, r, audit.Audit(str(tmp_path)), shell="bash")      # every row is a Bash tool payload
     if v.decision == "allow" and v.context:

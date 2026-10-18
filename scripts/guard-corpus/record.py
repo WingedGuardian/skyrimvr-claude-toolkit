@@ -70,6 +70,7 @@ ROOT_LEVEL_LAYOUTS = ("declared-root", "malformed-root", "touched-root")
 # drive-letter cwd/operand that no POSIX shell can be handed. Off Windows they are skipped by id, never by a rule:
 # each one's POSIX re-spelling (a /work cwd, /tmp operands) was fired on a simulated POSIX host and decided as intended.
 _DRIVE_CWD = "a drive-letter cwd/operand (C:/work, C:\\Temp, C:Data, Set-Location C:) exists only on Windows"
+_MSYS_ALIAS = "a Git Bash drive alias (/c/...) names drive C: only on Windows; on a POSIX host /c is an ordinary folder"
 WINDOWS_ONLY = {
     "p6t11-raw-icacls-remove": "icacls is a Windows program",
     "p6t11-raw-icacls-exe-reset": "icacls.exe is a Windows program",
@@ -82,6 +83,25 @@ WINDOWS_ONLY = {
     "p5a-m5-pwsh-drive-relative-operand": _DRIVE_CWD,
     "p5a-m5-pwsh-set-location-drive": _DRIVE_CWD,
     "p5f-pipe-copy-onto-save": _DRIVE_CWD,
+    # CI run 39145224156: since 4ebdd1c a POSIX host reads `/c/...` natively, so a Git Bash drive alias names drive C:
+    # only on Windows. The POSIX re-spellings of these rows are tests/test_posix_host_paths.py
+    # ::test_a_bash_delete_in_a_posix_install_is_denied_on_a_posix_host (same decision, same rule).
+    "rt-a-cd-bslash-space": _MSYS_ALIAS,
+    "rt-a-pushd-bslash-space": _MSYS_ALIAS,
+    "rt-a-rm-bslash-space-operand": _MSYS_ALIAS,
+    "rt-a-mklink-then-delete": "mklink is a Windows program, and " + _MSYS_ALIAS,
+    "t07-glob-middle": _MSYS_ALIAS,
+    "v4-store-sup-dialect-msys-0": _MSYS_ALIAS,
+    "v4-store-sup-dialect-msys-2": _MSYS_ALIAS,
+    "v4-store-sup-dialect-msys-3": _MSYS_ALIAS,
+    "v4-store-sup-dialect-msys-4": _MSYS_ALIAS,
+    "v4-store-sup-dialect-msys-5": _MSYS_ALIAS,
+    "v4-store-sup-dialect-msys-6": _MSYS_ALIAS,
+    "v4-store-sup-dialect-msys-7": _MSYS_ALIAS,
+    "v4-store-sup-testhooks-bfcd9608e7": _MSYS_ALIAS,
+    # Legacy (expected.jsonl) rows, frozen from the bash hooks: same reason.
+    "dialect-msys-1": _MSYS_ALIAS,
+    "dialect-msys-9": _MSYS_ALIAS,
 }
 
 

@@ -209,6 +209,11 @@ def test_protect_files_notes_inside_the_declared_install(project):
     ("bash tools/resaver-cli.sh reset-havok save.ess", "allow", "the dry-run does not"),
 ])
 def test_protect_bash_decides(project, command, expected, why):
+    # A Git Bash drive alias exists only on Windows; on a POSIX host `/c/...` is an ordinary folder (4ebdd1c, CI run
+    # 39145224156; the POSIX install delete is tests/test_posix_host_paths.py). Skipped here, not in the row: the
+    # guard-corpus recorder reads these rows as tuple literals.
+    if why == "the MSYS form" and sys.platform != "win32":
+        pytest.skip("Git Bash drive alias: Windows only")
     got, _ = fire(project, "protect-bash.sh", cmd(command))
     assert got == expected, f"{why}: {command}"
 
