@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`housekeep` and a retention policy (`docs/RETENTION.md`):** `report` / `plan` / `apply` for agent output. Byte-identical copies of live files and build intermediates go to the Recycle Bin, duplicates become read-only hard links, per-launch logs are gzipped after 7 days (round trip verified first) and recycled after 90, and repeated 3.x snapshot folders are recycled. Saves, `*backup*` folders, git-tracked files, files a project doc links to and task folders written in the last 48 hours are never touched; `apply` re-hashes every file and refuses anything that changed since the plan. The policy also says why `cleanupPeriodDays` belongs in user settings and never in a project's. Shared with the X4 toolkit (pinned by `tests/test_retention_policy.py`).
+
 - Optional House Carl 2.0.5 integration for Claude and Codex: pinned, hash-verified upstream download, isolated MCP client and one shared CLI/MCP gateway. Wrye-managed asterisk order and native MO2 profile inputs are independent of deployment. Ordinary plugin edits use verified permanent backups, private staging, independent xEdit checks, atomic publication, transaction receipts and conflict-aware restore. New patches remain inactive. Compaction, merging, runtime FormIDs, native pairing and facegen provenance remain unavailable. See `docs/housecarl.md` for setup and qualification limits.
 
 ## v4.0.0 — 2026-10-08

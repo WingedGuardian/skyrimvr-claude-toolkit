@@ -263,6 +263,7 @@ Coverage and gaps: `docs/guard-coverage.md`.
 - **Delete to the Recycle Bin, never permanently.** Windows: `Microsoft.VisualBasic.FileIO.FileSystem`
   `DeleteFile`/`DeleteDirectory` with `SendToRecycleBin`, not `rm`/`Remove-Item`. A permanent delete
   needs the user's OK; a tool's own temp files are exempt. The guard judges a Recycle-Bin delete like any delete.
+- Retention: `docs/RETENTION.md`, `tools/housekeep.py`. `cleanupPeriodDays`: user settings only.
 - **Never push CPU, RAM, free disk, disk I/O or GPU past 80% of the machine**, counting what already
   runs (games, other sessions). Measure first; if it won't fit, wait, shrink or ask. Stress tests: never
   one worker per core, idle priority, time-boxed.

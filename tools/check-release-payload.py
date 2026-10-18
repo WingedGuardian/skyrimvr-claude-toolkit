@@ -80,6 +80,7 @@ CORE_REQUIRED = (
     "tools/skse-load-status.py",
     "tools/archive-triage.py",
     "tools/mirror-launch-logs.py",
+    "tools/housekeep.py",
     "tools/mod-install.py",
     "tools/nexus.sh",
     "tools/nexus-render.py",

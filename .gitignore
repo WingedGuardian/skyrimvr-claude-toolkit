@@ -1,5 +1,6 @@
 # User-specific settings (contains local paths)
 .claude/settings.local.json
+.claude/housekeep.json
 
 # Backups (generated at runtime)
 .claude/backups/
