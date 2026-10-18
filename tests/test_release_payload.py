@@ -189,6 +189,7 @@ BREAKS = {
     "archive-triage-missing": (lambda r: (r / "tools" / "archive-triage.py").unlink(), "tools/archive-triage.py present"),
     "mirror-logs-missing": (lambda r: (r / "tools" / "mirror-launch-logs.py").unlink(),
                             "tools/mirror-launch-logs.py present"),
+    "housekeep-missing": (lambda r: (r / "tools" / "housekeep.py").unlink(), "tools/housekeep.py present"),
     "mod-install-missing": (lambda r: (r / "tools" / "mod-install.py").unlink(), "tools/mod-install.py present"),
     "nexus-sh-missing": (lambda r: (r / "tools" / "nexus.sh").unlink(), "tools/nexus.sh present"),
     "nexus-render-missing": (lambda r: (r / "tools" / "nexus-render.py").unlink(), "tools/nexus-render.py present"),

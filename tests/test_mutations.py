@@ -1412,6 +1412,43 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         id="mirror-logs-duplicate-sources",
     ),
 
+    # --- housekeep ----------------------------------------------------------
+    *[pytest.param("tools/housekeep.py", anchor, repl, "tests/test_housekeep.py::" + test, id="housekeep-" + mid)
+      for mid, anchor, repl, test in [
+          # A save copy loses its Forever status: a byte-identical .ess fixture would be recycled.
+          ("save-not-protected", '            return "save"', "            pass",
+           "test_saves_and_backup_folders_are_never_planned"),
+          # The doc-linked evidence file becomes fair game.
+          ("links-not-protected", "        if k in self.links:", "        if False:",
+           "test_a_file_a_project_doc_links_to_is_never_planned"),
+          # A git-tracked file becomes fair game.
+          ("tracked-not-protected", "        if k in self.tracked:", "        if False:",
+           "test_a_git_tracked_file_is_never_planned"),
+          # The backup-folder rule judges the root's own ancestors: an install under ".../backups/" plans nothing.
+          ("backup-rule-whole-path", '        if not rel.startswith(".."):', "        if False:",
+           "test_a_root_that_sits_under_a_backups_folder_is_not_all_protected"),
+          # Another session's live task folder is planned like an idle one.
+          ("activity-gate-off", '                out.append((p, "active" if newest_mtime(p) > cutoff else "idle"))',
+           '                out.append((p, "idle"))', "test_an_active_task_folder_is_skipped_whole"),
+          # A loose file in a root -- a service's append-only log -- becomes a candidate (read-only breaks it).
+          ("loose-files-planned", '                out.append((p, "loose"))', '                out.append((p, "idle"))',
+           "test_a_loose_file_in_a_root_is_never_planned"),
+          # apply trusts the plan: a file changed since planning is still recycled.
+          ("apply-skips-hash-recheck",
+           '        if p.stat().st_size != action["bytes"] or blake(p) != action["hash"]:', "        if False:",
+           "test_apply_refuses_a_file_changed_since_the_plan"),
+          # apply recycles a fixture after the live file moved on -- now the only copy of those bytes.
+          ("apply-skips-live-recheck",
+           '        if not Path(action["live"]).is_file() or memo.hash(action["live"]) != action["hash"]:',
+           "        if False:", "test_apply_refuses_when_the_live_file_changed"),
+          # A live database counts as a reference copy: its snapshots are recycled and lost at its next write.
+          ("state-file-as-reference", "                if os.path.splitext(f)[1].lower() in state:",
+           "                if False:", "test_a_snapshot_of_a_live_database_is_not_recreatable_but_still_deduplicated"),
+          # A gzip that does not reproduce the log still sends the original to the bin.
+          ("gzip-no-round-trip", '    if d.hexdigest() != action["hash"]:', "    if False:",
+           "test_a_gzip_that_does_not_round_trip_keeps_the_original"),
+      ]],
+
     # --- what the v3.9 release review found ---------------------------------
     # Put back the single-character separator class. Doubled separators name the same
     # directory and are the canonical Python/PowerShell spelling, and every one of them
