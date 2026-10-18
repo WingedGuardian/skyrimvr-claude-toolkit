@@ -532,7 +532,13 @@ def test_the_registry_covers_the_manual_audit_floor():
     assert set(ta.AUDIT_FLOOR) <= names
     assert len(names) == len(ta.REGISTRY)
     for spec in ta.REGISTRY:
-        assert spec.get("upstream"), spec["name"]
+        commit_sources = [args for check, args in spec.get("checks", []) if check == "commit_package"]
+        if not spec.get("upstream"):
+            assert len(commit_sources) == 1, spec["name"]
+            source = commit_sources[0]
+            assert __import__("re").fullmatch(r"[\w.-]+/[\w.-]+", source.get("repo", "")), spec["name"]
+            assert source.get("package") and len(source.get("version_sites", [])) >= 2, spec["name"]
+            assert spec.get("pins"), spec["name"]
         for check, _args in spec.get("checks", []):
             assert check in ta.CHECKS
 
@@ -547,8 +553,13 @@ def test_the_registry_reads_pins_from_the_repo_never_from_itself():
 def test_the_real_tree_declares_readable_pin_sites():
     """On this tree every declared pin site resolves (a reworded doc fails here first, not at release time)."""
     repo = ta.Repo(REPO)
-    unread = [(s["name"], site[1]) for s in ta.REGISTRY for site in s.get("pins", []) + s.get("tag_pins", [])
-              if ta.read_pin_site(repo, site)[1] is None]
+    unread = []
+    for spec in ta.REGISTRY:
+        sites = spec.get("pins", []) + spec.get("tag_pins", [])
+        for check, args in spec.get("checks", []):
+            if check == "commit_package":
+                sites += args["version_sites"]
+        unread.extend((spec["name"], site[1]) for site in sites if ta.read_pin_site(repo, site)[1] is None)
     assert unread == [], unread
 
 
@@ -1022,3 +1033,82 @@ def test_the_pinned_git_installer_hash_is_the_one_github_publishes(tmp_path, sha
     rows, _code = audit(repo, cache, ["Git for Windows"])
     assert [r.status for r in rows if r.check == "pinned hash"] == [want], [r.as_dict() for r in rows]
     assert [r.status for r in rows if r.check == "version"] == [ta.OK], [r.as_dict() for r in rows]
+
+
+# Commit-published xeditlib has a package version, not necessarily a matching release/tag.
+XEDIT_COMMIT = "1" * 40
+XEDIT_URL = "https://raw.githubusercontent.com/WingedGuardian/xeditlib/" + XEDIT_COMMIT + "/package.json"
+
+
+def xedit_repo(tmp_path, *, version="1.0.2", documentation=True, extra_doc="", hint=None):
+    url = "https://codeload.github.com/WingedGuardian/xeditlib/tar.gz/" + XEDIT_COMMIT
+    files = {
+        "package.json": json.dumps({"optionalDependencies": {"xeditlib": url}}),
+        "package-lock.json": json.dumps({"packages": {"node_modules/xeditlib": {
+            "resolved": url, "version": version}}}),
+    }
+    if documentation:
+        files["docs/installing-tools.md"] = "xeditlib v1.0.2 = commit `" + XEDIT_COMMIT + "`\n" + extra_doc
+    if hint:
+        files["setup.sh"] = hint
+    return make_repo(tmp_path, files)
+
+
+def xedit_cache(tmp_path, *, status=200, body=None):
+    if body is None:
+        body = b'{"name":"xeditlib","version":"1.0.2"}'
+    # No tag/release response is supplied: a regression must not silently need one.
+    cache = tmp_path / "cache"
+    ta.Fetcher(cache, offline=True, env={}).put(XEDIT_URL, status, body)
+    return cache
+
+
+def test_xeditlib_commit_package_does_not_require_a_matching_git_tag(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path), xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 0, [r.as_dict() for r in rows]
+    assert {r.check for r in rows} == {"install refs", "commit package"}
+    assert any(r.upstream == "1.0.2" and r.status == ta.OK for r in rows)
+
+
+def test_xeditlib_missing_commit_package_is_drift(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path), xedit_cache(tmp_path, status=404, body=b"missing"), ["xeditlib"])
+    assert code == 1 and any("absent at the pinned" in r.detail for r in by(rows, ta.DRIFT))
+
+
+@pytest.mark.parametrize("body", [b"not JSON", b"[]", b'{"name":"xeditlib"}'])
+def test_xeditlib_unreadable_commit_metadata_is_unchecked(tmp_path, body):
+    rows, code = audit(xedit_repo(tmp_path), xedit_cache(tmp_path, body=body), ["xeditlib"])
+    assert code == 2 and by(rows, ta.UNCHECKED), [r.as_dict() for r in rows]
+
+
+def test_xeditlib_wrong_upstream_package_is_drift(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path), xedit_cache(tmp_path, body=b'{"name":"other","version":"1.0.2"}'), ["xeditlib"])
+    assert code == 1 and any("package name differs" in r.detail for r in by(rows, ta.DRIFT))
+
+
+def test_xeditlib_locked_package_version_must_match_the_commit(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path, version="1.0.1"), xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 1 and any("package-lock.json" in r.detail for r in by(rows, ta.DRIFT))
+
+
+def test_xeditlib_missing_documented_package_version_is_unchecked(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path, documentation=False), xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 2 and any("docs/installing-tools.md" in r.detail for r in by(rows, ta.UNCHECKED))
+
+
+def test_xeditlib_conflicting_documented_versions_are_drift(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path, extra_doc="xeditlib v1.0.1 = commit `" + XEDIT_COMMIT + "`"),
+                       xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 1 and any("disagrees with itself" in r.detail for r in by(rows, ta.DRIFT))
+
+
+def test_xeditlib_setup_commit_hint_without_backticks_is_checked(tmp_path):
+    hint = 'echo "xeditlib v1.0.1 = commit 2222222 + koffi 2.15.1"\n'
+    rows, code = audit(xedit_repo(tmp_path, hint=hint), xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 1 and any("setup.sh:1 says 2222222" in r.detail for r in by(rows, ta.DRIFT))
+
+
+def test_xeditlib_audit_does_not_attribute_another_tools_commit_to_xeditlib(tmp_path):
+    hint = 'echo "Ask which tools: xeditlib, AutoMod; AutoMod tag v1.11.2 (commit 2222222)"\n'
+    rows, code = audit(xedit_repo(tmp_path, hint=hint), xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 0, [r.as_dict() for r in rows]

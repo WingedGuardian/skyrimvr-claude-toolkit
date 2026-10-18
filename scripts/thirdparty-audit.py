@@ -4,9 +4,10 @@
     python scripts/thirdparty-audit.py [--repo DIR] [--offline] [--cache-dir DIR] [--max-age HOURS]
                                        [--only NAME[,NAME...]] [--json] [--list]
 
-For every third-party tool, runtime, package, image and CI action the toolkit pins, recommends or
-integrates with, it prints  pinned -> latest upstream  and runs the integration-drift checks that are
-mechanical:
+For third-party tools, runtimes, packages, images and CI actions the toolkit pins, recommends or
+integrates with, it reports pinned -> latest upstream where applicable and runs mechanical integration-drift
+checks. Commit-package integrations verify package metadata at the exact pinned revision; a matching release
+or tag is not required. The checks are:
 
   * pin sites agree       every place that states a pin says the same thing (a declared pin site that
                           cannot be read is COULD NOT CHECK: the prose moved, the registry must follow);
@@ -15,7 +16,7 @@ mechanical:
                           pin file -- what a fresh user gets by following the README must BE the pinned
                           set (Plan 8 reproducibility ruling, item 4). An unpinned install line for a
                           pinned tool is drift too;
-  * pinned version exists the pin is still published upstream (npm / PyPI / NuGet / a git tag);
+  * pinned version exists the pin is still published upstream (npm / PyPI / NuGet / a git tag or commit package);
   * tag -> commit         a tag named next to a commit SHA still points at that SHA (AutoMod, Actions);
   * upstream paths        a documented file the pinned release must ship (a zip member of a release
                           asset, a file at the pinned commit, a nupkg target-framework folder);
@@ -670,14 +671,16 @@ REGISTRY = [
      "checks": [hashes("Caprica")]},
     {"name": "xeditlib", "pins": [("regex", "package.json", r"xeditlib/tar\.gz/(?P<v>[0-9a-f]{40})"),
                                   ("regex", "package-lock.json", r"xeditlib/tar\.gz/(?P<v>[0-9a-f]{40})")],
-     "tag_pins": [("regex", PINNED_DOWNLOADS, r"xeditlib (?P<v>v\d+\.\d+\.\d+) = commit")],
-     "upstream": ("github", "WingedGuardian/xeditlib"),
      "refs": [{"pattern": r"WingedGuardian/xeditlib#(?P<v>[0-9a-f]{40})"},
               {"pattern": r"(?:xeditlib/tar\.gz/|commit `)(?P<v>[0-9a-f]{7,40})", "line": r"xeditlib",
                "compare": "prefix"},
+              {"pattern": r'(?m)^\s*echo "\s*xeditlib\b[^"\n]*?= commit (?P<v>[0-9a-f]{7,40})',
+               "compare": "prefix"},
               {"pattern": r"\bnpm (?:install|i)\b(?P<tail>[^\n`\"']*WingedGuardian/xeditlib[^\n`\"']*)",
                "version": r"xeditlib#(?P<v>[0-9a-f]{40})", "unpinned": "xeditlib install without #<commit>"}],
-     "checks": [("tag_commit", {"repo": "WingedGuardian/xeditlib"})]},
+     "checks": [("commit_package", {"repo": "WingedGuardian/xeditlib", "package": "xeditlib",
+                  "version_sites": [("json", "package-lock.json", ["packages", "node_modules/xeditlib", "version"]),
+                                    ("regex", PINNED_DOWNLOADS, r"xeditlib v(?P<v>\d+\.\d+\.\d+) = commit")]})]},
     {"name": "zEdit", "upstream": ("github", "z-edit/zedit"),
      "not_delivered": "credited only: XEditLib.dll reaches users inside the pinned xeditlib commit, not from zEdit"},
     {"name": "xEdit (SSEEdit)", "upstream": ("github", "TES5Edit/TES5Edit"),
@@ -793,7 +796,7 @@ def dynamic_entries(repo):
             out.append({"name": "package.json", "broken": "package.json is not valid JSON"})
         for name in sorted(deps or {}):
             if re.fullmatch(r"https://codeload\.github\.com/[\w.-]+/[\w.-]+/tar\.gz/[0-9a-f]{40}", deps[name]):
-                continue   # a commit tarball (xeditlib): its registry entry holds the commit and the tag
+                continue   # a commit tarball (xeditlib): its registry entry verifies the commit and package metadata
             out.append({"name": "npm " + name, "npm": name, "spec": deps[name]})
     req = repo.read("requirements.txt")
     if req is not None:
@@ -1039,6 +1042,40 @@ def check_nupkg_tfm(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box)
         rows.append(Row(name, "nupkg tfm", pinned, ",".join(tfms) or "none", DRIFT,
                         "%s %s ships no tools/%s/ (pinned %s %s)" % (pkg, pinned, want, args["runtime"], runtime)))
 
+def check_commit_package(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box):
+    """A commit archive is published independently of releases/tags; verify its actual package metadata."""
+    if not pinned:
+        raise CouldNotCheck("no commit pin")
+    text = gh_raw(f, args["repo"], pinned, "package.json")
+    if text is None:
+        rows.append(Row(name, "commit package", pinned[:12], None, DRIFT,
+                        "package.json is absent at the pinned upstream commit"))
+        return
+    try:
+        package = json.loads(text)
+    except ValueError:
+        raise CouldNotCheck("unparseable package.json at the pinned upstream commit") from None
+    if not isinstance(package, dict) or not isinstance(package.get("version"), str) or not package["version"]:
+        raise CouldNotCheck("package.json has no readable version at the pinned upstream commit")
+    if package.get("name") != args["package"]:
+        rows.append(Row(name, "commit package", pinned[:12], package.get("name"), DRIFT,
+                        "pinned upstream package name differs from " + args["package"]))
+        return
+    failed = False
+    for site in args["version_sites"]:
+        label, version = read_pin_site(repo, site)
+        if version is None:
+            failed = True
+            rows.append(Row(name, "commit package", pinned[:12], package["version"], UNCHECKED,
+                            "package version site unreadable: " + label))
+        elif "disagrees" in label or not same(version, package["version"]):
+            failed = True
+            rows.append(Row(name, "commit package", version, package["version"], DRIFT,
+                            "package version disagrees with the pinned upstream commit: " + label))
+    if not failed:
+        rows.append(Row(name, "commit package", pinned[:12], package["version"], OK,
+                        "published commit package matches the lock and documented version; no Git tag required"))
+
 
 def check_tag_commit(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box):
     if not pinned or not tag_pin:
@@ -1254,7 +1291,7 @@ def check_hashes(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box):
                          "pinned SHA %s... is NOT what upstream has at " % want[:12]) + url))
 
 
-CHECKS = {"hashes": check_hashes, "cli_flags": check_cli_flags, "nupkg_tfm": check_nupkg_tfm, "tag_commit": check_tag_commit,
+CHECKS = {"commit_package": check_commit_package, "hashes": check_hashes, "cli_flags": check_cli_flags, "nupkg_tfm": check_nupkg_tfm, "tag_commit": check_tag_commit,
           "repo_paths": check_repo_paths, "follows_latest": check_follows_latest, "zip_paths": check_zip_paths,
           "upstream_text": check_upstream_text}
 
