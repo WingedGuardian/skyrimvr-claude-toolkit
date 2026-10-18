@@ -20,12 +20,16 @@ import struct
 import sys
 import os
 
-try:
-    import lz4.block
-except ImportError:
-    print("Error: lz4 package required. Install the tested version from the toolkit root with: "
-          "python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-tools.lock", file=sys.stderr)
-    sys.exit(1)
+def _lz4_block():
+    """lz4 is needed only to decompress a save body; header, plugin and malformed-input paths run without it."""
+    try:
+        import lz4.block
+    except ImportError:
+        print("Error: lz4 package required. Install the tested version from the toolkit root with: "
+              "python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-tools.lock",
+              file=sys.stderr)
+        sys.exit(1)
+    return lz4.block
 
 
 def read_save(path):
@@ -63,8 +67,9 @@ def decompress_save(data):
 
         if 1_000_000 < decomp_size < 200_000_000 and abs(remaining - comp_size) < 1000:
             compressed = data[i + 8:i + 8 + comp_size]
+            block = _lz4_block()          # outside the try: a missing lz4 must stop the run, not read as "no block"
             try:
-                decompressed = lz4.block.decompress(compressed, uncompressed_size=decomp_size)
+                decompressed = block.decompress(compressed, uncompressed_size=decomp_size)
                 return data[:i], decompressed, i
             except Exception:
                 continue

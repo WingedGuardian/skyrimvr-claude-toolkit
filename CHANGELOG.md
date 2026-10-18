@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `scripts/read-save.py` needs `lz4` only to decompress a save body. Malformed
+  input now reports its JSON error, and plugin parsing and search helpers load,
+  without the tools lock installed; a save that does need decompression still
+  stops with the install instruction instead of reading as uncompressed.
+
 - Mod-update review establishes the current kept-save, new-game or disposable-test situation and standing user rulings before proposing changes. Read local preferences and current session context; ask only about material facts that remain unknown. Carries the `step0-situation` branch forward without assuming session hooks run on every coding agent.
 
 - Save-approval hook reasons stay within two short lines. The neutral check adds
