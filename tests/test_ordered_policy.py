@@ -17,7 +17,7 @@ from modding_harness import contracts
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="reviewed personal native policy is Windows-specific")
 
 
-@pytest.fixture(params=['original', 'audit'])
+@pytest.fixture(params=['original', 'audit', 'helper-boundary'])
 def ordered(tmp_path, request):
     root, source, bundle = tmp_path / "installed", tmp_path / "source", tmp_path / "review"
     root.mkdir()
@@ -43,7 +43,8 @@ def ordered(tmp_path, request):
     controller.parent.mkdir()
     controller.write_text("raise RuntimeError('inert controller must never execute')\n")
     module = source / "tools/skyguard/local_policy.py"
-    qualified_hash = local_policy.TRANSFER_POLICY_SHA256 if request.param == 'original' else local_policy.AUDIT_POLICY_SHA256
+    qualified_hash = {'original': local_policy.TRANSFER_POLICY_SHA256, 'audit': local_policy.AUDIT_POLICY_SHA256,
+                      'helper-boundary': local_policy.HELPER_BOUNDARY_POLICY_SHA256}[request.param]
     module.write_text(module.read_text().replace(qualified_hash, hashlib.sha256(policy.read_bytes()).hexdigest())
                       .replace(local_policy.CONTROLLED_LOAD_SHA256, hashlib.sha256(controller.read_bytes()).hexdigest()))
     command = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + root.as_posix() + '/.claude/hooks/save-access-entry.ps1"'
