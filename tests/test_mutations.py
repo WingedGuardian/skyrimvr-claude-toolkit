@@ -4266,7 +4266,7 @@ MUTATIONS_FINAL = [
      "        cat \"$CODEX_DEFS\" | grep -qF",
      "tests/test_setup_paths.py::test_a_rerun_from_a_differently_cased_folder_is_not_a_moved_install",
      "setup-moved-install-check-is-case-sensitive"),
-    ("setup.sh", '    echo "Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you."',
+    ("setup.sh", '    echo "Start Codex in the game folder. Subfolder loading is version-dependent: it worked in an isolated"',
      "    :", "tests/test_setup_paths.py::test_setup_tells_the_user_to_start_codex_in_the_game_folder",
      "setup-omits-the-codex-subfolder-warning"),
 ]
@@ -8368,6 +8368,11 @@ _WINDOWS_ONLY_TWINS = {
     "t7-codex-render-only-for-codex":"Codex hooks are rendered on Windows only; off Windows nothing renders them anyway",
     "t7-says-codex-unconfigured": "the Codex NOT CONFIGURED line is the Windows branch; off Windows setup says "
                                   "Codex is Windows-only instead",
+    # CI run 39145224156: the next two survived only on Linux; each is killed on Windows.
+    "setup-omits-the-codex-subfolder-warning": "the Codex start-folder line is printed only where Codex is set up "
+                                               "(Windows); its anchor test skips off Windows",
+    "review-verifier-measured-venv-directory": "winpath is the identity off Windows, so dropping the converted "
+                                               "--allow-prefix changes nothing there",
 }
 assert set(_WINDOWS_ONLY_TWINS) <= {p.id for p in MUTATIONS}, set(_WINDOWS_ONLY_TWINS) - {p.id for p in MUTATIONS}
 MUTATIONS[:] = [
@@ -9002,11 +9007,11 @@ MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test
     ('((sources, "move"), (destinations, "write"))', '((sources, "move"), (destinations, "move"))',
      'tests/test_local_policy.py::test_qualified_transfer_roles_preserve_move_source_and_written_destination',
      'move-destination-is-write'),
-    ('            if (file_operation is None and result.get("op") in ("move", "rename") and\n                    hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256):',
+    ('            if (file_operation is None and result.get("op") in ("move", "rename") and\n                    hashlib.sha256(source).hexdigest() in QUALIFIED_POLICY_SHA256):',
      '            if (file_operation is None and result.get("op") in ("move", "rename") and\n                    True):',
      'tests/test_local_policy.py::test_unqualified_policy_cannot_relabel_its_own_transfer_requirements',
      'transfer-source-qualification'),
-    ('    if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:\n        return plan\n    from modding_harness.dispatch import Mutation',
+    ('    if registered is None or hashlib.sha256(registered[1]).hexdigest() not in QUALIFIED_POLICY_SHA256:\n        return plan\n    from modding_harness.dispatch import Mutation',
      '    if registered is None:\n        return plan\n    from modding_harness.dispatch import Mutation',
      'tests/test_save_profile.py::test_unqualified_policy_cannot_enable_additional_backup_membership',
      'backup-suffix-source-qualification'),
@@ -9030,7 +9035,7 @@ MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test
      '        if (registration(project) != registered or False or',
      'tests/test_controlled_policy.py::test_controlled_dependencies_changed_after_backup_refuse_permission_and_retain_backup[request]',
      'request-recheck'),
-    ('            if result.get("op") in ("controlled-prepare", "controlled-load") and hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256:',
+    ('            if result.get("op") in ("controlled-prepare", "controlled-load") and hashlib.sha256(source).hexdigest() in QUALIFIED_POLICY_SHA256:',
      '            if result.get("op") in ("controlled-prepare", "controlled-load"):',
      'tests/test_controlled_policy.py::test_unqualified_policy_cannot_relabel_controlled_operation',
      'source-qualification'),
@@ -9063,22 +9068,22 @@ MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after,
 
 MUTATIONS += [pytest.param("tools/skyguard/ordered_upgrade.py", before, after, test,
     id="ordered-policy-" + name) for before, after, test, name in (
-    ('    if rollback[local_policy.LEGACY] != local_policy.TRANSFER_POLICY_SHA256:', '    if False:',
-     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[policy]',
+    ('    if rollback[local_policy.LEGACY] not in local_policy.QUALIFIED_POLICY_SHA256:', '    if False:',
+     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[original-policy]',
      'source-qualification'),
     ('    if hashlib.sha256(normalized.encode("utf-8")).hexdigest() != WRAPPER_NORMALIZED_SHA256:', '    if False:',
-     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[wrapper]',
+     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[original-wrapper]',
      'wrapper-qualification'),
     ('        if any(upgrade.json_bytes(group) not in keys for group in merged.get("hooks", {}).get("PreToolUse", [])):',
      '        if False:',
-     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[windows-command]',
+     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[original-windows-command]',
      'complete-native-group'),
     ('    if not required <= candidate.keys():', '    if False:',
-     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[missing-runtime]',
+     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[original-missing-runtime]',
      'complete-runtime'),
     ('    if review["observed_local_files"].get(local_policy.CONFIG) is not None and upgrade.json_bytes(existing) != upgrade.json_bytes(registration):',
      '    if existing and upgrade.json_bytes(existing) != upgrade.json_bytes(registration):',
-     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[empty-registration]',
+     'tests/test_ordered_policy.py::test_unqualified_source_groups_or_partial_runtime_cannot_produce_a_migration[original-empty-registration]',
      'existing-empty-registration'),
 )]
 
@@ -9096,7 +9101,7 @@ MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test
      '        if False:',
      'tests/test_finite_policy.py::test_finite_requirement_change_after_backup_refuses_and_retains_original_bytes',
      'requirement-recheck'),
-    ('    if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:\n        return plan\n    report = inspect_policy(action, project, deadline)\n    requirements = report["requirements"]\n    if report["refusal"] is not None or len(requirements) != 1:',
+    ('    if registered is None or hashlib.sha256(registered[1]).hexdigest() not in QUALIFIED_POLICY_SHA256:\n        return plan\n    report = inspect_policy(action, project, deadline)\n    requirements = report["requirements"]\n    if report["refusal"] is not None or len(requirements) != 1:',
      '    if registered is None:\n        return plan\n    report = inspect_policy(action, project, deadline)\n    requirements = report["requirements"]\n    if report["refusal"] is not None or len(requirements) != 1:',
      'tests/test_finite_policy.py::test_unqualified_policy_cannot_add_finite_shell_scope',
      'source-qualification'),
@@ -9112,7 +9117,7 @@ MUTATIONS += [pytest.param("tools/skyguard/local_policy.py", before, after, test
      '                False):',
      'tests/test_declared_scope.py::test_declared_helper_rechecks_human_evidence_after_preserving_bytes',
      'human-recheck'),
-    ('                                declared=hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256)',
+    ('                                declared=hashlib.sha256(source).hexdigest() in QUALIFIED_POLICY_SHA256)',
      '                                declared=True)',
      'tests/test_declared_scope.py::test_unqualified_policy_cannot_use_a_declared_game_plan',
      'source-qualification'),
@@ -9298,4 +9303,21 @@ MUTATIONS += [
     pytest.param('tools/skyguard/engine.py', 'if not readonly and _state_reject_is_new(project, st.reason):', 'if _state_reject_is_new(project, st.reason):', 'tests/test_approval_preview.py::test_preview_shadow_does_not_write_reject_markers_or_relock[True]', id='approval-preview-reject-marker'),
     pytest.param('tools/skyguard/engine.py', '        if not readonly:\n            _relock_due', '        if False:\n            _relock_due', 'tests/test_approval_preview.py::test_readonly_shadow_does_not_change_normal_relock_path', id='approval-preview-preserve-normal-relock'),
     pytest.param('tools/skyguard/portable.py', 'reason=reason)\n    elif result.preservation == "failed":', 'reason=reason + chr(10) + result.reason)\n    elif result.preservation == "failed":', 'tests/test_approval_preview.py::test_compact_bulk_hook_and_preview_scope_oracle[sp-bash-three]', id='approval-bulk-reason-inline-scope'),
+]
+
+# CI run 39145224156: Windows-only twins defined after _WINDOWS_ONLY_TWINS was applied. Each is killed on Windows.
+_LATE_WINDOWS_ONLY = {
+    "setup-native-python-renderer-path": "$PY_ROOT and $GAME_ROOT_WIN name the same folder off Windows",
+    "setup-native-python-encoding-target": "$PY_ROOT and $GAME_ROOT_WIN name the same folder off Windows",
+}
+_LATE_WINDOWS_ONLY.update({"ordered-policy-" + name: "the reviewed personal-policy upgrade refuses off Windows, so "
+                           "every tests/test_ordered_policy.py anchor skips there" for name in (
+    "source-qualification", "wrapper-qualification", "complete-native-group", "complete-runtime",
+    "existing-empty-registration")})
+assert set(_LATE_WINDOWS_ONLY) <= {p.id for p in MUTATIONS}, set(_LATE_WINDOWS_ONLY) - {p.id for p in MUTATIONS}
+MUTATIONS[:] = [
+    pytest.param(*p.values, id=p.id, marks=tuple(p.marks) + (
+        pytest.mark.skipif(sys.platform != "win32", reason=_LATE_WINDOWS_ONLY[p.id]),))
+    if p.id in _LATE_WINDOWS_ONLY else p
+    for p in MUTATIONS
 ]
