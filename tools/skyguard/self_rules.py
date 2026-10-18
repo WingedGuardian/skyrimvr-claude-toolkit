@@ -149,15 +149,27 @@ class _StoreCache:
             self.keys[key] = canonical(path)
         return self.keys[key]
 
+    def protects(self, path, store, ancestor):
+        """modding_harness.preservation.protects(path, [store], ancestor) on cached keys. The shared core is pinned
+        byte-for-byte, so the comparison is mirrored here; test_cached_store_check_agrees_with_the_shared_core pins
+        the two together."""
+        try:
+            store, resolved = self.canonical(store), self.canonical(path)
+            shared = os.path.commonpath((store, resolved))
+        except ValueError:
+            return False
+        return shared == store or (ancestor and shared == resolved)
+
 
 def save_store_target(abs_path, roots, holder=False, cache=None):
     if roots is not None:
         from modding_harness import workspace
-        from modding_harness.preservation import canonical, protects
+        from modding_harness.preservation import protects
         for root in roots.install_dirs:
-            store = cache.destination(root) if cache is not None else workspace.settings(root)["destination"]
-            if protects(abs_path, [store], ancestor=holder,
-                        resolve=cache.canonical if cache is not None else canonical):
+            if cache is not None:
+                if cache.protects(abs_path, cache.destination(root), holder):
+                    return True
+            elif protects(abs_path, [workspace.settings(root)["destination"]], ancestor=holder):
                 return True
     rel = _rel(abs_path, roots.install_dirs) if roots is not None else None
     if rel is None:

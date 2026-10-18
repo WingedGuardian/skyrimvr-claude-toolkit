@@ -227,6 +227,21 @@ def test_a_many_operand_command_reads_each_store_config_once(monkeypatch):
     assert 0 < len(reads) <= len(_roots().install_dirs), len(reads)
 
 
+@pytest.mark.parametrize("ancestor", [False, True])
+def test_cached_store_check_agrees_with_the_shared_core(tmp_path, ancestor):
+    """_StoreCache.protects mirrors modding_harness.preservation.protects (the shared core is pinned byte-for-byte,
+    so it cannot take the cache): same answer for the store, inside it, its ancestors, a sibling and another drive."""
+    from modding_harness.preservation import protects
+    store = tmp_path / "ws" / ".modding-agent-harness" / "backups" / "saves"
+    store.mkdir(parents=True)
+    paths_ = [store, store / "t" / "x.json", store.parent, tmp_path / "ws", tmp_path, tmp_path / "ws" / "other",
+              tmp_path / "ws" / ".modding-agent-harness" / "backups" / "savesX", "Z:/elsewhere/x" if sys.platform == "win32"
+              else "/elsewhere/x"]
+    cache = self_rules._StoreCache()
+    for p in paths_:
+        assert cache.protects(p, store, ancestor) == protects(p, [store], ancestor=ancestor), (p, ancestor)
+
+
 @pytest.mark.parametrize("route", ["shell", "write"])
 def test_the_ask_branch_works_if_a_later_pricing_flips_the_guard_rule_back(monkeypatch, route):
     """Review M3: the registry holds the priced decision; the `ask` branch must work, not merely exist."""
