@@ -2661,12 +2661,14 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
          '        assert body["permissionDecision"] == "deny", (where, "only deny blocks on Codex", body)',
          "        pass",
          "tests/test_codex_conformance.py::test_the_shape_check_can_fail", "codex-conformance-shape-gate-passes-ask"),
-        # The plugin rule stops covering .esm: a patch heredoc onto Data/Skyrim.esm (a Bash call carrying a
-        # patch) runs. Killed by the shell-patch DERIVED variant of the captured heredoc shape.
+        # Removing .esm must be killed by a call that actually evaluates plugin policy.
+        # The relative captured shell-patch variant now refuses missing execution cwd
+        # before that rule, so it cannot detect this mutation. The absolute .esm write
+        # requires shell.DENY_WRITE_PLUGIN and preserves the original capture shape.
         ("tools/skyguard/targets.py",
          r'''PLUGIN_FILE = r"\.(esp|esm|esl|bsa|ba2)[\s.]*" + STREAM + "$"''',
          r'''PLUGIN_FILE = r"\.(esp|esl|bsa|ba2)[\s.]*" + STREAM + "$"''',
-         "tests/test_codex_conformance.py::test_conformance[derived:0.160.0/codex-PreToolUse-Bash-2:Data/Skyrim.esm]",
+         "tests/test_codex_conformance.py::test_conformance[derived:0.160.0/codex-PreToolUse-Bash-2:absolute-plugin-write]",
          "codex-plugin-rule-misses-esm"),
         # An `ask` loses the text that tells the model the user must run it themselves.
         ("tools/skyguard/adapters/codex.py",
