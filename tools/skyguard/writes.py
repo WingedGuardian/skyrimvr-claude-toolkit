@@ -771,8 +771,15 @@ def unplaced_mutation(command: str, parsed, env: Mapping[str, str]) -> bool:
         code = interpreter_code(e)
         if code:
             base = targets.exec_cwd(e, "", env) or ""
+            try:
+                literal_targets = text_write_targets(code, python_literals=bool(shellparse._PYTHON.fullmatch(e.program)))
+            except ValueError:
+                # An unreadable Python scope cannot prove that every mutation
+                # is absolute. Refuse with the missing-context verdict instead
+                # of losing the engine's answer to an internal exception.
+                return True
             if any(not execution_path_absolute(targets.resolve_literal(w, base, env)) for w in
-                   text_write_targets(code, python_literals=bool(shellparse._PYTHON.fullmatch(e.program)))):
+                   literal_targets):
                 return True
     # .NET static APIs resolve against the process directory, not Set-Location.
     if any(not execution_path_absolute(targets.resolve_literal(w, "", env)) for w in text_write_targets_ps(command)):

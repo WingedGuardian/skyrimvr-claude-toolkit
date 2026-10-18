@@ -146,7 +146,7 @@ follow [installing-tools.md](docs/installing-tools.md) for verification and inst
 
 ### Step 3: Open your agent in the Skyrim folder
 
-Open a terminal in the folder containing your game's executable, then start `claude` or `codex`. For Codex, starting in a subfolder silently skips the project hooks.
+Open a terminal in the folder containing your game's executable, then start `claude` or `codex`. For Codex, follow the startup and live-hook checks in **Using with Codex** below.
 
 Setup accepts `bash setup.sh --agent claude|codex|all|auto`. Choose one value; `auto` is the default and detects agents on PATH, and `both` aliases `all`. An unselected agent keeps its files but is reported NOT CONFIGURED. The optional file lock is off unless you select `--lock`.
 
@@ -486,7 +486,8 @@ and it skips unapproved ones **silently** -- no error, no warning, nothing check
 Skyrim folder, type `/hooks`, and approve the **2 Skyrim toolkit hooks**. Then check with
 `bash tools/hook-canary.sh`. When they run, each Codex session starts with `SKYGUARD: Codex hooks live`.
 
-Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you.
+Start Codex in the game folder. Subfolder loading is version-dependent: it worked in an isolated
+0.162.1 probe. Verify the live banner and canary before relying on hooks.
 
 Approve again when:
 
