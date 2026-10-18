@@ -10,6 +10,8 @@ that repeat the one before. The policy this tool implements is docs/RETENTION.md
             [--only CLASS[,CLASS]]               (skips the scans no listed class needs)
     python tools/housekeep.py apply plan.json     re-check each action, then do exactly those
             [--only CLASS[,CLASS]]               (recreatable, build, link, gzip, launch, snapshot, scratch)
+    python tools/housekeep.py sweep-temp          DELETE the toolkit's own stale temp dirs (see "temp sweep")
+    python tools/housekeep.py session STATE.txt   sweep-temp, then write the session-start disk note to STATE.txt
     --config FILE   default <toolkit>/.claude/housekeep.json (.claude/housekeep.json.example ships)
 
 Two passes, never one: `plan` decides, `apply` re-verifies. An action whose file changed since it was planned
@@ -19,7 +21,7 @@ What it never touches, whatever the config says: saves (.ess/.skse) and anything
 contains "backup"; git-tracked files; every file a project doc links to; and any task folder written to within
 `active_hours` (another session is probably still working there).
 
-Removal goes to the Recycle Bin, never a permanent delete (Windows: Microsoft.VisualBasic SendToRecycleBin).
+Removal goes to the Recycle Bin, never a permanent delete (the one exception: sweep-temp, below) (Windows: Microsoft.VisualBasic SendToRecycleBin).
 The bin frees no disk space until it is emptied; that is the user's call. A file the bin refuses is reported
 FAILED and left in place. Duplicates are not removed at all: they become NTFS hard links to one copy, marked
 read-only so an in-place edit cannot silently change every path at once.
@@ -73,6 +75,16 @@ DEFAULTS = {
     "gzip_after_days": 7,
     "recycle_after_days": 90,
     "free_floor_gib": 0,              # report warns within 20 GiB of it; 0 = no floor
+    # The toolkit's OWN temp dirs: immediate children of the system temp dir whose name starts with one of these.
+    # tests/test_temp_hygiene.py fails when a prefix the code creates is missing here.
+    "temp_prefixes": ["skyrim-harness-", "python-free-path-", "toolkit-nojq-", "toolkit-plugins-",
+                      "toolkit-localappdata-", "toolkit-loadorder-", "toolkit-precedence-", "t11-nohome-",
+                      "p6t11-nohome-", "p6t12-nohome-", "p6fixA-nohome-", "p6fixA-i1-", "p6fixA-b1-",
+                      "hc-xedit-", "modinst_"],
+    "temp_after_hours": 24,           # nothing in the dir or its direct children newer than this
+    "sweep_every_hours": 6,           # session start launches a sweep at most this often
+    "codex_sessions_warn_gib": 5,     # session note when ~/.codex/sessions passes this
+    "worktrees_warn": 10,             # session note when the toolkit repo has more worktrees than this
 }
 LAUNCH_RE = re.compile(r"^launch-(\d{8})-(\d{6})$")
 STAMP_RE = re.compile(r"^(\d{8})_(\d{6})$")
@@ -617,6 +629,150 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
     return 1 if failed else 0
 
 
+# --------------------------------------------------------------------------- temp sweep
+# Unlike everything above, this DELETES PERMANENTLY. These are the toolkit's own temp dirs, which no person made and
+# nothing reads back after the process that made them has ended. Sending them to the Recycle Bin would only move the
+# bytes (25 GiB of them in one run on 2026-10-18). Three gates stand between a dir and deletion: the name is one the
+# toolkit creates, nothing in it or its direct children changed for temp_after_hours, and the dir can be renamed
+# (Windows refuses that while any process holds a file open inside it).
+
+def _newest_shallow(p: Path) -> float:
+    newest = p.stat().st_mtime
+    try:
+        with os.scandir(p) as it:
+            for e in it:
+                try:
+                    newest = max(newest, e.stat(follow_symlinks=False).st_mtime)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return newest
+
+
+def _in_use(p: Path) -> bool:
+    probe = p.with_name(p.name + ".housekeep-probe")
+    try:
+        os.rename(p, probe)
+    except OSError:
+        return True
+    os.rename(probe, p)
+    return False
+
+
+def _remove_tree(p: Path) -> bool:
+    def unlock(fn, path, _exc):
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            fn(path)
+        except OSError:
+            pass
+    shutil.rmtree(p, onerror=unlock)
+    if p.exists() and os.name == "nt":
+        # A test that strips its own permissions (the ownership tests do) leaves a dir rmtree cannot even list.
+        user = os.environ.get("USERNAME") or os.getlogin()
+        subprocess.run(["icacls", str(p), "/grant", user + ":(OI)(CI)F", "/T", "/C", "/Q"],
+                       capture_output=True, timeout=120)
+        shutil.rmtree(p, onerror=unlock)
+    return not p.exists()
+
+
+def temp_candidates(cfg, temp: Path):
+    """(path, reason) for every dir the sweep may consider: our prefixes, plus pytest's own leftovers."""
+    prefixes = tuple(cfg["temp_prefixes"])
+    try:
+        entries = list(os.scandir(temp))
+    except OSError:
+        return
+    for e in entries:
+        try:
+            if e.is_symlink() or not e.is_dir(follow_symlinks=False):
+                continue
+        except OSError:
+            continue
+        if prefixes and e.name.startswith(prefixes):
+            yield Path(e.path), "toolkit temp"
+        elif e.name.startswith("pytest-of-"):
+            # pytest keeps the newest three runs itself and leaves garbage-* behind when it cannot delete one.
+            try:
+                kids = [k for k in os.scandir(e.path) if k.is_dir(follow_symlinks=False)]
+            except OSError:
+                continue
+            runs = sorted((k for k in kids if re.fullmatch(r"pytest-\d+", k.name)),
+                          key=lambda k: int(k.name.split("-")[1]))
+            for k in runs[:-1]:                        # never the newest: it may belong to a run starting now
+                yield Path(k.path), "old pytest run"
+            for k in kids:
+                if k.name.startswith("garbage-"):
+                    yield Path(k.path), "pytest garbage"
+
+
+def sweep_temp(cfg, temp: Path | None = None, now: float | None = None, remove=_remove_tree) -> dict:
+    temp = Path(temp or tempfile.gettempdir())
+    now = time.time() if now is None else now
+    cutoff = now - cfg["temp_after_hours"] * 3600
+    rows = {"deleted": 0, "kept: changed recently": 0, "kept: in use": 0, "failed": 0}
+    failed = []
+    for p, _why in temp_candidates(cfg, temp):
+        try:
+            if _newest_shallow(p) > cutoff:
+                rows["kept: changed recently"] += 1
+                continue
+        except OSError:
+            continue
+        if _in_use(p):
+            rows["kept: in use"] += 1
+        elif remove(p):
+            rows["deleted"] += 1
+        else:
+            rows["failed"] += 1
+            failed.append(str(p))
+    return {"rows": rows, "failed": failed, "temp": str(temp)}
+
+
+def worktree_count(root: Path) -> int:
+    try:
+        out = subprocess.run(["git", "-C", str(root), "worktree", "list", "--porcelain"], capture_output=True,
+                             text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    return sum(1 for line in out.splitlines() if line.startswith("worktree ")) - 1
+
+
+def session(cfg, state: Path) -> int:
+    """The session-start job: sweep the toolkit's temp dirs, then write a one-line note for the next banner when
+    something needs the user (free space near the floor, Codex sessions or worktrees past their threshold).
+    Runs at most once per sweep_every_hours: the state file's age is the clock."""
+    try:
+        if time.time() - state.stat().st_mtime < cfg["sweep_every_hours"] * 3600:
+            return 0
+    except OSError:
+        pass
+    free_before = shutil.disk_usage(tempfile.gettempdir()).free
+    res = sweep_temp(cfg)
+    notes = []
+    r = res["rows"]
+    if r["deleted"] or r["failed"]:
+        gained = (shutil.disk_usage(tempfile.gettempdir()).free - free_before) / GIB
+        notes.append("removed {} leftover temp dir(s), free space {:+.1f} GiB{}".format(
+            r["deleted"], gained, "; {} could not be removed".format(r["failed"]) if r["failed"] else ""))
+    home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
+    codex = dir_size(home / ".codex" / "sessions") / GIB
+    if codex > cfg["codex_sessions_warn_gib"]:
+        notes.append("~/.codex/sessions is {:.1f} GiB and Codex does not prune it".format(codex))
+    wt = worktree_count(cfg["root"])
+    if wt > cfg["worktrees_warn"]:
+        notes.append("{} git worktrees (git worktree list)".format(wt))
+    floor = cfg["free_floor_gib"]
+    free = shutil.disk_usage(str(cfg["root"])).free / GIB
+    if floor and free - floor < 20:
+        notes.append("{:.0f} GiB free, floor {} GiB".format(free, floor))
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(("DISK: " + "; ".join(notes) + " -- python tools/housekeep.py report\n") if notes else "",
+                     encoding="utf-8")
+    return 1 if r["failed"] else 0
+
+
 # --------------------------------------------------------------------------- report
 
 def dir_size(p: Path) -> int:
@@ -679,6 +835,17 @@ def main(argv) -> int:
     cmd = args.pop(0) if args else "report"
     if cmd == "report" and not args:
         return report(cfg)
+    if cmd == "sweep-temp" and not args:
+        res = sweep_temp(cfg)
+        rows = res["rows"]
+        print("toolkit temp dirs under {}: {} considered".format(res["temp"], sum(rows.values())))
+        for k, v in rows.items():                     # every row prints, zeros included; they sum to the total
+            print("  {:>6}  {}".format(v, k))
+        for p in res["failed"]:
+            print("  FAILED   " + p)
+        return 1 if res["failed"] else 0
+    if cmd == "session" and len(args) == 1:
+        return session(cfg, Path(args[0]))
     only = None
     if "--only" in args:
         i = args.index("--only")

@@ -10,6 +10,16 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+// Every temp dir a test makes is removed when node exits. Without this each run left 4-80 folders in the
+// system temp dir, and 14,018 had built up by 2026-10-18.
+const scratchDirs = [];
+process.on('exit', () => { for (const d of scratchDirs) fs.rmSync(d, { recursive: true, force: true }); });
+function scratch(prefix) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  scratchDirs.push(d);
+  return d;
+}
+
 const { defaultPluginsTxt } = require('./active-plugins');
 
 const fixture = JSON.parse(fs.readFileSync(
@@ -24,7 +34,7 @@ function norm(p) {
 
 for (const c of fixture.cases) {
   test('plugins.txt precedence: ' + c.id, () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-precedence-'));
+    const tmp = scratch('toolkit-precedence-');
     const t = tmp.replace(/\\/g, '/');
     const sub = s => s.split('{tmp}').join(t);
     const local = path.join(tmp, 'local');

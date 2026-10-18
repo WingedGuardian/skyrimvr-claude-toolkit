@@ -1412,9 +1412,39 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         id="mirror-logs-duplicate-sources",
     ),
 
+    # --- temp hygiene: a leaked test temp dir comes back ----------------------
+    pytest.param("tests/test_skyguard_mcp.py", 'NOHOME = scratch_dir("t11-nohome-")',
+                 'import tempfile; NOHOME = tempfile.mkdtemp(prefix="t11-nohome-")',
+                 "tests/test_temp_hygiene.py::test_no_python_test_makes_an_uncleaned_temp_dir_at_import",
+                 id="temp-hygiene-module-mkdtemp"),
+    pytest.param("tools/xelib/active-plugins.test.js", "const dir = scratch('toolkit-plugins-');",
+                 "const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-plugins-'));",
+                 "tests/test_temp_hygiene.py::test_no_node_test_makes_a_temp_dir_outside_its_cleanup_helper",
+                 id="temp-hygiene-node-mkdtemp"),
+    # --- session-start disk note: each agent's path, and the no-sweep-under-tests guard -------------------------
+    pytest.param("tools/skyguard/run.py", '_session_snapshot(a.project, req.source, audit)\n        out = _disk_note(',
+                 '_session_snapshot(a.project, req.source, audit)\n        _ = _disk_note(',
+                 "tests/test_session_disk_note.py::test_the_codex_session_start_shows_the_disk_note",
+                 id="disk-note-codex"),
+    pytest.param("tools/skyguard/run.py", 'p["source"], audit)\n        out = _disk_note(',
+                 'p["source"], audit)\n        _ = _disk_note(',
+                 "tests/test_session_disk_note.py::test_the_claude_session_start_shows_the_disk_note",
+                 id="disk-note-claude"),
+    pytest.param("tools/skyguard/run.py", '    if tool.is_file() and not in_test:', '    if tool.is_file():',
+                 "tests/test_session_disk_note.py::test_a_sweep_is_launched_detached_outside_tests_and_never_inside_them",
+                 id="disk-note-sweeps-under-tests"),
     # --- housekeep ----------------------------------------------------------
     *[pytest.param("tools/housekeep.py", anchor, repl, "tests/test_housekeep.py::" + test, id="housekeep-" + mid)
       for mid, anchor, repl, test in [
+          # The sweep's permanent delete: each gate, broken alone.
+          ("sweep-any-name", "        if prefixes and e.name.startswith(prefixes):", "        if True:",
+           "test_the_sweep_deletes_a_stale_toolkit_temp_dir_and_keeps_a_foreign_one"),
+          ("sweep-no-age-gate", "            if _newest_shallow(p) > cutoff:", "            if False:",
+           "test_the_sweep_keeps_a_dir_whose_child_changed_recently"),
+          ("sweep-no-in-use-probe", "        if _in_use(p):", "        if False:",
+           "test_the_sweep_keeps_a_dir_a_process_has_a_file_open_in"),
+          ("sweep-newest-pytest-run", "            for k in runs[:-1]:", "            for k in runs:",
+           "test_the_sweep_keeps_the_newest_pytest_run_and_removes_older_runs_and_garbage"),
           # A save copy loses its Forever status: a byte-identical .ess fixture would be recycled.
           ("save-not-protected", '            return "save"', "            pass",
            "test_saves_and_backup_folders_are_never_planned"),
@@ -4514,6 +4544,10 @@ def test_guard_actually_bites(tmp_path, relpath, find, replace, test_id):
         f"--- pytest output ---\n{result.stdout[-2000:]}"
     )
     assert failed and failed <= passed, "mutant must fail a testcase that actually passed in its pristine leg"
+    # Each copy is a whole toolkit. pytest keeps every tmp_path until a LATER run rotates it out, so one local run
+    # held 3,805 copies (~25 GiB) on 2026-10-18. A killed mutation leaves its copy behind, and so does a failing one,
+    # which is kept on purpose for debugging.
+    shutil.rmtree(work, ignore_errors=True)
 
 
 # Merge of Plans 4+5 (2026-10-04). One entry per guard the merge itself added; each names the test that must go red.

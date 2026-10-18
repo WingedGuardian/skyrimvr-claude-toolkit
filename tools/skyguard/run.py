@@ -113,6 +113,33 @@ def _session_snapshot(project, source, audit) -> None:
         audit.log("snapshot-before-tool", "FAILED", "the session-start snapshot raised -- no snapshot was taken")
 
 
+DISK_NOTE = Path(".claude") / "diag" / "housekeep-session.txt"
+
+
+def _disk_note(project) -> str:
+    """The previous session-start sweep's note (empty unless something needs the user), and a fresh sweep launched
+    DETACHED: deleting a few thousand temp dirs can take minutes, and the engine budget is seconds. housekeep
+    throttles itself (sweep_every_hours). Never raises: disk housekeeping must not cost the session its banner."""
+    state = Path(project) / DISK_NOTE
+    try:
+        note = state.read_text(encoding="utf-8").strip()
+    except OSError:
+        note = ""
+    tool = Path(__file__).resolve().parents[1] / "housekeep.py"
+    # A test suite runs this hook hundreds of times: none of them may launch a real sweep of the real temp dir.
+    in_test = os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("SKYGUARD_SWEEP_IN_TESTS")
+    if tool.is_file() and not in_test:
+        try:
+            import subprocess
+            flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0   # detached, new group, no window
+            subprocess.Popen([sys.executable, "-B", str(tool), "session", str(state)], cwd=str(project),
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             close_fds=True, creationflags=flags, start_new_session=os.name != "nt")
+        except Exception:
+            pass
+    return note + "\n" if note else ""
+
+
 def _recovery_deadline() -> float:
     """Task 15: a recovery snapshot or a save backup ends this far before the engine budget's watchdog."""
     return _T0 + _engine_budget() - SNAPSHOT_MARGIN
@@ -175,6 +202,7 @@ def _codex(a, raw: str) -> int:
         _session_line(a, req.session_id, source=req.source, transcript=req.transcript_path)
         out, status, code = session.run_status(a.project, req.source, a.bash, audit, root=a.root_win or a.root)
         _session_snapshot(a.project, req.source, audit)
+        out = _disk_note(a.project) + out
         _telemetry(a, Verdict("allow", "", "", status, code))
         _emit("SKYGUARD-OK\n" + codex.session_body(out))
         return 0
@@ -321,6 +349,7 @@ def main(argv=None) -> int:
         out, status, code = session.run_status(a.project, "" if p["empty"] else p["source"], a.bash, audit,
                                               root=a.root_win or a.root)
         _session_snapshot(a.project, "" if p["empty"] else p["source"], audit)
+        out = _disk_note(a.project) + out
         _telemetry(a, Verdict(status=status, code=code))
         session.export_env(p["session_id"], "claude")   # later Bash calls get SKYGUARD_SESSION_ID (Task 10)
         _emit(out)

@@ -9,11 +9,10 @@ without a lift the call is refused exactly as strictly as before (the decoy's de
 """
 import json
 import sys
-import tempfile
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, scratch_dir
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, codes, engine, paths, shell_rules, state  # noqa: E402
@@ -21,7 +20,7 @@ from skyguard.adapters import codex  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
 
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
-NOHOME = tempfile.mkdtemp(prefix="p6fixA-nohome-")
+NOHOME = scratch_dir("p6fixA-nohome-")
 ENV0 = {"USERPROFILE": NOHOME}
 H = 3600.0
 NOW = 1_800_000_000.0

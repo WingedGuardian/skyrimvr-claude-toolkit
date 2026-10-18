@@ -16,11 +16,10 @@ import json
 import shlex
 import shutil
 import sys
-import tempfile
 
 import pytest
 
-from conftest import REPO, make_game, run_setup
+from conftest import REPO, make_game, run_setup, scratch_dir
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, codes, codex_rules, engine, paths, rules, self_rules, session, shell_rules, state  # noqa: E402
@@ -30,7 +29,7 @@ from skyguard.verdict import Verdict  # noqa: E402
 
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
 SHELL = {"Bash": "bash", "PowerShell": "powershell"}
-NOHOME = tempfile.mkdtemp(prefix="p6t12-nohome-")
+NOHOME = scratch_dir("p6t12-nohome-")
 ENV0 = {"USERPROFILE": NOHOME, "HOME": NOHOME}
 SELF_IDS = ("S-SELF-STATE", "S-SELF-GUARD", "W-SELF-STATE", "W-SELF-GUARD")
 

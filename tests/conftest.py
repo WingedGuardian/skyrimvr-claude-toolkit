@@ -118,6 +118,19 @@ def copy_repo(dest: Path) -> Path:
     return dest
 
 
+def scratch_dir(prefix: str) -> str:
+    """A module-level temp dir that is removed when the process exits.
+
+    Bare tempfile.mkdtemp at import leaked one directory per pytest process: 14,018 of them had built up
+    in %TEMP% by 2026-10-18, because the mutation gate starts a pytest per mutation.
+    """
+    import atexit
+    import tempfile
+    root = tempfile.mkdtemp(prefix=prefix)
+    atexit.register(shutil.rmtree, root, True)
+    return root
+
+
 def make_game(tmp_path: Path, name: str = "game", exe: str = "SkyrimVR.exe") -> Path:
     """A toolkit copy plus a stubbed executable.
 
