@@ -35,23 +35,11 @@ def evidence_root(repo):
     raise SystemExit("Could not check: no writable evidence directory")
 
 
-EVIDENCE_KEEP = 10
-
-
-def prune_evidence(root, keep=EVIDENCE_KEEP):
-    """Keep the newest `keep` harness-* evidence folders. Every run adds one and nothing removed them: 117 MB in one
-    checkout by 2026-10-18, repeated in every worktree."""
-    runs = sorted((p for p in Path(root).glob("harness-*") if p.is_dir()), key=lambda p: p.stat().st_mtime)
-    for old in runs[:-keep] if keep else runs:
-        shutil.rmtree(old, ignore_errors=True)
-
-
 def main():
     repo = Path(__file__).resolve().parents[1]
     root = evidence_root(repo)
     if root != repo / ".pytest_cache":
         print("Repository not writable; evidence goes to", root, flush=True)
-    prune_evidence(root)
     work = Path(tempfile.mkdtemp(prefix="harness-", dir=root))
     binary = work / "bin"
     binary.mkdir()

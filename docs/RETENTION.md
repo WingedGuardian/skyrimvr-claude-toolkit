@@ -19,7 +19,7 @@ policy; `tools/housekeep.py` implements the parts a tool can.
 | **Build output** | Compiler intermediates inside build folders (`.obj .pch .lib .ilk .iobj .ipdb .tlog .idb`) | Removed once idle. Binaries and debug symbols (`.dll .exe .pdb`) are kept. |
 | **Duplicate** | The same bytes at several agent-output paths | Stored once: hard links to one read-only copy. Every path keeps working. |
 | **Rolling** | Per-launch log captures, snapshot folders, scratch test beds | Compressed after 7 days, removed after 90; a snapshot that repeats the one before is removed; a scratch bed is removed by name when its task is done. |
-| **Toolkit temp** | Directories the toolkit's own code and tests make in the system temp dir, and pytest's old runs | Deleted permanently by the session-start sweep once nothing in them changed for 24 hours and no process holds a file open inside. |
+| **Toolkit temp** | Directories the toolkit's own code and tests make in the system temp dir, and pytest's old runs | Recycled by the session-start sweep once nothing in them changed for 24 hours and no process holds a file open inside. |
 
 ### The toolkit cleans up after itself
 
@@ -27,11 +27,12 @@ Measured on one machine on 2026-10-18: one day of local test runs left about 25 
 temp dir, and 14,018 small directories from earlier runs had built up since August. None of it was ever read
 again. So:
 
-1. **Code and tests remove what they create.** A temp dir is made with a cleanup registered at the moment it is
-   created, never "deleted at the end" where a crash skips it. A test enforces it, and every prefix the code
-   creates must be one the sweep knows.
-2. **Session start sweeps the leftovers**, in the background, at most every 6 hours. These are the one class
-   deleted permanently instead of recycled: no person made them, and recycling would only move the bytes.
+1. **Code and tests remove what they create, in the same run.** A temp dir is made with a cleanup registered at
+   the moment it is created, never "deleted at the end" where a crash skips it. This is the only deletion that
+   bypasses the Recycle Bin: a process removing scratch it made itself during that run. A test enforces it,
+   and every prefix the code creates must be one the sweep knows.
+2. **Session start sweeps the leftovers** of earlier runs (a crash, a killed job) to the Recycle Bin, in the
+   background, at most every 6 hours.
 3. **Session start says what it cannot fix**: free space near the floor, an agent's session store past its
    threshold, a pile of git worktrees. One line, only when there is something to say.
 4. **Full test suites run in CI, not on the user's machine.** Locally: the tests for the files that changed.
@@ -40,8 +41,9 @@ again. So:
 
 1. **Report, plan, apply -- never one step.** The plan records each file's hash; apply re-checks it and refuses
    anything that changed.
-2. **Recycle Bin (or Trash), never a permanent delete** -- except the toolkit's own temp (above). The bin frees
-   nothing until the user empties it; that is their decision, and so is any other permanent delete.
+2. **Recycle Bin (or Trash), never a permanent delete** -- except same-run scratch (above). An item too big for
+   the bin gets the system's own "delete permanently?" prompt, and stays where it is unless the user says yes.
+   The bin frees nothing until the user empties it; that is their decision.
 3. **Leave active work alone.** A task folder written to in the last 48 hours belongs to a session that is
    probably still running.
 4. **Never touch a git-tracked file**, and never hard-link to a live game file.
