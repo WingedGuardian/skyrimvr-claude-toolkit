@@ -339,11 +339,59 @@ def operands(e) -> Optional[List[Optional[str]]]:
     return words
 
 
+def _python_interface(argv, launcher=False):
+    """Select Python's first -c program, never subsequent program arguments.
+
+    Keep option values (-W/-X and hash mode) separate from source selectors.
+    Return a normalized flag/code pair so the existing cluster reader remains
+    the single decoder for both separated and attached command strings.
+    """
+    i = 0
+    while i < len(argv):
+        word = argv[i]
+        if word == '--':
+            return None
+        if word == '-':
+            return None
+        if not word.startswith('-'):
+            return None                                # script/zip/directory and everything after it
+        if launcher and word.startswith('-V:'):
+            i += 1
+            continue
+        if word == '--check-hash-based-pycs':
+            i += 2
+            continue
+        if word.startswith('--'):
+            if word.startswith('--help') or word == '--version':
+                return None
+            i += 1
+            continue
+        for j, option in enumerate(word[1:], 1):
+            if option in 'cm':
+                value = word[j + 1:] or (argv[i + 1] if i + 1 < len(argv) else '')
+                flag = word[:j + 1]
+                if flag != '-c' and not _PY_CODE_CLUSTER.fullmatch(flag):
+                    flag = '-c'                       # long clusters still select exactly the same code
+                return (flag, value) if option == 'c' else None
+            if option in 'WX':
+                i += 1 if word[j + 1:] else 2          # the rest of this word, or the next word, is its value
+                break
+            if option in 'hV?':
+                return None
+        else:
+            i += 1
+    return None
+
+
 def interpreter_code(e) -> str:
     """The code an interpreter exec runs from its arguments or stdin (R7(b)); "" for a script file."""
     p = e.program
     if not (_PYTHON.fullmatch(p) or p in CODE_INTERPRETERS):
         return ""
+    if _PYTHON.fullmatch(p):
+        e = e._replace(argv=_python_interface(e.argv, launcher=p == 'py') or ())
+        # Retain the existing conservative stdin scan: -i/PYTHONINSPECT and
+        # a program that evaluates its input can execute a supplied body.
     code = []
     for i, w in enumerate(e.argv):
         nxt = e.argv[i + 1] if i + 1 < len(e.argv) else ""
@@ -354,6 +402,8 @@ def interpreter_code(e) -> str:
             code.append(w[2:])                            # python -cCODE
         elif _PYTHON.fullmatch(p) and _PY_CODE_CLUSTER.fullmatch(w):
             code.append(nxt)                              # python -Bc CODE (G1)
+        if _PYTHON.fullmatch(p) and code:
+            break                                         # selected code is not another command-line flag
     if e.stdin_body and (e.stdin_from.startswith("heredoc:interpreter") or e.stdin_from == "pipe"):
         code.append(e.stdin_body)
     return "\n".join(code)

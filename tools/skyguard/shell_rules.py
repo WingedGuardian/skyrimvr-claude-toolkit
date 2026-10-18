@@ -152,6 +152,11 @@ def resaver_write_calls(command: str, shell: str = "", parsed=None):
         # An opaque program may be the ReSaver named elsewhere in the command.
         # Do not let one known call suppress another call's conservative scope.
         if (_is_resaver(e) or e.program == "?") and _resaver_op(e):
+            if any("$" in a or "`" in a for a in e.argv):
+                # A resolved input is not proof of an unresolved output. Keep
+                # this call explicitly unknown so it refuses before backup.
+                calls.append((_resaver_op(e), [], e))
+                continue
             ws = [a for a in e.argv if a.lower().endswith(".ess")] or RESAVER_TEXT_SAVE.findall(e.segment)
             calls.append((_resaver_op(e), ws[1:] or ws, e))
     if calls:
