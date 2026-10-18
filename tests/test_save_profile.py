@@ -14,6 +14,14 @@ from skyguard import local_policy, portable, save_profile, save_store
 from test_local_policy import register
 
 
+def _qualify(monkeypatch, script):
+    """Model the reviewed source: add the fixture's hash to the qualified set. Since 783c5b0 every check reads
+    QUALIFIED_POLICY_SHA256 (built once at import), so patching TRANSFER_POLICY_SHA256 alone reaches nothing
+    (CI run 39145224156)."""
+    monkeypatch.setattr(local_policy, "QUALIFIED_POLICY_SHA256",
+                        local_policy.QUALIFIED_POLICY_SHA256 | {hashlib.sha256(script.read_bytes()).hexdigest()})
+
+
 @pytest.mark.parametrize("suffix", [".bak", ".BAK", ".old.1", ".snapshot-1", ".bäckup"])
 def test_backup_suffix_stays_attached_to_both_logical_members(tmp_path, suffix):
     ess, skse = tmp_path / ("Source.ess" + suffix), tmp_path / ("Source.skse" + suffix)
@@ -52,7 +60,7 @@ def test_qualified_native_backup_edit_preserves_and_restores_complete_pair(tmp_p
     script = register(tmp_path, "def decide(payload): return {'kind':'backup','op':'write','affected':[payload['tool_input']['file_path']],'count':1}\n")
     # The public fixture models the reviewed source; real installed-source
     # equivalence is measured separately without shipping private policy code.
-    monkeypatch.setattr(local_policy, "TRANSFER_POLICY_SHA256", hashlib.sha256(script.read_bytes()).hexdigest())
+    _qualify(monkeypatch, script)
     action = contracts.Action("future", "edit", "files", cwd=str(tmp_path), paths=(str(ess),), operations=("write",))
     outcome, _ = portable.check(action, tmp_path)
     assert outcome.result.decision == "allow" and outcome.result.preservation == "verified", outcome
@@ -88,7 +96,7 @@ def test_backup_supplement_keeps_unresolved_game_scope_and_the_total_deadline(tm
     save = tmp_path / "Source.ess.bak"
     save.write_bytes(b"original")
     script = register(tmp_path, "def decide(payload): return {'kind':'allow'}\n")
-    monkeypatch.setattr(local_policy, "TRANSFER_POLICY_SHA256", hashlib.sha256(script.read_bytes()).hexdigest())
+    _qualify(monkeypatch, script)
     action = contracts.Action("future", "edit", "files", paths=(str(save),), operations=("write",))
     unresolved = dispatch.SavePlan(unresolved="unknown original game scope")
     assert local_policy.supplement_native_backups(action, tmp_path, unresolved, save_profile.skyrim()) is unresolved
@@ -103,7 +111,7 @@ def test_policy_change_after_backup_refuses_permission_and_keeps_verified_backup
     save.write_bytes(b"original")
     (tmp_path / "skyrim-paths.env").write_text("SKYRIM_CONFIG_DIR='" + save.parent.parent.as_posix() + "'\n")
     script = register(tmp_path, "def decide(payload): return {'kind':'backup','op':'write','affected':[payload['tool_input']['file_path']],'count':1}\n")
-    monkeypatch.setattr(local_policy, "TRANSFER_POLICY_SHA256", hashlib.sha256(script.read_bytes()).hexdigest())
+    _qualify(monkeypatch, script)
     backup = SaveStore.backup
     def changed_after_backup(store, *args, **kwargs):
         manifest = backup(store, *args, **kwargs)
@@ -130,7 +138,7 @@ def test_bulk_backup_helper_requires_command_bound_human_scope(tmp_path, monkeyp
     for path in files:
         path.write_bytes(b"original")
     script = register(tmp_path, "def decide(payload): return {'kind':'backup','op':'write','affected':[payload['tool_input']['file_path']],'count':1}\n")
-    monkeypatch.setattr(local_policy, "TRANSFER_POLICY_SHA256", hashlib.sha256(script.read_bytes()).hexdigest())
+    _qualify(monkeypatch, script)
     action = contracts.Action("claude", "save-restore", "files", cwd=str(tmp_path), session_id="s",
                               command="restore explicitly selected backup copies", paths=tuple(map(str, files)), operations=("write",) * 3)
     members = [path for save in files for path in save_profile.skyrim().members(save)]
