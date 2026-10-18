@@ -357,6 +357,13 @@ def tdir(temp, name, days=3):
     return stale(d, days)
 
 
+def bin_for(tmp_path):
+    """A fake Recycle Bin OUTSIDE the swept dir: no test may put anything in the real one."""
+    root = tmp_path.parent / (tmp_path.name + "-bin")
+    root.mkdir(exist_ok=True)
+    return FakeBin(root)
+
+
 def sweep_cfg():
     cfg = hk.load_config(None)
     cfg["temp_prefixes"] = ["skyrim-harness-", "t11-nohome-"]
@@ -366,10 +373,10 @@ def sweep_cfg():
 def test_the_sweep_deletes_a_stale_toolkit_temp_dir_and_keeps_a_foreign_one(tmp_path):
     ours = tdir(tmp_path, "skyrim-harness-abc123")
     theirs = tdir(tmp_path, "someone-else-abc123")        # twin: same age, a name the toolkit never makes
-    res = hk.sweep_temp(sweep_cfg(), temp=tmp_path)
+    res = hk.sweep_temp(sweep_cfg(), temp=tmp_path, recycler=bin_for(tmp_path))
     assert not ours.exists()
     assert theirs.exists()
-    assert res["rows"]["deleted"] == 1
+    assert res["rows"]["recycled"] == 1
 
 
 def test_the_sweep_keeps_a_dir_whose_child_changed_recently(tmp_path):
@@ -377,7 +384,7 @@ def test_the_sweep_keeps_a_dir_whose_child_changed_recently(tmp_path):
     (busy / "new.txt").write_text("y", encoding="utf-8")   # a direct child written now
     os.utime(busy, (time.time() - 3 * DAY,) * 2)            # the dir's own mtime still says old
     idle = tdir(tmp_path, "t11-nohome-idle01")              # twin: nothing recent
-    res = hk.sweep_temp(sweep_cfg(), temp=tmp_path)
+    res = hk.sweep_temp(sweep_cfg(), temp=tmp_path, recycler=bin_for(tmp_path))
     assert busy.exists() and not idle.exists()
     assert res["rows"]["kept: changed recently"] == 1
 
@@ -387,7 +394,7 @@ def test_the_sweep_keeps_a_dir_a_process_has_a_file_open_in(tmp_path):
     held = tdir(tmp_path, "skyrim-harness-held01")
     free = tdir(tmp_path, "skyrim-harness-free01")          # twin: nothing open
     with open(held / "sub" / "f.txt", encoding="utf-8"):
-        res = hk.sweep_temp(sweep_cfg(), temp=tmp_path)
+        res = hk.sweep_temp(sweep_cfg(), temp=tmp_path, recycler=bin_for(tmp_path))
     assert held.exists() and not free.exists()
     assert res["rows"]["kept: in use"] == 1
 
@@ -397,7 +404,7 @@ def test_the_sweep_keeps_the_newest_pytest_run_and_removes_older_runs_and_garbag
     old = tdir(base, "pytest-9")
     newest = tdir(base, "pytest-10")                         # numerically newest, though just as stale
     garbage = tdir(base, "garbage-0d1e")
-    hk.sweep_temp(sweep_cfg(), temp=tmp_path)
+    hk.sweep_temp(sweep_cfg(), temp=tmp_path, recycler=bin_for(tmp_path))
     assert newest.exists()
     assert not old.exists() and not garbage.exists()
 
@@ -407,9 +414,9 @@ def test_the_sweep_removes_read_only_files_and_its_rows_sum(tmp_path):
     os.chmod(ro / "sub" / "f.txt", 0o444)
     stale(ro)
     tdir(tmp_path, "t11-nohome-young1", days=0)
-    res = hk.sweep_temp(sweep_cfg(), temp=tmp_path)
+    res = hk.sweep_temp(sweep_cfg(), temp=tmp_path, recycler=bin_for(tmp_path))
     assert not ro.exists()
-    assert sum(res["rows"].values()) == 2 and res["rows"]["deleted"] == 1
+    assert sum(res["rows"].values()) == 2 and res["rows"]["recycled"] == 1
 
 
 def test_the_sweep_never_follows_a_link_out_of_temp(tmp_path):
@@ -426,8 +433,10 @@ def test_the_sweep_never_follows_a_link_out_of_temp(tmp_path):
     except (OSError, subprocess.CalledProcessError):
         pytest.skip("cannot make a directory link here")
     stale(outside)
-    hk.sweep_temp(sweep_cfg(), temp=temp)
+    fake = bin_for(tmp_path)
+    hk.sweep_temp(sweep_cfg(), temp=temp, recycler=fake)
     assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep"
+    assert fake.got == [] and link.exists(), "a link is never even offered to the bin"
 
 
 def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, monkeypatch):
@@ -436,13 +445,14 @@ def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, mon
                sweep_every_hours=0)
     monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(tmp_path / "temp"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setattr(hk, "recycle", bin_for(tmp_path))
     (tmp_path / "temp").mkdir()
     state = tmp_path / "state" / "note.txt"
     assert hk.session(cfg, state) == 0
     assert state.read_text(encoding="utf-8") == ""
     tdir(tmp_path / "temp", "skyrim-harness-sess01")
     assert hk.session(cfg, state) == 0
-    assert state.read_text(encoding="utf-8").startswith("DISK: removed 1 leftover temp dir(s)")
+    assert state.read_text(encoding="utf-8").startswith("DISK: moved 1 leftover temp dir(s) to the Recycle Bin")
 
 
 def test_session_runs_at_most_once_per_interval(tmp_path, monkeypatch):
@@ -451,6 +461,7 @@ def test_session_runs_at_most_once_per_interval(tmp_path, monkeypatch):
                sweep_every_hours=6)
     monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(tmp_path / "temp"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setattr(hk, "recycle", bin_for(tmp_path))
     (tmp_path / "temp").mkdir()
     state = tmp_path / "note.txt"
     state.write_text("", encoding="utf-8")                   # a sweep ran just now
@@ -460,3 +471,34 @@ def test_session_runs_at_most_once_per_interval(tmp_path, monkeypatch):
     os.utime(state, (time.time() - 7 * 3600,) * 2)           # twin: the last sweep was 7 hours ago
     hk.session(cfg, state)
     assert not left.exists()
+
+
+def test_a_dir_the_bin_refuses_is_left_in_place_and_named(tmp_path):
+    """Never a permanent delete, not even as a fallback: what the Recycle Bin will not take stays put."""
+    temp = tmp_path / "temp"
+    refused = tdir(temp, "skyrim-harness-big001")
+    taken = tdir(temp, "skyrim-harness-ok0001")                # twin: the bin takes this one
+    fake = bin_for(tmp_path)
+
+    def picky(paths):
+        out = {}
+        for p in paths:
+            out.update({str(p): "too big for the Recycle Bin"} if "big" in str(p) else fake([p]))
+        return out
+    res = hk.sweep_temp(sweep_cfg(), temp=temp, recycler=picky)
+    assert refused.exists() and (refused / "sub" / "f.txt").read_text(encoding="utf-8") == "x"
+    assert not taken.exists()
+    assert res["rows"]["failed"] == 1 and res["rows"]["recycled"] == 1
+    assert "skyrim-harness-big001" in res["failed"][0] and "too big" in res["failed"][0]
+
+
+def test_the_tool_never_deletes_permanently():
+    """User ruling 2026-10-18: the Recycle Bin, always -- the tool's own files included."""
+    src = TOOL.read_text(encoding="utf-8")
+    for call in ("os.unlink(", "os.remove(", "shutil.rmtree(", ".unlink(", "os.rmdir(", ".rmdir(",
+                 "FileSystem]::Delete"):                    # the VB call: its 'OnlyErrorDialogs' skips the nuke prompt
+        assert call not in src, call
+    import re
+    flags = re.findall(r"fFlags = ([^}]+?) \}", src)         # the expression itself, never a comment about it
+    assert len(flags) == 1, flags
+    assert {"0x4000", "0x40"} <= set(re.findall(r"0x[0-9A-Fa-f]+", flags[0])), flags  # nuke warning + undo

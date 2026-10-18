@@ -10,7 +10,7 @@ that repeat the one before. The policy this tool implements is docs/RETENTION.md
             [--only CLASS[,CLASS]]               (skips the scans no listed class needs)
     python tools/housekeep.py apply plan.json     re-check each action, then do exactly those
             [--only CLASS[,CLASS]]               (recreatable, build, link, gzip, launch, snapshot, scratch)
-    python tools/housekeep.py sweep-temp          DELETE the toolkit's own stale temp dirs (see "temp sweep")
+    python tools/housekeep.py sweep-temp          recycle the toolkit's own stale temp dirs (see "temp sweep")
     python tools/housekeep.py session STATE.txt   sweep-temp, then write the session-start disk note to STATE.txt
     --config FILE   default <toolkit>/.claude/housekeep.json (.claude/housekeep.json.example ships)
 
@@ -21,7 +21,8 @@ What it never touches, whatever the config says: saves (.ess/.skse) and anything
 contains "backup"; git-tracked files; every file a project doc links to; and any task folder written to within
 `active_hours` (another session is probably still working there).
 
-Removal goes to the Recycle Bin, never a permanent delete (the one exception: sweep-temp, below) (Windows: Microsoft.VisualBasic SendToRecycleBin).
+Removal goes to the Recycle Bin, never a permanent delete, with no exceptions (Windows: the shell's own delete with
+FOF_ALLOWUNDO). An item too big for the bin gets Windows' own "delete permanently?" prompt; "No" leaves it in place.
 The bin frees no disk space until it is emptied; that is the user's call. A file the bin refuses is reported
 FAILED and left in place. Duplicates are not removed at all: they become NTFS hard links to one copy, marked
 read-only so an in-place edit cannot silently change every path at once.
@@ -466,24 +467,34 @@ def recycle(paths) -> dict:
         return {}
     if os.name != "nt":
         raise RuntimeError("Recycle Bin removal is implemented for Windows only")
-    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as lst:
-        lst.write("\n".join(paths))
+    # The shell's own delete, NOT Microsoft.VisualBasic's DeleteDirectory(..., 'OnlyErrorDialogs', ...): that UI option
+    # suppresses confirmations, and the confirmation it suppresses is the one Windows shows when an item is too big for
+    # the bin and would be destroyed instead. FOF_WANTNUKEWARNING (0x4000) brings exactly that prompt back while
+    # FOF_NOCONFIRMATION (0x10) still skips "move to the Recycle Bin?". FOF_ALLOWUNDO (0x40) is the Recycle Bin.
+    # The user's answer is the only way anything is ever permanently deleted; "No" leaves the item in place.
     script = (
-        "Add-Type -AssemblyName Microsoft.VisualBasic;"
-        "foreach ($p in [IO.File]::ReadAllLines($env:HOUSEKEEP_RECYCLE_LIST, [Text.Encoding]::UTF8)) {"
-        " try { if ([IO.Directory]::Exists($p)) {"
-        "  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p,'OnlyErrorDialogs','SendToRecycleBin') }"
-        " else { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p,'OnlyErrorDialogs','SendToRecycleBin') }"
-        " [Console]::Out.WriteLine('OK' + [char]9 + $p) }"
-        " catch { [Console]::Out.WriteLine('ERR' + [char]9 + $p + [char]9 + $_.Exception.Message) } }")
-    # The list goes through the environment: under -Command, trailing arguments are NOT $args -- PowerShell
-    # appends them to the command text and runs them (measured: $args.Count == 0).
-    env = dict(os.environ, HOUSEKEEP_RECYCLE_LIST=lst.name)
-    try:
-        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                             capture_output=True, text=True, encoding="utf-8", timeout=3600, env=env)
-    finally:
-        os.unlink(lst.name)
+        "Add-Type -TypeDefinition @'\n"
+        "using System; using System.Runtime.InteropServices;\n"
+        "public static class HkBin {\n"
+        " [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]\n"
+        " struct Op { public IntPtr hwnd; public uint wFunc; public string pFrom; public string pTo; public ushort fFlags;\n"
+        "  public bool fAnyOperationsAborted; public IntPtr hNameMappings; public string lpszProgressTitle; }\n"
+        " [DllImport(\"shell32.dll\", CharSet = CharSet.Unicode)] static extern int SHFileOperationW(ref Op op);\n"
+        " public static string Recycle(string p) {\n"
+        "  var op = new Op { wFunc = 3, pFrom = p + \"\\0\\0\", fFlags = 0x4000 | 0x40 | 0x10 | 0x200 | 0x4 };\n"
+        "  int rc = SHFileOperationW(ref op);\n"
+        "  if (op.fAnyOperationsAborted) return \"declined: left in place\";\n"
+        "  return rc == 0 ? \"\" : \"shell error 0x\" + rc.ToString(\"X\"); } }\n"
+        "'@;"
+        "[Console]::InputEncoding = [Text.Encoding]::UTF8; [Console]::OutputEncoding = [Text.Encoding]::UTF8;"
+        "foreach ($p in [Console]::In.ReadToEnd().Split([char]10)) { $p = $p.TrimEnd([char]13); if ($p -eq '') { continue };"
+        " $e = [HkBin]::Recycle($p);"
+        " if ($e -eq '') { [Console]::Out.WriteLine('OK' + [char]9 + $p) }"
+        " else { [Console]::Out.WriteLine('ERR' + [char]9 + $p + [char]9 + $e) } }")
+    # The list goes on stdin: under -Command, trailing arguments are NOT $args -- PowerShell appends them to the
+    # command text and runs them (measured: $args.Count == 0). A list file would be one more thing to delete.
+    out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], input="\n".join(paths),
+                         capture_output=True, text=True, encoding="utf-8", timeout=3600)
     silent = "no result reported" + (" (powershell: {})".format(out.stderr.strip()[:300]) if out.stderr.strip() else "")
     result = {p: silent for p in paths}
     for line in out.stdout.splitlines():
@@ -557,7 +568,7 @@ def link(action):
         raise OSError("leftover {} -- inspect it by hand".format(tmp))
     os.link(canon, tmp)
     if os.stat(tmp).st_ino != os.stat(canon).st_ino or blake(tmp) != action["hash"]:
-        os.unlink(tmp)                                           # our own just-made link, never data
+        recycle([tmp])                                           # our own just-made link -- still the bin, never a delete
         raise OSError("the new link does not resolve to the canonical bytes")
     if not os.access(dup, os.W_OK):
         os.chmod(dup, stat.S_IWRITE | stat.S_IREAD)
@@ -577,7 +588,7 @@ def compress(action) -> Path:
         for b in iter(lambda: f.read(1 << 20), b""):
             d.update(b)
     if d.hexdigest() != action["hash"]:
-        os.unlink(gz)                                             # our own bad output, never the original
+        recycle([gz])                                             # our own bad output -- still the bin, never a delete
         raise OSError("gzip round trip does not reproduce the original")
     st = src.stat()
     os.utime(gz, (st.st_atime, st.st_mtime))
@@ -630,11 +641,11 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
 
 
 # --------------------------------------------------------------------------- temp sweep
-# Unlike everything above, this DELETES PERMANENTLY. These are the toolkit's own temp dirs, which no person made and
-# nothing reads back after the process that made them has ended. Sending them to the Recycle Bin would only move the
-# bytes (25 GiB of them in one run on 2026-10-18). Three gates stand between a dir and deletion: the name is one the
-# toolkit creates, nothing in it or its direct children changed for temp_after_hours, and the dir can be renamed
-# (Windows refuses that while any process holds a file open inside it).
+# The toolkit's own leftover temp dirs go to the Recycle Bin like everything else -- never a permanent delete (user
+# ruling 2026-10-18: "There's never a good reason to just outright delete. Never."). Three gates stand between a dir
+# and the bin: the name is one the toolkit creates, nothing in it or its direct children changed for
+# temp_after_hours, and the dir can be renamed (Windows refuses that while any process holds a file open inside it).
+# A dir the bin will not take stays where it is and is named in the session note.
 
 def _newest_shallow(p: Path) -> float:
     newest = p.stat().st_mtime
@@ -660,23 +671,6 @@ def _in_use(p: Path) -> bool:
     return False
 
 
-def _remove_tree(p: Path) -> bool:
-    def unlock(fn, path, _exc):
-        try:
-            os.chmod(path, stat.S_IWRITE)
-            fn(path)
-        except OSError:
-            pass
-    shutil.rmtree(p, onerror=unlock)
-    if p.exists() and os.name == "nt":
-        # A test that strips its own permissions (the ownership tests do) leaves a dir rmtree cannot even list.
-        user = os.environ.get("USERNAME") or os.getlogin()
-        subprocess.run(["icacls", str(p), "/grant", user + ":(OI)(CI)F", "/T", "/C", "/Q"],
-                       capture_output=True, timeout=120)
-        shutil.rmtree(p, onerror=unlock)
-    return not p.exists()
-
-
 def temp_candidates(cfg, temp: Path):
     """(path, reason) for every dir the sweep may consider: our prefixes, plus pytest's own leftovers."""
     prefixes = tuple(cfg["temp_prefixes"])
@@ -687,6 +681,9 @@ def temp_candidates(cfg, temp: Path):
     for e in entries:
         try:
             if e.is_symlink() or not e.is_dir(follow_symlinks=False):
+                continue
+            # A junction is not a symlink to os.DirEntry on Python 3.10: skip every reparse point outright.
+            if getattr(e.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400:
                 continue
         except OSError:
             continue
@@ -707,12 +704,13 @@ def temp_candidates(cfg, temp: Path):
                     yield Path(k.path), "pytest garbage"
 
 
-def sweep_temp(cfg, temp: Path | None = None, now: float | None = None, remove=_remove_tree) -> dict:
+def sweep_temp(cfg, temp: Path | None = None, now: float | None = None, recycler=None) -> dict:
+    """Recycle every candidate that passes the gates, in one batch. What the bin refuses stays where it is."""
     temp = Path(temp or tempfile.gettempdir())
     now = time.time() if now is None else now
     cutoff = now - cfg["temp_after_hours"] * 3600
-    rows = {"deleted": 0, "kept: changed recently": 0, "kept: in use": 0, "failed": 0}
-    failed = []
+    rows = {"recycled": 0, "kept: changed recently": 0, "kept: in use": 0, "failed": 0}
+    ready = []
     for p, _why in temp_candidates(cfg, temp):
         try:
             if _newest_shallow(p) > cutoff:
@@ -722,11 +720,15 @@ def sweep_temp(cfg, temp: Path | None = None, now: float | None = None, remove=_
             continue
         if _in_use(p):
             rows["kept: in use"] += 1
-        elif remove(p):
-            rows["deleted"] += 1
         else:
+            ready.append(p)
+    failed = []
+    for p, err in (recycler or recycle)(ready).items():
+        if err:
             rows["failed"] += 1
-            failed.append(str(p))
+            failed.append("{}  ({})".format(p, err))
+        else:
+            rows["recycled"] += 1
     return {"rows": rows, "failed": failed, "temp": str(temp)}
 
 
@@ -748,14 +750,13 @@ def session(cfg, state: Path) -> int:
             return 0
     except OSError:
         pass
-    free_before = shutil.disk_usage(tempfile.gettempdir()).free
     res = sweep_temp(cfg)
     notes = []
     r = res["rows"]
-    if r["deleted"] or r["failed"]:
-        gained = (shutil.disk_usage(tempfile.gettempdir()).free - free_before) / GIB
-        notes.append("removed {} leftover temp dir(s), free space {:+.1f} GiB{}".format(
-            r["deleted"], gained, "; {} could not be removed".format(r["failed"]) if r["failed"] else ""))
+    if r["recycled"] or r["failed"]:
+        notes.append("moved {} leftover temp dir(s) to the Recycle Bin{}".format(
+            r["recycled"], "; {} could not be recycled and were LEFT IN PLACE (ask the user before any permanent "
+                           "delete)".format(r["failed"]) if r["failed"] else ""))
     home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
     codex = dir_size(home / ".codex" / "sessions") / GIB
     if codex > cfg["codex_sessions_warn_gib"]:

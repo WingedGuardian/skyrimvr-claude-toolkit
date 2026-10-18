@@ -1436,7 +1436,12 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     # --- housekeep ----------------------------------------------------------
     *[pytest.param("tools/housekeep.py", anchor, repl, "tests/test_housekeep.py::" + test, id="housekeep-" + mid)
       for mid, anchor, repl, test in [
-          # The sweep's permanent delete: each gate, broken alone.
+          # Recycling: the too-big prompt and the junction skip, each broken alone.
+          ("recycle-no-nuke-warning", "fFlags = 0x4000 | 0x40", "fFlags = 0x40",
+           "test_the_tool_never_deletes_permanently"),
+          ("sweep-follows-junctions", '"st_file_attributes", 0) & 0x400:', '"st_file_attributes", 0) & 0:',
+           "test_the_sweep_never_follows_a_link_out_of_temp"),
+          # The sweep's gates, each broken alone.
           ("sweep-any-name", "        if prefixes and e.name.startswith(prefixes):", "        if True:",
            "test_the_sweep_deletes_a_stale_toolkit_temp_dir_and_keeps_a_foreign_one"),
           ("sweep-no-age-gate", "            if _newest_shallow(p) > cutoff:", "            if False:",
