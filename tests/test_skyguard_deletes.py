@@ -428,8 +428,11 @@ def test_moving_a_root_folder_away_names_the_move_not_a_delete(cmd, shell):
 
 
 @pytest.mark.parametrize("verb,shell", [("mv", "bash"), ("Move-Item", "powershell")], ids=["mv", "move-item"])
-def test_moving_config_root_away_names_the_move_without_store_preemption(tmp_path, verb, shell):
+def test_moving_config_root_away_names_the_move_without_store_preemption(tmp_path, monkeypatch, verb, shell):
     """The game root now stops at save-store policy; a separate config root still uses S-MOVE-ROOT."""
+    # Real temp folders: read them as THIS host does (on Linux they are /tmp/..., unplaceable under the module's
+    # Windows-host pin; CI run 39167733692 turned Move-Item into S-DEL-UNRESOLVED there).
+    monkeypatch.setattr(paths, "POSIX_HOST", os.name != "nt")
     game, config = tmp_path / "game", tmp_path / "config"
     game.mkdir()
     config.mkdir()
