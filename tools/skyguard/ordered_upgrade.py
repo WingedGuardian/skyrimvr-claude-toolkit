@@ -117,7 +117,7 @@ def proposal(bundle, review):
         return None
     if os.name != "nt":
         raise ValueError("this reviewed Windows personal policy needs Windows qualification")
-    if rollback[local_policy.LEGACY] != local_policy.TRANSFER_POLICY_SHA256:
+    if rollback[local_policy.LEGACY] not in local_policy.QUALIFIED_POLICY_SHA256:
         raise ValueError("personal policy source has not been qualified")
     if WRAPPER not in rollback:
         raise ValueError("personal wrapper must be independently retained")
@@ -158,7 +158,7 @@ def proposal(bundle, review):
         local["hooks"]["PreToolUse"] = []
         files[".claude/settings.local.json"] = local
     registration = {"v": 1, "kind": local_policy.KIND, "path": local_policy.LEGACY,
-                    "sha256": local_policy.TRANSFER_POLICY_SHA256}
+                    "sha256": rollback[local_policy.LEGACY]}
     existing = upgrade.read_settings(bundle / "rollback", local_policy.CONFIG)
     if review["observed_local_files"].get(local_policy.CONFIG) is not None and upgrade.json_bytes(existing) != upgrade.json_bytes(registration):
         raise ValueError("existing personal-policy registration requires separate review")

@@ -17,8 +17,8 @@ from modding_harness import contracts
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="reviewed personal native policy is Windows-specific")
 
 
-@pytest.fixture
-def ordered(tmp_path):
+@pytest.fixture(params=['original', 'audit'])
+def ordered(tmp_path, request):
     root, source, bundle = tmp_path / "installed", tmp_path / "source", tmp_path / "review"
     root.mkdir()
     (source / "tools").mkdir(parents=True)
@@ -43,7 +43,8 @@ def ordered(tmp_path):
     controller.parent.mkdir()
     controller.write_text("raise RuntimeError('inert controller must never execute')\n")
     module = source / "tools/skyguard/local_policy.py"
-    module.write_text(module.read_text().replace(local_policy.TRANSFER_POLICY_SHA256, hashlib.sha256(policy.read_bytes()).hexdigest())
+    qualified_hash = local_policy.TRANSFER_POLICY_SHA256 if request.param == 'original' else local_policy.AUDIT_POLICY_SHA256
+    module.write_text(module.read_text().replace(qualified_hash, hashlib.sha256(policy.read_bytes()).hexdigest())
                       .replace(local_policy.CONTROLLED_LOAD_SHA256, hashlib.sha256(controller.read_bytes()).hexdigest()))
     command = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + root.as_posix() + '/.claude/hooks/save-access-entry.ps1"'
     handler = {"type": "command", "command": command, "timeout": 30,
@@ -82,6 +83,7 @@ def test_actual_cli_stages_and_applies_reviewed_personal_policy_with_rollback(or
     integration = review["ordered_integration"]
     assert set(integration["files"]) == {".claude/settings.json", ".codex/hooks.json", ".modding-agent-harness/local-policies.json"}
     assert integration["sources"][".claude/hooks/protect-save-access.py"] == hashlib.sha256(policy.read_bytes()).hexdigest()
+    assert json.loads((bundle / 'reviewed' / local_policy.CONFIG).read_bytes())['sha256'] == hashlib.sha256(policy.read_bytes()).hexdigest()
     choices = {row["path"]: "candidate" for row in review["plan"]["files"] if row["candidate_sha256"] is not None}
     choices.update({name: "reviewed_settings" for name in integration["files"]})
     choice_file = tmp_path / "choices.json"

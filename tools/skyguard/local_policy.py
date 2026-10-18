@@ -24,9 +24,14 @@ from skyguard import save_profile
 CONFIG = ".modding-agent-harness/local-policies.json"
 LEGACY = ".claude/hooks/protect-save-access.py"
 KIND = "legacy-skyrim-save-guard-v1"
-# Only this reviewed legacy version has qualified pure transfer helpers. A
+# Only exact reviewed legacy versions have qualified pure transfer helpers. A
 # registration for different source bytes remains a restrictive policy only.
 TRANSFER_POLICY_SHA256 = "30777ba84ec4dcf66b6be4c9b0d40ea6eb8e3075aa3561bb0493b8b9bb1351a2"
+AUDIT_POLICY_SHA256 = "27456e7cb314fb9178f9c77cc97758e4fab578b76776c6953931caabf55ea280"
+# Both exact versions retain the reviewed transfer/controller contracts. The
+# audit version adds only its independently qualified, confined read/report route.
+# Other registered policies remain restrictive; they do not gain these helpers.
+QUALIFIED_POLICY_SHA256 = frozenset((TRANSFER_POLICY_SHA256, AUDIT_POLICY_SHA256))
 CONTROLLED_LOAD_SHA256 = "22e0b8b1c004bc4ee79946836a6ce0abb60c4ca9b06ded20b8e659e61dc8102b"
 
 
@@ -127,7 +132,7 @@ def supplement_native_backups(action, project, plan, profile, *, helper=False, d
     if not selected:
         return plan
     registered = registration(project)
-    if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:
+    if registered is None or hashlib.sha256(registered[1]).hexdigest() not in QUALIFIED_POLICY_SHA256:
         return plan
     from modding_harness.dispatch import Mutation
     def extra():
@@ -197,7 +202,7 @@ def supplement_controlled(action, project, plan, profile, deadline=None):
     if action.surface != "shell" or plan.unresolved or "guarded-runtime-load.py" not in action.command.casefold():
         return plan
     registered = registration(project)
-    if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:
+    if registered is None or hashlib.sha256(registered[1]).hexdigest() not in QUALIFIED_POLICY_SHA256:
         return plan
     report = inspect_policy(action, project, deadline)
     requirements = report["requirements"]
@@ -298,7 +303,7 @@ def supplement_shell_scope(action, project, plan, profile, transcript="", deadli
     if action.surface != "shell" or plan.unresolved:
         return plan
     registered = registration(project)
-    if registered is None or hashlib.sha256(registered[1]).hexdigest() != TRANSFER_POLICY_SHA256:
+    if registered is None or hashlib.sha256(registered[1]).hexdigest() not in QUALIFIED_POLICY_SHA256:
         return plan
     report = inspect_policy(action, project, deadline)
     requirements = report["requirements"]
@@ -441,21 +446,21 @@ def evaluate(action, project, facts=None, *, requirements=None):
             if requirements is not None:
                 requirement = {key: result[key] for key in ("kind", "op", "affected", "set", "count") if key in result}
                 if (file_operation is None and result.get("op") in ("move", "rename") and
-                        hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256):
+                        hashlib.sha256(source).hexdigest() in QUALIFIED_POLICY_SHA256):
                     requirement["roles"] = [list(role) for role in _transfer_roles(namespace, payload)]
                 requirements.append(requirement)
                 continue
             roles = ()
             if (file_operation is None and result.get("op") in ("move", "rename") and
-                    hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256):
+                    hashlib.sha256(source).hexdigest() in QUALIFIED_POLICY_SHA256):
                 roles = _transfer_roles(namespace, payload)
             controlled = False
-            if result.get("op") in ("controlled-prepare", "controlled-load") and hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256:
+            if result.get("op") in ("controlled-prepare", "controlled-load") and hashlib.sha256(source).hexdigest() in QUALIFIED_POLICY_SHA256:
                 operation, selected, _bindings = _controlled_scope(action, project)
                 controlled = (result["kind"] == "backup" and result["op"] == operation and
                               sorted(map(profiles.canonical, result.get("affected", ()))) == sorted(map(profiles.canonical, selected)))
             refused = _coverage(result, facts, roles, controlled=controlled,
-                                declared=hashlib.sha256(source).hexdigest() == TRANSFER_POLICY_SHA256)
+                                declared=hashlib.sha256(source).hexdigest() in QUALIFIED_POLICY_SHA256)
             if refused is not None:
                 return refused
     # Save authorization and preservation remain the portable dispatcher's job.
