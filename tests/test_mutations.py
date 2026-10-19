@@ -9414,3 +9414,21 @@ MUTATIONS += [
                  "tests/test_ci_leg.py::test_a_part_is_checked_against_its_own_numbers",
                  id="ci-leg-part-numbers-ignored"),
 ]
+# 2026-10-19 procsubst: an assignment prefix holding `<( )` hid the program behind it ("?"), and an unnamed program
+# word (`$R rm`, `$(true) rm`) hid the command after it. Each fix is put back and its parser test must go red.
+_PS1 = "tests/test_shellparse.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_SP, "            # It joins the word it touches, as bash does",
+     "            self.end_word(f)\n            # It joins the word it touches, as bash does",
+     _PS1 + "test_assignment_prefix_holding_a_substitution_is_one_word[X=<(echo a) rm -rf x]",
+     "procsubst-ends-the-assignment-word"),
+    (_SP, "                        self.after.append(k)", "                        pass",
+     _PS1 + "test_an_unnamed_program_word_also_reads_the_next_word_as_the_program[$R rm -rf x]",
+     "unnamed-program-no-next-word-reading"),
+    (_SP, "            self._sub_run([], j, alt=False)", "            self._sub_run([], j)",
+     _PS1 + "test_the_next_word_reading_gets_the_program_candidates_too[$R $(echo rm) -rf x]",
+     "unnamed-program-next-word-without-candidates"),
+    (_SP, '                    if self.d == "bash" and self.y[k] and k + 1 < n:',
+     '                    if self.d == "bash" and k + 1 < n:',
+     _PS1 + "test_a_glob_program_word_gets_no_next_word_reading", "unnamed-program-glob-read-past"),
+]]

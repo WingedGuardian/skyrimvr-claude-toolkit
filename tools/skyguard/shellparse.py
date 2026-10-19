@@ -68,8 +68,12 @@ AN EXEC:
 
 KNOWN LIMITS -- each gives a partial answer, never a "safe" one:
   - a program held in a variable (`$R reset-havok`): program "?", argv kept; rules must treat "?" as opaque.
+    In bash the words after it are ALSO read as the command (`$R rm x`: $R may be empty or a wrapper, and rm runs).
+    A `cd` behind such a word (`$R cd X`) keeps the directory before it: the cd runs only if $R is empty, and one
+    directory cannot hold both readings (marking it unknown loosened `$R cd /tmp && rm -rf Data` in the install).
   - a quote-split token (`--ap""ply`, `r''m`): RESOLVED -- words are unquoted and concatenated as bash does.
-  - process substitution `<( )` / `>( )`: parsed as commands; the word itself is dynamic.
+  - process substitution `<( )` / `>( )`: parsed as commands; the word itself is dynamic, and it joins the text it
+    touches as bash does (`X=<(echo a) rm x` is an assignment prefix, then rm).
   - `$(( ))` arithmetic and `${ }` expansions are skipped; a `$( )` INSIDE them is not parsed.
   - aliases and shell functions defined in the same command are not expanded (a function's BODY is parsed).
   - PowerShell method calls other than [IO.File]/[IO.Directory] are not execs, except the opaque ones
@@ -2132,13 +2136,13 @@ class _Resolver:
                         continue
                     for cand in _program_candidates(v[k], self.d, self.ctx.root):
                         self._sub_run([cand], k)                # each program it CAN be; the "?" exec stays too
-                    if self.d == "bash" and self.y[k]:          # a glob word never expands to nothing
-                        # An unnamed program word may expand to NOTHING (`$R` unset, `$(true)`) or be a wrapper
-                        # (`$SUDO`): either way the NEXT word runs (MEASURED, Git Bash: `$R rm x` runs rm). Read the
-                        # words after it as the command too, with every reading a program word gets (candidates, and
-                        # this one again for `$A $B rm`); each hop is one nesting level, so MAX_DEPTH bounds the chain.
-                        if k + 1 < n:
-                            self.after.append(k)
+                    # An unnamed program word may expand to NOTHING (`$R` unset, `$(true)`) or be a wrapper
+                    # (`$SUDO`): either way the NEXT word runs (MEASURED, Git Bash: `$R rm x` runs rm). Read the
+                    # words after it as the command too, with every reading a program word gets (candidates, and
+                    # this one again for `$A $B rm`); each hop is one nesting level, so MAX_DEPTH bounds the chain.
+                    # A glob word (not dynamic) never expands to nothing.
+                    if self.d == "bash" and self.y[k] and k + 1 < n:
+                        self.after.append(k)
                 elif not self.y[k]:
                     body = self.ctx.aliases.get(v[k] if self.d == "bash" else v[k].lower())
                     if body:
