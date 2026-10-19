@@ -52,6 +52,15 @@ def _clean_path() -> str:
     return python_free_path()
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _python_free_path_built():
+    """Build the python-free PATH before any test here starts a clock. On Linux the first call mirrors /usr/bin,
+    once per process, and the contained launcher's audit hook judges every symlink it makes. MEASURED on CI
+    (debug run, ubuntu, Python 3.13): 134.4 s under the launcher, 9.8 s in each mutation-anchor rerun, 0.26 s
+    without the launcher. Inside _fire it landed in the timed windows below, so a fresh process failed them."""
+    _clean_path()
+
+
 def _shim(directory: Path, name: str, body: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     p = directory / name
@@ -351,8 +360,9 @@ def test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget(tmp_path
     assert r.stdout.strip().startswith("{") and "Traceback" not in r.stdout and "Thread" not in r.stdout
     assert time.time() - t < 12, "the watchdog did not end the call at its budget"
     # the WATCHDOG ended it (exit 1), not the wrapper's own kill 3 s later (exit 124)
-    assert "exit 1" in _failed(root, "protect-files") and "exit 124" not in _failed(root, "protect-files"), \
-        _failed(root, "protect-files")
+    # The exact code, not a substring: on Linux the reaper's SIGKILL reads "exit 137", which CONTAINS "exit 1", so a
+    # disarmed watchdog passed here (CI debug run, ubuntu 3.13) once the PATH build stopped failing the clock for it.
+    assert _failed(root, "protect-files").rstrip().endswith(" exit 1"), _failed(root, "protect-files")
 
 
 def test_a_hanging_fallback_engine_is_cut_off_by_timeout(tmp_path):
