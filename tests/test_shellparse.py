@@ -151,6 +151,64 @@ def test_process_substitution_joins_the_word_it_touches(cmd, argv):
     assert len(find(cmd, "cat" if cmd.startswith("cat") else "echo").argv) == argv
 
 
+# A program word the parser cannot name ("?") may expand to NOTHING (`$R` unset, `$(true)`) or be a wrapper (`$SUDO`
+# = sudo), and either way the next word runs. MEASURED (Git Bash): `$R rm x`, `$(true) rm x` and `${R} rm x` run rm.
+# So beside the opaque exec the parser also reads the words after it as the command. Before, `$R rm -rf Data` was
+# only "?" and every rule that names a program (deletes by resolved path, S-WRITE-SAVE, S-GIT-DISCARD, S-MOVE-ROOT,
+# ...) missed it: 340 of 826 opaque variants of the intended corpus's refusing rows were weaker than their control.
+@pytest.mark.parametrize("cmd", [
+    "$R rm -rf x", "${R} rm -rf x", "$(true) rm -rf x", "`true` rm -rf x", '"$R" rm -rf x', "$R$S rm -rf x",
+    "x$R rm -rf x", "$A $B rm -rf x", "$A $B $C rm -rf x", "sudo $R rm -rf x", "env $R rm -rf x",
+    "$R sudo rm -rf x", "X=<(echo a) $R rm -rf x", "a && $R rm -rf x", "a | $R rm -rf x", "( $R rm -rf x )",
+    "echo $($R rm -rf x)",
+])
+def test_an_unnamed_program_word_also_reads_the_next_word_as_the_program(cmd):
+    p = parse(cmd, "bash")
+    assert p.ok, (cmd, p.why)
+    assert "?" in [e.program for e in p.execs]                  # the opaque exec stays: rules still read its text
+    assert find(cmd, "rm").argv == ("-rf", "x")
+
+
+@pytest.mark.parametrize("cmd,program", [
+    ("echo $R rm -rf x", "echo"), ("$R", None), ("printf '%s' $R rm", "printf"), ("R=rm; echo $R", "echo"),
+    ("echo '$R rm -rf x'", "echo"),
+])
+def test_a_named_program_with_dynamic_arguments_gets_no_second_reading(cmd, program):
+    """Twins: only an UNNAMED program word is read past. `echo $R rm` prints; `$R` alone runs nothing nameable."""
+    p = parse(cmd, "bash")
+    assert p.ok, (cmd, p.why)
+    assert "rm" not in [e.program for e in p.execs], (cmd, [(e.program, e.argv) for e in p.execs])
+    if program:
+        assert p.execs[-1].program == program
+
+
+@pytest.mark.parametrize("cmd", [
+    "$R $(echo rm) -rf x", "$R ${RM:-rm} -rf x", "$R `which rm` -rf x", "$R r${X}m -rf x", "$A $B $(echo rm) -rf x",
+])
+def test_the_next_word_reading_gets_the_program_candidates_too(cmd):
+    """The word after an unnamed program word is itself unproven here: it gets the RT-A candidates (rm), as it would
+    if it came first."""
+    assert find(cmd, "rm").argv == ("-rf", "x")
+
+
+@pytest.mark.parametrize("cmd,cd", [
+    ("$R cd /x && rm -rf Data", ""), ('"$R" cd /x; rm -rf Data', ""), ("$(true) cd /x; rm -rf Data", ""),
+    ("cd /x && rm -rf Data", "/x"), ("echo $R cd /x; rm -rf Data", ""),
+])
+def test_a_cd_behind_an_unnamed_program_word_keeps_the_directory_before_it(cmd, cd):
+    """KNOWN LIMIT, chosen: `$R cd X` moves the shell if $R is empty and not if $R is a wrapper (MEASURED, Git Bash:
+    `R=; $R cd /tmp; pwd` prints /tmp, `R=env` leaves it). The parser holds ONE directory, and marking it unknown ("?")
+    was MEASURED to loosen a delete: `$R cd /tmp && rm -rf Data` run in the install went from S-DEL-INSTALL (deny) to an
+    S-RELATIVE-UNKNOWN note. So the wrapper reading is kept; `$R cd <install> && rm -rf Data` from outside stays
+    unjudged (as on master), never a weakened deny."""
+    assert find(cmd, "rm").cd_before == cd
+
+
+def test_a_glob_program_word_gets_no_next_word_reading():
+    """Twin: an unmatched glob stays a word in bash; it never vanishes, so `-rf` is not read as a program."""
+    assert [e.program for e in parse("/???/r? -rf x", "bash").execs if e.program not in ("?", "rm", "rd")] == []
+
+
 def test_an_assignment_alone_runs_only_its_substitution():
     assert progs("X=<(echo a)") == ["echo"]
     assert progs("X=<(echo a) Y=>(cat)") == ["echo", "cat"]

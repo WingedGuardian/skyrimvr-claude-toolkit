@@ -1970,19 +1970,21 @@ class _Resolver:
         self.call = call
         self.xargs = False
         self.alt_done = False         # RT-A: this resolver already IS one reading of an unproven program word
+        self.after: List[int] = []    # the words after an unnamed program word, read as the command AFTER this one
         self.strq: Optional[List[bool]] = None    # I4: PowerShell, per word: opens with a string quote (_ps_string)
         self.made: List[Exec] = []
 
     # -- RT-A: unproven program words, aliases, carried redirects, decoded text
-    def _sub_run(self, words: List[str], k: int) -> None:
-        """Resolve `words` + the arguments after the program word as another reading of this command."""
+    def _sub_run(self, words: List[str], k: int, alt: bool = True) -> None:
+        """Resolve `words` + the arguments after the program word as another reading of this command. alt=False: the
+        reading may itself read an unproven program word (the words after an unnamed program word)."""
         if self.depth + 1 > MAX_DEPTH:
             raise ParseError("nesting deeper than %d" % MAX_DEPTH)
         n = len(words)
         r = _Resolver(self.d, list(words) + list(self.v[k + 1:]), [False] * n + list(self.q[k + 1:]),
                       [False] * n + list(self.y[k + 1:]), self.redirs, self.cd, self.stdin, self.seg, self.bodies,
                       self.depth + 1, self.ctx, self.recurse, False)
-        r.alt_done = True
+        r.alt_done = alt
         self.made += r.run()
 
     def _certain_program(self, k: int) -> Optional[List[str]]:
@@ -2078,6 +2080,12 @@ class _Resolver:
             _sub(text, dialect, self.depth + 1, self.cd, self.ctx)
 
     def run(self, k: int = 0) -> List[Exec]:
+        self._run(k)
+        for j in self.after:                            # after the main reading, so its execs keep their order
+            self._sub_run([], j, alt=False)
+        return self.made
+
+    def _run(self, k: int = 0) -> List[Exec]:
         v, n = self.v, len(self.v)
         first = True
         while True:
@@ -2124,6 +2132,13 @@ class _Resolver:
                         continue
                     for cand in _program_candidates(v[k], self.d, self.ctx.root):
                         self._sub_run([cand], k)                # each program it CAN be; the "?" exec stays too
+                    if self.d == "bash" and self.y[k]:          # a glob word never expands to nothing
+                        # An unnamed program word may expand to NOTHING (`$R` unset, `$(true)`) or be a wrapper
+                        # (`$SUDO`): either way the NEXT word runs (MEASURED, Git Bash: `$R rm x` runs rm). Read the
+                        # words after it as the command too, with every reading a program word gets (candidates, and
+                        # this one again for `$A $B rm`); each hop is one nesting level, so MAX_DEPTH bounds the chain.
+                        if k + 1 < n:
+                            self.after.append(k)
                 elif not self.y[k]:
                     body = self.ctx.aliases.get(v[k] if self.d == "bash" else v[k].lower())
                     if body:
