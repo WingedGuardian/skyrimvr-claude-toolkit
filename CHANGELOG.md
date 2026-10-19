@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Guard: commands hidden behind a prefix. An assignment prefix holding a process
+  substitution (`X=<(echo a) rm -rf Data`, also after env/nohup or before
+  command/exec), and a program word the guard cannot name (`$R rm ...`,
+  `"$SUDO" rm ...`, `$(true) git reset --hard`), no longer hide the command that
+  runs. Still open: the same shapes inside `cmd /c` and PowerShell.
+
 - The Recycle Bin rule names the undoable shell delete (`SHFileOperation` with
   `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), which still prompts for an item too big
   for the bin. Only scratch a tool made in the same run may be deleted outright;
