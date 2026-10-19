@@ -77,7 +77,10 @@ def test_pristine_pass_precedes_each_measured_kill(tmp_path, monkeypatch, case, 
         assert calls[1][1] == b"VALUE = 2\n"
     assert not calls[0][0].parent.exists(), "owned scratch must be cleaned on failure too"
     assert (repo / "value.py").read_bytes() == original
-    assert (row / "mutated/value.py").read_bytes() == b"VALUE = 2\n"
+    if expected:    # a failing row keeps its copy for debugging, with the mutant reapplied
+        assert (row / "mutated/value.py").read_bytes() == b"VALUE = 2\n"
+    else:           # a killed row's whole-toolkit copy is removed (one local run once held ~25 GiB of them)
+        assert not (row / "mutated").exists()
 
 
 def test_pristine_timeout_cleans_scratch_and_reapplies_only_private_mutant(tmp_path, monkeypatch):

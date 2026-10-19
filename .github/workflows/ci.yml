@@ -305,14 +305,17 @@ jobs:
         run: bash scripts/setup-smoke.sh "${{ matrix.agent }}" "$RUNNER_TEMP/setup-smoke"
 
   behavior:
-    name: Behavioral tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    name: Behavioral tests (${{ matrix.os }}, Python ${{ matrix.python }}, ${{ matrix.part }})
     strategy:
       fail-fast: false
       # OS x the TESTED Python range (user ruling 2026-10-05: setup checks 3.10-3.13, so CI runs all four).
       # Node comes from .node-version on every leg; the .NET 10 toolchain has its own job below.
+      # x part: the mutation gate (tests/test_mutations.py) is its own job. It was 146-217 of a Windows leg's
+      # 270 minutes and one leg timed out (CI run 39210090486); each part is checked against its own numbers.
       matrix:
         os: [ubuntu-latest, windows-latest]
         python: ["3.10", "3.11", "3.12", "3.13"]
+        part: [suite, mutations]
     runs-on: ${{ matrix.os }}
     # The whole suite includes tests/test_mutations.py; a leg that hangs must die red, not stall for six hours.
     # 300 (the test_workflows cap): CI run 39167733692's full Windows suite took 176-190 min and two legs hit the
@@ -408,15 +411,19 @@ jobs:
         env:
           TOOLKIT_REQUIRE_HARNESS: "1"
           TOOLKIT_REQUIRE_NODE_DEPS: "1"
+          SUITE: ${{ matrix.part == 'mutations' && 'tests/test_mutations.py' || 'tests/ --ignore=tests/test_mutations.py' }}
         run: |
           set -o pipefail
-          python -B tests/run_harness_tests.py tests/ -v --durations=10 -rfEs | tee behavioral.log
+          python -B tests/run_harness_tests.py $SUITE -v --durations=10 -rfEs | tee behavioral.log
 
       # The skip ceiling, the xfail ceiling, every required module (harness-contained ones, hook deadlines, the
       # freeze gate, the release machinery; the platform's own) has a PASSED test, and the load test did not run.
+      # The mutation part has its own floor, ceilings and required module (.github/ci-leg.json parts.mutations).
       - name: Tripwire -- skip ceiling and required modules
         if: always()
-        run: python scripts/check_ci_leg.py log behavioral.log --leg "$RUNNER_OS"
+        env:
+          PART: ${{ matrix.part == 'mutations' && '--part mutations' || '' }}
+        run: python scripts/check_ci_leg.py log behavioral.log --leg "$RUNNER_OS" $PART
 
       # A COULD NOT CHECK skip means a test did not run. Linux has a daemon and the sentinel image,
       # so NOTHING may be unchecked there. On Windows the Docker daemon is the one expected absence
@@ -437,6 +444,7 @@ jobs:
       # platform this toolkit targets, so they run on both legs here too.
       # node_modules comes from the `npm ci` step above, so the FOMOD smoke runs here too and must not skip.
       - name: Node tests
+        if: matrix.part == 'suite'
         env:
           TOOLKIT_REQUIRE_NODE_DEPS: "1"
         run: npm test

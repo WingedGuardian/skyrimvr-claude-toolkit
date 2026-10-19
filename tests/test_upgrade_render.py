@@ -92,7 +92,8 @@ def test_rendered_interpreter_literals_roundtrip_unicode_and_single_quotes(tmp_p
         text = "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding\n" + "\n".join(assignments) + "; [Console]::Write($PY + '|' + $BASHEXE)"
         script.write_bytes((upgrade_render.BOM if raw.startswith(upgrade_render.BOM) else b"") + text.encode("utf-8"))
         command = [executable, "-NoProfile", "-NonInteractive", "-File", str(script)]
-    result = subprocess.run(command, capture_output=True, timeout=20)
+    # A hang guard, not a speed check: Windows PowerShell 5.1 cold starts passed 20 s on loaded CI runners.
+    result = subprocess.run(command, capture_output=True, timeout=120)
     assert result.returncode == 0, result.stderr
     assert result.stdout.decode("utf-8") == data["python"] + "|" + data["bash"]
 

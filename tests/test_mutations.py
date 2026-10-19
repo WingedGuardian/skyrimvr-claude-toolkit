@@ -9404,3 +9404,13 @@ MUTATIONS[:] = [
 MUTATIONS += [pytest.param("tools/skyguard/self_rules.py", "    cache = _StoreCache()\n", "    cache = None\n",
                            "tests/test_skyguard_self_rules.py::test_a_many_operand_command_reads_each_store_config_once",
                            id="save-store-config-read-once-per-decision")]
+
+# CI run 39210090486: the mutation gate became its own CI part per leg, checked against its own numbers.
+MUTATIONS += [
+    pytest.param(".github/workflows/ci.yml", "        part: [suite, mutations]", "        part: [suite]",
+                 "tests/test_workflows.py::test_the_tripwires_bracket_the_suite_on_every_leg",
+                 id="ci-mutation-part-dropped"),
+    pytest.param("scripts/check_ci_leg.py", "        spec = dict(spec, **spec[\"parts\"][part])", "        pass",
+                 "tests/test_ci_leg.py::test_a_part_is_checked_against_its_own_numbers",
+                 id="ci-leg-part-numbers-ignored"),
+]

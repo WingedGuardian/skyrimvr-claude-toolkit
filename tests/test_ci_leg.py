@@ -132,3 +132,51 @@ def test_a_missing_log_is_could_not_check_not_a_traceback(tmp_path):
                         "--spec", str(spec)], capture_output=True, text=True, timeout=60)
     assert r.returncode == 2 and "Traceback" not in r.stderr, r.stderr
     assert "COULD NOT CHECK: cannot read" in r.stdout and "behavioral.log" in r.stdout, r.stdout
+
+
+# --part: the mutation gate runs as its own CI job per leg, checked against its own numbers.
+PART_SPEC = dict(SPEC, parts={"m": {"collected_floor": 2, "skip_ceiling": {"Linux": 0, "Windows": 0},
+                                     "required_modules": {"all": ["test_m.py"], "Windows": [], "Linux": []}}})
+
+
+def _part_log(skipped=0, drop=()):
+    lines = ["collected 3 items", "", "tests/test_m.py::test_x PASSED  [ 50%]", "tests/test_m.py::test_y PASSED  [100%]",
+             "=== {} passed, {} skipped in 1.00s ===".format(3 - skipped, skipped)]
+    return "\n".join(l for l in lines if not any(d in l for d in drop)) + "\n"
+
+
+def _run_part(tmp_path, text, *extra, mode="log"):
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps(PART_SPEC), encoding="utf-8")
+    log = tmp_path / "x.log"
+    log.write_text(text, encoding="utf-8")
+    return subprocess.run([sys.executable, "-B", str(SCRIPT), mode, str(log), "--leg", "Linux", *extra,
+                           "--spec", str(spec)], capture_output=True, text=True, timeout=60)
+
+
+def test_a_part_is_checked_against_its_own_numbers(tmp_path):
+    assert _run_part(tmp_path, _part_log(), "--part", "m").returncode == 0
+    # the same log fails the top-level suite numbers: floor 10, and test_a.py never passed
+    assert _run_part(tmp_path, _part_log()).returncode == 1
+
+
+@pytest.mark.parametrize("text,why", [
+    (_part_log(skipped=1), "skipped > the Linux leg's ceiling 0"),
+    (_part_log(drop=("test_m.py",)), "required module test_m.py has no PASSED test"),
+])
+def test_each_part_tripwire_goes_red(tmp_path, text, why):
+    r = _run_part(tmp_path, text, "--part", "m")
+    assert r.returncode == 1 and why in r.stdout, r.stdout
+
+
+def test_an_unknown_part_or_a_part_in_collect_mode_is_exit_2(tmp_path):
+    assert _run_part(tmp_path, _part_log(), "--part", "nope").returncode == 2
+    assert _run_part(tmp_path, "collected 3 items\n", "--part", "m", mode="collect").returncode == 2
+
+
+def test_the_recorded_mutation_part_names_the_gate():
+    spec = json.loads((REPO / ".github" / "ci-leg.json").read_text(encoding="utf-8"))
+    part = spec["parts"]["mutations"]
+    assert set(part["skip_ceiling"]) == {"Linux", "Windows"}
+    assert part["required_modules"]["all"] == ["test_mutations.py"]
+    assert (REPO / "tests" / "test_mutations.py").is_file()

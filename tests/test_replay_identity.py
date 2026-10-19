@@ -169,7 +169,8 @@ def _directory_alias(link, target):
         result = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-Command",
             "$ErrorActionPreference='Stop'; New-Item -ItemType Junction -Path $env:REPLAY_LINK "
             "-Target $env:REPLAY_TARGET | Out-Null"],
-            env=dict(os.environ, REPLAY_LINK=str(link), REPLAY_TARGET=str(target)), capture_output=True, timeout=20,
+            # A hang guard, not a speed check: Windows PowerShell 5.1 cold starts passed 20 s on loaded CI runners.
+            env=dict(os.environ, REPLAY_LINK=str(link), REPLAY_TARGET=str(target)), capture_output=True, timeout=120,
             creationflags=subprocess.CREATE_NO_WINDOW)
         assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
     else:
