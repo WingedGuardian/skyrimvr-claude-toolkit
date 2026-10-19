@@ -315,7 +315,9 @@ jobs:
         python: ["3.10", "3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     # The whole suite includes tests/test_mutations.py; a leg that hangs must die red, not stall for six hours.
-    timeout-minutes: 240
+    # 300 (the test_workflows cap): CI run 39167733692's full Windows suite took 176-190 min and two legs hit the
+    # old 200-min step limit with no summary.
+    timeout-minutes: 300
     # Both legs block. Windows is the platform this toolkit actually targets and
     # every path bug it has shipped was Windows-specific, so a non-blocking
     # Windows leg would be a gate that cannot fail -- the exact defect this job
@@ -402,7 +404,7 @@ jobs:
         run: python -B tests/run_harness_tests.py tests/test_skyguard_timing.py tests/test_python_fallback.py tests/test_hook_deadline.py -q -rfEs
 
       - name: Behavioral suite (contained harness)
-        timeout-minutes: 200
+        timeout-minutes: 270
         env:
           TOOLKIT_REQUIRE_HARNESS: "1"
           TOOLKIT_REQUIRE_NODE_DEPS: "1"
