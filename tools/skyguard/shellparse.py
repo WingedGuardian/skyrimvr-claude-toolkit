@@ -68,7 +68,12 @@ AN EXEC:
 
 KNOWN LIMITS -- each gives a partial answer, never a "safe" one:
   - a program held in a variable (`$R reset-havok`): program "?", argv kept; rules must treat "?" as opaque.
-    In bash the words after it are ALSO read as the command (`$R rm x`: $R may be empty or a wrapper, and rm runs).
+    In bash the words after it are ALSO read as the command (`$R rm x`: $R may be empty or a wrapper, and rm runs);
+    so are cmd's (`%R% del x`, `!R! del x`) and a PowerShell `&`/`.` call's (`& $R Remove-Item x`). When a quoted word
+    follows, the joined words are also read as code (`$R 'rm x'` with R=eval, `& $R 'Remove-Item x'` with
+    Invoke-Expression). A concatenated name offers the programs its literal part can end (`%R%del`, `"$($R)-Item"`).
+    It stays "?" beside those readings, and a save in its words asks (S-SAVE-OPAQUE). Still unseen: a name built
+    entirely from variables (`$A$B`), and a string that a variable holds and an eval runs (`eval "$CODE"`).
     A `cd` behind such a word (`$R cd X`) keeps the directory before it: the cd runs only if $R is empty, and one
     directory cannot hold both readings (marking it unknown loosened `$R cd /tmp && rm -rf Data` in the install).
   - a quote-split token (`--ap""ply`, `r''m`): RESOLVED -- words are unquoted and concatenated as bash does.
@@ -124,6 +129,9 @@ class Parsed(NamedTuple):
     # own commands are execs as usual but the shell itself is not one, so a rule about the string reads it here.
     codes: Tuple[Tuple[str, str], ...] = ()
     xargs: Tuple[str, ...] = ()     # RT-A G2: the program each `xargs` runs (its first word after the options)
+    # The "?" execs whose program word offered NO candidate (no same-command assignment, default or literal part):
+    # the guard has no idea what runs. A save in their words asks the user (shell_rules, S-SAVE-OPAQUE).
+    unnamed: Tuple[Exec, ...] = ()
 
 
 class ParseError(Exception):
@@ -183,7 +191,7 @@ def _basename(word: str) -> str:
 def program_name(word: str, dialect: str, dynamic: bool = False) -> str:
     """The normalised program a command word names (see the module docstring)."""
     b = _basename(word)
-    if dynamic and (not b or "$" in b or "`" in b or "(" in b or "%" in b):
+    if dynamic and (not b or "$" in b or "`" in b or "(" in b or "%" in b or "!" in b):
         return "?"
     b = b.lower()
     for ext in _EXTS:
@@ -258,13 +266,14 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
 # ----------------------------------------------------------------------------------------------------------
 class _Ctx:
     __slots__ = ("tokens", "out", "frame_ids", "via_xargs", "root", "counts", "subst", "dialect", "poison", "unread",
-                 "aliases", "codes", "xargs")
+                 "aliases", "codes", "xargs", "unnamed")
 
     def __init__(self, root: str = "", dialect: str = ""):
         self.unread = False             # RT-A: decoded text runs as commands (Parsed.unread)
         self.aliases: dict = {}         # RT-A: same-command aliases, name -> body (bash alias, PowerShell Set-Alias)
         self.codes: List[Tuple[str, str]] = []      # RT-A G1/G2: Parsed.codes
         self.xargs: List[str] = []                  # RT-A G2: Parsed.xargs
+        self.unnamed: List[Exec] = []               # Parsed.unnamed
         self.tokens = 0
         self.out: List[Exec] = []
         self.frame_ids = 0
@@ -1606,6 +1615,9 @@ class _Pwsh(_Scanner):
 _CMD_PLAIN = re.compile(r'[^ \t\r\n\f\v",;=^&|<>()%]+')
 _CMD_BLANK = " \t\r\f\v,;="
 _CMD_VAR = re.compile(r"%%|%[^%\s]{1,256}%|%~?[A-Za-z0-9*]")
+# Delayed expansion (`cmd /v:on`, setlocal EnableDelayedExpansion): `!R! del x` runs del when R=call (MEASURED). With it
+# off the text is literal; reading it as dynamic is the stricter of the two.
+_CMD_DELAYED = re.compile(r"![^!\s]{1,256}!")
 _CMD_REM = re.compile(r"(?:rem(?=[ \t\r\n]|$)|::)", re.IGNORECASE)
 _CMD_REDIR_OPS = (">>", ">&", "<&", ">", "<")
 _CMD_REM_END = re.compile(r"[&|\n]")
@@ -1678,7 +1690,10 @@ class _Cmdexe(_Scanner):
                 continue
             m = _CMD_PLAIN.match(t, self.i)
             if m:
-                self._word(f).add(m.group())
+                w = self._word(f)
+                w.add(m.group())
+                if _CMD_DELAYED.search(m.group()):
+                    w.dyn = True
                 self.i = m.end()
                 continue
             if c == '"':
@@ -1688,6 +1703,8 @@ class _Cmdexe(_Scanner):
                 w = self._word(f)
                 w.quoted = True
                 w.add(t[self.i + 1:j])
+                if _CMD_DELAYED.search(t, self.i + 1, j):
+                    w.dyn = True
                 self.i = j + 1
             elif c == "^":
                 nx = t[self.i + 1] if self.i + 1 < n else ""
@@ -1934,8 +1951,13 @@ def _program_candidates(word: str, dialect: str, root: str) -> List[str]:
         found += _assigned_literals(root, nm, dialect)
     for sub in re.findall(r"\$\(([^()]{0,4096})\)|`([^`]{0,4096})`", word):
         found += _TOKEN.findall(sub[0] or sub[1])
-    base = _basename(_EXPANSION.sub("*", word)).lower()
-    if dialect == "bash" and re.search(r"[a-z0-9]", base) and ("*" in base or _glob_word(base)):
+    expanded = _EXPANSION.sub("*", word)
+    if dialect == "cmd":                            # `%R%del` / `!R!del`: R="call " runs del (MEASURED)
+        expanded = _CMD_DELAYED.sub("*", re.sub(r"%[^%\s]{1,256}%", "*", expanded))
+    base = _basename(expanded).lower()
+    # bash also globs a literal pattern word (`/???/r?`); cmd and PowerShell only an expansion's text, which may be
+    # anything (`& "$($R)-Item"` with R=Remove runs Remove-Item, MEASURED).
+    if re.search(r"[a-z0-9]", base) and ("*" in base or dialect == "bash" and _glob_word(base)):
         for alt in _brace_alts(base):
             found += [p for p in CANDIDATE_PROGRAMS if fnmatch.fnmatchcase(p, alt)]
     out: List[str] = []
@@ -1975,6 +1997,7 @@ class _Resolver:
         self.xargs = False
         self.alt_done = False         # RT-A: this resolver already IS one reading of an unproven program word
         self.after: List[int] = []    # the words after an unnamed program word, read as the command AFTER this one
+        self.no_candidate = False     # the "?" program word offered no candidate at all (Parsed.unnamed)
         self.strq: Optional[List[bool]] = None    # I4: PowerShell, per word: opens with a string quote (_ps_string)
         self.made: List[Exec] = []
 
@@ -2046,6 +2069,8 @@ class _Resolver:
                  body, self.ctx.subst)
         self.ctx.out.append(e)
         self.made.append(e)
+        if program == "?" and self.no_candidate:
+            self.ctx.unnamed.append(e)
         if self.xargs:                      # `... | xargs bash`, `xargs python`: the code arrives from stdin as args
             self.ctx.via_xargs.add(id(e))
             if program in ALL_SHELLS or (consumer_kind(program) == "interpreter" and _reads_code(e.argv)):
@@ -2087,6 +2112,11 @@ class _Resolver:
         self._run(k)
         for j in self.after:                            # after the main reading, so its execs keep their order
             self._sub_run([], j, alt=False)
+            # ...and as CODE: the unnamed word may be eval / Invoke-Expression / `cmd /c`, which join their arguments
+            # and run the result (MEASURED: `& $R 'Remove-Item -Recurse Data'` with R=Invoke-Expression deletes; bash
+            # `$R 'rm -rf Data'` with R=eval does too). Only when a quoted word groups text the word reading cannot.
+            if any(self.q[j + 1:]):
+                _sub_speculative(" ".join(self.v[j + 1:]), self.d, self.depth + 1, self.cd, self.ctx)
         return self.made
 
     def _run(self, k: int = 0) -> List[Exec]:
@@ -2134,14 +2164,19 @@ class _Resolver:
                         self.y = list(self.y[:k]) + [False] * len(certain) + list(self.y[k + 1:])
                         n = len(v)
                         continue
-                    for cand in _program_candidates(v[k], self.d, self.ctx.root):
+                    cands = _program_candidates(v[k], self.d, self.ctx.root)
+                    for cand in cands:
                         self._sub_run([cand], k)                # each program it CAN be; the "?" exec stays too
+                    self.no_candidate = not cands
                     # An unnamed program word may expand to NOTHING (`$R` unset, `$(true)`) or be a wrapper
                     # (`$SUDO`): either way the NEXT word runs (MEASURED, Git Bash: `$R rm x` runs rm). Read the
                     # words after it as the command too, with every reading a program word gets (candidates, and
                     # this one again for `$A $B rm`); each hop is one nesting level, so MAX_DEPTH bounds the chain.
-                    # A glob word (not dynamic) never expands to nothing.
-                    if self.d == "bash" and self.y[k] and k + 1 < n:
+                    # A glob word (not dynamic) never expands to nothing. cmd and a PowerShell `&`/`.` call
+                    # read the same way (MEASURED, Windows: `%R% del` with R=call or `cmd /c`, and `& $R Remove-Item`
+                    # with R=powershell, delete). PowerShell's `$R Remove-Item` without a call operator is a parse
+                    # error there and runs nothing.
+                    if self.y[k] and k + 1 < n and (self.d in ("bash", "cmd") or self.call):
                         self.after.append(k)
                 elif not self.y[k]:
                     body = self.ctx.aliases.get(v[k] if self.d == "bash" else v[k].lower())
@@ -2887,16 +2922,35 @@ def _sub(text: str, dialect: str, depth: int, cd: str, ctx: _Ctx, mode: str = "n
     _records_to_execs(sc)
 
 
+def _sub_speculative(text: str, dialect: str, depth: int, cd: str, ctx: _Ctx) -> None:
+    """_sub for text that MAY be code (what an eval-like wrapper would run), and usually is not: `"$PY" -c "<python>"`.
+    It never ends the parse and never marks it incomplete -- an incomplete parse sends many rules to their stricter text
+    fallbacks, so every such python one-liner would pay for a reading that is only a possibility. The commands it
+    completed before a parse error are still judged (`$R 'rm -rf x; ((('` keeps the rm)."""
+    if MAX_DEPTH < depth:                       # the same nesting bound as _sub (spelled apart: _sub's line is an anchor)
+        raise ParseError("nesting deeper than %d" % MAX_DEPTH)
+    sc = _SCANNERS[dialect](text, depth, cd, ctx, "n")
+    try:
+        sc.run()
+    except ParseError:
+        pass
+    try:
+        _records_to_execs(sc)
+    except ParseError:
+        pass
+
+
 def _parse_one(command: str, dialect: str) -> Parsed:
     ctx = _Ctx(command, dialect)
     try:
         _sub(command, dialect, 0, "", ctx)
-        return Parsed(tuple(ctx.out), True, "", ctx.unread, tuple(ctx.codes), tuple(ctx.xargs))
+        return Parsed(tuple(ctx.out), True, "", ctx.unread, tuple(ctx.codes), tuple(ctx.xargs), tuple(ctx.unnamed))
     except ParseError as e:
-        return Parsed(tuple(ctx.out), False, "%s: %s" % (dialect, e), ctx.unread, tuple(ctx.codes), tuple(ctx.xargs))
+        return Parsed(tuple(ctx.out), False, "%s: %s" % (dialect, e), ctx.unread, tuple(ctx.codes), tuple(ctx.xargs),
+                      tuple(ctx.unnamed))
     except Exception as e:  # a bug here must read as "could not parse", never as an allow
         return Parsed(tuple(ctx.out), False, "internal error: %s: %s" % (type(e).__name__, e), ctx.unread,
-                      tuple(ctx.codes), tuple(ctx.xargs))
+                      tuple(ctx.codes), tuple(ctx.xargs), tuple(ctx.unnamed))
 
 
 def parse(command: str, shell: str = "") -> Parsed:
@@ -2911,6 +2965,6 @@ def parse(command: str, shell: str = "") -> Parsed:
             return _parse_one(command, d)
         a, b = _parse_one(command, "bash"), _parse_one(command, "powershell")
         return Parsed(a.execs + b.execs, a.ok and b.ok, "; ".join(x for x in (a.why, b.why) if x),
-                      a.unread or b.unread, a.codes + b.codes, a.xargs + b.xargs)
+                      a.unread or b.unread, a.codes + b.codes, a.xargs + b.xargs, a.unnamed + b.unnamed)
     except Exception as e:
         return Parsed((), False, "internal error: %s: %s" % (type(e).__name__, e))

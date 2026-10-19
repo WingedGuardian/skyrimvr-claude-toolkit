@@ -6,7 +6,15 @@
   substitution (`X=<(echo a) rm -rf Data`, also after env/nohup or before
   command/exec), and a program word the guard cannot name (`$R rm ...`,
   `"$SUDO" rm ...`, `$(true) git reset --hard`), no longer hide the command that
-  runs. Still open: the same shapes inside `cmd /c` and PowerShell.
+  runs. The same holds in cmd (`%R% del`, `!R! del`, `%R%del`), in a PowerShell
+  `&` or `.` call (`& $R Remove-Item`, `& "$($R)-Item"`), and through
+  eval-like wrappers that run a quoted argument (`$R 'rm -rf Data'`,
+  `& $R 'Remove-Item ...'` with Invoke-Expression). Each form was measured
+  deleting a folder in real cmd.exe / Windows PowerShell 5.1 first.
+- Guard: a program the guard cannot name that is given a save now asks you
+  first (`S-SAVE-OPAQUE`). It may write, move or delete the save, or nothing;
+  if another reading of the command does change it, the pair is still backed
+  up before the question. `guards off` does not lift it.
 
 - The Recycle Bin rule names the undoable shell delete (`SHFileOperation` with
   `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), which still prompts for an item too big

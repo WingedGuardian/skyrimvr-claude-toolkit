@@ -52,6 +52,7 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
     "shell.S-SAVE-STORE": ("hook_only", _PATH + " (including ancestors of permanent recovery data)"),
     "write.W-SAVE-STORE": ("hook_only", "a file write to permanent recovery data, not a command"),
     "shell.S-SAVE-BACKUP-FAILED": ("hook_only", "the backup's own failure at run time, not a command"),
+    "shell.S-SAVE-OPAQUE": ("hook_only", _PATH + " (and the program word is one no prefix can name)"),
     # Plan 6 Task 11: hook_only. A `forbidden` prefix could also refuse the USER's own `!` command (not measured),
     # and running skyguard-unlock.cmd / `lock disable` themselves is what a Codex user is told to do; the operand of
     # S-LIFT-RAW is path-based. The ask of S-LIFT-PERMANENT reaches Codex as a deny through the adapter (R4).

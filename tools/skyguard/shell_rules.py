@@ -20,6 +20,7 @@ from . import rules
 from . import saves
 from . import self_rules
 from . import shellparse
+from . import targets
 from . import writes
 from .verdict import Advice, Verdict
 
@@ -230,6 +231,21 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     return saves.judge(change, v, audit, HOOK)
 
 
+def _opaque_save(parsed, roots, cwd, env) -> str:
+    """The first save (by name) an exec carries in its words or redirects when the guard has no idea what its program is
+    (Parsed.unnamed: "?" with no candidate), or "". A word with candidates (`R=$(echo resaver-cli.sh); $R ...`) is read
+    as each of them, and the save rules count and back up what those readings change."""
+    for e in parsed.unnamed:
+        if _resaver_op(e):                  # read as ReSaver by its operation (resaver_write_calls): counted, backed up
+            continue
+        e = deletes.substituted(e)
+        for w in list(e.argv) + [t for _, t in e.redirects]:
+            a = targets.resolve_operand(e, w, cwd, env)
+            if writes.is_save(a, roots):
+                return os.path.basename(a)
+    return ""
+
+
 def _ordered(command, parsed, dels, wr, own, roots, audit, cwd, shell, env) -> Verdict:
     """decide()'s rules after the NEVER_SHADOW denies, in the bash file's order (the first refusal wins)."""
     advice = Advice()
@@ -300,6 +316,13 @@ def _ordered(command, parsed, dels, wr, own, roots, audit, cwd, shell, env) -> V
     if git:
         reason = rules.message("S-GIT-DISCARD", file=git)
         audit.rule(HOOK, "S-GIT-DISCARD", "ask", reason)
+        return Verdict("ask", reason)
+    # User ruling 2026-10-19 ("ask first"): an unnamed program word naming a save. saves.judge still backs up a save
+    # another reading changes, and keeps this ask beside its note.
+    opaque = _opaque_save(parsed, roots, cwd, env)
+    if opaque:
+        reason = rules.message("S-SAVE-OPAQUE", file=opaque)
+        audit.rule(HOOK, "S-SAVE-OPAQUE", "ask", reason)
         return Verdict("ask", reason)
 
     # Plan 6 Task 11 (R7): a persistent `lock disable` is the user's to approve (deny on Codex, via the adapter).

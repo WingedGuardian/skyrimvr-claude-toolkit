@@ -47,7 +47,7 @@ LIMIT = 2                                 # saves one call may change without th
 NOTE_BEFORE = "restore: tools/skyguard.sh snapshot list --kind save"
 # The refusals a guards-off lift must not loosen (engine.NEVER_SHADOW).
 NEVER_SHADOW = frozenset(("shell.S-SAVE-APPROVAL", "shell.S-SAVE-UNKNOWN", "shell.S-SAVE-BACKUP-FAILED",
-                          "shell.S-DEVBENCH-SAVE", "shell.S-RESAVER-APPLY"))
+                          "shell.S-DEVBENCH-SAVE", "shell.S-RESAVER-APPLY", "shell.S-SAVE-OPAQUE"))
 
 
 class Target(NamedTuple):

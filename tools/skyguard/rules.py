@@ -383,6 +383,18 @@ RULES = {
         'Approve only if you asked for those changes to be discarded.'
     ),
     },
+    # 2026-10-19 (user ruling, "ask first"): a program the guard cannot name (`$R`, `%R%`, `& $R`) whose words name a
+    # save. It may write, move or delete the save, or do nothing; the guard cannot count that change or back it up first.
+    'S-SAVE-OPAQUE': {
+        "decision": 'ask',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'This runs a program the guard cannot name on the save {file}.\n'
+        'Approve only if you asked for this save to be used this way.'
+    ),
+    },
     'S-DEVBENCH-CRASH': {
         "decision": 'deny',
         "hook": 'protect-bash',

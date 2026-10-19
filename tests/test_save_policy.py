@@ -19,7 +19,7 @@ import pytest
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import (audit as audit_mod, backup, engine, mcp_rules, paths, recovery, rules,  # noqa: E402
+from skyguard import (audit as audit_mod, backup, codes, engine, mcp_rules, paths, recovery, rules,  # noqa: E402
                       saves, shell_rules, snapcli, snapshot, write_rules)
 from skyguard import save_store
 from modding_harness import approval as scoped_approval, durable, preservation, workspace
@@ -709,6 +709,35 @@ def test_guards_off_does_not_lift_a_bulk_save_change(inst, tmp_path):
     assert (kept.decision, kept.code) == ("deny", "shell.S-SAVE-APPROVAL")
     other = codes.classify(Verdict("deny", rules.message("S-DEL-INSTALL", file="x.nif")))
     assert engine.shadow(other, str(project), sid, str(hb), audit_mod.Audit(str(project)), now=now).decision == "allow"
+
+
+def test_an_unnamed_program_naming_a_save_asks_and_a_change_it_hides_is_still_backed_up(inst):
+    """User ruling 2026-10-19 ("ask first"): `$R <save>` may write, move or delete it -- the guard cannot tell. When a
+    reading of the same command does change the save (`$R cp a.ess <save>`: R empty runs cp), the pair is still backed
+    up before the ask goes to the user."""
+    v = inst.shell("$R " + inst.p("Save1.ess"))
+    assert (v.decision, codes.classify(v).code) == ("ask", "shell.S-SAVE-OPAQUE"), v
+    v = inst.enforce(inst.shell("$R cp a.ess " + inst.p("Save1.ess")))
+    assert (v.decision, codes.classify(v).code) == ("ask", "shell.S-SAVE-OPAQUE") and len(inst.saved()) == 2, v
+    assert inst.shell("echo " + inst.p("Save1.ess")).decision == "allow"       # twin: a NAMED program
+    # twin: a word WITH a candidate (`${R:-rm}`: rm) is read as it; that reading's save change is counted and backed up
+    v = inst.shell("${R:-rm} " + inst.p("Save1.ess"))
+    assert (v.decision, codes.classify(v).code) == ("allow", "shell.S-SAVE-BACKUP"), v
+
+
+def test_guards_off_does_not_lift_the_unnamed_program_save_ask(inst, tmp_path):
+    from skyguard import state
+    now, sid = 1_800_000_000.0, "sess-opaque"
+    project, hb = tmp_path / "proj", tmp_path / "hb"
+    state.write(str(project / ".skyguard" / "state.json"), {"v": 1, "persistent": {}, "lifts": [
+        {"kind": "guards", "reason": "t", "session_id": sid, "agent": "claude", "created": now - 60,
+         "expires_at": now + 3600}]})
+    f = hb / "sessions" / (sid + ".log")
+    f.parent.mkdir(parents=True)
+    f.write_text("{:.6f} start startup t.jsonl\n".format(now - 120), encoding="utf-8")
+    asked = codes.classify(inst.shell("$R " + inst.p("Save1.ess")))
+    kept = engine.shadow(asked, str(project), sid, str(hb), audit_mod.Audit(str(project)), now=now)
+    assert (kept.decision, kept.code) == ("ask", "shell.S-SAVE-OPAQUE")
 
 
 def test_codex_bulk_change_reads_only_the_tui_users_approval(inst):

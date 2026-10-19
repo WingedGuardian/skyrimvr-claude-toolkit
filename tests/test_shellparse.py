@@ -182,6 +182,60 @@ def test_a_named_program_with_dynamic_arguments_gets_no_second_reading(cmd, prog
         assert p.execs[-1].program == program
 
 
+# The same class in cmd and PowerShell, and through eval-like wrappers. MEASURED 2026-10-19 on Windows (cmd.exe /v:on,
+# Windows PowerShell 5.1), each deleting ./Data in a scratch folder: `%R% del` and `!R! del` with R=call or `cmd /c`;
+# `%R%del` with R="call "; `& $R Remove-Item` and `. $R Remove-Item` with R=powershell; `& $R 'Remove-Item ...'` with
+# R=Invoke-Expression; `& "$($R)-Item"` with R=Remove; bash `$R 'rm -rf x'` with R=eval. Unset/invalid values deleted
+# nothing; `$R Remove-Item` without `&` is a PowerShell parse error.
+@pytest.mark.parametrize("cmd,shell,program", [
+    ("%R% del /s /q x", "cmd", "del"),
+    ("!R! del /s /q x", "cmd", "del"),
+    ('"!R!" del /s /q x', "cmd", "del"),
+    ("%R%del /s /q x", "cmd", "del"),
+    ('%R% "del /s /q x"', "cmd", "del"),
+    ('cmd /c "%R% del /s /q x"', "bash", "del"),
+    ("& $R Remove-Item -Recurse x", "powershell", "remove-item"),
+    (". $R Remove-Item -Recurse x", "powershell", "remove-item"),
+    ("& $R 'Remove-Item -Recurse x'", "powershell", "remove-item"),
+    ('& "$($R)-Item" -Recurse x', "powershell", "remove-item"),
+    ('pwsh -c "& $R Remove-Item -Recurse x"', "bash", "remove-item"),
+    ("$R 'rm -rf x'", "bash", "rm"),
+    ('$R "a; rm -rf x"', "bash", "rm"),
+])
+def test_an_unnamed_program_hides_nothing_in_cmd_powershell_or_eval(cmd, shell, program):
+    assert find(cmd, program, shell).argv[-1] == "x"
+
+
+def test_a_speculative_eval_reading_keeps_what_it_completed():
+    """eval runs the commands it parsed before a syntax error (`rm` runs in `eval 'rm -rf x; ((('`), and so the
+    reading keeps them; a command after the error never ran, so it is not read either."""
+    assert find("$R 'rm -rf x; ((('", "rm").argv == ("-rf", "x")
+    assert "rm" not in progs("$R '((( ; rm -rf x'")
+
+
+@pytest.mark.parametrize("cmd", [
+    '"$PY" -c "import os; print(\'(\')"; rm -rf y',             # python code is no shell: the rm after it is still read
+    '"$X" -c "' + "a>b " * 3000 + '"; rm -rf y',                 # over the token cap: the reading is dropped, not the parse
+])
+def test_a_speculative_eval_reading_never_ends_or_marks_the_parse(cmd):
+    p = parse(cmd, "bash")
+    assert p.ok, p.why                  # an incomplete parse would send rules to their stricter text fallbacks
+    assert find(cmd, "rm").argv == ("-rf", "y")
+
+
+@pytest.mark.parametrize("cmd,shell,program", [
+    ("echo !R! del x", "cmd", "del"),                      # a NAMED program prints them
+    ("$R Remove-Item -Recurse x", "powershell", "remove-item"),   # no call operator: a parse error, nothing runs
+    ("Write-Output $R Remove-Item x", "powershell", "remove-item"),
+    ("echo $R 'rm -rf x'", "bash", "rm"),
+])
+def test_a_named_program_or_no_call_gets_no_cmd_or_powershell_reading(cmd, shell, program):
+    """Twins: the readings belong to an UNNAMED program word that can actually run."""
+    p = parse(cmd, shell)
+    assert p.ok, (cmd, p.why)
+    assert program not in [e.program for e in p.execs], (cmd, [(e.program, e.argv) for e in p.execs])
+
+
 @pytest.mark.parametrize("cmd", [
     "$R $(echo rm) -rf x", "$R ${RM:-rm} -rf x", "$R `which rm` -rf x", "$R r${X}m -rf x", "$A $B $(echo rm) -rf x",
 ])
@@ -423,7 +477,7 @@ def test_cd_inside_a_subshell_applies_inside_it():
     ("a; b | c && d || e\nf", ["a", "b", "c", "d", "e", "f"]),
     ("Get-ChildItem |\n Remove-Item", ["get-childitem", "remove-item"]),
     ("& 'C:/tools/x.exe' a", ["x"]),
-    ("& $exe a", ["?"]),
+    ("& $exe a", ["?", "a"]),          # $exe may be a wrapper (R=powershell runs `a`, MEASURED): `a` is read too
     (". ./setup.ps1", ["setup"]),
 ])
 def test_pwsh_separators_and_call(cmd, expected):
