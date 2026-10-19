@@ -286,9 +286,12 @@ def test_launch_logs_gzip_after_a_week_recycle_after_ninety_days_and_labelled_fo
 def test_a_gzip_that_does_not_round_trip_keeps_the_original(tree, monkeypatch):
     f = write(tree / "launches" / "x" / "SkyrimNet.log", blob("log", 100_000))
     action = {"class": "gzip", "path": str(f), "bytes": f.stat().st_size, "hash": "0" * 32}
+    fake = bin_for(tree)               # the bad .gz goes to a bin -- never the user's real one, and not Windows-only
+    monkeypatch.setattr(hk, "recycle", fake)
     with pytest.raises(OSError, match="round trip"):
         hk.compress(action)
     assert f.exists() and not (f.parent / "SkyrimNet.log.gz").exists()
+    assert [os.path.basename(p) for p in fake.got] == ["SkyrimNet.log.gz"]
 
 
 # --------------------------------------------------------------------------- legacy snapshots

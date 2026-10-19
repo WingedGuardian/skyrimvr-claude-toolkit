@@ -262,9 +262,8 @@ Coverage and gaps: `docs/guard-coverage.md`.
   install goes through `tools/mod-install.py`: dry run first, read every destination, then `--apply`
   (backups + manifest) and check the result. (The user's **own** in-development mod files are fine.)
 - **Delete to the Recycle Bin, never permanently.** Windows: the shell delete (`SHFileOperation` with
-  `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), not `rm`/`Remove-Item`. Only scratch made in the same run may go
-  outright; too big for the bin -> ask first. The guard judges a Recycle-Bin delete like any delete.
-- Retention: `docs/RETENTION.md`, `tools/housekeep.py`. `cleanupPeriodDays`: user settings only.
+  `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), not `rm`/`Remove-Item`; only same-run scratch goes outright; too big
+  for the bin -> ask. The guard judges these like any delete. Retention: `docs/RETENTION.md`.
 - **Never push CPU, RAM, free disk, disk I/O or GPU past 80% of the machine**, counting what already
   runs (games, other sessions). Measure first; if it won't fit, wait, shrink or ask. Stress tests: never
   one worker per core, idle priority, time-boxed.

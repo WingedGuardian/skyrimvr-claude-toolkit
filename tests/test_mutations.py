@@ -9385,6 +9385,8 @@ MUTATIONS += [
 _LATE_WINDOWS_ONLY = {
     "setup-native-python-renderer-path": "$PY_ROOT and $GAME_ROOT_WIN name the same folder off Windows",
     "setup-native-python-encoding-target": "$PY_ROOT and $GAME_ROOT_WIN name the same folder off Windows",
+    # 0x400 is FILE_ATTRIBUTE_REPARSE_POINT; off Windows st_file_attributes is absent and is_symlink() alone skips the link
+    "housekeep-sweep-follows-junctions": "the junction attribute exists only on Windows",
 }
 _LATE_WINDOWS_ONLY.update({"ordered-policy-" + name: "the reviewed personal-policy upgrade refuses off Windows, so "
                            "every tests/test_ordered_policy.py anchor skips there" for name in (
