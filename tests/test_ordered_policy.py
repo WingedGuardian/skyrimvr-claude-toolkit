@@ -192,7 +192,9 @@ def test_only_documented_wrapper_normalizations_are_accepted(ordered, variant):
     if variant == 'python-path':
         raw = raw.replace(b'C:/Tools/Python/python.exe', b'C:/Other Python/python.exe')
     else:
-        raw = b'\xef\xbb\xbf' + raw.replace(b'\n', b'\r\n')
+        # From LF first: `*.ps1 eol=crlf` checks the fixture out CRLF, and CRLF -> `\r\r\n` is not a documented
+        # normalization (CI run 39167733692, every Windows leg). A BOM plus exactly CRLF is.
+        raw = b'\xef\xbb\xbf' + raw.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
     wrapper.write_bytes(raw)
     completed, response = stage()
     assert completed.returncode == 0 and response['ordered_integration_available'], response
