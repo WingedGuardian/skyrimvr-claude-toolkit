@@ -1100,7 +1100,9 @@ class _Bash(_Scanner):
     def _redirect(self, f):
         t, i = self.t, self.i
         if t.startswith("(", i + 1):                            # <( ... ) / >( ... ) process substitution
-            self.end_word(f)
+            # It joins the word it touches, as bash does (`X=<(echo a) rm x`: X=/dev/fd/63, and rm is the program;
+            # `a<(true)b` is ONE word). Ending the word here made `X=` the assignment and the substitution the
+            # program ("?"), so every rule that names a program missed the `rm` after it.
             self._push(f, "proc", i, True)
             self.i = i + 2
             return

@@ -102,6 +102,60 @@ def test_bash_assignment_prefixes_skipped():
     assert progs("A=1") == []
 
 
+# An assignment prefix whose value holds a substitution: the WHOLE `NAME=value` is one word, so the program is the word
+# after it. MEASURED 2026-10-19 (Git Bash 5): bash joins `<( )` / `>( )` to the text around it (`X=<(echo a)` ->
+# X=/dev/fd/63, `a<(true)b` -> a/dev/fd/63b) and runs `rm` in every row below. Before the fix the parser ended the word
+# at `<(`, so `X=` was the assignment, the process substitution became the PROGRAM ("?") and `rm` an argument of it.
+# Each row is a grammar class (substitution kind, spacing inside it, nesting, text glued after or before it, append
+# and element assignments, several prefixes, a wrapper before or after the prefix), not one shape.
+ASSIGN_PREFIX_CLASS = [
+    "X=<(echo a) rm -rf x", "X=>(cat) rm -rf x", "X=<( echo a ) rm -rf x", "X=<(echo $(echo a)) rm -rf x",
+    "X=<(echo a)b rm -rf x", "X=a<(echo b) rm -rf x", 'X="a"<(echo b) rm -rf x', "X+=<(echo a) rm -rf x",
+    "X[0]=<(echo a) rm -rf x", "X=<(echo a) Y=<(echo b) rm -rf x", "X=$(echo a) Y=<(echo b) rm -rf x",
+    "env X=<(echo a) rm -rf x", "env -i X=<(echo a) rm -rf x", "nohup env X=<(echo a) rm -rf x",
+    "X=<(echo a) command rm -rf x", "X=<(echo a) exec rm -rf x", "X=<(echo a) nohup rm -rf x",
+    "X=<(echo a) env rm -rf x", "X=>(cat) Y=>(cat) env rm -rf x", "a; X=<(echo a) rm -rf x", "a | X=<(echo a) rm -rf x",
+    # the classes that already parsed: pinned so a fix for the one above cannot break them
+    "X=$(echo a) rm -rf x", "X=$(echo a b) rm -rf x", "X=`echo a` rm -rf x", "X=`echo a b` rm -rf x",
+    "X=$((1 + 2)) rm -rf x", "X=${Y:-a b} rm -rf x", "X=${Y:-$(echo a b)} rm -rf x", 'X="<(echo a)" rm -rf x',
+    "X='a b' rm -rf x", 'X="a b" rm -rf x', "X=a" + BS + " b rm -rf x", "env X=$(echo a b) rm -rf x",
+]
+
+
+@pytest.mark.parametrize("cmd", ASSIGN_PREFIX_CLASS)
+def test_assignment_prefix_holding_a_substitution_is_one_word(cmd):
+    p = parse(cmd, "bash")
+    assert p.ok, (cmd, p.why)
+    assert "?" not in [e.program for e in p.execs], (cmd, [(e.program, e.argv) for e in p.execs])
+    assert find(cmd, "rm").argv == ("-rf", "x")
+
+
+@pytest.mark.parametrize("cmd,inner", [
+    ("X=<(rm -rf y) rm -rf x", ("-rf", "y")), ("X=>(rm -rf y) rm -rf x", ("-rf", "y")),
+    ("X=a<(rm -rf y)b rm -rf x", ("-rf", "y")),
+])
+def test_assignment_prefix_substitution_still_runs_its_command(cmd, inner):
+    """Twin: joining the substitution to the word must not stop its own command being parsed as one that RUNS."""
+    p = parse(cmd, "bash")
+    assert p.ok, (cmd, p.why)
+    assert sorted(e.argv for e in p.execs if e.program == "rm") == sorted([inner, ("-rf", "x")])
+
+
+@pytest.mark.parametrize("cmd,argv", [
+    ("echo a<(true)b", 1), ("echo 2<(true)", 1), ('echo "q"<(true)', 1), ("echo x>(true)", 1),
+    ("echo a <(true)", 2), ("cat <(rm -rf x) y", 2),
+])
+def test_process_substitution_joins_the_word_it_touches(cmd, argv):
+    """MEASURED (Git Bash): `echo a<(true)b` prints a/dev/fd/63b, `echo 2<(true)` 2/dev/fd/63 -- one word each. A blank
+    before `<(` starts a new word (the twin rows)."""
+    assert len(find(cmd, "cat" if cmd.startswith("cat") else "echo").argv) == argv
+
+
+def test_an_assignment_alone_runs_only_its_substitution():
+    assert progs("X=<(echo a)") == ["echo"]
+    assert progs("X=<(echo a) Y=>(cat)") == ["echo", "cat"]
+
+
 @pytest.mark.parametrize("cmd", [
     "sudo rm -rf x", "sudo -u root rm -rf x", "env rm -rf x", "env -i A=1 B=2 rm -rf x", "command rm -rf x",
     "builtin rm -rf x", "exec rm -rf x", "nohup rm -rf x &", "time rm -rf x", "time -p rm -rf x",
