@@ -19,11 +19,11 @@ This file burns CPU on purpose, so it runs only with SKYGUARD_LOAD_TEST=1:
   SKYGUARD_LOAD_MAX_S    hard time box per burner in seconds (default 300): a burner stops itself then
   SKYGUARD_LOAD_PRIORITY "idle" (default) or "normal" -- see the resource budget below
 
-Resource budget (user rule 2026-10-05: never push any resource past 80% of the machine, counting what
-already runs; load generators never one worker per core, idle priority, time-boxed, tree-killed; and
-CPU-heavy test work at most 50% of the machine):
+Resource budget (unified user rule 2026-10-19: self-started work shares at most 40% of CPU; machine
+load stays under the 80% admission line, counting what already runs; load generators never one worker
+per core, idle priority, time-boxed, tree-killed):
   * before any burner starts, machine CPU use is MEASURED over 3 s; the cell runs only if
-    busy + pinned cores <= 80% of the logical CPUs AND pinned cores <= 50% of them -- otherwise the
+    busy + pinned cores <= 80% of the logical CPUs AND pinned cores <= 40% of them -- otherwise the
     test SKIPS and prints the numbers (it never "just runs");
   * the burners are pinned to the cell's cores, so however many there are they can take at most CORES
     CPUs of the machine;
@@ -66,8 +66,8 @@ DEF_TIMEOUT = 60          # the frozen PreToolUse definition timeout, both agent
 CAP = 240                 # a run still going after this is recorded as >= CAP and stopped
 MAX_S = int(os.environ.get("SKYGUARD_LOAD_MAX_S", "300"))
 PRIORITY = os.environ.get("SKYGUARD_LOAD_PRIORITY", "idle")
-MACHINE_CAP = 0.80        # user rule: no resource past 80% of the machine, counting what already runs
-CPU_HEAVY_CAP = 0.50      # user rule: CPU-heavy test work at most 50% of the machine
+MACHINE_CAP = 0.80        # admission line: machine load under 80%, counting what already runs
+CPU_HEAVY_CAP = 0.40      # user rule 2026-10-19: self-started work shares at most 40% of CPU
 IDLE_PRIORITY_CLASS = 0x00000040
 
 

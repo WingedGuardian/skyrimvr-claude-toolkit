@@ -262,9 +262,9 @@ Coverage and gaps: `docs/guard-coverage.md`.
 - **Delete to the Recycle Bin, never permanently.** Windows: `Microsoft.VisualBasic.FileIO.FileSystem`
   `DeleteFile`/`DeleteDirectory` with `SendToRecycleBin`, not `rm`/`Remove-Item`. A permanent delete
   needs the user's OK; a tool's own temp files are exempt. The guard judges a Recycle-Bin delete like any delete.
-- **Never push CPU, RAM, free disk, disk I/O or GPU past 80% of the machine**, counting what already
-  runs (games, other sessions). Measure first; if it won't fit, wait, shrink or ask. Stress tests: never
-  one worker per core, idle priority, time-boxed.
+- **Resources: limit work you start yourself** (tests, scans, parallel agents): together <=40% CPU, <=25%
+  RAM, <=8 workers, low priority; probes idle, time-boxed. The game and user-directed work are exempt.
+  Hard floor: system drive keeps min(pagefile, 50 GB) free. Flag only what could reach a floor.
 
 ### Safety improvement loop
 After every session, near-miss or surprise, ask whether a new guard rule, protection or knowledgebase entry would have caught it -- proactively, when you notice a gap. Record proposals in a "Hook Candidates" section of `KNOWLEDGEBASE.local.md`.
