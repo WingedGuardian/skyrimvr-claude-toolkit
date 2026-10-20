@@ -98,8 +98,11 @@ build_inventory() {
     local base rec
     base="$(basename "$f" .yaml)"
     rec="${base%% - *}"          # EditorID (strip ' - FORMID_Master' suffix)
-    # FormKey-style tokens: 6 hex digits, colon, master file name.
-    { grep -oE '[0-9A-Fa-f]{6}:[A-Za-z0-9 ._-]+\.(esp|esm|esl)' "$f" || true; } \
+    # FormKey-style tokens: 6 hex digits, colon, master file name. The name is any run of characters Windows
+    # allows in a file name -- ( ) [ ] ' & + , included: `Dawn of Skyrim (Director's Cut).esp` and
+    # `[COCO] Lingerie.esp` are real masters, and a token the inventory cannot see is a remap it cannot catch
+    # (review L5 F2). The colon of the next FormKey on a line stops the match.
+    { grep -oE '[0-9A-Fa-f]{6}:[^:*?"<>|/\\]+\.(esp|esm|esl)' "$f" || true; } \
       | while IFS= read -r tok; do printf '%s\t%s\n' "$rec" "$tok"; done
   done | sort > "$out"
   rm -rf "$tmp"

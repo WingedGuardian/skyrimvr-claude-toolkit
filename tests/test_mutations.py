@@ -4238,6 +4238,13 @@ MUTATIONS += [
                  "    : | awk -F'\\t'",
                  "tests/test_esp_verify.py::test_allow_empty_still_lists_the_references_that_appeared",
                  id="esp-verify-allow-empty-hides-additions"),
+    # Review L5 F2: the old name class, which never saw a master with ( ) [ ] ' & + or a comma.
+    pytest.param("tools/esp-verify-wrapper.sh",
+                 """grep -oE '[0-9A-Fa-f]{6}:[^:*?"<>|/\\\\]+\\.(esp|esm|esl)'""",
+                 """grep -oE '[0-9A-Fa-f]{6}:[A-Za-z0-9 ._-]+\\.(esp|esm|esl)'""",
+                 "tests/test_esp_verify.py::"
+                 "test_a_master_with_brackets_parentheses_or_an_apostrophe_is_inventoried_and_its_remap_caught",
+                 id="esp-verify-odd-master-names-unseen"),
 
     pytest.param("scripts/check_could_not_check.py",
                  'if skipped and not any("short test summary info" in line for line in lines):',

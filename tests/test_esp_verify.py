@@ -21,6 +21,10 @@ case "${FAKE_SPRIGGIT_MODE:-none}" in
   none) ;;
   noref) printf 'EditorID: Lonely\\n' > "$out/Lonely - 000800_Mod.esp.yaml" ;;
   refs) printf 'Keyword: 013794:Skyrim.esm\\n' > "$out/Thing - 000800_Mod.esp.yaml" ;;
+  odd) printf '%s\\n' "Race: 012345:Dawn of Skyrim (Director's Cut).esp" "Keyword: 0A0B0C:[COCO] Lingerie & Co+, v2.esp" \
+         "Keyword: 013794:Skyrim.esm" > "$out/Thing - 000800_Mod.esp.yaml" ;;
+  odd-remapped) printf '%s\\n' "Race: 012345:Patch.esp" "Keyword: 0A0B0C:[COCO] Lingerie & Co+, v2.esp" \
+         "Keyword: 013794:Skyrim.esm" > "$out/Thing - 000800_Mod.esp.yaml" ;;
 esac
 exit 0
 """
@@ -74,6 +78,18 @@ def test_a_populated_inventory_still_passes_without_the_flag(tmp_path):
     r = _run(tmp_path, "refs", "verify")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "PASS" in r.stdout
+
+
+def test_a_master_with_brackets_parentheses_or_an_apostrophe_is_inventoried_and_its_remap_caught(tmp_path):
+    """Review L5 F2: the inventory matched only [A-Za-z0-9 ._-] names, so a FormKey into `Dawn of Skyrim (Director's
+    Cut).esp` was never seen and its remap to a local plugin read as "reference added (info)" -> PASS."""
+    r = _run(tmp_path, "odd", "snapshot")
+    assert r.returncode == 0 and "3 cross-references" in r.stderr, r.stdout + r.stderr
+    r = _run(tmp_path, "odd-remapped", "verify")
+    assert r.returncode != 0 and "MASTER CHANGED" in r.stdout, r.stdout + r.stderr
+    assert "Dawn of Skyrim (Director's Cut).esp" in r.stdout and "012345:Patch.esp" in r.stdout
+    r = _run(tmp_path, "odd", "verify")                      # twin: the same odd names, unchanged, still PASS
+    assert r.returncode == 0 and "PASS" in r.stdout, r.stdout + r.stderr
 
 
 def test_allow_empty_still_lists_the_references_that_appeared(tmp_path):
