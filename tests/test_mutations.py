@@ -3448,7 +3448,7 @@ _T9_CLAUSES = [
     ("rule-S-WRITE-PLUGIN-fallback-arrow", _WR, r'''_REDIRECT_TARGET = re.compile(r"""[0-9&*]?(?<![=\-])>''',
      r'''_REDIRECT_TARGET = re.compile(r"""[0-9&*]?>''', "fallback-arrow"),
     ("rule-S-WRITE-PLUGIN-fallback-quoted", _WR, '''(?:"([^"\\n]*)"|'([^'\\n]*)'|''',
-     '''(?:"()"|'()'|''', "fallback-redirect-esp"),
+     '''(?:"()"|'()'|''', "fallback-redirect-esp-heredoc"),
     ("rule-S-WRITE-PLUGIN-copy-null", _WR,
      '            if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):',
      "            if False:", "cp-devnull-esp"),
@@ -3460,7 +3460,7 @@ _T9_CLAUSES = [
     ("rule-S-REGISTRY-parse-fail", _AN, "        return _legacy_registry(command)\n", "        return False\n",
      "reg-parse-fail"),
     ("rule-S-REGISTRY-opaque", _AN, "    if any(_legacy_registry(t) for t in _opaque_texts(parsed.execs)):",
-     "    if False:", "reg-opaque-cmd"),
+     "    if False:", "reg-opaque-heredoc"),
     ("rule-S-REGISTRY-opaque-pipe", _AN, "    if any(_legacy_registry(t) for t in _opaque_texts(parsed.execs)):",
      "    if any(_legacy_registry(t) for t in _opaque_texts([e for e in parsed.execs if e.stdin_from != 'pipe'])):",
      "reg-pipe-sh"),
@@ -6579,11 +6579,11 @@ _P5F_CLAUSES = [
      '        return [(dst[0] if dst else ".", src)] if src or e.stdin_from == "pipe" else []',
      '        return [(dst[0] if dst else ".", src)] if src else []', _p5f("pipe-copy-onto-save")),
     # D2: the documented ask count drifts from the registry again (core.md, README, safety-philosophy).
-    ("p5f-core-md-ask-count-stale", "agent/instructions/core.md", "### ASKS THE USER -- three rules",
-     "### ASKS THE USER -- two rules", _DOCS + "[core]"),
-    ("p5f-readme-ask-count-stale", "README.md", "Only three rules ask *you*", "Only two rules ask *you*",
+    ("p5f-core-md-ask-count-stale", "agent/instructions/core.md", "### ASKS THE USER -- four rules",
+     "### ASKS THE USER -- three rules", _DOCS + "[core]"),
+    ("p5f-readme-ask-count-stale", "README.md", "Only four rules ask *you*", "Only three rules ask *you*",
      _DOCS + "[readme]"),
-    ("p5f-philosophy-ask-count-stale", "docs/safety-philosophy.md", "Three rules in the toolkit ask you",
+    ("p5f-philosophy-ask-count-stale", "docs/safety-philosophy.md", "Four rules in the toolkit ask you",
      "Two rules in the toolkit ask you", _DOCS + "[philosophy]"),
     # Privacy: a fixture carries the home of whoever runs the gate again (built at collection time, so this file
     # never names anyone).
@@ -9453,7 +9453,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SP, ' or "%" in b or "!" in b):', ' or "%" in b):', _PS2, "cmd-delayed-word-is-a-name"),
     ("tools/skyguard/shell_rules.py", "    for e in parsed.unnamed:", "    for e in ():",
      _SPP + "test_an_unnamed_program_naming_a_save_asks_and_a_change_it_hides_is_still_backed_up",
-     "save-opaque-ask-dropped"),
+     "rule-S-SAVE-OPAQUE-dropped"),
     ("tools/skyguard/shell_rules.py", "        if _resaver_op(e):                  # read as ReSaver",
      "        if False:                  # read as ReSaver",
      _SPP + "test_known_resaver_does_not_hide_later_opaque_resaver_outputs", "save-opaque-asks-a-known-resaver"),
@@ -9468,4 +9468,10 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _PS1 + "test_a_speculative_eval_reading_keeps_what_it_completed", "speculative-reading-drops-completed"),
     ("tools/skyguard/saves.py", '"shell.S-RESAVER-APPLY", "shell.S-SAVE-OPAQUE"))', '"shell.S-RESAVER-APPLY"))',
      _SPP + "test_guards_off_does_not_lift_the_unnamed_program_save_ask", "save-opaque-ask-shadowed"),
+]]
+
+# 2026-10-19 procsubst, part 3: a dynamic word's literal part is a candidate (`"$X"reg` with X empty runs reg).
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_SP, "                    if lit and program_name(lit, self.d) not in cands:", "                    if False:",
+     _PS2, "concatenated-literal-not-a-candidate"),
 ]]

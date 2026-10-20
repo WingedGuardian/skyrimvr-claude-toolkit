@@ -10,7 +10,10 @@
   `&` or `.` call (`& $R Remove-Item`, `& "$($R)-Item"`), and through
   eval-like wrappers that run a quoted argument (`$R 'rm -rf Data'`,
   `& $R 'Remove-Item ...'` with Invoke-Expression). Each form was measured
-  deleting a folder in real cmd.exe / Windows PowerShell 5.1 first.
+  deleting a folder in real cmd.exe / Windows PowerShell 5.1 first. A name with
+  a variable glued to it (`"$X"reg delete <Bethesda key>`, `${R}git reset
+  --hard`) is also read as its literal part, which is what runs when the
+  variable is empty; both were allowed before.
 - Guard: a program the guard cannot name that is given a save now asks you
   first (`S-SAVE-OPAQUE`). It may write, move or delete the save, or nothing;
   if another reading of the command does change it, the pair is still backed

@@ -234,13 +234,13 @@ the working directory the agent reports.
 
 Naming a plugin or INI in a read-only command is silent: notes fire on the program that writes.
 
-### ASKS THE USER -- three rules
-- git that throws away uncommitted changes in a protected folder (`checkout -- x`, `restore`,
-  `reset --hard`)
-- `lock disable` (the file lock off for good), and `snapshot restore --in-place` or
+### ASKS THE USER -- four rules
+- git discarding uncommitted changes in a protected folder (`checkout -- x`, `restore`, `reset --hard`)
+- an unnamed program (`$R`) given a save
+- `lock disable` (file lock off for good), and `snapshot restore --in-place` or
   `restore-from-backup.sh --restore` (writes over live files)
 
-Few prompts by design: a guard that prompts on routine work gets approved by reflex
+Few prompts by design: a guard that prompts on routine work is approved by reflex
 (`docs/safety-philosophy.md`). **Check the guards are alive: `bash tools/hook-canary.sh`.**
 Coverage and gaps: `docs/guard-coverage.md`.
 

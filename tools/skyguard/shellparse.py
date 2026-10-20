@@ -266,7 +266,7 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
 # ----------------------------------------------------------------------------------------------------------
 class _Ctx:
     __slots__ = ("tokens", "out", "frame_ids", "via_xargs", "root", "counts", "subst", "dialect", "poison", "unread",
-                 "aliases", "codes", "xargs", "unnamed")
+                 "aliases", "codes", "xargs", "unnamed", "lits")
 
     def __init__(self, root: str = "", dialect: str = ""):
         self.unread = False             # RT-A: decoded text runs as commands (Parsed.unread)
@@ -274,6 +274,7 @@ class _Ctx:
         self.codes: List[Tuple[str, str]] = []      # RT-A G1/G2: Parsed.codes
         self.xargs: List[str] = []                  # RT-A G2: Parsed.xargs
         self.unnamed: List[Exec] = []               # Parsed.unnamed
+        self.lits: dict = {}                        # value -> _raw_literal, for the simple command being resolved
         self.tokens = 0
         self.out: List[Exec] = []
         self.frame_ids = 0
@@ -1936,6 +1937,29 @@ def _glob_word(base: str) -> bool:
     return i >= 0 and base.find("]", i + 2) > i
 
 
+# A word's expansions in its RAW text (quotes still in place, so `"$X"reg` keeps its boundary; the value `$Xreg` lost it).
+_RAW_EXPANSION = {
+    "bash": re.compile(r"\$\{[^{}]{0,256}\}|\$\([^()]{0,4096}\)|`[^`]{0,4096}`|\$[A-Za-z_][A-Za-z0-9_]{0,255}|\$[0-9@*#?$!-]"),
+    "cmd": re.compile(r"%[^%\s]{1,256}%|![^!\s]{1,256}!"),
+    "powershell": re.compile(r"\$\([^()]{0,4096}\)|\$\{[^{}]{0,256}\}|\$[A-Za-z_][\w:]{0,255}"),
+}
+_LITERAL_NAME = re.compile(r"[A-Za-z0-9_.+\-/\\:]{1,128}")
+
+
+def _raw_literal(raw: str, dialect: str) -> str:
+    """What a dynamic program word runs when every expansion in it is empty: `"$X"reg` -> reg, `${R}git` -> git,
+    `%R%del` -> del (MEASURED in bash and cmd: an empty expansion leaves the literal, and it runs). "" when the word
+    has no literal part, or one that is no program name (an unquoted `$Xreg` is ONE variable, so: "")."""
+    rx = _RAW_EXPANSION.get(dialect)
+    if rx is None:
+        return ""
+    s = rx.sub("", raw)
+    if s == raw:
+        return ""
+    s = s.replace('"', "").replace("'", "")
+    return s if _LITERAL_NAME.fullmatch(s) else ""
+
+
 def _program_candidates(word: str, dialect: str, root: str) -> List[str]:
     """The CANDIDATE_PROGRAMS an unproven program word can run (see above), in a stable order."""
     if len(word) > 8192:
@@ -2165,6 +2189,9 @@ class _Resolver:
                         n = len(v)
                         continue
                     cands = _program_candidates(v[k], self.d, self.ctx.root)
+                    lit = self.ctx.lits.get(v[k], "")
+                    if lit and program_name(lit, self.d) not in cands:      # every expansion empty: the literal runs
+                        cands = cands + [program_name(lit, self.d)]
                     for cand in cands:
                         self._sub_run([cand], k)                # each program it CAN be; the "?" exec stays too
                     self.no_candidate = not cands
@@ -2831,6 +2858,7 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
         quoted = [_ps_quoted(w) for w in ws] if d == "powershell" else [w.quoted for w in ws]
         dyn = [w.dyn for w in ws]
         saved, ctx.subst = ctx.subst, (_subst(sc, rec, ws, vals) if sc.vars else ())
+        saved_lits, ctx.lits = ctx.lits, {vals[j]: _raw_literal(w.raw, d) for j, w in enumerate(ws) if w.dyn}
         res = _Resolver(d, vals, quoted, dyn, rec.redirs, rec.cd, stdin, seg, bodies, sc.depth, ctx, recurse, rec.call)
         if d == "powershell":
             res.strq = [_ps_string(w) for w in ws]
@@ -2838,7 +2866,7 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
         if d == "bash" and any(w.bs for w in ws):                     # R6: the literal reading too
             made = made + _Resolver(d, ["".join(w.l) for w in ws], quoted, dyn, rec.redirs, rec.cd, stdin, seg,
                                     bodies, sc.depth, ctx, False, rec.call).run()
-        ctx.subst = saved
+        ctx.subst, ctx.lits = saved, saved_lits
         groups.setdefault(rec.key, []).append((rec, made))
     for _, e in synth[si:]:
         ctx.out.append(e)

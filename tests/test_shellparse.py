@@ -192,7 +192,10 @@ def test_a_named_program_with_dynamic_arguments_gets_no_second_reading(cmd, prog
     ("!R! del /s /q x", "cmd", "del"),
     ('"!R!" del /s /q x', "cmd", "del"),
     ("%R%del /s /q x", "cmd", "del"),
+    ("d%R%l /s /q x", "cmd", "del"),                       # R=e: only the glob of the literal parts names it
     ('%R% "del /s /q x"', "cmd", "del"),
+    ('"$X"rm -rf x', "bash", "rm"),                        # X empty: the literal runs (the value $Xrm lost the boundary)
+    ("${R}rm -rf x", "bash", "rm"),
     ('cmd /c "%R% del /s /q x"', "bash", "del"),
     ("& $R Remove-Item -Recurse x", "powershell", "remove-item"),
     (". $R Remove-Item -Recurse x", "powershell", "remove-item"),
@@ -228,6 +231,7 @@ def test_a_speculative_eval_reading_never_ends_or_marks_the_parse(cmd):
     ("$R Remove-Item -Recurse x", "powershell", "remove-item"),   # no call operator: a parse error, nothing runs
     ("Write-Output $R Remove-Item x", "powershell", "remove-item"),
     ("echo $R 'rm -rf x'", "bash", "rm"),
+    ("$Xrm -rf x", "bash", "rm"),                         # ONE variable named Xrm: no literal part runs
 ])
 def test_a_named_program_or_no_call_gets_no_cmd_or_powershell_reading(cmd, shell, program):
     """Twins: the readings belong to an UNNAMED program word that can actually run."""
