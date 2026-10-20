@@ -6603,12 +6603,12 @@ _P5F_CLAUSES = [
      '        return [(dst[0] if dst else ".", src)] if src or e.stdin_from == "pipe" else []',
      '        return [(dst[0] if dst else ".", src)] if src else []', _p5f("pipe-copy-onto-save")),
     # D2: the documented ask count drifts from the registry again (core.md, README, safety-philosophy).
-    ("p5f-core-md-ask-count-stale", "agent/instructions/core.md", "### ASKS THE USER -- four rules",
-     "### ASKS THE USER -- three rules", _DOCS + "[core]"),
-    ("p5f-readme-ask-count-stale", "README.md", "Only four rules ask *you*", "Only three rules ask *you*",
+    ("p5f-core-md-ask-count-stale", "agent/instructions/core.md", "### ASKS THE USER -- five rules",
+     "### ASKS THE USER -- four rules", _DOCS + "[core]"),
+    ("p5f-readme-ask-count-stale", "README.md", "Only five rules ask *you*", "Only four rules ask *you*",
      _DOCS + "[readme]"),
-    ("p5f-philosophy-ask-count-stale", "docs/safety-philosophy.md", "Four rules in the toolkit ask you",
-     "Two rules in the toolkit ask you", _DOCS + "[philosophy]"),
+    ("p5f-philosophy-ask-count-stale", "docs/safety-philosophy.md", "Five rules in the toolkit ask you",
+     "Four rules in the toolkit ask you", _DOCS + "[philosophy]"),
     # Privacy: a fixture carries the home of whoever runs the gate again (built at collection time, so this file
     # never names anyone).
     ("p5f-fixture-carries-home", "tests/fixtures/routes-harness/cases9.py", '"file_path":"<HOME>/.codex/config.toml"',

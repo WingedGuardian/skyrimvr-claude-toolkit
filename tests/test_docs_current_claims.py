@@ -35,7 +35,22 @@ def test_the_update_answer_names_a_path_a_user_can_follow():
     assert 'tools/agent-harness.py" upgrade-preview --installed-root' in upgrading
     assert "make it from the unpacked folder" in upgrading
     adapting = _read("ADAPTING.md")
-    assert adapting.index("This file is written to you") < adapting.index("protect-save-access") \
-        if "protect-save-access" in adapting else True
+    assert adapting.startswith("# ADAPTING.md") and "protect-save-access" not in adapting
     assert "upgrade-stage" not in adapting and "integrate-local-policy" not in adapting
     assert "**Which entry to call.**" in adapting
+
+
+def test_sed_without_binary_is_listed_as_refused_and_the_ask_rules_are_five():
+    """S-SED-CRLF denies `sed -i` without -b in the install area (tests/test_skyguard_shell.py::
+    test_sed_crlf_in_the_install_area_denies); core.md listed it as ADVISED. The ask rules are five once the
+    unreadable-command-naming-the-install rule lands (user ruling 3 of the v4 review)."""
+    core = _read("agent/instructions/core.md")
+    denied = core[core.index("### DENIED"):core.index("### ADVISED")]
+    advised = core[core.index("### ADVISED"):core.index("### ASKS THE USER")]
+    assert "`sed -i` without `-b`" in denied
+    assert "`sed -i` " not in advised and "`sed -i`," not in advised
+    assert "### ASKS THE USER -- five rules" in core
+    assert "a command the guard cannot read that names the install" in core
+    assert "`sed -i` without `-b`" in _read("README.md")
+    for rel, phrase in (("README.md", "Only five rules ask"), ("docs/safety-philosophy.md", "Five rules in the toolkit")):
+        assert phrase in _read(rel), rel
