@@ -78,3 +78,28 @@ def test_dotnet_requirements_admit_the_house_carl_runtimes():
     tools = _read("docs/installing-tools.md")
     assert "the toolkit's single .NET requirement" not in tools
     assert "House Carl gateway also needs the .NET 9 runtimes" in tools
+
+
+def _ticked(text: str):
+    import re
+    return set(re.findall(r"`([a-z0-9-]+)`", text))
+
+
+def test_the_neutral_skill_lists_are_the_gate_and_the_skill_list_is_the_folder():
+    """Review L6 F9: README omitted mod-update-check, agent/README omitted toolkit-setup from the neutral list and
+    toolkit-housecarl from the skill list."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("neutrality_for_docs", REPO / "tests" / "test_instruction_neutrality.py")
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    neutral = {p.split("/")[2] for p in gate.NEUTRAL_FILES if p.startswith("agent/skills/")}
+    readme = _read("README.md")
+    said = readme[readme.index("The core\nand the `devbench`"):readme.index("must also stay **agent-neutral**")]
+    assert _ticked(said) == neutral
+    agent = _read("agent/README.md")
+    said = agent[agent.index("**Neutrality.**"):agent.index("no Claude-only tool names")]
+    assert _ticked(said) - {"core.md"} == neutral
+    listed = agent[agent.index("Skills (`skills/<name>/SKILL.md`):"):agent.index("hold what used to be bulk")]
+    listed = listed[:listed.rindex("\n")]
+    folder = {p.name for p in (REPO / "agent" / "skills").iterdir() if (p / "SKILL.md").is_file()}
+    assert _ticked(listed) - {"skills"} == folder
