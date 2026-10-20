@@ -7590,6 +7590,20 @@ MUTATIONS += [
                  "tests/test_housekeep.py::test_every_test_helper_switches_the_real_sweep_off", id="setup-smoke-sweep-on"),
     pytest.param("tools/verify-release.sh", "LANG=C.UTF-8 SKYGUARD_HOUSEKEEP_SWEEP=off)", "LANG=C.UTF-8)",
                  "tests/test_housekeep.py::test_every_test_helper_switches_the_real_sweep_off", id="verify-scrub-sweep-on"),
+    # v4.0.0 review L4b M2: guard-latency timed dead hooks as fast ones and printed PASS. One twin per check.
+    *[pytest.param("scripts/guard-latency.py", find, repl, "tests/test_guard_latency.py::" + test,
+                   id="guard-latency-" + tid)
+      for tid, find, repl, test in [
+          ("result-discarded", '            why = answer_problem(r, json_out=hook != "session-kb-guard")',
+           '            why = ""', "test_hooks_that_crash_fail_the_gate"),
+          ("missing-wrapper-timed", "        if not os.path.isfile(wrapper):", "        if False:",
+           "test_an_install_with_no_hooks_fails_the_gate"),
+          ("exit-code-ignored", "    if r.returncode != 0:", "    if False:", "test_hooks_that_crash_fail_the_gate"),
+          ("garbage-accepted", "    if out and json_out:", "    if False:",
+           "test_a_tool_hook_answering_garbage_fails_the_gate"),
+          ("failures-not-gated", "    ok = worst <= 1000 and not failed and bool(results)", "    ok = worst <= 1000",
+           "test_hooks_that_crash_fail_the_gate"),
+      ]],
     # v4.0.0 review L4a L3: a DEGRADED hook-canary (exit 1) was accepted as a report.
     pytest.param("tools/verify-release.sh",
                  """  if { [ $rc -eq 0 ] || [ $rc -eq 2 ]; } && grep -q '^RESULT:' <<<"$out"; then""",
