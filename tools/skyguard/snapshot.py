@@ -35,8 +35,9 @@ holding 89 distinct contents). Now:
   ends; a rewrite that keeps both the size and the mtime is not seen by the index at all.
 * PRUNING keeps every blob referenced by the newest snapshot, by any snapshot younger than 14 days, or by the index
   (the live files' content); and it keeps, whatever its age, the newest snapshot that holds each path's latest content,
-  so the only copy of a deleted script's last version is never pruned. Pruning DELETES PERMANENTLY: it is this tool
-  removing its own managed store, not user files, so it does not go to the Recycle Bin.
+  so the only copy of a deleted script's last version is never pruned. Pruning never deletes: what it removes is
+  RETIRED into <project>/.claude/retired/ (retire.py), and housekeep's session sweep sends it to the Recycle Bin (the
+  user's rule has no carve-out for the toolkit's own store; review L2 LOW-7).
 """
 from __future__ import annotations
 
@@ -44,12 +45,11 @@ import bisect
 import json
 import os
 import re
-import shutil
 import stat
 import time
 from pathlib import Path
 
-from . import backup
+from . import backup, retire
 from .grep import grep
 
 SKIP = (r"^\s*(ls|cat|head|tail|grep|find|wc|file|stat|pwd|echo|date|whoami|which|type|env|printenv)\s",
@@ -723,14 +723,15 @@ def _stale_part(entry, now):
 
 
 def prune(store, now, audit, deadline=None):
-    """Delete (permanently: this is the tool's own store) the snapshots and blobs nothing still needs. See the module
-    docstring for what is kept. Any unreadable manifest, or an unreadable index, stops blob pruning: what it
-    references is unknown. With a `deadline` (a `_walk_clock()` time) it stops between deletions -- it is restartable,
-    so stopping only defers the rest (review M1). -> blobs and part files removed."""
+    """Retire (retire.py: renamed out of the store, then recycled by housekeep; never deleted) the snapshots and blobs
+    nothing still needs. See the module docstring for what is kept. Any unreadable manifest, or an unreadable index,
+    stops blob pruning: what it references is unknown. With a `deadline` (a `_walk_clock()` time) it stops between
+    removals -- it is restartable, so stopping only defers the rest (review M1). -> blobs and part files removed."""
     store = Path(store)
     if (store / "transactions").exists() or (store / "MANIFEST.jsonl").exists():
         audit.log(HOOK, "PRUNE-SKIPPED", "another store format; no script snapshot or blob was pruned")
         return 0
+    batch = retire.Batch(store, store.name)
 
     def late():
         return deadline is not None and _walk_clock() >= deadline
@@ -776,10 +777,7 @@ def prune(store, now, audit, deadline=None):
         if n not in keep:
             if late():
                 return _pruned(store, now, audit, 0, stopped=True)
-            try:
-                os.unlink(str(store / "manifests" / n))
-            except OSError:
-                pass
+            batch.retire(store / "manifests" / n)
     removed = 0
     idx = _read_json(store / INDEX)
     if unreadable:
@@ -802,11 +800,7 @@ def prune(store, now, audit, deadline=None):
             if (_BLOB.match(e.name) and e.name not in live) or _stale_part(e, now):
                 if late():
                     return _pruned(store, now, audit, removed, stopped=True)
-                try:
-                    os.unlink(e.path)
-                    removed += 1
-                except OSError:
-                    pass
+                removed += batch.retire(e.path)
     # Part files a killed writer left beside the manifests and the index (review M3).
     for d in (store / "manifests", store):
         try:
@@ -815,18 +809,14 @@ def prune(store, now, audit, deadline=None):
             continue
         for e in entries:
             if e.is_file() and _stale_part(e, now):
-                try:
-                    os.unlink(e.path)
-                    removed += 1
-                except OSError:
-                    pass
+                removed += batch.retire(e.path)
     # The bash-era copy folders (`<stamp>/source`, `<stamp>/deploy`) age out as they always did: older than 14 days.
     try:
         for d in store.iterdir():
             if d.is_dir() and _LEGACY_DIR.match(d.name) and int((now - d.stat().st_mtime) // DAY) > KEEP_DAYS:
                 if late():
                     return _pruned(store, now, audit, removed, stopped=True)
-                shutil.rmtree(str(d), ignore_errors=True)
+                batch.retire(d)
     except OSError:
         pass
     return _pruned(store, now, audit, removed)

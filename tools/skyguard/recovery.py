@@ -37,7 +37,8 @@ protect-mcp for saves; Codex: pre-tool), so the copy is finished before the comm
 PRUNING (once a day, inside PRUNE_BOX): a config snapshot is kept WHOLE while it is younger than KEEP_DAYS or holds
 some path's newest content, and each kept config snapshot keeps the earlier lines its full state needs (fix round 1,
 I4); a SAVE snapshot is always kept (the save policy: backups are kept forever; disk space is the user's call). Every
-other line goes, then every blob no remaining line names is deleted -- PERMANENTLY, as this is the tool's own store.
+other line goes, then every blob no remaining line names is RETIRED (retire.py: renamed out of the store, then sent to
+the Recycle Bin by housekeep's session sweep; never deleted -- review L2 LOW-7).
 An unreadable line is kept as it is and stops blob deletion. Every line records its snapshot's line count and full
 path set, so resolve() REFUSES a snapshot pruning has cut into instead of returning a state that never existed. A save
 copy also keeps SAVE_RESERVE_BYTES free on its drive (review M2): short of that it fails, and the hook denies.
@@ -56,7 +57,7 @@ from pathlib import Path
 
 from modding_harness import durable
 
-from . import backup, snapshot
+from . import backup, retire, snapshot
 
 HOOK = "recovery-snapshot"
 STORE = "recovery_snapshots"
@@ -572,6 +573,7 @@ def prune(store, now, audit, deadline=None):
         return 0
     live = {e["sha256"] for _r, e in keep}
     removed = 0
+    batch = retire.Batch(store, store.name)
     try:
         entries = list(os.scandir(str(store / "blobs")))
     except OSError:
@@ -581,9 +583,5 @@ def prune(store, now, audit, deadline=None):
             if late():
                 audit.log(HOOK, "PRUNE-PARTIAL", "pruning stopped at its time box -- the rest is pruned next time")
                 return removed
-            try:
-                os.unlink(ent.path)
-                removed += 1
-            except OSError:
-                pass
+            removed += batch.retire(ent.path)
     return removed

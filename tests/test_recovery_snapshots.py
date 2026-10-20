@@ -499,6 +499,11 @@ def test_pruning_drops_old_lines_but_keeps_each_paths_newest(inst):
     assert [e["snap"] for e in after] == [newer] * 5, "the old snapshot, superseded on every path, goes whole"
     assert not (inst.store / "blobs" / sha(b"*Skyrim.esm\n*Mine.esp\n")).exists()
     assert (inst.store / "blobs" / sha(b"*Skyrim.esm\n")).exists()
+    # Review L2 LOW-7: the pruned blob is retired (then recycled by housekeep), never deleted.
+    from skyguard import retire
+    moved = [p for p in retire.retired_dir(inst.store).glob("*/*")
+             if p.name.split("-", 1)[1] == sha(b"*Skyrim.esm\n*Mine.esp\n")]
+    assert len(moved) == 1 and moved[0].read_bytes() == b"*Skyrim.esm\n*Mine.esp\n"
 
 
 def test_pruning_never_cuts_into_the_state_a_kept_snapshot_needs(inst):
