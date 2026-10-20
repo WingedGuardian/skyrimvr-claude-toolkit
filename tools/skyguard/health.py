@@ -27,7 +27,7 @@ Per-session records (Task 13), one file per agent session, `<agent>/sessions/<se
 
 `coverage()` compares them with the agent's own transcript (tools/skyguard/transcripts.py): a call that
 ran with no record is a call the hook never saw (E24: some Windows surfaces emit no PreToolUse at all).
-Only the 20 newest session files per agent are kept.
+Only the 20 newest session files per agent are kept; older ones are retired (retire.py), never deleted.
 
 CLI:  python tools/skyguard/health.py report --root <install> [--stale-min N] [--json] [--codex-config P]
 Exit: 1 if any hook is DEGRADED, a Codex hook is untrusted/modified/disabled/never invoked, or a session's
@@ -150,15 +150,16 @@ def session_record(dirpath, session_id, hook, what, transcript=None):
 
 
 def prune_sessions(dirpath, keep=SESSIONS_KEEP):
-    """Keep the `keep` newest session files."""
+    """Keep the `keep` newest session files. Older ones are retired (tools/skyguard/retire.py), never deleted: they
+    are an earlier run's records, so the Recycle Bin rule covers them (review L3 LOW-3)."""
     try:
         files = sorted((p for p in (Path(dirpath) / "sessions").glob("*.log") if p.is_file()),
                        key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
-        for p in files[keep:]:
-            try:
-                p.unlink()
-            except OSError:
-                pass
+        if files[keep:]:
+            from skyguard import retire
+            batch = retire.Batch(dirpath, "sessions-" + Path(dirpath).name)
+            for p in files[keep:]:
+                batch.retire(p)
     except OSError:
         pass
 

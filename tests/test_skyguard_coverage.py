@@ -367,9 +367,9 @@ def test_a_session_id_that_is_not_a_plain_name_writes_nothing(tmp_path):
     assert not (tmp_path / "escape.log").exists()
 
 
-def test_only_the_twenty_newest_session_files_are_kept(tmp_path):
+def test_only_the_twenty_newest_session_files_are_kept_and_the_rest_are_retired_not_deleted(tmp_path):
     import os
-    d = tmp_path / "hb"
+    d = _sessions(tmp_path, "codex")
     for i in range(25):
         assert health.session_record(d, "s{:02d}".format(i), "start", "startup", "p")
         f = d / "sessions" / "s{:02d}.log".format(i)
@@ -377,6 +377,9 @@ def test_only_the_twenty_newest_session_files_are_kept(tmp_path):
     health.prune_sessions(d)
     kept = sorted(p.stem for p in (d / "sessions").glob("*.log"))
     assert len(kept) == health.SESSIONS_KEEP == 20 and kept[0] == "s05" and kept[-1] == "s24"
+    # Review L3 LOW-3: an earlier run's log goes to <project>/.claude/retired (then the Recycle Bin), never unlinked.
+    retired = sorted(p.name.split("-", 1)[1] for p in (tmp_path / ".claude" / "retired").glob("*/*.log"))
+    assert retired == ["s{:02d}.log".format(i) for i in range(5)]
 
 
 def _run_engine(root: Path, argv, payload: dict):

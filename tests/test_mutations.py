@@ -1506,7 +1506,26 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
           # A gzip that does not reproduce the log still sends the original to the bin.
           ("gzip-no-round-trip", '    if d.hexdigest() != action["hash"]:', "    if False:",
            "test_a_gzip_that_does_not_round_trip_keeps_the_original"),
+          # Review L3 LOW-3 / L2 LOW-7: the retired guard-store batches reach the bin, and only settled ones do.
+          ("retired-never-swept",
+           '    ret = sweep_retired([cfg["root"]] + [p for p in [_project_of(state)] if p is not None])',
+           '    ret = sweep_retired([cfg["root"]])',
+           "test_session_recycles_settled_retired_guard_store_batches_and_keeps_a_fresh_one"),
+          ("retired-no-settle-gate", "                settling = _newest_shallow(p) > now - RETIRED_SETTLE_S",
+           "                settling = False",
+           "test_session_recycles_settled_retired_guard_store_batches_and_keeps_a_fresh_one"),
       ]],
+    pytest.param("tools/housekeep.py",
+                 '                reparse = getattr(e.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400',
+                 "                reparse = 0", "tests/test_housekeep.py::"
+                 "test_a_retired_batch_is_never_deleted_and_a_link_is_never_offered",
+                 marks=pytest.mark.skipif(sys.platform != "win32", reason="a junction exists on Windows only"),
+                 id="housekeep-retired-follows-junctions"),
+    pytest.param("tools/housekeep.py", "                if e.is_symlink() or reparse or not e.is_dir(",
+                 "                if reparse or not e.is_dir(", "tests/test_housekeep.py::"
+                 "test_a_retired_batch_is_never_deleted_and_a_link_is_never_offered",
+                 marks=pytest.mark.skipif(sys.platform == "win32", reason="the test links with a junction there"),
+                 id="housekeep-retired-follows-symlinks"),
 
     # --- what the v3.9 release review found ---------------------------------
     # Put back the single-character separator class. Doubled separators name the same
@@ -4293,7 +4312,13 @@ MUTATIONS_TASK13 = [
      "        if not isinstance(session_id, str):",
      _COV + "test_a_session_id_that_is_not_a_plain_name_writes_nothing", "session-id-cannot-escape-the-sessions-dir"),
     ("tools/skyguard/health.py", "        for p in files[keep:]:", "        for p in files[keep + 100:]:",
-     _COV + "test_only_the_twenty_newest_session_files_are_kept", "session-files-are-pruned"),
+     _COV + "test_only_the_twenty_newest_session_files_are_kept_and_the_rest_are_retired_not_deleted",
+     "session-files-are-pruned"),
+    # Review L3 LOW-3 / L2 LOW-7: pruning retires (then housekeep recycles); it never deletes.
+    ("tools/skyguard/retire.py", '            os.rename(str(path), str(d / "{}-{}".format(self.count, Path(path).name)))',
+     "            os.unlink(str(path))",
+     _COV + "test_only_the_twenty_newest_session_files_are_kept_and_the_rest_are_retired_not_deleted",
+     "session-files-are-retired-not-deleted"),
     ("tools/skyguard/run.py", "    _session_line(a, req.session_id, tool=req.tool_name)\n", "",
      _COV + "test_the_engine_records_a_codex_session_and_its_calls", "engine-records-codex-calls"),
     ("tools/skyguard/run.py",

@@ -476,6 +476,53 @@ def test_session_runs_at_most_once_per_interval(tmp_path, monkeypatch):
     assert not left.exists()
 
 
+def test_session_recycles_settled_retired_guard_store_batches_and_keeps_a_fresh_one(tmp_path, monkeypatch):
+    """Review L3 LOW-3 / L2 LOW-7: the guard's pruning only renames into <project>/.claude/retired (retire.py); the
+    session sweep is what gets those batches to the Recycle Bin. A batch still being filled is never offered."""
+    proj = tmp_path / "proj"
+    cfg = sweep_cfg()
+    cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path / "toolkit",
+               sweep_every_hours=0)
+    monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(tmp_path / "temp"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    fake = bin_for(tmp_path)
+    monkeypatch.setattr(hk, "recycle", fake)
+    (tmp_path / "temp").mkdir()
+    (tmp_path / "toolkit").mkdir()
+    retired = proj / ".claude" / "retired"
+    settled = tdir(retired, "20261001-120000-auto_snapshots-11-1")
+    fresh = tdir(retired, "20261020-120000-sessions-codex-12-1", days=0)
+    state = proj / ".claude" / "diag" / "housekeep-session.txt"
+    assert hk.session(cfg, state) == 0
+    note = state.read_text(encoding="utf-8")
+    assert fresh.exists()
+    if os.name == "nt":
+        assert not settled.exists()
+        assert [os.path.basename(p) for p in fake.got] == [settled.name]
+        assert "moved 1 batch(es) of pruned guard-store files to the Recycle Bin" in note
+    else:                                       # no bin to call: it waits, named, and nothing is deleted
+        assert settled.exists() and fake.got == []
+        assert "1 batch(es) of pruned guard-store files" in note and "wait in .claude/retired" in note
+
+
+def test_a_retired_batch_is_never_deleted_and_a_link_is_never_offered(tmp_path):
+    retired = tmp_path / "toolkit" / ".claude" / "retired"
+    outside = tdir(tmp_path, "precious")
+    retired.mkdir(parents=True)
+    link = retired / "20261001-120000-link-1-1"
+    try:
+        if os.name == "nt":
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)], check=True, capture_output=True)
+        else:
+            os.symlink(outside, link)
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("cannot make a directory link here")
+    fake = bin_for(tmp_path)
+    res = hk.sweep_retired([tmp_path / "toolkit"], recycler=fake)
+    assert fake.got == [] and link.exists() and (outside / "sub" / "f.txt").exists()
+    assert sum(res["rows"].values()) == 0
+
+
 def test_a_dir_the_bin_refuses_is_left_in_place_and_named(tmp_path):
     """Never a permanent delete, not even as a fallback: what the Recycle Bin will not take stays put."""
     temp = tmp_path / "temp"
