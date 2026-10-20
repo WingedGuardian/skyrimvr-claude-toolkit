@@ -4583,11 +4583,12 @@ def test_guard_actually_bites(tmp_path, relpath, find, replace, test_id):
         passed = {identity for identity, outcome in pristine.items() if outcome == "passed"}
         assert passed and not any(outcome == "failed" for outcome in pristine.values()), "pristine anchor did not execute cleanly"
         result = _run_mutation_anchor(work, test_id, scratch, private / "mutant.xml")
-        why = _anchor_skipped_off_windows(result.returncode, result.stdout)
-        if why:
-            pytest.skip("the anchor test is skipped on this platform, so it cannot kill this twin: " + why)
-        unjudged = _unjudged_twin_message(result.returncode, result.stdout)   # Windows: still red, but never a "survivor"
-        assert not unjudged, unjudged
+        # The pristine anchor PASSED here, so a mutant leg that only skips is the revert turning the check off, not
+        # the platform: a survivor on every platform (review L7 LOW; it used to be excused off Windows and labelled
+        # "NOT JUDGED (not a survivor)" on Windows).
+        why = _anchor_skipped_off_windows(result.returncode, result.stdout, platform="any")
+        assert not why, ("SURVIVOR: the anchor test PASSED on the pristine tree and was only SKIPPED with this fix "
+                         "reverted -- the revert made the test stop checking instead of failing. Skip reason: " + why)
         # Read before cleanup. A setup/teardown error can also exit1 and is not
         # evidence of a failure in a previously passing testcase.
         mutated = _anchor_outcomes(private / "mutant.xml") if result.returncode in (0, 1) else {}
@@ -8690,6 +8691,12 @@ MUTATIONS.append(pytest.param(
     "tests/test_mutations.py", '    reason = _anchor_skipped_off_windows(returncode, stdout, platform=' + '"any")',   # split: unique
     '    reason = ""', "tests/test_mutations.py::test_a_skip_only_anchor_is_reported_unjudged_not_as_a_survivor",
     id="fixu-skip-only-anchor-reported-as-survivor"))
+# Review L7 LOW: a mutant leg that only skips after a PASSED pristine leg is a survivor, on every platform.
+MUTATIONS.append(pytest.param(
+    "tests/test_mutations.py", '        assert not why, (' + '"SURVIVOR: the anchor test PASSED',   # split: unique
+    '        assert True, (' + '"SURVIVOR: the anchor test PASSED',
+    "tests/test_mutation_measurement.py::test_existing_platform_skip_is_handled_before_report_qualification[mutant]",
+    id="mutant-only-skip-is-a-survivor"))
 
 # fix-unclear 4b (v4 regression vs 3.x): a write target held in a same-command literal is judged as its literal,
 # through the delete rules' Exec.subst. One twin per clause.
