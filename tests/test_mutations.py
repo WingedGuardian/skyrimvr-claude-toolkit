@@ -1419,6 +1419,15 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     pytest.param("tools/bench-vr.py", "                moved = True\n", "",
                  "tests/test_bench_vr.py::test_the_run_says_where_it_left_the_player",
                  id="bench-vr-player-location-unreported"),
+    # F6: the House Carl download goes to a part file, verified, before it takes the archive's name.
+    pytest.param("tools/housecarl_integration/setup.py",
+                 '(ARCHIVE_URL, timeout=60) as src, part.open("xb") as dst:',
+                 '(ARCHIVE_URL, timeout=60) as src, archive.open("xb") as dst:',
+                 "tests/test_housecarl.py::test_an_interrupted_download_never_leaves_a_file_at_the_archive_name",
+                 id="housecarl-download-straight-to-the-archive-name"),
+    pytest.param("tools/housecarl_integration/setup.py", "    if sha(part) != ARCHIVE_SHA256:", "    if False:",
+                 "tests/test_housecarl.py::test_an_interrupted_download_never_leaves_a_file_at_the_archive_name",
+                 id="housecarl-download-unverified-before-rename"),
 
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(

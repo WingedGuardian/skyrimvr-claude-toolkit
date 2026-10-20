@@ -21,6 +21,43 @@ def plugin(path, flags=0, masters=()):
     path.write_bytes(b"TES4" + struct.pack("<II", len(body), flags) + b"\0" * 12 + body)
 
 
+class _Source:
+    """A stand-in for the urlopen response: `chunks` are returned in turn; an exception instance is raised."""
+    def __init__(self, *chunks):
+        self.chunks = list(chunks)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, n=-1):
+        if not self.chunks:
+            return b""
+        c = self.chunks.pop(0)
+        if isinstance(c, BaseException):
+            raise c
+        return c
+
+
+def test_an_interrupted_download_never_leaves_a_file_at_the_archive_name(tmp_path, monkeypatch):
+    """Review L5 F6: a partial zip at the final name blocked every later setup with a hash error."""
+    from housecarl_integration import setup as hc_setup
+    archive = tmp_path / "houseCARL-2.0.5.zip"
+    with pytest.raises(OSError):
+        hc_setup.download_archive(archive, opener=lambda *a, **k: _Source(b"PK partial", OSError("connection reset")))
+    assert list(tmp_path.iterdir()) == []
+    with pytest.raises(Refusal, match="does not match pinned"):
+        hc_setup.download_archive(archive, opener=lambda *a, **k: _Source(b"PK the wrong bytes"))
+    assert not archive.exists() and [p.name.split(".rejected-")[0] for p in tmp_path.iterdir()] == [archive.name]
+    good = b"PK the pinned bytes"
+    import hashlib
+    monkeypatch.setattr(hc_setup, "ARCHIVE_SHA256", hashlib.sha256(good).hexdigest())
+    hc_setup.download_archive(archive, opener=lambda *a, **k: _Source(good))    # twin: a good download lands
+    assert archive.read_bytes() == good
+
+
 def test_a_staged_patch_name_with_brackets_is_a_name_not_a_glob(tmp_path):
     """Review L5 F3: `glob("*/Foo [Fix].esp")` matched `Foo F.esp` and not the literal file."""
     for folder, name in (("abc", "Foo [Fix].esp"), ("def", "Foo F.esp")):
