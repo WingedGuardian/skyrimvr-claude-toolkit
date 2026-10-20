@@ -542,6 +542,16 @@ def test_a_dir_the_bin_refuses_is_left_in_place_and_named(tmp_path):
     assert "skyrim-harness-big001" in res["failed"][0] and "too big" in res["failed"][0]
 
 
+def test_no_test_can_reach_the_real_recycle_bin(tmp_path):
+    """A forgotten fake must fail the test, never raise a Windows dialog on the user's desktop."""
+    f = tmp_path / "kept.txt"
+    f.write_text("x", encoding="utf-8")
+    assert hk.recycle([]) == {}
+    with pytest.raises(RuntimeError, match="inject a fake recycler"):
+        hk.recycle([f])
+    assert f.exists()
+
+
 def test_the_tool_never_deletes_permanently():
     """User ruling 2026-10-18: the Recycle Bin, always -- the tool's own files included."""
     src = TOOL.read_text(encoding="utf-8")

@@ -466,6 +466,11 @@ def recycle(paths) -> dict:
     paths = [str(p) for p in paths]
     if not paths:
         return {}
+    # No test may reach the real bin: it can raise Windows' "delete permanently?" dialog on the user's desktop
+    # (2026-10-20, four such popups from test runs). A test injects a fake recycler; the guard is here, at the one
+    # call that touches the shell, so a test that forgets fails loudly instead of prompting the user.
+    if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"):
+        raise RuntimeError("housekeep.recycle refused under pytest: inject a fake recycler (no real Recycle Bin)")
     if os.name != "nt":
         raise RuntimeError("Recycle Bin removal is implemented for Windows only")
     # The shell's own delete, NOT Microsoft.VisualBasic's DeleteDirectory(..., 'OnlyErrorDialogs', ...): that UI option
