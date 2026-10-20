@@ -179,8 +179,7 @@ def _relock(root):
     covers (multi-link, reparse) are expected skips, not failures."""
     from . import lock
     res = lock.lock_all(root)
-    bad = [x for x in res.data.get("not_locked", []) if x[1].startswith(("did not verify", "error"))]
-    if res.exit == 2 or bad:
+    if lock.relock_failed(res):
         return _clip("Vanilla-file relock FAILED: " + _clean(res.lines[0] if res.lines else "see `bash tools/skyguard.sh lock status`", 150))
     return ""
 

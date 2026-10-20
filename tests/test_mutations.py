@@ -118,7 +118,7 @@ PRESERVATION_STATUS_MUTATIONS = [pytest.param(path, before, after, test,
 
 RELOCK_RETRY_MUTATIONS = [pytest.param(path, before, after, "tests/test_relock_retries.py::" + test,
     id="relock-retry-" + name) for path, before, after, test, name in (
-    ("tools/skyguard/lock.py", "        if res.exit == 0:", "        if True:",
+    ("tools/skyguard/lock.py", "        if not relock_failed(res):", "        if True:",
      "test_failed_expiry_relock_is_retried_until_success", "success-before-retire"),
     ("tools/skyguard/cli.py", '(x["kind"] == "lock" or not state.lift_expired(x, now))',
      'not state.lift_expired(x, now)', "test_unrelated_guard_write_keeps_expired_lock_obligation", "guard-writer"),
@@ -9535,3 +9535,15 @@ MUTATIONS += [pytest.param("tools/skyguard/engine.py",
     '        return Verdict("deny", UNPARSED + str(exc), status="failed", code="engine.UNPARSED")', "        raise",
     "tests/test_skyguard_engine.py::test_the_claude_hook_answers_a_malformed_inline_snippet",
     id="engine-unparsed-snippet-refused")]
+
+# v4.0.0 review L2 LOW-4: an expired unlock-all relock settles on the same criterion as session start.
+_RLR = "tests/test_relock_retries.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/lock.py", "        if not relock_failed(res):", "        if res.exit == 0:",
+     _RLR + "test_a_structural_skip_settles_an_expired_relock", "relock-expired-structural-skip-settles"),
+    ("tools/skyguard/lock.py", '    bad = [x for x in res.data.get("not_locked", []) if x[1].startswith(("did not verify", "error"))]',
+     '    bad = [x for x in res.data.get("not_locked", []) if x[1].startswith(("did not verify",))]',
+     _RLR + "test_failed_expiry_relock_is_retried_until_success", "relock-expired-error-is-retried"),
+    ("tools/skyguard/lock.py", "    return res.exit == 2 or bool(bad)", "    return bool(bad)",
+     _RLR + "test_a_structural_skip_settles_an_expired_relock", "relock-refused-is-retried"),
+]]

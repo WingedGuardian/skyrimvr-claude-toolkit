@@ -980,6 +980,15 @@ def _unlock_files(root, data_dir, t, names, chosen, manifest):
 HOOK_STATE_WAIT = 0.2      # the per-call hook path never blocks on the state lock longer than this
 
 
+def relock_failed(res) -> bool:
+    """A relock that must be retried: refused (exit 2), or a target that did not verify or raised. A target the lock
+    never covers (multi-link, reparse, unreadable: a Targets skip) is an expected skip, not a failure. One criterion
+    for the hook path (relock_expired) and session start (session._relock), so the two agree (v4.0.0 review L2 LOW-4:
+    an expired unlock-all with a skipped vanilla file was retried on every guarded call)."""
+    bad = [x for x in res.data.get("not_locked", []) if x[1].startswith(("did not verify", "error"))]
+    return res.exit == 2 or bool(bad)
+
+
 def relock_expired(root, now=None, wait=HOOK_STATE_WAIT):
     """Relock what an EXPIRED lock lift opened; retire it after success. -> None when none is due, else a Result
     whose data["relocked"] names the files locked again. Called by engine.shadow on every guarded hook call (a time
@@ -1003,7 +1012,7 @@ def relock_expired(root, now=None, wait=HOOK_STATE_WAIT):
         keep = [x for x in st.lifts if not (x["kind"] == "lock" and _state.lift_expired(x, now))]
         persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
         # Serialize the filesystem operation with new lifts and persistent
-        # disable decisions. Retire the obligation only after success.
+        # disable decisions. Retire the obligation only after success; an expected skip is success (relock_failed).
         if st.lock_disabled or not supported() or not (Path(root) / ".skyguard" / "lock.json").is_file():
             _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
             return _res(0, "An expired lock lift was cleared; nothing relocked (the lock is %s)."
@@ -1018,7 +1027,7 @@ def relock_expired(root, now=None, wait=HOOK_STATE_WAIT):
             return name.lower() not in covered and (want is None or name.lower() in want)
 
         res = lock_all(root, only=only)
-        if res.exit == 0:
+        if not relock_failed(res):
             _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
         return Result(res.exit, res.lines, dict(res.data, relocked=[n for n in res.data.get("locked", []) if only(n)]))
 

@@ -39,6 +39,24 @@ def test_failed_expiry_relock_is_retried_until_success(pending, monkeypatch):
     assert state.read(sf).lifts == [] and len(calls) == 2
 
 
+def test_a_structural_skip_settles_an_expired_relock(pending, monkeypatch):
+    """L2 LOW-4: a target the lock never covers (a multi-link copy) is an expected skip, as session start treats it;
+    the expired lift is retired instead of re-running a full relock on every guarded call."""
+    root, sf, lift, now = pending
+    calls = []
+    def fake(root, only=None):
+        calls.append(only)
+        return lock.Result(1, ["Locked 1 of 2 vanilla files; 1 not locked."],
+                           {"locked": ["Skyrim.esm"], "not_locked": [("Dawnguard.esm", "multi-link (mod manager copy)")]})
+    monkeypatch.setattr(lock, "lock_all", fake)
+    assert lock.relock_expired(root, now).exit == 1
+    assert state.read(sf).lifts == []
+    assert lock.relock_expired(root, now + 1) is None and len(calls) == 1
+    assert not lock.relock_failed(fake(root))
+    assert lock.relock_failed(lock.Result(1, ["x"], {"not_locked": [("Skyrim.esm", "did not verify on re-read")]}))
+    assert lock.relock_failed(lock.Result(2, ["refused"], {}))
+
+
 def test_unrelated_guard_write_keeps_expired_lock_obligation(pending):
     root, sf, lift, now = pending
     cli._guards_write(root, lambda row: row["kind"] != "guards", now=now)
