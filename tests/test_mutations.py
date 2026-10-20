@@ -1391,6 +1391,16 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
            "test_backups_are_taken_and_recorded_before_the_first_change"),
           ("steamvr-running-ignored", "    if steamvr_running() and not force:", "    if False:",
            "test_steamvr_running_is_refused_unless_forced"),
+          # Review L5 F1: a file changed after `on` is kept before the backup goes back over it ...
+          ("changed-after-on-overwritten", '            if current is not None and current != e.get("applied_sha256"):',
+           "            if False:", "test_off_keeps_a_file_that_changed_after_on_before_restoring_over_it"),
+          # ... and only such a file: what `on` itself wrote is recognised, so no copy piles up on every `off`.
+          ("applied-hash-not-recorded", '        entries[0]["applied_sha256"] = sha(p["vrsettings"])',
+           "        pass", "test_off_keeps_a_file_that_changed_after_on_before_restoring_over_it"),
+          # Review L5 F4: the state file is closed by a rename, never deleted.
+          ("state-file-deleted",
+           '        os.replace(str(p), str(p.with_name("state-closed-{}.json".format(stamp))))',
+           "        p.unlink()", "test_off_closes_the_state_file_by_renaming_it_never_deleting"),
       ]],
 
     # --- mirror-launch-logs -------------------------------------------------

@@ -74,6 +74,34 @@ def test_on_swaps_opencomposite_and_enables_the_null_driver_then_off_restores_by
     assert not (tree["tmp"] / "state" / "state.json").exists()
 
 
+def test_off_keeps_a_file_that_changed_after_on_before_restoring_over_it(tree, capsys):
+    """Review L5 F1: the user updated OpenComposite and edited SteamVR settings while headless; `off` used to put the
+    old files back and destroy the new ones with no copy. Twin: an untouched file is restored with no extra copy."""
+    before = snapshot(tree)
+    assert tree["mod"].main(["on"]) == 0
+    tree["settings"].write_bytes(b'{"steamvr": {"x": 1}, "user_change_during_session": true}\n')
+    tree["dll"].write_bytes(b"MZ OpenComposite NEWER build installed by user")
+    assert tree["mod"].main(["off"]) == 0
+    assert snapshot(tree) == before
+    kept = {p.name: p.read_bytes() for p in (tree["tmp"] / "state").glob("*/changed-after-on-*/*")}
+    assert kept == {"openvr_api.dll": b"MZ OpenComposite NEWER build installed by user",
+                    "steamvr.vrsettings": b'{"steamvr": {"x": 1}, "user_change_during_session": true}\n'}
+    assert "changed after `on`" in capsys.readouterr().out
+    assert tree["mod"].main(["on"]) == 0                     # twin: nothing changed this time, nothing extra kept
+    assert tree["mod"].main(["off"]) == 0
+    assert len(list((tree["tmp"] / "state").glob("*/changed-after-on-*/*"))) == 2
+
+
+def test_off_closes_the_state_file_by_renaming_it_never_deleting(tree):
+    """Review L5 F4: state.json was written by an earlier run (`on`), so it is not same-run scratch."""
+    assert tree["mod"].main(["on"]) == 0
+    record = (tree["tmp"] / "state" / "state.json").read_text(encoding="utf-8")
+    assert tree["mod"].main(["off"]) == 0
+    closed = list((tree["tmp"] / "state").glob("state-closed-*.json"))
+    assert len(closed) == 1 and json.loads(closed[0].read_text(encoding="utf-8"))["since"] == json.loads(record)["since"]
+    assert tree["mod"].main(["off"]) == 0                     # a closed record is never read as an open one
+
+
 def test_off_is_safe_to_repeat_and_with_nothing_recorded(tree, capsys):
     assert tree["mod"].main(["off"]) == 0
     assert "nothing to restore" in capsys.readouterr().out
