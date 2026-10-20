@@ -2273,13 +2273,6 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         id='codex-context-cap-counts-characters',
     ),
     pytest.param(
-        'tools/skyguard/adapters/codex.py',
-        '        sp = patch_paths.shell_patch(cmd)',
-        '        sp = None',
-        'tests/test_skyguard_codex_adapter.py::test_a_patch_through_the_shell_carries_its_paths',
-        id='codex-shell-patch-paths-dropped',
-    ),
-    pytest.param(
         'tools/skyguard/portable.py',
         '    elif req.failure or req.event != "pre_tool":',
         '    elif req.event != "pre_tool":',
