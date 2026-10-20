@@ -12,6 +12,7 @@ that repeat the one before. The policy this tool implements is docs/RETENTION.md
             [--only CLASS[,CLASS]]               (recreatable, build, link, gzip, launch, snapshot, scratch)
     python tools/housekeep.py sweep-temp          recycle the toolkit's own stale temp dirs (see "temp sweep")
     python tools/housekeep.py session STATE.txt   sweep-temp, then write the session-start disk note to STATE.txt
+    python tools/housekeep.py recycle PATH...     send exactly these paths to the Recycle Bin (OK/FAILED per path)
     --config FILE   default <toolkit>/.claude/housekeep.json (.claude/housekeep.json.example ships)
 
 Two passes, never one: `plan` decides, `apply` re-verifies. An action whose file changed since it was planned
@@ -881,6 +882,11 @@ def main(argv) -> int:
         return 1 if res["failed"] else 0
     if cmd == "session" and len(args) == 1:
         return session(cfg, Path(args[0]))
+    if cmd == "recycle" and args:                     # for shell callers (kb-guard's rotation): one line per path
+        res = recycle(args)
+        for p in args:
+            print("OK\t" + p if res[p] is None else "FAILED\t{}\t{}".format(p, res[p]))
+        return 1 if any(res.values()) else 0
     only = None
     if "--only" in args:
         i = args.index("--only")

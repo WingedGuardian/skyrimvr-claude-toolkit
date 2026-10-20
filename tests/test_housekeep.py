@@ -373,9 +373,23 @@ def test_off_windows_the_bin_leaves_everything_in_place_and_says_so(tmp_path, mo
     d = tmp_path / "leftover"
     d.mkdir()
     monkeypatch.setattr(hk, "has_recycle_bin", lambda: False)
+
+    def no_shell(*a, **k):                     # never the real bin from a test, even if the platform check moved
+        raise AssertionError("the Recycle Bin shell call ran")
+
+    monkeypatch.setattr(hk.subprocess, "run", no_shell)
     res = hk.recycle([d])
     assert d.is_dir()
     assert "left in place" in res[str(d)], res
+
+
+def test_the_recycle_command_reports_every_path_the_bin_refused(tmp_path, monkeypatch, capsys):
+    """kb-guard's rotation reads this output (one OK / FAILED line per path); a refusal must never print OK."""
+    taken, refused = str(tmp_path / "taken"), str(tmp_path / "refused")
+    monkeypatch.setattr(hk, "recycle", lambda paths: {p: None if p == taken else "too big" for p in paths})
+    monkeypatch.setattr(hk, "DEFAULT_CONFIG", tmp_path / "no-config.json")
+    assert hk.main(["recycle", taken, refused]) == 1
+    assert capsys.readouterr().out.splitlines() == ["OK\t" + taken, "FAILED\t" + refused + "\ttoo big"]
 
 
 def test_session_writes_its_state_even_when_the_sweep_fails(tmp_path, monkeypatch):

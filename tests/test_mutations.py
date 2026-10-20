@@ -1860,6 +1860,29 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         "tests/test_kb_guard.py::test_rotation_never_prunes_the_oldest_copy",
         id="kb-guard-rotation-protects-the-oldest-copy",
     ),
+    # v4.0.0 review L4a M3: the rotation deletes outright again instead of using the Recycle Bin.
+    pytest.param(
+        "tools/kb-guard.sh",
+        '        victims+=("$d")',
+        '        rm -rf "$d"',
+        "tests/test_kb_guard.py::test_pruned_snapshots_go_to_the_recycle_bin",
+        id="kb-guard-rotation-deletes-outright",
+    ),
+    # ...and what the bin refuses goes unreported (the store silently keeps growing, or the user believes it pruned).
+    pytest.param(
+        "tools/kb-guard.sh",
+        '    if [ "$ok" -lt "$total" ]; then',
+        "    if false; then",
+        "tests/test_kb_guard.py::test_snapshots_the_bin_refuses_stay_and_the_report_says_so",
+        id="kb-guard-rotation-refusal-unreported",
+    ),
+    pytest.param(
+        "tools/housekeep.py",
+        '            print("OK' + BS + 't" + p if res[p] is None else "FAILED' + BS + 't{}' + BS + 't{}".format(p, res[p]))',
+        '            print("OK' + BS + 't" + p)',
+        "tests/test_housekeep.py::test_the_recycle_command_reports_every_path_the_bin_refused",
+        id="housekeep-recycle-cli-hides-refusals",
+    ),
     # Let the guard's exit status reach the session. SessionStart runs this, so a
     # lost knowledgebase would become a session that reports an error at startup --
     # the guard is allowed to be loud, not to break the thing it guards.
