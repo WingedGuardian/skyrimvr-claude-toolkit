@@ -275,7 +275,7 @@ if [ "$SCRUBBED" -eq 1 ]; then
   done
   SCRUB_ENV=(HOME="$FAKEHOME" USERPROFILE="$(winpath "$FAKEHOME")" APPDATA="$(winpath "$FAKEHOME/AppData/Roaming")"
              LOCALAPPDATA="$(winpath "$FAKEHOME/AppData/Local")" TMPDIR="$STMP" TEMP="$(winpath "$STMP")"
-             TMP="$(winpath "$STMP")" LANG=C.UTF-8)
+             TMP="$(winpath "$STMP")" LANG=C.UTF-8 SKYGUARD_HOUSEKEEP_SWEEP=off)   # verifying never sweeps temp
   if [ "${OS:-}" = "Windows_NT" ]; then
     SYSDIR="$(cygpath -u "${SYSTEMROOT:-C:/Windows}")/System32"
     MINPATH="$MINPATH:$SYSDIR:$SYSDIR/WindowsPowerShell/v1.0"

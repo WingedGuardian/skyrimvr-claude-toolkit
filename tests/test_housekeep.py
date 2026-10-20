@@ -419,6 +419,7 @@ def test_the_recycle_command_reports_every_path_the_bin_refused(tmp_path, monkey
 
 
 def test_session_writes_its_state_even_when_the_sweep_fails(tmp_path, monkeypatch):
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)   # conftest switches the sweep off for every test
     cfg = sweep_cfg()
     cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
                sweep_every_hours=6)
@@ -528,14 +529,59 @@ def test_the_sweep_keeps_a_dir_a_process_has_a_file_open_in(tmp_path):
     assert res["rows"]["kept: in use"] == 1
 
 
-def test_the_sweep_keeps_the_newest_pytest_run_and_removes_older_runs_and_garbage(tmp_path):
+def test_the_sweep_never_touches_another_projects_pytest_runs(tmp_path):
+    """Coordinator finding (X4 session, 2026-10-20): pytest-of-<user>/ is shared by every project on the machine, so
+    the unattended sweep recycled other projects' runs. Only this toolkit's own prefixes are candidates now."""
     base = tmp_path / "pytest-of-someone"
     old = tdir(base, "pytest-9")
-    newest = tdir(base, "pytest-10")                         # numerically newest, though just as stale
+    newest = tdir(base, "pytest-10")
     garbage = tdir(base, "garbage-0d1e")
-    hk.sweep_temp(sweep_cfg(), temp=tmp_path, recycler=bin_for(tmp_path))
-    assert newest.exists()
-    assert not old.exists() and not garbage.exists()
+    ours = tdir(tmp_path, "skyrim-harness-own001")             # twin: this toolkit's own leftover still goes
+    fake = bin_for(tmp_path)
+    hk.sweep_temp(sweep_cfg(), temp=tmp_path, recycler=fake)
+    assert newest.exists() and old.exists() and garbage.exists()
+    assert not ours.exists() and [os.path.basename(p) for p in fake.got] == ["skyrim-harness-own001"]
+
+
+@pytest.mark.parametrize("trigger", ["HARNESS_FIXTURE_ROOT", "SKYGUARD_HOUSEKEEP_SWEEP"])
+def test_the_real_bin_refuses_under_the_test_harness(tmp_path, monkeypatch, trigger):
+    """A test that forgot to inject a fake recycler must fail, never show the user a Windows dialog."""
+    d = tmp_path / "x"
+    d.mkdir()
+    monkeypatch.delenv("HARNESS_FIXTURE_ROOT", raising=False)
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
+    monkeypatch.setenv(trigger, "off" if trigger == "SKYGUARD_HOUSEKEEP_SWEEP" else str(tmp_path))
+    monkeypatch.setattr(hk, "has_recycle_bin", lambda: True)
+
+    def no_shell(*a, **k):
+        raise AssertionError("the Recycle Bin shell call ran under the test harness")
+
+    monkeypatch.setattr(hk.subprocess, "run", no_shell)
+    with pytest.raises(RuntimeError, match="never used under the test harness"):
+        hk.recycle([d])
+    assert d.is_dir()
+
+
+def test_the_switch_turns_the_session_sweep_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("SKYGUARD_HOUSEKEEP_SWEEP", "off")
+
+    def sweep(cfg):
+        raise AssertionError("a sweep ran with SKYGUARD_HOUSEKEEP_SWEEP=off")
+
+    monkeypatch.setattr(hk, "sweep_temp", sweep)
+    state = tmp_path / "note.txt"
+    assert hk.session(sweep_cfg(), state) == 0
+
+
+def test_every_test_helper_switches_the_real_sweep_off():
+    """Helpers that clean the environment lose PYTEST_CURRENT_TEST, so a hook they run would sweep the real temp."""
+    assert os.environ.get("SKYGUARD_HOUSEKEEP_SWEEP") == "off", "conftest must set it for every test and subprocess"
+    assert 'os.environ["SKYGUARD_HOUSEKEEP_SWEEP"] = "off"' in (REPO / "tests" / "conftest.py").read_text(encoding="utf-8")
+    launcher = (REPO / "tests" / "run_harness_tests.py").read_text(encoding="utf-8")
+    assert 'SKYGUARD_HOUSEKEEP_SWEEP="off"' in launcher
+    assert "export SKYGUARD_HOUSEKEEP_SWEEP=off" in (REPO / "scripts" / "setup-smoke.sh").read_text(encoding="utf-8")
+    verify = (REPO / "tools" / "verify-release.sh").read_text(encoding="utf-8")
+    assert "LANG=C.UTF-8 SKYGUARD_HOUSEKEEP_SWEEP=off)" in verify, "the scrubbed env must carry the switch"
 
 
 def test_the_sweep_removes_read_only_files_and_its_rows_sum(tmp_path):
@@ -569,6 +615,7 @@ def test_the_sweep_never_follows_a_link_out_of_temp(tmp_path):
 
 
 def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, monkeypatch):
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)   # conftest switches the sweep off for every test
     cfg = sweep_cfg()
     cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
                sweep_every_hours=0)
@@ -585,6 +632,7 @@ def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, mon
 
 
 def test_session_runs_at_most_once_per_interval(tmp_path, monkeypatch):
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)   # conftest switches the sweep off for every test
     cfg = sweep_cfg()
     cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
                sweep_every_hours=6)

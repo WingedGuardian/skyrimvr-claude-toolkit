@@ -116,7 +116,7 @@ def main():
                PYTHONPATH=os.pathsep.join([str(work), str(repo / "tests")]),
                PYTEST_PLUGINS="harness_pytest", BASH_ENV=bootstrap.as_posix(),
                HARNESS_TRIPWIRE_BIN=tripbin, HARNESS_FIXTURE_ROOT=os.pathsep.join([str(work), str(scratch)]),
-               HARNESS_TRIPWIRE_LOG=str(work / "tripwire.log"),
+               HARNESS_TRIPWIRE_LOG=str(work / "tripwire.log"), SKYGUARD_HOUSEKEEP_SWEEP="off",
                GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
     args = sys.argv[1:] or ["tests/", "-q", "-rs"]
     command = [sys.executable, "-B", "-m", "pytest", *args, "-p", "no:cacheprovider",

@@ -519,7 +519,10 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
         if aside is not None:
             # A verified copy is in the backup; the aside folder is a duplicate MO2 would list as another mod.
             print(BIN_NOTICE.format(aside), flush=True)
-            why = recycle([aside]).get(str(aside), "no result")
+            try:
+                why = recycle([aside]).get(str(aside), "no result")
+            except Exception as e:                   # e.g. refused under the test harness: the install stands
+                why = str(e)
             if why:
                 print("NOTE: the previous mod folder, moved aside to {}, was NOT sent to the Recycle Bin ({}). It is a"
                       " duplicate of {}; remove it yourself.".format(aside, why, old_folder))

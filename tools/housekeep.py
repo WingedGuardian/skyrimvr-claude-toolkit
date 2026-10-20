@@ -497,6 +497,17 @@ def has_recycle_bin() -> bool:
     return os.name == "nt"
 
 
+def sweep_switched_off() -> bool:
+    """SKYGUARD_HOUSEKEEP_SWEEP=off: no session-start sweep, and no real Recycle Bin call from this process."""
+    return os.environ.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"
+
+
+def under_test_harness() -> bool:
+    """The toolkit's test launcher (tests/run_harness_tests.py sets HARNESS_FIXTURE_ROOT) or the switch above. A test
+    that needs a bin injects a fake recycler; the real one would show the user Windows dialogs."""
+    return bool(os.environ.get("HARNESS_FIXTURE_ROOT")) or sweep_switched_off()
+
+
 def recycle(paths) -> dict:
     """{path: None | error} -- one PowerShell process for the whole batch. Recycle Bin only, never a delete."""
     paths = [str(p) for p in paths]
@@ -505,6 +516,9 @@ def recycle(paths) -> dict:
     if not has_recycle_bin():
         # No Recycle Bin implementation here (Windows only). Never a delete instead: every item stays, and says so.
         return {p: "no Recycle Bin on this platform: left in place" for p in paths}
+    if under_test_harness():
+        raise RuntimeError("refused: the real Recycle Bin is never used under the test harness (HARNESS_FIXTURE_ROOT "
+                           "or SKYGUARD_HOUSEKEEP_SWEEP=off); inject a fake recycler")
     # The shell's own delete, NOT Microsoft.VisualBasic's DeleteDirectory(..., 'OnlyErrorDialogs', ...): that UI option
     # suppresses confirmations, and the confirmation it suppresses is the one Windows shows when an item is too big for
     # the bin and would be destroyed instead. FOF_WANTNUKEWARNING (0x4000) brings exactly that prompt back while
@@ -728,21 +742,11 @@ def temp_candidates(cfg, temp: Path):
                 continue
         except OSError:
             continue
+        # Only names this toolkit creates. pytest-of-<user>/ is shared by every project on the machine (the X4
+        # toolkit's runs, anyone's): an unattended sweep cannot tell this toolkit's runs from theirs, so it never
+        # touches it. This toolkit's own test runs live under its skyrim-harness- prefix (tests/run_harness_tests.py).
         if prefixes and e.name.startswith(prefixes):
             yield Path(e.path), "toolkit temp"
-        elif e.name.startswith("pytest-of-"):
-            # pytest keeps the newest three runs itself and leaves garbage-* behind when it cannot delete one.
-            try:
-                kids = [k for k in os.scandir(e.path) if k.is_dir(follow_symlinks=False)]
-            except OSError:
-                continue
-            runs = sorted((k for k in kids if re.fullmatch(r"pytest-\d+", k.name)),
-                          key=lambda k: int(k.name.split("-")[1]))
-            for k in runs[:-1]:                        # never the newest: it may belong to a run starting now
-                yield Path(k.path), "old pytest run"
-            for k in kids:
-                if k.name.startswith("garbage-"):
-                    yield Path(k.path), "pytest garbage"
 
 
 def sweep_temp(cfg, temp: Path | None = None, now: float | None = None, recycler=None) -> dict:
@@ -785,7 +789,9 @@ def worktree_count(root: Path) -> int:
 def session(cfg, state: Path) -> int:
     """The session-start job: sweep the toolkit's temp dirs, then write a one-line note for the next banner when
     something needs the user (free space near the floor, Codex sessions or worktrees past their threshold).
-    Runs at most once per sweep_every_hours: the state file's age is the clock."""
+    Runs at most once per sweep_every_hours: the state file's age is the clock. SKYGUARD_HOUSEKEEP_SWEEP=off: nothing."""
+    if sweep_switched_off():
+        return 0
     try:
         if time.time() - state.stat().st_mtime < cfg["sweep_every_hours"] * 3600:
             return 0

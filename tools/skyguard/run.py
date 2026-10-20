@@ -126,9 +126,17 @@ def _disk_note(project) -> str:
     except OSError:
         note = ""
     tool = Path(__file__).resolve().parents[1] / "housekeep.py"
+    # Only the INSTALLED toolkit's own housekeep.py: this run.py's copy, and only when the hook's project IS that
+    # toolkit. A hook run against any other folder (a test fixture, a copy) never launches a sweep of the real temp.
+    try:
+        own = (Path(project).resolve() / "tools" / "housekeep.py") == tool
+    except OSError:
+        own = False
     # A test suite runs this hook hundreds of times: none of them may launch a real sweep of the real temp dir.
+    # Test helpers that clean the environment (no PYTEST_CURRENT_TEST) set SKYGUARD_HOUSEKEEP_SWEEP=off instead.
     in_test = os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("SKYGUARD_SWEEP_IN_TESTS")
-    if tool.is_file() and not in_test:
+    off = os.environ.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"
+    if tool.is_file() and own and not off and not in_test:
         try:
             import subprocess
             flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0   # detached, new group, no window
