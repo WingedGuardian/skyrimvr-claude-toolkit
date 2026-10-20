@@ -268,12 +268,22 @@ def walk_files(target: Path):
             yield Path(dp) / f
 
 
-def protected_inside(guard, folder: Path) -> str:
+# The 3.x snapshot-before-tool.sh store. User ruling 2026-10-20: its stamps are ROLLING (a stamp repeating the one
+# before goes to the Recycle Bin), although the store sits under .claude/backups/. Only this one tool store: saves
+# inside it, a backup folder inside a stamp, and every other backup folder stay Forever.
+ROLLING_SNAPSHOT_STORE = "auto_snapshots"
+
+
+def protected_inside(guard, folder: Path, cls: str = "") -> str:
     """Why a whole-folder action (launch, snapshot, scratch) may not take this folder: the first protected file in
     it, or "". A folder is recycled whole, so one save or one backup inside it keeps all of it, whatever the config
-    names."""
+    names -- except the "backup folder" ABOVE a stamp of the rolling snapshot store (see ROLLING_SNAPSHOT_STORE)."""
+    store = folder.parent if cls == "snapshot" and folder.parent.name.lower() == ROLLING_SNAPSHOT_STORE else None
     for f in walk_files(folder):
         why = guard.why_protected(f)
+        if why == "backup folder" and store is not None \
+                and not any("backup" in part.lower() for part in f.relative_to(store).parts[:-1]):
+            continue
         if why:
             return why
     return ""
@@ -444,7 +454,7 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             files = sorted(walk_files(p))
             sig = sorted((str(f.relative_to(p)).lower(), f.stat().st_size, blake(f)) for f in files)
             size = sum(s for _, s, _ in sig)
-            why = protected_inside(guard, p) if sig == prev and i != len(stamps) - 1 else ""
+            why = protected_inside(guard, p, "snapshot") if sig == prev and i != len(stamps) - 1 else ""
             if why:
                 count("kept: protected ({})".format(why), size)
             elif sig == prev and i != len(stamps) - 1:
@@ -584,7 +594,7 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
         if guard.why_protected(c) in ("save", "git-tracked"):
             return "canonical copy is protected"
     if action["class"] in ("launch", "snapshot", "scratch"):
-        why = protected_inside(guard, p)
+        why = protected_inside(guard, p, action["class"])
         if why:
             return "protected ({})".format(why)
         if fingerprint(p) != action["fingerprint"]:

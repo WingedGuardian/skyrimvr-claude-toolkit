@@ -80,7 +80,9 @@ link.
 - **Launch-log captures** (a watcher copying `SkyrimNet.log`, Papyrus and SKSE logs per launch) compress about
   10:1; a folder whose name is not `launch-YYYYMMDD-HHMMSS` counts as labelled and is kept.
 - **Snapshot folders** from the 3.x `snapshot-before-tool.sh` hook (`auto_snapshots/YYYYMMDD_HHMMSS/`) repeat
-  each other; the 4.x content-addressed store does not.
+  each other; the 4.x content-addressed store does not. That one store is **Rolling** although it sits under
+  `.claude/backups/` (user ruling 2026-10-20): a stamp repeating the one before goes to the Recycle Bin. A save, or
+  a `*backup*` folder, inside a stamp keeps that stamp, and every other backup folder stays Forever.
 
 ## Running it
 

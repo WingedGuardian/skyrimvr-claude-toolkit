@@ -342,6 +342,32 @@ def test_a_repeated_snapshot_under_a_backup_folder_is_never_planned(tree):
     assert got == {key(tree / "snaps" / "20261001_000002")}, got
 
 
+def _auto_snaps(tree, inner=None):
+    store = tree / ".claude" / "backups" / "auto_snapshots"
+    for name in ("20261001_000001", "20261001_000002", "20261001_000003"):
+        write(store / name / "a.psc", b"v1")
+        if inner:
+            write(store / name / inner, b"same")
+    return store
+
+
+def test_repeated_auto_snapshots_stamps_are_rolling(tree):
+    """User ruling 2026-10-20: the 3.x snapshot store is Rolling, though it sits under .claude/backups/."""
+    store = _auto_snaps(tree)
+    cfg = cfg_for(tree, legacy_snapshots=[".claude/backups/auto_snapshots"])
+    doc = hk.plan(cfg)
+    assert planned(doc, "snapshot") == {key(store / "20261001_000002")}
+    action = next(a for a in doc["actions"] if a["class"] == "snapshot")
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time()) == "", "apply must agree with plan"
+
+
+@pytest.mark.parametrize("inner", ["kept/quick" + hk.SAVE_EXTS[0], "backups/pair.txt"])
+def test_a_save_or_backup_inside_an_auto_snapshots_stamp_keeps_it(tree, inner):
+    _auto_snaps(tree, inner)
+    doc = hk.plan(cfg_for(tree, legacy_snapshots=[".claude/backups/auto_snapshots"]))
+    assert planned(doc, "snapshot") == set(), "a save or a backup folder inside a stamp is still Forever"
+
+
 def test_apply_refuses_a_scratch_folder_a_save_appeared_in_after_the_plan(tree):
     bed = tree / "scratchbed"
     write(bed / "plain.txt", b"x")
