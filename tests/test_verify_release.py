@@ -181,6 +181,18 @@ def test_the_scrubbed_install_runs_and_its_canary_is_invisible(tmp_path, payload
     assert r.returncode == 0, out[-4000:]
 
 
+def test_a_degraded_hook_canary_is_red(tmp_path, payload):
+    """v4.0.0 review L4a L3: hook-canary's exit 1 means a hook is DEGRADED; it was accepted as a report."""
+    def degraded(src):
+        (src / "tools" / "hook-canary.sh").write_text(
+            "#!/usr/bin/env bash\necho 'RESULT: DEGRADED -- protect-bash.sh received no payload'\nexit 1\n",
+            encoding="utf-8", newline="\n")
+    r = _verify(tmp_path, _variant(tmp_path, payload, degraded), "--scrubbed")
+    verdict = [ln for ln in r.stdout.splitlines() if ln.strip().startswith("hook-canary")]
+    assert len(verdict) == 1 and "!!" in verdict[0], r.stdout[-4000:]
+    assert r.returncode == 1
+
+
 def _setup_documents_below_login_home():
     """Does setup.sh's Documents folder sit below C:/Users/<whoami> here? Whenever PowerShell gives no answer (Linux,
     or Windows under the test harness's made-up profile -- MEASURED: an empty line) setup writes its

@@ -7501,6 +7501,12 @@ MUTATIONS += [
     pytest.param("tools/verify-release.sh", "    [A-Za-z]:/*) ;;", "    __not_a_drive_root__) ;;",
                  "tests/test_verify_release.py::test_the_scrubbed_install_runs_and_its_canary_is_invisible",
                  marks=CMD_ONLY, id="verify-codex-defs-rendered-on-windows"),
+    # v4.0.0 review L4a L3: a DEGRADED hook-canary (exit 1) was accepted as a report.
+    pytest.param("tools/verify-release.sh",
+                 """  if { [ $rc -eq 0 ] || [ $rc -eq 2 ]; } && grep -q '^RESULT:' <<<"$out"; then""",
+                 """  if [ $rc -le 2 ] && grep -q '^RESULT:' <<<"$out"; then""",
+                 "tests/test_verify_release.py::test_a_degraded_hook_canary_is_red",
+                 id="verify-accepts-degraded-canary"),
 ]
 
 # Final gate followups: launcher fallback, isolated barrier evidence, and accurate setup output.
