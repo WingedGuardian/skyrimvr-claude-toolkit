@@ -57,9 +57,12 @@ render() { $PY "$SCRIPT_DIR/nexus-render.py" "$@"; }
 # http <curl args...> -> body on stdout when the answer is HTTP 200; otherwise the reason on stderr and status 3.
 # Three outcomes, never two: "the API said nothing" and "we never reached the API" must not both arrive as an
 # empty string and print as a blank answer.
+# The key reaches curl on STDIN (`-H @-`; printf is a shell builtin, so no process ever carries it), never as an
+# argument: a curl command line is readable by any process of the same user and by command-line auditing for as
+# long as the request runs (review L5 F10).
 http() {
     local out code
-    out="$(curl -s --max-time 30 -w $'\n%{http_code}' -H "apikey: $KEY" "$@")" \
+    out="$(printf 'apikey: %s\n' "$KEY" | curl -s --max-time 30 -w $'\n%{http_code}' -H @- "$@")" \
         || { echo "ERROR: the request did not complete (network, DNS or timeout)" >&2; return 3; }
     code="${out##*$'\n'}"
     out="${out%$'\n'*}"

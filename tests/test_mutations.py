@@ -1439,6 +1439,11 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
                  "fs.readFileSync(pluginsTxt, 'utf8');",
                  "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests",
                  id="active-plugins-bom-drops-the-first-plugin"),
+    # F10: the Nexus key reaches curl on stdin, never on its command line.
+    pytest.param("tools/nexus.sh", """printf 'apikey: %s\\n' "$KEY" | curl -s --max-time 30 -w $'\\n%{http_code}' -H @- "$@")""",
+                 """curl -s --max-time 30 -w $'\\n%{http_code}' -H "apikey: $KEY" "$@")""",
+                 "tests/test_nexus.py::test_page_end_to_end_and_the_key_is_used_but_never_printed",
+                 id="nexus-key-on-the-curl-command-line"),
 
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(
