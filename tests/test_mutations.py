@@ -1410,6 +1410,15 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
                  '            if p in list(root.glob("*/" + name))]',
                  "tests/test_housecarl.py::test_a_staged_patch_name_with_brackets_is_a_name_not_a_glob",
                  id="housecarl-staged-name-is-a-glob"),
+    # F5: the god-mode restore is queued only after the toggle went through ...
+    pytest.param("tools/bench-vr.py", '        bench.console("tgm")\n        # Only once',
+                 '        restore.append(("god mode", "tgm"))\n        bench.console("tgm")\n        # Only once',
+                 "tests/test_bench_vr.py::test_a_god_mode_toggle_that_failed_is_not_toggled_back_on",
+                 id="bench-vr-tgm-restore-queued-first"),
+    # ... and a run that moved the player says where it left them.
+    pytest.param("tools/bench-vr.py", "                moved = True\n", "",
+                 "tests/test_bench_vr.py::test_the_run_says_where_it_left_the_player",
+                 id="bench-vr-player-location-unreported"),
 
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(

@@ -19,7 +19,9 @@ Rules it keeps:
   * Everything it changes for the measurement is put back in a `finally`, also when the run fails or is
     interrupted: god mode is toggled back, and timescale and game hour are set back to the values read before the
     run. A value that could not be read or restored is printed with the console command to restore it by hand.
-    The forced weather is not undone (the next weather change replaces it); use a save you can reload.
+    The forced weather is not undone (the next weather change replaces it), and neither is the player's location:
+    every coc/cow moves the player, and the run leaves them at the last location it measured (it prints where they
+    started). Run it on a save you reload afterwards.
   * It never re-`coc`s into the cell the player is already in: re-entering the current cell re-fires its Story
     Manager checks, which has crashed the game. That location is measured where it stands.
 
@@ -217,6 +219,8 @@ def run(a) -> int:
     restore = []            # (what, console command) to run in the finally, newest first
     unrestored = []
     status = 0
+    started_in, moved = current_cell(bench), False
+    result["started_in"] = started_in
     try:
         ts = read_value(bench.console("show timescale"))
         gh = read_value(bench.console("show gamehour"))
@@ -226,14 +230,16 @@ def run(a) -> int:
         restore.append(("gamehour", "set gamehour to {}".format(gh) if gh else None))
         bench.console("set gamehour to {}".format(a.hour))
         bench.console("fw {}".format(a.weather))
-        restore.append(("god mode", "tgm"))
         bench.console("tgm")
+        # Only once the toggle went through: a tgm that failed and was then "restored" would turn god mode ON.
+        restore.append(("god mode", "tgm"))
         for name, cmd in locs:
             print("--- {}".format(name))
             here = current_cell(bench)
             if cmd.lower().startswith("coc ") and here.lower() == cmd[4:].lower():
                 print("  already in {}: measured where it stands (re-entering the current cell can crash)".format(here))
             else:
+                moved = True
                 lines = bench.console(cmd, settle=2.0)
                 if any("not found" in ln.lower() or "invalid" in ln.lower() for ln in lines):
                     print("  SKIPPED, the console said: {}".format(lines))
@@ -277,11 +283,18 @@ def run(a) -> int:
             except DevBenchError as e:
                 unrestored.append((what, "run `{}` in the console ({})".format(cmd, e)))
         result["unrestored"] = [{"what": w, "how": h_} for w, h_ in unrestored]
+        # Not put back by design (review L5 F5): say so, every run, so nobody reads the run as leaving the game as
+        # it found it. Informational: it does not change the exit code.
+        result["left_as_is"] = ["the forced weather"] + (
+            ["the player's location: started in {}, now in {}; reload your save to return".format(
+                started_in or "an unknown cell", current_cell(bench) or "an unknown cell")] if moved else [])
         path = out / "bench-{}-{}.json".format(re.sub(r"[^A-Za-z0-9_.-]", "_", a.label), time.strftime("%Y%m%d-%H%M%S"))
         path.write_text(json.dumps(result, indent=2), encoding="utf-8")
         print("wrote {}".format(path))
         for what, how in unrestored:
             print("NOT RESTORED: {}: {}".format(what, how))
+        for what in result["left_as_is"]:
+            print("LEFT AS IS (by design): {}".format(what))
     return 1 if (status or unrestored) else 0
 
 
