@@ -261,7 +261,7 @@ After setup and any required hook approval, the supported agents run these check
 | Protection | What It Does |
 |-----------|-------------|
 | **Command guard** | Blocks deleting inside the install, the config folder or Mod Organizer's `mods`/`overwrite` (a Recycle-Bin delete included), deleting everything in a folder it cannot place, moving the install, `Data`, the settings folder or `Saves` away, running decoded text (`base64 -d` piped to a shell), deleting Bethesda registry keys, raw-text shell writes to ESP/ESM/ESL/BSA/BA2 (`>`, `tee`, `Set-Content`, `Out-File`, ...), and DevBench `smp reset`. Runs on the Bash and PowerShell tools. **Advises** on other file operations in game directories -- a note to Claude, not a prompt to you. |
-| **File guard** | Blocks direct writes to ESP/ESM/ESL/BSA/BA2 files through the edit tools. **Advises** on INIs, load-order files and scripts; its one prompt is a write onto a save in `Saves/`. |
+| **File guard** | Blocks direct writes to ESP/ESM/ESL/BSA/BA2 files through the edit tools. **Advises** on INIs, load-order files and scripts. A write onto one or two saves in `Saves/` is backed up first, then runs; more than two need your typed approval. |
 | **Auto-backup** | Copies a file to `.claude/backups/` before the edit tools (or Codex `apply_patch`) change it, with full audit log. A file a script writes through the shell is not backed up. |
 | **Confidence system** | Claude must rate confidence 0-100% and list assumptions before any change. |
 | **Investigation-first** | Claude checks the knowledgebase and web-searches before touching anything. |
@@ -517,7 +517,7 @@ you run it yourself if you agree. Deleting the Bethesda registry keys (`reg dele
   as a possible gap.
 - **MCP tools other than DevBench's**: logged in `.claude/backups/codex-unhooked-tools.log`, not guarded. DevBench's own tools
   (any server whose name contains `devbench`) get the same judge as on Claude: `smp reset` is refused, and a save over an
-  existing save is refused with `NEEDS YOUR CONFIRMATION`, like every other confirmation on Codex.
+  existing save is backed up first, then runs (more than two saves at once need your typed approval).
 - **A shell call's own working directory** (`workdir`): read when the hook payload carries one, so relative
   paths land there; whether Codex puts `workdir` in the payload is **unmeasured**. Use absolute paths for
   anything in the game folder.
