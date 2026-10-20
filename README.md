@@ -19,7 +19,21 @@ xEdit validation. The upstream server is an optional, separately installed depen
 
 The optional Windows file lock is off by default. Its limits and the hook coverage are described below. Earlier release announcements are in [CHANGELOG.md](CHANGELOG.md).
 
-## New in v3: Create Custom Animated VFX — and See Them Before You Load the Game
+## New in v4: Codex support, one guard engine, and backed-up game saves
+
+- **Codex CLI on Windows**, alongside Claude Code: the same instructions, skills and guards. Approve the hooks with
+  `/hooks` (see *Using with Codex* below). Other agents can wire the guards into themselves with [ADAPTING.md](ADAPTING.md).
+- **One guard engine in Python** (`tools/skyguard/`) behind both agents' hooks. A guard that cannot run refuses
+  rather than allows; `bash tools/hook-canary.sh` and `bash tools/skydoctor` show what is live.
+- **Game saves are backed up, not asked about:** a change to one or two of them first copies both files of each,
+  verified and kept forever; more than two need the approval line you type.
+- **An optional file lock** for the vanilla masters and archives (Windows, off by default), described below.
+- **New tools:** `mod-install` and `archive-triage` for manual installs, `housekeep` for agent output, headless
+  VR and `bench-vr` for DevBench, and the optional House Carl gateway (`docs/housecarl.md`).
+
+Everything else, and how to upgrade from 3.x: [CHANGELOG.md](CHANGELOG.md).
+
+## Added in v3: Create Custom Animated VFX — and See Them Before You Load the Game
 
 v2 could read, edit, and build ESPs. **v3 adds the ability to author 3D mesh content and animation, and to verify it visually before it ever touches your headset.** This is the big leap, so it goes first:
 

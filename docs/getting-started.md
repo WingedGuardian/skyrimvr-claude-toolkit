@@ -34,7 +34,10 @@ Claude Code is made by Anthropic (the company behind Claude AI). It's like ChatG
 
 ### Install it
 
-**Option A: Desktop App (if you've never used a terminal before)**
+The toolkit's safety hooks are tested on the Claude Code **command line** (Option B). The desktop app is not a
+surface the toolkit claims (`ADAPTING.md`, section 8), so prefer Option B if you can.
+
+**Option A: Desktop App (if you've never used a terminal before; not covered by the toolkit's hook testing)**
 
 1. Go to [claude.ai/code](https://claude.ai/code)
 2. Click the Windows download button

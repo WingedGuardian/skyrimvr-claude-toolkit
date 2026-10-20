@@ -144,3 +144,12 @@ def test_the_changelog_describes_the_approval_line_and_ask_rules_the_code_has():
     assert 'data.get("v") != 1 or data.get("session_id") != session_id' in approval
     assert "os.path.isabs(p) for p in data[\"paths\"]" in approval
     assert "Removed: .NET 8/9 support" not in notes and "- **.NET 8/9 support:**" not in notes
+
+
+def test_pre_arc_carry_overs_are_gone():
+    """Review L6 F13: a "confirmation threshold" setting that does not exist, the desktop app recommended without
+    saying it is unclaimed, and a v4 README whose first section was "New in v3"."""
+    assert "confirmation threshold" not in _read("docs/safety-philosophy.md")
+    assert "not covered by the toolkit's hook testing" in _read("docs/getting-started.md")
+    readme = _read("README.md")
+    assert "## New in v4" in readme and "## New in v3" not in readme
