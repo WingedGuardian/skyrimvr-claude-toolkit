@@ -43,6 +43,11 @@ _spec.loader.exec_module(triage)
     ("Optional-MCM/ExampleMod.esp", ("Optional-MCM", "ExampleMod.esp", "data")),
     ("Data/MCM/Config/x/config.json", ("", "MCM/Config/x/config.json", "data")),
     ("ExampleMod.esp", ("", "ExampleMod.esp", "data")),
+    # PBR patcher instructions are Data roots (PGPatcher reads them from Data/); dropping them silently
+    # installs PBR textures that no mesh ever uses (TomatoRim PBR, 2026-10-19).
+    ("Pack 2k/PBRNifPatcher/landscape/rocks.json", ("Pack 2k", "PBRNifPatcher/landscape/rocks.json", "data")),
+    ("Pack 2k/PBRTextureSets/TXSTRoad.json", ("Pack 2k", "PBRTextureSets/TXSTRoad.json", "data")),
+    ("PBRMaterialObjects/Snow.json", ("", "PBRMaterialObjects/Snow.json", "data")),
     # Binaries outside any Data root land in the game folder when installed as packaged.
     ("skse64_loader.exe", ("", "skse64_loader.exe", "game")),
     ("Main/d3d11.dll", ("Main", "d3d11.dll", "game")),

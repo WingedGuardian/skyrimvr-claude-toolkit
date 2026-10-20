@@ -60,7 +60,9 @@ import skyrim_paths  # noqa: E402
 # Top-level folders of Data/. An archive path is mapped onto Data/ at the first of these it contains.
 ROOTS = {"skse", "scripts", "source", "meshes", "textures", "interface", "sound", "music", "seq", "strings",
          "mcm", "nemesis_engine", "pandora_engine", "video", "lodsettings", "grass", "shadersfx", "facegen",
-         "dialogueviews", "calientetools", "netscriptframework", "platform", "skypatcher", "tools"}
+         "dialogueviews", "calientetools", "netscriptframework", "platform", "skypatcher", "tools",
+         # PBR mods ship patcher instructions read from Data/ by PGPatcher (and the older PBRNifPatcher)
+         "pbrnifpatcher", "pbrtexturesets", "pbrmaterialobjects"}
 PLUGIN_EXT = (".esp", ".esm", ".esl")
 # Loose files at an option folder's root that belong in Data/. NOT .txt/.md/.json: a root readme.txt would map
 # to Data/readme.txt and overwrite another mod's readme.
