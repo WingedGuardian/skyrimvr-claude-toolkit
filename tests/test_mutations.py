@@ -1434,6 +1434,11 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
                  '    return next((v for (_m, o), v in KNOWN.items() if o == r["offset"].upper()), ("UNKNOWN", ""))',
                  "tests/test_triage.py::test_an_accepted_offset_in_another_module_is_unknown_not_accepted",
                  id="crash-triage-offset-only-ruling"),
+    # F9: a BOM-headed plugins.txt keeps its first active plugin (the node suite runs under this anchor).
+    pytest.param("tools/xelib/active-plugins.js", "fs.readFileSync(pluginsTxt, 'utf8').replace(/^\\uFEFF/, '');",
+                 "fs.readFileSync(pluginsTxt, 'utf8');",
+                 "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests",
+                 id="active-plugins-bom-drops-the-first-plugin"),
 
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(

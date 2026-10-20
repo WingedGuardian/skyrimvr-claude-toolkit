@@ -38,6 +38,14 @@ test('only *-prefixed lines are treated as active', () => {
     ['Skyrim.esm', 'Dawnguard.esm', 'Mod.esp']);
 });
 
+test('a UTF-8 BOM does not drop the first active plugin', () => {
+  // Review L5 F9: the BOM made line 1 read '\uFEFF*Unofficial...' and the first plugin vanished.
+  const file = tmpPluginsTxt('\uFEFF*Unofficial Skyrim Special Edition Patch.esp\r\n*SkyUI_SE.esp\r\n');
+  assert.strictEqual(fs.readFileSync(file)[0], 0xEF, 'the fixture must really start with a BOM');
+  assert.deepStrictEqual(readActivePlugins(file),
+    ['Unofficial Skyrim Special Edition Patch.esp', 'SkyUI_SE.esp']);
+});
+
 test('CRLF line endings parse the same as LF', () => {
   // plugins.txt is written by Windows tooling and is routinely CRLF. Without
   // the \r being stripped, every plugin name would carry a trailing carriage
