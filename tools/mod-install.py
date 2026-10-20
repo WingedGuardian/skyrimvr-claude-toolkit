@@ -34,8 +34,11 @@ Where it installs:
     layout inside it. Enable it in MO2 afterwards. An existing, non-empty folder of that name is refused unless
     --update: then the WHOLE old folder is first moved (verified, byte for byte) to
     <records>/backups/<NAME>-<stamp>/mod-folder/, the manifest names it, and the new files are installed in its
-    place. The user's existing configs are carried over (the archive's copy goes beside them as .new, unless
-    --overwrite-config), and so is MO2's meta.ini. Game-folder files cannot go through MO2's virtual Data/:
+    place. That move is ONE atomic rename of the live folder (across volumes: a verified copy, then a rename aside
+    in the mods folder, the aside folder going to the Recycle Bin after the install). The live folder is never
+    removed file by file: if it cannot be renamed (on Windows, a file in it is open), the update is refused with
+    the folder unchanged and the open files named. The user's existing configs are carried over (the archive's
+    copy goes beside them as .new, unless --overwrite-config), and so is MO2's meta.ini. Game-folder files cannot go through MO2's virtual Data/:
     they are listed and skipped unless --game-root-files, which writes them to the REAL game folder.
   * Vortex (Data/vortex.deployment.json present): a warning that Vortex may later overwrite or purge files it
     does not own. Not a refusal.
@@ -320,22 +323,67 @@ def tree_hashes(root: Path):
     return {q.relative_to(root).as_posix(): sha(q) for q in sorted(root.rglob("*")) if q.is_file()}
 
 
-def move_verified(src: Path, dst: Path) -> int:
-    """Move a folder to dst, keeping every byte: a rename on the same volume; across volumes a copy, verified file
-    by file against the original's hashes, and only then is the original removed. Returns the file count."""
-    before = tree_hashes(src)
-    dst.parent.mkdir(parents=True, exist_ok=True)
+def files_in_use(root: Path):
+    """Files under root another process holds open in a way that blocks a rename (Windows only; [] elsewhere, where
+    an open file never blocks one). Probed by opening each for DELETE with full sharing, which changes nothing."""
+    if os.name != "nt":
+        return []
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                                wintypes.DWORD, wintypes.HANDLE]
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    invalid = wintypes.HANDLE(-1).value
+    busy = []
+    for q in sorted(root.rglob("*")):
+        # DELETE access, share read/write/delete, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS (folders open too)
+        h = k32.CreateFileW(str(q), 0x00010000, 0x7, None, 3, 0x02000000, None)
+        if h == invalid or h is None:
+            if ctypes.get_last_error() in (32, 33, 5):       # sharing violation, lock violation, access denied
+                busy.append(q)
+        else:
+            k32.CloseHandle(h)
+    return busy
+
+
+def keep_previous(live: Path, kept: Path, before) -> Path | None:
+    """Keep the whole previous mod folder at kept, in ONE atomic step on the live folder. The same volume: one rename
+    into the backup. Otherwise a copy into the backup, verified byte for byte against `before`, then the live folder
+    is renamed aside in its own parent; that aside folder is returned (it goes to the Recycle Bin once the install
+    succeeds). The live folder is never removed file by file: when it cannot be renamed (on Windows, any file open
+    inside it), this raises with the live folder unchanged, naming the files in use."""
+    kept.parent.mkdir(parents=True, exist_ok=True)
     try:
-        os.rename(str(src), str(dst))
-    except OSError:
-        shutil.copytree(str(src), str(dst))
-        if tree_hashes(dst) != before:
+        os.rename(str(live), str(kept))
+        aside = None
+    except OSError as e:
+        busy = files_in_use(live)
+        if busy:
+            raise OSError("{} cannot be moved while files in it are in use: {} ({})".format(
+                live, ", ".join(str(q.relative_to(live)) for q in busy[:10]), e))
+        shutil.copytree(str(live), str(kept))
+        if tree_hashes(kept) != before:
             raise OSError("the copy of {} in {} does not match the original; the original is untouched".format(
-                src, dst))
-        shutil.rmtree(str(src))                  # a verified move: every byte of the original is in dst
-    if tree_hashes(dst) != before:
-        raise OSError("the moved folder {} does not match what was there before".format(dst))
-    return len(before)
+                live, kept))
+        aside = live.with_name("{}.modinst-old-{}".format(live.name, uuid.uuid4().hex[:12]))
+        try:
+            os.rename(str(live), str(aside))
+        except OSError as e2:
+            busy = files_in_use(live)
+            raise OSError("{} could not be moved aside{} ({}); a verified copy of it is at {}".format(
+                live, ": files in use: " + ", ".join(str(q.relative_to(live)) for q in busy[:10]) if busy else "",
+                e2, kept))
+    if tree_hashes(kept) != before:
+        raise OSError("the kept folder {} does not match what was there before".format(kept))
+    return aside
+
+
+def recycle(paths):
+    """The toolkit's Recycle Bin (tools/housekeep.py): {path: None | why it was left in place}."""
+    import housekeep
+    return housekeep.recycle(paths)
 
 
 # Files of the OLD mod folder carried into the replacement when the archive has none: MO2's own record of the mod
@@ -403,49 +451,75 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
         planned = ["PLANNED  {}".format(target_of(p)) for p in todo]
         record(header + ["# STATUS: in progress"] + planned, initial=True)
 
+        aside, written = None, []
         if old_folder is not None:
+            old_hashes = tree_hashes(replacing)
             try:
-                n_old = move_verified(replacing, old_folder)
+                aside = keep_previous(replacing, old_folder, old_hashes)
             except OSError as e:
-                aborted = "# STATUS: aborted before any write -- the previous mod folder could not be kept: {}".format(e)
-                record(header + [aborted])
-                print("ERROR: {}. Nothing was installed.".format(e), file=sys.stderr)
-                return 2
-            header.append("# UPDATE: {} file(s) were in the previous mod folder".format(n_old))
-            replacing.mkdir(parents=True, exist_ok=True)
-            # The user's configs stay (the archive's copy goes beside them as .new), and so does MO2's meta.ini.
-            keep = [q[1] for q in todo if q[2] == "CONFIG-NEW"]
-            keep += [replacing / n for n in CARRY_OVER if not any(q[1] == replacing / n for q in todo)]
-            for dest in keep:
-                src_old = old_folder / dest.relative_to(replacing)
-                if src_old.is_file():
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(str(src_old), str(dest))
+                if tree_hashes(replacing) == old_hashes:         # observed, never assumed from the error
+                    aborted = "# STATUS: aborted before any write -- the previous mod folder could not be kept: {}"
+                    record(header + [aborted.format(e)])
+                    print("ERROR: {}. The mod folder {} was not changed. Nothing was installed.".format(e, replacing),
+                          file=sys.stderr)
+                    return 2
+                raise
+            header.append("# UPDATE: {} file(s) were in the previous mod folder".format(len(old_hashes)))
+        try:
+            if old_folder is not None:
+                replacing.mkdir(parents=True, exist_ok=True)
+                # The user's configs stay (the archive's copy goes beside them as .new), and so does MO2's meta.ini.
+                keep = [q[1] for q in todo if q[2] == "CONFIG-NEW"]
+                keep += [replacing / n for n in CARRY_OVER if not any(q[1] == replacing / n for q in todo)]
+                for dest in keep:
+                    src_old = old_folder / dest.relative_to(replacing)
+                    if src_old.is_file():
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(str(src_old), str(dest))
 
-        written, bad = [], 0
-        for p in todo:
-            inner, dest, action, notes = p
-            target = target_of(p)
-            if target.is_file():                     # OVERWRITE, or an older <file>.new: keep the original first
-                b = backup / backup_rel(target)
-                b.parent.mkdir(parents=True, exist_ok=True)
-                before = sha(target)
-                with target.open("rb") as source, b.open("xb") as saved:
-                    shutil.copyfileobj(source, saved)
-                    saved.flush()
-                    os.fsync(saved.fileno())
-                if sha(b) != before or sha(target) != before:
-                    raise OSError("backup verification failed before replacing {}".format(target))
-            write_replacing(staged[inner], target)
-            got, want = sha(target), sha(staged[inner])
-            if got != want:
-                bad += 1
-                print("  VERIFY MISMATCH: {}".format(triage.clean(str(target))), file=sys.stderr)
-            written.append("{}  {}".format(got, target))
-            record(header + ["# STATUS: in progress"] + written + planned[len(written):])
+            bad = 0
+            for p in todo:
+                inner, dest, action, notes = p
+                target = target_of(p)
+                if target.is_file():                     # OVERWRITE, or an older <file>.new: keep the original first
+                    b = backup / backup_rel(target)
+                    b.parent.mkdir(parents=True, exist_ok=True)
+                    before = sha(target)
+                    with target.open("rb") as source, b.open("xb") as saved:
+                        shutil.copyfileobj(source, saved)
+                        saved.flush()
+                        os.fsync(saved.fileno())
+                    if sha(b) != before or sha(target) != before:
+                        raise OSError("backup verification failed before replacing {}".format(target))
+                write_replacing(staged[inner], target)
+                got, want = sha(target), sha(staged[inner])
+                if got != want:
+                    bad += 1
+                    print("  VERIFY MISMATCH: {}".format(triage.clean(str(target))), file=sys.stderr)
+                written.append("{}  {}".format(got, target))
+                record(header + ["# STATUS: in progress"] + written + planned[len(written):])
+        except BaseException as e:
+            if old_folder is None:
+                raise
+            # The old folder has moved: never "nothing was installed". Say where it is and what the live folder holds.
+            failed = "# STATUS: FAILED after the previous mod folder was moved to {} -- {} of {} file(s) written: {}"
+            record(header + [failed.format(old_folder, len(written), len(todo), e)] + written)
+            print("ERROR: the update stopped partway: {}. The previous mod folder is kept whole at {}{}; {} now holds "
+                  "a partial install ({} of {} file(s)). To go back, replace {} with that copy.".format(
+                      e, old_folder, " (and moved aside at {})".format(aside) if aside is not None else "", replacing,
+                      len(written), len(todo), replacing), file=sys.stderr)
+            raise
         status = "# STATUS: complete, {} file(s), {} verify mismatch(es)".format(len(written), bad)
         record(header + [status] + written)
         print("INSTALLED {} file(s), verify mismatches={}; manifest {}".format(len(written), bad, manifest))
+        if aside is not None:
+            # A verified copy is in the backup; the aside folder is a duplicate MO2 would list as another mod.
+            why = recycle([aside]).get(str(aside), "no result")
+            if why:
+                print("NOTE: the previous mod folder, moved aside to {}, was NOT sent to the Recycle Bin ({}). It is a"
+                      " duplicate of {}; remove it yourself.".format(aside, why, old_folder))
+            else:
+                print("the previous mod folder, moved aside to {}, was sent to the Recycle Bin".format(aside))
         if old_folder is not None:
             print("the previous mod folder is kept whole at {}".format(old_folder))
         elif backup.is_dir():

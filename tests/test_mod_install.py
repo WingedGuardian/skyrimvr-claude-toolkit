@@ -348,37 +348,83 @@ def test_bad_usage_is_exit_2(tmp_path, sevenz, game, args):
 # --------------------------------------------------------------------------- --update across drives
 
 def _cross_drive(monkeypatch, mod):
-    """os.rename fails as it does between volumes, so move_verified takes the copy-verify-remove branch."""
+    """os.rename fails as it does between volumes for any move out of the mods folder, so keep_previous takes the
+    copy-verify branch; a rename inside the mods folder (moving the live folder aside) still works."""
     import errno
+    real = mod.os.rename
 
-    def no_rename(src, dst):
-        raise OSError(errno.EXDEV, "Invalid cross-device link", str(src))
+    def cross_rename(src, dst):
+        if mod.Path(src).parent != mod.Path(dst).parent:
+            raise OSError(errno.EXDEV, "Invalid cross-device link", str(src))
+        return real(src, dst)
 
-    monkeypatch.setattr(mod.os, "rename", no_rename)
+    monkeypatch.setattr(mod.os, "rename", cross_rename)
 
 
-def test_update_across_drives_copies_verifies_and_only_then_removes(tmp_path, sevenz, game, monkeypatch, capsys):
+def _bin(monkeypatch, mod, why=None):
+    """The Recycle Bin, recorded: never the real one from a test."""
+    sent = []
+
+    def fake_recycle(paths):
+        sent.extend(str(p) for p in paths)
+        return {str(p): why for p in paths}
+
+    monkeypatch.setattr(mod, "recycle", fake_recycle)
+    return sent
+
+
+def test_update_across_drives_copies_verifies_and_only_then_recycles(tmp_path, sevenz, game, monkeypatch, capsys):
     mods, old = _old_mod(tmp_path)
     before = {p.relative_to(old).as_posix(): p.read_bytes() for p in old.rglob("*") if p.is_file()}
     mod = _in_process(monkeypatch, tmp_path, sevenz, game)
     monkeypatch.setenv("SKYRIM_MO2_MODS", str(mods))
     _cross_drive(monkeypatch, mod)
-    removed = []
-    real_rmtree = mod.shutil.rmtree
-
-    def watching_rmtree(path, *a, **k):
-        removed.append(str(path))
-        return real_rmtree(path, *a, **k)
-
-    monkeypatch.setattr(mod.shutil, "rmtree", watching_rmtree)
+    sent = _bin(monkeypatch, mod)
     rc = mod.main([str(archive(tmp_path, ENTRIES)), "--update", "--apply"])
     out = capsys.readouterr()
     assert rc == 0, out.out + out.err
     kept = list((tmp_path / "records" / "backups").glob("ExampleMod-*/mod-folder/ExampleMod"))
     assert len(kept) == 1
     assert {p.relative_to(kept[0]).as_posix(): p.read_bytes() for p in kept[0].rglob("*") if p.is_file()} == before
-    assert str(old) in removed, "the copy branch did not run"
+    aside = [p for p in mods.iterdir() if p.name.startswith("ExampleMod.modinst-old-")]
+    assert len(aside) == 1 and sent == [str(aside[0])], "the copy branch did not hand the aside folder to the bin"
+    assert _tree(aside[0]) == before, "the aside folder must be the whole old folder, moved in one rename"
     assert (old / "ExampleMod.esp").read_bytes() == b"new plugin" and not (old / "Stale.dll").exists()
+    assert "sent to the Recycle Bin" in out.out
+
+
+def test_an_aside_folder_the_bin_refuses_is_left_and_named(tmp_path, sevenz, game, monkeypatch, capsys):
+    mods, old = _old_mod(tmp_path)
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    monkeypatch.setenv("SKYRIM_MO2_MODS", str(mods))
+    _cross_drive(monkeypatch, mod)
+    _bin(monkeypatch, mod, why="no Recycle Bin on this platform: left in place")
+    rc = mod.main([str(archive(tmp_path, ENTRIES)), "--update", "--apply"])
+    out = capsys.readouterr()
+    assert rc == 0, out.out + out.err
+    aside = [p for p in mods.iterdir() if p.name.startswith("ExampleMod.modinst-old-")]
+    assert len(aside) == 1 and (aside[0] / "Stale.dll").is_file()
+    assert "was NOT sent to the Recycle Bin" in out.out and str(aside[0]) in out.out, out.out
+
+
+def test_a_keep_that_fails_after_moving_the_folder_does_not_claim_nothing_changed(tmp_path, sevenz, game, monkeypatch,
+                                                                                capsys):
+    mods, old = _old_mod(tmp_path)
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    monkeypatch.setenv("SKYRIM_MO2_MODS", str(mods))
+
+    def moved_then_failed(live, kept, before):
+        kept.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(str(live), str(kept))
+        raise OSError("the kept folder does not match what was there before")
+
+    monkeypatch.setattr(mod, "keep_previous", moved_then_failed)
+    with pytest.raises(OSError, match="does not match"):
+        mod.main([str(archive(tmp_path, ENTRIES)), "--update", "--apply"])
+    out = capsys.readouterr()
+    assert "Nothing was installed" not in out.err and "was not changed" not in out.err, out.err
+    manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
+    assert "aborted before any write" not in manifest
 
 
 def test_a_copy_that_does_not_match_leaves_the_original_and_installs_nothing(tmp_path, sevenz, game, monkeypatch,
@@ -402,3 +448,81 @@ def test_a_copy_that_does_not_match_leaves_the_original_and_installs_nothing(tmp
     assert {p.relative_to(old).as_posix(): p.read_bytes() for p in old.rglob("*") if p.is_file()} == before
     manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
     assert "# STATUS: aborted before any write" in manifest
+
+
+# --------------------------------------------------------------------------- --update: the live folder is never gutted
+
+def _tree(root):
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+def _locked_rmtree(mod, monkeypatch, mods):
+    """rmtree as Windows does it with one file held open under mods: it deletes what it can, then raises on the open
+    file. The tool's own staging folder is removed for real."""
+    real = mod.shutil.rmtree
+
+    def partial_rmtree(path, *a, **k):
+        if mods not in mod.Path(path).parents:
+            return real(path, *a, **k)
+        files = sorted(p for p in mod.Path(path).rglob("*") if p.is_file())
+        for p in files[:-1]:
+            p.unlink()
+        raise PermissionError(32, "The process cannot access the file because it is being used by another process",
+                              str(files[-1]))
+    monkeypatch.setattr(mod.shutil, "rmtree", partial_rmtree)
+
+
+def test_a_folder_that_cannot_be_moved_is_left_whole_and_the_update_refused(tmp_path, sevenz, game, monkeypatch,
+                                                                           capsys):
+    mods, old = _old_mod(tmp_path)
+    before = _tree(old)
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    monkeypatch.setenv("SKYRIM_MO2_MODS", str(mods))
+
+    def no_rename(src, dst):
+        raise PermissionError(5, "Access is denied", str(src))
+
+    monkeypatch.setattr(mod.os, "rename", no_rename)
+    _locked_rmtree(mod, monkeypatch, mods)
+    rc = mod.main([str(archive(tmp_path, ENTRIES)), "--update", "--apply"])
+    out = capsys.readouterr()
+    assert rc == 2, out.out + out.err
+    assert _tree(old) == before, "the live mod folder was changed by a refused update"
+    assert "was not changed" in out.err, out.err
+    manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
+    assert "# STATUS: aborted before any write" in manifest
+
+
+@pytest.mark.skipif(os.name != "nt", reason="an open file blocks a folder rename on Windows only")
+def test_an_open_file_is_named_and_the_live_folder_is_untouched(tmp_path, sevenz, game, monkeypatch, capsys):
+    mods, old = _old_mod(tmp_path)
+    before = _tree(old)
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    monkeypatch.setenv("SKYRIM_MO2_MODS", str(mods))
+    with open(old / "Stale.dll", "rb"):
+        rc = mod.main([str(archive(tmp_path, ENTRIES)), "--update", "--apply"])
+    out = capsys.readouterr()
+    assert rc == 2, out.out + out.err
+    assert _tree(old) == before
+    assert "Stale.dll" in out.err and "in use" in out.err, out.err
+
+
+def test_a_failure_after_the_old_folder_moved_names_the_backup(tmp_path, sevenz, game, monkeypatch, capsys):
+    mods, old = _old_mod(tmp_path)
+    before = _tree(old)
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    monkeypatch.setenv("SKYRIM_MO2_MODS", str(mods))
+
+    def failing_write(src, target):
+        raise OSError(28, "No space left on device", str(target))
+
+    monkeypatch.setattr(mod, "write_replacing", failing_write)
+    with pytest.raises(OSError, match="No space left"):
+        mod.main([str(archive(tmp_path, ENTRIES)), "--update", "--apply"])
+    out = capsys.readouterr()
+    kept = list((tmp_path / "records" / "backups").glob("ExampleMod-*/mod-folder/ExampleMod"))
+    assert len(kept) == 1 and _tree(kept[0]) == before
+    assert "Nothing was installed" not in out.err
+    assert str(kept[0]) in out.err and "partial" in out.err, out.err
+    manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
+    assert "aborted before any write" not in manifest and "# STATUS: FAILED after" in manifest, manifest
