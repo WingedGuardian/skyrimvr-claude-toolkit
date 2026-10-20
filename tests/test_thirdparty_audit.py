@@ -384,6 +384,25 @@ def test_pin_sites_that_disagree_are_drift(tmp_path):
     assert code == 1 and any(r.check == "pin sites" and "disagree" in r.detail for r in by(rows, ta.DRIFT))
 
 
+def test_an_instruction_under_a_lead_in_with_an_earlier_history_sentence_is_compared(tmp_path):
+    """v4.0.0 review L4b M1: README:127/128. A lead-in ending ':' whose EARLIER sentence says 'was tested with' made
+    the winget line under it "historical", so the primary Node install was never compared with the pin."""
+    readme = ("Install Node.js **24.19.0**, the version this toolkit was tested with. For you to run, in Windows "
+              "Terminal:\n"
+              "    winget install --id OpenJS.NodeJS.LTS --exact --version 22.11.0 --no-upgrade\n")
+    repo = make_repo(tmp_path, {".node-version": "24.19.0\n", "README.md": readme})
+    hits = [h for ref in ta.NODE_REFS for h in ta.scan_refs(ta.Repo(repo), ref)]
+    assert ("README.md", 2, "22.11.0") in {h[:3] for h in hits}, hits
+
+
+def test_a_lead_in_whose_last_clause_is_history_still_marks_the_line_under_it(tmp_path):
+    """The twin: 'Releases before 29.x need ...:' is one clause, and it IS history."""
+    readme = "Releases before 24.x needed this:\n    winget install --id OpenJS.NodeJS.LTS --exact --version 22.11.0\n"
+    repo = make_repo(tmp_path, {".node-version": "24.19.0\n", "README.md": readme})
+    hits = [h for ref in ta.NODE_REFS for h in ta.scan_refs(ta.Repo(repo), ref)]
+    assert [h[2] for h in hits if h[0] == "README.md" and h[1] == 2] == ["history"], hits
+
+
 def test_a_major_version_reference_is_held_to_the_runtime_pin(tmp_path):
     repo = make_repo(tmp_path, {".node-version": "24.19.0\n", "package.json": '{"engines": {"node": ">=24"}}',
                                 ".devcontainer/Dockerfile": "RUN curl https://deb.nodesource.com/setup_20.x | bash -\n"})

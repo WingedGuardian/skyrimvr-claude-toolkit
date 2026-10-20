@@ -510,11 +510,14 @@ HISTORY_WINDOW = 30
 
 def history_context(lines, idx, start):
     """The text a history marker must sit in to make a reference historical: the last HISTORY_WINDOW characters
-    before it on its own line, cut at a ';' (a new clause), plus the line before when that line ends with ':'.
-    Kept this narrow on purpose -- every skipped mention is a reference nobody compares with the pin."""
+    before it on its own line, cut at a ';' (a new clause), plus the LAST CLAUSE of the line before when that line
+    ends with ':' (cut at a ';' or a sentence end: "..., the version this was tested with. For you to run:" leads in
+    with its last sentence, not with an earlier sentence's history word -- review L4b M1). Kept this narrow on
+    purpose -- every skipped mention is a reference nobody compares with the pin."""
     before = lines[idx][:start][-HISTORY_WINDOW:].rsplit(";", 1)[-1]
     if idx > 0 and lines[idx - 1].rstrip().endswith(":"):
-        before = lines[idx - 1] + " " + before
+        lead = re.split(r"[;.!?](?:\s|$)", lines[idx - 1].rstrip())[-1]
+        before = lead + " " + before
     return before
 
 

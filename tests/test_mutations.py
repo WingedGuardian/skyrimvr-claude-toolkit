@@ -7537,6 +7537,13 @@ MUTATIONS += [
                  "Audit = _DiskAudit\n\n\nclass _MemoryAudit(_DiskAudit):",
                  "tests/test_posix_host_paths.py::test_a_powershell_delete_in_the_install_is_denied_on_a_posix_host",
                  id="posix-host-tests-write-to-disk"),
+    # v4.0.0 review L4b M1: the whole lead-in line counted as history, so README's Node install was never compared.
+    pytest.param("scripts/thirdparty-audit.py",
+                 r'        lead = re.split(r"[;.!?](?:\s|$)", lines[idx - 1].rstrip())[-1]',
+                 "        lead = lines[idx - 1]",
+                 "tests/test_thirdparty_audit.py::"
+                 "test_an_instruction_under_a_lead_in_with_an_earlier_history_sentence_is_compared",
+                 id="thirdparty-lead-in-whole-line-history"),
     # v4.0.0 review L4a L3: a DEGRADED hook-canary (exit 1) was accepted as a report.
     pytest.param("tools/verify-release.sh",
                  """  if { [ $rc -eq 0 ] || [ $rc -eq 2 ]; } && grep -q '^RESULT:' <<<"$out"; then""",
