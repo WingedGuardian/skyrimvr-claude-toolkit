@@ -54,3 +54,17 @@ def test_sed_without_binary_is_listed_as_refused_and_the_ask_rules_are_five():
     assert "`sed -i` without `-b`" in _read("README.md")
     for rel, phrase in (("README.md", "Only five rules ask"), ("docs/safety-philosophy.md", "Five rules in the toolkit")):
         assert phrase in _read(rel), rel
+
+
+def test_user_docs_carry_no_pre_release_plan_wording():
+    """Review L6 F12: "after Plan 2 certification" (README), "Plan 5 Task 14." as guard-coverage's opening line."""
+    assert "Plan 2 certification" not in _read("README.md")
+    assert "Plan 5 Task 14" not in _read("docs/guard-coverage.md")
+    assert "Plan 5, Task 15" not in _read("docs/harness-integrations.md")
+
+
+def test_the_codex_subfolder_case_is_stated_one_way():
+    """Review L6 F6: "worked in 0.162.1" (README) against "never a subfolder: no hook runs" (CHANGELOG)."""
+    for rel in ("README.md", "CHANGELOG.md"):
+        assert "from a subfolder no hook runs" not in _read(rel), rel
+    assert "it depends on the version" in _read("README.md")

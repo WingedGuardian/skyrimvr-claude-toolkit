@@ -622,8 +622,8 @@ node --test                                                # Node unit tests
 
 The suite runs on both Windows and Linux in CI, so it should pass on either.
 
-Use the contained launcher above for local tests: bare pytest still inherits the host
-environment until the fixture integration is completed after Plan 2 certification.
+Use the contained launcher above for local tests: bare pytest inherits the host environment, and with
+`TOOLKIT_REQUIRE_HARNESS=1` a pytest session without the launcher's barriers errors instead of going green.
 See [integration safety and dependency locks](docs/harness-integrations.md) for Spriggit
 publication, read-only container mounts, MO2 load-order selection and explicit unavailable checks.
 

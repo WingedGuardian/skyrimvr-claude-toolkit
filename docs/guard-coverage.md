@@ -1,8 +1,9 @@
 # Guard coverage: every route by which an agent can change files or state
 
-Plan 5 Task 14. This is the inventory the guards are judged against: for each route an agent can use to
+This is the inventory the guards are judged against: for each route an agent can use to
 mutate the install or the machine, which hook sees it and what that hook does not catch. A hook that "sees" a
-route is not a hook that stops everything on it; the last column says what slips through.
+route is not a hook that stops everything on it; the last column says what slips through. Labels such as
+"Plan 5", "Task 17", "rt-fix-b" or "T6" name the development batch that measured or changed a row.
 
 Bash ANSI-C quoted paths are interpreted as UTF-8 bytes, including hexadecimal,
 octal, Unicode, control and unknown escapes, and NUL truncation. ASCII Unicode
