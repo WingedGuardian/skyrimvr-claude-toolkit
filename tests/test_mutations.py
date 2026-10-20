@@ -6812,6 +6812,12 @@ _T10 = [
     ("t10-payload-layer2-spike-allowed", _CRP,
      '    "scripts/layer2-spike",    # Plan 6 Layer 2 lock research probes: developer-only, kept in the repo, never shipped\n',
      "", _RP + "test_every_check_can_fail_on_its_own_line[layer2-spike-shipped]"),
+    # review L4b L1: the maintainer-only corpus scripts crash in a zip (they read tests/guard_corpus/).
+    ("t10-payload-guard-corpus-allowed", _CRP,
+     '    "scripts/guard-corpus",    # guard-corpus tooling and the latency gate read tests/guard_corpus/: maintainer-only\n',
+     "", _RP + "test_every_check_can_fail_on_its_own_line[guard-corpus-shipped]"),
+    ("t10-payload-guard-latency-allowed", _CRP, '    "scripts/guard-latency.py",\n', "",
+     _RP + "test_every_check_can_fail_on_its_own_line[guard-latency-shipped]"),
     ("t10-payload-paths-env-anywhere", _CRP, 'ABSENT_NAMES = ("skyrim-paths.env", ".nexus_api_key")',
      'ABSENT_NAMES = (".nexus_api_key",)', _RP + "test_every_check_can_fail_on_its_own_line[paths-env-shipped-deep]"),
     ("t10-payload-stdin-any-cat", _CRP, 'None if "INPUT=$(cat)" in text.splitlines() else', 'None if "cat" in text else',
