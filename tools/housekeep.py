@@ -24,7 +24,8 @@ contains "backup"; git-tracked files; every file a project doc links to; and any
 Removal goes to the Recycle Bin, never a permanent delete, with no exceptions (Windows: the shell's own delete with
 FOF_ALLOWUNDO). An item too big for the bin gets Windows' own "delete permanently?" prompt; "No" leaves it in place.
 The bin frees no disk space until it is emptied; that is the user's call. A file the bin refuses is reported
-FAILED and left in place. Duplicates are not removed at all: they become NTFS hard links to one copy, marked
+FAILED and left in place; off Windows there is no Recycle Bin implementation, so every removal is reported that way.
+The whole-folder classes (launch, snapshot, scratch) keep a folder whole when any file in it is protected. Duplicates are not removed at all: they become NTFS hard links to one copy, marked
 read-only so an in-place edit cannot silently change every path at once.
 
 Accounting: `report` and `plan` print every scanned byte in exactly one row, the rows sum to the total, and the
@@ -266,6 +267,17 @@ def walk_files(target: Path):
             yield Path(dp) / f
 
 
+def protected_inside(guard, folder: Path) -> str:
+    """Why a whole-folder action (launch, snapshot, scratch) may not take this folder: the first protected file in
+    it, or "". A folder is recycled whole, so one save or one backup inside it keeps all of it, whatever the config
+    names."""
+    for f in walk_files(folder):
+        why = guard.why_protected(f)
+        if why:
+            return why
+    return ""
+
+
 # --------------------------------------------------------------------------- planning
 
 def live_index(cfg):
@@ -401,7 +413,10 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                 count("kept: launch log, labelled or not a launch folder (Forever)", size)
                 continue
             age = (now - time.mktime(time.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S"))) / 86400
-            if age >= cfg["recycle_after_days"]:
+            why = protected_inside(guard, p) if age >= cfg["recycle_after_days"] else ""
+            if why:
+                count("kept: protected ({})".format(why), size)
+            elif age >= cfg["recycle_after_days"]:
                 act({"class": "launch", "path": str(p), "bytes": size, "fingerprint": fingerprint(p)},
                     "plan: launch folder past recycle_after_days -> Recycle Bin")
             elif age >= cfg["gzip_after_days"]:
@@ -428,7 +443,10 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             files = sorted(walk_files(p))
             sig = sorted((str(f.relative_to(p)).lower(), f.stat().st_size, blake(f)) for f in files)
             size = sum(s for _, s, _ in sig)
-            if sig == prev and i != len(stamps) - 1:
+            why = protected_inside(guard, p) if sig == prev and i != len(stamps) - 1 else ""
+            if why:
+                count("kept: protected ({})".format(why), size)
+            elif sig == prev and i != len(stamps) - 1:
                 act({"class": "snapshot", "path": str(p), "bytes": size, "fingerprint": fingerprint(p)},
                     "plan: snapshot repeating the previous one -> Recycle Bin")
             else:
@@ -437,9 +455,13 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
 
     # ---- named scratch folders
     for s in (cfg["scratch"] if wants("scratch") else []):
-        p = Path(s)
+        p = _abs(cfg, s)                  # relative to the toolkit folder, as the example config says
         if p.is_dir():
             fp = fingerprint(p)
+            why = protected_inside(guard, p)
+            if why:
+                count("kept: protected ({})".format(why), fp[1])
+                continue
             act({"class": "scratch", "path": str(p), "bytes": fp[1], "fingerprint": fp},
                 "plan: named scratch folder -> Recycle Bin")
 
@@ -460,13 +482,18 @@ def print_rows(rows: dict, title: str):
 
 # --------------------------------------------------------------------------- applying
 
+def has_recycle_bin() -> bool:
+    return os.name == "nt"
+
+
 def recycle(paths) -> dict:
     """{path: None | error} -- one PowerShell process for the whole batch. Recycle Bin only, never a delete."""
     paths = [str(p) for p in paths]
     if not paths:
         return {}
-    if os.name != "nt":
-        raise RuntimeError("Recycle Bin removal is implemented for Windows only")
+    if not has_recycle_bin():
+        # No Recycle Bin implementation here (Windows only). Never a delete instead: every item stays, and says so.
+        return {p: "no Recycle Bin on this platform: left in place" for p in paths}
     # The shell's own delete, NOT Microsoft.VisualBasic's DeleteDirectory(..., 'OnlyErrorDialogs', ...): that UI option
     # suppresses confirmations, and the confirmation it suppresses is the one Windows shows when an item is too big for
     # the bin and would be destroyed instead. FOF_WANTNUKEWARNING (0x4000) brings exactly that prompt back while
@@ -556,6 +583,9 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
         if guard.why_protected(c) in ("save", "git-tracked"):
             return "canonical copy is protected"
     if action["class"] in ("launch", "snapshot", "scratch"):
+        why = protected_inside(guard, p)
+        if why:
+            return "protected ({})".format(why)
         if fingerprint(p) != action["fingerprint"]:
             return "folder changed since the plan"
     return ""
@@ -750,10 +780,14 @@ def session(cfg, state: Path) -> int:
             return 0
     except OSError:
         pass
-    res = sweep_temp(cfg)
     notes = []
+    try:
+        res = sweep_temp(cfg)
+    except Exception as e:                    # the state file must still be written, or the throttle never engages
+        res = {"rows": {"recycled": 0, "failed": 1}}
+        notes.append("temp sweep failed ({}: {})".format(type(e).__name__, str(e)[:200]))
     r = res["rows"]
-    if r["recycled"] or r["failed"]:
+    if r["recycled"] or (r["failed"] and not notes):
         notes.append("moved {} leftover temp dir(s) to the Recycle Bin{}".format(
             r["recycled"], "; {} could not be recycled and were LEFT IN PLACE (ask the user before any permanent "
                            "delete)".format(r["failed"]) if r["failed"] else ""))

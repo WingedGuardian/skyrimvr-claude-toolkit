@@ -1519,6 +1519,33 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
           # A gzip that does not reproduce the log still sends the original to the bin.
           ("gzip-no-round-trip", '    if d.hexdigest() != action["hash"]:', "    if False:",
            "test_a_gzip_that_does_not_round_trip_keeps_the_original"),
+          # v4.0.0 review L4a M2: each whole-folder class, plan and apply, still answers to the Forever class.
+          ("scratch-ignores-guard", "            why = protected_inside(guard, p)\n            if why:",
+           '            why = ""\n            if why:',
+           "test_a_scratch_folder_holding_a_save_or_a_backup_is_never_planned"),
+          ("launch-ignores-guard", '            why = protected_inside(guard, p) if age >= cfg["recycle_after_days"] else ""',
+           '            why = ""', "test_an_old_launch_folder_holding_a_save_is_never_planned"),
+          ("snapshot-ignores-guard",
+           '            why = protected_inside(guard, p) if sig == prev and i != len(stamps) - 1 else ""',
+           '            why = ""', "test_a_repeated_snapshot_under_a_backup_folder_is_never_planned"),
+          ("apply-folder-ignores-guard", "        why = protected_inside(guard, p)\n        if why:\n            return",
+           '        why = ""\n        if why:\n            return',
+           "test_apply_refuses_a_scratch_folder_a_save_appeared_in_after_the_plan"),
+          ("protected-inside-blind", "        why = guard.why_protected(f)\n        if why:\n            return why",
+           '        why = ""\n        if why:\n            return why',
+           "test_a_scratch_folder_holding_a_save_or_a_backup_is_never_planned"),
+          # L4a L2: a relative scratch path is the toolkit folder's, not the current directory's.
+          ("scratch-relative-to-cwd", "        p = _abs(cfg, s)                  # relative to the toolkit folder",
+           "        p = Path(s)                  # relative to the toolkit folder",
+           "test_a_relative_scratch_path_is_the_toolkit_folder_not_the_current_directory"),
+          # L4a L1: off Windows the bin says "left in place" instead of crashing the sweep; session always writes.
+          ("no-bin-raises", '        return {p: "no Recycle Bin on this platform: left in place" for p in paths}',
+           '        raise RuntimeError("Recycle Bin removal is implemented for Windows only")',
+           "test_off_windows_the_bin_leaves_everything_in_place_and_says_so"),
+          ("session-sweep-crash-unhandled",
+           "    except Exception as e:                    # the state file must still be written",
+           "    except ZeroDivisionError as e:                    # the state file must still be written",
+           "test_session_writes_its_state_even_when_the_sweep_fails"),
       ]],
 
     # --- what the v3.9 release review found ---------------------------------

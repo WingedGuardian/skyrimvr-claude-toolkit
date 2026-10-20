@@ -308,6 +308,92 @@ def test_a_snapshot_repeating_the_previous_one_is_planned_and_distinct_and_newes
     assert not {key(s1), key(s3), key(s5)} & planned(doc)
 
 
+# ------------------------------------------------- whole-folder classes still answer to the Forever class (L4a M2)
+
+@pytest.mark.parametrize("inner", ["Save1.ess", "pair.skse", "backups/pair.txt"])
+def test_a_scratch_folder_holding_a_save_or_a_backup_is_never_planned(tree, inner):
+    bed = tree / "scratchbed"
+    write(bed / "plain.txt", b"x")
+    write(bed / inner, b"keep me")
+    clean = tree / "cleanbed"                                    # twin: the same folder without it is planned
+    write(clean / "plain.txt", b"x")
+    doc = hk.plan(cfg_for(tree, scratch=[str(bed), str(clean)]))
+    assert key(bed) not in planned(doc), "a protected file inside a scratch folder must keep the whole folder"
+    assert key(clean) in planned(doc, "scratch")
+    assert any(k.startswith("kept: protected") for k in doc["rows"]), doc["rows"]
+
+
+def test_an_old_launch_folder_holding_a_save_is_never_planned(tree):
+    stamp = time.strftime("launch-%Y%m%d-%H%M%S", time.localtime(time.time() - 100 * DAY))
+    d = launch(tree, stamp, 100)
+    write(d / "Saves" / "quick.ess", b"save", days=100)
+    stamp2 = time.strftime("launch-%Y%m%d-%H%M%S", time.localtime(time.time() - 101 * DAY))
+    twin = launch(tree, stamp2, 101)
+    doc = hk.plan(cfg_for(tree))
+    assert key(d) not in planned(doc) and key(twin) in planned(doc, "launch")
+
+
+def test_a_repeated_snapshot_under_a_backup_folder_is_never_planned(tree):
+    for name in ("20261001_000001", "20261001_000002", "20261001_000003"):
+        write(tree / "kb-backups" / "snaps" / name / "a.psc", b"v1")
+        write(tree / "snaps" / name / "a.psc", b"v1")            # twin: the same stamps outside a backup folder
+    doc = hk.plan(cfg_for(tree, legacy_snapshots=["kb-backups/snaps", "snaps"]))
+    got = planned(doc, "snapshot")
+    assert got == {key(tree / "snaps" / "20261001_000002")}, got
+
+
+def test_apply_refuses_a_scratch_folder_a_save_appeared_in_after_the_plan(tree):
+    bed = tree / "scratchbed"
+    write(bed / "plain.txt", b"x")
+    cfg = cfg_for(tree, scratch=[str(bed)])
+    doc = hk.plan(cfg)
+    assert key(bed) in planned(doc, "scratch")
+    action = next(a for a in doc["actions"] if a["class"] == "scratch")
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time()) == ""
+    write(bed / "Save9.ess", b"save", days=0)
+    os.utime(bed / "Save9.ess", (bed.stat().st_mtime,) * 2)
+    action["fingerprint"] = list(hk.fingerprint(bed))            # even with the fingerprint matching
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time()).startswith("protected"), "a save must refuse it"
+
+
+def test_a_relative_scratch_path_is_the_toolkit_folder_not_the_current_directory(tree, tmp_path, monkeypatch):
+    """L4a L2: the example config says paths are relative to the toolkit folder."""
+    write(tree / "scratchbed" / "a.txt", b"toolkit")
+    write(tree / "scratchbed" / "b.txt", b"toolkit")
+    elsewhere = tmp_path.parent / (tmp_path.name + "-elsewhere")
+    write(elsewhere / "scratchbed" / "a.txt", b"other")
+    monkeypatch.chdir(elsewhere)
+    doc = hk.plan(cfg_for(tree, scratch=["scratchbed"]))
+    assert planned(doc, "scratch") == {key(tree / "scratchbed")}
+
+
+# --------------------------------------------------------------------------- off Windows (L4a L1)
+
+def test_off_windows_the_bin_leaves_everything_in_place_and_says_so(tmp_path, monkeypatch):
+    d = tmp_path / "leftover"
+    d.mkdir()
+    monkeypatch.setattr(hk, "has_recycle_bin", lambda: False)
+    res = hk.recycle([d])
+    assert d.is_dir()
+    assert "left in place" in res[str(d)], res
+
+
+def test_session_writes_its_state_even_when_the_sweep_fails(tmp_path, monkeypatch):
+    cfg = sweep_cfg()
+    cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
+               sweep_every_hours=6)
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+    def broken(cfg):
+        raise RuntimeError("no Recycle Bin")
+
+    monkeypatch.setattr(hk, "sweep_temp", broken)
+    state = tmp_path / "state" / "note.txt"
+    assert hk.session(cfg, state) == 1
+    assert state.is_file(), "without the state file the throttle never engages"
+    assert "temp sweep failed" in state.read_text(encoding="utf-8")
+
+
 # --------------------------------------------------------------------------- accounting
 
 def test_report_rows_sum_to_every_byte_scanned(tree):
