@@ -7532,6 +7532,11 @@ MUTATIONS += [
                  "    _got=$( :",
                  "tests/test_setup_agent.py::test_an_exported_value_cannot_stand_in_for_a_missing_line",
                  id="setup-readback-trusts-exported-values"),
+    # v4.0.0 review L4a L5: the in-memory audit goes back to the disk one, which writes below C:/home/u on Windows.
+    pytest.param("tests/test_posix_host_paths.py", "class Audit(_DiskAudit):",
+                 "Audit = _DiskAudit\n\n\nclass _MemoryAudit(_DiskAudit):",
+                 "tests/test_posix_host_paths.py::test_a_powershell_delete_in_the_install_is_denied_on_a_posix_host",
+                 id="posix-host-tests-write-to-disk"),
     # v4.0.0 review L4a L3: a DEGRADED hook-canary (exit 1) was accepted as a report.
     pytest.param("tools/verify-release.sh",
                  """  if { [ $rc -eq 0 ] || [ $rc -eq 2 ]; } && grep -q '^RESULT:' <<<"$out"; then""",

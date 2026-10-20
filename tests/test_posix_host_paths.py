@@ -5,7 +5,8 @@ Windows and names NOTHING on Linux: there every such operand resolved to None (u
 POSIX install was allowed unless the command text happened to name a root. Reachable by a real user: Claude Code's
 PowerShell tool runs on Linux with pwsh, and `python -c "open('/.../Saves/x.ess','wb')"` through the Bash tool went
 the same way (its code is judged in both dialects). These tests run on any OS by flipping paths.POSIX_HOST; the paths
-are POSIX strings that never touch the disk.
+are POSIX strings that never touch the disk: the audit trail and coverage receipts stay in memory, and a fence fails
+any write below them (on Windows they resolve to C:/home/u).
 """
 import json
 import sys
@@ -17,10 +18,70 @@ from conftest import REPO
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import engine, paths, targets  # noqa: E402
 from skyguard.adapters import claude, codex  # noqa: E402
-from skyguard.audit import Audit  # noqa: E402
+from skyguard.audit import Audit as _DiskAudit  # noqa: E402
+
+
+class Audit(_DiskAudit):
+    """The audit trail in memory: `fired` is all these tests read, and the project paths are POSIX strings."""
+
+    def raw(self, line):
+        pass
+
+    def log_strict(self, hook, level, msg):
+        pass
 
 GAME = "/home/u/Games/SkyrimVR"
 CFG = "/home/u/cfg"
+
+
+@pytest.fixture(autouse=True)
+def nothing_written_under_the_posix_strings(monkeypatch):
+    """On Windows these POSIX strings resolve against the drive root (C:/home/u), so a deny that writes its audit line
+    or a coverage receipt wrote real files there (v4.0.0 review L4a L5). Any write below /home/u fails the test (an
+    AssertionError, which the audit's OSError handler does not swallow, so it fails the call itself)."""
+    import builtins
+    import os
+    from pathlib import Path
+    fence = os.path.normcase(os.path.abspath("/home/u"))
+
+    def inside(p):
+        try:
+            q = os.path.normcase(os.path.abspath(os.fspath(p)))
+        except TypeError:
+            return False
+        return q == fence or q.startswith(fence + os.sep)
+
+    real_open, real_mkdir, real_makedirs = builtins.open, Path.mkdir, os.makedirs
+
+    def guarded_open(file, mode="r", *a, **k):
+        if isinstance(file, (str, bytes, os.PathLike)) and any(c in mode for c in "wax+") and inside(file):
+            raise AssertionError("test fence: a write below /home/u: " + os.fspath(file))
+        return real_open(file, mode, *a, **k)
+
+    def guarded_mkdir(self, *a, **k):
+        if inside(self):
+            raise AssertionError("test fence: a write below /home/u: " + str(self))
+        return real_mkdir(self, *a, **k)
+
+    def guarded_makedirs(name, *a, **k):
+        if inside(name):
+            raise AssertionError("test fence: a write below /home/u: " + os.fspath(name))
+        return real_makedirs(name, *a, **k)
+
+    import sqlite3
+    from modding_harness import telemetry
+
+    def memory_store(self):                    # coverage receipts in memory, never <project>/.modding-agent-harness
+        connection = sqlite3.connect(":memory:")
+        connection.execute("CREATE TABLE IF NOT EXISTS receipt (utc REAL, session TEXT, call TEXT, host TEXT, "
+                           "version TEXT, tool TEXT, surface TEXT, event TEXT, decision TEXT, evaluation TEXT, "
+                           "validation TEXT, source TEXT, trust TEXT)")
+        return connection
+
+    monkeypatch.setattr(telemetry.Telemetry, "_connect", memory_store)
+    monkeypatch.setattr(builtins, "open", guarded_open)
+    monkeypatch.setattr(Path, "mkdir", guarded_mkdir)
+    monkeypatch.setattr(os, "makedirs", guarded_makedirs)
 
 
 @pytest.fixture()
