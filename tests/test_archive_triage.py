@@ -49,6 +49,11 @@ _spec.loader.exec_module(triage)
     ("Pack 2k/PBRTextureSets/TXSTRoad.json", ("Pack 2k", "PBRTextureSets/TXSTRoad.json", "data")),
     ("PBRMaterialObjects/Snow.json", ("", "PBRMaterialObjects/Snow.json", "data")),
     ("Output/LightPlacer/cs light/clutter.json", ("Output", "LightPlacer/cs light/clutter.json", "data")),
+    # Vanilla nests root names under asset roots: meshes/interface is Data/meshes/interface, not an option
+    # folder called "meshes" (Faultier's PBR Clutter, PGPatcher output, 2026-10-19).
+    ("Pack 2k/meshes/interface/lockpicking/lockpick01.nif",
+     ("Pack 2k", "meshes/interface/lockpicking/lockpick01.nif", "data")),
+    ("textures/interface/exm/icon.dds", ("", "textures/interface/exm/icon.dds", "data")),
     # Binaries outside any Data root land in the game folder when installed as packaged.
     ("skse64_loader.exe", ("", "skse64_loader.exe", "game")),
     ("Main/d3d11.dll", ("Main", "d3d11.dll", "game")),

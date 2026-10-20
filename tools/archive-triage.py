@@ -156,7 +156,10 @@ def map_entry(path):
             # is a prefix, not Data/mcm, when the next segment is itself a root (bar the real Scripts<->Source
             # nesting) or a plugin sits directly inside it.
             nxt = segs[i + 1].lower()
-            nested_root = nxt in ROOTS and {sl, nxt} != {"scripts", "source"}
+            # meshes/, textures/ and sound/ are never option folders, and vanilla nests root names under them
+            # (meshes/interface/lockpicking, textures/interface): only other roots can be a prefix.
+            nested_root = (nxt in ROOTS and {sl, nxt} != {"scripts", "source"}
+                           and sl not in ("meshes", "textures", "sound"))
             plugin_inside = i + 2 == len(segs) and nxt.endswith(PLUGIN_EXT + (".bsa",))
             if not (nested_root or plugin_inside):
                 return "/".join(segs[:i]), "/".join(segs[i:]), "data"
