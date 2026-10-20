@@ -6,7 +6,7 @@
 //   node create-esp.js --commit          # Actually creates the ESP
 //
 // Requires: xeditlib, pinned (docs/installing-tools.md), from the toolkit root:
-//   npm ci --ignore-scripts --no-audit --no-fund   (xeditlib 1.0.1 @ 19bef09 + koffi 2.15.1, from package-lock.json)
+//   npm ci --ignore-scripts --no-audit --no-fund   (xeditlib 1.0.2 @ 06f73ea + koffi 2.15.1, from package-lock.json)
 
 const xelib = require('xeditlib');
 
