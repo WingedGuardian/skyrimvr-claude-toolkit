@@ -286,6 +286,21 @@ def test_an_unreachable_source_is_could_not_check_with_exit_2(tmp_path):
     assert f.calls == 2   # one retry, then a reason -- never a silent pass
 
 
+def test_a_truncated_body_is_could_not_check_not_a_crash(tmp_path):
+    """v4.0.0 review L4b L4: http.client.IncompleteRead is an HTTPException, not an OSError; it killed the whole run
+    with the DRIFT exit code."""
+    import http.client
+
+    def truncated(url, headers, secret):
+        raise http.client.IncompleteRead(b"partial", 100)
+
+    repo = make_repo(tmp_path, CODEX)
+    f = ta.Fetcher(tmp_path / "empty-cache", transport=truncated, env={}, sleep=lambda s: None)
+    rows = ta.run(repo, f, ["Codex CLI"])
+    assert [r.status for r in rows] == [ta.UNCHECKED] and "unreachable" in rows[0].detail
+    assert ta.exit_code(rows) == 2 and f.calls == 2
+
+
 def test_offline_without_a_cached_answer_is_could_not_check(tmp_path):
     repo = make_repo(tmp_path, CODEX)
     rows, code = audit(repo, tmp_path / "empty-cache", ["Codex CLI"])
@@ -985,11 +1000,11 @@ def test_the_pre_fix_manual_steps_are_seen(tmp_path):
 
 
 def test_the_real_tree_install_refs_agree_with_their_pins(tmp_path):
-    """Every version a shipped file states for a pinned tool equals its pin (offline: install refs are local). The
-    only disagreements left are setup.sh's, owed to T7 (review I5: a doc's 'JDK 17 is in the image')."""
+    """Every version a shipped file states for a pinned tool equals its pin (offline: install refs are local), setup.sh
+    included: its exemption (owed to T7) outlived the drift it excused and hid every later one (review L4b L3)."""
     rows = ta.run(REPO, ta.Fetcher(tmp_path / "empty", offline=True, env={}))
     bad = [r.detail for r in rows if r.check == "install refs" and r.status == ta.DRIFT]
-    assert [d for d in bad if not d.startswith("setup.sh:")] == [], bad
+    assert bad == [], bad
 
 
 def test_a_doc_stating_another_jdk_than_the_image_is_drift(tmp_path):

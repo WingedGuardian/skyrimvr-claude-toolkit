@@ -7544,6 +7544,17 @@ MUTATIONS += [
                  "tests/test_thirdparty_audit.py::"
                  "test_an_instruction_under_a_lead_in_with_an_earlier_history_sentence_is_compared",
                  id="thirdparty-lead-in-whole-line-history"),
+    # v4.0.0 review L4b L3: setup.sh's install hints drift from their pins; the offline CI test must see it.
+    pytest.param("setup.sh", "or: dotnet tool install --global Spriggit.CLI --version 0.41.0",
+                 "or: dotnet tool install --global Spriggit.CLI --version 0.40.0",
+                 "tests/test_thirdparty_audit.py::test_the_real_tree_install_refs_agree_with_their_pins",
+                 id="thirdparty-setup-sh-drift-hidden"),
+    # v4.0.0 review L4b L4: a truncated body escapes the retry and kills the run with the DRIFT exit code.
+    pytest.param("scripts/thirdparty-audit.py",
+                 "            except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as exc:",
+                 "            except (urllib.error.URLError, OSError, ValueError) as exc:",
+                 "tests/test_thirdparty_audit.py::test_a_truncated_body_is_could_not_check_not_a_crash",
+                 id="thirdparty-incomplete-read-crashes"),
     # v4.0.0 review L4a L3: a DEGRADED hook-canary (exit 1) was accepted as a report.
     pytest.param("tools/verify-release.sh",
                  """  if { [ $rc -eq 0 ] || [ $rc -eq 2 ]; } && grep -q '^RESULT:' <<<"$out"; then""",
