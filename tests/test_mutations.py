@@ -1428,6 +1428,12 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     pytest.param("tools/housecarl_integration/setup.py", "    if sha(part) != ARCHIVE_SHA256:", "    if False:",
                  "tests/test_housecarl.py::test_an_interrupted_download_never_leaves_a_file_at_the_archive_name",
                  id="housecarl-download-unverified-before-rename"),
+    # F8: a crash ruling needs its module as well as its offset.
+    pytest.param("tools/crash-triage.py",
+                 '    return KNOWN.get((r["module"].lower(), r["offset"].upper()), ("UNKNOWN", ""))',
+                 '    return next((v for (_m, o), v in KNOWN.items() if o == r["offset"].upper()), ("UNKNOWN", ""))',
+                 "tests/test_triage.py::test_an_accepted_offset_in_another_module_is_unknown_not_accepted",
+                 id="crash-triage-offset-only-ruling"),
 
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(

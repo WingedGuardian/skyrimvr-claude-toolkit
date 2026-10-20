@@ -143,6 +143,18 @@ def test_crash_labels_an_accepted_signature_from_the_knowledgebase(crash_dir):
     assert "[ACCEPTED - do not re-investigate]" in r.stdout, r.stdout
 
 
+def test_an_accepted_offset_in_another_module_is_unknown_not_accepted(tmp_path):
+    """Review L5 F8: the rulings matched the offset alone, so `SomeModPlugin.dll+0B84F05` was printed ACCEPTED -
+    do not re-investigate. Twin: crash_dir's SkyrimVR.exe+0B84F05 above is still ACCEPTED."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    (d / "crash-2026-08-26-01.txt").write_text(
+        crash_log("0B84F05", "hkpContactSolver").replace("SkyrimVR.exe+", "SomeModPlugin.dll+"), encoding="utf-8")
+    r = run(CRASH, str(d))
+    assert "SomeModPlugin.dll+0B84F05   [** UNKNOWN **]" in r.stdout, r.stdout
+    assert "ACCEPTED" not in r.stdout and "UNKNOWN        : 1" in r.stdout, r.stdout
+
+
 def test_crash_flags_an_unrecognised_signature_as_unknown(crash_dir):
     r = run(CRASH, str(crash_dir))
     assert "[** UNKNOWN **]" in r.stdout, r.stdout
