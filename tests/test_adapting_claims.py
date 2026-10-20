@@ -22,7 +22,7 @@ from skyguard import engine, neutral  # noqa: E402
 from skyguard.verdict import DECISIONS  # noqa: E402
 
 DOC = REPO / "ADAPTING.md"
-SPEC = REPO / "docs" / "superpowers" / "specs" / "2026-09-30-universal-agent-support-design.md"
+SPEC = REPO / "docs" / "evidence" / "2026-09-30-universal-agent-support-design.md"
 CITE = re.compile(r"\[(src|repo|spec|measured): ([^\]]+)\]")
 OTHER_AGENTS = re.compile(r"\b(OpenCode|Cursor|Gemini|Aider|Cline|Copilot|Windsurf|Zed|Continue)\b")
 UNMEASURED = re.compile(r"not measured|unmeasured", re.I)
@@ -132,7 +132,7 @@ def test_the_gate_accepts_a_well_cited_row():
 
 def test_a_needle_that_is_absent_from_a_real_file_is_reported():
     bad = ("<!-- facts:begin -->\n| c |\n| --- |\n| x | [src: tools/skyguard/neutral.py::no such needle zzz] |\n"
-           "| y | [measured: docs/superpowers/measurements/2026-10-05-plan7-adapter-latency.md#no such heading] |\n"
+           "| y | [measured: docs/evidence/2026-10-05-plan7-adapter-latency.md#no such heading] |\n"
            "<!-- facts:end -->\n")
     got = problems(bad)
     assert len(got) == 2 and all("does not contain" in g for g in got)

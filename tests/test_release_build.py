@@ -107,6 +107,26 @@ def test_native_fixture_authoring_is_excluded_without_hiding_runtime_or_siblings
     assert root + paths[1] in names and root + paths[2] in names
 
 
+def test_the_maintainer_superpowers_tree_is_excluded_but_cited_evidence_ships(tmp_path):
+    """docs/superpowers/ (the maintainer's plans, handoffs and measurements) stays in the repo and out of the zip
+    (user ruling 2026-10-20); docs/evidence/, which the shipped docs cite, still ships."""
+    repo = _repo(tmp_path)
+    paths = ("docs/superpowers/plans/plan.md", "docs/superpowers/measurements/m.md", "docs/evidence/m.md",
+             "docs/superpowers.md")
+    for rel in paths:
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x\n")
+    _git(repo, "add", "--", *paths)
+    _git(repo, "commit", "-q", "-m", "maintainer docs")
+    result, output = _build(repo, "HEAD", "--version", "1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    names = _names(_zip(output))
+    root = "skyrim-ai-assistant-toolkit-1/"
+    assert not [n for n in names if n.startswith(root + "docs/superpowers/")], names
+    assert root + "docs/evidence/m.md" in names and root + "docs/superpowers.md" in names
+
+
 def test_the_layer2_spike_folder_is_excluded_by_prefix_not_its_siblings(tmp_path):
     """scripts/layer2-spike/ (developer-only Layer 2 lock probes) stays in the repo and out of the zip. The rule is
     a PATH PREFIX (the folder itself, or anything under it), never a top-level name: scripts/ still ships, and a
@@ -238,7 +258,8 @@ def test_the_excludes_are_one_list_the_tests_can_read():
     spec = importlib.util.spec_from_file_location("build_release_zip", BUILDER_PY)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    assert set(mod.EXCLUDE) == {"tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests"}, mod.EXCLUDE
+    assert set(mod.EXCLUDE) == {"tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests",
+                                "docs/superpowers"}, mod.EXCLUDE
 
 
 @pytest.mark.parametrize("args", [[], ["HEAD"], ["HEAD", "out", "--bogus"]])

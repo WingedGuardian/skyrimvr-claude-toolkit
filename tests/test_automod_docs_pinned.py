@@ -7,7 +7,7 @@ install reported "built for net8.0 by an older toolkit". A fix that reaches some
 and not the one that is followed is the failure this test exists for.
 
 Scanned: every Markdown/text file a user or agent reads as instructions, plus setup.sh. Not scanned: plan
-and measurement history (docs/superpowers/) and CHANGELOG.md, which describe what older versions did.
+and measurement history (docs/superpowers/, docs/evidence/) and CHANGELOG.md, which describe what older versions did.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from conftest import REPO
 
 PIN_TAG = "v1.11.2"
 SKIP_DIRS = {".git", "node_modules", ".superpowers", ".pytest_cache", ".venv", "__pycache__"}
-SKIP_PREFIXES = ("docs/superpowers/",)
+SKIP_PREFIXES = ("docs/superpowers/", "docs/evidence/")
 SKIP_FILES = {"CHANGELOG.md"}
 # A line that clones AutoMod must name the pinned tag; nothing may `dotnet build` its projects directly.
 CLONE = re.compile(r"(?i)\bclon(e|ing)\b.*spookys-automod-toolkit|spookys-automod-toolkit.*\bclon(e|ing)\b")

@@ -315,7 +315,7 @@ Copy their *mechanism*, not their wording. Every row is cited.
 <!-- facts:begin -->
 | Fact | Tier | Source |
 |---|---|---|
-| Codex blocks a tool call on exactly one thing: a parsed JSON `permissionDecision: "deny"`. `ask`, exit 2, exit 1, malformed JSON, a timeout and a missing script all let the command run | MEASURED | [spec: E17] [measured: docs/superpowers/measurements/2026-10-02-plan4-codex-derisk.md#EXIT2ME] |
+| Codex blocks a tool call on exactly one thing: a parsed JSON `permissionDecision: "deny"`. `ask`, exit 2, exit 1, malformed JSON, a timeout and a missing script all let the command run | MEASURED | [spec: E17] [measured: docs/evidence/2026-10-02-plan4-codex-derisk.md#EXIT2ME] |
 | Codex skips a project's unapproved hooks silently | MEASURED | [spec: E2] |
 | Codex shell commands arrive as tool `Bash` although they run under PowerShell | MEASURED | [spec: E3] |
 | Codex `apply_patch` carries paths only inside the patch text | MEASURED | [spec: E4] [src: tools/modding_harness/patches.py::def parse_patch] [src: tools/skyguard/patch_paths.py::from modding_harness.patches import] |
@@ -325,7 +325,7 @@ Copy their *mechanism*, not their wording. Every row is cited.
 | A deny that arrives after the agent's own hook timeout is discarded, so every wrapper bounds its own work below that timeout | READ | [src: agent/guards/adapters/codex/skyguard-entry.sh::DISCARDS an answer that arrives after its hook timeout] |
 | `AGENTS.md` past 32 KiB is silently truncated by Codex | MEASURED | [spec: E7] |
 | A skill with Claude-only frontmatter loads and runs in Codex | MEASURED | [spec: E6] |
-| The adapter template adds one Python start to every call; measured median and p95 are recorded | MEASURED | [measured: docs/superpowers/measurements/2026-10-05-plan7-adapter-latency.md#adapter median] |
+| The adapter template adds one Python start to every call; measured median and p95 are recorded | MEASURED | [measured: docs/evidence/2026-10-05-plan7-adapter-latency.md#adapter median] |
 <!-- facts:end -->
 
 ## 6. Wire the adapter

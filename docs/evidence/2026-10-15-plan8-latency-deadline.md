@@ -1,6 +1,8 @@
+> Evidence from the toolkit's development. Not instructions for your agent.
+
 # Plan 8 T14b: hook latency and deadline matrix
 
-Measured 2026-10-14 and 2026-10-15 on one machine (Intel(R) Core(TM) i7-14700F, 28 logical CPUs; Git 2.55.0.windows.5,
+Measured 2026-10-14 and 2026-10-15 on one machine (a desktop CPU with 28 logical CPUs; Git 2.55.0.windows.5,
 bash 5.3.15 (cygwin), harness Python 3.10.10, Windows PowerShell 5.1.26100.9549, pwsh 7.6.6).
 Every number below is MEASURED by `tests/test_hook_deadline_load.py` (opt-in, `SKYGUARD_LOAD_TEST=1`) and copied from its run rows; the rows
 and logs stay outside the repository (they hold machine paths). Tiers: MEASURED unless a sentence says INFERRED.

@@ -34,7 +34,7 @@ def _zip(src: Path, out: Path, top: str) -> Path:
 @pytest.fixture(scope="module")
 def payload(tmp_path_factory):
     root = copy_repo(tmp_path_factory.mktemp("vr") / "p")
-    for junk in (".github", "scripts/layer2-spike", ".claude/backups", ".superpowers", ".skyguard"):
+    for junk in (".github", "scripts/layer2-spike", "docs/superpowers", ".claude/backups", ".superpowers", ".skyguard"):
         if (root / junk).exists():
             shutil.rmtree(root / junk)
     for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", "KNOWLEDGEBASE.local.md"):

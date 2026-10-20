@@ -21,7 +21,7 @@ from conftest import REPO
 CHECKER = REPO / "tools" / "check-release-payload.py"
 
 CITE = re.compile(r"\[(src|repo|spec|measured): ([^\]]+)\]")
-SPEC = "docs/superpowers/specs/2026-09-30-universal-agent-support-design.md"
+SPEC = "docs/evidence/2026-09-30-universal-agent-support-design.md"
 
 
 def adapting_references():

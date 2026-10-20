@@ -2,7 +2,7 @@
 
 M-D = the read-only attribute PLUS a file-level, non-inherited deny ACE for the current user's SID with the
 mask (WD, AD, WA, WEA). Denying write-attributes is what stops `-Force` from clearing the bit. Measured in
-docs/superpowers/measurements/2026-10-04-plan6-ml2.md; what it does NOT stop (accepted by the user, written
+docs/evidence/2026-10-04-plan6-ml2.md; what it does NOT stop (accepted by the user, written
 into the README): an xEdit save renames the locked master into `zEdit Backups/` (the bytes survive) and a
 Codex `workspace-write` sandbox cannot lift it (the user runs tools/skyguard-unlock.cmd).
 

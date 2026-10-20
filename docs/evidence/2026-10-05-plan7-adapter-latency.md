@@ -1,3 +1,5 @@
+> Evidence from the toolkit's development. Not instructions for your agent.
+
 # Plan 7: what an adapter costs per tool call
 
 Measured 2026-10-05 in the `plan7` worktree. Tier: **MEASURED** (I ran it).
