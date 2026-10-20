@@ -947,3 +947,74 @@ def test_sp_row(sp_installs, row):
         pytest.skip(rec.windows_only(row["id"]))
     got = rec.engine_verdict(install, row["hook"], rec.row_payload(row, install))
     assert rec.intended_problems(row, got) == []
+
+
+# ================================================================ a save change beside another rule's ASK (L2 HIGH-1)
+# Through run.py in process (the real Claude hook entry): another rule's ask must never skip the save policy. More than
+# 2 saves with no typed approval: the S-SAVE-APPROVAL refusal wins over the ask. 1 or 2 saves: the pairs are backed up
+# and verified BEFORE the ask reaches the user, and a failed backup refuses.
+
+
+def _ask_beside(tmp_path, command_of, transcript=""):
+    rec = _rec()
+    install = rec.make_install(tmp_path, REPO / ".claude" / "hooks", "saves-bulk")
+    S = (install / "cfg" / "Saves").as_posix()
+    payload = {"tool_name": "Bash", "session_id": "corpus-save", "cwd": install.as_posix(),
+               "tool_input": {"command": command_of(S, install.as_posix())}}
+    if transcript:
+        payload["transcript_path"] = str(install / "transcripts" / transcript)
+    return install, rec.fire_inprocess(install, "protect-bash.sh", payload)
+
+
+def _rm(S, *stems):
+    return "rm " + " ".join('"{}/{}.ess"'.format(S, s) for s in stems)
+
+
+ASKERS = {
+    "opaque": lambda S, I: '$R "{}/Save1.ess"; '.format(S),
+    "git-discard": lambda S, I: "git checkout -- Data/Plugin.esp ; ",
+}
+
+
+@pytest.mark.parametrize("asker", sorted(ASKERS))
+def test_three_saves_beside_an_ask_are_refused_without_the_typed_approval(tmp_path, asker):
+    install, got = _ask_beside(tmp_path, lambda S, I: ASKERS[asker](S, I) + _rm(S, "Save1", "Save2", "Save3"))
+    assert got["decision"] == "deny" and "S-SAVE-APPROVAL" in got["rules"], got
+    assert got["text"].startswith("Blocked: this deletes 3 saves"), got
+    assert saved(install) == []
+
+
+@pytest.mark.parametrize("asker", sorted(ASKERS))
+def test_one_save_beside_an_ask_is_backed_up_before_the_ask(tmp_path, asker):
+    install, got = _ask_beside(tmp_path, lambda S, I: ASKERS[asker](S, I) + _rm(S, "Save1"))
+    assert got["decision"] == "ask", got
+    assert sorted(Path(e["src"]).name for e in saved(install)) == ["Save1.ess", "Save1.skse"]
+
+
+def test_three_approved_saves_beside_an_ask_are_backed_up_before_the_ask(tmp_path):
+    install, got = _ask_beside(tmp_path, lambda S, I: ASKERS["git-discard"](S, I) + _rm(S, "Save1", "Save2", "Save3"),
+                               transcript="approved.jsonl")
+    assert got["decision"] == "ask" and "S-GIT-DISCARD" in got["rules"], got
+    assert len(saved(install)) == 6
+
+
+def test_a_failed_backup_beside_an_ask_refuses(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("disk full")
+    from modding_harness.preservation import SaveStore
+    monkeypatch.setattr(SaveStore, "backup", boom)
+    install, got = _ask_beside(tmp_path, lambda S, I: ASKERS["git-discard"](S, I) + _rm(S, "Save1"))
+    assert got["decision"] == "deny" and got["text"].startswith("Blocked: the backup of the saves failed"), got
+
+
+@pytest.mark.parametrize("stems, want", [(("Save1",), "ask"), (("Save1", "Save2", "Save3"), "deny")],
+                         ids=["one-save-asks-after-backup", "three-saves-refused"])
+def test_codex_save_change_beside_an_ask_keeps_the_save_policy(inst, stems, want):
+    """The Codex entry (engine.pre_tool) shares portable.check: the same ordering holds there."""
+    cmd = 'git -C "{}" checkout -- Data/Plugin.esp ; '.format(inst.game.as_posix()) + "r" + "m " + " ".join(inst.p(s + ".ess") for s in stems)
+    v = codex_pre(inst, "Bash", {"command": cmd})
+    assert v.decision == want, v
+    if want == "deny":
+        assert v.code == "shell.S-SAVE-APPROVAL" and inst.saved() == []
+    else:
+        assert v.code == "shell.S-GIT-DISCARD" and len(inst.saved()) == 2
