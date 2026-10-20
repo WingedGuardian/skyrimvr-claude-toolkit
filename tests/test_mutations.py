@@ -9529,3 +9529,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "            if (False", "tests/test_portable_profile.py::test_a_local_restriction_ask_waits_for_the_save_policy",
      "save-local-restriction-ask-held"),
 ]]
+
+# v4.0.0 review L3 LOW-1: a malformed inline snippet is the engine's parse refusal, not a crash (GUARD INERT).
+MUTATIONS += [pytest.param("tools/skyguard/engine.py",
+    '        return Verdict("deny", UNPARSED + str(exc), status="failed", code="engine.UNPARSED")', "        raise",
+    "tests/test_skyguard_engine.py::test_the_claude_hook_answers_a_malformed_inline_snippet",
+    id="engine-unparsed-snippet-refused")]

@@ -28,9 +28,23 @@ NO_PATHS = ("GUARD INERT: a write request named no file, so the write rules chec
 NO_VERDICTS = "GUARD INERT: the engine combined zero verdicts, so nothing was checked."
 
 
+UNPARSED = "preservation/policy failed: "
+
+
 def evaluate_shell(req, roots, audit) -> Verdict:
     """Plan 5: the rules read the payload cwd (RAW) and the dialect; a request that names none ("" / None) is
-    parsed as bash AND PowerShell (spec R5)."""
+    parsed as bash AND PowerShell (spec R5).
+
+    v4.0.0 review L3 LOW-1: a rule that cannot read part of the command raises ValueError (a malformed inline snippet,
+    `python -c "print(1"`: writes.py cannot parse its literal write scope). That is a refusal of THIS command, with
+    the text the portable dispatcher gives the same failure -- never an exception that ends the hook as GUARD INERT."""
+    try:
+        return _evaluate_shell(req, roots, audit)
+    except ValueError as exc:
+        return Verdict("deny", UNPARSED + str(exc), status="failed", code="engine.UNPARSED")
+
+
+def _evaluate_shell(req, roots, audit) -> Verdict:
     command, shell = req.command, req.shell or ""
     try:
         parsed = shellparse.parse(command, shell) if isinstance(command, str) else None
