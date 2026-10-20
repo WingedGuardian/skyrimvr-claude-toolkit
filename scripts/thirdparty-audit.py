@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -206,7 +207,8 @@ class Fetcher:
             self.calls += 1
             try:
                 resp = self.transport(url, headers, secret)
-            except (urllib.error.URLError, OSError, ValueError) as exc:
+            except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as exc:
+                # HTTPException: a truncated body (IncompleteRead) or a garbled status line is a network failure too.
                 reason = getattr(exc, "reason", exc)
                 if attempt == 2:
                     raise CouldNotCheck("unreachable: %s (%s)" % (host, self._clean(str(reason)))) from None
