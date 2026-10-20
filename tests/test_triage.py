@@ -86,6 +86,12 @@ def test_papyrus_reports_the_not_shown_remainder_even_at_zero(papyrus_log):
     """Silence about the remainder is how a triage tool starts lying."""
     r = run(PAPYRUS, str(papyrus_log), "--top", "1")
     assert "(not shown above)" in r.stdout, r.stdout
+    # ... and at ZERO, which `--top 1` never reached for the error block (both blocks fit the default top: every
+    # remainder row is 0 and must still print once per block).
+    import re
+    r = run(PAPYRUS, str(papyrus_log))
+    zero_rows = re.findall(r"^\s+0\s+-\s+\(not shown above\)$", r.stdout, re.M)
+    assert len(zero_rows) == r.stdout.count(" buckets  (") == 2, r.stdout
 
 
 def test_papyrus_attributes_a_missing_plugin_to_its_name(papyrus_log):

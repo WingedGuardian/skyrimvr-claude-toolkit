@@ -1444,6 +1444,11 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
                  """curl -s --max-time 30 -w $'\\n%{http_code}' -H "apikey: $KEY" "$@")""",
                  "tests/test_nexus.py::test_page_end_to_end_and_the_key_is_used_but_never_printed",
                  id="nexus-key-on-the-curl-command-line"),
+    # Read-through of a skimmed file (test_triage.py): the zero remainder row was never actually tested at zero.
+    pytest.param("tools/papyrus-triage.py", """        print(f"  {remainder:>6}  {'-':<34}  (not shown above)")""",
+                 """        if remainder: print(f"  {remainder:>6}  {'-':<34}  (not shown above)")""",
+                 "tests/test_triage.py::test_papyrus_reports_the_not_shown_remainder_even_at_zero",
+                 id="papyrus-triage-zero-remainder-silent"),
 
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(
