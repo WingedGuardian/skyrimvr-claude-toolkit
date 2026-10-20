@@ -718,7 +718,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         # Drop the knowledgebase lookup: every crash reads as a new finding,
         # including the one already ruled ACCEPTED three investigations ago.
         "tools/crash-triage.py",
-        '        status, note = KNOWN.get(r["offset"], ("UNKNOWN", ""))',
+        '        status, note = known(r)',
         '        status, note = ("UNKNOWN", "")',
         "tests/test_triage.py::test_crash_labels_an_accepted_signature_from_the_knowledgebase",
         id="crash-known-signatures-ignored",
