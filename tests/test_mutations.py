@@ -7610,6 +7610,10 @@ MUTATIONS += [
           ("failures-not-gated", "    ok = worst <= 1000 and not failed and bool(results)", "    ok = worst <= 1000",
            "test_hooks_that_crash_fail_the_gate"),
       ]],
+    # v4.0.0 review L4b L2: the residual "no hook ran" check read only the last 1800 characters.
+    pytest.param("scripts/e2e-codex.py", '"hook_ran": "hook: " in out,', '"hook_ran": "hook: " in out[-1800:],',
+                 "tests/test_e2e_codex_verdict.py::test_a_hook_line_early_in_long_output_still_counts",
+                 id="e2e-residual-reads-the-tail"),
     # v4.0.0 review L4a L3: a DEGRADED hook-canary (exit 1) was accepted as a report.
     pytest.param("tools/verify-release.sh",
                  """  if { [ $rc -eq 0 ] || [ $rc -eq 2 ]; } && grep -q '^RESULT:' <<<"$out"; then""",

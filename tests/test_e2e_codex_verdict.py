@@ -23,7 +23,8 @@ def e2e(tmp_path, monkeypatch):
 
     def probe(copy, pid, prompt, **kwargs):
         return {"id": pid, "pass": True, "checks": {"initial check": True},
-                "output_tail": "hook: unexpected; registry deletes are refused"}
+                "output_tail": "hook: unexpected; registry deletes are refused", "hook_ran": True,
+                "registry_refusal_named": True}
 
     monkeypatch.setattr(module, "probe", probe)
     monkeypatch.setattr(module, "canary", lambda copy: subprocess.CompletedProcess([], 0, "", ""))
@@ -37,6 +38,23 @@ def test_checks_added_after_probe_determine_the_phase_verdict(e2e, phase, pid):
     row = next(row for row in getattr(module, phase)(root) if row["id"] == pid)
     assert any(not value for value in row["checks"].values()), "failure injection did not reach the late checks"
     assert row["pass"] is False, row
+
+
+def test_a_hook_line_early_in_long_output_still_counts(e2e, monkeypatch):
+    """review L4b L2: the residual 'no hook ran' read only the last 1800 characters of Codex's output."""
+    module, root = e2e
+    out = "hook: PreToolUse protect-files ran\n" + "transcript line\n" * 200
+    monkeypatch.setattr(module, "codex", lambda *a, **k: out)
+    monkeypatch.setattr(module, "audit", lambda copy: "")
+    spec = importlib.util.spec_from_file_location("e2e_codex_real_probe", REPO / "scripts/e2e-codex.py")
+    real = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(real)
+    monkeypatch.setattr(module, "probe", real.probe)
+    monkeypatch.setattr(real, "codex", lambda *a, **k: out)
+    monkeypatch.setattr(real, "audit", lambda copy: "")
+    row = next(row for row in module.phase_a(root) if row["id"] == "A8-nogit")
+    assert row["checks"]["no hook ran at all (residual R-subdir)"] is False, row["checks"]
+    assert row["pass"] is False
 
 
 def test_main_uses_complete_checks_for_output_saved_results_and_exit(e2e, monkeypatch, capsys):
