@@ -81,7 +81,7 @@ The "safety improvement loop" instruction in CLAUDE.md asks Claude to evaluate w
 
 ## Customizing Safety
 
-The guards can be customized, but their shipped files can be replaced during an update. Keep personal rules in separate local files. Use the reviewed upgrade workflow in `ADAPTING.md`: stage the candidate, retain custom instructions and settings as explicit collisions, and integrate existing pre-tool handlers into the ordered dispatcher before applying. Keep the old handlers active until that replacement is qualified. Extracting directly over the installation can overwrite those files. To customise:
+The guards can be customized, but their shipped files can be replaced during an update. Keep personal rules in separate local files. Before an update, run `tools/pre-update-snapshot.sh` as README.md's FAQ ("How do I update the toolkit?") says; extracting over the installation overwrites those files. If you added your own pre-tool handlers, use the reviewed upgrade in `docs/upgrading-native-hooks.md` instead, and keep the old handlers active until their replacement is qualified. To customise:
 
 - **Whitelist paths** you want Claude to edit freely (e.g., a working directory for scripts)
 - **Add new patterns** to the bash guard for commands specific to your workflow
