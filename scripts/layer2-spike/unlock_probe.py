@@ -173,26 +173,32 @@ def main():
     for _ in range(5):
         for f in stand:
             sandbox.assert_lockable(f)
+        rcs = []                     # review L4b L6: a lock command that fails instantly is not a fast lock
         t0 = time.perf_counter()
         for f in stand:
             w = os.path.normpath(f)
             if ro:
-                subprocess.run(["attrib", "+R", w], capture_output=True)
+                rcs.append(subprocess.run(["attrib", "+R", w], capture_output=True).returncode)
             if mask:
-                subprocess.run(["icacls", w, "/deny", "*%s:(%s)" % (sid, lockprobe.check_mask(mask))],
-                               capture_output=True)
+                rcs.append(subprocess.run(["icacls", w, "/deny", "*%s:(%s)" % (sid, lockprobe.check_mask(mask))],
+                                          capture_output=True).returncode)
         t1 = time.perf_counter()
+        locked_mid = all(lockprobe.is_locked(f) for f in stand)
+        t1b = time.perf_counter()
         for f in stand:
             w = os.path.normpath(f)
             if mask:
-                subprocess.run(["icacls", w, "/remove:d", "*" + sid], capture_output=True)
+                rcs.append(subprocess.run(["icacls", w, "/remove:d", "*" + sid], capture_output=True).returncode)
             if ro:
-                subprocess.run(["attrib", "-R", w], capture_output=True)
+                rcs.append(subprocess.run(["attrib", "-R", w], capture_output=True).returncode)
         t2 = time.perf_counter()
-        runs.append({"apply_s": round(t1 - t0, 3), "remove_s": round(t2 - t1, 3), "total_s": round(t2 - t0, 3),
-                     "all_locked_mid": None})
+        runs.append({"apply_s": round(t1 - t0, 3), "remove_s": round(t2 - t1b, 3),
+                     "total_s": round((t1 - t0) + (t2 - t1b), 3), "all_locked_mid": locked_mid,
+                     "commands_ok": all(rc == 0 for rc in rcs)})
     res["C10"] = {"files": len(stand), "runs": runs, "max_total_s": max(r["total_s"] for r in runs),
-                  "pass": max(r["total_s"] for r in runs) <= 2.0, "clean_after": clean(stand)}
+                  "pass": (max(r["total_s"] for r in runs) <= 2.0 and all(r["commands_ok"] for r in runs)
+                           and all(r["all_locked_mid"] for r in runs)),
+                  "clean_after": clean(stand)}
     with open(a.out, "w", encoding="utf-8") as fh:
         json.dump(res, fh, indent=1)
     print(json.dumps({k: ({kk: vv for kk, vv in v.items() if kk not in ("runs", "report", "out_tail")}

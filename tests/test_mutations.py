@@ -7619,6 +7619,16 @@ MUTATIONS += [
                  "   A regex is a search over the whole output stream",
                  "tests/test_adapting_claims.py::test_the_profile_regex_rule_is_stated_the_way_the_tool_applies_it",
                  id="adapting-regex-claim-weak-disjunct"),
+    # v4.0.0 review L4b L6: spike leftovers go to the Recycle Bin, inside the sandbox only, refusals stop the probe.
+    pytest.param("scripts/layer2-spike/sandbox.py", "    target = assert_inside(path)\n    if recycler is None:",
+                 "    target = resolve(path)\n    if recycler is None:",
+                 "tests/test_layer2_spike_sandbox.py::"
+                 "test_a_leftover_goes_to_the_injected_bin_and_never_outside_the_box",
+                 id="l2-spike-recycle-outside-box"),
+    pytest.param("scripts/layer2-spike/sandbox.py", '    if why:\n        raise SystemExit("left in place',
+                 '    if False:\n        raise SystemExit("left in place',
+                 "tests/test_layer2_spike_sandbox.py::test_a_leftover_the_bin_refuses_stays_and_stops_the_probe",
+                 id="l2-spike-recycle-refusal-ignored"),
     # v4.0.0 review L4a L3: a DEGRADED hook-canary (exit 1) was accepted as a report.
     pytest.param("tools/verify-release.sh",
                  """  if { [ $rc -eq 0 ] || [ $rc -eq 2 ]; } && grep -q '^RESULT:' <<<"$out"; then""",

@@ -63,6 +63,22 @@ def assert_inside(path) -> str:
     return target
 
 
+def recycle(path, recycler=None) -> None:
+    """Remove a spike folder through the Recycle Bin (tools/housekeep.py), never a permanent delete (review L4b L6:
+    the probes rmtree'd earlier runs' leftovers). Inside the sandbox only. What the bin does not take stays where it
+    is and stops the probe (SystemExit), so a measurement never runs on top of a leftover."""
+    target = assert_inside(path)
+    if recycler is None:
+        tools = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools")
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import housekeep
+        recycler = housekeep.recycle
+    why = recycler([target]).get(target, "no result")
+    if why:
+        raise SystemExit("left in place (not sent to the Recycle Bin): %s: %s" % (target, why))
+
+
 def _real_ids():
     try:
         with open(BASELINE, "r", encoding="utf-8") as fh:

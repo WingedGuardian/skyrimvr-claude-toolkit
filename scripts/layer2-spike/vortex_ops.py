@@ -67,7 +67,7 @@ def main():
     a = ap.parse_args()
     os.environ.setdefault(sandbox.ENV, ROOT)
     if os.path.exists(STAGING):
-        shutil.rmtree(STAGING)
+        sandbox.recycle(STAGING)
     os.makedirs(STAGING)
     for n, size in (("NewFile.esp", 4096), ("NewFile2.esp", 4096), ("Skyrim - Shaders.bsa", 65536)):
         with open(os.path.join(STAGING, n), "wb") as fh:
