@@ -27,5 +27,7 @@ authored parse fix can never reach `ChangeForm.write()` / `writeESS()` (corrupti
 The overlay is authored against a specific ReSaver release's internal API. If your downloaded
 `ReSaver.jar` is a different version and the overlay fails to `javac`-compile against it, the
 wrapper **automatically falls back to stock parsing** for that read op (you lose the enhanced
-changeform coverage, but `info`/`dump`/`find`/`worries` and all write ops keep working). Delete the
-`*.class` files here to force a recompile after swapping ReSaver versions.
+changeform coverage, but `info`/`dump`/`find`/`worries` and all write ops keep working). Swapping
+ReSaver versions needs no action: compiled classes live in `tools/resaver-cli/.compiled/<key>/`, keyed by
+the digests of `ReSaver.jar`, `lib/*.jar`, these sources and the JDK (`tools/resaver_cli_cache.py`), so a
+different jar is a different key and compiles on first use. Nothing is compiled into this folder.
