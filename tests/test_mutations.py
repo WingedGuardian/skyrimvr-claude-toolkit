@@ -7614,6 +7614,11 @@ MUTATIONS += [
     pytest.param("scripts/e2e-codex.py", '"hook_ran": "hook: " in out,', '"hook_ran": "hook: " in out[-1800:],',
                  "tests/test_e2e_codex_verdict.py::test_a_hook_line_early_in_long_output_still_counts",
                  id="e2e-residual-reads-the-tail"),
+    # v4.0.0 review L4b L5: the profile-regex claim passed on the word "whole" alone.
+    pytest.param("ADAPTING.md", "   A regex is a full match over the whole output stream",
+                 "   A regex is a search over the whole output stream",
+                 "tests/test_adapting_claims.py::test_the_profile_regex_rule_is_stated_the_way_the_tool_applies_it",
+                 id="adapting-regex-claim-weak-disjunct"),
     # v4.0.0 review L4a L3: a DEGRADED hook-canary (exit 1) was accepted as a report.
     pytest.param("tools/verify-release.sh",
                  """  if { [ $rc -eq 0 ] || [ $rc -eq 2 ]; } && grep -q '^RESULT:' <<<"$out"; then""",
