@@ -7525,6 +7525,13 @@ MUTATIONS += [
     pytest.param("tools/verify-release.sh", "    [A-Za-z]:/*) ;;", "    __not_a_drive_root__) ;;",
                  "tests/test_verify_release.py::test_the_scrubbed_install_runs_and_its_canary_is_invisible",
                  marks=CMD_ONLY, id="verify-codex-defs-rendered-on-windows"),
+    # v4.0.0 review L4a L4: an exported value stands in for a line skyrim-paths.env lacks (the test could not fail).
+    pytest.param("setup.sh",
+                 "    _got=$( unset SKYRIM_GAME_ROOT SKYRIM_CONFIG_DIR SKYRIM_LOADORDER_DIR SKYRIM_MO2_MODS "
+                 "SKYRIM_MO2_OVERWRITE SKYGUARD_PYTHON",
+                 "    _got=$( :",
+                 "tests/test_setup_agent.py::test_an_exported_value_cannot_stand_in_for_a_missing_line",
+                 id="setup-readback-trusts-exported-values"),
     # v4.0.0 review L4a L3: a DEGRADED hook-canary (exit 1) was accepted as a report.
     pytest.param("tools/verify-release.sh",
                  """  if { [ $rc -eq 0 ] || [ $rc -eq 2 ]; } && grep -q '^RESULT:' <<<"$out"; then""",
