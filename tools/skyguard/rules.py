@@ -326,7 +326,7 @@ RULES = {
         'Note: the guard backs up {file} before this runs ({op}).'
     ),
     },
-    # More than 2, or a wildcard: the user's typed SAVE_ACCESS_APPROVAL line (approvals.py) is required.
+    # More than 2, or a wildcard: the user's typed SAVE_ACCESS_APPROVAL line (modding_harness/approval.py) is required.
     'S-SAVE-APPROVAL': {
         "decision": 'deny',
         "hook": 'protect-bash',

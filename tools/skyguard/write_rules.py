@@ -103,7 +103,7 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
         a = targets.resolve_literal(file_path, cwd, os.environ if env is None else env)
         if is_save(a, roots):
             # The save policy (user ruling 2026-10-13): a save changed through Edit/Write or a patch is backed up
-            # first (saves.enforce); saves.judge decides it with every other save the call changes.
+            # first (portable.check); saves.judge decides it with every other save the call changes.
             from . import saves
             actual = targets.physical(file_path, cwd, "cmd", env_, literal=True)
             return saves.judge(saves.Change((saves.Target(actual or "", op if op in saves.OPS else "write", True),)), Verdict(),

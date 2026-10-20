@@ -253,7 +253,7 @@ def side_effects(req, project, audit, v, roots_fn=None, deadline=None) -> Verdic
     """Snapshot and backups, whatever the decision (as on Claude, where those hooks run beside the guard).
     Each step has its own try: one failing never skips the next and never changes the decision. Task 15: the recovery
     snapshot (load order, INIs) goes first, inside `deadline` (a time.monotonic time). A save the call changes was
-    backed up before this, by saves.enforce in pre_tool: its result decides the call, so it is no side effect."""
+    backed up before this, by portable.check in pre_tool: its result decides the call, so it is no side effect."""
     partial = False
     if req.kind == "shell":
         try:

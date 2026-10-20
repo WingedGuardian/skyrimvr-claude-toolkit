@@ -317,8 +317,8 @@ def _ordered(command, parsed, dels, wr, own, roots, audit, cwd, shell, env) -> V
         reason = rules.message("S-GIT-DISCARD", file=git)
         audit.rule(HOOK, "S-GIT-DISCARD", "ask", reason)
         return Verdict("ask", reason)
-    # User ruling 2026-10-19 ("ask first"): an unnamed program word naming a save. saves.judge still backs up a save
-    # another reading changes, and keeps this ask beside its note.
+    # User ruling 2026-10-19 ("ask first"): an unnamed program word naming a save. A save another reading changes is
+    # still counted (saves.judge), and portable.check holds this ask until that save is approved and backed up.
     opaque = _opaque_save(parsed, roots, cwd, env)
     if opaque:
         reason = rules.message("S-SAVE-OPAQUE", file=opaque)

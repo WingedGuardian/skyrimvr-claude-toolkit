@@ -8,13 +8,16 @@ writes or edits it, copies onto it, moves or renames it, deletes it, saves over 
 ReSaver --apply.
 
     judge(change, rest, audit, hook) -> Verdict      (pure but for listing folders: the rule modules call it)
-    enforce(v, ...) -> Verdict                       (the hooks: the backup itself, and the user's approval)
+
+The hooks act on judge's plan in ONE place: portable.check, which hands it to the shared dispatcher
+(modding_harness/dispatch.py). The dispatcher checks the user's typed approval (modding_harness/approval.py) and backs
+up and verifies every pair BEFORE the tool can run; any failure denies (S-SAVE-BACKUP-FAILED).
 
 DECISION (judge), counting the saves that EXIST now (creating a new save changes none):
   * 1 or 2 saves, every one named exactly: allow, with an S-SAVE-BACKUP note. The hook backs both files of each pair
-    up and verifies them BEFORE the tool runs (enforce), and denies if it cannot (S-SAVE-BACKUP-FAILED).
-  * more than 2, or any wildcard: S-SAVE-APPROVAL denies, naming the line the user types (approvals.py). With that
-    approval in the transcript, enforce backs every one of them up and allows.
+    up and verifies them BEFORE the tool runs, and denies if it cannot (S-SAVE-BACKUP-FAILED).
+  * more than 2, or any wildcard: S-SAVE-APPROVAL denies and points at the scope preview; the user types the canonical
+    line (ADAPTING.md). With that approval in the transcript, the hook backs every one of them up and allows.
   * a save the guard cannot place: denied (S-SAVE-UNKNOWN; DevBench's S-DEVBENCH-SAVE and ReSaver's S-RESAVER-APPLY
     say the same for their calls) -- no backup is possible, so nothing is allowed.
 Reading, hashing, listing and copying a save OUT of its folder change no save: free. Deleting or moving the Saves
@@ -22,8 +25,10 @@ FOLDER stays S-DEL-CONFIG / S-MOVE-ROOT (deletes.py, writes.py). Every save refu
 `guards off` is a lift the agent may take, and the user's typed approval cannot be.
 
 The plan travels on the verdict (Verdict.saves = Plan(change, rest)), `rest` being what the other rules decided, so
-enforce can still allow (with rest's own advice, ask or deny) once the backup holds. A call that the other rules deny
-still gets its saves backed up: shadow mode (guards off) can let a denied call run.
+the hook can still allow (with rest's own advice, ask or deny) once the backup holds. Another rule's ASK is held until
+the approval check and the backup pass (portable.check, L2 HIGH-1): a bulk change with no typed approval is refused
+whatever else asks, and 1-2 saves are backed up before the question reaches the user. A call that the other rules deny
+is refused; if shadow mode (guards off) lets it run, it reaches the dispatcher as an allow and is backed up first.
 
 KNOWN LIMITS: a save written by a script run from a file (`python fix.py`), or by code that builds its path at run
 time, is not seen; a loop over saves (`for f in ...; do rm "$f"; done`) cannot be counted, so it is never backed up
@@ -36,10 +41,10 @@ import os
 import re
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-from . import approvals, mcp_rules, paths, rules, targets
+from . import mcp_rules, paths, rules, targets
 from .verdict import Verdict
 
-OPS = approvals.OPS                       # write | move | delete
+OPS = ("write", "move", "delete")         # what a call does to a save
 VERB = {"write": "changes", "move": "moves", "delete": "deletes"}
 EXTS = (".ess", ".skse")
 WILD = re.compile(r"[*?\[]")
@@ -305,82 +310,3 @@ def combine(vs, fold):
         return None
     rest = fold([v.saves.rest if v.saves is not None else v for v in vs])
     return judge(merge([p.change for p in plans]), rest)
-
-
-# ------------------------------------------------------------------------------------------- the hooks
-def enforce(v: Verdict, project: str, audit, hook: str, command: str = "", transcript: str = "", agent: str = "",
-            session_id: str = "", deadline: Optional[float] = None) -> Verdict:
-    """Run in the deciding PreToolUse hook, BEFORE the tool can run. Backs up every save the call changes, verified,
-    and only then lets judge's allow (or the user-approved bulk change) stand. Any failure DENIES (fail closed).
-    A verdict with no save plan is returned unchanged."""
-    from . import codes, save_store
-    from modding_harness import approval as scoped_approval, profiles
-    plan = v.saves
-    if plan is None:
-        return v
-    change, rest = plan
-    if change.unknown:
-        return v
-    c = count(change)
-    if c.unknown:
-        return v
-    ex = _existing(c)
-    approved = False
-    if needs_approval(c):
-        grants, why = scoped_approval.read(transcript, agent, session_id)
-        wanted = {op: [p for pair in ex if op in pair.ops for p in profiles.skyrim().members(pair.ess)]
-                  for op in {op for pair in ex for op in pair.ops}}
-        if not wanted or not all(any(grant.matches(session_id, op, members, command, bool(c.patterns),
-                                                  len([p for p in ex if op in p.ops])) for grant in grants)
-                                 for op, members in wanted.items()):
-            examples = [scoped_approval.example(session_id, op, members, command, bool(c.patterns),
-                                               len([p for p in ex if op in p.ops]))
-                        for op, members in sorted(wanted.items())]
-            audit.log(hook, "SAVE-APPROVAL-MISSING", why or "scope changed")
-            reason = v.reason + "\nIf approved, the user types:\n" + "\n".join(examples)
-            if agent not in ("claude", "codex") or not session_id:
-                reason += "\nThis host/session has no qualified approval reader; bulk changes remain refused."
-            return v._replace(reason=reason)
-        approved = True
-    if not ex:
-        return codes.classify(rest) if approved else v
-    try:
-        ids = save_store.backup_pairs(project, audit, [(p.ess, p.skse) for p in ex], command or hook,
-                                    agent=agent, session_id=session_id, deadline=deadline)
-    except (OSError, ValueError) as e:
-        reason = _render("S-SAVE-BACKUP-FAILED", (("file", _phrase([p.stem for p in ex])), ("op", str(e))))
-        audit.rule(hook, "S-SAVE-BACKUP-FAILED", "deny", reason)
-        return Verdict("deny", reason, "", rest.status, code=codes.rule_code("S-SAVE-BACKUP-FAILED"))
-    # Recount after preservation so aliases, wildcard membership and absent
-    # counterparts appearing during a multi-save transaction cannot use old scope.
-    if count(change) != c:
-        reason = "save membership changed during preservation; run the guard again"
-        return Verdict("deny", reason, "", rest.status, code=codes.rule_code("S-SAVE-BACKUP-FAILED"))
-    note = _render("S-SAVE-BACKUP", (("file", _phrase([p.stem for p in ex])), ("op", NOTE_BEFORE)))
-    if approved:
-        audit.log(hook, "SAVE-APPROVED", "{} save(s) the user approved, backed up first: {}".format(
-            len(ex), _phrase([p.stem for p in ex])))
-        audit.rule(hook, "S-SAVE-BACKUP", "advise", note)
-    audit.log(hook, "SAVE-BACKUP", "{} backed up and verified ({}) before the call".format(
-        _phrase([p.stem for p in ex]), ", ".join(ids)))
-    return codes.classify(_with_note(rest, note))
-
-
-def _covered(c: Count, g) -> bool:
-    """Every existing save the call changes is approved for its op: by file, or by a pattern grant of the same
-    file-name pattern and op whose count is exactly what the pattern matches now."""
-    if g.why:
-        return False
-    by_pattern = {}
-    for (pat, op), keys in c.patterns.items():
-        live = [k for k in keys if k in {_key(os.path.dirname(p.ess), p.stem) for p in _existing(c)}]
-        if (pat.casefold(), op, len(live)) not in g.patterns:
-            return False                       # a wildcard is approved only by its own pattern grant, count and all
-        for k in live:
-            by_pattern.setdefault(k, set()).add(op)
-    for p in _existing(c):
-        k = _key(os.path.dirname(p.ess), p.stem)
-        for op in p.ops:
-            if op not in by_pattern.get(k, set()) and (p.stem.casefold(), op) not in g.files:
-                return False
-    return True

@@ -18,7 +18,7 @@ SPEC_FIELDS = ("v", "agent", "event", "kind", "shell", "command", "paths", "mcp_
 def test_verdict_shape():
     # `never` (Plan 6 final review A-C1, commit 3934907): a NEVER_SHADOW refusal carried beside a decision that
     # outranked it, for engine.shadow. It is engine-internal: the adapter wire line stays the five fields below.
-    # `saves` (the save policy, 2026-10-13): the call's save plan, read by saves.enforce in the hook; engine-internal too.
+    # `saves` (the save policy, 2026-10-13): the call's save plan, read by portable.check in the hook; engine-internal too.
     assert Verdict._fields == ("decision", "reason", "context", "status", "code", "never", "saves")
     assert Verdict().never is None
 

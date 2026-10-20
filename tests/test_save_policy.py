@@ -1,8 +1,8 @@
-"""The save policy (user ruling 2026-10-13): saves.py, recovery.backup_saves, the hooks that call them.
+"""The save policy (user ruling 2026-10-13): saves.py, and the LIVE hook path (portable.check -> dispatcher).
 
   * 1 or 2 saves changed (a save and its .skse co-save are ONE save): the hook backs up BOTH files of each pair, each
     verified by SHA-256, records them, and only then allows the call.
-  * more than 2, or a wildcard: refused until the USER types a SAVE_ACCESS_APPROVAL line (approvals.py); then backed
+  * more than 2, or a wildcard: refused until the USER types a SAVE_ACCESS_APPROVAL line (approval.py); then backed
     up the same way and allowed.
   * reading, hashing, listing, copying out: free. Deleting or moving the Saves FOLDER: still denied.
   * any backup failure: denied (fail closed). Save backups are never pruned; a restore puts both files back, verified.
@@ -56,8 +56,10 @@ class Inst:
                                   shell=shell, env={})
 
     def enforce(self, v, transcript="", agent="claude", deadline=None):
-        return saves.enforce(v, str(self.game), self.audit, "protect-bash", command="test", transcript=transcript,
-                             agent=agent, session_id="s1", deadline=deadline)
+        """The LIVE deciding path every hook takes (portable.legacy_pre_tool -> the shared dispatcher's approval
+        check and verified pair backup), given the rules' verdict `v` (L2 MEDIUM-2: not the retired saves.enforce)."""
+        return live_enforce(v, self.game, self.roots, self.audit, transcript=transcript, agent=agent,
+                            deadline=deadline)
 
     def store(self):
         return save_store.store(self.game)
@@ -82,6 +84,15 @@ class Inst:
         f = self.game / name
         f.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
         return str(f)
+
+
+def live_enforce(v, game, roots, audit, transcript="", agent="claude", deadline=None, command="test"):
+    from skyguard import portable
+    from skyguard.request import Request
+    req = Request(agent=agent, event="pre_tool", kind="shell", command=command, session_id="s1",
+                  transcript_path=transcript, cwd=Path(game).as_posix(), tool_name="Bash")
+    return portable.legacy_pre_tool(req, str(game), lambda: roots, audit, deadline=deadline, precomputed=v,
+                                    side_effects=False)
 
 
 @pytest.fixture
@@ -192,17 +203,22 @@ def test_the_deciding_hook_names_canonical_scope_instead_of_a_basename_grant(ins
     v = inst.shell("rm " + " ".join(inst.p(s + ".ess") for s in ("Save1", "Save2", "Save3")))
     assert "check --preview" in v.reason and "only the user types SAVE_ACCESS_APPROVAL" in v.reason
     guarded = inst.enforce(v)
-    line = guarded.reason.split("SAVE_ACCESS_APPROVAL ", 1)[1]
-    expected = json.loads(inst.grant().split("SAVE_ACCESS_APPROVAL ", 1)[1])
-    assert json.loads(line) == expected
+    # The live refusal points at the scope preview; it never prints a basename ("files") grant to copy.
+    assert (guarded.decision, guarded.code) == ("deny", "shell.S-SAVE-APPROVAL"), guarded
+    assert guarded.reason == v.reason and '"files"' not in guarded.reason and inst.saved() == []
+    # The canonical line (full paths, session, op) is what approves it.
+    assert inst.enforce(v, transcript=inst.transcript(inst.grant())).decision == "allow"
 
 
 def test_a_wildcard_needs_approval_even_when_it_matches_one_save(inst):
     v = inst.shell('rm "' + inst.S + '/"Sing*.ess')
     assert v.decision == "deny"
     scoped = inst.enforce(v)
-    grant = json.loads(scoped.reason.split("SAVE_ACCESS_APPROVAL ", 1)[1])
-    assert grant["count"] == 1 and len(grant["paths"]) == 2 and len(grant["command_sha256"]) == 64
+    assert (scoped.decision, scoped.code) == ("deny", "shell.S-SAVE-APPROVAL") and inst.saved() == []
+    files_only = inst.transcript(inst.grant(names=("Single",), count=1), name="files.jsonl")
+    assert inst.enforce(v, transcript=files_only).decision == "deny"           # a wildcard needs its own grant
+    pattern = inst.transcript(inst.grant(names=("Single",), wildcard=True, count=1), name="pattern.jsonl")
+    assert inst.enforce(v, transcript=pattern).decision == "allow" and len(inst.saved()) == 1
 
 
 def test_a_wildcard_in_a_folder_name_cannot_be_listed(inst):
@@ -532,7 +548,7 @@ def test_a_patch_delete_of_one_save_is_backed_up_then_allowed_on_codex(inst):
     assert sorted(Path(e["src"]).name for e in inst.saved()) == ["Save2.ess", "Save2.skse"]
 
 
-# ================================================================ the backup (enforce, recovery.backup_saves)
+# ================================================================ the backup (the live dispatcher)
 
 
 def test_enforce_backs_up_both_files_verified_before_it_allows(inst):

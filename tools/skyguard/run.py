@@ -157,7 +157,7 @@ def _recovery(a, p, audit, roots) -> None:
 
 
 def _saves(a, p, audit, v, what):
-    """The save policy (saves.enforce): every save the call changes is backed up and verified HERE, in the deciding
+    """The save policy (portable.check): every save the call changes is backed up and verified HERE, in the deciding
     PreToolUse hook, before its decision is returned -- so the tool cannot run first. A backup that fails, or that
     raises, denies."""
     try:
