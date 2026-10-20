@@ -274,6 +274,19 @@ prune_store() {
 }
 prune_store
 
+# ---------------------------------------------------------------- uncommitted notes
+# The instructions tell the agent to append findings to KNOWLEDGEBASE.local.md, and
+# nothing else makes it commit them. MEASURED in the sibling X4 toolkit 2026-10-20: about
+# 1,767 appended lines over 2.5 weeks, none committed. In a git-tracked install that does
+# not ignore the file, say so every session. A note, never an alarm: exit codes unchanged.
+if command -v git >/dev/null 2>&1 \
+    && dirty=$(git -C "$ROOT" status --porcelain -- KNOWLEDGEBASE.local.md 2>/dev/null) \
+    && [ -n "$dirty" ]; then
+    notes="$notes
+  note: KNOWLEDGEBASE.local.md has uncommitted changes; commit it alone:
+    git add -- KNOWLEDGEBASE.local.md && git commit -m \"Knowledgebase notes\" -- KNOWLEDGEBASE.local.md"
+fi
+
 # ---------------------------------------------------------------- report
 kept=0
 for d in "$STORE"/*/; do

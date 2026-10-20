@@ -96,7 +96,9 @@ Nexus also has a free API (versions, changelogs, dependencies). `bash tools/nexu
 **Standing instruction**: after every debugging session, mod investigation, or web
 research, extract any new facts (engine quirks, VR vs SSE differences, API gotchas,
 tool limitations) and append them to **`KNOWLEDGEBASE.local.md`**, creating it if it
-does not exist. Read both files; write only to the local one.
+does not exist. Read both files; write only to the local one. If the install is a git
+repository that does not ignore that file, commit it alone by explicit path (`git add -- <file>`, then
+`git commit -m "KB notes" -- <file>`). Never push.
 
 ### Your preferences: `## My preferences`, read every session
 
@@ -107,11 +109,8 @@ the same text. Read the rest of the file before making changes. When the user st
 preference ("always…", "never…", "from now on…"), add it to that section. When you create the
 file, start it with an empty `## My preferences` section.
 
-**Why the split, and it is not bookkeeping.** The upgrade path is "extract the new zip
-over your install", so any file the toolkit ships is *replaced* on update. A file that
-is both shipped by us and appended to by you loses everything you added, silently, at
-the moment you update — and the README used to promise the opposite. A toolkit must
-never ship a file it also asks you to edit.
+**Why the split:** updating extracts the new zip over your install, which *replaces* every
+shipped file, so notes appended to a shipped file are lost silently at the next update.
 
 ⚠ If you already have accumulated notes inside `KNOWLEDGEBASE.md` from an older
 version, move them to `KNOWLEDGEBASE.local.md` now. Anything left in the shipped file

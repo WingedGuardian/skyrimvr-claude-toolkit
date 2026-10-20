@@ -575,6 +575,30 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         "tests/test_kb_guard.py::test_every_watched_file_is_actually_snapshotted",
         id="kb-guard-watches-agents-md",
     ),
+    # kb-guard must name UNCOMMITTED local notes: nothing else makes an agent commit what it appended.
+    pytest.param(
+        "tools/kb-guard.sh",
+        "status --porcelain -- KNOWLEDGEBASE.local.md 2>/dev/null)",
+        "status --porcelain -- NO-SUCH-FILE 2>/dev/null)",
+        "tests/test_kb_guard.py::test_uncommitted_local_notes_are_named_until_committed",
+        id="kb-guard-uncommitted-notes-unchecked",
+    ),
+    # ...and only uncommitted ones: a clean or ignored file must not nag every session.
+    pytest.param(
+        "tools/kb-guard.sh",
+        '    && [ -n "$dirty" ]; then',
+        "    ; then",
+        "tests/test_kb_guard.py::test_no_commit_note_outside_git_or_for_an_ignored_file",
+        id="kb-guard-commit-note-on-clean-file",
+    ),
+    # The commit rule itself lives in the instructions every agent reads.
+    pytest.param(
+        "agent/instructions/core.md",
+        "commit it alone by explicit path",
+        "keep it by explicit path",
+        "tests/test_kb_guard.py::test_the_instructions_tell_the_agent_to_commit_its_notes_and_never_push",
+        id="core-md-kb-commit-rule-dropped",
+    ),
     # An alarm from tools/kb-guard.sh must reach the session as TEXT. If the engine instead fails on a
     # non-zero guard status, the wrapper reports NOT RUN and the alarm itself is lost.
     pytest.param(

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Knowledgebase notes get committed. The instructions now tell the agent to
+  commit `KNOWLEDGEBASE.local.md` alone, by explicit path, when the install is a
+  git repository that does not ignore it, and never to push. `tools/kb-guard.sh`
+  adds a session-start note while that file has uncommitted changes. Found in
+  the sibling X4 toolkit, where Codex appended about 1,767 lines over 2.5 weeks
+  and committed none: the commit rule lived only in one user's own settings.
 - Guard: commands hidden behind a prefix. An assignment prefix holding a process
   substitution (`X=<(echo a) rm -rf Data`, also after env/nohup or before
   command/exec), and a program word the guard cannot name (`$R rm ...`,

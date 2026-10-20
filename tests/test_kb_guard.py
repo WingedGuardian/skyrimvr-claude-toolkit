@@ -393,3 +393,50 @@ def test_two_runs_in_the_same_second_do_not_overwrite_each_other(tmp_path):
     assert big in bodies, (
         "the second snapshot overwrote the first because both used the same "
         f"timestamped directory; store now holds only {[len(b) for b in bodies]}")
+
+
+# --------------------------------------------------------------------------
+# uncommitted notes
+# --------------------------------------------------------------------------
+
+LOCAL = "KNOWLEDGEBASE.local.md"
+NOTE = "KNOWLEDGEBASE.local.md has uncommitted changes"
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(root), *args],
+                   check=True, capture_output=True, timeout=60)
+
+
+def test_uncommitted_local_notes_are_named_until_committed(tmp_path):
+    """An agent appends to the local knowledgebase every session and nothing makes it commit."""
+    root = make_install(tmp_path)
+    _git(root, "init", "-q")
+    write(root, LOCAL, "## My preferences\n\nfinding\n")
+    r = run_guard(root)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert NOTE in r.stdout, r.stdout
+    _git(root, "add", "--", LOCAL)
+    _git(root, "commit", "-q", "-m", "notes", "--", LOCAL)
+    r = run_guard(root)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert NOTE not in r.stdout, "a committed knowledgebase was still reported as uncommitted"
+
+
+def test_no_commit_note_outside_git_or_for_an_ignored_file(tmp_path):
+    plain = make_install(tmp_path, "plain")
+    write(plain, LOCAL, "finding\n")
+    r = run_guard(plain)
+    assert r.returncode == 0 and NOTE not in r.stdout, r.stdout + r.stderr
+    ignored = make_install(tmp_path, "ignored")
+    _git(ignored, "init", "-q")
+    write(ignored, ".gitignore", LOCAL + "\n")
+    write(ignored, LOCAL, "finding\n")
+    r = run_guard(ignored)
+    assert r.returncode == 0 and NOTE not in r.stdout, r.stdout + r.stderr
+
+
+def test_the_instructions_tell_the_agent_to_commit_its_notes_and_never_push():
+    """kb-guard's note is the backstop; the instruction every agent reads is the rule itself."""
+    core = (REPO / "agent" / "instructions" / "core.md").read_text(encoding="utf-8")
+    assert "commit it alone by explicit path" in core and "Never push." in core
