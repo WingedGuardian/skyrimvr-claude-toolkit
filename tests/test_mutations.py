@@ -3593,8 +3593,8 @@ MUTATIONS += [
     pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in (
         # the hook must hand the write guard its roots, or the zone notes fall back to the text tests
         ("rule-W-INSTALL-wired", "tools/skyguard/run.py",
-         'v = engine.evaluate_write(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""))',
-         'v = engine.evaluate_write(p["file_path"], audit)', "tests/test_guard_corpus.py::test_intended_rows_reproduce"),
+         'v = engine.evaluate_write(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""),',
+         'v = engine.evaluate_write(p["file_path"], audit,', "tests/test_guard_corpus.py::test_intended_rows_reproduce"),
         ("rule-W-INI-class", _WRR, '    if grep(targets.SKYRIM_INI, file_path):', "    if False:",
          "tests/test_skyguard_write.py::test_rule4_skyrim_ini"),
         ("rule-W-SKSE-INI-class", _WRR, '    if grep(targets.SKSE_INI, file_path):', "    if False:",
@@ -4605,10 +4605,10 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _MERGE + "test_skyguard_codex_adapter.py::test_a_scalar_non_string_command_is_refused_before_the_rules[exec_command-int]",
      "merge-codex-scalar-command-allowed"),
     # engine: Plan 5's cwd and dialect must reach the rules through the Plan 4 engine.
-    ("tools/skyguard/engine.py", 'cwd=req.cwd or "", shell=shell, parsed=parsed))', 'shell=shell, parsed=parsed))',
+    ("tools/skyguard/engine.py", 'cwd=req.cwd or "", shell=shell, parsed=parsed,', 'shell=shell, parsed=parsed,',
      _MERGE + "test_guard_corpus.py::test_intended_rows_reproduce", "merge-engine-drops-cwd"),
-    ("tools/skyguard/engine.py", "    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd, op=op))",
-     "    return codes.classify(write_rules.decide(path, audit, op=op))",
+    ("tools/skyguard/engine.py", "    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd, op=op, transcript=transcript))",
+     "    return codes.classify(write_rules.decide(path, audit, op=op, transcript=transcript))",
      _MERGE + "test_guard_corpus.py::test_intended_rows_reproduce", "merge-engine-write-drops-roots"),
     # Claude adapter: the Request carries the tool's dialect, never a guessed "bash".
     ("tools/skyguard/adapters/claude.py", '                   shell=(p.get("shell") or None) if kind == "shell" else None,',
@@ -6022,7 +6022,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/engine.py", _T17_PARTIAL, "    if False:",
      _T17E + "test_a_deny_on_an_unparseable_command_stays_a_deny_and_says_partial", "t17-partial-never-set"),
     # decide() must reuse the parse it is handed: dropping the argument parses twice and can disagree.
-    ("tools/skyguard/engine.py", "shell=shell, parsed=parsed))", "shell=shell))",
+    ("tools/skyguard/engine.py", "shell=shell, parsed=parsed,\n", "shell=shell,\n",
      _T17E + "test_decide_reuses_the_parse_it_is_handed", "t17-decide-reparses"),
 ]]
 
@@ -8978,7 +8978,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/engine.py", "        if is_save(a, roots):\n            return None                           # the save policy",
      "        if False:\n            return None                           # the save policy",
      _SPT + "test_a_patch_delete_of_one_save_is_backed_up_then_allowed_on_codex", "save-engine-patch-delete-is-a-save"),
-    ("tools/skyguard/engine.py", 'op=SAVE_OP.get(op, "write")))', 'op="write"))',
+    ("tools/skyguard/engine.py", 'op=SAVE_OP.get(op, "write"),\n', 'op="write",\n',
      _SPT + "test_a_patch_delete_or_move_is_judged_as_that_op", "save-engine-patch-op"),
     ("tools/skyguard/engine.py", "NEVER_SHADOW = NEVER_SHADOW | saves.NEVER_SHADOW", "NEVER_SHADOW = NEVER_SHADOW | frozenset()",
      _SPT + "test_guards_off_does_not_lift_a_bulk_save_change", "save-never-shadowed"),
@@ -9546,4 +9546,41 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _RLR + "test_failed_expiry_relock_is_retried_until_success", "relock-expired-error-is-retried"),
     ("tools/skyguard/lock.py", "    return res.exit == 2 or bool(bad)", "    return bool(bad)",
      _RLR + "test_a_structural_skip_settles_an_expired_relock", "relock-refused-is-retried"),
+]]
+
+
+# User ruling 2026-10-20 (v4.0.0 review L2 MEDIUM-3): the agent's session transcripts are never the agent's to change.
+_TRG = "tests/test_transcript_guard.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/shell_rules.py", '    if spoken:\n        return deny("S-SELF-TRANSCRIPT"',
+     '    if False:\n        return deny("S-SELF-TRANSCRIPT"',
+     _TRG + "test_a_shell_write_to_the_transcript_is_refused[append]", "rule-S-SELF-TRANSCRIPT-shell"),
+    ("tools/skyguard/write_rules.py", "    if spoken and self_rules.transcript_target(",
+     "    if False and self_rules.transcript_target(",
+     _TRG + "test_a_file_tool_write_to_the_transcript_is_refused[Write]", "rule-W-SELF-TRANSCRIPT-write"),
+    ("tools/skyguard/engine.py",
+     'NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-TRANSCRIPT", "write.W-SELF-TRANSCRIPT"))',
+     "NEVER_SHADOW = NEVER_SHADOW | frozenset()",
+     _TRG + "test_guards_off_never_lifts_the_transcript_refusal", "rule-S-SELF-TRANSCRIPT-never-shadowed"),
+    ("tools/skyguard/self_rules.py",
+     '        if own and (low == own.lower().rstrip("/") or holder and own.lower().startswith(low + "/")):',
+     "        if False:", _TRG + "test_the_payloads_own_transcript_is_refused_wherever_it_lives",
+     "rule-W-SELF-TRANSCRIPT-payload-path"),
+    ("tools/skyguard/self_rules.py", '            if rel[:1] == ["projects"] and len(rel) >= 3 and rel[-1].endswith(".jsonl"):',
+     "            if False:", _TRG + "test_the_transcript_tree_is_refused_whatever_the_payload_names[another-sessions-file]",
+     "rule-W-SELF-TRANSCRIPT-claude-tree"),
+    ("tools/skyguard/self_rules.py", '            if holder and (rel in ([], ["projects"]) or rel[:1] == ["projects"]',
+     '            if False and (rel in ([], ["projects"]) or rel[:1] == ["projects"]',
+     _TRG + "test_the_transcript_tree_is_refused_whatever_the_payload_names[the-projects-folder]", "rule-S-SELF-TRANSCRIPT-holder"),
+    ("tools/skyguard/self_rules.py",
+     '            if rel[:1] in (["sessions"], ["archived_sessions"]) and (holder or len(rel) >= 2):',
+     "            if False:", _TRG + "test_codex_shell_append_to_its_rollout_is_refused",
+     "rule-S-SELF-TRANSCRIPT-codex-tree"),
+    ("tools/skyguard/engine.py",
+     '        out.append(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "", op=SAVE_OP.get(op, "write"),\n'
+     '                                  transcript=req.transcript_path or ""))',
+     '        out.append(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "", op=SAVE_OP.get(op, "write")))',
+     _TRG + "test_codex_apply_patch_on_its_payload_transcript_is_refused", "transcript-codex-patch-wired"),
+    ("tools/skyguard/run.py", '._replace(transcript_path=p.get("transcript_path", "") or "")', "",
+     _TRG + "test_the_payloads_own_transcript_is_refused_wherever_it_lives", "transcript-claude-shell-wired"),
 ]]

@@ -55,7 +55,8 @@ def _evaluate_shell(req, roots, audit) -> Verdict:
         from modding_harness.transport import UNKNOWN_EXECUTION_CWD
         if parsed is None or writes.unplaced_mutation(command, parsed, os.environ):
             return Verdict("deny", UNKNOWN_EXECUTION_CWD, status="failed", code="engine.INERT_EXECUTION_CWD")
-    v = codes.classify(shell_rules.decide(command, roots, audit, cwd=req.cwd or "", shell=shell, parsed=parsed))
+    v = codes.classify(shell_rules.decide(command, roots, audit, cwd=req.cwd or "", shell=shell, parsed=parsed,
+                                          transcript=req.transcript_path or ""))
     # D-P4-2 (Plan 4 Verdict.status, Plan 5 Task 17): the rules ran, but on a command the parser could not read
     # completely (a quote or heredoc it could not close) or whose program is a variable. The answer stands; the
     # telemetry must not call it a full evaluation. A failed status (an INERT refusal) is never lowered.
@@ -64,10 +65,10 @@ def _evaluate_shell(req, roots, audit) -> Verdict:
     return v
 
 
-def evaluate_write(path: str, audit, roots=None, cwd: str = "", op: str = "write") -> Verdict:
+def evaluate_write(path: str, audit, roots=None, cwd: str = "", op: str = "write", transcript: str = "") -> Verdict:
     """Plan 5 Task 9: W-PAPYRUS / W-INSTALL decide on where the file RESOLVES (roots + cwd). roots=None keeps the
     legacy text tests (more notes, never fewer denies). op: what the call does to the file (write_rules.decide)."""
-    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd, op=op))
+    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd, op=op, transcript=transcript))
 
 
 def evaluate_mcp(tool_name: str, args, audit, roots=None) -> Verdict:
@@ -178,7 +179,8 @@ def evaluate_writes(req, audit, roots=None) -> Verdict:
             if v is not None:
                 out.append(v)
                 continue
-        out.append(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "", op=SAVE_OP.get(op, "write")))
+        out.append(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "", op=SAVE_OP.get(op, "write"),
+                                  transcript=req.transcript_path or ""))
     return combine(out)
 
 
@@ -318,6 +320,9 @@ NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE", "write.W-SELF-STA
 # be backed up is never changed. `guards off` is a lift the agent may take itself, so it lifts neither.
 NEVER_SHADOW = NEVER_SHADOW | saves.NEVER_SHADOW
 NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SAVE-STORE", "write.W-SAVE-STORE"))
+# User ruling 2026-10-20: `guards off` is a lift the agent may take; it must not open the transcript the user's typed
+# save approval is read from.
+NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-TRANSCRIPT", "write.W-SELF-TRANSCRIPT"))
 
 
 def _reject_marker(project) -> Path:

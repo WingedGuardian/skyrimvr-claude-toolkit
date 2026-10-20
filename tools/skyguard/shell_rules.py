@@ -173,7 +173,7 @@ def resaver_apply(command: str, shell: str = "", parsed=None):
 
 
 def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "", shell: str = "",
-           env=None, parsed=None) -> Verdict:
+           env=None, parsed=None, transcript: str = "") -> Verdict:
     """cwd: the payload's working directory, RAW (any spelling; targets normalises it). shell: "bash",
     "powershell", "cmd", or "" for unknown (parsed as bash AND PowerShell, R5). Both default so every existing
     caller stays valid (Plan 4 handshake). env: where `~`, $HOME and %USERPROFILE% resolve from (os.environ).
@@ -207,6 +207,10 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     store_hit = self_rules.shell_save_store_hit(command, parsed, roots, cwd, env)
     if store_hit:
         return deny("S-SAVE-STORE", store_hit)
+    # User ruling 2026-10-20: an agent session transcript (where save approvals are read) is never an agent's to change.
+    spoken = self_rules.shell_transcript_hit(command, parsed, cwd, env, transcript)
+    if spoken:
+        return deny("S-SELF-TRANSCRIPT", os.path.basename(spoken.rstrip("/")) or spoken)
     own = self_rules.shell_scan(command, parsed, roots, cwd, env)
     if own and own[0] == self_rules.STATE:
         return deny("S-SELF-STATE", own[1])

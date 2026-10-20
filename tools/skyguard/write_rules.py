@@ -46,7 +46,8 @@ def papyrus_zone(abs_path: str, roots) -> bool:
     return rel is not None and rel[:2] == ["data", "scripts"]
 
 
-def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str = "write") -> Verdict:
+def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str = "write",
+           transcript: str = "") -> Verdict:
     """op: what the call does to the file, for the save policy (saves.py): `write` (an edit, a write, a patch that
     adds or updates it), `delete` or `move` (a patch that deletes it or moves it away)."""
     if file_path == "":
@@ -65,6 +66,12 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
     if placed and self_rules.save_store_target(placed, roots, holder=op in ("delete", "move")):
         reason = rules.message("W-SAVE-STORE", file=file_path)
         audit.rule(HOOK, "W-SAVE-STORE", "deny", reason)
+        return Verdict("deny", reason)
+    # User ruling 2026-10-20: the agent's own session transcripts (save approvals are read there) are the host's alone.
+    spoken = placed if roots is not None else targets.resolve_literal(file_path, cwd, env_)
+    if spoken and self_rules.transcript_target(spoken, env_, transcript, holder=op in ("delete", "move")):
+        reason = rules.message("W-SELF-TRANSCRIPT", file=file_path)
+        audit.rule(HOOK, "W-SELF-TRANSCRIPT", "deny", reason)
         return Verdict("deny", reason)
     if roots is not None:
         a = self_rules.resolve_own(lambda x: targets.resolve_literal(x, cwd, env_), file_path)   # T8 r1 P1: streams

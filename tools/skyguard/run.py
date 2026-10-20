@@ -305,7 +305,8 @@ def main(argv=None) -> int:
     if decides:                      # fix-limits 2: shadow() below writes this call's rule lines as one record
         engine.hold_if_shadowing(a.project, audit)
     if a.role == "protect-bash":
-        req = adapter.to_request(p, "shell")
+        # The transcript the payload names is protected from the agent's own writes (S-SELF-TRANSCRIPT).
+        req = adapter.to_request(p, "shell")._replace(transcript_path=p.get("transcript_path", "") or "")
         if p.get("ws_monitor"):
             # Plan 5 Task 13b: a WebSocket Monitor runs no command (no `command` key at all): nothing to judge.
             v = Verdict()
@@ -328,7 +329,8 @@ def main(argv=None) -> int:
         # roots (the install this hook runs from is still known); it is not a reason to refuse an edit.
         env = _declared_env(a)
         roots = paths.roots(a.root, a.root_win, env if env is not None else {})
-        v = engine.evaluate_write(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""))
+        v = engine.evaluate_write(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""),
+                                  transcript=p.get("transcript_path", "") or "")
         v = _saves(a, p, audit, v, "{} {}".format(p["tool_name"], p["file_path"]))
     elif a.role == "protect-mcp":
         # Plan 5 Task 11: the DevBench MCP tools. Only the save-exists check reads the declared config dirs, so an
