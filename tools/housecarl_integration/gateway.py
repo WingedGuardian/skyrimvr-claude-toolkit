@@ -137,6 +137,17 @@ def independent_check(config, candidate, snapshot, before=None, allowed=None):
     return obj
 
 
+def staged_patches(state_dir, name):
+    """Every staged patch named `name` (any case). Compared as a NAME, never used as a glob pattern: plain_plugin
+    allows [ ], which Path.glob reads as a character class, so `Foo [Fix].esp` missed itself and could resolve to
+    a different staged patch such as `Foo F.esp` (review L5 F3)."""
+    root = Path(state_dir) / "patches"
+    if not root.is_dir():
+        return []
+    return [p for d in sorted(root.iterdir()) if d.is_dir() for p in sorted(d.iterdir())
+            if p.is_file() and p.name.casefold() == name.casefold()]
+
+
 def allowed_records(arguments):
     keys = set(arguments.get("formids") or [])
     ops = arguments.get("ops")
@@ -191,7 +202,7 @@ class Gateway:
             original = next((p for n, p in snap.paths.items() if n.casefold() == target_name.casefold()), None)
             if original is None:
                 # A previously staged, still inactive patch may be extended.
-                candidates = list((Path(config["state_dir"]) / "patches").glob("*/" + target_name))
+                candidates = staged_patches(config["state_dir"], target_name)
                 if len(candidates) != 1:
                     raise Refusal("Existing target must resolve to one active plugin or one staged patch.")
                 original = candidates[0]

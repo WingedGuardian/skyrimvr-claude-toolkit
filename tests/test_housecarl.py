@@ -21,6 +21,17 @@ def plugin(path, flags=0, masters=()):
     path.write_bytes(b"TES4" + struct.pack("<II", len(body), flags) + b"\0" * 12 + body)
 
 
+def test_a_staged_patch_name_with_brackets_is_a_name_not_a_glob(tmp_path):
+    """Review L5 F3: `glob("*/Foo [Fix].esp")` matched `Foo F.esp` and not the literal file."""
+    for folder, name in (("abc", "Foo [Fix].esp"), ("def", "Foo F.esp")):
+        (tmp_path / "patches" / folder).mkdir(parents=True)
+        plugin(tmp_path / "patches" / folder / name)
+    assert gateway.staged_patches(tmp_path, "Foo [Fix].esp") == [tmp_path / "patches" / "abc" / "Foo [Fix].esp"]
+    assert gateway.staged_patches(tmp_path, "foo f.ESP") == [tmp_path / "patches" / "def" / "Foo F.esp"]
+    assert gateway.staged_patches(tmp_path, "Foo [Gix].esp") == []
+    assert gateway.staged_patches(tmp_path / "none", "Foo F.esp") == []
+
+
 @pytest.fixture
 def install(tmp_path):
     data = tmp_path / "Data"

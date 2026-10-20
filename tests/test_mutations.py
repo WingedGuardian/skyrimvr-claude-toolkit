@@ -1403,6 +1403,14 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
            "        p.unlink()", "test_off_closes_the_state_file_by_renaming_it_never_deleting"),
       ]],
 
+    # --- review L5 (tools) fix batch ------------------------------------------
+    # F3: a staged patch name is compared as a name; as a glob, `[Fix]` is a character class.
+    pytest.param("tools/housecarl_integration/gateway.py",
+                 "            if p.is_file() and p.name.casefold() == name.casefold()]",
+                 '            if p in list(root.glob("*/" + name))]',
+                 "tests/test_housecarl.py::test_a_staged_patch_name_with_brackets_is_a_name_not_a_glob",
+                 id="housecarl-staged-name-is-a-glob"),
+
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(
         # Drop the previous copy on a replacement: the last launch's log is gone, which is the loss the mirror exists
