@@ -77,8 +77,7 @@ DevBench save overwrites) that a call CHANGES: written or edited, copied onto, m
   call (a note says so). A missing co-save is recorded as missing. If the backup fails (no room, unreadable, a copy
   that does not verify, the store busy), the call is refused and nothing changes. The backups are never pruned.
 - **More than two, or any wildcard:** refused until the USER types one line in their own message (it is never read
-  from a tool result, a file or your own text, so you cannot supply it -- show them the line the refusal prints):
-
+  from a tool result, a file or your own text, so you cannot supply it -- show them the line the refusal prints). In that line,
   `op` is `write` (a write, copy onto, edit, ReSaver `--apply`, DevBench save), `move` (a move or rename) or
   `delete`. The version 1 grant binds the current `session_id`, operation and canonical full `paths`, including
   both members of every pair. Wildcards also bind the exact `command_sha256` and logical save `count`.

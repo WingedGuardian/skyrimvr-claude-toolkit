@@ -76,8 +76,8 @@ bridge named anything else.
 **Versions.** The toolkit's wrapper needs **1.11.0+** for `alive` (off-thread health since 1.12.0; older
 builds fall back to a frame diff). Everything it documents (ports, `POST /api/tool/<tool>`,
 `/api/health`, `/api/tools`, console exec/capture/read, 400/504 meanings) is unchanged in 1.28.0 per the
-changelog and a diff of the tool descriptions against 1.24.0, which is the newest release this was read
-against (2026-10-11); the one behaviour that did change is the Papyrus `call` rule below. **Keep the VR Address Library
+changelog and a diff of the tool descriptions against 1.24.0; 1.28.0 (2026-10-11) is the newest release this was
+read against; the one behaviour that did change is the Papyrus `call` rule below. **Keep the VR Address Library
 current before updating DevBench:** DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0 and needs a current
 Address Library. The newest VR Address Library seen when this was written is **0.276.1** (2026-10-04);
 a stale Address Library is the usual reason an SKSE plugin fails to load.

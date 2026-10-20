@@ -103,3 +103,13 @@ def test_the_neutral_skill_lists_are_the_gate_and_the_skill_list_is_the_folder()
     listed = listed[:listed.rindex("\n")]
     folder = {p.name for p in (REPO / "agent" / "skills").iterdir() if (p / "SKILL.md").is_file()}
     assert _ticked(listed) - {"skills"} == folder
+
+
+def test_skill_sentences_are_whole():
+    """Review L6 F10/F11: skyrim-save introduced a deleted example with a colon; devbench named 1.24.0 as the newest
+    release read against while saying 1.28.0 in the same sentence."""
+    save = _read("agent/skills/skyrim-save/SKILL.md")
+    assert "the line the refusal prints):\n\n" not in save
+    devbench = _read("agent/skills/devbench/SKILL.md")
+    assert "1.24.0, which is the newest release" not in devbench
+    assert "1.28.0 (2026-10-11) is the newest release" in devbench
