@@ -1283,6 +1283,18 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         id="archive-triage-unmapped-hidden-by-default",
     ),
 
+    # v4.0.0 review L4a M1: the SHORTEST shipped knowledgebase prefix won, handing v3.9.1's own text over as notes.
+    pytest.param("tools/migrate-3x.py",
+                 '    for spec in sorted(known["docs"].get(KB, []), key=lambda s: s["bytes"], reverse=True):',
+                 '    for spec in known["docs"].get(KB, []):',
+                 "tests/test_migrate_3x.py::test_the_longest_shipped_knowledgebase_prefix_wins_whatever_the_table_order",
+                 id="migrate-3x-kb-shortest-prefix"),
+    pytest.param("tools/migrate-3x.py",
+                 '    for spec in sorted(known["docs"].get(KB, []), key=lambda s: s["bytes"], reverse=True):',
+                 '    for spec in sorted(known["docs"].get(KB, []), key=lambda s: s["bytes"]):',
+                 "tests/test_migrate_3x.py::test_notes_appended_to_the_391_knowledgebase_are_exactly_the_notes",
+                 id="migrate-3x-kb-shortest-prefix-real-391"),
+
     # --- mod-install ----------------------------------------------------------
     *[pytest.param("tools/mod-install.py", find, replace, "tests/test_mod_install.py::" + test, id="mod-install-" + tid)
       for tid, find, replace, test in [

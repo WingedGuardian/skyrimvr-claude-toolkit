@@ -349,6 +349,23 @@ def test_upgrade_from_391_with_edits_keeps_every_edit(tmp_path):
     assert "carried over before" in out2
 
 
+def test_notes_appended_to_the_391_knowledgebase_are_exactly_the_notes():
+    """v4.0.0 review L4a M1: v3.8's knowledgebase is a byte prefix of v3.9.1's, and the shortest match won, so the
+    4,786 bytes v3.9.1 itself shipped were carried as "notes you had added"."""
+    notes = "\n## My finding\n\nENB breaks the water shader here.\n"
+    assert M.kb_appended(fx("KNOWLEDGEBASE.fixture") + notes.encode("utf-8"), KNOWN) == notes
+
+
+def test_the_longest_shipped_knowledgebase_prefix_wins_whatever_the_table_order():
+    short, longer, notes = b"# KB\n\nv1 text\n", b"# KB\n\nv1 text\nv2 text\n", "my note\n"
+    spec = [{"bytes": len(b), "sha256": hashlib.sha256(b).hexdigest(), "tags": [t]}
+            for b, t in ((short, "v1"), (longer, "v2"))]
+    for order in (spec, spec[::-1]):
+        known = {"docs": {"KNOWLEDGEBASE.md": order}}
+        assert M.kb_appended(longer + notes.encode("utf-8"), known) == notes
+        assert M.kb_appended(short + notes.encode("utf-8"), known) == notes   # twin: only v1 matches
+
+
 def test_a_block_the_user_deleted_does_not_come_back(tmp_path):
     root = make_391(tmp_path / "i")
     (root / "CLAUDE.md").write_bytes(edited_claude())
