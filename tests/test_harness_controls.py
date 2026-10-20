@@ -63,6 +63,73 @@ def test_shell_node_npm_cli_is_blocked():
     assert "TRIPWIRE" in result.stderr
 
 
+# Mutation children inherit the launcher's PYTHONPATH, so the barrier installed in this process is the PARENT
+# checkout's. The pure checks below are read from this test's own sibling file, so a mutated copy is judged.
+# Never inside a fixture root, even in a mutation child (whose REPO copy lives under the parent's basetemp).
+OUTSIDE_DECOY = Path(sys.executable).resolve().parent / "HARNESS-NONEXISTENT-DECOY"
+_iso_spec = importlib.util.spec_from_file_location("_isolation_under_test",
+                                                   Path(__file__).resolve().with_name("harness_isolation.py"))
+iso = importlib.util.module_from_spec(_iso_spec)
+_iso_spec.loader.exec_module(iso)
+
+
+@pytest.mark.parametrize("event", ["_winapi.CopyFile2", "shutil.copyfile", "os.truncate"])
+def test_barrier_refuses_a_copy_or_truncate_outside_the_fixture(tmp_path, event):
+    """Review L7 MEDIUM: Windows Python 3.12+ copies through _winapi.CopyFile2 and os.truncate empties a file by
+    name; neither is an `open`, and both walked past the barrier. Twin: the same event inside the fixture passes."""
+    roots = [tmp_path.resolve()]
+    outside, inside = str(OUTSIDE_DECOY), str(tmp_path / "f")
+    args = {"_winapi.CopyFile2": lambda dst: (inside, dst, 8), "shutil.copyfile": lambda dst: (inside, dst),
+            "os.truncate": lambda dst: (dst, 0)}[event]
+    with pytest.raises(PermissionError, match="outside test fixture"):
+        iso.check_write(roots, event, args(outside))
+    iso.check_write(roots, event, args(inside))
+    # ... and the barrier actually installed in this run refuses it (no file is touched either way: it is a decoy).
+    with pytest.raises(PermissionError, match="outside test fixture"):
+        sys.audit(event, *args(outside))
+
+
+def test_barrier_refuses_a_real_truncate_outside_the_fixture(tmp_path):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me", encoding="utf-8")
+    os.truncate(victim, 0)                                  # inside: allowed
+    with pytest.raises(PermissionError, match="outside test fixture"):
+        os.truncate(OUTSIDE_DECOY, 0)                        # refused before the OS is asked (it does not exist)
+
+
+@pytest.mark.parametrize("argv", [
+    ["python", "-mpip", "--version"], ["python", "-I", "-m", "pip", "--version"], ["python", "-Impip"],
+    ["python", "-m", "pip3", "list"], ["npx", "TEST-DECOY"], ["corepack", "enable"], ["uv", "pip", "install"],
+    ["node", "/x/npx-cli.js", "TEST-DECOY"], ["bash", "-c", "python -I -m pip --version"],
+    ["bash", "-c", "cd x && python -E -mpip install TEST-DECOY"]])
+def test_every_package_manager_spelling_trips(argv):
+    """Review L7 LOW: `-mpip`, an isolated interpreter inside a shell string, npx and the other managers."""
+    assert iso.package_manager(None, argv), argv
+
+
+@pytest.mark.parametrize("argv", [
+    ["python", "-m", "pytest", "-k", "pip"], ["git", "commit", "-m", "pipe fix"], ["bash", "-c", "python -m pip"],
+    ["python", "-mypy"], ["node", "/x/server.js"]])
+def test_ordinary_commands_do_not_trip(argv):
+    """Twins: an ordinary -m, a commit message, and a plain `-m pip` in a shell string (sitecustomize's job there)."""
+    assert not iso.package_manager(None, argv), argv
+
+
+@pytest.mark.tripwire_control
+def test_native_mpip_and_npx_are_blocked():
+    with pytest.raises(PermissionError, match="TRIPWIRE"):
+        subprocess.run([sys.executable, "-mpip", "--version"])
+    with pytest.raises(PermissionError, match="TRIPWIRE"):
+        subprocess.run([BASH, "-c", "python -I -m pip --version"])
+
+
+@pytest.mark.tripwire_control
+def test_shell_mpip_and_npx_are_blocked():
+    for cmd in ("python -mpip --version", "npx --version"):
+        result = subprocess.run([BASH, "-c", cmd], capture_output=True, text=True, timeout=60)
+        assert result.returncode == 97 and "TRIPWIRE" in result.stderr, (cmd, result.returncode, result.stderr)
+
+
 def test_publication_failure_rolls_back(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location("publisher", REPO / "tools/spriggit_publish.py")
     module = importlib.util.module_from_spec(spec)
