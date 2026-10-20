@@ -467,6 +467,31 @@ def test_the_engine_records_a_refusal_in_the_session_line_and_an_allow_does_not(
         ["pre-tool", "Bash"], ["pre-tool", "Bash"], ["refused", "Bash"]]
 
 
+def test_a_codex_call_whose_engine_crashed_is_not_counted_as_hooked(tmp_path, monkeypatch):
+    """Review L3 LOW-2: the wrapper turns a crashed or killed engine into a deny, so Codex records no transcript item
+    for that call. A `pre-tool` line written before the crash, with no `refused` after it, counted it as hooked and
+    could cover a really unhooked call in the same session."""
+    import argparse
+    from skyguard import run
+    root = _codex_root(tmp_path)
+    tele = _sessions(root, "codex")
+    a = argparse.Namespace(agent="codex", role="pre-tool", project=str(root), root=str(root),
+                           root_win=str(root).replace(chr(92), "/"), bash="bash", invocation="1.9-1",
+                           telemetry=str(tele), nonce="")
+
+    def crash(*_a, **_k):
+        raise RuntimeError("engine crashed mid-decision")
+    monkeypatch.setattr(run.engine, "pre_tool", crash)
+    raw = json.dumps({"session_id": SID, "transcript_path": "C:/t/r.jsonl", "cwd": a.root_win,
+                      "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "echo hi"}})
+    with pytest.raises(RuntimeError):
+        run._codex(a, raw)
+    f = tele / "sessions" / (SID + ".log")
+    counted = [ln for ln in (f.read_text(encoding="utf-8").splitlines() if f.exists() else [])
+               if ln.split()[1:2] == ["pre-tool"]]
+    assert counted == []
+
+
 def test_a_denied_call_is_still_recorded_as_seen(tmp_path):
     root = _codex_root(tmp_path)
     p = {"session_id": SID, "transcript_path": "C:/t/r.jsonl", "cwd": str(root).replace(chr(92), "/"),

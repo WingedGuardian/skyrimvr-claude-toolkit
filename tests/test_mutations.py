@@ -4266,6 +4266,12 @@ MUTATIONS_TASK13 = [
     ("tools/skyguard/health.py", '    trust_unknown = bool(trust) and trust["overall"] == "unknown"',
      "    trust_unknown = False", _COV + "test_an_unreadable_codex_config_is_unknown_and_exits_2",
      "canary-unknown-trust-exits-2"),
+    # Review L3 LOW-2: a Codex call is recorded only once the engine decided; a crash must not leave it "hooked".
+    ("tools/skyguard/run.py",
+     "    v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit, telemetry=a.telemetry,",
+     "    _session_line(a, req.session_id, tool=req.tool_name)\n"
+     "    v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit, telemetry=a.telemetry,",
+     _COV + "test_a_codex_call_whose_engine_crashed_is_not_counted_as_hooked", "coverage-codex-crash-is-not-hooked"),
     # Coverage rules.
     ("tools/skyguard/health.py", "        short = hooked < called\n", "        short = False\n",
      _COV + "test_coverage_is_degraded_when_one_call_has_no_line", "coverage-degraded-when-a-call-had-no-hook"),
