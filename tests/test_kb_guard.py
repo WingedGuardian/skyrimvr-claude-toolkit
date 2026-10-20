@@ -481,7 +481,8 @@ def _stored_dirs(root):
 
 def test_pruned_snapshots_go_to_the_recycle_bin(tmp_path):
     root = make_install(tmp_path)
-    _rotate(root)
+    r = _rotate(root)
+    assert "to the Recycle Bin; if Windows says one is too big for the bin, it will ask you" in r.stdout, r.stdout
     fake_bin = tmp_path / "fake-bin"
     binned = [p for p in fake_bin.iterdir() if p.is_dir()] if fake_bin.is_dir() else []
     assert binned, "the rotation removed snapshots without the Recycle Bin"

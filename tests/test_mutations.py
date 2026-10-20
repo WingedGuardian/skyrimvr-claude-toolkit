@@ -1337,6 +1337,9 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
            "test_a_copy_that_does_not_match_leaves_the_original_and_installs_nothing"),
           ("cross-drive-aside-not-recycled", '            why = recycle([aside]).get(str(aside), "no result")',
            "            why = None", "test_update_across_drives_copies_verifies_and_only_then_recycles"),
+          # Parent ruling 2026-10-20: one plain line BEFORE the bin, so Windows' "too big" prompt is no surprise.
+          ("cross-drive-bin-notice-dropped", "            print(BIN_NOTICE.format(aside), flush=True)",
+           "            pass", "test_update_across_drives_copies_verifies_and_only_then_recycles"),
           ("cross-drive-bin-refusal-unreported", '            why = recycle([aside]).get(str(aside), "no result")',
            "            recycle([aside]); why = None", "test_an_aside_folder_the_bin_refuses_is_left_and_named"),
           # H1 (v4.0.0 review): the live folder is never removed file by file; an unmovable folder is left whole.
@@ -1889,6 +1892,13 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         "    if false; then",
         "tests/test_kb_guard.py::test_snapshots_the_bin_refuses_stay_and_the_report_says_so",
         id="kb-guard-rotation-refusal-unreported",
+    ),
+    pytest.param(
+        "tools/kb-guard.sh",
+        '            echo "Moving $total old knowledgebase snapshot(s)',
+        '            : "Moving $total old knowledgebase snapshot(s)',
+        "tests/test_kb_guard.py::test_pruned_snapshots_go_to_the_recycle_bin",
+        id="kb-guard-rotation-bin-notice-dropped",
     ),
     pytest.param(
         "tools/housekeep.py",

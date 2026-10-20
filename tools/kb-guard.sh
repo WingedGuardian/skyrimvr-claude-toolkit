@@ -264,6 +264,8 @@ recycle_dirs() {
             [ -n "$cand" ] || continue
             if [ -e "$cand" ]; then run=("$cand"); else IFS=' ' read -r -a run <<< "$cand"; fi
             "${run[@]}" -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1 || continue
+            # Said BEFORE anything goes to the bin, so Windows' own "too big" prompt is never a surprise.
+            echo "Moving $total old knowledgebase snapshot(s) from $STORE to the Recycle Bin; if Windows says one is too big for the bin, it will ask you before deleting it permanently -- answer No to keep it."
             out=$("${run[@]}" -B "$hk" recycle "${native[@]}" 2>&1)
             ok=$(printf '%s\n' "$out" | grep -c "^OK"$'	')
             why=$(printf '%s\n' "$out" | grep -m1 "^FAILED"$'	' | cut -f3)

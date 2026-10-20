@@ -391,6 +391,9 @@ def test_update_across_drives_copies_verifies_and_only_then_recycles(tmp_path, s
     assert _tree(aside[0]) == before, "the aside folder must be the whole old folder, moved in one rename"
     assert (old / "ExampleMod.esp").read_bytes() == b"new plugin" and not (old / "Stale.dll").exists()
     assert "sent to the Recycle Bin" in out.out
+    notice = "Moving {} to the Recycle Bin; if Windows says it is too big for the bin, it will ask you before".format(
+        aside[0])
+    assert notice in out.out and out.out.index(notice) < out.out.index("was sent to the Recycle Bin"), out.out
 
 
 def test_an_aside_folder_the_bin_refuses_is_left_and_named(tmp_path, sevenz, game, monkeypatch, capsys):

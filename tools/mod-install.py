@@ -390,6 +390,10 @@ def recycle(paths):
 # (Nexus id, version, notes), which lives in the mod folder and is in no archive.
 CARRY_OVER = ("meta.ini",)
 
+# Said BEFORE anything goes to the bin, so Windows' own "too big for the Recycle Bin" prompt is never a surprise.
+BIN_NOTICE = ("Moving {} to the Recycle Bin; if Windows says it is too big for the bin, it will ask you before "
+              "deleting it permanently -- answer No to keep it.")
+
 
 def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
     problem = destination_problem(plan)
@@ -514,6 +518,7 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
         print("INSTALLED {} file(s), verify mismatches={}; manifest {}".format(len(written), bad, manifest))
         if aside is not None:
             # A verified copy is in the backup; the aside folder is a duplicate MO2 would list as another mod.
+            print(BIN_NOTICE.format(aside), flush=True)
             why = recycle([aside]).get(str(aside), "no result")
             if why:
                 print("NOTE: the previous mod folder, moved aside to {}, was NOT sent to the Recycle Bin ({}). It is a"
