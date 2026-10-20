@@ -5572,6 +5572,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _DRT + "test_codex_coverage_short_is_not_live_and_none_recorded_is_unknown", "l2-doctor-codex-coverage"),
     (_DR, "    if not cov:", "    if False:",
      _DRT + "test_codex_coverage_short_is_not_live_and_none_recorded_is_unknown", "l2-doctor-codex-no-sessions"),
+    (_DR, 'cstate, why in health._coverage_rows(Path(root), "claude"):', 'cstate, why in []:',
+     _DRT + "test_claude_coverage_short_is_not_live_like_the_canary_says", "l2-doctor-claude-coverage"),
     # ---- the launchers
     ("tools/skydoctor", 'src="${BASH_SOURCE[0]//' + BS * 2 + '//}"', 'src="${BASH_SOURCE[0]}"',
      _DRT + "test_the_bash_launcher_reports_json_and_exits_by_the_worst_line", "l2-doctor-launcher-windows-path"),

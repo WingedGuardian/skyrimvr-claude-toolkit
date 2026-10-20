@@ -600,6 +600,22 @@ def test_codex_coverage_short_is_not_live_and_none_recorded_is_unknown(bed):
     assert len(r) == 1 and r[0].status == "unknown"
 
 
+def test_claude_coverage_short_is_not_live_like_the_canary_says(bed):
+    """Review L3 MEDIUM-1: the hook fired, but a covered call ran with no guard line. hook-canary reads that session
+    DEGRADED; skydoctor read Layer 3 claude live because it never looked at coverage."""
+    transcript = REPO / "tests" / "fixtures" / "claude" / "transcript-p.jsonl"     # 1 Bash tool_use
+    log = bed.hb("claude") / "sessions" / (SID + ".log")
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("1800000000.0 start startup {}\n".format(transcript), encoding="utf-8")
+    r = [x for x in bed.rows() if x.section == "Layer 3 claude" and x.item.startswith("coverage")]
+    assert len(r) == 1 and r[0].status == "not live" and "hooked 0 / called 1" in r[0].reason
+    assert _doctor().exit_code(bed.rows()) == 1
+    log.write_text("1800000000.0 start startup {}\n1800000001.0 protect-bash Bash\n".format(transcript),
+                   encoding="utf-8")
+    r = [x for x in bed.rows() if x.section == "Layer 3 claude" and x.item.startswith("coverage")]
+    assert len(r) == 1 and r[0].status == "live" and "hooked 1 / called 1" in r[0].reason
+
+
 # ---- the launchers, from the outside -----------------------------------------------------------------------------
 
 def _env(bed, **extra):
