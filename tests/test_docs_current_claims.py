@@ -113,3 +113,34 @@ def test_skill_sentences_are_whole():
     devbench = _read("agent/skills/devbench/SKILL.md")
     assert "1.24.0, which is the newest release" not in devbench
     assert "1.28.0 (2026-10-11) is the newest release" in devbench
+
+
+def _v4_section() -> str:
+    import re
+    text = _read("CHANGELOG.md")
+    m = re.search(r"^(#{1,3})\s*\[?v?4\.0\.0\]?.*?$(.*?)(?=^\1\s|\Z)", text, re.S | re.M)   # release.yml's extractor
+    assert m, "no v4.0.0 section"
+    return m.group(2)
+
+
+def test_the_changelog_v4_section_is_the_whole_release():
+    """Review L4a M4 / L6 F2: a 201-line '## Unreleased' above '## v4.0.0' never reached the release notes, which
+    release.yml extracts from the version heading to the next one."""
+    text = _read("CHANGELOG.md")
+    first = text.index("\n## ")
+    assert text[first:].startswith("\n## v4.0.0"), text[first:first + 40]
+    notes = _v4_section()
+    for entry in ("housekeep", "House Carl", "S-SAVE-OPAQUE", "Knowledgebase notes get committed"):
+        assert entry in notes, entry
+
+
+def test_the_changelog_describes_the_approval_line_and_ask_rules_the_code_has():
+    """Review L2 LOW-5 / L6 F2: the v4.0.0 text showed `{"op": ..., "files": [...]}`, which
+    modding_harness.approval.read refuses, and said three rules ask."""
+    notes = _v4_section()
+    assert '"files": [' not in notes and "Three rules still ask" not in notes
+    assert "Five rules ask" in notes and "absolute paths of both files of every save" in notes
+    approval = _read("tools/modding_harness/approval.py")
+    assert 'data.get("v") != 1 or data.get("session_id") != session_id' in approval
+    assert "os.path.isabs(p) for p in data[\"paths\"]" in approval
+    assert "Removed: .NET 8/9 support" not in notes and "- **.NET 8/9 support:**" not in notes

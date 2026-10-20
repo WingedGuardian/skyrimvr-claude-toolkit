@@ -1,205 +1,6 @@
 # Changelog
 
-## Unreleased
-
-- Knowledgebase notes get committed. The instructions now tell the agent to
-  commit `KNOWLEDGEBASE.local.md` alone, by explicit path, when the install is a
-  git repository that does not ignore it, and never to push. `tools/kb-guard.sh`
-  adds a session-start note while that file has uncommitted changes. Found in
-  the sibling X4 toolkit, where Codex appended about 1,767 lines over 2.5 weeks
-  and committed none: the commit rule lived only in one user's own settings.
-- Guard: commands hidden behind a prefix. An assignment prefix holding a process
-  substitution (`X=<(echo a) rm -rf Data`, also after env/nohup or before
-  command/exec), and a program word the guard cannot name (`$R rm ...`,
-  `"$SUDO" rm ...`, `$(true) git reset --hard`), no longer hide the command that
-  runs. The same holds in cmd (`%R% del`, `!R! del`, `%R%del`), in a PowerShell
-  `&` or `.` call (`& $R Remove-Item`, `& "$($R)-Item"`), and through
-  eval-like wrappers that run a quoted argument (`$R 'rm -rf Data'`,
-  `& $R 'Remove-Item ...'` with Invoke-Expression). Each form was measured
-  deleting a folder in real cmd.exe / Windows PowerShell 5.1 first. A name with
-  a variable glued to it (`"$X"reg delete <Bethesda key>`, `${R}git reset
-  --hard`) is also read as its literal part, which is what runs when the
-  variable is empty; both were allowed before.
-- Guard: a program the guard cannot name that is given a save now asks you
-  first (`S-SAVE-OPAQUE`). It may write, move or delete the save, or nothing;
-  if another reading of the command does change it, the pair is still backed
-  up before the question. `guards off` does not lift it.
-
-- The Recycle Bin rule names the undoable shell delete (`SHFileOperation` with
-  `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), which still prompts for an item too big
-  for the bin. Only scratch a tool made in the same run may be deleted outright;
-  the blanket temp-file exemption is withdrawn.
-
-- Agent instructions exempt the game and what it needs to run (Steam/SteamVR,
-  OpenComposite, DevBench, House Carl) from the machine resource limits: no caps,
-  throttling or watchdog kills for them; other heavy jobs count them as load.
-
-- The shell guard's save-store check reads each install's workspace config and
-  resolves its store once per decision instead of once per operand. Long
-  commands with many operands had become 20-70x slower and could approach the
-  agent's hook timeout, after which a refusal is discarded.
-
-- `scripts/read-save.py` needs `lz4` only to decompress a save body. Malformed
-  input now reports its JSON error, and plugin parsing and search helpers load,
-  without the tools lock installed; a save that does need decompression still
-  stops with the install instruction instead of reading as uncompressed.
-
-- Mod-update review establishes the current kept-save, new-game or disposable-test situation and standing user rulings before proposing changes. Read local preferences and current session context; ask only about material facts that remain unknown. Carries the `step0-situation` branch forward without assuming session hooks run on every coding agent.
-
-- Save-approval hook reasons stay within two short lines. The neutral check adds
-  a read-only `--preview` for complete canonical scope without preservation,
-  receipts or state changes. Installed personal policies require normal deciding
-  check instead; it retains their restrictions and may write internal recovery data.
-  Neither command executes the proposed operation; preview never authorizes it.
-
-- Setup and safety guidance describe permanent one/two-save preservation and
-  bulk approval, distinguish ReSaver candidate quarantine from publication,
-  and reconcile optional runtime requirements and reviewed upgrades.
-- Claude blocking wrappers validate the complete PreToolUse verdict schema before
-  reporting successful emission. Malformed bodies, NUL bytes and failed or
-  unacknowledged validation refuse under the existing outer hook deadline.
-- Resumed corpus replay binds cached rows to frozen items, both hook trees,
-  copied engine/runtime files and directories, recording helpers and effective environment.
-  Linked runtime directories are traversed as the staging copy traverses them;
-  cyclic sources refuse before staging.
-  Changed or unqualified caches are retained and require a fresh output
-  directory. Input drift invalidates the run; matching engine errors cannot
-  count as successful agreement.
-- Rule-pricing samples carry an ownership manifest. Previous unchanged samples
-  are retained in an archive, modified or unowned files stay untouched, and
-  filename collisions refuse replacement. Keep the output directory quiescent
-  during a run; retained samples and archives still contain private tool calls.
-- Published dependency checksums are bound to the selected artifact's exact
-  filename, release download URL, version and architecture. A digest belonging to another asset
-  cannot validate the pinned download; missing or conflicting metadata stays
-  explicitly unchecked.
-- Doctor and guard CLI launchers require Python 3.10+, skip older candidates
-  and disable Python Install Manager's automatic installation while probing.
-- Failed vanilla-file relocks retain expired retry records across session start,
-  guard changes and doctor cleanup. Relocking holds the state writer lock;
-  new lifts cannot interleave with that operation, and failures report pending.
-- Coverage receipts for native shell/patch tools cannot cover missing MCP calls;
-  MCP tools are counted individually. Failed knowledgebase preservation remains
-  partial even when another watched file also raises a completed loss alarm.
-- GNU find's file-writing `-fls` action retains recovery snapshots.
-- Script/config snapshots inspect every command in a parsed shell call before
-  skipping known reads. A read-only prefix, newline, pipeline or later mutator
-  can no longer suppress recovery snapshots. Incomplete syntax takes a snapshot.
-- The generic adapter requires the complete typed neutral verdict, including
-  an exact integer protocol version, status and text fields. Its conformance
-  matrix includes malformed versions, incomplete results and wrong field types.
-- Benchmark timing must be finite and valid before any DevBench contact; empty
-  retained windows and missing comparisons cannot report success. CI reads the
-  trailing test outcome, Nexus requirements disclose GraphQL partial results,
-  and changed corpus rows show their actual previous decision.
-- Spriggit publication rechecks destination identity and bytes after staging,
-  uses exclusive publication and rollback renames, and retains previous output
-  after success. A concurrent writer cannot be erased by backup cleanup; a
-  blocked rollback names the retained recovery path.
-- Bash ANSI-C quoted paths decode hexadecimal, octal, Unicode and control
-  escapes before policy evaluation. Escaped save names retain pair backups and
-  bulk approval limits; escaped plugin extensions retain raw-write refusal.
-  Unknown escapes keep their backslashes and NUL ends only that quoted portion.
-- Script/config restore records target identity and content before backup,
-  verifies those backups, and rechecks targets after staging. Initially absent
-  targets use no-clobber publication. Stop other writers during in-place restore;
-  existing-file replacement is not a filesystem compare-and-swap.
-- Custom Codex definitions alone no longer make a 3.x installation look like
-  4.x during migration. POSIX single-letter roots retain their native meaning,
-  and permanent-store refusals are included in the Codex rule inventory.
-- Independent release proof rejects duplicate ZIP members and altered binary or
-  undeclared bytes. Line-ending conversion requires the selected commit's text
-  attributes and nonbinary contents; it cannot hide payload corruption.
-- Save restore wrappers inherit the main worktree's configured save roots.
-  Failed emulator recovery retains its registration and refuses another enable
-  until recovery succeeds. Manual-install preflight also detects file/ancestor
-  collisions when other archive entries sort between them.
-- The pinned shared runtime now protects absent restore destinations from new
-  writers, preserves JSON types during policy migration, and refuses selected
-  read-only upgrade candidates before publication. OpenCode transport failures
-  refuse Skyrim's known DevBench tools; unknown tools keep warnings and receipts.
-- Manual installs reject colliding final destinations before writing, including
-  config `.new` paths and Windows aliases. Exclusive operation directories retain
-  original backups and manifests across repeated installs, and backup hashes are
-  verified before replacement. The named manifest remains a latest-operation copy.
-- Save preservation collects every DevBench save statement and argument string,
-  every compound ReSaver output, every copy destination, and Recycle Bin saves
-  following another refusal. ReSaver outputs retain each execution's directory;
-  all affected pairs count together for backup and bulk approval.
-- Guard-rule pricing stages each engine's matching shared runtime and lock.
-  Historical exports use that commit's bytes, keeping detached old/new engines
-  independent and preventing missing-core errors from contaminating the report.
-- Registered legacy policies with malformed logical counts, or an ordinary
-  backup decision claiming more than two saves, refuse before preservation.
-  Boolean, negative, fractional and nonnumeric counts cannot silently disappear.
-- `upgrade-stage --integrate-local-policy` prepares a reproducible ordered
-  migration for the exact reviewed Windows personal policy and complete native
-  groups. It retains private sources/helpers and unrelated settings, requires the
-  complete candidate runtime and explicit reviewed-file choices, and publishes
-  runtime before registration and native definitions. Unknown versions/groups
-  refuse; staging and application do not establish host trust.
-- Finite requirements from the reviewed personal policy supplement shell save
-  scope, including backup-suffixed writes and the legacy restore helper. Move
-  sources and written destinations retain separate roles. Requirements are
-  rechecked after copying; independent game-policy refusals remain effective.
-- Qualified human declarations can supply an otherwise unresolved legacy helper
-  scope. They bind complete pair paths, operation, count, current session and full
-  command hash, including for one save. Ambiguous/incomplete grants refuse;
-  approval and policy are rechecked after preservation. Agent provenance cannot
-  provide this scope, and other policy source revisions remain restrictive.
-- The exact reviewed personal controller's prepare/load requests retain their
-  complete save scope in the portable dispatcher. Request bytes, controller
-  identity, registered policy and membership are rechecked after preservation.
-  The controller retains its independent runtime gates. Fixture qualification
-  does not run the controller or authorize retiring the installed handler.
-- Qualified native file changes to legacy backup-suffixed saves preserve both
-  members, including `.ess.bak`/`.skse.bak`, in the neutral store. Pair selection
-  and restoration retain the suffix and missing-member state; bulk helpers keep
-  command-bound human approval and recheck the registered policy after copying.
-  Both legacy readers use the same pair-name rules when importing suffixed
-  evidence; old manifests and blobs remain unchanged.
-- The reviewed legacy save policy's literal move/rename checks now preserve the
-  source as a move and an overwritten destination as a write. Other source
-  revisions retain strict operation matching until qualified. Internal policy
-  inspection reports requirements without granting execution or taking backups.
-- Shared transaction/review/journal metadata completes short writes and verifies
-  staging bytes before publication. Save preservation retains its independent
-  final manifest verification. Native pre-tool ownership compares complete,
-  host-scoped groups, preserving changed matcher/timeout/Windows/async fields.
-- Private upgrade staging renders destination instructions, MO2 paths and hook
-  transports before hashing the review. Native settings are reviewed together;
-  unresolved custom Claude or Codex pre-tool handlers prevent application.
-  Setup and candidate preparation preserve Unicode interpreter paths in Windows
-  PowerShell 5.1 using an explicit UTF-8 marker, without reporting it as guard drift.
-- The installed-policy bridge now normalizes worker warnings before dispatch and
-  requires the portable plan to retain every legacy backup and approval
-  requirement. Unrecognized save-changing helpers refuse before preservation;
-  ordinary edits preserve the complete pair once. Full personal-handler migration
-  remains incomplete, so the original handler must stay active.
-- Neutral and both legacy restore routes now carry one total deadline through
-  import, verification, current-save preservation and final publication.
-- Existing Claude/Codex deciding entrypoints now use the ordered shared dispatcher,
-  retaining declared call identity and original unresolved-save explanations.
-  Both legacy save stores import verified complete-pair evidence into guarded
-  neutral recovery; in-place replacement respects local restrictions first.
-- Shared standing preferences are reinjected through OpenCode system transforms.
-  Mutation preflight checks every source anchor and referenced base test symbol;
-  moved preservation controls target the writer their tests actually exercise.
-- Portable Action v1 dispatcher and generic recovery entry, with synchronous save
-  preservation and local restrictions before permission. Generated OpenCode V1
-  plugin shares X4's pinned process transport; host enforcement remains unmeasured.
-  Unknown calls warn and allow with private receipts and sparse warnings.
-- House Carl freshness now includes complete plugin bytes, detecting same-size
-  changes with preserved timestamps. New-output publication refuses concurrent
-  creators. Permanent backups use durable verified copying and a 2 GiB reserve.
-- **`housekeep` and a retention policy (`docs/RETENTION.md`):** `report` / `plan` / `apply` for agent output. Byte-identical copies of live files and build intermediates go to the Recycle Bin, duplicates become read-only hard links, per-launch logs are gzipped after 7 days (round trip verified first) and recycled after 90, and repeated 3.x snapshot folders are recycled. Saves, `*backup*` folders, git-tracked files, files a project doc links to and task folders written in the last 48 hours are never touched; `apply` re-hashes every file and refuses anything that changed since the plan. The policy also says why `cleanupPeriodDays` belongs in user settings and never in a project's. Shared with the X4 toolkit (pinned by `tests/test_retention_policy.py`).
-- **The toolkit cleans up its own temp files.** Session start (Claude Code and Codex) launches `housekeep session` in the background, at most every 6 hours. It moves the toolkit's own leftover temp dirs to the Recycle Bin once nothing in them changed for 24 hours and no process has a file open inside, plus pytest's older runs and its `garbage-*` leftovers. Nothing is ever deleted outright; a dir the bin refuses stays where it is and is named in the note. The next session-start banner gets one `DISK:` line only when something needs you: free space near the floor, `~/.codex/sessions` past 5 GiB, more than 10 git worktrees. `housekeep sweep-temp` runs the sweep by hand.
-- **Tests no longer leak temp dirs.** Module-level temp dirs register their cleanup when created (`conftest.scratch_dir`); the Node tests clean up on exit; each mutation-gate copy of the toolkit is removed once that mutation passes. Only same-run scratch is removed outright; everything older goes through the sweep.
-- **Recycling asks before anything is destroyed.** `housekeep`'s Recycle Bin helper now uses the shell's own delete with "warn if not recycling" set, instead of `Microsoft.VisualBasic` `DeleteDirectory(..., 'OnlyErrorDialogs', ...)`, whose suppressed confirmations include Windows' "too big for the Recycle Bin, delete permanently?" prompt. `tests/test_temp_hygiene.py` fails on a new uncleaned temp dir and on a temp prefix the sweep does not know. Measured before the fix on one machine: 14,018 leaked directories, and about 25 GiB from a single local run.
-
-- Optional House Carl 2.0.5 integration for Claude and Codex: pinned, hash-verified upstream download, isolated MCP client and one shared CLI/MCP gateway. Wrye-managed asterisk order and native MO2 profile inputs are independent of deployment. Ordinary plugin edits use verified permanent backups, private staging, independent xEdit checks, atomic publication, transaction receipts and conflict-aware restore. New patches remain inactive. Compaction, merging, runtime FormIDs, native pairing and facegen provenance remain unavailable. See `docs/housecarl.md` for setup and qualification limits.
-
-## v4.0.0 — 2026-10-08
+## v4.0.0 — unreleased
 
 ### Added
 
@@ -290,10 +91,17 @@
 - **Setup smoke matrix:** CI exercises the agent-selection values.
 - **Merge-marker gate:** contributor tests reject committed conflict markers.
 - **Hook latency and deadline matrix:** `tests/test_hook_deadline_load.py` (opt-in, `SKYGUARD_LOAD_TEST=1`) runs every hook (six Claude wrappers, Codex bash, Windows PowerShell 5.1, pwsh) through five scenarios (healthy, fallback, engine failure, hang before and after the engine's own timer) at idle and under CPU load pinned to a core subset, and fails on any run within 10 s of the hook's timeout or any gate that lets a command through. Measured against the pre-fix tree (red) and the candidate (green) in `docs/evidence/2026-10-15-plan8-latency-deadline.md`.
+- **Two more rules ask you first.** A program the guard cannot name (a variable such as `$R`) given a save (`S-SAVE-OPAQUE`): it may write, move or delete the save, or nothing; if another reading of the command does change it, the pair is still backed up before the question, and `guards off` does not lift it. And a command the guard cannot read that names the install: it cannot tell what that command does there.
+- **`housekeep` and a retention policy (`docs/RETENTION.md`):** `report` / `plan` / `apply` for agent output. Byte-identical copies of live files and build intermediates go to the Recycle Bin, duplicates become read-only hard links, per-launch logs are gzipped after 7 days (round trip verified first) and recycled after 90, and repeated 3.x snapshot folders are recycled. Saves, `*backup*` folders, git-tracked files, files a project doc links to and task folders written in the last 48 hours are never touched; `apply` re-hashes every file and refuses anything that changed since the plan. The policy also says why `cleanupPeriodDays` belongs in user settings and never in a project's. Shared with the X4 toolkit (pinned by `tests/test_retention_policy.py`).
+- **The toolkit cleans up its own temp files.** Session start (Claude Code and Codex) launches `housekeep session` in the background, at most every 6 hours. It moves the toolkit's own leftover temp dirs to the Recycle Bin once nothing in them changed for 24 hours and no process has a file open inside, plus pytest's older runs and its `garbage-*` leftovers. Nothing is ever deleted outright; a dir the bin refuses stays where it is and is named in the note. The next session-start banner gets one `DISK:` line only when something needs you: free space near the floor, `~/.codex/sessions` past 5 GiB, more than 10 git worktrees. `housekeep sweep-temp` runs the sweep by hand.
+- **Optional House Carl 2.0.5 integration** for Claude and Codex: pinned, hash-verified upstream download, isolated MCP client and one shared CLI/MCP gateway. Wrye-managed asterisk order and native MO2 profile inputs are independent of deployment. Ordinary plugin edits use verified permanent backups, private staging, independent xEdit checks, atomic publication, transaction receipts and conflict-aware restore. New patches remain inactive. Compaction, merging, runtime FormIDs, native pairing and facegen provenance remain unavailable. Needs .NET Runtime 9 and ASP.NET Core Runtime 9. See `docs/housecarl.md` for setup and qualification limits.
+- **Portable Action v1 entry and save recovery:** `python tools/agent-harness.py check` judges an Action v1 call with synchronous save preservation and local restrictions before permission; `save-list` and `save-restore` recover its transactions (an ESS or SKSE member selects its whole pair). Unknown calls warn and allow with private receipts. `check --preview` reports the complete canonical approval scope of a bulk save change without preservation, receipts or state changes, and never authorizes it; save-approval hook reasons stay within two short lines and point to it.
+- **OpenCode V1 plugin (generated):** shares the X4 toolkit's pinned process transport and reinjects the standing preferences through OpenCode system transforms; its fixtures qualify translation and failure handling, host enforcement remains unmeasured.
+- **Reviewed upgrade for installs with their own hook handlers:** `python tools/agent-harness.py upgrade-preview`, `upgrade-stage`, `upgrade-apply` and `upgrade-rollback` stage a new version against the install, keep collisions for explicit choices, render destination instructions, MO2 paths and hook transports before the review is hashed, refuse unresolved custom pre-tool handlers, and keep a permanent rollback journal. An install that registered its own save policy keeps it running ahead of the portable save plan. See `docs/upgrading-native-hooks.md`.
 
 ### Changed
 
-- **Saves are backed up, not asked about (user ruling 2026-10-13):** a command that changes one or two saves -- a write, a copy onto, an edit, a move or rename, a delete, a DevBench save over an existing save, ReSaver `--apply` -- no longer asks. The deciding hook first copies BOTH files of each save (the `.ess` and its `.skse` co-save count as one save, whichever the command names) into the recovery store, reads each copy back to its SHA-256 and records it (a missing co-save is recorded as missing), and only then allows the call; if the backup fails the call is refused (S-SAVE-BACKUP-FAILED). More than two saves, or saves named by a wildcard, are refused (S-SAVE-APPROVAL) until the USER types `SAVE_ACCESS_APPROVAL {"op": ..., "files": [...]}` (or a `pattern` and `count`) -- read only from their own messages in the session transcript, never from a tool result or the agent's text; then every one is backed up the same way. Save backups are never pruned; `snapshot restore <id>` puts both files of a pair back, each hash-checked before it is written. Reading, hashing, listing and copying saves out stay free; deleting or moving the `Saves` folder stays refused, and so does a save change `guards off` would otherwise let through. On Codex a one- or two-save change now works (it used to be refused, as every ask is there). Three rules still ask (git discard, `lock disable`, in-place restore); S-WRITE-SAVE and W-SAVE are gone, S-RESAVER-APPLY and S-DEVBENCH-SAVE now refuse only a save the guard cannot place. Priced over 87,408 real tool calls (rules only, no backups taken): 7 asks became allows (ReSaver writing a NEW output, none over an existing save) and 2 denies became backed-up allows (one save moved out of `Saves`, one delete of a save that did not exist); 1 call now needs the typed approval (a PowerShell move of several saves out of `Saves`, which asked before); 6 ReSaver `--apply` calls whose output path was held in a shell variable now refuse instead of asking, because the guard cannot place that save to back it up -- spell the path out. Nothing else moved.
+- **Saves are backed up, not asked about (user ruling 2026-10-13):** a command that changes one or two saves -- a write, a copy onto, an edit, a move or rename, a delete, a DevBench save over an existing save, ReSaver `--apply` -- no longer asks. The deciding hook first copies BOTH files of each save (the `.ess` and its `.skse` co-save count as one save, whichever the command names) into the recovery store, reads each copy back to its SHA-256 and records it (a missing co-save is recorded as missing), and only then allows the call; if the backup fails the call is refused (S-SAVE-BACKUP-FAILED). More than two saves, or saves named by a wildcard, are refused (S-SAVE-APPROVAL) until the USER types the `SAVE_ACCESS_APPROVAL` line the refusal (or `python tools/agent-harness.py check --preview`) prints: version 1 JSON naming the session id, the operation (`write`, `move` or `delete`) and the absolute paths of both files of every save, plus the command's SHA-256 and the save count for a wildcard -- read only from their own messages in the session transcript, never from a tool result or the agent's text; then every one is backed up the same way. Save backups are never pruned; `snapshot restore <id>` puts both files of a pair back, each hash-checked before it is written. Reading, hashing, listing and copying saves out stay free; deleting or moving the `Saves` folder stays refused, and so does a save change `guards off` would otherwise let through. On Codex a one- or two-save change now works (it used to be refused, as every ask is there). Five rules ask: git discard, `lock disable`, in-place restore, a program the guard cannot name given a save, and a command the guard cannot read that names the install; S-WRITE-SAVE and W-SAVE are gone, S-RESAVER-APPLY and S-DEVBENCH-SAVE now refuse only a save the guard cannot place. Priced over 87,408 real tool calls (rules only, no backups taken): 7 asks became allows (ReSaver writing a NEW output, none over an existing save) and 2 denies became backed-up allows (one save moved out of `Saves`, one delete of a save that did not exist); 1 call now needs the typed approval (a PowerShell move of several saves out of `Saves`, which asked before); 6 ReSaver `--apply` calls whose output path was held in a shell variable now refuse instead of asking, because the guard cannot place that save to back it up -- spell the path out. Nothing else moved.
 - **Node 24 LTS:** xelib tooling requires Node 24; the tested pin is 24.19.0.
 - **.NET 10 SDK:** Spriggit and AutoMod use .NET 10; the tested SDK pin is 10.0.401.
 - **Spriggit 0.41.0:** replaces the 0.40.0 pin.
@@ -345,12 +153,20 @@
 - **Lift expiry:** the next hooked tool call after expiry relocks the affected files.
 - **Archive identity:** the root is `skyrim-ai-assistant-toolkit-<version>`, using the package name as the shared slug.
 - **GitHub links:** retain the current repository path; no remote rename is part of this change.
-- **Shipped identity scrub:** examples and dated reports use neutral paths.
+- **Shipped identity scrub:** examples use neutral paths; the measurements shipped docs cite are in `docs/evidence/`, scrubbed of the maintainer's machine details.
 - **Corpus fixture bytes:** non-shipped corpus fixtures preserve historical input bytes.
 - **Freeze baseline:** a tag on HEAD cannot serve as its own comparison baseline.
 - **DevBench reference 1.28.0:** the recorded API/docs reference moves from 1.24.0 to 1.28.0 (2026-10-11); the documented minimum stays 1.11.0.
 - **DevBench Papyrus `call`:** documented that since 1.25 an omitted optional argument is refused (400) unless it is a known vanilla/SKSE default or `fillNeutral:true` is sent; before 1.25 it was padded silently.
 - **DevBench console capture:** documented that 1.28 returns the captured lines from `exec` itself; the wrapper's exec-then-read pair is unchanged.
+- **Knowledgebase notes get committed.** The instructions now tell the agent to commit `KNOWLEDGEBASE.local.md` alone, by explicit path, when the install is a git repository that does not ignore it, and never to push. `tools/kb-guard.sh` adds a session-start note while that file has uncommitted changes. Found in the sibling X4 toolkit, where an agent appended about 1,767 lines of notes over 2.5 weeks and committed none.
+- **Recycle Bin rule:** names the undoable shell delete (`SHFileOperation` with `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), which still prompts for an item too big for the bin. Only scratch a tool made in the same run may be deleted outright; the blanket temp-file exemption is withdrawn.
+- **Recycling asks before anything is destroyed.** `housekeep`'s Recycle Bin helper uses the shell's own delete with "warn if not recycling" set, instead of `Microsoft.VisualBasic` `DeleteDirectory(..., 'OnlyErrorDialogs', ...)`, whose suppressed confirmations include Windows' "too big for the Recycle Bin, delete permanently?" prompt.
+- **Machine resource limits exempt the game:** the instructions exempt the game and what it needs to run (Steam/SteamVR, OpenComposite, DevBench, House Carl) from the agent's resource limits: no caps, throttling or watchdog kills for them; other heavy jobs count them as load.
+- **Mod-update review** first establishes whether the user is on a kept save, a new game or a disposable test, and their standing rulings, reading local preferences and session context and asking only about material facts still unknown.
+- **One ordered dispatcher:** the Claude and Codex deciding entrypoints use the shared ordered dispatcher, keeping declared call identity and the original unresolved-save explanations. Both earlier save stores import verified complete-pair evidence into the guarded neutral recovery; in-place replacement respects local restrictions first.
+- **Doctor and guard CLI launchers** require Python 3.10+, skip older candidates and disable Python Install Manager's automatic installation while probing.
+- **Setup and safety guidance** describe permanent one/two-save preservation and bulk approval, and distinguish ReSaver candidate quarantine from publication.
 
 ### Fixed
 
@@ -449,6 +265,26 @@
 - **Command-payload coverage documentation:** matches the current implementation.
 - **Paths-union coverage documentation:** matches the current implementation.
 - **Historical identity examples:** derived scratch-path spellings are scrubbed consistently.
+- **Commands hidden behind a prefix:** an assignment prefix holding a process substitution (`X=<(echo a) rm -rf Data`, also after env/nohup or before command/exec), and a program word the guard cannot name (`$R rm ...`, `"$SUDO" rm ...`, `$(true) git reset --hard`), no longer hide the command that runs. The same holds in cmd (`%R% del`, `!R! del`, `%R%del`), in a PowerShell `&` or `.` call (`& $R Remove-Item`, `& "$($R)-Item"`), and through eval-like wrappers that run a quoted argument (`$R 'rm -rf Data'`, `& $R 'Remove-Item ...'` with Invoke-Expression). Each form was measured deleting a folder in real cmd.exe / Windows PowerShell 5.1 first. A name with a variable glued to it (`"$X"reg delete <Bethesda key>`, `${R}git reset --hard`) is read as its literal part, which is what runs when the variable is empty; both were allowed before.
+- **Guard speed on long commands:** the shell guard's save-store check reads each install's workspace config and resolves its store once per decision instead of once per operand. Long commands with many operands had become 20-70x slower and could approach the agent's hook timeout, after which a refusal is discarded.
+- **Bash ANSI-C quoted paths** decode hexadecimal, octal, Unicode and control escapes before policy evaluation. Escaped save names keep pair backups and bulk approval limits; escaped plugin extensions keep the raw-write refusal. Unknown escapes keep their backslashes and NUL ends only that quoted portion.
+- **Save preservation** collects every DevBench save statement and argument string, every compound ReSaver output, every copy destination, and Recycle Bin saves following another refusal. ReSaver outputs keep each execution's directory; all affected pairs count together for backup and bulk approval. Malformed logical save counts refuse before preservation.
+- **Claude blocking wrappers** validate the complete PreToolUse verdict schema before reporting successful emission. Malformed bodies, NUL bytes and failed or unacknowledged validation refuse under the existing outer hook deadline.
+- **The generic adapter** requires the complete typed neutral verdict, including an exact integer protocol version, status and text fields; its conformance matrix includes malformed versions, incomplete results and wrong field types.
+- **Recovery snapshots:** script/config snapshots inspect every command in a parsed shell call before skipping known reads, so a read-only prefix, newline, pipeline or later mutator can no longer suppress them, and incomplete syntax takes a snapshot. GNU find's file-writing `-fls` action takes one too.
+- **Restores:** script/config restore records target identity and content before backup, verifies those backups and rechecks targets after staging; initially absent targets use no-clobber publication (stop other writers during an in-place restore: replacing an existing file is not a filesystem compare-and-swap). Neutral and legacy restore routes carry one total deadline through import, verification, current-save preservation and final publication. Save restore wrappers inherit the main worktree's configured save roots.
+- **Vanilla-file relocks:** failed relocks keep their expired retry records across session start, guard changes and doctor cleanup. Relocking holds the state writer lock; new lifts cannot interleave with it, and failures report pending.
+- **Coverage receipts** for native shell/patch tools cannot cover missing MCP calls; MCP tools are counted individually. A failed knowledgebase preservation stays partial even when another watched file raises a completed loss alarm.
+- **Spriggit publication** rechecks destination identity and bytes after staging, uses exclusive publication and rollback renames, and keeps previous output after success. A concurrent writer cannot be erased by backup cleanup; a blocked rollback names the retained recovery path.
+- **Manual installs** reject colliding final destinations before writing, including config `.new` paths, Windows aliases and file/ancestor collisions when other archive entries sort between them. Exclusive operation directories keep original backups and manifests across repeated installs, and backup hashes are verified before replacement.
+- **Published dependency checksums** are bound to the selected artifact's exact filename, release download URL, version and architecture; a digest belonging to another asset cannot validate the pinned download, and missing or conflicting metadata stays explicitly unchecked.
+- **3.x migration:** custom Codex definitions alone no longer make a 3.x installation look like 4.x. POSIX single-letter roots keep their native meaning, and permanent-store refusals are in the Codex rule inventory.
+- **The pinned shared runtime** protects absent restore destinations from new writers, preserves JSON types during policy migration, refuses selected read-only upgrade candidates before publication, and completes short writes and verifies staging bytes in its transaction, review and journal metadata. OpenCode transport failures refuse Skyrim's known DevBench tools.
+- **House Carl freshness** includes the complete plugin bytes, detecting same-size changes with preserved timestamps. New-output publication refuses concurrent creators. Permanent backups use durable verified copying and a 2 GiB reserve.
+- **Emulator recovery:** a failed recovery keeps its registration and refuses another enable until recovery succeeds.
+- **`bench-vr`:** timing must be finite and valid before any DevBench contact; empty retained windows and missing comparisons cannot report success.
+- **`scripts/read-save.py`** needs `lz4` only to decompress a save body. Malformed input reports its JSON error, and plugin parsing and search helpers load without the tools lock installed; a save that needs decompression still stops with the install instruction.
+- **Nexus requirements** disclose GraphQL partial results.
 
 ### Removed
 
@@ -457,16 +293,25 @@
 - **mypy:** unused, removed with its dependency pins.
 - **pytest-cov:** unused, removed with its dependency pins.
 - **Windows-only requirements:** the pywin32 requirements files.
-- **.NET 8/9 support:** optional .NET tools now use 10.
+- **.NET 8/9 builds of Spriggit and AutoMod:** both now use .NET 10. (The optional House Carl gateway, added in this release, needs the .NET 9 runtimes; see `docs/housecarl.md`.)
 - **Node 20 support:** Node tooling now requires 24.
 - **Spriggit 0.40.0 pin:** replaced by 0.41.0.
 - **Old Bash rule engine:** retained only as a non-shipped test reference.
 - **Separate Codex and adapter payload checkers:** folded into the shared checker.
 - **Layer 2 research probes in the install zip:** the developer-only `scripts/layer2-spike/` measurement scripts stay in the repository but are no longer shipped.
+- **Maintainer plans and handoffs in the install zip:** `docs/superpowers/` stays in the repository but is no longer shipped; the measurements shipped docs cite moved to `docs/evidence/`.
 - **Automatic jq installation:** removed from setup.
 - **Automatic host-runtime installation:** removed from the default setup prompt.
 - **Legacy paths writes:** setup writes the root paths file.
 - **PyNifly 29.1 Blender add-on recommendation:** replaced by the validated 27.2.0 pin.
+
+### For contributors
+
+- **Tests no longer leak temp dirs.** Module-level temp dirs register their cleanup when created (`conftest.scratch_dir`); the Node tests clean up on exit; each mutation-gate copy of the toolkit is removed once that mutation passes. `tests/test_temp_hygiene.py` fails on a new uncleaned temp dir and on a temp prefix the sweep does not know. Measured before the fix on one machine: 14,018 leaked directories, about 25 GiB from a single local run.
+- **Corpus replay:** resumed runs bind cached rows to frozen items, both hook trees, copied engine/runtime files and directories, recording helpers and the effective environment. Changed or unqualified caches are kept and need a fresh output directory; input drift invalidates the run, and matching engine errors cannot count as agreement.
+- **Rule pricing:** samples carry an ownership manifest (unchanged previous samples archived, modified or unowned files untouched, filename collisions refuse replacement; samples and archives still contain private tool calls). Each engine is staged with its matching shared runtime and lock, so historical exports use that commit's bytes.
+- **Release proof** rejects duplicate ZIP members and altered binary or undeclared bytes; line-ending conversion needs the selected commit's text attributes and nonbinary contents.
+- **Mutation preflight** checks every source anchor and referenced base test symbol; moved preservation controls target the writer their tests actually exercise. CI reads the trailing test outcome, and changed corpus rows show their actual previous decision.
 
 ### Known limits
 
@@ -475,7 +320,7 @@
 - **Codex confirmations:** the adapter refuses an ask and tells the user to run the intended action themselves.
 - **Codex other MCP tools:** logged rather than guarded, except the recognized DevBench surface.
 - **Codex user commands:** commands typed with `!` bypass hooks.
-- **Codex subfolders:** Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does not tell you.
+- **Codex subfolders:** start Codex in the game folder. From a subfolder of a non-git install no hook ran on codex-cli 0.160.0, while an isolated 0.162.1 probe loaded them: it depends on the version, and Codex does not tell you. Check the live banner and the canary.
 - **PowerShell policy:** AllSigned may prevent hook launch.
 - **Pattern-based coverage:** the guard is an accident barrier, not a sandbox.
 - **Save approvals:** the guard ignores approval text that reaches the transcript through a tool result or the agent's own output. An agent that deliberately forges a user approval line in its own transcript file is out of scope.
@@ -531,7 +376,7 @@
 ### Upgrading from 3.x
 
 1. Unpack the new zip into a separate folder and, from the Skyrim folder, run `bash "<new folder>/tools/pre-update-snapshot.sh" .` before replacing files.
-2. Extract the toolkit contents over the install; shipped files are replaced.
+2. Extract the toolkit contents over the install; shipped files are replaced. If you wrote your own pre-tool hook handlers or a personal save policy, use the reviewed upgrade in `docs/upgrading-native-hooks.md` instead.
 3. Run `bash setup.sh --agent auto`, or select `claude`, `codex` or `all`.
 4. Review migrated local notes and the settings backup; migration deletes nothing.
 5. Keep personal notes and standing preferences in `KNOWLEDGEBASE.local.md`, which is never shipped.
