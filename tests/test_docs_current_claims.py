@@ -68,3 +68,13 @@ def test_the_codex_subfolder_case_is_stated_one_way():
     for rel in ("README.md", "CHANGELOG.md"):
         assert "from a subfolder no hook runs" not in _read(rel), rel
     assert "it depends on the version" in _read("README.md")
+
+
+def test_dotnet_requirements_admit_the_house_carl_runtimes():
+    """Review L6 F8: ".NET 10 SDK, the toolkit's single .NET requirement" while tools/housecarl_integration/setup.py
+    requires Microsoft.NETCore.App 9 and Microsoft.AspNetCore.App 9."""
+    setup = _read("tools/housecarl_integration/setup.py")
+    assert '"Microsoft.NETCore.App 9."' in setup and '"Microsoft.AspNetCore.App 9."' in setup
+    tools = _read("docs/installing-tools.md")
+    assert "the toolkit's single .NET requirement" not in tools
+    assert "House Carl gateway also needs the .NET 9 runtimes" in tools
