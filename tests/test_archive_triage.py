@@ -48,6 +48,7 @@ _spec.loader.exec_module(triage)
     ("Pack 2k/PBRNifPatcher/landscape/rocks.json", ("Pack 2k", "PBRNifPatcher/landscape/rocks.json", "data")),
     ("Pack 2k/PBRTextureSets/TXSTRoad.json", ("Pack 2k", "PBRTextureSets/TXSTRoad.json", "data")),
     ("PBRMaterialObjects/Snow.json", ("", "PBRMaterialObjects/Snow.json", "data")),
+    ("Output/LightPlacer/cs light/clutter.json", ("Output", "LightPlacer/cs light/clutter.json", "data")),
     # Binaries outside any Data root land in the game folder when installed as packaged.
     ("skse64_loader.exe", ("", "skse64_loader.exe", "game")),
     ("Main/d3d11.dll", ("Main", "d3d11.dll", "game")),

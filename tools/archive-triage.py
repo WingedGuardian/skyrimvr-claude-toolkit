@@ -62,7 +62,8 @@ ROOTS = {"skse", "scripts", "source", "meshes", "textures", "interface", "sound"
          "mcm", "nemesis_engine", "pandora_engine", "video", "lodsettings", "grass", "shadersfx", "facegen",
          "dialogueviews", "calientetools", "netscriptframework", "platform", "skypatcher", "tools",
          # PBR mods ship patcher instructions read from Data/ by PGPatcher (and the older PBRNifPatcher)
-         "pbrnifpatcher", "pbrtexturesets", "pbrmaterialobjects"}
+         "pbrnifpatcher", "pbrtexturesets", "pbrmaterialobjects",
+         "lightplacer"}  # Light Placer JSONs (po3), rewritten by PGPatcher for its duplicate meshes
 PLUGIN_EXT = (".esp", ".esm", ".esl")
 # Loose files at an option folder's root that belong in Data/. NOT .txt/.md/.json: a root readme.txt would map
 # to Data/readme.txt and overwrite another mod's readme.

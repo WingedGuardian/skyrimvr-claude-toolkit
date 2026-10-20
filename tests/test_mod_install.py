@@ -116,6 +116,23 @@ def test_an_existing_config_gets_a_new_file_beside_it(tmp_path, sevenz, game):
     assert ini.with_name("ExampleFramework.ini.new").read_bytes() == b"theirs=1\n"
 
 
+def test_generated_json_data_is_replaced_but_a_real_config_is_still_kept(tmp_path, sevenz, game):
+    # PBR patcher instructions and Light Placer JSONs are mod data, not the user's settings: the later install
+    # (or a PGPatcher run) must win. A .new beside them left the earlier mod's copy live (SMIM PBR, 2026-10-19).
+    pbr = game / "Data" / "PBRNifPatcher" / "smim" / "bridge.json"
+    lp = game / "Data" / "LightPlacer" / "cs light" / "clutter.json"
+    for p in (pbr, lp):
+        p.parent.mkdir(parents=True)
+        p.write_bytes(b'{"old": 1}')
+    entries = ENTRIES + [{"path": "Data/PBRNifPatcher/smim/bridge.json", "data": '{"new": 1}'},
+                         {"path": "Data/LightPlacer/cs light/clutter.json", "data": '{"new": 1}'}]
+    run(archive(tmp_path, entries), "--apply", env=env_for(tmp_path, sevenz, game))
+    assert pbr.read_bytes() == b'{"new": 1}' and lp.read_bytes() == b'{"new": 1}'
+    assert not pbr.with_name("bridge.json.new").exists() and not lp.with_name("clutter.json.new").exists()
+    ini = game / "Data" / "SKSE" / "Plugins" / "ExampleFramework.ini"
+    assert ini.read_bytes() == b"mine=1\n", "a real config must still be protected"
+
+
 def test_overwrite_config_replaces_it_and_backs_it_up(tmp_path, sevenz, game):
     ini = game / "Data" / "SKSE" / "Plugins" / "ExampleFramework.ini"
     run(archive(tmp_path, ENTRIES), "--apply", "--overwrite-config", env=env_for(tmp_path, sevenz, game))

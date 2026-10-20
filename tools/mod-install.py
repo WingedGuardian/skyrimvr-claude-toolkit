@@ -71,6 +71,8 @@ triage = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(triage)
 
 CFG_EXT = (".ini", ".toml", ".json")
+# Generated or authored DATA, never the user's settings: a later mod or a patcher run must replace them.
+GENERATED_DATA_DIRS = ("pbrnifpatcher/", "pbrtexturesets/", "pbrmaterialobjects/", "lightplacer/")
 NAME_BAD = set('/\\:*?"<>|')
 WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *("com%d" % i for i in range(1, 10)),
                     *("lpt%d" % i for i in range(1, 10))}
@@ -154,7 +156,8 @@ def plan_files(entries, data: Path, game: Path, mo2: bool, root_files: bool, ove
         if not inside:
             notes.append("!! " + triage.OUTSIDE)
         if dest.is_file():
-            if dest.name.lower().endswith(CFG_EXT) and not overwrite_cfg:
+            if (dest.name.lower().endswith(CFG_EXT) and not overwrite_cfg
+                    and not rel.lower().replace("\\", "/").startswith(GENERATED_DATA_DIRS)):
                 action = "CONFIG-NEW"
                 notes.append("your config is kept; the archive's copy goes to {}.new".format(dest.name))
             else:
