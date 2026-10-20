@@ -77,7 +77,7 @@ def test_dotnet_requirements_admit_the_house_carl_runtimes():
     assert '"Microsoft.NETCore.App 9."' in setup and '"Microsoft.AspNetCore.App 9."' in setup
     tools = _read("docs/installing-tools.md")
     assert "the toolkit's single .NET requirement" not in tools
-    assert "House Carl gateway also needs the .NET 9 runtimes" in tools
+    assert "House Carl gateway needs its own, older .NET runtimes" in tools
 
 
 def _ticked(text: str):
