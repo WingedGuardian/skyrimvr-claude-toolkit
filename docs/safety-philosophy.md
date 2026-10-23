@@ -85,8 +85,9 @@ The guards can be customized, but their shipped files can be replaced during an 
 
 - **Whitelist paths** you want Claude to edit freely (e.g., a working directory for scripts)
 - **Add new patterns** to the bash guard for commands specific to your workflow
-- **Change a rule's decision** (`deny`, `ask` or `advise`) in `tools/skyguard/rules.py` -- for example to make a
-  refusal you hit often into a note
+- **Change a rule's behavior** in its deciding implementation, then verify the new verdict with focused tests.
+  `tools/skyguard/rules.py` holds rule metadata and messages; its `decision` field controls behavior only where
+  the implementation explicitly reads it. Editing that field alone does not change most rules' verdicts.
 
 The rules live in Python, in `tools/skyguard/`: the shell guard's patterns and messages in
 `shell_rules.py`, the file guard's in `write_rules.py`, and which directories count as "the install"
