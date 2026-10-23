@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import Tuple
 
-from . import codes, engine, mcp_rules
+from . import codes, engine, mcp_rules, saves
 from .request import Request
 from .verdict import DECISIONS, STATUSES, Verdict
 
@@ -35,10 +35,10 @@ TELEMETRY_ROLE = "neutral-pre-tool"   # never "pre-tool": that file is the Codex
 OWN_ENTRY_AGENTS = ("claude", "codex")
 # kind "other": no rule guards an arbitrary tool. Allowed (blocking every unknown tool would make an adapted agent
 # unusable), but coded and labelled so a reader can never take it for a verdict.
-UNJUDGED = "NOT JUDGED: this tool kind is not guarded"
+UNJUDGED = "NOT JUDGED: this tool kind is not guarded; WARN AND ALLOW"
 # kind "mcp" to a server the MCP rules do not judge (only DevBench is): allowed as before, labelled the same way,
 # never status "evaluated", which an adapter would log as checked.
-UNJUDGED_MCP = "NOT JUDGED: only a DevBench MCP server is guarded"
+UNJUDGED_MCP = "NOT JUDGED: only a DevBench MCP server is guarded; WARN AND ALLOW"
 # The shell rules' own INERT texts name protect-bash.sh (Plan 5's rule modules are not edited here); the neutral
 # role keeps their CODE and replaces their wording.
 NO_COMMAND = ("GUARD INERT: the adapter sent a shell request with no command, so the toolkit checked nothing.\n"
@@ -164,12 +164,17 @@ def _soft_roots(roots_fn):
 
 def _decide(req: Request, project: str, roots_fn, audit) -> Verdict:
     if req.kind == "other":
-        return Verdict("allow", "", UNJUDGED, status="partial", code="neutral.UNJUDGED")
+        v = engine.pre_tool(req, project, roots_fn, audit)
+        return v._replace(context=UNJUDGED if v.context else "", code="neutral.UNJUDGED")
     if req.kind == "mcp":
         if req.mcp_tool not in ("", "unknown") and not mcp_rules.judged_server(req.mcp_tool):
-            return Verdict("allow", "", UNJUDGED_MCP, status="partial", code="neutral.UNJUDGED_MCP")
-        # The same judge Claude's protect-mcp role uses (engine.evaluate_mcp -> mcp_rules).
-        return engine.evaluate_mcp(req.mcp_tool, mcp_args(req.mcp_args), audit, roots=_soft_roots(roots_fn))
+            v = engine.pre_tool(req, project, roots_fn, audit)
+            return v._replace(context=UNJUDGED_MCP if v.context else "", code="neutral.UNJUDGED_MCP")
+        # The same judge Claude's protect-mcp role uses (engine.evaluate_mcp -> mcp_rules), and the same save policy:
+        # an existing save the call overwrites is backed up first (saves.enforce), or the call is refused.
+        v = engine.evaluate_mcp(req.mcp_tool, mcp_args(req.mcp_args), audit, roots=_soft_roots(roots_fn))
+        from . import portable
+        return portable.legacy_pre_tool(req, project, roots_fn, audit, precomputed=v)
     v = codes.classify(engine.pre_tool(req, project, roots_fn, audit))
     text = REWORD.get(v.code)
     return v._replace(reason=text) if text and v.decision == "deny" else v

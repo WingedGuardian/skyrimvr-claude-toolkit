@@ -10,8 +10,8 @@
 #
 # Hot path = bash BUILTINS ONLY. Every `$(...)`, pipe stage or external command is a fork, and a fork
 # costs 10-70 ms on Git Bash: MEASURED 2026-10-02, the wrapper's own forks were ~390 ms of a 545 ms
-# median. So: parameter expansion, not dirname; `cd` in this shell, not in a subshell; printf's %()T,
-# not date; mkdir only when the directory is missing. The remaining forks are `$(cat)` and the engine.
+# median, before output-schema validation. So: parameter expansion, not dirname; `cd` in this shell; printf's %()T,
+# not date; mkdir only when the directory is missing. Calls also use a bounded output-schema validator.
 
 HOOK_NAME="protect-bash"
 HOOK_TIMEOUT_S=60     # this hook's timeout in agent/targets/claude/settings.json (tests/test_hook_deadline.py)
@@ -103,7 +103,7 @@ fi
 # a remembered fallback (below), then py -3 / python / python3 that resolve and are not a Store alias,
 # then the usual install locations (newest version first), then a Store alias, last. A candidate is
 # accepted only if it runs the engine's own `run.py --selftest <nonce>` (ONE process: run.py itself
-# refuses Python < 3.8, and an older one cannot even parse it) and echoes the nonce: a stub that merely
+# refuses Python < 3.10, and an older one cannot even parse it) and echoes the nonce: a stub that merely
 # exits 0 and prints `{}` would otherwise read as ALLOW. Each probe gets min(SKYGUARD_PROBE_TIMEOUT, the
 # time left), sub-second allowed, and no probe starts in the last 10 s before DL (the engine needs them).
 # Default 15 s: a HEALTHY selftest took up to 3.8 s native and ~9 s through a bash shim on 4 cores at 2x
@@ -316,7 +316,13 @@ fi
 if [ "$RC" -ne 0 ]; then
     inert engine "engine failed (exit $RC) -- run: bash tools/hook-canary.sh" "exit $RC"
 fi
-case "$OUT" in
-    "{"*) printf '%s\n' "$OUT"; _done; exit 0 ;;
-esac
-inert emission "engine failed (exit $RC) -- run: bash tools/hook-canary.sh" "engine output was not a JSON verdict"
+# Validate the complete output under the SAME outer deadline before marking emission successful.
+# This adds one bounded interpreter call; it does not probe the fallback chain or extend the hook budget.
+[ -z "$NUL" ] || inert emission "engine output contained a NUL byte -- run: bash tools/hook-canary.sh" "engine output contained a NUL byte"
+ENGINE_OUT="$OUT"; SAVED_INPUT="$INPUT"; INPUT="$OUT"
+_bounded "$ENGINE_MS" in "${PYC[@]}" -B "${ROOT_WIN:-$ROOT}/tools/skyguard/claude_output.py" "$NONCE"
+INPUT="$SAVED_INPUT"
+if [ "$RC" -eq 0 ] && [ -z "$NUL" ] && [ "$OUT" = "skyguard-claude-output:$NONCE" ]; then
+    printf '%s\n' "$ENGINE_OUT"; _done; exit 0
+fi
+inert emission "engine output was not a complete PreToolUse JSON verdict -- run: bash tools/hook-canary.sh" "engine output validation failed (exit $RC)"

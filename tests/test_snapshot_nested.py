@@ -66,6 +66,22 @@ def test_a_nested_pex_is_snapshotted(tmp_path):
     assert stored(tmp_path, ("Data/Scripts/sub/deep/Nested.pex", b"nested pex"))
 
 
+@pytest.mark.parametrize("command", [
+    "cat notes.txt; printf x > Data/Scripts/a.pex",
+    "make\nls y",
+    "cat 'unfinished",
+    "git status && python change.py", "echo $(python change.py)",
+    "Get-Content notes.txt; Set-Content Data/Scripts/a.pex x",
+    "Get-Content notes.txt | ForEach-Object { Set-Content Data/Scripts/a.pex x }",
+    "find . -delete", "find . -fprint output.txt", "find . -fls Data/Scripts/a.pex", "git diff --output=report.txt",
+    "git branch new-branch", "git remote add mine https://example.invalid/repo",
+])
+def test_read_prefix_does_not_skip_a_mutating_command_snapshot(tmp_path, command):
+    put(tmp_path, "Data/Scripts/a.pex", b"before command")
+    snap(tmp_path, command)
+    assert stored(tmp_path, ("Data/Scripts/a.pex", b"before command"))
+
+
 def test_a_psc_older_than_seven_days_is_snapshotted(tmp_path):
     put(tmp_path, "Data/Scripts/Source/Old.psc", b"eight days old", age_days=8)
     snap(tmp_path)
@@ -704,13 +720,19 @@ def test_materialise_refuses_a_malformed_hash(tmp_path):
 
 @needs_windows
 def test_materialise_replaces_a_hard_linked_target_instead_of_writing_through(tmp_path):
+    """Explicit replacement breaks the Vortex link; default materialisation refuses it."""
     put(tmp_path, "Data/Scripts/a.pex", b"snapshot content")
     snap(tmp_path)
     out = tmp_path / "out"
     staging = put(tmp_path, "staging/a.pex", b"staging must stay")
     (out / "Data" / "Scripts").mkdir(parents=True)
     os.link(str(staging), str(out / "Data" / "Scripts" / "a.pex"))
-    snapshot.materialise(str(tmp_path), snapshot.manifest_names(store(tmp_path))[-1], str(out))
+    name = snapshot.manifest_names(store(tmp_path))[-1]
+    with pytest.raises(OSError):
+        snapshot.materialise(str(tmp_path), name, str(out))
+    assert (out / "Data" / "Scripts" / "a.pex").read_bytes() == b"staging must stay"
+    files = snapshot.resolve(store(tmp_path), name)
+    snapshot.write_blobs(store(tmp_path), [(out / rel, sha) for rel, sha in files.items()], replace=True)
     assert (out / "Data" / "Scripts" / "a.pex").read_bytes() == b"snapshot content"
     assert staging.read_bytes() == b"staging must stay"
 

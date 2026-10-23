@@ -16,11 +16,10 @@ import json
 import shlex
 import shutil
 import sys
-import tempfile
 
 import pytest
 
-from conftest import REPO, make_game, run_setup
+from conftest import REPO, make_game, run_setup, scratch_dir
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, codes, codex_rules, engine, paths, rules, self_rules, session, shell_rules, state  # noqa: E402
@@ -30,7 +29,7 @@ from skyguard.verdict import Verdict  # noqa: E402
 
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
 SHELL = {"Bash": "bash", "PowerShell": "powershell"}
-NOHOME = tempfile.mkdtemp(prefix="p6t12-nohome-")
+NOHOME = scratch_dir("p6t12-nohome-")
 ENV0 = {"USERPROFILE": NOHOME, "HOME": NOHOME}
 SELF_IDS = ("S-SELF-STATE", "S-SELF-GUARD", "W-SELF-STATE", "W-SELF-GUARD")
 
@@ -78,6 +77,22 @@ def _got(v):
 
 def _roots():
     return paths.roots("C:/p6t12/Skyrim VR", "", {"SKYRIM_GAME_ROOT": GAME})
+
+
+def test_empty_recycle_argument_is_not_the_install_ancestor():
+    from skyguard import shellparse
+    command = "powershell -Command \"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('',1,2)\""
+    parsed = shellparse.parse(command, "bash")
+    assert self_rules.shell_save_store_hit(command, parsed, _roots(), GAME, ENV0) == ""
+
+
+@pytest.mark.parametrize("relative", [".modding-agent-harness/upgrades/operation/rollback/tool.py",
+                                      ".modding-agent-harness/upgrade.lock"])
+def test_permanent_upgrade_evidence_is_not_agent_mutable(relative):
+    (decision, _), fired = shell('rm "' + GAME + '/' + relative + '"')
+    assert decision == 'deny' and fired == {'S-SAVE-STORE'}
+    (decision, _), fired = write(GAME + '/' + relative)
+    assert decision == 'deny' and fired == {'W-SAVE-STORE'}
 
 
 def shell(command, shell_name="bash", cwd=GAME, env=None):
@@ -192,10 +207,38 @@ def test_a_recycle_bin_delete_of_the_state_is_s_self_state_in_every_spelling(com
     assert decision == "deny" and fired == {"S-SELF-STATE"}, (decision, fired)
 
 
-def test_a_delete_of_the_whole_install_stays_s_del_install():
-    """I1 is about the state, not the install: deleting the whole install (which holds .skyguard) keeps its own rule."""
+def test_a_delete_of_the_whole_install_cannot_destroy_permanent_backups():
+    """The 4.0 policy protects registered save-store ancestors even with guards off."""
     (decision, _), fired = shell("rm -rf \"" + GAME + "\"")
-    assert decision == "deny" and fired == {"S-DEL-INSTALL"}
+    assert decision == "deny" and fired == {"S-SAVE-STORE"}
+
+
+def test_a_many_operand_command_reads_each_store_config_once(monkeypatch):
+    """CI run 39145224156: the store check re-read the workspace config and re-resolved the store for EVERY operand,
+    20-70x slower than 1498c80 and over the 2 s timing ceiling on GitHub's Windows runners, yet under it on a fast
+    machine. Counting config reads is speed-independent: one decision reads each install root's config once."""
+    from modding_harness import workspace
+    reads = []
+    real = workspace.settings
+    monkeypatch.setattr(workspace, "settings", lambda root: reads.append(root) or real(root))
+    words = " ".join("x{}.txt".format(i) for i in range(300))
+    shell("rm -f " + words, cwd="C:/work")
+    assert 0 < len(reads) <= len(_roots().install_dirs), len(reads)
+
+
+@pytest.mark.parametrize("ancestor", [False, True])
+def test_cached_store_check_agrees_with_the_shared_core(tmp_path, ancestor):
+    """_StoreCache.protects mirrors modding_harness.preservation.protects (the shared core is pinned byte-for-byte,
+    so it cannot take the cache): same answer for the store, inside it, its ancestors, a sibling and another drive."""
+    from modding_harness.preservation import protects
+    store = tmp_path / "ws" / ".modding-agent-harness" / "backups" / "saves"
+    store.mkdir(parents=True)
+    paths_ = [store, store / "t" / "x.json", store.parent, tmp_path / "ws", tmp_path, tmp_path / "ws" / "other",
+              tmp_path / "ws" / ".modding-agent-harness" / "backups" / "savesX", "Z:/elsewhere/x" if sys.platform == "win32"
+              else "/elsewhere/x"]
+    cache = self_rules._StoreCache()
+    for p in paths_:
+        assert cache.protects(p, store, ancestor) == protects(p, [store], ancestor=ancestor), (p, ancestor)
 
 
 @pytest.mark.parametrize("route", ["shell", "write"])
@@ -303,8 +346,15 @@ def test_a_git_restore_of_a_guard_file_outside_the_install_is_the_guard_rule(com
 
 
 def test_a_user_level_write_tool_is_a_guard_file():
-    (_, text), fired = write("~/.claude/settings.json", cwd="C:/work", env=UENV)
+    (_, text), fired = write(HOME + "/.claude/settings.json", cwd="C:/work", env=UENV)
     assert fired == {"W-SELF-GUARD"}
+
+
+def test_native_file_tool_tilde_is_a_literal_directory_name():
+    # Shell operands expand ~; native file tools do not. This file is under
+    # C:/work/~ rather than the user's actual hook configuration folder.
+    (_, text), fired = write("~/.claude/settings.json", cwd="C:/work", env=UENV)
+    assert not fired
 
 
 @pytest.mark.parametrize("command", [
@@ -327,6 +377,20 @@ def test_without_roots_the_path_words_decide():
     assert fired == {"W-SELF-GUARD"}
     _, fired = write("D:/x/.skyguard-notes.txt", roots=None)
     assert not fired & set(SELF_IDS)
+
+
+@pytest.mark.parametrize("holder", ["tools", "agent"])
+def test_non_store_guard_holder_move_keeps_its_guard_advice(tmp_path, holder):
+    """Legacy .claude holders now stop at save-store policy; these still use guard holders."""
+    root = tmp_path / "install"
+    root.mkdir()
+    own_roots = paths.roots(root.as_posix(), "", {})
+    command = 'mv "{0}/{1}" "{0}/{1}-off"'.format(root.as_posix(), holder)
+    a = _audit()
+    v = shell_rules.decide(command, own_roots, a, cwd=root.as_posix(), shell="bash", env=ENV0)
+    assert v.decision == "allow"
+    assert v.context == "Note: this command edits {}, part of the safety guards themselves.".format(holder)
+    assert {rid for rid, _ in a.fired} == {"S-SELF-GUARD"}
 
 
 def test_a_declared_game_root_is_covered_as_well_as_the_hook_root():
@@ -447,7 +511,14 @@ def test_a_configured_install_banners_nothing_and_a_real_edit_is_named(tmp_path)
 ], ids=["other-interpreter", "unquoted", "trailing-command", "untouched"])
 def test_an_edit_on_the_configured_line_still_shows(tmp_path, line, named):
     root = tmp_path / "inst"
-    text = _gen().render()
+    # This component fixture covers every configured hook, without runtime code
+    # entries whose self-drift could falsely kill a mutation. The separate full
+    # checkout/setup/session tests retain complete manifest integration coverage.
+    gen = _gen()
+    text = "\n".join(["# release " + gen.release()] + [
+        "%s  %s" % (gen._sha(REPO / rel, rel), rel)
+        for rel in sorted(guard_hash.CONFIGURED)
+    ]) + "\n"
     for ln in text.splitlines()[1:]:
         rel = ln.split("  ", 1)[1]
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -459,7 +530,8 @@ def test_an_edit_on_the_configured_line_still_shows(tmp_path, line, named):
     hook = root / ".claude" / "hooks" / "protect-files.sh"
     if line is not None:
         body = hook.read_text(encoding="utf-8").replace("PY='C:/Python310/python.exe'", line)
-        hook.write_text(body, encoding="utf-8")
+        hook.write_bytes(body.encode("utf-8"))
+        assert hook.read_bytes() == body.encode("utf-8"), "fixture must preserve exact line endings"
     differ = session._guard_drift(str(root))[1]
     assert differ == (["protect-files.sh"] if named else []), differ
 

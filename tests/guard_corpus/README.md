@@ -54,7 +54,9 @@ the engine agrees with itself; it cannot go red for the reason it exists. If a r
 fix the row on the strength of the table, never by pasting what the engine printed.
 
 - `text` is exact, compared byte for byte through the real wrapper (`record.fire`).
-- `rules` is the set of rule ids that fire; an `allow` row names none.
+- `rules` is the set of rule ids that fire; an `allow` row names none. Approved
+  unknown-tool notices carry `evaluation: "unguarded"` and no rule IDs, explicitly
+  recording the coverage gap. They may allow or advise and never claim a refusal.
 - `supersedes` names a legacy row whose verdict this row deliberately changes. The payload, hook and layout
   must be identical, so the row really re-specifies that case. The supersession must be **live**: the engine
   must differ from the legacy verdict (decision or rule set), or `test_supersessions_are_live` fails.

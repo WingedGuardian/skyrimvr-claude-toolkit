@@ -169,7 +169,9 @@ MUTANTS = {  # id -> (exact text in the template, replacement, the row that must
                   "out, code, err = render_allow(\"\")", "fault:engine-crash"),
     "ignore-exit-code": ("    if cp.returncode != 0:\n        raise RuntimeError(\"engine exited {}\".format(cp.returncode))\n",
                          "", "fault:engine-allow-but-exit-1"),
-    "ignore-version": ("v.get(\"v\") != 1 or ", "", "fault:engine-wrong-version"),
+    # Keep the independent integer-type guard; this counterfactual removes
+    # only the protocol value check, whose following `or` now starts a new line.
+    "ignore-version": (" or v.get(\"v\") != 1\n", "\n", "fault:engine-wrong-version"),
     "deny-to-allow": ("    if decision == \"deny\":\n        return _checked(render_block(reason))",
                       "    if decision == \"deny\":\n        return _checked(render_allow(context))", "case:decoy-plugin-write"),
     "ignore-marker": ("    if not text.startswith(MARKER):\n        raise RuntimeError(\"engine answered without the marker\")\n",

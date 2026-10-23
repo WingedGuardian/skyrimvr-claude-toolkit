@@ -909,9 +909,13 @@ SSE, AE, and VR saves all use the same `.ess` format with LZ4 compression. The c
 
 ### What Cannot Be Done (Without Full Parser)
 
+These are limits of raw byte-scanning, not of the ReSaver CLI below. Use its
+structured parse and reference index for Papyrus data, record browsing and edits;
+byte-pattern matches alone do not establish parsed references or orphan counts.
+
 - Parse structured Papyrus instance data (variable values, active effect state)
 - Edit and write back a valid save (requires full format understanding)
-- Browse by record type (use ReSaver for that — Java GUI)
+- Browse by record type (use the structured ReSaver CLI or its Java GUI)
 
 ### Common Debugging Use Cases
 
@@ -952,7 +956,7 @@ ops always run the STOCK jar** so an authored parse fix can never reach `ChangeF
 corruption safety. If the overlay can't compile against your ReSaver version, the wrapper falls back
 to stock parsing automatically (basic ops unaffected).
 
-**Write safety:** every write op is **dry-run by default** and only applies with `--apply`. An applied write always goes to a **NEW file** — it never overwrites the input save. Every `--apply` is additionally **verify-gated**: the output is re-read and compared to the written model, and on any unintended divergence the file is deleted and the op fails (fail-to-write beats silent corruption). As always, **loading the result in-game is the final validation gate.**
+**Write safety:** every write op is **dry-run by default** and only applies with `--apply`. An applied write always goes to a **NEW file** — it never overwrites the input save. Every `--apply` is additionally **verify-gated**: a private candidate is re-read and compared to the written model. Failed candidates are quarantined in their owned staging directory with recovery evidence; existing destinations stay intact and no successful publication is reported. As always, **loading the result in-game is the final validation gate.**
 
 **Performance:** a full structured parse of a ~45MB save runs in about **2.4s**, including building the cross-reference index — fast enough to use interactively during debugging.
 
@@ -1606,10 +1610,19 @@ DevBench (alandtse, Nexus SE 181326) exposes the **running** game over a localho
 Everything below was learned during live sessions on a heavy (700+ plugin) VR load order. Read this
 before your first live session — several of these cost a force-killed game to discover.
 
-### Versions and what changed in 1.16-1.24 (read from the changelog/README, 2026-10-05; not run live)
-- Latest seen: **1.24.0** (2026-10-04). Toolkit floor stays **1.11.0** (`alive`; off-thread since 1.12.0).
-  No removals or renames in 1.16-1.24: ports, `POST /api/tool/<tool>`, `/api/health` fields, `/api/tools`,
-  console exec/capture/read and the 400/504 meanings are all unchanged.
+### Versions and what changed in 1.16-1.28 (read from the changelog/README, 2026-10-05; 1.25-1.28 added 2026-10-14; not run live)
+- Latest seen: **1.28.0** (2026-10-11; the recorded API/docs reference moved from 1.24.0 on 2026-10-14).
+  Toolkit floor stays **1.11.0** (`alive`; off-thread since 1.12.0).
+  No removals or renames in 1.16-1.28: ports, `POST /api/tool/<tool>`, `/api/health` fields, `/api/tools`,
+  console exec/capture/read and the 400/504 meanings are all unchanged (1.25-1.28 checked by diffing the
+  README and `bridge/src/tools-fallback.json` at v1.24.0 against v1.28.0; no new tool, no removed argument).
+  **One behaviour change: Papyrus `call` omitted optionals (1.25, #118)** -- see *Papyrus `call` gotchas*.
+  1.25-1.28 otherwise add: `camera frame`/`camAngles` (1.25); `inspect` actor alive/loaded3D (1.25), `lights`
+  and per-hand `hands` (1.26-1.27), attack state/stamina (1.28); `game setTimeScale` returns a
+  `generation`/`state` snapshot and waits `waitMs` instead of 504-ing while the engine ramps, unless
+  `requireReached:true` (1.26); `console exec capture:true` returns `lines` itself (1.28, #130); papyrus `null`
+  for `None` (#129) and forms behind custom scripts (#128) (1.28); injected keys carry an empty user event (1.28, #127).
+  CommonLibSSE-NG was not bumped in 1.25-1.28 (the Address Library note below still holds).
 - **Update the VR Address Library first.** DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0. Newest VR
   Address Library seen: **0.276.1** (2026-10-04).
 - New: `game loadLast` / `advanceTime` (1.17) / `setTimeScale` / `getTimeScale` (1.22, 0.1..3.0, leased, 409
@@ -1693,9 +1706,15 @@ before your first live session — several of these cost a force-killed game to 
   `{"form":"0x14"}` (or an EditorID), or `"selected"` for the console/crosshair ref (set via `prid`).
 - Unlike console `cgf`, **the return value comes back** (`{called, returned, returnedType}`) — this is
   what makes read-modify-read loops possible without a play-session round trip.
-- **Omitted trailing optional params are padded with neutral defaults** (`None`/`0`/`0.0`/`false`/`""`).
-  For reference ops (`MoveTo`, `Disable`, `Kill`) a short arg list therefore **silently no-ops** —
-  pass every optional whose real default isn't neutral (e.g. `StringUtil.Substring`'s `-1`).
+- **Omitted trailing optional params: DevBench <= 1.24 padded them with neutral defaults**
+  (`None`/`0`/`0.0`/`false`/`""`), so for reference ops (`MoveTo`, `Disable`, `Kill`) a short arg list
+  **silently no-opped**. **Since 1.25 (#118, read from the changelog/README, not run live)** an omitted
+  param is filled only from a table of known vanilla/SKSE defaults (`PlaceAtMe` `aiCount=1`, `MoveTo`
+  `abMatchRotation=true`); any other omitted param **refuses the call with 400 and nothing runs**. Pass every
+  param explicitly, or send `fillNeutral:true` for the old padding. The answer lists fills under `filledArgs`
+  (`source: table|neutral`) and a `warning` for neutral guesses. Still pass explicit values for non-neutral
+  defaults (e.g. `StringUtil.Substring`'s `-1`). Do not assume which build is installed: a 1.11-1.24
+  install still pads silently.
 - Array returns may not serialize (an array-returning function can come back as `none`) — probe with a
   scalar-returning function instead of concluding the state is absent.
 
@@ -2042,7 +2061,14 @@ hook processes left suspended, `UserProcessorTime = 00:00:00`, OPEN with no know
 `durationMs` is measured differently for a cancellation than for a success. **That question is
 unresolved** — do not treat the fork count as the explanation.
 
-## KNOWN, NOT FIXED: verify-release.sh's hook floor is never actually derived
+## SUPERSEDED: verify-release.sh's historical hook-floor derivation defect
+
+The current verifier no longer reads that missing extracted-tree workflow or
+falls back to five hooks. Both release paths call `tools/check-release-payload.py`.
+Its explicit Claude/Codex floors are checked against the actual shipped tree by
+`tests/test_release_payload.py`; this is a shared checked inventory, not a claim
+that a workflow floor is derived at runtime. The finding below records the old
+implementation and is retained as history.
 
 Found by the v3.9.1 release review, 2026-09-09. **Deferred deliberately — fix this before
 `verify-release.sh` certifies another release.**
@@ -2070,3 +2096,35 @@ hardcoded `-ge 4` that was one release stale the moment it shipped.
 where `.github` actually lives, and the header already says that is the intent. Then prove it by
 mutation: change `release.yml`'s floor and require the named check to go red. A derivation that
 cannot be shown to follow its source is a hardcoded value with extra steps.
+
+## Deadline clocks start at the spawn, not at the script's first line (T14b, 2026-10-15)
+
+MEASURED at 4x CPU load (16 burners pinned to 4 of 28 cores): the Codex Windows PowerShell 5.1 entry refused a hung engine **51.3 s after the spawn**
+against a 50 s margin (definition timeout 60 s). Its own clock started at the script's first line, after seconds of PowerShell start-up. Codex's
+timeout runs from the spawn, so any wrapper must date its deadline from its own **process start time** (`Process.StartTime`, guarded: never later
+than now, ignored if the read fails or is implausible). Test it by delaying inside the same process before the script runs, not by sleeping in the test.
+
+## A hang before the watchdog fails open, and it does not need load (T14b, 2026-10-15)
+
+MEASURED on the pre-fix tree `544efd4`: a hang before `run.py` arms its own timer ran to the harness cap (80 s; 140 s for session-kb-guard) on all six
+Claude wrappers at idle, 1x and 2x alike, and for the three gate hooks all 9 runs at every level failed open (the agent gave up at 60 s and the command
+ran). A load gate that sweeps only load levels, or only the failure paths that load makes worse, would not have shown it. Run every failure path at
+idle too.
+
+## A "kill latency" probe measures process start-up, not the bound (T14b, 2026-10-15)
+
+MEASURED: a 3 s bound on a native sleeper ended in 3.4-5.4 s at 2x on the pre-fix tree and in 3.7-10.6 s at 4x and 8x on both trees. The extra time is
+process start under load. It does not separate a working bound from a broken one; the scenario cells do. The investigation's 18-227 s kill times did not
+reproduce here (INFERRED: the Git 2.55 / MSYS update may have changed it; not tested).
+
+## Mutation anchors that quote a pinned value go stale when the pin moves (2026-10-14)
+
+The Git pin move changed an installer SHA-256 and added its own mutation twin, but an older mutation still named the previous checksum. The branch's
+targeted test run was green; the merged full suite failed `test_every_mutation_anchor_occurs_exactly_once[t6d-manual-steps-lose-their-hash]`. After any
+pin bump, grep `tests/` for the old value and run the anchor test (about 6 s for 2,521 anchors).
+
+## Long unattended work: use a detached process, not the agent's background shell (2026-10-14)
+
+OBSERVED: Claude Code stopped a background `until ...; sleep` wait when the machine ran low on memory (a game was running); the detached
+`pwsh -File` queue it was watching was unaffected. Launch overnight queues as detached processes that write their own log, and keep the agent's
+background shell for short waits.

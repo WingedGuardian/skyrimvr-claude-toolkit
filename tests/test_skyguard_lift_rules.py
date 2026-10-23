@@ -12,12 +12,11 @@ No ACL or attribute is ever applied here: the rules are pure.
 """
 import json
 import sys
-import tempfile
 import time
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, scratch_dir
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, codes, codex_rules, engine, lift_rules, paths, rules, shell_rules, state  # noqa: E402
@@ -26,7 +25,7 @@ from skyguard.verdict import Verdict  # noqa: E402
 
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
 SHELL = {"Bash": "bash", "PowerShell": "powershell"}
-NOHOME = tempfile.mkdtemp(prefix="p6t11-nohome-")
+NOHOME = scratch_dir("p6t11-nohome-")
 ENV0 = {"USERPROFILE": NOHOME}
 LIFT_IDS = ("S-LIFT-NOTE", "S-LIFT-RAW", "S-LIFT-PERMANENT", "S-LIFT-UNLOCKCMD")
 

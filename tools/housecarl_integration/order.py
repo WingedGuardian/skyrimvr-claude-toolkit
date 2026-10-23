@@ -8,7 +8,8 @@ from pathlib import Path
 import struct
 
 from . import Refusal
-from .files import contained, plain_plugin
+from .files import contained, plain_plugin, sha
+from modding_harness.durable import identity
 
 BASE = ("Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm")
 
@@ -121,13 +122,17 @@ def capture(config):
     if not fixed or fixed[0].casefold() != "skyrim.esm":
         raise Refusal("Skyrim.esm is missing from the configured Data folder.")
     active = fixed + [n for n, enabled in rows if enabled and n.casefold() not in {x.casefold() for x in fixed}]
-    paths, headers = {}, {}
+    paths, headers, content = {}, {}, {}
     for name in active:
         if name.casefold() not in disk:
             raise Refusal("Enabled plugin missing from deployed Data: " + name)
         path = disk[name.casefold()]
+        before = identity(path)
         paths[path.name] = path
         headers[path.name] = plugin_header(path)
+        content[path.name] = sha(path)
+        if identity(path) != before:
+            raise Refusal("Plugin changed during capture; retry: " + path.name)
     if config["edition"] == "VR" and any(h["light"] for h in headers.values()):
         if not any((Path(p) / "SKSE/Plugins/skyrimvresl.dll").is_file() for p in [data, *priority]):
             raise Refusal("Light plugins on VR require installed Skyrim VR ESL Support; not found.")
@@ -149,7 +154,11 @@ def capture(config):
         extra += p.read_bytes() if p.is_file() else b""
     if ccc.is_file():
         extra += ccc.read_bytes()
-    digest = hashlib.sha256(raw + extra + json.dumps([config["edition"], stamps, headers], sort_keys=True).encode()).hexdigest()
+    digest = hashlib.sha256(raw + extra + json.dumps([config["edition"], stamps, headers, content], sort_keys=True).encode()).hexdigest()
+    for name, path in paths.items():
+        before = identity(path)
+        if sha(path) != content[name] or identity(path) != before:
+            raise Refusal("Plugin bytes changed during capture; retry: " + name)
     if source.read_bytes() != raw:
         raise Refusal("Wrye-managed plugins.txt changed during capture; retry.")
     snap = Snapshot(names, paths, headers, digest, str(source), [n for n, a in rows if not a], stamps)

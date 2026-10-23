@@ -105,10 +105,9 @@ def _p(*body):
      [("add", "a.txt"), ("add", "evil.esp")]),
     (_p("  *** Update File: victim.esp", "@@", "-v", "+X"), [("update", "victim.esp")]),
     (_p("*** Update File: victim.esp", "  *** Move to: moved.esp", "@@", "-v", "+X"),
-     [("move_from", "victim.esp"), ("move_to", "moved.esp")]),
+     [("update", "victim.esp")]),
     (_p("*** Update File: v.esp", "@@", "-v", "+X", " *** Delete File: other.esp"),
-     [("update", "v.esp"), ("delete", "other.esp")]),     # over-reports a context line: safe direction
-    (_p("*** Add File:evil.esp", "+a"), [("add", "evil.esp")]),
+     [("update", "v.esp")]),  # Native Codex reads this as context, not a delete.
     (_p("\u00a0*** Add File: Data/x.esp", "+a"), [("add", "Data/x.esp")]),
 ])
 def test_indented_headers_are_headers_like_codex_reads_them(patch, expected):
@@ -117,6 +116,7 @@ def test_indented_headers_are_headers_like_codex_reads_them(patch, expected):
 
 @pytest.mark.parametrize("bad", [
     _p("*** Add File: a.txt", "+a", "***Add File: Data/x.esp", "+b"),      # no space after ***
+    _p("*** Add File:evil.esp", "+a"),                                    # Codex requires a separator
     _p("*** add file: Data/x.esp", "+a"),                                  # lowercase
     _p("*** Add File: a.txt", "+a", "*** End Patch", "*** Add File: Data/x.esp", "+b"),   # End mid-patch
     _p("*** Begin Patch", "*** Add File: a.txt", "+a"),                    # second Begin

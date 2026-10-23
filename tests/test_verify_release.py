@@ -43,7 +43,14 @@ def payload(tmp_path_factory):
     # Only what a release can ship: git-tracked files. CI tees behavioral.log / collect.log into the checkout
     # BEFORE this suite runs (ci.yml), and those logs name the runner's home -- copied in, they were reported as a
     # leak in the "artifact" (CI run 38178385999, 5 tests), a defect of this fixture and not of any release.
-    tracked = subprocess.run(["git", "ls-files", "-z"], cwd=str(REPO), capture_output=True, check=True).stdout
+    if (REPO / ".git").exists():
+        tracked = subprocess.run(["git", "ls-files", "-z"], cwd=str(REPO), capture_output=True, check=True).stdout
+    else:
+        # Supplied by the mutation instrument from its real source index, outside
+        # the copied payload. Disk existence alone is not release membership.
+        inventory = os.environ.get("TOOLKIT_TEST_TRACKED_FILES")
+        assert inventory, "Gitless payload fixture requires the explicit source inventory"
+        tracked = Path(inventory).read_bytes()
     keep = {t for t in tracked.decode("utf-8").split("\0") if t}
     for f in sorted(root.rglob("*"), reverse=True):
         if f.is_file() and f.relative_to(root).as_posix() not in keep:

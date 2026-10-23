@@ -215,7 +215,8 @@ def test_coverage_is_degraded_when_one_call_has_no_line(tmp_path):
 
 def test_a_blocked_call_leaves_a_line_but_no_item_so_it_is_not_counted_as_called(tmp_path):
     _session(tmp_path, "codex", SID, EXEC_DENY, ["Bash"])
-    assert _cov(tmp_path, "codex") == [(SID, "exec", 1, 0, "NOT EXERCISED")]
+    # No completed item can be matched to that receipt.
+    assert _cov(tmp_path, "codex") == [(SID, "exec", 0, 0, "NOT EXERCISED")]
 
 
 def test_no_calls_is_not_exercised(tmp_path):
@@ -406,9 +407,45 @@ def _append(f, line):
 def test_coverage_excludes_refused_calls_from_hooked(tmp_path):
     """A refused call leaves no transcript item, so counting its hook record as 'hooked' let one refusal hide
     one unguarded call: hooked 2 / called 2 HEALTHY. The refusal is recorded and subtracted."""
-    f = _session(tmp_path, "codex", SID, EXEC, ["Bash", "mcp__x"])
-    _append(f, "1800000009.0 refused mcp__x")
+    f = _session(tmp_path, "codex", SID, EXEC, ["Bash", "apply_patch"])
+    _append(f, "1800000009.0 refused Bash")
     assert _cov(tmp_path, "codex") == [(SID, "exec", 1, 2, "DEGRADED")]
+
+
+def test_shell_receipts_cannot_cover_unobserved_mcp_calls(tmp_path):
+    def three(rows):
+        item = next(row for row in rows if row.get("payload", {}).get("item", {}).get("type") == "McpToolCall")
+        rows.extend([json.loads(json.dumps(item)), json.loads(json.dumps(item))])
+    rollout = _rewrite(EXEC_MCP, tmp_path / "mcp.jsonl", three)
+    assert transcripts.count_calls("codex", rollout)[1] == {"mcp__probe__echo": 3}
+    _session(tmp_path, "codex", SID, rollout, ["Bash"] * 3)
+    assert _cov(tmp_path, "codex") == [(SID, "exec", 0, 3, "DEGRADED")]
+
+
+def test_receipt_for_another_mcp_server_cannot_cover_the_requested_tool(tmp_path):
+    _session(tmp_path, "codex", SID, EXEC_MCP, ["mcp__other__echo"])
+    assert _cov(tmp_path, "codex") == [(SID, "exec", 0, 1, "DEGRADED")]
+
+
+@pytest.mark.parametrize("tool", ["tools.bash", "tools.apply_patch", "exec_command"])
+def test_mcp_native_looking_tool_names_keep_their_identity(tmp_path, tool):
+    def rename(rows):
+        for row in rows:
+            item = row.get("payload", {}).get("item", {})
+            if item.get("type") == "McpToolCall":
+                item["tool"] = tool
+    rollout = _rewrite(EXEC_MCP, tmp_path / "named-mcp.jsonl", rename)
+    _session(tmp_path, "codex", SID, rollout, ["Bash", "apply_patch"])
+    assert _cov(tmp_path, "codex")[0][2:] == (0, 1, "DEGRADED")
+    _session(tmp_path, "codex", SID, rollout, ["mcp__probe__" + tool])
+    assert _cov(tmp_path, "codex")[0][2:] == (1, 1, "HEALTHY")
+
+
+def test_exact_mcp_receipt_and_shell_carried_filechange_remain_healthy(tmp_path):
+    _session(tmp_path, "codex", SID, EXEC_MCP, ["mcp__probe__echo"])
+    assert _cov(tmp_path, "codex") == [(SID, "exec", 1, 1, "HEALTHY")]
+    _session(tmp_path, "codex", SID, EXEC_PATCH, ["Bash"] * 5)
+    assert _cov(tmp_path, "codex") == [(SID, "exec", 5, 5, "HEALTHY")]
 
 
 def test_a_refusal_alone_does_not_make_a_session_degraded(tmp_path):

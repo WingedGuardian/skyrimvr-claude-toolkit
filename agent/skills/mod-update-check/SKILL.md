@@ -5,13 +5,39 @@ description: Use before updating, installing or adding a Skyrim mod on an existi
 
 # Mod update check
 
-Every mod is judged **against the user's save, load order and install**, never in the abstract.
-Assume the current playthrough continues unless the user says otherwise: most updates happen
-mid-playthrough, and that is where they do damage.
+Every mod is judged **against this user's situation, save, load order and install**, never in the
+abstract.
 
-**Read first:** `KNOWLEDGEBASE.md` → *Updating or Adding Mods on an Existing Save: Safety Rubric*.
+## Step 0: establish the situation and intent before proposing changes
+
+Most updates happen mid-playthrough, and that is where they do damage. But not every user is
+mid-playthrough, and the same user changes situation (a new character, a throwaway test save, a
+rebuild). The protections that matter for a kept save are wrong for a new game and missing for a
+kept one, so assume neither.
+
+1. **Read `## My preferences` in `KNOWLEDGEBASE.local.md`.** It holds what the user told you: whether
+   a save is being kept, what this session is for, and standing rulings ("never remove or reorder
+   mods on this save", "new mods go last", and so on). Those rulings decide what you may even
+   propose, and they outrank the rubric's defaults: the rubric says what a change COSTS, the
+   preferences say what the user will ACCEPT.
+2. **Check it still fits this request.** Use the current request and session context as well as
+   the recorded preferences. A missing file alone is not a reason to ask again. If a material fact
+   remains unknown or contradictory, ask only what you cannot establish; continue independent
+   read-only work while waiting:
+   - Is there a save you want to keep playing, or is this a new or throwaway game?
+   - What is this session for: updates only, new mods too, or fixing one problem?
+   - Is there anything you do not want touched: removals, load-order changes, particular mods?
+3. **Record the answers** in `## My preferences`, dated, and apply them. A new ruling stated mid-session
+   goes there in the same turn, so the next session starts with it. Keep the section short: the
+   session context includes at most 4,096 bytes of its body; read the full section if truncated.
+4. **If a ruling blocks the move that looks right, say so and propose the compliant one.** Do not queue
+   work that breaks a ruling (for example, offering a new mod as the next step while updates are still
+   open). When a material ambiguity remains, ask once and record the answer. These choices do not
+   waive verified backups, write guards or scoped authorization.
+
+**Then read:** `KNOWLEDGEBASE.md` → *Updating or Adding Mods on an Existing Save: Safety Rubric*.
 The rubric maps what an update CHANGES to its save footprint and a verdict. This skill is the
-procedure; the rubric is the law.
+procedure; the rubric prices each change; the user's rulings say which changes are allowed at all.
 
 **Source-of-truth order:** what is on disk (`Data/`, the SKSE log, the load order) > the Nexus API >
 the mod manager's records. A manager tracks what it installed, not what was copied in by hand or

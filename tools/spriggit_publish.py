@@ -1,9 +1,12 @@
 """Validate and transactionally publish Spriggit output; no binary-format editing."""
 import argparse
+import ctypes
+import errno
 import hashlib
 import os
 from pathlib import Path
 import shutil
+import stat
 import sys
 import tempfile
 import uuid
@@ -61,6 +64,66 @@ def _key(target):
     return hashlib.sha256(os.path.normcase(str(target)).encode("utf-8")).hexdigest()[:16]
 
 
+def _rename_new(source, target):
+    """Rename without replacing even an empty directory created by another writer."""
+    if os.name == "nt":
+        os.rename(source, target)  # Windows rename refuses an existing target.
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform.startswith("linux"):
+        rename = getattr(libc, "renameat2", None)
+        args = (-100, os.fsencode(source), -100, os.fsencode(target), 1)  # AT_FDCWD, RENAME_NOREPLACE
+        types = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+    elif sys.platform == "darwin":
+        rename = getattr(libc, "renamex_np", None)
+        args = (os.fsencode(source), os.fsencode(target), 4)  # RENAME_EXCL
+        types = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+    else:
+        rename = None
+    if rename is None:
+        raise OSError(errno.ENOTSUP, "exclusive publication rename unavailable", str(target))
+    rename.argtypes, rename.restype = types, ctypes.c_int
+    if rename(*args) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(target))
+
+
+def _state(target):
+    """Identity and bytes of a regular artifact tree; a changing read is not evidence."""
+    target = Path(target)
+    try:
+        root = target.lstat()
+    except FileNotFoundError:
+        return None
+    rows = []
+
+    def visit(path, before):
+        if stat.S_ISLNK(before.st_mode) or getattr(before, "st_file_attributes", 0) & 0x400:
+            raise ValueError("linked destination artifact: " + str(path))
+        digest = None
+        if stat.S_ISREG(before.st_mode):
+            h = hashlib.sha256()
+            with path.open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    h.update(block)
+            digest = h.hexdigest()
+        elif stat.S_ISDIR(before.st_mode):
+            for child in sorted(path.iterdir()):
+                visit(child, child.lstat())
+        else:
+            raise ValueError("nonregular destination artifact: " + str(path))
+        after = path.lstat()
+        fields = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if any(getattr(before, field) != getattr(after, field) for field in fields):
+            raise ValueError("destination changed while reading: " + str(path))
+        # Renaming changes ctime on POSIX; identities, names, mtimes and content must agree.
+        rows.append((path.relative_to(target).as_posix(), before.st_dev, before.st_ino,
+                     before.st_mode, before.st_size, before.st_mtime_ns, digest))
+
+    visit(target, root)
+    return tuple(rows)
+
+
 def check_paths(input_path, output_path):
     source = Path(input_path).resolve()
     target = Path(output_path)
@@ -84,8 +147,7 @@ def check_paths(input_path, output_path):
 def publish(source, target):
     source, target = Path(source), Path(target)
     validate(source)
-    if target.is_symlink():
-        raise ValueError("linked destination")
+    _state(target)  # Reject linked/reparse destinations before resolving their paths.
     target = target.resolve()
     if target == Path(target.anchor):
         raise ValueError("root destination")
@@ -113,6 +175,7 @@ def publish(source, target):
 
 
 def _publish_locked(source, target, key):
+    observed = _state(target)
     holder = Path(tempfile.mkdtemp(prefix=".spriggit-stage-" + key + "-", dir=target.parent))
     stage = holder / target.name
     backup = target.parent / (".spriggit-previous-" + key + "-" + uuid.uuid4().hex)
@@ -123,25 +186,28 @@ def _publish_locked(source, target, key):
         else:
             shutil.copy2(source, stage)
         validate(stage)
-        if target.exists():
-            os.replace(target, backup)
+        if _state(target) != observed:
+            raise ValueError("destination changed during staging; publication refused")
+        if observed is not None:
+            _rename_new(target, backup)
             moved = True
         try:
-            os.replace(stage, target)
-        except BaseException:
+            if moved and _state(backup) != observed:
+                raise ValueError("destination changed before publication; restoring previous output")
+            _rename_new(stage, target)
+        except BaseException as error:
             if moved:
-                os.replace(backup, target)
+                try:
+                    _rename_new(backup, target)
+                except OSError as recovery:
+                    raise ValueError("publication failed; rollback could not replace a new destination; previous output retained at "
+                                     + str(backup) + ": " + str(recovery)) from error
                 moved = False
             raise
         if moved:
-            try:
-                if backup.is_dir():
-                    shutil.rmtree(backup)
-                else:
-                    backup.unlink()
-            except OSError as error:
-                print("[spriggit-cli] cleanup warning; publication committed, retained " +
-                      str(backup) + ": " + str(error), file=sys.stderr)
+            # A writer may still hold an old file or directory handle. Never delete
+            # its bytes by cleaning up this previous destination after publication.
+            print("[spriggit-cli] publication committed; previous output retained at " + str(backup), file=sys.stderr)
     finally:
         try:
             shutil.rmtree(holder)

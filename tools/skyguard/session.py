@@ -185,6 +185,30 @@ def _relock(root):
     return ""
 
 
+def _start_relock(root, sf):
+    """Revoke permissions and retire obligations under the same writer lock."""
+    from . import lock, state
+    lock._assert_sandbox(sf)
+    with state.locked(str(sf)):
+        st = state.read(str(sf))
+        engaged = _engaged(root) and not st.lock_disabled
+        lifted, drift = _scan(root, st.lifts) if engaged else ([], [])
+        try:
+            failure = _relock(root) if engaged else ""
+        except (OSError, ValueError) as exc:
+            failure = "Vanilla-file relock FAILED: " + type(exc).__name__
+        current = state.read(str(sf))
+        if not current.rejected and (current.lifts or failure):
+            # Expired records grant no permission; they retain exactly what a
+            # later tool call must retry after a failed filesystem operation.
+            now = time.time()
+            keep = [{"kind": "lock", "reason": "session relock retry", "session_id": "session-relock",
+                     "agent": "system", "created": now, "expires_at": now}] if failure else []
+            persistent = {"lock_disabled": dict(current.lock_disabled)} if current.lock_disabled else {}
+            state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
+        return st, lifted, drift, failure
+
+
 def layer2_start(project, source="startup"):
     """The Layer 2 half of SessionStart -> banner strings (one or two lines each). Never raises: a failure is
     itself a banner. `compact` (R9) changes nothing and reports only the standing persistent-disable notice.
@@ -196,18 +220,13 @@ def layer2_start(project, source="startup"):
         root = str(project)
         sf = Path(root) / ".skyguard" / "state.json"
         st = state.read(str(sf))
-        # Clear old lifts before scanning. Re-read under the writer lock so a
-        # newer CLI enable/disable decision cannot be overwritten by this start.
-        if source != "compact" and not st.rejected and st.lifts:
-            try:
-                lock._assert_sandbox(sf)
-                with state.locked(str(sf)):
-                    st = state.read(str(sf))
-                    if not st.rejected and st.lifts:
-                        persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
-                        state.write(str(sf), {"v": 1, "lifts": [], "persistent": persistent})
-            except (ValueError, OSError):
-                pass                                    # session-bound lifts still expire
+        lifted, drift, failure = [], [], ""
+        checked = False
+        # Keep the state lock through relock, so a new unlock cannot be undone
+        # between reading its permission and touching the filesystem.
+        if source != "compact" and not st.rejected and (st.lifts or _engaged(root)):
+            st, lifted, drift, failure = _start_relock(root, sf)
+            checked = True
         disabled = None
         if st.lock_disabled:
             try:
@@ -219,18 +238,19 @@ def layer2_start(project, source="startup"):
         if source == "compact":
             return [disabled] if disabled else []
         engaged = _engaged(root) and not disabled
-        lifted, drift = _scan(root, st.lifts) if engaged else ([], [])
-        # Relock and report using the state captured before the clear.
-        failure = _relock(root) if engaged else ""
+        if not checked:
+            lifted, drift = _scan(root, st.lifts) if engaged else ([], [])
+            failure = _relock(root) if engaged else ""
         # step 3: the banners, in the order the brief lists them
         guards = [x for x in st.lifts if x["kind"] == "guards"]
         if guards:
             banners.append('Guards were left OFF by an earlier session (recorded reason, untrusted: "%s"); they are back ON.'
                            % _clean(guards[0]["reason"]))
         if lifted:
-            banners.append("%d vanilla files were left unlocked; relocked." % len(lifted))
+            banners.append("%d vanilla files were left unlocked; %s." % (len(lifted), "relock pending" if failure else "relocked"))
         if drift:
-            banners.append(_clip("%d vanilla files were unlocked outside skyguard (%s); relocked." % (len(drift), _names(drift))))
+            banners.append(_clip("%d vanilla files were unlocked outside skyguard (%s); %s." %
+                                 (len(drift), _names(drift), "relock pending" if failure else "relocked")))
         mine = [x for x in st.lifts if x["kind"] == "lock" and x["session_id"] == lock.USER_SESSION]
         if mine:
             every = any(x.get("files") is None for x in mine)
@@ -294,7 +314,7 @@ def run(project, source, bash, audit):
 
 def run_status(project, source, bash, audit, root=None):
     """-> (text, status, code). status is what the engine reports to the canary: `failed` when the guard did
-    not run at all, `partial` when it ran but snapshotted nothing (kb-guard exit 2), else `evaluated`.
+    not run at all, `partial` when snapshot coverage is incomplete, else `evaluated`.
     `root`: the install the guard reads its paths file from (run.py's --root); the legacy-location notice is keyed on
     it, not on the session's project folder (T8 review M2). None: the project (the two normally coincide)."""
     banners = "\n".join(layer2_start(project, source))
@@ -312,10 +332,12 @@ def run_status(project, source, bash, audit, root=None):
     raw = r.stdout.rstrip(b"\n")
     output = raw.decode("utf-8", "replace")
     lines = ([banners] if banners else []) + ([output] if output else [])
-    if r.returncode == 2:
-        lines.append("KB GUARD: the above means NOTHING was snapshotted this session -- unchecked, not clean.")
+    incomplete = (r.returncode != 0 and not (r.returncode == 1 and "KB GUARD -- ALARM:" in output
+                                           and "KB GUARD: FAILED to store" not in output))
+    if incomplete:
+        lines.append("KB GUARD: snapshot coverage is incomplete this session -- unchecked, not clean.")
     flat = raw.replace(b"\n", b" ")[:200]        # bash: tr '\n' ' ' | head -c 200
     audit.raw(b"[" + audit.stamp().encode() + b"] " + HOOK.encode() + b" rc=" + str(r.returncode).encode()
               + b" " + flat + b"\n")
-    status, code = ("partial", "session.NOT_SNAPSHOTTED") if r.returncode == 2 else ("evaluated", "session")
+    status, code = ("partial", "session.NOT_SNAPSHOTTED") if incomplete else ("evaluated", "session")
     return _with_prefs("\n".join(lines), project, audit), status, code

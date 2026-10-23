@@ -99,11 +99,12 @@ def _scenario_lift_prune(lock, bed):
     assert lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=now).exit == 0
     from skyguard import state
     lifts = state.read(str(_state_file(bed))).lifts
-    assert len(lifts) == 1, "an expired lift was kept (%d lifts)" % len(lifts)
+    assert len(lifts) == 1, "an obsolete lift was kept (%d lifts)" % len(lifts)
     for i in range(400):
         res = lock.unlock(str(bed.root), ["Skyrim.esm"], SESSION, now=now + i)
         assert res.exit == 0, "unlock #%d failed: %s" % (i, res.lines)
-    assert len(state.read(str(_state_file(bed))).lifts) <= 100
+        assert len(state.read(str(_state_file(bed))).lifts) <= 100, "an obsolete lift was kept beyond the live-record limit"
+    assert len(state.read(str(_state_file(bed))).lifts) <= 100, "an obsolete lift was kept beyond the live-record limit"
     assert _state_file(bed).stat().st_size < state.MAX_BYTES
 
 
@@ -383,7 +384,7 @@ def test_mutation_l2_lock_undo(bed, tmp_path, monkeypatch):
 @needs_windows
 def test_mutation_l2_state_lift_prune(bed, tmp_path):
     m = _mutant(tmp_path, "def _live_lifts(lifts, now):\n", "def _live_lifts(lifts, now):\n    return list(lifts)\n")
-    _red(_scenario_lift_prune, "expired lift was kept", m, bed)
+    _red(_scenario_lift_prune, "obsolete lift was kept", m, bed)
 
 
 @needs_windows

@@ -666,6 +666,7 @@ def _run_role(project, role, payload):
     finally:
         faulthandler.cancel_dump_traceback_later()
         sys.stdin, sys.stdout = saved
+    return out.getvalue()
 
 
 def _shadow_lines(project):
@@ -690,6 +691,26 @@ def test_a_tool_call_logs_one_shadow_line_not_one_per_hook(tmp_path):
     for role in ("protect-bash", "snapshot-before-tool"):
         _run_role(project, role, bash)
     assert len(_shadow_lines(project)) == 2
+
+
+@pytest.mark.parametrize("lift", [False, True], ids=["guards-on", "guards-off"])
+def test_a_websocket_monitor_uses_the_legacy_shadow_fallback(tmp_path, lift):
+    """A command-free Monitor stays outside ordered dispatch; inspect its output and audit without connecting."""
+    project = tmp_path / "root"
+    project.mkdir()
+    _start(project)
+    if lift:
+        code, text, _sf = _cli(tmp_path, "off")
+        assert code == 0, text
+    payload = {"tool_name": "Monitor", "session_id": SID,
+               "tool_input": {"ws": {"url": "ws://127.0.0.1:1/fixture-only"}}}
+    raw = _run_role(project, "protect-bash", payload).decode("utf-8").strip()
+    body = json.loads(raw).get("hookSpecificOutput", {}) if raw else {}
+    assert "permissionDecision" not in body
+    lines = _shadow_lines(project)
+    assert len(lines) == int(lift), lines
+    if lift:
+        assert lines[0].endswith("SHADOW: allow"), lines
 
 
 # STATE-REJECTED is logged when the reason changes, not on every hook call

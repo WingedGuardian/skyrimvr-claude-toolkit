@@ -27,3 +27,4 @@ class Request(NamedTuple):
     source: str = ""
     empty: bool = False
     failure: str = ""
+    execution_cwd_known: bool = True  # false: native host supplied session cwd only

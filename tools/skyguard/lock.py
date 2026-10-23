@@ -707,6 +707,21 @@ def _prior(st: FileState, path) -> dict:
 # ---- lock ------------------------------------------------------------------------------------------------------
 
 def lock_all(root, only=None) -> Result:
+    g = _guard(root)
+    if isinstance(g, Result):
+        return g
+    try:
+        sf = _skyguard_dir(root) / "state.json"
+        _assert_sandbox(sf)
+        with _state.locked(sf):
+            return _lock_all(root, only=only)
+    except Refused as exc:
+        return _res(2, str(exc))
+    except (OSError, ValueError) as exc:
+        return _res(2, "Lock operation did not complete (%s); inspect lock status." % type(exc).__name__)
+
+
+def _lock_all(root, only=None) -> Result:
     """Lock the derived target set. only: a predicate on a target's NAME -- lock just those (relock_expired); every
     other record in the manifest is kept as it is."""
     g = _guard(root)
@@ -784,11 +799,26 @@ MAX_LIFTS = 100
 
 
 def _live_lifts(lifts, now):
-    """The lifts worth keeping: not yet expired, and at most MAX_LIFTS (the newest). Without this every unlock
-    appends a lift for good and state.json hits state.MAX_BYTES after ~300, after which EVERY unlock fails."""
-    live = [x for x in lifts if x["expires_at"] > now]
+    """Prune old permissions, preserving expired lock obligations until relock succeeds.
+
+    Pending retries occupy one reserved slot, with the union of their scopes.
+    Evicted lock permissions expire immediately instead of losing their files.
+    """
+    pending = [x for x in lifts if x["kind"] == "lock" and _state.lift_expired(x, now)]
+    live = [x for x in lifts if not _state.lift_expired(x, now)]
     live.sort(key=lambda x: x["created"])
-    return live[-MAX_LIFTS:]
+    limit = MAX_LIFTS - 1 if pending or any(x["kind"] == "lock" for x in live[:-MAX_LIFTS]) else MAX_LIFTS
+    evicted, live = live[:-limit], live[-limit:]
+    pending += [dict(x, expires_at=min(x["expires_at"], now)) for x in evicted if x["kind"] == "lock"]
+    if len(pending) > 1:
+        merged = dict(pending[0], reason="expired lock retry", session_id="lock-relock", agent="system",
+                      created=min(x["created"] for x in pending), expires_at=min(now, *(x["expires_at"] for x in pending)))
+        if any(x.get("files") is None for x in pending):
+            merged.pop("files", None)
+        else:
+            merged["files"] = sorted({name.lower(): name for x in pending for name in x["files"]}.values())
+        pending = [merged]
+    return pending + live
 
 
 def _interactive() -> bool:
@@ -875,10 +905,13 @@ def unlock(root, names, session, now=None) -> Result:
         chosen = [n for n in universe.values() if os.path.lexists(str(data_dir / n))]
     now = time.time() if now is None else now
     try:
+        # A failure retains its expired record through the writer below.
+        relock_expired(root, now=now, wait=_state.LOCK_WAIT)
         sf = _skyguard_dir(root) / "state.json"
         _assert_sandbox(sf)
         with _state.locked(sf):                             # read-modify-write under the one state lock
             cur = _state.read(str(sf))
+            manifest, mstatus = _read_manifest(root)
             lift = {"kind": "lock", "reason": "lock unlock " + (_names_list(chosen, 3) if names else "all"),
                     "session_id": session,
                     "agent": "user" if session == USER_SESSION else (os.environ.get(ENV_AGENT, "cli") or "cli"),
@@ -888,10 +921,19 @@ def unlock(root, names, session, now=None) -> Result:
             persistent = {"lock_disabled": cur.lock_disabled} if cur.lock_disabled else {}
             lifts = _live_lifts(list(cur.lifts) + [lift], now)
             _state.write(str(sf), {"v": 1, "lifts": lifts, "persistent": persistent})
+            try:
+                return _unlock_files(root, data_dir, t, names, chosen, manifest)
+            except (OSError, ValueError) as exc:
+                return _res(1, "Unlock may be partial (%s); inspect lock status." % type(exc).__name__,
+                            "The recorded lift is retained for relock.")
     except Refused as e:
         return _res(2, str(e))
     except (ValueError, OSError) as e:
         return _res(2, "Could not record the lift (%s); nothing was unlocked." % e.__class__.__name__)
+
+
+def _unlock_files(root, data_dir, t, names, chosen, manifest):
+    """Undo file permissions while unlock() still owns the state writer lock."""
     done, failed, kept, settled = [], [], [], set()
     todo = [(data_dir / n, n) for n in chosen]
     if not names:
@@ -939,7 +981,7 @@ HOOK_STATE_WAIT = 0.2      # the per-call hook path never blocks on the state lo
 
 
 def relock_expired(root, now=None, wait=HOOK_STATE_WAIT):
-    """Relock what an EXPIRED lock lift opened, and clear that lift. -> None when no lock lift is due, else a Result
+    """Relock what an EXPIRED lock lift opened; retire it after success. -> None when none is due, else a Result
     whose data["relocked"] names the files locked again. Called by engine.shadow on every guarded hook call (a time
     compare when nothing is due); session start stays the backstop. A file a LIVE lock lift (any session) still
     covers stays open; nothing is relocked while the lock is persistently disabled or was never applied."""
@@ -960,20 +1002,25 @@ def relock_expired(root, now=None, wait=HOOK_STATE_WAIT):
         live = [x for x in st.lifts if x["kind"] == "lock" and not _state.lift_expired(x, now)]
         keep = [x for x in st.lifts if not (x["kind"] == "lock" and _state.lift_expired(x, now))]
         persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
-        _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})   # cleared first: one relock, not one per call
-    if st.lock_disabled or not supported() or not (Path(root) / ".skyguard" / "lock.json").is_file():
-        return _res(0, "An expired lock lift was cleared; nothing relocked (the lock is %s)."
-                    % ("disabled" if st.lock_disabled else "not applied"), data={"relocked": []})
-    if any(x.get("files") is None for x in live):
-        return _res(0, "An expired lock lift was cleared; a live lift still opens every file.", data={"relocked": []})
-    covered = {f.lower() for x in live for f in x["files"]}
-    want = None if any(x.get("files") is None for x in due) else {f.lower() for x in due for f in x["files"]}
+        # Serialize the filesystem operation with new lifts and persistent
+        # disable decisions. Retire the obligation only after success.
+        if st.lock_disabled or not supported() or not (Path(root) / ".skyguard" / "lock.json").is_file():
+            _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
+            return _res(0, "An expired lock lift was cleared; nothing relocked (the lock is %s)."
+                        % ("disabled" if st.lock_disabled else "not applied"), data={"relocked": []})
+        if any(x.get("files") is None for x in live):
+            _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
+            return _res(0, "An expired lock lift was cleared; a live lift still opens every file.", data={"relocked": []})
+        covered = {f.lower() for x in live for f in x["files"]}
+        want = None if any(x.get("files") is None for x in due) else {f.lower() for x in due for f in x["files"]}
 
-    def only(name):
-        return name.lower() not in covered and (want is None or name.lower() in want)
+        def only(name):
+            return name.lower() not in covered and (want is None or name.lower() in want)
 
-    res = lock_all(root, only=only)
-    return Result(res.exit, res.lines, dict(res.data, relocked=[n for n in res.data.get("locked", []) if only(n)]))
+        res = lock_all(root, only=only)
+        if res.exit == 0:
+            _state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
+        return Result(res.exit, res.lines, dict(res.data, relocked=[n for n in res.data.get("locked", []) if only(n)]))
 
 
 # ---- status ----------------------------------------------------------------------------------------------------
@@ -1065,12 +1112,15 @@ def enable(root, session=None) -> Result:
     if not supported():
         return _res(3, "Layer 2 lock: unsupported on this platform (Windows only in v4.0.0).")
     try:
-        _write_persistent(root, session, False)
+        sf = _skyguard_dir(root) / "state.json"
+        _assert_sandbox(sf)
+        with _state.locked(sf):
+            _write_persistent(root, session, False)
+            return lock_all(root)
     except Refused as e:
         return _res(2, str(e))
     except (ValueError, OSError) as e:
         return _res(2, "Could not clear the disable (%s)." % e.__class__.__name__)
-    return lock_all(root)
 
 
 # ---- CLI -------------------------------------------------------------------------------------------------------

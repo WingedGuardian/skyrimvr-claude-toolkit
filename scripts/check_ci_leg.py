@@ -2,7 +2,7 @@
 """Per-leg CI tripwires (Plan 8 T10.4): a leg that silently runs nothing, or skips its way to green, goes red.
 
     check_ci_leg.py collect <collect-only.log> --leg Linux|Windows [--spec .github/ci-leg.json]
-    check_ci_leg.py log     <pytest -v -rfEs log> --leg Linux|Windows [--spec .github/ci-leg.json]
+    check_ci_leg.py log     <pytest -v -rfEs log> --leg Linux|Windows [--part NAME] [--spec .github/ci-leg.json]
 
 `collect` runs FIRST on each leg, from `pytest --collect-only -q` output: fewer tests than the recorded floor
 means a module stopped being collected (or the leg is looking at the wrong tree) -- before an hour of suite.
@@ -15,6 +15,10 @@ means a module stopped being collected (or the leg is looking at the wrong tree)
     otherwise hides inside a total;
   * the opt-in load test (FORBIDDEN_PASSING) has NOT run: it burns CPU on purpose and a shared runner gives
     no stable CPU to measure against, so it runs locally only (T14b).
+
+`--part NAME` (log mode) checks one part of a leg that CI splits into jobs: spec["parts"][NAME] replaces the
+top-level floor, ceilings and module lists it names. The mutation gate runs as its own part because it is most of
+a Windows leg's time (146-217 of 270 minutes in CI run 39210090486); the top-level numbers are the rest of the suite.
 
 Numbers live in .github/ci-leg.json so a change to them is a reviewed diff. Exit 0 ok / 1 a tripwire fired /
 2 nothing could be checked (no summary, bad usage).
@@ -74,11 +78,13 @@ def check_log(lines, spec, leg):
     if xfailed > spec["xfail_ceiling"]:
         problems.append("{} xfailed > ceiling {}".format(xfailed, spec["xfail_ceiling"]))
     required = list(spec["required_modules"]["all"]) + list(spec["required_modules"].get(leg, []))
+    def passed(line, module):
+        return line.startswith("tests/" + module + "::") and re.search(r"\sPASSED(?:\s+\[\s*\d+%\])?\s*$", line)
     for mod in required:
-        if not any(l.startswith("tests/" + mod + "::") and " PASSED" in l for l in lines):
+        if not any(passed(l, mod) for l in lines):
             problems.append("required module {} has no PASSED test on the {} leg".format(mod, leg))
     for mod in spec["forbidden_passing"]:
-        if any(l.startswith("tests/" + mod + "::") and " PASSED" in l for l in lines):
+        if any(passed(l, mod) for l in lines):
             problems.append("{} RAN in CI; it is opt-in and local only".format(mod))
     return (1 if problems else 0), (problems or notes)
 
@@ -92,6 +98,12 @@ def main(argv=None) -> int:
     leg = argv[argv.index("--leg") + 1]
     spec_path = Path(argv[argv.index("--spec") + 1]) if "--spec" in argv else SPEC
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    if "--part" in argv:
+        part = argv[argv.index("--part") + 1]
+        if mode != "log" or part not in spec.get("parts", {}):
+            sys.stderr.write("unknown part {!r} for {}; known: {}\n".format(part, mode, ", ".join(spec.get("parts", {}))))
+            return 2
+        spec = dict(spec, **spec["parts"][part])
     if leg not in spec["skip_ceiling"]:
         sys.stderr.write("unknown leg {!r}; known: {}\n".format(leg, ", ".join(spec["skip_ceiling"])))
         return 2

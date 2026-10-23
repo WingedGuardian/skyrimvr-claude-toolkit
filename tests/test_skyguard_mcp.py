@@ -8,11 +8,10 @@ Two halves, as in test_skyguard_t09:
 import json
 import os
 import sys
-import tempfile
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, scratch_dir
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, mcp_rules, paths, rules, shell_rules, shellparse  # noqa: E402
@@ -32,7 +31,7 @@ ROWS = _rows()
 
 
 # Documents lives under USERPROFILE: every test points it at an EMPTY folder (never the machine's own) unless it builds one.
-NOHOME = tempfile.mkdtemp(prefix="t11-nohome-")
+NOHOME = scratch_dir("t11-nohome-")
 ENV0 = {"USERPROFILE": NOHOME}
 
 
@@ -88,7 +87,13 @@ def shell(command, roots=None, shell_name="bash", env=None):
 
 def test_there_are_t11_rows():
     assert len(ROWS) >= 30, len(ROWS)
-    assert {r["decision"] for r in ROWS} == {"allow", "ask", "deny"}
+    # The save policy (2026-10-13): a DevBench save over an existing save is backed up and allowed (advise), one the
+    # guard cannot identify is refused; no DevBench row asks any more.
+    assert {r["decision"] for r in ROWS} == {"allow", "advise", "deny"}
+
+
+# The save policy: the note a DevBench save over an existing save carries once the hook has backed it up.
+SAVE_NOTE = "Note: the guard backs up Existing before this runs (restore: tools/skyguard.sh snapshot list --kind save)."
 
 
 @pytest.mark.parametrize("row", ROWS, ids=[r["id"] for r in ROWS])
@@ -150,15 +155,14 @@ def test_deny_op_compares_whole_commands_on_words(command, want):
 
 
 def test_the_console_save_word_is_case_insensitive(cfg):
-    assert mcp("mcp__devbench-vr__console", {"command": "SAVE Existing"}, _roots("saves", cfg))[1] == {"S-DEVBENCH-SAVE"}
+    assert mcp("mcp__devbench-vr__console", {"command": "SAVE Existing"}, _roots("saves", cfg))[1] == {"S-SAVE-BACKUP"}
     assert mcp("mcp__devbench-vr__console", {"command": "saveall Existing"}, _roots("saves", cfg))[0] == ("allow", "")
 
 
 def test_a_save_name_is_read_trimmed(cfg):
     # rt-fix-b: the trailing-dot strip trims only the right; a leading space is still the same save.
     got = mcp("mcp__devbench-vr__game", {"action": "save", "name": "  Existing"}, _roots("saves", cfg))
-    assert got == (("ask", "Overwrites save Existing.\nYes goes ahead; the save it overwrites is copied first when it can be (skyguard snapshot list)."),
-                   {"S-DEVBENCH-SAVE"})
+    assert got == (("advise", SAVE_NOTE), {"S-SAVE-BACKUP"})
 
 
 def test_a_non_dict_tool_input_is_judged_on_its_strings():
@@ -210,13 +214,19 @@ def test_a_scan_lists_each_saves_folder_once(cfg, monkeypatch):
 
 def test_the_first_existing_saves_folder_wins(tmp_path, cfg):
     """A declared config dir with no Saves folder is skipped; the first one that HAS a Saves folder is the only one read."""
+    def configured(*directories):
+        # Build both comparison and physical I/O roots through the production
+        # constructor; replacing just config_dirs leaves the physical roots stale.
+        config = paths.PathsConfig({}, {"SKYRIM_CONFIG_DIR": directories}, ())
+        return paths.roots("C:/t11/x", "", config)
+
     empty = tmp_path / "other"
     (empty / "Saves").mkdir(parents=True)
     r = paths.roots("C:/t11/x", "", {"SKYRIM_CONFIG_DIR": empty.as_posix()})
     assert mcp_rules.save_exists("Existing", r, ENV0) is False
-    r = r._replace(config_dirs=(tmp_path.as_posix() + "/none",) + r.config_dirs + (cfg,))
+    r = configured(tmp_path.as_posix() + "/none", empty.as_posix(), cfg)
     assert mcp_rules.save_exists("Existing", r, ENV0) is False               # `other` has a Saves folder: it wins
-    r = r._replace(config_dirs=(tmp_path.as_posix() + "/none", cfg, empty.as_posix()))
+    r = configured(tmp_path.as_posix() + "/none", cfg, empty.as_posix())
     assert mcp_rules.save_exists("Existing", r, ENV0) is True                # `none` skipped, `cfg` wins
 
 
@@ -265,7 +275,7 @@ def test_a_redirected_documents_is_found(tmp_path, key):
 
 @pytest.mark.parametrize("args", [{"action": "SAVE", "name": "Existing"}, {"action": " save ", "name": "Existing.ess"}])
 def test_the_save_action_is_read_leniently(args, cfg):
-    assert mcp("mcp__devbench-vr__game", args, _roots("saves", cfg))[1] == {"S-DEVBENCH-SAVE"}
+    assert mcp("mcp__devbench-vr__game", args, _roots("saves", cfg))[1] == {"S-SAVE-BACKUP"}
 
 
 @pytest.mark.parametrize("action", ["load", "list", "loadLast", "", 7, None])
@@ -277,14 +287,14 @@ def test_other_game_actions_never_ask(action, cfg):
                                   'a"b', "a<b", "a>b", "a|b", "a" + chr(1) + "b"],
                          ids=["none", "empty", "blank", "slash", "dotdot-slash", "backslash", "dotdot", "dot", "colon",
                               "number", "star", "qmark", "quote", "angle", "angle2", "pipe", "control"])
-def test_an_unusable_save_name_asks(name, cfg):
+def test_an_unusable_save_name_is_refused(name, cfg):
     got, fired = mcp("mcp__devbench-vr__game", {"action": "save", "name": name}, _roots("saves", cfg))
-    assert fired == {"S-DEVBENCH-SAVE"} and got[1].startswith("Cannot tell which save this overwrites.")
+    assert fired == {"S-DEVBENCH-SAVE"} and got[0] == "deny" and got[1].startswith("Cannot tell which save this overwrites.")
 
 
-def test_the_ask_is_two_plain_lines_and_does_not_echo_the_call(cfg):
-    got, _ = mcp("mcp__devbench-vr__game", {"action": "save", "name": "Existing"}, _roots("saves", cfg))
-    assert got[0] == "ask" and len(got[1].split("\n")) == 2 and "action" not in got[1] and "{" not in got[1]
+def test_the_refusal_is_two_plain_lines_and_does_not_echo_the_call(cfg):
+    got, _ = mcp("mcp__devbench-vr__game", {"action": "save", "name": "a/b"}, _roots("saves", cfg))
+    assert got[0] == "deny" and len(got[1].split("\n")) == 2 and "action" not in got[1] and "{" not in got[1]
 
 
 # ---------------------------------------------------------------------------------------------- the MCP wrapper
@@ -393,7 +403,7 @@ def test_a_damaged_json_body_is_still_read_for_the_action_and_name(cfg):
     through it is still judged (a bare reset in it is caught by the unreadable-body rule, tested below)."""
     body = "'{\"action\":\"save\",\"name\":\"Existing\",}'"
     got, fired = shell(f"curl http://127.0.0.1:8921/api/tool/game -d {body}", _roots("saves", cfg))
-    assert fired == {"S-DEVBENCH-SAVE"} and got[1].startswith("Overwrites save Existing.")
+    assert fired == {"S-SAVE-BACKUP"} and got == ("advise", SAVE_NOTE)
 
 
 def test_a_damaged_body_with_a_bad_escape_does_not_crash():

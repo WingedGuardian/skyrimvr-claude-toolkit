@@ -35,7 +35,7 @@ Six thin wrappers over the Python engine `tools/skyguard/` intercept Claude's to
 
 - **protect-bash.sh** -- Blocks destructive commands; **advises** on file operations in the game directory (a note to Claude, not a prompt to you)
 - **protect-files.sh** -- Blocks writes to plugin/archive binaries through the Edit/Write tools; **advises** on all other edits in the install
-- **protect-mcp.sh** -- Guards the DevBench MCP tools (and the curl / `devbench-cli.sh` route to the same tools): denies the one console command measured to crash a large load order (`smp reset`), and asks before a save would overwrite an existing save
+- **protect-mcp.sh** -- Guards the DevBench MCP tools (and the curl / `devbench-cli.sh` route to the same tools): denies the one console command measured to crash a large load order (`smp reset`). Recognized changes to one or two saves require verified permanent save-pair backups before proceeding; bulk access needs the bound human approval described below.
 - **backup-before-edit.sh** -- Copies a file before Claude modifies it **through the Edit/Write/NotebookEdit tools**. ⚠ Anything written by a script run through Bash is invisible to it -- that is a property of hooks, not a bug here. MEASURED: zero backups of a 177,459-byte `KNOWLEDGEBASE.md` across seven months, because it is written by a script. `session-kb-guard.sh` below covers that channel.
 - **snapshot-before-tool.sh** -- Snapshots Papyrus source/compiled scripts before shell commands
 - **session-kb-guard.sh** -- At SessionStart, copies the files nothing can rebuild
@@ -54,7 +54,16 @@ Every change made through the edit tools (and Codex `apply_patch`) is logged wit
 ## Design Principles
 
 ### 1. No Silent Modifications
-Destructive changes are blocked outright. Everything else that is consequential but legitimate is **advised**: a note is injected into Claude's context and the call proceeds -- you are not prompted. Seven rules in the toolkit ask you to decide: a ReSaver command that mutates a save file, a DevBench save over an existing save, a write, copy or move onto a save in `Saves` (two rules: the shell and the edit tools), a git command that would throw away uncommitted changes in a protected folder, a `lock disable` that turns the vanilla-file lock off for good, and an in-place restore (`snapshot restore --in-place` or `restore-from-backup.sh --restore`), which writes over live files.
+Destructive changes are blocked outright. Everything else that is consequential but legitimate is **advised**: a note is injected into Claude's context and the call proceeds -- you are not prompted. Four rules in the toolkit ask you to decide: a git command that would throw away uncommitted changes in a protected folder, a `lock disable` that turns the vanilla-file lock off for good, an in-place restore (`snapshot restore --in-place` or `restore-from-backup.sh --restore`), which writes over live files, and a program the guard cannot name (a variable such as `$R`) given one of your saves -- it may write, move or delete the save, or nothing, and the guard cannot count that change to back it up first.
+
+Saves follow their own rule (user ruling 2026-10-13), because a save is the one thing a mod manager cannot give back. A command that changes one or two saves -- writes, copies onto, edits, moves, renames or deletes them, a DevBench save over an existing one, ReSaver `--apply` -- runs WITHOUT a prompt, but only after the deciding hook has copied both files of each pair (the `.ess` and its `.skse` co-save count as one save), read each copy back to its SHA-256 and recorded it; if that backup fails the command is refused. More than two saves, or a wildcard, is refused until you type the `SAVE_ACCESS_APPROVAL` line the refusal shows -- read only from what you typed, never from anything the agent read. Those backups are never pruned. Reading, hashing, listing and copying saves out are free; deleting or moving the whole `Saves` folder stays refused.
+
+New save transactions live in `.modding-agent-harness/backups/saves/`, independent of the coding agent.
+Version 1 approvals bind canonical full paths and session/operation; wildcards also bind the command hash
+and logical save count. Legacy basename-only grants do not qualify. The neutral configuration file can
+select another backup destination and reserve; the store cannot include a save root. Both older Skyrim
+save formats remain readable, and legacy recovery leaves their evidence intact. Restore defaults to a
+new directory, expands a member selection to its pair, verifies chosen blobs and journals publication.
 
 ⚠ This inverted in v3.8.3 and this page said the opposite until v3.9. A guard that prompts on routine work gets approved by reflex and then protects nothing; the X4 toolkit measured 40 such prompts across 13,282 commands, every one of them noise. So the honest summary is: **few prompts, a short deny list, and a lot of advice** -- not "nothing happens without your approval".
 
@@ -72,7 +81,7 @@ The "safety improvement loop" instruction in CLAUDE.md asks Claude to evaluate w
 
 ## Customizing Safety
 
-The hook scripts are designed to be customized -- but ⚠ **they are shipped files, so extracting an update replaces them and your edits are lost.** Keep a copy of any hook you change, or put your rules in a separate hook and register it in `.claude/settings.json` (also shipped -- copy it too). To customise:
+The guards can be customized, but their shipped files can be replaced during an update. Keep personal rules in separate local files. Use the reviewed upgrade workflow in `ADAPTING.md`: stage the candidate, retain custom instructions and settings as explicit collisions, and integrate existing pre-tool handlers into the ordered dispatcher before applying. Keep the old handlers active until that replacement is qualified. Extracting directly over the installation can overwrite those files. To customise:
 
 - **Whitelist paths** you want Claude to edit freely (e.g., a working directory for scripts)
 - **Add new patterns** to the bash guard for commands specific to your workflow

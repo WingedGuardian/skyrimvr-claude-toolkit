@@ -1,5 +1,6 @@
 """The neutral agent/ source and the per-agent files generated from it."""
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -24,11 +25,33 @@ LINUX_READ = [".devcontainer/Dockerfile", ".devcontainer/devcontainer.json", ".d
               "requirements.lock", ".node-version", ".python-version", "requirements.txt", "x.toml", "x.java"]
 
 
-def test_files_linux_tools_read_are_pinned_lf():
+def test_files_linux_tools_read_are_pinned_lf(tmp_path, monkeypatch):
     """MEASURED 2026-10-06: the Dockerfile blob was LF but a Windows autocrlf checkout made all 79 lines CRLF, which
     breaks every backslash-continued RUN line in a Linux devcontainer build. Pinned, every checkout stays LF."""
+    root = REPO
+    if not (root / ".git").exists():
+        # Mutation/export copies omit Git metadata. Query their actual attributes
+        # in a separate owned repository; keep the real-checkout branch intact.
+        sentinel = tmp_path / "external-git-dir"
+        sentinel.write_bytes(b"preserve this external Git sentinel\n")
+        monkeypatch.setenv("GIT_DIR", str(sentinel))
+        for key in list(os.environ):
+            if key.upper().startswith("GIT_"):
+                monkeypatch.delenv(key)
+        empty_config = tmp_path / "git-global-empty"
+        empty_config.write_bytes(b"")
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        template = tmp_path / "empty-template"
+        template.mkdir()
+        root = tmp_path / "attributes-tree"
+        root.mkdir()
+        (root / ".gitattributes").write_bytes((REPO / ".gitattributes").read_bytes())
+        subprocess.run(["git", "-C", str(root), "init", "--quiet", "--template", str(template)],
+                       check=True, capture_output=True, timeout=10)
+        assert sentinel.read_bytes() == b"preserve this external Git sentinel\n"
     out = subprocess.run(["git", "check-attr", "eol", "--", *LINUX_READ],
-                         cwd=REPO, capture_output=True, text=True, check=True).stdout
+                         cwd=root, capture_output=True, text=True, check=True, timeout=10).stdout
     unpinned = [line for line in out.splitlines() if not line.endswith(": eol: lf")]
     assert not unpinned, "not pinned to LF:\n" + "\n".join(unpinned)
 

@@ -15,20 +15,19 @@ import io
 import json
 import os
 import sys
-import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, scratch_dir
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, backup, codes, paths, rules, shell_rules, state  # noqa: E402
 from skyguard.adapters import codex  # noqa: E402
 
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
-NOHOME = tempfile.mkdtemp(prefix="p6fixA-b1-")
+NOHOME = scratch_dir("p6fixA-b1-")
 ENV0 = {"USERPROFILE": NOHOME, "HOME": NOHOME}
 
 

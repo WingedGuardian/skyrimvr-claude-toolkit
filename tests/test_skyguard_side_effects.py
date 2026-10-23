@@ -117,7 +117,7 @@ def snap(tmp_path, command, now=None):
     snapshot.run(str(tmp_path), command, False, audit_mod.Audit(str(tmp_path)), now)
 
 
-@pytest.mark.parametrize("cmd", ["ls x", "git status", "ls x\nls y", "make\nls y", "  cat f", "git config --get a"])
+@pytest.mark.parametrize("cmd", ["ls x", "git status", "ls x\nls y", "  cat f", "git config --get a"])
 def test_snapshot_skips_read_only(tmp_path, cmd):
     (install(tmp_path) / "a.psc").write_text("x")
     snap(tmp_path, cmd)
@@ -136,7 +136,7 @@ def test_snapshot_skips_powershell_reads(tmp_path, cmd):
 
 
 @pytest.mark.parametrize("cmd", ["Remove-Item a.psc", "Set-Content a.txt x", "Get-ChildItem; Remove-Item a",
-                                 "Getaway-Thing", "Copy-Item a b", "Select-Stringy x", "Test-PathX"])
+                                 "Getaway-Thing", "Copy-Item a b", "Select-Stringy x", "Test-PathX", "Get-DateX"])
 def test_snapshot_does_not_skip_powershell_writes(tmp_path, cmd):
     """A mutating verb, or a lookalike that merely starts with a read verb, still snapshots."""
     (install(tmp_path) / "a.psc").write_text("x")
@@ -301,8 +301,7 @@ def test_session_missing_tool(tmp_path):
 def test_session_rc2_gets_extra_line_and_flat_audit(tmp_path):
     stub(tmp_path, "echo one\necho two >&2\nexit 2\n")
     out = session.run(str(tmp_path), "resume", record.bash(), audit_mod.Audit(str(tmp_path)))
-    assert out == ("one\ntwo\nKB GUARD: the above means NOTHING was snapshotted this session -- "
-                   "unchecked, not clean.")
+    assert out == ("one\ntwo\nKB GUARD: snapshot coverage is incomplete this session -- unchecked, not clean.")
     assert re.fullmatch(r"\[\d{8}_\d{6}\] session-kb-guard rc=2 one two\n", log_text(tmp_path))
 
 
@@ -310,6 +309,20 @@ def test_session_clean_run_and_empty_output(tmp_path):
     stub(tmp_path, "exit 0\n")
     assert session.run(str(tmp_path), "startup", record.bash(), audit_mod.Audit(str(tmp_path))) == ""
     assert re.fullmatch(r"\[\d{8}_\d{6}\] session-kb-guard rc=0 \n", log_text(tmp_path))
+
+
+@pytest.mark.parametrize("text,status", [
+    ("KB GUARD: FAILED to store -- file. UNPROTECTED", "partial"),
+    ("KB GUARD -- ALARM: an irreplaceable file lost content", "evaluated"),
+    ("KB GUARD -- ALARM: an irreplaceable file lost content\nKB GUARD: FAILED to store -- file. UNPROTECTED", "partial"),
+])
+def test_session_distinguishes_completed_alarm_from_failed_preservation(tmp_path, text, status):
+    import shlex
+    stub(tmp_path, "printf '%s\\n' " + shlex.quote(text) + "\nexit 1\n")
+    out, actual, code = session.run_status(str(tmp_path), "startup", record.bash(), audit_mod.Audit(str(tmp_path)))
+    assert actual == status
+    assert code == ("session.NOT_SNAPSHOTTED" if status == "partial" else "session")
+    assert text in out
 
 
 def test_session_audit_output_truncated_to_200_bytes(tmp_path):
@@ -352,7 +365,7 @@ def test_backup_equivalent_to_real_bash(tmp_path, name):
 
 
 @needs_jq
-@pytest.mark.parametrize("command", ["ls x", "make\nls y", "git status"])
+@pytest.mark.parametrize("command", ["ls x", "git status"])
 def test_snapshot_skip_equivalent_to_real_bash(tmp_path, command):
     inst_b = record.make_install(tmp_path / "bash", HOOKS, "declared")
     py = tmp_path / "py"
@@ -378,7 +391,10 @@ def test_session_equivalent_to_real_bash(tmp_path):
     assert r.returncode == 0
     want = r.stdout.decode("utf-8").replace("\r\n", "\n")
     got = session.run(str(py), "startup", record.bash(), audit_mod.Audit(str(py))) + "\n"
-    assert got == want and "KB GUARD: the above" in want
+    # The historical hook called every rc=2 "NOTHING" preserved. The current
+    # guard uses rc=2 for partial preservation too, so report that accurately.
+    want = want.replace("the above means NOTHING was snapshotted", "snapshot coverage is incomplete")
+    assert got == want and "snapshot coverage is incomplete" in got
     assert strip_ts(log_text(inst_b)) == strip_ts(log_text(py)) != ""
 
 

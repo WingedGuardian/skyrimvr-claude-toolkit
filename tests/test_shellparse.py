@@ -6,17 +6,43 @@ names has a row here, and test_mutations.py deletes each branch and names the ro
 import base64
 import json
 import random
+import os
+import subprocess
 import sys
 
 import pytest
 
-from conftest import REPO
+from conftest import BASH, REPO
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import shellparse as sp  # noqa: E402
 from skyguard.shellparse import parse  # noqa: E402
 
 BS = chr(92)
+
+
+@pytest.mark.parametrize("quoted", [
+    r"Data/test.\x65sp", r"Data/test.\145sp", r"Data/test.\u0065sp",
+    r"Data/test.\U00000065sp", r"Saves/test.\x65ss", r"Saves/test.\145ss",
+    r"\x6\x65\x123", r"\1\12\123\777", r"a\q\z\8\9b",
+    r"a\cA\ca\c?\c_b", r"a\0ignored", r"a\x00ignored",
+    r"a\u0000ignored", r"\xC3\xA9", r"\u00e9\U0001f600",
+    r"a\n\r\t\a\b\e\E\f\v\\\'\"\?b", r"a\x\u\Uend",
+    r"a\c\\b", r"a\c", r"Data/test.\x65sp\0\uD800",
+    r"Data/test.\x65sp\0\Uffffffff", "Data/test.\\x65sp\\0\\cé",
+    r"a\c\b", r"a\c\\\b", r"a\c\\\\b", r"a\c\'b", r'a\c\"b', "a\\céb",
+    r"\uD800", r"\U00110000", r"\U7fffffff", r"Fixture.\x65sp\Uffffffff",
+    r"Fixture.\x65sp\U80000000",
+    r"a\c\\", r"a\c\\\\",
+])
+def test_ansi_c_arguments_match_stdout_only_bash_oracle(quoted):
+    # Hardcoded literals only. The oracle prints an argument; it writes no files.
+    command = "printf '%s' $'" + quoted + "'"
+    result = subprocess.run([BASH, "--noprofile", "--norc", "-s"], input=command.encode("utf-8"),
+                            capture_output=True, timeout=10,
+                            env=dict(os.environ, LC_ALL="C.UTF-8"))
+    assert result.returncode == 0, result.stderr
+    assert find(command, "printf").argv[1] == result.stdout.decode("utf-8", "surrogateescape")
 
 
 def progs(cmd, shell="bash"):
@@ -74,6 +100,176 @@ def test_bash_assignment_prefixes_skipped():
     e = find("FOO=1 BAR='a b' rm -rf x", "rm")
     assert e.argv == ("-rf", "x")
     assert progs("A=1") == []
+
+
+# An assignment prefix whose value holds a substitution: the WHOLE `NAME=value` is one word, so the program is the word
+# after it. MEASURED 2026-10-19 (Git Bash 5): bash joins `<( )` / `>( )` to the text around it (`X=<(echo a)` ->
+# X=/dev/fd/63, `a<(true)b` -> a/dev/fd/63b) and runs `rm` in every row below. Before the fix the parser ended the word
+# at `<(`, so `X=` was the assignment, the process substitution became the PROGRAM ("?") and `rm` an argument of it.
+# Each row is a grammar class (substitution kind, spacing inside it, nesting, text glued after or before it, append
+# and element assignments, several prefixes, a wrapper before or after the prefix), not one shape.
+ASSIGN_PREFIX_CLASS = [
+    "X=<(echo a) rm -rf x", "X=>(cat) rm -rf x", "X=<( echo a ) rm -rf x", "X=<(echo $(echo a)) rm -rf x",
+    "X=<(echo a)b rm -rf x", "X=a<(echo b) rm -rf x", 'X="a"<(echo b) rm -rf x', "X+=<(echo a) rm -rf x",
+    "X[0]=<(echo a) rm -rf x", "X=<(echo a) Y=<(echo b) rm -rf x", "X=$(echo a) Y=<(echo b) rm -rf x",
+    "env X=<(echo a) rm -rf x", "env -i X=<(echo a) rm -rf x", "nohup env X=<(echo a) rm -rf x",
+    "X=<(echo a) command rm -rf x", "X=<(echo a) exec rm -rf x", "X=<(echo a) nohup rm -rf x",
+    "X=<(echo a) env rm -rf x", "X=>(cat) Y=>(cat) env rm -rf x", "a; X=<(echo a) rm -rf x", "a | X=<(echo a) rm -rf x",
+    # the classes that already parsed: pinned so a fix for the one above cannot break them
+    "X=$(echo a) rm -rf x", "X=$(echo a b) rm -rf x", "X=`echo a` rm -rf x", "X=`echo a b` rm -rf x",
+    "X=$((1 + 2)) rm -rf x", "X=${Y:-a b} rm -rf x", "X=${Y:-$(echo a b)} rm -rf x", 'X="<(echo a)" rm -rf x',
+    "X='a b' rm -rf x", 'X="a b" rm -rf x', "X=a" + BS + " b rm -rf x", "env X=$(echo a b) rm -rf x",
+]
+
+
+@pytest.mark.parametrize("cmd", ASSIGN_PREFIX_CLASS)
+def test_assignment_prefix_holding_a_substitution_is_one_word(cmd):
+    p = parse(cmd, "bash")
+    assert p.ok, (cmd, p.why)
+    assert "?" not in [e.program for e in p.execs], (cmd, [(e.program, e.argv) for e in p.execs])
+    assert find(cmd, "rm").argv == ("-rf", "x")
+
+
+@pytest.mark.parametrize("cmd,inner", [
+    ("X=<(rm -rf y) rm -rf x", ("-rf", "y")), ("X=>(rm -rf y) rm -rf x", ("-rf", "y")),
+    ("X=a<(rm -rf y)b rm -rf x", ("-rf", "y")),
+])
+def test_assignment_prefix_substitution_still_runs_its_command(cmd, inner):
+    """Twin: joining the substitution to the word must not stop its own command being parsed as one that RUNS."""
+    p = parse(cmd, "bash")
+    assert p.ok, (cmd, p.why)
+    assert sorted(e.argv for e in p.execs if e.program == "rm") == sorted([inner, ("-rf", "x")])
+
+
+@pytest.mark.parametrize("cmd,argv", [
+    ("echo a<(true)b", 1), ("echo 2<(true)", 1), ('echo "q"<(true)', 1), ("echo x>(true)", 1),
+    ("echo a <(true)", 2), ("cat <(rm -rf x) y", 2),
+])
+def test_process_substitution_joins_the_word_it_touches(cmd, argv):
+    """MEASURED (Git Bash): `echo a<(true)b` prints a/dev/fd/63b, `echo 2<(true)` 2/dev/fd/63 -- one word each. A blank
+    before `<(` starts a new word (the twin rows)."""
+    assert len(find(cmd, "cat" if cmd.startswith("cat") else "echo").argv) == argv
+
+
+# A program word the parser cannot name ("?") may expand to NOTHING (`$R` unset, `$(true)`) or be a wrapper (`$SUDO`
+# = sudo), and either way the next word runs. MEASURED (Git Bash): `$R rm x`, `$(true) rm x` and `${R} rm x` run rm.
+# So beside the opaque exec the parser also reads the words after it as the command. Before, `$R rm -rf Data` was
+# only "?" and every rule that names a program (deletes by resolved path, S-WRITE-SAVE, S-GIT-DISCARD, S-MOVE-ROOT,
+# ...) missed it: 340 of 826 opaque variants of the intended corpus's refusing rows were weaker than their control.
+@pytest.mark.parametrize("cmd", [
+    "$R rm -rf x", "${R} rm -rf x", "$(true) rm -rf x", "`true` rm -rf x", '"$R" rm -rf x', "$R$S rm -rf x",
+    "x$R rm -rf x", "$A $B rm -rf x", "$A $B $C rm -rf x", "sudo $R rm -rf x", "env $R rm -rf x",
+    "$R sudo rm -rf x", "X=<(echo a) $R rm -rf x", "a && $R rm -rf x", "a | $R rm -rf x", "( $R rm -rf x )",
+    "echo $($R rm -rf x)",
+])
+def test_an_unnamed_program_word_also_reads_the_next_word_as_the_program(cmd):
+    p = parse(cmd, "bash")
+    assert p.ok, (cmd, p.why)
+    assert "?" in [e.program for e in p.execs]                  # the opaque exec stays: rules still read its text
+    assert find(cmd, "rm").argv == ("-rf", "x")
+
+
+@pytest.mark.parametrize("cmd,program", [
+    ("echo $R rm -rf x", "echo"), ("$R", None), ("printf '%s' $R rm", "printf"), ("R=rm; echo $R", "echo"),
+    ("echo '$R rm -rf x'", "echo"),
+])
+def test_a_named_program_with_dynamic_arguments_gets_no_second_reading(cmd, program):
+    """Twins: only an UNNAMED program word is read past. `echo $R rm` prints; `$R` alone runs nothing nameable."""
+    p = parse(cmd, "bash")
+    assert p.ok, (cmd, p.why)
+    assert "rm" not in [e.program for e in p.execs], (cmd, [(e.program, e.argv) for e in p.execs])
+    if program:
+        assert p.execs[-1].program == program
+
+
+# The same class in cmd and PowerShell, and through eval-like wrappers. MEASURED 2026-10-19 on Windows (cmd.exe /v:on,
+# Windows PowerShell 5.1), each deleting ./Data in a scratch folder: `%R% del` and `!R! del` with R=call or `cmd /c`;
+# `%R%del` with R="call "; `& $R Remove-Item` and `. $R Remove-Item` with R=powershell; `& $R 'Remove-Item ...'` with
+# R=Invoke-Expression; `& "$($R)-Item"` with R=Remove; bash `$R 'rm -rf x'` with R=eval. Unset/invalid values deleted
+# nothing; `$R Remove-Item` without `&` is a PowerShell parse error.
+@pytest.mark.parametrize("cmd,shell,program", [
+    ("%R% del /s /q x", "cmd", "del"),
+    ("!R! del /s /q x", "cmd", "del"),
+    ('"!R!" del /s /q x', "cmd", "del"),
+    ("%R%del /s /q x", "cmd", "del"),
+    ("d%R%l /s /q x", "cmd", "del"),                       # R=e: only the glob of the literal parts names it
+    ('%R% "del /s /q x"', "cmd", "del"),
+    ('"$X"rm -rf x', "bash", "rm"),                        # X empty: the literal runs (the value $Xrm lost the boundary)
+    ("${R}rm -rf x", "bash", "rm"),
+    ('cmd /c "%R% del /s /q x"', "bash", "del"),
+    ("& $R Remove-Item -Recurse x", "powershell", "remove-item"),
+    (". $R Remove-Item -Recurse x", "powershell", "remove-item"),
+    ("& $R 'Remove-Item -Recurse x'", "powershell", "remove-item"),
+    ('& "$($R)-Item" -Recurse x', "powershell", "remove-item"),
+    ('pwsh -c "& $R Remove-Item -Recurse x"', "bash", "remove-item"),
+    ("$R 'rm -rf x'", "bash", "rm"),
+    ('$R "a; rm -rf x"', "bash", "rm"),
+])
+def test_an_unnamed_program_hides_nothing_in_cmd_powershell_or_eval(cmd, shell, program):
+    assert find(cmd, program, shell).argv[-1] == "x"
+
+
+def test_a_speculative_eval_reading_keeps_what_it_completed():
+    """eval runs the commands it parsed before a syntax error (`rm` runs in `eval 'rm -rf x; ((('`), and so the
+    reading keeps them; a command after the error never ran, so it is not read either."""
+    assert find("$R 'rm -rf x; ((('", "rm").argv == ("-rf", "x")
+    assert "rm" not in progs("$R '((( ; rm -rf x'")
+
+
+@pytest.mark.parametrize("cmd", [
+    '"$PY" -c "import os; print(\'(\')"; rm -rf y',             # python code is no shell: the rm after it is still read
+    '"$X" -c "' + "a>b " * 3000 + '"; rm -rf y',                 # over the token cap: the reading is dropped, not the parse
+])
+def test_a_speculative_eval_reading_never_ends_or_marks_the_parse(cmd):
+    p = parse(cmd, "bash")
+    assert p.ok, p.why                  # an incomplete parse would send rules to their stricter text fallbacks
+    assert find(cmd, "rm").argv == ("-rf", "y")
+
+
+@pytest.mark.parametrize("cmd,shell,program", [
+    ("echo !R! del x", "cmd", "del"),                      # a NAMED program prints them
+    ("$R Remove-Item -Recurse x", "powershell", "remove-item"),   # no call operator: a parse error, nothing runs
+    ("Write-Output $R Remove-Item x", "powershell", "remove-item"),
+    ("echo $R 'rm -rf x'", "bash", "rm"),
+    ("$Xrm -rf x", "bash", "rm"),                         # ONE variable named Xrm: no literal part runs
+])
+def test_a_named_program_or_no_call_gets_no_cmd_or_powershell_reading(cmd, shell, program):
+    """Twins: the readings belong to an UNNAMED program word that can actually run."""
+    p = parse(cmd, shell)
+    assert p.ok, (cmd, p.why)
+    assert program not in [e.program for e in p.execs], (cmd, [(e.program, e.argv) for e in p.execs])
+
+
+@pytest.mark.parametrize("cmd", [
+    "$R $(echo rm) -rf x", "$R ${RM:-rm} -rf x", "$R `which rm` -rf x", "$R r${X}m -rf x", "$A $B $(echo rm) -rf x",
+])
+def test_the_next_word_reading_gets_the_program_candidates_too(cmd):
+    """The word after an unnamed program word is itself unproven here: it gets the RT-A candidates (rm), as it would
+    if it came first."""
+    assert find(cmd, "rm").argv == ("-rf", "x")
+
+
+@pytest.mark.parametrize("cmd,cd", [
+    ("$R cd /x && rm -rf Data", ""), ('"$R" cd /x; rm -rf Data', ""), ("$(true) cd /x; rm -rf Data", ""),
+    ("cd /x && rm -rf Data", "/x"), ("echo $R cd /x; rm -rf Data", ""),
+])
+def test_a_cd_behind_an_unnamed_program_word_keeps_the_directory_before_it(cmd, cd):
+    """KNOWN LIMIT, chosen: `$R cd X` moves the shell if $R is empty and not if $R is a wrapper (MEASURED, Git Bash:
+    `R=; $R cd /tmp; pwd` prints /tmp, `R=env` leaves it). The parser holds ONE directory, and marking it unknown ("?")
+    was MEASURED to loosen a delete: `$R cd /tmp && rm -rf Data` run in the install went from S-DEL-INSTALL (deny) to an
+    S-RELATIVE-UNKNOWN note. So the wrapper reading is kept; `$R cd <install> && rm -rf Data` from outside stays
+    unjudged (as on master), never a weakened deny."""
+    assert find(cmd, "rm").cd_before == cd
+
+
+def test_a_glob_program_word_gets_no_next_word_reading():
+    """Twin: an unmatched glob stays a word in bash; it never vanishes, so `-rf` is not read as a program."""
+    assert [e.program for e in parse("/???/r? -rf x", "bash").execs if e.program not in ("?", "rm", "rd")] == []
+
+
+def test_an_assignment_alone_runs_only_its_substitution():
+    assert progs("X=<(echo a)") == ["echo"]
+    assert progs("X=<(echo a) Y=>(cat)") == ["echo", "cat"]
 
 
 @pytest.mark.parametrize("cmd", [
@@ -285,7 +481,7 @@ def test_cd_inside_a_subshell_applies_inside_it():
     ("a; b | c && d || e\nf", ["a", "b", "c", "d", "e", "f"]),
     ("Get-ChildItem |\n Remove-Item", ["get-childitem", "remove-item"]),
     ("& 'C:/tools/x.exe' a", ["x"]),
-    ("& $exe a", ["?"]),
+    ("& $exe a", ["?", "a"]),          # $exe may be a wrapper (R=powershell runs `a`, MEASURED): `a` is read too
     (". ./setup.ps1", ["setup"]),
 ])
 def test_pwsh_separators_and_call(cmd, expected):
@@ -558,8 +754,11 @@ def _t4_rows():
 
 @pytest.mark.parametrize("row", _t4_rows(), ids=[r["id"] for r in _t4_rows()])
 def test_t04_rows_come_out_as_executed_commands(row):
-    """Every T4 intended row's decision, reproduced from execs alone: the shapes Task 6 re-bases ReSaver onto."""
-    assert _resaver_from_parser(row["payload"]["tool_input"]["command"]) is (row["decision"] == "ask")
+    """Every T4 intended row's decision, reproduced from execs alone: the shapes Task 6 re-bases ReSaver onto. Since
+    the save policy (2026-10-13) a detected --apply is refused when the save cannot be placed and allowed when
+    a new output resolves through an absolute path or a known preceding cd. Policy and detection are separate."""
+    detected = row["decision"] == "deny" or row["id"] in ("t04-quoted-spaces", "t04-heredoc-sh-s")
+    assert _resaver_from_parser(row["payload"]["tool_input"]["command"]) is detected
 
 
 def test_t04_rows_parse():

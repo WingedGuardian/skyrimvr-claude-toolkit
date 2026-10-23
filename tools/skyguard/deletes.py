@@ -339,11 +339,59 @@ def operands(e) -> Optional[List[Optional[str]]]:
     return words
 
 
+def _python_interface(argv, launcher=False):
+    """Select Python's first -c program, never subsequent program arguments.
+
+    Keep option values (-W/-X and hash mode) separate from source selectors.
+    Return a normalized flag/code pair so the existing cluster reader remains
+    the single decoder for both separated and attached command strings.
+    """
+    i = 0
+    while i < len(argv):
+        word = argv[i]
+        if word == '--':
+            return None
+        if word == '-':
+            return None
+        if not word.startswith('-'):
+            return None                                # script/zip/directory and everything after it
+        if launcher and word.startswith('-V:'):
+            i += 1
+            continue
+        if word == '--check-hash-based-pycs':
+            i += 2
+            continue
+        if word.startswith('--'):
+            if word.startswith('--help') or word == '--version':
+                return None
+            i += 1
+            continue
+        for j, option in enumerate(word[1:], 1):
+            if option in 'cm':
+                value = word[j + 1:] or (argv[i + 1] if i + 1 < len(argv) else '')
+                flag = word[:j + 1]
+                if flag != '-c' and not _PY_CODE_CLUSTER.fullmatch(flag):
+                    flag = '-c'                       # long clusters still select exactly the same code
+                return (flag, value) if option == 'c' else None
+            if option in 'WX':
+                i += 1 if word[j + 1:] else 2          # the rest of this word, or the next word, is its value
+                break
+            if option in 'hV?':
+                return None
+        else:
+            i += 1
+    return None
+
+
 def interpreter_code(e) -> str:
     """The code an interpreter exec runs from its arguments or stdin (R7(b)); "" for a script file."""
     p = e.program
     if not (_PYTHON.fullmatch(p) or p in CODE_INTERPRETERS):
         return ""
+    if _PYTHON.fullmatch(p):
+        e = e._replace(argv=_python_interface(e.argv, launcher=p == 'py') or ())
+        # Retain the existing conservative stdin scan: -i/PYTHONINSPECT and
+        # a program that evaluates its input can execute a supplied body.
     code = []
     for i, w in enumerate(e.argv):
         nxt = e.argv[i + 1] if i + 1 < len(e.argv) else ""
@@ -354,6 +402,8 @@ def interpreter_code(e) -> str:
             code.append(w[2:])                            # python -cCODE
         elif _PYTHON.fullmatch(p) and _PY_CODE_CLUSTER.fullmatch(w):
             code.append(nxt)                              # python -Bc CODE (G1)
+        if _PYTHON.fullmatch(p) and code:
+            break                                         # selected code is not another command-line flag
     if e.stdin_body and (e.stdin_from.startswith("heredoc:interpreter") or e.stdin_from == "pipe"):
         code.append(e.stdin_body)
     return "\n".join(code)
@@ -501,6 +551,10 @@ def raw_reaches(word: str, base: Optional[str], dialect: str, roots) -> bool:
 class Scan(NamedTuple):
     hit: Optional[Hit]
     relative_unknown: str           # basename for S-RELATIVE-UNKNOWN advice ("" for none)
+    # The save policy (saves.py): each save in the settings folder (writes.is_save) a delete removes, resolved. Not a
+    # S-DEL-CONFIG hit: saves.judge backs it up and allows it, or asks the user for a bulk delete. The Saves FOLDER
+    # itself is no save, so deleting it stays S-DEL-CONFIG.
+    saves: Tuple[str, ...] = ()
 
 
 def _is_data_word(word: str) -> bool:
@@ -668,6 +722,8 @@ def _upstream(execs, i: int) -> list:
 
 def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, str]] = None, has=grep) -> Scan:
     env = os.environ if env is None else env
+    from .writes import is_save                           # writes imports this module
+    saves: List[str] = []
     resolved: Optional[Hit] = None
     unresolved_reach: Optional[Hit] = None
     unknown_dir: Optional[Hit] = None
@@ -735,6 +791,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                         unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
                     continue
                 kind, b = place(a)
+                if is_save(b, roots):
+                    continue                              # the save policy: writes.scan names it, saves.py judges it
                 z = targets.zone(b, roots)
                 if d is None:
                     leaves = _expands(dst) and not raw_reaches(dst, mcwd, e.dialect, roots)
@@ -755,7 +813,10 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             a = None if w is UNRESOLVED else targets.resolve(w, ecwd or "", e.dialect, env)
             if a is not None:
                 kind, b = place(a)
-                if kind and resolved is None:
+                if is_save(b, roots):
+                    actual = targets.physical_operand(e, w, cwd, env)
+                    saves.append(actual if a == b and actual else "")
+                elif kind and resolved is None:
                     resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
                 continue
             if w is not UNRESOLVED:
@@ -763,6 +824,10 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 # whose literal reading is a protected path is that path, whatever the glob reading would be.
                 lit = literal_abs(w, ecwd, e.dialect)
                 kind = protected_kind(lit, roots) if lit else ""
+                if kind and is_save(lit, roots):
+                    actual_base = targets.physical_cwd(e, cwd, env) or ""
+                    saves.append(targets.physical(w, actual_base, e.dialect, env, literal=True) or "")
+                    continue
                 if kind:
                     if resolved is None:
                         resolved = Hit(RULE_OF[kind], posixpath.basename(lit.rstrip("/")) or lit)
@@ -790,7 +855,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     # D1: Recycle-Bin deletes, found in the text (RECYCLE_CALL). .NET resolves a relative path against the process
     # directory, which is the payload cwd (Set-Location does not move it).
     base = targets.normalise_cwd(cwd)
-    for w, how in (recycle_targets(recycle_text(command, parsed)) if resolved is None else ()):
+    for w, how in recycle_targets(recycle_text(command, parsed)):
         a = None
         if how == "single":
             a = literal_abs(w, base, "powershell")
@@ -798,26 +863,30 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             a = targets.resolve(w, base or "", "powershell", env)
         if a is not None:
             kind, b = place(a)
-            if kind:
+            if is_save(b, roots):
+                actual = targets.physical(w, cwd, "powershell", env, literal=how == "single")
+                saves.append(actual if a == b and actual else "")
+                continue
+            if kind and resolved is None:
                 resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
-                break
             continue
         unresolved_any = True
         if unresolved_reach is None and raw_reaches(w, base, "powershell", roots):
             unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
+    sv = tuple(dict.fromkeys(saves))
     if resolved:
-        return Scan(resolved, relative)
+        return Scan(resolved, relative, sv)
     if unresolved_reach:
-        return Scan(unresolved_reach, relative)
+        return Scan(unresolved_reach, relative, sv)
     if unknown_dir:
-        return Scan(unknown_dir, relative)
+        return Scan(unknown_dir, relative, sv)
     if unresolved_any and names_root(command, roots, has):
-        return Scan(Hit("S-DEL-UNRESOLVED", ""), relative)
+        return Scan(Hit("S-DEL-UNRESOLVED", ""), relative, sv)
     if not parsed.ok and has(DESTROYER, command) and names_root(command, roots, has):
-        return Scan(Hit("S-DEL-FALLBACK", ""), relative)
+        return Scan(Hit("S-DEL-FALLBACK", ""), relative, sv)
     if opaque and any(_loose_hit(e, roots, has) for e in parsed.execs):
-        return Scan(Hit("S-DEL-FALLBACK", ""), relative)
-    return Scan(None, relative)
+        return Scan(Hit("S-DEL-FALLBACK", ""), relative, sv)
+    return Scan(None, relative, sv)
 
 
 def _loose_hit(e, roots, has) -> bool:

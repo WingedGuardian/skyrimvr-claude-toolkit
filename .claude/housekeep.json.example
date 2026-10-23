@@ -1,0 +1,20 @@
+{
+  "_comment": "Copy to .claude/housekeep.json and edit. Paths are relative to the toolkit folder or absolute. See docs/RETENTION.md.",
+  "agent_output": ["_CLAUDE_OUTPUT"],
+  "nested_task_roots": [],
+  "live_roots": ["Data"],
+  "launch_logs": [],
+  "legacy_snapshots": [".claude/backups/auto_snapshots"],
+  "scratch": [],
+  "evidence_docs": ["CLAUDE.md", "AGENTS.md", "KNOWLEDGEBASE.md", "KNOWLEDGEBASE.local.md"],
+  "protected_globs": [],
+  "active_hours": 48,
+  "min_bytes": 1048576,
+  "gzip_after_days": 7,
+  "recycle_after_days": 90,
+  "free_floor_gib": 0,
+  "temp_after_hours": 24,
+  "sweep_every_hours": 6,
+  "codex_sessions_warn_gib": 5,
+  "worktrees_warn": 10
+}

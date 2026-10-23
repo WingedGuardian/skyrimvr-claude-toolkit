@@ -15,8 +15,8 @@ What --apply guarantees:
   * Extraction happens in a temporary staging folder, never in place, and every planned file must be staged
     before ANY file is written (a name 7-Zip would not extract stops the install with nothing changed).
   * Every file it replaces is BACKED UP first, and a manifest records every file it wrote with its SHA-256:
-        <records>/backups/<NAME>-<stamp>/   the originals, by destination
-        <records>/<NAME>.files.txt          the manifest (written before the first write, completed after)
+        <records>/backups/<NAME>-<stamp>-<UUID>/   originals and the operation manifest
+        <records>/<NAME>.files.txt               latest-operation manifest (compatibility copy)
     <records> is $SKYRIM_MANUAL_INSTALLS, else <toolkit>/.claude/backups/manual-installs/ (never shipped).
     Uninstall = delete the manifest's files, then copy the backup folder's originals back.
   * An EXISTING config (.ini/.toml/.json) is left alone and the archive's copy is written beside it as
@@ -60,6 +60,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -172,6 +173,29 @@ def plan_files(entries, data: Path, game: Path, mo2: bool, root_files: bool, ove
     return plan
 
 
+def destination_problem(plan):
+    """Reject ambiguous final targets, including .new configs and Windows case/path aliases."""
+    seen = {}
+    for row in plan:
+        if row[2] == "SKIP-GAME-ROOT":
+            continue
+        target = target_of(row)
+        key = "/".join(p.rstrip(" .") for p in target.resolve().as_posix().casefold().split("/"))
+        if key in seen:
+            inner, old_target = seen[key]
+            return "destination collision: {!r} and {!r} map to {} / {}".format(
+                inner, row[0], old_target, target)
+        seen[key] = row[0], target
+    for child in seen:
+        parts = child.split("/")
+        for index in range(1, len(parts)):
+            parent = "/".join(parts[:index])
+            if parent in seen:
+                return "destination collision: {!r} and {!r} require a file and its child at {}".format(
+                    seen[parent][0], seen[child][0], seen[parent][1])
+    return ""
+
+
 def main(argv) -> int:
     try:
         sys.stdout.reconfigure(errors="backslashreplace")
@@ -275,6 +299,10 @@ def main(argv) -> int:
         return 2
     chosen = [e for e in groups[group] if not any(fnmatch.fnmatch(e[1].lower(), s.lower()) for s in skip)]
     plan = plan_files(chosen, data, game, bool(mods), root_files, overwrite_cfg)
+    problem = destination_problem(plan)
+    if problem:
+        print("ERROR: " + problem + "; nothing was written", file=sys.stderr)
+        return 2
 
     print("=" * 78)
     print("{}  [{}]  {} file(s)  {}".format(triage.clean(name), triage.clean(group), len(plan),
@@ -319,11 +347,27 @@ CARRY_OVER = ("meta.ini",)
 
 
 def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
+    problem = destination_problem(plan)
+    if problem:
+        print("ERROR: " + problem + "; nothing was written", file=sys.stderr)
+        return 2
     todo = [p for p in plan if p[2] != "SKIP-GAME-ROOT"]
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     records = records_dir()
-    backup = records / "backups" / "{}-{}".format(name, stamp)
+    backup = records / "backups" / "{}-{}-{}".format(name, stamp, uuid.uuid4().hex)
     manifest = records / "{}.files.txt".format(name)
+    operation_manifest = backup / "manifest.files.txt"
+
+    def record(lines, initial=False):
+        text = "\n".join(lines) + "\n"
+        if initial:
+            with operation_manifest.open("x", encoding="utf-8", newline="\n") as stream:
+                stream.write(text)
+                stream.flush()
+                os.fsync(stream.fileno())
+        else:
+            atomic_record(operation_manifest, text)
+        atomic_record(manifest, text)
     stage = Path(tempfile.mkdtemp(prefix="modinst_"))           # the tool's own temp; removed below
     try:
         # Names go through a list file, never argv: a large archive overflows Windows' 32K command line.
@@ -351,6 +395,7 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
             staged[inner] = src
 
         records.mkdir(parents=True, exist_ok=True)
+        backup.mkdir(parents=True, exist_ok=False)  # exclusive ownership; no prior recovery bytes can be reused
         header = ["# {} -- installed {} from {} [group {}]".format(name, stamp, os.path.basename(arc), group),
                   "# installed into: {}".format(data),
                   "# overwritten originals backed up under: {}".format(backup),
@@ -359,14 +404,14 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
         if old_folder is not None:
             header.append("# UPDATE: the previous mod folder {} is kept whole at {}".format(replacing, old_folder))
         planned = ["PLANNED  {}".format(target_of(p)) for p in todo]
-        manifest.write_text("\n".join(header + ["# STATUS: in progress"] + planned) + "\n", encoding="utf-8")
+        record(header + ["# STATUS: in progress"] + planned, initial=True)
 
         if old_folder is not None:
             try:
                 n_old = move_verified(replacing, old_folder)
             except OSError as e:
                 aborted = "# STATUS: aborted before any write -- the previous mod folder could not be kept: {}".format(e)
-                manifest.write_text("\n".join(header + [aborted]) + "\n", encoding="utf-8")
+                record(header + [aborted])
                 print("ERROR: {}. Nothing was installed.".format(e), file=sys.stderr)
                 return 2
             header.append("# UPDATE: {} file(s) were in the previous mod folder".format(n_old))
@@ -387,15 +432,22 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
             if target.is_file():                     # OVERWRITE, or an older <file>.new: keep the original first
                 b = backup / backup_rel(target)
                 b.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(target), str(b))
+                before = sha(target)
+                with target.open("rb") as source, b.open("xb") as saved:
+                    shutil.copyfileobj(source, saved)
+                    saved.flush()
+                    os.fsync(saved.fileno())
+                if sha(b) != before or sha(target) != before:
+                    raise OSError("backup verification failed before replacing {}".format(target))
             write_replacing(staged[inner], target)
             got, want = sha(target), sha(staged[inner])
             if got != want:
                 bad += 1
                 print("  VERIFY MISMATCH: {}".format(triage.clean(str(target))), file=sys.stderr)
             written.append("{}  {}".format(got, target))
+            record(header + ["# STATUS: in progress"] + written + planned[len(written):])
         status = "# STATUS: complete, {} file(s), {} verify mismatch(es)".format(len(written), bad)
-        manifest.write_text("\n".join(header + [status] + written) + "\n", encoding="utf-8")
+        record(header + [status] + written)
         print("INSTALLED {} file(s), verify mismatches={}; manifest {}".format(len(written), bad, manifest))
         if old_folder is not None:
             print("the previous mod folder is kept whole at {}".format(old_folder))
@@ -410,6 +462,20 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
 def target_of(p) -> Path:
     inner, dest, action, notes = p
     return dest.with_name(dest.name + ".new") if action == "CONFIG-NEW" else dest
+
+
+def atomic_record(target: Path, text: str):
+    """Publish a complete manifest without truncating the previous one on a failed write."""
+    fd, temporary = tempfile.mkstemp(dir=target.parent, prefix=".modinst_manifest_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
 
 
 def backup_rel(target: Path) -> Path:

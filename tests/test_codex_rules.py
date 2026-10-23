@@ -54,7 +54,10 @@ def test_buckets_sum():
     assert all(cls[r["code"]][0] == r["decision"] for r in codex_rules.PREFIX_RULES)
 
 
-@pytest.mark.parametrize("rule", codex_rules.PREFIX_RULES, ids=lambda r: " ".join(r["pattern"]))
+# A mutation can change the pattern. Keep case identities independent of that
+# value so the instrument can pair each pristine pass with its mutant outcome.
+@pytest.mark.parametrize("rule", codex_rules.PREFIX_RULES,
+                         ids=[f"rule-{i:02d}" for i in range(len(codex_rules.PREFIX_RULES))])
 def test_every_prefix_rule_is_a_subset_of_its_hook_deny(rule, tmp_path):
     assert rule["match"] and rule["not_match"]
     for shell in ("powershell", "bash"):

@@ -41,14 +41,25 @@ FAULTS = {
     "engine-silent": "pass\n",
     "engine-garbage": _W + "w(b'hello\\n')\n",
     "engine-marker-garbage": _W + "w(b'SKYGUARD-OK\\nnot json\\n')\n",
-    "engine-wrong-version": _W + "w(b'SKYGUARD-OK\\n{\"v\":2,\"decision\":\"allow\"}\\n')\n",
+    "engine-wrong-version": _W + "w(b'SKYGUARD-OK\\n{\"v\":2,\"decision\":\"allow\",\"reason\":\"\",\"context\":\"\",\"status\":\"evaluated\",\"code\":\"allow\"}\\n')\n",
     "engine-allow-but-exit-1": ALLOW_V1 + "\nraise SystemExit(1)\n",
     # Valid verdict JSON with no marker, behind 12 filler bytes so that a missing marker CHECK still parses it.
-    "engine-no-marker": _W + "w(b'            {\"v\":1,\"decision\":\"allow\",\"reason\":\"\",\"context\":\"\"}\\n')\n",
-    "engine-unknown-decision": _W + "w(b'SKYGUARD-OK\\n{\"v\":1,\"decision\":\"maybe\",\"reason\":\"\",\"context\":\"\"}\\n')\n",
+    "engine-no-marker": _W + "w(b'            {\"v\":1,\"decision\":\"allow\",\"reason\":\"\",\"context\":\"\",\"status\":\"evaluated\",\"code\":\"allow\"}\\n')\n",
+    "engine-unknown-decision": _W + "w(b'SKYGUARD-OK\\n{\"v\":1,\"decision\":\"maybe\",\"reason\":\"\",\"context\":\"\",\"status\":\"evaluated\",\"code\":\"allow\"}\\n')\n",
     "engine-hang": "import time; time.sleep(60)\n",
     "engine-missing": None,
 }
+for _name, _changes in (
+        ("bool-version", {"v": True}), ("float-version", {"v": 1.0}),
+        ("reason-type", {"reason": []}), ("context-type", {"context": {}}),
+        ("status-type", {"status": []}), ("status-unknown", {"status": "unknown"}),
+        ("code-type", {"code": None}), ("incomplete-verdict", None)):
+    _verdict = dict(v=1, decision="allow", reason="", context="", status="evaluated", code="allow")
+    if _changes is None:
+        _verdict = {"v": 1, "decision": "allow"}
+    else:
+        _verdict.update(_changes)
+    FAULTS["engine-" + _name] = _W + "w(" + repr(("SKYGUARD-OK\n" + json.dumps(_verdict) + "\n").encode("ascii")) + ")\n"
 # Faults that make the engine DECIDE something the payload does not suggest: the adapter must obey the verdict,
 # not its own opinion of the payload. Both are valid, well-formed engine answers.
 VERDICT_FAULTS = ("engine-deny-nonce", "engine-allow-valid")
@@ -84,6 +95,9 @@ def make_install(adapter_dir: Path, dest: Path, repo: Path = REPO) -> Path:
     dest = Path(dest)
     shutil.copytree(Path(repo) / "tools" / "skyguard", dest / "tools" / "skyguard",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    if (Path(repo) / "tools" / "modding_harness").is_dir():    # the engine imports it
+        shutil.copytree(Path(repo) / "tools" / "modding_harness", dest / "tools" / "modding_harness",
+                        ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(adapter_dir, dest / "tools" / "adapters" / Path(adapter_dir).name,
                     ignore=shutil.ignore_patterns("__pycache__"))
     (dest / ".claude").mkdir(exist_ok=True)

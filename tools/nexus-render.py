@@ -38,6 +38,10 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from modding_harness import discovery
 
 UA = "skyrim-ai-assistant-toolkit-nexus/1 (+https://github.com/WingedGuardian/skyrimvr-claude-toolkit)"
 GAME_IDS = {"skyrimspecialedition": 1704}   # GraphQL v2 takes a numeric game id for requirements
@@ -103,14 +107,20 @@ def print_changelogs(logs, since=None, newest=8):
 
 def cmd_find():
     d = load_env("R")
-    nodes = ((d.get("data") or {}).get("mods") or {}).get("nodes")
-    if nodes is None:
-        print("ERROR: Nexus GraphQL gave no results: {}".format(str(d.get("errors") or d)[:300]), file=sys.stderr)
+    result = discovery.parse(d, os.environ.get("NEXUS_DOMAIN", "skyrimspecialedition"),
+                             os.environ.get("NEXUS_QUERY", "search"))
+    if result["state"] == "unavailable":
+        print("ERROR: Nexus search unavailable: {}".format("; ".join(result["reasons"])), file=sys.stderr)
         return 2
-    for m in nodes:
-        print("  [{:>6}] {}  v{}  by {}  updated {}".format(s(m.get("modId")), s(m.get("name")), s(m.get("version")),
-                                                             s(m.get("author")), s(m.get("updatedAt"))[:10]))
-    print("  ({} match(es); 15 max -- ports, forks and rewrites share names: pick by author and page)".format(len(nodes)))
+    for m in result["candidates"]:
+        print("  [{:>6}] {}  v{}  by {}  updated {}  status={}".format(
+            m["mod_id"], m["name"], s(m["version"]), s(m["author"]),
+            s(m["updated_at"])[:10], s(m["status"])))
+    print("  ({} match(es); 15 max -- ports, forks and rewrites share names: pick by author and page)".format(result["returned"]))
+    print("  coverage={} total={} -- candidates only; installed state not checked".format(
+        result["state"], s(result["total"])))
+    for reason in result["reasons"]:
+        print("  " + reason)
     return 0
 
 
@@ -142,10 +152,16 @@ def cmd_page(dom, mid, since, full):
     try:
         req = load_env("REQ", required=False)
         nodes = req["data"]["mod"]["modRequirements"]["nexusRequirements"]["nodes"]
-        for r in nodes:
+        if not isinstance(nodes, list):
+            raise ValueError("requirements nodes are not a list")
+        usable = [r for r in nodes if isinstance(r, dict) and isinstance(r.get("modName"), str) and r["modName"].strip()]
+        partial = bool(req.get("errors")) or len(usable) != len(nodes)
+        for r in usable:
             notes = " ".join(clean(r.get("notes")).split())[:160]
             print("  - {}{}".format(s(r.get("modName")), "  ({})".format(notes) if notes else ""))
-        if not nodes:
+        if partial:
+            print("  (PARTIAL: could NOT fetch all requirements -- missing results are not none)")
+        elif not nodes:
             print("  (none declared -- the description may still list some)")
     except (ValueError, KeyError, TypeError):
         print("  (could NOT fetch requirements -- not the same as none)")
@@ -257,10 +273,7 @@ def main(argv):
         if cmd == "contents" and len(rest) <= 1:
             return cmd_contents(rest[0] if rest else None)
         if cmd == "gql-find" and len(rest) == 2:
-            print(json.dumps({"query": "query($f: ModsFilter){ mods(filter:$f, count:15){ nodes{ modId name version "
-                                       "author updatedAt } } }",
-                              "variables": {"f": {"gameDomainName": [{"value": rest[1]}],
-                                                  "name": [{"value": rest[0], "op": "WILDCARD"}]}}}))
+            print(json.dumps(discovery.request(rest[1], rest[0], wildcard=True)))
             return 0
         if cmd == "gql-req" and len(rest) == 2 and rest[0].isdigit() and rest[1] in GAME_IDS:
             # The query text the dev install's tool uses, with the id inlined (it is all digits, checked above).

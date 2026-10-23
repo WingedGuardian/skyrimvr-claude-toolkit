@@ -56,6 +56,8 @@ def kit(tmp_path):
     tools.mkdir(parents=True)
     for name in ("nexus.sh", "nexus-render.py"):
         shutil.copy2(REPO / "tools" / name, tools / name)
+    shutil.copytree(REPO / "tools/modding_harness", tools / "modding_harness",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     fake = tmp_path / "bin"
     fake.mkdir()
     (fake / "curl").write_bytes(FAKE_CURL.encode("utf-8"))
@@ -68,11 +70,19 @@ def run(kit, *args, key=KEY, **env):
     e.pop("NEXUS_API_KEY", None)
     if key:
         e["NEXUS_API_KEY"] = key
-    e["PATH"] = str(kit.parent.parent / "bin") + os.pathsep + e.get("PATH", "")
+    e["PATH"] = str(kit.parent.parent / "bin").replace("\\", "/") + os.pathsep + e.get("PATH", "")
     e["FAKE_NEXUS_DIR"] = str(FIX)
     e["FAKE_CURL_LOG"] = str(kit.parent.parent / "curl.log")
     e.update({k: str(v) for k, v in env.items()})
-    r = subprocess.run([BASH, str(kit / "nexus.sh"), *args], capture_output=True, timeout=120, env=e)
+    # Git for Windows' bin/bash launcher prepends /mingw64/bin to inherited PATH,
+    # ahead of a fake curl. Bind and verify the fake INSIDE the started shell so
+    # a fixture can never fall through to the real network client.
+    shell = ('testbin="$1"; shift; '
+             'if command -v cygpath >/dev/null 2>&1; then testbin=$(cygpath -u "$testbin"); fi; '
+             'export PATH="$testbin:$PATH"; '
+             '[ "$(command -v curl)" = "$testbin/curl" ] || exit 97; source "$@"')
+    r = subprocess.run([BASH, "-c", shell, "--", str(kit.parent.parent / "bin"),
+                        str(kit / "nexus.sh"), *args], capture_output=True, timeout=120, env=e)
     return subprocess.CompletedProcess(r.args, r.returncode, r.stdout.decode("utf-8", "replace"),
                                        r.stderr.decode("utf-8", "replace"))
 
@@ -142,6 +152,18 @@ def test_page_tolerates_explicit_nulls_and_reports_every_part():
 def test_page_says_requirements_could_not_be_fetched_not_none():
     out = render("page", "skyrimspecialedition", "101", INFO=fx("mod.json"), FILES=fx("files.json"), REQ="").stdout
     assert "could NOT fetch requirements -- not the same as none" in out
+
+
+@pytest.mark.parametrize("nodes", [[], [{"modName": "Known dependency", "notes": "retained"}]])
+def test_requirements_graphql_errors_are_partial_even_with_a_nodes_list(nodes):
+    req = {"data": {"mod": {"modRequirements": {"nexusRequirements": {"nodes": nodes}}}},
+           "errors": [{"message": "fixture unavailable"}]}
+    out = render("page", "skyrimspecialedition", "101", INFO=fx("mod.json"), FILES=fx("files.json"),
+                 REQ=json.dumps(req)).stdout
+    assert "PARTIAL: could NOT fetch all requirements" in out
+    assert "none declared" not in out
+    if nodes:
+        assert "Known dependency" in out and "retained" in out
 
 
 def test_page_with_no_mod_record_is_exit_2():

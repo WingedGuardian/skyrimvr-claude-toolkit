@@ -328,7 +328,28 @@ def _label(text: str) -> str:
 
 def _set_from_dir(label: str, base: Path) -> SourceSet:
     files = {n: base / n for n in (*DOCS, KB, SETTINGS) if (base / n).is_file()}
-    return SourceSet(label, files, read_env(base / ENV), (base / ".codex" / "hooks.json").is_file())
+    return SourceSet(label, files, read_env(base / ENV), _is_4x_codex(base / ".codex" / "hooks.json"))
+
+
+def _is_4x_codex(path: Path) -> bool:
+    """Recognize the managed 4.x entry routes, never the mere presence of a user's Codex definitions."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return False
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if not isinstance(hooks, dict):
+        return False
+    for event, route in (("SessionStart", "session-start"), ("PreToolUse", "pre-tool")):
+        groups = hooks.get(event)
+        commands = [hook.get(key) for group in groups if isinstance(group, dict)
+                    for hook in (group.get("hooks") if isinstance(group.get("hooks"), list) else [])
+                    if isinstance(hook, dict) and hook.get("type") == "command"
+                    for key in ("command", "commandWindows")] if isinstance(groups, list) else []
+        pattern = r'[/\\]\.codex[/\\]hooks[/\\]skyguard-entry\.(?:sh|ps1)"?\s+' + route + r'(?:\s|$)'
+        if not any(isinstance(command, str) and re.search(pattern, command) for command in commands):
+            return False
+    return True
 
 
 def _is_4x_doc(path: Path) -> bool:

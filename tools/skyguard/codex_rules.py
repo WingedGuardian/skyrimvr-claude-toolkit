@@ -43,9 +43,16 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
     "shell.S-DEL-UNKNOWN-DIR": ("hook_only", "depends on an earlier `cd` in the same command, not on a prefix"),
     "shell.S-SHELL-UNREAD": ("hook_only", "the decoder and the shell can be anywhere in a pipeline"),
     "shell.S-RESAVER-APPLY": (
-        "hook_only", "a prefix would also prompt every dry-run; `--apply` position varies (R4)"),
+        "hook_only", "depends on whether the save it writes can be placed; `--apply` position varies (R4)"),
     "shell.S-DEVBENCH-CRASH": ("hook_only", "the console command is inside a JSON body or an MCP argument"),
-    "shell.S-DEVBENCH-SAVE": ("hook_only", "depends on whether the save file exists"),
+    "shell.S-DEVBENCH-SAVE": ("hook_only", "depends on whether the save can be identified on disk"),
+    # The save policy (user ruling 2026-10-13): every save change is counted, backed up and verified by the hook.
+    "shell.S-SAVE-APPROVAL": ("hook_only", _PATH + " (and the count and the user's typed approval are read at run time)"),
+    "shell.S-SAVE-UNKNOWN": ("hook_only", _PATH + " (a wildcard the hook lists at run time)"),
+    "shell.S-SAVE-STORE": ("hook_only", _PATH + " (including ancestors of permanent recovery data)"),
+    "write.W-SAVE-STORE": ("hook_only", "a file write to permanent recovery data, not a command"),
+    "shell.S-SAVE-BACKUP-FAILED": ("hook_only", "the backup's own failure at run time, not a command"),
+    "shell.S-SAVE-OPAQUE": ("hook_only", _PATH + " (and the program word is one no prefix can name)"),
     # Plan 6 Task 11: hook_only. A `forbidden` prefix could also refuse the USER's own `!` command (not measured),
     # and running skyguard-unlock.cmd / `lock disable` themselves is what a Codex user is told to do; the operand of
     # S-LIFT-RAW is path-based. The ask of S-LIFT-PERMANENT reaches Codex as a deny through the adapter (R4).
@@ -57,12 +64,10 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
     # Plan 6 Task 12: path-based (where the write RESOLVES). S-SELF-GUARD / W-SELF-GUARD priced to advise: not decisive.
     "shell.S-SELF-STATE": ("hook_only", _PATH),
     "write.W-SELF-STATE": ("hook_only", "a file write, not a command"),
-    "shell.S-WRITE-SAVE": ("hook_only", _PATH + " (any writer, copy or move onto a save)"),
     "shell.S-MOVE-ROOT": ("hook_only", _PATH + " (the moved folder is resolved, not spelled)"),
     "shell.S-GIT-DISCARD": (
         "hook_only", "depends on where the working tree resolves (cwd, cd, -C, --work-tree); a `git reset --hard` "
         "prefix would also refuse it in every unprotected repository"),
-    "write.W-SAVE": ("hook_only", "a file write, not a command"),
     "mcp.S-INERT-NOINPUT": ("hook_only", _INERT),
     "write.DENY_PLUGIN": ("hook_only", "a file write, not a command"),
     "write.NO_PATH_DENY": ("hook_only", _INERT),

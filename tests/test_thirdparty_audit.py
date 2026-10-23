@@ -157,6 +157,19 @@ def test_a_pin_ahead_of_upstream_is_drift():
     assert ta.version_status("v1.11.2", "1.11.2")[0] == ta.OK
 
 
+# Git for Windows tags a release v<git>.windows.<n> and names its installer Git-<git>-64-bit.exe when n is 1 and
+# Git-<git>.<n>-64-bit.exe otherwise; the pin is the installer's version, so the tag must compare in that form.
+@pytest.mark.parametrize("pinned,latest,status", [
+    ("2.55.0.5", "v2.55.0.windows.5", ta.OK),
+    ("2.48.1", "v2.48.1.windows.1", ta.OK),
+    ("2.55.0.5", "v2.55.0.windows.6", ta.NEWER),
+    ("2.55.0.5", "v2.56.0.windows.2", ta.NEWER),
+    ("2.55.0.5", "v2.55.0.windows.4", ta.DRIFT),
+])
+def test_a_git_for_windows_tag_compares_as_its_installer_version(pinned, latest, status):
+    assert ta.version_status(pinned, latest)[0] == status
+
+
 # ------------------------------------------------------------------ 2. a documented path the release no longer ships
 
 def test_a_documented_path_the_release_no_longer_ships_is_drift(tmp_path):
@@ -174,6 +187,32 @@ def test_a_documented_path_the_release_ships_is_ok(tmp_path):
     rows, code = audit(repo, make_cache(tmp_path), ["PyNifly"])
     assert code == 0, [r.as_dict() for r in rows]
     assert any(r.check == "upstream path" and r.status == ta.OK for r in rows)
+
+
+@pytest.mark.parametrize("wrong_release", [False, True])
+def test_addon_download_url_must_belong_to_the_release_whose_checksum_is_published(tmp_path, wrong_release):
+    root = pynifly_repo(tmp_path, "io_scene_nifly/NiflyDLL.dll")
+    path = root / "docs/installing-tools.md"
+    if wrong_release:
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "/download/V27.2.0/io_scene_nifly.zip", "/download/V27.1.0/io_scene_nifly.zip"), encoding="utf-8")
+    rows, code = audit(root, make_cache(tmp_path), ["PyNifly"])
+    hashes = [r for r in rows if r.check == "pinned hash"]
+    assert [r.status for r in hashes] == [ta.OK, ta.DRIFT if wrong_release else ta.OK]
+    assert code == (1 if wrong_release else 0), [r.as_dict() for r in rows]
+
+
+@pytest.mark.parametrize("published_url", [None, "https://github.com/example/tool/releases/download/v2/selected.zip"])
+def test_release_asset_download_url_is_bound_including_repeated_filenames(published_url):
+    item = {"label": "selected", "published_format": "github-release"}
+    entry = {"name": "selected.zip", "digest": "sha256:" + SHA_A}
+    if published_url is not None:
+        entry["browser_download_url"] = published_url
+    response = ta.Response(200, json.dumps({"assets": [entry]}).encode())
+    api = "https://api.github.com/repos/example/tool/releases/tags/v2"
+    for version in ("v1", "v2"):
+        fields = {"url": "https://github.com/example/tool/releases/download/" + version + "/selected.zip"}
+        assert ta._published_checksum(response, api, item, fields, 64) == (SHA_A if version == "v2" else None)
 
 
 def test_a_historical_path_mention_is_not_an_instruction(tmp_path):
@@ -493,7 +532,13 @@ def test_the_registry_covers_the_manual_audit_floor():
     assert set(ta.AUDIT_FLOOR) <= names
     assert len(names) == len(ta.REGISTRY)
     for spec in ta.REGISTRY:
-        assert spec.get("upstream"), spec["name"]
+        commit_sources = [args for check, args in spec.get("checks", []) if check == "commit_package"]
+        if not spec.get("upstream"):
+            assert len(commit_sources) == 1, spec["name"]
+            source = commit_sources[0]
+            assert __import__("re").fullmatch(r"[\w.-]+/[\w.-]+", source.get("repo", "")), spec["name"]
+            assert source.get("package") and len(source.get("version_sites", [])) >= 2, spec["name"]
+            assert spec.get("pins"), spec["name"]
         for check, _args in spec.get("checks", []):
             assert check in ta.CHECKS
 
@@ -508,8 +553,13 @@ def test_the_registry_reads_pins_from_the_repo_never_from_itself():
 def test_the_real_tree_declares_readable_pin_sites():
     """On this tree every declared pin site resolves (a reworded doc fails here first, not at release time)."""
     repo = ta.Repo(REPO)
-    unread = [(s["name"], site[1]) for s in ta.REGISTRY for site in s.get("pins", []) + s.get("tag_pins", [])
-              if ta.read_pin_site(repo, site)[1] is None]
+    unread = []
+    for spec in ta.REGISTRY:
+        sites = spec.get("pins", []) + spec.get("tag_pins", [])
+        for check, args in spec.get("checks", []):
+            if check == "commit_package":
+                sites += args["version_sites"]
+        unread.extend((spec["name"], site[1]) for site in sites if ta.read_pin_site(repo, site)[1] is None)
     assert unread == [], unread
 
 
@@ -745,6 +795,97 @@ def test_a_pinned_hash_is_checked_by_downloading_when_upstream_publishes_none(tm
         assert [r.status for r in rows if r.check == "pinned hash"] == [want], [r.as_dict() for r in rows]
 
 
+@pytest.mark.parametrize("family,index", [
+    ("Node.js", 0), ("Node.js", 1), (".NET SDK", 0), (".NET SDK", 1),
+    ("Microsoft OpenJDK", 0), ("Microsoft OpenJDK", 1),
+    ("Blender (4.2 LTS)", 0), ("PyNifly", 0), ("PyNifly", 1), ("House Carl", 0), ("7-Zip", 0), ("7-Zip", 1),
+])
+@pytest.mark.parametrize("swapped", [False, True])
+def test_published_hash_belongs_to_the_exact_artifact(tmp_path, family, index, swapped):
+    spec = next(row for row in ta.REGISTRY if row["name"] == family)
+    items = [item for kind, args in spec["checks"] if kind == "hashes" for item in args["items"]]
+    item = items[index]
+    repo = ta.Repo(REPO)
+    import re
+    match = re.search(item["pattern"], repo.read(item["file"]))
+    fields = match.groupdict()
+    want, version = fields["sha"], fields["v"]
+    other = ("e" if want[0] != "e" else "f") * len(want)
+    correct, alternate = (other, want) if swapped else (want, other)
+    if family == "Node.js":
+        arch = "x64" if index == 0 else "arm64"
+        artifact = f"node-v{version}-linux-{arch}.tar.gz"
+        body = f"{correct}  {artifact}\n{alternate}  unrelated-platform.tar.gz\n"
+    elif family == ".NET SDK":
+        arch = "x64" if index == 0 else "arm64"
+        artifact = f"dotnet-sdk-{version}-linux-{arch}.tar.gz"
+        body = json.dumps({"releases": [{"sdk": {"version": version, "files": [
+            {"url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/" + version + "/" + artifact, "hash": correct},
+            {"url": "https://example.invalid/unrelated-platform.tar.gz", "hash": alternate}]}}]})
+    elif family == "Microsoft OpenJDK":
+        arch = "x64" if index == 0 else "aarch64"
+        artifact = f"microsoft-jdk-{version}-linux-{arch}.tar.gz"
+        body = f"{correct}  {artifact}\n{alternate}  unrelated-platform.tar.gz\n"
+    else:
+        artifact = fields["url"].rsplit("/", 1)[-1]
+        if family == "Blender (4.2 LTS)":
+            body = f"{correct}  {artifact}\n{alternate}  unrelated-platform.tar.gz\n"
+        else:
+            body = json.dumps({"assets": [{"name": artifact, "digest": "sha256:" + correct},
+                                           {"name": "unrelated-platform.zip", "digest": "sha256:" + alternate}]})
+    url = item["published"].format(**fields)
+    cache = make_cache(tmp_path, extra=[(url, 200, body.encode())])
+    rows = []
+    ta.check_hashes(ta.Fetcher(cache, offline=True, env={}), repo, family, version, None,
+                    {"items": [item]}, rows, {}, [])
+    assert [row.status for row in rows] == [ta.DRIFT if swapped else ta.OK], [row.as_dict() for row in rows]
+
+
+@pytest.mark.parametrize("fmt,body", [
+    ("github-release", '{"assets":[{"name":"selected.zip"}]}'),
+    ("github-release", '{"assets":{}}'),
+    ("github-release", '{"assets":[false]}'),
+    ("github-release", '{"assets":[{"name":"selected.zip","digest":"sha256:no"}]}'),
+    ("github-release", json.dumps({"assets": [
+        {"name": "selected.zip", "digest": "sha256:" + SHA_A},
+        {"name": "selected.zip", "digest": "sha256:" + SHA_B}]})),
+    ("dotnet", '{"releases":[{"sdk":{"files":[{"url":"https://example.invalid/selected.zip"}]}}]}'),
+    ("dotnet", '{"releases":false}'),
+    ("checksums", SHA_A),  # A bare digest cannot validate an artifact in a multi-file manifest.
+    ("checksums", SHA_A + "  selected.zip\n" + SHA_B + "  selected.zip\n"),
+    ("unknown", SHA_A + "  selected.zip\n"),
+])
+def test_ambiguous_or_unreadable_published_hash_is_unchecked(fmt, body):
+    item = {"label": "selected", "artifact": "selected.zip", "published_format": fmt}
+    with pytest.raises(ta.CouldNotCheck):
+        ta._published_checksum(ta.Response(200, body.encode()), "https://example.invalid/SUMS", item, {}, 64)
+
+
+@pytest.mark.parametrize("fmt,body", [
+    ("github-release", '{"assets":[]}'),
+    ("dotnet", '{"releases":[]}'),
+    ("checksums", SHA_A + "  other.zip\n"),
+])
+def test_an_absent_artifact_does_not_borrow_another_artifacts_hash(fmt, body):
+    item = {"label": "selected", "artifact": "selected.zip", "published_format": fmt}
+    assert ta._published_checksum(ta.Response(200, body.encode()), "https://example.invalid/SUMS", item, {}, 64) is None
+
+
+@pytest.mark.parametrize("filename", ["selected.zip", "*selected.zip", "./selected.zip"])
+def test_checksum_manifest_supported_filename_forms(filename):
+    item = {"label": "selected", "artifact": "selected.zip", "published_format": "checksums"}
+    body = (SHA_A.upper() + "  " + filename + "\n").encode()
+    assert ta._published_checksum(ta.Response(200, body), "https://example.invalid/SUMS", item, {}, 64) == SHA_A
+
+
+def test_a_bare_sidecar_hash_is_bound_to_its_artifact_specific_url():
+    item = {"label": "selected", "artifact": "selected.zip", "published_format": "checksums", "single_file": True}
+    response = ta.Response(200, (SHA_A + "\n").encode())
+    assert ta._published_checksum(response, "https://example.invalid/selected.zip.sha256sum.txt", item, {}, 64) == SHA_A
+    with pytest.raises(ta.CouldNotCheck):
+        ta._published_checksum(response, "https://example.invalid/other.zip.sha256sum.txt", item, {}, 64)
+
+
 def test_the_newest_main_nexus_file_is_the_upstream_version(tmp_path):
     url = "https://api.nexusmods.com/v1/games/g/mods/1/files.json"
     files = {"files": [{"category_name": "MAIN", "version": "6.0.636"}, {"category_name": "MAIN", "version": "6.0.643"},
@@ -841,3 +982,133 @@ def test_a_doc_stating_another_jdk_than_the_image_is_drift(tmp_path):
     files["docs/container-vs-windows.md"] = files["docs/container-vs-windows.md"].replace("JDK 17", "JDK 21.0.12")
     rows, _ = audit(make_repo(tmp_path / "ok", files), tmp_path / "c", ["Microsoft OpenJDK"])
     assert not [r for r in by(rows, ta.DRIFT) if r.check == "install refs"]
+
+
+# ------------------------------------------------------------------ Git for Windows: one tested version, every path
+# The Git for Windows the suites run under (MEASURED 2026-10-13 on the dev machine: `git --version` prints
+# 2.55.0.windows.5), and its installer's SHA-256: downloaded and hashed, equal to the digest GitHub publishes for the
+# release asset and to the InstallerSha256 in winget's Git.Git 2.55.0.5 manifest; Authenticode signature valid.
+TESTED_GIT, TESTED_GIT_TAG = "2.55.0.5", "v2.55.0.windows.5"
+TESTED_GIT_SHA = "d065a4e23c3d9a6b5073d609b5be0830227ec3ca053c083ba385061ddfaf94c6"
+GIT_SPEC = next(s for s in ta.REGISTRY if s["name"] == "Git for Windows")
+
+
+def _inventory():
+    spec = importlib.util.spec_from_file_location("inventory_runtimes", REPO / "tools" / "inventory-runtimes.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_every_git_for_windows_pin_names_the_tested_version():
+    """Each delivery path names the one tested Git: the manual steps the toolkit-setup skill prints (version,
+    release tag and hash), the version setup.sh reports as tested, and the docs' install line. Red while any of
+    them still says an older Git (2.48.1 until 2026-10-13)."""
+    repo = ta.Repo(REPO)
+    sites = [ta.read_pin_site(repo, s) for s in GIT_SPEC["pins"]]
+    assert sites and all(v == TESTED_GIT for _label, v in sites), sites
+    live = [h for ref in GIT_SPEC["refs"] for h in ta.scan_refs(repo, ref) if h[2] != "history"]
+    assert {h[0] for h in live} >= {"tools/inventory-runtimes.py", "setup.sh", "docs/installing-tools.md",
+                                    "README.md"}, live
+    assert [h for h in live if h[2] != TESTED_GIT] == [], live
+    steps = _inventory().MANUAL_STEPS["git"]
+    assert "Git for Windows %s " % TESTED_GIT in steps and "Git-%s-64-bit.exe" % TESTED_GIT in steps, steps
+    assert "/releases/download/%s/" % TESTED_GIT_TAG in steps and TESTED_GIT_SHA in steps, steps
+
+
+GIT_STEPS = ('    "git": "Install Git for Windows 2.55.0.5 (it includes Git Bash): download Git-2.55.0.5-64-bit.exe from "\n'
+             '           "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/ -- " + _VERIFY\n'
+             '           + "%s -- and run it. Then open a new terminal.",\n')
+GIT_RELEASE_URL = "https://api.github.com/repos/git-for-windows/git/releases/tags/v2.55.0.windows.5"
+GIT_LATEST_URL = "https://api.github.com/repos/git-for-windows/git/releases/latest"
+
+
+@pytest.mark.parametrize("sha,want", [(TESTED_GIT_SHA, ta.OK), ("f" * 64, ta.DRIFT)])
+def test_the_pinned_git_installer_hash_is_the_one_github_publishes(tmp_path, sha, want):
+    release = json.dumps({"tag_name": TESTED_GIT_TAG, "assets": [
+        {"name": "Git-2.55.0.5-64-bit.exe", "digest": "sha256:" + TESTED_GIT_SHA},
+        {"name": "unrelated-installer.exe", "digest": "sha256:" + "f" * 64}]}).encode()
+    repo = make_repo(tmp_path, {"tools/inventory-runtimes.py": GIT_STEPS % sha})
+    cache = make_cache(tmp_path, extra=[(GIT_RELEASE_URL, 200, release), (GIT_LATEST_URL, 200, release)])
+    rows, _code = audit(repo, cache, ["Git for Windows"])
+    assert [r.status for r in rows if r.check == "pinned hash"] == [want], [r.as_dict() for r in rows]
+    assert [r.status for r in rows if r.check == "version"] == [ta.OK], [r.as_dict() for r in rows]
+
+
+# Commit-published xeditlib has a package version, not necessarily a matching release/tag.
+XEDIT_COMMIT = "1" * 40
+XEDIT_URL = "https://raw.githubusercontent.com/WingedGuardian/xeditlib/" + XEDIT_COMMIT + "/package.json"
+
+
+def xedit_repo(tmp_path, *, version="1.0.2", documentation=True, extra_doc="", hint=None):
+    url = "https://codeload.github.com/WingedGuardian/xeditlib/tar.gz/" + XEDIT_COMMIT
+    files = {
+        "package.json": json.dumps({"optionalDependencies": {"xeditlib": url}}),
+        "package-lock.json": json.dumps({"packages": {"node_modules/xeditlib": {
+            "resolved": url, "version": version}}}),
+    }
+    if documentation:
+        files["docs/installing-tools.md"] = "xeditlib v1.0.2 = commit `" + XEDIT_COMMIT + "`\n" + extra_doc
+    if hint:
+        files["setup.sh"] = hint
+    return make_repo(tmp_path, files)
+
+
+def xedit_cache(tmp_path, *, status=200, body=None):
+    if body is None:
+        body = b'{"name":"xeditlib","version":"1.0.2"}'
+    # No tag/release response is supplied: a regression must not silently need one.
+    cache = tmp_path / "cache"
+    ta.Fetcher(cache, offline=True, env={}).put(XEDIT_URL, status, body)
+    return cache
+
+
+def test_xeditlib_commit_package_does_not_require_a_matching_git_tag(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path), xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 0, [r.as_dict() for r in rows]
+    assert {r.check for r in rows} == {"install refs", "commit package"}
+    assert any(r.upstream == "1.0.2" and r.status == ta.OK for r in rows)
+
+
+def test_xeditlib_missing_commit_package_is_drift(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path), xedit_cache(tmp_path, status=404, body=b"missing"), ["xeditlib"])
+    assert code == 1 and any("absent at the pinned" in r.detail for r in by(rows, ta.DRIFT))
+
+
+@pytest.mark.parametrize("body", [b"not JSON", b"[]", b'{"name":"xeditlib"}'])
+def test_xeditlib_unreadable_commit_metadata_is_unchecked(tmp_path, body):
+    rows, code = audit(xedit_repo(tmp_path), xedit_cache(tmp_path, body=body), ["xeditlib"])
+    assert code == 2 and by(rows, ta.UNCHECKED), [r.as_dict() for r in rows]
+
+
+def test_xeditlib_wrong_upstream_package_is_drift(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path), xedit_cache(tmp_path, body=b'{"name":"other","version":"1.0.2"}'), ["xeditlib"])
+    assert code == 1 and any("package name differs" in r.detail for r in by(rows, ta.DRIFT))
+
+
+def test_xeditlib_locked_package_version_must_match_the_commit(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path, version="1.0.1"), xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 1 and any("package-lock.json" in r.detail for r in by(rows, ta.DRIFT))
+
+
+def test_xeditlib_missing_documented_package_version_is_unchecked(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path, documentation=False), xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 2 and any("docs/installing-tools.md" in r.detail for r in by(rows, ta.UNCHECKED))
+
+
+def test_xeditlib_conflicting_documented_versions_are_drift(tmp_path):
+    rows, code = audit(xedit_repo(tmp_path, extra_doc="xeditlib v1.0.1 = commit `" + XEDIT_COMMIT + "`"),
+                       xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 1 and any("disagrees with itself" in r.detail for r in by(rows, ta.DRIFT))
+
+
+def test_xeditlib_setup_commit_hint_without_backticks_is_checked(tmp_path):
+    hint = 'echo "xeditlib v1.0.1 = commit 2222222 + koffi 2.15.1"\n'
+    rows, code = audit(xedit_repo(tmp_path, hint=hint), xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 1 and any("setup.sh:1 says 2222222" in r.detail for r in by(rows, ta.DRIFT))
+
+
+def test_xeditlib_audit_does_not_attribute_another_tools_commit_to_xeditlib(tmp_path):
+    hint = 'echo "Ask which tools: xeditlib, AutoMod; AutoMod tag v1.11.2 (commit 2222222)"\n'
+    rows, code = audit(xedit_repo(tmp_path, hint=hint), xedit_cache(tmp_path), ["xeditlib"])
+    assert code == 0, [r.as_dict() for r in rows]

@@ -28,6 +28,14 @@ LAYOUT_ENV = {
 SHELL = {"Bash": "bash", "PowerShell": "powershell"}
 
 
+@pytest.fixture(autouse=True)
+def _windows_host(monkeypatch):
+    """The rows and helpers here read Windows roots and Git Bash `/c/` aliases. Since 4ebdd1c a POSIX host reads
+    `/c/...` natively, so pin the host (CI run 39145224156); the two tests that exercise a host reading set their
+    own, which overrides this."""
+    monkeypatch.setattr(paths, "POSIX_HOST", False)
+
+
 def _rows():
     text = (REPO / "tests" / "guard_corpus" / "intended.jsonl").read_text(encoding="utf-8")
     return [r for r in (json.loads(x) for x in text.split("\n") if x.strip()) if r["task"] == "T7"]
@@ -410,8 +418,32 @@ def test_moving_a_file_out_of_the_install_is_a_delete(cmd, shell):
 ], ids=["mv-install", "move-item-data"])
 def test_moving_a_root_folder_away_names_the_move_not_a_delete(cmd, shell):
     (decision, reason), fired = decide(cmd, shell=shell)
+    if cmd.startswith(f'mv "{INSTALL}"'):
+        # The install itself contains permanent recovery; moving its ancestor is forbidden first.
+        assert (decision, fired) == ("deny", {"S-SAVE-STORE"})
+        assert "permanent save backup store" in reason
+        return
     assert (decision, fired) == ("deny", {"S-MOVE-ROOT"}), (cmd, reason, fired)
     assert "moves" in reason and "deletes" not in reason
+
+
+@pytest.mark.parametrize("verb,shell", [("mv", "bash"), ("Move-Item", "powershell")], ids=["mv", "move-item"])
+def test_moving_config_root_away_names_the_move_without_store_preemption(tmp_path, monkeypatch, verb, shell):
+    """The game root now stops at save-store policy; a separate config root still uses S-MOVE-ROOT."""
+    # Real temp folders: read them as THIS host does (on Linux they are /tmp/..., unplaceable under the module's
+    # Windows-host pin; CI run 39167733692 turned Move-Item into S-DEL-UNRESOLVED there).
+    monkeypatch.setattr(paths, "POSIX_HOST", os.name != "nt")
+    game, config = tmp_path / "game", tmp_path / "config"
+    game.mkdir()
+    config.mkdir()
+    roots = paths.roots(game.as_posix(), game.as_posix(), {"SKYRIM_CONFIG_DIR": config.as_posix()})
+    command = '{} "{}" "{}"'.format(verb, config.as_posix(), (tmp_path / "config-off").as_posix())
+    a = audit.Audit("")
+    a.raw = lambda line: None
+    v = shell_rules.decide(command, roots, a, cwd=tmp_path.as_posix(), shell=shell, env={})
+    assert v.decision == "deny"
+    assert {rid for rid, _ in a.fired} == {"S-MOVE-ROOT"}
+    assert "moves config away" in v.reason and "deletes" not in v.reason
 
 
 # ---- Plan 5 final review D1: the Recycle-Bin delete core.md recommends is a delete to every detector.

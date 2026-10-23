@@ -1,4 +1,5 @@
-"""Recovery snapshots: the load order, the INIs and the one save a command is about to rewrite (Plan 6 Task 15, spec 5.3).
+"""Recovery snapshots: the load order and the INIs before a command, and every save a command changes (spec 5.3; the
+save policy, user ruling 2026-10-13).
 
 The script snapshot (snapshot.py) covers .psc/.pex. This covers the rest of what a bad command can break and the lock
 does not protect:
@@ -7,43 +8,41 @@ does not protect:
   read-only): `plugins.txt` and `loadorder.txt` in each declared SKYRIM_LOADORDER_DIR, and every `Skyrim*.ini` (any case)
   directly in each declared SKYRIM_CONFIG_DIR. The CONFIGURED roots only (skyrim-paths.env and the environment, through
   paths.roots): nothing is probed, so an install that declares neither gets no such snapshot and the audit log says so
-  (once per change of that state, not once per call).
-* THE SAVE A COMMAND WRITES, whatever the command's first word (fix round 1, I1), before a command S-RESAVER-APPLY
-  asks about (ReSaver run with --apply and a save-writing operation; shell_rules.resaver_writes, on the rule's own
-  decision: the <out.ess> it writes, never the input it only reads -- fix round 1, I2) or one S-DEVBENCH-SAVE covers (DevBench told to save
-  over an EXISTING save, by MCP, curl, Invoke-RestMethod or devbench-cli; mcp_rules.save_name / shell_save_names, then
-  the rule's Saves folder and its case-insensitive listing): that `<name>.ess` and its `<name>.skse` co-save. Never the
-  save folder. A save and its co-save are kept together or not at all.
+  (once per change of that state, not once per call). Taken by run() (snapshot-before-tool; Codex pre-tool's side
+  effects); never blocks.
+* EVERY SAVE A COMMAND CHANGES (backup_saves), called by the DECIDING hook (saves.enforce) before it allows the
+  command, because the save policy allows a save change only once its backup is verified: both files of each pair
+  (the save and its SKSE co-save, whichever one the command names), each copy fsynced and read back to its SHA-256,
+  one snapshot per pair; a missing co-save is recorded in the line's `missing`. Any failure raises SaveBackupFailed
+  and the hook DENIES. No rate limit, no size bound (the hook's time is the bound), and never pruned.
 
 STORE `.claude/backups/recovery_snapshots/`:
 * `blobs/<sha256>`: content-addressed (snapshot._store_blob, backup.py's part file + running sha256 + size check), so
   identical bytes are stored once however many snapshots hold them.
 * `MANIFEST.jsonl`: Task 13's line -- `v, ts, src` (verbatim) `, dest` (the blob's name) `, size, sha256, tool, agent,
-  session_id` -- plus `t` (epoch), `kind` (config | save), `snap` (the snapshot id) and `command` (its first 120 bytes).
-  One locked append (backup._append_line) per snapshot. A reader skips and COUNTS a line that does not parse.
-* `index.json`: per path, the size / mtime_ns / sha256 / snapshot id last recorded, so a path is re-read only when needed.
+  session_id` -- plus `t` (epoch), `kind` (config | save), `snap` (the snapshot id), `command` (its first 120 bytes)
+  and, on a save line, `missing` (the pair's files that did not exist). One locked append (backup._append_line) per
+  snapshot (per call, for saves). A reader skips and COUNTS a line that does not parse.
+* `index.json`: per config path, the size / mtime_ns / sha256 / snapshot id last recorded, so a path is re-read only when
+  needed; and the last snapshot id of each kind.
 
-DEDUP AND RATE LIMIT. A file whose listing (size, mtime) matches the index is not read again; a line is written only when
-a path's content differs from what was last recorded for it, so a snapshot id holds what CHANGED and `resolve` gives the
-full state at that id. Config files are re-read regardless once per CONFIG_RATE seconds (a same-size, same-mtime rewrite
-is seen then). A save is copied at most once per SAVE_RATE seconds per path (the state before the FIRST of a burst of
-ReSaver runs is the one kept; the burst's intermediate states are not -- logged RATE-LIMITED).
+DEDUP AND RATE LIMIT (config only). A file whose listing (size, mtime) matches the index is not read again; a line is
+written only when a path's content differs from what was last recorded for it, so a snapshot id holds what CHANGED and
+`resolve` gives the full state at that id. Config files are re-read regardless once per CONFIG_RATE seconds (a
+same-size, same-mtime rewrite is seen then).
 
-BOUNDS. A save whose .ess plus .skse exceed SAVE_MAX_BYTES is not copied (SKIPPED, with both sizes). The copy is
-time-boxed: at most SAVE_BOX seconds and never past the caller's deadline (the hook's budget); a copy cut short leaves no
-part file and no snapshot of that save and is logged PARTIAL -- never a silent skip.
+ORDER. The hooks call this in PreToolUse (Claude: snapshot-before-tool, and protect-bash / protect-files /
+protect-mcp for saves; Codex: pre-tool), so the copy is finished before the command can start.
 
-ORDER. The hooks call this in PreToolUse (Claude: snapshot-before-tool and protect-mcp; Codex: pre-tool's side
-effects), so the copy is finished before the command can start.
+PRUNING (once a day, inside PRUNE_BOX): a config snapshot is kept WHOLE while it is younger than KEEP_DAYS or holds
+some path's newest content, and each kept config snapshot keeps the earlier lines its full state needs (fix round 1,
+I4); a SAVE snapshot is always kept (the save policy: backups are kept forever; disk space is the user's call). Every
+other line goes, then every blob no remaining line names is deleted -- PERMANENTLY, as this is the tool's own store.
+An unreadable line is kept as it is and stops blob deletion. Every line records its snapshot's line count and full
+path set, so resolve() REFUSES a snapshot pruning has cut into instead of returning a state that never existed. A save
+copy also keeps SAVE_RESERVE_BYTES free on its drive (review M2): short of that it fails, and the hook denies.
 
-PRUNING (once a day, inside PRUNE_BOX): a snapshot is kept WHOLE while it is younger than KEEP_DAYS (a save:
-SAVE_KEEP_DAYS) or holds some path's newest content, and each kept config snapshot keeps the earlier lines its full state
-needs (fix round 1, I4); every other line goes, then every blob no remaining line names is deleted -- PERMANENTLY, as
-this is the tool's own store. An unreadable line is kept as it is and stops blob deletion. Every line records its
-snapshot's line count and full path set, so resolve() REFUSES a snapshot pruning has cut into instead of returning a
-state that never existed. A save copy also keeps SAVE_RESERVE_BYTES free on its drive (review M2).
-
-Restoring: `tools/skyguard.sh snapshot list | restore` (snapcli.py).
+Restoring: `tools/skyguard.sh snapshot list | restore` (snapcli.py); a save snapshot restores both files of its pair.
 """
 from __future__ import annotations
 
@@ -52,9 +51,12 @@ import os
 import re
 import shutil
 import time
+import uuid
 from pathlib import Path
 
-from . import backup, mcp_rules, paths, shell_rules, shellparse, snapshot
+from modding_harness import durable
+
+from . import backup, snapshot
 
 HOOK = "recovery-snapshot"
 STORE = "recovery_snapshots"
@@ -62,24 +64,18 @@ MANIFEST = "MANIFEST.jsonl"
 INDEX = "index.json"
 DAY = 86400
 CONFIG_RATE = 60          # seconds: config files are re-read at most this often when their listing is unchanged
-SAVE_RATE = 300           # seconds: one copy of a given save per this long
 LOADORDER_FILES = ("plugins.txt", "loadorder.txt")
 _INI = re.compile(r"^skyrim[^/\\]*\.ini$", re.IGNORECASE)
-SAVE_MAX_BYTES = 192 * 1024 * 1024   # .ess + .skse together
 # Review M2: a save copy never takes its drive below this much free space (SKIPPED, logged, instead).
 SAVE_RESERVE_BYTES = 2 * 1024 * 1024 * 1024
-SAVE_BOX = 10.0           # seconds, at most, for one call's save copies (also capped by the caller's deadline)
-LOCK_WAIT = 0.2           # a call waits this long for the store lock
+LOCK_WAIT = 0.2           # a config snapshot waits this long for the store lock
+SAVE_LOCK_WAIT = 5.0      # a save backup waits up to this long (never past the hook's deadline): it decides the call
 KEEP_DAYS = 14
-SAVE_KEEP_DAYS = 3        # saves are tens of MB on a drive that may be nearly full; the newest per save is always kept
 PRUNE_EVERY = DAY
 PRUNE_BOX = 0.5
-COSAVE = ".skse"
 _BLOB = re.compile(r"^[0-9a-f]{64}$")
-_ID = re.compile(r"^\d{8}_\d{6}-(config|save)(?:-\d+)?\Z")   # \Z: `$` also matches before a final newline
+_ID = re.compile(r"^\d{8}_\d{6}-(config|save)(?:-(?:\d+|[0-9a-f]{32}))?\Z")
 _MB = 1024 * 1024
-UNREADABLE_SAVE = ("the save {} is NOT being kept: the paths file could not be read, so the Saves folder is unknown "
-                   "-- copy that save yourself before the command runs")
 
 
 def store_dir(project):
@@ -125,122 +121,17 @@ def _listed(folder, name):
     return None
 
 
-def _cosave(ess):
-    folder, base = os.path.split(ess)
-    return _listed(folder, base[:-4] + COSAVE) if base.lower().endswith(".ess") else None
-
-
-def _resaver_save(word, cwd, shell, roots, env):
-    """(path, (level, message) or None). A save ReSaver WRITES (fix round 1, I2), as written: absolute, relative to the
-    payload cwd (where ReSaver resolves it), else a bare name in the Saves folder. A target that does not exist yet is
-    a NEW file: nothing to keep, and the log says so."""
-    if not word:
-        return None, ("SKIPPED", "ReSaver --apply names no .ess this guard can read, so it cannot tell which save "
-                                 "to keep")
-    if "*" in word or "?" in word:
-        return None, ("SKIPPED", "ReSaver --apply names a pattern ({}), not one save, so no save was kept -- copy the "
-                                 "saves yourself first".format(word))
-    n = paths.norm_abs(word, msys=(shell != "powershell"))
-    cands = [n] if n else []
-    if not n:
-        base = paths.norm_abs(cwd) if cwd else None
-        if base:
-            j = paths.norm_abs(base + "/" + word.replace("\\", "/"))
-            if j:
-                cands.append(j)
-        folder = mcp_rules.saves_folder(roots, env) if roots is not None else None
-        if folder:
-            cands.append(os.path.join(folder, re.split(r"[/\\]", word)[-1]))
-    for c in cands:
-        hit = _listed(*os.path.split(c))
-        if hit:
-            return hit, None
-    if roots is None and not n:
-        # Final review B-M2: a bare or relative name not found by the cwd may still be in the Saves folder, which is
-        # unknown without the paths file -- so this is NOT a new save, and the log must say the save was not kept.
-        return None, ("SKIPPED", UNREADABLE_SAVE.format(word))
-    return None, ("NEW", "ReSaver writes {}, which does not exist yet -- nothing to keep".format(word))
-
-
-def _devbench_save(name, roots, env):
-    """(path, problem); (None, "") for a NEW save name -- nothing exists to keep, and the rule passes it too."""
-    clean = mcp_rules._clean_name(name)
-    if clean is None:
-        return None, "cannot tell which save the DevBench call overwrites ({!r})".format(name)
-    folder = mcp_rules.saves_folder(roots, env)
-    if folder is None:
-        return None, "no Saves folder is known, so the save {} cannot be kept".format(clean)
-    return _listed(folder, clean + ".ess"), ""
-
-
-def shell_saves(command, shell, cwd, roots, env):
-    """([save path], [(level, message)]) for the saves a shell command WRITES under S-RESAVER-APPLY / S-DEVBENCH-SAVE,
-    decided on the parsed command as the rules decide (fix round 1, I1: whatever its first word). The parse happens
-    only when the text names ReSaver with --apply, or the DevBench endpoint / CLI (M6: a JSON-escaped "save" is found
-    by the parse, not by a text filter)."""
-    low = command.lower()
-    resaver = "resaver" in low and shell_rules.RESAVER_APPLY in low
-    dev = any(w in low for w in mcp_rules._SHELL_WORDS)
-    if not (resaver or dev):
-        return [], []
-    # Final review B-M2: an unreadable paths file (roots None) used to return here with no log line, before even an
-    # absolute .ess that needs no roots. Now an absolute or cwd-relative save is still kept, and any other is logged.
-    parsed = shellparse.parse(command, shell or "")
-    found, notes = [], []
-    if resaver:
-        w = shell_rules.resaver_writes(command, shell or "", parsed)
-        for word in (w[1] or [""]) if w else []:
-            p, note = _resaver_save(word, cwd, shell, roots, env)
-            if p:
-                found.append(p)
-            if note:
-                notes.append(note)
-    if dev:
-        for name in mcp_rules.shell_save_names(command, parsed):
-            if roots is None:
-                notes.append(("SKIPPED", UNREADABLE_SAVE.format(name)))
-                continue
-            p, why = _devbench_save(name, roots, env)
-            if p:
-                found.append(p)
-            elif why:
-                notes.append(("SKIPPED", why))
-    return list(dict.fromkeys(found)), notes
-
-
 # ---------------------------------------------------------------- entry points (the hooks)
 
 
 def run(project, command, payload_empty, audit, roots, cwd="", shell="", agent="", session_id="", deadline=None,
         now=None, env=None):
-    """Shell route: the saves the command writes (if any), then the load order and INIs. Never raises into the hook.
-    Fix round 1 (I1): the read-only first-word skip applies to the load order and INIs only -- `echo x && resaver ...`,
-    `env X=y resaver ...` still write the save, and the rule still fires on them."""
+    """Shell route (snapshot-before-tool, Codex pre-tool side effects): the load order and INIs before a command that
+    is not read-only. Never raises into the hook. A SAVE a command changes is backed up by the deciding hook instead
+    (saves.enforce -> backup_saves), before it allows the command: the save policy needs the backup's result."""
     if payload_empty or not (command or "").strip():
         return
-    env = os.environ if env is None else env
-    saves, notes = shell_saves(command, shell, cwd, roots, env)
-    take(project, audit, roots, command, saves, notes, not snapshot.read_only(command), now, deadline, agent,
-         session_id)
-
-
-def mcp(project, tool_name, args, audit, roots, agent="", session_id="", deadline=None, now=None, env=None):
-    """MCP route (protect-mcp): a DevBench save over an existing save keeps that save first."""
-    parts = (tool_name or "").split("__")
-    if not mcp_rules.is_devbench(tool_name):
-        return
-    name = mcp_rules.save_name(parts[-1], args)
-    if name is None:
-        return
-    if roots is None:                         # final review B-M2: never a silent skip
-        take(project, audit, roots, "{} save {}".format(tool_name, name), [],
-             [("SKIPPED", UNREADABLE_SAVE.format(name))], False, now, deadline, agent, session_id)
-        return
-    p, why = _devbench_save(name, roots, os.environ if env is None else env)
-    if not (p or why):
-        return
-    take(project, audit, roots, "{} save {}".format(tool_name, name), [p] if p else [],
-         [("SKIPPED", why)] if why else [], False, now, deadline, agent, session_id)
+    take(project, audit, roots, command, not snapshot.read_only(command), now, deadline, agent, session_id)
 
 
 # ---------------------------------------------------------------- taking a snapshot
@@ -257,6 +148,10 @@ def _read_index(store):
 def _new_id(idx, ts, kind):
     """`<stamp>-<kind>`, with `-2`, `-3` ... when the previous snapshot of that kind took the same second."""
     base = "{}-{}".format(ts, kind)
+    if kind == "save":
+        sid = base + "-" + uuid.uuid4().hex
+        idx["last"][kind] = sid
+        return sid
     last = idx["last"].get(kind, "")
     n = 1
     if last == base:
@@ -268,11 +163,10 @@ def _new_id(idx, ts, kind):
     return sid
 
 
-def take(project, audit, roots, command, saves, problems, do_config, now=None, deadline=None, agent="", session_id=""):
+def take(project, audit, roots, command, do_config, now=None, deadline=None, agent="", session_id=""):
+    """The load order and INIs (config snapshot). Never raises; a lost lock or an unwritable store is logged."""
     now = time.time() if now is None else now
-    for level, msg in problems:
-        audit.log(HOOK, level, msg)
-    if not saves and not do_config:
+    if not do_config:
         return
     store = store_dir(project)
     try:
@@ -285,38 +179,29 @@ def take(project, audit, roots, command, saves, problems, do_config, now=None, d
         lock.__enter__()
     except OSError:
         audit.log(HOOK, "SKIPPED", "another session holds the recovery store lock -- this call took no recovery "
-                  "snapshot{}".format(" (NOT of the save it is about to rewrite)" if saves else ""))
+                  "snapshot")
         return
     try:
-        _take_locked(store, audit, roots, command, saves, do_config, now, deadline, agent, session_id)
+        _take_locked(store, audit, roots, command, now, agent, session_id)
     finally:
         lock.__exit__(None, None, None)
 
 
-def _take_locked(store, audit, roots, command, saves, do_config, now, deadline, agent, session_id):
+def _take_locked(store, audit, roots, command, now, agent, session_id):
     idx = _read_index(store)
     before = json.dumps(idx, sort_keys=True)
-    start = backup._clock()
-    box_end = start + SAVE_BOX if deadline is None else min(deadline, start + SAVE_BOX)
-    pending = []                              # (lines, index updates) appended only after the lines are on disk
-    for ess in saves:
-        got = _save(store, idx, ess, audit, command, now, box_end, agent, session_id)
-        if got:
-            pending.append(got)
-    if do_config:
-        got = _config(store, idx, roots, audit, command, now, agent, session_id)
-        if got:
-            pending.append(got)
-    for lines, updates, logline in pending:
+    got = _config(store, idx, roots, audit, command, now, agent, session_id)
+    if got:
+        lines, updates, logline = got
         data = b"".join((json.dumps(e, ensure_ascii=True) + "\n").encode("ascii") for e in lines)
         try:
             backup._append_line(store / MANIFEST, data)
         except OSError:
             audit.log(HOOK, "FAILED", "could not append to {} -- {} is NOT recorded; the next call retries".format(
                 MANIFEST, lines[0]["snap"]))
-            continue
-        idx["files"].update(updates)          # recorded only once on disk, so a failed append is retried
-        audit.raw(logline)
+        else:
+            idx["files"].update(updates)          # recorded only once on disk, so a failed append is retried
+            audit.raw(logline)
     if now - idx.get("pruned", 0) >= PRUNE_EVERY:
         prune(store, now, audit, deadline=time.monotonic() + PRUNE_BOX)
         idx["pruned"] = int(now)
@@ -394,64 +279,148 @@ def _config(store, idx, roots, audit, command, now, agent, session_id):
     return lines, updates, logline
 
 
-def _save(store, idx, ess, audit, command, now, box_end, agent, session_id):
-    co = _cosave(ess)
-    members = [ess] + ([co] if co else [])
-    name = os.path.basename(ess)
-    try:
-        stats = [os.stat(m) for m in members]
-    except OSError:
-        audit.log(HOOK, "FAILED", "could not read save {} -- NO snapshot of it was taken".format(name))
-        return None
-    total = sum(s.st_size for s in stats)
-    if total > SAVE_MAX_BYTES:
-        audit.log(HOOK, "SKIPPED", "save {} is {:.1f} MB with its co-save, over the {:.0f} MB bound -- NO snapshot of it "
-                  "was taken; copy it yourself before this command".format(name, total / _MB, SAVE_MAX_BYTES / _MB))
-        return None
-    try:
-        free = shutil.disk_usage(str(store)).free
-    except OSError:
-        free = None
-    if free is not None and free - total < SAVE_RESERVE_BYTES:
-        audit.log(HOOK, "SKIPPED", "save {} ({:.1f} MB) would leave under {:.0f} MB free on the snapshot drive -- NO "
-                  "snapshot of it was taken; copy it yourself before this command".format(
-                      name, total / _MB, SAVE_RESERVE_BYTES / _MB))
-        return None
-    recs = [idx["files"].get(m) for m in members]
-    if all(isinstance(r, list) and r[:2] == [s.st_size, s.st_mtime_ns] for r, s in zip(recs, stats)):
-        audit.log(HOOK, "UNCHANGED", "save {} is unchanged since recovery snapshot {} -- not copied again".format(
-            name, recs[0][3]))
-        return None
-    last = recs[0][4] if isinstance(recs[0], list) and len(recs[0]) > 4 and recs[0][4] else None
-    if last is not None and 0 <= now - last < SAVE_RATE:
-        audit.log(HOOK, "RATE-LIMITED", "save {} was copied {} s ago ({}); this intermediate state is NOT kept -- the "
-                  "state from before that run is".format(name, int(now - last), recs[0][3]))
-        return None
-    blobs = store / "blobs"
-    got = []
-    for m, s, r in zip(members, stats, recs):
-        if isinstance(r, list) and r[:2] == [s.st_size, s.st_mtime_ns]:
-            got.append((m, r[2], s))                  # this member is unchanged: its blob is already held
+# ---------------------------------------------------------------- the save policy's backup (saves.enforce)
+
+
+class SaveBackupFailed(Exception):
+    """A save pair could not be backed up and verified; the message says why (the deny names it)."""
+
+
+def pair_members(ess, skse):
+    """([existing file], [missing path]) of one save pair, each spelled as the folder lists it (case-insensitive)."""
+    have, missing = [], []
+    for p in (ess, skse):
+        if not p:
             continue
-        try:
-            sha = snapshot._store_blob(blobs, m, deadline=box_end)
-        except backup.CopyTimeout:
-            audit.log(HOOK, "PARTIAL", "the copy of save {} did not finish inside its time box ({:.1f} MB) -- NO "
-                      "snapshot of it was kept; copy it yourself before this command".format(name, total / _MB))
-            return None
-        if sha is None:
-            audit.log(HOOK, "FAILED", "could not copy {} (unreadable, or it changed while being copied) -- NO snapshot "
-                      "of save {} was kept".format(os.path.basename(m), name))
-            return None
-        got.append((m, sha, s))
+        hit = p if os.path.isfile(p) else _listed(*os.path.split(p))
+        (have if hit else missing).append(hit or p)
+    return have, missing
+
+
+def _store_verified(blobs, src, deadline):
+    """Copy `src` into the store under its sha256, fsynced, and READ IT BACK: the stored bytes must hash to what was
+    read from the source. An existing blob of that hash is re-hashed too (blobs of the other snapshots are not
+    fsynced, and one torn by a power loss is replaced). -> sha256. Raises SaveBackupFailed with the reason."""
+    part = blobs / ".part-save-{}".format(os.getpid())
+    name = os.path.basename(src)
+    try:
+        want, copied, digest = backup._copy_hashed(src, part, fsync=True, deadline=deadline)
+        on_disk = os.stat(str(part)).st_size
+    except backup.CopyTimeout:
+        backup._discard(part)
+        raise SaveBackupFailed("the copy of {} did not finish inside the hook's time".format(name))
+    except OSError as e:
+        backup._discard(part)
+        raise SaveBackupFailed("{} could not be read or copied ({})".format(name, e.__class__.__name__))
+    if not (on_disk == copied == want):
+        backup._discard(part)
+        raise SaveBackupFailed("{} changed size while it was copied".format(name))
+    try:
+        if backup._sha256(part) != digest:
+            raise SaveBackupFailed("the copy of {} does not hash to what was read".format(name))
+        dest = blobs / digest
+        if dest.is_file() and backup._sha256(dest) == digest:
+            return digest
+        os.replace(str(part), str(dest))
+        if backup._sha256(dest) != digest:
+            raise SaveBackupFailed("the stored copy of {} does not verify".format(name))
+        return digest
+    except OSError as e:
+        raise SaveBackupFailed("the copy of {} could not be stored ({})".format(name, e.__class__.__name__))
+    finally:
+        backup._discard(part)
+
+
+def backup_saves(project, audit, pairs, command, agent="", session_id="", deadline=None, now=None):
+    """Back up each save pair BEFORE a command changes it (the save policy, user ruling 2026-10-13): both files of
+    each pair, `.ess` and `.skse`, copied into the recovery store and each copy verified by SHA-256; then one
+    manifest snapshot per pair (`<stamp>-save`), holding the files that exist and naming a missing co-save in
+    `missing`. Kept FOREVER: pruning never removes a save snapshot. `pairs`: [(ess path, skse path)], either may be
+    absent on disk (a pair with neither file is skipped: nothing exists to keep). -> [snapshot id], in pair order.
+    Raises SaveBackupFailed (and records nothing) when any file cannot be copied and verified, the store cannot be
+    written, its lock is held past the deadline, or the copy would leave the drive under SAVE_RESERVE_BYTES."""
+    now = time.time() if now is None else now
+    plan = []
+    for ess, skse in pairs:
+        have, missing = pair_members(ess, skse)
+        if have:
+            plan.append((have, missing))
+    if not plan:
+        return []
+    store = store_dir(project)
+    try:
+        (store / "blobs").mkdir(parents=True, exist_ok=True)
+        total = sum(os.path.getsize(f) for have, _m in plan for f in have)
+        free = shutil.disk_usage(str(store)).free
+    except OSError as e:
+        raise SaveBackupFailed("the backup store {} is not usable ({})".format(store, e.__class__.__name__))
+    if free - total < SAVE_RESERVE_BYTES:
+        raise SaveBackupFailed("{:.1f} MB of saves would leave under {:.0f} MB free on the backup drive".format(
+            total / _MB, SAVE_RESERVE_BYTES / _MB))
+    left = SAVE_LOCK_WAIT if deadline is None else max(0.0, min(SAVE_LOCK_WAIT, deadline - backup._clock()))
+    try:
+        with backup._exclusive(store / ".lock", wait=left):
+            return _backup_locked(store, audit, plan, command, agent, session_id, deadline, now)
+    except SaveBackupFailed:
+        raise
+    except OSError:
+        raise SaveBackupFailed("another session held the backup store's lock")
+
+
+def _backup_locked(store, audit, plan, command, agent, session_id, deadline, now):
+    blobs = store / "blobs"
+    # Capture identities before copying any member, then revalidate the whole set
+    # after every copy. Size/mtime alone cannot detect metadata-preserving writes.
+    before = {f: durable.identity(f) for have, _missing in plan for f in have}
+    stored = []
+    for have, missing in plan:
+        stored.append(([(f, _store_verified(blobs, f, deadline)) for f in have], missing))
+    try:
+        for got, missing in stored:
+            for f, sha in got:
+                if (durable.identity(f) != before[f] or durable.digest(f, deadline) != sha
+                        or durable.identity(f) != before[f]):
+                    raise SaveBackupFailed("{} changed before the complete save was preserved".format(f))
+            for f in missing:
+                if os.path.lexists(f) or _listed(*os.path.split(f)):
+                    raise SaveBackupFailed("the missing save counterpart {} appeared during preservation".format(f))
+    except OSError as exc:
+        raise SaveBackupFailed("the complete save could not be revalidated ({})".format(exc)) from exc
+    idx = _read_index(store)
     ts = audit.stamp()
-    sid = _new_id(idx, ts, "save")
-    lines = [_line(ts, now, m, sha, os.stat(str(blobs / sha)).st_size, "save", sid, command, agent, session_id,
-                   len(got), sorted(g[0] for g in got)) for m, sha, _s in got]
-    updates = {m: [s.st_size, s.st_mtime_ns, sha, sid, int(now)] for m, sha, s in got}
-    logline = "[{}] RECOVERY-SNAPSHOT (save: {}{}, {:.1f} MB) {} before: {}\n".format(
-        ts, name, " + " + os.path.basename(co) if co else ", no co-save", total / _MB, sid, _short(command))
-    return lines, updates, logline
+    lines, ids = [], []
+    if shutil.disk_usage(str(store)).free < SAVE_RESERVE_BYTES:
+        raise SaveBackupFailed("the backup drive lost its free-space reserve during preservation")
+    for got, missing in stored:
+        sid = _new_id(idx, ts, "save")
+        ids.append(sid)
+        state = sorted(f for f, _s in got)
+        for f, sha in got:
+            e = _line(ts, now, f, sha, os.stat(str(blobs / sha)).st_size, "save", sid, command, agent, session_id,
+                      len(got), state)
+            e["missing"] = sorted(missing)
+            lines.append(e)
+    data = b"".join((json.dumps(e, ensure_ascii=True) + "\n").encode("ascii") for e in lines)
+    try:
+        backup._append_line(store / MANIFEST, data)
+        # Windows _commit (os.fsync) requires a write-capable descriptor.
+        with open(store / MANIFEST, "r+b") as manifest:
+            os.fsync(manifest.fileno())
+        durable.sync_dir(store)
+        for sid in ids:
+            if not resolve(store, sid):
+                raise ValueError("empty save snapshot")
+    except (OSError, ValueError):
+        raise SaveBackupFailed("the backup manifest could not be written")
+    try:
+        snapshot._write_replace(store / INDEX, json.dumps(idx, ensure_ascii=True, sort_keys=True).encode("ascii"))
+    except OSError:
+        pass                                  # the index only spaces snapshot ids; the manifest holds the backup
+    for (got, missing), sid in zip(stored, ids):
+        audit.raw("[{}] SAVE-BACKUP {} ({}{}) before: {}\n".format(
+            ts, sid, " + ".join(os.path.basename(f) for f, _s in got),
+            ", co-save missing" if missing else "", _short(command)))
+    return ids
 
 
 # ---------------------------------------------------------------- reading
@@ -541,7 +510,7 @@ def resolve(store, sid):
 
 def _needed(parsed, now):
     """The indices of the lines pruning keeps (fix round 1, I4). A snapshot is KEPT -- whole -- when it is younger than
-    KEEP_DAYS (a save: SAVE_KEEP_DAYS) or holds the newest line of some path (the only copy of that content). For every
+    KEEP_DAYS (a save: always) or holds the newest line of some path (the only copy of that content). For every
     kept config snapshot, each path's newest line at or before it is kept too, so its full state still resolves. A line
     kept only for that leaves its own (old) snapshot partial, which resolve() then refuses rather than misreports."""
     newest, last = {}, {}
@@ -551,9 +520,8 @@ def _needed(parsed, now):
             last[e["snap"]] = i
     kept = {parsed[i]["snap"] for i in newest.values()}
     for sid, i in last.items():
-        days = SAVE_KEEP_DAYS if parsed[i]["kind"] == "save" else KEEP_DAYS
-        if now - parsed[i]["t"] < days * DAY:
-            kept.add(sid)
+        if parsed[i]["kind"] == "save" or now - parsed[i]["t"] < KEEP_DAYS * DAY:
+            kept.add(sid)                     # a save snapshot is kept forever (the save policy)
     need, latest = set(), {}
     for i, e in enumerate(parsed):
         if e is None:
@@ -572,6 +540,15 @@ def prune(store, now, audit, deadline=None):
     removed."""
     store = Path(store)
     mpath = store / MANIFEST
+    # A missing/empty authority is not proof that every blob is an orphan. In
+    # particular, never apply the legacy collector to neutral permanent saves.
+    try:
+        unknown = (store / "transactions").exists() or not mpath.is_file() or mpath.stat().st_size == 0
+    except OSError:
+        unknown = True
+    if unknown:
+        audit.log(HOOK, "PRUNE-SKIPPED", "no nonempty legacy recovery manifest; no blob was pruned")
+        return 0
 
     def late():
         return deadline is not None and time.monotonic() >= deadline

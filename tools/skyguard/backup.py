@@ -16,6 +16,8 @@ import shutil
 import time
 from pathlib import Path
 
+from modding_harness import durable
+
 from .grep import grep
 
 try:
@@ -167,13 +169,20 @@ def _exclusive(lock_path, wait=None):
 
 
 def _append_line(path, line):
-    """ONE os.write of one line, under an exclusive lock. On Windows the CRT emulates O_APPEND as seek-to-end then
-    write, so two unlocked appenders overwrite each other's lines (review I1, MEASURED: 178 of 3000 lost); the lock
-    makes seek + write one step. A reader still skips and counts any line that does not parse."""
+    """Complete a locked append. Roll back a failed partial append.
+
+    The exclusive lock also covers Windows' seek-to-end O_APPEND emulation.
+    Save-required callers additionally fsync before acknowledging preservation.
+    Ordinary edit/config audit recording remains non-blocking best effort.
+    """
     with _exclusive(Path(str(path) + ".lock")):
         fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
+        start = os.lseek(fd, 0, os.SEEK_END)
         try:
-            os.write(fd, line)
+            durable.write_all(fd, line)
+        except OSError:
+            os.ftruncate(fd, start)
+            raise
         finally:
             os.close(fd)
 
@@ -353,7 +362,7 @@ def _list(backups, search):
         print("{} orphaned .part file(s): an interrupted (or still running) backup, not a backup".format(parts))
     print("\nTo restore one (its sha256 is checked first; the current file is backed up before it is replaced):")
     print("  bash scripts/restore-from-backup.sh --restore <backup-file> [--to <path>]")
-    print("\nSnapshots taken before commands (scripts, load order, INIs, the save a command rewrote):")
+    print("\nSnapshots taken before commands (scripts, load order, INIs, every save a command changed):")
     print("  bash tools/skyguard.sh snapshot list")
     print("\nTo view the audit log:\n  cat \"{}\"".format(backups / "AUDIT_LOG.txt"))
     return 0

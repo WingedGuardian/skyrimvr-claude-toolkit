@@ -24,7 +24,7 @@
 # on top of it. Recovery is always "the previous copy is in the store".
 #
 # Usage:  bash tools/kb-guard.sh [--verbose]
-# Exit:   0 = checked · 1 = ALARM (a watched file shrank or vanished) · 2 = cannot check
+# Exit:   0 = checked · 1 = completed ALARM · 2 = cannot check or preserve every watched file
 
 set -uo pipefail
 
@@ -274,6 +274,19 @@ prune_store() {
 }
 prune_store
 
+# ---------------------------------------------------------------- uncommitted notes
+# The instructions tell the agent to append findings to KNOWLEDGEBASE.local.md, and
+# nothing else makes it commit them. MEASURED in the sibling X4 toolkit 2026-10-20: about
+# 1,767 appended lines over 2.5 weeks, none committed. In a git-tracked install that does
+# not ignore the file, say so every session. A note, never an alarm: exit codes unchanged.
+if command -v git >/dev/null 2>&1 \
+    && dirty=$(git -C "$ROOT" status --porcelain -- KNOWLEDGEBASE.local.md 2>/dev/null) \
+    && [ -n "$dirty" ]; then
+    notes="$notes
+  note: KNOWLEDGEBASE.local.md has uncommitted changes; commit it alone:
+    git add -- KNOWLEDGEBASE.local.md && git commit -m \"Knowledgebase notes\" -- KNOWLEDGEBASE.local.md"
+fi
+
 # ---------------------------------------------------------------- report
 kept=0
 for d in "$STORE"/*/; do
@@ -291,7 +304,7 @@ if [ -n "$alarms" ]; then
     echo "  Extracting a toolkit update over an install replaces every file the"
     echo "  toolkit ships. Keep your own findings in KNOWLEDGEBASE.local.md, which"
     echo "  is never shipped."
-    exit 1
+    [ -z "$failed" ] && exit 1
 fi
 
 if [ "$checked" -eq 0 ]; then
@@ -306,7 +319,7 @@ if [ -n "$failed" ]; then
     [ -n "$copied" ] && echo "KB GUARD: did store --$copied"
     printf '%s' "$notes"
     [ -n "$notes" ] && echo
-    exit 1
+    exit 2
 fi
 
 if [ -n "$copied" ]; then

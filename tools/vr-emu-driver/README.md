@@ -6,24 +6,24 @@ so the first-person hands move with no headset. This folder ships **no binary an
 that driver: only `build.py`, which fetches one pinned upstream commit and compiles it on your
 machine.
 
-## Where it comes from, and why it is not shipped (checked 2026-10-13)
+## Source and local-build delivery (checked 2026-10-14)
 
 | | |
 |---|---|
 | Source | [DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit](https://github.com/DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit), commit `59be19d13287e2088c515b696a964381784a3356` ("null driver testing", 2026-10-05) |
 | Forked from | [ar-zadeh/VR-Emulator-Driver](https://github.com/ar-zadeh/VR-Emulator-Driver) |
 | Based on | Valve's OpenVR sample driver: the files carry `Copyright (c) Valve Corporation, All rights reserved` and `Changed by r57zone (https://github.com/r57zone)` |
-| Licence | **None.** Neither repository has a LICENSE file, and GitHub reports no licence for either. |
+| Licence | Upstream added a BSD-3-Clause `LICENSE.txt` and closed the licensing request on 2026-10-14. The owner separately identifies the AutoHotKey side as GPL-3.0. This builder does not use AutoHotKey. The pinned commit predates that file, and the parent fork ([ar-zadeh/VR-Emulator-Driver](https://github.com/ar-zadeh/VR-Emulator-Driver)) still has no licence. |
 | Headers | Valve's [OpenVR](https://github.com/ValveSoftware/openvr) `v1.26.7` (commit `751538d6cbde9d060e5906c1d45c8cedeaf0ee18`), BSD-3-Clause; fetched at build time as well |
 
-Code published with no licence grants no right to redistribute it, so the toolkit can't ship it,
-neither as source nor as a binary. `build.py` fetches it from its own repository at a pinned
-commit, for your own use on your own machine. If upstream ever adds a licence, this can be revisited.
-A licence has been requested upstream:
+The toolkit keeps its existing local-build delivery and tested pin. The licence response is resolved:
 [DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit#1](https://github.com/DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit/issues/1).
-The r57zone header suggests the code passed through one of r57zone's OpenVR driver projects, some
-of which are GPL-3.0; nothing in either fork says which, so this is unresolved provenance, not a
-grant.
+The newer upstream head also contains runtime changes; the licensing response is not evidence
+that those changes have passed this toolkit's runtime qualification. They are not adopted here.
+`UPSTREAM-LICENSE.txt` records the notice supplied in that response, separately from the pin.
+Upstream has since published v2.0.1 (`32ec302`); the pin stays on the tested commit. Shipping a prebuilt copy would be a
+separate decision and would also have to settle the parent fork's provenance: the r57zone header suggests one of
+r57zone's OpenVR driver projects, some of which are GPL-3.0, and nothing in either fork says which.
 
 ## The one local change
 
@@ -43,3 +43,5 @@ python tools/vr-emu-driver/build.py
 Each checkout is verified against its pinned commit before anything compiles. The result,
 `build/driver_null.dll`, and `build/BUILD-INFO.json` (pins, patch, SHA-256) are ignored by git.
 MSVC output is not byte-reproducible, so the hash identifies your build, not a reference.
+Existing caches with dirty files or a different HEAD are refused; use a new `--work` folder.
+Each build gets fresh marked staging. Existing `work/src` and `work/build.bat` are preserved.

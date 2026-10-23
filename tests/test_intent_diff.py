@@ -32,6 +32,14 @@ def test_only_added_and_changed_rows_appear_and_old_is_attributed():
     assert "S-DEL-INSTALL" in m.render(list(rows.values()))
 
 
+def test_existing_row_uses_previous_decision_even_when_it_supersedes_legacy():
+    m = _mod()
+    rows = m.table([_row("existing", "allow", supersedes="legacy")],
+                   [_row("existing", "deny", supersedes="legacy")],
+                   [{"id": "legacy", "decision": "deny"}])
+    assert rows[0][2:4] == ["allow (previous)", "deny"]
+
+
 def test_a_rev_range_reads_the_file_at_each_revision(tmp_path):
     m = _mod()
     def git(*a):

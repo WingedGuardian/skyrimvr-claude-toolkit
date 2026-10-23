@@ -512,22 +512,29 @@ def test_setup_prints_the_codex_approval_step(game_dir):
         assert part in r.stdout, part
 
 
-SUBFOLDER_LINE = ("Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, "
-                  "and Codex does not tell you.")
+SUBFOLDER_LINE = ("Start Codex in the game folder. Subfolder loading is version-dependent: it worked in an isolated "
+                  "0.162.1 probe. Verify the live banner and canary before relying on hooks.")
+HISTORICAL_SUBFOLDER_LINE = ("Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, "
+                             "and Codex does not tell you.")
 
 
 @windows_only   # the line is printed only once Codex is configured, which is Windows-only (Linux CI 38187755448)
 def test_setup_tells_the_user_to_start_codex_in_the_game_folder(game_dir):
     r = run_setup(game_dir)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "Start Codex in the game folder itself, never a subfolder" in r.stdout, r.stdout
-    assert "from a subfolder no hook runs, and Codex does not tell you." in r.stdout
+    assert SUBFOLDER_LINE in " ".join(r.stdout.split()), r.stdout
+    assert HISTORICAL_SUBFOLDER_LINE not in " ".join(r.stdout.split()), r.stdout
 
 
 @pytest.mark.parametrize("rel", ["README.md", "CHANGELOG.md", "agent/instructions/codex.md"])
 def test_the_codex_subfolder_warning_is_in_the_docs(rel):
     text = " ".join((REPO / rel).read_text(encoding="utf-8").split())
-    assert SUBFOLDER_LINE in text, rel
+    if rel == "CHANGELOG.md":
+        # Preserve the historical release record; it is not current guidance.
+        assert HISTORICAL_SUBFOLDER_LINE in text, rel
+    else:
+        assert SUBFOLDER_LINE in text, rel
+        assert HISTORICAL_SUBFOLDER_LINE not in text, rel
 
 
 @windows_only

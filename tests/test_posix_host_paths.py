@@ -49,6 +49,18 @@ def test_on_windows_a_slash_path_is_still_the_cwd_drives_root(windows):
     assert paths.norm_abs("/x", msys=False) is None
 
 
+@pytest.mark.parametrize("root", ["/c/profile", "/x/profile", "/a"])
+def test_single_letter_posix_root_and_native_file_use_the_same_zone(posix, root):
+    roots = paths.roots(GAME, "", {"SKYRIM_CONFIG_DIR": root})
+    assert paths.norm_abs(root, msys=True) == root
+    target = targets.resolve(root + "/Saves/Existing.ess", "/home/u", "cmd", {})
+    assert targets.zone(target, roots) == "config"
+
+
+def test_git_bash_drive_alias_is_still_windows_specific(windows):
+    assert paths.norm_abs("/c/profile", msys=True) == "c:/profile"
+
+
 def _claude(tool, command):
     p = claude.extract(json.dumps({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/home/u",
                                    "tool_input": {"command": command}}))
@@ -57,17 +69,56 @@ def _claude(tool, command):
     return v.decision, {rid for rid, _ in audit.fired}
 
 
-def test_a_powershell_save_overwrite_asks_on_a_posix_host(posix):
-    assert _claude("PowerShell", "Set-Content '{}/Saves/Existing.ess' x".format(CFG)) == ("ask", {"S-WRITE-SAVE"})
+def _save_targets(tool, command):
+    """The saves the call changes, as the save policy reads them (saves.py): (path, op). Nothing exists on disk here,
+    so no backup is due; what matters is that the guard SEES the save under a POSIX install."""
+    p = claude.extract(json.dumps({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/home/u",
+                                   "tool_input": {"command": command}}))
+    v = engine.evaluate_shell(claude.to_request(p, "shell"), _roots(), Audit(GAME))
+    return [(t.path, t.op) for t in v.saves.change.targets] if v.saves is not None else []
 
 
-def test_a_python_save_overwrite_through_bash_asks_on_a_posix_host(posix):
+def test_a_powershell_save_overwrite_is_seen_on_a_posix_host(posix):
+    got = _save_targets("PowerShell", "Set-Content '{}/Saves/Existing.ess' x".format(CFG))
+    assert got == [(CFG + "/Saves/Existing.ess", "write")]
+
+
+def test_a_python_save_overwrite_through_bash_is_seen_on_a_posix_host(posix):
     cmd = "python -c \"open('{}/Saves/Existing.ess','wb').write(b'x')\"".format(CFG)
-    assert _claude("Bash", cmd) == ("ask", {"S-WRITE-SAVE"})
+    assert _save_targets("Bash", cmd) == [(CFG + "/Saves/Existing.ess", "write")]
 
 
 def test_a_powershell_delete_in_the_install_is_denied_on_a_posix_host(posix):
     assert _claude("PowerShell", "Remove-Item -Recurse '{}/Data'".format(GAME)) == ("deny", {"S-DEL-INSTALL"})
+
+
+SPACED = "/home/u/My Games/Skyrim VR"
+
+
+@pytest.mark.parametrize("command,rule", [
+    ('rm -rf "{g}"', "S-SAVE-STORE"),                       # the install is an ancestor of the backup store
+    ('rm -r -f "{g}/Data"', "S-DEL-INSTALL"),
+    ('erase "{g}/x.txt"', "S-DEL-INSTALL"),
+    ("cd {e} && rm -rf Data", "S-DEL-INSTALL"),
+    ("pushd {e} && rm -rf Data", "S-DEL-INSTALL"),
+    ("cd '/home/u/My Games' && rm -rf Skyrim\\ VR", "S-SAVE-STORE"),
+    ("rm -rf /home/*/My*/Sky*/Data", "S-DEL-UNRESOLVED"),
+])
+def test_a_bash_delete_in_a_posix_install_is_denied_on_a_posix_host(posix, command, rule):
+    """The POSIX re-spellings of the corpus rows record.WINDOWS_ONLY skips off Windows for their Git Bash `/c/`
+    alias (CI run 39145224156): same decision, same rule, so the skip loses no Linux coverage."""
+    cmd = command.format(g=SPACED, e=SPACED.replace(" ", "\\ "))
+    p = claude.extract(json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": "/home/u/work",
+                                   "tool_input": {"command": cmd}}))
+    audit = Audit(SPACED)
+    v = engine.evaluate_shell(claude.to_request(p, "shell"),
+                              paths.roots(SPACED, "", {"SKYRIM_CONFIG_DIR": CFG}), audit)
+    assert (v.decision, {rid for rid, _ in audit.fired}) == ("deny", {rule})
+
+
+def test_a_git_bash_drive_alias_is_an_ordinary_folder_on_a_posix_host(posix):
+    """`/c/...` is drive C: only under Git Bash on Windows; on a POSIX host it is just a folder (4ebdd1c)."""
+    assert paths.norm_abs("/c/GOG Games/x", msys=True) == "/c/GOG Games/x"
 
 
 def test_an_apply_patch_delete_by_absolute_posix_path_is_denied_on_a_posix_host(posix):

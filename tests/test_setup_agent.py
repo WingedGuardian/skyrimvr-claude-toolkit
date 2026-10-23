@@ -84,6 +84,19 @@ def test_help_exits_0_and_writes_nothing(game_dir):
     assert tree(game_dir) == before
 
 
+@pytest.mark.parametrize("agent", ["generic", "opencode"])
+def test_portable_targets_configure_shared_instructions_without_codex_trust(game_dir, agent):
+    before = (game_dir / ".codex/hooks.json").read_bytes()
+    result = run_setup(game_dir, shim_path=True, args=("--agent", agent))
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr
+    assert configured(game_dir, "AGENTS.md")
+    assert (game_dir / ".codex/hooks.json").read_bytes() == before
+    assert "does not prove a host intercepted" in result.stdout
+    if agent == "opencode":
+        assert "Running-host blocking, Desktop and V2 remain unqualified" in result.stdout
+    assert not (game_dir / ".codex/trusted.json").exists()
+
+
 @posix_only
 def test_codex_by_name_off_windows_is_refused_before_anything_is_written(game_dir):
     before = tree(game_dir)
@@ -540,7 +553,6 @@ def test_the_jdk_check(game_dir, tmp_path, line, javac, expect):
 @pytest.mark.parametrize("version,expect", [
     ("3.12.10", "is inside the tested range 3.10-3.13"),
     ("3.13.1", "is inside the tested range 3.10-3.13"),
-    ("3.9.18", "OLDER than the tested range"),
     ("3.14.0", "outside the tested range 3.10-3.13 (newer than tested)"),
 ])
 def test_the_python_range_message(game_dir, version, expect):
@@ -549,6 +561,14 @@ def test_the_python_range_message(game_dir, version, expect):
     assert r.returncode == 0
     lines = [ln for ln in r.stdout.splitlines() if expect in ln]
     assert len(lines) == 1 and ("Python %s " % version) in lines[0], r.stdout[:3000]
+
+
+def test_python_39_is_refused_before_configuring_shared_harness(game_dir):
+    r = run_setup(game_dir, shim_path=True, env_overrides={
+        "FAKE_PYTHON_EXE": "C:/Py/python.exe", "FAKE_PYTHON_VERSION": "3.9.18"})
+    assert "safety hooks need Python 3.10 or newer" in r.stdout
+    assert "Python 3.10+ not found" in r.stdout
+    assert "Hooks will use: C:/Py/python.exe" not in r.stdout
 
 
 # --------------------------------------------------------------------------------- the instruction budget --

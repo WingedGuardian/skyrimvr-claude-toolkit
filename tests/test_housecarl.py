@@ -101,6 +101,39 @@ def test_fingerprint_changes_for_order_or_plugin_changes(install):
     assert order.capture(install).fingerprint != b
 
 
+def test_fingerprint_changes_for_equal_size_body_change_with_preserved_mtime(install):
+    target = Path(install["data_dir"]) / "Sword.esp"
+    with target.open("ab") as stream:
+        stream.write(b"synthetic record body A")
+    before = order.capture(install).fingerprint
+    stamp = target.stat()
+    with target.open("r+b") as stream:
+        stream.seek(-1, 2)
+        stream.write(b"B")
+    os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert order.capture(install).fingerprint != before
+
+
+def test_new_publication_does_not_clobber_a_concurrently_created_target(tmp_path, monkeypatch):
+    candidate, target = tmp_path / "candidate.esp", tmp_path / "new.esp"
+    candidate.write_bytes(b"prepared")
+    original = {name: getattr(files.os, name) for name in ("replace", "rename", "link")}
+
+    def racing(name):
+        def invoke(source, destination, *args, **kwargs):
+            if Path(destination) == target:
+                target.write_bytes(b"concurrent unrelated content")
+            return original[name](source, destination, *args, **kwargs)
+        return invoke
+
+    for name in original:
+        monkeypatch.setattr(files.os, name, racing(name))
+    with pytest.raises((Refusal, FileExistsError)):
+        files.publish(candidate, target, None)
+    assert target.read_bytes() == b"concurrent unrelated content"
+    assert candidate.read_bytes() == b"prepared"
+
+
 def test_private_profile_does_not_rewrite_source_and_carries_vr_archive(install):
     install["edition"] = "VR"
     source = Path(install["plugins_txt"])
@@ -123,7 +156,12 @@ def test_backup_is_independent_and_verified(tmp_path):
 def test_backup_copy_corruption_refuses(tmp_path, monkeypatch):
     target = tmp_path / "A.esp"
     target.write_bytes(b"old bytes")
-    monkeypatch.setattr(files.shutil, "copyfile", lambda _a, b: Path(b).write_bytes(b"corrupt"))
+    original = files.durable.digest
+    def corrupt_readback(path, deadline=None):
+        if Path(path) != target:
+            Path(path).write_bytes(b"corrupt")
+        return original(path, deadline)
+    monkeypatch.setattr(files.durable, "digest", corrupt_readback)
     with pytest.raises(Refusal, match="hash verification"):
         files.backup(target, tmp_path / "backups")
     assert target.read_bytes() == b"old bytes"

@@ -9,6 +9,7 @@ intended.jsonl is the spec for the new behaviour, authored by hand: decision, ru
 through the real wrapper. It is never recorded from the engine (see tests/guard_corpus/README.md).
 """
 import importlib.util
+import contextlib
 import json
 import tempfile
 from pathlib import Path
@@ -40,8 +41,8 @@ SUPERSEDED = {r["supersedes"] for r in INTENDED_ROWS if r.get("supersedes")}
 LIVE = [r for r in ROWS if r["id"] not in SUPERSEDED]
 
 
-@pytest.fixture(scope="module")
-def installs():
+@contextlib.contextmanager
+def _isolated_installs():
     rec = _rec()
     if rec.needs_missing_jq(REPO / ".claude" / "hooks"):
         pytest.skip("the shipped hooks still need jq, and it is not installed")
@@ -49,9 +50,45 @@ def installs():
         yield rec, {name: rec.make_install(Path(td), REPO / ".claude" / "hooks", name) for name in rec.LAYOUTS}
 
 
+@pytest.fixture(scope="module")
+def installs():
+    with _isolated_installs() as value:
+        yield value
+
+
+@pytest.fixture
+def intended_installs():
+    """Each exact-message epoch starts with fresh unknown-tool counters."""
+    with _isolated_installs() as value:
+        yield value
+
+
 def test_corpus_is_not_trivially_small():
     assert len(ROWS) >= 150, len(ROWS)
     assert {r["decision"] for r in ROWS} >= {"allow", "advise", "ask", "deny"}
+
+
+def test_one_inprocess_corpus_call_records_one_receipt(tmp_path):
+    import sys
+    sys.path.insert(0, str(REPO / 'tools'))
+    from modding_harness import telemetry
+    rec = _rec()
+    install = rec.make_install(tmp_path, REPO / '.claude/hooks', 'declared')
+    row = {'id': 'single-receipt', 'hook': 'protect-mcp.sh', 'payload': {
+        'tool_name': 'mcp__other__console', 'session_id': 'single-receipt', 'tool_input': {'command': 'status'}}}
+    rec.fire_full_inprocess(install, row)
+    assert telemetry.Telemetry(install).report('single-receipt')['receipts'] == 1
+
+
+def test_rule_trace_sidechannel_does_not_create_a_tool_receipt(tmp_path):
+    import sys
+    sys.path.insert(0, str(REPO / 'tools'))
+    from modding_harness import telemetry
+    rec = _rec()
+    install = rec.make_install(tmp_path, REPO / '.claude/hooks', 'declared')
+    rec.engine_verdict(install, 'protect-mcp.sh', {'tool_name': 'mcp__other__console',
+                       'session_id': 'pure-trace', 'tool_input': {'command': 'status'}})
+    assert telemetry.Telemetry(install).report('pure-trace')['evidence'] == 'unavailable'
 
 
 def test_corpus_inputs_are_exactly_what_the_recorder_generates():
@@ -65,9 +102,26 @@ def test_corpus_inputs_are_exactly_what_the_recorder_generates():
 def test_hook_reproduces_the_recorded_decision_and_rules(installs, row):
     """A legacy row that is not superseded: same decision, same rule-id set. Never the text."""
     rec, inst = installs
+    if rec.windows_only(row["id"]):
+        pytest.skip(rec.windows_only(row["id"]))
     got = rec.fire_full(inst[row["layout"]], row)
     assert got["decision"] == row["decision"]
     assert got["rules"] == rec.legacy_rule_ids(row["text"], TEMPLATES), (row["text"], got["rules"])
+
+
+def test_live_legacy_rows_reproduce_in_process(intended_installs):
+    """Replay the unchanged frozen decisions through one production invocation per row."""
+    rec, inst = intended_installs
+    failures = []
+    for row in LIVE:
+        if rec.windows_only(row['id']):
+            continue
+        got = rec.fire_full_inprocess(inst[row['layout']], row)
+        expected_rules = rec.legacy_rule_ids(row['text'], TEMPLATES)
+        if got['decision'] != row['decision'] or got['rules'] != expected_rules:
+            failures.append(f"{row['id']}: expected {row['decision']} {sorted(expected_rules)}, "
+                            f"got {got['decision']} {sorted(got['rules'])}")
+    assert not failures, '\n'.join(failures)
 
 
 def test_every_legacy_text_resolves_to_a_rule_set():
@@ -125,14 +179,26 @@ def test_an_intended_row_without_why_or_task_is_rejected():
     assert rec.intended_row_problems({k: v for k, v in row.items() if k != "why"})
 
 
+def test_unknown_advice_is_an_explicit_coverage_gap_not_a_fabricated_rule():
+    rec = _rec()
+    row = {'id': 'unknown', 'layout': 'declared', 'hook': 'protect-mcp.sh', 'payload': {},
+           'decision': 'advise', 'rules': [], 'text': 'WARN AND ALLOW: this tool surface was not evaluated',
+           'task': 'V4-UNKNOWN', 'why': 'Approved unknown-tool policy', 'evaluation': 'unguarded'}
+    assert rec.intended_row_problems(row) == []
+    assert rec.intended_row_problems({key: value for key, value in row.items() if key != 'evaluation'})
+    assert rec.intended_row_problems(dict(row, decision='deny'))
+    assert rec.intended_row_problems(dict(row, rules=['M-DEV-SMP-RESET']))
+
+
 def test_every_windows_only_row_is_an_intended_row():
-    """record.WINDOWS_ONLY skips by id off Windows: a stale id would skip nothing, a typo would hide nothing."""
-    assert set(_rec().WINDOWS_ONLY) <= {r["id"] for r in INTENDED_ROWS}
+    """record.WINDOWS_ONLY skips by id off Windows: a stale id would skip nothing, a typo would hide nothing.
+    Legacy ids count only while LIVE (a superseded legacy row is never fired, so skipping it would hide nothing)."""
+    assert set(_rec().WINDOWS_ONLY) <= {r["id"] for r in INTENDED_ROWS} | {r["id"] for r in LIVE}
 
 
-def test_intended_rows_reproduce(installs):
+def test_intended_rows_reproduce(intended_installs):
     """Each hand-authored row: decision + rule ids + EXACT text, through the real wrapper."""
-    rec, inst = installs
+    rec, inst = intended_installs
     # Self-check first: the comparison must be able to fail on each of its three parts. With intended.jsonl
     # empty this is the only thing that proves the check is not decoration.
     good = {"decision": "deny", "rules": ["S-DEL-INSTALL"], "text": "Blocked: exact."}
@@ -149,12 +215,12 @@ def test_intended_rows_reproduce(installs):
     assert not failures, "\n".join(failures)
 
 
-def test_intended_rows_reproduce_in_process(installs):
+def test_intended_rows_reproduce_in_process(intended_installs):
     """test_intended_rows_reproduce with run.py's main() called IN PROCESS (record.fire_inprocess): the same rows,
     decision + rule ids + exact text, through adapter, run.py, engine.py and the rules, without the bash wrapper.
     MEASURED 2026-10-12: ~4 s for 982 rows against ~420 s through the wrapper. It is the anchor for the mutation
     twins that break the engine path; the wrapper-fired test above stays for what only the wrapper does."""
-    rec, inst = installs
+    rec, inst = intended_installs
     good = {"decision": "deny", "rules": ["S-DEL-INSTALL"], "text": "Blocked: exact."}
     assert rec.intended_problems(good, dict(good, rules={"S-DEL-INSTALL"})) == []
     assert rec.intended_problems(good, {"decision": "ask", "rules": {"S-DEL-INSTALL"}, "text": good["text"]})
@@ -183,8 +249,16 @@ def test_supersessions_are_live(installs):
     assert problems == []
 
 
+def test_supersessions_are_live_in_process(intended_installs):
+    rec, inst = intended_installs
+    def current(row):
+        got = rec.fire_full_inprocess(inst[row['layout']], row)
+        return {'decision': got['decision'], 'rules': got['rules']}
+    assert rec.supersession_problems(INTENDED_ROWS, ROWS, TEMPLATES, current) == []
+
+
 def _a_denied_legacy_row():
-    return next(r for r in ROWS if r["decision"] == "deny" and r["layout"] == "declared"
+    return next(r for r in LIVE if r["decision"] == "deny" and r["layout"] == "declared"
                 and not r.get("payload_note"))
 
 

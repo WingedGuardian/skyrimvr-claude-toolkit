@@ -136,7 +136,16 @@ def _render_codex(src: Path) -> dict[str, bytes]:
     return out
 
 
-TARGETS = {"claude": _render_claude, "codex": _render_codex}
+def _render_opencode(src: Path) -> dict[str, bytes]:
+    out = {}
+    for f in sorted((src / "targets" / "opencode").rglob("*")):
+        if f.is_file():
+            rel = f.relative_to(src / "targets" / "opencode").as_posix()
+            out[".opencode/" + rel] = _lf(f.read_bytes())
+    return out
+
+
+TARGETS = {"claude": _render_claude, "codex": _render_codex, "opencode": _render_opencode}
 
 
 def render(target: str, src: Path) -> dict[str, bytes]:

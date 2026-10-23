@@ -99,7 +99,7 @@ def _expired(lift, now) -> bool:
 # ---- R9: the one write -------------------------------------------------------------------------------------------
 
 def clear_expired(root, now):
-    """Remove the expired lifts from a state file that verifies; log it. -> the removed lifts ([] when none, when
+    """Retire expired permissions and successfully relocked obligations; log them. -> the removed lifts ([] when none, when
     there is no state file, or when it does not verify -- a rejected file is never rewritten)."""
     sf = Path(root) / ".skyguard" / "state.json"
     if not os.path.lexists(str(sf)):
@@ -117,12 +117,13 @@ def clear_expired(root, now):
         st = state.read(str(sf))
         if st.rejected:
             return []
-        rest = [x for x in st.lifts if _expired(x, now)]
+        rest = [x for x in st.lifts if x["kind"] != "lock" and _expired(x, now)]
         if rest:
-            keep = [x for x in st.lifts if not _expired(x, now)]
+            keep = [x for x in st.lifts if x not in rest]
             persistent = {"lock_disabled": dict(st.lock_disabled)} if st.lock_disabled else {}
             state.write(str(sf), {"v": 1, "lifts": keep, "persistent": persistent})
-        gone = due + [x for x in rest if x not in due]
+        remaining = state.read(str(sf)).lifts
+        gone = [x for x in due + [x for x in rest if x not in due] if x not in remaining]
         if not gone:
             return []
     from skyguard.audit import Audit

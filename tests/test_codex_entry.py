@@ -71,6 +71,8 @@ def _install(tmp_path: Path, py: str = REAL_PY) -> Path:
         (hooks / name).write_text(text, encoding="ascii", newline="\n")
     shutil.copytree(REPO / "tools" / "skyguard", root / "tools" / "skyguard",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(REPO / "tools/modding_harness", root / "tools/modding_harness",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(REPO / "tools" / "kb-guard.sh", root / "tools" / "kb-guard.sh")
     return root
 
@@ -279,6 +281,23 @@ def test_a_hung_engine_is_a_deny(tmp_path, entry):
     assert r.returncode == 0
     assert r.stdout == _expected("pre-tool", "engine did not answer within 2 s"), r.stdout
     assert took < 10, f"the wrapper's deadline did not end the call ({took:.1f} s)"
+
+
+@pytest.mark.parametrize("entry", [p for p in ENTRIES if p.values[0] != "bash"])
+def test_the_deadline_clock_starts_when_powershell_starts_not_when_the_script_does(tmp_path, entry):
+    # Codex's timeout runs from the spawn. Under load Windows PowerShell 5.1 spent seconds starting before the
+    # script's first line, and a clock taken there let the call end past definition timeout - 10 s (T14b,
+    # 2026-10-14: 51.3 s against 50). A delay inside the same process stands in for that start-up time.
+    root = _install(tmp_path)
+    script = root / ".codex" / "hooks" / "skyguard-entry.ps1"
+    e = dict(os.environ)
+    e.pop("SKYGUARD_WRAPPER_TIMEOUT_S", None)
+    spawned = time.time()
+    subprocess.run([_ps_exe(entry), "-NoProfile", "-NonInteractive",
+                    "-ExecutionPolicy", "Bypass", "-Command", f"Start-Sleep -Seconds 8; & '{script}' pre-tool"],
+                   input=_benign(root), capture_output=True, env=e, timeout=90)
+    t0 = float(_rec(root, "pre-tool", "invoked").split()[0])
+    assert t0 - spawned < 4, f"the clock started {t0 - spawned:.1f} s after the spawn"
 
 
 def _alive(pid: int) -> bool:
@@ -564,7 +583,7 @@ def test_fallback_chain_matches_the_claude_wrappers():
     # and the Store alias is tried last in both
     assert ps.index("if ($null -ne $alias -and") > ps.index("$script:PyPosix)")
     assert claude.index('if [ -n "$PY_ALIAS" ] && py_good') > claude.index("/usr/local/bin/python3")
-    # the same acceptance test: >= 3.8 and the engine's own --selftest nonce. The PowerShell entry checks
-    # the version in its own process; the bash chain in ONE (run.py --selftest refuses < 3.8 itself).
-    assert "sys.version_info[:2] >= (3, 8)" in ps and "--selftest" in ps
+    # the same acceptance test: >= 3.10 and the engine's own --selftest nonce. The PowerShell entry checks
+    # the version in its own process; the bash chain in ONE (run.py --selftest refuses < 3.10 itself).
+    assert "sys.version_info[:2] >= (3, 10)" in ps and "--selftest" in ps
     assert "--selftest" in claude and "version_info" not in claude

@@ -118,6 +118,19 @@ def copy_repo(dest: Path) -> Path:
     return dest
 
 
+def scratch_dir(prefix: str) -> str:
+    """A module-level temp dir that is removed when the process exits.
+
+    Bare tempfile.mkdtemp at import leaked one directory per pytest process: 14,018 of them had built up
+    in %TEMP% by 2026-10-18, because the mutation gate starts a pytest per mutation.
+    """
+    import atexit
+    import tempfile
+    root = tempfile.mkdtemp(prefix=prefix)
+    atexit.register(shutil.rmtree, root, True)
+    return root
+
+
 def make_game(tmp_path: Path, name: str = "game", exe: str = "SkyrimVR.exe") -> Path:
     """A toolkit copy plus a stubbed executable.
 
@@ -153,8 +166,15 @@ def run_setup(cwd: Path, env_overrides: dict | None = None, shim_path: bool = Fa
         env["PATH"] = f"{BIN}{os.pathsep}{env['PATH']}"
     if env_overrides:
         env.update({k: str(v) for k, v in env_overrides.items()})
+    # The Git for Windows bin/bash launcher prepends its own directories. Bind
+    # fixture commands inside the launched shell, retaining any containment
+    # tripwires ahead of them, instead of accidentally probing the host tools.
+    start = ('testpath="$1"; shift; '
+             'if command -v cygpath >/dev/null 2>&1; then testpath=$(cygpath -p -u "$testpath"); fi; '
+             'export PATH="${HARNESS_TRIPWIRE_BIN:+$HARNESS_TRIPWIRE_BIN:}$testpath:$PATH"; '
+             'script="$1"; shift; source "$script" "$@"')
     return subprocess.run(
-        [BASH, "setup.sh", *args],
+        [BASH, "-c", start, "--", env["PATH"], "setup.sh", *args],
         cwd=str(cwd), env=env,
         stdin=subprocess.DEVNULL,
         # errors="replace": a path setup echoes may hold bytes the locale codec cannot decode (a cp437 probe);
@@ -199,6 +219,8 @@ def install_hooks(root: Path, names=None, python: str | None = None, with_engine
         (hooks / f.name).write_text(text, encoding="utf-8", newline="\n")
     if with_engine:
         shutil.copytree(REPO / "tools" / "skyguard", root / "tools" / "skyguard",
+                        ignore=shutil.ignore_patterns("__pycache__"), dirs_exist_ok=True)
+        shutil.copytree(REPO / "tools/modding_harness", root / "tools/modding_harness",
                         ignore=shutil.ignore_patterns("__pycache__"), dirs_exist_ok=True)
     return root
 

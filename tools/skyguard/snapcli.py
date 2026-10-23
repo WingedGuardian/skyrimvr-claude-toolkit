@@ -79,6 +79,9 @@ def _allowed(project, sid, key, target):
         return "" if ok else "not a .psc/.pex under the script folders of this install"
     try:
         cfg = paths.read_install(str(project), os.environ)
+        main = paths.main_worktree(str(project))
+        if main:
+            cfg = paths.merge_configs(cfg, paths.read_install(main, {}))
     except (OSError, ValueError):
         return "the configured roots cannot be read"
     roots = paths.roots(str(project), str(project), cfg)
@@ -144,7 +147,8 @@ def _recovery_rows(project, kind):
             continue
         names = [os.path.basename(e["src"]) for e in g["files"]]
         if kind == "save":
-            what = " + ".join(names) + ", " + _mb(sum(e["size"] for e in g["files"]))
+            gone = [os.path.basename(m) for m in g["files"][0].get("missing", []) if isinstance(m, str)]
+            what = " + ".join(names) + "".join(", no " + m for m in gone) + ", " + _mb(sum(e["size"] for e in g["files"]))
         else:
             what = "{} changed: {}".format(len(names), ", ".join(names))
         if not g["complete"]:
@@ -154,10 +158,12 @@ def _recovery_rows(project, kind):
 
 
 def cmd_list(project, kind, out):
+    from . import save_store, legacy_saves
     print("Snapshots under {} (newest first):".format(Path(project) / ".claude" / "backups"), file=out)
     sections = (("scripts", "Scripts (.psc / .pex)", lambda: _script_rows(project)),
                 ("config", "Load order and INIs", lambda: _recovery_rows(project, "config")),
-                ("save", "Saves (taken before ReSaver --apply or a DevBench save)", lambda: _recovery_rows(project, "save")))
+                ("save", "Saves (each pair backed up before a command changed it; kept forever)",
+                 lambda: _recovery_rows(project, "save")))
     for key, title, rows_of in sections:
         if kind and kind != key:
             continue
@@ -168,6 +174,23 @@ def cmd_list(project, kind, out):
         if not rows:
             print("  (none)", file=out)
     bad = recovery.read_manifest(recovery.store_dir(project))[1]
+    if kind in (None, "save"):
+        try:
+            rows, unreadable = save_store.rows(project)
+            print("\nNeutral permanent save store: {}".format(save_store.store(project).root), file=out)
+            for sid, what, _cmd in reversed(rows):
+                print("  {} {}".format(sid, what), file=out)
+            if unreadable:
+                print("  {} unreadable transaction record(s): {}".format(len(unreadable), ", ".join(unreadable)), file=out)
+            legacy, bad_legacy = legacy_saves.records(project)
+            print("\nLegacy installed save-backups (read-only compatibility):", file=out)
+            for row in legacy:
+                print("  local-{} {}".format(row["id"], " + ".join(Path(p).name for p in row["originals"])), file=out)
+            if bad_legacy:
+                print("  {} unreadable/ambiguous legacy record(s) were excluded".format(bad_legacy), file=out)
+        except (OSError, ValueError) as exc:
+            print("COULD NOT LIST neutral save store: {}".format(exc), file=out)
+            return 2
     if bad and kind in (None, "config", "save"):
         print("\n{} unreadable line(s) in the recovery manifest were skipped".format(bad), file=out)
     print("\nRestore one (to a NEW folder; live files are written only with --in-place, each backed up first):", file=out)
@@ -242,6 +265,13 @@ def _new_folder(project, sid):
 
 
 def cmd_restore(project, sid, wanted, to, in_place, out):
+    from . import save_store, legacy_saves
+    if legacy_saves.ID.fullmatch(sid):
+        return legacy_saves.restore(project, sid, wanted, to, in_place, out)
+    if save_store.ID.fullmatch(sid):
+        return save_store.restore(project, sid, wanted, to, in_place, out)
+    if recovery._ID.fullmatch(sid) and sid.split("-")[1:2] == ["save"]:
+        return legacy_saves.recovery_restore(project, sid, wanted, to, in_place, out)
     from .audit import Audit
     try:
         store, files, shown, live = _plan(project, sid)
@@ -298,11 +328,19 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
         pairs = [(live[k], chosen[k]) for k in keys if k not in same]
         unchanged = [live[k] for k in same]
         dest = "the live files"
-        for target, _sha in pairs:
-            if target.is_file() and backup.take(str(project), "skyguard snapshot restore", str(target), audit) is None:
-                print("REFUSED: could not back up {} before replacing it. Nothing was restored.".format(target),
-                      file=out)
-                return 2
+        try:
+            expected = {str(target): snapshot.restore_target_state(target) for target, _sha in pairs}
+            for target, _sha in pairs:
+                state = expected[str(target)]
+                if state is not None:
+                    saved = backup.take(str(project), "skyguard snapshot restore", str(target), audit)
+                    if saved is None or backup._sha256(saved) != state["sha256"]:
+                        raise OSError("could not verify the pre-restore backup of " + str(target))
+                if snapshot.restore_target_state(target) != state:
+                    raise OSError("restore target changed during prebackup: " + str(target))
+        except OSError as exc:
+            print("REFUSED: {}. Nothing was restored.".format(exc), file=out)
+            return 2
     else:
         base = Path(to) if to else _new_folder(project, sid)
         pairs = [(base.joinpath(*k.split("/")), chosen[k]) for k in keys]
@@ -313,8 +351,9 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
             return 2
         dest = str(base)
         unchanged, skipped = [], []
+        expected = None
     try:
-        n = snapshot.write_blobs(store, pairs)
+        n = snapshot.write_blobs(store, pairs, replace=in_place, expected=expected)
     except OSError as e:
         print("FAILED part-way restoring snapshot {} to {}: {}".format(sid, dest, e), file=out)
         audit.log(HOOK, "FAILED", "restore of {} to {} stopped: {}".format(sid, dest, e))

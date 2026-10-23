@@ -104,7 +104,7 @@ fi
 # a remembered fallback (below), then py -3 / python / python3 that resolve and are not a Store alias,
 # then the usual install locations (newest version first), then a Store alias, last. A candidate is
 # accepted only if it runs the engine's own `run.py --selftest <nonce>` (ONE process: run.py itself
-# refuses Python < 3.8, and an older one cannot even parse it) and echoes the nonce: a stub that merely
+# refuses Python < 3.10, and an older one cannot even parse it) and echoes the nonce: a stub that merely
 # exits 0 and prints `{}` would otherwise read as ALLOW. Each probe gets min(SKYGUARD_PROBE_TIMEOUT, the
 # time left), sub-second allowed, and no probe starts in the last 10 s before DL (the engine needs them).
 # Default 15 s: a HEALTHY selftest took up to 3.8 s native and ~9 s through a bash shim on 4 cores at 2x

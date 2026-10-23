@@ -85,13 +85,17 @@ def test_ci_workflow_parses_and_runs_harness_modules_on_both_legs():
                if "tests/run_harness_tests.py" in str(step.get("run", "")) and "if" not in step]
     assert harness, "no unconditional harness-contained step in the behavior job"
     # Plan 8 T10 added harness-run tripwire and timing steps before it: the suite is the one naming -rfEs on tests/.
-    suite = [step for step in harness if "tests/ -v" in step["run"]]
+    suite = [step for step in harness if "$SUITE -v" in step["run"]]
     assert len(suite) == 1, [step.get("name") for step in harness]
     harness = suite
     command = harness[0]["run"]
     # The WHOLE suite goes through the launcher (which includes both barrier-dependent modules), on
-    # both matrix legs (no `if`), and a run without the barriers is an error, not a quiet green.
-    assert "python -B tests/run_harness_tests.py tests/ " in command + " ", command
+    # both matrix legs (no `if`), and a run without the barriers is an error, not a quiet green. CI runs it in
+    # two parts per leg: the mutation gate alone, and tests/ without it -- together, all of tests/.
+    assert "python -B tests/run_harness_tests.py $SUITE " in command + " ", command
+    assert behavior["strategy"]["matrix"]["part"] == ["suite", "mutations"]
+    assert harness[0]["env"]["SUITE"] == ("${{ matrix.part == 'mutations' && 'tests/test_mutations.py' "
+                                          "|| 'tests/ --ignore=tests/test_mutations.py' }}")
     assert "-rfEs" in command, "failures, errors and skips must all be named: " + command
     assert str(harness[0].get("env", {}).get("TOOLKIT_REQUIRE_HARNESS")) == "1", harness[0]
     # ...and nothing else runs plain pytest over tests/, which would skip those modules unseen.
@@ -147,7 +151,7 @@ def test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them():
     step dropped together with that env var would skip the smoke silently)."""
     yaml = pytest.importorskip("yaml")
     jobs = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text())["jobs"]
-    for job, consumer in (("node", "npm test"), ("behavior", "tests/run_harness_tests.py tests/ -v")):
+    for job, consumer in (("node", "npm test"), ("behavior", "tests/run_harness_tests.py $SUITE -v")):
         steps = jobs[job]["steps"]
         install = [i for i in _steps_named(steps, "npm ci --ignore-scripts")
                    if "if" not in steps[i] and str(steps[i]["run"]).strip().startswith("npm ci")]

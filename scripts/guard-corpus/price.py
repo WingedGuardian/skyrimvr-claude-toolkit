@@ -3,9 +3,10 @@
 
     price.py --base <rev> [--new <dir>] --history ~/.claude/projects --out-dir <outside repo> [--only-rule ID]
 
-The base tree is `git archive <rev>:tools/skyguard` (or --base-dir for an already-exported tree); the new
-tree is --new (a skyguard package directory; default: this checkout's tools/skyguard). Each engine runs in
-its own subprocess (engine_eval.py, PYTHONPATH = that tree), so two versions of one package never share an
+The base tree is exported from `<rev>:tools` (or --base-dir for an already-exported tree); the new
+tree is --new (a skyguard package directory; default: this checkout's tools/skyguard). Keep its matching
+`modding_harness` sibling and lock beside a detached package: each engine stages its own dependencies.
+Each engine runs in its own subprocess (engine_eval.py, PYTHONPATH = that tree), so two versions never share an
 interpreter. Items are deduplicated on (tool_name, command|file_path|mcp-input, cwd).
 
 A rule "newly fires" for an item when its id is in new.fired and not in old.fired. Counted per rule and per
@@ -15,11 +16,14 @@ but whose reason moved to a different rule is visible too ("reason_moved").
 
 Raw items hold secrets and private paths, so they go ONLY to --out-dir, which must be outside the repo
 (refused otherwise). Only the printed / summary.json COUNTS belong in the repo.
+Keep other writers out of the output directory during a run. Previous owned samples are retained in
+an archive; unowned or modified samples are preserved, and a new sample cannot overwrite them.
 """
 from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import importlib.util
 import io
 import json
@@ -27,9 +31,11 @@ import os
 import re
 import shutil
 import subprocess
+import stat
 import sys
 import tarfile
 import tempfile
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -37,6 +43,73 @@ REPO = HERE.parents[1]
 DIRECTIONS = ("newly-deny", "newly-ask", "newly-advise", "no-longer-deny", "no-longer-ask", "no-longer-advise",
               "newly-error")
 ERROR_RULE = "<engine-error>"
+OWNERSHIP = ".price-owned.json"
+
+
+def _sample_stamp(path: Path) -> dict:
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or path.is_symlink():
+        raise SystemExit(f"sample ownership requires a regular file: {path}")
+    data = path.read_bytes()
+    after = path.lstat()
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+        raise SystemExit(f"sample changed while reading ownership: {path}")
+    return {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+
+
+def _read_ownership(out_dir: Path) -> tuple[bytes | None, dict]:
+    path = out_dir / OWNERSHIP
+    if path.is_symlink():
+        raise SystemExit(f"sample ownership must not be a link: {path}")
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        return None, {}
+    try:
+        record = json.loads(data)
+        if (not isinstance(record, dict) or type(record.get("version")) is not int or record["version"] != 1 or
+                record.get("tool") != "guard-corpus-price" or not isinstance(record.get("files"), dict)):
+            raise ValueError("invalid header")
+        for name, stamp in record["files"].items():
+            if (not re.fullmatch(r"[A-Za-z0-9_-]+__(?:" + "|".join(DIRECTIONS) + r")\.jsonl", name) or
+                    not isinstance(stamp, dict) or not isinstance(stamp.get("sha256"), str) or
+                    not re.fullmatch(r"[0-9a-f]{64}", stamp["sha256"]) or
+                    type(stamp.get("size")) is not int or stamp["size"] < 0):
+                raise ValueError("invalid file entry")
+    except (ValueError, TypeError) as exc:
+        raise SystemExit(f"invalid sample ownership in {path}: {exc}") from None
+    return data, record["files"]
+
+
+def _retire_samples(out_dir: Path, owned: dict) -> None:
+    archive = None
+    for name, expected in owned.items():
+        source = out_dir / name
+        if not source.exists() and not source.is_symlink():
+            continue
+        if _sample_stamp(source) != expected:
+            print(f"preserving modified sample: {source}", file=sys.stderr)
+            continue
+        if archive is None:
+            archive = out_dir / (".price-previous-" + uuid.uuid4().hex)
+            archive.mkdir()
+        # Rename retains even a concurrent writer's bytes; never unlink old samples as cleanup.
+        source.rename(archive / name)
+        if _sample_stamp(archive / name) != expected:
+            raise SystemExit(f"sample changed during retirement; retained at {archive / name}")
+
+
+def _write_ownership(out_dir: Path, previous: bytes | None, files: dict) -> None:
+    current, _ = _read_ownership(out_dir)
+    if current != previous:
+        raise SystemExit("sample ownership changed during pricing; preserve this directory and use a fresh one")
+    record = {"version": 1, "tool": "guard-corpus-price",
+              "files": {name: _sample_stamp(out_dir / name) for name in files}}
+    temporary = out_dir / (".price-owned-" + uuid.uuid4().hex + ".tmp")
+    with temporary.open("x", encoding="utf-8", newline="\n") as stream:
+        stream.write(json.dumps(record, indent=2) + "\n")
+    temporary.replace(out_dir / OWNERSHIP)
 
 
 def _load(name: str):
@@ -56,21 +129,31 @@ def check_out_dir(out_dir: Path) -> Path:
 
 
 def export_base(rev: str, dest: Path) -> Path:
-    """`git archive <rev>:tools/skyguard` into dest/skyguard; returns dest (the PYTHONPATH entry)."""
-    r = subprocess.run(["git", "-C", str(REPO), "archive", "--format=tar", f"{rev}:tools/skyguard"],
+    """Export the guard and its own committed optional runtime, never the current checkout's core."""
+    listed = subprocess.run(["git", "-C", str(REPO), "ls-tree", "--name-only", f"{rev}:tools", "--",
+                             "skyguard", "modding_harness", "modding-harness.lock.json"], capture_output=True)
+    names = listed.stdout.decode("utf-8").splitlines()
+    if listed.returncode or "skyguard" not in names:
+        raise SystemExit(f"cannot find skyguard in {rev}:tools")
+    r = subprocess.run(["git", "-C", str(REPO), "archive", "--format=tar", f"{rev}:tools", *names],
                        capture_output=True)
     if r.returncode != 0:
-        raise SystemExit(f"git archive {rev}:tools/skyguard failed: {r.stderr.decode(errors='replace')[:300]}")
-    pkg = dest / "skyguard"
-    pkg.mkdir(parents=True)
+        raise SystemExit(f"git archive {rev}:tools failed: {r.stderr.decode(errors='replace')[:300]}")
+    dest.mkdir(parents=True)
     with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tf:
-        tf.extractall(pkg)
+        tf.extractall(dest)
     return dest
 
 
 def stage_tree(src: Path, dest: Path) -> Path:
-    """Copy a skyguard package directory to dest/skyguard (its own directory name does not matter)."""
+    """Copy a package and its matching sibling runtime (the package name does not matter)."""
     shutil.copytree(src, dest / "skyguard", ignore=shutil.ignore_patterns("__pycache__"))
+    for name in ("modding_harness", "modding-harness.lock.json"):
+        dependency = src.parent / name
+        if dependency.is_dir():
+            shutil.copytree(dependency, dest / name, ignore=shutil.ignore_patterns("__pycache__"))
+        elif dependency.is_file():
+            shutil.copy2(dependency, dest / name)
     return dest
 
 
@@ -111,6 +194,7 @@ def price(base_tree: Path, new_tree: Path, history: Path, out_dir: Path, only_ru
           root: str | None = None, root_win: str | None = None) -> dict:
     out_dir = check_out_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    previous_ownership, owned = _read_ownership(out_dir)
     ee = _load("engine_eval")
     root, root_win = root or ee.DEFAULT_ROOT, root_win or ee.DEFAULT_ROOT_WIN
     replay = _load("replay")
@@ -129,9 +213,7 @@ def price(base_tree: Path, new_tree: Path, history: Path, out_dir: Path, only_ru
                                          for i in items)
     reason_moved = parse_fail_old = parse_fail_new = err_old = err_new = 0
     parse_fail_tool = collections.Counter()            # new engine, per tool (the R4 gate: < 0.5% of items)
-    for d in DIRECTIONS:                                    # only files this tool writes; a stale one would lie
-        for stale in out_dir.glob(f"*__{d}.jsonl"):
-            stale.unlink()
+    _retire_samples(out_dir, owned)
     files: dict[str, io.TextIOBase] = {}
     try:
         for item, o, n in zip(items, old, new):
@@ -153,11 +235,12 @@ def price(base_tree: Path, new_tree: Path, history: Path, out_dir: Path, only_ru
                 per_rule[rid][direction] += 1
                 key = f"{re.sub(r'[^A-Za-z0-9-]', '_', rid)}__{direction}.jsonl"
                 if key not in files:
-                    files[key] = (out_dir / key).open("w", encoding="utf-8", newline="\n")
+                    files[key] = (out_dir / key).open("x", encoding="utf-8", newline="\n")
                 files[key].write(json.dumps({"item": item, "old": o, "new": n}, ensure_ascii=False) + "\n")
     finally:
         for fh in files.values():
             fh.close()
+        _write_ownership(out_dir, previous_ownership, files)
     totals = {d: sum(c[d] for c in per_rule.values()) for d in DIRECTIONS}
     summary = {
         "N": len(items), "N_per_tool": dict(unique_by_tool), "raw_tool_calls": raw_counts,

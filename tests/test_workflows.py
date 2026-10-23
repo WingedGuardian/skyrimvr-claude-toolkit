@@ -118,12 +118,19 @@ def test_the_tripwires_bracket_the_suite_on_every_leg():
     _, data = _load("ci.yml")
     steps = _steps(data["jobs"]["behavior"])
     collect = _index(steps, lambda s: "check_ci_leg.py collect" in s.get("run", ""))
-    suite = _index(steps, lambda s: "run_harness_tests.py tests/ -v" in s.get("run", ""))
+    suite = _index(steps, lambda s: "run_harness_tests.py $SUITE -v" in s.get("run", ""))
     log = _index(steps, lambda s: "check_ci_leg.py log" in s.get("run", ""))
     assert None not in (collect, suite, log) and collect < suite < log, (collect, suite, log)
     assert "if" not in steps[collect] and steps[log].get("if") == "always()"
     for i in (collect, log):
         assert '--leg "$RUNNER_OS"' in steps[i]["run"]
+    # The two parts are the whole suite: one runs exactly the mutation gate, the other everything but it,
+    # and the mutation part is checked against its own numbers.
+    assert data["jobs"]["behavior"]["strategy"]["matrix"]["part"] == ["suite", "mutations"]
+    assert steps[suite]["env"]["SUITE"] == ("${{ matrix.part == 'mutations' && 'tests/test_mutations.py' "
+                                            "|| 'tests/ --ignore=tests/test_mutations.py' }}")
+    assert steps[log]["env"]["PART"] == "${{ matrix.part == 'mutations' && '--part mutations' || '' }}"
+    assert "$PART" in steps[log]["run"]
     assert "set -o pipefail" in steps[suite]["run"], "a `| tee` without pipefail turns a red suite green"
     # Review M7: the job default is what makes every step bash -eo pipefail on BOTH legs; on Windows the
     # runner's default shell is PowerShell, where `tee`, `set -o` and "$RUNNER_OS" mean something else.

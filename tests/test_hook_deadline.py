@@ -244,7 +244,8 @@ def test_a_candidate_costs_one_probe_process(tmp_path):
     calls = _log_lines(log)
     assert [c for c in calls if "version_info" in c or " -c " in c] == [], calls
     assert len([c for c in calls if "--selftest" in c]) == 1, calls
-    assert len(calls) == 2, calls          # the probe and the engine run, nothing else
+    assert len(calls) == 3, calls          # one probe, engine, complete-output validation
+    assert len([c for c in calls if "/claude_output.py " in c]) == 1, calls
 
 
 def test_run_py_selftest_refuses_an_old_python():
@@ -270,7 +271,7 @@ def test_a_verified_fallback_is_remembered_and_not_probed_again(tmp_path):
     assert _reason(r2).startswith(BLOCKED), r2.stdout
     calls = _log_lines(log)
     assert not any("--selftest" in c for c in calls), calls
-    assert len(calls) == 1 and "--nonce" in calls[0], calls
+    assert len(calls) == 2 and "--nonce" in calls[0] and "/claude_output.py " in calls[1], calls
     assert "(verified earlier)" in _failed(root, "protect-files")
 
 
@@ -411,7 +412,22 @@ def test_a_probe_gets_only_the_time_left_before_the_deadline(tmp_path):
             _kill(int(pidfile.read_text()))
 
 
+def _start_overhead() -> float:
+    """Worst of three: bash starting two Pythons, the shim chain's own cost on THIS machine right now."""
+    worst = 0.0
+    for _ in range(3):
+        t = time.perf_counter()
+        subprocess.run([BASH, "-c", f'"{REAL_PY}" -c pass; "{REAL_PY}" -c pass'], capture_output=True, check=False)
+        worst = max(worst, time.perf_counter() - t)
+    return worst
+
+
 def test_a_sub_second_probe_budget_is_honoured(tmp_path):
+    # The gap is 0.5 s plus process starts and the kill landing. A fixed 2 s failed on a slow CI runner
+    # (4.01 s, windows-latest 3.13, run 38489393645), so the bound scales with the measured start cost.
+    # It is capped at 10 s: a dropped fraction turns 0.5 into the 15 s default, which must stay red.
+    overhead = _start_overhead()
+    bound = min(0.5 + 3 * overhead + 2.0, 10.0)
     root = _install(tmp_path, MISSING)
     stamps = tmp_path / "stamps.log"
     pidfile = tmp_path / "probe.pid"
@@ -432,7 +448,7 @@ def test_a_sub_second_probe_budget_is_honoured(tmp_path):
             n, v = line.split()
             t.setdefault(n, float(v))
         gap = t["python3"] - t["python"]
-        assert gap < 2.0, f"a 0.5 s probe held the chain {gap:.2f} s"
+        assert gap < bound, f"a 0.5 s probe held the chain {gap:.2f} s (bound {bound:.2f} s, start cost {overhead:.2f} s)"
     finally:
         if pidfile.is_file():
             _kill(int(pidfile.read_text()))

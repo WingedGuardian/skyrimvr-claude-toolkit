@@ -46,7 +46,9 @@ def papyrus_zone(abs_path: str, roots) -> bool:
     return rel is not None and rel[:2] == ["data", "scripts"]
 
 
-def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdict:
+def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str = "write") -> Verdict:
+    """op: what the call does to the file, for the save policy (saves.py): `write` (an edit, a write, a patch that
+    adds or updates it), `delete` or `move` (a patch that deletes it or moves it away)."""
     if file_path == "":
         audit.rule(HOOK, "W-INERT-NOPATH", "deny", NO_PATH_LOG, level="REFUSE")
         return Verdict("deny", NO_PATH_DENY)
@@ -59,10 +61,15 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdic
     # RESOLVES -- before the silent whitelist below, which used to cover .claude/hooks and .claude/backups. With no
     # roots (an old caller, an unreadable paths file on Codex) the path's own words decide (self_rules.text_kind).
     env_ = os.environ if env is None else env
+    placed = targets.resolve_literal(file_path, cwd, env_) if roots is not None else None
+    if placed and self_rules.save_store_target(placed, roots, holder=op in ("delete", "move")):
+        reason = rules.message("W-SAVE-STORE", file=file_path)
+        audit.rule(HOOK, "W-SAVE-STORE", "deny", reason)
+        return Verdict("deny", reason)
     if roots is not None:
-        a = self_rules.resolve_own(lambda x: targets.resolve(x, cwd, "bash", env_), file_path)   # T8 r1 P1: streams
+        a = self_rules.resolve_own(lambda x: targets.resolve_literal(x, cwd, env_), file_path)   # T8 r1 P1: streams
         # An unresolved path (relative, no cwd) fails closed for the STATE class only, as on the shell.
-        own = self_rules.kind_of(a, roots, env_) if a is not None else (
+        own = self_rules.kind_of(a, roots, env_, holder=op in ("delete", "move")) if a is not None else (
             self_rules.STATE if self_rules.text_kind(file_path) == self_rules.STATE else "")
     else:
         own = self_rules.text_kind(file_path)
@@ -93,12 +100,14 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None) -> Verdic
 
     if roots is not None:
         from .writes import in_install_area, is_save
-        a = targets.resolve(file_path, cwd, "bash", os.environ if env is None else env)
+        a = targets.resolve_literal(file_path, cwd, os.environ if env is None else env)
         if is_save(a, roots):
-            # rt-fix-b: a save rewritten through Edit/Write (or a Codex patch) is a binary file replaced by text.
-            text = rules.message("W-SAVE", file=file_path)
-            audit.rule(HOOK, "W-SAVE", "ask", text)
-            return Verdict("ask", text)
+            # The save policy (user ruling 2026-10-13): a save changed through Edit/Write or a patch is backed up
+            # first (saves.enforce); saves.judge decides it with every other save the call changes.
+            from . import saves
+            actual = targets.physical(file_path, cwd, "cmd", env_, literal=True)
+            return saves.judge(saves.Change((saves.Target(actual or "", op if op in saves.OPS else "write", True),)), Verdict(),
+                               audit, HOOK)
         papyrus = a is not None and papyrus_zone(a, roots)
         install = a is not None and in_install_area(a, roots)
     else:

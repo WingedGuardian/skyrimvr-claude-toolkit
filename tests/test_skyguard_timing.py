@@ -259,12 +259,24 @@ def test_the_delete_shapes_reach_the_delete_code(shell):
 DELETE_SHAPES = sorted(_delete_shapes(SMALL))
 
 
+def _timed_shell_decision(command, name, shell):
+    try:
+        return shell_rules.decide(command, ROOTS, _QuietAudit(), cwd="/x/install", shell=shell)
+    except ValueError as error:
+        # These shapes contain invalid Python, whose static reader now refuses.
+        # Time that completed refusal too. The normal dispatcher must deny it
+        # (test_timing_refusals.py); unrelated failures still fail this timing test.
+        if (name not in ("interp-unlink-run", "reg-code-run", "reg-code-unterminated")
+                or str(error) != "Python literal write scope could not be parsed"):
+            raise
+
+
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
 @pytest.mark.parametrize("name", DELETE_SHAPES)
 def test_delete_rules_stay_fast(name, shell):
     def make(n):
         cmd = _delete_shapes(n)[name]
-        return lambda: shell_rules.decide(cmd, ROOTS, _QuietAudit(), cwd="/x/install", shell=shell)
+        return lambda: _timed_shell_decision(cmd, name, shell)
     assert_linear(name + "/" + shell, make)
 
 
@@ -523,7 +535,7 @@ def test_the_anchored_shapes_reach_the_anchored_code(shell):
 def test_anchored_rules_stay_fast(name, shell):
     def make(n):
         cmd = _anchored_shapes(n)[name]
-        return lambda: shell_rules.decide(cmd, ROOTS, _QuietAudit(), cwd="/x/install", shell=shell)
+        return lambda: _timed_shell_decision(cmd, name, shell)
     assert_linear(name + "/" + shell, make)
 
 

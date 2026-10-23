@@ -412,6 +412,9 @@ def test_the_shipped_wrappers_refuse_it_under_guards_off(install, agent, finding
         payload = json.loads(FIX.read_text(encoding="utf-8"))
         payload.update(cwd=root.as_posix(), session_id=sid)
         payload["tool_input"]["command"] = ENTRY_PROBES[finding]
+        # This test reaches the state policy. The historical captured payload
+        # has no native workdir; supply one only in this synthetic policy case.
+        payload["tool_input"]["workdir"] = root.as_posix()
         cmd = [BASH, str(root / ".codex" / "hooks" / "skyguard-entry.sh"), "pre-tool"]
     r = subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True,
                        env=dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), timeout=120)
@@ -419,3 +422,28 @@ def test_the_shipped_wrappers_refuse_it_under_guards_off(install, agent, finding
     out = json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else {"permissionDecision": "allow"}
     assert out.get("permissionDecision") == "deny", out
     assert "lock.json holds the guards' on/off state" in out.get("permissionDecisionReason", ""), out
+
+
+@pytest.mark.parametrize("finding", ["F1-fstring", "F1-node-concat", "I2"])
+def test_codex_routes_without_execution_context_are_explicitly_inert(install, finding):
+    from modding_harness.transport import UNKNOWN_EXECUTION_CWD
+
+    root = install
+    if (root / ".skyguard").exists():
+        shutil.rmtree(root / ".skyguard")  # test-owned fixture only
+    sid = "rr-codex-missing-cwd-" + finding
+    _guards_off(root, "codex", sid)
+    state_file = root / ".skyguard" / "state.json"
+    before = state_file.read_bytes()
+    payload = json.loads(FIX.read_text(encoding="utf-8"))
+    payload.update(cwd=root.as_posix(), session_id=sid)
+    payload["tool_input"]["command"] = ENTRY_PROBES[finding]
+    assert "workdir" not in payload["tool_input"]
+    result = subprocess.run([BASH, str(root / ".codex/hooks/skyguard-entry.sh"), "pre-tool"],
+                            input=json.dumps(payload), capture_output=True, text=True,
+                            env=dict(os.environ, CLAUDE_PROJECT_DIR=str(root)), timeout=120)
+    assert result.returncode == 0, result.stderr
+    answer = json.loads(result.stdout)["hookSpecificOutput"]
+    assert answer["permissionDecision"] == "deny"
+    assert answer["permissionDecisionReason"] == UNKNOWN_EXECUTION_CWD
+    assert state_file.read_bytes() == before

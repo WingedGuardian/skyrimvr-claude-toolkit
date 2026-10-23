@@ -89,6 +89,24 @@ def test_tests_and_github_are_not_shipped(tmp_path):
     assert not [n for n in names if "/tests/" in n or "/.github/" in n], names
 
 
+def test_native_fixture_authoring_is_excluded_without_hiding_runtime_or_siblings(tmp_path):
+    repo = _repo(tmp_path)
+    paths = ("tools/resaver-cli/tests/NativeSafetyProbe.java",
+             "tools/resaver-cli/tests-extra/keep.java", "tools/resaver-cli/ResaverCLI.java")
+    for rel in paths:
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"fixture source\n")
+    _git(repo, "add", "--", *paths)
+    _git(repo, "commit", "-q", "-m", "native fixture authoring")
+    result, output = _build(repo, "HEAD", "--version", "1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    names = _names(_zip(output))
+    root = "skyrim-ai-assistant-toolkit-1/"
+    assert root + paths[0] not in names
+    assert root + paths[1] in names and root + paths[2] in names
+
+
 def test_the_layer2_spike_folder_is_excluded_by_prefix_not_its_siblings(tmp_path):
     """scripts/layer2-spike/ (developer-only Layer 2 lock probes) stays in the repo and out of the zip. The rule is
     a PATH PREFIX (the folder itself, or anything under it), never a top-level name: scripts/ still ships, and a
@@ -220,7 +238,7 @@ def test_the_excludes_are_one_list_the_tests_can_read():
     spec = importlib.util.spec_from_file_location("build_release_zip", BUILDER_PY)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    assert set(mod.EXCLUDE) == {"tests", ".github", "scripts/layer2-spike"}, mod.EXCLUDE
+    assert set(mod.EXCLUDE) == {"tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests"}, mod.EXCLUDE
 
 
 @pytest.mark.parametrize("args", [[], ["HEAD"], ["HEAD", "out", "--bogus"]])
@@ -314,6 +332,7 @@ def test_the_post_build_proof_catches_a_missing_or_altered_member(tmp_path, monk
     """Re-review N2: whatever made the archive, the zip must be the commit's tree minus EXCLUDE, byte for byte
     (CRLF/LF aside). Each problem kind is planted on a good zip."""
     repo = _repo(tmp_path)
+    _commit_file(repo, ".gitattributes", "README.md text eol=lf\n")
     r, out = _build(repo, "HEAD", "--version", "1")
     assert r.returncode == 0
     good = _zip(out).read_bytes()
@@ -331,6 +350,40 @@ def test_the_post_build_proof_catches_a_missing_or_altered_member(tmp_path, monk
     with zipfile.ZipFile(buf, "a") as zf:
         zf.writestr(name + "/stray.txt", "x")
     assert any("not in the commit: stray.txt" in p for p in m.prove(buf.getvalue(), sha, name))
+
+
+def test_the_post_build_proof_rejects_duplicate_members_even_if_last_is_correct(tmp_path, monkeypatch):
+    import io
+    repo = _repo(tmp_path)
+    result, out = _build(repo, "HEAD", "--version", "1")
+    assert result.returncode == 0, result.stderr
+    m = _mod_in(repo, monkeypatch)
+    sha = _git(repo, "rev-parse", "HEAD")
+    good = _zip(out).read_bytes()
+    corrupt_first = _rezip(good, change=("README.md", lambda data: b"wrong first member"))
+    buffer = io.BytesIO(corrupt_first)
+    with zipfile.ZipFile(buffer, "a") as archive:
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            archive.writestr("skyrim-ai-assistant-toolkit-1/README.md", b"hello\n")
+    assert any("duplicate" in p for p in m.prove(buffer.getvalue(), sha, "skyrim-ai-assistant-toolkit-1"))
+
+
+@pytest.mark.parametrize("attributes,data", [("payload.bin -text\n", b"opaque\r\nbytes"),
+                                             ("", b"undeclared\r\nbytes"),
+                                             ("payload.bin text=auto eol=lf\n", b"binary\0\r\nbytes")])
+def test_the_post_build_proof_does_not_normalize_binary_or_undeclared_bytes(tmp_path, monkeypatch, attributes, data):
+    repo = _repo(tmp_path)
+    _commit_file(repo, ".gitattributes", attributes)
+    (repo / "payload.bin").write_bytes(data)
+    _git(repo, "add", "--", "payload.bin")
+    _git(repo, "commit", "-q", "-m", "opaque payload")
+    result, out = _build(repo, "HEAD", "--version", "1")
+    assert result.returncode == 0, result.stderr
+    m = _mod_in(repo, monkeypatch)
+    sha = _git(repo, "rev-parse", "HEAD")
+    assert any("bytes differ" in p for p in m.prove(
+        _rezip(_zip(out).read_bytes(), change=("payload.bin", lambda value: value.replace(b"\r\n", b"\n"))),
+        sha, "skyrim-ai-assistant-toolkit-1"))
 
 
 def test_a_build_whose_archive_differs_is_refused_and_writes_nothing(tmp_path, monkeypatch):

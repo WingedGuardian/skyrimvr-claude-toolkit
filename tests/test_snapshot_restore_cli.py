@@ -14,7 +14,8 @@ from conftest import BASH, REPO
 from test_recovery_snapshots import Install, put, sha
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import audit as audit_mod, backup, cli, recovery, snapshot  # noqa: E402
+from skyguard import audit as audit_mod, backup, cli, recovery, shell_rules, snapshot  # noqa: E402
+from modding_harness import workspace
 
 
 @pytest.fixture
@@ -47,6 +48,8 @@ def take_all(inst, command="make"):
 def ids(inst, kind):
     if kind == "scripts":
         return [n[:-len("__snapshot.json")] for n in snapshot.manifest_names(snapshot.store_dir(str(inst.game)))]
+    if kind == "save":
+        return ["core-" + row["id"] for row in workspace.summaries(inst.save_store)[0]]
     return [g["id"] for g in recovery.snapshots(inst.store) if g["kind"] == kind]
 
 
@@ -54,12 +57,72 @@ def tree(root):
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
 
+@pytest.mark.parametrize("initially_present", [False, True])
+def test_script_restore_refuses_a_target_changed_while_candidates_are_staged(inst, monkeypatch, initially_present):
+    from modding_harness import durable
+    take_all(inst)
+    sid = ids(inst, "scripts")[0]
+    target = inst.game / "Data/Scripts/a.pex"
+    if initially_present:
+        target.write_bytes(b"current before restore")
+    else:
+        target.unlink()
+    original = durable.copy_verified
+    def racing_copy(source, candidate, deadline=None):
+        result = original(source, candidate, deadline)
+        if ".restore-part-" in str(candidate):
+            target.write_bytes(b"another writer's current bytes")
+        return result
+    monkeypatch.setattr(durable, "copy_verified", racing_copy)
+    rc, output = cli_run(inst, "restore", sid, "--path", "Data/Scripts/a.pex", "--in-place")
+    assert rc != 0, output
+    assert target.read_bytes() == b"another writer's current bytes"
+
+
+def test_script_restore_refuses_a_target_changed_during_its_prebackup(inst, monkeypatch):
+    take_all(inst)
+    sid = ids(inst, "scripts")[0]
+    target = inst.game / "Data/Scripts/a.pex"
+    target.write_bytes(b"current before restore")
+    original = backup.take
+    def racing_backup(*args, **kwargs):
+        result = original(*args, **kwargs)
+        target.write_bytes(b"another writer after backup")
+        return result
+    monkeypatch.setattr(backup, "take", racing_backup)
+    rc, output = cli_run(inst, "restore", sid, "--path", "Data/Scripts/a.pex", "--in-place")
+    assert rc != 0, output
+    assert target.read_bytes() == b"another writer after backup"
+
+
+def test_absent_script_restore_does_not_clobber_a_creator_at_publication(inst, monkeypatch):
+    from modding_harness import durable
+    take_all(inst)
+    sid = ids(inst, "scripts")[0]
+    target = inst.game / "Data/Scripts/a.pex"
+    target.unlink()
+    original_replace, original_publish = snapshot.os.replace, durable.publish_new
+    def replace(source, destination):
+        if ".restore-part-" in str(source):
+            target.write_bytes(b"foreign creator at publication")
+        return original_replace(source, destination)
+    def publish(source, destination):
+        if ".restore-part-" in str(source):
+            target.write_bytes(b"foreign creator at publication")
+        return original_publish(source, destination)
+    monkeypatch.setattr(snapshot.os, "replace", replace)
+    monkeypatch.setattr(durable, "publish_new", publish)
+    rc, output = cli_run(inst, "restore", sid, "--path", "Data/Scripts/a.pex", "--in-place")
+    assert rc == 1, output
+    assert target.read_bytes() == b"foreign creator at publication"
+
+
 # ---------------------------------------------------------------- list
 
 
 def test_list_shows_script_config_and_save_snapshots(inst):
     take_all(inst)
-    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
     rc, text = cli_run(inst, "list")
     assert rc == 0
     for sid in ids(inst, "scripts") + ids(inst, "config") + ids(inst, "save"):
@@ -101,7 +164,7 @@ def test_a_config_restore_is_the_state_at_that_snapshot_not_later(inst):
 
 
 def test_a_save_restore_gives_back_the_save_and_its_cosave(inst):
-    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
     put(inst.saves / "Quick.ess", b"what resaver wrote")
     out = inst.game.parent / "out"
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--to", str(out))
@@ -234,13 +297,13 @@ def _low_disk(monkeypatch, room):
 def test_in_place_save_restore_refuses_when_its_backup_would_fill_the_drive(inst, monkeypatch):
     """Final review B-M6: the live save (up to 192 MB) was backed up with no free-space reserve, on a drive the user
     keeps ~88% full. The backup now keeps the recovery store's reserve; when it cannot, nothing is restored."""
-    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
     put(inst.saves / "Quick.ess", b"what resaver wrote")
     _low_disk(monkeypatch, 10)
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
-    assert rc == 2 and "could not back up" in text, text
+    assert rc == 2 and "insufficient destination space" in text, text
     assert (inst.saves / "Quick.ess").read_bytes() == b"what resaver wrote", "no backup, so no replace"
-    assert "would leave under" in inst.log() and "NO BACKUP EXISTS" in inst.log()
+    assert "restore failed" in inst.log() and "insufficient destination space" in inst.log()
 
 
 def test_the_save_reserve_applies_to_saves_only(inst, monkeypatch):
@@ -253,12 +316,15 @@ def test_the_save_reserve_applies_to_saves_only(inst, monkeypatch):
 
 
 def test_in_place_save_restore_with_room_backs_the_save_up(inst, monkeypatch):
-    inst.run("bash tools/resaver-cli.sh clean Quick.ess --apply")
+    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
     put(inst.saves / "Quick.ess", b"what resaver wrote")
     _low_disk(monkeypatch, 10 * 1024 * 1024)
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
     assert rc == 0 and (inst.saves / "Quick.ess").read_bytes() == b"quick save bytes", text
-    assert any(e["src"].endswith("Quick.ess") for e in _backups(inst).values())
+    prebackup = workspace.summaries(inst.save_store)[0][-1]
+    members = prebackup["groups"][0]["members"]
+    assert {os.path.basename(e["path"]) for e in members} == {"Quick.ess", "Quick.skse"}
+    assert all((inst.save_store.root / "blobs" / e["sha256"]).is_file() for e in members)
 
 
 def forge_recovery(inst, victim, sid):
@@ -337,7 +403,7 @@ def test_an_unreadable_stored_copy_is_a_refusal_not_a_traceback(inst, monkeypatc
 @pytest.mark.parametrize("cmd", ["bash tools/skyguard.sh snapshot restore 20261005_120000-config --in-place",
                                  "python tools/skyguard snapshot restore --in-place 20261005_120000"])
 def test_the_guard_asks_before_an_in_place_restore(inst, cmd):
-    v = recovery.shell_rules.decide(cmd, inst.roots, inst.audit, env={})
+    v = shell_rules.decide(cmd, inst.roots, inst.audit, env={})
     assert v.decision == "ask" and "S-RESTORE-INPLACE" in [r for r, _d in inst.audit.fired]
 
 
@@ -353,7 +419,7 @@ def test_the_guard_asks_before_an_in_place_restore(inst, cmd):
 def test_the_guard_asks_for_every_spelling_of_an_in_place_restore(inst, cmd, shell):
     """Fix round 2, N1 (MEASURED by the re-reviewer: `--in`, `--in-p` and `snapshot --in-place restore` restored in place
     while the rule said allow). N2: the .cmd and python launcher forms."""
-    v = recovery.shell_rules.decide(cmd, inst.roots, inst.audit, shell=shell, env={})
+    v = shell_rules.decide(cmd, inst.roots, inst.audit, shell=shell, env={})
     assert v.decision == "ask", v
 
 
@@ -386,7 +452,7 @@ def test_a_recovery_id_with_a_trailing_newline_is_not_an_id():
 
 
 def test_the_guard_lets_a_restore_to_a_new_folder_through(inst):
-    v = recovery.shell_rules.decide("bash tools/skyguard.sh snapshot restore 20261005_120000-config --to out",
+    v = shell_rules.decide("bash tools/skyguard.sh snapshot restore 20261005_120000-config --to out",
                                     inst.roots, inst.audit, env={})
     assert v.decision == "allow"
 

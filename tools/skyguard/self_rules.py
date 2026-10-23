@@ -85,9 +85,22 @@ def install_kind(rel: List[str]) -> str:
         return ""
     if rel[0] == ".skyguard":
         return STATE
+    if rel in ([".modding-agent-harness", "config.json"], [".modding-agent-harness", "local-policies.json"]):
+        return STATE
+    if rel[:2] == [".modding-agent-harness", "upgrades"] or rel == [".modding-agent-harness", "upgrade.lock"]:
+        return STATE
+    if (rel[:3] in ([".claude", "backups", "recovery_snapshots"],
+                     [".claude", "backups", "save-backups"])
+            or rel[:3] == [".modding-agent-harness", "backups", "saves"]):
+        return STATE
     if rel[0] == ".codex":
         return GUARD
-    if rel[:2] in ([".claude", "hooks"], ["tools", "skyguard"], ["agent", "guards"]) and len(rel) >= 2:
+    if rel == ["tools", "agent-harness.py"] or rel[:2] in ([".opencode", "hooks"], [".opencode", "plugins"]):
+        return GUARD
+    if rel[:2] in ([".claude", "hooks"], ["tools", "skyguard"], ["tools", "modding_harness"],
+                   ["agent", "guards"]) and len(rel) >= 2:
+        return GUARD
+    if rel in (["tools", "modding-harness.lock.json"], ["tools", "resaver_cli_cache.py"]):
         return GUARD
     if rel[0] == ".claude" and len(rel) == 2 and (_settings(rel[1]) or rel[1] == "skyrim-paths.env"):
         return GUARD
@@ -109,6 +122,88 @@ def user_kind(rel: List[str]) -> str:
 
 # A folder ABOVE guard files: moving or restoring it moves or restores them (`mv .claude x`, `git checkout -- tools`).
 _HOLDERS = ([".claude"], [".claude", "backups"], ["tools"], ["agent"])
+_SAVE_HOLDERS = ([".claude"], [".claude", "backups"],
+                 [".modding-agent-harness"], [".modding-agent-harness", "backups"])
+
+
+class _StoreCache:
+    """One decision's store lookups. CI run 39145224156: an 80 KB command with ~1300 operands re-read the workspace
+    config and re-resolved the same store and paths through the filesystem per operand (20-70x slower than 1498c80,
+    over the 2 s timing ceiling). Within one decision the answers cannot differ, so each is computed once. Failures
+    are never cached: a malformed config or an unresolvable path raises exactly where and as often as before."""
+
+    def __init__(self):
+        self.destinations = {}
+        self.keys = {}
+
+    def destination(self, root):
+        if root not in self.destinations:
+            from modding_harness import workspace
+            self.destinations[root] = workspace.settings(root)["destination"]
+        return self.destinations[root]
+
+    def canonical(self, path):
+        key = str(path)
+        if key not in self.keys:
+            from modding_harness.profiles import canonical
+            self.keys[key] = canonical(path)
+        return self.keys[key]
+
+    def protects(self, path, store, ancestor):
+        """modding_harness.preservation.protects(path, [store], ancestor) on cached keys. The shared core is pinned
+        byte-for-byte, so the comparison is mirrored here; test_cached_store_check_agrees_with_the_shared_core pins
+        the two together."""
+        try:
+            store, resolved = self.canonical(store), self.canonical(path)
+            shared = os.path.commonpath((store, resolved))
+        except ValueError:
+            return False
+        return shared == store or (ancestor and shared == resolved)
+
+
+def save_store_target(abs_path, roots, holder=False, cache=None):
+    if roots is not None:
+        from modding_harness import workspace
+        from modding_harness.preservation import protects
+        for root in roots.install_dirs:
+            if cache is not None:
+                if cache.protects(abs_path, cache.destination(root), holder):
+                    return True
+            elif protects(abs_path, [workspace.settings(root)["destination"]], ancestor=holder):
+                return True
+    rel = _rel(abs_path, roots.install_dirs) if roots is not None else None
+    if rel is None:
+        return False
+    return (rel[:3] in ([".claude", "backups", "recovery_snapshots"],
+                        [".claude", "backups", "save-backups"],
+                        [".modding-agent-harness", "backups", "saves"])
+            or rel[:2] == [".modding-agent-harness", "upgrades"]
+            or rel == [".modding-agent-harness", "upgrade.lock"]
+            or holder and (not rel or rel in _SAVE_HOLDERS))
+
+
+def shell_save_store_hit(command, parsed, roots, cwd="", env=None):
+    """Recognized store mutations, including an ancestor moved/deleted or aliased."""
+    from . import deletes
+    env = os.environ if env is None else env
+    cache = _StoreCache()
+    for e in parsed.execs:
+        e = deletes.substituted(e)
+        candidates = [(w, holder) for w, holder, _op in _routes(e)]
+        candidates += [(w, True) for w in (deletes.operands(e) or []) if isinstance(w, str)]
+        for word, holder in candidates:
+            placed = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), word)
+            if placed and save_store_target(placed, roots, holder, cache):
+                return placed
+    for word, how in deletes.recycle_targets(deletes.recycle_text(command, parsed)):
+        # A concatenation hole can look like an empty quoted argument. It is
+        # unresolved, never the cwd (which might contain the entire save store).
+        if not word.strip():
+            continue
+        placed = _recycle_abs(word, how, targets.normalise_cwd(cwd), env)
+        if placed and save_store_target(placed, roots, True, cache):
+            return placed
+    return ""
 
 
 def kind_of(abs_path: str, roots, env: Mapping[str, str], holder: bool = False) -> str:
@@ -121,6 +216,8 @@ def kind_of(abs_path: str, roots, env: Mapping[str, str], holder: bool = False) 
         k = install_kind(rel)
         if k or not holder:
             return k
+        if rel in _SAVE_HOLDERS:
+            return STATE
         return GUARD if (rel == [] or rel in _HOLDERS) else ""
     for h in _homes(env):
         r = _rel(abs_path, [h])
@@ -139,7 +236,7 @@ def text_kind(path: str) -> str:
         # At most 4 components: install_kind never looks further, and a length of 4 still fails its `== 2` / `== 3`
         # tests as the full tail would. The full tail made this quadratic (test_skyguard_timing, fix round 1).
         k = install_kind(comps[i:i + 4])
-        if k == GUARD:
+        if k in (GUARD, STATE):
             return k
     return ""
 
@@ -339,7 +436,7 @@ def _reaches_state(a: str, roots) -> bool:
     if roots is None or not a:
         return False
     rel = _rel(a, roots.install_dirs)
-    return rel is not None and rel[:1] == [".skyguard"]     # the folder or a file in it; not the install itself
+    return rel is not None and (install_kind(rel) == STATE or rel in _SAVE_HOLDERS)
 
 
 def _hit_name(a: str, w: str) -> str:

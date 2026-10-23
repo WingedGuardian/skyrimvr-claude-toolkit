@@ -1,0 +1,27 @@
+{
+  "v": 1,
+  "project": "modding-agent-harness",
+  "revision": "12a87ea3e8d3cb5ae10fc0b99f092712467bb9f2",
+  "api_version": 1,
+  "files": {
+    "tools/modding_harness/LICENSE": "07a5c5e4aac6c4eda67565a716c8f4967dc318abe03098e5dee6a8fa7672d619",
+    "tools/modding_harness/__init__.py": "a8fde02ae542cf24e1e7652e171e0744e1009fb9e5ebe55486dec866456f1cf3",
+    "tools/modding_harness/approval.py": "257f5ba1acbc1b6731b676d6c8dcc310c6e8ee8769df38b0eff896956d5d1334",
+    "tools/modding_harness/contracts.py": "306a5bb0cf7fc8cb02a51b9919a3200e1a647675b579141abd3e06b152b8a5ec",
+    "tools/modding_harness/discovery.py": "05e335477d7ea707436606bde533c1197f43608ff1fdd1bd52ecd936b488ae4e",
+    "tools/modding_harness/dispatch.py": "d9812a304b8af5bc6c30592d2f0d9d84bf1b65c33399f0a8a80ea73127d07ee4",
+    "tools/modding_harness/durable.py": "2305d273461440dab9081ce88cb363afbe7ede17eae782d659c3791cb963e71f",
+    "tools/modding_harness/generic.py": "662227e3d75048529066905cb742cd07936bd1958424bd634a7d10d60f49176f",
+    "tools/modding_harness/installation.py": "cfab92a3af0e1cc3cc8459b98bb6d10a3f9295341cee642edfc1c433b8b7e223",
+    "tools/modding_harness/locking.py": "42c8d3322567e6225cf74429aeb0b8b5361edf92986f3e488a8fb2433f9e476a",
+    "tools/modding_harness/opencode_plugin.mjs": "e94a99de83c99b43ca7941a7f4690641254bb91e3a6b3710ff585503ace0639a",
+    "tools/modding_harness/patches.py": "b3b122f53f0408938626f376afbdff193b8f8675c7986d3b131a5da4589f320d",
+    "tools/modding_harness/preferences.py": "e5efda32f1192a8a0975b17447d275ea509eca7cab7d69d15a83e4b531b9d158",
+    "tools/modding_harness/preservation.py": "fa17427eea2e4e98dee1e68279ea74838f82bef959f84174e4878e0faa20cd2c",
+    "tools/modding_harness/profiles.py": "091e5afb1ae6f7e10657f3bd8317de99a404a4dd44c74b1b6a01b5315dd2321c",
+    "tools/modding_harness/telemetry.py": "fdfd78ad65dd681fe311bf35b459d6969f032edf6b7bde177ec3b76d2e396f40",
+    "tools/modding_harness/transport.py": "fa01781cea531e16c26f66ec89ffeea0de023f2ccb5486e59e7a849be0393db5",
+    "tools/modding_harness/upgrade.py": "59f3f07378a92f6815e3c83b81d7923fc043b56f3ee694cfb8453c6529ed39f9",
+    "tools/modding_harness/workspace.py": "264d871f6eca26dd91d8616cdcc1424d0d101d436c3aec01f4d52d4b67ba7d64"
+  }
+}

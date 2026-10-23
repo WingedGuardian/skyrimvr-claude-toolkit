@@ -13,12 +13,14 @@ import time
 from pathlib import Path
 from typing import Iterable, Optional
 
-from . import (backup, codes, deletes, mcp_rules, paths as _paths, recovery, rules, self_rules, shell_rules, shellparse,
-               snapshot, state as _state, targets, write_rules)
+from . import (backup, codes, deletes, mcp_rules, paths as _paths, recovery, rules, saves, self_rules, shell_rules,
+               shellparse, snapshot, state as _state, targets, write_rules)
 from .verdict import Advice, Verdict
 
 # apply_patch ops that take a file away from where it is (a Move only when it leaves that folder).
 DELETE_OPS = ("delete", "move_from")
+# The save policy (saves.py): what a patch op does to a save.
+SAVE_OP = {"delete": "delete", "move_from": "move"}
 
 _RANK = {"evaluated": 0, "partial": 1, "failed": 2}
 NO_PATHS = ("GUARD INERT: a write request named no file, so the write rules checked NOTHING. Allowing "
@@ -34,6 +36,11 @@ def evaluate_shell(req, roots, audit) -> Verdict:
         parsed = shellparse.parse(command, shell) if isinstance(command, str) else None
     except Exception:
         parsed = None                  # decide() parses (and fails) as before; the answer below is partial either way
+    if not req.execution_cwd_known:
+        from . import writes
+        from modding_harness.transport import UNKNOWN_EXECUTION_CWD
+        if parsed is None or writes.unplaced_mutation(command, parsed, os.environ):
+            return Verdict("deny", UNKNOWN_EXECUTION_CWD, status="failed", code="engine.INERT_EXECUTION_CWD")
     v = codes.classify(shell_rules.decide(command, roots, audit, cwd=req.cwd or "", shell=shell, parsed=parsed))
     # D-P4-2 (Plan 4 Verdict.status, Plan 5 Task 17): the rules ran, but on a command the parser could not read
     # completely (a quote or heredoc it could not close) or whose program is a variable. The answer stands; the
@@ -43,10 +50,10 @@ def evaluate_shell(req, roots, audit) -> Verdict:
     return v
 
 
-def evaluate_write(path: str, audit, roots=None, cwd: str = "") -> Verdict:
+def evaluate_write(path: str, audit, roots=None, cwd: str = "", op: str = "write") -> Verdict:
     """Plan 5 Task 9: W-PAPYRUS / W-INSTALL decide on where the file RESOLVES (roots + cwd). roots=None keeps the
-    legacy text tests (more notes, never fewer denies)."""
-    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd))
+    legacy text tests (more notes, never fewer denies). op: what the call does to the file (write_rules.decide)."""
+    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd, op=op))
 
 
 def evaluate_mcp(tool_name: str, args, audit, roots=None) -> Verdict:
@@ -59,6 +66,11 @@ def combine(verdicts: Iterable[Verdict]) -> Verdict:
     vs = list(verdicts)
     if not vs:   # nothing was evaluated; an empty fold must never read as "allow"
         return Verdict("deny", NO_VERDICTS, status="failed", code="engine.EMPTY_COMBINE")
+    # The save policy: when any verdict carries saves, the others' verdicts are folded here and ALL their saves are
+    # judged together (two one-save edits in one patch are two saves, not one each).
+    together = saves.combine(vs, combine)
+    if together is not None:
+        return codes.classify(together)
     worst = max((v.status for v in vs), key=lambda s: _RANK.get(s, 2), default="evaluated")
     # Plan 6 final fix (lane A C1): within a decision a NEVER_SHADOW refusal outranks the others (an apply_patch that
     # deletes an install file and then adds .skyguard/state.json is W-SELF-STATE, not S-DEL-INSTALL), and one that a
@@ -102,16 +114,7 @@ def patch_target(path: str, cwd: str) -> Optional[str]:
     """Where an apply_patch path lands, read LITERALLY: apply_patch expands nothing (`$HOME/x` and `~/x` are folder
     names under the cwd), and `/x` is the root of the cwd's drive (Codex runs Windows paths). None when unknowable
     (no usable cwd for a relative path, a drive-relative `C:x`, an 8.3 short name)."""
-    p = path.strip().replace("\\", "/")
-    a = _paths.norm_abs(p, msys=False)
-    if a is None and not re.match(r"[A-Za-z]:", p):
-        base = targets.normalise_cwd(cwd)
-        if base and p.startswith("/"):
-            root = targets._drive_root(base)
-            a = _paths.norm_abs(root + p.lstrip("/")) if root else None
-        elif base:
-            a = _paths.norm_abs(_paths._join(base, p))
-    return targets._final(a, os.environ)
+    return targets.resolve_literal(path, cwd, os.environ)
 
 
 def _patch_delete(path: str, dest: Optional[str], roots, cwd: str, audit) -> Optional[Verdict]:
@@ -130,6 +133,9 @@ def _patch_delete(path: str, dest: Optional[str], roots, cwd: str, audit) -> Opt
         else:
             return None
     else:
+        from .writes import is_save
+        if is_save(a, roots):
+            return None                           # the save policy: the write rule judges it (saves.py)
         kind = deletes.protected_kind(a, roots)
         if not kind:
             return None
@@ -158,7 +164,7 @@ def evaluate_writes(req, audit, roots=None) -> Verdict:
             if v is not None:
                 out.append(v)
                 continue
-        out.append(evaluate_write(p, audit, roots=roots, cwd=req.cwd or ""))
+        out.append(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "", op=SAVE_OP.get(op, "write")))
     return combine(out)
 
 
@@ -220,10 +226,10 @@ def _rules(req, roots_fn, audit) -> Verdict:
         return v
     if req.kind == "mcp":
         # rt-fix-b (routes s115/s116) = gap X4 (Plan 5 Task 17): the DevBench judge Claude's protect-mcp uses, on Codex
-        # too. Any other MCP server is allowed by mcp_rules and still logged as unhooked. An ask (S-DEVBENCH-SAVE)
-        # stays an ask, which the Codex render turns into a refusal naming the confirmation (adapters/codex.py
-        # ASK_PREFIX), as every other ask on Codex does. Merge of rt-fix-b into plan5: this replaces Task 17's
-        # ask-to-advice downgrade (the stricter of the two; see merge-fixes-report).
+        # too. Any other MCP server is allowed by mcp_rules and still logged as unhooked. A save over an existing save
+        # carries its save plan (Verdict.saves), which pre_tool backs up before the call may run (the save policy,
+        # 2026-10-13); a save it cannot identify is refused (S-DEVBENCH-SAVE). Merge of rt-fix-b into plan5: this
+        # replaced Task 17's ask-to-advice downgrade (the stricter of the two; see merge-fixes-report).
         try:
             args = json.loads(req.mcp_args) if req.mcp_args else {}
         except ValueError:
@@ -246,7 +252,8 @@ def _unhooked(req) -> bool:
 def side_effects(req, project, audit, v, roots_fn=None, deadline=None) -> Verdict:
     """Snapshot and backups, whatever the decision (as on Claude, where those hooks run beside the guard).
     Each step has its own try: one failing never skips the next and never changes the decision. Task 15: the recovery
-    snapshot (load order, INIs, the named save) goes first, inside `deadline` (a time.monotonic time)."""
+    snapshot (load order, INIs) goes first, inside `deadline` (a time.monotonic time). A save the call changes was
+    backed up before this, by saves.enforce in pre_tool: its result decides the call, so it is no side effect."""
     partial = False
     if req.kind == "shell":
         try:
@@ -293,6 +300,10 @@ NEVER_SHADOW = frozenset(("shell.S-LIFT-PERMANENT", "shell.S-LIFT-RAW", "shell.S
 # Plan 6 Task 12 (R12): nor does it open the state file. Shadowed, a `guards off` would let the agent then write
 # .skyguard/state.json directly -- a persistent disable or an extended lift that nobody approved.
 NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE", "write.W-SELF-STATE"))
+# The save policy (user ruling 2026-10-13): a bulk save change needs the USER's typed approval, and a save that cannot
+# be backed up is never changed. `guards off` is a lift the agent may take itself, so it lifts neither.
+NEVER_SHADOW = NEVER_SHADOW | saves.NEVER_SHADOW
+NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SAVE-STORE", "write.W-SAVE-STORE"))
 
 
 def _reject_marker(project) -> Path:
@@ -371,16 +382,18 @@ def _release(audit) -> None:
             pass
 
 
-def shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
+def shadow(v, project, session_id, telemetry, audit, now=None, *, readonly=False) -> Verdict:
     """See _shadow. Whatever rule lines are still held when it returns (a refusal that stands, an allow, a failure)
     are written exactly as they fired."""
     try:
+        if readonly:
+            return _shadow(v, project, session_id, telemetry, audit, now, readonly=True)
         return _shadow(v, project, session_id, telemetry, audit, now)
     finally:
         _release(audit)
 
 
-def _shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
+def _shadow(v, project, session_id, telemetry, audit, now=None, *, readonly=False) -> Verdict:
     """R8, shadow mode: the ONE place a refusal can be turned into an allow. Called on the finished verdict
     (after combine, after the side effects) by every agent's decision path.
 
@@ -401,14 +414,16 @@ def _shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
         st = _state.read(str(Path(project) / ".skyguard" / "state.json"))
         if st.rejected:
             _release(audit)
-            if _state_reject_is_new(project, st.reason):
+            if not readonly and _state_reject_is_new(project, st.reason):
                 audit.log("skyguard", "STATE-REJECTED", st.reason)
             return v
-        _state_reject_clear(project)
+        if not readonly:
+            _state_reject_clear(project)
         if not st.lifts:
             return v
         now = time.time() if now is None else now
-        _relock_due(project, st, now, audit)          # Plan 6 final fix: a lock lift's expiry relocks (A-I3 / C-I1)
+        if not readonly:
+            _relock_due(project, st, now, audit)      # Plan 6 final fix: a lock lift's expiry relocks (A-I3 / C-I1)
         start = _state.session_start(telemetry, session_id) if telemetry else None
         if not [x for x in _state.honoured(st, session_id, now, start) if x["kind"] == "guards"]:
             return v
@@ -456,15 +471,7 @@ def _shadow(v, project, session_id, telemetry, audit, now=None) -> Verdict:
         return v
 
 
-def pre_tool(req, project, roots_fn, audit, telemetry="", now=None, deadline=None) -> Verdict:
-    """All Codex PreToolUse work: the rules, then the side effects, then shadow mode on the finished verdict."""
-    hold_if_shadowing(project, audit)
-    if req.failure:
-        audit.log("codex-pre-tool", "REFUSE", req.failure)
-        v = _failed(INERT_TRANSLATE.format(req.failure), "codex.TRANSLATE")
-    elif req.event != "pre_tool":
-        v = _failed(INERT_TRANSLATE.format("unexpected event {!r}".format(req.event)), "codex.TRANSLATE")
-    else:
-        v = _rules(req, roots_fn, audit)
-    v = side_effects(req, project, audit, v, roots_fn, deadline)
-    return shadow(v, project, req.session_id, telemetry, audit, now=now)
+def pre_tool(req, project, roots_fn, audit, telemetry="", now=None, deadline=None, *, metadata=None) -> Verdict:
+    """Legacy parser/verdict compatibility over the shared synchronous dispatcher."""
+    from . import portable
+    return portable.legacy_pre_tool(req, project, roots_fn, audit, telemetry, now, deadline, metadata=metadata)

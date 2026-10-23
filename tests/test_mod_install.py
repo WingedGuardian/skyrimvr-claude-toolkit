@@ -109,6 +109,62 @@ def test_apply_installs_backs_up_and_writes_a_manifest(tmp_path, sevenz, game):
     assert "PLANNED" not in manifest
 
 
+@pytest.mark.parametrize("kind", ["mapped", "case", "config-new"])
+@pytest.mark.parametrize("apply_", [False, True])
+def test_effective_destination_collisions_refuse_before_writing(tmp_path, sevenz, game, kind, apply_):
+    if kind == "config-new":
+        entries = [{"path": "Data/SKSE/Plugins/ExampleFramework.ini", "data": "config"},
+                   {"path": "Data/SKSE/Plugins/ExampleFramework.ini.new", "data": "other"}]
+    else:
+        entries = [{"path": "ExampleMod.esp", "data": "first"},
+                   {"path": "Data/" + ("examplemod.ESP" if kind == "case" else "ExampleMod.esp"), "data": "second"}]
+    before = {p: p.read_bytes() for p in game.rglob("*") if p.is_file()}
+    r = run(archive(tmp_path, entries), *(["--apply"] if apply_ else []), env=env_for(tmp_path, sevenz, game))
+    assert r.returncode == 2 and "destination collision" in r.stderr, r.stdout + r.stderr
+    assert {p: p.read_bytes() for p in game.rglob("*") if p.is_file()} == before
+    assert not (tmp_path / "records").exists()
+
+
+def test_same_second_installs_keep_distinct_backups_and_operation_manifests(tmp_path, sevenz, game, monkeypatch):
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    class FixedDateTime:
+        @staticmethod
+        def now():
+            return type("Clock", (), {"strftime": lambda self, fmt: "20261015-120000"})()
+    monkeypatch.setattr(mod.datetime, "datetime", FixedDateTime)
+    arc = archive(tmp_path, [{"path": "Data/ExampleMod.esp", "data": "first"}])
+    assert mod.main([str(arc), "--apply"]) == 0
+    first_manifests = {p: p.read_bytes() for p in (tmp_path / "records/backups").rglob("manifest.files.txt")}
+    archive(tmp_path, [{"path": "Data/ExampleMod.esp", "data": "second"}])
+    assert mod.main([str(arc), "--apply"]) == 0
+    backups = list((tmp_path / "records/backups").rglob("ExampleMod.esp"))
+    assert sorted(p.read_bytes() for p in backups) == [b"first", b"old plugin"]
+    assert len(first_manifests) == 1
+    assert all(p.read_bytes() == data for p, data in first_manifests.items())
+    assert len(list((tmp_path / "records/backups").rglob("manifest.files.txt"))) == 2
+
+
+def test_failed_backup_verification_leaves_installed_original_untouched(tmp_path, sevenz, game, monkeypatch):
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    def corrupt_copy(source, destination):
+        destination.write(b"incomplete backup")
+    monkeypatch.setattr(mod.shutil, "copyfileobj", corrupt_copy)
+    with pytest.raises(OSError, match="backup verification failed"):
+        mod.main([str(archive(tmp_path, [{"path": "Data/ExampleMod.esp", "data": "new"}])), "--apply"])
+    assert (game / "Data/ExampleMod.esp").read_bytes() == b"old plugin"
+    manifests = list((tmp_path / "records/backups").rglob("manifest.files.txt"))
+    assert len(manifests) == 1 and "# STATUS: in progress" in manifests[0].read_text()
+
+
+def test_target_ancestor_collision_is_found_with_an_intervening_sibling(tmp_path, sevenz, game, monkeypatch):
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    entries = [("Scripts/a", "Scripts/a", "data"), ("Scripts/a-b", "Scripts/a-b", "data"),
+               ("Data/Scripts/a/b", "Scripts/a/b", "data")]
+    plan = mod.plan_files(entries, game / "Data", game, False, False, False)
+    assert "destination collision" in mod.destination_problem(plan)
+    assert not (game / "Data/Scripts").exists()
+
+
 def test_an_existing_config_gets_a_new_file_beside_it(tmp_path, sevenz, game):
     ini = game / "Data" / "SKSE" / "Plugins" / "ExampleFramework.ini"
     run(archive(tmp_path, ENTRIES), "--apply", env=env_for(tmp_path, sevenz, game))

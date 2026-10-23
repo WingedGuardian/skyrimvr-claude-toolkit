@@ -97,7 +97,10 @@ def _engine(req_json, root, inv):
     if not text.startswith(MARKER):
         raise RuntimeError("engine answered without the marker")
     v = json.loads(text[len(MARKER):])
-    if not isinstance(v, dict) or v.get("v") != 1 or v.get("decision") not in ("allow", "ask", "deny"):
+    if (not isinstance(v, dict) or type(v.get("v")) is not int or v.get("v") != 1
+            or v.get("decision") not in ("allow", "ask", "deny")
+            or not all(isinstance(v.get(key), str) for key in ("reason", "context", "status", "code"))
+            or v.get("status") not in ("evaluated", "partial", "failed")):
         raise RuntimeError("engine verdict malformed")
     return v
 

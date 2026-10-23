@@ -178,17 +178,14 @@ def _write_replace(path, data):
         raise
 
 
-def _store_blob(blobs, src, deadline=None):
+def _store_blob(blobs, src):
     """Copy `src` into the store under its sha256 (backup.py's hashed part-file copy). -> sha256, or None when the file
     could not be read or changed size while it was copied (the index keeps its old entry, so the next walk retries).
-    With a `deadline` (backup._clock time) a copy that reaches it raises backup.CopyTimeout, its part file removed."""
+    (A save is stored by recovery._store_verified instead: fsynced, read back, and inside the hook's deadline.)"""
     part = blobs / ".part-{}".format(os.getpid())
     try:
-        want, copied, digest = backup._copy_hashed(src, part, fsync=False, deadline=deadline)   # see backup._copy_hashed
+        want, copied, digest = backup._copy_hashed(src, part, fsync=False)   # see backup._copy_hashed
         on_disk = os.stat(str(part)).st_size
-    except backup.CopyTimeout:
-        backup._discard(part)
-        raise
     except OSError:
         backup._discard(part)
         return None
@@ -307,22 +304,75 @@ def materialise(project, name, dest, only=None):
     return write_blobs(store, [(Path(dest).joinpath(*rel.split("/")), sha) for rel, sha in sorted(files.items())])
 
 
-def write_blobs(store, pairs):
+def restore_target_state(path):
+    """Identity and content a restore may replace; an absent path remains explicitly absent."""
+    from modding_harness import durable
+    path = Path(path)
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    if (not stat.S_ISREG(info.st_mode) or path.is_symlink() or
+            getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+        raise OSError("restore target is not an ordinary unlinked file: " + str(path))
+    before = durable.identity(path)
+    digest = backup._sha256(path)
+    if durable.identity(path) != before:
+        raise OSError("restore target changed while inspecting: " + str(path))
+    return {"identity": list(before), "sha256": digest}
+
+
+def write_blobs(store, pairs, replace=False, expected=None):
     """Copy each (target, sha256) blob of `store` to its target. Each file is written to a part file and swapped in, so
-    a hard-linked target (Vortex) is replaced, never written through. -> files written; OSError at the first failure."""
-    store = Path(store)
+    a hard-linked target (Vortex) is replaced, never written through. The part file is hashed BEFORE it replaces the
+    target (the save policy: a restore is hash-verified at the file it writes, not only at the blob it reads). -> files
+    written; OSError reports how many files were published. Quiesce other writers for in-place restore:
+    identity/hash rechecks are not a filesystem compare-and-swap. Initially absent paths never replace a creator."""
+    from modding_harness import durable
+    import uuid
+    pairs = list(pairs)
+    if replace:
+        expected = ({str(t): restore_target_state(t) for t, _ in pairs} if expected is None else expected)
+        if set(expected) != {str(t) for t, _ in pairs}:
+            raise OSError("restore observations do not cover the complete target set")
+    else:
+        expected = {str(t): None for t, _ in pairs}
+    store, staged = Path(store), []
+    operation = uuid.uuid4().hex
+    journal = store / "restore-journals" / operation
+    journal.mkdir(parents=True, exist_ok=False)
+    durable.atomic_json(journal / "plan.json", {"targets": [str(t) for t, _ in pairs], "replace": replace,
+                                             "observed": expected})
     n = 0
-    for target, sha in pairs:
-        target = Path(target)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        part = Path("{}.restore-part-{}".format(target, os.getpid()))
-        try:
-            shutil.copyfile(str(store / "blobs" / sha), str(part))
-            os.replace(str(part), str(target))
-        except OSError:
+    try:
+        for target, sha in pairs:
+            target = Path(target)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            part = target.with_name(target.name + ".restore-part-" + uuid.uuid4().hex)
+            staged.append((part, target))
+            durable.copy_verified(store / "blobs" / sha, part)
+            if backup._sha256(part) != sha:
+                raise OSError("the copy of {} does not hash to {}".format(target.name, sha))
+        if replace:
+            for _, target in staged:
+                if restore_target_state(target) != expected[str(target)]:
+                    raise OSError("restore target changed after its prebackup: " + str(target))
+        for part, target in staged:
+            if replace and expected[str(target)] is not None:
+                if restore_target_state(target) != expected[str(target)]:
+                    raise OSError("restore target changed before publication: " + str(target))
+                os.replace(str(part), str(target))
+                durable.sync_dir(target.parent)
+            else:
+                durable.publish_new(part, target)
+            n += 1
+            durable.atomic_json(journal / ("{}-published.json".format(n)), {"path": str(target)})
+        durable.atomic_json(journal / "complete.json", {"written": n})
+    except OSError as exc:
+        raise OSError("{}; {} file(s) published; restore journal {}".format(exc, n, journal)) from exc
+    finally:
+        for part, _ in staged:
             backup._discard(part)
-            raise
-        n += 1
     return n
 
 
@@ -361,8 +411,46 @@ def _write_manifest(store, ts, now, command, files, partial, head_base):
 
 
 def read_only(command):
-    """A read-only verb takes no snapshot (recovery.py asks the same question, so both stores agree)."""
-    return any(grep(p, command, icase=False) for p in SKIP) or grep(SKIP_POWERSHELL, command, icase=True)
+    """Skip only when the complete parsed command consists of known reads.
+
+    This classifies ordinary builtins, not shell functions, aliases or programs'
+    runtime configuration. Unknown or incomplete syntax takes a snapshot.
+    """
+    from . import shellparse
+    bash_prefix = any(grep(p, command, icase=False) for p in SKIP)
+    if not (bash_prefix or grep(SKIP_POWERSHELL, command, icase=True)):
+        return False
+    parsed = shellparse.parse(command, "bash" if bash_prefix else "powershell")
+    if not parsed.ok or not parsed.execs:
+        return False
+    reads = {"ls", "cat", "head", "tail", "grep", "wc", "file", "stat", "pwd", "echo", "date", "whoami",
+             "which", "type", "printenv", "get-childitem", "get-content", "get-item", "get-itemproperty",
+             "get-date", "get-process", "get-command", "get-location", "get-filehash", "get-acl", "get-culture",
+             "get-variable", "get-module", "get-service", "select-string", "test-path", "resolve-path", "measure-object"}
+    for call in parsed.execs:
+        if any(">" in op for op, _ in call.redirects):
+            return False
+        program, args = call.program, call.argv
+        if program in reads:
+            continue
+        if program == "env" and not args:
+            continue
+        if program == "find" and not any(a in ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls")
+                                          for a in args):
+            continue
+        if program == "git" and args and not any(a == "--output" or a.startswith("--output=") for a in args):
+            sub, rest = args[0], args[1:]
+            if sub in ("status", "log", "diff", "show"):
+                continue
+            if sub == "remote" and all(a in ("-v", "--verbose") for a in rest):
+                continue
+            if sub == "branch" and all(a in ("-a", "-r", "-v", "-vv", "--all", "--remotes", "--verbose", "--list")
+                                        or ("--list" in rest and not a.startswith("-")) for a in rest):
+                continue
+            if sub == "config" and rest and rest[0] in ("--get", "--get-all", "--get-regexp", "--get-urlmatch"):
+                continue
+        return False
+    return True
 
 
 def run(project, command, payload_empty, audit, now=None):
@@ -640,6 +728,9 @@ def prune(store, now, audit, deadline=None):
     references is unknown. With a `deadline` (a `_walk_clock()` time) it stops between deletions -- it is restartable,
     so stopping only defers the rest (review M1). -> blobs and part files removed."""
     store = Path(store)
+    if (store / "transactions").exists() or (store / "MANIFEST.jsonl").exists():
+        audit.log(HOOK, "PRUNE-SKIPPED", "another store format; no script snapshot or blob was pruned")
+        return 0
 
     def late():
         return deadline is not None and _walk_clock() >= deadline

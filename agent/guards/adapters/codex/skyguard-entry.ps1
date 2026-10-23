@@ -31,7 +31,14 @@ $script:Role = ''
 if ($args.Count -ge 1) { $script:Role = [string]$args[0] }
 $script:Known = ($script:Role -ceq 'pre-tool') -or ($script:Role -ceq 'session-start')
 $script:Emitted = $false
+# The clock starts at this PROCESS's start, not this line: Codex's timeout runs from the spawn, and under load
+# Windows PowerShell 5.1 can spend seconds starting before the first line runs (T14b 2026-10-14: a call ended
+# 51.3 s after the spawn against definition timeout - 10 = 50). Never later than now, should the read fail.
 $script:T0ms = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+try {
+    $st = ([DateTimeOffset][System.Diagnostics.Process]::GetCurrentProcess().StartTime).ToUnixTimeMilliseconds()
+    if ($st -le $script:T0ms -and $st -gt $script:T0ms - 120000) { $script:T0ms = $st }
+} catch { }
 $script:T0 = ''
 $script:Inv = ''
 $script:HB = ''
@@ -156,7 +163,7 @@ function Invoke-Proc([string[]]$cmd, [string[]]$more, [byte[]]$in, [int]$ms) {
 # (tests/test_codex_entry.py::test_fallback_chain_matches_the_claude_wrappers). The configured $PY is the
 # only thing the hot path touches; probing runs ONLY once it has failed. Order: py -3 / python / python3
 # that resolve and are not a Store alias, then the usual install locations (newest version first), then a
-# Store alias, last. A candidate is accepted only if it is Python >= 3.8 AND runs the engine's own
+# Store alias, last. A candidate is accepted only if it is Python >= 3.10 AND runs the engine's own
 # `run.py --selftest <nonce>` and echoes the nonce (a stub printing {} would otherwise read as ALLOW).
 # Each probe gets min(SKYGUARD_PROBE_TIMEOUT, the time left), default 15 s, sub-second allowed, and no probe
 # runs in the last 10 s before the wrapper's own limit (the engine needs them) -- the Claude chain's budget.
@@ -219,7 +226,7 @@ function Test-PyGood([string[]]$c) {
     $ms = Get-ProbeMs
     if ($ms -le 0) { Add-Probe $c 'skipped:no-time-left' $t0; return $false }
     try {
-        $r = Invoke-Proc $c @('-c', 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 8) else 1)') ([byte[]]@()) $ms
+        $r = Invoke-Proc $c @('-c', 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)') ([byte[]]@()) $ms
     } catch { Add-Probe $c 'rejected:cannot-start' $t0; return $false }
     if ($r.TimedOut) { Add-Probe $c ('rejected:version-check-timeout-' + $ms + 'ms') $t0; return $false }
     if ($r.Code -ne 0) { Add-Probe $c ('rejected:version-check-exit-' + $r.Code) $t0; return $false }

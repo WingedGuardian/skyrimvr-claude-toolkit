@@ -183,6 +183,33 @@ def test_emu_needs_a_build_and_is_restored_by_off(tree, capsys):
     assert tree["null"].read_bytes() == b"stock null driver"
 
 
+def test_failed_emulator_swap_and_restore_retain_recovery_for_retry(tree, monkeypatch, capsys):
+    mod = tree["mod"]
+    before = snapshot(tree)
+    assert mod.main(["on"]) == 0
+    mod.EMU_BUILD.parent.mkdir(parents=True)
+    mod.EMU_BUILD.write_bytes(b"emulator build")
+    real = mod.replace_file
+    def broken_swap_and_restore(src, dst):
+        if src == mod.EMU_BUILD:
+            dst.write_bytes(b"failed swap")
+        elif dst == tree["null"]:
+            raise PermissionError("temporarily held")
+        else:
+            real(src, dst)
+    monkeypatch.setattr(mod, "replace_file", broken_swap_and_restore)
+    assert mod.main(["emu", "on"]) == 3
+    assert "recovery is incomplete" in capsys.readouterr().err
+    state = mod.load_state()
+    assert state["emu"]["path"] == str(tree["null"])
+    assert mod.main(["emu", "on"]) == 2
+    assert "recovery" in capsys.readouterr().err
+    assert mod.main(["off"]) == 3 and mod.load_state()["emu"]
+    monkeypatch.setattr(mod, "replace_file", real)
+    assert mod.main(["off"]) == 0
+    assert snapshot(tree) == before and mod.load_state() is None
+
+
 def test_bad_usage_is_exit_2(tree):
     for args in (["sideways"], ["on", "--bogus"], ["emu"], ["emu", "maybe"]):
         assert tree["mod"].main(args) == 2, args
@@ -207,7 +234,8 @@ def test_no_driver_binary_or_upstream_source_is_tracked():
     if r.returncode != 0:
         pytest.skip("COULD NOT CHECK: not a git work tree")
     tracked = sorted(r.stdout.split())
-    assert tracked == ["tools/vr-emu-driver/README.md", "tools/vr-emu-driver/build.py"], tracked
+    allowed = {"tools/vr-emu-driver/README.md", "tools/vr-emu-driver/build.py", "tools/vr-emu-driver/UPSTREAM-LICENSE.txt"}
+    assert set(tracked) <= allowed and "tools/vr-emu-driver/build.py" in tracked, tracked
 
 
 def test_the_shell_wrapper_runs_the_tool():

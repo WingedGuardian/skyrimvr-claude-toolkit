@@ -1,5 +1,6 @@
 # User-specific settings (contains local paths)
 .claude/settings.local.json
+.claude/housekeep.json
 
 # Backups (generated at runtime)
 .claude/backups/
@@ -36,6 +37,8 @@ __pycache__/
 KNOWLEDGEBASE.local.md
 
 # The pose-emulating null driver is BUILT on the user's machine from pinned upstream source and never shipped:
-# no licence grants its redistribution (tools/vr-emu-driver/README.md).
+# local-build delivery and licensing response: tools/vr-emu-driver/README.md.
 tools/vr-emu-driver/build/
 tools/vr-emu-driver/work/
+.modding-agent-harness/
+tools/resaver-cli/.compiled/

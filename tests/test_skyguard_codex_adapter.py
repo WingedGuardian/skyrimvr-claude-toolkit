@@ -201,6 +201,9 @@ def test_a_backup_is_taken_even_when_the_write_is_denied(tmp_path):
 def test_a_shell_patch_is_checked_as_shell_and_as_write(tmp_path):
     cmd = "cd Data && apply_patch <<'P'\n*** Begin Patch\n*** Add File: z.esp\n+x\n*** End Patch\nP"
     v = _run(tmp_path, _pre("Bash", {"command": cmd}))
+    assert (v.decision, v.code) == ("deny", "engine.INERT_EXECUTION_CWD")
+    # An explicitly reported execution directory retains the game-policy path.
+    v = _run(tmp_path, _pre("Bash", {"command": cmd, "workdir": str(tmp_path)}))
     assert (v.decision, v.code) == ("deny", "write.DENY_PLUGIN")
 
 
@@ -222,7 +225,7 @@ def test_an_unexpected_event_is_a_failed_deny(tmp_path):
 
 def test_an_mcp_tool_is_allowed_and_recorded(tmp_path):
     v = _run(tmp_path, _pre("mcp__probe__echo", {"text": "hi"}))
-    assert (v.decision, v.status) == ("allow", "evaluated")
+    assert (v.decision, v.status) == ("allow", "partial")
     lines = (tmp_path / ".claude" / "backups" / "codex-unhooked-tools.log").read_text().splitlines()
     assert len(lines) == 1 and "mcp__probe__echo" in lines[0]
 
@@ -423,7 +426,7 @@ def test_an_unknown_tool_with_no_command_key_is_still_other():
 @pytest.mark.parametrize("cmd,code", [
     ('Remove-Item -Recurse -Force "{g}/Data/meshes"', "shell.S-DEL-INSTALL"),
     ('rm -rf "{g}/Data/meshes"', "shell.S-DEL-INSTALL"),
-    ("Remove-Item -Recurse Data", "shell.S-DEL-INSTALL"),                       # relative to the session cwd
+    ("Remove-Item -Recurse Data", "engine.INERT_EXECUTION_CWD"),  # session cwd cannot place a native mutation
     ('Remove-Item "{c}/Skyrim.ini"', "shell.S-DEL-CONFIG"),
     ('rm "{c}/SkyrimPrefs.ini"', "shell.S-DEL-CONFIG"),   # (`rm -f` is ambiguous in PowerShell: it does not run)
 ])
@@ -474,7 +477,7 @@ def test_an_ordinary_devbench_call_is_allowed_silently(tmp_path):
 
 def test_only_devbench_servers_are_judged_on_codex(tmp_path):
     v = _run(tmp_path, _pre("mcp__probe__console", {"action": "exec", "command": "smp reset"}))
-    assert (v.decision, v.context) == ("allow", "")
+    assert v.decision == "allow" and "WARN AND ALLOW" in v.context and v.status == "partial"
     assert "mcp__probe__console" in _unhooked_log(tmp_path)
 
 
@@ -488,18 +491,20 @@ def _run_with_saves(tmp_path, raw):
     return v, audit
 
 
-def test_a_devbench_ask_is_refused_with_the_confirmation_on_codex(tmp_path):
-    """Merge of rt-fix-b (2026-10-05): Codex cannot ask, so -- as for every other ask on Codex (W-SAVE, ReSaver --apply)
-    -- the render refuses and names the confirmation the user must give; the model still reads why. (Task 17 had
-    downgraded this ask to an allow with the text as advice; the merge kept rt-fix-b's stricter route.)"""
+def test_a_devbench_save_over_an_existing_save_is_backed_up_then_allowed_on_codex(tmp_path):
+    """The save policy (user ruling 2026-10-13): Codex cannot ask, so the old ask was a refusal there. Now the save is
+    backed up and verified by the pre-tool hook (saves.enforce), and only then is the call allowed, on Codex too."""
     v, audit = _run_with_saves(tmp_path, _pre("mcp__devbench-vr__game", {"action": "save", "name": "Existing"}))
-    assert v.decision == "ask"
-    assert "Existing" in v.reason and v.reason.count("\n") <= 1
-    assert v.code == "shell.S-DEVBENCH-SAVE"
-    assert ("S-DEVBENCH-SAVE", "ask") in audit.fired
-    out = json.loads(codex.render(v))["hookSpecificOutput"]
-    assert out["permissionDecision"] == "deny"
-    assert out["permissionDecisionReason"] == codex.ASK_PREFIX + v.reason
+    assert v.decision == "allow" and v.code == "shell.S-SAVE-BACKUP" and "Existing" in v.context
+    assert ("S-SAVE-BACKUP", "advise") in audit.fired
+    from skyguard import save_store
+    store = save_store.store(tmp_path)
+    manifests = list((store.root / "transactions").glob("*.json"))
+    assert len(manifests) == 1
+    members = [member for group in store.load(manifests[0].stem)["groups"] for member in group["members"]]
+    assert [Path(member["path"]).name for member in members if not member["missing"]] == ["Existing.ess"]
+    assert [Path(member["path"]).name for member in members if member["missing"]] == ["Existing.skse"]
+    assert "permissionDecision" not in json.loads(codex.render(v) or "{}").get("hookSpecificOutput", {})
 
 
 def test_a_devbench_save_to_a_new_name_is_silent_on_codex(tmp_path):

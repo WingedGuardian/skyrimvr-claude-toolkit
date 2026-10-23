@@ -7,17 +7,16 @@ unclosed quote was ALLOWED -- a forged persistent disable with no prompt and no 
 only cost is a false positive on an unreadable command that mentions `.skyguard` beside a write construct.
 """
 import sys
-import tempfile
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, scratch_dir
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, codes, engine, paths, shell_rules, shellparse, state  # noqa: E402
 
 GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
-NOHOME = tempfile.mkdtemp(prefix="p6fixA-i1-")
+NOHOME = scratch_dir("p6fixA-i1-")
 ENV0 = {"USERPROFILE": NOHOME, "HOME": NOHOME}
 SG = GAME + "/.skyguard"
 H = 3600.0

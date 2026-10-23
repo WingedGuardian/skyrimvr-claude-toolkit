@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import faulthandler
+import json
 import os
 import sys
 import time
@@ -20,7 +21,7 @@ _T0 = time.monotonic()        # the engine's time budget counts from (about) her
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from skyguard import backup, codes, engine, health, paths, recovery, session, snapshot  # noqa: E402
+from skyguard import backup, codes, engine, health, paths, recovery, saves, session, snapshot  # noqa: E402
 from skyguard.adapters import claude, codex  # noqa: E402
 from skyguard.audit import Audit  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
@@ -112,24 +113,84 @@ def _session_snapshot(project, source, audit) -> None:
         audit.log("snapshot-before-tool", "FAILED", "the session-start snapshot raised -- no snapshot was taken")
 
 
+DISK_NOTE = Path(".claude") / "diag" / "housekeep-session.txt"
+
+
+def _disk_note(project) -> str:
+    """The previous session-start sweep's note (empty unless something needs the user), and a fresh sweep launched
+    DETACHED: deleting a few thousand temp dirs can take minutes, and the engine budget is seconds. housekeep
+    throttles itself (sweep_every_hours). Never raises: disk housekeeping must not cost the session its banner."""
+    state = Path(project) / DISK_NOTE
+    try:
+        note = state.read_text(encoding="utf-8").strip()
+    except OSError:
+        note = ""
+    tool = Path(__file__).resolve().parents[1] / "housekeep.py"
+    # A test suite runs this hook hundreds of times: none of them may launch a real sweep of the real temp dir.
+    in_test = os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("SKYGUARD_SWEEP_IN_TESTS")
+    if tool.is_file() and not in_test:
+        try:
+            import subprocess
+            flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0   # detached, new group, no window
+            subprocess.Popen([sys.executable, "-B", str(tool), "session", str(state)], cwd=str(project),
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             close_fds=True, creationflags=flags, start_new_session=os.name != "nt")
+        except Exception:
+            pass
+    return note + "\n" if note else ""
+
+
 def _recovery_deadline() -> float:
-    """Task 15: a recovery snapshot (a save copy) ends this far before the engine budget's watchdog."""
+    """Task 15: a recovery snapshot or a save backup ends this far before the engine budget's watchdog."""
     return _T0 + _engine_budget() - SNAPSHOT_MARGIN
 
 
 def _recovery(a, p, audit, roots) -> None:
-    """Task 15: the load order, INIs and the named save, before the command (snapshot role) or the DevBench call
-    (protect-mcp). Never raises and never changes a verdict."""
+    """Task 15: the load order and INIs, before the command (snapshot role). Never raises and never changes a verdict.
+    A save the command changes is backed up by the deciding hook instead (_saves)."""
     try:
-        if a.role == "protect-mcp":
-            recovery.mcp(a.project, p["tool_name"], p["mcp_input"], audit, roots, agent="claude",
-                         session_id=p.get("session_id", ""), deadline=_recovery_deadline())
-        else:
-            recovery.run(a.project, p["command"], p["empty"], audit, roots, cwd=p.get("cwd", ""),
-                         shell=p.get("shell", ""), agent="claude", session_id=p.get("session_id", ""),
-                         deadline=_recovery_deadline())
+        recovery.run(a.project, p["command"], p["empty"], audit, roots, cwd=p.get("cwd", ""),
+                     shell=p.get("shell", ""), agent="claude", session_id=p.get("session_id", ""),
+                     deadline=_recovery_deadline())
     except Exception:
         audit.log(recovery.HOOK, "FAILED", "the recovery snapshot raised -- none was taken")
+
+
+def _saves(a, p, audit, v, what):
+    """The save policy (saves.enforce): every save the call changes is backed up and verified HERE, in the deciding
+    PreToolUse hook, before its decision is returned -- so the tool cannot run first. A backup that fails, or that
+    raises, denies."""
+    try:
+        from skyguard import portable
+        kind = {"protect-bash": "shell", "protect-files": "write", "protect-mcp": "mcp"}[a.role]
+        req = claude.to_request(p, kind)._replace(transcript_path=p.get("transcript_path", ""))
+        if kind == "mcp":
+            import json
+            req = req._replace(mcp_tool=p["tool_name"], mcp_args=json.dumps(p["mcp_input"]))
+        def roots():
+            env = _declared_env(a)
+            if env is None:
+                raise engine.RootsUnavailable(ENV_UNREADABLE)
+            return paths.roots(a.root, a.root_win, env)
+        a.ordered_dispatch = True
+        return portable.legacy_pre_tool(req, a.project, roots, audit, a.telemetry,
+                                         deadline=_recovery_deadline(), precomputed=v, side_effects=False,
+                                         metadata=p.get("receipt_identity", {}))
+    except Exception as e:  # noqa: BLE001 -- fail closed: no verified backup, no save change
+        reason = saves.rules.message("S-SAVE-BACKUP-FAILED", file="the saves", op="the guard raised " +
+                                     e.__class__.__name__)
+        audit.rule(a.role, "S-SAVE-BACKUP-FAILED", "deny", reason)
+        return Verdict("deny", reason, code="shell.S-SAVE-BACKUP-FAILED")
+
+
+def _receipt_identity(raw):
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return {}
+        return {key: data[key] for key in ("tool_use_id", "host_version") if isinstance(data.get(key), str)}
+    except (ValueError, RecursionError):
+        return {}
 
 
 def _codex(a, raw: str) -> int:
@@ -141,6 +202,7 @@ def _codex(a, raw: str) -> int:
         _session_line(a, req.session_id, source=req.source, transcript=req.transcript_path)
         out, status, code = session.run_status(a.project, req.source, a.bash, audit, root=a.root_win or a.root)
         _session_snapshot(a.project, req.source, audit)
+        out = _disk_note(a.project) + out
         _telemetry(a, Verdict("allow", "", "", status, code))
         _emit("SKYGUARD-OK\n" + codex.session_body(out))
         return 0
@@ -154,7 +216,7 @@ def _codex(a, raw: str) -> int:
         return paths.roots(a.root, a.root_win, env)
 
     v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit, telemetry=a.telemetry,
-                                       deadline=_recovery_deadline()))
+                                       deadline=_recovery_deadline(), metadata=_receipt_identity(raw)))
     _telemetry(a, v)
     if v.decision != "allow":
         # A refused call leaves no item in the agent's transcript, so the canary must not count its hook
@@ -192,7 +254,7 @@ def main(argv=None) -> int:
     if len(args) == 2 and args[0] == "--selftest":
         # Reaching here means every engine module above imported. The wrappers' fallback chain uses this
         # to prove a candidate interpreter can run the ENGINE, not merely that it exits 0.
-        if sys.version_info[:2] < (3, 8):
+        if sys.version_info[:2] < (3, 10):
             return 1
         _emit("skyguard-selftest:{}\n".format(args[1]))
         return 0
@@ -233,6 +295,7 @@ def main(argv=None) -> int:
     if a.agent == "codex":
         return _codex(a, raw)
     p = adapter.extract(raw)
+    p["receipt_identity"] = _receipt_identity(raw)
     if a.role == "session-kb-guard":
         _session_line(a, p["session_id"], source=p["source"], transcript=p["transcript_path"])
     else:
@@ -258,6 +321,7 @@ def main(argv=None) -> int:
             else:
                 # The payload's cwd and the tool's dialect reach the rules through the engine (Plan 4/5 handshake).
                 v = engine.evaluate_shell(req, paths.roots(a.root, a.root_win, env), audit)
+                v = _saves(a, p, audit, v, p["command"])
     elif a.role == "protect-files":
         # Plan 5 Task 9: W-PAPYRUS and W-INSTALL decide on where the file RESOLVES, so this role needs the roots
         # too. Its rules are notes plus a name-based deny, so an unreadable paths file costs only the declared
@@ -265,18 +329,19 @@ def main(argv=None) -> int:
         env = _declared_env(a)
         roots = paths.roots(a.root, a.root_win, env if env is not None else {})
         v = engine.evaluate_write(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""))
+        v = _saves(a, p, audit, v, "{} {}".format(p["tool_name"], p["file_path"]))
     elif a.role == "protect-mcp":
         # Plan 5 Task 11: the DevBench MCP tools. Only the save-exists check reads the declared config dirs, so an
-        # unreadable paths file costs that one answer (it then asks); it is not a reason to refuse every call.
+        # unreadable paths file costs that one answer (that save is then refused); it is not a reason to refuse every call.
         env = _declared_env(a)
         roots = paths.roots(a.root, a.root_win, env if env is not None else {})
         v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)
-        _recovery(a, p, audit, roots)          # Task 15: an existing save DevBench overwrites is kept first
+        v = _saves(a, p, audit, v, p["tool_name"])          # an existing save DevBench overwrites is kept first
     elif a.role == "backup-before-edit":
         backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit, "claude", p.get("session_id", ""))
         v = Verdict()
     elif a.role == "snapshot-before-tool":
-        env = _declared_env(a)                 # Task 15: the save first (the bigger copy gets the budget), then scripts
+        env = _declared_env(a)                 # Task 15: the load order and INIs, then scripts
         _recovery(a, p, audit, None if env is None else paths.roots(a.root, a.root_win, env))
         snapshot.run(a.project, p["command"], p["empty"], audit)
         v = Verdict()
@@ -284,11 +349,12 @@ def main(argv=None) -> int:
         out, status, code = session.run_status(a.project, "" if p["empty"] else p["source"], a.bash, audit,
                                               root=a.root_win or a.root)
         _session_snapshot(a.project, "" if p["empty"] else p["source"], audit)
+        out = _disk_note(a.project) + out
         _telemetry(a, Verdict(status=status, code=code))
         session.export_env(p["session_id"], "claude")   # later Bash calls get SKYGUARD_SESSION_ID (Task 10)
         _emit(out)
         return 0
-    if a.role in DECISION_ROLES:     # one SHADOW line per tool call: backup / snapshot hooks make no decision
+    if a.role in DECISION_ROLES and not getattr(a, "ordered_dispatch", False):
         v = engine.shadow(v, a.project, p["session_id"], a.telemetry, audit)   # R8: the one exit
     v = codes.classify(v)
     _telemetry(a, v)

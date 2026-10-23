@@ -96,7 +96,9 @@ Nexus also has a free API (versions, changelogs, dependencies). `bash tools/nexu
 **Standing instruction**: after every debugging session, mod investigation, or web
 research, extract any new facts (engine quirks, VR vs SSE differences, API gotchas,
 tool limitations) and append them to **`KNOWLEDGEBASE.local.md`**, creating it if it
-does not exist. Read both files; write only to the local one.
+does not exist. Read both files; write only to the local one. If the install is a git
+repository that does not ignore that file, commit it alone by explicit path (`git add -- <file>`, then
+`git commit -m "KB notes" -- <file>`). Never push.
 
 ### Your preferences: `## My preferences`, read every session
 
@@ -107,11 +109,8 @@ the same text. Read the rest of the file before making changes. When the user st
 preference ("always…", "never…", "from now on…"), add it to that section. When you create the
 file, start it with an empty `## My preferences` section.
 
-**Why the split, and it is not bookkeeping.** The upgrade path is "extract the new zip
-over your install", so any file the toolkit ships is *replaced* on update. A file that
-is both shipped by us and appended to by you loses everything you added, silently, at
-the moment you update — and the README used to promise the opposite. A toolkit must
-never ship a file it also asks you to edit.
+**Why the split:** updating extracts the new zip over your install, which *replaces* every
+shipped file, so notes appended to a shipped file are lost silently at the next update.
 
 ⚠ If you already have accumulated notes inside `KNOWLEDGEBASE.md` from an older
 version, move them to `KNOWLEDGEBASE.local.md` now. Anything left in the shipped file
@@ -215,6 +214,8 @@ the working directory the agent reports.
   inside `Data/Scripts/` -- both have destroyed sources
 - DevBench `smp reset` (measured to crash a large load order), by MCP, `curl` or `devbench-cli.sh`
 - Decoded text run as commands (`base64 -d | bash`), which the guard cannot read
+- **More than two saves changed at once**, or saves named by a wildcard, until the user types the
+  `SAVE_ACCESS_APPROVAL` line the refusal shows (skill `skyrim-save`)
 - A command the guard cannot read: empty or not text ("GUARD INERT"), or unparseable while it contains
   a deletion and names a protected folder -- it refuses rather than shrugs
 
@@ -228,19 +229,18 @@ the working directory the agent reports.
   file directly in the game folder (its exe and dlls, `openvr_api.dll`, loader INIs)
 - A decompiler writing its output into the install; `sed -i` with a backslash path, on a file in the install
 - AutoMod write commands without `--dry-run`
+- Changing one or two saves (a save and its `.skse` are one): both are backed up, verified, first;
+  a failed backup refuses
 
 Naming a plugin or INI in a read-only command is silent: notes fire on the program that writes.
 
-### ASKS THE USER -- seven rules
-- A ReSaver write operation (`clean`, `reset-havok`, `set-global`, ...) with `--apply`: it rewrites the save
-- A DevBench save (`game` tool or console `save <name>`) over an existing save: the old one is not kept
-- A shell write, copy or move onto a save in `Saves/`, and an edit-tool write to one (two rules)
-- git that throws away uncommitted changes in a protected folder (`checkout -- x`, `restore`,
-  `reset --hard`)
-- `lock disable` (the file lock off for good), and `snapshot restore --in-place` or
+### ASKS THE USER -- four rules
+- git discarding uncommitted changes in a protected folder (`checkout -- x`, `restore`, `reset --hard`)
+- an unnamed program (`$R`) given a save
+- `lock disable` (file lock off for good), and `snapshot restore --in-place` or
   `restore-from-backup.sh --restore` (writes over live files)
 
-Few prompts by design: a guard that prompts on routine work gets approved by reflex
+Few prompts by design: a guard that prompts on routine work is approved by reflex
 (`docs/safety-philosophy.md`). **Check the guards are alive: `bash tools/hook-canary.sh`.**
 Coverage and gaps: `docs/guard-coverage.md`.
 
@@ -260,9 +260,9 @@ Coverage and gaps: `docs/guard-coverage.md`.
   files get clobbered or orphaned by a deploy or purge. Prefer the user's mod manager; a manual
   install goes through `tools/mod-install.py`: dry run first, read every destination, then `--apply`
   (backups + manifest) and check the result. (The user's **own** in-development mod files are fine.)
-- **Delete to the Recycle Bin, never permanently.** Windows: `Microsoft.VisualBasic.FileIO.FileSystem`
-  `DeleteFile`/`DeleteDirectory` with `SendToRecycleBin`, not `rm`/`Remove-Item`. A permanent delete
-  needs the user's OK; a tool's own temp files are exempt. The guard judges a Recycle-Bin delete like any delete.
+- **Delete to the Recycle Bin, never permanently.** Windows: the shell delete (`SHFileOperation` with
+  `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), not `rm`/`Remove-Item`; only same-run scratch goes outright; too big
+  for the bin -> ask. The guard judges these like any delete. Retention: `docs/RETENTION.md`.
 - **Resources:** own jobs share <=40% CPU/25% physical RAM, <=8 workers, low priority.
   Physical RAM is primary; commit uses fixed 512/256/128 MiB buffers, never percentages.
   Games/user-directed work skip admission; games skip floors. See [resource policy](docs/resource-policy.md)
@@ -378,9 +378,8 @@ Generated into `AGENTS.md` only; everything above is shared. Other agents: this 
   toolkit's two hooks, and check with `bash tools/hook-canary.sh`. Approval is needed again after a
   toolkit update whose CHANGELOG says "re-approve your Codex hooks", and (inferred, not measured) after the
   install folder moves: the approval covers the definition as rendered, install path included.
-- **Start Codex in the game folder itself, never a subfolder: from a subfolder no hook runs, and Codex does
-  not tell you.** If your working directory is not the install root (the folder holding `SkyrimVR.exe`),
-  say so to the user before doing anything else and ask them to restart Codex there.
+- Start Codex in the game folder. Subfolder loading is version-dependent: it worked in an isolated
+  0.162.1 probe. Verify the live banner and canary before relying on hooks.
 - **Run the toolkit's scripts as `bash tools/<name>.sh`.** Do not assume your shell is bash: on Windows
   it may be PowerShell, so write commands that work there.
 - **A refusal is final.** The guards cannot ask on Codex, so anything that needs the user's confirmation
@@ -391,9 +390,11 @@ Generated into `AGENTS.md` only; everything above is shared. Other agents: this 
   folders is refused; edits inside the game get advice. Files an `apply_patch` changes or deletes are
   backed up to `.claude/backups/` first, and recent `.psc`/`.pex` are snapshotted before shell commands.
   A file written by a script you run is not backed up.
-- **DevBench MCP** (server name contains `devbench`): `smp reset` and a save over an existing save are
-  refused; for the save, ask the user to run it.
+- **DevBench MCP** (server name contains `devbench`): `smp reset` is refused; a save over an existing
+  save is backed up first, then runs.
 - **Not checked:** commands the user types with `!` in the Codex TUI (they bypass hooks), and other MCP
   tools (only logged).
 - **Skills** are in `.agents/skills/<name>/SKILL.md`: read the file when `core.md` points at it by name.
 - `bash tools/hook-canary.sh` shows whether each hook ran, saw its input and finished, per surface.
+
+- Missing tool workdir: Codex shell mutations need absolute paths (Windows: drive/UNC).

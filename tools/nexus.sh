@@ -113,7 +113,7 @@ case "$cmd" in
         DOMAIN="${2:-skyrimspecialedition}"; need_domain "$DOMAIN"
         q="$(render gql-find "$1" "$DOMAIN")" || could_not_check "could not build the search request"
         resp="$(gql "$q")" || could_not_check
-        R="$resp" render find || could_not_check "the search response could not be read"
+        R="$resp" NEXUS_DOMAIN="$DOMAIN" NEXUS_QUERY="$1" render find || could_not_check "the search response could not be read"
         echo "RESULT: OK"
         ;;
     page)

@@ -202,12 +202,18 @@ def test_protect_files_notes_inside_the_declared_install(project):
     ("rm Data/Textures/x.dds", "advise", "a relative delete inside Data"),
     ("rm ./Data/x.dds", "advise", "dot-relative too"),
     ("cat loadorder.txt", "allow", "reading the load order is silent; a write notes (Plan 5 Task 8)"),
-    # The single ask -- genuinely the user's decision.
-    ("bash tools/resaver-cli.sh reset-havok save.ess --apply", "ask",
+    # The save policy (2026-10-13): --apply on a bare save name with no cwd cannot be placed, so it cannot be backed
+    # up first -- refused (a placed save is backed up and allowed: tests/test_save_policy.py).
+    ("bash tools/resaver-cli.sh reset-havok save.ess --apply", "deny",
      "--apply MUTATES a save through ReSaver's write path"),
     ("bash tools/resaver-cli.sh reset-havok save.ess", "allow", "the dry-run does not"),
 ])
 def test_protect_bash_decides(project, command, expected, why):
+    # A Git Bash drive alias exists only on Windows; on a POSIX host `/c/...` is an ordinary folder (4ebdd1c, CI run
+    # 39145224156; the POSIX install delete is tests/test_posix_host_paths.py). Skipped here, not in the row: the
+    # guard-corpus recorder reads these rows as tuple literals.
+    if why == "the MSYS form" and sys.platform != "win32":
+        pytest.skip("Git Bash drive alias: Windows only")
     got, _ = fire(project, "protect-bash.sh", cmd(command))
     assert got == expected, f"{why}: {command}"
 
@@ -589,7 +595,7 @@ def test_wrapper_denies_on_non_json_output(tmp_path, name, payload):
     r = _run_wrapper(root, env, name, payload)
     h = json.loads(r.stdout)["hookSpecificOutput"]
     assert h["permissionDecision"] == "deny"
-    assert "engine failed (exit 0)" in h["permissionDecisionReason"]
+    assert "engine output was not a complete PreToolUse JSON verdict" in h["permissionDecisionReason"]
 
 
 @pytest.mark.parametrize("name,payload", BLOCKING)
@@ -837,7 +843,7 @@ def test_protect_bash_resolves_its_install_however_it_is_launched(project, how):
     assert ok[0] == "allow", f"{how}: an `ls` was not allowed: {ok}"
     rm = {"tool_name": "Bash", "tool_input": {"command": f'rm -rf "{project.as_posix()}"'}}
     got = _decision(_invoke(project, "protect-bash.sh", rm, how))
-    assert got[0] == "deny" and got[1].startswith("Blocked: this deletes"), f"{how}: deleting the install was not refused: {got}"
+    assert _install_delete_refused(got, project), f"{how}: deleting the install was not refused: {got}"
 
 
 @pytest.mark.parametrize("how", ["forward-slash", "mixed", "relative"])
@@ -933,11 +939,18 @@ def _fire_at(launch: str, root: Path, payload, ostype=None) -> tuple:
                                     text=True, env=env, timeout=60))
 
 
+def _install_delete_refused(got, root):
+    # The whole install also contains the permanent recovery store. That earlier
+    # policy can refuse it before the ordinary game-root deletion rule.
+    return got[0] == "deny" and (got[1].startswith("Blocked: this deletes") or
+        got[1].startswith("Blocked: " + root.name + " is a permanent save backup store or its ancestor."))
+
+
 def _check_root_spelling(root: Path, launch: str, ostype=None):
     ok = _fire_at(launch, root, _shell("ls"), ostype)
     assert ok[0] == "allow", f"an `ls` was not allowed -- the engine path was misspelled: {ok}"
     got = _fire_at(launch, root, _shell(f'rm -rf "{root.as_posix()}"'), ostype)
-    assert got[0] == "deny" and got[1].startswith("Blocked: this deletes"), f"deleting the install was not refused: {got}"
+    assert _install_delete_refused(got, root), f"deleting the install was not refused: {got}"
 
 
 @pytest.mark.parametrize("ostype", _OSTYPES, ids=["inherited", "cygwin"])

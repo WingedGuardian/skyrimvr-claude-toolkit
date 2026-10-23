@@ -4,9 +4,10 @@
     python scripts/thirdparty-audit.py [--repo DIR] [--offline] [--cache-dir DIR] [--max-age HOURS]
                                        [--only NAME[,NAME...]] [--json] [--list]
 
-For every third-party tool, runtime, package, image and CI action the toolkit pins, recommends or
-integrates with, it prints  pinned -> latest upstream  and runs the integration-drift checks that are
-mechanical:
+For third-party tools, runtimes, packages, images and CI actions the toolkit pins, recommends or
+integrates with, it reports pinned -> latest upstream where applicable and runs mechanical integration-drift
+checks. Commit-package integrations verify package metadata at the exact pinned revision; a matching release
+or tag is not required. The checks are:
 
   * pin sites agree       every place that states a pin says the same thing (a declared pin site that
                           cannot be read is COULD NOT CHECK: the prose moved, the registry must follow);
@@ -15,7 +16,7 @@ mechanical:
                           pin file -- what a fresh user gets by following the README must BE the pinned
                           set (Plan 8 reproducibility ruling, item 4). An unpinned install line for a
                           pinned tool is drift too;
-  * pinned version exists the pin is still published upstream (npm / PyPI / NuGet / a git tag);
+  * pinned version exists the pin is still published upstream (npm / PyPI / NuGet / a git tag or commit package);
   * tag -> commit         a tag named next to a commit SHA still points at that SHA (AutoMod, Actions);
   * upstream paths        a documented file the pinned release must ship (a zip member of a release
                           asset, a file at the pinned commit, a nupkg target-framework folder);
@@ -415,7 +416,11 @@ def zip_names(f, url):
 def norm(v):
     v = str(v).strip()
     v = re.sub(r"^(?:rust-|release-|xedit-|pyffi-)", "", v)
-    return re.sub(r"^[vV](?=\d)", "", v)
+    v = re.sub(r"^[vV](?=\d)", "", v)
+    # Git for Windows tags v2.55.0.windows.5 and names that installer Git-2.55.0.5-64-bit.exe (.windows.1 -> no
+    # fourth part): a tag compares in the installer's form, which is what the pin records.
+    m = re.fullmatch(r"(\d+\.\d+\.\d+)\.windows\.(\d+)", v)
+    return (m.group(1) + ("" if m.group(2) == "1" else "." + m.group(2))) if m else v
 
 
 def vkey(v):
@@ -576,10 +581,12 @@ def table_row(tool):
 
 
 def hashes(tool, published=None):
-    """The `hashes` check for one table row: published=URL template (fields from the row) whose text must contain
-    the pinned hash, or None to download the file itself and hash it (small assets only)."""
+    """Check the table row's exact download against published metadata, or hash the small asset itself."""
     return ("hashes", {"items": [{"label": tool, "file": PINNED_DOWNLOADS, "pattern": table_row(tool),
-                                  "published": published}]})
+                                  "published": published,
+                                  "published_format": ("github-release" if published and
+                                                       published.startswith("https://api.github.com/")
+                                                       else "checksums")}]})
 
 REGISTRY = [
     {"name": "House Carl", "pins": [("regex", PINNED_DOWNLOADS, table_row("House Carl")),
@@ -609,13 +616,17 @@ REGISTRY = [
      "checks": [("hashes", {"items": [
          {"label": ".NET SDK " + arch, "file": ".devcontainer/Dockerfile",
           "pattern": r"DOTNET_SDK_VERSION=(?P<v>(?P<ch>\d+\.\d+)\.\d+)[\s\S]*?DOTNET_SHA512_%s=(?P<sha>[0-9a-f]{128})" % arch,
-          "published": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/{ch}/releases.json"}
+          "published": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/{ch}/releases.json",
+          "published_format": "dotnet", "artifact": "dotnet-sdk-{v}-linux-" +
+          ("x64" if arch == "AMD64" else "arm64") + ".tar.gz"}
          for arch in ("AMD64", "ARM64")]})]},
     {"name": "Node.js", "pins": [("text", ".node-version")], "upstream": ("eol", "nodejs", "major"), "refs": NODE_REFS,
      "checks": [("hashes", {"items": [
          {"label": "Node.js " + arch, "file": ".devcontainer/Dockerfile",
           "pattern": r"NODE_VERSION=(?P<v>\d+\.\d+\.\d+)[\s\S]*?NODE_SHA256_%s=(?P<sha>[0-9a-f]{64})" % arch,
-          "published": "https://nodejs.org/dist/v{v}/SHASUMS256.txt"} for arch in ("AMD64", "ARM64")]})]},
+          "published": "https://nodejs.org/dist/v{v}/SHASUMS256.txt", "published_format": "checksums",
+          "artifact": "node-v{v}-linux-" + ("x64" if arch == "AMD64" else "arm64") + ".tar.gz"}
+         for arch in ("AMD64", "ARM64")]})]},
     {"name": "Python", "pins": [("text", ".python-version")], "upstream": ("eol", "python", "minor"),
      "refs": [{"pattern": r"devcontainers/python:[\d.]+-(?P<v>\d+\.\d+)-", "compare": "minor"}]},
     {"name": "AutoMod", "pins": [("regex", "tools/automod-cli.sh", r"PIN_COMMIT=\"(?P<v>[0-9a-f]{40})\"")],
@@ -660,14 +671,16 @@ REGISTRY = [
      "checks": [hashes("Caprica")]},
     {"name": "xeditlib", "pins": [("regex", "package.json", r"xeditlib/tar\.gz/(?P<v>[0-9a-f]{40})"),
                                   ("regex", "package-lock.json", r"xeditlib/tar\.gz/(?P<v>[0-9a-f]{40})")],
-     "tag_pins": [("regex", PINNED_DOWNLOADS, r"xeditlib (?P<v>v\d+\.\d+\.\d+) = commit")],
-     "upstream": ("github", "WingedGuardian/xeditlib"),
      "refs": [{"pattern": r"WingedGuardian/xeditlib#(?P<v>[0-9a-f]{40})"},
               {"pattern": r"(?:xeditlib/tar\.gz/|commit `)(?P<v>[0-9a-f]{7,40})", "line": r"xeditlib",
                "compare": "prefix"},
+              {"pattern": r'(?m)^\s*echo "\s*xeditlib\b[^"\n]*?= commit (?P<v>[0-9a-f]{7,40})',
+               "compare": "prefix"},
               {"pattern": r"\bnpm (?:install|i)\b(?P<tail>[^\n`\"']*WingedGuardian/xeditlib[^\n`\"']*)",
                "version": r"xeditlib#(?P<v>[0-9a-f]{40})", "unpinned": "xeditlib install without #<commit>"}],
-     "checks": [("tag_commit", {"repo": "WingedGuardian/xeditlib"})]},
+     "checks": [("commit_package", {"repo": "WingedGuardian/xeditlib", "package": "xeditlib",
+                  "version_sites": [("json", "package-lock.json", ["packages", "node_modules/xeditlib", "version"]),
+                                    ("regex", PINNED_DOWNLOADS, r"xeditlib v(?P<v>\d+\.\d+\.\d+) = commit")]})]},
     {"name": "zEdit", "upstream": ("github", "z-edit/zedit"),
      "not_delivered": "credited only: XEditLib.dll reaches users inside the pinned xeditlib commit, not from zEdit"},
     {"name": "xEdit (SSEEdit)", "upstream": ("github", "TES5Edit/TES5Edit"),
@@ -695,10 +708,14 @@ REGISTRY = [
      "checks": [("hashes", {"items": [
          {"label": "JDK amd64", "file": ".devcontainer/Dockerfile",
           "pattern": r"JDK_VERSION=(?P<v>[\d.]+)[\s\S]*?JDK_SHA256_AMD64=(?P<sha>[0-9a-f]{64})",
-          "published": "https://aka.ms/download-jdk/microsoft-jdk-{v}-linux-x64.tar.gz.sha256sum.txt"},
+          "published": "https://aka.ms/download-jdk/microsoft-jdk-{v}-linux-x64.tar.gz.sha256sum.txt",
+          "published_format": "checksums", "artifact": "microsoft-jdk-{v}-linux-x64.tar.gz",
+          "single_file": True},
          {"label": "JDK arm64", "file": ".devcontainer/Dockerfile",
           "pattern": r"JDK_VERSION=(?P<v>[\d.]+)[\s\S]*?JDK_SHA256_ARM64=(?P<sha>[0-9a-f]{64})",
-          "published": "https://aka.ms/download-jdk/microsoft-jdk-{v}-linux-aarch64.tar.gz.sha256sum.txt"}]})]},
+          "published": "https://aka.ms/download-jdk/microsoft-jdk-{v}-linux-aarch64.tar.gz.sha256sum.txt",
+          "published_format": "checksums", "artifact": "microsoft-jdk-{v}-linux-aarch64.tar.gz",
+          "single_file": True}]})]},
     {"name": "Python (Windows install)",
      "pins": [("regex", "README.md", r"Python\.Python\.3\.\d+ --exact --version (?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("eol", "python", "minor"),
@@ -727,12 +744,18 @@ REGISTRY = [
     {"name": "Wrye Bash", "upstream": ("github", "wrye-bash/wrye-bash"),
      "not_delivered": "the user's own tool; no shipped instruction installs it"},
     {"name": "Git for Windows", "pins": [("regex", "tools/inventory-runtimes.py",
-                                          r"Git-(?P<v>\d+\.\d+\.\d+)-64-bit\.exe")],
+                                          r"Git-(?P<v>\d+(?:\.\d+){2,3})-64-bit\.exe")],
      "upstream": ("github", "git-for-windows/git"),
-     "refs": [{"pattern": r"Git\.Git --exact --version[ =]+(?P<v>\d+\.\d+\.\d+)"},
-              {"pattern": r"Git-(?P<v>\d+\.\d+\.\d+)-64-bit\.exe"}],
-     "newer_note": "the Git these suites ran under on the dev machine; Plan 8 Q6 updates Git before T14b -- move "
-                   "this pin (inventory-runtimes MANUAL_STEPS) with it"},
+     "refs": [{"pattern": r"Git\.Git --exact --version[ =]+(?P<v>\d+(?:\.\d+){2,3})"},
+              {"pattern": r"Git-(?P<v>\d+(?:\.\d+){2,3})-64-bit\.exe"},
+              {"pattern": r"tested with Git for Windows \*{0,2}(?P<v>\d+(?:\.\d+){2,3})"}],
+     "checks": [("hashes", {"items": [{
+         "label": "Git for Windows installer", "file": "tools/inventory-runtimes.py",
+         "pattern": r"git-for-windows/git/releases/download/(?P<tag>v[\w.]+)/[^\n]*\n[^\n]*?(?P<sha>[0-9a-f]{64})",
+         "published": "https://api.github.com/repos/git-for-windows/git/releases/tags/{tag}",
+         "published_format": "github-release", "artifact": "Git-{pinned}-64-bit.exe"}]})],
+     "newer_note": "the Git these suites run under on the dev machine: a bump is deliberate and tested -- move every "
+                   "pin (inventory-runtimes MANUAL_STEPS: version, release tag, SHA-256; setup.sh; the docs) together"},
     {"name": "Codex CLI", "pins": [("dirs", "tests/fixtures/codex/*"), ("dirs", "tests/fixtures/payloads/codex/*"),
                                    ("regex", "tools/skyguard/codex_trust.py", r"MEASURED on codex-cli (?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("npm", "@openai/codex"),
@@ -773,7 +796,7 @@ def dynamic_entries(repo):
             out.append({"name": "package.json", "broken": "package.json is not valid JSON"})
         for name in sorted(deps or {}):
             if re.fullmatch(r"https://codeload\.github\.com/[\w.-]+/[\w.-]+/tar\.gz/[0-9a-f]{40}", deps[name]):
-                continue   # a commit tarball (xeditlib): its registry entry holds the commit and the tag
+                continue   # a commit tarball (xeditlib): its registry entry verifies the commit and package metadata
             out.append({"name": "npm " + name, "npm": name, "spec": deps[name]})
     req = repo.read("requirements.txt")
     if req is not None:
@@ -1019,6 +1042,40 @@ def check_nupkg_tfm(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box)
         rows.append(Row(name, "nupkg tfm", pinned, ",".join(tfms) or "none", DRIFT,
                         "%s %s ships no tools/%s/ (pinned %s %s)" % (pkg, pinned, want, args["runtime"], runtime)))
 
+def check_commit_package(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box):
+    """A commit archive is published independently of releases/tags; verify its actual package metadata."""
+    if not pinned:
+        raise CouldNotCheck("no commit pin")
+    text = gh_raw(f, args["repo"], pinned, "package.json")
+    if text is None:
+        rows.append(Row(name, "commit package", pinned[:12], None, DRIFT,
+                        "package.json is absent at the pinned upstream commit"))
+        return
+    try:
+        package = json.loads(text)
+    except ValueError:
+        raise CouldNotCheck("unparseable package.json at the pinned upstream commit") from None
+    if not isinstance(package, dict) or not isinstance(package.get("version"), str) or not package["version"]:
+        raise CouldNotCheck("package.json has no readable version at the pinned upstream commit")
+    if package.get("name") != args["package"]:
+        rows.append(Row(name, "commit package", pinned[:12], package.get("name"), DRIFT,
+                        "pinned upstream package name differs from " + args["package"]))
+        return
+    failed = False
+    for site in args["version_sites"]:
+        label, version = read_pin_site(repo, site)
+        if version is None:
+            failed = True
+            rows.append(Row(name, "commit package", pinned[:12], package["version"], UNCHECKED,
+                            "package version site unreadable: " + label))
+        elif "disagrees" in label or not same(version, package["version"]):
+            failed = True
+            rows.append(Row(name, "commit package", version, package["version"], DRIFT,
+                            "package version disagrees with the pinned upstream commit: " + label))
+    if not failed:
+        rows.append(Row(name, "commit package", pinned[:12], package["version"], OK,
+                        "published commit package matches the lock and documented version; no Git tag required"))
+
 
 def check_tag_commit(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box):
     if not pinned or not tag_pin:
@@ -1133,10 +1190,86 @@ def check_upstream_text(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_
                         "%d documented item(s) still in upstream %s" % (len(items), args["path"])))
 
 
+def _published_checksum(response, url, item, fields, digits):
+    """Return only the digest attached to the selected artifact; absent is drift, ambiguous is unchecked."""
+    artifact = item.get("artifact", "").format(**fields)
+    if not artifact:
+        artifact = urllib.parse.unquote(urllib.parse.urlsplit(fields.get("url", "")).path).rsplit("/", 1)[-1]
+    if not artifact or "/" in artifact or "\\" in artifact:
+        raise CouldNotCheck("no exact artifact name for " + item["label"])
+    fmt, found = item.get("published_format"), []
+    if fmt == "github-release":
+        data = response.json()
+        if not isinstance(data, dict) or not isinstance(data.get("assets"), list):
+            raise CouldNotCheck("release metadata has no asset list")
+        for entry in data["assets"]:
+            if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
+                raise CouldNotCheck("invalid release asset metadata")
+            if entry["name"] == artifact:
+                if fields.get("url"):
+                    download = entry.get("browser_download_url")
+                    if download is None:
+                        release = re.fullmatch(r"/repos/([^/]+/[^/]+)/releases/tags/([^/]+)",
+                                               urllib.parse.urlsplit(url).path)
+                        if not release:
+                            raise CouldNotCheck("cannot associate release metadata with its download URL")
+                        download = "https://github.com/%s/releases/download/%s/%s" % (
+                            release[1], urllib.parse.unquote(release[2]), artifact)
+                    if not isinstance(download, str) or not download.startswith("https://"):
+                        raise CouldNotCheck("invalid published download URL for " + artifact)
+                    # Repeated asset names are common across tags; bind the complete documented download.
+                    if urllib.parse.unquote(fields["url"]) != urllib.parse.unquote(download):
+                        continue
+                digest = entry.get("digest")
+                if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
+                    raise CouldNotCheck("no published SHA-256 for " + artifact)
+                found.append(digest.split(":", 1)[1].lower())
+    elif fmt == "dotnet":
+        data = response.json()
+        if not isinstance(data, dict) or not isinstance(data.get("releases"), list):
+            raise CouldNotCheck(".NET metadata has no releases list")
+        # The file's `name` omits the SDK version. Its URL carries the exact version and architecture.
+        def walk(value):
+            if isinstance(value, dict):
+                file_url = value.get("url")
+                if isinstance(file_url, str) and urllib.parse.urlsplit(file_url).path.rsplit("/", 1)[-1] == artifact:
+                    digest = value.get("hash")
+                    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-fA-F]{128}", digest):
+                        raise CouldNotCheck("no published SHA-512 for " + artifact)
+                    found.append(digest.lower())
+                for child in value.values():
+                    walk(child)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child)
+        walk(data["releases"])
+    elif fmt == "checksums":
+        text = response.text()
+        # Some artifact-specific sidecars contain only a hash. A multi-file manifest never has that meaning.
+        if (item.get("single_file") is True and
+                urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1] == artifact + ".sha256sum.txt" and
+                re.fullmatch(r"[0-9a-fA-F]{64}", text.strip())):
+            found.append(text.strip().lower())
+        else:
+            entries = []
+            for line in text.splitlines():
+                match = re.fullmatch(r"([0-9a-fA-F]{%d})\s+\*?(\S+)\s*" % digits, line)
+                if match:
+                    filename = match[2]
+                    entries.append(filename)
+                    if filename == artifact or filename == "./" + artifact:
+                        found.append(match[1].lower())
+            if not entries:
+                raise CouldNotCheck("no recognized artifact checksum entries")
+    else:
+        raise CouldNotCheck("unknown published checksum format for " + item["label"])
+    if len(set(found)) > 1:
+        raise CouldNotCheck("conflicting published checksums for " + artifact)
+    return found[0] if found else None
+
+
 def check_hashes(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box):
-    """Every pinned SHA in the repo is the one upstream publishes for that exact file. An item with `published`
-    fetches that URL (fields filled from the pattern's named groups) and requires the hash in its text; without it,
-    the file at the row's URL is downloaded and hashed (small assets only)."""
+    """Bind every published checksum to its exact download, or hash the small asset itself."""
     for it in args["items"]:
         m = re.search(it["pattern"], repo.read(it["file"]) or "")
         if not m:
@@ -1144,19 +1277,21 @@ def check_hashes(f, repo, name, pinned, tag_pin, args, rows, ctx, latest_box):
                             "no pinned hash found in %s (moved or reworded?)" % it["file"]))
             continue
         want, fields = m.group("sha").lower(), {k: v for k, v in m.groupdict().items() if v is not None}
+        fields["pinned"] = pinned
         if it.get("published"):
             url = it["published"].format(**fields)
-            ok = want in f.get_ok(url).text().lower()
+            ok = _published_checksum(f.get_ok(url), url, it, fields, len(want)) == want
         else:
             url = it["url"].format(**fields) if it.get("url") else fields.get("url", "")
             if not url.startswith("https://"):
                 raise CouldNotCheck("%s: no download URL to hash" % it["label"])
             ok = hashlib.sha256(f.get_ok(url, accept=it.get("accept")).body).hexdigest() == want
         rows.append(Row(name, "pinned hash", fields.get("v", pinned), it["label"], OK if ok else DRIFT,
-                        ("SHA-256 matches " if ok else "pinned SHA %s... is NOT what upstream has at " % want[:12]) + url))
+                        ("SHA-%d matches " % (len(want) * 4) if ok else
+                         "pinned SHA %s... is NOT what upstream has at " % want[:12]) + url))
 
 
-CHECKS = {"hashes": check_hashes, "cli_flags": check_cli_flags, "nupkg_tfm": check_nupkg_tfm, "tag_commit": check_tag_commit,
+CHECKS = {"commit_package": check_commit_package, "hashes": check_hashes, "cli_flags": check_cli_flags, "nupkg_tfm": check_nupkg_tfm, "tag_commit": check_tag_commit,
           "repo_paths": check_repo_paths, "follows_latest": check_follows_latest, "zip_paths": check_zip_paths,
           "upstream_text": check_upstream_text}
 

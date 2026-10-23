@@ -71,14 +71,14 @@ def test_publication_failure_rolls_back(tmp_path, monkeypatch):
     source.mkdir(); target.mkdir()
     (source / "fresh.yaml").write_text("fresh")
     (target / "old.yaml").write_text("original")
-    replace = module.os.replace
+    replace = module._rename_new
 
     def fail_once(src, dst):
         if Path(src).parent.name.startswith(".spriggit-stage-"):
             raise OSError("controlled publication failure")
         return replace(src, dst)
 
-    monkeypatch.setattr(module.os, "replace", fail_once)
+    monkeypatch.setattr(module, "_rename_new", fail_once)
     with pytest.raises(OSError, match="controlled publication failure"):
         module.publish(source, target)
     assert (target / "old.yaml").read_text() == "original"
@@ -98,7 +98,7 @@ def test_concurrent_publication_rejected(tmp_path):
     assert (target / "original.yaml").read_text() == "old"
 
 
-def test_committed_publication_cleanup_failure_is_warning(tmp_path, monkeypatch, capsys):
+def test_committed_publication_never_deletes_previous_destination(tmp_path, monkeypatch, capsys):
     spec = importlib.util.spec_from_file_location("publisher", REPO / "tools/spriggit_publish.py")
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     source, target = tmp_path / "new", tmp_path / "old"
@@ -108,14 +108,14 @@ def test_committed_publication_cleanup_failure_is_warning(tmp_path, monkeypatch,
 
     def failure(path, *args, **kwargs):
         if Path(path).name.startswith(".spriggit-previous-"):
-            raise PermissionError("controlled readonly backup")
+            pytest.fail("previous destination must not be deleted")
         return remove(path, *args, **kwargs)
 
     monkeypatch.setattr(module.shutil, "rmtree", failure)
     module.publish(source, target)
     assert (target / "fresh.yaml").read_text() == "fresh"
     assert len(list(tmp_path.glob(".spriggit-previous-*"))) == 1
-    assert "cleanup" in capsys.readouterr().err.lower()
+    assert "previous output retained" in capsys.readouterr().err.lower()
 
 
 def test_lock_refresh_merges_target_reports_and_rejects_missing_extras():
