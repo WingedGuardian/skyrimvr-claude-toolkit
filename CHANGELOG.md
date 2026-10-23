@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Shared preservation core pinned to d2af1e8: permission prompts from a profile or local restriction now pass save-scope, bulk-approval and verified-backup checks before reaching the host.
+
 - Knowledgebase notes get committed. The instructions now tell the agent to
   commit `KNOWLEDGEBASE.local.md` alone, by explicit path, when the install is a
   git repository that does not ignore it, and never to push. `tools/kb-guard.sh`

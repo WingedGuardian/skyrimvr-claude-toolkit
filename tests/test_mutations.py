@@ -1286,7 +1286,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     # --- mod-install ----------------------------------------------------------
     *[pytest.param("tools/mod-install.py", find, replace, "tests/test_mod_install.py::" + test, id="mod-install-" + tid)
       for tid, find, replace, test in [
-          ("config-overwritten", "            if dest.name.lower().endswith(CFG_EXT) and not overwrite_cfg:",
+          ("config-overwritten", '            if (dest.name.lower().endswith(CFG_EXT) and not overwrite_cfg\n                    and not rel.lower().replace("\\\\", "/").startswith(GENERATED_DATA_DIRS)):',
            "            if False:", "test_an_existing_config_gets_a_new_file_beside_it"),
           ("no-backup", '            if target.is_file():                     # OVERWRITE, or an older <file>.new: keep the original first',
            '            if False:',
@@ -9498,4 +9498,14 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SP, "                    if lit and program_name(lit, self.d) not in cands:", "                    if False:",
      _PS2, "concatenated-literal-not-a-candidate"),
+]]
+
+# A shared-core ask still has to pass the save policy before reaching the host.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/modding_harness/dispatch.py", '                if restriction.decision == "deny":',
+     '                if restriction.decision in ("deny", "ask"):',
+     "tests/test_shared_core_ask_order.py", "core-local-ask-skips-save-preservation"),
+    ("tools/modding_harness/dispatch.py", '            if result.decision == "deny":',
+     '            if result.decision in ("deny", "ask"):',
+     "tests/test_shared_core_ask_order.py", "core-profile-ask-skips-save-preservation"),
 ]]

@@ -1,7 +1,7 @@
 {
   "v": 1,
   "project": "modding-agent-harness",
-  "revision": "12a87ea3e8d3cb5ae10fc0b99f092712467bb9f2",
+  "revision": "d2af1e897daecad4fabc22189ae74fc8a9d91e91",
   "api_version": 1,
   "files": {
     "tools/modding_harness/LICENSE": "07a5c5e4aac6c4eda67565a716c8f4967dc318abe03098e5dee6a8fa7672d619",
@@ -9,7 +9,7 @@
     "tools/modding_harness/approval.py": "257f5ba1acbc1b6731b676d6c8dcc310c6e8ee8769df38b0eff896956d5d1334",
     "tools/modding_harness/contracts.py": "306a5bb0cf7fc8cb02a51b9919a3200e1a647675b579141abd3e06b152b8a5ec",
     "tools/modding_harness/discovery.py": "05e335477d7ea707436606bde533c1197f43608ff1fdd1bd52ecd936b488ae4e",
-    "tools/modding_harness/dispatch.py": "d9812a304b8af5bc6c30592d2f0d9d84bf1b65c33399f0a8a80ea73127d07ee4",
+    "tools/modding_harness/dispatch.py": "2a53ec37caa28001e867721ca9a3e7718e3a8aa8f9864c348de4eff0e7077e5c",
     "tools/modding_harness/durable.py": "2305d273461440dab9081ce88cb363afbe7ede17eae782d659c3791cb963e71f",
     "tools/modding_harness/generic.py": "662227e3d75048529066905cb742cd07936bd1958424bd634a7d10d60f49176f",
     "tools/modding_harness/installation.py": "cfab92a3af0e1cc3cc8459b98bb6d10a3f9295341cee642edfc1c433b8b7e223",

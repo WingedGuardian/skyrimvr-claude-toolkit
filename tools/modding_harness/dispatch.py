@@ -57,16 +57,25 @@ class Dispatcher:
             if not isinstance(evaluation, Evaluation):
                 raise ValueError("profile returned no versioned evaluation")
             result, plan = evaluation.result, evaluation.saves
+            # A deny returns at once because nothing will run. An ask can run on a
+            # human "yes", so it is held and still passes save scope, approval and
+            # preservation exactly like an allow before it is returned.
+            asking = None
             for local in self.local_restrictions:
                 restriction = local(action)
                 if not isinstance(restriction, Result):
                     raise ValueError("local restriction returned no verdict")
-                if restriction.decision in ("deny", "ask"):
+                if restriction.decision == "deny":
                     return Outcome(restriction)
+                if restriction.decision == "ask":
+                    asking = asking or restriction
+                    continue
                 if restriction.evaluation in ("failed", "partial"):
                     return Outcome(Result("deny", "failed", reason="local restriction could not be completely evaluated"))
                 result = replace(result, warnings=result.warnings + restriction.warnings)
             if result.evaluation == "unguarded":
+                if asking is not None:
+                    return Outcome(asking)
                 warnings = result.warnings
                 if not any("WARN AND ALLOW" in warning for warning in warnings):
                     warnings += ("WARN AND ALLOW: this surface was not evaluated",)
@@ -75,8 +84,12 @@ class Dispatcher:
                 raise ValueError("affected paths and operations are not a complete version 1 mapping")
             if result.evaluation == "failed":
                 return Outcome(replace(result, decision="deny"))
-            if result.decision in ("deny", "ask"):
+            if result.decision == "deny":
                 return Outcome(result)
+            if result.decision == "ask" and asking is None:
+                asking = result
+            if asking is not None:
+                result = asking
             if plan.unresolved:
                 return Outcome(Result("deny", "partial", "failed", reason="save scope unresolved: " + plan.unresolved))
             target = workspace.save_store(self.root, self.profile)
