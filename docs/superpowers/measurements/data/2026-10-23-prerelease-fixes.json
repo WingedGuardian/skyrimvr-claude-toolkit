@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "date": "2026-10-23",
+  "scope": "local source repairs, targeted verification; integration and release remain held",
+  "hash_kind": "SHA-256 of working-tree bytes; commits name current HEAD, with dirty selected paths declared separately",
+  "sources": {
+    "core": {
+      "commit": "221292e4b92a9f1b1df21f2c5342a4a54e410be6",
+      "branch": "fix/ask-preserves-saves",
+      "files": {
+        "README.md": "62674250713ee3e34c1bf8d6b9a084c02373772dfb457ec2d8621a74d7592fc1",
+        "modding_harness/dispatch.py": "5b5660a10fd830d84305c9fa713a9cb1feb482b29d717e15d9b0eb091da15a84",
+        "tests/test_dispatch.py": "8ea2a353872824beef44cb0712f7633b1cbb151c5a7ffa5b7cf062c63bbc07e5"
+      }
+    },
+    "skyrim": {
+      "commit": "3cbcf6c6c671977ced0f1eddadd5ac71652059a0",
+      "branch": "master",
+      "files": {
+        "tools/modding-harness.lock.json": "fe23adbd0235e82dcd4fee905144f72fafa92ccfa0359e63cdc6fc68fdefb62d",
+        "tools/modding_harness/dispatch.py": "5b5660a10fd830d84305c9fa713a9cb1feb482b29d717e15d9b0eb091da15a84",
+        "tests/test_shared_core_ask_order.py": "3a2b8275701d80b91272fadf1750681e7e5efaef9fb02cbd3c5a3d921cc8c575",
+        "tests/test_mutations.py": "312001173b835d80c1b4a964ae4a11049fe110d289a95583dd18ce9441e26bc0",
+        "GUARD-FILES.sha256": "00397a89a58d62f637e4924e9c595cd6a50e39e080e21fb1e1187d2b68a5700a"
+      },
+      "verified_vendor_files": 19
+    },
+    "guard": {
+      "commit": "ced18c8390ea5a5736659a85782e205d4c695459",
+      "branch": "fix/v4-guard",
+      "files": {
+        "tools/skyguard/self_rules.py": "bc8df3e4d1407b44a5f6e4d8cf392dc7c5c7a1b2d7562e7f913a34b9a32e232e",
+        "tools/skyguard/shell_rules.py": "4701ec436f984dd41f91a7cce1c8a8b6197140597e45ae51b567add1f3218ef3",
+        "tools/skyguard/rules.py": "49cce085a9550340e45d9a1b0f549cff38cdf0d2bb0338353770d1040077304a",
+        "tools/skyguard/codex_rules.py": "e52f8b6b8d487ca8251c2475f153d7d502dbf5eda45adf58123f631c5cec8a17",
+        "tools/skyguard/deletes.py": "000bf9f7ba2b3b4a7dfbb875cb321c907b35b5b689a12f8b690991aeb7c612fa",
+        "tools/skyguard/shellparse.py": "b886b08d696be08f2136a3ef0a24bf037f00c833f4c2def4dfbf07ab176f3cc3",
+        "tests/test_transcript_guard.py": "c7a4237d76d8081f64452dd942df956284797af34641d0370b9ab12894631101",
+        "tests/test_opaque_protected.py": "6fd248dc464fd1cc3af4a2814ed7250898c65496c1f14d23bee79af14077c5e1",
+        "tests/guard_corpus/intended.jsonl": "03bfd2963b7ddce6b3c4a7aec729440b394eb78f2659aa96ee45ce4bd848993a",
+        "tests/test_mutations.py": "725bd339aa28d951b25d4653d73385dcd3a449705117e56d48c5fc6decc276a5",
+        "GUARD-FILES.sha256": "cc93e9512b9bd8e07aea99a307a2349dcabeb1d43e509c39aaf789582969de0e"
+      }
+    },
+    "installer": {
+      "commit": "e2933a75be091718fe4de1ee2c76cd1bbf5ec88d",
+      "branch": "fix/v4-install",
+      "files": {
+        "scripts/guard-latency.py": "36d42db0383b0d6a3058dd9b00f172d1ae24a84c6d7fa2bf4a898fe19087f7ef",
+        "tests/test_guard_latency.py": "d18a13288ff0ebbf71e6b439f7b8207ebe80983da3f0df5ce7edb4b3fd91ab53",
+        "tests/test_mutations.py": "bb69245609d649dc4881869b27bdd598eab0fea55b38d74da50767a7851c242c"
+      },
+      "dirty_selected_paths": [
+        "tests/test_mutations.py"
+      ],
+      "dirty_selected_paths_note": "Pre-existing housekeeping mutation edits remain uncommitted; the latency mutation and two exclusion reanchors are committed."
+    },
+    "docs": {
+      "commit": "808af7cda958335709189811aeff295a0c3d9f8f",
+      "branch": "fix/v4-docs",
+      "files": {
+        "docs/safety-philosophy.md": "e26760e3788fb7587c90fd076c1d1762446e0f4e68bd906e16d5bd545347947e"
+      }
+    },
+    "x4": {
+      "commit": "ca39a3a478b3ea2469ed9ab9bfe5e0657fffe295",
+      "branch": "master",
+      "files": {
+        "tools/modding-harness.lock.json": "fe23adbd0235e82dcd4fee905144f72fafa92ccfa0359e63cdc6fc68fdefb62d",
+        "tools/modding_harness/dispatch.py": "5b5660a10fd830d84305c9fa713a9cb1feb482b29d717e15d9b0eb091da15a84"
+      },
+      "verified_vendor_files": 19
+    }
+  },
+  "preserved_preexisting_installer_work": {
+    "tools/housekeep.py": {
+      "matches_review_freeze": true,
+      "sha256": "0ec8f2305cc5086de3ac90c790415f14ccbce98553b5db51351af1f010e60311"
+    },
+    "tests/test_housekeep.py": {
+      "matches_review_freeze": true,
+      "sha256": "1a80540e0326a4f53a2dd9c7619653070d0d4499a0a8a81269c2c14d688fcff3"
+    }
+  }
+}

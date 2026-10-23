@@ -1,5 +1,9 @@
 # Incremental pre-release review, 2026-10-22
 
+**Follow-up, 2026-10-23:** All five findings have local source repairs and targeted verification.
+See the [repair record](2026-10-23-prerelease-review-repairs.md). The original findings below
+remain historical evidence; integration and final release approval are still held.
+
 **Verdict: CHANGES REQUIRED.** Five confirmed findings: four medium, one low. One affects
 the integrated shared core; the other four concern held repair work. This is an incremental
 review of previously unreviewed changes, not final release sign-off.
