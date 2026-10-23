@@ -7,7 +7,7 @@ Run against a CONFIGURED copy (setup.sh already run), on an otherwise idle machi
 
 Payloads are corpus rows (tests/guard_corpus/expected.jsonl) with the corpus game path rewritten to
 the install's own. Gate: p95 <= 1000 ms for every wrapper, AND every run answered: exit 0 (and a tool hook's stdout
-empty or JSON).
+empty or a valid PreToolUse response).
 A wrapper that is missing, crashes or prints garbage is a FAILED run, never a fast one (review L4b M2: an install
 whose hooks all died used to print PASS). Plan 1 spike (E10): Python 3.10 p95 60-64 ms,
 Python 3.12 Store alias 81-85 ms, old bash guard 297-670 ms.
@@ -16,6 +16,8 @@ import argparse, json, os, statistics, subprocess, sys, time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "tools"))
+from skyguard.claude_output import valid as valid_pretooluse
 GAME = (REPO / "tests/guard_corpus/game-root.txt").read_text(encoding="utf-8").strip()
 ROWS = {  # wrapper -> corpus row ids
     "protect-bash": ["shell-delete-inside", "shell-benign-git", "shell-cp-inside"],
@@ -87,7 +89,8 @@ def main() -> int:
 
 def answer_problem(r, json_out=True) -> str:
     """Why one wrapper run is not a verdict, or "": a hook answers with exit 0 and, for a tool hook, either nothing
-    (allow) or JSON. SessionStart prints its banner as plain text, so there only the exit code counts."""
+    (allow) or the production PreToolUse schema. SessionStart prints its banner as plain text,
+    so there only the exit code counts."""
     if r.returncode != 0:
         return "exit {} ({})".format(r.returncode, r.stderr.decode("utf-8", "replace").strip()[-160:])
     out = r.stdout.decode("utf-8", "replace").strip()
@@ -96,6 +99,8 @@ def answer_problem(r, json_out=True) -> str:
             json.loads(out)
         except ValueError:
             return "stdout is not JSON: " + out[:160]
+        if not valid_pretooluse(r.stdout):
+            return "stdout is not a valid PreToolUse response: " + out[:160]
     return ""
 
 

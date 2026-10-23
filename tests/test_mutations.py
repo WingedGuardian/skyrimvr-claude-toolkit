@@ -9708,3 +9708,11 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SP, "                    if lit and program_name(lit, self.d) not in cands:", "                    if False:",
      _PS2, "concatenated-literal-not-a-candidate"),
 ]]
+
+
+# Incremental pre-release R4: JSON syntax alone is not a usable hook verdict.
+MUTATIONS.append(pytest.param(
+    "scripts/guard-latency.py", '        if not valid_pretooluse(r.stdout):',
+    '        if False:',
+    "tests/test_guard_latency.py::test_invalid_pretooluse_schema_fails_the_gate[scalar]",
+    id="guard-latency-valid-json-invalid-schema"))

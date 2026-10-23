@@ -5,6 +5,9 @@ printed `WORST p95 = 27 ms ... PASS` and exited 0.
 """
 from __future__ import annotations
 
+import json
+import pytest
+
 import subprocess
 import sys
 
@@ -51,3 +54,32 @@ def test_hooks_that_answer_pass_the_gate(tmp_path):
     r = _run(_install(tmp_path / "ok", "exit 0"))
     assert r.returncode == 0, r.stdout + r.stderr
     assert "0 failed run(s): PASS" in r.stdout
+
+
+@pytest.mark.parametrize("answer", [1, [], {"allow": True},
+    {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "bogus"}},
+    {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny"}}],
+    ids=["scalar", "array", "wrong-object", "invalid-decision", "missing-reason"])
+def test_invalid_pretooluse_schema_fails_the_gate(tmp_path, answer):
+    body = "printf '%s\\n' '" + json.dumps(answer) + "'"
+    r = _run(_install(tmp_path / "invalid", body))
+    assert r.returncode == 1 and "FAILED RUN" in r.stdout and ": FAIL" in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("answer", [{},
+    {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                            "permissionDecisionReason": "fixture refusal"}},
+    {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "fixture context"}}],
+    ids=["empty-object", "deny", "context"])
+def test_valid_pretooluse_schema_passes_the_gate(tmp_path, answer):
+    body = "printf '%s\\n' '" + json.dumps(answer) + "'"
+    r = _run(_install(tmp_path / "valid", body))
+    assert r.returncode == 0 and "0 failed run(s): PASS" in r.stdout, r.stdout + r.stderr
+
+
+def test_session_start_plain_text_banner_is_accepted(tmp_path):
+    install = _install(tmp_path / "banner", "exit 0")
+    (install / ".claude/hooks/session-kb-guard.sh").write_text("#!/usr/bin/env bash\ncat >/dev/null\necho banner\n",
+                                                             encoding="utf-8", newline="\n")
+    r = _run(install)
+    assert r.returncode == 0, r.stdout + r.stderr
