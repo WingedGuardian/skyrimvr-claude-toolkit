@@ -265,7 +265,7 @@ Coverage and gaps: `docs/guard-coverage.md`.
   for the bin -> ask. The guard judges these like any delete. Retention: `docs/RETENTION.md`.
 - **Resources:** own jobs share <=40% CPU/25% physical RAM, <=8 workers, low priority.
   Physical RAM is primary; commit uses fixed 512/256/128 MiB buffers, never percentages.
-  Games/user-directed work skip admission; games skip floors. See [resource policy](docs/resource-policy.md)
+  Games/user-directed work skip admission; games skip floors. See `docs/resource-policy.md`
   for admission, emergency/disk floors and probes.
 
 ### Safety improvement loop
