@@ -9509,3 +9509,18 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '            if result.decision in ("deny", "ask"):',
      "tests/test_shared_core_ask_order.py", "core-profile-ask-skips-save-preservation"),
 ]]
+
+
+# Incremental pre-release R1: unknown/failed coverage cannot be promoted by a prompt.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/modding_harness/dispatch.py", '                if (plan.mutations or plan.unresolved or plan.wildcard or plan.helper or\n                        plan.recheck is not None or plan.known_writer_active):',
+     '                if False:', "tests/test_shared_core_ask_order.py::test_unguarded_save_obligation_refuses",
+     "core-unguarded-save-obligations-discarded"),
+    ("tools/modding_harness/dispatch.py", '                if restriction.evaluation in ("failed", "partial"):',
+     '                if False:', "tests/test_shared_core_ask_order.py::test_incomplete_local_ask_refuses",
+     "core-incomplete-local-ask-accepted"),
+    ("tools/modding_harness/dispatch.py", '                    result = replace(result, decision="ask", reason=asking.reason)',
+     '                    result = replace(asking, warnings=result.warnings)',
+     "tests/test_shared_core_ask_order.py::test_unknown_local_ask_does_not_claim_profile_evaluation",
+     "core-local-ask-promotes-unguarded-coverage"),
+]]

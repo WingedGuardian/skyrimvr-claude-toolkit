@@ -67,15 +67,20 @@ class Dispatcher:
                     raise ValueError("local restriction returned no verdict")
                 if restriction.decision == "deny":
                     return Outcome(restriction)
-                if restriction.decision == "ask":
-                    asking = asking or restriction
-                    continue
                 if restriction.evaluation in ("failed", "partial"):
                     return Outcome(Result("deny", "failed", reason="local restriction could not be completely evaluated"))
                 result = replace(result, warnings=result.warnings + restriction.warnings)
+                if restriction.decision == "ask":
+                    asking = asking or restriction
             if result.evaluation == "unguarded":
-                if asking is not None:
-                    return Outcome(asking)
+                # An unknown surface may warn and allow only without declared save work.
+                # A local permission prompt cannot qualify an unresolved profile contract.
+                if (plan.mutations or plan.unresolved or plan.wildcard or plan.helper or
+                        plan.recheck is not None or plan.known_writer_active):
+                    return Outcome(Result("deny", "partial", "failed", reason=
+                        "unguarded profile declared save obligations; complete evaluation is required"))
+                if asking is not None and result.decision != "deny":
+                    result = replace(result, decision="ask", reason=asking.reason)
                 warnings = result.warnings
                 if not any("WARN AND ALLOW" in warning for warning in warnings):
                     warnings += ("WARN AND ALLOW: this surface was not evaluated",)
