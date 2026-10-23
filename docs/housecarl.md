@@ -49,7 +49,7 @@ Upstream references remain in the separately installed package, accessible throu
 | Record queries, sources, fields, predicates, differences and walks | Upstream tool schema, with plugin-qualified FormKeys |
 | SkyPatcher inventory and replay | Static model, retaining unknown-operation and coverage notices |
 | Config references | `housecarl_skse findings="config"`; comments are included by upstream |
-| Asset/NIF inspection and BSA listing | Reads winning deployed content; ownership can be unknown |
+| Asset/NIF inspection and BSA listing | Reads configured deployed content; archive coverage and ownership can be incomplete (see below) |
 | Ordinary plugin authoring | New patches staged; existing files backed up and replaced only after validation |
 | Native pairing, VR runtime addresses and facegen provenance | Explicitly unavailable in this release |
 | Merging, compaction and external-reference remapping | Not exposed |
@@ -61,7 +61,7 @@ The reader accounts for implicit masters, master flags and VR ESL support, and r
 or inactive dependencies. Source files are never rewritten. Status prints the whole resolved sequence,
 so a fresh Wrye export can independently qualify it; historical exports do not establish current state.
 
-Every call captures current inputs. Source/configuration/plugin changes invalidate the result rather
+Every call captures its configured plugin/profile inputs. Source/configuration/plugin changes invalidate the result rather
 than becoming a quiet partial answer. The backend is owned per call and closed on completion or
 cancellation; no background game polling or user-process termination is involved.
 Before data tools run, the pinned backend's resolver count and exclusion alarm must confirm the complete
@@ -75,6 +75,19 @@ The current whole sequence still needs a fresh Wrye UI/export cross-check; a his
 Status supports a plugin-basename filter on this captured membership; alternate-profile and mod-folder
 lookups are unavailable through the gateway. Creation does not compile scripts or supply voice/SEQ assets;
 retain upstream notices about those requirements before using a plugin in game.
+
+## Archive discovery limit
+
+[Issue 11](https://github.com/WingedGuardian/skyrimvr-claude-toolkit/issues/11) reports asset-absence
+results without a coverage warning when applicable base archives were omitted. The gateway builds
+its backend INI from the configured user/profile INIs and adds the VR archive; it currently does
+not import archive lists from the game-root INI. A synthetic SE/VR profile check reproduced that
+omission. The public toolkit pins 2.0.5; the original report used an installed 2.1.0 backend.
+
+Treat a missing asset result as inconclusive until the relevant base archives are independently
+accounted for, even when the backend says `read_incomplete: false`. Plugin-index completeness does
+not establish archive completeness. This is a file-discovery limit, not evidence of the runtime
+asset winner. Do not change the user's INIs or activation/order files to make a query agree.
 
 ## Existing-file publication and recovery
 

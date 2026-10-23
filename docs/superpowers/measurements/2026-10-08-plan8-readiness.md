@@ -1,5 +1,7 @@
 # Plan 8 local release readiness — 2026-10-08
 
+Status note, 2026-10-22: the measurements below remain bound to their historical commits. See the [current scoped reconciliation](2026-10-22-plan8-reconciliation.md) for integration, issue dispositions and user-held work. Final release verification and final readiness numbers are deferred.
+
 Local implementation, release review and automated gates are complete. Current live-agent E2E and the manual batch remain unmeasured; this report does **not** certify publication readiness. No push, tag, upload, remote rename, real-install change or global hook-trust change was performed.
 
 The integration branch and master were locally fast-forwarded to `97116d0ddd001b0ea5271fdb0beba51402a220bb`. This report is a subsequent documentation-only addition. The product rename, archive identity classification, README and dated v4.0.0 CHANGELOG are complete. GitHub repository URLs retain the existing remote name.
