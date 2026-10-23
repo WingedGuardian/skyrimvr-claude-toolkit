@@ -250,6 +250,119 @@ def _opaque_save(parsed, roots, cwd, env) -> str:
     return ""
 
 
+# User ruling 2026-10-20 (v4.0.0 review L1 MEDIUM-1/2, LOWs, INFO): when the guard cannot name the program that runs
+# AND the command names a path the other rules protect, the user is asked (S-OPAQUE-PROTECTED). "Cannot name": an
+# unnamed program word (Parsed.unnamed: `$R`, `%R%`, `!R!`, `${!R}`, `"${A[@]}"`, `& (Get-Command ...)`, a variable
+# set by printf -v or read), an eval-like call whose code is not literal (`eval "$c"`, `bash -c "$c"`, `iex $s`,
+# `Invoke-Expression $s`, `source "$f"`), and awk's system(). "Names a protected path": one of those execs' own words
+# resolves to the install folder itself, anything under its Data folder, the settings folder or MO2's folders, or is
+# a plugin or archive file (a whole word: `'x.esp'` inside interpreter code is not one); or the command TEXT spells one
+# of those folders absolutely (a string a variable holds, a here-string) or a Bethesda registry key. A save keeps S-SAVE-OPAQUE, which is checked first. Ordinary commands that run a
+# named program, and an opaque program on anything else (`"$PY" tools/x.py`, `$EDITOR notes.txt`), stay as they were.
+_EVAL_PROGRAMS = frozenset(("eval", "source", ".", "invoke-expression", "iex"))
+_AWK_PROGRAMS = frozenset(("awk", "gawk", "mawk", "nawk", "busybox-awk"))
+_DYNAMIC = re.compile(r"[$%`!]")
+_PLUGIN_WORD = re.compile(r"\.(?:esp|esm|esl|bsa|ba2)$", re.IGNORECASE)
+# The ruling does not require a write/delete verb: the unknown program may have been set earlier.
+_TERMINATOR = "\"' \t\r\n|&;<>)`"
+
+
+def _opaque_execs(parsed):
+    """The execs whose program the guard cannot name (see above)."""
+    out = list(parsed.unnamed)
+    for e in parsed.execs:
+        if e.program in _EVAL_PROGRAMS and any(_DYNAMIC.search(w) for w in e.argv):
+            out.append(e)
+        elif e.program in _AWK_PROGRAMS and any("system(" in w.replace(" ", "") for w in e.argv):
+            out.append(e)
+    for _shell, text in parsed.codes:
+        if _DYNAMIC.search(text or ""):
+            return out or [None]
+    return out
+
+
+def _path_like(word) -> bool:
+    """A word an unnamed program may take as a path: not an option, and a path separator, a drive, a dot, or the
+    install's own folder name. Priced (v4.0.0 review): with a cwd inside Data, bare words (`list`, `-r`, `l`) were
+    read as Data files and asked 15 times in 97,323 history items with no path in them at all."""
+    if not word or word.startswith("-"):
+        return False
+    return any(c in word for c in "/\\:.") or word.lower() == "data"
+
+
+def _protected_word(a, roots) -> str:
+    """The name to show when the resolved path `a` is the install itself, under its Data folder, in the settings
+    folder (not a save: S-SAVE-OPAQUE's) or MO2's folders; "" otherwise."""
+    if not a:
+        return ""
+    z = targets.zone(a, roots)
+    if z in ("config", "mo2"):
+        return "" if writes.is_save(a, roots) else (os.path.basename(a.rstrip("/")) or a)
+    if z != "install":
+        return ""
+    rel = writes._rel(a, roots.install_dirs)
+    if rel is not None and (not rel or rel[0] == "data"):
+        return os.path.basename(a.rstrip("/")) or a
+    return ""
+
+
+def _protected_text(command, roots) -> str:
+    """A protected path the command TEXT spells absolutely, or a Bethesda key; "" if none."""
+    text = command.replace("\\", "/").lower()
+    text = re.sub(r"/{2,}", "/", text)
+    for kind, dirs in (("install", roots.install_dirs), ("config", roots.config_dirs), ("mo2", roots.mo2_dirs)):
+        for d in dirs:
+            root = (d or "").lower().rstrip("/")
+            if not root:
+                continue
+            start = 0
+            while True:
+                at = text.find(root, start)
+                if at < 0:
+                    break
+                start = at + 1
+                rest = text[at + len(root):]
+                if at and text[at - 1] not in _TERMINATOR + "=:(":
+                    continue
+                if (not rest or rest[0] in _TERMINATOR) and kind != "install":
+                    return os.path.basename(root) or root
+                if not rest or rest[0] != "/":
+                    continue
+                first = re.split(r"[/" + re.escape(_TERMINATOR) + r"]", rest[1:], 1)[0]
+                if kind == "install" and first == "data":
+                    return "Data"
+                if kind == "config" and first != "saves":
+                    return os.path.basename(root)
+                if kind == "mo2":
+                    return os.path.basename(root)
+    low = command.replace("/", "\\").lower()
+    for key in anchored.BETHESDA_KEYS:
+        if key.split("\\", 1)[1] in low:
+            return "the Bethesda registry key"
+    return ""
+
+
+def _opaque_protected(command, parsed, roots, cwd, env) -> str:
+    """The protected path (as shown) an unnamed program runs on, or "" (see the ruling above)."""
+    opaque = _opaque_execs(parsed)
+    if not opaque:
+        return ""
+    for e in opaque:
+        if e is None:
+            continue
+        e = deletes.substituted(e)
+        for w in list(e.argv) + [t for _, t in e.redirects]:
+            if not _path_like(w):
+                continue
+            hit = _protected_word(targets.resolve_operand(e, w, cwd, env), roots)
+            if hit:
+                return hit
+            name = re.split(r"[/\\]", w)[-1]
+            if _PLUGIN_WORD.search(name):                 # a plugin or archive file, wherever it is
+                return name
+    return _protected_text(command, roots)
+
+
 def _ordered(command, parsed, dels, wr, own, roots, audit, cwd, shell, env) -> Verdict:
     """decide()'s rules after the NEVER_SHADOW denies, in the bash file's order (the first refusal wins)."""
     advice = Advice()
@@ -327,6 +440,12 @@ def _ordered(command, parsed, dels, wr, own, roots, audit, cwd, shell, env) -> V
     if opaque:
         reason = rules.message("S-SAVE-OPAQUE", file=opaque)
         audit.rule(HOOK, "S-SAVE-OPAQUE", "ask", reason)
+        return Verdict("ask", reason)
+    # User ruling 2026-10-20: the same "ask first" for a protected path that is not a save (_opaque_protected).
+    hidden = _opaque_protected(command, parsed, roots, cwd, env)
+    if hidden:
+        reason = rules.message("S-OPAQUE-PROTECTED", file=hidden)
+        audit.rule(HOOK, "S-OPAQUE-PROTECTED", "ask", reason)
         return Verdict("ask", reason)
 
     # Plan 6 Task 11 (R7): a persistent `lock disable` is the user's to approve (deny on Codex, via the adapter).

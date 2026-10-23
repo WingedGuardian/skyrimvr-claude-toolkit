@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Guard: existing hardlinks to the supplied current transcript are protected; an unknown program naming a protected path asks even without a write/delete verb.
+
 - Knowledgebase notes get committed. The instructions now tell the agent to
   commit `KNOWLEDGEBASE.local.md` alone, by explicit path, when the install is a
   git repository that does not ignore it, and never to push. `tools/kb-guard.sh`

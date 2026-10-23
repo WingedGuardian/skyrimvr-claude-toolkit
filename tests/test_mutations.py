@@ -9564,7 +9564,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _TRG + "test_guards_off_never_lifts_the_transcript_refusal", "rule-S-SELF-TRANSCRIPT-never-shadowed"),
     ("tools/skyguard/self_rules.py",
      '        if own and (low == own.lower().rstrip("/") or holder and own.lower().startswith(low + "/")):',
-     "        if False:", _TRG + "test_the_payloads_own_transcript_is_refused_wherever_it_lives",
+     "        if False:", _TRG + "test_missing_payload_transcript_keeps_lexical_protection",
      "rule-W-SELF-TRANSCRIPT-payload-path"),
     ("tools/skyguard/self_rules.py", '            if rel[:1] == ["projects"] and len(rel) >= 3 and rel[-1].endswith(".jsonl"):',
      "            if False:", _TRG + "test_the_transcript_tree_is_refused_whatever_the_payload_names[another-sessions-file]",
@@ -9583,4 +9583,16 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _TRG + "test_codex_apply_patch_on_its_payload_transcript_is_refused", "transcript-codex-patch-wired"),
     ("tools/skyguard/run.py", '._replace(transcript_path=p.get("transcript_path", "") or "")', "",
      _TRG + "test_the_payloads_own_transcript_is_refused_wherever_it_lives", "transcript-claude-shell-wired"),
+]]
+
+
+# Incremental pre-release R2/R3: physical transcript identity and the recorded opaque-program boundary.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/self_rules.py", '                if os.path.samefile(abs_path, own):',
+     '                if False:', "tests/test_transcript_guard.py::test_current_transcript_hardlink_is_refused",
+     "rule-S-SELF-TRANSCRIPT-hardlink-identity"),
+    ("tools/skyguard/shell_rules.py", '    if not opaque:\n        return ""\n    for e in opaque:',
+     '    if True:\n        return ""\n    for e in opaque:',
+     "tests/test_opaque_protected.py::test_an_unnamed_program_on_a_protected_path_asks[opaque-on-a-plugin]",
+     "rule-S-OPAQUE-PROTECTED-no-verb"),
 ]]

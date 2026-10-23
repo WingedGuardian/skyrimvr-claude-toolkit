@@ -128,6 +128,13 @@ def test_memory_notes_beside_the_transcripts_stay_writable(claude):
     assert "W-SELF-TRANSCRIPT" not in got["rules"] and got["decision"] in ("allow", "advise"), got
 
 
+def test_a_note_file_beside_the_transcripts_can_be_deleted(claude):
+    """Priced: `rm -f <project>/MEMORY.md.bak` (a file, not a folder that holds transcripts) stays the agent's."""
+    _, _, own, _ = claude
+    got = fire(claude, "protect-bash.sh", {"command": "rm -f \"{}\"".format(own.with_name("MEMORY.md.bak").as_posix())})
+    assert "S-SELF-TRANSCRIPT" not in got["rules"], got
+
+
 def test_guards_off_never_lifts_the_transcript_refusal():
     assert {"shell.S-SELF-TRANSCRIPT", "write.W-SELF-TRANSCRIPT"} <= engine.NEVER_SHADOW
 
@@ -179,3 +186,60 @@ def test_codex_apply_patch_on_its_payload_transcript_is_refused(tmp_path, monkey
     body = ["*** Begin Patch", "*** Update File: " + custom.as_posix(), "@@", "-{}", "+" + FORGED, "*** End Patch"]
     v = codex_pre(tmp_path, "apply_patch", {"command": "\n".join(body)}, custom, monkeypatch)
     assert (v.decision, v.code) == ("deny", "write.W-SELF-TRANSCRIPT"), v
+
+
+@pytest.fixture
+def transcript_alias(claude, tmp_path):
+    import os
+    own = claude[2]
+    alias = tmp_path / "ordinary.log"
+    os.link(own, alias)
+    assert os.path.samefile(own, alias)
+    return alias
+
+
+@pytest.mark.parametrize("route", ["append", "file-write", "file-edit", "delete", "move-away"])
+def test_current_transcript_hardlink_is_refused(claude, transcript_alias, route):
+    alias = transcript_alias
+    before = alias.read_bytes()
+    if route.startswith("file-"):
+        got = fire(claude, "protect-files.sh", {"file_path": str(alias), "content": FORGED,
+            "old_string": "{}", "new_string": FORGED}, tool="Write" if route == "file-write" else "Edit")
+        rule = "W-SELF-TRANSCRIPT"
+    else:
+        got = fire(claude, "protect-bash.sh", {"command": SHELL_WRITES[route].format(t=alias.as_posix())})
+        rule = "S-SELF-TRANSCRIPT"
+    assert got["decision"] == "deny" and rule in got["rules"], got
+    assert alias.read_bytes() == claude[2].read_bytes() == before
+
+
+@pytest.mark.parametrize("command", ['cat "{t}"', 'cp "{t}" /tmp/transcript-copy.jsonl'])
+def test_reading_or_copying_out_a_transcript_hardlink_stays_free(claude, transcript_alias, command):
+    got = fire(claude, "protect-bash.sh", {"command": command.format(t=transcript_alias.as_posix())})
+    assert got["decision"] in ("allow", "advise") and "S-SELF-TRANSCRIPT" not in got["rules"], got
+
+
+@pytest.mark.parametrize("exists", [False, True])
+def test_unrelated_file_identity_does_not_refuse(claude, tmp_path, exists):
+    target = tmp_path / "ordinary.log"
+    if exists:
+        target.write_text("owned fixture")
+    got = fire(claude, "protect-files.sh", {"file_path": str(target), "content": "x"}, tool="Write")
+    assert got["decision"] in ("allow", "advise") and "W-SELF-TRANSCRIPT" not in got["rules"], got
+
+
+def test_codex_apply_patch_on_current_transcript_hardlink_is_refused(tmp_path, rollout, monkeypatch):
+    import os
+    alias = tmp_path / "ordinary.log"
+    os.link(rollout, alias)
+    patch = "*** Begin Patch\n*** Update File: " + alias.as_posix() + "\n@@\n-{}\n+x\n*** End Patch"
+    v = codex_pre(tmp_path, "apply_patch", {"command": patch}, rollout, monkeypatch)
+    assert (v.decision, v.code) == ("deny", "write.W-SELF-TRANSCRIPT"), v
+
+
+def test_missing_payload_transcript_keeps_lexical_protection(claude, tmp_path):
+    missing = tmp_path / "uncreated-session.jsonl"
+    assert not missing.exists()
+    got = fire(claude, "protect-files.sh", {"file_path": str(missing), "content": FORGED},
+               tool="Write", transcript=missing)
+    assert got["decision"] == "deny" and "W-SELF-TRANSCRIPT" in got["rules"], got

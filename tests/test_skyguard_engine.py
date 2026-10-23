@@ -89,7 +89,7 @@ def test_a_parse_failure_makes_the_verdict_partial():
 
 
 def test_an_opaque_program_makes_the_verdict_partial():
-    v = _shell_status('"$TOOL" --run Data')                                             # the program is a variable
+    v = _shell_status('"$TOOL" --run notes')                                            # the program is a variable
     assert (v.decision, v.status) == ("allow", "partial")
 
 

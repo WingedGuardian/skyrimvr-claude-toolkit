@@ -837,6 +837,14 @@ def transcript_target(abs_path: str, env, transcript: str = "", holder: bool = F
         own = paths.norm_abs(transcript)
         if own and (low == own.lower().rstrip("/") or holder and own.lower().startswith(low + "/")):
             return True
+        # Existing hardlinks can hide the supplied current transcript outside its tree.
+        # No scan is made for aliases to other sessions whose path the host did not supply.
+        if own:
+            try:
+                if os.path.samefile(abs_path, own):
+                    return True
+            except OSError:
+                pass  # Missing/unreadable paths still receive the lexical tree checks below.
     for base, kind in _transcript_bases(env):
         rel = _rel(abs_path, [base])
         if rel is None:
@@ -844,7 +852,10 @@ def transcript_target(abs_path: str, env, transcript: str = "", holder: bool = F
         if kind == "claude":
             if rel[:1] == ["projects"] and len(rel) >= 3 and rel[-1].endswith(".jsonl"):
                 return True
-            if holder and (rel in ([], ["projects"]) or rel[:1] == ["projects"] and (len(rel) == 2 or rel[2] != "memory")):
+            # A folder that holds transcripts (a project or a session folder), never a note file beside them
+            # (priced: `rm -f <project>/MEMORY.md.bak` was refused once in 97,323 history items).
+            if holder and (rel in ([], ["projects"]) or rel[:1] == ["projects"] and (
+                    len(rel) == 2 or rel[2] != "memory" and "." not in rel[-1])):
                 return True
         else:
             if rel[:1] in (["sessions"], ["archived_sessions"]) and (holder or len(rel) >= 2):

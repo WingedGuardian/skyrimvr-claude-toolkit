@@ -395,6 +395,18 @@ RULES = {
         'Approve only if you asked for this save to be used this way.'
     ),
     },
+    # 2026-10-20 (user ruling, "ask first", v4.0.0 review L1): a program the guard cannot name (an unnamed program
+    # word, an eval of a variable, awk system()) on a path the other rules protect that is not a save (S-SAVE-OPAQUE's).
+    'S-OPAQUE-PROTECTED': {
+        "decision": 'ask',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'This runs a program the guard cannot name on {file}, which the guards protect.\n'
+        'Approve only if you asked for this command to be run on it.'
+    ),
+    },
     'S-DEVBENCH-CRASH': {
         "decision": 'deny',
         "hook": 'protect-bash',
