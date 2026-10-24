@@ -46,6 +46,7 @@ any agent can read one directly. Read the skill BEFORE the work:
 
 | When you are about to… | Read |
 |---|---|
+| find logging/debug switches across the install | skill `logging-registry` |
 | query records, check SkyPatcher/configs, or edit plugins through House Carl | skill `toolkit-housecarl` (optional gateway) |
 | use the running game (inspect, console, Papyrus calls, scenarios) | skill `devbench` |
 | ask which plugin wins a record, triage Papyrus, crash or SKSE logs or a mod archive, or bulk-edit ESPs | skill `triage-and-conflicts` |
