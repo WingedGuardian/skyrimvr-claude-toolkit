@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -76,14 +77,17 @@ def test_no_private_values_or_log_contents_escape(install):
 
 
 def test_log_content_and_binary_are_never_opened(install, monkeypatch):
+    put(install[1], 'SKSE/Plugins/Example/logs/session.json', '{"logging": {"level":"trace"}}')
+    put(install[1], 'SKSE/Plugins/Example/recordings/take.json', '{"debug":true}')
     original = Path.open
     def guarded(path, *args, **kwargs):
-        if path.suffix in {'.dll', '.esp', '.log'}:
+        if path.suffix in {'.dll', '.esp', '.log'} or 'session.json' == path.name or 'take.json' == path.name:
             pytest.fail('attempt to read forbidden content: ' + path.name)
         return original(path, *args, **kwargs)
     monkeypatch.setattr(Path, 'open', guarded)
     report = scan(install)
     assert report['log_files'][0]['bytes'] == len('PRIVATE_LOG_CONTENT')
+    assert sum(s['directories_excluded'] for s in report['scopes']) == 2
 
 
 @pytest.mark.parametrize('content,suffix', [('{"logLevel":1,"logLevel":2}', '.json'),
@@ -219,4 +223,16 @@ def test_symlink_does_not_escape_scope(install, tmp_path):
         pytest.skip('creating symlinks unavailable on this host')
     report = scan(install)
     assert not any(f['path'].endswith('Linked.ini') for f in report['files'])
+    assert sum(s['symlinks_excluded'] for s in report['scopes']) == 1
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows junction contract')
+def test_windows_junction_is_excluded_on_python310(install, tmp_path):
+    outside = put(tmp_path, 'outside/Private.ini', 'LogLevel=trace').parent
+    link = install[1] / 'SKSE/Plugins/LinkedFolder'
+    made = subprocess.run(['cmd.exe', '/d', '/c', 'mklink', '/J', str(link), str(outside)],
+                          capture_output=True, text=True, timeout=10)
+    assert made.returncode == 0, 'Could not create isolated junction fixture: ' + made.stderr
+    report = scan(install)
+    assert not any('LinkedFolder' in f['path'] for f in report['files'])
     assert sum(s['symlinks_excluded'] for s in report['scopes']) == 1

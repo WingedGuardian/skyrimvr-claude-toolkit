@@ -22,6 +22,7 @@ VERSION = 1
 EXTENSIONS = {'.ini', '.cfg', '.conf', '.config', '.json', '.yaml', '.yml', '.toml', '.psc', '.xml'}
 EXCLUDED_DIRS = {'saves', 'saves-no-cosave', '__mo_saves', '.git', '__pycache__',
                  'node_modules', 'backups', 'backupcfgs', '.venv'}
+CONTENT_DIRS = {'logs', 'log', 'crashlogs', 'captures', 'recordings', 'screenshots'}
 BACKUP = re.compile(r'(?:\.bak|\.old|\.disabled|\.new|\.vortex_backup|\.backup)(?:\.|$)|\.pre-', re.I)
 SENSITIVE = re.compile(r'password|passwd|secret|credential|authorization|api.?key|access.?token|auth.?token', re.I)
 SAFE_STRINGS = {'trace', 'debug', 'info', 'information', 'warn', 'warning', 'error', 'err',
@@ -37,6 +38,7 @@ GAPS = [
     'Explicit Data roots describe disk content only; MO2 virtual winners must be supplied as an externally resolved view.',
     'Only the named scan scopes are covered. A search finding no switch does not establish absence of logging.',
     'Log metadata is historical evidence of a file, not proof of current activity or ownership. Log contents are never read.',
+    'Known log/capture/recording trees are excluded from control parsing; unknown state-JSON formats cannot always be distinguished from configuration.',
 ]
 
 
@@ -376,12 +378,14 @@ class Scanner:
                 continue
             for item in entries:
                 ref = label + '/' + item.name
-                if item.is_symlink() or getattr(Path(item.path), 'is_junction', lambda: False)():
-                    scope['symlinks_excluded'] += 1
-                    continue
                 try:
+                    # FILE_ATTRIBUTE_REPARSE_POINT also detects junctions on Python 3.10,
+                    # which has no Path.is_junction(). Do not follow unknown reparse points.
+                    if item.is_symlink() or getattr(item.stat(follow_symlinks=False), 'st_file_attributes', 0) & 0x400:
+                        scope['symlinks_excluded'] += 1
+                        continue
                     if item.is_dir(follow_symlinks=False):
-                        if item.name.casefold() in EXCLUDED_DIRS:
+                        if item.name.casefold() in EXCLUDED_DIRS or (not logs and item.name.casefold() in CONTENT_DIRS):
                             scope['directories_excluded'] += 1
                         elif recursive:
                             pending.append((Path(item.path), ref))
