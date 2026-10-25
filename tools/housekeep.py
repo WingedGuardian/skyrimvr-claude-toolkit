@@ -499,18 +499,19 @@ def has_recycle_bin() -> bool:
 
 
 def sweep_switched_off() -> bool:
-    """SKYGUARD_HOUSEKEEP_SWEEP=off: no session-start sweep, and no real Recycle Bin call from this process."""
+    """SKYGUARD_HOUSEKEEP_SWEEP=off: the USER's switch. It stops the session-start sweep and nothing else: `housekeep
+    recycle`, `apply` and kb-guard's rotation still use the Recycle Bin (review2 B-tools L2 / C-docs L7)."""
     return os.environ.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"
 
 
 def under_test_harness() -> bool:
-    """pytest, the toolkit's contained launcher without pytest (tests/run_harness_tests.py sets HARNESS_FIXTURE_ROOT),
-    or the switch above -- unless HOUSEKEEP_REAL_BIN_IN_TESTS opts a deliberate integration test in. A test that needs
-    a bin injects a fake recycler; the real one would show the user Windows dialogs (2026-10-20)."""
+    """A test run: pytest, or the toolkit's contained launcher without pytest (tests/run_harness_tests.py sets
+    HARNESS_FIXTURE_ROOT) -- unless HOUSEKEEP_REAL_BIN_IN_TESTS, the one opt-in, lets a deliberate integration test
+    through. tools/skyguard/run.py's session-sweep launch guard uses the same markers and the same opt-in. A test
+    that needs a bin injects a fake recycler; the real one would show the user Windows dialogs (2026-10-20)."""
     if os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"):
         return False
-    return (bool(os.environ.get("PYTEST_CURRENT_TEST")) or bool(os.environ.get("HARNESS_FIXTURE_ROOT"))
-            or sweep_switched_off())
+    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or bool(os.environ.get("HARNESS_FIXTURE_ROOT"))
 
 
 def recycle(paths) -> dict:
@@ -521,8 +522,8 @@ def recycle(paths) -> dict:
     # No test may reach the real bin; the guard sits at the one call that touches the shell, so a test that forgets
     # its fake fails loudly instead of prompting the user.
     if under_test_harness():
-        raise RuntimeError("housekeep.recycle refused under the test harness (pytest, HARNESS_FIXTURE_ROOT or "
-                           "SKYGUARD_HOUSEKEEP_SWEEP=off): inject a fake recycler (no real Recycle Bin)")
+        raise RuntimeError("housekeep.recycle refused under the test harness (pytest or HARNESS_FIXTURE_ROOT): "
+                           "inject a fake recycler (no real Recycle Bin)")
     if not has_recycle_bin():
         # No Recycle Bin implementation here (Windows only). Never a delete instead: every item stays, and says so.
         return {p: "no Recycle Bin on this platform: left in place" for p in paths}

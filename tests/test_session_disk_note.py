@@ -9,6 +9,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from conftest import REPO
 
 RUN = REPO / "tools" / "skyguard" / "run.py"
@@ -55,14 +57,24 @@ def test_no_note_adds_nothing_to_the_banner(tmp_path):
     assert "DISK:" in _start(with_note, "claude", "session-kb-guard", payload).stdout.decode("utf-8")
 
 
-def test_a_sweep_is_launched_detached_outside_tests_and_never_inside_them(monkeypatch):
-    """Only for the installed toolkit itself (the project whose tools/ holds this run.py): here, REPO."""
+def _markers(monkeypatch, *keep):
+    """Exactly the named test markers set (the launcher sets HARNESS_FIXTURE_ROOT too, which would mask a clause)."""
+    for k in ("PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT", "HOUSEKEEP_REAL_BIN_IN_TESTS", "SKYGUARD_HOUSEKEEP_SWEEP"):
+        monkeypatch.delenv(k, raising=False)
+    for k in keep:
+        monkeypatch.setenv(k, "1")
+
+
+@pytest.mark.parametrize("marker", ["PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT"])
+def test_a_sweep_is_launched_detached_outside_tests_and_never_inside_them(monkeypatch, marker):
+    """Only for the installed toolkit itself (the project whose tools/ holds this run.py): here, REPO. Each test
+    marker alone stops the launch; HOUSEKEEP_REAL_BIN_IN_TESTS (housekeep's one opt-in) lets it through."""
     launched = []
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
-    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
+    _markers(monkeypatch, marker)
     run._disk_note(str(REPO))
-    assert launched == [], "under pytest the hook must not sweep the real temp dir"
-    monkeypatch.setenv("SKYGUARD_SWEEP_IN_TESTS", "1")              # twin: what a real session does
+    assert launched == [], "under the test harness the hook must not sweep the real temp dir"
+    monkeypatch.setenv("HOUSEKEEP_REAL_BIN_IN_TESTS", "1")         # twin: what a real session does
     run._disk_note(str(REPO))
     (argv, kw), = launched
     assert argv[-3:] == [str(REPO / "tools" / "housekeep.py"), "session", str(REPO / run.DISK_NOTE)]
@@ -73,19 +85,34 @@ def test_no_sweep_for_a_project_that_is_not_this_toolkit(tmp_path, monkeypatch):
     """A hook run against a test fixture or another copy never launches THIS copy's sweep (coordinator finding)."""
     launched = []
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
-    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
-    monkeypatch.setenv("SKYGUARD_SWEEP_IN_TESTS", "1")              # as a real session: only the project differs
+    _markers(monkeypatch, "HOUSEKEEP_REAL_BIN_IN_TESTS")           # as a real session: only the project differs
     run._disk_note(str(tmp_path))
     assert launched == []
     run._disk_note(str(REPO))                                       # twin: the toolkit itself does launch
     assert len(launched) == 1
 
 
+def test_the_launch_guard_and_the_bin_refusal_read_the_same_markers(monkeypatch):
+    """review2 B-tools L2: one set of test markers and ONE opt-in for both guards (the launch and the shell call)."""
+    sys.path.insert(0, str(REPO / "tools"))
+    import housekeep
+    launched = []
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
+    for keep in [(), ("PYTEST_CURRENT_TEST",), ("HARNESS_FIXTURE_ROOT",),
+                 ("PYTEST_CURRENT_TEST", "HOUSEKEEP_REAL_BIN_IN_TESTS"),
+                 ("HARNESS_FIXTURE_ROOT", "SKYGUARD_SWEEP_IN_TESTS")]:     # the retired second opt-in counts for nothing
+        monkeypatch.delenv("SKYGUARD_SWEEP_IN_TESTS", raising=False)
+        _markers(monkeypatch, *keep)
+        del launched[:]
+        run._disk_note(str(REPO))
+        assert bool(launched) is not housekeep.under_test_harness(), keep
+
+
 def test_the_switch_stops_the_session_sweep(monkeypatch):
     """Helpers that clean the environment (no PYTEST_CURRENT_TEST) rely on SKYGUARD_HOUSEKEEP_SWEEP=off."""
     launched = []
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
-    monkeypatch.setenv("SKYGUARD_SWEEP_IN_TESTS", "1")
+    _markers(monkeypatch, "HOUSEKEEP_REAL_BIN_IN_TESTS")
     monkeypatch.setenv("SKYGUARD_HOUSEKEEP_SWEEP", "off")
     run._disk_note(str(REPO))
     assert launched == []

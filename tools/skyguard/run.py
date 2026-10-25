@@ -134,9 +134,12 @@ def _disk_note(project) -> str:
         own = (Path(project).resolve() / "tools" / "housekeep.py") == tool
     except OSError:
         own = False
-    # A test suite runs this hook hundreds of times: none of them may launch a real sweep of the real temp dir.
-    # Test helpers that clean the environment (no PYTEST_CURRENT_TEST) set SKYGUARD_HOUSEKEEP_SWEEP=off instead.
-    in_test = os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("SKYGUARD_SWEEP_IN_TESTS")
+    # A test suite runs this hook hundreds of times: none of them may launch a real sweep of the real temp dir. The
+    # same test markers and the same single opt-in as housekeep.under_test_harness (pytest, the contained launcher's
+    # HARNESS_FIXTURE_ROOT; HOUSEKEEP_REAL_BIN_IN_TESTS). Test helpers that clean the environment lose both markers,
+    # so they set SKYGUARD_HOUSEKEEP_SWEEP=off instead.
+    in_test = ((os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("HARNESS_FIXTURE_ROOT"))
+               and not os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"))
     off = os.environ.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"
     if tool.is_file() and own and not off and not in_test:
         try:
