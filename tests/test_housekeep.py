@@ -679,6 +679,8 @@ def test_session_recycles_settled_retired_guard_store_batches_and_keeps_a_fresh_
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     fake = bin_for(tmp_path)
     monkeypatch.setattr(hk, "recycle", fake)
+    # conftest switches the real sweep off for every test; this one runs it against a fake temp dir and a fake bin.
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
     (tmp_path / "temp").mkdir()
     (tmp_path / "toolkit").mkdir()
     retired = proj / ".claude" / "retired"
