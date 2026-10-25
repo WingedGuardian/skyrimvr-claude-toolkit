@@ -55,6 +55,8 @@ EXCLUDE = ("tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests"
 # docs/superpowers/ is the maintainer's plans, handoffs and measurements (user ruling 2026-10-20: never shipped). The
 # measurements that shipped docs cite live in docs/evidence/ instead.
 EXCLUDE += ("docs/superpowers",)
+# docs/REVIEW-SCOPE.md is the maintainer's release-review scope note (final sweep 2026-10-25): same ruling, never shipped.
+EXCLUDE += ("docs/REVIEW-SCOPE.md",)
 
 
 def is_excluded(path: str) -> bool:

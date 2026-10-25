@@ -76,6 +76,8 @@ def pristine(tmp_path_factory):
     root = copy_repo(tmp_path_factory.mktemp("payload") / "toolkit")
     shutil.rmtree(root / ".github")
     shutil.rmtree(root / "docs" / "superpowers")
+    if (root / "docs" / "REVIEW-SCOPE.md").exists():
+        (root / "docs" / "REVIEW-SCOPE.md").unlink()        # same-run scratch: this fixture's own copy
     if (root / "scripts" / "layer2-spike").is_dir():
         shutil.rmtree(root / "scripts" / "layer2-spike")
     if (root / "scripts" / "guard-corpus").is_dir():
@@ -168,6 +170,8 @@ BREAKS = {
                               "scripts/guard-latency.py NOT shipped"),
     "git-shipped": (_mkdir(".git"), ".git NOT shipped"),
     "superpowers-shipped": (_mkdir(".superpowers"), ".superpowers NOT shipped"),
+    "review-scope-shipped": (lambda r: (r / "docs" / "REVIEW-SCOPE.md").write_text("scope"),
+                             "docs/REVIEW-SCOPE.md NOT shipped"),
     "docs-superpowers-shipped": (_mkdir("docs/superpowers"), "docs/superpowers NOT shipped"),
     "skyguard-state-shipped": (_mkdir(".skyguard"), ".skyguard NOT shipped"),
     "local-kb-shipped": (lambda r: (r / "KNOWLEDGEBASE.local.md").write_text("mine"), "KNOWLEDGEBASE.local.md NOT shipped"),

@@ -10125,3 +10125,12 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_HKS, "        res = recycle([p for p in args if not refused[p]])\n", "        res = recycle(list(args))\n",
      _HKS_T + "test_a_refused_path_never_reaches_the_bin_and_the_rest_still_goes", "sweep-hk-recycle-refusal-ignored"),
 ]]
+
+# Final sweep 2026-10-25 (X4 6a15443): docs/REVIEW-SCOPE.md is a maintainer note, never in the zip. Builder + checker.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("scripts/build_release_zip.py", 'EXCLUDE += ("docs/REVIEW-SCOPE.md",)\n', "",
+     "tests/test_release_build.py::test_the_maintainer_review_scope_note_is_excluded_and_its_siblings_ship",
+     "sweep-release-review-scope-shipped"),
+    ("tools/check-release-payload.py", '    "docs/REVIEW-SCOPE.md",   # the maintainer', '    # "docs/REVIEW-SCOPE.md", the maintainer',
+     _MM_RP + "[review-scope-shipped]", "sweep-payload-review-scope-allowed"),
+]]

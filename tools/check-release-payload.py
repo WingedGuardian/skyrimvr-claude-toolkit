@@ -125,6 +125,7 @@ ABSENT_PATHS = (
     ".git",
     ".superpowers",
     "docs/superpowers",       # maintainer plans/handoffs/measurements; cited evidence ships as docs/evidence/
+    "docs/REVIEW-SCOPE.md",   # the maintainer's release-review scope note
     ".skyguard",
     "KNOWLEDGEBASE.local.md",
     ".claude/backups",
