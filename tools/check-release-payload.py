@@ -92,6 +92,17 @@ CORE_REQUIRED = (
     "tools/resaver-cli.sh",
     "tools/resaver-cli/ResaverCLI.java",
     "tools/resaver_cli_cache.py",
+    # v4.0.0: the opt-in native backend. Built on the user's machine from the pinned upstream plus these patches;
+    # the Apache-2.0 LICENSE and NOTICE (with the modification notice) and the CLI build's third-party notices ship
+    # with every copy of the patch set (tools/resaver-plus/NOTICE.md).
+    "tools/resaver_native.py",
+    "tools/resaver-plus.py",
+    "tools/resaver-plus/build.py",
+    "tools/resaver-plus/SOURCE-SHA256",
+    "tools/resaver-plus/LICENSE",
+    "tools/resaver-plus/NOTICE.md",
+    "tools/resaver-plus/THIRD-PARTY-NOTICES.md",
+    "tools/resaver-plus/README.md",
     "tools/modding-harness.lock.json",
     "tools/agent-harness.py",
     "tools/skyguard/portable.py",
@@ -134,6 +145,16 @@ ABSENT_PATHS = (
     # The driver retains local-build delivery (tools/vr-emu-driver/README.md).
     "tools/vr-emu-driver/build",
     "tools/vr-emu-driver/work",
+    # ReSaver Plus: the user's own build, its work tree and their backend choice; and the local-only upstream
+    # contribution bundles and install-specific helpers of the dev install, which never ship.
+    "tools/resaver-plus/build",
+    "tools/resaver-plus/work",
+    "tools/resaver-plus/backend",
+    "tools/resaver-plus/contributions",
+    "tools/resaver-port",
+    "tools/resaver-port-contributions.py",
+    "tools/resaver-native-runtime.py",
+    "tools/resaver-production-check.py",
     "tools/resaver-cli/tests",
     "tools/resaver-cli/.compiled",
     ".modding-agent-harness",
@@ -142,6 +163,12 @@ ABSENT_NAMES = ("skyrim-paths.env", ".nexus_api_key")
 # Any dotenv-style file (review M8): a committed `.env` / `x.env` / `.env.local` is where secrets live.
 # A documented `*.example` template is not one.
 DOTENV_GLOBS = (".env", "*.env", ".env.*", "*.env.local")
+# ReSaver Plus ships text only (patches, additions, build.py): no binary of any kind under its folder, no PR draft of
+# an upstream contribution anywhere, no qualification checker of the dev install, and exactly the tested patch set.
+RESAVER_PLUS = "tools/resaver-plus"
+RESAVER_BINARY_SUFFIXES = (".exe", ".dll", ".pdb", ".lib", ".obj", ".ilk", ".exp")
+RESAVER_PLUS_PATCHES = 27
+RESAVER_PLUS_ADDITIONS = 15
 
 ADAPTER_REQUIRED = (
     "ADAPTING.md",
@@ -204,6 +231,26 @@ def check_shape(root: Path):
     found = sorted({p.relative_to(root).as_posix() for g in DOTENV_GLOBS for p in root.rglob(g)
                     if p.is_file() and not p.name.endswith(".example")})
     yield "no dotenv-style file (.env, *.env, .env.*) anywhere", ("PRESENT: " + ", ".join(found)) if found else None
+    yield from check_resaver_plus(root)
+
+
+def check_resaver_plus(root: Path):
+    folder = root / RESAVER_PLUS
+    files = sorted(p for p in folder.rglob("*") if p.is_file()) if folder.is_dir() else []
+    binaries = [p.relative_to(root).as_posix() for p in files if p.suffix.lower() in RESAVER_BINARY_SUFFIXES]
+    yield "no binary under {}".format(RESAVER_PLUS), ("PRESENT: " + ", ".join(binaries)) if binaries else None
+    drafts = sorted(p.relative_to(root).as_posix() for p in root.rglob("*-PR.md"))
+    yield "no upstream PR draft (*-PR.md) anywhere", ("PRESENT: " + ", ".join(drafts)) if drafts else None
+    tools = root / "tools"
+    checkers = sorted(p.relative_to(root).as_posix() for p in tools.glob("resaver-port-*")) if tools.is_dir() else []
+    yield "no ReSaver Plus qualification checker (tools/resaver-port-*)", (
+        "PRESENT: " + ", ".join(checkers)) if checkers else None
+    patches = len(list((folder / "patches").glob("*.patch"))) if folder.is_dir() else 0
+    additions = len([p for p in (folder / "additions").rglob("*") if p.is_file()]) if folder.is_dir() else 0
+    yield "{} carries the tested {} patches and {} additions".format(
+        RESAVER_PLUS, RESAVER_PLUS_PATCHES, RESAVER_PLUS_ADDITIONS), (
+        None if (patches, additions) == (RESAVER_PLUS_PATCHES, RESAVER_PLUS_ADDITIONS)
+        else "{} patches, {} additions".format(patches, additions))
 
 
 def check_hooks(root: Path):

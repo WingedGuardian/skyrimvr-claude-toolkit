@@ -152,7 +152,8 @@ def test_a_missing_output_folder_is_refused(native):
 def test_an_output_inside_the_permanent_save_store_is_refused(native):
     store = rn.store_root(native.project)
     store.mkdir(parents=True, exist_ok=True)
-    refused(native, "clean", native.source, store / "Out.ess", "--apply", match="permanent save store")
+    refused(native, "clean", native.source, store / "Out.ess", "--apply",
+            match="Output cannot be inside the permanent save store")
     assert not native.calls
 
 
@@ -254,7 +255,8 @@ def test_an_applied_receipt_that_differs_from_the_preview_is_an_error(native):
 
 @pytest.mark.parametrize("key,match", [("verified", "not verified on reopen"),
                                        ("wroteFile", "no file written"),
-                                       ("deltaVerified", "lacks a verified delta")])
+                                       ("deltaVerified", "lacks a verified delta")],
+                         ids=["verified", "wroteFile", "deltaVerified"])
 def test_an_incomplete_applied_receipt_is_an_error(native, key, match):
     native.applied = dict(native.applied, **{key: False})
     refused(native, "clean", native.source, native.out, "--apply", match=match)

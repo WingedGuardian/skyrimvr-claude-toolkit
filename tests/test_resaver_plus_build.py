@@ -237,9 +237,18 @@ def test_jobs_are_capped_at_two(env):
 
 def test_a_work_folder_too_deep_for_msvc_is_refused_up_front(env, monkeypatch):
     mod, fake = env
-    monkeypatch.setattr(mod, "MAX_WORK_PATH", 100)
+    monkeypatch.setattr(mod, "MAX_WORK_PATH", len(str(fake.work)) + 10)
     with pytest.raises(mod.BuildError, match="shorter --work"):
-        mod.build(Path("C:/" + "d" * 120))
+        mod.build(fake.work / ("d" * 20))
+    assert not fake.calls
+
+
+def test_a_manifest_that_does_not_cover_the_patches_is_refused(env):
+    mod, fake = env
+    mod.MANIFEST.write_text("{} patched src/other.cpp\n{} added src/new.cpp\n".format(_sha(PATCHED), _sha(ADDED)),
+                            encoding="utf-8")
+    with pytest.raises(mod.BuildError, match="does not list"):
+        mod.build(fake.work)
     assert not fake.calls
 
 
