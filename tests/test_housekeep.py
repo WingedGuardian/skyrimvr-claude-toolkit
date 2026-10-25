@@ -154,6 +154,52 @@ def test_a_git_tracked_file_is_never_planned(tree):
     assert key(twin) in planned(doc)
 
 
+def _git_answers(monkeypatch, rc, stderr=b"", raises=None):
+    real = subprocess.run
+
+    def fake(cmd, *a, **k):
+        if cmd[:1] == ["git"] and "ls-files" in cmd:
+            if raises:
+                raise raises
+            return subprocess.CompletedProcess(cmd, rc, b"", stderr)
+        return real(cmd, *a, **k)
+
+    monkeypatch.setattr(hk.subprocess, "run", fake)
+
+
+@pytest.mark.parametrize("failure", ["dubious-ownership", "git-missing"])
+def test_a_git_failure_in_a_repository_refuses_instead_of_unprotecting_tracked_files(tree, monkeypatch, capsys,
+                                                                                       failure):
+    """Sweep 2026-10-25 (X4 679bc4a): any git failure used to return an empty set, so every tracked file silently
+    lost its protection. Now nothing is planned, and the command says why."""
+    write(tree / "_CLAUDE_OUTPUT" / "t" / "fixture" / "Skyrim.esm", blob("master"))
+    (tree / ".git").mkdir()
+    if failure == "dubious-ownership":
+        _git_answers(monkeypatch, 128, b"fatal: detected dubious ownership in repository at '/x'")
+    else:
+        _git_answers(monkeypatch, 0, raises=FileNotFoundError("git"))
+    with pytest.raises(hk.ProtectionUnavailable):
+        hk.plan(cfg_for(tree))
+    cfg_for(tree)
+    conf = json.loads((tree / "hk.json").read_text(encoding="utf-8"))
+    conf["root"] = str(tree)                      # the CLI reads the root from the file, not from the fixture
+    (tree / "hk.json").write_text(json.dumps(conf), encoding="utf-8")
+    assert hk.main(["--config", str(tree / "hk.json"), "plan", "-o", str(tree / "plan.json")]) == 1
+    assert "REFUSED" in capsys.readouterr().err and not (tree / "plan.json").exists()
+
+
+@pytest.mark.parametrize("case", ["not-a-repository", "no-git-no-repository"])
+def test_a_plain_folder_has_no_tracked_files_and_is_still_planned(tree, monkeypatch, case):
+    """The twin: a root that is not in any git work tree has nothing tracked, and that is not a failure."""
+    monkeypatch.setattr(hk, "_in_git_work_tree", lambda root: False)
+    if case == "not-a-repository":
+        _git_answers(monkeypatch, 128, b"fatal: not a git repository (or any of the parent directories): .git")
+    else:
+        _git_answers(monkeypatch, 0, raises=FileNotFoundError("git"))
+    write(tree / "_CLAUDE_OUTPUT" / "t" / "fixture" / "Skyrim.esm", blob("master"))
+    assert planned(hk.plan(cfg_for(tree)), "recreatable")
+
+
 def test_an_active_task_folder_is_skipped_whole(tree):
     busy = write(tree / "_CLAUDE_OUTPUT" / "busy" / "fixture" / "Skyrim.esm", blob("master"))
     write(tree / "_CLAUDE_OUTPUT" / "busy" / "notes.md", b"still working", days=0)

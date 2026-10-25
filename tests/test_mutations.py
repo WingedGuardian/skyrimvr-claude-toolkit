@@ -10061,3 +10061,17 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _HKS_T + "test_duplicates_become_one_read_only_copy_with_every_path_intact",
      "sweep-hk-apply-forgets-its-own-links"),
 ]]
+
+# Final sweep 2026-10-25 (X4 679bc4a): a git failure must not silently switch the git-tracked protection off.
+_HKG = "test_a_git_failure_in_a_repository_refuses_instead_of_unprotecting_tracked_files"
+_HKP = "test_a_plain_folder_has_no_tracked_files_and_is_still_planned"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_HKS, "        if isinstance(e, OSError) and not _in_git_work_tree(root):\n", "        if True:\n",
+     _HKS_T + _HKG + "[git-missing]", "sweep-hk-git-missing-unprotects"),
+    (_HKS, '        if "not a git repository" in err.lower():\n', "        if True:\n",
+     _HKS_T + _HKG + "[dubious-ownership]", "sweep-hk-git-error-unprotects"),
+    (_HKS, '        if "not a git repository" in err.lower():\n', "        if False:\n",
+     _HKS_T + _HKP + "[not-a-repository]", "sweep-hk-plain-folder-refused"),
+    (_HKS, "    except ProtectionUnavailable as e:\n", "    except ZeroDivisionError as e:\n",
+     _HKS_T + _HKG + "[dubious-ownership]", "sweep-hk-refusal-not-reported"),
+]]

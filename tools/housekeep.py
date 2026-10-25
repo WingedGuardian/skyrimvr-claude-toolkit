@@ -21,7 +21,8 @@ Two passes, never one: `plan` decides, `apply` re-verifies. An action whose file
 
 What it never touches, whatever the config says: saves (.ess/.skse) and anything under a folder whose name
 contains "backup"; git-tracked files; every file a project doc links to; and any task folder written to within
-`active_hours` (another session is probably still working there).
+`active_hours` (another session is probably still working there). When git cannot say which files are tracked in a
+root that is in a work tree, `report`, `plan` and `apply` refuse (exit 1) instead of planning without that protection.
 
 Removal goes to the Recycle Bin, never a permanent delete, with no exceptions (Windows: the shell's own delete with
 FOF_ALLOWUNDO). An item too big for the bin gets Windows' own "delete permanently?" prompt; "No" leaves it in place.
@@ -159,13 +160,32 @@ def fingerprint(folder: Path):
     return [n, size, round(newest, 3)]
 
 
+class ProtectionUnavailable(OSError):
+    """A Forever rule could not be evaluated. Nothing is planned or applied: a rule that silently evaluates to "nothing
+    is protected" is the one failure this tool must never have."""
+
+
+def _in_git_work_tree(root: Path) -> bool:
+    p = Path(os.path.abspath(str(root)))
+    return any((q / ".git").exists() for q in (p, *p.parents))
+
+
 def tracked_files(root: Path) -> set:
+    """Every git-tracked file under root. Fails CLOSED (ProtectionUnavailable) when git cannot answer for a root that
+    is in a work tree -- dubious ownership, a broken index, a timeout, no runnable git -- instead of returning an empty
+    set that switches the git-tracked protection off without a word (sweep 2026-10-25; X4 679bc4a)."""
     try:
         out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, timeout=120)
-    except (OSError, subprocess.SubprocessError):
-        return set()
+    except (OSError, subprocess.SubprocessError) as e:
+        if isinstance(e, OSError) and not _in_git_work_tree(root):
+            return set()                         # no git, and no repository either: nothing here is tracked
+        raise ProtectionUnavailable("git-tracked protection unavailable ({}: {})".format(type(e).__name__, e)) from e
     if out.returncode != 0:
-        return set()
+        err = out.stderr.decode("utf-8", "replace").strip()
+        if "not a git repository" in err.lower():
+            return set()                         # a plain folder: nothing here is tracked
+        raise ProtectionUnavailable("git-tracked protection unavailable (git ls-files exit {}: {})".format(
+            out.returncode, err[:300] or "no message"))
     return {_key(root / p) for p in out.stdout.decode("utf-8", "replace").split("\0") if p}
 
 
@@ -984,6 +1004,14 @@ def main(argv) -> int:
         print("housekeep: {}".format(e), file=sys.stderr)
         return 2
     cmd = args.pop(0) if args else "report"
+    try:
+        return _run(cmd, args, cfg)
+    except ProtectionUnavailable as e:
+        print("housekeep: REFUSED, nothing planned or applied: {}".format(e), file=sys.stderr)
+        return 1
+
+
+def _run(cmd, args, cfg) -> int:
     if cmd == "report" and not args:
         return report(cfg)
     if cmd == "sweep-temp" and not args:
