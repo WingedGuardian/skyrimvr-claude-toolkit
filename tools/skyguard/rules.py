@@ -326,7 +326,7 @@ RULES = {
         'Note: the guard backs up {file} before this runs ({op}).'
     ),
     },
-    # More than 2, or a wildcard: the user's typed SAVE_ACCESS_APPROVAL line (approvals.py) is required.
+    # More than 2, or a wildcard: the user's typed SAVE_ACCESS_APPROVAL line (modding_harness/approval.py) is required.
     'S-SAVE-APPROVAL': {
         "decision": 'deny',
         "hook": 'protect-bash',
@@ -393,6 +393,18 @@ RULES = {
         "template": (
         'This runs a program the guard cannot name on the save {file}.\n'
         'Approve only if you asked for this save to be used this way.'
+    ),
+    },
+    # 2026-10-20 (user ruling, "ask first", v4.0.0 review L1): a program the guard cannot name (an unnamed program
+    # word, an eval of a variable, awk system()) on a path the other rules protect that is not a save (S-SAVE-OPAQUE's).
+    'S-OPAQUE-PROTECTED': {
+        "decision": 'ask',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'This runs a program the guard cannot name on {file}, which the guards protect.\n'
+        'Approve only if you asked for this command to be run on it.'
     ),
     },
     'S-DEVBENCH-CRASH': {
@@ -493,6 +505,18 @@ RULES = {
     # user asked for, against a pre-committed bar of <= 25 %. The ask text, if a later pricing flips it back:
     #   'This edits {file}, part of the safety guards themselves.' / 'Yes applies it; the next session start lists
     #   guard files that differ from the release.' (W-: 'Yes saves it; ...'). The session-start banner ships either way.
+    # User ruling 2026-10-20 (v4.0.0 review L2 MEDIUM-3): the agent's own session transcripts are where the bulk-save
+    # approval reader looks for the user's typed line. No agent write, append, move or delete may reach one (NEVER_SHADOW).
+    'S-SELF-TRANSCRIPT': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        "Blocked: {file} is an agent session transcript; only the agent host writes it.\n"
+        'Reading it is fine. Save approvals are read from it, so no agent may change it.'
+    ),
+    },
     'S-SELF-GUARD': {
         "decision": 'advise',
         "hook": 'protect-bash',
@@ -542,6 +566,16 @@ RULES = {
         "template": (
         "Blocked: {file} holds the guards' on/off state and is written only by tools/skyguard.\n"
         'Use bash tools/skyguard.sh guards off, or lock unlock, not an edit.'
+    ),
+    },
+    'W-SELF-TRANSCRIPT': {
+        "decision": 'deny',
+        "hook": 'protect-files',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        "Blocked: {file} is an agent session transcript; only the agent host writes it.\n"
+        'Reading it is fine. Save approvals are read from it, so no agent may edit it.'
     ),
     },
     'W-SELF-GUARD': {

@@ -53,7 +53,9 @@ KNOWN LIMITS (fix round 1, recorded, not handled):
     allowlist (beside SCRATCH_GLOBS) is a follow-up idea, not built;
   - an unresolved delete operand run from inside a protected folder is not flagged (ruling, fix round 1:
     measured 75 occurrences, 0 real, in 61,935 items);
-  - `CMD="rm -rf <install>"; $CMD`: an assignment value is not an exec; PS5 Remove-Item -Recurse follows junctions;
+  - `CMD="rm -rf <install>"; $CMD`: an assignment value is not an exec, so no delete rule sees it; the unnamed
+    program asks instead (shell_rules S-OPAQUE-PROTECTED, user ruling 2026-10-20). PS5 Remove-Item -Recurse follows
+    junctions;
   - (Task 7b) a variable built from another variable (`SP=...; Y="$SP/x"; rm -rf "$Y"`) stays unresolved -- only
     a plain literal counts; so does any name the text writes twice, even harmlessly (`echo "D=$D"`). ~80 such
     S-DEL-UNRESOLVED denies remain in the history.

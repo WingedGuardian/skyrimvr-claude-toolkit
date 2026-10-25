@@ -28,9 +28,23 @@ NO_PATHS = ("GUARD INERT: a write request named no file, so the write rules chec
 NO_VERDICTS = "GUARD INERT: the engine combined zero verdicts, so nothing was checked."
 
 
+UNPARSED = "preservation/policy failed: "
+
+
 def evaluate_shell(req, roots, audit) -> Verdict:
     """Plan 5: the rules read the payload cwd (RAW) and the dialect; a request that names none ("" / None) is
-    parsed as bash AND PowerShell (spec R5)."""
+    parsed as bash AND PowerShell (spec R5).
+
+    v4.0.0 review L3 LOW-1: a rule that cannot read part of the command raises ValueError (a malformed inline snippet,
+    `python -c "print(1"`: writes.py cannot parse its literal write scope). That is a refusal of THIS command, with
+    the text the portable dispatcher gives the same failure -- never an exception that ends the hook as GUARD INERT."""
+    try:
+        return _evaluate_shell(req, roots, audit)
+    except ValueError as exc:
+        return Verdict("deny", UNPARSED + str(exc), status="failed", code="engine.UNPARSED")
+
+
+def _evaluate_shell(req, roots, audit) -> Verdict:
     command, shell = req.command, req.shell or ""
     try:
         parsed = shellparse.parse(command, shell) if isinstance(command, str) else None
@@ -41,7 +55,8 @@ def evaluate_shell(req, roots, audit) -> Verdict:
         from modding_harness.transport import UNKNOWN_EXECUTION_CWD
         if parsed is None or writes.unplaced_mutation(command, parsed, os.environ):
             return Verdict("deny", UNKNOWN_EXECUTION_CWD, status="failed", code="engine.INERT_EXECUTION_CWD")
-    v = codes.classify(shell_rules.decide(command, roots, audit, cwd=req.cwd or "", shell=shell, parsed=parsed))
+    v = codes.classify(shell_rules.decide(command, roots, audit, cwd=req.cwd or "", shell=shell, parsed=parsed,
+                                          transcript=req.transcript_path or ""))
     # D-P4-2 (Plan 4 Verdict.status, Plan 5 Task 17): the rules ran, but on a command the parser could not read
     # completely (a quote or heredoc it could not close) or whose program is a variable. The answer stands; the
     # telemetry must not call it a full evaluation. A failed status (an INERT refusal) is never lowered.
@@ -50,10 +65,10 @@ def evaluate_shell(req, roots, audit) -> Verdict:
     return v
 
 
-def evaluate_write(path: str, audit, roots=None, cwd: str = "", op: str = "write") -> Verdict:
+def evaluate_write(path: str, audit, roots=None, cwd: str = "", op: str = "write", transcript: str = "") -> Verdict:
     """Plan 5 Task 9: W-PAPYRUS / W-INSTALL decide on where the file RESOLVES (roots + cwd). roots=None keeps the
     legacy text tests (more notes, never fewer denies). op: what the call does to the file (write_rules.decide)."""
-    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd, op=op))
+    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd, op=op, transcript=transcript))
 
 
 def evaluate_mcp(tool_name: str, args, audit, roots=None) -> Verdict:
@@ -164,7 +179,8 @@ def evaluate_writes(req, audit, roots=None) -> Verdict:
             if v is not None:
                 out.append(v)
                 continue
-        out.append(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "", op=SAVE_OP.get(op, "write")))
+        out.append(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "", op=SAVE_OP.get(op, "write"),
+                                  transcript=req.transcript_path or ""))
     return combine(out)
 
 
@@ -253,7 +269,7 @@ def side_effects(req, project, audit, v, roots_fn=None, deadline=None) -> Verdic
     """Snapshot and backups, whatever the decision (as on Claude, where those hooks run beside the guard).
     Each step has its own try: one failing never skips the next and never changes the decision. Task 15: the recovery
     snapshot (load order, INIs) goes first, inside `deadline` (a time.monotonic time). A save the call changes was
-    backed up before this, by saves.enforce in pre_tool: its result decides the call, so it is no side effect."""
+    backed up before this, by portable.check in pre_tool: its result decides the call, so it is no side effect."""
     partial = False
     if req.kind == "shell":
         try:
@@ -304,6 +320,9 @@ NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE", "write.W-SELF-STA
 # be backed up is never changed. `guards off` is a lift the agent may take itself, so it lifts neither.
 NEVER_SHADOW = NEVER_SHADOW | saves.NEVER_SHADOW
 NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SAVE-STORE", "write.W-SAVE-STORE"))
+# User ruling 2026-10-20: `guards off` is a lift the agent may take; it must not open the transcript the user's typed
+# save approval is read from.
+NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-TRANSCRIPT", "write.W-SELF-TRANSCRIPT"))
 
 
 def _reject_marker(project) -> Path:

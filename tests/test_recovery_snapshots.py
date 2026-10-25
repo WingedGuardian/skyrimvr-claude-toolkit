@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit as audit_mod, mcp_rules, paths, recovery, saves as saves_mod, shell_rules  # noqa: E402
 from skyguard import save_store
 from modding_harness import workspace
+from test_save_policy import live_enforce  # noqa: E402
 
 DAY = 86400
 
@@ -87,13 +88,13 @@ class Install:
                      deadline=deadline, env={})
 
     def change(self, command, cwd="", shell="bash", deadline=None):
-        """A save change as the deciding hook makes it: the rules, then the backup (saves.enforce)."""
+        """A save change as the deciding hook makes it: the rules, then the LIVE dispatcher (approval, backup)."""
         v = shell_rules.decide(command, self.roots, self.audit, cwd=cwd, shell=shell, env={})
-        return saves_mod.enforce(v, str(self.game), self.audit, "protect-bash", command=command, deadline=deadline)
+        return live_enforce(v, self.game, self.roots, self.audit, command=command, deadline=deadline)
 
     def mcp(self, tool_name, args):
         v = mcp_rules.decide(tool_name, args, self.audit, roots=self.roots, env={})
-        return saves_mod.enforce(v, str(self.game), self.audit, "protect-mcp", command=tool_name)
+        return live_enforce(v, self.game, self.roots, self.audit, command=tool_name)
 
     def stored(self, kind=None):
         """{basename: sha256} of every recorded line (of one kind)."""
@@ -213,7 +214,7 @@ def test_unreadable_roots_are_logged_not_silent(inst):
 
 
 # ---------------------------------------------------------------- the save a command changes (the save policy)
-# User ruling 2026-10-13: the DECIDING hook backs up every save a call changes (saves.enforce -> backup_saves), both
+# User ruling 2026-10-13: the DECIDING hook backs up every save a call changes (portable.check -> dispatcher), both
 # files of each pair, verified, BEFORE it allows the call; any failure denies. These are the Task 15 cases, ported:
 # the save is found exactly as before, and now its backup decides the call.
 
@@ -275,9 +276,14 @@ def test_resaver_keeps_the_save_it_writes_not_the_one_it_reads(inst):
 
 def test_resaver_writing_a_new_out_keeps_nothing_and_says_so(inst):
     """A NEW out changes no save: nothing to back up, and no note claims a backup."""
-    v = inst.change("bash tools/resaver-cli.sh set-global Quick.ess 0x14 1 Fresh.ess --apply", cwd=str(inst.game))
+    command = "bash tools/resaver-cli.sh set-global Quick.ess 0x14 1 Fresh.ess --apply"
+    v = inst.change(command, cwd=str(inst.game))
     assert (v.decision, v.context) == ("allow", "")
     assert inst.stored("save") == {}
+    # The rules' own verdict claims no backup either (the live dispatcher re-checks existence before preserving, so
+    # only this reading can show a pair wrongly counted as existing).
+    ruled = shell_rules.decide(command, inst.roots, inst.audit, cwd=str(inst.game), shell="bash", env={})
+    assert ruled.context == ""
 
 
 def test_resaver_given_a_pattern_says_it_cannot_keep_one_save(inst):

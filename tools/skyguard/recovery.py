@@ -10,11 +10,12 @@ does not protect:
   paths.roots): nothing is probed, so an install that declares neither gets no such snapshot and the audit log says so
   (once per change of that state, not once per call). Taken by run() (snapshot-before-tool; Codex pre-tool's side
   effects); never blocks.
-* EVERY SAVE A COMMAND CHANGES (backup_saves), called by the DECIDING hook (saves.enforce) before it allows the
-  command, because the save policy allows a save change only once its backup is verified: both files of each pair
+* LEGACY SAVE SNAPSHOTS (backup_saves). No hook calls it any more: the deciding hooks preserve saves through
+  portable.check -> the shared dispatcher's neutral store. It is retained to write the legacy store format that
+  restore still reads (tests build fixtures with it). In that format: both files of each pair
   (the save and its SKSE co-save, whichever one the command names), each copy fsynced and read back to its SHA-256,
-  one snapshot per pair; a missing co-save is recorded in the line's `missing`. Any failure raises SaveBackupFailed
-  and the hook DENIES. No rate limit, no size bound (the hook's time is the bound), and never pruned.
+  one snapshot per pair; a missing co-save is recorded in the line's `missing`. Any failure raises SaveBackupFailed.
+  No rate limit, no size bound (the caller's deadline is the bound), and never pruned.
 
 STORE `.claude/backups/recovery_snapshots/`:
 * `blobs/<sha256>`: content-addressed (snapshot._store_blob, backup.py's part file + running sha256 + size check), so
@@ -129,7 +130,7 @@ def run(project, command, payload_empty, audit, roots, cwd="", shell="", agent="
         now=None, env=None):
     """Shell route (snapshot-before-tool, Codex pre-tool side effects): the load order and INIs before a command that
     is not read-only. Never raises into the hook. A SAVE a command changes is backed up by the deciding hook instead
-    (saves.enforce -> backup_saves), before it allows the command: the save policy needs the backup's result."""
+    (portable.check -> the shared dispatcher), before it allows the command: the save policy needs the backup's result."""
     if payload_empty or not (command or "").strip():
         return
     take(project, audit, roots, command, not snapshot.read_only(command), now, deadline, agent, session_id)
@@ -280,7 +281,7 @@ def _config(store, idx, roots, audit, command, now, agent, session_id):
     return lines, updates, logline
 
 
-# ---------------------------------------------------------------- the save policy's backup (saves.enforce)
+# ---------------------------------------------------------------- legacy save snapshots (no hook calls these)
 
 
 class SaveBackupFailed(Exception):

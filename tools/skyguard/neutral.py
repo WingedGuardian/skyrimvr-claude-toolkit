@@ -171,7 +171,7 @@ def _decide(req: Request, project: str, roots_fn, audit) -> Verdict:
             v = engine.pre_tool(req, project, roots_fn, audit)
             return v._replace(context=UNJUDGED_MCP if v.context else "", code="neutral.UNJUDGED_MCP")
         # The same judge Claude's protect-mcp role uses (engine.evaluate_mcp -> mcp_rules), and the same save policy:
-        # an existing save the call overwrites is backed up first (saves.enforce), or the call is refused.
+        # an existing save the call overwrites is backed up first (portable.check), or the call is refused.
         v = engine.evaluate_mcp(req.mcp_tool, mcp_args(req.mcp_args), audit, roots=_soft_roots(roots_fn))
         from . import portable
         return portable.legacy_pre_tool(req, project, roots_fn, audit, precomputed=v)

@@ -803,3 +803,84 @@ def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping
         if k in found:
             return (k,) + found[k]
     return None
+
+
+# ------------------------------------------------------------------------- the agent's own session transcripts
+# User ruling 2026-10-20 (v4.0.0 review L2 MEDIUM-3): the bulk-save approval reader (modding_harness/approval.py) reads
+# the user's typed SAVE_ACCESS_APPROVAL from the agent's session transcript. An agent that could append a "typed human"
+# line there could approve its own bulk save change, so no agent write, append, move or delete may reach a transcript.
+# Reading one stays free. Covered: the payload's own transcript_path, Claude Code's `<config>/projects/**/*.jsonl`
+# (`~/.claude`, or CLAUDE_CONFIG_DIR) and Codex's `<home>/sessions/**` and `archived_sessions/**` (`~/.codex`, or
+# CODEX_HOME), through the file tools, apply_patch and every shell write/copy/move/delete route self_rules reads.
+# NOT covered (residue): interpreter code that builds the path at run time or writes from a script file.
+
+def _transcript_bases(env) -> List[Tuple[str, str]]:
+    """(absolute folder, "claude" | "codex") for each transcript tree this environment names."""
+    out = []
+    env = env or {}
+    for home in _homes(env):
+        out += [(home + "/.claude", "claude"), (home + "/.codex", "codex")]
+    for name, kind in (("CLAUDE_CONFIG_DIR", "claude"), ("CODEX_HOME", "codex")):
+        value = env.get(name) or ""
+        placed = paths.norm_abs(value) if value else None
+        if placed and (placed, kind) not in out:
+            out.append((placed, kind))
+    return out
+
+
+def transcript_target(abs_path: str, env, transcript: str = "", holder: bool = False) -> bool:
+    """`abs_path` is (or, holder=True, is a folder that holds) an agent session transcript."""
+    if not abs_path:
+        return False
+    low = abs_path.lower().rstrip("/")
+    if transcript:
+        own = paths.norm_abs(transcript)
+        if own and (low == own.lower().rstrip("/") or holder and own.lower().startswith(low + "/")):
+            return True
+        # Existing hardlinks can hide the supplied current transcript outside its tree.
+        # No scan is made for aliases to other sessions whose path the host did not supply.
+        if own:
+            try:
+                if os.path.samefile(abs_path, own):
+                    return True
+            except OSError:
+                pass  # Missing/unreadable paths still receive the lexical tree checks below.
+    for base, kind in _transcript_bases(env):
+        rel = _rel(abs_path, [base])
+        if rel is None:
+            continue
+        if kind == "claude":
+            if rel[:1] == ["projects"] and len(rel) >= 3 and rel[-1].endswith(".jsonl"):
+                return True
+            # A folder that holds transcripts (a project or a session folder), never a note file beside them
+            # (priced: `rm -f <project>/MEMORY.md.bak` was refused once in 97,323 history items).
+            if holder and (rel in ([], ["projects"]) or rel[:1] == ["projects"] and (
+                    len(rel) == 2 or rel[2] != "memory" and "." not in rel[-1])):
+                return True
+        else:
+            if rel[:1] in (["sessions"], ["archived_sessions"]) and (holder or len(rel) >= 2):
+                return True
+            if holder and rel == []:
+                return True
+    return False
+
+
+def shell_transcript_hit(command, parsed, cwd="", env=None, transcript="") -> str:
+    """The first transcript (or folder holding one) a shell command writes, copies onto, moves or deletes, or ""."""
+    from . import deletes
+    env = os.environ if env is None else env
+    for e in parsed.execs:
+        e = deletes.substituted(e)
+        candidates = [(w, holder) for w, holder, _op in _routes(e)]
+        candidates += [(w, True) for w in (deletes.operands(e) or []) if isinstance(w, str)]
+        for word, holder in candidates:
+            placed = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), word)
+            if placed and transcript_target(placed, env, transcript, holder):
+                return placed
+    for word, how in deletes.recycle_targets(deletes.recycle_text(command, parsed)):
+        if not word.strip():
+            continue
+        placed = _recycle_abs(word, how, targets.normalise_cwd(cwd), env)
+        if placed and transcript_target(placed, env, transcript, True):
+            return placed
+    return ""

@@ -1,8 +1,8 @@
-"""The save policy (user ruling 2026-10-13): saves.py, recovery.backup_saves, the hooks that call them.
+"""The save policy (user ruling 2026-10-13): saves.py, and the LIVE hook path (portable.check -> dispatcher).
 
   * 1 or 2 saves changed (a save and its .skse co-save are ONE save): the hook backs up BOTH files of each pair, each
     verified by SHA-256, records them, and only then allows the call.
-  * more than 2, or a wildcard: refused until the USER types a SAVE_ACCESS_APPROVAL line (approvals.py); then backed
+  * more than 2, or a wildcard: refused until the USER types a SAVE_ACCESS_APPROVAL line (approval.py); then backed
     up the same way and allowed.
   * reading, hashing, listing, copying out: free. Deleting or moving the Saves FOLDER: still denied.
   * any backup failure: denied (fail closed). Save backups are never pruned; a restore puts both files back, verified.
@@ -56,8 +56,10 @@ class Inst:
                                   shell=shell, env={})
 
     def enforce(self, v, transcript="", agent="claude", deadline=None):
-        return saves.enforce(v, str(self.game), self.audit, "protect-bash", command="test", transcript=transcript,
-                             agent=agent, session_id="s1", deadline=deadline)
+        """The LIVE deciding path every hook takes (portable.legacy_pre_tool -> the shared dispatcher's approval
+        check and verified pair backup), given the rules' verdict `v` (L2 MEDIUM-2: not the retired saves.enforce)."""
+        return live_enforce(v, self.game, self.roots, self.audit, transcript=transcript, agent=agent,
+                            deadline=deadline)
 
     def store(self):
         return save_store.store(self.game)
@@ -82,6 +84,15 @@ class Inst:
         f = self.game / name
         f.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
         return str(f)
+
+
+def live_enforce(v, game, roots, audit, transcript="", agent="claude", deadline=None, command="test"):
+    from skyguard import portable
+    from skyguard.request import Request
+    req = Request(agent=agent, event="pre_tool", kind="shell", command=command, session_id="s1",
+                  transcript_path=transcript, cwd=Path(game).as_posix(), tool_name="Bash")
+    return portable.legacy_pre_tool(req, str(game), lambda: roots, audit, deadline=deadline, precomputed=v,
+                                    side_effects=False)
 
 
 @pytest.fixture
@@ -192,17 +203,22 @@ def test_the_deciding_hook_names_canonical_scope_instead_of_a_basename_grant(ins
     v = inst.shell("rm " + " ".join(inst.p(s + ".ess") for s in ("Save1", "Save2", "Save3")))
     assert "check --preview" in v.reason and "only the user types SAVE_ACCESS_APPROVAL" in v.reason
     guarded = inst.enforce(v)
-    line = guarded.reason.split("SAVE_ACCESS_APPROVAL ", 1)[1]
-    expected = json.loads(inst.grant().split("SAVE_ACCESS_APPROVAL ", 1)[1])
-    assert json.loads(line) == expected
+    # The live refusal points at the scope preview; it never prints a basename ("files") grant to copy.
+    assert (guarded.decision, guarded.code) == ("deny", "shell.S-SAVE-APPROVAL"), guarded
+    assert guarded.reason == v.reason and '"files"' not in guarded.reason and inst.saved() == []
+    # The canonical line (full paths, session, op) is what approves it.
+    assert inst.enforce(v, transcript=inst.transcript(inst.grant())).decision == "allow"
 
 
 def test_a_wildcard_needs_approval_even_when_it_matches_one_save(inst):
     v = inst.shell('rm "' + inst.S + '/"Sing*.ess')
     assert v.decision == "deny"
     scoped = inst.enforce(v)
-    grant = json.loads(scoped.reason.split("SAVE_ACCESS_APPROVAL ", 1)[1])
-    assert grant["count"] == 1 and len(grant["paths"]) == 2 and len(grant["command_sha256"]) == 64
+    assert (scoped.decision, scoped.code) == ("deny", "shell.S-SAVE-APPROVAL") and inst.saved() == []
+    files_only = inst.transcript(inst.grant(names=("Single",), count=1), name="files.jsonl")
+    assert inst.enforce(v, transcript=files_only).decision == "deny"           # a wildcard needs its own grant
+    pattern = inst.transcript(inst.grant(names=("Single",), wildcard=True, count=1), name="pattern.jsonl")
+    assert inst.enforce(v, transcript=pattern).decision == "allow" and len(inst.saved()) == 1
 
 
 def test_a_wildcard_in_a_folder_name_cannot_be_listed(inst):
@@ -532,7 +548,7 @@ def test_a_patch_delete_of_one_save_is_backed_up_then_allowed_on_codex(inst):
     assert sorted(Path(e["src"]).name for e in inst.saved()) == ["Save2.ess", "Save2.skse"]
 
 
-# ================================================================ the backup (enforce, recovery.backup_saves)
+# ================================================================ the backup (the live dispatcher)
 
 
 def test_enforce_backs_up_both_files_verified_before_it_allows(inst):
@@ -947,3 +963,74 @@ def test_sp_row(sp_installs, row):
         pytest.skip(rec.windows_only(row["id"]))
     got = rec.engine_verdict(install, row["hook"], rec.row_payload(row, install))
     assert rec.intended_problems(row, got) == []
+
+
+# ================================================================ a save change beside another rule's ASK (L2 HIGH-1)
+# Through run.py in process (the real Claude hook entry): another rule's ask must never skip the save policy. More than
+# 2 saves with no typed approval: the S-SAVE-APPROVAL refusal wins over the ask. 1 or 2 saves: the pairs are backed up
+# and verified BEFORE the ask reaches the user, and a failed backup refuses.
+
+
+def _ask_beside(tmp_path, command_of, transcript=""):
+    rec = _rec()
+    install = rec.make_install(tmp_path, REPO / ".claude" / "hooks", "saves-bulk")
+    S = (install / "cfg" / "Saves").as_posix()
+    payload = {"tool_name": "Bash", "session_id": "corpus-save", "cwd": install.as_posix(),
+               "tool_input": {"command": command_of(S, install.as_posix())}}
+    if transcript:
+        payload["transcript_path"] = str(install / "transcripts" / transcript)
+    return install, rec.fire_inprocess(install, "protect-bash.sh", payload)
+
+
+def _rm(S, *stems):
+    return "rm " + " ".join('"{}/{}.ess"'.format(S, s) for s in stems)
+
+
+ASKERS = {
+    "opaque": lambda S, I: '$R "{}/Save1.ess"; '.format(S),
+    "git-discard": lambda S, I: "git checkout -- Data/Plugin.esp ; ",
+}
+
+
+@pytest.mark.parametrize("asker", sorted(ASKERS))
+def test_three_saves_beside_an_ask_are_refused_without_the_typed_approval(tmp_path, asker):
+    install, got = _ask_beside(tmp_path, lambda S, I: ASKERS[asker](S, I) + _rm(S, "Save1", "Save2", "Save3"))
+    assert got["decision"] == "deny" and "S-SAVE-APPROVAL" in got["rules"], got
+    assert got["text"].startswith("Blocked: this deletes 3 saves"), got
+    assert saved(install) == []
+
+
+@pytest.mark.parametrize("asker", sorted(ASKERS))
+def test_one_save_beside_an_ask_is_backed_up_before_the_ask(tmp_path, asker):
+    install, got = _ask_beside(tmp_path, lambda S, I: ASKERS[asker](S, I) + _rm(S, "Save1"))
+    assert got["decision"] == "ask", got
+    assert sorted(Path(e["src"]).name for e in saved(install)) == ["Save1.ess", "Save1.skse"]
+
+
+def test_three_approved_saves_beside_an_ask_are_backed_up_before_the_ask(tmp_path):
+    install, got = _ask_beside(tmp_path, lambda S, I: ASKERS["git-discard"](S, I) + _rm(S, "Save1", "Save2", "Save3"),
+                               transcript="approved.jsonl")
+    assert got["decision"] == "ask" and "S-GIT-DISCARD" in got["rules"], got
+    assert len(saved(install)) == 6
+
+
+def test_a_failed_backup_beside_an_ask_refuses(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("disk full")
+    from modding_harness.preservation import SaveStore
+    monkeypatch.setattr(SaveStore, "backup", boom)
+    install, got = _ask_beside(tmp_path, lambda S, I: ASKERS["git-discard"](S, I) + _rm(S, "Save1"))
+    assert got["decision"] == "deny" and got["text"].startswith("Blocked: the backup of the saves failed"), got
+
+
+@pytest.mark.parametrize("stems, want", [(("Save1",), "ask"), (("Save1", "Save2", "Save3"), "deny")],
+                         ids=["one-save-asks-after-backup", "three-saves-refused"])
+def test_codex_save_change_beside_an_ask_keeps_the_save_policy(inst, stems, want):
+    """The Codex entry (engine.pre_tool) shares portable.check: the same ordering holds there."""
+    cmd = 'git -C "{}" checkout -- Data/Plugin.esp ; '.format(inst.game.as_posix()) + "r" + "m " + " ".join(inst.p(s + ".ess") for s in stems)
+    v = codex_pre(inst, "Bash", {"command": cmd})
+    assert v.decision == want, v
+    if want == "deny":
+        assert v.code == "shell.S-SAVE-APPROVAL" and inst.saved() == []
+    else:
+        assert v.code == "shell.S-GIT-DISCARD" and len(inst.saved()) == 2

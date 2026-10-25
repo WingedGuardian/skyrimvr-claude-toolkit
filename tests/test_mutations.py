@@ -118,7 +118,7 @@ PRESERVATION_STATUS_MUTATIONS = [pytest.param(path, before, after, test,
 
 RELOCK_RETRY_MUTATIONS = [pytest.param(path, before, after, "tests/test_relock_retries.py::" + test,
     id="relock-retry-" + name) for path, before, after, test, name in (
-    ("tools/skyguard/lock.py", "        if res.exit == 0:", "        if True:",
+    ("tools/skyguard/lock.py", "        if not relock_failed(res):", "        if True:",
      "test_failed_expiry_relock_is_retried_until_success", "success-before-retire"),
     ("tools/skyguard/cli.py", '(x["kind"] == "lock" or not state.lift_expired(x, now))',
      'not state.lift_expired(x, now)', "test_unrelated_guard_write_keeps_expired_lock_obligation", "guard-writer"),
@@ -3760,8 +3760,8 @@ MUTATIONS += [
     pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in (
         # the hook must hand the write guard its roots, or the zone notes fall back to the text tests
         ("rule-W-INSTALL-wired", "tools/skyguard/run.py",
-         'v = engine.evaluate_write(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""))',
-         'v = engine.evaluate_write(p["file_path"], audit)', "tests/test_guard_corpus.py::test_intended_rows_reproduce"),
+         'v = engine.evaluate_write(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""),',
+         'v = engine.evaluate_write(p["file_path"], audit,', "tests/test_guard_corpus.py::test_intended_rows_reproduce"),
         ("rule-W-INI-class", _WRR, '    if grep(targets.SKYRIM_INI, file_path):', "    if False:",
          "tests/test_skyguard_write.py::test_rule4_skyrim_ini"),
         ("rule-W-SKSE-INI-class", _WRR, '    if grep(targets.SKSE_INI, file_path):', "    if False:",
@@ -4804,10 +4804,10 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _MERGE + "test_skyguard_codex_adapter.py::test_a_scalar_non_string_command_is_refused_before_the_rules[exec_command-int]",
      "merge-codex-scalar-command-allowed"),
     # engine: Plan 5's cwd and dialect must reach the rules through the Plan 4 engine.
-    ("tools/skyguard/engine.py", 'cwd=req.cwd or "", shell=shell, parsed=parsed))', 'shell=shell, parsed=parsed))',
+    ("tools/skyguard/engine.py", 'cwd=req.cwd or "", shell=shell, parsed=parsed,', 'shell=shell, parsed=parsed,',
      _MERGE + "test_guard_corpus.py::test_intended_rows_reproduce", "merge-engine-drops-cwd"),
-    ("tools/skyguard/engine.py", "    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd, op=op))",
-     "    return codes.classify(write_rules.decide(path, audit, op=op))",
+    ("tools/skyguard/engine.py", "    return codes.classify(write_rules.decide(path, audit, roots=roots, cwd=cwd, op=op, transcript=transcript))",
+     "    return codes.classify(write_rules.decide(path, audit, op=op, transcript=transcript))",
      _MERGE + "test_guard_corpus.py::test_intended_rows_reproduce", "merge-engine-write-drops-roots"),
     # Claude adapter: the Request carries the tool's dialect, never a guessed "bash".
     ("tools/skyguard/adapters/claude.py", '                   shell=(p.get("shell") or None) if kind == "shell" else None,',
@@ -5904,8 +5904,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_RC, "        want, copied, digest = backup._copy_hashed(src, part, fsync=True, deadline=deadline)",
      "        want, copied, digest = backup._copy_hashed(src, part, fsync=True)",
      'tests/test_legacy_save_store.py::test_legacy_writer_copy_deadline_cleans_partial_candidate', "l2-rec-save-deadline"),
-    ("tools/skyguard/saves.py", "                                    agent=agent, session_id=session_id, deadline=deadline)",
-     "                                    agent=agent, session_id=session_id)",
+    ("tools/modding_harness/dispatch.py", '"surface": action.surface}, deadline, plan.known_writer_active)',
+     '"surface": action.surface}, None, plan.known_writer_active)',
      _RCT + "test_a_save_copy_that_runs_out_of_time_is_partial_never_silent", "l2-rec-save-caller-deadline"),
     ("tools/skyguard/backup.py", "                if deadline is not None and _clock() >= deadline:", "                if False:",
      'tests/test_legacy_save_store.py::test_legacy_writer_copy_deadline_cleans_partial_candidate', "l2-rec-copy-deadline"),
@@ -6223,7 +6223,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/engine.py", _T17_PARTIAL, "    if False:",
      _T17E + "test_a_deny_on_an_unparseable_command_stays_a_deny_and_says_partial", "t17-partial-never-set"),
     # decide() must reuse the parse it is handed: dropping the argument parses twice and can disagree.
-    ("tools/skyguard/engine.py", "shell=shell, parsed=parsed))", "shell=shell))",
+    ("tools/skyguard/engine.py", "shell=shell, parsed=parsed,\n", "shell=shell,\n",
      _T17E + "test_decide_reuses_the_parse_it_is_handed", "t17-decide-reparses"),
 ]]
 
@@ -8466,7 +8466,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_P8R1_SR, "            a = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), w)",
      "            a = targets.resolve_operand(e, w, cwd, env)",
      _P8R1 + "test_a_stream_of_a_guard_file_is_the_guard_file[hook-data]", "p8r1-stream-shell-wired"),
-    ('tools/skyguard/portable.py', '                    (local_policy.restriction(project, deadline, lambda: save_plan[0]), *local_restrictions))', '                    tuple(local_restrictions))', 'tests/test_local_policy.py::test_registered_policy_denies_before_any_permanent_save_backup', 'registered-local-policy-before-preservation'),
+    ('tools/skyguard/portable.py', '                    tuple(holding(r) for r in (local_policy.restriction(project, deadline, lambda: save_plan[0]),', '                    tuple(holding(r) for r in (lambda _a: contracts.Result(evaluation="evaluated"),', 'tests/test_local_policy.py::test_registered_policy_denies_before_any_permanent_save_backup', 'registered-local-policy-before-preservation'),
 ]]
 
 # ---- Plan 8 T8 fix round 2 (lane p8-paths): re-review N1, N2, N4. One twin per clause. ---------------------------
@@ -9264,14 +9264,14 @@ MUTATIONS.append(pytest.param(_TGT, '("ini", SKYRIM_INI, "S-WRITE-INI"), ', "",
                               "tests/test_skyguard_writes.py::test_file_class[SkyrimPrefs.ini-ini]", id="rule-S-WRITE-INI-class"))
 
 
-# The save policy (user ruling 2026-10-13): saves.py decides every save change, recovery.backup_saves keeps it,
-# approvals.py reads the user's typed approval. One twin per clause, each on a FAST in-process test (no wrapper replay).
+# The save policy (user ruling 2026-10-13): saves.py decides every save change; the shared dispatcher (reached
+# through portable.check) checks the user's typed approval (modding_harness/approval.py) and keeps the pairs. One twin
+# per clause, each on a FAST in-process test (no wrapper replay) that drives that live path.
 # No twin, said so: the fsync on a save copy (nothing short of a power loss can show it), the read-back after the final
-# os.replace (needs the disk to change the bytes between two reads), `if g.why: return False` in _covered (an
-# unreadable transcript grants nothing, so the per-file check refuses anyway: an equivalent mutant), and the
-# `rest.decision in ("deny", "ask")` half of judge's early return (_with_note returns a deny/ask unchanged: equivalent).
+# os.replace (needs the disk to change the bytes between two reads), and the `rest.decision in ("deny", "ask")` half of
+# judge's early return (_with_note returns a deny/ask unchanged: equivalent).
 _SV = "tools/skyguard/saves.py"
-_AP = "tools/skyguard/approvals.py"
+_AP = "tools/modding_harness/approval.py"
 _SPT = "tests/test_save_policy.py::"
 _SAT = "tests/test_save_approvals.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
@@ -9300,18 +9300,21 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ('tools/modding_harness/approval.py', '        grant.update(count=logical_count, command_sha256=hashlib.sha256(command.encode("utf-8")).hexdigest())',
      '        grant.update(count=logical_count)',
      _SPT + "test_a_wildcard_needs_approval_even_when_it_matches_one_save", "rule-S-SAVE-APPROVAL-pattern-line"),
-    # ---- the hook: the backup is taken, verified, BEFORE the allow; a failure denies; approval is per file and op
-    (_SV, '        ids = save_store.backup_pairs(', '        ids = [] or (lambda *args, **kwargs: [])(',
+    # ---- the hook (L2 MEDIUM-2: the LIVE shared dispatcher every hook reaches through portable.check, not the retired
+    # saves.enforce): the backup is taken, verified, BEFORE the allow; a failure denies; bulk needs the typed approval
+    ("tools/modding_harness/dispatch.py", "            transaction = target.backup(list(groups.values()), {",
+     '            transaction = {"id": "none"} or target.backup(list(groups.values()), {',
      _SPT + "test_enforce_backs_up_both_files_verified_before_it_allows", "rule-S-SAVE-BACKUP-taken"),
-    (_SV, '        return Verdict("deny", reason, "", rest.status, code=codes.rule_code("S-SAVE-BACKUP-FAILED"))\n    # Recount',
-     '        return codes.classify(rest)\n    # Recount',
+    ("tools/modding_harness/dispatch.py",
+     '            return Outcome(Result("deny", "failed", "failed", reason="preservation/policy failed: " + str(exc)))',
+     '            return Outcome(Result("allow", "evaluated"))',
      _SPT + "test_a_backup_that_would_fill_the_drive_denies", "rule-S-SAVE-BACKUP-FAILED-denies"),
-    (_SV, '    if needs_approval(c):\n        grants, why = scoped_approval.read', '    if False:\n        grants, why = scoped_approval.read',
+    ("tools/modding_harness/dispatch.py", "            if approval.needs_approval(len(groups), plan.wildcard):",
+     "            if False:",
      _SPT + "test_with_no_approval_the_bulk_change_stays_refused_and_nothing_is_copied", "rule-S-SAVE-APPROVAL-enforced"),
-    (_SV, "        approved = True\n", "        approved = True\n        return codes.classify(rest)\n",
+    ("tools/modding_harness/dispatch.py", "            if not groups:\n                return Outcome(result)\n",
+     "            if not groups or approval.needs_approval(len(groups), plan.wildcard):\n                return Outcome(result)\n",
      _SPT + "test_a_typed_approval_lifts_the_bulk_refusal_and_everything_is_backed_up", "rule-S-SAVE-APPROVAL-still-backed-up"),
-    # saves._covered is retained legacy code; deciding hooks now use the shared canonical matcher.
-    # Keep the wildcard-count control on that live check, not the unused basename-grant helper.
     ("tools/modding_harness/approval.py", "self.count == count", "True",
      _SPT + "test_a_pattern_approval_needs_the_exact_pattern_and_count", "rule-S-SAVE-APPROVAL-pattern-grant"),
     ("tools/modding_harness/approval.py", " and self.operation == operation", "",
@@ -9325,7 +9328,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/engine.py", "        if is_save(a, roots):\n            return None                           # the save policy",
      "        if False:\n            return None                           # the save policy",
      _SPT + "test_a_patch_delete_of_one_save_is_backed_up_then_allowed_on_codex", "save-engine-patch-delete-is-a-save"),
-    ("tools/skyguard/engine.py", 'op=SAVE_OP.get(op, "write")))', 'op="write"))',
+    ("tools/skyguard/engine.py", 'op=SAVE_OP.get(op, "write"),\n', 'op="write",\n',
      _SPT + "test_a_patch_delete_or_move_is_judged_as_that_op", "save-engine-patch-op"),
     ("tools/skyguard/engine.py", "NEVER_SHADOW = NEVER_SHADOW | saves.NEVER_SHADOW", "NEVER_SHADOW = NEVER_SHADOW | frozenset()",
      _SPT + "test_guards_off_does_not_lift_a_bulk_save_change", "save-never-shadowed"),
@@ -9372,43 +9375,45 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "save-restore-verifies-its-target"),
     ('tools/skyguard/save_store.py', '    for rec in (r for g in groups for r in g["members"]):\n        if rec["missing"]:', '    for rec in (r for g in groups for r in g["members"]):\n        if False:',
      _SPT + "test_a_restore_of_a_pair_without_its_cosave_says_so", "save-restore-names-a-missing-cosave"),
-    # ---- approvals.py: only what the USER typed
+    # ---- modding_harness/approval.py, the LIVE reader (L2 MEDIUM-2; skyguard/approvals.py had no caller): only what the
+    # USER typed. No twin, said so: read()'s own `host not in ("claude", "codex")` refusal is shadowed by human_texts'
+    # identical one (an equivalent mutant), and kept as defence in depth.
     (_AP, '_LINE = re.compile(r"^[ \\t]*" + KEY', '_LINE = re.compile(r"[ \\t]*" + KEY',
-     _SAT + "test_an_approval_quoted_mid_line_grants_nothing", "save-approval-line-anchored"),
-    (_AP, '        if row.get("type") != "user" or not human:', '        if row.get("type") != "user":',
-     _SAT + "test_a_user_line_that_was_not_typed_by_the_user_grants_nothing[no-origin]", "save-approval-human-origin"),
-    (_AP, '        if row.get("isMeta") or row.get("isSidechain") or row.get("isCompactSummary"):',
-     '        if row.get("isSidechain") or row.get("isCompactSummary"):',
-     _SAT + "test_a_user_line_that_was_not_typed_by_the_user_grants_nothing[meta]", "save-approval-not-meta"),
-    (_AP, '        if row.get("isMeta") or row.get("isSidechain") or row.get("isCompactSummary"):',
-     '        if row.get("isMeta") or row.get("isCompactSummary"):',
-     _SAT + "test_a_user_line_that_was_not_typed_by_the_user_grants_nothing[sidechain]", "save-approval-not-sidechain"),
-    (_AP, '        if row.get("isMeta") or row.get("isSidechain") or row.get("isCompactSummary"):',
-     '        if row.get("isMeta") or row.get("isSidechain"):',
-     _SAT + "test_a_user_line_that_was_not_typed_by_the_user_grants_nothing[compact-summary]", "save-approval-not-summary"),
-    (_AP, '        if row.get("promptSource") not in CLAUDE_PROMPT_SOURCES:', "        if False:",
-     _SAT + "test_a_user_line_that_was_not_typed_by_the_user_grants_nothing[suggestion]", "save-approval-typed-source"),
-    (_AP, '            if not all(isinstance(b, dict) and b.get("type") == "text" for b in content):', "            if False:",
-     _SAT + "test_a_tool_result_row_marked_human_still_grants_nothing", "save-approval-no-tool-result"),
-    (_AP, '            if isinstance(att, dict) and att.get("type") == "queued_command" and att.get("commandMode") == "prompt":',
-     '            if isinstance(att, dict) and att.get("type") == "queued_command":',
-     _SAT + "test_a_queued_command_not_from_the_user_grants_nothing", "save-approval-queued-prompt-only"),
-    (_AP, '                if isinstance(aorigin, dict) and aorigin.get("kind") == "human" and isinstance(att.get("prompt"), str):',
-     '                if isinstance(att.get("prompt"), str):',
-     _SAT + "test_a_queued_command_not_from_the_user_grants_nothing", "save-approval-queued-human-only"),
-    (_AP, '                    and pl.get("originator") == CODEX_TUI):', "                    ):",
-     _SAT + "test_codex_exec_never_approves", "save-approval-codex-tui-only"),
-    (_AP, '        if not (isinstance(item, dict) and item.get("type") == "UserMessage" and isinstance(item.get("content"), list)):',
-     '        if not (isinstance(item, dict) and isinstance(item.get("content"), list)):',
-     _SAT + "test_codex_context_and_agent_text_never_approve", "save-approval-codex-user-item-only"),
-    (_AP, '    if agent not in ("claude", "codex"):', "    if False:",
-     _SAT + "test_a_missing_or_unknown_transcript_grants_nothing_and_says_why", "save-approval-known-agents-only"),
-    (_AP, "                if op in OPS and isinstance(n, int) and not isinstance(n, bool) and n >= 0 and d[\"pattern\"].strip():",
-     "                if op in OPS and isinstance(n, int) and n >= 0 and d[\"pattern\"].strip():",
-     _SAT + "test_a_malformed_approval_grants_nothing[{\"op\": \"delete\", \"pattern\": \"a*.ess\", \"count\": true}]",
-     "save-approval-count-is-a-number"),
-    (_AP, "                if isinstance(f, str) and op in OPS and stem(f):", "                if isinstance(f, str) and stem(f):",
-     _SAT + "test_a_malformed_approval_grants_nothing[{\"op\": \"erase\", \"files\": [\"a\"]}]", "save-approval-known-op"),
+     _SAT + 'test_an_approval_quoted_mid_line_grants_nothing', 'save-approval-line-anchored'),
+    (_AP, 'row.get("type") == "user" and isinstance(origin, dict) and origin.get("kind") == "human"', 'row.get("type") == "user"',
+     _SAT + 'test_a_user_line_that_was_not_typed_by_the_user_grants_nothing[no-origin]', 'save-approval-human-origin'),
+    (_AP, '        if row.get("isMeta") or row.get("isSidechain") or row.get("isCompactSummary"):', '        if row.get("isSidechain") or row.get("isCompactSummary"):',
+     _SAT + 'test_a_user_line_that_was_not_typed_by_the_user_grants_nothing[meta]', 'save-approval-not-meta'),
+    (_AP, '        if row.get("isMeta") or row.get("isSidechain") or row.get("isCompactSummary"):', '        if row.get("isMeta") or row.get("isCompactSummary"):',
+     _SAT + 'test_a_user_line_that_was_not_typed_by_the_user_grants_nothing[sidechain]', 'save-approval-not-sidechain'),
+    (_AP, '        if row.get("isMeta") or row.get("isSidechain") or row.get("isCompactSummary"):', '        if row.get("isMeta") or row.get("isSidechain"):',
+     _SAT + 'test_a_user_line_that_was_not_typed_by_the_user_grants_nothing[compact-summary]', 'save-approval-not-summary'),
+    (_AP, '        if row.get("sessionId", session_id) != session_id:', '        if False:',
+     _SAT + 'test_a_user_line_that_was_not_typed_by_the_user_grants_nothing[other-session-row]', 'save-approval-row-session'),
+    (_AP, '                and row.get("promptSource") in (None, "typed", "queued")\n', '',
+     _SAT + 'test_a_user_line_that_was_not_typed_by_the_user_grants_nothing[suggestion]', 'save-approval-typed-source'),
+    (_AP, '    if isinstance(content, list) and all(isinstance(c, dict) and c.get("type") == "text"\n                                        and isinstance(c.get("text"), str) for c in content):\n        return "\\n".join(c["text"] for c in content)\n', '    if isinstance(content, list):\n        return "\\n".join(c.get("text", "") for c in content if isinstance(c, dict))\n',
+     _SAT + 'test_a_tool_result_row_marked_human_still_grants_nothing', 'save-approval-no-tool-result'),
+    (_AP, '            if (isinstance(att, dict) and att.get("type") == "queued_command"\n                    and att.get("commandMode") == "prompt" and isinstance(origin, dict)\n                    and origin.get("kind") == "human"):\n', '            if (isinstance(att, dict) and att.get("type") == "queued_command" and isinstance(origin, dict)\n                    and origin.get("kind") == "human"):\n',
+     _SAT + 'test_a_queued_command_not_from_the_user_grants_nothing', 'save-approval-queued-prompt-only'),
+    (_AP, '            if (isinstance(att, dict) and att.get("type") == "queued_command"\n                    and att.get("commandMode") == "prompt" and isinstance(origin, dict)\n                    and origin.get("kind") == "human"):\n', '            if (isinstance(att, dict) and att.get("type") == "queued_command"\n                    and att.get("commandMode") == "prompt" and True):\n',
+     _SAT + 'test_a_queued_command_not_from_the_user_grants_nothing', 'save-approval-queued-human-only'),
+    (_AP, 'and meta.get("originator") == "codex-tui"', '',
+     _SAT + 'test_codex_exec_never_approves', 'save-approval-codex-tui-only'),
+    (_AP, 'and meta.get("id") == session_id)', ')',
+     _SAT + 'test_codex_another_sessions_rollout_never_approves', 'save-approval-codex-session'),
+    (_AP, 'if isinstance(item, dict) and item.get("type") == "UserMessage":', 'if isinstance(item, dict):',
+     _SAT + 'test_codex_context_and_agent_text_never_approve', 'save-approval-codex-user-item-only'),
+    (_AP, 'data.get("v") != 1 or ', '',
+     _SAT + 'test_a_malformed_approval_grants_nothing[version]', 'save-approval-version'),
+    (_AP, 'data.get("session_id") != session_id\n', 'False\n',
+     _SAT + 'test_a_malformed_approval_grants_nothing[other-session]', 'save-approval-grant-session'),
+    (_AP, 'or data.get("op") not in ("write", "move", "delete")\n', 'or False\n',
+     _SAT + 'test_a_malformed_approval_grants_nothing[unknown-op]', 'save-approval-known-op'),
+    (_AP, 'or not all(isinstance(p, str) and os.path.isabs(p) for p in data["paths"])', '',
+     _SAT + 'test_a_malformed_approval_grants_nothing[relative-path]', 'save-approval-absolute-paths'),
+    (_AP, '                        if len(set(paths)) != len(paths):\n', '                        if False:\n',
+     _SAT + 'test_a_malformed_approval_grants_nothing[duplicate-path]', 'save-approval-no-duplicate-paths'),
     ('tools/modding_harness/dispatch.py', '                grants, why = approval.read(transcript, action.host, action.session_id)', '                grants, why = approval.read(transcript, "claude", action.session_id)',
      _SPT + "test_codex_bulk_change_reads_only_the_tui_users_approval", "save-approval-reads-its-agents-transcript"),
 ]]
@@ -9881,3 +9886,94 @@ MUTATIONS.append(pytest.param(
     '        if False:',
     "tests/test_guard_latency.py::test_invalid_pretooluse_schema_fails_the_gate[scalar]",
     id="guard-latency-valid-json-invalid-schema"))
+# L2 HIGH-1 (v4.0.0 review): another rule's ASK beside a save change. The shared dispatcher returns an ask before the
+# bulk approval and the backup, so portable.check holds the ask until both pass. One twin per clause, each on the live
+# hook entry (run.py in process) or the dispatcher bridge.
+_PSAVE = "tests/test_save_policy.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/portable.py", '        if result.decision == "ask" and _changes_saves(plan):', "        if False:",
+     _PSAVE + "test_three_saves_beside_an_ask_are_refused_without_the_typed_approval[opaque]",
+     "rule-S-SAVE-APPROVAL-wins-over-an-ask"),
+    ("tools/skyguard/portable.py", '        if result.decision == "ask" and _changes_saves(plan):', '        if result.decision == "never":',
+     _PSAVE + "test_one_save_beside_an_ask_is_backed_up_before_the_ask[git-discard]",
+     "rule-S-SAVE-BACKUP-before-an-ask"),
+    ("tools/skyguard/portable.py",
+     '        outcome = replace(outcome, result=replace(outcome.result, decision="ask", reason=held[0].reason))',
+     "        pass", _PSAVE + "test_one_save_beside_an_ask_is_backed_up_before_the_ask[opaque]",
+     "save-held-ask-restored"),
+    ("tools/skyguard/portable.py", "    return plan is not None and bool(plan.mutations or plan.wildcard or plan.helper or plan.unresolved)",
+     "    return plan is not None and bool(plan.wildcard or plan.helper or plan.unresolved)",
+     _PSAVE + "test_codex_save_change_beside_an_ask_keeps_the_save_policy[one-save-asks-after-backup]",
+     "save-held-ask-counts-mutations"),
+    ("tools/skyguard/portable.py",
+     '            if (isinstance(verdict, contracts.Result) and verdict.decision == "ask" and held[0] is None',
+     "            if (False", "tests/test_portable_profile.py::test_a_local_restriction_ask_waits_for_the_save_policy",
+     "save-local-restriction-ask-held"),
+]]
+
+# v4.0.0 review L3 LOW-1: a malformed inline snippet is the engine's parse refusal, not a crash (GUARD INERT).
+MUTATIONS += [pytest.param("tools/skyguard/engine.py",
+    '        return Verdict("deny", UNPARSED + str(exc), status="failed", code="engine.UNPARSED")', "        raise",
+    "tests/test_skyguard_engine.py::test_the_claude_hook_answers_a_malformed_inline_snippet",
+    id="engine-unparsed-snippet-refused")]
+
+# v4.0.0 review L2 LOW-4: an expired unlock-all relock settles on the same criterion as session start.
+_RLR = "tests/test_relock_retries.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/lock.py", "        if not relock_failed(res):", "        if res.exit == 0:",
+     _RLR + "test_a_structural_skip_settles_an_expired_relock", "relock-expired-structural-skip-settles"),
+    ("tools/skyguard/lock.py", '    bad = [x for x in res.data.get("not_locked", []) if x[1].startswith(("did not verify", "error"))]',
+     '    bad = [x for x in res.data.get("not_locked", []) if x[1].startswith(("did not verify",))]',
+     _RLR + "test_failed_expiry_relock_is_retried_until_success", "relock-expired-error-is-retried"),
+    ("tools/skyguard/lock.py", "    return res.exit == 2 or bool(bad)", "    return bool(bad)",
+     _RLR + "test_a_structural_skip_settles_an_expired_relock", "relock-refused-is-retried"),
+]]
+
+
+# User ruling 2026-10-20 (v4.0.0 review L2 MEDIUM-3): the agent's session transcripts are never the agent's to change.
+_TRG = "tests/test_transcript_guard.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/shell_rules.py", '    if spoken:\n        return deny("S-SELF-TRANSCRIPT"',
+     '    if False:\n        return deny("S-SELF-TRANSCRIPT"',
+     _TRG + "test_a_shell_write_to_the_transcript_is_refused[append]", "rule-S-SELF-TRANSCRIPT-shell"),
+    ("tools/skyguard/write_rules.py", "    if spoken and self_rules.transcript_target(",
+     "    if False and self_rules.transcript_target(",
+     _TRG + "test_a_file_tool_write_to_the_transcript_is_refused[Write]", "rule-W-SELF-TRANSCRIPT-write"),
+    ("tools/skyguard/engine.py",
+     'NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-TRANSCRIPT", "write.W-SELF-TRANSCRIPT"))',
+     "NEVER_SHADOW = NEVER_SHADOW | frozenset()",
+     _TRG + "test_guards_off_never_lifts_the_transcript_refusal", "rule-S-SELF-TRANSCRIPT-never-shadowed"),
+    ("tools/skyguard/self_rules.py",
+     '        if own and (low == own.lower().rstrip("/") or holder and own.lower().startswith(low + "/")):',
+     "        if False:", _TRG + "test_missing_payload_transcript_keeps_lexical_protection",
+     "rule-W-SELF-TRANSCRIPT-payload-path"),
+    ("tools/skyguard/self_rules.py", '            if rel[:1] == ["projects"] and len(rel) >= 3 and rel[-1].endswith(".jsonl"):',
+     "            if False:", _TRG + "test_the_transcript_tree_is_refused_whatever_the_payload_names[another-sessions-file]",
+     "rule-W-SELF-TRANSCRIPT-claude-tree"),
+    ("tools/skyguard/self_rules.py", '            if holder and (rel in ([], ["projects"]) or rel[:1] == ["projects"]',
+     '            if False and (rel in ([], ["projects"]) or rel[:1] == ["projects"]',
+     _TRG + "test_the_transcript_tree_is_refused_whatever_the_payload_names[the-projects-folder]", "rule-S-SELF-TRANSCRIPT-holder"),
+    ("tools/skyguard/self_rules.py",
+     '            if rel[:1] in (["sessions"], ["archived_sessions"]) and (holder or len(rel) >= 2):',
+     "            if False:", _TRG + "test_codex_shell_append_to_its_rollout_is_refused",
+     "rule-S-SELF-TRANSCRIPT-codex-tree"),
+    ("tools/skyguard/engine.py",
+     '        out.append(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "", op=SAVE_OP.get(op, "write"),\n'
+     '                                  transcript=req.transcript_path or ""))',
+     '        out.append(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "", op=SAVE_OP.get(op, "write")))',
+     _TRG + "test_codex_apply_patch_on_its_payload_transcript_is_refused", "transcript-codex-patch-wired"),
+    ("tools/skyguard/run.py", '._replace(transcript_path=p.get("transcript_path", "") or "")', "",
+     _TRG + "test_the_payloads_own_transcript_is_refused_wherever_it_lives", "transcript-claude-shell-wired"),
+]]
+
+
+# Incremental pre-release R2/R3: physical transcript identity and the recorded opaque-program boundary.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/self_rules.py", '                if os.path.samefile(abs_path, own):',
+     '                if False:', "tests/test_transcript_guard.py::test_current_transcript_hardlink_is_refused",
+     "rule-S-SELF-TRANSCRIPT-hardlink-identity"),
+    ("tools/skyguard/shell_rules.py", '    if not opaque:\n        return ""\n    for e in opaque:',
+     '    if True:\n        return ""\n    for e in opaque:',
+     "tests/test_opaque_protected.py::test_an_unnamed_program_on_a_protected_path_asks[opaque-on-a-plugin]",
+     "rule-S-OPAQUE-PROTECTED-no-verb"),
+]]

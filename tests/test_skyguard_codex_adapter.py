@@ -493,7 +493,7 @@ def _run_with_saves(tmp_path, raw):
 
 def test_a_devbench_save_over_an_existing_save_is_backed_up_then_allowed_on_codex(tmp_path):
     """The save policy (user ruling 2026-10-13): Codex cannot ask, so the old ask was a refusal there. Now the save is
-    backed up and verified by the pre-tool hook (saves.enforce), and only then is the call allowed, on Codex too."""
+    backed up and verified by the pre-tool hook (portable.check), and only then is the call allowed, on Codex too."""
     v, audit = _run_with_saves(tmp_path, _pre("mcp__devbench-vr__game", {"action": "save", "name": "Existing"}))
     assert v.decision == "allow" and v.code == "shell.S-SAVE-BACKUP" and "Existing" in v.context
     assert ("S-SAVE-BACKUP", "advise") in audit.fired

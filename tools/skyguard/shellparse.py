@@ -66,14 +66,19 @@ AN EXEC:
              after `||`, written twice anywhere, or followed by source/eval/dot-source never resolves a use; cmd
              never resolves (it expands %K% before `set` runs).
 
-KNOWN LIMITS -- each gives a partial answer, never a "safe" one:
+KNOWN LIMITS -- each gives a PARTIAL answer: the rules judge only what the parser could read. Where the program
+itself cannot be named, the rules ask the user when the command names a protected path (shell_rules: S-SAVE-OPAQUE
+for a save, S-OPAQUE-PROTECTED for the install's Data, the settings or MO2 folders, a plugin or archive file, or a
+Bethesda key); on any other path such a command is allowed as read, and the verdict is marked "partial":
   - a program held in a variable (`$R reset-havok`): program "?", argv kept; rules must treat "?" as opaque.
     In bash the words after it are ALSO read as the command (`$R rm x`: $R may be empty or a wrapper, and rm runs);
     so are cmd's (`%R% del x`, `!R! del x`) and a PowerShell `&`/`.` call's (`& $R Remove-Item x`). When a quoted word
     follows, the joined words are also read as code (`$R 'rm x'` with R=eval, `& $R 'Remove-Item x'` with
     Invoke-Expression). A concatenated name offers the programs its literal part can end (`%R%del`, `"$($R)-Item"`).
-    It stays "?" beside those readings, and a save in its words asks (S-SAVE-OPAQUE). Still unseen: a name built
-    entirely from variables (`$A$B`), and a string that a variable holds and an eval runs (`eval "$CODE"`).
+    It stays "?" beside those readings, and a save in its words asks (S-SAVE-OPAQUE), as does a protected path in
+    its words or in the command text (S-OPAQUE-PROTECTED). Not parsed: a name built entirely from variables (`$A$B`),
+    and a string that a variable holds and an eval runs (`eval "$CODE"`, `iex $s`); both ask only through the
+    S-OPAQUE-PROTECTED text check, so a protected path spelled relatively inside such a string is not seen.
     A `cd` behind such a word (`$R cd X`) keeps the directory before it: the cd runs only if $R is empty, and one
     directory cannot hold both readings (marking it unknown loosened `$R cd /tmp && rm -rf Data` in the install).
   - a quote-split token (`--ap""ply`, `r''m`): RESOLVED -- words are unquoted and concatenated as bash does.

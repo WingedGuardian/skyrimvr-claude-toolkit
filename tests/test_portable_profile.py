@@ -47,6 +47,18 @@ def test_pair_is_one_group_and_local_refusal_precedes_preservation(install):
     assert {Path(member["path"]).name for member in transaction["groups"][0]["members"]} == {"0.ess", "0.skse"}
 
 
+def test_a_local_restriction_ask_waits_for_the_save_policy(install):
+    """L2 HIGH-1: a local restriction's ask is returned only after the bulk approval check and the verified backup."""
+    root, files = install
+    asks = (lambda request: contracts.Result("ask", "evaluated", reason="installed local policy asks"),)
+    one, _ = portable.check(action(root, files[0]), root, local_restrictions=asks)
+    assert (one.result.decision, one.result.reason) == ("ask", "installed local policy asks")
+    assert one.result.preservation == "verified" and len(one.transactions) == 1
+    every = tuple(path for pair in files for path in pair)
+    bulk, _ = portable.check(action(root, every, host="claude"), root, local_restrictions=asks)
+    assert bulk.result.decision == "deny" and bulk.result.preservation == "required" and not bulk.transactions
+
+
 @pytest.mark.parametrize('surface', ['files', 'mcp'])
 def test_concrete_file_and_api_save_targets_are_literal_with_bracketed_paths(tmp_path, surface):
     root = tmp_path / 'game [VR]'
