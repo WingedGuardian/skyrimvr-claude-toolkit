@@ -9983,6 +9983,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (".github/workflows/release.yml", "          python -B scripts/check_changelog_release.py",
      "          true || python -B scripts/check_changelog_release.py",
      _CCR + "test_the_release_workflow_runs_the_check", "release-changelog-check-skipped"),
+]]
 
 # --- Issue 11: House Carl base-archive inputs ---------------------------------------------------------------------
 _HC = "tools/housecarl_integration/order.py"
