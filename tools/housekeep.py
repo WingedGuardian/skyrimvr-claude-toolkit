@@ -863,11 +863,11 @@ def session(cfg, state: Path) -> int:
             return 0
     except OSError:
         pass
-    notes = []
+    notes, temp_raised = [], False
     try:
         res = sweep_temp(cfg)
     except Exception as e:                    # the state file must still be written, or the throttle never engages
-        res = {"rows": {"recycled": 0, "failed": 1}}
+        res, temp_raised = {"rows": {"recycled": 0, "failed": 1}}, True
         notes.append("temp sweep failed ({}: {})".format(type(e).__name__, str(e)[:200]))
     try:
         ret = sweep_retired([cfg["root"]] + [p for p in [_project_of(state)] if p is not None])
@@ -875,7 +875,8 @@ def session(cfg, state: Path) -> int:
         ret = {"rows": {"recycled": 0, "failed": 0, "waiting: no Recycle Bin here": 0}, "waiting_bytes": 0}
         notes.append("retired-store sweep failed ({}: {})".format(type(e).__name__, str(e)[:200]))
     r = res["rows"]
-    if r["recycled"] or (r["failed"] and not notes):
+    # Its own flag, not "no note yet": a retired-store failure note must not hide dirs the temp sweep LEFT IN PLACE.
+    if r["recycled"] or (r["failed"] and not temp_raised):
         notes.append("moved {} leftover temp dir(s) to the Recycle Bin{}".format(
             r["recycled"], "; {} could not be recycled and were LEFT IN PLACE (ask the user before any permanent "
                            "delete)".format(r["failed"]) if r["failed"] else ""))

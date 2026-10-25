@@ -7712,6 +7712,11 @@ MUTATIONS += [
                  "    if False:\n        raise RuntimeError",
                  "tests/test_housekeep.py::test_the_real_bin_refuses_under_the_test_harness[HARNESS_FIXTURE_ROOT]",
                  id="real-bin-never-refuses"),
+    # review2 B-tools L3: a retired-store failure must not hide the temp sweep's LEFT IN PLACE note.
+    pytest.param("tools/housekeep.py", '    if r["recycled"] or (r["failed"] and not temp_raised):',
+                 '    if r["recycled"] or (r["failed"] and not notes):',
+                 "tests/test_housekeep.py::test_a_failed_retired_sweep_never_hides_temp_dirs_left_in_place",
+                 id="session-retired-failure-hides-left-in-place"),
     pytest.param("tools/housekeep.py", "    if sweep_switched_off():\n        return 0", "    if False:\n        return 0",
                  "tests/test_housekeep.py::test_the_switch_turns_the_session_sweep_off", id="session-ignores-switch"),
     pytest.param("tools/housekeep.py", '            yield Path(e.path), "toolkit temp"',
