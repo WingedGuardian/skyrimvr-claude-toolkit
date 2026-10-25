@@ -46,7 +46,10 @@ DevBench is drivable with nobody in the headset. Close SteamVR first; then start
 settle (if room setup opens, wait for it to close: launching while it runs gets the game evicted),
 and launch the game. `bash tools/vr-headless.sh off` restores both files byte-exact and verifies
 them (a file that changed after `on` is first copied into the run's `changed-after-on-<stamp>/`); it is safe to
-repeat and after a crash, so run it before the user plays again. **Valid only for
+repeat and after a crash, so run it before the user plays again. `off` restores what `on` saw: if the
+game was already headless at `on`, it restores a headless setup. Before the user plays, check the result
+itself (the game folder's `openvr_api.dll` is the user's normal loader, null-driver forcing is off in
+SteamVR's settings, the user's input plugin is present), not only that it matches the snapshot. **Valid only for
 pose-independent tests** -- scripts, records, console, frame rate. Anything that depends on where the
 head and hands are (HIGGS, VRIK, PLANCK, hand collision) needs the real headset. `emu on|off` swaps in
 a pose-emulating driver (its hands track) once the user has built it (`tools/vr-emu-driver/README.md`:

@@ -16,7 +16,7 @@ bash tools/automod-cli.sh archive <command> [args] --json
 ## Read-Only Commands
 
 - `archive info <archive>` — metadata and stats
-- `archive list <archive> [--filter <pattern>] [--limit <n>]` — list contents
+- `archive list <archive> [--filter <pattern>] [--limit <n>]` — list contents. ⚠ **The default `--limit` is 100**: pass `--limit 0` for every file, and check `showing` against `totalInArchive` before concluding a file is absent
 - `archive validate <archive>` — integrity check
 - `archive diff <archive1> <archive2>` — compare two archives
 - `archive status` — verify BSArch tool availability

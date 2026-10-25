@@ -199,6 +199,16 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim modding 
 
 *Sources: [CK Wiki: Condition Functions](https://ck.uesp.net/wiki/Condition_Functions), [Beyond Skyrim: Scripting Best Practices](https://wiki.beyondskyrim.org/wiki/Arcane_University:Scripting_Best_Practices)*
 
+### `Math.Acos` / `Math.Asin` and NaN: neither a clamp nor an inclusive range check catches it
+
+`Math.Acos(x)` errors ("Argument for acos out of range") for any x outside [-1, 1], **including NaN**. A
+zero-length vector normalised and fed into a dot product produces NaN. The usual clamp lets it through,
+because `NaN > 1.0` and `NaN < -1.0` are both false. MEASURED on one Skyrim VR install: the Papyrus VM also
+returned **true** for the inclusive test `x >= -1.0 && x <= 1.0` with x = NaN, so an inclusive membership
+check is not a finite-value check either; strict comparisons rejected it. Validate with strict
+comparisons, handle the exact endpoints explicitly, and then call `Acos`/`Asin`. In a polling `OnUpdate`
+an unguarded call errors on every tick, and that error storm can degrade the VM until the game freezes.
+
 ---
 
 ## VR vs SSE Differences
@@ -335,6 +345,32 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim modding 
 6. **Framerate constraints** — physics/logic tuned for 60Hz fails at VR 90Hz
 7. **ImageSpace/visual conflicts** — post-processing vs UI rendering trade-offs
 8. **Physics collision differences** — player ragdoll vs capsule collision
+
+### Which INI Skyrim VR actually reads, and VR shadow settings
+
+MEASURED on one Skyrim VR install (2026-10-11/12, `getini` through DevBench after a relaunch); check yours the
+same way before relying on it:
+- **Skyrim VR did not read `Documents/My Games/Skyrim VR/Skyrim.ini` for `[Display]` sun-shadow settings.**
+  Values written there were absent from the live `getini` answer after a relaunch. Put user overrides in
+  `SkyrimVR.ini` (or `SkyrimPrefs.ini`) and confirm each one live with `getini`. The generic "Skyrim.ini,
+  then SkyrimVR.ini, then SkyrimPrefs.ini" order does not by itself prove a key is read from a given file.
+- **Shadows that step "bit by bit" while the player stands still, but move smoothly while walking** come from
+  `fSunStaticTimeUpdateScale:Display` (live VR default 0.10). `1.0` made the steps larger; `0` made them smooth.
+  With `bDisableShadowJumps=1` the `fSunShadowUpdateTime`/`fSunUpdateThreshold` pair had no visible effect.
+- **An FPS-driven shadow plugin can differ between headset and desktop view.** ShadowBoost scales shadow
+  distance between a minimum and maximum to hold a target FPS. With a 60 FPS target and VR running below it,
+  the distance sat at the minimum, so distant shadows were missing in the headset but present in the desktop
+  mirror. Setting minimum = maximum stopped the resizing. Symptom "VR and desktop view differ": look for
+  plugins that react to frame rate.
+- **Community Shaders (CSX 3.19.2) cloud shadows were invisible** until Dynamic Cubemaps' `CubemapResolution`
+  went from 128 to 256 (the cloud-shadow texture is sized from that resolution).
+
+### A mod's MCM Helper settings file can override its SKSE INI
+
+MEASURED on one install: a mod configured through MCM Helper kept `Data/MCM/Settings/<mod>.ini` beside its
+`Data/SKSE/Plugins/<mod>.ini`. Changing a key only in the SKSE INI left the mod's startup log reporting the old
+behaviour until the same key was changed in the MCM settings file too. When a mod has both, edit both with the
+game closed, and confirm the change from the mod's own log line, not from the file you edited.
 
 ---
 
@@ -496,6 +532,17 @@ Read the decompiled source (Champollion) to confirm it actually exists.
   co-save records by opcode. JContainers (`JSTR`), PapyrusUtil (`STFV`/`STRL`/...), Papyrus Extender
   (`P3PE`), SPID and DbSkseFunctions are common writers; many opcodes will be unnamed.
 
+- **A newer Address Library can be a hard prerequisite even when the mod's stated minimum is met.**
+  MEASURED on one VR install: Engine Fixes VR 7.11.0 (stated minimum VR Address Library 0.235.0) stopped the
+  game before SKSE finished starting, missing Address Library ID 40291, with 0.276.1 installed; with 0.279.0
+  installed it loaded. Update the Address Library first when a DLL update fails early, and treat a
+  stated minimum as a claim to check against the log. Engine Fixes also reads a separate
+  `EngineFixesCustom.toml` for overrides, beside the `EngineFixes.toml` it ships.
+- **A VR mod's Nexus MAIN file can be the SE/AE build.** One VR mod's MAIN download was SE/AE-only; the VR DLL
+  came from the author's GitHub release (MEASURED, checked against GitHub's published digest). An `openvr`
+  string inside a DLL is not proof of VR support: the SE/AE DLL contained one too. Judge by the plugin's
+  declared runtime support and runtime guards (or by `sksevr.log` after a test start), not by a string search.
+
 #### 3. Adding a mod not yet installed
 
 - **Appending, or inserting mid-order, does not corrupt other mods' saved state** (see the
@@ -643,6 +690,11 @@ not facts.
 ---
 
 ## ESP Creation via Spriggit
+
+### A round trip reorders VMAD properties
+MEASURED on one plugin: a Spriggit serialize/deserialize round trip rewrote the order of a script's VMAD
+properties and nothing else in that record. A byte comparison of the plugin then reports a difference that is
+not a change. Verify a round trip by parsing the properties (names, types, values), not by comparing bytes.
 
 ### Header Version
 - **ESP header version must be 1.7** for SSE/VR plugins. Version 1.0 is flagged as Oldrim/wrong game by tools like Rybash.
@@ -983,6 +1035,14 @@ blobs) and **how much** — the mod-state landscape the `.ess` never exposes. It
 *structure* (the `{u32 type, u32 version, u32 length}` walk, validated on real VR cosaves) and
 resyncs on a desync, reporting coverage — it does **not** decode each chunk's plugin-internal format
 (those are undocumented per-plugin). No install beyond Python 3; it never writes the cosave.
+
+### Decoding co-save chunks: `PLGN` and 8-byte counts
+
+The SKSE core `PLGN` chunk is the load order at save time: a u16 count, then per entry a u8 index (`0xFE`
+followed by a u16 light index for a light plugin), a u16 name length and the name. It is what resolves the
+FormIDs stored elsewhere in the co-save. Inside Papyrus Extender's (`P3PE`) chunks, MEASURED on PE 5.10
+co-saves (chunk version 8), counts are 8-byte `size_t` values, not 4-byte. A decoder that reads 4-byte
+counts desynchronises silently after the first one.
 
 ### Node/koffi helper exit codes are unreliable on Windows
 
@@ -1525,6 +1585,19 @@ only low-risk lever is PapyrusTweaks `bIgnoreMemoryLimit` true->false (re-impose
 VM freezes/dumps instead of growing into the fault) — without touching page geometry.
 
 
+## nifly/PyNifly saves can change what you did not touch
+
+MEASURED on one install (2026-10-14): saving with nifly's default optimisation changed a particle light's
+bounds in a mesh whose collision was being replaced; a strict before/after visual comparison caught it.
+Preserving the original took an explicit `SetBounds` with the original values and `Save(optimize=false,
+sortBlocks=false)`.
+
+**Collision triangle count can cause a local stutter.** On that install a replacement brazier mesh whose
+collision had 2,120 triangles stuttered the frame rate near it; a loose override with a 76-triangle collision
+aligned to the original bounds fixed it (user-confirmed A/B, not a measured FPS delta). Hitch Hunter's report
+log names the thread blocking each hitch, which separates a main-thread stall from runtime waits. A high
+triangle count alone does not prove a mesh causes stutter.
+
 ## NIF Tooling — PyFFI Limits, PyNifly, and CTD Prevention
 
 **PyFFI 2.2.3 has two HARD limits (both cost us real debugging):**
@@ -1716,6 +1789,11 @@ before your first live session — several of these cost a force-killed game to 
   for a logic failure.
 - Shader-state probes report **false negatives while paused** (playback is frozen), so a
   "shader not playing" reading taken in a menu is meaningless. Check unpaused.
+- **A game-modal message box pauses the simulation while every read still succeeds.** MEASURED on one
+  install: after a load, a mod's message box was up; Papyrus calls and reference inspection returned
+  normally while nothing in the world moved. Before taking a baseline or timing anything, check for an open
+  menu or message box, deal with it deliberately (read its buttons before choosing one), and confirm with
+  `GET /api/health` that `frame` advances. A successful call proves the call ran, not that the game is running.
 
 ### Don't wreck the live session you're testing in
 - **Heavy/global console commands can CTD a big load order.** A full `smp reset` reliably crashed a
@@ -1726,6 +1804,16 @@ before your first live session — several of these cost a force-killed game to 
   systems pollutes engine state (e.g. the music instance stack, producing phantom double-tracks).
   **Spawn dedicated test actors and act on those** (`player.placeatme <hostileBase> N`), and observe
   the player's natural activity rather than perturbing it.
+- **Headless: never use the player as an attacker, target or hit recipient.** With no headset the emulated
+  player has no usable physical body (on one install the headset pose lay on the floor). Spawn the NPCs a test
+  needs, record their identities, and verify their roles and positions; the player only keeps the area loaded.
+- **A main-menu start is enough to check that an SKSE plugin loads.** Starting the game to the main menu
+  (health `lastLifecycle` `dataLoaded`, no save loaded) plus the plugin's line in the SKSE log qualifies
+  "the DLL loads and starts", without touching any save. It says nothing about behaviour in a loaded world.
+- **Turning autosaves off does not stop every save writer.** On one install, with the game's own autosaves
+  off, a save-manager mod's rotation still wrote saves during a test and overwrote an existing one (no save
+  was requested). Before a test that loads a save, back up the saves it could reach, or keep the test's save
+  outside the folder the game writes to. `sLocalSavePath` did not move DevBench's save folder there.
 - Many commands produce **no console output at all** (`addmusic`/`removemusic`, etc.). `count:0` from
   a capture can be genuine (on DevBench < 1.19 it was also what an empty capture buffer returned; fixed in
   1.19, reworked in 1.24) — judge the result by re-reading state, not by captured lines.
@@ -1746,6 +1834,9 @@ before your first live session — several of these cost a force-killed game to 
   install still pads silently.
 - Array returns may not serialize (an array-returning function can come back as `none`) — probe with a
   scalar-returning function instead of concluding the state is absent.
+- **Send Papyrus float parameters as JSON floats.** MEASURED: `ModActorValue("health", 1000000)` returned
+  `called` with no effect on health, while `1000000.0` changed it. A void call's success says nothing about its
+  effect: read the state back.
 
 ### Protocol for tests the user must physically observe (VR)
 - **Narrate on the HUD.** The user cannot see chat while in the headset. Drive every instruction and
@@ -1759,6 +1850,17 @@ before your first live session — several of these cost a force-killed game to 
   console capture where a Papyrus channel or an on-disk log will do.
 
 ---
+
+## Vortex: a purge puts `.vortex_backup` files back, and can leave orphans
+
+MEASURED on one install (2026-10-05 and 2026-10-13):
+- When Vortex deploys a mod over files that already exist unmanaged, it renames them `*.vortex_backup`. When that
+  mod is disabled or purged, Vortex renames the backups back, so an old manual copy returns. "Disabled in
+  Vortex" does not mean "gone from `Data/`". Before installing a replacement for a framework, inventory its
+  folders by date and by Vortex ownership (`vortex.deployment.json`).
+- It can also leave a `*.vortex_backup` with no original beside it. After one mod that had overwritten meshes
+  was disabled, two NIFs existed only as `.nif.vortex_backup`, and the item was invisible in game. A whole-`Data/`
+  scan found 748 backups, 30 of them without an original. After any purge, scan for orphans.
 
 ## Mod Manager Layout — MO2's Virtual Filesystem (read this before trusting any path)
 
@@ -1850,6 +1952,13 @@ behind a parameter too, not just the magnitude, so you can swap approaches witho
 
 ---
 
+## Indexing records by FormKey can hide a duplicate
+
+MEASURED on one plugin: a checker that built a dictionary keyed by FormKey silently collapsed two records that
+shared object ID `0x860` (a weapon and an unused explosion), so its record count disagreed with xEdit's for a
+reason it could not see. xEdit's CheckForErrors reported no error for the duplicate. Before indexing by FormKey,
+assert the keys are unique, and keep the record type and EditorID with each entry.
+
 ## xelib `setFormID`: the master-count high-byte trap
 
 The "local" FormID xelib reports for a record a plugin **owns** is **master-count-prefixed**, not the
@@ -1911,6 +2020,15 @@ counted as a crash.
 
 ---
 
+## AutoMod `archive list` shows 100 files unless told otherwise
+
+`archive list` defaults to `--limit 100` (READ: AutoMod v1.11.0 source, `ArchiveCommands.cs`; `--limit 0` lists
+all). The JSON carries `"showing"` and `"totalInArchive"`, but a reader who looks only at the file list sees a
+100-file archive. MEASURED on one install: a 1,571-file texture BSA read as holding 100 files and produced a
+confident wrong conclusion ("648 of 709 textures missing everywhere"). Pass `--limit 0` and compare `showing`
+with `totalInArchive` before concluding anything from a listing. With `--filter`, `totalInArchive` is still the
+whole archive's count, so a filtered listing is expected to show fewer.
+
 ## AutoMod BSA extract/repack needs `bsarch.exe`
 
 AutoMod's `archive` module reads a BSA index natively for `list`, but `create`, `extract`,
@@ -1954,6 +2072,22 @@ the knob, and it is not.
   actors outward. For a directional fling the centre must be offset from the target.
 - For simple visible knockback, the engine-native `PushActorAway(target, magnitude)` (roughly 1-5 =
   stagger through ragdoll) is usually a better tool than an explosion at all.
+
+## Windows scripting traps that look like success
+
+MEASURED on Windows 11 (2026-10-25 unless noted):
+- **`subprocess.run(['bash', ...])` from Python starts the WSL `bash.exe` in `System32`, not Git Bash**,
+  because Windows searches the system folder before `PATH`. With no WSL distribution it prints only
+  `execvpe(/bin/bash) failed` on stderr and exits 1. A hook harness that reads empty stdout as "the hook allowed
+  it" then reports allows the hook never made. Call Git Bash by absolute path, and treat a non-zero exit as an
+  error, never as a decision.
+- **Python 3.10's `datetime.fromisoformat` rejects a 7-digit fraction** (`...00.1234567`, the precision
+  PowerShell and .NET print); 3.12 accepts it. Trim to 6 digits before parsing.
+- **Process start times differ by source:** on one install, Get-Process and CIM (`Win32_Process`) gave the same
+  process start time with a different last fractional digit (MEASURED 2026-10-23). Compare identities from one
+  source only.
+- **PyYAML (YAML 1.1) turns bare `off`, `on`, `yes`, `no` into booleans:** `a: off` loads as `False`. Quote
+  such values in a YAML file that a tool reads as text.
 
 ## Windows paths in `sed` replacement text get eaten
 
