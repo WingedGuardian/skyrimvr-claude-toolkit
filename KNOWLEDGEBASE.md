@@ -1114,7 +1114,7 @@ Name:
 Model:
   File: weapons\path\to\mesh.nif
   Data: 0x020000000000000000000000
-EquipmentType: 013F45:Skyrim.esm
+EquipmentType: 013F42:Skyrim.esm
 Keywords:
 - 01E711:Skyrim.esm
 Description:
@@ -1145,9 +1145,17 @@ Critical:
 DetectionSoundLevel: Normal
 ```
 
-**Common EquipmentType FormIDs:**
-- `013F45:Skyrim.esm` — RightHand (one-handed weapons)
-- `013F42:Skyrim.esm` — BothHands (two-handed weapons)
+**Vanilla EquipmentType FormIDs** (MEASURED: EditorIDs read from the `EQUP` group of `Skyrim.esm`):
+- `013F42:Skyrim.esm` — RightHand
+- `013F43:Skyrim.esm` — LeftHand
+- `013F44:Skyrim.esm` — EitherHand
+- `013F45:Skyrim.esm` — BothHands
+- `0141E8:Skyrim.esm` — Shield; `025BEE` — Voice; `035698` — Potion
+
+Which one a weapon uses (MEASURED over every `WEAP` in `Skyrim.esm`): one-handed swords, daggers, axes and maces
+use RightHand (1,213 of 1,258 records; 42 EitherHand, 3 BothHands), greatswords, battleaxes and bows use BothHands (1,137 of 1,137).
+`IronSword` is RightHand, `IronGreatsword` BothHands. Copy the EquipmentType of a vanilla weapon of the same kind.
+(Earlier versions of this file had RightHand and BothHands swapped.)
 
 **Previous error**: Using `Critical.Flags: [OnDeath]` caused Spriggit parse error. Use `Flags: []` instead. `OnDeath` is valid in some records but may not be valid for Mutagen's CriticalData.Flag enum.
 
@@ -1244,7 +1252,7 @@ calibration (not via `vrik.ini`, which has only a global `weaponAdjustment`).
 
 ### Block Detection in Papyrus
 
-**No native `IsBlocking()` function exists** in Papyrus, SKSE, PO3, or DbSKSE. **Workaround:** `target.GetActorValue("IsBlocking")` returns 1.0 if actor is in blocking stance, 0.0 otherwise. This is an internal AV, not documented but functional.
+Vanilla Papyrus and SKSE have no `IsBlocking()` function. **Do not use `GetActorValue("IsBlocking")`** — it is not an actor value and errors on every call (see the correction below; an earlier version of this file recommended it). Use `Actor.GetAnimationVariableBool("IsBlocking")` on actors whose behavior graph supplies the variable. DbSKSE's source declares a native `IsActorBlocking(Actor)` (READ: `DbSKSEFunctions.psc`); a declaration does not prove it works on your runtime, so verify it before relying on it.
 
 ### DbSKSEFunctions — Projectile Collision Tracking
 
@@ -1303,7 +1311,9 @@ Vanilla bleed (e.g. Bleeding Strikes perk, `0C367A:Skyrim.esm`):
 
 ### `GetActorValue("IsBlocking")` is NOT a valid actor value
 
-Throws `Error: Actor value "IsBlocking" does not exist` on every call. This error has non-trivial VM overhead, especially in hot paths. **Use `Actor.GetAnimationVariableBool("IsBlocking")` instead** — this reads the animation graph variable and works correctly.
+Throws `Error: Actor value "IsBlocking" does not exist` on every call. This error has non-trivial VM overhead, especially in hot paths. **Use `Actor.GetAnimationVariableBool("IsBlocking")` instead** — it reads the animation graph variable. Animal and creature graphs may not supply it: there the call logs a missing-variable error and returns false, so skip actors whose race has no such graph rather than probing them every hit.
+
+The **`IsBlocking` condition function** (on a magic effect or spell condition) evaluates its subject natively. If that subject can be a non-actor reference — a cone or area effect hitting a door or other scenery — guard it with `IsActor == 1` first. INFERRED from one VR crash log (a native null read inside condition evaluation with a door as the subject); the guard is cheap either way.
 
 ### dirChanged early-return is the correct pattern for cheap polling loops
 
