@@ -24,7 +24,16 @@ jobs:
         with:
           persist-credentials: false
 
+      # SETUP ENDS HERE. Every step above is setup: if one fails, nothing below can mean anything and it all
+      # skips (the default). Every step below is an INDEPENDENT check gated on this marker, so one red check
+      # no longer silently skips the ones after it; a failed step still fails the job (X4 a0e4fd1).
+      # tests/test_workflows.py::test_one_red_check_never_skips_the_later_ones enforces it.
+      - name: Setup complete
+        id: setup
+        run: echo setup complete
+
       - name: Syntax and shebangs
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           fail=0
           while IFS= read -r f; do
@@ -37,6 +46,7 @@ jobs:
       # not fail the build -- the scripts predate this workflow and are clean at
       # error severity today.
       - name: shellcheck (errors block, warnings advisory)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           mapfile -t files < <(git ls-files '*.sh')
@@ -56,7 +66,13 @@ jobs:
         with:
           python-version-file: .python-version
 
+      # SETUP ENDS HERE: every check below is gated on this marker, not on the checks before it (see the shell job).
+      - name: Setup complete
+        id: setup
+        run: echo setup complete
+
       - name: Compile
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           fail=0
           while IFS= read -r f; do
@@ -71,6 +87,7 @@ jobs:
       # slot fragments (*.slots.py); tests/test_ruff_gate.py proves the gate still
       # goes red on a real undefined name.
       - name: ruff
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           python -m pip install --only-binary=:all: --require-hashes -r requirements.lock
           mapfile -t files < <(git ls-files '*.py')
@@ -93,7 +110,13 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      # SETUP ENDS HERE: every check below is gated on this marker, not on the checks before it (see the shell job).
+      - name: Setup complete
+        id: setup
+        run: echo setup complete
+
       - name: Syntax
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           fail=0
           while IFS= read -r f; do
@@ -104,6 +127,7 @@ jobs:
       # TOOLKIT_REQUIRE_NODE_DEPS=1: the FOMOD smoke (tests/fomod-xmlbuilder.test.js) must run against the
       # `npm ci` install above, never skip because node_modules is missing.
       - name: npm test
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         env:
           TOOLKIT_REQUIRE_NODE_DEPS: "1"
         run: npm test
@@ -111,6 +135,7 @@ jobs:
       # The smoke's own control: it must go RED on fast-xml-parser 4.3.6, which lets comment/CDATA text inject
       # elements. This needs a package manager, so it lives here and not in the contained launcher's pytest run.
       - name: FOMOD smoke control (must fail on fast-xml-parser 4.3.6)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           d="$(mktemp -d)"
           cp tests/fomod-xmlbuilder.test.js "$d/"
@@ -134,12 +159,19 @@ jobs:
         with:
           python-version-file: .python-version
 
+      # SETUP ENDS HERE: every check below is gated on this marker, not on the checks before it (see the shell job).
+      - name: Setup complete
+        id: setup
+        run: echo setup complete
+
       # R12 (Plan 6 Task 12): every session start hashes the guard files against GUARD-FILES.sha256 and banners the
       # ones that differ. A guard file changed without regenerating the manifest would banner on every install.
       - name: GUARD-FILES.sha256 is current
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python scripts/gen-guard-hashes.py --check
 
       - name: settings JSON parses
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           fail=0
           for f in .claude/settings.json .claude/settings.local.json.example .config/dotnet-tools.json package.json; do
@@ -150,6 +182,7 @@ jobs:
           exit $fail
 
       - name: devcontainer.json parses
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           python - <<'PY'
           import json, re, sys, os
@@ -171,6 +204,7 @@ jobs:
       # A hook whose script path is wrong does not error at runtime -- it silently
       # never fires. For a safety toolkit that is the worst failure mode there is.
       - name: Every hook command points at a file that exists
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           python - <<'PY'
           import json, re, sys, os
@@ -205,6 +239,7 @@ jobs:
       # The PowerShell tool is a second way to run any command (E12). A shell hook whose matcher is plain
       # `Bash` never fires for it, silently. The file-tool hooks must stay off the shells.
       - name: Shell hooks cover the PowerShell tool
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           python - <<'PY'
           import json, re, sys
@@ -233,6 +268,7 @@ jobs:
       # A SKILL.md without name+description frontmatter is silently ignored, and a
       # name that does not match its directory never resolves.
       - name: Skill frontmatter is well-formed
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           python - <<'PY'
           import glob, os, re, sys
@@ -260,9 +296,11 @@ jobs:
           PY
 
       - name: Generated agent files match agent/, and the instruction budget holds (edit agent/, then run scripts/gen_agent_trees.py)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python scripts/gen_agent_trees.py --check
 
       - name: Relative links in Markdown resolve
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           python - <<'PY'
           import glob, os, re, sys
@@ -385,9 +423,15 @@ jobs:
           docker pull busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
           docker tag busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e busybox:1.37
 
+      # SETUP ENDS HERE: every check below is gated on this marker, not on the checks before it (see the shell job).
+      - name: Setup complete
+        id: setup
+        run: echo setup complete
+
       # TRIPWIRE, before an hour of suite: this leg must COLLECT at least the recorded floor
       # (.github/ci-leg.json). A module that stopped importing, or a leg looking at the wrong tree, goes red here.
       - name: Tripwire -- the leg collects the whole suite
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         timeout-minutes: 10
         env:
           TOOLKIT_REQUIRE_HARNESS: "1"
@@ -401,12 +445,14 @@ jobs:
       # They run again inside the full suite; this run exists for the timeout. The opt-in CPU-load file
       # (test_hook_deadline_load.py) is NOT run in CI: a shared runner gives no stable CPU to measure against.
       - name: Timing guards and hook deadlines, under a hard timeout
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         timeout-minutes: 20
         env:
           TOOLKIT_REQUIRE_HARNESS: "1"
         run: python -B tests/run_harness_tests.py tests/test_skyguard_timing.py tests/test_python_fallback.py tests/test_hook_deadline.py -q -rfEs
 
       - name: Behavioral suite (contained harness)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         timeout-minutes: 270
         env:
           TOOLKIT_REQUIRE_HARNESS: "1"
@@ -444,7 +490,7 @@ jobs:
       # platform this toolkit targets, so they run on both legs here too.
       # node_modules comes from the `npm ci` step above, so the FOMOD smoke runs here too and must not skip.
       - name: Node tests
-        if: matrix.part == 'suite'
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && matrix.part == 'suite' }}
         env:
           TOOLKIT_REQUIRE_NODE_DEPS: "1"
         run: npm test

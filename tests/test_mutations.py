@@ -10134,3 +10134,16 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/check-release-payload.py", '    "docs/REVIEW-SCOPE.md",   # the maintainer', '    # "docs/REVIEW-SCOPE.md", the maintainer',
      _MM_RP + "[review-scope-shipped]", "sweep-payload-review-scope-allowed"),
 ]]
+
+# Final sweep 2026-10-25 (X4 a0e4fd1): one red CI check must not skip the later ones. A twin per kind of step: a plain
+# check, a check with its own condition, and a job without the setup marker.
+_WF_T = "tests/test_workflows.py::test_one_red_check_never_skips_the_later_ones"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (".github/workflows/ci.yml", "      - name: ruff\n        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}\n",
+     "      - name: ruff\n", _WF_T, "sweep-ci-ruff-skipped-after-a-red-check"),
+    (".github/workflows/ci.yml",
+     "        if: ${{ !cancelled() && steps.setup.outcome == 'success' && matrix.part == 'suite' }}\n",
+     "        if: matrix.part == 'suite'\n", _WF_T, "sweep-ci-node-tests-skipped-after-a-red-check"),
+    (".github/workflows/ci.yml", "      - name: Setup complete\n        id: setup\n        run: echo setup complete\n\n"
+     "      - name: Syntax and shebangs\n", "      - name: Syntax and shebangs\n", _WF_T, "sweep-ci-shell-job-has-no-marker"),
+]]

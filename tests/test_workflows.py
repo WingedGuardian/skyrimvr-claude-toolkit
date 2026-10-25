@@ -86,7 +86,8 @@ def test_the_load_test_never_runs_in_ci_and_the_deadline_tests_run_on_both_legs(
         "(test_hook_deadline_load.py) is NOT run in CI", "")
     beh = data["jobs"]["behavior"]
     timing = [s for s in _steps(beh) if "tests/test_hook_deadline.py" in s.get("run", "")]
-    assert timing and "if" not in timing[0] and isinstance(timing[0].get("timeout-minutes"), int), timing
+    # Both legs: no condition beyond the setup gate every check carries (test_one_red_check_never_skips_the_later_ones).
+    assert timing and timing[0].get("if", SETUP_GATE) == SETUP_GATE and isinstance(timing[0].get("timeout-minutes"), int), timing
 
 
 def test_the_behavior_matrix_is_both_oses_times_the_tested_pythons():
@@ -121,7 +122,7 @@ def test_the_tripwires_bracket_the_suite_on_every_leg():
     suite = _index(steps, lambda s: "run_harness_tests.py $SUITE -v" in s.get("run", ""))
     log = _index(steps, lambda s: "check_ci_leg.py log" in s.get("run", ""))
     assert None not in (collect, suite, log) and collect < suite < log, (collect, suite, log)
-    assert "if" not in steps[collect] and steps[log].get("if") == "always()"
+    assert steps[collect].get("if") == SETUP_GATE and steps[log].get("if") == "always()"
     for i in (collect, log):
         assert '--leg "$RUNNER_OS"' in steps[i]["run"]
     # The two parts are the whole suite: one runs exactly the mutation gate, the other everything but it,
@@ -135,6 +136,35 @@ def test_the_tripwires_bracket_the_suite_on_every_leg():
     # Review M7: the job default is what makes every step bash -eo pipefail on BOTH legs; on Windows the
     # runner's default shell is PowerShell, where `tee`, `set -o` and "$RUNNER_OS" mean something else.
     assert data["jobs"]["behavior"].get("defaults", {}).get("run", {}).get("shell") == "bash"
+
+
+SETUP_GATE = "${{ !cancelled() && steps.setup.outcome == 'success' }}"
+# Jobs whose later steps CONSUME an earlier step's output (the restored tools, the built zip), so a red step there
+# must skip the rest, and jobs with one check. Every other job ends its setup with the marker below.
+SEQUENTIAL_JOBS = {"setup-smoke", "dotnet", "release-build"}
+
+
+def test_one_red_check_never_skips_the_later_ones():
+    """Final sweep 2026-10-25 (X4 a0e4fd1). A step `if:` without a status function means `success() && ...`, so the
+    first red check skipped every check after it: one failing gate hid the suite, its ceilings and the Node tests.
+    Each job closes its setup with a `Setup complete` step (id: setup); every later step is gated on that marker
+    (`!cancelled() && steps.setup.outcome == 'success'`, plus its own condition) or on always(). A failed step still
+    fails the job."""
+    _, data = _load("ci.yml")
+    jobs = data["jobs"]
+    assert set(jobs) - SEQUENTIAL_JOBS, "no job left to check: this test would be vacuous"
+    for name, job in jobs.items():
+        if name in SEQUENTIAL_JOBS:
+            continue
+        steps = _steps(job)
+        marker = _index(steps, lambda s: s.get("id") == "setup")
+        assert marker is not None, f"{name}: no `Setup complete` step (id: setup) closes the setup block"
+        later = steps[marker + 1:]
+        assert later, f"{name}: nothing after the setup marker"
+        for s in later:
+            cond = str(s.get("if", ""))
+            assert cond == "always()" or cond.startswith(SETUP_GATE[:-3]), (
+                f"{name}: step {s.get('name')!r} runs only if EVERY earlier check passed (if: {cond or 'none'})")
 
 
 def test_every_job_that_runs_the_freeze_gate_has_full_history():
