@@ -81,6 +81,102 @@ class Snapshot:
     stamps: list
 
 
+# Issue 11: the base archive lists the backend sees. Sources and precedence, lowest first (key by key, never file by
+# file): the game-root Skyrim.ini, the default the engine ships beside the exe (Wrye Bash skyrimvr Ini.default_ini_file;
+# also the pinned backend's own game-dir fallback, houseCARL 4e28505 ArchiveDiscovery.ReadBaseArchiveNames), then the
+# captured user/profile INIs in their existing Skyrim.ini < SkyrimVR.ini < SkyrimPrefs.ini order. "The first INI with
+# the key wins" is Wrye Bash's rule (game/__init__.py Ini.get_bsas_from_inis). Anything not qualified is marked, never
+# applied: built-in engine defaults, an explicitly empty user value, SkyrimCustom.ini, plugin-named INIs, other VR keys.
+BASE_KEYS = ("sResourceArchiveList", "sResourceArchiveList2")
+VR_KEY, VR_FALLBACK = "sVrResourceArchiveList", "Skyrim_VR - Main.bsa"  # Wrye Bash skyrimvr Ini.engine_overrides
+USER_INIS = ("Skyrim.ini", "SkyrimVR.ini", "SkyrimPrefs.ini")
+
+
+def archive_keys(raw):
+    """[Archive] *ResourceArchiveList* keys of one INI: {casefolded key: [(spelled key, value), ...]} in file order."""
+    text = raw.decode("utf-8-sig") if raw.startswith(b"\xef\xbb\xbf") else raw.decode("cp1252", errors="replace")
+    found, inside = {}, False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line[0] in ";#":
+            continue
+        if line[0] == "[":
+            inside = line.casefold() == "[archive]"
+            continue
+        key, eq, value = line.partition("=")
+        key = key.strip()
+        if inside and eq and "resourcearchivelist" in key.casefold():
+            found.setdefault(key.casefold(), []).append((key, value.strip()))
+    return found
+
+
+def archive_inputs(config, plugin_paths, roots):
+    """Read every INI that can name a base archive once; return (coverage, fingerprint material)."""
+    data, user = Path(config["data_dir"]), Path(config["config_dir"])
+    game_ini = data.parent / "Skyrim.ini"
+    applied = [("game-root", game_ini)] + [("user", user / n) for n in USER_INIS]
+    unqualified = [("custom", user / "SkyrimCustom.ini")]
+    if config["edition"] == "VR":
+        unqualified.append(("game-root", data.parent / "SkyrimVR.ini"))
+    for name in plugin_paths:   # a plugin-named INI from the same supplier walk as the plugins (VFS winner first)
+        stem = Path(name).stem + ".ini"
+        hit = next((Path(r) / stem for r in [*roots, data] if (Path(r) / stem).is_file()), None)
+        if hit:
+            unqualified.append(("plugin", hit))
+    sources, uncertain, lists, seen = [], [], {}, set()
+    for role, path in applied + unqualified:
+        key = str(path.resolve()).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        raw = path.read_bytes() if path.is_file() else None
+        sources.append({"role": role, "path": str(path), "present": raw is not None,
+                        "sha256": hashlib.sha256(raw).hexdigest() if raw is not None else None,
+                        "applied": (role, path) in applied})
+        if raw is None:
+            continue
+        keys = archive_keys(raw)
+        if (role, path) not in applied:
+            if any(v for rows in keys.values() for _k, v in rows):
+                uncertain.append(path.name + " names resource archives; whether the engine loads them is not "
+                                 "qualified, so they were not applied: " + str(path))
+            continue
+        allowed = {k.casefold() for k in BASE_KEYS + ((VR_KEY,) if config["edition"] == "VR" else ())}
+        for folded, rows in keys.items():
+            if len({v for _k, v in rows}) > 1:
+                uncertain.append(str(path) + " sets " + rows[0][0] + " more than once with different values.")
+            if folded not in allowed:
+                if any(v for _k, v in rows):
+                    uncertain.append(str(path) + " sets unqualified archive key " + rows[0][0] + "; not applied.")
+                continue
+            value = rows[-1][1]
+            if value:
+                lists[folded] = {"value": value, "source": str(path)}
+            elif folded in lists:
+                uncertain.append(str(path) + " sets " + rows[0][0] + " explicitly empty; the engine's reading of an "
+                                 "empty value is not qualified, so the lower value from " + lists[folded]["source"]
+                                 + " was kept.")
+    if config.get("asset_provider") == "mo2":
+        settings = Path(config["plugins_txt"]).parent / "settings.ini"
+        raw = settings.read_bytes() if settings.is_file() else None
+        sources.append({"role": "mo2-settings", "path": str(settings), "present": raw is not None,
+                        "sha256": hashlib.sha256(raw).hexdigest() if raw is not None else None, "applied": False})
+        local = raw is not None and any(
+            line.strip().replace(" ", "").casefold() == "localsettings=true"
+            for line in raw.decode("utf-8-sig", errors="replace").splitlines())
+        if not local:
+            uncertain.append("The MO2 profile does not set LocalSettings=true, so the game reads Documents INIs that "
+                             "this integration did not capture: " + str(settings))
+    resolved = {k: lists.get(k.casefold(), {"value": "", "source": None}) for k in BASE_KEYS}
+    if config["edition"] == "VR":
+        resolved[VR_KEY] = lists.get(VR_KEY.casefold(), {"value": VR_FALLBACK, "source": "engine fallback"})
+    if not any(resolved[k]["value"] for k in BASE_KEYS):
+        uncertain.append("No captured INI lists sResourceArchiveList/sResourceArchiveList2; the engine's built-in "
+                         "defaults are not modelled, so base-game archives are not in the asset scan.")
+    coverage = {"complete": not uncertain, "lists": resolved, "sources": sources, "uncertain": uncertain}
+    return coverage, json.dumps(sources, sort_keys=True).encode()
+
+
 def capture(config):
     data = Path(config["data_dir"])
     source = Path(config["plugins_txt"])
@@ -154,6 +250,8 @@ def capture(config):
         extra += p.read_bytes() if p.is_file() else b""
     if ccc.is_file():
         extra += ccc.read_bytes()
+    coverage, archive_material = archive_inputs(config, names, priority)
+    extra += archive_material
     digest = hashlib.sha256(raw + extra + json.dumps([config["edition"], stamps, headers, content], sort_keys=True).encode()).hexdigest()
     for name, path in paths.items():
         before = identity(path)
@@ -163,6 +261,7 @@ def capture(config):
         raise Refusal("Wrye-managed plugins.txt changed during capture; retry.")
     snap = Snapshot(names, paths, headers, digest, str(source), [n for n, a in rows if not a], stamps)
     snap.asset_roots = priority
+    snap.archive_coverage = coverage
     return snap
 
 
@@ -172,21 +271,14 @@ def write_profile(snapshot, folder, config):
     texts = {"loadorder.txt": "\n".join(snapshot.names) + "\n",
              "plugins.txt": "\n".join("*" + n for n in snapshot.names) + "\n",
              "modlist.txt": "\n".join("+" + str(p) for p in getattr(snapshot, "asset_roots", [])) + "\n"}
-    # House Carl reads Skyrim.ini only; fold the VR archive override into its synthetic INI.
-    import configparser
-    ini = configparser.ConfigParser(strict=False, interpolation=None)
-    ini.read([str(Path(config["config_dir"]) / n) for n in
-              ("Skyrim.ini", "SkyrimVR.ini", "SkyrimPrefs.ini")], encoding="utf-8-sig")
+    # The pinned backend reads only the profile Skyrim.ini's [Archive] lists (ArchiveDiscovery.cs). Write the lists
+    # resolved at capture, from the captured bytes, so the backend never re-reads a live INI; fold the VR list in.
+    lists = snapshot.archive_coverage["lists"]
+    second = lists["sResourceArchiveList2"]["value"]
     if config["edition"] == "VR":
-        if not ini.has_section("Archive"):
-            ini.add_section("Archive")
-        vr = ini.get("Archive", "sVrResourceArchiveList", fallback="Skyrim_VR - Main.bsa")
-        combined = ini.get("Archive", "sResourceArchiveList2", fallback="")
-        ini.set("Archive", "sResourceArchiveList2", ",".join(s for s in (combined, vr) if s))
-    import io
-    out = io.StringIO()
-    ini.write(out)
-    texts["Skyrim.ini"] = out.getvalue()
+        second = ",".join(v for v in (second, lists[VR_KEY]["value"]) if v)
+    texts["Skyrim.ini"] = ("[Archive]\nsResourceArchiveList=" + lists["sResourceArchiveList"]["value"]
+                           + "\nsResourceArchiveList2=" + second + "\n")
     for name, text in texts.items():
         p = folder / name
         if not p.exists() or p.read_text(encoding="utf-8") != text:

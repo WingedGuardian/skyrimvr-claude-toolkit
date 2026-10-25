@@ -9969,3 +9969,36 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "tests/test_opaque_protected.py::test_an_unnamed_program_on_a_protected_path_asks[opaque-on-a-plugin]",
      "rule-S-OPAQUE-PROTECTED-no-verb"),
 ]]
+
+# --- Issue 11: House Carl base-archive inputs ---------------------------------------------------------------------
+_HC = "tools/housecarl_integration/order.py"
+_HCT = "tests/test_housecarl.py::"
+MUTATIONS += [pytest.param(f, find, rep, _HCT + test, id="housecarl-archive-" + i) for i, f, find, rep, test in [
+    ("game-root-ini-not-read", _HC,
+     '    applied = [("game-root", game_ini)] + [("user", user / n) for n in USER_INIS]',
+     '    applied = [("user", user / n) for n in USER_INIS]', "test_root_ini_base_archives_reach_the_backend[SE]"),
+    ("user-key-does-not-override", _HC, '                lists[folded] = {"value": value, "source": str(path)}',
+     '                lists.setdefault(folded, {"value": value, "source": str(path)})',
+     "test_user_ini_precedence_and_explicit_override"),
+    ("explicit-empty-not-marked", _HC, "            elif folded in lists:", "            elif False:",
+     "test_user_ini_precedence_and_explicit_override"),
+    ("unqualified-source-applied", _HC, "        if (role, path) not in applied:", "        if False:",
+     "test_unqualified_ini_sources_are_marked_never_applied"),
+    ("unqualified-source-not-marked", _HC, "            if any(v for rows in keys.values() for _k, v in rows):",
+     "            if False:", "test_unqualified_ini_sources_are_marked_never_applied"),
+    ("plugin-ini-not-found", _HC, "        if hit:", "        if False:",
+     "test_unqualified_ini_sources_are_marked_never_applied"),
+    ("mo2-global-inis-not-marked", _HC, "        if not local:", "        if False:",
+     "test_mo2_profile_inis_and_game_root_list"),
+    ("no-base-list-not-marked", _HC, '    if not any(resolved[k]["value"] for k in BASE_KEYS):', "    if False:",
+     "test_root_ini_base_archives_reach_the_backend[VR]"),
+    ("inputs-not-fingerprinted", _HC, "    extra += archive_material\n", "",
+     "test_every_archive_input_is_fingerprinted[root-edit]"),
+    ("unqualified-vr-key-not-marked", _HC, "            if folded not in allowed:", "            if False:",
+     "test_vr_supplemental_list_and_unqualified_vr_keys"),
+    ("vr-fallback-dropped", _HC, '{"value": VR_FALLBACK, "source": "engine fallback"}',
+     '{"value": "", "source": "engine fallback"}', "test_vr_supplemental_list_and_unqualified_vr_keys"),
+    ("absence-always-conclusive", "tools/housecarl_integration/gateway.py",
+     '"absence_conclusive": snap.archive_coverage["complete"],', '"absence_conclusive": True,',
+     "test_asset_answers_carry_machine_readable_archive_coverage"),
+]]
