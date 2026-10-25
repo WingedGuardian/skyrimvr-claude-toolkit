@@ -12,7 +12,7 @@ python tools/logging-registry.py show <reports>/current/registry.json --filter m
 python tools/logging-registry.py diff <reports>/previous/registry.json <reports>/current/registry.json
 ```
 
-Keep a previous registry in another output directory to compare snapshots. The scanner writes only `registry.json` and `registry.md` in the requested output directory, using atomic file replacement. Output beneath Data, the user configuration directory or an extra input root is refused. A game-local `.skyguard/logging-registry/` or `_CLAUDE_OUTPUT/` directory is suitable. Do not publish a real install's reports.
+Keep a previous registry in another output directory to compare snapshots. The scanner writes only `registry.json` and `registry.md` in the requested output directory, using atomic file replacement. Output beneath Data, the user configuration directory or an extra input root is refused. Use a folder whose old reports you can rotate out: a dated folder per run under `_CLAUDE_OUTPUT/logging-registry/` (for example `_CLAUDE_OUTPUT/logging-registry/2026-10-25/`), or one outside the install. Never `.skyguard/`: it holds the guards' own state, and the guard refuses moving or deleting anything in it, so reports there could never be cleaned up. Do not publish a real install's reports.
 
 `--data-root` selects an explicit Data view instead of `<game>/Data`. `--extra-root NAME=PATH` adds a named recursive scope. There is no MO2 load-order resolver in this tool: obtain a resolved virtual view through the existing manager/integration first, or retain the gap. A scan of all MO2 mod folders includes disabled and losing files and cannot establish current settings.
 

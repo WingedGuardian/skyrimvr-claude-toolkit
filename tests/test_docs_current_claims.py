@@ -193,3 +193,11 @@ def test_the_v4_fixed_list_names_only_behaviour_3_9_1_shipped():
             assert word.lower() not in title.lower(), (title, word)
     assert "#### Hardened before release (features new in v4)" in notes
     assert "it used to be refused, as every ask is there" not in notes
+
+
+def test_logging_registry_never_suggests_a_report_folder_the_guard_will_not_let_anyone_clean():
+    """Review C-docs F9: docs/logging-registry.md suggested `.skyguard/logging-registry/`; S-SELF-STATE (in
+    NEVER_SHADOW) then refuses mv/rm of those reports, so they could never be rotated."""
+    doc = _read("docs/logging-registry.md")
+    assert ".skyguard/logging-registry" not in doc
+    assert "`_CLAUDE_OUTPUT/logging-registry/`" in doc and "Never `.skyguard/`" in doc
