@@ -2825,6 +2825,9 @@ class _Resolver:
                 return self.made
             else:
                 words.append(a)
+        sub = dict(self.ctx.subst)                              # guard3: `$g = 'C:\x'; Start-Process "$g\a.exe"`
+        if fp[1] and fp[0] in sub and "$" not in sub[fp[0]] and "`" not in sub[fp[0]]:
+            fp = (sub[fp[0]], False)
         if fp[1] or "$" in fp[0] or "(" in fp[0]:
             self.opaque(k + 1)                                  # the program itself is not known
             return self.made

@@ -109,6 +109,11 @@ STAYS = {
     "root-in-a-plain-assignment": ('ROOT="<I>"; "$PY" tools/x.py', "Bash"),
     "token-cap-no-expansion": ('ls "<I>/Data"; echo ' + "a " * 2500, "Bash"),
     "expansion-beside-data": ('echo "$HOME"; ls "<I>/Data"', "Bash"),
+    # Priced (guard3): a -Command string with its own variables is code the parser read, not a variable's text.
+    "pwsh-command-with-its-own-variables": ('P="<I>"; powershell -NoProfile -Command "Get-Item \'$P/x.dll\'; $v = 1"',
+                                            "Bash"),
+    "start-process-of-a-literal-path": ('$g = "<IB>"; Start-Process -FilePath "$g' + BS + 'sksevr_loader.exe" '
+                                        '-WorkingDirectory $g', "PowerShell"),
     "eval-of-a-literal-beside-data": ('c="echo hi"; eval "$c"; ls "<I>/Data"', "Bash"),
 }
 

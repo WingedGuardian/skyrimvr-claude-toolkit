@@ -10102,7 +10102,9 @@ MUTATIONS += [pytest.param(_SR, *m[:3], id=m[3]) for m in [
      _OPA + "[pwsh-pipe-iex-root-alone]", "rule-S-OPAQUE-PROTECTED-reader-runs-text"),
     ("            evals = True", "            evals = False", _OPA + "[eval-root-alone]",
      "rule-S-OPAQUE-PROTECTED-eval-runs-text"),
-    ("            return out or [None], True", "            return out or [None], False", _OPA + "[bash-c-root-alone]",
+    ("evals or any(_CODE_VARIABLE.fullmatch(t) for t in dynamic)", "True",
+     _OPS + "[pwsh-command-with-its-own-variables]", "rule-S-OPAQUE-PROTECTED-code-variable-only"),
+    ("evals or any(_CODE_VARIABLE.fullmatch(t) for t in dynamic)", "evals", _OPA + "[bash-c-root-alone]",
      "rule-S-OPAQUE-PROTECTED-code-runs-text"),
     ('        hit = _protected_text(m.group(1) or m.group(2) or m.group(3) or "", roots, root_alone=True)',
      '        hit = _protected_text(m.group(1) or m.group(2) or m.group(3) or "", roots, root_alone=False)',
@@ -10124,3 +10126,6 @@ MUTATIONS += [pytest.param(_SR, *m[:3], id=m[3]) for m in [
     ("    opaque = _opaque_save(parsed, roots, cwd, env, command)", "    opaque = _opaque_save(parsed, roots, cwd, env)",
      _OPT + "test_past_the_token_cap_a_save_in_the_text_still_asks", "rule-S-SAVE-OPAQUE-token-cap-wired"),
 ]]
+MUTATIONS.append(pytest.param(
+    _G3P, '        if fp[1] and fp[0] in sub and "$" not in sub[fp[0]] and "`" not in sub[fp[0]]:', "        if False:",
+    _OPS + "[start-process-of-a-literal-path]", id="guard3-start-process-reads-literal"))

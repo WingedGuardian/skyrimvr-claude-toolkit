@@ -278,6 +278,7 @@ _PLUGIN_WORD = re.compile(r"\.(?:esp|esm|esl|bsa|ba2)$", re.IGNORECASE)
 _TERMINATOR = "\"' \t\r\n|&;<>)`"
 # The pipeline readers whose unknown input shellparse turns into a "?" exec (argv = the reader): they run TEXT.
 _TEXT_READERS = frozenset(shellparse.ALL_SHELLS) | {"invoke-expression"}
+_CODE_VARIABLE = re.compile(r"""\s*["']?\$\{?[A-Za-z_][A-Za-z0-9_]{0,255}\}?["']?\s*""")
 # guard3 (v4.0.0 review MEDIUM-1): an MSYS spelling (`/c/Users/...`) is the drive path it names.
 _MSYS = re.compile(r"(?<![\w:.~/-])/([a-z])/")
 # A value the command assigns (`c="rm -rf <install>"`, `$c = '...'`): the text an eval-like call may run.
@@ -305,9 +306,11 @@ def _opaque_execs(parsed):
             evals = True
         elif e.program in _AWK_PROGRAMS and any("system(" in w.replace(" ", "") for w in e.argv):
             out.append(e)
-    for _shell, text in parsed.codes:
-        if _DYNAMIC.search(text or ""):
-            return out or [None], True
+    dynamic = [text for _shell, text in parsed.codes if _DYNAMIC.search(text or "")]
+    if dynamic:
+        # Priced (guard3): a -Command string holding its own PowerShell variables is code the parser READ; only a
+        # string that is wholly one variable (`bash -c "$c"`) runs text the variable holds.
+        return out or [None], evals or any(_CODE_VARIABLE.fullmatch(t) for t in dynamic)
     return out, evals
 
 
