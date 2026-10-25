@@ -153,3 +153,18 @@ def test_pre_arc_carry_overs_are_gone():
     assert "not covered by the toolkit's hook testing" in _read("docs/getting-started.md")
     readme = _read("README.md")
     assert "## New in v4" in readme and "## New in v3" not in readme
+
+
+def test_no_doc_says_the_bulk_save_refusal_prints_the_approval_line():
+    """Review C-docs F1: the S-SAVE-APPROVAL refusal is two lines pointing to `check --preview` (rules.py template;
+    tests/test_approval_preview.py::test_adapting_shell_example_yields_the_grant_the_refusal_does_not_print runs the
+    documented route). Docs said the refusal prints or shows the line, which an agent cannot follow."""
+    stale = ("line the refusal shows", "line the refusal prints", "approval line the guard shows",
+             "line printed by the deciding hook", "the refusal (or `python tools/agent-harness.py check --preview`) prints")
+    for rel in ("README.md", "CHANGELOG.md", "ADAPTING.md", "docs/safety-philosophy.md", "agent/instructions/core.md",
+                "agent/skills/skyrim-save/SKILL.md"):
+        text = _read(rel)
+        for phrase in stale:
+            assert phrase not in text, (rel, phrase)
+    for rel in ("README.md", "docs/safety-philosophy.md", "agent/instructions/core.md", "agent/skills/skyrim-save/SKILL.md"):
+        assert "check --preview` prints" in _read(rel) or "check --preview`." in _read(rel), rel

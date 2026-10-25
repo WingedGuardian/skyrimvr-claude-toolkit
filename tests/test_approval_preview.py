@@ -12,7 +12,7 @@ import time
 import pytest
 
 from conftest import REPO
-from test_save_policy import Inst
+from test_save_policy import Inst, live_enforce
 from test_local_policy import register
 from test_rule_messages import contract_problems
 
@@ -222,6 +222,28 @@ def test_readonly_shadow_retains_session_binding_and_never_shadow(installed):
     kept = decoy._replace(code="shell.S-SAVE-APPROVAL")
     assert engine.shadow(kept, str(inst.game), "preview-session", str(hb.parent), audit, now, readonly=True).decision == "deny"
     assert census(inst.game.parent) == before
+
+
+def test_adapting_shell_example_yields_the_grant_the_refusal_does_not_print(installed):
+    """Review C-docs F1: every doc said the bulk-save refusal prints the SAVE_ACCESS_APPROVAL line; it prints only a
+    pointer to `check --preview`. ADAPTING's shell-surface example, run as written (fixture paths swapped in), must
+    produce the delete grant for all three pairs, so the documented route is one a user can actually follow."""
+    import re
+    text = (REPO / "ADAPTING.md").read_text(encoding="utf-8")
+    blocks = [b for b in re.findall(r"```json\n(.*?)\n```", text, re.S) if '"surface":"shell"' in b]
+    assert len(blocks) == 1, "ADAPTING.md must carry exactly one shell-surface preview example"
+    inst = installed
+    data = json.loads(blocks[0])
+    data.update(cwd=str(inst.game), session_id="preview-session")
+    data["command"] = data["command"].replace("C:/Profile/Saves", inst.S).replace("/A.ess", "/Save1.ess") \
+        .replace("/B.ess", "/Save2.ess").replace("/C.ess", "/Save3.ess")
+    data.pop("api_version")
+    hook = live_enforce(inst.shell(data["command"]), inst.game, inst.roots, inst.audit, command=data["command"])
+    assert (hook.decision, hook.code) == ("deny", "shell.S-SAVE-APPROVAL"), hook
+    assert "SAVE_ACCESS_APPROVAL {" not in hook.reason and "check --preview" in hook.reason
+    report = cli(inst, contracts.Action(**data))
+    assert report["result"]["decision"] == "deny"
+    assert grants(report) == [expected(inst, ("Save1", "Save2", "Save3"), "delete")]
 
 
 def test_preview_unknown_surface_stays_warn_and_allow(installed):

@@ -215,7 +215,7 @@ the working directory the agent reports.
 - Decoded text run as commands (`base64 -d | bash`), which the guard cannot read
 - `sed -i` without `-b` on a file in the install, config or MO2 folder (it makes CRLF LF): use `sed -i -b`
 - **More than two saves changed at once**, or saves named by a wildcard, until the user types the
-  `SAVE_ACCESS_APPROVAL` line the refusal shows (skill `skyrim-save`)
+  `SAVE_ACCESS_APPROVAL` line `check --preview` prints (skill `skyrim-save`)
 - A command the guard cannot read: empty or not text ("GUARD INERT"), or unparseable while it contains
   a deletion and names a protected folder -- it refuses rather than shrugs
 
@@ -255,7 +255,7 @@ Coverage and gaps: `docs/guard-coverage.md`.
 
 ### General rules
 - **Always review changes before applying** -- modded installs are delicate
-- Never modify ESP/ESM files directly -- use xelib programmatically or Spriggit
+- Never modify ESP/ESM files directly -- use xelib or Spriggit
 - Vortex manages load order -- direct edits to loadorder.txt/plugins.txt may be overwritten
 - **Never bare-copy a third-party mod into `Data/`**, SKSE DLLs (DevBench too) included: untracked
   files get clobbered or orphaned by a deploy or purge. Prefer the user's mod manager; a manual

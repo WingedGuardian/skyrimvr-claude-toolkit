@@ -29,9 +29,19 @@ the helper command, paths and count. Unknown approval readers cannot grant it.
 Both legacy formats remain readable through `tools/skyguard.sh snapshot`.
 
 For an exact save-approval proposal, submit the same Action v1 to `check --preview`.
-The bounded human hook reason points here instead of embedding a long grant.
+The bounded human hook reason points here instead of embedding a long grant: the
+refusal itself never prints the `SAVE_ACCESS_APPROVAL` line, the preview does.
 For example, save this JSON as `action.json`, replacing the fixture paths and
-session with the actual proposed call (the command is opaque metadata, never run):
+session with the actual proposed call (the command is opaque metadata, never run).
+A refused shell command (here a delete of three saves) goes in as the shell surface,
+with the exact command text, the shell, the working directory and the session id;
+the guard reads the saves and the operation from the command itself:
+
+```json
+{"api_version":1,"host":"claude","tool":"Bash","surface":"shell","shell":"bash","cwd":"C:/Toolkit","session_id":"actual-session","command":"rm \"C:/Profile/Saves/A.ess\" \"C:/Profile/Saves/B.ess\" \"C:/Profile/Saves/C.ess\""}
+```
+
+An edit-tool write names its files and operations instead:
 
 ```json
 {"api_version":1,"host":"claude","tool":"write","surface":"files","cwd":"C:/Toolkit","session_id":"actual-session","command":"the exact proposed operation","paths":["C:/Profile/Saves/A.ess","C:/Profile/Saves/B.ess","C:/Profile/Saves/C.ess"],"operations":["write","write","write"]}

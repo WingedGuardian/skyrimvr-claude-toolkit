@@ -77,11 +77,16 @@ DevBench save overwrites) that a call CHANGES: written or edited, copied onto, m
   call (a note says so). A missing co-save is recorded as missing. If the backup fails (no room, unreadable, a copy
   that does not verify, the store busy), the call is refused and nothing changes. The backups are never pruned.
 - **More than two, or any wildcard:** refused until the USER types one line in their own message (it is never read
-  from a tool result, a file or your own text, so you cannot supply it -- show them the line the refusal prints). In that line,
+  from a tool result, a file or your own text, so you cannot supply it). The refusal does not print that line; it points
+  to `python tools/agent-harness.py check --preview`. Pipe that the same call as Action v1 JSON on stdin -- for a
+  shell command `{"api_version":1,"host":"<your host>","tool":"<its shell tool>","surface":"shell","shell":"bash" or "powershell",
+  "cwd":"<working dir>","session_id":"<this session>","command":"<the exact command>"}` (example: `ADAPTING.md`) --
+  and `result.reason` in its JSON output holds the complete line(s) to show the user (an install with a personal
+  policy refuses the preview: use plain `check`, which never runs the command). In that line,
   `op` is `write` (a write, copy onto, edit, ReSaver `--apply`, DevBench save), `move` (a move or rename) or
   `delete`. The version 1 grant binds the current `session_id`, operation and canonical full `paths`, including
   both members of every pair. Wildcards also bind the exact `command_sha256` and logical save `count`.
-  Show the complete line printed by the deciding hook; do not construct an approval yourself. Old basename-only
+  Show the complete line the preview printed; do not construct or edit an approval yourself. Old basename-only
   and pattern/count grants require a new canonical grant. A matching grant can be reused in that session;
   changed membership or command scope invalidates it. Every approved save is still backed up first.
 - **Free, any number:** reading, hashing, listing, and copying saves OUT of `Saves`.
