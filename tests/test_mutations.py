@@ -10171,3 +10171,15 @@ MUTATIONS += [pytest.param("tools/skyguard/self_rules.py", *m[:3], id=m[3]) for 
      "    for words, holder in ((deletes.interpreter_delete_targets(code, python), True),):",
      _ITW + "[node-e-append]", "rule-S-SELF-TRANSCRIPT-interpreter-write"),
 ]]
+
+
+# guard3 (parent ruling): a bash-era snapshot stamp holding a save or a backup folder is never retired.
+_SNT = "tests/test_snapshot_nested.py::test_an_old_bash_era_stamp_holding_a_save_or_a_backup_is_kept"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/snapshot.py", "                    and not _holds_protected(d):", "                    and True:",
+     _SNT + "[source/x.ess]", "guard3-legacy-stamp-checked"),
+    ("tools/skyguard/snapshot.py", '        if any(f.lower().endswith(_PROTECTED_EXTS) for f in files):',
+     "        if False:", _SNT + "[deploy/SKSE/x.skse]", "guard3-legacy-stamp-save"),
+    ("tools/skyguard/snapshot.py", '        if rel != "." and any("backup" in part for part in rel.split("/")):',
+     "        if False:", _SNT + "[source/backups/x.txt]", "guard3-legacy-stamp-backup"),
+]]

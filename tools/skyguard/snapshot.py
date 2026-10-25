@@ -813,13 +813,30 @@ def prune(store, now, audit, deadline=None):
     # The bash-era copy folders (`<stamp>/source`, `<stamp>/deploy`) age out as they always did: older than 14 days.
     try:
         for d in store.iterdir():
-            if d.is_dir() and _LEGACY_DIR.match(d.name) and int((now - d.stat().st_mtime) // DAY) > KEEP_DAYS:
+            if d.is_dir() and _LEGACY_DIR.match(d.name) and int((now - d.stat().st_mtime) // DAY) > KEEP_DAYS \
+                    and not _holds_protected(d):
                 if late():
                     return _pruned(store, now, audit, removed, stopped=True)
                 batch.retire(d)
     except OSError:
         pass
     return _pruned(store, now, audit, removed)
+
+
+_PROTECTED_EXTS = (".ess", ".skse")                  # housekeep.SAVE_EXTS
+
+
+def _holds_protected(folder) -> bool:
+    """guard3 (parent ruling, as housekeep.protected_inside): a bash-era stamp is retired WHOLE, so a save (.ess/.skse)
+    or a backup folder anywhere inside it keeps all of it. A folder that cannot be read is kept too."""
+    failed = []
+    for root, _dirs, files in os.walk(str(folder), onerror=failed.append):
+        rel = os.path.relpath(root, str(folder)).replace("\\", "/").lower()
+        if rel != "." and any("backup" in part for part in rel.split("/")):
+            return True
+        if any(f.lower().endswith(_PROTECTED_EXTS) for f in files):
+            return True
+    return bool(failed)
 
 
 def _pruned(store, now, audit, removed, stopped=False):
