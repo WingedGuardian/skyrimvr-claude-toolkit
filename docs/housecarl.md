@@ -76,18 +76,27 @@ Status supports a plugin-basename filter on this captured membership; alternate-
 lookups are unavailable through the gateway. Creation does not compile scripts or supply voice/SEQ assets;
 retain upstream notices about those requirements before using a plugin in game.
 
-## Archive discovery limit
+## Archive discovery coverage
 
-[Issue 11](https://github.com/WingedGuardian/skyrimvr-claude-toolkit/issues/11) reports asset-absence
-results without a coverage warning when applicable base archives were omitted. The gateway builds
-its backend INI from the configured user/profile INIs and adds the VR archive; it currently does
-not import archive lists from the game-root INI. A synthetic SE/VR profile check reproduced that
-omission. The public toolkit pins 2.0.5; the original report used an installed 2.1.0 backend.
+[Issue 11](https://github.com/WingedGuardian/skyrimvr-claude-toolkit/issues/11) reported asset-absence
+results without a coverage warning when base archives were omitted. The gateway now resolves
+`sResourceArchiveList` and `sResourceArchiveList2` key by key: the game-root `Skyrim.ini` first, then
+the captured user or MO2 profile INIs, where a non-empty value overrides lower ones for that key only.
+On VR, `sVrResourceArchiveList` is added, falling back to `Skyrim_VR - Main.bsa`. The backend receives
+only these captured values. Every consulted INI, present or absent, is part of the input fingerprint,
+so a changed INI rejects the answer. Authority and INI files are never edited.
 
-Treat a missing asset result as inconclusive until the relevant base archives are independently
-accounted for, even when the backend says `read_incomplete: false`. Plugin-index completeness does
-not establish archive completeness. This is a file-discovery limit, not evidence of the runtime
-asset winner. Do not change the user's INIs or activation/order files to make a query agree.
+Some inputs are reported but not applied: an explicitly empty user value, `SkyrimCustom.ini`,
+plugin-named INIs, other VR archive keys, an MO2 profile without `LocalSettings=true`, or no base list
+at all. The engine's built-in defaults are not modelled. Any such input sets
+`context.archive_coverage.complete` to false, lists the reason under `uncertain`, and makes the
+response's `absence_conclusive` false. Treat an absent asset as inconclusive then, even with
+`read_incomplete: false`.
+
+The VR supplemental list is ranked with the base archives, so a BSA-versus-BSA winner involving it may
+differ from the engine; presence is unaffected. This is file discovery, not the runtime asset winner.
+Synthetic fixtures qualify this logic; no real install or backend run did. The public toolkit pins 2.0.5;
+the original report used 2.1.0.
 
 ## Existing-file publication and recovery
 
