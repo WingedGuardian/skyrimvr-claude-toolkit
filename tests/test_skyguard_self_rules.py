@@ -562,3 +562,10 @@ def test_the_configured_set_is_setup_sh_s_own_loop_lists():
     for rel, kinds in slots.items():
         src = (REPO / rel).read_text(encoding="utf-8")
         assert ("{{PYTHON_PATH}}" in src) == ("python" in kinds) and ("{{BASH_PATH}}" in src) == ("bash" in kinds), rel
+
+
+def test_a_computed_interpreter_delete_keeps_the_state_text_fallback():
+    # The literal-target reader cannot resolve os.path.join; the older text clause must still refuse it.
+    code = "import os, shutil; shutil.rmtree(os.path.join(" + repr(GAME + "/.skyguard") + ", 'state'))"
+    (decision, _), fired = shell("python -c " + shlex.quote(code))
+    assert decision == "deny" and "S-SELF-STATE" in fired, (decision, fired)

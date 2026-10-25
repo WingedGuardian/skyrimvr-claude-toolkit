@@ -412,9 +412,11 @@ def test_an_exported_value_cannot_stand_in_for_a_missing_line(game_dir):
     v4.0.0 review L4a L4: the old assertion named a message setup.sh never prints, so it could not go red. Now a copy
     of setup.sh that forgets one line runs with no Python (so the guard's own reader cannot catch it) and with that
     very value exported: only the `unset` before the read-back makes the missing line visible."""
-    from conftest import no_python_env
+    from conftest import no_python_env, offers_python
     env = no_python_env()
-    path = {"PATH": env["PATH"] + os.pathsep + os.path.dirname(BASH)}
+    # On Linux bash shares /usr/bin with python3; the no-Python mirror already supplies bash and its tools.
+    bash_dir = os.path.dirname(BASH)
+    path = {"PATH": env["PATH"] if offers_python(bash_dir) else env["PATH"] + os.pathsep + bash_dir}
     r = run_setup(game_dir, env_overrides=path)
     assert "Wrote: skyrim-paths.env" in r.stdout, r.stdout[-1500:]
     line = next(ln for ln in (game_dir / "skyrim-paths.env").read_text(encoding="utf-8").splitlines()

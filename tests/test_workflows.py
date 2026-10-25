@@ -141,7 +141,7 @@ def test_the_tripwires_bracket_the_suite_on_every_leg():
 SETUP_GATE = "${{ !cancelled() && steps.setup.outcome == 'success' }}"
 # Jobs whose later steps CONSUME an earlier step's output (the restored tools, the built zip), so a red step there
 # must skip the rest, and jobs with one check. Every other job ends its setup with the marker below.
-SEQUENTIAL_JOBS = {"setup-smoke", "dotnet", "release-build"}
+SEQUENTIAL_JOBS = {"setup-smoke", "dotnet", "release-build", "resaver-plus"}
 
 
 def test_one_red_check_never_skips_the_later_ones():
@@ -242,3 +242,8 @@ def test_the_ci_release_build_builds_before_anything_writes():
     assert "scripts/build-release-zip.sh" in steps[first_run]["run"]
     assert any("verify-release.sh --local" in s.get("run", "") and "--scrubbed" in s.get("run", "") for s in steps)
     assert set(data["jobs"]["release-build"]["strategy"]["matrix"]["os"]) == {"ubuntu-latest", "windows-latest"}
+
+
+def test_resaver_plus_uses_the_qualified_vs2022_runner():
+    _, data = _load("ci.yml")
+    assert data["jobs"]["resaver-plus"]["runs-on"] == "windows-2022"
