@@ -50,7 +50,11 @@ def test_sed_without_binary_is_listed_as_refused_and_the_ask_rules_are_five():
     assert "`sed -i` without `-b`" in denied
     assert "`sed -i` " not in advised and "`sed -i`," not in advised
     assert "### ASKS THE USER -- five rules" in core
-    assert "a command the guard cannot read that names the install" in core
+    asks = core[core.index("### ASKS THE USER"):core.index("Few prompts by design")]
+    # Review C-docs F8: S-OPAQUE-PROTECTED asks only for these three forms; an unreadable command naming the install
+    # is allowed (or refused as a delete), never asked about.
+    assert "an unnamed program, an eval of a variable, or awk system() given a protected path" in asks
+    assert "cannot read" not in asks
     assert "`sed -i` without `-b`" in _read("README.md")
     for rel, phrase in (("README.md", "Only five rules ask"), ("docs/safety-philosophy.md", "Five rules in the toolkit")):
         assert phrase in _read(rel), rel

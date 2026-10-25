@@ -190,7 +190,7 @@ the rules are graded and only the first list refuses.
 ### DENIED -- refused outright, cannot proceed
 
 Each is judged on the **program that runs** and the file it targets, in Bash and PowerShell, not on words
-that merely appear in a command (`grep -rn "rm -rf" <install>` is allowed). Relative paths resolve against
+merely in a command (`grep -rn "rm -rf" <install>` is allowed). Relative paths resolve against
 the working directory the agent reports.
 
 - **Deleting inside the game install, the config directory, or Mod Organizer's `mods/` / `overwrite/`**
@@ -238,7 +238,7 @@ Naming a plugin or INI in a read-only command is silent: notes fire on the progr
 ### ASKS THE USER -- five rules
 - git discarding uncommitted changes in a protected folder (`checkout -- x`, `restore`, `reset --hard`)
 - an unnamed program (`$R`) given a save
-- a command the guard cannot read that names the install
+- an unnamed program, an eval of a variable, or awk system() given a protected path
 - `lock disable` (file lock off for good), and `snapshot restore --in-place` or
   `restore-from-backup.sh --restore` (writes over live files)
 
@@ -249,7 +249,7 @@ Coverage and gaps: `docs/guard-coverage.md`.
 ### The file lock and the guards' own state
 - **"Access denied" writing a vanilla master or archive** (`Skyrim.esm`, a base `.bsa`) is the optional lock, not
   a fault (the OS says no more): never retry or work around it. `bash tools/skyguard.sh lock unlock <file>` lifts
-  it for an hour (the next tool call after that relocks it): **tell the user why first; relock when done**
+  it for an hour (then the next tool call relocks it): **tell the user why first; relock when done**
   (`lock lock`). If it answers "No session id", you cannot lift it, by design: ask the user to run
   `tools\skyguard-unlock.cmd` in their own terminal. Never clear the read-only bit or ACL by hand.
 - **Never edit `.skyguard/`** (guard on/off state): refused. `bash tools/skydoctor` shows what is live.
@@ -277,7 +277,7 @@ After every session, near-miss or surprise, ask whether a new guard rule, protec
 - On agents with hooks, files changed through the edit tools are backed up to `.claude/backups/` first. ⚠ A file a script writes is not backed up (see the knowledgebase note above).
 - An audit log at `.claude/backups/AUDIT_LOG.txt` records every file touched, when, and by which tool
 
-### Iteration snapshots (standing process — do not skip)
+### Iteration snapshots (standing process -- do not skip)
 1. **Before any experimental change**, copy the current `.psc` files to `.claude/backups/<descriptive-name>/` (e.g. `known-good-pre-stagger/`): the rollback point.
 2. **Automatic copies are not rollback points** -- you can't identify them later, so snapshot by name anyway. Spriggit backs up the ESP on deserialize, not scripts.
 3. **After a state works in-game**, snapshot scripts and a Spriggit export to a `known-good/` folder named for what works.
