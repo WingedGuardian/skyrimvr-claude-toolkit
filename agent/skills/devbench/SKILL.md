@@ -51,6 +51,11 @@ head and hands are (HIGGS, VRIK, PLANCK, hand collision) needs the real headset.
 a pose-emulating driver (its hands track) once the user has built it (`tools/vr-emu-driver/README.md`:
 fetched from a pinned upstream commit, never shipped). Skyrim VR only.
 
+**A headless run must not take over the user's desktop.** The user may be at the same computer: never
+send keystrokes or mouse input to their desktop, and never bring a window to the foreground to drive
+the game. Drive it through DevBench (REST/MCP) only. If a step seems to need window input or focus, stop
+and ask the user first, every time; an earlier yes does not carry over to a new session.
+
 **Port is deterministic per runtime: SE/AE `8920`, VR `8921`** (DevBench iterates if the port is busy
 and writes the bound port to `Data/SKSE/Plugins/devbench/runtime.json`, which the wrapper reads).
 Override with `DEVBENCH_PORT`. MCP clients can point at `http://127.0.0.1:<port>/mcp`; the REST path
