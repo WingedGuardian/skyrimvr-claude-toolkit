@@ -17,7 +17,7 @@ You are working in a modded Skyrim installation with a full modding toolkit. Con
 4. **PlayIdle fails in VR** — VRIK overrides skeleton IK; bypass with timed Papyrus scripts
 5. **Wait() unreliable under 100ms** — merge sub-100ms gaps; use `RegisterForSingleUpdate` when possible
 6. **SSE != VR** for: camera, skeleton, collision, UI, input, SKSE addresses, physics (60Hz→90Hz)
-7. **ESL FormIDs must be in xx000800-xx000FFF** — exceeding = crash or data corruption
+7. **Light-plugin (ESL) FormIDs: keep to xx000800-xx000FFF** (header 1.70) — lower IDs (header 1.71) depend on the runtime; verify on yours (KB *ESL rules*)
 8. **Loose files always override BSAs** — check for loose file conflicts before assuming BSA content wins
 9. **Condition OR has precedence over AND** — `A AND B OR C` != what you'd expect
 10. **Non-auto properties don't restore from master on save/load** — they stay blank

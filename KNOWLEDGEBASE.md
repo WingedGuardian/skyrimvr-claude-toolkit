@@ -389,10 +389,19 @@ This applies to `getValue`, `setValue`, `setFloatValue` — all path-based funct
 |------|--------------|--------------|-------|-------|
 | ESM | Top of load order | Full range | 254 total ESM+ESP | Supports temp refs properly |
 | ESP | After ESMs | Full range | 254 total ESM+ESP | Treats ALL refs as permanent |
-| ESL | Shares FE slot | xx000800-xx000FFF | 4096 | Only 2048 usable FormIDs |
+| ESL | Shares FE slot | xx000800-xx000FFF (header 1.70) | 4096 | 2048 usable FormIDs at header 1.70 |
 
-**ESL Critical Rules:**
-- All FormIDs must fall within `xx000800` to `xx000FFF` — exceeding causes crashes or data corruption
+**ESL rules:**
+- **Recommended: keep new records at object IDs `xx000800` to `xx000FFF`** with a header-1.70 plugin. That range
+  is the one every ESL-capable runtime accepts, and IDs above `0xFFF` do not fit a light plugin at all.
+- **Below `0x800` is runtime-dependent, not a rule either way.** Header 1.71 lets SE 1.6.1130 and later use object
+  IDs from `0x001`; modern SE tools generate light plugins that way. Skyrim VR has no native ESL support, so
+  there it depends on the ESL-support plugin you run. Observed on one VR install (MEASURED there, not
+  generalised): a header-1.71 light plugin with most of its records at `0x002`-`0x7FF` loaded and played
+  normally, and the ESL-support plugin's log said it emulated the old header version. On the same install a
+  different header-1.71 light plugin with every record below `0x800` was followed by a heap-corruption crash at
+  save load, whose cause was never established. So neither "always crashes" nor "safe" is proven: before you
+  enable such a plugin, check its new-record ID range, install it on its own, and verify it on your runtime.
 - xEdit's "Compact FormIDs for ESL" starts at `FE000xxx`; CK starts at `FE001xxx` (discrepancy)
 - ESP→ESL conversion requires compacting FormIDs AND setting ESL flag
 
