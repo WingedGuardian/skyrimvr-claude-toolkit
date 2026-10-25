@@ -10129,3 +10129,24 @@ MUTATIONS += [pytest.param(_SR, *m[:3], id=m[3]) for m in [
 MUTATIONS.append(pytest.param(
     _G3P, '        if fp[1] and fp[0] in sub and "$" not in sub[fp[0]] and "`" not in sub[fp[0]]:', "        if False:",
     _OPS + "[start-process-of-a-literal-path]", id="guard3-start-process-reads-literal"))
+
+
+# guard3 (v4.0.0 review C-docs MEDIUM-2): a literal name inline interpreter code deletes resolves where the code runs.
+_IDT = "tests/test_interpreter_deletes.py::test_a_relative_interpreter_delete_from_the_install_is_refused"
+MUTATIONS += [pytest.param("tools/skyguard/deletes.py", *m[:3], id=m[3]) for m in [
+    ("        if code and resolved is None:\n            # guard3", "        if False:\n            # guard3",
+     _IDT + "[python-rmtree]", "guard3-interpreter-delete-read"),
+    ("        named = isinstance(f, ast.Name) and f.id in _PY_DELETE_CALLS", "        named = False",
+     _IDT + "[python-from-import]", "guard3-interpreter-delete-bare-name"),
+    ("        owned = (isinstance(f, ast.Attribute) and f.attr in _PY_DELETE_CALLS",
+     "        owned = False and (isinstance(f, ast.Attribute) and f.attr in _PY_DELETE_CALLS",
+     _IDT + "[python-os-remove]", "guard3-interpreter-delete-module-call"),
+    ("            p = path_of(f.value)", "            p = None", _IDT + "[python-path-unlink]",
+     "guard3-interpreter-delete-path-unlink"),
+    ("        return [m.group(2) for m in _INTERP_DELETE_LIT.finditer(code)]", "        return []",
+     _IDT + "[node-rmsync]", "guard3-interpreter-delete-other-languages"),
+    ('            base = targets.exec_cwd(e, cwd, env) or ""', '            base = ""', _IDT + "[python-rmtree]",
+     "guard3-interpreter-delete-resolved-where-it-runs"),
+    ("interpreter_delete_targets(code, bool(_PYTHON.fullmatch(e.program)))", "interpreter_delete_targets(code, False)",
+     _IDT + "[python-os-remove]", "guard3-interpreter-delete-python-as-python"),
+]]
