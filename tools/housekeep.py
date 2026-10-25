@@ -505,13 +505,18 @@ def superseded_reason(path, root, cfg, guard, now):
         return "folder has no supported numeric version"
     if not plain_path(path):
         return "staging path is a link"
+    latest = path.stat().st_mtime
     for dp, dirs, files in os.walk(path, onerror=walk_error):
-        if not all(plain_path(Path(dp) / name) for name in dirs + files):
-            return "staging tree contains a link"
+        if any(name.casefold() == ".git" for name in dirs + files):
+            return "staging tree contains a Git checkout"
+        for name in dirs + files:
+            entry = Path(dp) / name
+            if not plain_path(entry):
+                return "staging tree contains a link"
+            latest = max(latest, entry.stat().st_mtime)
     why = guard.why_protected(path) or protected_inside(guard, path)
     if why:
         return "protected ({})".format(why)
-    latest = max(path.stat().st_mtime, newest_mtime(path))
     if latest > now - max(cfg["superseded_after_days"] * 86400, cfg["active_hours"] * 3600):
         return "staging folder is recent or active"
     listed = set()

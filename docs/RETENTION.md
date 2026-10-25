@@ -85,6 +85,8 @@ Staging versions use two to four numeric components after the final name separat
 comparison is numeric, with missing trailing components treated as zero. A staging root's optional
 `_superseded` is a UTF-8 text file containing one exact versioned folder name per line; blanks and `#`
 comment lines are allowed. Names built from paths are refused. Staging roots may not overlap each other.
+Activity includes directory timestamps, including new empty directories. A Git checkout anywhere inside
+a staging candidate keeps the whole folder, even when the staging root itself is outside Git.
 
 Rollback manifests are read beneath `<toolkit>/manual-installs/`,
 `<toolkit>/.claude/backups/manual-installs/`, and `SKYRIM_MANUAL_INSTALLS` when configured. Supported formats

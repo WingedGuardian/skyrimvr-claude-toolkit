@@ -190,6 +190,22 @@ def test_staging_preserves_tracked_files_and_linked_evidence(tmp_path, kind):
     assert key(old) not in planned(hk.plan(cfg), "superseded")
 
 
+def test_a_new_empty_subdirectory_keeps_staging_active(tmp_path):
+    old, _new, cfg = stage_tree(tmp_path)
+    (old / "nested/new-empty").mkdir(parents=True)
+    os.utime(old, (time.time() - 50 * DAY,) * 2)
+    assert key(old) not in planned(hk.plan(cfg), "superseded")
+
+
+def test_a_nested_git_checkout_is_never_staging_cleanup(tmp_path):
+    old, _new, cfg = stage_tree(tmp_path)
+    subprocess.run(["git", "init", "-q", str(old)], check=True)
+    subprocess.run(["git", "-C", str(old), "add", "payload.txt"], check=True)
+    age(old, 50)
+    os.utime(old, (time.time() - 50 * DAY,) * 2)
+    assert key(old) not in planned(hk.plan(cfg), "superseded")
+
+
 @pytest.mark.parametrize("change", ["manifest", "higher", "activity", "contents", "config", "marker"])
 def test_staging_apply_rechecks_eligibility(tmp_path, change):
     old, new, cfg = stage_tree(tmp_path)
