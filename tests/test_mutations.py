@@ -9969,3 +9969,18 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "tests/test_opaque_protected.py::test_an_unnamed_program_on_a_protected_path_asks[opaque-on-a-plugin]",
      "rule-S-OPAQUE-PROTECTED-no-verb"),
 ]]
+
+
+# v4.0.0 review L4a M4: a release refuses entries left under an Unreleased heading above the tagged section.
+_CCR = "tests/test_changelog_release.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("scripts/check_changelog_release.py", "                if populated:", "                if False:",
+     _CCR + "test_entries_above_the_tagged_section_refuse[entry]", "changelog-unreleased-entries-ignored"),
+    ("scripts/check_changelog_release.py", "            populated.add(section)", "            pass",
+     _CCR + "test_entries_above_the_tagged_section_refuse[entry-under-subheading]", "changelog-unreleased-never-populated"),
+    ("scripts/check_changelog_release.py", "title, re.I):", "title, re.I) and False:",
+     _CCR + "test_entries_above_the_tagged_section_refuse[entry]", "changelog-unreleased-not-recognised"),
+    (".github/workflows/release.yml", "          python -B scripts/check_changelog_release.py",
+     "          true || python -B scripts/check_changelog_release.py",
+     _CCR + "test_the_release_workflow_runs_the_check", "release-changelog-check-skipped"),
+]]
