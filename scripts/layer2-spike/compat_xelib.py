@@ -62,9 +62,9 @@ def main():
     os.makedirs(PRISTINE, exist_ok=True)
     if not os.path.exists(PRISTINE + "/Update.esm"):
         shutil.copyfile(DATA + "/Update.esm", PRISTINE + "/Update.esm")
-    if os.path.exists(DATA + "/Spike.esp"):
+    if os.path.exists(DATA + "/Spike.esp"):    # an EARLIER run's output: to the Recycle Bin, never deleted outright
         lockprobe.remove(DATA + "/Spike.esp")
-        os.remove(DATA + "/Spike.esp")
+        sandbox.recycle(DATA + "/Spike.esp")
     if sha(DATA + "/Update.esm") != sha(PRISTINE + "/Update.esm"):
         restore_update()
     before = {t: sha(DATA + "/" + t) for t in TARGETS}

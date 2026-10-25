@@ -10015,6 +10015,17 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _CCR + "test_the_release_workflow_runs_the_check", "release-changelog-check-skipped"),
 ]]
 
+# review2 B-tools L4: the spike scripts send an earlier run's leftovers to the Recycle Bin; the scan reads calls.
+_L2S = "tests/test_layer2_spike_sandbox.py::"
+MUTATIONS += [
+    pytest.param("scripts/layer2-spike/compat_xelib.py", '        sandbox.recycle(DATA + "/Spike.esp")',
+                 '        os.remove(DATA + "/Spike.esp")', _L2S + "test_no_spike_script_deletes_outright",
+                 id="layer2-spike-esp-deleted-outright"),
+    pytest.param("tests/test_layer2_spike_sandbox.py", ' or node.func.attr in ("unlink", "rmdir"):', ":",
+                 _L2S + "test_the_outright_delete_scan_sees_every_spelling[Path(f).unlink()]",
+                 id="layer2-spike-scan-misses-path-unlink"),
+]
+
 # --- Issue 11: House Carl base-archive inputs ---------------------------------------------------------------------
 _HC = "tools/housecarl_integration/order.py"
 _HCT = "tests/test_housecarl.py::"
