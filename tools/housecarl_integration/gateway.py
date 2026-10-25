@@ -184,7 +184,9 @@ class Gateway:
                 result = await backend.call(name, a)
             if capture(self.config).fingerprint != snap.fingerprint:
                 raise Refusal("Inputs changed during the read; discard this response and retry.")
-            return {"context": context(self.config, snap), "result": result.model_dump(mode="json", exclude_none=True)}
+            # Issue 11: an absence is conclusive only when every archive input was qualified; say so in the response.
+            return {"context": context(self.config, snap), "absence_conclusive": snap.archive_coverage["complete"],
+                    "result": result.model_dump(mode="json", exclude_none=True)}
 
     async def write(self, name, arguments, snap):
         config = self.config

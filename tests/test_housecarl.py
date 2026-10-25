@@ -443,3 +443,220 @@ assert.throws(() => parse(['{}']));
 assert.throws(() => parse(['broken']));
 """
     subprocess.run(["node", "-e", code, str(verifier)], check=True, capture_output=True)
+
+
+# --- Issue 11: archive lists the backend receives ------------------------------------------------------------------
+# Every case is a synthetic tmp_path layout; no real game folder, INI or backend is read or launched.
+
+def _archive_names(ini):
+    """Port of the pinned backend's ParseResourceArchiveList (houseCARL 4e28505, ArchiveDiscovery.cs): every entry of
+    sResourceArchiveList and sResourceArchiveList2 in an [Archive] section, in file order."""
+    names, inside = [], False
+    for line in Path(ini).read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line[0] == ";":
+            continue
+        if line[0] == "[":
+            inside = line.casefold() == "[archive]"
+            continue
+        key, eq, value = line.partition("=")
+        if inside and eq and key.strip().casefold() in ("sresourcearchivelist", "sresourcearchivelist2"):
+            names += [p.strip() for p in value.split(",") if p.strip()]
+    return names
+
+
+def _backend_base_archives(profile, game_root):
+    """The pinned backend's ReadBaseArchiveNames: the profile Skyrim.ini, and the game dir's only when the profile's
+    lists none. This is what decides which base BSAs an asset answer can see."""
+    for ini in (Path(profile) / "Skyrim.ini", Path(game_root) / "Skyrim.ini"):
+        if ini.is_file() and _archive_names(ini):
+            return _archive_names(ini)
+    return []
+
+
+def _ini(path, **keys):
+    path.write_text("[Archive]\n" + "".join(k + "=" + v + "\n" for k, v in keys.items())
+                    + "[General]\nsLanguage=ENGLISH\n", encoding="utf-8")
+    return path
+
+
+def _view(install):
+    snap = order.capture(install)
+    folder = Path(install["state_dir"]) / "views" / snap.fingerprint / "profile"
+    order.write_profile(snap, folder, install)
+    return snap, _backend_base_archives(folder, Path(install["data_dir"]).parent)
+
+
+@pytest.mark.parametrize("edition", ["SE", "VR"])
+def test_root_ini_base_archives_reach_the_backend(install, edition):
+    install["edition"] = edition
+    root, user = Path(install["root"]), Path(install["config_dir"])
+    _ini(user / "Skyrim.ini", bInvalidateOlderFiles="1", sResourceArchiveList2="Mod - Extra.bsa")
+    _ini(root / "Skyrim.ini", sResourceArchiveList="Skyrim - Meshes0.bsa, Skyrim - Meshes1.bsa",
+         sResourceArchiveList2="Skyrim - Textures0.bsa")
+    before = {p: p.read_bytes() for p in (user / "Skyrim.ini", root / "Skyrim.ini")}
+    snap, names = _view(install)
+    assert "Skyrim - Meshes1.bsa" in names and "Mod - Extra.bsa" in names
+    # The user INI's own sResourceArchiveList2 overrides the root's for that key only.
+    assert "Skyrim - Textures0.bsa" not in names
+    assert snap.archive_coverage["complete"] is True
+    assert {p: p.read_bytes() for p in before} == before
+    # Contrast: the same archive named nowhere is absent, and that absence is not called complete.
+    (root / "Skyrim.ini").write_text("[General]\n", encoding="utf-8")
+    _ini(user / "Skyrim.ini", bInvalidateOlderFiles="1")
+    snap, names = _view(install)
+    assert "Skyrim - Meshes1.bsa" not in names
+    assert snap.archive_coverage["complete"] is False
+
+
+def test_user_ini_precedence_and_explicit_override(install):
+    install["edition"] = "VR"
+    root, user = Path(install["root"]), Path(install["config_dir"])
+    _ini(root / "Skyrim.ini", sResourceArchiveList="Root - A.bsa", sResourceArchiveList2="Root - B.bsa")
+    _ini(user / "Skyrim.ini", sResourceArchiveList="User - A.bsa")
+    _ini(user / "SkyrimVR.ini", sResourceArchiveList="VRIni - A.bsa")
+    snap, names = _view(install)
+    assert names[:2] == ["VRIni - A.bsa", "Root - B.bsa"]
+    lists = snap.archive_coverage["lists"]
+    assert lists["sResourceArchiveList"]["source"].endswith("SkyrimVR.ini")
+    assert lists["sResourceArchiveList2"]["source"] == str(root / "Skyrim.ini")
+    # An explicitly empty user value: the lower value is kept, and the engine's reading of it is marked unknown.
+    _ini(user / "SkyrimVR.ini", sResourceArchiveList="")
+    _ini(user / "Skyrim.ini")
+    snap, names = _view(install)
+    assert "Root - A.bsa" in names
+    assert snap.archive_coverage["complete"] is False
+    assert any("empty" in u for u in snap.archive_coverage["uncertain"])
+
+
+def test_vr_supplemental_list_and_unqualified_vr_keys(install):
+    install["edition"] = "VR"
+    root, user = Path(install["root"]), Path(install["config_dir"])
+    _ini(root / "Skyrim.ini", sResourceArchiveList="Skyrim - Meshes0.bsa")
+    snap, names = _view(install)
+    assert names[-1] == "Skyrim_VR - Main.bsa"           # engine fallback when the VR key loads nothing
+    _ini(user / "SkyrimVR.ini", sVrResourceArchiveList="Custom_VR.bsa")
+    snap, names = _view(install)
+    assert "Custom_VR.bsa" in names and "Skyrim_VR - Main.bsa" not in names
+    assert snap.archive_coverage["complete"] is True
+    _ini(user / "SkyrimVR.ini", sVrResourceArchiveList="Custom_VR.bsa", sVrResourceArchiveList2="Other_VR.bsa")
+    snap, names = _view(install)
+    assert "Other_VR.bsa" not in names and snap.archive_coverage["complete"] is False
+    # SE has no supplemental list: nothing is folded in.
+    install["edition"] = "SE"
+    _snap, names = _view(install)
+    assert "Custom_VR.bsa" not in names and "Skyrim_VR - Main.bsa" not in names
+
+
+def test_unqualified_ini_sources_are_marked_never_applied(install):
+    root, user, data = Path(install["root"]), Path(install["config_dir"]), Path(install["data_dir"])
+    _ini(root / "Skyrim.ini", sResourceArchiveList="Skyrim - Meshes0.bsa")
+    assert order.capture(install).archive_coverage["complete"] is True
+    _ini(user / "SkyrimCustom.ini", sResourceArchiveList2="Custom.bsa")
+    snap, names = _view(install)
+    assert "Custom.bsa" not in names and snap.archive_coverage["complete"] is False
+    (user / "SkyrimCustom.ini").write_text("[Display]\nfGamma=1\n", encoding="utf-8")
+    assert order.capture(install).archive_coverage["complete"] is True
+    _ini(data / "Sword.ini", sResourceArchiveList2="PluginIni.bsa")
+    snap, names = _view(install)
+    assert "PluginIni.bsa" not in names and snap.archive_coverage["complete"] is False
+    assert any("Sword.ini" in u for u in snap.archive_coverage["uncertain"])
+
+
+def test_mo2_profile_inis_and_game_root_list(install):
+    root = Path(install["root"])
+    mods = root / "mods"
+    (mods / "High").mkdir(parents=True)
+    profile = root / "profiles/Default"             # apart from the game root, as in a real MO2 instance
+    profile.mkdir(parents=True)
+    (profile / "plugins.txt").write_bytes(Path(install["plugins_txt"]).read_bytes())
+    install["plugins_txt"] = str(profile / "plugins.txt")
+    (profile / "modlist.txt").write_text("+High\n")
+    (profile / "loadorder.txt").write_text("Skyrim.esm\nLateMaster.esp\nSword.esp\nDisabled.esp\n")
+    install.update(asset_provider="mo2", authority="mo2-profile", mods_dir=str(mods), config_dir=str(profile))
+    _ini(root / "Skyrim.ini", sResourceArchiveList="Skyrim - Meshes1.bsa", sResourceArchiveList2="Root2.bsa")
+    _ini(profile / "Skyrim.ini", sResourceArchiveList2="Profile2.bsa")
+    (profile / "settings.ini").write_text("[General]\nLocalSettings=true\n", encoding="utf-8")
+    snap, names = _view(install)
+    assert names == ["Skyrim - Meshes1.bsa", "Profile2.bsa"]
+    assert snap.archive_coverage["complete"] is True
+    # A profile without local INIs means the game reads Documents INIs this integration never captured.
+    (profile / "settings.ini").write_text("[General]\nLocalSettings=false\n", encoding="utf-8")
+    snap = order.capture(install)
+    assert snap.archive_coverage["complete"] is False
+    assert any("LocalSettings" in u for u in snap.archive_coverage["uncertain"])
+    # A plugin INI in the winning MO2 layer is seen as well.
+    (profile / "settings.ini").write_text("[General]\nLocalSettings=true\n", encoding="utf-8")
+    _ini(mods / "High/Sword.ini", sResourceArchiveList2="X.bsa")
+    assert order.capture(install).archive_coverage["complete"] is False
+
+
+@pytest.mark.parametrize("change", ["root-edit", "root-create", "custom-create", "plugin-ini", "vr-ini"])
+def test_every_archive_input_is_fingerprinted(install, change):
+    install["edition"] = "VR"
+    root, user, data = Path(install["root"]), Path(install["config_dir"]), Path(install["data_dir"])
+    if change != "root-create":
+        _ini(root / "Skyrim.ini", sResourceArchiveList="A.bsa")
+    before = order.capture(install).fingerprint
+    target = {"root-edit": root / "Skyrim.ini", "root-create": root / "Skyrim.ini",
+              "custom-create": user / "SkyrimCustom.ini", "plugin-ini": data / "Sword.ini",
+              "vr-ini": user / "SkyrimVR.ini"}[change]
+    _ini(target, sResourceArchiveList="B.bsa")
+    assert order.capture(install).fingerprint != before
+
+
+def test_mo2_settings_ini_is_fingerprinted(install):
+    mods = Path(install["root"]) / "mods"
+    mods.mkdir()
+    profile = Path(install["plugins_txt"]).parent
+    (profile / "modlist.txt").write_text("")
+    (profile / "loadorder.txt").write_text("Skyrim.esm\nLateMaster.esp\nSword.esp\n")
+    install.update(asset_provider="mo2", authority="mo2-profile", mods_dir=str(mods), config_dir=str(profile))
+    before = order.capture(install).fingerprint
+    (profile / "settings.ini").write_text("[General]\nLocalSettings=true\n", encoding="utf-8")
+    assert order.capture(install).fingerprint != before
+
+
+def _fake_read_backend(monkeypatch, during=None):
+    class Result:
+        def model_dump(self, **_kwargs):
+            return {"content": [{"type": "text", "text": json.dumps({"exists": False, "read_incomplete": False})}]}
+
+    class FakeBackend:
+        def __init__(self, config, snapshot, work=None):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def call(self, _name, _args):
+            if during:
+                during()
+            return Result()
+
+    monkeypatch.setattr(gateway, "Backend", FakeBackend)
+
+
+def test_asset_answers_carry_machine_readable_archive_coverage(install, monkeypatch):
+    root = Path(install["root"])
+    _fake_read_backend(monkeypatch)
+    args = {"paths": ["meshes/weapons/shiv/shiv.nif"]}
+    obj = asyncio.run(gateway.Gateway(install).call("housecarl_asset_status", args))
+    assert obj["absence_conclusive"] is False
+    assert obj["context"]["archive_coverage"]["complete"] is False
+    assert obj["context"]["archive_coverage"]["uncertain"]
+    _ini(root / "Skyrim.ini", sResourceArchiveList="Skyrim - Meshes1.bsa")
+    obj = asyncio.run(gateway.Gateway(install).call("housecarl_asset_status", args))
+    assert obj["absence_conclusive"] is True
+    assert obj["context"]["archive_coverage"]["lists"]["sResourceArchiveList"]["value"] == "Skyrim - Meshes1.bsa"
+
+
+def test_a_root_ini_changed_during_a_read_rejects_the_answer(install, monkeypatch):
+    root = Path(install["root"])
+    _ini(root / "Skyrim.ini", sResourceArchiveList="A.bsa")
+    _fake_read_backend(monkeypatch, during=lambda: _ini(root / "Skyrim.ini", sResourceArchiveList="B.bsa"))
+    with pytest.raises(Refusal, match="Inputs changed"):
+        asyncio.run(gateway.Gateway(install).call("housecarl_asset_status", {"paths": ["a.nif"]}))

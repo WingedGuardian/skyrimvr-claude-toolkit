@@ -116,6 +116,15 @@ class Backend:
 
 
 def context(config, snapshot):
+    coverage = snapshot.archive_coverage
+    limits = ["File and modeled configuration state; not observed runtime state.",
+              "Loose Data ownership is unknown; native pairing and facegen provenance are unavailable."]
+    if config["edition"] == "VR":
+        limits.append("The VR supplemental archive list is ranked with the base archives, so a BSA-vs-BSA winner "
+                      "involving it may differ from the engine; presence is unaffected.")
+    if not coverage["complete"]:
+        limits.append("Archive coverage is incomplete (see archive_coverage.uncertain): an asset reported absent may "
+                      "still be supplied by an archive that was not scanned.")
     return {"authority": config["authority"], "asset_provider": config["asset_provider"],
             "plugins_txt": config["plugins_txt"], "edition": config["edition"],
             "plugin_count": len(snapshot.names), "input_fingerprint": snapshot.fingerprint,
@@ -123,5 +132,4 @@ def context(config, snapshot):
             "capabilities": {"record_reads": True, "record_writes": True, "config_reference_checks": True,
                              "runtime_addresses": False, "native_pairing": False,
                              "facegen_provenance": False, "compaction": False, "merge": False},
-            "limits": ["File and modeled configuration state; not observed runtime state.",
-                       "Loose Data ownership is unknown; native pairing and facegen provenance are unavailable."]}
+            "archive_coverage": coverage, "limits": limits}
