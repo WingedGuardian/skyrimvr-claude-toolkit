@@ -45,7 +45,8 @@ null driver (replacing an OpenComposite `openvr_api.dll` with SteamVR's own), so
 DevBench is drivable with nobody in the headset. Close SteamVR first; then start SteamVR, let it
 settle (if room setup opens, wait for it to close: launching while it runs gets the game evicted),
 and launch the game. `bash tools/vr-headless.sh off` restores both files byte-exact and verifies
-them; it is safe to repeat and after a crash, so run it before the user plays again. **Valid only for
+them (a file that changed after `on` is first copied into the run's `changed-after-on-<stamp>/`); it is safe to
+repeat and after a crash, so run it before the user plays again. **Valid only for
 pose-independent tests** -- scripts, records, console, frame rate. Anything that depends on where the
 head and hands are (HIGGS, VRIK, PLANCK, hand collision) needs the real headset. `emu on|off` swaps in
 a pose-emulating driver (its hands track) once the user has built it (`tools/vr-emu-driver/README.md`:
@@ -136,7 +137,9 @@ It pins timescale 0, one game hour, one forced weather and god mode, travels to 
 derives fps from the off-thread `/api/health` frame counter (a stall shows as ~0 fps, not a gap).
 **Window 1 at each location is discarded**; windows 2+ are pooled. God mode, timescale and game hour
 are put back even when the run fails (anything it could not restore is printed with its command);
-the forced weather is not, so measure where reverting is easy. `compare` refuses two runs taken under
+god mode is toggled back only if its `tgm` went through. The forced weather is not put back, so measure where
+reverting is easy, and neither is the player's location: the run prints `LEFT AS IS (by design)` with the start
+and end cell -- reload the save to return. `compare` refuses two runs taken under
 different conditions. Results go to `.claude/backups/bench-vr/`. Default location: one vanilla
 `coc WhiterunOrigin`. Trust a number only when nothing caps it: a refresh cap (a headset's frame
 synthesis or a fixed-rate mode) makes every location read the same value, and then any change

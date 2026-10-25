@@ -83,6 +83,22 @@ link.
   each other; the 4.x content-addressed store does not. That one store is **Rolling** although it sits under
   `.claude/backups/` (user ruling 2026-10-20): a stamp repeating the one before goes to the Recycle Bin. A save, or
   a `*backup*` folder, inside a stamp keeps that stamp, and every other backup folder stays Forever.
+- **The temp sweep here is narrower than the Toolkit temp row above:** it recycles only directories with this
+  toolkit's own name prefixes (its test runs live under `skyrim-harness-`), never pytest's `pytest-of-<user>`,
+  which every project's runs share. Session start launches it only when the hook's project is the toolkit
+  install the hook belongs to, never under the test harness. `SKYGUARD_HOUSEKEEP_SWEEP=off` turns it off, and
+  that process makes no real Recycle Bin call.
+- **The guard's own stores are pruned by retiring, not deleting.** Script snapshots, recovery blobs and session
+  logs past the 20 newest per agent are renamed into `<project>/.claude/retired/<batch>/` (a hook has no time
+  for the Recycle Bin). The session sweep sends each batch to the bin once nothing in it changed for 10 minutes
+  and it is not in use. Off Windows there is no bin to call: the batches wait there, and the session note says
+  how many and how large. Save backups are never pruned.
+- **Knowledgebase snapshots** (`.claude/backups/kb/`): `tools/kb-guard.sh` keeps at most `KB_GUARD_KEEP`
+  (default 30) snapshot folders, never removing the oldest, the newest or the one holding the largest copy of a
+  watched file, and sends the others to the Recycle Bin through `housekeep.py recycle`, saying so first; what
+  the bin does not take stays and is reported.
+- **Whole-folder classes** (launch, snapshot, scratch) keep a folder whole when any file in it is protected, and
+  `apply` checks that again. Off Windows `housekeep` removes nothing: every item is reported as left in place.
 
 ## Running it
 
@@ -93,7 +109,8 @@ python tools/housekeep.py plan -o plan.json                # every action, with 
 python tools/housekeep.py apply plan.json [--only link,gzip]
 ```
 
-`python tools/housekeep.py sweep-temp` runs the temp sweep by hand. The session-start hook runs
+`python tools/housekeep.py sweep-temp` runs the temp sweep by hand; `python tools/housekeep.py recycle PATH...` sends
+exactly those paths to the Recycle Bin and prints OK or FAILED for each. The session-start hook runs
 `housekeep.py session .claude/diag/housekeep-session.txt` detached and shows that file's line at the next start.
 
 `apply` runs the classes in a fixed order (recreatable, build, link, gzip, launch, snapshot, scratch) and prints
