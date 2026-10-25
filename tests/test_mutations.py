@@ -9969,3 +9969,22 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "tests/test_opaque_protected.py::test_an_unnamed_program_on_a_protected_path_asks[opaque-on-a-plugin]",
      "rule-S-OPAQUE-PROTECTED-no-verb"),
 ]]
+
+# Corpus fix 2026-10-24: the guard corpus runs against a SYNTHETIC install root, and no file under tests/ may name the
+# real one. One twin per spelling the scan must see, one for the exemption, and one that puts the real root back.
+_NRI = "tests/test_no_real_install_path.py"
+_NRI_T = _NRI + "::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_NRI, r'r"og(\\*) games")', r'r"og() games")', _NRI_T + "test_the_scan_sees_every_spelling_of_the_real_install",
+     "corpus-root-scan-misses-escaped-space"),
+    (_NRI, '_PARENT = re.compile(r"(?i)\\b" + "g"', '_PARENT = re.compile(r"\\b" + "G"',
+     _NRI_T + "test_the_scan_sees_every_spelling_of_the_real_install", "corpus-root-scan-is-case-sensitive"),
+    (_NRI, " + [m.group(0) for m in _SHORT.finditer(text)]", "",
+     _NRI_T + "test_the_scan_sees_every_spelling_of_the_real_install", "corpus-root-scan-misses-short-name"),
+    (_NRI, "    for tok in _B64.findall(text):", "    for tok in []:",
+     _NRI_T + "test_the_scan_sees_every_spelling_of_the_real_install", "corpus-root-scan-misses-base64"),
+    (_NRI, "        if hashlib.sha256(data).hexdigest() in exempt_hashes:", '        if path.suffix == ".fixture":',
+     _NRI_T + "test_only_an_unedited_released_copy_is_exempt", "corpus-root-exempts-by-name-not-hash"),
+    ("tests/guard_corpus/game-root.txt", "C:/Synthetic Games/", "C:/G" + "OG Games/",
+     _NRI_T + "test_no_file_under_tests_names_the_real_install", "corpus-root-is-the-real-install"),
+]]

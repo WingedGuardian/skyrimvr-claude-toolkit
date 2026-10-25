@@ -34,6 +34,12 @@ make a failing test pass; that erases the yardstick.
 - `write-*`: each protect-files rule. `payload-*`: empty, invalid, array and tool-less payloads.
 - `root-*`: deleting the install's own `Data/` under the `undeclared` and `metachar` layouts.
 
+`game-root.txt` is the install path the rows name (`SKYRIM_GAME_ROOT`, and every `GAME` spelling). It is SYNTHETIC
+and exists on no machine, so no verdict can depend on the host's disk; it is the one definition (tests read it as
+`conftest.GAME_ROOT`). `tests/test_no_real_install_path.py` fails if a real install path appears under `tests/` again.
+Changing it changes the `testhooks-*` ids (they hash the payload), so a change re-derives those ids and the
+`supersedes` pointers to them; it never changes a decision, a rule set or a message beyond the path itself.
+
 Layouts (`declared`, `undeclared`, `metachar`, `config`) are built fresh in a temp dir by `make_install`.
 Intended rows may also use `malformed` (Task 6: an unreadable protection key) and `mo2` (Task 7: Mod Organizer
 `mods/` and `overwrite/` declared at `D:/MO2/...`) and `saves` (Task 11: a declared config dir `<install>/cfg` whose
