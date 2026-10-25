@@ -172,3 +172,24 @@ def test_no_doc_says_the_bulk_save_refusal_prints_the_approval_line():
             assert phrase not in text, (rel, phrase)
     for rel in ("README.md", "docs/safety-philosophy.md", "agent/instructions/core.md", "agent/skills/skyrim-save/SKILL.md"):
         assert "check --preview` prints" in _read(rel) or "check --preview`." in _read(rel), rel
+
+
+def test_the_v4_fixed_list_names_only_behaviour_3_9_1_shipped():
+    """Review C-docs F6: v4.0.0 "Fixed" described pre-release defects of features new in v4 (bench-vr, vr-headless,
+    House Carl, housekeep, migrate-3x, mod-install, Codex ...) as if a 3.9.1 user had them. Those lines live under
+    "Hardened before release (features new in v4)"; a Fixed bullet's title may not name such a feature."""
+    import re
+    notes = _v4_section()
+    fixed = notes[notes.index("\n### Fixed\n"):notes.index("\n### Removed\n")]
+    titles = re.findall(r"^- \*\*(.+?)\*\*", fixed, re.M)
+    assert len(titles) > 40, len(titles)
+    new_in_v4 = ("Codex", "bench-vr", "vr-headless", "House Carl", "housekeep", "migrate-3x", "3.x migration",
+                 "mod-install", "Manual installs", "archive-triage", "skydoctor", "Emulator", "Prefs", "Lock inheritance",
+                 "Save reserve", "Guard stores", "sweep", "launcher", "CMD ", "Migration fence", "relock",
+                 "Session transcripts", "auto_snapshots", "shared runtime", "Save preservation", "Guards-off",
+                 "Shadow-mode", "Adapted agents")
+    for title in titles:
+        for word in new_in_v4:
+            assert word.lower() not in title.lower(), (title, word)
+    assert "#### Hardened before release (features new in v4)" in notes
+    assert "it used to be refused, as every ask is there" not in notes
