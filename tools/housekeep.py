@@ -14,6 +14,7 @@ that repeat the one before. The policy this tool implements is docs/RETENTION.md
     python tools/housekeep.py session STATE.txt   sweep-temp, recycle settled .claude/retired batches (what the guard
                                                   pruned from its own stores), then write the session note to STATE.txt
     python tools/housekeep.py recycle PATH...     send exactly these paths to the Recycle Bin (OK/FAILED per path)
+                                                  (only what retention may remove: see recycle_refusal)
     --config FILE   default <toolkit>/.claude/housekeep.json (.claude/housekeep.json.example ships)
 
 Two passes, never one: `plan` decides, `apply` re-verifies. An action whose file changed since it was planned
@@ -624,6 +625,84 @@ def recycle(paths) -> dict:
     return result
 
 
+# `housekeep recycle PATH...` is a shell door to the Recycle Bin (kb-guard's rotation uses it), so it takes only
+# what this toolkit's own retention may remove (docs/RETENTION.md), never a path a mistyped argument could name:
+#   allowed  strictly inside one of the rolling tool stores (<root>/.claude/retired, .claude/backups/kb,
+#            .claude/backups/auto_snapshots), a configured agent_output / launch_logs / legacy_snapshots root, a
+#            named scratch folder (or that folder itself), or the system temp folder; <root> is the toolkit root
+#            and $CLAUDE_PROJECT_DIR (kb-guard's own root rule)
+#   refused  anything else, and whatever the allow rule says: a drive or filesystem root, the home folder, the toolkit
+#            or install root or a folder above it, a link or reparse point, a Saves folder or anything inside one, a
+#            save (.ess/.skse) or a folder holding one, and a Forever name (a *backup* folder below the allowed root,
+#            known-good*, AUDIT_LOG.txt)
+REPARSE_POINT = 0x400                 # FILE_ATTRIBUTE_REPARSE_POINT (a junction is one)
+ROLLING_STORES = (Path(".claude") / "retired", Path(".claude") / "backups" / "kb",
+                  Path(".claude") / "backups" / ROLLING_SNAPSHOT_STORE)
+
+
+def _real(p) -> Path:
+    return Path(os.path.realpath(os.path.abspath(str(p))))
+
+
+def _strictly_inside(child: Path, parent: Path) -> bool:
+    return os.path.normcase(str(parent)) != os.path.normcase(str(child)) and \
+        os.path.normcase(str(parent)) in {os.path.normcase(str(a)) for a in child.parents}
+
+
+def _temp_root() -> Path:
+    return _real(tempfile.gettempdir())
+
+
+def recycle_refusal(cfg, path) -> str:
+    """Why the `recycle` command will not send this path to the Recycle Bin, or "" when it may."""
+    p = Path(os.path.abspath(str(path)))
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return "does not exist"
+    if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & REPARSE_POINT:
+        return "a link or reparse point"
+    real = _real(p)
+    if real.parent == real:
+        return "a drive or filesystem root"
+    if os.path.normcase(str(real)) == os.path.normcase(str(_real(Path.home()))):
+        return "the home folder"
+    bases = [_real(cfg["root"]), _real(TOOLKIT_ROOT)]
+    if os.environ.get("CLAUDE_PROJECT_DIR"):
+        bases.append(_real(os.environ["CLAUDE_PROJECT_DIR"]))
+    for b in bases:
+        if os.path.normcase(str(b)) == os.path.normcase(str(real)) or _strictly_inside(b, real):
+            return "the toolkit or install root, or a folder above it"
+    if any(part.lower() == "saves" for part in real.parts):
+        return "a Saves folder or inside one"
+    for f in walk_files(real):
+        if str(f).lower().endswith(SAVE_EXTS):
+            return "a save or a folder holding one ({})".format(f.name)
+    allowed = [(b / s, False) for b in bases for s in ROLLING_STORES]
+    allowed += [(_real(_abs(cfg, r)), False) for k in ("agent_output", "launch_logs", "legacy_snapshots")
+                for r in cfg[k]]
+    allowed += [(_real(_abs(cfg, r)), True) for r in cfg["scratch"]]
+    allowed.append((_temp_root(), False))
+    home = None
+    for root, itself_ok in allowed:
+        if _strictly_inside(real, root) or (itself_ok and os.path.normcase(str(real)) == os.path.normcase(str(root))):
+            home = root
+            break
+    if home is None:
+        return "outside the folders housekeep may recycle from (docs/RETENTION.md)"
+    rel = [x.lower() for x in real.relative_to(home).parts] if real != home else []
+    if any("backup" in x for x in rel):
+        return "inside a backup folder (Forever)"
+    if any(x.startswith("known-good") for x in rel):
+        return "a known-good baseline (Forever)"
+    for f in walk_files(real):
+        low = f.name.lower()
+        if low == "audit_log.txt" or any(x.lower().startswith("known-good") for x in f.relative_to(real).parts) \
+                or any("backup" in x.lower() for x in f.relative_to(real).parts[:-1]):
+            return "holds a Forever file ({})".format(f.relative_to(real).as_posix())
+    return ""
+
+
 def _set_readonly(path):
     os.chmod(path, stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH)
 
@@ -1054,10 +1133,12 @@ def _run(cmd, args, cfg) -> int:
     if cmd == "session" and len(args) == 1:
         return session(cfg, Path(args[0]))
     if cmd == "recycle" and args:                     # for shell callers (kb-guard's rotation): one line per path
-        res = recycle(args)
+        refused = {p: recycle_refusal(cfg, p) for p in args}
+        res = recycle([p for p in args if not refused[p]])
         for p in args:
-            print("OK\t" + p if res[p] is None else "FAILED\t{}\t{}".format(p, res[p]))
-        return 1 if any(res.values()) else 0
+            err = "refused: " + refused[p] if refused[p] else res[p]
+            print("OK\t" + p if err is None else "FAILED\t{}\t{}".format(p, err))
+        return 1 if any(refused.values()) or any(res.values()) else 0
     only = None
     if "--only" in args:
         i = args.index("--only")

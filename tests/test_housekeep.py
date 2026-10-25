@@ -541,10 +541,83 @@ def test_off_windows_the_bin_leaves_everything_in_place_and_says_so(tmp_path, mo
 def test_the_recycle_command_reports_every_path_the_bin_refused(tmp_path, monkeypatch, capsys):
     """kb-guard's rotation reads this output (one OK / FAILED line per path); a refusal must never print OK."""
     taken, refused = str(tmp_path / "taken"), str(tmp_path / "refused")
+    monkeypatch.setattr(hk, "_temp_root", lambda: hk._real(tmp_path))   # the paths sit where retention may recycle
+    os.mkdir(taken)
+    os.mkdir(refused)
     monkeypatch.setattr(hk, "recycle", lambda paths: {p: None if p == taken else "too big" for p in paths})
     monkeypatch.setattr(hk, "DEFAULT_CONFIG", tmp_path / "no-config.json")
     assert hk.main(["recycle", taken, refused]) == 1
     assert capsys.readouterr().out.splitlines() == ["OK\t" + taken, "FAILED\t" + refused + "\ttoo big"]
+
+
+# --------------------------------------------------------------------------- the recycle command's own refusals
+
+@pytest.fixture
+def door(tree, monkeypatch):
+    """A tree whose temp folder is elsewhere, so the temp allowance cannot excuse every path under tmp_path."""
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.setattr(hk, "_temp_root", lambda: hk._real(tree / "systemp"))
+    (tree / "systemp").mkdir()
+    return tree, cfg_for(tree, scratch=["bed"])
+
+
+REFUSED = {
+    "the-root": (lambda t: t, "install root"),
+    "above-the-root": (lambda t: t.parent, "install root"),
+    "a-drive-root": (lambda t: __import__("pathlib").Path(t.anchor), "drive or filesystem root"),
+    "the-home-folder": (lambda t: __import__("pathlib").Path.home(), "home folder"),
+    "a-saves-folder": (lambda t: _mk(t / "_CLAUDE_OUTPUT/t/Saves/x.txt").parent, "Saves folder"),
+    "holds-a-save": (lambda t: _mk(t / "_CLAUDE_OUTPUT/t/copy/Save1.ess").parent, "holding one"),
+    "outside-the-allowed-roots": (lambda t: _mk(t / "Data/meshes/x.nif"), "outside the folders"),
+    "the-agent-output-root-itself": (lambda t: _mk(t / "_CLAUDE_OUTPUT/keep.txt").parent, "outside the folders"),
+    "a-backup-folder": (lambda t: _mk(t / "_CLAUDE_OUTPUT/t/backups/a.txt").parent, "backup folder"),
+    "a-known-good-baseline": (lambda t: _mk(t / "_CLAUDE_OUTPUT/known-good-1/a.psc").parent, "known-good"),
+    "holds-the-audit-log": (lambda t: _mk(t / "_CLAUDE_OUTPUT/t2/logs/AUDIT_LOG.txt").parent.parent, "Forever file"),
+    "missing": (lambda t: t / "_CLAUDE_OUTPUT/nothing-here", "does not exist"),
+}
+ALLOWED = {
+    "agent-output-task": lambda t: _mk(t / "_CLAUDE_OUTPUT/t3/notes.md").parent,
+    "kb-snapshot": lambda t: _mk(t / ".claude/backups/kb/20261001-000000/KNOWLEDGEBASE.md").parent,
+    "retired-batch": lambda t: _mk(t / ".claude/retired/batch-1/x.psc").parent,
+    "scratch-folder-itself": lambda t: _mk(t / "bed/x.txt").parent,
+    "temp-child": lambda t: _mk(t / "systemp/skyrim-harness-1/x.txt").parent,
+}
+
+
+def _mk(p):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"x")
+    return p
+
+
+@pytest.mark.parametrize("case", sorted(REFUSED))
+def test_the_recycle_command_refuses_what_retention_never_removes(door, case):
+    """Sweep 2026-10-25 (X4 6bf11a9): `housekeep recycle PATH` passed anything to the shell's delete."""
+    tree, cfg = door
+    make, why = REFUSED[case]
+    target = make(tree)
+    assert why in hk.recycle_refusal(cfg, target), (case, hk.recycle_refusal(cfg, target))
+
+
+@pytest.mark.parametrize("case", sorted(ALLOWED))
+def test_the_recycle_command_still_takes_the_rolling_stores_and_agent_output(door, case):
+    tree, cfg = door
+    assert hk.recycle_refusal(cfg, ALLOWED[case](tree)) == ""
+
+
+def test_a_refused_path_never_reaches_the_bin_and_the_rest_still_goes(door, monkeypatch, capsys):
+    tree, cfg = door
+    conf = json.loads((tree / "hk.json").read_text(encoding="utf-8"))
+    conf["root"] = str(tree)
+    (tree / "hk.json").write_text(json.dumps(conf), encoding="utf-8")
+    ok = str(ALLOWED["kb-snapshot"](tree))
+    bad = str(REFUSED["holds-a-save"][0](tree))
+    sent = []
+    monkeypatch.setattr(hk, "recycle", lambda paths: sent.extend(paths) or {p: None for p in paths})
+    assert hk.main(["--config", str(tree / "hk.json"), "recycle", ok, bad]) == 1
+    assert sent == [ok], "a refused path was handed to the Recycle Bin"
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "OK\t" + ok and out[1].startswith("FAILED\t" + bad + "\trefused: ")
 
 
 def test_session_writes_its_state_even_when_the_sweep_fails(tmp_path, monkeypatch):

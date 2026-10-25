@@ -1977,7 +1977,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     ),
     pytest.param(
         "tools/housekeep.py",
-        '            print("OK' + BS + 't" + p if res[p] is None else "FAILED' + BS + 't{}' + BS + 't{}".format(p, res[p]))',
+        '            print("OK' + BS + 't" + p if err is None else "FAILED' + BS + 't{}' + BS + 't{}".format(p, err))',
         '            print("OK' + BS + 't" + p)',
         "tests/test_housekeep.py::test_the_recycle_command_reports_every_path_the_bin_refused",
         id="housekeep-recycle-cli-hides-refusals",
@@ -10085,7 +10085,6 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _HKS_T + _HKF + "[t/logs/AUDIT_LOG.txt]", "sweep-hk-audit-log-unprotected"),
 ]]
 
-
 # Final sweep 2026-10-25 (X4 34133b7): an evidence link holding spaces, parentheses or escapes still protects its file.
 _HKE = "test_a_linked_path_with_spaces_and_parentheses_is_still_evidence"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
@@ -10097,4 +10096,32 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _HKS_T + _HKE + "[backslash]", "sweep-hk-link-backslash-escapes-unread"),
     (_HKS, "                    if len(tail) > 32768:\n", "                    if False:\n",
      _HKS_T + "test_evidence_discovery_past_its_bound_refuses_instead_of_truncating", "sweep-hk-link-bound-ignored"),
+]]
+
+# Final sweep 2026-10-25 (X4 6bf11a9): `housekeep recycle PATH` refuses what retention never removes. One twin per clause.
+_HKR = "test_the_recycle_command_refuses_what_retention_never_removes"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_HKS, "    if real.parent == real:\n", "    if False:\n", _HKS_T + _HKR + "[a-drive-root]",
+     "sweep-hk-recycle-takes-a-drive-root"),
+    (_HKS, "    if os.path.normcase(str(real)) == os.path.normcase(str(_real(Path.home()))):\n", "    if False:\n",
+     _HKS_T + _HKR + "[the-home-folder]", "sweep-hk-recycle-takes-home"),
+    (_HKS, "        if os.path.normcase(str(b)) == os.path.normcase(str(real)) or _strictly_inside(b, real):\n",
+     "        if False or _strictly_inside(b, real):\n", _HKS_T + _HKR + "[the-root]", "sweep-hk-recycle-takes-the-root"),
+    (_HKS, "        if os.path.normcase(str(b)) == os.path.normcase(str(real)) or _strictly_inside(b, real):\n",
+     "        if os.path.normcase(str(b)) == os.path.normcase(str(real)) or False:\n", _HKS_T + _HKR + "[above-the-root]",
+     "sweep-hk-recycle-takes-above-the-root"),
+    (_HKS, '    if any(part.lower() == "saves" for part in real.parts):\n', "    if False:\n",
+     _HKS_T + _HKR + "[a-saves-folder]", "sweep-hk-recycle-takes-a-saves-folder"),
+    (_HKS, "        if str(f).lower().endswith(SAVE_EXTS):\n", "        if False:\n", _HKS_T + _HKR + "[holds-a-save]",
+     "sweep-hk-recycle-takes-a-save"),
+    (_HKS, "    if home is None:\n", "    if False:\n", _HKS_T + _HKR + "[outside-the-allowed-roots]",
+     "sweep-hk-recycle-takes-anything"),
+    (_HKS, '    if any("backup" in x for x in rel):\n', "    if False:\n", _HKS_T + _HKR + "[a-backup-folder]",
+     "sweep-hk-recycle-takes-a-backup"),
+    (_HKS, '    if any(x.startswith("known-good") for x in rel):\n', "    if False:\n",
+     _HKS_T + _HKR + "[a-known-good-baseline]", "sweep-hk-recycle-takes-known-good"),
+    (_HKS, '        if low == "audit_log.txt" or any(', "        if False or any(",
+     _HKS_T + _HKR + "[holds-the-audit-log]", "sweep-hk-recycle-takes-the-audit-log"),
+    (_HKS, "        res = recycle([p for p in args if not refused[p]])\n", "        res = recycle(list(args))\n",
+     _HKS_T + "test_a_refused_path_never_reaches_the_bin_and_the_rest_still_goes", "sweep-hk-recycle-refusal-ignored"),
 ]]
