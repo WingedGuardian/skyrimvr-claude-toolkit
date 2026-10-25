@@ -22,6 +22,9 @@ from modding_harness.dispatch import SavePlan
 from skyguard import save_profile
 
 CONFIG = ".modding-agent-harness/local-policies.json"
+# Optional legacy compatibility for one reviewed personal save policy and its controller (the file names below and the
+# test-save prefix in _controlled_scope are that install's, kept by user ruling 2026-10-20). Nothing here applies to an
+# install without a hash-matching registration.
 LEGACY = ".claude/hooks/protect-save-access.py"
 KIND = "legacy-skyrim-save-guard-v1"
 # Only exact reviewed legacy versions have qualified pure transfer helpers. A
