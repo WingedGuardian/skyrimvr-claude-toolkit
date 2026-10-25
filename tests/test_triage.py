@@ -86,6 +86,12 @@ def test_papyrus_reports_the_not_shown_remainder_even_at_zero(papyrus_log):
     """Silence about the remainder is how a triage tool starts lying."""
     r = run(PAPYRUS, str(papyrus_log), "--top", "1")
     assert "(not shown above)" in r.stdout, r.stdout
+    # ... and at ZERO, which `--top 1` never reached for the error block (both blocks fit the default top: every
+    # remainder row is 0 and must still print once per block).
+    import re
+    r = run(PAPYRUS, str(papyrus_log))
+    zero_rows = re.findall(r"^\s+0\s+-\s+\(not shown above\)$", r.stdout, re.M)
+    assert len(zero_rows) == r.stdout.count(" buckets  (") == 2, r.stdout
 
 
 def test_papyrus_attributes_a_missing_plugin_to_its_name(papyrus_log):
@@ -141,6 +147,18 @@ def test_crash_labels_an_accepted_signature_from_the_knowledgebase(crash_dir):
     """The point of the tool: an accepted crash must not read as a new finding."""
     r = run(CRASH, str(crash_dir))
     assert "[ACCEPTED - do not re-investigate]" in r.stdout, r.stdout
+
+
+def test_an_accepted_offset_in_another_module_is_unknown_not_accepted(tmp_path):
+    """Review L5 F8: the rulings matched the offset alone, so `SomeModPlugin.dll+0B84F05` was printed ACCEPTED -
+    do not re-investigate. Twin: crash_dir's SkyrimVR.exe+0B84F05 above is still ACCEPTED."""
+    d = tmp_path / "SKSE"
+    d.mkdir()
+    (d / "crash-2026-08-26-01.txt").write_text(
+        crash_log("0B84F05", "hkpContactSolver").replace("SkyrimVR.exe+", "SomeModPlugin.dll+"), encoding="utf-8")
+    r = run(CRASH, str(d))
+    assert "SomeModPlugin.dll+0B84F05   [** UNKNOWN **]" in r.stdout, r.stdout
+    assert "ACCEPTED" not in r.stdout and "UNKNOWN        : 1" in r.stdout, r.stdout
 
 
 def test_crash_flags_an_unrecognised_signature_as_unknown(crash_dir):

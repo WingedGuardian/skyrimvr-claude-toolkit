@@ -11,7 +11,8 @@ that repeat the one before. The policy this tool implements is docs/RETENTION.md
     python tools/housekeep.py apply plan.json     re-check each action, then do exactly those
             [--only CLASS[,CLASS]]               (recreatable, build, link, gzip, launch, snapshot, scratch)
     python tools/housekeep.py sweep-temp          recycle the toolkit's own stale temp dirs (see "temp sweep")
-    python tools/housekeep.py session STATE.txt   sweep-temp, then write the session-start disk note to STATE.txt
+    python tools/housekeep.py session STATE.txt   sweep-temp, recycle settled .claude/retired batches (what the guard
+                                                  pruned from its own stores), then write the session note to STATE.txt
     --config FILE   default <toolkit>/.claude/housekeep.json (.claude/housekeep.json.example ships)
 
 Two passes, never one: `plan` decides, `apply` re-verifies. An action whose file changed since it was planned
@@ -465,6 +466,11 @@ def recycle(paths) -> dict:
     paths = [str(p) for p in paths]
     if not paths:
         return {}
+    # No test may reach the real bin: it can raise Windows' "delete permanently?" dialog on the user's desktop
+    # (2026-10-20, four such popups from test runs). A test injects a fake recycler; the guard is here, at the one
+    # call that touches the shell, so a test that forgets fails loudly instead of prompting the user.
+    if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"):
+        raise RuntimeError("housekeep.recycle refused under pytest: inject a fake recycler (no real Recycle Bin)")
     if os.name != "nt":
         raise RuntimeError("Recycle Bin removal is implemented for Windows only")
     # The shell's own delete, NOT Microsoft.VisualBasic's DeleteDirectory(..., 'OnlyErrorDialogs', ...): that UI option
@@ -732,6 +738,64 @@ def sweep_temp(cfg, temp: Path | None = None, now: float | None = None, recycler
     return {"rows": rows, "failed": failed, "temp": str(temp)}
 
 
+# --------------------------------------------------------------------------- retired store batches
+# The guard prunes its own stores (script snapshots, recovery blobs, old session logs) by RENAMING each item into a
+# batch folder under <project>/.claude/retired/ (tools/skyguard/retire.py): a hook has no time for the Recycle Bin.
+# The session sweep moves every settled batch to the bin whole. Off Windows there is no bin to call, so the batches
+# wait there and the session note says so; nothing is ever deleted.
+RETIRED_REL = Path(".claude") / "retired"
+RETIRED_SETTLE_S = 600                # a batch nothing touched for 10 minutes is finished (a prune takes seconds)
+
+
+def sweep_retired(roots, now: float | None = None, recycler=None) -> dict:
+    now = time.time() if now is None else now
+    rows = {"recycled": 0, "kept: changed recently": 0, "kept: in use": 0, "waiting: no Recycle Bin here": 0,
+            "failed": 0}
+    ready, failed, seen = [], [], set()
+    for root in roots:
+        base = Path(root) / RETIRED_REL
+        if not base.is_dir() or _key(base) in seen:
+            continue
+        seen.add(_key(base))
+        try:
+            entries = list(os.scandir(base))
+        except OSError:
+            continue
+        for e in entries:
+            try:
+                reparse = getattr(e.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400
+                if e.is_symlink() or reparse or not e.is_dir(follow_symlinks=False):
+                    continue                           # retire.py makes plain folders only; a link is not ours
+                p = Path(e.path)
+                settling = _newest_shallow(p) > now - RETIRED_SETTLE_S
+            except OSError:
+                continue
+            if settling:
+                rows["kept: changed recently"] += 1
+            elif _in_use(p):
+                rows["kept: in use"] += 1
+            else:
+                ready.append(p)
+    if recycler is None and os.name != "nt":
+        rows["waiting: no Recycle Bin here"] += len(ready)
+        return {"rows": rows, "failed": failed, "waiting_bytes": sum(dir_size(p) for p in ready)}
+    for p, err in (recycler or recycle)(ready).items():
+        if err:
+            rows["failed"] += 1
+            failed.append("{}  ({})".format(p, err))
+        else:
+            rows["recycled"] += 1
+    return {"rows": rows, "failed": failed, "waiting_bytes": 0}
+
+
+def _project_of(state: Path):
+    """The project a session note belongs to: run.py writes it at <project>/.claude/diag/housekeep-session.txt."""
+    state = Path(state).absolute()
+    if state.parent.name == "diag" and state.parent.parent.name == ".claude":
+        return state.parents[2]
+    return None
+
+
 def worktree_count(root: Path) -> int:
     try:
         out = subprocess.run(["git", "-C", str(root), "worktree", "list", "--porcelain"], capture_output=True,
@@ -751,12 +815,22 @@ def session(cfg, state: Path) -> int:
     except OSError:
         pass
     res = sweep_temp(cfg)
+    ret = sweep_retired([cfg["root"]] + [p for p in [_project_of(state)] if p is not None])
     notes = []
     r = res["rows"]
     if r["recycled"] or r["failed"]:
         notes.append("moved {} leftover temp dir(s) to the Recycle Bin{}".format(
             r["recycled"], "; {} could not be recycled and were LEFT IN PLACE (ask the user before any permanent "
                            "delete)".format(r["failed"]) if r["failed"] else ""))
+    rr = ret["rows"]
+    if rr["recycled"] or rr["failed"]:
+        notes.append("moved {} batch(es) of pruned guard-store files to the Recycle Bin{}".format(
+            rr["recycled"], "; {} could not be recycled and were LEFT IN PLACE in .claude/retired (ask the user "
+                            "before any permanent delete)".format(rr["failed"]) if rr["failed"] else ""))
+    if rr["waiting: no Recycle Bin here"]:
+        notes.append("{} batch(es) of pruned guard-store files ({:.1f} MiB) wait in .claude/retired: there is no "
+                     "Recycle Bin to send them to here, so move them to your trash when you choose".format(
+                         rr["waiting: no Recycle Bin here"], ret["waiting_bytes"] / 1048576))
     home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
     codex = dir_size(home / ".codex" / "sessions") / GIB
     if codex > cfg["codex_sessions_warn_gib"]:
@@ -771,7 +845,7 @@ def session(cfg, state: Path) -> int:
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text(("DISK: " + "; ".join(notes) + " -- python tools/housekeep.py report\n") if notes else "",
                      encoding="utf-8")
-    return 1 if r["failed"] else 0
+    return 1 if r["failed"] or rr["failed"] else 0
 
 
 # --------------------------------------------------------------------------- report

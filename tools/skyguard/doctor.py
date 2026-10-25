@@ -411,6 +411,13 @@ def _layer3_claude(root, now, home):
             continue
         st, detail = health.hook_state(hb, h, now)
         rows.append(Row(S, h, HOOK_STATUS.get(st, UNKNOWN), "wired; %s: %s" % (st, _txt(detail, 140))))
+    # Per-session transcript coverage, as the Codex layer and hook-canary read it: a hook that fires for Bash while
+    # PowerShell calls run unhooked is DEGRADED there, and must not read live here (review L3 MEDIUM-1). No session
+    # recorded adds no row: each hook's own line above already says NOT EXERCISED.
+    for sid, surface, hooked, called, cstate, why in health._coverage_rows(Path(root), "claude"):
+        rows.append(Row(S, "coverage " + session._clean(sid, 13), COVERAGE_STATUS.get(cstate, UNKNOWN),
+                        "%s: hooked %d / called %d, %s%s" % (session._clean(surface, 20), hooked, called, cstate,
+                                                            (" (%s)" % _txt(why, 100)) if why else "")))
     return rows
 
 

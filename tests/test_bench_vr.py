@@ -98,6 +98,34 @@ def test_a_failure_partway_still_restores_everything(tmp_path):
     assert "HTTP 500" in res["error"] and res["unrestored"] == []
 
 
+def test_a_god_mode_toggle_that_failed_is_not_toggled_back_on(tmp_path):
+    """Review L5 F5: the restore entry was queued BEFORE the tgm call, so a tgm that failed was "restored" -- one
+    toggle, turning god mode ON for the rest of the session. Twin: the default run toggles exactly twice."""
+    s, log = start(tmp_path, MOCK_FAIL_ON="tgm")
+    try:
+        r = run("run", "--label", "x", "--out", tmp_path / "out", *FAST, port=s.port)
+    finally:
+        s.stop()
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert commands(log).count("tgm") == 1, commands(log)
+
+
+def test_the_run_says_where_it_left_the_player(tmp_path):
+    """Review L5 F5: every coc/cow moves the player and nothing moves them back; the run must say so."""
+    s, log = start(tmp_path)
+    try:
+        r = run("run", "--label", "x", "--out", tmp_path / "out", *FAST, port=s.port)
+    finally:
+        s.stop()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert commands(log).count("tgm") == 2
+    res = result_file(tmp_path / "out")
+    assert res["started_in"] == "SomeInterior"
+    assert any("player's location: started in SomeInterior" in x and "reload your save" in x
+               for x in res["left_as_is"]), res["left_as_is"]
+    assert "LEFT AS IS (by design): the player's location" in r.stdout
+
+
 def test_a_restore_that_fails_is_named_with_its_command(tmp_path):
     s, log = start(tmp_path, MOCK_FAIL_ON="set timescale to 20")
     try:

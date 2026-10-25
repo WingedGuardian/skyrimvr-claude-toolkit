@@ -17,8 +17,10 @@ What `on` changes, and nothing else:
 BEFORE changing anything, both files are copied to the backup area, hashed, the copies verified, and a state file
 written. If any step fails, everything is put back from those copies before the tool exits.
 
-`off` restores both files byte-exact from the backups and verifies each hash. With no state file it has nothing to
-do and says so, so it is safe to run again, or after a crash or a reboot. A restore that does not verify keeps the
+`off` restores both files byte-exact from the backups and verifies each hash. A file that changed AFTER `on` (an
+OpenComposite update, a settings edit) is first copied, hash-verified, into the run's backup folder
+(changed-after-on-<stamp>/), so nothing is lost. The closed state file is kept as state-closed-<stamp>.json. With no
+state file it has nothing to do and says so, so it is safe to run again, or after a crash or a reboot. A restore that does not verify keeps the
 state file and the backups, and exits 3. Run `off` again once the reported problem is resolved.
 
 Close SteamVR first: it rewrites steamvr.vrsettings when it exits. `on` refuses while vrserver.exe runs (--force
@@ -232,9 +234,12 @@ def save_state(state) -> None:
 
 
 def clear_state() -> None:
+    """Close the run: state.json is renamed to a dated state-closed-*.json beside it, never deleted (it was written
+    by an EARLIER run, so the user's Recycle Bin rule covers it; review L5 F4). Only state.json is ever read."""
     p = state_dir() / "state.json"
     if p.exists():
-        p.unlink()
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        os.replace(str(p), str(p.with_name("state-closed-{}.json".format(stamp))))
 
 
 def restore_entries(entries) -> list:
@@ -243,12 +248,23 @@ def restore_entries(entries) -> list:
     for e in entries:
         live, bak, want = Path(e["path"]), Path(e["backup"]), e["sha256"]
         try:
-            if live.is_file() and sha(live) == want:
+            current = sha(live) if live.is_file() else None
+            if current == want:
                 continue                           # never changed, or already restored
             if not bak.is_file() or sha(bak) != want:
                 problems.append("{}: its backup {} is missing or does not match the recorded hash; restore it by "
                                 "hand".format(live, bak))
                 continue
+            if current is not None and current != e.get("applied_sha256"):
+                # Changed AFTER `on` (an OpenComposite update, a SteamVR settings change): keep those bytes before
+                # the backup goes back over them (review L5 F1). A copy that does not verify stops this restore.
+                kept = bak.parent / "changed-after-on-{}".format(datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f"))
+                try:
+                    backup(live, kept / live.name)
+                except Refused as ex:
+                    problems.append("{}: it changed after `on` and {}; nothing was restored".format(live, ex))
+                    continue
+                print("  {} changed after `on`; that version is kept at {}".format(live, kept / live.name))
             replace_file(bak, live)
             if sha(live) != want:
                 problems.append("{}: restored, but its hash does not verify".format(live))
@@ -286,11 +302,13 @@ def cmd_on(force=False) -> int:
     save_state(state)                              # recorded BEFORE the first change
     try:
         write_text_atomic(p["vrsettings"], headless_settings(p["vrsettings"].read_text(encoding="utf-8")))
+        entries[0]["applied_sha256"] = sha(p["vrsettings"])     # what `off` may overwrite without keeping a copy
         print("  steamvr.vrsettings: null driver enabled ({})".format(p["vrsettings"]))
         if swap:
             replace_file(p["valve_dll"], p["live_dll"])
             if sha(p["live_dll"]) != sha(p["valve_dll"]):
                 raise OSError("the game's openvr_api.dll does not match SteamVR's after the copy")
+            entries[1]["applied_sha256"] = sha(p["live_dll"])
             print("  openvr_api.dll: OpenComposite replaced by SteamVR's ({})".format(p["valve_dll"]))
         else:
             print("  openvr_api.dll: not OpenComposite; left alone")
@@ -364,6 +382,8 @@ def cmd_emu(arg) -> int:
             st.pop("emu_recovery_pending", None)
             save_state(st)
             raise Refused("`emu on` failed ({}); the stock driver is restored".format(e))
+        entry["applied_sha256"] = sha(p["null_driver"])
+        save_state(st)
         print("emulator driver installed in place of SteamVR's null driver")
         return 0
     if arg == "off":

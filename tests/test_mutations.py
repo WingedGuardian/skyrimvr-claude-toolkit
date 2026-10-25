@@ -718,7 +718,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         # Drop the knowledgebase lookup: every crash reads as a new finding,
         # including the one already ruled ACCEPTED three investigations ago.
         "tools/crash-triage.py",
-        '        status, note = KNOWN.get(r["offset"], ("UNKNOWN", ""))',
+        '        status, note = known(r)',
         '        status, note = ("UNKNOWN", "")',
         "tests/test_triage.py::test_crash_labels_an_accepted_signature_from_the_knowledgebase",
         id="crash-known-signatures-ignored",
@@ -1391,7 +1391,64 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
            "test_backups_are_taken_and_recorded_before_the_first_change"),
           ("steamvr-running-ignored", "    if steamvr_running() and not force:", "    if False:",
            "test_steamvr_running_is_refused_unless_forced"),
+          # Review L5 F1: a file changed after `on` is kept before the backup goes back over it ...
+          ("changed-after-on-overwritten", '            if current is not None and current != e.get("applied_sha256"):',
+           "            if False:", "test_off_keeps_a_file_that_changed_after_on_before_restoring_over_it"),
+          # ... and only such a file: what `on` itself wrote is recognised, so no copy piles up on every `off`.
+          ("applied-hash-not-recorded", '        entries[0]["applied_sha256"] = sha(p["vrsettings"])',
+           "        pass", "test_off_keeps_a_file_that_changed_after_on_before_restoring_over_it"),
+          # Review L5 F4: the state file is closed by a rename, never deleted.
+          ("state-file-deleted",
+           '        os.replace(str(p), str(p.with_name("state-closed-{}.json".format(stamp))))',
+           "        p.unlink()", "test_off_closes_the_state_file_by_renaming_it_never_deleting"),
       ]],
+
+    # --- review L5 (tools) fix batch ------------------------------------------
+    # F3: a staged patch name is compared as a name; as a glob, `[Fix]` is a character class.
+    pytest.param("tools/housecarl_integration/gateway.py",
+                 "            if p.is_file() and p.name.casefold() == name.casefold()]",
+                 '            if p in list(root.glob("*/" + name))]',
+                 "tests/test_housecarl.py::test_a_staged_patch_name_with_brackets_is_a_name_not_a_glob",
+                 id="housecarl-staged-name-is-a-glob"),
+    # F5: the god-mode restore is queued only after the toggle went through ...
+    pytest.param("tools/bench-vr.py", '        bench.console("tgm")\n        # Only once',
+                 '        restore.append(("god mode", "tgm"))\n        bench.console("tgm")\n        # Only once',
+                 "tests/test_bench_vr.py::test_a_god_mode_toggle_that_failed_is_not_toggled_back_on",
+                 id="bench-vr-tgm-restore-queued-first"),
+    # ... and a run that moved the player says where it left them.
+    pytest.param("tools/bench-vr.py", "                moved = True\n", "",
+                 "tests/test_bench_vr.py::test_the_run_says_where_it_left_the_player",
+                 id="bench-vr-player-location-unreported"),
+    # F6: the House Carl download goes to a part file, verified, before it takes the archive's name.
+    pytest.param("tools/housecarl_integration/setup.py",
+                 '(ARCHIVE_URL, timeout=60) as src, part.open("xb") as dst:',
+                 '(ARCHIVE_URL, timeout=60) as src, archive.open("xb") as dst:',
+                 "tests/test_housecarl.py::test_an_interrupted_download_never_leaves_a_file_at_the_archive_name",
+                 id="housecarl-download-straight-to-the-archive-name"),
+    pytest.param("tools/housecarl_integration/setup.py", "    if sha(part) != ARCHIVE_SHA256:", "    if False:",
+                 "tests/test_housecarl.py::test_an_interrupted_download_never_leaves_a_file_at_the_archive_name",
+                 id="housecarl-download-unverified-before-rename"),
+    # F8: a crash ruling needs its module as well as its offset.
+    pytest.param("tools/crash-triage.py",
+                 '    return KNOWN.get((r["module"].lower(), r["offset"].upper()), ("UNKNOWN", ""))',
+                 '    return next((v for (_m, o), v in KNOWN.items() if o == r["offset"].upper()), ("UNKNOWN", ""))',
+                 "tests/test_triage.py::test_an_accepted_offset_in_another_module_is_unknown_not_accepted",
+                 id="crash-triage-offset-only-ruling"),
+    # F9: a BOM-headed plugins.txt keeps its first active plugin (the node suite runs under this anchor).
+    pytest.param("tools/xelib/active-plugins.js", "fs.readFileSync(pluginsTxt, 'utf8').replace(/^\\uFEFF/, '');",
+                 "fs.readFileSync(pluginsTxt, 'utf8');",
+                 "tests/test_repo_invariants.py::test_npm_test_actually_runs_tests",
+                 id="active-plugins-bom-drops-the-first-plugin"),
+    # F10: the Nexus key reaches curl on stdin, never on its command line.
+    pytest.param("tools/nexus.sh", """printf 'apikey: %s\\n' "$KEY" | curl -s --max-time 30 -w $'\\n%{http_code}' -H @- "$@")""",
+                 """curl -s --max-time 30 -w $'\\n%{http_code}' -H "apikey: $KEY" "$@")""",
+                 "tests/test_nexus.py::test_page_end_to_end_and_the_key_is_used_but_never_printed",
+                 id="nexus-key-on-the-curl-command-line"),
+    # Read-through of a skimmed file (test_triage.py): the zero remainder row was never actually tested at zero.
+    pytest.param("tools/papyrus-triage.py", """        print(f"  {remainder:>6}  {'-':<34}  (not shown above)")""",
+                 """        if remainder: print(f"  {remainder:>6}  {'-':<34}  (not shown above)")""",
+                 "tests/test_triage.py::test_papyrus_reports_the_not_shown_remainder_even_at_zero",
+                 id="papyrus-triage-zero-remainder-silent"),
 
     # --- mirror-launch-logs -------------------------------------------------
     pytest.param(
@@ -1506,7 +1563,26 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
           # A gzip that does not reproduce the log still sends the original to the bin.
           ("gzip-no-round-trip", '    if d.hexdigest() != action["hash"]:', "    if False:",
            "test_a_gzip_that_does_not_round_trip_keeps_the_original"),
+          # Review L3 LOW-3 / L2 LOW-7: the retired guard-store batches reach the bin, and only settled ones do.
+          ("retired-never-swept",
+           '    ret = sweep_retired([cfg["root"]] + [p for p in [_project_of(state)] if p is not None])',
+           '    ret = sweep_retired([cfg["root"]])',
+           "test_session_recycles_settled_retired_guard_store_batches_and_keeps_a_fresh_one"),
+          ("retired-no-settle-gate", "                settling = _newest_shallow(p) > now - RETIRED_SETTLE_S",
+           "                settling = False",
+           "test_session_recycles_settled_retired_guard_store_batches_and_keeps_a_fresh_one"),
       ]],
+    pytest.param("tools/housekeep.py",
+                 '                reparse = getattr(e.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400',
+                 "                reparse = 0", "tests/test_housekeep.py::"
+                 "test_a_retired_batch_is_never_deleted_and_a_link_is_never_offered",
+                 marks=pytest.mark.skipif(sys.platform != "win32", reason="a junction exists on Windows only"),
+                 id="housekeep-retired-follows-junctions"),
+    pytest.param("tools/housekeep.py", "                if e.is_symlink() or reparse or not e.is_dir(",
+                 "                if reparse or not e.is_dir(", "tests/test_housekeep.py::"
+                 "test_a_retired_batch_is_never_deleted_and_a_link_is_never_offered",
+                 marks=pytest.mark.skipif(sys.platform == "win32", reason="the test links with a junction there"),
+                 id="housekeep-retired-follows-symlinks"),
 
     # --- what the v3.9 release review found ---------------------------------
     # Put back the single-character separator class. Doubled separators name the same
@@ -2252,13 +2328,6 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         '    if len(text) <= CONTEXT_LIMIT:',
         'tests/test_skyguard_codex_adapter.py::test_the_cap_counts_bytes_not_characters',
         id='codex-context-cap-counts-characters',
-    ),
-    pytest.param(
-        'tools/skyguard/adapters/codex.py',
-        '        sp = patch_paths.shell_patch(cmd)',
-        '        sp = None',
-        'tests/test_skyguard_codex_adapter.py::test_a_patch_through_the_shell_carries_its_paths',
-        id='codex-shell-patch-paths-dropped',
     ),
     pytest.param(
         'tools/skyguard/portable.py',
@@ -4216,6 +4285,13 @@ MUTATIONS += [
                  "    : | awk -F'\\t'",
                  "tests/test_esp_verify.py::test_allow_empty_still_lists_the_references_that_appeared",
                  id="esp-verify-allow-empty-hides-additions"),
+    # Review L5 F2: the old name class, which never saw a master with ( ) [ ] ' & + or a comma.
+    pytest.param("tools/esp-verify-wrapper.sh",
+                 """grep -oE '[0-9A-Fa-f]{6}:[^:*?"<>|/\\\\]+\\.(esp|esm|esl)'""",
+                 """grep -oE '[0-9A-Fa-f]{6}:[A-Za-z0-9 ._-]+\\.(esp|esm|esl)'""",
+                 "tests/test_esp_verify.py::"
+                 "test_a_master_with_brackets_parentheses_or_an_apostrophe_is_inventoried_and_its_remap_caught",
+                 id="esp-verify-odd-master-names-unseen"),
 
     pytest.param("scripts/check_could_not_check.py",
                  'if skipped and not any("short test summary info" in line for line in lines):',
@@ -4266,6 +4342,12 @@ MUTATIONS_TASK13 = [
     ("tools/skyguard/health.py", '    trust_unknown = bool(trust) and trust["overall"] == "unknown"',
      "    trust_unknown = False", _COV + "test_an_unreadable_codex_config_is_unknown_and_exits_2",
      "canary-unknown-trust-exits-2"),
+    # Review L3 LOW-2: a Codex call is recorded only once the engine decided; a crash must not leave it "hooked".
+    ("tools/skyguard/run.py",
+     "    v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit, telemetry=a.telemetry,",
+     "    _session_line(a, req.session_id, tool=req.tool_name)\n"
+     "    v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit, telemetry=a.telemetry,",
+     _COV + "test_a_codex_call_whose_engine_crashed_is_not_counted_as_hooked", "coverage-codex-crash-is-not-hooked"),
     # Coverage rules.
     ("tools/skyguard/health.py", "        short = hooked < called\n", "        short = False\n",
      _COV + "test_coverage_is_degraded_when_one_call_has_no_line", "coverage-degraded-when-a-call-had-no-hook"),
@@ -4287,7 +4369,25 @@ MUTATIONS_TASK13 = [
      "        if not isinstance(session_id, str):",
      _COV + "test_a_session_id_that_is_not_a_plain_name_writes_nothing", "session-id-cannot-escape-the-sessions-dir"),
     ("tools/skyguard/health.py", "        for p in files[keep:]:", "        for p in files[keep + 100:]:",
-     _COV + "test_only_the_twenty_newest_session_files_are_kept", "session-files-are-pruned"),
+     _COV + "test_only_the_twenty_newest_session_files_are_kept_and_the_rest_are_retired_not_deleted",
+     "session-files-are-pruned"),
+    # Review L3 LOW-3 / L2 LOW-7: pruning retires (then housekeep recycles); it never deletes.
+    ("tools/skyguard/retire.py", '            os.rename(str(path), str(d / "{}-{}".format(self.count, Path(path).name)))',
+     "            os.unlink(str(path))",
+     _COV + "test_only_the_twenty_newest_session_files_are_kept_and_the_rest_are_retired_not_deleted",
+     "session-files-are-retired-not-deleted"),
+    ("tools/skyguard/snapshot.py", "            batch.retire(store / \"manifests\" / n)",
+     "            os.unlink(str(store / \"manifests\" / n))",
+     "tests/test_snapshot_nested.py::test_pruning_retires_what_it_removes_and_deletes_nothing",
+     "snapshot-prune-retires-manifests"),
+    ("tools/skyguard/snapshot.py", "                batch.retire(d)\n",
+     "                __import__(\"shutil\").rmtree(str(d))\n",
+     "tests/test_snapshot_nested.py::test_pruning_retires_what_it_removes_and_deletes_nothing",
+     "snapshot-prune-retires-bash-era-folders"),
+    ("tools/skyguard/recovery.py", "            removed += batch.retire(ent.path)",
+     "            os.unlink(ent.path)",
+     "tests/test_recovery_snapshots.py::test_pruning_drops_old_lines_but_keeps_each_paths_newest",
+     "recovery-prune-retires-blobs"),
     ("tools/skyguard/run.py", "    _session_line(a, req.session_id, tool=req.tool_name)\n", "",
      _COV + "test_the_engine_records_a_codex_session_and_its_calls", "engine-records-codex-calls"),
     ("tools/skyguard/run.py",
@@ -4540,11 +4640,12 @@ def test_guard_actually_bites(tmp_path, relpath, find, replace, test_id):
         passed = {identity for identity, outcome in pristine.items() if outcome == "passed"}
         assert passed and not any(outcome == "failed" for outcome in pristine.values()), "pristine anchor did not execute cleanly"
         result = _run_mutation_anchor(work, test_id, scratch, private / "mutant.xml")
-        why = _anchor_skipped_off_windows(result.returncode, result.stdout)
-        if why:
-            pytest.skip("the anchor test is skipped on this platform, so it cannot kill this twin: " + why)
-        unjudged = _unjudged_twin_message(result.returncode, result.stdout)   # Windows: still red, but never a "survivor"
-        assert not unjudged, unjudged
+        # The pristine anchor PASSED here, so a mutant leg that only skips is the revert turning the check off, not
+        # the platform: a survivor on every platform (review L7 LOW; it used to be excused off Windows and labelled
+        # "NOT JUDGED (not a survivor)" on Windows).
+        why = _anchor_skipped_off_windows(result.returncode, result.stdout, platform="any")
+        assert not why, ("SURVIVOR: the anchor test PASSED on the pristine tree and was only SKIPPED with this fix "
+                         "reverted -- the revert made the test stop checking instead of failing. Skip reason: " + why)
         # Read before cleanup. A setup/teardown error can also exit1 and is not
         # evidence of a failure in a previously passing testcase.
         mutated = _anchor_outcomes(private / "mutant.xml") if result.returncode in (0, 1) else {}
@@ -5572,6 +5673,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _DRT + "test_codex_coverage_short_is_not_live_and_none_recorded_is_unknown", "l2-doctor-codex-coverage"),
     (_DR, "    if not cov:", "    if False:",
      _DRT + "test_codex_coverage_short_is_not_live_and_none_recorded_is_unknown", "l2-doctor-codex-no-sessions"),
+    (_DR, 'cstate, why in health._coverage_rows(Path(root), "claude"):', 'cstate, why in []:',
+     _DRT + "test_claude_coverage_short_is_not_live_like_the_canary_says", "l2-doctor-claude-coverage"),
     # ---- the launchers
     ("tools/skydoctor", 'src="${BASH_SOURCE[0]//' + BS * 2 + '//}"', 'src="${BASH_SOURCE[0]}"',
      _DRT + "test_the_bash_launcher_reports_json_and_exits_by_the_worst_line", "l2-doctor-launcher-windows-path"),
@@ -7434,6 +7537,26 @@ MUTATIONS += [
     pytest.param("tests/harness_pytest.py", "    os.environ[\"HARNESS_TRIPWIRE_LOG\"] = str(log)\n", "    pass\n", "tests/test_harness_tripwire_scope.py::test_overlapping_control_attempt_does_not_accuse_the_innocent_test[shell]", id="review-tripwire-scope-env"),
     pytest.param("tests/harness_pytest.py", "            assert not attempts, \"PACKAGE-MANAGER TRIPWIRE: \" + repr(attempts)\n", "            assert True\n", "tests/test_harness_tripwire_scope.py::test_an_unmarked_tests_own_attempt_still_fails_and_keeps_its_evidence[native]", id="review-tripwire-own-attempt-refuses"),
     pytest.param("tests/harness_pytest.py", "        os.environ[\"HARNESS_TRIPWIRE_LOG\"] = previous\n", "        pass\n", "tests/test_harness_tripwire_scope.py::test_aborted_scope_restores_the_parent_log", id="review-tripwire-parent-log-restored"),
+    # Review L7 MEDIUM / LOW: the write barrier's copy and truncate events, and every pip/npx spelling. One per clause;
+    # the anchors judge the sibling harness_isolation.py by file spec, so the mutated copy is what they read.
+    *[pytest.param("tests/harness_isolation.py", find, repl, "tests/test_harness_controls.py::" + test,
+                   id="review-l7-" + name) for name, find, repl, test in [
+        ("barrier-copyfile2", 'WRITE_EVENTS = {"_winapi.CopyFile2": 1, ', "WRITE_EVENTS = {",
+         "test_barrier_refuses_a_copy_or_truncate_outside_the_fixture"),
+        ("barrier-shutil-copyfile", '"shutil.copyfile": 1, "os.truncate": 0}', '"os.truncate": 0}',
+         "test_barrier_refuses_a_copy_or_truncate_outside_the_fixture"),
+        ("barrier-truncate", '"shutil.copyfile": 1, "os.truncate": 0}', '"shutil.copyfile": 1}',
+         "test_barrier_refuses_a_copy_or_truncate_outside_the_fixture"),
+        ("pip-attached-module", r'm = re.fullmatch(r"-[A-Za-z]*m(\S*)", t)', r'm = re.fullmatch(r"-m()", t)',
+         "test_every_package_manager_spelling_trips"),
+        ("pip-in-isolated-shell-string", "(no_site and pip_module(inner))", "False",
+         "test_every_package_manager_spelling_trips"),
+        ("pip-shell-string-needs-no-site", "(no_site and pip_module(inner))", "pip_module(inner)",
+         "test_ordinary_commands_do_not_trip"),
+        ("npx-cli", '("/npm-cli.js", "/npx-cli.js")', '("/npm-cli.js",)',
+         "test_every_package_manager_spelling_trips"),
+        ("npx-manager", "npm npx corepack", "npm corepack", "test_every_package_manager_spelling_trips"),
+    ]],
     pytest.param("tests/test_automod_docs_pinned.py", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".pytest_cache\", \".venv\", \"__pycache__\"}", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".venv\", \"__pycache__\"}", "tests/test_automod_docs_pinned.py::test_generated_caches_are_not_instruction_copies[.pytest_cache]", id="review-instruction-scan-ignores-pytestcache"),
     pytest.param("tests/test_automod_docs_pinned.py", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".pytest_cache\", \".venv\", \"__pycache__\"}", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".pytest_cache\", \"__pycache__\"}", "tests/test_automod_docs_pinned.py::test_generated_caches_are_not_instruction_copies[.venv]", id="review-instruction-scan-ignores-venv"),
     pytest.param("tests/test_automod_docs_pinned.py", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".pytest_cache\", \".venv\", \"__pycache__\"}", "SKIP_DIRS = {\".git\", \"node_modules\", \".superpowers\", \".pytest_cache\", \".venv\"}", "tests/test_automod_docs_pinned.py::test_generated_caches_are_not_instruction_copies[__pycache__]", id="review-instruction-scan-ignores-pycache"),
@@ -8645,6 +8768,12 @@ MUTATIONS.append(pytest.param(
     "tests/test_mutations.py", '    reason = _anchor_skipped_off_windows(returncode, stdout, platform=' + '"any")',   # split: unique
     '    reason = ""', "tests/test_mutations.py::test_a_skip_only_anchor_is_reported_unjudged_not_as_a_survivor",
     id="fixu-skip-only-anchor-reported-as-survivor"))
+# Review L7 LOW: a mutant leg that only skips after a PASSED pristine leg is a survivor, on every platform.
+MUTATIONS.append(pytest.param(
+    "tests/test_mutations.py", '        assert not why, (' + '"SURVIVOR: the anchor test PASSED',   # split: unique
+    '        assert True, (' + '"SURVIVOR: the anchor test PASSED',
+    "tests/test_mutation_measurement.py::test_existing_platform_skip_is_handled_before_report_qualification[mutant]",
+    id="mutant-only-skip-is-a-survivor"))
 
 # fix-unclear 4b (v4 regression vs 3.x): a write target held in a same-command literal is judged as its literal,
 # through the delete rules' Exec.subst. One twin per clause.

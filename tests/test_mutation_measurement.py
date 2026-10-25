@@ -136,7 +136,11 @@ def test_existing_platform_skip_is_handled_before_report_qualification(tmp_path,
         _report(Path(args[args.index("--junitxml") + 1]), "passed")
         return subprocess.CompletedProcess(args, 0, "1 passed in 0.1s\n", "")
     monkeypatch.setattr(instrument.subprocess, "run", run)
-    with pytest.raises(pytest.skip.Exception, match="skipped"):
+    # A pristine skip excuses the twin off Windows. A mutant-only skip after a PASSED pristine leg is the revert
+    # switching the check off: red on every platform (review L7 LOW).
+    expected = (pytest.raises(pytest.skip.Exception, match="skipped") if leg == "baseline"
+                else pytest.raises(AssertionError, match="SURVIVOR: .* only SKIPPED with this fix reverted"))
+    with expected:
         instrument.test_guard_actually_bites(tmp_path / "row", "value.py", "VALUE = 1",
                                              "VALUE = 2", "tests/test_owned.py::test_value")
     assert len(calls) == (1 if leg == "baseline" else 2)

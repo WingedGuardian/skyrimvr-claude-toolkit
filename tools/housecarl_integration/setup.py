@@ -37,6 +37,27 @@ def install_archive(archive, dest):
     return server, {p.name: sha(p) for p in server.parent.iterdir() if p.is_file()}
 
 
+def download_archive(archive, opener=None):
+    """Fetch the pinned archive to a unique part file, check its SHA256, and only then rename it to `archive`.
+    Review L5 F6: it was written straight to the final name, so an interrupted download stayed there, the next run
+    skipped the download, and every later setup failed on the hash. The part file is this run's own scratch, so it
+    is removed when the download fails; a complete download with the wrong hash is kept, renamed, and named."""
+    part = archive.with_name(archive.name + ".part-" + uuid.uuid4().hex)
+    try:
+        with (opener or urllib.request.urlopen)(ARCHIVE_URL, timeout=60) as src, part.open("xb") as dst:
+            shutil.copyfileobj(src, dst)
+    except BaseException:
+        if part.exists():
+            part.unlink()                                  # this run's own partial download
+        raise
+    if sha(part) != ARCHIVE_SHA256:
+        rejected = archive.with_name(archive.name + ".rejected-" + uuid.uuid4().hex)
+        os.replace(part, rejected)
+        raise Refusal("Downloaded House Carl archive does not match pinned 2.0.5; kept as " + str(rejected)
+                      + " for inspection, nothing extracted.")
+    os.replace(part, archive)
+
+
 def register(config, agents):
     import tomlkit
     root = Path(config["root"])
@@ -119,8 +140,10 @@ def setup(args):
     state.mkdir(parents=True, exist_ok=True)
     archive = Path(args.archive).resolve() if args.archive else state / "houseCARL-2.0.5.zip"
     if not args.archive and not archive.exists():
-        with urllib.request.urlopen(ARCHIVE_URL, timeout=60) as src, archive.open("xb") as dst:
-            shutil.copyfileobj(src, dst)
+        download_archive(archive)
+    elif not args.archive and sha(archive) != ARCHIVE_SHA256:
+        raise Refusal(str(archive) + " does not match pinned 2.0.5 (an interrupted earlier download?). Move it to "
+                      "the Recycle Bin and rerun setup to download it again; nothing extracted.")
     dest = state / "upstream" / (UPSTREAM_VERSION + "-" + uuid.uuid4().hex)
     server, hashes = install_archive(archive, dest)
     config = {"schema": 1, "root": str(root), "state_dir": str(state), "edition": args.edition,

@@ -4,6 +4,8 @@
 
 # Backups (generated at runtime)
 .claude/backups/
+# What the guard pruned from its own stores, waiting for housekeep's session sweep to send it to the Recycle Bin
+.claude/retired/
 
 # Node modules
 node_modules/

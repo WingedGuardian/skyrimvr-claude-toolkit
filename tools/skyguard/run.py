@@ -61,8 +61,8 @@ def _telemetry(a, v) -> None:
 
 
 def _session_line(a, session_id, tool="", source=None, transcript=None, hook=None) -> None:
-    """Per-session record for the canary's coverage check (health.py). Written BEFORE the engine decides, so a
-    call the engine denies still counts as seen. Never changes the verdict: any failure is swallowed."""
+    """Per-session record for the canary's coverage check (health.py). Claude roles write it BEFORE the engine
+    decides, so a call the engine denies still counts as seen; Codex writes it after (see _codex). Never changes the verdict: any failure is swallowed."""
     try:
         if not a.telemetry:
             return
@@ -207,8 +207,6 @@ def _codex(a, raw: str) -> int:
         _emit("SKYGUARD-OK\n" + codex.session_body(out))
         return 0
 
-    _session_line(a, req.session_id, tool=req.tool_name)
-
     def roots_fn():
         env = _declared_env(a)
         if env is None:
@@ -217,6 +215,10 @@ def _codex(a, raw: str) -> int:
 
     v = codes.classify(engine.pre_tool(req, a.project, roots_fn, audit, telemetry=a.telemetry,
                                        deadline=_recovery_deadline(), metadata=_receipt_identity(raw)))
+    # Recorded only once the engine has DECIDED (review L3 LOW-2). A crashed, killed or timed-out engine ends in the
+    # wrapper's failure deny, so the call leaves no transcript item; a line written before deciding, with no
+    # `refused` after it, counted that call as hooked and could mask a really unhooked call as HEALTHY.
+    _session_line(a, req.session_id, tool=req.tool_name)
     _telemetry(a, v)
     if v.decision != "allow":
         # A refused call leaves no item in the agent's transcript, so the canary must not count its hook

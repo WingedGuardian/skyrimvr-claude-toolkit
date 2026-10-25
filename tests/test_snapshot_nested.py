@@ -525,6 +525,27 @@ def test_pruning_keeps_the_blob_of_live_content_no_snapshot_holds_yet(tmp_path, 
     assert sha(b"a22") in blobs(tmp_path)
 
 
+def test_pruning_retires_what_it_removes_and_deletes_nothing(tmp_path, monkeypatch):
+    """Review L2 LOW-7: the user's Recycle Bin rule has no carve-out for the toolkit's own store. A pruned manifest,
+    blob and bash-era copy folder are moved whole into <project>/.claude/retired (housekeep recycles them)."""
+    full_maps(monkeypatch)
+    a = put(tmp_path, "Data/Scripts/a.pex", b"a1")
+    snap(tmp_path, now=at(40))
+    a.write_bytes(b"a22")
+    snap(tmp_path, now=at(30))
+    m1, _m2 = snapshot.manifest_names(store(tmp_path))
+    legacy = store(tmp_path) / "20200101_000000"
+    (legacy / "source").mkdir(parents=True)
+    (legacy / "source" / "x.psc").write_bytes(b"bash-era copy")
+    os.utime(str(legacy), (at(30),) * 2)
+    snapshot.prune(store(tmp_path), time.time(), audit_mod.Audit(str(tmp_path)))
+    assert not legacy.exists() and snapshot.manifest_names(store(tmp_path)) == [_m2]
+    moved = {p.name.split("-", 1)[1]: p for p in (tmp_path / ".claude" / "retired").glob("*/*")}
+    assert sorted(moved) == sorted([m1, sha(b"a1"), legacy.name])
+    assert (moved[legacy.name] / "source" / "x.psc").read_bytes() == b"bash-era copy"
+    assert moved[sha(b"a1")].read_bytes() == b"a1"
+
+
 def test_pruning_removes_only_stale_part_files(tmp_path):
     put(tmp_path, "Data/Scripts/a.pex", b"a1")
     snap(tmp_path)

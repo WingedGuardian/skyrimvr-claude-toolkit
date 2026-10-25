@@ -78,14 +78,22 @@ CPP_FIELD_RE = re.compile(r"^\s*(?P<field>Type|Info|Throw Location)\s*:\s*(?P<va
 
 # Signatures the knowledgebase has already ruled on. The status text is quoted
 # from it: a crash marked ACCEPTED must not quietly read as a new finding.
+# Keyed by (module, offset), never the offset alone (review L5 F8): an offset means nothing outside its module,
+# so `SomeModPlugin.dll+0B84F05` must not be told "ACCEPTED - do not re-investigate". The module also fixes the
+# runtime here: SkyrimVR.exe has one build (1.4.15), and an SE/AE crash names SkyrimSE.exe.
 KNOWN = {
-    "0B84F05": ("ACCEPTED", "Havok contact solver on a dangling rigid body "
+    ("skyrimvr.exe", "0B84F05"): ("ACCEPTED", "Havok contact solver on a dangling rigid body "
                             "(predator Havok CTD) -- KB: accepted, do not re-investigate"),
-    "0B67DCE": ("KNOWN", "Havok ragdoll add/remove during get-up (PLANCK/hdtSMP) "
+    ("skyrimvr.exe", "0B67DCE"): ("KNOWN", "Havok ragdoll add/remove during get-up (PLANCK/hdtSMP) "
                          "-- same family as 0B84F05"),
-    "093D04C": ("ACCEPTED", "Papyrus VM SkyrimScript::HandlePolicy::Func4 "
+    ("skyrimvr.exe", "093D04C"): ("ACCEPTED", "Papyrus VM SkyrimScript::HandlePolicy::Func4 "
                             "-- KB: accepted, do not change Papyrus memory INIs"),
 }
+
+
+def known(r):
+    """(status, note) for one parsed crash: ("UNKNOWN", "") unless its module AND offset have a ruling."""
+    return KNOWN.get((r["module"].lower(), r["offset"].upper()), ("UNKNOWN", ""))
 
 
 def parse(path: Path):
@@ -411,7 +419,7 @@ def main() -> int:
     for key, count in rows:
         shown += count
         r = detail[key]
-        status, note = KNOWN.get(r["offset"], ("UNKNOWN", ""))
+        status, note = known(r)
         tag = {"ACCEPTED": "[ACCEPTED - do not re-investigate]",
                "KNOWN": "[known]"}.get(status, "[** UNKNOWN **]")
         print(f"\n  {count} x  {key}   {tag}")
@@ -438,7 +446,7 @@ def main() -> int:
     print(f"  {sig_total} accounted   "
           f"[{'OK' if sig_ok else 'MISMATCH'} vs {len(parsed)} parsed crashes]")
 
-    unknown = sum(c for k, c in sigs.items() if detail[k]["offset"] not in KNOWN)
+    unknown = sum(c for k, c in sigs.items() if known(detail[k])[0] == "UNKNOWN")
     print(f"\n  known/accepted : {len(parsed) - unknown}")
     print(f"  UNKNOWN        : {unknown}   <-- the ones worth looking at")
 

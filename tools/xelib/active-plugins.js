@@ -106,7 +106,9 @@ function configuredLoadOrder() {
 }
 
 function readActivePlugins(pluginsTxt = defaultPluginsTxt()) {
-    const txt = fs.readFileSync(pluginsTxt, 'utf8');
+    // A UTF-8 BOM would make line 1 start with U+FEFF, not '*', silently dropping the first active plugin --
+    // a plausible, wrong load order (review L5 F9; House Carl's order.parse_plugins already strips it).
+    const txt = fs.readFileSync(pluginsTxt, 'utf8').replace(/^\uFEFF/, '');
     return txt.split(/\r?\n/)
         .filter(l => l.startsWith('*'))   // '*' marks an active plugin
         .map(l => l.slice(1).trim())

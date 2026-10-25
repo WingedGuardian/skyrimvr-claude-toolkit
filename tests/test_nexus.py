@@ -29,11 +29,18 @@ FAKE_CURL = r"""#!/usr/bin/env bash
 # Test stand-in for curl: answers from $FAKE_NEXUS_DIR, appends the -w status line, logs what it was asked.
 url=""; data=""; key=""; prev=""
 for a in "$@"; do
-    case "$prev" in --data-binary) data="$a" ;; -H) case "$a" in apikey:*) key="${a#apikey: }" ;; esac ;; esac
+    case "$prev" in
+        --data-binary) data="$a" ;;
+        -H) case "$a" in
+                apikey:*) key="${a#apikey: }" ;;
+                @-) while IFS= read -r line; do case "$line" in apikey:*) key="${line#apikey: }" ;; esac; done ;;
+            esac ;;
+    esac
     case "$a" in http*) url="$a" ;; esac
     prev="$a"
 done
 printf '%s\t%s\n' "$url" "$key" >> "$FAKE_CURL_LOG"
+printf '%s\n' "$*" >> "$FAKE_CURL_LOG.argv"
 [ -n "${FAKE_CURL_FAIL:-}" ] && exit 6
 case "$url" in
     */graphql) case "$data" in *"mods("*) f="${FAKE_FIND:-find.json}" ;; *) f="req.json" ;; esac ;;
@@ -231,6 +238,9 @@ def test_page_end_to_end_and_the_key_is_used_but_never_printed(kit):
     urls = [u for u, _ in calls(kit)]
     assert any(u.endswith("/mods/101.json") for u in urls) and any(u.endswith("/graphql") for u in urls)
     assert all(k == KEY for _, k in calls(kit)), "the key was not sent as the apikey header"
+    # Review L5 F10: sent, but never as a curl ARGUMENT (any same-user process can read a command line).
+    argv = (kit.parent.parent / "curl.log.argv").read_text(encoding="utf-8")
+    assert argv and KEY not in argv, argv
 
 
 def test_find_end_to_end(kit):

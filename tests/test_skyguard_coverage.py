@@ -367,9 +367,9 @@ def test_a_session_id_that_is_not_a_plain_name_writes_nothing(tmp_path):
     assert not (tmp_path / "escape.log").exists()
 
 
-def test_only_the_twenty_newest_session_files_are_kept(tmp_path):
+def test_only_the_twenty_newest_session_files_are_kept_and_the_rest_are_retired_not_deleted(tmp_path):
     import os
-    d = tmp_path / "hb"
+    d = _sessions(tmp_path, "codex")
     for i in range(25):
         assert health.session_record(d, "s{:02d}".format(i), "start", "startup", "p")
         f = d / "sessions" / "s{:02d}.log".format(i)
@@ -377,6 +377,9 @@ def test_only_the_twenty_newest_session_files_are_kept(tmp_path):
     health.prune_sessions(d)
     kept = sorted(p.stem for p in (d / "sessions").glob("*.log"))
     assert len(kept) == health.SESSIONS_KEEP == 20 and kept[0] == "s05" and kept[-1] == "s24"
+    # Review L3 LOW-3: an earlier run's log goes to <project>/.claude/retired (then the Recycle Bin), never unlinked.
+    retired = sorted(p.name.split("-", 1)[1] for p in (tmp_path / ".claude" / "retired").glob("*/*.log"))
+    assert retired == ["s{:02d}.log".format(i) for i in range(5)]
 
 
 def _run_engine(root: Path, argv, payload: dict):
@@ -465,6 +468,31 @@ def test_the_engine_records_a_refusal_in_the_session_line_and_an_allow_does_not(
         "command": "reg delete HKLM\\SOFTWARE\\WOW6432Node\\Bethesda Softworks /f"}))
     assert [ln.split()[1:] for ln in f.read_text(encoding="utf-8").splitlines()] == [
         ["pre-tool", "Bash"], ["pre-tool", "Bash"], ["refused", "Bash"]]
+
+
+def test_a_codex_call_whose_engine_crashed_is_not_counted_as_hooked(tmp_path, monkeypatch):
+    """Review L3 LOW-2: the wrapper turns a crashed or killed engine into a deny, so Codex records no transcript item
+    for that call. A `pre-tool` line written before the crash, with no `refused` after it, counted it as hooked and
+    could cover a really unhooked call in the same session."""
+    import argparse
+    from skyguard import run
+    root = _codex_root(tmp_path)
+    tele = _sessions(root, "codex")
+    a = argparse.Namespace(agent="codex", role="pre-tool", project=str(root), root=str(root),
+                           root_win=str(root).replace(chr(92), "/"), bash="bash", invocation="1.9-1",
+                           telemetry=str(tele), nonce="")
+
+    def crash(*_a, **_k):
+        raise RuntimeError("engine crashed mid-decision")
+    monkeypatch.setattr(run.engine, "pre_tool", crash)
+    raw = json.dumps({"session_id": SID, "transcript_path": "C:/t/r.jsonl", "cwd": a.root_win,
+                      "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "echo hi"}})
+    with pytest.raises(RuntimeError):
+        run._codex(a, raw)
+    f = tele / "sessions" / (SID + ".log")
+    counted = [ln for ln in (f.read_text(encoding="utf-8").splitlines() if f.exists() else [])
+               if ln.split()[1:2] == ["pre-tool"]]
+    assert counted == []
 
 
 def test_a_denied_call_is_still_recorded_as_seen(tmp_path):

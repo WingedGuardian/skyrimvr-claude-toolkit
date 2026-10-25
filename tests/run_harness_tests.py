@@ -7,6 +7,8 @@ import subprocess
 import sys
 import tempfile
 
+from harness_isolation import MANAGERS
+
 
 # The only inherited variables; everything else is scrubbed. TOOLKIT_REQUIRE_HARNESS must be here or
 # the "barriers are not active" check could never fire under the launcher. TOOLKIT_REQUIRE_NODE_DEPS likewise:
@@ -43,8 +45,7 @@ def main():
     work = Path(tempfile.mkdtemp(prefix="harness-", dir=root))
     binary = work / "bin"
     binary.mkdir()
-    managers = "winget choco scoop apt apt-get dnf pacman brew npm pip pip3 dotnet".split()
-    for name in managers:
+    for name in sorted(MANAGERS):           # one list, shared with the native check (harness_isolation.py)
         stub = binary / name
         stub.write_text('#!/bin/bash\n' +
                         'printf "%s %s\\n" "' + name + '" "$*" >> "$HARNESS_TRIPWIRE_LOG"\n' +
@@ -83,8 +84,8 @@ def main():
         quoted = "'" + Path(node).as_posix().replace("'", "'\\''") + "'"
         (binary / "node").write_text(
             '#!/bin/bash\nfor a in "$@"; do\n'
-            ' case "$a" in *npm-cli.js) echo "PACKAGE-MANAGER TRIPWIRE: node npm-cli.js" >&2; '
-            'echo "node npm-cli.js" >> "$HARNESS_TRIPWIRE_LOG"; exit 97;; esac\ndone\n'
+            ' case "$a" in *npm-cli.js|*npx-cli.js) echo "PACKAGE-MANAGER TRIPWIRE: node $a" >&2; '
+            'echo "node $a" >> "$HARNESS_TRIPWIRE_LOG"; exit 97;; esac\ndone\n'
             'exec ' + quoted + ' "$@"\n', newline="\n")
         (binary / "node").chmod(0o755)
     # Git Bash rewrites native PATH on startup; restore each subprocess's intended PATH inside Bash.
@@ -95,7 +96,8 @@ def main():
                          'export PATH="$HARNESS_TRIPWIRE_BIN:$PATH"\n', newline="\n")
     (work / "sitecustomize.py").write_text(
         "import os, sys\n"
-        "if '-m' in sys.orig_argv and any(x in ('pip', 'pip3') for x in sys.orig_argv):\n"
+        "from harness_isolation import pip_module\n"
+        "if pip_module(sys.orig_argv[1:]):\n"
         " with open(os.environ['HARNESS_TRIPWIRE_LOG'], 'a') as log: log.write('python -m pip\\n')\n"
         " os.write(2, b'PACKAGE-MANAGER TRIPWIRE: python -m pip\\n'); os._exit(97)\n"
         "from harness_isolation import install\ninstall()\n")
