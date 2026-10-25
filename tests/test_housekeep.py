@@ -436,6 +436,25 @@ def test_session_writes_its_state_even_when_the_sweep_fails(tmp_path, monkeypatc
     assert "temp sweep failed" in state.read_text(encoding="utf-8")
 
 
+def test_a_failed_retired_sweep_never_hides_temp_dirs_left_in_place(tmp_path, monkeypatch):
+    """review2 B-tools L3: the retired-store failure note used to suppress the temp sweep's LEFT IN PLACE note."""
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)   # conftest switches the sweep off for every test
+    cfg = sweep_cfg()
+    cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
+               sweep_every_hours=6)
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setattr(hk, "sweep_temp", lambda cfg: {"rows": {"recycled": 0, "failed": 2}})
+
+    def exploded(roots):
+        raise OSError("retired scan exploded")
+
+    monkeypatch.setattr(hk, "sweep_retired", exploded)
+    state = tmp_path / "state" / "note.txt"
+    assert hk.session(cfg, state) == 1
+    note = state.read_text(encoding="utf-8")
+    assert "retired-store sweep failed" in note and "2 could not be recycled and were LEFT IN PLACE" in note, note
+
+
 # --------------------------------------------------------------------------- accounting
 
 def test_report_rows_sum_to_every_byte_scanned(tree):
@@ -557,10 +576,10 @@ def _only(monkeypatch, trigger, tmp_path):
     monkeypatch.setattr(hk.subprocess, "run", no_shell)
 
 
-@pytest.mark.parametrize("trigger", ["PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT", "SKYGUARD_HOUSEKEEP_SWEEP"])
+@pytest.mark.parametrize("trigger", ["PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT"])
 def test_the_real_bin_refuses_under_the_test_harness(tmp_path, monkeypatch, trigger):
     """A test that forgot to inject a fake recycler must fail, never show the user a Windows dialog. Each trigger
-    alone: pytest, the contained launcher without pytest (HARNESS_FIXTURE_ROOT), the sweep switch."""
+    alone: pytest, the contained launcher without pytest (HARNESS_FIXTURE_ROOT)."""
     d = tmp_path / "x"
     d.mkdir()
     _only(monkeypatch, trigger, tmp_path)
@@ -570,14 +589,31 @@ def test_the_real_bin_refuses_under_the_test_harness(tmp_path, monkeypatch, trig
 
 
 def test_an_integration_test_opts_in_to_the_real_bin_explicitly(tmp_path, monkeypatch):
-    """HOUSEKEEP_REAL_BIN_IN_TESTS (shared with the health branch) is the one opt-in. The shell is stubbed to raise
-    here, so even this test never reaches the real bin: reaching the stub is the proof the refusal stepped aside."""
+    """HOUSEKEEP_REAL_BIN_IN_TESTS is the one opt-in (run.py's sweep launch guard reads it too). The shell is stubbed
+    to raise here, so even this test never reaches the real bin: reaching the stub is the proof the refusal stepped
+    aside."""
     d = tmp_path / "x"
     d.mkdir()
     _only(monkeypatch, "PYTEST_CURRENT_TEST", tmp_path)
     monkeypatch.setenv("HOUSEKEEP_REAL_BIN_IN_TESTS", "1")
     with pytest.raises(AssertionError, match="shell call ran"):
         hk.recycle([d])
+
+
+def test_the_users_sweep_switch_never_blocks_the_recycle_bin(tmp_path, monkeypatch, capsys):
+    """review2 B-tools L2 / C-docs L7: SKYGUARD_HOUSEKEEP_SWEEP=off is a user switch for the session sweep only. With
+    no test marker, `housekeep recycle` (and so apply and kb-guard's rotation) must reach the shell, not refuse with
+    "under the test harness". The shell is stubbed to raise: reaching it is the proof, and nothing is recycled."""
+    d = tmp_path / "x"
+    d.mkdir()
+    _only(monkeypatch, "SKYGUARD_HOUSEKEEP_SWEEP", tmp_path)
+    assert not hk.under_test_harness()
+    with pytest.raises(AssertionError, match="shell call ran"):
+        hk.recycle([d])
+    monkeypatch.setattr(hk, "DEFAULT_CONFIG", tmp_path / "no-config.json")
+    with pytest.raises(AssertionError, match="shell call ran"):
+        hk.main(["recycle", str(d)])
+    assert d.is_dir() and "test harness" not in capsys.readouterr().out
 
 
 def test_the_switch_turns_the_session_sweep_off(tmp_path, monkeypatch):

@@ -6,6 +6,8 @@
 The release workflow publishes only the tagged version's section as the release notes. Entries left under an
 `## Unreleased` heading ABOVE that section are therefore shipped in the code but missing from the notes (v4.0.0
 review L4a M4: a 201-line Unreleased section sat above the v4.0.0 heading). An empty Unreleased heading is fine.
+The tagged version's own heading must carry its date, not "unreleased": the heading ships in the zip's CHANGELOG
+and the release notes (v4.0.0 review2 C-docs L5: `## v4.0.0 — unreleased` passed).
 
 Exit 0 = the version's section exists and nothing populated sits above it; 1 = refused (the reason is printed);
 2 = bad usage or unreadable file.
@@ -31,6 +33,9 @@ def problem(text: str, version: str) -> str:
                 if populated:
                     return "CHANGELOG.md has entries under '{}' above the v{} section: fold them in first".format(
                         sorted(populated)[0], version)
+                if re.search(r"\bunreleased\b", title, flags=re.I):
+                    return "the v{} heading still says 'unreleased' (heading: {}): date it before tagging".format(
+                        version, line.strip())
                 return ""
             if re.match(r"^\[?unreleased\b", title, re.I):
                 section = title

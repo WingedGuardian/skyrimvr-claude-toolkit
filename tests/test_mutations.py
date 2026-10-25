@@ -7516,6 +7516,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # the payload checker's guard-manifest section, and a Plan 6 launcher in its required list.
     ("tools/check-release-payload.py", '            "adapter": check_adapter, "guards": check_guards, "shared-core": check_shared_core}',
      '            "adapter": check_adapter, "shared-core": check_shared_core}', _MM_RP + "[guard-file-edited]", "p6mm-payload-guards-section-dropped"),
+    ("tools/check-release-payload.py", '    ".claude/retired",', "", _MM_RP + "[retired-shipped]",
+     "rr2-payload-retired-store-allowed"),
     ("tools/check-release-payload.py", '    "tools/skydoctor",\n', "", _MM_RP + "[skydoctor-missing]",
      "p6mm-payload-skydoctor-not-required"),
 ]]
@@ -7676,17 +7678,34 @@ MUTATIONS += [
     pytest.param("tools/skyguard/run.py", "    if tool.is_file() and own and not off and not in_test:",
                  "    if tool.is_file() and own and not in_test:",
                  "tests/test_session_disk_note.py::test_the_switch_stops_the_session_sweep", id="sweep-switch-ignored"),
-    pytest.param("tools/housekeep.py", '    return (bool(os.environ.get("PYTEST_CURRENT_TEST")) or ',
-                 "    return (False or ",
+    pytest.param("tools/housekeep.py", '    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or ',
+                 "    return False or ",
                  "tests/test_housekeep.py::test_the_real_bin_refuses_under_the_test_harness[PYTEST_CURRENT_TEST]",
                  id="real-bin-under-pytest"),
-    pytest.param("tools/housekeep.py", ' or bool(os.environ.get("HARNESS_FIXTURE_ROOT"))\n            or sweep',
-                 ' or False\n            or sweep',
+    pytest.param("tools/housekeep.py", ' or bool(os.environ.get("HARNESS_FIXTURE_ROOT"))\n',
+                 ' or False\n',
                  "tests/test_housekeep.py::test_the_real_bin_refuses_under_the_test_harness[HARNESS_FIXTURE_ROOT]",
                  id="real-bin-under-launcher"),
-    pytest.param("tools/housekeep.py", "            or sweep_switched_off())", "            or False)",
-                 "tests/test_housekeep.py::test_the_real_bin_refuses_under_the_test_harness[SKYGUARD_HOUSEKEEP_SWEEP]",
-                 id="real-bin-under-switch"),
+    # review2 B-tools L2 / C-docs L7: the user's sweep switch must not make the bin refuse.
+    pytest.param("tools/housekeep.py",
+                 '    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or bool(os.environ.get("HARNESS_FIXTURE_ROOT"))\n',
+                 '    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or bool(os.environ.get("HARNESS_FIXTURE_ROOT"))'
+                 ' or sweep_switched_off()\n',
+                 "tests/test_housekeep.py::test_the_users_sweep_switch_never_blocks_the_recycle_bin",
+                 id="real-bin-refuses-under-the-user-switch"),
+    # ... and run.py's launch guard reads the same markers and opt-in: one twin per clause.
+    pytest.param("tools/skyguard/run.py", '    in_test = ((os.environ.get("PYTEST_CURRENT_TEST") or ',
+                 "    in_test = ((None or ",
+                 "tests/test_session_disk_note.py::test_a_sweep_is_launched_detached_outside_tests_and_never_inside_them"
+                 "[PYTEST_CURRENT_TEST]", id="sweep-launch-ignores-pytest"),
+    pytest.param("tools/skyguard/run.py", ' or os.environ.get("HARNESS_FIXTURE_ROOT"))\n',
+                 " or None)\n",
+                 "tests/test_session_disk_note.py::test_a_sweep_is_launched_detached_outside_tests_and_never_inside_them"
+                 "[HARNESS_FIXTURE_ROOT]", id="sweep-launch-ignores-launcher"),
+    pytest.param("tools/skyguard/run.py", '               and not os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"))',
+                 '               and not os.environ.get("SKYGUARD_SWEEP_IN_TESTS"))',
+                 "tests/test_session_disk_note.py::test_the_launch_guard_and_the_bin_refusal_read_the_same_markers",
+                 id="sweep-launch-own-opt-in"),
     pytest.param("tools/housekeep.py", '    if os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"):\n        return False',
                  '    if False:\n        return False',
                  "tests/test_housekeep.py::test_an_integration_test_opts_in_to_the_real_bin_explicitly",
@@ -7695,6 +7714,11 @@ MUTATIONS += [
                  "    if False:\n        raise RuntimeError",
                  "tests/test_housekeep.py::test_the_real_bin_refuses_under_the_test_harness[HARNESS_FIXTURE_ROOT]",
                  id="real-bin-never-refuses"),
+    # review2 B-tools L3: a retired-store failure must not hide the temp sweep's LEFT IN PLACE note.
+    pytest.param("tools/housekeep.py", '    if r["recycled"] or (r["failed"] and not temp_raised):',
+                 '    if r["recycled"] or (r["failed"] and not notes):',
+                 "tests/test_housekeep.py::test_a_failed_retired_sweep_never_hides_temp_dirs_left_in_place",
+                 id="session-retired-failure-hides-left-in-place"),
     pytest.param("tools/housekeep.py", "    if sweep_switched_off():\n        return 0", "    if False:\n        return 0",
                  "tests/test_housekeep.py::test_the_switch_turns_the_session_sweep_off", id="session-ignores-switch"),
     pytest.param("tools/housekeep.py", '            yield Path(e.path), "toolkit temp"',
@@ -7711,6 +7735,14 @@ MUTATIONS += [
                  "tests/test_housekeep.py::test_every_test_helper_switches_the_real_sweep_off", id="setup-smoke-sweep-on"),
     pytest.param("tools/verify-release.sh", "LANG=C.UTF-8 SKYGUARD_HOUSEKEEP_SWEEP=off)", "LANG=C.UTF-8)",
                  "tests/test_housekeep.py::test_every_test_helper_switches_the_real_sweep_off", id="verify-scrub-sweep-on"),
+    # review2 B-tools L1: the two maintainer scripts that run real hooks on a configured copy.
+    pytest.param("scripts/guard-latency.py", 'CLAUDE_PROJECT_DIR=str(inst), SKYGUARD_HOUSEKEEP_SWEEP="off")',
+                 "CLAUDE_PROJECT_DIR=str(inst))",
+                 "tests/test_guard_latency.py::test_every_timed_hook_runs_with_the_session_sweep_off",
+                 id="guard-latency-sweep-on"),
+    pytest.param("scripts/e2e-codex.py", '    os.environ["SKYGUARD_HOUSEKEEP_SWEEP"] = "off"\n', "    pass\n",
+                 "tests/test_e2e_codex_verdict.py::test_main_switches_the_session_sweep_off_for_every_hook_it_starts",
+                 id="e2e-codex-sweep-on"),
     # v4.0.0 review L4b M2: guard-latency timed dead hooks as fast ones and printed PASS. One twin per check.
     *[pytest.param("scripts/guard-latency.py", find, repl, "tests/test_guard_latency.py::" + test,
                    id="guard-latency-" + tid)
@@ -9980,18 +10012,39 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _CCR + "test_entries_above_the_tagged_section_refuse[entry-under-subheading]", "changelog-unreleased-never-populated"),
     ("scripts/check_changelog_release.py", "title, re.I):", "title, re.I) and False:",
      _CCR + "test_entries_above_the_tagged_section_refuse[entry]", "changelog-unreleased-not-recognised"),
+    ("scripts/check_changelog_release.py", '                if re.search(r"\\bunreleased\\b", title, flags=re.I):',
+     "                if False:", _CCR + "test_a_tagged_heading_that_still_says_unreleased_refuses",
+     "changelog-undated-tagged-heading-accepted"),
     (".github/workflows/release.yml", "          python -B scripts/check_changelog_release.py",
      "          true || python -B scripts/check_changelog_release.py",
      _CCR + "test_the_release_workflow_runs_the_check", "release-changelog-check-skipped"),
 ]]
+
+# review2 B-tools L4: the spike scripts send an earlier run's leftovers to the Recycle Bin; the scan reads calls.
+_L2S = "tests/test_layer2_spike_sandbox.py::"
+MUTATIONS += [
+    pytest.param("scripts/layer2-spike/compat_xelib.py", '        sandbox.recycle(DATA + "/Spike.esp")',
+                 '        os.remove(DATA + "/Spike.esp")', _L2S + "test_no_spike_script_deletes_outright",
+                 id="layer2-spike-esp-deleted-outright"),
+    pytest.param("tests/test_layer2_spike_sandbox.py", ' or node.func.attr in ("unlink", "rmdir"):', ":",
+                 _L2S + "test_the_outright_delete_scan_sees_every_spelling[Path(f).unlink()]",
+                 id="layer2-spike-scan-misses-path-unlink"),
+]
 
 # --- Issue 11: House Carl base-archive inputs ---------------------------------------------------------------------
 _HC = "tools/housecarl_integration/order.py"
 _HCT = "tests/test_housecarl.py::"
 MUTATIONS += [pytest.param(f, find, rep, _HCT + test, id="housecarl-archive-" + i) for i, f, find, rep, test in [
     ("game-root-ini-not-read", _HC,
-     '    applied = [("game-root", game_ini)] + [("user", user / n) for n in USER_INIS]',
-     '    applied = [("user", user / n) for n in USER_INIS]', "test_root_ini_base_archives_reach_the_backend[SE]"),
+     '    applied = [("game-root", game_ini), ("user", user / main)]',
+     '    applied = [("user", user / main)]', "test_root_ini_base_archives_reach_the_backend[SE]"),
+    ("vr-documents-skyrim-ini-applied", _HC, 'MAIN_INI = {"SE": "Skyrim.ini", "VR": "SkyrimVR.ini"}',
+     'MAIN_INI = {"SE": "Skyrim.ini", "VR": "Skyrim.ini"}', "test_only_the_editions_main_user_ini_is_applied[VR]"),
+    ("other-user-inis-not-marked", _HC,
+     '    unqualified = [("user", user / n) for n in USER_INIS if n != main] + [("custom"', '    unqualified = [("custom"',
+     "test_only_the_editions_main_user_ini_is_applied[SE]"),
+    ("mixed-files-not-marked", _HC, "    if len(mixed) > 1:", "    if False:",
+     "test_root_ini_base_archives_reach_the_backend[VR]"),
     ("user-key-does-not-override", _HC, '                lists[folded] = {"value": value, "source": str(path)}',
      '                lists.setdefault(folded, {"value": value, "source": str(path)})',
      "test_user_ini_precedence_and_explicit_override"),

@@ -79,16 +79,21 @@ retain upstream notices about those requirements before using a plugin in game.
 ## Archive discovery coverage
 
 [Issue 11](https://github.com/WingedGuardian/skyrimvr-claude-toolkit/issues/11) reported asset-absence
-results without a coverage warning when base archives were omitted. The gateway now resolves
-`sResourceArchiveList` and `sResourceArchiveList2` key by key: the game-root `Skyrim.ini` first, then
-the captured user or MO2 profile INIs, where a non-empty value overrides lower ones for that key only.
-On VR, `sVrResourceArchiveList` is added, falling back to `Skyrim_VR - Main.bsa`. The backend receives
-only these captured values. Every consulted INI, present or absent, is part of the input fingerprint,
-so a changed INI rejects the answer. Authority and INI files are never edited.
+results without a coverage warning when base archives were omitted. The pinned backend reads the
+whole first `Skyrim.ini` that lists archives, profile folder before game folder, and never merges
+files. The gateway writes that profile `Skyrim.ini` itself, so the backend reads exactly the lists
+reported in `context.archive_coverage.lists`. They are resolved from two INIs: the game-root
+`Skyrim.ini`, then the edition's main user INI (`Skyrim.ini` on SE, `SkyrimVR.ini` on VR, in the
+Documents folder or the MO2 profile), whose non-empty value overrides the root's for that key. On VR,
+`sVrResourceArchiveList` is added, falling back to `Skyrim_VR - Main.bsa`. Every consulted INI, present
+or absent, is part of the input fingerprint, so a changed INI rejects the answer. Authority and INI
+files are never edited.
 
-Some inputs are reported but not applied: an explicitly empty user value, `SkyrimCustom.ini`,
-plugin-named INIs, other VR archive keys, an MO2 profile without `LocalSettings=true`, or no base list
-at all. The engine's built-in defaults are not modelled. Any such input sets
+How the engine itself reads these INIs has not been measured. Anything the cited sources do not settle
+is reported but not applied: lists taken from both INIs at once (the per-key layering), `SkyrimPrefs.ini`,
+the other edition's main INI (a Documents `Skyrim.ini` on VR, a `SkyrimVR.ini` on SE), an explicitly
+empty user value, `SkyrimCustom.ini`, plugin-named INIs, other VR archive keys, an MO2 profile without
+`LocalSettings=true`, or no base list at all. The engine's built-in defaults are not modelled. Any such input sets
 `context.archive_coverage.complete` to false, lists the reason under `uncertain`, and makes the
 response's `absence_conclusive` false. Treat an absent asset as inconclusive then, even with
 `read_incomplete: false`.

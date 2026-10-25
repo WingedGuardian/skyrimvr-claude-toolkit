@@ -128,6 +128,7 @@ ABSENT_PATHS = (
     ".skyguard",
     "KNOWLEDGEBASE.local.md",
     ".claude/backups",
+    ".claude/retired",         # the guard stores' pruned batches awaiting the Recycle Bin
     ".claude/settings.local.json",
     "node_modules",
     ".venv",

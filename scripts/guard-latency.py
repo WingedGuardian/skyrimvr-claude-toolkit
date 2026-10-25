@@ -52,7 +52,9 @@ def main() -> int:
             r = json.loads(line)
             corpus[r["id"]] = r
     bash = git_bash()
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(inst))
+    # A configured copy holds its own tools/housekeep.py, so its session hook would launch a REAL sweep of the real
+    # temp dir on every timed run (review2 B-tools L1). A measurement never does.
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(inst), SKYGUARD_HOUSEKEEP_SWEEP="off")
     results, worst, failed = {}, 0.0, []
     for hook in ["protect-bash", "protect-files", "protect-mcp", "backup-before-edit", "snapshot-before-tool", "session-kb-guard"]:
         payloads = ([json.dumps(corpus[i]["payload"]).replace(GAME, game) for i in ROWS[hook]]

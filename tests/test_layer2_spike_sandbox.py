@@ -7,6 +7,7 @@ files, so the twin lives here rather than in test_mutations.py; Task 18 moves it
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import os
 import shutil
@@ -155,6 +156,30 @@ def test_a_leftover_the_bin_refuses_stays_and_stops_the_probe(box):
     assert left.is_dir()
 
 
-def test_no_spike_script_deletes_a_folder_outright():
+_OUTRIGHT = {("shutil", "rmtree"), ("os", "remove"), ("os", "unlink"), ("os", "rmdir"), ("os", "removedirs")}
+
+
+def _outright_deletes(source):
+    """Calls that delete outright: shutil.rmtree, os.remove/unlink/rmdir/removedirs, any `<x>.unlink(` / `.rmdir(`
+    (Path). Read from the AST, so a probe command held in a STRING (primitives.py D4 is the delete being measured
+    against a locked bed copy) and a docstring that quotes an fs.unlink are not calls (review2 B-tools L4)."""
+    hits = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            owner = node.func.value.id if isinstance(node.func.value, ast.Name) else None
+            if (owner, node.func.attr) in _OUTRIGHT or node.func.attr in ("unlink", "rmdir"):
+                hits.append("%s.%s (line %d)" % (owner or "<expr>", node.func.attr, node.lineno))
+    return hits
+
+
+def test_no_spike_script_deletes_outright():
     for p in SPIKE.parent.glob("*.py"):
-        assert "shutil.rmtree(" not in p.read_text(encoding="utf-8"), p.name
+        assert _outright_deletes(p.read_text(encoding="utf-8")) == [], p.name
+
+
+@pytest.mark.parametrize("call", ["shutil.rmtree(d)", "os.remove(f)", "os.unlink(f)", "Path(f).unlink()",
+                                  "p.unlink(missing_ok=True)", "os.rmdir(d)"])
+def test_the_outright_delete_scan_sees_every_spelling(call):
+    """Twin of the scan: each spelling is found, and the same text in a string is not."""
+    assert _outright_deletes("import os, shutil\n" + call + "\n")
+    assert _outright_deletes("x = %r\n" % call) == []
