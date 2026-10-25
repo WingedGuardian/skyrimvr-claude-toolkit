@@ -399,6 +399,7 @@ def test_off_windows_the_bin_leaves_everything_in_place_and_says_so(tmp_path, mo
     d = tmp_path / "leftover"
     d.mkdir()
     monkeypatch.setattr(hk, "has_recycle_bin", lambda: False)
+    monkeypatch.setenv("HOUSEKEEP_REAL_BIN_IN_TESTS", "1")      # past the test refusal, to the platform answer
 
     def no_shell(*a, **k):                     # never the real bin from a test, even if the platform check moved
         raise AssertionError("the Recycle Bin shell call ran")
@@ -543,23 +544,40 @@ def test_the_sweep_never_touches_another_projects_pytest_runs(tmp_path):
     assert not ours.exists() and [os.path.basename(p) for p in fake.got] == ["skyrim-harness-own001"]
 
 
-@pytest.mark.parametrize("trigger", ["HARNESS_FIXTURE_ROOT", "SKYGUARD_HOUSEKEEP_SWEEP"])
-def test_the_real_bin_refuses_under_the_test_harness(tmp_path, monkeypatch, trigger):
-    """A test that forgot to inject a fake recycler must fail, never show the user a Windows dialog."""
-    d = tmp_path / "x"
-    d.mkdir()
-    monkeypatch.delenv("HARNESS_FIXTURE_ROOT", raising=False)
-    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
-    monkeypatch.setenv(trigger, "off" if trigger == "SKYGUARD_HOUSEKEEP_SWEEP" else str(tmp_path))
+def _only(monkeypatch, trigger, tmp_path):
+    for k in ("HARNESS_FIXTURE_ROOT", "SKYGUARD_HOUSEKEEP_SWEEP", "PYTEST_CURRENT_TEST", "HOUSEKEEP_REAL_BIN_IN_TESTS"):
+        monkeypatch.delenv(k, raising=False)
+    if trigger:
+        monkeypatch.setenv(trigger, "off" if trigger == "SKYGUARD_HOUSEKEEP_SWEEP" else str(tmp_path))
     monkeypatch.setattr(hk, "has_recycle_bin", lambda: True)
 
     def no_shell(*a, **k):
-        raise AssertionError("the Recycle Bin shell call ran under the test harness")
+        raise AssertionError("the Recycle Bin shell call ran")
 
     monkeypatch.setattr(hk.subprocess, "run", no_shell)
-    with pytest.raises(RuntimeError, match="never used under the test harness"):
+
+
+@pytest.mark.parametrize("trigger", ["PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT", "SKYGUARD_HOUSEKEEP_SWEEP"])
+def test_the_real_bin_refuses_under_the_test_harness(tmp_path, monkeypatch, trigger):
+    """A test that forgot to inject a fake recycler must fail, never show the user a Windows dialog. Each trigger
+    alone: pytest, the contained launcher without pytest (HARNESS_FIXTURE_ROOT), the sweep switch."""
+    d = tmp_path / "x"
+    d.mkdir()
+    _only(monkeypatch, trigger, tmp_path)
+    with pytest.raises(RuntimeError, match="inject a fake recycler"):
         hk.recycle([d])
     assert d.is_dir()
+
+
+def test_an_integration_test_opts_in_to_the_real_bin_explicitly(tmp_path, monkeypatch):
+    """HOUSEKEEP_REAL_BIN_IN_TESTS (shared with the health branch) is the one opt-in. The shell is stubbed to raise
+    here, so even this test never reaches the real bin: reaching the stub is the proof the refusal stepped aside."""
+    d = tmp_path / "x"
+    d.mkdir()
+    _only(monkeypatch, "PYTEST_CURRENT_TEST", tmp_path)
+    monkeypatch.setenv("HOUSEKEEP_REAL_BIN_IN_TESTS", "1")
+    with pytest.raises(AssertionError, match="shell call ran"):
+        hk.recycle([d])
 
 
 def test_the_switch_turns_the_session_sweep_off(tmp_path, monkeypatch):

@@ -503,9 +503,13 @@ def sweep_switched_off() -> bool:
 
 
 def under_test_harness() -> bool:
-    """The toolkit's test launcher (tests/run_harness_tests.py sets HARNESS_FIXTURE_ROOT) or the switch above. A test
-    that needs a bin injects a fake recycler; the real one would show the user Windows dialogs."""
-    return bool(os.environ.get("HARNESS_FIXTURE_ROOT")) or sweep_switched_off()
+    """pytest, the toolkit's contained launcher without pytest (tests/run_harness_tests.py sets HARNESS_FIXTURE_ROOT),
+    or the switch above -- unless HOUSEKEEP_REAL_BIN_IN_TESTS opts a deliberate integration test in. A test that needs
+    a bin injects a fake recycler; the real one would show the user Windows dialogs (2026-10-20)."""
+    if os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"):
+        return False
+    return (bool(os.environ.get("PYTEST_CURRENT_TEST")) or bool(os.environ.get("HARNESS_FIXTURE_ROOT"))
+            or sweep_switched_off())
 
 
 def recycle(paths) -> dict:
@@ -513,12 +517,14 @@ def recycle(paths) -> dict:
     paths = [str(p) for p in paths]
     if not paths:
         return {}
+    # No test may reach the real bin; the guard sits at the one call that touches the shell, so a test that forgets
+    # its fake fails loudly instead of prompting the user.
+    if under_test_harness():
+        raise RuntimeError("housekeep.recycle refused under the test harness (pytest, HARNESS_FIXTURE_ROOT or "
+                           "SKYGUARD_HOUSEKEEP_SWEEP=off): inject a fake recycler (no real Recycle Bin)")
     if not has_recycle_bin():
         # No Recycle Bin implementation here (Windows only). Never a delete instead: every item stays, and says so.
         return {p: "no Recycle Bin on this platform: left in place" for p in paths}
-    if under_test_harness():
-        raise RuntimeError("refused: the real Recycle Bin is never used under the test harness (HARNESS_FIXTURE_ROOT "
-                           "or SKYGUARD_HOUSEKEEP_SWEEP=off); inject a fake recycler")
     # The shell's own delete, NOT Microsoft.VisualBasic's DeleteDirectory(..., 'OnlyErrorDialogs', ...): that UI option
     # suppresses confirmations, and the confirmation it suppresses is the one Windows shows when an item is too big for
     # the bin and would be destroyed instead. FOF_WANTNUKEWARNING (0x4000) brings exactly that prompt back while
