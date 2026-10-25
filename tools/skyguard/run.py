@@ -127,7 +127,9 @@ def _disk_note(project) -> str:
         note = ""
     tool = Path(__file__).resolve().parents[1] / "housekeep.py"
     # Only the INSTALLED toolkit's own housekeep.py: this run.py's copy, and only when the hook's project IS that
-    # toolkit. A hook run against any other folder (a test fixture, a copy) never launches a sweep of the real temp.
+    # toolkit. A hook run against any other folder (a test fixture) never launches a sweep of the real temp. A full
+    # copy of the toolkit used as its own project (a configured test install) IS that toolkit, so the helpers and
+    # measurement scripts that run hooks on one set SKYGUARD_HOUSEKEEP_SWEEP=off.
     try:
         own = (Path(project).resolve() / "tools" / "housekeep.py") == tool
     except OSError:

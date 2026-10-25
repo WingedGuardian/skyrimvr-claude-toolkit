@@ -7711,6 +7711,14 @@ MUTATIONS += [
                  "tests/test_housekeep.py::test_every_test_helper_switches_the_real_sweep_off", id="setup-smoke-sweep-on"),
     pytest.param("tools/verify-release.sh", "LANG=C.UTF-8 SKYGUARD_HOUSEKEEP_SWEEP=off)", "LANG=C.UTF-8)",
                  "tests/test_housekeep.py::test_every_test_helper_switches_the_real_sweep_off", id="verify-scrub-sweep-on"),
+    # review2 B-tools L1: the two maintainer scripts that run real hooks on a configured copy.
+    pytest.param("scripts/guard-latency.py", 'CLAUDE_PROJECT_DIR=str(inst), SKYGUARD_HOUSEKEEP_SWEEP="off")',
+                 "CLAUDE_PROJECT_DIR=str(inst))",
+                 "tests/test_guard_latency.py::test_every_timed_hook_runs_with_the_session_sweep_off",
+                 id="guard-latency-sweep-on"),
+    pytest.param("scripts/e2e-codex.py", '    os.environ["SKYGUARD_HOUSEKEEP_SWEEP"] = "off"\n', "    pass\n",
+                 "tests/test_e2e_codex_verdict.py::test_main_switches_the_session_sweep_off_for_every_hook_it_starts",
+                 id="e2e-codex-sweep-on"),
     # v4.0.0 review L4b M2: guard-latency timed dead hooks as fast ones and printed PASS. One twin per check.
     *[pytest.param("scripts/guard-latency.py", find, repl, "tests/test_guard_latency.py::" + test,
                    id="guard-latency-" + tid)

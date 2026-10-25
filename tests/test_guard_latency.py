@@ -6,6 +6,7 @@ printed `WORST p95 = 27 ms ... PASS` and exited 0.
 from __future__ import annotations
 
 import json
+import os
 import pytest
 
 import subprocess
@@ -36,6 +37,19 @@ def test_hooks_that_crash_fail_the_gate(tmp_path):
     r = _run(_install(tmp_path / "broken", "echo 'GUARD INERT: crashed' >&2; exit 3"))
     assert r.returncode == 1, r.stdout + r.stderr
     assert "FAILED RUN" in r.stdout and ": FAIL" in r.stdout, r.stdout
+
+
+def test_every_timed_hook_runs_with_the_session_sweep_off(tmp_path):
+    """review2 B-tools L1: a configured copy holds its own housekeep.py, so a timed session hook would launch a real
+    sweep of the real temp dir. The parent here has the switch REMOVED, as a maintainer's shell would."""
+    log = tmp_path / "sweep.log"
+    root = _install(tmp_path / "ok", 'printf "%s\\n" "${SKYGUARD_HOUSEKEEP_SWEEP:-unset}" >> "' + log.as_posix() + '"')
+    env = {k: v for k, v in os.environ.items() if k != "SKYGUARD_HOUSEKEEP_SWEEP"}
+    r = subprocess.run([sys.executable, "-B", str(SCRIPT), str(root), "--runs", "2"], capture_output=True,
+                       text=True, timeout=300, env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    seen = log.read_text(encoding="utf-8").split()
+    assert len(seen) == 2 * len(HOOKS) and set(seen) == {"off"}, seen
 
 
 def test_an_install_with_no_hooks_fails_the_gate(tmp_path):

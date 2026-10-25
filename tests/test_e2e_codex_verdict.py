@@ -1,6 +1,7 @@
 """Offline failure injection: never starts Codex or reads its trust configuration."""
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 
@@ -55,6 +56,15 @@ def test_a_hook_line_early_in_long_output_still_counts(e2e, monkeypatch):
     row = next(row for row in module.phase_a(root) if row["id"] == "A8-nogit")
     assert row["checks"]["no hook ran at all (residual R-subdir)"] is False, row["checks"]
     assert row["pass"] is False
+
+
+def test_main_switches_the_session_sweep_off_for_every_hook_it_starts(e2e, monkeypatch):
+    """review2 B-tools L1: setup.sh and codex exec inherit os.environ, and the copy holds its own housekeep.py."""
+    module, root = e2e
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
+    monkeypatch.setattr(sys, "argv", ["e2e-codex.py", "--report", str(root)])
+    assert module.main() == 0
+    assert os.environ.get("SKYGUARD_HOUSEKEEP_SWEEP") == "off"
 
 
 def test_main_uses_complete_checks_for_output_saved_results_and_exit(e2e, monkeypatch, capsys):

@@ -225,6 +225,9 @@ def main() -> int:
     g.add_argument("--report", action="store_true")
     ap.add_argument("path", nargs="?")
     a = ap.parse_args()
+    # Every hook this run starts (setup.sh, codex exec) inherits this: the copy holds its own tools/housekeep.py, so
+    # its session hook would otherwise launch a REAL sweep of the real temp dir (review2 B-tools L1).
+    os.environ["SKYGUARD_HOUSEKEEP_SWEEP"] = "off"
     if a.make:
         make(Path(a.make), a.git)
         return 0
