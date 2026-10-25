@@ -3509,7 +3509,7 @@ MUTATIONS += [
     for i, f, find, rep, row in _DEL_CLAUSES
 ]
 MUTATIONS.append(pytest.param(_DL, "    return _covers_kind(abs_path, roots)", '    return ""',
-    "tests/test_skyguard_deletes.py::test_protected_kind[c:/GOG Games-install]",
+    "tests/test_skyguard_deletes.py::test_protected_kind[c:/Synthetic Games-install]",
     id="rule-S-DEL-INSTALL-covers-ancestor"))
 MUTATIONS.append(pytest.param(   # a quoted `[x]` in the install's own name is literal, not a glob: still the install
     _DL, '                kind = protected_kind(lit, roots) if lit else ""', '                kind = ""',

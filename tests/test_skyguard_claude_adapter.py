@@ -96,7 +96,7 @@ def _run(role, payload, tmp_path, env_extra=None, args=None):
     env = dict(os.environ)
     env.update(env_extra or {})
     return subprocess.run(
-        [sys.executable, RUN, "claude", role, "--root", "C:/GOG Games/Fake", "--root-win", "C:" + chr(92) + "GOG Games" + chr(92) + "Fake",
+        [sys.executable, RUN, "claude", role, "--root", "C:/Synthetic Games/Fake", "--root-win", "C:" + chr(92) + "Synthetic Games" + chr(92) + "Fake",
          "--project", str(tmp_path)] + (args or []),
         input=payload.encode("utf-8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 
@@ -109,7 +109,7 @@ def test_run_protect_bash(tmp_path):
 
 
 def test_run_protect_files(tmp_path):
-    r = _run("protect-files", json.dumps({"tool_input": {"file_path": "C:/GOG Games/Fake/Data/a.esp"}}), tmp_path)
+    r = _run("protect-files", json.dumps({"tool_input": {"file_path": "C:/Synthetic Games/Fake/Data/a.esp"}}), tmp_path)
     assert r.returncode == 0 and json.loads(r.stdout) is not None
 
 
@@ -130,9 +130,9 @@ def test_run_nonascii_output_on_cp1252_console(tmp_path):
     env = {"PYTHONIOENCODING": "cp1252"}
     env_clean = dict(os.environ)
     env_clean.pop("PYTHONIOENCODING", None)
-    payload = json.dumps({"tool_input": {"command": "rm C:/GOG Games/Fake/caf\u00e9\ufffd\u2603.esp"}})
+    payload = json.dumps({"tool_input": {"command": "rm C:/Synthetic Games/Fake/caf\u00e9\ufffd\u2603.esp"}})
     r = subprocess.run(
-        [sys.executable, "-X", "utf8=0", RUN, "claude", "protect-bash", "--root", "C:/GOG Games/Fake",
+        [sys.executable, "-X", "utf8=0", RUN, "claude", "protect-bash", "--root", "C:/Synthetic Games/Fake",
          "--project", str(tmp_path)],
         input=payload.encode("utf-8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=dict(env_clean, **env))
@@ -143,7 +143,7 @@ def test_run_nonascii_output_on_cp1252_console(tmp_path):
 def test_run_nonascii_reason_roundtrips_as_utf8(tmp_path):
     env = dict(os.environ)
     env.pop("PYTHONIOENCODING", None)
-    payload = json.dumps({"tool_input": {"file_path": "C:/GOG Games/Fake/Data/caf\u00e9\ufffd.esp"}})
+    payload = json.dumps({"tool_input": {"file_path": "C:/Synthetic Games/Fake/Data/caf\u00e9\ufffd.esp"}})
     r = subprocess.run([sys.executable, "-X", "utf8=0", RUN, "claude", "protect-files", "--project", str(tmp_path)],
                        input=payload.encode("utf-8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     assert r.returncode == 0, r.stderr
@@ -249,7 +249,7 @@ def _decision(out):
     return out.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
 
 
-FAKE_ROOT = "C:/GOG Games/Fake"
+FAKE_ROOT = "C:/Synthetic Games/Fake"
 
 
 def test_monitor_fixture_command_is_extracted_with_the_unknown_dialect():

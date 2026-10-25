@@ -48,7 +48,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO, install_hooks, no_python_env
+from conftest import REPO, install_hooks, no_python_env, GAME_ROOT
 
 HOOKS = REPO / ".claude" / "hooks"
 BS = chr(92)
@@ -58,7 +58,7 @@ BS = chr(92)
 #: the real install root instead of matching the word "Skyrim" anywhere in a path, so a
 #: row naming some third directory would describe a place the hook has no reason to
 #: guard. One constant, used by the fixture and by every row, so the two cannot disagree.
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = GAME_ROOT
 GAMEW = GAME.replace("/", BS)
 
 
@@ -94,7 +94,7 @@ def project(tmp_path_factory):
     # the hook's own location, plus whatever setup.sh recorded here.
     #
     # In this fixture the hook's location is a pytest tmp dir, so without this file the
-    # rows below -- which assert about `C:/GOG Games/...` -- would describe a directory
+    # rows below -- which assert about GAME (the corpus's synthetic root) -- would describe a directory
     # the hook has no reason to guard, and every deletion row would (correctly) stop
     # denying. Writing it also means the configured-paths arm is exercised rather than
     # assumed; INSTALL_ROOT alone would never test it.

@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, GAME_ROOT, GAME_PARENT
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import rules  # noqa: E402
@@ -162,7 +162,7 @@ def _segments(command):
 
 # Folder basenames that contain spaces (a bare token split would shred them): naming the folder is naming a basename.
 # Explicit and short on purpose; anything longer than one of these names is a path and still counts as an echo.
-SPACED_BASENAMES = ("the elder scrolls v skyrim vr", "gog games", "my games", "skyrim vr")
+SPACED_BASENAMES = ("the elder scrolls v skyrim vr", GAME_PARENT[3:].lower(), "my games", "skyrim vr")
 
 
 # Task 12: a run of a rule's OWN fixed wording is not an echo, even when the command happens to contain the same words
@@ -296,17 +296,17 @@ def test_the_contract_check_can_fail():
     assert contract_problems("x", "a" * 201, cmd)
     # a basename quoted back is allowed even when it is long; a path-sized run is not
     longname = "x" * 40 + ".esp"
-    p = {"tool_input": {"file_path": "C:/GOG Games/Skyrim VR/Data/" + longname}}
+    p = {"tool_input": {"file_path": GAME_PARENT + "/Skyrim VR/Data/" + longname}}
     assert echoed_run("Blocked: " + longname + " is a plugin.", p) is None
-    assert echoed_run("Blocked: C:/GOG Games/Skyrim VR/Data/" + longname, p)
+    assert echoed_run("Blocked: " + GAME_PARENT + "/Skyrim VR/Data/" + longname, p)
     # a spaced folder basename is a basename; the path around it is not
-    q = {"tool_input": {"command": "delete C:/GOG Games/The Elder Scrolls V Skyrim VR/Data"}}
+    q = {"tool_input": {"command": "delete " + GAME_ROOT + "/Data"}}
     assert echoed_run("Blocked: deletes The Elder Scrolls V Skyrim VR here.", q) is None
-    assert echoed_run("Blocked: GOG Games/The Elder Scrolls V Skyrim VR/Data", q)
+    assert echoed_run("Blocked: " + GAME_ROOT[3:] + "/Data", q)
     # a rule's own wording is not an echo; a field value beside it still is (Task 12)
-    u = {"tool_input": {"command": "attrib -R x && python tools/skyguard lock unlock C:/GOG Games/Skyrim VR/Data/a.esm"}}
+    u = {"tool_input": {"command": "attrib -R x && python tools/skyguard lock unlock " + GAME_PARENT + "/Skyrim VR/Data/a.esm"}}
     assert echoed_run(rules.message("S-LIFT-RAW", file="a.esm"), u) is None
-    assert echoed_run(rules.RULES["S-LIFT-RAW"]["template"].format(file="C:/GOG Games/Skyrim VR/Data/a.esm"), u)
+    assert echoed_run(rules.RULES["S-LIFT-RAW"]["template"].format(file=GAME_PARENT + "/Skyrim VR/Data/a.esm"), u)
 
 
 def test_the_wrapper_exemption_does_not_widen():
@@ -318,8 +318,8 @@ def test_the_wrapper_exemption_does_not_widen():
     assert not _wrapper_exempt("payload-empty", good + "\nsecond")     # and not a longer message
     assert not _wrapper_exempt("payload-empty", "Blocked: something else.")
     # the exemption skips the shape check only, never the echo check
-    p = {"tool_input": {"command": "remove C:/GOG Games/The Elder Scrolls V Skyrim VR/Data"}}
-    echoing = good.replace("PreToolUse", "C:/GOG Games/The Elder Scrolls V Skyrim VR/Data")
+    p = {"tool_input": {"command": "remove " + GAME_ROOT + "/Data"}}
+    echoing = good.replace("PreToolUse", GAME_ROOT + "/Data")
     assert _wrapper_exempt("payload-x", echoing)                       # shaped like the wrapper text, so shape-exempt
     assert any("echoes" in x for x in contract_problems("payload-x", echoing, p))
 
@@ -338,10 +338,10 @@ def test_message_fields_are_basenames():
         if "{file}" not in r["template"]:
             continue
         seen += 1
-        for path in ("C:/GOG Games/The Elder Scrolls V Skyrim VR/Data/" + LONG_NAME,
-                     "C:" + chr(92) + "GOG Games" + chr(92) + "Data" + chr(92) + LONG_NAME):
+        for path in (GAME_ROOT + "/Data/" + LONG_NAME,
+                     "C:" + chr(92) + GAME_PARENT[3:] + chr(92) + "Data" + chr(92) + LONG_NAME):
             out = rules.message(rid, file=path, op="op", save="Save1", n=3)
-            assert LONG_NAME in out and "GOG Games" not in out and "Data/" + LONG_NAME not in out, rid
+            assert LONG_NAME in out and GAME_PARENT[3:] not in out and "Data/" + LONG_NAME not in out, rid
             assert "C:" not in out and chr(92) not in out, rid
             assert max(len(ln) for ln in out.split("\n")) <= 200, rid
     assert seen >= 3, seen

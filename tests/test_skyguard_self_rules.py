@@ -19,7 +19,7 @@ import sys
 
 import pytest
 
-from conftest import REPO, make_game, run_setup, scratch_dir
+from conftest import REPO, make_game, run_setup, scratch_dir, GAME_ROOT
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, codes, codex_rules, engine, paths, rules, self_rules, session, shell_rules, state  # noqa: E402
@@ -27,7 +27,7 @@ from skyguard import guard_hash, write_rules  # noqa: E402
 from skyguard.adapters import codex  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
 
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = GAME_ROOT
 SHELL = {"Bash": "bash", "PowerShell": "powershell"}
 NOHOME = scratch_dir("p6t12-nohome-")
 ENV0 = {"USERPROFILE": NOHOME, "HOME": NOHOME}

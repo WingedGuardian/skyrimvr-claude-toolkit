@@ -14,8 +14,10 @@ sys.path.insert(0, str(REPO / "tools"))
 from skyguard import paths, shellparse, targets  # noqa: E402
 
 BS = chr(92)
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
-GAMEN = "c:/GOG Games/The Elder Scrolls V Skyrim VR"
+# This module's OWN install fixture: a self-contained path-resolution test that replays no corpus row, so it spells
+# its root, and the 8.3/glob/UNC forms derived from it, as literals. Synthetic, never the real install.
+GAME = "C:/Synthetic Games/The Elder Scrolls V Skyrim VR"
+GAMEN = "c:/Synthetic Games/The Elder Scrolls V Skyrim VR"
 ENV = {"HOME": "/c/Users/me", "USERPROFILE": "C:" + BS + "Users" + BS + "me"}
 CWD_WIN = GAME.replace("/", BS)
 
@@ -101,13 +103,13 @@ def test_home_unset_is_none_not_relative():
     assert targets.resolve("$HOME/x", CWD_WIN, "bash", {}) is None
 
 
-@pytest.mark.parametrize("cwd", [CWD_WIN, GAME, "/c/GOG Games/The Elder Scrolls V Skyrim VR",
-                                 "/c/GOG Games/The Elder Scrolls V Skyrim VR/"])
+@pytest.mark.parametrize("cwd", [CWD_WIN, GAME, "/c/Synthetic Games/The Elder Scrolls V Skyrim VR",
+                                 "/c/Synthetic Games/The Elder Scrolls V Skyrim VR/"])
 @pytest.mark.parametrize("dialect", ["bash", "powershell", "cmd"])
 def test_relative_word_resolves_against_the_payload_cwd(cwd, dialect):
     word = w("Data/x") if dialect != "bash" else "Data/x"
     assert targets.resolve(word, cwd, dialect, ENV) == GAMEN + "/Data/x"
-    assert targets.resolve("../x", cwd, dialect, ENV) == "c:/GOG Games/x"
+    assert targets.resolve("../x", cwd, dialect, ENV) == "c:/Synthetic Games/x"
     assert targets.resolve(".", cwd, dialect, ENV) == GAMEN
 
 
@@ -161,7 +163,7 @@ def test_no_cd_uses_the_payload_cwd():
 
 
 @pytest.mark.parametrize("cmd,dialect", [
-    ("cd /c/GOG*/The*Skyrim*; rm -rf Data", "bash"),
+    ("cd /c/Synth*/The*Skyrim*; rm -rf Data", "bash"),
     ("cd '" + GAME[:-3] + "'*; rm -rf Data", "bash"),
     ("cd '" + GAME[:-3] + "'?R; rm -rf Data", "bash"),
     ("Set-Location '" + w(GAME[:-3]) + "*'; Remove-Item -Recurse Data", "powershell"),
@@ -197,8 +199,8 @@ ROOTS = paths.roots(GAME, "", {"SKYRIM_GAME_ROOT": GAME, "SKYRIM_CONFIG_DIR": "D
     (GAMEN + "/Data/x.esp", "install"),
     (GAMEN.upper(), "install"),
     (GAMEN, "install"),
-    ("c:/GOG Games/The Elder Scrolls V Skyrim VR2/x", "outside"),        # a sibling, not a child
-    ("c:/GOG Games", "outside"),
+    ("c:/Synthetic Games/The Elder Scrolls V Skyrim VR2/x", "outside"),        # a sibling, not a child
+    ("c:/Synthetic Games", "outside"),
     ("d:/profiles/default/skyrim.ini", "config"),
     ("c:/Users/me/Documents/My Games/Skyrim VR/SkyrimVR.ini", "config"),   # legacy literal, any Skyrim* folder
     ("c:/Users/me/Documents/My Games/SkyrimX", "config"),
@@ -243,30 +245,30 @@ def test_scratch_globs_are_validated_data():
 
 def test_roots_dirs_are_normalised_and_deduped(monkeypatch):
     monkeypatch.setattr(paths, "POSIX_HOST", False)
-    r = paths.roots("/c/GOG Games/The Elder Scrolls V Skyrim VR", CWD_WIN, {"SKYRIM_GAME_ROOT": GAME + "/"})
+    r = paths.roots("/c/Synthetic Games/The Elder Scrolls V Skyrim VR", CWD_WIN, {"SKYRIM_GAME_ROOT": GAME + "/"})
     assert r.install_dirs == (GAMEN,)
 
 
 # ------------------------------------------------------------------------------------------------ fix round 1
 # Adversarial review of Task 6 (plan5-t6-review/adv.py, adv2.py, cfg.py): every wrong row is a test here.
-PARENT = "C:/GOG Games"
+PARENT = "C:/Synthetic Games"
 
 
 @pytest.mark.parametrize("word,cwd,dialect", [
-    ("C:/GOG Games", GAME, "bash"),
-    ("C:/GOG Games/", GAME, "powershell"),
+    ("C:/Synthetic Games", GAME, "bash"),
+    ("C:/Synthetic Games/", GAME, "powershell"),
     ("C:/", GAME, "cmd"),
     ("/c", GAME, "bash"),
     ("/c/", GAME, "bash"),
     (".", PARENT, "bash"),
     ("..", GAME, "powershell"),
-    ("C:/GOG Games/*", GAME, "bash"),
-    ("C:/GOG*", GAME, "bash"),
-    ("C:/GOG Games/The Elder*", GAME, "powershell"),
-    ("C:/GOG Games/The Elder Scrolls V Skyrim V?", GAME, "cmd"),
-    ("C:/GOG Games/[T]he Elder Scrolls V Skyrim VR", GAME, "bash"),
-    ("C:/GOG Games/{The Elder Scrolls V Skyrim VR,x}", GAME, "bash"),
-    ("C:/GOG Games/{TES,The Elder Scrolls V Skyrim VR}", GAME, "bash"),
+    ("C:/Synthetic Games/*", GAME, "bash"),
+    ("C:/Synth*", GAME, "bash"),
+    ("C:/Synthetic Games/The Elder*", GAME, "powershell"),
+    ("C:/Synthetic Games/The Elder Scrolls V Skyrim V?", GAME, "cmd"),
+    ("C:/Synthetic Games/[T]he Elder Scrolls V Skyrim VR", GAME, "bash"),
+    ("C:/Synthetic Games/{The Elder Scrolls V Skyrim VR,x}", GAME, "bash"),
+    ("C:/Synthetic Games/{TES,The Elder Scrolls V Skyrim VR}", GAME, "bash"),
     ("*", PARENT, "bash"),
     ("The*", PARENT, "powershell"),
     ("D:/MO2", GAME, "bash"),
@@ -282,8 +284,8 @@ def test_a_path_that_contains_or_globs_a_protected_root_covers_it(word, cwd, dia
 
 
 @pytest.mark.parametrize("word,cwd", [
-    ("C:/GOG Games/Other", GAME), ("C:/GOG Games/Th?", GAME), ("C:/GOG Games/[X]he Elder Scrolls V Skyrim VR", GAME),
-    ("C:/GOG Games/{a,b}", GAME), ("C:/Temp/*", GAME), ("x*", PARENT), ("D:/MO2/other", GAME), ("/tmp/*", GAME),
+    ("C:/Synthetic Games/Other", GAME), ("C:/Synthetic Games/Th?", GAME), ("C:/Synthetic Games/[X]he Elder Scrolls V Skyrim VR", GAME),
+    ("C:/Synthetic Games/{a,b}", GAME), ("C:/Temp/*", GAME), ("x*", PARENT), ("D:/MO2/other", GAME), ("/tmp/*", GAME),
     ("//srv/share", GAME), (GAME + "/Data/x", GAME),
 ])
 def test_a_path_that_does_not_reach_a_protected_root_does_not_cover_it(word, cwd):
@@ -305,26 +307,26 @@ def test_covers_protected_is_linear_on_a_long_glob():
 
 
 @pytest.mark.parametrize("word", [
-    "C:/GOGGAM~1/THEELD~1/Data", "C:/GOGGAM~1/THEELD~1", "C:/GOG Games/THEELD~1", "c:/progra~2/x",
+    "C:/SYNTHE~1/THEELD~1/Data", "C:/SYNTHE~1/THEELD~1", "C:/Synthetic Games/THEELD~1", "c:/progra~2/x",
 ])
 def test_an_8dot3_short_name_is_unresolvable(word):
-    """IMPORTANT (item 2): the install's real short name is C:/GOGGAM~1/THEELD~1. It cannot be expanded without the
+    """IMPORTANT (item 2): the install's real short name is C:/SYNTHE~1/THEELD~1. It cannot be expanded without the
     filesystem, so it is unresolved (stricter), never "outside"."""
     for d in ("bash", "powershell", "cmd"):
         assert targets.resolve(word, GAME, d, ENV) is None, (word, d)
 
 
 def test_a_short_name_cwd_makes_relative_words_unresolvable():
-    assert targets.resolve("Data/x", w("C:/GOGGAM~1/THEELD~1"), "powershell", ENV) is None
-    assert targets.exec_cwd(_exec("rm x")[0], w("C:/GOGGAM~1/THEELD~1"), ENV) is None
+    assert targets.resolve("Data/x", w("C:/SYNTHE~1/THEELD~1"), "powershell", ENV) is None
+    assert targets.exec_cwd(_exec("rm x")[0], w("C:/SYNTHE~1/THEELD~1"), ENV) is None
 
 
 @pytest.mark.parametrize("word", [
-    w("//localhost/c$/GOG Games/The Elder Scrolls V Skyrim VR/Data"),
-    w("//127.0.0.1/C$/GOG Games/The Elder Scrolls V Skyrim VR"),
-    w("//?/UNC/localhost/c$/GOG Games/The Elder Scrolls V Skyrim VR"),
-    w("//BILLY/c$/GOG Games/The Elder Scrolls V Skyrim VR"),
-    w("Microsoft.PowerShell.Core/FileSystem:://localhost/c$/GOG Games/The Elder Scrolls V Skyrim VR"),
+    w("//localhost/c$/Synthetic Games/The Elder Scrolls V Skyrim VR/Data"),
+    w("//127.0.0.1/C$/Synthetic Games/The Elder Scrolls V Skyrim VR"),
+    w("//?/UNC/localhost/c$/Synthetic Games/The Elder Scrolls V Skyrim VR"),
+    w("//BILLY/c$/Synthetic Games/The Elder Scrolls V Skyrim VR"),
+    w("Microsoft.PowerShell.Core/FileSystem:://localhost/c$/Synthetic Games/The Elder Scrolls V Skyrim VR"),
 ])
 def test_a_loopback_admin_share_is_the_drive(word):
     env = dict(ENV, COMPUTERNAME="BILLY")
@@ -335,7 +337,7 @@ def test_a_loopback_admin_share_is_the_drive(word):
 
 def test_an_ipv6_loopback_admin_share_is_the_drive_in_cmd_and_unresolvable_in_powershell():
     """`[` is a PowerShell wildcard in a directory component, so there it is unresolved (stricter)."""
-    word = w("//[::1]/c$/GOG Games/The Elder Scrolls V Skyrim VR")
+    word = w("//[::1]/c$/Synthetic Games/The Elder Scrolls V Skyrim VR")
     assert targets.zone(targets.resolve(word, GAME, "cmd", ENV), ROOTS) == "install"
     assert targets.resolve(word, GAME, "powershell", ENV) is None
 
@@ -400,9 +402,9 @@ def test_a_root_with_literal_glob_characters_covers_itself():
     assert targets.covers_protected("e:/M{a,b}/ow", r)
 
 
-@pytest.mark.parametrize("word", ["{C:/GOG*,x}", "{x,C:/GOG Games}", "a{b,c/d}e", "{x,/c/GOG Games}"])
+@pytest.mark.parametrize("word", ["{C:/Synth*,x}", "{x,C:/Synthetic Games}", "a{b,c/d}e", "{x,/c/Synthetic Games}"])
 def test_a_brace_group_holding_a_separator_is_unresolvable(word):
-    """bash `{C:/GOG*,x}` expands to an ABSOLUTE path; read literally it looked relative (fix round 2)."""
+    """bash `{C:/Synth*,x}` expands to an ABSOLUTE path; read literally it looked relative (fix round 2)."""
     assert targets.resolve(word, GAME, "bash", ENV) is None
 
 

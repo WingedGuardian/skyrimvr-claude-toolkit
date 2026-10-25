@@ -212,7 +212,7 @@ def test_the_claude_hook_records_its_agent_and_session(tmp_path):
     f.write_text("x")
     payload = json.dumps({"tool_name": "Edit", "session_id": "sess-42", "tool_input": {"file_path": str(f)}})
     r = subprocess.run([sys.executable, str(REPO / "tools" / "skyguard" / "run.py"), "claude", "backup-before-edit",
-                        "--root", "C:/GOG Games/Fake", "--project", str(tmp_path)],
+                        "--root", "C:/Synthetic Games/Fake", "--project", str(tmp_path)],
                        input=payload.encode("utf-8"), capture_output=True, timeout=60)
     assert r.returncode == 0, r.stderr
     (m,) = manifest(tmp_path)

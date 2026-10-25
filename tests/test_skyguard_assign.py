@@ -13,12 +13,12 @@ import sys
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, GAME_ROOT
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import anchored, assign, audit, deletes, paths, shell_rules, shellparse  # noqa: E402
 
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = GAME_ROOT
 INSTALL = "C:/t7/Skyrim VR"
 SHELL = {"Bash": "bash", "PowerShell": "powershell"}
 BS = chr(92)

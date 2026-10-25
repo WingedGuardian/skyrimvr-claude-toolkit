@@ -54,7 +54,7 @@ sys.exit(1 if bad else 0)
 
 def make_install(tmp_path: Path, name: str = "install with space") -> Path:
     """A minimal install. The default name carries a SPACE on purpose: this
-    project's real root is `C:/GOG Games/The Elder Scrolls V Skyrim VR`, and a
+    project's real root is `C:/Synthetic Games/The Elder Scrolls V Skyrim VR`, and a
     guard that only works on space-free paths would be inert for its author."""
     root = tmp_path / name
     (root / "tools").mkdir(parents=True)

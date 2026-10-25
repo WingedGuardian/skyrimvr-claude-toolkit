@@ -13,12 +13,12 @@ import sys
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, GAME_ROOT, GAME_PARENT, GAME_SHORT
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, deletes, paths, shell_rules, shellparse  # noqa: E402
 
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = GAME_ROOT
 INSTALL = "C:/t7/Skyrim VR"           # stands in for the corpus's temp install (`<install>`)
 LAYOUT_ENV = {
     "declared": {"SKYRIM_GAME_ROOT": GAME},
@@ -185,9 +185,9 @@ R = paths.roots(INSTALL, "", LAYOUT_ENV["mo2"])
 
 
 @pytest.mark.parametrize("p,kind", [
-    ("c:/GOG Games/The Elder Scrolls V Skyrim VR/Data", "install"),
-    ("c:/GOG Games", "install"),                           # an ancestor (covers_protected)
-    ("c:/GOG*", "install"),
+    ("c" + GAME[1:] + "/Data", "install"),
+    ("c" + GAME_PARENT[1:], "install"),                    # an ancestor (covers_protected)
+    ("c" + GAME_PARENT[1:6] + "*", "install"),
     ("d:/MO2/mods/X", "mo2"),
     ("d:/MO2", "mo2"),
     ("c:/Users/u/Documents/My Games/Skyrim VR/x.ini", "config"),
@@ -201,9 +201,9 @@ def test_protected_kind(p, kind):
 
 @pytest.mark.parametrize("word,base,reaches", [
     ("/c/*/The*/Data", None, True),
-    ("C:/GOGGAM~1/THEELD~1/Data", None, True),
-    ("C:/GOGGAM~1", None, True),
-    ("*/Data", "c:/GOG Games", True),
+    (GAME_SHORT + "/Data", None, True),
+    (GAME_SHORT.rsplit("/", 1)[0], None, True),
+    ("*/Data", "c" + GAME_PARENT[1:], True),
     ("C:/*/Other*/Data", None, False),
     ("C:/PROGRA~1/x", None, False),
     ("$G/Data", None, False),
@@ -585,7 +585,7 @@ def test_a_find_that_deletes_nothing_protected_stays_allowed(shell, command):
 
 # ---- fix-unclear: a recursive search started ABOVE a protected root reaches its whole subtree; a name filter only
 # narrows which files match, so the verdict is the filterless control's.
-_ABOVE = "C:/GOG Games"                  # GAME's parent
+_ABOVE = GAME_PARENT                     # GAME's parent
 _FIND_ABOVE = [   # (id, shell, command, filterless control)
     ("find-name-delete", "bash", "find '" + _ABOVE + "' -name Skyrim.esm -delete", "find '" + _ABOVE + "' -delete"),
     ("find-iname-delete", "bash", "find '" + _ABOVE + "' -iname '*.esm' -delete", "find '" + _ABOVE + "' -delete"),
@@ -605,7 +605,7 @@ _FIND_ABOVE = [   # (id, shell, command, filterless control)
     # fix-limits 14: a cd whose folder is a same-command literal is followed like the literal cd
     ("find-after-variable-cd-above", "bash", 'D="' + _ABOVE + '"; cd "$D" && find . -name Skyrim.esm -delete',
      "cd '" + _ABOVE + "' && find . -delete"),
-    ("find-after-variable-subdir-cd-above", "bash", 'D="C:/"; cd "${D}GOG Games" && find . -name Skyrim.esm -delete',
+    ("find-after-variable-subdir-cd-above", "bash", 'D="C:/"; cd "${D}' + GAME_PARENT[3:] + '" && find . -name Skyrim.esm -delete',
      "cd '" + _ABOVE + "' && find . -delete"),
     ("ps-foreach-after-variable-set-location", "powershell",
      "$d = '" + _ABOVE + "'; Set-Location $d; Get-ChildItem . -Recurse -Filter Skyrim.esm | ForEach-Object { Remove-Item $_ }",

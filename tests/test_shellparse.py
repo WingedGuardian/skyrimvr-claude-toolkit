@@ -457,7 +457,7 @@ def test_program_normalisation(word, program):
 @pytest.mark.parametrize("cmd,cd", [
     ("cd /c/x && rm a", "/c/x"),
     ("cd /c/x; cd Data; rm a", "/c/x/Data"),
-    ("cd 'C:/GOG Games/x' && rm a", "C:/GOG Games/x"),
+    ("cd 'C:/Synthetic Games/x' && rm a", "C:/Synthetic Games/x"),
     ("cd && rm a", "~"),
     ("cd - && rm a", "?"),
     ("cd $X && rm a", "?"),
@@ -900,7 +900,7 @@ def test_r1_wsl_and_watch_run_their_words_as_bash(shell):
 def test_r1_wsl_management_and_quoted_words(shell):
     """Found re-pricing fix round 1: wsl's words keep their quoting (never re-joined), and a management flag runs
     nothing in Linux."""
-    vhdx = '"C:/GOG Games/Mods/1)Distro-1/ext4.vhdx"'
+    vhdx = '"C:/Synthetic Games/Mods/1)Distro-1/ext4.vhdx"'
     for cmd in ("wsl --import D C:/x " + vhdx + " 2>&1", "wsl --import-in-place D " + vhdx, "wsl --shutdown"):
         p = parse(cmd, shell)
         assert p.ok and [e.program for e in p.execs] == ["wsl"], (cmd, p)

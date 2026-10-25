@@ -30,6 +30,21 @@ REPO = Path(__file__).resolve().parent.parent
 os.environ["SKYGUARD_HOUSEKEEP_SWEEP"] = "off"
 BIN = Path(__file__).resolve().parent / "bin"
 BS = chr(92)  # backslash, spelled this way to keep escapes out of this file
+# THE install path of the guard corpus and of every test that replays or extends its rows: tests/guard_corpus/
+# game-root.txt is the one place it is defined. It is SYNTHETIC (no machine this suite runs on has it, which
+# tests/test_no_real_install_path.py asserts), so no verdict can depend on what is on the host's disk. It keeps a space
+# in a folder name and an 8.3-shaped parent, the shapes the delete rules parse. Never spell it as a literal in a test.
+GAME_ROOT = (REPO / "tests" / "guard_corpus" / "game-root.txt").read_text(encoding="utf-8").strip()
+GAME_PARENT = GAME_ROOT.rsplit("/", 1)[0]
+
+
+def short_name(component: str) -> str:
+    """The first 8.3 short name Windows would give a long folder name (`Synthetic Games` -> `SYNTHE~1`)."""
+    return "".join(c for c in component if c.isalnum())[:6].upper() + "~1"
+
+
+# The install's 8.3 spelling, drive kept: C:/SYNTHE~1/THEELD~1.
+GAME_SHORT = GAME_ROOT[:3] + "/".join(short_name(c) for c in GAME_ROOT[3:].split("/"))
 
 
 def _resolve_bash() -> str:

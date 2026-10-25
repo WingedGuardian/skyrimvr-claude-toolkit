@@ -21,8 +21,8 @@ RUN = str(REPO / "tools" / "skyguard" / "run.py")
 
 def _run(payload, tmp_path):
     r = subprocess.run(
-        [sys.executable, RUN, "claude", "protect-bash", "--root", "C:/GOG Games/Fake",
-         "--root-win", "C:" + chr(92) + "GOG Games" + chr(92) + "Fake", "--project", str(tmp_path)],
+        [sys.executable, RUN, "claude", "protect-bash", "--root", "C:/Synthetic Games/Fake",
+         "--root-win", "C:" + chr(92) + "Synthetic Games" + chr(92) + "Fake", "--project", str(tmp_path)],
         input=json.dumps(payload).encode("utf-8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=dict(os.environ))
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)
@@ -51,7 +51,7 @@ def test_run_still_allows_an_ordinary_command(tmp_path):
 @pytest.mark.parametrize("cmd", ["   \n\t", " ", "\n\n"])
 def test_decide_denies_a_whitespace_only_command(cmd, tmp_path):
     a = audit.Audit(str(tmp_path))
-    roots = paths.Roots("C:/GOG Games/Fake", "C:/GOG Games/Fake")
+    roots = paths.Roots("C:/Synthetic Games/Fake", "C:/Synthetic Games/Fake")
     v = shell_rules.decide(cmd, roots, a)
     assert v.decision == "deny" and v.reason == rules.RULES["S-INERT-NOCMD"]["template"]
     assert ("S-INERT-NOCMD", "deny") in a.fired
