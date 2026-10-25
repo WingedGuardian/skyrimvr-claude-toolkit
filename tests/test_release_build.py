@@ -136,6 +136,24 @@ def test_the_maintainer_superpowers_tree_is_excluded_but_cited_evidence_ships(tm
     assert root + "docs/evidence/m.md" in names and root + "docs/superpowers.md" in names
 
 
+def test_the_maintainer_review_scope_note_is_excluded_and_its_siblings_ship(tmp_path):
+    """Final sweep 2026-10-25: docs/REVIEW-SCOPE.md is maintainer-only, like docs/superpowers/; other docs ship."""
+    repo = _repo(tmp_path)
+    paths = ("docs/REVIEW-SCOPE.md", "docs/REVIEW-SCOPE.md.txt", "docs/RETENTION.md")
+    for rel in paths:
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x\n")
+    _git(repo, "add", "--", *paths)
+    _git(repo, "commit", "-q", "-m", "maintainer note")
+    result, output = _build(repo, "HEAD", "--version", "1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    names = _names(_zip(output))
+    root = "skyrim-ai-assistant-toolkit-1/"
+    assert root + "docs/REVIEW-SCOPE.md" not in names, names
+    assert root + "docs/REVIEW-SCOPE.md.txt" in names and root + "docs/RETENTION.md" in names
+
+
 def test_the_layer2_spike_folder_is_excluded_by_prefix_not_its_siblings(tmp_path):
     """scripts/layer2-spike/ (developer-only Layer 2 lock probes) stays in the repo and out of the zip. The rule is
     a PATH PREFIX (the folder itself, or anything under it), never a top-level name: scripts/ still ships, and a
@@ -269,7 +287,7 @@ def test_the_excludes_are_one_list_the_tests_can_read():
     spec.loader.exec_module(mod)
     assert set(mod.EXCLUDE) == {"tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests",
                                 "scripts/guard-corpus", "scripts/guard-latency.py",
-                                "docs/superpowers"}, mod.EXCLUDE
+                                "docs/superpowers", "docs/REVIEW-SCOPE.md"}, mod.EXCLUDE
 
 
 @pytest.mark.parametrize("args", [[], ["HEAD"], ["HEAD", "out", "--bogus"]])

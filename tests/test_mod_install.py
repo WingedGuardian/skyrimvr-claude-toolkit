@@ -172,6 +172,20 @@ def test_an_existing_config_gets_a_new_file_beside_it(tmp_path, sevenz, game):
     assert ini.with_name("ExampleFramework.ini.new").read_bytes() == b"theirs=1\n"
 
 
+def test_a_kept_config_identical_to_the_archive_gets_no_new_file_and_is_still_recorded(tmp_path, sevenz, game):
+    """Install 86c18ca: a .new identical to the kept config is only a file to merge-check for nothing."""
+    ini = game / "Data" / "SKSE" / "Plugins" / "ExampleFramework.ini"
+    ini.write_bytes(b"theirs=1\n")
+    r = run(archive(tmp_path, ENTRIES), "--apply", env=env_for(tmp_path, sevenz, game))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert ini.read_bytes() == b"theirs=1\n"
+    assert not ini.with_name("ExampleFramework.ini.new").exists(), "a .new identical to the kept config was written"
+    assert "CONFIG-SAME" in r.stdout
+    manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
+    assert "{}  {}".format(hashlib.sha256(b"theirs=1\n").hexdigest(), ini) in manifest, manifest
+    assert "# STATUS: complete, 5 file(s), 0 verify mismatch(es)" in manifest, manifest
+
+
 def test_generated_json_data_is_replaced_but_a_real_config_is_still_kept(tmp_path, sevenz, game):
     # PBR patcher instructions and Light Placer JSONs are mod data, not the user's settings: the later install
     # (or a PGPatcher run) must win. A .new beside them left the earlier mod's copy live (SMIM PBR, 2026-10-19).

@@ -126,7 +126,8 @@ def test_a_snapshot_of_a_live_database_is_not_recreatable_but_still_deduplicated
 
 # --------------------------------------------------------------------------- the Forever class, each with a twin
 
-@pytest.mark.parametrize("rel", ["t/after/Saves/x.ess", "t/after/Saves/x.skse", "t/permanent-backups/Skyrim.esm"])
+@pytest.mark.parametrize("rel", ["t/after/Saves/x.ess", "t/after/Saves/x.skse", "t/permanent-backups/Skyrim.esm",
+                                 "t/known-good-2026-10-01-pre-stagger/Skyrim.esm", "t/logs/AUDIT_LOG.txt"])
 def test_saves_and_backup_folders_are_never_planned(tree, rel):
     f = write(tree / "_CLAUDE_OUTPUT" / rel, blob("master"))
     twin = write(tree / "_CLAUDE_OUTPUT" / "t" / "plain" / "Skyrim.esm", blob("master"))
@@ -144,6 +145,27 @@ def test_a_file_a_project_doc_links_to_is_never_planned(tree):
     assert key(twin) in planned(doc)
 
 
+@pytest.mark.parametrize("spelling", ["literal", "percent", "backslash"])
+def test_a_linked_path_with_spaces_and_parentheses_is_still_evidence(tree, spelling):
+    """Sweep 2026-10-25 (X4 34133b7): discovery stopped at the first space or ')', so this file lost its protection."""
+    rel = "_CLAUDE_OUTPUT/Mod (v2) notes/fixture/Skyrim.esm"
+    linked = write(tree / rel, blob("master"))
+    twin = write(tree / "_CLAUDE_OUTPUT" / "u" / "fixture" / "Skyrim.esm", blob("master"))
+    shown = {"literal": rel, "percent": rel.replace(" ", "%20").replace("(", "%28").replace(")", "%29"),
+             "backslash": rel.replace("(", "\\(").replace(")", "\\)")}[spelling]
+    (tree / "CLAUDE.md").write_text("[evidence]({}). Next line.\n".format(shown), encoding="utf-8")
+    doc = hk.plan(cfg_for(tree))
+    assert key(linked) not in planned(doc)
+    assert key(twin) in planned(doc)
+
+
+def test_evidence_discovery_past_its_bound_refuses_instead_of_truncating(tree):
+    write(tree / "_CLAUDE_OUTPUT" / "t" / "fixture" / "Skyrim.esm", blob("master"))
+    (tree / "CLAUDE.md").write_text("_CLAUDE_OUTPUT/" + "x" * 40000 + "\n", encoding="utf-8")
+    with pytest.raises(hk.ProtectionUnavailable, match="too long"):
+        hk.plan(cfg_for(tree))
+
+
 def test_a_git_tracked_file_is_never_planned(tree):
     tracked = write(tree / "_CLAUDE_OUTPUT" / "t" / "fixture" / "Skyrim.esm", blob("master"))
     twin = write(tree / "_CLAUDE_OUTPUT" / "u" / "fixture" / "Skyrim.esm", blob("master"))
@@ -152,6 +174,52 @@ def test_a_git_tracked_file_is_never_planned(tree):
     doc = hk.plan(cfg_for(tree))
     assert key(tracked) not in planned(doc)
     assert key(twin) in planned(doc)
+
+
+def _git_answers(monkeypatch, rc, stderr=b"", raises=None):
+    real = subprocess.run
+
+    def fake(cmd, *a, **k):
+        if cmd[:1] == ["git"] and "ls-files" in cmd:
+            if raises:
+                raise raises
+            return subprocess.CompletedProcess(cmd, rc, b"", stderr)
+        return real(cmd, *a, **k)
+
+    monkeypatch.setattr(hk.subprocess, "run", fake)
+
+
+@pytest.mark.parametrize("failure", ["dubious-ownership", "git-missing"])
+def test_a_git_failure_in_a_repository_refuses_instead_of_unprotecting_tracked_files(tree, monkeypatch, capsys,
+                                                                                       failure):
+    """Sweep 2026-10-25 (X4 679bc4a): any git failure used to return an empty set, so every tracked file silently
+    lost its protection. Now nothing is planned, and the command says why."""
+    write(tree / "_CLAUDE_OUTPUT" / "t" / "fixture" / "Skyrim.esm", blob("master"))
+    (tree / ".git").mkdir()
+    if failure == "dubious-ownership":
+        _git_answers(monkeypatch, 128, b"fatal: detected dubious ownership in repository at '/x'")
+    else:
+        _git_answers(monkeypatch, 0, raises=FileNotFoundError("git"))
+    with pytest.raises(hk.ProtectionUnavailable):
+        hk.plan(cfg_for(tree))
+    cfg_for(tree)
+    conf = json.loads((tree / "hk.json").read_text(encoding="utf-8"))
+    conf["root"] = str(tree)                      # the CLI reads the root from the file, not from the fixture
+    (tree / "hk.json").write_text(json.dumps(conf), encoding="utf-8")
+    assert hk.main(["--config", str(tree / "hk.json"), "plan", "-o", str(tree / "plan.json")]) == 1
+    assert "REFUSED" in capsys.readouterr().err and not (tree / "plan.json").exists()
+
+
+@pytest.mark.parametrize("case", ["not-a-repository", "no-git-no-repository"])
+def test_a_plain_folder_has_no_tracked_files_and_is_still_planned(tree, monkeypatch, case):
+    """The twin: a root that is not in any git work tree has nothing tracked, and that is not a failure."""
+    monkeypatch.setattr(hk, "_in_git_work_tree", lambda root: False)
+    if case == "not-a-repository":
+        _git_answers(monkeypatch, 128, b"fatal: not a git repository (or any of the parent directories): .git")
+    else:
+        _git_answers(monkeypatch, 0, raises=FileNotFoundError("git"))
+    write(tree / "_CLAUDE_OUTPUT" / "t" / "fixture" / "Skyrim.esm", blob("master"))
+    assert planned(hk.plan(cfg_for(tree)), "recreatable")
 
 
 def test_an_active_task_folder_is_skipped_whole(tree):
@@ -222,6 +290,66 @@ def test_duplicates_become_one_read_only_copy_with_every_path_intact(tree):
     assert not os.access(b, os.W_OK)
     again = hk.plan(cfg)
     assert not planned(again, "link"), "linked files must not be planned a second time"
+
+
+@pytest.mark.parametrize("side", ["canonical", "duplicate"])
+def test_a_file_hard_linked_from_outside_is_never_linked_or_made_read_only(tree, side):
+    """A mod manager deploys by hard link: a fixture copy can share its inode with a live Data/ file. The read-only
+    attribute housekeep sets on a duplicate set changes EVERY name of the inode, so that one would change too."""
+    import stat
+    a = write(tree / "_CLAUDE_OUTPUT" / "a" / "x.log", blob("dup"))
+    b = write(tree / "_CLAUDE_OUTPUT" / "b" / "x.log", blob("dup"))
+    outside = tree / "Mods" / "deployed.log"            # not under any configured root: nothing knows whose it is
+    outside.parent.mkdir()
+    os.link(a if side == "canonical" else b, outside)
+    before = outside.stat().st_mode
+    cfg = cfg_for(tree)
+    doc = hk.plan(cfg)
+    assert not planned(doc, "link"), "a file with another name outside housekeep's view was planned for linking"
+    assert hk.apply(doc, cfg, recycler=FakeBin(tree)) == 0
+    assert outside.stat().st_mode == before and os.access(outside, os.W_OK)
+    assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(before)
+
+
+def test_a_hard_link_made_after_the_plan_is_refused_before_any_chmod(tree):
+    a = write(tree / "_CLAUDE_OUTPUT" / "a" / "x.log", blob("dup"))
+    write(tree / "_CLAUDE_OUTPUT" / "b" / "x.log", blob("dup"))
+    cfg = cfg_for(tree)
+    doc = hk.plan(cfg)
+    assert planned(doc, "link")
+    outside = tree / "Mods" / "deployed.log"
+    outside.parent.mkdir()
+    os.link(a, outside)
+    assert hk.apply(doc, cfg, recycler=FakeBin(tree)) == 1
+    assert os.access(outside, os.W_OK), "apply made a live file's inode read-only"
+
+
+@pytest.mark.parametrize("side", ["canonical", "duplicate"])
+def test_check_refuses_a_link_whose_files_gained_a_name_after_the_plan(tree, side):
+    a = write(tree / "_CLAUDE_OUTPUT" / "a" / "x.log", blob("dup"))
+    b = write(tree / "_CLAUDE_OUTPUT" / "b" / "x.log", blob("dup"))
+    cfg = cfg_for(tree)
+    doc = hk.plan(cfg)
+    (action,) = [x for x in doc["actions"] if x["class"] == "link"]
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time()) == ""
+    outside = tree / "Mods" / "deployed.log"
+    outside.parent.mkdir()
+    os.link(a if side == "canonical" else b, outside)
+    assert "hard-linked elsewhere" in hk.check(action, cfg, hk.Guard(cfg), time.time())
+
+
+@pytest.mark.parametrize("side", ["canonical", "duplicate"])
+def test_link_itself_refuses_a_file_with_an_unexpected_name(tree, side):
+    """The choke point: link() re-checks the count at the moment it acts, whatever check() said."""
+    a = write(tree / "_CLAUDE_OUTPUT" / "a" / "x.log", blob("dup"))
+    b = write(tree / "_CLAUDE_OUTPUT" / "b" / "x.log", blob("dup"))
+    outside = tree / "Mods" / "deployed.log"
+    outside.parent.mkdir()
+    os.link(a if side == "canonical" else b, outside)
+    action = {"class": "link", "path": str(b), "canonical": str(a), "hash": hk.blake(a), "bytes": a.stat().st_size}
+    with pytest.raises(OSError, match="hard-linked elsewhere"):
+        hk.link(action)
+    assert os.access(outside, os.W_OK) and os.stat(b).st_ino != os.stat(a).st_ino
 
 
 # --------------------------------------------------------------------------- apply re-proves the plan
@@ -310,7 +438,7 @@ def test_a_snapshot_repeating_the_previous_one_is_planned_and_distinct_and_newes
 
 # ------------------------------------------------- whole-folder classes still answer to the Forever class (L4a M2)
 
-@pytest.mark.parametrize("inner", ["Save1.ess", "pair.skse", "backups/pair.txt"])
+@pytest.mark.parametrize("inner", ["Save1.ess", "pair.skse", "backups/pair.txt", "known-good/ok.psc", "AUDIT_LOG.txt"])
 def test_a_scratch_folder_holding_a_save_or_a_backup_is_never_planned(tree, inner):
     bed = tree / "scratchbed"
     write(bed / "plain.txt", b"x")
@@ -413,10 +541,83 @@ def test_off_windows_the_bin_leaves_everything_in_place_and_says_so(tmp_path, mo
 def test_the_recycle_command_reports_every_path_the_bin_refused(tmp_path, monkeypatch, capsys):
     """kb-guard's rotation reads this output (one OK / FAILED line per path); a refusal must never print OK."""
     taken, refused = str(tmp_path / "taken"), str(tmp_path / "refused")
+    monkeypatch.setattr(hk, "_temp_root", lambda: hk._real(tmp_path))   # the paths sit where retention may recycle
+    os.mkdir(taken)
+    os.mkdir(refused)
     monkeypatch.setattr(hk, "recycle", lambda paths: {p: None if p == taken else "too big" for p in paths})
     monkeypatch.setattr(hk, "DEFAULT_CONFIG", tmp_path / "no-config.json")
     assert hk.main(["recycle", taken, refused]) == 1
     assert capsys.readouterr().out.splitlines() == ["OK\t" + taken, "FAILED\t" + refused + "\ttoo big"]
+
+
+# --------------------------------------------------------------------------- the recycle command's own refusals
+
+@pytest.fixture
+def door(tree, monkeypatch):
+    """A tree whose temp folder is elsewhere, so the temp allowance cannot excuse every path under tmp_path."""
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.setattr(hk, "_temp_root", lambda: hk._real(tree / "systemp"))
+    (tree / "systemp").mkdir()
+    return tree, cfg_for(tree, scratch=["bed"])
+
+
+REFUSED = {
+    "the-root": (lambda t: t, "install root"),
+    "above-the-root": (lambda t: t.parent, "install root"),
+    "a-drive-root": (lambda t: __import__("pathlib").Path(t.anchor), "drive or filesystem root"),
+    "the-home-folder": (lambda t: __import__("pathlib").Path.home(), "home folder"),
+    "a-saves-folder": (lambda t: _mk(t / "_CLAUDE_OUTPUT/t/Saves/x.txt").parent, "Saves folder"),
+    "holds-a-save": (lambda t: _mk(t / "_CLAUDE_OUTPUT/t/copy/Save1.ess").parent, "holding one"),
+    "outside-the-allowed-roots": (lambda t: _mk(t / "Data/meshes/x.nif"), "outside the folders"),
+    "the-agent-output-root-itself": (lambda t: _mk(t / "_CLAUDE_OUTPUT/keep.txt").parent, "outside the folders"),
+    "a-backup-folder": (lambda t: _mk(t / "_CLAUDE_OUTPUT/t/backups/a.txt").parent, "backup folder"),
+    "a-known-good-baseline": (lambda t: _mk(t / "_CLAUDE_OUTPUT/known-good-1/a.psc").parent, "known-good"),
+    "holds-the-audit-log": (lambda t: _mk(t / "_CLAUDE_OUTPUT/t2/logs/AUDIT_LOG.txt").parent.parent, "Forever file"),
+    "missing": (lambda t: t / "_CLAUDE_OUTPUT/nothing-here", "does not exist"),
+}
+ALLOWED = {
+    "agent-output-task": lambda t: _mk(t / "_CLAUDE_OUTPUT/t3/notes.md").parent,
+    "kb-snapshot": lambda t: _mk(t / ".claude/backups/kb/20261001-000000/KNOWLEDGEBASE.md").parent,
+    "retired-batch": lambda t: _mk(t / ".claude/retired/batch-1/x.psc").parent,
+    "scratch-folder-itself": lambda t: _mk(t / "bed/x.txt").parent,
+    "temp-child": lambda t: _mk(t / "systemp/skyrim-harness-1/x.txt").parent,
+}
+
+
+def _mk(p):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"x")
+    return p
+
+
+@pytest.mark.parametrize("case", sorted(REFUSED))
+def test_the_recycle_command_refuses_what_retention_never_removes(door, case):
+    """Sweep 2026-10-25 (X4 6bf11a9): `housekeep recycle PATH` passed anything to the shell's delete."""
+    tree, cfg = door
+    make, why = REFUSED[case]
+    target = make(tree)
+    assert why in hk.recycle_refusal(cfg, target), (case, hk.recycle_refusal(cfg, target))
+
+
+@pytest.mark.parametrize("case", sorted(ALLOWED))
+def test_the_recycle_command_still_takes_the_rolling_stores_and_agent_output(door, case):
+    tree, cfg = door
+    assert hk.recycle_refusal(cfg, ALLOWED[case](tree)) == ""
+
+
+def test_a_refused_path_never_reaches_the_bin_and_the_rest_still_goes(door, monkeypatch, capsys):
+    tree, cfg = door
+    conf = json.loads((tree / "hk.json").read_text(encoding="utf-8"))
+    conf["root"] = str(tree)
+    (tree / "hk.json").write_text(json.dumps(conf), encoding="utf-8")
+    ok = str(ALLOWED["kb-snapshot"](tree))
+    bad = str(REFUSED["holds-a-save"][0](tree))
+    sent = []
+    monkeypatch.setattr(hk, "recycle", lambda paths: sent.extend(paths) or {p: None for p in paths})
+    assert hk.main(["--config", str(tree / "hk.json"), "recycle", ok, bad]) == 1
+    assert sent == [ok], "a refused path was handed to the Recycle Bin"
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "OK\t" + ok and out[1].startswith("FAILED\t" + bad + "\trefused: ")
 
 
 def test_session_writes_its_state_even_when_the_sweep_fails(tmp_path, monkeypatch):

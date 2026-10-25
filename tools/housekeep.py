@@ -14,21 +14,24 @@ that repeat the one before. The policy this tool implements is docs/RETENTION.md
     python tools/housekeep.py session STATE.txt   sweep-temp, recycle settled .claude/retired batches (what the guard
                                                   pruned from its own stores), then write the session note to STATE.txt
     python tools/housekeep.py recycle PATH...     send exactly these paths to the Recycle Bin (OK/FAILED per path)
+                                                  (only what retention may remove: see recycle_refusal)
     --config FILE   default <toolkit>/.claude/housekeep.json (.claude/housekeep.json.example ships)
 
 Two passes, never one: `plan` decides, `apply` re-verifies. An action whose file changed since it was planned
 (size, hash, a newer write in its task folder) is REFUSED, not re-decided -- run `plan` again.
 
-What it never touches, whatever the config says: saves (.ess/.skse) and anything under a folder whose name
-contains "backup"; git-tracked files; every file a project doc links to; and any task folder written to within
-`active_hours` (another session is probably still working there).
+What it never touches, whatever the config says: saves (.ess/.skse), anything under a folder whose name contains
+"backup", known-good* baselines and AUDIT_LOG.txt; git-tracked files; every file a project doc links to; and any task folder written to within
+`active_hours` (another session is probably still working there). When git cannot say which files are tracked in a
+root that is in a work tree, `report`, `plan` and `apply` refuse (exit 1) instead of planning without that protection.
 
 Removal goes to the Recycle Bin, never a permanent delete, with no exceptions (Windows: the shell's own delete with
 FOF_ALLOWUNDO). An item too big for the bin gets Windows' own "delete permanently?" prompt; "No" leaves it in place.
 The bin frees no disk space until it is emptied; that is the user's call. A file the bin refuses is reported
 FAILED and left in place; off Windows there is no Recycle Bin implementation, so every removal is reported that way.
 The whole-folder classes (launch, snapshot, scratch) keep a folder whole when any file in it is protected. Duplicates are not removed at all: they become NTFS hard links to one copy, marked
-read-only so an in-place edit cannot silently change every path at once.
+read-only so an in-place edit cannot silently change every path at once. A file that already has another name (a mod
+manager's hard-link deployment shares the inode with a live Data/ file) is never linked or made read-only.
 
 Accounting: `report` and `plan` print every scanned byte in exactly one row, the rows sum to the total, and the
 row of bytes it leaves alone prints even at zero.
@@ -51,6 +54,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import unquote
 
 TOOLKIT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = TOOLKIT_ROOT / ".claude" / "housekeep.json"
@@ -92,7 +96,6 @@ DEFAULTS = {
 }
 LAUNCH_RE = re.compile(r"^launch-(\d{8})-(\d{6})$")
 STAMP_RE = re.compile(r"^(\d{8})_(\d{6})$")
-LINK_TAIL = r"/[^)\s\]\"'`<>|]+"
 GIB = 1024 ** 3
 
 
@@ -158,13 +161,32 @@ def fingerprint(folder: Path):
     return [n, size, round(newest, 3)]
 
 
+class ProtectionUnavailable(OSError):
+    """A Forever rule could not be evaluated. Nothing is planned or applied: a rule that silently evaluates to "nothing
+    is protected" is the one failure this tool must never have."""
+
+
+def _in_git_work_tree(root: Path) -> bool:
+    p = Path(os.path.abspath(str(root)))
+    return any((q / ".git").exists() for q in (p, *p.parents))
+
+
 def tracked_files(root: Path) -> set:
+    """Every git-tracked file under root. Fails CLOSED (ProtectionUnavailable) when git cannot answer for a root that
+    is in a work tree -- dubious ownership, a broken index, a timeout, no runnable git -- instead of returning an empty
+    set that switches the git-tracked protection off without a word (sweep 2026-10-25; X4 679bc4a)."""
     try:
         out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, timeout=120)
-    except (OSError, subprocess.SubprocessError):
-        return set()
+    except (OSError, subprocess.SubprocessError) as e:
+        if isinstance(e, OSError) and not _in_git_work_tree(root):
+            return set()                         # no git, and no repository either: nothing here is tracked
+        raise ProtectionUnavailable("git-tracked protection unavailable ({}: {})".format(type(e).__name__, e)) from e
     if out.returncode != 0:
-        return set()
+        err = out.stderr.decode("utf-8", "replace").strip()
+        if "not a git repository" in err.lower():
+            return set()                         # a plain folder: nothing here is tracked
+        raise ProtectionUnavailable("git-tracked protection unavailable (git ls-files exit {}: {})".format(
+            out.returncode, err[:300] or "no message"))
     return {_key(root / p) for p in out.stdout.decode("utf-8", "replace").split("\0") if p}
 
 
@@ -182,14 +204,35 @@ def evidence_links(cfg) -> set:
             prefixes.append(re.escape(rel.replace("\\", "/")))
     if not prefixes:
         return links
-    link_re = re.compile("(?:{})".format("|".join(prefixes)) + LINK_TAIL)
+    start_re = re.compile("(?:{})/".format("|".join(prefixes)), re.I if os.name == "nt" else 0)
+    budget = 8 * 1024 * 1024
     for doc in cfg["evidence_docs"]:
         p = _abs(cfg, doc)
         if not p.is_file():
             continue
-        for m in link_re.findall(p.read_text(encoding="utf-8", errors="replace")):
-            m = m.rstrip(".,;:*")
-            links.add(_key(cfg["root"] / m))
+        text = p.read_text(encoding="utf-8", errors="replace")
+        # Conservative reference discovery, not a Markdown parser (sweep 2026-10-25; X4 34133b7, c6d4760). A link may
+        # hold spaces and parentheses (`_CLAUDE_OUTPUT/Mod (v2) notes/x.md`), so every cut of the rest of the line at a
+        # delimiter is a candidate: stopping at the FIRST space or ')' silently lost evidence. Literal, %-escaped and
+        # backslash-escaped spellings can all name a real file. Too many candidates refuses rather than truncates.
+        views = {text, unquote(text)}
+        views |= {re.sub(r"\\([!\"#$%&'()*+,./:;<=>?@\[\]^_`{|}~\\-])", r"\1", s) for s in tuple(views)}
+        for view in views:
+            for line in view.splitlines():
+                for start in start_re.finditer(line):
+                    tail = line[start.start():]
+                    if len(tail) > 32768:
+                        raise ProtectionUnavailable("an evidence reference line in {} is too long to read safely".format(
+                            doc))
+                    ends = [i for i, ch in enumerate(tail) if ch.isspace() or ch in ")]\"'`<>|.,;:*"]
+                    for end in ends + [len(tail)]:
+                        candidate = tail[:end]
+                        if candidate:
+                            budget -= len(candidate)
+                            links.add(_key(cfg["root"] / candidate))
+                    if budget < 0 or len(links) > 50000:
+                        raise ProtectionUnavailable("evidence references in {} exceed the safe discovery bound".format(
+                            doc))
     return links
 
 
@@ -214,6 +257,13 @@ class Guard:
         except ValueError:                       # another drive: no relative form, judge the whole path
             rel = p
         rel_parts = rel.replace("\\", "/").lower().split("/")
+        # docs/RETENTION.md's Forever names, in code: a known-good baseline (a folder or file named known-good*) and the
+        # toolkit's audit log. Judged below the root, like "backup", so a root named that way does not protect all.
+        named = rel_parts if not rel.startswith("..") else low.split("/")
+        if any(part.startswith("known-good") for part in named):
+            return "known-good baseline"
+        if named[-1] == "audit_log.txt":
+            return "audit log"
         if not rel.startswith(".."):
             if any("backup" in part for part in rel_parts[:-1]):
                 return "backup folder"
@@ -348,6 +398,15 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
     live = live_index(cfg) if tasks else {}
     live_hash = {}
     by_size = {}
+
+    def queue_duplicate(f, task, size, digest=None):
+        # A chmod changes every name of an inode. A file that already has another name may share it with a live
+        # Data/ file a mod manager deployed by hard link (Vortex, MO2): whose file that is, nothing here can tell.
+        if f.stat().st_nlink != 1:
+            count("kept: already hard-linked elsewhere (ownership unknown)", size)
+        else:
+            by_size.setdefault(size, []).append((f, task, digest))
+
     for task, state in tasks:
         for f in walk_files(task):
             try:
@@ -381,10 +440,10 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                     act({"class": "recreatable", "path": str(f), "bytes": size, "hash": h,
                                     "live": match, "task": str(task)}, "plan: copy of a live file -> Recycle Bin")
                     continue
-                by_size.setdefault(size, []).append((f, task, h))
+                queue_duplicate(f, task, size, h)
                 continue
             if size >= cfg["min_bytes"]:
-                by_size.setdefault(size, []).append((f, task, None))
+                queue_duplicate(f, task, size)
                 continue
             count("kept: below min_bytes / not duplicated", size)
 
@@ -567,6 +626,84 @@ def recycle(paths) -> dict:
     return result
 
 
+# `housekeep recycle PATH...` is a shell door to the Recycle Bin (kb-guard's rotation uses it), so it takes only
+# what this toolkit's own retention may remove (docs/RETENTION.md), never a path a mistyped argument could name:
+#   allowed  strictly inside one of the rolling tool stores (<root>/.claude/retired, .claude/backups/kb,
+#            .claude/backups/auto_snapshots), a configured agent_output / launch_logs / legacy_snapshots root, a
+#            named scratch folder (or that folder itself), or the system temp folder; <root> is the toolkit root
+#            and $CLAUDE_PROJECT_DIR (kb-guard's own root rule)
+#   refused  anything else, and whatever the allow rule says: a drive or filesystem root, the home folder, the toolkit
+#            or install root or a folder above it, a link or reparse point, a Saves folder or anything inside one, a
+#            save (.ess/.skse) or a folder holding one, and a Forever name (a *backup* folder below the allowed root,
+#            known-good*, AUDIT_LOG.txt)
+REPARSE_POINT = 0x400                 # FILE_ATTRIBUTE_REPARSE_POINT (a junction is one)
+ROLLING_STORES = (Path(".claude") / "retired", Path(".claude") / "backups" / "kb",
+                  Path(".claude") / "backups" / ROLLING_SNAPSHOT_STORE)
+
+
+def _real(p) -> Path:
+    return Path(os.path.realpath(os.path.abspath(str(p))))
+
+
+def _strictly_inside(child: Path, parent: Path) -> bool:
+    return os.path.normcase(str(parent)) != os.path.normcase(str(child)) and \
+        os.path.normcase(str(parent)) in {os.path.normcase(str(a)) for a in child.parents}
+
+
+def _temp_root() -> Path:
+    return _real(tempfile.gettempdir())
+
+
+def recycle_refusal(cfg, path) -> str:
+    """Why the `recycle` command will not send this path to the Recycle Bin, or "" when it may."""
+    p = Path(os.path.abspath(str(path)))
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return "does not exist"
+    if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & REPARSE_POINT:
+        return "a link or reparse point"
+    real = _real(p)
+    if real.parent == real:
+        return "a drive or filesystem root"
+    if os.path.normcase(str(real)) == os.path.normcase(str(_real(Path.home()))):
+        return "the home folder"
+    bases = [_real(cfg["root"]), _real(TOOLKIT_ROOT)]
+    if os.environ.get("CLAUDE_PROJECT_DIR"):
+        bases.append(_real(os.environ["CLAUDE_PROJECT_DIR"]))
+    for b in bases:
+        if os.path.normcase(str(b)) == os.path.normcase(str(real)) or _strictly_inside(b, real):
+            return "the toolkit or install root, or a folder above it"
+    if any(part.lower() == "saves" for part in real.parts):
+        return "a Saves folder or inside one"
+    for f in walk_files(real):
+        if str(f).lower().endswith(SAVE_EXTS):
+            return "a save or a folder holding one ({})".format(f.name)
+    allowed = [(b / s, False) for b in bases for s in ROLLING_STORES]
+    allowed += [(_real(_abs(cfg, r)), False) for k in ("agent_output", "launch_logs", "legacy_snapshots")
+                for r in cfg[k]]
+    allowed += [(_real(_abs(cfg, r)), True) for r in cfg["scratch"]]
+    allowed.append((_temp_root(), False))
+    home = None
+    for root, itself_ok in allowed:
+        if _strictly_inside(real, root) or (itself_ok and os.path.normcase(str(real)) == os.path.normcase(str(root))):
+            home = root
+            break
+    if home is None:
+        return "outside the folders housekeep may recycle from (docs/RETENTION.md)"
+    rel = [x.lower() for x in real.relative_to(home).parts] if real != home else []
+    if any("backup" in x for x in rel):
+        return "inside a backup folder (Forever)"
+    if any(x.startswith("known-good") for x in rel):
+        return "a known-good baseline (Forever)"
+    for f in walk_files(real):
+        low = f.name.lower()
+        if low == "audit_log.txt" or any(x.lower().startswith("known-good") for x in f.relative_to(real).parts) \
+                or any("backup" in x.lower() for x in f.relative_to(real).parts[:-1]):
+            return "holds a Forever file ({})".format(f.relative_to(real).as_posix())
+    return ""
+
+
 def _set_readonly(path):
     os.chmod(path, stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH)
 
@@ -576,6 +713,7 @@ class _Memo:
 
     def __init__(self):
         self.hashes, self.newest = {}, {}
+        self.links = {}                   # canonical -> links THIS apply made to it (the only extra names it may have)
 
     def hash(self, path):
         st = os.stat(path)
@@ -615,6 +753,8 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
             return "canonical copy changed or gone"
         if guard.why_protected(c) in ("save", "git-tracked"):
             return "canonical copy is protected"
+        if p.stat().st_nlink != 1 or c.stat().st_nlink != 1 + memo.links.get(_key(c), 0):
+            return "hard-linked elsewhere since the plan (ownership unknown)"
     if action["class"] in ("launch", "snapshot", "scratch"):
         why = protected_inside(guard, p, action["class"])
         if why:
@@ -624,15 +764,20 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
     return ""
 
 
-def link(action):
+def link(action, canonical_links=1):
+    """`canonical_links`: the names the canonical copy may have right now -- itself plus the links this apply made.
+    Any other name may be a live file elsewhere, and the read-only attribute below would change it too."""
     dup, canon = Path(action["path"]), Path(action["canonical"])
     tmp = dup.with_name(dup.name + ".housekeep-link")
     if tmp.exists():
         raise OSError("leftover {} -- inspect it by hand".format(tmp))
+    if dup.stat().st_nlink != 1 or canon.stat().st_nlink != canonical_links:
+        raise OSError("hard-linked elsewhere before linking (ownership unknown)")
     os.link(canon, tmp)
-    if os.stat(tmp).st_ino != os.stat(canon).st_ino or blake(tmp) != action["hash"]:
+    if (os.stat(tmp).st_ino != os.stat(canon).st_ino or blake(tmp) != action["hash"]
+            or dup.stat().st_nlink != 1 or canon.stat().st_nlink != canonical_links + 1):
         recycle([tmp])                                           # our own just-made link -- still the bin, never a delete
-        raise OSError("the new link does not resolve to the canonical bytes")
+        raise OSError("the new link's bytes or link count are not what was planned")
     if not os.access(dup, os.W_OK):
         os.chmod(dup, stat.S_IWRITE | stat.S_IREAD)
     os.replace(tmp, dup)
@@ -678,7 +823,9 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
                 continue
             try:
                 if cls == "link":
-                    link(a)
+                    ck = _key(a["canonical"])
+                    link(a, 1 + memo.links.get(ck, 0))
+                    memo.links[ck] = memo.links.get(ck, 0) + 1
                     done += a["bytes"]
                 elif cls == "gzip":
                     compress(a)
@@ -966,6 +1113,14 @@ def main(argv) -> int:
         print("housekeep: {}".format(e), file=sys.stderr)
         return 2
     cmd = args.pop(0) if args else "report"
+    try:
+        return _run(cmd, args, cfg)
+    except ProtectionUnavailable as e:
+        print("housekeep: REFUSED, nothing planned or applied: {}".format(e), file=sys.stderr)
+        return 1
+
+
+def _run(cmd, args, cfg) -> int:
     if cmd == "report" and not args:
         return report(cfg)
     if cmd == "sweep-temp" and not args:
@@ -980,10 +1135,12 @@ def main(argv) -> int:
     if cmd == "session" and len(args) == 1:
         return session(cfg, Path(args[0]))
     if cmd == "recycle" and args:                     # for shell callers (kb-guard's rotation): one line per path
-        res = recycle(args)
+        refused = {p: recycle_refusal(cfg, p) for p in args}
+        res = recycle([p for p in args if not refused[p]])
         for p in args:
-            print("OK\t" + p if res[p] is None else "FAILED\t{}\t{}".format(p, res[p]))
-        return 1 if any(res.values()) else 0
+            err = "refused: " + refused[p] if refused[p] else res[p]
+            print("OK\t" + p if err is None else "FAILED\t{}\t{}".format(p, err))
+        return 1 if any(refused.values()) or any(res.values()) else 0
     only = None
     if "--only" in args:
         i = args.index("--only")

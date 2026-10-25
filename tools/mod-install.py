@@ -488,6 +488,14 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
             for p in todo:
                 inner, dest, action, notes = p
                 target = target_of(p)
+                if action == "CONFIG-NEW" and dest.is_file() and sha(dest) == sha(staged[inner]):
+                    # The kept config already holds the archive's bytes: a .new beside it would only be a file to
+                    # merge-check for nothing (install 86c18ca). The manifest still lists the file, as installed.
+                    print("  CONFIG-SAME  {} (identical to the archive's copy: no .new written)".format(
+                        triage.clean(str(dest))))
+                    written.append("{}  {}".format(sha(dest), dest))
+                    record(header + ["# STATUS: in progress"] + written + planned[len(written):])
+                    continue
                 if target.is_file():                     # OVERWRITE, or an older <file>.new: keep the original first
                     b = backup / backup_rel(target)
                     b.parent.mkdir(parents=True, exist_ok=True)

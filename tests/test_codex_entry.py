@@ -225,16 +225,24 @@ CASES = ([pytest.param(e, role, row, id=f"{e}-{role}-{row}", marks=p.marks)
 @pytest.mark.parametrize("entry,role,row", CASES)
 def test_every_path_exits_zero(tmp_path, entry, role, row):
     if role != "control":
-        r = _fire_row(tmp_path, entry, role, row)
-        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-        assert r.stdout == _expected(role, MATRIX[row][1][role]), r.stdout
-        if role == "pre-tool":
-            body = json.loads(r.stdout)["hookSpecificOutput"]
-            assert body["permissionDecision"] == "deny"
-        failed = _rec(r.root, role, "failed")
-        assert MATRIX[row][1][role] in failed, failed
-        assert not _rec(r.root, role, "emitted"), "a failure was recorded as emitted"
-        return
+        _assert_failure_row(tmp_path, entry, role, row)
+    else:
+        _assert_control_row(tmp_path, entry, row)
+
+
+def _assert_failure_row(tmp_path, entry, role, row):
+    r = _fire_row(tmp_path, entry, role, row)
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    assert r.stdout == _expected(role, MATRIX[row][1][role]), r.stdout
+    if role == "pre-tool":
+        body = json.loads(r.stdout)["hookSpecificOutput"]
+        assert body["permissionDecision"] == "deny"
+    failed = _rec(r.root, role, "failed")
+    assert MATRIX[row][1][role] in failed, failed
+    assert not _rec(r.root, role, "emitted"), "a failure was recorded as emitted"
+
+
+def _assert_control_row(tmp_path, entry, row):
     root = _install(tmp_path)
     if row == "benign":
         r = _run(entry, root, "pre-tool", _benign(root))

@@ -2052,7 +2052,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     ),
     pytest.param(
         "tools/housekeep.py",
-        '            print("OK' + BS + 't" + p if res[p] is None else "FAILED' + BS + 't{}' + BS + 't{}".format(p, res[p]))',
+        '            print("OK' + BS + 't" + p if err is None else "FAILED' + BS + 't{}' + BS + 't{}".format(p, err))',
         '            print("OK' + BS + 't" + p)',
         "tests/test_housekeep.py::test_the_recycle_command_reports_every_path_the_bin_refused",
         id="housekeep-recycle-cli-hides-refusals",
@@ -10343,3 +10343,173 @@ MUTATIONS += [
     pytest.param(_AS, '        if w == "printf" and any(_PRINTF_V.match(r) for r in rest):', "        if False:",
                  _UPU + "[printf-v]", id="guard3-e2e-poison-printf-v"),
 ]
+# Final sweep 2026-10-25 (X4 5e00b6e): housekeep never links or chmods a file that has a name it did not make -- a mod
+# manager's hard link into a live Data/ file shares the inode, and the read-only attribute with it. One twin per clause.
+_HKS = "tools/housekeep.py"
+_HKS_T = "tests/test_housekeep.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_HKS, "        if f.stat().st_nlink != 1:\n", "        if False:\n",
+     _HKS_T + "test_a_file_hard_linked_from_outside_is_never_linked_or_made_read_only[duplicate]",
+     "sweep-hk-plan-ignores-link-count"),
+    (_HKS, "        if p.stat().st_nlink != 1 or c.stat()", "        if False or c.stat()",
+     _HKS_T + "test_check_refuses_a_link_whose_files_gained_a_name_after_the_plan[duplicate]",
+     "sweep-hk-check-ignores-duplicate-links"),
+    (_HKS, " or c.stat().st_nlink != 1 + memo.links.get(_key(c), 0):", " or False:",
+     _HKS_T + "test_check_refuses_a_link_whose_files_gained_a_name_after_the_plan[canonical]",
+     "sweep-hk-check-ignores-canonical-links"),
+    (_HKS, "    if dup.stat().st_nlink != 1 or canon", "    if False or canon",
+     _HKS_T + "test_link_itself_refuses_a_file_with_an_unexpected_name[duplicate]",
+     "sweep-hk-link-ignores-duplicate-links"),
+    (_HKS, " or canon.stat().st_nlink != canonical_links:\n", " or False:\n",
+     _HKS_T + "test_link_itself_refuses_a_file_with_an_unexpected_name[canonical]",
+     "sweep-hk-link-ignores-canonical-links"),
+    (_HKS, "                    memo.links[ck] = memo.links.get(ck, 0) + 1\n", "",
+     _HKS_T + "test_duplicates_become_one_read_only_copy_with_every_path_intact",
+     "sweep-hk-apply-forgets-its-own-links"),
+]]
+
+# Final sweep 2026-10-25 (X4 679bc4a): a git failure must not silently switch the git-tracked protection off.
+_HKG = "test_a_git_failure_in_a_repository_refuses_instead_of_unprotecting_tracked_files"
+_HKP = "test_a_plain_folder_has_no_tracked_files_and_is_still_planned"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_HKS, "        if isinstance(e, OSError) and not _in_git_work_tree(root):\n", "        if True:\n",
+     _HKS_T + _HKG + "[git-missing]", "sweep-hk-git-missing-unprotects"),
+    (_HKS, '        if "not a git repository" in err.lower():\n', "        if True:\n",
+     _HKS_T + _HKG + "[dubious-ownership]", "sweep-hk-git-error-unprotects"),
+    (_HKS, '        if "not a git repository" in err.lower():\n', "        if False:\n",
+     _HKS_T + _HKP + "[not-a-repository]", "sweep-hk-plain-folder-refused"),
+    (_HKS, "    except ProtectionUnavailable as e:\n", "    except ZeroDivisionError as e:\n",
+     _HKS_T + _HKG + "[dubious-ownership]", "sweep-hk-refusal-not-reported"),
+]]
+
+# Final sweep 2026-10-25 (X4 c6d4760): docs/RETENTION.md's Forever names are protected in code. One twin per name.
+_HKF = "test_saves_and_backup_folders_are_never_planned"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_HKS, '        if any(part.startswith("known-good") for part in named):\n', "        if False:\n",
+     _HKS_T + _HKF + "[t/known-good-2026-10-01-pre-stagger/Skyrim.esm]", "sweep-hk-known-good-unprotected"),
+    (_HKS, '        if named[-1] == "audit_log.txt":\n', "        if False:\n",
+     _HKS_T + _HKF + "[t/logs/AUDIT_LOG.txt]", "sweep-hk-audit-log-unprotected"),
+]]
+
+# Final sweep 2026-10-25 (X4 34133b7): an evidence link holding spaces, parentheses or escapes still protects its file.
+_HKE = "test_a_linked_path_with_spaces_and_parentheses_is_still_evidence"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_HKS, "                    for end in ends + [len(tail)]:\n", "                    for end in ends[:1]:\n",
+     _HKS_T + _HKE + "[literal]", "sweep-hk-link-stops-at-first-space"),
+    (_HKS, "        views = {text, unquote(text)}\n", "        views = {text}\n",
+     _HKS_T + _HKE + "[percent]", "sweep-hk-link-percent-escapes-unread"),
+    (_HKS, "        views |= {re.sub(", "        views |= set() and {re.sub(",
+     _HKS_T + _HKE + "[backslash]", "sweep-hk-link-backslash-escapes-unread"),
+    (_HKS, "                    if len(tail) > 32768:\n", "                    if False:\n",
+     _HKS_T + "test_evidence_discovery_past_its_bound_refuses_instead_of_truncating", "sweep-hk-link-bound-ignored"),
+]]
+
+# Final sweep 2026-10-25 (X4 6bf11a9): `housekeep recycle PATH` refuses what retention never removes. One twin per clause.
+_HKR = "test_the_recycle_command_refuses_what_retention_never_removes"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_HKS, "    if real.parent == real:\n", "    if False:\n", _HKS_T + _HKR + "[a-drive-root]",
+     "sweep-hk-recycle-takes-a-drive-root"),
+    (_HKS, "    if os.path.normcase(str(real)) == os.path.normcase(str(_real(Path.home()))):\n", "    if False:\n",
+     _HKS_T + _HKR + "[the-home-folder]", "sweep-hk-recycle-takes-home"),
+    (_HKS, "        if os.path.normcase(str(b)) == os.path.normcase(str(real)) or _strictly_inside(b, real):\n",
+     "        if False or _strictly_inside(b, real):\n", _HKS_T + _HKR + "[the-root]", "sweep-hk-recycle-takes-the-root"),
+    (_HKS, "        if os.path.normcase(str(b)) == os.path.normcase(str(real)) or _strictly_inside(b, real):\n",
+     "        if os.path.normcase(str(b)) == os.path.normcase(str(real)) or False:\n", _HKS_T + _HKR + "[above-the-root]",
+     "sweep-hk-recycle-takes-above-the-root"),
+    (_HKS, '    if any(part.lower() == "saves" for part in real.parts):\n', "    if False:\n",
+     _HKS_T + _HKR + "[a-saves-folder]", "sweep-hk-recycle-takes-a-saves-folder"),
+    (_HKS, "        if str(f).lower().endswith(SAVE_EXTS):\n", "        if False:\n", _HKS_T + _HKR + "[holds-a-save]",
+     "sweep-hk-recycle-takes-a-save"),
+    (_HKS, "    if home is None:\n", "    if False:\n", _HKS_T + _HKR + "[outside-the-allowed-roots]",
+     "sweep-hk-recycle-takes-anything"),
+    (_HKS, '    if any("backup" in x for x in rel):\n', "    if False:\n", _HKS_T + _HKR + "[a-backup-folder]",
+     "sweep-hk-recycle-takes-a-backup"),
+    (_HKS, '    if any(x.startswith("known-good") for x in rel):\n', "    if False:\n",
+     _HKS_T + _HKR + "[a-known-good-baseline]", "sweep-hk-recycle-takes-known-good"),
+    (_HKS, '        if low == "audit_log.txt" or any(', "        if False or any(",
+     _HKS_T + _HKR + "[holds-the-audit-log]", "sweep-hk-recycle-takes-the-audit-log"),
+    (_HKS, "        res = recycle([p for p in args if not refused[p]])\n", "        res = recycle(list(args))\n",
+     _HKS_T + "test_a_refused_path_never_reaches_the_bin_and_the_rest_still_goes", "sweep-hk-recycle-refusal-ignored"),
+]]
+
+# Final sweep 2026-10-25 (X4 6a15443): docs/REVIEW-SCOPE.md is a maintainer note, never in the zip. Builder + checker.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("scripts/build_release_zip.py", 'EXCLUDE += ("docs/REVIEW-SCOPE.md",)\n', "",
+     "tests/test_release_build.py::test_the_maintainer_review_scope_note_is_excluded_and_its_siblings_ship",
+     "sweep-release-review-scope-shipped"),
+    ("tools/check-release-payload.py", '    "docs/REVIEW-SCOPE.md",   # the maintainer', '    # "docs/REVIEW-SCOPE.md", the maintainer',
+     _MM_RP + "[review-scope-shipped]", "sweep-payload-review-scope-allowed"),
+]]
+
+# Final sweep 2026-10-25 (X4 a0e4fd1): one red CI check must not skip the later ones. A twin per kind of step: a plain
+# check, a check with its own condition, and a job without the setup marker.
+_WF_T = "tests/test_workflows.py::test_one_red_check_never_skips_the_later_ones"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (".github/workflows/ci.yml", "      - name: ruff\n        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}\n",
+     "      - name: ruff\n", _WF_T, "sweep-ci-ruff-skipped-after-a-red-check"),
+    (".github/workflows/ci.yml",
+     "        if: ${{ !cancelled() && steps.setup.outcome == 'success' && matrix.part == 'suite' }}\n",
+     "        if: matrix.part == 'suite'\n", _WF_T, "sweep-ci-node-tests-skipped-after-a-red-check"),
+    (".github/workflows/ci.yml", "      - name: Setup complete\n        id: setup\n        run: echo setup complete\n\n"
+     "      - name: Syntax and shebangs\n", "      - name: Syntax and shebangs\n", _WF_T, "sweep-ci-shell-job-has-no-marker"),
+]]
+
+# Final sweep 2026-10-25 (X4 5811619): a bare `return` in a test passes silently. The scan must see a planted one.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tests/test_no_bare_return_in_a_test.py",
+     "            if in_test and isinstance(child, ast.Return) and child.value is None:\n",
+     "            if False:\n",
+     "tests/test_no_bare_return_in_a_test.py::test_the_guard_itself_can_go_red", "sweep-bare-return-scan-blind"),
+    ("tests/test_skyguard_shell.py", "        assert got[0] == decision\n    else:\n        assert got == (decision, text)",
+     "        assert got[0] == decision\n        return\n    assert got == (decision, text)",
+     "tests/test_no_bare_return_in_a_test.py::test_no_test_function_bails_with_a_bare_return",
+     "sweep-bare-return-reintroduced"),
+]]
+
+# Final sweep 2026-10-25 (install 6318fcf): the independent plugin parser reports what it could read only partly, and
+# refuses what it cannot walk. One twin per report and per refusal.
+_ESP = "tools/esp_records.py"
+_ESP_T = "tests/test_esp_records.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_ESP, "        if n > 1:\n", "        if False:\n",
+     _ESP_T + "test_a_duplicate_formid_is_reported_not_silently_collapsed", "sweep-esp-duplicate-formid-hidden"),
+    (_ESP, "                except zlib.error as e:\n                    problems.append(",
+     "                except zlib.error as e:\n                    [].append(",
+     _ESP_T + "test_a_compressed_record_that_does_not_inflate_is_reported", "sweep-esp-bad-compression-hidden"),
+    (_ESP, "        if (r.formid >> 24) > len(plugin.masters):\n", "        if False:\n",
+     _ESP_T + "test_a_master_index_past_the_master_list_is_reported", "sweep-esp-bad-master-index-hidden"),
+    (_ESP, "                if size < 24 or off + size > end:\n", "                if off + size > end:\n",
+     _ESP_T + "test_a_file_that_cannot_be_walked_is_refused_with_its_offset[grup-too-small]",
+     "sweep-esp-grup-size-unchecked"),
+    (_ESP, "            if off + 24 + size > end:\n", "            if False:\n",
+     _ESP_T + "test_a_file_that_cannot_be_walked_is_refused_with_its_offset[record-past-its-group]",
+     "sweep-esp-truncation-unchecked"),
+    (_ESP, "    if header is None:\n", "    if False:\n",
+     _ESP_T + "test_a_file_that_cannot_be_walked_is_refused_with_its_offset[no-tes4-header]", "sweep-esp-any-file-accepted"),
+    (_ESP, '        if t == "XXXX" and n == 4 and i + 10 <= len(body):\n', "        if False:\n",
+     _ESP_T + "test_compressed_records_and_oversize_subrecords_are_read", "sweep-esp-xxxx-ignored"),
+    ("tools/esp-summary.py", "    return 1 if plugin.problems else 0\n", "    return 0\n",
+     _ESP_T + "test_summary_exits_1_on_a_problem_and_2_on_a_file_it_cannot_walk", "sweep-esp-summary-problem-exit-0"),
+    ("tools/esp-record-diff.py", "    return 1 if differs or problems else 0\n", "    return 1 if differs else 0\n",
+     _ESP_T + "test_diff_with_a_duplicate_formid_is_inconclusive_not_clean", "sweep-esp-diff-inconclusive-is-clean"),
+    ("tools/esp-record-diff.py", "        if ra.sha1 != rb.sha1 or ra.flags != rb.flags or ra.type != rb.type:\n",
+     "        if ra.flags != rb.flags or ra.type != rb.type:\n",
+     _ESP_T + "test_diff_names_added_removed_and_changed_records_and_subrecords", "sweep-esp-diff-misses-body-change"),
+    ("tools/esp-record-diff.py", "    if pa.header.sha1 != pb.header.sha1 or pa.header.flags != pb.header.flags:\n",
+     "    if pa.header.flags != pb.header.flags:\n",
+     _ESP_T + "test_diff_sees_a_header_change_and_a_reordered_record", "sweep-esp-diff-misses-header-change"),
+]]
+
+# Final sweep 2026-10-25 (install 86c18ca): a kept config identical to the archive's copy gets no .new.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/mod-install.py",
+     '                if action == "CONFIG-NEW" and dest.is_file() and sha(dest) == sha(staged[inner]):\n',
+     "                if False:\n",
+     "tests/test_mod_install.py::test_a_kept_config_identical_to_the_archive_gets_no_new_file_and_is_still_recorded",
+     "sweep-modinst-identical-config-gets-new"),
+    ("tools/mod-install.py",
+     '                if action == "CONFIG-NEW" and dest.is_file() and sha(dest) == sha(staged[inner]):\n',
+     '                if action == "CONFIG-NEW" and dest.is_file():\n',
+     "tests/test_mod_install.py::test_an_existing_config_gets_a_new_file_beside_it",
+     "sweep-modinst-different-config-gets-no-new"),
+]]

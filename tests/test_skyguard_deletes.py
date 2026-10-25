@@ -422,9 +422,9 @@ def test_moving_a_root_folder_away_names_the_move_not_a_delete(cmd, shell):
         # The install itself contains permanent recovery; moving its ancestor is forbidden first.
         assert (decision, fired) == ("deny", {"S-SAVE-STORE"})
         assert "permanent save backup store" in reason
-        return
-    assert (decision, fired) == ("deny", {"S-MOVE-ROOT"}), (cmd, reason, fired)
-    assert "moves" in reason and "deletes" not in reason
+    else:
+        assert (decision, fired) == ("deny", {"S-MOVE-ROOT"}), (cmd, reason, fired)
+        assert "moves" in reason and "deletes" not in reason
 
 
 @pytest.mark.parametrize("verb,shell", [("mv", "bash"), ("Move-Item", "powershell")], ids=["mv", "move-item"])

@@ -105,6 +105,15 @@ link.
   `tools/kb-guard.sh` keeps `KB_GUARD_KEEP` (default 30) snapshot folders, the newest ones, never removing the
   oldest, the newest or the one holding the largest copy of a watched file, and sends the others to the Recycle
   Bin through `housekeep.py recycle`, printing a notice first; what the bin does not take stays and is reported.
+- **Forever names, in code:** besides saves and `*backup*` folders, `housekeep` never plans a file under a folder (or
+  a file) whose name starts with `known-good` (the dated known-good baselines) or a file named `AUDIT_LOG.txt`, and a
+  whole-folder action keeps any folder holding one.
+- **A protection that cannot be evaluated stops the run.** When git cannot list the tracked files of a root inside
+  a work tree (no runnable git, dubious ownership, a broken index), `report`, `plan` and `apply` refuse with the
+  reason instead of treating nothing as tracked. A folder outside any repository has no tracked files.
+- **Hard links a mod manager made are not ours.** Vortex and MO2 can deploy by hard link, so an agent-output copy
+  may share its file with a live `Data/` file, and the read-only mark a duplicate set gets would land on that file
+  too. A duplicate that already has a second name is left alone; `apply` re-counts the names before it links.
 - **Whole-folder classes** (launch, snapshot, scratch) keep a folder whole when any file in it is protected, and
   `apply` checks that again. Off Windows `housekeep` removes nothing: every item is reported as left in place.
 
@@ -118,7 +127,13 @@ python tools/housekeep.py apply plan.json [--only link,gzip]
 ```
 
 `python tools/housekeep.py sweep-temp` runs the temp sweep by hand; `python tools/housekeep.py recycle PATH...` sends
-exactly those paths to the Recycle Bin and prints OK or FAILED for each. The session-start hook runs
+exactly those paths to the Recycle Bin and prints OK or FAILED for each. It takes only what this policy may remove: a
+path strictly inside a rolling tool store (`.claude/retired`, `.claude/backups/kb`, `.claude/backups/auto_snapshots`
+of the toolkit folder or `$CLAUDE_PROJECT_DIR`), a configured `agent_output`, `launch_logs` or `legacy_snapshots`
+folder, a named `scratch` folder (or that folder itself), or the system temp folder. Whatever that rule says, it
+refuses (`FAILED ... refused: <why>`, nothing sent to the bin) a drive root, the home folder, the toolkit or install
+folder or one above it, a link, a `Saves` folder or anything in one, a save or a folder holding one, and a Forever
+name (a `*backup*` folder below the allowed folder, `known-good*`, `AUDIT_LOG.txt`). The session-start hook runs
 `housekeep.py session .claude/diag/housekeep-session.txt` detached and shows that file's line at the next start.
 
 `apply` runs the classes in a fixed order (recreatable, build, link, gzip, launch, snapshot, scratch) and prints

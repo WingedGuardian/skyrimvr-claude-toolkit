@@ -403,8 +403,8 @@ def test_port_matches_recorded_bash_verdict(tmp_path, monkeypatch, cid, layout, 
     rewritten = [t for t, rid in frozen.items() if rid in rules.REMOVED or not rules.RULES[rid]["legacy"]]
     if text and any(text == t.replace("{c}", cmd) for t in rewritten):
         assert got[0] == decision
-        return
-    assert got == (decision, text)
+    else:
+        assert got == (decision, text)
 
 
 # Accepted divergence (controller ruling, Task 3 fix round 1): next to a NON-ASCII letter, GNU grep in
