@@ -661,6 +661,19 @@ REGISTRY = [
      "upstream": ("github", "alandtse/devbench"), "nexus": ("skyrimspecialedition", 181326),
      "checks": [("upstream_text", {"repo": "alandtse/devbench", "path": "README.md", "files": ["tools/devbench-cli.sh"],
                                    "pattern": r"(?P<p>/api/(?:health|tools?)\b/?)"})]},
+    # vr-headless's optional emulator driver: the official prebuilt package at a release commit, fetched on the user's
+    # machine by tools/vr-emu-driver/fetch.py (never shipped). The zip hash binds every file in it, the DLL included.
+    {"name": "SkyrimVR Devkit null driver",
+     "pins": [("regex", "tools/vr-emu-driver/fetch.py", r'(?m)^DRIVER_COMMIT = "(?P<v>[0-9a-f]{40})"'),
+              ("regex", "tools/vr-emu-driver/fetch.py", r'SkyrimVR-Devkit/"\s*"(?P<v>[0-9a-f]{40})/null%20driver\.zip"'),
+              ("regex", "tools/vr-emu-driver/README.md", r"`Release_v[\d.]+` = commit `(?P<v>[0-9a-f]{40})`")],
+     "tag_pins": [("regex", "tools/vr-emu-driver/fetch.py", r'(?m)^DRIVER_TAG = "(?P<v>Release_v[\d.]+)"')],
+     "upstream": ("github", "DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit"),
+     "checks": [("tag_commit", {"repo": "DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit"}),
+                ("hashes", {"items": [{"label": "null driver.zip", "file": "tools/vr-emu-driver/fetch.py",
+                                       "pattern": r'(?m)^DRIVER_ZIP_SHA256 = "(?P<sha>[0-9a-f]{64})"',
+                                       "url": "https://raw.githubusercontent.com/DubiousDuo/"
+                                              "VR-Emulator-Driver---SkyrimVR-Devkit/{pinned}/null%20driver.zip"}]})]},
     {"name": "VR Address Library", "pins": [("regex", "README.md", r"newest seen: (?P<v>\d+\.\d+\.\d+)"),
                                             ("regex", "agent/skills/devbench/SKILL.md", r"VR Address Library seen when this was written is \*\*(?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("nexus", "skyrimspecialedition", 58101)},
@@ -785,7 +798,7 @@ AUDIT_FLOOR = ("Spriggit", ".NET SDK", "Node.js", "Python", "AutoMod", "PyNifly"
                "CrashLoggerSSE", "SKSE VR", "Champollion", "Caprica", "xeditlib", "zEdit", "koffi", "PyFFI",
                "ReSaver (FallrimTools)", "NifSkope", "Blender (4.2 LTS)", "Cathedral Assets Optimizer", "BSArch",
                "Mod Organizer 2", "Vortex", "Codex CLI", "Claude Code", "devcontainer base image",
-               "busybox (CI sentinel)")
+               "busybox (CI sentinel)", "SkyrimVR Devkit null driver")
 
 
 def dynamic_entries(repo):

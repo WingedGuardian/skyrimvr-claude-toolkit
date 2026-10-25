@@ -462,6 +462,61 @@ def test_a_path_missing_at_the_pinned_commit_is_drift(tmp_path):
     assert code == 1 and any("Directory.Build.props" in r.detail for r in by(rows, ta.DRIFT))
 
 
+DEVKIT_ZIP = b"fixture null driver zip"
+DEVKIT_SHA = __import__("hashlib").sha256(DEVKIT_ZIP).hexdigest()
+DEVKIT_COMMIT = "32ec30294a871683254b944b4129cbdec2591e6a"
+DEVKIT_REPO = "DubiousDuo/VR-Emulator-Driver---SkyrimVR-Devkit"
+DEVKIT_RAW = "https://raw.githubusercontent.com/%s/%s/null%%20driver.zip" % (DEVKIT_REPO, DEVKIT_COMMIT)
+DEVKIT = {
+    "tools/vr-emu-driver/fetch.py": ('DRIVER_TAG = "Release_v2.0.1"\n'
+                                     'DRIVER_COMMIT = "%s"\n'
+                                     'DRIVER_ZIP_URL = ("https://raw.githubusercontent.com/DubiousDuo/'
+                                     'VR-Emulator-Driver---SkyrimVR-Devkit/"\n'
+                                     '                  "%s/null%%20driver.zip")\n'
+                                     'DRIVER_ZIP_SHA256 = "%s"\n' % (DEVKIT_COMMIT, DEVKIT_COMMIT, DEVKIT_SHA)),
+    "tools/vr-emu-driver/README.md": "| Release | `Release_v2.0.1` = commit `%s` (2026-10-14) |\n" % DEVKIT_COMMIT,
+}
+
+
+def devkit_cache(tmp_path, tag_sha=DEVKIT_COMMIT, body=DEVKIT_ZIP, latest="Release_v2.0.1"):
+    api = "https://api.github.com/repos/" + DEVKIT_REPO
+    return make_cache(tmp_path, extra=[
+        (api + "/releases/latest", 200, json.dumps({"tag_name": latest}).encode()),
+        (api + "/git/ref/tags/Release_v2.0.1", 200, json.dumps({"object": {"type": "commit", "sha": tag_sha}}).encode()),
+        (DEVKIT_RAW, 200, body)])
+
+
+def test_the_devkit_driver_pin_tag_and_package_hash_are_ok(tmp_path):
+    rows, code = audit(make_repo(tmp_path, DEVKIT), devkit_cache(tmp_path), ["SkyrimVR Devkit null driver"])
+    assert code == 0, [r.as_dict() for r in rows]
+    assert {"version", "tag -> commit", "pinned hash"} <= {r.check for r in rows}
+
+
+def test_a_devkit_package_that_changed_upstream_is_drift(tmp_path):
+    rows, code = audit(make_repo(tmp_path, DEVKIT), devkit_cache(tmp_path, body=b"a different zip"),
+                       ["SkyrimVR Devkit null driver"])
+    assert code == 1 and any(r.check == "pinned hash" for r in by(rows, ta.DRIFT))
+
+
+def test_a_moved_devkit_release_tag_is_drift(tmp_path):
+    rows, code = audit(make_repo(tmp_path, DEVKIT), devkit_cache(tmp_path, tag_sha="c" * 40),
+                       ["SkyrimVR Devkit null driver"])
+    assert code == 1 and any(r.check == "tag -> commit" for r in by(rows, ta.DRIFT))
+
+
+def test_devkit_pin_sites_that_disagree_are_drift(tmp_path):
+    files = dict(DEVKIT)
+    files["tools/vr-emu-driver/README.md"] = "| Release | `Release_v2.0.1` = commit `%s` |\n" % ("b" * 40)
+    rows, code = audit(make_repo(tmp_path, files), devkit_cache(tmp_path), ["SkyrimVR Devkit null driver"])
+    assert code == 1 and any(r.check == "pin sites" for r in by(rows, ta.DRIFT))
+
+
+def test_a_newer_devkit_release_is_reported_not_failed(tmp_path):
+    rows, code = audit(make_repo(tmp_path, DEVKIT), devkit_cache(tmp_path, latest="Release_v2.1.0"),
+                       ["SkyrimVR Devkit null driver"])
+    assert code == 0 and any(r.check == "version" for r in by(rows, ta.NEWER))
+
+
 def test_an_unpinned_automod_clone_is_drift(tmp_path):
     files = dict(AUTOMOD)
     files["README.md"] = "git clone https://github.com/SpookyPirate/spookys-automod-toolkit tools/automod\n"

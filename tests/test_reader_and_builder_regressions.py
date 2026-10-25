@@ -1,11 +1,8 @@
 """Malformed-reader and source-ownership failures from the 4.0 review."""
 import importlib.util
 import json
-import os
 import subprocess
 import sys
-from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -45,39 +42,71 @@ def test_raw_hit_contexts_are_bounded_but_counts_are_complete():
     assert result.total == 1000 and len(result) == 50
 
 
-def test_builder_refuses_dirty_existing_source_without_discarding_edits(tmp_path):
-    builder = module("driver_build_regression", "tools/vr-emu-driver/build.py")
-    source = tmp_path / "driver"
-    subprocess.run(["git", "init", str(source)], check=True, capture_output=True)
-    path = source / "source.cpp"
-    path.write_text("original")
-    subprocess.run(["git", "-C", str(source), "add", "source.cpp"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(source), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                    "commit", "-m", "fixture"], check=True, capture_output=True)
-    head = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
-    path.write_text("valuable uncommitted edit")
-    with pytest.raises(builder.BuildError, match="local changes"):
-        builder.fetch("unused.invalid", head, source)
-    assert path.read_text() == "valuable uncommitted edit"
+def _driver_zip(members):
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, body in members.items():
+            z.writestr(name, body)
+    return buf.getvalue()
 
 
-@pytest.mark.skipif(os.name != "nt", reason="MSVC builder entry point is Windows only")
-def test_builder_preserves_unowned_src_and_build_script(tmp_path, monkeypatch):
-    builder = module("driver_build_main_regression", "tools/vr-emu-driver/build.py")
-    work = tmp_path / "work"
-    (work / "src").mkdir(parents=True)
-    (work / "src/valuable.txt").write_text("unowned")
-    (work / "build.bat").write_text("user script")
-    monkeypatch.setattr(builder, "vcvars", lambda: tmp_path / "vcvars.bat")
-    monkeypatch.setattr(builder, "BUILD", tmp_path / "output")
+def _fetcher(monkeypatch, members, tmp_path):
+    import hashlib
+    fetch = module("driver_fetch_regression", "tools/vr-emu-driver/fetch.py")
+    data = _driver_zip(members)
+    monkeypatch.setattr(fetch, "DRIVER_ZIP_SHA256", hashlib.sha256(data).hexdigest())
+    monkeypatch.setattr(fetch, "DRIVER_DLL_SHA256", hashlib.sha256(b"dll").hexdigest())
+    monkeypatch.setattr(fetch, "BUILD", tmp_path / "build")
+    return fetch, data
 
-    def fetch(repo, commit, dest, sparse=None):
-        dest.mkdir()
-        (dest / builder.PATCH["file"]).write_text(builder.PATCH["find"])
 
-    monkeypatch.setattr(builder, "fetch", fetch)
-    monkeypatch.setattr(builder, "run", lambda *args, **kwargs: (_ for _ in ()).throw(builder.BuildError("fake compiler")))
-    assert builder.main(["--work", str(work)]) == 2
-    assert (work / "src/valuable.txt").read_text() == "unowned"
-    assert (work / "build.bat").read_text() == "user script"
-    assert len(list(work.glob("owned-build-*/.toolkit-build-owner.json"))) == 1
+GOOD_DRIVER = {"null/bin/win64/driver_null.dll": b"dll", "null/driver.vrdrivermanifest": b"{}",
+               "null/resources/settings/default.vrsettings": b"{}"}
+
+
+def _sidecar(members):
+    import hashlib
+    return dict(members, **{"null/bin/win64/driver_null.dll.sha256": hashlib.sha256(b"dll").hexdigest().encode()})
+
+
+def test_fetcher_accepts_only_the_pinned_package(tmp_path, monkeypatch):
+    fetch, data = _fetcher(monkeypatch, _sidecar(GOOD_DRIVER), tmp_path)
+    files = fetch.verify(data)
+    assert set(fetch.SWAPPED) <= set(files)
+    with pytest.raises(fetch.FetchError, match="not the pinned"):
+        fetch.verify(data + b"tampered")
+
+
+@pytest.mark.parametrize("members, why", [
+    (dict(_sidecar(GOOD_DRIVER), **{"../escape.dll": b"x"}), "unexpected path"),
+    (dict(_sidecar(GOOD_DRIVER), **{"elsewhere/file": b"x"}), "unexpected path"),
+    (GOOD_DRIVER, "sha256 says"),
+    ({k: v for k, v in _sidecar(GOOD_DRIVER).items() if "manifest" not in k}, "lacks"),
+    (dict(_sidecar(GOOD_DRIVER), **{"null/bin/win64/driver_null.dll": b"other dll"}), "not the pinned"),
+])
+def test_fetcher_refuses_a_package_with_a_bad_layout_or_hash(tmp_path, monkeypatch, members, why):
+    fetch, data = _fetcher(monkeypatch, members, tmp_path)
+    with pytest.raises(fetch.FetchError, match=why):
+        fetch.verify(data)
+
+
+def test_fetcher_never_overwrites_a_different_existing_package(tmp_path, monkeypatch):
+    fetch, data = _fetcher(monkeypatch, _sidecar(GOOD_DRIVER), tmp_path)
+    files = fetch.verify(data)
+    dest = tmp_path / "build" / "null"
+    fetch.install(files, dest)
+    fetch.install(files, dest)                                  # identical: a no-op
+    (dest / "driver.vrdrivermanifest").write_bytes(b"the user's edit")
+    with pytest.raises(fetch.FetchError, match="different package"):
+        fetch.install(files, dest)
+    assert (dest / "driver.vrdrivermanifest").read_bytes() == b"the user's edit"
+
+
+def test_fetcher_pins_agree_with_the_readme():
+    fetch = module("driver_fetch_pins", "tools/vr-emu-driver/fetch.py")
+    readme = (REPO / "tools/vr-emu-driver/README.md").read_text(encoding="utf-8")
+    for pin in (fetch.DRIVER_COMMIT, fetch.DRIVER_ZIP_SHA256, fetch.DRIVER_DLL_SHA256, fetch.DRIVER_TAG):
+        assert pin in readme, pin
+    assert fetch.DRIVER_COMMIT in fetch.DRIVER_ZIP_URL and fetch.DRIVER_ZIP_URL.startswith("https://")
