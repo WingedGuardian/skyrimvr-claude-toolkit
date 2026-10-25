@@ -85,3 +85,12 @@ def test_an_unreadable_version_is_said_not_refused(tmp_path):
 def test_codex_only_setup_never_asks_claude(tmp_path):
     r, _ = _setup(tmp_path, "1.0.0", agent="codex")
     assert "older than 2.1.295" not in r.stderr and "needs 2.1.295" not in r.stdout
+
+
+def test_ordered_upgrade_uses_the_shipped_guard_failure_policy():
+    import sys
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import ordered_upgrade
+
+    expected = json.loads((REPO / "agent/targets/claude/settings.json").read_text(encoding="utf-8"))
+    assert ordered_upgrade._claude_pre() == expected["hooks"]["PreToolUse"]

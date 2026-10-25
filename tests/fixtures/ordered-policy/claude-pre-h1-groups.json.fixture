@@ -1,0 +1,51 @@
+{
+  "source_commit": "7a69c0ef00bd2245b5b8b164ee77ce0437884db2",
+  "source_path": "agent/targets/claude/settings.json",
+  "groups": [
+    {
+      "matcher": "Bash|PowerShell|Monitor",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-bash.sh\"",
+          "timeout": 60,
+          "statusMessage": "Checking command safety..."
+        },
+        {
+          "type": "command",
+          "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/snapshot-before-tool.sh\"",
+          "timeout": 60,
+          "statusMessage": "Snapshotting scripts..."
+        }
+      ]
+    },
+    {
+      "matcher": "Edit|Write|NotebookEdit",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-files.sh\"",
+          "timeout": 60,
+          "statusMessage": "Checking file protection..."
+        },
+        {
+          "type": "command",
+          "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/backup-before-edit.sh\"",
+          "timeout": 60,
+          "statusMessage": "Backing up file..."
+        }
+      ]
+    },
+    {
+      "matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-mcp.sh\"",
+          "timeout": 60,
+          "statusMessage": "Checking DevBench call..."
+        }
+      ]
+    }
+  ]
+}

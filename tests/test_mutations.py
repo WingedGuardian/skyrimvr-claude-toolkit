@@ -10666,3 +10666,26 @@ MUTATIONS.append(pytest.param(
     ".github/workflows/ci.yml", "    runs-on: windows-2022\n", "    runs-on: windows-latest\n",
     "tests/test_workflows.py::test_resaver_plus_uses_the_qualified_vs2022_runner",
     id="ci5-resaver-runner-unpinned"))
+
+# H1 ordered-upgrade integration: current guard policies and exact historical definitions.
+_H1O = "tools/skyguard/ordered_upgrade.py"
+_H1OC = 'CLAUDE_BLOCKING = frozenset(("protect-bash.sh", "protect-files.sh", "protect-mcp.sh"))'
+_H1OU = _H1T + "test_ordered_upgrade_uses_the_shipped_guard_failure_policy"
+MUTATIONS += [pytest.param(_H1O, find, rep, test, id=ident) for find, rep, test, ident in [
+    (_H1OC, 'CLAUDE_BLOCKING = frozenset(("protect-files.sh", "protect-mcp.sh"))',
+     _H1OU, "h1-ordered-bash-fails-open"),
+    (_H1OC, 'CLAUDE_BLOCKING = frozenset(("protect-bash.sh", "protect-mcp.sh"))',
+     _H1OU, "h1-ordered-files-fails-open"),
+    (_H1OC, 'CLAUDE_BLOCKING = frozenset(("protect-bash.sh", "protect-files.sh"))',
+     _H1OU, "h1-ordered-mcp-fails-open"),
+    ('        handler["onFailure"] = "block"', '        handler["onFailure"] = "ignore"',
+     _H1OU, "h1-ordered-wrong-failure-policy"),
+    ("    if script in CLAUDE_BLOCKING:", "    if True:",
+     _H1OU, "h1-ordered-backup-hooks-block"),
+    ('            handler.pop("onFailure", None)', "            pass",
+     "tests/test_ordered_policy.py::test_published_legacy_groups_migrate_to_current_blocking_guards[original-v3.9.1]",
+     "h1-ordered-legacy-schema-not-recognized"),
+    ("    groups = [*current, *published, installed]", "    groups = [*published, installed]",
+     "tests/test_ordered_policy.py::test_published_legacy_groups_migrate_to_current_blocking_guards[original-pre-h1]",
+     "h1-ordered-previous-v4-schema-not-recognized"),
+]]
