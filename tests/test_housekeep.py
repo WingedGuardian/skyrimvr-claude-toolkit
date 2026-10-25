@@ -145,6 +145,27 @@ def test_a_file_a_project_doc_links_to_is_never_planned(tree):
     assert key(twin) in planned(doc)
 
 
+@pytest.mark.parametrize("spelling", ["literal", "percent", "backslash"])
+def test_a_linked_path_with_spaces_and_parentheses_is_still_evidence(tree, spelling):
+    """Sweep 2026-10-25 (X4 34133b7): discovery stopped at the first space or ')', so this file lost its protection."""
+    rel = "_CLAUDE_OUTPUT/Mod (v2) notes/fixture/Skyrim.esm"
+    linked = write(tree / rel, blob("master"))
+    twin = write(tree / "_CLAUDE_OUTPUT" / "u" / "fixture" / "Skyrim.esm", blob("master"))
+    shown = {"literal": rel, "percent": rel.replace(" ", "%20").replace("(", "%28").replace(")", "%29"),
+             "backslash": rel.replace("(", "\\(").replace(")", "\\)")}[spelling]
+    (tree / "CLAUDE.md").write_text("[evidence]({}). Next line.\n".format(shown), encoding="utf-8")
+    doc = hk.plan(cfg_for(tree))
+    assert key(linked) not in planned(doc)
+    assert key(twin) in planned(doc)
+
+
+def test_evidence_discovery_past_its_bound_refuses_instead_of_truncating(tree):
+    write(tree / "_CLAUDE_OUTPUT" / "t" / "fixture" / "Skyrim.esm", blob("master"))
+    (tree / "CLAUDE.md").write_text("_CLAUDE_OUTPUT/" + "x" * 40000 + "\n", encoding="utf-8")
+    with pytest.raises(hk.ProtectionUnavailable, match="too long"):
+        hk.plan(cfg_for(tree))
+
+
 def test_a_git_tracked_file_is_never_planned(tree):
     tracked = write(tree / "_CLAUDE_OUTPUT" / "t" / "fixture" / "Skyrim.esm", blob("master"))
     twin = write(tree / "_CLAUDE_OUTPUT" / "u" / "fixture" / "Skyrim.esm", blob("master"))

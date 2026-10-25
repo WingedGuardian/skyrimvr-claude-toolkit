@@ -10084,3 +10084,17 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_HKS, '        if named[-1] == "audit_log.txt":\n', "        if False:\n",
      _HKS_T + _HKF + "[t/logs/AUDIT_LOG.txt]", "sweep-hk-audit-log-unprotected"),
 ]]
+
+
+# Final sweep 2026-10-25 (X4 34133b7): an evidence link holding spaces, parentheses or escapes still protects its file.
+_HKE = "test_a_linked_path_with_spaces_and_parentheses_is_still_evidence"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_HKS, "                    for end in ends + [len(tail)]:\n", "                    for end in ends[:1]:\n",
+     _HKS_T + _HKE + "[literal]", "sweep-hk-link-stops-at-first-space"),
+    (_HKS, "        views = {text, unquote(text)}\n", "        views = {text}\n",
+     _HKS_T + _HKE + "[percent]", "sweep-hk-link-percent-escapes-unread"),
+    (_HKS, "        views |= {re.sub(", "        views |= set() and {re.sub(",
+     _HKS_T + _HKE + "[backslash]", "sweep-hk-link-backslash-escapes-unread"),
+    (_HKS, "                    if len(tail) > 32768:\n", "                    if False:\n",
+     _HKS_T + "test_evidence_discovery_past_its_bound_refuses_instead_of_truncating", "sweep-hk-link-bound-ignored"),
+]]

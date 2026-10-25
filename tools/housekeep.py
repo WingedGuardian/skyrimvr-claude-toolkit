@@ -53,6 +53,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import unquote
 
 TOOLKIT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = TOOLKIT_ROOT / ".claude" / "housekeep.json"
@@ -94,7 +95,6 @@ DEFAULTS = {
 }
 LAUNCH_RE = re.compile(r"^launch-(\d{8})-(\d{6})$")
 STAMP_RE = re.compile(r"^(\d{8})_(\d{6})$")
-LINK_TAIL = r"/[^)\s\]\"'`<>|]+"
 GIB = 1024 ** 3
 
 
@@ -203,14 +203,35 @@ def evidence_links(cfg) -> set:
             prefixes.append(re.escape(rel.replace("\\", "/")))
     if not prefixes:
         return links
-    link_re = re.compile("(?:{})".format("|".join(prefixes)) + LINK_TAIL)
+    start_re = re.compile("(?:{})/".format("|".join(prefixes)), re.I if os.name == "nt" else 0)
+    budget = 8 * 1024 * 1024
     for doc in cfg["evidence_docs"]:
         p = _abs(cfg, doc)
         if not p.is_file():
             continue
-        for m in link_re.findall(p.read_text(encoding="utf-8", errors="replace")):
-            m = m.rstrip(".,;:*")
-            links.add(_key(cfg["root"] / m))
+        text = p.read_text(encoding="utf-8", errors="replace")
+        # Conservative reference discovery, not a Markdown parser (sweep 2026-10-25; X4 34133b7, c6d4760). A link may
+        # hold spaces and parentheses (`_CLAUDE_OUTPUT/Mod (v2) notes/x.md`), so every cut of the rest of the line at a
+        # delimiter is a candidate: stopping at the FIRST space or ')' silently lost evidence. Literal, %-escaped and
+        # backslash-escaped spellings can all name a real file. Too many candidates refuses rather than truncates.
+        views = {text, unquote(text)}
+        views |= {re.sub(r"\\([!\"#$%&'()*+,./:;<=>?@\[\]^_`{|}~\\-])", r"\1", s) for s in tuple(views)}
+        for view in views:
+            for line in view.splitlines():
+                for start in start_re.finditer(line):
+                    tail = line[start.start():]
+                    if len(tail) > 32768:
+                        raise ProtectionUnavailable("an evidence reference line in {} is too long to read safely".format(
+                            doc))
+                    ends = [i for i, ch in enumerate(tail) if ch.isspace() or ch in ")]\"'`<>|.,;:*"]
+                    for end in ends + [len(tail)]:
+                        candidate = tail[:end]
+                        if candidate:
+                            budget -= len(candidate)
+                            links.add(_key(cfg["root"] / candidate))
+                    if budget < 0 or len(links) > 50000:
+                        raise ProtectionUnavailable("evidence references in {} exceed the safe discovery bound".format(
+                            doc))
     return links
 
 
