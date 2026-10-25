@@ -10193,3 +10193,17 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "    if pa.header.flags != pb.header.flags:\n",
      _ESP_T + "test_diff_sees_a_header_change_and_a_reordered_record", "sweep-esp-diff-misses-header-change"),
 ]]
+
+# Final sweep 2026-10-25 (install 86c18ca): a kept config identical to the archive's copy gets no .new.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/mod-install.py",
+     '                if action == "CONFIG-NEW" and dest.is_file() and sha(dest) == sha(staged[inner]):\n',
+     "                if False:\n",
+     "tests/test_mod_install.py::test_a_kept_config_identical_to_the_archive_gets_no_new_file_and_is_still_recorded",
+     "sweep-modinst-identical-config-gets-new"),
+    ("tools/mod-install.py",
+     '                if action == "CONFIG-NEW" and dest.is_file() and sha(dest) == sha(staged[inner]):\n',
+     '                if action == "CONFIG-NEW" and dest.is_file():\n',
+     "tests/test_mod_install.py::test_an_existing_config_gets_a_new_file_beside_it",
+     "sweep-modinst-different-config-gets-no-new"),
+]]
