@@ -8466,7 +8466,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_P8R1_SR, "            a = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), w)",
      "            a = targets.resolve_operand(e, w, cwd, env)",
      _P8R1 + "test_a_stream_of_a_guard_file_is_the_guard_file[hook-data]", "p8r1-stream-shell-wired"),
-    ('tools/skyguard/portable.py', '                    tuple(holding(r) for r in (local_policy.restriction(project, deadline, lambda: save_plan[0]),', '                    tuple(holding(r) for r in (lambda _a: contracts.Result(evaluation="evaluated"),', 'tests/test_local_policy.py::test_registered_policy_denies_before_any_permanent_save_backup', 'registered-local-policy-before-preservation'),
+    ('tools/skyguard/portable.py', '                    (local_policy.restriction(project, deadline, lambda: save_plan[0]), *local_restrictions))', '                    tuple(local_restrictions))', 'tests/test_local_policy.py::test_registered_policy_denies_before_any_permanent_save_backup', 'registered-local-policy-before-preservation'),
 ]]
 
 # ---- Plan 8 T8 fix round 2 (lane p8-paths): re-review N1, N2, N4. One twin per clause. ---------------------------
@@ -9886,28 +9886,20 @@ MUTATIONS.append(pytest.param(
     '        if False:',
     "tests/test_guard_latency.py::test_invalid_pretooluse_schema_fails_the_gate[scalar]",
     id="guard-latency-valid-json-invalid-schema"))
-# L2 HIGH-1 (v4.0.0 review): another rule's ASK beside a save change. The shared dispatcher returns an ask before the
-# bulk approval and the backup, so portable.check holds the ask until both pass. One twin per clause, each on the live
-# hook entry (run.py in process) or the dispatcher bridge.
+# L2 HIGH-1 (v4.0.0 review): another rule's ASK beside a save change. The shared core (pinned 221292e) holds the ask
+# until the typed bulk approval and the verified pair backup pass; these twins restore its early returns and require
+# the LIVE hook-path tests (Claude run.py in process, Codex engine.pre_tool, portable.check) to go red.
 _PSAVE = "tests/test_save_policy.py::"
-MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
-    ("tools/skyguard/portable.py", '        if result.decision == "ask" and _changes_saves(plan):', "        if False:",
-     _PSAVE + "test_three_saves_beside_an_ask_are_refused_without_the_typed_approval[opaque]",
+_CORE_PROFILE_ASK = ('            if result.decision == "deny":', '            if result.decision in ("deny", "ask"):')
+_CORE_LOCAL_ASK = ('                if restriction.decision == "deny":', '                if restriction.decision in ("deny", "ask"):')
+MUTATIONS += [pytest.param("tools/modding_harness/dispatch.py", *m[:3], id=m[3]) for m in [
+    (*_CORE_PROFILE_ASK, _PSAVE + "test_three_saves_beside_an_ask_are_refused_without_the_typed_approval[opaque]",
      "rule-S-SAVE-APPROVAL-wins-over-an-ask"),
-    ("tools/skyguard/portable.py", '        if result.decision == "ask" and _changes_saves(plan):', '        if result.decision == "never":',
-     _PSAVE + "test_one_save_beside_an_ask_is_backed_up_before_the_ask[git-discard]",
+    (*_CORE_PROFILE_ASK, _PSAVE + "test_one_save_beside_an_ask_is_backed_up_before_the_ask[git-discard]",
      "rule-S-SAVE-BACKUP-before-an-ask"),
-    ("tools/skyguard/portable.py",
-     '        outcome = replace(outcome, result=replace(outcome.result, decision="ask", reason=held[0].reason))',
-     "        pass", _PSAVE + "test_one_save_beside_an_ask_is_backed_up_before_the_ask[opaque]",
-     "save-held-ask-restored"),
-    ("tools/skyguard/portable.py", "    return plan is not None and bool(plan.mutations or plan.wildcard or plan.helper or plan.unresolved)",
-     "    return plan is not None and bool(plan.wildcard or plan.helper or plan.unresolved)",
-     _PSAVE + "test_codex_save_change_beside_an_ask_keeps_the_save_policy[one-save-asks-after-backup]",
-     "save-held-ask-counts-mutations"),
-    ("tools/skyguard/portable.py",
-     '            if (isinstance(verdict, contracts.Result) and verdict.decision == "ask" and held[0] is None',
-     "            if (False", "tests/test_portable_profile.py::test_a_local_restriction_ask_waits_for_the_save_policy",
+    (*_CORE_PROFILE_ASK, _PSAVE + "test_codex_save_change_beside_an_ask_keeps_the_save_policy[one-save-asks-after-backup]",
+     "save-codex-ask-after-backup"),
+    (*_CORE_LOCAL_ASK, "tests/test_portable_profile.py::test_a_local_restriction_ask_waits_for_the_save_policy",
      "save-local-restriction-ask-held"),
 ]]
 

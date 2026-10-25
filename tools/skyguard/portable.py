@@ -18,11 +18,6 @@ from .request import Request
 from .verdict import Verdict
 
 
-def _changes_saves(plan):
-    """The save plan names a save change the dispatcher must approve or preserve before any ask is returned."""
-    return plan is not None and bool(plan.mutations or plan.wildcard or plan.helper or plan.unresolved)
-
-
 def request(action, transcript=""):
     ops = []
     for index, operation in enumerate(action.operations):
@@ -78,11 +73,6 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
     req = _legacy.request if _legacy else request(action, transcript)
     last = [Verdict()]
     save_plan = [None]
-    # L2 HIGH-1: the shared dispatcher returns any ask BEFORE it checks the typed bulk approval or preserves a save.
-    # An ask beside a save change is therefore held here and handed to the dispatcher as an allow, so the approval
-    # check and the verified pair backup run first; the held ask is restored only once they pass, and their refusal
-    # (S-SAVE-APPROVAL, S-SAVE-BACKUP-FAILED) wins over it.
-    held = [None]
     known = req.kind in ("shell", "write") or req.kind == "mcp" and mcp_rules.judged_server(req.mcp_tool)
     if _legacy:
         roots = _legacy.roots or paths.Roots("", "")
@@ -141,9 +131,6 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
             plan = local_policy.supplement_controlled(action, project, plan, profile, deadline)
             plan = local_policy.supplement_shell_scope(action, project, plan, profile, transcript, deadline)
         save_plan[0] = plan
-        if result.decision == "ask" and _changes_saves(plan):
-            held[0] = result
-            result = replace(result, decision="allow", reason="")
         return dispatch.Evaluation(result, plan)
 
     def preview_restriction(_action):
@@ -154,23 +141,10 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
                 "PREVIEW ONLY: installed local policy workers are not read-only qualified; use normal check for exact scope (it may write runtime state/backups).")
         return contracts.Result(evaluation="evaluated")
 
-    def holding(restriction):
-        def check_held(_action):
-            verdict = restriction(_action)
-            if (isinstance(verdict, contracts.Result) and verdict.decision == "ask" and held[0] is None
-                    and _changes_saves(save_plan[0])):
-                held[0] = verdict
-                return replace(verdict, decision="allow", reason="")
-            return verdict
-        return check_held
-
     restrictions = ((preview_restriction,) if preview else
-                    tuple(holding(r) for r in (local_policy.restriction(project, deadline, lambda: save_plan[0]),
-                                               *local_restrictions)))
+                    (local_policy.restriction(project, deadline, lambda: save_plan[0]), *local_restrictions))
     outcome = dispatch.Dispatcher(project, profile, policy, restrictions).pre(action, transcript, deadline,
                                                                           preserve=not preview)
-    if held[0] is not None and outcome.result.decision == "allow":
-        outcome = replace(outcome, result=replace(outcome.result, decision="ask", reason=held[0].reason))
     if preview:
         return replace(outcome, result=replace(outcome.result, warnings=outcome.result.warnings +
             ("PREVIEW ONLY: no operation is authorized; no backup, receipt or runtime state was written",))), None
