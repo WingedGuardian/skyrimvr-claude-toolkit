@@ -45,11 +45,19 @@ DevBench is drivable with nobody in the headset. Close SteamVR first; then start
 settle (if room setup opens, wait for it to close: launching while it runs gets the game evicted),
 and launch the game. `bash tools/vr-headless.sh off` restores both files byte-exact and verifies
 them (a file that changed after `on` is first copied into the run's `changed-after-on-<stamp>/`); it is safe to
-repeat and after a crash, so run it before the user plays again. **Valid only for
+repeat and after a crash, so run it before the user plays again. `off` restores what `on` saw: if the
+game was already headless at `on`, it restores a headless setup. Before the user plays, check the result
+itself (the game folder's `openvr_api.dll` is the user's normal loader, null-driver forcing is off in
+SteamVR's settings, the user's input plugin is present), not only that it matches the snapshot. **Valid only for
 pose-independent tests** -- scripts, records, console, frame rate. Anything that depends on where the
 head and hands are (HIGGS, VRIK, PLANCK, hand collision) needs the real headset. `emu on|off` swaps in
 a pose-emulating driver (its hands track) once the user has built it (`tools/vr-emu-driver/README.md`:
 fetched from a pinned upstream commit, never shipped). Skyrim VR only.
+
+**A headless run must not take over the user's desktop.** The user may be at the same computer: never
+send keystrokes or mouse input to their desktop, and never bring a window to the foreground to drive
+the game. Drive it through DevBench (REST/MCP) only. If a step seems to need window input or focus, stop
+and ask the user first, every time; an earlier yes does not carry over to a new session.
 
 **Port is deterministic per runtime: SE/AE `8920`, VR `8921`** (DevBench iterates if the port is busy
 and writes the bound port to `Data/SKSE/Plugins/devbench/runtime.json`, which the wrapper reads).

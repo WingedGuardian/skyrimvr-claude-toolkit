@@ -22,8 +22,6 @@
       "Bash(gh auth:*)",
       "WebSearch",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:www.nexusmods.com)",
-      "WebFetch(domain:forums.nexusmods.com)",
       "WebFetch(domain:en.uesp.net)",
       "WebFetch(domain:ck.uesp.net)",
       "WebFetch(domain:wiki.beyondskyrim.org)",

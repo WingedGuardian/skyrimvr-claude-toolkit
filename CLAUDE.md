@@ -60,6 +60,7 @@ any agent can read one directly. Read the skill BEFORE the work:
 | install or verify an optional tool, or set up the Nexus API key | `docs/installing-tools.md` |
 | use the Linux devcontainer | `docs/container-vs-windows.md` |
 | understand why the guards behave as they do | `docs/safety-philosophy.md` |
+| review, debug or build a check | `docs/verify-from-the-outside.md` |
 | adapt an unsupported agent, or Python, Git or Node is missing or broken | `ADAPTING.md`, skill `toolkit-setup` |
 
 ## PyFFI / PyNifly (NIF geometry + animation authoring)
@@ -81,7 +82,7 @@ Settings load in this order (later overrides earlier):
 
 **Always search a mod's Nexus mod page before investigating it.** Check the description, tutorials/articles, comments, and bug reports before going in blind. Most issues are already documented there.
 
-Nexus also has a free API (versions, changelogs, dependencies). `bash tools/nexus.sh mod <id>` wraps it; key setup and the personal-use rules are in `docs/installing-tools.md`. Never echo, log or commit the key.
+Nexus also has a free API (versions, changelogs, dependencies). `bash tools/nexus.sh mod <id>` wraps it; key setup and the personal-use rules are in `docs/installing-tools.md`. Never echo, log or commit the key. Nexus pages answer plain web fetches with 403: use a browser tool.
 
 ## Knowledgebase
 
@@ -105,8 +106,8 @@ repository that does not ignore that file, commit it alone by explicit path (`gi
 
 `KNOWLEDGEBASE.local.md` holds the user's facts AND their standing instructions. Its
 `## My preferences` section is the user's instructions to you: **read it at the start of every
-session and follow it**. On agents with session hooks the guards print it at session start; that is
-the same text. Read the rest of the file before making changes. When the user states a lasting
+session and follow it**. Never grant or imply an exception to it; no doc outranks it. On agents with
+session hooks the guards print it at session start; that is the same text. Read the rest of the file before making changes. When the user states a lasting
 preference ("always…", "never…", "from now on…"), add it to that section. When you create the
 file, start it with an empty `## My preferences` section.
 
@@ -136,7 +137,7 @@ These are the most dangerous/common pitfalls. Consult `KNOWLEDGEBASE.md` for ful
 4. **PlayIdle fails in VR** -- VRIK overrides skeleton IK; bypass with timed Papyrus scripts
 5. **Wait() unreliable under 100ms** -- merge sub-100ms gaps; use `RegisterForSingleUpdate` when possible
 6. **SSE != VR** for: camera, skeleton, collision, UI, input, SKSE addresses, physics (60Hz->90Hz)
-7. **ESL FormIDs must be in xx000800-xx000FFF** -- exceeding = crash or data corruption
+7. **Light-plugin (ESL) FormIDs: keep to xx000800-xx000FFF** -- lower IDs depend on the runtime (KB)
 8. **Loose files always override BSAs** -- check for loose file conflicts before assuming BSA content wins
 9. **Condition OR has precedence over AND** -- `A AND B OR C` != what you'd expect
 10. **Non-auto properties don't restore from master on save/load** -- they stay blank
@@ -257,6 +258,7 @@ Coverage and gaps: `docs/guard-coverage.md`.
 ### General rules
 - **Always review changes before applying** -- modded installs are delicate
 - Never modify ESP/ESM files directly -- use xelib or Spriggit
+- **Keep line endings:** a CRLF file stays CRLF; whole-file churn in `git diff --stat` means you broke it
 - Vortex manages load order -- direct edits to loadorder.txt/plugins.txt may be overwritten
 - **Never bare-copy a third-party mod into `Data/`**, SKSE DLLs (DevBench too) included: untracked
   files get clobbered or orphaned by a deploy or purge. Prefer the user's mod manager; a manual
@@ -264,7 +266,8 @@ Coverage and gaps: `docs/guard-coverage.md`.
   (backups + manifest) and check the result. (The user's **own** in-development mod files are fine.)
 - **Delete to the Recycle Bin, never permanently.** Windows: the shell delete (`SHFileOperation` with
   `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), not `rm`/`Remove-Item`; only same-run scratch goes outright; too big
-  for the bin -> ask. The guard judges these like any delete. Retention: `docs/RETENTION.md`.
+  for the bin -> ask. Say in chat first when a delete may need approval or raise an OS prompt. The guard
+  judges these like any delete. Retention: `docs/RETENTION.md`.
 - **Resources:** own jobs share <=40% CPU/25% physical RAM, <=8 workers, low priority.
   Physical RAM is primary; commit uses fixed 512/256/128 MiB buffers, never percentages.
   Games/user-directed work skip admission; games skip floors. See `docs/resource-policy.md`
@@ -317,14 +320,7 @@ Approaches disconnected from how the engine actually works lead to silent failur
 3. Model your solution as closely as possible on that pattern
 4. Only diverge when the vanilla pattern genuinely cannot be adapted
 
-**Examples:**
-
-| Mechanic | Wrong (invented) | Vanilla-aligned |
-|----------|-----------------|-----------------|
-| Bleed on hit | ValueModifier MGEF on a Concentration enchantment | FireAndForget bleed spell cast per-swing (mirrors the Bleeding Strikes perk's per-hit application) |
-| Script stagger | Stagger-archetype FireAndForget spell via `Spell.Cast()` (no visible animation) | `PushActorAway(target, 1-3)` — physical stumble, proven engine behavior |
-| Stagger immunity | `ForceActorValue("Stagger", 0)` polling | AddPerk with a ModIncomingStagger ×0 entry |
-| Melee auto-fire prevention | Dispel in OnEffectStart | Strip the enchantment from the weapon form |
+Worked examples: `KNOWLEDGEBASE.md`, *Stagger & Bleed — Vanilla Alignment*.
 
 ---
 

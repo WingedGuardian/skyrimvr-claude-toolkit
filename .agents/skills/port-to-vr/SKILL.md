@@ -59,7 +59,7 @@ Decompile all `.pex` files and check for:
 Serialize with Spriggit and check:
 - [ ] Casting type consistency on all spells (all effects must match)
 - [ ] ONAM subrecords if ESM-flagged
-- [ ] ESL FormID range (xx000800-xx000FFF)
+- [ ] ESL FormID range: xx000800-xx000FFF is the safe range. A header-1.71 light plugin from a modern SE tool may use IDs below 0x800; VR has no native ESL support, so test such a plugin alone on your ESL-support setup (KB *ESL rules*)
 - [ ] VMAD script properties → use `GetFormFromFile()` on your OWN plugin's forms to minimize properties (never another mod's — see *Own Your Records*), and check the result for `None`
 
 ## Step 8: Create VR Patch
