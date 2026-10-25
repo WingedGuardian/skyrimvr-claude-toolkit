@@ -502,8 +502,9 @@ and it skips unapproved ones **silently** -- no error, no warning, nothing check
 Skyrim folder, type `/hooks`, and approve the **2 Skyrim toolkit hooks**. Then check with
 `bash tools/hook-canary.sh`. When they run, each Codex session starts with `SKYGUARD: Codex hooks live`.
 
-Start Codex in the game folder. From a subfolder of a non-git install no hook ran on codex-cli 0.160.0, while an
-isolated 0.162.1 probe loaded them: it depends on the version. Verify the live banner and canary before relying on hooks.
+Start Codex in the game folder. Subfolder loading is version-dependent: it worked in an isolated 0.162.1 probe.
+Verify the live banner and canary before relying on hooks. From a subfolder of a non-git install no hook ran on
+codex-cli 0.160.0: it depends on the version.
 
 Approve again when:
 

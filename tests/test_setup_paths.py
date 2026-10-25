@@ -530,8 +530,9 @@ def test_setup_tells_the_user_to_start_codex_in_the_game_folder(game_dir):
 def test_the_codex_subfolder_warning_is_in_the_docs(rel):
     text = " ".join((REPO / rel).read_text(encoding="utf-8").split())
     if rel == "CHANGELOG.md":
-        # Preserve the historical release record; it is not current guidance.
-        assert HISTORICAL_SUBFOLDER_LINE in text, rel
+        # v4.0.0's notes carry the current, version-dependent guidance, never the old absolute "no hook runs" claim.
+        assert "start Codex in the game folder" in text and "it depends on the version" in text, rel
+        assert HISTORICAL_SUBFOLDER_LINE not in text, rel
     else:
         assert SUBFOLDER_LINE in text, rel
         assert HISTORICAL_SUBFOLDER_LINE not in text, rel
