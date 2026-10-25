@@ -3448,12 +3448,6 @@ _DEL_CLAUSES = [
     ("rule-S-DEL-MO2-zone", _DL,
      'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG", "mo2": "S-DEL-MO2"}',
      'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG"}', "mo2-bash"),
-    ("rule-S-DEL-INSTALL-interpreter-code", _DL,
-     "        if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (",
-     "        if code and resolved is None and False and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (",
-     "python-rmtree"),
-    ("rule-S-DEL-INSTALL-interpreter-api", _DL,
-     "(has(DESTROYER, code) or has(INTERP_DELETE, code) or (", "(has(DESTROYER, code) or (", "node-rmsync"),
     # clause (b): an UNRESOLVED operand
     ("rule-S-DEL-UNRESOLVED-needs-root-mention", _DL, "    if unresolved_any and names_root(command, roots, has):",
      "    if unresolved_any:", "tmp-var"),
@@ -3508,6 +3502,16 @@ _DEL_CLAUSES = [
 MUTATIONS += [
     pytest.param(f, find, rep, _t07(row), id="deletes-" + i if not i.startswith("rule-") else i)
     for i, f, find, rep, row in _DEL_CLAUSES
+]
+# guard3: the literal-name reader (interpreter_delete_targets) also refuses rows python-rmtree and node-rmsync, so
+# the text clause these two twins pin is now proven on code that BUILDS its name (tests/test_interpreter_deletes.py).
+_IDB = "tests/test_interpreter_deletes.py::test_a_built_name_naming_the_install_is_still_refused_by_text"
+MUTATIONS += [
+    pytest.param(_DL, "        if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (",
+                 "        if code and resolved is None and False and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (",
+                 _IDB + "[python-joined-name]", id="rule-S-DEL-INSTALL-interpreter-code"),
+    pytest.param(_DL, "(has(DESTROYER, code) or has(INTERP_DELETE, code) or (", "(has(DESTROYER, code) or (",
+                 _IDB + "[node-joined-name]", id="rule-S-DEL-INSTALL-interpreter-api"),
 ]
 MUTATIONS.append(pytest.param(_DL, "    return _covers_kind(abs_path, roots)", '    return ""',
     "tests/test_skyguard_deletes.py::test_protected_kind[c:/Synthetic Games-install]",
@@ -10149,4 +10153,21 @@ MUTATIONS += [pytest.param("tools/skyguard/deletes.py", *m[:3], id=m[3]) for m i
      "guard3-interpreter-delete-resolved-where-it-runs"),
     ("interpreter_delete_targets(code, bool(_PYTHON.fullmatch(e.program)))", "interpreter_delete_targets(code, False)",
      _IDT + "[python-os-remove]", "guard3-interpreter-delete-python-as-python"),
+]]
+
+
+# guard3 (v4.0.0 review A-guard MEDIUM-3 and its S-SELF-STATE note): interpreter literal writes reach both refusals.
+_ITW = "tests/test_transcript_guard.py::test_interpreter_code_writing_the_transcript_is_refused"
+MUTATIONS += [pytest.param("tools/skyguard/self_rules.py", *m[:3], id=m[3]) for m in [
+    ("        for placed, holder in _interpreter_targets(e, cwd, env):", "        for placed, holder in []:",
+     _ITW + "[python-c-append]", "rule-S-SELF-TRANSCRIPT-interpreter-code"),
+    ("            for a, holder in _interpreter_targets(e, cwd, env):", "            for a, holder in []:",
+     "tests/test_interpreter_deletes.py::test_interpreter_code_writing_the_guard_state_is_refused",
+     "rule-S-SELF-STATE-interpreter-code"),
+    ("    for words, holder in ((written, False), (deletes.interpreter_delete_targets(code, python), True)):",
+     "    for words, holder in ((written, False),):", _ITW + "[python-c-delete]",
+     "rule-S-SELF-TRANSCRIPT-interpreter-delete"),
+    ("    for words, holder in ((written, False), (deletes.interpreter_delete_targets(code, python), True)):",
+     "    for words, holder in ((deletes.interpreter_delete_targets(code, python), True),):",
+     _ITW + "[node-e-append]", "rule-S-SELF-TRANSCRIPT-interpreter-write"),
 ]]

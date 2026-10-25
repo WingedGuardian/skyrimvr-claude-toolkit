@@ -54,6 +54,19 @@ def test_a_relative_interpreter_delete_from_the_install_is_refused(inst, case):
     assert got["decision"] == "deny" and got["rules"] == {"S-DEL-INSTALL"}, got
 
 
+# A name the code BUILDS is not a literal; the older text clause (a delete word plus a protected root) still refuses it.
+BUILT = {
+    "python-joined-name": "python -c \"import os, shutil; shutil.rmtree(os.path.join('<I>', 'Data'))\"",
+    "node-joined-name": "node -e \"require('fs').rmSync(require('path').join('<I>', 'Data'), {recursive: true})\"",
+}
+
+
+@pytest.mark.parametrize("case", sorted(BUILT))
+def test_a_built_name_naming_the_install_is_still_refused_by_text(inst, case):
+    got = fire(inst, BUILT[case], cwd="C:/work")
+    assert got["decision"] == "deny" and got["rules"] == {"S-DEL-INSTALL"}, got
+
+
 ALLOWED = {
     "outside-the-install": ("python -c \"import shutil; shutil.rmtree('Data')\"", "C:/work"),
     "scratch-name": ("python -c \"import shutil; shutil.rmtree('/tmp/x')\"", "<I>"),
@@ -74,3 +87,11 @@ def test_the_python_reader_names_only_literal_delete_arguments():
             "Path('c', 'd').rmdir()\nos.remove(x)\nprint('rm -rf e')\n")
     assert deletes.interpreter_delete_targets(code, True) == ["a", "b", "c/d"]
     assert deletes.interpreter_delete_targets("print(1", True) == []
+
+
+def test_interpreter_code_writing_the_guard_state_is_refused(inst):
+    """guard3 (A-guard MEDIUM-3 note): S-SELF-STATE reads interpreter literal writes and deletes too."""
+    for code in ("open('<I>/.skyguard/state.json','w').write('x')", "import os; os.remove('.skyguard/state.json')"):
+        got = fire(inst, 'python -c "%s"' % code)
+        assert got["decision"] == "deny" and got["rules"] == {"S-SELF-STATE"}, (code, got)
+

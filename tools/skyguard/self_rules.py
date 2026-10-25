@@ -771,6 +771,30 @@ def _state_text(command: str, parsed) -> str:
     return ""
 
 
+def _interpreter_targets(e, cwd, env) -> List[Tuple[str, bool]]:
+    """guard3 (v4.0.0 review A-guard MEDIUM-3): (absolute path, holder) for each file interpreter code names by a string
+    literal to write (writes.text_write_targets: open(..., 'a'), Path.write_text, fs.appendFileSync ...) or to delete
+    (deletes.interpreter_delete_targets: holder=True, a folder counts), resolved where the code runs. Malformed Python
+    is writes.scan's refusal (engine.UNPARSED), so it names nothing here."""
+    from . import deletes, writes
+    code = deletes.interpreter_code(e)
+    if not code:
+        return []
+    python = bool(deletes._PYTHON.fullmatch(e.program))
+    try:
+        written = writes.text_write_targets(code, python_literals=python)
+    except ValueError:
+        written = []
+    base = targets.exec_cwd(e, cwd, env) or ""
+    out = []
+    for words, holder in ((written, False), (deletes.interpreter_delete_targets(code, python), True)):
+        for w in words:
+            a = targets.resolve_literal(w, base, env)
+            if a is not None:
+                out.append((a, holder))
+    return out
+
+
 def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, str]] = None):
     """(class, basename, op) of the first protected file a command writes, STATE before GUARD; None when it writes none.
     op: EDITS / CREATES / LINKS, the verb of the S-SELF-GUARD note (T8 fix round 2, review N4)."""
@@ -791,6 +815,12 @@ def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping
                    or _printed_state_delete(e, parsed, cwd, env, roots, command))
             if hit:
                 found[STATE] = (hit, EDITS)
+        if STATE not in found:
+            # guard3 (v4.0.0 review A-guard, S-SELF-STATE note): `python -c "open('.skyguard/state.json','w')"`.
+            for a, holder in _interpreter_targets(e, cwd, env):
+                if kind_of(a, roots, env, holder) == STATE:
+                    found[STATE] = (re.split(r"[/\\]+", a.rstrip("/\\"))[-1] or a, EDITS)
+                    break
     if STATE not in found:
         hit = _recycle_delete(command, parsed, cwd, env, roots)
         if hit:
@@ -812,6 +842,7 @@ def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping
 # Reading one stays free. Covered: the payload's own transcript_path, Claude Code's `<config>/projects/**/*.jsonl`
 # (`~/.claude`, or CLAUDE_CONFIG_DIR) and Codex's `<home>/sessions/**` and `archived_sessions/**` (`~/.codex`, or
 # CODEX_HOME), through the file tools, apply_patch and every shell write/copy/move/delete route self_rules reads.
+# Interpreter code (python -c, a python heredoc, node -e ...) writing or deleting one by a literal name is refused too.
 # NOT covered (residue): interpreter code that builds the path at run time or writes from a script file.
 
 def _transcript_bases(env) -> List[Tuple[str, str]]:
@@ -876,6 +907,9 @@ def shell_transcript_hit(command, parsed, cwd="", env=None, transcript="") -> st
         for word, holder in candidates:
             placed = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), word)
             if placed and transcript_target(placed, env, transcript, holder):
+                return placed
+        for placed, holder in _interpreter_targets(e, cwd, env):    # guard3: python -c / node -e / a heredoc
+            if transcript_target(placed, env, transcript, holder):
                 return placed
     for word, how in deletes.recycle_targets(deletes.recycle_text(command, parsed)):
         if not word.strip():

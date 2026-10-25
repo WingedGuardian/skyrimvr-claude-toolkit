@@ -77,7 +77,8 @@ Bethesda key); on any other path such a command is allowed as read, and the verd
     Invoke-Expression). A concatenated name offers the programs its literal part can end (`%R%del`, `"$($R)-Item"`).
     It stays "?" beside those readings, and a save in its words asks (S-SAVE-OPAQUE), as does a protected path in
     its words or in the command text (S-OPAQUE-PROTECTED). Not parsed: a name built entirely from variables (`$A$B`),
-    and a string that a variable holds and an eval runs (`eval "$CODE"`, `iex $s`); both ask only through the
+    and a string that a variable holds and an eval runs (`eval "$CODE"`, `iex $s`) unless that variable is a certain
+    same-command literal (guard3: then the literal is parsed as the command it is); both ask only through the
     S-OPAQUE-PROTECTED text check, so a protected path spelled relatively inside such a string is not seen.
     A `cd` behind such a word (`$R cd X`) keeps the directory before it: the cd runs only if $R is empty, and one
     directory cannot hold both readings (marking it unknown loosened `$R cd /tmp && rm -rf Data` in the install).
