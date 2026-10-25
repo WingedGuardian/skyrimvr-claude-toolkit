@@ -10693,6 +10693,8 @@ MUTATIONS += [pytest.param(_HKD, before, after, _HKDT + test, id="hk-derived-" +
      "test_manifest_references_or_uncertainty_keep_staging[json]"),
     ("rollback-writer", '                        remember(line.split(": ", 1)[1])', '                        pass',
      "test_manifest_references_or_uncertainty_keep_staging[writer-text]"),
+    ("rollback-payload", '                if "backups" in Path(dp).relative_to(root).parts and not name.endswith(".files.txt"):',
+     '                if False:', "test_operation_manifests_are_read_without_misreading_backed_up_configs[False]"),
     ("manifest-uncertainty", '                why = "staging protection unavailable ({}: {})".format(type(error).__name__, error)',
      '                why = ""', "test_manifest_references_or_uncertainty_keep_staging[unreadable-json]"),
     ("manifest-relative", '        if not Path(value).is_absolute():', '        if False:',

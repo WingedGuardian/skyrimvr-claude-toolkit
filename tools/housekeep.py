@@ -457,6 +457,8 @@ def manifest_references(cfg):
                 if not plain_path(path):
                     raise ValueError("manifest is a link")
                 # Backup payloads are not manifests. Only manifest files are parsed.
+                if "backups" in Path(dp).relative_to(root).parts and not name.endswith(".files.txt"):
+                    continue
                 if not (name.endswith(".files.txt") or path.suffix.lower() == ".json"):
                     if "backups" in Path(dp).relative_to(root).parts:
                         continue

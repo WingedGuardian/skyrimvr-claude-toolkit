@@ -163,6 +163,22 @@ def test_a_manifest_for_another_folder_does_not_block_staging(tmp_path):
     assert planned(hk.plan(cfg), "superseded") == {key(old)}
 
 
+@pytest.mark.parametrize("rollback", [False, True])
+def test_operation_manifests_are_read_without_misreading_backed_up_configs(tmp_path, rollback):
+    old, _new, cfg = stage_tree(tmp_path)
+    operation = tmp_path / "manual-installs/backups/operation"
+    reference = old if rollback else operation
+    text = ("# Example -- installed 20261025-000000 from example.zip [group default]\n"
+            "# installed into: " + str(tmp_path / "Data") + "\n"
+            "# overwritten originals backed up under: " + str(reference) + "\n"
+            "# format: <sha256>  <file written>   (uninstall: delete these, restore the backups)\n"
+            "# STATUS: complete, 1 file(s), 0 verify mismatch(es)\n" + "0" * 64 + "  "
+            + str(tmp_path / "Data/settings.json") + "\n")
+    write(operation / "manifest.files.txt", text.encode())
+    write(operation / "Data/settings.json", b'{"mod_configuration":true}')
+    assert (key(old) in planned(hk.plan(cfg), "superseded")) is not rollback
+
+
 @pytest.mark.parametrize("kind", ["tracked", "linked"])
 def test_staging_preserves_tracked_files_and_linked_evidence(tmp_path, kind):
     old, _new, cfg = stage_tree(tmp_path)
