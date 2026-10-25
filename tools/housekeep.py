@@ -9,7 +9,8 @@ that repeat the one before. The policy this tool implements is docs/RETENTION.md
     python tools/housekeep.py plan -o plan.json   every action it would take, with the hash it was planned on
             [--only CLASS[,CLASS]]               (skips the scans no listed class needs)
     python tools/housekeep.py apply plan.json     re-check each action, then do exactly those
-            [--only CLASS[,CLASS]]               (recreatable, build, link, gzip, launch, snapshot, scratch)
+            [--only CLASS[,CLASS]]               (derived, recreatable, build, link, gzip, launch, snapshot, scratch,
+                                                  superseded)
     python tools/housekeep.py sweep-temp          recycle the toolkit's own stale temp dirs (see "temp sweep")
     python tools/housekeep.py session STATE.txt   sweep-temp, recycle settled .claude/retired batches (what the guard
                                                   pruned from its own stores), then write the session note to STATE.txt
@@ -29,7 +30,7 @@ Removal goes to the Recycle Bin, never a permanent delete, with no exceptions (W
 FOF_ALLOWUNDO). An item too big for the bin gets Windows' own "delete permanently?" prompt; "No" leaves it in place.
 The bin frees no disk space until it is emptied; that is the user's call. A file the bin refuses is reported
 FAILED and left in place; off Windows there is no Recycle Bin implementation, so every removal is reported that way.
-The whole-folder classes (launch, snapshot, scratch) keep a folder whole when any file in it is protected. Duplicates are not removed at all: they become NTFS hard links to one copy, marked
+The whole-folder classes (launch, snapshot, scratch, superseded) keep a folder whole when any file in it is protected. Duplicates are not removed at all: they become NTFS hard links to one copy, marked
 read-only so an in-place edit cannot silently change every path at once. A file that already has another name (a mod
 manager's hard-link deployment shares the inode with a live Data/ file) is never linked or made read-only.
 
@@ -45,6 +46,7 @@ import fnmatch
 import gzip
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -63,7 +65,7 @@ DEFAULT_CONFIG = TOOLKIT_ROOT / ".claude" / "housekeep.json"
 # install that predates the guard package; tests/test_housekeep.py fails if the two drift.
 SAVE_EXTS = (".ess", ".skse")
 
-CLASSES = ("recreatable", "build", "link", "gzip", "launch", "snapshot", "scratch")
+CLASSES = ("derived", "recreatable", "build", "link", "gzip", "launch", "snapshot", "scratch", "superseded")
 DEFAULTS = {
     "agent_output": [],               # task-folder roots (relative to the toolkit root, or absolute)
     "nested_task_roots": [],          # roots one level down whose children are task folders of their own
@@ -73,6 +75,8 @@ DEFAULTS = {
     "launch_logs": [],                # folders of launch-YYYYMMDD-HHMMSS/ log captures
     "legacy_snapshots": [],           # folders of YYYYMMDD_HHMMSS/ snapshot copies (the 3.x snapshot hook)
     "scratch": [],                    # whole folders to recycle, named one by one
+    "staging_roots": [],              # direct versioned children only; rollback sources always stay
+    "superseded_after_days": 30,
     "evidence_docs": ["CLAUDE.md", "AGENTS.md", "KNOWLEDGEBASE.md", "KNOWLEDGEBASE.local.md"],
     "protected_globs": [],
     "build_dir_names": ["build", "build-sdk", "build-vcpkg", "native-bootstrap", "native-prebuilt",
@@ -113,6 +117,15 @@ def load_config(path: Path | None) -> dict:
     elif path:
         raise ValueError("config not found: {}".format(p))
     cfg["root"] = Path(cfg.get("root") or TOOLKIT_ROOT)
+    days = cfg["superseded_after_days"]
+    if isinstance(days, bool) or not isinstance(days, (int, float)) or not math.isfinite(days) or days < 0:
+        raise ValueError("superseded_after_days must be a finite nonnegative number")
+    if not isinstance(cfg["staging_roots"], list) or any(not isinstance(p, str) or not p for p in cfg["staging_roots"]):
+        raise ValueError("staging_roots must be a list of nonempty paths")
+    stage_roots = [_real(_abs(cfg, p)) for p in cfg["staging_roots"]]
+    if any(a == b or _strictly_inside(a, b) or _strictly_inside(b, a)
+           for i, a in enumerate(stage_roots) for b in stage_roots[i + 1:]):
+        raise ValueError("staging_roots must not overlap")
     return cfg
 
 
@@ -195,7 +208,7 @@ def evidence_links(cfg) -> set:
     file is never planned for anything."""
     links = set()
     prefixes = []
-    for r in cfg["agent_output"]:
+    for r in cfg["agent_output"] + cfg["staging_roots"]:
         try:
             rel = os.path.relpath(os.path.abspath(str(_abs(cfg, r))), os.path.abspath(str(cfg["root"])))
         except ValueError:                       # another drive: docs cannot link it relatively
@@ -242,6 +255,10 @@ class Guard:
     def __init__(self, cfg):
         self.cfg = cfg
         self.tracked = tracked_files(cfg["root"])
+        for r in cfg["staging_roots"]:
+            root = _abs(cfg, r)
+            if root.is_dir():
+                self.tracked.update(tracked_files(root))
         self.links = evidence_links(cfg)
         self.globs = [g.lower() for g in cfg["protected_globs"]]
 
@@ -250,6 +267,8 @@ class Guard:
         low = p.replace("\\", "/").lower()
         if low.endswith(SAVE_EXTS):
             return "save"
+        if low.endswith(".etl"):
+            return "source measurement (ETL)"
         # Folder names BELOW the configured root only: a root that itself sits under ".../backups/..." must not
         # make every file look protected (or, read the other way, make the rule meaningless).
         try:
@@ -374,6 +393,145 @@ def is_build(path: Path, cfg) -> bool:
     return path.suffix.lower() in {e.lower() for e in cfg["build_exts"]} and any(x in names for x in parts)
 
 
+def plain_path(path: Path) -> bool:
+    """New retention classes never follow a symlink, junction or reparse point, including ancestors."""
+    return all(not stat.S_ISLNK(s.st_mode) and not getattr(s, "st_file_attributes", 0) & 0x400
+               for s in (os.lstat(p) for p in (path, *path.parents)))
+
+
+def walk_error(error):
+    raise error
+
+
+def derived_source(path: Path):
+    if path.suffix.lower() != ".xml" or not (path.name.lower() == "events.xml"
+                                                   or path.parent.name.lower() == "xml-decoder"):
+        return None
+    if not plain_path(path):
+        return None
+    for folder in (path.parent, path.parent.parent):
+        for source in sorted(folder.iterdir()):
+            if source.suffix.lower() == ".etl" and source.is_file() and plain_path(source):
+                return source
+    return None
+
+
+VERSIONED_STAGE = re.compile(r"^(.+)-(\d+(?:\.\d+){1,3})$")
+
+
+def stage_version(name):
+    match = VERSIONED_STAGE.fullmatch(name)
+    if match is None:
+        return None
+    numbers = tuple(int(n) for n in match[2].split("."))
+    return match[1].casefold(), numbers + (0,) * (4 - len(numbers))
+
+
+def manifest_references(cfg):
+    """Read rollback manifests, never assume an unreadable/unknown format contains no references.
+
+    The installed mod-install writer uses *.files.txt (including operation manifests in backups/).
+    JSON manifests use {"rollback_sources": [absolute paths]}.
+    Relative paths and unrecognized text refuse staging cleanup until the manifest can be interpreted.
+    """
+    roots = [cfg["root"] / "manual-installs", cfg["root"] / ".claude/backups/manual-installs"]
+    if os.environ.get("SKYRIM_MANUAL_INSTALLS"):
+        roots.append(Path(os.environ["SKYRIM_MANUAL_INSTALLS"]))
+    refs = set()
+
+    def remember(value):
+        if not Path(value).is_absolute():
+            raise ValueError("relative manifest path")
+        refs.add(_key(_real(value)))
+
+    for root in roots:
+        if not root.exists():
+            continue
+        if not root.is_dir() or not plain_path(root):
+            raise ValueError("manual-installs is not a plain directory")
+        for dp, dirs, files in os.walk(root, onerror=walk_error):
+            if not plain_path(Path(dp)) or not all(plain_path(Path(dp) / name) for name in dirs):
+                raise ValueError("manifest directory is a link")
+            for name in files:
+                path = Path(dp) / name
+                if not plain_path(path):
+                    raise ValueError("manifest is a link")
+                # Backup payloads are not manifests. Only manifest files are parsed.
+                if not (name.endswith(".files.txt") or path.suffix.lower() == ".json"):
+                    if "backups" in Path(dp).relative_to(root).parts:
+                        continue
+                    raise ValueError("unknown manual-install manifest format: " + name)
+                text = path.read_text(encoding="utf-8-sig")
+                if not text.strip():
+                    raise ValueError("empty manifest")
+                if path.suffix.lower() == ".json":
+                    document = json.loads(text)
+                    if not isinstance(document, dict) or set(document) != {"rollback_sources"} \
+                            or not isinstance(document["rollback_sources"], list):
+                        raise ValueError("unknown JSON manifest structure")
+                    for value in document["rollback_sources"]:
+                        if not isinstance(value, str):
+                            raise ValueError("invalid rollback source")
+                        remember(value)
+                    continue
+                for line in text.splitlines():
+                    if not line.strip():
+                        continue
+                    if line.startswith("# overwritten originals backed up under: "):
+                        remember(line.split(": ", 1)[1])
+                    elif line.startswith("# UPDATE: the previous mod folder "):
+                        remember(line.split(" is kept whole at ", 1)[1])
+                    elif line.startswith(("# installed into: ", "# format: ", "# STATUS: ")) \
+                            or re.match(r"^# .* -- installed .* from .* \[group .*\]$", line) \
+                            or re.match(r"^# UPDATE: \d+ file\(s\) were in the previous mod folder$", line):
+                        continue
+                    elif re.match(r"^[0-9a-fA-F]{64}  .+", line):
+                        remember(line[66:])
+                    elif line.startswith("PLANNED  "):
+                        remember(line[9:])
+                    else:
+                        raise ValueError("unknown manual-install manifest row")
+    return refs
+
+
+def superseded_reason(path, root, cfg, guard, now):
+    """An empty result proves every staging eligibility clause again at apply time."""
+    if path.parent != root or root not in [_abs(cfg, r) for r in cfg["staging_roots"]]:
+        return "not a direct child of a configured staging root"
+    version = stage_version(path.name)
+    if version is None:
+        return "folder has no supported numeric version"
+    if not plain_path(path):
+        return "staging path is a link"
+    for dp, dirs, files in os.walk(path, onerror=walk_error):
+        if not all(plain_path(Path(dp) / name) for name in dirs + files):
+            return "staging tree contains a link"
+    why = guard.why_protected(path) or protected_inside(guard, path)
+    if why:
+        return "protected ({})".format(why)
+    latest = max(path.stat().st_mtime, newest_mtime(path))
+    if latest > now - max(cfg["superseded_after_days"] * 86400, cfg["active_hours"] * 3600):
+        return "staging folder is recent or active"
+    listed = set()
+    marker = root / "_superseded"
+    if marker.exists():
+        if not marker.is_file() or not plain_path(marker):
+            return "unreadable _superseded list"
+        listed = {line.strip() for line in marker.read_text(encoding="utf-8-sig").splitlines()
+                  if line.strip() and not line.lstrip().startswith("#")}
+        if any(stage_version(name) is None or "/" in name or "\\" in name for name in listed):
+            return "invalid _superseded list"
+    higher = any(other.is_dir() and plain_path(other) and (v := stage_version(other.name)) is not None
+                 and v[0] == version[0] and v[1] > version[1] for other in root.iterdir())
+    if path.name not in listed and not higher:
+        return "no higher version or explicit supersession"
+    refs = manifest_references(cfg)
+    real = _real(path)
+    if any(_key(real) == ref or _strictly_inside(Path(ref), real) or _strictly_inside(real, Path(ref)) for ref in refs):
+        return "manual-install rollback source"
+    return ""
+
+
 def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -> dict:
     """Every action, with the hash it was planned on. `only` (a set of CLASSES) skips the scans no requested class
     needs -- the launch watcher plans gzip/launch without hashing every agent-output file -- and counts a planned
@@ -394,7 +552,7 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             count(row, action["bytes"])
 
     # ---- agent output: recreatable, build, link
-    tasks = task_folders(cfg) if wants("recreatable", "build", "link") else []
+    tasks = task_folders(cfg) if wants("derived", "recreatable", "build", "link") else []
     live = live_index(cfg) if tasks else {}
     live_hash = {}
     by_size = {}
@@ -409,6 +567,9 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
 
     for task, state in tasks:
         for f in walk_files(task):
+            if wants("superseded") and any(_strictly_inside(_real(f), _real(_abs(cfg, r)))
+                                           for r in cfg["staging_roots"]):
+                continue                    # staging scan accounts for these bytes exactly once
             try:
                 size = f.stat().st_size
             except OSError:
@@ -422,6 +583,11 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             why = guard.why_protected(f)
             if why:
                 count("kept: protected ({})".format(why), size)
+                continue
+            source = derived_source(f)
+            if source is not None:
+                act({"class": "derived", "path": str(f), "bytes": size, "hash": blake(f),
+                     "task": str(task), "source": str(source)}, "plan: decoded trace -> Recycle Bin")
                 continue
             if is_build(f, cfg):
                 act({"class": "build", "path": str(f), "bytes": size, "hash": blake(f),
@@ -535,6 +701,26 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                 continue
             act({"class": "scratch", "path": str(p), "bytes": fp[1], "fingerprint": fp},
                 "plan: named scratch folder -> Recycle Bin")
+
+    # ---- direct versioned staging folders; uncertainty keeps the whole folder
+    for r in (cfg["staging_roots"] if wants("superseded") else []):
+        root = _abs(cfg, r)
+        if not root.is_dir():
+            continue
+        for path in sorted(root.iterdir()):
+            if path.name == "_superseded":
+                count("kept: staging supersession list", path.stat().st_size if path.is_file() else dir_size(path))
+                continue
+            size = dir_size(path) if path.is_dir() else path.stat().st_size
+            try:
+                why = superseded_reason(path, root, cfg, guard, now) if path.is_dir() else "not a staging folder"
+            except (OSError, ValueError, IndexError) as error:
+                why = "staging protection unavailable ({}: {})".format(type(error).__name__, error)
+            if why:
+                count("kept: " + why, size)
+            else:
+                act({"class": "superseded", "path": str(path), "bytes": size, "fingerprint": fingerprint(path),
+                     "staging_root": str(root)}, "plan: superseded staging -> Recycle Bin")
 
     return {"created": now, "root": str(cfg["root"]), "actions": actions, "rows": rows}
 
@@ -735,18 +921,29 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
     p = Path(action["path"])
     if not p.exists():
         return "gone since the plan"
-    if action["class"] in ("recreatable", "build", "link", "gzip"):
+    if action["class"] in ("derived", "recreatable", "build", "link", "gzip"):
         why = guard.why_protected(p)
         if why:
             return "protected ({})".format(why)
         if p.stat().st_size != action["bytes"] or blake(p) != action["hash"]:
             return "changed since the plan"
-    if action["class"] in ("recreatable", "build", "link"):
+    if action["class"] in ("derived", "recreatable", "build", "link"):
         if memo.task_newest(action["task"]) > now - cfg["active_hours"] * 3600:
             return "task folder written to since the plan (active)"
     if action["class"] == "recreatable":
         if not Path(action["live"]).is_file() or memo.hash(action["live"]) != action["hash"]:
             return "live file no longer identical"
+    if action["class"] == "derived":
+        source = Path(action["source"])
+        if not source.is_file() or not plain_path(source) or derived_source(p) is None:
+            return "trace source gone or no longer a decoded trace"
+    if action["class"] == "superseded":
+        try:
+            why = superseded_reason(p, Path(action["staging_root"]), cfg, guard, now)
+        except (OSError, ValueError, IndexError) as error:
+            return "staging protection unavailable ({}: {})".format(type(error).__name__, error)
+        if why:
+            return why
     if action["class"] == "link":
         c = Path(action["canonical"])
         if not c.is_file() or memo.hash(c) != action["hash"]:
@@ -755,7 +952,7 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
             return "canonical copy is protected"
         if p.stat().st_nlink != 1 or c.stat().st_nlink != 1 + memo.links.get(_key(c), 0):
             return "hard-linked elsewhere since the plan (ownership unknown)"
-    if action["class"] in ("launch", "snapshot", "scratch"):
+    if action["class"] in ("launch", "snapshot", "scratch", "superseded"):
         why = protected_inside(guard, p, action["class"])
         if why:
             return "protected ({})".format(why)

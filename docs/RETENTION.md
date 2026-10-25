@@ -72,6 +72,33 @@ link.
 
 ## Skyrim checklist
 
+### Additional Skyrim classes
+
+These rows extend the Skyrim policy; the shared policy above is unchanged.
+
+| Class | What | Rule |
+|---|---|---|
+| **Derived** (`derived`) | `events.xml`, or an XML file directly inside an `xml-decoder` folder, in an idle agent task | Recycle only while a plain `.etl` source exists in the same folder or its parent. ETL measurements are always kept, including inside whole-folder candidates. |
+| **Superseded staging** (`superseded`) | A direct versioned child of a configured `staging_roots` folder | Recycle after `superseded_after_days` (default 30) and `active_hours`, only with a higher numeric version of the same name beside it, or its exact folder name in `_superseded`. Keep rollback sources and every folder whose protection cannot be decided. |
+
+Staging versions use two to four numeric components after the final name separator (`My Mod-1.2.3`);
+comparison is numeric, with missing trailing components treated as zero. A staging root's optional
+`_superseded` is a UTF-8 text file containing one exact versioned folder name per line; blanks and `#`
+comment lines are allowed. Names built from paths are refused. Staging roots may not overlap each other.
+
+Rollback manifests are read beneath `<toolkit>/manual-installs/`,
+`<toolkit>/.claude/backups/manual-installs/`, and `SKYRIM_MANUAL_INSTALLS` when configured. Supported formats
+are mod-install's `*.files.txt` manifests (including operation manifests), and JSON objects containing
+exactly `{"rollback_sources": ["absolute/path", "..."]}`. Any unknown format, relative path, read failure
+or link keeps the staging folder. Source directories and files named by these manifests are kept.
+The new classes never follow symlinks, junctions or reparse points.
+
+Planning records the XML hash or staging-folder fingerprint; apply checks the current source,
+activity, protection, supersession and manifests again. Both classes use the existing Recycle Bin
+path. `--only derived,superseded` restricts the scans; no staging location is enabled by default.
+
+### Existing Skyrim retention rules
+
 - **Saves are Forever, everywhere.** `.ess` and `.skse` copies inside experiment folders included -- and
   de-duplicating them is not worth it where a save guard backs a save up before any change, because the backup
   re-copies the very bytes being freed.
@@ -136,5 +163,6 @@ folder or one above it, a link, a `Saves` folder or anything in one, a save or a
 name (a `*backup*` folder below the allowed folder, `known-good*`, `AUDIT_LOG.txt`). The session-start hook runs
 `housekeep.py session .claude/diag/housekeep-session.txt` detached and shows that file's line at the next start.
 
-`apply` runs the classes in a fixed order (recreatable, build, link, gzip, launch, snapshot, scratch) and prints
+`apply` runs the classes in a fixed order (derived, recreatable, build, link, gzip, launch, snapshot, scratch,
+superseded) and prints
 every refusal with its reason. A refusal is not an error to work around: re-run `plan`.

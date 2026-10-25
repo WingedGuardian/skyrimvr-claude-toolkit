@@ -2,6 +2,9 @@
 
 ## v4.0.0 — unreleased
 
+- **Housekeep decoded traces:** idle `events.xml` and XML in `xml-decoder` can be recycled while an ETL source remains beside them or one folder above; ETL source measurements stay protected.
+- **Housekeep superseded staging:** opt-in `staging_roots`, a default 30-day idle threshold, numeric version siblings or an exact `_superseded` list, and fail-closed rollback-manifest checks. Apply rechecks eligibility; removal still uses the Recycle Bin.
+
 ### Added
 
 - **ReSaver Plus, an opt-in native ReSaver backend (Windows):** `python tools/resaver-plus/build.py` builds [Tonycubed2/ResaverPP](https://github.com/Tonycubed2/ResaverPP) 19.6 (commit `0d48f60`) on your machine with the toolkit's 27 patches and 15 additions. It verifies the commit, checks every changed and added file against `tools/resaver-plus/SOURCE-SHA256`, builds the CLI and tests with the GUI off, and installs nothing unless all six runnable CTest targets pass. Nothing binary ships. Needs Visual Studio 2022 Build Tools, which you install yourself; `setup.sh` reports what it finds against the tested MSVC 19.44 / CMake 3.31.6.
