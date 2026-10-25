@@ -31,7 +31,7 @@ def inst(tmp_path_factory):
 def fire(inst, command, tool="Bash", shell=None, cwd=None):
     rec, install = inst
     I = install.as_posix()
-    command = command.replace("<I>", I).replace("<IB>", I.replace("/", BS))
+    command = command.replace("<I>", I).replace("<IB>", I.replace("/", BS)).replace("<M>", "/" + I[0].lower() + I[2:])
     tool_input = {"command": command}
     if shell:
         tool_input["shell"] = shell
@@ -42,8 +42,9 @@ def fire(inst, command, tool="Bash", shell=None, cwd=None):
 
 ASKS = {
     "var-holds-command-line": ('R="rm -rf"; $R "<I>/Data"', "Bash"),
-    "eval-of-variable": ('c="rm -rf <I>/Data"; eval "$c"', "Bash"),
-    "bash-c-of-variable": ('c="rm -rf <I>/Data"; bash -c "$c"', "Bash"),
+    # guard3: a value assigned in a branch is not proven, so the eval-like call runs text the guard cannot read.
+    "eval-of-variable": ('if [ -n "$X" ]; then c="rm -rf <I>/Data"; fi; eval "$c"', "Bash"),
+    "bash-c-of-variable": ('if [ -n "$X" ]; then c="rm -rf <I>/Data"; fi; bash -c "$c"', "Bash"),
     "indirect-expansion": ('R=rm; ${!R} -rf "<I>/Data"', "Bash"),
     "array-program": ('A=(rm -rf); "${A[@]}" "<I>/Data"', "Bash"),
     "printf-v": ('printf -v R rm; $R -rf "<I>/Data"', "Bash"),
@@ -51,7 +52,7 @@ ASKS = {
     "awk-system": ("awk 'BEGIN{system(\"rm -rf <I>/Data\")}'", "Bash"),
     "cmd-percent-var": ('cmd /c "set R=del&& %R% /s /q <IB>' + BS + 'Data"', "Bash"),
     "cmd-delayed-var": ('cmd /v:on /c "set R=del&& !R! /s /q <IB>' + BS + 'Data"', "Bash"),
-    "pwsh-iex-variable": ("$c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\"; iex $c", "PowerShell"),
+    "pwsh-iex-variable": ("if ($x) { $c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\" }; iex $c", "PowerShell"),
     "pwsh-get-command-call": ("& (Get-Command Remove-Item) -Recurse '<IB>" + BS + "Data'", "PowerShell"),
     "pwsh-here-string-iex": ("$s = @'\nRemove-Item -Recurse '<IB>" + BS + "Data'\n'@\nInvoke-Expression $s",
                              "PowerShell"),
@@ -61,6 +62,26 @@ ASKS = {
     "opaque-relative-plugin-no-verb": ('$R custom.esp', "Bash"),
     "opaque-redirect-no-verb": ('$R > "<I>/Data/result.txt"', "Bash"),
     "opaque-on-a-plugin": ('$R "<I>/Data/Skyrim.esm"', "Bash"),
+    # guard3 (v4.0.0 review A-guard MEDIUM-1): the install folder itself in text an eval-like call runs, and MSYS.
+    "eval-root-alone": ('if [ -n "$X" ]; then c=\'rm -rf "<I>"\'; fi; eval "$c"', "Bash"),
+    "bash-c-root-alone": ('if [ -n "$X" ]; then c=\'rm -rf "<I>"\'; fi; bash -c "$c"', "Bash"),
+    "pwsh-iex-root-alone": ("if ($x) { $c = \"Remove-Item -Recurse '<IB>'\" }; iex $c", "PowerShell"),
+    "eval-msys-data": ('if [ -n "$X" ]; then c="rm -rf <M>/Data"; fi; eval "$c"', "Bash"),
+    "bash-c-operand-msys-root": ('bash -c "$c" "<M>"', "Bash"),
+    # guard3 (MEDIUM-2): eval-like shapes that were no opaque program at all.
+    "pwsh-pipe-iex": ("if ($x) { $c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\" }; $c | iex", "PowerShell"),
+    "pwsh-pipe-iex-root-alone": ("if ($x) { $c = \"Remove-Item -Recurse '<IB>'\" }; $c | iex", "PowerShell"),
+    "pwsh-pipe-invoke-expression":("if ($x) { $c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\" }; "
+                                    "$c | Invoke-Expression", "PowerShell"),
+    "pwsh-write-output-iex": ("$c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\"; Write-Output $c | iex",
+                              "PowerShell"),
+    "pwsh-invoke-command-scriptblock": ("$c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\"; "
+                                        "Invoke-Command -ScriptBlock ([scriptblock]::Create($c))", "PowerShell"),
+    "source-variable": ('f=/tmp/x.sh; source "$f" "<I>/Data"', "Bash"),
+    "dot-variable": ('. "$f" "<I>/Data"', "Bash"),
+    # guard3 (LOW-4): past the parser's token cap the text is read, as S-DEL-FALLBACK reads it.
+    "token-cap": ('$R "<I>/Data"; echo ' + "a " * 2500, "Bash"),
+    "token-cap-eval": ('if [ -n "$X" ]; then c="rm -rf <I>/Data"; fi; eval "$c"; echo ' + "a " * 2500, "Bash"),
 }
 
 
@@ -80,6 +101,20 @@ STAYS = {
     "opaque-on-scratch": ('$EDITOR /tmp/notes.txt', "Bash"),
     "named-program-reads-data": ('ls "<I>/Data"', "Bash"),
     "eval-of-literal-elsewhere": ('eval "echo hi"', "Bash"),
+    # guard3 precision (v4.0.0 review LOW-5, user-approved): a same-command literal names what runs.
+    "program-path-with-spaces": ('CAP="<I>/tools/Caprica/Caprica.exe"; "$CAP" -f "TESV_Papyrus_Flags.flg" '
+                                 '"<I>/Data/Scripts/Source/x.psc"', "Bash"),
+    "eval-of-a-harmless-literal": ('c="echo hi"; eval "$c"', "Bash"),
+    # guard3: the install folder itself in an assignment asks only when an eval-like call may run that text.
+    "root-in-a-plain-assignment": ('ROOT="<I>"; "$PY" tools/x.py', "Bash"),
+    "token-cap-no-expansion": ('ls "<I>/Data"; echo ' + "a " * 2500, "Bash"),
+    "expansion-beside-data": ('echo "$HOME"; ls "<I>/Data"', "Bash"),
+    # Priced (guard3): a -Command string with its own variables is code the parser read, not a variable's text.
+    "pwsh-command-with-its-own-variables": ('P="<I>"; powershell -NoProfile -Command "Get-Item \'$P/x.dll\'; $v = 1"',
+                                            "Bash"),
+    "start-process-of-a-literal-path": ('$g = "<IB>"; Start-Process -FilePath "$g' + BS + 'sksevr_loader.exe" '
+                                        '-WorkingDirectory $g', "PowerShell"),
+    "eval-of-a-literal-beside-data": ('c="echo hi"; eval "$c"; ls "<I>/Data"', "Bash"),
 }
 
 
@@ -93,6 +128,12 @@ def test_ordinary_commands_and_unprotected_targets_do_not_ask(inst, case):
 def test_a_save_keeps_its_own_ask(inst):
     got = fire(inst, '$R "<I>/cfg/Saves/Existing.ess"')
     assert got["decision"] == "ask" and "S-SAVE-OPAQUE" in got["rules"] and "S-OPAQUE-PROTECTED" not in got["rules"]
+
+
+def test_past_the_token_cap_a_save_in_the_text_still_asks(inst):
+    """guard3 (v4.0.0 review A-guard LOW-4): the parser stops at its token cap; the save is read from the text."""
+    got = fire(inst, '$R "<I>/cfg/Saves/Existing.ess"; echo ' + "a " * 2500)
+    assert got["decision"] == "ask" and "S-SAVE-OPAQUE" in got["rules"], got
 
 
 def test_option_and_bare_words_are_not_paths_even_inside_data(inst):
@@ -119,3 +160,50 @@ def test_changed_opaque_corpus_rows_match_their_recorded_contract(tmp_path):
         got = rec.fire_full_inprocess(install, row)
         failures.extend(row["id"] + ": " + problem for problem in rec.intended_problems(row, got))
     assert not failures, "\n".join(failures)
+
+
+# guard3 precision (v4.0.0 review LOW-5, user-approved direction): a variable assigned ONE literal, unconditionally, in
+# the same command is read as that literal when it is the program word or the text an eval-like call runs. The eval is
+# then the command it runs, and the delete rule refuses it. Anything less stays unreadable (the asks above).
+LITERALS = {
+    "eval-literal": ("c='rm -rf \"<I>/Data\"'; eval \"$c\"", "Bash"),
+    "bash-c-literal": ("c='rm -rf \"<I>/Data\"'; bash -c \"$c\"", "Bash"),
+    "pwsh-iex-literal": ("$c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\"; iex $c", "PowerShell"),
+    "pwsh-iex-command-literal": ("$c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\"; Invoke-Expression -Command $c",
+                                 "PowerShell"),
+    "pwsh-pipe-iex-literal": ("$c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\"; $c | iex", "PowerShell"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(LITERALS))
+def test_an_eval_of_a_same_command_literal_is_the_command_it_runs(inst, case):
+    command, tool = LITERALS[case]
+    got = fire(inst, command, tool)
+    assert got["decision"] == "deny" and got["rules"] == {"S-DEL-INSTALL"}, got
+
+
+# The eval of a literal lifts no resolution it could falsify: an eval the guard cannot prove still turns every
+# variable in the command unresolved, as an eval always did. /tmp/safe here would otherwise be read as the target.
+POISONED = {
+    "value-unproven": ('D=/tmp/safe; if [ -n "$X" ]; then k="echo hi"; fi; eval "$k"; rm -rf "$D"; ls "<I>"', "deny"),
+    "value-expands": ("D=/tmp/safe; k='$R D'; eval \"$k\"; rm -rf \"$D\"; ls \"<I>\"", "deny"),
+    # `source` may set D without spelling it (a `read D` would already count D as written twice).
+    "value-poisons": ("D=/tmp/safe; k='source /tmp/x.sh'; eval \"$k\"; rm -rf \"$D\"; ls \"<I>\"", "deny"),
+    "eval-not-a-plain-statement": ('D=/tmp/safe; X=1 eval "$k"; rm -rf "$D"; ls "<I>"', "deny"),
+    "value-writes-the-variable": ("D=/tmp/safe; k='D=\"<I>/Data\"'; eval \"$k\"; rm -rf \"$D\"", "deny"),
+    "cd-before-the-eval-settles": ('D=/tmp/safe; X=1 eval "$k"; cd "$D" && rm -rf Data', "advise"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(POISONED))
+def test_an_eval_the_guard_cannot_prove_still_turns_resolution_off(inst, case):
+    command, decision = POISONED[case]
+    got = fire(inst, command)
+    rule = "S-RELATIVE-UNKNOWN" if decision == "advise" else "S-DEL-UNRESOLVED"
+    assert got["decision"] == decision and rule in got["rules"], got
+
+
+def test_a_resolved_eval_frees_the_rest_of_the_command(inst):
+    """The point of the precision: `k="echo hi"; eval "$k"` no longer hides /tmp/safe behind an eval poison."""
+    got = fire(inst, 'D=/tmp/safe; k="echo hi"; eval "$k"; rm -rf "$D"; ls "<I>"')
+    assert got["decision"] == "allow", got

@@ -546,6 +546,26 @@ def test_pruning_retires_what_it_removes_and_deletes_nothing(tmp_path, monkeypat
     assert moved[sha(b"a1")].read_bytes() == b"a1"
 
 
+@pytest.mark.parametrize("inside", ["source/x.ess", "deploy/SKSE/x.skse", "source/backups/x.txt"])
+def test_an_old_bash_era_stamp_holding_a_save_or_a_backup_is_kept(tmp_path, monkeypatch, inside):
+    """guard3 (parent ruling): a 3.x stamp is retired whole, so like housekeep.protected_inside a save or a backup
+    folder anywhere in it keeps all of it. A plain old stamp beside it is still retired."""
+    full_maps(monkeypatch)
+    put(tmp_path, "Data/Scripts/a.pex", b"a1")
+    snap(tmp_path, now=at(40))
+    kept = store(tmp_path) / "20200101_000000"
+    (kept / inside).parent.mkdir(parents=True)
+    (kept / inside).write_bytes(b"keep me")
+    plain = store(tmp_path) / "20200102_000000"
+    (plain / "source").mkdir(parents=True)
+    (plain / "source" / "x.psc").write_bytes(b"bash-era copy")
+    for d in (kept, plain):
+        os.utime(str(d), (at(30),) * 2)
+    snapshot.prune(store(tmp_path), time.time(), audit_mod.Audit(str(tmp_path)))
+    assert (kept / inside).read_bytes() == b"keep me"
+    assert not plain.exists()
+
+
 def test_pruning_removes_only_stale_part_files(tmp_path):
     put(tmp_path, "Data/Scripts/a.pex", b"a1")
     snap(tmp_path)

@@ -243,3 +243,35 @@ def test_missing_payload_transcript_keeps_lexical_protection(claude, tmp_path):
     got = fire(claude, "protect-files.sh", {"file_path": str(missing), "content": FORGED},
                tool="Write", transcript=missing)
     assert got["decision"] == "deny" and "W-SELF-TRANSCRIPT" in got["rules"], got
+
+
+# guard3 (v4.0.0 review A-guard MEDIUM-3): inline interpreter code writing the transcript by a literal name -- the
+# easiest way to forge the approval line -- is refused like the shell routes; reading it stays free.
+INTERPRETER_WRITES = {
+    "python-c-append": "python -c \"open(r'{t}','a').write('x')\"",
+    "python-heredoc": "python - <<'EOF'\nopen(r'{t}','a').write('x')\nEOF",
+    "python-pathlib": "python -c \"from pathlib import Path; Path(r'{t}').write_text('x')\"",
+    "node-e-append": "node -e \"require('fs').appendFileSync('{t}','x')\"",
+    "python-c-delete": "python -c \"import os; os.remove(r'{t}')\"",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(INTERPRETER_WRITES))
+def test_interpreter_code_writing_the_transcript_is_refused(claude, shape):
+    _, _, own, _ = claude
+    got = fire(claude, "protect-bash.sh", {"command": INTERPRETER_WRITES[shape].format(t=own.as_posix())})
+    assert got["decision"] == "deny" and "S-SELF-TRANSCRIPT" in got["rules"], got
+
+
+def test_interpreter_code_writing_a_transcript_hardlink_is_refused(claude, transcript_alias):
+    got = fire(claude, "protect-bash.sh", {"command": INTERPRETER_WRITES["python-c-append"].format(
+        t=transcript_alias.as_posix())})
+    assert got["decision"] == "deny" and "S-SELF-TRANSCRIPT" in got["rules"], got
+
+
+def test_interpreter_code_reading_the_transcript_stays_free(claude):
+    _, _, own, _ = claude
+    got = fire(claude, "protect-bash.sh", {"command": "python -c \"print(open(r'{t}').read())\"".format(
+        t=own.as_posix())})
+    assert got["decision"] in ("allow", "advise") and "S-SELF-TRANSCRIPT" not in got["rules"], got
+

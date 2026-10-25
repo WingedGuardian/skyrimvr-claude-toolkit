@@ -45,8 +45,9 @@ lost.
 ADVICE (no deny): S-RELATIVE-UNKNOWN -- a relative `Data` operand with no cwd (R9).
 
 KNOWN LIMITS (fix round 1, recorded, not handled):
-  - interpreter code with RELATIVE paths (`python -c "shutil.rmtree('Data')"`, node/perl equivalents) is invisible
-    unless the code also names a protected root -- the code is matched as text, not resolved;
+  - interpreter code: a LITERAL name given to a known delete call (`python -c "shutil.rmtree('Data')"`, fs.rmSync,
+    unlink ...) is resolved where the code runs (guard3, interpreter_delete_targets); a name the code builds at run
+    time, or a delete call outside that list, is still seen only when the code also names a protected root as text;
   - `mv` OUT of the install with a relative source path gets no advice (moves are Task 9's rules);
   - shred, `rsync --delete`, `git checkout -- .`, `git reset --hard`, `git stash -u` are not delete primitives;
   - a per-install user folder such as `_CLAUDE_OUTPUT` is protected like the rest of the install; a configurable
@@ -411,6 +412,69 @@ def interpreter_code(e) -> str:
     return "\n".join(code)
 
 
+# guard3 (v4.0.0 review C-docs MEDIUM-2): interpreter code that deletes a file NAMED by a string literal. Python is read
+# as Python (ast, never run): shutil.rmtree, os.remove/unlink/rmdir/removedirs, Path(...).unlink/rmdir, send2trash, and
+# the bare names a `from ... import` brings in. Other interpreters by their call text: fs.rmSync/rmdirSync/unlinkSync
+# (and the callback forms), rmtree, remove_tree, FileUtils.rm_rf and friends, perl/php unlink. Only a literal name is
+# read; scan() resolves it where the code runs, so `python -c "shutil.rmtree('Data')"` from the install is the install's
+# Data folder, exactly as `rm -rf Data` is.
+_PY_DELETE_CALLS = frozenset(("rmtree", "remove", "unlink", "rmdir", "removedirs", "send2trash"))
+_PY_DELETE_OWNERS = frozenset(("shutil", "os", "send2trash"))
+_INTERP_DELETE_LIT = re.compile(
+    r"""(?:\b(?:rm|rmdir|unlink)(?:Sync)?|\brmtree|\bremove_tree|\bFileUtils\.(?:rm_rf|rm_r|rm|remove_dir|remove_entry\w*)"""
+    r"""|\bunlink)\s*\(?\s*(['"])([^'"\n]{1,400})\1""")
+
+
+def interpreter_delete_targets(code: str, python: bool) -> List[str]:
+    """The literal names `code` deletes (see above); [] when Python code cannot be parsed (writes.scan refuses it)."""
+    if not python:
+        return [m.group(2) for m in _INTERP_DELETE_LIT.finditer(code)]
+    import ast
+    if len(code) > 1024 * 1024:
+        return []
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return []
+
+    def literal(node):
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+    def path_of(node):
+        if isinstance(node, ast.Call) and node.args and not node.keywords and (
+                isinstance(node.func, ast.Name) and node.func.id == "Path" or isinstance(node.func, ast.Attribute)
+                and node.func.attr == "Path" and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "pathlib"):
+            parts = [literal(a) for a in node.args]
+            if all(x is not None for x in parts):
+                return "/".join(parts)
+        return None
+
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        if isinstance(f, ast.Attribute) and f.attr in ("unlink", "rmdir") and not node.args:
+            p = path_of(f.value)                                    # Path('Data/x').unlink()
+            if p is not None:
+                out.append(p)
+                continue
+        named = isinstance(f, ast.Name) and f.id in _PY_DELETE_CALLS
+        owned = (isinstance(f, ast.Attribute) and f.attr in _PY_DELETE_CALLS and isinstance(f.value, ast.Name)
+                 and f.value.id in _PY_DELETE_OWNERS)
+        if not (named or owned):
+            continue
+        arg = node.args[0] if node.args else next(
+            (k.value for k in node.keywords if k.arg in ("path", "paths", "name")), None)
+        value = literal(arg) if arg is not None else None
+        if value is None and arg is not None:
+            value = path_of(arg)
+        if value is not None:
+            out.append(value)
+    return out
+
+
 def substituted(e):
     """e with each argv word that uses a same-command LITERAL assignment replaced by its value (Task 7b; the parser
     decides which assignment certainly reaches the word, see assign.py). Other words are unchanged."""
@@ -760,6 +824,17 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             for kind, rx in _root_regexes(roots):
                 if has(rx, code):
                     resolved = Hit(RULE_OF[kind], _match_basename(rx, code))
+                    break
+        if code and resolved is None:
+            # guard3: a literal name the code deletes, resolved where the code runs (relative ones included).
+            base = targets.exec_cwd(e, cwd, env) or ""
+            for w in interpreter_delete_targets(code, bool(_PYTHON.fullmatch(e.program))):
+                a = targets.resolve_literal(w, base, env)
+                if a is None:
+                    continue
+                kind, b = place(a)
+                if kind and not is_save(b, roots):          # a save keeps the save policy's own reading
+                    resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
                     break
         if e.program in MOVE_PROGRAMS and resolved is None:
             # RT-A: a move whose source is protected and whose destination is NOT in that same protected area

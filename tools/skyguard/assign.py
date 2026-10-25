@@ -170,11 +170,28 @@ def _command_word(tokens):
     return (tokens[k], tokens[k + 1:]) if k < len(tokens) else ("", [])
 
 
-def poisoned(text: str, dialect: str) -> str:
-    """The first poison class found in the command (see POLICY), or "" when resolution may run. cmd: always."""
+# guard3 (v4.0.0 review LOW-5, user-approved precision): an eval of ONE variable (`eval "$c"`, `iex $c`,
+# `Invoke-Expression -Command $c`, `$c | iex`) runs the text that variable holds. When that text is a same-command
+# literal, every write it makes is spelled in the command (write_counts counts it), so it is no poison. poisoned()
+# with `evals` (a list) DEFERS these statements, appending one name per statement; shellparse then proves each one is
+# a certain literal holding no poison itself, or turns resolution off ("eval") exactly as before.
+_EVAL_VAR = re.compile(r"\$\{?(" + _IDENT + r")\}?")
+_PS_IEX_VAR = re.compile(r"(?:^|(?<=[\s;|(){}]))(?:iex|invoke-expression)[ \t]{1,64}(?:-c[a-z]{0,6}[ \t]{1,64})?"
+                         r"\$\{?(" + _IDENT + r")\}?(?=[ \t]{0,64}(?:$|[;\n)}]))", re.IGNORECASE | re.MULTILINE)
+_PS_PIPE_IEX = re.compile(r"(?:^|(?<=[\s;(){}]))\$\{?(" + _IDENT + r")\}?[ \t]{0,64}\|[ \t]{0,64}"
+                          r"(?:iex|invoke-expression)(?=[ \t]{0,64}(?:$|[;\n)}]))", re.IGNORECASE | re.MULTILINE)
+
+
+def poisoned(text: str, dialect: str, evals=None) -> str:
+    """The first poison class found in the command (see POLICY), or "" when resolution may run. cmd: always.
+    evals: a list to defer eval-of-one-variable statements into (see _EVAL_VAR above); None poisons them."""
     if dialect not in ("bash", "powershell"):
         return "cmd"
     t = normalize(text)
+    if dialect == "powershell" and evals is not None:
+        for rx in (_PS_IEX_VAR, _PS_PIPE_IEX):
+            evals += [m.group(1).lower() for m in rx.finditer(t)]
+            t = rx.sub(" ", t)
     if dialect == "bash":
         if _FUNC_DEF.search(t):
             return "function"
@@ -204,6 +221,9 @@ def poisoned(text: str, dialect: str) -> str:
         if w == ".":
             return "dot-source"
         if dialect != "bash":
+            continue
+        if w == "eval" and evals is not None and len(rest) == 1 and _EVAL_VAR.fullmatch(rest[0]):
+            evals.append(_EVAL_VAR.fullmatch(rest[0]).group(1))
             continue
         if w in _POISON_COMMANDS:
             return w

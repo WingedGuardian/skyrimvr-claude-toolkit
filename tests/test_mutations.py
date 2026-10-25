@@ -3299,7 +3299,8 @@ _SP_CLAUSES = [
      "test_t04_rows_come_out_as_executed_commands[t04-bash-heredoc]"),
     ("pwsh-alias", '"ri": "remove-item", "rm": "remove-item"', '"rm": "remove-item"', "test_pwsh_aliases"),
     ("find-delete", 'if w == "-delete":', "if False:", "test_find_delete_is_a_delete_on_the_start_paths"),
-    ("bash-c", 'self.reparse(v[j], "bash")', "pass", "test_bash_shell_strings_reparsed_in_their_dialect"),
+    ("bash-c", '                self._decoded(code)\n                self.reparse(code, "bash")',
+     '                self._decoded(code)\n                pass', "test_bash_shell_strings_reparsed_in_their_dialect"),
     ("pwsh-command", 'self.reparse(_join_words(rest, "powershell"), "powershell")', "pass",
      "test_bash_shell_strings_reparsed_in_their_dialect"),
     ("never-raises", "raise ParseError(\"unterminated ' quote\")    # bash single quote",
@@ -3317,7 +3318,7 @@ _SP_CLAUSES = [
     ("find-exec", 'if w in ("-exec", "-execdir", "-ok", "-okdir"):', "if False:",
      "test_find_exec_runs_its_command_on_the_start_paths"),
     ("cmd-c", '                    self.reparse(text, "cmd")', "                    pass", "test_bash_shell_strings_reparsed_in_their_dialect"),
-    ("eval", 'self.reparse(" ".join(v[k + 1:]), "bash")', "pass",
+    ("eval", '\n                    self.reparse(code, "bash")', "\n                    pass",
      "test_bash_shell_strings_reparsed_in_their_dialect"),
     ("iex", 'self.reparse(s, "powershell")', "pass", "test_pwsh_blocks_and_subexpressions_parsed"),
     ("encoded-command", 'self.reparse(text, "powershell")', "pass", "test_pwsh_encoded_command_is_decoded"),
@@ -3469,7 +3470,7 @@ _SP_CLAUSES = [
     ("ra-alias-use", "self._sub_run(body.split(), k)          # RT-A: an alias defined in the same command", "pass",
      "test_ra_an_alias_use_runs_its_body_with_the_uses_arguments"),
     ("r1-parallel", 'if p == "parallel":', "if False:", "test_r1_more_wrappers"),
-    ("r1-iex-opaque", "if not lits or any(self.y[k + 1:]):", "if False:",
+    ("r1-iex-opaque", "if not lits or not self._code(k + 1)[1]:", "if False:",
      "test_r1_unknown_execution_is_opaque_not_missing"),
     ("r1-saps-args-alias", 'if name and ("argumentlist".startswith(name) or name == "args"):',
      'if name and "argumentlist".startswith(name):', "test_r1_start_process_runs_its_argument_list"),
@@ -3522,12 +3523,6 @@ _DEL_CLAUSES = [
     ("rule-S-DEL-MO2-zone", _DL,
      'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG", "mo2": "S-DEL-MO2"}',
      'RULE_OF = {"install": "S-DEL-INSTALL", "config": "S-DEL-CONFIG"}', "mo2-bash"),
-    ("rule-S-DEL-INSTALL-interpreter-code", _DL,
-     "        if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (",
-     "        if code and resolved is None and False and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (",
-     "python-rmtree"),
-    ("rule-S-DEL-INSTALL-interpreter-api", _DL,
-     "(has(DESTROYER, code) or has(INTERP_DELETE, code) or (", "(has(DESTROYER, code) or (", "node-rmsync"),
     # clause (b): an UNRESOLVED operand
     ("rule-S-DEL-UNRESOLVED-needs-root-mention", _DL, "    if unresolved_any and names_root(command, roots, has):",
      "    if unresolved_any:", "tmp-var"),
@@ -3582,6 +3577,16 @@ _DEL_CLAUSES = [
 MUTATIONS += [
     pytest.param(f, find, rep, _t07(row), id="deletes-" + i if not i.startswith("rule-") else i)
     for i, f, find, rep, row in _DEL_CLAUSES
+]
+# guard3: the literal-name reader (interpreter_delete_targets) also refuses rows python-rmtree and node-rmsync, so
+# the text clause these two twins pin is now proven on code that BUILDS its name (tests/test_interpreter_deletes.py).
+_IDB = "tests/test_interpreter_deletes.py::test_a_built_name_naming_the_install_is_still_refused_by_text"
+MUTATIONS += [
+    pytest.param(_DL, "        if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (",
+                 "        if code and resolved is None and False and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (",
+                 _IDB + "[python-joined-name]", id="rule-S-DEL-INSTALL-interpreter-code"),
+    pytest.param(_DL, "(has(DESTROYER, code) or has(INTERP_DELETE, code) or (", "(has(DESTROYER, code) or (",
+                 _IDB + "[node-joined-name]", id="rule-S-DEL-INSTALL-interpreter-api"),
 ]
 MUTATIONS.append(pytest.param(_DL, "    return _covers_kind(abs_path, roots)", '    return ""',
     "tests/test_skyguard_deletes.py::test_protected_kind[c:/Synthetic Games-install]",
@@ -9338,9 +9343,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/shellparse.py", "            new = self.cd_word(cmd, src[0], False) if src",
      "            new = _cd_value(src[0], False) if src",
      _FL14P + "powershell-$d = '/a/b'; Set-Location $d; Remove-Item x-/a/b]", "fl14-ps-set-location-not-resolved"),
-    ("tools/skyguard/shellparse.py", " or self.unsure or self.ctx.poisoned():", " or self.unsure:",
+    ("tools/skyguard/shellparse.py", " or self.unsure or self.ctx.poisoned() or self.ctx.evals:", " or self.unsure or self.ctx.evals:",
      _FL14P + 'bash-D=/a; source x.sh; cd "$D" && rm x-?]', "fl14-cd-resolved-in-a-poisoned-command"),
-    ("tools/skyguard/shellparse.py", " or self.unsure or self.ctx.poisoned():", " or self.ctx.poisoned():",
+    ("tools/skyguard/shellparse.py", " or self.unsure or self.ctx.poisoned() or self.ctx.evals:", " or self.ctx.poisoned() or self.ctx.evals:",
      _FL14P + 'bash-D=/a; done; cd "$D" && rm x-?]', "fl14-cd-resolved-after-a-stray-closer"),
     ("tools/skyguard/deletes.py", '_ROBO_LISTS = frozenset(("XF", "XD"))', '_ROBO_LISTS = frozenset(("XD",))',
      _FL14R + "robocopy src dst /XF *.esp *.esm /E-cmd-want11]", "fl14-robocopy-xf-read-as-files"),
@@ -10071,7 +10076,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/self_rules.py", '                if os.path.samefile(abs_path, own):',
      '                if False:', "tests/test_transcript_guard.py::test_current_transcript_hardlink_is_refused",
      "rule-S-SELF-TRANSCRIPT-hardlink-identity"),
-    ("tools/skyguard/shell_rules.py", '    if not opaque:\n        return ""\n    for e in opaque:',
+    ("tools/skyguard/shell_rules.py",
+     '    if not opaque:\n        return _protected_text(command, roots) if _unfinished(parsed, command) else ""\n'
+     '    for e in opaque:',
      '    if True:\n        return ""\n    for e in opaque:',
      "tests/test_opaque_protected.py::test_an_unnamed_program_on_a_protected_path_asks[opaque-on-a-plugin]",
      "rule-S-OPAQUE-PROTECTED-no-verb"),
@@ -10164,3 +10171,175 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tests/guard_corpus/game-root.txt", "C:/Synthetic Games/", "C:/G" + "OG Games/",
      _NRI_T + "test_no_file_under_tests_names_the_real_install", "corpus-root-is-the-real-install"),
 ]]
+
+
+# guard3 precision (v4.0.0 review A-guard LOW-5, user-approved): a same-command literal names the program and the text an
+# eval-like call runs; an eval the guard cannot prove keeps resolution off.
+_OPT = "tests/test_opaque_protected.py::"
+_G3P = "tools/skyguard/shellparse.py"
+_G3A = "tools/skyguard/assign.py"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_G3P, "                return [val]\n            return None\n        return words or None",
+     "                return None\n            return None\n        return words or None",
+     _OPT + "test_ordinary_commands_and_unprotected_targets_do_not_ask[program-path-with-spaces]",
+     "guard3-quoted-program-path"),
+    (_G3P, '                    code = self._code(k + 1)[0]                 # guard3', '                    code = " ".join(v[k + 1:])  # guard3',
+     _OPT + "test_an_eval_of_a_same_command_literal_is_the_command_it_runs[eval-literal]", "guard3-eval-reads-literal"),
+    (_G3P, "                code, certain = self._code(j, j + 1)        # guard3",
+     "                code, certain = v[j], not self.y[j]        # guard3",
+     _OPT + "test_an_eval_of_a_same_command_literal_is_the_command_it_runs[bash-c-literal]", "guard3-bash-c-reads-literal"),
+    (_G3P, '                    lits = [sub.get(w, w) for w in ps_param(ex, "Command", 0)]',
+     '                    lits = list(ps_param(ex, "Command", 0))',
+     _OPT + "test_an_eval_of_a_same_command_literal_is_the_command_it_runs[pwsh-iex-literal]", "guard3-iex-reads-literal"),
+    (_G3P, "                    else:\n                        strings.append(val)", "                    else:\n                        known = False",
+     _OPT + "test_an_eval_of_a_same_command_literal_is_the_command_it_runs[pwsh-pipe-iex-literal]",
+     "guard3-pipe-iex-reads-literal"),
+    (_G3A, '        if w == "eval" and evals is not None and len(rest) == 1 and _EVAL_VAR.fullmatch(rest[0]):',
+     "        if False:", _OPT + "test_an_eval_of_a_same_command_literal_is_the_command_it_runs[eval-literal]",
+     "guard3-eval-deferred"),
+    (_G3A, "        for rx in (_PS_IEX_VAR, _PS_PIPE_IEX):", "        for rx in ():",
+     _OPT + "test_an_eval_of_a_same_command_literal_is_the_command_it_runs[pwsh-iex-literal]", "guard3-iex-deferred"),
+    (_G3A, "        for rx in (_PS_IEX_VAR, _PS_PIPE_IEX):", "        for rx in (_PS_IEX_VAR,):",
+     _OPT + "test_an_eval_of_a_same_command_literal_is_the_command_it_runs[pwsh-pipe-iex-literal]",
+     "guard3-pipe-iex-deferred"),
+    (_G3P, '        if val is None or "$" in val or "`" in val or assign.poisoned(val, sc.DIALECT):',
+     '        if val is not None and ("$" in val or "`" in val or assign.poisoned(val, sc.DIALECT)):',
+     _OPT + "test_an_eval_the_guard_cannot_prove_still_turns_resolution_off[value-unproven]", "guard3-settle-unproven"),
+    (_G3P, '        if val is None or "$" in val or "`" in val or assign.poisoned(val, sc.DIALECT):',
+     '        if val is None or "`" in val or assign.poisoned(val, sc.DIALECT):',
+     _OPT + "test_an_eval_the_guard_cannot_prove_still_turns_resolution_off[value-expands]", "guard3-settle-expands"),
+    (_G3P, '        if val is None or "$" in val or "`" in val or assign.poisoned(val, sc.DIALECT):',
+     '        if val is None or "$" in val or "`" in val:',
+     _OPT + "test_an_eval_the_guard_cannot_prove_still_turns_resolution_off[value-poisons]", "guard3-settle-poisons"),
+    (_G3P, "    if found != len(ctx.evals):", "    if False:",
+     _OPT + "test_an_eval_the_guard_cannot_prove_still_turns_resolution_off[eval-not-a-plain-statement]",
+     "guard3-settle-unseen-eval"),
+    (_G3P, "    if sc.depth == 0:\n        _settle_evals(sc)", "    if False:\n        _settle_evals(sc)",
+     _OPT + "test_an_eval_the_guard_cannot_prove_still_turns_resolution_off[value-unproven]", "guard3-settle-runs"),
+    (_G3P, "or self.ctx.poisoned() or self.ctx.evals:", "or self.ctx.poisoned():",
+     _OPT + "test_an_eval_the_guard_cannot_prove_still_turns_resolution_off[cd-before-the-eval-settles]",
+     "guard3-cd-waits-for-settle"),
+]]
+
+
+# guard3 (v4.0.0 review A-guard MEDIUM-1, MEDIUM-2, LOW-4, INFO): S-OPAQUE-PROTECTED's widened reading, one twin per clause.
+_OPA = _OPT + "test_an_unnamed_program_on_a_protected_path_asks"
+_OPS = _OPT + "test_ordinary_commands_and_unprotected_targets_do_not_ask"
+MUTATIONS += [pytest.param(_SR, *m[:3], id=m[3]) for m in [
+    ('        if e.program == "?":\n            if e not in out:', '        if False:\n            if e not in out:',
+     _OPA + "[source-variable]", "rule-S-OPAQUE-PROTECTED-every-unknown-program"),
+    ("any(_DYNAMIC.search(w) for w in s.argv)", "any(_DYNAMIC.search(w) for w in e.argv)",
+     _OPS + "[eval-of-a-literal-beside-data]", "rule-S-OPAQUE-PROTECTED-eval-after-substitution"),
+    ("            evals = evals or (len(e.argv) == 1 and e.argv[0] in _TEXT_READERS)", "            evals = evals",
+     _OPA + "[pwsh-pipe-iex-root-alone]", "rule-S-OPAQUE-PROTECTED-reader-runs-text"),
+    ("            evals = True", "            evals = False", _OPA + "[eval-root-alone]",
+     "rule-S-OPAQUE-PROTECTED-eval-runs-text"),
+    ("evals or any(_CODE_VARIABLE.fullmatch(t) for t in dynamic)", "True",
+     _OPS + "[pwsh-command-with-its-own-variables]", "rule-S-OPAQUE-PROTECTED-code-variable-only"),
+    ("evals or any(_CODE_VARIABLE.fullmatch(t) for t in dynamic)", "evals", _OPA + "[bash-c-root-alone]",
+     "rule-S-OPAQUE-PROTECTED-code-runs-text"),
+    ('        hit = _protected_text(m.group(1) or m.group(2) or m.group(3) or "", roots, root_alone=True)',
+     '        hit = _protected_text(m.group(1) or m.group(2) or m.group(3) or "", roots, root_alone=False)',
+     _OPA + "[eval-root-alone]", "rule-S-OPAQUE-PROTECTED-root-in-evaluated-text"),
+    ("                if (not rest or rest[0] in _TERMINATOR) and root_alone:",
+     "                if (not rest or rest[0] in _TERMINATOR) and False:", _OPA + "[pwsh-iex-root-alone]",
+     "rule-S-OPAQUE-PROTECTED-root-alone-clause"),
+    ('    text = _MSYS.sub(r"\\1:/", text)', "    text = text", _OPA + "[eval-msys-data]",
+     "rule-S-OPAQUE-PROTECTED-msys-spelling"),
+    ('        return _protected_text(command, roots) if _unfinished(parsed, command) else ""', '        return ""',
+     _OPA + "[token-cap]", "rule-S-OPAQUE-PROTECTED-token-cap"),
+    ("    return not parsed.ok and bool(_DYNAMIC.search(command))", "    return not parsed.ok",
+     _OPS + "[token-cap-no-expansion]", "rule-S-OPAQUE-PROTECTED-token-cap-needs-expansion"),
+    ("    return not parsed.ok and bool(_DYNAMIC.search(command))", "    return bool(_DYNAMIC.search(command))",
+     _OPS + "[expansion-beside-data]", "rule-S-OPAQUE-PROTECTED-token-cap-needs-cap"),
+    ("    if _unfinished(parsed, command):\n        m = RESAVER_TEXT_SAVE.search(command)",
+     "    if False:\n        m = RESAVER_TEXT_SAVE.search(command)",
+     _OPT + "test_past_the_token_cap_a_save_in_the_text_still_asks", "rule-S-SAVE-OPAQUE-token-cap"),
+    ("    opaque = _opaque_save(parsed, roots, cwd, env, command)", "    opaque = _opaque_save(parsed, roots, cwd, env)",
+     _OPT + "test_past_the_token_cap_a_save_in_the_text_still_asks", "rule-S-SAVE-OPAQUE-token-cap-wired"),
+]]
+MUTATIONS.append(pytest.param(
+    _G3P, '        if fp[1] and fp[0] in sub and "$" not in sub[fp[0]] and "`" not in sub[fp[0]]:', "        if False:",
+    _OPS + "[start-process-of-a-literal-path]", id="guard3-start-process-reads-literal"))
+
+
+# guard3 (v4.0.0 review C-docs MEDIUM-2): a literal name inline interpreter code deletes resolves where the code runs.
+_IDT = "tests/test_interpreter_deletes.py::test_a_relative_interpreter_delete_from_the_install_is_refused"
+MUTATIONS += [pytest.param("tools/skyguard/deletes.py", *m[:3], id=m[3]) for m in [
+    ("        if code and resolved is None:\n            # guard3", "        if False:\n            # guard3",
+     _IDT + "[python-rmtree]", "guard3-interpreter-delete-read"),
+    ("        named = isinstance(f, ast.Name) and f.id in _PY_DELETE_CALLS", "        named = False",
+     _IDT + "[python-from-import]", "guard3-interpreter-delete-bare-name"),
+    ("        owned = (isinstance(f, ast.Attribute) and f.attr in _PY_DELETE_CALLS",
+     "        owned = False and (isinstance(f, ast.Attribute) and f.attr in _PY_DELETE_CALLS",
+     _IDT + "[python-os-remove]", "guard3-interpreter-delete-module-call"),
+    ("            p = path_of(f.value)", "            p = None", _IDT + "[python-path-unlink]",
+     "guard3-interpreter-delete-path-unlink"),
+    ("        return [m.group(2) for m in _INTERP_DELETE_LIT.finditer(code)]", "        return []",
+     _IDT + "[node-rmsync]", "guard3-interpreter-delete-other-languages"),
+    ('            base = targets.exec_cwd(e, cwd, env) or ""', '            base = ""', _IDT + "[python-rmtree]",
+     "guard3-interpreter-delete-resolved-where-it-runs"),
+    ("interpreter_delete_targets(code, bool(_PYTHON.fullmatch(e.program)))", "interpreter_delete_targets(code, False)",
+     _IDT + "[python-os-remove]", "guard3-interpreter-delete-python-as-python"),
+]]
+
+
+# guard3 (v4.0.0 review A-guard MEDIUM-3 and its S-SELF-STATE note): interpreter literal writes reach both refusals.
+_ITW = "tests/test_transcript_guard.py::test_interpreter_code_writing_the_transcript_is_refused"
+MUTATIONS += [pytest.param("tools/skyguard/self_rules.py", *m[:3], id=m[3]) for m in [
+    ("        for placed, holder in _interpreter_targets(e, cwd, env):", "        for placed, holder in []:",
+     _ITW + "[python-c-append]", "rule-S-SELF-TRANSCRIPT-interpreter-code"),
+    ("            for a, holder in _interpreter_targets(e, cwd, env):", "            for a, holder in []:",
+     "tests/test_interpreter_deletes.py::test_interpreter_code_writing_the_guard_state_is_refused",
+     "rule-S-SELF-STATE-interpreter-code"),
+    ("    for words, holder in ((written, False), (deletes.interpreter_delete_targets(code, python), True)):",
+     "    for words, holder in ((written, False),):", _ITW + "[python-c-delete]",
+     "rule-S-SELF-TRANSCRIPT-interpreter-delete"),
+    ("    for words, holder in ((written, False), (deletes.interpreter_delete_targets(code, python), True)):",
+     "    for words, holder in ((deletes.interpreter_delete_targets(code, python), True),):",
+     _ITW + "[node-e-append]", "rule-S-SELF-TRANSCRIPT-interpreter-write"),
+]]
+
+
+# guard3 (parent ruling): a bash-era snapshot stamp holding a save or a backup folder is never retired.
+_SNT = "tests/test_snapshot_nested.py::test_an_old_bash_era_stamp_holding_a_save_or_a_backup_is_kept"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/snapshot.py", "                    and not _holds_protected(d):", "                    and True:",
+     _SNT + "[source/x.ess]", "guard3-legacy-stamp-checked"),
+    ("tools/skyguard/snapshot.py", '        if any(f.lower().endswith(_PROTECTED_EXTS) for f in files):',
+     "        if False:", _SNT + "[deploy/SKSE/x.skse]", "guard3-legacy-stamp-save"),
+    ("tools/skyguard/snapshot.py", '        if rel != "." and any("backup" in part for part in rel.split("/")):',
+     "        if False:", _SNT + "[source/backups/x.txt]", "guard3-legacy-stamp-backup"),
+]]
+
+
+# guard3 follow-up: a program that may set variables (an unproven program word, or one naming read/declare/...) ends
+# literal resolution for every later word; the builtins themselves are pinned end to end beside the Task 7b units.
+_UPP = "tests/test_unknown_program_poison.py::"
+_UPU = _UPP + "test_after_a_possible_variable_setter_the_operand_stays_unresolved"
+_UPR = _UPP + "test_a_literal_still_resolves_where_nothing_could_have_changed_it"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_G3P, "                    self.mark_unknown(cmd)", "                    pass", _UPU + "[unknown-program-reads-a-file]",
+     "guard3-unknown-program-marked"),
+    (_G3P, "        if self.unknown_ends and cmd.start >= self.unknown_ends[0]:", "        if False:",
+     _UPU + "[substitution-program]", "guard3-unknown-program-ends-resolution"),
+    (_G3P, "        if self.unknown_ends and cmd.start >= self.unknown_ends[0]:", "        if self.unknown_ends:",
+     _UPR + "[use-before-the-unknown-program]", "guard3-unknown-program-only-later-words"),
+    (_G3P, "        if val is None or not words or _basename(words[0]) in _VARIABLE_SETTERS:",
+     "        if val is not None and (not words or _basename(words[0]) in _VARIABLE_SETTERS):",
+     _UPU + "[unknown-program-reads-a-file]", "guard3-unknown-program-unproven"),
+    (_G3P, "        if val is None or not words or _basename(words[0]) in _VARIABLE_SETTERS:",
+     "        if val is None or _basename(words[0] if words else '') in _VARIABLE_SETTERS:",
+     _UPU + "[empty-program-then-printf-v]", "guard3-unknown-program-empty"),
+    (_G3P, "        if val is None or not words or _basename(words[0]) in _VARIABLE_SETTERS:",
+     "        if val is None or not words:", _UPU + "[proven-program-is-printf]", "guard3-unknown-program-setter"),
+    (_G3P, "            val = self.lookup(cmd, m.group(1)) if m and not self.unsure and split_safe else None",
+     "            val = None", _UPR + "[proven-program-with-arguments]", "guard3-unknown-program-split-value"),
+]]
+# The other builtins (read, mapfile, readarray, getopts, declare, typeset, local, export) are ALSO write-counted
+# (assign._KW_BASH counts every name in their statement), so removing their poison entry alone leaves D unresolved: a
+# twin there survives by double coverage. Their e2e rows stay as tests; the Task 7b unit twins pin each poison entry.
+MUTATIONS += [
+    pytest.param(_AS, '        if w == "printf" and any(_PRINTF_V.match(r) for r in rest):', "        if False:",
+                 _UPU + "[printf-v]", id="guard3-e2e-poison-printf-v"),
+]
