@@ -10159,3 +10159,37 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "tests/test_no_bare_return_in_a_test.py::test_no_test_function_bails_with_a_bare_return",
      "sweep-bare-return-reintroduced"),
 ]]
+
+# Final sweep 2026-10-25 (install 6318fcf): the independent plugin parser reports what it could read only partly, and
+# refuses what it cannot walk. One twin per report and per refusal.
+_ESP = "tools/esp_records.py"
+_ESP_T = "tests/test_esp_records.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_ESP, "        if n > 1:\n", "        if False:\n",
+     _ESP_T + "test_a_duplicate_formid_is_reported_not_silently_collapsed", "sweep-esp-duplicate-formid-hidden"),
+    (_ESP, "                except zlib.error as e:\n                    problems.append(",
+     "                except zlib.error as e:\n                    [].append(",
+     _ESP_T + "test_a_compressed_record_that_does_not_inflate_is_reported", "sweep-esp-bad-compression-hidden"),
+    (_ESP, "        if (r.formid >> 24) > len(plugin.masters):\n", "        if False:\n",
+     _ESP_T + "test_a_master_index_past_the_master_list_is_reported", "sweep-esp-bad-master-index-hidden"),
+    (_ESP, "                if size < 24 or off + size > end:\n", "                if off + size > end:\n",
+     _ESP_T + "test_a_file_that_cannot_be_walked_is_refused_with_its_offset[grup-too-small]",
+     "sweep-esp-grup-size-unchecked"),
+    (_ESP, "            if off + 24 + size > end:\n", "            if False:\n",
+     _ESP_T + "test_a_file_that_cannot_be_walked_is_refused_with_its_offset[record-past-its-group]",
+     "sweep-esp-truncation-unchecked"),
+    (_ESP, "    if header is None:\n", "    if False:\n",
+     _ESP_T + "test_a_file_that_cannot_be_walked_is_refused_with_its_offset[no-tes4-header]", "sweep-esp-any-file-accepted"),
+    (_ESP, '        if t == "XXXX" and n == 4 and i + 10 <= len(body):\n', "        if False:\n",
+     _ESP_T + "test_compressed_records_and_oversize_subrecords_are_read", "sweep-esp-xxxx-ignored"),
+    ("tools/esp-summary.py", "    return 1 if plugin.problems else 0\n", "    return 0\n",
+     _ESP_T + "test_summary_exits_1_on_a_problem_and_2_on_a_file_it_cannot_walk", "sweep-esp-summary-problem-exit-0"),
+    ("tools/esp-record-diff.py", "    return 1 if differs or problems else 0\n", "    return 1 if differs else 0\n",
+     _ESP_T + "test_diff_with_a_duplicate_formid_is_inconclusive_not_clean", "sweep-esp-diff-inconclusive-is-clean"),
+    ("tools/esp-record-diff.py", "        if ra.sha1 != rb.sha1 or ra.flags != rb.flags or ra.type != rb.type:\n",
+     "        if ra.flags != rb.flags or ra.type != rb.type:\n",
+     _ESP_T + "test_diff_names_added_removed_and_changed_records_and_subrecords", "sweep-esp-diff-misses-body-change"),
+    ("tools/esp-record-diff.py", "    if pa.header.sha1 != pb.header.sha1 or pa.header.flags != pb.header.flags:\n",
+     "    if pa.header.flags != pb.header.flags:\n",
+     _ESP_T + "test_diff_sees_a_header_change_and_a_reordered_record", "sweep-esp-diff-misses-header-change"),
+]]
