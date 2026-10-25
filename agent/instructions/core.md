@@ -190,8 +190,8 @@ the rules are graded and only the first list refuses.
 ### DENIED -- refused outright, cannot proceed
 
 Each is judged on the **program that runs** and the file it targets, in Bash and PowerShell, not on words
-merely in a command (`grep -rn "rm -rf" <install>` is allowed). Relative paths resolve against
-the working directory the agent reports.
+merely in a command (`grep -rn "rm -rf" <install>` is allowed). Relative paths, including literal interpreter-delete
+names, resolve against the reported working directory; names built at run time rely on the text fallback.
 
 - **Deleting inside the game install, the config directory, or Mod Organizer's `mods/` / `overwrite/`**
   (`rm`, `del`, `Remove-Item`, `find -delete`, `git clean`, `shutil.rmtree`, a Recycle-Bin delete, ...), or
