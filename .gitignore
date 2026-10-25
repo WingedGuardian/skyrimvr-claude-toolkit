@@ -38,8 +38,8 @@ __pycache__/
 # A file that is both shipped by us and appended to by you loses your work on update.
 KNOWLEDGEBASE.local.md
 
-# The pose-emulating null driver is BUILT on the user's machine from pinned upstream source and never shipped:
-# local-build delivery and licensing response: tools/vr-emu-driver/README.md.
+# The pose-emulating null driver is FETCHED on the user's machine (pinned, hash-verified) and never shipped:
+# delivery decision and licence: tools/vr-emu-driver/README.md. work/ is a pre-4.0 build cache, still ignored.
 tools/vr-emu-driver/build/
 tools/vr-emu-driver/work/
 .modding-agent-harness/

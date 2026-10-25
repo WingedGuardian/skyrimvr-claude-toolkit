@@ -3,9 +3,13 @@
 # The logic, and everything it changes and restores, is documented in tools/vr-headless.py.
 #
 #   bash tools/vr-headless.sh status
-#   bash tools/vr-headless.sh on [--force]
+#   bash tools/vr-headless.sh run --desktop background|current [--park] [--emu] [--force]   # managed session
+#   bash tools/vr-headless.sh on [--force] [--park]
+#   bash tools/vr-headless.sh launch --desktop background|current
+#   bash tools/vr-headless.sh stop             # orderly exit of the owned game, then off
 #   bash tools/vr-headless.sh off              # byte-exact restore; safe to repeat, safe after a crash
-#   bash tools/vr-headless.sh emu on|off       # only after: python tools/vr-emu-driver/build.py
+#   bash tools/vr-headless.sh emu on|off       # only after: python tools/vr-emu-driver/fetch.py
+# Ask the user every session: this desktop (current) or a private background desktop (background)?
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
