@@ -10631,3 +10631,30 @@ MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test i
      '    drafts = sorted(p.relative_to(root).as_posix() for p in root.rglob("*-PR.md"))', "    drafts = []",
      "tests/test_release_payload.py::test_every_check_can_fail_on_its_own_line[resaver-plus-pr-draft-shipped]"),
 ]]
+
+# H1 (user ruling 2026-10-25): a crashed, killed or timed-out Claude guard blocks the call; setup refuses a Claude Code
+# too old for the key. One twin per guard registration and per clause of the version gate.
+_H1S = "agent/targets/claude/settings.json"
+_H1T = "tests/test_hook_failure_blocks.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_H1S, '"Checking command safety...",\n            "onFailure": "block"', '"Checking command safety..."',
+     _H1T + "test_every_guard_hook_blocks_on_failure_and_nothing_else_does[agent/targets/claude/settings.json]",
+     "h1-protect-bash-fails-open"),
+    (_H1S, '"Checking file protection...",\n            "onFailure": "block"', '"Checking file protection..."',
+     _H1T + "test_every_guard_hook_blocks_on_failure_and_nothing_else_does[agent/targets/claude/settings.json]",
+     "h1-protect-files-fails-open"),
+    (_H1S, '"Checking DevBench call...",\n            "onFailure": "block"', '"Checking DevBench call..."',
+     _H1T + "test_every_guard_hook_blocks_on_failure_and_nothing_else_does[agent/targets/claude/settings.json]",
+     "h1-protect-mcp-fails-open"),
+    ("setup.sh", "sort -t. -k1,1n -k2,2n -k3,3n | head -n1)", "sort | head -n1)",
+     _H1T + "test_a_numerically_older_minor_is_refused_not_compared_as_text",
+     "h1-version-compared-as-text"),
+    ("setup.sh", '            echo "Update it first (claude update), then run setup.sh again. Nothing was changed." >&2\n'
+                 "            exit 3\n",
+     '            echo "Update it first (claude update), then run setup.sh again. Nothing was changed." >&2\n',
+     _H1T + "test_an_older_claude_code_is_refused_before_anything_is_written",
+     "h1-old-claude-not-refused"),
+    ("setup.sh", 'CLAUDE_MIN="2.1.295"', 'CLAUDE_MIN="2.1.290"',
+     _H1T + "test_an_older_claude_code_is_refused_before_anything_is_written",
+     "h1-minimum-below-the-key"),
+]]

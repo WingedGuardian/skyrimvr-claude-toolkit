@@ -99,6 +99,32 @@ if [ "$AGENT_SEL" = "codex" ] && [ -z "$CODEX_WIN" ]; then
     echo "Use --agent claude here." >&2
     exit 3
 fi
+# The Claude guard hooks set "onFailure": "block" (a hook that crashes, is killed, cannot start or times out blocks
+# the tool call instead of letting it through). The key needs Claude Code 2.1.295+; an older one is refused here,
+# before anything is written, because what it does with the key is untested. Not on PATH = said, not refused.
+CLAUDE_MIN="2.1.295"
+if [ -n "$DO_CLAUDE" ]; then
+    CLAUDE_BIN="$(command -v claude 2>/dev/null || true)"
+    if [ -z "$CLAUDE_BIN" ]; then
+        CLAUDE_VER_NOTE="Claude Code is not on this shell's PATH: the toolkit's hooks need Claude Code $CLAUDE_MIN or newer."
+    else
+        if command -v timeout >/dev/null 2>&1; then
+            CLAUDE_VER=$(timeout 30 "$CLAUDE_BIN" --version 2>/dev/null | tr -d '\r' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+        else
+            CLAUDE_VER=$("$CLAUDE_BIN" --version 2>/dev/null | tr -d '\r' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+        fi
+        if [ -z "$CLAUDE_VER" ]; then
+            CLAUDE_VER_NOTE="Could not read 'claude --version': the toolkit's hooks need Claude Code $CLAUDE_MIN or newer."
+        elif [ "$(printf '%s\n%s\n' "$CLAUDE_MIN" "$CLAUDE_VER" | sort -t. -k1,1n -k2,2n -k3,3n | head -n1)" != "$CLAUDE_MIN" ]; then
+            echo "setup.sh: Claude Code $CLAUDE_VER is older than $CLAUDE_MIN, which the toolkit's guard hooks need" >&2
+            echo "(\"onFailure\": \"block\" keeps a crashed or timed-out guard from letting a command through)." >&2
+            echo "Update it first (claude update), then run setup.sh again. Nothing was changed." >&2
+            exit 3
+        else
+            CLAUDE_VER_NOTE="Claude Code $CLAUDE_VER (needs $CLAUDE_MIN or newer): OK."
+        fi
+    fi
+fi
 
 echo "============================================"
 echo " Skyrim AI Assistant Toolkit -- Setup"
@@ -109,6 +135,7 @@ case "$AGENT_ARG" in
     auto) echo "Agents: ${AGENTS_FOUND:-none found on PATH} -> configuring: $AGENT_SEL (--agent auto)" ;;
     *) echo "Agents: configuring $AGENT_SEL (--agent $AGENT_ARG)" ;;
 esac
+[ -z "${CLAUDE_VER_NOTE:-}" ] || echo "$CLAUDE_VER_NOTE"
 echo ""
 
 # --- Verify this looks like a Skyrim install ---
