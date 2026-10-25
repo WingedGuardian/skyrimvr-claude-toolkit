@@ -569,7 +569,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.11"
-      - name: Record the toolchain this image provides (tested: Build Tools 17.14.39, MSVC 19.44, CMake 3.31.6)
+      - name: "Record the toolchain this image provides (tested: Build Tools 17.14.39, MSVC 19.44, CMake 3.31.6)"
         run: |
           vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
           "$vswhere" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
@@ -590,7 +590,7 @@ jobs:
       # R4 of the port plan (native vs the toolkit's Java on the same synthetic save) needs ReSaver.jar, a manual Nexus
       # download no runner has: it is reported, not faked.
       - name: Native-vs-Java read contrast
-        run: echo "COULD NOT CHECK -- ReSaver.jar (Nexus mod 5031) is a manual download; no CI runner has it"
+        run: echo "COULD NOT CHECK -- no CI runner has ReSaver.jar (docs/installing-tools.md, *Pinned downloads*)"
 
   # The release machinery on every push: build the zip from the commit (scripts/build-release-zip.sh, the same
   # build release.yml runs), then verify it as a user would get it -- payload checker, leak grep, and a scrubbed

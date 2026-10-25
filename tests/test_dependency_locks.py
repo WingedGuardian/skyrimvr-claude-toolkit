@@ -74,6 +74,16 @@ def test_bare_pytest_skips_unsafe_controls(tmp_path):
     assert " passed" not in result.stdout
 
 
+# The sweep's setup marker: every check after a job's setup runs unless setup failed or the run was cancelled, so a
+# red check no longer skips the checks after it. That gate is the ONLY condition that still counts as unconditional:
+# it never depends on the matrix leg or on an earlier check.
+SETUP_GATE = "${{ !cancelled() && steps.setup.outcome == 'success' }}"
+
+
+def _unconditional(step):
+    return "if" not in step or step["if"] == SETUP_GATE
+
+
 def test_ci_workflow_parses_and_runs_harness_modules_on_both_legs():
     """An unparseable workflow runs NOTHING. `--only-binary=:all: --require-hashes` in a plain
     scalar is a YAML mapping error (": "), which silently disabled every CI job."""
@@ -82,7 +92,7 @@ def test_ci_workflow_parses_and_runs_harness_modules_on_both_legs():
     behavior = workflow["jobs"]["behavior"]
     assert set(behavior["strategy"]["matrix"]["os"]) >= {"ubuntu-latest", "windows-latest"}
     harness = [step for step in behavior["steps"]
-               if "tests/run_harness_tests.py" in str(step.get("run", "")) and "if" not in step]
+               if "tests/run_harness_tests.py" in str(step.get("run", "")) and _unconditional(step)]
     assert harness, "no unconditional harness-contained step in the behavior job"
     # Plan 8 T10 added harness-run tripwire and timing steps before it: the suite is the one naming -rfEs on tests/.
     suite = [step for step in harness if "$SUITE -v" in step["run"]]
@@ -168,7 +178,7 @@ def test_ci_keeps_the_fomod_smoke_control_that_must_go_red():
     there. Losing the step, the pinned bad version or the inverted exit leaves a smoke nobody has watched go red."""
     yaml = pytest.importorskip("yaml")
     steps = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text())["jobs"]["node"]["steps"]
-    control = [s for s in steps if "fomod-xmlbuilder.test.js" in str(s.get("run", "")) and "if" not in s]
+    control = [s for s in steps if "fomod-xmlbuilder.test.js" in str(s.get("run", "")) and _unconditional(s)]
     assert len(control) == 1, [s.get("name") for s in control]
     run = control[0]["run"]
     assert "npm install --ignore-scripts --no-audit --no-fund fast-xml-parser@4.3.6" in run, run

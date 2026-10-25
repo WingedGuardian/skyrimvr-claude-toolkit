@@ -386,30 +386,30 @@ RSPP_TESTED_TOOLSET="14.44.35207"
 RSPP_TESTED_CMAKE="3.31.6"
 echo ""
 echo "Checking for the ReSaver Plus build tools (optional native ReSaver backend)..."
-RSPP_UNAME="$(uname -s 2>/dev/null)"
-[ "${TOOLKIT_TEST_MODE:-}" = 1 ] && [ -n "${SETUP_UNAME:-}" ] && RSPP_UNAME="$SETUP_UNAME"
+RSPP_UNAME="$(uname -s 2>/dev/null || true)"
+if [ "${TOOLKIT_TEST_MODE:-}" = 1 ] && [ -n "${SETUP_UNAME:-}" ]; then RSPP_UNAME="$SETUP_UNAME"; fi
 if [ -f tools/resaver-plus/build/BUILD-INFO.json ]; then
     echo "  A ReSaver Plus build is present (tools/resaver-plus/build/); check it with: bash tools/resaver-cli.sh verify-native"
 fi
 case "$RSPP_UNAME" in
     MINGW*|MSYS*|CYGWIN*|Windows*)
-        RSPP_VSWHERE="$(printenv 'ProgramFiles(x86)' 2>/dev/null)"
+        RSPP_VSWHERE="$(printenv 'ProgramFiles(x86)' 2>/dev/null || true)"
         RSPP_VSWHERE="${RSPP_VSWHERE:-C:/Program Files (x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
-        [ "${TOOLKIT_TEST_MODE:-}" = 1 ] && [ -n "${SETUP_VSWHERE:-}" ] && RSPP_VSWHERE="$SETUP_VSWHERE"
+        if [ "${TOOLKIT_TEST_MODE:-}" = 1 ] && [ -n "${SETUP_VSWHERE:-}" ]; then RSPP_VSWHERE="$SETUP_VSWHERE"; fi
         RSPP_VS=""
         if [ -f "$RSPP_VSWHERE" ] || [ -x "$RSPP_VSWHERE" ]; then
             RSPP_VS=$("$RSPP_VSWHERE" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
-                      -property installationPath 2>/dev/null | tr -d '\r' | head -n1)
+                      -property installationPath 2>/dev/null | tr -d '\r' | head -n1 || true)
         fi
         if [ -n "$RSPP_VS" ]; then
             RSPP_VER=$("$RSPP_VSWHERE" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
-                       -property catalog_productDisplayVersion 2>/dev/null | tr -d '\r' | head -n1 | awk '{print $1}')
+                       -property catalog_productDisplayVersion 2>/dev/null | tr -d '\r' | head -n1 | awk '{print $1}' || true)
             RSPP_VS_U="$RSPP_VS"
-            command -v cygpath >/dev/null 2>&1 && RSPP_VS_U="$(cygpath -u "$RSPP_VS")"
-            RSPP_TOOLSET=$(tr -d '\r\n ' < "$RSPP_VS_U/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt" 2>/dev/null)
-            RSPP_CMAKE_BIN="$(command -v cmake 2>/dev/null)"
-            [ -z "$RSPP_CMAKE_BIN" ] && RSPP_CMAKE_BIN="$RSPP_VS_U/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"
-            RSPP_CMAKE=$("$RSPP_CMAKE_BIN" --version 2>/dev/null | tr -d '\r' | sed -n 's/^cmake version //p' | head -n1)
+            if command -v cygpath >/dev/null 2>&1; then RSPP_VS_U="$(cygpath -u "$RSPP_VS" || echo "$RSPP_VS")"; fi
+            RSPP_TOOLSET=$(tr -d '\r\n ' < "$RSPP_VS_U/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt" 2>/dev/null || true)
+            RSPP_CMAKE_BIN="$(command -v cmake 2>/dev/null || true)"
+            if [ -z "$RSPP_CMAKE_BIN" ]; then RSPP_CMAKE_BIN="$RSPP_VS_U/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"; fi
+            RSPP_CMAKE=$("$RSPP_CMAKE_BIN" --version 2>/dev/null | tr -d '\r' | sed -n 's/^cmake version //p' | head -n1 || true)
             echo "  Found Visual Studio Build Tools ${RSPP_VER:-(version unread)} with the C++ tools: MSVC toolset ${RSPP_TOOLSET:-unread}, CMake ${RSPP_CMAKE:-not found}"
             echo "  Tested with: Build Tools $RSPP_TESTED_VS, MSVC toolset $RSPP_TESTED_TOOLSET, CMake $RSPP_TESTED_CMAKE."
             if [ -z "$RSPP_CMAKE" ]; then

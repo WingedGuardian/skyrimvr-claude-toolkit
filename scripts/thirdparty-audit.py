@@ -63,7 +63,7 @@ USER_AGENT = "skyrim-ai-assistant-toolkit-thirdparty-audit/1"
 # User-facing instruction surfaces: what a fresh user (or their agent) reads and follows. agent/ is the source of
 # the generated .claude/ and .agents/ copies (gen_agent_trees --check keeps those identical), so it is read once.
 SURFACES = ("README.md", "SETUP_PROMPT.txt", "setup.sh", "KNOWLEDGEBASE.md", "ADAPTING.md", "docs/*.md",
-            "agent/**/*.md", "examples/*", "tools/*.sh", "tools/*.py", ".devcontainer/*", ".github/workflows/*.yml")
+            "agent/**/*.md", "examples/*", "tools/*.sh", "tools/*.py", "tools/*/README.md", ".devcontainer/*", ".github/workflows/*.yml")
 SURFACE_EXCLUDES = ("docs/superpowers/*", "docs/evidence/*")
 # A mention that only RECORDS history ("releases before 29.x kept it at ...", "was 0.40.0") is not an instruction.
 # Matched in the text before the reference on its own line (and the line before, when that one ends with ':').
