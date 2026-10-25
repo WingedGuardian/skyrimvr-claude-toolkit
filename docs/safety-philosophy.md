@@ -54,7 +54,7 @@ Every change made through the edit tools (and Codex `apply_patch`) is logged wit
 ## Design Principles
 
 ### 1. No Silent Modifications
-Destructive changes are blocked outright. Everything else that is consequential but legitimate is **advised**: a note is injected into Claude's context and the call proceeds -- you are not prompted. Five rules in the toolkit ask you to decide: a git command that would throw away uncommitted changes in a protected folder, a `lock disable` that turns the vanilla-file lock off for good, an in-place restore (`snapshot restore --in-place` or `restore-from-backup.sh --restore`), which writes over live files, and a program the guard cannot name (a variable such as `$R`) given one of your saves -- it may write, move or delete the save, or nothing, and the guard cannot count that change to back it up first -- and a command the guard cannot read that names the install, since it cannot tell what that command does there.
+Destructive changes are blocked outright. Everything else that is consequential but legitimate is **advised**: a note is injected into Claude's context and the call proceeds -- you are not prompted. Five rules in the toolkit ask you to decide: a git command that would throw away uncommitted changes in a protected folder, a `lock disable` that turns the vanilla-file lock off for good, an in-place restore (`snapshot restore --in-place` or `restore-from-backup.sh --restore`), which writes over live files, and a program the guard cannot name (a variable such as `$R`) given one of your saves -- it may write, move or delete the save, or nothing, and the guard cannot count that change to back it up first -- and such a program, or an `eval` of code a variable holds, naming another protected path (the install, `Data`, the settings or MO2 folders, a plugin or archive), since the guard cannot tell what it does there.
 
 Saves follow their own rule (user ruling 2026-10-13), because a save is the one thing a mod manager cannot give back. A command that changes one or two saves -- writes, copies onto, edits, moves, renames or deletes them, a DevBench save over an existing one, ReSaver `--apply` -- runs WITHOUT a prompt, but only after the deciding hook has copied both files of each pair (the `.ess` and its `.skse` co-save count as one save), read each copy back to its SHA-256 and recorded it; if that backup fails the command is refused. More than two saves, or a wildcard, is refused until you type the `SAVE_ACCESS_APPROVAL` line the refusal shows -- read only from what you typed, never from anything the agent read. Those backups are never pruned. Reading, hashing, listing and copying saves out are free; deleting or moving the whole `Saves` folder stays refused.
 
@@ -163,6 +163,11 @@ more than half its bytes. Run it by hand any time: `bash tools/kb-guard.sh --ver
   file.** Every session after an unnoticed loss snapshots the damaged file, so a plain
   oldest-first rotation would walk the good copy off the end — a store that destroys
   what it exists to protect while still looking like a store.
+- **Rotation goes to the Recycle Bin.** Past `KB_GUARD_KEEP` (default 30) the oldest unprotected
+  snapshots are sent there through `tools/housekeep.py recycle`, after one printed line that
+  warns Windows may ask before deleting an item too big for the bin (answer No to keep it).
+  Whatever the bin does not take -- no Python, no bin on this platform, a refusal -- stays in
+  the store, and the report says how many and why.
 - **Why a separate mechanism at all**, when `backup-before-edit.sh` already exists:
   that hook fires on Edit/Write/NotebookEdit tool calls, and the knowledgebase is usually written
   through a script run via Bash, which an Edit/Write hook structurally cannot see.

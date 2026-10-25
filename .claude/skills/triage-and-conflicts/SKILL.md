@@ -71,8 +71,9 @@ A CrashLogger dump is ~5,500 lines, ~4,600 of which are the raw `STACK` block. T
 part is the exception line plus the top of `PROBABLE CALL STACK`. This groups dumps by
 `module+offset` and cross-references a `KNOWN` dict of signatures you have already ruled on —
 so a settled crash prints as `[ACCEPTED - do not re-investigate]` instead of being chased a
-fourth time. **Add your own rulings to that dict** as you make them; it ships with the three
-from the dev install and is meant to be edited.
+fourth time. **Add your own rulings to that dict** as you make them, keyed by module AND offset
+(`("skyrimvr.exe", "0B84F05")`: module in lower case, offset in upper case), so an offset in
+another module stays unknown; it ships with the three from the dev install and is meant to be edited.
 
 **It matches `crash-*.txt` AND `crash-*.log`, case-insensitively**, because CrashLoggerSSE
 changed extension. Matching one of them does not fail — it prints a confident, complete-looking

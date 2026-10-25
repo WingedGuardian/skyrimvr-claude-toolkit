@@ -117,7 +117,13 @@ Run `python -B tests/run_harness_tests.py` (or supply pytest targets/options). I
 a scrubbed environment, fixture-local profile/temp paths, effective Git Bash PATH tripwires
 and native Python subprocess barriers. Package-manager attempts fail the originating test.
 Controls remove the barrier only against a controlled fake outer command. Python writes are
-constrained to fixtures; this is not an OS sandbox for arbitrary native subprocesses.
+constrained to fixtures, including copies (`_winapi.CopyFile2`, `shutil.copyfile`) and `os.truncate`;
+this is not an OS sandbox for arbitrary native subprocesses. The package-manager tripwire covers
+`winget choco scoop apt apt-get dnf pacman brew npm npx corepack pnpm yarn pip pip3 pipx uv conda
+gem cargo dotnet`, every `-m pip` spelling (`-mpip`, `-Im pip`), `npm-cli.js`/`npx-cli.js`, and a
+`python -I/-E/-S -m pip` inside a `bash -c`, `cmd /c` or `-Command` string. Not covered: mode, time
+and ownership changes (`chmod`, `utime`, `chown`) outside a fixture, and an isolated `python -I -m pip`
+inside a shell script file.
 
 The launcher is the canonical test entry point. `tests/conftest.py` exposes
 `harness_active()`, and with `TOOLKIT_REQUIRE_HARNESS=1` a pytest session that does not have the
