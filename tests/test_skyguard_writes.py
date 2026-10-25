@@ -300,10 +300,10 @@ def test_a_same_command_literal_target_is_judged_as_its_literal(shell, direct, v
     if "Saves/" in direct:
         assert saved, ("the direct form must be caught, or this pair proves nothing", direct)
         assert _save_targets(var, shell) == saved, var
-        return
-    want = decide(direct, cwd="C:/w", shell=shell)
-    assert want[0][0] != "allow", ("the direct form must be caught, or this pair proves nothing", direct)
-    assert decide(var, cwd="C:/w", shell=shell) == want, var
+    else:
+        want = decide(direct, cwd="C:/w", shell=shell)
+        assert want[0][0] != "allow", ("the direct form must be caught, or this pair proves nothing", direct)
+        assert decide(var, cwd="C:/w", shell=shell) == want, var
 
 
 @pytest.mark.parametrize("shell,command", [

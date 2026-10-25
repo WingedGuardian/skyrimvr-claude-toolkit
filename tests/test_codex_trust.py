@@ -209,10 +209,16 @@ def test_narrow_reader_reads_the_shapes_codex_writes(tmp_path):
     for k, h in exp.items():
         assert tables["hooks.state:" + k] == {"trusted_hash": h, "enabled": True}
     assert tables["projects:" + str(root.resolve()).lower()] == {"trust_level": "trusted"}
-    try:
-        import tomllib
-    except ImportError:
-        return
+
+
+def test_narrow_reader_agrees_with_tomllib(tmp_path):
+    """A separate test, so a Python without tomllib reports a SKIP here instead of passing silently."""
+    tomllib = pytest.importorskip("tomllib")
+    root = _install(tmp_path)
+    exp = _expected(root)
+    cfg = _config(tmp_path, {k: {"trusted_hash": h, "enabled": True} for k, h in exp.items()}, root,
+                  extra='\n[tui]\nhooks = "not ours"\n')
+    tables = ct._read_tables_narrow(cfg.read_text(encoding="utf-8"))
     assert ct._tables_from_doc(tomllib.loads(cfg.read_text(encoding="utf-8"))) == tables
 
 

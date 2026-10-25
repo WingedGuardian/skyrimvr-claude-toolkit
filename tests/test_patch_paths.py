@@ -231,5 +231,5 @@ def test_every_file_codex_touches_is_in_the_parsers_output(patch, tmp_path):
     try:
         claimed = {p.strip() for _, p in parse_patch(patch)}
     except PatchParseError:
-        return                                   # refusing is always safe
-    assert touched <= claimed, (touched, claimed)
+        claimed = None                           # refusing is always safe: the guard denies what it cannot parse
+    assert claimed is None or touched <= claimed, (touched, claimed)

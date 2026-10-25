@@ -10147,3 +10147,15 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (".github/workflows/ci.yml", "      - name: Setup complete\n        id: setup\n        run: echo setup complete\n\n"
      "      - name: Syntax and shebangs\n", "      - name: Syntax and shebangs\n", _WF_T, "sweep-ci-shell-job-has-no-marker"),
 ]]
+
+# Final sweep 2026-10-25 (X4 5811619): a bare `return` in a test passes silently. The scan must see a planted one.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tests/test_no_bare_return_in_a_test.py",
+     "            if in_test and isinstance(child, ast.Return) and child.value is None:\n",
+     "            if False:\n",
+     "tests/test_no_bare_return_in_a_test.py::test_the_guard_itself_can_go_red", "sweep-bare-return-scan-blind"),
+    ("tests/test_skyguard_shell.py", "        assert got[0] == decision\n    else:\n        assert got == (decision, text)",
+     "        assert got[0] == decision\n        return\n    assert got == (decision, text)",
+     "tests/test_no_bare_return_in_a_test.py::test_no_test_function_bails_with_a_bare_return",
+     "sweep-bare-return-reintroduced"),
+]]
