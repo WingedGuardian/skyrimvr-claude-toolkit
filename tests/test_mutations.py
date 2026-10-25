@@ -10183,3 +10183,35 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/snapshot.py", '        if rel != "." and any("backup" in part for part in rel.split("/")):',
      "        if False:", _SNT + "[source/backups/x.txt]", "guard3-legacy-stamp-backup"),
 ]]
+
+
+# guard3 follow-up: a program that may set variables (an unproven program word, or one naming read/declare/...) ends
+# literal resolution for every later word; the builtins themselves are pinned end to end beside the Task 7b units.
+_UPP = "tests/test_unknown_program_poison.py::"
+_UPU = _UPP + "test_after_a_possible_variable_setter_the_operand_stays_unresolved"
+_UPR = _UPP + "test_a_literal_still_resolves_where_nothing_could_have_changed_it"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_G3P, "                    self.mark_unknown(cmd)", "                    pass", _UPU + "[unknown-program-reads-a-file]",
+     "guard3-unknown-program-marked"),
+    (_G3P, "        if self.unknown_ends and cmd.start >= self.unknown_ends[0]:", "        if False:",
+     _UPU + "[substitution-program]", "guard3-unknown-program-ends-resolution"),
+    (_G3P, "        if self.unknown_ends and cmd.start >= self.unknown_ends[0]:", "        if self.unknown_ends:",
+     _UPR + "[use-before-the-unknown-program]", "guard3-unknown-program-only-later-words"),
+    (_G3P, "        if val is None or not words or _basename(words[0]) in _VARIABLE_SETTERS:",
+     "        if val is not None and (not words or _basename(words[0]) in _VARIABLE_SETTERS):",
+     _UPU + "[unknown-program-reads-a-file]", "guard3-unknown-program-unproven"),
+    (_G3P, "        if val is None or not words or _basename(words[0]) in _VARIABLE_SETTERS:",
+     "        if val is None or _basename(words[0] if words else '') in _VARIABLE_SETTERS:",
+     _UPU + "[empty-program-then-printf-v]", "guard3-unknown-program-empty"),
+    (_G3P, "        if val is None or not words or _basename(words[0]) in _VARIABLE_SETTERS:",
+     "        if val is None or not words:", _UPU + "[proven-program-is-printf]", "guard3-unknown-program-setter"),
+    (_G3P, "            val = self.lookup(cmd, m.group(1)) if m and not self.unsure and split_safe else None",
+     "            val = None", _UPR + "[proven-program-with-arguments]", "guard3-unknown-program-split-value"),
+]]
+# The other builtins (read, mapfile, readarray, getopts, declare, typeset, local, export) are ALSO write-counted
+# (assign._KW_BASH counts every name in their statement), so removing their poison entry alone leaves D unresolved: a
+# twin there survives by double coverage. Their e2e rows stay as tests; the Task 7b unit twins pin each poison entry.
+MUTATIONS += [
+    pytest.param(_AS, '        if w == "printf" and any(_PRINTF_V.match(r) for r in rest):', "        if False:",
+                 _UPU + "[printf-v]", id="guard3-e2e-poison-printf-v"),
+]

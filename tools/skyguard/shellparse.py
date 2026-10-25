@@ -433,6 +433,7 @@ class _Scanner:
         self._pmatch: Optional[dict] = None
         self.vars: dict = {}            # Task 7b: name -> [value, known_ver, list, seq] (one literal assignment)
         self.unsure = False             # a closing keyword without its opener: the control depth is not known
+        self.unknown_ends: List[int] = []   # guard3: where each program that may set variables ends (mark_unknown)
 
     def _frame(self, kind, cd, mode, start):
         self.ctx.frame_ids += 1
@@ -507,6 +508,8 @@ class _Scanner:
                 self.recs.append(cmd)
                 if self.SESSION_CD or (sep not in ("|", "|&") and cmd.stage == 0):
                     self.track_cd(f, cmd)
+                if self.depth == 0 and self.DIALECT == "bash":
+                    self.mark_unknown(cmd)
         if self.depth == 0 and self.DIALECT in ("bash", "powershell"):
             self.track_vars(f, cmd, sep)
         if sep in ("|", "|&"):
@@ -564,8 +567,31 @@ class _Scanner:
             top.seq = 0
             top.chain_ok = True
 
+    def mark_unknown(self, cmd: _Cmd) -> None:
+        """guard3: a bash program word the guard cannot prove (`$R D < f`, `$(pick) D`) may be `read`, `declare` or
+        `eval` and set ANY variable without spelling an assignment; so may a proven one that names such a builtin
+        (`R=read; $R D < f`). From where that command ends, no variable resolves (lookup). Earlier words still do:
+        they were expanded before it ran."""
+        ws, k = cmd.words, 0
+        while k < len(ws) and _ASSIGN.match(ws[k].raw):
+            k += 1
+        if k >= len(ws) or not ws[k].dyn:
+            return
+        split_safe = self.ctx.writes("IFS") == 0
+        val = None if self.unsure else assign.expand_word(ws[k].raw, "bash", lambda n: self.lookup(cmd, n),
+                                                           split_safe)
+        if val is None:
+            m = _BARE_VAR.fullmatch(ws[k].raw)              # unquoted `$R` holding `rm -rf`: split, but known
+            val = self.lookup(cmd, m.group(1)) if m and not self.unsure and split_safe else None
+        words = (val or "").split()
+        # (An empty value runs the NEXT word, which may be `read`: `R=; $R read D`.)
+        if val is None or not words or _basename(words[0]) in _VARIABLE_SETTERS:
+            self.unknown_ends.append(cmd.end)
+
     def lookup(self, cmd: _Cmd, name: str) -> Optional[str]:
         """The literal `name` certainly holds when `cmd` runs, or None."""
+        if self.unknown_ends and cmd.start >= self.unknown_ends[0]:
+            return None                             # guard3: after a program that may set it (mark_unknown)
         r = self.vars.get(name if self.DIALECT == "bash" else name.lower())
         if r is None:
             return None
@@ -591,6 +617,12 @@ _BASH_DROP = frozenset(("if", "then", "else", "elif", "fi", "do", "done", "while
 _BASH_OPEN = frozenset(("if", "while", "until", "{"))          # Task 7b: a statement inside may not run
 _BASH_CLOSE = frozenset(("fi", "done", "}"))
 _VARNAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,255}")
+_BARE_VAR = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]{0,255})\}?")
+# guard3 (mark_unknown): programs that can set a caller's variable without an assignment word, and the wrappers that
+# run the next word in THIS shell (sudo/env/nohup start a child, which cannot). A program word that may be one of them ends variable resolution.
+_VARIABLE_SETTERS = frozenset(("read", "readarray", "mapfile", "getopts", "declare", "typeset", "local", "export",
+                               "readonly", "unset", "let", "printf", "eval", "source", ".", "trap", "wait",
+                               "builtin", "command"))
 # `(( ... ))` / `$(( ... ))` whose body reads as `word -opt` or `word word`: bash takes it as arithmetic and runs
 # nothing, but another reading (or a typo) runs a command. The parser cannot be sure, so it says so.
 _CMDLIKE = re.compile(r"[\s(]*[A-Za-z_./][A-Za-z0-9_./-]{0,255}[ \t]+(?:-[A-Za-z]|[A-Za-z_.])")
