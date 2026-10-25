@@ -7516,6 +7516,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # the payload checker's guard-manifest section, and a Plan 6 launcher in its required list.
     ("tools/check-release-payload.py", '            "adapter": check_adapter, "guards": check_guards, "shared-core": check_shared_core}',
      '            "adapter": check_adapter, "shared-core": check_shared_core}', _MM_RP + "[guard-file-edited]", "p6mm-payload-guards-section-dropped"),
+    ("tools/check-release-payload.py", '    ".claude/retired",', "", _MM_RP + "[retired-shipped]",
+     "rr2-payload-retired-store-allowed"),
     ("tools/check-release-payload.py", '    "tools/skydoctor",\n', "", _MM_RP + "[skydoctor-missing]",
      "p6mm-payload-skydoctor-not-required"),
 ]]
