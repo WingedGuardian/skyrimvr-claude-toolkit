@@ -107,6 +107,15 @@ def test_native_fixture_authoring_is_excluded_without_hiding_runtime_or_siblings
     assert root + paths[1] in names and root + paths[2] in names
 
 
+def test_maintainer_only_corpus_scripts_are_excluded_and_their_siblings_ship():
+    """review L4b L1: these read tests/guard_corpus/ at import, so in the zip they could only crash."""
+    spec = importlib.util.spec_from_file_location("brz_corpus", BUILDER_PY)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    assert m.is_excluded("scripts/guard-corpus/record.py") and m.is_excluded("scripts/guard-latency.py")
+    assert not m.is_excluded("scripts/gen_agent_trees.py") and not m.is_excluded("scripts/guard-latency.pyc.md")
+
+
 def test_the_layer2_spike_folder_is_excluded_by_prefix_not_its_siblings(tmp_path):
     """scripts/layer2-spike/ (developer-only Layer 2 lock probes) stays in the repo and out of the zip. The rule is
     a PATH PREFIX (the folder itself, or anything under it), never a top-level name: scripts/ still ships, and a
@@ -238,7 +247,8 @@ def test_the_excludes_are_one_list_the_tests_can_read():
     spec = importlib.util.spec_from_file_location("build_release_zip", BUILDER_PY)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    assert set(mod.EXCLUDE) == {"tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests"}, mod.EXCLUDE
+    assert set(mod.EXCLUDE) == {"tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests",
+                                "scripts/guard-corpus", "scripts/guard-latency.py"}, mod.EXCLUDE
 
 
 @pytest.mark.parametrize("args", [[], ["HEAD"], ["HEAD", "out", "--bogus"]])

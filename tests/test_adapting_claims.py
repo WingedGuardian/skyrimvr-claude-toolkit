@@ -171,7 +171,7 @@ def test_the_contract_names_the_decisions_the_marker_and_the_unjudged_text():
     sec = section(DOC.read_text(encoding="utf-8"), 4)
     assert neutral.OK in sec and neutral.UNJUDGED in sec
     assert "|".join(DECISIONS) in sec
-    assert "`partial`" in sec or "partial" in sec
+    assert "`partial`" in sec          # review L4b L5: `or "partial" in sec` made the backticked status optional
 
 
 def test_the_backup_ops_in_the_doc_are_the_engines_backup_ops():
@@ -260,7 +260,7 @@ def test_the_unjudged_mcp_text_in_the_doc_is_the_entrys():
 
 def test_the_profile_regex_rule_is_stated_the_way_the_tool_applies_it():
     sec6 = section(DOC.read_text(encoding="utf-8"), 6)
-    assert "fullmatch" in sec6.replace("full match", "fullmatch") or "whole" in sec6
+    assert "fullmatch" in sec6.replace("full match", "fullmatch")   # review L4b L5: `or "whole"` passed on any prose
     src = (REPO / "tools" / "adapter_conformance.py").read_text(encoding="utf-8")
     assert "re.fullmatch" in src and "re.DOTALL" in src
 

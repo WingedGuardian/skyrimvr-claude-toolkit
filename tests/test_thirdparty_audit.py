@@ -286,6 +286,21 @@ def test_an_unreachable_source_is_could_not_check_with_exit_2(tmp_path):
     assert f.calls == 2   # one retry, then a reason -- never a silent pass
 
 
+def test_a_truncated_body_is_could_not_check_not_a_crash(tmp_path):
+    """v4.0.0 review L4b L4: http.client.IncompleteRead is an HTTPException, not an OSError; it killed the whole run
+    with the DRIFT exit code."""
+    import http.client
+
+    def truncated(url, headers, secret):
+        raise http.client.IncompleteRead(b"partial", 100)
+
+    repo = make_repo(tmp_path, CODEX)
+    f = ta.Fetcher(tmp_path / "empty-cache", transport=truncated, env={}, sleep=lambda s: None)
+    rows = ta.run(repo, f, ["Codex CLI"])
+    assert [r.status for r in rows] == [ta.UNCHECKED] and "unreachable" in rows[0].detail
+    assert ta.exit_code(rows) == 2 and f.calls == 2
+
+
 def test_offline_without_a_cached_answer_is_could_not_check(tmp_path):
     repo = make_repo(tmp_path, CODEX)
     rows, code = audit(repo, tmp_path / "empty-cache", ["Codex CLI"])
@@ -382,6 +397,25 @@ def test_pin_sites_that_disagree_are_drift(tmp_path):
     del files["tests/fixtures/payloads/codex/0.160.0"]
     rows, code = audit(make_repo(tmp_path, files), make_cache(tmp_path), ["Codex CLI"])
     assert code == 1 and any(r.check == "pin sites" and "disagree" in r.detail for r in by(rows, ta.DRIFT))
+
+
+def test_an_instruction_under_a_lead_in_with_an_earlier_history_sentence_is_compared(tmp_path):
+    """v4.0.0 review L4b M1: README:127/128. A lead-in ending ':' whose EARLIER sentence says 'was tested with' made
+    the winget line under it "historical", so the primary Node install was never compared with the pin."""
+    readme = ("Install Node.js **24.19.0**, the version this toolkit was tested with. For you to run, in Windows "
+              "Terminal:\n"
+              "    winget install --id OpenJS.NodeJS.LTS --exact --version 22.11.0 --no-upgrade\n")
+    repo = make_repo(tmp_path, {".node-version": "24.19.0\n", "README.md": readme})
+    hits = [h for ref in ta.NODE_REFS for h in ta.scan_refs(ta.Repo(repo), ref)]
+    assert ("README.md", 2, "22.11.0") in {h[:3] for h in hits}, hits
+
+
+def test_a_lead_in_whose_last_clause_is_history_still_marks_the_line_under_it(tmp_path):
+    """The twin: 'Releases before 29.x need ...:' is one clause, and it IS history."""
+    readme = "Releases before 24.x needed this:\n    winget install --id OpenJS.NodeJS.LTS --exact --version 22.11.0\n"
+    repo = make_repo(tmp_path, {".node-version": "24.19.0\n", "README.md": readme})
+    hits = [h for ref in ta.NODE_REFS for h in ta.scan_refs(ta.Repo(repo), ref)]
+    assert [h[2] for h in hits if h[0] == "README.md" and h[1] == 2] == ["history"], hits
 
 
 def test_a_major_version_reference_is_held_to_the_runtime_pin(tmp_path):
@@ -966,11 +1000,11 @@ def test_the_pre_fix_manual_steps_are_seen(tmp_path):
 
 
 def test_the_real_tree_install_refs_agree_with_their_pins(tmp_path):
-    """Every version a shipped file states for a pinned tool equals its pin (offline: install refs are local). The
-    only disagreements left are setup.sh's, owed to T7 (review I5: a doc's 'JDK 17 is in the image')."""
+    """Every version a shipped file states for a pinned tool equals its pin (offline: install refs are local), setup.sh
+    included: its exemption (owed to T7) outlived the drift it excused and hid every later one (review L4b L3)."""
     rows = ta.run(REPO, ta.Fetcher(tmp_path / "empty", offline=True, env={}))
     bad = [r.detail for r in rows if r.check == "install refs" and r.status == ta.DRIFT]
-    assert [d for d in bad if not d.startswith("setup.sh:")] == [], bad
+    assert bad == [], bad
 
 
 def test_a_doc_stating_another_jdk_than_the_image_is_drift(tmp_path):

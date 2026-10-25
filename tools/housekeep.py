@@ -13,6 +13,7 @@ that repeat the one before. The policy this tool implements is docs/RETENTION.md
     python tools/housekeep.py sweep-temp          recycle the toolkit's own stale temp dirs (see "temp sweep")
     python tools/housekeep.py session STATE.txt   sweep-temp, recycle settled .claude/retired batches (what the guard
                                                   pruned from its own stores), then write the session note to STATE.txt
+    python tools/housekeep.py recycle PATH...     send exactly these paths to the Recycle Bin (OK/FAILED per path)
     --config FILE   default <toolkit>/.claude/housekeep.json (.claude/housekeep.json.example ships)
 
 Two passes, never one: `plan` decides, `apply` re-verifies. An action whose file changed since it was planned
@@ -25,7 +26,8 @@ contains "backup"; git-tracked files; every file a project doc links to; and any
 Removal goes to the Recycle Bin, never a permanent delete, with no exceptions (Windows: the shell's own delete with
 FOF_ALLOWUNDO). An item too big for the bin gets Windows' own "delete permanently?" prompt; "No" leaves it in place.
 The bin frees no disk space until it is emptied; that is the user's call. A file the bin refuses is reported
-FAILED and left in place. Duplicates are not removed at all: they become NTFS hard links to one copy, marked
+FAILED and left in place; off Windows there is no Recycle Bin implementation, so every removal is reported that way.
+The whole-folder classes (launch, snapshot, scratch) keep a folder whole when any file in it is protected. Duplicates are not removed at all: they become NTFS hard links to one copy, marked
 read-only so an in-place edit cannot silently change every path at once.
 
 Accounting: `report` and `plan` print every scanned byte in exactly one row, the rows sum to the total, and the
@@ -267,6 +269,27 @@ def walk_files(target: Path):
             yield Path(dp) / f
 
 
+# The 3.x snapshot-before-tool.sh store. User ruling 2026-10-20: its stamps are ROLLING (a stamp repeating the one
+# before goes to the Recycle Bin), although the store sits under .claude/backups/. Only this one tool store: saves
+# inside it, a backup folder inside a stamp, and every other backup folder stay Forever.
+ROLLING_SNAPSHOT_STORE = "auto_snapshots"
+
+
+def protected_inside(guard, folder: Path, cls: str = "") -> str:
+    """Why a whole-folder action (launch, snapshot, scratch) may not take this folder: the first protected file in
+    it, or "". A folder is recycled whole, so one save or one backup inside it keeps all of it, whatever the config
+    names -- except the "backup folder" ABOVE a stamp of the rolling snapshot store (see ROLLING_SNAPSHOT_STORE)."""
+    store = folder.parent if cls == "snapshot" and folder.parent.name.lower() == ROLLING_SNAPSHOT_STORE else None
+    for f in walk_files(folder):
+        why = guard.why_protected(f)
+        if why == "backup folder" and store is not None \
+                and not any("backup" in part.lower() for part in f.relative_to(store).parts[:-1]):
+            continue
+        if why:
+            return why
+    return ""
+
+
 # --------------------------------------------------------------------------- planning
 
 def live_index(cfg):
@@ -402,7 +425,10 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                 count("kept: launch log, labelled or not a launch folder (Forever)", size)
                 continue
             age = (now - time.mktime(time.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S"))) / 86400
-            if age >= cfg["recycle_after_days"]:
+            why = protected_inside(guard, p) if age >= cfg["recycle_after_days"] else ""
+            if why:
+                count("kept: protected ({})".format(why), size)
+            elif age >= cfg["recycle_after_days"]:
                 act({"class": "launch", "path": str(p), "bytes": size, "fingerprint": fingerprint(p)},
                     "plan: launch folder past recycle_after_days -> Recycle Bin")
             elif age >= cfg["gzip_after_days"]:
@@ -429,7 +455,10 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             files = sorted(walk_files(p))
             sig = sorted((str(f.relative_to(p)).lower(), f.stat().st_size, blake(f)) for f in files)
             size = sum(s for _, s, _ in sig)
-            if sig == prev and i != len(stamps) - 1:
+            why = protected_inside(guard, p, "snapshot") if sig == prev and i != len(stamps) - 1 else ""
+            if why:
+                count("kept: protected ({})".format(why), size)
+            elif sig == prev and i != len(stamps) - 1:
                 act({"class": "snapshot", "path": str(p), "bytes": size, "fingerprint": fingerprint(p)},
                     "plan: snapshot repeating the previous one -> Recycle Bin")
             else:
@@ -438,9 +467,13 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
 
     # ---- named scratch folders
     for s in (cfg["scratch"] if wants("scratch") else []):
-        p = Path(s)
+        p = _abs(cfg, s)                  # relative to the toolkit folder, as the example config says
         if p.is_dir():
             fp = fingerprint(p)
+            why = protected_inside(guard, p)
+            if why:
+                count("kept: protected ({})".format(why), fp[1])
+                continue
             act({"class": "scratch", "path": str(p), "bytes": fp[1], "fingerprint": fp},
                 "plan: named scratch folder -> Recycle Bin")
 
@@ -461,18 +494,38 @@ def print_rows(rows: dict, title: str):
 
 # --------------------------------------------------------------------------- applying
 
+def has_recycle_bin() -> bool:
+    return os.name == "nt"
+
+
+def sweep_switched_off() -> bool:
+    """SKYGUARD_HOUSEKEEP_SWEEP=off: no session-start sweep, and no real Recycle Bin call from this process."""
+    return os.environ.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"
+
+
+def under_test_harness() -> bool:
+    """pytest, the toolkit's contained launcher without pytest (tests/run_harness_tests.py sets HARNESS_FIXTURE_ROOT),
+    or the switch above -- unless HOUSEKEEP_REAL_BIN_IN_TESTS opts a deliberate integration test in. A test that needs
+    a bin injects a fake recycler; the real one would show the user Windows dialogs (2026-10-20)."""
+    if os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"):
+        return False
+    return (bool(os.environ.get("PYTEST_CURRENT_TEST")) or bool(os.environ.get("HARNESS_FIXTURE_ROOT"))
+            or sweep_switched_off())
+
+
 def recycle(paths) -> dict:
     """{path: None | error} -- one PowerShell process for the whole batch. Recycle Bin only, never a delete."""
     paths = [str(p) for p in paths]
     if not paths:
         return {}
-    # No test may reach the real bin: it can raise Windows' "delete permanently?" dialog on the user's desktop
-    # (2026-10-20, four such popups from test runs). A test injects a fake recycler; the guard is here, at the one
-    # call that touches the shell, so a test that forgets fails loudly instead of prompting the user.
-    if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"):
-        raise RuntimeError("housekeep.recycle refused under pytest: inject a fake recycler (no real Recycle Bin)")
-    if os.name != "nt":
-        raise RuntimeError("Recycle Bin removal is implemented for Windows only")
+    # No test may reach the real bin; the guard sits at the one call that touches the shell, so a test that forgets
+    # its fake fails loudly instead of prompting the user.
+    if under_test_harness():
+        raise RuntimeError("housekeep.recycle refused under the test harness (pytest, HARNESS_FIXTURE_ROOT or "
+                           "SKYGUARD_HOUSEKEEP_SWEEP=off): inject a fake recycler (no real Recycle Bin)")
+    if not has_recycle_bin():
+        # No Recycle Bin implementation here (Windows only). Never a delete instead: every item stays, and says so.
+        return {p: "no Recycle Bin on this platform: left in place" for p in paths}
     # The shell's own delete, NOT Microsoft.VisualBasic's DeleteDirectory(..., 'OnlyErrorDialogs', ...): that UI option
     # suppresses confirmations, and the confirmation it suppresses is the one Windows shows when an item is too big for
     # the bin and would be destroyed instead. FOF_WANTNUKEWARNING (0x4000) brings exactly that prompt back while
@@ -562,6 +615,9 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
         if guard.why_protected(c) in ("save", "git-tracked"):
             return "canonical copy is protected"
     if action["class"] in ("launch", "snapshot", "scratch"):
+        why = protected_inside(guard, p, action["class"])
+        if why:
+            return "protected ({})".format(why)
         if fingerprint(p) != action["fingerprint"]:
             return "folder changed since the plan"
     return ""
@@ -693,21 +749,11 @@ def temp_candidates(cfg, temp: Path):
                 continue
         except OSError:
             continue
+        # Only names this toolkit creates. pytest-of-<user>/ is shared by every project on the machine (the X4
+        # toolkit's runs, anyone's): an unattended sweep cannot tell this toolkit's runs from theirs, so it never
+        # touches it. This toolkit's own test runs live under its skyrim-harness- prefix (tests/run_harness_tests.py).
         if prefixes and e.name.startswith(prefixes):
             yield Path(e.path), "toolkit temp"
-        elif e.name.startswith("pytest-of-"):
-            # pytest keeps the newest three runs itself and leaves garbage-* behind when it cannot delete one.
-            try:
-                kids = [k for k in os.scandir(e.path) if k.is_dir(follow_symlinks=False)]
-            except OSError:
-                continue
-            runs = sorted((k for k in kids if re.fullmatch(r"pytest-\d+", k.name)),
-                          key=lambda k: int(k.name.split("-")[1]))
-            for k in runs[:-1]:                        # never the newest: it may belong to a run starting now
-                yield Path(k.path), "old pytest run"
-            for k in kids:
-                if k.name.startswith("garbage-"):
-                    yield Path(k.path), "pytest garbage"
 
 
 def sweep_temp(cfg, temp: Path | None = None, now: float | None = None, recycler=None) -> dict:
@@ -808,17 +854,27 @@ def worktree_count(root: Path) -> int:
 def session(cfg, state: Path) -> int:
     """The session-start job: sweep the toolkit's temp dirs, then write a one-line note for the next banner when
     something needs the user (free space near the floor, Codex sessions or worktrees past their threshold).
-    Runs at most once per sweep_every_hours: the state file's age is the clock."""
+    Runs at most once per sweep_every_hours: the state file's age is the clock. SKYGUARD_HOUSEKEEP_SWEEP=off: nothing."""
+    if sweep_switched_off():
+        return 0
     try:
         if time.time() - state.stat().st_mtime < cfg["sweep_every_hours"] * 3600:
             return 0
     except OSError:
         pass
-    res = sweep_temp(cfg)
-    ret = sweep_retired([cfg["root"]] + [p for p in [_project_of(state)] if p is not None])
     notes = []
+    try:
+        res = sweep_temp(cfg)
+    except Exception as e:                    # the state file must still be written, or the throttle never engages
+        res = {"rows": {"recycled": 0, "failed": 1}}
+        notes.append("temp sweep failed ({}: {})".format(type(e).__name__, str(e)[:200]))
+    try:
+        ret = sweep_retired([cfg["root"]] + [p for p in [_project_of(state)] if p is not None])
+    except Exception as e:                    # same rule: the state file is still written
+        ret = {"rows": {"recycled": 0, "failed": 0, "waiting: no Recycle Bin here": 0}, "waiting_bytes": 0}
+        notes.append("retired-store sweep failed ({}: {})".format(type(e).__name__, str(e)[:200]))
     r = res["rows"]
-    if r["recycled"] or r["failed"]:
+    if r["recycled"] or (r["failed"] and not notes):
         notes.append("moved {} leftover temp dir(s) to the Recycle Bin{}".format(
             r["recycled"], "; {} could not be recycled and were LEFT IN PLACE (ask the user before any permanent "
                            "delete)".format(r["failed"]) if r["failed"] else ""))
@@ -921,6 +977,11 @@ def main(argv) -> int:
         return 1 if res["failed"] else 0
     if cmd == "session" and len(args) == 1:
         return session(cfg, Path(args[0]))
+    if cmd == "recycle" and args:                     # for shell callers (kb-guard's rotation): one line per path
+        res = recycle(args)
+        for p in args:
+            print("OK\t" + p if res[p] is None else "FAILED\t{}\t{}".format(p, res[p]))
+        return 1 if any(res.values()) else 0
     only = None
     if "--only" in args:
         i = args.index("--only")

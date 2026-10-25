@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -206,7 +207,8 @@ class Fetcher:
             self.calls += 1
             try:
                 resp = self.transport(url, headers, secret)
-            except (urllib.error.URLError, OSError, ValueError) as exc:
+            except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as exc:
+                # HTTPException: a truncated body (IncompleteRead) or a garbled status line is a network failure too.
                 reason = getattr(exc, "reason", exc)
                 if attempt == 2:
                     raise CouldNotCheck("unreachable: %s (%s)" % (host, self._clean(str(reason)))) from None
@@ -510,11 +512,14 @@ HISTORY_WINDOW = 30
 
 def history_context(lines, idx, start):
     """The text a history marker must sit in to make a reference historical: the last HISTORY_WINDOW characters
-    before it on its own line, cut at a ';' (a new clause), plus the line before when that line ends with ':'.
-    Kept this narrow on purpose -- every skipped mention is a reference nobody compares with the pin."""
+    before it on its own line, cut at a ';' (a new clause), plus the LAST CLAUSE of the line before when that line
+    ends with ':' (cut at a ';' or a sentence end: "..., the version this was tested with. For you to run:" leads in
+    with its last sentence, not with an earlier sentence's history word -- review L4b M1). Kept this narrow on
+    purpose -- every skipped mention is a reference nobody compares with the pin."""
     before = lines[idx][:start][-HISTORY_WINDOW:].rsplit(";", 1)[-1]
     if idx > 0 and lines[idx - 1].rstrip().endswith(":"):
-        before = lines[idx - 1] + " " + before
+        lead = re.split(r"[;.!?](?:\s|$)", lines[idx - 1].rstrip())[-1]
+        before = lead + " " + before
     return before
 
 

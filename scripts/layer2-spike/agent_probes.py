@@ -46,7 +46,7 @@ def fresh(d):
             p = os.path.join(d, n)
             if os.path.isfile(p):
                 lockprobe.remove(p)
-        shutil.rmtree(d)
+        sandbox.recycle(d)
     os.makedirs(d)
 
 

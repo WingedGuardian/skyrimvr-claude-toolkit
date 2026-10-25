@@ -77,6 +77,10 @@ def pristine(tmp_path_factory):
     shutil.rmtree(root / ".github")
     if (root / "scripts" / "layer2-spike").is_dir():
         shutil.rmtree(root / "scripts" / "layer2-spike")
+    if (root / "scripts" / "guard-corpus").is_dir():
+        shutil.rmtree(root / "scripts" / "guard-corpus")
+    if (root / "scripts" / "guard-latency.py").exists():
+        (root / "scripts" / "guard-latency.py").unlink()
     for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", ".claude/backups",
                  "KNOWLEDGEBASE.local.md", ".superpowers", ".skyguard", "tools/resaver-cli/tests"):
         p = root / junk
@@ -158,6 +162,9 @@ BREAKS = {
     "routes-harness-shipped": (_mkdir("tests/fixtures/routes-harness"), "tests/fixtures/routes-harness NOT shipped"),
     "github-shipped": (_mkdir(".github"), ".github NOT shipped"),
     "layer2-spike-shipped": (_mkdir("scripts/layer2-spike"), "scripts/layer2-spike NOT shipped"),
+    "guard-corpus-shipped": (_mkdir("scripts/guard-corpus"), "scripts/guard-corpus NOT shipped"),
+    "guard-latency-shipped": (lambda r: (r / "scripts" / "guard-latency.py").write_text("x"),
+                              "scripts/guard-latency.py NOT shipped"),
     "git-shipped": (_mkdir(".git"), ".git NOT shipped"),
     "superpowers-shipped": (_mkdir(".superpowers"), ".superpowers NOT shipped"),
     "skyguard-state-shipped": (_mkdir(".skyguard"), ".skyguard NOT shipped"),

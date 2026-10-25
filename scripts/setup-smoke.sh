@@ -8,6 +8,8 @@
 # work-dir (default: a new folder under ${TMPDIR:-/tmp}) must not exist or be empty; nothing in it is deleted.
 # Exit 0 = every check passed, 1 = a check failed (each failure is printed), 2 = usage.
 set -u
+# The installed hooks run below; none may launch the real session-start temp sweep (tools/skyguard/run.py).
+export SKYGUARD_HOUSEKEEP_SWEEP=off
 AGENT="${1:-}"
 case "$AGENT" in claude|codex|all|both|auto|generic|opencode) ;; *) echo "usage: setup-smoke.sh <claude|codex|all|both|auto|generic|opencode> [work-dir]" >&2; exit 2 ;; esac
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

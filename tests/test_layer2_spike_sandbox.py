@@ -129,3 +129,32 @@ def test_mutation_l2_sandbox_realpath_turns_the_junction_row_red(box, tmp_path):
     # ...while the real module refuses it.
     with pytest.raises(sb.SandboxViolation):
         sb.assert_inside(link / "Skyrim.esm")
+
+
+# --------------------------------------------------------------------- leftovers go to the bin (review L4b L6)
+
+def test_a_leftover_goes_to_the_injected_bin_and_never_outside_the_box(box):
+    root, outside = box
+    sb = _load()
+    left = root / "rows"
+    left.mkdir()
+    sent = []
+    sb.recycle(str(left), recycler=lambda ps: {p: sent.append(p) for p in ps})
+    assert sent == [sb.resolve(str(left))]
+    with pytest.raises(sb.SandboxViolation):
+        sb.recycle(str(outside), recycler=lambda ps: pytest.fail("the bin was offered a path outside the box"))
+
+
+def test_a_leftover_the_bin_refuses_stays_and_stops_the_probe(box):
+    root, _ = box
+    sb = _load()
+    left = root / "rows"
+    left.mkdir()
+    with pytest.raises(SystemExit, match="left in place"):
+        sb.recycle(str(left), recycler=lambda ps: {p: "too big" for p in ps})
+    assert left.is_dir()
+
+
+def test_no_spike_script_deletes_a_folder_outright():
+    for p in SPIKE.parent.glob("*.py"):
+        assert "shutil.rmtree(" not in p.read_text(encoding="utf-8"), p.name

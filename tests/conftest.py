@@ -25,6 +25,9 @@ import pytest
 from harness_isolation import active as _harness_active
 
 REPO = Path(__file__).resolve().parent.parent
+# No test, and no hook a test runs (most copy os.environ), may launch the real session-start temp sweep or reach the
+# real Recycle Bin (tools/skyguard/run.py, tools/housekeep.py). A test that means to exercise either sets it back.
+os.environ["SKYGUARD_HOUSEKEEP_SWEEP"] = "off"
 BIN = Path(__file__).resolve().parent / "bin"
 BS = chr(92)  # backslash, spelled this way to keep escapes out of this file
 

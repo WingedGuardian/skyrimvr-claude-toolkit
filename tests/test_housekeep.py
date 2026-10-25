@@ -308,6 +308,134 @@ def test_a_snapshot_repeating_the_previous_one_is_planned_and_distinct_and_newes
     assert not {key(s1), key(s3), key(s5)} & planned(doc)
 
 
+# ------------------------------------------------- whole-folder classes still answer to the Forever class (L4a M2)
+
+@pytest.mark.parametrize("inner", ["Save1.ess", "pair.skse", "backups/pair.txt"])
+def test_a_scratch_folder_holding_a_save_or_a_backup_is_never_planned(tree, inner):
+    bed = tree / "scratchbed"
+    write(bed / "plain.txt", b"x")
+    write(bed / inner, b"keep me")
+    clean = tree / "cleanbed"                                    # twin: the same folder without it is planned
+    write(clean / "plain.txt", b"x")
+    doc = hk.plan(cfg_for(tree, scratch=[str(bed), str(clean)]))
+    assert key(bed) not in planned(doc), "a protected file inside a scratch folder must keep the whole folder"
+    assert key(clean) in planned(doc, "scratch")
+    assert any(k.startswith("kept: protected") for k in doc["rows"]), doc["rows"]
+
+
+def test_an_old_launch_folder_holding_a_save_is_never_planned(tree):
+    stamp = time.strftime("launch-%Y%m%d-%H%M%S", time.localtime(time.time() - 100 * DAY))
+    d = launch(tree, stamp, 100)
+    write(d / "Saves" / "quick.ess", b"save", days=100)
+    stamp2 = time.strftime("launch-%Y%m%d-%H%M%S", time.localtime(time.time() - 101 * DAY))
+    twin = launch(tree, stamp2, 101)
+    doc = hk.plan(cfg_for(tree))
+    assert key(d) not in planned(doc) and key(twin) in planned(doc, "launch")
+
+
+def test_a_repeated_snapshot_under_a_backup_folder_is_never_planned(tree):
+    for name in ("20261001_000001", "20261001_000002", "20261001_000003"):
+        write(tree / "kb-backups" / "snaps" / name / "a.psc", b"v1")
+        write(tree / "snaps" / name / "a.psc", b"v1")            # twin: the same stamps outside a backup folder
+    doc = hk.plan(cfg_for(tree, legacy_snapshots=["kb-backups/snaps", "snaps"]))
+    got = planned(doc, "snapshot")
+    assert got == {key(tree / "snaps" / "20261001_000002")}, got
+
+
+def _auto_snaps(tree, inner=None):
+    store = tree / ".claude" / "backups" / "auto_snapshots"
+    for name in ("20261001_000001", "20261001_000002", "20261001_000003"):
+        write(store / name / "a.psc", b"v1")
+        if inner:
+            write(store / name / inner, b"same")
+    return store
+
+
+def test_repeated_auto_snapshots_stamps_are_rolling(tree):
+    """User ruling 2026-10-20: the 3.x snapshot store is Rolling, though it sits under .claude/backups/."""
+    store = _auto_snaps(tree)
+    cfg = cfg_for(tree, legacy_snapshots=[".claude/backups/auto_snapshots"])
+    doc = hk.plan(cfg)
+    assert planned(doc, "snapshot") == {key(store / "20261001_000002")}
+    action = next(a for a in doc["actions"] if a["class"] == "snapshot")
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time()) == "", "apply must agree with plan"
+
+
+@pytest.mark.parametrize("inner", ["kept/quick" + hk.SAVE_EXTS[0], "backups/pair.txt"])
+def test_a_save_or_backup_inside_an_auto_snapshots_stamp_keeps_it(tree, inner):
+    _auto_snaps(tree, inner)
+    doc = hk.plan(cfg_for(tree, legacy_snapshots=[".claude/backups/auto_snapshots"]))
+    assert planned(doc, "snapshot") == set(), "a save or a backup folder inside a stamp is still Forever"
+
+
+def test_apply_refuses_a_scratch_folder_a_save_appeared_in_after_the_plan(tree):
+    bed = tree / "scratchbed"
+    write(bed / "plain.txt", b"x")
+    cfg = cfg_for(tree, scratch=[str(bed)])
+    doc = hk.plan(cfg)
+    assert key(bed) in planned(doc, "scratch")
+    action = next(a for a in doc["actions"] if a["class"] == "scratch")
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time()) == ""
+    write(bed / "Save9.ess", b"save", days=0)
+    os.utime(bed / "Save9.ess", (bed.stat().st_mtime,) * 2)
+    action["fingerprint"] = list(hk.fingerprint(bed))            # even with the fingerprint matching
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time()).startswith("protected"), "a save must refuse it"
+
+
+def test_a_relative_scratch_path_is_the_toolkit_folder_not_the_current_directory(tree, tmp_path, monkeypatch):
+    """L4a L2: the example config says paths are relative to the toolkit folder."""
+    write(tree / "scratchbed" / "a.txt", b"toolkit")
+    write(tree / "scratchbed" / "b.txt", b"toolkit")
+    elsewhere = tmp_path.parent / (tmp_path.name + "-elsewhere")
+    write(elsewhere / "scratchbed" / "a.txt", b"other")
+    monkeypatch.chdir(elsewhere)
+    doc = hk.plan(cfg_for(tree, scratch=["scratchbed"]))
+    assert planned(doc, "scratch") == {key(tree / "scratchbed")}
+
+
+# --------------------------------------------------------------------------- off Windows (L4a L1)
+
+def test_off_windows_the_bin_leaves_everything_in_place_and_says_so(tmp_path, monkeypatch):
+    d = tmp_path / "leftover"
+    d.mkdir()
+    monkeypatch.setattr(hk, "has_recycle_bin", lambda: False)
+    monkeypatch.setenv("HOUSEKEEP_REAL_BIN_IN_TESTS", "1")      # past the test refusal, to the platform answer
+
+    def no_shell(*a, **k):                     # never the real bin from a test, even if the platform check moved
+        raise AssertionError("the Recycle Bin shell call ran")
+
+    monkeypatch.setattr(hk.subprocess, "run", no_shell)
+    res = hk.recycle([d])
+    assert d.is_dir()
+    assert "left in place" in res[str(d)], res
+
+
+def test_the_recycle_command_reports_every_path_the_bin_refused(tmp_path, monkeypatch, capsys):
+    """kb-guard's rotation reads this output (one OK / FAILED line per path); a refusal must never print OK."""
+    taken, refused = str(tmp_path / "taken"), str(tmp_path / "refused")
+    monkeypatch.setattr(hk, "recycle", lambda paths: {p: None if p == taken else "too big" for p in paths})
+    monkeypatch.setattr(hk, "DEFAULT_CONFIG", tmp_path / "no-config.json")
+    assert hk.main(["recycle", taken, refused]) == 1
+    assert capsys.readouterr().out.splitlines() == ["OK\t" + taken, "FAILED\t" + refused + "\ttoo big"]
+
+
+def test_session_writes_its_state_even_when_the_sweep_fails(tmp_path, monkeypatch):
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)   # conftest switches the sweep off for every test
+    cfg = sweep_cfg()
+    cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
+               sweep_every_hours=6)
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+    def broken(cfg):
+        raise RuntimeError("no Recycle Bin")
+
+    monkeypatch.setattr(hk, "sweep_temp", broken)
+    state = tmp_path / "state" / "note.txt"
+    assert hk.session(cfg, state) == 1
+    assert state.is_file(), "without the state file the throttle never engages"
+    assert "temp sweep failed" in state.read_text(encoding="utf-8")
+
+
 # --------------------------------------------------------------------------- accounting
 
 def test_report_rows_sum_to_every_byte_scanned(tree):
@@ -402,14 +530,76 @@ def test_the_sweep_keeps_a_dir_a_process_has_a_file_open_in(tmp_path):
     assert res["rows"]["kept: in use"] == 1
 
 
-def test_the_sweep_keeps_the_newest_pytest_run_and_removes_older_runs_and_garbage(tmp_path):
+def test_the_sweep_never_touches_another_projects_pytest_runs(tmp_path):
+    """Coordinator finding (X4 session, 2026-10-20): pytest-of-<user>/ is shared by every project on the machine, so
+    the unattended sweep recycled other projects' runs. Only this toolkit's own prefixes are candidates now."""
     base = tmp_path / "pytest-of-someone"
     old = tdir(base, "pytest-9")
-    newest = tdir(base, "pytest-10")                         # numerically newest, though just as stale
+    newest = tdir(base, "pytest-10")
     garbage = tdir(base, "garbage-0d1e")
-    hk.sweep_temp(sweep_cfg(), temp=tmp_path, recycler=bin_for(tmp_path))
-    assert newest.exists()
-    assert not old.exists() and not garbage.exists()
+    ours = tdir(tmp_path, "skyrim-harness-own001")             # twin: this toolkit's own leftover still goes
+    fake = bin_for(tmp_path)
+    hk.sweep_temp(sweep_cfg(), temp=tmp_path, recycler=fake)
+    assert newest.exists() and old.exists() and garbage.exists()
+    assert not ours.exists() and [os.path.basename(p) for p in fake.got] == ["skyrim-harness-own001"]
+
+
+def _only(monkeypatch, trigger, tmp_path):
+    for k in ("HARNESS_FIXTURE_ROOT", "SKYGUARD_HOUSEKEEP_SWEEP", "PYTEST_CURRENT_TEST", "HOUSEKEEP_REAL_BIN_IN_TESTS"):
+        monkeypatch.delenv(k, raising=False)
+    if trigger:
+        monkeypatch.setenv(trigger, "off" if trigger == "SKYGUARD_HOUSEKEEP_SWEEP" else str(tmp_path))
+    monkeypatch.setattr(hk, "has_recycle_bin", lambda: True)
+
+    def no_shell(*a, **k):
+        raise AssertionError("the Recycle Bin shell call ran")
+
+    monkeypatch.setattr(hk.subprocess, "run", no_shell)
+
+
+@pytest.mark.parametrize("trigger", ["PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT", "SKYGUARD_HOUSEKEEP_SWEEP"])
+def test_the_real_bin_refuses_under_the_test_harness(tmp_path, monkeypatch, trigger):
+    """A test that forgot to inject a fake recycler must fail, never show the user a Windows dialog. Each trigger
+    alone: pytest, the contained launcher without pytest (HARNESS_FIXTURE_ROOT), the sweep switch."""
+    d = tmp_path / "x"
+    d.mkdir()
+    _only(monkeypatch, trigger, tmp_path)
+    with pytest.raises(RuntimeError, match="inject a fake recycler"):
+        hk.recycle([d])
+    assert d.is_dir()
+
+
+def test_an_integration_test_opts_in_to_the_real_bin_explicitly(tmp_path, monkeypatch):
+    """HOUSEKEEP_REAL_BIN_IN_TESTS (shared with the health branch) is the one opt-in. The shell is stubbed to raise
+    here, so even this test never reaches the real bin: reaching the stub is the proof the refusal stepped aside."""
+    d = tmp_path / "x"
+    d.mkdir()
+    _only(monkeypatch, "PYTEST_CURRENT_TEST", tmp_path)
+    monkeypatch.setenv("HOUSEKEEP_REAL_BIN_IN_TESTS", "1")
+    with pytest.raises(AssertionError, match="shell call ran"):
+        hk.recycle([d])
+
+
+def test_the_switch_turns_the_session_sweep_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("SKYGUARD_HOUSEKEEP_SWEEP", "off")
+
+    def sweep(cfg):
+        raise AssertionError("a sweep ran with SKYGUARD_HOUSEKEEP_SWEEP=off")
+
+    monkeypatch.setattr(hk, "sweep_temp", sweep)
+    state = tmp_path / "note.txt"
+    assert hk.session(sweep_cfg(), state) == 0
+
+
+def test_every_test_helper_switches_the_real_sweep_off():
+    """Helpers that clean the environment lose PYTEST_CURRENT_TEST, so a hook they run would sweep the real temp."""
+    assert os.environ.get("SKYGUARD_HOUSEKEEP_SWEEP") == "off", "conftest must set it for every test and subprocess"
+    assert 'os.environ["SKYGUARD_HOUSEKEEP_SWEEP"] = "off"' in (REPO / "tests" / "conftest.py").read_text(encoding="utf-8")
+    launcher = (REPO / "tests" / "run_harness_tests.py").read_text(encoding="utf-8")
+    assert 'SKYGUARD_HOUSEKEEP_SWEEP="off"' in launcher
+    assert "export SKYGUARD_HOUSEKEEP_SWEEP=off" in (REPO / "scripts" / "setup-smoke.sh").read_text(encoding="utf-8")
+    verify = (REPO / "tools" / "verify-release.sh").read_text(encoding="utf-8")
+    assert "LANG=C.UTF-8 SKYGUARD_HOUSEKEEP_SWEEP=off)" in verify, "the scrubbed env must carry the switch"
 
 
 def test_the_sweep_removes_read_only_files_and_its_rows_sum(tmp_path):
@@ -443,6 +633,7 @@ def test_the_sweep_never_follows_a_link_out_of_temp(tmp_path):
 
 
 def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, monkeypatch):
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)   # conftest switches the sweep off for every test
     cfg = sweep_cfg()
     cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
                sweep_every_hours=0)
@@ -459,6 +650,7 @@ def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, mon
 
 
 def test_session_runs_at_most_once_per_interval(tmp_path, monkeypatch):
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)   # conftest switches the sweep off for every test
     cfg = sweep_cfg()
     cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
                sweep_every_hours=6)

@@ -79,7 +79,7 @@ def main():
     c2 = xe("spike")
     spr = ROOT + "/spr/" + a.mech
     if os.path.exists(spr):
-        shutil.rmtree(spr)
+        sandbox.recycle(spr)
     sp = subprocess.run(["spriggit", "serialize", "--InputPath", DATA + "/Spike.esp", "--OutputPath", spr,
                          "--GameRelease", "SkyrimSE", "--PackageName", "Spriggit.Yaml", "--PackageVersion",
                          "0.41.0"], capture_output=True, text=True, timeout=600)
@@ -93,7 +93,8 @@ def main():
     # C3 / P32
     c3 = xe("modify-update")
     after3 = sha(DATA + "/Update.esm")
-    res["C3"] = {"pass_means_refused": after3 == before["Update.esm"], "raw": c3,
+    attempted = not (c3.get("fatal") or c3.get("error"))     # a crash before the save attempt refused nothing
+    res["C3"] = {"pass_means_refused": attempted and after3 == before["Update.esm"], "attempted": attempted, "raw": c3,
                  "update_identical": after3 == before["Update.esm"]}
     # C4: unlock one command -> save succeeds -> restore -> relock
     rm = lockprobe.remove(DATA + "/Update.esm")
@@ -123,8 +124,7 @@ def main():
                 stuck.append(p)
     bk = DATA + "/zEdit Backups"
     if os.path.isdir(bk) and not stuck:
-        sandbox.assert_inside(bk)
-        shutil.rmtree(bk)
+        sandbox.recycle(bk)
     res["stuck"] = stuck
     res["data_listing"] = sorted(os.listdir(DATA))
     with open(a.out, "w", encoding="utf-8") as fh:

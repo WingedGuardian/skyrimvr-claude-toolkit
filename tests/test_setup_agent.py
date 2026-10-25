@@ -407,12 +407,30 @@ def test_no_interpreter_line_when_no_python_was_found(game_dir):
 
 
 def test_an_exported_value_cannot_stand_in_for_a_missing_line(game_dir):
-    """The read-back compares what the FILE says: a SKYGUARD_PYTHON exported by the caller must not mask it."""
+    """The read-back compares what the FILE says: a value exported by the caller must not mask a line the file lacks.
+
+    v4.0.0 review L4a L4: the old assertion named a message setup.sh never prints, so it could not go red. Now a copy
+    of setup.sh that forgets one line runs with no Python (so the guard's own reader cannot catch it) and with that
+    very value exported: only the `unset` before the read-back makes the missing line visible."""
     from conftest import no_python_env
     env = no_python_env()
-    r = run_setup(game_dir, env_overrides={"PATH": env["PATH"] + os.pathsep + os.path.dirname(BASH),
-                                           "SKYGUARD_PYTHON": "C:/Elsewhere/python.exe"})
-    assert "does not parse as shell" not in r.stdout, r.stdout[-1500:]
+    path = {"PATH": env["PATH"] + os.pathsep + os.path.dirname(BASH)}
+    r = run_setup(game_dir, env_overrides=path)
+    assert "Wrote: skyrim-paths.env" in r.stdout, r.stdout[-1500:]
+    line = next(ln for ln in (game_dir / "skyrim-paths.env").read_text(encoding="utf-8").splitlines()
+                if ln.startswith("SKYRIM_CONFIG_DIR="))
+    value = line.split("=", 1)[1].strip("'")
+    assert value, "the fixture needs a detected config folder to export"
+    script = game_dir / "setup.sh"
+    text = script.read_bytes()
+    forgot = b"    printf 'SKYRIM_CONFIG_DIR=%s\\n' \"$(sq \"$CONFIG_DIR\")\"\n"
+    if forgot not in text:                       # a CRLF checkout
+        forgot = forgot.replace(b"\n", b"\r\n")
+    assert text.count(forgot) == 1
+    script.write_bytes(text.replace(forgot, b""))
+    r = run_setup(game_dir, env_overrides={**path, "SKYRIM_CONFIG_DIR": value})
+    assert "skyrim-paths.env does NOT read back" in r.stdout, r.stdout[-1500:]
+    assert "Wrote: skyrim-paths.env" not in r.stdout
 
 
 def test_the_root_paths_file_is_not_tracked():

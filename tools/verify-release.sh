@@ -275,7 +275,7 @@ if [ "$SCRUBBED" -eq 1 ]; then
   done
   SCRUB_ENV=(HOME="$FAKEHOME" USERPROFILE="$(winpath "$FAKEHOME")" APPDATA="$(winpath "$FAKEHOME/AppData/Roaming")"
              LOCALAPPDATA="$(winpath "$FAKEHOME/AppData/Local")" TMPDIR="$STMP" TEMP="$(winpath "$STMP")"
-             TMP="$(winpath "$STMP")" LANG=C.UTF-8)
+             TMP="$(winpath "$STMP")" LANG=C.UTF-8 SKYGUARD_HOUSEKEEP_SWEEP=off)   # verifying never sweeps temp
   if [ "${OS:-}" = "Windows_NT" ]; then
     SYSDIR="$(cygpath -u "${SYSTEMROOT:-C:/Windows}")/System32"
     MINPATH="$MINPATH:$SYSDIR:$SYSDIR/WindowsPowerShell/v1.0"
@@ -340,9 +340,9 @@ if [ "$SCRUBBED" -eq 1 ]; then
 
   # 4. the hook canary runs from the install (a fresh install has no heartbeats yet: it must REPORT, not crash).
   out=$(cd "$GAME" && scrub env CLAUDE_PROJECT_DIR="$(winpath "$GAME")" bash tools/hook-canary.sh 2>&1); rc=$?
-  # Its contract: 0 healthy / 1 blind / 2 unmeasurable -- a fresh install, never exercised, is the last. A crash
-  # (127, a Python traceback) prints no RESULT line.
-  if [ $rc -le 2 ] && grep -q '^RESULT:' <<<"$out"; then ok "hook-canary reports from the install (exit $rc)"; else bad "hook-canary" "exit $rc, no RESULT line"; echo "$out" | tail -5; fi
+  # Its contract: 0 healthy / 1 DEGRADED (a hook blind) / 2 unmeasurable -- a fresh install, never exercised, is the
+  # last. 1 is a failure, never a pass. A crash (127, a Python traceback) prints no RESULT line.
+  if { [ $rc -eq 0 ] || [ $rc -eq 2 ]; } && grep -q '^RESULT:' <<<"$out"; then ok "hook-canary reports from the install (exit $rc)"; else bad "hook-canary" "exit $rc, no RESULT line"; echo "$out" | tail -5; fi
 
   # 5. the shipped generated files match agent/ (the extracted payload, before setup fills its copies).
   out=$(cd "$ROOT" && scrub "$PY" -B scripts/gen_agent_trees.py --check 2>&1); rc=$?

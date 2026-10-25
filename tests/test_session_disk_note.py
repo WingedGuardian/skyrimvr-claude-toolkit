@@ -55,13 +55,37 @@ def test_no_note_adds_nothing_to_the_banner(tmp_path):
     assert "DISK:" in _start(with_note, "claude", "session-kb-guard", payload).stdout.decode("utf-8")
 
 
-def test_a_sweep_is_launched_detached_outside_tests_and_never_inside_them(tmp_path, monkeypatch):
+def test_a_sweep_is_launched_detached_outside_tests_and_never_inside_them(monkeypatch):
+    """Only for the installed toolkit itself (the project whose tools/ holds this run.py): here, REPO."""
     launched = []
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
-    assert run._disk_note(str(tmp_path)) == ""
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
+    run._disk_note(str(REPO))
     assert launched == [], "under pytest the hook must not sweep the real temp dir"
     monkeypatch.setenv("SKYGUARD_SWEEP_IN_TESTS", "1")              # twin: what a real session does
-    run._disk_note(str(tmp_path))
+    run._disk_note(str(REPO))
     (argv, kw), = launched
-    assert argv[-3:] == [str(REPO / "tools" / "housekeep.py"), "session", str(tmp_path / run.DISK_NOTE)]
+    assert argv[-3:] == [str(REPO / "tools" / "housekeep.py"), "session", str(REPO / run.DISK_NOTE)]
     assert kw["stdout"] == subprocess.DEVNULL and (kw["creationflags"] if os.name == "nt" else kw["start_new_session"])
+
+
+def test_no_sweep_for_a_project_that_is_not_this_toolkit(tmp_path, monkeypatch):
+    """A hook run against a test fixture or another copy never launches THIS copy's sweep (coordinator finding)."""
+    launched = []
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
+    monkeypatch.setenv("SKYGUARD_SWEEP_IN_TESTS", "1")              # as a real session: only the project differs
+    run._disk_note(str(tmp_path))
+    assert launched == []
+    run._disk_note(str(REPO))                                       # twin: the toolkit itself does launch
+    assert len(launched) == 1
+
+
+def test_the_switch_stops_the_session_sweep(monkeypatch):
+    """Helpers that clean the environment (no PYTEST_CURRENT_TEST) rely on SKYGUARD_HOUSEKEEP_SWEEP=off."""
+    launched = []
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
+    monkeypatch.setenv("SKYGUARD_SWEEP_IN_TESTS", "1")
+    monkeypatch.setenv("SKYGUARD_HOUSEKEEP_SWEEP", "off")
+    run._disk_note(str(REPO))
+    assert launched == []

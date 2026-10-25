@@ -203,7 +203,7 @@ def cleanup(d):
             res = lockprobe.remove(p)
             if not res["clean"]:
                 raise SystemExit("STUCK: could not unlock %s: %s" % (p, res))
-    shutil.rmtree(d)
+    sandbox.recycle(d)
 
 
 def main():

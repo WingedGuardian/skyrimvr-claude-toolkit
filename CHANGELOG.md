@@ -5,6 +5,7 @@
 - Shared preservation core pinned to 221292e: incomplete local prompts refuse, and unknown surfaces cannot discard declared save work or claim evaluated coverage through a prompt.
 
 - Shared preservation core pinned to d2af1e8: permission prompts from a profile or local restriction now pass save-scope, bulk-approval and verified-backup checks before reaching the host.
+- Guard latency gate validates every tool-hook response against the production PreToolUse schema; valid JSON scalars, arrays and malformed verdict objects fail.
 
 - Knowledgebase notes get committed. The instructions now tell the agent to
   commit `KNOWLEDGEBASE.local.md` alone, by explicit path, when the install is a

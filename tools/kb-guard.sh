@@ -242,8 +242,46 @@ scan_store
 # thing it protects. (The newest is pinned because at a small KEEP the oldest-first
 # walk would otherwise delete every unprotected directory, including the one written
 # seconds earlier -- correct arithmetic, useless result.)
+#
+# ⚠ Pruned directories go to the Recycle Bin through `tools/housekeep.py recycle`, never a
+# permanent delete (docs/RETENTION.md; user ruling 2026-10-18). Whatever the bin does not
+# take -- no Python, no housekeep.py, a platform with no bin, a refusal -- stays in the
+# store, and the report says how many and why.
+recycle_dirs() {
+    local hk cand run out ok total why p native=()
+    total=$#
+    hk="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/housekeep.py"
+    why="no Python 3 found to run tools/housekeep.py"
+    [ -f "$hk" ] || why="tools/housekeep.py is missing"
+    for p in "$@"; do
+        p="${p%/}"
+        command -v cygpath >/dev/null 2>&1 && p=$(cygpath -w "$p")
+        native+=("$p")
+    done
+    if [ -f "$hk" ]; then
+        command -v cygpath >/dev/null 2>&1 && hk=$(cygpath -w "$hk")
+        for cand in "${SKYGUARD_PYTHON:-}" python3 python "py -3"; do
+            [ -n "$cand" ] || continue
+            if [ -e "$cand" ]; then run=("$cand"); else IFS=' ' read -r -a run <<< "$cand"; fi
+            "${run[@]}" -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1 || continue
+            # Said BEFORE anything goes to the bin, so Windows' own "too big" prompt is never a surprise.
+            echo "Moving $total old knowledgebase snapshot(s) from $STORE to the Recycle Bin; if Windows says one is too big for the bin, it will ask you before deleting it permanently -- answer No to keep it."
+            out=$("${run[@]}" -B "$hk" recycle "${native[@]}" 2>&1)
+            ok=$(printf '%s\n' "$out" | grep -c "^OK"$'	')
+            why=$(printf '%s\n' "$out" | grep -m1 "^FAILED"$'	' | cut -f3)
+            [ -z "$why" ] && [ "$ok" -lt "$total" ] && why=$(printf '%s' "$out" | tail -n1)
+            break
+        done
+    fi
+    ok=${ok:-0}
+    if [ "$ok" -lt "$total" ]; then
+        notes="$notes
+  note: rotation: $((total - ok)) old snapshot(s) left in place in $STORE (not sent to the Recycle Bin: ${why:-no reason given})"
+    fi
+}
+
 prune_store() {
-    local dirs=() d p name best bestsize sz skip removed target
+    local dirs=() victims=() d p name best bestsize sz skip removed target
     for d in "$STORE"/*/; do
         [ -d "$d" ] && dirs+=("$d")
     done
@@ -269,8 +307,11 @@ prune_store() {
             [ "$d" = "$p" ] && skip=1
         done
         [ "$skip" -eq 1 ] && continue
-        rm -rf "$d" 2>/dev/null && removed=$((removed + 1))
+        victims+=("$d")
+        removed=$((removed + 1))
     done
+    [ "${#victims[@]}" -gt 0 ] && recycle_dirs "${victims[@]}"
+    return 0
 }
 prune_store
 

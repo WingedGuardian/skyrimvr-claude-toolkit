@@ -266,10 +266,12 @@ def classify_doc(name: str, data: bytes, known: dict, env=None):
 
 
 def kb_appended(data: bytes, known: dict):
-    """If the knowledgebase is a shipped version with text added at the END, that text; else None."""
+    """If the knowledgebase is a shipped version with text added at the END, that text; else None. The LONGEST
+    shipped version that is a prefix wins: an older release's file can be a byte prefix of a newer one's (v3.8's of
+    v3.9.1's), and the shortest match would hand the newer release's own text over as the user's notes."""
     text = norm(data)
     raw = text.encode("utf-8", "surrogateescape")
-    for spec in known["docs"].get(KB, []):
+    for spec in sorted(known["docs"].get(KB, []), key=lambda s: s["bytes"], reverse=True):
         n = spec["bytes"]
         if len(raw) > n and hashlib.sha256(raw[:n]).hexdigest() == spec["sha256"]:
             return raw[n:].decode("utf-8", "surrogateescape")

@@ -34,10 +34,12 @@ def _zip(src: Path, out: Path, top: str) -> Path:
 @pytest.fixture(scope="module")
 def payload(tmp_path_factory):
     root = copy_repo(tmp_path_factory.mktemp("vr") / "p")
-    for junk in (".github", "scripts/layer2-spike", ".claude/backups", ".superpowers", ".skyguard"):
+    for junk in (".github", "scripts/layer2-spike", "scripts/guard-corpus", ".claude/backups", ".superpowers",
+                 ".skyguard"):
         if (root / junk).exists():
             shutil.rmtree(root / junk)
-    for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", "KNOWLEDGEBASE.local.md"):
+    for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", "KNOWLEDGEBASE.local.md",
+                 "scripts/guard-latency.py"):
         if (root / junk).exists():
             (root / junk).unlink()
     # Only what a release can ship: git-tracked files. CI tees behavioral.log / collect.log into the checkout
@@ -179,6 +181,18 @@ def test_the_scrubbed_install_runs_and_its_canary_is_invisible(tmp_path, payload
         line = _line(out, name)
         assert line.endswith(" ok"), "{!r} not ok:\n{}".format(name, out[-4000:] + r.stderr[-2000:])
     assert r.returncode == 0, out[-4000:]
+
+
+def test_a_degraded_hook_canary_is_red(tmp_path, payload):
+    """v4.0.0 review L4a L3: hook-canary's exit 1 means a hook is DEGRADED; it was accepted as a report."""
+    def degraded(src):
+        (src / "tools" / "hook-canary.sh").write_text(
+            "#!/usr/bin/env bash\necho 'RESULT: DEGRADED -- protect-bash.sh received no payload'\nexit 1\n",
+            encoding="utf-8", newline="\n")
+    r = _verify(tmp_path, _variant(tmp_path, payload, degraded), "--scrubbed")
+    verdict = [ln for ln in r.stdout.splitlines() if ln.strip().startswith("hook-canary")]
+    assert len(verdict) == 1 and "!!" in verdict[0], r.stdout[-4000:]
+    assert r.returncode == 1
 
 
 def _setup_documents_below_login_home():

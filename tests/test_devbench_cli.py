@@ -221,10 +221,13 @@ def test_400_is_reported_as_a_bad_argument(server):
 
 # ------------------------------------------------------------------- no jq
 
-@pytest.mark.parametrize("server", ["running", "hung", "notingame"], indirect=True)
-def test_liveness_still_works_without_jq(server):
+@pytest.mark.parametrize("server,code,words", [("running", 0, ("RUNNING",)), ("hung", 2, ("HUNG", "STARVED")),
+                                               ("notingame", 3, ("NOT IN GAME",))], indirect=["server"])
+def test_liveness_still_works_without_jq(server, code, words):
     """jget's no-jq branch is hand-rolled sed and is the least-exercised code in
-    the script; every verdict must survive losing jq."""
+    the script; every verdict must survive losing jq -- the SAME verdict as with jq
+    (v4.0.0 review L4a L7: any of 0/2/3 used to pass, so a hang read as running passed)."""
     r = run_cli("alive", port=server.port, mask_jq=True)
     assert "instance:" in r.stdout, r.stdout + r.stderr
-    assert r.returncode in (0, 2, 3), f"unexpected exit {r.returncode}"
+    assert r.returncode == code, r.stdout + r.stderr
+    assert any(w in r.stdout for w in words), r.stdout

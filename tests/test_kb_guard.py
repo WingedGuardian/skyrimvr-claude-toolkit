@@ -31,6 +31,27 @@ KB = "KNOWLEDGEBASE.md"
 # helpers
 # --------------------------------------------------------------------------
 
+# The rotation sends old snapshots to the Recycle Bin through `housekeep.py recycle`. Tests never touch the real bin:
+# this stand-in moves each folder into <tmp>/fake-bin, or refuses all of them when a file named REFUSE sits beside it.
+FAKE_HOUSEKEEP = r"""import os, sys
+from pathlib import Path
+here = Path(__file__).resolve().parent
+args = sys.argv[1:]
+assert args and args[0] == "recycle", args
+fake_bin = here.parent.parent / "fake-bin"
+fake_bin.mkdir(exist_ok=True)
+bad = 0
+for p in args[1:]:
+    if (here / "REFUSE").exists():
+        print("FAILED\t" + p + "\tthe bin said no")
+        bad += 1
+    else:
+        os.replace(p, str(fake_bin / "{}-{}".format(len(list(fake_bin.iterdir())), Path(p).name)))
+        print("OK\t" + p)
+sys.exit(1 if bad else 0)
+"""
+
+
 def make_install(tmp_path: Path, name: str = "install with space") -> Path:
     """A minimal install. The default name carries a SPACE on purpose: this
     project's real root is `C:/GOG Games/The Elder Scrolls V Skyrim VR`, and a
@@ -38,6 +59,7 @@ def make_install(tmp_path: Path, name: str = "install with space") -> Path:
     root = tmp_path / name
     (root / "tools").mkdir(parents=True)
     shutil.copy2(TOOL, root / "tools" / "kb-guard.sh")
+    (root / "tools" / "housekeep.py").write_text(FAKE_HOUSEKEEP, encoding="utf-8")
     return root
 
 
@@ -440,3 +462,53 @@ def test_the_instructions_tell_the_agent_to_commit_its_notes_and_never_push():
     """kb-guard's note is the backstop; the instruction every agent reads is the rule itself."""
     core = (REPO / "agent" / "instructions" / "core.md").read_text(encoding="utf-8")
     assert "commit it alone by explicit path" in core and "Never push." in core
+
+
+# --------------------------------------------------------------------------
+# pruned copies go to the Recycle Bin, never a permanent delete (v4.0.0 review L4a M3)
+# --------------------------------------------------------------------------
+
+def _rotate(root, runs=8, keep=3):
+    for i in range(runs):
+        write(root, KB, "notes " * (i + 1))
+        r = run_guard(root, keep=keep)
+    return r
+
+
+def _stored_dirs(root):
+    return [p for p in store(root).iterdir() if p.is_dir()]
+
+
+def test_pruned_snapshots_go_to_the_recycle_bin(tmp_path):
+    root = make_install(tmp_path)
+    r = _rotate(root)
+    assert "to the Recycle Bin; if Windows says one is too big for the bin, it will ask you" in r.stdout, r.stdout
+    fake_bin = tmp_path / "fake-bin"
+    binned = [p for p in fake_bin.iterdir() if p.is_dir()] if fake_bin.is_dir() else []
+    assert binned, "the rotation removed snapshots without the Recycle Bin"
+    assert len(_stored_dirs(root)) + len(binned) == 8, "every snapshot is stored or in the bin -- none destroyed"
+    assert len(_stored_dirs(root)) <= 3 + 2, "the rotation stopped rotating"
+    assert all((p / KB).is_file() for p in binned)
+
+
+def test_snapshots_the_bin_refuses_stay_and_the_report_says_so(tmp_path):
+    root = make_install(tmp_path)
+    (root / "tools" / "REFUSE").write_text("", encoding="utf-8")
+    r = _rotate(root)
+    assert len(_stored_dirs(root)) == 8, "a snapshot the bin refused was removed anyway"
+    assert "left in place" in r.stdout and "the bin said no" in r.stdout, r.stdout
+
+
+def test_without_the_recycle_helper_nothing_is_pruned(tmp_path):
+    root = make_install(tmp_path)
+    (root / "tools" / "housekeep.py").unlink()
+    r = _rotate(root)
+    assert len(_stored_dirs(root)) == 8
+    assert "left in place" in r.stdout, r.stdout
+
+
+def test_the_guard_never_deletes_permanently():
+    src = TOOL.read_text(encoding="utf-8")
+    code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
+    for call in ("rm -rf", "rm -r ", "rmdir", "shutil.rmtree", "os.unlink", "Remove-Item"):
+        assert call not in code, call
