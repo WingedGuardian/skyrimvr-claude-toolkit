@@ -69,7 +69,71 @@ RESAVER_TEXT_SAVE = re.compile(r"[^\s\"'/\\]{1,300}\.ess(?![^\s\"'])", re.ASCII 
 def _is_resaver(e) -> bool:
     if e.program in RESAVER_PROGRAMS:
         return True
+    # v4.0.0: the native backend's adapter run directly (`python tools/resaver_native.py clean x.ess y.ess --apply`)
+    # takes the wrapper's arguments, so it is judged exactly as the wrapper is.
+    if RESAVER_PYTHON.fullmatch(e.program):
+        script = next((a for a in e.argv if not a.startswith("-")), "")        # past `-B`, `-3`, `-I`
+        if _base_name(script).startswith(RESAVER_ADAPTER):
+            return True
     return e.program == "java" and any("resaver" in a.lower() for a in e.argv)
+
+
+def _base_name(word: str) -> str:
+    return re.split(r"[/\\]", word.lower())[-1]
+
+
+# --- S-RESAVER-NATIVE-DIRECT (v4.0.0): ReSaver Plus's own executables, run directly. The command-line tool writes a
+# save with `-o`, `--batch`/`--batch-all` and its structured `--apply` (upstream src/cli/main.cpp, src/core/Structured.cpp)
+# with none of tools/resaver_native.py's new-output admission, backups or receipt checks, and the GUI's writes are
+# unqualified (tools/resaver-plus/README.md). Reads (`x.ess --top 20`, `x.pex --psc`, `--json info x.ess`) stay
+# allowed. An argument not proven literal is read as a write.
+RESAVER_PYTHON = re.compile(r"python[\d.]*|py", re.ASCII)
+RESAVER_ADAPTER = "resaver_native"
+RESAVER_NATIVE_CLI = ("resaverpp-cli",)
+RESAVER_NATIVE_GUI = ("resaverpp",)
+RESAVER_NATIVE_WRITES = ("-o", "--batch", "--batch-all", "--apply")
+RESAVER_NATIVE_TEXT = re.compile(r"resaverpp(?P<cli>-cli)?(?:\.exe)?(?![\w-])", re.ASCII | re.IGNORECASE)
+
+
+RESAVER_NATIVE_LAUNCHERS = ("start", "start-process", "saps", "explorer", "invoke-item", "ii")
+
+
+def _native_program(word: str) -> str:
+    """"resaverpp" / "resaverpp-cli" when `word` names that executable (any folder, any case, .exe or not), else ""."""
+    name = _base_name(word.strip("\"'"))
+    name = name[:-4] if name.endswith(".exe") else name
+    return name if name in RESAVER_NATIVE_GUI + RESAVER_NATIVE_CLI else ""
+
+
+def _native_write_word(word: str) -> bool:
+    w = word.lower()
+    return w in RESAVER_NATIVE_WRITES or w.split("=", 1)[0] in RESAVER_NATIVE_WRITES
+
+
+def resaver_native_direct(command: str, parsed) -> str:
+    """The ReSaver Plus executable a command runs to write a save directly ("" for none, or for a read)."""
+    if "resaverpp" not in command.lower():
+        return ""
+    for e in parsed.execs:
+        e = deletes.substituted(e)
+        program, argv = e.program, list(e.argv)
+        if program in RESAVER_NATIVE_LAUNCHERS:         # `start ReSaverPP.exe`, `Start-Process resaverpp-cli ...`
+            named = [i for i, a in enumerate(argv) if _native_program(a)]
+            if not named:
+                continue
+            program, argv = _native_program(argv[named[0]]), argv[named[0] + 1:]
+        if program in RESAVER_NATIVE_GUI:
+            return "ReSaverPP.exe"
+        if program in RESAVER_NATIVE_CLI:
+            if any(_native_write_word(a) for a in argv) or any("$" in a or "`" in a for a in argv):
+                return "resaverpp-cli.exe"
+    if not parsed.ok:
+        for m in RESAVER_NATIVE_TEXT.finditer(command):
+            if not m.group("cli"):
+                return "ReSaverPP.exe"
+            if any(_native_write_word(w.strip("\"'")) for w in command[m.end():].split()):
+                return "resaverpp-cli.exe"
+    return ""
 
 
 def _resaver_op(e) -> str:
@@ -452,6 +516,9 @@ def _ordered(command, parsed, dels, wr, own, roots, audit, cwd, shell, env) -> V
     champ = anchored.champollion(command, parsed, roots, cwd, env)
     if champ:
         return deny("S-CHAMPOLLION", champ)
+    native = resaver_native_direct(command, parsed)
+    if native:
+        return deny("S-RESAVER-NATIVE-DIRECT", native)
     # Task 11: the DevBench console reached by curl or devbench-cli.sh (mcp_rules.py judges the same calls as the MCP hook).
     dev = mcp_rules.scan_shell(command, parsed, roots, env)
     if dev and dev[0] == "S-DEVBENCH-CRASH":

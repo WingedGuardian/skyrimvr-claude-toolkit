@@ -1,0 +1,12 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -85,6 +85,9 @@
+ 	add_executable(rs_cf_port_test tests/cf_port_test.cpp)
+ 	target_link_libraries(rs_cf_port_test PRIVATE rs_core)
+ 	add_test(NAME decoder_port COMMAND rs_cf_port_test)
++	add_executable(rs_cf_topic113_test tests/cf_topic113_test.cpp)
++	target_link_libraries(rs_cf_topic113_test PRIVATE rs_core)
++	add_test(NAME topic113 COMMAND rs_cf_topic113_test)
+ 	add_executable(rs_verify_port_test tests/verify_port_test.cpp)
+ 	target_link_libraries(rs_verify_port_test PRIVATE rs_core)
+ 	add_test(NAME expected_result COMMAND rs_verify_port_test)

@@ -1,0 +1,21 @@
+--- a/src/core/Save.h
++++ b/src/core/Save.h
+@@ -87,7 +87,7 @@
+ 	public:
+ 		static std::unique_ptr<SaveFile> load(const std::filesystem::path& a_path);
+ 		// Same parser as load(), also usable for synthetic fixtures and verified in-memory roundtrips.
+-		static std::unique_ptr<SaveFile> parse(const std::vector<std::uint8_t>& bytes, const std::vector<std::uint8_t>& cosaveBytes = {});
++		static std::unique_ptr<SaveFile> parse(const std::vector<std::uint8_t>& bytes, const std::vector<std::uint8_t>& cosaveBytes = {}, bool cosavePresent = false);
+ 		void save(const std::filesystem::path& a_path) const;  // also writes the .skse co-save next to it
+ 
+ 		// Writes the save (and its .skse co-save) safely:
+@@ -120,7 +120,8 @@
+ 		std::vector<std::uint32_t> formIDs;
+ 		std::vector<std::uint32_t> visitedWorldspaces;
+ 		std::vector<std::uint8_t> unknown3;
+-		std::vector<std::uint8_t> cosave;  // .skse file contents (empty if none)
++		bool                     hasCosave = false;  // distinguishes an empty file from an absent file
++		std::vector<std::uint8_t> cosave;  // .skse file contents
+ 		std::size_t               originalBodySize = 0;
+ 		// Structural problems found while reading (layout that does not add up, bad string indices,
+ 		// duplicate ids...). A save with problems may not be written back faithfully: open it read-only.

@@ -1,0 +1,35 @@
+--- a/src/core/Save.cpp
++++ b/src/core/Save.cpp
+@@ -261,10 +261,16 @@
+ 
+ 	std::unique_ptr<SaveFile> SaveFile::load(const std::filesystem::path& a_path)
+ 	{
++		const auto co = CosavePath(a_path);
++		auto save = parse(ReadFile(a_path), std::filesystem::exists(co) ? ReadFile(co) : std::vector<std::uint8_t>{});
++		save->path = a_path;
++		return save;
++	}
++
++	std::unique_ptr<SaveFile> SaveFile::parse(const std::vector<std::uint8_t>& file, const std::vector<std::uint8_t>& cosaveBytes)
++	{
+ 		auto save = std::make_unique<SaveFile>();
+-		save->path = a_path;
+-
+-		const auto file = ReadFile(a_path);
++		save->cosave = cosaveBytes;
+ 		Reader     hr(file.data(), file.size());
+ 		save->header.read(hr);
+ 		const std::size_t headerEnd = hr.pos();
+@@ -384,12 +390,6 @@
+ 			save->visitedWorldspaces.push_back(r.u32());
+ 		}
+ 		save->unknown3 = r.bytes(r.remaining());
+-
+-		std::error_code ec;
+-		const auto      co = CosavePath(a_path);
+-		if (std::filesystem::exists(co, ec)) {
+-			save->cosave = ReadFile(co);
+-		}
+ 
+ 		save->reindexChangeForms();
+ 		if (auto* p = save->papyrus()) {

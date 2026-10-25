@@ -1,0 +1,22 @@
+--- a/src/core/Save.h
++++ b/src/core/Save.h
+@@ -5,6 +5,7 @@
+ #include "Papyrus.h"
+ 
+ #include <filesystem>
++#include <functional>
+ #include <memory>
+ #include <string>
+ #include <vector>
+@@ -105,7 +106,10 @@
+ 		{
+ 			std::filesystem::path backup, cosaveBackup;  // empty when none was made
+ 		};
+-		WriteResult write(const std::filesystem::path& a_path, bool a_backup) const;
++		enum class WriteStage { kStaged, kVerified, kEssPublished };
++		// Optional instrumentation/fault probes. The path is the owned staged ESS.
++		using WriteObserver = std::function<void(WriteStage, const std::filesystem::path&)>;
++		WriteResult write(const std::filesystem::path& a_path, bool a_backup, const WriteObserver& observer = {}) const;
+ 		std::vector<std::uint8_t> serialize() const;  // the whole .ess file
+ 
+ 		std::vector<std::uint8_t> buildBody() const;  // uncompressed body, offsets recomputed

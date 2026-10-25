@@ -267,6 +267,11 @@ def gh_latest(f, repo, prerelease=False):
     raise CouldNotCheck("no releases or tags in " + repo)
 
 
+def gh_head(f, repo):
+    """The commit at the tip of `repo`'s default branch (for a tool pinned by commit that publishes no tags)."""
+    return gh_api(f, "repos/%s/commits/HEAD" % repo)["sha"]
+
+
 def gh_release_assets(f, repo, tag):
     return [a["name"] for a in gh_api(f, "repos/%s/releases/tags/%s" % (repo, tag)).get("assets", [])]
 
@@ -709,6 +714,18 @@ REGISTRY = [
      "refs": [{"pattern": r"\bkoffi@(?P<v>\d+\.\d+\.\d+)"}, {"pattern": r"\bkoffi (?P<v>\d+\.\d+\.\d+)\b"}]},
     {"name": "PyFFI", "pins": [("regex", "tools/requirements-tools.txt", r"(?m)^PyFFI==(?P<v>\d+\.\d+\.\d+)")],
      "upstream": ("pypi", "PyFFI")},
+    # v4.0.0: the opt-in native ReSaver backend, built locally (tools/resaver-plus/build.py); upstream publishes no tags.
+    {"name": "ReSaver Plus (ReSaverPP)",
+     "pins": [("regex", "tools/resaver-plus/build.py", r'UPSTREAM_COMMIT = "(?P<v>[0-9a-f]{40})"'),
+              ("regex", "tools/resaver_native.py", r'UPSTREAM_COMMIT = "(?P<v>[0-9a-f]{40})"')],
+     "upstream": ("github-commit", "Tonycubed2/ResaverPP"),
+     "refs": [{"pattern": r"ResaverPP[^\n]{0,80}?commit `(?P<v>[0-9a-f]{7,40})`", "compare": "prefix"}],
+     "newer_note": "19.8 (3958350) and 19.9 (03ca2b6) were reviewed and NOT adopted; the pin is the tested commit. "
+                   "A bump re-qualifies the 27 patches (SOURCE-SHA256, the six CTest targets, the CI survey)"},
+    {"name": "Visual Studio 2022 Build Tools (tested range)", "upstream": ("eol", "visual-studio", "minor"),
+     "not_delivered": "system software the user installs; the toolkit never installs it. Tested range for the local "
+                      "builds: MSVC 19.44 / CMake 3.31.6 (tools/resaver-plus/README.md); setup.sh reports detected "
+                      "versus tested"},
     {"name": "ReSaver (FallrimTools)", "pins": [("regex", PINNED_DOWNLOADS, table_row("ReSaver"))],
      "upstream": ("nexus-file", "skyrimspecialedition", 5031),
      "refs": [{"pattern": r"ReSaver \*?\*?(?P<v>6\.\d+\.\d+)"}]},
@@ -796,7 +813,8 @@ REGISTRY = [
 # Every entry either reads a pin from the repo or says why the toolkit never delivers it (tests hold this).
 AUDIT_FLOOR = ("Spriggit", ".NET SDK", "Node.js", "Python", "AutoMod", "PyNifly", "DevBench", "VR Address Library",
                "CrashLoggerSSE", "SKSE VR", "Champollion", "Caprica", "xeditlib", "zEdit", "koffi", "PyFFI",
-               "ReSaver (FallrimTools)", "NifSkope", "Blender (4.2 LTS)", "Cathedral Assets Optimizer", "BSArch",
+               "ReSaver (FallrimTools)", "ReSaver Plus (ReSaverPP)",
+               "NifSkope", "Blender (4.2 LTS)", "Cathedral Assets Optimizer", "BSArch",
                "Mod Organizer 2", "Vortex", "Codex CLI", "Claude Code", "devcontainer base image",
                "busybox (CI sentinel)", "SkyrimVR Devkit null driver")
 
@@ -864,6 +882,8 @@ def latest_of(f, upstream, pinned):
         return gh_latest(f, upstream[1])
     if kind == "github-pre":
         return gh_latest(f, upstream[1], prerelease=True)
+    if kind == "github-commit":
+        return gh_head(f, upstream[1])
     if kind == "nuget":
         return nuget_latest(f, upstream[1])
     if kind == "npm":
@@ -946,7 +966,11 @@ def audit_entry(f, repo, spec, rows, ctx):
                 rows.append(Row(name, "version", None, latest, UNPINNED, "recommended without a pin"))
                 return
             cmp_pin, cmp_latest = shown_pin, latest.split(" ")[0]
-            st, why = (OK, "") if same(cmp_pin, cmp_latest, compare) else version_status(cmp_pin, cmp_latest)
+            if upstream[0] == "github-commit":
+                # Commits have no order to compare: the pin is the tip, or upstream has moved on past it.
+                st, why = (OK, "") if same(cmp_pin, cmp_latest, "prefix") else (NEWER, "upstream head moved past the pin")
+            else:
+                st, why = (OK, "") if same(cmp_pin, cmp_latest, compare) else version_status(cmp_pin, cmp_latest)
             if st == NEWER and spec.get("newer_note"):
                 why = spec["newer_note"]
             rows.append(Row(name, "version", shown_pin, latest, st, why))

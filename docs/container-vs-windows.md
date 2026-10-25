@@ -24,6 +24,7 @@ mount contracts, disposable sentinel checks and the COULD NOT CHECK status.
 | Validate JSON schemas | Container | Node.js (`ajv`, `zod`) |
 | Unit test mod logic | Container | `pytest` |
 | Parse a `.ess` save | Container | ReSaver CLI (JDK 21.0.12 is in the image) |
+| Parse a `.ess` save with the native ReSaver Plus backend (opt-in) | Windows | `tools/resaver-plus/build.py` builds it with MSVC; no Linux build exists, so the container uses the Java backend |
 | Read INI / load order files | Container | `SKYRIM_PROFILE_DIR` mount |
 | Read an installed mod's files | Container | `SKYRIM_MODS_DIR` mount |
 | Load-order-dependent ESP edits | Windows (MO2) | xelib (`examples/inspect-esp.js`, etc.) |

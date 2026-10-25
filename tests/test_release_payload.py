@@ -212,6 +212,29 @@ BREAKS = {
     "vr-headless-missing": (lambda r: (r / "tools" / "vr-headless.py").unlink(), "tools/vr-headless.py present"),
     "emu-build-shipped": (_mkdir("tools/vr-emu-driver/build"), "tools/vr-emu-driver/build NOT shipped"),
     "emu-work-shipped": (_mkdir("tools/vr-emu-driver/work"), "tools/vr-emu-driver/work NOT shipped"),
+    # v4.0.0 ReSaver Plus: text only, the tested patch set, its Apache-2.0 notices, and none of the dev install's
+    # local-only material.
+    "resaver-plus-build-shipped": (_mkdir("tools/resaver-plus/build"), "tools/resaver-plus/build NOT shipped"),
+    "resaver-plus-work-shipped": (_mkdir("tools/resaver-plus/work"), "tools/resaver-plus/work NOT shipped"),
+    "resaver-plus-backend-shipped": (lambda r: (r / "tools" / "resaver-plus" / "backend").write_text("native"),
+                                     "tools/resaver-plus/backend NOT shipped"),
+    "resaver-plus-contributions-shipped": (_mkdir("tools/resaver-plus/contributions"),
+                                           "tools/resaver-plus/contributions NOT shipped"),
+    "resaver-port-shipped": (_mkdir("tools/resaver-port"), "tools/resaver-port NOT shipped"),
+    "resaver-plus-binary-shipped": (lambda r: (r / "tools" / "resaver-plus" / "patches" / "resaverpp-cli.exe")
+                                    .write_bytes(b"MZ"), "no binary under tools/resaver-plus"),
+    "resaver-plus-pr-draft-shipped": (lambda r: (r / "tools" / "resaver-plus" / "analysis-PR.md").write_text("draft"),
+                                      "no upstream PR draft"),
+    "resaver-port-checker-shipped": (lambda r: (r / "tools" / "resaver-port-write-check.py").write_text("x"),
+                                     "no ReSaver Plus qualification checker"),
+    "resaver-plus-patch-missing": (lambda r: sorted((r / "tools" / "resaver-plus" / "patches").glob("*.patch"))[0]
+                                   .unlink(), "carries the tested 27 patches"),
+    "resaver-plus-license-missing": (lambda r: (r / "tools" / "resaver-plus" / "LICENSE").unlink(),
+                                     "tools/resaver-plus/LICENSE present"),
+    "resaver-plus-notice-missing": (lambda r: (r / "tools" / "resaver-plus" / "NOTICE.md").unlink(),
+                                    "tools/resaver-plus/NOTICE.md present"),
+    "resaver-plus-builder-missing": (lambda r: (r / "tools" / "resaver-plus" / "build.py").unlink(),
+                                     "tools/resaver-plus/build.py present"),
     "guard-manifest-missing": (lambda r: (r / "GUARD-FILES.sha256").unlink(), "GUARD-FILES.sha256 present"),
     "guard-file-edited": (lambda r: (r / "tools" / "skyguard" / "engine.py").write_text(
         (r / "tools" / "skyguard" / "engine.py").read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8"),

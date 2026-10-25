@@ -1,0 +1,287 @@
+--- a/src/core/Ops.h
++++ b/src/core/Ops.h
+@@ -116,6 +116,15 @@
+ 		std::string name;
+ 		std::size_t n = 0;
+ 	};
++	// Findings are observations, not instructions to clean a save. Only explicit
++	// structural failures block saving; numeric heuristics remain advisory.
++	struct Finding
++	{
++		std::string code, message;
++		std::size_t count = 0;
++		std::vector<std::string> samples;  // at most eight identities
++		bool blocksSaving = false;
++	};
+ 	struct Report
+ 	{
+ 		std::size_t scripts = 0, instances = 0, references = 0, arrays = 0, threads = 0, functionMessages = 0, suspended = 0, changeForms = 0, strings = 0;
+@@ -126,6 +135,9 @@
+ 		std::vector<Count> messagesByFunction;
+ 		std::vector<Count> instancesByScript;
+ 		std::vector<Count> changeFormsByType;
++		std::size_t frames = 0, maxStackDepth = 0;
++		std::vector<Count> framesByScript;
++		std::vector<Finding> findings;             // stable codes and bounded evidence
+ 		std::vector<std::string> warnings;          // plain-language findings
+ 		std::vector<std::string> loopingScripts;    // scripts with 20+ threads parked in Utility.Wait
+ 		bool                     mcmJam = false;    // SkyUI registration was mid-way (FixMcmJam applies)
+--- a/src/core/Ops.cpp
++++ b/src/core/Ops.cpp
+@@ -1,5 +1,6 @@
+ // ReSaver++ - C++ port of ReSaver (FallrimTools) by Mark Fairchild, Apache License 2.0.
+ #include "Ops.h"
++#include "Text.h"
+ 
+ #include <algorithm>
+ #include <cstdio>
+@@ -729,6 +730,104 @@
+ 		}
+ 		std::string FrameName(const Papyrus& p, const StackFrame& f) { return p.str(f.baseName) + "." + p.str(f.event); }
+ 		std::string MsgName(const Papyrus& p, const FunctionMessageData& d) { return p.str(d.scriptName) + "." + p.str(d.event); }
++
++		std::string Identity(const char* kind, std::uint64_t id)
++		{
++			char buf[32];
++			std::snprintf(buf, sizeof(buf), "%016llX", static_cast<unsigned long long>(id));
++			return std::string(kind) + ":" + buf;
++		}
++		struct Evidence
++		{
++			std::size_t count = 0;
++			std::vector<std::string> samples;
++			void add(const std::string& identity)
++			{
++				++count;
++				if (samples.size() < 8 && std::find(samples.begin(), samples.end(), identity) == samples.end()) samples.push_back(identity);
++			}
++		};
++		void FindingFor(Report& r, const char* code, const std::string& message, std::size_t count,
++			const std::vector<std::string>& samples = {}, bool blocksSaving = false)
++		{
++			auto evidence = samples;
++			for (auto& sample : evidence) sample = text::ToUtf8(sample);
++			const auto display = text::ToUtf8(message);
++			r.findings.push_back({ code, display, count, std::move(evidence), blocksSaving });
++			r.warnings.push_back(display);  // existing GUI/CLI consumers share these findings
++		}
++
++		// Resolve counts once per saved script, without recursion or an arbitrary depth
++		// cutoff. Unknown parents/cycles make the layout unavailable, not mismatched.
++		struct Layout { std::size_t members = 0; bool complete = true; };
++		class Layouts
++		{
++			const Papyrus& p;
++			std::unordered_map<TStr, Layout> cache;
++		public:
++			explicit Layouts(const Papyrus& value) : p(value) {}
++			Layout get(TStr name)
++			{
++				std::vector<const Script*> chain;
++				std::unordered_set<TStr> seen;
++				Layout result;
++				for (;;) {
++					if (auto it = cache.find(name); it != cache.end()) { result = it->second; break; }
++					const auto* node = p.findScript(name);
++					if (!node || !seen.insert(name).second) { result.complete = false; break; }
++					chain.push_back(node);
++					if (p.str(node->parent).empty()) break;
++					name = node->parent;
++				}
++				for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
++					if (result.complete) result.members += (*it)->members.size();
++					cache[(*it)->name] = result;
++				}
++				return result;
++			}
++		};
++		void AnalyzeMemberData(const Papyrus& p, Report& r)
++		{
++			Layouts layouts(p);
++			Evidence definitions, parents, parentless, unresolved, missing, empty, mismatch, references;
++			for (const auto& sc : p.scripts) {
++				const auto sample = "script:" + p.str(sc.name);
++				if (IsScriptUndefined(p, sc)) definitions.add(sample);
++				if (IsMissingParent(p, sc)) parents.add(sample);
++				if (IsNoParent(p, sc)) parentless.add(sample);
++				if (!layouts.get(sc.name).complete) unresolved.add(sample);
++			}
++			auto relationship = [&](TStr name, const std::string& sample) {
++				if (!p.findScript(name) && !IsNativeScriptName(p.str(name)) && !IsEngineType(p.str(name))) missing.add(sample + " script:" + p.str(name));
++			};
++			for (const auto& i : p.instances) {
++				const auto sample = Identity("instance", i.id);
++				relationship(i.script, sample);
++				const auto layout = layouts.get(i.script);
++				if (!layout.complete) continue;
++				const auto values = i.data ? i.data->vars.size() : 0;
++				if (!values && layout.members) empty.add(sample);
++				else if (values && values != layout.members) mismatch.add(sample);
++			}
++			for (const auto& ref : p.references) {
++				const auto sample = Identity("reference", ref.id);
++				relationship(ref.script, sample);
++				if (IsInstanceUndefined(p, ref.script)) references.add(sample);
++			}
++			// A global/native call frame need not own a saved script definition.
++			// Preserve IsThreadUndefined semantics instead of inventing a dependency.
++			auto emit = [&](const char* code, const Evidence& e, const char* explanation) {
++				if (e.count) FindingFor(r, code, std::to_string(e.count) + " " + explanation, e.count, e.samples);
++			};
++			emit("papyrus.undefined-definitions", definitions, "non-native saved script definitions have no parent; review before changing mods.");
++			emit("papyrus.missing-parents", parents, "saved script definitions have an empty or absent parent definition.");
++			emit("papyrus.parentless-definitions", parentless, "non-native saved script definitions have no parent.");
++			emit("papyrus.unresolved-member-layout", unresolved, "script member layouts cannot be resolved because of missing ancestors or an inheritance cycle; member-count comparison is unavailable.");
++			emit("papyrus.missing-script-definitions", missing, "saved instance/reference relationships name an absent script definition; this does not establish whether a mod is installed.");
++			emit("papyrus.undefined-references", references, "saved references use undefined script definitions.");
++			emit("papyrus.member-data-missing", empty, "script instances have no saved member values although their resolved definitions declare members.");
++			emit("papyrus.member-data-mismatch", mismatch, "script instances have a different number of saved values and resolved declared members; review script-version changes.");
++		}
+ 	}
+ 
+ 	Report Analyze(SaveFile& s)
+@@ -743,7 +842,7 @@
+ 
+ 		const auto* pp = s.papyrus();
+ 		if (!pp) {
+-			r.warnings.push_back("This save has no Papyrus section.");
++			FindingFor(r, "save.papyrus-missing", "This save has no Papyrus section; Papyrus diagnostics are unavailable.", 1, {}, true);
+ 			return r;
+ 		}
+ 		const auto& p = *pp;
+@@ -762,11 +861,13 @@
+ 			}
+ 		}
+ 
++		Evidence unattachedRecords;
+ 		std::unordered_map<std::string, std::size_t> inst, top, cur, susp, msg;
+ 		for (const auto& i : p.instances) {
+ 			inst[p.str(i.script)]++;
+ 			if (IsUnattached(i)) {
+ 				++r.unattached;
++				unattachedRecords.add(Identity("instance", i.id));
+ 			}
+ 			if (IsInstanceUndefined(p, i.script)) {
+ 				++r.undefinedInstances;
+@@ -776,13 +877,19 @@
+ 			}
+ 		}
+ 
+-		std::size_t waitLoops = 0;
++		AnalyzeMemberData(p, r);
++		Evidence deepStacks;
++		std::unordered_map<std::string, std::size_t> frameCounts;
+ 		std::unordered_map<std::string, std::size_t> waitByScript;
+ 		for (const auto& a : p.activeScripts) {
+ 			if (!a.data || a.data->frames.empty()) {
+ 				top["<no frames>"]++;
+ 				continue;
+ 			}
++			r.frames += a.data->frames.size();
++			r.maxStackDepth = std::max(r.maxStackDepth, a.data->frames.size());
++			if (a.data->frames.size() >= 100) deepStacks.add(Identity("thread", a.id));
++			for (const auto& f : a.data->frames) ++frameCounts[p.str(f.scriptName)];
+ 			top[p.str(a.data->frames.front().scriptName)]++;
+ 			const auto& inner = a.data->frames.back();
+ 			cur[FrameName(p, inner)]++;
+@@ -794,7 +901,6 @@
+ 			}
+ 			const auto innerName = FrameName(p, inner);
+ 			if (EqualsNoCase(innerName, "utility.Wait") || EqualsNoCase(innerName, "utility.WaitGameTime") || EqualsNoCase(innerName, "utility.WaitMenuMode")) {
+-				++waitLoops;
+ 				waitByScript[p.str(a.data->frames.front().scriptName)]++;
+ 			}
+ 		}
+@@ -807,11 +913,17 @@
+ 			msg[m.data ? MsgName(p, *m.data) : "<no data>"]++;
+ 		}
+ 
++		r.framesByScript = Sorted(frameCounts);
+ 		r.instancesByScript = Sorted(inst);
+ 		r.threadsByTopScript = Sorted(top);
+ 		r.threadsByCurrentFrame = Sorted(cur);
+ 		r.suspendedByFunction = Sorted(susp);
+ 		r.messagesByFunction = Sorted(msg);
++
++		if (deepStacks.count) FindingFor(r, "papyrus.stack-depth",
++			std::to_string(deepStacks.count) + " threads have at least 100 saved frames (maximum " + std::to_string(r.maxStackDepth) + "); a snapshot alone does not prove a stuck script.", deepStacks.count, deepStacks.samples);
++		if (r.threads > 50 || r.frames > 150) FindingFor(r, "papyrus.stack-load",
++			std::to_string(r.threads) + " active threads and " + std::to_string(r.frames) + " saved frames exceed the advisory snapshot threshold; this may be temporary load.", r.threads);
+ 
+ 		// ---- plain-language findings ----
+ 		char buf[512];
+@@ -822,7 +934,7 @@
+ 					"%zu threads of '%s' are sleeping in Utility.Wait loops. That many copies of one looping script usually means "
+ 					"a script that never exits (each wakes several times a second). Consider purging '%s'.",
+ 					c.n, c.name.c_str(), c.name.c_str());
+-				r.warnings.push_back(buf);
++				FindingFor(r, "papyrus.wait-loops", buf, c.n, { "script:" + c.name });
+ 			}
+ 		}
+ 		std::size_t mcmThreads = 0;
+@@ -850,31 +962,31 @@
+ 				"%zu RegisterMod calls are queued%s. Loading replays all of it. Fix: Clean > Fix SkyUI MCM registration jam "
+ 				"(removes the stuck registration work; SkyUI registers the remaining menus again on the next load).",
+ 				mcmThreads, registerMod, busy ? ", and SKI_ConfigManager was saved in its BUSY state" : "");
+-			r.warnings.push_back(buf);
++			FindingFor(r, "papyrus.mcm-registration", buf, mcmThreads + registerMod);
+ 		}
+ 		if (r.suspended >= 50) {
+ 			std::snprintf(buf, sizeof(buf), "%zu suspended stacks are queued (normal is a handful).", r.suspended);
+-			r.warnings.push_back(buf);
++			FindingFor(r, "papyrus.suspended-queue", buf, r.suspended);
+ 		}
+ 		if (r.threads >= 300) {
+ 			std::snprintf(buf, sizeof(buf), "%zu active script threads were saved (a healthy save usually has under ~150).", r.threads);
+-			r.warnings.push_back(buf);
++			FindingFor(r, "papyrus.thread-count-high", buf, r.threads);
+ 		}
+ 		if (r.undefinedInstances || r.undefinedThreads) {
+ 			std::snprintf(buf, sizeof(buf),
+ 				"%zu script instances and %zu threads belong to scripts that are no longer installed. Clean > Remove Undefined fixes this.",
+ 				r.undefinedInstances, r.undefinedThreads);
+-			r.warnings.push_back(buf);
+-		}
+-		if (r.unattached >= 100) {
+-			std::snprintf(buf, sizeof(buf), "%zu script instances are attached to nothing (Clean > Remove Unattached).", r.unattached);
+-			r.warnings.push_back(buf);
++			FindingFor(r, "papyrus.undefined-execution", buf, r.undefinedInstances + r.undefinedThreads);
++		}
++		if (r.unattached > 0) {
++			std::snprintf(buf, sizeof(buf), "%zu script instances are attached to nothing; review this advisory before considering removal.", r.unattached);
++			FindingFor(r, "papyrus.unattached-instances", buf, r.unattached, unattachedRecords.samples);
+ 		}
+ 		if (r.instances >= 150000) {
+ 			std::snprintf(buf, sizeof(buf),
+ 				"%zu script instances is very high; every load has to rebuild them, which makes the script engine slow to settle after loading.",
+ 				r.instances);
+-			r.warnings.push_back(buf);
++			FindingFor(r, "papyrus.instance-count-high", buf, r.instances);
+ 		}
+ 		return r;
+ 	}
+@@ -901,10 +1013,11 @@
+ 			}
+ 			out += std::string("\n") + title + "\n";
+ 			for (std::size_t i = 0; i < v.size() && i < a_top; ++i) {
+-				std::snprintf(buf, sizeof(buf), "  %7zu  %s\n", v[i].n, v[i].name.c_str());
++				std::snprintf(buf, sizeof(buf), "  %7zu  %s\n", v[i].n, text::ToUtf8(v[i].name).c_str());
+ 				out += buf;
+ 			}
+ 		};
++		section("Saved frames by script", r.framesByScript);
+ 		section("Threads by event script (frame 0)", r.threadsByTopScript);
+ 		section("Threads by current frame (what they are waiting in)", r.threadsByCurrentFrame);
+ 		section("Suspended stacks", r.suspendedByFunction);
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -98,6 +98,9 @@
+ 	add_executable(rs_structured_port_test tests/structured_port_test.cpp)
+ 	target_link_libraries(rs_structured_port_test PRIVATE rs_core)
+ 	add_test(NAME structured_queries COMMAND rs_structured_port_test)
++	add_executable(rs_analysis_port_test tests/analysis_port_test.cpp)
++	target_link_libraries(rs_analysis_port_test PRIVATE rs_core)
++	add_test(NAME analysis_contract COMMAND rs_analysis_port_test)
+ 	# real saves: -DRESAVERPP_TEST_SAVES=<folder with .ess files>. Each is loaded, written back and
+ 	# compared, backups checked. A folder given without saves in it fails the run (fixtures missing).
+ 	set(RESAVERPP_TEST_SAVES "" CACHE PATH "Folder of .ess saves for the fixture tests")

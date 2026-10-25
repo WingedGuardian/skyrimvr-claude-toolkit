@@ -28,8 +28,17 @@
 #   freeze-report     <save>                                  active-script / suspended-stack survey (freeze-diagnosis aid)
 #   globaldata        <save>                                  survey the save's global-data tables
 #   globaldata-diff   <saveA> <saveB>                         cross-save global-data table diff
+#   writer-scan       <save>                                  pending save-writer frames (NATIVE backend only; advisory)
 #   --- the install itself ---
-#   verify                        check ReSaver.jar and lib/ against the pinned SHA-256s below (no JDK needed)
+#   verify                        the selected backend: Java = ReSaver.jar and lib/ against the pinned SHA-256s below
+#                                 (no JDK needed); native = its BUILD-INFO.json and the executable's SHA-256
+#   verify-native                 the native build, whichever backend is selected
+#   backend                       which backend is selected
+#
+# Backends: java (the default) and native, opt-in: RESAVER_BACKEND=native, or the word `native` in
+#   tools/resaver-plus/backend. Native runs ReSaver Plus built on THIS machine by tools/resaver-plus/build.py, through
+#   tools/resaver_native.py (same operations plus writer-scan; its JSON is the native schema, not the Java one). The
+#   selected backend failing is an error and never falls back to the other one.
 #
 # Notes: writes NEVER overwrite the input save. Always review dry-run output before --apply.
 #   Every --apply is VERIFY-GATED: a private candidate is re-read and compared to the written model.
@@ -44,6 +53,50 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd -W 2>/dev/null)"
 [ -z "$HERE" ] && HERE="$(cd "$(dirname "$0")" && pwd)"
 TOOL="$HERE/resaver-cli"
+
+# --- Backend (v4.0.0). `java` (ReSaver 6.0.643 + this folder's driver) is the DEFAULT; `native` (ReSaver Plus, built
+# on this machine by tools/resaver-plus/build.py) is opt-in. RESAVER_BACKEND wins, else the one word in
+# tools/resaver-plus/backend, else java. The chosen backend failing is an ERROR: neither ever falls back to the other.
+BACKEND="${RESAVER_BACKEND:-}"
+if [ -z "$BACKEND" ] && [ -f "$HERE/resaver-plus/backend" ]; then
+  BACKEND="$(tr -d ' \t\r\n' < "$HERE/resaver-plus/backend")"
+fi
+BACKEND="${BACKEND:-java}"
+case "$BACKEND" in
+  java|native) ;;
+  *) echo '{"ok":false,"error":"RESAVER_BACKEND (or tools/resaver-plus/backend) must be java or native"}'; exit 2 ;;
+esac
+_python() {
+  PY=()
+  for candidate in python python3; do
+    if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' >/dev/null 2>&1; then
+      PY=("$candidate"); return 0
+    fi
+  done
+  if py -3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' >/dev/null 2>&1; then PY=(py -3); return 0; fi
+  return 1
+}
+case "${1:-}" in
+  backend)
+    printf '{"ok":true,"backend":"%s","choices":["java","native"],"default":"java"}\n' "$BACKEND"
+    exit 0 ;;
+  verify-native)
+    _python || { echo '{"ok":false,"error":"Python 3.10+ required for the native backend"}'; exit 1; }
+    "${PY[@]}" -B "$HERE/resaver_native.py" --verify
+    [ $? -eq 0 ] && exit 0 || exit 1 ;;
+esac
+if [ "$BACKEND" = native ]; then
+  _python || { echo '{"ok":false,"error":"Python 3.10+ required for the native backend"}'; exit 1; }
+  if [ "${1:-}" = verify ]; then
+    "${PY[@]}" -B "$HERE/resaver_native.py" --verify
+    [ $? -eq 0 ] && exit 0 || exit 1
+  fi
+  exec "${PY[@]}" -B "$HERE/resaver_native.py" "$@"
+fi
+if [ "${1:-}" = writer-scan ]; then
+  echo '{"ok":false,"error":"writer-scan is a ReSaver Plus (native backend) operation; the Java backend has none. Nothing was run."}'
+  exit 2
+fi
 # Java's classpath separator is the PLATFORM's: ';' on Windows (Git Bash passes Windows paths, which contain ':'),
 # ':' everywhere else -- with ';' on Linux java reads the whole string as one path and finds no class (review P1).
 # Test seam: RESAVER_CLI_UNAME stands in for `uname -s`, honoured only under TOOLKIT_TEST_MODE=1.

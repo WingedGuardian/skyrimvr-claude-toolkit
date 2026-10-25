@@ -549,6 +549,49 @@ jobs:
             echo "::warning::round trip: same records, different bytes"
           fi
 
+  # v4.0.0: ReSaver Plus (the opt-in native ReSaver backend) is BUILT on the user's machine and never shipped, so CI
+  # builds it exactly that way on a machine that never saw the dev install -- the "second machine" build: the pin
+  # verified, the 27 patches applied, every changed/added file checked against SOURCE-SHA256, the CLI and tests built
+  # with the GUI off, all six runnable CTest targets passing (build.py refuses to install otherwise) -- then runs every
+  # operation through tools/resaver-cli.sh on a SYNTHETIC save made by the build's own probe (never a real save).
+  # The behavior legs test the same code with a stub executable on both OSes.
+  resaver-plus:
+    name: ReSaver Plus build + synthetic survey (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Record the toolchain this image provides (tested: Build Tools 17.14.39, MSVC 19.44, CMake 3.31.6)
+        run: |
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          "$vswhere" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
+            -property catalog_productDisplayVersion || echo "::warning::vswhere did not answer"
+          cmake --version || echo "cmake is not on PATH; build.py uses the copy inside Visual Studio"
+      - name: Build (pin, patches, SOURCE-SHA256, CLI + tests with the GUI off, six CTest targets)
+        run: python -B tools/resaver-plus/build.py --work "$(cygpath -m "$RUNNER_TEMP")/rspp" --jobs 2
+      - name: The installed build matches its BUILD-INFO
+        run: |
+          cat tools/resaver-plus/build/BUILD-INFO.json
+          bash tools/resaver-cli.sh verify-native
+      - name: Synthetic survey through tools/resaver-cli.sh (every operation; edits to new outputs only)
+        run: |
+          set -euo pipefail
+          tmp="$(cygpath -m "$RUNNER_TEMP")"
+          probe=$(ls "$tmp"/rspp/owned-build-*/cmake-build/Release/rs_write_port_probe.exe | head -n1)
+          BASH_EXE="$(cygpath -m "$BASH")" python -B tests/resaver_native_survey.py --root . --probe "$probe" --work "$tmp/rspp-survey"
+      # R4 of the port plan (native vs the toolkit's Java on the same synthetic save) needs ReSaver.jar, a manual Nexus
+      # download no runner has: it is reported, not faked.
+      - name: Native-vs-Java read contrast
+        run: echo "COULD NOT CHECK -- ReSaver.jar (Nexus mod 5031) is a manual download; no CI runner has it"
+
   # The release machinery on every push: build the zip from the commit (scripts/build-release-zip.sh, the same
   # build release.yml runs), then verify it as a user would get it -- payload checker, leak grep, and a scrubbed
   # install (setup.sh, canary, drift check, engine selftest, every hook entry) on both platforms.

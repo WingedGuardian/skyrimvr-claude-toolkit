@@ -1,0 +1,121 @@
+--- a/src/core/Papyrus.cpp
++++ b/src/core/Papyrus.cpp
+@@ -107,9 +107,17 @@
+ 
+ 	namespace
+ 	{
++		void CheckCount(const Reader& r, std::size_t count, std::size_t minimum, const char* what)
++		{
++			if (count > r.remaining() / minimum) {
++				throw FormatError(std::string(what) + " count cannot fit the remaining bytes", r.pos());
++			}
++		}
++
+ 		std::vector<Variable> ReadVars(Reader& r, std::uint32_t n)
+ 		{
+ 			std::vector<Variable> v;
++			CheckCount(r, n, 5, "variable or suspended-stack");
+ 			v.reserve(n);
+ 			for (std::uint32_t i = 0; i < n; ++i) {
+ 				v.push_back(Variable::read(r));
+@@ -242,6 +250,7 @@
+ 				f.locals.push_back(m);
+ 			}
+ 			const auto oc = r.u16();
++			CheckCount(r, oc, 1, "opcode");
+ 			f.code.reserve(oc);
+ 			for (std::uint16_t i = 0; i < oc; ++i) {
+ 				f.code.push_back(ReadOpcode(r));
+@@ -348,6 +357,7 @@
+ 			if (count > 100000) {
+ 				throw FormatError("invalid stack frame count", r.pos());
+ 			}
++			CheckCount(r, count, 32, "stack-frame");
+ 			d.frames.reserve(count);
+ 			for (std::uint32_t i = 0; i < count; ++i) {
+ 				d.frames.push_back(ReadFrame(r));
+@@ -406,6 +416,7 @@
+ 		{
+ 			std::vector<SuspendedStack> v;
+ 			const auto                  n = r.u32();
++			CheckCount(r, n, 5, "variable or suspended-stack");
+ 			v.reserve(n);
+ 			for (std::uint32_t i = 0; i < n; ++i) {
+ 				SuspendedStack s;
+@@ -460,18 +471,21 @@
+ 		header = r.u16();
+ 
+ 		const auto strCount = r.u32();
++		CheckCount(r, strCount, 2, "strings");
+ 		strings.reserve(strCount);
+ 		for (std::uint32_t i = 0; i < strCount; ++i) {
+ 			strings.push_back(r.wstring());
+ 		}
+ 
+ 		const auto scriptCount = r.u32();
++		CheckCount(r, scriptCount, 12, "scripts");
+ 		scripts.reserve(scriptCount);
+ 		for (std::uint32_t i = 0; i < scriptCount; ++i) {
+ 			Script s;
+ 			s.name = r.u32();
+ 			s.parent = r.u32();
+ 			const auto mc = r.u32();
++			CheckCount(r, mc, 8, "s.members");
+ 			s.members.reserve(mc);
+ 			for (std::uint32_t m = 0; m < mc; ++m) {
+ 				MemberDesc d;
+@@ -483,6 +497,7 @@
+ 		}
+ 
+ 		const auto instCount = r.u32();
++		CheckCount(r, instCount, 20, "instances");
+ 		instances.reserve(instCount);
+ 		for (std::uint32_t i = 0; i < instCount; ++i) {
+ 			ScriptInstance s;
+@@ -496,6 +511,7 @@
+ 		}
+ 
+ 		const auto refCount = r.u32();
++		CheckCount(r, refCount, 12, "references");
+ 		references.reserve(refCount);
+ 		for (std::uint32_t i = 0; i < refCount; ++i) {
+ 			Reference x;
+@@ -505,6 +521,7 @@
+ 		}
+ 
+ 		const auto arrCount = r.u32();
++		CheckCount(r, arrCount, 13, "arrays");
+ 		arrays.reserve(arrCount);
+ 		for (std::uint32_t i = 0; i < arrCount; ++i) {
+ 			ArrayInfo a;
+@@ -520,6 +537,7 @@
+ 		runtime = r.u32();
+ 
+ 		const auto activeCount = r.u32();
++		CheckCount(r, activeCount, 5, "activeScripts");
+ 		activeScripts.reserve(activeCount);
+ 		for (std::uint32_t i = 0; i < activeCount; ++i) {
+ 			ActiveScript a;
+@@ -580,6 +598,7 @@
+ 		}
+ 
+ 		const auto fmCount = r.u32();
++		CheckCount(r, fmCount, 2, "functionMessages");
+ 		functionMessages.reserve(fmCount);
+ 		for (std::uint32_t i = 0; i < fmCount; ++i) {
+ 			FunctionMessage m;
+@@ -602,12 +621,14 @@
+ 			unk2 = r.u32();
+ 		}
+ 		const auto unkCount = r.u32();
++		CheckCount(r, unkCount, 8, "unknownIDs");
+ 		unknownIDs.reserve(unkCount);
+ 		for (std::uint32_t i = 0; i < unkCount; ++i) {
+ 			unknownIDs.push_back(r.u64());
+ 		}
+ 
+ 		const auto unbindCount = r.u32();
++		CheckCount(r, unbindCount, 12, "unbinds");
+ 		unbinds.reserve(unbindCount);
+ 		for (std::uint32_t i = 0; i < unbindCount; ++i) {
+ 			QueuedUnbind u;

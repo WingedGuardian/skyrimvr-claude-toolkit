@@ -1,0 +1,13 @@
+--- a/src/core/Save.h
++++ b/src/core/Save.h
+@@ -96,7 +96,9 @@
+ 		//     everything before anything is replaced;
+ 		//  3. the save is put in place, then the co-save; if the co-save cannot be, the save is rolled
+ 		//     back to the previous file (or removed, if there was none).
+-		// Throws std::runtime_error on any failure; then nothing but the temporary files was changed.
++		// Requires backup permission for an existing destination. Staged output must reproduce the
++		// complete expected model, including the matching co-save. Failed stages are retained.
++		// Throws std::runtime_error on failure; a publication failure reports whether rollback succeeded.
+ 		struct WriteResult
+ 		{
+ 			std::filesystem::path backup, cosaveBackup;  // empty when none was made

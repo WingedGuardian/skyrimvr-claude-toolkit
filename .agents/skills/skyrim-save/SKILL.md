@@ -66,6 +66,32 @@ SSE/VR saves use LZ4 compression. General layout of the decompressed data:
 - The pinned ReSaver script-instance setter rejects variable index zero. A preview lists the library's indexes; do not bypass its setter with reflection or direct file edits. Other supported primitive indexes use the same verified pipeline.
 - Resolve FormID to EditorID with `tools/resaver-resolve-names.js`.
 
+### Native backend: ReSaver Plus (opt-in, Windows)
+
+`bash tools/resaver-cli.sh backend` says which backend runs. **Java is the default.** The native backend is ReSaver Plus
+(Tonycubed2's C++ port of ReSaver), built on the user's machine by `python tools/resaver-plus/build.py` from a pinned
+commit plus the toolkit's patches; nothing binary ships. The user opts in with `RESAVER_BACKEND=native` or the word
+`native` in `tools/resaver-plus/backend`. Do not switch backends on your own to get past an error: **the selected
+backend failing is an error, and neither falls back to the other.** Building it needs Visual Studio 2022 Build Tools,
+which is system software: give the user the manual steps (`tools/resaver-plus/README.md`), never install it.
+
+- **Check it first:** `bash tools/resaver-cli.sh verify-native` (its `BUILD-INFO.json` and the executable's SHA-256).
+- **Ops:** the same 19 as Java plus `writer-scan` (pending save-writer frames; advisory, a heuristic, not proof of an
+  imminent write). Reads and previews never write; `verify-roundtrip` runs in memory.
+- **Writes:** `--apply` needs ONE explicit new output pair in an existing folder. An existing `.ess` OR `.skse` of that
+  pair is refused, so is the input and the permanent save store. Run the preview (no `--apply`) first and show it.
+  Before writing, the adapter backs up the input pair and the output pair into the permanent save store; the applied
+  receipt must equal the preview, be verified on reopen, and carry the input's co-save over unchanged. A failed
+  candidate stays on disk for inspection: report it, never delete it.
+- **JSON:** the native schema, close to but NOT identical to Java's (native report wording, warnings and changeform
+  trees). Never diff native output against Java output and call the difference a save change.
+- **Read-only reports:** `python tools/resaver-plus.py report|compare|decompile|disassemble`.
+- **Never** run `resaverpp-cli.exe` directly with `-o`, `--batch` or `--apply`, or the GUI `ReSaverPP.exe`: the guard
+  denies them (S-RESAVER-NATIVE-DIRECT) because they skip every check above.
+- **Limits:** one real edited save was load-tested in game on one machine; for saves unlike that one confidence is
+  moderate, so the user's own in-game load of the new output is the final check. Crash atomicity is unqualified.
+  Windows only: elsewhere use Java.
+
 ## Changing a save: what the guard does
 
 A save is a `.ess` with its `.skse` co-save (same folder, same name): ONE save, whichever file a command names.

@@ -97,3 +97,17 @@ Ranked by what an agent can do through the route, the uncovered routes to close 
    reads the whole name after `mcp__` (fix round 1), so a server name holding `__` (`mcp__my__devbench__console`)
    is judged too, not allowed unjudged (row `p8t6-mcp-devbench-after-double-underscore`).
 4. **C9 worktree tools**, **C13** and **C17**: lower impact; record and watch.
+
+## Save-writing programs the shell rules name (v4.0.0)
+
+The routes above decide WHETHER the shell rules see a command. Among the programs they name, ReSaver Plus (the opt-in
+native ReSaver backend, `tools/resaver-plus/`) has its own rule:
+
+- `bash tools/resaver-cli.sh ... --apply` and `python tools/resaver_native.py ... --apply` are both ReSaver writes
+  (S-RESAVER-APPLY and the save policy: the guard backs up the pair it can place; the adapter then also backs up the
+  input and refuses any existing output member). READ `tools/skyguard/shell_rules.py` `_is_resaver`.
+- `resaverpp-cli[.exe]` run directly with `-o`, `--batch`, `--batch-all` or `--apply`, or with an argument not
+  proven literal, and `ReSaverPP.exe` (the GUI) at all, are denied: S-RESAVER-NATIVE-DIRECT, never shadowed by
+  `guards off`. Reads (`x.ess --top 20`, `x.pex --psc`, `--json info x.ess`) are allowed. MEASURED by
+  `tests/test_resaver_native_guard.py` (bash, `bash -c`, quoted, PowerShell `&`, `start`). Not seen (INFERRED): a
+  renamed copy of either executable, and interpreter code that starts one (`python -c "subprocess.run(...)"`).

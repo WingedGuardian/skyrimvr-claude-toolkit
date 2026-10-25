@@ -1,0 +1,30 @@
+--- a/src/core/ChangeFormData.cpp
++++ b/src/core/ChangeFormData.cpp
+@@ -933,7 +933,7 @@
+ 							const auto n = static_cast<std::uint32_t>(p.i32("COUNT"));
+ 							p.countedArray("ITEMS", n, [&] {
+ 								const auto t = p.i32("TYPE");
+-								if (t == 1 || t == 2 || t == 4) {
++								if (t == 0 || t == 1 || t == 2 || t == 4) {
+ 									p.ref("UNK_REF");
+ 								} else if (t == 3) {
+ 									p.i32("UNK_INT");
+@@ -943,6 +943,18 @@
+ 							});
+ 						});
+ 					}
++				});
++			}
++			if (Bit(flags, 27)) {
++				p.group("QUEST_INSTANCES", [&] {
++					p.i32("UNK");
++					p.vsArray("INSTANCE_DATA", [&] {
++						p.i32("UNK");
++						p.vsArray("STRUCT1", [&] { p.i32("UNK"); p.ref("REF"); });
++						p.vsArray("STRUCT2", [&] { p.ref("REF"); p.i32("UNK"); });
++						p.i16("UNK16");
++						p.u8("UNK8");
++					});
+ 				});
+ 			}
+ 			if (Bit(flags, 26)) {

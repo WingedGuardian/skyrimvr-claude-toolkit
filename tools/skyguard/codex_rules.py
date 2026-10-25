@@ -44,6 +44,7 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
     "shell.S-SHELL-UNREAD": ("hook_only", "the decoder and the shell can be anywhere in a pipeline"),
     "shell.S-RESAVER-APPLY": (
         "hook_only", "depends on whether the save it writes can be placed; `--apply` position varies (R4)"),
+    "shell.S-RESAVER-NATIVE-DIRECT": ("hook_only", "the -o / --batch / --apply flag can be anywhere in the arguments"),
     "shell.S-DEVBENCH-CRASH": ("hook_only", "the console command is inside a JSON body or an MCP argument"),
     "shell.S-DEVBENCH-SAVE": ("hook_only", "depends on whether the save can be identified on disk"),
     # The save policy (user ruling 2026-10-13): every save change is counted, backed up and verified by the hook.

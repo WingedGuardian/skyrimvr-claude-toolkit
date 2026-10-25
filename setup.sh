@@ -376,6 +376,61 @@ else
     hint_jdk
 fi
 
+# --- Detect the ReSaver Plus build tools (the OPTIONAL native ReSaver backend; do NOT auto-install) ---
+# ReSaver Plus is built on this machine by tools/resaver-plus/build.py from a pinned upstream commit plus the shipped
+# patches. It needs Visual Studio 2022 Build Tools ("Desktop development with C++": MSVC, a Windows SDK and its bundled
+# CMake). Reported against the tested versions, never installed. Java stays the default backend either way.
+# Test seams (like RESAVER_CLI_UNAME): SETUP_UNAME and SETUP_VSWHERE, honoured only under TOOLKIT_TEST_MODE=1.
+RSPP_TESTED_VS="17.14.39"
+RSPP_TESTED_TOOLSET="14.44.35207"
+RSPP_TESTED_CMAKE="3.31.6"
+echo ""
+echo "Checking for the ReSaver Plus build tools (optional native ReSaver backend)..."
+RSPP_UNAME="$(uname -s 2>/dev/null)"
+[ "${TOOLKIT_TEST_MODE:-}" = 1 ] && [ -n "${SETUP_UNAME:-}" ] && RSPP_UNAME="$SETUP_UNAME"
+if [ -f tools/resaver-plus/build/BUILD-INFO.json ]; then
+    echo "  A ReSaver Plus build is present (tools/resaver-plus/build/); check it with: bash tools/resaver-cli.sh verify-native"
+fi
+case "$RSPP_UNAME" in
+    MINGW*|MSYS*|CYGWIN*|Windows*)
+        RSPP_VSWHERE="$(printenv 'ProgramFiles(x86)' 2>/dev/null)"
+        RSPP_VSWHERE="${RSPP_VSWHERE:-C:/Program Files (x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+        [ "${TOOLKIT_TEST_MODE:-}" = 1 ] && [ -n "${SETUP_VSWHERE:-}" ] && RSPP_VSWHERE="$SETUP_VSWHERE"
+        RSPP_VS=""
+        if [ -f "$RSPP_VSWHERE" ] || [ -x "$RSPP_VSWHERE" ]; then
+            RSPP_VS=$("$RSPP_VSWHERE" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
+                      -property installationPath 2>/dev/null | tr -d '\r' | head -n1)
+        fi
+        if [ -n "$RSPP_VS" ]; then
+            RSPP_VER=$("$RSPP_VSWHERE" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
+                       -property catalog_productDisplayVersion 2>/dev/null | tr -d '\r' | head -n1 | awk '{print $1}')
+            RSPP_VS_U="$RSPP_VS"
+            command -v cygpath >/dev/null 2>&1 && RSPP_VS_U="$(cygpath -u "$RSPP_VS")"
+            RSPP_TOOLSET=$(tr -d '\r\n ' < "$RSPP_VS_U/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt" 2>/dev/null)
+            RSPP_CMAKE_BIN="$(command -v cmake 2>/dev/null)"
+            [ -z "$RSPP_CMAKE_BIN" ] && RSPP_CMAKE_BIN="$RSPP_VS_U/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"
+            RSPP_CMAKE=$("$RSPP_CMAKE_BIN" --version 2>/dev/null | tr -d '\r' | sed -n 's/^cmake version //p' | head -n1)
+            echo "  Found Visual Studio Build Tools ${RSPP_VER:-(version unread)} with the C++ tools: MSVC toolset ${RSPP_TOOLSET:-unread}, CMake ${RSPP_CMAKE:-not found}"
+            echo "  Tested with: Build Tools $RSPP_TESTED_VS, MSVC toolset $RSPP_TESTED_TOOLSET, CMake $RSPP_TESTED_CMAKE."
+            if [ -z "$RSPP_CMAKE" ]; then
+                echo "  CMake was not found on PATH or inside Visual Studio: add the 'C++ CMake tools for Windows' component."
+            elif [ "${RSPP_TOOLSET}" != "$RSPP_TESTED_TOOLSET" ] || [ "${RSPP_CMAKE%%-*}" != "$RSPP_TESTED_CMAKE" ]; then
+                echo "  NOTE: these differ from the tested versions. build.py still checks every source byte against the"
+                echo "  pinned hashes and installs nothing unless all six tests pass, but this toolchain itself is untested."
+            fi
+            echo "  To use the native backend (optional; Java stays the default): python tools/resaver-plus/build.py,"
+            echo "  then opt in with RESAVER_BACKEND=native (tools/resaver-plus/README.md)."
+        else
+            echo "  Not found. That is fine: ReSaver Plus is an optional second ReSaver backend, and the default (Java) does"
+            echo "  not need it. To build it, install Visual Studio 2022 Build Tools with 'Desktop development with C++'"
+            echo "  yourself (several GB; tested: $RSPP_TESTED_VS), for example:"
+            echo "      winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --version $RSPP_TESTED_VS"
+            echo "  then add that workload in the Visual Studio Installer, and run: python tools/resaver-plus/build.py"
+        fi ;;
+    *)
+        echo "  Not Windows: ReSaver Plus builds with MSVC on Windows only. The Java backend (the default) is the path here." ;;
+esac
+
 # --- 3.x -> 4.0: carry a 3.x user's own edits forward (tools/migrate-3x.py; it deletes nothing) ---
 # Run BEFORE anything that renders CLAUDE.md/AGENTS.md or can run kb-guard, so the 3.x copies are read
 # first. A fresh 4.x install prints "nothing to do". Exit 1 = a copy or write failed and nothing was

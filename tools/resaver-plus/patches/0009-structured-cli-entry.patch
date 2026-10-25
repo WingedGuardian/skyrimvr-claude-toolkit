@@ -1,0 +1,17 @@
+--- a/src/cli/main.cpp
++++ b/src/cli/main.cpp
+@@ -1,5 +1,6 @@
+ // ReSaver++ command line - C++ port of ReSaver (FallrimTools) by Mark Fairchild, Apache License 2.0.
+ #include "core/Batch.h"
++#include "core/Structured.h"
+ #include "core/ChangeFormData.h"
+ #include "core/Compare.h"
+ #include "core/ModRemove.h"
+@@ -81,6 +82,7 @@
+ 
+ int main(int argc, char** argv)
+ {
++	if (argc > 1 && !std::strcmp(argv[1], "--json")) return structured::Main(argc, argv);
+ 	if (argc < 2 || !std::strcmp(argv[1], "-h") || !std::strcmp(argv[1], "--help")) {
+ 		Usage();
+ 		return argc < 2 ? 1 : 0;

@@ -181,6 +181,17 @@ if wrapper automod-cli "$ROOT/tools/automod" "Spooky's AutoMod Toolkit"; then
   fi
 fi
 wrapper resaver-cli "$ROOT/tools/resaver-cli/ReSaver.jar" "need <op>" "$ROOT/tools/resaver-cli/lib/*.jar"
+# ReSaver Plus, the optional native backend: built HERE by tools/resaver-plus/build.py (nothing ships). Its pin
+# (BUILD-INFO.json + the executable's SHA-256) first, then whether the pinned executable starts.
+RSPP="$ROOT/tools/resaver-plus/build"
+if [ ! -f "$RSPP/BUILD-INFO.json" ]; then
+  printf '  %-22s not built (optional: python tools/resaver-plus/build.py)\n' "resaver-plus"
+elif RSPP_V=$("$BASH" "$ROOT/tools/resaver-cli.sh" verify-native 2>&1); then
+  check resaver-plus "ReSaver\+\+ version" "$RSPP/resaverpp-cli.exe" --help
+else
+  printf '  %-22s MISMATCH      %s\n' "resaver-plus" "$(printf '%s' "$RSPP_V" | tail -n1 | cut -c1-90)"
+  FAIL=1; MISSING="$MISSING resaver-plus"
+fi
 
 echo "safety:"
 if [ -f "$ROOT/tools/hook-canary.sh" ]; then

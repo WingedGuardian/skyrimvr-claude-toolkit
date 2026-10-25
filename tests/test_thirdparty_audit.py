@@ -1201,3 +1201,48 @@ def test_xeditlib_audit_does_not_attribute_another_tools_commit_to_xeditlib(tmp_
     hint = 'echo "Ask which tools: xeditlib, AutoMod; AutoMod tag v1.11.2 (commit 2222222)"\n'
     rows, code = audit(xedit_repo(tmp_path, hint=hint), xedit_cache(tmp_path), ["xeditlib"])
     assert code == 0, [r.as_dict() for r in rows]
+
+
+# ------------------------------------------------------------------ v4.0.0: tools pinned by commit, with no upstream tags
+
+PIN = "0d48f60cb8a69b367abfbd78d58418e64c507da5"
+RESAVERPP = {
+    "tools/resaver-plus/build.py": 'UPSTREAM_COMMIT = "%s"\n' % PIN,
+    "tools/resaver_native.py": 'UPSTREAM_COMMIT = "%s"\n' % PIN,
+    "tools/resaver-plus/README.md": "| Upstream | [Tonycubed2/ResaverPP](x), version **19.6**, commit `%s` |\n" % PIN,
+}
+HEAD_URL = "https://api.github.com/repos/Tonycubed2/ResaverPP/commits/HEAD"
+
+
+def _head(sha):
+    return [(HEAD_URL, 200, json.dumps({"sha": sha}).encode())]
+
+
+def test_a_commit_pin_at_the_upstream_head_is_ok(tmp_path):
+    rows, code = audit(make_repo(tmp_path, RESAVERPP), make_cache(tmp_path, extra=_head(PIN)), ["ReSaver Plus (ReSaverPP)"])
+    assert code == 0 and {r.status for r in rows} == {ta.OK}, [r.as_dict() for r in rows]
+    assert {"version", "install refs"} <= {r.check for r in rows}
+
+
+def test_an_upstream_head_past_the_commit_pin_is_newer_with_the_note(tmp_path):
+    rows, code = audit(make_repo(tmp_path, RESAVERPP), make_cache(tmp_path, extra=_head("3" * 40)),
+                       ["ReSaver Plus (ReSaverPP)"])
+    newer = by(rows, ta.NEWER)
+    assert code == 0 and len(newer) == 1 and "NOT adopted" in newer[0].detail, [r.as_dict() for r in rows]
+
+
+def test_commit_pin_sites_that_disagree_are_drift(tmp_path):
+    files = dict(RESAVERPP, **{"tools/resaver_native.py": 'UPSTREAM_COMMIT = "%s"\n' % ("1" * 40)})
+    rows, code = audit(make_repo(tmp_path, files), make_cache(tmp_path, extra=_head(PIN)), ["ReSaver Plus (ReSaverPP)"])
+    assert code == 1 and any(r.check == "pin sites" for r in by(rows, ta.DRIFT))
+
+
+def test_a_doc_naming_another_commit_is_drift(tmp_path):
+    files = dict(RESAVERPP, **{"tools/resaver-plus/README.md": "Tonycubed2/ResaverPP at commit `3958350`\n"})
+    rows, code = audit(make_repo(tmp_path, files), make_cache(tmp_path, extra=_head(PIN)), ["ReSaver Plus (ReSaverPP)"])
+    assert code == 1 and any(r.check == "install refs" for r in by(rows, ta.DRIFT))
+
+
+def test_a_commit_pin_offline_without_a_cached_head_is_could_not_check(tmp_path):
+    rows, code = audit(make_repo(tmp_path, RESAVERPP), make_cache(tmp_path), ["ReSaver Plus (ReSaverPP)"])
+    assert code == 2 and by(rows, ta.UNCHECKED)

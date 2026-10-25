@@ -1,0 +1,185 @@
+--- a/src/core/ChangeFormData.cpp
++++ b/src/core/ChangeFormData.cpp
+@@ -43,62 +43,75 @@
+ 			{
+ 				auto& k = top().kids;
+ 				k.push_back(Node{ label, std::move(value) });
++				k.back().offset = r.pos();
+ 				return k.back();
++			}
++			Node& scalar(const std::string& label, std::string value, std::size_t width)
++			{
++				auto& n = add(label, std::move(value));
++				n.offset -= width; n.size = width;
++				return n;
+ 			}
+ 			template <class F>
+ 			void group(const std::string& label, F f)
+ 			{
+ 				auto& n = add(label);
++				const auto start = r.pos();
+ 				_stack.push_back(&n);
+ 				try {
+ 					f();
+ 				} catch (...) {
++					n.size = r.pos() - start;
++					if (_out.failurePath.empty()) {
++						for (const auto* item : _stack) _out.failurePath += "/" + item->label;
++					}
+ 					_stack.pop_back();
+ 					throw;
+ 				}
++				n.size = r.pos() - start;
+ 				_stack.pop_back();
+ 			}
+ 
+ 			std::uint8_t u8(const std::string& l)
+ 			{
+ 				const auto v = r.u8();
+-				add(l, std::to_string(v));
++				scalar(l, std::to_string(v), 1);
+ 				return v;
+ 			}
+ 			std::int16_t i16(const std::string& l)
+ 			{
+ 				const auto v = r.i16();
+-				add(l, std::to_string(v));
++				scalar(l, std::to_string(v), 2);
+ 				return v;
+ 			}
+ 			std::uint16_t flags16(const std::string& l)
+ 			{
+ 				const auto v = r.u16();
+-				add(l, Fmt("0x%04X", v));
++				scalar(l, Fmt("0x%04X", v), 2);
+ 				return v;
+ 			}
+ 			std::uint8_t flags8(const std::string& l)
+ 			{
+ 				const auto v = r.u8();
+-				add(l, Fmt("0x%02X", v));
++				scalar(l, Fmt("0x%02X", v), 1);
+ 				return v;
+ 			}
+ 			std::uint32_t flags32(const std::string& l)
+ 			{
+ 				const auto v = r.u32();
+-				add(l, Fmt("0x%08X", v));
++				scalar(l, Fmt("0x%08X", v), 4);
+ 				return v;
+ 			}
+ 			std::int32_t i32(const std::string& l)
+ 			{
+ 				const auto v = r.i32();
+-				add(l, std::to_string(v));
++				scalar(l, std::to_string(v), 4);
+ 				return v;
+ 			}
+ 			float f32(const std::string& l)
+ 			{
+ 				const auto v = r.f32();
+-				add(l, Fmt("%g", v));
++				scalar(l, Fmt("%g", v), 4);
+ 				return v;
+ 			}
+ 			void floats(const std::string& l, std::size_t n)
+@@ -107,7 +120,7 @@
+ 				for (std::size_t i = 0; i < n; ++i) {
+ 					s += (i ? ", " : "") + Fmt("%g", r.f32());
+ 				}
+-				add(l, s);
++				scalar(l, s, n * 4);
+ 			}
+ 			void ints(const std::string& l, std::size_t n)
+ 			{
+@@ -122,7 +135,7 @@
+ 				if (n > 16) {
+ 					s += Fmt(", ... (%zu)", n);
+ 				}
+-				add(l, s);
++				scalar(l, s, n * 4);
+ 			}
+ 			std::size_t bytes(const std::string& l, std::size_t n)
+ 			{
+@@ -136,11 +149,12 @@
+ 					s += Fmt("... (%zu bytes)", n);
+ 				}
+ 				r.seek(r.pos() + n);
+-				add(l, s);
++				scalar(l, s, n);
+ 				return at;
+ 			}
+ 			std::uint32_t vs(const std::string& l)
+ 			{
++				const auto start = r.pos();
+ 				const auto    b0 = r.u8();
+ 				std::uint32_t v = b0;
+ 				switch (b0 & 3) {
+@@ -156,7 +170,7 @@
+ 				}
+ 				v >>= 2;
+ 				if (!l.empty()) {
+-					add(l, std::to_string(v));
++					scalar(l, std::to_string(v), r.pos() - start);
+ 				}
+ 				return v;
+ 			}
+@@ -178,12 +192,12 @@
+ 				const auto n = vs(l + "_COUNT");
+ 				r.need(std::size_t(n) * 8);
+ 				r.seek(r.pos() + std::size_t(n) * 8);
+-				add(l, Fmt("%u values", n));
++				scalar(l, Fmt("%u values", n), std::size_t(n) * 8);
+ 			}
+ 			std::uint32_t ref(const std::string& l)
+ 			{
+ 				const auto id = RefID::read(r);
+-				auto&      n = add(l);
++				auto&      n = scalar(l, {}, 3);
+ 				n.isRef = true;
+ 				n.refRaw = id.data;
+ 				n.formID = id.isZero() ? 0 : _save.formIDOf(id);
+@@ -201,7 +215,7 @@
+ 				r.need(n);
+ 				std::string s(reinterpret_cast<const char*>(r.here()), n);
+ 				r.seek(r.pos() + n);
+-				add(l, "\"" + s + "\"");
++				scalar(l, "\"" + s + "\"", n + 2);
+ 				return s;
+ 			}
+ 			template <class F>
+@@ -276,7 +290,10 @@
+ 
+ 		void ExtraDataData(P& p)
+ 		{
++			const auto offset = p.r.pos();
+ 			const auto type = p.r.u8();
++			auto& trace = p.out().extraTrace;
++			trace.push_back({type, offset, trace.empty() ? -1 : int(trace.back().type)});
+ 			auto       one = [&](const char* name, auto body) { p.group(name, body); };
+ 			switch (type) {
+ 			case 0: one("NULL", [] {}); break;
+@@ -1074,6 +1091,7 @@
+ 			body = Body(a_cf);
+ 		} catch (const std::exception& e) {
+ 			out.error = std::string("could not decompress: ") + e.what();
++			out.failureCategory = "decompression";
+ 			return out;
+ 		}
+ 		out.bodySize = body.size();
+@@ -1125,6 +1143,15 @@
+ 			p.bytes(out.supported ? "NOT DECODED" : "DATA", rest);
+ 		}
+ 		out.complete = out.supported && out.error.empty();
++		out.root.size = out.bodySize;
++		if (!out.supported) out.failureCategory = "unsupported";
++		else if (!out.error.empty()) {
++			if (out.error.find("unknown extra data type") != std::string::npos) out.failureCategory = "extra-unknown-type";
++			else if (out.error.find("count") != std::string::npos) out.failureCategory = "excessive-array-count";
++			else if (out.error.find("unexpected end") != std::string::npos) out.failureCategory = "buffer-underflow";
++			else if (out.error.find("at the end") != std::string::npos) out.failureCategory = "unparsed-tail";
++			else out.failureCategory = "other";
++		}
+ 
+ 		// filter facts
+ 		for (const auto& k : out.root.kids) {
