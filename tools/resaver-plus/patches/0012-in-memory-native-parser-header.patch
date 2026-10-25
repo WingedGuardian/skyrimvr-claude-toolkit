@@ -1,0 +1,11 @@
+--- a/src/core/Save.h
++++ b/src/core/Save.h
+@@ -86,6 +86,8 @@
+ 	{
+ 	public:
+ 		static std::unique_ptr<SaveFile> load(const std::filesystem::path& a_path);
++		// Same parser as load(), also usable for synthetic fixtures and verified in-memory roundtrips.
++		static std::unique_ptr<SaveFile> parse(const std::vector<std::uint8_t>& bytes, const std::vector<std::uint8_t>& cosaveBytes = {});
+ 		void save(const std::filesystem::path& a_path) const;  // also writes the .skse co-save next to it
+ 
+ 		// Writes the save (and its .skse co-save) safely:

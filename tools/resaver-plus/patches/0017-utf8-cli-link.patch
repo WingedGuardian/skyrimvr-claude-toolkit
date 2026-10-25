@@ -1,0 +1,12 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -53,6 +53,9 @@
+ if (RS_CLI_SOURCES)
+ 	add_executable(resaverpp-cli ${RS_CLI_SOURCES})
+ 	target_link_libraries(resaverpp-cli PRIVATE rs_core)
++	if (WIN32)
++		target_link_libraries(resaverpp-cli PRIVATE shell32)
++	endif()
+ 	rs_add_version_info(resaverpp-cli resaverpp-cli "ReSaver++ command line - Skyrim save editor")
+ 	if (MINGW)
+ 		target_link_options(resaverpp-cli PRIVATE -static)

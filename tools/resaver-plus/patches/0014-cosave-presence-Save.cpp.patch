@@ -1,0 +1,53 @@
+--- a/src/core/Save.cpp
++++ b/src/core/Save.cpp
+@@ -262,15 +262,17 @@
+ 	std::unique_ptr<SaveFile> SaveFile::load(const std::filesystem::path& a_path)
+ 	{
+ 		const auto co = CosavePath(a_path);
+-		auto save = parse(ReadFile(a_path), std::filesystem::exists(co) ? ReadFile(co) : std::vector<std::uint8_t>{});
++		const bool present = std::filesystem::exists(co);
++		auto save = parse(ReadFile(a_path), present ? ReadFile(co) : std::vector<std::uint8_t>{}, present);
+ 		save->path = a_path;
+ 		return save;
+ 	}
+ 
+-	std::unique_ptr<SaveFile> SaveFile::parse(const std::vector<std::uint8_t>& file, const std::vector<std::uint8_t>& cosaveBytes)
++	std::unique_ptr<SaveFile> SaveFile::parse(const std::vector<std::uint8_t>& file, const std::vector<std::uint8_t>& cosaveBytes, bool cosavePresent)
+ 	{
+ 		auto save = std::make_unique<SaveFile>();
+ 		save->cosave = cosaveBytes;
++		save->hasCosave = cosavePresent || !cosaveBytes.empty();
+ 		Reader     hr(file.data(), file.size());
+ 		save->header.read(hr);
+ 		const std::size_t headerEnd = hr.pos();
+@@ -507,10 +509,11 @@
+ 		WriteResult     res;
+ 		std::error_code ec;
+ 		const auto      co = CosavePath(a_path);
++		const bool coPresent = hasCosave || !cosave.empty();
+ 		const bool hadEss = std::filesystem::exists(a_path);
+ 		const bool hadCo = std::filesystem::exists(co);
+ 		if (!a_backup && (hadEss || hadCo)) throw std::runtime_error("existing destination requires a verified pair backup");
+-		if (cosave.empty() && hadCo) throw std::runtime_error("destination has a co-save but the expected model has none");
++		if (!coPresent && hadCo) throw std::runtime_error("destination has a co-save but the expected model has none");
+ 		// A private directory makes both filenames ordinary matching siblings.
+ 		// Exclusive directory creation also avoids clobbering another writer's stage.
+ 		std::filesystem::path stage;
+@@ -533,7 +536,7 @@
+ 		// 1. stage both files and check the new save reads back
+ 		try {
+ 			WriteFile(tmp, serialize());
+-			if (!cosave.empty()) {
++			if (coPresent) {
+ 				WriteFile(tmpCo, cosave);
+ 			}
+ 			auto check = SaveFile::load(tmp);
+@@ -590,7 +593,7 @@
+ 			cleanup();
+ 			throw std::runtime_error("could not replace " + a_path.filename().string() + " (" + ec.message() + "); nothing was changed");
+ 		}
+-		if (!cosave.empty()) {
++		if (coPresent) {
+ 			if (hadCo) std::filesystem::rename(tmpCo, co, ec);
+ 			else std::filesystem::create_hard_link(tmpCo, co, ec);
+ 			if (ec) {

@@ -1,0 +1,10 @@
+--- a/src/gui/Platform.cpp
++++ b/src/gui/Platform.cpp
+@@ -3,6 +3,7 @@
+ 
+ #ifdef _WIN32
+ #	include <windows.h>
++#	include <shellapi.h>
+ #	include <shlobj.h>
+ #	include <commdlg.h>
+ #endif

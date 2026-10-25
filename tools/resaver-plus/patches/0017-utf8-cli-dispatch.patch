@@ -1,0 +1,11 @@
+--- a/src/cli/main.cpp
++++ b/src/cli/main.cpp
+@@ -82,7 +82,7 @@
+ 
+ int main(int argc, char** argv)
+ {
+-	if (argc > 1 && !std::strcmp(argv[1], "--json")) return structured::Main(argc, argv);
++	if (argc > 1 && !std::strcmp(argv[1], "--json")) return structured::Entry(argc, argv);
+ 	if (argc < 2 || !std::strcmp(argv[1], "-h") || !std::strcmp(argv[1], "--help")) {
+ 		Usage();
+ 		return argc < 2 ? 1 : 0;

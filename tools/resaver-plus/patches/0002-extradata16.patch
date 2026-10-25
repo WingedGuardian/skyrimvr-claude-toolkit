@@ -1,0 +1,16 @@
+--- a/src/core/ChangeFormData.cpp
++++ b/src/core/ChangeFormData.cpp
+@@ -292,6 +292,13 @@
+ 					p.group("SUB_DATA1", [&] { ExtraDataData(p); });
+ 					p.group("SUB_DATA2", [&] { ExtraDataData(p); });
+ 					p.group("SUB_DATA3", [&] { ExtraDataData(p); });
++				});
++				break;
++			case 16:
++				one("ExtraExtraData4", [&] {
++					for (int i = 1; i <= 4; ++i) {
++						p.group(Fmt("SUB_DATA%d", i), [&] { ExtraDataData(p); });
++					}
+ 				});
+ 				break;
+ 			case 22: one("Worn", [] {}); break;

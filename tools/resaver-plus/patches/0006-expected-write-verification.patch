@@ -1,0 +1,119 @@
+--- a/src/core/Save.cpp
++++ b/src/core/Save.cpp
+@@ -1,10 +1,12 @@
+ // ReSaver++ - C++ port of ReSaver (FallrimTools) by Mark Fairchild, Apache License 2.0.
+ #include "Save.h"
++#include "Verify.h"
+ 
+ #include "lz4.h"
+ #include "miniz.h"
+ 
+ #include <fstream>
++#include <random>
+ #include <stdexcept>
+ 
+ namespace ess
+@@ -499,17 +501,33 @@
+ 
+ 	SaveFile::WriteResult SaveFile::write(const std::filesystem::path& a_path, bool a_backup) const
+ 	{
++		if (!problems.empty()) {
++			throw std::runtime_error("save has structural problems; refusing an unverifiable write");
++		}
+ 		WriteResult     res;
+ 		std::error_code ec;
+ 		const auto      co = CosavePath(a_path);
+-		auto            tmp = a_path;
+-		tmp += ".tmp";
+-		auto tmpCo = co;
+-		tmpCo += ".tmp";
++		const bool hadEss = std::filesystem::exists(a_path);
++		const bool hadCo = std::filesystem::exists(co);
++		if (!a_backup && (hadEss || hadCo)) throw std::runtime_error("existing destination requires a verified pair backup");
++		if (cosave.empty() && hadCo) throw std::runtime_error("destination has a co-save but the expected model has none");
++		// A private directory makes both filenames ordinary matching siblings.
++		// Exclusive directory creation also avoids clobbering another writer's stage.
++		std::filesystem::path stage;
++		std::random_device random;
++		for (int attempt = 0; attempt < 64; ++attempt) {
++			auto candidate = a_path;
++			candidate += ".stage-" + std::to_string(random());
++			if (std::filesystem::create_directory(candidate, ec)) { stage = candidate; break; }
++			if (ec) throw std::runtime_error("could not create a private write stage: " + ec.message());
++		}
++		if (stage.empty()) throw std::runtime_error("could not reserve a unique write stage");
++		const auto tmp = stage / a_path.filename();
++		const auto tmpCo = CosavePath(tmp);
+ 		auto cleanup = [&] {
+ 			std::error_code e;
+-			std::filesystem::remove(tmp, e);
+-			std::filesystem::remove(tmpCo, e);
++			// Only an empty directory is removed. Failed stages are retained for diagnosis.
++			std::filesystem::remove(stage, e);
+ 		};
+ 
+ 		// 1. stage both files and check the new save reads back
+@@ -522,14 +540,15 @@
+ 			if (!check->papyrus()) {
+ 				throw std::runtime_error("the written save has no Papyrus section");
+ 			}
++			const auto result = verify::Expected(*this, *check);
++			if (!result.identical()) throw std::runtime_error("expected-result mismatch: " + verify::Describe(result));
+ 		} catch (const std::exception& e) {
+ 			cleanup();
+-			throw std::runtime_error(std::string("could not write the new save (nothing was changed): ") + e.what());
++			throw std::runtime_error(std::string("could not verify the new save; destination unchanged; stage retained at ") +
++				stage.string() + ": " + e.what());
+ 		}
+ 
+ 		// 2. back up what is there, as one generation for both files
+-		const bool hadEss = std::filesystem::exists(a_path, ec);
+-		const bool hadCo = std::filesystem::exists(co, ec);
+ 		if (a_backup && (hadEss || hadCo)) {
+ 			std::string suffix = ".bak";
+ 			for (int n = 2;; ++n) {
+@@ -549,6 +568,7 @@
+ 					cleanup();
+ 					throw std::runtime_error("could not back up " + a_path.filename().string() + " (" + ec.message() + "); nothing was changed");
+ 				}
++				if (ReadFile(a_path) != ReadFile(res.backup)) throw std::runtime_error("save backup verification failed; destination unchanged");
+ 			}
+ 			if (hadCo) {
+ 				res.cosaveBackup = co;
+@@ -557,17 +577,22 @@
+ 					cleanup();
+ 					throw std::runtime_error("could not back up " + co.filename().string() + " (" + ec.message() + "); nothing was changed");
+ 				}
++				if (ReadFile(co) != ReadFile(res.cosaveBackup)) throw std::runtime_error("co-save backup verification failed; destination unchanged");
+ 			}
+ 		}
+ 
+ 		// 3. put them in place: the save, then the co-save; roll the save back if the co-save fails
+-		std::filesystem::rename(tmp, a_path, ec);
++		// New outputs use exclusive link creation: a destination appearing during
++		// verification is never silently overwritten by rename on POSIX or Windows.
++		if (hadEss) std::filesystem::rename(tmp, a_path, ec);
++		else std::filesystem::create_hard_link(tmp, a_path, ec);
+ 		if (ec) {
+ 			cleanup();
+ 			throw std::runtime_error("could not replace " + a_path.filename().string() + " (" + ec.message() + "); nothing was changed");
+ 		}
+ 		if (!cosave.empty()) {
+-			std::filesystem::rename(tmpCo, co, ec);
++			if (hadCo) std::filesystem::rename(tmpCo, co, ec);
++			else std::filesystem::create_hard_link(tmpCo, co, ec);
+ 			if (ec) {
+ 				const auto      why = ec.message();
+ 				std::error_code e2;
+@@ -582,6 +607,11 @@
+ 										 (restored ? "the save was put back as it was" : "the save could not be put back: restore it from its .bak copy"));
+ 			}
+ 		}
++		// Successful new publication leaves staging hard links to the same verified
++		// files. Remove those links only after both destination members are present.
++		std::filesystem::remove(tmp, ec);
++		std::filesystem::remove(tmpCo, ec);
++		cleanup();
+ 		return res;
+ 	}
+ 

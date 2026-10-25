@@ -86,3 +86,8 @@ requirements*.txt  text eol=lf
 # OpenCode V1 generated entrypoints and their canonical sources.
 .opencode/** text eol=lf
 agent/targets/opencode/** text eol=lf
+
+# The ReSaver Plus patch set is verified byte-for-byte (tools/resaver-plus/SOURCE-SHA256): never converted.
+tools/resaver-plus/patches/** -text
+tools/resaver-plus/additions/** -text
+tools/resaver-plus/SOURCE-SHA256 -text

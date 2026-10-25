@@ -1,0 +1,61 @@
+--- a/src/core/Ops.cpp
++++ b/src/core/Ops.cpp
+@@ -660,36 +660,41 @@
+ 
+ 	// ---- queries -----------------------------------------------------------------------------
+ 
+-	static bool VarRefersTo(const Variable& v, EID target)
++	static bool VarRefersTo(const Variable& v, const std::set<EID>& targets)
+ 	{
+ 		if (v.type == VType::kVariant) {
+-			return v.inner && VarRefersTo(*v.inner, target);
+-		}
+-		return (v.type == VType::kRef || v.type == VType::kStruct || IsArrayType(v.type)) && v.value == target;
++			return v.inner && VarRefersTo(*v.inner, targets);
++		}
++		return (v.type == VType::kRef || v.type == VType::kStruct || IsArrayType(v.type)) && targets.contains(v.value);
+ 	}
+ 
+ 	std::vector<Referrer> FindReferrers(const Papyrus& p, EID a_target)
++	{
++		return FindReferrers(p, std::set<EID>{ a_target }, false);
++	}
++
++	std::vector<Referrer> FindReferrers(const Papyrus& p, const std::set<EID>& targets, bool includeSelf)
+ 	{
+ 		std::vector<Referrer> out;
+ 		auto                  scanVars = [&](const std::vector<Variable>& vars, Referrer::Kind k, std::uint64_t id, const std::string& owner) {
+             for (std::size_t i = 0; i < vars.size(); ++i) {
+-                if (VarRefersTo(vars[i], a_target)) {
++                if (VarRefersTo(vars[i], targets)) {
+                     out.push_back({ k, id, owner + " var[" + std::to_string(i) + "]" });
+                 }
+             }
+ 		};
+ 		for (const auto& i : p.instances) {
+-			if (i.id != a_target && i.data) {
++			if ((includeSelf || !targets.contains(i.id)) && i.data) {
+ 				scanVars(i.data->vars, Referrer::Kind::kInstance, i.id, p.str(i.script));
+ 			}
+ 		}
+ 		for (const auto& r : p.references) {
+-			if (r.id != a_target && r.data) {
++			if ((includeSelf || !targets.contains(r.id)) && r.data) {
+ 				scanVars(r.data->vars, Referrer::Kind::kReference, r.id, p.str(r.script));
+ 			}
+ 		}
+ 		for (const auto& a : p.arrays) {
+-			if (a.id != a_target) {
++			if (includeSelf || !targets.contains(a.id)) {
+ 				scanVars(a.vars, Referrer::Kind::kArray, a.id, std::string("array ") + VTypeName(a.type));
+ 			}
+ 		}
+@@ -699,7 +704,7 @@
+ 			}
+ 			for (const auto& f : t.data->frames) {
+ 				const std::string where = p.str(f.baseName) + "." + p.str(f.event);
+-				if (VarRefersTo(f.owner, a_target)) {
++				if (VarRefersTo(f.owner, targets)) {
+ 					out.push_back({ Referrer::Kind::kThread, t.id, where + " (owner)" });
+ 				}
+ 				scanVars(f.vars, Referrer::Kind::kThread, t.id, where);

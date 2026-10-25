@@ -1,0 +1,54 @@
+--- a/src/core/Save.cpp
++++ b/src/core/Save.cpp
+@@ -501,7 +501,7 @@
+ 
+ 	void SaveFile::save(const std::filesystem::path& a_path) const { write(a_path, false); }
+ 
+-	SaveFile::WriteResult SaveFile::write(const std::filesystem::path& a_path, bool a_backup) const
++	SaveFile::WriteResult SaveFile::write(const std::filesystem::path& a_path, bool a_backup, const WriteObserver& observer) const
+ 	{
+ 		if (!problems.empty()) {
+ 			throw std::runtime_error("save has structural problems; refusing an unverifiable write");
+@@ -539,6 +539,7 @@
+ 			if (coPresent) {
+ 				WriteFile(tmpCo, cosave);
+ 			}
++			if (observer) observer(WriteStage::kStaged, tmp);
+ 			auto check = SaveFile::load(tmp);
+ 			if (!check->papyrus()) {
+ 				throw std::runtime_error("the written save has no Papyrus section");
+@@ -550,6 +551,7 @@
+ 			throw std::runtime_error(std::string("could not verify the new save; destination unchanged; stage retained at ") +
+ 				stage.string() + ": " + e.what());
+ 		}
++		if (observer) observer(WriteStage::kVerified, tmp);
+ 
+ 		// 2. back up what is there, as one generation for both files
+ 		if (a_backup && (hadEss || hadCo)) {
+@@ -594,15 +596,21 @@
+ 			throw std::runtime_error("could not replace " + a_path.filename().string() + " (" + ec.message() + "); nothing was changed");
+ 		}
+ 		if (coPresent) {
+-			if (hadCo) std::filesystem::rename(tmpCo, co, ec);
+-			else std::filesystem::create_hard_link(tmpCo, co, ec);
+-			if (ec) {
+-				const auto      why = ec.message();
++			std::string why;
++			try {
++				if (observer) observer(WriteStage::kEssPublished, tmp);
++				if (hadCo) std::filesystem::rename(tmpCo, co, ec);
++				else std::filesystem::create_hard_link(tmpCo, co, ec);
++				if (ec) why = ec.message();
++			} catch (const std::exception& failure) { why = failure.what(); }
++			if (!why.empty()) {
+ 				std::error_code e2;
+ 				bool            restored = false;
+ 				if (!res.backup.empty()) {
+ 					restored = std::filesystem::copy_file(res.backup, a_path, std::filesystem::copy_options::overwrite_existing, e2) && !e2;
+-				} else if (!hadEss) {
++				} else if (!hadEss && std::filesystem::equivalent(a_path, tmp, e2) && !e2) {
++					// Remove only our own newly published link, never a replacement
++					// installed by another writer while the co-save was being published.
+ 					restored = std::filesystem::remove(a_path, e2) && !e2;
+ 				}
+ 				cleanup();

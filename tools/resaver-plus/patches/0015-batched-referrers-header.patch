@@ -1,0 +1,11 @@
+--- a/src/core/Ops.h
++++ b/src/core/Ops.h
+@@ -107,6 +107,8 @@
+ 		std::string   where;
+ 	};
+ 	std::vector<Referrer> FindReferrers(const Papyrus& p, EID a_target);
++	// One scan for a set of targets; optional self edges support complete graph diagnostics.
++	std::vector<Referrer> FindReferrers(const Papyrus& p, const std::set<EID>& targets, bool includeSelf = false);
+ 
+ 	// ---- analysis ------------------------------------------------------------------------
+ 	struct Count

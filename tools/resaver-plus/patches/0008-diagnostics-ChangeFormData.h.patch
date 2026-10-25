@@ -1,0 +1,25 @@
+--- a/src/core/ChangeFormData.h
++++ b/src/core/ChangeFormData.h
+@@ -20,6 +20,13 @@
+ 		std::uint32_t     refRaw = 0;  // the 3-byte RefID as stored
+ 		std::uint32_t     formID = 0;  // resolved runtime form ID (0 if none / unknown)
+ 		std::vector<Node> kids;
++		std::size_t offset = 0, size = 0;  // byte range in the decompressed body
++	};
++	struct ExtraTrace
++	{
++		std::uint8_t type = 0;
++		std::size_t offset = 0;
++		int predecessor = -1;
+ 	};
+ 
+ 	// An inventory entry that carries an enchantment and/or a charge in its extra data (weapons and
+@@ -45,6 +52,8 @@
+ 		std::string error;              // why decoding stopped (if it did)
+ 		std::size_t bodySize = 0, consumed = 0;
+ 		Node        root;
++		std::string failureCategory, failurePath;
++		std::vector<ExtraTrace> extraTrace;  // stops at the first failed element
+ 
+ 		bool          hasHavok = false;
+ 		std::size_t   havokOffset = 0, havokSize = 0;  // in the uncompressed body

@@ -1,0 +1,11 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -93,6 +93,8 @@
+ 	add_test(NAME expected_result COMMAND rs_verify_port_test)
+ 	add_executable(rs_write_port_probe tests/write_port_probe.cpp)
+ 	target_link_libraries(rs_write_port_probe PRIVATE rs_core)
++	add_executable(rs_warning_contrast tests/warning_contrast_probe.cpp)
++	target_link_libraries(rs_warning_contrast PRIVATE rs_core)
+ 	add_executable(rs_structured_port_test tests/structured_port_test.cpp)
+ 	target_link_libraries(rs_structured_port_test PRIVATE rs_core)
+ 	add_test(NAME structured_queries COMMAND rs_structured_port_test)

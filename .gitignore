@@ -42,5 +42,10 @@ KNOWLEDGEBASE.local.md
 # local-build delivery and licensing response: tools/vr-emu-driver/README.md.
 tools/vr-emu-driver/build/
 tools/vr-emu-driver/work/
+# ReSaver Plus is BUILT on the user's machine from pinned upstream source plus the shipped patches; nothing binary
+# ships (tools/resaver-plus/README.md). `backend` is the user's own backend choice.
+tools/resaver-plus/build/
+tools/resaver-plus/work/
+tools/resaver-plus/backend
 .modding-agent-harness/
 tools/resaver-cli/.compiled/

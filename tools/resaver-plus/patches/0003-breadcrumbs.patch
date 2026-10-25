@@ -1,0 +1,24 @@
+--- a/src/core/ChangeFormData.cpp
++++ b/src/core/ChangeFormData.cpp
+@@ -513,10 +513,17 @@
+ 				break;
+ 			case 133: one("AshPileRef", [&] { p.ref("REF"); }); break;
+ 			case 135:
+-				one("TEST", [&] {
+-					for (int i = 1; i <= 4; ++i) {
+-						p.ref(Fmt("R%d", i));
+-					}
++				one("FollowerSwimBreadcrumbs", [&] {
++					p.floats("UNK1", 3);
++					p.ref("REF");
++					p.i32("UNK2");
++					p.vsArray("BREADCRUMBS", [&] {
++						p.floats("POS1", 3);
++						p.ref("REF1");
++						p.floats("POS2", 3);
++						p.ref("REF2");
++						p.u8("UNK");
++					});
+ 				});
+ 				break;
+ 			case 136:
