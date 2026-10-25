@@ -28,7 +28,8 @@ FOF_ALLOWUNDO). An item too big for the bin gets Windows' own "delete permanentl
 The bin frees no disk space until it is emptied; that is the user's call. A file the bin refuses is reported
 FAILED and left in place; off Windows there is no Recycle Bin implementation, so every removal is reported that way.
 The whole-folder classes (launch, snapshot, scratch) keep a folder whole when any file in it is protected. Duplicates are not removed at all: they become NTFS hard links to one copy, marked
-read-only so an in-place edit cannot silently change every path at once.
+read-only so an in-place edit cannot silently change every path at once. A file that already has another name (a mod
+manager's hard-link deployment shares the inode with a live Data/ file) is never linked or made read-only.
 
 Accounting: `report` and `plan` print every scanned byte in exactly one row, the rows sum to the total, and the
 row of bytes it leaves alone prints even at zero.
@@ -348,6 +349,15 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
     live = live_index(cfg) if tasks else {}
     live_hash = {}
     by_size = {}
+
+    def queue_duplicate(f, task, size, digest=None):
+        # A chmod changes every name of an inode. A file that already has another name may share it with a live
+        # Data/ file a mod manager deployed by hard link (Vortex, MO2): whose file that is, nothing here can tell.
+        if f.stat().st_nlink != 1:
+            count("kept: already hard-linked elsewhere (ownership unknown)", size)
+        else:
+            by_size.setdefault(size, []).append((f, task, digest))
+
     for task, state in tasks:
         for f in walk_files(task):
             try:
@@ -381,10 +391,10 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                     act({"class": "recreatable", "path": str(f), "bytes": size, "hash": h,
                                     "live": match, "task": str(task)}, "plan: copy of a live file -> Recycle Bin")
                     continue
-                by_size.setdefault(size, []).append((f, task, h))
+                queue_duplicate(f, task, size, h)
                 continue
             if size >= cfg["min_bytes"]:
-                by_size.setdefault(size, []).append((f, task, None))
+                queue_duplicate(f, task, size)
                 continue
             count("kept: below min_bytes / not duplicated", size)
 
@@ -575,6 +585,7 @@ class _Memo:
 
     def __init__(self):
         self.hashes, self.newest = {}, {}
+        self.links = {}                   # canonical -> links THIS apply made to it (the only extra names it may have)
 
     def hash(self, path):
         st = os.stat(path)
@@ -614,6 +625,8 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
             return "canonical copy changed or gone"
         if guard.why_protected(c) in ("save", "git-tracked"):
             return "canonical copy is protected"
+        if p.stat().st_nlink != 1 or c.stat().st_nlink != 1 + memo.links.get(_key(c), 0):
+            return "hard-linked elsewhere since the plan (ownership unknown)"
     if action["class"] in ("launch", "snapshot", "scratch"):
         why = protected_inside(guard, p, action["class"])
         if why:
@@ -623,15 +636,20 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
     return ""
 
 
-def link(action):
+def link(action, canonical_links=1):
+    """`canonical_links`: the names the canonical copy may have right now -- itself plus the links this apply made.
+    Any other name may be a live file elsewhere, and the read-only attribute below would change it too."""
     dup, canon = Path(action["path"]), Path(action["canonical"])
     tmp = dup.with_name(dup.name + ".housekeep-link")
     if tmp.exists():
         raise OSError("leftover {} -- inspect it by hand".format(tmp))
+    if dup.stat().st_nlink != 1 or canon.stat().st_nlink != canonical_links:
+        raise OSError("hard-linked elsewhere before linking (ownership unknown)")
     os.link(canon, tmp)
-    if os.stat(tmp).st_ino != os.stat(canon).st_ino or blake(tmp) != action["hash"]:
+    if (os.stat(tmp).st_ino != os.stat(canon).st_ino or blake(tmp) != action["hash"]
+            or dup.stat().st_nlink != 1 or canon.stat().st_nlink != canonical_links + 1):
         recycle([tmp])                                           # our own just-made link -- still the bin, never a delete
-        raise OSError("the new link does not resolve to the canonical bytes")
+        raise OSError("the new link's bytes or link count are not what was planned")
     if not os.access(dup, os.W_OK):
         os.chmod(dup, stat.S_IWRITE | stat.S_IREAD)
     os.replace(tmp, dup)
@@ -677,7 +695,9 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
                 continue
             try:
                 if cls == "link":
-                    link(a)
+                    ck = _key(a["canonical"])
+                    link(a, 1 + memo.links.get(ck, 0))
+                    memo.links[ck] = memo.links.get(ck, 0) + 1
                     done += a["bytes"]
                 elif cls == "gzip":
                     compress(a)

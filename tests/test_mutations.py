@@ -10036,3 +10036,28 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tests/guard_corpus/game-root.txt", "C:/Synthetic Games/", "C:/G" + "OG Games/",
      _NRI_T + "test_no_file_under_tests_names_the_real_install", "corpus-root-is-the-real-install"),
 ]]
+
+# Final sweep 2026-10-25 (X4 5e00b6e): housekeep never links or chmods a file that has a name it did not make -- a mod
+# manager's hard link into a live Data/ file shares the inode, and the read-only attribute with it. One twin per clause.
+_HKS = "tools/housekeep.py"
+_HKS_T = "tests/test_housekeep.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_HKS, "        if f.stat().st_nlink != 1:\n", "        if False:\n",
+     _HKS_T + "test_a_file_hard_linked_from_outside_is_never_linked_or_made_read_only[duplicate]",
+     "sweep-hk-plan-ignores-link-count"),
+    (_HKS, "        if p.stat().st_nlink != 1 or c.stat()", "        if False or c.stat()",
+     _HKS_T + "test_check_refuses_a_link_whose_files_gained_a_name_after_the_plan[duplicate]",
+     "sweep-hk-check-ignores-duplicate-links"),
+    (_HKS, " or c.stat().st_nlink != 1 + memo.links.get(_key(c), 0):", " or False:",
+     _HKS_T + "test_check_refuses_a_link_whose_files_gained_a_name_after_the_plan[canonical]",
+     "sweep-hk-check-ignores-canonical-links"),
+    (_HKS, "    if dup.stat().st_nlink != 1 or canon", "    if False or canon",
+     _HKS_T + "test_link_itself_refuses_a_file_with_an_unexpected_name[duplicate]",
+     "sweep-hk-link-ignores-duplicate-links"),
+    (_HKS, " or canon.stat().st_nlink != canonical_links:\n", " or False:\n",
+     _HKS_T + "test_link_itself_refuses_a_file_with_an_unexpected_name[canonical]",
+     "sweep-hk-link-ignores-canonical-links"),
+    (_HKS, "                    memo.links[ck] = memo.links.get(ck, 0) + 1\n", "",
+     _HKS_T + "test_duplicates_become_one_read_only_copy_with_every_path_intact",
+     "sweep-hk-apply-forgets-its-own-links"),
+]]

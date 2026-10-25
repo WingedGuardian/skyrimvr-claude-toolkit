@@ -105,6 +105,9 @@ link.
   `tools/kb-guard.sh` keeps `KB_GUARD_KEEP` (default 30) snapshot folders, the newest ones, never removing the
   oldest, the newest or the one holding the largest copy of a watched file, and sends the others to the Recycle
   Bin through `housekeep.py recycle`, printing a notice first; what the bin does not take stays and is reported.
+- **Hard links a mod manager made are not ours.** Vortex and MO2 can deploy by hard link, so an agent-output copy
+  may share its file with a live `Data/` file, and the read-only mark a duplicate set gets would land on that file
+  too. A duplicate that already has a second name is left alone; `apply` re-counts the names before it links.
 - **Whole-folder classes** (launch, snapshot, scratch) keep a folder whole when any file in it is protected, and
   `apply` checks that again. Off Windows `housekeep` removes nothing: every item is reported as left in place.
 

@@ -224,6 +224,66 @@ def test_duplicates_become_one_read_only_copy_with_every_path_intact(tree):
     assert not planned(again, "link"), "linked files must not be planned a second time"
 
 
+@pytest.mark.parametrize("side", ["canonical", "duplicate"])
+def test_a_file_hard_linked_from_outside_is_never_linked_or_made_read_only(tree, side):
+    """A mod manager deploys by hard link: a fixture copy can share its inode with a live Data/ file. The read-only
+    attribute housekeep sets on a duplicate set changes EVERY name of the inode, so that one would change too."""
+    import stat
+    a = write(tree / "_CLAUDE_OUTPUT" / "a" / "x.log", blob("dup"))
+    b = write(tree / "_CLAUDE_OUTPUT" / "b" / "x.log", blob("dup"))
+    outside = tree / "Mods" / "deployed.log"            # not under any configured root: nothing knows whose it is
+    outside.parent.mkdir()
+    os.link(a if side == "canonical" else b, outside)
+    before = outside.stat().st_mode
+    cfg = cfg_for(tree)
+    doc = hk.plan(cfg)
+    assert not planned(doc, "link"), "a file with another name outside housekeep's view was planned for linking"
+    assert hk.apply(doc, cfg, recycler=FakeBin(tree)) == 0
+    assert outside.stat().st_mode == before and os.access(outside, os.W_OK)
+    assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(before)
+
+
+def test_a_hard_link_made_after_the_plan_is_refused_before_any_chmod(tree):
+    a = write(tree / "_CLAUDE_OUTPUT" / "a" / "x.log", blob("dup"))
+    write(tree / "_CLAUDE_OUTPUT" / "b" / "x.log", blob("dup"))
+    cfg = cfg_for(tree)
+    doc = hk.plan(cfg)
+    assert planned(doc, "link")
+    outside = tree / "Mods" / "deployed.log"
+    outside.parent.mkdir()
+    os.link(a, outside)
+    assert hk.apply(doc, cfg, recycler=FakeBin(tree)) == 1
+    assert os.access(outside, os.W_OK), "apply made a live file's inode read-only"
+
+
+@pytest.mark.parametrize("side", ["canonical", "duplicate"])
+def test_check_refuses_a_link_whose_files_gained_a_name_after_the_plan(tree, side):
+    a = write(tree / "_CLAUDE_OUTPUT" / "a" / "x.log", blob("dup"))
+    b = write(tree / "_CLAUDE_OUTPUT" / "b" / "x.log", blob("dup"))
+    cfg = cfg_for(tree)
+    doc = hk.plan(cfg)
+    (action,) = [x for x in doc["actions"] if x["class"] == "link"]
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time()) == ""
+    outside = tree / "Mods" / "deployed.log"
+    outside.parent.mkdir()
+    os.link(a if side == "canonical" else b, outside)
+    assert "hard-linked elsewhere" in hk.check(action, cfg, hk.Guard(cfg), time.time())
+
+
+@pytest.mark.parametrize("side", ["canonical", "duplicate"])
+def test_link_itself_refuses_a_file_with_an_unexpected_name(tree, side):
+    """The choke point: link() re-checks the count at the moment it acts, whatever check() said."""
+    a = write(tree / "_CLAUDE_OUTPUT" / "a" / "x.log", blob("dup"))
+    b = write(tree / "_CLAUDE_OUTPUT" / "b" / "x.log", blob("dup"))
+    outside = tree / "Mods" / "deployed.log"
+    outside.parent.mkdir()
+    os.link(a if side == "canonical" else b, outside)
+    action = {"class": "link", "path": str(b), "canonical": str(a), "hash": hk.blake(a), "bytes": a.stat().st_size}
+    with pytest.raises(OSError, match="hard-linked elsewhere"):
+        hk.link(action)
+    assert os.access(outside, os.W_OK) and os.stat(b).st_ino != os.stat(a).st_ino
+
+
 # --------------------------------------------------------------------------- apply re-proves the plan
 
 def test_apply_refuses_a_file_changed_since_the_plan(tree):
