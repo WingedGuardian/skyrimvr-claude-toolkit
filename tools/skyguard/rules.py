@@ -305,6 +305,18 @@ RULES = {
         'Give the save as a full path.'
     ),
     },
+    # v4.0.0: ReSaver Plus's own executables run directly -- the CLI with a save-writing flag, or the GUI -- write saves
+    # with none of tools/resaver_native.py's admission, backups or receipt checks (shell_rules.resaver_native_direct).
+    'S-RESAVER-NATIVE-DIRECT': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: {file} run directly writes saves without the adapter\'s new-output checks and backups.\n'
+        'Use bash tools/resaver-cli.sh with RESAVER_BACKEND=native instead.'
+    ),
+    },
     'S-EXTERNAL-OUT': {
         "decision": 'advise',
         "hook": 'protect-bash',
