@@ -88,7 +88,8 @@ CORE_REQUIRED = (
     "tools/bench-vr.py",
     "tools/vr-headless.sh",
     "tools/vr-headless.py",
-    "tools/vr-emu-driver/build.py",
+    "tools/vr_background_desktop.py",
+    "tools/vr-emu-driver/fetch.py",
     "tools/resaver-cli.sh",
     "tools/resaver-cli/ResaverCLI.java",
     "tools/resaver_cli_cache.py",
@@ -131,7 +132,7 @@ ABSENT_PATHS = (
     ".claude/settings.local.json",
     "node_modules",
     ".venv",
-    # The driver retains local-build delivery (tools/vr-emu-driver/README.md).
+    # The driver is fetched on the user's machine, never shipped (tools/vr-emu-driver/README.md).
     "tools/vr-emu-driver/build",
     "tools/vr-emu-driver/work",
     "tools/resaver-cli/tests",

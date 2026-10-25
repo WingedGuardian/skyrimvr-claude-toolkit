@@ -40,17 +40,25 @@ running with a save loaded. In VR that normally means the headset is on (Skyrim 
 without one) -- or headless mode, below. When the game is closed the port is dead — fall back to the
 offline tools (xelib, Spriggit, ReSaver, PyNifly).
 
-**Headless Skyrim VR (no headset): `bash tools/vr-headless.sh on`.** It points the game at SteamVR's
-null driver (replacing an OpenComposite `openvr_api.dll` with SteamVR's own), so the game boots and
-DevBench is drivable with nobody in the headset. Close SteamVR first; then start SteamVR, let it
-settle (if room setup opens, wait for it to close: launching while it runs gets the game evicted),
-and launch the game. `bash tools/vr-headless.sh off` restores both files byte-exact and verifies
-them (a file that changed after `on` is first copied into the run's `changed-after-on-<stamp>/`); it is safe to
-repeat and after a crash, so run it before the user plays again. **Valid only for
-pose-independent tests** -- scripts, records, console, frame rate. Anything that depends on where the
-head and hands are (HIGGS, VRIK, PLANCK, hand collision) needs the real headset. `emu on|off` swaps in
-a pose-emulating driver (its hands track) once the user has built it (`tools/vr-emu-driver/README.md`:
-fetched from a pinned upstream commit, never shipped). Skyrim VR only.
+**Headless Skyrim VR (no headset): `bash tools/vr-headless.sh run --desktop <choice> [--park]`.**
+**Before every session ask the user: this desktop (`current`) or a private background desktop
+(`background`)?** Wait for the answer; never reuse the last one. Neither choice may touch their
+mouse, keyboard or window focus, and choosing this desktop does not authorise desktop input:
+control the game through DevBench only. `run` owns the whole session: it points the game at
+SteamVR's null driver (OpenComposite's `openvr_api.dll` swapped for SteamVR's; `--park` also sets
+OpenComposite's SKSE plugins aside), starts SteamVR and the game, returns control once DevBench
+answers for the owned game at the main menu, waits for the game to exit, and restores everything
+in `finally` -- on error too. `background` needs the user's Steam client already open (it stays
+theirs); Steam is never owned or closed. End a session early with `bash tools/vr-headless.sh stop`
+(from another shell): it quits only the owned game, and only when DevBench shows it running and
+not loading, then restores. A caller that wraps `run` must start it fully detached. `off` alone
+restores byte-exact and is safe to repeat and after a crash, so run it before the user plays again;
+`on`/`launch` remain for staging. **Valid only for pose-independent tests** -- scripts, records,
+console, frame rate. Anything that depends on where the head and hands are (HIGGS, VRIK, PLANCK,
+hand collision) needs the real headset. `emu on|off` (Steam closed) swaps in the official SkyrimVR
+Devkit v2.0.1 driver (its hands track) once the user has fetched it (`tools/vr-emu-driver/README.md`:
+pinned, hash-verified download, never shipped); prepare with `on` + `emu on`, then `run` adopts it.
+Skyrim VR only.
 
 **Port is deterministic per runtime: SE/AE `8920`, VR `8921`** (DevBench iterates if the port is busy
 and writes the bound port to `Data/SKSE/Plugins/devbench/runtime.json`, which the wrapper reads).
