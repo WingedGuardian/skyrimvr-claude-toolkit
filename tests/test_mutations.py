@@ -9990,8 +9990,15 @@ _HC = "tools/housecarl_integration/order.py"
 _HCT = "tests/test_housecarl.py::"
 MUTATIONS += [pytest.param(f, find, rep, _HCT + test, id="housecarl-archive-" + i) for i, f, find, rep, test in [
     ("game-root-ini-not-read", _HC,
-     '    applied = [("game-root", game_ini)] + [("user", user / n) for n in USER_INIS]',
-     '    applied = [("user", user / n) for n in USER_INIS]', "test_root_ini_base_archives_reach_the_backend[SE]"),
+     '    applied = [("game-root", game_ini), ("user", user / main)]',
+     '    applied = [("user", user / main)]', "test_root_ini_base_archives_reach_the_backend[SE]"),
+    ("vr-documents-skyrim-ini-applied", _HC, 'MAIN_INI = {"SE": "Skyrim.ini", "VR": "SkyrimVR.ini"}',
+     'MAIN_INI = {"SE": "Skyrim.ini", "VR": "Skyrim.ini"}', "test_only_the_editions_main_user_ini_is_applied[VR]"),
+    ("other-user-inis-not-marked", _HC,
+     '    unqualified = [("user", user / n) for n in USER_INIS if n != main] + [("custom"', '    unqualified = [("custom"',
+     "test_only_the_editions_main_user_ini_is_applied[SE]"),
+    ("mixed-files-not-marked", _HC, "    if len(mixed) > 1:", "    if False:",
+     "test_root_ini_base_archives_reach_the_backend[VR]"),
     ("user-key-does-not-override", _HC, '                lists[folded] = {"value": value, "source": str(path)}',
      '                lists.setdefault(folded, {"value": value, "source": str(path)})',
      "test_user_ini_precedence_and_explicit_override"),

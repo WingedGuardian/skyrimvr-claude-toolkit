@@ -491,19 +491,30 @@ def _view(install):
 def test_root_ini_base_archives_reach_the_backend(install, edition):
     install["edition"] = edition
     root, user = Path(install["root"]), Path(install["config_dir"])
-    _ini(user / "Skyrim.ini", bInvalidateOlderFiles="1", sResourceArchiveList2="Mod - Extra.bsa")
+    main = user / order.MAIN_INI[edition]
+    _ini(main, bInvalidateOlderFiles="1")
     _ini(root / "Skyrim.ini", sResourceArchiveList="Skyrim - Meshes0.bsa, Skyrim - Meshes1.bsa",
          sResourceArchiveList2="Skyrim - Textures0.bsa")
-    before = {p: p.read_bytes() for p in (user / "Skyrim.ini", root / "Skyrim.ini")}
+    before = {p: p.read_bytes() for p in (main, root / "Skyrim.ini")}
+    snap, names = _view(install)
+    assert names[:3] == ["Skyrim - Meshes0.bsa", "Skyrim - Meshes1.bsa", "Skyrim - Textures0.bsa"]
+    assert snap.archive_coverage["complete"] is True      # one whole file: the backend's rule and the layering agree
+    assert {p: p.read_bytes() for p in before} == before
+    # The main INI's own sResourceArchiveList2 overrides the root's for that key only, and that mix is not "complete":
+    # the backend reads one whole file and Wrye never reads the root, so neither qualifies the layering.
+    _ini(main, bInvalidateOlderFiles="1", sResourceArchiveList2="Mod - Extra.bsa")
     snap, names = _view(install)
     assert "Skyrim - Meshes1.bsa" in names and "Mod - Extra.bsa" in names
-    # The user INI's own sResourceArchiveList2 overrides the root's for that key only.
     assert "Skyrim - Textures0.bsa" not in names
-    assert snap.archive_coverage["complete"] is True
-    assert {p: p.read_bytes() for p in before} == before
+    assert snap.archive_coverage["complete"] is False
+    assert any("more than one INI" in u for u in snap.archive_coverage["uncertain"])
+    # Both keys from the main INI: one file again, complete.
+    _ini(main, sResourceArchiveList="Mod - A.bsa", sResourceArchiveList2="Mod - Extra.bsa")
+    snap, names = _view(install)
+    assert names[:2] == ["Mod - A.bsa", "Mod - Extra.bsa"] and snap.archive_coverage["complete"] is True
     # Contrast: the same archive named nowhere is absent, and that absence is not called complete.
     (root / "Skyrim.ini").write_text("[General]\n", encoding="utf-8")
-    _ini(user / "Skyrim.ini", bInvalidateOlderFiles="1")
+    _ini(main, bInvalidateOlderFiles="1")
     snap, names = _view(install)
     assert "Skyrim - Meshes1.bsa" not in names
     assert snap.archive_coverage["complete"] is False
@@ -520,6 +531,7 @@ def test_user_ini_precedence_and_explicit_override(install):
     lists = snap.archive_coverage["lists"]
     assert lists["sResourceArchiveList"]["source"].endswith("SkyrimVR.ini")
     assert lists["sResourceArchiveList2"]["source"] == str(root / "Skyrim.ini")
+    assert snap.archive_coverage["complete"] is False      # a Documents Skyrim.ini on VR, and a mixed result
     # An explicitly empty user value: the lower value is kept, and the engine's reading of it is marked unknown.
     _ini(user / "SkyrimVR.ini", sResourceArchiveList="")
     _ini(user / "Skyrim.ini")
@@ -527,6 +539,28 @@ def test_user_ini_precedence_and_explicit_override(install):
     assert "Root - A.bsa" in names
     assert snap.archive_coverage["complete"] is False
     assert any("empty" in u for u in snap.archive_coverage["uncertain"])
+
+
+@pytest.mark.parametrize("edition", ["SE", "VR"])
+def test_only_the_editions_main_user_ini_is_applied(install, edition):
+    """Review2 M1: a stale Documents Skyrim.ini on VR (whose reading by the VR engine is unknown), a SkyrimVR.ini on SE
+    and SkyrimPrefs.ini (Wrye reads no archives from it) are fingerprinted, never applied, and make coverage
+    incomplete. Before the fix the VR case dropped the base archives and still said complete."""
+    install["edition"] = edition
+    root, user = Path(install["root"]), Path(install["config_dir"])
+    _ini(root / "Skyrim.ini", sResourceArchiveList="Skyrim - Meshes0.bsa, Skyrim - Meshes1.bsa",
+         sResourceArchiveList2="Skyrim - Textures0.bsa")
+    other = {"VR": "Skyrim.ini", "SE": "SkyrimVR.ini"}[edition]
+    for stale in (other, "SkyrimPrefs.ini"):
+        _ini(user / stale, sResourceArchiveList="Stale.bsa", sResourceArchiveList2="Stale2.bsa")
+        snap, names = _view(install)
+        assert "Stale.bsa" not in names and "Stale2.bsa" not in names
+        assert names[:3] == ["Skyrim - Meshes0.bsa", "Skyrim - Meshes1.bsa", "Skyrim - Textures0.bsa"]
+        assert snap.archive_coverage["complete"] is False
+        assert any(stale in u and "not applied" in u for u in snap.archive_coverage["uncertain"])
+        assert [s["applied"] for s in snap.archive_coverage["sources"] if s["path"] == str(user / stale)] == [False]
+        _ini(user / stale)                               # the same INI naming no archive is harmless
+        assert order.capture(install).archive_coverage["complete"] is True
 
 
 def test_vr_supplemental_list_and_unqualified_vr_keys(install):
@@ -575,11 +609,15 @@ def test_mo2_profile_inis_and_game_root_list(install):
     (profile / "loadorder.txt").write_text("Skyrim.esm\nLateMaster.esp\nSword.esp\nDisabled.esp\n")
     install.update(asset_provider="mo2", authority="mo2-profile", mods_dir=str(mods), config_dir=str(profile))
     _ini(root / "Skyrim.ini", sResourceArchiveList="Skyrim - Meshes1.bsa", sResourceArchiveList2="Root2.bsa")
-    _ini(profile / "Skyrim.ini", sResourceArchiveList2="Profile2.bsa")
+    _ini(profile / "Skyrim.ini", sResourceArchiveList="Profile1.bsa", sResourceArchiveList2="Profile2.bsa")
     (profile / "settings.ini").write_text("[General]\nLocalSettings=true\n", encoding="utf-8")
     snap, names = _view(install)
-    assert names == ["Skyrim - Meshes1.bsa", "Profile2.bsa"]
+    assert names == ["Profile1.bsa", "Profile2.bsa"]
     assert snap.archive_coverage["complete"] is True
+    _ini(profile / "Skyrim.ini", sResourceArchiveList2="Profile2.bsa")     # a profile key over the root's: mixed
+    snap, names = _view(install)
+    assert names == ["Skyrim - Meshes1.bsa", "Profile2.bsa"]
+    assert snap.archive_coverage["complete"] is False
     # A profile without local INIs means the game reads Documents INIs this integration never captured.
     (profile / "settings.ini").write_text("[General]\nLocalSettings=false\n", encoding="utf-8")
     snap = order.capture(install)
@@ -591,7 +629,8 @@ def test_mo2_profile_inis_and_game_root_list(install):
     assert order.capture(install).archive_coverage["complete"] is False
 
 
-@pytest.mark.parametrize("change", ["root-edit", "root-create", "custom-create", "plugin-ini", "vr-ini"])
+@pytest.mark.parametrize("change", ["root-edit", "root-create", "custom-create", "plugin-ini", "vr-ini",
+                                    "documents-skyrim-ini", "prefs-ini"])
 def test_every_archive_input_is_fingerprinted(install, change):
     install["edition"] = "VR"
     root, user, data = Path(install["root"]), Path(install["config_dir"]), Path(install["data_dir"])
@@ -600,7 +639,8 @@ def test_every_archive_input_is_fingerprinted(install, change):
     before = order.capture(install).fingerprint
     target = {"root-edit": root / "Skyrim.ini", "root-create": root / "Skyrim.ini",
               "custom-create": user / "SkyrimCustom.ini", "plugin-ini": data / "Sword.ini",
-              "vr-ini": user / "SkyrimVR.ini"}[change]
+              "vr-ini": user / "SkyrimVR.ini", "documents-skyrim-ini": user / "Skyrim.ini",
+              "prefs-ini": user / "SkyrimPrefs.ini"}[change]
     _ini(target, sResourceArchiveList="B.bsa")
     assert order.capture(install).fingerprint != before
 

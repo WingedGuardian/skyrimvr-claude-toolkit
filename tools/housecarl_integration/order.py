@@ -81,14 +81,29 @@ class Snapshot:
     stamps: list
 
 
-# Issue 11: the base archive lists the backend sees. Sources and precedence, lowest first (key by key, never file by
-# file): the game-root Skyrim.ini, the default the engine ships beside the exe (Wrye Bash skyrimvr Ini.default_ini_file;
-# also the pinned backend's own game-dir fallback, houseCARL 4e28505 ArchiveDiscovery.ReadBaseArchiveNames), then the
-# captured user/profile INIs in their existing Skyrim.ini < SkyrimVR.ini < SkyrimPrefs.ini order. "The first INI with
-# the key wins" is Wrye Bash's rule (game/__init__.py Ini.get_bsas_from_inis). Anything not qualified is marked, never
-# applied: built-in engine defaults, an explicitly empty user value, SkyrimCustom.ini, plugin-named INIs, other VR keys.
+# Issue 11: the base archive lists the backend sees.
+# The backend (READ, houseCARL 4e28505 src/housecarl-core/ArchiveDiscovery.cs:92-110, ReadBaseArchiveNames, called at
+# src/housecarl-mcp/LoadOrderService.cs:547-548 with gamePath = the Data folder's parent) reads the WHOLE first
+# Skyrim.ini that lists sResourceArchiveList/2, profile folder before game dir (:102); it never merges files. The
+# gateway hands it a profile Skyrim.ini that write_profile fills from the lists resolved here, so these lists are
+# exactly what it reads. Its game-dir fallback is reached only when they are empty: the root lists none, or repeats a
+# key with differing values (marked uncertain below).
+# What the ENGINE reads is not measured here. Applied, lowest first, per edition (MAIN_INI):
+#   1. the game-root Skyrim.ini: the backend's own whole-file fallback (ArchiveDiscovery.cs:96); on VR also the INI
+#      shipped beside the exe (Wrye Bash dev game/skyrimvr/__init__.py:55 default_ini_file, which Wrye uses only as a
+#      template for a missing INI, never as a layer);
+#   2. the edition's main user INI: Skyrim.ini on SE, SkyrimVR.ini on VR. That is Wrye's main INI (skyrimvr:56
+#      dropdown_inis[0]), the only non-plugin INI bosh/__init__.py:2516-2517 passes to get_bsas_from_inis, where the
+#      first INI with each key wins (game/__init__.py:698-710).
+# The main INI overrides the root key by key. Neither source models that layering (Wrye never reads the root, the
+# backend takes one whole file), so a result mixing keys from both files is marked uncertain, not complete.
+# Fingerprinted but never applied, marking coverage incomplete when they name archives: SkyrimPrefs.ini (Wrye reads
+# no archives from it), the OTHER edition's main INI (a Documents Skyrim.ini on VR, whose reading by the VR engine is
+# unknown; a SkyrimVR.ini on SE), SkyrimCustom.ini, a game-root SkyrimVR.ini, plugin-named INIs. Built-in engine
+# defaults, an explicitly empty value and other VR keys are likewise marked, never applied.
 BASE_KEYS = ("sResourceArchiveList", "sResourceArchiveList2")
 VR_KEY, VR_FALLBACK = "sVrResourceArchiveList", "Skyrim_VR - Main.bsa"  # Wrye Bash skyrimvr Ini.engine_overrides
+MAIN_INI = {"SE": "Skyrim.ini", "VR": "SkyrimVR.ini"}
 USER_INIS = ("Skyrim.ini", "SkyrimVR.ini", "SkyrimPrefs.ini")
 
 
@@ -114,8 +129,9 @@ def archive_inputs(config, plugin_paths, roots):
     """Read every INI that can name a base archive once; return (coverage, fingerprint material)."""
     data, user = Path(config["data_dir"]), Path(config["config_dir"])
     game_ini = data.parent / "Skyrim.ini"
-    applied = [("game-root", game_ini)] + [("user", user / n) for n in USER_INIS]
-    unqualified = [("custom", user / "SkyrimCustom.ini")]
+    main = MAIN_INI[config["edition"]]
+    applied = [("game-root", game_ini), ("user", user / main)]
+    unqualified = [("user", user / n) for n in USER_INIS if n != main] + [("custom", user / "SkyrimCustom.ini")]
     if config["edition"] == "VR":
         unqualified.append(("game-root", data.parent / "SkyrimVR.ini"))
     for name in plugin_paths:   # a plugin-named INI from the same supplier walk as the plugins (VFS winner first)
@@ -170,6 +186,10 @@ def archive_inputs(config, plugin_paths, roots):
     resolved = {k: lists.get(k.casefold(), {"value": "", "source": None}) for k in BASE_KEYS}
     if config["edition"] == "VR":
         resolved[VR_KEY] = lists.get(VR_KEY.casefold(), {"value": VR_FALLBACK, "source": "engine fallback"})
+    mixed = {resolved[k]["source"] for k in BASE_KEYS if resolved[k]["value"]}
+    if len(mixed) > 1:
+        uncertain.append("The base archive lists come from more than one INI (" + ", ".join(sorted(mixed)) + "); "
+                         "the engine's key-by-key layering of the user INI over the game-root INI is not qualified.")
     if not any(resolved[k]["value"] for k in BASE_KEYS):
         uncertain.append("No captured INI lists sResourceArchiveList/sResourceArchiveList2; the engine's built-in "
                          "defaults are not modelled, so base-game archives are not in the asset scan.")
