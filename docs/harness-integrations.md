@@ -119,8 +119,8 @@ and native Python subprocess barriers. Package-manager attempts fail the origina
 Controls remove the barrier only against a controlled fake outer command. Python writes are
 constrained to fixtures, including copies (`_winapi.CopyFile2`, `shutil.copyfile`) and `os.truncate`;
 this is not an OS sandbox for arbitrary native subprocesses. The package-manager tripwire covers
-`winget choco scoop apt apt-get dnf pacman brew npm npx corepack pnpm yarn pip pip3 pipx uv conda
-gem cargo dotnet`, every `-m pip` spelling (`-mpip`, `-Im pip`), `npm-cli.js`/`npx-cli.js`, and a
+`winget`, `choco`, `scoop`, `apt`, `apt-get`, `dnf`, `pacman`, `brew`, `npm`, `npx`, `corepack`,
+`pnpm`, `yarn`, `pip`, `pip3`, `pipx`, `uv`, `conda`, `gem`, `cargo` and `dotnet`, every `-m pip` spelling (`-mpip`, `-Im pip`), `npm-cli.js`/`npx-cli.js`, and a
 `python -I/-E/-S -m pip` inside a `bash -c`, `cmd /c` or `-Command` string. Not covered: mode, time
 and ownership changes (`chmod`, `utime`, `chown`) outside a fixture, and an isolated `python -I -m pip`
 inside a shell script file.
