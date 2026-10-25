@@ -2,7 +2,7 @@
 
 # Plan 8 T14b: hook latency and deadline matrix
 
-Measured 2026-10-14 and 2026-10-15 on one machine (a desktop CPU with 28 logical CPUs; Git 2.55.0.windows.5,
+Measured 2026-10-14 and 2026-10-15 on one machine (a multi-core desktop CPU; Git 2.55.0.windows.5,
 bash 5.3.15 (cygwin), harness Python 3.10.10, Windows PowerShell 5.1.26100.9549, pwsh 7.6.6).
 Every number below is MEASURED by `tests/test_hook_deadline_load.py` (opt-in, `SKYGUARD_LOAD_TEST=1`) and copied from its run rows; the rows
 and logs stay outside the repository (they hold machine paths). Tiers: MEASURED unless a sentence says INFERRED.
@@ -13,7 +13,7 @@ and logs stay outside the repository (they hold machine paths). Tiers: MEASURED 
   the Codex bash entry, the Codex Windows PowerShell 5.1 entry and the pwsh entry.
 - **Scenarios (5):** healthy; fallback (configured Python missing); engine failure; hung engine before `run.py` arms its watchdog; hung engine after.
   Every failure scenario is a mutation of a **scratch install**, never a switch in the product.
-- **Load:** CPU burners pinned by affinity to 4 of the 28 logical CPUs (`SKYGUARD_LOAD_CORES`), at **normal** priority (user-approved for this
+- **Load:** CPU burners pinned by affinity to 4 of the machine's logical CPUs (`SKYGUARD_LOAD_CORES`), at **normal** priority (user-approved for this
   run); 1x = 1 burner per pinned core, 2x = 2, 4x = 4. Burners are stopped by their own handles. The machine as a whole lost at most 4 CPUs.
   Runs per scenario: 5 at idle, 1x and 4x; 10 at 2x. A run is timed from spawn to the later of the entry's exit and its stdout closing.
 - **Pass:** a scenario's worst run is under the definition timeout minus 10 s (50 s for PreToolUse hooks, 110 s for SessionStart); no gate hook

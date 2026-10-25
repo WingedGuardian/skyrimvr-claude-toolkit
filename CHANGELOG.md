@@ -421,7 +421,7 @@ Defects found and fixed during the v4 work, in features 3.9.1 did not have: Code
 
 ### Upgrading from 3.x
 
-1. Unpack the new zip into a separate folder and, from the Skyrim folder, run `bash "<new folder>/tools/pre-update-snapshot.sh" .` before replacing files.
+1. Unpack the new zip into a separate folder and, from the Skyrim folder, run `bash "<new folder>/tools/pre-update-snapshot.sh" .` before replacing files; `<new folder>` is the zip's inner `skyrim-ai-assistant-toolkit-<version>/` folder.
 2. Extract the toolkit contents over the install; shipped files are replaced. If you wrote your own pre-tool hook handlers or a personal save policy, use the reviewed upgrade in `docs/upgrading-native-hooks.md` instead.
 3. Run `bash setup.sh --agent auto`, or select `claude`, `codex` or `all`.
 4. Review migrated local notes and the settings backup; migration deletes nothing.

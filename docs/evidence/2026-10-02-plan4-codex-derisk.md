@@ -115,7 +115,7 @@ KNOWLEDGEBASE.local.md" notice), which also keeps the spill-to-TEMP copy from be
 ### Latency — hook launch forms through `cmd /c <commandWindows>`, 30 rounds, INTERLEAVED
 
 Each form was fed a captured PreToolUse payload on stdin; every form drains stdin and starts
-`python -c pass` (the `.cmd` and floor rows let Python drain it). Whole-machine CPU busy % (28 logical CPUs,
+`python -c pass` (the `.cmd` and floor rows let Python drain it). Whole-machine CPU busy % (all logical CPUs,
 `GetSystemTimes`) was recorded per run. The machine was shared (`Win32_Processor.LoadPercentage` read
 68–74 % around the runs, mostly from unrelated desktop software). Script: scratch `lat.py`.
 

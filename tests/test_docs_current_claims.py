@@ -201,3 +201,20 @@ def test_logging_registry_never_suggests_a_report_folder_the_guard_will_not_let_
     doc = _read("docs/logging-registry.md")
     assert ".skyguard/logging-registry" not in doc
     assert "`_CLAUDE_OUTPUT/logging-registry/`" in doc and "Never `.skyguard/`" in doc
+
+
+def test_evidence_files_carry_no_cpu_count():
+    """Review C-docs F10: the CPU model was scrubbed from docs/evidence, but "28 logical CPUs" stayed (a weaker
+    machine fingerprint, removed on the maintainer's call)."""
+    import re
+    for p in (REPO / "docs" / "evidence").glob("*.md"):
+        assert not re.search(r"\b\d+ logical CPUs", p.read_text(encoding="utf-8")), p.name
+
+
+def test_upgrade_docs_say_new_folder_is_the_zips_inner_versioned_folder():
+    """Review C-docs F10: `<new folder>` was ambiguous against the zip's one root `<slug>-<version>/`
+    (scripts/build_release_zip.py); the snapshot path and the candidate's relative paths need the inner folder."""
+    import json
+    slug = json.loads(_read("package.json"))["name"] + "-<version>/"
+    for rel in ("README.md", "docs/upgrading-native-hooks.md", "CHANGELOG.md"):
+        assert slug in _read(rel), rel

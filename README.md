@@ -503,8 +503,8 @@ Skyrim folder, type `/hooks`, and approve the **2 Skyrim toolkit hooks**. Then c
 `bash tools/hook-canary.sh`. When they run, each Codex session starts with `SKYGUARD: Codex hooks live`.
 
 Start Codex in the game folder. Subfolder loading is version-dependent: it worked in an isolated 0.162.1 probe.
-Verify the live banner and canary before relying on hooks. From a subfolder of a non-git install no hook ran on
-codex-cli 0.160.0: it depends on the version.
+Verify the live banner and canary before relying on hooks. The older evidence: from a subfolder of a non-git
+install no hook ran on codex-cli 0.160.0, which is why it depends on the version you run.
 
 Approve again when:
 
@@ -575,7 +575,7 @@ A: Only for the optional headless render-verification loop. The core NIF authori
 A: The safety hooks run on Python 3 and refuse everything when they cannot start it (that is deliberate: a guard that cannot run must not allow). Install Python 3 (for you to run: `winget install --id Python.Python.3.12 --exact --version 3.12.10 --no-upgrade`: inside the tested 3.10-3.13 range and the Python the optional tools were verified on; winget checks the installer's hash), then run `bash setup.sh` again so it records the interpreter's path in the hooks. `jq` is no longer needed by the hooks; it is optional and only prettifies `tools/devbench-cli.sh` and `tools/nexus.sh` output.
 
 **Q: How do I update the toolkit?**
-A: (1) Unpack the new zip into a separate folder. (2) From your Skyrim folder, run `bash "<new folder>/tools/pre-update-snapshot.sh" .` to keep a copy of what the update replaces. (3) Copy the new folder's contents over your Skyrim folder; shipped files are replaced. (4) Run `bash setup.sh --agent auto` (or `claude`, `codex`, `all`); on a 3.x install it runs `tools/migrate-3x.py`, which carries your own edits to CLAUDE.md, the hook settings and KNOWLEDGEBASE.md forward and deletes nothing. (5) Complete the hook review (Codex: `/hooks`) and check `bash tools/hook-canary.sh` after real tool calls. If you wrote your own pre-tool hook handlers or a personal save policy, use the reviewed upgrade in [docs/upgrading-native-hooks.md](docs/upgrading-native-hooks.md) instead of step 3.
+A: (1) Unpack the new zip into a separate folder. The zip holds one versioned folder, `skyrim-ai-assistant-toolkit-<version>/`: that inner folder is `<new folder>` below, the one with `setup.sh` and `tools/` directly inside it. (2) From your Skyrim folder, run `bash "<new folder>/tools/pre-update-snapshot.sh" .` to keep a copy of what the update replaces. (3) Copy the new folder's contents over your Skyrim folder; shipped files are replaced. (4) Run `bash setup.sh --agent auto` (or `claude`, `codex`, `all`); on a 3.x install it runs `tools/migrate-3x.py`, which carries your own edits to CLAUDE.md, the hook settings and KNOWLEDGEBASE.md forward and deletes nothing. (5) Complete the hook review (Codex: `/hooks`) and check `bash tools/hook-canary.sh` after real tool calls. If you wrote your own pre-tool hook handlers or a personal save policy, use the reviewed upgrade in [docs/upgrading-native-hooks.md](docs/upgrading-native-hooks.md) instead of step 3.
 
 **Extracting directly over an installation replaces shipped files, including customized instructions and hook settings.** Step 2's snapshot and setup's migration keep a copy of each; the reviewed upgrader instead preserves collisions for explicit choices. Your own notes belong in **`KNOWLEDGEBASE.local.md`**, which the toolkit never ships and the release build refuses to contain; the agent reads both knowledge files and writes only to the local one. Its `## My preferences` section holds your standing instructions. Existing session hooks and the OpenCode system transform reinject that section through the same bounded parser. Local notes, path configuration and permanent recovery stores remain separate from shipped defaults.
 

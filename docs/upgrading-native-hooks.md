@@ -5,7 +5,9 @@
 > `.claude/hooks/protect-save-access.py` you wrote), which extracting a new version over the install would replace.
 
 The commands below are subcommands of the NEW toolkit's entry, run from the folder you unpacked it into, with
-`--installed-root` naming your Skyrim folder:
+`--installed-root` naming your Skyrim folder. `<new folder>` is the zip's one inner folder,
+`skyrim-ai-assistant-toolkit-<version>/` (the one with `setup.sh` and `tools/` directly inside it), not the folder
+you unpacked the zip into; the candidate's paths are relative to it:
 
 ```bash
 python "<new folder>/tools/agent-harness.py" upgrade-preview --installed-root "<Skyrim folder>" --candidate "<scratch folder>/candidate.json"
