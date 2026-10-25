@@ -1,6 +1,23 @@
 # ADAPTING.md: you are an agent this toolkit does not support yet
 
-The 4.0 neutral entry is `python tools/agent-harness.py check`, with Action v1 JSON
+This file is written to you, the coding agent. If you are Claude Code or the Codex CLI, stop: the toolkit
+is already wired for you (see `README.md`); only the next section, which a bulk-save refusal points to, is
+for you too. Otherwise you can wire it into yourself. Be honest about how
+far you get: the toolkit gives you Layers 0 and 1 without any hook (Layer 2, the vanilla-file lock, is off by default), and Layer 3
+only if you can *prove* a hook of yours blocks.
+
+`python` in this file means a Python 3.10 or newer interpreter. On Linux and macOS that is usually `python3`; on
+Windows, `py -3` or `python`. Use whichever one starts on this machine.
+
+**Which entry to call.** Your adapter calls `python tools/skyguard/run.py neutral pre-tool` (the contract in
+section 4; the template in section 6 calls it for you). `python tools/agent-harness.py check` reads the shared
+Action v1 format instead: use it for the save-approval preview and the save recovery commands below. Upgrading an
+install that has its own pre-tool hook handlers or a personal save policy is covered in
+[docs/upgrading-native-hooks.md](docs/upgrading-native-hooks.md).
+
+## The Action v1 entry: save-approval preview and save recovery
+
+The Action v1 entry is `python tools/agent-harness.py check`, with Action v1 JSON
 on stdin and a structured result on stdout. It needs `tools/skyguard/` and the
 pinned `tools/modding_harness/`, independently of named-agent hook directories.
 `capabilities` states qualification limits and `coverage --session-id ID` reports
@@ -65,134 +82,6 @@ and imports the same pinned process transport as X4. Its Node
 fixtures qualify translation and failure handling only; running-host blocking,
 Desktop and V2 remain unqualified. See `.opencode/SKYRIM-OPENCODE.md`. Existing
 Claude/Codex entrypoints remain available during the dispatcher transition.
-
-An existing installed `protect-save-access.py` is a local policy, never a
-replaceable toolkit default. Portable mutations refuse until it is registered
-in `.modding-agent-harness/local-policies.json` as version 1, kind
-`legacy-skyrim-save-guard-v1`, its exact installed relative path, and
-its full SHA-256; see [native hook upgrade formats](docs/upgrading-native-hooks.md).
-The bridge runs only its pure `decide` entry before permanent
-preservation. Changed bytes, a crash, output, or a missed deadline refuse the
-call. It cannot grant bulk approval or bypass game rules. Its structured DevBench
-checks retain the local refusal of generic runtime save/load; the separately
-pinned controlled loader retains its own independent gate. For the exact reviewed
-policy/controller hashes, its prepare/load requests add complete preservation
-scope; request bytes, controller identity, policy and membership are rechecked
-after copying. These are fixture-qualified preflight checks, not a live controller
-or runtime-saving qualification. Legacy backup and approval decisions must be
-covered by the portable save plan, including logical pair identities, operations,
-bulk thresholds and wildcard membership rechecks. The exact reviewed source can
-add finite shell requirements omitted by the game parser, including the legacy
-restore helper and suffixed backup writes. Qualified transfer roles distinguish a
-move source from a written destination. Requirements and membership are rechecked
-after preservation. These additions cannot relax an independent game-policy denial.
-For that reviewed policy, an unresolved helper may use one unambiguous canonical
-human declaration binding the current session, full command SHA-256, operation,
-logical-save count and every absolute pair-member path. Include an absent co-save
-too. Even one declared save requires this grant; it is read again after verified
-preservation. The human declaration specifies the opaque command's intended
-scope; it does not prove what its implementation will do. An incomplete pair,
-ambiguous declarations, an unknown approval reader or changed membership refuses.
-Legacy basename/short-hash grants and caller-supplied provenance cannot supply a
-preservation plan. Without qualified evidence the helper refuses before backup.
-Fresh installations
-without that personal policy do not acquire it. Registration is part of a
-reviewed upgrade, never inferred from a hook trust record.
-Keep the existing parallel handler active until the complete replacement,
-including any controlled loader and helper routes in use, is qualified. The
-profile supports `upgrade-stage --integrate-local-policy` for the exact reviewed
-Windows policy, wrapper and native groups. It needs the complete candidate guard
-runtime and both destination-rendered native definitions. Unknown source versions,
-changed matcher/timeout/Windows/async fields, unrelated local pre-handlers and an
-unqualified existing registration refuse the proposal. The wrapper permits only
-its documented literal interpreter-path and UTF-8/line-ending normalization.
-All policy/helper sources and unrelated settings/post-handlers are retained.
-Every proposed file needs an explicit `reviewed_settings` choice; application
-reproduces the proposal from retained bytes and binds every required runtime file.
-Runtime is published before registration, then native definitions. A staged review
-changes no installed file and establishes no native host trust or interception.
-
-`upgrade-preview --candidate FILE [--previous FILE]` compares version 1 inventories
-(`{"v":1,"files":{"relative/path":"sha256"}}`) without writing anything.
-Unknown or modified installed bytes are collisions to preserve; previous
-ownership is accepted only for matching bytes. A preview does not approve an
-upgrade or establish host interception.
-
-`upgrade-stage --installed-root DIR --source DIR --candidate FILE --destination DIR`
-prepares a private review bundle with independent candidate and rollback copies,
-merged project settings and local-setting review. Add `--previous FILE` and exact
-verified `--owned-command COMMAND` values for lifecycle handlers where available.
-Pre-tool retirement uses complete groups: exact current candidate groups and
-unchanged files matching the previous inventory qualify automatically. Otherwise
-`--owned-pre-groups FILE` supplies complete groups scoped to their native definition
-file, using the [native hook upgrade formats](docs/upgrading-native-hooks.md),
-from verified previous definitions. Matcher, timeout,
-Windows command and asynchronous changes remain custom; command text alone is
-insufficient. Existing personal save
-guard sources are retained; `--local-file PATH` includes other local policy files.
-This command changes no installed files and performs no deployment or hook review.
-The bundle contains private notes/settings and must stay out of release artifacts.
-
-Add `--render-config FILE` to render the independently copied instructions and
-hook transports for the destination before review. The source and installed
-files stay unchanged. The JSON object supplies actual absolute paths, for example:
-
-```json
-{
-  "v": 1,
-  "config_dir": "C:/Profiles/Skyrim VR",
-  "loadorder_dir": "C:/LoadOrder/Skyrim VR",
-  "skyrim_folder": "Skyrim VR",
-  "python": "C:/Tools/Python/python.exe",
-  "bash": "C:/Program Files/Git/bin/bash.exe",
-  "mod_manager": {"kind": "stock"}
-}
-```
-
-The destination supplies the toolkit root used by hook definitions. Instructions
-use the retained `SKYRIM_GAME_ROOT`, or the optional absolute `game_root` field;
-without either they use the destination's usual in-game layout. This distinction
-keeps a separate worktree from being mistaken for the game. `stock` covers Vortex/manual deployment.
-For MO2, use `kind: "mo2"` and supply `instance`, `profile`, `mods`, `overwrite`
-and `profile_dir`; all except the profile name are absolute paths. Both config
-and load-order directories must name that profile. Values conflicting with
-retained installation paths refuse. The existing Codex definition renderer keeps
-its command normalization; unsafe roots refuse. Interpreter literals use their
-shell's quoting, and Unicode PowerShell scripts carry an explicit UTF-8 marker
-for Windows PowerShell 5.1. Unresolved placeholders or oversized agent
-instructions refuse application before installed writes. This renders selected
-candidate files; it does not select a complete payload or establish host trust.
-
-After reviewing the bundle, `upgrade-apply --installed-root DIR --bundle DIR
---review-sha256 SHA256 --choices FILE --quiescent` applies its selected files.
-SHA256 is the hash of the exact `complete.json` reviewed. The choices file is a
-JSON object mapping every collision path to `keep` or `candidate`; project
-hook definitions for both supported native hosts instead select `merged_settings`
-when replacing existing definitions. Omit `--choices`
-only when no collision needs a choice. Custom pre-tool handlers must first be
-integrated into the ordered dispatcher and reviewed; an unresolved handler
-in either native configuration refuses application, even when its file is kept.
-Local policy or configuration changes invalidate review. Restage older bundles
-that lack the combined native-settings observations.
-Stop host/editor writers before using `--quiescent`: the flag asserts that
-condition and does not stop them. The upgrade lock coordinates upgraders only;
-replacing existing files cannot exclude arbitrary foreign writers atomically.
-Read-only installed targets refuse during preflight; their protection is retained.
-The receipt gives an operation ID and permanent rollback journal. Exit 2 is a
-refusal; exit 1 reports a partial failure with its journal and published paths.
-Inspect that evidence before recovery. `upgrade-rollback ID --installed-root
-DIR --quiescent` restores previous files only when the upgrade's published
-bytes and identity still match, retaining new files in the journal. Local notes
-remain preserved. Installation and rollback both require separate host hook
-review before claiming enforcement.
-
-This file is written to you, the coding agent. If you are Claude Code or the Codex CLI, stop: the toolkit
-is already wired for you (see `README.md`). Otherwise you can wire it into yourself. Be honest about how
-far you get: the toolkit gives you Layers 0 and 1 without any hook (Layer 2, the vanilla-file lock, is off by default), and Layer 3
-only if you can *prove* a hook of yours blocks.
-
-`python` in this file means a Python 3.10 or newer interpreter. On Linux and macOS that is usually `python3`; on
-Windows, `py -3` or `python`. Use whichever one starts on this machine.
 
 ## 0. The only status words you may use
 
@@ -315,7 +204,7 @@ Copy their *mechanism*, not their wording. Every row is cited.
 <!-- facts:begin -->
 | Fact | Tier | Source |
 |---|---|---|
-| Codex blocks a tool call on exactly one thing: a parsed JSON `permissionDecision: "deny"`. `ask`, exit 2, exit 1, malformed JSON, a timeout and a missing script all let the command run | MEASURED | [spec: E17] [measured: docs/superpowers/measurements/2026-10-02-plan4-codex-derisk.md#EXIT2ME] |
+| Codex blocks a tool call on exactly one thing: a parsed JSON `permissionDecision: "deny"`. `ask`, exit 2, exit 1, malformed JSON, a timeout and a missing script all let the command run | MEASURED | [spec: E17] [measured: docs/evidence/2026-10-02-plan4-codex-derisk.md#EXIT2ME] |
 | Codex skips a project's unapproved hooks silently | MEASURED | [spec: E2] |
 | Codex shell commands arrive as tool `Bash` although they run under PowerShell | MEASURED | [spec: E3] |
 | Codex `apply_patch` carries paths only inside the patch text | MEASURED | [spec: E4] [src: tools/modding_harness/patches.py::def parse_patch] [src: tools/skyguard/patch_paths.py::from modding_harness.patches import] |
@@ -325,7 +214,7 @@ Copy their *mechanism*, not their wording. Every row is cited.
 | A deny that arrives after the agent's own hook timeout is discarded, so every wrapper bounds its own work below that timeout | READ | [src: agent/guards/adapters/codex/skyguard-entry.sh::DISCARDS an answer that arrives after its hook timeout] |
 | `AGENTS.md` past 32 KiB is silently truncated by Codex | MEASURED | [spec: E7] |
 | A skill with Claude-only frontmatter loads and runs in Codex | MEASURED | [spec: E6] |
-| The adapter template adds one Python start to every call; measured median and p95 are recorded | MEASURED | [measured: docs/superpowers/measurements/2026-10-05-plan7-adapter-latency.md#adapter median] |
+| The adapter template adds one Python start to every call; measured median and p95 are recorded | MEASURED | [measured: docs/evidence/2026-10-05-plan7-adapter-latency.md#adapter median] |
 <!-- facts:end -->
 
 ## 6. Wire the adapter
@@ -463,7 +352,7 @@ List every gap in the report. These are the ones the toolkit already knows about
 - The neutral entry sends kind `mcp` to the DevBench rules | [src: tools/skyguard/neutral.py::engine.evaluate_mcp]
 - The neutral entry allows an MCP call to any other server and labels it not judged, status `partial` | [src: tools/skyguard/neutral.py::UNJUDGED_MCP = "NOT JUDGED: only a DevBench MCP server is guarded; WARN AND ALLOW"]
 - Only an MCP server whose name contains `devbench`, ignoring case and `-` `_` `.` (`DevBench-vr`, `dev-bench`, `skyrim-devbench`), is judged, so a DevBench server registered under any other name is allowed unjudged; an adapter must map such a server to such a name itself. | [src: tools/skyguard/mcp_rules.py::"devbench" in re.sub(]
-- The MCP judge reads every string in a DevBench call, whatever the tool, for a refused console command (`smp reset`); the save-over-a-save confirmation reads only the `console`, `game` and `papyrus` tools and scenario steps (`steps`), so a save made by a `replay` of a recording is not confirmed | [src: tools/skyguard/mcp_rules.py::for s in _strings(args):] [src: tools/skyguard/mcp_rules.py::elif tool == "game"]
+- The MCP judge reads every string in a DevBench call, whatever the tool, for a refused console command (`smp reset`); the save-over-a-save backup reads only the `console`, `game` and `papyrus` tools and scenario steps (`steps`), so a save made by a `replay` of a recording is not backed up | [src: tools/skyguard/mcp_rules.py::for s in _strings(args):] [src: tools/skyguard/mcp_rules.py::elif tool == "game"]
 - Ops that take a backup are exactly `update`, `delete` and `move_from` | [src: tools/skyguard/engine.py::_BACKUP_OPS = ("update", "delete", "move_from")]
 - The engine's own telemetry role for the neutral entry is `neutral-pre-tool` | [src: tools/skyguard/neutral.py::TELEMETRY_ROLE = "neutral-pre-tool"]
 - The health tooling (`hook-canary`, `skydoctor`) reads an adapted agent's heartbeats from the folder its adapter's `AGENT_NAME` slot names, and measures no transcript coverage for it | [src: tools/skyguard/health.py::def adapted_agents] [src: tools/skyguard/health.py::an adapted agent has no transcript reader] [src: tools/skyguard/doctor.py::def _layer3_adapted]

@@ -54,7 +54,7 @@ Every change made through the edit tools (and Codex `apply_patch`) is logged wit
 ## Design Principles
 
 ### 1. No Silent Modifications
-Destructive changes are blocked outright. Everything else that is consequential but legitimate is **advised**: a note is injected into Claude's context and the call proceeds -- you are not prompted. Four rules in the toolkit ask you to decide: a git command that would throw away uncommitted changes in a protected folder, a `lock disable` that turns the vanilla-file lock off for good, an in-place restore (`snapshot restore --in-place` or `restore-from-backup.sh --restore`), which writes over live files, and a program the guard cannot name (a variable such as `$R`) given one of your saves -- it may write, move or delete the save, or nothing, and the guard cannot count that change to back it up first.
+Destructive changes are blocked outright. Everything else that is consequential but legitimate is **advised**: a note is injected into Claude's context and the call proceeds -- you are not prompted. Five rules in the toolkit ask you to decide: a git command that would throw away uncommitted changes in a protected folder, a `lock disable` that turns the vanilla-file lock off for good, an in-place restore (`snapshot restore --in-place` or `restore-from-backup.sh --restore`), which writes over live files, and a program the guard cannot name (a variable such as `$R`) given one of your saves -- it may write, move or delete the save, or nothing, and the guard cannot count that change to back it up first -- and a command the guard cannot read that names the install, since it cannot tell what that command does there.
 
 Saves follow their own rule (user ruling 2026-10-13), because a save is the one thing a mod manager cannot give back. A command that changes one or two saves -- writes, copies onto, edits, moves, renames or deletes them, a DevBench save over an existing one, ReSaver `--apply` -- runs WITHOUT a prompt, but only after the deciding hook has copied both files of each pair (the `.ess` and its `.skse` co-save count as one save), read each copy back to its SHA-256 and recorded it; if that backup fails the command is refused. More than two saves, or a wildcard, is refused until you type the `SAVE_ACCESS_APPROVAL` line the refusal shows -- read only from what you typed, never from anything the agent read. Those backups are never pruned. Reading, hashing, listing and copying saves out are free; deleting or moving the whole `Saves` folder stays refused.
 
@@ -81,11 +81,13 @@ The "safety improvement loop" instruction in CLAUDE.md asks Claude to evaluate w
 
 ## Customizing Safety
 
-The guards can be customized, but their shipped files can be replaced during an update. Keep personal rules in separate local files. Use the reviewed upgrade workflow in `ADAPTING.md`: stage the candidate, retain custom instructions and settings as explicit collisions, and integrate existing pre-tool handlers into the ordered dispatcher before applying. Keep the old handlers active until that replacement is qualified. Extracting directly over the installation can overwrite those files. To customise:
+The guards can be customized, but their shipped files can be replaced during an update. Keep personal rules in separate local files. Before an update, run `tools/pre-update-snapshot.sh` as README.md's FAQ ("How do I update the toolkit?") says; extracting over the installation overwrites those files. If you added your own pre-tool handlers, use the reviewed upgrade in `docs/upgrading-native-hooks.md` instead, and keep the old handlers active until their replacement is qualified. To customise:
 
 - **Whitelist paths** you want Claude to edit freely (e.g., a working directory for scripts)
 - **Add new patterns** to the bash guard for commands specific to your workflow
-- **Adjust the confirmation threshold** -- some users may want less friction for frequently-edited files
+- **Change a rule's behavior** in its deciding implementation, then verify the new verdict with focused tests.
+  `tools/skyguard/rules.py` holds rule metadata and messages; its `decision` field controls behavior only where
+  the implementation explicitly reads it. Editing that field alone does not change most rules' verdicts.
 
 The rules live in Python, in `tools/skyguard/`: the shell guard's patterns and messages in
 `shell_rules.py`, the file guard's in `write_rules.py`, and which directories count as "the install"

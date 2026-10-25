@@ -79,7 +79,7 @@ Settings load in this order (later overrides earlier):
 
 ## Nexus Mod Research (Standing Rule)
 
-**Always search a mod's Nexus mod page before investigating it.** Check the description, tutorials/articles, comments, and bug reports before going in blind. This saves enormous time -- most issues have been seen and documented by other users.
+**Always search a mod's Nexus mod page before investigating it.** Check the description, tutorials/articles, comments, and bug reports before going in blind. Most issues are already documented there.
 
 Nexus also has a free API (versions, changelogs, dependencies). `bash tools/nexus.sh mod <id>` wraps it; key setup and the personal-use rules are in `docs/installing-tools.md`. Never echo, log or commit the key.
 
@@ -173,7 +173,7 @@ verify every new field, pass `--PackageVersion` as `spriggit --version` prints i
 
 ## ESP Dependency Rule: Own Your Records
 
-**Never use `GetFormFromFile()` to borrow records from another mod.** Soft runtime dependencies silently break when that mod is disabled — the call returns `None` with zero error output and the feature simply doesn't work. This is nearly impossible to debug without reading the Papyrus log.
+**Never use `GetFormFromFile()` to borrow records from another mod.** Soft runtime dependencies silently break when that mod is disabled — the call returns `None` with zero error output and the feature simply doesn't work.
 
 **Rule**: Any record your mod needs must live in the ESP you're building. Copy the record (SNDR, SPEL, MGEF, WEAP, etc.) into your own plugin rather than referencing another mod's.
 - **Hard master dependencies** (MAST records): acceptable when overriding or extending a specific mod's content.
@@ -198,8 +198,7 @@ the working directory the agent reports.
   moving files out of them. Also refused: a delete whose target the guard cannot work out in a command
   naming a protected folder, and deleting everything in a folder it cannot place (`rm -rf *` after an
   unknown `cd`). Scratch folders (`/tmp`, temp, the scratchpad) are not protected.
-  Pattern matching on parsed commands, **not a sandbox** (a relative path inside `python -c` code is not
-  resolved): a guard against accidents.
+  Pattern matching, **not a sandbox**: a guard against accidents.
 
   The install is **resolved** (from the guard's own location plus `skyrim-paths.env` at the toolkit root), never guessed
   from the word "Skyrim". ⚠ If no root resolves, or a path in `skyrim-paths.env` is unreadable, the guard DENIES.
@@ -215,6 +214,7 @@ the working directory the agent reports.
   inside `Data/Scripts/` -- both have destroyed sources
 - DevBench `smp reset` (measured to crash a large load order), by MCP, `curl` or `devbench-cli.sh`
 - Decoded text run as commands (`base64 -d | bash`), which the guard cannot read
+- `sed -i` without `-b` on a file in the install, config or MO2 folder (it makes CRLF LF): use `sed -i -b`
 - **More than two saves changed at once**, or saves named by a wildcard, until the user types the
   `SAVE_ACCESS_APPROVAL` line the refusal shows (skill `skyrim-save`)
 - A command the guard cannot read: empty or not text ("GUARD INERT"), or unparseable while it contains
@@ -225,19 +225,20 @@ the working directory the agent reports.
 - SKSE plugin configs (`Data/SKSE/Plugins/*.ini`) -- not captured by any snapshot
 - Papyrus scripts (`.psc`, `.pex`) -- a `.pex` loads at game startup ONLY
 - Load order files -- the mod manager owns them and may overwrite a direct edit
-- Redirects, `tee`, `sed -i` and other shell writes into `Data/`, the config folder or MO2 (a `cp`/`mv`
+- Redirects, `tee`, `sed -i -b` and other shell writes into `Data/`, the config folder or MO2 (a `cp`/`mv`
   there is silent), a copy onto a plugin where the game loads it, and any write, copy or move onto a
   file directly in the game folder (its exe and dlls, `openvr_api.dll`, loader INIs)
-- A decompiler writing its output into the install; `sed -i` with a backslash path, on a file in the install
+- A decompiler writing its output into the install; a backslash path in a `sed` replacement
 - AutoMod write commands without `--dry-run`
 - Changing one or two saves (a save and its `.skse` are one): both are backed up, verified, first;
   a failed backup refuses
 
 Naming a plugin or INI in a read-only command is silent: notes fire on the program that writes.
 
-### ASKS THE USER -- four rules
+### ASKS THE USER -- five rules
 - git discarding uncommitted changes in a protected folder (`checkout -- x`, `restore`, `reset --hard`)
 - an unnamed program (`$R`) given a save
+- a command the guard cannot read that names the install
 - `lock disable` (file lock off for good), and `snapshot restore --in-place` or
   `restore-from-backup.sh --restore` (writes over live files)
 

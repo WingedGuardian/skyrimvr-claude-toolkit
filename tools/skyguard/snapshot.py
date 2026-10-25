@@ -63,7 +63,7 @@ TREES = ("Data/Scripts", "Data/Source/Scripts")   # Data/Scripts/** holds the LE
 EXTS = (".psc", ".pex")
 # Latency gate (controller ruling: the added PER-CALL p95 over the real call stream): 131-137 ms MEASURED by replaying
 # 15,138 real walking hook calls against measured shape costs -> the <= 150 ms branch, the 60 s rate limit. The worst
-# single-call shape is 160-168 ms p95. Source and numbers: docs/superpowers/measurements/2026-10-04-plan6-pricing.md.
+# single-call shape is 160-168 ms p95. Source and numbers: docs/evidence/2026-10-04-plan6-pricing.md.
 RATE = 60
 KEEP_DAYS = 14
 BASELINE_BOX = 20.0       # seconds at SessionStart

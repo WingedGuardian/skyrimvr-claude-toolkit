@@ -19,7 +19,21 @@ xEdit validation. The upstream server is an optional, separately installed depen
 
 The optional Windows file lock is off by default. Its limits and the hook coverage are described below. Earlier release announcements are in [CHANGELOG.md](CHANGELOG.md).
 
-## New in v3: Create Custom Animated VFX — and See Them Before You Load the Game
+## New in v4: Codex support, one guard engine, and backed-up game saves
+
+- **Codex CLI on Windows**, alongside Claude Code: the same instructions, skills and guards. Approve the hooks with
+  `/hooks` (see *Using with Codex* below). Other agents can wire the guards into themselves with [ADAPTING.md](ADAPTING.md).
+- **One guard engine in Python** (`tools/skyguard/`) behind both agents' hooks. A guard that cannot run refuses
+  rather than allows; `bash tools/hook-canary.sh` and `bash tools/skydoctor` show what is live.
+- **Game saves are backed up, not asked about:** a change to one or two of them first copies both files of each,
+  verified and kept forever; more than two need the approval line you type.
+- **An optional file lock** for the vanilla masters and archives (Windows, off by default), described below.
+- **New tools:** `mod-install` and `archive-triage` for manual installs, `housekeep` for agent output, headless
+  VR and `bench-vr` for DevBench, and the optional House Carl gateway (`docs/housecarl.md`).
+
+Everything else, and how to upgrade from 3.x: [CHANGELOG.md](CHANGELOG.md).
+
+## Added in v3: Create Custom Animated VFX — and See Them Before You Load the Game
 
 v2 could read, edit, and build ESPs. **v3 adds the ability to author 3D mesh content and animation, and to verify it visually before it ever touches your headset.** This is the big leap, so it goes first:
 
@@ -72,7 +86,7 @@ The clearest example: **xeditlib**. XEditLib.dll is the engine inside SSEEdit/xE
 - **1,300+ lines of Skyrim modding knowledge** -- Papyrus quirks, version-specific differences, xEdit pitfalls, engine bugs, NIF/animation authoring, VR hit-detection, and more (including VR-specific sections). Loaded into every Claude session automatically.
 - **NIF authoring & animation** -- Author self-animating meshes (self-spinning, telescoping, keyframed motion) with PyNifly, edit LE geometry with PyFFI, and verify everything with a headless render before you load the game.
 - **Render-verification loop** -- Headless Blender renders any NIF to a PNG so fixes are confirmed in chat; NifSkope and PyNifly act as independent render/parse gates so bad files are caught in tooling.
-- **Safety hooks** -- Claude is refused outright on the things that are never correct (writing a plugin or archive as raw text -- through the edit tools **and** through the shell -- deleting inside the game, config or Mod Organizer folders or moving files out of them, moving the install, `Data`, the settings folder or `Saves` away, deleting Bethesda registry keys, running decoded text as commands, DevBench's `smp reset`), and is warned -- without interrupting you -- on the things that are consequential but legitimate. Files it edits are backed up first, with a full audit trail. Only four rules ask *you* to decide: a git command that would throw away uncommitted changes in a protected folder, a `lock disable` that turns the vanilla-file lock off for good, an in-place snapshot restore (`snapshot restore --in-place`), which writes over live files, and a program the guard cannot name (a variable such as `$R`) given one of your saves. Any other change to your saves does not ask: one or two saves (a save and its co-save count as one) are backed up first, verified, and kept forever; more than two, or a wildcard, is refused until you type the approval line the guard shows you. Run `bash tools/hook-canary.sh` any time to confirm the hooks are alive and actually receiving their input -- they once were not, and nothing looked wrong.
+- **Safety hooks** -- Claude is refused outright on the things that are never correct (writing a plugin or archive as raw text -- through the edit tools **and** through the shell -- deleting inside the game, config or Mod Organizer folders or moving files out of them, moving the install, `Data`, the settings folder or `Saves` away, deleting Bethesda registry keys, running decoded text as commands, DevBench's `smp reset`), and is warned -- without interrupting you -- on the things that are consequential but legitimate. Files it edits are backed up first, with a full audit trail. Only five rules ask *you* to decide: a git command that would throw away uncommitted changes in a protected folder, a `lock disable` that turns the vanilla-file lock off for good, an in-place snapshot restore (`snapshot restore --in-place`), which writes over live files, a program the guard cannot name (a variable such as `$R`) given one of your saves, and a command the guard cannot read that names the install. Any other change to your saves does not ask: one or two saves (a save and its co-save count as one) are backed up first, verified, and kept forever; more than two, or a wildcard, is refused until you type the approval line the guard shows you. Run `bash tools/hook-canary.sh` any time to confirm the hooks are alive and actually receiving their input -- they once were not, and nothing looked wrong.
 - **Confidence system** -- Claude rates its confidence (0-100%) and lists its assumptions before proposing any change. No guessing, no "this should work."
 - **ESP editing via Spriggit** -- Serialize any ESP to human-readable YAML, edit it directly, deserialize back. Claude's native file editing works on YAML out of the box — no FFI layer, no scripting, and changes diff cleanly in git.
 - **ESP analysis via xeditlib** -- Programmatic inspection, diffing, and bulk queries across records. The hard Delphi FFI work is already done. ([xeditlib on GitHub](https://github.com/WingedGuardian/xeditlib))
@@ -261,8 +275,8 @@ After setup and any required hook approval, the supported agents run these check
 
 | Protection | What It Does |
 |-----------|-------------|
-| **Command guard** | Blocks deleting inside the install, the config folder or Mod Organizer's `mods`/`overwrite` (a Recycle-Bin delete included), deleting everything in a folder it cannot place, moving the install, `Data`, the settings folder or `Saves` away, running decoded text (`base64 -d` piped to a shell), deleting Bethesda registry keys, raw-text shell writes to ESP/ESM/ESL/BSA/BA2 (`>`, `tee`, `Set-Content`, `Out-File`, ...), and DevBench `smp reset`. Runs on the Bash and PowerShell tools. **Advises** on other file operations in game directories -- a note to Claude, not a prompt to you. |
-| **File guard** | Blocks direct writes to ESP/ESM/ESL/BSA/BA2 files through the edit tools. **Advises** on INIs, load-order files and scripts; its one prompt is a write onto a save in `Saves/`. |
+| **Command guard** | Blocks deleting inside the install, the config folder or Mod Organizer's `mods`/`overwrite` (a Recycle-Bin delete included), deleting everything in a folder it cannot place, moving the install, `Data`, the settings folder or `Saves` away, running decoded text (`base64 -d` piped to a shell), deleting Bethesda registry keys, raw-text shell writes to ESP/ESM/ESL/BSA/BA2 (`>`, `tee`, `Set-Content`, `Out-File`, ...), `sed -i` without `-b` on a file in the install, config or MO2 folder (it rewrites CRLF line endings to LF; `sed -i -b` is fine), and DevBench `smp reset`. Runs on the Bash and PowerShell tools. **Advises** on other file operations in game directories -- a note to Claude, not a prompt to you. |
+| **File guard** | Blocks direct writes to ESP/ESM/ESL/BSA/BA2 files through the edit tools. **Advises** on INIs, load-order files and scripts. A write onto one or two saves in `Saves/` is backed up first, then runs; more than two need your typed approval. |
 | **Auto-backup** | Copies a file to `.claude/backups/` before the edit tools (or Codex `apply_patch`) change it, with full audit log. A file a script writes through the shell is not backed up. |
 | **Confidence system** | Claude must rate confidence 0-100% and list assumptions before any change. |
 | **Investigation-first** | Claude checks the knowledgebase and web-searches before touching anything. |
@@ -283,7 +297,7 @@ mod files that look vanilla), and only files that exist, are regular and have a 
 manager hard-linked is reported and skipped, never locked. It is applied in-process (no process per file) and
 needs no administrator rights (apply plus remove over the 26 names of the spike's full VR set, which the shipped list has grown to 33, took at most 0.021 s, over
 5 runs, MEASURED on the Phase A spike's in-process code `fastlock.py`, not on the shipped `lock.py`;
-`docs/superpowers/measurements/2026-10-04-plan6-ml2.md`, C10). **It is off by default**: nothing is locked until you
+`docs/evidence/2026-10-04-plan6-ml2.md`, C10). **It is off by default**: nothing is locked until you
 run it.
 
 **What it stops, MEASURED** (2026-10-04, on scratch copies of real masters under `C:/Temp`, one Windows 11
@@ -341,7 +355,7 @@ half-locked (`drift`) or read-only but not locked by the toolkit, plus the files
 - **Without Python:** double-click `tools\skyguard-unlock.cmd`. It unlocks every target (no lift is recorded), re-checks
   every file, prints `NOT unlocked` and exits non-zero if one is still locked; `lock lock`, or the next session start,
   locks them again. MEASURED on the shipped script with Python off `PATH` (only `C:\Windows\System32` on it): 6 of 6
-  masters unlocked, no toolkit deny entry left (`docs/superpowers/measurements/2026-10-05-plan6-e2e.md`, row 9).
+  masters unlocked, no toolkit deny entry left (`docs/evidence/2026-10-05-plan6-e2e.md`, row 9).
 - **Last resort, by hand,** for one file `F`, in this order: `icacls "F" /remove:d *<your SID>` and then
   `attrib -R "F"`. Your SID is the `S-1-5-21-...` value `whoami /user` prints (call `System32\whoami.exe`, not Git's).
   `/remove:d` removes every explicit deny entry for your account on that file. Afterwards `icacls "F"` should list no
@@ -369,7 +383,7 @@ you run `lock lock`. An unlock there can therefore outlast its hour.
 to `.claude/backups/AUDIT_LOG.txt` and put in the model's context, the lift notes and session-start banners go to the
 model's context, and `bash tools/skydoctor` shows every lift. None of them is sent through a channel that is shown to
 you: the toolkit's hooks emit model context (`additionalContext`) only (MEASURED in headless Claude, `claude -p`:
-every note arrived as `additionalContext`; `docs/superpowers/measurements/2026-10-05-plan6-e2e.md`). The interactive
+every note arrived as `additionalContext`; `docs/evidence/2026-10-05-plan6-e2e.md`). The interactive
 Claude screen has not been checked, and for Codex it is unmeasured, so the toolkit claims only that **every lift is
 reported to the agent, recorded in the state file, and shown by `skydoctor`**, not that it is shown to you.
 
@@ -446,7 +460,7 @@ are not classified; this gap also exists in v3.9.1. The guard does not provide a
   live install, **137.7 ms** with all 11,898 hard-linked, against a gate of 150 ms; the slowest single call shape is
   148.5 / 150.7 ms at p95. Charging the recovery snapshot's once-a-minute re-read (13.8 ms) to every walking call
   outside the rate window, a conservative sensitivity check rather than the gate, gives 143.7 ms and **151.5 ms, 1.5 ms
-  over the gate** on the fully linked tree (`docs/superpowers/measurements/2026-10-04-plan6-pricing.md`, Task 18 step
+  over the gate** on the fully linked tree (`docs/evidence/2026-10-04-plan6-pricing.md`, Task 18 step
   3). The first session builds its baseline over about 100 s of work spread across the session start and the first
   calls.
 - **Recovery snapshots** also copy, before a shell command that may change them, your `plugins.txt`, `loadorder.txt`
@@ -488,8 +502,8 @@ and it skips unapproved ones **silently** -- no error, no warning, nothing check
 Skyrim folder, type `/hooks`, and approve the **2 Skyrim toolkit hooks**. Then check with
 `bash tools/hook-canary.sh`. When they run, each Codex session starts with `SKYGUARD: Codex hooks live`.
 
-Start Codex in the game folder. Subfolder loading is version-dependent: it worked in an isolated
-0.162.1 probe. Verify the live banner and canary before relying on hooks.
+Start Codex in the game folder. From a subfolder of a non-git install no hook ran on codex-cli 0.160.0, while an
+isolated 0.162.1 probe loaded them: it depends on the version. Verify the live banner and canary before relying on hooks.
 
 Approve again when:
 
@@ -518,7 +532,7 @@ you run it yourself if you agree. Deleting the Bethesda registry keys (`reg dele
   as a possible gap.
 - **MCP tools other than DevBench's**: logged in `.claude/backups/codex-unhooked-tools.log`, not guarded. DevBench's own tools
   (any server whose name contains `devbench`) get the same judge as on Claude: `smp reset` is refused, and a save over an
-  existing save is refused with `NEEDS YOUR CONFIRMATION`, like every other confirmation on Codex.
+  existing save is backed up first, then runs (more than two saves at once need your typed approval).
 - **A shell call's own working directory** (`workdir`): read when the hook payload carries one, so relative
   paths land there; whether Codex puts `workdir` in the payload is **unmeasured**. Use absolute paths for
   anything in the game folder.
@@ -560,9 +574,9 @@ A: Only for the optional headless render-verification loop. The core NIF authori
 A: The safety hooks run on Python 3 and refuse everything when they cannot start it (that is deliberate: a guard that cannot run must not allow). Install Python 3 (for you to run: `winget install --id Python.Python.3.12 --exact --version 3.12.10 --no-upgrade`: inside the tested 3.10-3.13 range and the Python the optional tools were verified on; winget checks the installer's hash), then run `bash setup.sh` again so it records the interpreter's path in the hooks. `jq` is no longer needed by the hooks; it is optional and only prettifies `tools/devbench-cli.sh` and `tools/nexus.sh` output.
 
 **Q: How do I update the toolkit?**
-A: Unpack the new zip into a separate folder first. For the 4.0 candidate, use the private `upgrade-stage` / `upgrade-apply` workflow in [ADAPTING.md](ADAPTING.md): review the explicit file inventory, rendered destination instructions, merged native settings and retained rollback bytes before applying. `bash "<new folder>/tools/pre-update-snapshot.sh" .` provides an additional snapshot from your Skyrim folder. Keep existing personal pre-tool handlers active until their ordered replacement is qualified; unresolved policies refuse the upgrade. After applying, re-run `bash setup.sh --agent auto` (or your selected agent), complete the required hook review and check `bash tools/hook-canary.sh` after real calls.
+A: (1) Unpack the new zip into a separate folder. (2) From your Skyrim folder, run `bash "<new folder>/tools/pre-update-snapshot.sh" .` to keep a copy of what the update replaces. (3) Copy the new folder's contents over your Skyrim folder; shipped files are replaced. (4) Run `bash setup.sh --agent auto` (or `claude`, `codex`, `all`); on a 3.x install it runs `tools/migrate-3x.py`, which carries your own edits to CLAUDE.md, the hook settings and KNOWLEDGEBASE.md forward and deletes nothing. (5) Complete the hook review (Codex: `/hooks`) and check `bash tools/hook-canary.sh` after real tool calls. If you wrote your own pre-tool hook handlers or a personal save policy, use the reviewed upgrade in [docs/upgrading-native-hooks.md](docs/upgrading-native-hooks.md) instead of step 3.
 
-**Extracting directly over an installation replaces shipped files, including customized instructions and hook settings.** The reviewed upgrader preserves collisions for explicit choices and independently retains legacy knowledge before replacing the shipped reference. Your own notes belong in **`KNOWLEDGEBASE.local.md`**, which the toolkit never ships and the release build refuses to contain; the agent reads both knowledge files and writes only to the local one. Its `## My preferences` section holds your standing instructions. Existing session hooks and the OpenCode system transform reinject that section through the same bounded parser. Local notes, path configuration and permanent recovery stores remain separate from shipped defaults.
+**Extracting directly over an installation replaces shipped files, including customized instructions and hook settings.** Step 2's snapshot and setup's migration keep a copy of each; the reviewed upgrader instead preserves collisions for explicit choices. Your own notes belong in **`KNOWLEDGEBASE.local.md`**, which the toolkit never ships and the release build refuses to contain; the agent reads both knowledge files and writes only to the local one. Its `## My preferences` section holds your standing instructions. Existing session hooks and the OpenCode system transform reinject that section through the same bounded parser. Local notes, path configuration and permanent recovery stores remain separate from shipped defaults.
 
 Since v3.9 a SessionStart hook also copies `KNOWLEDGEBASE.md`, `KNOWLEDGEBASE.local.md`, `CLAUDE.md` and `AGENTS.md` into `.claude/backups/kb/` whenever they change, and says so loudly at the start of the next session if one of them vanished, emptied, or lost more than half its bytes — which is what extracting an update over your install looks like from the inside. Run it yourself any time with `bash tools/kb-guard.sh --verbose`. Note the honest limit: an update that replaces your 100 KB knowledgebase with a 140 KB shipped one shrinks nothing and raises no alarm. The stored copy is the protection; the alarm is a convenience on top of it.
 
@@ -604,7 +618,7 @@ generated file. `--check` also enforces the **instruction budget**: the installe
 (header + `agent/instructions/core.md` + an addendum, plus room for `setup.sh`'s path expansion) must
 stay at or under 32,768 bytes, because Codex silently truncates past that. Check it with
 `python scripts/gen_agent_trees.py --budget`; when over, move bulk into a skill or `docs/`. The core
-and the `devbench`, `mod-release-review`, `toolkit-setup`, `triage-and-conflicts` and `xelib` skills must also stay **agent-neutral**
+and the `devbench`, `mod-release-review`, `mod-update-check`, `toolkit-setup`, `triage-and-conflicts` and `xelib` skills must also stay **agent-neutral**
 (no Claude-only tool names, variables, slash commands or config paths; Claude specifics go in
 `agent/instructions/claude.md`), enforced by `tests/test_instruction_neutrality.py`.
 
@@ -623,8 +637,8 @@ node --test                                                # Node unit tests
 
 The suite runs on both Windows and Linux in CI, so it should pass on either.
 
-Use the contained launcher above for local tests: bare pytest still inherits the host
-environment until the fixture integration is completed after Plan 2 certification.
+Use the contained launcher above for local tests: bare pytest inherits the host environment, and with
+`TOOLKIT_REQUIRE_HARNESS=1` a pytest session without the launcher's barriers errors instead of going green.
 See [integration safety and dependency locks](docs/harness-integrations.md) for Spriggit
 publication, read-only container mounts, MO2 load-order selection and explicit unavailable checks.
 

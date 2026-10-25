@@ -50,7 +50,7 @@ HOOK_STATUS = {"HEALTHY": LIVE, "DEGRADED": NOT_LIVE, "NEVER INVOKED": NOT_LIVE,
                "STALE": UNKNOWN, "NOT EXERCISED": UNKNOWN, "UNMEASURABLE": UNKNOWN}
 COVERAGE_STATUS = {"HEALTHY": LIVE, "DEGRADED": NOT_LIVE, "NOT EXERCISED": UNKNOWN, "UNMEASURABLE": UNKNOWN}
 
-# Table A, M-D column (docs/superpowers/measurements/2026-10-04-plan6-ml2.md, Task 1 + C1-C4): the rows NOT BLOCKED.
+# Table A, M-D column (docs/evidence/2026-10-04-plan6-ml2.md, Task 1 + C1-C4): the rows NOT BLOCKED.
 GAPS = (
     ("P32 / C3 xEdit or xelib save of a locked master", NOT_LIVE,
      "the save renames the locked file into Data/zEdit Backups/<name>.<stamp>.bak and writes a new one; the "

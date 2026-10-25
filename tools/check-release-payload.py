@@ -124,6 +124,7 @@ ABSENT_PATHS = (
     "scripts/guard-latency.py",
     ".git",
     ".superpowers",
+    "docs/superpowers",       # maintainer plans/handoffs/measurements; cited evidence ships as docs/evidence/
     ".skyguard",
     "KNOWLEDGEBASE.local.md",
     ".claude/backups",
@@ -169,9 +170,9 @@ ADAPTER_REQUIRED = (
     "agent/guards/adapters/codex/skyguard-entry.sh",
     "README.md",
     "docs/safety-philosophy.md",
-    "docs/superpowers/specs/2026-09-30-universal-agent-support-design.md",
-    "docs/superpowers/measurements/2026-10-02-plan4-codex-derisk.md",
-    "docs/superpowers/measurements/2026-10-05-plan7-adapter-latency.md",
+    "docs/evidence/2026-09-30-universal-agent-support-design.md",
+    "docs/evidence/2026-10-02-plan4-codex-derisk.md",
+    "docs/evidence/2026-10-05-plan7-adapter-latency.md",
 )
 
 

@@ -64,7 +64,7 @@ USER_AGENT = "skyrim-ai-assistant-toolkit-thirdparty-audit/1"
 # the generated .claude/ and .agents/ copies (gen_agent_trees --check keeps those identical), so it is read once.
 SURFACES = ("README.md", "SETUP_PROMPT.txt", "setup.sh", "KNOWLEDGEBASE.md", "ADAPTING.md", "docs/*.md",
             "agent/**/*.md", "examples/*", "tools/*.sh", "tools/*.py", ".devcontainer/*", ".github/workflows/*.yml")
-SURFACE_EXCLUDES = ("docs/superpowers/*",)
+SURFACE_EXCLUDES = ("docs/superpowers/*", "docs/evidence/*")
 # A mention that only RECORDS history ("releases before 29.x kept it at ...", "was 0.40.0") is not an instruction.
 # Matched in the text before the reference on its own line (and the line before, when that one ends with ':').
 HISTORY = re.compile(r"(?i)\b(was|were|before|older|earlier|previous(?:ly)?|no longer|end-of-life|eol|used to|"
@@ -1399,7 +1399,7 @@ DELIVERY_SUFFIXES = (".md", ".txt", ".sh", ".ps1", ".cmd", ".bat", ".py", ".json
 DELIVERY_SKIP_DIRS = {".git", "node_modules", "tests", ".superpowers", ".pytest_cache", "__pycache__", ".venv"}
 DELIVERY_PRIVATE_PATHS = (".skyguard", ".claude/backups", ".claude/settings.local.json", "KNOWLEDGEBASE.local.md")
 # Files that only record history (file-scoped; nothing in them is an instruction), plus this file's own rule text.
-DELIVERY_HISTORY_FILES = ("CHANGELOG.md", "docs/superpowers/*", "scripts/thirdparty-audit.py")
+DELIVERY_HISTORY_FILES = ("CHANGELOG.md", "docs/superpowers/*", "docs/evidence/*", "scripts/thirdparty-audit.py")
 SHA256_HEX = re.compile(r"\b[0-9a-f]{64}\b")
 EXACT_NPM = re.compile(r"(?:@[\w.-]+/)?[\w.-]+@\d+\.\d+\.\d+(?:-[\w.]+)?")
 COMMIT_NPM = re.compile(r"(?:github:)?[\w.-]+/[\w.-]+#[0-9a-f]{40}")

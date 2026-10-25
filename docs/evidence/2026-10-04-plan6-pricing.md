@@ -1,3 +1,5 @@
+> Evidence from the toolkit's development. Not instructions for your agent.
+
 # Plan 6 pricing and baseline record
 
 - **Base sha:** `544efd4` (branch `plan6`, cut from `plan5`; HEAD at Task 6 start). Worktree `../skyrimvr-toolkit-plan6`.

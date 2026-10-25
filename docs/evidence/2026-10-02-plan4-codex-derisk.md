@@ -1,6 +1,8 @@
+> Evidence from the toolkit's development. Not instructions for your agent.
+
 # Plan 4 Task 0 — Codex re-measured before anything is frozen
 
-Plan: `docs/superpowers/plans/2026-10-02-plan4-codex-target.md`, Task 0. Measured 2026-10-02 on this
+Plan: `docs/superpowers/plans/2026-10-02-plan4-codex-target.md` (maintainer record, not in the release), Task 0. Measured 2026-10-02 on this
 machine (Windows 11 26200, shared with other sessions), in one throwaway scratch repo outside every
 repo and install: `<scratch>/plan4-probes/p1` (a git repo; the hook folder is `p1/sp ace/`, with a space
 on purpose). Driven with `codex exec --dangerously-bypass-hook-trust -s workspace-write` (bypass flag in
@@ -115,7 +117,7 @@ KNOWLEDGEBASE.local.md" notice), which also keeps the spill-to-TEMP copy from be
 Each form was fed a captured PreToolUse payload on stdin; every form drains stdin and starts
 `python -c pass` (the `.cmd` and floor rows let Python drain it). Whole-machine CPU busy % (28 logical CPUs,
 `GetSystemTimes`) was recorded per run. The machine was shared (`Win32_Processor.LoadPercentage` read
-68–74 % around the runs; a VaM process was the top CPU consumer). Script: scratch `lat.py`.
+68–74 % around the runs, mostly from unrelated desktop software). Script: scratch `lat.py`.
 
 | Form | run 1 p50 / p95 (s) | run 2 p50 / p95 | run 3 p50 / p95 |
 |---|---|---|---|
@@ -173,7 +175,7 @@ has no item, so `hooked ≥ called` stays the right inequality; any other shape 
 ## Step 6 — TUI probe: PENDING (user step)
 
 Prepared scratch repo `<scratch>/plan4-probes/p-tui` (R2-form probe hooks, a read-only `collect.py`).
-Instructions: `docs/superpowers/measurements/2026-10-02-plan4-tui-probe-instructions.md`. Open until the
+Instructions: `docs/superpowers/measurements/2026-10-02-plan4-tui-probe-instructions.md` (maintainer record, not in the release). Open until the
 user runs it: (a) PreToolUse fires and a JSON deny blocks in the TUI (the D14 must-have and Plan 4's stop
 condition), (b) whether `!cmd` produces a PreToolUse (R4's text), (c) `SessionStart` `source:"compact"`,
 (d) the TUI rollout's surface value, (e) the `[hooks.state.'<key>']` spelling and `trusted_hash` values.

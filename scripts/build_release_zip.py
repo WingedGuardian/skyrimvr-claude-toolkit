@@ -52,6 +52,9 @@ from pathlib import Path
 # could only crash: maintainer-only, kept in the repo (review L4b L1).
 EXCLUDE = ("tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests", "scripts/guard-corpus",
            "scripts/guard-latency.py")
+# docs/superpowers/ is the maintainer's plans, handoffs and measurements (user ruling 2026-10-20: never shipped). The
+# measurements that shipped docs cite live in docs/evidence/ instead.
+EXCLUDE += ("docs/superpowers",)
 
 
 def is_excluded(path: str) -> bool:

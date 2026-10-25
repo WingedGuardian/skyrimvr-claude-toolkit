@@ -119,7 +119,7 @@ and native Python subprocess barriers. Package-manager attempts fail the origina
 Controls remove the barrier only against a controlled fake outer command. Python writes are
 constrained to fixtures; this is not an OS sandbox for arbitrary native subprocesses.
 
-The launcher is the canonical test entry point (Plan 5, Task 15). `tests/conftest.py` exposes
+The launcher is the canonical test entry point. `tests/conftest.py` exposes
 `harness_active()`, and with `TOOLKIT_REQUIRE_HARNESS=1` a pytest session that does not have the
 barriers installed errors at `pytest_configure` instead of skipping the barrier-dependent
 modules and going green. CI runs the whole suite as
@@ -140,4 +140,4 @@ configuration file, then LOCALAPPDATA detection) is what makes the MO2 profile w
 beating a rival LOCALAPPDATA list, and each explicit override beating that. The guard side of the same
 configuration is covered by `tests/test_setup_paths.py::test_setup_writes_the_mo2_roots_the_guard_reads`
 (setup records the MO2 `mods` and `overwrite` roots, read back as data the way the guard reads them).
-No code change was needed for Task 15; this section only records the behavior those tests pin.
+This section only records the behavior those tests pin.
