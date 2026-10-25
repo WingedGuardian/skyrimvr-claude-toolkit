@@ -13,13 +13,14 @@ policy; `tools/housekeep.py` implements the parts a tool can.
 
 | Class | What | Rule |
 |---|---|---|
-| **Forever** | Saves and every copy of them; backup stores and their manifests (anything under a folder named `*backup*`); knowledgebase snapshots; known-good baselines; audit logs; folders a person labelled by hand | Never removed by a tool. A person decides. |
+| **Forever** | Saves and every copy of them, save backups included; every other backup store and its manifests (anything under a folder named `*backup*`) except the rolling tool stores below; known-good baselines; audit logs; folders a person labelled by hand | Never removed by a tool. A person decides. |
 | **Evidence** | Findings, READMEs, receipts (`.md`, `.json`, `.jsonl`), small logs; every file a project doc links to | Kept. They are small, and docs point at them. |
 | **Recreatable** | A byte-identical copy of a file that is still live (a fixture copy of a game master) | Removed as soon as it is idle: the live file is the copy. |
 | **Build output** | Compiler intermediates inside build folders (`.obj .pch .lib .ilk .iobj .ipdb .tlog .idb`) | Removed once idle. Binaries and debug symbols (`.dll .exe .pdb`) are kept. |
 | **Duplicate** | The same bytes at several agent-output paths | Stored once: hard links to one read-only copy. Every path keeps working. |
 | **Rolling** | Per-launch log captures, snapshot folders, scratch test beds | Compressed after 7 days, removed after 90; a snapshot that repeats the one before is removed; a scratch bed is removed by name when its task is done. |
-| **Toolkit temp** | Directories the toolkit's own code and tests make in the system temp dir, and pytest's old runs | Recycled by the session-start sweep once nothing in them changed for 24 hours and no process holds a file open inside. |
+| **Rolling tool store** | A tool's own rotating snapshots of the files it watches (script, config and knowledgebase snapshots), even under a `*backup*` folder. Each toolkit's checklist names its stores and their numbers | Kept by age or count, always with the newest copy; the rest goes to the Recycle Bin. |
+| **Toolkit temp** | Directories the toolkit's own code and tests make in the system temp dir, by the toolkit's own name prefixes only (never a folder every project shares, such as pytest's `pytest-of-<user>`), and the batches a rolling tool store retires into `.claude/retired/` | Recycled by the session-start sweep once nothing in them changed for 24 hours (a retired batch: 10 minutes) and no process holds a file open inside. |
 
 ### The toolkit cleans up after itself
 
@@ -79,24 +80,31 @@ link.
 - **CommonLibSSE builds** leave ~300 MB `.lib` files and precompiled headers per build folder.
 - **Launch-log captures** (a watcher copying `SkyrimNet.log`, Papyrus and SKSE logs per launch) compress about
   10:1; a folder whose name is not `launch-YYYYMMDD-HHMMSS` counts as labelled and is kept.
-- **Snapshot folders** from the 3.x `snapshot-before-tool.sh` hook (`auto_snapshots/YYYYMMDD_HHMMSS/`) repeat
-  each other; the 4.x content-addressed store does not. That one store is **Rolling** although it sits under
-  `.claude/backups/` (user ruling 2026-10-20): a stamp repeating the one before goes to the Recycle Bin. A save, or
-  a `*backup*` folder, inside a stamp keeps that stamp, and every other backup folder stays Forever.
-- **The temp sweep here is narrower than the Toolkit temp row above:** it recycles only directories with this
-  toolkit's own name prefixes (its test runs live under `skyrim-harness-`), never pytest's `pytest-of-<user>`,
-  which every project's runs share. Session start launches it only when the hook's project is the toolkit
+- **Snapshot folders** from the 3.x `snapshot-before-tool.sh` hook (`.claude/backups/auto_snapshots/YYYYMMDD_HHMMSS/`)
+  repeat each other; the 4.x content-addressed store beside them does not. Both are a **Rolling tool store** although
+  they sit under `.claude/backups/` (user rulings 2026-10-20 and 2026-10-24). Two things remove a 3.x stamp, both by
+  way of the Recycle Bin: `housekeep` recycles a stamp that repeats the one before (a save or a `*backup*` folder
+  inside a stamp keeps that stamp), and the guard's own pruning retires every stamp whose folder is older than 14
+  days, as 3.x deleted them; that age-out does not look inside the stamp (a 3.x stamp holds only `.psc`/`.pex`
+  copies). Every other backup folder stays Forever.
+- **The temp sweep** recycles only directories with this toolkit's own name prefixes (its test runs live under
+  `skyrim-harness-`), never pytest's `pytest-of-<user>`, which every project's runs share. Session start launches it only when the hook's project is the toolkit
   install the hook belongs to, never under the test harness. `SKYGUARD_HOUSEKEEP_SWEEP=off` turns it off, and
   that process makes no real Recycle Bin call.
-- **The guard's own stores are pruned by retiring, not deleting.** Script snapshots, recovery blobs and session
-  logs past the 20 newest per agent are renamed into `<project>/.claude/retired/<batch>/` (a hook has no time
+- **The guard's own stores are Rolling tool stores, pruned by retiring, not deleting** (user ruling 2026-10-24).
+  Script snapshots (`.claude/backups/auto_snapshots`) and config recovery snapshots
+  (`.claude/backups/recovery_snapshots`) keep everything younger than 14 days, the newest snapshot, and the newest
+  snapshot holding each path's latest content (a kept recovery snapshot also keeps the earlier lines its state
+  needs; the script store also keeps every copy its index of the live files names). Session logs keep the 20 newest
+  per agent. What goes is renamed into `<project>/.claude/retired/<batch>/` (a hook has no time
   for the Recycle Bin). The session sweep sends each batch to the bin once nothing in it changed for 10 minutes
   and it is not in use. Off Windows there is no bin to call: the batches wait there, and the session note says
-  how many and how large. Save backups are never pruned.
-- **Knowledgebase snapshots** (`.claude/backups/kb/`): `tools/kb-guard.sh` keeps at most `KB_GUARD_KEEP`
-  (default 30) snapshot folders, never removing the oldest, the newest or the one holding the largest copy of a
-  watched file, and sends the others to the Recycle Bin through `housekeep.py recycle`, saying so first; what
-  the bin does not take stays and is reported.
+  how many and how large. Save snapshots in the recovery store and the save backups
+  (`.modding-agent-harness/backups/saves/`) are never pruned.
+- **Knowledgebase snapshots** (`.claude/backups/kb/`) are a Rolling tool store (user ruling 2026-10-24):
+  `tools/kb-guard.sh` keeps `KB_GUARD_KEEP` (default 30) snapshot folders, the newest ones, never removing the
+  oldest, the newest or the one holding the largest copy of a watched file, and sends the others to the Recycle
+  Bin through `housekeep.py recycle`, printing a notice first; what the bin does not take stays and is reported.
 - **Whole-folder classes** (launch, snapshot, scratch) keep a folder whole when any file in it is protected, and
   `apply` checks that again. Off Windows `housekeep` removes nothing: every item is reported as left in place.
 
