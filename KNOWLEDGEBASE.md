@@ -1289,6 +1289,16 @@ This is the same principle as engine-primary hit detection: the engine is always
 
 ## Stagger & Bleed — Vanilla Alignment
 
+Vanilla-aligned patterns versus invented ones (the *Vanilla Game as Frame of Reference* principle in the
+agent instructions):
+
+| Mechanic | Wrong (invented) | Vanilla-aligned |
+|----------|-----------------|-----------------|
+| Bleed on hit | ValueModifier MGEF on a Concentration enchantment | FireAndForget bleed spell cast per-swing (mirrors the Bleeding Strikes perk's per-hit application) |
+| Script stagger | Stagger-archetype FireAndForget spell via `Spell.Cast()` (no visible animation) | `PushActorAway(target, 1-3)` — physical stumble, proven engine behavior |
+| Stagger immunity | `ForceActorValue("Stagger", 0)` polling | AddPerk with a ModIncomingStagger ×0 entry |
+| Melee auto-fire prevention | Dispel in OnEffectStart | Strip the enchantment from the weapon form |
+
 ### Stagger-archetype spell cast from Papyrus → no visible animation
 
 `Spell.Cast(source, target)` where the spell wraps a `Stagger` archetype MGEF produces NO visible stagger animation on the target. Vanilla Skyrim never delivers stagger this way — vanilla staggers come from perk entry points on weapon hit, shout impact data, or spell impact data on projectile collision. None of those paths are accessible from a Papyrus `Spell.Cast()` call. Do not pursue this approach.

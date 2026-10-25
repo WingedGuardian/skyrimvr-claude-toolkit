@@ -146,3 +146,9 @@ The xelib loader hazard (fix 3) is a usage rule; it lives in the `xelib` skill.
 ## Nexus API key
 
 Nexus also offers a free REST+GraphQL API ([api-docs.nexusmods.com](https://api-docs.nexusmods.com/)) for mod **version, update dates, changelogs, file info, and dependencies** — useful for update detection and migration/triage. Supply your own free **Personal API Key** (nexusmods.com → Site preferences → API Access) and send it raw as the `apikey` request header. Skyrim SE/VR domain = `skyrimspecialedition`; endpoints take `game_domain_name` + `mod_id`. A personal key is for personal/local use only — never commit or log it, and a shared tool must have each user supply their own. In this toolkit the key is resolved **file-first, then env**: `tools/.nexus_api_key` (one line) if present, else `$NEXUS_API_KEY`. The key file is gitignored — never echo, log, or commit it. `tools/nexus.sh` wraps this (e.g. `bash tools/nexus.sh mod <id>`).
+
+The mod pages themselves are not readable by a plain fetch: `www.nexusmods.com` and `forums.nexusmods.com` answer
+an agent's web-fetch tool and `curl` with HTTP 403 (MEASURED 2026-10-25). The API does not serve comments, posts or
+bug reports either (MEASURED 2026-08-27: 404 on v1, and no such field on the GraphQL v2 `Mod` type). For those,
+use a browser tool that renders the page (for example the Playwright MCP), for targeted reads only. The example
+`settings.local.json` therefore no longer pre-allows web fetches of the Nexus domains.
