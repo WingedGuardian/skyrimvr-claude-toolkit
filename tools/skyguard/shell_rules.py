@@ -235,7 +235,7 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     return saves.judge(change, v, audit, HOOK)
 
 
-def _opaque_save(parsed, roots, cwd, env) -> str:
+def _opaque_save(parsed, roots, cwd, env, command="") -> str:
     """The first save (by name) an exec carries in its words or redirects when the guard has no idea what its program is
     (Parsed.unnamed: "?" with no candidate), or "". A word with candidates (`R=$(echo resaver-cli.sh); $R ...`) is read
     as each of them, and the save rules count and back up what those readings change."""
@@ -247,7 +247,18 @@ def _opaque_save(parsed, roots, cwd, env) -> str:
             a = targets.resolve_operand(e, w, cwd, env)
             if writes.is_save(a, roots):
                 return os.path.basename(a)
+    if _unfinished(parsed, command):
+        m = RESAVER_TEXT_SAVE.search(command)
+        if m:
+            return re.split(r"[/\\]", m.group(0))[-1]
     return ""
+
+
+def _unfinished(parsed, command) -> bool:
+    """guard3 (v4.0.0 review LOW-4): the parser stopped before the end (its token or nesting cap, R4) and the text holds
+    an expansion, so a program it never reached may be one it cannot name. The two "ask first" rules then read the TEXT,
+    as S-DEL-FALLBACK does for deletes."""
+    return not parsed.ok and bool(_DYNAMIC.search(command))
 
 
 # User ruling 2026-10-20 (v4.0.0 review L1 MEDIUM-1/2, LOWs, INFO): when the guard cannot name the program that runs
@@ -265,20 +276,39 @@ _DYNAMIC = re.compile(r"[$%`!]")
 _PLUGIN_WORD = re.compile(r"\.(?:esp|esm|esl|bsa|ba2)$", re.IGNORECASE)
 # The ruling does not require a write/delete verb: the unknown program may have been set earlier.
 _TERMINATOR = "\"' \t\r\n|&;<>)`"
+# The pipeline readers whose unknown input shellparse turns into a "?" exec (argv = the reader): they run TEXT.
+_TEXT_READERS = frozenset(shellparse.ALL_SHELLS) | {"invoke-expression"}
+# guard3 (v4.0.0 review MEDIUM-1): an MSYS spelling (`/c/Users/...`) is the drive path it names.
+_MSYS = re.compile(r"(?<![\w:.~/-])/([a-z])/")
+# A value the command assigns (`c="rm -rf <install>"`, `$c = '...'`): the text an eval-like call may run.
+_ASSIGNED = re.compile(r"""(?<![\w$-])\$?[A-Za-z_][A-Za-z0-9_]{0,255}[ \t]{0,64}=[ \t]{0,64}"""
+                       r"""(?:'([^'\n]{0,4096})'|"([^"\n]{0,4096})"|([^\s;&|'"]{1,4096}))""")
 
 
 def _opaque_execs(parsed):
-    """The execs whose program the guard cannot name (see above)."""
+    """(the execs whose program the guard cannot name (see above), whether one of them runs TEXT a variable holds).
+    guard3 (v4.0.0 review MEDIUM-2): every "?" exec counts, not only the candidate-less program words -- `source "$f"`,
+    `. "$f"`, `$c | iex`, `Write-Output $c | iex`, `[scriptblock]::Create($c)` handed to Invoke-Command, `bash -c "$c"`
+    -- and an eval-like call is judged after its same-command literals are substituted (Exec.subst): `c="..."; eval
+    "$c"` is read as the text it runs (shellparse) and is no unknown program."""
     out = list(parsed.unnamed)
+    evals = False
     for e in parsed.execs:
-        if e.program in _EVAL_PROGRAMS and any(_DYNAMIC.search(w) for w in e.argv):
+        if e.program == "?":
+            if e not in out:
+                out.append(e)
+            evals = evals or (len(e.argv) == 1 and e.argv[0] in _TEXT_READERS)
+            continue
+        s = deletes.substituted(e)
+        if e.program in _EVAL_PROGRAMS and any(_DYNAMIC.search(w) for w in s.argv):
             out.append(e)
+            evals = True
         elif e.program in _AWK_PROGRAMS and any("system(" in w.replace(" ", "") for w in e.argv):
             out.append(e)
     for _shell, text in parsed.codes:
         if _DYNAMIC.search(text or ""):
-            return out or [None]
-    return out
+            return out or [None], True
+    return out, evals
 
 
 def _path_like(word) -> bool:
@@ -306,10 +336,12 @@ def _protected_word(a, roots) -> str:
     return ""
 
 
-def _protected_text(command, roots) -> str:
-    """A protected path the command TEXT spells absolutely, or a Bethesda key; "" if none."""
+def _protected_text(command, roots, root_alone=False) -> str:
+    """A protected path the command TEXT spells absolutely, or a Bethesda key; "" if none. root_alone: the install
+    folder itself counts too (text an eval-like call runs); elsewhere it is the priced `cd "<install>"` exemption."""
     text = command.replace("\\", "/").lower()
     text = re.sub(r"/{2,}", "/", text)
+    text = _MSYS.sub(r"\1:/", text)
     for kind, dirs in (("install", roots.install_dirs), ("config", roots.config_dirs), ("mo2", roots.mo2_dirs)):
         for d in dirs:
             root = (d or "").lower().rstrip("/")
@@ -326,6 +358,8 @@ def _protected_text(command, roots) -> str:
                     continue
                 if (not rest or rest[0] in _TERMINATOR) and kind != "install":
                     return os.path.basename(root) or root
+                if (not rest or rest[0] in _TERMINATOR) and root_alone:
+                    return os.path.basename(d.rstrip("/")) or d
                 if not rest or rest[0] != "/":
                     continue
                 first = re.split(r"[/" + re.escape(_TERMINATOR) + r"]", rest[1:], 1)[0]
@@ -344,9 +378,9 @@ def _protected_text(command, roots) -> str:
 
 def _opaque_protected(command, parsed, roots, cwd, env) -> str:
     """The protected path (as shown) an unnamed program runs on, or "" (see the ruling above)."""
-    opaque = _opaque_execs(parsed)
+    opaque, evals = _opaque_execs(parsed)
     if not opaque:
-        return ""
+        return _protected_text(command, roots) if _unfinished(parsed, command) else ""
     for e in opaque:
         if e is None:
             continue
@@ -360,7 +394,16 @@ def _opaque_protected(command, parsed, roots, cwd, env) -> str:
             name = re.split(r"[/\\]", w)[-1]
             if _PLUGIN_WORD.search(name):                 # a plugin or archive file, wherever it is
                 return name
-    return _protected_text(command, roots)
+    hit = _protected_text(command, roots)
+    if hit or not evals:
+        return hit
+    # guard3 (v4.0.0 review MEDIUM-1): `c="rm -rf <install>"; eval "$c"` that the parser could not read as its rm (the
+    # value is not certain): the install folder itself inside a value an eval-like call may run asks too.
+    for m in _ASSIGNED.finditer(command):
+        hit = _protected_text(m.group(1) or m.group(2) or m.group(3) or "", roots, root_alone=True)
+        if hit:
+            return hit
+    return ""
 
 
 def _ordered(command, parsed, dels, wr, own, roots, audit, cwd, shell, env) -> Verdict:
@@ -436,7 +479,7 @@ def _ordered(command, parsed, dels, wr, own, roots, audit, cwd, shell, env) -> V
         return Verdict("ask", reason)
     # User ruling 2026-10-19 ("ask first"): an unnamed program word naming a save. A save another reading changes is
     # still counted (saves.judge), and portable.check holds this ask until that save is approved and backed up.
-    opaque = _opaque_save(parsed, roots, cwd, env)
+    opaque = _opaque_save(parsed, roots, cwd, env, command)
     if opaque:
         reason = rules.message("S-SAVE-OPAQUE", file=opaque)
         audit.rule(HOOK, "S-SAVE-OPAQUE", "ask", reason)

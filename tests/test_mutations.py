@@ -9965,7 +9965,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/self_rules.py", '                if os.path.samefile(abs_path, own):',
      '                if False:', "tests/test_transcript_guard.py::test_current_transcript_hardlink_is_refused",
      "rule-S-SELF-TRANSCRIPT-hardlink-identity"),
-    ("tools/skyguard/shell_rules.py", '    if not opaque:\n        return ""\n    for e in opaque:',
+    ("tools/skyguard/shell_rules.py",
+     '    if not opaque:\n        return _protected_text(command, roots) if _unfinished(parsed, command) else ""\n'
+     '    for e in opaque:',
      '    if True:\n        return ""\n    for e in opaque:',
      "tests/test_opaque_protected.py::test_an_unnamed_program_on_a_protected_path_asks[opaque-on-a-plugin]",
      "rule-S-OPAQUE-PROTECTED-no-verb"),
@@ -10087,3 +10089,38 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "guard3-cd-waits-for-settle"),
 ]]
 
+
+# guard3 (v4.0.0 review A-guard MEDIUM-1, MEDIUM-2, LOW-4, INFO): S-OPAQUE-PROTECTED's widened reading, one twin per clause.
+_OPA = _OPT + "test_an_unnamed_program_on_a_protected_path_asks"
+_OPS = _OPT + "test_ordinary_commands_and_unprotected_targets_do_not_ask"
+MUTATIONS += [pytest.param(_SR, *m[:3], id=m[3]) for m in [
+    ('        if e.program == "?":\n            if e not in out:', '        if False:\n            if e not in out:',
+     _OPA + "[source-variable]", "rule-S-OPAQUE-PROTECTED-every-unknown-program"),
+    ("any(_DYNAMIC.search(w) for w in s.argv)", "any(_DYNAMIC.search(w) for w in e.argv)",
+     _OPS + "[eval-of-a-literal-beside-data]", "rule-S-OPAQUE-PROTECTED-eval-after-substitution"),
+    ("            evals = evals or (len(e.argv) == 1 and e.argv[0] in _TEXT_READERS)", "            evals = evals",
+     _OPA + "[pwsh-pipe-iex-root-alone]", "rule-S-OPAQUE-PROTECTED-reader-runs-text"),
+    ("            evals = True", "            evals = False", _OPA + "[eval-root-alone]",
+     "rule-S-OPAQUE-PROTECTED-eval-runs-text"),
+    ("            return out or [None], True", "            return out or [None], False", _OPA + "[bash-c-root-alone]",
+     "rule-S-OPAQUE-PROTECTED-code-runs-text"),
+    ('        hit = _protected_text(m.group(1) or m.group(2) or m.group(3) or "", roots, root_alone=True)',
+     '        hit = _protected_text(m.group(1) or m.group(2) or m.group(3) or "", roots, root_alone=False)',
+     _OPA + "[eval-root-alone]", "rule-S-OPAQUE-PROTECTED-root-in-evaluated-text"),
+    ("                if (not rest or rest[0] in _TERMINATOR) and root_alone:",
+     "                if (not rest or rest[0] in _TERMINATOR) and False:", _OPA + "[pwsh-iex-root-alone]",
+     "rule-S-OPAQUE-PROTECTED-root-alone-clause"),
+    ('    text = _MSYS.sub(r"\\1:/", text)', "    text = text", _OPA + "[eval-msys-data]",
+     "rule-S-OPAQUE-PROTECTED-msys-spelling"),
+    ('        return _protected_text(command, roots) if _unfinished(parsed, command) else ""', '        return ""',
+     _OPA + "[token-cap]", "rule-S-OPAQUE-PROTECTED-token-cap"),
+    ("    return not parsed.ok and bool(_DYNAMIC.search(command))", "    return not parsed.ok",
+     _OPS + "[token-cap-no-expansion]", "rule-S-OPAQUE-PROTECTED-token-cap-needs-expansion"),
+    ("    return not parsed.ok and bool(_DYNAMIC.search(command))", "    return bool(_DYNAMIC.search(command))",
+     _OPS + "[expansion-beside-data]", "rule-S-OPAQUE-PROTECTED-token-cap-needs-cap"),
+    ("    if _unfinished(parsed, command):\n        m = RESAVER_TEXT_SAVE.search(command)",
+     "    if False:\n        m = RESAVER_TEXT_SAVE.search(command)",
+     _OPT + "test_past_the_token_cap_a_save_in_the_text_still_asks", "rule-S-SAVE-OPAQUE-token-cap"),
+    ("    opaque = _opaque_save(parsed, roots, cwd, env, command)", "    opaque = _opaque_save(parsed, roots, cwd, env)",
+     _OPT + "test_past_the_token_cap_a_save_in_the_text_still_asks", "rule-S-SAVE-OPAQUE-token-cap-wired"),
+]]

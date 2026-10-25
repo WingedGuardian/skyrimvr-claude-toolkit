@@ -31,7 +31,7 @@ def inst(tmp_path_factory):
 def fire(inst, command, tool="Bash", shell=None, cwd=None):
     rec, install = inst
     I = install.as_posix()
-    command = command.replace("<I>", I).replace("<IB>", I.replace("/", BS))
+    command = command.replace("<I>", I).replace("<IB>", I.replace("/", BS)).replace("<M>", "/" + I[0].lower() + I[2:])
     tool_input = {"command": command}
     if shell:
         tool_input["shell"] = shell
@@ -62,6 +62,26 @@ ASKS = {
     "opaque-relative-plugin-no-verb": ('$R custom.esp', "Bash"),
     "opaque-redirect-no-verb": ('$R > "<I>/Data/result.txt"', "Bash"),
     "opaque-on-a-plugin": ('$R "<I>/Data/Skyrim.esm"', "Bash"),
+    # guard3 (v4.0.0 review A-guard MEDIUM-1): the install folder itself in text an eval-like call runs, and MSYS.
+    "eval-root-alone": ('if [ -n "$X" ]; then c=\'rm -rf "<I>"\'; fi; eval "$c"', "Bash"),
+    "bash-c-root-alone": ('if [ -n "$X" ]; then c=\'rm -rf "<I>"\'; fi; bash -c "$c"', "Bash"),
+    "pwsh-iex-root-alone": ("if ($x) { $c = \"Remove-Item -Recurse '<IB>'\" }; iex $c", "PowerShell"),
+    "eval-msys-data": ('if [ -n "$X" ]; then c="rm -rf <M>/Data"; fi; eval "$c"', "Bash"),
+    "bash-c-operand-msys-root": ('bash -c "$c" "<M>"', "Bash"),
+    # guard3 (MEDIUM-2): eval-like shapes that were no opaque program at all.
+    "pwsh-pipe-iex": ("if ($x) { $c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\" }; $c | iex", "PowerShell"),
+    "pwsh-pipe-iex-root-alone": ("if ($x) { $c = \"Remove-Item -Recurse '<IB>'\" }; $c | iex", "PowerShell"),
+    "pwsh-pipe-invoke-expression":("if ($x) { $c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\" }; "
+                                    "$c | Invoke-Expression", "PowerShell"),
+    "pwsh-write-output-iex": ("$c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\"; Write-Output $c | iex",
+                              "PowerShell"),
+    "pwsh-invoke-command-scriptblock": ("$c = \"Remove-Item -Recurse '<IB>" + BS + "Data'\"; "
+                                        "Invoke-Command -ScriptBlock ([scriptblock]::Create($c))", "PowerShell"),
+    "source-variable": ('f=/tmp/x.sh; source "$f" "<I>/Data"', "Bash"),
+    "dot-variable": ('. "$f" "<I>/Data"', "Bash"),
+    # guard3 (LOW-4): past the parser's token cap the text is read, as S-DEL-FALLBACK reads it.
+    "token-cap": ('$R "<I>/Data"; echo ' + "a " * 2500, "Bash"),
+    "token-cap-eval": ('if [ -n "$X" ]; then c="rm -rf <I>/Data"; fi; eval "$c"; echo ' + "a " * 2500, "Bash"),
 }
 
 
@@ -85,6 +105,11 @@ STAYS = {
     "program-path-with-spaces": ('CAP="<I>/tools/Caprica/Caprica.exe"; "$CAP" -f "TESV_Papyrus_Flags.flg" '
                                  '"<I>/Data/Scripts/Source/x.psc"', "Bash"),
     "eval-of-a-harmless-literal": ('c="echo hi"; eval "$c"', "Bash"),
+    # guard3: the install folder itself in an assignment asks only when an eval-like call may run that text.
+    "root-in-a-plain-assignment": ('ROOT="<I>"; "$PY" tools/x.py', "Bash"),
+    "token-cap-no-expansion": ('ls "<I>/Data"; echo ' + "a " * 2500, "Bash"),
+    "expansion-beside-data": ('echo "$HOME"; ls "<I>/Data"', "Bash"),
+    "eval-of-a-literal-beside-data": ('c="echo hi"; eval "$c"; ls "<I>/Data"', "Bash"),
 }
 
 
@@ -98,6 +123,12 @@ def test_ordinary_commands_and_unprotected_targets_do_not_ask(inst, case):
 def test_a_save_keeps_its_own_ask(inst):
     got = fire(inst, '$R "<I>/cfg/Saves/Existing.ess"')
     assert got["decision"] == "ask" and "S-SAVE-OPAQUE" in got["rules"] and "S-OPAQUE-PROTECTED" not in got["rules"]
+
+
+def test_past_the_token_cap_a_save_in_the_text_still_asks(inst):
+    """guard3 (v4.0.0 review A-guard LOW-4): the parser stops at its token cap; the save is read from the text."""
+    got = fire(inst, '$R "<I>/cfg/Saves/Existing.ess"; echo ' + "a " * 2500)
+    assert got["decision"] == "ask" and "S-SAVE-OPAQUE" in got["rules"], got
 
 
 def test_option_and_bare_words_are_not_paths_even_inside_data(inst):
