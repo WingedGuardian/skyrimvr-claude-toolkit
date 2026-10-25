@@ -31,7 +31,7 @@ def inst(tmp_path_factory):
 def fire(inst, command, tool="Bash", shell=None, cwd=None):
     rec, install = inst
     I = install.as_posix()
-    command = command.replace("<I>", I).replace("<IB>", I.replace("/", BS)).replace("<M>", "/" + I[0].lower() + I[2:])
+    command = command.replace("<I>", I).replace("<IB>", I.replace("/", BS)).replace("<M>", "/" + I[0].lower() + I[2:] if I[1:2] == ":" else I)
     tool_input = {"command": command}
     if shell:
         tool_input["shell"] = shell
@@ -207,3 +207,13 @@ def test_a_resolved_eval_frees_the_rest_of_the_command(inst):
     """The point of the precision: `k="echo hi"; eval "$k"` no longer hides /tmp/safe behind an eval poison."""
     got = fire(inst, 'D=/tmp/safe; k="echo hi"; eval "$k"; rm -rf "$D"; ls "<I>"')
     assert got["decision"] == "allow", got
+
+
+def test_msys_text_is_compared_with_the_drive_root_on_every_host():
+    from types import SimpleNamespace
+    from conftest import GAME_ROOT
+    from skyguard import shell_rules
+
+    roots = SimpleNamespace(install_dirs=(GAME_ROOT,), config_dirs=(), mo2_dirs=())
+    alias = "/" + GAME_ROOT[0].lower() + GAME_ROOT[2:]
+    assert shell_rules._protected_text(alias + "/Data", roots) == "Data"

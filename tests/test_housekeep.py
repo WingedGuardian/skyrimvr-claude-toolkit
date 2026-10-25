@@ -812,6 +812,7 @@ def test_the_users_sweep_switch_never_blocks_the_recycle_bin(tmp_path, monkeypat
     with pytest.raises(AssertionError, match="shell call ran"):
         hk.recycle([d])
     monkeypatch.setattr(hk, "DEFAULT_CONFIG", tmp_path / "no-config.json")
+    monkeypatch.setattr(hk, "_temp_root", lambda: tmp_path)
     with pytest.raises(AssertionError, match="shell call ran"):
         hk.main(["recycle", str(d)])
     assert d.is_dir() and "test harness" not in capsys.readouterr().out

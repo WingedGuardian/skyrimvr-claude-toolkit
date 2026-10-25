@@ -556,8 +556,8 @@ jobs:
   # operation through tools/resaver-cli.sh on a SYNTHETIC save made by the build's own probe (never a real save).
   # The behavior legs test the same code with a stub executable on both OSes.
   resaver-plus:
-    name: ReSaver Plus build + synthetic survey (windows-latest)
-    runs-on: windows-latest
+    name: ReSaver Plus build + synthetic survey (windows-2022)
+    runs-on: windows-2022
     timeout-minutes: 60
     defaults:
       run:

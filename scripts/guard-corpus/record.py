@@ -91,6 +91,7 @@ WINDOWS_ONLY = {
     "rt-a-rm-bslash-space-operand": _MSYS_ALIAS,
     "rt-a-mklink-then-delete": "mklink is a Windows program, and " + _MSYS_ALIAS,
     "t07-glob-middle": _MSYS_ALIAS,
+    "g3-bash-c-operand-msys-root": _MSYS_ALIAS,
     "v4-store-sup-dialect-msys-0": _MSYS_ALIAS,
     "v4-store-sup-dialect-msys-2": _MSYS_ALIAS,
     "v4-store-sup-dialect-msys-3": _MSYS_ALIAS,

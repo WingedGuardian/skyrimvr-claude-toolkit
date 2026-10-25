@@ -517,8 +517,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     # The PowerShell entry hands the engine a bash; an MSYS /usr/bin/bash is not one it can start.
     pytest.param(
         "setup.sh",
-        "if command -v cygpath >/dev/null 2>&1; then",
-        "if false; then",
+        "if command -v cygpath >/dev/null 2>&1; then\n    BASH_FOR_HOOKS=",
+        "if false; then\n    BASH_FOR_HOOKS=",
         "tests/test_setup_paths.py::test_setup_configures_the_codex_entry_scripts",
         marks=pytest.mark.skipif(sys.platform != "win32", reason="cygpath exists on Git Bash only"),
         id="setup-codex-bash-path-is-a-windows-path",
@@ -10244,7 +10244,7 @@ MUTATIONS += [pytest.param(_SR, *m[:3], id=m[3]) for m in [
     ("                if (not rest or rest[0] in _TERMINATOR) and root_alone:",
      "                if (not rest or rest[0] in _TERMINATOR) and False:", _OPA + "[pwsh-iex-root-alone]",
      "rule-S-OPAQUE-PROTECTED-root-alone-clause"),
-    ('    text = _MSYS.sub(r"\\1:/", text)', "    text = text", _OPA + "[eval-msys-data]",
+    ('    text = _MSYS.sub(r"\\1:/", text)', "    text = text", _OPT + "test_msys_text_is_compared_with_the_drive_root_on_every_host",
      "rule-S-OPAQUE-PROTECTED-msys-spelling"),
     ('        return _protected_text(command, roots) if _unfinished(parsed, command) else ""', '        return ""',
      _OPA + "[token-cap]", "rule-S-OPAQUE-PROTECTED-token-cap"),
@@ -10631,3 +10631,9 @@ MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test i
      '    drafts = sorted(p.relative_to(root).as_posix() for p in root.rglob("*-PR.md"))', "    drafts = []",
      "tests/test_release_payload.py::test_every_check_can_fail_on_its_own_line[resaver-plus-pr-draft-shipped]"),
 ]]
+
+# CI5: the native backend remains on the qualified VS 2022 runner.
+MUTATIONS.append(pytest.param(
+    ".github/workflows/ci.yml", "    runs-on: windows-2022\n", "    runs-on: windows-latest\n",
+    "tests/test_workflows.py::test_resaver_plus_uses_the_qualified_vs2022_runner",
+    id="ci5-resaver-runner-unpinned"))
