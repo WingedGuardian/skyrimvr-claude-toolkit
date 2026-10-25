@@ -6,13 +6,13 @@ import sys
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, GAME_ROOT
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, paths, rules, shell_rules  # noqa: E402
 
 BASH = (REPO / "tests" / "guard_corpus" / "reference" / "protect-bash.sh").read_text(encoding="utf-8")
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = GAME_ROOT
 LINES = BASH.splitlines()
 
 

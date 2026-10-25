@@ -11,12 +11,12 @@ import sys
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, GAME_ROOT
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, paths, shell_rules, shellparse, targets, write_rules, writes  # noqa: E402
 
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = GAME_ROOT
 INSTALL = "C:/t7/Skyrim VR"           # stands in for the corpus's temp install (`<install>`)
 LAYOUT_ENV = {
     "declared": {"SKYRIM_GAME_ROOT": GAME},

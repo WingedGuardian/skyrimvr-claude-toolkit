@@ -24,12 +24,12 @@ import time
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, GAME_ROOT, GAME_SHORT
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, paths, shell_rules, write_rules  # noqa: E402
 
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = GAME_ROOT
 BS = chr(92)
 SMALL, LARGE = 20000, 80000
 RATIO_MAX = 8.0          # cpu(80 KB) / cpu(20 KB): linear ~4, quadratic ~16
@@ -212,7 +212,7 @@ def _delete_shapes(N):
         "rm-many-operands": "rm " + (F + " ") * (N // 61),
         "rm-many-data-operands": "rm -rf " + ("Data/" + F + " ") * (N // 66),
         "rm-many-glob-operands": "rm -rf " + ("/c/*/" + F + " ") * (N // 66),
-        "rm-many-short-operands": "rm " + ("C:/GOGGAM~1/" + F + " ") * (N // 73),
+        "rm-many-short-operands": "rm " + (GAME_SHORT.rsplit("/", 1)[0] + "/" + F + " ") * (N // 73),
         "rm-var-operands": 'ls "' + GAME + '"; rm ' + ('"$X' + F + '" ') * (N // 65),
         "rm-option-run": "rm " + ("-" + F + " ") * (N // 62) + "x",
         "rm-deep-relative": "rm " + "a/" * (N // 2) + "x",

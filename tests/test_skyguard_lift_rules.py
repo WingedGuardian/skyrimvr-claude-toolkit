@@ -16,14 +16,14 @@ import time
 
 import pytest
 
-from conftest import REPO, scratch_dir
+from conftest import REPO, scratch_dir, GAME_ROOT, GAME_PARENT
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, codes, codex_rules, engine, lift_rules, paths, rules, shell_rules, state  # noqa: E402
 from skyguard.adapters import codex  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
 
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = GAME_ROOT
 SHELL = {"Bash": "bash", "PowerShell": "powershell"}
 NOHOME = scratch_dir("p6t11-nohome-")
 ENV0 = {"USERPROFILE": NOHOME}
@@ -205,7 +205,7 @@ def test_a_help_only_disable_does_not_hide_a_real_one_beside_it():
 def test_a_lift_rule_message_never_echoes_the_install_path():
     for cmd in ("attrib -R \"" + GAME + "/Data/Skyrim.esm\"", "python tools/skyguard lock unlock " + GAME + "/Data/Update.esm"):
         (decision, text), _ = shell(cmd)
-        assert "GOG Games" not in text and "C:" not in text, text
+        assert GAME_PARENT[3:] not in text and "C:" not in text, text
 
 
 def test_many_files_are_summarised():

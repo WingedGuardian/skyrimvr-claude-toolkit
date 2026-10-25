@@ -35,9 +35,9 @@ def test_grep_is_ascii_only():
 
 
 def test_path_regex_windows_dialects_all_match():
-    rx = paths.path_to_regex("C:/GOG Games/Skyrim VR")
-    for s in ["C:/GOG Games/Skyrim VR", "C:" + BS + "GOG Games" + BS + "Skyrim VR", "/c/GOG Games/Skyrim VR",
-              "C://GOG Games//Skyrim VR", "C:" + BS * 2 + "GOG Games" + BS * 2 + "Skyrim VR", "c:/gog games/skyrim vr"]:
+    rx = paths.path_to_regex("C:/Synthetic Games/Skyrim VR")
+    for s in ["C:/Synthetic Games/Skyrim VR", "C:" + BS + "Synthetic Games" + BS + "Skyrim VR", "/c/Synthetic Games/Skyrim VR",
+              "C://Synthetic Games//Skyrim VR", "C:" + BS * 2 + "Synthetic Games" + BS * 2 + "Skyrim VR", "c:/synthetic games/skyrim vr"]:
         assert grep.grep(rx, s), s
 
 
@@ -85,11 +85,11 @@ def test_empty_values_declare_nothing_and_are_not_malformed(tmp_path):
 
 SQ_FORMS = [
     # (file text after `KEY=`, the value bash assigns) -- setup.sh's sq() output and the hand-written spellings
-    ("'C:/GOG Games/Skyrim VR'", "C:/GOG Games/Skyrim VR"),
+    ("'C:/Synthetic Games/Skyrim VR'", "C:/Synthetic Games/Skyrim VR"),
     ("'C:/Bob'\\''s Games/Skyrim'", "C:/Bob's Games/Skyrim"),
     ("'C:/a'\\'''\\''b'", "C:/a''b"),
     ("'C:/My$Stuff/Sky`rim'", "C:/My$Stuff/Sky`rim"),
-    ("\"C:/GOG Games/Skyrim VR\"", "C:/GOG Games/Skyrim VR"),
+    ("\"C:/Synthetic Games/Skyrim VR\"", "C:/Synthetic Games/Skyrim VR"),
     ("\"C:\\Users\\me\\Skyrim\"", "C:\\Users\\me\\Skyrim"),
     ("\"C:/a\\\"b\"", "C:/a\"b"),
     ("C:/plain/path", "C:/plain/path"),

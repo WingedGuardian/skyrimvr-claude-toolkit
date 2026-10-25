@@ -179,7 +179,7 @@ def test_a_bash_delete_in_a_posix_install_is_denied_on_a_posix_host(posix, comma
 
 def test_a_git_bash_drive_alias_is_an_ordinary_folder_on_a_posix_host(posix):
     """`/c/...` is drive C: only under Git Bash on Windows; on a POSIX host it is just a folder (4ebdd1c)."""
-    assert paths.norm_abs("/c/GOG Games/x", msys=True) == "/c/GOG Games/x"
+    assert paths.norm_abs("/c/Synthetic Games/x", msys=True) == "/c/Synthetic Games/x"
 
 
 def test_an_apply_patch_delete_by_absolute_posix_path_is_denied_on_a_posix_host(posix):

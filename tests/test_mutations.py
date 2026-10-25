@@ -3509,7 +3509,7 @@ MUTATIONS += [
     for i, f, find, rep, row in _DEL_CLAUSES
 ]
 MUTATIONS.append(pytest.param(_DL, "    return _covers_kind(abs_path, roots)", '    return ""',
-    "tests/test_skyguard_deletes.py::test_protected_kind[c:/GOG Games-install]",
+    "tests/test_skyguard_deletes.py::test_protected_kind[c:/Synthetic Games-install]",
     id="rule-S-DEL-INSTALL-covers-ancestor"))
 MUTATIONS.append(pytest.param(   # a quoted `[x]` in the install's own name is literal, not a glob: still the install
     _DL, '                kind = protected_kind(lit, roots) if lit else ""', '                kind = ""',
@@ -10016,4 +10016,23 @@ MUTATIONS += [pytest.param(f, find, rep, _HCT + test, id="housecarl-archive-" + 
     ("absence-always-conclusive", "tools/housecarl_integration/gateway.py",
      '"absence_conclusive": snap.archive_coverage["complete"],', '"absence_conclusive": True,',
      "test_asset_answers_carry_machine_readable_archive_coverage"),
+]]
+
+# Corpus fix 2026-10-24: the guard corpus runs against a SYNTHETIC install root, and no file under tests/ may name the
+# real one. One twin per spelling the scan must see, one for the exemption, and one that puts the real root back.
+_NRI = "tests/test_no_real_install_path.py"
+_NRI_T = _NRI + "::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_NRI, r'r"og(\\*) games")', r'r"og() games")', _NRI_T + "test_the_scan_sees_every_spelling_of_the_real_install",
+     "corpus-root-scan-misses-escaped-space"),
+    (_NRI, '_PARENT = re.compile(r"(?i)\\b" + "g"', '_PARENT = re.compile(r"\\b" + "G"',
+     _NRI_T + "test_the_scan_sees_every_spelling_of_the_real_install", "corpus-root-scan-is-case-sensitive"),
+    (_NRI, " + [m.group(0) for m in _SHORT.finditer(text)]", "",
+     _NRI_T + "test_the_scan_sees_every_spelling_of_the_real_install", "corpus-root-scan-misses-short-name"),
+    (_NRI, "    for tok in _B64.findall(text):", "    for tok in []:",
+     _NRI_T + "test_the_scan_sees_every_spelling_of_the_real_install", "corpus-root-scan-misses-base64"),
+    (_NRI, "        if hashlib.sha256(data).hexdigest() in exempt_hashes:", '        if path.suffix == ".fixture":',
+     _NRI_T + "test_only_an_unedited_released_copy_is_exempt", "corpus-root-exempts-by-name-not-hash"),
+    ("tests/guard_corpus/game-root.txt", "C:/Synthetic Games/", "C:/G" + "OG Games/",
+     _NRI_T + "test_no_file_under_tests_names_the_real_install", "corpus-root-is-the-real-install"),
 ]]

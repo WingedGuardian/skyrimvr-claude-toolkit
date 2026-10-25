@@ -131,9 +131,9 @@ path_to_ere() {
             # ONE OR MORE separators, not exactly one. A doubled separator names the
             # identical directory on every platform, and it is not exotic -- it is how
             # you WRITE a Windows path in Python or PowerShell source:
-            #   shutil.rmtree('C:\\GOG Games\\The Elder Scrolls V Skyrim VR')
+            #   shutil.rmtree('C:\\Synthetic Games\\The Elder Scrolls V Skyrim VR')
             # MEASURED: with a single-character class, that spelling and
-            # `rm -rf "C://GOG Games//..."` both produced NO hook output at all, which
+            # `rm -rf "C://Synthetic Games//..."` both produced NO hook output at all, which
             # the runtime reads as allow -- while the single-separator spelling denied.
             # The pre-arc rule matched with `[^"']*` and was separator-agnostic, so
             # this was a regression introduced by resolving the root, and the replay

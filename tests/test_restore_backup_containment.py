@@ -20,13 +20,13 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO, scratch_dir
+from conftest import REPO, scratch_dir, GAME_ROOT
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, backup, codes, paths, rules, shell_rules, state  # noqa: E402
 from skyguard.adapters import codex  # noqa: E402
 
-GAME = "C:/GOG Games/The Elder Scrolls V Skyrim VR"
+GAME = GAME_ROOT
 NOHOME = scratch_dir("p6fixA-b1-")
 ENV0 = {"USERPROFILE": NOHOME, "HOME": NOHOME}
 
