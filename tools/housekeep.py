@@ -19,8 +19,8 @@ that repeat the one before. The policy this tool implements is docs/RETENTION.md
 Two passes, never one: `plan` decides, `apply` re-verifies. An action whose file changed since it was planned
 (size, hash, a newer write in its task folder) is REFUSED, not re-decided -- run `plan` again.
 
-What it never touches, whatever the config says: saves (.ess/.skse) and anything under a folder whose name
-contains "backup"; git-tracked files; every file a project doc links to; and any task folder written to within
+What it never touches, whatever the config says: saves (.ess/.skse), anything under a folder whose name contains
+"backup", known-good* baselines and AUDIT_LOG.txt; git-tracked files; every file a project doc links to; and any task folder written to within
 `active_hours` (another session is probably still working there). When git cannot say which files are tracked in a
 root that is in a work tree, `report`, `plan` and `apply` refuse (exit 1) instead of planning without that protection.
 
@@ -235,6 +235,13 @@ class Guard:
         except ValueError:                       # another drive: no relative form, judge the whole path
             rel = p
         rel_parts = rel.replace("\\", "/").lower().split("/")
+        # docs/RETENTION.md's Forever names, in code: a known-good baseline (a folder or file named known-good*) and the
+        # toolkit's audit log. Judged below the root, like "backup", so a root named that way does not protect all.
+        named = rel_parts if not rel.startswith("..") else low.split("/")
+        if any(part.startswith("known-good") for part in named):
+            return "known-good baseline"
+        if named[-1] == "audit_log.txt":
+            return "audit log"
         if not rel.startswith(".."):
             if any("backup" in part for part in rel_parts[:-1]):
                 return "backup folder"

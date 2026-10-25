@@ -105,6 +105,9 @@ link.
   `tools/kb-guard.sh` keeps `KB_GUARD_KEEP` (default 30) snapshot folders, the newest ones, never removing the
   oldest, the newest or the one holding the largest copy of a watched file, and sends the others to the Recycle
   Bin through `housekeep.py recycle`, printing a notice first; what the bin does not take stays and is reported.
+- **Forever names, in code:** besides saves and `*backup*` folders, `housekeep` never plans a file under a folder (or
+  a file) whose name starts with `known-good` (the dated known-good baselines) or a file named `AUDIT_LOG.txt`, and a
+  whole-folder action keeps any folder holding one.
 - **A protection that cannot be evaluated stops the run.** When git cannot list the tracked files of a root inside
   a work tree (no runnable git, dubious ownership, a broken index), `report`, `plan` and `apply` refuse with the
   reason instead of treating nothing as tracked. A folder outside any repository has no tracked files.

@@ -10075,3 +10075,12 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_HKS, "    except ProtectionUnavailable as e:\n", "    except ZeroDivisionError as e:\n",
      _HKS_T + _HKG + "[dubious-ownership]", "sweep-hk-refusal-not-reported"),
 ]]
+
+# Final sweep 2026-10-25 (X4 c6d4760): docs/RETENTION.md's Forever names are protected in code. One twin per name.
+_HKF = "test_saves_and_backup_folders_are_never_planned"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_HKS, '        if any(part.startswith("known-good") for part in named):\n', "        if False:\n",
+     _HKS_T + _HKF + "[t/known-good-2026-10-01-pre-stagger/Skyrim.esm]", "sweep-hk-known-good-unprotected"),
+    (_HKS, '        if named[-1] == "audit_log.txt":\n', "        if False:\n",
+     _HKS_T + _HKF + "[t/logs/AUDIT_LOG.txt]", "sweep-hk-audit-log-unprotected"),
+]]

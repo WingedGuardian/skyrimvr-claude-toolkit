@@ -126,7 +126,8 @@ def test_a_snapshot_of_a_live_database_is_not_recreatable_but_still_deduplicated
 
 # --------------------------------------------------------------------------- the Forever class, each with a twin
 
-@pytest.mark.parametrize("rel", ["t/after/Saves/x.ess", "t/after/Saves/x.skse", "t/permanent-backups/Skyrim.esm"])
+@pytest.mark.parametrize("rel", ["t/after/Saves/x.ess", "t/after/Saves/x.skse", "t/permanent-backups/Skyrim.esm",
+                                 "t/known-good-2026-10-01-pre-stagger/Skyrim.esm", "t/logs/AUDIT_LOG.txt"])
 def test_saves_and_backup_folders_are_never_planned(tree, rel):
     f = write(tree / "_CLAUDE_OUTPUT" / rel, blob("master"))
     twin = write(tree / "_CLAUDE_OUTPUT" / "t" / "plain" / "Skyrim.esm", blob("master"))
@@ -416,7 +417,7 @@ def test_a_snapshot_repeating_the_previous_one_is_planned_and_distinct_and_newes
 
 # ------------------------------------------------- whole-folder classes still answer to the Forever class (L4a M2)
 
-@pytest.mark.parametrize("inner", ["Save1.ess", "pair.skse", "backups/pair.txt"])
+@pytest.mark.parametrize("inner", ["Save1.ess", "pair.skse", "backups/pair.txt", "known-good/ok.psc", "AUDIT_LOG.txt"])
 def test_a_scratch_folder_holding_a_save_or_a_backup_is_never_planned(tree, inner):
     bed = tree / "scratchbed"
     write(bed / "plain.txt", b"x")
