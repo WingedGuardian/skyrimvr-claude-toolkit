@@ -271,7 +271,7 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
 # ----------------------------------------------------------------------------------------------------------
 class _Ctx:
     __slots__ = ("tokens", "out", "frame_ids", "via_xargs", "root", "counts", "subst", "dialect", "poison", "unread",
-                 "aliases", "codes", "xargs", "unnamed", "lits")
+                 "aliases", "codes", "xargs", "unnamed", "lits", "evals")
 
     def __init__(self, root: str = "", dialect: str = ""):
         self.unread = False             # RT-A: decoded text runs as commands (Parsed.unread)
@@ -287,6 +287,7 @@ class _Ctx:
         self.root = root                # the whole command (Task 7b: assignments are counted over all of it)
         self.dialect = dialect
         self.poison: Optional[str] = None
+        self.evals: List[str] = []      # guard3: eval-of-one-variable statements poisoned() deferred (_settle_evals)
         self.counts: Optional[dict] = None
         self.subst: Tuple[Tuple[str, str], ...] = ()     # the Exec.subst of the simple command being resolved
 
@@ -297,7 +298,7 @@ class _Ctx:
 
     def poisoned(self) -> str:
         if self.poison is None:
-            self.poison = assign.poisoned(self.root, self.dialect)
+            self.poison = assign.poisoned(self.root, self.dialect, self.evals)
         return self.poison
 
     def tick(self, k: int = 1) -> None:
@@ -522,8 +523,8 @@ class _Scanner:
         literal assignments (`D=/x; cd "$D/sub"`) is that literal, resolved exactly as Exec.subst resolves an argv
         word (the same lookup, poison and IFS rules); any other dynamic word stays "?"."""
         v = _cd_value(w, lit)
-        if v != "?" or not w.dyn or not self.vars or self.unsure or self.ctx.poisoned():
-            return v
+        if v != "?" or not w.dyn or not self.vars or self.unsure or self.ctx.poisoned() or self.ctx.evals:
+            return v                                # (guard3: an eval not yet settled may write the cd's variable)
         split_safe = self.DIALECT != "bash" or self.ctx.writes("IFS") == 0
         s = assign.expand_word(w.raw, self.DIALECT, lambda name: self.lookup(cmd, name), split_safe)
         return s if s and s != "-" else v
@@ -2050,8 +2051,24 @@ class _Resolver:
             return None
         words = val.split()
         if len(words) != 1 and self.q[k]:
-            return None                                 # "$R" holding `rm -rf`: one word naming no program
+            # guard3 (v4.0.0 review LOW-5): "$CAP" holding `C:/GOG Games/tools/Caprica.exe` is ONE word, the path of
+            # the program it runs; its last component names it. "$R" holding `rm -rf` names no program: unknown.
+            tail = re.split(r"[/\\]", val)[-1]
+            if ("/" in val or "\\" in val) and tail and not any(c.isspace() for c in tail):
+                return [val]
+            return None
         return words or None
+
+    def _code(self, j: int, end: Optional[int] = None) -> Tuple[str, bool]:
+        """guard3: the text words j..end hand an eval-like reader, each word through its same-command literal
+        (Exec.subst), and whether every word was certain (no expansion left unresolved)."""
+        sub = dict(self.ctx.subst)
+        out, certain = [], True
+        for w, dyn in zip(self.v[j:end], self.y[j:end]):
+            if dyn and (w not in sub or "$" in sub[w] or "`" in sub[w]):
+                certain = False
+            out.append(sub.get(w, w) if dyn else w)
+        return " ".join(out), certain
 
     def _carry(self, p: str, k: int) -> None:
         """A shell that re-parses a string still owns its OWN redirects: `bash -c 'echo x' > X.esp`, `cmd /c echo x >
@@ -2417,8 +2434,9 @@ class _Resolver:
             if p == "eval" and self.d == "bash":
                 self.emit(p, k + 1)
                 if k + 1 < n:
-                    self._decoded(" ".join(v[k + 1:]))
-                    self.reparse(" ".join(v[k + 1:]), "bash")
+                    code = self._code(k + 1)[0]                 # guard3: `c="rm x"; eval "$c"` runs rm x
+                    self._decoded(code)
+                    self.reparse(code, "bash")
                 return self.made
             if p in POSIX_SHELLS:
                 return self._posix_shell(p, k)
@@ -2437,13 +2455,14 @@ class _Resolver:
                 if p == "invoke-expression":
                     self.emit(p, k + 1)
                     ex = self.made[-1]
-                    lits = ps_param(ex, "Command", 0)
+                    sub = dict(self.ctx.subst)                  # guard3: `$c = 'x'; iex $c` runs x
+                    lits = [sub.get(w, w) for w in ps_param(ex, "Command", 0)]
                     self._decoded(" ".join(v[k + 1:]))         # RT-A: iex ([Text.Encoding]::...FromBase64String(..))
                     if not ex.argv and self.stdin == "pipe" and "frombase64string" in self.ctx.root.lower():
                         self.ctx.unread = True                  # ... | iex, fed by a FromBase64String expression
                     for s in lits:
                         self.reparse(s, "powershell")
-                    if not lits or any(self.y[k + 1:]):        # iex $cmd, iex ('a' + 'b'): unknown text runs
+                    if not lits or not self._code(k + 1)[1]:   # iex $cmd, iex ('a' + 'b'): unknown text runs
                         self.opaque(k + 1)
                     return self.made
                 if p == "start-process":
@@ -2542,9 +2561,12 @@ class _Resolver:
             sflag, j = True, j + 1                              # M4: `bash /dev/stdin`: commands from stdin
         if cflag:
             if j < n:
-                self.ctx.codes.append((p, v[j]))
-                self._decoded(v[j])
-                self.reparse(v[j], "bash")
+                code, certain = self._code(j, j + 1)        # guard3: `c="rm x"; bash -c "$c"` runs rm x
+                self.ctx.codes.append((p, code))
+                self._decoded(code)
+                self.reparse(code, "bash")
+                if not certain:
+                    self.opaque(j)                          # guard3: `bash -c "$c" <operands>`: an unnamed program
             else:
                 self.opaque(k)                      # `xargs -0 sh -c`: the command string comes from elsewhere
             self._carry(p, k + 1)
@@ -2837,8 +2859,60 @@ def _subst(sc: _Scanner, rec: _Cmd, ws, vals) -> Tuple[Tuple[str, str], ...]:
     return tuple((k, v) for k, v in got.items() if v is not None and v != k)
 
 
+_EVAL_WORD = re.compile(r"""["']?\$\{?[A-Za-z_][A-Za-z0-9_]{0,255}\}?["']?""")
+_PS_EVALS = frozenset(("iex", "invoke-expression"))
+
+
+def _eval_word(sc: _Scanner, idx: int, rec: _Cmd) -> Optional[_Word]:
+    """guard3: the one variable word an eval-like statement runs (`eval "$c"`, `iex $c`, `Invoke-Expression -Command
+    $c`, `$c | iex`), or None: the shapes assign.poisoned() defers."""
+    ws = rec.words
+    if sc.DIALECT == "bash":
+        if len(ws) == 2 and not ws[0].dyn and ws[0].raw == "eval" and ws[1].dyn and _EVAL_WORD.fullmatch(ws[1].raw):
+            return ws[1]
+        return None
+    if not ws or ws[0].dyn or ws[0].quoted or "".join(ws[0].b).lower() not in _PS_EVALS:
+        return None
+    rest = ws[1:]
+    if rest and not rest[0].dyn and len("".join(rest[0].b)) >= 2 and "-command".startswith("".join(rest[0].b).lower()):
+        rest = rest[1:]
+    if len(rest) == 1 and rest[0].dyn and _EVAL_WORD.fullmatch(rest[0].raw):
+        return rest[0]
+    if not rest and rec.stage == 1 and idx > 0:
+        up = sc.recs[idx - 1]
+        if up.key == rec.key and up.stage == 0 and len(up.words) == 1 and up.words[0].dyn and \
+                _EVAL_WORD.fullmatch(up.words[0].raw):
+            return up.words[0]
+    return None
+
+
+def _settle_evals(sc: _Scanner) -> None:
+    """guard3: lift the eval poison only when EVERY deferred eval-of-one-variable statement is a record of this root
+    command whose variable certainly holds a literal (lookup, the same rules as Exec.subst) that is itself no poison.
+    Anything less turns all resolution off, as an eval always did (assign.POLICY)."""
+    ctx = sc.ctx
+    if ctx.poisoned() or not ctx.evals:
+        return
+    split_safe = sc.DIALECT != "bash" or ctx.writes("IFS") == 0
+    found = 0
+    for idx, rec in enumerate(sc.recs):
+        w = _eval_word(sc, idx, rec)
+        if w is None:
+            continue
+        found += 1
+        val = None if sc.unsure or not sc.vars else assign.expand_word(
+            w.raw, sc.DIALECT, lambda name, rec=rec: sc.lookup(rec, name), split_safe)
+        if val is None or "$" in val or "`" in val or assign.poisoned(val, sc.DIALECT):
+            ctx.poison = "eval"
+            return
+    if found != len(ctx.evals):
+        ctx.poison = "eval"                         # an eval the records do not show (in a string, a nested shell)
+
+
 def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
     d, t, ctx = sc.DIALECT, sc.t, sc.ctx
+    if sc.depth == 0:
+        _settle_evals(sc)
     synth = sorted(sc.synth, key=lambda x: x[0])
     si = 0
     groups = {}
@@ -2894,20 +2968,41 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
                 ctx.unread = True                   # RT-A: `echo .. | base64 -d | sh`, `printf '\x72\x6d ..' | sh`
             texts, known = [], True                 # the upstream text, if it can be rebuilt statically
             strings = []                            # RT-A G1: a PowerShell string stage, `@'..'@ | python -`
+            partial = False                         # guard3: rebuilt text still holding an unresolved variable
             for urec, umade in items[:ci]:
                 texts += [h.body or "" for h in urec.heredocs]
                 if d == "powershell" and not umade and len(urec.words) == 1 and _ps_quoted(urec.words[0]):
                     strings.append("".join(urec.words[0].b))
                     if urec.words[0].dyn:
                         known = False               # I6: `"Remove-Item $x" | iex`: the text holds a variable's value
+                elif d == "powershell" and not umade and len(urec.words) == 1 and urec.words[0].dyn:
+                    # guard3 (v4.0.0 review MEDIUM-2): `$c | iex` runs the text $c holds: its literal when certain
+                    # (Exec.subst), else text the parser never saw.
+                    val = dict(_subst(sc, urec, urec.words, ["".join(urec.words[0].b)]) if sc.vars else ()).get(
+                        "".join(urec.words[0].b))
+                    if val is None or "$" in val or "`" in val:
+                        known = False
+                    else:
+                        strings.append(val)
                 for e in umade:
                     if e.program in _TEXT_SOURCES and not (e.program == "echo" and e.argv and _ECHO_OPTS.match(e.argv[0])):
                         if e.argv:
-                            texts.append(" ".join(e.argv))
+                            sub = dict(e.subst)             # guard3: `Write-Output $c | iex` with $c a literal
+                            words = [sub.get(a, a) for a in e.argv]
+                            partial = partial or any("$" in a or "`" in a for a in words)
+                            texts.append(" ".join(words))
                     elif not urec.heredocs:          # printf, echo -e, cat FILE, curl ...: not reconstructable
                         known = False
+            if known and partial and (reader.program in ALL_SHELLS or _ps_reads_commands(reader)):
+                # guard3: `Write-Output $c | iex`, `echo "$c" | sh`: the text is read as far as it goes (below), and the
+                # variable's part of it is a program the guard cannot name.
+                unknown = reader._replace(program="?", argv=(reader.program,), quoted=(False,))
+                ctx.out.append(unknown)
+                ctx.unnamed.append(unknown)
             if not known:                    # `cat s.sh | bash`, `printf ... | sh`: code the parser never saw
-                ctx.out.append(reader._replace(program="?", argv=(reader.program,), quoted=(False,)))
+                unknown = reader._replace(program="?", argv=(reader.program,), quoted=(False,))
+                ctx.out.append(unknown)
+                ctx.unnamed.append(unknown)     # guard3: no candidate either (S-OPAQUE-PROTECTED, S-SAVE-OPAQUE)
             elif reader.program in ALL_SHELLS or _ps_reads_commands(reader):
                 # I6: a PowerShell string stage is text too (`'Remove-Item X' | pwsh -Command -`, `'...' | iex`).
                 dialect = "powershell" if reader.program == "invoke-expression" else _shell_dialect(reader.program)
