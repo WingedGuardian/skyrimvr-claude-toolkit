@@ -3117,7 +3117,11 @@ def _sub(text: str, dialect: str, depth: int, cd: str, ctx: _Ctx, mode: str = "n
     if depth > MAX_DEPTH:
         raise ParseError("nesting deeper than %d" % MAX_DEPTH)
     sc = _SCANNERS[dialect](text, depth, cd, ctx, mode)
-    sc.run()
+    try:
+        sc.run()
+    except ParseError:
+        _records_to_execs(sc)       # completed commands/substitutions remain evidence before a later syntax error
+        raise
     _records_to_execs(sc)
     return sc.final_cd
 

@@ -673,7 +673,7 @@ def test_nested_reparse_counts_toward_the_depth():
 
 def test_partial_execs_survive_a_failure():
     p = parse("rm -rf x; echo 'oops", "bash")
-    assert not p.ok and [e.program for e in p.execs] == []          # the scan failed before phase 2
+    assert not p.ok and [e.program for e in p.execs] == ["rm"]      # completed commands survive a later scan failure
     p = parse("bash -c 'rm -rf x'; bash -c 'echo $('", "bash")
     assert not p.ok and "rm" in [e.program for e in p.execs]
 

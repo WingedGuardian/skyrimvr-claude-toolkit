@@ -91,6 +91,14 @@ def test_unknown_eval_location_is_unknown_for_later_commands():
     assert next(e for e in parsed.execs if e.program == "rm").cd_before == "?"
 
 
+def test_inline_substitution_before_a_syntax_error_keeps_its_delete_evidence():
+    command = "eval 'cd Data'; echo `rm -rf x`; echo '"
+    parsed = shellparse.parse(command, "bash")
+    assert not parsed.ok
+    verdict = shell_rules.decide(command, ROOTS, Audit(), cwd=ROOT, shell="bash", env={})
+    assert verdict.decision == "deny", "a later syntax error erased the deferred substitution"
+
+
 @pytest.mark.parametrize("arg", ["%OUT%", "!OUT!", "$OUT", "`pick`"])
 def test_unproved_adapter_output_cannot_preserve_only_the_input(arg):
     calls = shell_rules.resaver_write_calls("resaver-cli.sh clean x.ess " + arg + " --apply", "cmd")

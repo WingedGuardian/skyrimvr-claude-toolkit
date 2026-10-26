@@ -10740,4 +10740,6 @@ MUTATIONS += [pytest.param(f, find, rep, test, id="review-guards-" + ident) for 
     (_SP7, '    return sc.final_cd', '    return cd', _EVAL7, 'nested-final-location'),
     (_SP7, 'base = next((frame_cd[p] for p in parents if p in frame_cd), before)', 'base = before', _EVAL7, 'substitution-location'),
     (_SP7, 'while pending is not None and pending[0] <= position:', 'while pending is not None:', _EVAL7, 'substitution-order'),
+    (_SP7, '        _records_to_execs(sc)       # completed commands/substitutions remain evidence before a later syntax error',
+     '        pass', _RG7 + 'test_inline_substitution_before_a_syntax_error_keeps_its_delete_evidence', 'partial-parse-evidence'),
 ]]
