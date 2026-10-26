@@ -146,6 +146,8 @@ def test_control_location_alternatives_reach_nested_commands(tail):
 @pytest.mark.parametrize("command", [
     "{ eval 'cd C:/Review/Scratch'; }; rm -rf Data",
     "if false; then eval 'cd C:/Review/Game'; fi; cd C:/Review/Scratch; rm -rf Data",
+    "for x in; do eval 'cd C:/Review/Game'; done; cd C:/Review/Scratch; rm -rf Data",
+    "case x in y) eval 'cd C:/Review/Game';; esac; cd C:/Review/Scratch; rm -rf Data",
     "f() { eval 'cd C:/Review/Game'; }; { eval 'cd C:/Review/Scratch'; }; rm -rf Data",
     "f() (echo unused); { eval 'cd C:/Review/Scratch'; }; rm -rf Data",
 ])

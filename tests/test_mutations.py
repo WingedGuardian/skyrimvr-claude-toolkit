@@ -10764,7 +10764,7 @@ MUTATIONS += [pytest.param(f, find, rep, test, id="review-guards-" + ident) for 
      '                    cmd.words = []                              # name () -- a function definition\n                    f.function_pending = False',
      _RG7 + 'test_unexecuted_control_body_cannot_move_a_later_protected_delete', 'control-function-spaced'),
     (_SP7, '            f.location_controls.append("loop")', '            pass',
-     _RG7 + 'test_unexecuted_control_body_cannot_move_a_later_protected_delete', 'control-loop'),
+     _RG7 + 'test_proved_brace_or_later_absolute_cd_resolves_location_alternatives', 'control-loop'),
     (_SP7, 'kind = ("function" if f.function_pending else "brace") if v == "{" else v',
      'kind = "brace"', _RG7 + 'test_unexecuted_control_body_cannot_move_a_later_protected_delete', 'control-kind'),
     (_SP7, '                    f.location_depth -= f.location_controls.pop() != "brace"', '                    pass',
