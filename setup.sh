@@ -423,8 +423,8 @@ case "$RSPP_UNAME" in
         else
             echo "  Not found. That is fine: ReSaver Plus is an optional second ReSaver backend, and the default (Java) does"
             echo "  not need it. To build it, install Visual Studio 2022 Build Tools with 'Desktop development with C++'"
-            echo "  yourself (several GB; tested: $RSPP_TESTED_VS), for example:"
-            echo "      winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --version $RSPP_TESTED_VS"
+            echo "  yourself (several GB; tested: $RSPP_TESTED_VS): a manual step, for you to run -- an agent may not install this:"
+            echo "      winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --version $RSPP_TESTED_VS --no-upgrade"
             echo "  then add that workload in the Visual Studio Installer, and run: python tools/resaver-plus/build.py"
         fi ;;
     *)

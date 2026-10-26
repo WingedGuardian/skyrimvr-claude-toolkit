@@ -517,8 +517,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     # The PowerShell entry hands the engine a bash; an MSYS /usr/bin/bash is not one it can start.
     pytest.param(
         "setup.sh",
-        "if command -v cygpath >/dev/null 2>&1; then",
-        "if false; then",
+        "if command -v cygpath >/dev/null 2>&1; then\n    BASH_FOR_HOOKS=",
+        "if false; then\n    BASH_FOR_HOOKS=",
         "tests/test_setup_paths.py::test_setup_configures_the_codex_entry_scripts",
         marks=pytest.mark.skipif(sys.platform != "win32", reason="cygpath exists on Git Bash only"),
         id="setup-codex-bash-path-is-a-windows-path",
@@ -1721,8 +1721,9 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
                  "test_a_retired_batch_is_never_deleted_and_a_link_is_never_offered",
                  marks=pytest.mark.skipif(sys.platform != "win32", reason="a junction exists on Windows only"),
                  id="housekeep-retired-follows-junctions"),
-    pytest.param("tools/housekeep.py", "                if e.is_symlink() or reparse or not e.is_dir(",
-                 "                if reparse or not e.is_dir(", "tests/test_housekeep.py::"
+    # Both the explicit symlink check and is_dir(False) reject links; regress the behavior, not one redundant term.
+    pytest.param("tools/housekeep.py", "                if e.is_symlink() or reparse or not e.is_dir(follow_symlinks=False):",
+                 "                if reparse or not e.is_dir(follow_symlinks=True):", "tests/test_housekeep.py::"
                  "test_a_retired_batch_is_never_deleted_and_a_link_is_never_offered",
                  marks=pytest.mark.skipif(sys.platform == "win32", reason="the test links with a junction there"),
                  id="housekeep-retired-follows-symlinks"),
@@ -5445,7 +5446,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_SF, "        hit = _recycle_delete(command, parsed, cwd, env, roots)",'        hit = ""', _p12row("state-del-recycle"),
      "rule-S-SELF-STATE-delete-recycle-bin"),
     (_SF, "    if code and (grep(deletes.INTERP_DESTROYER, code) or delete_api):", "    if False:",
-     _p12row("state-del-python"), "rule-S-SELF-STATE-delete-interpreter"),
+     _SFT + "test_a_computed_interpreter_delete_keeps_the_state_text_fallback", "rule-S-SELF-STATE-delete-interpreter"),
     # Re-anchored in the final fix pass (lane A C1 put the raw-unlock check between this and the deletes).
     (_SR6, '    if own and own[0] == self_rules.STATE:\n        return deny("S-SELF-STATE", own[1])\n    # Plan 6 final fix',
      '    if own and own[0] == self_rules.STATE and not dels.hit:\n        return deny("S-SELF-STATE", own[1])\n'
@@ -10244,7 +10245,7 @@ MUTATIONS += [pytest.param(_SR, *m[:3], id=m[3]) for m in [
     ("                if (not rest or rest[0] in _TERMINATOR) and root_alone:",
      "                if (not rest or rest[0] in _TERMINATOR) and False:", _OPA + "[pwsh-iex-root-alone]",
      "rule-S-OPAQUE-PROTECTED-root-alone-clause"),
-    ('    text = _MSYS.sub(r"\\1:/", text)', "    text = text", _OPA + "[eval-msys-data]",
+    ('    text = _MSYS.sub(r"\\1:/", text)', "    text = text", _OPT + "test_msys_text_is_compared_with_the_drive_root_on_every_host",
      "rule-S-OPAQUE-PROTECTED-msys-spelling"),
     ('        return _protected_text(command, roots) if _unfinished(parsed, command) else ""', '        return ""',
      _OPA + "[token-cap]", "rule-S-OPAQUE-PROTECTED-token-cap"),
@@ -10631,3 +10632,9 @@ MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test i
      '    drafts = sorted(p.relative_to(root).as_posix() for p in root.rglob("*-PR.md"))', "    drafts = []",
      "tests/test_release_payload.py::test_every_check_can_fail_on_its_own_line[resaver-plus-pr-draft-shipped]"),
 ]]
+
+# CI5: the native backend remains on the qualified VS 2022 runner.
+MUTATIONS.append(pytest.param(
+    ".github/workflows/ci.yml", "    runs-on: windows-2022\n", "    runs-on: windows-latest\n",
+    "tests/test_workflows.py::test_resaver_plus_uses_the_qualified_vs2022_runner",
+    id="ci5-resaver-runner-unpinned"))

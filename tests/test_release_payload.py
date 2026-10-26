@@ -74,6 +74,9 @@ def pristine(tmp_path_factory):
     """The tree as the builder ships it: tracked content (copy_repo drops tests/), minus every path the builder
     excludes (.github/, scripts/layer2-spike/), a BUILD-INFO."""
     root = copy_repo(tmp_path_factory.mktemp("payload") / "toolkit")
+    # Native test sources are part of the build kit, including its nested tests/ folder.
+    shutil.copytree(REPO / "tools/resaver-plus/additions", root / "tools/resaver-plus/additions",
+                    dirs_exist_ok=True)
     shutil.rmtree(root / ".github")
     shutil.rmtree(root / "docs" / "superpowers")
     if (root / "docs" / "REVIEW-SCOPE.md").exists():
