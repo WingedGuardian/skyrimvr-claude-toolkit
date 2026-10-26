@@ -10689,3 +10689,17 @@ MUTATIONS += [pytest.param(_H1O, find, rep, test, id=ident) for find, rep, test,
      "tests/test_ordered_policy.py::test_published_legacy_groups_migrate_to_current_blocking_guards[original-pre-h1]",
      "h1-ordered-previous-v4-schema-not-recognized"),
 ]]
+
+# Task 7 P6: a kept config is never an uninstall target or a pending write.
+_RI7 = "tests/test_review_install.py::test_kept_identical_config_survives_the_documented_uninstall[0]"
+MUTATIONS += [pytest.param("tools/mod-install.py", find, rep, _RI7, id="review-install-" + ident)
+              for find, rep, ident in [
+    ('                    header.append("# KEPT: {}  {}".format(sha(dest), dest))',
+     '                    written.append("{}  {}".format(sha(dest), dest))', 'kept-is-written'),
+    ('                    header.append("# KEPT: {}  {}".format(sha(dest), dest))',
+     '                    header.append("KEPT: {}  {}".format(sha(dest), dest))', 'kept-is-removable'),
+    ('                    record(header + ["# STATUS: in progress"] + written + planned[done:])',
+     '                    record(header + ["# STATUS: in progress"] + written + planned[len(written):])', 'kept-still-pending'),
+    ('\n                record(header + ["# STATUS: in progress"] + written + planned[done:])',
+     '\n                record(header + ["# STATUS: in progress"] + written + planned[len(written):])', 'later-write-still-pending'),
+]]
