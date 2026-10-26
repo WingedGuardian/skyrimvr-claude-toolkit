@@ -494,6 +494,8 @@ def manifest_references(cfg):
                         continue
                     elif re.match(r"^[0-9a-fA-F]{64}  .+", line):
                         remember(line[66:])
+                    elif re.fullmatch(r"# KEPT: [0-9a-fA-F]{64}  .+", line):
+                        remember(line.split("  ", 1)[1])
                     elif line.startswith("PLANNED  "):
                         remember(line[9:])
                     else:

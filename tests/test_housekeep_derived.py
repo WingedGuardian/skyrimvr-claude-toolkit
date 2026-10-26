@@ -309,3 +309,17 @@ def test_nonplain_paths_are_refused_without_link_privileges(tmp_path, monkeypatc
 
     monkeypatch.setattr(hk.os, "lstat", lstat)
     assert hk.derived_source(trace) is None
+
+
+@pytest.mark.parametrize("kind", ["valid", "bad-hash", "relative"])
+def test_kept_install_records_remain_understood_protection(tmp_path, kind):
+    old, _new, cfg = stage_tree(tmp_path)
+    target = old / "payload.txt"
+    digest = "0" * (64 if kind != "bad-hash" else 63)
+    value = str(target) if kind != "relative" else "relative/payload.txt"
+    write(tmp_path / "manual-installs/kept.files.txt", ("# KEPT: " + digest + "  " + value + "\n").encode())
+    if kind == "valid":
+        assert key(hk._real(target)) in hk.manifest_references(cfg)
+    else:
+        with pytest.raises(ValueError):
+            hk.manifest_references(cfg)

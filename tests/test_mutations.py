@@ -10806,4 +10806,11 @@ MUTATIONS += [pytest.param("tools/housekeep.py", find, rep, test, id="review-hou
      _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[stat]', 'strict-entry-stat'),
     ('        return "unreadable tree or file metadata (inspection incomplete)"', '        return ""',
      _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[walk]', 'incomplete-refused'),
+    ('                    elif re.fullmatch(r"# KEPT: [0-9a-fA-F]{64}  .+", line):',
+     '                    elif False:', _HKDT + 'test_kept_install_records_remain_understood_protection[valid]', 'kept-record-understood'),
+    ('                    elif re.fullmatch(r"# KEPT: [0-9a-fA-F]{64}  .+", line):',
+     '                    elif re.fullmatch(r"# KEPT: [0-9a-fA-F]{63,64}  .+", line):',
+     _HKDT + 'test_kept_install_records_remain_understood_protection[bad-hash]', 'kept-record-shape'),
+    ('                        remember(line.split("  ", 1)[1])', '                        pass',
+     _HKDT + 'test_kept_install_records_remain_understood_protection[valid]', 'kept-record-path'),
 ]]
