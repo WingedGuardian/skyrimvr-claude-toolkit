@@ -115,8 +115,8 @@ RULES = {
         "legacy": False,
         "prefixes": [],
         "template": (
-        'Blocked: decoded text is run as shell commands, so the guard cannot read what it does.\n'
-        'Decode it to a file, read it, then run that file; or run it yourself.'
+        'Blocked: decoded shell text or uncertain execution directories prevent a complete safety check.\n'
+        'Read decoded text before running it; use explicit working directories, or run the command yourself.'
     ),
     },
     'S-DEL-FALLBACK': {

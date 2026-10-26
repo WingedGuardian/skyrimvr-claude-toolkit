@@ -118,6 +118,77 @@ def test_heredoc_expansion_uses_its_receiving_subshell_scope():
     assert decide(command).decision == "deny"
 
 
+@pytest.mark.parametrize("command", [
+    "f() { eval 'cd C:/Review/Scratch'; }; rm -rf Data",
+    "f () { eval 'cd C:/Review/Scratch'; }; rm -rf Data",
+    "function f { eval 'cd C:/Review/Scratch'; }; rm -rf Data",
+    "if false; then eval 'cd C:/Review/Scratch'; fi; rm -rf Data",
+    "while false; do eval 'cd C:/Review/Scratch'; done; rm -rf Data",
+    "for x in; do eval 'cd C:/Review/Scratch'; done; rm -rf Data",
+    "case x in y) eval 'cd C:/Review/Scratch';; esac; rm -rf Data",
+    "false && eval 'cd C:/Review/Scratch'; rm -rf Data",
+    "true || eval 'cd C:/Review/Scratch'; rm -rf Data",
+    "eval 'if false; then cd C:/Review/Scratch; fi'; rm -rf Data",
+    "if false; then cd C:/Review/Other; fi; eval 'if false; then cd C:/Review/Scratch; fi'; rm -rf Data",
+])
+def test_unexecuted_control_body_cannot_move_a_later_protected_delete(command):
+    verdict = shell_rules.decide(command, ROOTS, Audit(), cwd=ROOT, shell="bash", env={})
+    assert verdict.decision == "deny"
+
+
+@pytest.mark.parametrize("tail", ["(rm -rf Data)", "echo `rm -rf Data`", "echo $(rm -rf Data)"])
+def test_control_location_alternatives_reach_nested_commands(tail):
+    command = "if false; then eval 'cd C:/Review/Scratch'; fi; " + tail
+    verdict = shell_rules.decide(command, ROOTS, Audit(), cwd=ROOT, shell="bash", env={})
+    assert verdict.decision == "deny"
+
+
+@pytest.mark.parametrize("command", [
+    "{ eval 'cd C:/Review/Scratch'; }; rm -rf Data",
+    "if false; then eval 'cd C:/Review/Game'; fi; cd C:/Review/Scratch; rm -rf Data",
+    "f() { eval 'cd C:/Review/Game'; }; { eval 'cd C:/Review/Scratch'; }; rm -rf Data",
+    "f() (echo unused); { eval 'cd C:/Review/Scratch'; }; rm -rf Data",
+])
+def test_proved_brace_or_later_absolute_cd_resolves_location_alternatives(command):
+    parsed = shellparse.parse(command, "bash")
+    assert parsed.ok, parsed.why
+    verdict = shell_rules.decide(command, ROOTS, Audit(), cwd=ROOT, shell="bash", env={})
+    assert verdict.decision == "allow"
+
+
+def test_location_alternatives_apply_to_the_bash_literal_backslash_reading():
+    command = "if false; then eval 'cd C:/Outside'; fi; rm Game\\Data\\x"
+    verdict = shell_rules.decide(command, ROOTS, Audit(), cwd="C:/Review", shell="bash", env={})
+    assert verdict.decision == "deny"
+
+
+def test_location_alternatives_are_bounded_and_overflow_refuses(monkeypatch):
+    monkeypatch.setattr(shellparse, "MAX_LOCATION_STATES", 2)
+    command = "if x; then cd /first; fi; if y; then cd /second; fi; rm harmless.txt"
+    parsed = shellparse.parse(command, "bash")
+    assert parsed.ok, parsed.why
+    assert parsed.unread, "location overflow must refuse instead of choosing one path"
+    assert len([e for e in parsed.execs if e.program == "rm"]) <= 2
+    assert decide(command).decision == "deny"
+
+
+def test_partial_parse_after_location_ambiguity_refuses(monkeypatch):
+    monkeypatch.setattr(shellparse, "MAX_TOKENS", 30)
+    command = "if x; then cd /first; fi; " + "echo x; " * 50
+    parsed = shellparse.parse(command, "bash")
+    assert not parsed.ok
+    assert parsed.unread, "a partial result lost an alternative location"
+    assert decide(command).decision == "deny"
+
+
+def test_repeated_equal_location_alternatives_do_not_exhaust_the_bound():
+    command = "if x; then cd /first; fi; " * 10 + "echo x"
+    parsed = shellparse.parse(command, "bash")
+    assert parsed.ok, parsed.why
+    assert not parsed.unread
+    assert decide(command).decision == "allow"
+
+
 @pytest.mark.parametrize("arg", ["%OUT%", "!OUT!", "$OUT", "`pick`"])
 def test_unproved_adapter_output_cannot_preserve_only_the_input(arg):
     calls = shell_rules.resaver_write_calls("resaver-cli.sh clean x.ess " + arg + " --apply", "cmd")
