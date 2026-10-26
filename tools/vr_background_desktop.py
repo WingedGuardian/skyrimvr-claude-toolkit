@@ -114,11 +114,16 @@ def process_generation(pid):
     _, kernel32, w = _api()
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, int(pid))
     if not handle:
-        return None
+        if ctypes.get_last_error() == 87:     # ERROR_INVALID_PARAMETER: no such PID
+            return None
+        raise ctypes.WinError(ctypes.get_last_error())
     try:
         times = [w.FILETIME() for _ in range(4)]
         _check(kernel32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]))
-        running = kernel32.WaitForSingleObject(handle, 0) == 0x102     # WAIT_TIMEOUT: not signalled = running
+        status = kernel32.WaitForSingleObject(handle, 0)
+        if status not in (0, 0x102):
+            raise ctypes.WinError(ctypes.get_last_error())
+        running = status == 0x102     # WAIT_TIMEOUT: not signalled = running
         return _filetime(times[0]), running
     finally:
         kernel32.CloseHandle(handle)
@@ -218,11 +223,28 @@ class BackgroundDesktop:
         create.restype = w.BOOL
         _check(create(exe, cmdline, None, None, False, CREATE_NO_WINDOW, None, str(cwd), ctypes.byref(si),
                       ctypes.byref(pi)))
-        kernel32.CloseHandle(pi.hThread)
-        kernel32.CloseHandle(pi.hProcess)
+        try:
+            times = [w.FILETIME() for _ in range(4)]
+            _check(kernel32.GetProcessTimes(pi.hProcess, *[ctypes.byref(t) for t in times]))
+            created = _filetime(times[0]).isoformat()
+        finally:
+            kernel32.CloseHandle(pi.hThread)
+            kernel32.CloseHandle(pi.hProcess)
         self.verify()
         return pi.dwProcessId, {"pid": pi.dwProcessId, "main_thread": pi.dwThreadId, "desktop": self.name,
-                                "executable": exe}
+                                "executable": exe, "start_time": created}
+
+    def process_on_desktop(self, pid):
+        """Prove placement even for windowless helpers; a missing/unreadable thread is not proof."""
+        try:
+            r = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
+                                "(Get-Process -Id {} -ErrorAction Stop).Threads.Id | ConvertTo-Json".format(int(pid))],
+                               check=True, capture_output=True, text=True, timeout=8)
+            tids = json.loads(r.stdout)
+            tids = tids if isinstance(tids, list) else [tids]
+            return bool(tids) and all(thread_desktop(tid) == self.name for tid in tids)
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+            return False
 
     def close(self):
         if self.handle:

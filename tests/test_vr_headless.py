@@ -375,6 +375,7 @@ class World:
         self.lifecycle = "dataLoaded"
         self.desktop_closed = 0
         self.private_windows = True
+        self.roots = []
         self.clock = Clock(self)
 
     def tick(self):
@@ -428,14 +429,21 @@ class World:
             def start(self, command, cwd):
                 exe = Path(command[0]).name
                 world.started.append(exe)
+                root_id = 90 if exe in ("vrstartup.exe", "steam.exe") else 91
+                root = proc(root_id, Path(exe).stem, str(command[0]))
+                world.roots.append(root)
+                child = {"pid": root_id, "executable": root["Path"], "start_time": root["StartTime"]}
                 if exe in ("vrstartup.exe", "steam.exe"):
                     world.procs.append(proc(11, "vrserver", str(world.t["vr"] / "bin" / "win64" / "vrserver.exe")))
                     if world.room:
                         world.procs.append(world.room)
-                    return 11, {"pid": 11}
+                    return root_id, child
                 world.procs.append(proc(12, "SkyrimVR", str(world.t["game"] / "SkyrimVR.exe")))
                 world.health = {"ok": True, "pid": 12, "frame": 0}
-                return 12, {"pid": 12}
+                return root_id, child
+
+            def process_on_desktop(self, pid):
+                return world.isolated
 
             def boundary(self, pids):
                 visible = [] if world.isolated else [p for p in pids if p == 11]
@@ -456,6 +464,10 @@ def world(tree, monkeypatch):
     for name in ("devbench_health", "devbench_quit", "process_alive", "terminate_verified", "make_desktop"):
         monkeypatch.setattr(mod, name, getattr(w, name))
     monkeypatch.setattr(mod, "read_processes", w.read)
+    def census():
+        return [dict(p, ParentId=91 if p["ProcessName"] == "SkyrimVR" else 90)
+                for p in w.procs + w.roots]
+    monkeypatch.setattr(mod, "read_process_tree", census)
     return w
 
 
@@ -820,11 +832,10 @@ def test_room_setup_with_unproved_identity_is_refused(tree, world, bad):
         r["Path"] = None
     else:
         r["StartTime"] = None
-    world.room = r
     mod = tree["mod"]
-    assert mod.main(["on"]) == 0
+    session = {"boundary": {"private_window_pids": [14]}}
     with pytest.raises(mod.Refused, match="unproved"):
-        mod.cmd_launch("background")
+        mod.wait_for_room_setup(mod.paths(), "background", session, lambda: [r], {})
     assert world.terminated == [] and "sksevr_loader.exe" not in world.started
 
 
