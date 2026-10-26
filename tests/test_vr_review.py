@@ -22,9 +22,43 @@ def test_foreign_process_seen_before_start_is_never_owned(tree, world, monkeypat
     with pytest.raises(mod.Refused):
         mod.cmd_launch("background")
     assert mod.load_state()["session"]["processes"] == []
+    assert "boundary" not in mod.load_state()["session"], "an unproved candidate's PID leaked into state"
     assert world.started == []
     mod.stop_owned(mod.load_state())
     assert world.terminated == []
+
+
+@pytest.mark.parametrize("refusal", ["ancestry", "boundary", "census"])
+def test_managed_run_keeps_files_when_ownership_refusal_is_followed_by_a_missed_read(tree, world, monkeypatch, refusal):
+    mod = tree["mod"]
+    foreign = proc(27, "vrmonitor", str(tree["vr"] / "bin" / "vrmonitor.exe"))
+    world.isolated = refusal != "boundary"
+    read = world.read
+    def race():
+        found = read()
+        if refusal in ("ancestry", "census"):
+            return found + ([foreign] if world.reads == 2 else [])
+        return [p for p in found if p["ProcessName"] not in mod.VR_NAMES] if world.reads > 3 else found
+    monkeypatch.setattr(mod, "read_processes", race)
+    if refusal == "census":
+        def unknown():
+            raise mod.ProcessReadError("synthetic unreadable ancestry")
+        monkeypatch.setattr(mod, "read_process_tree", unknown)
+    with pytest.raises((mod.Refused, mod.ProcessReadError)):
+        mod.cmd_run("background")
+    assert mod.load_state() is not None, "a failed ownership proof restored files after a missed process read"
+    assert tree["dll"].read_bytes() == VALVE_BYTES
+    assert world.terminated == [] and world.quits == []
+    assert world.started == (["vrstartup.exe"] if refusal == "boundary" else [])
+
+
+def test_off_also_refuses_an_observed_foreign_vr_process(tree, world):
+    mod = tree["mod"]
+    assert mod.cmd_on() == 0
+    world.procs.append(proc(27, "vrmonitor"))
+    with pytest.raises(mod.Refused):
+        mod.cmd_off()
+    assert mod.load_state() is not None and tree["dll"].read_bytes() == VALVE_BYTES
 
 
 def test_legacy_session_without_launch_proof_is_never_stopped(tree, world):

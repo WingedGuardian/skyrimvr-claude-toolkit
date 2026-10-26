@@ -443,7 +443,7 @@ class World:
                 return root_id, child
 
             def process_on_desktop(self, pid):
-                return world.isolated
+                return True       # independent thread and window observations: neither proves the other
 
             def boundary(self, pids):
                 visible = [] if world.isolated else [p for p in pids if p == 11]

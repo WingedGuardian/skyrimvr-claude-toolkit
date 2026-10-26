@@ -37,8 +37,9 @@ steamvr.vrsettings that ALREADY forces the null driver: `off` would faithfully r
 OpenComposite update, a settings edit) is first copied, hash-verified, into the run's backup folder
 (changed-after-on-<stamp>/), so nothing is lost. The closed state file is kept as state-closed-<stamp>.json. With no
 state file it has nothing to do and says so, so it is safe to run again, or after a crash or a reboot. A restore that does not verify keeps the
-state file and the backups, and exits 3. Run `off` again once the reported problem is resolved. While a process
-that `launch` recorded is still running, `off` refuses: use `stop`.
+state file and the backups, and exits 3. Run `off` again once the reported problem is resolved. While any game or
+SteamVR process is observed, `off` refuses; missing owned processes also need absent health/handle backstops.
+Use `stop` for owned processes, and close foreign processes yourself.
 
 Close SteamVR first: it rewrites steamvr.vrsettings when it exits. `on` refuses while vrserver.exe runs (--force
 overrides).
@@ -56,6 +57,9 @@ SteamVR's Room Setup appears, the game waits (up to 25 s) until that helper's wi
 private desktop and is stopped (or it exits by itself); an unproved, wrong-path or reused-PID helper refuses the
 launch, and a window on the user's desktop stops the session. Then sksevr_loader.exe starts, and `launch`
 returns once DevBench answers /api/health for the owned game's PID with lifecycle dataLoaded and frame > 100.
+
+An ownership/placement refusal keeps headless files and state instead of automatically restoring under an
+unproved process, even if a later process read misses it. Close unproved processes yourself, then `stop` / `off`.
 
 How `run` decides the game has EXITED (a wrong "exited" would restore files under a running game): it needs
 EXIT_MISSES consecutive process reads without the owned game spanning at least EXIT_WINDOW seconds, and then
@@ -606,13 +610,14 @@ def restore_entries(entries) -> list:
 
 
 def owned_running(st) -> list:
-    """Recorded session processes that are still running (ProcessReadError when that cannot be known)."""
+    """Observed VR processes or live owned backstops. Foreign processes block restore without gaining ownership."""
     owned = (st.get("session") or {}).get("processes") or []
-    if not owned:
-        return []
     running = read_processes()
-    port = st["session"].get("port", 8921)
-    return [o for o in owned if any(same_process(p, o) for p in running) or still_alive(o, port)]
+    listed = [p for p in running if p["ProcessName"] in VR_NAMES]
+    if listed:
+        return listed
+    port = (st.get("session") or {}).get("port", 8921)
+    return [o for o in owned if still_alive(o, port)]
 
 
 # --------------------------------------------------------------------------- commands
@@ -852,20 +857,30 @@ def cmd_launch(desktop) -> dict:
     save_state(st)
 
     def record():
-        now = read_processes()
-        candidates = [x for x in now if x["ProcessName"] in VR_NAMES]
-        session["boundary"] = desk.boundary([x["Id"] for x in candidates])
-        save_state(st)
-        if desktop == "background" and not session["boundary"].get("isolated"):
+        try:
+            now = read_processes()
+            candidates = [x for x in now if x["ProcessName"] in VR_NAMES]
+            boundary = desk.boundary([x["Id"] for x in candidates])
+            census = read_process_tree() if candidates else []
+        except (ProcessReadError, OSError, ValueError):
+            session["ownership_refused"] = True
+            save_state(st)
+            raise
+        if desktop == "background" and not boundary.get("isolated"):
+            session["ownership_refused"] = True
+            save_state(st)
             raise Refused("a test window escaped onto your desktop; stopping this owned session")
-        census = read_process_tree() if candidates else []
         for x in candidates:
             if not any(same_process(x, o) for o in session["processes"]):
                 if not proven_process(x, session, census, desk):
+                    session["ownership_refused"] = True
+                    save_state(st)
                     raise Refused("a game or SteamVR process has unproved launch ownership or desktop placement; "
                                   "it was not recorded and will not be stopped")
                 session["processes"].append(x)
                 save_state(st)
+        session["boundary"] = boundary          # persist only boundary evidence whose identities were proved
+        save_state(st)
         return now
 
     try:
@@ -1070,12 +1085,15 @@ def cmd_run(desktop, park=False, emu=False, force=False) -> int:
         raise
     finally:
         if error is not None:
-            print("ERROR during the managed session ({}: {}); cleaning up".format(type(error).__name__, error),
+            print("ERROR during the managed session ({}: {}); checking for safe cleanup".format(type(error).__name__, error),
                   file=sys.stderr)
         st = load_state()
         if st and st.get("session") and st["session"].get("creator_pid") != os.getpid():
             raise Refused("this session belongs to another run (pid {}); not cleaning it up".format(
                 st["session"].get("creator_pid")))
+        if st and (st.get("session") or {}).get("ownership_refused"):
+            raise Refused("launch ownership could not be proved; headless files and state are kept. Close unproved "
+                          "processes yourself, then use `stop` or `off`; no automatic restore is safe")
         if st and st.get("session", {}).get("processes"):
             rc = cmd_stop()                      # owned processes exist: orderly exit, then restore
         elif st:
