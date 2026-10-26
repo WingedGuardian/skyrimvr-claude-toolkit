@@ -8,7 +8,8 @@
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-bash.sh\"",
             "timeout": 60,
-            "statusMessage": "Checking command safety..."
+            "statusMessage": "Checking command safety...",
+            "onFailure": "block"
           },
           {
             "type": "command",
@@ -25,7 +26,8 @@
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-files.sh\"",
             "timeout": 60,
-            "statusMessage": "Checking file protection..."
+            "statusMessage": "Checking file protection...",
+            "onFailure": "block"
           },
           {
             "type": "command",
@@ -42,7 +44,8 @@
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-mcp.sh\"",
             "timeout": 60,
-            "statusMessage": "Checking DevBench call..."
+            "statusMessage": "Checking DevBench call...",
+            "onFailure": "block"
           }
         ]
       }
