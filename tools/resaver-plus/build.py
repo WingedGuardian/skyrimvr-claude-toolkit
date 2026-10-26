@@ -212,8 +212,9 @@ def fetch(repo: str, commit: str, dest: Path) -> None:
     if dest.exists():
         if not (dest / ".git").is_dir():
             raise BuildError("existing source directory is not this builder's Git cache: {}".format(dest))
-        _code, conversion = run_result([*GIT, "-C", dest, "config", "--get", "core.autocrlf"])
-        if conversion.strip().lower() != "false":
+        # Inspect the stored local policy, not GIT's command-line conversion override or an inherited default.
+        code, conversion = run_result(["git", "-C", dest, "config", "--local", "--get", "core.autocrlf"])
+        if code != 0 or conversion.strip().lower() != "false":
             raise BuildError("source cache converts line endings (core.autocrlf is not false); its bytes are not the "
                              "pinned ones. Use a fresh --work directory: {}".format(dest))
         dirty = run([*GIT, "-C", dest, "status", "--porcelain", "--untracked-files=all"])
