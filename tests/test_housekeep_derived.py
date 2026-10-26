@@ -52,11 +52,14 @@ def test_derived_apply_rechecks_the_source_bytes_and_activity(tmp_path, change):
     cfg = cfg_for(tmp_path)
     doc = hk.plan(cfg, only={"derived"})
     assert planned(doc) == {key(trace)}
+    trace_stamp, folder_stamp = trace.stat(), trace.parent.stat()
     if change == "source":
         # Rename only a synthetic source, keeping its bytes available for the assertion.
         source.rename(source.with_suffix(".retained"))
+        os.utime(trace.parent, ns=(folder_stamp.st_atime_ns, folder_stamp.st_mtime_ns))
     elif change == "xml":
         trace.write_bytes(b"changed")
+        os.utime(trace, ns=(trace_stamp.st_atime_ns, trace_stamp.st_mtime_ns))
     else:
         write(trace.parent / "new.txt", b"active", days=0)
     fake = FakeBin(tmp_path)

@@ -81,6 +81,10 @@ These rows extend the Skyrim policy; the shared policy above is unchanged.
 | **Derived** (`derived`) | `events.xml`, or an XML file directly inside an `xml-decoder` folder, in an idle agent task | Recycle only while a plain `.etl` source exists in the same folder or its parent. ETL measurements are always kept, including inside whole-folder candidates. |
 | **Superseded staging** (`superseded`) | A direct versioned child of a configured `staging_roots` folder | Recycle after `superseded_after_days` (default 30) and `active_hours`, only with a higher numeric version of the same name beside it, or its exact folder name in `_superseded`. Keep rollback sources and every folder whose protection cannot be decided. |
 
+Activity includes the task directory and its child directories, including recent empty directories.
+An unreadable activity walk or metadata read keeps the task active. Direct `recycle` inspection also
+refuses the whole item on any walk or metadata error, before calling the Recycle Bin.
+
 Staging versions use two to four numeric components after the final name separator (`My Mod-1.2.3`);
 comparison is numeric, with missing trailing components treated as zero. A staging root's optional
 `_superseded` is a UTF-8 text file containing one exact versioned folder name per line; blanks and `#`

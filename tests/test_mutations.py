@@ -10781,3 +10781,29 @@ MUTATIONS += [pytest.param(_H1O, find, rep, test, id=ident) for find, rep, test,
      "tests/test_ordered_policy.py::test_published_legacy_groups_migrate_to_current_blocking_guards[original-pre-h1]",
      "h1-ordered-previous-v4-schema-not-recognized"),
 ]]
+
+# Task 7 P5/HK1: incomplete inspection refuses; uncertain activity is active.
+_HKR7 = "tests/test_review_housekeep.py::"
+MUTATIONS += [pytest.param("tools/housekeep.py", find, rep, test, id="review-housekeep-" + ident)
+              for find, rep, test, ident in [
+    ('        newest = folder.stat().st_mtime', '        newest = 0.0',
+     _HKR7 + 'test_uncertain_or_recent_directory_activity_keeps_derived_trace[plan-root]', 'root-activity'),
+    ('        for dp, dirs, files in os.walk(folder, onerror=walk_error):', '        for dp, dirs, files in os.walk(folder):',
+     _HKR7 + 'test_uncertain_or_recent_directory_activity_keeps_derived_trace[plan-walk]', 'walk-activity'),
+    ('            for name in dirs + files:', '            for name in files:',
+     _HKR7 + 'test_uncertain_or_recent_directory_activity_keeps_derived_trace[plan-empty-child]', 'directory-activity'),
+    ('    except OSError:\n        return float("inf")', '    except OSError:\n        return 0.0',
+     _HKR7 + 'test_uncertain_or_recent_directory_activity_keeps_derived_trace[apply-stat]', 'unknown-activity'),
+    ('        files = tuple(walk_files(real, strict=True))', '        files = tuple(walk_files(real))',
+     _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[stat]', 'strict-inspection-wired'),
+    ('onerror=walk_error if strict else None', 'onerror=None',
+     _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[walk]', 'strict-walk-error'),
+    ('        if strict:\n            os.stat(dp)', '        if False:\n            os.stat(dp)',
+     _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[stat]', 'strict-metadata-gate'),
+    ('            os.stat(dp)\n            for name in dirs + fn:', '            pass\n            for name in dirs + fn:',
+     _HKR7 + 'test_strict_recycle_inspection_checks_root_metadata[walk-root]', 'strict-walk-root-stat'),
+    ('                os.stat(os.path.join(dp, name))', '                pass',
+     _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[stat]', 'strict-entry-stat'),
+    ('        return "unreadable tree or file metadata (inspection incomplete)"', '        return ""',
+     _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[walk]', 'incomplete-refused'),
+]]

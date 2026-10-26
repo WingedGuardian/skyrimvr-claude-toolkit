@@ -147,14 +147,15 @@ def blake(path, chunk=1 << 20) -> str:
 
 
 def newest_mtime(folder: Path) -> float:
-    newest = 0.0
-    for dp, _, fn in os.walk(folder):
-        for f in fn:
-            try:
-                newest = max(newest, os.stat(os.path.join(dp, f)).st_mtime)
-            except OSError:
-                pass
-    return newest
+    """Uncertain activity is active; directory writes count even when no file was added."""
+    try:
+        newest = folder.stat().st_mtime
+        for dp, dirs, files in os.walk(folder, onerror=walk_error):
+            for name in dirs + files:
+                newest = max(newest, os.stat(os.path.join(dp, name)).st_mtime)
+        return newest
+    except OSError:
+        return float("inf")
 
 
 def fingerprint(folder: Path):
@@ -329,11 +330,15 @@ def task_folders(cfg):
     return out
 
 
-def walk_files(target: Path):
+def walk_files(target: Path, strict=False):
     if target.is_file():
         yield target
         return
-    for dp, _, fn in os.walk(target):
+    for dp, dirs, fn in os.walk(target, onerror=walk_error if strict else None):
+        if strict:
+            os.stat(dp)
+            for name in dirs + fn:
+                os.stat(os.path.join(dp, name))
         for f in fn:
             yield Path(dp) / f
 
@@ -869,7 +874,11 @@ def recycle_refusal(cfg, path) -> str:
             return "the toolkit or install root, or a folder above it"
     if any(part.lower() == "saves" for part in real.parts):
         return "a Saves folder or inside one"
-    for f in walk_files(real):
+    try:
+        files = tuple(walk_files(real, strict=True))
+    except OSError:
+        return "unreadable tree or file metadata (inspection incomplete)"
+    for f in files:
         if str(f).lower().endswith(SAVE_EXTS):
             return "a save or a folder holding one ({})".format(f.name)
     allowed = [(b / s, False) for b in bases for s in ROLLING_STORES]
@@ -889,7 +898,7 @@ def recycle_refusal(cfg, path) -> str:
         return "inside a backup folder (Forever)"
     if any(x.startswith("known-good") for x in rel):
         return "a known-good baseline (Forever)"
-    for f in walk_files(real):
+    for f in files:
         low = f.name.lower()
         if low == "audit_log.txt" or any(x.lower().startswith("known-good") for x in f.relative_to(real).parts) \
                 or any("backup" in x.lower() for x in f.relative_to(real).parts[:-1]):
