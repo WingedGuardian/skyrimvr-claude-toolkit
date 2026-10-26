@@ -10742,4 +10742,12 @@ MUTATIONS += [pytest.param(f, find, rep, test, id="review-guards-" + ident) for 
     (_SP7, 'while pending is not None and pending[0] <= position:', 'while pending is not None:', _EVAL7, 'substitution-order'),
     (_SP7, '        _records_to_execs(sc)       # completed commands/substitutions remain evidence before a later syntax error',
      '        pass', _RG7 + 'test_inline_substitution_before_a_syntax_error_keeps_its_delete_evidence', 'partial-parse-evidence'),
+    (_SP7, 'position = next((j for j, rec in enumerate(self.recs) if rec is cmd), len(self.recs))',
+     'position = len(self.recs)',
+     _RG7 + 'test_heredoc_substitutions_run_before_the_receiving_eval_changes_directory', 'heredoc-before-receiver'),
+    (_SP7, '(position, (cmd.frame,) + cmd.parent_frame, cmd.cd, h.body, "hd")',
+     '(position, (self.frames[0].id,), cmd.cd, h.body, "hd")',
+     _RG7 + 'test_heredoc_expansion_uses_its_receiving_subshell_scope', 'heredoc-receiver-scope'),
+    (_SP7, 'nested = iter(sorted(sc.nested, key=lambda item: item[0]))', 'nested = iter(sc.nested)',
+     _RG7 + 'test_heredoc_substitutions_run_before_the_receiving_eval_changes_directory', 'heredoc-deferred-order'),
 ]]

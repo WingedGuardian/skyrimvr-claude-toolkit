@@ -2,7 +2,7 @@
 
 ## v4.0.0 — unreleased
 
-- **Final guard review:** literal Python `Path` components use the host platform's joining rules, including later absolute paths and Windows drive resets. Literal Bash `eval` carries directory changes to later commands in its caller; child shells, pipelines and background commands retain their own scope. Unproved ReSaver arguments use the same dollar, backtick, cmd percent and delayed-expansion markers for direct-native refusals and adapter write handling.
+- **Final guard review:** literal Python `Path` components use the host platform's joining rules, including later absolute paths and Windows drive resets. Literal Bash `eval` carries directory changes to later commands in its caller; child shells, pipelines and background commands retain their own scope. Heredoc substitutions expand in their receiving command's scope before that command runs. Unproved ReSaver arguments use the same dollar, backtick, cmd percent and delayed-expansion markers for direct-native refusals and adapter write handling.
 
 ### Added
 

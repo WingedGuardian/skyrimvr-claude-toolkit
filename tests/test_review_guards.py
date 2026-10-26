@@ -99,6 +99,25 @@ def test_inline_substitution_before_a_syntax_error_keeps_its_delete_evidence():
     assert verdict.decision == "deny", "a later syntax error erased the deferred substitution"
 
 
+@pytest.mark.parametrize("command", [
+    "eval 'cd C:/Review/Scratch' <<EOF\n$(rm -rf Data)\nEOF\n",
+    "eval 'cd C:/Review/Game'; eval 'cd C:/Review/Scratch' <<EOF\n`rm -rf Data`\nEOF\n",
+    "eval 'cd C:/Review/Scratch' <<EOF; echo `rm -rf Data`\n$(rm -rf Data)\nEOF\n",
+])
+def test_heredoc_substitutions_run_before_the_receiving_eval_changes_directory(command):
+    parsed = shellparse.parse(command, "bash")
+    assert parsed.ok, parsed.why
+    verdict = shell_rules.decide(command, ROOTS, Audit(), cwd=ROOT, shell="bash", env={})
+    assert verdict.decision == "deny", "heredoc expansion used the receiver's later directory"
+
+
+def test_heredoc_expansion_uses_its_receiving_subshell_scope():
+    command = "(eval 'cd C:/Review/Game'; eval 'cd C:/Review/Scratch' <<EOF\n$(rm -rf Data)\nEOF\n)"
+    parsed = shellparse.parse(command, "bash")
+    assert parsed.ok, parsed.why
+    assert decide(command).decision == "deny"
+
+
 @pytest.mark.parametrize("arg", ["%OUT%", "!OUT!", "$OUT", "`pick`"])
 def test_unproved_adapter_output_cannot_preserve_only_the_input(arg):
     calls = shell_rules.resaver_write_calls("resaver-cli.sh clean x.ess " + arg + " --apply", "cmd")

@@ -435,7 +435,7 @@ class _Scanner:
         self.frames = [self._frame("top", cd, mode, 0)]
         self.initial_cd = self.final_cd = cd
         self.nested = []                # inline substitutions resolved after preceding eval location effects
-        self.pending: List[_Here] = []
+        self.pending: List[Tuple[_Here, _Cmd]] = []
         self.i = 0
         self._pmatch: Optional[dict] = None
         self.vars: dict = {}            # Task 7b: name -> [value, known_ver, list, seq] (one literal assignment)
@@ -1223,13 +1223,13 @@ class _Bash(_Scanner):
             raise ParseError("a heredoc without a delimiter")
         h = _Here(delim, strip, quoted, None)
         cmd.heredocs.append(h)
-        self.pending.append(h)
+        self.pending.append((h, cmd))
         self.i = j
 
     def _read_bodies(self):
         t, n = self.t, self.n
         pos = self.i
-        for h in self.pending:
+        for h, cmd in self.pending:
             start = pos
             while True:
                 if pos >= n:
@@ -1245,7 +1245,10 @@ class _Bash(_Scanner):
                     break
                 pos = end + 1
             if not h.quoted and ("$(" in h.body or "`" in h.body):
-                self.defer_sub(h.body, self.frames[-1], mode="hd")
+                # Expand before the receiving command executes, in that command's shell frame. The body is
+                # read after the line's records, possibly after later argument substitutions were queued.
+                position = next((j for j, rec in enumerate(self.recs) if rec is cmd), len(self.recs))
+                self.nested.append((position, (cmd.frame,) + cmd.parent_frame, cmd.cd, h.body, "hd"))
         self.pending = []
         self.i = min(pos, n)
 
@@ -2970,7 +2973,7 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
     si = 0
     groups = {}
     frame_cd = {sc.frames[0].id: sc.initial_cd}
-    nested = iter(sc.nested)
+    nested = iter(sorted(sc.nested, key=lambda item: item[0]))
     pending = next(nested, None)
     def drain_nested(position):
         nonlocal pending

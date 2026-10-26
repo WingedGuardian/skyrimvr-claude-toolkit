@@ -13,8 +13,9 @@ their different spelling in a non-UTF-8 locale is not qualified by this parser.
 
 Literal Python `Path` delete arguments follow the host platform's component joining,
 including absolute-path and Windows drive resets. A literal Bash `eval` updates the
-caller's directory for subsequent commands and inline substitutions; child shells,
-pipelines and background commands keep that change in their own scope. ReSaver's
+caller's directory for subsequent commands and inline substitutions; heredoc
+substitutions expand in the receiving command's scope before that command runs.
+Child shells, pipelines and background commands keep directory changes in their own scope. ReSaver's
 unproved-argument checks share the dollar, backtick, cmd `%VAR%` and delayed `!VAR!`
 markers, including the direct-native CLI refusal. These are parser checks, with the
 runtime-built-path and unknown-code limits in row C1 still applying.
