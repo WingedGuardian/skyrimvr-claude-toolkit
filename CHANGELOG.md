@@ -2,6 +2,8 @@
 
 ## v4.0.0 — unreleased
 
+- **Final guard review:** literal Python `Path` components use the host platform's joining rules, including later absolute paths and Windows drive resets. Literal Bash `eval` carries directory changes to later commands in its caller; child shells, pipelines and background commands retain their own scope. Unproved ReSaver arguments use the same dollar, backtick, cmd percent and delayed-expansion markers for direct-native refusals and adapter write handling.
+
 ### Added
 
 - **Independent plugin tools:** `python tools/esp-summary.py <plugin>` reports masters and new/overridden records (`--list-overrides` prints each override); `python tools/esp-record-diff.py <old> <new>` reports byte equality and record/subrecord changes. Duplicate FormIDs, failed decompression and invalid master indexes are problems (diff INCONCLUSIVE, exit 1); unwalkable files refuse with an offset (exit 2). Both are bundled, read-only Python tools.

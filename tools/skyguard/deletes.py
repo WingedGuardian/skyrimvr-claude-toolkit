@@ -68,6 +68,7 @@ from __future__ import annotations
 import os
 import posixpath
 import re
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import List, Mapping, NamedTuple, Optional, Tuple
 
 from . import paths, targets
@@ -447,7 +448,8 @@ def interpreter_delete_targets(code: str, python: bool) -> List[str]:
                 and node.func.value.id == "pathlib"):
             parts = [literal(a) for a in node.args]
             if all(x is not None for x in parts):
-                return "/".join(parts)
+                path_type = PurePosixPath if paths.POSIX_HOST else PureWindowsPath
+                return path_type(*parts).as_posix()
         return None
 
     out = []
