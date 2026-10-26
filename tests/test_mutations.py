@@ -10633,6 +10633,34 @@ MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test i
      "tests/test_release_payload.py::test_every_check_can_fail_on_its_own_line[resaver-plus-pr-draft-shipped]"),
 ]]
 
+
+# H1 (user ruling 2026-10-25): a crashed, killed or timed-out Claude guard blocks the call; setup refuses a Claude Code
+# too old for the key. One twin per guard registration and per clause of the version gate.
+_H1S = "agent/targets/claude/settings.json"
+_H1T = "tests/test_hook_failure_blocks.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    (_H1S, '"Checking command safety...",\n            "onFailure": "block"', '"Checking command safety..."',
+     _H1T + "test_every_guard_hook_blocks_on_failure_and_nothing_else_does[agent/targets/claude/settings.json]",
+     "h1-protect-bash-fails-open"),
+    (_H1S, '"Checking file protection...",\n            "onFailure": "block"', '"Checking file protection..."',
+     _H1T + "test_every_guard_hook_blocks_on_failure_and_nothing_else_does[agent/targets/claude/settings.json]",
+     "h1-protect-files-fails-open"),
+    (_H1S, '"Checking DevBench call...",\n            "onFailure": "block"', '"Checking DevBench call..."',
+     _H1T + "test_every_guard_hook_blocks_on_failure_and_nothing_else_does[agent/targets/claude/settings.json]",
+     "h1-protect-mcp-fails-open"),
+    ("setup.sh", "sort -t. -k1,1n -k2,2n -k3,3n | head -n1)", "sort | head -n1)",
+     _H1T + "test_a_numerically_older_minor_is_refused_not_compared_as_text",
+     "h1-version-compared-as-text"),
+    ("setup.sh", '            echo "Update it first (claude update), then run setup.sh again. Nothing was changed." >&2\n'
+                 "            exit 3\n",
+     '            echo "Update it first (claude update), then run setup.sh again. Nothing was changed." >&2\n',
+     _H1T + "test_an_older_claude_code_is_refused_before_anything_is_written",
+     "h1-old-claude-not-refused"),
+    ("setup.sh", 'CLAUDE_MIN="2.1.295"', 'CLAUDE_MIN="2.1.290"',
+     _H1T + "test_an_older_claude_code_is_refused_before_anything_is_written",
+     "h1-minimum-below-the-key"),
+]]
+
 # CI5: the native backend remains on the qualified VS 2022 runner.
 MUTATIONS.append(pytest.param(
     ".github/workflows/ci.yml", "    runs-on: windows-2022\n", "    runs-on: windows-latest\n",
@@ -10729,4 +10757,27 @@ MUTATIONS += [pytest.param(_HKD, before, after, _HKDT + test, id="hk-derived-" +
     ("overlap-roots", '    if any(a == b or _strictly_inside(a, b) or _strictly_inside(b, a)\n'
                       '           for i, a in enumerate(stage_roots) for b in stage_roots[i + 1:]):',
      '    if False:', "test_invalid_or_overlapping_staging_roots_are_refused"),
+]]
+
+# H1 ordered-upgrade integration: current guard policies and exact historical definitions.
+_H1O = "tools/skyguard/ordered_upgrade.py"
+_H1OC = 'CLAUDE_BLOCKING = frozenset(("protect-bash.sh", "protect-files.sh", "protect-mcp.sh"))'
+_H1OU = _H1T + "test_ordered_upgrade_uses_the_shipped_guard_failure_policy"
+MUTATIONS += [pytest.param(_H1O, find, rep, test, id=ident) for find, rep, test, ident in [
+    (_H1OC, 'CLAUDE_BLOCKING = frozenset(("protect-files.sh", "protect-mcp.sh"))',
+     _H1OU, "h1-ordered-bash-fails-open"),
+    (_H1OC, 'CLAUDE_BLOCKING = frozenset(("protect-bash.sh", "protect-mcp.sh"))',
+     _H1OU, "h1-ordered-files-fails-open"),
+    (_H1OC, 'CLAUDE_BLOCKING = frozenset(("protect-bash.sh", "protect-files.sh"))',
+     _H1OU, "h1-ordered-mcp-fails-open"),
+    ('        handler["onFailure"] = "block"', '        handler["onFailure"] = "ignore"',
+     _H1OU, "h1-ordered-wrong-failure-policy"),
+    ("    if script in CLAUDE_BLOCKING:", "    if True:",
+     _H1OU, "h1-ordered-backup-hooks-block"),
+    ('            handler.pop("onFailure", None)', "            pass",
+     "tests/test_ordered_policy.py::test_published_legacy_groups_migrate_to_current_blocking_guards[original-v3.9.1]",
+     "h1-ordered-legacy-schema-not-recognized"),
+    ("    groups = [*current, *published, installed]", "    groups = [*published, installed]",
+     "tests/test_ordered_policy.py::test_published_legacy_groups_migrate_to_current_blocking_guards[original-pre-h1]",
+     "h1-ordered-previous-v4-schema-not-recognized"),
 ]]

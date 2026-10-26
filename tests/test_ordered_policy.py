@@ -222,3 +222,20 @@ def test_ordered_application_refuses_unreviewed_runtime_or_late_edits_before_pub
              '--review-sha256', hashlib.sha256((bundle / 'complete.json').read_bytes()).hexdigest(), '--choices', str(choice_file), '--quiescent')
     assert completed.returncode == 2, response
     assert {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob('*') if path.is_file()} == before
+
+
+@pytest.mark.parametrize("legacy_version", ["v3.9.1", "pre-h1"])
+def test_published_legacy_groups_migrate_to_current_blocking_guards(ordered, legacy_version):
+    root, _source, _bundle, _policy, _wrapper, _controller, _cli, stage = ordered
+    if legacy_version == "v3.9.1":
+        fixture = REPO / "tests/fixtures/migrate-3x/v3.9.1/settings.json.fixture"
+        legacy = json.loads(fixture.read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
+    else:
+        fixture = REPO / "tests/fixtures/ordered-policy/claude-pre-h1-groups.json.fixture"
+        legacy = json.loads(fixture.read_text(encoding="utf-8"))["groups"]
+    path = root / ".claude/settings.json"
+    settings = json.loads(path.read_bytes())
+    settings["hooks"]["PreToolUse"].extend(legacy)
+    path.write_text(json.dumps(settings), encoding="utf-8")
+    completed, response = stage()
+    assert completed.returncode == 0 and response["ordered_integration_available"], response

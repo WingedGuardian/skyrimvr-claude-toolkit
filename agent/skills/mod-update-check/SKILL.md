@@ -137,8 +137,11 @@ Stage 2?) at the top, so the review survives across sessions.
    xEdit, and an update silently overwrites those fixes. Hash the installed plugin against the SAME
    version's original archive (not the mod manager's staging copy: a hardlinked staging file changes
    together with the installed one). Compare against every version available, not only the one the
-   manager claims. Different from all of them = a record-level diff (xelib or Spriggit) of installed
-   vs the nearest original lists the candidate user edits; a difference a later official version also
+   manager claims. Different from all of them = run `python tools/esp-record-diff.py <installed.esp>
+   <archive-copy.esp>` against the nearest original: it lists changed records/subrecords and byte equality
+   (0 = same records, 1 = differences or an INCONCLUSIVE parse, 2 = unreadable). xelib or Spriggit can
+   inspect the candidate edits further; `python tools/esp-summary.py <installed.esp>` counts added and
+   overridden records. A difference a later official version also
    has is an untracked update, not an edit. Re-apply the edits onto the new version, or hold the
    update. Never overwrite an edited plugin without listing what is lost. No original archive for
    the installed version: say so, and treat the plugin as possibly edited.

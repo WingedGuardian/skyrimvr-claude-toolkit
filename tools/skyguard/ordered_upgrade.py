@@ -18,9 +18,15 @@ WRAPPER_NORMALIZED_SHA256 = "18c2325a4800b3f1704b5129f370498770aebce710432c6056f
 RESTORE_SHA256 = "6118fe35ba773cd520727b59821d93ce3fb9746c7f0e6a3295a1921ff4fdc9e6"
 
 
+CLAUDE_BLOCKING = frozenset(("protect-bash.sh", "protect-files.sh", "protect-mcp.sh"))
+
+
 def _handler(script, status):
-    return {"type": "command", "command": 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/' + script + '"',
+    handler = {"type": "command", "command": 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/' + script + '"',
             "timeout": 60, "statusMessage": status}
+    if script in CLAUDE_BLOCKING:
+        handler["onFailure"] = "block"
+    return handler
 
 
 def _claude_pre():
@@ -65,7 +71,12 @@ def _legacy_claude():
     installed = {"matcher": "Bash|PowerShell|Monitor", "hooks": [
         _handler("snapshot-before-tool.sh", "Snapshotting source files..."),
         _handler("protect-bash.sh", "Checking command safety...")]}
-    return [*published, installed]
+    groups = [*current, *published, installed]
+    # Historical groups predate onFailure. Recognize those exact schemas while requiring it on current candidates.
+    for group in groups:
+        for handler in group["hooks"]:
+            handler.pop("onFailure", None)
+    return groups
 
 
 def wrapper_identity(raw):

@@ -19,9 +19,10 @@ on your machine.
 
 - Windows x64 and git.
 - Visual Studio 2022 Build Tools with **Desktop development with C++** (MSVC v143, a Windows SDK and the bundled CMake
-  3.21+). Installing it is your call; nothing here installs anything. One way, run by you:
-  `winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --version 17.14.39` (the tested release; ASSUMED
-  to be the version string winget lists for it) and then add the workload in the Visual Studio Installer. It is several GB.
+  3.21+). This is a manual step, for you to run -- an agent may not install this:
+  `winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --version 17.14.39 --no-upgrade`,
+  then add the workload in the Visual Studio Installer. Winget lists this tested version (checked 2026-10-25).
+  It is several GB.
 - Python 3.10+ (the toolkit already needs it).
 
 Tested with VS Build Tools 17.14.39 / MSBuild 17.14.51, MSVC 19.44.35228 (toolset 14.44.35207), CMake 3.31.6-msvc6,
