@@ -10487,7 +10487,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "sweep-esp-truncation-unchecked"),
     (_ESP, "    if header is None:\n", "    if False:\n",
      _ESP_T + "test_a_file_that_cannot_be_walked_is_refused_with_its_offset[no-tes4-header]", "sweep-esp-any-file-accepted"),
-    (_ESP, '        if t == "XXXX" and n == 4 and i + 10 <= len(body):\n', "        if False:\n",
+    (_ESP, '        if t == "XXXX":\n', "        if False:\n",
      _ESP_T + "test_compressed_records_and_oversize_subrecords_are_read", "sweep-esp-xxxx-ignored"),
     ("tools/esp-summary.py", "    return 1 if plugin.problems else 0\n", "    return 0\n",
      _ESP_T + "test_summary_exits_1_on_a_problem_and_2_on_a_file_it_cannot_walk", "sweep-esp-summary-problem-exit-0"),
@@ -10688,4 +10688,31 @@ MUTATIONS += [pytest.param(_H1O, find, rep, test, id=ident) for find, rep, test,
     ("    groups = [*current, *published, installed]", "    groups = [*published, installed]",
      "tests/test_ordered_policy.py::test_published_legacy_groups_migrate_to_current_blocking_guards[original-pre-h1]",
      "h1-ordered-previous-v4-schema-not-recognized"),
+]]
+
+# Task 7 P1: every malformed body is a problem, never a clean parse/diff.
+_RP7 = "tests/test_review_plugin.py::"
+_RB7 = _RP7 + "test_malformed_subrecord_is_never_a_clean_record"
+MUTATIONS += [pytest.param(f, find, rep, test, id="review-plugin-" + ident) for f, find, rep, test, ident in [
+    (_ESP, '    while i < len(body):', '    while i + 6 <= len(body):', _RB7 + '[trailing-header]', 'trailing-header'),
+    (_ESP, '            return fail("truncated subrecord header")', '            return out',
+     _RB7 + '[trailing-header]', 'header-fault-reported'),
+    (_ESP, '            if n != 4:', '            if False:', _RB7 + '[wrong-xxxx-size]', 'xxxx-size'),
+    (_ESP, '            if big is not None:\n                return fail("XXXX has no following ordinary subrecord")',
+     '            if False:\n                return fail("XXXX has no following ordinary subrecord")', _RB7 + '[double-xxxx]', 'xxxx-owner'),
+    (_ESP, '                return fail("truncated XXXX payload")', '                return out',
+     _RB7 + '[short-xxxx]', 'xxxx-truncation'),
+    (_ESP, '        if i + 6 + n > len(body):', '        if False:', _RB7 + '[overrun]', 'payload-boundary'),
+    (_ESP, '        if i + 6 + n > len(body):', '        if False:', _RB7 + '[extended-overrun]', 'extended-payload-boundary'),
+    (_ESP, '    if big is not None:\n        return fail("dangling XXXX without its following subrecord")',
+     '    if False:\n        return fail("dangling XXXX without its following subrecord")', _RB7 + '[dangling-xxxx]', 'xxxx-dangling'),
+    (_ESP, '            raise PluginError(message)', '            return out',
+     _RP7 + 'test_standalone_subrecord_reader_refuses_malformed_bytes', 'standalone-refuses'),
+    (_ESP, '        problems.append(message)', '        pass', _RB7 + '[overrun]', 'problem-retained'),
+    (_ESP, '            problems.extend("{} {:08X} at offset {}: {}".format(name, fid, off, issue) for issue in issues)',
+     '            pass', _RB7 + '[overrun]', 'parse-problem-wired'),
+    (_ESP, 'subrecs(header_body, problems=[])', 'subrecs(header_body)',
+     _RP7 + 'test_both_plugin_reports_keep_malformed_input_inconclusive[header]', 'damaged-header-reportable'),
+    ('tools/esp-record-diff.py', '    if issues:\n        return "(malformed subrecords)"', '    if False:\n        return "(malformed subrecords)"',
+     _RP7 + 'test_both_plugin_reports_keep_malformed_input_inconclusive[record]', 'damaged-diff-labelled'),
 ]]
