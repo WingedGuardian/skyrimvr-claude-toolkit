@@ -10689,3 +10689,15 @@ MUTATIONS += [pytest.param(_H1O, find, rep, test, id=ident) for find, rep, test,
      "tests/test_ordered_policy.py::test_published_legacy_groups_migrate_to_current_blocking_guards[original-pre-h1]",
      "h1-ordered-previous-v4-schema-not-recognized"),
 ]]
+
+# Task 7 A2: unreadable authority is never an empty live set.
+_RR7 = "tests/test_review_recovery.py::"
+MUTATIONS += [pytest.param("tools/skyguard/recovery.py", find, rep, test, id="review-recovery-" + ident)
+              for find, rep, test, ident in [
+    ('    except FileNotFoundError:\n        return []', '    except OSError:\n        return []',
+     _RR7 + 'test_unreadable_manifest_is_not_an_empty_snapshot_list', 'read-error-not-empty'),
+    ('            if not raws:\n                raise OSError("the recovery manifest became empty")', '            if False:\n                raise OSError("the recovery manifest became empty")',
+     _RR7 + 'test_manifest_authority_must_remain_readable_under_the_prune_lock[emptied]', 'empty-under-lock'),
+    ('        audit.log(HOOK, "FAILED", "could not read the recovery authority -- no config snapshot was recorded")\n        return',
+     '        raise', _RR7 + 'test_unreadable_authority_stops_config_snapshot_without_blocking_the_hook', 'snapshot-error-contained'),
+]]
