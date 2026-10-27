@@ -182,8 +182,8 @@ def test_a_kept_config_identical_to_the_archive_gets_no_new_file_and_is_still_re
     assert not ini.with_name("ExampleFramework.ini.new").exists(), "a .new identical to the kept config was written"
     assert "CONFIG-SAME" in r.stdout
     manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
-    assert "{}  {}".format(hashlib.sha256(b"theirs=1\n").hexdigest(), ini) in manifest, manifest
-    assert "# STATUS: complete, 5 file(s), 0 verify mismatch(es)" in manifest, manifest
+    assert "# KEPT: {}  {}".format(hashlib.sha256(b"theirs=1\n").hexdigest(), ini) in manifest, manifest
+    assert "# STATUS: complete, 4 file(s), 0 verify mismatch(es)" in manifest, manifest
 
 
 def test_generated_json_data_is_replaced_but_a_real_config_is_still_kept(tmp_path, sevenz, game):

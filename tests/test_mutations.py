@@ -10826,3 +10826,17 @@ MUTATIONS += [pytest.param("tools/housekeep.py", find, rep, test, id="review-hou
     ('                        remember(line.split("  ", 1)[1])', '                        pass',
      _HKDT + 'test_kept_install_records_remain_understood_protection[valid]', 'kept-record-path'),
 ]]
+
+# Task 7 P6: a kept config is never an uninstall target or a pending write.
+_RI7 = "tests/test_review_install.py::test_kept_identical_config_survives_the_documented_uninstall[0]"
+MUTATIONS += [pytest.param("tools/mod-install.py", find, rep, _RI7, id="review-install-" + ident)
+              for find, rep, ident in [
+    ('                    header.append("# KEPT: {}  {}".format(sha(dest), dest))',
+     '                    written.append("{}  {}".format(sha(dest), dest))', 'kept-is-written'),
+    ('                    header.append("# KEPT: {}  {}".format(sha(dest), dest))',
+     '                    header.append("KEPT: {}  {}".format(sha(dest), dest))', 'kept-is-removable'),
+    ('                    record(header + ["# STATUS: in progress"] + written + planned[done:])',
+     '                    record(header + ["# STATUS: in progress"] + written + planned[len(written):])', 'kept-still-pending'),
+    ('\n                record(header + ["# STATUS: in progress"] + written + planned[done:])',
+     '\n                record(header + ["# STATUS: in progress"] + written + planned[len(written):])', 'later-write-still-pending'),
+]]
