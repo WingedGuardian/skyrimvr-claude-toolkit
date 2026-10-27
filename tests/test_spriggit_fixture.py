@@ -1,6 +1,6 @@
 """fix-limits 4: CI runs the pinned Spriggit on a committed fixture, not only restores it.
 
-The `.NET 10 toolchain` job in .github/workflows/ci.yml restored Spriggit and listed it, so a Spriggit that could
+The `.NET 10 toolchain` job in .github/workflows/full-qualification.yml restored Spriggit and listed it, so a Spriggit that could
 not serialize or deserialize on .NET 10 still went green. It now round-trips tests/fixtures/spriggit/
 FixLimitsRoundTrip.esp: serialize -> deserialize -> the same records (the YAML of the rebuilt plugin equals the
 first YAML) and, MEASURED 2026-10-13 on Windows with Spriggit 0.41.0 / .NET SDK 10.0.401, the same bytes.
@@ -18,7 +18,7 @@ from conftest import REPO
 
 yaml = pytest.importorskip("yaml")
 FIX = REPO / "tests" / "fixtures" / "spriggit"
-CI = REPO / ".github" / "workflows" / "ci.yml"
+CI = REPO / ".github" / "workflows" / "full-qualification.yml"
 
 
 def _gen():

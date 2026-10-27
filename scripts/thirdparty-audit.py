@@ -621,7 +621,7 @@ REGISTRY = [
                                            "Spriggit.Core/Commands/DeserializeCommand.cs"]}),
                 ("nupkg_tfm", {"package": "spriggit.cli", "runtime": ".NET SDK"})]},
     {"name": ".NET SDK", "pins": [("regex", ".devcontainer/Dockerfile", r"DOTNET_SDK_VERSION=(?P<v>\d+\.\d+\.\d+)"),
-                                  ("regex", ".github/workflows/ci.yml", r"dotnet-version:\s*[\"']?(?P<v>\d+\.\d+)")],
+                                  ("regex", ".github/workflows/full-qualification.yml", r"dotnet-version:\s*[\"']?(?P<v>\d+\.\d+)")],
      "compare": "minor", "upstream": ("dotnet", None), "refs": DOTNET_REFS,
      "checks": [("hashes", {"items": [
          {"label": ".NET SDK " + arch, "file": ".devcontainer/Dockerfile",
@@ -806,7 +806,7 @@ REGISTRY = [
          "url": "https://mcr.microsoft.com/v2/devcontainers/python/manifests/{tag}",
          "accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json"}]})],
      "upstream": ("mcr", "devcontainers/python", r"\d+\.\d+\.\d+-{pyminor}-bookworm")},
-    {"name": "busybox (CI sentinel)", "pins": [("regex", ".github/workflows/ci.yml", r"busybox:(?P<v>\d+\.\d+)\b")],
+    {"name": "busybox (CI sentinel)", "pins": [("regex", ".github/workflows/full-qualification.yml", r"busybox:(?P<v>\d+\.\d+)\b")],
      "upstream": ("dockerhub", "library/busybox"), "compare": "minor"},
 ]
 # Names the manual audit (2026-10-05) covered; tests/test_thirdparty_audit.py holds the registry to this floor.
@@ -1608,6 +1608,7 @@ DELIVERY_EXEMPT = [
     ("docs/skse-cross-compile.md", "pipe-to-shell", r"xmake\.io/shget\.text \| bash", _SKSE),
     ("docs/skse-cross-compile.md", "download-unverified", r"Jake-Shadle/xwin/releases/download", _SKSE),
     (".github/workflows/ci.yml", "system-package", r"sudo apt-get install -y|choco install jq -y", _CI),
+    (".github/workflows/full-qualification.yml", "system-package", r"sudo apt-get install -y|choco install jq -y", _CI),
     ("*settings.local.json.example", "npm", r'"Bash\(npm install:\*\)"', "a permission-allowlist pattern, not an install"),
     ("*settings.local.json.example", "pip", r'"Bash\(pip install:\*\)"', "a permission-allowlist pattern, not an install"),
     ("*", "follows-latest", r"install locations \(newest version first\)",
