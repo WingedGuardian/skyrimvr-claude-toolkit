@@ -211,7 +211,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
                  "if False:",
                  "tests/test_release_build.py::test_a_missing_or_invalid_committed_product_slug_refuses[traversal]",
                  id="review-builder-invalid-product-slug"),
-    pytest.param(".github/workflows/ci.yml", 'tee "$RUNNER_TEMP/build.out"', "tee build.out",
+    pytest.param(".github/workflows/full-qualification.yml", 'tee "$RUNNER_TEMP/build.out"', "tee build.out",
                  "tests/test_release_build.py::test_the_real_ci_build_step_keeps_its_log_outside_the_checkout",
                  id="review-ci-build-log-outside-checkout"),
     pytest.param("tools/verify-release.sh", ' || exit 2\n\n# The workspace goes under VERIFY_WORK_ROOT',
@@ -7084,27 +7084,27 @@ _T10 = [
     ("t10-wf-release-keeps-token", ".github/workflows/release.yml",
      "          persist-credentials: false\n          # Without this", "          # Without this",
      _WT + "test_least_privilege_and_no_dangerous_triggers[release.yml]"),
-    ("t10-wf-load-test-in-ci", ".github/workflows/ci.yml",
+    ("t10-wf-load-test-in-ci", ".github/workflows/full-qualification.yml",
      "        run: python -B tests/run_harness_tests.py tests/test_skyguard_timing.py",
      "        run: SKYGUARD_LOAD_TEST=1 python -B tests/run_harness_tests.py tests/test_skyguard_timing.py",
      _WT + "test_the_load_test_never_runs_in_ci_and_the_deadline_tests_run_on_both_legs"),
-    ("t10-wf-python-range-short", ".github/workflows/ci.yml", '        python: ["3.10", "3.11", "3.12", "3.13"]',
+    ("t10-wf-python-range-short", ".github/workflows/full-qualification.yml", '        python: ["3.10", "3.11", "3.12", "3.13"]',
      '        python: ["3.11"]', _WT + "test_the_behavior_matrix_is_both_oses_times_the_tested_pythons"),
-    ("t10-wf-collect-tripwire-dropped", ".github/workflows/ci.yml",
+    ("t10-wf-collect-tripwire-dropped", ".github/workflows/full-qualification.yml",
      '          python scripts/check_ci_leg.py collect collect.log --leg "$RUNNER_OS"', "          true",
      _WT + "test_the_tripwires_bracket_the_suite_on_every_leg"),
     # Review M7: dropping the pipefail TEXT was an equivalent mutant (the job's bash default already adds it);
     # the real hazard is losing that default, so the twin removes it.
-    ("t10-wf-behavior-loses-bash-default", ".github/workflows/ci.yml",
+    ("t10-wf-behavior-loses-bash-default", ".github/workflows/full-qualification.yml",
      "    defaults:\n      run:\n        shell: bash\n    steps:\n      # Full history WITH tags",
      "    steps:\n      # Full history WITH tags", _WT + "test_the_tripwires_bracket_the_suite_on_every_leg"),
-    ("t10-wf-behavior-shallow", ".github/workflows/ci.yml",
+    ("t10-wf-behavior-shallow", ".github/workflows/full-qualification.yml",
      "tagless shallow clone.\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1\n"
      "        with:\n          fetch-depth: 0",
      "tagless shallow clone.\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1\n"
      "        with:\n          fetch-depth: 1",
      _WT + "test_every_job_that_runs_the_freeze_gate_has_full_history"),
-    ("t10-wf-dotnet-channel", ".github/workflows/ci.yml", '          dotnet-version: "10.0.x"', '          dotnet-version: "9.0.x"',
+    ("t10-wf-dotnet-channel", ".github/workflows/full-qualification.yml", '          dotnet-version: "10.0.x"', '          dotnet-version: "9.0.x"',
      _WT + "test_node_comes_from_node_version_and_dotnet_is_channel_10"),
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T10]
@@ -9058,11 +9058,11 @@ MUTATIONS += [
 _DL = "tests/test_dependency_locks.py::"
 _NPM_CI = "        run: npm ci --ignore-scripts --no-audit --no-fund\n"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
-    (".github/workflows/ci.yml", "      - name: Install Node dependencies for the FOMOD smoke\n" + _NPM_CI, "",
+    (".github/workflows/full-qualification.yml", "      - name: Install Node dependencies for the FOMOD smoke\n" + _NPM_CI, "",
      _DL + "test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them", "fixu-ci-behavior-npm-ci-dropped"),
     (".github/workflows/ci.yml", "      - name: Install dependencies\n" + _NPM_CI, "",
      _DL + "test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them", "fixu-ci-node-npm-ci-dropped"),
-    (".github/workflows/ci.yml", '          TOOLKIT_REQUIRE_HARNESS: "1"\n          TOOLKIT_REQUIRE_NODE_DEPS: "1"\n',
+    (".github/workflows/full-qualification.yml", '          TOOLKIT_REQUIRE_HARNESS: "1"\n          TOOLKIT_REQUIRE_NODE_DEPS: "1"\n',
      '          TOOLKIT_REQUIRE_HARNESS: "1"\n',
      _DL + "test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them", "fixu-ci-suite-node-deps-not-required"),
     (".github/workflows/ci.yml", "fast-xml-parser@4.3.6", "fast-xml-parser@5.7.3",
@@ -9301,9 +9301,9 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 # fix-limits 4: CI runs the pinned Spriggit (serialize -> deserialize -> serialize) on a committed synthetic fixture.
 _FL4 = "tests/test_spriggit_fixture.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
-    (".github/workflows/ci.yml", '          diff -r "$work/yaml1" "$work/yaml2"\n', "          true\n",
+    (".github/workflows/full-qualification.yml", '          diff -r "$work/yaml1" "$work/yaml2"\n', "          true\n",
      _FL4 + "test_the_dotnet_job_round_trips_the_fixture_after_restoring_spriggit", "fl4-ci-no-record-compare"),
-    (".github/workflows/ci.yml", '          dotnet tool run spriggit -- deserialize --InputPath "$work/yaml1"',
+    (".github/workflows/full-qualification.yml", '          dotnet tool run spriggit -- deserialize --InputPath "$work/yaml1"',
      '          echo deserialize skipped --InputPath "$work/yaml1"',
      _FL4 + "test_the_dotnet_job_round_trips_the_fixture_after_restoring_spriggit", "fl4-ci-never-deserializes"),
     ("tests/fixtures/spriggit/make_fixture.py", "FORM_VERSION = 44", "FORM_VERSION = 43",
@@ -9899,7 +9899,7 @@ MUTATIONS += [pytest.param("tools/skyguard/self_rules.py", "    cache = _StoreCa
 
 # CI run 39210090486: the mutation gate became its own CI part per leg, checked against its own numbers.
 MUTATIONS += [
-    pytest.param(".github/workflows/ci.yml", "        part: [suite, mutations]", "        part: [suite]",
+    pytest.param(".github/workflows/full-qualification.yml", "        part: [suite, mutations]", "        part: [suite]",
                  "tests/test_workflows.py::test_the_tripwires_bracket_the_suite_on_every_leg",
                  id="ci-mutation-part-dropped"),
     pytest.param("scripts/check_ci_leg.py", "        spec = dict(spec, **spec[\"parts\"][part])", "        pass",
@@ -10448,7 +10448,7 @@ _WF_T = "tests/test_workflows.py::test_one_red_check_never_skips_the_later_ones"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (".github/workflows/ci.yml", "      - name: ruff\n        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}\n",
      "      - name: ruff\n", _WF_T, "sweep-ci-ruff-skipped-after-a-red-check"),
-    (".github/workflows/ci.yml",
+    (".github/workflows/full-qualification.yml",
      "        if: ${{ !cancelled() && steps.setup.outcome == 'success' && matrix.part == 'suite' }}\n",
      "        if: matrix.part == 'suite'\n", _WF_T, "sweep-ci-node-tests-skipped-after-a-red-check"),
     (".github/workflows/ci.yml", "      - name: Setup complete\n        id: setup\n        run: echo setup complete\n\n"
@@ -10663,7 +10663,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 
 # CI5: the native backend remains on the qualified VS 2022 runner.
 MUTATIONS.append(pytest.param(
-    ".github/workflows/ci.yml", "    runs-on: windows-2022\n", "    runs-on: windows-latest\n",
+    ".github/workflows/full-qualification.yml", "    runs-on: windows-2022\n", "    runs-on: windows-latest\n",
     "tests/test_workflows.py::test_resaver_plus_uses_the_qualified_vs2022_runner",
     id="ci5-resaver-runner-unpinned"))
 

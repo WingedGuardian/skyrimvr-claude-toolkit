@@ -673,3 +673,7 @@ MIT -- see [LICENSE](LICENSE).
 - [DevBench](https://www.nexusmods.com/skyrimspecialedition/mods/181326) by alandtse ([source](https://github.com/alandtse/devbench)) -- the live in-game REST/MCP channel the `devbench-cli.sh` wrapper drives
 - [@aaronputty](https://github.com/aaronputty) ([fork](https://github.com/aaronputty/putty-skyrim-claude-toolkit)) -- the MO2 path-detection insight that shaped v3.4, and the devcontainer + `docs/container-vs-windows.md` foundation for v3.5
 - [Claude Code](https://claude.ai/code) by Anthropic
+
+## Development CI
+
+Use draft pull requests for fast feedback, then mark ready for full qualification. See the [CI workflow](docs/ci-workflow.md).

@@ -1,0 +1,321 @@
+name: Full qualification
+on:
+  workflow_call:
+permissions:
+  contents: read
+
+jobs:
+  behavior:
+    needs: [release-build]
+    name: Behavioral tests (${{ matrix.os }}, Python ${{ matrix.python }}, ${{ matrix.part }})
+    strategy:
+      max-parallel: 4
+      fail-fast: false
+      # OS x the TESTED Python range (user ruling 2026-10-05: setup checks 3.10-3.13, so CI runs all four).
+      # Node comes from .node-version on every leg; the .NET 10 toolchain has its own job below.
+      # x part: the mutation gate (tests/test_mutations.py) is its own job. It was 146-217 of a Windows leg's
+      # 270 minutes and one leg timed out (CI run 39210090486); each part is checked against its own numbers.
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        part: [suite, mutations]
+    runs-on: ${{ matrix.os }}
+    # The whole suite includes tests/test_mutations.py; a leg that hangs must die red, not stall for six hours.
+    # 300 (the test_workflows cap): CI run 39167733692's full Windows suite took 176-190 min and two legs hit the
+    # old 200-min step limit with no summary.
+    timeout-minutes: 300
+    # Both legs block. Windows is the platform this toolkit actually targets and
+    # every path bug it has shipped was Windows-specific, so a non-blocking
+    # Windows leg would be a gate that cannot fail -- the exact defect this job
+    # exists to eliminate.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Full history WITH tags: the Codex hook-definition freeze gate compares against the newest release
+      # tag, and fails (rather than passing vacuously) in a tagless shallow clone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Deliberately NOT python-version-file here. .python-version pins an exact
+      # patch (3.11.15) for the devcontainer, and that patch has no Windows x64
+      # build in the runner manifest -- the Windows leg died at setup before
+      # running a single test. The matrix names the minor; the runner supplies its latest patch.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      # The shipped hooks no longer use jq, but the frozen bash reference hooks under
+      # tests/guard_corpus/reference/ do, and the side-effect equivalence tests run them.
+      - name: Ensure jq is on PATH
+        run: |
+          if command -v jq >/dev/null 2>&1; then jq --version; exit 0; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            choco install jq -y --no-progress
+          else
+            sudo apt-get update -qq && sudo apt-get install -y -qq jq
+          fi
+          command -v jq >/dev/null 2>&1 || { echo "::error::jq still missing"; exit 1; }
+
+      - name: Install pytest
+        # Block scalar: in a plain scalar, ':all: ' is a YAML mapping error that invalidates
+        # the whole workflow file.
+        run: |
+          python -m pip install --quiet --disable-pip-version-check --only-binary=:all: --require-hashes -r requirements.lock
+
+      # test_harness_controls.py and test_harness_integrations.py skip WHOLE MODULES under a
+      # plain pytest: they need the package-manager barrier that only the contained launcher
+      # installs. So the WHOLE suite runs through the launcher, and TOOLKIT_REQUIRE_HARNESS=1
+      # makes a run without the barriers an error rather than a quiet green.
+      # The live-Docker controls never pull; give the Linux leg (which has a daemon) the exact
+      # sentinel image, pinned by digest, so they run there instead of reporting COULD NOT CHECK.
+      # --- FOMOD smoke prerequisite (Plan 8 T6c) ---
+      # tests/test_node_fomod_smoke.py runs under the launcher, whose tripwire blocks package managers, so the
+      # locked node_modules must already be installed here, outside the launcher.
+      - name: Install Node dependencies for the FOMOD smoke
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      # --- end FOMOD smoke prerequisite ---
+
+      - name: Live-Docker sentinel image (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          docker pull busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+          docker tag busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e busybox:1.37
+
+      # SETUP ENDS HERE: every check below is gated on this marker, not on the checks before it (see the shell job).
+      - name: Setup complete
+        id: setup
+        run: echo setup complete
+
+      # TRIPWIRE, before an hour of suite: this leg must COLLECT at least the recorded floor
+      # (.github/ci-leg.json). A module that stopped importing, or a leg looking at the wrong tree, goes red here.
+      - name: Tripwire -- the leg collects the whole suite
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 10
+        env:
+          TOOLKIT_REQUIRE_HARNESS: "1"
+        run: |
+          set -o pipefail
+          python -B tests/run_harness_tests.py tests/ --collect-only -q | tee collect.log
+          python scripts/check_ci_leg.py collect collect.log --leg "$RUNNER_OS"
+
+      # The timing guards (catastrophic-regex, quadratic-input) and the hook deadline tests, alone and under a
+      # hard step timeout: a regression there is a HANG, and a hang must be a red step, not a stalled job.
+      # They run again inside the full suite; this run exists for the timeout. The opt-in CPU-load file
+      # (test_hook_deadline_load.py) is NOT run in CI: a shared runner gives no stable CPU to measure against.
+      - name: Timing guards and hook deadlines, under a hard timeout
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 20
+        env:
+          TOOLKIT_REQUIRE_HARNESS: "1"
+        run: python -B tests/run_harness_tests.py tests/test_skyguard_timing.py tests/test_python_fallback.py tests/test_hook_deadline.py -q -rfEs
+
+      - name: Behavioral suite (contained harness)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 270
+        env:
+          TOOLKIT_REQUIRE_HARNESS: "1"
+          TOOLKIT_REQUIRE_NODE_DEPS: "1"
+          SUITE: ${{ matrix.part == 'mutations' && 'tests/test_mutations.py' || 'tests/ --ignore=tests/test_mutations.py' }}
+        run: |
+          set -o pipefail
+          python -B tests/run_harness_tests.py $SUITE -v --durations=10 -rfEs | tee behavioral.log
+
+      # The skip ceiling, the xfail ceiling, every required module (harness-contained ones, hook deadlines, the
+      # freeze gate, the release machinery; the platform's own) has a PASSED test, and the load test did not run.
+      # The mutation part has its own floor, ceilings and required module (.github/ci-leg.json parts.mutations).
+      - name: Tripwire -- skip ceiling and required modules
+        if: always()
+        env:
+          PART: ${{ matrix.part == 'mutations' && '--part mutations' || '' }}
+        run: python scripts/check_ci_leg.py log behavioral.log --leg "$RUNNER_OS" $PART
+
+      # A COULD NOT CHECK skip means a test did not run. Linux has a daemon and the sentinel image,
+      # so NOTHING may be unchecked there. On Windows the Docker daemon is the one expected absence
+      # (no Linux daemon on the runner) and the dir_fd skip is POSIX-only by definition. Anything
+      # else going unchecked fails the job. -rfEs names failures and errors as well as skips.
+      - name: No unexpected COULD NOT CHECK skips
+        if: always()
+        run: |
+          allow=()
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            allow+=(--allow "Docker daemon" --allow "platform has no dir_fd removal")
+          fi
+          python scripts/check_could_not_check.py behavioral.log "${allow[@]}"
+
+      # The Node tests cover path handling (game-root separators, plugins.txt
+      # discovery), and the `node` job runs on Linux only -- where `path.sep`
+      # is '/' and a Windows-separator bug cannot surface. Windows is the
+      # platform this toolkit targets, so they run on both legs here too.
+      # node_modules comes from the `npm ci` step above, so the FOMOD smoke runs here too and must not skip.
+      - name: Node tests
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && matrix.part == 'suite' }}
+        env:
+          TOOLKIT_REQUIRE_NODE_DEPS: "1"
+        run: npm test
+
+  # The pinned .NET tools restore and start with the SDK the toolkit requires (10): setup-dotnet installs
+  # channel 10.0 and `dotnet tool restore` resolves .config/dotnet-tools.json with it. Honest limit: hosted
+  # runner images carry other .NET runtimes too, so this leg cannot prove a 10-ONLY machine works -- that is
+  # T6b's net10-only spike, run locally.
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: behavior-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.part }}
+          path: |
+            collect.log
+            behavioral.log
+          if-no-files-found: warn
+
+  dotnet:
+    name: .NET 10 toolchain (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+      - name: The SDK is 10, and the pinned tools restore with it
+        run: |
+          set -euo pipefail
+          v=$(dotnet --version)
+          case "$v" in 10.*) echo "SDK $v" ;; *) echo "::error::dotnet resolves SDK $v, not 10"; exit 1 ;; esac
+          dotnet tool restore
+          dotnet tool list --local
+      # Restoring proves Spriggit downloads, not that it works on .NET 10: RUN it. The committed synthetic fixture
+      # (tests/fixtures/spriggit/make_fixture.py documents it) goes plugin -> YAML -> plugin -> YAML. The two YAML
+      # trees must be equal (the same records back); equal bytes were measured locally and are reported here, but a
+      # byte difference alone is a warning, because a round trip may reorder records (CHANGELOG known limit).
+      # Shallow work folder: Spriggit fails on deep output paths.
+      - name: Spriggit round trip on the committed fixture
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP"
+          if command -v cygpath >/dev/null 2>&1; then tmp="$(cygpath -m "$tmp")"; fi
+          work="$tmp/spriggit-rt"
+          mkdir -p "$work/out"
+          cp tests/fixtures/spriggit/FixLimitsRoundTrip.esp "$work/"
+          dotnet tool run spriggit -- serialize --InputPath "$work/FixLimitsRoundTrip.esp" --OutputPath "$work/yaml1" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion 0.41.0
+          dotnet tool run spriggit -- deserialize --InputPath "$work/yaml1" --OutputPath "$work/out/FixLimitsRoundTrip.esp"
+          dotnet tool run spriggit -- serialize --InputPath "$work/out/FixLimitsRoundTrip.esp" --OutputPath "$work/yaml2" --GameRelease SkyrimSE --PackageName Spriggit.Yaml --PackageVersion 0.41.0
+          record="$(cat "$work"/yaml1/Globals/*.yaml)"
+          case "$record" in *"EditorID: FixLimitsRoundTrip"*) ;; *) echo "::error::the fixture's global was not serialized"; exit 1 ;; esac
+          diff -r "$work/yaml1" "$work/yaml2"
+          if cmp -s "$work/FixLimitsRoundTrip.esp" "$work/out/FixLimitsRoundTrip.esp"; then
+            echo "round trip: same records, same bytes"
+          else
+            echo "::warning::round trip: same records, different bytes"
+          fi
+
+  # v4.0.0: ReSaver Plus (the opt-in native ReSaver backend) is BUILT on the user's machine and never shipped, so CI
+  # builds it exactly that way on a machine that never saw the dev install -- the "second machine" build: the pin
+  # verified, the 27 patches applied, every changed/added file checked against SOURCE-SHA256, the CLI and tests built
+  # with the GUI off, all six runnable CTest targets passing (build.py refuses to install otherwise) -- then runs every
+  # operation through tools/resaver-cli.sh on a SYNTHETIC save made by the build's own probe (never a real save).
+  # The behavior legs test the same code with a stub executable on both OSes.
+
+  resaver-plus:
+    name: ReSaver Plus build + synthetic survey (windows-2022)
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: "Record the toolchain this image provides (tested: Build Tools 17.14.39, MSVC 19.44, CMake 3.31.6)"
+        run: |
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          "$vswhere" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
+            -property catalog_productDisplayVersion || echo "::warning::vswhere did not answer"
+          cmake --version || echo "cmake is not on PATH; build.py uses the copy inside Visual Studio"
+      - name: Build (pin, patches, SOURCE-SHA256, CLI + tests with the GUI off, six CTest targets)
+        run: python -B tools/resaver-plus/build.py --work "$(cygpath -m "$RUNNER_TEMP")/rspp" --jobs 2
+      - name: The installed build matches its BUILD-INFO
+        run: |
+          cat tools/resaver-plus/build/BUILD-INFO.json
+          bash tools/resaver-cli.sh verify-native
+      - name: Synthetic survey through tools/resaver-cli.sh (every operation; edits to new outputs only)
+        run: |
+          set -euo pipefail
+          tmp="$(cygpath -m "$RUNNER_TEMP")"
+          probe=$(ls "$tmp"/rspp/owned-build-*/cmake-build/Release/rs_write_port_probe.exe | head -n1)
+          BASH_EXE="$(cygpath -m "$BASH")" python -B tests/resaver_native_survey.py --root . --probe "$probe" --work "$tmp/rspp-survey"
+      # R4 of the port plan (native vs the toolkit's Java on the same synthetic save) needs ReSaver.jar, a manual Nexus
+      # download no runner has: it is reported, not faked.
+      - name: Native-vs-Java read contrast
+        run: echo "COULD NOT CHECK -- no CI runner has ReSaver.jar (docs/installing-tools.md, *Pinned downloads*)"
+
+  # The release machinery on every push: build the zip from the commit (scripts/build-release-zip.sh, the same
+  # build release.yml runs), then verify it as a user would get it -- payload checker, leak grep, and a scrubbed
+  # install (setup.sh, canary, drift check, engine selftest, every hook entry) on both platforms.
+
+  release-build:
+    needs: [dotnet, resaver-plus]
+    name: Release build + scrubbed verify (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+      # FIRST, before any step writes into the checkout: the builder refuses a dirty tree, and CI never passes
+      # --allow-dirty.
+      - name: Build the zip from the commit
+        run: |
+          set -euo pipefail
+          bash scripts/build-release-zip.sh HEAD "$RUNNER_TEMP/dist" | tee "$RUNNER_TEMP/build.out"
+          echo "ZIP=$(sed -n 's/^ZIP=//p' "$RUNNER_TEMP/build.out")" >> "$GITHUB_ENV"
+          echo "COMMIT=$(sed -n 's/^COMMIT=//p' "$RUNNER_TEMP/build.out")" >> "$GITHUB_ENV"
+      - name: Verify the zip in a scrubbed environment
+        run: bash tools/verify-release.sh --local "$ZIP" --scrubbed --expect-commit "$COMMIT"
+
+  full-required:
+    name: Full qualification required
+    needs: [behavior, dotnet, resaver-plus, release-build]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: WingedGuardian/modding-agent-harness/.github/actions/ci-policy@38bf2cb8da9d4add2fa3c71341d641fafd265368 # v1 policy API
+        with:
+          profile: skyrim
+          mode: verify
+          required-jobs: '["behavior","dotnet","resaver-plus","release-build"]'
+          needs-json: ${{ toJSON(needs) }}

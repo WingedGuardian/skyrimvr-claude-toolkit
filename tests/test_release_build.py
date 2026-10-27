@@ -10,6 +10,7 @@ Each test builds a tiny throwaway repo, never this one: the builder must not dep
 mutation harness copies the repo without .git.
 """
 from __future__ import annotations
+from ci_workflow import load_ci
 
 import importlib.util
 import os
@@ -545,7 +546,7 @@ def test_archive_name_comes_from_the_selected_commit_not_the_producer_checkout(t
 
 def test_the_real_ci_build_step_keeps_its_log_outside_the_checkout(tmp_path):
     import yaml
-    workflow = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text())
+    workflow = load_ci(REPO)
     script = next(s["run"] for s in workflow["jobs"]["release-build"]["steps"]
                   if s.get("name") == "Build the zip from the commit")
     repo = _repo(tmp_path)

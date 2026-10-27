@@ -21,6 +21,10 @@ TESTED_PYTHONS = ["3.10", "3.11", "3.12", "3.13"]     # user ruling 2026-10-05: 
 def _load(name):
     text = (WF / name).read_text(encoding="utf-8")
     data = yaml.safe_load(text)
+    if name == "ci.yml":
+        from ci_workflow import load_ci
+        data = load_ci(REPO)
+        text += "\n" + (WF / "full-qualification.yml").read_text(encoding="utf-8")
     # PyYAML reads the bare key `on` as the boolean True.
     data["on"] = data.pop(True, data.get("on"))
     return text, data
@@ -44,7 +48,10 @@ def test_every_action_is_pinned_by_commit_sha(name):
     uses = re.findall(r"^\s*-?\s*uses:\s*(\S+)(.*)$", text, re.M)
     assert uses, f"{name}: no `uses:` at all -- this check would be vacuous"
     for ref, rest in uses:
-        assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", ref), f"{name}: {ref} is not pinned by a full commit sha"
+        if ref.startswith("./"):
+            assert ref == "./.github/workflows/full-qualification.yml" and (WF / "full-qualification.yml").is_file()
+            continue
+        assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", ref), f"{name}: {ref} is not pinned by a full commit sha"
         assert re.search(r"#\s*v\d", rest), f"{name}: {ref} has no `# vX.Y.Z` comment naming the release"
 
 
@@ -52,6 +59,11 @@ def test_every_action_is_pinned_by_commit_sha(name):
 def test_every_job_has_a_timeout(name):
     _, data = _load(name)
     for jid, job in data["jobs"].items():
+        if "uses" in job:
+            assert jid == "qualification" and job["uses"] == "./.github/workflows/full-qualification.yml"
+            _, called = _load("full-qualification.yml")
+            assert all(isinstance(j.get("timeout-minutes"), int) and 0 < j["timeout-minutes"] <= 300 for j in called["jobs"].values())
+            continue
         assert isinstance(job.get("timeout-minutes"), int) and 0 < job["timeout-minutes"] <= 300, \
             f"{name}/{jid}: no timeout-minutes (a hang would stall for six hours instead of going red)"
 
@@ -141,7 +153,8 @@ def test_the_tripwires_bracket_the_suite_on_every_leg():
 SETUP_GATE = "${{ !cancelled() && steps.setup.outcome == 'success' }}"
 # Jobs whose later steps CONSUME an earlier step's output (the restored tools, the built zip), so a red step there
 # must skip the rest, and jobs with one check. Every other job ends its setup with the marker below.
-SEQUENTIAL_JOBS = {"setup-smoke", "dotnet", "release-build", "resaver-plus"}
+SEQUENTIAL_JOBS = {"setup-smoke", "dotnet", "release-build", "resaver-plus",
+                   "policy", "qualification", "required", "full-required"}
 
 
 def test_one_red_check_never_skips_the_later_ones():

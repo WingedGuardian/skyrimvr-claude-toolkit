@@ -1,4 +1,5 @@
 """Read-only dependency/configuration gates also run under ordinary CI pytest."""
+from ci_workflow import load_ci
 import hashlib
 import json
 import re
@@ -88,7 +89,7 @@ def test_ci_workflow_parses_and_runs_harness_modules_on_both_legs():
     """An unparseable workflow runs NOTHING. `--only-binary=:all: --require-hashes` in a plain
     scalar is a YAML mapping error (": "), which silently disabled every CI job."""
     yaml = pytest.importorskip("yaml")
-    workflow = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text())
+    workflow = load_ci(REPO)
     behavior = workflow["jobs"]["behavior"]
     assert set(behavior["strategy"]["matrix"]["os"]) >= {"ubuntu-latest", "windows-latest"}
     harness = [step for step in behavior["steps"]
@@ -160,7 +161,7 @@ def test_ci_installs_node_deps_with_npm_ci_before_the_tests_that_require_them():
     and xeditlib-dependent tests run against no node_modules (TOOLKIT_REQUIRE_NODE_DEPS=1 then fails the leg, but a
     step dropped together with that env var would skip the smoke silently)."""
     yaml = pytest.importorskip("yaml")
-    jobs = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text())["jobs"]
+    jobs = load_ci(REPO)["jobs"]
     for job, consumer in (("node", "npm test"), ("behavior", "tests/run_harness_tests.py $SUITE -v")):
         steps = jobs[job]["steps"]
         install = [i for i in _steps_named(steps, "npm ci --ignore-scripts")
@@ -177,7 +178,7 @@ def test_ci_keeps_the_fomod_smoke_control_that_must_go_red():
     """The FOMOD smoke's control installs the injectable fast-xml-parser 4.3.6 and FAILS the job if the smoke passes
     there. Losing the step, the pinned bad version or the inverted exit leaves a smoke nobody has watched go red."""
     yaml = pytest.importorskip("yaml")
-    steps = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text())["jobs"]["node"]["steps"]
+    steps = load_ci(REPO)["jobs"]["node"]["steps"]
     control = [s for s in steps if "fomod-xmlbuilder.test.js" in str(s.get("run", "")) and _unconditional(s)]
     assert len(control) == 1, [s.get("name") for s in control]
     run = control[0]["run"]
