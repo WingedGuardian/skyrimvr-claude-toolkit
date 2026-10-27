@@ -3349,10 +3349,11 @@ _SP_CLAUSES = [
     ("pipe-stdin", 'stdin = "pipe" if rec.stage > 0 else ""', 'stdin = ""', "test_pipeline_stage_reads_the_pipe"),
     # cd_before
     ("cd-tracked", "                    self.track_cd(f, cmd)", "                    pass", "test_bash_cd_before"),
-    ("cd-not-from-a-pipeline", 'if self.SESSION_CD or (sep not in ("|", "|&") and cmd.stage == 0):', "if True:", "test_bash_cd_before"),
-    ("cd-subshell-scope", '        self.frames.pop()\n        p = self.frames[-1]\n        if f.kind in ("subst", "proc"):',
-     '        self.frames.pop()\n        p = self.frames[-1]\n        p.cd = f.cd\n        if f.kind in ("subst", "proc"):',
-     "test_bash_cd_before"),
+    ("cd-not-from-a-pipeline", '        if d == "bash" and rec.carry_cd:', '        if d == "bash":', "test_eval_pipeline_does_not_move_the_caller"),
+    ("cd-subshell-scope",
+     "            frame_cd[rec.frame] = (_join_cd(res.cd, rec.cd_change) if rec.cd_change is not None else res.cd)",
+     "            frame_cd[sc.frames[0].id] = (_join_cd(res.cd, rec.cd_change) if rec.cd_change is not None else res.cd)",
+     "test_eval_subshell_does_not_move_the_caller"),
     # fail closed (R4)
     ("token-cap", "if self.tokens > MAX_TOKENS:", "if False:", "test_too_many_tokens_fails_closed"),
     ("depth-cap-frames", "if len(self.frames) + self.depth > MAX_DEPTH:", "if False:",
@@ -4188,9 +4189,9 @@ _T11_CLAUSES = [
      _t11row("t11-cli-exec-smp-reset")),
     # not safe by default (R4), per clause
     ("rule-S-DEVBENCH-CRASH-unparsable", _MC, "    textual = not parsed.ok or opaque or bool(", "    textual = False and bool(",
-     _t11row("t11-curl-unparsable")),
+     "tests/test_review_guards.py::test_uncompleted_curl_needs_the_unreadable_text_fallback"),
     ("rule-S-DEVBENCH-CRASH-unparsable-only", _MC, "    textual = not parsed.ok or opaque or bool(", "    textual = opaque or bool(",
-     _t11row("t11-curl-unparsable")),
+     "tests/test_review_guards.py::test_uncompleted_curl_needs_the_unreadable_text_fallback"),
     ("rule-S-DEVBENCH-CRASH-opaque", _MC, "    textual = not parsed.ok or opaque or bool(", "    textual = not parsed.ok or bool(",
      _T11 + "test_an_opaque_program_next_to_the_endpoint_and_the_denied_command_denies"),
     ("rule-S-DEVBENCH-CRASH-text-needs-reset", _MC, " and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(_norm_text(command)):",
@@ -7970,7 +7971,7 @@ _FXI1 = "tests/test_skyguard_state_text_fallback.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # A-I1: S-SELF-STATE reads an unreadable command's text...
     ("tools/skyguard/self_rules.py", "        hit = _state_text(command, parsed)", '        hit = ""',
-     _FXI1 + "test_an_unparseable_write_into_the_state_is_s_self_state[unclosed-quote-redirect]", "fixA-i1-fallback"),
+     "tests/test_review_guards.py::test_uncompleted_state_redirect_needs_the_text_fallback", "fixA-i1-fallback"),
     # ...needing a write construct (a read of the state is not a write)...
     ("tools/skyguard/self_rules.py", "            if m and _STATE_TEXT_WRITE.search(stmt):", "            if m:",
      _FXI1 + "test_an_unparseable_command_that_writes_no_state_is_not_s_self_state[read-only-unclosed]",
@@ -10248,7 +10249,7 @@ MUTATIONS += [pytest.param(_SR, *m[:3], id=m[3]) for m in [
     ('    text = _MSYS.sub(r"\\1:/", text)', "    text = text", _OPT + "test_msys_text_is_compared_with_the_drive_root_on_every_host",
      "rule-S-OPAQUE-PROTECTED-msys-spelling"),
     ('        return _protected_text(command, roots) if _unfinished(parsed, command) else ""', '        return ""',
-     _OPA + "[token-cap]", "rule-S-OPAQUE-PROTECTED-token-cap"),
+     _OPA + "[token-cap-after-prefix]", "rule-S-OPAQUE-PROTECTED-token-cap"),
     ("    return not parsed.ok and bool(_DYNAMIC.search(command))", "    return not parsed.ok",
      _OPS + "[token-cap-no-expansion]", "rule-S-OPAQUE-PROTECTED-token-cap-needs-expansion"),
     ("    return not parsed.ok and bool(_DYNAMIC.search(command))", "    return bool(_DYNAMIC.search(command))",
@@ -10731,7 +10732,8 @@ MUTATIONS += [pytest.param(f, find, rep, test, id="review-guards-" + ident) for 
      _SCOPE7, 'background-scope'),
     (_SP7, 'cmd.carry_cd = sep not in ("|", "|&", "&") and cmd.stage == 0', 'cmd.carry_cd = sep not in ("|", "|&", "&")',
      _SCOPE7, 'pipeline-stage-scope'),
-    (_SP7, '        cmd.cd_change = new', '        cmd.cd_change = None', _SCOPE7, 'later-explicit-cd'),
+    (_SP7, '        cmd.cd_change = new', '        cmd.cd_change = None',
+     _RG7 + 'test_explicit_directory_change_reaches_a_later_delete', 'later-explicit-cd'),
     (_SP7, '        g.parent = (f.id,) + f.parent', '        g.parent = ()', _EVAL7, 'nested-frame-inheritance'),
     (_SP7, 'rec.cd = frame_cd.setdefault(rec.frame, next((frame_cd[p] for p in rec.parent_frame if p in frame_cd), rec.cd))',
      'rec.cd = rec.cd', _EVAL7, 'caller-record-location'),

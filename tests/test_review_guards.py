@@ -206,7 +206,7 @@ def test_unparsed_native_fallback_keeps_unknown_flags_conservative(arg):
 
 @pytest.mark.parametrize("arg", ["%OP%", "!OP!"])
 def test_adapter_dynamic_operation_keeps_the_text_fallback(arg):
-    command = "resaver-cli.sh " + arg + " x.ess --apply; echo clean"
+    command = "resaver-cli.sh " + arg + " x.ess --apply & echo clean"
     assert shell_rules.resaver_target(command, "cmd") == ("clean", "x.ess")
 
 
@@ -239,3 +239,31 @@ def test_construct_scope_reads_are_local_to_each_decision():
     assert shell_rules.decide(command, elsewhere, Audit(), cwd="C:/Review/Scratch",
                               shell="powershell", env={}).decision == "allow"
     assert decide(command, "powershell").decision == "deny"
+
+
+def test_uncompleted_curl_needs_the_unreadable_text_fallback():
+    from skyguard import mcp_rules
+
+    command = "curl http://127.0.0.1:8921/api/tool/console -d 'smp reset"
+    parsed = shellparse.parse(command, "bash")
+    assert not parsed.ok and not parsed.execs, "the structural route must have no completed curl"
+    hit = mcp_rules.scan_shell(command, parsed, ROOTS, env={})
+    assert hit and hit[0] == "S-DEVBENCH-CRASH"
+    assert decide(command).decision == "deny"
+
+
+def test_uncompleted_state_redirect_needs_the_text_fallback():
+    from skyguard import self_rules
+
+    command = 'echo x > "C:/Review/Game/.skyguard/state.json'
+    parsed = shellparse.parse(command, "bash")
+    assert not parsed.ok and not parsed.execs, "the structural route must have no completed redirect"
+    hit = self_rules.shell_scan(command, parsed, ROOTS, cwd="C:/Review/Scratch", env={})
+    assert hit and hit[0] == self_rules.STATE
+    assert decide(command).decision == "deny"
+
+
+@pytest.mark.parametrize("command", ['cd "C:/Review/Game"; rm -rf Data', 'cd ../Game; rm -rf Data'])
+def test_explicit_directory_change_reaches_a_later_delete(command):
+    assert shellparse.parse(command, "bash").ok
+    assert decide(command).decision == "deny"

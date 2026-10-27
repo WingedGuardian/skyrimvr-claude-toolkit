@@ -1224,3 +1224,11 @@ def test_a_cd_through_a_same_command_literal_is_followed(dialect, command, want)
     p = parse(command, dialect)
     (rm,) = [e for e in p.execs if e.program in ("rm", "remove-item")]
     assert rm.cd_before == want, (command, rm.cd_before)
+
+
+def test_eval_pipeline_does_not_move_the_caller():
+    assert find("eval 'cd /c/elsewhere' | cat; rm a", "rm").cd_before == ""
+
+
+def test_eval_subshell_does_not_move_the_caller():
+    assert find("cd /c/outer; (eval 'cd /c/inner'); rm a", "rm").cd_before == "/c/outer"
