@@ -308,6 +308,9 @@ jobs:
     name: Behavioral tests (${{ matrix.os }}, Python ${{ matrix.python }})
     strategy:
       fail-fast: false
+      # GitHub-hosted job concurrency is a per-account pool, shared with every other repo on the account.
+      # These are the longest legs, so cap how many one run holds at once.
+      max-parallel: 4
       # OS x the TESTED Python range (user ruling 2026-10-05: setup checks 3.10-3.13, so CI runs all four).
       # Node comes from .node-version on every leg; the .NET 10 toolchain has its own job below.
       matrix:
