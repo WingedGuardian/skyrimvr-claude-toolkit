@@ -27,15 +27,28 @@ DAY = 86400
 
 def age(path, days):
     t = time.time() - days * DAY
-    targets = [path] if path.is_file() else [p for p in path.rglob("*")]
+    targets = [path] if path.is_file() else [path, *path.rglob("*")]
     for p in targets:
         os.utime(p, (t, t))
 
 
 def write(path, data, days=10):
+    # Simulate a historical write, including the directory entries it created.
+    # Preserve any pre-existing recent activity rather than aging that away.
+    missing, parent = [], path.parent
+    while not parent.exists():
+        missing.append(parent)
+        parent = parent.parent
+    previous = {parent: parent.stat().st_mtime}
+    if path.parent.exists():
+        previous[path.parent] = path.parent.stat().st_mtime
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     age(path, days)
+    historical = path.stat().st_mtime
+    for directory in {path.parent, *(p.parent for p in missing)}:
+        stamp = max(previous.get(directory, historical), historical)
+        os.utime(directory, (stamp, stamp))
     return path
 
 

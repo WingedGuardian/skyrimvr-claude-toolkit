@@ -6,6 +6,8 @@
   "launch_logs": [],
   "legacy_snapshots": [".claude/backups/auto_snapshots"],
   "scratch": [],
+  "staging_roots": [],
+  "superseded_after_days": 30,
   "evidence_docs": ["CLAUDE.md", "AGENTS.md", "KNOWLEDGEBASE.md", "KNOWLEDGEBASE.local.md"],
   "protected_globs": [],
   "active_hours": 48,

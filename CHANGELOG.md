@@ -2,6 +2,9 @@
 
 ## v4.0.0 — unreleased
 
+- **Housekeep decoded traces:** idle `events.xml` and XML in `xml-decoder` can be recycled while an ETL source remains beside them or one folder above; ETL source measurements stay protected.
+- **Housekeep superseded staging:** opt-in `staging_roots`, a default 30-day idle threshold, numeric version siblings or an exact `_superseded` list, and fail-closed rollback-manifest checks. Apply rechecks eligibility; removal still uses the Recycle Bin.
+
 ### Added
 
 - **Independent plugin tools:** `python tools/esp-summary.py <plugin>` reports masters and new/overridden records (`--list-overrides` prints each override); `python tools/esp-record-diff.py <old> <new>` reports byte equality and record/subrecord changes. Duplicate FormIDs, failed decompression and invalid master indexes are problems (diff INCONCLUSIVE, exit 1); unwalkable files refuse with an offset (exit 2). Both are bundled, read-only Python tools.
