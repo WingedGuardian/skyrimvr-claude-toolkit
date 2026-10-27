@@ -19,6 +19,8 @@ What --apply guarantees:
         <records>/<NAME>.files.txt               latest-operation manifest (compatibility copy)
     <records> is $SKYRIM_MANUAL_INSTALLS, else <toolkit>/.claude/backups/manual-installs/ (never shipped).
     Uninstall = delete the manifest's files, then copy the backup folder's originals back.
+    Identical existing configs are recorded as `# KEPT:` comments, outside the written-file rows and count;
+    uninstall leaves them alone because this operation never wrote or backed them up.
   * An EXISTING config (.ini/.toml/.json) is left alone and the archive's copy is written beside it as
     <file>.new for a merge, unless --overwrite-config.
   * Hardlink-safe: each file is written to a temporary file beside its target and swapped in with os.replace,
@@ -485,16 +487,16 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
                         shutil.copy2(str(src_old), str(dest))
 
             bad = 0
-            for p in todo:
+            for done, p in enumerate(todo, 1):
                 inner, dest, action, notes = p
                 target = target_of(p)
                 if action == "CONFIG-NEW" and dest.is_file() and sha(dest) == sha(staged[inner]):
                     # The kept config already holds the archive's bytes: a .new beside it would only be a file to
-                    # merge-check for nothing (install 86c18ca). The manifest still lists the file, as installed.
+                    # merge-check for nothing. It was not written and must never be an uninstall target.
                     print("  CONFIG-SAME  {} (identical to the archive's copy: no .new written)".format(
                         triage.clean(str(dest))))
-                    written.append("{}  {}".format(sha(dest), dest))
-                    record(header + ["# STATUS: in progress"] + written + planned[len(written):])
+                    header.append("# KEPT: {}  {}".format(sha(dest), dest))
+                    record(header + ["# STATUS: in progress"] + written + planned[done:])
                     continue
                 if target.is_file():                     # OVERWRITE, or an older <file>.new: keep the original first
                     b = backup / backup_rel(target)
@@ -512,7 +514,7 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
                     bad += 1
                     print("  VERIFY MISMATCH: {}".format(triage.clean(str(target))), file=sys.stderr)
                 written.append("{}  {}".format(got, target))
-                record(header + ["# STATUS: in progress"] + written + planned[len(written):])
+                record(header + ["# STATUS: in progress"] + written + planned[done:])
         except BaseException as e:
             if old_folder is None:
                 raise

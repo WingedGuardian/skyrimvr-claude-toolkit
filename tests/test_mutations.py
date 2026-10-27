@@ -10667,6 +10667,98 @@ MUTATIONS.append(pytest.param(
     "tests/test_workflows.py::test_resaver_plus_uses_the_qualified_vs2022_runner",
     id="ci5-resaver-runner-unpinned"))
 
+# New retention classes: every eligibility/refusal clause has a synthetic behavioral witness.
+_HKD = "tools/housekeep.py"
+_HKDT = "tests/test_housekeep_derived.py::"
+MUTATIONS += [pytest.param(_HKD, before, after, _HKDT + test, id="hk-derived-" + name)
+              for name, before, after, test in [
+    ("etl-protected", '        if low.endswith(".etl"):', '        if False:',
+     "test_etl_cannot_be_recreatable_or_a_duplicate"),
+    ("xml-shape", '    if path.suffix.lower() != ".xml" or not (path.name.lower() == "events.xml"\n'
+                  '                                                   or path.parent.name.lower() == "xml-decoder"):',
+     '    if False:', "test_other_xml_is_kept[unrelated-xml]"),
+    ("parent-source", '    for folder in (path.parent, path.parent.parent):', '    for folder in (path.parent,):',
+     "test_decoded_trace_with_a_source_is_derived[parent-xml-decoder/trace.xml]"),
+    ("source-needed", '    return None\n\n\nVERSIONED_STAGE', '    return path\n\n\nVERSIONED_STAGE',
+     "test_other_xml_is_kept[no-source]"),
+    ("plain-path", '    return all(not stat.S_ISLNK(s.st_mode) and not getattr(s, "st_file_attributes", 0) & 0x400',
+     '    return all(not getattr(s, "st_file_attributes", 0) & 0x400',
+     "test_nonplain_paths_are_refused_without_link_privileges[symlink]"),
+    ("reparse-path", '    return all(not stat.S_ISLNK(s.st_mode) and not getattr(s, "st_file_attributes", 0) & 0x400',
+     '    return all(not stat.S_ISLNK(s.st_mode)',
+     "test_nonplain_paths_are_refused_without_link_privileges[reparse]"),
+    ("apply-source", '        if not source.is_file() or not plain_path(source) or derived_source(p) is None:',
+     '        if False:', "test_derived_apply_rechecks_the_source_bytes_and_activity[source]"),
+    ("apply-xml", '    if action["class"] in ("derived", "recreatable", "build", "link", "gzip"):',
+     '    if action["class"] in ("recreatable", "build", "link", "gzip"):',
+     "test_derived_apply_rechecks_the_source_bytes_and_activity[xml]"),
+    ("apply-activity", '    if action["class"] in ("derived", "recreatable", "build", "link"):',
+     '    if action["class"] in ("recreatable", "build", "link"):',
+     "test_derived_apply_rechecks_the_source_bytes_and_activity[activity]"),
+    ("default-age", '    "superseded_after_days": 30,', '    "superseded_after_days": 0,',
+     "test_only_a_lower_numeric_sibling_is_superseded"),
+    ("numeric-version", '    numbers = tuple(int(n) for n in match[2].split("."))',
+     '    numbers = tuple(match[2].split("."))', "test_only_a_lower_numeric_sibling_is_superseded"),
+    ("version-required", '    if match is None:\n        return None',
+     '    if match is None:\n        return (name.casefold(), (0, 0, 0, 0))',
+     "test_only_a_lower_numeric_sibling_is_superseded"),
+    ("configured-direct-child", '    if path.parent != root or root not in [_abs(cfg, r) for r in cfg["staging_roots"]]:',
+     '    if False:', "test_staging_apply_rechecks_eligibility[config]"),
+    ("idle-age", '    if latest > now - max(cfg["superseded_after_days"] * 86400, cfg["active_hours"] * 3600):',
+     '    if False:', "test_staging_eligibility_is_narrow[recent]"),
+    ("active-age", 'max(cfg["superseded_after_days"] * 86400, cfg["active_hours"] * 3600)',
+     'min(cfg["superseded_after_days"] * 86400, cfg["active_hours"] * 3600)',
+     "test_staging_eligibility_is_narrow[active]"),
+    ("same-name", 'and v[0] == version[0] and v[1] > version[1]', 'and v[1] > version[1]',
+     "test_staging_eligibility_is_narrow[other-name]"),
+    ("strictly-higher", 'and v[1] > version[1] for other in root.iterdir())',
+     'and v[1] >= version[1] for other in root.iterdir())', "test_staging_eligibility_is_narrow[equal]"),
+    ("explicit-list", '    if path.name not in listed and not higher:', '    if not higher:',
+     "test_exact_superseded_list_can_retire_the_only_version"),
+    ("invalid-list", '            return "invalid _superseded list"',
+     '            pass', "test_invalid_superseded_list_keeps_staging"),
+    ("rollback-reference", '    refs = manifest_references(cfg)', '    refs = set()',
+     "test_manifest_references_or_uncertainty_keep_staging[json]"),
+    ("rollback-writer", '                        remember(line.split(": ", 1)[1])', '                        pass',
+     "test_manifest_references_or_uncertainty_keep_staging[writer-text]"),
+    ("rollback-payload", '                if "backups" in Path(dp).relative_to(root).parts and not name.endswith(".files.txt"):',
+     '                if False:', "test_operation_manifests_are_read_without_misreading_backed_up_configs[False]"),
+    ("manifest-uncertainty", '                why = "staging protection unavailable ({}: {})".format(type(error).__name__, error)',
+     '                why = ""', "test_manifest_references_or_uncertainty_keep_staging[unreadable-json]"),
+    ("manifest-relative", '        if not Path(value).is_absolute():', '        if False:',
+     "test_manifest_references_or_uncertainty_keep_staging[relative]"),
+    ("empty-manifest", '                if not text.strip():', '                if False:',
+     "test_unknown_manifest_layout_refuses_staging[empty]"),
+    ("unknown-text", '                        raise ValueError("unknown manual-install manifest row")',
+     '                        pass', "test_manifest_references_or_uncertainty_keep_staging[unknown-text]"),
+    ("apply-stage", '            why = superseded_reason(p, Path(action["staging_root"]), cfg, guard, now)',
+     '            why = ""', "test_staging_apply_rechecks_eligibility[manifest]"),
+    ("apply-fingerprint", '    if action["class"] in ("launch", "snapshot", "scratch", "superseded"):',
+     '    if action["class"] in ("launch", "snapshot", "scratch"):',
+     "test_staging_apply_rechecks_eligibility[contents]"),
+    ("protected-tree", '    why = guard.why_protected(path) or protected_inside(guard, path)', '    why = ""',
+     "test_protected_staging_content_keeps_the_whole_folder[known-good.txt]"),
+    ("staging-tracked", '                self.tracked.update(tracked_files(root))', '                pass',
+     "test_staging_preserves_tracked_files_and_linked_evidence[tracked]"),
+    ("staging-evidence", '    for r in cfg["agent_output"] + cfg["staging_roots"]:',
+     '    for r in cfg["agent_output"]:', "test_staging_preserves_tracked_files_and_linked_evidence[linked]"),
+    ("directory-activity", '            latest = max(latest, entry.stat().st_mtime)',
+     '            latest = max(latest, entry.stat().st_mtime) if entry.is_file() else latest',
+     "test_a_new_empty_subdirectory_keeps_staging_active"),
+    ("nested-checkout", '        if any(name.casefold() == ".git" for name in dirs + files):',
+     '        if False:', "test_a_nested_git_checkout_is_never_staging_cleanup"),
+    ("count-once", '            if wants("superseded") and any(_strictly_inside(_real(f), _real(_abs(cfg, r)))',
+     '            if False and any(_strictly_inside(_real(f), _real(_abs(cfg, r)))',
+     "test_overlapping_agent_and_staging_roots_are_counted_once"),
+    ("valid-age", '    if isinstance(days, bool) or not isinstance(days, (int, float)) or not math.isfinite(days) or days < 0:',
+     '    if False:', "test_invalid_staging_age_is_refused"),
+    ("valid-roots", '    if not isinstance(cfg["staging_roots"], list) or any(not isinstance(p, str) or not p for p in cfg["staging_roots"]):',
+     '    if False:', "test_invalid_or_overlapping_staging_roots_are_refused"),
+    ("overlap-roots", '    if any(a == b or _strictly_inside(a, b) or _strictly_inside(b, a)\n'
+                      '           for i, a in enumerate(stage_roots) for b in stage_roots[i + 1:]):',
+     '    if False:', "test_invalid_or_overlapping_staging_roots_are_refused"),
+]]
+
 # H1 ordered-upgrade integration: current guard policies and exact historical definitions.
 _H1O = "tools/skyguard/ordered_upgrade.py"
 _H1OC = 'CLAUDE_BLOCKING = frozenset(("protect-bash.sh", "protect-files.sh", "protect-mcp.sh"))'
@@ -10688,4 +10780,63 @@ MUTATIONS += [pytest.param(_H1O, find, rep, test, id=ident) for find, rep, test,
     ("    groups = [*current, *published, installed]", "    groups = [*published, installed]",
      "tests/test_ordered_policy.py::test_published_legacy_groups_migrate_to_current_blocking_guards[original-pre-h1]",
      "h1-ordered-previous-v4-schema-not-recognized"),
+]]
+
+# Task 7 A2: unreadable authority is never an empty live set.
+_RR7 = "tests/test_review_recovery.py::"
+MUTATIONS += [pytest.param("tools/skyguard/recovery.py", find, rep, test, id="review-recovery-" + ident)
+              for find, rep, test, ident in [
+    ('    except FileNotFoundError:\n        return []', '    except OSError:\n        return []',
+     _RR7 + 'test_unreadable_manifest_is_not_an_empty_snapshot_list', 'read-error-not-empty'),
+    ('            if not raws:\n                raise OSError("the recovery manifest became empty")', '            if False:\n                raise OSError("the recovery manifest became empty")',
+     _RR7 + 'test_manifest_authority_must_remain_readable_under_the_prune_lock[emptied]', 'empty-under-lock'),
+    ('        audit.log(HOOK, "FAILED", "could not read the recovery authority -- no config snapshot was recorded")\n        return',
+     '        raise', _RR7 + 'test_unreadable_authority_stops_config_snapshot_without_blocking_the_hook', 'snapshot-error-contained'),
+]]
+
+# Task 7 P5/HK1: incomplete inspection refuses; uncertain activity is active.
+_HKR7 = "tests/test_review_housekeep.py::"
+MUTATIONS += [pytest.param("tools/housekeep.py", find, rep, test, id="review-housekeep-" + ident)
+              for find, rep, test, ident in [
+    ('        newest = folder.stat().st_mtime', '        newest = 0.0',
+     _HKR7 + 'test_uncertain_or_recent_directory_activity_keeps_derived_trace[plan-root]', 'root-activity'),
+    ('        for dp, dirs, files in os.walk(folder, onerror=walk_error):', '        for dp, dirs, files in os.walk(folder):',
+     _HKR7 + 'test_uncertain_or_recent_directory_activity_keeps_derived_trace[plan-walk]', 'walk-activity'),
+    ('            for name in dirs + files:', '            for name in files:',
+     _HKR7 + 'test_uncertain_or_recent_directory_activity_keeps_derived_trace[plan-empty-child]', 'directory-activity'),
+    ('    except OSError:\n        return float("inf")', '    except OSError:\n        return 0.0',
+     _HKR7 + 'test_uncertain_or_recent_directory_activity_keeps_derived_trace[apply-stat]', 'unknown-activity'),
+    ('        files = tuple(walk_files(real, strict=True))', '        files = tuple(walk_files(real))',
+     _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[stat]', 'strict-inspection-wired'),
+    ('onerror=walk_error if strict else None', 'onerror=None',
+     _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[walk]', 'strict-walk-error'),
+    ('        if strict:\n            os.stat(dp)', '        if False:\n            os.stat(dp)',
+     _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[stat]', 'strict-metadata-gate'),
+    ('            os.stat(dp)\n            for name in dirs + fn:', '            pass\n            for name in dirs + fn:',
+     _HKR7 + 'test_strict_recycle_inspection_checks_root_metadata[walk-root]', 'strict-walk-root-stat'),
+    ('                os.stat(os.path.join(dp, name))', '                pass',
+     _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[stat]', 'strict-entry-stat'),
+    ('        return "unreadable tree or file metadata (inspection incomplete)"', '        return ""',
+     _HKR7 + 'test_recycle_refuses_an_uninspectable_descendant[walk]', 'incomplete-refused'),
+    ('                    elif re.fullmatch(r"# KEPT: [0-9a-fA-F]{64}  .+", line):',
+     '                    elif False:', _HKDT + 'test_kept_install_records_remain_understood_protection[valid]', 'kept-record-understood'),
+    ('                    elif re.fullmatch(r"# KEPT: [0-9a-fA-F]{64}  .+", line):',
+     '                    elif re.fullmatch(r"# KEPT: [0-9a-fA-F]{63,64}  .+", line):',
+     _HKDT + 'test_kept_install_records_remain_understood_protection[bad-hash]', 'kept-record-shape'),
+    ('                        remember(line.split("  ", 1)[1])', '                        pass',
+     _HKDT + 'test_kept_install_records_remain_understood_protection[valid]', 'kept-record-path'),
+]]
+
+# Task 7 P6: a kept config is never an uninstall target or a pending write.
+_RI7 = "tests/test_review_install.py::test_kept_identical_config_survives_the_documented_uninstall[0]"
+MUTATIONS += [pytest.param("tools/mod-install.py", find, rep, _RI7, id="review-install-" + ident)
+              for find, rep, ident in [
+    ('                    header.append("# KEPT: {}  {}".format(sha(dest), dest))',
+     '                    written.append("{}  {}".format(sha(dest), dest))', 'kept-is-written'),
+    ('                    header.append("# KEPT: {}  {}".format(sha(dest), dest))',
+     '                    header.append("KEPT: {}  {}".format(sha(dest), dest))', 'kept-is-removable'),
+    ('                    record(header + ["# STATUS: in progress"] + written + planned[done:])',
+     '                    record(header + ["# STATUS: in progress"] + written + planned[len(written):])', 'kept-still-pending'),
+    ('\n                record(header + ["# STATUS: in progress"] + written + planned[done:])',
+     '\n                record(header + ["# STATUS: in progress"] + written + planned[len(written):])', 'later-write-still-pending'),
 ]]

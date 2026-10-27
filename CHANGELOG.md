@@ -2,6 +2,9 @@
 
 ## v4.0.0 — unreleased
 
+- **Housekeep decoded traces:** idle `events.xml` and XML in `xml-decoder` can be recycled while an ETL source remains beside them or one folder above; ETL source measurements stay protected.
+- **Housekeep superseded staging:** opt-in `staging_roots`, a default 30-day idle threshold, numeric version siblings or an exact `_superseded` list, and fail-closed rollback-manifest checks. Apply rechecks eligibility; removal still uses the Recycle Bin.
+
 ### Added
 
 - **Independent plugin tools:** `python tools/esp-summary.py <plugin>` reports masters and new/overridden records (`--list-overrides` prints each override); `python tools/esp-record-diff.py <old> <new>` reports byte equality and record/subrecord changes. Duplicate FormIDs, failed decompression and invalid master indexes are problems (diff INCONCLUSIVE, exit 1); unwalkable files refuse with an offset (exit 2). Both are bundled, read-only Python tools.
@@ -199,7 +202,7 @@ Defects found and fixed during the v4 work, in features 3.9.1 did not have: Code
 - **Housekeep Forever names:** `known-good*` path components and `AUDIT_LOG.txt` are kept, including a folder holding one.
 - **Housekeep evidence links:** paths with spaces, parentheses, percent escapes and backslash escapes remain protected; discovery beyond its bounds refuses instead of truncating.
 - **Housekeep recycle limits:** only rolling tool stores, configured output/log/snapshot roots, named scratch and system temp are eligible. Drive/home/install roots and ancestors, links, saves, backups, known-good baselines and audit logs are refused before reaching the bin (`docs/RETENTION.md`).
-- **Mod-install identical configs:** a kept config already equal to the archive copy prints `CONFIG-SAME` and remains in the manifest without creating a redundant `.new` file.
+- **Mod-install identical configs:** a kept config already equal to the archive copy prints `CONFIG-SAME` and is recorded as a `# KEPT:` comment without creating a redundant `.new` file. It is excluded from written-file rows and counts, so the documented uninstall preserves it.
 
 - **Codex PowerShell hook deadline under load:** the PowerShell entry now starts its deadline clock when its process starts, not at its first line. Under heavy CPU load Windows PowerShell 5.1 spent seconds starting up, uncounted, and a hung engine's refusal arrived 51.3 s after the spawn against the 50 s margin (load-test matrix, 4x on 4 cores; the answer was still a refusal, never an allow).
 - **Writes into the game folder itself were silent (a regression from 3.x, which asked about any copy into the game folder):** a write, copy or move onto a game or loader file directly in the install root -- `.exe`, `.dll`, `.asi`, `.ini`, `.toml`, `.cfg`, `.json`, `.fx`: the game's exe and dlls, `openvr_api.dll`, a loader INI, ENB/ReShade files -- now gets an advisory (S-WRITE-ROOT), in Bash, PowerShell and cmd, never an ask or a deny. Data/, subfolders, scratch output (`> out.txt`), the toolkit's own files and dotfiles stay silent; an INI, the load order, a save or a plugin keeps its own rule. Priced over 87,006 real tool calls: 2 new notes, both real OpenComposite dll swaps in the game folder; nothing else moved.

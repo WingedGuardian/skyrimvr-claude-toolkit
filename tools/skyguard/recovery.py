@@ -40,7 +40,8 @@ some path's newest content, and each kept config snapshot keeps the earlier line
 I4); a SAVE snapshot is always kept (the save policy: backups are kept forever; disk space is the user's call). Every
 other line goes, then every blob no remaining line names is RETIRED (retire.py: renamed out of the store, then sent to
 the Recycle Bin by housekeep's session sweep; never deleted -- review L2 LOW-7).
-An unreadable line is kept as it is and stops blob deletion. Every line records its snapshot's line count and full
+An unreadable line is kept as it is and stops blob deletion. An unreadable, missing or empty manifest under the
+prune lock also refuses retirement; a failed read is never an empty live set. Every line records its snapshot's line count and full
 path set, so resolve() REFUSES a snapshot pruning has cut into instead of returning a state that never existed. A save
 copy also keeps SAVE_RESERVE_BYTES free on its drive (review M2): short of that it fails, and the hook denies.
 
@@ -192,7 +193,11 @@ def take(project, audit, roots, command, do_config, now=None, deadline=None, age
 def _take_locked(store, audit, roots, command, now, agent, session_id):
     idx = _read_index(store)
     before = json.dumps(idx, sort_keys=True)
-    got = _config(store, idx, roots, audit, command, now, agent, session_id)
+    try:
+        got = _config(store, idx, roots, audit, command, now, agent, session_id)
+    except OSError:
+        audit.log(HOOK, "FAILED", "could not read the recovery authority -- no config snapshot was recorded")
+        return
     if got:
         lines, updates, logline = got
         data = b"".join((json.dumps(e, ensure_ascii=True) + "\n").encode("ascii") for e in lines)
@@ -442,7 +447,7 @@ def _valid(e):
 def _raw_lines(store):
     try:
         data = (Path(store) / MANIFEST).read_bytes()
-    except OSError:
+    except FileNotFoundError:
         return []
     return [ln for ln in data.split(b"\n") if ln.strip()]
 
@@ -457,7 +462,7 @@ def _parse(raw):
 
 def read_manifest(store):
     """([entry], unreadable line count), in file order. A line that does not parse or has not the v1 shape is skipped
-    and COUNTED, never silently dropped."""
+    and COUNTED, never silently dropped. A whole-manifest read failure raises OSError; only absence is empty."""
     out, bad = [], 0
     for raw in _raw_lines(store):
         e = _parse(raw)
@@ -557,6 +562,8 @@ def prune(store, now, audit, deadline=None):
     try:
         with backup._exclusive(Path(str(mpath) + ".lock"), wait=LOCK_WAIT):
             raws = _raw_lines(store)
+            if not raws:
+                raise OSError("the recovery manifest became empty")
             parsed = [_parse(r) for r in raws]
             need = _needed(parsed, now)
             keep = [(r, e) for i, (r, e) in enumerate(zip(raws, parsed)) if e is None or i in need]
