@@ -376,6 +376,9 @@ class World:
         self.desktop_closed = 0
         self.private_windows = True
         self.roots = []
+        self.roots_visible = True
+        self.steam_handoff = False
+        self.launch_exit = "2026-10-25T10:00:05Z"
         self.clock = Clock(self)
 
     def tick(self):
@@ -434,13 +437,19 @@ class World:
                 world.roots.append(root)
                 child = {"pid": root_id, "executable": root["Path"], "start_time": root["StartTime"]}
                 if exe in ("vrstartup.exe", "steam.exe"):
-                    world.procs.append(proc(11, "vrserver", str(world.t["vr"] / "bin" / "win64" / "vrserver.exe")))
+                    world.procs.append(proc(11, "vrserver", str(world.t["vr"] / "bin" / "win64" / "vrserver.exe"),
+                                            "2026-10-25T10:00:01Z" if world.steam_handoff else "2026-10-25T10:00:00Z"))
                     if world.room:
                         world.procs.append(world.room)
                     return root_id, child
                 world.procs.append(proc(12, "SkyrimVR", str(world.t["game"] / "SkyrimVR.exe")))
                 world.health = {"ok": True, "pid": 12, "frame": 0}
                 return root_id, child
+
+            def launch_lifetime(self, pid):
+                root = next(p for p in world.roots if p["Id"] == pid)
+                return {"pid": pid, "executable": root["Path"], "start_time": root["StartTime"],
+                        "exit_time": world.launch_exit, "observed_until": "2026-10-25T10:01:00Z"}
 
             def process_on_desktop(self, pid):
                 return True       # independent thread and window observations: neither proves the other
@@ -465,8 +474,10 @@ def world(tree, monkeypatch):
         monkeypatch.setattr(mod, name, getattr(w, name))
     monkeypatch.setattr(mod, "read_processes", w.read)
     def census():
-        return [dict(p, ParentId=91 if p["ProcessName"] == "SkyrimVR" else 90)
-                for p in w.procs + w.roots]
+        roots = w.roots if w.roots_visible else []
+        return [dict(p, ParentId=(0 if p in roots or p["ProcessName"] in mod.STEAM_NAMES else
+                                  91 if p["ProcessName"] == "SkyrimVR" else
+                                  10 if w.steam_handoff else 90)) for p in w.procs + roots]
     monkeypatch.setattr(mod, "read_process_tree", census)
     return w
 

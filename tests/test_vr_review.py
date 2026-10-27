@@ -229,7 +229,7 @@ def test_windowless_desktop_proof_requires_readable_threads(tree, monkeypatch, c
     assert desk.process_on_desktop(55) is (case == "private")
 
 
-@pytest.mark.parametrize("case", ["ok", "time-error"])
+@pytest.mark.parametrize("case", ["ok", "time-error", "placement-error"])
 def test_start_records_creation_time_from_the_opened_handle(tree, monkeypatch, case):
     import ctypes
     import ctypes.wintypes as w
@@ -250,14 +250,24 @@ def test_start_records_creation_time_from_the_opened_handle(tree, monkeypatch, c
     monkeypatch.setattr(desktop, "_api", lambda: (None, kernel, w))
     monkeypatch.setattr(desktop, "_check", check)
     desk = desktop.BackgroundDesktop.__new__(desktop.BackgroundDesktop)
-    desk.name, desk.verify = "private", lambda: None
-    if case == "time-error":
-        with pytest.raises(OSError):
+    calls = []
+    def verify():
+        calls.append(True)
+        if case == "placement-error" and len(calls) == 2:
+            raise RuntimeError("synthetic placement error after creation")
+    desk.name, desk.verify = "private", verify
+    desk.handle, desk._launch_handles = None, {}
+    if case in ("time-error", "placement-error"):
+        with pytest.raises(desktop.LaunchIdentityError):
             desk.start([tree["game"] / "sksevr_loader.exe"], tree["game"])
+        if case == "placement-error":
+            desk.close()
     else:
         pid, record = desk.start([tree["game"] / "sksevr_loader.exe"], tree["game"])
         assert pid == record["pid"] == 55
         assert desktop.parse_start(record["start_time"]) == desktop._filetime(w.FILETIME())
+        assert closed == [78], "the launched process handle must remain open"
+        desk.close()
     assert reads == [77] and closed == [78, 77]
 
 
@@ -275,3 +285,198 @@ def test_ancestry_census_read_errors_are_unknown(tree, monkeypatch, bad):
             mod.read_process_tree()
     else:
         assert mod.read_process_tree() == [{"Id": 55, "ParentId": 90}]
+
+
+def test_exited_launchers_can_prove_their_children_without_census_roots(tree, world):
+    world.roots_visible = False
+    result = launch_session(tree, world)
+    assert result["started"]
+    owned = tree["mod"].load_state()["session"]["processes"]
+    assert {p["Id"] for p in owned} == {11, 12}
+
+
+def test_steam_handoff_can_start_without_owning_the_users_runtime(tree, world):
+    world.roots_visible = False
+    world.steam_handoff = True
+    result = launch_session(tree, world, desktop="current")
+    assert result["started"]
+    session = tree["mod"].load_state()["session"]
+    assert [p["Id"] for p in session["processes"]] == [12]
+    assert [p["Id"] for p in session["observed_runtime"]] == [11]
+    world.game_exits()
+    with pytest.raises(tree["mod"].Refused):
+        tree["mod"].cmd_stop()
+    assert world.terminated == []
+    assert tree["mod"].load_state() is not None
+
+
+@pytest.mark.parametrize("bad", ["none", "no-proof", "no-launch", "parent", "proof-pid", "path", "start", "before", "after", "unknown-upper", "observed-upper"])
+def test_retained_launcher_lifetime_is_bound_to_identity_and_birth(tree, world, bad):
+    mod = tree["mod"]
+    child = dict(proc(11, "vrserver", "C:/fixture/vrserver.exe", "2026-10-25T10:00:01Z"), ParentId=90)
+    launch = dict(pid=90, executable="C:/fixture/vrstartup.exe", start_time="2026-10-25T10:00:00Z")
+    proof = dict(launch, exit_time="2026-10-25T10:00:02Z", observed_until="2026-10-25T10:00:03Z")
+    session = dict(processes=[], desktop_mode="background", runtime_launch=launch,
+                   launch_lifetimes={"runtime_launch": proof})
+    if bad == "no-proof":
+        session["launch_lifetimes"] = {}
+    elif bad == "no-launch":
+        session.pop("runtime_launch")
+    elif bad == "parent":
+        child["ParentId"] = 999
+    elif bad == "proof-pid":
+        proof["pid"] = 999
+    elif bad == "path":
+        proof["executable"] = "C:/other/vrstartup.exe"
+    elif bad == "start":
+        proof["start_time"] = "2026-10-25T09:00:00Z"
+    elif bad == "before":
+        child["StartTime"] = "2026-10-25T09:59:59Z"
+    elif bad == "after":
+        child["StartTime"] = "2026-10-25T10:00:03Z"
+    elif bad == "unknown-upper":
+        proof["exit_time"] = None
+        proof["observed_until"] = None
+    elif bad == "observed-upper":
+        proof["exit_time"] = None
+    desk = SimpleNamespace(process_on_desktop=lambda pid: True)
+    assert mod.proven_process(child, session, [child], desk) is (bad in ("none", "observed-upper"))
+
+
+@pytest.mark.parametrize("bad", ["none", "background", "not-absent", "no-before-proof", "no-request", "game", "other-name", "outside", "prefix-collision", "filename", "before", "late", "census-pid", "census-path", "census-time", "desktop", "unreadable"])
+def test_handoff_readiness_checks_every_boundary_without_granting_ownership(tree, bad):
+    mod = tree["mod"]
+    child = proc(11, "vrserver", "C:/fixture/SteamVR/bin/vrserver.exe", "2026-10-25T10:00:01Z")
+    session = dict(desktop_mode="current", preexisting_vr=[], steamvr_root="C:/fixture/SteamVR",
+                   steam_launch=dict(pid=90, start_time="2026-10-25T10:00:00Z"), processes=[],
+                   runtime_observed_at="2026-10-25T10:01:30Z")
+    if bad == "background":
+        session["desktop_mode"] = "background"
+    elif bad == "not-absent":
+        session["preexisting_vr"] = [child]
+    elif bad == "no-before-proof":
+        session.pop("preexisting_vr")
+    elif bad == "no-request":
+        session.pop("steam_launch")
+    elif bad in ("game", "other-name"):
+        child["ProcessName"] = "SkyrimVR" if bad == "game" else "unrelated"
+        child["Path"] = "C:/fixture/SteamVR/bin/" + child["ProcessName"] + ".exe"
+    elif bad in ("outside", "prefix-collision", "filename"):
+        child["Path"] = {"outside": "C:/elsewhere/vrserver.exe",
+                         "prefix-collision": "C:/fixture/SteamVR-other/vrserver.exe",
+                         "filename": "C:/fixture/SteamVR/bin/other.exe"}[bad]
+    elif bad == "before":
+        child["StartTime"] = "2026-10-25T09:59:59Z"
+    elif bad == "late":
+        child["StartTime"] = "2026-10-25T10:01:31Z"
+    census = [dict(child)]
+    if bad == "census-pid":
+        census[0]["Id"] = 12
+    elif bad == "census-path":
+        census[0]["Path"] = "C:/other/vrserver.exe"
+    elif bad == "census-time":
+        census[0]["StartTime"] = "2026-10-25T10:00:02Z"
+    def placed(pid):
+        if bad == "unreadable":
+            raise OSError("synthetic inaccessible thread")
+        return bad != "desktop"
+    assert mod.steam_handoff_runtime(child, session, census, SimpleNamespace(process_on_desktop=placed)) is (bad == "none")
+    assert session["processes"] == []
+
+
+def test_observed_runtime_stays_non_terminable_even_if_late_proof_changes(tree, world, monkeypatch):
+    world.roots_visible, world.steam_handoff = False, True
+    launch_session(tree, world, desktop="current")
+    world.game_exits()
+    monkeypatch.setattr(tree["mod"], "proven_process", lambda *args: True)
+    tree["mod"].stop_owned(tree["mod"].load_state())
+    assert world.terminated == []
+    assert 11 not in [p["Id"] for p in tree["mod"].load_state()["session"]["processes"]]
+
+
+def test_observed_runtime_handle_blocks_restore_after_a_missed_census(tree, world, monkeypatch):
+    mod = tree["mod"]
+    world.roots_visible, world.steam_handoff = False, True
+    launch_session(tree, world, desktop="current")
+    world.game_exits()
+    monkeypatch.setattr(mod, "read_processes", lambda: [])
+    with pytest.raises(mod.Refused):
+        mod.cmd_off()
+    assert mod.load_state() is not None and tree["dll"].read_bytes() == VALVE_BYTES
+
+
+def test_unreadable_launcher_lifetime_keeps_files_and_no_new_ownership(tree, world, monkeypatch):
+    mod = tree["mod"]
+    make = world.make_desktop
+    def failed(kind, name=None):
+        desk = make(kind, name)
+        def unreadable(pid):
+            raise KeyError("synthetic lost handle")
+        desk.launch_lifetime = unreadable
+        return desk
+    monkeypatch.setattr(mod, "make_desktop", failed)
+    assert mod.cmd_on() == 0
+    with pytest.raises((mod.Refused, mod.ProcessReadError)):
+        mod.cmd_launch("background")
+    assert mod.load_state()["session"]["ownership_refused"]
+    assert mod.load_state()["session"]["processes"] == []
+    assert world.terminated == [] and tree["dll"].read_bytes() == VALVE_BYTES
+
+
+@pytest.mark.parametrize("case", ["running", "exited", "wait-failed", "time-error", "generation", "unknown-exit"])
+def test_retained_native_handle_reads_creation_and_exit_without_reopening(tree, monkeypatch, case):
+    import ctypes
+    import ctypes.wintypes as w
+    import vr_background_desktop as desktop
+    created = desktop.parse_start("2026-10-25T10:00:00Z")
+    ended = desktop.parse_start("2026-10-25T10:00:05Z")
+    record = dict(pid=90, executable="C:/fixture/vrstartup.exe", start_time=created.isoformat())
+    if case == "generation":
+        record["start_time"] = "2026-10-25T09:00:00Z"
+    def times(handle, *pointers):
+        assert handle == 77
+        pointers[0]._obj.dwLowDateTime = 1
+        pointers[1]._obj.dwLowDateTime = 2 if case == "exited" else 0
+        return case != "time-error"
+    status = 0 if case in ("exited", "unknown-exit") else 0xffffffff if case == "wait-failed" else 258
+    kernel = SimpleNamespace(GetProcessTimes=times, WaitForSingleObject=lambda *a: status)
+    monkeypatch.setattr(desktop, "_api", lambda: (None, kernel, w))
+    monkeypatch.setattr(desktop, "_filetime", lambda ft: created if ft.dwLowDateTime == 1 else ended)
+    monkeypatch.setattr(ctypes, "WinError", lambda *a: OSError("synthetic native read failure"), raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    desk = desktop.BackgroundDesktop.__new__(desktop.BackgroundDesktop)
+    desk._launch_handles = {90: (77, record)}
+    if case in ("running", "exited"):
+        proof = desk.launch_lifetime(90)
+        assert proof["start_time"] == record["start_time"]
+        assert proof["exit_time"] == (ended.isoformat() if case == "exited" else None)
+        assert proof["observed_until"]
+    else:
+        with pytest.raises(OSError):
+            desk.launch_lifetime(90)
+
+
+@pytest.mark.parametrize("failed", ["vrstartup.exe", "sksevr_loader.exe"])
+def test_created_launcher_identity_failure_keeps_state_after_later_missed_reads(tree, world, monkeypatch, failed):
+    import vr_background_desktop as desktop
+    mod = tree["mod"]
+    make, read = world.make_desktop, world.read
+    lost = []
+    def factory(kind, name=None):
+        desk = make(kind, name)
+        start = desk.start
+        def started_then_failed(command, cwd):
+            result = start(command, cwd)
+            if command[0].name == failed:
+                lost.append(True)
+                raise desktop.LaunchIdentityError("synthetic identity failure after CreateProcess")
+            return result
+        desk.start = started_then_failed
+        return desk
+    monkeypatch.setattr(mod, "make_desktop", factory)
+    monkeypatch.setattr(mod, "read_processes", lambda: [] if lost else read())
+    with pytest.raises(mod.Refused):
+        mod.cmd_run("background")
+    assert mod.load_state()["session"]["ownership_refused"]
+    assert tree["dll"].read_bytes() == VALVE_BYTES
+    assert world.terminated == [] and world.quits == []

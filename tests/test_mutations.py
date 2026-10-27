@@ -10772,3 +10772,98 @@ MUTATIONS += [pytest.param(f, find, rep, test, id="vr-review-" + ident) for f, f
     (_VR7, '    listed = [p for p in running if p["ProcessName"] in VR_NAMES]', '    listed = list(running)',
      'tests/test_vr_headless.py::test_stop_quits_a_ready_game_stops_owned_helpers_leaves_steam_and_restores', 'steam-does-not-block-restore'),
 ]]
+
+
+# Exited launcher and Steam handoff review: native handles, identity/range bounds and observation-only rights.
+_VLP = _VT7 + "test_retained_launcher_lifetime_is_bound_to_identity_and_birth"
+_VHO = _VT7 + "test_handoff_readiness_checks_every_boundary_without_granting_ownership"
+_VNH = _VT7 + "test_retained_native_handle_reads_creation_and_exit_without_reopening"
+_VEX = _VT7 + "test_exited_launchers_can_prove_their_children_without_census_roots"
+MUTATIONS += [pytest.param(f, find, rep, test, id="vr-review-life-" + ident) for f, find, rep, test, ident in [
+    (_VD7, '            self._launch_handles[pi.dwProcessId] = (pi.hProcess, record)', '            pass',
+     _VT7 + 'test_start_records_creation_time_from_the_opened_handle[ok]', 'retain-handle'),
+    (_VD7, '            if not retained:', '            if True:',
+     _VT7 + 'test_start_records_creation_time_from_the_opened_handle[ok]', 'keep-handle-open'),
+    (_VD7, '            _api()[1].CloseHandle(handle)', '            pass',
+     _VT7 + 'test_start_records_creation_time_from_the_opened_handle[ok]', 'close-retained-handle'),
+    (_VD7, '        if status not in {0, 0x102}:', '        if False:', _VNH + '[wait-failed]', 'wait-error'),
+    (_VD7, '        _check(kernel32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]))\n        created = _filetime(times[0])',
+     '        kernel32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times])\n        created = _filetime(times[0])',
+     _VNH + '[time-error]', 'read-error'),
+    (_VD7, '        if created != parse_start(record["start_time"]):', '        if False:',
+     _VNH + '[generation]', 'native-generation'),
+    (_VD7, '        if status == 0 and not exited:', '        if False:', _VNH + '[unknown-exit]', 'exit-readable'),
+    (_VR7, '                proofs[key] = reader(session[key]["pid"])', '                proofs[key] = {}', _VEX, 'refresh-proof'),
+    (_VR7, '                raise ProcessReadError("launcher lifetime is unreadable: {}".format(exc)) from exc',
+     '                return', _VT7 + 'test_unreadable_launcher_lifetime_keeps_files_and_no_new_ownership', 'read-failure-refuses'),
+    (_VR7, '            if parent is None and retained_launcher_parent(node, session):', '            if False:', _VEX, 'missing-root-proof-wired'),
+    (_VR7, 'node.get("ParentId") != launch["pid"] or proof["pid"] != launch["pid"]',
+     'proof["pid"] != launch["pid"]', _VLP + '[parent]', 'parent-id'),
+    (_VR7, 'node.get("ParentId") != launch["pid"] or proof["pid"] != launch["pid"]',
+     'node.get("ParentId") != launch["pid"]', _VLP + '[proof-pid]', 'proof-id'),
+    (_VR7, '            if Path(proof["executable"]).as_posix().casefold() != Path(launch["executable"]).as_posix().casefold():',
+     '            if False:', _VLP + '[path]', 'proof-path'),
+    (_VR7, '            if parse_start(proof["start_time"]) != start:', '            if False:', _VLP + '[start]', 'proof-start'),
+    (_VR7, '            if start <= created <= parse_start(upper):', '            if created <= parse_start(upper):', _VLP + '[before]', 'birth-after-start'),
+    (_VR7, '            if start <= created <= parse_start(upper):', '            if start <= created:', _VLP + '[after]', 'birth-before-exit'),
+    (_VR7, 'upper = proof["exit_time"] if proof.get("exit_time") is not None else proof["observed_until"]',
+     'upper = proof["observed_until"]', _VLP + '[after]', 'exit-precedes-observation'),
+    (_VR7, 'session["desktop_mode"] != "current" or session.get("preexisting_vr") != []',
+     'session.get("preexisting_vr") != []', _VHO + '[background]', 'handoff-current-only'),
+    (_VR7, 'session["desktop_mode"] != "current" or session.get("preexisting_vr") != []',
+     'session["desktop_mode"] != "current"', _VHO + '[not-absent]', 'handoff-absent-before'),
+    (_VR7, 'not launch or x["ProcessName"] not in VR_NAMES or x["ProcessName"] in GAME_NAMES',
+     'not launch or x["ProcessName"] in GAME_NAMES', _VHO + '[other-name]', 'handoff-vr-name'),
+    (_VR7, 'not launch or x["ProcessName"] not in VR_NAMES or x["ProcessName"] in GAME_NAMES',
+     'not launch or x["ProcessName"] not in VR_NAMES', _VHO + '[game]', 'handoff-not-game'),
+    (_VR7, 'not path.startswith(base + "/") or Path(path).name != x["ProcessName"].casefold() + ".exe"',
+     'Path(path).name != x["ProcessName"].casefold() + ".exe"', _VHO + '[outside]', 'handoff-install-path'),
+    (_VR7, 'path.startswith(base + "/")', 'path.startswith(base)', _VHO + '[prefix-collision]', 'handoff-directory-boundary'),
+    (_VR7, 'not path.startswith(base + "/") or Path(path).name != x["ProcessName"].casefold() + ".exe"',
+     'not path.startswith(base + "/")', _VHO + '[filename]', 'handoff-image-name'),
+    (_VR7, '        if not start <= created <= parse_start(session["runtime_observed_at"]):',
+     '        if not created <= parse_start(session["runtime_observed_at"]):', _VHO + '[before]', 'handoff-after-request'),
+    (_VR7, '        if not start <= created <= parse_start(session["runtime_observed_at"]):',
+     '        if not start <= created:', _VHO + '[late]', 'handoff-observation-bound'),
+    (_VR7, 'Path(current["Path"]).as_posix().casefold() != path or parse_start(current["StartTime"]) != created',
+     'parse_start(current["StartTime"]) != created', _VHO + '[census-path]', 'handoff-census-path'),
+    (_VR7, 'Path(current["Path"]).as_posix().casefold() != path or parse_start(current["StartTime"]) != created',
+     'Path(current["Path"]).as_posix().casefold() != path', _VHO + '[census-time]', 'handoff-census-time'),
+    (_VR7, '        return bool(desk.process_on_desktop(x["Id"]))', '        return True', _VHO + '[desktop]', 'handoff-desktop'),
+    (_VR7, '                    if steam_handoff_runtime(x, session, census, desk):', '                    if False:',
+     _VT7 + 'test_steam_handoff_can_start_without_owning_the_users_runtime', 'handoff-readiness-wired'),
+    (_VR7, '                    if steam_handoff_runtime(x, session, census, desk):', '                    if True:',
+     _VT7 + 'test_foreign_process_on_private_desktop_still_needs_launch_ancestry', 'handoff-no-bypass'),
+    (_VR7, 'session["observed_runtime"].append(dict(x))', 'session["processes"].append(dict(x))',
+     _VT7 + 'test_steam_handoff_can_start_without_owning_the_users_runtime', 'observations-not-owned'),
+    (_VR7, '                    not any(same_process(x, o) for o in session.get("observed_runtime", []))',
+     '                    True', _VT7 + 'test_observed_runtime_stays_non_terminable_even_if_late_proof_changes', 'observed-never-late-adopted'),
+    (_VR7, '            ((st.get("session") or {}).get("observed_runtime") or [])', '            []',
+     _VT7 + 'test_observed_runtime_handle_blocks_restore_after_a_missed_census', 'observed-restore-backstop'),
+]]
+
+
+MUTATIONS += [pytest.param(f, find, rep, test, id="vr-review-life-" + ident) for f, find, rep, test, ident in [
+    (_VR7, 'upper = proof["exit_time"] if proof.get("exit_time") is not None else proof["observed_until"]',
+     'upper = proof["exit_time"]', _VLP + '[observed-upper]', 'running-observation-upper'),
+    (_VR7, 'current = next((p for p in census if p.get("Id") == x["Id"]), {})',
+     'current = next(iter(census), {})', _VHO + '[census-pid]', 'handoff-census-pid'),
+    (_VR7, '                        if not any(same_process(x, old) for old in session["observed_runtime"]):',
+     '                        if True:', _VT7 + 'test_steam_handoff_can_start_without_owning_the_users_runtime', 'handoff-observation-dedup'),
+    (_VR7, '            session["runtime_observed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()',
+     '            session["runtime_observed_at"] = session.get("steam_launch", {}).get("start_time", "")',
+     _VT7 + 'test_steam_handoff_can_start_without_owning_the_users_runtime', 'handoff-fresh-observation'),
+]]
+
+
+MUTATIONS += [pytest.param(f, find, rep, test, id="vr-review-life-" + ident) for f, find, rep, test, ident in [
+    (_VD7, '            raise LaunchIdentityError("a launcher was created but its identity is unreadable") from exc',
+     '            raise', _VT7 + 'test_start_records_creation_time_from_the_opened_handle[time-error]', 'created-identity-error-type'),
+    (_VD7, '            raise LaunchIdentityError("a launcher was created but its placement is unproved") from exc',
+     '            raise', _VT7 + 'test_start_records_creation_time_from_the_opened_handle[placement-error]', 'created-placement-error-type'),
+    (_VR7, '    except LaunchIdentityError as exc:', '    except ZeroDivisionError as exc:',
+     _VT7 + 'test_created_launcher_identity_failure_keeps_state_after_later_missed_reads', 'created-error-retains-state'),
+    (_VR7, '    except LaunchIdentityError as exc:\n        session["ownership_refused"] = True',
+     '    except LaunchIdentityError as exc:\n        session["ownership_refused"] = False',
+     _VT7 + 'test_created_launcher_identity_failure_keeps_state_after_later_missed_reads', 'created-refusal-marker'),
+]]
