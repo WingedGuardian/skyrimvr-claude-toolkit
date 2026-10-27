@@ -2,7 +2,9 @@
 
 ## v4.0.0 — unreleased
 
-- **Housekeep decoded traces:** idle `events.xml` and XML in `xml-decoder` can be recycled while an ETL source remains beside them or one folder above; ETL source measurements stay protected.
+- **Housekeep planning errors:** unreadable trace provenance or staging sizes keep the candidate and let other work continue; unknown byte counts and paths are reported. An ETL used for decoded XML must remain inside the same task, during both planning and apply.
+
+- **Housekeep decoded traces:** idle `events.xml` and XML in `xml-decoder` can be recycled while an ETL source remains beside them or one folder above within the same task; ETL source measurements stay protected.
 - **Housekeep superseded staging:** opt-in `staging_roots`, a default 30-day idle threshold, numeric version siblings or an exact `_superseded` list, and fail-closed rollback-manifest checks. Apply rechecks eligibility; removal still uses the Recycle Bin.
 
 ### Added
