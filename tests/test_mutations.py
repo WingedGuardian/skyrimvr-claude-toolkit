@@ -10816,3 +10816,18 @@ MUTATIONS += [pytest.param(f, find, rep, test, id="review-guards-" + ident) for 
     (_SP7, '            f.location_depth += 1', '            pass',
      _RG7 + 'test_unexecuted_control_body_cannot_move_a_later_protected_delete', 'control-loop-depth'),
 ]]
+
+
+# Task 7 CI performance follow-up: repeat elimination cannot discard distinct feeders or outlive a command.
+MUTATIONS += [pytest.param("tools/skyguard/lift_rules.py", find, rep, _RG7 + test,
+                           id="review-guards-lift-repeat-" + ident) for find, rep, test, ident in [
+    ("        if scope_key in checked_scopes:", "        if False and scope_key in checked_scopes:",
+     "test_repeated_fed_construct_scope_is_read_once", "membership"),
+    ("        checked_scopes.add(scope_key)", "        pass  # omitted scope record",
+     "test_repeated_fed_construct_scope_is_read_once", "record"),
+    ("        scope_key = stmt", "        scope_key = text[spans[k][0]:spans[k][1]]",
+     "test_repeated_construct_keeps_different_feeder_targets", "feeders"),
+    ("    checked_scopes = set()",
+     '    checked_scopes = getattr(_construct_hit, "_checked", set())\n    _construct_hit._checked = checked_scopes',
+     "test_construct_scope_reads_are_local_to_each_decision", "lifetime"),
+]]

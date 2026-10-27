@@ -208,3 +208,34 @@ def test_unparsed_native_fallback_keeps_unknown_flags_conservative(arg):
 def test_adapter_dynamic_operation_keeps_the_text_fallback(arg):
     command = "resaver-cli.sh " + arg + " x.ess --apply; echo clean"
     assert shell_rules.resaver_target(command, "cmd") == ("clean", "x.ess")
+
+
+def test_repeated_fed_construct_scope_is_read_once(monkeypatch):
+    from skyguard import lift_rules
+
+    original = lift_rules._text_hit
+    reads = []
+
+    def counted(text, *args):
+        reads.append(text)
+        return original(text, *args)
+
+    monkeypatch.setattr(lift_rules, "_text_hit", counted)
+    command = "$x = Get-Item C:/Review/Scratch/a;$x.IsReadOnly = $false;" * 8
+    assert decide(command, "powershell").decision == "allow"
+    assert len(reads) == 1, "identical construct/feeder scope was resolved repeatedly"
+
+
+def test_repeated_construct_keeps_different_feeder_targets():
+    command = ("$x = Get-Item C:/Review/Scratch/a; $x.IsReadOnly = $false; "
+               "$x = Get-Item C:/Review/Game/Data/Skyrim.esm; $x.IsReadOnly = $false")
+    assert decide(command, "powershell").decision == "deny"
+
+
+def test_construct_scope_reads_are_local_to_each_decision():
+    command = "$x = Get-Item C:/Review/Game/Data/Skyrim.esm; $x.IsReadOnly = $false"
+    elsewhere = paths.Roots(paths.path_to_regex("C:/Review/Other"), "",
+                            install_dirs=("c:/review/other",))
+    assert shell_rules.decide(command, elsewhere, Audit(), cwd="C:/Review/Scratch",
+                              shell="powershell", env={}).decision == "allow"
+    assert decide(command, "powershell").decision == "deny"

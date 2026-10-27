@@ -437,6 +437,7 @@ def _construct_hit(text: str, parsed, cwd, env, roots) -> str:
     `$var.IsReadOnly = $false` receiver also reads the latest earlier statement that assigns `$var`."""
     spans, done = _statements(text), set()
     starts, assigners, whole = [a for a, _ in spans], None, None
+    checked_scopes = set()
     for m in PS_CONSTRUCT.finditer(text):
         k = max(0, bisect.bisect_right(starts, m.start()) - 1)  # the statement holding the construct
         if k in done:                                           # one reading per statement, however many constructs
@@ -452,6 +453,12 @@ def _construct_hit(text: str, parsed, cwd, env, roots) -> str:
                 return whole
             continue
         stmt = "\n".join(text[spans[j][0]:spans[j][1]] for j in chosen)
+        # The fixed parsed stream selects the same execs for identical construct/feeder text.
+        # Re-read each distinct scope once per command, retaining different feeders and all exec contexts.
+        scope_key = stmt
+        if scope_key in checked_scopes:
+            continue
+        checked_scopes.add(scope_key)
         mine = tuple(x for x in parsed.execs if x.segment.strip() and x.segment.strip() in stmt)
         t = _text_hit(stmt, shellparse.Parsed(mine, True, ""), cwd, env, roots)
         if t:
