@@ -275,8 +275,8 @@ def cmd_restore(project, sid, wanted, to, in_place, out):
     from .audit import Audit
     try:
         store, files, shown, live = _plan(project, sid)
-    except ValueError as e:
-        print("REFUSED: {}".format(e), file=out)
+    except (ValueError, OSError) as e:
+        print("REFUSED: {}".format(" ".join(str(e).splitlines())), file=out)
         return 2
     keys, missing = _select(shown, wanted)
     if missing:
@@ -398,7 +398,11 @@ def main(argv, out=None):
         return 2
     project = _project(a.project)
     if a.action == "list" and not (a.id or a.path or a.to or a.in_place):
-        return cmd_list(project, a.kind, out)
+        try:
+            return cmd_list(project, a.kind, out)
+        except OSError as exc:
+            print("COULD NOT LIST snapshots: {}".format(" ".join(str(exc).splitlines())), file=out)
+            return 2
     if a.action == "restore" and a.id and not a.kind and not (a.to and a.in_place):
         return cmd_restore(project, a.id, a.path, a.to, a.in_place, out)
     print(USAGE, file=out)

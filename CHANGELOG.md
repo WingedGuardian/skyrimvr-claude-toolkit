@@ -2,6 +2,8 @@
 
 ## v4.0.0 — unreleased
 
+- **Snapshot metadata errors:** list and config restore refuse an unreadable recovery manifest with a one-line message and no traceback; restore admission fails before any output is written.
+
 - **Housekeep decoded traces:** idle `events.xml` and XML in `xml-decoder` can be recycled while an ETL source remains beside them or one folder above; ETL source measurements stay protected.
 - **Housekeep superseded staging:** opt-in `staging_roots`, a default 30-day idle threshold, numeric version siblings or an exact `_superseded` list, and fail-closed rollback-manifest checks. Apply rechecks eligibility; removal still uses the Recycle Bin.
 
