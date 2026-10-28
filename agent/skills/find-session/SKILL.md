@@ -1,6 +1,6 @@
 ---
 name: find-session
-description: Find the past agent session (Claude Code or Codex) where something was discussed ("do you remember when we...", "what session was that in", "find the conversation where we..."), down to the passage, and resume it. Use whenever the user asks about an earlier conversation rather than the code.
+description: Find the past agent session where something was discussed ("do you remember when we...", "what session was that in", "find the conversation where we..."), down to the passage, and resume it. Use whenever the user asks about an earlier conversation rather than the code.
 argument-hint: "[what was discussed]"
 ---
 
@@ -22,8 +22,8 @@ python tools/modding_harness/find_session.py "going over my balance tweaks with 
 
 On Windows use the same interpreter the ledger commands print at session start, or `py -3`.
 
-Give the command up to 5 minutes: set your shell tool's timeout to 300 s, because its default limit can be shorter
-than a run. The tool first updates the index: about 13 s when nothing is new. It waits at most 60 s for that, then
+Give the command up to 5 minutes by setting your command tool's timeout to 300000 ms (the `timeout` or `timeout_ms`
+field). Default limits are shorter than a run: one harness stops a command after 10 s. The tool first updates the index: about 13 s when nothing is new. It waits at most 60 s for that, then
 searches what is already indexed and leaves the update running.
 
 The first line of output says how the update went:

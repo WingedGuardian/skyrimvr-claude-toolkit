@@ -141,6 +141,11 @@ def _tool():
 
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)           # Windows: no console window for node
+# The sync runs in its own process group: an agent that times out a command kills that command's whole group
+# (Codex: codex-rs/core/src/exec.rs, kill_child_process_group, 10 s default), and a killed sync holds the index lock
+# for its 10-minute stale period.
+_DETACH = ({"creationflags": _NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)} if os.name == "nt"
+           else {"start_new_session": True})
 
 
 def sync(wait: Optional[float] = None) -> str:
@@ -160,7 +165,7 @@ def sync(wait: Optional[float] = None) -> str:
         with open(log, "wb") as fh:
             proc = subprocess.Popen([node, str(em / "cli" / "episodic-memory.js"), "sync", "--summary-limit", "0"],
                                     stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env,
-                                    cwd=str(em), creationflags=_NO_WINDOW)
+                                    cwd=str(em), **_DETACH)
     except OSError as e:
         return "index sync could not start ({}): results may miss recent sessions".format(e)
     try:
