@@ -7,7 +7,8 @@ into the plugin's own master list (see Plugin.masters), nothing more.
 
 It never writes, and it never guesses: a structure it cannot walk raises PluginError with the byte offset, and a
 record it can read only partly (a compressed body that does not inflate, a FormID that appears twice, a master index
-past the master list) is listed in Plugin.problems instead of being silently folded into the answer.
+past the master list, or malformed subrecords) is listed in Plugin.problems instead of being silently folded into
+the answer. Subrecord lengths and XXXX ownership are checked before any payload is accepted.
 
 Used by esp-summary.py and esp-record-diff.py.
 """
@@ -85,7 +86,10 @@ def parse(data: bytes) -> Plugin:
                     problems.append("{} {:08X} at offset {}: compressed body does not inflate ({}); its hash is "
                                     "of the raw bytes".format(name, fid, off, e))
             edid = ""
-            for tag, value in subrecs(body):
+            issues = []
+            fields = subrecs(body, problems=issues)
+            problems.extend("{} {:08X} at offset {}: {}".format(name, fid, off, issue) for issue in issues)
+            for tag, value in fields:
                 if tag == "EDID":
                     edid = value.rstrip(b"\0").decode("latin-1")
                     break
@@ -114,21 +118,45 @@ def parse(data: bytes) -> Plugin:
 
 def masters(header_body: bytes):
     """The plugin's master file names, in order (index = the FormID high byte of an override)."""
-    return [v.rstrip(b"\0").decode("latin-1") for t, v in subrecs(header_body) if t == "MAST"]
+    # parse() already records structural problems, including those in TES4; retain only its valid prefix here.
+    return [v.rstrip(b"\0").decode("latin-1") for t, v in subrecs(header_body, problems=[]) if t == "MAST"]
 
 
-def subrecs(body: bytes):
-    """Split a record body into [(tag, bytes)]. An XXXX subrecord carries the 32-bit size of the one after it."""
+def subrecs(body: bytes, problems=None):
+    """Split [(tag, bytes)], validating every boundary. XXXX sizes exactly the following ordinary subrecord.
+
+    By default malformed bytes raise PluginError. Reporters may supply a problem list to retain the valid prefix
+    and report the fault instead; an invalid payload is never returned as if complete.
+    """
     out, i, big = [], 0, None
-    while i + 6 <= len(body):
+    def fail(reason):
+        message = "subrecord at body offset {}: {}".format(i, reason)
+        if problems is None:
+            raise PluginError(message)
+        problems.append(message)
+        return out
+
+    while i < len(body):
+        if i + 6 > len(body):
+            return fail("truncated subrecord header")
         t = body[i:i + 4].decode("latin-1")
         n = struct.unpack_from("<H", body, i + 4)[0]
-        if t == "XXXX" and n == 4 and i + 10 <= len(body):
+        if t == "XXXX":
+            if n != 4:
+                return fail("XXXX length must be four bytes")
+            if big is not None:
+                return fail("XXXX has no following ordinary subrecord")
+            if i + 10 > len(body):
+                return fail("truncated XXXX payload")
             big = struct.unpack_from("<I", body, i + 6)[0]
             i += 10
             continue
         if big is not None:
             n, big = big, None
+        if i + 6 + n > len(body):
+            return fail("{} payload length {} runs past the record body".format(t, n))
         out.append((t, body[i + 6:i + 6 + n]))
         i += 6 + n
+    if big is not None:
+        return fail("dangling XXXX without its following subrecord")
     return out
