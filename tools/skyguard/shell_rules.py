@@ -125,13 +125,13 @@ def resaver_native_direct(command: str, parsed) -> str:
         if program in RESAVER_NATIVE_GUI:
             return "ReSaverPP.exe"
         if program in RESAVER_NATIVE_CLI:
-            if any(_native_write_word(a) for a in argv) or any("$" in a or "`" in a for a in argv):
+            if any(_native_write_word(a) for a in argv) or any(_DYNAMIC.search(a) for a in argv):
                 return "resaverpp-cli.exe"
     if not parsed.ok:
         for m in RESAVER_NATIVE_TEXT.finditer(command):
             if not m.group("cli"):
                 return "ReSaverPP.exe"
-            if any(_native_write_word(w.strip("\"'")) for w in command[m.end():].split()):
+            if any(_native_write_word(w.strip("\"'")) or _DYNAMIC.search(w) for w in command[m.end():].split()):
                 return "resaverpp-cli.exe"
     return ""
 
@@ -180,7 +180,7 @@ def resaver_target(command: str, shell: str = "", parsed=None):
             continue
         if _is_resaver(e):
             e = deletes.substituted(e)             # RT-A: `OP=reset-havok; ... $OP x.ess --apply`
-            if any("$" in a or "`" in a for a in e.argv):
+            if any(_DYNAMIC.search(a) for a in e.argv):
                 opaque = True                       # RT-A: an argument not proven literal (`$(echo --apply)`): the text
             op = _resaver_op(e)
             if op:
@@ -217,7 +217,7 @@ def resaver_write_calls(command: str, shell: str = "", parsed=None):
         # An opaque program may be the ReSaver named elsewhere in the command.
         # Do not let one known call suppress another call's conservative scope.
         if (_is_resaver(e) or e.program == "?") and _resaver_op(e):
-            if any("$" in a or "`" in a for a in e.argv):
+            if any(_DYNAMIC.search(a) for a in e.argv):
                 # A resolved input is not proof of an unresolved output. Keep
                 # this call explicitly unknown so it refuses before backup.
                 calls.append((_resaver_op(e), [], e))

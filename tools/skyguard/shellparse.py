@@ -33,7 +33,9 @@ commands too. Unquoted-delimiter bodies are scanned for `$( )` and backticks, wh
 
 LINEAR. One pass per nesting level with an explicit frame stack (no recursion over `(` / `$(` / `{` nesting);
 the only recursion is re-parsing a string that is itself a command line (backticks, -c strings, eval,
-shell-fed heredocs, find -exec), bounded by MAX_DEPTH. Every regex is a single character-class run or a
+shell-fed heredocs, find -exec), bounded by MAX_DEPTH. Bash retains both locations when a control body may not
+run, coalescing equal locations and bounding each frame at 16. Overflow, or an incomplete parse after location
+ambiguity, marks the command unread and refuses it. Every regex is a single character-class run or a
 bounded literal. A hook that answers after its timeout has its answer DROPPED (fail open), so
 tests/test_skyguard_timing.py holds this at 20 KB and 80 KB.
 
@@ -55,6 +57,8 @@ AN EXEC:
              is session-wide, so a pipeline stage's Set-Location carries, and one inside a block or ( ) makes
              the caller's directory "?" (whether the block ran is not known). cmd: `cd` takes the rest of the
              line as one path, spaces included.
+             Bash control bodies and conditional chains retain both execution possibilities; later commands
+             have an Exec for each possible location. An unconditional absolute cd collapses those alternatives.
   stdin_from "pipe" | "heredoc:shell" | "heredoc:interpreter" | "heredoc:data" | "".
   segment    the source text of this simple command (for the legacy fallback and messages' basenames only).
   stdin_body the heredoc / here-string body when stdin_from starts with "heredoc:" (an addition to the
@@ -106,6 +110,7 @@ from . import assign
 
 MAX_TOKENS = 2000
 MAX_DEPTH = 8
+MAX_LOCATION_STATES = 16
 # Every branch is linear, but "linear" is proven only up to the sizes the timing tests run (20/80 KB), and a
 # superlinear path small enough to stay under the ratio floor at 80 KB would cost seconds at megabytes. Above this
 # cap the parser does not try: ok=False, and the legacy rules (linear) decide. MEASURED 2026-10-03: the largest of
@@ -272,10 +277,11 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
 # ----------------------------------------------------------------------------------------------------------
 class _Ctx:
     __slots__ = ("tokens", "out", "frame_ids", "via_xargs", "root", "counts", "subst", "dialect", "poison", "unread",
-                 "aliases", "codes", "xargs", "unnamed", "lits", "evals")
+                 "aliases", "codes", "xargs", "unnamed", "lits", "evals", "location_ambiguous")
 
     def __init__(self, root: str = "", dialect: str = ""):
-        self.unread = False             # RT-A: decoded text runs as commands (Parsed.unread)
+        self.unread = False             # decoded code or location ambiguity prevents a complete scope proof
+        self.location_ambiguous = False
         self.aliases: dict = {}         # RT-A: same-command aliases, name -> body (bash alias, PowerShell Set-Alias)
         self.codes: List[Tuple[str, str]] = []      # RT-A G1/G2: Parsed.codes
         self.xargs: List[str] = []                  # RT-A G2: Parsed.xargs
@@ -334,7 +340,8 @@ class _Here:
 
 class _Cmd:
     __slots__ = ("words", "redirs", "heredocs", "start", "end", "cd", "key", "stage", "skip", "redir_op",
-                 "drop_next", "call", "frame", "after_time", "coproc", "kv", "lst", "seq", "valid", "redir_words")
+                 "drop_next", "call", "frame", "after_time", "coproc", "kv", "lst", "seq", "valid", "redir_words",
+                 "parent_frame", "carry_cd", "cd_change", "conditional", "record_index")
 
     def __init__(self, f, start: int):
         self.words: List[_Word] = []
@@ -351,6 +358,11 @@ class _Cmd:
         self.drop_next = False
         self.call = False
         self.frame = f.id
+        self.parent_frame = f.parent
+        self.carry_cd = False
+        self.cd_change = None
+        self.conditional = f.last_sep in ("&&", "||")
+        self.record_index = None
         self.after_time = False
         self.coproc = False
         self.kv = self.lst = self.seq = 0       # Task 7b: where this command sits in the top-level statement list
@@ -359,7 +371,8 @@ class _Cmd:
 
 class _Frame:
     __slots__ = ("kind", "cmd", "word", "mode", "cd", "pipe", "stage", "case", "dbr", "start", "id", "last_sep",
-                 "io", "rec_mark", "ctl", "kv", "lst", "seq", "chain_ok", "pend", "opq")
+                 "io", "rec_mark", "ctl", "kv", "lst", "seq", "chain_ok", "pend", "opq", "parent",
+                 "location_controls", "location_depth", "function_pending")
 
     def __init__(self, kind: str, cd: str, mode: str, fid: int, start: int = 0):
         self.kind = kind
@@ -373,6 +386,10 @@ class _Frame:
         self.dbr = False
         self.start = start
         self.id = fid
+        self.parent = ()
+        self.location_controls = []
+        self.location_depth = 0
+        self.function_pending = False
         self.last_sep = ""
         self.io = ""
         self.opq = -1               # I7: index in _Scanner.synth of this call's opaque exec
@@ -428,7 +445,10 @@ class _Scanner:
         self.recs: List[_Cmd] = []
         self.synth: List[Tuple[int, Exec]] = []
         self.frames = [self._frame("top", cd, mode, 0)]
-        self.pending: List[_Here] = []
+        self.initial_cd = self.final_cd = cd
+        self.final_cds = (cd,)
+        self.nested = []                # inline substitutions resolved after preceding eval location effects
+        self.pending: List[Tuple[_Here, _Cmd]] = []
         self.i = 0
         self._pmatch: Optional[dict] = None
         self.vars: dict = {}            # Task 7b: name -> [value, known_ver, list, seq] (one literal assignment)
@@ -457,6 +477,7 @@ class _Scanner:
         if word:
             self._word(f)
         g = self._frame(kind, f.cd, "n", start)
+        g.parent = (f.id,) + f.parent
         g.rec_mark = len(self.recs)
         self.frames.append(g)
         return g
@@ -504,7 +525,11 @@ class _Scanner:
             if cmd.redir_op is not None:
                 raise ParseError("a redirection without a target")
             cmd.end = self.i
+            cmd.carry_cd = sep not in ("|", "|&", "&") and cmd.stage == 0
+            if self.DIALECT == "bash":
+                cmd.conditional |= bool(f.case or f.location_depth)
             if not cmd.skip and (cmd.words or cmd.redirs or cmd.heredocs):
+                cmd.record_index = len(self.recs)
                 self.recs.append(cmd)
                 if self.SESSION_CD or (sep not in ("|", "|&") and cmd.stage == 0):
                     self.track_cd(f, cmd)
@@ -521,6 +546,9 @@ class _Scanner:
 
     def track_cd(self, f: _Frame, cmd: _Cmd) -> None:
         pass
+
+    def defer_sub(self, text, f, mode="n"):
+        self.nested.append((len(self.recs), (f.id,) + f.parent, f.cd, text, mode))
 
     def cd_word(self, cmd: _Cmd, w: _Word, lit: bool) -> str:
         """The folder a cd word names (_cd_value). fix-limits 14: a word that is dynamic only through same-command
@@ -693,16 +721,26 @@ class _Bash(_Scanner):
         if v in _BASH_DROP:
             if v in _BASH_OPEN:
                 f.ctl += 1
+                kind = ("function" if f.function_pending else "brace") if v == "{" else v
+                f.location_controls.append(kind)
+                f.location_depth += kind != "brace"
+                if v == "{":
+                    f.function_pending = False
             elif v in _BASH_CLOSE:
                 f.ctl -= 1
+                if f.location_controls:
+                    f.location_depth -= f.location_controls.pop() != "brace"
                 if f.ctl < 0:
                     self.unsure = True              # a stray fi/done/}: resolution off (fix round 1)
             return True
         if v == "function":
             cmd.drop_next = True
+            f.function_pending = True
             return True
         if v in ("for", "select"):
             f.ctl += 1                                          # closed by `done`
+            f.location_controls.append("loop")
+            f.location_depth += 1
             cmd.skip = True
             return True
         if v == "case":
@@ -754,6 +792,7 @@ class _Bash(_Scanner):
             new = "~"
         else:
             new = self.cd_word(cmd, args[0], args[0].bs)
+        cmd.cd_change = new
         f.cd = _join_cd(f.cd, new)
 
     # -- the main loop
@@ -921,12 +960,12 @@ class _Bash(_Scanner):
                 e = t.find("`", s + 1, b)
                 if e < 0:
                     raise ParseError("an unterminated ` inside a $(( )), (( )), ${ } or ( ) span")
-                _sub(t[s + 1:e], "bash", self.depth + 1, f.cd, self.ctx)
+                self.defer_sub(t[s + 1:e], f)
             else:
                 e = self._pairs().get(s + 1)
                 if e is None or e >= b:
                     raise ParseError("an unbalanced $( inside a $(( )), (( )), ${ } or ( ) span")
-                _sub(t[s + 2:e], "bash", self.depth + 1, f.cd, self.ctx)
+                self.defer_sub(t[s + 2:e], f)
             j = e + 1
         if not found and arith and _CMDLIKE.match(t, a, b):
             raise ParseError("a (( )) whose body reads as a command")
@@ -1034,7 +1073,7 @@ class _Bash(_Scanner):
         w.add(t[self.i:j + 1])
         w.dyn = True
         self.i = j + 1
-        _sub("".join(parts), "bash", self.depth + 1, f.cd, self.ctx)
+        self.defer_sub("".join(parts), f)
 
     def _operator(self, f, c):
         t, i = self.t, self.i
@@ -1095,6 +1134,7 @@ class _Bash(_Scanner):
                     j += 1
                 if len(cmd.words) == 1 and not cmd.redirs and j < self.n and t[j] == ")":
                     cmd.words = []                              # name () -- a function definition
+                    f.function_pending = True
                     self.i = j + 1
                     return
                 raise ParseError("unexpected (")
@@ -1106,6 +1146,7 @@ class _Bash(_Scanner):
                     self._cmd(f, i).skip = True
                     self.i = k + 1
                     return
+            f.function_pending = False                          # a function's ( ) body keeps its own location
             self._push(f, "paren", i, False)
             self.i = i + 1
             return
@@ -1116,6 +1157,7 @@ class _Bash(_Scanner):
                 j += 1
             if j < self.n and t[j] == ")":                      # name() -- a function definition
                 f.word = None
+                f.function_pending = True
                 self.i = j + 1
                 return
         if _ASSIGN.fullmatch(t, w.start, i) or t[i - 1] in "@!+*?":   # a=( ... ) array / extglob @( ... )
@@ -1210,13 +1252,13 @@ class _Bash(_Scanner):
             raise ParseError("a heredoc without a delimiter")
         h = _Here(delim, strip, quoted, None)
         cmd.heredocs.append(h)
-        self.pending.append(h)
+        self.pending.append((h, cmd))
         self.i = j
 
     def _read_bodies(self):
         t, n = self.t, self.n
         pos = self.i
-        for h in self.pending:
+        for h, cmd in self.pending:
             start = pos
             while True:
                 if pos >= n:
@@ -1232,7 +1274,10 @@ class _Bash(_Scanner):
                     break
                 pos = end + 1
             if not h.quoted and ("$(" in h.body or "`" in h.body):
-                _sub(h.body, "bash", self.depth + 1, self.frames[-1].cd, self.ctx, mode="hd")
+                # Expand before the receiving command executes, in that command's shell frame. The body is
+                # read after the line's records, possibly after later argument substitutions were queued.
+                position = cmd.record_index if cmd.record_index is not None else len(self.recs)
+                self.nested.append((position, (cmd.frame,) + cmd.parent_frame, cmd.cd, h.body, "hd"))
         self.pending = []
         self.i = min(pos, n)
 
@@ -2050,6 +2095,7 @@ class _Resolver:
         self.y = dyn
         self.redirs = tuple(redirs)
         self.cd = cd
+        self.cd_alternates = ()
         self.stdin = stdin
         self.seg = seg
         self.bodies = bodies          # [(body, delimiter_quoted)] in order; the last one is stdin
@@ -2181,11 +2227,15 @@ class _Resolver:
                 return True
         return False
 
-    def reparse(self, text: str, dialect: str) -> None:
+    def reparse(self, text: str, dialect: str, carry_cd: bool = False) -> None:
         # RT-A: cmd's string is re-read in the R6 literal (Windows) reading too -- `cmd /c mklink /J C:\w\j ...` names
         # C:\w\j, which bash would have mangled. One extra reading per bash-to-cmd hop; MAX_DEPTH bounds the hops.
         if self.recurse or dialect == "cmd":
-            _sub(text, dialect, self.depth + 1, self.cd, self.ctx)
+            final_dirs = []
+            final_cd = _sub(text, dialect, self.depth + 1, self.cd, self.ctx, final_dirs=final_dirs)
+            if carry_cd:
+                self.cd = final_cd
+                self.cd_alternates = tuple(final_dirs[1:])
 
     def run(self, k: int = 0) -> List[Exec]:
         self._run(k)
@@ -2467,9 +2517,11 @@ class _Resolver:
             if p == "eval" and self.d == "bash":
                 self.emit(p, k + 1)
                 if k + 1 < n:
-                    code = self._code(k + 1)[0]                 # guard3: `c="rm x"; eval "$c"` runs rm x
+                    code, certain = self._code(k + 1)          # eval runs in the caller's scope
                     self._decoded(code)
-                    self.reparse(code, "bash")
+                    self.reparse(code, "bash", carry_cd=True)
+                    if not certain:
+                        self.cd = "?"
                 return self.made
             if p in POSIX_SHELLS:
                 return self._posix_shell(p, k)
@@ -2952,7 +3004,21 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
     synth = sorted(sc.synth, key=lambda x: x[0])
     si = 0
     groups = {}
+    frame_cd = {sc.frames[0].id: sc.initial_cd}
+    frame_dirs = {sc.frames[0].id: (sc.initial_cd,)}
+    nested = iter(sorted(sc.nested, key=lambda item: item[0]))
+    pending = next(nested, None)
+    def drain_nested(position):
+        nonlocal pending
+        while pending is not None and pending[0] <= position:
+            _, parents, before, text, mode = pending
+            base = next((frame_cd[p] for p in parents if p in frame_cd), before)
+            alternatives = next((frame_dirs[p][1:] for p in parents if p in frame_dirs), ())
+            for location in (base,) + alternatives:
+                _sub(text, "bash", sc.depth + 1, location, ctx, mode)
+            pending = next(nested, None)
     for idx, rec in enumerate(sc.recs):
+        drain_nested(idx)
         while si < len(synth) and synth[si][0] <= idx:
             ctx.out.append(synth[si][1])
             si += 1
@@ -2974,15 +3040,45 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
         dyn = [w.dyn for w in ws]
         saved, ctx.subst = ctx.subst, (_subst(sc, rec, ws, vals) if sc.vars else ())
         saved_lits, ctx.lits = ctx.lits, {vals[j]: _raw_literal(w.raw, d) for j, w in enumerate(ws) if w.dyn}
+        if d == "bash":
+            rec.cd = frame_cd.setdefault(rec.frame, next((frame_cd[p] for p in rec.parent_frame if p in frame_cd), rec.cd))
+        inherited = frame_dirs.get(rec.frame, next((frame_dirs[p] for p in rec.parent_frame if p in frame_dirs), (rec.cd,)))
+        alternatives = inherited[1:] if d == "bash" else ()
         res = _Resolver(d, vals, quoted, dyn, rec.redirs, rec.cd, stdin, seg, bodies, sc.depth, ctx, recurse, rec.call)
         if d == "powershell":
             res.strq = [_ps_string(w) for w in ws]
         made = res.run()
+        alternate_results = []
+        for location in alternatives:
+            other = _Resolver(d, vals, quoted, dyn, rec.redirs, location, stdin, seg, bodies, sc.depth, ctx, recurse, rec.call)
+            made += other.run()
+            alternate_results.extend((other.cd,) + other.cd_alternates)
+        if d == "bash" and rec.carry_cd:
+            frame_cd[rec.frame] = (_join_cd(res.cd, rec.cd_change) if rec.cd_change is not None else res.cd)
+            outcomes = [frame_cd[rec.frame]]
+            outcomes.extend(_join_cd(value, rec.cd_change) if rec.cd_change is not None else value
+                            for value in res.cd_alternates + tuple(alternate_results))
+            if rec.conditional:
+                outcomes.extend((rec.cd,) + alternatives)
+            choices = tuple(dict.fromkeys(outcomes))
+            if len(choices) > 1:
+                ctx.location_ambiguous = True
+            if len(choices) > MAX_LOCATION_STATES:
+                ctx.unread = True       # bounded location ambiguity cannot turn into a guessed allow
+                choices = choices[:MAX_LOCATION_STATES]
+            frame_dirs[rec.frame] = choices
         if d == "bash" and any(w.bs for w in ws):                     # R6: the literal reading too
             made = made + _Resolver(d, ["".join(w.l) for w in ws], quoted, dyn, rec.redirs, rec.cd, stdin, seg,
                                     bodies, sc.depth, ctx, False, rec.call).run()
+            for location in alternatives:
+                made += _Resolver(d, ["".join(w.l) for w in ws], quoted, dyn, rec.redirs, location, stdin, seg,
+                                  bodies, sc.depth, ctx, False, rec.call).run()
         ctx.subst, ctx.lits = saved, saved_lits
         groups.setdefault(rec.key, []).append((rec, made))
+    if d == "bash":
+        sc.final_cd = frame_cd[sc.frames[0].id]
+        sc.final_cds = (sc.final_cd,) + frame_dirs[sc.frames[0].id][1:]
+    drain_nested(len(sc.recs))
     for _, e in synth[si:]:
         ctx.out.append(e)
     if not recurse:
@@ -3077,13 +3173,25 @@ def _reads_code(argv) -> bool:
 _SCANNERS = {"bash": _Bash, "powershell": _Pwsh, "cmd": _Cmdexe}
 
 
-def _sub(text: str, dialect: str, depth: int, cd: str, ctx: _Ctx, mode: str = "n") -> None:
+def _sub(text: str, dialect: str, depth: int, cd: str, ctx: _Ctx, mode: str = "n", final_dirs=None) -> str:
     """Parse `text` (itself a command line) at nesting `depth`; its execs go to ctx.out."""
-    if depth > MAX_DEPTH:
-        raise ParseError("nesting deeper than %d" % MAX_DEPTH)
-    sc = _SCANNERS[dialect](text, depth, cd, ctx, mode)
-    sc.run()
-    _records_to_execs(sc)
+    try:
+        if depth > MAX_DEPTH:
+            raise ParseError("nesting deeper than %d" % MAX_DEPTH)
+        sc = _SCANNERS[dialect](text, depth, cd, ctx, mode)
+        try:
+            sc.run()
+        except ParseError:
+            _records_to_execs(sc)       # completed commands/substitutions remain evidence before a later syntax error
+            raise
+        _records_to_execs(sc)
+        if final_dirs is not None:
+            final_dirs.extend(sc.final_cds)
+        return sc.final_cd
+    except Exception:
+        if ctx.location_ambiguous:
+            ctx.unread = True          # a partial answer cannot discard one possible execution location
+        raise
 
 
 def _sub_speculative(text: str, dialect: str, depth: int, cd: str, ctx: _Ctx) -> None:
