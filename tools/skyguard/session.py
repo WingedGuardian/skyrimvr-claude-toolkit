@@ -17,6 +17,31 @@ def _with_prefs(text, project, audit):
     return "\n".join(t for t in (text, extra) if t)
 
 
+def with_charter(text, project, session_id):
+    """The session charter (origin) and the open session ledger after everything else, at every source -- compact is
+    when they matter most. They live in <project>/.agent-sessions/, outside .modding-agent-harness/. Codex keeps this
+    whole text within 8,000 bytes and Claude Code previews past 10,000 characters, so the charter and ledger get what
+    the rest leaves, or a one-line pointer -- never a silent mid-cut. Never raises."""
+    try:
+        from modding_harness import charter, ledger
+        if not session_id:
+            return text
+        extra = "\n".join(t for t in (charter.render(project, session_id),
+                                     ledger.summary(project, session_id, full=True, rows_cap=2048)) if t)
+    except Exception:                         # noqa: BLE001 -- a missing or broken core must not fail the session
+        extra = "SESSION CHARTER: NOT INJECTED -- the shared core could not be loaded."
+    room = 7600 - len(text.encode("utf-8")) if text else 7600
+    if len(extra.encode("utf-8")) > room:
+        extra = ("SESSION CHARTER: not shown (session-start output budget) -- read .agent-sessions/{}.md and list the "
+                 "open ledger yourself.".format(session_id))
+        try:
+            from modding_harness import ledger
+            extra += " " + ledger.commands(project, session_id)
+        except Exception:                     # noqa: BLE001
+            pass
+    return "\n".join(t for t in (text, extra) if t)
+
+
 # ---- Layer 2 at session start (Plan 6 Task 10; R4, R6, R7, R9, R12) ---------------------------------------------
 # Order (Review Focus 4): 1 the start is recorded (run.py, before this) -> 2 every lift is cleared and the derived
 # target set relocked unless a TRUSTED persistent disable exists -> 3 the banners are computed from what was found

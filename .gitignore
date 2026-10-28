@@ -41,4 +41,6 @@ KNOWLEDGEBASE.local.md
 tools/vr-emu-driver/build/
 tools/vr-emu-driver/work/
 .modding-agent-harness/
+# Session charters: each session's first prompt, goal and open items (private, per install).
+.agent-sessions/
 tools/resaver-cli/.compiled/

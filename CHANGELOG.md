@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Session charter and ledger (shared core pinned to ee30180, which adds `charter` and `ledger`). Every session start, including after context compaction, now ends with the session's charter (its origin) and its open ledger: one sentence per agreed item with an id, status and evidence, changed with `tools/modding_harness/ledger.py add|update|mission|list` (the exact command is printed). Claude Code and Codex both get it through the existing session-start path, so no hook is added and Codex needs no re-review. If it does not fit the session-start budget it is replaced by a pointer to the files, never cut. The files live in `.agent-sessions/` (gitignored). Not yet: the per-prompt ledger line and automatic first-prompt capture, which need a UserPromptSubmit hook (pending a latency measurement on this toolkit's wrappers).
 - Shared preservation core pinned to 221292e: incomplete local prompts refuse, and unknown surfaces cannot discard declared save work or claim evaluated coverage through a prompt.
 
 - Shared preservation core pinned to d2af1e8: permission prompts from a profile or local restriction now pass save-scope, bulk-approval and verified-backup checks before reaching the host.
