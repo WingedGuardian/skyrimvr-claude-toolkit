@@ -68,5 +68,7 @@ To read more of a session, open its transcript at the line range shown, or resum
 ## Not installed
 
 If the tool reports that episodic-memory is not installed or has no index, tell the user. Installing it is their
-decision: a clone of obra/episodic-memory at commit 7e06519 plus `npm ci --omit=dev` (with the pinned Node.js), then one full index build, which took about
-an hour and used about 4.5 GB on a workstation with 1,349 conversations. Do not install it unasked.
+decision: obra/episodic-memory at commit 7e06519, installed into `~/.local/share/episodic-memory` as its README says
+(that commit ships no lockfile, so its dependencies resolve at install time), then one full index build with
+`EPISODIC_MEMORY_CONFIG_DIR` set to `~/.local/share/episodic-memory-data`, where the tool looks first. That build took
+about an hour and used about 4.5 GB on a workstation with 1,349 conversations. Do not install it unasked.
