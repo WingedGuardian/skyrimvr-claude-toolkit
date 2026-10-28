@@ -154,3 +154,30 @@ def test_the_hook_is_registered_for_every_prompt_and_not_as_a_guard():
     assert entry["command"] == 'bash "$CLAUDE_PROJECT_DIR/tools/session-charter.sh"'
     assert entry["timeout"] >= 30
     assert not (REPO / ".claude" / "hooks" / "session-charter.sh").exists()
+
+
+def _protect_bash(root, command):
+    payload = {"session_id": SID, "hook_event_name": "PreToolUse", "tool_name": "Bash",
+               "tool_input": {"command": command}, "cwd": str(root)}
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_ENV_FILE"}
+    r = subprocess.run([sys.executable, "-B", str(REPO / "tools" / "skyguard" / "run.py"), "claude", "protect-bash",
+                        "--project", str(root), "--root", str(root), "--root-win", str(root).replace("\\", "/")],
+                       input=json.dumps(payload).encode(), capture_output=True, timeout=120, env=env)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout.decode() or "{}")
+
+
+@pytest.mark.parametrize("verb", ["add -- 'Rebuild the ESP'", "list", "mission -- 'Port the mod to VR'",
+                                  "update L123456 --status done --evidence 'built and loaded in game'"])
+def test_the_guard_lets_the_session_run_the_printed_ledger_commands(tmp_path, verb):
+    """The session changes its ledger only through the command ledger.commands() prints. If protect-bash refused it,
+    the ledger would stay empty while every prompt said it was there."""
+    root = tmp_path / "game"
+    root.mkdir()
+    _install(root, sys.executable)
+    (root / "skyrim-paths.env").unlink()    # the fixture's dummy game root would make the guard fail closed (inert)
+    printed = ledger.commands(str(root), SID)
+    command = printed.split("`")[1] + " " + verb
+    assert _protect_bash(root, command) == {}, command
+    # control: the same engine on the same root does refuse a destructive command
+    assert _protect_bash(root, "rm -rf Data")["hookSpecificOutput"]["permissionDecision"] == "deny"
