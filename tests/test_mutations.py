@@ -10609,7 +10609,7 @@ MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test i
      _RPBT + "test_a_checkout_at_another_commit_is_refused_before_anything_builds"),
     ("resaver-plus-build-dirty-cache-used", _RPB, "        if dirty:", "        if False:",
      _RPBT + "test_a_dirty_source_cache_is_refused_and_left_alone"),
-    ("resaver-plus-build-crlf-cache-used", _RPB, '        if conversion.strip().lower() != "false":', "        if False:",
+    ("resaver-plus-build-crlf-cache-used", _RPB, '        if code != 0 or conversion.strip().lower() != "false":', "        if False:",
      _RPBT + "test_a_cache_that_converts_line_endings_is_refused"),
     ("resaver-plus-build-patch-unchecked", _RPB, '        run([*GIT, "apply", "--check", p], cwd=source, env=env)',
      "        pass", _RPBT + "test_a_patch_that_does_not_apply_stops_before_the_build"),
@@ -10879,4 +10879,21 @@ MUTATIONS += [pytest.param("tools/housekeep.py", find, rep, test,
     ('count("kept: trace provenance unavailable ({})".format(type(error).__name__), size)',
      'count("kept: trace provenance unavailable ({})".format(type(error).__name__), 0)',
      _HPE + 'test_unreadable_trace_provenance_keeps_it_and_plans_other_tasks', 'known-bytes-accounted'),
+]]
+
+# Task 7 P2: the cache's stored local policy is the authority, never a -c override or global default.
+_BC7 = "tools/resaver-plus/build.py"
+_BT7 = "tests/test_review_cache.py::"
+MUTATIONS += [pytest.param(_BC7, find, rep, test, id="review-cache-" + ident) for find, rep, test, ident in [
+    ('run_result(["git", "-C", dest, "config", "--local", "--get", "core.autocrlf"])',
+     'run_result([*GIT, "-C", dest, "config", "--local", "--get", "core.autocrlf"])',
+     _BT7 + 'test_cache_admission_reads_stored_local_autocrlf_without_overriding_it[false]', 'getter-overrides'),
+    ('run_result(["git", "-C", dest, "config", "--local", "--get", "core.autocrlf"])',
+     'run_result(["git", "-C", dest, "config", "--get", "core.autocrlf"])',
+     _BT7 + 'test_cache_admission_reads_stored_local_autocrlf_without_overriding_it[None]', 'local-required'),
+    ('        if code != 0 or conversion.strip().lower() != "false":',
+     '        if conversion.strip().lower() != "false":',
+     _BT7 + 'test_failed_config_read_is_unknown_even_with_a_false_fragment', 'read-must-succeed'),
+    ('        if code != 0 or conversion.strip().lower() != "false":', '        if code != 0:',
+     _BT7 + 'test_cache_admission_reads_stored_local_autocrlf_without_overriding_it[input]', 'only-false'),
 ]]
