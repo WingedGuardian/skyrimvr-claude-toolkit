@@ -68,6 +68,7 @@ CORE_REQUIRED = (
     "tools/session-charter.sh",
     "tools/modding_harness/charter.py",
     "tools/modding_harness/ledger.py",
+    "tools/modding_harness/find_session.py",
     "tools/skyguard/run.py",
     "scripts/gen_agent_trees.py",
     # Plan 6: what README tells a user to run for the lock, lifts, snapshots and skydoctor, and the guard manifest
