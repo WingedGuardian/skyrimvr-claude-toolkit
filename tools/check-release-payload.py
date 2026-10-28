@@ -65,6 +65,9 @@ CORE_REQUIRED = (
     "AGENTS.md",
     "tools/hook-canary.sh",
     "tools/kb-guard.sh",
+    "tools/session-charter.sh",
+    "tools/modding_harness/charter.py",
+    "tools/modding_harness/ledger.py",
     "tools/skyguard/run.py",
     "scripts/gen_agent_trees.py",
     # Plan 6: what README tells a user to run for the lock, lifts, snapshots and skydoctor, and the guard manifest
@@ -221,8 +224,11 @@ def check_hooks(root: Path):
         cmds = [h.get("command", "") for ms in cfg.get("hooks", {}).values() for m in ms for h in m.get("hooks", [])]
         named = sorted({p for c in cmds for p in re.findall(r"\$CLAUDE_PROJECT_DIR/([^\"' ]+)", c)})
         missing = [p for p in named if not (root / p).is_file()]
+        # Only guard wrappers count toward the floor: an advisory entry outside .claude/hooks/ (tools/session-charter.sh)
+        # must not stand in for a guard whose registration was dropped.
+        guards = [p for p in named if p.startswith(".claude/hooks/")]
         problem = ("missing: " + ", ".join(missing)) if missing else (
-            None if len(named) >= CLAUDE_HOOK_FLOOR else "only {} hook(s) registered".format(len(named)))
+            None if len(guards) >= CLAUDE_HOOK_FLOOR else "only {} guard hook(s) registered".format(len(guards)))
     except (OSError, ValueError, AttributeError, TypeError) as e:
         problem = "unreadable: {}".format(e)
     yield ".claude/settings.json registers the hooks, and each is shipped", problem

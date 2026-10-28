@@ -97,6 +97,8 @@ def _claude_definition_timeouts() -> dict:
     for groups in d["hooks"].values():
         for g in groups:
             for h in g["hooks"]:
+                if h["command"].endswith('/tools/session-charter.sh"'):
+                    continue    # advisory context, not a guard wrapper: no deadline chain (tests/test_session_charter.py)
                 m = re.search(r"\.claude/hooks/([\w-]+\.sh)", h["command"])
                 out[m.group(1)] = h["timeout"]
     return out

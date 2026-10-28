@@ -590,6 +590,21 @@ def test_a_registered_hook_missing_from_the_payload_is_named(payload):
     assert r.returncode == 1 and "!!" in line and "protect-mcp.sh" in line, r.stdout
 
 
+def test_an_advisory_hook_does_not_stand_in_for_a_dropped_guard_registration(payload):
+    """tools/session-charter.sh is registered too, but it is not a guard: with one guard's registration dropped, the
+    floor must still fail although the registered total is back at six."""
+    s = payload / ".claude" / "settings.json"
+    cfg = json.loads(s.read_text(encoding="utf-8"))
+    for groups in cfg["hooks"].values():
+        for g in groups:
+            g["hooks"] = [h for h in g["hooks"] if "protect-mcp.sh" not in h["command"]]
+    assert any("session-charter.sh" in h["command"] for g in cfg["hooks"]["UserPromptSubmit"] for h in g["hooks"])
+    s.write_text(json.dumps(cfg), encoding="utf-8")
+    r = _check(payload, "--section", "hooks")
+    line = _line(r.stdout, ".claude/settings.json registers the hooks")
+    assert r.returncode == 1 and "only 5 guard hook(s) registered" in line, r.stdout
+
+
 # ------------------------------------------------------------------ fix round 2 (re-review N1, N3)
 
 TOKEN_NAME = "Qorvath"                          # synthetic identity: never the maintainer's
