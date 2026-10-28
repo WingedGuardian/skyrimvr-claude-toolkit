@@ -37,8 +37,9 @@ steamvr.vrsettings that ALREADY forces the null driver: `off` would faithfully r
 OpenComposite update, a settings edit) is first copied, hash-verified, into the run's backup folder
 (changed-after-on-<stamp>/), so nothing is lost. The closed state file is kept as state-closed-<stamp>.json. With no
 state file it has nothing to do and says so, so it is safe to run again, or after a crash or a reboot. A restore that does not verify keeps the
-state file and the backups, and exits 3. Run `off` again once the reported problem is resolved. While a process
-that `launch` recorded is still running, `off` refuses: use `stop`.
+state file and the backups, and exits 3. Run `off` again once the reported problem is resolved. While any game or
+SteamVR process is observed, `off` refuses; missing owned processes also need absent health/handle backstops.
+Use `stop` for owned processes, and close foreign processes yourself.
 
 Close SteamVR first: it rewrites steamvr.vrsettings when it exits. `on` refuses while vrserver.exe runs (--force
 overrides).
@@ -46,11 +47,27 @@ overrides).
 `launch` (Windows): refuses while any game or SteamVR process runs. `--desktop background` needs the user's Steam
 client already OPEN (it stays theirs, on their desktop) and starts SteamVR's vrstartup.exe directly on a new
 private desktop; `--desktop current` asks Steam to start SteamVR (app 250820) on the user's desktop. Steam and its
-browser helpers are never owned, stopped or moved. Owned processes are recorded by PID + path + start time. If
+browser helpers are never owned, stopped or moved. Ownership requires a creation-time-ordered parent chain to
+a matching launch identity. CreateProcess handles stay open throughout launch: a direct child born between its
+launcher's creation and exit (or last proved-alive observation) can be proved after that launcher disappears.
+Missing unobserved intermediates, unreadable identity/lifetime data and unproved private placement still refuse.
+Background processes need readable threads on the private desktop. Late helpers need the same proof.
+
+A current-desktop Steam handoff may use a different, already-running Steam client. A SteamVR process absent
+before launch, observed during startup, born after the recorded request and running from the SteamVR install
+on the selected desktop may satisfy readiness. A simultaneous user launch cannot be distinguished: these
+runtime processes are tracked as observations, never owned or automatically terminated, including during late
+cleanup. After the owned game exits, close that SteamVR yourself before `stop`/`off` can restore files; its live
+handle also blocks restore after a missed process read. Strongly proved game/launcher descendants remain owned.
+Owned processes are recorded by PID + path + start time; legacy sessions without proof cannot be stopped
+automatically (close their processes yourself, then `off`). If
 SteamVR's Room Setup appears, the game waits (up to 25 s) until that helper's window is proved to be on the
 private desktop and is stopped (or it exits by itself); an unproved, wrong-path or reused-PID helper refuses the
 launch, and a window on the user's desktop stops the session. Then sksevr_loader.exe starts, and `launch`
 returns once DevBench answers /api/health for the owned game's PID with lifecycle dataLoaded and frame > 100.
+
+An ownership/placement refusal keeps headless files and state instead of automatically restoring under an
+unproved process, even if a later process read misses it. Close unproved processes yourself, then `stop` / `off`.
 
 How `run` decides the game has EXITED (a wrong "exited" would restore files under a running game): it needs
 EXIT_MISSES consecutive process reads without the owned game spanning at least EXIT_WINDOW seconds, and then
@@ -104,6 +121,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import skyrim_paths  # noqa: E402
+from vr_background_desktop import LaunchIdentityError  # noqa: E402
 
 DEFAULT_DIR = skyrim_paths.TOOLKIT_ROOT / ".claude" / "backups" / "vr-headless"
 EMU_DIR = Path(__file__).resolve().parent / "vr-emu-driver"
@@ -291,14 +309,14 @@ def make_desktop(kind: str, name=None):
 
 
 def process_alive(pid, start) -> bool:
-    """Same PID AND same creation time, still running (False when it cannot be opened)."""
+    """Same PID AND creation time; an unreadable handle is unknown, never an exit."""
     if not start:
-        return False
+        raise ProcessReadError("the owned process has no creation time")
     import vr_background_desktop as d
     try:
         return d.process_alive(pid, start)
-    except (OSError, ValueError):
-        return False
+    except (OSError, ValueError) as e:
+        raise ProcessReadError("the owned process handle could not be read: {}".format(e)) from e
 
 
 def terminate_verified(pid, start) -> None:
@@ -311,6 +329,129 @@ def parent_pid(pid):
                         "(Get-CimInstance Win32_Process -Filter 'ProcessId = {}').ParentProcessId".format(int(pid))],
                        capture_output=True, text=True, timeout=8)
     return int(r.stdout.strip()) if r.stdout.strip().isdigit() else None
+
+
+def read_process_tree():
+    """A creation-time-bound parent census, including non-VR intermediates. Failure proves no ownership."""
+    command = ("Get-CimInstance Win32_Process -ErrorAction Stop | Select-Object "
+               "@{n='Id';e={$_.ProcessId}},@{n='ParentId';e={$_.ParentProcessId}},"
+               "@{n='Path';e={$_.ExecutablePath}},"
+               "@{n='StartTime';e={$_.CreationDate.ToUniversalTime().ToString('o')}} | ConvertTo-Json -Compress")
+    try:
+        r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command], capture_output=True,
+                           text=True, check=True, timeout=8)
+        value = json.loads(r.stdout)
+        return value if isinstance(value, list) else [value]
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        raise ProcessReadError("process ancestry is unreadable: {}".format(e)) from e
+
+
+def refresh_launch_lifetimes(session, desk):
+    """Persist only bounded lifetime facts read from handles retained by this launch."""
+    reader = getattr(desk, "launch_lifetime", None)
+    if reader is None:
+        return
+    proofs = session.setdefault("launch_lifetimes", {})
+    for key in ("runtime_launch", "steam_launch", "game_launch"):
+        if session.get(key):
+            try:
+                proofs[key] = reader(session[key]["pid"])
+            except (OSError, KeyError, TypeError, ValueError) as exc:
+                raise ProcessReadError("launcher lifetime is unreadable: {}".format(exc)) from exc
+
+
+def retained_launcher_parent(node, session):
+    """A direct child born during a retained launcher's proved lifetime can outlive that launcher."""
+    from vr_background_desktop import parse_start
+    try:
+        created = parse_start(node["StartTime"])
+        for key in ("runtime_launch", "steam_launch", "game_launch"):
+            launch = session.get(key)
+            proof = session.get("launch_lifetimes", {}).get(key)
+            if not launch or not proof:
+                continue
+            if node.get("ParentId") != launch["pid"] or proof["pid"] != launch["pid"]:
+                continue
+            if Path(proof["executable"]).as_posix().casefold() != Path(launch["executable"]).as_posix().casefold():
+                continue
+            start = parse_start(launch["start_time"])
+            if parse_start(proof["start_time"]) != start:
+                continue
+            upper = proof["exit_time"] if proof.get("exit_time") is not None else proof["observed_until"]
+            if start <= created <= parse_start(upper):
+                return True
+    except (KeyError, TypeError, ValueError, OSError):
+        return False
+    return False
+
+
+def steam_handoff_runtime(x, session, census, desk):
+    """Readiness observation only: a concurrent user launch is indistinguishable, so never own it."""
+    from vr_background_desktop import parse_start
+    try:
+        if session["desktop_mode"] != "current" or session.get("preexisting_vr") != []:
+            return False
+        launch = session.get("steam_launch")
+        if not launch or x["ProcessName"] not in VR_NAMES or x["ProcessName"] in GAME_NAMES:
+            return False
+        path = Path(x["Path"]).as_posix().casefold()
+        base = Path(session["steamvr_root"]).as_posix().casefold().rstrip("/")
+        if not path.startswith(base + "/") or Path(path).name != x["ProcessName"].casefold() + ".exe":
+            return False
+        start, created = parse_start(launch["start_time"]), parse_start(x["StartTime"])
+        if not start <= created <= parse_start(session["runtime_observed_at"]):
+            return False
+        current = next((p for p in census if p.get("Id") == x["Id"]), {})
+        if Path(current["Path"]).as_posix().casefold() != path or parse_start(current["StartTime"]) != created:
+            return False
+        return bool(desk.process_on_desktop(x["Id"]))
+    except (KeyError, TypeError, ValueError, OSError):
+        return False
+
+
+def proven_process(x, session, census, desk):
+    """Require an identity-bound chain, allowing a retained launcher's bounded lifetime at a missing root.
+
+    Previously proved descendants can anchor later helpers, but their generation must still match the census.
+    Unseen non-launcher intermediates remain unproved. Steam handoff observations never become owned anchors.
+    """
+    from vr_background_desktop import parse_start
+    def identity(a, b):
+        def key(p):
+            return (p["Id"], Path(p["Path"]).as_posix().casefold(), parse_start(p["StartTime"]))
+        return key(a) == key(b)
+    nodes = {p.get("Id"): p for p in census}
+    anchors = list(session["processes"])
+    for key in ("runtime_launch", "steam_launch", "game_launch"):
+        child = session.get(key)
+        if child:
+            anchors.append({"Id": child["pid"], "Path": child.get("executable"),
+                            "StartTime": child.get("start_time")})
+    try:
+        node = nodes.get(x["Id"], {})
+        if not identity(node, x):
+            return False
+        seen = set()
+        while node["Id"] not in seen:
+            seen.add(node["Id"])
+            created = parse_start(node["StartTime"])
+            if any(identity(node, a) for a in anchors):
+                break
+            parent = nodes.get(node.get("ParentId"))
+            if parent is None and retained_launcher_parent(node, session):
+                break
+            if not parent:
+                return False
+            if created < parse_start(parent["StartTime"]):
+                return False
+            node = parent
+        else:
+            return False
+        if session["desktop_mode"] == "background" and not desk.process_on_desktop(x["Id"]):
+            return False
+        return True
+    except (KeyError, TypeError, ValueError, OSError):
+        return False
 
 
 def devbench_port(game: Path) -> int:
@@ -369,7 +510,12 @@ class ExitWatch:
         self.first_miss = now if self.first_miss is None else self.first_miss
         if self.misses < EXIT_MISSES or now - self.first_miss < EXIT_WINDOW:
             return False
-        if any(still_alive(g, self.port) for g in self.games):
+        try:
+            alive = any(still_alive(g, self.port) for g in self.games)
+        except ProcessReadError:
+            self.misses, self.first_miss = 0, None
+            return False
+        if alive:
             print("  the process list missed the game, but it is still alive; waiting on", file=sys.stderr)
             self.misses, self.first_miss = 0, None              # the list was wrong
             return False
@@ -538,12 +684,15 @@ def restore_entries(entries) -> list:
 
 
 def owned_running(st) -> list:
-    """Recorded session processes that are still running (ProcessReadError when that cannot be known)."""
-    owned = (st.get("session") or {}).get("processes") or []
-    if not owned:
-        return []
+    """Observed VR processes or live owned backstops. Foreign processes block restore without gaining ownership."""
+    owned = ((st.get("session") or {}).get("processes") or []) + \
+            ((st.get("session") or {}).get("observed_runtime") or [])
     running = read_processes()
-    return [p for p in running if any(same_process(p, o) for o in owned)]
+    listed = [p for p in running if p["ProcessName"] in VR_NAMES]
+    if listed:
+        return listed
+    port = (st.get("session") or {}).get("port", 8921)
+    return [o for o in owned if still_alive(o, port)]
 
 
 # --------------------------------------------------------------------------- commands
@@ -727,6 +876,12 @@ def cmd_emu(arg) -> int:
         if not st or not st.get("emu"):
             print("the emulator driver is not live; nothing to restore")
             return 0
+        try:
+            busy = owned_running(st)
+        except ProcessReadError as e:
+            raise Refused("{}; cannot establish that the emulator is idle".format(e))
+        if busy:
+            raise Refused("the session still runs; use `stop` before restoring the emulator")
         problems = restore_entries(emu_entries(st))
         if problems:
             for pr in problems:
@@ -771,20 +926,44 @@ def cmd_launch(desktop) -> dict:
     elif not (p["steam"] / "steam.exe").is_file():
         raise Refused("steam.exe not found in {}".format(p["steam"]))
     desk = make_desktop(desktop)
-    session = {"creator_pid": os.getpid(), "desktop_mode": desktop, "desktop": desk.name, "processes": [],
-               "steam_policy": "keep-running", "preexisting_steam": prior_steam, "port": devbench_port(p["game"])}
+    session = {"ownership_version": 1, "creator_pid": os.getpid(), "desktop_mode": desktop, "desktop": desk.name, "processes": [],
+               "steam_policy": "keep-running", "preexisting_steam": prior_steam, "port": devbench_port(p["game"]),
+               "preexisting_vr": busy, "steamvr_root": str(p["steamvr"]), "observed_runtime": []}
     st["session"] = session
     save_state(st)
 
     def record():
-        now = read_processes()
-        for x in now:
-            if x["ProcessName"] in VR_NAMES and not any(same_process(x, o) for o in session["processes"]):
-                session["processes"].append(x)
-        session["boundary"] = desk.boundary([x["Id"] for x in session["processes"]])
-        save_state(st)
-        if desktop == "background" and not session["boundary"].get("isolated"):
+        try:
+            now = read_processes()
+            candidates = [x for x in now if x["ProcessName"] in VR_NAMES]
+            boundary = desk.boundary([x["Id"] for x in candidates])
+            census = read_process_tree() if candidates else []
+            session["runtime_observed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            refresh_launch_lifetimes(session, desk)
+        except (ProcessReadError, OSError, ValueError):
+            session["ownership_refused"] = True
+            save_state(st)
+            raise
+        if desktop == "background" and not boundary.get("isolated"):
+            session["ownership_refused"] = True
+            save_state(st)
             raise Refused("a test window escaped onto your desktop; stopping this owned session")
+        for x in candidates:
+            if not any(same_process(x, o) for o in session["processes"]):
+                if not proven_process(x, session, census, desk):
+                    if steam_handoff_runtime(x, session, census, desk):
+                        if not any(same_process(x, old) for old in session["observed_runtime"]):
+                            session["observed_runtime"].append(dict(x))
+                        save_state(st)
+                        continue
+                    session["ownership_refused"] = True
+                    save_state(st)
+                    raise Refused("a game or SteamVR process has unproved launch ownership or desktop placement; "
+                                  "it was not recorded and will not be stopped")
+                session["processes"].append(x)
+                save_state(st)
+        session["boundary"] = boundary          # persist only boundary evidence whose identities were proved
+        save_state(st)
         return now
 
     try:
@@ -818,6 +997,11 @@ def cmd_launch(desktop) -> dict:
             time.sleep(2)
         raise Refused("the main menu was not reached (DevBench health for the owned game) within 180 s; the session "
                       "is kept for `stop`")
+    except LaunchIdentityError as exc:
+        session["ownership_refused"] = True
+        save_state(st)
+        raise Refused("a launcher started without a readable identity or placement; close unproved processes "
+                      "yourself, then use `stop`/`off`; files are kept") from exc
     finally:
         desk.close()
 
@@ -869,6 +1053,8 @@ def wait_for_room_setup(p, desktop, session, record, st) -> None:
 def stop_owned(st) -> dict:
     """Exit the owned game in order, then the owned SteamVR helpers. Steam and its helpers are never touched."""
     session = st["session"]
+    if session.get("ownership_version") != 1:
+        raise Refused("this legacy session has no launch ownership proof; close its processes yourself, then `off`")
     owned = session["processes"]
     port = session.get("port", 8921)
     running = read_processes()
@@ -876,7 +1062,6 @@ def stop_owned(st) -> dict:
     if any(not any(same_process(g, o) for o in owned) for g in games):
         raise Refused("a game process this session did not start is running; stop refused, nothing sent")
     skyrim = [g for g in games if g["ProcessName"] == "SkyrimVR"]
-    steamvr = paths()["steamvr"].resolve()
     if skyrim:
         watch, deadline = ExitWatch(skyrim, port), time.monotonic() + QUIT_WAIT
         while True:
@@ -900,17 +1085,18 @@ def stop_owned(st) -> dict:
     deadline = time.monotonic() + 15
     while True:
         running = read_processes()
-        for x in running:                     # a helper forked late by an owned helper (a crash handler) is owned too
+        for x in running:                     # late helpers need the same ownership proof as launch
             if (x["ProcessName"] in VR_NAMES and x["ProcessName"] not in GAME_NAMES and x.get("Path") and
-                    not any(same_process(x, o) for o in owned)):
+                    not any(same_process(x, o) for o in owned) and
+                    not any(same_process(x, o) for o in session.get("observed_runtime", []))):
+                desk = make_desktop(session["desktop_mode"], session["desktop"])
                 try:
-                    Path(x["Path"]).resolve().relative_to(steamvr)
-                except ValueError:
-                    continue
-                parent = next((o for o in owned if o["Id"] == parent_pid(x["Id"])), None)
-                if parent and x.get("StartTime", "") >= parent.get("StartTime", ""):
+                    proved = proven_process(x, session, read_process_tree(), desk)
+                finally:
+                    desk.close()
+                if proved:
                     owned.append(x)
-                    session.setdefault("late_helpers", []).append({"process": x, "owned_parent": parent["Id"]})
+                    session.setdefault("late_helpers", []).append({"process": x})
                     save_state(st)
         helpers = [x for x in running if x["ProcessName"] in VR_NAMES and x["ProcessName"] not in GAME_NAMES and
                    any(same_process(x, o) for o in owned)]
@@ -988,12 +1174,15 @@ def cmd_run(desktop, park=False, emu=False, force=False) -> int:
         raise
     finally:
         if error is not None:
-            print("ERROR during the managed session ({}: {}); cleaning up".format(type(error).__name__, error),
+            print("ERROR during the managed session ({}: {}); checking for safe cleanup".format(type(error).__name__, error),
                   file=sys.stderr)
         st = load_state()
         if st and st.get("session") and st["session"].get("creator_pid") != os.getpid():
             raise Refused("this session belongs to another run (pid {}); not cleaning it up".format(
                 st["session"].get("creator_pid")))
+        if st and (st.get("session") or {}).get("ownership_refused"):
+            raise Refused("launch ownership could not be proved; headless files and state are kept. Close unproved "
+                          "processes yourself, then use `stop` or `off`; no automatic restore is safe")
         if st and st.get("session", {}).get("processes"):
             rc = cmd_stop()                      # owned processes exist: orderly exit, then restore
         elif st:

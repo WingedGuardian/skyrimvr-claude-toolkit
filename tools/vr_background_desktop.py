@@ -42,6 +42,10 @@ NAME_PREFIX = "SkyrimVRHeadless_"
 _EPOCH_1601 = datetime.datetime(1601, 1, 1, tzinfo=datetime.timezone.utc)
 
 
+class LaunchIdentityError(OSError):
+    """CreateProcess succeeded, but the launched identity or placement could not be recorded."""
+
+
 def _api():
     """user32/kernel32 with argument types declared (Windows only; imported lazily so the module loads anywhere)."""
     from ctypes import wintypes as w
@@ -114,11 +118,16 @@ def process_generation(pid):
     _, kernel32, w = _api()
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, int(pid))
     if not handle:
-        return None
+        if ctypes.get_last_error() == 87:     # ERROR_INVALID_PARAMETER: no such PID
+            return None
+        raise ctypes.WinError(ctypes.get_last_error())
     try:
         times = [w.FILETIME() for _ in range(4)]
         _check(kernel32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]))
-        running = kernel32.WaitForSingleObject(handle, 0) == 0x102     # WAIT_TIMEOUT: not signalled = running
+        status = kernel32.WaitForSingleObject(handle, 0)
+        if status not in (0, 0x102):
+            raise ctypes.WinError(ctypes.get_last_error())
+        running = status == 0x102     # WAIT_TIMEOUT: not signalled = running
         return _filetime(times[0]), running
     finally:
         kernel32.CloseHandle(handle)
@@ -179,6 +188,7 @@ class BackgroundDesktop:
         if not re.fullmatch(re.escape(NAME_PREFIX) + r"[A-Za-z0-9_]+", self.name):
             raise ValueError("a dedicated headless desktop name is required, got {!r}".format(self.name))
         self.original_input = input_desktop()
+        self._launch_handles = {}
         access = (DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS | DESKTOP_CREATEWINDOW | DESKTOP_CREATEMENU |
                   DESKTOP_ENUMERATE | DESKTOP_HOOKCONTROL)        # deliberately no DESKTOP_SWITCHDESKTOP
         self.handle = _check(user32.CreateDesktopW(self.name, None, None, 0, access, None))
@@ -190,7 +200,7 @@ class BackgroundDesktop:
             raise RuntimeError("the input desktop changed; refusing to start a headless process")
 
     def start(self, command, cwd):
-        """Start `command` on this desktop. Returns (pid, record); the handles are closed here."""
+        """Start `command`; retain its process handle until close() to bind the launcher lifetime."""
         from ctypes import wintypes as w
         self.verify()
         _, kernel32, _ = _api()
@@ -218,13 +228,62 @@ class BackgroundDesktop:
         create.restype = w.BOOL
         _check(create(exe, cmdline, None, None, False, CREATE_NO_WINDOW, None, str(cwd), ctypes.byref(si),
                       ctypes.byref(pi)))
-        kernel32.CloseHandle(pi.hThread)
-        kernel32.CloseHandle(pi.hProcess)
-        self.verify()
-        return pi.dwProcessId, {"pid": pi.dwProcessId, "main_thread": pi.dwThreadId, "desktop": self.name,
-                                "executable": exe}
+        retained = False
+        try:
+            times = [w.FILETIME() for _ in range(4)]
+            _check(kernel32.GetProcessTimes(pi.hProcess, *[ctypes.byref(t) for t in times]))
+            created = _filetime(times[0]).isoformat()
+            record = {"pid": pi.dwProcessId, "main_thread": pi.dwThreadId, "desktop": self.name,
+                      "executable": exe, "start_time": created}
+            self._launch_handles[pi.dwProcessId] = (pi.hProcess, record)
+            retained = True
+        except Exception as exc:
+            raise LaunchIdentityError("a launcher was created but its identity is unreadable") from exc
+        finally:
+            kernel32.CloseHandle(pi.hThread)
+            if not retained:
+                kernel32.CloseHandle(pi.hProcess)
+        try:
+            self.verify()
+        except Exception as exc:
+            raise LaunchIdentityError("a launcher was created but its placement is unproved") from exc
+        return pi.dwProcessId, record
+
+    def launch_lifetime(self, pid):
+        """Bound a launched PID using its still-open CreateProcess handle, including after exit."""
+        _, kernel32, w = _api()
+        handle, record = self._launch_handles[int(pid)]
+        observed = datetime.datetime.now(datetime.timezone.utc)
+        status = kernel32.WaitForSingleObject(handle, 0)
+        if status not in {0, 0x102}:
+            raise ctypes.WinError(ctypes.get_last_error())
+        times = [w.FILETIME() for _ in range(4)]
+        _check(kernel32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]))
+        created = _filetime(times[0])
+        if created != parse_start(record["start_time"]):
+            raise OSError("launcher creation time does not match the retained handle")
+        exited = bool(times[1].dwLowDateTime or times[1].dwHighDateTime)
+        if status == 0 and not exited:
+            raise OSError("launcher is signalled but its exit time is unreadable")
+        return dict(record, exit_time=_filetime(times[1]).isoformat() if exited else None,
+                    observed_until=observed.isoformat())
+
+    def process_on_desktop(self, pid):
+        """Prove placement even for windowless helpers; a missing/unreadable thread is not proof."""
+        try:
+            r = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
+                                "(Get-Process -Id {} -ErrorAction Stop).Threads.Id | ConvertTo-Json".format(int(pid))],
+                               check=True, capture_output=True, text=True, timeout=8)
+            tids = json.loads(r.stdout)
+            tids = tids if isinstance(tids, list) else [tids]
+            return bool(tids) and all(thread_desktop(tid) == self.name for tid in tids)
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+            return False
 
     def close(self):
+        for handle, _record in self._launch_handles.values():
+            _api()[1].CloseHandle(handle)
+        self._launch_handles.clear()
         if self.handle:
             _api()[0].CloseDesktop(self.handle)
             self.handle = None
@@ -252,6 +311,7 @@ class CurrentDesktop(BackgroundDesktop):
         user32, _, _ = _api()
         self.original_input = input_desktop()
         self.name = name or self.original_input
+        self._launch_handles = {}
         if self.name != self.original_input:
             raise RuntimeError("the selected desktop is no longer the input desktop")
         self.handle = _check(user32.OpenInputDesktop(0, False, DESKTOP_READOBJECTS | DESKTOP_ENUMERATE))
