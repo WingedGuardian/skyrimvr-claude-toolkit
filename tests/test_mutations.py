@@ -10840,3 +10840,20 @@ MUTATIONS += [pytest.param("tools/mod-install.py", find, rep, _RI7, id="review-i
     ('\n                record(header + ["# STATUS: in progress"] + written + planned[done:])',
      '\n                record(header + ["# STATUS: in progress"] + written + planned[len(written):])', 'later-write-still-pending'),
 ]]
+
+
+# Cheap review LOW follow-up: unreadable recovery metadata never leaks a CLI traceback.
+_SCE = "tests/test_snapshot_manifest_error.py::test_snapshot_manifest_read_error_is_one_line_without_a_traceback"
+MUTATIONS += [pytest.param("tools/skyguard/snapcli.py", find, rep, _SCE + case,
+                           id="review-recovery-cli-" + ident) for find, rep, case, ident in [
+    ('        except OSError as exc:\n            print("COULD NOT LIST snapshots:',
+     '        except ZeroDivisionError as exc:\n            print("COULD NOT LIST snapshots:',
+     '[PermissionError-list]', 'list-read-error'),
+    ('    except (ValueError, OSError) as e:\n        print("REFUSED: {}".format(" ".join(str(e).splitlines())), file=out)',
+     '    except ValueError as e:\n        print("REFUSED: {}".format(" ".join(str(e).splitlines())), file=out)',
+     '[PermissionError-restore]', 'restore-read-error'),
+    ('"COULD NOT LIST snapshots: {}".format(" ".join(str(exc).splitlines()))',
+     '"COULD NOT LIST snapshots: {}".format(str(exc))', '[OSError-list]', 'list-one-line'),
+    ('"REFUSED: {}".format(" ".join(str(e).splitlines()))',
+     '"REFUSED: {}".format(e)', '[OSError-restore]', 'restore-one-line'),
+]]
