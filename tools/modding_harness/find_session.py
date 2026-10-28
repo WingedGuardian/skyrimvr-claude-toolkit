@@ -10,10 +10,13 @@ module is the glue around it:
   location that holds an index), and a missing index is an error naming where it looked.
 * Freshness. The index holds only what its last sync saw, and nothing on a workstation keeps it current (MEASURED:
   24 sessions behind after one day). Every search first runs the tool's incremental sync, summaries off so nothing
-  leaves the machine; there a no-op sync took 13 s and a one-day catch-up 2 min. The search waits SYNC_WAIT for it,
-  then searches what is indexed and says so. A sync still running is left to finish: killing it would leave its lock
-  held for the tool's 10-minute stale period, during which every other sync skips. A skipped or failed sync is
-  reported as such, never as a sync.
+  leaves the machine; there a no-op sync took 13 s and a one-day catch-up 2 min. The search waits SYNC_WAIT for it
+  (inside the 5-minute command timeout the skill asks the agent to set), then searches what is indexed and says so.
+  A sync still running is not killed here, and it runs in its own process group so the agent's timeout of this
+  command does not kill it either. That is not enough everywhere: a Windows SSH session ends every process it
+  started (MEASURED: the sync, and the tool's own `sync --background`, both died with the session). A sync that dies
+  holds the index lock for the tool's 10-minute stale period, during which the next search reports the sync as
+  skipped and searches what is indexed. A skipped or failed sync is reported as such, never as a sync.
 * Semantic only. The default hybrid mode adds exact-substring hits, which on real transcripts rank instruction
   blocks, environment headers and task notifications first (MEASURED on a workstation index of 1,349
   conversations). `vector` mode, subagent threads excluded.
@@ -40,7 +43,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-SYNC_WAIT = 60                # s waited for the sync: inside an agent's default 120 s tool limit, with the search
+SYNC_WAIT = 240               # s waited for the sync: a one-day catch-up (2 min) finishes inside a 300 s command
 SEARCH_TIMEOUT = 300          # s: a cold start loads the embedding model (seconds); a hung node must not hang the agent
 FETCH = 60                    # passages asked for: several per session, before boilerplate and grouping
 SESSIONS = 5                  # sessions shown
@@ -151,7 +154,7 @@ _DETACH = ({"creationflags": _NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCES
 def sync(wait: Optional[float] = None) -> str:
     """Bring the index up to date (incremental) and say how it went, in one line. Never raises past a missing
     install: a sync that is skipped, fails or is still running is reported, and the search runs on what is indexed.
-    Output goes to a log file, not a pipe, so a sync left running can finish after this process exits."""
+    Output goes to a log file, not a pipe, so a sync still running is not broken by this process exiting."""
     wait = SYNC_WAIT if wait is None else wait
     em, node, env = _tool()
     log = config_dir() / "find-session-sync-{}.log".format(os.getpid())   # per run: concurrent runs read their own
@@ -171,8 +174,9 @@ def sync(wait: Optional[float] = None) -> str:
     try:
         code = proc.wait(timeout=wait)
     except subprocess.TimeoutExpired:
-        return ("index sync still running after {:g} s (left to finish; its log is {}): results may miss the newest "
-                "sessions, so search again in a few minutes if the answer is not here".format(wait, log))
+        return ("index sync still running after {:g} s (not stopped; it may stop when this command ends; log {}): "
+                "results may miss the newest sessions, so search again later if the answer is not here"
+                .format(wait, log))
     try:
         out = log.read_text(encoding="utf-8", errors="replace")
     except OSError:

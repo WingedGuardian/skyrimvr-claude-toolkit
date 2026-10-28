@@ -24,8 +24,11 @@ python tools/modding_harness/find_session.py "going over my balance tweaks with 
 On Windows use the same interpreter the ledger commands print at session start, or `py -3`.
 
 Give the command up to 5 minutes by setting your command tool's timeout to 300000 ms (the `timeout` or `timeout_ms`
-field). Default limits are shorter than a run: one harness stops a command after 10 s. The tool first updates the index: about 13 s when nothing is new. It waits at most 60 s for that, then
-searches what is already indexed and leaves the update running.
+field). Default limits are shorter than a run: one harness stops a command after 10 s.
+
+The tool first updates the index: about 13 s when nothing is new and about 2 minutes after a day of sessions. It
+waits up to 4 minutes for that, then searches what is already indexed. Cut it short and the update stops with it;
+the next search then reports the update as skipped for about 10 minutes.
 
 The first line of output says how the update went:
 - `index synced`: complete.
