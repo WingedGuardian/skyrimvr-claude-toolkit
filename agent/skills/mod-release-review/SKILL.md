@@ -152,8 +152,9 @@ the final go. Then:
 1. Build the package and hash its actual contents. Those hashes must match the reviewed files.
 2. Write the release record in a folder **outside `Data/` and outside the package**, the same place
    every release (ask the author once). It holds:
-   - `SHIPPED-MANIFEST.json`: every packaged file with sha256 and size, status `packed` (the author
-     confirms the upload; the next Phase 0 checks it)
+   - `SHIPPED-MANIFEST.json`: every packaged file with sha256 and size, status `shipped`. Once the
+     package is handed over, **treat it as published**: record it as the current version and the next
+     baseline without waiting for the author to confirm the upload. The next Phase 0 checks it
    - the reviewable sources: `.psc`, Spriggit YAML per plugin, INI/JSON, FOMOD XML
    - `REVIEW-RECORD.md`: the baseline used, the author-tested set, every finding with its answer
 3. A clean review is necessary, not sufficient. The upload itself is the author's step.
