@@ -10687,7 +10687,7 @@ MUTATIONS += [pytest.param(_HKD, before, after, _HKDT + test, id="hk-derived-" +
     ("reparse-path", '    return all(not stat.S_ISLNK(s.st_mode) and not getattr(s, "st_file_attributes", 0) & 0x400',
      '    return all(not stat.S_ISLNK(s.st_mode)',
      "test_nonplain_paths_are_refused_without_link_privileges[reparse]"),
-    ("apply-source", '        if not source.is_file() or not plain_path(source) or derived_source(p) is None:',
+    ("apply-source", '        if not source.is_file() or not plain_path(source) or derived_source(p, Path(action["task"])) is None:',
      '        if False:', "test_derived_apply_rechecks_the_source_bytes_and_activity[source]"),
     ("apply-xml", '    if action["class"] in ("derived", "recreatable", "build", "link", "gzip"):',
      '    if action["class"] in ("recreatable", "build", "link", "gzip"):',
@@ -10856,4 +10856,27 @@ MUTATIONS += [pytest.param("tools/skyguard/snapcli.py", find, rep, _SCE + case,
      '"COULD NOT LIST snapshots: {}".format(str(exc))', '[OSError-list]', 'list-one-line'),
     ('"REFUSED: {}".format(" ".join(str(e).splitlines()))',
      '"REFUSED: {}".format(e)', '[OSError-restore]', 'restore-one-line'),
+]]
+
+# Cheap review LOW follow-up: bounded ETL provenance and refusal of unreadable plan candidates.
+_HPE = "tests/test_housekeep_plan_errors.py::"
+MUTATIONS += [pytest.param("tools/housekeep.py", find, rep, test,
+                           id="review-housekeep-low-" + ident) for find, rep, test, ident in [
+    ('        if folder != boundary and boundary not in folder.parents:', '        if False:',
+     _HPE + 'test_events_at_a_task_root_cannot_borrow_an_etl_from_the_shared_root', 'source-task-boundary'),
+    ('                source = derived_source(f, task)', '                source = derived_source(f)',
+     'tests/test_housekeep_derived.py::test_decoded_trace_with_a_source_is_derived', 'plan-task-context'),
+    ('derived_source(p, Path(action["task"])) is None', 'derived_source(p, p.parent.parent) is None',
+     _HPE + 'test_apply_refuses_an_old_derived_plan_that_borrows_a_shared_root_etl', 'apply-task-context'),
+    ('            except OSError as error:\n                count("kept: trace provenance unavailable',
+     '            except ZeroDivisionError as error:\n                count("kept: trace provenance unavailable',
+     _HPE + 'test_unreadable_trace_provenance_keeps_it_and_plans_other_tasks', 'provenance-read-error'),
+    ('            except OSError as error:\n                count("kept: staging size unavailable',
+     '            except ZeroDivisionError as error:\n                count("kept: staging size unavailable',
+     _HPE + 'test_unreadable_staging_size_keeps_it_and_continues', 'staging-size-error'),
+    ('"unreadable_paths": unreadable_paths', '"unreadable_paths": []',
+     _HPE + 'test_unreadable_staging_size_keeps_it_and_continues', 'unknown-size-reported'),
+    ('count("kept: trace provenance unavailable ({})".format(type(error).__name__), size)',
+     'count("kept: trace provenance unavailable ({})".format(type(error).__name__), 0)',
+     _HPE + 'test_unreadable_trace_provenance_keeps_it_and_plans_other_tasks', 'known-bytes-accounted'),
 ]]

@@ -408,13 +408,16 @@ def walk_error(error):
     raise error
 
 
-def derived_source(path: Path):
+def derived_source(path: Path, task: Path | None = None):
     if path.suffix.lower() != ".xml" or not (path.name.lower() == "events.xml"
                                                    or path.parent.name.lower() == "xml-decoder"):
         return None
     if not plain_path(path):
         return None
+    boundary = Path(task) if task is not None else path.parent
     for folder in (path.parent, path.parent.parent):
+        if folder != boundary and boundary not in folder.parents:
+            continue
         for source in sorted(folder.iterdir()):
             if source.suffix.lower() == ".etl" and source.is_file() and plain_path(source):
                 return source
@@ -553,6 +556,7 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
     now = time.time() if now is None else now
     guard = guard or Guard(cfg)
     actions, rows = [], {}
+    unreadable_paths = []
     wants = (lambda *classes: True) if not only else (lambda *classes: bool(set(classes) & set(only)))
 
     def count(row, n):
@@ -598,7 +602,12 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             if why:
                 count("kept: protected ({})".format(why), size)
                 continue
-            source = derived_source(f)
+            try:
+                source = derived_source(f, task)
+            except OSError as error:
+                count("kept: trace provenance unavailable ({})".format(type(error).__name__), size)
+                unreadable_paths.append(str(f))
+                continue
             if source is not None:
                 act({"class": "derived", "path": str(f), "bytes": size, "hash": blake(f),
                      "task": str(task), "source": str(source)}, "plan: decoded trace -> Recycle Bin")
@@ -722,10 +731,15 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
         if not root.is_dir():
             continue
         for path in sorted(root.iterdir()):
-            if path.name == "_superseded":
-                count("kept: staging supersession list", path.stat().st_size if path.is_file() else dir_size(path))
+            try:
+                if path.name == "_superseded":
+                    count("kept: staging supersession list", path.stat().st_size if path.is_file() else dir_size(path))
+                    continue
+                size = dir_size(path) if path.is_dir() else path.stat().st_size
+            except OSError as error:
+                count("kept: staging size unavailable (unknown bytes: {})".format(type(error).__name__), 0)
+                unreadable_paths.append(str(path))
                 continue
-            size = dir_size(path) if path.is_dir() else path.stat().st_size
             try:
                 why = superseded_reason(path, root, cfg, guard, now) if path.is_dir() else "not a staging folder"
             except (OSError, ValueError, IndexError) as error:
@@ -736,7 +750,8 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                 act({"class": "superseded", "path": str(path), "bytes": size, "fingerprint": fingerprint(path),
                      "staging_root": str(root)}, "plan: superseded staging -> Recycle Bin")
 
-    return {"created": now, "root": str(cfg["root"]), "actions": actions, "rows": rows}
+    return {"created": now, "root": str(cfg["root"]), "actions": actions, "rows": rows,
+            "unreadable_paths": unreadable_paths}
 
 
 def print_rows(rows: dict, title: str):
@@ -953,7 +968,7 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
             return "live file no longer identical"
     if action["class"] == "derived":
         source = Path(action["source"])
-        if not source.is_file() or not plain_path(source) or derived_source(p) is None:
+        if not source.is_file() or not plain_path(source) or derived_source(p, Path(action["task"])) is None:
             return "trace source gone or no longer a decoded trace"
     if action["class"] == "superseded":
         try:

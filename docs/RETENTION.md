@@ -78,7 +78,7 @@ These rows extend the Skyrim policy; the shared policy above is unchanged.
 
 | Class | What | Rule |
 |---|---|---|
-| **Derived** (`derived`) | `events.xml`, or an XML file directly inside an `xml-decoder` folder, in an idle agent task | Recycle only while a plain `.etl` source exists in the same folder or its parent. ETL measurements are always kept, including inside whole-folder candidates. |
+| **Derived** (`derived`) | `events.xml`, or an XML file directly inside an `xml-decoder` folder, in an idle agent task | Recycle only while a plain `.etl` source exists in the same folder or its parent inside the same task. ETL measurements are always kept, including inside whole-folder candidates. |
 | **Superseded staging** (`superseded`) | A direct versioned child of a configured `staging_roots` folder | Recycle after `superseded_after_days` (default 30) and `active_hours`, only with a higher numeric version of the same name beside it, or its exact folder name in `_superseded`. Keep rollback sources and every folder whose protection cannot be decided. |
 
 Activity includes the task directory and its child directories, including recent empty directories.
@@ -98,6 +98,11 @@ are mod-install's `*.files.txt` manifests (including operation manifests), and J
 exactly `{"rollback_sources": ["absolute/path", "..."]}`. Any unknown format, relative path, read failure
 or link keeps the staging folder. Source directories and files named by these manifests are kept.
 The new classes never follow symlinks, junctions or reparse points.
+
+A trace at the task root cannot borrow an ETL from the shared output root. If provenance
+cannot be read, planning keeps the XML and counts its known bytes. An unreadable staging
+size also keeps that candidate; the plan names it in `unreadable_paths` and labels its
+byte count unknown, without aborting the remaining candidates.
 
 Planning records the XML hash or staging-folder fingerprint; apply checks the current source,
 activity, protection, supersession and manifests again. Both classes use the existing Recycle Bin
