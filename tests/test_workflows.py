@@ -260,3 +260,11 @@ def test_the_ci_release_build_builds_before_anything_writes():
 def test_resaver_plus_uses_the_qualified_vs2022_runner():
     _, data = _load("ci.yml")
     assert data["jobs"]["resaver-plus"]["runs-on"] == "windows-2022"
+
+
+def test_mutations_run_once_per_os_on_the_oldest_tested_python():
+    """User ruling 2026-10-28: the mutation part runs on one Python per OS; the suite part keeps every tested Python."""
+    m = _load("full-qualification.yml")[1]["jobs"]["behavior"]["strategy"]["matrix"]
+    excluded = {(e["part"], e["python"]) for e in m.get("exclude", [])}
+    assert excluded == {("mutations", p) for p in TESTED_PYTHONS[1:]}
+    assert m["os"][0] == "windows-latest"

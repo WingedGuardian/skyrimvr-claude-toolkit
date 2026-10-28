@@ -15,10 +15,17 @@ jobs:
       # Node comes from .node-version on every leg; the .NET 10 toolchain has its own job below.
       # x part: the mutation gate (tests/test_mutations.py) is its own job. It was 146-217 of a Windows leg's
       # 270 minutes and one leg timed out (CI run 39210090486); each part is checked against its own numbers.
+      # Mutations once per OS on the oldest tested Python (user ruling 2026-10-28): whether a mutant is killed does
+      # not depend on the Python minor, and the four copies were ~22 of each run's ~30 runner-hours. The suite part
+      # still runs every tested Python. Windows is listed first so its longest job starts in the first wave.
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest, ubuntu-latest]
         python: ["3.10", "3.11", "3.12", "3.13"]
         part: [suite, mutations]
+        exclude:
+          - {part: mutations, python: "3.11"}
+          - {part: mutations, python: "3.12"}
+          - {part: mutations, python: "3.13"}
     runs-on: ${{ matrix.os }}
     # The whole suite includes tests/test_mutations.py; a leg that hangs must die red, not stall for six hours.
     # 300 (the test_workflows cap): CI run 39167733692's full Windows suite took 176-190 min and two legs hit the
