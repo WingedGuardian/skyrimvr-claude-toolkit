@@ -2095,7 +2095,10 @@ class _Resolver:
         self.y = dyn
         self.redirs = tuple(redirs)
         self.cd = cd
-        self.cd_alternates = ()
+        # Only a literal eval changes the CALLER's directory. `env -C`, `pwsh -WorkingDirectory` and similar move
+        # just the child, so they change self.cd (where this command runs) and never these.
+        self.caller_cd = None
+        self.caller_alternates = ()
         self.stdin = stdin
         self.seg = seg
         self.bodies = bodies          # [(body, delimiter_quoted)] in order; the last one is stdin
@@ -2235,7 +2238,7 @@ class _Resolver:
             final_cd = _sub(text, dialect, self.depth + 1, self.cd, self.ctx, final_dirs=final_dirs)
             if carry_cd:
                 self.cd = final_cd
-                self.cd_alternates = tuple(final_dirs[1:])
+                self.caller_cd, self.caller_alternates = final_cd, tuple(final_dirs[1:])
 
     def run(self, k: int = 0) -> List[Exec]:
         self._run(k)
@@ -2519,9 +2522,13 @@ class _Resolver:
                 if k + 1 < n:
                     code, certain = self._code(k + 1)          # eval runs in the caller's scope
                     self._decoded(code)
+                    before = self.cd
                     self.reparse(code, "bash", carry_cd=True)
                     if not certain:
-                        self.cd = "?"
+                        # Unknown code may or may not change directory: keep the earlier location as a candidate,
+                        # never "?" (an unknown directory lets a later relative delete through).
+                        self.caller_cd = self.caller_cd if self.caller_cd is not None else before
+                        self.caller_alternates = tuple(dict.fromkeys(self.caller_alternates + (before,)))
                 return self.made
             if p in POSIX_SHELLS:
                 return self._posix_shell(p, k)
@@ -3052,12 +3059,14 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
         for location in alternatives:
             other = _Resolver(d, vals, quoted, dyn, rec.redirs, location, stdin, seg, bodies, sc.depth, ctx, recurse, rec.call)
             made += other.run()
-            alternate_results.extend((other.cd,) + other.cd_alternates)
+            alternate_results.extend(((other.caller_cd if other.caller_cd is not None else location),)
+                                     + other.caller_alternates)
         if d == "bash" and rec.carry_cd:
-            frame_cd[rec.frame] = (_join_cd(res.cd, rec.cd_change) if rec.cd_change is not None else res.cd)
+            caller = res.caller_cd if res.caller_cd is not None else rec.cd
+            frame_cd[rec.frame] = (_join_cd(caller, rec.cd_change) if rec.cd_change is not None else caller)
             outcomes = [frame_cd[rec.frame]]
             outcomes.extend(_join_cd(value, rec.cd_change) if rec.cd_change is not None else value
-                            for value in res.cd_alternates + tuple(alternate_results))
+                            for value in res.caller_alternates + tuple(alternate_results))
             if rec.conditional:
                 outcomes.extend((rec.cd,) + alternatives)
             choices = tuple(dict.fromkeys(outcomes))
