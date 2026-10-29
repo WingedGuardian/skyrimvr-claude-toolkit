@@ -1,4 +1,5 @@
 """Release-review P1/P2/P3/P4: synthetic ownership, plus a real disposable Python child."""
+import ctypes
 import os
 import subprocess
 import sys
@@ -13,8 +14,32 @@ from test_vr_headless import tree, world, proc, load
 def test_real_non_gui_child_passes_desktop_check(tree):
     import vr_background_desktop as d
     desk = d.BackgroundDesktop.__new__(d.BackgroundDesktop)
-    desk.name = d.input_desktop()
+    # The child inherits THIS process's desktop. The input desktop is not that desktop in a CI service session
+    # (GitHub's Windows runners failed this test when it compared against input_desktop()).
+    desk.name = d.thread_desktop(ctypes.windll.kernel32.GetCurrentThreadId())
     # Exits by itself; no game, Steam, input or other session's process.
+    with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(6)"]) as child:
+        seen = {}
+        for tid in d.process_thread_ids(child.pid):
+            try:
+                seen[tid] = d.thread_desktop(tid)
+            except OSError as e:
+                seen[tid] = "unreadable ({})".format(e.winerror)
+        assert seen, "the snapshot listed no thread for a live child"
+        assert len(seen) <= 32, "a sleeping python child has a few threads, not the machine's: %d" % len(seen)
+        assert desk.process_on_desktop(child.pid), (desk.name, seen)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="real GetThreadDesktop")
+def test_desktop_check_never_waits_on_a_slow_powershell(tree, monkeypatch):
+    """CI run 40825956336: PowerShell startup on a loaded runner outlasted the old 8 s thread listing, and a
+    timed-out listing read as "not on this desktop". The listing must not depend on a child shell at all."""
+    import vr_background_desktop as d
+    def slow(*a, **k):
+        raise subprocess.TimeoutExpired(a[0] if a else "powershell.exe", 8)
+    monkeypatch.setattr(d.subprocess, "run", slow)
+    desk = d.BackgroundDesktop.__new__(d.BackgroundDesktop)
+    desk.name = d.thread_desktop(ctypes.windll.kernel32.GetCurrentThreadId())
     with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(6)"]) as child:
         assert desk.process_on_desktop(child.pid)
 
@@ -22,7 +47,7 @@ def test_real_non_gui_child_passes_desktop_check(tree):
 @pytest.mark.parametrize("other", [False, True])
 def test_unreadable_threads_are_neutral_but_different_desktop_refuses(tree, monkeypatch, other):
     import vr_background_desktop as d
-    monkeypatch.setattr(d.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout="[1,2]"))
+    monkeypatch.setattr(d, "process_thread_ids", lambda pid: [1, 2])
     def desktop(tid):
         if tid == 1:
             raise OSError("no user32 desktop")
