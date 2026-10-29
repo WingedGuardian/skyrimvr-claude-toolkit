@@ -11,6 +11,13 @@ import pytest
 from test_housekeep import DAY, FakeBin, age, cfg_for, hk, key, planned, write
 
 
+@pytest.fixture(autouse=True)
+def historical_staging(monkeypatch, tmp_path):
+    # These fixtures represent staging extracted fifty days ago, not today.
+    monkeypatch.setattr(hk, "staging_activity", lambda path: path.stat().st_mtime)
+    monkeypatch.setattr(hk, "TOOLKIT_ROOT", tmp_path)
+
+
 @pytest.mark.parametrize("relative", ["events.xml", "xml-decoder/trace.xml", "xml-decoder/EVENTS.XML"])
 @pytest.mark.parametrize("source_folder", ["same", "parent"])
 def test_decoded_trace_with_a_source_is_derived(tmp_path, relative, source_folder):
@@ -168,7 +175,8 @@ def test_a_manifest_for_another_folder_does_not_block_staging(tmp_path):
 
 
 @pytest.mark.parametrize("rollback", [False, True])
-def test_operation_manifests_are_read_without_misreading_backed_up_configs(tmp_path, rollback):
+@pytest.mark.parametrize("extension", ["ini", "json"])
+def test_operation_manifests_are_read_without_misreading_backed_up_configs(tmp_path, rollback, extension):
     old, _new, cfg = stage_tree(tmp_path)
     operation = tmp_path / "manual-installs/backups/operation"
     reference = old if rollback else operation
@@ -179,8 +187,9 @@ def test_operation_manifests_are_read_without_misreading_backed_up_configs(tmp_p
             "# STATUS: complete, 1 file(s), 0 verify mismatch(es)\n" + "0" * 64 + "  "
             + str(tmp_path / "Data/settings.json") + "\n")
     write(operation / "manifest.files.txt", text.encode())
-    write(operation / "Data/settings.json", b'{"mod_configuration":true}')
-    assert (key(old) in planned(hk.plan(cfg), "superseded")) is not rollback
+    write(operation / ("Data/settings." + extension), b'{"mod_configuration":true}')
+    # Unknown JSON could be a rollback manifest; keep staging conservatively.
+    assert (key(old) in planned(hk.plan(cfg), "superseded")) is (not rollback and extension != "json")
 
 
 @pytest.mark.parametrize("kind", ["tracked", "linked"])

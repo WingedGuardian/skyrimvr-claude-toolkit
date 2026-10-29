@@ -750,7 +750,7 @@ def test_run_restores_through_stop_when_startup_times_out(tree, world):
         return d
     mod.make_desktop = no_devbench
     world.events.append((250, world.game_exits))       # the stuck game is closed by hand, during stop's wait
-    assert mod.main(["run", "--desktop", "current"]) == 2
+    assert mod.main(["run", "--desktop", "background"]) == 2
     assert world.quits == [], "DevBench never named the game: no quit may be sent"
     assert snapshot(tree) == before and mod.load_state() is None
 

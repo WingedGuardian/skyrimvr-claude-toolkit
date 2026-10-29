@@ -4,7 +4,7 @@
     bash tools/vr-headless.sh status
     bash tools/vr-headless.sh run --desktop background|current [--park] [--emu] [--force]
                                                # the managed session: prepare, launch, wait for the game to
-                                               # exit, then restore -- restoration is part of exit and error
+                                               # exit, then restore when ownership and runtime checks permit
     bash tools/vr-headless.sh on [--force] [--park]   # headless: SteamVR null driver (and Valve's openvr_api.dll)
     bash tools/vr-headless.sh launch --desktop background|current   # start SteamVR + the game on `on` files
     bash tools/vr-headless.sh stop             # orderly exit of the owned game, its helpers, then `off`
@@ -316,6 +316,14 @@ def process_alive(pid, start) -> bool:
     try:
         return d.process_alive(pid, start)
     except (OSError, ValueError) as e:
+        if isinstance(e, PermissionError) or getattr(e, "winerror", None) == 5:
+            try:
+                node = next((p for p in read_process_tree() if p.get("Id") == pid), None)
+                if node is None:
+                    return False  # a successful complete census proves absence
+                return d.parse_start(node["StartTime"]) == d.parse_start(start)
+            except (ProcessReadError, OSError, ValueError, KeyError, TypeError) as census_error:
+                raise ProcessReadError("the owned process census identity could not be read") from census_error
         raise ProcessReadError("the owned process handle could not be read: {}".format(e)) from e
 
 
@@ -365,7 +373,7 @@ def retained_launcher_parent(node, session):
     from vr_background_desktop import parse_start
     try:
         created = parse_start(node["StartTime"])
-        for key in ("runtime_launch", "steam_launch", "game_launch"):
+        for key in ("runtime_launch", "game_launch"):  # Steam is readiness only
             launch = session.get(key)
             proof = session.get("launch_lifetimes", {}).get(key)
             if not launch or not proof:
@@ -422,7 +430,7 @@ def proven_process(x, session, census, desk):
         return key(a) == key(b)
     nodes = {p.get("Id"): p for p in census}
     anchors = list(session["processes"])
-    for key in ("runtime_launch", "steam_launch", "game_launch"):
+    for key in ("runtime_launch", "game_launch"):  # no Steam ownership anchor
         child = session.get(key)
         if child:
             anchors.append({"Id": child["pid"], "Path": child.get("executable"),
@@ -898,6 +906,7 @@ def cmd_emu(arg) -> int:
 
 def cmd_launch(desktop) -> dict:
     """Start SteamVR and the game for a prepared (`on`) session and record what this run owns."""
+    from vr_background_desktop import parse_start
     if not IS_WINDOWS:
         raise Refused("`launch`/`run` start processes on a Windows desktop; this is not Windows")
     p = paths()
@@ -940,7 +949,7 @@ def cmd_launch(desktop) -> dict:
             census = read_process_tree() if candidates else []
             session["runtime_observed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             refresh_launch_lifetimes(session, desk)
-        except (ProcessReadError, OSError, ValueError):
+        except (ProcessReadError, OSError, ValueError, RuntimeError):
             session["ownership_refused"] = True
             save_state(st)
             raise
@@ -949,6 +958,13 @@ def cmd_launch(desktop) -> dict:
             save_state(st)
             raise Refused("a test window escaped onto your desktop; stopping this owned session")
         for x in candidates:
+            if any(x["Id"] == session.get(k, {}).get("pid") and
+                   parse_start(x["StartTime"]) == parse_start(session[k]["start_time"])
+                   for k in ("runtime_launch", "game_launch")) and not any(p.get("Id") == x["Id"] for p in census):
+                # A short-lived launcher may exit between Get-Process and CIM. Confirm
+                # that exact generation disappeared; a still-live unproved process refuses.
+                if not any(same_process(x, p) for p in read_processes()):
+                    continue
             if not any(same_process(x, o) for o in session["processes"]):
                 if not proven_process(x, session, census, desk):
                     if steam_handoff_runtime(x, session, census, desk):
@@ -1208,6 +1224,11 @@ def cmd_status() -> int:
         s = st["session"]
         print("session   : {} desktop, {} owned process(es), started by pid {}".format(
             s.get("desktop_mode"), len(s.get("processes", [])), s.get("creator_pid")))
+        if s.get("ownership_refused"):
+            print("session   : ownership refused; headless files kept for inspection")
+        if s.get("observed_runtime"):
+            print("session   : observed-only SteamVR (close manually before restoration): {}".format(
+                ", ".join(str(x["Id"]) for x in s["observed_runtime"])))
     try:
         emu_package()
         fetched = "fetched, pinned v2.0.1 verified"

@@ -262,7 +262,7 @@ class BackgroundDesktop:
         created = _filetime(times[0])
         if created != parse_start(record["start_time"]):
             raise OSError("launcher creation time does not match the retained handle")
-        exited = bool(times[1].dwLowDateTime or times[1].dwHighDateTime)
+        exited = status == 0 and bool(times[1].dwLowDateTime or times[1].dwHighDateTime)
         if status == 0 and not exited:
             raise OSError("launcher is signalled but its exit time is unreadable")
         return dict(record, exit_time=_filetime(times[1]).isoformat() if exited else None,
@@ -276,7 +276,16 @@ class BackgroundDesktop:
                                check=True, capture_output=True, text=True, timeout=8)
             tids = json.loads(r.stdout)
             tids = tids if isinstance(tids, list) else [tids]
-            return bool(tids) and all(thread_desktop(tid) == self.name for tid in tids)
+            if not tids:
+                return False
+            for tid in tids:
+                try:
+                    name = thread_desktop(tid)
+                except OSError:
+                    continue  # no user32 desktop: neutral; ancestry is proved by the caller
+                if name != self.name:
+                    return False
+            return True
         except (OSError, subprocess.SubprocessError, ValueError, TypeError):
             return False
 

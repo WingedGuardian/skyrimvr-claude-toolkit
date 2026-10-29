@@ -372,7 +372,7 @@ class _Cmd:
 class _Frame:
     __slots__ = ("kind", "cmd", "word", "mode", "cd", "pipe", "stage", "case", "dbr", "start", "id", "last_sep",
                  "io", "rec_mark", "ctl", "kv", "lst", "seq", "chain_ok", "pend", "opq", "parent",
-                 "location_controls", "location_depth", "function_pending")
+                 "location_controls", "location_depth", "function_pending", "brace_marks")
 
     def __init__(self, kind: str, cd: str, mode: str, fid: int, start: int = 0):
         self.kind = kind
@@ -390,6 +390,7 @@ class _Frame:
         self.location_controls = []
         self.location_depth = 0
         self.function_pending = False
+        self.brace_marks = []
         self.last_sep = ""
         self.io = ""
         self.opq = -1               # I7: index in _Scanner.synth of this call's opaque exec
@@ -528,6 +529,7 @@ class _Scanner:
             cmd.carry_cd = sep not in ("|", "|&", "&") and cmd.stage == 0
             if self.DIALECT == "bash":
                 cmd.conditional |= bool(f.case or f.location_depth)
+                cmd.conditional |= sep == "||"  # a failed cd leaves its prior location
             if not cmd.skip and (cmd.words or cmd.redirs or cmd.heredocs):
                 cmd.record_index = len(self.recs)
                 self.recs.append(cmd)
@@ -711,6 +713,7 @@ class _Bash(_Scanner):
             while j < self.n and self.t[j] in " \t":
                 j += 1
             if j < self.n and self.t[j] in "{(":
+                cmd.coproc = True  # retain the scope after an optional coprocess name
                 return True
         if v == "time":                                         # time [-p] <pipeline>, incl. { } and ( )
             cmd.after_time = True
@@ -721,15 +724,24 @@ class _Bash(_Scanner):
         if v in _BASH_DROP:
             if v in _BASH_OPEN:
                 f.ctl += 1
-                kind = ("function" if f.function_pending else "brace") if v == "{" else v
+                kind = ("function" if f.function_pending else "coproc" if coproc else
+                        "conditional-brace" if cmd.conditional else "brace") if v == "{" else v
                 f.location_controls.append(kind)
                 f.location_depth += kind != "brace"
                 if v == "{":
+                    f.brace_marks.append((kind, len(self.recs), f.cd))
                     f.function_pending = False
             elif v in _BASH_CLOSE:
                 f.ctl -= 1
                 if f.location_controls:
                     f.location_depth -= f.location_controls.pop() != "brace"
+                if v == "}" and f.brace_marks:
+                    kind, mark, before = f.brace_marks.pop()
+                    tail = self.t[self.i:].lstrip()
+                    isolated = (tail.startswith("|") and not tail.startswith("||")) or (
+                        tail.startswith("&") and not tail.startswith("&&"))
+                    if kind in ("function", "coproc") or isolated:
+                        self.scope_brace(f, mark, before)
                 if f.ctl < 0:
                     self.unsure = True              # a stray fi/done/}: resolution off (fix round 1)
             return True
@@ -756,6 +768,22 @@ class _Bash(_Scanner):
             cmd.skip = True
             return True
         return False
+
+    def scope_brace(self, f, mark, before):
+        """A function/coprocess/pipeline brace body has its own caller location."""
+        child = self._frame("brace", before, "n", self.i).id
+        for rec in self.recs[mark:]:
+            if rec.frame == f.id:
+                rec.frame = child
+                rec.parent_frame = (f.id,) + rec.parent_frame
+            elif f.id in rec.parent_frame:
+                at = rec.parent_frame.index(f.id)
+                rec.parent_frame = rec.parent_frame[:at] + (child,) + rec.parent_frame[at:]
+        for index, (position, parents, cd, text, mode) in enumerate(self.nested):
+            if position >= mark and f.id in parents:
+                at = parents.index(f.id)
+                self.nested[index] = (position, parents[:at] + (child,) + parents[at:], cd, text, mode)
+        f.cd = before
 
     def assignments(self, cmd):
         out = []
@@ -793,6 +821,9 @@ class _Bash(_Scanner):
         else:
             new = self.cd_word(cmd, args[0], args[0].bs)
         cmd.cd_change = new
+        if not _is_abs(new) and any(kind in ("loop", "while", "until") for kind in f.location_controls):
+            # A relative move in a 0..N loop has no proved finite location bound.
+            self.ctx.unread = True
         f.cd = _join_cd(f.cd, new)
 
     # -- the main loop
@@ -1157,6 +1188,8 @@ class _Bash(_Scanner):
                 j += 1
             if j < self.n and t[j] == ")":                      # name() -- a function definition
                 f.word = None
+                if f.cmd is not None:
+                    f.cmd.drop_next = False  # function f() consumed its own name
                 f.function_pending = True
                 self.i = j + 1
                 return
@@ -3148,7 +3181,8 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
                 # I6: a PowerShell string stage is text too (`'Remove-Item X' | pwsh -Command -`, `'...' | iex`).
                 dialect = "powershell" if reader.program == "invoke-expression" else _shell_dialect(reader.program)
                 for text in texts + strings:
-                    _sub(text, dialect, sc.depth + 1, crec.cd, ctx)
+                    for location in dict.fromkeys(e.cd_before for e in readers):
+                        _sub(text, dialect, sc.depth + 1, location, ctx)
             else:                            # literal code into python/node/...: R7(b), the legacy text rules
                 for j in range(len(ctx.out) - 1, -1, -1):
                     if ctx.out[j] is reader:

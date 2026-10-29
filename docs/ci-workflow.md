@@ -21,5 +21,6 @@ Fast draft checks remain independent of this queue.
 Retry failed jobs on the same revision while retaining original failures and
 passing legs. Reports bind the source head and tested merge candidate and show
 queue time separately from execution time. Missing or skipped required jobs
-cannot qualify a ready PR. Test matrices, mutation witnesses and thresholds are
-preserved. CI does not certify native game or host-hook behavior.
+cannot qualify a ready PR. Behavioral test matrices and mutation thresholds are
+preserved; mutations run once per OS on Python 3.10, with their named witnesses.
+CI does not certify native game or host-hook behavior.
