@@ -41,3 +41,22 @@ def test_literal_safe_location_controls_still_allow(command):
 def test_isolated_body_location_does_not_leak(body):
     command = body + (' ' if body.endswith('&') else '; ') + 'rm -rf Data'
     assert shell_rules.decide(command, ROOTS, Audit(), cwd="C:/Review/Scratch", shell="bash", env={}).decision == "allow"
+
+
+@pytest.mark.parametrize("command", [
+    'for d in /a /b; do cd "$d" && git status; done',
+    'for w in plan4 plan5; do cd /c/Projects/$w && git log --oneline -1; done',
+    'cd "C:/Review/Game"; for d in /a /b; do cd "$d"; git status --short; done',
+])
+def test_a_loop_cd_to_an_unknown_target_is_not_unreadable(command):
+    """Priced 2026-10-29: 37 real read-only loops were denied when an unknown cd target counted as relative.
+    An unknown target is the ordinary unknown-location case; only a literal relative move is unbounded."""
+    assert shell_rules.decide(command, ROOTS, Audit(), cwd="C:/Review/Scratch", shell="bash", env={}).decision == "allow"
+
+
+@pytest.mark.parametrize("command", [
+    'cd "C:/Review/Game"; for d in $X; do cd "$d"; done; rm -rf Data',
+    'cd "C:/Review/Game"; for d in /a /b; do cd "$d" && git status; done; rm -rf Data',
+])
+def test_a_loop_cd_to_an_unknown_target_still_protects_the_install(command):
+    assert shell_rules.decide(command, ROOTS, Audit(), cwd="C:/Review/Scratch", shell="bash", env={}).decision == "deny"

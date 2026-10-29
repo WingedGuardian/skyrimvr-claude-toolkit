@@ -821,8 +821,9 @@ class _Bash(_Scanner):
         else:
             new = self.cd_word(cmd, args[0], args[0].bs)
         cmd.cd_change = new
-        if not _is_abs(new) and any(kind in ("loop", "while", "until") for kind in f.location_controls):
-            # A relative move in a 0..N loop has no proved finite location bound.
+        if new != "?" and not _is_abs(new) and any(kind in ("loop", "while", "until") for kind in f.location_controls):
+            # A literal relative move in a 0..N loop has no proved finite location bound. An unknown target
+            # ("?") is the unknown-location case, decided exactly as outside a loop.
             self.ctx.unread = True
         f.cd = _join_cd(f.cd, new)
 
