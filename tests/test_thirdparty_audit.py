@@ -121,7 +121,7 @@ def pynifly_repo(tmp_path, path):
 SPRIGGIT_BASE = {
     ".config/dotnet-tools.json": json.dumps({"version": 1, "tools": {"spriggit.cli": {"version": "0.41.0"}}}),
     ".devcontainer/Dockerfile": "ARG DOTNET_SDK_VERSION=10.0.401\n",
-    ".github/workflows/ci.yml": "      - with:\n          dotnet-version: \"10.0.x\"\n",
+    ".github/workflows/full-qualification.yml": "      - with:\n          dotnet-version: \"10.0.x\"\n",
     "docs/installing-tools.md": ("spriggit serialize --InputPath a --OutputPath b --GameRelease SkyrimSE "
                                  "--PackageName Spriggit.Yaml --PackageVersion \"0.41.0\"\n"),
 }
@@ -386,7 +386,7 @@ def test_a_documented_cli_flag_missing_upstream_is_drift(tmp_path):
 def test_a_package_without_the_pinned_sdk_framework_is_drift(tmp_path):
     files = dict(SPRIGGIT_BASE)
     repo = spriggit_repo(tmp_path, "x", {".devcontainer/Dockerfile": "ARG DOTNET_SDK_VERSION=9.0.100\n",
-                                         ".github/workflows/ci.yml": files[".github/workflows/ci.yml"].replace("10.0", "9.0")})
+                                         ".github/workflows/full-qualification.yml": files[".github/workflows/full-qualification.yml"].replace("10.0", "9.0")})
     rows, code = audit(repo, make_cache(tmp_path), ["Spriggit"])
     assert code == 1 and any("ships no tools/net9.0/" in r.detail for r in by(rows, ta.DRIFT))
 

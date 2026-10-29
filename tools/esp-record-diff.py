@@ -31,7 +31,10 @@ def _sha(path):
 
 
 def changed_tags(body_a, body_b):
-    a, b = collections.Counter(subrecs(body_a)), collections.Counter(subrecs(body_b))
+    issues = []
+    a, b = collections.Counter(subrecs(body_a, problems=issues)), collections.Counter(subrecs(body_b, problems=issues))
+    if issues:
+        return "(malformed subrecords)"
     tags = sorted({t for (t, _v) in (a - b) + (b - a)})
     return ",".join(tags) if tags else "(same subrecords, different order)"
 

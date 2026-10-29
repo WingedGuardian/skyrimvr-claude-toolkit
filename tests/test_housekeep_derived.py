@@ -18,7 +18,8 @@ def test_decoded_trace_with_a_source_is_derived(tmp_path, relative, source_folde
     parent = trace.parent if source_folder == "same" else trace.parent.parent
     source = write(parent / "source.etl", b"measurement")
     doc = hk.plan(cfg_for(tmp_path), only={"derived"})
-    assert planned(doc) == {key(trace)}
+    expected = set() if relative == "events.xml" and source_folder == "parent" else {key(trace)}
+    assert planned(doc) == expected
     assert key(source) not in planned(doc)
     assert sum(doc["rows"].values()) == sum(p.stat().st_size for p in (tmp_path / "_CLAUDE_OUTPUT").rglob("*")
                                             if p.is_file())

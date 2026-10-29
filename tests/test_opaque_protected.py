@@ -81,6 +81,7 @@ ASKS = {
     "dot-variable": ('. "$f" "<I>/Data"', "Bash"),
     # guard3 (LOW-4): past the parser's token cap the text is read, as S-DEL-FALLBACK reads it.
     "token-cap": ('$R "<I>/Data"; echo ' + "a " * 2500, "Bash"),
+    "token-cap-after-prefix": ('echo ' + "a " * 2500 + '; $R "<I>/Data"', "Bash"),
     "token-cap-eval": ('if [ -n "$X" ]; then c="rm -rf <I>/Data"; fi; eval "$c"; echo ' + "a " * 2500, "Bash"),
 }
 
@@ -130,9 +131,12 @@ def test_a_save_keeps_its_own_ask(inst):
     assert got["decision"] == "ask" and "S-SAVE-OPAQUE" in got["rules"] and "S-OPAQUE-PROTECTED" not in got["rules"]
 
 
-def test_past_the_token_cap_a_save_in_the_text_still_asks(inst):
+@pytest.mark.parametrize("before_cap", [True, False])
+def test_past_the_token_cap_a_save_in_the_text_still_asks(inst, before_cap):
     """guard3 (v4.0.0 review A-guard LOW-4): the parser stops at its token cap; the save is read from the text."""
-    got = fire(inst, '$R "<I>/cfg/Saves/Existing.ess"; echo ' + "a " * 2500)
+    save = '$R "<I>/cfg/Saves/Existing.ess"'
+    command = save + '; echo ' + "a " * 2500 if before_cap else 'echo ' + "a " * 2500 + '; ' + save
+    got = fire(inst, command)
     assert got["decision"] == "ask" and "S-SAVE-OPAQUE" in got["rules"], got
 
 

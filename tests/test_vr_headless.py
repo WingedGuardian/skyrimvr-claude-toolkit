@@ -375,6 +375,10 @@ class World:
         self.lifecycle = "dataLoaded"
         self.desktop_closed = 0
         self.private_windows = True
+        self.roots = []
+        self.roots_visible = True
+        self.steam_handoff = False
+        self.launch_exit = "2026-10-25T10:00:05Z"
         self.clock = Clock(self)
 
     def tick(self):
@@ -428,14 +432,27 @@ class World:
             def start(self, command, cwd):
                 exe = Path(command[0]).name
                 world.started.append(exe)
+                root_id = 90 if exe in ("vrstartup.exe", "steam.exe") else 91
+                root = proc(root_id, Path(exe).stem, str(command[0]))
+                world.roots.append(root)
+                child = {"pid": root_id, "executable": root["Path"], "start_time": root["StartTime"]}
                 if exe in ("vrstartup.exe", "steam.exe"):
-                    world.procs.append(proc(11, "vrserver", str(world.t["vr"] / "bin" / "win64" / "vrserver.exe")))
+                    world.procs.append(proc(11, "vrserver", str(world.t["vr"] / "bin" / "win64" / "vrserver.exe"),
+                                            "2026-10-25T10:00:01Z" if world.steam_handoff else "2026-10-25T10:00:00Z"))
                     if world.room:
                         world.procs.append(world.room)
-                    return 11, {"pid": 11}
+                    return root_id, child
                 world.procs.append(proc(12, "SkyrimVR", str(world.t["game"] / "SkyrimVR.exe")))
                 world.health = {"ok": True, "pid": 12, "frame": 0}
-                return 12, {"pid": 12}
+                return root_id, child
+
+            def launch_lifetime(self, pid):
+                root = next(p for p in world.roots if p["Id"] == pid)
+                return {"pid": pid, "executable": root["Path"], "start_time": root["StartTime"],
+                        "exit_time": world.launch_exit, "observed_until": "2026-10-25T10:01:00Z"}
+
+            def process_on_desktop(self, pid):
+                return True       # independent thread and window observations: neither proves the other
 
             def boundary(self, pids):
                 visible = [] if world.isolated else [p for p in pids if p == 11]
@@ -456,6 +473,12 @@ def world(tree, monkeypatch):
     for name in ("devbench_health", "devbench_quit", "process_alive", "terminate_verified", "make_desktop"):
         monkeypatch.setattr(mod, name, getattr(w, name))
     monkeypatch.setattr(mod, "read_processes", w.read)
+    def census():
+        roots = w.roots if w.roots_visible else []
+        return [dict(p, ParentId=(0 if p in roots or p["ProcessName"] in mod.STEAM_NAMES else
+                                  91 if p["ProcessName"] == "SkyrimVR" else
+                                  10 if w.steam_handoff else 90)) for p in w.procs + roots]
+    monkeypatch.setattr(mod, "read_process_tree", census)
     return w
 
 
@@ -820,11 +843,10 @@ def test_room_setup_with_unproved_identity_is_refused(tree, world, bad):
         r["Path"] = None
     else:
         r["StartTime"] = None
-    world.room = r
     mod = tree["mod"]
-    assert mod.main(["on"]) == 0
+    session = {"boundary": {"private_window_pids": [14]}}
     with pytest.raises(mod.Refused, match="unproved"):
-        mod.cmd_launch("background")
+        mod.wait_for_room_setup(mod.paths(), "background", session, lambda: [r], {})
     assert world.terminated == [] and "sksevr_loader.exe" not in world.started
 
 

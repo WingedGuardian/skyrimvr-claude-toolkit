@@ -673,7 +673,7 @@ def test_nested_reparse_counts_toward_the_depth():
 
 def test_partial_execs_survive_a_failure():
     p = parse("rm -rf x; echo 'oops", "bash")
-    assert not p.ok and [e.program for e in p.execs] == []          # the scan failed before phase 2
+    assert not p.ok and [e.program for e in p.execs] == ["rm"]      # completed commands survive a later scan failure
     p = parse("bash -c 'rm -rf x'; bash -c 'echo $('", "bash")
     assert not p.ok and "rm" in [e.program for e in p.execs]
 
@@ -1224,3 +1224,11 @@ def test_a_cd_through_a_same_command_literal_is_followed(dialect, command, want)
     p = parse(command, dialect)
     (rm,) = [e for e in p.execs if e.program in ("rm", "remove-item")]
     assert rm.cd_before == want, (command, rm.cd_before)
+
+
+def test_eval_pipeline_does_not_move_the_caller():
+    assert find("eval 'cd /c/elsewhere' | cat; rm a", "rm").cd_before == ""
+
+
+def test_eval_subshell_does_not_move_the_caller():
+    assert find("cd /c/outer; (eval 'cd /c/inner'); rm a", "rm").cd_before == "/c/outer"
