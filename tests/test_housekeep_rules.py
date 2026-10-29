@@ -203,7 +203,10 @@ class NeverAskDeletePermanently(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_a_network_path_is_refused(self):
-        self.assertIn("network", h.bin_refusal("\\\\server\\share\\x.txt"))
+        # A UNC path only means something on Windows (POSIX abspath makes it relative); pin abspath so the
+        # network check itself is what is tested on every runner.
+        with patch.object(h.os.path, "abspath", lambda s: s):
+            self.assertIn("network", h.bin_refusal("\\\\server\\share\\x.txt"))
 
     def test_a_folder_holding_an_over_long_path_is_refused(self):
         deep = self.d.joinpath(*(["a" * 40] * 7), "f.txt")
