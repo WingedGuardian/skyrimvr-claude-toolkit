@@ -115,15 +115,25 @@ def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=()) -> dict:
         "- zip: `{zip}`\n- files: {files}\n- bytes: {bytes}\n- date: {date}\n\n"
         "Restore: `python tools/housekeep_archive.py restore \"{stub}\"`\n\n<!-- {js} -->\n".format(
             stub=src / STUB, js=json.dumps(record), **record), encoding="utf-8")
-    res = recycler(_victims(src, keep))
+    victims = _victims(src, keep)
+    record["victims"] = victims
+    if recycler is None:                   # the caller batches the recycle of many folders into a few shell calls
+        record["recycle_failed"] = {}
+        return record
+    res = recycler(victims)
     failed = {str(p): err for p, err in res.items() if err}
     record["recycle_failed"] = failed
-    if failed:                             # the stub must not claim a payload is gone when part of it is still here
-        with open(src / STUB, "a", encoding="utf-8") as f:
-            f.write("\n**Still here:** {} item(s) could not be recycled (open in another program?). The zip is "
-                    "complete; these local copies are duplicates of it:\n\n".format(len(failed)))
-            f.writelines("- `{}`\n".format(p) for p in sorted(failed))
+    if failed:
+        note_leftovers(src, failed)
     return record
+
+
+def note_leftovers(src: Path, failed: dict):
+    """The stub must not claim a payload is gone when part of it is still here."""
+    with open(Path(src) / STUB, "a", encoding="utf-8") as f:
+        f.write("\n**Still here:** {} item(s) were not recycled. The zip is complete; these local copies are "
+                "duplicates of it:\n\n".format(len(failed)))
+        f.writelines("- `{}` ({})\n".format(p, e) for p, e in sorted(failed.items()))
 
 
 def restore_archive(stub: Path) -> Path:

@@ -448,7 +448,7 @@ def test_the_sweep_never_follows_a_link_out_of_temp(tmp_path):
 def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, monkeypatch):
     cfg = sweep_cfg()
     cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
-               sweep_every_hours=0)
+               sweep_every_hours=0, daily_enabled=False)          # the daily run has its own tests
     monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(tmp_path / "temp"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.setattr(hk, "recycle", bin_for(tmp_path))
@@ -464,7 +464,7 @@ def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, mon
 def test_session_runs_at_most_once_per_interval(tmp_path, monkeypatch):
     cfg = sweep_cfg()
     cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
-               sweep_every_hours=6)
+               sweep_every_hours=6, daily_enabled=False)          # the daily run has its own tests
     monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(tmp_path / "temp"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.setattr(hk, "recycle", bin_for(tmp_path))

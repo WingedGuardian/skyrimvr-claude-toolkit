@@ -52,9 +52,13 @@ again. So:
 4. **Never touch a git-tracked file**, and never hard-link to a live game file.
 5. **Accounting must sum.** Every scanned byte lands in exactly one row; the row of bytes left alone prints even
    at zero.
-6. **A changed rule acts only after a person has seen its output.** The unattended daily run applies only when
-   the cleanup code matches the version the user approved; after any change it plans, writes a review file, and
-   the session-start note says so.
+6. **A changed rule acts only after a person has seen its output.** The daily run applies only when the cleanup
+   code matches the version the user approved; after any change it plans, writes a review file, and the session
+   says so.
+7. **Never unattended, never a blindside.** Cleanup runs only from an open agent session, which announces it --
+   what, which approved version, where the log is -- before it starts. No background service or scheduled task, no
+   window or focus change, and nothing that makes the system ask "delete permanently?": an item the bin cannot
+   take stays where it is and is reported.
 
 ### Where agent output goes
 
@@ -114,21 +118,25 @@ python tools/housekeep.py apply plan.json [--only link,gzip]
 `apply` runs the classes in a fixed order (recreatable, build, link, gzip, launch, snapshot, scratch, archive,
 expire) and prints every refusal with its reason. A refusal is not an error to work around: re-run `plan`.
 
-### The daily run
+### The daily run: only with a session open, always announced
 
-`tools/housekeep_scheduled.py` plans and applies once a day, at idle priority, and skips while a process in
-`pause_while_running` runs. It **applies only when the housekeep code matches `approved_sha256`** in your config.
-The first run, and the first run after any toolkit update that changes housekeep, only plans: it writes
-`.claude/diag/housekeep/REVIEW-NEEDED.md` (what it would archive or remove, by folder and file type, and the code
-fingerprint), and the session-start note points at it. Read it; if it is right, put that fingerprint in
-`approved_sha256`. To register the daily task (Windows, as your own user, so the Recycle Bin is yours):
+Cleanup never runs in the background on its own: there is no scheduled task and no service. When you start a
+Claude Code session, the session-start hook checks whether the daily run is due (at most once every
+`daily_every_hours`, 20; not while a process in `pause_while_running` runs, such as the game or SteamVR). If it is,
+the hook prints one line into the session **before anything starts** -- what will run, which approved version, where
+the log is -- and then starts `housekeep.py session` detached: low priority, no windows, time-boxed to
+`daily_minutes` (10); whatever is left waits for the next run. The run's summary is the next session's start note.
 
-```powershell
-$py = (Get-Command pythonw.exe).Source; $root = '<this toolkit folder>'
-Register-ScheduledTask -TaskName 'Skyrim housekeep' -Trigger (New-ScheduledTaskTrigger -Daily -At 4:30am) `
-  -Action (New-ScheduledTaskAction -Execute $py -Argument 'tools\housekeep_scheduled.py' -WorkingDirectory $root) `
-  -Settings (New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2))
-```
+It **applies only when the housekeep code matches `approved_sha256`** in your config. The first run, and the first
+run after any toolkit update that changes housekeep, only plans: it writes `.claude/diag/housekeep/REVIEW-NEEDED.md`
+(what it would archive or remove, by folder and file type, and the code fingerprint), and the session says so. Read
+it; if it is right, put that fingerprint in `approved_sha256`. You approve each version once and are told about every
+run. `"daily_enabled": false` turns the daily run off; `python tools/housekeep.py announce` shows what the hook would
+print right now.
+
+Nothing it removes ever makes Windows ask "delete permanently?": an item the Recycle Bin cannot take (a network
+location, a path longer than 259 characters, something bigger than the bin's limit) is left where it is and listed
+in the summary for you to decide.
 
 ### The archive
 

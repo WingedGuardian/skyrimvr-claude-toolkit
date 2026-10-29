@@ -129,6 +129,17 @@ def _disk_note(project) -> str:
     # A test suite runs this hook hundreds of times: none of them may launch a real sweep of the real temp dir.
     in_test = os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("SKYGUARD_SWEEP_IN_TESTS")
     if tool.is_file() and not in_test:
+        # Announce the daily cleanup BEFORE it starts (user ruling 2026-10-29: never blindsided). Fast: no planning.
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("housekeep_daily", tool.with_name("housekeep_daily.py"))
+            daily = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(daily)
+            line = daily.announcement(daily.housekeep.load_config(None))
+            if line:
+                note = (line + "\n" + note).strip()
+        except Exception:
+            pass
         try:
             import subprocess
             flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0   # detached, new group, no window

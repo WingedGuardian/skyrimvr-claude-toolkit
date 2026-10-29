@@ -62,6 +62,7 @@ def test_a_sweep_is_launched_detached_outside_tests_and_never_inside_them(tmp_pa
     assert launched == [], "under pytest the hook must not sweep the real temp dir"
     monkeypatch.setenv("SKYGUARD_SWEEP_IN_TESTS", "1")              # twin: what a real session does
     run._disk_note(str(tmp_path))
-    (argv, kw), = launched
+    # Only the housekeep launch counts; the daily announcement's process check (tasklist) also goes through Popen.
+    (argv, kw), = [(a, k) for a, k in launched if "session" in a]
     assert argv[-3:] == [str(REPO / "tools" / "housekeep.py"), "session", str(tmp_path / run.DISK_NOTE)]
     assert kw["stdout"] == subprocess.DEVNULL and (kw["creationflags"] if os.name == "nt" else kw["start_new_session"])

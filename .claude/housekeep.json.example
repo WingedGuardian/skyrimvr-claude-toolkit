@@ -28,5 +28,8 @@
   "budget_gib": 25,
   "pin_warn_gib": 1,
   "growth_warn_gib": 5,
+  "daily_enabled": true,
+  "daily_every_hours": 20,
+  "daily_minutes": 10,
   "pause_while_running": ["SkyrimVR.exe", "SkyrimSE.exe", "vrserver.exe", "vrcompositor.exe"]
 }

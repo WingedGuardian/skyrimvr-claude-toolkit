@@ -57,6 +57,11 @@ DEFAULT_CONFIG = TOOLKIT_ROOT / ".claude" / "housekeep.json"
 SAVE_EXTS = (".ess", ".skse")
 
 CLASSES = ("recreatable", "build", "link", "gzip", "launch", "snapshot", "scratch", "archive", "expire")
+# Every child process is started without a console window. 2026-10-29: the daily task runs under pythonw (no
+# console), so each PowerShell recycle call opened its own visible window -- one per archived folder, hundreds of
+# them flashing on the user's desktop.
+NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}      # CREATE_NO_WINDOW
+RECYCLE_BATCH = 500                                                        # paths per PowerShell call
 DEFAULTS = {
     "agent_output": [],               # task-folder roots (relative to the toolkit root, or absolute)
     "nested_task_roots": [],          # roots one level down whose children are task folders of their own
@@ -72,8 +77,8 @@ DEFAULTS = {
                         "CMakeFiles", "vcpkg_installed", "buildtrees"],
     "build_exts": [".obj", ".pch", ".ilk", ".iobj", ".ipdb", ".tlog", ".idb"],
     "active_hours": 48,
-    # code fingerprint (housekeep_scheduled.code_sha256: housekeep, housekeep_archive, housekeep_scheduled) whose
-    # dry-run output the user has reviewed. housekeep_scheduled.py APPLIES only
+    # code fingerprint (housekeep_daily.code_sha256: housekeep, housekeep_archive, housekeep_daily) whose
+    # dry-run output the user has reviewed. housekeep_daily.py APPLIES only
     # when the code still matches; otherwise it dry-runs and writes REVIEW-NEEDED.md (2026-10-28: a new rule acted
     # on its first run, unreviewed, and took a library a live build needed).
     "approved_sha256": "",
@@ -90,7 +95,10 @@ DEFAULTS = {
     "budget_gib": 0,                  # agent output above this: done folders idle >= min_idle_days go, oldest first
     "pin_warn_gib": 1,                # a .housekeep-keep folder this big is named in the session note
     "growth_warn_gib": 5,             # agent output grew more than this since the previous daily run: session note
-    # the unattended daily run (tools/housekeep_scheduled.py) skips while any of these processes runs
+    # The daily run (tools/housekeep_daily.py) is started only by a Claude Code session, announced in it first.
+    "daily_enabled": True,
+    "daily_every_hours": 20,          # at most one run per this many hours
+    "daily_minutes": 10,              # time box: no new action starts after this; the rest waits for the next run
     "pause_while_running": ["SkyrimVR.exe", "SkyrimSE.exe", "vrserver.exe", "vrcompositor.exe"],
     "min_bytes": 1048576,             # recreatable / link candidates below this are not worth a hash
     "gzip_after_days": 7,
@@ -250,7 +258,8 @@ def fingerprint(folder: Path):
 
 def tracked_files(root: Path) -> set:
     try:
-        out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, timeout=120)
+        out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, timeout=120,
+                             **NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         return set()
     if out.returncode != 0:
@@ -721,6 +730,13 @@ def recycle(paths) -> dict:
         return {}
     if os.name != "nt":
         raise RuntimeError("Recycle Bin removal is implemented for Windows only")
+    # 2026-10-29: items the bin cannot take made Windows pop "delete permanently?" dialogs on the user's desktop during
+    # an unattended run. Those items are never handed to the shell: they stay where they are and are reported.
+    refused = {p: bin_refusal(p) for p in paths}
+    refused = {p: why for p, why in refused.items() if why}
+    paths = [p for p in paths if p not in refused]
+    if not paths:
+        return refused
     # The shell's own delete, NOT Microsoft.VisualBasic's DeleteDirectory(..., 'OnlyErrorDialogs', ...): that UI option
     # suppresses confirmations, and the confirmation it suppresses is the one Windows shows when an item is too big for
     # the bin and would be destroyed instead. FOF_WANTNUKEWARNING (0x4000) brings exactly that prompt back while
@@ -748,7 +764,7 @@ def recycle(paths) -> dict:
     # The list goes on stdin: under -Command, trailing arguments are NOT $args -- PowerShell appends them to the
     # command text and runs them (measured: $args.Count == 0). A list file would be one more thing to delete.
     out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], input="\n".join(paths),
-                         capture_output=True, text=True, encoding="utf-8", timeout=3600)
+                         capture_output=True, text=True, encoding="utf-8", timeout=3600, **NO_WINDOW)
     silent = "no result reported" + (" (powershell: {})".format(out.stderr.strip()[:300]) if out.stderr.strip() else "")
     result = {p: silent for p in paths}
     for line in out.stdout.splitlines():
@@ -758,7 +774,70 @@ def recycle(paths) -> dict:
     for p in paths:                     # the bin's word is not the proof: the path must actually be gone
         if result[p] is None and os.path.exists(p):
             result[p] = "still present after a reported recycle"
+    result.update(refused)
     return result
+
+
+MAX_BIN_PATH = 259                      # Explorer's recycle path limit; longer paths are offered "delete permanently"
+
+
+def bin_refusal(p) -> str:
+    """'' when the Recycle Bin can take `p` without asking; otherwise why it would prompt (and so is left alone)."""
+    s = os.path.abspath(str(p))
+    if s.startswith("\\\\") or _drive_type(s) == 4:                    # DRIVE_REMOTE: a share has no Recycle Bin
+        return "left in place: network location (no Recycle Bin)"
+    longest = len(s)
+    size = 0
+    if os.path.isdir(s):
+        for dp, _, fn in os.walk(s):
+            for f in fn:
+                q = os.path.join(dp, f)
+                longest = max(longest, len(q))
+                try:
+                    size += os.stat(q).st_size
+                except OSError:
+                    pass
+    else:
+        try:
+            size = os.stat(s).st_size
+        except OSError:
+            pass
+    if longest > MAX_BIN_PATH:
+        return "left in place: a path is longer than {} characters (the bin would ask to delete it)".format(MAX_BIN_PATH)
+    cap = bin_capacity(s)
+    if cap is not None and size > cap:
+        return "left in place: {:.1f} GiB is bigger than this drive's Recycle Bin ({:.1f} GiB)".format(
+            size / GIB, cap / GIB)
+    return ""
+
+
+def _drive_type(path: str) -> int:
+    try:
+        import ctypes
+        return ctypes.windll.kernel32.GetDriveTypeW(os.path.splitdrive(path)[0] + "\\")
+    except (OSError, AttributeError):
+        return 0
+
+
+def bin_capacity(path: str):
+    """This volume's Recycle Bin size limit in bytes (0 if it deletes immediately); None when it cannot be read."""
+    try:
+        import ctypes
+        import winreg
+        buf = ctypes.create_unicode_buffer(64)
+        if not ctypes.windll.kernel32.GetVolumeNameForVolumeMountPointW(os.path.splitdrive(path)[0] + "\\", buf, 64):
+            return None
+        guid = buf.value[buf.value.index("{"):buf.value.index("}") + 1]
+        key = r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume" + "\\" + guid
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as k:
+            try:
+                if winreg.QueryValueEx(k, "NukeOnDelete")[0]:
+                    return 0
+            except OSError:
+                pass
+            return int(winreg.QueryValueEx(k, "MaxCapacity")[0]) * 1024 * 1024
+    except (OSError, ValueError, AttributeError, ImportError):
+        return None
 
 
 def _set_readonly(path):
@@ -880,19 +959,27 @@ def _archive_module():
     return mod
 
 
-def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = None) -> int:
+def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = None, deadline: float | None = None,
+          summary: bool = False):
+    """Do exactly the plan, re-checking each action. `deadline` (epoch): no new action starts after it; the rest is
+    counted as deferred for the next run. summary=True returns {"gib", "failed", "deferred"} instead of an exit code.
+    Archive payloads go to the bin in batches at the end of the class, not one shell call per folder."""
     now = time.time() if now is None else now
     guard = Guard(cfg)
     memo = _Memo()
     order = [c for c in CLASSES if not only or c in only]
-    failed = 0
+    failed = deferred = 0
     totals = {}
     for cls in order:
         acts = [a for a in plan_doc["actions"] if a["class"] == cls]
         if not acts:
             continue
         to_recycle, done = [], 0
+        archived = []                       # (action, record) awaiting the batched recycle of their payload
         for a in acts:
+            if deadline is not None and time.time() > deadline:
+                deferred += 1
+                continue
             why = check(a, cfg, guard, now, memo)
             if why:
                 print("  REFUSED  {:<11} {}  ({})".format(cls, a["path"], why))
@@ -909,13 +996,7 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
                     ha = _archive_module()
                     k = _key(a["path"]) + os.sep
                     extra = [x for x in guard.tracked | guard.links if x.startswith(k)]
-                    rec = ha.archive_folder(Path(a["path"]), Path(a["nas"]), recycler, extra)
-                    if rec["recycle_failed"]:
-                        print("  PARTIAL  {:<11} {}  ({} item(s) could not be recycled; zip is complete: {})".format(
-                            cls, a["path"], len(rec["recycle_failed"]), rec["zip"]))
-                        failed += 1
-                    else:
-                        done += a["bytes"]
+                    archived.append((a, ha.archive_folder(Path(a["path"]), Path(a["nas"]), None, extra)))
                 else:
                     to_recycle.append(a)
             except Exception as e:          # OSError, or the archive module's ArchiveError: local folder untouched
@@ -923,8 +1004,27 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
                     raise
                 print("  FAILED   {:<11} {}  ({})".format(cls, a["path"], e))
                 failed += 1
+        if archived:
+            ha = _archive_module()
+            victims = [str(v) for _, rec in archived for v in rec["victims"]]
+            res = {}
+            for i in range(0, len(victims), RECYCLE_BATCH):
+                res.update(recycler(victims[i:i + RECYCLE_BATCH]))
+            for a, rec in archived:
+                left = {v: res.get(str(v), "no result reported") for v in rec["victims"]}
+                left = {str(v): e for v, e in left.items() if e}
+                if left:
+                    ha.note_leftovers(Path(a["path"]), left)
+                    print("  PARTIAL  {:<11} {}  ({} item(s) left in place: {}; zip is complete: {})".format(
+                        cls, a["path"], len(left), next(iter(left.values())), rec["zip"]))
+                    failed += 1
+                else:
+                    done += a["bytes"]
         if to_recycle:
-            res = recycler([a["path"] for a in to_recycle])
+            paths = [a["path"] for a in to_recycle]
+            res = {}
+            for i in range(0, len(paths), RECYCLE_BATCH):
+                res.update(recycler(paths[i:i + RECYCLE_BATCH]))
             for a in to_recycle:
                 err = res.get(a["path"], "no result reported")
                 if err:
@@ -934,7 +1034,10 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
                     done += a["bytes"]
         totals[cls] = done
         print("  {:<11} {:>4} action(s), {:.2f} GiB done".format(cls, len(acts), done / GIB))
-    print("applied: {:.2f} GiB; {} refused/failed".format(sum(totals.values()) / GIB, failed))
+    print("applied: {:.2f} GiB; {} refused/failed; {} deferred (deadline)".format(
+        sum(totals.values()) / GIB, failed, deferred))
+    if summary:
+        return {"gib": sum(totals.values()) / GIB, "failed": failed, "deferred": deferred}
     return 1 if failed else 0
 
 
@@ -1033,7 +1136,7 @@ def sweep_temp(cfg, temp: Path | None = None, now: float | None = None, recycler
 def worktree_count(root: Path) -> int:
     try:
         out = subprocess.run(["git", "-C", str(root), "worktree", "list", "--porcelain"], capture_output=True,
-                             text=True, timeout=30).stdout
+                             text=True, timeout=30, **NO_WINDOW).stdout
     except (OSError, subprocess.SubprocessError):
         return 0
     return sum(1 for line in out.splitlines() if line.startswith("worktree ")) - 1
@@ -1042,15 +1145,27 @@ def worktree_count(root: Path) -> int:
 def session(cfg, state: Path) -> int:
     """The session-start job: sweep the toolkit's temp dirs, then write a one-line note for the next banner when
     something needs the user (free space near the floor, Codex sessions or worktrees past their threshold).
-    Runs at most once per sweep_every_hours: the state file's age is the clock."""
+    The sweep runs at most once per sweep_every_hours (the state file's age is the clock). The daily run has its own
+    clock (housekeep_daily.due) and is announced by the session-start hook before this process starts; its summary
+    becomes the next session's note."""
     try:
-        if time.time() - state.stat().st_mtime < cfg["sweep_every_hours"] * 3600:
-            return 0
+        sweep_due = time.time() - state.stat().st_mtime >= cfg["sweep_every_hours"] * 3600
     except OSError:
-        pass
-    res = sweep_temp(cfg)
+        sweep_due = True
+    daily = _daily_module()
+    daily_due = daily.due(cfg) == ""
+    if not sweep_due and not daily_due:
+        return 0
     notes = []
-    r = res["rows"]
+    r = {"recycled": 0, "failed": 0}
+    if sweep_due:
+        r = sweep_temp(cfg)["rows"]
+    if daily_due:
+        try:
+            notes.append(daily.run(cfg))
+        except Exception as e:                    # never cost the next session its note; say what broke instead
+            notes.append("housekeep: today's run FAILED ({}: {}) -- {}".format(
+                type(e).__name__, e, daily.f(cfg, "LOG")))
     if r["recycled"] or r["failed"]:
         notes.append("moved {} leftover temp dir(s) to the Recycle Bin{}".format(
             r["recycled"], "; {} could not be recycled and were LEFT IN PLACE (ask the user before any permanent "
@@ -1063,7 +1178,7 @@ def session(cfg, state: Path) -> int:
     if wt > cfg["worktrees_warn"]:
         notes.append("{} git worktrees (git worktree list)".format(wt))
     review = cfg["root"] / ".claude" / "diag" / "housekeep" / "REVIEW-NEEDED.md"
-    if review.is_file():
+    if review.is_file() and not daily_due:          # a run that just happened already said so in its summary
         notes.append("housekeep code changed: the daily run only PLANNED; read {} and approve it".format(review))
     alerts = cfg["root"] / ".claude" / "diag" / "housekeep" / "alerts.txt"
     try:
@@ -1079,6 +1194,16 @@ def session(cfg, state: Path) -> int:
     state.write_text(("DISK: " + "; ".join(notes) + " -- python tools/housekeep.py report\n") if notes else "",
                      encoding="utf-8")
     return 1 if r["failed"] else 0
+
+
+def _daily_module():
+    """tools/housekeep_daily.py, loaded from beside this file."""
+    import importlib.util
+    sys.modules.setdefault("housekeep", sys.modules[__name__])
+    spec = importlib.util.spec_from_file_location("housekeep_daily", Path(__file__).with_name("housekeep_daily.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 # --------------------------------------------------------------------------- report
@@ -1154,6 +1279,11 @@ def main(argv) -> int:
         return 1 if res["failed"] else 0
     if cmd == "session" and len(args) == 1:
         return session(cfg, Path(args[0]))
+    if cmd == "announce" and not args:            # the session-start hook prints this BEFORE launching `session`
+        line = _daily_module().announcement(cfg)
+        if line:
+            print(line)
+        return 0
     only = None
     if "--only" in args:
         i = args.index("--only")
