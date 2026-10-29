@@ -214,11 +214,17 @@ class Selection(DoneTest):
         self.assertEqual([], self.plan_paths()[0])
 
     def test_housekeep_hashing_does_not_count_as_a_read(self):
+        # Asserted on the restore call itself: a filesystem that does not record reads (CI runners) would let a
+        # missing restore pass unseen if we only compared access times.
         f = self.d / "x.bin"
         touch(f, mtime=time.time() - 30 * DAY)
-        before = os.stat(f).st_atime_ns
-        h.blake(f)
-        self.assertEqual(before, os.stat(f).st_atime_ns)
+        st = os.stat(f)
+        calls = []
+        real = os.utime
+        with patch.object(h.os, "utime", lambda *a, **k: (calls.append((a, k)), real(*a, **k))[1]):
+            h.blake(f)
+        self.assertIn(((f,), {"ns": (st.st_atime_ns, st.st_mtime_ns)}), calls)
+        self.assertEqual(st.st_atime_ns, os.stat(f).st_atime_ns)
 
     def test_nothing_below_min_idle_even_over_budget(self):
         # A root configured with a shorter age than min_idle_days must still wait min_idle_days.
