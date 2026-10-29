@@ -56,7 +56,7 @@ DEFAULT_CONFIG = TOOLKIT_ROOT / ".claude" / "housekeep.json"
 # install that predates the guard package; tests/test_housekeep.py fails if the two drift.
 SAVE_EXTS = (".ess", ".skse")
 
-CLASSES = ("recreatable", "build", "link", "gzip", "launch", "snapshot", "scratch")
+CLASSES = ("recreatable", "build", "link", "gzip", "launch", "snapshot", "scratch", "archive", "expire")
 DEFAULTS = {
     "agent_output": [],               # task-folder roots (relative to the toolkit root, or absolute)
     "nested_task_roots": [],          # roots one level down whose children are task folders of their own
@@ -70,8 +70,28 @@ DEFAULTS = {
     "protected_globs": [],
     "build_dir_names": ["build", "build-sdk", "build-vcpkg", "native-bootstrap", "native-prebuilt",
                         "CMakeFiles", "vcpkg_installed", "buildtrees"],
-    "build_exts": [".obj", ".pch", ".lib", ".ilk", ".iobj", ".ipdb", ".tlog", ".idb"],
+    "build_exts": [".obj", ".pch", ".ilk", ".iobj", ".ipdb", ".tlog", ".idb"],
     "active_hours": 48,
+    # code fingerprint (housekeep_scheduled.code_sha256: housekeep, housekeep_archive, housekeep_scheduled) whose
+    # dry-run output the user has reviewed. housekeep_scheduled.py APPLIES only
+    # when the code still matches; otherwise it dry-runs and writes REVIEW-NEEDED.md (2026-10-28: a new rule acted
+    # on its first run, unreviewed, and took a library a live build needed).
+    "approved_sha256": "",
+    # ---- archive: a DONE task folder is zipped to archive_root, verified there, then its payload recycled.
+    # No extra storage is assumed: the default destination is a LOCAL folder on the same drive (text evidence
+    # compresses ~5-10x), and local zips expire after archive_retention_days. A NAS is an option, never a crutch.
+    "archive_enabled": True,
+    "archive_root": "",               # empty = <root>/.claude/archive (local); or another drive / NAS share
+    "archive_retention_days": 90,     # zips under archive_root older than this -> Recycle Bin; 0 = keep forever
+    "archive_roots": {},              # {folder: idle_days}: its child folders are archived once done
+    "archive_after_days": 14,         # agent_output task folders: done and idle this long
+    "min_idle_days": 7,               # no WRITE for this long; sooner only via .housekeep-closed
+    "read_veto_hours": 48,            # any READ this recent blocks archiving (a build linking, a session reading)
+    "budget_gib": 0,                  # agent output above this: done folders idle >= min_idle_days go, oldest first
+    "pin_warn_gib": 1,                # a .housekeep-keep folder this big is named in the session note
+    "growth_warn_gib": 5,             # agent output grew more than this since the previous daily run: session note
+    # the unattended daily run (tools/housekeep_scheduled.py) skips while any of these processes runs
+    "pause_while_running": ["SkyrimVR.exe", "SkyrimSE.exe", "vrserver.exe", "vrcompositor.exe"],
     "min_bytes": 1048576,             # recreatable / link candidates below this are not worth a hash
     "gzip_after_days": 7,
     "recycle_after_days": 90,
@@ -107,6 +127,8 @@ def load_config(path: Path | None) -> dict:
     elif path:
         raise ValueError("config not found: {}".format(p))
     cfg["root"] = Path(cfg.get("root") or TOOLKIT_ROOT)
+    if not cfg["archive_root"]:
+        cfg["archive_root"] = str(cfg["root"] / ".claude" / "archive")
     return cfg
 
 
@@ -120,11 +142,82 @@ def _key(p) -> str:
 
 
 def blake(path, chunk=1 << 20) -> str:
+    """Content hash that leaves the file's access time as it found it: housekeep's own reads must not make a folder
+    look in use (activity, below, counts reads)."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        st = None
     d = hashlib.blake2b(digest_size=16)
     with open(path, "rb") as f:
         for b in iter(lambda: f.read(chunk), b""):
             d.update(b)
+    if st is not None:
+        try:
+            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+        except OSError:                  # read-only (a housekeep hard link): its access time may move; safe direction
+            pass
     return d.hexdigest()
+
+
+def activity(folder: Path) -> tuple:
+    """(newest write, newest read) of any file under `folder`. NTFS keeps last-access times on this machine (fsutil
+    disablelastaccess = 2, verified 2026-10-28), so a build linking a library or a session reading its staging shows
+    up. 2026-10-28: a write-only signal let a cleanup take a .lib a live build was linking. Reads are noisy too
+    (a disk scan reads whole trees), so a read only VETOES for read_veto_hours; idleness is measured on writes."""
+    w = r = 0.0
+    for dp, _, fn in os.walk(folder):
+        for f in fn:
+            try:
+                st = os.stat(os.path.join(dp, f))
+            except OSError:
+                continue
+            w, r = max(w, st.st_mtime), max(r, st.st_atime)
+    return w, r
+
+
+def newest_activity(folder: Path) -> float:
+    return max(activity(folder))
+
+
+_READS_RECORDED = {}
+
+
+def reads_recorded(folder: Path) -> bool:
+    """Does this volume update last-access times when a file is read? Probed, not assumed: NTFS can switch it off
+    (fsutil disablelastaccess) and Linux may keep atime coarsely. Without it the read veto silently does nothing, so
+    archiving falls back to folders their session marked .housekeep-closed. The probe creates and deletes nothing:
+    it backdates one existing small file's access time, reads it, looks, and restores both times exactly."""
+    try:
+        dev = os.stat(folder).st_dev
+    except OSError:
+        return False
+    if dev not in _READS_RECORDED:
+        ok = False
+        probe = next((Path(dp) / f for dp, _, fn in os.walk(folder) for f in fn
+                      if 0 < _size(Path(dp) / f) <= 1 << 20), None)
+        if probe is not None:
+            try:
+                st = os.stat(probe)
+                old = time.time() - 3 * DAY
+                try:
+                    os.utime(probe, (old, st.st_mtime))
+                    with open(probe, "rb") as fh:
+                        fh.read(1)
+                    ok = os.stat(probe).st_atime > old + 3600
+                finally:
+                    os.utime(probe, ns=(st.st_atime_ns, st.st_mtime_ns))
+            except OSError:
+                ok = False
+        _READS_RECORDED[dev] = ok
+    return _READS_RECORDED[dev]
+
+
+def _size(p: Path) -> int:
+    try:
+        return p.stat().st_size
+    except OSError:
+        return 0
 
 
 def newest_mtime(folder: Path) -> float:
@@ -246,7 +339,7 @@ def task_folders(cfg):
             if e.is_dir(follow_symlinks=False) and _key(p) in nested:
                 visit(p)
             elif e.is_dir(follow_symlinks=False):
-                out.append((p, "active" if newest_mtime(p) > cutoff else "idle"))
+                out.append((p, "active" if newest_activity(p) > cutoff else "idle"))
             else:
                 out.append((p, "loose"))
 
@@ -255,6 +348,116 @@ def task_folders(cfg):
         if root.is_dir():
             visit(root)
     return out
+
+
+# --------------------------------------------------------------------------- archive: is this work DONE?
+DAY = 86400
+KEEP_PIN, CLOSED_MARK = ".housekeep-keep", ".housekeep-closed"
+
+
+def live_state_tokens(cfg) -> set:
+    """Backticked names in the `## Live state` block of the instruction files: work a session is still holding."""
+    toks = set()
+    for doc in ("CLAUDE.md", "AGENTS.md"):
+        try:
+            text = (cfg["root"] / doc).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        m = re.search(r"^## Live state.*?$(.*?)(?=^## |\Z)", text, re.M | re.S)
+        if m:                                   # entry lines only: the block's own instructions name example paths
+            entries = "\n".join(ln for ln in m.group(1).splitlines() if ln.lstrip().startswith(("- ", "* ")))
+            toks |= {t.replace("\\", "/").rstrip("/").lower() for t in re.findall(r"`([^`\n]+)`", entries)}
+    return toks
+
+
+def rb_job_cwds() -> list:
+    p = Path(os.path.expanduser("~")) / ".claude" / "tools" / "resource-budget" / "ledger.json"
+    try:
+        return [_key(e["cwd"]) for e in json.loads(p.read_text(encoding="utf-8")).get("entries", []) if e.get("cwd")]
+    except (OSError, ValueError, AttributeError, TypeError):
+        return []
+
+
+def is_done(task: Path, idle_days: float, tokens: set, cwds: list, guard) -> str:
+    """'' when `task` is finished work; otherwise why it is still in use or must stay. idle_days is measured by the
+    caller. Written-recently is the weakest signal (a read leaves no mtime), so every other gate is independent."""
+    if (task / KEEP_PIN).exists():
+        return "pinned (.housekeep-keep)"
+    name = task.name.lower()
+    path = str(task).replace("\\", "/").lower()
+    if any(t == name or path.endswith("/" + t) or t.endswith("/" + name) or (len(t) > 8 and t in path)
+           for t in tokens):
+        return "named in the Live state block"
+    k = _key(task)
+    if any(c == k or c.startswith(k + os.sep) for c in cwds):
+        return "a running rb job works here"
+    for dp, dirs, files in os.walk(task):
+        if ".git" in dirs:
+            return "a git repository"
+        for f in files:
+            if f.lower().endswith(SAVE_EXTS):
+                return "holds a save"
+            if guard.globs and guard.why_protected(os.path.join(dp, f)) == "protected_globs":
+                return "holds a protected_globs file"
+    return ""
+
+
+def archive_selection(cfg, guard, tasks, now) -> tuple:
+    """([action], rows) for every done folder due: closed first, then by age; over budget, down to min_idle_days."""
+    tokens, cwds = live_state_tokens(cfg), rb_job_cwds()
+    # from_root: the folder lives under archive_roots, which the file-level loop never scans, so its kept bytes are
+    # counted here; agent_output folders that stay are counted by that loop instead (rows must sum to the scan).
+    cands = [(t, cfg["archive_after_days"], False) for t, s in tasks if s != "loose"]
+    for root, days in cfg["archive_roots"].items():
+        r = _abs(cfg, root)
+        if r.is_dir():
+            cands += [(Path(e.path), days, True) for e in os.scandir(r) if e.is_dir(follow_symlinks=False)]
+    info, total = [], 0
+    actions, rows, pins = [], {}, []
+
+    def keep(row, n, from_root):
+        if from_root:
+            rows[row] = rows.get(row, 0) + n
+
+    for t, days, from_root in cands:
+        fp = fingerprint(t)
+        total += fp[1]
+        if (t / "ARCHIVED.md").exists() and fp[1] < 1 << 20:
+            keep("kept: already archived (stub only)", fp[1], from_root)
+            continue
+        wrote, read = activity(t)
+        idle = (now - wrote) / DAY if wrote else 0.0           # idleness: writes
+        if read > now - cfg["read_veto_hours"] * 3600:         # but anything reading here right now blocks it
+            keep("kept: archive folder read within read_veto_hours", fp[1], from_root)
+            continue
+        closed = (t / CLOSED_MARK).exists()
+        if not closed and not reads_recorded(t.parent):        # no read signal on this drive: only explicit "done"
+            keep("kept: archive needs .housekeep-closed (this drive does not record reads)", fp[1], from_root)
+            continue
+        info.append((not closed, -idle, t, days, fp, idle, closed, from_root))
+    info.sort(key=lambda x: (x[0], x[1]))
+    measured = total
+    over = cfg["budget_gib"] and total > cfg["budget_gib"] * GIB
+    for _, _, t, days, fp, idle, closed, from_root in info:
+        if (t / KEEP_PIN).exists() and fp[1] >= cfg["pin_warn_gib"] * GIB:
+            pins.append((t, fp[1]))
+        # The budget lowers the bar for agent_output only; an archive_roots entry's own age is the user's number.
+        due = closed or idle >= days or (over and not from_root and idle >= cfg["min_idle_days"])
+        if not due or idle < cfg["min_idle_days"] and not closed:
+            keep("kept: archive folder not due yet", fp[1], from_root)
+            continue
+        why = is_done(t, idle, tokens, cwds, guard)
+        if why:
+            keep("kept: archive folder not done ({})".format(why), fp[1], from_root)
+            continue
+        label = re.sub(r"[^\w.-]+", "_", t.parent.name) or "root"
+        actions.append({"class": "archive", "path": str(t), "bytes": fp[1], "fingerprint": list(fp),
+                        "nas": str(Path(cfg["archive_root"]) / label), "idle_days": round(idle, 1),
+                        "closed": closed})
+        if over:
+            total -= fp[1]
+            over = total > cfg["budget_gib"] * GIB
+    return actions, rows, pins, measured
 
 
 def walk_files(target: Path):
@@ -294,10 +497,30 @@ def live_index(cfg):
     return idx
 
 
+_CMAKE_DIRS = {}
+BUILD_PRODUCTS = {".lib", ".dll", ".exe", ".pdb", ".exp", ".a", ".so", ".pex", ".esp", ".esm", ".esl"}
+
+
+def _cmake_tree(folder: Path) -> bool:
+    k = _key(folder)
+    if k not in _CMAKE_DIRS:
+        _CMAKE_DIRS[k] = (folder / "CMakeCache.txt").is_file()
+    return _CMAKE_DIRS[k]
+
+
 def is_build(path: Path, cfg) -> bool:
+    """A build intermediate (build_exts) inside a build tree: a folder named in build_dir_names, or -- whatever its
+    name -- one holding a CMakeCache.txt (2026-10-28: `build-vr`, `build-ae`, `sdk14-build` held 3.7 GiB unseen).
+    Build PRODUCTS are never intermediates, whatever build_exts says: another build links a .lib, a test loads a
+    .dll (2026-10-28: a recycled CommonLibSSE.lib broke a live build)."""
+    if path.suffix.lower() in BUILD_PRODUCTS:
+        return False
+    if path.suffix.lower() not in {e.lower() for e in cfg["build_exts"]}:
+        return False
     names = {n.lower() for n in cfg["build_dir_names"]}
-    parts = [x.lower() for x in path.parts[:-1]]
-    return path.suffix.lower() in {e.lower() for e in cfg["build_exts"]} and any(x in names for x in parts)
+    if any(x.lower() in names for x in path.parts[:-1]):
+        return True
+    return any(_cmake_tree(p) for p in path.parents)
 
 
 def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -> dict:
@@ -320,7 +543,18 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             count(row, action["bytes"])
 
     # ---- agent output: recreatable, build, link
-    tasks = task_folders(cfg) if wants("recreatable", "build", "link") else []
+    all_tasks = task_folders(cfg) if wants("recreatable", "build", "link", "archive") else []
+    # ---- archive first: a folder going to the NAS whole is not also picked over file by file
+    archived = set()
+    plan_pins, agent_total = [], None
+    if cfg["archive_enabled"] and wants("archive"):
+        arch, arch_rows, plan_pins, agent_total = archive_selection(cfg, guard, all_tasks, now)
+        for k, v in arch_rows.items():
+            count(k, v)
+        for a in arch:
+            act(a, "plan: done folder -> zip to NAS, verify, payload to Recycle Bin")
+            archived.add(_key(a["path"]))
+    tasks = [(t, s) for t, s in all_tasks if _key(t) not in archived] if wants("recreatable", "build", "link") else []
     live = live_index(cfg) if tasks else {}
     live_hash = {}
     by_size = {}
@@ -333,6 +567,9 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             if state == "loose":
                 count("kept: loose file in a root (shared live state)", size)
                 continue
+            # Nothing inside an active task is a candidate, build output included. 2026-10-28: a rule that took build
+            # output from a subfolder idle 12 h recycled a CommonLibSSE.lib another build was still linking -- a read
+            # leaves no mtime, so "not written lately" never meant "done". Done = the whole task idle, or closed.
             if state == "active":
                 count("kept: task folder active (written within active_hours)", size)
                 continue
@@ -435,6 +672,22 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                 count("kept: snapshot with distinct content (or the newest)", size)
                 prev = sig
 
+    # ---- archive retention: the archive must not become the next pile
+    days = cfg["archive_retention_days"]
+    aroot = Path(cfg["archive_root"])
+    if days and wants("expire") and aroot.is_dir():
+        for dp, _, fn in os.walk(aroot):
+            for f in fn:
+                p = Path(dp) / f
+                if not f.lower().endswith(".zip"):
+                    continue
+                st = p.stat()
+                if now - st.st_mtime >= days * DAY:
+                    act({"class": "expire", "path": str(p), "bytes": st.st_size, "mtime": st.st_mtime},
+                        "plan: archive zip past archive_retention_days -> Recycle Bin")
+                else:
+                    count("kept: archive zip within archive_retention_days", st.st_size)
+
     # ---- named scratch folders
     for s in (cfg["scratch"] if wants("scratch") else []):
         p = Path(s)
@@ -443,7 +696,8 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             act({"class": "scratch", "path": str(p), "bytes": fp[1], "fingerprint": fp},
                 "plan: named scratch folder -> Recycle Bin")
 
-    return {"created": now, "root": str(cfg["root"]), "actions": actions, "rows": rows}
+    return {"created": now, "root": str(cfg["root"]), "actions": actions, "rows": rows,
+            "large_pins": [[str(p), b] for p, b in plan_pins], "agent_total": agent_total}
 
 
 def print_rows(rows: dict, title: str):
@@ -527,7 +781,7 @@ class _Memo:
     def task_newest(self, task):
         k = _key(task)
         if k not in self.newest:
-            self.newest[k] = newest_mtime(Path(task))
+            self.newest[k] = newest_activity(Path(task))
         return self.newest[k]
 
 
@@ -555,7 +809,29 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
             return "canonical copy changed or gone"
         if guard.why_protected(c) in ("save", "git-tracked"):
             return "canonical copy is protected"
+    if action["class"] == "archive":
+        if list(fingerprint(p)) != list(action["fingerprint"]):
+            return "folder changed since the plan"
+        wrote, read = activity(p)
+        if read > now - cfg["read_veto_hours"] * 3600:
+            return "something read here since the plan"
+        if (now - wrote) / DAY < cfg["min_idle_days"] and not action.get("closed"):
+            return "something wrote here since the plan"
+        why = is_done(p, action["idle_days"], live_state_tokens(cfg), rb_job_cwds(), guard)
+        if why:
+            return "no longer done ({})".format(why)
+        if not cfg["archive_enabled"]:
+            return "archiving is off"
+        return ""
+    if action["class"] == "expire":
+        st = p.stat()
+        if st.st_mtime != action["mtime"] or st.st_size != action["bytes"]:
+            return "archive zip changed since the plan"
+        return ""
     if action["class"] in ("launch", "snapshot", "scratch"):
+        # A whole-folder action must never carry a save into the bin with it, whatever the plan or config says.
+        if p.is_dir() and any(f.lower().endswith(SAVE_EXTS) for _, _, fn in os.walk(p) for f in fn):
+            return "protected (folder holds a save)"
         if fingerprint(p) != action["fingerprint"]:
             return "folder changed since the plan"
     return ""
@@ -595,6 +871,15 @@ def compress(action) -> Path:
     return gz
 
 
+def _archive_module():
+    """tools/housekeep_archive.py, loaded from beside this file: housekeep is often run (and tested) by path."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("housekeep_archive", Path(__file__).with_name("housekeep_archive.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = None) -> int:
     now = time.time() if now is None else now
     guard = Guard(cfg)
@@ -620,9 +905,22 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
                 elif cls == "gzip":
                     compress(a)
                     to_recycle.append(a)
+                elif cls == "archive":
+                    ha = _archive_module()
+                    k = _key(a["path"]) + os.sep
+                    extra = [x for x in guard.tracked | guard.links if x.startswith(k)]
+                    rec = ha.archive_folder(Path(a["path"]), Path(a["nas"]), recycler, extra)
+                    if rec["recycle_failed"]:
+                        print("  PARTIAL  {:<11} {}  ({} item(s) could not be recycled; zip is complete: {})".format(
+                            cls, a["path"], len(rec["recycle_failed"]), rec["zip"]))
+                        failed += 1
+                    else:
+                        done += a["bytes"]
                 else:
                     to_recycle.append(a)
-            except OSError as e:
+            except Exception as e:          # OSError, or the archive module's ArchiveError: local folder untouched
+                if not isinstance(e, OSError) and type(e).__name__ != "ArchiveError":
+                    raise
                 print("  FAILED   {:<11} {}  ({})".format(cls, a["path"], e))
                 failed += 1
         if to_recycle:
@@ -764,6 +1062,15 @@ def session(cfg, state: Path) -> int:
     wt = worktree_count(cfg["root"])
     if wt > cfg["worktrees_warn"]:
         notes.append("{} git worktrees (git worktree list)".format(wt))
+    review = cfg["root"] / ".claude" / "diag" / "housekeep" / "REVIEW-NEEDED.md"
+    if review.is_file():
+        notes.append("housekeep code changed: the daily run only PLANNED; read {} and approve it".format(review))
+    alerts = cfg["root"] / ".claude" / "diag" / "housekeep" / "alerts.txt"
+    try:
+        if time.time() - alerts.stat().st_mtime < 36 * 3600:
+            notes += [a for a in alerts.read_text(encoding="utf-8").splitlines() if a.strip()]
+    except OSError:
+        pass
     floor = cfg["free_floor_gib"]
     free = shutil.disk_usage(str(cfg["root"])).free / GIB
     if floor and free - floor < 20:

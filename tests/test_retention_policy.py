@@ -12,7 +12,7 @@ import re
 
 from conftest import REPO
 
-PINNED = "e89302148024fd266cbd0a5075fea84c6d1f705c49d835c7f7c91e7198cdf3ef"
+PINNED = "8a2be2522822b37931ba2d169b88a627815551d91db7c7076e40dbf6ebda396a"
 DOC = REPO / "docs" / "RETENTION.md"
 
 

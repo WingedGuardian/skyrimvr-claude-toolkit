@@ -16,7 +16,8 @@ policy; `tools/housekeep.py` implements the parts a tool can.
 | **Forever** | Saves and every copy of them; backup stores and their manifests (anything under a folder named `*backup*`); knowledgebase snapshots; known-good baselines; audit logs; folders a person labelled by hand | Never removed by a tool. A person decides. |
 | **Evidence** | Findings, READMEs, receipts (`.md`, `.json`, `.jsonl`), small logs; every file a project doc links to | Kept. They are small, and docs point at them. |
 | **Recreatable** | A byte-identical copy of a file that is still live (a fixture copy of a game master) | Removed as soon as it is idle: the live file is the copy. |
-| **Build output** | Compiler intermediates inside build folders (`.obj .pch .lib .ilk .iobj .ipdb .tlog .idb`) | Removed once idle. Binaries and debug symbols (`.dll .exe .pdb`) are kept. |
+| **Build output** | Compiler intermediates inside build folders (`.obj .pch .ilk .iobj .ipdb .tlog .idb`); a folder holding `CMakeCache.txt` is a build folder whatever its name | Removed once idle. Build *products* (`.lib .dll .exe .pdb .exp`) are never intermediates: another build links them. |
+| **Finished work** | A task folder that is done: no write for 7 days, no read for 48 hours, not named in the instruction file's Live state block, not pinned with `.housekeep-keep`, no save, no git repository. A session can mark it done early with `.housekeep-closed`. | Zipped to the archive folder, the zip read back and checked, a short `ARCHIVED.md` (with a restore command) left behind, then the bulk recycled. The archive is local by default; another drive or a NAS is optional, never assumed. Local zips expire after 90 days. |
 | **Duplicate** | The same bytes at several agent-output paths | Stored once: hard links to one read-only copy. Every path keeps working. |
 | **Rolling** | Per-launch log captures, snapshot folders, scratch test beds | Compressed after 7 days, removed after 90; a snapshot that repeats the one before is removed; a scratch bed is removed by name when its task is done. |
 | **Toolkit temp** | Directories the toolkit's own code and tests make in the system temp dir, and pytest's old runs | Recycled by the session-start sweep once nothing in them changed for 24 hours and no process holds a file open inside. |
@@ -44,17 +45,33 @@ again. So:
 2. **Recycle Bin (or Trash), never a permanent delete** -- except same-run scratch (above). An item too big for
    the bin gets the system's own "delete permanently?" prompt, and stays where it is unless the user says yes.
    The bin frees nothing until the user empties it; that is their decision.
-3. **Leave active work alone.** A task folder written to in the last 48 hours belongs to a session that is
-   probably still running.
+3. **Leave active work alone.** A task folder written to -- or read from -- in the last 48 hours belongs to a
+   session that is probably still running. A read leaves no write time, so "nothing wrote here" alone never
+   means done: a build linking a library only reads it. Where the drive does not record reads, only folders a
+   session marked `.housekeep-closed` are archived.
 4. **Never touch a git-tracked file**, and never hard-link to a live game file.
 5. **Accounting must sum.** Every scanned byte lands in exactly one row; the row of bytes left alone prints even
    at zero.
+6. **A changed rule acts only after a person has seen its output.** The unattended daily run applies only when
+   the cleanup code matches the version the user approved; after any change it plans, writes a review file, and
+   the session-start note says so.
 
 ### Where agent output goes
 
 One folder per task. Findings and receipts at the top level; bulk (copied game files, archives, build trees, raw
 log copies) in a `payload/` subfolder. Docs link to the top level, so the bulk can be trimmed without breaking a
 link.
+
+Cleanup is the second line of defence; writing less is the first:
+
+- **Reference, don't copy.** Evidence records a commit, a hash and a diff, never a full copy of a tree, bundle,
+  database or game file per run. Stage unchanged inputs as hard links, not copies.
+- **One build folder per task.** Regenerated outputs overwrite, or keep the newest two.
+- **Close the task.** Keep the README and receipts, recycle build trees and staged copies, write
+  `.housekeep-closed`. A multi-GB folder that is genuinely needed later gets `.housekeep-keep` and one README line
+  saying why; the daily note names every pinned folder over 1 GiB.
+- **Budget.** Agent output has a size budget (`budget_gib`); over it, finished work is archived oldest first, and
+  growth of more than 5 GiB in a day is named in the session-start note.
 
 ### Agent transcripts
 
@@ -94,5 +111,29 @@ python tools/housekeep.py apply plan.json [--only link,gzip]
 `python tools/housekeep.py sweep-temp` runs the temp sweep by hand. The session-start hook runs
 `housekeep.py session .claude/diag/housekeep-session.txt` detached and shows that file's line at the next start.
 
-`apply` runs the classes in a fixed order (recreatable, build, link, gzip, launch, snapshot, scratch) and prints
-every refusal with its reason. A refusal is not an error to work around: re-run `plan`.
+`apply` runs the classes in a fixed order (recreatable, build, link, gzip, launch, snapshot, scratch, archive,
+expire) and prints every refusal with its reason. A refusal is not an error to work around: re-run `plan`.
+
+### The daily run
+
+`tools/housekeep_scheduled.py` plans and applies once a day, at idle priority, and skips while a process in
+`pause_while_running` runs. It **applies only when the housekeep code matches `approved_sha256`** in your config.
+The first run, and the first run after any toolkit update that changes housekeep, only plans: it writes
+`.claude/diag/housekeep/REVIEW-NEEDED.md` (what it would archive or remove, by folder and file type, and the code
+fingerprint), and the session-start note points at it. Read it; if it is right, put that fingerprint in
+`approved_sha256`. To register the daily task (Windows, as your own user, so the Recycle Bin is yours):
+
+```powershell
+$py = (Get-Command pythonw.exe).Source; $root = '<this toolkit folder>'
+Register-ScheduledTask -TaskName 'Skyrim housekeep' -Trigger (New-ScheduledTaskTrigger -Daily -At 4:30am) `
+  -Action (New-ScheduledTaskAction -Execute $py -Argument 'tools\housekeep_scheduled.py' -WorkingDirectory $root) `
+  -Settings (New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2))
+```
+
+### The archive
+
+Finished folders are zipped to `archive_root` (default `.claude/archive`, on the same drive: evidence and logs
+compress several times over) and the zips expire after `archive_retention_days` (90; 0 keeps them). Point
+`archive_root` at another drive or a NAS share if you have one, and add `archive_roots` entries (`{"folder":
+days}`) for folders of your own whose subfolders should be archived after that many idle days. Restore a folder
+with `python tools/housekeep_archive.py restore "<folder>/ARCHIVED.md"`; it refuses to overwrite anything.

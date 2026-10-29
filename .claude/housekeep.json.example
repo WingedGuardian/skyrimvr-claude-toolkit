@@ -16,5 +16,17 @@
   "temp_after_hours": 24,
   "sweep_every_hours": 6,
   "codex_sessions_warn_gib": 5,
-  "worktrees_warn": 10
+  "worktrees_warn": 10,
+  "approved_sha256": "",
+  "archive_enabled": true,
+  "archive_root": "",
+  "archive_retention_days": 90,
+  "archive_roots": {},
+  "archive_after_days": 14,
+  "min_idle_days": 7,
+  "read_veto_hours": 48,
+  "budget_gib": 25,
+  "pin_warn_gib": 1,
+  "growth_warn_gib": 5,
+  "pause_while_running": ["SkyrimVR.exe", "SkyrimSE.exe", "vrserver.exe", "vrcompositor.exe"]
 }

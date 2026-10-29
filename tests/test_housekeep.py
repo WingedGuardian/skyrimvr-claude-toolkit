@@ -149,6 +149,7 @@ def test_a_git_tracked_file_is_never_planned(tree):
     twin = write(tree / "_CLAUDE_OUTPUT" / "u" / "fixture" / "Skyrim.esm", blob("master"))
     subprocess.run(["git", "init", "-q", str(tree)], check=True)
     subprocess.run(["git", "-C", str(tree), "add", "-f", "_CLAUDE_OUTPUT/t/fixture/Skyrim.esm"], check=True)
+    age(tracked, 10)              # `git add` READ it; reads now count as activity, which would protect it for that reason
     doc = hk.plan(cfg_for(tree))
     assert key(tracked) not in planned(doc)
     assert key(twin) in planned(doc)
@@ -197,14 +198,16 @@ def test_a_loose_file_in_a_root_is_never_planned(tree):
 
 # --------------------------------------------------------------------------- build output
 
-def test_build_intermediates_are_planned_and_dll_pdb_are_kept(tree):
-    obj = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.lib", b"lib")
+def test_build_intermediates_are_planned_and_products_are_kept(tree):
+    # A .lib is a build PRODUCT another build links (2026-10-28: a recycled CommonLibSSE.lib broke a live build).
+    obj = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.obj", b"obj")
+    lib = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.lib", b"lib")
     dll = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.dll", b"dll")
     pdb = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.pdb", b"pdb")
-    loose = write(tree / "_CLAUDE_OUTPUT" / "t" / "notes" / "x.lib", b"lib outside a build dir")
+    loose = write(tree / "_CLAUDE_OUTPUT" / "t" / "notes" / "x.obj", b"obj outside a build dir")
     doc = hk.plan(cfg_for(tree))
     assert planned(doc, "build") == {key(obj)}
-    assert not {key(dll), key(pdb), key(loose)} & planned(doc)
+    assert not {key(lib), key(dll), key(pdb), key(loose)} & planned(doc)
 
 
 # --------------------------------------------------------------------------- links
