@@ -1278,7 +1278,8 @@ def session(cfg, state: Path) -> int:
     if sweep_switched_off():
         return 0
     try:
-        if time.time() - state.stat().st_mtime < cfg["sweep_every_hours"] * 3600:
+        # A negative age (clock set back, or Windows' coarse time.time() a tick behind the file's mtime) is due.
+        if 0 <= time.time() - state.stat().st_mtime < cfg["sweep_every_hours"] * 3600:
             return 0
     except OSError:
         pass
