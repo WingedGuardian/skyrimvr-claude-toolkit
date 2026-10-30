@@ -131,6 +131,9 @@ expire) and prints every refusal with its reason. A refusal is not an error to w
 
 ### The daily run: only with a session open, always announced
 
+The daily action/refusal log is append-only. Previous review notes are retained
+after approval; age or a line-count limit does not establish their obsolescence.
+
 Cleanup never runs in the background on its own: there is no scheduled task and no service. When you start a
 Claude Code session, the session-start hook checks whether the daily run is due (at most once every
 `daily_every_hours`, 20; not while a process in `pause_while_running` runs, such as the game or SteamVR). If it is,

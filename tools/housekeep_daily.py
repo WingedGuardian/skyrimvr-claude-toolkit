@@ -39,7 +39,6 @@ NAMES = {"LOG": "daily.log", "PLAN": "last-plan.json", "REVIEW": "REVIEW-NEEDED.
 def f(cfg, name) -> Path:
     return Path(cfg["root"]) / ".claude" / "diag" / "housekeep" / NAMES[name]
 GIB = 1024 ** 3
-LOG_KEEP_LINES = 3000
 CODE_FILES = ("housekeep.py", "housekeep_archive.py", "housekeep_daily.py", "housekeep_backups.py")
 
 
@@ -61,9 +60,9 @@ def low_priority():
 def log(cfg, text):
     p = f(cfg, "LOG")
     p.parent.mkdir(parents=True, exist_ok=True)
-    lines = p.read_text(encoding="utf-8").splitlines() if p.exists() else []
-    lines += text.rstrip("\n").splitlines()
-    p.write_text("\n".join(lines[-LOG_KEEP_LINES:]) + "\n", encoding="utf-8")
+    # These are action/refusal receipts. A line-count limit cannot prove them obsolete.
+    with p.open('a', encoding='utf-8') as stream:
+        stream.write(text.rstrip('\n')+'\n')
 
 
 def code_sha256() -> str:
@@ -167,8 +166,7 @@ def run(cfg, dry=False, now=None) -> str:
         if not ok:
             write_review(cfg, doc, sha)
         else:
-            if f(cfg, "REVIEW").exists():             # an earlier run's notice, now answered: the bin, never a delete
-                housekeep.recycle([f(cfg, "REVIEW")])
+            # Keep the previous review receipt: approval does not prove its notes obsolete.
             if not dry and doc["actions"]:
                 done = housekeep.apply(doc, cfg, deadline=now + cfg["daily_minutes"] * 60, summary=True)
     write_alerts(doc, cfg)

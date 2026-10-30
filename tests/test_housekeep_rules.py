@@ -135,6 +135,23 @@ class DailyRunGovernance(Fixture):
     def quiet(self):
         return patch.object(hd, "running_games", lambda names: []), patch.object(hd, "low_priority", lambda: None)
 
+    def test_old_daily_evidence_is_not_truncated(self):
+        hd.log(self.cfg, 'unique first receipt\n'+'entry\n'*3100)
+        hd.log(self.cfg, 'new receipt')
+        text = hd.f(self.cfg, 'LOG').read_text(encoding='utf-8')
+        self.assertTrue(text.startswith('unique first receipt\n'))
+        self.assertTrue(text.endswith('new receipt\n'))
+
+    def test_approved_code_does_not_remove_previous_review_notes(self):
+        review = hd.f(self.cfg, 'REVIEW')
+        review.parent.mkdir(parents=True, exist_ok=True)
+        review.write_text('unique operator review notes', encoding='utf-8')
+        g, l = self.quiet()
+        with g, l, patch.object(h, 'apply', return_value=dict(gib=0,failed=0,deferred=0)), patch.object(h, 'recycle') as recycle:
+            hd.run(self.cfg)
+        recycle.assert_not_called()
+        self.assertEqual('unique operator review notes', review.read_text(encoding='utf-8'))
+
     def test_a_run_is_due_only_once_per_window(self):
         g, l = self.quiet()
         with g, l:
