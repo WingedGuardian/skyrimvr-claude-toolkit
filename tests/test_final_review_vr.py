@@ -27,7 +27,9 @@ def test_real_non_gui_child_passes_desktop_check(tree):
                 seen[tid] = "unreadable ({})".format(e.winerror)
         assert seen, "the snapshot listed no thread for a live child"
         assert len(seen) <= 32, "a sleeping python child has a few threads, not the machine's: %d" % len(seen)
-        assert desk.process_on_desktop(child.pid), (desk.name, seen)
+        assert desk.process_on_desktop(child.pid, allow_ancestry_only=True), (desk.name, seen)
+        desk.name = "NonexistentRoundDDesktop"
+        assert not desk.process_on_desktop(child.pid)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="real GetThreadDesktop")
@@ -41,7 +43,7 @@ def test_desktop_check_never_waits_on_a_slow_powershell(tree, monkeypatch):
     desk = d.BackgroundDesktop.__new__(d.BackgroundDesktop)
     desk.name = d.thread_desktop(ctypes.windll.kernel32.GetCurrentThreadId())
     with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(6)"]) as child:
-        assert desk.process_on_desktop(child.pid)
+        assert desk.process_on_desktop(child.pid, allow_ancestry_only=True)
 
 
 @pytest.mark.parametrize("other", [False, True])
@@ -77,7 +79,7 @@ def test_steam_client_is_never_an_ownership_anchor(tree, world, monkeypatch, in_
     assert world.terminated == []
 
 
-@pytest.mark.parametrize("census", ["reused", "same", "absent", "unknown"])
+@pytest.mark.parametrize("census", ["reused", "same", "exited", "absent", "unknown"])
 def test_access_denied_handle_uses_census_generation(tree, monkeypatch, census):
     import vr_background_desktop as d
     mod = load()
@@ -86,10 +88,13 @@ def test_access_denied_handle_uses_census_generation(tree, monkeypatch, census):
     monkeypatch.setattr(d, "process_alive", denied)
     def read():
         if census == "unknown":
-            raise mod.ProcessReadError("census unreadable")
+            raise OSError("native identity unreadable")
         return [] if census == "absent" else [dict(Id=55, StartTime=(
             "2026-10-26T10:00:00Z" if census == "reused" else "2026-10-25T10:00:00Z"))]
-    monkeypatch.setattr(mod, "read_process_tree", read)
+    def native(pid):
+        rows = read()
+        return None if not rows else (d.parse_start(rows[0]["StartTime"]), census != "exited")
+    monkeypatch.setattr(d, "process_generation_limited", native)
     if census == "unknown":
         with pytest.raises(mod.ProcessReadError):
             mod.process_alive(55, "2026-10-25T10:00:00Z")

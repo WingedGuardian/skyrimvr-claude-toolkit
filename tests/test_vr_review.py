@@ -130,7 +130,7 @@ def test_ownership_needs_each_independent_proof(tree, world, bad):
     elif bad in ("path", "time"):
         key = "Path" if bad == "path" else "StartTime"
         census[1][key] = child[key] = None
-    desk = SimpleNamespace(process_on_desktop=lambda pid: bad != "desktop")
+    desk = SimpleNamespace(process_on_desktop=lambda pid, **kwargs: bad != "desktop")
     assert mod.proven_process(child, session, census, desk) is (bad == "none")
     if bad == "desktop":
         session["desktop_mode"] = "current"
@@ -339,7 +339,7 @@ def test_retained_launcher_lifetime_is_bound_to_identity_and_birth(tree, world, 
         proof["observed_until"] = None
     elif bad == "observed-upper":
         proof["exit_time"] = None
-    desk = SimpleNamespace(process_on_desktop=lambda pid: True)
+    desk = SimpleNamespace(process_on_desktop=lambda pid, **kwargs: True)
     assert mod.proven_process(child, session, [child], desk) is (bad in ("none", "observed-upper"))
 
 
