@@ -45,9 +45,9 @@ from pathlib import Path
 
 # ------------------------------------------------------------------ the hook floor (recounted 2026-10-05)
 # .claude/hooks: backup-before-edit, protect-bash, protect-files, protect-mcp, session-kb-guard,
-# snapshot-before-tool. .codex/hooks: skyguard-entry.sh, skyguard-entry.ps1. tests/test_release_payload.py
+# snapshot-before-tool, save-sentinel (2026-10-30). .codex/hooks: skyguard-entry.sh, skyguard-entry.ps1. tests/test_release_payload.py
 # asserts both numbers against the tree, so a hook added or dropped makes this file change too.
-CLAUDE_HOOK_FLOOR = 6
+CLAUDE_HOOK_FLOOR = 7
 CODEX_ENTRY_FLOOR = 2
 HOOK_FLOOR = CLAUDE_HOOK_FLOOR + CODEX_ENTRY_FLOOR
 

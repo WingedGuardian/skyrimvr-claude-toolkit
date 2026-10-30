@@ -199,7 +199,7 @@ def test_a_later_run_for_the_other_agent_keeps_the_first(game_dir):
 
 @pytest.mark.parametrize("value", ["claude", pytest.param("codex", marks=windows_only)])
 def test_an_unselected_agent_leaves_no_guard_drift(game_dir, value):
-    """The session-start drift check compares the interpreter across all eight guard files: one left at its
+    """The session-start drift check compares the interpreter across all nine guard files: one left at its
     placeholder by a one-agent run would read as an edited guard file at every session start."""
     sys.path.insert(0, str(REPO / "tools"))
     from skyguard import session

@@ -50,7 +50,7 @@ COVERAGE_STATES = ("HEALTHY", "DEGRADED", "NOT EXERCISED", "UNMEASURABLE")
 STAGES = ("invoked", "received", "evaluated", "emitted", "failed")
 STATUS_VALUES = ("evaluated", "partial", "failed")
 CLAUDE_HOOKS = ("protect-files", "protect-bash", "protect-mcp", "backup-before-edit", "snapshot-before-tool",
-                "session-kb-guard")
+                "session-kb-guard", "save-sentinel")
 CODEX_HOOKS = ("pre-tool", "session-start")
 SKEW_S = 300           # a stamp further ahead of "now" than this is a clock fault, not a record
 LATENCY_MAX_BYTES = 256 * 1024

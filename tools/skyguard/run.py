@@ -286,7 +286,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("agent", choices=sorted(ADAPTERS) + ["neutral"])
     ap.add_argument("role", choices=["protect-bash", "protect-files", "backup-before-edit",
-                                     "snapshot-before-tool", "session-kb-guard", "protect-mcp"]
+                                     "snapshot-before-tool", "session-kb-guard", "protect-mcp", "save-sentinel"]
                     + list(CODEX_ROLES))
     ap.add_argument("--root", default="")
     ap.add_argument("--root-win", default="")
@@ -357,6 +357,16 @@ def main(argv=None) -> int:
     elif a.role == "backup-before-edit":
         backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit, "claude", p.get("session_id", ""))
         v = Verdict()
+    elif a.role == "save-sentinel":
+        # PostToolUse, after the call: report saves changed with no backup first (saves.py KNOWN LIMITS). Never a
+        # decision; an unreadable paths file costs only the declared config dirs, never the look itself.
+        from skyguard import save_sentinel
+        env = _declared_env(a)
+        roots = paths.roots(a.root, a.root_win, env if env is not None else {})
+        text, loud = save_sentinel.report_text(a.project, roots, dict(os.environ))
+        _telemetry(a, Verdict())
+        _emit(save_sentinel.render(text, loud))
+        return 0
     elif a.role == "snapshot-before-tool":
         env = _declared_env(a)                 # Task 15: the load order and INIs, then scripts
         _recovery(a, p, audit, None if env is None else paths.roots(a.root, a.root_win, env))

@@ -61,6 +61,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Monitor|Edit|Write|NotebookEdit|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/save-sentinel.sh\"",
+            "timeout": 60
+          }
+        ]
+      }
     ]
   }
 }

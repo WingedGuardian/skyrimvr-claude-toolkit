@@ -571,7 +571,11 @@ BLOCKING = [
 NONBLOCKING = [
     ("backup-before-edit.sh", "backup-before-edit"),
     ("snapshot-before-tool.sh", "snapshot-before-tool"),
+    ("save-sentinel.sh", "save-sentinel"),
 ]
+#: What each non-blocking hook's audit line says it did NOT do.
+NOT_DONE = {"backup-before-edit": "NO backup/snapshot was taken", "snapshot-before-tool": "NO backup/snapshot was taken",
+            "save-sentinel": "saves were NOT checked after this call"}
 EDIT = {"tool_name": "Write", "tool_input": {"file_path": "C:/work/a.txt"}}
 
 
@@ -617,7 +621,7 @@ def test_nonblocking_wrapper_logs_when_engine_crashes(tmp_path, name, what):
     r = _run_wrapper(root, env, name, EDIT)
     assert r.returncode == 0 and r.stdout.strip() == ""
     log = (root / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8")
-    assert f"{what} FAILED: engine error (exit 3) -- NO backup/snapshot was taken" in log
+    assert f"{what} FAILED: engine error (exit 3) -- {NOT_DONE[what]}" in log
 
 
 @pytest.mark.parametrize("name,what", NONBLOCKING)
@@ -627,7 +631,7 @@ def test_nonblocking_wrapper_logs_without_python(tmp_path, name, what):
     r = _run_wrapper(root, env, name, EDIT)
     assert r.returncode == 0 and r.stdout.strip() == ""
     log = (root / ".claude" / "backups" / "AUDIT_LOG.txt").read_text(encoding="utf-8")
-    assert f"{what} FAILED: Python not runnable" in log and "NO backup/snapshot was taken" in log
+    assert f"{what} FAILED: Python not runnable" in log and NOT_DONE[what] in log
 
 
 # --------------------------------------------------------------------------

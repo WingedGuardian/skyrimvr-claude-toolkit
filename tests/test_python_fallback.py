@@ -272,7 +272,7 @@ def test_every_wrapper_lists_the_same_chain():
         t = f.read_text(encoding="utf-8")
         assert t.count(CHAIN_BEGIN) == 1 and t.count(CHAIN_END) == 1, f.name
         chains[f.name] = t[t.index(CHAIN_BEGIN):t.index(CHAIN_END)]
-    assert len(chains) == 6, sorted(chains)
+    assert len(chains) == 7, sorted(chains)
     assert len(set(chains.values())) == 1, "the wrappers disagree about the fallback chain: " + ", ".join(
         n for n, c in chains.items() if c != next(iter(chains.values())))
 

@@ -111,7 +111,10 @@ def test_actual_cli_stages_and_applies_reviewed_personal_policy_with_rollback(or
     assert completed.returncode == 0 and applied["host_review_required"], applied
     for name in (".claude/settings.json", ".codex/hooks.json"):
         actual = json.loads((root / name).read_bytes())
-        assert actual["personal"] == "retained" and actual["hooks"]["PostToolUse"][-1]["hooks"][0]["command"] == "personal post"
+        # The personal hook is RETAINED (order is immaterial: every PostToolUse hook runs; since 2026-10-30 the toolkit
+        # has its own PostToolUse entry, the save sentinel, so the personal one is no longer necessarily last).
+        post = [h["command"] for g in actual["hooks"]["PostToolUse"] for h in g["hooks"]]
+        assert actual["personal"] == "retained" and "personal post" in post, post
         assert actual["hooks"]["PreToolUse"] == json.loads((bundle / "candidate" / name).read_bytes())["hooks"]["PreToolUse"]
     for path in (policy, wrapper, controller):
         assert path.read_bytes() == before[path.relative_to(root).as_posix()]

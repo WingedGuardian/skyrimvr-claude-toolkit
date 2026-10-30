@@ -257,11 +257,11 @@ def test_every_check_can_fail_on_its_own_line(payload, brk):
 
 
 def test_the_hook_floor_is_the_tree_recounted():
-    """6 Claude wrappers plus the Codex entries, counted from the tree, not retyped from an old workflow."""
+    """7 Claude wrappers plus the Codex entries, counted from the tree, not retyped from an old workflow."""
     m = _mod()
     claude = sorted((REPO / ".claude" / "hooks").rglob("*.sh"))
     codex = sorted(p for p in (REPO / ".codex" / "hooks").rglob("*") if p.is_file())
-    assert m.CLAUDE_HOOK_FLOOR == len(claude) == 6, claude
+    assert m.CLAUDE_HOOK_FLOOR == len(claude) == 7, claude
     assert m.CODEX_ENTRY_FLOOR == len(codex), codex
     assert m.HOOK_FLOOR == len(claude) + len(codex)
     sys.path.insert(0, str(REPO / "tools"))

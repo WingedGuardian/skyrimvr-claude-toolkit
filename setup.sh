@@ -653,6 +653,7 @@ HOOKS_MISSING=0
 # hooks; the .ps1 as $PY = '...' with PowerShell's own quote escaping (PY_PS above).
 for hook in .claude/hooks/protect-bash.sh .claude/hooks/protect-files.sh .claude/hooks/protect-mcp.sh \
             .claude/hooks/backup-before-edit.sh .claude/hooks/snapshot-before-tool.sh .claude/hooks/session-kb-guard.sh \
+            .claude/hooks/save-sentinel.sh \
             .codex/hooks/skyguard-entry.ps1 .codex/hooks/skyguard-entry.sh; do
     case "$hook" in
         *.ps1) H_SED="$PY_PS_SED"; H_LINE="\$PY = '$PY_PS'"; H_RE='^[$]PY = '; H_NEW="\$PY = '$PY_PS_SED'" ;;
@@ -1171,6 +1172,7 @@ echo "  .claude/hooks/protect-mcp.sh     -- Guards DevBench (smp reset denied, v
 echo "  .claude/hooks/backup-before-edit.sh -- Auto-backups (Edit/Write/NotebookEdit) with audit trail"
 echo "  .claude/hooks/snapshot-before-tool.sh -- Snapshots .psc/.pex before non-read-only shell commands"
 echo "  .claude/hooks/session-kb-guard.sh -- Snapshots KNOWLEDGEBASE/CLAUDE.md/AGENTS.md once per session"
+echo "  .claude/hooks/save-sentinel.sh   -- After each call: reports saves changed with no backup first"
 echo "  tools/                           -- Helper scripts (AutoMod wrapper, esp-verify, NIF tools, nexus.sh, resaver-cli.sh)"
 echo "  .claude/backups/                 -- Backup storage"
 echo ""
