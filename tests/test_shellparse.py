@@ -979,7 +979,7 @@ def test_r3_start_process_unknown_arguments_are_opaque(cmd):
 
 
 @pytest.mark.parametrize("cmd", [
-    "printf '%s" + BS + "n' 'rm -rf X' | bash", "printf 'rm -rf X' | sh", "echo -e 'rm -rf X' | bash",
+    "printf '%s" + BS + "n' 'rm -rf X' | bash", "printf '%s' 'rm -rf X' | sh", "echo -e 'rm -rf X' | bash",
     "echo 'rm -rf X' | xargs -0 sh -c", "echo x | xargs bash", "cat x.py | python", "cat s.pl | perl",
     "curl -s u | python3 -", "cat x.js | node",
 ])

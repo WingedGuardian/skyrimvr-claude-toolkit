@@ -109,6 +109,9 @@ from typing import List, NamedTuple, Optional, Tuple
 from . import assign
 
 MAX_TOKENS = 2000
+# Re-reading a same-command function's body at each call multiplies its tokens (a `run` wrapper called ten times).
+# Those re-readings draw on this separate allowance; past it the usual cap applies (fail closed, R4).
+MAX_FUNCTION_TOKENS = 2 * MAX_TOKENS
 MAX_DEPTH = 8
 MAX_LOCATION_STATES = 16
 # Every branch is linear, but "linear" is proven only up to the sizes the timing tests run (20/80 KB), and a
@@ -277,12 +280,16 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
 # ----------------------------------------------------------------------------------------------------------
 class _Ctx:
     __slots__ = ("tokens", "out", "frame_ids", "via_xargs", "root", "counts", "subst", "dialect", "poison", "unread",
-                 "aliases", "codes", "xargs", "unnamed", "lits", "evals", "location_ambiguous")
+                 "aliases", "codes", "xargs", "unnamed", "lits", "evals", "location_ambiguous", "functions",
+                 "fn_depth", "fn_tokens")
 
     def __init__(self, root: str = "", dialect: str = ""):
         self.unread = False             # decoded code or location ambiguity prevents a complete scope proof
         self.location_ambiguous = False
         self.aliases: dict = {}         # RT-A: same-command aliases, name -> body (bash alias, PowerShell Set-Alias)
+        self.functions: dict = {}       # bash functions defined in the same command, name -> body text
+        self.fn_depth = 0               # > 0 while a function call's body is being re-read
+        self.fn_tokens = 0              # tokens those re-readings used (MAX_FUNCTION_TOKENS)
         self.codes: List[Tuple[str, str]] = []      # RT-A G1/G2: Parsed.codes
         self.xargs: List[str] = []                  # RT-A G2: Parsed.xargs
         self.unnamed: List[Exec] = []               # Parsed.unnamed
@@ -309,6 +316,9 @@ class _Ctx:
         return self.poison
 
     def tick(self, k: int = 1) -> None:
+        if self.fn_depth and self.fn_tokens + k <= MAX_FUNCTION_TOKENS:
+            self.fn_tokens += k
+            return
         self.tokens += k
         if self.tokens > MAX_TOKENS:
             raise ParseError("more than %d tokens" % MAX_TOKENS)
@@ -341,7 +351,8 @@ class _Here:
 class _Cmd:
     __slots__ = ("words", "redirs", "heredocs", "start", "end", "cd", "key", "stage", "skip", "redir_op",
                  "drop_next", "call", "frame", "after_time", "coproc", "kv", "lst", "seq", "valid", "redir_words",
-                 "parent_frame", "carry_cd", "cd_change", "conditional", "record_index")
+                 "parent_frame", "carry_cd", "cd_change", "conditional", "record_index", "piped_from",
+                 "ascend_loop")
 
     def __init__(self, f, start: int):
         self.words: List[_Word] = []
@@ -352,6 +363,9 @@ class _Cmd:
         self.end = start
         self.cd = f.cd
         self.key = (f.id, f.pipe)
+        # A command inside a group that is a pipe stage (`echo x | (cd d && sh)`, `echo x | { cd d; sh; }`) reads
+        # that pipe like the group's first command: it joins the outer pipeline for the stdin-to-shell reading.
+        self.piped_from = next((x for x in reversed(f.brace_pipe) if x), None) or f.piped_from
         self.stage = f.stage
         self.skip = False
         self.redir_op: Optional[str] = None
@@ -362,6 +376,7 @@ class _Cmd:
         self.carry_cd = False
         self.cd_change = None
         self.conditional = f.last_sep in ("&&", "||")
+        self.ascend_loop = False    # a `cd ..` (only ..) inside a loop: any ancestor of its start is a location
         self.record_index = None
         self.after_time = False
         self.coproc = False
@@ -372,7 +387,8 @@ class _Cmd:
 class _Frame:
     __slots__ = ("kind", "cmd", "word", "mode", "cd", "pipe", "stage", "case", "dbr", "start", "id", "last_sep",
                  "io", "rec_mark", "ctl", "kv", "lst", "seq", "chain_ok", "pend", "opq", "parent",
-                 "location_controls", "location_depth", "function_pending", "brace_marks")
+                 "location_controls", "location_depth", "function_pending", "brace_marks", "andor",
+                 "piped_from", "brace_pipe", "function_name")
 
     def __init__(self, kind: str, cd: str, mode: str, fid: int, start: int = 0):
         self.kind = kind
@@ -391,6 +407,10 @@ class _Frame:
         self.location_depth = 0
         self.function_pending = False
         self.brace_marks = []
+        self.andor = []             # bash: this frame's records in the current `&&` / `||` list
+        self.piped_from = None      # a ( ) group that is a pipe stage: the pipeline key its stdin comes from
+        self.brace_pipe = []        # per open { }: that key when the brace is itself a pipe stage, else None
+        self.function_name = None   # bash: the name of the function whose body `{` opens next
         self.last_sep = ""
         self.io = ""
         self.opq = -1               # I7: index in _Scanner.synth of this call's opaque exec
@@ -410,6 +430,46 @@ _DRIVE_ABS = re.compile(r"[A-Za-z]:[/\\]")
 
 def _is_abs(p: str) -> bool:
     return p[:1] in ("/", "\\", "~", "$", "%") or bool(_DRIVE_ABS.match(p))
+
+
+# One redirection after a closing `}`: `2>&1`, `>/dev/null`, `&>log`, `&>>log`, `>> "a b"`, `<in`, `>|x`. The brace's
+# isolation is decided by the operator AFTER them (`{ cd x; } 2>&1 | cat` is a pipeline stage; `{ cd x; } &>/dev/null`
+# is NOT backgrounded). Anything this does not recognise stays in place, so the caller reads the raw text as before.
+_REDIRECTION = re.compile(r"""\s*(?:\d+|&)?(?:>>|>&|<&|<>|>\||>|<(?!<))\s*(?:\d+-?|-|"[^"]*"|'[^']*'|[^\s|&;<>()]+)""")
+
+
+# The `||` branch is an unconditional exit: `|| exit`, `|| exit 1`, `|| return 2`, or a brace group whose last
+# statement is one (`|| { echo failed; exit 1; }`). Then nothing after the list runs unless the list succeeded.
+_EXIT_ONLY = re.compile(r"""\s*(?:(?:exit|return)(?:\s+\d+)?\s*(?:;|\n|$)|\{[^{}]*?\b(?:exit|return)(?:\s+\d+)?\s*;?\s*\}\s*(?:;|\n|$))""")
+
+
+def _only_exits(tail: str) -> bool:
+    return bool(_EXIT_ONLY.match(tail))
+
+
+def _skip_redirections(tail: str) -> str:
+    while True:
+        m = _REDIRECTION.match(tail)
+        if not m:
+            return tail.lstrip()
+        tail = tail[m.end():]
+
+
+def _ancestors(p: str) -> list:
+    """Every folder above p, nearest first (`C:/a/b` -> `C:/a`, `C:`). A relative p (`""` is the payload cwd, joined
+    later) gets `..` steps instead, as many as fit the location budget; an unknown p has none."""
+    if p == "?":
+        return []
+    if not p or not _is_abs(p):
+        return [_join_cd(p, "/".join([".."] * k)) for k in range(1, MAX_LOCATION_STATES - 1)]
+    out, cur = [], p.rstrip("/\\")
+    while True:
+        cut = max(cur.rfind("/"), cur.rfind("\\"))
+        if cut <= 0:
+            break
+        cur = cur[:cut]
+        out.append(cur)
+    return out
 
 
 def _join_cd(prev: str, new: str) -> str:
@@ -449,6 +509,7 @@ class _Scanner:
         self.initial_cd = self.final_cd = cd
         self.final_cds = (cd,)
         self.nested = []                # inline substitutions resolved after preceding eval location effects
+        self.fn_open = []               # bash: (frame id, name, body start) of each function body being read
         self.pending: List[Tuple[_Here, _Cmd]] = []
         self.i = 0
         self._pmatch: Optional[dict] = None
@@ -526,19 +587,30 @@ class _Scanner:
             if cmd.redir_op is not None:
                 raise ParseError("a redirection without a target")
             cmd.end = self.i
-            cmd.carry_cd = sep not in ("|", "|&", "&") and cmd.stage == 0
+            # A cd inside a group that is a pipe stage carries to the group's later commands; the group itself is
+            # isolated from the caller (scope_brace / its own paren frame).
+            cmd.carry_cd = sep not in ("|", "|&", "&") and (cmd.stage == 0 or bool(cmd.piped_from))
             if self.DIALECT == "bash":
                 cmd.conditional |= bool(f.case or f.location_depth)
-                cmd.conditional |= sep == "||"  # a failed cd leaves its prior location
             if not cmd.skip and (cmd.words or cmd.redirs or cmd.heredocs):
                 cmd.record_index = len(self.recs)
                 self.recs.append(cmd)
-                if self.SESSION_CD or (sep not in ("|", "|&") and cmd.stage == 0):
+                if self.DIALECT == "bash" and sep not in ("|", "|&"):
+                    f.andor.append(cmd)
+                if self.SESSION_CD or (sep not in ("|", "|&") and (cmd.stage == 0 or cmd.piped_from)):
                     self.track_cd(f, cmd)
                 if self.depth == 0 and self.DIALECT == "bash":
                     self.mark_unknown(cmd)
         if self.depth == 0 and self.DIALECT in ("bash", "powershell"):
             self.track_vars(f, cmd, sep)
+        if self.DIALECT == "bash":
+            if sep == "||" and not _only_exits(self.t[self.i + 2:]):
+                # Any cd so far in this and-or list may have failed (or been skipped) and still reach what
+                # follows: `cd x || true`, `cd x && ls || true`. A branch that can only exit never falls through.
+                for rec in f.andor:
+                    rec.conditional = True
+            if sep not in ("&&", "||", "|", "|&"):
+                f.andor = []
         if sep in ("|", "|&"):
             f.stage += 1
         elif sep:
@@ -700,6 +772,8 @@ class _Bash(_Scanner):
             return False
         if cmd.drop_next:
             cmd.drop_next = False
+            if f.function_pending:
+                f.function_name = "".join(w.b)              # `function NAME { ... }`
             return True
         after_time, cmd.after_time = cmd.after_time, False
         coproc, cmd.coproc = cmd.coproc, False
@@ -729,19 +803,34 @@ class _Bash(_Scanner):
                 f.location_controls.append(kind)
                 f.location_depth += kind != "brace"
                 if v == "{":
+                    if kind == "function" and f.function_name:
+                        self.fn_open.append((f.id, f.function_name, self.i))
                     f.brace_marks.append((kind, len(self.recs), f.cd))
+                    f.brace_pipe.append(cmd.key if cmd.stage > 0 else None)
+                    if cmd.stage > 0:
+                        cmd.piped_from = cmd.key        # the brace's first command shares this _Cmd with `{`
                     f.function_pending = False
             elif v in _BASH_CLOSE:
                 f.ctl -= 1
                 if f.location_controls:
                     f.location_depth -= f.location_controls.pop() != "brace"
+                piped_brace = f.brace_pipe.pop() if v == "}" and f.brace_pipe else None
                 if v == "}" and f.brace_marks:
                     kind, mark, before = f.brace_marks.pop()
-                    tail = self.t[self.i:].lstrip()
+                    if kind == "function" and self.fn_open and self.fn_open[-1][0] == f.id:
+                        _, name, body_start = self.fn_open.pop()
+                        f.function_name = None
+                        # The `}` word is already consumed: the body is the text between `{` and this `}`.
+                        self.ctx.functions[name] = self.t[body_start:self.t.rfind("}", body_start, self.i)]
+                    tail = _skip_redirections(self.t[self.i:])
                     isolated = (tail.startswith("|") and not tail.startswith("||")) or (
-                        tail.startswith("&") and not tail.startswith("&&"))
-                    if kind in ("function", "coproc") or isolated:
+                        tail.startswith("&") and not tail.startswith("&&"))   # `&>x` was consumed as a redirection
+                    if kind in ("function", "coproc") or isolated or piped_brace:   # `x | { cd d; }`: a subshell
                         self.scope_brace(f, mark, before)
+                    elif tail.startswith("||") and not _only_exits(tail[2:]):
+                        for rec in self.recs[mark:]:
+                            if rec.frame == f.id:
+                                rec.conditional = True
                 if f.ctl < 0:
                     self.unsure = True              # a stray fi/done/}: resolution off (fix round 1)
             return True
@@ -822,9 +911,12 @@ class _Bash(_Scanner):
             new = self.cd_word(cmd, args[0], args[0].bs)
         cmd.cd_change = new
         if new != "?" and not _is_abs(new) and any(kind in ("loop", "while", "until") for kind in f.location_controls):
-            # A literal relative move in a 0..N loop has no proved finite location bound. An unknown target
-            # ("?") is the unknown-location case, decided exactly as outside a loop.
-            self.ctx.unread = True
+            if all(part == ".." for part in re.split(r"[/\\]+", new.strip("/\\"))):
+                cmd.ascend_loop = True      # `cd ..` repeated: bounded by the root, every ancestor is a candidate
+            else:
+                # A descending relative move in a 0..N loop has no proved finite location bound. An unknown target
+                # ("?") is the unknown-location case, decided exactly as outside a loop.
+                self.ctx.unread = True
         f.cd = _join_cd(f.cd, new)
 
     # -- the main loop
@@ -1165,6 +1257,7 @@ class _Bash(_Scanner):
                 while j < self.n and t[j] in " \t":
                     j += 1
                 if len(cmd.words) == 1 and not cmd.redirs and j < self.n and t[j] == ")":
+                    f.function_name = "".join(cmd.words[0].b)
                     cmd.words = []                              # name () -- a function definition
                     f.function_pending = True
                     self.i = j + 1
@@ -1179,7 +1272,9 @@ class _Bash(_Scanner):
                     self.i = k + 1
                     return
             f.function_pending = False                          # a function's ( ) body keeps its own location
-            self._push(f, "paren", i, False)
+            g = self._push(f, "paren", i, False)
+            g.piped_from = ((f.id, f.pipe) if f.last_sep in ("|", "|&") and f.stage > 0 else
+                            next((x for x in reversed(f.brace_pipe) if x), None) or f.piped_from)
             self.i = i + 1
             return
         cmd = f.cmd
@@ -1192,6 +1287,7 @@ class _Bash(_Scanner):
                 if f.cmd is not None:
                     f.cmd.drop_next = False  # function f() consumed its own name
                 f.function_pending = True
+                f.function_name = t[w.start:i]
                 self.i = j + 1
                 return
         if _ASSIGN.fullmatch(t, w.start, i) or t[i - 1] in "@!+*?":   # a=( ... ) array / extglob @( ... )
@@ -2351,6 +2447,17 @@ class _Resolver:
                     body = self.ctx.aliases.get(v[k] if self.d == "bash" else v[k].lower())
                     if body:
                         self._sub_run(body.split(), k)          # RT-A: an alias defined in the same command
+                    elif self.d == "bash" and not self.q[k] and v[k] in self.ctx.functions:
+                        # A function defined in the same command runs its BODY here, in the caller's scope: its cd
+                        # moves the caller and its deletes run at the call site (as a literal eval would).
+                        self.emit(p, k + 1)
+                        self.ctx.fn_depth += 1
+                        try:
+                            self.reparse(_call_body(self.ctx.functions[v[k]], v[k + 1:], self.y[k + 1:]), "bash",
+                                         carry_cd=True)
+                        finally:
+                            self.ctx.fn_depth -= 1
+                        return self.made
             if p in ("sudo", "doas"):
                 k += 1
                 while k < n and v[k].startswith("-") and v[k] != "--":
@@ -2386,6 +2493,11 @@ class _Resolver:
                         if w[idx] == "C":
                             self.cd = _join_cd(self.cd, val)
                         k = nxt
+                        continue
+                    if w.startswith("--chdir=") or w.startswith("--unset="):  # the equals form: one word
+                        if w.startswith("--chdir="):
+                            self.cd = _join_cd(self.cd, w[len("--chdir="):])
+                        k += 1
                         continue
                     if w in ("-u", "--unset", "-C", "--chdir"):
                         if w in ("-C", "--chdir") and k + 1 < n:
@@ -2559,10 +2671,11 @@ class _Resolver:
                     before = self.cd
                     self.reparse(code, "bash", carry_cd=True)
                     if not certain:
-                        # Unknown code may or may not change directory: keep the earlier location as a candidate,
-                        # never "?" (an unknown directory lets a later relative delete through).
+                        # Unknown code may or may not change directory. Both candidates stay: the earlier location
+                        # (a later relative delete there is judged as at that place) AND "?" (it may have moved
+                        # anywhere, so the unknown-folder rules still fire on `rm -rf *`, `git clean`).
                         self.caller_cd = self.caller_cd if self.caller_cd is not None else before
-                        self.caller_alternates = tuple(dict.fromkeys(self.caller_alternates + (before,)))
+                        self.caller_alternates = tuple(dict.fromkeys(self.caller_alternates + (before, "?")))
                 return self.made
             if p in POSIX_SHELLS:
                 return self._posix_shell(p, k)
@@ -2737,9 +2850,15 @@ class _Resolver:
                     if j + 1 < n:
                         self.emit(program_name(v[j + 1], "powershell", self.y[j + 1]), j + 2)
                     return self.made
-                if name in ("workingdirectory", "wd") and j + 1 < n:
-                    self.cd = _join_cd(self.cd, v[j + 1])
-                j += 2 if any(name and s.startswith(name) for s in _PS_VALUE_PARAMS) else 1
+                inline = w.split(":", 1)[1] if ":" in w[1:] else None     # -WorkingDirectory:DIR is one word
+                if name == "wd" or (len(name) >= 2 and "workingdirectory".startswith(name)):  # -wo, -work, ...
+                    target = inline if inline is not None else (v[j + 1] if j + 1 < n else None)
+                    if target is not None:
+                        self.cd = _join_cd(self.cd, target)
+                if inline is not None:
+                    j += 1
+                else:
+                    j += 2 if any(name and s.startswith(name) for s in _PS_VALUE_PARAMS) else 1
                 continue
             if p == "powershell":
                 self.reparse(_join_words(v[j:], "powershell"), "powershell")
@@ -3075,7 +3194,7 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
             ws, vals = [ws[j] for j in keep], [vals[j] for j in keep]
             vals = ["-" + v[1:] if v[:1] in _PS_DASHES and not w.quoted else v for v, w in zip(vals, ws)]
         seg = t[rec.start:rec.end]
-        stdin = "pipe" if rec.stage > 0 else ""
+        stdin = "pipe" if rec.stage > 0 or rec.piped_from else ""
         bodies = [(h.body or "", h.quoted) for h in rec.heredocs]
         quoted = [_ps_quoted(w) for w in ws] if d == "powershell" else [w.quoted for w in ws]
         dyn = [w.dyn for w in ws]
@@ -3103,6 +3222,8 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
                             for value in res.caller_alternates + tuple(alternate_results))
             if rec.conditional:
                 outcomes.extend((rec.cd,) + alternatives)
+            if rec.ascend_loop:
+                outcomes.extend(a for start in (rec.cd,) + alternatives for a in _ancestors(start))
             choices = tuple(dict.fromkeys(outcomes))
             if len(choices) > 1:
                 ctx.location_ambiguous = True
@@ -3117,7 +3238,7 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
                 made += _Resolver(d, ["".join(w.l) for w in ws], quoted, dyn, rec.redirs, location, stdin, seg,
                                   bodies, sc.depth, ctx, False, rec.call).run()
         ctx.subst, ctx.lits = saved, saved_lits
-        groups.setdefault(rec.key, []).append((rec, made))
+        groups.setdefault(rec.piped_from or rec.key, []).append((rec, made))
     if d == "bash":
         sc.final_cd = frame_cd[sc.frames[0].id]
         sc.final_cds = (sc.final_cd,) + frame_dirs[sc.frames[0].id][1:]
@@ -3145,6 +3266,8 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
             strings = []                            # RT-A G1: a PowerShell string stage, `@'..'@ | python -`
             partial = False                         # guard3: rebuilt text still holding an unresolved variable
             for urec, umade in items[:ci]:
+                if urec.piped_from and umade and all(e.program in _NO_STDIN for e in umade):
+                    continue                        # `x | (cd d && sh)`: the group's cd reads no stdin, sh does
                 texts += [h.body or "" for h in urec.heredocs]
                 if d == "powershell" and not umade and len(urec.words) == 1 and _ps_quoted(urec.words[0]):
                     strings.append("".join(urec.words[0].b))
@@ -3166,7 +3289,11 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
                             words = [sub.get(a, a) for a in e.argv]
                             partial = partial or any("$" in a or "`" in a for a in words)
                             texts.append(" ".join(words))
-                    elif not urec.heredocs:          # printf, echo -e, cat FILE, curl ...: not reconstructable
+                    elif e.program == "printf" and _printf_text(e.argv) is not None:
+                        words = [dict(e.subst).get(a, a) for a in e.argv]
+                        partial = partial or "$" in words[0] or "`" in words[0]
+                        texts.append(_printf_text(words))
+                    elif not urec.heredocs:          # printf with directives, echo -e, cat FILE, curl ...: not rebuilt
                         known = False
             if known and partial and (reader.program in ALL_SHELLS or _ps_reads_commands(reader)):
                 # guard3: `Write-Output $c | iex`, `echo "$c" | sh`: the text is read as far as it goes (below), and the
@@ -3192,7 +3319,55 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
             break        # only the FIRST reader reads the upstream text; a later one reads that reader's output
 
 
-_TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))   # printf is NOT emulated
+_TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))   # printf: only a plain format (_printf_text)
+_PLAIN_ARG = re.compile(r"[A-Za-z0-9_./:@%+,=~-]+")
+_POSITIONAL = re.compile(r"\$(?:\{([1-9])\}|([1-9])|\{?([@*])\}?)")
+
+
+def _call_body(body: str, args, dynamic) -> str:
+    """The body with $1..$9 / ${N} / $@ / $* replaced by the call's arguments where each is a plain literal word
+    (letters, digits, path punctuation). Any other argument, or a missing one, leaves the reference in place: an
+    unknown value, judged as any unknown variable is."""
+    plain = [a if not dyn and _PLAIN_ARG.fullmatch(a or "") else None for a, dyn in zip(args, dynamic)]
+
+    def one(m):
+        if m.group(3):
+            return " ".join(plain) if plain and all(a is not None for a in plain) else m.group(0)
+        n = int(m.group(1) or m.group(2))
+        return plain[n - 1] if n <= len(plain) and plain[n - 1] is not None else m.group(0)
+    return _POSITIONAL.sub(one, body)
+
+
+_PRINTF_ESCAPES = {"n": "\n", "t": "\t", "\\": "\\"}
+
+
+def _printf_text(argv) -> Optional[str]:
+    """The output of `printf FORMAT [args]` when FORMAT has no % directive (a literal `%%` is one %) and only the
+    escapes \\n \\t \\\\: then the arguments are unused and the output is FORMAT itself. None for anything else
+    (a directive consumes arguments; \\x / octal / \\c are decoders or truncation: _is_decoder, unread)."""
+    if not argv or argv[0].startswith("-"):
+        return None
+    fmt, out, i = argv[0], [], 0
+    while i < len(fmt):
+        c = fmt[i]
+        if c == "%":
+            if fmt[i + 1:i + 2] != "%":
+                return None
+            out.append("%")
+            i += 2
+        elif c == "\\":
+            nx = fmt[i + 1:i + 2]
+            if nx not in _PRINTF_ESCAPES:
+                return None
+            out.append(_PRINTF_ESCAPES[nx])
+            i += 2
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+_NO_STDIN = frozenset(("cd", "pushd", "exec", "true", ":", "export", "set", "shopt", "umask"))
 _STDIN_SCRIPTS = frozenset(("/dev/stdin", "/proc/self/fd/0", "/dev/fd/0"))   # M4: a script file that IS stdin
 _ECHO_OPTS = re.compile(r"-[neE]*[eE][neE]*$")                       # echo -e / -ne: escapes, not literal text
 _CODE_OPTS = frozenset(("-c", "-e", "-E", "-m", "-p", "-r", "--eval", "--print", "--command"))

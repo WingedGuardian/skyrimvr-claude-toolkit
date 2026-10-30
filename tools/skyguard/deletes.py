@@ -961,7 +961,9 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         return Scan(unknown_dir, relative, sv)
     if unresolved_any and names_root(command, roots, has):
         return Scan(Hit("S-DEL-UNRESOLVED", ""), relative, sv)
-    if not parsed.ok and has(DESTROYER, command) and names_root(command, roots, has):
+    # (c1) also when the text names no root but the command RUNS in one: an unparsed `rm -rf Data` from the install.
+    if not parsed.ok and has(DESTROYER, command) and (
+            names_root(command, roots, has) or (base is not None and protected_kind(base, roots))):
         return Scan(Hit("S-DEL-FALLBACK", ""), relative, sv)
     if opaque and any(_loose_hit(e, roots, has) for e in parsed.execs):
         return Scan(Hit("S-DEL-FALLBACK", ""), relative, sv)

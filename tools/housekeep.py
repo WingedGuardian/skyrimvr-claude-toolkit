@@ -123,10 +123,6 @@ def load_config(path: Path | None) -> dict:
     if not isinstance(cfg["staging_roots"], list) or any(not isinstance(p, str) or not p for p in cfg["staging_roots"]):
         raise ValueError("staging_roots must be a list of nonempty paths")
     stage_roots = [_real(_abs(cfg, p)) for p in cfg["staging_roots"]]
-    for root in stage_roots:
-        unsafe = staging_root_refusal(root, cfg)  # reject before scanning a configured root
-        if unsafe:
-            raise ValueError(unsafe)
     if any(a == b or _strictly_inside(a, b) or _strictly_inside(b, a)
            for i, a in enumerate(stage_roots) for b in stage_roots[i + 1:]):
         raise ValueError("staging_roots must not overlap")
@@ -262,7 +258,7 @@ class Guard:
         self.tracked = tracked_files(cfg["root"])
         for r in cfg["staging_roots"]:
             root = _abs(cfg, r)
-            if root.is_dir():
+            if not staging_root_refusal(root, cfg) and root.is_dir():
                 self.tracked.update(tracked_files(root))
         self.links = evidence_links(cfg)
         self.globs = [g.lower() for g in cfg["protected_globs"]]
@@ -474,10 +470,18 @@ def manifest_references(cfg):
                         continue
                     raise ValueError("unknown manual-install manifest format: " + name)
                 text = path.read_text(encoding="utf-8-sig")
-                if not text.strip():
-                    raise ValueError("empty manifest")
                 if path.suffix.lower() == ".json":
-                    document = json.loads(text)
+                    # Backup configs are payloads unless their name or top-level shape claims a manifest.
+                    in_backups = root == TOOLKIT_ROOT / ".claude/backups/manual-installs" or "backups" in Path(dp).relative_to(root).parts
+                    named_manifest = name.lower() in ("manifest.json", "rollback.json") or name.lower().endswith(".manifest.json")
+                    try:
+                        document = json.loads(text)
+                    except ValueError:
+                        if in_backups and not named_manifest and not re.search(r'"rollback_sources"\s*:', text):
+                            continue
+                        raise
+                    if in_backups and not named_manifest and not (isinstance(document, dict) and "rollback_sources" in document):
+                        continue
                     if not isinstance(document, dict) or set(document) != {"rollback_sources"} \
                             or not isinstance(document["rollback_sources"], list):
                         raise ValueError("unknown JSON manifest structure")
@@ -486,6 +490,8 @@ def manifest_references(cfg):
                             raise ValueError("invalid rollback source")
                         remember(value)
                     continue
+                if not text.strip():
+                    raise ValueError("empty manifest")
                 for line in text.splitlines():
                     if not line.strip():
                         continue
@@ -613,7 +619,8 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
 
     for task, state in tasks:
         for f in walk_files(task):
-            if wants("superseded") and any(_strictly_inside(_real(f), _real(_abs(cfg, r)))
+            if wants("superseded") and any(not staging_root_refusal(_abs(cfg, r), cfg) and
+                                           _strictly_inside(_real(f), _real(_abs(cfg, r)))
                                            for r in cfg["staging_roots"]):
                 continue                    # staging scan accounts for these bytes exactly once
             try:
@@ -756,6 +763,8 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
     # ---- direct versioned staging folders; uncertainty keeps the whole folder
     for r in (cfg["staging_roots"] if wants("superseded") else []):
         root = _abs(cfg, r)
+        if staging_root_refusal(root, cfg):  # refuse staging before any root scan, without disabling other classes
+            continue
         if not root.is_dir():
             continue
         for path in sorted(root.iterdir()):
@@ -1269,7 +1278,8 @@ def session(cfg, state: Path) -> int:
     if sweep_switched_off():
         return 0
     try:
-        if time.time() - state.stat().st_mtime < cfg["sweep_every_hours"] * 3600:
+        # A negative age (clock set back, or Windows' coarse time.time() a tick behind the file's mtime) is due.
+        if 0 <= time.time() - state.stat().st_mtime < cfg["sweep_every_hours"] * 3600:
             return 0
     except OSError:
         pass
@@ -1376,6 +1386,10 @@ def main(argv) -> int:
         print("housekeep: {}".format(e), file=sys.stderr)
         return 2
     cmd = args.pop(0) if args else "report"
+    refusals = ["{} ({})".format(reason, root) for root in (_abs(cfg, r) for r in cfg["staging_roots"])
+                if (reason := staging_root_refusal(root, cfg))]
+    if refusals:
+        print("housekeep: staging cleanup REFUSED: " + "; ".join(refusals), file=sys.stderr)
     try:
         return _run(cmd, args, cfg)
     except ProtectionUnavailable as e:

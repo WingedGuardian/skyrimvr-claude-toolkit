@@ -136,8 +136,11 @@ def test_derived_apply_oserror_is_a_refused_line(tmp_path, monkeypatch, capsys):
 
 
 def test_config_refuses_live_staging_root_before_any_scan(tmp_path):
-    with pytest.raises(ValueError, match="unsafe staging root"):
-        cfg_for(tmp_path, staging_roots=[str(tmp_path / "MO2/mods")])
+    root = tmp_path / "MO2/mods"
+    root.mkdir(parents=True)
+    cfg = cfg_for(tmp_path, staging_roots=[str(root)])
+    assert not planned(hk.plan(cfg, only={"superseded"}))
+    assert "unsafe staging root" in hk.staging_root_refusal(root, cfg)
 
 
 def test_relative_data_writes_absolute_manifest_rows(tmp_path, monkeypatch):

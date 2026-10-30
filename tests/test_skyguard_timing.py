@@ -229,7 +229,7 @@ def _delete_shapes(N):
         "node-rmsync-run": 'node -e "' + ".rmSync(" * (N // 8) + '"',
         "remove-item-params": "Remove-Item " + ("-Include " + W + " ") * (N // 210),
         "remove-item-many": "Remove-Item " + (W + ", ") * (N // 202) + "b",
-        "printf-sh-opaque": "printf '" + "rm -rf x " * (N // 9) + "' | sh",
+        "printf-sh-opaque": "printf '%s" + "rm -rf x " * (N // 9) + "' | sh",   # % keeps the text opaque (round D)
         "opaque-many": ("$R " + W + "; ") * (N // 206) + 'ls "' + GAME + '"',
         "xargs-rm-many": ("ls " + X + " | xargs rm; ") * (N // 417) + 'ls "' + GAME + '"',
         "find-delete-starts": "find " + (F + " ") * (N // 61) + "-delete",
@@ -300,7 +300,7 @@ def _shell_write_shapes(N_):
         "dots-run": "echo x > " + "." * N_ + "esp",
         "fallback-parse-fail": 'echo "' + ("> " + F + ".esp ") * (N_ // 67),
         "fallback-write-words": 'echo "' + "> " * (N_ // 2),
-        "opaque-pipe-text": "printf '" + ("echo > " + F + ".esp ") * (N_ // 72) + "' | sh",
+        "opaque-pipe-text": "printf '%s" + ("echo > " + F + ".esp ") * (N_ // 72) + "' | sh",
         "opaque-many-pipes": ("printf " + W + " | $X; ") * (N_ // 211),
         # Task 9 item 0: the fallback's redirect target (one word, quoted or not) and tee's operand list.
         "opaque-gt-run": '"$X" -c "' + "a>b " * (N_ // 4) + '"',
@@ -503,7 +503,7 @@ def _anchored_shapes(N):
         "reg-set-run": ("set K" + F + "=" + F + "& ") * (N // 128) + R + " " + D + ' "%K%"',
         "reg-code-run": 'python -c "' + ("os.system('" + R + " " + D + " '" + F + ") ") * (N // 85) + '"',
         "reg-code-unterminated": 'python -c "' + R + " " + D + " '" + "a" * N + '"',
-        "reg-opaque-pipe":"printf '" + (R + " " + D + " " + F + " ") * (N // 72) + "' | sh",
+        "reg-opaque-pipe":"printf '%s" + (R + " " + D + " " + F + " ") * (N // 72) + "' | sh",
         "psc-flags": "tool " + ("-o " + W + ".psc ") * (N // 208),
         "psc-eq-flags": "tool " + ("--output=" + F + " ") * (N // 70),
         "champollion-many": "Champollion " + ("Data/Scripts/" + F + ".pex ") * (N // 78),

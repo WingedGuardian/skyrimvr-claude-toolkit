@@ -318,12 +318,13 @@ def process_alive(pid, start) -> bool:
     except (OSError, ValueError) as e:
         if isinstance(e, PermissionError) or getattr(e, "winerror", None) == 5:
             try:
-                node = next((p for p in read_process_tree() if p.get("Id") == pid), None)
-                if node is None:
-                    return False  # a successful complete census proves absence
-                return d.parse_start(node["StartTime"]) == d.parse_start(start)
-            except (ProcessReadError, OSError, ValueError, KeyError, TypeError) as census_error:
-                raise ProcessReadError("the owned process census identity could not be read") from census_error
+                generation = d.process_generation_limited(pid)
+                if generation is None:
+                    return False  # a successful native snapshot proves absence
+                created, running = generation
+                return running and abs((created - d.parse_start(start)).total_seconds()) <= 0.001
+            except (OSError, ValueError, TypeError) as native_error:
+                raise ProcessReadError("the owned process native identity could not be read") from native_error
         raise ProcessReadError("the owned process handle could not be read: {}".format(e)) from e
 
 
@@ -455,7 +456,7 @@ def proven_process(x, session, census, desk):
             node = parent
         else:
             return False
-        if session["desktop_mode"] == "background" and not desk.process_on_desktop(x["Id"]):
+        if session["desktop_mode"] == "background" and not desk.process_on_desktop(x["Id"], allow_ancestry_only=True):
             return False
         return True
     except (KeyError, TypeError, ValueError, OSError):
@@ -559,13 +560,25 @@ def quit_safe(pid: int, port: int) -> bool:
 
 # --------------------------------------------------------------------------- file plumbing
 
+def replace_atomic_temp(tmp, dst):
+    """Retry brief Windows AV/indexer contention; the caller owns and cleans its temporary file."""
+    for attempt in range(10):
+        try:
+            os.replace(tmp, str(dst))
+            return
+        except PermissionError as exc:
+            if getattr(exc, "winerror", None) not in (5, 32) or attempt == 9:
+                raise
+            time.sleep(0.05)
+
+
 def replace_file(src: Path, dst: Path) -> None:
     """Write dst from src through a temp file beside it and os.replace: never half-written."""
     fd, tmp = tempfile.mkstemp(dir=str(dst.parent), prefix=".vrheadless_")
     os.close(fd)
     try:
         shutil.copyfile(str(src), tmp)
-        os.replace(tmp, str(dst))
+        replace_atomic_temp(tmp, dst)
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)                        # the tool's own temp file
@@ -573,16 +586,24 @@ def replace_file(src: Path, dst: Path) -> None:
 
 def write_text_atomic(dst: Path, text: str) -> None:
     fd, tmp = tempfile.mkstemp(dir=str(dst.parent), prefix=".vrheadless_")
-    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(text)
-    os.replace(tmp, str(dst))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        replace_atomic_temp(tmp, dst)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def write_bytes_atomic(dst: Path, data: bytes) -> None:
     fd, tmp = tempfile.mkstemp(dir=str(dst.parent), prefix=".vrheadless_")
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(data)
-    os.replace(tmp, str(dst))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        replace_atomic_temp(tmp, dst)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def backup(src: Path, dst: Path) -> str:
@@ -783,6 +804,21 @@ def cmd_off() -> int:
         raise Refused("{}; cannot tell whether the session's game or SteamVR still runs, so nothing is restored. Try "
                       "again, or use `stop`".format(e))
     if alive:
+        session = st.get("session") or {}
+        owned = session.get("processes") or []
+        observed = [x for x in alive if any(same_process(x, o) for o in session.get("observed_runtime", []))]
+        foreign = [x for x in alive if x not in observed and not any(same_process(x, o) for o in owned)]
+        if observed or foreign:
+            names = lambda xs: ", ".join("{} (PID {})".format(x["ProcessName"], x["Id"]) for x in xs)
+            steps = []
+            if observed:
+                steps.append("Close observed-only SteamVR processes yourself: " + names(observed))
+            if foreign:
+                steps.append("Close unowned VR processes yourself: " + names(foreign))
+            if any(any(same_process(x, o) for o in owned) for x in alive):
+                steps.append("use `stop` for the remaining owned processes")
+            raise Refused("; ".join(steps) + "; then run `off`. Headless files and state are kept; "
+                          "`stop` cannot terminate observed-only or unowned processes")
         raise Refused("the session's {} still running; restoring files under it would break it. Use `stop` (or close "
                       "them), then `off`".format(", ".join(sorted({x["ProcessName"] for x in alive})) + " is"))
     entries = list(st.get("files", [])) + emu_entries(st)
