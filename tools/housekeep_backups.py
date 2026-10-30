@@ -44,6 +44,115 @@ def file_hash(path, deadline=float('inf')):
     return h.hexdigest()
 
 
+def content_hash(path):
+    """A disposition names exact current bytes, not an age or a filename guess."""
+    p = plain_path(path)
+    if p.is_dir():
+        return digest(inventory(p, hasher=_local_sha256)['files'])
+    h = hashlib.blake2b(digest_size=16)
+    with p.open('rb') as stream:
+        while block := stream.read(1024 * 1024):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _local_sha256(path):
+    """As ordinary housekeep's blake: its own proof read is not user activity."""
+    p = Path(path)
+    before = p.stat()
+    result = file_hash(p)
+    after = p.stat()
+    if (before.st_size, before.st_mtime_ns, before.st_ino) == (after.st_size, after.st_mtime_ns, after.st_ino):
+        try:
+            os.utime(p, ns=(before.st_atime_ns, after.st_mtime_ns))
+        except OSError:
+            pass  # Conservative: a read veto may remain; never fake idleness.
+    return result
+
+
+def obsolete_reason(path, cfg, expected_hash=None):
+    """Empty only for an explicit, evidence-bound declaration of obsolescence."""
+    key = os.path.normcase(os.path.abspath(path))
+    declarations = cfg.get('obsolete_items', {})
+    declaration = next((v for k, v in declarations.items() if os.path.normcase(os.path.abspath(k)) == key), {})
+    if not isinstance(declaration, dict) or declaration.get('basis') != 'operator-confirmed-obsolete' or not declaration.get('reason') or not declaration.get('evidence'):
+        return 'usefulness unproven; age/name/class alone is not deletion evidence'
+    if declaration.get('content_hash') != (expected_hash or content_hash(path)):
+        return 'obsolescence evidence no longer matches current bytes'
+    return ''
+
+
+def mark_disposable_temp(directory, toolkit):
+    """Producer declaration, made only while its newly created workspace is empty."""
+    p = plain_path(directory)
+    if any(p.iterdir()):
+        raise Refused('cannot adopt an existing populated workspace as disposable')
+    write_json(p/'.housekeep-disposable.json', dict(v=1,
+        directory=os.path.normcase(os.path.realpath(p)), toolkit=os.path.normcase(os.path.realpath(toolkit)),
+        purpose='producer-declared disposable temporary workspace'))
+
+
+def disposable_temp(directory, toolkit):
+    p = Path(directory)
+    identity = dict(directory=os.path.normcase(os.path.realpath(p)), toolkit=os.path.normcase(os.path.realpath(toolkit)))
+    for name, expected in [('.housekeep-disposable.json', dict(v=1, **identity,
+                           purpose='producer-declared disposable temporary workspace')),
+                           ('.x4-temp-owner.json', dict(v=2, **identity, purpose='disposable temporary workspace'))]:
+        marker = p/name
+        if marker.is_file():
+            plain_path(marker)
+            if marker.stat().st_size <= 4096 and json.loads(marker.read_text(encoding='utf-8')) == expected:
+                return True
+    return False
+
+
+def snapshot_signature(folder, hasher):
+    root = plain_path(folder)
+    rows = []
+    for dp, dirs, files in os.walk(root, onerror=lambda e: (_ for _ in ()).throw(e)):
+        for name in dirs + files:
+            p = plain_path(Path(dp)/name)
+            rel = p.relative_to(root).as_posix()
+            rows.append((rel+'/', 0, 'directory') if p.is_dir() else
+                        (rel, p.stat().st_size, hasher(p)))
+    return sorted(rows)
+
+
+def rolling_protection(path, guard):
+    p = Path(path)
+    low = p.as_posix().lower()
+    if low.endswith(('.ess', '.skse')) or '/egosoft/x4/' in low or ('/save/' in low and low.endswith(('.xml', '.xml.gz'))):
+        return 'save/profile'
+    key = os.path.normcase(os.path.abspath(p))
+    if key in guard.tracked or key in guard.links:
+        return 'tracked/linked evidence'
+    if p.name.lower() in {'audit_log.txt', 'guards-off.log', '.housekeep-keep'} or any(n.lower().startswith('known-good-') for n in p.parts):
+        return 'baseline/audit evidence'
+    why = guard.why_protected(p)
+    return '' if why == 'backup folder' else why
+
+
+def snapshot_refusal(action, cfg, guard, hasher):
+    p = plain_path(action['path'])
+    kept = plain_path(action.get('duplicate_of', ''))
+    roots = [Path(r) if Path(r).is_absolute() else Path(cfg['root'])/r for r in cfg['legacy_snapshots']]
+    if p == kept or p.parent != kept.parent or p.parent not in [plain_path(r) for r in roots]:
+        return 'snapshot retained-copy scope invalid'
+    for folder in (p, kept):
+        why = rolling_protection(folder, guard)
+        if why:
+            return 'protected ('+why+')'
+        for dp, dirs, files in os.walk(folder):
+            for name in dirs + files:
+                why = rolling_protection(Path(dp)/name, guard)
+                if why:
+                    return 'protected ('+why+')'
+    signature = snapshot_signature(kept, hasher)
+    if digest(signature) != action.get('duplicate_signature') or snapshot_signature(p, hasher) != signature:
+        return 'snapshot has no unchanged identical retained copy'
+    return ''
+
+
 def plain_path(path):
     """Refuse links/junctions at every existing component, including the root."""
     p = Path(path)
@@ -91,7 +200,7 @@ def settings(cfg):
     return out
 
 
-def inventory(folder, protect=lambda p: ''):
+def inventory(folder, protect=lambda p: '', hasher=file_hash):
     """Whole directory generation; no silent exclusions from a backup."""
     root = plain_path(folder)
     rows = []
@@ -118,7 +227,7 @@ def inventory(folder, protect=lambda p: ''):
                 raise Refused('save/profile data needs its separate save policy')
             if not stat.S_ISREG(s.st_mode):
                 raise Refused('non-regular backup member')
-            sha = file_hash(p)
+            sha = hasher(p)
             after = p.stat()
             if (s.st_size, s.st_mtime_ns, s.st_ino) != (after.st_size, after.st_mtime_ns, after.st_ino):
                 raise Refused(f'backup changed while hashing: {p}')

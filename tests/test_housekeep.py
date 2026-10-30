@@ -14,6 +14,51 @@ import time
 
 import pytest
 
+def test_preexisting_hardlink_to_live_bytes_is_not_made_readonly(tree):
+    p = write(tree/'_CLAUDE_OUTPUT/a/file.bin', blob('same'))
+    outside = write(tree/'live/file.bin', blob('same'))
+    p.unlink()  # same-run fixture only
+    os.link(outside, p)
+    write(tree/'_CLAUDE_OUTPUT/b/file.bin', blob('same'))
+    cfg = cfg_for(tree)
+    doc = hk.plan(cfg, only={'link'})
+    assert not doc['actions']
+    assert os.access(outside, os.W_OK)
+
+@pytest.mark.parametrize("kind", ["scratch", "launch", "build"])
+def test_age_and_class_alone_do_not_prove_obsolescence(tree, kind):
+    root = "out" if "x4housekeep" in str(TOOL) else "_CLAUDE_OUTPUT"
+    relative = {"scratch":"scratch/item.log", "launch":"launches/launch-20200101-000000/item.log",
+                "build":root+"/task/build/item.obj"}[kind]
+    p = write(tree/relative, b"unique bytes", days=400)
+    cfg = cfg_for(tree, scratch=["scratch"])
+    assert not planned(hk.plan(cfg, only={kind}), kind)
+    declare_obsolete(cfg, p if kind == "build" else p.parent)
+    doc = hk.plan(cfg, only={kind})
+    assert planned(doc, kind)
+    action = next(a for a in doc["actions"] if a["class"] == kind)
+    cfg["obsolete_items"].clear()
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time())
+
+def test_snapshot_retirement_requires_unchanged_retained_copy(tree):
+    for stamp in ("20260101_000000", "20260102_000000", "20260103_000000"):
+        write(tree/"snaps"/stamp/"data.bin", b"equal", days=400)
+    cfg = cfg_for(tree)
+    action = next(a for a in hk.plan(cfg, only={"snapshot"})["actions"] if a["class"] == "snapshot")
+    assert not hk.check(action, cfg, hk.Guard(cfg), time.time())
+    kept = __import__("pathlib").Path(action["duplicate_of"])/"data.bin"
+    kept.write_bytes(b"other")
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time())
+
+def test_snapshot_directories_are_part_of_redundancy_proof(tree):
+    for stamp in ("20260101_000000", "20260102_000000", "20260103_000000"):
+        write(tree/"snaps"/stamp/"data.bin", b"equal", days=400)
+    cfg = cfg_for(tree)
+    action = next(a for a in hk.plan(cfg, only={"snapshot"})["actions"] if a["class"] == "snapshot")
+    (__import__("pathlib").Path(action["path"])/"unique-empty-directory").mkdir()
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time())
+
+
 from conftest import REPO
 
 TOOL = REPO / "tools" / "housekeep.py"
@@ -68,6 +113,17 @@ class FakeBin:
 
 def planned(doc, cls=None):
     return {os.path.normcase(a["path"]) for a in doc["actions"] if cls is None or a["class"] == cls}
+
+
+def declare_obsolete(cfg, *paths):
+    for p in paths:
+        before = {q:(q.stat().st_atime_ns,q.stat().st_mtime_ns) for q in ([p,*p.rglob('*')] if p.is_dir() else [p])}
+        cfg.setdefault('obsolete_items', {})[str(p)] = dict(basis='operator-confirmed-obsolete',
+            reason='fixture owner retired this payload', evidence='explicit test disposition',
+            content_hash=hk.certainty.content_hash(p))
+        for q, stamps in before.items():
+            os.utime(q, ns=stamps)
+    return cfg
 
 
 def key(p):
@@ -205,7 +261,7 @@ def test_build_intermediates_are_planned_and_products_are_kept(tree):
     dll = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.dll", b"dll")
     pdb = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.pdb", b"pdb")
     loose = write(tree / "_CLAUDE_OUTPUT" / "t" / "notes" / "x.obj", b"obj outside a build dir")
-    doc = hk.plan(cfg_for(tree))
+    doc = hk.plan(declare_obsolete(cfg_for(tree), obj))
     assert planned(doc, "build") == {key(obj)}
     assert not {key(lib), key(dll), key(pdb), key(loose)} & planned(doc)
 
@@ -275,6 +331,7 @@ def test_launch_logs_gzip_after_a_week_recycle_after_ninety_days_and_labelled_fo
     fresh, week, old = launch(tree, stamp(2), 2), launch(tree, stamp(10), 10), launch(tree, stamp(100), 100)
     labelled = launch(tree, "BORKED-ocu-2026-07-02", 400)
     cfg = cfg_for(tree)
+    declare_obsolete(cfg, old)
     doc = hk.plan(cfg)
     assert planned(doc, "gzip") == {key(week / "SkyrimNet.log")}
     assert planned(doc, "launch") == {key(old)}
@@ -333,7 +390,7 @@ def test_a_launch_only_plan_never_scans_agent_output_and_still_sums(tree):
     """The launch watcher plans gzip/launch after every game exit; it must not hash every agent-output file."""
     copy = write(tree / "_CLAUDE_OUTPUT" / "t" / "fixture" / "Skyrim.esm", blob("master"))
     old = launch(tree, "launch-20200101-000000", 2000)
-    doc = hk.plan(cfg_for(tree), only={"gzip", "launch"})
+    doc = hk.plan(declare_obsolete(cfg_for(tree), old), only={"gzip", "launch"})
     assert planned(doc) == {key(old)}
     assert key(copy) not in planned(doc)
     scanned = sum(p.stat().st_size for p in (tree / "launches").rglob("*") if p.is_file())
@@ -356,9 +413,11 @@ def stale(d, days=3):
     return d
 
 
-def tdir(temp, name, days=3):
+def tdir(temp, name, days=3, toolkit=None):
     d = temp / name
-    (d / "sub").mkdir(parents=True)
+    d.mkdir(parents=True)
+    hk.certainty.mark_disposable_temp(d, toolkit or hk.TOOLKIT_ROOT)
+    (d / "sub").mkdir()
     (d / "sub" / "f.txt").write_text("x", encoding="utf-8")
     return stale(d, days)
 
@@ -456,7 +515,7 @@ def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, mon
     state = tmp_path / "state" / "note.txt"
     assert hk.session(cfg, state) == 0
     assert state.read_text(encoding="utf-8") == ""
-    tdir(tmp_path / "temp", "skyrim-harness-sess01")
+    tdir(tmp_path / "temp", "skyrim-harness-sess01", toolkit=tmp_path)
     assert hk.session(cfg, state) == 0
     assert state.read_text(encoding="utf-8").startswith("DISK: moved 1 leftover temp dir(s) to the Recycle Bin")
 
@@ -471,7 +530,7 @@ def test_session_runs_at_most_once_per_interval(tmp_path, monkeypatch):
     (tmp_path / "temp").mkdir()
     state = tmp_path / "note.txt"
     state.write_text("", encoding="utf-8")                   # a sweep ran just now
-    left = tdir(tmp_path / "temp", "skyrim-harness-thr001")
+    left = tdir(tmp_path / "temp", "skyrim-harness-thr001", toolkit=tmp_path)
     hk.session(cfg, state)
     assert left.exists()
     os.utime(state, (time.time() - 7 * 3600,) * 2)           # twin: the last sweep was 7 hours ago

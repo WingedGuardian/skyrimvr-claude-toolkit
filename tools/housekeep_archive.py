@@ -6,12 +6,13 @@ matches what was written from the local bytes. Any failure leaves the local fold
     python tools/housekeep_archive.py restore <task>/ARCHIVED.md   # put an archived folder back
 """
 import fnmatch
+import hashlib
 import json
 import os
 import sys
 import time
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 STUB = "ARCHIVED.md"
 SAVE_EXTS = (".ess", ".skse")
@@ -26,6 +27,10 @@ class ArchiveError(Exception):
 def _members(src: Path):
     out = []
     for dp, dirs, files in os.walk(src):
+        for name in dirs + files:
+            p = Path(dp)/name
+            if p.is_symlink() or getattr(p.lstat(), 'st_file_attributes', 0) & 0x400:
+                raise ArchiveError('link/reparse archive member: {}'.format(p))
         if ".git" in dirs:
             raise ArchiveError("contains a .git folder: a repository is never archived")
         for f in files:
@@ -34,6 +39,29 @@ def _members(src: Path):
                 raise ArchiveError("holds a save ({}): saves are never archived".format(p))
             out.append(p)
     return out
+
+
+def _hash(path):
+    d = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for block in iter(lambda:stream.read(1024*1024), b''):
+            d.update(block)
+    return d.hexdigest()
+
+
+def verify_source(src, record):
+    """The local payload still equals the verified archive, including population."""
+    expected = record.get('source_hashes')
+    if expected is None:
+        raise ArchiveError('archive has no source hash proof')
+    current = {p.relative_to(src).as_posix():_hash(p) for p in _members(src) if p != src/STUB}
+    if current != expected:
+        raise ArchiveError('source changed after archival; local payload retained')
+    directories = sorted((Path(dp)/d).relative_to(src).as_posix()+'/' for dp, ds, fs in os.walk(src) for d in ds)
+    if directories != record['directories']:
+        raise ArchiveError('source directory population changed')
+    if _hash(record['zip']) != record['zip_sha256']:
+        raise ArchiveError('archive changed before local retirement')
 
 
 def keep_local(src: Path, extra=()) -> set:
@@ -79,12 +107,18 @@ def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=()) -> dict:
     files = _members(src)
     if not files:
         raise ArchiveError("empty folder")
+    if any(p.name == STUB for p in files):
+        raise ArchiveError('existing archive stub needs disposition, not another archive')
+    hashes = {p.relative_to(src).as_posix():_hash(p) for p in files}
+    directories = sorted((Path(dp)/d).relative_to(src).as_posix()+'/' for dp, ds, fs in os.walk(src) for d in ds)
     nas_dir.mkdir(parents=True, exist_ok=True)
     target = nas_target(nas_dir, src.name)
     partial = target.with_name(target.name + ".partial")
     total = 0
     try:
         with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as z:
+            for name in directories:
+                z.write(src/name, name)
             for p in files:
                 z.write(p, p.relative_to(src).as_posix())
                 total += p.stat().st_size
@@ -93,9 +127,20 @@ def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=()) -> dict:
             if bad is not None:
                 raise ArchiveError("NAS copy failed its CRC check at {}".format(bad))
             names = {i.filename: i.file_size for i in z.infolist()}
+            if len(names) != len(z.infolist()) or set(names) != set(hashes) | set(directories):
+                raise ArchiveError('archive member population mismatch')
+            for name, wanted in hashes.items():
+                d = hashlib.sha256()
+                with z.open(name) as stream:
+                    for block in iter(lambda:stream.read(1024*1024), b''):
+                        d.update(block)
+                if d.hexdigest() != wanted:
+                    raise ArchiveError('archive SHA256 mismatch: '+name)
         for p in files:
             if names.get(p.relative_to(src).as_posix()) != p.stat().st_size:
                 raise ArchiveError("NAS copy is missing or short for {}".format(p))
+        if {p.relative_to(src).as_posix():_hash(p) for p in _members(src)} != hashes:
+            raise ArchiveError('source changed during archival; local payload retained')
         os.replace(partial, target)
     except Exception as e:
         try:                       # this run's own half-written zip: same-run scratch, and a NAS share has no bin
@@ -108,6 +153,7 @@ def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=()) -> dict:
         raise ArchiveError("{}: {}".format(type(e).__name__, e)) from e
     keep = keep_local(src, extra_keep)
     record = {"zip": str(target), "files": len(files), "bytes": total, "date": time.strftime("%Y-%m-%d %H:%M"),
+              "source_hashes": hashes, "zip_sha256": _hash(target), "directories": directories,
               "kept_local": sorted(os.path.relpath(k, os.path.normcase(str(src))) for k in keep)}
     (src / STUB).write_text(
         "# Archived\n\nThis folder's contents were zipped to the NAS by housekeep and verified (every member's CRC "
@@ -116,6 +162,7 @@ def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=()) -> dict:
         "Restore: `python tools/housekeep_archive.py restore \"{stub}\"`\n\n<!-- {js} -->\n".format(
             stub=src / STUB, js=json.dumps(record), **record), encoding="utf-8")
     victims = _victims(src, keep)
+    verify_source(src, record)
     record["victims"] = victims
     if recycler is None:                   # the caller batches the recycle of many folders into a few shell calls
         record["recycle_failed"] = {}
@@ -142,11 +189,31 @@ def restore_archive(stub: Path) -> Path:
     text = stub.read_text(encoding="utf-8")
     record = json.loads(text.rsplit("<!-- ", 1)[1].split(" -->", 1)[0])
     dest = stub.parent
+    if record.get('zip_sha256') and _hash(record['zip']) != record['zip_sha256']:
+        raise ArchiveError('archive hash no longer matches its receipt')
     with zipfile.ZipFile(record["zip"]) as z:
-        clash = [i.filename for i in z.infolist()
-                 if (dest / i.filename).exists() and (dest / i.filename).stat().st_size != i.file_size]
-        if clash:
-            raise ArchiveError("refusing to overwrite {} existing file(s), e.g. {}".format(len(clash), clash[0]))
+        if len({i.filename for i in z.infolist()}) != len(z.infolist()):
+            raise ArchiveError('duplicate archive member')
+        for i in z.infolist():
+            relative = PurePosixPath(i.filename)
+            if (relative.is_absolute() or '..' in relative.parts or '\\' in i.filename
+                    or ':' in i.filename):
+                raise ArchiveError('unsafe archive member path')
+            p = dest/i.filename
+            for ancestor in (p, *p.parents):
+                if ancestor.is_symlink() or (ancestor.exists() and getattr(ancestor.lstat(), 'st_file_attributes', 0) & 0x400):
+                    raise ArchiveError('restore path contains a link/reparse point')
+            if p.exists():
+                if i.is_dir():
+                    if not p.is_dir():
+                        raise ArchiveError('directory clashes with existing file')
+                else:
+                    d = hashlib.sha256()
+                    with z.open(i) as stream:
+                        for block in iter(lambda:stream.read(1024*1024), b''):
+                            d.update(block)
+                    if not p.is_file() or _hash(p) != d.hexdigest():
+                        raise ArchiveError('refusing to overwrite existing different bytes: '+i.filename)
         for i in z.infolist():
             if not (dest / i.filename).exists():
                 z.extract(i, dest)

@@ -9,6 +9,12 @@ policy; `tools/housekeep.py` implements the parts a tool can.
 <!-- shared-policy:begin -->
 ## Shared policy (identical in the Skyrim and X4 toolkits -- change both)
 
+### Certainty before removal
+
+Age, size, an idle timer, a filename and a completed-task marker trigger review; none proves that unique bytes are obsolete. Housekeep retires a payload only when it re-proves an identical retained copy or a verified lossless replacement, or the operator has explicitly declared those exact bytes obsolete with a reason and evidence. Unknown usefulness is kept indefinitely. Failed or stale proof leaves the source in place.
+
+This applies to ordinary cleanup and both archive tiers. Older plans do not bypass the apply-time checks. A backup vault is optional and disabled by default; its permanent pruning always needs a separate exact-plan approval.
+
 ### Classes
 
 | Class | What | Rule |
@@ -16,11 +22,11 @@ policy; `tools/housekeep.py` implements the parts a tool can.
 | **Forever** | Saves and every copy of them; backup stores and their manifests (anything under a folder named `*backup*`); knowledgebase snapshots; known-good baselines; audit logs; folders a person labelled by hand | Never removed by a tool. A person decides. |
 | **Evidence** | Findings, READMEs, receipts (`.md`, `.json`, `.jsonl`), small logs; every file a project doc links to | Kept. They are small, and docs point at them. |
 | **Recreatable** | A byte-identical copy of a file that is still live (a fixture copy of a game master) | Removed as soon as it is idle: the live file is the copy. |
-| **Build output** | Compiler intermediates inside build folders (`.obj .pch .ilk .iobj .ipdb .tlog .idb`); a folder holding `CMakeCache.txt` is a build folder whatever its name | Removed once idle. Build *products* (`.lib .dll .exe .pdb .exp`) are never intermediates: another build links them. |
-| **Finished work** | A task folder that is done: no write for 7 days, no read for 48 hours, not named in the instruction file's Live state block, not pinned with `.housekeep-keep`, no save, no git repository. A session can mark it done early with `.housekeep-closed`. | Zipped to the archive folder, the zip read back and checked, a short `ARCHIVED.md` (with a restore command) left behind, then the bulk recycled. The archive is local by default; another drive or a NAS is optional, never assumed. Local zips expire after 90 days. |
+| **Build output** | Compiler intermediates inside build folders | Review candidates only. Removal requires an explicit content-bound obsolete decision. Build products and active work remain protected. |
+| **Finished work** | A task folder that is done: no write for 7 days, no read for 48 hours, not named in the instruction file's Live state block, not pinned with `.housekeep-keep`, no save, no git repository. A session can mark it done early with `.housekeep-closed`. | Zipped to the archive folder, the zip read back and checked, a short `ARCHIVED.md` (with a restore command) left behind, then the bulk recycled. The archive is local by default; another drive or a NAS is optional, never assumed. Archive age triggers review only; unique archives stay until explicitly declared obsolete. |
 | **Duplicate** | The same bytes at several agent-output paths | Stored once: hard links to one read-only copy. Every path keeps working. |
-| **Rolling** | Per-launch log captures, snapshot folders, scratch test beds | Compressed after 7 days, removed after 90; a snapshot that repeats the one before is removed; a scratch bed is removed by name when its task is done. |
-| **Toolkit temp** | Directories the toolkit's own code and tests make in the system temp dir, and pytest's old runs | Recycled by the session-start sweep once nothing in them changed for 24 hours and no process holds a file open inside. |
+| **Rolling** | Per-launch logs, snapshot folders, named scratch beds | Compression requires a verified lossless replacement. Snapshots require an identical retained generation. Unique logs and scratch need explicit content-bound obsolete decisions; age alone never deletes them. |
+| **Toolkit temp** | Leftover workspaces explicitly declared disposable by their producer when newly created | Name, ownership and age alone are insufficient. Require a producer disposition receipt or explicit content-bound obsolete decision, then the ordinary protection, inactivity and in-use checks. Legacy unmarked workspaces stay. |
 
 ### The toolkit cleans up after itself
 
@@ -71,7 +77,7 @@ Cleanup is the second line of defence; writing less is the first:
 - **Reference, don't copy.** Evidence records a commit, a hash and a diff, never a full copy of a tree, bundle,
   database or game file per run. Stage unchanged inputs as hard links, not copies.
 - **One build folder per task.** Regenerated outputs overwrite, or keep the newest two.
-- **Close the task.** Keep the README and receipts, recycle build trees and staged copies, write
+- **Close the task.** Keep the README and receipts; retire bulk only after replacement or obsolescence proof, and write
   `.housekeep-closed`. A multi-GB folder that is genuinely needed later gets `.housekeep-keep` and one README line
   saying why; the daily note names every pinned folder over 1 GiB.
 - **Budget.** Agent output has a size budget (`budget_gib`); over it, finished work is archived oldest first, and
@@ -146,7 +152,24 @@ in the summary for you to decide.
 ### The archive
 
 Finished folders are zipped to `archive_root` (default `.claude/archive`, on the same drive: evidence and logs
-compress several times over) and the zips expire after `archive_retention_days` (90; 0 keeps them). Point
+compress several times over) and `archive_retention_days` (90; 0 disables review) sets the review threshold. Age never proves an archive obsolete. Point
 `archive_root` at another drive or a NAS share if you have one, and add `archive_roots` entries (`{"folder":
 days}`) for folders of your own whose subfolders should be archived after that many idle days. Restore a folder
 with `python tools/housekeep_archive.py restore "<folder>/ARCHIVED.md"`; it refuses to overwrite anything.
+
+### Explicit obsolete decisions
+
+Use top-level `obsolete_items` for unique ordinary cleanup candidates. Each key is an exact absolute path:
+
+```json
+"obsolete_items": {
+  "/absolute/retired-item": {
+    "basis": "operator-confirmed-obsolete",
+    "reason": "Explain why this specific state is no longer needed",
+    "evidence": "Reviewed receipt, replacement or operator decision",
+    "content_hash": "<current housekeep content hash>"
+  }
+}
+```
+
+Files use BLAKE2b-128; directory generations use the SHA256 manifest digest returned by `housekeep_backups.content_hash(path)`. Record the decision only after review, never generate declarations merely to clear a report. Changed content invalidates it. Saves, tracked/linked evidence, pins and active work remain protected.

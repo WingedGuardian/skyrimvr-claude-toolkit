@@ -24,8 +24,9 @@ configuration, replacing the absolute paths with your own:
 ```
 
 UNC paths work on Windows. Use a destination your machine policy permits. Keep
-this vault separate from ordinary task archives: their age-based expiry must
-never expire backups. Link/junction destinations and overlapping stores refuse.
+this vault separate from ordinary task archives so their records remain distinct.
+Both tiers retain unique bytes until proven obsolete; ordinary archive age is a
+review threshold. Link/junction destinations and overlapping stores refuse.
 
 Run the following through your normal housekeep entry point (`scripts/x4housekeep.py`
 for X4, `tools/housekeep.py` for Skyrim):
@@ -80,3 +81,5 @@ plan, especially on a NAS without a Recycle Bin. Changing the declaration,
 configuration, archive bytes or references invalidates the approval. An archive
 shared by another retained restore point is kept. Small retirement receipts
 remain to explain the disposition. No blanket age expiry applies to this vault.
+
+Ordinary cleanup follows the same certainty rule; see the retention policy's explicit obsolete decisions. Archive age never authorizes deletion.

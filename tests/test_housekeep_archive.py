@@ -66,6 +66,30 @@ class Base(unittest.TestCase):
 
 
 class ArchiveFolder(Base):
+    def test_same_size_restore_conflict_is_preserved(self):
+        t = self.task()
+        ha.archive_folder(t, self.nas, self.recycler)
+        touch(t/'evidence/run.json', b'X'*800)
+        with self.assertRaises(ha.ArchiveError):
+            ha.restore_archive(t/ha.STUB)
+        self.assertEqual(b'X'*800, (t/'evidence/run.json').read_bytes())
+
+    def test_changed_source_after_verified_copy_cannot_retire(self):
+        t = self.task()
+        rec = ha.archive_folder(t, self.nas, None)
+        p = t/'build/big.bin'
+        p.write_bytes(b'X'*p.stat().st_size)
+        with self.assertRaises(ha.ArchiveError):
+            ha.verify_source(t, rec)
+        self.assertTrue(p.exists())
+
+    def test_old_expiry_plan_needs_disposition_on_apply(self):
+        p = self.nas/'old.zip'
+        touch(p, b'unique backup')
+        cfg = dict(h.DEFAULTS, root=self.d)
+        action = dict(path=str(p), **{'class':'expire'}, bytes=p.stat().st_size, mtime=p.stat().st_mtime)
+        self.assertTrue(h.check(action, cfg, h.Guard(cfg), time.time()))
+
     def test_archive_roundtrip(self):
         t = self.task()
         before = tree_hash(t)
@@ -283,8 +307,8 @@ class Selection(DoneTest):
         self.cfg["archive_retention_days"] = retention
         return [Path(a["path"]).name for a in h.plan(self.cfg, only={"expire"})["actions"]]
 
-    def test_local_zips_expire(self):
-        self.assertEqual(["old.zip"], self.plan_expire(100, 90))
+    def test_old_local_zips_are_reviewed_not_expired(self):
+        self.assertEqual([], self.plan_expire(100, 90))
 
     def test_young_zips_and_keep_forever_stay(self):
         self.assertEqual([], self.plan_expire(30, 90))

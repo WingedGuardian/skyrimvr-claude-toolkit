@@ -10,6 +10,32 @@ import zipfile
 
 import pytest
 
+def test_obsolescence_is_bound_to_current_content(tmp_path):
+    p = tmp_path/"retired.bin"
+    p.write_bytes(b"old")
+    cfg = {"obsolete_items":{str(p):dict(basis="operator-confirmed-obsolete",
+           reason="retired", evidence="operator review", content_hash=b.content_hash(p))}}
+    assert b.obsolete_reason(p, cfg) == ""
+    p.write_bytes(b"new")
+    assert b.obsolete_reason(p, cfg)
+    cfg["obsolete_items"][str(p)]["content_hash"] = b.content_hash(p)
+    del cfg["obsolete_items"][str(p)]["evidence"]
+    assert b.obsolete_reason(p, cfg)
+
+def test_temporary_ownership_is_not_a_disposition(tmp_path):
+    p = tmp_path/"scratch"; p.mkdir()
+    identity = dict(directory=os.path.normcase(os.path.realpath(p)),
+                    toolkit=os.path.normcase(os.path.realpath(tmp_path)))
+    (p/".x4-temp-owner.json").write_text(json.dumps(dict(v=1, **identity)))
+    assert not b.disposable_temp(p, tmp_path)
+    with pytest.raises(b.Refused, match="populated"):
+        b.mark_disposable_temp(p, tmp_path)
+    new = tmp_path/"new"; new.mkdir()
+    b.mark_disposable_temp(new, tmp_path)
+    (new/"temporary.bin").write_bytes(b"temporary")
+    assert b.disposable_temp(new, tmp_path)
+
+
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('cold_backups', ROOT/'tools/housekeep_backups.py')
 b = importlib.util.module_from_spec(spec)

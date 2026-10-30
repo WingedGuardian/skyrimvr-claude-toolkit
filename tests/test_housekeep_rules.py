@@ -28,6 +28,14 @@ def touch(p: Path, mtime=None, data=b"x" * 64):
         os.utime(p, (mtime, mtime))
 
 
+def declare(cfg, p):
+    st = p.stat()
+    cfg.setdefault('obsolete_items', {})[str(p)] = dict(basis='operator-confirmed-obsolete',
+        reason='fixture producer retired this intermediate', evidence='explicit fixture disposition',
+        content_hash=h.certainty.content_hash(p))
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
 class Fixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()          # same-run scratch, removed at exit
@@ -53,6 +61,7 @@ class BuildProductsAreNeverIntermediates(Fixture):
         tree = self.out / "task" / "deps" / "sdk-build"
         for name in ("CMakeCache.txt", "CommonLibSSE.lib", "Actor.cpp.obj", "plugin.dll", "plugin.pdb"):
             touch(tree / name, old)
+        declare(self.cfg, tree/'Actor.cpp.obj')
         self.assertEqual({"Actor.cpp.obj"}, self.planned())
 
     def test_build_exts_in_config_cannot_bring_lib_back(self):
@@ -121,6 +130,7 @@ class DailyRunGovernance(Fixture):
         self.cfg["approved_sha256"] = hd.code_sha256()
         touch(self.out / "task" / "build" / "a.obj", time.time() - 5 * DAY)
         touch(self.out / "task" / "build" / "CMakeCache.txt", time.time() - 5 * DAY)
+        declare(self.cfg, self.out/'task/build/a.obj')
 
     def quiet(self):
         return patch.object(hd, "running_games", lambda names: []), patch.object(hd, "low_priority", lambda: None)
