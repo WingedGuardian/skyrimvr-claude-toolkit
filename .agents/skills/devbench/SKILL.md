@@ -47,12 +47,13 @@ mouse, keyboard or window focus, and choosing this desktop does not authorise de
 control the game through DevBench only. `run` owns the whole session: it points the game at
 SteamVR's null driver (OpenComposite's `openvr_api.dll` swapped for SteamVR's; `--park` also sets
 OpenComposite's SKSE plugins aside), starts SteamVR and the game, returns control once DevBench
-answers for the owned game at the main menu, waits for the game to exit, and restores everything
-in `finally` -- on error too. `background` needs the user's Steam client already open (it stays
+answers for the owned game at the main menu, waits for the game to exit, and attempts restoration
+in `finally`. An ownership or placement refusal keeps headless files and session evidence for inspection;
+observed SteamVR also blocks restoration until the user closes it. `background` needs the user's Steam client already open (it stays
 theirs); Steam is never owned or closed. End a session early with `bash tools/vr-headless.sh stop`
 (from another shell): it quits only the owned game, and only when DevBench shows it running and
-not loading, then restores. A caller that wraps `run` must start it fully detached. `off` alone
-restores byte-exact and is safe to repeat and after a crash, so run it before the user plays again;
+not loading, then attempts restoration under the same checks. A caller that wraps `run` must start it fully detached. `off` alone
+restores byte-exact only once no owned or observed runtime remains; it is safe to repeat after a crash;
 `on`/`launch` remain for staging. Before the user plays, check the result itself (the game
 folder's `openvr_api.dll` is the user's normal loader, null-driver forcing is off in SteamVR's
 settings, the user's input plugin is present), not only that it matches the snapshot. **Valid only for pose-independent tests** -- scripts, records,

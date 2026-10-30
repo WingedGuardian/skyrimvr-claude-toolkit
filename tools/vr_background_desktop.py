@@ -34,6 +34,7 @@ from pathlib import Path
 
 DESKTOP_READOBJECTS, DESKTOP_CREATEWINDOW, DESKTOP_CREATEMENU, DESKTOP_HOOKCONTROL = 0x1, 0x2, 0x4, 0x8
 DESKTOP_ENUMERATE, DESKTOP_WRITEOBJECTS = 0x40, 0x80
+TH32CS_SNAPTHREAD = 0x00000004
 UOI_NAME = 2
 STARTF_USESHOWWINDOW = 0x1
 CREATE_NO_WINDOW = 0x08000000
@@ -94,6 +95,40 @@ def input_desktop() -> str:
         return _object_name(user32, w, handle)
     finally:
         user32.CloseDesktop(handle)
+
+
+def process_thread_ids(pid) -> list:
+    """Every thread id of `pid`, from one Toolhelp32 snapshot (no PowerShell: its startup alone can exceed any short
+    timeout on a loaded machine, and a timed-out listing must not read as "not on this desktop"). OSError when the
+    snapshot cannot be taken."""
+    from ctypes import wintypes as w
+
+    class THREADENTRY32(ctypes.Structure):
+        _fields_ = [("dwSize", w.DWORD), ("cntUsage", w.DWORD), ("th32ThreadID", w.DWORD),
+                    ("th32OwnerProcessID", w.DWORD), ("tpBasePri", w.LONG), ("tpDeltaPri", w.LONG),
+                    ("dwFlags", w.DWORD)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.restype, kernel32.CreateToolhelp32Snapshot.argtypes = w.HANDLE, [w.DWORD, w.DWORD]
+    for name in ("Thread32First", "Thread32Next"):
+        fn = getattr(kernel32, name)
+        fn.restype, fn.argtypes = w.BOOL, [w.HANDLE, ctypes.POINTER(THREADENTRY32)]
+    kernel32.CloseHandle.restype, kernel32.CloseHandle.argtypes = w.BOOL, [w.HANDLE]
+    snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
+    if not snap or snap == w.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())  # no snapshot: unknown, never "no threads"
+    try:
+        entry = THREADENTRY32()
+        entry.dwSize = ctypes.sizeof(THREADENTRY32)
+        tids = []
+        ok = kernel32.Thread32First(snap, ctypes.byref(entry))
+        while ok:
+            if entry.th32OwnerProcessID == int(pid):
+                tids.append(entry.th32ThreadID)
+            ok = kernel32.Thread32Next(snap, ctypes.byref(entry))
+        return tids
+    finally:
+        kernel32.CloseHandle(snap)
 
 
 def thread_desktop(thread_id) -> str:
@@ -262,7 +297,7 @@ class BackgroundDesktop:
         created = _filetime(times[0])
         if created != parse_start(record["start_time"]):
             raise OSError("launcher creation time does not match the retained handle")
-        exited = bool(times[1].dwLowDateTime or times[1].dwHighDateTime)
+        exited = status == 0 and bool(times[1].dwLowDateTime or times[1].dwHighDateTime)
         if status == 0 and not exited:
             raise OSError("launcher is signalled but its exit time is unreadable")
         return dict(record, exit_time=_filetime(times[1]).isoformat() if exited else None,
@@ -271,12 +306,17 @@ class BackgroundDesktop:
     def process_on_desktop(self, pid):
         """Prove placement even for windowless helpers; a missing/unreadable thread is not proof."""
         try:
-            r = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
-                                "(Get-Process -Id {} -ErrorAction Stop).Threads.Id | ConvertTo-Json".format(int(pid))],
-                               check=True, capture_output=True, text=True, timeout=8)
-            tids = json.loads(r.stdout)
-            tids = tids if isinstance(tids, list) else [tids]
-            return bool(tids) and all(thread_desktop(tid) == self.name for tid in tids)
+            tids = process_thread_ids(pid)
+            if not tids:
+                return False
+            for tid in tids:
+                try:
+                    name = thread_desktop(tid)
+                except OSError:
+                    continue  # no user32 desktop: neutral; ancestry is proved by the caller
+                if name != self.name:
+                    return False
+            return True
         except (OSError, subprocess.SubprocessError, ValueError, TypeError):
             return False
 

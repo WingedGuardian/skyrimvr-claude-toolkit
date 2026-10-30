@@ -246,7 +246,7 @@ def main(argv) -> int:
               "--data). Without MO2, an install over existing files already backs each one up.", file=sys.stderr)
         return 2
     if data_arg:
-        data = Path(data_arg)
+        data = Path(data_arg).absolute()
     elif mods:
         data = Path(mods) / name
         if data.exists() and any(data.iterdir()):

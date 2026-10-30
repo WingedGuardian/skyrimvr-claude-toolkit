@@ -85,10 +85,32 @@ def test_directory_changes_respect_scope_and_later_absolute_cd(command):
     assert decide(command).decision == "allow"
 
 
-def test_unknown_eval_location_is_unknown_for_later_commands():
-    parsed = shellparse.parse('eval "$UNKNOWN"; rm -rf Data', "bash")
+@pytest.mark.parametrize("command", [
+    'cd "C:/Review/Game"; eval "$UNKNOWN"; rm -rf Data',
+    'cd "C:/Review/Game"; eval "$(conda shell.bash hook)"; rm -rf Data',
+    'cd "C:/Review/Game"; eval "cd /tmp; $UNKNOWN"; rm -rf Data',   # the unknown part may cd straight back
+])
+def test_unknown_eval_keeps_the_earlier_location_for_later_commands(command):
+    """Final review A-C2: unknown eval code may not change directory, so a later relative delete is still judged
+    where it ran before. An unknown ("?") location used to let it through."""
+    parsed = shellparse.parse(command, "bash")
     assert parsed.ok, parsed.why
-    assert next(e for e in parsed.execs if e.program == "rm").cd_before == "?"
+    assert decide(command).decision == "deny"
+
+
+@pytest.mark.parametrize("command", [
+    'cd "C:/Review/Game"; env -C /tmp true; rm -rf Data',
+    'cd "C:/Review/Game"; env --chdir /tmp true; rm -rf Data',
+    'cd "C:/Review/Game"; pwsh -WorkingDirectory C:/tmp -c "echo hi"; rm -rf Data',
+])
+def test_a_child_only_directory_never_moves_the_caller(command):
+    """Final review A-C1: env -C and pwsh -WorkingDirectory move only the child they start."""
+    assert decide(command).decision == "deny"
+
+
+def test_a_literal_eval_cd_still_moves_the_caller():
+    assert decide('cd "C:/Review/Game"; rm -rf Data').decision == "deny"          # the control
+    assert decide('cd "C:/Review/Game"; eval \'cd /tmp\'; rm -rf Data').decision == "allow"
 
 
 def test_inline_substitution_before_a_syntax_error_keeps_its_delete_evidence():

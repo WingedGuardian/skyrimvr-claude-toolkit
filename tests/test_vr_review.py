@@ -217,12 +217,12 @@ def test_native_handle_errors_are_not_exits(tree, monkeypatch, case):
 @pytest.mark.parametrize("case", ["private", "mixed", "empty", "unknown"])
 def test_windowless_desktop_proof_requires_readable_threads(tree, monkeypatch, case):
     import vr_background_desktop as desktop
-    def run(*args, **kwargs):
-        assert kwargs["check"] and kwargs["timeout"] == 8
+    def threads(pid):
+        assert pid == 55
         if case == "unknown":
             raise OSError("synthetic thread read error")
-        return SimpleNamespace(stdout="[]" if case == "empty" else "[1, 2]")
-    monkeypatch.setattr(desktop.subprocess, "run", run)
+        return [] if case == "empty" else [1, 2]
+    monkeypatch.setattr(desktop, "process_thread_ids", threads)
     monkeypatch.setattr(desktop, "thread_desktop", lambda tid: "Default" if case == "mixed" and tid == 2 else "private")
     desk = desktop.BackgroundDesktop.__new__(desktop.BackgroundDesktop)
     desk.name = "private"

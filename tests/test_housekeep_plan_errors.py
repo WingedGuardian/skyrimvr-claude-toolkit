@@ -2,7 +2,7 @@
 import pytest
 
 from test_housekeep import cfg_for, hk, key, planned, write
-from test_housekeep_derived import stage_tree
+from test_housekeep_derived import stage_tree, historical_staging
 
 
 def test_events_at_a_task_root_cannot_borrow_an_etl_from_the_shared_root(tmp_path):

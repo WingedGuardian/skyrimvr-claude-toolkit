@@ -123,6 +123,10 @@ def load_config(path: Path | None) -> dict:
     if not isinstance(cfg["staging_roots"], list) or any(not isinstance(p, str) or not p for p in cfg["staging_roots"]):
         raise ValueError("staging_roots must be a list of nonempty paths")
     stage_roots = [_real(_abs(cfg, p)) for p in cfg["staging_roots"]]
+    for root in stage_roots:
+        unsafe = staging_root_refusal(root, cfg)  # reject before scanning a configured root
+        if unsafe:
+            raise ValueError(unsafe)
     if any(a == b or _strictly_inside(a, b) or _strictly_inside(b, a)
            for i, a in enumerate(stage_roots) for b in stage_roots[i + 1:]):
         raise ValueError("staging_roots must not overlap")
@@ -442,7 +446,7 @@ def manifest_references(cfg):
     JSON manifests use {"rollback_sources": [absolute paths]}.
     Relative paths and unrecognized text refuse staging cleanup until the manifest can be interpreted.
     """
-    roots = [cfg["root"] / "manual-installs", cfg["root"] / ".claude/backups/manual-installs"]
+    roots = [TOOLKIT_ROOT / "manual-installs", TOOLKIT_ROOT / ".claude/backups/manual-installs"]
     if os.environ.get("SKYRIM_MANUAL_INSTALLS"):
         roots.append(Path(os.environ["SKYRIM_MANUAL_INSTALLS"]))
     refs = set()
@@ -465,8 +469,6 @@ def manifest_references(cfg):
                 if not plain_path(path):
                     raise ValueError("manifest is a link")
                 # Backup payloads are not manifests. Only manifest files are parsed.
-                if "backups" in Path(dp).relative_to(root).parts and not name.endswith(".files.txt"):
-                    continue
                 if not (name.endswith(".files.txt") or path.suffix.lower() == ".json"):
                     if "backups" in Path(dp).relative_to(root).parts:
                         continue
@@ -506,24 +508,50 @@ def manifest_references(cfg):
     return refs
 
 
+def staging_activity(path):
+    """Extraction/creation is activity even when an archive restores an old modification time."""
+    info = path.stat()
+    return max(info.st_mtime, info.st_ctime)
+
+
+def staging_root_refusal(root, cfg):
+    real = _real(root)
+    if real.parent == real:
+        return "unsafe staging root: drive or filesystem root"
+    if real == _real(Path.home()):
+        return "unsafe staging root: home folder"
+    bases = [_real(cfg["root"]), _real(TOOLKIT_ROOT)]
+    if os.environ.get("CLAUDE_PROJECT_DIR"):
+        bases.append(_real(os.environ["CLAUDE_PROJECT_DIR"]))
+    if any(real == base or _strictly_inside(base, real) for base in bases):
+        return "unsafe staging root: toolkit/install root or ancestor"
+    if real.name.casefold() == "mods":
+        return "unsafe staging root: mod-manager mods folder"
+    return ""
+
+
 def superseded_reason(path, root, cfg, guard, now):
     """An empty result proves every staging eligibility clause again at apply time."""
     if path.parent != root or root not in [_abs(cfg, r) for r in cfg["staging_roots"]]:
         return "not a direct child of a configured staging root"
+    unsafe = staging_root_refusal(root, cfg)  # also recheck an existing plan
+    if unsafe:
+        return unsafe
     version = stage_version(path.name)
     if version is None:
         return "folder has no supported numeric version"
     if not plain_path(path):
         return "staging path is a link"
-    latest = path.stat().st_mtime
+    latest = staging_activity(path)
     for dp, dirs, files in os.walk(path, onerror=walk_error):
         if any(name.casefold() == ".git" for name in dirs + files):
             return "staging tree contains a Git checkout"
         for name in dirs + files:
             entry = Path(dp) / name
-            if not plain_path(entry):
+            info = entry.lstat()
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & REPARSE_POINT:
                 return "staging tree contains a link"
-            latest = max(latest, entry.stat().st_mtime)
+            latest = max(latest, staging_activity(entry))
     why = guard.why_protected(path) or protected_inside(guard, path)
     if why:
         return "protected ({})".format(why)
@@ -896,6 +924,8 @@ def recycle_refusal(cfg, path) -> str:
     except OSError:
         return "unreadable tree or file metadata (inspection incomplete)"
     for f in files:
+        if f.suffix.casefold() == ".etl":
+            return "a source measurement (ETL) or a folder holding one"
         if str(f).lower().endswith(SAVE_EXTS):
             return "a save or a folder holding one ({})".format(f.name)
     allowed = [(b / s, False) for b in bases for s in ROLLING_STORES]
@@ -968,8 +998,11 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
             return "live file no longer identical"
     if action["class"] == "derived":
         source = Path(action["source"])
-        if not source.is_file() or not plain_path(source) or derived_source(p, Path(action["task"])) is None:
-            return "trace source gone or no longer a decoded trace"
+        try:
+            if not source.is_file() or not plain_path(source) or derived_source(p, Path(action["task"])) is None:
+                return "trace source gone or no longer a decoded trace"
+        except OSError as error:
+            return "trace source inspection unavailable ({}: {})".format(type(error).__name__, error)
     if action["class"] == "superseded":
         try:
             why = superseded_reason(p, Path(action["staging_root"]), cfg, guard, now)
