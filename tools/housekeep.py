@@ -63,6 +63,7 @@ CLASSES = ("recreatable", "build", "link", "gzip", "launch", "snapshot", "scratc
 NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}      # CREATE_NO_WINDOW
 RECYCLE_BATCH = 500                                                        # paths per PowerShell call
 DEFAULTS = {
+    "backup_archive": {},            # opt-in cold backups; docs/BACKUP-ARCHIVE.md
     "agent_output": [],               # task-folder roots (relative to the toolkit root, or absolute)
     "nested_task_roots": [],          # roots one level down whose children are task folders of their own
     "live_roots": ["Data"],           # a byte-identical copy of a file here is "recreatable"
@@ -1158,6 +1159,13 @@ def session(cfg, state: Path) -> int:
         return 0
     notes = []
     r = {"recycled": 0, "failed": 0}
+    try:
+        import housekeep_backups
+        note = housekeep_backups.periodic_note(cfg)
+        if note:
+            notes.append(note)
+    except (OSError, ValueError) as exc:
+        notes.append("cold backup review unavailable: {}".format(exc))
     if sweep_due:
         r = sweep_temp(cfg)["rows"]
     if daily_due:
@@ -1266,6 +1274,18 @@ def main(argv) -> int:
         print("housekeep: {}".format(e), file=sys.stderr)
         return 2
     cmd = args.pop(0) if args else "report"
+    if cmd == "backups":
+        import housekeep_backups
+        guard = Guard(cfg)
+        def protect_backup(path):
+            k = _key(path)
+            if k in guard.tracked or k in guard.links:
+                return "tracked/linked evidence"
+            if any(fnmatch.fnmatch(str(path).replace('\\', '/').lower(), g) for g in guard.globs):
+                return "protected_globs"
+            why = guard.why_protected(path)
+            return "" if why in {"backup folder", "known-good baseline"} else why
+        return housekeep_backups.main(args, cfg, recycle, protect_backup)
     if cmd == "report" and not args:
         return report(cfg)
     if cmd == "sweep-temp" and not args:

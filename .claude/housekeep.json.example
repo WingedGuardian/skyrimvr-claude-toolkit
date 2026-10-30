@@ -1,5 +1,6 @@
 {
   "_comment": "Copy to .claude/housekeep.json and edit. Paths are relative to the toolkit folder or absolute. See docs/RETENTION.md.",
+  "backup_archive": {"enabled": false},
   "agent_output": ["_CLAUDE_OUTPUT"],
   "nested_task_roots": [],
   "live_roots": ["Data"],

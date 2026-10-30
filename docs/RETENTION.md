@@ -105,6 +105,11 @@ Cleanup is the second line of defence; writing less is the first:
 
 ## Running it
 
+Optional preservation of older backup generations on secondary storage:
+[cold backup archive](BACKUP-ARCHIVE.md). It is opt-in, verifies every archived
+byte, keeps uncertain usefulness indefinitely, and requires a separate exact,
+evidence-backed approval for permanent pruning.
+
 ```bash
 cp .claude/housekeep.json.example .claude/housekeep.json   # then list your own folders in it
 python tools/housekeep.py                                  # report: changes nothing

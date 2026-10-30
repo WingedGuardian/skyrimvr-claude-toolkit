@@ -40,7 +40,7 @@ def f(cfg, name) -> Path:
     return Path(cfg["root"]) / ".claude" / "diag" / "housekeep" / NAMES[name]
 GIB = 1024 ** 3
 LOG_KEEP_LINES = 3000
-CODE_FILES = ("housekeep.py", "housekeep_archive.py", "housekeep_daily.py")
+CODE_FILES = ("housekeep.py", "housekeep_archive.py", "housekeep_daily.py", "housekeep_backups.py")
 
 
 def running_games(names):
