@@ -147,9 +147,9 @@ def write_alerts(doc, cfg):
         prev = {}
     if total is not None:
         if prev.get("total") is not None and total - prev["total"] > cfg["growth_warn_gib"] * GIB:
-            lines.append("agent output grew {:.1f} GiB since {} (now {:.1f} GiB) -- see {}".format(
+            lines.append("agent output grew {:.1f} GiB in logical file bytes since {} (now {:.1f} GiB; hard links included, not allocated drive growth) -- see {}".format(
                 (total - prev["total"]) / GIB, prev.get("date", "the last run"), total / GIB, f(cfg, "LOG")))
-        f(cfg, "SIZES").write_text(json.dumps({"total": total, "date": datetime.datetime.now().isoformat(timespec="minutes")}),
+        f(cfg, "SIZES").write_text(json.dumps({"total": total, "measurement": "logical_file_bytes_including_hardlinks", "date": datetime.datetime.now().isoformat(timespec="minutes")}),
                          encoding="utf-8")
     for p, b in doc.get("large_pins", []):
         lines.append("pinned (.housekeep-keep) {:.1f} GiB: {} -- archive it or say why in its README".format(b / GIB, p))

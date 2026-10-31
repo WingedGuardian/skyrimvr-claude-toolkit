@@ -863,7 +863,7 @@ def print_coverage(doc):
 
 def print_rows(rows: dict, title: str):
     total = sum(rows.values())
-    print("{}: {:.2f} GiB scanned".format(title, total / GIB))
+    print("{}: {:.2f} GiB logical file bytes scanned (hard links included)".format(title, total / GIB))
     for k in sorted(rows, key=lambda k: (not k.startswith("plan"), k)):
         print("  {:>9.2f} GiB  {}".format(rows[k] / GIB, k))
     kept = sum(v for k, v in rows.items() if not k.startswith("plan"))
