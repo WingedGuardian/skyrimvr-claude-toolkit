@@ -14,6 +14,72 @@ import time
 
 import pytest
 
+@pytest.mark.parametrize("failure", ["exit", "launch", "timeout"])
+@pytest.mark.parametrize("query,label", [("tracked_files", "tracked-file protection"), ("worktree_count", "worktree")])
+def test_git_failures_refuse_protection_and_inventory(tmp_path, monkeypatch, failure, query, label):
+    def broken(*args, **kwargs):
+        if failure == "launch":
+            raise OSError("cannot start git")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("git", 30)
+        text = kwargs.get("text", False)
+        return subprocess.CompletedProcess(args[0], 3221225794,
+            stdout="" if text else b"", stderr="" if text else b"")
+    monkeypatch.setattr(hk.subprocess, "run", broken)
+    with pytest.raises(OSError, match=label):
+        getattr(hk, query)(tmp_path)
+
+
+def test_git_non_repository_is_distinct_from_git_failure(tmp_path, monkeypatch):
+    def nonrepo(*args, **kwargs):
+        text = kwargs.get("text", False)
+        err = "fatal: not a git repository"
+        return subprocess.CompletedProcess(args[0], 128,
+            stdout="" if text else b"", stderr=err if text else err.encode())
+    monkeypatch.setattr(hk.subprocess, "run", nonrepo)
+    assert hk.tracked_files(tmp_path) == set()
+    assert hk.worktree_count(tmp_path) is None
+
+
+def test_git_success_counts_tracked_paths_and_worktrees(tmp_path, monkeypatch):
+    def success(*args, **kwargs):
+        out = "worktree /main\n\nworktree /lane\n" if kwargs.get("text") else b"keep.txt\0"
+        return subprocess.CompletedProcess(args[0], 0, stdout=out, stderr="")
+    monkeypatch.setattr(hk.subprocess, "run", success)
+    assert len(hk.tracked_files(tmp_path)) == 1
+    assert hk.worktree_count(tmp_path) == 1
+
+
+def test_session_preflight_failure_never_claims_a_recycle_attempt(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    cfg = cfg_for(tmp_path)
+    cfg.update(sweep_every_hours=0, daily_enabled=False, recycle_bin_warn_gib=0,
+               free_floor_gib=0)
+    monkeypatch.delenv("X4_HOUSEKEEP_SWEEP", raising=False)
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(temp))
+    monkeypatch.setattr(hk, "dir_size", lambda *args: 0)
+    monkeypatch.setattr(hk, "recycle", lambda *args: pytest.fail("recycler reached after failed protection"))
+    def protection_failed(*args):
+        raise OSError("git tracked-file protection failed (exit 3221225794)")
+    def inventory_failed(*args):
+        raise OSError("git worktree inventory failed (exit 3221225794)")
+    monkeypatch.setattr(hk, "tracked_files", protection_failed)
+    monkeypatch.setattr(hk, "worktree_count", inventory_failed)
+    monkeypatch.setattr(hk.certainty, "periodic_note", lambda cfg: "")
+    if hasattr(hk, "_daily_module"):
+        monkeypatch.setattr(hk, "_daily_module", lambda: SimpleNamespace(due=lambda cfg: "disabled"))
+    state = tmp_path / "startup-note.txt"
+    assert hk.session(cfg, state) == 1
+    note = state.read_text(encoding="utf-8")
+    assert "temp cleanup skipped; no recycling attempted" in note
+    assert "git tracked-file protection failed (exit 3221225794)" in note
+    assert "worktree inventory unavailable: git worktree inventory failed (exit 3221225794)" in note
+    assert "could not be recycled" not in note
+    assert "moved 0 leftover" not in note
+
+
 def test_session_reports_large_recycle_bin_without_emptying_it(tmp_path,monkeypatch):
     from types import SimpleNamespace
     cfg = cfg_for(tmp_path)

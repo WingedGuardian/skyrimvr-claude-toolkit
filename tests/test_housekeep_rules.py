@@ -195,7 +195,7 @@ class DailyRunGovernance(Fixture):
         state = self.d / "note.txt"
         g, l = self.quiet()
         with g, l, patch.object(h, "_daily_module", lambda: hd), patch.object(h, "sweep_temp",
-                lambda cfg: {"rows": {"recycled": 0, "failed": 0}}), \
+                lambda cfg: {"rows": {"recycled": 0, "failed": 0}, "failed": []}), \
                 patch.object(h, "apply", return_value={"gib": 1.5, "failed": 0, "deferred": 0}) as apply:
             h.session(self.cfg, state)
             self.assertIn("1.50 GiB done", state.read_text(encoding="utf-8"))
