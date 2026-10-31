@@ -115,21 +115,35 @@ class Gate:
         self.failed = []
         self.t0 = time.time()
 
-    def step(self, name, cmd, *, check=None):
+    def step(self, name, cmd, *, check=None, timeout=900):
+        """Run one step with a hard timeout. Output streams to a log file, so a hang (two gates hung on a pytest
+        grandchild on 2026-10-31) is killed at the limit and reported with the last lines written -- under -v, the
+        test that was running -- instead of holding the push and the resource budget open."""
         t = time.time()
         print("== {}".format(name), flush=True)
-        r = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace")
-        ok = r.returncode == 0
+        log = REPO / ".pytest_cache" / "prepush-gate.log"
+        log.parent.mkdir(exist_ok=True)
+        timed_out = False
+        with open(log, "w", encoding="utf-8", errors="replace") as fh:
+            try:
+                rc = subprocess.run(cmd, cwd=REPO, stdout=fh, stderr=subprocess.STDOUT, timeout=timeout).returncode
+            except subprocess.TimeoutExpired:
+                rc, timed_out = 124, True
+        out = log.read_text(encoding="utf-8", errors="replace")
+        r = subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="")
+        ok = rc == 0
         problems = []
         if check is not None:
             problems = check(r)
             ok = ok and not problems
         secs = time.time() - t
         if not ok:
-            tail = (r.stdout + r.stderr).strip().splitlines()[-40:]
+            tail = out.strip().splitlines()[-40:]
             print("\n".join("   " + l for l in tail))
             for p in problems:
                 print("   " + p)
+            if timed_out:
+                print("   TIMED OUT after {} s; the last line above is the test that was running (log: {})".format(timeout, log))
             self.failed.append(name)
         print("   {} in {:.0f}s".format("ok" if ok else "FAILED", secs), flush=True)
         return ok
@@ -191,7 +205,9 @@ def main(argv=None) -> int:
     files = [s for s in SENTINELS if (REPO / s).is_file()] + extra
     if extra:
         print("   tests for changed files: " + ", ".join(extra))
-    g.step("sentinels and changed-file tests ({} files)".format(len(files)), pyt + ["-rfE", "--durations=15"] + files)
+    # -v so a timeout names the running test; 25 min is the hard limit, well past the ~10 min this set should take
+    g.step("sentinels and changed-file tests ({} files)".format(len(files)),
+           [py, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-v", "-rfE", "--durations=15"] + files, timeout=1500)
     total = time.time() - g.t0
     if g.failed:
         print("prepush-gate: FAILED ({}) in {:.0f}s -- fix before pushing; CI would have gone red on it".format(
