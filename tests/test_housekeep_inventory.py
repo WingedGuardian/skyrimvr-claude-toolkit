@@ -99,3 +99,28 @@ def test_daily_review_names_holds_and_preserves_complete_growth_baseline(tmp_pat
     assert '"total": 999' in baseline.read_text()
     assert "held-task (unreadable)" in daily.f(cfg, "REVIEW").read_text()
     assert "sizes are unknown and excluded" in daily.f(cfg, "ALERTS").read_text()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="real Windows junction contract")
+def test_archive_root_holds_linked_fixture_and_counts_independent_candidate(tmp_path, monkeypatch):
+    root = tmp_path / "archive-input"
+    write(root / "held/unique.bin", b"unique")
+    write(root / "healthy/keep.bin", b"kept")
+    write(root / "healthy/.housekeep-keep", b"")
+    outside = write(tmp_path / "outside/keep.bin", b"external")
+    junction = root / "held/inside-link"
+    subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(outside.parent)],
+                   check=True, capture_output=True)
+    cfg = cfg_for(tmp_path, agent_output=[], live_roots=[], archive_enabled=True,
+                  archive_roots={str(root): 0})
+    monkeypatch.setattr(hk, "reads_recorded", lambda path: True)
+    doc = hk.plan(cfg)
+    coverage = doc["coverage"]
+    assert coverage["state"] == "accounted_with_holds"
+    assert coverage["archive_inventory"]["candidates_inspected"] == 1
+    assert coverage["archive_inventory"]["candidates_held"] == 1
+    assert coverage["held"][0]["path"] == str(root / "held")
+    assert coverage["held"][0]["bytes"] is None
+    assert doc["agent_total"] == 4 and sum(doc["rows"].values()) == 4
+    assert doc["actions"] == []
+    assert outside.read_bytes() == b"external" and junction.is_dir()

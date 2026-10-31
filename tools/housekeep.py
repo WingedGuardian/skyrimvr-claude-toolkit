@@ -457,16 +457,29 @@ def is_done(task: Path, idle_days: float, tokens: set, cwds: list, guard) -> str
     return ""
 
 
-def archive_selection(cfg, guard, tasks, now) -> tuple:
+def archive_selection(cfg, guard, tasks, now, held=None, inventory=None) -> tuple:
     """([action], rows) for every done folder due: closed first, then by age; over budget, down to min_idle_days."""
     tokens, cwds = live_state_tokens(cfg), rb_job_cwds()
+    held = [] if held is None else held
+    inventory = {} if inventory is None else inventory
+    inventory.update(roots=[str(_abs(cfg, r)) for r in cfg["archive_roots"]], roots_held=0,
+                     candidates_inspected=0, candidates_held=0)
     # from_root: the folder lives under archive_roots, which the file-level loop never scans, so its kept bytes are
     # counted here; agent_output folders that stay are counted by that loop instead (rows must sum to the scan).
     cands = [(t, cfg["archive_after_days"], False) for t, s in tasks if s != "loose"]
     for root, days in cfg["archive_roots"].items():
         r = _abs(cfg, root)
-        if r.is_dir():
+        try:
+            st = r.lstat()
+            if r.is_symlink() or getattr(st, "st_file_attributes", 0) & 0x400:
+                raise OSError("archive root is a symbolic link or reparse point")
+            if not r.is_dir():
+                raise OSError("archive root is not a directory")
             cands += [(Path(e.path), days, True) for e in os.scandir(r) if e.is_dir(follow_symlinks=False)]
+        except OSError as exc:
+            inventory["roots_held"] += 1
+            held.append({"path": str(r), "reason": str(exc), "bytes": None, "scope": "archive"})
+    inventory["candidates_requested"] = len(cands)
     info, total = [], 0
     actions, rows, pins = [], {}, []
 
@@ -475,12 +488,18 @@ def archive_selection(cfg, guard, tasks, now) -> tuple:
             rows[row] = rows.get(row, 0) + n
 
     for t, days, from_root in cands:
-        fp = fingerprint(t)
+        try:
+            fp = fingerprint(t)
+            wrote, read = activity(t)
+        except OSError as exc:
+            inventory["candidates_held"] += 1
+            held.append({"path": str(t), "reason": str(exc), "bytes": None, "scope": "archive"})
+            continue
+        inventory["candidates_inspected"] += 1
         total += fp[1]
         if (t / "ARCHIVED.md").exists() and fp[1] < 1 << 20:
             keep("kept: already archived (stub only)", fp[1], from_root)
             continue
-        wrote, read = activity(t)
         idle = (now - wrote) / DAY if wrote else 0.0           # idleness: writes
         if read > now - cfg["read_veto_hours"] * 3600:         # but anything reading here right now blocks it
             keep("kept: archive folder read within read_veto_hours", fp[1], from_root)
@@ -631,13 +650,18 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
     # ---- archive first: a folder going to the NAS whole is not also picked over file by file
     archived = set()
     plan_pins, agent_total = [], None
+    archive_inventory = {}
     if cfg["archive_enabled"] and wants("archive"):
-        arch, arch_rows, plan_pins, agent_total = archive_selection(cfg, guard, all_tasks, now)
+        arch, arch_rows, plan_pins, agent_total = archive_selection(cfg, guard, all_tasks, now,
+                                                                 held=held, inventory=archive_inventory)
         for k, v in arch_rows.items():
             count(k, v)
         for a in arch:
             act(a, "plan: done folder -> zip to NAS, verify, payload to Recycle Bin")
             archived.add(_key(a["path"]))
+    held_keys = [_key(item["path"]) for item in held]
+    all_tasks = [(t, s) for t, s in all_tasks
+                 if not any(_key(t) == k or _key(t).startswith(k + os.sep) for k in held_keys)]
     tasks = [(t, s) for t, s in all_tasks if _key(t) not in archived] if wants("recreatable", "build", "link") else []
     live = live_index(cfg) if tasks else {}
     live_hash = {}
@@ -800,6 +824,7 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                          "agent_output_requested": wants("recreatable", "build", "link", "archive"),
                          "agent_output_roots": [str(_abs(cfg, r)) for r in cfg["agent_output"]],
                          "targets_inspected": len(all_tasks), "targets_held": len(held),
+                         "archive_inventory": archive_inventory,
                          "held": held, "unmeasured_held_bytes": bool(held)}}
 
 
@@ -811,6 +836,10 @@ def print_coverage(doc):
         print("Agent-output inspection was not requested (--only); this is a class-limited plan.")
     print("target inventory: {} inspected, {} held; {}".format(
         coverage["targets_inspected"], coverage["targets_held"], coverage["state"]))
+    archive = coverage.get("archive_inventory")
+    if archive:
+        print("archive inventory: {} candidates inspected, {} candidates held, {} roots held".format(
+            archive["candidates_inspected"], archive["candidates_held"], archive["roots_held"]))
     if coverage["held"]:
         print("Byte totals exclude held targets; their sizes are unknown and they have no cleanup actions.")
         for item in coverage["held"]:
