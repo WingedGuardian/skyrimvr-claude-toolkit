@@ -4268,7 +4268,7 @@ _T11_CLAUSES = [
      'CLAUDE_HOOKS = ("protect-files", "protect-bash", "backup-before-edit",',
      "tests/test_repo_invariants.py::test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks"),
     # Plan 8 T10: both release gates read the floor from tools/check-release-payload.py.
-    ("rule-S-DEVBENCH-CRASH-release-floor", "tools/check-release-payload.py", "CLAUDE_HOOK_FLOOR = 6", "CLAUDE_HOOK_FLOOR = 5",
+    ("rule-S-DEVBENCH-CRASH-release-floor", "tools/check-release-payload.py", "CLAUDE_HOOK_FLOOR = 7", "CLAUDE_HOOK_FLOOR = 6",
      "tests/test_repo_invariants.py::test_every_gate_that_counts_hooks_agrees_with_the_shipped_hooks"),
     ("release-codex-entry-floor", "tools/check-release-payload.py", "CODEX_ENTRY_FLOOR = 2", "CODEX_ENTRY_FLOOR = 1",
      "tests/test_release_payload.py::test_the_hook_floor_is_the_tree_recounted"),
