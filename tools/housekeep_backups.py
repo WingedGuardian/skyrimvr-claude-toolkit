@@ -510,10 +510,23 @@ def restore(receipt, destination):
     return str(dest)
 
 
+def _recycle_bin_info_type(pointer_bytes):
+    import ctypes
+    if pointer_bytes not in (4, 8):
+        raise ValueError('unsupported Windows pointer width')
+    class Info(ctypes.Structure):
+        _pack_ = 1
+        # shellapi.h packs x86 only. x64 has four padding bytes after DWORD.
+        _fields_ = [('cbSize', ctypes.c_uint32)] + (
+            [('_padding', ctypes.c_uint32)] if pointer_bytes == 8 else []) + [
+            ('bytes', ctypes.c_int64), ('items', ctypes.c_int64)]
+    return Info
+
+
 def recycle_bin_usage(*, shell32=None):
     """Read-only Windows aggregate; unavailable is never reported as an empty bin.
 
-    SHQUERYRBINFO is packed to one byte by shellapi.h (20 bytes on x86/x64).
+    SHQUERYRBINFO is 20 bytes on x86, 24 on x64 (shellapi.h's !_WIN64 packing).
     https://learn.microsoft.com/windows/win32/api/shellapi/nf-shellapi-shqueryrecyclebinw
     """
     import ctypes
@@ -521,9 +534,7 @@ def recycle_bin_usage(*, shell32=None):
         if os.name != 'nt':
             return None
         shell32 = ctypes.WinDLL('shell32', use_last_error=True)
-    class Info(ctypes.Structure):
-        _pack_ = 1
-        _fields_ = [('cbSize', ctypes.c_uint32), ('bytes', ctypes.c_int64), ('items', ctypes.c_int64)]
+    Info = _recycle_bin_info_type(ctypes.sizeof(ctypes.c_void_p))
     info = Info()
     info.cbSize = ctypes.sizeof(info)
     query = shell32.SHQueryRecycleBinW
