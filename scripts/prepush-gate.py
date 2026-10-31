@@ -54,6 +54,7 @@ SENTINELS = [
     "tests/test_release_build.py",         # the release zip
     "tests/test_release_payload.py",       # what ships and what never does
 ]
+TIMING_SENTINELS = {"tests/test_skyguard_timing.py", "tests/test_python_fallback.py", "tests/test_hook_deadline.py"}
 # changed path prefix -> extra test files (a changed test file always runs itself)
 PATH_TESTS = {
     "agent/guards/": ["tests/test_python_fallback.py", "tests/test_hook_deadline.py", "tests/test_skyguard_shell.py",
@@ -205,9 +206,15 @@ def main(argv=None) -> int:
     files = [s for s in SENTINELS if (REPO / s).is_file()] + extra
     if extra:
         print("   tests for changed files: " + ", ".join(extra))
-    # -v so a timeout names the running test; 25 min is the hard limit, well past the ~10 min this set should take
-    g.step("sentinels and changed-file tests ({} files)".format(len(files)),
-           [py, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-v", "-rfE", "--durations=15"] + files, timeout=1500)
+    # Two processes, -v so a timeout names the running test. The timing/deadline files run alone: in one process with
+    # the rest, test_hook_deadline hung twice on 2026-10-31 (once in each of two sessions' gates) while the same files
+    # pass together in under 3 min; the cause is still open (a killed child's grandchild holding the pipe is the
+    # suspect). Isolated, a repeat is named by the log and costs 10 min, not the push.
+    timing = [f for f in files if f in TIMING_SENTINELS]
+    rest = [f for f in files if f not in TIMING_SENTINELS]
+    verbose = [py, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-v", "-rfE", "--durations=10"]
+    g.step("timing and deadline tests ({} files)".format(len(timing)), verbose + timing, timeout=600)
+    g.step("sentinels and changed-file tests ({} files)".format(len(rest)), verbose + rest, timeout=1200)
     total = time.time() - g.t0
     if g.failed:
         print("prepush-gate: FAILED ({}) in {:.0f}s -- fix before pushing; CI would have gone red on it".format(
