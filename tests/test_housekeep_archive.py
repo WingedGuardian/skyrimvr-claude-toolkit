@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -66,6 +67,52 @@ class Base(unittest.TestCase):
 
 
 class ArchiveFolder(Base):
+    def test_unreadable_branch_cannot_be_omitted_from_archive_proof(self):
+        t = self.task()
+        touch(t / 'blocked' / 'unique.bin', b'only copy')
+        real_walk = os.walk
+
+        def incomplete_walk(root, *args, **kwargs):
+            if Path(root) != t:
+                yield from real_walk(root, *args, **kwargs)
+                return
+            yield str(t), ['blocked'], ['README.md']
+            if kwargs.get('onerror'):
+                kwargs['onerror'](PermissionError('blocked directory'))
+
+        calls = []
+        with patch.object(ha.os, 'walk', incomplete_walk):
+            with self.assertRaises(ha.ArchiveError):
+                ha.archive_folder(t, self.nas, lambda ps: calls.extend(ps) or {})
+        self.assertFalse(self.nas.exists())
+        self.assertFalse((t / ha.STUB).exists())
+        self.assertEqual([], calls)
+        self.assertEqual(b'only copy', (t / 'blocked' / 'unique.bin').read_bytes())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows junction regression')
+    def test_archive_root_junction_is_refused(self):
+        outside = self.task('outside')
+        link = self.d / 'junction'
+        made = subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(outside)],
+                              capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        self.assertEqual(0, made.returncode, made.stderr.decode(errors='replace'))
+        calls = []
+        try:
+            with self.assertRaises(ha.ArchiveError):
+                ha.archive_folder(link, self.nas, lambda ps: calls.extend(ps) or {})
+            self.assertFalse(self.nas.exists())
+            self.assertFalse((outside / ha.STUB).exists())
+            self.assertEqual([], calls)
+            self.assertTrue((outside / 'build' / 'big.bin').exists())
+        finally:
+            link.rmdir()  # remove only this test's junction, never its target
+
+    def test_pending_stub_does_not_claim_recycling_has_finished(self):
+        t = self.task()
+        ha.archive_folder(t, self.nas, None)
+        self.assertNotIn('payload went to the Recycle Bin', (t / ha.STUB).read_text())
+        self.assertIn('retirement', (t / ha.STUB).read_text())
+
     def test_same_size_restore_conflict_is_preserved(self):
         t = self.task()
         ha.archive_folder(t, self.nas, self.recycler)

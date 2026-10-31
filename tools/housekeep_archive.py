@@ -24,13 +24,30 @@ class ArchiveError(Exception):
     pass
 
 
+def _walk(src: Path):
+    """Archive proofs must cover the entire source, without following links."""
+    def failed(exc):
+        raise ArchiveError('unreadable archive source: {}'.format(exc)) from exc
+
+    try:
+        st = src.lstat()
+        if src.is_symlink() or getattr(st, 'st_file_attributes', 0) & 0x400:
+            raise ArchiveError('link/reparse archive root: {}'.format(src))
+        if not src.is_dir():
+            raise ArchiveError('archive source is not a directory: {}'.format(src))
+        for dp, dirs, files in os.walk(src, onerror=failed):
+            for name in dirs + files:
+                p = Path(dp)/name
+                if p.is_symlink() or getattr(p.lstat(), 'st_file_attributes', 0) & 0x400:
+                    raise ArchiveError('link/reparse archive member: {}'.format(p))
+            yield dp, dirs, files
+    except OSError as exc:
+        failed(exc)
+
+
 def _members(src: Path):
     out = []
-    for dp, dirs, files in os.walk(src):
-        for name in dirs + files:
-            p = Path(dp)/name
-            if p.is_symlink() or getattr(p.lstat(), 'st_file_attributes', 0) & 0x400:
-                raise ArchiveError('link/reparse archive member: {}'.format(p))
+    for dp, dirs, files in _walk(src):
         if ".git" in dirs:
             raise ArchiveError("contains a .git folder: a repository is never archived")
         for f in files:
@@ -57,7 +74,7 @@ def verify_source(src, record):
     current = {p.relative_to(src).as_posix():_hash(p) for p in _members(src) if p != src/STUB}
     if current != expected:
         raise ArchiveError('source changed after archival; local payload retained')
-    directories = sorted((Path(dp)/d).relative_to(src).as_posix()+'/' for dp, ds, fs in os.walk(src) for d in ds)
+    directories = sorted((Path(dp)/d).relative_to(src).as_posix()+'/' for dp, ds, fs in _walk(src) for d in ds)
     if directories != record['directories']:
         raise ArchiveError('source directory population changed')
     if _hash(record['zip']) != record['zip_sha256']:
@@ -110,7 +127,7 @@ def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=()) -> dict:
     if any(p.name == STUB for p in files):
         raise ArchiveError('existing archive stub needs disposition, not another archive')
     hashes = {p.relative_to(src).as_posix():_hash(p) for p in files}
-    directories = sorted((Path(dp)/d).relative_to(src).as_posix()+'/' for dp, ds, fs in os.walk(src) for d in ds)
+    directories = sorted((Path(dp)/d).relative_to(src).as_posix()+'/' for dp, ds, fs in _walk(src) for d in ds)
     nas_dir.mkdir(parents=True, exist_ok=True)
     target = nas_target(nas_dir, src.name)
     partial = target.with_name(target.name + ".partial")
@@ -157,7 +174,8 @@ def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=()) -> dict:
               "kept_local": sorted(os.path.relpath(k, os.path.normcase(str(src))) for k in keep)}
     (src / STUB).write_text(
         "# Archived\n\nThis folder's contents were zipped to the NAS by housekeep and verified (every member's CRC "
-        "read back from the NAS copy) before the local payload went to the Recycle Bin.\n\n"
+        "read back from the NAS copy). Local retirement is a separate step; consult the action receipt "
+        "and any leftovers listed below for its result.\n\n"
         "- zip: `{zip}`\n- files: {files}\n- bytes: {bytes}\n- date: {date}\n\n"
         "Restore: `python tools/housekeep_archive.py restore \"{stub}\"`\n\n<!-- {js} -->\n".format(
             stub=src / STUB, js=json.dumps(record), **record), encoding="utf-8")
