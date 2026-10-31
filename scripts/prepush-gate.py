@@ -139,7 +139,15 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--base", default="", help="compare against this revision (default: upstream, else origin/master)")
     ap.add_argument("--python", default=sys.executable, help="interpreter that has pytest (default: this one)")
+    ap.add_argument("--root", type=Path, default=None,
+                    help="the checkout to gate (default: this script's repo); the hook passes the tree being pushed")
     a = ap.parse_args(argv)
+    global REPO
+    if a.root is not None:
+        REPO = a.root.resolve()
+        if not (REPO / "tests").is_dir() or not (REPO / ".github" / "ci-leg.json").is_file():
+            print("prepush-gate: {} is not a toolkit checkout (no tests/ or .github/ci-leg.json)".format(REPO))
+            return 2
     py = a.python
     probe = subprocess.run([py, "-c", "import pytest"], capture_output=True)
     if probe.returncode != 0:
