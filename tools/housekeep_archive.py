@@ -9,6 +9,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import tempfile
@@ -32,12 +33,25 @@ def is_save(path):
             or '/save/' in low and low.endswith(('.xml','.xml.gz')))
 
 
+def _plain(path):
+    path = Path(os.path.abspath(path))
+    for part in (path,*path.parents):
+        try:
+            st = part.lstat()
+        except FileNotFoundError:
+            continue
+        if part.is_symlink() or getattr(st,'st_file_attributes',0)&0x400:
+            raise ArchiveError('link/reparse archive path: {}'.format(part))
+    return path
+
+
 def _walk(src: Path):
     """Archive proofs must cover the entire source, without following links."""
     def failed(exc):
         raise ArchiveError('unreadable archive source: {}'.format(exc)) from exc
 
     try:
+        src = _plain(src)
         st = src.lstat()
         if src.is_symlink() or getattr(st, 'st_file_attributes', 0) & 0x400:
             raise ArchiveError('link/reparse archive root: {}'.format(src))
@@ -80,6 +94,7 @@ def _hash(path):
 
 def verify_source(src, record):
     """The local payload still equals the verified archive, including population."""
+    src = _plain(src)
     expected = record.get('source_hashes')
     if expected is None:
         raise ArchiveError('archive has no source hash proof')
@@ -130,9 +145,38 @@ def nas_target(nas_dir: Path, name: str) -> Path:
     return t
 
 
+def archive_scope(action, cfg):
+    """A plan cannot select new source roots or redirect its configured destination."""
+    try:
+        src, destination = Path(action['path']), Path(action['nas'])
+        if not src.is_absolute() or not destination.is_absolute():
+            return 'archive source/destination must be absolute; create a new plan'
+        src, destination = _plain(src), _plain(destination)
+        root = Path(cfg['root'])
+        def absolute(value):
+            p = Path(value)
+            return Path(os.path.abspath(p if p.is_absolute() else root/p))
+        sources = [*cfg['agent_output'],*cfg['nested_task_roots'],*cfg['archive_roots']]
+        if os.path.normcase(str(src.parent)) not in {os.path.normcase(str(absolute(p))) for p in sources}:
+            return 'archive source is outside configured task roots'
+        archive_root = _plain(absolute(cfg['archive_root'] or '.claude/archive'))
+        label = re.sub(r'[^\w.-]+','_',src.parent.name) or 'root'
+        if destination != archive_root/label:
+            return 'archive destination differs from configured archive root/group'
+        if archive_root.is_relative_to(src) or src.is_relative_to(archive_root):
+            return 'archive source and destination overlap'
+        if is_save(src):
+            return 'archive source is a protected save/profile path'
+        return ''
+    except (KeyError, TypeError, OSError, ArchiveError) as exc:
+        return 'archive source/destination scope could not be verified: '+str(exc)
+
+
 def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=()) -> dict:
     """Zip `src` into `nas_dir`, verify, write the stub, recycle everything not kept locally. Returns the record."""
-    src = Path(src)
+    src, nas_dir = _plain(src), _plain(nas_dir)
+    if nas_dir.is_relative_to(src) or src.is_relative_to(nas_dir):
+        raise ArchiveError('archive source and destination overlap')
     files = _members(src)
     if not files:
         raise ArchiveError("empty folder")
@@ -144,8 +188,13 @@ def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=()) -> dict:
     target = nas_target(nas_dir, src.name)
     partial = target.with_name(target.name + ".partial")
     total = 0
+    owned_partial = False
+    partial_identity = None
     try:
-        with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as z:
+        with zipfile.ZipFile(partial, "x", zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as z:
+            owned_partial = True
+            st = partial.stat()
+            partial_identity = (st.st_dev,st.st_ino)
             for name in directories:
                 z.write(src/name, name)
             for p in files:
@@ -170,11 +219,21 @@ def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=()) -> dict:
                 raise ArchiveError("NAS copy is missing or short for {}".format(p))
         if {p.relative_to(src).as_posix():_hash(p) for p in _members(src)} != hashes:
             raise ArchiveError('source changed during archival; local payload retained')
-        os.replace(partial, target)
+        verified_zip_hash = _hash(partial)
+        if os.name=='nt':
+            os.rename(partial, target)  # Windows refuses an already existing target
+        else:
+            os.link(partial, target)    # exclusive publication; unsupported filesystems refuse
+            partial.unlink()           # this run's own staging name, same bytes now published
+        if _hash(target)!=verified_zip_hash:
+            raise ArchiveError('published archive differs from verified bytes; source retained')
     except Exception as e:
         try:                       # this run's own half-written zip: same-run scratch, and a NAS share has no bin
-            if partial.exists():
-                partial.unlink()
+            if owned_partial and partial.exists():
+                st = partial.lstat()
+                if (st.st_ino and (st.st_dev,st.st_ino)==partial_identity and st.st_nlink==1
+                        and not partial.is_symlink() and not getattr(st,'st_file_attributes',0)&0x400):
+                    partial.unlink()
         except OSError:
             pass
         if isinstance(e, ArchiveError):
@@ -182,7 +241,7 @@ def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=()) -> dict:
         raise ArchiveError("{}: {}".format(type(e).__name__, e)) from e
     keep = keep_local(src, extra_keep)
     record = {"zip": str(target), "files": len(files), "bytes": total, "date": time.strftime("%Y-%m-%d %H:%M"),
-              "source_hashes": hashes, "zip_sha256": _hash(target), "directories": directories,
+              "source_hashes": hashes, "zip_sha256": verified_zip_hash, "directories": directories,
               "kept_local": sorted(os.path.relpath(k, os.path.normcase(str(src))) for k in keep)}
     (src / STUB).write_text(
         "# Archived\n\nThis folder's contents were zipped to the NAS by housekeep and verified (every member's CRC "

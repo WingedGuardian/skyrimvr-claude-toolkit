@@ -190,3 +190,81 @@ def test_hash_proof_preserves_a_concurrent_write_and_refuses_it(tmp_path,monkeyp
         h.blake(p)
     assert p.read_bytes()==b'new bytes must survive'
     assert p.stat().st_mtime_ns==new_mtime
+
+
+@pytest.mark.parametrize('occupied_suffix',['.zip','.zip.partial'])
+def test_archive_never_overwrites_a_competing_publication(tmp_path,monkeypatch,occupied_suffix):
+    src=tmp_path/'task'; src.mkdir(); (src/'unique.bin').write_bytes(b'only local copy')
+    nas=tmp_path/'nas'; choose=ha.nas_target; foreign=[]
+    def competing(root,name):
+        target=choose(root,name)
+        other=target if occupied_suffix=='.zip' else target.with_name(target.name+'.partial')
+        other.write_bytes(b'other producer owns these bytes'); foreign.append(other)
+        return target
+    monkeypatch.setattr(ha,'nas_target',competing)
+    with pytest.raises(ha.ArchiveError):
+        ha.archive_folder(src,nas,lambda paths:pytest.fail('competing publication reached recycler'))
+    assert foreign[0].read_bytes()==b'other producer owns these bytes'
+    assert (src/'unique.bin').read_bytes()==b'only local copy'
+    assert not (src/ha.STUB).exists()
+
+
+def test_published_archive_is_bound_to_the_verified_bytes(tmp_path,monkeypatch):
+    src=tmp_path/'task'; src.mkdir(); (src/'unique.bin').write_bytes(b'only local copy')
+    nas=tmp_path/'nas'
+    def replace_after_publish(real):
+        def mutate(a,b,*args,**kwargs):
+            result=real(a,b,*args,**kwargs)
+            if Path(b).parent==nas and str(b).endswith('.zip'):
+                Path(b).write_bytes(b'competing replacement after publication')
+            return result
+        return mutate
+    monkeypatch.setattr(ha.os,'rename',replace_after_publish(ha.os.rename))
+    monkeypatch.setattr(ha.os,'replace',replace_after_publish(ha.os.replace))
+    with pytest.raises(ha.ArchiveError):
+        ha.archive_folder(src,nas,lambda paths:pytest.fail('unverified published bytes reached recycler'))
+    assert (src/'unique.bin').read_bytes()==b'only local copy'
+    assert not (src/ha.STUB).exists()
+
+
+def test_archive_destination_inside_source_is_refused_before_any_write(tmp_path):
+    src=tmp_path/'task'; src.mkdir(); (src/'unique.bin').write_bytes(b'only local copy')
+    with pytest.raises(ha.ArchiveError):
+        ha.archive_folder(src,src/'archive',lambda paths:pytest.fail('overlap reached recycler'))
+    assert sorted(p.name for p in src.iterdir())==['unique.bin']
+
+
+def planned_folder(tmp_path):
+    h,cfg=entry_config(tmp_path)
+    cfg.update(agent_output=[str(tmp_path/'out')],archive_enabled=True)
+    src=tmp_path/'out/task'; src.mkdir(parents=True)
+    p=src/'unique.bin'; p.write_bytes(b'potentially useful')
+    os.utime(p,(time.time()-30*86400,)*2)
+    action=dict(path=str(src),nas=str(Path(cfg['archive_root'])/'out'),
+                fingerprint=h.fingerprint(src),bytes=p.stat().st_size,idle_days=30,closed=False,
+                **{'class':'archive'})
+    return h,cfg,src,action
+
+
+def test_archive_action_cannot_redirect_the_configured_destination(tmp_path):
+    h,cfg,src,a=planned_folder(tmp_path)
+    a['nas']=str(tmp_path/'unapproved-destination')
+    assert 'destination' in h.check(a,cfg,h.Guard(cfg),time.time())
+
+
+def test_archive_action_cannot_select_an_unconfigured_source(tmp_path):
+    h,cfg,src,a=planned_folder(tmp_path)
+    cfg['agent_output']=[]
+    assert 'source' in h.check(a,cfg,h.Guard(cfg),time.time())
+
+
+def test_archive_action_cannot_invent_a_closure_marker(tmp_path):
+    h,cfg,src,a=planned_folder(tmp_path)
+    p=src/'unique.bin'; os.utime(p,(time.time()-30*86400,time.time()-86400))
+    a.update(fingerprint=h.fingerprint(src),closed=True)
+    assert h.check(a,cfg,h.Guard(cfg),time.time())
+
+
+def test_configured_archive_scope_remains_eligible(tmp_path):
+    h,cfg,src,a=planned_folder(tmp_path)
+    assert h.check(a,cfg,h.Guard(cfg),time.time())==''

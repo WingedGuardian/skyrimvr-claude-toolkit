@@ -30,7 +30,7 @@ read-only so an in-place edit cannot silently change every path at once.
 Accounting: `report` and `plan` print every scanned byte in exactly one row, the rows sum to the total, and the
 row of bytes it leaves alone prints even at zero.
 
-Exit: 0 ok Ã‚Â· 1 an action was refused or failed Ã‚Â· 2 bad usage or config.
+Exit: 0 ok Ãƒâ€šÃ‚Â· 1 an action was refused or failed Ãƒâ€šÃ‚Â· 2 bad usage or config.
 """
 
 from __future__ import annotations
@@ -147,6 +147,7 @@ def load_config(path: Path | None) -> dict:
     cfg["root"] = Path(cfg.get("root") or TOOLKIT_ROOT)
     if not cfg["archive_root"]:
         cfg["archive_root"] = str(cfg["root"] / ".claude" / "archive")
+    cfg["archive_root"] = str(_abs(cfg,cfg["archive_root"]))
     return cfg
 
 
@@ -505,9 +506,14 @@ def archive_selection(cfg, guard, tasks, now, held=None, inventory=None) -> tupl
             keep("kept: archive folder not done ({})".format(why), fp[1], from_root)
             continue
         label = re.sub(r"[^\w.-]+", "_", t.parent.name) or "root"
-        actions.append({"class": "archive", "path": str(t), "bytes": fp[1], "fingerprint": list(fp),
-                        "nas": str(Path(cfg["archive_root"]) / label), "idle_days": round(idle, 1),
-                        "closed": closed})
+        action = {"class": "archive", "path": str(t), "bytes": fp[1], "fingerprint": list(fp),
+                  "nas": str(Path(cfg["archive_root"]) / label), "idle_days": round(idle, 1),
+                  "closed": closed}
+        why = _archive_module().archive_scope(action, cfg)
+        if why:
+            keep("kept: archive scope ("+why+")",fp[1],from_root)
+            continue
+        actions.append(action)
         if over:
             total -= fp[1]
             over = total > cfg["budget_gib"] * GIB
@@ -592,6 +598,7 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
     """Every action, with the hash it was planned on. `only` (a set of CLASSES) skips the scans no requested class
     needs -- the launch watcher plans gzip/launch without hashing every agent-output file -- and counts a planned
     action of an unrequested class as kept, so the rows still sum to what was scanned."""
+    cfg = dict(cfg, archive_root=str(_abs(cfg,cfg['archive_root'] or '.claude/archive')))
     now = time.time() if now is None else now
     guard = guard or Guard(cfg)
     actions, rows = [], {}
@@ -1009,12 +1016,15 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
         if p.stat().st_nlink != 1 or c.stat().st_nlink != 1 + memo.links.get(_key(c), 0):
             return 'hard-link ownership changed or is unqualified'
     if action["class"] == "archive":
+        why = _archive_module().archive_scope(action, cfg)
+        if why:
+            return why
         if list(fingerprint(p)) != list(action["fingerprint"]):
             return "folder changed since the plan"
         wrote, read = activity(p)
         if read > now - cfg["read_veto_hours"] * 3600:
             return "something read here since the plan"
-        if (now - wrote) / DAY < cfg["min_idle_days"] and not action.get("closed"):
+        if (now - wrote) / DAY < cfg["min_idle_days"] and not (p/CLOSED_MARK).is_file():
             return "something wrote here since the plan"
         why = is_done(p, action["idle_days"], live_state_tokens(cfg), rb_job_cwds(), guard)
         if why:
