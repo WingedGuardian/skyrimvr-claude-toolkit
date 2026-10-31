@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import time
+import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -24,6 +25,13 @@ class ArchiveError(Exception):
     pass
 
 
+def is_save(path):
+    """Both supported games' saves, plus X4's protected profile subtree."""
+    low = str(path).replace('\\','/').lower()
+    return (low.endswith(SAVE_EXTS) or '/egosoft/x4/' in low.rstrip('/')+'/'
+            or '/save/' in low and low.endswith(('.xml','.xml.gz')))
+
+
 def _walk(src: Path):
     """Archive proofs must cover the entire source, without following links."""
     def failed(exc):
@@ -35,6 +43,8 @@ def _walk(src: Path):
             raise ArchiveError('link/reparse archive root: {}'.format(src))
         if not src.is_dir():
             raise ArchiveError('archive source is not a directory: {}'.format(src))
+        if is_save(src):
+            raise ArchiveError('archive source is in a protected save/profile subtree')
         for dp, dirs, files in os.walk(src, onerror=failed):
             for name in dirs + files:
                 p = Path(dp)/name
@@ -54,7 +64,7 @@ def _members(src: Path):
             p = Path(dp) / f
             if fnmatch.fnmatch(f.lower(), 'owned-session*.json') or fnmatch.fnmatch(f.lower(), '*ownership*.json'):
                 raise ArchiveError('ownership receipt lacks qualified release proof: {}'.format(p))
-            if f.lower().endswith(SAVE_EXTS):
+            if is_save(p):
                 raise ArchiveError("holds a save ({}): saves are never archived".format(p))
             out.append(p)
     return out
@@ -203,6 +213,121 @@ def note_leftovers(src: Path, failed: dict):
         f.writelines("- `{}` ({})\n".format(p, e) for p, e in sorted(failed.items()))
 
 
+def reads_recorded(folder, cache):
+    """Only our own scratch is backdated/read. Unmeasurable volumes require closure."""
+    try:
+        dev = Path(folder).stat().st_dev
+        if dev not in cache:
+            cache[dev] = False
+            base = Path(tempfile.gettempdir()).resolve()
+            if str(base).startswith((chr(92)*2,'//')) or base.stat().st_dev != dev:
+                return False
+            if os.name=='nt':
+                import ctypes
+                if ctypes.windll.kernel32.GetDriveTypeW(base.anchor)==4:
+                    return False  # never create a capability probe on a mapped NAS
+            with tempfile.TemporaryDirectory(dir=base) as directory:
+                probe = Path(directory)/'access-probe'
+                probe.write_bytes(b'.')
+                old = time.time()-3*86400
+                os.utime(probe,(old,old))
+                probe.read_bytes()
+                cache[dev] = probe.stat().st_atime > old+3600
+        return cache[dev]
+    except OSError:
+        return False
+
+
+def _retirement_hash(path, deadline, chunk=1024*1024):
+    before = path.stat()
+    d = hashlib.blake2b(digest_size=16)
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(chunk), b''):
+            if time.monotonic() > deadline:
+                raise TimeoutError('archive review time budget reached')
+            d.update(block)
+    after = path.stat()
+    if (before.st_size, before.st_mtime_ns, before.st_ino) != (after.st_size, after.st_mtime_ns, after.st_ino):
+        raise ArchiveError('archive changed during proof')
+    try:
+        os.utime(path, ns=(before.st_atime_ns, after.st_mtime_ns))
+    except OSError:
+        pass
+    return d.hexdigest()
+
+
+def review_archives(cfg, protect=lambda path: '', now=None):
+    """Read-only review, including retention=0. Age never supplies retirement proof."""
+    root = Path(cfg['archive_root'])
+    deadline = time.monotonic() + cfg.get('archive_review_seconds', 15)
+    declarations = {os.path.normcase(os.path.abspath(p)): v for p,v in cfg.get('obsolete_items', {}).items()}
+    result = dict(state='complete', root=str(root), rows=[], held=[])
+    try:
+        for dp, dirs, files in _walk(root):
+            if time.monotonic() > deadline:
+                raise TimeoutError('archive review time budget reached')
+            for name in files:
+                if time.monotonic() > deadline:
+                    raise TimeoutError('archive review time budget reached')
+                if not name.lower().endswith('.zip'):
+                    continue
+                p = Path(dp)/name
+                st = p.stat()
+                row = dict(path=str(p), bytes=st.st_size, mtime=st.st_mtime, state='retained',
+                           reason='unknown usefulness retained; age is not obsolescence')
+                why = protect(p)
+                if why or st.st_nlink != 1:
+                    row.update(state='held', reason=why or 'shared archive ownership unqualified')
+                else:
+                    decision = declarations.get(os.path.normcase(os.path.abspath(p)), {})
+                    if (isinstance(decision, dict) and decision.get('basis')=='operator-confirmed-obsolete'
+                            and decision.get('reason') and decision.get('evidence')):
+                        actual = _retirement_hash(p, deadline)
+                        if actual == decision.get('content_hash'):
+                            row.update(state='review retirement', content_hash=actual,
+                                       reason=decision['reason'], evidence=decision['evidence'])
+                        else:
+                            row['reason'] = 'obsolete decision no longer matches current bytes'
+                result['rows'].append(row)
+    except (OSError, ArchiveError, TimeoutError) as exc:
+        result['state'] = 'partial'
+        result['held'].append(dict(path=str(root), reason=str(exc)))
+        # An incomplete source set cannot authorize even a previously inspected retirement.
+        for row in result['rows']:
+            if row['state']=='review retirement':
+                row.update(state='held', reason='archive inventory incomplete')
+    return result
+
+
+def periodic_note(cfg, scanner, now=None):
+    """Session-only read-only review; local summary is overwritten, never a service."""
+    days = cfg.get('archive_review_days', 30)
+    if not days:
+        return ''
+    now = time.time() if now is None else now
+    state = Path(cfg['root'])/'.claude/diag/housekeep/task-archive-review.json'
+    try:
+        previous = json.loads(state.read_text(encoding='utf-8'))
+        interval = min(days, 1) if previous.get('state') not in {'complete','absent'} else days
+        if now-previous['checked_at'] < interval*86400:
+            return ''
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    report = scanner()
+    counts = {}
+    for row in report['rows']:
+        counts[row['state']] = counts.get(row['state'], 0)+1
+    summary = dict(checked_at=now, state=report['state'], root=report['root'], counts=counts,
+                   held=report['held'], rows_total=len(report['rows']), rows_stored=min(20,len(report['rows'])),
+                   rows=report['rows'][:20])
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps(summary,indent=1)+'\n',encoding='utf-8')
+    if report['state']=='absent':
+        return ''  # no archive created yet: nothing needs the user
+    return 'task archives: {} reviewed, {} retirement decisions, {} inventory; unknown usefulness retained'.format(
+        len(report['rows']),counts.get('review retirement',0),report['state'])
+
+
 def restore_archive(stub: Path) -> Path:
     """Extract the zip named in the stub back into its folder. Refuses if any member's path exists with other bytes."""
     stub = Path(stub)
@@ -220,6 +345,8 @@ def restore_archive(stub: Path) -> Path:
                     or ':' in i.filename):
                 raise ArchiveError('unsafe archive member path')
             p = dest/i.filename
+            if is_save(p):
+                raise ArchiveError('restore would write a protected save/profile path')
             for ancestor in (p, *p.parents):
                 if ancestor.is_symlink() or (ancestor.exists() and getattr(ancestor.lstat(), 'st_file_attributes', 0) & 0x400):
                     raise ArchiveError('restore path contains a link/reparse point')

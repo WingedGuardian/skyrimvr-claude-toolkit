@@ -30,7 +30,7 @@ read-only so an in-place edit cannot silently change every path at once.
 Accounting: `report` and `plan` print every scanned byte in exactly one row, the rows sum to the total, and the
 row of bytes it leaves alone prints even at zero.
 
-Exit: 0 ok · 1 an action was refused or failed · 2 bad usage or config.
+Exit: 0 ok Ã‚Â· 1 an action was refused or failed Ã‚Â· 2 bad usage or config.
 """
 
 from __future__ import annotations
@@ -95,7 +95,9 @@ DEFAULTS = {
     # compresses ~5-10x), and local zips expire after archive_retention_days. A NAS is an option, never a crutch.
     "archive_enabled": True,
     "archive_root": "",               # empty = <root>/.claude/archive (local); or another drive / NAS share
-    "archive_retention_days": 90,     # zips under archive_root older than this -> Recycle Bin; 0 = keep forever
+    "archive_retention_days": 90,     # legacy setting; age never authorizes archive removal
+    "archive_review_days": 30,       # read-only session review, including retention=0; 0 disables reminders
+    "archive_review_seconds": 15,    # bounded archive inventory/content proof; incomplete means held
     "archive_roots": {},              # {folder: idle_days}: its child folders are archived once done
     "archive_after_days": 14,         # agent_output task folders: done and idle this long
     "min_idle_days": 7,               # no WRITE for this long; sooner only via .housekeep-closed
@@ -158,22 +160,9 @@ def _key(p) -> str:
 
 
 def blake(path, chunk=1 << 20) -> str:
-    """Content hash that leaves the file's access time as it found it: housekeep's own reads must not make a folder
-    look in use (activity, below, counts reads)."""
-    try:
-        st = os.stat(path)
-    except OSError:
-        st = None
-    d = hashlib.blake2b(digest_size=16)
-    with open(path, "rb") as f:
-        for b in iter(lambda: f.read(chunk), b""):
-            d.update(b)
-    if st is not None:
-        try:
-            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
-        except OSError:                  # read-only (a housekeep hard link): its access time may move; safe direction
-            pass
-    return d.hexdigest()
+    """A current content proof; never rewind a concurrent writer's timestamps."""
+    return _archive_module()._retirement_hash(Path(path), float('inf'), chunk)
+
 
 
 def activity(folder: Path) -> tuple:
@@ -196,33 +185,9 @@ _READS_RECORDED = {}
 
 
 def reads_recorded(folder: Path) -> bool:
-    """Does this volume update last-access times when a file is read? Probed, not assumed: NTFS can switch it off
-    (fsutil disablelastaccess) and Linux may keep atime coarsely. Without it the read veto silently does nothing, so
-    archiving falls back to folders their session marked .housekeep-closed. The probe creates and deletes nothing:
-    it backdates one existing small file's access time, reads it, looks, and restores both times exactly."""
-    try:
-        dev = os.stat(folder).st_dev
-    except OSError:
-        return False
-    if dev not in _READS_RECORDED:
-        ok = False
-        probe = next((Path(dp) / f for dp, _, fn in os.walk(folder) for f in fn
-                      if 0 < _size(Path(dp) / f) <= 1 << 20), None)
-        if probe is not None:
-            try:
-                st = os.stat(probe)
-                old = time.time() - 3 * DAY
-                try:
-                    os.utime(probe, (old, st.st_mtime))
-                    with open(probe, "rb") as fh:
-                        fh.read(1)
-                    ok = os.stat(probe).st_atime > old + 3600
-                finally:
-                    os.utime(probe, ns=(st.st_atime_ns, st.st_mtime_ns))
-            except OSError:
-                ok = False
-        _READS_RECORDED[dev] = ok
-    return _READS_RECORDED[dev]
+    """Measure using owned scratch on the same volume; never backdate source files."""
+    return _archive_module().reads_recorded(folder, _READS_RECORDED)
+
 
 
 def _size(p: Path) -> int:
@@ -812,21 +777,14 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                 prev = sig
                 prev_path = p
 
-    # ---- archive retention: the archive must not become the next pile
-    days = cfg["archive_retention_days"]
-    aroot = Path(cfg["archive_root"])
-    if days and wants("expire") and aroot.is_dir():
-        for dp, _, fn in os.walk(aroot):
-            for f in fn:
-                p = Path(dp) / f
-                if not f.lower().endswith(".zip"):
-                    continue
-                st = p.stat()
-                if now - st.st_mtime >= days * DAY:
-                    act({"class": "expire", "path": str(p), "bytes": st.st_size, "mtime": st.st_mtime},
-                        "plan: archive zip past archive_retention_days -> Recycle Bin")
-                else:
-                    count("kept: archive zip within archive_retention_days", st.st_size)
+    # ---- ordinary archives are reviewed independently of age-based retention settings
+    archive_review = review_archives(cfg, guard) if wants('expire') else {}
+    for row in archive_review.get('rows', []):
+        if row['state']=='review retirement' and archive_review['state']=='complete':
+            act({'class':'expire','path':row['path'],'bytes':row['bytes'],'mtime':row['mtime'],
+                 'hash':row['content_hash']}, 'plan: archive has exact obsolete decision -> Recycle Bin')
+        else:
+            count('kept: archive '+row['reason'], row['bytes'])
 
     # ---- named scratch folders
     for s in (cfg["scratch"] if wants("scratch") else []):
@@ -844,6 +802,7 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                          "agent_output_roots": [str(_abs(cfg, r)) for r in cfg["agent_output"]],
                          "targets_inspected": len(all_tasks), "targets_held": len(held),
                          "archive_inventory": archive_inventory,
+                         "archive_review": archive_review,
                          "held": held, "unmeasured_held_bytes": bool(held)}}
 
 
@@ -1064,13 +1023,22 @@ def check(action, cfg, guard: Guard, now: float, memo: _Memo | None = None) -> s
             return "archiving is off"
         return ""
     if action["class"] == "expire":
-        why = guard.why_protected(p)
+        root = Path(cfg['archive_root'] or Path(cfg['root'])/'.claude/archive')
+        certainty.plain_path(p)
+        if not p.resolve().is_relative_to(root.resolve()) or p.suffix.lower()!='.zip':
+            return 'archive is outside configured archive root'
+        if not root.is_relative_to(Path(cfg['root'])):
+            guard.tracked.update(tracked_files(root))
+        why = archive_protection(guard, p)
         if why:
             return 'protected ('+why+')'
         st = p.stat()
-        if st.st_mtime != action["mtime"] or st.st_size != action["bytes"]:
+        if st.st_nlink!=1 or st.st_mtime != action["mtime"] or st.st_size != action["bytes"]:
             return "archive zip changed since the plan"
-        return certainty.obsolete_reason(p, cfg)
+        actual = _archive_module()._retirement_hash(p,time.monotonic()+cfg['archive_review_seconds'])
+        if actual!=action.get('hash'):
+            return 'archive bytes changed since the plan; create a new plan'
+        return certainty.obsolete_reason(p, cfg, actual)
     if action["class"] in ("launch", "snapshot", "scratch"):
         if action['class'] != 'snapshot':
             if newest_activity(p) > now - cfg['active_hours'] * 3600:
@@ -1133,13 +1101,58 @@ def compress(action) -> Path:
     return gz
 
 
+def archive_protection(guard, path):
+    """A source-group label 'backups' is not an eternal veto on an explicitly obsolete ZIP.
+    Every independent save, baseline, tracked, linked and custom protection still applies."""
+    why = guard.why_protected(path)
+    if why != 'backup folder':
+        return why
+    k = _key(path)
+    if k in guard.tracked:
+        return 'git-tracked'
+    if k in guard.links:
+        return 'linked evidence'
+    if any(fnmatch.fnmatch(str(path).replace('\\','/').lower(), g) for g in guard.globs):
+        return 'protected_globs'
+    return ''
+
+
+def review_archives(cfg, guard=None):
+    guard = Guard(cfg) if guard is None else guard
+    root = Path(cfg['archive_root'] or Path(cfg['root'])/'.claude/archive')
+    if not root.is_absolute():
+        root = Path(cfg['root'])/root
+    try:
+        root.lstat()
+        certainty.plain_path(root)
+        if not root.is_relative_to(Path(cfg['root'])):
+            guard.tracked.update(tracked_files(root))
+    except FileNotFoundError as exc:
+        if not str(root).startswith(('\\\\','//')):
+            return dict(state='absent',root=str(root),rows=[],held=[])
+        return dict(state='partial',root=str(root),rows=[],held=[dict(path=str(root),reason=str(exc))])
+    except (OSError, ValueError) as exc:
+        return dict(state='partial',root=str(root),rows=[],held=[dict(path=str(root),reason=str(exc))])
+    return _archive_module().review_archives(dict(cfg,archive_root=str(root)),
+                                             protect=lambda p:archive_protection(guard,p))
+
+
+_ARCHIVE_MODULE = None
+
+
 def _archive_module():
-    """tools/housekeep_archive.py, loaded from beside this file: housekeep is often run (and tested) by path."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("housekeep_archive", Path(__file__).with_name("housekeep_archive.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """The shared archive helper, cached only for this process."""
+    global _ARCHIVE_MODULE
+    if _ARCHIVE_MODULE is None:
+        spec = importlib.util.spec_from_file_location("housekeep_archive", Path(__file__).with_name("housekeep_archive.py"))
+        _ARCHIVE_MODULE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_ARCHIVE_MODULE)
+    return _ARCHIVE_MODULE
+
+
+
+def cleanup_code_sha256():
+    return _daily_module().code_sha256()
 
 
 def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = None, deadline: float | None = None,
@@ -1147,6 +1160,10 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
     """Do exactly the plan, re-checking each action. `deadline` (epoch): no new action starts after it; the rest is
     counted as deferred for the next run. summary=True returns {"gib", "failed", "deferred"} instead of an exit code.
     Archive payloads go to the bin in batches at the end of the class, not one shell call per folder."""
+    if any(a['class'] in {'archive','expire'} and (not only or a['class'] in only) for a in plan_doc['actions']):
+        if cfg.get('approved_sha256') != cleanup_code_sha256():
+            print('REFUSED: archive cleanup version has not been approved after first-output review: '+cleanup_code_sha256())
+            return {'gib':0,'failed':1,'deferred':0} if summary else 1
     now = time.time() if now is None else now
     guard = Guard(cfg)
     memo = _Memo()
@@ -1163,7 +1180,14 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
             if deadline is not None and time.time() > deadline:
                 deferred += 1
                 continue
-            why = check(a, cfg, guard, now, memo)
+            try:
+                why = check(a, cfg, guard, now, memo)
+            except (OSError, ValueError, TimeoutError) as exc:
+                why = 'candidate could not be rechecked: '+str(exc)
+            except Exception as exc:
+                if type(exc).__name__ != 'ArchiveError':
+                    raise
+                why = 'archive proof failed: '+str(exc)
             if why:
                 print("  REFUSED  {:<11} {}  ({})".format(cls, a["path"], why))
                 failed += 1
@@ -1404,6 +1428,12 @@ def session(cfg, state: Path) -> int:
             notes.append(note)
     except (OSError, ValueError) as exc:
         notes.append("cold backup review unavailable: {}".format(exc))
+    try:
+        note = _archive_module().periodic_note(cfg, lambda:review_archives(cfg))
+        if note:
+            notes.append(note)
+    except (OSError, ValueError) as exc:
+        notes.append('task archive review unavailable: {}'.format(exc))
     if sweep_due:
         res = sweep_temp(cfg)
         r = res["rows"]
