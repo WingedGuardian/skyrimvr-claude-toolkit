@@ -48,10 +48,12 @@ def _walk(src: Path):
 def _members(src: Path):
     out = []
     for dp, dirs, files in _walk(src):
-        if ".git" in dirs:
-            raise ArchiveError("contains a .git folder: a repository is never archived")
+        if ".git" in dirs or ".git" in files:
+            raise ArchiveError("contains a .git entry: a repository is never archived")
         for f in files:
             p = Path(dp) / f
+            if fnmatch.fnmatch(f.lower(), 'owned-session*.json') or fnmatch.fnmatch(f.lower(), '*ownership*.json'):
+                raise ArchiveError('ownership receipt lacks qualified release proof: {}'.format(p))
             if f.lower().endswith(SAVE_EXTS):
                 raise ArchiveError("holds a save ({}): saves are never archived".format(p))
             out.append(p)

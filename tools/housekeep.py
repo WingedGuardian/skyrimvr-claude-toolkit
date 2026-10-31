@@ -447,9 +447,13 @@ def is_done(task: Path, idle_days: float, tokens: set, cwds: list, guard) -> str
     if any(c == k or c.startswith(k + os.sep) for c in cwds):
         return "a running rb job works here"
     for dp, dirs, files in os.walk(task):
-        if ".git" in dirs:
+        if ".git" in dirs or ".git" in files:
             return "a git repository"
         for f in files:
+            if fnmatch.fnmatch(f.lower(), 'owned-session*.json') or fnmatch.fnmatch(f.lower(), '*ownership*.json'):
+                # Legacy receipts have no common release schema. A dead/reused PID, age or an
+                # unqualified `released` field cannot prove that the owner's work is finished.
+                return "holds an ownership receipt without qualified release proof"
             if f.lower().endswith(SAVE_EXTS):
                 return "holds a save"
             if guard.globs and guard.why_protected(os.path.join(dp, f)) == "protected_globs":

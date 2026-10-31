@@ -176,6 +176,20 @@ class ArchiveFolder(Base):
             ha.archive_folder(t, self.nas, self.recycler)
         self.assertFalse(self.nas.exists() and any(self.nas.iterdir()))
 
+    def test_worktree_git_file_is_refused_by_archive_helper(self):
+        t = self.task()
+        touch(t / '.git', b'gitdir: elsewhere')
+        with self.assertRaises(ha.ArchiveError):
+            ha.archive_folder(t, self.nas, self.recycler)
+        self.assertFalse(self.nas.exists())
+
+    def test_ownership_receipt_is_refused_by_archive_helper(self):
+        t = self.task()
+        touch(t / 'owned-session.json', b'{"Id":123}')
+        with self.assertRaises(ha.ArchiveError):
+            ha.archive_folder(t, self.nas, self.recycler)
+        self.assertFalse(self.nas.exists())
+
     def test_restore_refuses_existing(self):
         t = self.task()
         ha.archive_folder(t, self.nas, self.recycler)
@@ -229,6 +243,27 @@ class DoneTest(Base):
         t = self.task()
         (t / "repo" / ".git").mkdir(parents=True)
         self.assertIn("git", self.done(t))
+
+    def test_git_worktree_file_never(self):
+        t = self.task()
+        touch(t / '.git', b'gitdir: elsewhere')
+        self.assertIn('git', self.done(t))
+
+    def test_ownership_receipts_need_qualified_release_proof(self):
+        t = self.task()
+        for name, data in (('owned-session.json', b'{"Id":123,"StartTime":"old"}'),
+                           ('runtime-ownership.json', b'{"released":true}'),
+                           ('owned-session-broken.json', b'{broken')):
+            with self.subTest(name=name):
+                receipt = t / 'nested' / name
+                touch(receipt, data)
+                self.assertIn('ownership', self.done(t))
+                receipt.unlink()  # this test's own scratch, never a user receipt
+
+    def test_ownership_word_in_notes_does_not_hold_plain_task(self):
+        t = self.task()
+        touch(t / 'ownership-notes.md', b'notes, not an owner receipt')
+        self.assertEqual('', self.done(t))
 
     def test_save_blocks(self):
         t = self.task()
