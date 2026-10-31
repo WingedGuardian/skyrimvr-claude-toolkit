@@ -11,6 +11,46 @@ def config(root):
     return cfg_for(root, archive_enabled=False, live_roots=[])
 
 
+def test_archive_metadata_single_pass_preserves_fingerprint_and_activity(tmp_path, monkeypatch):
+    root = tmp_path / "task"
+    write(root / "first.bin", b"first", days=10)
+    write(root / "nested/second.bin", b"second", days=20)
+    expected = hk.fingerprint(root), *hk.activity(root)
+    calls = []
+    original = hk.walk_files
+    def observed(path):
+        calls.append(path)
+        yield from original(path)
+    monkeypatch.setattr(hk, "walk_files", observed)
+    assert hk.archive_facts(root) == expected
+    assert calls == [root]
+
+
+@pytest.mark.parametrize("shared", [True, False])
+def test_live_input_links_are_kept_without_content_reads_but_real_copies_qualify(tmp_path, monkeypatch, shared):
+    live = write(tmp_path / "Data/input.bin", b"identical")
+    staged = tmp_path / "_CLAUDE_OUTPUT/task/input.bin"
+    staged.parent.mkdir(parents=True)
+    if shared:
+        os.link(live, staged)
+    else:
+        write(staged, b"identical")
+    cfg = cfg_for(tmp_path, archive_enabled=False, min_bytes=1, active_hours=0)
+    reads = []
+    original = hk.blake
+    def observed(path, *args, **kwargs):
+        reads.append(os.fspath(path))
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(hk, "blake", observed)
+    doc = hk.plan(cfg)
+    if shared:
+        assert doc["actions"] == []
+        assert reads == []
+    else:
+        assert [a["class"] for a in doc["actions"]] == ["recreatable"]
+        assert os.fspath(staged) in reads
+
+
 @pytest.mark.parametrize("protection", ["tracked", "linked"])
 def test_external_repository_output_keeps_its_own_protected_evidence(tmp_path, protection):
     root = tmp_path / "toolkit"

@@ -457,6 +457,18 @@ def is_done(task: Path, idle_days: float, tokens: set, cwds: list, guard) -> str
     return ""
 
 
+def archive_facts(folder):
+    """One bounded-memory metadata pass for fingerprint and write/read activity."""
+    n = size = 0
+    wrote = read = 0.0
+    for p in walk_files(folder):
+        st = p.stat()
+        n += 1
+        size += st.st_size
+        wrote, read = max(wrote, st.st_mtime), max(read, st.st_atime)
+    return [n, size, round(wrote, 3)], wrote, read
+
+
 def archive_selection(cfg, guard, tasks, now, held=None, inventory=None) -> tuple:
     """([action], rows) for every done folder due: closed first, then by age; over budget, down to min_idle_days."""
     tokens, cwds = live_state_tokens(cfg), rb_job_cwds()
@@ -489,8 +501,7 @@ def archive_selection(cfg, guard, tasks, now, held=None, inventory=None) -> tupl
 
     for t, days, from_root in cands:
         try:
-            fp = fingerprint(t)
-            wrote, read = activity(t)
+            fp, wrote, read = archive_facts(t)
         except OSError as exc:
             inventory["candidates_held"] += 1
             held.append({"path": str(t), "reason": str(exc), "bytes": None, "scope": "archive"})
@@ -675,9 +686,10 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
     for task, state in tasks:
         for f in walk_files(task):
             try:
-                size = f.stat().st_size
-            except OSError:
-                continue
+                st = f.stat()
+                size = st.st_size
+            except OSError as exc:
+                raise OSError("candidate could not be inspected: {}".format(f)) from exc
             if state == "loose":
                 count("kept: loose file in a root (shared live state)", size)
                 continue
@@ -690,6 +702,9 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             why = guard.why_protected(f)
             if why:
                 count("kept: protected ({})".format(why), size)
+                continue
+            if st.st_nlink != 1:
+                count("kept: pre-existing hard links (ownership unqualified)", size)
                 continue
             if is_build(f, cfg):
                 act({"class": "build", "path": str(f), "bytes": size, "hash": blake(f),
