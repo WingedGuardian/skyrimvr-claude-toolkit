@@ -117,8 +117,12 @@ def test_inline_substitution_before_a_syntax_error_keeps_its_delete_evidence():
     command = "eval 'cd Data'; echo `rm -rf x`; echo '"
     parsed = shellparse.parse(command, "bash")
     assert not parsed.ok
+    # The EVIDENCE, not only the verdict: since round D the delete fallback (S-DEL-FALLBACK) denies an unparsable
+    # command that names a destroyer inside the install anyway, so a deny alone no longer proves the substitution
+    # survived the syntax error (CI run 41119451558: the review-guards-partial-parse-evidence twin outlived it).
+    assert any(e.program == "rm" for e in parsed.execs), "a later syntax error erased the deferred substitution"
     verdict = shell_rules.decide(command, ROOTS, Audit(), cwd=ROOT, shell="bash", env={})
-    assert verdict.decision == "deny", "a later syntax error erased the deferred substitution"
+    assert verdict.decision == "deny"
 
 
 @pytest.mark.parametrize("command", [
