@@ -2,14 +2,27 @@
   "_comment": "Copy to .claude/housekeep.json and edit. Paths are relative to the toolkit folder or absolute. See docs/RETENTION.md.",
   "obsolete_items": {},
   "recycle_bin_warn_gib": 10,
-  "backup_archive": {"enabled": false},
-  "agent_output": ["_CLAUDE_OUTPUT"],
+  "backup_archive": {
+    "enabled": false
+  },
+  "agent_output": [
+    "_CLAUDE_OUTPUT"
+  ],
   "nested_task_roots": [],
-  "live_roots": ["Data"],
+  "live_roots": [
+    "Data"
+  ],
   "launch_logs": [],
-  "legacy_snapshots": [".claude/backups/auto_snapshots"],
+  "legacy_snapshots": [
+    ".claude/backups/auto_snapshots"
+  ],
   "scratch": [],
-  "evidence_docs": ["CLAUDE.md", "AGENTS.md", "KNOWLEDGEBASE.md", "KNOWLEDGEBASE.local.md"],
+  "evidence_docs": [
+    "CLAUDE.md",
+    "AGENTS.md",
+    "KNOWLEDGEBASE.md",
+    "KNOWLEDGEBASE.local.md"
+  ],
   "protected_globs": [],
   "active_hours": 48,
   "min_bytes": 1048576,
@@ -34,5 +47,12 @@
   "daily_enabled": true,
   "daily_every_hours": 20,
   "daily_minutes": 10,
-  "pause_while_running": ["SkyrimVR.exe", "SkyrimSE.exe", "vrserver.exe", "vrcompositor.exe"]
+  "pause_while_running": [
+    "SkyrimVR.exe",
+    "SkyrimSE.exe",
+    "vrserver.exe",
+    "vrcompositor.exe"
+  ],
+  "archive_review_days": 30,
+  "archive_review_seconds": 15
 }

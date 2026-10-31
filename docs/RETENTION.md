@@ -44,13 +44,14 @@ physical allocation. Report permanent deletions, recycling and failures separate
 
 | Class | What | Rule |
 |---|---|---|
-| **Forever** | Saves and every copy of them; backup stores and their manifests (anything under a folder named `*backup*`); knowledgebase snapshots; known-good baselines; audit logs; folders a person labelled by hand | Never removed by a tool. A person decides. |
+| **Forever** | Saves and every copy of them; backup stores and their manifests (except explicitly configured rolling tool stores below); knowledgebase snapshots; known-good baselines; audit logs; folders a person labelled by hand | Never removed by a tool. A person decides. |
 | **Evidence** | Findings, READMEs, receipts (`.md`, `.json`, `.jsonl`), small logs; every file a project doc links to | Kept. They are small, and docs point at them. |
 | **Recreatable** | A byte-identical copy of a file that is still live (a fixture copy of a game master) | Removed as soon as it is idle: the live file is the copy. |
 | **Build output** | Compiler intermediates inside build folders | Review candidates only. Removal requires an explicit content-bound obsolete decision. Build products and active work remain protected. |
-| **Finished work** | A task folder that is done: no write for 7 days, no read for 48 hours, not named in the instruction file's Live state block, not pinned with `.housekeep-keep`, no save, no git repository. A session can mark it done early with `.housekeep-closed`. | Zipped to the archive folder, the zip read back and checked, a short `ARCHIVED.md` (with a restore command) left behind, then the bulk recycled. The archive is local by default; another drive or a NAS is optional, never assumed. Archive age triggers review only; unique archives stay until explicitly declared obsolete. |
+| **Finished work** | A task folder that is done: no write for 7 days, no read for 48 hours, not named in the instruction file's Live state block, not pinned with `.housekeep-keep`, no save or git repository/worktree, no ownership receipt without qualified release proof. A session can mark it done early with `.housekeep-closed`; independent holds still apply. | Zipped to the archive folder, the zip read back and checked, a short `ARCHIVED.md` (with a restore command) left behind, then the bulk recycled. The archive is local by default; another drive or a NAS is optional, never assumed. Archive age triggers review only; unique archives stay until explicitly declared obsolete. |
 | **Duplicate** | The same bytes at several agent-output paths | Stored once: hard links to one read-only copy. Every path keeps working. |
 | **Rolling** | Per-launch logs, snapshot folders, named scratch beds | Compression requires a verified lossless replacement. Snapshots require an identical retained generation. Unique logs and scratch need explicit content-bound obsolete decisions; age alone never deletes them. |
+| **Rolling tool store** | Configured rolling snapshots, including stores under backup folders | Retire only a byte-identical repeated generation after re-proving the retained copy. Newest and distinct generations stay. |
 | **Toolkit temp** | Leftover workspaces explicitly declared disposable by their producer when newly created | Name, ownership and age alone are insufficient. Require a producer disposition receipt or explicit content-bound obsolete decision, then the ordinary protection, inactivity and in-use checks. Legacy unmarked workspaces stay. |
 
 ### The toolkit cleans up after itself
@@ -73,22 +74,23 @@ again. So:
 
 1. **Report, plan, apply -- never one step.** The plan records each file's hash; apply re-checks it and refuses
    anything that changed.
-2. **Recycle Bin (or Trash) by default.** Permanent eligibility requires both gates above, except same-run scratch. An item too big for
-   the bin gets the system's own "delete permanently?" prompt, and stays where it is unless the user says yes.
-   The bin frees nothing until the user empties it; that is their decision.
-3. **Leave active work alone.** A task folder written to -- or read from -- in the last 48 hours belongs to a
-   session that is probably still running. A read leaves no write time, so "nothing wrote here" alone never
-   means done: a build linking a library only reads it. Where the drive does not record reads, only folders a
-   session marked `.housekeep-closed` are archived.
+2. **Recycle Bin (or Trash) by default.** Permanent eligibility requires both gates above, except same-run scratch.
+   An item too big for the Bin, a network item without a recycling route, or unknown/disabled Bin capacity stays
+   in place and is reported in-session. Any exact-item permanent-deletion decision belongs to the user; cleanup
+   never silently falls back to it. Recycling frees no disk space until the Bin is deliberately emptied.
+3. **Leave active work alone.** Task archival checks whole-task write/read activity, pins, Live state,
+   resource-job ownership, ownership receipts and repository/save protections. Recent reads independently veto
+   archival. If read recording cannot be proven with same-run owned scratch on the same volume, only an explicitly
+   closed folder can qualify. A closure bypasses write-age only; it does not bypass the independent hold gates.
 4. **Never touch a git-tracked file**, and never hard-link to a live game file.
 5. **Accounting must sum.** Every scanned byte lands in exactly one row; the row of bytes left alone prints even
    at zero.
-6. **A changed rule acts only after a person has seen its output.** The daily run applies only when the cleanup
-   code matches the version the user approved; after any change it plans, writes a review file, and the session
-   says so.
+6. **A changed rule acts only after a person has seen its output.** Archive/retirement actions require the
+   cleanup version the user approved. An updated version first produces a review; it does not approve itself.
+   The optional session daily runner applies only its approved version. X4 task archiving is opt-in and manual.
 7. **Never unattended, never a blindside.** Cleanup runs only from an open agent session, which announces it --
    what, which approved version, where the log is -- before it starts. No background service or scheduled task, no
-   window or focus change, and nothing that makes the system ask "delete permanently?": an item the bin cannot
+   window or focus change, and no unattended permanent-deletion prompt: an item the bin cannot
    take stays where it is and is reported.
 
 ### Where agent output goes
@@ -106,7 +108,24 @@ Cleanup is the second line of defence; writing less is the first:
   `.housekeep-closed`. A multi-GB folder that is genuinely needed later gets `.housekeep-keep` and one README line
   saying why; the daily note names every pinned folder over 1 GiB.
 - **Budget.** Agent output has a size budget (`budget_gib`); over it, finished work is archived oldest first, and
-  growth of more than 5 GiB in a day is named in the session-start note.
+  the optional daily runner reports measured logical growth separately from physical drive usage.
+
+### Ordinary archive review
+
+Ordinary task archives and the optional cold-backup vault are separate inventories. Both are reviewed; one is
+not coverage for the other. `archive_review_days` defaults to 30, with `archive_review_seconds` 15 per ordinary
+archive review, from an open session only. A failed/partial review retries sooner and offers no retirement.
+`archive_retention_days` is accepted for compatibility; age is never authority to remove an archive, and setting
+it to zero does not disable certainty-based review. Unknown usefulness stays indefinitely.
+
+Only an explicit `obsolete_items` entry bound to the current archive bytes, with
+`basis: operator-confirmed-obsolete`, a reason and evidence can produce an ordinary archive retirement candidate.
+Its `content_hash` is the current BLAKE2b digest with 16-byte output. Apply checks those bytes again, plus the
+configured namespace and independent protections. Source group names such as `backups` do not hide tracked,
+linked, save, baseline or custom protections. NAS retirement still needs a working recycler; failure leaves it.
+
+The source check `check-housekeep-parity.py PEER_SOURCE_ROOT` compares both actual shared policies, their pins,
+and both shared archive helpers. The local pin tests alone do not prove that the sibling repository agrees.
 
 ### Agent transcripts
 
@@ -135,6 +154,14 @@ Cleanup is the second line of defence; writing less is the first:
   each other; the 4.x content-addressed store does not.
 
 ## Running it
+
+Task archive workflow: configure `agent_output`/`archive_roots` and `archive_root`, enable `archive_enabled`,
+then run `python tools/housekeep.py version` and `python tools/housekeep.py plan --only archive,expire -o archive-plan.json`.
+Review that version and the full proposal before recording its digest in `approved_sha256`; then an announced
+in-session `apply archive-plan.json --only archive,expire` rechecks it. X4 does not start an automatic task archive
+run. An unreachable NAS, stale proof, active owner or unqualified Bin route leaves local material in place.
+Archive inventories may include another drive/NAS; logical totals are not C: allocation or immediate recovery.
+
 
 Optional preservation of older backup generations on secondary storage:
 [cold backup archive](BACKUP-ARCHIVE.md). It is opt-in, verifies every archived
