@@ -124,6 +124,10 @@ def write_review(cfg, doc, sha):
     lines += ["- {:.2f} GiB  {}  {}".format(b / GIB, c, t) for (c, t), b in by_task.most_common()]
     lines += ["", "## By extension", ""]
     lines += ["- {:.2f} GiB  {}".format(b / GIB, e) for e, b in by_ext.most_common()]
+    held = doc.get("coverage", {}).get("held", [])
+    if held:
+        lines += ["", "## Held targets", "", "Their byte sizes are unknown and excluded from totals.", ""]
+        lines += ["- {} ({})".format(item["path"], item["reason"]) for item in held]
     f(cfg, "REVIEW").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -132,6 +136,11 @@ def write_alerts(doc, cfg):
     (.housekeep-keep) folder is big. Rewritten every run, so a quiet day leaves an empty file."""
     lines = []
     total = doc.get("agent_total")
+    held = doc.get("coverage", {}).get("held", [])
+    if held:
+        lines.append("cleanup inventory holds {} target(s); their sizes are unknown and excluded -- see {}".format(
+            len(held), f(cfg, "PLAN")))
+        total = None  # Partial totals cannot replace a complete growth baseline.
     try:
         prev = json.loads(f(cfg, "SIZES").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -161,6 +170,7 @@ def run(cfg, dry=False, now=None) -> str:
     done = None
     with redirect_stdout(buf):
         doc = housekeep.plan(cfg)
+        housekeep.print_coverage(doc)
         housekeep.print_rows(doc["rows"], "plan")
         f(cfg, "PLAN").write_text(json.dumps(doc, indent=1), encoding="utf-8")
         if not ok:
