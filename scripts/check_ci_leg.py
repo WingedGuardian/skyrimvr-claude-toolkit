@@ -2,7 +2,7 @@
 """Per-leg CI tripwires (Plan 8 T10.4): a leg that silently runs nothing, or skips its way to green, goes red.
 
     check_ci_leg.py collect <collect-only.log> --leg Linux|Windows [--spec .github/ci-leg.json]
-    check_ci_leg.py log     <pytest -v -rfEs log> --leg Linux|Windows [--part NAME] [--spec .github/ci-leg.json]
+    check_ci_leg.py log     <pytest -v -rfEs log>... --leg Linux|Windows [--part NAME] [--spec .github/ci-leg.json]
 
 `collect` runs FIRST on each leg, from `pytest --collect-only -q` output: fewer tests than the recorded floor
 means a module stopped being collected (or the leg is looking at the wrong tree) -- before an hour of suite.
@@ -19,6 +19,12 @@ means a module stopped being collected (or the leg is looking at the wrong tree)
 `--part NAME` (log mode) checks one part of a leg that CI splits into jobs: spec["parts"][NAME] replaces the
 top-level floor, ceilings and module lists it names. The mutation gate runs as its own part because it is most of
 a Windows leg's time (146-217 of 270 minutes in CI run 39210090486); the top-level numbers are the rest of the suite.
+
+Several logs (log mode) are the SHARDS of one part, each a job that ran a slice of the same collection
+(SKYGUARD_MUTATION_SHARD in tests/conftest.py): every shard must have collected the whole part (the floor is
+checked per log), the skipped and xfailed counts are SUMMED before the ceilings, a required module needs a PASSED
+test in any one shard, and a forbidden module passing anywhere is red. So n shard logs are checked exactly as the one
+unsharded log would be; a shard that ran nothing, or skipped its share, cannot hide behind the others.
 
 Numbers live in .github/ci-leg.json so a change to them is a reviewed diff. Exit 0 ok / 1 a tripwire fired /
 2 nothing could be checked (no summary, bad usage).
@@ -53,23 +59,31 @@ def check_collect(lines, spec, leg):
     return 0, ["{} leg collected {} tests (floor {})".format(leg, n, floor)]
 
 
-def check_log(lines, spec, leg):
-    summary = [l for l in lines if re.match(r"^=+ .* in [0-9.]+s", l)]
-    if not summary:
-        return 2, ["COULD NOT CHECK: no pytest summary line"]
+def check_log(lines, spec, leg, shards=None):
+    """`lines` is one log; `shards` (a list of line lists) is every shard of the part, `lines` first, when CI split
+    it into jobs. Each shard must collect the whole part; the counts are summed across shards."""
+    shards = shards or [lines]
+    summary = [l for s in shards for l in s if re.match(r"^=+ .* in [0-9.]+s", l)]
+    if len(summary) < len(shards):
+        return 2, ["COULD NOT CHECK: no pytest summary line" + (" in every shard" if len(shards) > 1 else "")]
     problems, notes = [], []
     # Real `pytest -v` output piped to a file reads `collecting ... collected N items` on one line (MEASURED
     # 2026-10-06). The match is anchored at the line start, so a node id carrying the same words in its
     # parameters never counts.
-    collected = next((int(m.group(1)) for l in lines
-                      for m in [re.match(r"^(?:collecting \.\.\. )?collected (\d+) items?\b", l)] if m), None)
-    if collected is None:
-        problems.append("no 'collected N items' line: was the suite run with -v?")
-    elif collected < spec["collected_floor"]:
-        problems.append("collected {} < floor {}".format(collected, spec["collected_floor"]))
-    else:
-        notes.append("collected {} (floor {})".format(collected, spec["collected_floor"]))
+    for k, s in enumerate(shards):
+        where = " in shard {} of {}".format(k + 1, len(shards)) if len(shards) > 1 else ""
+        collected = next((int(m.group(1)) for l in s
+                          for m in [re.match(r"^(?:collecting \.\.\. )?collected (\d+) items?\b", l)] if m), None)
+        if collected is None:
+            problems.append("no 'collected N items' line{}: was the suite run with -v?".format(where))
+        elif collected < spec["collected_floor"]:
+            problems.append("collected {} < floor {}{}".format(collected, spec["collected_floor"], where))
+        else:
+            notes.append("collected {} (floor {}){}".format(collected, spec["collected_floor"], where))
+    lines = [l for s in shards for l in s]
     skipped, xfailed = _count(summary, "skipped"), _count(summary, "xfailed")
+    if len(shards) > 1:
+        notes.append("{} shard logs summed".format(len(shards)))
     ceiling = spec["skip_ceiling"][leg]
     if skipped > ceiling:
         problems.append("{} skipped > the {} leg's ceiling {}: something stopped running".format(skipped, leg, ceiling))
@@ -94,7 +108,16 @@ def main(argv=None) -> int:
     if len(argv) < 4 or argv[0] not in ("collect", "log") or "--leg" not in argv:
         sys.stderr.write(__doc__.split("\n\n")[1] + "\n")
         return 2
-    mode, log = argv[0], argv[1]
+    mode = argv[0]
+    logs = []
+    for a in argv[1:]:
+        if a.startswith("--"):
+            break
+        logs.append(a)
+    if not logs or (mode == "collect" and len(logs) > 1):
+        sys.stderr.write(__doc__.split("\n\n")[1] + "\n")
+        return 2
+    log = logs[0]
     leg = argv[argv.index("--leg") + 1]
     spec_path = Path(argv[argv.index("--spec") + 1]) if "--spec" in argv else SPEC
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
@@ -108,13 +131,16 @@ def main(argv=None) -> int:
         sys.stderr.write("unknown leg {!r}; known: {}\n".format(leg, ", ".join(spec["skip_ceiling"])))
         return 2
     # An `if: always()` step after a failed suite step reads a log nobody wrote: say so, not a traceback.
-    try:
-        lines = Path(log).read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as e:
-        print("COULD NOT CHECK: cannot read {} ({}) -- did the step that writes it run?".format(log, e.strerror))
-        print("CI LEG {} ({}): COULD NOT CHECK".format(leg, mode))
-        return 2
-    rc, msgs = (check_collect if mode == "collect" else check_log)(lines, spec, leg)
+    shards = []
+    for log in logs:
+        try:
+            shards.append(Path(log).read_text(encoding="utf-8", errors="replace").splitlines())
+        except OSError as e:
+            print("COULD NOT CHECK: cannot read {} ({}) -- did the step that writes it run?".format(log, e.strerror))
+            print("CI LEG {} ({}): COULD NOT CHECK".format(leg, mode))
+            return 2
+    lines = shards[0]
+    rc, msgs = check_collect(lines, spec, leg) if mode == "collect" else check_log(lines, spec, leg, shards)
     for m in msgs:
         print(("TRIPWIRE: " if rc == 1 else "") + m)
     print("CI LEG {} ({}): {}".format(leg, mode, {0: "OK", 1: "RED", 2: "COULD NOT CHECK"}[rc]))

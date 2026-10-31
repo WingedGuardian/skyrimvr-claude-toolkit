@@ -101,6 +101,38 @@ def pytest_configure(config):
             "TOOLKIT_REQUIRE_HARNESS=1 but the package-manager barriers are not active; "
             "run through: python -B tests/run_harness_tests.py tests/")
 
+
+def mutation_shard(spec):
+    """Parse SKYGUARD_MUTATION_SHARD ("2/4": the second of four) -> (index, count), or None for the whole gate."""
+    if not spec:
+        return None
+    try:
+        i, n = (int(x) for x in spec.split("/"))
+    except ValueError:
+        raise pytest.UsageError("SKYGUARD_MUTATION_SHARD must look like 2/4, got %r" % spec)
+    if not 1 <= i <= n:
+        raise pytest.UsageError("SKYGUARD_MUTATION_SHARD %r: the index is outside 1..count" % spec)
+    return i - 1, n
+
+
+def pytest_collection_modifyitems(config, items):
+    """SKYGUARD_MUTATION_SHARD=i/n keeps every n-th mutation twin (by its position in MUTATIONS) and DESELECTS the
+    rest, so CI can run the gate as n parallel jobs: one Windows mutation job was 258 of a run's 270 minutes (CI run
+    40953576542). Deselection, not skipping: the collected count stays the whole gate (the floor in ci-leg.json still
+    means what it did), the deselected twins are not "skipped" (the skip ceiling still bites), and the n shard logs
+    summed by check_ci_leg.py are exactly one unsharded run. Everything else in the session is untouched."""
+    shard = mutation_shard(os.environ.get("SKYGUARD_MUTATION_SHARD"))
+    if shard is None:
+        return
+    i, n = shard
+    prefix = "tests/test_mutations.py::test_guard_actually_bites["
+    twins = [it for it in items if it.nodeid.replace("\\", "/").startswith(prefix)]
+    dropped = [it for k, it in enumerate(twins) if k % n != i]
+    if dropped:
+        gone = set(id(it) for it in dropped)
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = [it for it in items if id(it) not in gone]
+
 # setup.sh no longer installs anything, but it still shells out to which/python/powershell
 # probes. Every invocation is capped so a stuck probe fails the test instead of hanging the job.
 SETUP_TIMEOUT = 240
