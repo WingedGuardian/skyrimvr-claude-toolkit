@@ -287,7 +287,7 @@ def test_the_excludes_are_one_list_the_tests_can_read():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     assert set(mod.EXCLUDE) == {"tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests",
-                                "scripts/guard-corpus", "scripts/guard-latency.py",
+                                "scripts/guard-corpus", "scripts/guard-latency.py", "scripts/prepush-gate.py",
                                 "docs/superpowers", "docs/REVIEW-SCOPE.md"}, mod.EXCLUDE
 
 

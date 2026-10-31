@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""The local pre-push gate: what a push must pass at the desk before it costs a CI round.
+
+    python scripts/prepush-gate.py [--base REV] [--python EXE]
+
+Full suites run on GitHub CI, never on the dev machine (user ruling 2026-10-18). This is the targeted set that
+catches what actually turned CI red: of the ten red full-qualification runs between 2026-10-26 and 2026-10-30,
+seven failed on something below -- a moved mutation anchor, a corpus row no longer reproduced, a stale pin
+audit, a test module that was not in the pusher's local set -- and each cost a 4-5 hour round (user ruling
+2026-10-31: no push without this gate; it is installed as the maintainers' git pre-push hook, never shipped).
+
+Steps, each red on its own:
+  1. collection: `pytest --collect-only tests/` collects at least the recorded floors (.github/ci-leg.json: the
+     suite part plus the mutation part) with no errors -- a module that stopped importing, or a floor the push
+     should have raised;
+  2. drift: the generated agent files match agent/ (scripts/gen_agent_trees.py --check) and GUARD-FILES.sha256 is
+     fresh (scripts/gen-guard-hashes.py --check);
+  3. sentinels: the deterministic test files that fail CI whole when stale (SENTINELS below), plus the tests for
+     the files this push changes (`git diff --name-only BASE...HEAD`: a changed test file runs itself; a changed
+     tools/ or scripts/ module runs every tests/test_*<its stem>*.py; the guard adapters run the wrapper tests).
+
+BASE defaults to the branch's upstream, else the merge-base with origin/master. A dirty working tree is reported
+(the gate runs on the tree, the push sends the commits). Exit 0 = passed, 1 = a step failed, 2 = could not run.
+Runs under the resource budget when the hook launches it (rb.py); prints each step's seconds so growth is seen.
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+SENTINELS = [
+    "tests/test_mutation_anchors.py",      # every twin's anchor occurs exactly once (6 of the week's reds)
+    "tests/test_mutation_inventory.py",    # anchors unique, Python mutants compile
+    "tests/test_guard_corpus.py",          # intended rows reproduce
+    "tests/test_skyguard_codes.py",        # every rule and corpus row maps to one code
+    "tests/test_rule_messages.py",         # no message echoes its command
+    "tests/test_skyguard_timing.py",       # the timing shapes (CI runs them as their own step)
+    "tests/test_python_fallback.py",       # interpreter fallback chain and its clocks
+    "tests/test_hook_deadline.py",         # hook deadline arithmetic
+    "tests/test_thirdparty_audit.py",      # pins and their audit
+    "tests/test_spriggit_fixture.py",      # the Spriggit pin agrees with the manifest
+    "tests/test_codex_definitions.py",     # the frozen Codex hook definitions
+    "tests/test_gen_agent_trees.py",       # agent/ -> generated files
+    "tests/test_ci_leg.py",                # the CI tripwires
+    "tests/test_workflows.py",             # the workflow files
+    "tests/test_release_build.py",         # the release zip
+    "tests/test_release_payload.py",       # what ships and what never does
+]
+# changed path prefix -> extra test files (a changed test file always runs itself)
+PATH_TESTS = {
+    "agent/guards/": ["tests/test_python_fallback.py", "tests/test_hook_deadline.py", "tests/test_skyguard_shell.py",
+                      "tests/test_skyguard_write.py"],
+    "agent/": ["tests/test_gen_agent_trees.py"],
+    ".github/": ["tests/test_workflows.py", "tests/test_ci_leg.py"],
+    "tests/guard_corpus/": ["tests/test_guard_corpus.py", "tests/test_skyguard_codes.py"],
+    "tests/conftest.py": ["tests/test_ci_leg.py"],
+}
+
+
+def _git(*args):
+    return subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True).stdout.strip()
+
+
+def base_rev(explicit):
+    if explicit:
+        return explicit
+    up = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+    if up and _git("rev-parse", "--verify", "-q", up):
+        return up
+    for ref in ("origin/master", "origin/main", "master"):
+        mb = _git("merge-base", "HEAD", ref)
+        if mb:
+            return mb
+    return ""
+
+
+def changed_files(base):
+    if not base:
+        return []
+    out = _git("diff", "--name-only", base + "...HEAD")
+    return [l.replace("\\", "/") for l in out.splitlines() if l.strip()]
+
+
+def tests_for(changed):
+    want = []
+    for p in changed:
+        if p.startswith("tests/test_") and p.endswith(".py"):
+            want.append(p)
+        for prefix, tests in PATH_TESTS.items():
+            if p.startswith(prefix):
+                want.extend(tests)
+        if (p.startswith("tools/") or p.startswith("scripts/")) and p.endswith(".py"):
+            stem = Path(p).stem.replace("-", "_")
+            want.extend(sorted(Path(f).as_posix() for f in glob.glob(str(REPO / "tests" / ("test_*" + stem + "*.py")))))
+    seen, out = set(), []
+    for t in want:
+        rel = str(Path(t).as_posix()).replace(str(REPO.as_posix()) + "/", "")
+        if rel not in seen and (REPO / rel).is_file():
+            seen.add(rel)
+            out.append(rel)
+    return out
+
+
+class Gate:
+    def __init__(self, py):
+        self.py = py
+        self.failed = []
+        self.t0 = time.time()
+
+    def step(self, name, cmd, *, check=None):
+        t = time.time()
+        print("== {}".format(name), flush=True)
+        r = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        ok = r.returncode == 0
+        problems = []
+        if check is not None:
+            problems = check(r)
+            ok = ok and not problems
+        secs = time.time() - t
+        if not ok:
+            tail = (r.stdout + r.stderr).strip().splitlines()[-40:]
+            print("\n".join("   " + l for l in tail))
+            for p in problems:
+                print("   " + p)
+            self.failed.append(name)
+        print("   {} in {:.0f}s".format("ok" if ok else "FAILED", secs), flush=True)
+        return ok
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--base", default="", help="compare against this revision (default: upstream, else origin/master)")
+    ap.add_argument("--python", default=sys.executable, help="interpreter that has pytest (default: this one)")
+    a = ap.parse_args(argv)
+    py = a.python
+    probe = subprocess.run([py, "-c", "import pytest"], capture_output=True)
+    if probe.returncode != 0:
+        print("prepush-gate: {} has no pytest; pass --python <interpreter with pytest>".format(py))
+        return 2
+    spec = json.loads((REPO / ".github" / "ci-leg.json").read_text(encoding="utf-8"))
+    floor = spec["collected_floor"] + spec["parts"]["mutations"]["collected_floor"]
+    base = base_rev(a.base)
+    changed = changed_files(base)
+    dirty = _git("status", "--porcelain", "--untracked-files=no")
+    print("prepush-gate: {} @ {}  base {}  {} changed file(s){}".format(
+        _git("rev-parse", "--abbrev-ref", "HEAD"), _git("rev-parse", "--short", "HEAD"), base or "(none)",
+        len(changed), "  [DIRTY TREE: the gate runs on the tree, the push sends the commits]" if dirty else ""))
+    g = Gate(py)
+    pyt = [py, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-q"]
+
+    def collect_check(r):
+        # Node ids never count: test_ci_leg's own parameter ids carry "collected 12 items"-shaped text (the first
+        # version of this check read one of those and reported 12 < floor on a 17,018-test collection).
+        lines = [l for l in r.stdout.splitlines() if "::" not in l]
+        m = next((m for l in reversed(lines) for m in [re.search(r"(\d+) tests? collected", l)] if m), None)
+        if not m:
+            return ["no 'N tests collected' line"]
+        n = int(m.group(1))
+        out = []
+        if any(re.search(r"\d+ errors?\b", l) for l in lines if "collected" in l or l.startswith("=")):
+            out.append("collection reported errors: a module did not import")
+        if n < floor:
+            out.append("collected {} < floor {} (ci-leg.json suite + mutations)".format(n, floor))
+        else:
+            print("   collected {} (floor {})".format(n, floor))
+        return out
+    g.step("collection against the recorded floors", pyt + ["--collect-only", "tests/"], check=collect_check)
+    g.step("generated agent files match agent/", [py, "-B", "scripts/gen_agent_trees.py", "--check"])
+    g.step("GUARD-FILES.sha256 is fresh", [py, "-B", "scripts/gen-guard-hashes.py", "--check"])
+    extra = [t for t in tests_for(changed) if t not in SENTINELS]
+    missing = [s for s in SENTINELS if not (REPO / s).is_file()]
+    if missing:
+        print("   sentinel file(s) missing: {}".format(", ".join(missing)))
+        g.failed.append("sentinels present")
+    files = [s for s in SENTINELS if (REPO / s).is_file()] + extra
+    if extra:
+        print("   tests for changed files: " + ", ".join(extra))
+    g.step("sentinels and changed-file tests ({} files)".format(len(files)), pyt + ["-rfE", "--durations=15"] + files)
+    total = time.time() - g.t0
+    if g.failed:
+        print("prepush-gate: FAILED ({}) in {:.0f}s -- fix before pushing; CI would have gone red on it".format(
+            ", ".join(g.failed), total))
+        return 1
+    print("prepush-gate: passed in {:.0f}s{}".format(total, "  (over 15 min: trim or shard this gate)" if total > 900 else ""))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
