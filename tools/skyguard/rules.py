@@ -503,6 +503,16 @@ RULES = {
         "decision": "deny", "hook": "protect-files", "legacy": False, "prefixes": [],
         "template": "Blocked: this write targets {file}, a permanent save backup store or its ancestor.\nRecovery data cannot be overwritten, deleted, moved or aliased by this call."
     },
+    # User ruling 2026-10-31: save locking is optional and only the user switches it off. The switch file is also
+    # locked by the OS while on, and `save-lock off` needs an elevated prompt; this refuses the agent's own attempts.
+    'S-SAVE-LOCK': {
+        "decision": "deny", "hook": "protect-bash", "legacy": False, "prefixes": [],
+        "template": "Blocked: {file} is the save-lock switch; only the user turns save locking off.\nReading it is fine. The user switches locking off with tools/skyguard.sh save-lock off from an elevated prompt."
+    },
+    'W-SAVE-LOCK': {
+        "decision": "deny", "hook": "protect-files", "legacy": False, "prefixes": [],
+        "template": "Blocked: this write targets {file}, the save-lock switch; only the user changes it.\nReading it is fine. The user switches locking off with tools/skyguard.sh save-lock off from an elevated prompt."
+    },
     'S-SELF-STATE': {
         "decision": 'deny',
         "hook": 'protect-bash',

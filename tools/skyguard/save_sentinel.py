@@ -22,10 +22,11 @@ import subprocess
 import time
 from pathlib import Path
 
-from modding_harness import sentinel
+from modding_harness import save_lock, sentinel
 from . import mcp_rules, paths, save_profile
 
 MARKER = ".protect-saves"
+ELEVATED_REPEAT = 12 * 3600   # seconds between "this agent runs elevated" warnings
 MARKED_DEPTH = 4          # <project>/<a>/<b>/<c>/.protect-saves at most
 MARKED_REFRESH = 3600     # seconds between searches for marked folders
 GAMES = ("SkyrimVR.exe", "SkyrimSE.exe", "Skyrim.exe")
@@ -115,6 +116,44 @@ def state_path(project):
     return Path(project) / ".claude" / "backups" / ".save-sentinel.json"
 
 
+def lock_switch(project):
+    """The optional save-lock switch (modding_harness/save_lock.py); self_rules protects it from agent changes."""
+    return Path(project) / ".modding-agent-harness" / "save-lock.json"
+
+
+def lock_notes(project, state, before, profile, now):
+    """(notes, raise to the user?) for save locking: lock new or changed saves once settled while the switch is on,
+    and say so loudly when locking was switched off or the agent runs elevated (the locks do not hold it)."""
+    enabled = bool(save_lock.read_config(lock_switch(project)).get("enabled"))
+    notes, loud = [], False
+    if state.get("lock_enabled") and not enabled:
+        notes.append("SAVE LOCK: save locking was switched OFF ({} changed or removed). If the user did not do this, "
+                     "an agent or script did; it is switched back on with `tools/skyguard.sh save-lock on`."
+                     .format(lock_switch(project)))
+        loud = True
+    state["lock_enabled"] = enabled
+    if not enabled or not save_lock.supported():
+        return notes, loud
+    files = state.get("files") or {}
+    folders = list(dict.fromkeys([str(r) for r in profile.save_roots]
+                                 + [os.path.dirname(p) for _, _, p in files.values()]))
+    try:
+        failed = save_lock.auto_lock(state, before, files, folders, now=now, extensions=profile.extensions)
+    except (OSError, subprocess.SubprocessError, save_lock.Unsupported) as exc:
+        failed = ["(locking unavailable: {})".format(exc)]
+    if failed:
+        notes.append("SAVE LOCK: could not lock {} save file(s): {}".format(len(failed), ", ".join(failed[:5])))
+    if save_lock.is_elevated():
+        if "elevated_warned" not in state or now - state["elevated_warned"] > ELEVATED_REPEAT:
+            state["elevated_warned"] = now
+            notes.append("SAVE LOCK: this agent session runs as administrator, so the save locks do NOT protect the "
+                         "saves from it. Restart the agent from a normal (non-admin) terminal.")
+            loud = True
+    else:
+        state.pop("elevated_warned", None)
+    return notes, loud
+
+
 def report_text(project, roots, env, now=None):
     """(text for the agent, raise to the user?) -- ('', False) when nothing changed without a backup."""
     from . import save_store
@@ -129,16 +168,20 @@ def report_text(project, roots, env, now=None):
         store = save_store.store(project)
     except (OSError, ValueError):
         store = _NoStore()        # no readable store: every change is reported, none is "covered"
+    before = dict(state.get("files") or {})
     report = sentinel.check(profile, store, state, watch=state["marked"], now=now)
+    notes, lock_loud = lock_notes(project, state, before, profile, now)
     sentinel.save_state(path, state)
     text = sentinel.describe(report)
-    if not report.unbacked:
-        return text, False
-    running = game_running()
-    text += ("\nThe game is running, so it may be the game itself saving." if running else
-             "\nThe save rules did not back these up. If a command or script you ran did this, tell the user now; "
-             "a removed file may be in the Recycle Bin. Restore points: tools/skyguard.sh snapshot list --kind save")
-    return text, not running
+    loud = False
+    if report.unbacked:
+        running = game_running()
+        text += ("\nThe game is running, so it may be the game itself saving." if running else
+                 "\nThe save rules did not back these up. If a command or script you ran did this, tell the user now; "
+                 "a removed file may be in the Recycle Bin. Restore points: tools/skyguard.sh snapshot list --kind save")
+        loud = not running
+    text = "\n".join([t for t in [text] + notes if t])
+    return text, loud or lock_loud
 
 
 def render(text, loud):

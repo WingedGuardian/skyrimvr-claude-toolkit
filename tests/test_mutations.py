@@ -5453,7 +5453,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '    if own and own[0] == self_rules.STATE and not dels.hit:\n        return deny("S-SELF-STATE", own[1])\n'
      '    # Plan 6 final fix',
      _SFT + "test_guards_off_does_not_let_the_lock_manifest_be_deleted", "rule-S-SELF-STATE-delete-before-del-install"),
-    ('tools/skyguard/self_rules.py', '            if placed and save_store_target(placed, roots, holder, cache):', '            if False:', 'tests/test_skyguard_self_rules.py::test_a_delete_of_the_whole_install_cannot_destroy_permanent_backups', 'save-store-install-ancestor-protection'),
+    ('tools/skyguard/self_rules.py', '            if placed and target(placed, roots, holder, cache):', '            if False:', 'tests/test_skyguard_self_rules.py::test_a_delete_of_the_whole_install_cannot_destroy_permanent_backups', 'save-store-install-ancestor-protection'),
     # ---- fix round 1, C1: the guard hash is the REPO form of a configured file
     ("tools/skyguard/guard_hash.py", "    if not slots:\n        return data, {}", "    if True:\n        return data, {}",
      _SFT + "test_a_configured_install_banners_nothing_and_a_real_edit_is_named", "l2-self-hash-normalises-setup-slots"),
@@ -11381,4 +11381,31 @@ MUTATIONS += [pytest.param('tools/skyguard/shellparse.py', anchor, replacement, 
     ('                        _sub(text, dialect, sc.depth + 1, location, ctx)',
      '                        _sub(text, dialect, sc.depth + 1, crec.cd, ctx)',
      'test_possible_caller_locations_protect_install[pipe-heredoc]', 'pipe-heredoc'),
+]]
+
+
+# User ruling 2026-10-31: save locking is optional and only the user turns it off; the switch is never the agent's.
+_SLG = "tests/test_save_lock_guard.py::"
+_SLS = "tests/test_save_sentinel.py::"
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/shell_rules.py", '    if lock_hit:\n        return deny("S-SAVE-LOCK"',
+     '    if False:\n        return deny("S-SAVE-LOCK"',
+     _SLG + "test_a_shell_change_to_the_switch_is_refused[delete]", "rule-S-SAVE-LOCK-shell"),
+    ("tools/skyguard/self_rules.py", "    return rel is not None and [p.lower() for p in rel] == SAVE_LOCK_SWITCH",
+     "    return rel is not None and [p.lower() for p in rel][-1:] == SAVE_LOCK_SWITCH[-1:]",
+     _SLG + "test_a_same_named_file_elsewhere_is_not_the_switch", "rule-S-SAVE-LOCK-exact-path"),
+    ("tools/skyguard/self_rules.py", "    target = target or save_store_target",
+     "    target = save_store_target",
+     _SLG + "test_a_shell_change_to_the_switch_is_refused[overwrite]", "rule-S-SAVE-LOCK-target-used"),
+    ("tools/skyguard/write_rules.py", "    if placed and self_rules.save_lock_target(placed, roots):",
+     "    if False and self_rules.save_lock_target(placed, roots):",
+     _SLG + "test_a_file_tool_write_to_the_switch_is_refused[Write]", "rule-W-SAVE-LOCK-write"),
+    ("tools/skyguard/engine.py",
+     'NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SAVE-LOCK", "write.W-SAVE-LOCK"))',
+     "NEVER_SHADOW = NEVER_SHADOW | frozenset()",
+     _SLG + "test_guards_off_never_lifts_the_switch_refusal", "rule-S-SAVE-LOCK-never-shadowed"),
+    ("tools/skyguard/save_sentinel.py", '    if state.get("lock_enabled") and not enabled:',
+     "    if False:", _SLS + "test_switching_locking_off_is_raised_once", "save-lock-switched-off-alert"),
+    ("tools/skyguard/save_sentinel.py", "    if not enabled or not save_lock.supported():",
+     "    if not save_lock.supported():", _SLS + "test_locking_off_locks_nothing", "save-lock-off-locks-nothing"),
 ]]

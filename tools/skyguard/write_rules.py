@@ -67,6 +67,10 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
         reason = rules.message("W-SAVE-STORE", file=file_path)
         audit.rule(HOOK, "W-SAVE-STORE", "deny", reason)
         return Verdict("deny", reason)
+    if placed and self_rules.save_lock_target(placed, roots):
+        reason = rules.message("W-SAVE-LOCK", file=os.path.basename(placed))
+        audit.rule(HOOK, "W-SAVE-LOCK", "deny", reason)
+        return Verdict("deny", reason)
     # User ruling 2026-10-20: the agent's own session transcripts (save approvals are read there) are the host's alone.
     spoken = placed if roots is not None else targets.resolve_literal(file_path, cwd, env_)
     if spoken and self_rules.transcript_target(spoken, env_, transcript, holder=op in ("delete", "move")):

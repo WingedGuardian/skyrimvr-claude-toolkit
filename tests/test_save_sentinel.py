@@ -113,3 +113,78 @@ def test_the_wrapper_end_to_end(tmp_path):
     answer = json.loads(second.stdout)
     assert answer["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
     assert "modified: " + str(a) in answer["hookSpecificOutput"]["additionalContext"]
+
+
+class _FakeLock:
+    """modding_harness.save_lock with the Windows calls replaced by recorders."""
+    def __init__(self, elevated=False):
+        self.locked_files, self.elevated = [], elevated
+
+    def install(self, monkeypatch):
+        sl = save_sentinel.save_lock
+        monkeypatch.setattr(sl, "supported", lambda: True)
+        monkeypatch.setattr(sl, "is_elevated", lambda: self.elevated)
+        monkeypatch.setattr(sl, "user_sid", lambda: "S-1-5-21-1")
+        monkeypatch.setattr(sl, "status_map", lambda folder, exts: {})
+        monkeypatch.setattr(sl, "is_locked", lambda p: True)
+        monkeypatch.setattr(sl, "lock_folder", lambda p, sid: None)
+        monkeypatch.setattr(sl, "lock_file", lambda p, sid: self.locked_files.append(os.path.basename(p)))
+        return self
+
+
+def _switch(project, enabled):
+    s = save_sentinel.lock_switch(project)
+    s.parent.mkdir(parents=True, exist_ok=True)
+    s.write_text(json.dumps({"enabled": enabled}), encoding="utf-8")
+
+
+def _old_pair(folder, stem):
+    a = _pair(folder, stem)
+    for p in (a, a.with_suffix(".skse")):
+        os.utime(p, (500.0, 500.0))
+    return a
+
+
+def test_locking_off_locks_nothing(world, monkeypatch):
+    project, home, env = world
+    fake = _FakeLock().install(monkeypatch)
+    _old_pair(home / "Documents" / "My Games" / "Skyrim VR" / "Saves", "A")
+    _look(project, env, 1000.0)
+    _look(project, env, 1010.0)
+    assert fake.locked_files == []
+
+
+def test_locking_on_locks_settled_saves_once_and_leaves_rotating_slots(world, monkeypatch):
+    project, home, env = world
+    fake = _FakeLock().install(monkeypatch)
+    folder = home / "Documents" / "My Games" / "Skyrim VR" / "Saves"
+    _old_pair(folder, "Save1")
+    _old_pair(folder, "Autosave1")
+    _switch(project, True)
+    text, loud = _look(project, env, 1000.0)
+    assert sorted(fake.locked_files) == ["Save1.ess", "Save1.skse"] and not loud, text
+    fake.locked_files.clear()
+    _look(project, env, 1010.0)
+    assert fake.locked_files == []
+
+
+def test_switching_locking_off_is_raised_once(world, monkeypatch):
+    project, home, env = world
+    _FakeLock().install(monkeypatch)
+    _switch(project, True)
+    _look(project, env, 1000.0)
+    _switch(project, False)
+    text, loud = _look(project, env, 1010.0)
+    assert loud and "switched OFF" in text
+    text, loud = _look(project, env, 1020.0)
+    assert "switched OFF" not in text
+
+
+def test_an_elevated_agent_is_warned_while_locking_is_on(world, monkeypatch):
+    project, home, env = world
+    _FakeLock(elevated=True).install(monkeypatch)
+    _switch(project, True)
+    text, loud = _look(project, env, 1000.0)
+    assert loud and "runs as administrator" in text
+    text, loud = _look(project, env, 1010.0)
+    assert "runs as administrator" not in text
