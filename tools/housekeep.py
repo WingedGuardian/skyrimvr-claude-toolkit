@@ -47,6 +47,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.parse import unquote
 from pathlib import Path
 import importlib.util
 _BACKUP_SPEC = importlib.util.spec_from_file_location('housekeep_cold_helper', Path(__file__).with_name('housekeep_backups.py'))
@@ -268,24 +269,42 @@ def evidence_links(cfg) -> set:
     """Every agent-output path a project doc links to (written relative to the root, as docs link them). A linked
     file is never planned for anything."""
     links = set()
-    prefixes = []
-    for r in cfg["agent_output"]:
-        try:
-            rel = os.path.relpath(os.path.abspath(str(_abs(cfg, r))), os.path.abspath(str(cfg["root"])))
-        except ValueError:                       # another drive: docs cannot link it relatively
-            continue
-        if rel.split(os.sep)[0] != "..":
-            prefixes.append(re.escape(rel.replace("\\", "/")))
-    if not prefixes:
+    reference_chars = 0
+    roots = [_abs(cfg, r) for r in cfg["agent_output"]]
+    if not roots:
         return links
-    link_re = re.compile("(?:{})".format("|".join(prefixes)) + LINK_TAIL)
     for doc in cfg["evidence_docs"]:
         p = _abs(cfg, doc)
         if not p.is_file():
             continue
-        for m in link_re.findall(p.read_text(encoding="utf-8", errors="replace")):
-            m = m.rstrip(".,;:*")
-            links.add(_key(cfg["root"] / m))
+        prefixes = []
+        for root in roots:
+            prefixes.append(re.escape(str(root).replace("\\", "/")))
+            try:
+                prefixes.append(re.escape(os.path.relpath(root, p.parent).replace("\\", "/")))
+            except ValueError:
+                pass  # Cross-drive documents can still use the absolute spelling.
+        start_re = re.compile("(?:{})/".format("|".join(prefixes)), re.I if os.name == "nt" else 0)
+        text = p.read_text(encoding="utf-8", errors="replace")
+        views = {text, unquote(text)}
+        views |= {re.sub(r"\\([!\"#$%&'()*+,./:;<=>?@\[\]^_`{|}~\\-])", r"\1", s) for s in tuple(views)}
+        for view in views:
+            for line in view.splitlines():
+                for start in start_re.finditer(line):
+                    tail = line[start.start():]
+                    if len(tail) > 32768:
+                        raise OSError("evidence reference line exceeds the safe discovery bound; cleanup refused")
+                    ends = [i for i, ch in enumerate(tail) if ch.isspace() or ch in ")]\"'`<>|.,;:*"]
+                    for end in ends + [len(tail)]:
+                        candidate = tail[:end]
+                        if candidate:
+                            reference_chars += len(candidate)
+                            if reference_chars > 8 * 1024 * 1024:
+                                raise OSError("evidence references exceed the safe discovery byte bound; cleanup refused")
+                            q = Path(candidate)
+                            links.add(_key(q if q.is_absolute() else p.parent / q))
+                        if len(links) > 50000:
+                            raise OSError("evidence references exceed the safe discovery bound; cleanup refused")
     return links
 
 
@@ -295,6 +314,22 @@ class Guard:
     def __init__(self, cfg):
         self.cfg = cfg
         self.tracked = tracked_files(cfg["root"])
+        seen = {_key(cfg["root"])}
+        roots = [*cfg["agent_output"], *cfg["launch_logs"], *cfg["legacy_snapshots"],
+                 *cfg["scratch"], *cfg.get("archive_roots", {})]
+        for value in roots:
+            root = _abs(cfg, value)
+            if _key(root) in seen or root.is_relative_to(cfg["root"]):
+                continue
+            seen.add(_key(root))
+            try:
+                info = root.lstat()
+            except FileNotFoundError:
+                continue
+            if root.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+                continue
+            if root.is_dir():
+                self.tracked.update(tracked_files(root))
         self.links = evidence_links(cfg)
         self.globs = [g.lower() for g in cfg["protected_globs"]]
 

@@ -11,6 +11,29 @@ def config(root):
     return cfg_for(root, archive_enabled=False, live_roots=[])
 
 
+@pytest.mark.parametrize("protection", ["tracked", "linked"])
+def test_external_repository_output_keeps_its_own_protected_evidence(tmp_path, protection):
+    root = tmp_path / "toolkit"
+    root.mkdir()
+    external = tmp_path / "external"
+    first = write(external / "reports/task-a/input file.bin", b"identical")
+    second = write(external / "reports/task-b/input file.bin", b"identical")
+    subprocess.run(["git", "init", "-q", str(external)], check=True, capture_output=True)
+    doc = external / "CLAUDE.md"
+    doc.write_text("[evidence](reports/task-a/input file.bin)")
+    if protection == "tracked":
+        subprocess.run(["git", "-C", str(external), "add", "--", "reports/task-a/input file.bin"],
+                       check=True, capture_output=True)
+    cfg = config(root)
+    cfg.update(agent_output=[str(external / "reports")], evidence_docs=[str(doc)] if protection == "linked" else [],
+               min_bytes=1, active_hours=0)
+    guard = hk.Guard(cfg)
+    assert guard.why_protected(first) == ("git-tracked" if protection == "tracked" else "linked evidence")
+    result = hk.plan(cfg, guard)
+    assert not result["actions"]
+    assert first.read_bytes() == second.read_bytes() == b"identical"
+
+
 def test_failed_task_is_held_whole_while_independent_task_is_measured(tmp_path, monkeypatch):
     write(tmp_path / "_CLAUDE_OUTPUT/held/unique.bin", b"unique")
     write(tmp_path / "_CLAUDE_OUTPUT/healthy/keep.bin", b"kept")
