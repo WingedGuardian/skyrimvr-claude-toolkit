@@ -99,7 +99,7 @@ description — is treated as in-diff.
 | Properties | non-auto properties stay blank after load; added, removed or renamed properties against the plugin's VMAD |
 | Save compatibility for players mid-playthrough | new masters; removed scripts, forms or quests; changed property sets → verdict SAFE / RISKY / DON'T |
 | Plugin structure | ESL FormID range, FormID reuse, ONAM for ESM overrides |
-| Package contents | file list and hashes against baseline + diff; loose files vs BSA; FOMOD paths resolve to the intended `Data/` layout |
+| Package contents | file list and hashes against baseline + diff; loose files vs BSA; FOMOD paths resolve to the intended `Data/` layout; no source bundle inside the main package (see *Packaging rules*) |
 | Content that must never be published | the author's private or development plugins, and assets they have no right to redistribute. Ask the author for their list once and record it |
 | Leftover development scaffolding | diagnostic logging, disabled test functions, unused globals |
 | Meshes | cross-read with PyNifly (never PyFFI alone); no PreWEAPON/PreSHIELD nodes (VR) |
@@ -161,6 +161,21 @@ the final go. Then:
 3. A clean review is necessary, not sufficient. The upload itself is the author's step.
 
 Skipping step 2 makes the next release's review start from a download or a full read.
+
+### Packaging rules
+
+- **One upload folder.** Everything the author uploads or pastes (the main zip, every optional
+  zip, any separate source zip, the page description, the summary and the changelog text) goes in
+  the same release folder, with plain names. Give the author one path; nothing to upload lives in a
+  build workspace or a second folder.
+- **No source in the main file.** The main zip holds what goes in `Data/` plus the player docs at
+  the top level. An SKSE DLL's source is its own download, never a `Source/` folder inside the main
+  zip. If its license (e.g. the GPL) requires the source to stay available, tell the author not to
+  archive that download while the DLL ships.
+- **License notices travel with the DLL.** Put the DLL's license and third-party notices beside it
+  in `SKSE/Plugins/` (`<Name>-LICENSE.txt`, `<Name>-THIRD-PARTY.txt`), not at the top level, and
+  point the README and page text at the separate source download.
+- Papyrus `.psc` under `Scripts/Source` is mod content, not "source" in this sense, and stays.
 
 ## Red flags
 
