@@ -67,6 +67,7 @@ CLASSES = ("recreatable", "build", "link", "gzip", "launch", "snapshot", "scratc
 NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}      # CREATE_NO_WINDOW
 RECYCLE_BATCH = 500                                                        # paths per PowerShell call
 DEFAULTS = {
+    "recycle_bin_warn_gib": 10,       # read-only Windows aggregate; 0 disables warning
     "obsolete_items": {},            # exact bytes + explicit reason/evidence; never age alone
     "backup_archive": {},            # opt-in cold backups; docs/BACKUP-ARCHIVE.md
     "agent_output": [],               # task-folder roots (relative to the toolkit root, or absolute)
@@ -1306,6 +1307,9 @@ def session(cfg, state: Path) -> int:
     free = shutil.disk_usage(str(cfg["root"])).free / GIB
     if floor and free - floor < 20:
         notes.append("{:.0f} GiB free, floor {} GiB".format(free, floor))
+    bin_note = certainty.recycle_bin_note(cfg)
+    if bin_note:
+        notes.append(bin_note)
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text(("DISK: " + "; ".join(notes) + " -- python tools/housekeep.py report\n") if notes else "",
                      encoding="utf-8")

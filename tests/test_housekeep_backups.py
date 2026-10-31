@@ -10,6 +10,48 @@ import zipfile
 
 import pytest
 
+def test_recycle_bin_uses_windows_packed_64bit_abi():
+    import ctypes
+    class Query:
+        def __call__(self, root, pointer):
+            info = pointer._obj
+            assert root is None
+            assert ctypes.sizeof(info) == info.cbSize == 20
+            assert type(info).bytes.offset == 4 and type(info).items.offset == 12
+            info.bytes = 12 * 1024**3
+            info.items = 12345
+            return 0
+    assert b.recycle_bin_usage(shell32=SimpleNamespace(SHQueryRecycleBinW=Query())) == dict(bytes=12*1024**3,items=12345)
+
+def test_recycle_bin_warning_is_read_only_and_reports_failures():
+    assert '12.0 GiB' in b.recycle_bin_note({},query=lambda:dict(bytes=12*1024**3,items=7))
+    assert b.recycle_bin_note({},query=lambda:dict(bytes=1024**3,items=7)) == ''
+    assert b.recycle_bin_note({'recycle_bin_warn_gib':0},query=lambda:(_ for _ in ()).throw(AssertionError('disabled query'))) == ''
+    assert b.recycle_bin_note({},query=lambda:None) == ''
+    assert 'unavailable' in b.recycle_bin_note({},query=lambda:(_ for _ in ()).throw(OSError('probe failed')))
+
+def test_recycle_bin_hresult_failure_is_not_zero_usage():
+    query = lambda *_args:-2147024809
+    with pytest.raises(OSError,match='80070057'):
+        b.recycle_bin_usage(shell32=SimpleNamespace(SHQueryRecycleBinW=query))
+
+def test_failed_archive_recycling_keeps_payload_and_restore_receipts(setup):
+    _,cfg,rows = archived(setup)
+    records = [json.loads(Path(r['receipt']).read_text()) for r in rows]
+    cfg['backup_archive']['obsolete'] = {r['id']:dict(basis='operator-confirmed-obsolete',
+        reason='reviewed obsolete',evidence='explicit receipt-bound review') for r in records}
+    doc = b.prune_plan(cfg)
+    with pytest.raises(b.Refused,match='Recycle Bin route'):
+        b.prune(doc,cfg,b.digest(doc))
+    with pytest.raises(b.Refused,match='failed/left in place'):
+        b.prune(doc,cfg,b.digest(doc),recycler=lambda paths:{p:'network recycle unavailable' for p in paths})
+    assert all(Path(r['archive']).exists() for r in rows)
+    assert not list((Path(cfg['backup_archive']['destination'])/'retired').glob('*.json'))
+    restored = Path(cfg['root'])/'still-restorable'
+    b.restore(rows[0]['receipt'],restored)
+    assert (restored/'script.py').exists()
+
+
 def test_obsolescence_is_bound_to_current_content(tmp_path):
     p = tmp_path/"retired.bin"
     p.write_bytes(b"old")
@@ -221,8 +263,15 @@ def test_explicit_prune_keeps_shared_archives_until_all_restore_points_retire(se
         b.prune(doc, cfg, 'wrong')
     with pytest.raises(b.Refused, match='approval mismatch'):
         b.prune(dict(doc, kind='tampered'), cfg, b.digest(doc))
-    removed = b.prune(doc, cfg, b.digest(doc), remover=lambda p:p.unlink())
+    archive_bin = Path(cfg['root'])/'archive-bin'
+    archive_bin.mkdir()
+    def recycle_archives(paths):
+        for p in paths:
+            Path(p).rename(archive_bin/Path(p).name)
+        return {p:None for p in paths}
+    removed = b.prune(doc, cfg, b.digest(doc), recycler=recycle_archives)
     assert len(removed) == 1 and not Path(rows[0]['archive']).exists()
+    assert (archive_bin/Path(rows[0]['archive']).name).is_file()
     assert {r['state'] for r in b.review(cfg)} == {'retired'}
 
 

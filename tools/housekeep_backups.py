@@ -2,7 +2,7 @@
 
 Shared verbatim by the X4 and Skyrim housekeep entry points. Local retirement
 always uses the caller's recycler. Remote pruning requires a separate exact
-plan approval; session maintenance only checks and reports.
+plan approval and a recycler; session maintenance only checks and reports.
 """
 from __future__ import annotations
 
@@ -447,22 +447,31 @@ def prune_plan(cfg):
                 records=retire, objects=sorted(objects, key=lambda r: r['path']))
 
 
-def prune(doc, cfg, approved_sha256, remover=None):
-    """Permanent NAS removal only under an exact, freshly revalidated approval."""
+def prune(doc, cfg, approved_sha256, recycler=None):
+    """Unique backup bytes are tier 2: recycle after exact revalidation, never unlink."""
     if digest(doc) != approved_sha256 or doc != prune_plan(cfg):
         raise Refused('exact deletion plan/config/evidence approval mismatch')
     dest = Path(settings(cfg)['destination'])
-    for row in doc['records']:
-        tomb = dest / 'retired' / (row['id'] + '.json')
-        if not tomb.exists():
-            write_json(tomb, dict(row, retired_at=time.time(), approved_plan_sha256=approved_sha256))
     removed = []
     for row in doc['objects']:
         p = plain_path(row['path'])
         if p.parent != dest / 'objects' or file_hash(p) != row['sha256']:
             raise Refused('archive changed before removal')
-        (remover or os.remove)(p)
         removed.append(str(p))
+    if removed:
+        if recycler is None:
+            raise Refused('tier 2 backup payload requires a Recycle Bin route; no permanent fallback')
+        results = recycler(removed)
+        failures = {p:results.get(p, 'no recycler result') for p in removed
+                    if results.get(p, 'no recycler result') is not None}
+        if failures:
+            raise Refused('backup recycling incomplete: {} recycled, {} failed/left in place: {}'.format(
+                len(removed)-len(failures), len(failures), failures))
+    # Never invalidate restore receipts for an archive the recycler refused.
+    for row in doc['records']:
+        tomb = dest / 'retired' / (row['id'] + '.json')
+        if not tomb.exists():
+            write_json(tomb, dict(row, retired_at=time.time(), approved_plan_sha256=approved_sha256))
     return removed
 
 
@@ -499,6 +508,47 @@ def restore(receipt, destination):
                 while block := stream.read(1024 * 1024):
                     out.write(block)
     return str(dest)
+
+
+def recycle_bin_usage(*, shell32=None):
+    """Read-only Windows aggregate; unavailable is never reported as an empty bin.
+
+    SHQUERYRBINFO is packed to one byte by shellapi.h (20 bytes on x86/x64).
+    https://learn.microsoft.com/windows/win32/api/shellapi/nf-shellapi-shqueryrecyclebinw
+    """
+    import ctypes
+    if shell32 is None:
+        if os.name != 'nt':
+            return None
+        shell32 = ctypes.WinDLL('shell32', use_last_error=True)
+    class Info(ctypes.Structure):
+        _pack_ = 1
+        _fields_ = [('cbSize', ctypes.c_uint32), ('bytes', ctypes.c_int64), ('items', ctypes.c_int64)]
+    info = Info()
+    info.cbSize = ctypes.sizeof(info)
+    query = shell32.SHQueryRecycleBinW
+    query.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(Info)]
+    query.restype = ctypes.c_int32
+    result = query(None, ctypes.byref(info))
+    if result != 0:
+        raise OSError('SHQueryRecycleBinW failed: HRESULT 0x{:08x}'.format(result & 0xffffffff))
+    if info.bytes < 0 or info.items < 0:
+        raise OSError('Recycle Bin returned invalid size/item count')
+    return dict(bytes=info.bytes, items=info.items)
+
+
+def recycle_bin_note(cfg, *, query=None):
+    threshold = cfg.get('recycle_bin_warn_gib', 10)
+    if not threshold:
+        return ''
+    try:
+        usage = (query or recycle_bin_usage)()
+        if usage is not None and usage['bytes'] >= threshold * 1024**3:
+            return 'Recycle Bin is {:.1f} GiB logical ({} items); review and empty deliberately'.format(
+                usage['bytes']/1024**3, usage['items'])
+    except (OSError, ValueError, TypeError) as exc:
+        return 'Recycle Bin usage unavailable: '+str(exc)
+    return ''
 
 
 def periodic_note(cfg):
@@ -557,7 +607,8 @@ def main(argv, cfg, recycler, protect=lambda p: ''):
             Path(a.output).write_text(json.dumps(doc, indent=2)+'\n', encoding='utf-8')
             print(json.dumps(dict(plan=doc, approval_sha256=digest(doc)), indent=2))
         elif a.command == 'prune':
-            print(json.dumps(prune(json.loads(Path(a.plan).read_text(encoding='utf-8')), cfg, a.approved_plan_sha256), indent=2))
+            recycled = prune(json.loads(Path(a.plan).read_text(encoding='utf-8')), cfg, a.approved_plan_sha256, recycler)
+            print(json.dumps(dict(permanently_deleted=[], recycled=recycled, failed=[]), indent=2))
         elif a.command == 'review':
             rows = review(cfg)
             print(json.dumps(rows, indent=2))

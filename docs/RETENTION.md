@@ -13,7 +13,32 @@ policy; `tools/housekeep.py` implements the parts a tool can.
 
 Age, size, an idle timer, a filename and a completed-task marker trigger review; none proves that unique bytes are obsolete. Housekeep retires a payload only when it re-proves an identical retained copy or a verified lossless replacement, or the operator has explicitly declared those exact bytes obsolete with a reason and evidence. Unknown usefulness is kept indefinitely. Failed or stale proof leaves the source in place.
 
-This applies to ordinary cleanup and both archive tiers. Older plans do not bypass the apply-time checks. A backup vault is optional and disabled by default; its permanent pruning always needs a separate exact-plan approval.
+This applies to ordinary cleanup and both archive tiers. Older plans do not bypass the apply-time checks. A backup vault is optional and disabled by default; archive retirement needs a separate exact-plan approval and a working recycle route.
+
+### Destination follows creation-time disposition and current proof
+
+Permanent deletion is eligible only when the producer declared the item disposable
+at creation and rebuildability is checked now. A receipt alone is not current
+proof; a current rebuild test alone is not a creation-time disposition. Never
+backfill receipts onto legacy material. Incomplete proof demotes an otherwise
+authorized retirement to the Recycle Bin; unknown value remains kept.
+
+Uncommitted work, unique logs/evidence, long-run outputs and handwritten material
+can be the only copy and belong in the Recycle Bin when retirement is justified.
+Worktree proof includes a clean tree plus a branch committed and pushed; this is
+not permission to push just to make cleanup eligible. Same-run scratch may still
+be deleted by its creator at exit. An item Windows cannot recycle needs the
+user's exact-item decision, never a silent permanent fallback.
+
+Housekeep currently uses recycling for cross-run retirements. It does not infer
+permanent eligibility from a folder name, ownership marker or file extension.
+NAS backup payloads also use the recycler after exact-plan approval; without a
+working recycle route they stay in place. No automatic Bin purge is provided.
+
+The Windows session-start report warns at `recycle_bin_warn_gib` (default 10 GiB;
+0 disables the warning). It reads aggregate contents only and reports unavailable
+queries separately. The size is logical contents, not guaranteed reclaimable
+physical allocation. Report permanent deletions, recycling and failures separately.
 
 ### Classes
 
@@ -35,8 +60,8 @@ temp dir, and 14,018 small directories from earlier runs had built up since Augu
 again. So:
 
 1. **Code and tests remove what they create, in the same run.** A temp dir is made with a cleanup registered at
-   the moment it is created, never "deleted at the end" where a crash skips it. This is the only deletion that
-   bypasses the Recycle Bin: a process removing scratch it made itself during that run. A test enforces it,
+   the moment it is created, never "deleted at the end" where a crash skips it. Same-run scratch may bypass
+   the Recycle Bin; cross-run permanent deletion needs the separate receipt and current-proof gates. A test enforces cleanup,
    and every prefix the code creates must be one the sweep knows.
 2. **Session start sweeps the leftovers** of earlier runs (a crash, a killed job) to the Recycle Bin, in the
    background, at most every 6 hours.
@@ -48,7 +73,7 @@ again. So:
 
 1. **Report, plan, apply -- never one step.** The plan records each file's hash; apply re-checks it and refuses
    anything that changed.
-2. **Recycle Bin (or Trash), never a permanent delete** -- except same-run scratch (above). An item too big for
+2. **Recycle Bin (or Trash) by default.** Permanent eligibility requires both gates above, except same-run scratch. An item too big for
    the bin gets the system's own "delete permanently?" prompt, and stays where it is unless the user says yes.
    The bin frees nothing until the user empties it; that is their decision.
 3. **Leave active work alone.** A task folder written to -- or read from -- in the last 48 hours belongs to a
@@ -114,7 +139,7 @@ Cleanup is the second line of defence; writing less is the first:
 Optional preservation of older backup generations on secondary storage:
 [cold backup archive](BACKUP-ARCHIVE.md). It is opt-in, verifies every archived
 byte, keeps uncertain usefulness indefinitely, and requires a separate exact,
-evidence-backed approval for permanent pruning.
+evidence-backed approval for recycling obsolete archives.
 
 ```bash
 cp .claude/housekeep.json.example .claude/housekeep.json   # then list your own folders in it

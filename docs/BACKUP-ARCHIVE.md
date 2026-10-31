@@ -76,8 +76,10 @@ needed, add its receipt ID to `obsolete`:
 
 Then run `backups prune-plan -o obsolete-plan.json`. Review its exact objects and
 reasons before `backups prune obsolete-plan.json --approved-plan-sha256 <hash>`.
-This is permanent removal, appropriate only with explicit approval for that
-plan, especially on a NAS without a Recycle Bin. Changing the declaration,
+These archives can be the only copy, so payload retirement uses the Recycle Bin,
+even after explicit approval. A NAS without a working recycle route retains the
+payload; there is no direct permanent-delete fallback. Failed recycling does not
+invalidate its remaining restore receipts. Changing the declaration,
 configuration, archive bytes or references invalidates the approval. An archive
 shared by another retained restore point is kept. Small retirement receipts
 remain to explain the disposition. No blanket age expiry applies to this vault.
