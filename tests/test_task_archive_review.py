@@ -6,6 +6,8 @@ import os
 import time
 import tempfile
 import sys
+import re
+import subprocess
 import pytest
 from pathlib import Path
 
@@ -268,3 +270,61 @@ def test_archive_action_cannot_invent_a_closure_marker(tmp_path):
 def test_configured_archive_scope_remains_eligible(tmp_path):
     h,cfg,src,a=planned_folder(tmp_path)
     assert h.check(a,cfg,h.Guard(cfg),time.time())==''
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows recycler admission')
+@pytest.mark.parametrize('capacity,data',[(None,b'unique'),(0,b'')])
+def test_unproven_bin_route_never_starts_the_shell(tmp_path,monkeypatch,capacity,data):
+    h,cfg=entry_config(tmp_path); p=tmp_path/'payload.bin'; p.write_bytes(data)
+    monkeypatch.setattr(h,'bin_capacity',lambda path:capacity)
+    monkeypatch.setattr(h.subprocess,'run',lambda *a,**k:pytest.fail('unproven recycle route started a shell'))
+    result=h.recycle([str(p)])
+    assert result[str(p)] and p.read_bytes()==data
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows shell contract')
+def test_recycler_requests_no_error_ui_and_retains_permanent_delete_warning(tmp_path,monkeypatch):
+    h,cfg=entry_config(tmp_path); p=tmp_path/'payload.bin'; p.write_bytes(b'unique')
+    monkeypatch.setattr(h,'bin_capacity',lambda path:1<<30)
+    def fake_shell(argv,**kwargs):
+        expression=re.search(r'fFlags\s*=\s*([^;}]+)',argv[-1]).group(1)
+        flags=0
+        for number in re.findall(r'0x[0-9a-fA-F]+',expression):flags|=int(number,16)
+        assert flags&0x400 and flags&0x4000 and flags&0x40
+        assert kwargs['creationflags']&0x08000000
+        return subprocess.CompletedProcess(argv,0,stdout='ERR\t'+str(p)+'\ttest refusal\n',stderr='')
+    monkeypatch.setattr(h.subprocess,'run',fake_shell)
+    assert h.recycle([str(p)])[str(p)]=='test refusal'
+    assert p.exists()
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows child-process contract')
+@pytest.mark.parametrize('method',['tracked_files','worktree_count'])
+def test_repository_metadata_children_are_hidden(tmp_path,monkeypatch,method):
+    h,cfg=entry_config(tmp_path)
+    def hidden(argv,**kwargs):
+        assert kwargs['creationflags']&0x08000000
+        empty='' if kwargs.get('text') else b''
+        return subprocess.CompletedProcess(argv,0,stdout=empty,stderr=empty)
+    monkeypatch.setattr(h.subprocess,'run',hidden)
+    getattr(h,method)(tmp_path)
+
+
+def test_partial_archive_review_is_visible_and_not_reported_complete(tmp_path,monkeypatch,capsys):
+    h,cfg=entry_config(tmp_path)
+    monkeypatch.setattr(h,'review_archives',lambda *a,**k:dict(state='partial',root=cfg['archive_root'],
+        rows=[],held=[dict(path=cfg['archive_root'],reason='unreadable archive branch')]))
+    doc=h.plan(cfg,only={'expire'})
+    assert doc['coverage']['state']=='accounted_with_holds'
+    assert doc['coverage']['unmeasured_held_bytes'] and not doc['actions']
+    h.print_coverage(doc)
+    output=capsys.readouterr().out
+    assert 'ordinary archive review: partial' in output and 'HELD ARCHIVES' in output
+
+
+def test_cli_version_is_read_only_and_names_the_current_cleanup_code(tmp_path,capsys):
+    h,cfg=entry_config(tmp_path); path=tmp_path/'config.json'
+    path.write_text(json.dumps(cfg,default=str))
+    assert h.main(['--config',str(path),'version'])==0
+    assert capsys.readouterr().out.strip()==h.cleanup_code_sha256()
+    assert list(tmp_path.iterdir())==[path]
