@@ -98,6 +98,8 @@ def changed_files(base):
 def tests_for(changed):
     want = []
     for p in changed:
+        if p == "tests/test_mutations.py":
+            continue    # the whole mutation gate (hours; CI runs it sharded); its anchors and inventory are sentinels
         if p.startswith("tests/test_") and p.endswith(".py"):
             want.append(p)
         for prefix, tests in PATH_TESTS.items():
