@@ -18,6 +18,7 @@ Steps, each red on its own:
   3. sentinels: the deterministic test files that fail CI whole when stale (SENTINELS below), plus the tests for
      the files this push changes (`git diff --name-only BASE...HEAD`: a changed test file runs itself; a changed
      tools/ or scripts/ module runs every tests/test_*<its stem>*.py; the guard adapters run the wrapper tests).
+     Two processes: the timing/deadline files alone (10-minute cap), the rest together (20-minute cap).
 
 BASE defaults to the branch's upstream, else the merge-base with origin/master. A dirty working tree is reported
 (the gate runs on the tree, the push sends the commits). Exit 0 = passed, 1 = a step failed, 2 = could not run.
@@ -51,8 +52,9 @@ SENTINELS = [
     "tests/test_gen_agent_trees.py",       # agent/ -> generated files
     "tests/test_ci_leg.py",                # the CI tripwires
     "tests/test_workflows.py",             # the workflow files
-    "tests/test_release_build.py",         # the release zip
-    "tests/test_release_payload.py",       # what ships and what never does
+    # NOT here: tests/test_release_build.py and test_release_payload.py build a release payload per case and ran the
+    # gate past its 20-minute step limit (2026-10-31); CI's release-build job runs them on every push, and the pin
+    # audits that actually went stale (thirdparty, spriggit) are above. They still run when the push changes them.
 ]
 TIMING_SENTINELS = {"tests/test_skyguard_timing.py", "tests/test_python_fallback.py", "tests/test_hook_deadline.py"}
 # changed path prefix -> extra test files (a changed test file always runs itself)
@@ -61,6 +63,9 @@ PATH_TESTS = {
                       "tests/test_skyguard_write.py"],
     "agent/": ["tests/test_gen_agent_trees.py"],
     ".github/": ["tests/test_workflows.py", "tests/test_ci_leg.py"],
+    "scripts/build_release_zip.py": ["tests/test_release_build.py", "tests/test_release_payload.py"],
+    "scripts/build-release-zip.sh": ["tests/test_release_build.py", "tests/test_release_payload.py"],
+    "tools/check-release-payload.py": ["tests/test_release_payload.py"],
     "tests/guard_corpus/": ["tests/test_guard_corpus.py", "tests/test_skyguard_codes.py"],
     "tests/conftest.py": ["tests/test_ci_leg.py"],
 }
@@ -150,6 +155,43 @@ class Gate:
         return ok
 
 
+    def parallel(self, steps):
+        """Run several steps at once, each to its own log with its own timeout; report each as step() would."""
+        t = time.time()
+        procs = []
+        for k, (name, cmd, timeout) in enumerate(steps):
+            print("== {} (parallel)".format(name), flush=True)
+            log = REPO / ".pytest_cache" / "prepush-gate-{}.log".format(k)
+            log.parent.mkdir(exist_ok=True)
+            fh = open(log, "w", encoding="utf-8", errors="replace")
+            procs.append([name, subprocess.Popen(cmd, cwd=REPO, stdout=fh, stderr=subprocess.STDOUT), fh, log,
+                          time.time() + timeout, None])
+        while any(p[5] is None for p in procs):
+            for p in procs:
+                if p[5] is not None:
+                    continue
+                rc = p[1].poll()
+                if rc is not None:
+                    p[5] = rc
+                elif time.time() > p[4]:
+                    p[1].kill()
+                    p[1].wait()
+                    p[5] = 124
+            time.sleep(0.5)
+        for name, proc, fh, log, _, rc in procs:
+            fh.close()
+            out = log.read_text(encoding="utf-8", errors="replace")
+            if rc != 0:
+                print("-- {}:".format(name))
+                print("\n".join("   " + l for l in out.strip().splitlines()[-25:]))
+                if rc == 124:
+                    print("   TIMED OUT; the last line above is the test that was running (log: {})".format(log))
+                self.failed.append(name)
+            m = re.search(r"=+ (.*) in ([0-9.]+)s", out.strip().splitlines()[-1] if out.strip() else "")
+            print("   {}: {} in {}s".format(name, "ok" if rc == 0 else "FAILED", m.group(2) if m else "?"), flush=True)
+        print("   parallel block done in {:.0f}s".format(time.time() - t), flush=True)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--base", default="", help="compare against this revision (default: upstream, else origin/master)")
@@ -206,15 +248,18 @@ def main(argv=None) -> int:
     files = [s for s in SENTINELS if (REPO / s).is_file()] + extra
     if extra:
         print("   tests for changed files: " + ", ".join(extra))
-    # Two processes, -v so a timeout names the running test. The timing/deadline files run alone: in one process with
-    # the rest, test_hook_deadline hung twice on 2026-10-31 (once in each of two sessions' gates) while the same files
-    # pass together in under 3 min; the cause is still open (a killed child's grandchild holding the pipe is the
-    # suspect). Isolated, a repeat is named by the log and costs 10 min, not the push.
-    timing = [f for f in files if f in TIMING_SENTINELS]
-    rest = [f for f in files if f not in TIMING_SENTINELS]
+    # Parallel processes, -v so a timeout names the running test. MEASURED 2026-10-31 (each file alone, 36% CPU
+    # share): the corpus rows 531 s and the rule messages 548 s -- each fires every intended row through the real
+    # wrapper -- against about 60 s for everything else and ~6 min for the timing files. In one process the set took
+    # 25+ min and, twice, test_hook_deadline hung behind the others (cause open; a killed child's grandchild holding
+    # the pipe is the suspect). As four processes the wall time is the slowest one, ~10 min, and a hang is isolated.
     verbose = [py, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-v", "-rfE", "--durations=10"]
-    g.step("timing and deadline tests ({} files)".format(len(timing)), verbose + timing, timeout=600)
-    g.step("sentinels and changed-file tests ({} files)".format(len(rest)), verbose + rest, timeout=1200)
+    groups = [("timing and deadline tests", [f for f in files if f in TIMING_SENTINELS], 900),
+              ("corpus rows", [f for f in files if f == "tests/test_guard_corpus.py"], 1200),
+              ("rule messages", [f for f in files if f == "tests/test_rule_messages.py"], 1200),
+              ("sentinels and changed-file tests", [f for f in files if f not in TIMING_SENTINELS
+                                                     and f not in ("tests/test_guard_corpus.py", "tests/test_rule_messages.py")], 900)]
+    g.parallel([(name + " ({} files)".format(len(fs)), verbose + fs, t) for name, fs, t in groups if fs])
     total = time.time() - g.t0
     if g.failed:
         print("prepush-gate: FAILED ({}) in {:.0f}s -- fix before pushing; CI would have gone red on it".format(

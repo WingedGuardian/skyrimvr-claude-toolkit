@@ -9898,10 +9898,13 @@ MUTATIONS += [pytest.param("tools/skyguard/self_rules.py", "    cache = _StoreCa
                            "tests/test_skyguard_self_rules.py::test_a_many_operand_command_reads_each_store_config_once",
                            id="save-store-config-read-once-per-decision")]
 
-# CI run 39210090486: the mutation gate became its own CI part per leg, checked against its own numbers.
+# CI run 39210090486: the mutation gate became its own CI part per leg, checked against its own numbers. Since
+# 2026-10-31 the part runs as shards: dropping one shard row is a slice of the gate nobody runs.
 MUTATIONS += [
-    pytest.param(".github/workflows/full-qualification.yml", "        part: [suite, mutations]", "        part: [suite]",
-                 "tests/test_workflows.py::test_the_tripwires_bracket_the_suite_on_every_leg",
+    pytest.param(".github/workflows/full-qualification.yml",
+                 '          - {os: ubuntu-latest, python: "3.10", part: mutations, shard: 2, shards: 2}',
+                 '          # - {os: ubuntu-latest, python: "3.10", part: mutations, shard: 2, shards: 2}',
+                 "tests/test_workflows.py::test_the_mutation_gate_is_sharded_and_summed",
                  id="ci-mutation-part-dropped"),
     pytest.param("scripts/check_ci_leg.py", "        spec = dict(spec, **spec[\"parts\"][part])", "        pass",
                  "tests/test_ci_leg.py::test_a_part_is_checked_against_its_own_numbers",
