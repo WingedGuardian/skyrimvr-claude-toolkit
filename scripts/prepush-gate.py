@@ -144,6 +144,16 @@ def tests_for(changed):
     return out
 
 
+def rest_chunks(files, per_chunk=6, max_chunks=4):
+    """Split the changed-file/sentinel test files into round-robin chunks: one per `per_chunk` files, at most
+    `max_chunks`, each run as its own process under its own time cap. Every file lands in exactly one chunk."""
+    files = list(files)
+    if not files:
+        return []
+    n = min(max_chunks, max(1, -(-len(files) // per_chunk)))
+    return [files[k::n] for k in range(n)]
+
+
 class Gate:
     def __init__(self, py):
         self.py = py
@@ -285,9 +295,14 @@ def main(argv=None) -> int:
     verbose = [py, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-v", "-rfE", "--durations=10"]
     groups = [("timing and deadline tests", [f for f in files if f in TIMING_SENTINELS], 900),
               ("corpus rows", [f for f in files if f == "tests/test_guard_corpus.py"], 1200),
-              ("rule messages", [f for f in files if f == "tests/test_rule_messages.py"], 1200),
-              ("sentinels and changed-file tests", [f for f in files if f not in TIMING_SENTINELS
-                                                     and f not in ("tests/test_guard_corpus.py", "tests/test_rule_messages.py")], 900)]
+              ("rule messages", [f for f in files if f == "tests/test_rule_messages.py"], 1200)]
+    rest = [f for f in files if f not in TIMING_SENTINELS
+            and f not in ("tests/test_guard_corpus.py", "tests/test_rule_messages.py")]
+    # The changed-file set grows with the branch (177 changed files on a peer's branch timed this group out at 900 s
+    # on 2026-11-01: a time-budget refusal, not a test failure) and with reference selection. A big branch gets more
+    # processes, not a refusal: round-robin chunks, each under its own cap.
+    groups += [("sentinels and changed-file tests {}/{}".format(k + 1, len(chunks)), chunk, 900)
+               for chunks in [rest_chunks(rest)] for k, chunk in enumerate(chunks)]
     g.parallel([(name + " ({} files)".format(len(fs)), verbose + fs, t) for name, fs, t in groups if fs])
     total = time.time() - g.t0
     if g.failed:

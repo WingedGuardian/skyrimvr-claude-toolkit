@@ -41,6 +41,20 @@ def test_a_changed_test_file_selects_only_itself_by_reference(tmp_path):
     assert g.referencing_tests(["tests/test_b.py"], test_dir=tests) == []
 
 
+def test_a_large_changed_file_set_is_split_into_parallel_chunks_not_refused():
+    """A peer's 177-file branch timed the one changed-file process out at its 900 s cap (2026-11-01): a time-budget
+    refusal, not a test failure. More files mean more processes; every file still runs exactly once."""
+    g = _gate()
+    assert g.rest_chunks([]) == []
+    assert g.rest_chunks(["a"]) == [["a"]]
+    files = ["t%02d" % i for i in range(30)]
+    chunks = g.rest_chunks(files)
+    assert len(chunks) == 4, [len(c) for c in chunks]
+    assert sorted(f for c in chunks for f in c) == files           # each file once, none dropped
+    assert max(len(c) for c in chunks) - min(len(c) for c in chunks) <= 1   # balanced
+    assert len(g.rest_chunks(files[:7])) == 2
+
+
 def test_the_real_batch_that_turned_ci_red_is_now_selected():
     """Against the real tests/ tree: the three files CI 41254615914 failed in are picked for the files that changed."""
     g = _gate()
