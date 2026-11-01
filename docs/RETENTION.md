@@ -102,7 +102,9 @@ link.
 Cleanup is the second line of defence; writing less is the first:
 
 - **Reference, don't copy.** Evidence records a commit, a hash and a diff, never a full copy of a tree, bundle,
-  database or game file per run. Stage unchanged inputs as hard links, not copies.
+  database or game file per run. Stage unchanged inputs by reference where the tool allows, otherwise
+  copy them; never hard-link them (a hard link is the same file, so a write to the staged copy changes
+  the source).
 - **One build folder per task.** Regenerated outputs overwrite, or keep the newest two.
 - **Close the task.** Keep the README and receipts; retire bulk only after replacement or obsolescence proof, and write
   `.housekeep-closed`. A multi-GB folder that is genuinely needed later gets `.housekeep-keep` and one README line

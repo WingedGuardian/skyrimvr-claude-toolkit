@@ -234,6 +234,14 @@ class NeverAskDeletePermanently(unittest.TestCase):
         # network check itself is what is tested on every runner.
         with patch.object(h.os.path, "abspath", lambda s: s):
             self.assertIn("network", h.bin_refusal("\\\\server\\share\\x.txt"))
+            # the extended-length UNC form is a network path too (MEASURED refused in the X4 copy, 2026-10-31)
+            self.assertIn("network", h.bin_refusal("\\\\?\\UNC\\server\\share\\x.txt"))
+
+    def test_a_mapped_network_drive_is_refused(self):
+        # SHFileOperation destroys a file on a share silently, nuke warning set or not (MEASURED 2026-10-31), so a
+        # mapped drive letter (DRIVE_REMOTE, 4) must be refused before the shell is ever called.
+        with patch.object(h, "_drive_type", lambda s: 4):
+            self.assertIn("network", h.bin_refusal(str(self.d / "x.txt")))
 
     def test_a_folder_holding_an_over_long_path_is_refused(self):
         deep = self.d.joinpath(*(["a" * 40] * 7), "f.txt")

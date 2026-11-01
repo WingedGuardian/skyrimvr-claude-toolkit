@@ -869,8 +869,10 @@ def recycle(paths) -> dict:
     # suppresses confirmations, and the confirmation it suppresses is the one Windows shows when an item is too big for
     # the bin and would be destroyed instead. FOF_WANTNUKEWARNING (0x4000) brings exactly that prompt back while
     # FOF_NOCONFIRMATION (0x10) still skips "move to the Recycle Bin?". FOF_ALLOWUNDO (0x40) is the Recycle Bin.
-    # The user's answer is the only way anything is ever permanently deleted; "No" leaves the item in place.
-    # NOERRORUI suppresses error dialogs; WANTNUKEWARNING still guards permanent fallback.
+    # For a local item too big for its bin, the user's answer decides; "No" leaves the item in place.
+    # NOERRORUI suppresses error dialogs. WANTNUKEWARNING is NOT a guarantee: MEASURED 2026-10-31, a file on a
+    # network share was destroyed silently (rc 0, no dialog) with these flags AND without 0x400. bin_refusal() above
+    # is the only thing keeping no-bin locations out of this call; never loosen it on the strength of this flag.
     # https://learn.microsoft.com/windows/win32/api/shellapi/ns-shellapi-shfileopstructw
     script = (
         "Add-Type -TypeDefinition @'\n"
