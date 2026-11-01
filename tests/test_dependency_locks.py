@@ -102,9 +102,12 @@ def test_ci_workflow_parses_and_runs_harness_modules_on_both_legs():
     command = harness[0]["run"]
     # The WHOLE suite goes through the launcher (which includes both barrier-dependent modules), on
     # both matrix legs (no `if`), and a run without the barriers is an error, not a quiet green. CI runs it in
-    # two parts per leg: the mutation gate alone, and tests/ without it -- together, all of tests/.
+    # two parts per leg: the mutation gate alone (as `include:` shard rows, summed by mutations-total), and
+    # tests/ without it (the `part: [suite]` axis) -- together, all of tests/.
     assert "python -B tests/run_harness_tests.py $SUITE " in command + " ", command
-    assert behavior["strategy"]["matrix"]["part"] == ["suite", "mutations"]
+    assert behavior["strategy"]["matrix"]["part"] == ["suite"]
+    shard_rows = [row for row in behavior["strategy"]["matrix"]["include"] if row.get("part") == "mutations"]
+    assert shard_rows, "the mutation gate must run as include: rows (test_workflows checks their shape)"
     assert harness[0]["env"]["SUITE"] == ("${{ matrix.part == 'mutations' && 'tests/test_mutations.py' "
                                           "|| 'tests/ --ignore=tests/test_mutations.py' }}")
     assert "-rfEs" in command, "failures, errors and skips must all be named: " + command

@@ -17,7 +17,8 @@ Steps, each red on its own:
      fresh (scripts/gen-guard-hashes.py --check);
   3. sentinels: the deterministic test files that fail CI whole when stale (SENTINELS below), plus the tests for
      the files this push changes (`git diff --name-only BASE...HEAD`: a changed test file runs itself; a changed
-     tools/ or scripts/ module runs every tests/test_*<its stem>*.py; the guard adapters run the wrapper tests).
+     tools/ or scripts/ module runs every tests/test_*<its stem>*.py; the guard adapters run the wrapper tests; and
+     EVERY test file whose text names a changed file's basename runs, since that is the test that goes red on it).
      Two processes: the timing/deadline files alone (10-minute cap), the rest together (20-minute cap).
 
 BASE defaults to the branch's upstream, else the merge-base with origin/master. A dirty working tree is reported
@@ -95,6 +96,31 @@ def changed_files(base):
     return [l.replace("\\", "/") for l in out.splitlines() if l.strip()]
 
 
+def referencing_tests(changed, test_dir=None):
+    """Every tests/test_*.py whose TEXT names a changed file's basename.
+
+    Stem matching alone missed CI run 41254615914's three deterministic reds on all 8 legs: the batch changed
+    full-qualification.yml, ci.yml and build_release_zip.py, and test_dependency_locks / test_pr_ci_policy /
+    test_verify_release each assert on those files by name without sharing a stem with them. A test that spells the
+    changed file is the test that will go red on it; selecting by reference is what CI would have shown.
+    """
+    test_dir = test_dir or REPO / "tests"
+    names = {Path(p).name for p in changed if not (p.startswith("tests/test_") and p.endswith(".py"))}
+    if not names:
+        return []
+    out = []
+    for f in sorted(test_dir.glob("test_*.py")):
+        if f.name == "test_mutations.py":
+            continue
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if any(n in text for n in names):
+            out.append(f.relative_to(REPO).as_posix())
+    return out
+
+
 def tests_for(changed):
     want = []
     for p in changed:
@@ -108,6 +134,7 @@ def tests_for(changed):
         if (p.startswith("tools/") or p.startswith("scripts/")) and p.endswith(".py"):
             stem = Path(p).stem.replace("-", "_")
             want.extend(sorted(Path(f).as_posix() for f in glob.glob(str(REPO / "tests" / ("test_*" + stem + "*.py")))))
+    want.extend(referencing_tests(changed))
     seen, out = set(), []
     for t in want:
         rel = str(Path(t).as_posix()).replace(str(REPO.as_posix()) + "/", "")
