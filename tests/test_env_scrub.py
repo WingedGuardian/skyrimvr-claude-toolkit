@@ -32,6 +32,24 @@ def test_the_launcher_scrub_keeps_systemroot_and_systemdrive():
     assert {"SYSTEMROOT", "SYSTEMDRIVE"} <= names, sorted(names)
 
 
+def test_the_launcher_forwards_every_workflow_variable_conftest_reads():
+    """CI run 41254615914: full-qualification.yml set SKYGUARD_MUTATION_SHARD on the suite step, tests/conftest.py read
+    it, and the launcher's scrub between them dropped it, so each of the six shard jobs ran the WHOLE mutation gate
+    (3,180 twins and 2 h per Linux shard, no "deselected"). Every variable the workflow sets for pytest that conftest
+    reads must survive the scrub; the class, not the one name."""
+    import re
+    import yaml
+    wf = yaml.safe_load((REPO / ".github/workflows/full-qualification.yml").read_text(encoding="utf-8"))
+    suite = [s for s in wf["jobs"]["behavior"]["steps"] if "run_harness_tests.py $SUITE -v" in str(s.get("run", ""))]
+    assert len(suite) == 1, [s.get("name") for s in suite]
+    set_by_workflow = {k.upper() for k in suite[0].get("env", {})}
+    read_by_conftest = set(re.findall(r'os\.environ\.get\("([A-Za-z_]+)"', (REPO / "tests/conftest.py").read_text(encoding="utf-8")))
+    needed = set_by_workflow & {n.upper() for n in read_by_conftest}
+    assert "SKYGUARD_MUTATION_SHARD" in needed, sorted(needed)      # the instance this test was written for
+    forwarded = {n.upper() for n in _launcher().FORWARDED_ENV}
+    assert needed <= forwarded, "set by the workflow, read by conftest, dropped by the launcher: " + ", ".join(sorted(needed - forwarded))
+
+
 @pytest.mark.skipif(os.name != "nt", reason="SystemDrive is a Windows variable")
 @pytest.mark.skipif(not os.environ.get("HARNESS_TRIPWIRE_LOG"), reason="only meaningful under tests/run_harness_tests.py")
 def test_under_the_launcher_systemdrive_reaches_the_tests():

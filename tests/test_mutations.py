@@ -7260,7 +7260,7 @@ MUTATIONS += [pytest.param("tests/test_node_fomod_smoke.py", "    if os.environ.
                            "    if False:" + chr(10) + "        pytest.fail(",
                            _NS + "test_a_missing_install_fails_when_required_and_skips_otherwise",
                            id="t6c-fomod-smoke-missing-install-must-fail-when-required")]
-MUTATIONS += [pytest.param("tests/run_harness_tests.py", '"TOOLKIT_REQUIRE_NODE_DEPS")', ")",
+MUTATIONS += [pytest.param("tests/run_harness_tests.py", '"TOOLKIT_REQUIRE_NODE_DEPS",', '"TOOLKIT_REQUIRE_NODE_DEPS_",',
                            "tests/test_harness_required.py::test_the_launcher_forwards_the_node_deps_flag_to_pytest",
                            id="t6c-launcher-drops-require-node-deps-flag")]
 
@@ -8152,6 +8152,10 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tests/run_harness_tests.py", 'FORWARDED_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", ', 'FORWARDED_ENV = ("SYSTEMROOT", ',
      "tests/test_env_scrub.py::test_the_launcher_scrub_keeps_systemroot_and_systemdrive", "p8t6-launcher-keeps-systemdrive"),
+    # The launcher drops the CI shard selector again (CI run 41254615914: every shard ran the whole mutation gate).
+    ("tests/run_harness_tests.py", '                 "SKYGUARD_MUTATION_SHARD")', '                 )',
+     "tests/test_env_scrub.py::test_the_launcher_forwards_every_workflow_variable_conftest_reads",
+     "ci-launcher-drops-the-shard-selector"),
     ("tests/test_skyguard_lock.py",
      '            "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE", "C:"), "COMSPEC": str(SYS32 / "cmd.exe"), "SKYGUARD_NO_PAUSE": "1",',
      '            "COMSPEC": str(SYS32 / "cmd.exe"), "SKYGUARD_NO_PAUSE": "1",',
