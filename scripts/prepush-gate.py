@@ -238,6 +238,11 @@ def main(argv=None) -> int:
     ap.add_argument("--root", type=Path, default=None,
                     help="the checkout to gate (default: this script's repo); the hook passes the tree being pushed")
     a = ap.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")   # a cp1252 console must not crash the gate on a test's output
+        except Exception:                           # (UnicodeEncodeError printing a failing step, X4, 2026-11-01)
+            pass
     global REPO
     if a.root is not None:
         REPO = a.root.resolve()
