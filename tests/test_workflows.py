@@ -137,11 +137,15 @@ def test_the_tripwires_bracket_the_suite_on_every_leg():
     assert steps[collect].get("if") == SETUP_GATE and steps[log].get("if") == "always()"
     for i in (collect, log):
         assert '--leg "$RUNNER_OS"' in steps[i]["run"]
-    # The two parts are the whole suite: one runs exactly the mutation gate, the other everything but it,
-    # and the mutation part is checked against its own numbers.
-    assert data["jobs"]["behavior"]["strategy"]["matrix"]["part"] == ["suite", "mutations"]
+    # The two parts are the whole suite: one runs exactly the mutation gate (as shards, see
+    # test_the_mutation_gate_is_sharded_and_summed), the other everything but it, and the mutation part is checked
+    # against its own numbers.
+    m = data["jobs"]["behavior"]["strategy"]["matrix"]
+    assert m["part"] == ["suite"] and {e["part"] for e in m["include"]} == {"mutations"}
     assert steps[suite]["env"]["SUITE"] == ("${{ matrix.part == 'mutations' && 'tests/test_mutations.py' "
                                             "|| 'tests/ --ignore=tests/test_mutations.py' }}")
+    assert steps[suite]["env"]["SKYGUARD_MUTATION_SHARD"] == (
+        "${{ matrix.part == 'mutations' && format('{0}/{1}', matrix.shard, matrix.shards) || '' }}")
     assert steps[log]["env"]["PART"] == "${{ matrix.part == 'mutations' && '--part mutations' || '' }}"
     assert "$PART" in steps[log]["run"]
     assert "set -o pipefail" in steps[suite]["run"], "a `| tee` without pipefail turns a red suite green"
@@ -153,7 +157,7 @@ def test_the_tripwires_bracket_the_suite_on_every_leg():
 SETUP_GATE = "${{ !cancelled() && steps.setup.outcome == 'success' }}"
 # Jobs whose later steps CONSUME an earlier step's output (the restored tools, the built zip), so a red step there
 # must skip the rest, and jobs with one check. Every other job ends its setup with the marker below.
-SEQUENTIAL_JOBS = {"setup-smoke", "dotnet", "release-build", "resaver-plus",
+SEQUENTIAL_JOBS = {"setup-smoke", "dotnet", "release-build", "resaver-plus", "mutations-total",
                    "policy", "qualification", "required", "full-required"}
 
 
@@ -265,6 +269,49 @@ def test_resaver_plus_uses_the_qualified_vs2022_runner():
 def test_mutations_run_once_per_os_on_the_oldest_tested_python():
     """User ruling 2026-10-28: the mutation part runs on one Python per OS; the suite part keeps every tested Python."""
     m = _load("full-qualification.yml")[1]["jobs"]["behavior"]["strategy"]["matrix"]
-    excluded = {(e["part"], e["python"]) for e in m.get("exclude", [])}
-    assert excluded == {("mutations", p) for p in TESTED_PYTHONS[1:]}
+    assert m["python"] == TESTED_PYTHONS and m["part"] == ["suite"]
+    assert {(e["os"], e["python"]) for e in m["include"]} == {(os, TESTED_PYTHONS[0]) for os in m["os"]}
     assert m["os"][0] == "windows-latest"
+
+
+def test_the_mutation_gate_is_sharded_and_summed():
+    """User ruling 2026-10-31: the run is as long as its slowest job. One Windows mutation job was 258 of 270 minutes
+    (CI run 40953576542), so the gate runs as shards and a totals job checks the shards' logs as ONE gate."""
+    _, data = _load("full-qualification.yml")
+    beh = data["jobs"]["behavior"]
+    m = beh["strategy"]["matrix"]
+    shards = {}
+    for e in m["include"]:
+        assert set(e) == {"os", "python", "part", "shard", "shards"}, e
+        shards.setdefault(e["os"], set()).add((e["shard"], e["shards"]))
+    for os_, got in shards.items():
+        n = {s for _, s in got}
+        assert len(n) == 1, f"{os_}: shard counts disagree: {got}"
+        n = n.pop()
+        assert got == {(i, n) for i in range(1, n + 1)}, f"{os_}: shards {got} are not 1..{n}: a twin would never run"
+    # every leg runs at once: the cap covers the suite legs plus every shard
+    assert beh["strategy"]["max-parallel"] >= len(m["os"]) * len(m["python"]) + len(m["include"])
+    # the totals job: after every behavior job, even a red one, one per OS, the right shard count, the shards' logs
+    tot = data["jobs"]["mutations-total"]
+    # no `if:`: the core contract forbids a conditional full job (a red shard already fails the run)
+    assert tot["needs"] == ["behavior"] and "if" not in tot
+    totals = {e["os"]: e for e in tot["strategy"]["matrix"]["include"]}
+    assert set(totals) == set(shards)
+    for os_, e in totals.items():
+        assert e["shards"] == len(shards[os_]), (os_, e)
+        assert e["leg"] == ("Windows" if os_.startswith("windows") else "Linux")
+    steps = _steps(tot)
+    dl = [s for s in steps if str(s.get("uses", "")).startswith("actions/download-artifact@")]
+    assert dl and dl[0]["with"]["pattern"] == "behavior-${{ matrix.os }}-" + TESTED_PYTHONS[0] + "-mutations-*"
+    check = [s for s in steps if "check_ci_leg.py log" in s.get("run", "")]
+    assert check and '"${logs[@]}" --leg "$LEG" --part mutations' in check[0]["run"]
+    assert '-ne "$SHARDS"' in check[0]["run"], "a missing shard log must be red, not a smaller sum"
+    # the totals job is part of the gate: the full-required verifier needs it and lists it
+    fr = data["jobs"]["full-required"]
+    assert "mutations-total" in fr["needs"]
+    verify = [s for s in _steps(fr) if (s.get("with") or {}).get("mode") == "verify"]
+    assert verify and '"mutations-total"' in verify[0]["with"]["required-jobs"]
+    # the shard artifact name is what the totals job downloads
+    up = [s for s in _steps(beh) if str(s.get("uses", "")).startswith("actions/upload-artifact@")]
+    assert up[0]["with"]["name"].startswith("behavior-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.part }}")
+    assert "format('-{0}of{1}', matrix.shard, matrix.shards)" in up[0]["with"]["name"]

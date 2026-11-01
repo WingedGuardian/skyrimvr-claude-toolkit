@@ -366,17 +366,26 @@ def test_a_catastrophic_regex_inside_the_engine_is_killed_at_the_budget(tmp_path
 
 
 def test_a_hanging_fallback_engine_is_cut_off_by_timeout(tmp_path):
-    """On the fallback path the wrapper bounds the engine (SKYGUARD_ENGINE_TIMEOUT + 3 s), killing it by
-    its Windows pid -- not with coreutils `timeout`, which cannot stop a native python.exe under load."""
+    """On the fallback path the wrapper bounds the engine (SKYGUARD_ENGINE_TIMEOUT + 10 s from its spawn, never
+    past the outer deadline), killing it by its Windows pid -- not with coreutils `timeout`, which cannot stop a
+    native python.exe under load.
+
+    The clock asserts the wrapper's PROMISE, the answer before DL = start + (hook timeout - 15 s), not a sum of
+    phase budgets: a probe (<= 15 s), the engine (12 s) and the kill wait (<= 10 s) legitimately add up to ~37 s on
+    a loaded runner, and a fixed 25 s here failed exactly such a run (CI 41119451558, Windows 3.11, 42 s). With a
+    40 s test-only hook timeout DL is 25 s, the probe window closes at 15 s and the engine's end clamps to DL, so
+    the bound holds whatever the load -- or the wrapper broke its promise, which is the thing to see red."""
     import time
     root = _install(tmp_path, MISSING)
     _shim(tmp_path / "shims", "python",
           f'case "$*" in *--selftest*|*version_info*) exec "{REAL_PY}" "$@" ;; esac\nexec sleep 40\n')
     t = time.time()
-    r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root), {"SKYGUARD_ENGINE_TIMEOUT": "2"})
+    r = _fire(root, [tmp_path / "shims"], "protect-files.sh", _esp_write(root),
+              {"SKYGUARD_ENGINE_TIMEOUT": "2", "SKYGUARD_HOOK_TIMEOUT_S": "40"})
+    elapsed = time.time() - t
     assert "GUARD INERT" in _reason(r) and "engine failed" in _reason(r), r.stdout
     assert "exit 124" in _failed(root, "protect-files"), _failed(root, "protect-files")
-    assert time.time() - t < 25, "the fallback engine call was not cut off at its budget"
+    assert elapsed < 25 + 5, "the answer landed after the outer deadline (DL 25 s + 5 s to start bash and print)"
 
 
 def test_known_locations_are_tried_newest_version_first(tmp_path):

@@ -451,7 +451,7 @@ class World:
                 return {"pid": pid, "executable": root["Path"], "start_time": root["StartTime"],
                         "exit_time": world.launch_exit, "observed_until": "2026-10-25T10:01:00Z"}
 
-            def process_on_desktop(self, pid):
+            def process_on_desktop(self, pid, *, allow_ancestry_only=False):
                 return True       # independent thread and window observations: neither proves the other
 
             def boundary(self, pids):

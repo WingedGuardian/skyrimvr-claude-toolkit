@@ -7,9 +7,12 @@ permissions:
 jobs:
   behavior:
     needs: [release-build]
-    name: Behavioral tests (${{ matrix.os }}, Python ${{ matrix.python }}, ${{ matrix.part }})
+    name: Behavioral tests (${{ matrix.os }}, Python ${{ matrix.python }}, ${{ matrix.part }}${{ matrix.shard && format(' {0}/{1}', matrix.shard, matrix.shards) || '' }})
     strategy:
-      max-parallel: 4
+      # Every leg at once. The run is as long as its SLOWEST job, not its queue (user ruling 2026-10-31, after a
+      # month of 4-5 h rounds): at max-parallel 4 the Linux legs could not start until 95 min in (CI run
+      # 40953576542). 14 = the 8 suite legs + 6 mutation shards below; the account's hosted-runner limit is 20.
+      max-parallel: 14
       fail-fast: false
       # OS x the TESTED Python range (user ruling 2026-10-05: setup checks 3.10-3.13, so CI runs all four).
       # Node comes from .node-version on every leg; the .NET 10 toolchain has its own job below.
@@ -18,14 +21,21 @@ jobs:
       # Mutations once per OS on the oldest tested Python (user ruling 2026-10-28): whether a mutant is killed does
       # not depend on the Python minor, and the four copies were ~22 of each run's ~30 runner-hours. The suite part
       # still runs every tested Python. Windows is listed first so its longest job starts in the first wave.
+      # The mutation gate runs as SHARDS (include below): one Windows mutation job was 258 of a run's 270 minutes
+      # (CI run 40953576542; Linux 125), so Windows runs 4 shards and Linux 2, each ~65 min, about a suite leg.
+      # tests/conftest.py (SKYGUARD_MUTATION_SHARD=i/n) keeps every n-th twin and DESELECTS the rest; the
+      # mutations-total job below sums the shards' logs and checks them as the one unsharded gate.
       matrix:
         os: [windows-latest, ubuntu-latest]
         python: ["3.10", "3.11", "3.12", "3.13"]
-        part: [suite, mutations]
-        exclude:
-          - {part: mutations, python: "3.11"}
-          - {part: mutations, python: "3.12"}
-          - {part: mutations, python: "3.13"}
+        part: [suite]
+        include:
+          - {os: windows-latest, python: "3.10", part: mutations, shard: 1, shards: 4}
+          - {os: windows-latest, python: "3.10", part: mutations, shard: 2, shards: 4}
+          - {os: windows-latest, python: "3.10", part: mutations, shard: 3, shards: 4}
+          - {os: windows-latest, python: "3.10", part: mutations, shard: 4, shards: 4}
+          - {os: ubuntu-latest, python: "3.10", part: mutations, shard: 1, shards: 2}
+          - {os: ubuntu-latest, python: "3.10", part: mutations, shard: 2, shards: 2}
     runs-on: ${{ matrix.os }}
     # The whole suite includes tests/test_mutations.py; a leg that hangs must die red, not stall for six hours.
     # 300 (the test_workflows cap): CI run 39167733692's full Windows suite took 176-190 min and two legs hit the
@@ -130,6 +140,8 @@ jobs:
           TOOLKIT_REQUIRE_HARNESS: "1"
           TOOLKIT_REQUIRE_NODE_DEPS: "1"
           SUITE: ${{ matrix.part == 'mutations' && 'tests/test_mutations.py' || 'tests/ --ignore=tests/test_mutations.py' }}
+          # a mutation shard runs its slice of the gate (tests/conftest.py); a suite leg leaves this empty
+          SKYGUARD_MUTATION_SHARD: ${{ matrix.part == 'mutations' && format('{0}/{1}', matrix.shard, matrix.shards) || '' }}
         run: |
           set -o pipefail
           python -B tests/run_harness_tests.py $SUITE -v --durations=10 -rfEs | tee behavioral.log
@@ -175,11 +187,51 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: behavior-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.part }}
+          name: behavior-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.part }}${{ matrix.shard && format('-{0}of{1}', matrix.shard, matrix.shards) || '' }}
           path: |
             collect.log
             behavioral.log
           if-no-files-found: warn
+
+  # The shards of one OS's mutation gate, checked TOGETHER as the one unsharded gate (scripts/check_ci_leg.py, several
+  # logs): every shard collected the whole gate, the skipped/xfailed counts SUMMED stay under the part's ceilings, and
+  # test_mutations.py has a PASSED test. Per-shard ceilings alone would let n shards each skip a share.
+  # No `if:` here: the core contract forbids a conditional full job, and none is needed -- a red shard already fails
+  # the run, so the totals only add information when every behavior job succeeded.
+  mutations-total:
+    needs: [behavior]
+    name: Mutation gate totals (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: windows-latest, leg: Windows, shards: 4}
+          - {os: ubuntu-latest, leg: Linux, shards: 2}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          pattern: behavior-${{ matrix.os }}-3.10-mutations-*
+          path: shards
+
+      - name: Tripwire -- the summed shards are one whole mutation gate
+        shell: bash
+        env:
+          LEG: ${{ matrix.leg }}
+          SHARDS: ${{ matrix.shards }}
+        run: |
+          shopt -s nullglob
+          logs=(shards/*/behavioral.log)
+          if [ "${#logs[@]}" -ne "$SHARDS" ]; then
+            echo "::error::expected $SHARDS mutation shard logs for $LEG, found ${#logs[@]}: a shard job wrote none"
+            exit 1
+          fi
+          python scripts/check_ci_leg.py log "${logs[@]}" --leg "$LEG" --part mutations
 
   dotnet:
     name: .NET 10 toolchain (${{ matrix.os }})
@@ -312,7 +364,7 @@ jobs:
 
   full-required:
     name: Full qualification required
-    needs: [behavior, dotnet, resaver-plus, release-build]
+    needs: [behavior, mutations-total, dotnet, resaver-plus, release-build]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -320,9 +372,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: WingedGuardian/modding-agent-harness/.github/actions/ci-policy@38bf2cb8da9d4add2fa3c71341d641fafd265368 # v1 policy API
+      - uses: WingedGuardian/modding-agent-harness/.github/actions/ci-policy@50a993ba807d4c1e513cedef19b709fa2cf91ce0 # v1 policy API
         with:
           profile: skyrim
           mode: verify
-          required-jobs: '["behavior","dotnet","resaver-plus","release-build"]'
+          required-jobs: '["behavior","mutations-total","dotnet","resaver-plus","release-build"]'
           needs-json: ${{ toJSON(needs) }}

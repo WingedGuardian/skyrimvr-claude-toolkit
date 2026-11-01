@@ -177,6 +177,58 @@ def process_alive(pid, start_time: str) -> bool:
     return running and abs((created - parse_start(start_time)).total_seconds()) <= 0.001
 
 
+def process_generation_limited(pid):
+    """Native access-denied fallback without SYNCHRONIZE or a child shell.
+
+    A complete Toolhelp32 snapshot proves absence. A present PID still needs a query-only handle and creation
+    time; unreadable identity raises OSError. Exit code 259 is conservatively treated as possibly running.
+    """
+    _, kernel32, w = _api()
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [("dwSize", w.DWORD), ("cntUsage", w.DWORD), ("th32ProcessID", w.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", w.DWORD), ("cntThreads", w.DWORD),
+                    ("th32ParentProcessID", w.DWORD), ("pcPriClassBase", w.LONG), ("dwFlags", w.DWORD),
+                    ("szExeFile", w.WCHAR * 260)]
+
+    kernel32.CreateToolhelp32Snapshot.restype, kernel32.CreateToolhelp32Snapshot.argtypes = w.HANDLE, [w.DWORD, w.DWORD]
+    for name in ("Process32FirstW", "Process32NextW"):
+        fn = getattr(kernel32, name)
+        fn.restype, fn.argtypes = w.BOOL, [w.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    snap = kernel32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    if not snap or snap == w.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        present = False
+        ok = kernel32.Process32FirstW(snap, ctypes.byref(entry))
+        while ok:
+            if entry.th32ProcessID == int(pid):
+                present = True
+                break
+            ok = kernel32.Process32NextW(snap, ctypes.byref(entry))
+        if not present:
+            if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES is the only complete absence
+                raise ctypes.WinError(ctypes.get_last_error())
+            return None
+    finally:
+        kernel32.CloseHandle(snap)
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if not handle:
+        if ctypes.get_last_error() == 87:  # exited after the snapshot
+            return None
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        times = [w.FILETIME() for _ in range(4)]
+        _check(kernel32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]))
+        code = w.DWORD()
+        _check(kernel32.GetExitCodeProcess(handle, ctypes.byref(code)))
+        return _filetime(times[0]), code.value == 259  # STILL_ACTIVE; ambiguity refuses restoration
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def terminate_verified(pid, start_time: str) -> None:
     """Terminate one owned process, re-checking its creation time on the OPENED handle first (PID reuse)."""
     _, kernel32, w = _api()
@@ -303,12 +355,18 @@ class BackgroundDesktop:
         return dict(record, exit_time=_filetime(times[1]).isoformat() if exited else None,
                     observed_until=observed.isoformat())
 
-    def process_on_desktop(self, pid):
-        """Prove placement even for windowless helpers; a missing/unreadable thread is not proof."""
+    def process_on_desktop(self, pid, *, allow_ancestry_only=False):
+        """Require a readable thread on this desktop, and no readable thread elsewhere.
+
+        Unreadable threads are neutral. For windowless helpers only, a caller that independently proved an
+        identity-bound launch ancestry may explicitly allow all threads to be unreadable. That path proves no
+        desktop placement; the caller must also retain its window-boundary check. Empty/failed listings refuse.
+        """
         try:
             tids = process_thread_ids(pid)
             if not tids:
                 return False
+            readable = False
             for tid in tids:
                 try:
                     name = thread_desktop(tid)
@@ -316,7 +374,8 @@ class BackgroundDesktop:
                     continue  # no user32 desktop: neutral; ancestry is proved by the caller
                 if name != self.name:
                     return False
-            return True
+                readable = True
+            return readable or allow_ancestry_only
         except (OSError, subprocess.SubprocessError, ValueError, TypeError):
             return False
 

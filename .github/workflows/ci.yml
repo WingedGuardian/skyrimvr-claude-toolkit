@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: WingedGuardian/modding-agent-harness/.github/actions/ci-policy@38bf2cb8da9d4add2fa3c71341d641fafd265368 # v1 policy API
+      - uses: WingedGuardian/modding-agent-harness/.github/actions/ci-policy@50a993ba807d4c1e513cedef19b709fa2cf91ce0 # v1 policy API
         id: context
         with:
           profile: skyrim
@@ -339,7 +339,7 @@ jobs:
           PY
 
 
-      - uses: WingedGuardian/modding-agent-harness/.github/actions/ci-policy@38bf2cb8da9d4add2fa3c71341d641fafd265368 # v1 policy API
+      - uses: WingedGuardian/modding-agent-harness/.github/actions/ci-policy@50a993ba807d4c1e513cedef19b709fa2cf91ce0 # v1 policy API
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         with:
           profile: skyrim
@@ -353,7 +353,9 @@ jobs:
     # the root skyrim-paths.env, no lock without --lock), that a second run changes nothing, and that a bad
     # value exits 2 writing nothing. --agent codex on Linux must exit 3 writing nothing (Codex is Windows-only).
     strategy:
-      max-parallel: 4
+      # All 14 at once (each is 1-2 min): at 4 they ran in four waves, ~8 min on the critical path of every full
+      # qualification (user ruling 2026-10-31: the run is as long as its slowest leg, not its queue).
+      max-parallel: 14
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -392,13 +394,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: WingedGuardian/modding-agent-harness/.github/actions/ci-policy@38bf2cb8da9d4add2fa3c71341d641fafd265368 # v1 policy API
+      - uses: WingedGuardian/modding-agent-harness/.github/actions/ci-policy@50a993ba807d4c1e513cedef19b709fa2cf91ce0 # v1 policy API
         with:
           profile: skyrim
           mode: verify
           required-jobs: '["policy","shell","python","node","toolkit","setup-smoke","qualification"]'
           needs-json: ${{ toJSON(needs) }}
-      - uses: WingedGuardian/modding-agent-harness/.github/actions/ci-policy@38bf2cb8da9d4add2fa3c71341d641fafd265368 # v1 policy API
+      - uses: WingedGuardian/modding-agent-harness/.github/actions/ci-policy@50a993ba807d4c1e513cedef19b709fa2cf91ce0 # v1 policy API
         if: always()
         with:
           profile: skyrim

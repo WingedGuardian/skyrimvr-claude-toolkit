@@ -188,8 +188,8 @@ def test_operation_manifests_are_read_without_misreading_backed_up_configs(tmp_p
             + str(tmp_path / "Data/settings.json") + "\n")
     write(operation / "manifest.files.txt", text.encode())
     write(operation / ("Data/settings." + extension), b'{"mod_configuration":true}')
-    # Unknown JSON could be a rollback manifest; keep staging conservatively.
-    assert (key(old) in planned(hk.plan(cfg), "superseded")) is (not rollback and extension != "json")
+    # Backed-up configs are payloads; only the operation manifest supplies rollback references.
+    assert (key(old) in planned(hk.plan(cfg), "superseded")) is (not rollback)
 
 
 @pytest.mark.parametrize("kind", ["tracked", "linked"])

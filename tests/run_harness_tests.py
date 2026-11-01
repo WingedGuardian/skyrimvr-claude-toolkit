@@ -14,7 +14,10 @@ from harness_isolation import MANAGERS
 # the "barriers are not active" check could never fire under the launcher. TOOLKIT_REQUIRE_NODE_DEPS likewise:
 # without it a missing `npm ci` would skip the FOMOD smoke instead of failing it (tests/test_node_fomod_smoke.py).
 FORWARDED_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "TOOLKIT_REQUIRE_HARNESS",
-                 "TOOLKIT_REQUIRE_NODE_DEPS")
+                 "TOOLKIT_REQUIRE_NODE_DEPS",
+                 # The CI shard selector tests/conftest.py reads. Not forwarding it ran the WHOLE mutation gate in
+                 # every shard job (CI run 41254615914: 2 Linux shards x 3,180 twins, 2 h each, no "deselected").
+                 "SKYGUARD_MUTATION_SHARD")
 
 
 def evidence_root(repo):

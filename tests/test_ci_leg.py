@@ -174,6 +174,73 @@ def test_an_unknown_part_or_a_part_in_collect_mode_is_exit_2(tmp_path):
     assert _run_part(tmp_path, "collected 3 items\n", "--part", "m", mode="collect").returncode == 2
 
 
+def _run_shards(tmp_path, texts, *extra):
+    """Several logs = the shards of one part (CI's mutations-total job)."""
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps(PART_SPEC), encoding="utf-8")
+    logs = []
+    for k, text in enumerate(texts):
+        log = tmp_path / "shard{}.log".format(k + 1)
+        log.write_text(text, encoding="utf-8")
+        logs.append(str(log))
+    return subprocess.run([sys.executable, "-B", str(SCRIPT), "log", *logs, "--leg", "Linux", *extra,
+                           "--spec", str(spec)], capture_output=True, text=True, timeout=60)
+
+
+def _shard_log(passed, skipped=0, collected=3, drop=()):
+    lines = ["collected {} items / {} deselected / {} selected".format(collected, collected - passed - skipped,
+                                                                       passed + skipped), "",
+             *["tests/test_m.py::test_x{} PASSED  [ 50%]".format(k) for k in range(passed)],
+             "=== {} passed, {} skipped, {} deselected in 1.00s ===".format(passed, skipped, collected - passed - skipped)]
+    return "\n".join(l for l in lines if not any(d in l for d in drop)) + "\n"
+
+
+def test_shard_logs_are_checked_as_one_part(tmp_path):
+    r = _run_shards(tmp_path, [_shard_log(2), _shard_log(1)], "--part", "m")
+    assert r.returncode == 0 and "2 shard logs summed" in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("texts,why", [
+    # each shard alone is under the ceiling (0 here would fail alone; so use a spec-level view: 1 + 0 > 0)
+    ([_shard_log(2), _shard_log(0, skipped=1)], "1 skipped > the Linux leg's ceiling 0"),
+    # a shard that collected a slice instead of the whole part
+    ([_shard_log(2), _shard_log(1, collected=1)], "collected 1 < floor 2 in shard 2 of 2"),
+    # a shard with no summary line (its job died) cannot be averaged away by the others
+    ([_shard_log(2), "collected 3 items\n"], "no pytest summary line in every shard"),
+    # the required module passed in no shard
+    ([_shard_log(2, drop=("test_m.py",)), _shard_log(1, drop=("test_m.py",))], "required module test_m.py has no PASSED test"),
+])
+def test_each_shard_tripwire_goes_red(tmp_path, texts, why):
+    r = _run_shards(tmp_path, texts, "--part", "m")
+    assert r.returncode in (1, 2) and why in r.stdout, r.stdout
+
+
+def test_shard_skips_are_summed_not_taken_per_shard(tmp_path):
+    """The thing per-shard checks cannot see: two shards each under a ceiling of 1 whose SUM is over it."""
+    spec = dict(PART_SPEC, parts={"m": dict(PART_SPEC["parts"]["m"], skip_ceiling={"Linux": 1, "Windows": 1})})
+    (tmp_path / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
+    logs = []
+    for k in (1, 2):
+        log = tmp_path / "s{}.log".format(k)
+        log.write_text(_shard_log(1, skipped=1), encoding="utf-8")
+        logs.append(str(log))
+    one = subprocess.run([sys.executable, "-B", str(SCRIPT), "log", logs[0], "--leg", "Linux", "--part", "m",
+                          "--spec", str(tmp_path / "spec.json")], capture_output=True, text=True, timeout=60)
+    both = subprocess.run([sys.executable, "-B", str(SCRIPT), "log", *logs, "--leg", "Linux", "--part", "m",
+                           "--spec", str(tmp_path / "spec.json")], capture_output=True, text=True, timeout=60)
+    assert one.returncode == 0, one.stdout
+    assert both.returncode == 1 and "2 skipped > the Linux leg's ceiling 1" in both.stdout, both.stdout
+
+
+def test_collect_mode_takes_one_log_only(tmp_path):
+    for k in (1, 2):
+        (tmp_path / "c{}.log".format(k)).write_text("12 tests collected\n", encoding="utf-8")
+    (tmp_path / "spec.json").write_text(json.dumps(SPEC), encoding="utf-8")
+    r = subprocess.run([sys.executable, "-B", str(SCRIPT), "collect", str(tmp_path / "c1.log"), str(tmp_path / "c2.log"),
+                        "--leg", "Windows", "--spec", str(tmp_path / "spec.json")], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 2
+
+
 def test_the_recorded_mutation_part_names_the_gate():
     spec = json.loads((REPO / ".github" / "ci-leg.json").read_text(encoding="utf-8"))
     part = spec["parts"]["mutations"]

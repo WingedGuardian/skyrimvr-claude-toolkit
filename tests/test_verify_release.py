@@ -42,7 +42,9 @@ def payload(tmp_path_factory):
         if (root / junk).exists():
             shutil.rmtree(root / junk)
     for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", "KNOWLEDGEBASE.local.md",
-                 "scripts/guard-latency.py", "docs/REVIEW-SCOPE.md"):
+                 "scripts/guard-latency.py", "scripts/prepush-gate.py", "docs/REVIEW-SCOPE.md"):
+        # (the hand-removed files mirror scripts/build_release_zip.py's EXCLUDE: this fixture builds its payload
+        # from the tracked tree, not from the build script, so a new maintainer-only script must be dropped here too)
         if (root / junk).exists():
             (root / junk).unlink()
     # Only what a release can ship: git-tracked files. CI tees behavioral.log / collect.log into the checkout

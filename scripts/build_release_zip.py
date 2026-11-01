@@ -49,9 +49,9 @@ from pathlib import Path
 # Native fixture authors are also maintainer-only. Exclude them explicitly here,
 # never through export-ignore: the archive proof must account for every omission.
 # scripts/guard-corpus/ and scripts/guard-latency.py read tests/guard_corpus/ (which never ships), so in a zip they
-# could only crash: maintainer-only, kept in the repo (review L4b L1).
+# could only crash: maintainer-only, kept in the repo (review L4b L1). scripts/prepush-gate.py runs tests/ too.
 EXCLUDE = ("tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests", "scripts/guard-corpus",
-           "scripts/guard-latency.py")
+           "scripts/guard-latency.py", "scripts/prepush-gate.py")
 # docs/superpowers/ is the maintainer's plans, handoffs and measurements (user ruling 2026-10-20: never shipped). The
 # measurements that shipped docs cite live in docs/evidence/ instead.
 EXCLUDE += ("docs/superpowers",)

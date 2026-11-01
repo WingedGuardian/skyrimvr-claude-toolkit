@@ -919,6 +919,25 @@ def test_session_runs_at_most_once_per_interval(tmp_path, monkeypatch):
     assert not left.exists()
 
 
+def test_session_runs_when_the_last_sweep_is_dated_in_the_future(tmp_path, monkeypatch):
+    """A state file newer than the clock (the clock was set back, or Windows' coarse time.time() lags the file's
+    precise mtime by a tick) is not "a sweep ran just now": a negative age must not switch the sweep off."""
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)   # conftest switches the sweep off for every test
+    cfg = sweep_cfg()
+    cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
+               sweep_every_hours=6)
+    monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(tmp_path / "temp"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setattr(hk, "recycle", bin_for(tmp_path))
+    (tmp_path / "temp").mkdir()
+    state = tmp_path / "note.txt"
+    state.write_text("", encoding="utf-8")
+    os.utime(state, (time.time() + 60,) * 2)
+    left = tdir(tmp_path / "temp", "skyrim-harness-fut001")
+    hk.session(cfg, state)
+    assert not left.exists()
+
+
 def test_session_recycles_settled_retired_guard_store_batches_and_keeps_a_fresh_one(tmp_path, monkeypatch):
     """Review L3 LOW-3 / L2 LOW-7: the guard's pruning only renames into <project>/.claude/retired (retire.py); the
     session sweep is what gets those batches to the Recycle Bin. A batch still being filled is never offered."""

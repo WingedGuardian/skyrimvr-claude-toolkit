@@ -87,6 +87,8 @@ def pristine(tmp_path_factory):
         shutil.rmtree(root / "scripts" / "guard-corpus")
     if (root / "scripts" / "guard-latency.py").exists():
         (root / "scripts" / "guard-latency.py").unlink()
+    if (root / "scripts" / "prepush-gate.py").exists():     # excluded by build_release_zip.EXCLUDE like the two above
+        (root / "scripts" / "prepush-gate.py").unlink()
     for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", ".claude/backups",
                  ".claude/retired",
                  "KNOWLEDGEBASE.local.md", ".superpowers", ".skyguard", "tools/resaver-cli/tests"):

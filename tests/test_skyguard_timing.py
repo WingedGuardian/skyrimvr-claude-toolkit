@@ -13,7 +13,9 @@ meant "the machine was loaded" as often as "a rule went quadratic", and would ha
     steps and a single fast call reads as 0 or 15.6;
   - LINEARITY: each shape runs at 20 KB and 80 KB; cpu(80 KB) / cpu(20 KB) must stay under RATIO_MAX (linear is
     ~4, quadratic ~16) whenever the 80 KB time is large enough to measure (>= RATIO_FLOOR_MS). This is independent
-    of machine speed;
+    of machine speed. A ratio over the limit is re-measured precisely up to RETRIES times and the LOWEST ratio
+    counts: interference only adds CPU time (hosted-VM steal time is booked to the process; CI run 41269438890
+    read a linear shape at 8.7 once), while a quadratic shape cannot measure low;
   - an absolute CEILING_MS of CPU at 80 KB, generous: it catches the catastrophic case, it does not tune;
   - EARLY_MS at 20 KB: a shape already that slow at 20 KB fails at once instead of spending minutes at 80 KB.
 The mutations in test_mutations.py put each known cause back and require the named shape to go red.
@@ -38,6 +40,7 @@ CEILING_MS = 2000.0      # CPU per call at 80 KB
 EARLY_MS = 1000.0        # CPU per call at 20 KB: already catastrophic
 MIN_SAMPLE_MS = 80.0     # accumulate at least this much CPU per measurement (clock granularity ~15.6 ms)
 PRECISE_SAMPLE_MS = 400.0  # the re-measurement when a ratio reads >= RATIO_MAX
+RETRIES = 3              # precise re-measurements before a ratio >= RATIO_MAX is believed; the lowest ratio counts
 MAX_REPS = 20000
 WALL_CAP_S = 5.0         # stop repeating after this much wall time (a call that waits rather than computes)
 
@@ -80,12 +83,18 @@ def assert_linear(label, make, small_n=SMALL, large_n=LARGE):
     assert large < CEILING_MS, f"{label}: {large:.0f} ms CPU per call at {l_kb} KB (ceiling {CEILING_MS:.0f})"
     if large >= RATIO_FLOOR_MS:
         ratio = large / max(small, 0.25)
-        if ratio >= RATIO_MAX:
+        attempts = 0
+        while ratio >= RATIO_MAX and attempts < RETRIES:
             # An 80 ms sample of a ~30 ms call is 3 calls on a 15.6 ms clock (+-17%). Before calling it
-            # superlinear, measure both sizes once more with a 5x sample (+-3%): a quadratic (~16) stays red.
-            small = cpu_ms(make(small_n), PRECISE_SAMPLE_MS)
+            # superlinear, measure both sizes again with a 5x sample (+-3%), large first so a burst of interference
+            # that spans both sizes inflates them together, and keep the LOWEST ratio seen: interference can only
+            # add CPU time (a hosted VM's steal time is booked to the process), so the minimum is the estimate of the
+            # shape's own cost, and a quadratic (~16) stays red on every attempt. CI run 41269438890: one Linux
+            # runner read skse-path-run at 8.7 after the single re-measure; the shape measures 3.4 on a quiet machine.
+            attempts += 1
             large = cpu_ms(make(large_n), PRECISE_SAMPLE_MS)
-            ratio = large / max(small, 0.25)
+            small = cpu_ms(make(small_n), PRECISE_SAMPLE_MS)
+            ratio = min(ratio, large / max(small, 0.25))
         assert ratio < RATIO_MAX, (
             f"{label}: superlinear -- {small:.1f} ms CPU at {s_kb} KB, {large:.1f} ms at {l_kb} KB, ratio {ratio:.1f} "
             f"(linear ~4, quadratic ~16, limit {RATIO_MAX:.0f})")
@@ -229,7 +238,7 @@ def _delete_shapes(N):
         "node-rmsync-run": 'node -e "' + ".rmSync(" * (N // 8) + '"',
         "remove-item-params": "Remove-Item " + ("-Include " + W + " ") * (N // 210),
         "remove-item-many": "Remove-Item " + (W + ", ") * (N // 202) + "b",
-        "printf-sh-opaque": "printf '" + "rm -rf x " * (N // 9) + "' | sh",
+        "printf-sh-opaque": "printf '%s" + "rm -rf x " * (N // 9) + "' | sh",   # % keeps the text opaque (round D)
         "opaque-many": ("$R " + W + "; ") * (N // 206) + 'ls "' + GAME + '"',
         "xargs-rm-many": ("ls " + X + " | xargs rm; ") * (N // 417) + 'ls "' + GAME + '"',
         "find-delete-starts": "find " + (F + " ") * (N // 61) + "-delete",
@@ -300,7 +309,7 @@ def _shell_write_shapes(N_):
         "dots-run": "echo x > " + "." * N_ + "esp",
         "fallback-parse-fail": 'echo "' + ("> " + F + ".esp ") * (N_ // 67),
         "fallback-write-words": 'echo "' + "> " * (N_ // 2),
-        "opaque-pipe-text": "printf '" + ("echo > " + F + ".esp ") * (N_ // 72) + "' | sh",
+        "opaque-pipe-text": "printf '%s" + ("echo > " + F + ".esp ") * (N_ // 72) + "' | sh",
         "opaque-many-pipes": ("printf " + W + " | $X; ") * (N_ // 211),
         # Task 9 item 0: the fallback's redirect target (one word, quoted or not) and tee's operand list.
         "opaque-gt-run": '"$X" -c "' + "a>b " * (N_ // 4) + '"',
@@ -503,7 +512,7 @@ def _anchored_shapes(N):
         "reg-set-run": ("set K" + F + "=" + F + "& ") * (N // 128) + R + " " + D + ' "%K%"',
         "reg-code-run": 'python -c "' + ("os.system('" + R + " " + D + " '" + F + ") ") * (N // 85) + '"',
         "reg-code-unterminated": 'python -c "' + R + " " + D + " '" + "a" * N + '"',
-        "reg-opaque-pipe":"printf '" + (R + " " + D + " " + F + " ") * (N // 72) + "' | sh",
+        "reg-opaque-pipe":"printf '%s" + (R + " " + D + " " + F + " ") * (N // 72) + "' | sh",
         "psc-flags": "tool " + ("-o " + W + ".psc ") * (N // 208),
         "psc-eq-flags": "tool " + ("--output=" + F + " ") * (N // 70),
         "champollion-many": "Champollion " + ("Data/Scripts/" + F + ".pex ") * (N // 78),
