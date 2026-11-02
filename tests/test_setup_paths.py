@@ -8,6 +8,8 @@ afterwards -- it never looks at a single path setup.sh wrote.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from conftest import claude_md, game_root_win, hook_python_lines, key_path, run_setup, write_mo2_ini
@@ -550,3 +552,67 @@ def test_a_rerun_from_a_differently_cased_folder_is_not_a_moved_install(tmp_path
     assert "points at" not in r.stdout, r.stdout
     assert "Already configured: .codex/hooks.json" in r.stdout, r.stdout
     assert game.joinpath(".codex", "hooks.json").read_bytes() == first
+
+
+def test_a_hand_set_path_survives_a_rerun_and_can_be_reset(tmp_path):
+    """Review round 2: a hand-set SKYRIM_MO2_MODS reset to '' on any re-run, and that folder stopped being guarded."""
+    from conftest import make_game
+    game = make_game(tmp_path)
+    assert run_setup(game).returncode == 0
+    env = game / "skyrim-paths.env"
+    mods = tmp_path / "hand-set-mods"
+    mods.mkdir()
+    text = env.read_text(encoding="utf-8")
+    env.write_text(re.sub(r"(?m)^SKYRIM_MO2_MODS=.*$", "SKYRIM_MO2_MODS='{}'".format(mods.as_posix()), text),
+                   encoding="utf-8")
+    r = run_setup(game)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert re.search(r"(?m)^SKYRIM_MO2_MODS='{}'$".format(re.escape(mods.as_posix())), env.read_text(encoding="utf-8"))
+    assert "keeping the path you set by hand" in r.stdout + r.stderr
+    r = run_setup(game, env_overrides={"SKYRIM_PREFER_DETECTED": "1"})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert re.search(r"(?m)^SKYRIM_MO2_MODS=''$", env.read_text(encoding="utf-8"))
+
+
+def test_a_path_setup_wrote_itself_follows_what_it_detects_now(tmp_path):
+    """A profile switch or a moved Documents, with the old folder still there: keeping it leaves the new one unguarded."""
+    from conftest import make_game
+    game = make_game(tmp_path)
+    assert run_setup(game).returncode == 0
+    env = game / "skyrim-paths.env"
+    old = tmp_path / "old-profile"
+    old.mkdir()
+    text = env.read_text(encoding="utf-8")
+    for pattern in (r"(?m)^SKYRIM_MO2_MODS=.*$", r"(?m)^# detected SKYRIM_MO2_MODS=.*$"):
+        assert re.search(pattern, text), pattern
+    text = re.sub(r"(?m)^(# detected )?SKYRIM_MO2_MODS=.*$",
+                  lambda m: "{}SKYRIM_MO2_MODS='{}'".format(m.group(1) or "", old.as_posix()), text)
+    env.write_text(text, encoding="utf-8")
+    assert run_setup(game).returncode == 0
+    assert re.search(r"(?m)^SKYRIM_MO2_MODS=''$", env.read_text(encoding="utf-8"))
+
+
+def test_a_file_from_before_the_detected_lines_follows_detection(tmp_path):
+    from conftest import make_game
+    game = make_game(tmp_path)
+    assert run_setup(game).returncode == 0
+    env = game / "skyrim-paths.env"
+    old = tmp_path / "old-profile"
+    old.mkdir()
+    text = re.sub(r"(?m)^# detected .*\n", "", env.read_text(encoding="utf-8"))
+    env.write_text(re.sub(r"(?m)^SKYRIM_MO2_MODS=.*$", "SKYRIM_MO2_MODS='{}'".format(old.as_posix()), text),
+                   encoding="utf-8")
+    assert run_setup(game).returncode == 0
+    assert re.search(r"(?m)^SKYRIM_MO2_MODS=''$", env.read_text(encoding="utf-8"))
+
+
+def test_a_hand_set_path_that_is_not_a_folder_is_not_kept(tmp_path):
+    from conftest import make_game
+    game = make_game(tmp_path)
+    assert run_setup(game).returncode == 0
+    env = game / "skyrim-paths.env"
+    text = env.read_text(encoding="utf-8")
+    env.write_text(re.sub(r"(?m)^SKYRIM_MO2_MODS=.*$", "SKYRIM_MO2_MODS='{}/gone'".format(tmp_path.as_posix()), text),
+                   encoding="utf-8")
+    assert run_setup(game).returncode == 0
+    assert re.search(r"(?m)^SKYRIM_MO2_MODS=''$", env.read_text(encoding="utf-8"))

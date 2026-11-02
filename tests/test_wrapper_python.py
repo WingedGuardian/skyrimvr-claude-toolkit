@@ -71,6 +71,9 @@ def test_the_environment_still_wins_over_the_file(tmp_path, name):
 def test_a_recorded_interpreter_that_does_not_exist_is_skipped(tmp_path, name, value):
     r = _bash(_install(tmp_path, value), name)
     assert "FILEPY" not in r.stdout and "nowhere" not in r.stdout + r.stderr, r.stdout + r.stderr
+    # Skipped and carried on: the next interpreter ran the wrapper's target (this bed has no such file, so it says so).
+    # Review round 2: a wrapper that aborted on a stale path, printing nothing, passed the line above.
+    assert "skyguard" in r.stdout + r.stderr, r.stdout + r.stderr
 
 
 @pytest.mark.skipif(not WIN, reason="the .cmd twins run on Windows")

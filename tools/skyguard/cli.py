@@ -168,7 +168,7 @@ def main(argv=None, out=None) -> int:
     if cmd == "doctor":
         from . import health
         from . import lock as _lock
-        if "--root" not in rest:
+        if not any(a == "--root" or a.startswith("--root=") for a in rest):
             rest = rest + ["--root", _lock.default_root()]
         try:
             return health.main(["report"] + rest)

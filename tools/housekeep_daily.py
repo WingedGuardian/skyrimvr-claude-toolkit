@@ -52,9 +52,14 @@ def running_games(names):
 
 def low_priority():
     if sys.platform == "win32":                       # idle CPU class + background I/O mode for this process
-        k = ctypes.windll.kernel32
-        k.SetPriorityClass(k.GetCurrentProcess(), 0x00000040)
-        k.SetPriorityClass(k.GetCurrentProcess(), 0x00100000)
+        # The pseudo-handle is -1 as a pointer: with ctypes' default int it arrives invalid and the call does nothing
+        # (MEASURED 2026-11-02: error 6, the class unchanged, while the announcement promised low priority).
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.GetCurrentProcess.restype = ctypes.c_void_p
+        k.SetPriorityClass.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+        me = k.GetCurrentProcess()
+        k.SetPriorityClass(me, 0x00100000)            # background I/O first: MEASURED, it resets the class to normal
+        k.SetPriorityClass(me, 0x00000040)            # idle CPU class
 
 
 def log(cfg, text):

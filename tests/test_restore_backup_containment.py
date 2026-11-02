@@ -62,7 +62,8 @@ def test_the_reviewers_state_json_probe_is_refused_at_the_restore(tmp_path):
 
 GUARDED = [".claude/hooks/protect-bash.sh", ".claude/settings.json", ".claude/settings.local.json",
            ".claude/skyrim-paths.env", ".codex/config.toml", "tools/skyguard/engine.py", "agent/guards/x.py",
-           "GUARD-FILES.sha256", "Data/Skyrim.esm", "Data/MyMod.esp", "Data/Foo - Main.bsa", ".skyguard/lock.json"]
+           "GUARD-FILES.sha256", "Data/Skyrim.esm", "Data/MyMod.esp", "Data/Foo - Main.bsa", ".skyguard/lock.json",
+           "notes.txt:stream"]
 
 
 @pytest.mark.parametrize("rel", GUARDED)

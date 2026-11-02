@@ -829,6 +829,41 @@ retire_3x_paths() {
         echo "  (the guard reads nothing from it that skyrim-paths.env does not already say)."
     fi
 }
+# A path set by hand survives a re-run (review 2026-11-02: a hand-set SKYRIM_MO2_MODS reset to '' with nothing reported,
+# and that folder stopped being guarded). Hand-set means it differs from the `# detected` line setup wrote beside it, so
+# a path setup wrote itself still follows a profile switch or a moved Documents: keeping that one would leave the new
+# folder unguarded. No `# detected` line (a file from before this rule): nothing proves a hand edit, so detection wins.
+# Only a real folder is kept; SKYRIM_PREFER_DETECTED=1 takes the detected path.
+DETECTED_LINES=""
+keep_hand_set() {  # $1 = key in skyrim-paths.env, $2 = detected value -> prints the value to use; notes go to stderr
+    local v="" was="" seen=""
+    if [ -f "$PATHS_ENV" ]; then
+        v=$(sed -n "s/^$1=['\"]\(.*\)['\"]\$/\1/p" "$PATHS_ENV" | tail -n 1)
+        seen=$(grep -c "^# detected $1=" "$PATHS_ENV")
+        was=$(sed -n "s/^# detected $1=['\"]\(.*\)['\"]\$/\1/p" "$PATHS_ENV" | tail -n 1)
+    fi
+    if test "$seen" = 1 && test "$v" != "$was" && test -n "$v" && test -d "$v" && test "${SKYRIM_PREFER_DETECTED:-0}" != 1; then
+        if test "$v" != "$2"; then
+            echo "" >&2
+            echo "  !! $1: keeping the path you set by hand: $v" >&2
+            echo "  !! Setup detected ${2:-nothing} instead. The guard protects YOUR path, not the detected one." >&2
+            echo "  !! To use the detected one: SKYRIM_PREFER_DETECTED=1 bash setup.sh" >&2
+        fi
+        printf '%s' "$v"
+    else
+        printf '%s' "$2"
+    fi
+}
+_keep() {  # $1 = key, $2 = name of the variable holding the detected value
+    local detected="${!2}"
+    DETECTED_LINES="$DETECTED_LINES# detected $1=$(sq "$detected")"$'\n'
+    printf -v "$2" '%s' "$(keep_hand_set "$1" "$detected")"
+}
+_keep SKYRIM_CONFIG_DIR CONFIG_DIR
+_keep SKYRIM_DOCUMENTS_DIR DOCUMENTS_GAME_DIR
+_keep SKYRIM_LOADORDER_DIR LOADORDER_DIR
+_keep SKYRIM_MO2_MODS MO2_MODS
+_keep SKYRIM_MO2_OVERWRITE MO2_OVERWRITE
 # Written beside it, then renamed: a crash never leaves half a file, or an empty one, in place.
 {
     printf '# Written by setup.sh. Machine-local: not tracked, not shipped.\n'
@@ -842,6 +877,8 @@ retire_3x_paths() {
     # protect them if it is told where they are. Empty ('') on a non-MO2 install: declares nothing.
     printf 'SKYRIM_MO2_MODS=%s\n' "$(sq "$MO2_MODS")"
     printf 'SKYRIM_MO2_OVERWRITE=%s\n' "$(sq "$MO2_OVERWRITE")"
+    # What setup found, so a re-run can tell a path edited by hand from one it wrote itself.
+    printf '%s' "$DETECTED_LINES"
     # The interpreter the hooks were configured with ('' when no Python was found).
     printf 'SKYGUARD_PYTHON=%s\n' "$(sq "$PYTHON_PATH")"
 } > "$PATHS_ENV.new" 2>/dev/null && mv -f "$PATHS_ENV.new" "$PATHS_ENV" && PATHS_OK=1 || PATHS_OK=""
