@@ -1,14 +1,30 @@
 {
   "_comment": "Copy to .claude/housekeep.json and edit. Paths are relative to the toolkit folder or absolute. See docs/RETENTION.md.",
-  "agent_output": ["_CLAUDE_OUTPUT"],
+  "obsolete_items": {},
+  "recycle_bin_warn_gib": 10,
+  "backup_archive": {
+    "enabled": false
+  },
+  "agent_output": [
+    "_CLAUDE_OUTPUT"
+  ],
   "nested_task_roots": [],
-  "live_roots": ["Data"],
+  "live_roots": [
+    "Data"
+  ],
   "launch_logs": [],
-  "legacy_snapshots": [".claude/backups/auto_snapshots"],
+  "legacy_snapshots": [
+    ".claude/backups/auto_snapshots"
+  ],
   "scratch": [],
   "staging_roots": [],
   "superseded_after_days": 30,
-  "evidence_docs": ["CLAUDE.md", "AGENTS.md", "KNOWLEDGEBASE.md", "KNOWLEDGEBASE.local.md"],
+  "evidence_docs": [
+    "CLAUDE.md",
+    "AGENTS.md",
+    "KNOWLEDGEBASE.md",
+    "KNOWLEDGEBASE.local.md"
+  ],
   "protected_globs": [],
   "active_hours": 48,
   "min_bytes": 1048576,
@@ -18,5 +34,27 @@
   "temp_after_hours": 24,
   "sweep_every_hours": 6,
   "codex_sessions_warn_gib": 5,
-  "worktrees_warn": 10
+  "worktrees_warn": 10,
+  "approved_sha256": "",
+  "archive_enabled": true,
+  "archive_root": "",
+  "archive_retention_days": 90,
+  "archive_roots": {},
+  "archive_after_days": 14,
+  "min_idle_days": 7,
+  "read_veto_hours": 48,
+  "budget_gib": 25,
+  "pin_warn_gib": 1,
+  "growth_warn_gib": 5,
+  "daily_enabled": true,
+  "daily_every_hours": 20,
+  "daily_minutes": 10,
+  "pause_while_running": [
+    "SkyrimVR.exe",
+    "SkyrimSE.exe",
+    "vrserver.exe",
+    "vrcompositor.exe"
+  ],
+  "archive_review_days": 30,
+  "archive_review_seconds": 15
 }
