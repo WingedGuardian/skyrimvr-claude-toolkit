@@ -407,6 +407,9 @@ _INTERP_WRITE = (
 )
 
 
+_INTERP_TWO_LITS = re.compile(r"\b(?:copyFile|rename|cp)(?:Sync)?\(" + _LIT + r"\s*,\s*(['\"])([^'\"\n]{1,400})\3")
+
+
 def text_write_targets_ps(text: str) -> List[str]:
     return [m.group(1) for m in _PS_METHOD_WRITE.finditer(text)]
 
@@ -461,8 +464,22 @@ def _python_write_targets(code: str) -> List[str]:
             if parent is not None and (func.attr in ("write_bytes", "write_text") or
                                        func.attr == "open" and writing(node, 0)):
                 out.append(parent)
+            if parent is not None and func.attr in ("rename", "replace"):     # Path(x).rename(y): both change
+                out.append(parent)
+                dest = literal(node.args[0]) if node.args else None
+                out += [dest] if dest else []
             if isinstance(func.value, ast.Name) and func.value.id in ("io", "builtins", "os"):
                 name = func.value.id + "." + func.attr
+        # Release review 2026-11-02: moves and copies by literal name. The destination is written; a move's source goes.
+        changes = {"os.rename": 2, "os.replace": 2, "os.renames": 2, "shutil.move": 2, "shutil.copy": 1,
+                   "shutil.copy2": 1, "shutil.copyfile": 1, "shutil.copytree": 1}
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id == "shutil":
+            name = "shutil." + func.attr
+        if name in changes and len(node.args) >= 2:
+            dest, source = literal(node.args[1]), literal(node.args[0])
+            out += [dest] if dest else []
+            out += [source] if source and changes[name] == 2 else []
+            continue
         keyword = "path" if name == "os.truncate" else "file"
         argument = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == keyword), None)
         value = literal(argument)
@@ -478,6 +495,8 @@ def text_write_targets(code: str, *, python_literals: bool = False) -> List[str]
     out = []
     for rx in _INTERP_WRITE:
         out += [m.group(2) for m in rx.finditer(code)]
+    for m in _INTERP_TWO_LITS.finditer(code):
+        out += [m.group(4)] + ([m.group(2)] if "rename" in m.group(0) else [])
     return out
 
 
@@ -672,6 +691,57 @@ def is_save(abs_path: Optional[str], roots) -> bool:
     return bool(abs_path) and abs_path.lower().endswith(SAVE_EXTS) and targets.zone(abs_path, roots) == "config"
 
 
+def is_save_folder(abs_path: Optional[str], roots) -> bool:
+    """A Saves folder in the settings area: a bulk copy into it can replace any save there."""
+    return bool(abs_path) and targets.zone(abs_path, roots) == "config" and \
+        posixpath.basename(abs_path.rstrip("/")).lower() == "saves"
+
+
+def _may_bring_saves(source: str) -> bool:
+    """A copy source that can hold saves: a folder, a wildcard that could match one. A named other file cannot."""
+    name = _name(source)
+    if re.search(r"[*?\[{]", name):
+        import fnmatch
+        return any(fnmatch.fnmatchcase("x" + ext, name.lower()) or fnmatch.fnmatchcase("save" + ext, name.lower())
+                   for ext in SAVE_EXTS) or not re.search(r"\.[a-z0-9]+$", name.lower())
+    return _looks_like_dir(source)
+
+
+def bulk_destinations(e) -> List[str]:
+    """Folders this exec fills with files it does not name: an archive extraction, or a tree copy (release review
+    2026-11-02: `tar -xf x -C Saves`, `rsync -a bk/ Saves/` and `robocopy bk Saves` changed saves with no save plan)."""
+    p, argv = e.program, e.argv
+    if p == "tar" and any(w == "--extract" or w == "--get" or re.fullmatch(r"-?[a-zA-Z]*x[a-zA-Z]*", w)
+                          for w in argv[:3]):
+        return (_opt_values(argv, ("--directory",), ("-C",)) or ["."])[:1]
+    if p == "unzip":
+        return (_opt_values(argv, (), ("-d",)) or ["."])[:1]
+    if p in ("7z", "7za", "7zr", "7z.exe") and argv and argv[0].lower() in ("x", "e"):
+        out = [w[2:] for w in argv if w.startswith("-o") and len(w) > 2]
+        return out[:1] or ["."]
+    if p == "expand-archive":
+        return (list(ps_param(e, "destinationpath", 1)) or ["."])[:1]
+    if p in ("rsync", "scp"):
+        return _plain_operands(argv)[-1:]
+    if p == "robocopy":
+        pos = robocopy_positionals(argv)
+        return [pos[1]] if len(pos) == 2 else []
+    return []
+
+
+def _save_only_writes(e) -> List[str]:
+    """Programs that replace a file by name and are judged elsewhere, read here only for the save policy."""
+    p, argv = e.program, e.argv
+    if p == "shred":
+        return _plain_operands_valued(argv, ("-n", "--iterations", "-s", "--size", "--random-source"))
+    if p == "install" and not any(w in ("-d", "--directory") for w in argv):
+        return _plain_operands_valued(argv, ("-m", "--mode", "-o", "--owner", "-g", "--group", "-t",
+                                             "--target-directory"))[-1:]
+    if p == "ln":
+        return _plain_operands(argv)[-1:]
+    return []
+
+
 def is_protected_folder(abs_path: Optional[str], roots) -> bool:
     """A folder whose MOVE takes the game's files away: a protected root itself or an ancestor of one
     (targets.covers_protected), the install's Data folder, or the settings folder's Saves folder."""
@@ -841,12 +911,29 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 moved.append(posixpath.basename(a.rstrip("/")) or a)
             elif is_save(a, roots):
                 saves.append((targets.physical_operand(e, w, cwd, env) or "", "move"))
+        for w in _save_only_writes(e):
+            a = targets.resolve_operand(e, w, cwd, env)
+            if is_save(a, roots):
+                saves.append((targets.physical_operand(e, w, cwd, env) or "", "write"))
+
+        def bulk_into_saves(word):
+            """A wildcard change of that Saves folder: the typed approval, like any bulk change (saves.judge)."""
+            physical = targets.physical_operand(e, word, cwd, env)
+            saves.append((physical.rstrip("/\\") + "/*" if physical else "", "write"))
+
+        for dst in bulk_destinations(e):
+            if is_save_folder(targets.resolve_operand(e, dst, cwd, env), roots):
+                bulk_into_saves(dst)
         for dst, srcs in copy_targets(e):
             # The destination as written AND where it resolves (`cp a.ini x.ini` run inside Data/SKSE/Plugins).
             a_dst = targets.resolve_operand(e, dst, cwd, env)
             # A save replaced: the destination itself, or a folder destination that takes a save's name.
             if is_save(a_dst, roots):
                 saves.append((targets.physical_operand(e, dst, cwd, env) or "", "write"))
+                continue
+            if is_save_folder(a_dst, roots) and (not srcs or any(_may_bring_saves(s) for s in srcs
+                                                                 if not s.lower().endswith(SAVE_EXTS))):
+                bulk_into_saves(dst)
                 continue
             if a_dst is not None and _looks_like_dir(dst):
                 save_dests = [a_dst.rstrip("/") + "/" + _name(s) for s in srcs

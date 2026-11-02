@@ -73,6 +73,7 @@ from typing import List, Mapping, NamedTuple, Optional, Tuple
 
 from . import paths, targets
 from .grep import _compile, grep
+from .shellparse import ps_param
 
 # ------------------------------------------------------------------------------------------- legacy text tests
 DESTROYER = (
@@ -178,6 +179,11 @@ _PS_VALUED = ("filter", "include", "exclude", "credential", "stream", "erroracti
               "outbuffer", "pipelinevariable", "ea", "wa", "ev", "wv", "ov", "ob", "pv", "iv", "infa")
 
 UNRESOLVED = None           # an operand the guard cannot place (pipeline input, a variable, ...)
+# Release review 2026-11-02: cmdlets that take their paths from the pipe, and the members `ForEach-Object <Name>` calls
+# on each piped item, change what the earlier stage named.
+_PIPED_CHANGERS = frozenset(("clear-content", "set-content", "add-content", "rename-item"))
+_PIPED_MEMBERS = frozenset(("delete", "moveto", "encrypt", "replace", "create", "createtext", "appendtext", "open",
+                            "openwrite"))
 _NOCWD = "c:/__skyguard_no_cwd__"
 
 
@@ -320,6 +326,12 @@ def _rimraf_after_runner(e) -> Optional[List[str]]:
 def operands(e) -> Optional[List[Optional[str]]]:
     """None: e deletes nothing. Otherwise its target words; UNRESOLVED stands for input it reads from a pipe."""
     p = e.program
+    if e.dialect == "powershell" and e.stdin_from == "pipe":
+        if p == "foreach-object" and any(m.lower() in _PIPED_MEMBERS for m in ps_param(e, "membername", 0)):
+            return [UNRESOLVED]
+        if p in _PIPED_CHANGERS and not ps_param(e, "path", None if p == "rename-item" else 0) and not ps_param(
+                e, "literalpath"):
+            return [UNRESOLVED]
     if p == "find.delete":
         return list(e.argv)
     if p in ("io.file.delete", "io.directory.delete"):
@@ -419,10 +431,13 @@ def interpreter_code(e) -> str:
 # (and the callback forms), rmtree, remove_tree, FileUtils.rm_rf and friends, perl/php unlink. Only a literal name is
 # read; scan() resolves it where the code runs, so `python -c "shutil.rmtree('Data')"` from the install is the install's
 # Data folder, exactly as `rm -rf Data` is.
-_PY_DELETE_CALLS = frozenset(("rmtree", "remove", "unlink", "rmdir", "removedirs", "send2trash"))
+# Release review 2026-11-02: a move takes its source away, so shutil.move / os.rename / os.replace / Path(x).rename read
+# the same way, and fs.rename(Sync) by call text.
+_PY_DELETE_CALLS = frozenset(("rmtree", "remove", "unlink", "rmdir", "removedirs", "send2trash", "move", "rename",
+                              "replace", "renames"))
 _PY_DELETE_OWNERS = frozenset(("shutil", "os", "send2trash"))
 _INTERP_DELETE_LIT = re.compile(
-    r"""(?:\b(?:rm|rmdir|unlink)(?:Sync)?|\brmtree|\bremove_tree|\bFileUtils\.(?:rm_rf|rm_r|rm|remove_dir|remove_entry\w*)"""
+    r"""(?:\b(?:rm|rmdir|unlink|rename)(?:Sync)?|\brmtree|\bremove_tree|\bFileUtils\.(?:rm_rf|rm_r|rm|remove_dir|remove_entry\w*)"""
     r"""|\bunlink)\s*\(?\s*(['"])([^'"\n]{1,400})\1""")
 
 
@@ -457,8 +472,9 @@ def interpreter_delete_targets(code: str, python: bool) -> List[str]:
         if not isinstance(node, ast.Call):
             continue
         f = node.func
-        if isinstance(f, ast.Attribute) and f.attr in ("unlink", "rmdir") and not node.args:
-            p = path_of(f.value)                                    # Path('Data/x').unlink()
+        if isinstance(f, ast.Attribute) and (f.attr in ("unlink", "rmdir") and not node.args or
+                                             f.attr in ("rename", "replace")):
+            p = path_of(f.value)                                    # Path('Data/x').unlink() / .rename('y')
             if p is not None:
                 out.append(p)
                 continue

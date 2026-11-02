@@ -1148,7 +1148,7 @@ def test_i7_an_opaque_method_keeps_its_receiver_and_arguments():
     assert ("io.directory.delete", ("(Get-Item 'X')",)) in got        # `.Delete()` deletes its receiver
     sb = parse("[scriptblock]::Create('Remove-Item X').Invoke()", "powershell")
     assert ("?", ("[scriptblock]::Create", "Remove-Item X")) in [(e.program, e.argv) for e in sb.execs]
-    assert "io.directory.delete" not in progs("$f.MoveTo('Y')", "powershell")
+    assert "io.directory.delete" in progs("$f.MoveTo('Y')", "powershell")      # it takes its receiver away too
 
 
 def test_m1_any_prefix_of_encodedcommand_is_decoded():

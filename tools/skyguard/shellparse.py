@@ -148,6 +148,12 @@ class Parsed(NamedTuple):
     unnamed: Tuple[Exec, ...] = ()
 
 
+class _ListItem(str):
+    """A PowerShell word followed by a comma: `a,b,c` is ONE argument. The parser flattens lists into argv, so this
+    marks the word for ps_param (release review 2026-11-02: `Move-Item -Path a,b,c -Destination d` counted two saves).
+    It compares and hashes as the plain string."""
+
+
 class ParseError(Exception):
     """The text cannot be read with confidence: parse() returns ok=False with this message as `why`."""
 
@@ -248,9 +254,18 @@ PS_SWITCHES = ("recurse", "force", "whatif", "confirm", "verbose", "debug", "pas
 def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, ...]:
     """Values of PowerShell parameter `name` in `ex.argv`: `-Name v`, `-Na v` (any prefix), `-Name:v`; plus the
     `position`-th positional argument (0-based) when given. A word `-x` that is a prefix of a known switch takes
-    no value; any other `-x` is assumed to take one."""
+    no value; any other `-x` is assumed to take one. A comma list is one argument and yields all its items."""
     want = name.lower()
     out, pos, k, argv = [], [], 0, ex.argv
+
+    def group(i):
+        """The list starting at argv[i] (`a,b,c`), and the index of its last item."""
+        items = [argv[i]]
+        while isinstance(argv[i], _ListItem) and i + 1 < len(argv):
+            i += 1
+            items.append(argv[i])
+        return items, i
+
     while k < len(argv):
         w, q = argv[k], ex.quoted[k]
         if w.startswith("-") and len(w) > 1 and not q:
@@ -260,18 +275,19 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
                 if attached:
                     out.append(attached)
                 elif k + 1 < len(argv):
-                    out.append(argv[k + 1])
-                    k += 1
+                    items, k = group(k + 1)
+                    out.extend(items)
             elif attached or any(s.startswith(key) for s in PS_SWITCHES):
                 pass
             elif k + 1 < len(argv) and not (argv[k + 1].startswith("-") and not ex.quoted[k + 1]):
-                k += 1                                    # another parameter's value
+                k = group(k + 1)[1]                       # another parameter's value
             k += 1
             continue
-        pos.append(w)
+        items, k = group(k)
+        pos.append(items)
         k += 1
     if position is not None and position < len(pos):
-        out.append(pos[position])
+        out.extend(pos[position])
     return tuple(out)
 
 
@@ -325,7 +341,7 @@ class _Ctx:
 
 
 class _Word:
-    __slots__ = ("b", "l", "quoted", "dyn", "bs", "start", "raw")
+    __slots__ = ("b", "l", "quoted", "dyn", "bs", "start", "raw", "comma")
 
     def __init__(self, start: int):
         self.b: List[str] = []
@@ -335,6 +351,7 @@ class _Word:
         self.bs = False
         self.start = start
         self.raw = ""
+        self.comma = False
 
     def add(self, s: str, lit: Optional[str] = None) -> None:
         self.b.append(s)
@@ -821,7 +838,7 @@ class _Bash(_Scanner):
                         _, name, body_start = self.fn_open.pop()
                         f.function_name = None
                         # The `}` word is already consumed: the body is the text between `{` and this `}`.
-                        self.ctx.functions[name] = self.t[body_start:self.t.rfind("}", body_start, self.i)]
+                        _define_function(self.ctx, name, self.t[body_start:self.t.rfind("}", body_start, self.i)])
                     tail = _skip_redirections(self.t[self.i:])
                     isolated = (tail.startswith("|") and not tail.startswith("||")) or (
                         tail.startswith("&") and not tail.startswith("&&"))   # `&>x` was consumed as a redirection
@@ -1271,6 +1288,11 @@ class _Bash(_Scanner):
                     self._cmd(f, i).skip = True
                     self.i = k + 1
                     return
+            if f.function_pending and f.function_name:          # `f() ( ... )`: read at each call, like a { } body
+                k = self._pairs().get(i)
+                if k is not None:
+                    _define_function(self.ctx, f.function_name, self.t[i:k + 1])
+                f.function_name = None
             f.function_pending = False                          # a function's ( ) body keeps its own location
             g = self._push(f, "paren", i, False)
             g.piped_from = ((f.id, f.pipe) if f.last_sep in ("|", "|&") and f.stage > 0 else
@@ -1596,6 +1618,8 @@ class _Pwsh(_Scanner):
                 self._redirect(f)
             elif c == ",":
                 self.end_word(f)
+                if f.cmd is not None and f.cmd.words:
+                    f.cmd.words[-1].comma = True
                 self.i += 1
             else:                                               # '#' inside a word
                 self._word(f).add(c)
@@ -1744,8 +1768,8 @@ class _Pwsh(_Scanner):
             g.opq = len(self.synth)
             self.synth.append((len(self.recs), Exec(
                 "?", (self.t[w.start:i],), (False,), (), "powershell", f.cd, "", self.t[w.start:i])))
-            if tail.group(1).lower() == "delete":
-                # `.Delete()` deletes its RECEIVER: an operand the guard cannot place, never nothing.
+            if tail.group(1).lower() in ("delete", "moveto"):
+                # `.Delete()` / `.MoveTo()` take away their RECEIVER: an operand the guard cannot place, never nothing.
                 self.synth.append((len(self.recs), Exec(
                     "io.directory.delete", (self.t[w.start:tail.start()],), (False,), (), "powershell", f.cd, "",
                     self.t[w.start:i])))
@@ -2143,6 +2167,47 @@ def _brace_alts(word: str) -> List[str]:
     return out
 
 
+def _define_function(ctx, name: str, body: str) -> None:
+    """Calls are read after the whole command is scanned, so one stored body cannot stand for two definitions."""
+    if ctx.functions.get(name, body) != body:
+        raise ParseError("function {} is defined twice".format(name))
+    ctx.functions[name] = body
+
+
+def _unquoted_brace(raw: str) -> bool:
+    """`raw` holds a `{..,..}` outside quotes and not as `${..}`: bash expands it. `'{a,b}'` stays one word."""
+    quote, depth, comma = "", 0, False
+    for i, c in enumerate(raw):
+        if quote:
+            quote = "" if c == quote else quote
+        elif c in "'\"":
+            quote = c
+        elif c == "{" and raw[i - 1:i] != "$":
+            depth, comma = depth + 1, False
+        elif c == "}" and depth:
+            if comma:
+                return True
+            depth -= 1
+        elif c == "," and depth:
+            comma = True
+    return False
+
+
+def _expand_braces(dialect, ws, vals):
+    """Bash expands `{a,b}` before the command runs, so `rm {a,b,c}.ess` has three operands (release review
+    2026-11-02: read as one file that does not exist, it counted no saves). Never the program word."""
+    if dialect != "bash" or not any("{" in v for v in vals[1:]):
+        return ws, vals
+    out_w, out_v = list(ws[:1]), list(vals[:1])
+    for w, v in zip(ws[1:], vals[1:]):
+        alts = _brace_alts(v) if not w.dyn or _BRACE1.search(v) else [v]
+        if len(alts) < 2 or not _unquoted_brace(w.raw):
+            alts = [v]
+        out_w += [w] * len(alts)
+        out_v += alts
+    return out_w, out_v
+
+
 def _glob_word(base: str) -> bool:
     """A bash program word that is a glob or a brace expansion (`r?`, `r[m]`, `r{m,m}`), not a literal name."""
     if "*" in base or "?" in base or _BRACE1.search(base):
@@ -2447,7 +2512,7 @@ class _Resolver:
                     body = self.ctx.aliases.get(v[k] if self.d == "bash" else v[k].lower())
                     if body:
                         self._sub_run(body.split(), k)          # RT-A: an alias defined in the same command
-                    elif self.d == "bash" and not self.q[k] and v[k] in self.ctx.functions:
+                    elif self.d == "bash" and v[k] in self.ctx.functions:    # `"f"` calls f too; only aliases differ
                         # A function defined in the same command runs its BODY here, in the caller's scope: its cd
                         # moves the caller and its deletes run at the call site (as a literal eval would).
                         self.emit(p, k + 1)
@@ -3193,6 +3258,9 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
             keep = [j for j, w in enumerate(ws) if not (vals[j] == "--%" and not w.quoted)]   # stop-parsing token
             ws, vals = [ws[j] for j in keep], [vals[j] for j in keep]
             vals = ["-" + v[1:] if v[:1] in _PS_DASHES and not w.quoted else v for v, w in zip(vals, ws)]
+            vals = [_ListItem(v) if w.comma else v for v, w in zip(vals, ws)]
+        else:
+            ws, vals = _expand_braces(d, ws, vals)
         seg = t[rec.start:rec.end]
         stdin = "pipe" if rec.stage > 0 or rec.piped_from else ""
         bodies = [(h.body or "", h.quoted) for h in rec.heredocs]
@@ -3322,12 +3390,16 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
 _TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))   # printf: only a plain format (_printf_text)
 _PLAIN_ARG = re.compile(r"[A-Za-z0-9_./:@%+,=~-]+")
 _POSITIONAL = re.compile(r"\$(?:\{([1-9])\}|([1-9])|\{?([@*])\}?)")
+_ARGS_MOVED = re.compile(r"(?:^|[;&|({\s])(?:shift|set\s+--?)(?=$|[;&|)}\s])")
 
 
 def _call_body(body: str, args, dynamic) -> str:
     """The body with $1..$9 / ${N} / $@ / $* replaced by the call's arguments where each is a plain literal word
     (letters, digits, path punctuation). Any other argument, or a missing one, leaves the reference in place: an
-    unknown value, judged as any unknown variable is."""
+    unknown value, judged as any unknown variable is. A body that moves its own arguments (`shift`, `set --`) cannot
+    be read this way, so it refuses to parse."""
+    if _POSITIONAL.search(body) and _ARGS_MOVED.search(body):
+        raise ParseError("a function moves its positional arguments")
     plain = [a if not dyn and _PLAIN_ARG.fullmatch(a or "") else None for a, dyn in zip(args, dynamic)]
 
     def one(m):

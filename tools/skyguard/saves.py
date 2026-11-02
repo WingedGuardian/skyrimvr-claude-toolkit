@@ -47,7 +47,7 @@ from .verdict import Verdict
 OPS = ("write", "move", "delete")         # what a call does to a save
 VERB = {"write": "changes", "move": "moves", "delete": "deletes"}
 EXTS = (".ess", ".skse")
-WILD = re.compile(r"[*?\[]")
+WILD = re.compile(r"[*?\[{]")             # `{1..3}`: a brace form the parser leaves as one word
 LIMIT = 2                                 # saves one call may change without the user's approval
 NOTE_BEFORE = "restore: tools/skyguard.sh snapshot list --kind save"
 # The refusals a guards-off lift must not loosen (engine.NEVER_SHADOW).
