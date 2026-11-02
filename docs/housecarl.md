@@ -67,6 +67,11 @@ cancellation; no background game polling or user-process termination is involved
 Before data tools run, the pinned backend's resolver count and exclusion alarm must confirm the complete
 captured plugin set. This does not fingerprint every loose asset; retain upstream coverage and truncation notices.
 
+The independent xEdit check needs the candidate and every master in one folder, so it hard-links the masters into a
+scratch folder for that one call. The verifier never saves, the folder's links are removed before the call returns, also
+on failure, and each master's size and modified time are compared afterwards. Masters are never copied: if a link cannot
+be made, the check refuses. The scratch folder is on the install's drive when the system temp folder is not.
+
 Local qualification used Windows Python 3.10 and Skyrim VR: 684 enabled plugins, an independently
 matched Iron Sword winner, real MCP calls, and isolated create/apply/forward/copy/create-plugin/remove/restore
 with a manager hardlink stand-in. Creating a record inside an ESL-flagged plugin and owned-process cancellation

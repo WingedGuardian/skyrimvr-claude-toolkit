@@ -91,7 +91,11 @@ def check_arguments(name, arguments, config):
 def independent_check(config, candidate, snapshot, before=None, allowed=None):
     """xEdit parses every candidate record; preserves untouched records by canonical JSON."""
     verifier = Path(config["root"]) / "tools/housecarl-verify.js"
-    work = Path(tempfile.mkdtemp(prefix="hc-xedit-"))
+    # A hard link needs one volume; never fall back to copying masters, so a game on another drive gets its scratch there.
+    temp = Path(tempfile.gettempdir())
+    parent = temp if temp.anchor.lower() == Path(config["root"]).anchor.lower() else Path(config["root"]) / ".housecarl-tmp"
+    parent.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="hc-xedit-", dir=str(parent)))
     try:                                  # housekeep's temp sweep retires a leftover only with this declaration
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         import housekeep_backups
@@ -100,23 +104,39 @@ def independent_check(config, candidate, snapshot, before=None, allowed=None):
         pass                              # without it the sweep only keeps the folder
     data = work / "Data"
     data.mkdir(parents=True)
-    # Only a read-only verifier sees these master hardlinks; the writer never gets this directory.
-    for name, original in snapshot.paths.items():
-        dest = data / name
-        if name.casefold() == candidate.name.casefold():
-            shutil.copyfile(candidate, dest)
-        else:
-            try:
-                os.link(original, dest)
-            except OSError:
-                shutil.copyfile(original, dest)
-    if not (data / candidate.name).exists():
-        shutil.copyfile(candidate, data / candidate.name)
     out = work / "inspection.json"
-    env = os.environ.copy()
-    env["HOUSECARL_XELIB_ROOT"] = config.get("xelib_root", config["root"])
-    result = subprocess.run([config.get("node", "node"), str(verifier), str(work), candidate.name, str(out)],
-                            env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+    # USER EXCEPTION, 2026-11-02, this check only: the "never hard-link staged inputs" rule is waived here because xEdit
+    # needs the candidate and every master in one folder. Conditions: the verifier is read-only (tools/housecarl-verify.js
+    # never saves), the links last this one call, and masters are never copied. A linked view is the real file under a
+    # second name, so it is gone before this call returns, also when the check fails or times out, and every master is
+    # compared afterwards: House Carl's backups cover the plugin being edited, not the masters.
+    before_stats = {}
+    try:
+        for name, original in snapshot.paths.items():
+            dest = data / name
+            if name.casefold() == candidate.name.casefold():
+                shutil.copyfile(candidate, dest)
+            else:
+                try:
+                    os.link(original, dest)
+                except OSError as exc:
+                    raise Refusal("Cannot link master {} for the read-only check ({}); masters are never copied.".format(
+                        name, exc)) from exc
+                stat = os.stat(original)
+                before_stats[name] = (original, stat.st_size, stat.st_mtime_ns)
+        if not (data / candidate.name).exists():
+            shutil.copyfile(candidate, data / candidate.name)
+        env = os.environ.copy()
+        env["HOUSECARL_XELIB_ROOT"] = config.get("xelib_root", config["root"])
+        result = subprocess.run([config.get("node", "node"), str(verifier), str(work), candidate.name, str(out)],
+                                env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+    finally:
+        shutil.rmtree(data, ignore_errors=True)
+        for name, (original, size, mtime) in before_stats.items():
+            stat = os.stat(original)
+            if (stat.st_size, stat.st_mtime_ns) != (size, mtime):
+                raise Refusal("Master {} changed during the read-only check. It is not backed up here: restore it from "
+                              "your mod manager or Steam.".format(name))
     # The installed xelib has a documented native teardown exit-code problem. Require both markers and data.
     if "RESULT: OK" not in result.stdout or not out.is_file():
         detail = (result.stderr + result.stdout).replace("\0", "")
@@ -124,7 +144,7 @@ def independent_check(config, candidate, snapshot, before=None, allowed=None):
     obj = json.loads(out.read_text(encoding="utf-8"))
     shutil.copyfile(out, candidate.parent / ("xedit-" + uuid.uuid4().hex + ".json"))
     # This is this call's own shallow scratch directory, never a backup or a save folder.
-    if work.resolve().parent != Path(tempfile.gettempdir()).resolve() or not work.name.startswith("hc-xedit-"):
+    if work.resolve().parent != parent.resolve() or not work.name.startswith("hc-xedit-"):
         raise Refusal("Unexpected verifier scratch location; retained for inspection.")
     shutil.rmtree(work)
     if not obj.get("complete") or not isinstance(obj.get("records"), dict):

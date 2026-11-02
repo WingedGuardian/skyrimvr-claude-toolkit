@@ -232,6 +232,12 @@ def test_shard_skips_are_summed_not_taken_per_shard(tmp_path):
     assert both.returncode == 1 and "2 skipped > the Linux leg's ceiling 1" in both.stdout, both.stdout
 
 
+def test_shards_that_do_not_add_up_go_red(tmp_path):
+    """Release review 2026-11-02: every shard given the same selector still passed the totals. Three collected, one ran."""
+    r = _run_shards(tmp_path, [_shard_log(1), _shard_log(0)], "--part", "m")
+    assert r.returncode == 1 and "a shard selector is wrong" in r.stdout, r.stdout
+
+
 def test_collect_mode_takes_one_log_only(tmp_path):
     for k in (1, 2):
         (tmp_path / "c{}.log".format(k)).write_text("12 tests collected\n", encoding="utf-8")

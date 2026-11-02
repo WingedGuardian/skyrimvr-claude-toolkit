@@ -3,6 +3,7 @@ in an archived folder stays where it is and the rest of the folder is archived. 
 import json
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -176,3 +177,76 @@ def test_the_temp_producers_declare_their_own_workspaces(tmp_path):
     work.mkdir()
     hk.certainty.mark_disposable_temp(work, tmp_path)
     assert hk.certainty.disposable_temp(work, tmp_path)
+
+
+@pytest.mark.parametrize("fail", ["refused", "timeout"])
+def test_house_carl_leaves_no_linked_view_when_its_check_fails(tmp_path, monkeypatch, fail):
+    """User ruling 2026-10-29: a hard-linked view of game files never outlives the run that made it."""
+    import importlib
+    import sys
+    from types import SimpleNamespace
+    sys.path.insert(0, str(REPO / "tools"))
+    gw = importlib.import_module("housecarl_integration.gateway")
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(gw.tempfile, "tempdir", str(temp))
+    master = tmp_path / "Skyrim.esm"
+    master.write_bytes(b"m")
+    candidate = tmp_path / "cand.esp"
+    candidate.write_bytes(b"c")
+    seen = []
+
+    def run(cmd, **kw):
+        seen.extend(p.name for p in (Path(cmd[2]) / "Data").iterdir())
+        if fail == "timeout":
+            raise gw.subprocess.TimeoutExpired(cmd, 120)
+        return SimpleNamespace(stdout="", stderr="no", returncode=1)
+    monkeypatch.setattr(gw.subprocess, "run", run)
+    with pytest.raises((gw.Refusal, gw.subprocess.TimeoutExpired)):
+        gw.independent_check({"root": str(tmp_path)}, candidate, SimpleNamespace(paths={"Skyrim.esm": master}))
+    assert "Skyrim.esm" in seen, "the verifier saw the view"
+    assert not list(temp.glob("hc-xedit-*/Data")), "a view of the real plugin outlived the check"
+    assert master.read_bytes() == b"m"
+
+
+def _check(tmp_path, monkeypatch, run=None, link=None):
+    import importlib
+    import sys
+    from types import SimpleNamespace
+    sys.path.insert(0, str(REPO / "tools"))
+    gw = importlib.import_module("housecarl_integration.gateway")
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(gw.tempfile, "tempdir", str(temp))
+    master = tmp_path / "Skyrim.esm"
+    master.write_bytes(b"m")
+    candidate = tmp_path / "cand.esp"
+    candidate.write_bytes(b"c")
+    if run:
+        monkeypatch.setattr(gw.subprocess, "run", lambda cmd, **kw: run(cmd, master))
+    if link:
+        monkeypatch.setattr(gw.os, "link", link)
+    return gw, lambda: gw.independent_check({"root": str(tmp_path)}, candidate, SimpleNamespace(paths={"Skyrim.esm": master}))
+
+
+def test_house_carl_refuses_rather_than_copying_a_master(tmp_path, monkeypatch):
+    def no_link(a, b):
+        raise OSError("cross-device")
+    gw, go = _check(tmp_path, monkeypatch, link=no_link)
+    copied = []
+    real = gw.shutil.copyfile
+    monkeypatch.setattr(gw.shutil, "copyfile", lambda a, b: copied.append(str(a)) or real(a, b))
+    with pytest.raises(gw.Refusal, match="never copied"):
+        go()
+    assert not [c for c in copied if c.endswith("Skyrim.esm")]
+
+
+def test_house_carl_notices_a_master_that_changed_during_its_check(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    def run(cmd, master):
+        master.write_bytes(b"changed through the link")
+        return SimpleNamespace(stdout="", stderr="", returncode=1)
+    gw, go = _check(tmp_path, monkeypatch, run=run)
+    with pytest.raises(gw.Refusal, match="changed during the read-only check"):
+        go()

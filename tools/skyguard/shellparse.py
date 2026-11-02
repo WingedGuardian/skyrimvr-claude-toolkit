@@ -3390,24 +3390,37 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
 _TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))   # printf: only a plain format (_printf_text)
 _PLAIN_ARG = re.compile(r"[A-Za-z0-9_./:@%+,=~-]+")
 _POSITIONAL = re.compile(r"\$(?:\{([1-9])\}|([1-9])|\{?([@*])\}?)")
-_ARGS_MOVED = re.compile(r"(?:^|[;&|({\s])(?:shift|set\s+--?)(?=$|[;&|)}\s])")
+_ARGS_MOVED = re.compile(r"(?:^|[;&|({\s])(?:shift(?:[ \t]+(?P<count>[0-9]+))?|(?P<set>set[ \t]+--?))(?=$|[;&|)}\s])")
+_BRANCHES = re.compile(r"(?:^|[;&|({\s])(?:if|while|until|for|case|select)(?=\s)|&&|\|\|")
 
 
 def _call_body(body: str, args, dynamic) -> str:
     """The body with $1..$9 / ${N} / $@ / $* replaced by the call's arguments where each is a plain literal word
     (letters, digits, path punctuation). Any other argument, or a missing one, leaves the reference in place: an
-    unknown value, judged as any unknown variable is. A body that moves its own arguments (`shift`, `set --`) cannot
-    be read this way, so it refuses to parse."""
-    if _POSITIONAL.search(body) and _ARGS_MOVED.search(body):
-        raise ParseError("a function moves its positional arguments")
+    unknown value, judged as any unknown variable is. `shift` moves the arguments for the text after it (release review
+    2026-11-02: `g() { shift; cd "$1"; }` read the wrong word). A `set --`, or a shift under a branch or loop, leaves every
+    later reference unknown: which arguments remain depends on the run."""
     plain = [a if not dyn and _PLAIN_ARG.fullmatch(a or "") else None for a, dyn in zip(args, dynamic)]
+    branching = bool(_BRANCHES.search(body))
 
-    def one(m):
-        if m.group(3):
-            return " ".join(plain) if plain and all(a is not None for a in plain) else m.group(0)
-        n = int(m.group(1) or m.group(2))
-        return plain[n - 1] if n <= len(plain) and plain[n - 1] is not None else m.group(0)
-    return _POSITIONAL.sub(one, body)
+    def fill(text, rest):
+        def one(m):
+            if rest is None:
+                return m.group(0)
+            if m.group(3):
+                return " ".join(rest) if rest and all(a is not None for a in rest) else m.group(0)
+            n = int(m.group(1) or m.group(2))
+            return rest[n - 1] if n <= len(rest) and rest[n - 1] is not None else m.group(0)
+        return _POSITIONAL.sub(one, text)
+
+    out, at, rest = [], 0, plain
+    for m in _ARGS_MOVED.finditer(body):
+        out.append(fill(body[at:m.end()], rest))
+        at = m.end()
+        count = m.group("count")
+        rest = None if rest is None or branching or m.group("set") else rest[int(count or 1):]
+    out.append(fill(body[at:], rest))
+    return "".join(out)
 
 
 _PRINTF_ESCAPES = {"n": "\n", "t": "\t", "\\": "\\"}

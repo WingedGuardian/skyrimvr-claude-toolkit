@@ -512,6 +512,7 @@ else
     SKYRIM_FOLDER="Skyrim VR"
 fi
 CONFIG_DIR="$DOCUMENTS_DIR/My Games/$SKYRIM_FOLDER"
+DOCUMENTS_GAME_DIR="$CONFIG_DIR"       # stays here when MO2 profile INIs move CONFIG_DIR: the saves do not move
 LOADORDER_DIR="$LOCALAPPDATA_DIR/$SKYRIM_FOLDER"
 
 # --- Detect Mod Organizer 2 -------------------------------------------------
@@ -835,6 +836,7 @@ retire_3x_paths() {
     printf '# contains the word "Skyrim" -- a scratchpad, a checkout, a downloaded zip.\n'
     printf 'SKYRIM_GAME_ROOT=%s\n' "$(sq "$GAME_ROOT_WIN")"
     printf 'SKYRIM_CONFIG_DIR=%s\n' "$(sq "$CONFIG_DIR")"
+    printf 'SKYRIM_DOCUMENTS_DIR=%s\n' "$(sq "$DOCUMENTS_GAME_DIR")"
     printf 'SKYRIM_LOADORDER_DIR=%s\n' "$(sq "$LOADORDER_DIR")"
     # MO2 keeps every mod's real files in mods/ and overwrite/, outside the install, so the guard can only
     # protect them if it is told where they are. Empty ('') on a non-MO2 install: declares nothing.

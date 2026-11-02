@@ -132,8 +132,9 @@ G = "$B/Game"
     "f() ( rm -rf Data ); cd " + G + "; f",
     "g() { shift; cd \"$1\"; }; g x " + G + "; rm -rf Data",
     "g() { set -- " + G + "; cd \"$1\"; }; g; rm -rf Data",
+    "g() { shift 2; cd \"$1\"; }; g x y " + G + "; rm -rf Data",
     "f() { cd " + G + "; }; \"f\"; rm -rf Data",
-], ids=["redefined-after-call", "paren-body", "shift", "set-args", "quoted-call"])
+], ids=["redefined-after-call", "paren-body", "shift", "set-args", "shift-count", "quoted-call"])
 def test_function_forms_cannot_hide_a_delete_in_the_install(box, cmd):
     assert box(cmd, cwd=str(Path(tempfile.gettempdir()).as_posix())).decision == "deny"
 
@@ -158,7 +159,48 @@ def test_function_forms_cannot_hide_a_delete_in_the_install(box, cmd):
     ("f() { cd /tmp; }; f; ls", "bash", 0),
     ("f() ( ls ); f", "bash", 0),
     ("g() { cd \"$1\"; ls; }; g /tmp", "bash", 0),
+    ("w() { local f=\"$1\"; shift; printf '%s' \"$1\" > \"$B/other/$f\"; }; w a.txt hi", "bash", 0),
 ], ids=lambda x: x[:42] if isinstance(x, str) else str(x))
 def test_ordinary_commands_stay_allowed(box, cmd, shell, want):
     v = box(cmd, shell)
     assert v.decision == "allow" and _pairs(v) == want, v
+
+
+def test_a_helper_that_shifts_still_parses():
+    """Priced 2026-11-02: refusing every shift made 39 real helper functions unparsable."""
+    from skyguard import shellparse
+    assert shellparse.parse('w() { local f="$1"; shift; printf x > "$f"; }; w a b').ok
+
+
+def test_shift_moves_the_arguments_for_the_text_after_it_only():
+    from skyguard.shellparse import _call_body
+    assert _call_body('echo "$1"; shift; echo "$1"', ("a", "b"), (False, False)) == 'echo "a"; shift; echo "b"'
+    assert _call_body('shift 2; echo "$1"', ("a", "b", "c"), (False,) * 3) == 'shift 2; echo "c"'
+    assert _call_body('[ -n x ] && shift; echo "$1"', ("a", "b"), (False,) * 2) == '[ -n x ] && shift; echo "$1"'
+    assert _call_body('set -- z; echo "$1"', ("a",), (False,)) == 'set -- z; echo "$1"'
+
+
+def test_a_quoted_brace_stays_one_word():
+    from skyguard import shellparse
+    assert shellparse.parse("rm '{a,b}.txt'").execs[0].argv == ("{a,b}.txt",)
+    assert shellparse.parse("rm {a,b}.txt").execs[0].argv == ("a.txt", "b.txt")
+    assert shellparse.parse("rm \"${x}\"/{a,b}").execs[0].argv[-1].endswith("/b")
+
+
+def test_saves_under_a_moved_documents_folder_are_protected_with_mo2_profile_inis(tmp_path):
+    inst, profile, docs = tmp_path / "Game", tmp_path / "MO2/profiles/P", tmp_path / "D/Dokumente/My Stuff/Skyrim VR"
+    for d in (inst, profile, docs / "Saves"):
+        d.mkdir(parents=True)
+    (inst / "skyrim-paths.env").write_text(
+        "SKYRIM_GAME_ROOT='{}'\nSKYRIM_CONFIG_DIR='{}'\nSKYRIM_DOCUMENTS_DIR='{}'\n".format(
+            inst.as_posix(), profile.as_posix(), docs.as_posix()), encoding="utf-8")
+    env = paths.read_install(inst.as_posix(), {})
+    roots = paths.roots(inst.as_posix(), inst.as_posix(), env)
+    from skyguard import writes
+    assert writes.is_save((docs / "Saves" / ("a" + EXT)).as_posix().lower(), roots)
+
+
+def test_setup_records_the_documents_folder():
+    text = (REPO / "setup.sh").read_text(encoding="utf-8")
+    assert "printf 'SKYRIM_DOCUMENTS_DIR=%s" in text
+    assert 'DOCUMENTS_GAME_DIR="$CONFIG_DIR"' in text

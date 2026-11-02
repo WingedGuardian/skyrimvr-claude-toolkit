@@ -96,7 +96,7 @@ DEFAULTS = {
                         "CMakeFiles", "vcpkg_installed", "buildtrees"],
     "build_exts": [".obj", ".pch", ".ilk", ".iobj", ".ipdb", ".tlog", ".idb"],
     "active_hours": 48,
-    # code fingerprint (housekeep_daily.code_sha256: housekeep, housekeep_archive, housekeep_daily) whose
+    # code fingerprint (housekeep_daily.code_sha256: housekeep, housekeep_archive, housekeep_backups, housekeep_daily) whose
     # dry-run output the user has reviewed. housekeep_daily.py APPLIES only
     # when the code still matches; otherwise it dry-runs and writes REVIEW-NEEDED.md (2026-10-28: a new rule acted
     # on its first run, unreviewed, and took a library a live build needed).

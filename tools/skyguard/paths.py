@@ -29,10 +29,10 @@ SEP = r"[/\\]+"
 LEAD = r"(?<![/\\])[/\\]+"
 _META = set("[]*+?^$(){}|.\\")
 CONFIG_LITERAL = r"Documents[/\\]+My Games[/\\]+Skyrim"
-ENV_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_LOADORDER_DIR", "SKYRIM_MO2_MODS",
+ENV_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR", "SKYRIM_LOADORDER_DIR", "SKYRIM_MO2_MODS",
             "SKYRIM_MO2_OVERWRITE")
 # A malformed value for one of these leaves a protected folder unknown, so it is S-INERT-CONFIG, not a skip.
-PROTECTION_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_MO2_MODS", "SKYRIM_MO2_OVERWRITE")
+PROTECTION_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR", "SKYRIM_MO2_MODS", "SKYRIM_MO2_OVERWRITE")
 # Plan 8 T8: the paths file lives at the TOOLKIT ROOT (the install folder the hooks sit two levels below). The 3.x /
 # early-4.0 spelling under .claude/ is still read, but only when the root file is absent, and it earns a deprecation
 # notice at session start (session.py). setup.sh writes the root file.
@@ -462,13 +462,17 @@ def roots(root_posix: str, root_win: str, env: EnvLike) -> Roots:
     for v in _values(env, "SKYRIM_GAME_ROOT"):
         _add(game, v)
     config = [CONFIG_LITERAL]
-    for v in _values(env, "SKYRIM_CONFIG_DIR"):
+    # SKYRIM_DOCUMENTS_DIR: the game's folder under Documents as Windows reports it. Release review 2026-11-02: with MO2
+    # profile INIs SKYRIM_CONFIG_DIR is the profile, and a moved or localized Documents misses the literal, so the saves
+    # there were in no protected zone.
+    config_values = _values(env, "SKYRIM_CONFIG_DIR") + _values(env, "SKYRIM_DOCUMENTS_DIR")
+    for v in config_values:
         _add(config, v)
     install: List[str] = []
     for v in [root_posix, root_win, main] + _values(env, "SKYRIM_GAME_ROOT"):
         _add_dir(install, v)
     cfg: List[str] = []
-    for v in _values(env, "SKYRIM_CONFIG_DIR"):
+    for v in config_values:
         _add_dir(cfg, v)
     mo2: List[str] = []
     for v in _values(env, "SKYRIM_MO2_MODS") + _values(env, "SKYRIM_MO2_OVERWRITE"):
@@ -478,10 +482,11 @@ def roots(root_posix: str, root_win: str, env: EnvLike) -> Roots:
     for v in _values(env, "SKYRIM_LOADORDER_DIR"):
         _add_dir(lo, v)
     physical_cfg = []
-    for v in _values(env, "SKYRIM_CONFIG_DIR"):
+    for key in ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR"):
+      for v in _values(env, key):
         d = physical_abs(v)
         if d is None:
-            bad += ((PATHS_FILE, "SKYRIM_CONFIG_DIR"),)
+            bad += ((PATHS_FILE, key),)
         elif d not in physical_cfg:
             physical_cfg.append(d)
     return Roots("|".join(game), "|".join(config), tuple(install), tuple(cfg), tuple(mo2), bad, tuple(lo),

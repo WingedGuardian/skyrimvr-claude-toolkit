@@ -299,7 +299,8 @@ in the summary for you to decide.
 ### The archive
 
 Finished folders are zipped to `archive_root` (default `.claude/archive`, on the same drive: evidence and logs
-compress several times over) and `archive_retention_days` (90; 0 disables review) sets the review threshold. Age never proves an archive obsolete. Point
+compress several times over). Anything protected in a finished folder (a Forever name, linked evidence, a nested
+`.housekeep-keep`) stays where it is; the zip holds a verified copy and the rest of the folder is retired. Age never proves an archive obsolete. Point
 `archive_root` at another drive or a NAS share if you have one, and add `archive_roots` entries (`{"folder":
 days}`) for folders of your own whose subfolders should be archived after that many idle days. Restore a folder
 with `python tools/housekeep_archive.py restore "<folder>/ARCHIVED.md"`; it refuses to overwrite anything.

@@ -694,7 +694,7 @@ def is_save(abs_path: Optional[str], roots) -> bool:
 def is_save_folder(abs_path: Optional[str], roots) -> bool:
     """A Saves folder in the settings area: a bulk copy into it can replace any save there."""
     return bool(abs_path) and targets.zone(abs_path, roots) == "config" and \
-        posixpath.basename(abs_path.rstrip("/")).lower() == "saves"
+        "saves" in abs_path.rstrip("/").lower().split("/")       # sLocalSavePath can name a folder below Saves
 
 
 def _may_bring_saves(source: str) -> bool:
@@ -911,10 +911,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 moved.append(posixpath.basename(a.rstrip("/")) or a)
             elif is_save(a, roots):
                 saves.append((targets.physical_operand(e, w, cwd, env) or "", "move"))
-        for w in _save_only_writes(e):
-            a = targets.resolve_operand(e, w, cwd, env)
-            if is_save(a, roots):
-                saves.append((targets.physical_operand(e, w, cwd, env) or "", "write"))
+        saves.extend((targets.physical_operand(e, w, cwd, env) or "", "write") for w in _save_only_writes(e)
+                     if is_save(targets.resolve_operand(e, w, cwd, env), roots))
 
         def bulk_into_saves(word):
             """A wildcard change of that Saves folder: the typed approval, like any bulk change (saves.judge)."""
