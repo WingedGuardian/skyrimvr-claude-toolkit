@@ -173,7 +173,7 @@ def test_every_value_is_idempotent(game_dir, value):
 def test_auto_configures_the_agents_found_on_path(game_dir, tmp_path, hide, stubs, expected):
     stubdir = stub_bin(tmp_path, **{s: "echo stub" for s in stubs})
     r = run_setup(game_dir, shim_path=True, env_overrides={
-        "PATH": path_with(stubdir, BIN), "FAKE_WHICH_MISSING": hide})
+        "PATH": path_with(stubdir, BIN), "FAKE_WHICH_MISSING": (hide + " opencode").strip()})   # a real install must not count
     assert r.returncode == 0, r.stdout[-1500:] + r.stderr[-1500:]
     assert "-> configuring: %s (--agent auto)" % expected in r.stdout, r.stdout[:800]
     assert configured(game_dir, "CLAUDE.md") is (expected in ("claude", "all"))
@@ -182,7 +182,7 @@ def test_auto_configures_the_agents_found_on_path(game_dir, tmp_path, hide, stub
 
 def test_auto_is_the_default(game_dir, tmp_path):
     r = run_setup(game_dir, shim_path=True, env_overrides={
-        "PATH": path_with(stub_bin(tmp_path, claude="echo stub"), BIN), "FAKE_WHICH_MISSING": "codex"})
+        "PATH": path_with(stub_bin(tmp_path, claude="echo stub"), BIN), "FAKE_WHICH_MISSING": "codex opencode"})
     assert "-> configuring: claude (--agent auto)" in r.stdout, r.stdout[:800]
 
 
