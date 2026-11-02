@@ -55,7 +55,7 @@ any agent can read one directly. Read the skill BEFORE the work:
 | edit an ESP with Spriggit, or compile Papyrus | skill `skyrim-context` |
 | touch a mesh (`.nif`) | skill `skyrim-nif` |
 | update or add a mod | skill `mod-update-check` |
-| publish a new version of your own mod | skill `mod-release-review` |
+| publish a new version of your own mod | skill `mod-release-review` (handed over = shipped) |
 | work with archives, audio, MCM menus or saves | skills `skyrim-bsa`, `skyrim-audio`, `skyrim-mcm`, `skyrim-save` |
 | install or verify an optional tool, or set up the Nexus API key | `docs/installing-tools.md` |
 | use the Linux devcontainer | `docs/container-vs-windows.md` |

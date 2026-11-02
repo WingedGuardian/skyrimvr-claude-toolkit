@@ -13,6 +13,141 @@ import subprocess
 import time
 
 import pytest
+from pathlib import Path
+
+@pytest.mark.parametrize("failure", ["exit", "launch", "timeout"])
+@pytest.mark.parametrize("query,label", [("tracked_files", "tracked-file protection"), ("worktree_count", "worktree")])
+def test_git_failures_refuse_protection_and_inventory(tmp_path, monkeypatch, failure, query, label):
+    def broken(*args, **kwargs):
+        if failure == "launch":
+            raise OSError("cannot start git")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("git", 30)
+        text = kwargs.get("text", False)
+        return subprocess.CompletedProcess(args[0], 3221225794,
+            stdout="" if text else b"", stderr="" if text else b"")
+    monkeypatch.setattr(hk.subprocess, "run", broken)
+    (tmp_path / ".git").mkdir()                  # in a work tree: outside one, a git that cannot start tracks nothing
+    with pytest.raises(OSError, match=label):
+        getattr(hk, query)(tmp_path)
+
+
+def test_git_non_repository_is_distinct_from_git_failure(tmp_path, monkeypatch):
+    def nonrepo(*args, **kwargs):
+        text = kwargs.get("text", False)
+        err = "fatal: not a git repository"
+        return subprocess.CompletedProcess(args[0], 128,
+            stdout="" if text else b"", stderr=err if text else err.encode())
+    monkeypatch.setattr(hk.subprocess, "run", nonrepo)
+    assert hk.tracked_files(tmp_path) == set()
+    assert hk.worktree_count(tmp_path) is None
+
+
+def test_git_success_counts_tracked_paths_and_worktrees(tmp_path, monkeypatch):
+    def success(*args, **kwargs):
+        out = "worktree /main\n\nworktree /lane\n" if kwargs.get("text") else b"keep.txt\0"
+        return subprocess.CompletedProcess(args[0], 0, stdout=out, stderr="")
+    monkeypatch.setattr(hk.subprocess, "run", success)
+    assert len(hk.tracked_files(tmp_path)) == 1
+    assert hk.worktree_count(tmp_path) == 1
+
+
+def test_session_preflight_failure_never_claims_a_recycle_attempt(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    cfg = cfg_for(tmp_path)
+    cfg.update(sweep_every_hours=0, daily_enabled=False, recycle_bin_warn_gib=0,
+               free_floor_gib=0)
+    monkeypatch.delenv("X4_HOUSEKEEP_SWEEP", raising=False)
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(temp))
+    monkeypatch.setattr(hk, "dir_size", lambda *args: 0)
+    monkeypatch.setattr(hk, "recycle", lambda *args: pytest.fail("recycler reached after failed protection"))
+    def protection_failed(*args):
+        raise OSError("git tracked-file protection failed (exit 3221225794)")
+    def inventory_failed(*args):
+        raise OSError("git worktree inventory failed (exit 3221225794)")
+    monkeypatch.setattr(hk, "tracked_files", protection_failed)
+    monkeypatch.setattr(hk, "worktree_count", inventory_failed)
+    monkeypatch.setattr(hk.certainty, "periodic_note", lambda cfg: "")
+    if hasattr(hk, "_daily_module"):
+        monkeypatch.setattr(hk, "_daily_module", lambda: SimpleNamespace(due=lambda cfg: "disabled"))
+    state = tmp_path / "startup-note.txt"
+    assert hk.session(cfg, state) == 1
+    note = state.read_text(encoding="utf-8")
+    assert "temp cleanup skipped; no recycling attempted" in note
+    assert "git tracked-file protection failed (exit 3221225794)" in note
+    assert "worktree inventory unavailable: git worktree inventory failed (exit 3221225794)" in note
+    assert "could not be recycled" not in note
+    assert "moved 0 leftover" not in note
+
+
+def test_session_reports_large_recycle_bin_without_emptying_it(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    cfg = cfg_for(tmp_path)
+    cfg.update(recycle_bin_warn_gib=10,worktrees_warn=10**6,codex_sessions_warn_gib=10**6,
+               free_floor_gib=0,sweep_every_hours=0)
+    monkeypatch.delenv('X4_HOUSEKEEP_SWEEP',raising=False)
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
+    monkeypatch.setattr(hk,'sweep_temp',lambda cfg:dict(rows={'recycled':0,'failed':0,
+        'kept: no Recycle Bin on this OS':0},failed=[]))
+    monkeypatch.setattr(hk,'dir_size',lambda *args:0)
+    monkeypatch.setattr(hk,'worktree_count',lambda *args:0)
+    monkeypatch.setattr(hk.certainty,'recycle_bin_usage',lambda:dict(bytes=12*1024**3,items=7))
+    monkeypatch.setattr(hk,'recycle',lambda *args:(_ for _ in ()).throw(AssertionError('report must not empty bin')))
+    if hasattr(hk,'_daily_module'):
+        monkeypatch.setattr(hk,'_daily_module',lambda:SimpleNamespace(due=lambda cfg:'disabled'))
+    state=tmp_path/'session-note.txt'
+    assert hk.session(cfg,state)==0
+    assert 'Recycle Bin is 12.0 GiB logical (7 items)' in state.read_text(encoding='utf-8')
+    assert 'review and empty deliberately' in state.read_text(encoding='utf-8')
+
+
+def test_preexisting_hardlink_to_live_bytes_is_not_made_readonly(tree):
+    p = write(tree/'_CLAUDE_OUTPUT/a/file.bin', blob('same'))
+    outside = write(tree/'live/file.bin', blob('same'))
+    p.unlink()  # same-run fixture only
+    os.link(outside, p)
+    write(tree/'_CLAUDE_OUTPUT/b/file.bin', blob('same'))
+    cfg = cfg_for(tree)
+    doc = hk.plan(cfg, only={'link'})
+    assert not doc['actions']
+    assert os.access(outside, os.W_OK)
+
+@pytest.mark.parametrize("kind", ["scratch", "launch", "build"])
+def test_age_and_class_alone_do_not_prove_obsolescence(tree, kind):
+    root = "out" if "x4housekeep" in str(TOOL) else "_CLAUDE_OUTPUT"
+    relative = {"scratch":"scratch/item.log", "launch":"launches/launch-20200101-000000/item.log",
+                "build":root+"/task/build/item.obj"}[kind]
+    p = write(tree/relative, b"unique bytes", days=400)
+    cfg = cfg_for(tree, scratch=["scratch"])
+    assert not planned(hk.plan(cfg, only={kind}), kind)
+    declare_obsolete(cfg, p if kind == "build" else p.parent)
+    doc = hk.plan(cfg, only={kind})
+    assert planned(doc, kind)
+    action = next(a for a in doc["actions"] if a["class"] == kind)
+    cfg["obsolete_items"].clear()
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time())
+
+def test_snapshot_retirement_requires_unchanged_retained_copy(tree):
+    for stamp in ("20260101_000000", "20260102_000000", "20260103_000000"):
+        write(tree/"snaps"/stamp/"data.bin", b"equal", days=400)
+    cfg = cfg_for(tree)
+    action = next(a for a in hk.plan(cfg, only={"snapshot"})["actions"] if a["class"] == "snapshot")
+    assert not hk.check(action, cfg, hk.Guard(cfg), time.time())
+    kept = __import__("pathlib").Path(action["duplicate_of"])/"data.bin"
+    kept.write_bytes(b"other")
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time())
+
+def test_snapshot_directories_are_part_of_redundancy_proof(tree):
+    for stamp in ("20260101_000000", "20260102_000000", "20260103_000000"):
+        write(tree/"snaps"/stamp/"data.bin", b"equal", days=400)
+    cfg = cfg_for(tree)
+    action = next(a for a in hk.plan(cfg, only={"snapshot"})["actions"] if a["class"] == "snapshot")
+    (__import__("pathlib").Path(action["path"])/"unique-empty-directory").mkdir()
+    assert hk.check(action, cfg, hk.Guard(cfg), time.time())
+
 
 from conftest import REPO
 
@@ -81,6 +216,17 @@ class FakeBin:
 
 def planned(doc, cls=None):
     return {os.path.normcase(a["path"]) for a in doc["actions"] if cls is None or a["class"] == cls}
+
+
+def declare_obsolete(cfg, *paths):
+    for p in paths:
+        before = {q:(q.stat().st_atime_ns,q.stat().st_mtime_ns) for q in ([p,*p.rglob('*')] if p.is_dir() else [p])}
+        cfg.setdefault('obsolete_items', {})[str(p)] = dict(basis='operator-confirmed-obsolete',
+            reason='fixture owner retired this payload', evidence='explicit test disposition',
+            content_hash=hk.certainty.content_hash(p))
+        for q, stamps in before.items():
+            os.utime(q, ns=stamps)
+    return cfg
 
 
 def key(p):
@@ -184,6 +330,7 @@ def test_a_git_tracked_file_is_never_planned(tree):
     twin = write(tree / "_CLAUDE_OUTPUT" / "u" / "fixture" / "Skyrim.esm", blob("master"))
     subprocess.run(["git", "init", "-q", str(tree)], check=True)
     subprocess.run(["git", "-C", str(tree), "add", "-f", "_CLAUDE_OUTPUT/t/fixture/Skyrim.esm"], check=True)
+    age(tracked, 10)              # `git add` READ it; reads now count as activity, which would protect it for that reason
     doc = hk.plan(cfg_for(tree))
     assert key(tracked) not in planned(doc)
     assert key(twin) in planned(doc)
@@ -278,14 +425,16 @@ def test_a_loose_file_in_a_root_is_never_planned(tree):
 
 # --------------------------------------------------------------------------- build output
 
-def test_build_intermediates_are_planned_and_dll_pdb_are_kept(tree):
-    obj = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.lib", b"lib")
+def test_build_intermediates_are_planned_and_products_are_kept(tree):
+    # A .lib is a build PRODUCT another build links (2026-10-28: a recycled CommonLibSSE.lib broke a live build).
+    obj = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.obj", b"obj")
+    lib = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.lib", b"lib")
     dll = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.dll", b"dll")
     pdb = write(tree / "_CLAUDE_OUTPUT" / "t" / "build-sdk" / "Release" / "x.pdb", b"pdb")
-    loose = write(tree / "_CLAUDE_OUTPUT" / "t" / "notes" / "x.lib", b"lib outside a build dir")
-    doc = hk.plan(cfg_for(tree))
+    loose = write(tree / "_CLAUDE_OUTPUT" / "t" / "notes" / "x.obj", b"obj outside a build dir")
+    doc = hk.plan(declare_obsolete(cfg_for(tree), obj))
     assert planned(doc, "build") == {key(obj)}
-    assert not {key(dll), key(pdb), key(loose)} & planned(doc)
+    assert not {key(lib), key(dll), key(pdb), key(loose)} & planned(doc)
 
 
 # --------------------------------------------------------------------------- links
@@ -322,6 +471,29 @@ def test_a_file_hard_linked_from_outside_is_never_linked_or_made_read_only(tree,
     assert hk.apply(doc, cfg, recycler=FakeBin(tree)) == 0
     assert outside.stat().st_mode == before and os.access(outside, os.W_OK)
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(before)
+
+
+def test_a_file_gaining_a_name_during_the_plan_is_not_queued_for_linking(tree, monkeypatch):
+    """queue_duplicate()'s own link count, alone: the walk's earlier check already saw one name, then a mod manager
+    linked the file while the plan was still inspecting it. The other two copies still dedupe."""
+    a = write(tree / "_CLAUDE_OUTPUT" / "a" / "x.log", blob("dup"))
+    b = write(tree / "_CLAUDE_OUTPUT" / "b" / "x.log", blob("dup"))
+    c = write(tree / "_CLAUDE_OUTPUT" / "c" / "x.log", blob("dup"))
+    outside = tree / "Mods" / "deployed.log"
+    outside.parent.mkdir()
+    original = hk.derived_source
+
+    def link_mid_plan(f, task):
+        if os.path.samefile(f, b) and not outside.exists():
+            os.link(b, outside)
+        return original(f, task)
+
+    monkeypatch.setattr(hk, "derived_source", link_mid_plan)
+    links = [x for x in hk.plan(cfg_for(tree))["actions"] if x["class"] == "link"]
+    assert outside.exists() and len(links) == 1, links
+    named = {links[0]["path"], links[0]["canonical"]}
+    assert not any(os.path.samefile(n, b) for n in named), "a file with an outside name was planned for linking"
+    assert all(any(os.path.samefile(n, k) for k in (a, c)) for n in named)
 
 
 def test_a_hard_link_made_after_the_plan_is_refused_before_any_chmod(tree):
@@ -413,6 +585,7 @@ def test_launch_logs_gzip_after_a_week_recycle_after_ninety_days_and_labelled_fo
     fresh, week, old = launch(tree, stamp(2), 2), launch(tree, stamp(10), 10), launch(tree, stamp(100), 100)
     labelled = launch(tree, "BORKED-ocu-2026-07-02", 400)
     cfg = cfg_for(tree)
+    declare_obsolete(cfg, old)
     doc = hk.plan(cfg)
     assert planned(doc, "gzip") == {key(week / "SkyrimNet.log")}
     assert planned(doc, "launch") == {key(old)}
@@ -426,7 +599,10 @@ def test_launch_logs_gzip_after_a_week_recycle_after_ninety_days_and_labelled_fo
 
 def test_a_gzip_that_does_not_round_trip_keeps_the_original(tree, monkeypatch):
     f = write(tree / "launches" / "x" / "SkyrimNet.log", blob("log", 100_000))
-    action = {"class": "gzip", "path": str(f), "bytes": f.stat().st_size, "hash": "0" * 32}
+    # The source still matches its planned hash; only the compressed copy is wrong (a truncating copy). So the
+    # ROUND-TRIP clause alone refuses: with a fake planned hash the source clause tripped too and masked its twin.
+    action = {"class": "gzip", "path": str(f), "bytes": f.stat().st_size, "hash": hk.blake(f)}
+    monkeypatch.setattr(hk.shutil, "copyfileobj", lambda fi, fo, n=0: fo.write(fi.read()[:-10]))
     fake = bin_for(tree)               # the bad .gz goes to a bin -- never the user's real one, and not Windows-only
     monkeypatch.setattr(hk, "recycle", fake)
     with pytest.raises(OSError, match="round trip"):
@@ -458,7 +634,12 @@ def test_a_scratch_folder_holding_a_save_or_a_backup_is_never_planned(tree, inne
     write(bed / inner, b"keep me")
     clean = tree / "cleanbed"                                    # twin: the same folder without it is planned
     write(clean / "plain.txt", b"x")
-    doc = hk.plan(cfg_for(tree, scratch=[str(bed), str(clean)]))
+    cfg = cfg_for(tree, scratch=[str(bed), str(clean)])
+    # scratch needs an obsolete decision (master ca7d3a3). A save can never get one (housekeep_backups refuses it),
+    # so for the other Forever names the bed is declared obsolete too: then protected_inside() ALONE keeps it, and
+    # its mutation twins can go red (merge 2026-11-01: declaring only the twin let the missing decision mask them).
+    declare_obsolete(cfg, clean, *([] if inner.endswith((".ess", ".skse")) else [bed]))
+    doc = hk.plan(cfg)
     assert key(bed) not in planned(doc), "a protected file inside a scratch folder must keep the whole folder"
     assert key(clean) in planned(doc, "scratch")
     assert any(k.startswith("kept: protected") for k in doc["rows"]), doc["rows"]
@@ -470,8 +651,41 @@ def test_an_old_launch_folder_holding_a_save_is_never_planned(tree):
     write(d / "Saves" / "quick.ess", b"save", days=100)
     stamp2 = time.strftime("launch-%Y%m%d-%H%M%S", time.localtime(time.time() - 101 * DAY))
     twin = launch(tree, stamp2, 101)
-    doc = hk.plan(cfg_for(tree))
+    cfg = declare_obsolete(cfg_for(tree), twin)      # a launch log needs an obsolete decision (master ca7d3a3)
+    doc = hk.plan(cfg)
     assert key(d) not in planned(doc) and key(twin) in planned(doc, "launch")
+
+
+# Two layers check a whole launch/scratch folder for Forever content (user ruling 2026-11-01: keep both, test each
+# alone): protected_inside() where the folder is first considered, and folder_protection() where the action is
+# recorded. They give the same verdict, so with both live a test cannot tell which one kept the folder; each case
+# below switches ONE off and requires the other to keep the folder by itself. A save can never be declared obsolete
+# (housekeep_backups refuses it), so these use a backup folder, which can be.
+LAYERS = {"protected_inside": "folder_protection", "folder_protection": "protected_inside"}
+
+
+@pytest.mark.parametrize("alone", sorted(LAYERS))
+def test_each_layer_alone_keeps_an_old_launch_folder_holding_a_backup_folder(tree, monkeypatch, alone):
+    monkeypatch.setattr(hk, LAYERS[alone], lambda *a, **k: "")          # the OTHER layer is off
+    stamp = time.strftime("launch-%Y%m%d-%H%M%S", time.localtime(time.time() - 100 * DAY))
+    d = launch(tree, stamp, 100)
+    write(d / "backups" / "pair.txt", b"keep me", days=100)
+    stamp2 = time.strftime("launch-%Y%m%d-%H%M%S", time.localtime(time.time() - 101 * DAY))
+    twin = launch(tree, stamp2, 101)
+    doc = hk.plan(declare_obsolete(cfg_for(tree), twin, d))
+    assert key(d) not in planned(doc) and key(twin) in planned(doc, "launch")
+
+
+@pytest.mark.parametrize("alone", sorted(LAYERS))
+def test_each_layer_alone_keeps_a_scratch_folder_holding_a_backup_folder(tree, monkeypatch, alone):
+    monkeypatch.setattr(hk, LAYERS[alone], lambda *a, **k: "")
+    bed, clean = tree / "scratchbed", tree / "cleanbed"
+    write(bed / "plain.txt", b"x")
+    write(bed / "backups" / "pair.txt", b"keep me")
+    write(clean / "plain.txt", b"x")
+    cfg = declare_obsolete(cfg_for(tree, scratch=[str(bed), str(clean)]), clean, bed)
+    doc = hk.plan(cfg)
+    assert key(bed) not in planned(doc) and key(clean) in planned(doc, "scratch")
 
 
 def test_a_repeated_snapshot_under_a_backup_folder_is_never_planned(tree):
@@ -502,8 +716,13 @@ def test_repeated_auto_snapshots_stamps_are_rolling(tree):
     assert hk.check(action, cfg, hk.Guard(cfg), time.time()) == "", "apply must agree with plan"
 
 
+@pytest.mark.parametrize("alone", ["both", "protected_inside"])
 @pytest.mark.parametrize("inner", ["kept/quick" + hk.SAVE_EXTS[0], "backups/pair.txt"])
-def test_a_save_or_backup_inside_an_auto_snapshots_stamp_keeps_it(tree, inner):
+def test_a_save_or_backup_inside_an_auto_snapshots_stamp_keeps_it(tree, monkeypatch, inner, alone):
+    # "protected_inside": master's rolling_protection (which also refuses these) is off, so the rolling-store
+    # exemption in protected_inside() alone must still keep the stamp (two layers, each tested alone; 2026-11-01).
+    if alone == "protected_inside":
+        monkeypatch.setattr(hk.certainty, "rolling_protection", lambda *a, **k: "")
     _auto_snaps(tree, inner)
     doc = hk.plan(cfg_for(tree, legacy_snapshots=[".claude/backups/auto_snapshots"]))
     assert planned(doc, "snapshot") == set(), "a save or a backup folder inside a stamp is still Forever"
@@ -512,7 +731,7 @@ def test_a_save_or_backup_inside_an_auto_snapshots_stamp_keeps_it(tree, inner):
 def test_apply_refuses_a_scratch_folder_a_save_appeared_in_after_the_plan(tree):
     bed = tree / "scratchbed"
     write(bed / "plain.txt", b"x")
-    cfg = cfg_for(tree, scratch=[str(bed)])
+    cfg = declare_obsolete(cfg_for(tree, scratch=[str(bed)]), bed)
     doc = hk.plan(cfg)
     assert key(bed) in planned(doc, "scratch")
     action = next(a for a in doc["actions"] if a["class"] == "scratch")
@@ -530,7 +749,7 @@ def test_a_relative_scratch_path_is_the_toolkit_folder_not_the_current_directory
     elsewhere = tmp_path.parent / (tmp_path.name + "-elsewhere")
     write(elsewhere / "scratchbed" / "a.txt", b"other")
     monkeypatch.chdir(elsewhere)
-    doc = hk.plan(cfg_for(tree, scratch=["scratchbed"]))
+    doc = hk.plan(declare_obsolete(cfg_for(tree, scratch=["scratchbed"]), tree / "scratchbed"))
     assert planned(doc, "scratch") == {key(tree / "scratchbed")}
 
 
@@ -691,7 +910,7 @@ def test_a_launch_only_plan_never_scans_agent_output_and_still_sums(tree):
     """The launch watcher plans gzip/launch after every game exit; it must not hash every agent-output file."""
     copy = write(tree / "_CLAUDE_OUTPUT" / "t" / "fixture" / "Skyrim.esm", blob("master"))
     old = launch(tree, "launch-20200101-000000", 2000)
-    doc = hk.plan(cfg_for(tree), only={"gzip", "launch"})
+    doc = hk.plan(declare_obsolete(cfg_for(tree), old), only={"gzip", "launch"})
     assert planned(doc) == {key(old)}
     assert key(copy) not in planned(doc)
     scanned = sum(p.stat().st_size for p in (tree / "launches").rglob("*") if p.is_file())
@@ -714,9 +933,11 @@ def stale(d, days=3):
     return d
 
 
-def tdir(temp, name, days=3):
+def tdir(temp, name, days=3, toolkit=None):
     d = temp / name
-    (d / "sub").mkdir(parents=True)
+    d.mkdir(parents=True)
+    hk.certainty.mark_disposable_temp(d, toolkit or hk.TOOLKIT_ROOT)
+    (d / "sub").mkdir()
     (d / "sub" / "f.txt").write_text("x", encoding="utf-8")
     return stale(d, days)
 
@@ -730,6 +951,7 @@ def bin_for(tmp_path):
 
 def sweep_cfg():
     cfg = hk.load_config(None)
+    cfg['recycle_bin_warn_gib'] = 0  # no real user-bin inventory in unit fixtures
     cfg["temp_prefixes"] = ["skyrim-harness-", "t11-nohome-"]
     return cfg
 
@@ -783,6 +1005,9 @@ def _only(monkeypatch, trigger, tmp_path):
     if trigger:
         monkeypatch.setenv(trigger, "off" if trigger == "SKYGUARD_HOUSEKEEP_SWEEP" else str(tmp_path))
     monkeypatch.setattr(hk, "has_recycle_bin", lambda: True)
+    # These tests are about the harness refusal, not the bin's capacity: bin_refusal() reads this machine's
+    # registry and refuses without its key (every CI runner), which would stop short of the stubbed shell.
+    monkeypatch.setattr(hk, "bin_refusal", lambda p: "")
 
     def no_shell(*a, **k):
         raise AssertionError("the Recycle Bin shell call ran")
@@ -863,7 +1088,13 @@ def test_the_sweep_removes_read_only_files_and_its_rows_sum(tmp_path):
     assert sum(res["rows"].values()) == 2 and res["rows"]["recycled"] == 1
 
 
-def test_the_sweep_never_follows_a_link_out_of_temp(tmp_path):
+@pytest.mark.parametrize("alone", ["both", "entry_check"])
+def test_the_sweep_never_follows_a_link_out_of_temp(tmp_path, monkeypatch, alone):
+    # "entry_check": certainty.plain_path (which also refuses links) is off, so temp_candidates' own reparse
+    # check alone must keep the junction out (two layers, each tested alone; 2026-11-01).
+    if alone == "entry_check":                # every overlapping layer off: link refusal, disposability gate
+        monkeypatch.setattr(hk.certainty, "plain_path", lambda p, *a, **k: Path(p))
+        monkeypatch.setattr(hk.certainty, "disposable_temp", lambda *a, **k: True)
     temp, outside = tmp_path / "temp", tmp_path / "precious"
     temp.mkdir()
     (outside / "keep.txt").parent.mkdir(parents=True)
@@ -887,7 +1118,7 @@ def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, mon
     monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)   # conftest switches the sweep off for every test
     cfg = sweep_cfg()
     cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
-               sweep_every_hours=0)
+               sweep_every_hours=0, daily_enabled=False)          # the daily run has its own tests
     monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(tmp_path / "temp"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.setattr(hk, "recycle", bin_for(tmp_path))
@@ -895,7 +1126,7 @@ def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, mon
     state = tmp_path / "state" / "note.txt"
     assert hk.session(cfg, state) == 0
     assert state.read_text(encoding="utf-8") == ""
-    tdir(tmp_path / "temp", "skyrim-harness-sess01")
+    tdir(tmp_path / "temp", "skyrim-harness-sess01", toolkit=tmp_path)
     assert hk.session(cfg, state) == 0
     assert state.read_text(encoding="utf-8").startswith("DISK: moved 1 leftover temp dir(s) to the Recycle Bin")
 
@@ -904,14 +1135,14 @@ def test_session_runs_at_most_once_per_interval(tmp_path, monkeypatch):
     monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)   # conftest switches the sweep off for every test
     cfg = sweep_cfg()
     cfg.update(codex_sessions_warn_gib=10 ** 6, worktrees_warn=10 ** 6, free_floor_gib=0, root=tmp_path,
-               sweep_every_hours=6)
+               sweep_every_hours=6, daily_enabled=False)          # the daily run has its own tests
     monkeypatch.setattr(hk.tempfile, "gettempdir", lambda: str(tmp_path / "temp"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.setattr(hk, "recycle", bin_for(tmp_path))
     (tmp_path / "temp").mkdir()
     state = tmp_path / "note.txt"
     state.write_text("", encoding="utf-8")                   # a sweep ran just now
-    left = tdir(tmp_path / "temp", "skyrim-harness-thr001")
+    left = tdir(tmp_path / "temp", "skyrim-harness-thr001", toolkit=tmp_path)
     hk.session(cfg, state)
     assert left.exists()
     os.utime(state, (time.time() - 7 * 3600,) * 2)           # twin: the last sweep was 7 hours ago
@@ -933,7 +1164,7 @@ def test_session_runs_when_the_last_sweep_is_dated_in_the_future(tmp_path, monke
     state = tmp_path / "note.txt"
     state.write_text("", encoding="utf-8")
     os.utime(state, (time.time() + 60,) * 2)
-    left = tdir(tmp_path / "temp", "skyrim-harness-fut001")
+    left = tdir(tmp_path / "temp", "skyrim-harness-fut001", toolkit=tmp_path)   # the producer receipt names this root
     hk.session(cfg, state)
     assert not left.exists()
 

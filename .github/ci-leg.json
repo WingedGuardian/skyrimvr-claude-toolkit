@@ -4,7 +4,9 @@
   "_final_review_measurement": "2026-10-29, CI run 40901320070 at f5785a3: the Linux mutation part passed every test (3123 passed) and skipped 196 > 194. The +2 are exactly the two new twins final-review-thread-listing-native and final-review-thread-listing-owner, whose target test (test_real_non_gui_child_passes_desktop_check) is Windows-only; the Windows leg ran and killed both. Linux mutation ceiling 194 -> 196; every other ceiling unchanged. Round D VR/housekeep adds two Windows-only regression witnesses (user32 desktop, native limited process read) and their two mutation twins: Linux behavior 720 -> 722, mutations 196 -> 198; no other ceiling changes.",
   "_shards": "2026-10-31: the mutation part runs as SHARDS (full-qualification.yml include: Windows 4, Linux 2; tests/conftest.py SKYGUARD_MUTATION_SHARD deselects the other slices). Each shard still COLLECTS the whole gate, so parts.mutations.collected_floor is checked per shard unchanged; the skip and xfail ceilings are checked on the shards' SUM by the mutations-total job (check_ci_leg.py log <shard logs...>), so they too are unchanged. One Windows mutation job was 258 min in CI run 40953576542.",
   "collected_floor": 8100,
-  "skip_ceiling": {"Linux": 722, "Windows": 276},
+  "_mutation_ceiling_measurement": "2026-11-02, CI run 41403931536 at 1c5a760: the Linux mutation shards skipped 199 > 198 with every test passing. The +1 is exactly twin housekeep-bin-takes-anything, whose target test_a_refused_item_never_reaches_the_shell is Windows-only; the Windows shard ran and killed it. Linux mutation ceiling 198 -> 199.",
+  "_skip_ceiling_measurement": "2026-11-02, CI run 41388574286 at 84a889a: Linux skipped 731 (732 on Python 3.10), up from 721 at the last green run. The 10 new rows are all Windows-only tests from the housekeep merge (test_task_archive_review 6, test_housekeep_inventory 2, test_housekeep_archive 1, test_housekeep_rules 1); those files skip nothing on Windows.",
+  "skip_ceiling": {"Linux": 732, "Windows": 276},
   "xfail_ceiling": 12,
   "required_modules": {
     "all": [
@@ -24,7 +26,7 @@
   "parts": {
     "mutations": {
       "collected_floor": 2600,
-      "skip_ceiling": {"Linux": 198, "Windows": 8},
+      "skip_ceiling": {"Linux": 199, "Windows": 8},
       "required_modules": {"all": ["test_mutations.py"], "Windows": [], "Linux": []}
     }
   }

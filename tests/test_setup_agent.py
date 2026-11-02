@@ -165,10 +165,12 @@ def test_every_value_is_idempotent(game_dir, value):
 
 
 @pytest.mark.parametrize("hide,stubs,expected", [
-    ("claude codex", (), "all"),
-    ("codex", ("claude",), "claude"),
-    pytest.param("claude", ("codex",), "codex", marks=windows_only),
-    pytest.param("", ("claude", "codex"), "all", marks=windows_only),
+    # opencode is hidden in every case: a machine that has it installed (the maintainers' does) made auto find it
+    # and configure "all", so these went red off CI only (pre-push gate, 2026-11-01). Each case controls every agent.
+    ("claude codex opencode", (), "all"),
+    ("codex opencode", ("claude",), "claude"),
+    pytest.param("claude opencode", ("codex",), "codex", marks=windows_only),
+    pytest.param("opencode", ("claude", "codex"), "all", marks=windows_only),
 ], ids=["none-found-means-all", "claude-only", "codex-only", "both-found"])
 def test_auto_configures_the_agents_found_on_path(game_dir, tmp_path, hide, stubs, expected):
     stubdir = stub_bin(tmp_path, **{s: "echo stub" for s in stubs})
@@ -182,7 +184,7 @@ def test_auto_configures_the_agents_found_on_path(game_dir, tmp_path, hide, stub
 
 def test_auto_is_the_default(game_dir, tmp_path):
     r = run_setup(game_dir, shim_path=True, env_overrides={
-        "PATH": path_with(stub_bin(tmp_path, claude="echo stub"), BIN), "FAKE_WHICH_MISSING": "codex"})
+        "PATH": path_with(stub_bin(tmp_path, claude="echo stub"), BIN), "FAKE_WHICH_MISSING": "codex opencode"})
     assert "-> configuring: claude (--agent auto)" in r.stdout, r.stdout[:800]
 
 

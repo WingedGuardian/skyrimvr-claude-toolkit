@@ -106,6 +106,10 @@ def referencing_tests(changed, test_dir=None):
     """
     test_dir = test_dir or REPO / "tests"
     names = {Path(p).name for p in changed if not (p.startswith("tests/test_") and p.endswith(".py"))}
+    # A test can reach a workflow through its folder, naming no file: X4 CI run 41399417477 went red on all four legs
+    # on a test that globs .github/workflows, and name matching had skipped it.
+    if any(p.startswith(".github/workflows/") for p in changed):
+        names.add(".github/workflows")
     if not names:
         return []
     out = []
@@ -306,7 +310,9 @@ def main(argv=None) -> int:
     # The changed-file set grows with the branch (177 changed files on a peer's branch timed this group out at 900 s
     # on 2026-11-01: a time-budget refusal, not a test failure) and with reference selection. A big branch gets more
     # processes, not a refusal: round-robin chunks, each under its own cap.
-    groups += [("sentinels and changed-file tests {}/{}".format(k + 1, len(chunks)), chunk, 900)
+    # 1200 like the corpus groups: a 19-file chunk of the 28-file housekeep merge was killed at 98% after 900 s
+    # (2026-11-01). The cap catches a hang; it must not refuse a merely large push.
+    groups += [("sentinels and changed-file tests {}/{}".format(k + 1, len(chunks)), chunk, 1200)
                for chunks in [rest_chunks(rest)] for k, chunk in enumerate(chunks)]
     g.parallel([(name + " ({} files)".format(len(fs)), verbose + fs, t) for name, fs, t in groups if fs])
     total = time.time() - g.t0

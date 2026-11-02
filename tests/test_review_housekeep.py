@@ -101,3 +101,19 @@ def test_uncertain_or_recent_directory_activity_keeps_derived_trace(tmp_path, mo
         called = []
         assert hk.apply(doc, cfg, recycler=lambda items: called.extend(items) or {}) == 1
         assert called == [] and trace.exists()
+
+
+def test_newest_mtime_alone_counts_an_unreadable_subfolder_as_active(tmp_path, monkeypatch):
+    """newest_mtime() on its own (2026-11-01: in plan() the file-activity walk raises on the same folder first, so
+    only a direct test leaves this check standing alone). A walk error is uncertainty, and uncertain is active."""
+    folder = tmp_path / "task"
+    child = write(folder / "sub" / "a.txt", b"x")
+    original = os.scandir
+
+    def denied(path):
+        if Path(path) == child.parent:
+            raise PermissionError("synthetic unreadable folder")
+        return original(path)
+
+    monkeypatch.setattr(os, "scandir", denied)
+    assert hk.newest_mtime(folder) == float("inf")

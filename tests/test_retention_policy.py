@@ -1,6 +1,6 @@
 """docs/RETENTION.md's shared section is the same text in the Skyrim and X4 toolkits.
 
-The two repos have disjoint histories, so nothing can import one from the other. Instead each pins the hash of the
+The local pin validates this copy. check-housekeep-parity.py compares actual peer bytes. Instead each pins the hash of the
 section between the shared-policy markers. Change the text in one repo and this goes red until the new hash is
 pinned -- in BOTH repos (x4-claude-toolkit: tools/x4validate/tests/test_retention_policy.py), with the same text.
 """
@@ -12,7 +12,7 @@ import re
 
 from conftest import REPO
 
-PINNED = "6c4fc1024bb44d5505ed79d8a983e128a0079aa2cc21a664b607bcaee486feac"
+PINNED = "084bdd17bfc90466c757cd438b0fd6e05f7b60af7b8c2ed0a81b484f6aa24c4b"
 DOC = REPO / "docs" / "RETENTION.md"
 
 

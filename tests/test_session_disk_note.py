@@ -76,7 +76,8 @@ def test_a_sweep_is_launched_detached_outside_tests_and_never_inside_them(monkey
     assert launched == [], "under the test harness the hook must not sweep the real temp dir"
     monkeypatch.setenv("HOUSEKEEP_REAL_BIN_IN_TESTS", "1")         # twin: what a real session does
     run._disk_note(str(REPO))
-    (argv, kw), = launched
+    # Only the housekeep launch counts; the daily announcement's process check (tasklist) also goes through Popen.
+    (argv, kw), = [(a, k) for a, k in launched if "session" in a]
     assert argv[-3:] == [str(REPO / "tools" / "housekeep.py"), "session", str(REPO / run.DISK_NOTE)]
     assert kw["stdout"] == subprocess.DEVNULL and (kw["creationflags"] if os.name == "nt" else kw["start_new_session"])
 
@@ -89,7 +90,7 @@ def test_no_sweep_for_a_project_that_is_not_this_toolkit(tmp_path, monkeypatch):
     run._disk_note(str(tmp_path))
     assert launched == []
     run._disk_note(str(REPO))                                       # twin: the toolkit itself does launch
-    assert len(launched) == 1
+    assert len([a for a, _ in launched if "session" in a]) == 1
 
 
 def test_the_launch_guard_and_the_bin_refusal_read_the_same_markers(monkeypatch):

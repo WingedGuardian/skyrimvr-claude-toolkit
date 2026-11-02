@@ -142,6 +142,17 @@ def _disk_note(project) -> str:
                and not os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"))
     off = os.environ.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"
     if tool.is_file() and own and not off and not in_test:
+        # Announce the daily cleanup BEFORE it starts (user ruling 2026-10-29: never blindsided). Fast: no planning.
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("housekeep_daily", tool.with_name("housekeep_daily.py"))
+            daily = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(daily)
+            line = daily.announcement(daily.housekeep.load_config(None))
+            if line:
+                note = (line + "\n" + note).strip()
+        except Exception:
+            pass
         try:
             import subprocess
             flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0   # detached, new group, no window

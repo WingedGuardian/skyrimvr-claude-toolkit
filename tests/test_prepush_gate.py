@@ -30,6 +30,18 @@ def test_a_changed_file_selects_every_test_that_names_it(tmp_path):
     assert picked == ["tests/test_pr_ci_policy.py"], picked        # named: yes; unrelated: no; the mutation gate: never
 
 
+def test_a_changed_workflow_selects_a_test_that_only_names_the_folder(tmp_path):
+    """X4 CI run 41399417477: a test globbed .github/workflows and named no file, so name matching skipped it."""
+    g = _gate()
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_globber.py").write_text('ROOT = ".github/workflows"\n', encoding="utf-8")
+    (tests / "test_unrelated.py").write_text("def test_y():\n    pass\n", encoding="utf-8")
+    g.REPO = tmp_path
+    assert g.referencing_tests([".github/workflows/ci.yml"], test_dir=tests) == ["tests/test_globber.py"]
+    assert g.referencing_tests(["tools/x.py"], test_dir=tests) == []          # only a workflow change adds the folder
+
+
 def test_a_changed_test_file_selects_only_itself_by_reference(tmp_path):
     """A changed test's own name is not a reference to chase: every test that mentions test_x.py would otherwise run."""
     g = _gate()
