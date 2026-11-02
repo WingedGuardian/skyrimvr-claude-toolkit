@@ -238,6 +238,7 @@ def _committed_engine(tmp_path, monkeypatch, module, with_core=True):
         subprocess.run(["git", "-c", "core.autocrlf=false", "-C", str(repository), *args],
                        check=True, capture_output=True)
     git("init", "-q")
+    git("config", "core.autocrlf", "false")   # commit the fixture bytes as they are on any host
     git("add", "tools")
     git("-c", "user.name=Pricing Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture")
     monkeypatch.setattr(module, "REPO", repository)

@@ -17,7 +17,8 @@ def check(root):
 @pytest.fixture
 def payload(tmp_path):
     (tmp_path / "tools").mkdir()
-    shutil.copytree(REPO / "tools/modding_harness", tmp_path / "tools/modding_harness")
+    shutil.copytree(REPO / "tools/modding_harness", tmp_path / "tools/modding_harness",
+                    ignore=shutil.ignore_patterns("__pycache__"))   # bytecode from this run is not the payload
     shutil.copy2(REPO / "tools/modding-harness.lock.json", tmp_path / "tools/modding-harness.lock.json")
     assert not check(tmp_path), "control: the exact vendored source must verify"
     return tmp_path
