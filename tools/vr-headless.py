@@ -346,13 +346,16 @@ def read_process_tree():
                "@{n='Id';e={$_.ProcessId}},@{n='ParentId';e={$_.ParentProcessId}},"
                "@{n='Path';e={$_.ExecutablePath}},"
                "@{n='StartTime';e={$_.CreationDate.ToUniversalTime().ToString('o')}} | ConvertTo-Json -Compress")
-    try:
-        r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command], capture_output=True,
-                           text=True, check=True, timeout=8)
-        value = json.loads(r.stdout)
-        return value if isinstance(value, list) else [value]
-    except (OSError, subprocess.SubprocessError, ValueError) as e:
-        raise ProcessReadError("process ancestry is unreadable: {}".format(e)) from e
+    failure = None
+    for _ in range(3):                    # launch load can outlast one read; a refused launch leaves files headless
+        try:
+            r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command], capture_output=True,
+                               text=True, check=True, timeout=8)
+            value = json.loads(r.stdout)
+            return value if isinstance(value, list) else [value]
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
+            failure = e
+    raise ProcessReadError("process ancestry is unreadable: {}".format(failure)) from failure
 
 
 def refresh_launch_lifetimes(session, desk):

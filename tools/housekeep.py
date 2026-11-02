@@ -278,7 +278,7 @@ def evidence_links(cfg) -> set:
     file is never planned for anything."""
     links = set()
     prefixes = []                                # root-relative spellings (resolved against the root)
-    roots = [_abs(cfg, r) for r in cfg["agent_output"] + cfg["staging_roots"]]
+    roots = [_abs(cfg, r) for r in [*cfg["agent_output"], *cfg["staging_roots"], *cfg.get("archive_roots", {})]]
     for root in roots:
         try:
             rel = os.path.relpath(os.path.abspath(str(root)), os.path.abspath(str(cfg["root"])))
@@ -391,7 +391,7 @@ class Guard:
         k = _key(p)
         if k in self.tracked:
             return "git-tracked"
-        if k in self.links:
+        if k in self.links or any(k.startswith(x + os.sep) for x in self.links):
             return "linked evidence"
         if any(fnmatch.fnmatch(low, g) for g in self.globs):
             return "protected_globs"
@@ -457,18 +457,26 @@ def live_state_tokens(cfg) -> set:
         except OSError:
             continue
         m = re.search(r"^## Live state.*?$(.*?)(?=^## |\Z)", text, re.M | re.S)
-        if m:                                   # entry lines only: the block's own instructions name example paths
-            entries = "\n".join(ln for ln in m.group(1).splitlines() if ln.lstrip().startswith(("- ", "* ")))
-            toks |= {t.replace("\\", "/").rstrip("/").lower() for t in re.findall(r"`([^`\n]+)`", entries)}
-    return toks
+        if m:
+            toks |= {t.replace("\\", "/").rstrip("/").lower() for t in re.findall(r"`([^`\n]+)`", m.group(1))}
+    # The block's own instructions may name a whole output root as an example; that holds no one task. A session's
+    # line need not be a bullet (release review 2026-11-02: the install's block only asks for "one line per session").
+    whole = {str(r).replace("\\", "/").rstrip("/").lower() for r in cfg.get("agent_output", ())}
+    return toks - whole
 
 
 def rb_job_cwds() -> list:
     p = Path(os.path.expanduser("~")) / ".claude" / "tools" / "resource-budget" / "ledger.json"
     try:
-        return [_key(e["cwd"]) for e in json.loads(p.read_text(encoding="utf-8")).get("entries", []) if e.get("cwd")]
-    except (OSError, ValueError, AttributeError, TypeError):
-        return []
+        text = p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []                               # no budget tool here: no jobs to hold for
+    except OSError:
+        return None
+    try:
+        return [_key(e["cwd"]) for e in json.loads(text).get("entries", []) if e.get("cwd")]
+    except (ValueError, AttributeError, TypeError):
+        return None                             # unreadable is not "nothing is running": is_done holds the work
 
 
 def is_done(task: Path, idle_days: float, tokens: set, cwds: list, guard) -> str:
@@ -476,6 +484,8 @@ def is_done(task: Path, idle_days: float, tokens: set, cwds: list, guard) -> str
     caller. Written-recently is the weakest signal (a read leaves no mtime), so every other gate is independent."""
     if (task / KEEP_PIN).exists():
         return "pinned (.housekeep-keep)"
+    if cwds is None:
+        return "the rb ledger could not be read, so a running job may work here"
     name = task.name.lower()
     path = str(task).replace("\\", "/").lower()
     if any(t == name or path.endswith("/" + t) or t.endswith("/" + name) or (len(t) > 8 and t in path)
@@ -550,8 +560,8 @@ def archive_selection(cfg, guard, tasks, now, held=None, inventory=None) -> tupl
             continue
         inventory["candidates_inspected"] += 1
         total += fp[1]
-        if (t / "ARCHIVED.md").exists() and fp[1] < 1 << 20:
-            keep("kept: already archived (stub only)", fp[1], from_root)
+        if (t / "ARCHIVED.md").exists():        # any size: linked evidence or a pin can keep more than a stub
+            keep("kept: already archived", fp[1], from_root)
             continue
         idle = (now - wrote) / DAY if wrote else 0.0           # idleness: writes
         if read > now - cfg["read_veto_hours"] * 3600:         # but anything reading here right now blocks it
@@ -622,6 +632,26 @@ def walk_files(target: Path, strict=False):
 # before goes to the Recycle Bin), although the store sits under .claude/backups/. Only this one tool store: saves
 # inside it, a backup folder inside a stamp, and every other backup folder stay Forever.
 ROLLING_SNAPSHOT_STORE = "auto_snapshots"
+
+
+def under_pin(path: Path, top: Path) -> bool:
+    """A .housekeep-keep in this file's folder or any folder up to and including `top`."""
+    for parent in path.parents:
+        if (parent / KEEP_PIN).exists():
+            return True
+        if parent == top:
+            return False
+    return False
+
+
+def archive_keeps(task: Path, guard) -> list:
+    """What an archive leaves in place (user ruling 2026-11-02): every Forever name, and everything under a nested pin.
+    The zip still holds a verified copy; only the local retirement skips them, so a baseline never moves from its path."""
+    keep = []
+    for dp, ds, fs in os.walk(task):
+        pinned = under_pin(Path(dp) / "x", task)
+        keep += [_key(os.path.join(dp, f)) for f in fs if pinned or guard.why_protected(os.path.join(dp, f))]
+    return keep
 
 
 def folder_protection(folder: Path, guard) -> str:
@@ -986,6 +1016,9 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             if why:
                 count("kept: protected ({})".format(why), size)
                 continue
+            if under_pin(f, task):
+                count("kept: pinned (.housekeep-keep)", size)
+                continue
             if st.st_nlink != 1:
                 count("kept: already hard-linked elsewhere (ownership unknown)", size)
                 continue
@@ -1224,6 +1257,14 @@ def under_test_harness() -> bool:
     if os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"):
         return False
     return bool(os.environ.get("PYTEST_CURRENT_TEST")) or bool(os.environ.get("HARNESS_FIXTURE_ROOT"))
+
+
+def _recycle_batch(recycler, batch) -> dict:
+    """A shell call that outlives its timeout is every item's failure to report, never a traceback."""
+    try:
+        return recycler(batch)
+    except subprocess.TimeoutExpired as exc:
+        return {str(p): "the Recycle Bin call timed out ({} s): check this item".format(exc.timeout) for p in batch}
 
 
 def recycle(paths) -> dict:
@@ -1712,7 +1753,7 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
                 elif cls == "archive":
                     ha = _archive_module()
                     k = _key(a["path"]) + os.sep
-                    extra = [x for x in guard.tracked | guard.links if x.startswith(k)]
+                    extra = [x for x in guard.tracked | guard.links if x.startswith(k)] + archive_keeps(Path(a["path"]), guard)
                     archived.append((a, ha.archive_folder(Path(a["path"]), Path(a["nas"]), None, extra)))
                 else:
                     to_recycle.append(a)
@@ -1735,7 +1776,7 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
             victims = [str(v) for _, rec in archived for v in rec["victims"]]
             res = {}
             for i in range(0, len(victims), RECYCLE_BATCH):
-                res.update(recycler(victims[i:i + RECYCLE_BATCH]))
+                res.update(_recycle_batch(recycler, victims[i:i + RECYCLE_BATCH]))
             for a, rec in archived:
                 left = {v: res.get(str(v), "no result reported") for v in rec["victims"]}
                 left = {str(v): e for v, e in left.items() if e}
@@ -1761,7 +1802,9 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
                     if a['class'] == 'snapshot' and any(
                             other['path'] == a.get('duplicate_of') for other in plan_doc['actions']):
                         why = 'retained snapshot is also scheduled for removal'
-                except (OSError, ValueError) as exc:
+                except Exception as exc:
+                    if not isinstance(exc, (OSError, ValueError)) and type(exc).__name__ != "ArchiveError":
+                        raise
                     why = 'final replacement proof failed: '+str(exc)
                 if why:
                     print('  REFUSED  {}  ({})'.format(a['path'], why))
@@ -1772,7 +1815,7 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
             paths = [a["path"] for a in to_recycle]
             res = {}
             for i in range(0, len(paths), RECYCLE_BATCH):
-                res.update(recycler(paths[i:i + RECYCLE_BATCH]))
+                res.update(_recycle_batch(recycler, paths[i:i + RECYCLE_BATCH]))
             for a in to_recycle:
                 err = res.get(a["path"], "no result reported")
                 if err:
@@ -2145,7 +2188,10 @@ def main(argv) -> int:
         print("housekeep: staging cleanup REFUSED: " + "; ".join(refusals), file=sys.stderr)
     try:
         return _run(cmd, args, cfg)
-    except (ProtectionUnavailable, OSError) as e:    # fail closed: a protection that cannot be evaluated refuses
+    except Exception as e:                           # fail closed: a protection that cannot be evaluated refuses
+        if not isinstance(e, (ProtectionUnavailable, OSError, ValueError, KeyError)) \
+                and type(e).__name__ != "ArchiveError":
+            raise
         print("housekeep: REFUSED, nothing planned or applied: {}".format(e), file=sys.stderr)
         return 1
 

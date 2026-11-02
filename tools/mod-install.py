@@ -72,6 +72,16 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import skyrim_paths  # noqa: E402
 
+
+def _declare_disposable(workspace):
+    """The producer's declaration housekeep's temp sweep requires, so a crash's leftover can be retired. Best effort:
+    without it the sweep only keeps the folder."""
+    try:
+        import housekeep_backups
+        housekeep_backups.mark_disposable_temp(workspace, HERE.parent)
+    except Exception:
+        pass
+
 _spec = importlib.util.spec_from_file_location("archive_triage", HERE / "archive-triage.py")
 triage = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(triage)
@@ -423,6 +433,7 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
             atomic_record(operation_manifest, text)
         atomic_record(manifest, text)
     stage = Path(tempfile.mkdtemp(prefix="modinst_"))           # the tool's own temp; removed below
+    _declare_disposable(stage)
     try:
         # Names go through a list file, never argv: a large archive overflows Windows' 32K command line.
         # -spd: names are literal, not wildcards; -scsUTF-8: the list file's encoding.

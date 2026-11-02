@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 
@@ -91,6 +92,12 @@ def independent_check(config, candidate, snapshot, before=None, allowed=None):
     """xEdit parses every candidate record; preserves untouched records by canonical JSON."""
     verifier = Path(config["root"]) / "tools/housecarl-verify.js"
     work = Path(tempfile.mkdtemp(prefix="hc-xedit-"))
+    try:                                  # housekeep's temp sweep retires a leftover only with this declaration
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import housekeep_backups
+        housekeep_backups.mark_disposable_temp(work, Path(config["root"]))
+    except Exception:
+        pass                              # without it the sweep only keeps the folder
     data = work / "Data"
     data.mkdir(parents=True)
     # Only a read-only verifier sees these master hardlinks; the writer never gets this directory.
