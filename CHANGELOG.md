@@ -94,7 +94,7 @@
 - **Installation instruction audit:** checks installation instructions.
 - **Pinned downloads table:** records version, file, SHA-256 and source for optional downloads.
 - **Optional Python dependencies:** tool requirements have a separate hash lock.
-- **Payload fixtures:** real hook shapes were rechecked on Claude Code 2.1.291 and Codex CLI 0.160.0; no shape change was found.
+- **Payload fixtures:** real hook shapes were rechecked on Claude Code 2.1.316 and Codex CLI 0.165.0; no shape change was found.
 - **Generated agent files:** contributors edit `agent/` and regenerate.
 - **Generated file sync check:** CI checks that generated agent files are in sync.
 - **Committed release builds:** the archive builder reads git objects.
