@@ -42,6 +42,13 @@ def test_a_changed_workflow_selects_a_test_that_only_names_the_folder(tmp_path):
     assert g.referencing_tests(["tools/x.py"], test_dir=tests) == []          # only a workflow change adds the folder
 
 
+def test_an_unreadable_base_is_not_read_as_nothing_changed():
+    g = _gate()
+    assert g.base_readable("HEAD")
+    assert not g.base_readable("no-such-revision-at-all")
+    assert not g.base_readable("")
+
+
 def test_a_changed_test_file_selects_only_itself_by_reference(tmp_path):
     """A changed test's own name is not a reference to chase: every test that mentions test_x.py would otherwise run."""
     g = _gate()

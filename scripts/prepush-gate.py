@@ -21,7 +21,7 @@ Steps, each red on its own:
      EVERY test file whose text names a changed file's basename runs, since that is the test that goes red on it).
      Up to seven processes: timing/deadline, corpus, rule messages, and up to four changed-file chunks.
 
-BASE defaults to the branch's upstream (a base it cannot read selects no changed-file tests, and says so), else the merge-base with origin/master. A dirty working tree is reported
+BASE defaults to the branch's upstream (a base it cannot read stops the gate: it would select no tests), else the merge-base with origin/master. A dirty working tree is reported
 (the gate runs on the tree, the push sends the commits). Exit 0 = passed, 1 = a step failed, 2 = could not run.
 Runs under the resource budget when the hook launches it (rb.py); prints each step's seconds so growth is seen.
 """
@@ -87,6 +87,11 @@ def base_rev(explicit):
         if mb:
             return mb
     return ""
+
+
+def base_readable(base):
+    """A typo in --base would otherwise read as "nothing changed" and run no changed-file tests."""
+    return bool(base) and bool(_git("rev-parse", "--verify", "-q", base + "^{commit}"))
 
 
 def changed_files(base):
@@ -261,6 +266,9 @@ def main(argv=None) -> int:
     spec = json.loads((REPO / ".github" / "ci-leg.json").read_text(encoding="utf-8"))
     floor = spec["collected_floor"] + spec["parts"]["mutations"]["collected_floor"]
     base = base_rev(a.base)
+    if base and not base_readable(base):
+        print("prepush-gate: cannot read the base revision {}".format(base))
+        return 2
     changed = changed_files(base)
     dirty = _git("status", "--porcelain", "--untracked-files=no")
     print("prepush-gate: {} @ {}  base {}  {} changed file(s){}".format(
