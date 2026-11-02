@@ -265,7 +265,7 @@ recycle_dirs() {
             if [ -e "$cand" ]; then run=("$cand"); else IFS=' ' read -r -a run <<< "$cand"; fi
             "${run[@]}" -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1 || continue
             # Said BEFORE anything goes to the bin. An item too big for it stays in place and is reported.
-            echo "Moving $total old knowledgebase snapshot(s) from $STORE to the Recycle Bin; anything too big for the bin stays where it is, before deleting it permanently -- answer No to keep it."
+            echo "Moving $total old knowledgebase snapshot(s) from $STORE to the Recycle Bin; anything too big for the bin stays where it is."
             out=$("${run[@]}" -B "$hk" recycle "${native[@]}" 2>&1)
             ok=$(printf '%s\n' "$out" | grep -c "^OK"$'	')
             why=$(printf '%s\n' "$out" | grep -m1 "^FAILED"$'	' | cut -f3)

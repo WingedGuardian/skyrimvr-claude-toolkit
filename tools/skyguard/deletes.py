@@ -73,7 +73,7 @@ from typing import List, Mapping, NamedTuple, Optional, Tuple
 
 from . import paths, targets
 from .grep import _compile, grep
-from .shellparse import ps_param
+from .shellparse import _ListItem, ps_param
 
 # ------------------------------------------------------------------------------------------- legacy text tests
 DESTROYER = (
@@ -499,7 +499,9 @@ def substituted(e):
     if not e.subst:
         return e
     sub = dict(e.subst)
-    return e._replace(argv=tuple(sub.get(w, w) for w in e.argv),
+    # A substituted word stays in its comma list (`$d,b,c` is one PowerShell argument).
+    return e._replace(argv=tuple((_ListItem(sub[w]) if isinstance(w, _ListItem) else sub[w]) if w in sub else w
+                                 for w in e.argv),
                       redirects=tuple((op, sub.get(w, w)) for op, w in e.redirects))   # fix-unclear 4b
 
 

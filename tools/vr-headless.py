@@ -221,7 +221,7 @@ def steamvr_running() -> bool:
         r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq vrserver.exe", "/NH"], capture_output=True, text=True,
                            timeout=30)
     except (OSError, subprocess.TimeoutExpired):
-        return False
+        return True                     # unknown is never absent: treat it as running, which only holds restoration
     return "vrserver.exe" in r.stdout.lower()
 
 
@@ -621,7 +621,8 @@ def backup(src: Path, dst: Path) -> str:
 def set_aside(live: Path, folder: Path) -> None:
     """Take a file out of play by MOVING it into the run's backup folder (never deleting it)."""
     folder.mkdir(parents=True, exist_ok=True)
-    os.replace(str(live), str(folder / "{}-{}".format(datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f"),
+    # shutil.move: the backup folder can be on another drive, where os.replace cannot go.
+    shutil.move(str(live), str(folder / "{}-{}".format(datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f"),
                                                        live.name)))
 
 

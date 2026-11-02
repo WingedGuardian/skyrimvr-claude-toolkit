@@ -2153,6 +2153,9 @@ def _assigned_literals(root: str, name: str, dialect: str) -> Tuple[str, ...]:
     return tuple(a or b or c for a, b, c in re.findall(rx, root, flags))
 
 
+_BRACE_CAP = 64
+
+
 def _brace_alts(word: str) -> List[str]:
     out = [word]
     for _ in range(4):
@@ -2163,7 +2166,7 @@ def _brace_alts(word: str) -> List[str]:
                 nxt.append(w)
                 continue
             nxt += [w[:m.start()] + alt + w[m.end():] for alt in m.group(1).split(",")]
-        out = nxt[:64]
+        out = nxt[:_BRACE_CAP]
     return out
 
 
@@ -2201,7 +2204,8 @@ def _expand_braces(dialect, ws, vals):
     out_w, out_v = list(ws[:1]), list(vals[:1])
     for w, v in zip(ws[1:], vals[1:]):
         alts = _brace_alts(v) if not w.dyn or _BRACE1.search(v) else [v]
-        if len(alts) < 2 or not _unquoted_brace(w.raw):
+        # Past the cap _brace_alts drops members: keep the whole word, which is judged as unresolved, never a part of it.
+        if len(alts) < 2 or len(alts) >= _BRACE_CAP or any(_BRACE1.search(a) for a in alts) or not _unquoted_brace(w.raw):
             alts = [v]
         out_w += [w] * len(alts)
         out_v += alts
@@ -3390,18 +3394,24 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
 _TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))   # printf: only a plain format (_printf_text)
 _PLAIN_ARG = re.compile(r"[A-Za-z0-9_./:@%+,=~-]+")
 _POSITIONAL = re.compile(r"\$(?:\{([1-9])\}|([1-9])|\{?([@*])\}?)")
-_ARGS_MOVED = re.compile(r"(?:^|[;&|({\s])(?:shift(?:[ \t]+(?P<count>[0-9]+))?|(?P<set>set[ \t]+--?))(?=$|[;&|)}\s])")
+# In command position only: `echo shift` moves nothing.
+_ARGS_MOVED = re.compile(r"(?:^|(?P<lead>[;&|({\n]))[ \t]*(?:shift(?:[ \t]+(?:(?P<count>[0-9]+)|(?P<computed>[^\s;&|)}]+)))?"
+                         r"|(?P<set>set[ \t]+--?))(?=$|[;&|)}\s])")
 _BRANCHES = re.compile(r"(?:^|[;&|({\s])(?:if|while|until|for|case|select)(?=\s)|&&|\|\|")
 
 
 def _call_body(body: str, args, dynamic) -> str:
     """The body with $1..$9 / ${N} / $@ / $* replaced by the call's arguments where each is a plain literal word
     (letters, digits, path punctuation). Any other argument, or a missing one, leaves the reference in place: an
-    unknown value, judged as any unknown variable is. `shift` moves the arguments for the text after it (release review
-    2026-11-02: `g() { shift; cd "$1"; }` read the wrong word). A `set --`, or a shift under a branch or loop, leaves every
-    later reference unknown: which arguments remain depends on the run."""
+    unknown value, judged as any unknown variable is. A `shift` in the body's straight line moves the arguments for the
+    text after it (release review 2026-11-02: `g() { shift; cd "$1"; }` read the wrong word). Anything else that moves
+    them (`set --`, a shift under a branch, loop, subshell or pipe, or by a computed count) depends on the run, so the
+    command refuses to parse: leaving the references unknown turned a deny into an allow (review round 2)."""
     plain = [a if not dyn and _PLAIN_ARG.fullmatch(a or "") else None for a, dyn in zip(args, dynamic)]
-    branching = bool(_BRANCHES.search(body))
+    if _POSITIONAL.search(body):
+        for m in _ARGS_MOVED.finditer(body):
+            if m.group("set") or m.group("computed") or _BRANCHES.search(body) or m.group("lead") in ("(", "|"):
+                raise ParseError("a function moves its arguments in a way that depends on the run")
 
     def fill(text, rest):
         def one(m):
@@ -3417,8 +3427,7 @@ def _call_body(body: str, args, dynamic) -> str:
     for m in _ARGS_MOVED.finditer(body):
         out.append(fill(body[at:m.end()], rest))
         at = m.end()
-        count = m.group("count")
-        rest = None if rest is None or branching or m.group("set") else rest[int(count or 1):]
+        rest = rest[int(m.group("count") or 1):]
     out.append(fill(body[at:], rest))
     return "".join(out)
 

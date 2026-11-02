@@ -1,7 +1,6 @@
 """v4.0.0 release review, 2026-11-02: what the guard counted as a save change or a delete. Each row was allowed at
 bc246b8 (reproduced through engine.evaluate_shell), and each control pins the ordinary command that must stay allowed.
 Commands are only judged here, never run."""
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -18,8 +17,8 @@ EXT, CO = ".ess", ".skse"
 
 
 @pytest.fixture(scope="module")
-def box():
-    base = Path(tempfile.mkdtemp(prefix="sggap")).resolve()
+def box(tmp_path_factory):
+    base = tmp_path_factory.mktemp("gaps").resolve()
     inst, sv = base / "Game", base / "My Games" / "Skyrim VR" / "Saves"
     for d in (inst / "Data", inst / "tools", sv, base / "bk", base / "other"):
         d.mkdir(parents=True)
@@ -40,7 +39,6 @@ def box():
                       cwd=cwd or inst.as_posix(), session_id="s", tool_name="Bash")
         return engine.evaluate_shell(req, roots, audit.Audit(inst.as_posix()))
     yield judge
-    shutil.rmtree(base, ignore_errors=True)
 
 
 def _pairs(v):
@@ -176,8 +174,11 @@ def test_shift_moves_the_arguments_for_the_text_after_it_only():
     from skyguard.shellparse import _call_body
     assert _call_body('echo "$1"; shift; echo "$1"', ("a", "b"), (False, False)) == 'echo "a"; shift; echo "b"'
     assert _call_body('shift 2; echo "$1"', ("a", "b", "c"), (False,) * 3) == 'shift 2; echo "c"'
-    assert _call_body('[ -n x ] && shift; echo "$1"', ("a", "b"), (False,) * 2) == '[ -n x ] && shift; echo "$1"'
-    assert _call_body('set -- z; echo "$1"', ("a",), (False,)) == 'set -- z; echo "$1"'
+    from skyguard.shellparse import ParseError
+    for body in ('[ -n x ] && shift; echo "$1"', 'set -- z; echo "$1"', 'shift $2; echo "$1"', '( shift ); echo "$1"',
+                 'true | shift; echo "$1"'):
+        with pytest.raises(ParseError):
+            _call_body(body, ("a", "b"), (False,) * 2)
 
 
 def test_a_quoted_brace_stays_one_word():
@@ -219,3 +220,53 @@ def test_a_folder_below_saves_counts_and_a_parent_called_saves_does_not(tmp_path
     assert writes.is_save_folder((cfg / "Saves" / "Sub").as_posix(), roots)
     assert not writes.is_save_folder((cfg / "Saves.old").as_posix(), roots)
     assert not writes.is_save_folder(cfg.as_posix(), roots)
+
+
+# ---- review round 2: spellings the first fixes lost or missed
+@pytest.mark.parametrize("cmd", [
+    "f() { [ -n \"$2\" ] && shift; rm -rf \"$1\"; }; f Data",
+    "f() { if [ -n \"$2\" ]; then shift; fi; rm -rf \"$1\"; }; f Data",
+    "f() { set -- \"$@\"; rm -rf \"$1\"; }; f Data",
+    "f() { echo shift; rm -rf \"$1\"; }; f Data",
+    "f() { echo shift; rm -rf \"$@\"; }; f Data",
+    "f() { shift $2; rm -rf \"$1\"; }; f x Data",
+    "f() { ( shift ); rm -rf \"$1\"; }; f Data",
+    "f() { true | shift; rm -rf \"$1\"; }; f Data",
+], ids=["and-shift", "if-shift", "set-args", "echo-shift", "echo-shift-all", "shift-var", "subshell", "pipe"])
+def test_round_two_function_forms_stay_refused_in_the_install(box, cmd):
+    assert box(cmd).decision == "deny"           # the fixture's default cwd is the install
+
+
+def test_a_brace_list_past_the_cap_keeps_its_last_member(box):
+    cmd = "rm -rf {" + ",".join("a%02d" % i for i in range(65)) + ",$B/Game/Data}"
+    assert box(cmd, cwd=Path(tempfile.gettempdir()).as_posix()).decision == "deny"
+
+
+@pytest.mark.parametrize("cmd", [
+    "$d='$B/other/x.txt'; Set-Content $d,$B/Game/Data/Skyrim.esm x",
+    "$d='$B/other/x.txt'; Move-Item $d,$B/Game/Data/Skyrim.esm $B/bk",
+], ids=["set-content", "move-item"])
+def test_a_comma_list_keeps_its_group_through_a_variable(box, cmd):
+    assert box(cmd, "powershell").decision == "deny"
+
+
+def test_three_saves_through_a_variable_are_counted(box):
+    v = box("$d='$B/My Games/Skyrim VR/Saves/a$E'; Move-Item $d,$S/b$E,$S/c$E $B/bk", "powershell")
+    assert v.decision == "deny" and codes.classify(v).code == "shell.S-SAVE-APPROVAL", v
+
+
+@pytest.mark.parametrize("cmd,shell", [
+    ("xcopy $B/bk $S /E", "powershell"),
+    ("xcopy $B/bk/* $S", "bash"),
+    ("tar -f $B/x.tar -C $S -x", "bash"),
+    ("tar -C $S --verbose --no-same-owner --extract -f $B/x", "bash"),
+    ("rsync -a $B/bk/ $S/ --exclude x", "bash"),
+], ids=lambda x: x[:30])
+def test_round_two_bulk_spellings_need_the_typed_approval(box, cmd, shell):
+    v = box(cmd, shell)
+    assert v.decision == "deny" and codes.classify(v).code == "shell.S-SAVE-APPROVAL", v
+
+
+def test_a_linear_shift_is_still_read_precisely():
+    from skyguard.shellparse import _call_body
+    assert _call_body('echo shift; echo "$1"', ("a",), (False,)) == 'echo shift; echo "a"'

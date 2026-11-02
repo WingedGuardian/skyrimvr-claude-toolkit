@@ -164,8 +164,8 @@ more than half its bytes. Run it by hand any time: `bash tools/kb-guard.sh --ver
   oldest-first rotation would walk the good copy off the end — a store that destroys
   what it exists to protect while still looking like a store.
 - **Rotation goes to the Recycle Bin.** Past `KB_GUARD_KEEP` (default 30) the oldest unprotected
-  snapshots are sent there through `tools/housekeep.py recycle`, after one printed line that
-  warns Windows may ask before deleting an item too big for the bin (answer No to keep it).
+  snapshots are sent there through `tools/housekeep.py recycle`, after one printed line. An item
+  too big for the bin stays in the store.
   Whatever the bin does not take -- no Python, no bin on this platform, a refusal -- stays in
   the store, and the report says how many and why.
 - **Why a separate mechanism at all**, when `backup-before-edit.sh` already exists:

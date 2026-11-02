@@ -103,7 +103,7 @@ def announcement(cfg, now=None) -> str:
         return ("HOUSEKEEP: housekeep's code changed since you approved it, so today's run only PLANS (nothing is "
                 "removed or archived). When it finishes, review {} and approve it.".format(f(cfg, "REVIEW")))
     return ("HOUSEKEEP: today's cleanup (toolkit housekeep, approved version {}) starts now in the background -- low "
-            "priority, no windows, at most {} min. It archives finished work to {} and recycles build leftovers; "
+            "priority, no windows, at most {} min. It archives finished work to {} and applies your approved plan; "
             "nothing in use, no saves. Summary at the next session start; log: {}.".format(
                 cfg["approved_sha256"][:8], cfg["daily_minutes"], cfg["archive_root"], f(cfg, "LOG")))
 

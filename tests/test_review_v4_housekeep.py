@@ -11,6 +11,7 @@ from conftest import REPO  # noqa: F401
 from test_housekeep import hk
 
 OLD = time.time() - 40 * 86400
+TES4 = b"TES4" + b"\0" * 20                  # a minimal plugin header: no subrecords, no masters
 
 
 def put(path, data=b"x" * 100):
@@ -164,19 +165,71 @@ def test_a_recycle_timeout_is_a_reported_failure_not_a_crash(root):
     assert (root / "out/task/payload.bin").exists()
 
 
-def test_the_temp_producers_declare_their_own_workspaces(tmp_path):
-    """Finding F3: nothing outside the tests wrote the declaration, so the sweep never recycled anything real."""
-    import ast
-    for rel, needle in (("tools/mod-install.py", "_declare_disposable(stage)"),
-                        ("tools/housecarl_integration/gateway.py", "mark_disposable_temp(work")):
-        text = (REPO / rel).read_text(encoding="utf-8")
-        assert needle in text, rel
-        names = {a.name for n in ast.walk(ast.parse(text)) if isinstance(n, ast.Import) for a in n.names}
-        assert "sys" in names, rel + " would swallow a NameError in its best-effort declaration"
+def test_house_carl_declares_its_workspace_to_the_sweep(tmp_path, monkeypatch):
+    """Finding F3, through the real call (a text search for the call let a disabled one pass, review round 2)."""
+    from types import SimpleNamespace
+    seen = []
+
+    def run(cmd, master):
+        seen.append(hk.certainty.disposable_temp(Path(cmd[2]), tmp_path))
+        return SimpleNamespace(stdout="", stderr="", returncode=1)
+    gw, go = _check(tmp_path, monkeypatch, run=run)
+    with pytest.raises(gw.Refusal):
+        go()
+    assert seen == [True]
+
+
+def test_mod_install_declares_its_workspace_to_the_sweep(tmp_path, monkeypatch):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("mod_install_for_sweep", REPO / "tools" / "mod-install.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
     work = tmp_path / "modinst_x"
     work.mkdir()
-    hk.certainty.mark_disposable_temp(work, tmp_path)
-    assert hk.certainty.disposable_temp(work, tmp_path)
+    mod._declare_disposable(work)
+    assert hk.certainty.disposable_temp(work, mod.HERE.parent)
+    text = (REPO / "tools" / "mod-install.py").read_text(encoding="utf-8")
+    assert 'stage = Path(tempfile.mkdtemp(prefix="modinst_"))' in text and "    _declare_disposable(stage)\n" in text
+
+
+def _plugin(path, *masters):
+    body = b"".join(b"MAST" + (len(m) + 1).to_bytes(2, "little") + m.encode() + b"\0" for m in masters)
+    path.write_bytes(b"TES4" + len(body).to_bytes(4, "little") + b"\0" * 16 + body)
+    return path
+
+
+def test_house_carl_links_only_the_masters_it_needs(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import importlib
+    import sys
+    sys.path.insert(0, str(REPO / "tools"))
+    gw = importlib.import_module("housecarl_integration.gateway")
+    active = {"Skyrim.esm": _plugin(tmp_path / "Skyrim.esm"), "Base.esp": _plugin(tmp_path / "Base.esp", "Skyrim.esm"),
+              "Unrelated.esp": _plugin(tmp_path / "Unrelated.esp", "Skyrim.esm")}
+    got = gw._masters_of(_plugin(tmp_path / "cand.esp", "Base.esp"), active)
+    assert set(got) == {"Skyrim.esm", "Base.esp"}
+
+
+def test_house_carl_refuses_a_read_only_master_before_linking_it(tmp_path, monkeypatch):
+    gw, go = _check(tmp_path, monkeypatch, link=lambda a, b: pytest.fail("linked a read-only master"))
+    master = tmp_path / "Skyrim.esm"
+    os.chmod(master, 0o444)
+    try:
+        with pytest.raises(gw.Refusal, match="read-only"):
+            go()
+    finally:
+        os.chmod(master, 0o666)
+
+
+def test_house_carl_refuses_masters_on_two_drives():
+    import importlib
+    import sys
+    sys.path.insert(0, str(REPO / "tools"))
+    gw = importlib.import_module("housecarl_integration.gateway")
+    from pathlib import PureWindowsPath
+    fake = {"A.esm": PureWindowsPath("C:/a/A.esm"), "B.esm": PureWindowsPath("D:/b/B.esm")}
+    with pytest.raises(gw.Refusal, match="one drive"):
+        gw._scratch_parent({"root": "C:/x"}, fake)
 
 
 @pytest.mark.parametrize("fail", ["refused", "timeout"])
@@ -191,9 +244,9 @@ def test_house_carl_leaves_no_linked_view_when_its_check_fails(tmp_path, monkeyp
     temp.mkdir()
     monkeypatch.setattr(gw.tempfile, "tempdir", str(temp))
     master = tmp_path / "Skyrim.esm"
-    master.write_bytes(b"m")
+    master.write_bytes(TES4)
     candidate = tmp_path / "cand.esp"
-    candidate.write_bytes(b"c")
+    candidate.write_bytes(TES4)
     seen = []
 
     def run(cmd, **kw):
@@ -206,7 +259,7 @@ def test_house_carl_leaves_no_linked_view_when_its_check_fails(tmp_path, monkeyp
         gw.independent_check({"root": str(tmp_path)}, candidate, SimpleNamespace(paths={"Skyrim.esm": master}))
     assert "Skyrim.esm" in seen, "the verifier saw the view"
     assert not list(temp.glob("hc-xedit-*/Data")), "a view of the real plugin outlived the check"
-    assert master.read_bytes() == b"m"
+    assert master.read_bytes() == TES4
 
 
 def _check(tmp_path, monkeypatch, run=None, link=None):
@@ -219,9 +272,9 @@ def _check(tmp_path, monkeypatch, run=None, link=None):
     temp.mkdir()
     monkeypatch.setattr(gw.tempfile, "tempdir", str(temp))
     master = tmp_path / "Skyrim.esm"
-    master.write_bytes(b"m")
+    master.write_bytes(TES4)
     candidate = tmp_path / "cand.esp"
-    candidate.write_bytes(b"c")
+    candidate.write_bytes(TES4)
     if run:
         monkeypatch.setattr(gw.subprocess, "run", lambda cmd, **kw: run(cmd, master))
     if link:

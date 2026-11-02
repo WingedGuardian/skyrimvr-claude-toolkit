@@ -104,6 +104,7 @@ class Snapshot:
 BASE_KEYS = ("sResourceArchiveList", "sResourceArchiveList2")
 VR_KEY, VR_FALLBACK = "sVrResourceArchiveList", "Skyrim_VR - Main.bsa"  # Wrye Bash skyrimvr Ini.engine_overrides
 MAIN_INI = {"SE": "Skyrim.ini", "VR": "SkyrimVR.ini"}
+MAIN_INI["AE"] = MAIN_INI["SE"]         # the CLI offers AE, which reads the same INIs as SE
 USER_INIS = ("Skyrim.ini", "SkyrimVR.ini", "SkyrimPrefs.ini")
 
 

@@ -45,9 +45,9 @@ offline tools (xelib, Spriggit, ReSaver, PyNifly).
 mouse, keyboard or window focus, and choosing this desktop does not authorise desktop input:
 control the game through DevBench only. `run` owns the whole session: it points the game at
 SteamVR's null driver (OpenComposite's `openvr_api.dll` swapped for SteamVR's; `--park` also sets
-OpenComposite's SKSE plugins aside), starts SteamVR and the game, returns control once DevBench
-answers for the owned game at the main menu, waits for the game to exit, and attempts restoration
-in `finally`. An ownership or placement refusal keeps headless files and session evidence for inspection;
+OpenComposite's SKSE plugins aside), starts SteamVR and the game, waits until DevBench answers for the
+owned game at the main menu, then BLOCKS until the game exits and attempts restoration in `finally`.
+Detach it so you can keep working. An ownership or placement refusal keeps headless files and session evidence for inspection;
 observed SteamVR also blocks restoration until the user closes it. `background` needs the user's Steam client already open (it stays
 theirs); Steam is never owned or closed. End a session early with `bash tools/vr-headless.sh stop`
 (from another shell): it quits only the owned game, and only when DevBench shows it running and

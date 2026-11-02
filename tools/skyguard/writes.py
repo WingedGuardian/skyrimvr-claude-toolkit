@@ -529,7 +529,7 @@ def copy_targets(e) -> List[Tuple[str, Tuple[str, ...]]]:
         dst = ps_param(e, "destination", 1)
         # B-I1 (final review): `Get-Item X | Copy-Item -Destination D` still writes D; its source arrives on the pipe.
         return [(dst[0] if dst else ".", src)] if src or e.stdin_from == "pipe" else []
-    if p in CMD_COPY_PROGRAMS and e.dialect == "cmd":
+    if p in CMD_COPY_PROGRAMS and (e.dialect == "cmd" or p == "xcopy"):     # xcopy is a program in every shell
         words = [w for w in argv if not _CMD_SWITCH.fullmatch(w)]
         if not words:
             return []
@@ -718,8 +718,8 @@ def bulk_destinations(e) -> List[str]:
     """Folders this exec fills with files it does not name: an archive extraction, or a tree copy (release review
     2026-11-02: `tar -xf x -C Saves`, `rsync -a bk/ Saves/` and `robocopy bk Saves` changed saves with no save plan)."""
     p, argv = e.program, e.argv
-    if p == "tar" and any(w == "--extract" or w == "--get" or re.fullmatch(r"-?[a-zA-Z]*x[a-zA-Z]*", w)
-                          for w in argv[:3]):
+    if p == "tar" and (any(w in ("--extract", "--get") or re.fullmatch(r"-[a-zA-Z]*x[a-zA-Z]*", w) for w in argv)
+                       or re.fullmatch(r"[a-zA-Z]*x[a-zA-Z]*", argv[0] if argv else "")):
         return (_opt_values(argv, ("--directory",), ("-C",)) or ["."])[:1]
     if p == "unzip":
         return (_opt_values(argv, (), ("-d",)) or ["."])[:1]
@@ -729,7 +729,9 @@ def bulk_destinations(e) -> List[str]:
     if p == "expand-archive":
         return (list(ps_param(e, "destinationpath", 1)) or ["."])[:1]
     if p in ("rsync", "scp"):
-        return _plain_operands(argv)[-1:]
+        return _plain_operands_valued(argv, ("--exclude", "--include", "--filter", "-f", "-e", "--rsh", "--files-from",
+                                             "--exclude-from", "--include-from", "--link-dest", "--compare-dest",
+                                             "-P", "-i", "-o", "-F", "-l"))[-1:]
     if p == "robocopy":
         pos = robocopy_positionals(argv)
         return [pos[1]] if len(pos) == 2 else []
