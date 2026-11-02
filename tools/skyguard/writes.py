@@ -693,8 +693,15 @@ def is_save(abs_path: Optional[str], roots) -> bool:
 
 def is_save_folder(abs_path: Optional[str], roots) -> bool:
     """A Saves folder in the settings area: a bulk copy into it can replace any save there."""
-    return bool(abs_path) and targets.zone(abs_path, roots) == "config" and \
-        "saves" in abs_path.rstrip("/").lower().split("/")       # sLocalSavePath can name a folder below Saves
+    if not abs_path or targets.zone(abs_path, roots) != "config":
+        return False
+    # Below the settings folder only (sLocalSavePath can name a folder below Saves): a parent folder of the settings
+    # folder that happens to be called Saves says nothing.
+    below = _rel(abs_path, roots.config_dirs)
+    if below is None:
+        m = re.search(r"/my games/skyrim[^/]*/(.*)$", abs_path.rstrip("/").lower())
+        below = m.group(1).split("/") if m else []
+    return "saves" in below
 
 
 def _may_bring_saves(source: str) -> bool:

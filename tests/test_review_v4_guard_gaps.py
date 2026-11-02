@@ -204,3 +204,18 @@ def test_setup_records_the_documents_folder():
     text = (REPO / "setup.sh").read_text(encoding="utf-8")
     assert "printf 'SKYRIM_DOCUMENTS_DIR=%s" in text
     assert 'DOCUMENTS_GAME_DIR="$CONFIG_DIR"' in text
+
+
+def test_a_folder_below_saves_counts_and_a_parent_called_saves_does_not(tmp_path):
+    from skyguard import writes
+    base = tmp_path / "Saves" / "x"
+    inst, cfg = base / "Game", base / "My Games" / "Skyrim VR"
+    (cfg / "Saves" / "Sub").mkdir(parents=True)
+    inst.mkdir()
+    (inst / "skyrim-paths.env").write_text(
+        "SKYRIM_GAME_ROOT='{}'\nSKYRIM_CONFIG_DIR='{}'\n".format(inst.as_posix(), cfg.as_posix()), encoding="utf-8")
+    roots = paths.roots(inst.as_posix(), inst.as_posix(), paths.read_install(inst.as_posix(), {}))
+    assert writes.is_save_folder((cfg / "Saves").as_posix(), roots)
+    assert writes.is_save_folder((cfg / "Saves" / "Sub").as_posix(), roots)
+    assert not writes.is_save_folder((cfg / "Saves.old").as_posix(), roots)
+    assert not writes.is_save_folder(cfg.as_posix(), roots)

@@ -135,7 +135,7 @@ def export_base(rev: str, dest: Path) -> Path:
     names = listed.stdout.decode("utf-8").splitlines()
     if listed.returncode or "skyguard" not in names:
         raise SystemExit(f"cannot find skyguard in {rev}:tools")
-    r = subprocess.run(["git", "-C", str(REPO), "archive", "--format=tar", f"{rev}:tools", *names],
+    r = subprocess.run(["git", "-c", "core.autocrlf=false", "-C", str(REPO), "archive", "--format=tar", f"{rev}:tools", *names],
                        capture_output=True)
     if r.returncode != 0:
         raise SystemExit(f"git archive {rev}:tools failed: {r.stderr.decode(errors='replace')[:300]}")
