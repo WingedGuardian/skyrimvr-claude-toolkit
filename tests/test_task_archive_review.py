@@ -223,6 +223,7 @@ def test_published_archive_is_bound_to_the_verified_bytes(tmp_path,monkeypatch):
         return mutate
     monkeypatch.setattr(ha.os,'rename',replace_after_publish(ha.os.rename))
     monkeypatch.setattr(ha.os,'replace',replace_after_publish(ha.os.replace))
+    monkeypatch.setattr(ha.os,'link',replace_after_publish(ha.os.link))
     with pytest.raises(ha.ArchiveError):
         ha.archive_folder(src,nas,lambda paths:pytest.fail('unverified published bytes reached recycler'))
     assert (src/'unique.bin').read_bytes()==b'only local copy'

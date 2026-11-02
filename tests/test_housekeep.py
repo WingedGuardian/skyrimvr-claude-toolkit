@@ -473,6 +473,29 @@ def test_a_file_hard_linked_from_outside_is_never_linked_or_made_read_only(tree,
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(before)
 
 
+def test_a_file_gaining_a_name_during_the_plan_is_not_queued_for_linking(tree, monkeypatch):
+    """queue_duplicate()'s own link count, alone: the walk's earlier check already saw one name, then a mod manager
+    linked the file while the plan was still inspecting it. The other two copies still dedupe."""
+    a = write(tree / "_CLAUDE_OUTPUT" / "a" / "x.log", blob("dup"))
+    b = write(tree / "_CLAUDE_OUTPUT" / "b" / "x.log", blob("dup"))
+    c = write(tree / "_CLAUDE_OUTPUT" / "c" / "x.log", blob("dup"))
+    outside = tree / "Mods" / "deployed.log"
+    outside.parent.mkdir()
+    original = hk.derived_source
+
+    def link_mid_plan(f, task):
+        if os.path.samefile(f, b) and not outside.exists():
+            os.link(b, outside)
+        return original(f, task)
+
+    monkeypatch.setattr(hk, "derived_source", link_mid_plan)
+    links = [x for x in hk.plan(cfg_for(tree))["actions"] if x["class"] == "link"]
+    assert outside.exists() and len(links) == 1, links
+    named = {links[0]["path"], links[0]["canonical"]}
+    assert not any(os.path.samefile(n, b) for n in named), "a file with an outside name was planned for linking"
+    assert all(any(os.path.samefile(n, k) for k in (a, c)) for n in named)
+
+
 def test_a_hard_link_made_after_the_plan_is_refused_before_any_chmod(tree):
     a = write(tree / "_CLAUDE_OUTPUT" / "a" / "x.log", blob("dup"))
     write(tree / "_CLAUDE_OUTPUT" / "b" / "x.log", blob("dup"))
@@ -982,6 +1005,9 @@ def _only(monkeypatch, trigger, tmp_path):
     if trigger:
         monkeypatch.setenv(trigger, "off" if trigger == "SKYGUARD_HOUSEKEEP_SWEEP" else str(tmp_path))
     monkeypatch.setattr(hk, "has_recycle_bin", lambda: True)
+    # These tests are about the harness refusal, not the bin's capacity: bin_refusal() reads this machine's
+    # registry and refuses without its key (every CI runner), which would stop short of the stubbed shell.
+    monkeypatch.setattr(hk, "bin_refusal", lambda p: "")
 
     def no_shell(*a, **k):
         raise AssertionError("the Recycle Bin shell call ran")

@@ -10424,7 +10424,7 @@ _HKS = "tools/housekeep.py"
 _HKS_T = "tests/test_housekeep.py::"
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_HKS, "        if f.stat().st_nlink != 1:\n", "        if False:\n",
-     _HKS_T + "test_a_file_hard_linked_from_outside_is_never_linked_or_made_read_only[duplicate]",
+     _HKS_T + "test_a_file_gaining_a_name_during_the_plan_is_not_queued_for_linking",
      "sweep-hk-plan-ignores-link-count"),
     (_HKS, "        if p.stat().st_nlink != 1 or c.stat()", "        if False or c.stat()",
      _HKS_T + "test_check_refuses_a_link_whose_files_gained_a_name_after_the_plan[duplicate]",

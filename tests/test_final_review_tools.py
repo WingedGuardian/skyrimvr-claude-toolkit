@@ -132,7 +132,8 @@ def test_derived_apply_oserror_is_a_refused_line(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(hk, "derived_source", denied)
     recycled = []
     assert hk.apply(doc, cfg, recycler=lambda p: recycled.extend(p) or {}) == 1
-    assert "REFUSED" in capsys.readouterr().out and recycled == []
+    out = capsys.readouterr().out
+    assert "REFUSED" in out and "trace source inspection unavailable" in out and recycled == []
 
 
 def test_config_refuses_live_staging_root_before_any_scan(tmp_path):
