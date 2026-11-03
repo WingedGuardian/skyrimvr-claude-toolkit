@@ -292,6 +292,8 @@ def test_literal_python_spellings_of_one_save_change_are_backed_up(box, code):
     "from shutil import copy; copy('{B}/x', '{B}/Game/Data/X.esp')",
     "import shutil; shutil.copy(src='{B}/x', dst='{B}/Game/Data/X.esp')",
     "from pathlib import Path as P; P('{B}/Game/Data/X.esp').write_bytes(b'')",
-], ids=["from-import", "keywords", "path-alias"])
+    "import pathlib as pl; pl.Path('{B}/Game/Data/X.esp').write_bytes(b'')",
+    "from pathlib import *; Path('{B}/Game/Data/X.esp').write_bytes(b'')",
+], ids=["from-import", "keywords", "path-alias", "module-alias", "star-import"])
 def test_literal_python_spellings_of_a_plugin_write_are_seen(box, code):
     assert box('python -c "{}"'.format(code.format(B="$B"))).decision == "deny"

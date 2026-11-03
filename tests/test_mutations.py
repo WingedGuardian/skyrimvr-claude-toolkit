@@ -9867,12 +9867,10 @@ MUTATIONS += [pytest.param(path, before, after, "tests/test_save_physical_paths.
      'test_drive_relative_file_operand_uses_known_same_drive_cwd', 'drive-relative-file'),
     ("tools/skyguard/writes.py", '    if python_literals:', '    if False:',
      'test_raw_namespace_preserves_requested_pair_not_folded_peer[python-escaped-.]', 'python-literal-dispatch'),
-    ("tools/skyguard/writes.py", 'func.id == "Path" or (', 'func.id == "NoPath" or (',
-     'test_raw_namespace_preserves_requested_pair_not_folded_peer[python-path-.]', 'python-direct-path'),
     ("tools/skyguard/writes.py", '        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None',
      '        return repr(node.value) if isinstance(node, ast.Constant) and isinstance(node.value, str) else None',
      'test_raw_namespace_preserves_requested_pair_not_folded_peer[python-escaped-.]', 'python-decoded-value'),
-    ("tools/skyguard/writes.py", '            return str(Path(*parts))', '            return parts[0]',
+    ("tools/skyguard/writes.py", ' else str(Path(*parts))', ' else parts[0]',
      'test_python_path_absolute_later_argument_selects_the_actual_save', 'python-complete-path'),
     # Classification and I/O have separate resolvers. Restoring expansion only in
     # the classifier is masked by the correct I/O identity; revert that I/O flag.
@@ -10719,6 +10717,31 @@ MUTATIONS += [pytest.param(src, a, b, test, id=name) for name, src, a, b, test i
      '    if real_profile:\n',
      'tests/test_skyrim_paths_documents.py::test_without_a_record_a_test_profile_stays_isolated'),
 ]]
+# CI run 41560815549: round 3 added an alias-aware copy of the "is this pathlib's Path" check beside the original, each hid
+# the other, and three twins survived. One check now, one twin per spelling it reads. The gate also runs these from now on.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("tools/skyguard/writes.py", '(func.id == "Path" or names.get', '(func.id == "NoPath" or names.get',
+     "tests/test_review_v4_guard_gaps.py::test_literal_python_spellings_of_a_plugin_write_are_seen[star-import]",
+     "python-path-bare-under-star-import"),
+    ("tools/skyguard/writes.py", 'names.get(func.id) == "pathlib.Path")', 'names.get(func.id) == "no.Path")',
+     "tests/test_review_v4_guard_gaps.py::test_literal_python_spellings_of_a_plugin_write_are_seen[path-alias]",
+     "python-path-from-import-alias"),
+    ("tools/skyguard/writes.py", 'modules.get(func.value.id, func.value.id) == "pathlib")', 'func.value.id == "pathlib")',
+     "tests/test_review_v4_guard_gaps.py::test_literal_python_spellings_of_a_plugin_write_are_seen[module-alias]",
+     "python-path-module-alias"),
+    ("scripts/prepush-gate.py", '    files = {p for p in changed if p != "tests/test_mutations.py"}', '    files = set()',
+     "tests/test_prepush_gate.py::test_a_changed_guard_file_selects_its_twins", "gate-selects-twins-of-changed-files"),
+    ("tests/conftest.py", '        twins = [it for it in twins if twin_selected(it, files)]', '        pass',
+     "tests/test_prepush_gate.py::test_the_twin_filter_keeps_only_the_named_files", "conftest-twin-filter"),
+    ("tools/housecarl_integration/runtime.py", '    if config.get("upstream_version") != UPSTREAM_VERSION:', '    if False:',
+     "tests/test_housecarl.py::test_a_backend_set_up_for_another_version_is_named_not_reported_as_the_pin", "hc-stale-backend-named"),
+    ("tools/resaver-plus/build.py", '            ours = json.loads(marker.read_text(encoding="utf-8")).get("builder") == "tools/resaver-plus/build.py"',
+     '            ours = True',
+     "tests/test_resaver_plus_build.py::test_only_trees_this_builder_declared_are_removed", "rs-removes-only-its-own-trees"),
+    ("tools/housekeep.py", '    for parent in (temp, Path(cfg["root"]) / ".housecarl-tmp"):', '    for parent in (temp,):',
+     "tests/test_temp_hygiene.py::test_house_carls_scratch_beside_the_masters_is_swept_like_temp", "hk-sweeps-house-carl-scratch"),
+]]
+
 # Final sweep 2026-10-25 (X4 5e00b6e): housekeep never links or chmods a file that has a name it did not make -- a mod
 # manager's hard link into a live Data/ file shares the inode, and the read-only attribute with it. One twin per clause.
 _HKS = "tools/housekeep.py"

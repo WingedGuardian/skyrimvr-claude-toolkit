@@ -153,6 +153,47 @@ def tests_for(changed):
     return out
 
 
+def twin_selection(changed, added_lines="", aliases=None):
+    """The files whose mutation twins this push must run: what it changed, and every file a line added to the twin table
+    names, spelled out or through one of the table's aliases. CI run 41560815549 went red on three surviving twins of a file
+    this gate's other steps had passed in full: those tests pass on the pristine tree, so only running the twin shows it."""
+    files = {p for p in changed if p != "tests/test_mutations.py"}
+    files |= set(re.findall(r"(?:tools|scripts|agent|tests)/[\w./-]+\.\w+|setup\.sh", added_lines))
+    for alias, path in (aliases or {}).items():
+        if re.search(r"\b" + re.escape(alias) + r"\b", added_lines):
+            files.add(path)
+    return sorted(files)
+
+
+def twin_aliases():
+    text = (REPO / "tests" / "test_mutations.py").read_text(encoding="utf-8", errors="replace")
+    return dict(re.findall(r'^(_[A-Z][A-Z0-9_]*) = "([^"\n]+)"$', text, re.M))
+
+
+def twin_steps(py, base, changed, processes=4, per_process=150):
+    """At most processes x per_process twins, each process under the cap of the other groups: a big branch gets a spread
+    sample here and every twin on CI, not a push refused on time."""
+    added = ""
+    if "tests/test_mutations.py" in changed and base:
+        diff = _git("diff", "-U0", base + "...HEAD", "--", "tests/test_mutations.py")
+        added = "\n".join(l for l in diff.splitlines() if l.startswith("+"))
+    files = twin_selection(changed, added, twin_aliases())
+    env = dict(os.environ, SKYGUARD_MUTATION_FILES=",".join(files), SKYGUARD_MUTATION_LIMIT=str(processes * per_process))
+    node = "tests/test_mutations.py::test_guard_actually_bites"
+    listed = subprocess.run([py, "-B", "-m", "pytest", "-p", "no:cacheprovider", "--collect-only", "-q", node], cwd=REPO, env=env,
+                            capture_output=True, text=True, encoding="utf-8", errors="replace")
+    count = sum(1 for l in listed.stdout.splitlines() if l.startswith(node))
+    if listed.returncode not in (0, 5):
+        raise RuntimeError("could not list the twins of the changed files:\n" + (listed.stdout + listed.stderr)[-1500:])
+    if not count:
+        return []
+    n = min(processes, -(-count // 20))
+    print("   {} mutation twin(s) of the changed files, in {} process(es)".format(count, n), flush=True)
+    return [("mutation twins of changed files {}/{}".format(k + 1, n),
+             [py, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-v", "-rfE", node], 1200,
+             dict(env, SKYGUARD_MUTATION_SHARD="{}/{}".format(k + 1, n))) for k in range(n)]
+
+
 def rest_chunks(files, per_chunk=6, max_chunks=4):
     """Split the changed-file/sentinel test files into round-robin chunks: one per `per_chunk` files, at most
     `max_chunks`, each run as its own process under its own time cap. Every file lands in exactly one chunk."""
@@ -207,12 +248,12 @@ class Gate:
         """Run several steps at once, each to its own log with its own timeout; report each as step() would."""
         t = time.time()
         procs = []
-        for k, (name, cmd, timeout) in enumerate(steps):
+        for k, (name, cmd, timeout, *env) in enumerate(steps):
             print("== {} (parallel)".format(name), flush=True)
             log = REPO / ".pytest_cache" / "prepush-gate-{}.log".format(k)
             log.parent.mkdir(exist_ok=True)
             fh = open(log, "w", encoding="utf-8", errors="replace")
-            procs.append([name, subprocess.Popen(cmd, cwd=REPO, stdout=fh, stderr=subprocess.STDOUT), fh, log,
+            procs.append([name, subprocess.Popen(cmd, cwd=REPO, env=env[0] if env else None, stdout=fh, stderr=subprocess.STDOUT), fh, log,
                           time.time() + timeout, None])
         while any(p[5] is None for p in procs):
             for p in procs:
@@ -322,7 +363,7 @@ def main(argv=None) -> int:
     # (2026-11-01). The cap catches a hang; it must not refuse a merely large push.
     groups += [("sentinels and changed-file tests {}/{}".format(k + 1, len(chunks)), chunk, 1200)
                for chunks in [rest_chunks(rest)] for k, chunk in enumerate(chunks)]
-    g.parallel([(name + " ({} files)".format(len(fs)), verbose + fs, t) for name, fs, t in groups if fs])
+    g.parallel([(name + " ({} files)".format(len(fs)), verbose + fs, t) for name, fs, t in groups if fs] + twin_steps(py, base, changed))
     total = time.time() - g.t0
     if g.failed:
         print("prepush-gate: FAILED ({}) in {:.0f}s -- fix before pushing; CI would have gone red on it".format(

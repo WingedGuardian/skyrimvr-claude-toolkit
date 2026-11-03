@@ -53,7 +53,8 @@ hook-test harness passing a write as DATA to a function beside an opaque `bash "
 
 Literal Python open/Path/truncate writes are read as Python syntax, including escaped and raw strings;
 the Node literal-call and PowerShell method-call readers keep their own language rules.
-KNOWN LIMITS (recorded, not handled): interpreter code that computes its filename, and opaque
+KNOWN LIMITS (recorded, not handled): interpreter code that computes its filename (a Python name held in a variable, joined
+or formatted, or a Path built with an operator such as `Path(a) / "x"`, is not a literal), and opaque
 scripts that write a plugin get no message (R11: the Write-tool deny remains, and Plan 6's read-only lock is the
 backstop); a copy whose unresolved destination does not name a Data folder gets no note (`"$D/My.esp"`);
 `touch` is not a write primitive; a copy or move onto an ordinary (non-plugin, non-config) file in
@@ -434,19 +435,6 @@ def _python_write_targets(code: str) -> List[str]:
     def literal(node):
         return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
-    def path_argument(node):
-        if not isinstance(node, ast.Call) or not node.args:
-            return None
-        func = node.func
-        if isinstance(func, ast.Name) and func.id == "Path" or (
-                isinstance(func, ast.Attribute) and func.attr == "Path" and
-                isinstance(func.value, ast.Name) and func.value.id == "pathlib"):
-            parts = [literal(arg) for arg in node.args]
-            if node.keywords or any(part is None for part in parts):
-                return None
-            return str(Path(*parts))
-        return None
-
     def writing(call, index):
         mode = next((literal(k.value) for k in call.keywords if k.arg == "mode"),
                     literal(call.args[index]) if len(call.args) > index else "r")
@@ -460,14 +448,18 @@ def _python_write_targets(code: str) -> List[str]:
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             names.update({a.asname or a.name: node.module + "." + a.name for a in node.names})
 
-    def path_argument(node, _plain=path_argument):
-        if isinstance(node, ast.Call) and node.args and not node.keywords and (
-                isinstance(node.func, ast.Name) and names.get(node.func.id) == "pathlib.Path" or
-                isinstance(node.func, ast.Attribute) and node.func.attr == "Path" and
-                isinstance(node.func.value, ast.Name) and modules.get(node.func.value.id) == "pathlib"):
-            parts = [literal(arg) for arg in node.args]
-            return None if any(part is None for part in parts) else str(Path(*parts))
-        return _plain(node)
+    def path_argument(node):
+        if not isinstance(node, ast.Call) or not node.args or node.keywords:
+            return None
+        func = node.func
+        # A bare `Path` is read as pathlib's whatever its import: `from pathlib import *` names no name at all.
+        bare = isinstance(func, ast.Name) and (func.id == "Path" or names.get(func.id) == "pathlib.Path")
+        dotted = (isinstance(func, ast.Attribute) and func.attr == "Path" and
+                  isinstance(func.value, ast.Name) and modules.get(func.value.id, func.value.id) == "pathlib")
+        if not bare and not dotted:
+            return None
+        parts = [literal(arg) for arg in node.args]
+        return None if any(part is None for part in parts) else str(Path(*parts))
 
     out = []
     for node in nodes:

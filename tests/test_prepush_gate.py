@@ -4,6 +4,8 @@ scripts/prepush-gate.py never ships (test_release_build / test_release_payload p
 RUNS, because a gate that skips the test CI will fail on is the month of CI rounds it exists to end.
 """
 import importlib.util
+import os
+import subprocess
 import sys
 
 from conftest import REPO
@@ -81,3 +83,39 @@ def test_the_real_batch_that_turned_ci_red_is_now_selected():
                               "scripts/build_release_zip.py"]))
     assert {"tests/test_dependency_locks.py", "tests/test_pr_ci_policy.py", "tests/test_verify_release.py"} <= picked, picked
     assert "tests/test_mutations.py" not in picked
+
+
+def test_a_changed_guard_file_selects_its_twins():
+    """CI run 41560815549: three surviving twins of a file the gate had otherwise passed."""
+    gate = _gate()
+    assert gate.twin_selection(["tools/skyguard/writes.py"]) == ["tools/skyguard/writes.py"]
+    assert gate.twin_selection(["tests/test_mutations.py"]) == []                    # the table alone names nothing yet
+
+
+def test_lines_added_to_the_twin_table_select_the_files_they_name():
+    gate = _gate()
+    added = """+    ("tools/skyguard/saves.py", 'a', 'b', "tests/test_x.py::test_y", "id"),\n+    ("x", _WR, 'a', 'b'),\n"""
+    assert gate.twin_selection(["tests/test_mutations.py"], added, {"_WR": "tools/skyguard/writes.py", "_NO": "tools/no.py"}) == [
+        "tests/test_x.py", "tools/skyguard/saves.py", "tools/skyguard/writes.py"]
+
+
+def test_the_twin_table_aliases_are_read_from_the_table():
+    assert _gate().twin_aliases()["_WR"] == "tools/skyguard/writes.py"
+
+
+def _collected(**env):
+    node = "tests/test_mutations.py::test_guard_actually_bites"
+    full = {k: v for k, v in os.environ.items() if not k.startswith("SKYGUARD_MUTATION")}
+    r = subprocess.run([sys.executable, "-B", "-m", "pytest", "-p", "no:cacheprovider", "--collect-only", "-q", node], cwd=REPO,
+                       env={**full, **env}, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return [l for l in r.stdout.splitlines() if l.startswith(node)]
+
+
+def test_the_twin_filter_keeps_only_the_named_files():
+    from_table = _collected(SKYGUARD_MUTATION_FILES="tools/automod-cli.sh")
+    everything = _collected()
+    assert 0 < len(from_table) < len(everything) / 10
+    limited = _collected(SKYGUARD_MUTATION_FILES="tools/automod-cli.sh", SKYGUARD_MUTATION_LIMIT="5")
+    assert 0 < len(limited) <= 5 and set(limited) < set(from_table)
+    shards = [_collected(SKYGUARD_MUTATION_FILES="tools/automod-cli.sh", SKYGUARD_MUTATION_SHARD=s) for s in ("1/2", "2/2")]
+    assert sorted(shards[0] + shards[1]) == sorted(from_table) and shards[0] and shards[1]
