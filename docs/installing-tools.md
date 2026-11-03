@@ -2,7 +2,7 @@
 
 None of the modding tools are bundled — install only the ones you need. Per tool: what it is, how to acquire it, and a quick verify.
 
-**House Carl 2.0.5** is an optional record/query backend with a shared Claude/Codex gateway, Wrye-managed
+**House Carl 2.1.2** is an optional record/query backend with a shared Claude/Codex gateway, Wrye-managed
 or MO2-profile inputs, and verified staged plugin edits. Setup, pinned archive hash, prerequisites and
 capability limits: [House Carl integration](housecarl.md). Start with `python tools/housecarl.py --help`.
 
@@ -21,7 +21,7 @@ Install them into the `tools/` folder in your game directory; the setup prompt w
   - Acquire: download **v0.3.0** (`Caprica.v0.3.0.7z`, see [Pinned downloads](#pinned-downloads)), check its SHA-256, and unpack into `tools/Caprica/`.
   - Verify: `tools/Caprica/Caprica.exe --help`.
 - **Spriggit** — ESP ↔ YAML/JSON serialization.
-  - Acquire, **pinned to 0.41.0** (the version every serialize/deserialize command here was tested against; needs the **.NET 10 SDK**, the single .NET requirement of the core tools; the optional House Carl gateway needs its own, older .NET runtimes: see `docs/housecarl.md`): `dotnet tool restore` from the toolkit root (installs exactly the version in `.config/dotnet-tools.json`, also 0.41.0, as a local tool you run as `dotnet tool run spriggit`) or `dotnet tool install --global Spriggit.CLI --version 0.41.0`. Either works with everything here: `tools/spriggit-cli.sh`, the ESP guard `tools/esp-verify-wrapper.sh` and `tools/toolchain-check.sh` use a global `spriggit` when one is on PATH and fall back to the local tool otherwise. **Never install it unpinned**: you get whatever is newest, not what was tested. 0.41.0 ships only a `net10.0` tool, so on an SDK-9 machine it starts, prints a version, and cannot serialize. `bash tools/toolchain-check.sh` reports DEGRADED when the installed version differs from the pin (older or newer) or its target SDK is missing.
+  - Acquire, **pinned to 0.41.0** (the version every serialize/deserialize command here was tested against; needs the **.NET 10 SDK**, the toolkit's single .NET requirement: the optional House Carl gateway runs on the runtime that SDK includes): `dotnet tool restore` from the toolkit root (installs exactly the version in `.config/dotnet-tools.json`, also 0.41.0, as a local tool you run as `dotnet tool run spriggit`) or `dotnet tool install --global Spriggit.CLI --version 0.41.0`. Either works with everything here: `tools/spriggit-cli.sh`, the ESP guard `tools/esp-verify-wrapper.sh` and `tools/toolchain-check.sh` use a global `spriggit` when one is on PATH and fall back to the local tool otherwise. **Never install it unpinned**: you get whatever is newest, not what was tested. 0.41.0 ships only a `net10.0` tool, so on an SDK-9 machine it starts, prints a version, and cannot serialize. `bash tools/toolchain-check.sh` reports DEGRADED when the installed version differs from the pin (older or newer) or its target SDK is missing.
   - The first round trip of an ESP another tool wrote is **not byte-stable** (on 0.40 and 0.41 alike): deserializing unchanged YAML gives an ESP of the same size whose records can come out in a different order; after that the output is a fixed point. To prove a round trip lossless, re-serialize and compare the YAML.
   - Still pass the version `spriggit --version` prints as `--PackageVersion`, never a hardcoded one.
   - For deeply-nested output paths that trip `UnauthorizedAccessException`, call `tools/spriggit-cli.sh` (same args; it runs in a shallow workspace and copies the result back).
@@ -75,7 +75,7 @@ ignoring case). A different hash means a different file than the one tested — 
 
 | Tool | Version | File | SHA-256 | From |
 |---|---|---|---|---|
-| House Carl | 2.0.5 | `houseCARL-2.0.5.zip` | `c3d3ca7e124d92c65f7a1b935b4a598e8d69f2f1fe900224bab5d1b352f0df19` | <https://github.com/Avick3110/houseCARL/releases/download/v2.0.5/houseCARL-2.0.5.zip> |
+| House Carl | 2.1.2 | `houseCARL-2.1.2.zip` | `4e69494cc4cadd1e040a0762318d6e0ad0ac7082f68c413ffa96e8fbd879be96` | <https://github.com/Avick3110/houseCARL/releases/download/v2.1.2/houseCARL-2.1.2.zip> |
 | Champollion | v1.3.2 | `Champollion.v1.3.2.zip` | `ea53054276ac8006ccd3b323286bfbc6e34a454fa419d08da9bd440cbd31b383` | <https://github.com/Orvid/Champollion/releases/download/v1.3.2/Champollion.v1.3.2.zip> |
 | Caprica | v0.3.0 | `Caprica.v0.3.0.7z` | `0037e54cf3a1021e976278d9a637e8ae541aaf9ebeb8d274b6c2cfe32f4ee559` | <https://github.com/Orvid/Caprica/releases/download/v0.3.0/Caprica.v0.3.0.7z> |
 | PyNifly | 27.2.0 | `io_scene_nifly.zip` | `920a17c8c4001c4f2a12eff85aad8e54fd19ebcf7e828624733f1fb2bba972da` | <https://github.com/BadDogSkyrim/PyNifly/releases/download/V27.2.0/io_scene_nifly.zip> |

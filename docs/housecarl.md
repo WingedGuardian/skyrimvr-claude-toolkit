@@ -1,14 +1,14 @@
 # House Carl integration
 
 House Carl is an optional data-layer backend. The toolkit installs an unchanged, separately licensed
-2.0.5 server and places one gateway between it and either agent. Both CLI and MCP calls use the same
+2.1.2 server and places one gateway between it and either agent. Both CLI and MCP calls use the same
 publication policy. The gateway does not observe gameplay, sort or activate plugins, or touch saves.
 
 ## Install and verify
 
-Windows x64, Python 3.10 or newer, .NET Runtime 9 and ASP.NET Core Runtime 9 are required. Both .NET
-runtimes must already be installed; setup reports missing prerequisites without installing system
-software. Node and the toolkit's separately installed xeditlib are required for independently
+Windows x64, Python 3.10 or newer and .NET Runtime 10 are required. The .NET 10 SDK the core tools
+need includes that runtime. It must already be installed; setup reports a missing prerequisite without
+installing system software. Node and the toolkit's separately installed xeditlib are required for independently
 validating writes. Read `docs/installing-tools.md` for those tools.
 
 For Wrye Bash with deployed Data:
@@ -19,7 +19,7 @@ python tools/housecarl.py setup --edition VR --plugins-txt <absolute-plugins.txt
 
 `--data-dir` overrides the toolkit root's Data. `--archive <zip>` uses an already downloaded archive;
 otherwise setup downloads the exact pinned GitHub release. The SHA256 is
-`c3d3ca7e124d92c65f7a1b935b4a598e8d69f2f1fe900224bab5d1b352f0df19`.
+`4e69494cc4cadd1e040a0762318d6e0ad0ac7082f68c413ffa96e8fbd879be96`.
 It must match before extraction. Both package version and installed server-file hashes are checked.
 
 For an MO2 profile, pass `--mo2-instance <folder-containing-ModOrganizer.ini>` instead of the two
@@ -49,7 +49,7 @@ Upstream references remain in the separately installed package, accessible throu
 | Record queries, sources, fields, predicates, differences and walks | Upstream tool schema, with plugin-qualified FormKeys |
 | SkyPatcher inventory and replay | Static model, retaining unknown-operation and coverage notices |
 | Config references | `housecarl_skse findings="config"`; comments are included by upstream |
-| Asset/NIF inspection and BSA listing | Reads configured deployed content; archive coverage and ownership can be incomplete (see below) |
+| Asset/NIF inspection, BSA listing, a file's provider, links and walks | Reads configured deployed content; archive coverage and ownership can be incomplete (see below) |
 | Ordinary plugin authoring | New patches staged; existing files backed up and replaced only after validation |
 | Native pairing, VR runtime addresses and facegen provenance | Explicitly unavailable in this release |
 | Merging, compaction and external-reference remapping | Not exposed |
@@ -74,10 +74,10 @@ when one cannot be linked safely: it is read-only, the toolkit's file lock is on
 install with mods on another drive). The scratch folder follows the masters' drive; the verifier's report stays there
 after a failed check.
 
-Local qualification used Windows Python 3.10 and Skyrim VR: 684 enabled plugins, an independently
-matched Iron Sword winner, real MCP calls, and isolated create/apply/forward/copy/create-plugin/remove/restore
-with a manager hardlink stand-in. Creating a record inside an ESL-flagged plugin and owned-process cancellation
-also passed. This proves those fixtures, not every record type or mod's gameplay behavior.
+Local qualification of 2.1.2 used Windows Python 3.10 and Skyrim VR with 710 enabled plugins: every read tool, real MCP calls,
+new patches created and copied against that order, and apply, forward, create-plugin, remove and restore on a synthetic fixture
+with a manager hardlink stand-in, including a record created inside an ESL-flagged plugin. Earlier versions also passed
+owned-process cancellation; this version did not re-run it. This proves those cases, not every record type or mod's gameplay behavior.
 The current whole sequence still needs a fresh Wrye UI/export cross-check; a historical export is insufficient.
 Status supports a plugin-basename filter on this captured membership; alternate-profile and mod-folder
 lookups are unavailable through the gateway. Creation does not compile scripts or supply voice/SEQ assets;
@@ -107,7 +107,7 @@ response's `absence_conclusive` false. Treat an absent asset as inconclusive the
 
 The VR supplemental list is ranked with the base archives, so a BSA-versus-BSA winner involving it may
 differ from the engine; presence is unaffected. This is file discovery, not the runtime asset winner.
-Synthetic fixtures qualify this logic; no real install or backend run did. The public toolkit pins 2.0.5;
+Synthetic fixtures qualify this logic; no real install or backend run did. The public toolkit pins 2.1.2;
 the original report used 2.1.0.
 
 ## Existing-file publication and recovery
@@ -130,7 +130,9 @@ Existing edits affect the active deployed file only; redeployment may replace th
 under the integration's patches directory until the user installs and activates them. No save or
 activation changes are part of either operation.
 With MO2, the active file is its winning mod/overwrite supplier. No other copy is edited.
-Closure copy supports new patches only. Existing targets with pre-existing xEdit reference errors are
+Closure copy supports new patches only. A record whose winning version names a record another plugin injected into a master's
+ID range (a keyword numbered as Update.esm's that the file itself does not hold) is refused by the independent check: the patch
+would not list the plugin that supplies it. Copy a record without such references, or add what it needs by hand. Existing targets with pre-existing xEdit reference errors are
 currently refused; nested edits that change an unrequested containing record can also be refused.
 
 ```text

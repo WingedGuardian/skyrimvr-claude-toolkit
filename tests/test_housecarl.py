@@ -44,7 +44,7 @@ class _Source:
 def test_an_interrupted_download_never_leaves_a_file_at_the_archive_name(tmp_path, monkeypatch):
     """Review L5 F6: a partial zip at the final name blocked every later setup with a hash error."""
     from housecarl_integration import setup as hc_setup
-    archive = tmp_path / "houseCARL-2.0.5.zip"
+    archive = tmp_path / "houseCARL-2.1.2.zip"
     with pytest.raises(OSError):
         hc_setup.download_archive(archive, opener=lambda *a, **k: _Source(b"PK partial", OSError("connection reset")))
     assert list(tmp_path.iterdir()) == []
@@ -700,3 +700,14 @@ def test_a_root_ini_changed_during_a_read_rejects_the_answer(install, monkeypatc
     _fake_read_backend(monkeypatch, during=lambda: _ini(root / "Skyrim.ini", sResourceArchiveList="B.bsa"))
     with pytest.raises(Refusal, match="Inputs changed"):
         asyncio.run(gateway.Gateway(install).call("housecarl_asset_status", {"paths": ["a.nif"]}))
+
+
+def test_a_backend_set_up_for_another_version_is_named_not_reported_as_the_pin(tmp_path):
+    """A toolkit update moves the pin, not the installed backend: doctor would have named the new version over the old files."""
+    from housecarl_integration import UPSTREAM_VERSION, runtime
+    for recorded in ({}, {"upstream_version": "2.0.5"}):
+        with pytest.raises(Refusal, match="Rerun tools/housecarl.py setup"):
+            runtime.verify_installation({"server": str(tmp_path / "housecarl-mcp.exe"), "server_hashes": {}, **recorded})
+    with pytest.raises(Refusal, match="Incomplete installed-backend"):      # the current pin goes on to the next check
+        runtime.verify_installation({"server": str(tmp_path / "housecarl-mcp.exe"), "server_hashes": {},
+                                     "upstream_version": UPSTREAM_VERSION})

@@ -74,14 +74,14 @@ def test_the_codex_subfolder_case_is_stated_one_way():
     assert "it depends on the version" in _read("README.md")
 
 
-def test_dotnet_requirements_admit_the_house_carl_runtimes():
-    """Review L6 F8: ".NET 10 SDK, the toolkit's single .NET requirement" while tools/housecarl_integration/setup.py
-    requires Microsoft.NETCore.App 9 and Microsoft.AspNetCore.App 9."""
-    setup = _read("tools/housecarl_integration/setup.py")
-    assert '"Microsoft.NETCore.App 9."' in setup and '"Microsoft.AspNetCore.App 9."' in setup
-    tools = _read("docs/installing-tools.md")
-    assert "the toolkit's single .NET requirement" not in tools
-    assert "House Carl gateway needs its own, older .NET runtimes" in tools
+def test_dotnet_requirements_match_what_house_carl_setup_checks():
+    """Review L6 F8 said ".NET 10 only" while setup required .NET 9. House Carl 2.1.1 moved to .NET 10, so that sentence
+    is true now, and it stays true only while setup asks for the runtime that SDK includes and for nothing else."""
+    init = _read("tools/housecarl_integration/__init__.py")
+    assert 'BACKEND_RUNTIME = "Microsoft.NETCore.App 10."' in init
+    assert "AspNetCore" not in _read("tools/housecarl_integration/setup.py")
+    assert "the toolkit's single .NET requirement" in _read("docs/installing-tools.md")
+    assert ".NET Runtime 10" in _read("docs/housecarl.md") and "ASP.NET" not in _read("docs/housecarl.md")
 
 
 def _ticked(text: str):
