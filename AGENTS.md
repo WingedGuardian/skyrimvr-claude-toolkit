@@ -268,7 +268,7 @@ Coverage and gaps: `docs/guard-coverage.md`.
   `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), not `rm`/`Remove-Item`; only same-run scratch goes outright; too big
   for the bin -> ask. Say in chat first when a delete may need approval or raise an OS prompt. The guard
   judges these like any delete. Retention: `docs/RETENTION.md`.
-- **Resources:** own jobs share <=40% CPU/25% physical RAM, <=8 workers, low priority.
+- **Resources:** own jobs wait only past 90% CPU or under 3 GiB RAM left, <=8 workers, low priority.
   Physical RAM is primary; commit uses fixed 512/256/128 MiB buffers, never percentages.
   Games/user-directed work skip admission; games skip floors. See `docs/resource-policy.md`
   for admission, emergency/disk floors and probes.
