@@ -65,6 +65,7 @@ NOT A DELETE: a command that only MENTIONS one (grep, rg, Select-String, echo, g
 """
 from __future__ import annotations
 
+import functools
 import os
 import posixpath
 import re
@@ -441,6 +442,14 @@ _INTERP_DELETE_LIT = re.compile(
     r"""|\bunlink)\s*\(?\s*(['"])([^'"\n]{1,400})\1""")
 
 
+@functools.lru_cache(maxsize=4)
+def python_nodes(code: str):
+    """Every node of `code`, parsed once: one decision read the same source seven times, and a long one-liner reached
+    3.5 s of CPU against a 2 s ceiling on a CI runner (2026-11-02). Read-only for callers. Parse errors are not cached."""
+    import ast
+    return tuple(ast.walk(ast.parse(code)))
+
+
 def interpreter_delete_targets(code: str, python: bool) -> List[str]:
     """The literal names `code` deletes (see above); [] when Python code cannot be parsed (writes.scan refuses it)."""
     if not python:
@@ -449,7 +458,7 @@ def interpreter_delete_targets(code: str, python: bool) -> List[str]:
     if len(code) > 1024 * 1024:
         return []
     try:
-        tree = ast.parse(code)
+        nodes = python_nodes(code)
     except (SyntaxError, ValueError, RecursionError, MemoryError):
         return []
 
@@ -468,7 +477,7 @@ def interpreter_delete_targets(code: str, python: bool) -> List[str]:
         return None
 
     out = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         f = node.func

@@ -9887,7 +9887,7 @@ MUTATIONS += [pytest.param("tools/skyguard/writes.py", before, after,
     "tests/test_python_literal_writes.py::" + test, id="python-literal-" + name) for before, after, test, name in (
     ('    if len(code) > 1024 * 1024:', '    if False:',
      'test_oversized_python_analysis_refuses_instead_of_guessing_an_identity', 'analysis-bound'),
-    ('        tree = ast.parse(code)', '        tree = ast.parse("pass")',
+    ('        nodes = python_nodes(code)', '        nodes = python_nodes("pass")',
      'test_python_write_literals_decode_to_the_filename_value', 'syntax-reader'),
 )]
 

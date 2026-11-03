@@ -74,7 +74,7 @@ from pathlib import Path
 from typing import List, Mapping, NamedTuple, Optional, Tuple
 
 from . import paths, shellparse, targets
-from .deletes import _plain_operands, interpreter_code, robocopy_positionals, substituted
+from .deletes import _plain_operands, interpreter_code, python_nodes, robocopy_positionals, substituted
 from .grep import _compile
 from .shellparse import ps_param
 
@@ -424,7 +424,7 @@ def _python_write_targets(code: str) -> List[str]:
     if len(code) > 1024 * 1024:
         raise ValueError("Python literal write scope exceeds the analysis limit")
     try:
-        tree = ast.parse(code)
+        nodes = python_nodes(code)
     except SyntaxError:
         # The invoked Python can have a different syntax version from this guard.
         raise ValueError("Python literal write scope could not be parsed") from None
@@ -454,7 +454,7 @@ def _python_write_targets(code: str) -> List[str]:
 
     # What `import x as y` / `from x import y as z` call things (review round 3: `from shutil import move` was no one's).
     modules, names = {}, {}
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Import):
             modules.update({a.asname or a.name: a.name for a in node.names})
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
@@ -470,7 +470,7 @@ def _python_write_targets(code: str) -> List[str]:
         return _plain(node)
 
     out = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         func, name = node.func, ""
