@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -216,28 +217,43 @@ def _tree(d):
     return {str(p.relative_to(d)).replace("\\", "/"): p.read_bytes() for p in d.rglob("*") if p.is_file()}
 
 
+def _real_codex():
+    """The executable that takes a patch as one argument. npm's codex.CMD will not do: cmd.exe ends an argument at its first
+    newline, so every patch arrived cut short, Codex refused it, and every case below passed having changed nothing."""
+    found = shutil.which("codex")
+    if not found or not found.lower().endswith((".cmd", ".bat")):
+        return found
+    root = Path(found).parent / "node_modules" / "@openai"
+    native = [c for c in root.rglob("codex.exe") if "vendor" in c.parts]
+    native.sort(key=lambda c: any(part.startswith(".") for part in c.relative_to(root).parts))    # npm's staging folders last
+    return str(native[0]) if native else None
+
+
+CODEX = _real_codex() if os.environ.get("SKYGUARD_CODEX_DIFF") else None
+
+
 @pytest.mark.skipif(not os.environ.get("SKYGUARD_CODEX_DIFF"),
                     reason="differential test against the real Codex apply_patch: set SKYGUARD_CODEX_DIFF=1")
-@pytest.mark.skipif(shutil.which("codex") is None, reason="codex is not on PATH")
+@pytest.mark.skipif(CODEX is None, reason="no Codex that takes a patch as one argument")
 def test_the_real_codex_still_applies_a_plain_patch(tmp_path):
     """The control for the differential below: if a Codex dropped this option, nothing would change on disk, `touched`
     would be empty and every adversarial case would pass."""
     (tmp_path / "victim.esp").write_text("v\n")
     patch = "*** Begin Patch\n*** Update File: victim.esp\n@@\n-v\n+w\n*** End Patch"
-    subprocess.run([shutil.which("codex"), "--codex-run-as-apply-patch", patch], cwd=str(tmp_path),
+    subprocess.run([CODEX, "--codex-run-as-apply-patch", patch], cwd=str(tmp_path),
                    capture_output=True, text=True, timeout=60)
     assert (tmp_path / "victim.esp").read_text() == "w\n"
 
 
 @pytest.mark.skipif(not os.environ.get("SKYGUARD_CODEX_DIFF"),
                     reason="differential test against the real Codex apply_patch: set SKYGUARD_CODEX_DIFF=1")
-@pytest.mark.skipif(shutil.which("codex") is None, reason="codex is not on PATH")
+@pytest.mark.skipif(CODEX is None, reason="no Codex that takes a patch as one argument")
 @pytest.mark.parametrize("patch", _ADV)
 def test_every_file_codex_touches_is_in_the_parsers_output(patch, tmp_path):
     for f in ("victim.esp", "other.esp"):
         (tmp_path / f).write_text("v\n")
     before = _tree(tmp_path)
-    subprocess.run([shutil.which("codex"), "--codex-run-as-apply-patch", patch], cwd=str(tmp_path),
+    subprocess.run([CODEX, "--codex-run-as-apply-patch", patch], cwd=str(tmp_path),
                    capture_output=True, text=True, timeout=60)
     after = _tree(tmp_path)
     touched = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
