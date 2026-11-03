@@ -188,6 +188,11 @@ def twin_steps(py, base, changed, processes=4, per_process=50):
         raise RuntimeError("could not list the twins of the changed files:\n" + (listed.stdout + listed.stderr)[-1500:])
     if not count:
         return []
+    if count > processes * per_process:
+        # A tree older than the selector ignores these variables, and every process then runs the whole table: four
+        # identical copies stopped at 6% of 2,700 twins on master (2026-11-03). CI runs every twin on that tree.
+        print("   this tree has no twin selector ({} twins listed): twins are left to CI".format(count), flush=True)
+        return []
     n = min(processes, -(-count // 20))
     print("   {} mutation twin(s) of the changed files, in {} process(es)".format(count, n), flush=True)
     return [("mutation twins of changed files {}/{}".format(k + 1, n),

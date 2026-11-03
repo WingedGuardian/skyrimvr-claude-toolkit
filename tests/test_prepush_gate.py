@@ -76,6 +76,23 @@ def test_a_large_changed_file_set_is_split_into_parallel_chunks_not_refused():
     assert len(g.rest_chunks(files[:7])) == 2
 
 
+def test_a_tree_without_the_twin_selector_leaves_twins_to_ci(monkeypatch, capsys):
+    """A listing over the cap means the selector was ignored: running it would be four copies of the whole table."""
+    g = _gate()
+    node = "tests/test_mutations.py::test_guard_actually_bites"
+
+    def listing(count):
+        out = "\n".join("{}[t{}]".format(node, i) for i in range(count))
+        return lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=out, stderr="")
+    monkeypatch.setattr(g, "twin_selection", lambda *a: ["tools/x.py"])
+    monkeypatch.setattr(g, "twin_aliases", lambda: {})
+    monkeypatch.setattr(g.subprocess, "run", listing(201))
+    assert g.twin_steps("py", "", ["tools/x.py"]) == []
+    assert "left to CI" in capsys.readouterr().out
+    monkeypatch.setattr(g.subprocess, "run", listing(200))           # the cap itself still runs, shared out
+    assert len(g.twin_steps("py", "", ["tools/x.py"])) == 4
+
+
 def test_chunks_are_balanced_by_file_size_not_position(tmp_path, monkeypatch):
     g = _gate()
     monkeypatch.setattr(g, "REPO", tmp_path)

@@ -10731,6 +10731,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "python-path-module-alias"),
     ("scripts/prepush-gate.py", '    files = {p for p in changed if p != "tests/test_mutations.py"}', '    files = set()',
      "tests/test_prepush_gate.py::test_a_changed_guard_file_selects_its_twins", "gate-selects-twins-of-changed-files"),
+    ("scripts/prepush-gate.py", '    if count > processes * per_process:', '    if False:',
+     "tests/test_prepush_gate.py::test_a_tree_without_the_twin_selector_leaves_twins_to_ci", "gate-leaves-unselected-twins-to-ci"),
     ("tests/conftest.py", '        twins = [it for it in twins if twin_selected(it, files)]', '        pass',
      "tests/test_prepush_gate.py::test_the_twin_filter_keeps_only_the_named_files", "conftest-twin-filter"),
     ("tools/housecarl_integration/runtime.py", '    if config.get("upstream_version") != UPSTREAM_VERSION:', '    if False:',
