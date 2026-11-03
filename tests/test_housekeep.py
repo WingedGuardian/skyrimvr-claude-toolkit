@@ -1229,7 +1229,7 @@ def test_a_dir_the_bin_refuses_is_left_in_place_and_named(tmp_path):
     def picky(paths):
         out = {}
         for p in paths:
-            out.update({str(p): "too big for the Recycle Bin"} if "big" in str(p) else fake([p]))
+            out.update({str(p): "too big for the Recycle Bin"} if "big" in os.path.basename(str(p)) else fake([p]))
         return out
     res = hk.sweep_temp(sweep_cfg(), temp=temp, recycler=picky)
     assert refused.exists() and (refused / "sub" / "f.txt").read_text(encoding="utf-8") == "x"
