@@ -36,7 +36,7 @@ a later parse failure or token-budget overflow can produce S-SHELL-UNREAD even
 when the earlier ambiguity was inside a subshell or a later absolute `cd` settled
 the location. For example, `mkdir -p out && cd out; echo 'unterminated` refuses.
 
-`tests/test_guard_coverage.py` parses this file and the shipped `agent/targets/claude/settings.json` and fails
+In a development clone (`tests/` is not in the release zip), `tests/test_guard_coverage.py` parses this file and the shipped `agent/targets/claude/settings.json` and fails
 if the two disagree (a route marked guarded that no matcher fires on, a route marked uncovered that a
 matcher now fires on, a matcher naming a tool this table lacks, or a summary count that is wrong).
 

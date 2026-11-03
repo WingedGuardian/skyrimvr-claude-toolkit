@@ -14,12 +14,13 @@ both the source and the regenerated files. CI runs `--check` and fails on any di
 | `guards/adapters/codex/*` (`skyguard-entry.ps1`, `.sh`; the rules live in `tools/skyguard/`) | `.codex/hooks/*` |
 | `targets/codex/hooks.json`, `config.toml` | `.codex/hooks.json` (no header, never edited by hand: see below), `.codex/config.toml` |
 | `tools/skyguard/codex_rules.py` (`render()`) | `.codex/rules/skyrim.rules` |
+| `targets/opencode/*` | `.opencode/*` |
 
 `targets/codex/FROZEN.sha256` is the freeze ledger for the two Codex hook definitions, not a product: nothing is
 generated from it. `hooks.json` is rendered ONLY by `tools/skyguard/codex_definitions.py render`; the generator
 copies the template and never edits it. `.codex/**` is pinned LF by a path rule in `.gitattributes` (the
 generator writes LF and `*.ps1` is otherwise CRLF). `--target all` (the default; what `--check` and CI use) is
-the union of both targets and refuses two targets emitting one path; `--target claude|codex` renders one.
+the union of the targets and refuses two targets emitting one path; `--target claude|codex|opencode` renders one.
 
 Skills (`skills/<name>/SKILL.md`): `create-mod`, `devbench`, `inspect-esp`, `logging-registry`, `mod-release-review`, `mod-update-check`, `port-to-vr`, `skyrim-audio`,
 `skyrim-bsa`, `skyrim-context`, `skyrim-mcm`, `skyrim-nif`, `skyrim-save`, `toolkit-housecarl`, `toolkit-setup`,

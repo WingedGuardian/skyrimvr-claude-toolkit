@@ -2,16 +2,13 @@
 pins a control too: the plain spelling that was already caught, or the ordinary command that must stay allowed.
 Commands are only judged here, never run."""
 import os
-import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
-from conftest import REPO
+from conftest import BASH as CONF_BASH, REPO
 
-GIT_BASH = next((p for p in (r"C:/Program Files/Git/bin/bash.exe",) if os.path.exists(p)), None)
 
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import anchored, audit, deletes, mcp_rules, paths, shell_rules, shellparse, targets  # noqa: E402
@@ -21,7 +18,7 @@ ENV = {"SKYRIM_GAME_ROOT": "C:/GOG Games/Skyrim Fixture"}
 DATA = INSTALL + "/Data"
 HOOK = INSTALL + "/.claude/hooks/protect-bash.sh"
 URL = "http://127.0.0.1:8921/api/tool/console"
-BASH = str(Path(GIT_BASH)) if GIT_BASH else (None if os.name == "nt" else shutil.which("bash"))
+BASH = CONF_BASH
 
 
 def decide(command, shell="bash"):
@@ -141,6 +138,13 @@ def test_a_heredoc_to_one_of_them_is_read_too():
                                  'julia -e \'rm("C:/Temp/scratch.txt")\'', 'Rscript analysis.R', 'julia script.jl'])
 def test_reading_and_scratch_work_in_them_stay_allowed(cmd):
     assert decide(cmd)[0] != "deny", cmd
+
+
+# ---- 2.6: a tilde inside a word is literal, one an assignment expands is not
+@pytest.mark.parametrize("raw,want", [("C:/PROGRA~1/Skyrim", "C:/PROGRA~1/Skyrim"), ("C:/x~y", "C:/x~y"),
+                                      ("~/Skyrim", None), ("C:/a:~/b", None), ("A=~/b", None), ("'C:/a:~/b'", "C:/a:~/b")])
+def test_a_tilde_in_a_paths_value(raw, want):
+    assert paths.parse_value(raw) == want
 
 
 # ---- 3.1: a folder merely named documents is not the user's Documents

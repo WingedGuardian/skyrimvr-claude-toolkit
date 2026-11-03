@@ -147,7 +147,9 @@ Variable Build(Papyrus &p, const Variable &old, const std::string &value,
   v.type = t;
   if (t == VType::kInt) {
     std::size_t n = 0;
-    auto i = std::stoll(value, &n, 0);
+    // Base 10 unless spelled 0x: base 0 read a zero-padded 010 as octal 8, silently.
+    const auto hex = value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0;
+    auto i = std::stoll(value, &n, hex ? 16 : 10);
     if (n != value.size() || i < std::numeric_limits<std::int32_t>::min() ||
         i > std::numeric_limits<std::int32_t>::max())
       throw std::runtime_error("integer outside signed 32-bit range");

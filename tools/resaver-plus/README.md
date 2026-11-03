@@ -78,6 +78,8 @@ S-RESAVER-NATIVE-DIRECT.
   wrote has been loaded in game yet. An edited save from the earlier 19.6 patch set was, once, on one machine, from a
   GUI+CLI build; your build is CLI-only and made by your compiler. Confidence for saves unlike the tested ones is moderate: the user's own in-game
   load stays the final check.
+- `--apply` publishes through a hard link, so its output folder must allow them: FAT, exFAT and many network shares refuse, and
+  nothing is changed.
 - Process-crash atomicity of a write is unqualified; existing-output writes are refused rather than qualified.
 - The upstream GUI and its writes, and upstream's optional `helper/` SKSE plugin, are out of scope: not built, not
   shipped, not supported.

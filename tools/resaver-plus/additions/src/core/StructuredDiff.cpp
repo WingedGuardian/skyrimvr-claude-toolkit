@@ -246,6 +246,8 @@ json::Value ChangeDifferences(const SaveFile &before, const SaveFile &after,
   if (args.has("--quests")) {
     j.o["mode"] = S("quests");
     j.o["changed"] = Arr();
+    j.o["added"] = Arr();
+    j.o["removed"] = Arr();
     std::map<std::uint32_t, const ChangeForm *> quests;
     for (const auto &f : after.changeForms) {
       if (f.typeCode() == static_cast<unsigned>(ChangeFormType::QUST) &&
@@ -259,7 +261,16 @@ json::Value ChangeDifferences(const SaveFile &before, const SaveFile &after,
         if (match && (f.changeFlags != match->changeFlags ||
                       cf::Body(f) != cf::Body(*match)))
           j.o["changed"].a.push_back(One(before, f, after, *match));
+        if (!match)
+          j.o["removed"].a.push_back(S(Hex(f.refID.data, 6)));
       }
+    for (const auto &entry : quests) {
+      bool had = false;
+      for (const auto &f : before.changeForms)
+        had = had || (f.typeCode() == static_cast<unsigned>(ChangeFormType::QUST) && f.refID.data == entry.first);
+      if (!had)
+        j.o["added"].a.push_back(S(Hex(entry.first, 6)));
+    }
     j.o["changedCount"] = N(j.o["changed"].a.size());
   } else {
     const auto id =

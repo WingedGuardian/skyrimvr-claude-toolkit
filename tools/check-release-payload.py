@@ -23,6 +23,7 @@ Sections (all run by default; --section picks some, for tests and for a tree tha
            file; .agents skills mirror .claude skills; AGENTS.md within the size Codex reads untruncated
   adapter  the adapter kit (ADAPTING.md, tools/adapting/, the files it cites)
   guards   every guard file hashes to what the payload's own GUARD-FILES.sha256 says (Plan 6 R12)
+  shared-core  the pinned bytes and inventory of tools/modding_harness/
 
 --leaks greps files for the home folder of whoever runs it, in every spelling (C:/Users/<name>,
 C:\\Users\\<name>, /c/Users/<name>, JSON-escaped, /home/<name>, UTF-8 and UTF-16), and for the bare user name

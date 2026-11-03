@@ -281,6 +281,10 @@ def test_every_doc_states_the_real_patch_counts_and_target_count():
     for name in ("CHANGELOG.md", "docs/installing-tools.md", "tools/resaver-plus/README.md"):
         text = (REPO / name).read_text(encoding="utf-8")
         assert counts in text and runnable in text, name
+    for name in ("README.md", "SETUP_PROMPT.txt", "docs/getting-started.md"):
+        assert "its {} tests pass".format(words[len(mod.REQUIRED_TESTS)]) in (REPO / name).read_text(encoding="utf-8"), name
+    assert "all {} tests pass".format(words[len(mod.REQUIRED_TESTS)]) in (REPO / "setup.sh").read_text(encoding="utf-8")
+    assert all(t in (mod.__doc__ or "") for t in mod.REQUIRED_TESTS), "the docstring names every target"
 
 
 def test_the_shipped_patches_are_lf_only_and_hold_no_contribution_drafts():

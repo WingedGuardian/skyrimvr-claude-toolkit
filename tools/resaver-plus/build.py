@@ -15,7 +15,7 @@ Steps, each checked; the first failure stops the build and nothing is installed:
   5. CMake configures the command-line tool and the tests with the GUI OFF, and builds them with one MSBuild job and
      one compiler worker by default (--jobs 2 at most).
   6. CTest runs. The seven runnable targets (unit, decoder_port, topic113, expected_result, structured_queries,
-     analysis_contract) must all pass; the real-save `fixtures` target is skipped by design. Anything else -- a
+     analysis_contract, le_bounds) must all pass; the real-save `fixtures` target is skipped by design. Anything else -- a
      failure, a missing target, an unexpected one -- refuses the install.
   7. Only then: resaverpp-cli.exe is installed into tools/resaver-plus/build/ with BUILD-INFO.json (pins, patch-set
      hash, per-file source hashes, the tool versions found, the executable's SHA-256 and the CTest summary). A previous

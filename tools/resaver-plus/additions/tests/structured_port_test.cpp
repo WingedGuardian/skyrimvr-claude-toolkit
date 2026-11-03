@@ -98,6 +98,12 @@ int main(){
         Check(result.o.at("deltaVerified").b&&!result.o.at("wroteFile").b&&sample.papyrus()->instances[0].data->vars[0].value==1,"variable dry-run simulates exact targeted value without disk write");
         Check(SaveFile::parse(sample.serialize(),sample.cosave)->papyrus()->instances[0].data->vars[0].value==1,"edited primitive survives native serialization/parser");
     }
+    {
+        auto sample=Make();Edit("set-var",sample,Parse("set-var",{"F123456789ABCDEF","0","010","--type","int"}));
+        Check(sample.papyrus()->instances[0].data->vars[0].value==10,"a zero-padded integer is decimal, not octal");
+        auto hexed=Make();Edit("set-var",hexed,Parse("set-var",{"F123456789ABCDEF","0","0x10","--type","int"}));
+        Check(hexed.papyrus()->instances[0].data->vars[0].value==16,"an 0x integer stays hexadecimal");
+    }
     for(auto type:{"int","float","str"}){
         auto sample=Make();const auto value=std::string(type)=="int"?"-42":std::string(type)=="float"?"1.25":"synthetic string";
         Edit("set-var",sample,Parse("set-var",{"F123456789ABCDEF","0",value,"--type",type}));
@@ -150,6 +156,13 @@ int main(){
         auto second=Make();Check(Run("changeform-diff",sample,{"second","--quests"},&second).o.at("changedCount").n==0,"native quest diff unchanged");
         second.changeForms[0].changeFlags|=1u<<26;second.changeForms[0].data.push_back(1);second.changeForms[0].length1++;
         Check(Run("changeform-diff",sample,{"second","--quests"},&second).o.at("changedCount").n==1,"native quest diff detects added flag and payload");
+    }
+    {
+        auto full=Make();auto fewer=Make();fewer.changeForms.erase(fewer.changeForms.begin());
+        auto gone=Run("changeform-diff",full,{"second","--quests"},&fewer);
+        Check(gone.o.at("removed").a.size()==1&&gone.o.at("added").a.empty(),"native quest diff names a quest only the first save has");
+        auto gained=Run("changeform-diff",fewer,{"second","--quests"},&full);
+        Check(gained.o.at("added").a.size()==1&&gained.o.at("removed").a.empty(),"native quest diff names a quest only the second save has");
     }
     Reject("set-var",{"1","0","true","--apply"},"apply requires explicit output");
     Reject("clean",{"a","b"},"multiple outputs rejected");

@@ -113,6 +113,8 @@ subsequent installs do not resolve fresh versions. Input checksums normalize lin
 
 ## Test-only package-manager barriers
 
+> For a development clone: `tests/` and `scripts/prepush-gate.py` are not in the release zip.
+
 Run `python -B tests/run_harness_tests.py` (or supply pytest targets/options). It constructs
 a scrubbed environment, fixture-local profile/temp paths, effective Git Bash PATH tripwires
 and native Python subprocess barriers. Package-manager attempts fail the originating test.

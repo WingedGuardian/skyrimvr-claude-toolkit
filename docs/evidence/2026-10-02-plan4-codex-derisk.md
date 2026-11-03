@@ -172,7 +172,7 @@ Consequence for Task 13 (plan amended): count Codex calls from `item_completed` 
 (`CommandExecution`/`FileChange`/`McpToolCall`), not from the `custom_tool_call` JS text; a blocked call
 has no item, so `hooked ≥ called` stays the right inequality; any other shape → UNMEASURABLE.
 
-## Step 6 — TUI probe: PENDING (user step)
+## Step 6 — TUI probe: pending when written (result below)
 
 Prepared scratch repo `<scratch>/plan4-probes/p-tui` (R2-form probe hooks, a read-only `collect.py`).
 Instructions: `docs/superpowers/measurements/2026-10-02-plan4-tui-probe-instructions.md` (maintainer record, not in the release). Open until the
@@ -202,7 +202,7 @@ condition), (b) whether `!cmd` produces a PreToolUse (R4's text), (c) `SessionSt
 
 ## Not run / UNMEASURED
 
-- The interactive TUI (Step 6, pending the user).
+- The interactive TUI, when this was written. It was later run and passed: *Step 6 — TUI probe result*, below.
 - `hooks/list` with `cwds=[<scratch repo>]` for project hooks (X4 saw 0 listed; not re-run).
 - A direct `write_stdin` call (X4 P4; not in this brief).
 - A clean-machine latency run: all three runs were on a shared, loaded machine.

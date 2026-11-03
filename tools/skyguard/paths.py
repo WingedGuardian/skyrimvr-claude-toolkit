@@ -192,7 +192,7 @@ _ASSIGN = re.compile(_DECL + r"([A-Za-z_][A-Za-z0-9_]*)(\s*)=(.*)")
 _PROT_MENTION = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(PROTECTION_KEYS) + r")(?![A-Za-z0-9_])")
 _SAFE_FLAGS = re.compile(r"[\s\-xrg]*")
 # `#` is literal inside a word (`'C:/x'#c` is C:/x#c); it starts a comment only after whitespace.
-_BARE = re.compile(r"[A-Za-z0-9_./:,+@%=#-]+")
+_BARE = re.compile(r"[A-Za-z0-9_./:,+@%=#~-]+")
 
 
 def parse_value(raw: str) -> Optional[str]:
@@ -239,7 +239,9 @@ def parse_value(raw: str) -> Optional[str]:
             return None
         else:
             m = _BARE.match(raw, i)
-            if not m or (i == 0 and c == "~"):
+            # A tilde is literal inside a word (C:/PROGRA~1), but an assignment expands one that leads the value or follows
+            # a colon or equals sign.
+            if not m or (i == 0 and c == "~") or re.search(r"[:=]~", m.group(0)):
                 return None
             out.append(m.group(0))
             i = m.end()
