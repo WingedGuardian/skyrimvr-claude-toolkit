@@ -431,7 +431,10 @@ def test_launch_logs_gzip_after_a_week_recycle_after_ninety_days_and_labelled_fo
 
 def test_a_gzip_that_does_not_round_trip_keeps_the_original(tree, monkeypatch):
     f = write(tree / "launches" / "x" / "SkyrimNet.log", blob("log", 100_000))
-    action = {"class": "gzip", "path": str(f), "bytes": f.stat().st_size, "hash": "0" * 32}
+    # The source still matches its planned hash; only the compressed copy is wrong (a truncating copy). So the
+    # ROUND-TRIP clause alone refuses: with a fake planned hash the source clause tripped too and masked its twin.
+    action = {"class": "gzip", "path": str(f), "bytes": f.stat().st_size, "hash": hk.blake(f)}
+    monkeypatch.setattr(hk.shutil, "copyfileobj", lambda fi, fo, n=0: fo.write(fi.read()[:-10]))
     fake = bin_for(tree)               # the bad .gz goes to a bin -- never the user's real one, and not Windows-only
     monkeypatch.setattr(hk, "recycle", fake)
     with pytest.raises(OSError, match="round trip"):

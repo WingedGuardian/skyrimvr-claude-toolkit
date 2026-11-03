@@ -1510,7 +1510,11 @@ def session(cfg, state: Path) -> int:
 def _daily_module():
     """tools/housekeep_daily.py, loaded from beside this file."""
     import importlib.util
-    sys.modules.setdefault("housekeep", sys.modules[__name__])
+    # Share this module only when it is registered: loaded by path (the tests, the session hook) it is not in
+    # sys.modules, and housekeep_daily then loads its own copy.
+    me = sys.modules.get(__name__)
+    if me is not None:
+        sys.modules.setdefault("housekeep", me)
     spec = importlib.util.spec_from_file_location("housekeep_daily", Path(__file__).with_name("housekeep_daily.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

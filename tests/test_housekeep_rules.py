@@ -96,8 +96,15 @@ class ReadsCountAsUse(Fixture):
         tree = self.out / "task" / "build"
         touch(tree / "CMakeCache.txt", old)
         touch(tree / "a.obj", old)
+        # Declared obsolete, so the read veto ALONE keeps it (without the decision, "usefulness unproven" kept it
+        # too and the reads-not-activity twin survived). The twin below proves it is planned.
+        declare(self.cfg, tree / "a.obj")
+        twin = self.out / "task2" / "build"             # its own task: a read anywhere in a task keeps all of it
+        touch(twin / "CMakeCache.txt", old)
+        touch(twin / "b.obj", old)
+        declare(self.cfg, twin / "b.obj")
         os.utime(tree / "a.obj", (time.time() - 3600, old))   # read an hour ago, written 5 days ago
-        self.assertEqual(set(), self.planned())
+        self.assertEqual({"b.obj"}, self.planned())
 
 
 class NoWindows(unittest.TestCase):

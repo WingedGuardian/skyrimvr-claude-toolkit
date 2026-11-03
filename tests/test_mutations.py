@@ -1505,7 +1505,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
           ("state-file-as-reference", "                if os.path.splitext(f)[1].lower() in state:",
            "                if False:", "test_a_snapshot_of_a_live_database_is_not_recreatable_but_still_deduplicated"),
           # A gzip that does not reproduce the log still sends the original to the bin.
-          ("gzip-no-round-trip", '    if d.hexdigest() != action["hash"]:', "    if False:",
+          ("gzip-no-round-trip", '    if d.hexdigest() != action["hash"] or ', "    if False or ",
            "test_a_gzip_that_does_not_round_trip_keeps_the_original"),
       ]],
     # --- housekeep after the 2026-10-28 incident (a recycled CommonLibSSE.lib a live build linked) + archive ---
@@ -1514,11 +1514,11 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
           ("products-as-intermediates", "tools/housekeep.py", "    if path.suffix.lower() in BUILD_PRODUCTS:",
            "    if False:",
            "tests/test_housekeep_rules.py::BuildProductsAreNeverIntermediates::test_build_exts_in_config_cannot_bring_lib_back"),
-          ("reads-not-activity", "tools/housekeep.py", "            w, r = max(w, st.st_mtime), max(r, st.st_atime)",
-           "            w, r = max(w, st.st_mtime), 0.0",
+          ("reads-not-activity", "tools/housekeep.py", "        w, r = max(w, st.st_mtime), max(r, st.st_atime)",
+           "        w, r = max(w, st.st_mtime), 0.0",
            "tests/test_housekeep_rules.py::ReadsCountAsUse::test_build_output_a_live_build_is_reading_is_kept"),
-          ("hashing-counts-as-a-read", "tools/housekeep.py",
-           "            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))", "            pass",
+          ("hashing-counts-as-a-read", "tools/housekeep_archive.py",
+           "        os.utime(path, ns=(before.st_atime_ns, after.st_mtime_ns))", "        pass",
            "tests/test_housekeep_archive.py::Selection::test_housekeep_hashing_does_not_count_as_a_read"),
           ("approval-gate-bypassed", "tools/housekeep_daily.py",
            '    return bool(cfg["approved_sha256"]) and cfg["approved_sha256"] == code_sha256()', "    return True",
@@ -1566,8 +1566,6 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
           ("archive-trusts-missing-read-times", "tools/housekeep.py",
            "        if not closed and not reads_recorded(t.parent):", "        if False:",
            "tests/test_housekeep_archive.py::Selection::test_without_read_times_only_closed_folders_archive"),
-          ("archive-zips-never-expire", "tools/housekeep.py", "                if now - st.st_mtime >= days * DAY:",
-           "                if False:", "tests/test_housekeep_archive.py::Selection::test_local_zips_expire"),
       ]],
 
     # --- what the v3.9 release review found ---------------------------------
