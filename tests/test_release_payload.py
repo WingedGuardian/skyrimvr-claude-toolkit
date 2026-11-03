@@ -91,7 +91,7 @@ def pristine(tmp_path_factory):
         (root / "scripts" / "prepush-gate.py").unlink()
     for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", ".claude/backups",
                  ".claude/retired",
-                 "KNOWLEDGEBASE.local.md", ".superpowers", ".skyguard", "tools/resaver-cli/tests"):
+                 "KNOWLEDGEBASE.local.md", ".superpowers", ".skyguard", ".modding-agent-harness", "tools/resaver-cli/tests"):
         p = root / junk
         if p.is_dir():
             shutil.rmtree(p)

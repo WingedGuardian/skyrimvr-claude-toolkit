@@ -1109,9 +1109,10 @@ def test_the_sweep_never_follows_a_link_out_of_temp(tmp_path, monkeypatch, alone
         pytest.skip("cannot make a directory link here")
     stale(outside)
     fake = bin_for(tmp_path)
-    hk.sweep_temp(sweep_cfg(), temp=temp, recycler=fake)
+    result = hk.sweep_temp(sweep_cfg(), temp=temp, recycler=fake)
     assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep"
     assert fake.got == [] and link.exists(), "a link is never even offered to the bin"
+    assert result["rows"]["failed"] == 0, "a link is skipped at the candidate stage, not caught by a later check"
 
 
 def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, monkeypatch):
