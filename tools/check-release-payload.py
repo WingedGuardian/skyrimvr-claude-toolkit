@@ -171,8 +171,8 @@ DOTENV_GLOBS = (".env", "*.env", ".env.*", "*.env.local")
 # an upstream contribution anywhere, no qualification checker of the dev install, and exactly the tested patch set.
 RESAVER_PLUS = "tools/resaver-plus"
 RESAVER_BINARY_SUFFIXES = (".exe", ".dll", ".pdb", ".lib", ".obj", ".ilk", ".exp")
-RESAVER_PLUS_PATCHES = 27
-RESAVER_PLUS_ADDITIONS = 15
+RESAVER_PLUS_PATCHES = 10
+RESAVER_PLUS_ADDITIONS = 16
 
 ADAPTER_REQUIRED = (
     "ADAPTING.md",

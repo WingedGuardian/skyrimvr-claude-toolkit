@@ -1,18 +1,20 @@
+diff --git a/src/core/ChangeFormData.cpp b/src/core/ChangeFormData.cpp
+index f6b0b04..1cdd9e0 100644
 --- a/src/core/ChangeFormData.cpp
 +++ b/src/core/ChangeFormData.cpp
-@@ -43,62 +43,75 @@
+@@ -69,62 +69,75 @@ namespace ess::cf
  			{
  				auto& k = top().kids;
  				k.push_back(Node{ label, std::move(value) });
 +				k.back().offset = r.pos();
  				return k.back();
-+			}
+ 			}
 +			Node& scalar(const std::string& label, std::string value, std::size_t width)
 +			{
 +				auto& n = add(label, std::move(value));
 +				n.offset -= width; n.size = width;
 +				return n;
- 			}
++			}
  			template <class F>
  			void group(const std::string& label, F f)
  			{
@@ -83,7 +85,7 @@
  				return v;
  			}
  			void floats(const std::string& l, std::size_t n)
-@@ -107,7 +120,7 @@
+@@ -133,7 +146,7 @@ namespace ess::cf
  				for (std::size_t i = 0; i < n; ++i) {
  					s += (i ? ", " : "") + Fmt("%g", r.f32());
  				}
@@ -92,7 +94,7 @@
  			}
  			void ints(const std::string& l, std::size_t n)
  			{
-@@ -122,7 +135,7 @@
+@@ -148,7 +161,7 @@ namespace ess::cf
  				if (n > 16) {
  					s += Fmt(", ... (%zu)", n);
  				}
@@ -101,7 +103,7 @@
  			}
  			std::size_t bytes(const std::string& l, std::size_t n)
  			{
-@@ -136,11 +149,12 @@
+@@ -162,11 +175,12 @@ namespace ess::cf
  					s += Fmt("... (%zu bytes)", n);
  				}
  				r.seek(r.pos() + n);
@@ -115,7 +117,7 @@
  				const auto    b0 = r.u8();
  				std::uint32_t v = b0;
  				switch (b0 & 3) {
-@@ -156,7 +170,7 @@
+@@ -185,7 +199,7 @@ namespace ess::cf
  				}
  				v >>= 2;
  				if (!l.empty()) {
@@ -124,7 +126,7 @@
  				}
  				return v;
  			}
-@@ -178,12 +192,12 @@
+@@ -207,12 +221,12 @@ namespace ess::cf
  				const auto n = vs(l + "_COUNT");
  				r.need(std::size_t(n) * 8);
  				r.seek(r.pos() + std::size_t(n) * 8);
@@ -139,7 +141,7 @@
  				n.isRef = true;
  				n.refRaw = id.data;
  				n.formID = id.isZero() ? 0 : _save.formIDOf(id);
-@@ -201,7 +215,7 @@
+@@ -230,7 +244,7 @@ namespace ess::cf
  				r.need(n);
  				std::string s(reinterpret_cast<const char*>(r.here()), n);
  				r.seek(r.pos() + n);
@@ -148,10 +150,19 @@
  				return s;
  			}
  			template <class F>
-@@ -276,7 +290,10 @@
+@@ -432,24 +446,40 @@ namespace ess::cf
  
- 		void ExtraDataData(P& p)
+ 		void PackageDataExtra(P& p, std::int8_t a_type);
+ 
+-		void ExtraDataData(P& p)
++		// Each level costs one byte, so a crafted form could otherwise nest until the stack ran out.
++		constexpr int kMaxExtraDataNesting = 16;
++
++		void ExtraDataData(P& p, int a_depth = 0)
  		{
++			if (a_depth > kMaxExtraDataNesting) {
++				throw Stop("extra data nested too deeply");
++			}
 +			const auto offset = p.r.pos();
  			const auto type = p.r.u8();
 +			auto& trace = p.out().extraTrace;
@@ -159,7 +170,66 @@
  			auto       one = [&](const char* name, auto body) { p.group(name, body); };
  			switch (type) {
  			case 0: one("NULL", [] {}); break;
-@@ -1074,6 +1091,7 @@
+-			case 4: one("ExtraExtraData1", [&] { p.group("SUB_DATA", [&] { ExtraDataData(p); }); }); break;
++			case 4: one("ExtraExtraData1", [&] { p.group("SUB_DATA", [&] { ExtraDataData(p, a_depth + 1); }); }); break;
+ 			case 8:
+ 				one("ExtraExtraData2", [&] {
+-					p.group("SUB_DATA1", [&] { ExtraDataData(p); });
+-					p.group("SUB_DATA2", [&] { ExtraDataData(p); });
++					p.group("SUB_DATA1", [&] { ExtraDataData(p, a_depth + 1); });
++					p.group("SUB_DATA2", [&] { ExtraDataData(p, a_depth + 1); });
+ 				});
+ 				break;
+ 			case 12:
+ 				one("ExtraExtraData3", [&] {
+-					p.group("SUB_DATA1", [&] { ExtraDataData(p); });
+-					p.group("SUB_DATA2", [&] { ExtraDataData(p); });
+-					p.group("SUB_DATA3", [&] { ExtraDataData(p); });
++					p.group("SUB_DATA1", [&] { ExtraDataData(p, a_depth + 1); });
++					p.group("SUB_DATA2", [&] { ExtraDataData(p, a_depth + 1); });
++					p.group("SUB_DATA3", [&] { ExtraDataData(p, a_depth + 1); });
++				});
++				break;
++			case 16:
++				one("ExtraExtraData4", [&] {
++					for (int i = 1; i <= 4; ++i) {
++						p.group(Fmt("SUB_DATA%d", i), [&] { ExtraDataData(p, a_depth + 1); });
++					}
+ 				});
+ 				break;
+ 			case 22: one("Worn", [] {}); break;
+@@ -662,13 +692,13 @@ namespace ess::cf
+ 				// a u8, three refs and a u8. (UESP's "SayToTopicInfoData"; read without it, the whole rest of the actor
+ 				// was lost.)
+ 				one("SayToTopicInfo", [&] {
+-					p.ref("TOPIC");
++					p.ref("REF1");
+ 					p.u8("UNK1");
+ 					p.i32("UNK2");
+ 					p.ref("REF2");
+-					p.vsArray("ITEMS", [&] {
+-						p.wstring("TEXT");
+-						p.wstring("VOICE FILE");
++					p.vsArray("DATA2", [&] {
++						p.wstring("TEXT1");
++						p.wstring("TEXT2");
+ 						p.i32("UNK1");
+ 						p.i32("UNK2");
+ 						p.u8("UNK3");
+@@ -677,10 +707,8 @@ namespace ess::cf
+ 						p.ref("REF3");
+ 						p.u8("UNK4");
+ 					});
+-					p.i16("UNK4");
+-					for (int i = 0; i < 4; ++i) {
+-						p.ref(Fmt("REF%d", i + 3));
+-					}
++					p.flags16("UNK_U16");
++					for (int i = 1; i <= 4; ++i) p.ref(Fmt("FOOTER_REF%d", i));
+ 				});
+ 				break;
+ 			case 120:
+@@ -3604,6 +3632,7 @@ namespace ess::cf
  			body = Body(a_cf);
  		} catch (const std::exception& e) {
  			out.error = std::string("could not decompress: ") + e.what();
@@ -167,7 +237,7 @@
  			return out;
  		}
  		out.bodySize = body.size();
-@@ -1125,6 +1143,15 @@
+@@ -3663,6 +3692,15 @@ namespace ess::cf
  			p.bytes(out.supported ? "NOT DECODED" : "DATA", rest);
  		}
  		out.complete = out.supported && out.error.empty();

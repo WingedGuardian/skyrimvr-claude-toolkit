@@ -34,7 +34,7 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 BUILD_DIR = ROOT / "tools" / "resaver-plus" / "build"
 EXECUTABLE = "resaverpp-cli.exe"
-UPSTREAM_COMMIT = "0d48f60cb8a69b367abfbd78d58418e64c507da5"
+UPSTREAM_COMMIT = "098eb8c1c3a23552c7662a2083f4aca9a2ff41f4"
 TIMEOUT = 180
 READS = {"info", "dump", "find", "find-refs", "worries", "changeform", "recon",
          "extradata-scan", "changeform-diff", "globaldata", "globaldata-diff",

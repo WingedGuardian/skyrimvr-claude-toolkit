@@ -1,31 +1,5 @@
---- a/src/core/Ops.h
-+++ b/src/core/Ops.h
-@@ -116,6 +116,15 @@
- 		std::string name;
- 		std::size_t n = 0;
- 	};
-+	// Findings are observations, not instructions to clean a save. Only explicit
-+	// structural failures block saving; numeric heuristics remain advisory.
-+	struct Finding
-+	{
-+		std::string code, message;
-+		std::size_t count = 0;
-+		std::vector<std::string> samples;  // at most eight identities
-+		bool blocksSaving = false;
-+	};
- 	struct Report
- 	{
- 		std::size_t scripts = 0, instances = 0, references = 0, arrays = 0, threads = 0, functionMessages = 0, suspended = 0, changeForms = 0, strings = 0;
-@@ -126,6 +135,9 @@
- 		std::vector<Count> messagesByFunction;
- 		std::vector<Count> instancesByScript;
- 		std::vector<Count> changeFormsByType;
-+		std::size_t frames = 0, maxStackDepth = 0;
-+		std::vector<Count> framesByScript;
-+		std::vector<Finding> findings;             // stable codes and bounded evidence
- 		std::vector<std::string> warnings;          // plain-language findings
- 		std::vector<std::string> loopingScripts;    // scripts with 20+ threads parked in Utility.Wait
- 		bool                     mcmJam = false;    // SkyUI registration was mid-way (FixMcmJam applies)
+diff --git a/src/core/Ops.cpp b/src/core/Ops.cpp
+index 6b67511..ffefeb9 100644
 --- a/src/core/Ops.cpp
 +++ b/src/core/Ops.cpp
 @@ -1,5 +1,6 @@
@@ -34,8 +8,66 @@
 +#include "Text.h"
  
  #include <algorithm>
- #include <cstdio>
-@@ -729,6 +730,104 @@
+ #include <cctype>
+@@ -662,36 +663,41 @@ namespace ess::ops
+ 
+ 	// ---- queries -----------------------------------------------------------------------------
+ 
+-	static bool VarRefersTo(const Variable& v, EID target)
++	static bool VarRefersTo(const Variable& v, const std::set<EID>& targets)
+ 	{
+ 		if (v.type == VType::kVariant) {
+-			return v.inner && VarRefersTo(*v.inner, target);
++			return v.inner && VarRefersTo(*v.inner, targets);
+ 		}
+-		return (v.type == VType::kRef || v.type == VType::kStruct || IsArrayType(v.type)) && v.value == target;
++		return (v.type == VType::kRef || v.type == VType::kStruct || IsArrayType(v.type)) && targets.contains(v.value);
+ 	}
+ 
+ 	std::vector<Referrer> FindReferrers(const Papyrus& p, EID a_target)
++	{
++		return FindReferrers(p, std::set<EID>{ a_target }, false);
++	}
++
++	std::vector<Referrer> FindReferrers(const Papyrus& p, const std::set<EID>& targets, bool includeSelf)
+ 	{
+ 		std::vector<Referrer> out;
+ 		auto                  scanVars = [&](const std::vector<Variable>& vars, Referrer::Kind k, std::uint64_t id, const std::string& owner) {
+             for (std::size_t i = 0; i < vars.size(); ++i) {
+-                if (VarRefersTo(vars[i], a_target)) {
++                if (VarRefersTo(vars[i], targets)) {
+                     out.push_back({ k, id, owner + " var[" + std::to_string(i) + "]" });
+                 }
+             }
+ 		};
+ 		for (const auto& i : p.instances) {
+-			if (i.id != a_target && i.data) {
++			if ((includeSelf || !targets.contains(i.id)) && i.data) {
+ 				scanVars(i.data->vars, Referrer::Kind::kInstance, i.id, p.str(i.script));
+ 			}
+ 		}
+ 		for (const auto& r : p.references) {
+-			if (r.id != a_target && r.data) {
++			if ((includeSelf || !targets.contains(r.id)) && r.data) {
+ 				scanVars(r.data->vars, Referrer::Kind::kReference, r.id, p.str(r.script));
+ 			}
+ 		}
+ 		for (const auto& a : p.arrays) {
+-			if (a.id != a_target) {
++			if (includeSelf || !targets.contains(a.id)) {
+ 				scanVars(a.vars, Referrer::Kind::kArray, a.id, std::string("array ") + VTypeName(a.type));
+ 			}
+ 		}
+@@ -701,7 +707,7 @@ namespace ess::ops
+ 			}
+ 			for (const auto& f : t.data->frames) {
+ 				const std::string where = p.str(f.baseName) + "." + p.str(f.event);
+-				if (VarRefersTo(f.owner, a_target)) {
++				if (VarRefersTo(f.owner, targets)) {
+ 					out.push_back({ Referrer::Kind::kThread, t.id, where + " (owner)" });
+ 				}
+ 				scanVars(f.vars, Referrer::Kind::kThread, t.id, where);
+@@ -726,6 +732,104 @@ namespace ess::ops
  		}
  		std::string FrameName(const Papyrus& p, const StackFrame& f) { return p.str(f.baseName) + "." + p.str(f.event); }
  		std::string MsgName(const Papyrus& p, const FunctionMessageData& d) { return p.str(d.scriptName) + "." + p.str(d.event); }
@@ -140,7 +172,7 @@
  	}
  
  	Report Analyze(SaveFile& s)
-@@ -743,7 +842,7 @@
+@@ -740,7 +844,7 @@ namespace ess::ops
  
  		const auto* pp = s.papyrus();
  		if (!pp) {
@@ -149,7 +181,7 @@
  			return r;
  		}
  		const auto& p = *pp;
-@@ -762,11 +861,13 @@
+@@ -759,11 +863,13 @@ namespace ess::ops
  			}
  		}
  
@@ -163,7 +195,7 @@
  			}
  			if (IsInstanceUndefined(p, i.script)) {
  				++r.undefinedInstances;
-@@ -776,13 +877,19 @@
+@@ -773,13 +879,19 @@ namespace ess::ops
  			}
  		}
  
@@ -184,7 +216,7 @@
  			top[p.str(a.data->frames.front().scriptName)]++;
  			const auto& inner = a.data->frames.back();
  			cur[FrameName(p, inner)]++;
-@@ -794,7 +901,6 @@
+@@ -791,7 +903,6 @@ namespace ess::ops
  			}
  			const auto innerName = FrameName(p, inner);
  			if (EqualsNoCase(innerName, "utility.Wait") || EqualsNoCase(innerName, "utility.WaitGameTime") || EqualsNoCase(innerName, "utility.WaitMenuMode")) {
@@ -192,7 +224,7 @@
  				waitByScript[p.str(a.data->frames.front().scriptName)]++;
  			}
  		}
-@@ -807,11 +913,17 @@
+@@ -804,12 +915,18 @@ namespace ess::ops
  			msg[m.data ? MsgName(p, *m.data) : "<no data>"]++;
  		}
  
@@ -202,15 +234,16 @@
  		r.threadsByCurrentFrame = Sorted(cur);
  		r.suspendedByFunction = Sorted(susp);
  		r.messagesByFunction = Sorted(msg);
-+
+ 
 +		if (deepStacks.count) FindingFor(r, "papyrus.stack-depth",
 +			std::to_string(deepStacks.count) + " threads have at least 100 saved frames (maximum " + std::to_string(r.maxStackDepth) + "); a snapshot alone does not prove a stuck script.", deepStacks.count, deepStacks.samples);
 +		if (r.threads > 50 || r.frames > 150) FindingFor(r, "papyrus.stack-load",
 +			std::to_string(r.threads) + " active threads and " + std::to_string(r.frames) + " saved frames exceed the advisory snapshot threshold; this may be temporary load.", r.threads);
- 
++
  		// ---- plain-language findings ----
  		char buf[512];
-@@ -822,7 +934,7 @@
+ 		for (const auto& c : Sorted(waitByScript)) {
+@@ -819,7 +936,7 @@ namespace ess::ops
  					"%zu threads of '%s' are sleeping in Utility.Wait loops. That many copies of one looping script usually means "
  					"a script that never exits (each wakes several times a second). Consider purging '%s'.",
  					c.n, c.name.c_str(), c.name.c_str());
@@ -219,7 +252,7 @@
  			}
  		}
  		std::size_t mcmThreads = 0;
-@@ -850,31 +962,31 @@
+@@ -847,31 +964,31 @@ namespace ess::ops
  				"%zu RegisterMod calls are queued%s. Loading replays all of it. Fix: Clean > Fix SkyUI MCM registration jam "
  				"(removes the stuck registration work; SkyUI registers the remaining menus again on the next load).",
  				mcmThreads, registerMod, busy ? ", and SKI_ConfigManager was saved in its BUSY state" : "");
@@ -241,12 +274,11 @@
  				"%zu script instances and %zu threads belong to scripts that are no longer installed. Clean > Remove Undefined fixes this.",
  				r.undefinedInstances, r.undefinedThreads);
 -			r.warnings.push_back(buf);
--		}
++			FindingFor(r, "papyrus.undefined-execution", buf, r.undefinedInstances + r.undefinedThreads);
+ 		}
 -		if (r.unattached >= 100) {
 -			std::snprintf(buf, sizeof(buf), "%zu script instances are attached to nothing (Clean > Remove Unattached).", r.unattached);
 -			r.warnings.push_back(buf);
-+			FindingFor(r, "papyrus.undefined-execution", buf, r.undefinedInstances + r.undefinedThreads);
-+		}
 +		if (r.unattached > 0) {
 +			std::snprintf(buf, sizeof(buf), "%zu script instances are attached to nothing; review this advisory before considering removal.", r.unattached);
 +			FindingFor(r, "papyrus.unattached-instances", buf, r.unattached, unattachedRecords.samples);
@@ -260,7 +292,7 @@
  		}
  		return r;
  	}
-@@ -901,10 +1013,11 @@
+@@ -898,10 +1015,11 @@ namespace ess::ops
  			}
  			out += std::string("\n") + title + "\n";
  			for (std::size_t i = 0; i < v.size() && i < a_top; ++i) {
@@ -273,15 +305,3 @@
  		section("Threads by event script (frame 0)", r.threadsByTopScript);
  		section("Threads by current frame (what they are waiting in)", r.threadsByCurrentFrame);
  		section("Suspended stacks", r.suspendedByFunction);
---- a/CMakeLists.txt
-+++ b/CMakeLists.txt
-@@ -98,6 +98,9 @@
- 	add_executable(rs_structured_port_test tests/structured_port_test.cpp)
- 	target_link_libraries(rs_structured_port_test PRIVATE rs_core)
- 	add_test(NAME structured_queries COMMAND rs_structured_port_test)
-+	add_executable(rs_analysis_port_test tests/analysis_port_test.cpp)
-+	target_link_libraries(rs_analysis_port_test PRIVATE rs_core)
-+	add_test(NAME analysis_contract COMMAND rs_analysis_port_test)
- 	# real saves: -DRESAVERPP_TEST_SAVES=<folder with .ess files>. Each is loaded, written back and
- 	# compared, backups checked. A folder given without saves in it fails the run (fixtures missing).
- 	set(RESAVERPP_TEST_SAVES "" CACHE PATH "Folder of .ess saves for the fixture tests")

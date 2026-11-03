@@ -1,17 +1,20 @@
+diff --git a/src/cli/main.cpp b/src/cli/main.cpp
+index 24ec04e..65aef51 100644
 --- a/src/cli/main.cpp
 +++ b/src/cli/main.cpp
-@@ -1,5 +1,6 @@
+@@ -2,6 +2,7 @@
+ #include <tuple>
  // ReSaver++ command line - C++ port of ReSaver (FallrimTools) by Mark Fairchild, Apache License 2.0.
  #include "core/Batch.h"
 +#include "core/Structured.h"
- #include "core/ChangeFormData.h"
- #include "core/Compare.h"
- #include "core/ModRemove.h"
-@@ -81,6 +82,7 @@
+ #include "core/Bsa.h"
+ #include "core/CliHelp.h"
+ #include "core/SkyrimLogs.h"
+@@ -318,6 +319,7 @@ static int AnalyzeLogsMain(int argc, char** argv)
  
  int main(int argc, char** argv)
  {
-+	if (argc > 1 && !std::strcmp(argv[1], "--json")) return structured::Main(argc, argv);
++	if (argc > 1 && !std::strcmp(argv[1], "--json")) return structured::Entry(argc, argv);
  	if (argc < 2 || !std::strcmp(argv[1], "-h") || !std::strcmp(argv[1], "--help")) {
  		Usage();
  		return argc < 2 ? 1 : 0;

@@ -2,7 +2,7 @@
 
 git, CMake and CTest are replaced by a recording fake (no network, no compiler, any platform). Each refusal has its
 own test, and each test asserts the step the refusal must PREVENT never ran: a refused build installs nothing.
-The real patch set is checked too: SOURCE-SHA256 must cover exactly what the 27 patches change and the 15 additions
+The real patch set is checked too: SOURCE-SHA256 must cover exactly what the 10 patches change and the 16 additions
 add (the bytes themselves are reproduced against upstream by the Windows CI job, which builds for real).
 """
 from __future__ import annotations
@@ -31,10 +31,10 @@ def _sha(b: bytes) -> str:
 
 
 GOOD_CTEST = "\n".join(["Test project x"] + [
-    "  {}/7 Test #{}: {} ....................   Passed    0.05 sec".format(i + 1, i + 1, n)
+    "  {}/8 Test #{}: {} ....................   Passed    0.05 sec".format(i + 1, i + 1, n)
     for i, n in enumerate(("unit", "decoder_port", "topic113", "expected_result", "structured_queries",
-                           "analysis_contract"))] + [
-    "  7/7 Test #7: fixtures .....................***Skipped   0.01 sec", "100% tests passed"])
+                           "analysis_contract", "le_bounds"))] + [
+    "  8/8 Test #8: fixtures .....................***Skipped   0.01 sec", "100% tests passed"])
 UPSTREAM = {"src/a.cpp": b"int a;\n", "CMakeLists.txt": b"project(x)\n"}
 PATCHED = b"int a; // patched\n"
 ADDED = b"// added\n"
@@ -265,18 +265,29 @@ def test_off_windows_it_says_so_and_runs_nothing(env, monkeypatch):
 def test_the_shipped_patch_set_is_complete_and_the_manifest_covers_exactly_it():
     mod = _load()
     patches, additions, manifest = mod.patch_files(), mod.addition_files(), mod.read_manifest()
-    assert len(patches) == mod.EXPECTED_PATCHES == 27
-    assert len(additions) == mod.EXPECTED_ADDITIONS == 15
+    assert len(patches) == mod.EXPECTED_PATCHES == 10
+    assert len(additions) == mod.EXPECTED_ADDITIONS == 16
     mod.check_inputs(patches, additions, manifest)
     assert sorted(r for r, (_h, k) in manifest.items() if k == "patched") == sorted(mod.patched_paths(patches))
     assert len([1 for _h, k in manifest.values() if k == "patched"]) == 10
+
+
+def test_every_doc_states_the_real_patch_counts_and_target_count():
+    """The port to upstream 51 left "27 patches and 15 additions" and "six" in the CHANGELOG and the install guide."""
+    mod = _load()
+    words = {6: "six", 7: "seven", 8: "eight"}
+    counts = "{} patches and {} additions".format(mod.EXPECTED_PATCHES, mod.EXPECTED_ADDITIONS)
+    runnable = "all {} ".format(words[len(mod.REQUIRED_TESTS)])
+    for name in ("CHANGELOG.md", "docs/installing-tools.md", "tools/resaver-plus/README.md"):
+        text = (REPO / name).read_text(encoding="utf-8")
+        assert counts in text and runnable in text, name
 
 
 def test_the_shipped_patches_are_lf_only_and_hold_no_contribution_drafts():
     files = [p for p in HERE.rglob("*") if p.is_file()]
     assert not [p for p in files if p.name.endswith("-PR.md") or "contributions" in p.relative_to(HERE).parts]
     shipped = [p for p in files if p.relative_to(HERE).parts[0] in ("patches", "additions")]
-    assert len(shipped) == 42
+    assert len(shipped) == 26
     assert not [p.name for p in shipped if b"\r\n" in p.read_bytes()]
 
 

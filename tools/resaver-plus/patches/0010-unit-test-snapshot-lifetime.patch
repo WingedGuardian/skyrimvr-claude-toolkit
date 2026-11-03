@@ -1,0 +1,24 @@
+diff --git a/tests/unit_test.cpp b/tests/unit_test.cpp
+index aa94da0..594a763 100644
+--- a/tests/unit_test.cpp
++++ b/tests/unit_test.cpp
+@@ -474,7 +474,8 @@ namespace
+ 			const auto b10 = write("rs_tp_bad10.txt", "RSH-SNAPSHOT\t1\t1-6-1170-0\tAllandor\n"
+ 													  "follower\tInigo.esp\t000D62\t5700D62\tInigo\t1\t0\tInigo.esp*001D8B*0\tSkyrim.esm*01397E*2\n"
+ 													  "follower\tSkyrim.esm\t0A2C94\t000A2C94\tLydia\t1\t0\tSkyrim.esm*0750BA*0\tSkyrim.esm*013989*1\n");
+-			const auto c10 = tp::Diff(tp::ReadSnapshot(g10), tp::ReadSnapshot(b10));
++			const auto good10 = tp::ReadSnapshot(g10), bad10 = tp::ReadSnapshot(b10);
++			const auto c10 = tp::Diff(good10, bad10);
+ 			const tp::Change *inigo = nullptr, *lydia = nullptr;
+ 			for (const auto& c : c10) {
+ 				inigo = c.cat == tp::Category::kFollowers && c.label.rfind("Inigo", 0) == 0 ? &c : inigo;
+@@ -501,7 +502,8 @@ namespace
+ 				"jobj\tSkyrim.esm\t0242BA\t000242BA\t10\t1\n"
+ 				"jobj\tSkyrim.esm\t025231\t00025231\t10\t3\n");
+ 			std::ofstream(g9, std::ios::app) << "jobj\tSkyrim.esm\t0BBBBB\t000BBBBB\t10\t1\n";
+-			const auto c9 = tp::Diff(tp::ReadSnapshot(g9), tp::ReadSnapshot(b9));
++			const auto good9 = tp::ReadSnapshot(g9), bad9 = tp::ReadSnapshot(b9);
++			const auto c9 = tp::Diff(good9, bad9);
+ 			const tp::Change *voice = nullptr, *muscle = nullptr, *theft = nullptr;
+ 			for (const auto& c : c9) {
+ 				voice = c.label.rfind("The Way of the Voice", 0) == 0 ? &c : voice;

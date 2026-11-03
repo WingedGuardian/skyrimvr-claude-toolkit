@@ -233,7 +233,7 @@ BREAKS = {
     "resaver-port-checker-shipped": (lambda r: (r / "tools" / "resaver-port-write-check.py").write_text("x"),
                                      "no ReSaver Plus qualification checker"),
     "resaver-plus-patch-missing": (lambda r: sorted((r / "tools" / "resaver-plus" / "patches").glob("*.patch"))[0]
-                                   .unlink(), "carries the tested 27 patches"),
+                                   .unlink(), "carries the tested 10 patches"),
     "resaver-plus-license-missing": (lambda r: (r / "tools" / "resaver-plus" / "LICENSE").unlink(),
                                      "tools/resaver-plus/LICENSE present"),
     "resaver-plus-notice-missing": (lambda r: (r / "tools" / "resaver-plus" / "NOTICE.md").unlink(),

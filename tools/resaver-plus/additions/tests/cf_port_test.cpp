@@ -13,7 +13,7 @@ void Check(bool ok, const char* name) {
 void VS(Writer& w, std::uint32_t n) {
     if (n < 64) w.u8(static_cast<std::uint8_t>(n << 2));
     else if (n < 16384) w.u16(static_cast<std::uint16_t>((n << 2) | 1));
-    else { n = (n << 2) | 2; w.u8(n); w.u8(n >> 8); w.u8(n >> 16); }
+    else w.u32((n << 2) | 2);
 }
 void Ref(Writer& w, std::uint32_t n = 0x400014) { RefID{n}.write(w); }
 void Floats(Writer& w, int n) { for (int i = 0; i < n; ++i) w.f32(i + 0.25f); }
@@ -68,7 +68,15 @@ int main() {
         Check(cf::Decode(s, nf).complete, "nested type16 groups consume exactly");
         Truncations(s, nf);
     }
-    for (auto count : {0u, 2u, 64u}) {
+    for (int levels : {16, 17, 100000}) {
+        Writer w; VS(w, 1);
+        for (int i = 0; i < levels; ++i) w.u8(4);
+        w.u8(22);
+        const auto d = cf::Decode(s, Form(w, ChangeFormType::REFR, 1u << 6));
+        Check(d.complete == (levels == 16), "extra data nesting is limited at 16 levels");
+        if (levels > 16) Check(d.error.find("nested too deeply") != std::string::npos, "too deep is named, not a crash");
+    }
+    for (auto count : {0u, 2u, 64u, 16384u}) {
         Writer w; VS(w, 2); Breadcrumb(w, count); w.u8(22);
         auto f = Form(w, ChangeFormType::REFR, 1u << 6); const auto d = cf::Decode(s, f);
         Check(d.complete && d.consumed == w.size(), "breadcrumb lengths and following element stay synchronized");

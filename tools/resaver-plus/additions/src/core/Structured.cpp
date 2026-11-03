@@ -83,10 +83,11 @@ std::vector<const GlobalData *> Globals(const SaveFile &s) {
       out.push_back(&g);
   return out;
 }
-std::vector<std::uint8_t> Bytes(const GlobalData &g) {
+std::vector<std::uint8_t> Bytes(const GlobalData &g, bool le) {
   if (!g.papyrus)
     return g.raw;
   Writer w;
+  w.le = le;
   g.papyrus->write(w);
   return w.buf;
 }
@@ -146,7 +147,7 @@ J Info(SaveFile &s) {
   // The native header does not distinguish SE and VR reliably. The local
   // compatibility adapter may label its known VR corpus; the reusable API must
   // not claim a runtime based only on matching save-format versions.
-  j.o["game"] = S("SKYRIM_SE");
+  j.o["game"] = S(s.isLE() ? "SKYRIM_LE" : "SKYRIM_SE");
   j.o["changeForms"] = N(s.changeForms.size());
   j.o["scriptInstances"] = N(p.instances.size());
   j.o["scripts"] = N(p.scripts.size());
@@ -611,8 +612,8 @@ J GlobalData(SaveFile &s, SaveFile *second) {
     auto x = Object();
     const auto *ga = i < a.size() ? a[i] : nullptr;
     const auto *gb = i < b.size() ? b[i] : nullptr;
-    auto ba = ga ? Bytes(*ga) : std::vector<std::uint8_t>{};
-    auto bb = gb ? Bytes(*gb) : std::vector<std::uint8_t>{};
+    auto ba = ga ? Bytes(*ga, s.isLE()) : std::vector<std::uint8_t>{};
+    auto bb = gb ? Bytes(*gb, second->isLE()) : std::vector<std::uint8_t>{};
     if (second && ga && gb && ga->type == gb->type && ba == bb)
       continue;
     x.o["index"] = N(i);

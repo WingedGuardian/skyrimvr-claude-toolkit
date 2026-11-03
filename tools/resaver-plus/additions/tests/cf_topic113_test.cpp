@@ -5,7 +5,7 @@ using namespace ess;
 namespace {
 int passed=0,failed=0;
 void Check(bool good,const char* name){if(good)++passed;else{++failed;std::printf("FAIL: %s\n",name);}}
-void VS(Writer& w,std::uint32_t n){if(n<64)w.u8(n<<2);else if(n<16384)w.u16((n<<2)|1);else{n=(n<<2)|2;w.u8(n);w.u8(n>>8);w.u8(n>>16);}}
+void VS(Writer& w,std::uint32_t n){if(n<64)w.u8(n<<2);else if(n<16384)w.u16((n<<2)|1);else w.u32((n<<2)|2);}
 void Ref(Writer& w){RefID{0x400014}.write(w);}
 ChangeForm Form(const Writer& w){ChangeForm f;f.refID.data=0x400055;f.typeField=0;f.changeFlags=1u<<6;cf::SetBody(f,w.buf);return f;}
 Writer Make(std::uint32_t count,bool payload=true){

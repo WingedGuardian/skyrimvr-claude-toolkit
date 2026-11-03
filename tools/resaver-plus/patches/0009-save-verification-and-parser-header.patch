@@ -1,0 +1,51 @@
+diff --git a/src/core/Save.h b/src/core/Save.h
+index 0d7fedf..8fe0a67 100644
+--- a/src/core/Save.h
++++ b/src/core/Save.h
+@@ -5,6 +5,7 @@
+ #include "Papyrus.h"
+ 
+ #include <filesystem>
++#include <functional>
+ #include <memory>
+ #include <string>
+ #include <vector>
+@@ -87,6 +88,8 @@ namespace ess
+ 	{
+ 	public:
+ 		static std::unique_ptr<SaveFile> load(const std::filesystem::path& a_path);
++		// Same parser as load(), also usable for synthetic fixtures and verified in-memory roundtrips.
++		static std::unique_ptr<SaveFile> parse(const std::vector<std::uint8_t>& bytes, const std::vector<std::uint8_t>& cosaveBytes = {}, bool cosavePresent = false);
+ 		void save(const std::filesystem::path& a_path) const;  // also writes the .skse co-save next to it
+ 
+ 		// Writes the save (and its .skse co-save) safely:
+@@ -97,12 +100,17 @@ namespace ess
+ 		//     everything before anything is replaced;
+ 		//  3. the save is put in place, then the co-save; if the co-save cannot be, the save is rolled
+ 		//     back to the previous file (or removed, if there was none).
+-		// Throws std::runtime_error on any failure; then nothing but the temporary files was changed.
++		// Requires backup permission for an existing destination. Staged output must reproduce the
++		// complete expected model, including the matching co-save. Failed stages are retained.
++		// Throws std::runtime_error on failure; a publication failure reports whether rollback succeeded.
+ 		struct WriteResult
+ 		{
+ 			std::filesystem::path backup, cosaveBackup;  // empty when none was made
+ 		};
+-		WriteResult write(const std::filesystem::path& a_path, bool a_backup) const;
++		enum class WriteStage { kStaged, kVerified, kEssPublished };
++		// Optional instrumentation/fault probes. The path is the owned staged ESS.
++		using WriteObserver = std::function<void(WriteStage, const std::filesystem::path&)>;
++		WriteResult write(const std::filesystem::path& a_path, bool a_backup, const WriteObserver& observer = {}) const;
+ 		std::vector<std::uint8_t> serialize() const;  // the whole .ess file
+ 
+ 		std::vector<std::uint8_t> buildBody() const;  // uncompressed body, offsets recomputed
+@@ -118,7 +126,8 @@ namespace ess
+ 		std::vector<std::uint32_t> formIDs;
+ 		std::vector<std::uint32_t> visitedWorldspaces;
+ 		std::vector<std::uint8_t> unknown3;
+-		std::vector<std::uint8_t> cosave;  // .skse file contents (empty if none)
++		bool                     hasCosave = false;  // distinguishes an empty file from an absent file
++		std::vector<std::uint8_t> cosave;  // .skse file contents
+ 		std::size_t               originalBodySize = 0;
+ 		// Structural problems found while reading (layout that does not add up, bad string indices,
+ 		// duplicate ids...). A save with problems may not be written back faithfully: open it read-only.

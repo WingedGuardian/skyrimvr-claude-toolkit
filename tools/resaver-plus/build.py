@@ -7,14 +7,14 @@ binary is shipped.
 Steps, each checked; the first failure stops the build and nothing is installed:
   1. Windows, git, the MSVC build tools (Visual Studio 2022 Build Tools, "Desktop development with C++") and CMake
      3.21 or newer (on PATH, or the copy Visual Studio bundles) are present.
-  2. Tonycubed2/ResaverPP is fetched at UPSTREAM_COMMIT (19.6) with line-ending conversion OFF; the checkout's HEAD is
+  2. Tonycubed2/ResaverPP is fetched at UPSTREAM_COMMIT (51) with line-ending conversion OFF; the checkout's HEAD is
      verified against the pin. An existing cache must be clean, at the pin, and conversion-free, or it is refused.
-  3. The upstream tree is copied into fresh owned staging. Each of the 27 patches is checked (`git apply --check`) and
-     applied, in order; the 15 additions are copied in (none may replace an upstream file).
+  3. The upstream tree is copied into fresh owned staging. Each of the 10 patches is checked (`git apply --check`) and
+     applied, in order; the 16 additions are copied in (none may replace an upstream file).
   4. Every changed and added file is compared with SOURCE-SHA256. One byte different and the build stops.
   5. CMake configures the command-line tool and the tests with the GUI OFF, and builds them with one MSBuild job and
      one compiler worker by default (--jobs 2 at most).
-  6. CTest runs. The six runnable targets (unit, decoder_port, topic113, expected_result, structured_queries,
+  6. CTest runs. The seven runnable targets (unit, decoder_port, topic113, expected_result, structured_queries,
      analysis_contract) must all pass; the real-save `fixtures` target is skipped by design. Anything else -- a
      failure, a missing target, an unexpected one -- refuses the install.
   7. Only then: resaverpp-cli.exe is installed into tools/resaver-plus/build/ with BUILD-INFO.json (pins, patch-set
@@ -47,11 +47,11 @@ PATCHES = HERE / "patches"
 ADDITIONS = HERE / "additions"
 MANIFEST = HERE / "SOURCE-SHA256"
 UPSTREAM_REPO = "https://github.com/Tonycubed2/ResaverPP"
-UPSTREAM_VERSION = "19.6"
-UPSTREAM_COMMIT = "0d48f60cb8a69b367abfbd78d58418e64c507da5"
-EXPECTED_PATCHES = 27
-EXPECTED_ADDITIONS = 15
-REQUIRED_TESTS = ("unit", "decoder_port", "topic113", "expected_result", "structured_queries", "analysis_contract")
+UPSTREAM_VERSION = "51"
+UPSTREAM_COMMIT = "098eb8c1c3a23552c7662a2083f4aca9a2ff41f4"
+EXPECTED_PATCHES = 10
+EXPECTED_ADDITIONS = 16
+REQUIRED_TESTS = ("unit", "decoder_port", "topic113", "expected_result", "structured_queries", "analysis_contract", "le_bounds")
 SKIPPED_TESTS = ("fixtures",)        # real saves; never configured here
 EXECUTABLE = "resaverpp-cli.exe"
 CMAKE_MINIMUM = (3, 21)
