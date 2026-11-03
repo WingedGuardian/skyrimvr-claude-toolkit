@@ -195,14 +195,27 @@ def twin_steps(py, base, changed, processes=4, per_process=50):
              dict(env, SKYGUARD_MUTATION_SHARD="{}/{}".format(k + 1, n))) for k in range(n)]
 
 
-def rest_chunks(files, per_chunk=6, max_chunks=4):
-    """Split the changed-file/sentinel test files into round-robin chunks: one per `per_chunk` files, at most
-    `max_chunks`, each run as its own process under its own time cap. Every file lands in exactly one chunk."""
+def rest_chunks(files, per_chunk=6, max_chunks=5):
+    """Split the changed-file/sentinel test files into chunks: one per `per_chunk` files, at most `max_chunks` (with the
+    three named groups, the policy's eight test workers), each run as its own process under its own time cap. Every file
+    lands in exactly one chunk, biggest first into the lightest, since a test file's size roughly follows its cost: by
+    position alone one chunk drew 1,380 tests and reached 70% in the 20-minute cap (2026-11-03)."""
     files = list(files)
     if not files:
         return []
     n = min(max_chunks, max(1, -(-len(files) // per_chunk)))
-    return [files[k::n] for k in range(n)]
+
+    def size(name):
+        try:
+            return (REPO / name).stat().st_size
+        except OSError:
+            return 0
+    chunks, loads = [[] for _ in range(n)], [0] * n
+    for name in sorted(files, key=size, reverse=True):
+        k = min(range(n), key=lambda i: (loads[i], len(chunks[i])))
+        chunks[k].append(name)
+        loads[k] += size(name)
+    return chunks
 
 
 class Gate:

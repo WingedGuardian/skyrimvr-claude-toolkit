@@ -70,10 +70,19 @@ def test_a_large_changed_file_set_is_split_into_parallel_chunks_not_refused():
     assert g.rest_chunks(["a"]) == [["a"]]
     files = ["t%02d" % i for i in range(30)]
     chunks = g.rest_chunks(files)
-    assert len(chunks) == 4, [len(c) for c in chunks]
+    assert len(chunks) == 5, [len(c) for c in chunks]
     assert sorted(f for c in chunks for f in c) == files           # each file once, none dropped
     assert max(len(c) for c in chunks) - min(len(c) for c in chunks) <= 1   # balanced
     assert len(g.rest_chunks(files[:7])) == 2
+
+
+def test_chunks_are_balanced_by_file_size_not_position(tmp_path, monkeypatch):
+    g = _gate()
+    monkeypatch.setattr(g, "REPO", tmp_path)
+    for name, size in (("big", 900), ("a", 100), ("b", 100), ("c", 100), ("d", 100), ("e", 100), ("f", 100), ("g", 100)):
+        (tmp_path / name).write_bytes(b"x" * size)
+    chunks = g.rest_chunks(["big", "a", "b", "c", "d", "e", "f", "g"], per_chunk=4, max_chunks=2)
+    assert sorted(len(c) for c in chunks) == [1, 7] and ["big"] in chunks
 
 
 def test_the_real_batch_that_turned_ci_red_is_now_selected():
