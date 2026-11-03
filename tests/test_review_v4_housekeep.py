@@ -221,15 +221,14 @@ def test_house_carl_refuses_a_read_only_master_before_linking_it(tmp_path, monke
         os.chmod(master, 0o666)
 
 
-def test_house_carl_refuses_masters_on_two_drives():
+def test_house_carl_refuses_masters_on_two_drives(monkeypatch):
     import importlib
     import sys
     sys.path.insert(0, str(REPO / "tools"))
     gw = importlib.import_module("housecarl_integration.gateway")
-    from pathlib import PureWindowsPath
-    fake = {"A.esm": PureWindowsPath("C:/a/A.esm"), "B.esm": PureWindowsPath("D:/b/B.esm")}
+    monkeypatch.setattr(gw, "_drive", lambda p: str(p)[:2].lower())     # drive letters mean nothing off Windows
     with pytest.raises(gw.Refusal, match="one drive"):
-        gw._scratch_parent({"root": "C:/x"}, fake)
+        gw._scratch_parent({"root": "C:/x"}, {"A.esm": "C:/a/A.esm", "B.esm": "D:/b/B.esm"})
 
 
 @pytest.mark.parametrize("fail", ["refused", "timeout"])

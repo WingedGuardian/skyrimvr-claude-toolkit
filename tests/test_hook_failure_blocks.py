@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 
 import pytest
 
@@ -84,7 +85,8 @@ def test_an_unreadable_version_is_said_not_refused(tmp_path):
 
 def test_codex_only_setup_never_asks_claude(tmp_path):
     r, _ = _setup(tmp_path, "1.0.0", agent="codex")
-    assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+    # Codex support is Windows-only: elsewhere setup says so and stops (exit 3), and it still must not ask about Claude.
+    assert r.returncode == (0 if sys.platform == "win32" else 3), r.stdout[-2000:] + r.stderr[-2000:]
     assert "older than 2.1.295" not in r.stderr and "needs 2.1.295" not in r.stdout
 
 

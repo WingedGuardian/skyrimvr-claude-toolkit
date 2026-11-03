@@ -113,6 +113,7 @@ if [ -n "$SPRIGGIT" ]; then
   INSTALLED=$("$SPRIGGIT" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   if [ -z "$PIN" ]; then
     printf '  %-22s unknown       no pin readable from .config/dotnet-tools.json\n' "spriggit version"
+    FAIL=1; MISSING="$MISSING spriggit-pin"
   elif [ "$INSTALLED" = "$PIN" ]; then
     printf '  %-22s ok            installed %s == pinned %s\n' "spriggit version" "$INSTALLED" "$PIN"
   else

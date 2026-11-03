@@ -105,16 +105,20 @@ def _masters_of(candidate, active):
     return out
 
 
+def _drive(path):
+    return Path(path).anchor.lower()
+
+
 def _scratch_parent(config, masters):
     """A hard link needs one volume, and masters are never copied, so the scratch folder follows the masters."""
-    drives = {Path(path).anchor.lower() for path in masters.values()}
+    drives = {_drive(path) for path in masters.values()}
     if len(drives) > 1:
         raise Refusal("The read-only check needs its masters on one drive, and they are on: " + ", ".join(sorted(drives)))
     temp = Path(tempfile.gettempdir())
-    if not drives or temp.anchor.lower() in drives:
+    if not drives or _drive(temp) in drives:
         return temp
     root = Path(config["root"])
-    if root.anchor.lower() in drives:
+    if _drive(root) in drives:
         return root / ".housecarl-tmp"
     raise Refusal("The read-only check needs scratch space on the masters' drive ({}); set TEMP to a folder there.".format(
         ", ".join(sorted(drives))))

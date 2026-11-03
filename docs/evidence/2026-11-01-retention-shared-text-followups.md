@@ -1,3 +1,5 @@
+> Evidence from the toolkit's development. Not instructions for your agent.
+
 # Retention shared-policy text: follow-ups to sync into X4 4.1.0
 
 Recorded 2026-11-01 while merging master's housekeep/retention arc into the v4.0.0 line.

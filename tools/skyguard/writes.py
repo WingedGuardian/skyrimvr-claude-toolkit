@@ -53,10 +53,10 @@ hook-test harness passing a write as DATA to a function beside an opaque `bash "
 
 Literal Python open/Path/truncate writes are read as Python syntax, including escaped and raw strings;
 the Node literal-call and PowerShell method-call readers keep their own language rules.
-KNOWN LIMITS (recorded, not handled): `perl -i`, interpreter code that computes its filename, and opaque
+KNOWN LIMITS (recorded, not handled): interpreter code that computes its filename, and opaque
 scripts that write a plugin get no message (R11: the Write-tool deny remains, and Plan 6's read-only lock is the
 backstop); a copy whose unresolved destination does not name a Data folder gets no note (`"$D/My.esp"`);
-`touch` and `truncate` are not write primitives; a copy or move onto an ordinary (non-plugin, non-config) file in
+`touch` is not a write primitive; a copy or move onto an ordinary (non-plugin, non-config) file in
 Data/ gets no note (S-MOVE-INSTALL was removed in Task 9 fix round 1: 107 of 107 hits in history were the user's
 deliberate deploys); on a parse failure the S-WRITE-INSTALL note is not attempted;
 a target held in a variable that is NOT a same-command literal (unassigned here, assigned in a branch, written
@@ -452,13 +452,30 @@ def _python_write_targets(code: str) -> List[str]:
                     literal(call.args[index]) if len(call.args) > index else "r")
         return isinstance(mode, str) and any(c in mode for c in "wax+")
 
+    # What `import x as y` / `from x import y as z` call things (review round 3: `from shutil import move` was no one's).
+    modules, names = {}, {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update({a.asname or a.name: a.name for a in node.names})
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.update({a.asname or a.name: node.module + "." + a.name for a in node.names})
+
+    def path_argument(node, _plain=path_argument):
+        if isinstance(node, ast.Call) and node.args and not node.keywords and (
+                isinstance(node.func, ast.Name) and names.get(node.func.id) == "pathlib.Path" or
+                isinstance(node.func, ast.Attribute) and node.func.attr == "Path" and
+                isinstance(node.func.value, ast.Name) and modules.get(node.func.value.id) == "pathlib"):
+            parts = [literal(arg) for arg in node.args]
+            return None if any(part is None for part in parts) else str(Path(*parts))
+        return _plain(node)
+
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func, name = node.func, ""
         if isinstance(func, ast.Name):
-            name = func.id
+            name = names.get(func.id, func.id)
         elif isinstance(func, ast.Attribute):
             parent = path_argument(func.value)
             if parent is not None and (func.attr in ("write_bytes", "write_text") or
@@ -468,15 +485,17 @@ def _python_write_targets(code: str) -> List[str]:
                 out.append(parent)
                 dest = literal(node.args[0]) if node.args else None
                 out += [dest] if dest else []
-            if isinstance(func.value, ast.Name) and func.value.id in ("io", "builtins", "os"):
-                name = func.value.id + "." + func.attr
+            if isinstance(func.value, ast.Name) and modules.get(func.value.id, func.value.id) in ("io", "builtins", "os",
+                                                                                                  "shutil"):
+                name = modules.get(func.value.id, func.value.id) + "." + func.attr
         # Release review 2026-11-02: moves and copies by literal name. The destination is written; a move's source goes.
         changes = {"os.rename": 2, "os.replace": 2, "os.renames": 2, "shutil.move": 2, "shutil.copy": 1,
                    "shutil.copy2": 1, "shutil.copyfile": 1, "shutil.copytree": 1}
-        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id == "shutil":
-            name = "shutil." + func.attr
-        if name in changes and len(node.args) >= 2:
-            dest, source = literal(node.args[1]), literal(node.args[0])
+        if name in changes:
+            given = {k.arg: k.value for k in node.keywords}
+            first = node.args[0] if node.args else given.get("src")
+            second = node.args[1] if len(node.args) > 1 else given.get("dst")
+            dest, source = (literal(second) if second is not None else None), (literal(first) if first is not None else None)
             out += [dest] if dest else []
             out += [source] if source and changes[name] == 2 else []
             continue

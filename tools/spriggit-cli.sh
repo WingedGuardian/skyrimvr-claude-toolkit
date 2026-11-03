@@ -36,6 +36,9 @@ while [ "$i" -lt "${#argv[@]}" ]; do
             p="${argv[$((i+1))]//\\//}"
             if [ "$a" = --InputPath ]; then REAL_IN="$p"; else REAL_OUT="$p"; fi
             i=$((i+2));;
+        -i|-o|--InputPath=*|--OutputPath=*)
+            echo "[spriggit-cli] use --InputPath and --OutputPath as separate words: $a would skip validated publication" >&2
+            exit 2;;
         *) i=$((i+1));;
     esac
 done

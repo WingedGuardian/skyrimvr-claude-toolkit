@@ -270,3 +270,28 @@ def test_round_two_bulk_spellings_need_the_typed_approval(box, cmd, shell):
 def test_a_linear_shift_is_still_read_precisely():
     from skyguard.shellparse import _call_body
     assert _call_body('echo shift; echo "$1"', ("a",), (False,)) == 'echo shift; echo "a"'
+
+
+# ---- review round 3: other spellings of the same literal Python moves
+@pytest.mark.parametrize("code", [
+    "from shutil import move; move('{S}/a{E}', '{B}/x')",
+    "from shutil import move as m; m('{S}/a{E}', '{B}/x')",
+    "import shutil as s; s.move('{S}/a{E}', '{B}/x')",
+    "import shutil; shutil.copy(src='{B}/x', dst='{S}/a{E}')",
+    "import shutil; shutil.move(src='{S}/a{E}', dst='{B}/x')",
+    "from os import replace; replace('{B}/x', '{S}/a{E}')",
+    "from pathlib import Path as P; P('{S}/a{E}').rename('{B}/x')",
+], ids=["from-import", "from-import-as", "import-as", "keywords", "keyword-source", "from-os", "path-alias"])
+def test_literal_python_spellings_of_one_save_change_are_backed_up(box, code):
+    folder = "$B/My Games/Skyrim VR/Saves"
+    v = box('python -c "{}"'.format(code.format(S=folder, B="$B", E="$E")))
+    assert v.decision == "allow" and _pairs(v) == 1, v
+
+
+@pytest.mark.parametrize("code", [
+    "from shutil import copy; copy('{B}/x', '{B}/Game/Data/X.esp')",
+    "import shutil; shutil.copy(src='{B}/x', dst='{B}/Game/Data/X.esp')",
+    "from pathlib import Path as P; P('{B}/Game/Data/X.esp').write_bytes(b'')",
+], ids=["from-import", "keywords", "path-alias"])
+def test_literal_python_spellings_of_a_plugin_write_are_seen(box, code):
+    assert box('python -c "{}"'.format(code.format(B="$B"))).decision == "deny"

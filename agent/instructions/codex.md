@@ -21,7 +21,7 @@ Generated into `AGENTS.md` only; everything above is shared. Other agents: this 
 - **Checked:** every shell command and every `apply_patch`, including one run through the shell. Writing
   a plugin or archive (`.esp/.esm/.esl/.bsa/.ba2`) directly is refused; deleting in the game or config
   folders is refused; edits inside the game get advice. Files an `apply_patch` changes or deletes are
-  backed up to `.claude/backups/` first, and recent `.psc`/`.pex` are snapshotted before shell commands.
+  backed up to `.claude/backups/` first, and `.psc`/`.pex` are snapshotted before shell commands.
   A file written by a script you run is not backed up.
 - **DevBench MCP** (server name contains `devbench`): `smp reset` is refused; a save over an existing
   save is backed up first, then runs.

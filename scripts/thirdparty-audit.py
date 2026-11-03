@@ -845,7 +845,7 @@ def dynamic_entries(repo):
     seen = set()
     for wf in sorted(repo.root.glob(".github/workflows/*.y*ml")):
         for line in wf.read_text(encoding="utf-8", errors="replace").splitlines():
-            m = re.search(r"uses:\s*(?P<repo>[\w.-]+/[\w.-]+)(?:/[\w./-]+)?@(?P<ref>[\w.-]+)(?:\s*#\s*(?P<tag>v?[\w.-]+))?", line)
+            m = re.search(r"uses:\s*(?P<repo>[\w.-]+/[\w.-]+)(?:/[\w./-]+)?@(?P<ref>[\w.-]+)(?:\s*#\s*(?P<tag>v?[0-9][\w.-]*)\s*$)?", line)
             if m and (m.group("repo"), m.group("ref")) not in seen:
                 seen.add((m.group("repo"), m.group("ref")))
                 out.append({"name": "action " + m.group("repo"), "action": m.group("repo"), "ref": m.group("ref"),
@@ -1609,8 +1609,6 @@ DELIVERY_EXEMPT = [
     ("docs/skse-cross-compile.md", "download-unverified", r"Jake-Shadle/xwin/releases/download", _SKSE),
     (".github/workflows/ci.yml", "system-package", r"sudo apt-get install -y|choco install jq -y", _CI),
     (".github/workflows/full-qualification.yml", "system-package", r"sudo apt-get install -y|choco install jq -y", _CI),
-    ("*settings.local.json.example", "npm", r'"Bash\(npm install:\*\)"', "a permission-allowlist pattern, not an install"),
-    ("*settings.local.json.example", "pip", r'"Bash\(pip install:\*\)"', "a permission-allowlist pattern, not an install"),
     ("*", "follows-latest", r"install locations \(newest version first\)",
      "the hook wrappers' search order for an interpreter already installed, not an install"),
     ("scripts/build-nexus-pack.sh", "gh-release", r'gh release download "\$TAG"', _OWN),

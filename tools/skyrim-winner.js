@@ -207,7 +207,7 @@ function findByLocalID(file, localID) {
     // plainly existed came back as "no record". That false negative is exactly
     // what this tool exists to prevent, so match on the low 3 bytes instead --
     // the same thing the existing hand-rolled scripts do.
-    for (const r of xelib.getRecords(file, '', false)) {
+    for (const r of xelib.getRecords(file, '', true)) {     // true: its overrides too, as the header promises
         let fid;
         try { fid = xelib.getFormID(r, false); } catch (e) { continue; }
         if ((fid & 0x00FFFFFF) === (localID & 0x00FFFFFF)) return r;

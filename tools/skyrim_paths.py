@@ -24,9 +24,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))   # tools/, for the gua
 from skyguard.paths import GAME_FOLDERS  # noqa: E402
 
 
+def _recorded_documents() -> str:
+    """The game's folder under Documents as setup recorded it, or ""."""
+    try:
+        from skyguard import paths
+        values = paths.read_install(str(Path(__file__).resolve().parent.parent), {}).values("SKYRIM_DOCUMENTS_DIR")
+    except (ImportError, OSError, ValueError):
+        return ""
+    return values[0] if values else ""
+
+
+def _windows_folder(csidl: int) -> str:
+    if sys.platform != "win32":
+        return ""
+    import ctypes
+    buf = ctypes.create_unicode_buffer(32768)
+    return buf.value if ctypes.windll.shell32.SHGetFolderPathW(None, csidl, None, 0, buf) == 0 else ""
+
+
 def my_games() -> Path:
-    """<user profile>/Documents/My Games -- the root Bethesda writes under."""
+    """The root Bethesda writes under: Documents/My Games, where Documents can be redirected (OneDrive, a moved or
+    localized folder), so a leftover <profile>/Documents does not win. Recorded by setup, else as Windows reports it."""
+    recorded = os.environ.get("SKYRIM_DOCUMENTS_DIR") or _recorded_documents()
+    if recorded:
+        return Path(recorded).parent
     profile = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+    real_profile = _windows_folder(0x28)            # CSIDL_PROFILE: a test's fake profile keeps its own Documents
+    if real_profile and os.path.normcase(real_profile) == os.path.normcase(profile):
+        documents = _windows_folder(0x05)           # CSIDL_PERSONAL
+        if documents:
+            return Path(documents) / "My Games"
     return Path(profile) / "Documents" / "My Games"
 
 

@@ -713,7 +713,7 @@ not a change. Verify a round trip by parsing the properties (names, types, value
   the drift audit a `dotnet tool update` on an SDK 6/8/9 machine failed with
   "DotnetToolSettings.xml was not found". 0.40.0 targeted net9.0. `tools/toolchain-check.sh`
   compares `spriggit --version` with the pin in `.config/dotnet-tools.json` (older or newer is
-  a MISMATCH) and requires SDK 10+ for 0.41+, SDK 9+ before that.
+  a MISMATCH) and requires exactly SDK major 10 for 0.41+, SDK 9 before that.
 - **`spriggit --version` exits 1 even when it works** (MEASURED 2026-10-05, 0.41.0, global tool and
   `dotnet tool run spriggit` alike): it prints `Spriggit version 0.41.0+...`, a stray `--version`, and
   `Spriggit.CLI 0.41.0+...`, then returns 1. Probe it by its OUTPUT, never its exit status, and not with

@@ -1118,7 +1118,8 @@ mkdir -p "$GAME_DIR/.claude/backups"
 if [ -n "$DO_CLAUDE" ] && [ ! -f "$GAME_DIR/.claude/settings.local.json" ] && [ -f "$GAME_DIR/.claude/settings.local.json.example" ]; then
     cp "$GAME_DIR/.claude/settings.local.json.example" "$GAME_DIR/.claude/settings.local.json"
     echo ""
-    echo "  Copied settings.local.json.example -> settings.local.json (customize allowed commands later)"
+    echo "  Copied settings.local.json.example -> settings.local.json: common commands (rm, bash, python, curl and"
+    echo "  others) run without a prompt, and the guards still judge each one. Edit that file to change the list."
 fi
 
 # --- Optional: Nexus API integration status (non-blocking) ---
