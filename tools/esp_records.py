@@ -49,6 +49,9 @@ class Plugin:
         return [name for bit, name in HEADER_FLAGS if self.header.flags & bit]
 
 
+MAX_GROUP_DEPTH = 64        # real plugins nest a few levels; a crafted file must not reach Python's recursion limit
+
+
 def read(path) -> Plugin:
     with open(path, "rb") as f:
         data = f.read()
@@ -59,8 +62,10 @@ def parse(data: bytes) -> Plugin:
     records, problems = [], []
     header = None
 
-    def walk(off, end):
+    def walk(off, end, depth=0):
         nonlocal header
+        if depth > MAX_GROUP_DEPTH:
+            raise PluginError("GRUPs nested deeper than {} at offset {}".format(MAX_GROUP_DEPTH, off))
         while off < end:
             if off + 24 > end:
                 raise PluginError("truncated record header at offset {}".format(off))
@@ -70,7 +75,7 @@ def parse(data: bytes) -> Plugin:
                 # A GRUP's size includes its own 24-byte header. Smaller than that would walk in place forever.
                 if size < 24 or off + size > end:
                     raise PluginError("GRUP at offset {} has an impossible size {}".format(off, size))
-                walk(off + 24, off + size)
+                walk(off + 24, off + size, depth + 1)
                 off += size
                 continue
             if off + 24 + size > end:

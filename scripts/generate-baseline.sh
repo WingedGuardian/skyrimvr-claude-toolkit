@@ -2,18 +2,27 @@
 # Generate SHA256 checksums for critical game files
 # Run manually to create a baseline snapshot for drift detection
 #
-# Usage: bash scripts/generate-baseline.sh
+# Usage: bash scripts/generate-baseline.sh            writes .claude/baseline_checksums.txt
+#        bash scripts/generate-baseline.sh --stdout   prints the same text and leaves the baseline alone
 #
 # SETUP: Set GAME_DIR and CONFIG_DIR below to match your installation.
 
 GAME_DIR="${GAME_DIR:-$(pwd)}"
 CONFIG_DIR="${CONFIG_DIR:-$HOME/Documents/My Games/Skyrim VR}"
 OUTPUT="$GAME_DIR/.claude/baseline_checksums.txt"
+STDOUT=
+if [ "${1:-}" = "--stdout" ]; then
+    STDOUT=1
+    OUTPUT=$(mktemp) || exit 1       # /dev/stdout cannot be reopened for writing when stdout is a Windows pipe
+    trap 'rm -f "$OUTPUT"' EXIT
+fi
 
-echo "Generating baseline checksums..."
-echo "Game dir:   $GAME_DIR"
-echo "Config dir: $CONFIG_DIR"
-echo ""
+{
+    echo "Generating baseline checksums..."
+    echo "Game dir:   $GAME_DIR"
+    echo "Config dir: $CONFIG_DIR"
+    echo ""
+} >&2
 
 echo "# Baseline checksums generated $(date '+%Y-%m-%d %H:%M:%S')" > "$OUTPUT"
 echo "# Compare with: diff <(bash scripts/generate-baseline.sh --stdout) .claude/baseline_checksums.txt" >> "$OUTPUT"
@@ -48,6 +57,10 @@ echo "## Project Files" >> "$OUTPUT"
 sha256sum "$GAME_DIR/CLAUDE.md" >> "$OUTPUT" 2>/dev/null
 sha256sum "$GAME_DIR/KNOWLEDGEBASE.md" >> "$OUTPUT" 2>/dev/null
 
+if [ -n "$STDOUT" ]; then
+    cat "$OUTPUT"
+    exit 0
+fi
 LINES=$(wc -l < "$OUTPUT")
 echo "Baseline written to $OUTPUT ($LINES lines)"
-echo "Re-run anytime to compare against current state."
+echo "To compare against the current state, use --stdout: running without it replaces this baseline."

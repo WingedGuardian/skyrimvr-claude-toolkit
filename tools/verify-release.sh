@@ -249,7 +249,9 @@ fi
 # Anchored, fixed-string, and end-of-heading: `grep -q "## $TAG"` matched `## v3.9.1` when the tag was v3.9.
 if [ -n "$TAG" ]; then
   VER_RE=$(printf '%s' "${TAG#v}" | sed 's/[.]/[.]/g')
-  if grep -qE "^#{1,3} +\[?v?${VER_RE}\]?([^0-9.]|$)" "$ROOT/CHANGELOG.md" 2>/dev/null; then
+  if grep -E "^#{1,3} +\[?v?${VER_RE}\]?([^0-9.]|$)" "$ROOT/CHANGELOG.md" 2>/dev/null | grep -qi "unreleased"; then
+    bad "CHANGELOG section" "the $TAG heading still says unreleased"
+  elif grep -qE "^#{1,3} +\[?v?${VER_RE}\]?([^0-9.]|$)" "$ROOT/CHANGELOG.md" 2>/dev/null; then
     ok "CHANGELOG carries a $TAG section"
   else
     bad "CHANGELOG section" "no '## $TAG' heading"

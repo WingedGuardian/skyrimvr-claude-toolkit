@@ -21,7 +21,7 @@ Notes / gotchas (learned the hard way):
 - bound sphere (center + radius) is mandatory on each new shape.
 - LE (user_version_2=83) NIFs only. PyFFI cannot read SSE BSTriShape — use PyNifly.
 """
-import sys, time, math
+import os, sys, time, math
 time.clock = time.perf_counter
 from pyffi.formats.nif import NifFormat
 
@@ -196,8 +196,11 @@ root.children.update_size()
 root.children[n] = bs
 print(f"root children: {n} -> {root.num_children}")
 
-with open(PATH, "wb") as f:
+# Overwrites the input, so the new bytes go to a temporary file first: PyFFI raising mid-write must not leave it truncated.
+partial = PATH + ".partial"
+with open(partial, "wb") as f:
     data.write(f)
+os.replace(partial, PATH)
 print("written.")
 
 # Verify readback (note: cross-validate with PyNifly before any in-game test)

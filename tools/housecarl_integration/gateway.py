@@ -274,8 +274,9 @@ class Gateway:
             if original.name.lower() in {"skyrim.esm", "update.esm", "dawnguard.esm", "hearthfires.esm",
                                          "dragonborn.esm", "skyrimvr.esm"}:
                 raise Refusal("Edit a patch rather than rewriting an official master.")
-            preservation = backup(original, Path(config["state_dir"]) / "backups")
-            digest = preservation["sha256"]
+            if not arguments.get("dry_run"):     # backups are kept forever; a dry run publishes nothing to restore from
+                preservation = backup(original, Path(config["state_dir"]) / "backups")
+                digest = preservation["sha256"]
             staged = work / "mods/Target" / original.name
             staged.parent.mkdir(parents=True)
             shutil.copyfile(original, staged)

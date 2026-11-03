@@ -47,7 +47,15 @@ if (!args.length) { console.error('usage: node resaver-resolve-names.js <Plugin.
 const targets = args.map(a => {
     const i = a.lastIndexOf(':');
     return { raw: a, plugin: a.slice(0, i), fid: parseInt(a.slice(i + 1), 16) & 0xFFFFFF };
-}).filter(t => t.plugin && !Number.isNaN(t.fid));
+});
+const unreadable = targets.filter(t => !t.plugin || Number.isNaN(t.fid));
+targets.splice(0, targets.length, ...targets.filter(t => t.plugin && !Number.isNaN(t.fid)));
+if (!targets.length) {      // never hand the loader an empty list
+    const none = {};
+    for (const t of unreadable) none[t.raw] = { found: false, error: 'not Plugin.esp:formidHex' };
+    console.log(JSON.stringify(none));
+    process.exit(0);
+}
 
 const byPlugin = {};
 for (const t of targets) (byPlugin[t.plugin] = byPlugin[t.plugin] || []).push(t);
@@ -56,6 +64,7 @@ const plugins = Object.keys(byPlugin);
 async function main() {
     xelib.init();
     const out = {};
+    for (const t of unreadable) out[t.raw] = { found: false, error: 'not Plugin.esp:formidHex' };
     try {
         xelib.setGameMode(GM_SSE); xelib.setGamePath(GAME_PATH); xelib.setLanguage('English');
         xelib.loadPlugins(plugins.join('\n'), true, false);

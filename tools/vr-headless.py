@@ -1206,6 +1206,9 @@ def cmd_run(desktop, park=False, emu=False, force=False) -> int:
     st = load_state()
     if st and (st.get("mode") != "on" or st.get("session")):
         raise Refused("`run` needs a fresh session or one prepared by `on`; finish the existing one first (`stop`)")
+    if emu and desktop == "background" and not (st or {}).get("emu"):
+        raise Refused("`run --desktop background --emu` cannot prepare the driver: installing it needs Steam closed and a "
+                      "background session needs Steam open. Close Steam, run `emu on`, open Steam, then run this again")
     error = None
     try:
         if not st:

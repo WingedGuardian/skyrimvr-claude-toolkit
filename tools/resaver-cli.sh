@@ -15,7 +15,7 @@
 #   set-global <save> <target> <value> [<out.ess>] [--apply]      target = formidHex | Plugin.esp:formid
 #   set-var    <save> <eidHex> [<index> <value> <out.ess>] [--type int|float|bool|str] [--apply]
 #   clean      <save> <out.ess> [--undefined] [--unattached] [--terminate-threads] [--apply]
-#                                 dry-run unless --apply; writes to a NEW file, auto-backs-up + handles .skse
+#                                 dry-run unless --apply; writes to a NEW file + handles .skse (no backup of its own: the native backend's --apply takes one, and a guarded agent session does)
 #   changeform <save> <refidHex> [--raw] [--depth N]   parse ONE changeform body; --raw adds changeflags+hex/base64
 #   --- ReSaver-DELEGATED write ops (dry-run unless --apply; VERIFY-GATED: re-read==model or delete+fail) ---
 #   reset-havok       <save> [<out.ess>] [--apply]     ESS.resetHavok — clear REFR havok-move data

@@ -839,8 +839,10 @@ keep_hand_set() {  # $1 = key in skyrim-paths.env, $2 = detected value -> prints
     local v="" was="" seen=""
     if [ -f "$PATHS_ENV" ]; then
         v=$(sed -n "s/^$1=['\"]\(.*\)['\"]\$/\1/p" "$PATHS_ENV" | tail -n 1)
+        v=${v//"'\\''"/"'"}
         seen=$(grep -c "^# detected $1=" "$PATHS_ENV")
         was=$(sed -n "s/^# detected $1=['\"]\(.*\)['\"]\$/\1/p" "$PATHS_ENV" | tail -n 1)
+        was=${was//"'\\''"/"'"}
     fi
     if test "$seen" = 1 && test "$v" != "$was" && test -n "$v" && test -d "$v" && test "${SKYRIM_PREFER_DETECTED:-0}" != 1; then
         if test "$v" != "$2"; then

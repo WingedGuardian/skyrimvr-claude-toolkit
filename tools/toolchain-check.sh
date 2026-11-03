@@ -67,7 +67,11 @@ echo "=============================================================="
 { [ -n "${BASH:-}" ] && [ -x "$BASH" ]; } || { echo "cannot tell which bash is running this check" >&2; exit 2; }
 
 echo "runtimes:"
-check "python"        "Python 3"       python --version
+if command -v python >/dev/null 2>&1; then
+  check "python"      "Python 3"       python --version
+else
+  check "python3"     "Python 3"       python3 --version
+fi
 check "node"          "v[0-9]"         node --version
 check "jq"            "jq-"            jq --version
 check "java"          "version"        java -version

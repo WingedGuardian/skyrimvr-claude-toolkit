@@ -1105,6 +1105,9 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                     if f.suffix.lower() == ".gz" or s < 65536:
                         count("kept: launch log, recent or already compressed", s)
                         continue
+                    if not has_recycle_bin():    # the original stays, so the next plan would meet its own .gz and fail
+                        count("kept: launch log (no Recycle Bin on this platform)", s)
+                        continue
                     act({"class": "gzip", "path": str(f), "bytes": s, "hash": blake(f)},
                         "plan: launch log -> gzip (original to Recycle Bin)")
             else:
@@ -1225,7 +1228,14 @@ def print_coverage(doc):
             print("  HELD {} ({})".format(item["path"], item["reason"]))
 
 
-def print_rows(rows: dict, title: str):
+def accounting(rows: dict, actions) -> str:
+    """The plan rows against the actions behind them, two totals built separately: `rows sum` used to compare a total with
+    itself and could not fail."""
+    planned = sum(v for k, v in rows.items() if k.startswith("plan"))
+    return "OK" if planned == sum(a["bytes"] for a in actions) else "ACCOUNTING MISMATCH"
+
+
+def print_rows(rows: dict, title: str, actions=None):
     total = sum(rows.values())
     print("{}: {:.2f} GiB logical file bytes scanned (hard links included)".format(title, total / GIB))
     for k in sorted(rows, key=lambda k: (not k.startswith("plan"), k)):
@@ -1233,8 +1243,8 @@ def print_rows(rows: dict, title: str):
     kept = sum(v for k, v in rows.items() if not k.startswith("plan"))
     print("  {:>9.2f} GiB  (left alone, all 'kept' rows)".format(kept / GIB))
     planned = total - kept
-    print("  {:>9.2f} GiB  (planned)   rows sum: {}".format(planned / GIB, "OK" if planned + kept == total
-                                                              else "ACCOUNTING MISMATCH"))
+    print("  {:>9.2f} GiB  (planned){}".format(planned / GIB, "" if actions is None else
+                                               "   rows match the actions: " + accounting(rows, actions)))
 
 
 # --------------------------------------------------------------------------- applying
@@ -1483,7 +1493,7 @@ def bin_capacity(path: str):
 
 
 def _set_readonly(path):
-    os.chmod(path, stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH)
+    os.chmod(path, stat.S_IMODE(os.stat(path).st_mode) & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
 
 
 class _Memo:
@@ -2128,7 +2138,23 @@ def _daily_module():
 # --------------------------------------------------------------------------- report
 
 def dir_size(p: Path) -> int:
-    return sum(f.stat().st_size for f in walk_files(p) if f.exists()) if p.exists() else 0
+    """Report only, so unlike walk_files it steps over a link or a file another program just removed."""
+    def linked(path):
+        try:
+            st = os.lstat(path)
+        except OSError:
+            return True
+        return stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x400    # os.walk follows a junction
+    total = 0
+    for folder, dirs, files in os.walk(str(p)):
+        dirs[:] = [d for d in dirs if not linked(os.path.join(folder, d))]
+        for name in files:
+            try:
+                st = os.lstat(os.path.join(folder, name))
+            except OSError:
+                continue
+            total += st.st_size if stat.S_ISREG(st.st_mode) else 0
+    return total
 
 
 def user_level(cfg):
@@ -2156,7 +2182,7 @@ def user_level(cfg):
 def report(cfg) -> int:
     doc = plan(cfg)
     print_coverage(doc)
-    print_rows(doc["rows"], "agent output + rolling stores")
+    print_rows(doc["rows"], "agent output + rolling stores", doc["actions"])
     by = {}
     for a in doc["actions"]:
         by[a["class"]] = by.get(a["class"], 0) + a["bytes"]
@@ -2253,7 +2279,7 @@ def _run(cmd, args, cfg) -> int:
         doc = plan(cfg, only=only)
         Path(args[1]).write_text(json.dumps(doc, indent=1), encoding="utf-8")
         print_coverage(doc)
-        print_rows(doc["rows"], "plan")
+        print_rows(doc["rows"], "plan", doc["actions"])
         print("{} action(s) written to {}".format(len(doc["actions"]), args[1]))
         return 0
     if cmd == "apply" and args:

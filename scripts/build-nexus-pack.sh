@@ -106,7 +106,7 @@ if [ -n "$CHANGELOG_SRC" ]; then
     cp "$CHANGELOG_SRC" "$CHANGELOG_OUT" || die "could not copy changelog into the pack"
 elif [ ! -s "$CHANGELOG_OUT" ]; then
     awk -v ver="## $TAG" '
-        $0 == ver          { inblock = 1; next }
+        $0 == ver || index($0, ver " ") == 1 { inblock = 1; next }
         inblock && /^## /  { exit }
         inblock            { print }
     ' "$REPO_DIR/CHANGELOG.md" > "$DEST/NEXUS-CHANGELOG-$TAG.DRAFT.txt"

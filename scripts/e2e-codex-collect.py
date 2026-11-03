@@ -7,8 +7,8 @@ files for this folder, and (read-only) ~/.codex/config.toml. It runs the install
 
 Run it YOURSELF in PowerShell, in the same tab, after /quit:
 
-    python collect.py                      (from the folder that holds this file and "Skyrim Probe (x86)")
-    python collect.py "<path to the install>"      (anywhere)
+    python e2e-codex-collect.py                      (from the folder that holds this file and "Skyrim Probe (x86)")
+    python e2e-codex-collect.py "<path to the install>"      (anywhere)
 
 Paste the whole output back. Python 3.8+, standard library only.
 """
@@ -24,7 +24,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ARG = sys.argv[1] if len(sys.argv) > 1 else None
-COPY = Path(ARG) if ARG else HERE / "Skyrim Probe (x86)"
+COPY = Path(ARG).resolve() if ARG else HERE / "Skyrim Probe (x86)"      # Codex records an absolute cwd
 CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 CFG = CODEX_HOME / "config.toml"
 

@@ -133,7 +133,11 @@ def setup(args):
         raise Refusal("Deployed/Wrye setup requires --plugins-txt and --config-dir.")
     if os.name != "nt":
         raise Refusal("The pinned House Carl server supports Windows x64 only.")
-    runtimes = subprocess.run(["dotnet", "--list-runtimes"], capture_output=True, text=True, check=True).stdout
+    try:
+        runtimes = subprocess.run(["dotnet", "--list-runtimes"], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise Refusal("Could not run dotnet (" + type(exc).__name__ + "): install the " + BACKEND_RUNTIME + "x runtime "
+                      "manually, then rerun setup.")
     if BACKEND_RUNTIME not in runtimes:
         raise Refusal("Missing " + BACKEND_RUNTIME + "x runtime; install it manually, then rerun setup.")
     state.mkdir(parents=True, exist_ok=True)

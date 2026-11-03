@@ -176,7 +176,7 @@ def run(cfg, dry=False, now=None) -> str:
     with redirect_stdout(buf):
         doc = housekeep.plan(cfg)
         housekeep.print_coverage(doc)
-        housekeep.print_rows(doc["rows"], "plan")
+        housekeep.print_rows(doc["rows"], "plan", doc["actions"])
         f(cfg, "PLAN").write_text(json.dumps(doc, indent=1), encoding="utf-8")
         if not ok:
             write_review(cfg, doc, sha)
@@ -198,5 +198,16 @@ def run(cfg, dry=False, now=None) -> str:
     return "housekeep: " + summary + " -- " + str(f(cfg, "LOG"))
 
 
+def main(argv) -> int:
+    cfg = housekeep.load_config(None)
+    dry = "--dry-run" in argv
+    games = running_games(cfg["pause_while_running"])
+    if games and not dry:                # by hand as well: only the session path goes through due()
+        print("housekeep: not run: {} running (--dry-run only plans)".format(", ".join(games)))
+        return 1
+    print(run(cfg, dry=dry))
+    return 0
+
+
 if __name__ == "__main__":
-    print(run(housekeep.load_config(None), dry="--dry-run" in sys.argv[1:]))
+    sys.exit(main(sys.argv[1:]))

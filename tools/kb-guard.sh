@@ -176,12 +176,20 @@ for name in $WATCHED; do
         largest_copy_of "$name"
         if [ "$LARGEST_SIZE" -gt 0 ]; then
             checked=$((checked + 1))
-            alarms="$alarms
+            # Once per loss: a stored copy is kept forever, so without this a file removed on purpose alarms every session.
+            if [ -f "$STORE/.gone-$name" ]; then
+                notes="$notes
+  note: $name is still gone; the largest stored copy is $LARGEST_SIZE bytes ($LARGEST_PATH)"
+            else
+                : > "$STORE/.gone-$name" 2>/dev/null
+                alarms="$alarms
   $name is GONE. Its largest stored copy is $LARGEST_SIZE bytes.
 $(where_to_recover "$name" "${prior:-$LARGEST_PATH}")"
+            fi
         fi
         continue
     fi
+    rm -f "$STORE/.gone-$name" 2>/dev/null
 
     checked=$((checked + 1))
     cur=$(bytes "$live")

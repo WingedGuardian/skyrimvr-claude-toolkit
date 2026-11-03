@@ -345,7 +345,7 @@ public class ResaverCLI {
                 }
                 break;
             default:
-                b.append("]}"); System.out.println(b); err("unknown subsystem: " + sub); return;
+                err("unknown subsystem: " + sub); return;
         }
         b.append("],\"count\":").append(n);
         if (n >= limit) b.append(",\"truncated\":true");
@@ -574,7 +574,10 @@ public class ResaverCLI {
 
         GlobalVariable match = null;
         for (GlobalVariable g : ess.getGlobals().getVariables()) {
-            if (globalMatches(g, target)) { match = g; break; }
+            if (globalMatches(g, target)) {
+                if (match != null) { err("ambiguous: " + target + " matches more than one global; use Plugin.esp:formid"); return; }
+                match = g;
+            }
         }
         StringBuilder b = new StringBuilder();
         b.append("{\"ok\":true,\"op\":\"set-global\",\"target\":").append(jstr(target)).append(",\"apply\":").append(apply);
