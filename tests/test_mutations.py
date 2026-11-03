@@ -1463,7 +1463,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
           # Recycling: the too-big prompt and the junction skip, each broken alone.
           ("recycle-no-nuke-warning", "fFlags = 0x4000 | 0x40", "fFlags = 0x40",
            "test_the_tool_never_deletes_permanently"),
-          ("sweep-follows-junctions", '"st_file_attributes", 0) & 0x400:', '"st_file_attributes", 0) & 0:',
+          ("sweep-follows-junctions", 'if getattr(e.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400:',
+           'if getattr(e.stat(follow_symlinks=False), "st_file_attributes", 0) & 0:',
            "test_the_sweep_never_follows_a_link_out_of_temp"),
           # The sweep's gates, each broken alone.
           ("sweep-any-name", "        if prefixes and e.name.startswith(prefixes):", "        if True:",
