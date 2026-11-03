@@ -132,10 +132,18 @@ def test_an_unknown_jar_on_the_classpath_is_named_but_another_file_is_not(tmp_pa
 
 
 def test_verify_needs_no_jdk(tmp_path):
-    """It runs before the JDK probe: a PATH without java still verifies."""
+    """It runs before the JDK probe: a `java` that records being run is never run."""
     tools = _install(tmp_path, REQUIRED)
     _pinned_wrapper(tools, REQUIRED)
-    code, out = _verify(tools, {"JAVA_HOME": str(tmp_path / "no-jdk-here")})
-    assert code == 0 and out["ok"] is True
+    stub, ran = tmp_path / "stub-jdk", tmp_path / "java-ran"
+    stub.mkdir()
+    (stub / "java").write_text('#!/bin/bash\n: > "$JAVA_RAN"\nexit 1\n', encoding="utf-8", newline="\n")
+    os.chmod(stub / "java", 0o755)
+    env = {"PATH": str(stub) + os.pathsep + os.environ["PATH"], "JAVA_RAN": str(ran), "JAVA_HOME": str(tmp_path / "no-jdk-here")}
+    probe = subprocess.run([BASH, "-c", 'java -version; [ -e "$JAVA_RAN" ]'], env=dict(os.environ, **env), capture_output=True)
+    assert probe.returncode == 0            # the stub is what `java` means under this PATH
+    ran.unlink()
+    code, out = _verify(tools, env)
+    assert code == 0 and out["ok"] is True and not ran.exists()
     src = (tools / "resaver-cli.sh").read_text(encoding="utf-8")
     assert src.index('if [ "${1:-}" = "verify" ]') < src.index("JV=$(java -version")

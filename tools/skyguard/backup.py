@@ -206,12 +206,16 @@ def _save_room(backups, file_path):
     return ""
 
 
+def flat_name(file_path):
+    """The path as one file name. bash: sed 's|[/\\:]|_|g' | sed 's|^_*||'"""
+    return re.sub(r"[/\\:]", "_", file_path).lstrip("_")
+
+
 def take(project, tool_name, file_path, audit, agent="", session_id=""):
     """Back up one existing file. Returns the backup's Path, or None when no backup exists (FAILED is logged)."""
     backups = Path(project) / ".claude" / "backups"
     ts = audit.stamp()
-    # bash: sed 's|[/\\:]|_|g' | sed 's|^_*||'
-    safe = re.sub(r"[/\\:]", "_", file_path).lstrip("_")
+    safe = flat_name(file_path)
     base = backups / "{}__{}".format(ts, safe)
     part = Path("{}.part-{}".format(base, os.getpid()))
     try:

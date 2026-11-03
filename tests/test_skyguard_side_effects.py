@@ -56,8 +56,9 @@ def test_backup_copies_with_flattened_name_and_audit_line(tmp_path):
 
 def test_backup_name_flattening_matches_sed_for_windows_paths():
     # `C:\x\y.txt`: colon and backslash each become "_"; leading underscores are stripped.
-    assert re.sub(r"[/\\:]", "_", "C:\\x\\y.txt").lstrip("_") == "C__x_y.txt"
-    assert re.sub(r"[/\\:]", "_", "/c/x/y").lstrip("_") == "c_x_y"
+    from skyguard.backup import flat_name
+    assert flat_name("C:\\x\\y.txt") == "C__x_y.txt"
+    assert flat_name("/c/x/y") == "c_x_y"
 
 
 @pytest.mark.parametrize("sub", [".claude/backups", ".claude/hooks", ".claude/plans", "node_modules",

@@ -305,14 +305,13 @@ def test_apply_patch_elsewhere_is_untouched():
     assert v.decision == "allow" and not v.context
 
 
-def test_on_codex_a_guard_ask_is_a_deny_and_a_state_deny_stays_one():
-    for rid in ("S-SELF-GUARD", "S-SELF-STATE"):
-        text = rules.message(rid, file="x", op="edits")
-        decision = rules.RULES[rid]["decision"]
-        if decision == "advise":
-            continue
+def test_on_codex_an_ask_is_a_deny_and_a_state_deny_stays_one():
+    # S-SELF-GUARD was priced down to a note in Plan 6: it has no deny half to render.
+    assert rules.RULES["S-SELF-GUARD"]["decision"] == "advise"
+    text = rules.message("S-SELF-STATE", file="x", op="edits")
+    for decision in (rules.RULES["S-SELF-STATE"]["decision"], "ask"):
         body = json.loads(codex.render(codes.classify(Verdict(decision, text))))["hookSpecificOutput"]
-        assert body["permissionDecision"] == "deny"
+        assert body["permissionDecision"] == "deny", decision
 
 
 # ---- the user-level switches (`~` resolved from HOME / USERPROFILE, not the install) -------------------------------

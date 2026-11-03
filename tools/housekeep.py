@@ -1866,10 +1866,14 @@ def _in_use(p: Path) -> bool:
 def temp_candidates(cfg, temp: Path):
     """(path, reason) for every dir the sweep may consider: our prefixes, plus pytest's own leftovers."""
     prefixes = tuple(cfg["temp_prefixes"])
-    try:
-        entries = list(os.scandir(temp))
-    except OSError:
-        return
+    entries = []
+    # House Carl's check keeps its scratch beside the masters when they are not on the temp drive, and a failed check leaves
+    # its report there. Same names, same gates; an absent folder is simply none.
+    for parent in (temp, Path(cfg["root"]) / ".housecarl-tmp"):
+        try:
+            entries += list(os.scandir(parent))
+        except OSError:
+            continue
     for e in entries:
         try:
             if e.is_symlink() or not e.is_dir(follow_symlinks=False):

@@ -24,9 +24,6 @@ def _compile(pattern: str, icase: bool):
 # the history corpus and 76k fuzzed lines agree with the unsplit regex), so they are listed, not inferred.
 SPLIT_SAFE_FIRST = frozenset([
     r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)\s",
-    r"(^|[;&|(`]|\s)(mv|cp|move|copy)\s",
-    r"sed\s+-i",
-    r"(automod|SpookysAutomod)",
     r"Remove-ItemProperty",
     r"(?<![/\\])[/\\]+Data[/\\]+SKSE[/\\]+Plugins[/\\]+",
 ])

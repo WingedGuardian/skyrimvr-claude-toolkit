@@ -79,7 +79,8 @@ def test_papyrus_accounting_balances_and_reports_ok(papyrus_log):
 def test_papyrus_groups_identical_shapes_across_differing_formids(papyrus_log):
     """Two entries differing only by FormID are one shape, counted twice."""
     r = run(PAPYRUS, str(papyrus_log))
-    assert "2  " in r.stdout and "Cannot call Foo() on a None object" in r.stdout, r.stdout
+    rows = [l for l in r.stdout.splitlines() if "Cannot call Foo() on a None object" in l]
+    assert len(rows) == 1 and rows[0].split()[0] == "2", r.stdout
 
 
 def test_papyrus_reports_the_not_shown_remainder_even_at_zero(papyrus_log):

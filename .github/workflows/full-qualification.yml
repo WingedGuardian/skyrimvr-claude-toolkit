@@ -311,7 +311,7 @@ jobs:
             -property catalog_productDisplayVersion || echo "::warning::vswhere did not answer"
           cmake --version || echo "cmake is not on PATH; build.py uses the copy inside Visual Studio"
       - name: Build (pin, patches, SOURCE-SHA256, CLI + tests with the GUI off, six CTest targets)
-        run: python -B tools/resaver-plus/build.py --work "$(cygpath -m "$RUNNER_TEMP")/rspp" --jobs 2
+        run: python -B tools/resaver-plus/build.py --work "$(cygpath -m "$RUNNER_TEMP")/rspp" --jobs 2 --keep-build
       - name: The installed build matches its BUILD-INFO
         run: |
           cat tools/resaver-plus/build/BUILD-INFO.json

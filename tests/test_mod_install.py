@@ -560,3 +560,14 @@ def test_a_failure_after_the_old_folder_moved_names_the_backup(tmp_path, sevenz,
     assert str(kept[0]) in out.err and "partial" in out.err, out.err
     manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
     assert "aborted before any write" not in manifest and "# STATUS: FAILED after" in manifest, manifest
+
+
+def test_a_relative_data_folder_still_writes_absolute_manifest_rows(tmp_path, sevenz, game, monkeypatch):
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    data = os.path.relpath(str(game / "Data"), str(tmp_path))
+    arc = archive(tmp_path, [{"path": "Data/ExampleMod.esp", "data": "x"}])
+    monkeypatch.chdir(tmp_path)
+    assert mod.main([str(arc), "--data", data, "--apply"]) == 0
+    manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
+    rows = [l for l in manifest.splitlines() if l and not l.startswith("#")]
+    assert rows and all(os.path.isabs(r.split("	")[-1].split("  ")[-1]) for r in rows), manifest

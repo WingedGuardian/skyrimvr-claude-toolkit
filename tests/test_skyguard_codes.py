@@ -160,16 +160,16 @@ def test_unreadable_env_refusal_is_failed_and_coded(monkeypatch, tmp_path, capsy
 
 def test_no_deny_or_ask_is_built_outside_the_rule_modules_uncoded():
     """Scan: any Verdict("deny"/"ask", ...) in a non-rule module must name its own code= or use a rule constant."""
-    import re
+    import ast
 
-    pat = re.compile(r"Verdict\(\s*[\"'](deny|ask)[\"']([^\n]*)")
     bad = []
     for f in (REPO / "tools" / "skyguard").rglob("*.py"):
         # mcp_rules.py is Plan 5's third rule module: its texts come from the registry, which codes.py reads.
         if f.name in ("shell_rules.py", "write_rules.py", "mcp_rules.py", "codes.py", "verdict.py"):
             continue
-        for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
-            m = pat.search(line)
-            if m and "code=" not in m.group(2):
-                bad.append("{}:{}".format(f.name, n))
+        for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):       # a call split over lines counts too
+            if (isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) == "Verdict"
+                    and node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value in ("deny", "ask")
+                    and not any(k.arg == "code" for k in node.keywords)):
+                bad.append("{}:{}".format(f.name, node.lineno))
     assert bad == [], bad

@@ -420,14 +420,18 @@ def test_an_allow_prefix_below_the_home_is_still_applied(tmp_path):
     assert r.returncode == 0 and "NOT applied" not in r.stdout, r.stdout + r.stderr
 
 
-def test_the_checker_itself_names_no_one():
+def test_the_checker_itself_names_no_one(tmp_path):
     """The name is read at check time. A literal one in the repo would be the very leak this hunts."""
+    # Works on a runner too, whose own account name is generic: a name the checker cannot hold as a literal is still found.
+    name = "zq" + "checktimename"
+    (tmp_path / "a.md").write_text("by " + name, encoding="utf-8")
+    assert _leaks([tmp_path], _clean_env(USERNAME=name, USERPROFILE="C:/Users/" + name)).returncode == 1
     text = CHECKER.read_text(encoding="utf-8").lower()
+    assert name not in text
     for k in ("USERNAME", "USER", "LOGNAME"):
         n = os.environ.get(k, "")
         if len(n) >= 4 and n.lower() not in _mod().GENERIC_ACCOUNTS:
             assert n.lower() not in text, k
-    assert json.dumps  # keep the import honest for linters
 
 
 def test_changed_from_skips_only_byte_identical_files(tmp_path):

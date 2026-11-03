@@ -219,6 +219,19 @@ def _tree(d):
 @pytest.mark.skipif(not os.environ.get("SKYGUARD_CODEX_DIFF"),
                     reason="differential test against the real Codex apply_patch: set SKYGUARD_CODEX_DIFF=1")
 @pytest.mark.skipif(shutil.which("codex") is None, reason="codex is not on PATH")
+def test_the_real_codex_still_applies_a_plain_patch(tmp_path):
+    """The control for the differential below: if a Codex dropped this option, nothing would change on disk, `touched`
+    would be empty and every adversarial case would pass."""
+    (tmp_path / "victim.esp").write_text("v\n")
+    patch = "*** Begin Patch\n*** Update File: victim.esp\n@@\n-v\n+w\n*** End Patch"
+    subprocess.run([shutil.which("codex"), "--codex-run-as-apply-patch", patch], cwd=str(tmp_path),
+                   capture_output=True, text=True, timeout=60)
+    assert (tmp_path / "victim.esp").read_text() == "w\n"
+
+
+@pytest.mark.skipif(not os.environ.get("SKYGUARD_CODEX_DIFF"),
+                    reason="differential test against the real Codex apply_patch: set SKYGUARD_CODEX_DIFF=1")
+@pytest.mark.skipif(shutil.which("codex") is None, reason="codex is not on PATH")
 @pytest.mark.parametrize("patch", _ADV)
 def test_every_file_codex_touches_is_in_the_parsers_output(patch, tmp_path):
     for f in ("victim.esp", "other.esp"):

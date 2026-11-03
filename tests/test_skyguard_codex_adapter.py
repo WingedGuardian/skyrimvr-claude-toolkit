@@ -134,13 +134,21 @@ def test_untranslatable_payloads_carry_a_failure(raw):
 
 
 @pytest.mark.parametrize("fx", FIXTURES, ids=lambda p: p.name)
-def test_every_committed_codex_fixture_translates_and_renders(fx):
+def test_every_committed_codex_fixture_translates_and_renders(fx, tmp_path):
     raw = fx.read_text(encoding="utf-8")
     r = codex.to_request(raw, "win32")
     assert not r.failure, r
     assert r.agent == "codex" and r.event in ("pre_tool", "session_start")
-    out = codex.render(Verdict("deny", "x"))
-    assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    if r.event == "pre_tool":                  # the fixture's own decision, through the engine, not a constant
+        v = engine.pre_tool(codex.to_request(raw, sys.platform), str(tmp_path), lambda: paths.roots(str(tmp_path), "", {}),
+                            Audit(str(tmp_path)))
+        out = codex.render(v)
+        said = json.loads(out)["hookSpecificOutput"]["permissionDecision"] if v.decision == "deny" else None
+        assert said == ("deny" if v.decision == "deny" else None) and (v.decision == "deny" or '"deny"' not in out), (v, out)
+
+
+def test_a_deny_renders_as_the_one_form_codex_honours():
+    assert json.loads(codex.render(Verdict("deny", "x")))["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 # ---- engine.pre_tool ------------------------------------------------------------------------------

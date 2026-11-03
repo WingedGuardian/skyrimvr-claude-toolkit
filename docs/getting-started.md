@@ -92,7 +92,7 @@ Common paths look like:
 5. In the "Extract to" box, **paste your Skyrim folder path** from Step 2
 6. Click **Extract**
 
-The toolkit files blend in alongside your existing game files. ⚠ Files the toolkit ships ARE replaced on a later update -- `CLAUDE.md`, `KNOWLEDGEBASE.md`, `.claude/hooks/`. Your own notes belong in `KNOWLEDGEBASE.local.md`, which the toolkit never ships. On a FIRST install it only adds new files (CLAUDE.md, KNOWLEDGEBASE.md, setup.sh, and the .claude/ folder).
+The toolkit files blend in alongside your existing game files. ⚠ Files the toolkit ships ARE replaced on a later update -- `CLAUDE.md`, `KNOWLEDGEBASE.md`, `.claude/hooks/`. Your own notes belong in `KNOWLEDGEBASE.local.md`, which the toolkit never ships. On a FIRST install it only adds new files: the instruction files (CLAUDE.md, AGENTS.md, KNOWLEDGEBASE.md), setup.sh, the docs/ and tools/ folders and the agent folders (.claude/, .codex/, .agents/, .opencode/).
 
 ---
 

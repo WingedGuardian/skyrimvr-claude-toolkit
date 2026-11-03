@@ -286,3 +286,13 @@ def test_the_manifest_rejects_a_damaged_line(tmp_path):
     bad.write_text("abc patched x\n", encoding="utf-8")
     with pytest.raises(mod.BuildError, match="unreadable"):
         mod.read_manifest(bad)
+
+
+def test_only_trees_this_builder_declared_are_removed(tmp_path):
+    ours, theirs, unreadable = tmp_path / "owned-build-a", tmp_path / "owned-build-b", tmp_path / "owned-build-c"
+    for d in (ours, theirs, unreadable):
+        d.mkdir()
+    (ours / ".toolkit-build-owner.json").write_text('{"builder": "tools/resaver-plus/build.py"}', encoding="utf-8")
+    (theirs / ".toolkit-build-owner.json").write_text('{"builder": "someone else"}', encoding="utf-8")
+    assert _load().remove_owned_builds(tmp_path) == [ours]
+    assert not ours.exists() and theirs.is_dir() and unreadable.is_dir()

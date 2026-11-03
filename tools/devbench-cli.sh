@@ -30,7 +30,8 @@ set -u
 # would be masked by the formatter's 0 and the caller would think the call succeeded.
 set -o pipefail
 
-GAME_DIR="${GAME_DIR:-$(pwd)}"
+# This script lives in <game root>/tools, so where you run it from cannot pick the wrong game (it used to pick port 8920).
+GAME_DIR="${GAME_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 RUNTIME_JSON="$GAME_DIR/Data/SKSE/Plugins/devbench/runtime.json"
 TIMEOUT="${DEVBENCH_TIMEOUT:-15}"
 
@@ -42,7 +43,7 @@ resolve_port() {
     if [ -n "${DEVBENCH_PORT:-}" ]; then echo "$DEVBENCH_PORT"; return; fi
     # DevBench writes the port it actually bound here (it iterates if the default was taken).
     if [ -f "$RUNTIME_JSON" ]; then
-        p=$(tr -dc '0-9' < "$RUNTIME_JSON" 2>/dev/null | head -c 5)
+        p=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$RUNTIME_JSON" 2>/dev/null | head -n 1)
         [ -n "$p" ] && { echo "$p"; return; }
     fi
     # Fall back to the deterministic per-runtime default.
@@ -56,8 +57,8 @@ pretty() { if [ "$HAVE_JQ" -eq 1 ]; then jq . 2>/dev/null || cat; else cat; fi; 
 
 dead_port() {
     echo "ERROR: no response from DevBench on port $PORT." >&2
-    echo "  The game must be RUNNING with a save loaded (VR: headset on -- Skyrim VR" >&2
-    echo "  cannot init without it). If it IS running, check the bound port in" >&2
+    echo "  The game must be RUNNING with a save loaded (VR: with a headset, or headless" >&2
+    echo "  through tools/vr-headless.sh). If it IS running, check the bound port in" >&2
     echo "  Data/SKSE/Plugins/devbench/runtime.json or set DEVBENCH_PORT." >&2
 }
 
@@ -161,7 +162,7 @@ case "$CMD" in
       # (main menu / still loading). Nothing is wrong -- there is just nothing to drive yet.
       case "$f2" in -*)
           echo "NOT IN GAME (frame $f2) -- server is up, but no save is loaded yet."
-          echo "  Load a save (VR: headset on) before driving state/console/papyrus tools."
+          echo "  Load a save before driving state/console/papyrus tools."
           exit 3 ;;
       esac
 

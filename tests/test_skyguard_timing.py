@@ -765,10 +765,6 @@ def test_split_dotstar_matches_the_unsplit_regex_on_random_text():
     from skyguard import grep as g
     patterns = [
         r"(^|[;&|(`]|\s)(rm|rmdir|del|erase)\s.*(" + GAME + ")",
-        r"(^|[;&|(`]|\s)(mv|cp|move|copy)\s.*(" + GAME + ")",
-        r"sed\s+-i.*(" + GAME + ")",
-        r"(automod|SpookysAutomod).*\b(replace-textures|rename-strings|fix-eyes|scale)\b",
-        r"(automod|SpookysAutomod).*\b(add-weapon|add-spell)\b",
         r"(?<![/\\])[/\\]+Data[/\\]+SKSE[/\\]+Plugins[/\\]+.*\.ini$",
     ]
     words = ["rm", "mv", "cp", "sed", "-i", "automod", "Automod", "SpookysAutomod", "scale", "add-spell", "x",
@@ -814,9 +810,15 @@ def test_a_naive_split_really_is_wrong_for_the_counterexamples():
 
 
 def test_the_safe_prefix_list_is_what_the_rules_use():
-    """If a rule's `A` changes, the split silently stops applying (and the timing shapes go red), so pin them."""
+    """If a rule's `A` changes, the split silently stops applying (and the timing shapes go red), so pin them: each listed
+    prefix appears in a rule module and really is split, and any other prefix is not."""
     from skyguard import grep as g
-    assert len(g.SPLIT_SAFE_FIRST) == 6
+    source = "".join(p.read_text(encoding="utf-8") for p in (REPO / "tools" / "skyguard").glob("*.py") if p.name != "grep.py")
+    assert len(g.SPLIT_SAFE_FIRST) == 3
+    for first in g.SPLIT_SAFE_FIRST:
+        assert first in source or first.replace("\\", "\\\\") in source, first      # raw or escaped in the rule's source
+        assert g.split_dotstar(first + ".*x") == (first, "x"), first
+    assert g.split_dotstar("not-a-listed-prefix.*x") is None
 
 
 def test_split_dotstar_refuses_a_possessive_quantifier():

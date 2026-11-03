@@ -230,8 +230,26 @@ def fetch(repo: str, commit: str, dest: Path) -> None:
     verify_head(run([*GIT, "-C", dest, "rev-parse", "HEAD"]), commit, repo)
 
 
+def remove_owned_builds(work: Path) -> list:
+    """Each build leaves one full tree: kept after a failure to read, or for a caller's --keep-build. The next build removes
+    earlier ones. Only trees this builder declared, by the marker it wrote when it made them: they rebuild from the pinned
+    commit and the patches here, so they are deleted, not recycled."""
+    removed = []
+    for tree in sorted(Path(work).glob("owned-build-*")):
+        marker = tree / ".toolkit-build-owner.json"
+        try:
+            ours = json.loads(marker.read_text(encoding="utf-8")).get("builder") == "tools/resaver-plus/build.py"
+        except (OSError, ValueError):
+            ours = False                                   # not declared by this builder: left alone
+        if ours and tree.is_dir() and not tree.is_symlink():
+            shutil.rmtree(tree)
+            removed.append(tree)
+    return removed
+
+
 def stage(work: Path, upstream: Path) -> Path:
     """Fresh owned staging under `work`, holding a copy of the upstream tree in staging/source."""
+    remove_owned_builds(work)
     owned = Path(tempfile.mkdtemp(prefix="owned-build-", dir=str(work))).resolve()
     if owned.parent != work:
         raise BuildError("staging resolved outside the selected work directory")
@@ -348,7 +366,7 @@ def install(executable: Path, info: dict, dest: Path = None) -> Path:
     return dest / EXECUTABLE
 
 
-def build(work: Path, jobs: int = 1, dest: Path = None) -> dict:
+def build(work: Path, jobs: int = 1, dest: Path = None, keep_build: bool = False) -> dict:
     if not windows():
         raise BuildError("ReSaver Plus builds with MSVC on Windows only; the Java backend is the cross-platform path")
     if jobs not in (1, 2):
@@ -389,6 +407,8 @@ def build(work: Path, jobs: int = 1, dest: Path = None) -> dict:
             "tools": versions, "tested_tools": TESTED, "ctest": summary, "executable": EXECUTABLE,
             "sha256": sha(exe), "staging": owned.name, "built": time.strftime("%Y-%m-%dT%H:%M:%S")}
     install(exe, info, dest)
+    if not keep_build:
+        remove_owned_builds(work)                          # installed and tested: its tree rebuilds from the pin
     return info
 
 
@@ -399,9 +419,11 @@ def main(argv=None) -> int:
     parser.add_argument("--install", type=Path, default=BUILD,
                         help="where the tested executable and BUILD-INFO.json go (default tools/resaver-plus/build; "
                              "the adapter reads only that one)")
+    parser.add_argument("--keep-build", action="store_true", help="keep the build tree after a successful install "
+                        "(it holds the test programs); a failed build's tree is always kept until the next build")
     args = parser.parse_args(argv)
     try:
-        info = build(args.work.resolve(), args.jobs, args.install.resolve())
+        info = build(args.work.resolve(), args.jobs, args.install.resolve(), args.keep_build)
     except (BuildError, OSError, subprocess.SubprocessError) as e:
         print("ERROR: {}".format(e), file=sys.stderr)
         return 2
