@@ -441,7 +441,7 @@ def test_a_slot_that_raises_or_exits_is_a_block_so_the_fail_closed_rows_pass(tmp
         assert not rows["fault:engine-deny-nonce"].ok, body      # the engine's reason never reached the agent
 
 
-def _gone(pid):
+def _gone_now(pid):
     if sys.platform == "win32":
         out = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid, "/NH"], capture_output=True, text=True).stdout
         return str(pid) not in out
@@ -450,6 +450,17 @@ def _gone(pid):
     except OSError:
         return True
     return False
+
+
+def _gone(pid, within=15.0):
+    """Termination is asynchronous, so a killed process can still be listed for a moment on a loaded machine. A real
+    survivor sleeps 120 s, so it still fails here."""
+    end = time.time() + within
+    while not _gone_now(pid):
+        if time.time() > end:
+            return False
+        time.sleep(0.5)
+    return True
 
 
 def test_a_slot_that_hangs_ends_in_a_failed_row_and_the_child_is_killed(tmp_path):
