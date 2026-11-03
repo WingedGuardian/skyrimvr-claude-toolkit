@@ -68,6 +68,9 @@ class BuildProductsAreNeverIntermediates(Fixture):
         old = time.time() - 5 * DAY
         touch(self.out / "task" / "build" / "x.lib", old)
         self.cfg["build_exts"] = self.cfg["build_exts"] + [".lib"]
+        # Declared obsolete, so BUILD_PRODUCTS ALONE keeps the .lib: without the decision the obsolete gate kept it too
+        # and the products twin survived.
+        declare(self.cfg, self.out / "task" / "build" / "x.lib")
         self.assertEqual(set(), self.planned())
 
 
