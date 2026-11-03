@@ -91,13 +91,15 @@ INTERP_DELETE = (
     r"|\bunlink\s*[('\"$]"
     # G1 (RT-A): .NET / Ruby / Deno removal calls.
     r"|\bFileUtils\.(rm|remove)\w*|\bDeno\.remove\w*\s*\(|\b(File|Directory)\]?::Delete\s*\(|\.Delete\s*\("
+    # The other interpreters the parser names: julia rm(), R file.remove(), tcl `file delete`, Java and Groovy File.
+    r"|\brm\s*\(|\bfile\.remove\s*\(|\bfile\s+delete\b|\bFiles\.delete\w*\s*\(|\.deleteDir\s*\(|\.delete\s*\(\s*\)"
 )
 # G1 (RT-A): code that LAUNCHES a process is judged like a delete only when the launched text also carries a delete
 # word, quoted or space-bounded (`os.system('rd /s /q X')`, `subprocess.run(['cmd','/c','rd',X])`). Priced: launch +
 # root alone denied 6 of 68,475 history items, all read-only analysis scripts (`automod archive list`, cosave reads).
 INTERP_LAUNCH = (
     r"\bos\.(system|popen|exec\w*|spawn\w*)\s*\(|\bsubprocess\.|\bchild_process\b|\b(exec|spawn)(File)?Sync\s*\("
-    r"|\b(system|shell_exec|passthru|proc_open)\s*\("
+    r"|\b(system|shell_exec|passthru|proc_open)\s*\(|\bdo shell script\b"
 )
 LAUNCH_DELETE_WORD = r"""(^|['"\s,\[(])(rm|rmdir|rd|del|erase|unlink|Remove-Item|ri|rimraf)(['"\s,\])]|$)"""
 
@@ -161,7 +163,8 @@ _CMD_SWITCH = re.compile(r"/[A-Za-z?](:\S*)?")
 NPX = frozenset(("npx", "pnpx", "bunx"))
 PKG_RUNNERS = frozenset(("pnpm", "yarn", "bun", "npm"))
 _PYTHON = re.compile(r"(?:python|pypy|py)[0-9.]{0,8}w?")
-CODE_INTERPRETERS = frozenset(("node", "nodejs", "deno", "bun", "perl", "ruby", "php"))
+CODE_INTERPRETERS = frozenset(("node", "nodejs", "deno", "bun", "perl", "ruby", "php", "lua", "luajit", "rscript", "julia",
+                               "tclsh", "wish", "osascript", "jshell", "groovy", "ts-node", "tsx", "jython"))
 CODE_FLAGS = frozenset(("-c", "-e", "-E", "--eval", "-p", "--print", "-r", "-pe"))
 _PY_CODE_CLUSTER = re.compile(r"-[A-Za-z]{1,4}c")      # python -Bc CODE, -Ic CODE, -IBc CODE (G1)
 
@@ -410,6 +413,8 @@ def interpreter_code(e) -> str:
         # Retain the existing conservative stdin scan: -i/PYTHONINSPECT and
         # a program that evaluates its input can execute a supplied body.
     code = []
+    if p == "deno" and e.argv[:1] == ("eval",) and len(e.argv) > 1:
+        code.append(e.argv[1])                            # deno eval CODE: a subcommand, not a flag
     for i, w in enumerate(e.argv):
         nxt = e.argv[i + 1] if i + 1 < len(e.argv) else ""
         if w in CODE_FLAGS or (re.fullmatch(r"-[A-Za-z]{1,4}[eE]", w) and p not in CODE_INTERPRETERS - {"perl",
@@ -439,6 +444,7 @@ _PY_DELETE_CALLS = frozenset(("rmtree", "remove", "unlink", "rmdir", "removedirs
 _PY_DELETE_OWNERS = frozenset(("shutil", "os", "send2trash"))
 _INTERP_DELETE_LIT = re.compile(
     r"""(?:\b(?:rm|rmdir|unlink|rename)(?:Sync)?|\brmtree|\bremove_tree|\bFileUtils\.(?:rm_rf|rm_r|rm|remove_dir|remove_entry\w*)"""
+    r"""|\bos\.remove|\bfile\.remove"""
     r"""|\bunlink)\s*\(?\s*(['"])([^'"\n]{1,400})\1""")
 
 

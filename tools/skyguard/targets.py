@@ -515,9 +515,21 @@ def covers_protected(abs_path: Optional[str], roots) -> bool:
         rc = _split(root.lower().rstrip("/") or root.lower())
         if len(pc) <= len(rc) and all(_comp_matches(a, b) for a, b in zip(pc, rc)):
             return True
-    if len(pc) >= 2 and pc[-1] == "documents":
+    if pc[-1] == "documents":
+        return _user_documents(pc)
+    return len(pc) >= 3 and pc[-1] == "my games" and pc[-2] == "documents" and _user_documents(pc[:-1])
+
+
+def _user_documents(pc) -> bool:
+    """A Documents folder that can hold the config: a user's own (through OneDrive too), or one at a drive's root. Not any
+    folder of that name: `rm -rf C:/Temp/build/documents` was refused as the config folder."""
+    if len(pc) == 2:
         return True
-    return len(pc) >= 3 and pc[-1] == "my games" and pc[-2] == "documents"
+    for i, c in enumerate(pc[:-1]):
+        if c in ("users", "home"):
+            between = pc[i + 2:-1]
+            return not between or (len(between) == 1 and between[0].startswith("onedrive"))
+    return False
 
 
 # --------------------------------------------------------------------------------------------- file classes (Task 8)

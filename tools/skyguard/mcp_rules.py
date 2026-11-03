@@ -344,8 +344,9 @@ def _curl_bodies(argv) -> list:
                 out.append(argv[k + 1])
             k += 2
             continue
-        if w.startswith("-d") and len(w) > 2 and not w.startswith("--"):
-            out.append(w[2:])
+        attached = re.fullmatch(r"-[A-Za-z]*d(.+)", w, re.S)    # curl takes the rest of a cluster as d's value: -sd'{..}'
+        if attached and not w.startswith("--"):
+            out.append(attached.group(1))
         k += 1
     return out
 

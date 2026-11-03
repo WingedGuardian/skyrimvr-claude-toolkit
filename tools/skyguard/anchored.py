@@ -91,8 +91,9 @@ def _reg_key(word: str) -> str:
     for long, short in _HIVES:
         if k == long or k.startswith(long + "\\") or k.startswith(long + ":"):
             k = short + k[len(long):]
-    if k[4:5] == ":":                                         # hklm:\software -> hklm\software
-        k = k[:4] + k[5:]
+    if k[4:5] == ":":                                         # hklm:\software and hklm:software -> hklm\software
+        rest = k[5:]
+        k = k[:4] + ("\\" if rest and not rest.startswith("\\") else "") + rest
     return re.sub(r"\\+", r"\\", k)
 
 

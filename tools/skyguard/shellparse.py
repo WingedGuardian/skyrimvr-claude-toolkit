@@ -1112,12 +1112,30 @@ class _Bash(_Scanner):
             raise ParseError("a (( )) whose body reads as a command")
 
     def _brace_end(self, j):
-        """End (exclusive) of a ${ ... } expansion starting after `${`, nested braces counted."""
+        """End (exclusive) of a ${ ... } expansion starting after `${`, nested braces counted. Quotes protect braces in
+        an unquoted expansion and are ordinary characters in a double-quoted one, so where the two readings disagree
+        this declines to choose: `echo ${a:-'{'} ; rm x ; echo }` ran the rm while a quote-blind count hid it."""
+        end = self._brace_scan(j, False)
+        if end is None:
+            raise ParseError("unterminated ${")
+        if self._brace_scan(j, True) != end:
+            raise ParseError("a ${ } whose end depends on how its quotes are read")
+        return end
+
+    def _brace_scan(self, j, quotes):
         t, n, depth = self.t, self.n, 1
         while j < n:
             c = t[j]
             if c == "\\":
                 j += 2
+                continue
+            if quotes and c in "'\"":
+                j += 1
+                while j < n and t[j] != c:
+                    j += 2 if c == '"' and t[j] == "\\" else 1
+                if j >= n:
+                    return None
+                j += 1
                 continue
             if c == "{":
                 depth += 1
@@ -1126,7 +1144,7 @@ class _Bash(_Scanner):
                 if depth == 0:
                     return j + 1
             j += 1
-        raise ParseError("unterminated ${")
+        return None
 
     def _ansi(self, f, w):
         t, n = self.t, self.n

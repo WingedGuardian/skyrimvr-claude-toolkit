@@ -377,9 +377,13 @@ def _routes(e) -> List[Tuple[str, bool, str]]:
     elif p == "cp" and _cp_links(argv):
         rec = any(_short(w, "aRr") or w in ("--recursive", "--archive") for w in argv)
         out += [(s, rec, LINKS) for _, srcs in writes.copy_targets(e) for s in srcs]     # r2 N2: cp -l / -s
-    elif p in ("chmod", "chown", "chgrp"):
-        words = [w for w in argv if not w.startswith("-") and not w.startswith("--reference")]
-        out += [(w, False) for w in words[1:]]
+    elif p == "chmod":
+        # A symbolic mode may start with a dash (`chmod -r f`), so only chmod's own letters are options here.
+        words = [w for w in argv if not w.startswith("--") and not re.fullmatch(r"-[Rcfv]+", w)]
+        out += [(w, False) for w in (words if any(w.startswith("--reference") for w in argv) else words[1:])]
+    elif p in ("chown", "chgrp"):
+        words = [w for w in argv if not w.startswith("-")]
+        out += [(w, False) for w in (words if any(w.startswith("--reference") for w in argv) else words[1:])]
     elif p == "icacls" and argv and not argv[0].startswith("/"):
         if any(w.lower().startswith(_ICACLS_WRITE) for w in argv[1:]):
             out.append((argv[0], False))
