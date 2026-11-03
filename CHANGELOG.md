@@ -2,6 +2,8 @@
 
 ## v4.0.0 — unreleased
 
+- Shared preservation core pinned to e0851b8: each path resolves once per read-only pass, including the store check in `Dispatcher.pre`.
+
 - **Snapshot metadata errors:** list and config restore refuse an unreadable recovery manifest with a one-line message and no traceback; restore admission fails before any output is written.
 - **Housekeep planning errors:** unreadable trace provenance or staging sizes keep the candidate and let other work continue; unknown byte counts and paths are reported. An ETL used for decoded XML must remain inside the same task, during both planning and apply.
 - **Housekeep decoded traces:** idle `events.xml` and XML in `xml-decoder` can be recycled while an ETL source remains beside them or one folder above within the same task; ETL source measurements stay protected.

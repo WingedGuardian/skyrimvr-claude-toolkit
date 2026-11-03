@@ -11,6 +11,8 @@ import os
 import shutil
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,9 +27,38 @@ class PreservationFailed(OSError):
     pass
 
 
+_read_memo = ContextVar("modding_harness_one_read", default=None)
+
+
+@contextmanager
+def one_read():
+    """Resolve each path spelling once for one read-only pass over a set of paths.
+
+    contains and protects resolve both operands on every call, and a bulk check asks about
+    the same roots and paths many times per path. Assumes links are stable for the pass,
+    so a pass that writes, or a recheck after one, must not share it. The memo follows the
+    context: a plain new thread does not see it, a copied context does. It ends with the
+    block and never holds a failed resolution."""
+    token = _read_memo.set({})
+    try:
+        yield
+    finally:
+        _read_memo.reset(token)
+
+
+def _key(path):
+    memo = _read_memo.get()
+    if memo is None:
+        return canonical(path)
+    spelling = os.fspath(path)
+    if spelling not in memo:
+        memo[spelling] = canonical(path)
+    return memo[spelling]
+
+
 def contains(parent, child):
     try:
-        parent, child = canonical(parent), canonical(child)
+        parent, child = _key(parent), _key(child)
         return os.path.commonpath((parent, child)) == parent
     except ValueError:
         return False
@@ -38,9 +69,9 @@ def protects(path, stores, ancestor=False):
     resolved = None
     for store in stores:
         try:
-            store = canonical(store)
+            store = _key(store)
             if resolved is None:
-                resolved = canonical(path)
+                resolved = _key(path)
             shared = os.path.commonpath((store, resolved))
             if shared == store or (ancestor and shared == resolved):
                 return True
