@@ -170,9 +170,10 @@ def twin_aliases():
     return dict(re.findall(r'^(_[A-Z][A-Z0-9_]*) = "([^"\n]+)"$', text, re.M))
 
 
-def twin_steps(py, base, changed, processes=4, per_process=150):
+def twin_steps(py, base, changed, processes=4, per_process=50):
     """At most processes x per_process twins, each process under the cap of the other groups: a big branch gets a spread
-    sample here and every twin on CI, not a push refused on time."""
+    sample here and every twin on CI, not a push refused on time. They run after the other groups, never beside them: 600
+    twins beside the timing tests starved those past their limits (2026-11-03, a gate that refused on load alone)."""
     added = ""
     if "tests/test_mutations.py" in changed and base:
         diff = _git("diff", "-U0", base + "...HEAD", "--", "tests/test_mutations.py")
@@ -363,7 +364,11 @@ def main(argv=None) -> int:
     # (2026-11-01). The cap catches a hang; it must not refuse a merely large push.
     groups += [("sentinels and changed-file tests {}/{}".format(k + 1, len(chunks)), chunk, 1200)
                for chunks in [rest_chunks(rest)] for k, chunk in enumerate(chunks)]
-    g.parallel([(name + " ({} files)".format(len(fs)), verbose + fs, t) for name, fs, t in groups if fs] + twin_steps(py, base, changed))
+    g.parallel([(name + " ({} files)".format(len(fs)), verbose + fs, t) for name, fs, t in groups if fs])
+    if not g.failed:
+        twins = twin_steps(py, base, changed)
+        if twins:
+            g.parallel(twins)
     total = time.time() - g.t0
     if g.failed:
         print("prepush-gate: FAILED ({}) in {:.0f}s -- fix before pushing; CI would have gone red on it".format(
