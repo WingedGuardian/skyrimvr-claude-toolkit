@@ -2,7 +2,7 @@
 
 ## v4.0.0 — unreleased
 
-- Shared preservation core pinned to e0851b8: each path resolves once per read-only pass, including the store check in `Dispatcher.pre`.
+- Shared preservation core pinned to 78ec2ed: each path resolves once per read-only pass, including the store check in `Dispatcher.pre`; `upgrade-stage` works through a linked parent folder; a failed `upgrade-preview` exits non-zero; a wildcard matching no save says why it is denied.
 
 - **Snapshot metadata errors:** list and config restore refuse an unreadable recovery manifest with a one-line message and no traceback; restore admission fails before any output is written.
 - **Housekeep planning errors:** unreadable trace provenance or staging sizes keep the candidate and let other work continue; unknown byte counts and paths are reported. An ETL used for decoded XML must remain inside the same task, during both planning and apply.

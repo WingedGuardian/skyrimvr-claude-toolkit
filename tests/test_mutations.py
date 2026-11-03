@@ -4222,7 +4222,7 @@ _T11_CLAUSES = [
     ("rule-S-DEVBENCH-CRASH-curl-short-cluster", _MC, '        if w in _CURL_BODY_FLAGS or re.fullmatch(r"-[A-Za-z]*d", w):',
      '        if w in _CURL_BODY_FLAGS or w == "-d":', _t11curl("short-cluster")),
     ("rule-S-DEVBENCH-CRASH-curl-attached-body", _MC, '        attached = re.fullmatch(r"-[A-Za-z]*d(.+)", w, re.S)',
-     "        if False:", _t11curl("attached-body")),
+     "        attached = None", _t11curl("attached-body")),
     ("rule-S-DEVBENCH-CRASH-curl-every-body", _MC, "            k += 2\n            continue\n", "            break\n",
      _t11curl("two-bodies")),
     ("rule-S-DEVBENCH-CRASH-curl-endpoint", _MC, '_ENDPOINT = re.compile(r"/api/tool/([A-Za-z_]+)/?(?:[?#].*)?$")',
