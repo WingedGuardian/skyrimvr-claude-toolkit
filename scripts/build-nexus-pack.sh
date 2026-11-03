@@ -6,7 +6,7 @@
 # plus `mod-page-full-rewrite.txt`, v3.5.4 added a `PATCH-ONLY` file, v3.7 renamed
 # the changelog to `CHANGELOG-for-nexus.txt`, **v3.5 and v3.5.3 shipped EMPTY
 # directories**, and **v3.9 split in two: a complete pack (zip, changelog,
-# description) landed on the //HUB/Downloads-Temp/Downloads share while the
+# description) landed on a network share while the
 # canonical home got only UPLOAD-NOTES.txt**.
 # `nexus-v3.8/` contains a zip named 3.8.1. Prose could not hold the shape; this
 # script is the shape.
