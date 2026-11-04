@@ -9,7 +9,7 @@ import pytest
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import audit, paths, shell_rules  # noqa: E402
+from skyguard import audit, paths, shell_rules, writes  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -117,6 +117,13 @@ def test_oar_user_settings_are_not_treated_as_the_mods_data():
     assert m.MOD_DATA_CONFIG.search(base + "config.json")
     assert not m.MOD_DATA_CONFIG.search(base + "user.json")
     assert not m.MOD_DATA_CONFIG.search("meshes/actors/character/animations/OpenAnimationReplacer/user.json")
+
+
+# ---- a destination named by keyword is the same destination
+
+def test_a_keyword_destination_is_read_like_a_positional_one():
+    keyword = writes.text_write_targets("import os; os.replace(src='a', dst='b')", python_literals=True)
+    assert keyword == writes.text_write_targets("import os; os.replace('a', 'b')", python_literals=True) and "b" in keyword
 
 
 # ---- a twin the piped-listing rule came to shadow: a pipe is now caught earlier, and this clause still decides this shape

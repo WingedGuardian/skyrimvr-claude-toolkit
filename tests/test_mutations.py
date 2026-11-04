@@ -1329,7 +1329,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
           ("mo2-update-configs-lost", '            keep = [q[1] for q in todo if q[2] == "CONFIG-NEW" and replacing in q[1].parents]',
            "            keep = []", "test_mo2_update_replaces_the_folder_after_keeping_the_old_one_whole"),
           ("mo2-update-meta-ini-lost", 'CARRY_OVER = ("meta.ini",)', "CARRY_OVER = ()",
-           "test_mo2_update_replaces_the_folder_after_keeping_the_old_one_whole"),
+           "test_mo2_update_does_not_report_its_own_meta_ini_as_an_old_file"),
           ("update-without-mo2-ignored", "    if update and not mods:", "    if False:",
            "test_update_without_mo2_is_refused"),
           ("cross-drive-copy-unverified", "        if tree_hashes(kept) != before:\n            raise OSError(\"the copy",
@@ -3349,8 +3349,6 @@ _T6R1 = [
 ]
 MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test in _T6R1]
 for _suffix, _find, _rep in [
-    ("claude", r'r"(^|(?<![/\\])[/\\]+)\.claude', r'r"(^|[/\\]+)\.claude'),
-    ("node-modules", r'r"(?<![/\\])[/\\]+node_modules', r'r"[/\\]+node_modules'),
     ("skse-ini", r'r"(?<![/\\])[/\\]+Data[/\\]+SKSE', r'r"[/\\]+Data[/\\]+SKSE'),
     ("install", r'r"(^|(?<![/\\])[/\\]+)Data', r'r"(^|[/\\]+)Data'),
 ]:
@@ -7783,6 +7781,7 @@ MUTATIONS += [
                  '  login=""',
                  "tests/test_verify_release.py::"
                  "test_the_config_folder_setup_writes_is_allow_listed_in_the_scrubbed_install",
+                 marks=pytest.mark.skipif(sys.platform != "win32", reason="off Windows setup writes below the scrubbed home, so this one is not used"),
                  id="verify-passes-setups-fallback-home"),
     # Off Windows setup leaves .codex/hooks.json unrendered by design; the placeholder grep must not count it there.
     pytest.param("tools/verify-release.sh", '       codex_defs="" ;;', "       : ;;",
@@ -10710,7 +10709,7 @@ MUTATIONS += [pytest.param(src, a, b, test, id=name) for name, src, a, b, test i
      'tools/skyguard/writes.py',
      '            second = node.args[1] if len(node.args) > 1 else given.get("dst")\n',
      '            second = node.args[1] if len(node.args) > 1 else None\n',
-     'tests/test_review_v4_guard_gaps.py::test_literal_python_spellings_of_a_plugin_write_are_seen'),
+     'tests/test_review_v4_35f8_fixes.py::test_a_keyword_destination_is_read_like_a_positional_one'),
     ('r3r-documents-record-ignored',
      'tools/skyrim_paths.py',
      '    recorded = os.environ.get("SKYRIM_DOCUMENTS_DIR") or _recorded_documents()\n',

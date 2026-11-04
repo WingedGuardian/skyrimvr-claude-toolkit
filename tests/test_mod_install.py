@@ -608,6 +608,13 @@ def test_mo2_update_does_not_keep_a_file_the_last_install_wrote_unchanged(tmp_pa
     assert r.returncode == 0 and not mine.exists(), r.stdout + r.stderr
 
 
+def test_mo2_update_does_not_report_its_own_meta_ini_as_an_old_file(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    r = run(archive(tmp_path, ENTRIES), "--update", "--apply", env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
+    assert r.returncode == 0 and (old / "meta.ini").is_file(), r.stdout + r.stderr
+    assert not [line for line in r.stdout.splitlines() if "KEPT" in line and "meta.ini" in line], r.stdout
+
+
 def test_mo2_update_does_not_keep_old_distribution_files(tmp_path, sevenz, game):
     mods, old = _old_mod(tmp_path)
     (old / "Foo_DISTR.ini").write_bytes(b"Spell = x\n")
