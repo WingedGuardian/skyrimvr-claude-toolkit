@@ -1,0 +1,101 @@
+Handoff: owned SKSEVR native-observation/build capability for Delirium research
+Date: 2026-11-04
+Recipient: Skyrim toolkit maintenance owner, current toolkit master checkout.
+Request status: local handoff only; no issue, push, release or implementation.
+
+Why this request belongs here
+The user explicitly ruled that reusable infrastructure belongs in the appropriate
+toolkit, with supported interfaces, ownership and provenance. Delirium's workstream
+must not depend on another session's experiment, mutable SDK build or qualification
+receipt. User selected handoff to the toolkit owner instead of having the Delirium
+session implement shared toolkit infrastructure.
+
+Consumer and scope
+The requesting workstream is a Skyrim VR1.4.15 / SKSEVR2.0.12 passive feasibility
+probe. It must preserve PLANCK0.8.2/HIGGS1.10.10/PPB interactions and Shinso settings.
+It observes native physics call ordering and bounded generator-track metadata,
+alongside supported hit and grab/drop callbacks. No pose/velocity/motor/material/
+constraint/global-setting/save writes are authorized. Hook installation is still
+native code instrumentation and requires its own qualification and launch approval.
+The request is for development/test support, not a new runtime mod dependency.
+
+Existing capabilities checked
+Installed CLI/House Carl/DevBench and toolkit docs/tools were consulted. The public
+skse-cross-compile recipe explicitly says it is unvalidated beyond an experiment;
+it is not a qualified Windows SDK/native observer interface. Useful bridge and
+trampoline experiments exist in separate workstreams but are not owned packages.
+The original Delirium draft referenced those experiments; that coupling has been
+stopped. The workstream's native build entry point now refuses to run. Its core
+unit checks build separately using only its own code and installed MSVC tooling.
+
+Requested owned capability (owner chooses interface/package names)
+1. A declared Windows SKSEVR build dependency contract: pinned upstream CommonLib,
+   matching source-built library, OpenVR, MinHook/tooling provenance, compiler/CRT
+   compatibility and exact consumed input identities. No foreign session manifests
+   or mutable experiment-library paths. Stable exported interfaces/targets only.
+2. A raw-context pre/original/post observation bridge that invokes original exactly
+   once, preserves machine return registers/flags/vector state and LastError,
+   propagates original exceptions without replay, and exposes no reloadable callback
+   after publication. Hot observers must not allocate/log/acquire engine locks.
+3. Supported checked entry-trampoline/unwind machinery with explicit per-site
+   descriptors supplied by the consumer. Reject unknown entry bytes/foreign hooks;
+   validate generated relay/trampoline/unwind metadata before enabling. Never treat
+   a previous site's passing fixtures as qualification of a new site.
+4. An owned native-image inspection capability or provenance interface. Game assets
+   remain local inputs and are read/referenced in place. Do not duplicate a full
+   unpacked game executable per session or ship game bytes in the toolkit. Record
+   input hashes/derivation; a private investigation's image path is not an API.
+5. Source/config/generated-input and built-output receipt binding, including stale
+   binary rejection and post-run drift failure. Keep inspection/build tooling
+   separate from the consumer plugin's actual runtime requirements.
+
+Concrete site facts already investigated (not runtime acceptance)
+Pinned upstream source references:
+Delirium49bd3435e7c4a8b7d3e383a4d549679b49bfa010
+PLANCKaed524a5e398f04f10f8f95469153362a88c3681
+Drive RVA A25B60 first5:4C894C2420, MOV [rsp+20],r9; no unwind operation.
+Post RVA A27730 first5:4053554156, PUSH RBX/RBP/R14 at offsets2/3/5.
+Drive args RCX=driver,XMM1=dt,R8=context,R9=output.
+Post args RCX=driver,RDX=context,R8=output.
+Native ranges have chained unwind fragments. The source bool return typedef is
+not sufficient native return evidence; some branches return without assigning a
+canonical Boolean and callers ignore the result. Preserve raw machine state.
+The existing bridge requires originals not to consume incoming RBP as an argument;
+these decoded bodies replace RBP before using it as working state. R11 is not an
+input to either evidenced site; drive assigns before use, post never uses it.
+Stock FF25 continuation after displaced pushes has a known virtual-unwind problem
+in prior experimentation. Qualify any alternative continuation plus metadata at
+every copied-instruction and continuation boundary, not merely on normal calls.
+
+Passive metadata and lifecycle constraints
+Copy caller-provided output pointer,16-byte master and bounded16-byte track headers
+only; cap total declared bytes/count and validate spans/overflow. Do not index
+controller arrays until actual native stride/semantics are independently verified.
+One local SDK's powered-controller type measures size20/alignment4, while PLANCK
+declares HK_ALIGN16 data. Neither declaration is native ABI proof.
+Opaque driver/character/ragdoll pointers are observations, not durable identities.
+No later worker dereferences of borrowed game pointers. Match normal return to
+its invocation; missing return on native exception must remain missing evidence.
+SKSE PostLoadGame passes success as pointer value1, dataLen1, NOT a bool pointer.
+Arming must be generation-bound against PreLoadGame and have a hot-path deadline.
+After callback publication, startup failure must leave resident inert code, never
+return failure that unloads a DLL with a registered callback. Capture completion
+must drain admitted producers or explicitly report incomplete capture.
+Dormant XSAVE bridges have measurable potential overhead; do not call them free.
+
+Owner acceptance / handback
+- Identify the supported package/API, ownership, pinned provenance and exact
+  consumed dependency qualification. No installation/launch/push needed to hand back.
+- Provide tests for raw native ABI/unwind/exception behavior, stale receipt/profile
+  rejection, callback lifetime failure and capture cancellation/deadline races.
+- Provide an offline consumer build example using the owned interface only.
+- Return known limitations and any consumer-side site qualifications still needed.
+The Delirium workstream will adapt its two site-specific descriptors and probe,
+review the result, then request approval immediately before each runtime test.
+Do not change game-root harness hooks or deploy unreviewed infrastructure.
+
+Local workstream references (relative to configured game root; not dependencies)
+_CLAUDE_OUTPUT/delirium-vr-assessment-20261104/PLAN.txt
+_CLAUDE_OUTPUT/delirium-vr-assessment-20261104/ROUTES.txt
+_CLAUDE_OUTPUT/delirium-vr-assessment-20261104/probe/
+These are supporting evidence and an unfinished consumer draft, not a shared API.
