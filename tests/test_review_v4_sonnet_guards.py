@@ -14,7 +14,7 @@ sys.path.insert(0, str(REPO / "tools"))
 from skyguard import anchored, audit, deletes, mcp_rules, paths, shell_rules, shellparse, targets  # noqa: E402
 
 INSTALL = "C:/t7/Skyrim VR"
-ENV = {"SKYRIM_GAME_ROOT": "C:/GOG Games/Skyrim Fixture"}
+ENV = {"SKYRIM_GAME_ROOT": "C:/Synthetic Games/Skyrim Fixture"}
 DATA = INSTALL + "/Data"
 HOOK = INSTALL + "/.claude/hooks/protect-bash.sh"
 URL = "http://127.0.0.1:8921/api/tool/console"

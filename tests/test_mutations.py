@@ -1734,6 +1734,11 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
                  "test_a_retired_batch_is_never_deleted_and_a_link_is_never_offered",
                  marks=pytest.mark.skipif(sys.platform == "win32", reason="the test links with a junction there"),
                  id="housekeep-retired-follows-symlinks"),
+    # POSIX os.walk never enters a symlink, so this filter only matters for a junction (Python below 3.12 follows those).
+    pytest.param("tools/housekeep.py", "        dirs[:] = [d for d in dirs if not linked(os.path.join(folder, d))]\n", "",
+                 "tests/test_review_v4_sonnet_tools.py::test_a_report_size_steps_over_a_link",
+                 marks=pytest.mark.skipif(sys.platform != "win32", reason="a junction exists on Windows only"),
+                 id="housekeep-size-skips-links"),
     # --- housekeep after the 2026-10-28 incident (a recycled CommonLibSSE.lib a live build linked) + archive ---
     *[pytest.param(src, anchor, repl, test, id="housekeep-" + mid)
       for mid, src, anchor, repl, test in [
@@ -10353,7 +10358,7 @@ MUTATIONS += [pytest.param("tools/skyguard/deletes.py", *m[:3], id=m[3]) for m i
     ('            base = targets.exec_cwd(e, cwd, env) or ""', '            base = ""', _IDT + "[python-rmtree]",
      "guard3-interpreter-delete-resolved-where-it-runs"),
     ("interpreter_delete_targets(code, bool(_PYTHON.fullmatch(e.program)))", "interpreter_delete_targets(code, False)",
-     _IDT + "[python-os-remove]", "guard3-interpreter-delete-python-as-python"),
+     _IDT + "[python-path-unlink]", "guard3-interpreter-delete-python-as-python"),
 ]]
 
 
@@ -10755,8 +10760,6 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      'tests/test_review_v4_sonnet_tools.py::test_housekeep_accounting_can_fail', 'housekeep-accounting-can-fail'),
     ('tools/housekeep.py', '                    if not has_recycle_bin():    # the original stays', '                    if False:    # the original stays',
      'tests/test_review_v4_sonnet_tools.py::test_no_recycle_bin_no_gzip_plan', 'housekeep-no-bin-no-gzip'),
-    ('tools/housekeep.py', '        dirs[:] = [d for d in dirs if not linked(os.path.join(folder, d))]\n', '',
-     'tests/test_review_v4_sonnet_tools.py::test_a_report_size_steps_over_a_link', 'housekeep-size-skips-links'),
     ('tools/housekeep.py', '    os.chmod(path, stat.S_IMODE(os.stat(path).st_mode) & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))\n', '    pass\n',
      'tests/test_review_v4_sonnet_tools.py::test_read_only_really_is', 'housekeep-readonly-clears-write'),
     ('tools/adapting/adapter_template.py', '    if not root:\n        return\n    try:\n        d = _hb_dir(root)', '    try:\n        d = _hb_dir(root)',

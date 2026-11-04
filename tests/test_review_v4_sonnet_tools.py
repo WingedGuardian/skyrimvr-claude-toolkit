@@ -333,7 +333,13 @@ def test_a_dry_run_takes_no_permanent_backup(install, monkeypatch):  # noqa: F81
 # ---- 8.12
 def test_missing_dotnet_is_named(tmp_path, monkeypatch):
     from housecarl_integration import Refusal, setup as hc_setup
-    monkeypatch.setattr(hc_setup.os, "name", "nt")
+    class _WindowsOs:
+        name = "nt"
+
+        def __getattr__(self, attr):
+            return getattr(os, attr)
+
+    monkeypatch.setattr(hc_setup, "os", _WindowsOs())    # setup.py's reference only: pathlib reads the real os.name
     monkeypatch.setattr(hc_setup.subprocess, "run", lambda *_a, **_k: (_ for _ in ()).throw(FileNotFoundError("WinError 2")))
     args = SimpleNamespace(root=str(tmp_path), mo2_instance="x", plugins_txt=None, config_dir=None)
     with pytest.raises(Refusal, match="Could not run dotnet"):

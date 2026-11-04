@@ -578,7 +578,8 @@ def launch(root, name, days, size=200_000):
     return d
 
 
-def test_launch_logs_gzip_after_a_week_recycle_after_ninety_days_and_labelled_folders_stay(tree):
+def test_launch_logs_gzip_after_a_week_recycle_after_ninety_days_and_labelled_folders_stay(tree, monkeypatch):
+    monkeypatch.setattr(hk, "has_recycle_bin", lambda: True)    # FakeBin stands in for it; off Windows the plan keeps the log
     def stamp(days):
         return time.strftime("launch-%Y%m%d-%H%M%S", time.localtime(time.time() - days * DAY))
 
