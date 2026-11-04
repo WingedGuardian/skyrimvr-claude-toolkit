@@ -659,7 +659,8 @@ public class ResaverCLI {
                   : old instanceof Variable.Bool ? "bool" : old instanceof Variable.Str ? "str" : null);
         if (t == null) return null;
         switch (t) {
-            case "int":   return new Variable.Int(Integer.decode(val));
+            // Base 10 unless spelled 0x: Integer.decode read a zero-padded 010 as octal 8, silently.
+            case "int":   return new Variable.Int(val.matches("[+-]?0[xX].*") ? Integer.decode(val) : Integer.parseInt(val));
             case "float": return new Variable.Flt(Float.parseFloat(val));
             case "bool":
                 if (!val.matches("(?i)0|1|true|false")) throw new NumberFormatException("not a bool: " + val);

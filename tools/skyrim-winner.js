@@ -206,14 +206,24 @@ function findByLocalID(file, localID) {
     // straight through searched index 00 (Skyrim.esm) instead, so a record that
     // plainly existed came back as "no record". That false negative is exactly
     // what this tool exists to prevent, so match on the low 3 bytes instead --
-    // the same thing the existing hand-rolled scripts do.
+    // the same thing the existing hand-rolled scripts do. Its overrides can share low bytes across masters (Skyrim.esm and
+    // Dawnguard.esm both have a 003363), so the full id decides when it matches, and two candidates with none refuse.
+    const same = [];
     for (const r of xelib.getRecords(file, '', true)) {     // true: its overrides too, as the header promises
         let fid;
         try { fid = xelib.getFormID(r, false); } catch (e) { continue; }
-        if ((fid & 0x00FFFFFF) === (localID & 0x00FFFFFF)) return r;
-        try { xelib.release(r); } catch (e) {}
+        if (fid === localID) {
+            same.forEach(s => { try { xelib.release(s); } catch (e) {} });
+            return r;
+        }
+        if ((fid & 0x00FFFFFF) === (localID & 0x00FFFFFF)) same.push(r);
+        else { try { xelib.release(r); } catch (e) {} }
     }
-    return null;
+    if (same.length > 1) {
+        throw new Error(same.length + ' records in this plugin share the low bytes of ' + localID.toString(16) +
+                        '; give the full FormID with its load-order byte');
+    }
+    return same[0] || null;
 }
 
 function run() {

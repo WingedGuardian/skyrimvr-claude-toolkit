@@ -350,8 +350,8 @@ lift is then recorded and bound to that session. **A lift lasts one hour by defa
 expires locks the file again**, and the next session start relocks anything still open (the backstop). Without hooks
 neither happens (see below). `bash tools/skyguard.sh lock status` shows each target as locked, unlocked, missing,
 half-locked (`drift`) or read-only but not locked by the toolkit, plus the files it skipped; it does not show lifts (a lifted file reads
-`unlocked`): `bash tools/skydoctor` shows each lift and when it ends. `lock disable` turns the lock off for good (until
-`lock enable`) and a banner repeats it at every session start. To lock again now: `lock lock`.
+`unlocked`): `bash tools/skydoctor` shows each lift and when it ends. `lock disable` stops any relocking for good (until
+`lock enable`) and a banner repeats it at every session start; files already locked stay locked until `lock unlock`. To lock again now: `lock lock`.
 
 - **Without Python:** double-click `tools\skyguard-unlock.cmd`. It unlocks every target (no lift is recorded), re-checks
   every file, prints `NOT unlocked` and exits non-zero if one is still locked; `lock lock`, or the next session start,
@@ -492,6 +492,28 @@ are not classified; this gap also exists in v3.9.1. The guard does not provide a
   picture; use `skyguard doctor` only if you want the hook report alone.
 
 ---
+
+## Save sentinel, save locks and `.protect-saves`
+
+- **Save sentinel (Claude Code, every post-call hook).** It reports any `.ess`/`.skse` changed with no backup first, whatever changed
+  it, including a script the pre-call rules cannot read. A save changed while the game ran, or in a session that ended since the last
+  look (by its SKSE and Papyrus logs), is reported to the agent only. Codex has no post-call hook, so it gets no such report.
+- **Save locks (optional, Windows, off unless you choose them).** `bash tools/skyguard.sh save-lock on|off|status|unlock`. While on,
+  Windows refuses any delete, overwrite, rename or recycle of a locked save, from any program running as you, the game included:
+  saving over a menu slot writes a new file, but a mod or console command saving to one fixed name fails once that file is locked.
+  Autosave and quicksave slots stay unlocked. New saves are locked by the sentinel, so on another agent only the saves present at `on`
+  are locked. Only you change this: `off` and `unlock` need an elevated prompt, and the guard refuses an agent's `on`, `off` and `unlock`.
+  An unlock lasts an hour. The locks do not hold a process running as administrator, and a script can still delete the switch file
+  itself (the sentinel reports that). The locks outlast the toolkit: run `save-lock off` before removing it. If a locked folder is gone
+  for good, `save-lock off --forget-missing`. An agent that hits "access denied" on a save must tell you, never work around it.
+- **`.protect-saves`.** An empty file with this name makes a kept folder of saves count as a save location for the guard, the sentinel
+  and the locks.
+
+## Session charter and ledger
+
+Claude Code: the session's first prompt is kept in `.agent-sessions/<session id>.md`, in the install, with its open ledger beside it;
+both come back at session start and after compaction. The folder holds private text, so it ignores itself in git; nothing removes it,
+so delete old files whenever you like. Codex has the ledger, but no first-prompt record, because it has no per-prompt hook.
 
 ## Using with Codex
 

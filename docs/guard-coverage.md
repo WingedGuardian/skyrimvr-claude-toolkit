@@ -26,7 +26,7 @@ checked at each location; an unconditional absolute `cd` collapses the alternati
 Equal locations coalesce. More than 16 alternatives per frame, or an incomplete
 parse after location ambiguity, refuses with S-SHELL-UNREAD. This is conservative
 location analysis. A function defined in the same command is read at each call, and aliases are expanded; a function
-defined twice refuses, and a `shift` under a branch leaves later arguments unknown. Function,
+defined twice refuses, and a `shift` under a branch refuses to parse. Function,
 coprocess and piped/background brace bodies keep their own locations. Text piped
 into a shell is checked at every possible reader location. A relative `cd` in a
 loop is tracked; a target it cannot name is an unknown location.

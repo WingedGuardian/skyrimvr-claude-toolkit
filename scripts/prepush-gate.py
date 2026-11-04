@@ -19,7 +19,8 @@ Steps, each red on its own:
      the files this push changes (`git diff --name-only BASE...HEAD`: a changed test file runs itself; a changed
      tools/ or scripts/ module runs every tests/test_*<its stem>*.py; the guard adapters run the wrapper tests; and
      EVERY test file whose text names a changed file's basename runs, since that is the test that goes red on it).
-     Up to seven processes: timing/deadline, corpus, rule messages, and up to four changed-file chunks.
+     One process per test file, at most eight at once, plus timing/deadline, corpus and rule messages as their own groups.
+     Then a spread sample of at most 200 mutation twins of the changed files; CI runs every twin.
 
 BASE defaults to the branch's upstream (a base it cannot read stops the gate: it would select no tests), else the merge-base with origin/master. A dirty working tree is reported
 (the gate runs on the tree, the push sends the commits). Exit 0 = passed, 1 = a step failed, 2 = could not run.

@@ -90,7 +90,7 @@ Bethesda key); on any other path such a command is allowed as read, and the verd
   - process substitution `<( )` / `>( )`: parsed as commands; the word itself is dynamic, and it joins the text it
     touches as bash does (`X=<(echo a) rm x` is an assignment prefix, then rm).
   - `$(( ))` arithmetic and `${ }` expansions are skipped; a `$( )` INSIDE them is not parsed.
-  - aliases and shell functions defined in the same command are not expanded (a function's BODY is parsed).
+  - aliases and shell functions defined in the same command are read at each call; ones defined elsewhere are not known.
   - PowerShell method calls other than [IO.File]/[IO.Directory] are not execs, except the opaque ones
     (.Delete/.MoveTo/.Invoke/::Create ...): a "?" exec whose argv is the receiver+method as written and the call's
     arguments, and for `.Delete()` an io.directory.delete of the receiver (unresolved). A script block or $( )

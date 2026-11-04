@@ -366,8 +366,11 @@ def main(argv=None) -> int:
         v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)
         v = _saves(a, p, audit, v, p["tool_name"])          # an existing save DevBench overwrites is kept first
     elif a.role == "backup-before-edit":
-        backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit, "claude", p.get("session_id", ""))
+        kept = backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit, "claude", p.get("session_id", ""))
         v = Verdict()
+        if kept is backup.FAILED:           # never a block, but never silent: the edit goes ahead with no copy of the file
+            v = Verdict("allow", "", "NO BACKUP of {} could be taken before this edit (see .claude/backups/AUDIT_LOG.txt). "
+                        "Tell the user if the file matters.".format(p["file_path"]))
     elif a.role == "save-sentinel":
         # PostToolUse, after the call: report saves changed with no backup first (saves.py KNOWN LIMITS). Never a
         # decision; an unreadable paths file costs only the declared config dirs, never the look itself.

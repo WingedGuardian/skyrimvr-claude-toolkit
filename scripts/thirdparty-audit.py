@@ -721,7 +721,7 @@ REGISTRY = [
      "upstream": ("github-commit", "Tonycubed2/ResaverPP"),
      "refs": [{"pattern": r"ResaverPP[^\n]{0,80}?commit `(?P<v>[0-9a-f]{7,40})`", "compare": "prefix"}],
      "newer_note": "19.8 (3958350) and 19.9 (03ca2b6) were reviewed and NOT adopted; the pin is the tested commit. "
-                   "A bump re-qualifies the 27 patches (SOURCE-SHA256, the six CTest targets, the CI survey)"},
+                   "A bump re-qualifies the 10 patches (SOURCE-SHA256, the seven CTest targets, the CI survey)"},
     {"name": "Visual Studio 2022 Build Tools (tested range)", "upstream": ("eol", "visual-studio", "minor"),
      "not_delivered": "system software the user installs; the toolkit never installs it. Tested range for the local "
                       "builds: MSVC 19.44 / CMake 3.31.6 (tools/resaver-plus/README.md); setup.sh reports detected "

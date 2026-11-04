@@ -360,6 +360,9 @@ class Guard:
             if root.is_dir():
                 self.tracked.update(tracked_files(root))
         self.links = evidence_links(cfg)
+        # A doc line naming the output root itself (`out/*.log`, `out/<task>/README.md`) protects no file under it: every
+        # finished task would otherwise read as linked evidence, forever, with nothing said.
+        self.output_roots = {_key(_abs(cfg, r)) for r in cfg["agent_output"]}
         self.globs = [g.lower() for g in cfg["protected_globs"]]
 
     def why_protected(self, path) -> str:
@@ -391,7 +394,7 @@ class Guard:
         k = _key(p)
         if k in self.tracked:
             return "git-tracked"
-        if k in self.links or any(k.startswith(x + os.sep) for x in self.links):
+        if k in self.links or any(k.startswith(x + os.sep) for x in self.links if x not in self.output_roots):
             return "linked evidence"
         if any(fnmatch.fnmatch(low, g) for g in self.globs):
             return "protected_globs"
@@ -1310,7 +1313,7 @@ def recycle(paths) -> dict:
     # suppresses confirmations, and the confirmation it suppresses is the one Windows shows when an item is too big for
     # the bin and would be destroyed instead. FOF_WANTNUKEWARNING (0x4000) brings exactly that prompt back while
     # FOF_NOCONFIRMATION (0x10) still skips "move to the Recycle Bin?". FOF_ALLOWUNDO (0x40) is the Recycle Bin.
-    # For a local item too big for its bin, the user's answer decides; "No" leaves the item in place.
+    # An item too big for its bin is refused before this call (bin_refusal) and stays in place; the flag is for a race.
     # NOERRORUI suppresses error dialogs. WANTNUKEWARNING is NOT a guarantee: MEASURED 2026-10-31, a file on a
     # network share was destroyed silently (rc 0, no dialog) with these flags AND without 0x400. bin_refusal() above
     # is the only thing keeping no-bin locations out of this call; never loosen it on the strength of this flag.

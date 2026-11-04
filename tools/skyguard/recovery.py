@@ -277,7 +277,9 @@ def _config(store, idx, roots, audit, command, now, agent, session_id):
     sid = _new_id(idx, ts, "config")
     for u in updates.values():
         u[3] = sid
-    state = sorted({e["src"] for e in read_manifest(store)[0] if e["kind"] == "config"} | {s for s, _h, _z in changed})
+    # What exists now: a file deleted since an older snapshot is no part of this point's state, or a restore brings it back.
+    state = sorted({e["src"] for e in read_manifest(store)[0] if e["kind"] == "config" and e["src"] in files}
+                   | {s for s, _h, _z in changed})
     lines = [_line(ts, now, src, sha, size, "config", sid, command, agent, session_id, len(changed), state)
              for src, sha, size in changed]
     names = ", ".join(os.path.basename(s) for s, _h, _z in changed)
@@ -490,7 +492,7 @@ def resolve(store, sid):
     every config path's newest line up to and including that snapshot's; a save snapshot is its own files. Raises
     ValueError for an unknown id -- and (fix round 1, I4) for a snapshot that is no longer whole: one of its own lines
     is gone, or a path its state held has no line left at that point. A partial state is refused, never returned."""
-    entries = read_manifest(store)[0]
+    entries, bad_lines = read_manifest(store)
     mine = [i for i, e in enumerate(entries) if e["snap"] == sid]
     if not mine:
         raise ValueError("no recovery snapshot {}".format(sid))
@@ -501,6 +503,9 @@ def resolve(store, sid):
     if first["kind"] == "save":
         state = {entries[i]["src"]: entries[i] for i in mine}
     else:
+        if bad_lines:
+            raise ValueError("recovery snapshot {} cannot be rebuilt: the manifest has {} unreadable line(s), and an older copy "
+                             "would silently stand in for a lost one".format(sid, bad_lines))
         state = {}
         for e in entries[:mine[-1] + 1]:
             if e["kind"] == "config":

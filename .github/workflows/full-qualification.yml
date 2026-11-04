@@ -285,8 +285,8 @@ jobs:
 
   # v4.0.0: ReSaver Plus (the opt-in native ReSaver backend) is BUILT on the user's machine and never shipped, so CI
   # builds it exactly that way on a machine that never saw the dev install -- the "second machine" build: the pin
-  # verified, the 27 patches applied, every changed/added file checked against SOURCE-SHA256, the CLI and tests built
-  # with the GUI off, all six runnable CTest targets passing (build.py refuses to install otherwise) -- then runs every
+  # verified, the 10 patches applied, every changed/added file checked against SOURCE-SHA256, the CLI and tests built
+  # with the GUI off, all seven runnable CTest targets passing (build.py refuses to install otherwise) -- then runs every
   # operation through tools/resaver-cli.sh on a SYNTHETIC save made by the build's own probe (never a real save).
   # The behavior legs test the same code with a stub executable on both OSes.
 

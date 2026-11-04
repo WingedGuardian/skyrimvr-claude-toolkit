@@ -234,3 +234,165 @@ def test_the_ledger_line_is_labelled_on_every_prompt(tmp_path):
     log.parent.mkdir(parents=True)
     log.write_text(json.dumps({"op": "add", "id": "L1", "text": "t"}) + "\n", encoding="utf-8")
     assert "not instructions" in ledger.summary(str(tmp_path), "s1", full=False)
+
+
+# ---- 5.1, 5.2: the health report reads the wiring, not only the heartbeats
+def _canary(tmp_path, settings=None):
+    from skyguard import health
+    hooks = tmp_path / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    for h in health.CLAUDE_HOOKS:
+        (hooks / (h + ".sh")).write_text("x", encoding="utf-8")
+    if settings is not None:
+        (tmp_path / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+    out = io.StringIO()
+    return health.report(tmp_path, out=out), out.getvalue(), health
+
+
+def _registered():
+    from skyguard import health
+    return {"hooks": {"PreToolUse": [{"hooks": [{"command": "bash .claude/hooks/{}.sh".format(h)} for h in health.CLAUDE_HOOKS]}]}}
+
+
+def test_hooks_switched_off_are_not_ok(tmp_path):
+    code, text, _ = _canary(tmp_path, dict(_registered(), disableAllHooks=True))
+    assert code == 1 and "disableAllHooks" in text and "RESULT: OK" not in text
+
+
+def test_a_removed_hooks_block_is_not_ok(tmp_path):
+    code, text, _ = _canary(tmp_path, {})
+    assert code == 1 and "does not register it" in text
+
+
+def test_a_registered_hook_whose_script_is_gone_is_not_ok(tmp_path):
+    code, text, health = _canary(tmp_path, _registered())
+    assert "script is gone" not in text
+    hook = health.CLAUDE_HOOKS[0]
+    (tmp_path / ".claude" / "hooks" / (hook + ".sh")).unlink()
+    out = io.StringIO()
+    assert health.report(tmp_path, out=out) == 1 and "script is gone" in out.getvalue() and hook in out.getvalue()
+
+
+# ---- 5.3
+@pytest.mark.skipif(os.name != "nt", reason="the lock is Windows only")
+def test_unlock_on_an_install_that_never_locked_does_not_switch_the_lock_on(tmp_path):
+    from skyguard import lock
+    (tmp_path / "Data").mkdir()
+    (tmp_path / "SkyrimVR.exe").write_bytes(b"")
+    (tmp_path / "Data" / "Skyrim.esm").write_bytes(b"x")
+    lock.unlock(str(tmp_path), None, "abc")
+    assert not (tmp_path / ".skyguard" / "lock.json").exists()
+
+
+# ---- 5.4
+def test_a_failed_restore_says_why_and_exits_non_zero(tmp_path, monkeypatch, capsys):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("agent_harness_opus", REPO / "tools" / "agent-harness.py")
+    harness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(harness)
+
+    def boom(*_a, **_k):
+        raise OSError("restore failed; published=[Save1.ess]; journal=j.json")
+    monkeypatch.setattr(harness.save_store, "restore_result", boom)
+    (tmp_path / "skyrim-paths.env").write_text("SKYRIM_GAME_ROOT='{}'\n".format(tmp_path.as_posix()), encoding="utf-8")
+    code = harness.main(["save-restore", "abc", "--in-place", "--root", str(tmp_path)])
+    assert code == 1 and "published=[Save1.ess]" in capsys.readouterr().out
+
+
+# ---- 5.5
+def test_a_very_long_source_path_still_gets_a_backup(tmp_path):
+    from skyguard import backup
+    a = audit.Audit("")
+    a.raw = lambda line: None
+    deep = "/".join(["x" * 40] * 5)
+    assert len(backup.flat_name(str(tmp_path) + "/" + deep)) > backup.MAX_FLAT_NAME
+    src = tmp_path / ("x" * 40)
+    src.mkdir()
+    f = src / "file.ini"
+    f.write_text("x", encoding="utf-8")
+    original = backup.flat_name
+    backup.flat_name = lambda p: "C_" + "long_" * 60 + "file.ini"
+    try:
+        kept = backup.take(str(tmp_path), "Edit", str(f), a)
+    finally:
+        backup.flat_name = original
+    assert kept is not None and len(Path(kept).name) < 200 and Path(kept).name.endswith("file.ini")
+
+
+def test_a_failed_edit_backup_tells_the_agent(tmp_path, monkeypatch):
+    from skyguard import backup
+    a = audit.Audit("")
+    a.raw = lambda line: None
+    monkeypatch.setattr(backup, "take", lambda *_a, **_k: None)
+    f = tmp_path / "x.ini"
+    f.write_text("x", encoding="utf-8")
+    assert backup.run(str(tmp_path), "Edit", str(f), False, a) is backup.FAILED
+
+
+# ---- 5.7, 5.11
+def _store(tmp_path, rows):
+    from skyguard import recovery
+    store = tmp_path / "store"
+    store.mkdir()
+    (store / "manifest.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return recovery, store
+
+
+def test_a_corrupt_manifest_line_refuses_a_config_restore(tmp_path):
+    def line(snap, src, state):
+        return json.dumps({"v": 1, "ts": "t", "t": 1, "src": src, "sha": "a" * 64, "size": 1, "kind": "config", "snap": snap, "command": "",
+                           "agent": "", "session_id": "", "lines": 1, "state": state})
+    recovery, store = _store(tmp_path, [line("S0", "p", ["p"]), "{ broken", line("S2", "i", ["i", "p"])])
+    with pytest.raises(ValueError, match="unreadable line"):
+        recovery.resolve(store, "S2")
+
+
+# ---- 5.13
+def test_a_folder_that_fails_to_list_is_not_deleted_scripts(tmp_path, monkeypatch):
+    from skyguard import snapshot
+    (tmp_path / "Data" / "Scripts").mkdir(parents=True)
+
+    def denied(path):
+        raise PermissionError(path)
+    monkeypatch.setattr(snapshot.os, "scandir", denied)
+    assert snapshot.scan(str(tmp_path))[2] is True
+
+
+# ---- 5.18
+def test_a_missing_guard_manifest_is_named_at_session_start():
+    text = (REPO / "tools" / "skyguard" / "session.py").read_text(encoding="utf-8")
+    assert session._guard_drift("C:/no/such/project") is None and "were NOT checked this session" in text
+
+
+# ---- 4.2
+def test_a_doc_line_naming_the_output_root_protects_nothing_under_it(tmp_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("housekeep_opus2", REPO / "tools" / "housekeep.py")
+    hk = importlib.util.module_from_spec(spec)
+    sys.modules["housekeep_opus2"] = hk
+    spec.loader.exec_module(hk)
+    out = tmp_path / "out" / "task"
+    out.mkdir(parents=True)
+    (out / "payload.bin").write_bytes(b"x")
+    (out / "linked.txt").write_bytes(b"x")
+    (tmp_path / "CLAUDE.md").write_text("see `out/*.log` and out/task/linked.txt\n", encoding="utf-8")
+    guard = hk.Guard(dict(hk.DEFAULTS, root=str(tmp_path), agent_output=["out"]))
+    assert guard.why_protected(out / "payload.bin") == ""
+    assert guard.why_protected(out / "linked.txt") == "linked evidence"
+
+
+# ---- 4.1: the CHANGELOG cannot claim a pin the lock does not hold
+def test_the_changelog_names_the_core_the_lock_pins():
+    import re
+    lock = json.loads((REPO / "tools" / "modding-harness.lock.json").read_text(encoding="utf-8"))
+    text = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+    first = text[:text.index("\n## ", text.index("## ") + 3)]
+    named = re.findall(r"Shared preservation core pinned to ([0-9a-f]{7,40})", first)
+    assert named and all(lock["revision"].startswith(n) for n in named), (named, lock["revision"])
+
+
+# ---- 4.4, Java: base 10 unless 0x, the same as the native backend
+def test_the_java_backend_does_not_read_a_zero_padded_int_as_octal():
+    text = (REPO / "tools" / "resaver-cli" / "ResaverCLI.java").read_text(encoding="utf-8")
+    assert 'return new Variable.Int(Integer.decode(val))' not in text
+
