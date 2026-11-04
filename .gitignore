@@ -48,4 +48,6 @@ tools/resaver-plus/build/
 tools/resaver-plus/work/
 tools/resaver-plus/backend
 .modding-agent-harness/
+# Session charters: each session's first prompt, goal and open items (private, per install).
+.agent-sessions/
 tools/resaver-cli/.compiled/

@@ -226,7 +226,7 @@ def _codex(a, raw: str) -> int:
         _session_line(a, req.session_id, source=req.source, transcript=req.transcript_path)
         out, status, code = session.run_status(a.project, req.source, a.bash, audit, root=a.root_win or a.root)
         _session_snapshot(a.project, req.source, audit)
-        out = _disk_note(a.project) + out
+        out = session.with_charter(_disk_note(a.project) + out, a.project, req.session_id)
         _telemetry(a, Verdict("allow", "", "", status, code))
         _emit("SKYGUARD-OK\n" + codex.session_body(out))
         return 0
@@ -387,7 +387,7 @@ def main(argv=None) -> int:
         out, status, code = session.run_status(a.project, "" if p["empty"] else p["source"], a.bash, audit,
                                               root=a.root_win or a.root)
         _session_snapshot(a.project, "" if p["empty"] else p["source"], audit)
-        out = _disk_note(a.project) + out
+        out = session.with_charter(_disk_note(a.project) + out, a.project, p["session_id"])
         _telemetry(a, Verdict(status=status, code=code))
         session.export_env(p["session_id"], "claude")   # later Bash calls get SKYGUARD_SESSION_ID (Task 10)
         _emit(out)

@@ -12030,6 +12030,9 @@ MUTATIONS += [pytest.param(path, anchor, replacement, _DVRHK + test, id='review-
     (_FH, '                        if in_backups and not named_manifest and not re.search(r\'"rollback_sources"\\s*:\', text):',
      '                        if in_backups and not named_manifest:',
      'test_backup_manifest_recognized_by_shape[malformed]', 'json-manifest-claimed'),
+]]
+
+
 # User ruling 2026-10-31: save locking is optional and only the user turns it off; the switch is never the agent's.
 _SLG = "tests/test_save_lock_guard.py::"
 _SLS = "tests/test_save_sentinel.py::"
