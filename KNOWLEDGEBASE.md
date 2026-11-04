@@ -10,6 +10,10 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim modding 
 
 **"VM is freezing..." / "VM is frozen"** — These lines appear in **every** Papyrus log on normal game exit and save. They are not a crash, not a script error, and have no diagnostic value. Ignore them completely when troubleshooting.
 
+**"Unable to bind script X to alias Y on quest Z because their base types do not match"** (measured 2026-11-04) — the plugin attaches script `X` to a ReferenceAlias, but `X.psc` does not extend `ReferenceAlias` (for example `Scriptname X Hidden`, a holder of global native functions that extends nothing). The script never runs on that alias; if the mod calls its functions as globals and keeps state elsewhere (SKSE co-save), the line is cosmetic. Fixing it means editing the alias's VMAD in the third-party plugin.
+
+**"Script X does not exist" for a script the plugin references** — check whether that mod's own BSA ships it. When the mod's other scripts are present and this one is not, it is an author-side packaging miss, not a load-order problem.
+
 ### Script Lifecycle
 
 **OnInit vs OnLoad:**
@@ -18,6 +22,7 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim modding 
 - For other objects (Topic Infos, Perks, persistent refs): `OnInit` fires at first load into the session
 - All properties and variables are reset to default values before `OnInit` fires
 - There is NO `OnLoad` event — use `RegisterForSingleUpdate`/`OnUpdate` or `OnGameReload` for reload detection
+- SKSE's `ActiveMagicEffect.psc` declares the Actor events, including `OnRaceSwitchComplete`, so an ability's effect script can react to vampire turn, cure and Vampire Lord transform (all race swaps) without a ReferenceAlias script
 - `OnInit` does NOT fire again after save/load (quest must be reset)
 
 **Persistence and Save/Load:**
@@ -987,7 +992,8 @@ A living list of potential safety hooks identified during work. Evaluated but no
 
 | Candidate | Trigger | What it would do | Priority | Status |
 |-----------|---------|------------------|----------|--------|
-| *None yet* | — | — | — | — |
+| Missing-master preflight | Before a game launch | Read `plugins.txt` and the MAST records of every active plugin; refuse or warn when a master is absent or disabled. A CTD on 2026-11-02 looked like a plugin bug and was a missing master (see *Crash logs*) | High | Not implemented |
+| Write guard for the Nexus downloads folder | Bash/Edit/Write into the mod manager's download folder | Refuse like the install and `mods/` guards do. Needs the folder in `skyrim-paths.env` first; check `docs/guard-coverage.md` | Medium | Not implemented |
 
 **When to add entries:** After any near-miss, unexpected outcome, or pattern of risk that current hooks don't cover. Include why the gap was noticed and whether the overhead is justified.
 
@@ -1796,6 +1802,14 @@ and writes a SHA-256 manifest, which is the record a bare copy lacks. Under MO2 
 folder in MO2's `mods/` (enable it in MO2) instead of writing to the real `Data/`. Read the
 destinations before `--apply`, and check the result after it (skill `triage-and-conflicts`).
 
+### `modlist.txt` is written in reverse
+
+`<instance>/profiles/<profile>/modlist.txt` (CRLF) lists the **highest** priority first, and a separator line (`-<name>_separator`) comes **after** its members: a separator's members are the lines above it, up to the previous separator. `+` = enabled, `-` = disabled. "Insert above X" therefore means "higher priority than X". Write a sorted copy elsewhere and let the user back up the original and swap the copy in with MO2 closed; assert the result has the same line count and the same multiset of lines as the input.
+
+### usvfs 0.5.7.1 corrupts .NET directory listings (measured 2026-10-29)
+
+`hooks/file_information_utils.h` in usvfs 0.5.7.1 maps `FileFullDirectoryInformation` (class 2, the one .NET uses) to `FILE_ID_FULL_DIR_INFORMATION`, so the name is read and written at offset 80 instead of 68. Reads break duplicate skipping (each entry listed twice); writes land 12 bytes late (names like `1hm_be1hm_be`, `0_mast0_`, `info.iin`). Any .NET tool listing a virtual folder is hit; Pandora Behaviour Engine+ showed it as Nemesis mods partly ignored, `Event/variable table mismatch` and `DirectoryNotFoundException`. Not Wine-specific; fixed in 0.5.7.2 (commit de356fb2). **Check the `FileVersion` of `usvfs_x64.dll` itself**: one install had the x86 DLL and both proxies at 0.5.7.2 and the x64 DLL still at 0.5.7.1.
+
 ---
 
 ## Papyrus: a recompiled `.pex` only loads at game STARTUP
@@ -1865,6 +1879,23 @@ Serializing your copy with Spriggit is the fastest way to actually *see* inherit
 
 ---
 
+## Two winners: records by plugin order, files by mod priority (measured 2026-11-01..04, MO2)
+
+What the player sees often comes from two independent conflict winners:
+
+- **NPC look.** The NPC_ record is won by plugin order; its loose FaceGen (`meshes/actors/character/FaceGenData/FaceGeom/<plugin>/<FormID>.nif` and the FaceTint DDS) is won by MO2 mod priority. When they come from different mods the head is missing or wrong (a headless NPC: record from mod A names A's head part, FaceGeom from mod B uses B's). Rule: the mod whose plugin wins the record must also win its FaceGen. To survey, list loose FaceGeom per enabled mod, find paths shipped by more than one, then find the record winner by scanning plugins for `NPC_` headers with that FormID.
+  A FaceGen patch that tells users "let mod X win all loose-file conflicts against mod Y" must patch EVERY NPC whose FaceGen both mods ship, not only the ones split in your own setup; measure the shared file set of the two mod folders first. With several mod pairs, every pair must be flipped; diagnose by listing, per patched FormID, the winning FaceGeom/FaceTint mod next to the installed plugin's record source.
+- **Scripts.** A loose `.pex` beats a `.pex` inside any BSA regardless of MO2 priority. Two overhauls that replace the same vanilla scripts, one loose and one in its BSA, give the loose scripts while the later plugin wins the records: a mismatched script/record pair. Pick one mod.
+- **Interface SWFs.** Resource mods sometimes ship stock `interface/*.swf` (Beyond Skyrim Assets: `hudmenu.swf`, `map.swf`, `SkyUI/mapMarkerArt.swf`); placed above a UI reskin they silently revert it. After any sort, diff the file winner of every file the moved mods ship, before vs after.
+
+**A patch must master every plugin that overrides its records, not only today's winner.** With two plugins overriding the same record and neither mastering the other, LOOT's order between them is not guaranteed; a patch mastering both is the only order-proof fix. A FaceGen patch built against the winner alone was beaten when LOOT sorted another overrider after it, and 10 NPCs stayed headless. Build from the live `plugins.txt` (scan every active plugin's headers for the FormIDs), not a remembered load order, and check in game with the console's "Base last changed by". Merge only the fields you mean to change onto the current winner; copying a donor record whole reverts later fixes (USSEP, AI Overhaul).
+
+**A plugin that swaps `.esp` for `.esl` across a major version does not keep its FormIDs.** Changing a dependent patch's master header from the old name to the new one leaves dangling references to records the new version deleted (Tamrielic Distribution 1.x -> 2.0 dropped its `DES_Proxy*` records). Re-target the references to records that still exist.
+
+**Overhauls reuse vanilla FormIDs under new EditorIDs** (Scion, Sacrosanct). Porting a feature from one onto another means copying those records to new FormIDs, never sharing the IDs.
+
+---
+
 ## Crash logs: CrashLogger writes `.LOG`, not `.txt`
 
 Recent CrashLogger versions write crash logs as **`.LOG`** into `Documents/My Games/<game>/SKSE/` and
@@ -1880,6 +1911,10 @@ a denominator can only account for what it was given. Match `crash-*.(txt|log)`
 case-insensitively, and keep the `crash-` prefix so the plugin's own `CrashLogger.log` is not
 counted as a crash.
 
+**Trainwreck** (Nexus 106440) names its dumps by timestamp only (`2026-10-22-22-14-42.log`, no `crash-` prefix) and writes them to `SKSE/Crashlogs/`. `crash-triage.py` reads that subfolder and that name shape; a `crash-*` glob finds none of them.
+
+**First moves on a new CTD (measured 2026-11-02, AE 1.7.104).** Before porting or patching the plugin that changed last: (1) compare the crash signature with and without the suspect, and (2) check every active plugin's MAST records against `plugins.txt`. A CTD right after the main menu at `SkyrimSE.exe+1DCB60` (`mov rax,[rcx+0x30]`, called from `+2DF22B`, `rcx = [PlayerCharacter+0x40] + 0x30`, i.e. the player's base object is null) was identical with and without the blamed DLL; the cause was an enabled patch plugin whose master had been deleted. MO2 deleted it: installing an archive into an existing mod folder with **Replace** removes that folder's files first.
+
 ---
 
 ## AutoMod BSA extract/repack needs `bsarch.exe`
@@ -1892,6 +1927,65 @@ v4 retarget builds into a NEW folder, so move an existing copy across). BSArch a
 `extract --output` folder that does not exist yet (`EInvalidArguments: Folder does not exist`);
 create it first. **It lives under `bin/`, so any `dotnet build` or `clean` of AutoMod wipes
 it** — keep a canonical copy elsewhere and re-place it after a rebuild.
+
+---
+
+## Reading a BSA or plugin header without AutoMod or xEdit (measured 2026-11-04, macOS)
+
+When neither AutoMod's DLL nor `bsarch.exe` is available, an SSE BSA v105 with archive flags 3 (directory and file names, no default compression) reads in about 30 lines of Python: header `<4s8I`; folder records `<QIIQ`; then per folder a bzstring name plus `<QII` file records; then the file-name block (header field 7 is its length). Bit `0x40000000` of a file size toggles compression for that file, and a compressed block starts with its uncompressed size (4 bytes), so asset versions compare by size without extracting. Used to pull two `.pex` out of a 40,643-file BSA and to compare 44k archive entries across a load order.
+
+Header-level plugin parsing is equally small: TES4 MAST subrecords, a GRUP walk, and zlib for records with flag `0x40000`. That was enough for overlap counts, full override chains (767 plugins in a few minutes) and LVLO diffs. It does not replace xEdit's field-level conflict view, and it reads files, not the MO2 VFS.
+
+---
+
+## FOMOD Installers: Authoring and Mod Manager Behaviour (measured 2026-11-01, MO2)
+
+**Archive layout.** `fomod/info.xml` + `fomod/ModuleConfig.xml` + one folder per installable option. Each `<folder source="X" destination=""/>` must name a folder that exists in the archive; a build script should assert the set of `source=` values equals the folders it packs. Exclude OS litter (`.DS_Store`, `Thumbs.db`).
+
+**Schema validation.** `xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd"` is a thin file that `<xs:redefine>`s `http://qconsulting.ca/gemm/ModConfig5.0.xsd`. The gemm schema has `type=" xs:string"` (leading space) on one attribute, which libxml2 refuses to compile. To validate offline: download both with `curl -L` (the plain URL returns a redirect page), strip the space, point the redefine at the local copy, then `xmllint --noout --nonet --schema ModConfig5.0.xsd ModuleConfig.xml`. Well-formed XML is not enough: the schema catches misplaced elements that a mod manager may silently ignore.
+
+**One plugin per setup (variants).** When a patch must master a different set of optional plugins depending on what the user has (patch A, patch B, both; optional addon or not), build one plugin per combination, all with the same file name, each in its own option folder, and let the installer pick. Install exactly one: two copies of the same overrides confuse load-order sorting and double-apply. Tell the user to reinstall when they enable or disable one of the detected plugins: the old variant is then a missing master or loses to a plugin it no longer masters.
+
+**Optional support for another mod: an add-on plugin, not more variants.** When a supported mod is optional and only adds fields to a few records the patch overrides, ship a small separate plugin that masters both the main patch and that mod and copies just those fields on top of the main patch's records. One add-on fits every variant if the main records it touches are identical across variants (assert it in the build). In the FOMOD put it in a `SelectAny` group: `defaultType NotUsable` (greyed out, it would be a missing master) and one pattern `Recommended` (checked) when the mod's plugin is `Active`. In `SelectAny`, MO2 disables only that option.
+
+**Auto-detecting active plugins: the layout that works in MO2.**
+- One visible step, one `SelectExactlyOne` group, one option per variant. Do not hide the choice entirely in `conditionalFileInstalls`: the user then cannot see which variant is installed, and the archive's identical plugin names in several folders read as "installs all of them".
+- Make **exactly one** option `Recommended` for any setup; every other option `Optional`. Never rely on option order to pick among several Recommended ones: MO2's source checks only the first Recommended, yet a real MO2 build preselected the LAST of several.
+- MO2 uses the **first matching pattern** of an option's `dependencyType` (`getPluginDependencyType`). So per option: pattern 1 `Optional` when any detected plugin the option does NOT need is `Active` (an `Or` of `fileDependency state="Active"`), pattern 2 `Recommended` when all plugins it needs are `Active`, default `Optional`. Only positive `Active` checks; no `Missing` / `Inactive` logic needed.
+- **Do not use `Required` for auto-selection** in a `SelectExactlyOne` or `SelectAtMostOne` group: MO2 then disables EVERY option of the group by design, and the user cannot change or even clearly see the selection. `NotUsable` defaults have the same effect on the other options.
+- **Do not gate a patch FOMOD with `moduleDependencies`.** It is a hard gate: one required plugin missing or inactive (no USSEP, Vortex not yet deployed, a merged or renamed plugin) and the installer refuses to run; the user sees only "problem with the fomod". A failing nested `<dependencies operator="Or">` gives MO2's "installation as fomod Failed No conditions were successful in an 'OR' clause" (user report 2026-11-02, both target plugins installed but not active). Let the plugin's masters and the game's missing-master warning do the gating.
+- MO2 answers `fileDependency` for `.esp/.esm/.esl` from its live plugin list: a plugin present but disabled is `Inactive`, so "enable first, then install" belongs in the instructions.
+
+**Two independent choices without duplicating the auto-detect group** (a user pick x an auto-detected setup; XSD-valid and simulated for every setup, not yet manager-tested): options install no files and only set `conditionFlags`; `conditionalFileInstalls` (after `</installSteps>`, ModConfig 5.0 order) maps each `flagDependency` pair to one folder. Options keep their `typeDescriptor` patterns, so preselection is unchanged and the choices stay visible. A FOMOD cannot read mod file priority, so a choice that depends on which mod wins loose files must be a user pick with the priority rule in its description.
+
+**Self-check before handing it to a user.** Write a small evaluator over `ModuleConfig.xml` (And/Or over `fileDependency`, first-match patterns, defaultType) and run it over every Active/Inactive/Missing combination of the detected plugins: assert the install is refused exactly when it should be and that exactly one option is Recommended, the right one. XSD validation plus this simulation still do not prove a manager's behaviour; one real install test per manager does.
+
+**Mod name shown by MO2.** The installer window title is MO2's guess from the archive file name, set before `info.xml` is read. For a file name without a Nexus `-<modid>-` part, MO2 keeps only letters, `_` and spaces up to the first other character (`Foo - Bar Patch.zip` becomes `Foo`). In a real MO2 build the Name box also kept that guess although `info.xml` had `<Name>`. For a Nexus download MO2 uses the `.meta` mod name (the page title), so users are unaffected; for local testing, type the name. Fill `<Author>`, `<Version>` and `<Website>`: MO2 shows them on the installer page.
+
+**Vortex:** not measured. Its installer evaluates the same XML, but preselection and `Required` behaviour may differ; test once before release.
+
+---
+
+## Releasing: MO2 `meta.ini` and the Nexus API
+
+- (Source-read 2026-11-03, not verified with a real install.) MO2 keeps a `meta.ini` bundled at the archive root, then overwrites only installationFile, repository, author, uploader, uploaderUrl, nexusFileStatus, plus gameName/modid/version when the download's `.meta` supplies them. A manually added zip has a blank `.meta` (`version=0.0.0.0`), so the bundled version is lost. `url` + `hasCustomURL=true` set "Visit web page". Quote values containing commas (QSettings reads them as lists).
+- (Measured 2026-11-01.) Nexus API v1 `/games/<domain>/mods/<id>.json` returns the full description (BBCode) but **not** the Permissions tab; fetching the page itself gets a Cloudflare 403. Permission terms differ between sibling pages by the same author: read each page, never copy one page's terms to another.
+- (Source-read 2026-11-03, not yet run live.) Nexus v3 (`https://api.nexusmods.com/v3`, `apikey` header) can only add a new version to an **existing** file (`POST /mod-files/{file_id}/versions`); the mod page and its first file are made on the website. Upload: `POST /uploads/multipart` -> PUT parts to the presigned URLs (no key) -> POST the completion XML -> `POST /uploads/{id}/finalise` -> poll `GET /uploads/{id}` until `available`. Changelog: `POST /mods/{id}/changelogs` (appends). Source: `Nexus-Mods/upload-action` commit 98532f7.
+
+---
+
+## CommonLibSSE-NG & SKSE Plugin Rebuild Traps
+
+Lessons from rebuilding SE/AE plugins on AE 1.7.104 (2026-10-27 to 2026-11-04); not exercised on VR:
+
+- **Rebuild the DLL the enabled mod ships.** Hash the DLL in the folder that has the `+` line in `modlist.txt` and match its PDB source list to a commit before rebuilding. Rebuilding from an older or different Nexus version's source can crash on launch if forms or INI configurations drifted.
+- **Two mods shipping the same DLL name.** Tell them apart by the `SKSEPlugin_Version` struct bytes (`+0x304` `versionIndependenceEx`, `+0x308` `versionIndependence`) and the version field in `skse64.log` / `sksevr.log`. A `no version data` line means the DLL exports `SKSEPlugin_Query` but not `SKSEPlugin_Version` (an older 1.5.97 build): often another mod bundles an outdated copy (e.g. Simply Knock SE shipping a pre-AE `PapyrusUtil.dll` overriding a newer one by priority). Delete the bundled copy in the mod manager. Triage: `grep "no version data" skse64.log`, find every copy in `mods/`, compare exports with `llvm-readobj --coff-exports`.
+- **Manual CommonLibSSE-NG install (no vcpkg port).** `cmake --install` omits `cmake/CommonLibSSE.cmake` (defines `add_commonlibsse_plugin`) and the generated config lacks `find_dependency(directxtk)`: copy the `.cmake` into `lib/cmake/CommonLibSSE/` and add `find_dependency(directxtk CONFIG)` before the targets include. Configure with `-DENABLE_SKYRIM_VR=OFF -DBUILD_TESTS=OFF` (`extern/openvr` is an empty submodule); a VR build was not tried.
+- **14.x/15.x API breaks.** No `UNICODE` (use `GetModuleHandleW` for wide literals); `NOMINMAX` must precede `RE/Skyrim.h`; `ActorValueOwner::RestoreActorValue(modifier, av, v)` is removed (the 2-argument versions force the sign; use virtual `ModActorValue(modifier, av, v)`); `RE::DebugNotification` is removed (`RE::SendHUDMessage::ShowHUDMessage`).
+- **`SKSE::AllocTrampoline(n)` runs once** (`std::once_flag`) and fixes the total size. A helper that calls `AllocTrampoline(14)` before each `write_call<5>` leaves a 14-byte trampoline; the second hook fails with `SKSE/Trampoline.cpp(164): Failed to handle allocation request`. Call it once after `SKSE::Init` with 14 x the number of call hooks plus margin.
+- **`add_commonlibsse_plugin(... STRUCT_DEPENDENT)`** emits `versionIndependenceEx = 0x2` and `versionIndependence = 0x1` (no `StructsPost629`), which tells SKSE the plugin uses pre-1.6.629 structs. Plugins that read version-shifted structs through `RUNTIME_DATA_ACCESSOR`s pick the layout at runtime and should keep the default Independent (`0x3` / `0x1`).
+- **A post-build `copy_if_different` to `$SKYRIM_MODS_FOLDER` / `$SKYRIM_FOLDER`** in a mod's `CMakeLists.txt` writes straight into the live install. Configure with those variables unset.
+- **The 1.6.1170 `SkyrimSE.exe` is SteamStub-encrypted** (`.text` is noise), so code cannot be diffed across builds without an unpacked copy. For hardcoded-RVA plugins, map Format 2 (1.6.1170) offset -> ID -> Format 5 offset; Format 5 is `uint32 rva[id]` from file offset 96.
 
 Similarly, `audio wav-to-xwm` needs `xWMAEncode.exe`, which is not bundled. It is often simpler to call
 `xWMAEncode` directly than to go through AutoMod.
@@ -2128,3 +2222,734 @@ pin bump, grep `tests/` for the old value and run the anchor test (about 6 s for
 OBSERVED: Claude Code stopped a background `until ...; sleep` wait when the machine ran low on memory (a game was running); the detached
 `pwsh -File` queue it was watching was unaffected. Launch overnight queues as detached processes that write their own log, and keep the agent's
 background shell for short waits.
+
+---
+
+## Vanilla Game Mechanics & Reference (baseline that gameplay mods edit)
+
+Purpose: when **sorting a modlist** or judging whether two gameplay mods conflict, an agent needs
+the vanilla baseline those mods retune — the combat/crafting math, the records that get overridden,
+and the bugs that make a mod a "fix" (which must load after what it patches). This is the vanilla
+game data, not tooling. Sourced from **UESP** (`en.uesp.net`), the same primary source the rest of
+this file uses; the fandom wiki `elderscrolls.fandom.com` 403s automated fetches and is not used.
+
+Conventions that apply throughout:
+- **FormIDs are written as 6-digit local IDs under the `00` (Skyrim.esm) prefix**, the way UESP/CK
+  write them. The leading master byte is load-order dependent — see *Vanilla Record Reference* for
+  how to read it and why the same local ID under a different prefix is a different master.
+- Exact IDs must be confirmed in xEdit at edit time; this section names which records collide, not
+  an exhaustive dump.
+- **Verified on flat Skyrim SE/AE only.** VR was not checked for any of this; treat the formulas and FormIDs as unverified for VR.
+- Older related entries: *Useful Vanilla MGEFs / Reference FormIDs* (in the VR Papyrus findings
+  above) and *Reused vanilla records can carry gating Conditions*.
+
+### Combat & Defense Formulas
+
+**Weapon damage**
+
+```
+displayed damage = Round[ (base damage + smithing increase)
+                          * (1 + skill/200)
+                          * (1 + perk effects)
+                          * (1 + item effects)
+                          * (1 + potion effect)
+                          * (1 + Seeker of Might bonus) ]
+```
+- Skill: each point of One-handed / Two-handed / Archery = +0.5% damage for the player, **+2% for
+  NPCs** (NPCs scale ~4x faster off skill).
+- Perk effects = `0.2 * Armsman/Barbarian/Overdraw rank` (rank 5 = `+1.0`, i.e. x2). Multiplicative
+  with skill and smithing, so all three multiply together.
+- Blessing of Auriel adds into `item effects`; Blessing of Boethiah adds into `potion effect`.
+- Smithing increase must be the unrounded value before the Round step.
+- Attack speed: `attacks per second = speed / 0.867` (base one-hand attack = 13/15 s).
+  Representative speeds: dagger 1.3 (1.50 APS), sword 1.0 (1.154), war axe 0.9, mace 0.8 (0.923);
+  greatsword 0.7, battleaxe 0.7, warhammer 0.6.
+- Dual-wield off-hand attacks take 50% longer, so dual-wield is ~+33% DPS, not +100%. The off-hand
+  weapon's speed governs the whole dual power attack.
+
+Power attack damage (both hands summed):
+
+```
+damage = SUM_hands[ displayed * (1 + PAB) * (1 + PAP) * (1 + DPAP) * DPAM ]
+PAB = 1 if power attacking            (=> x2 base)
+PAP = 0.25 with Savage Strike / Devastating Blow
+DPAP = 0.5 with Dual Savagery
+DPAM = 1.5 (right) / 3 (left) on a dual power attack, else 1
+```
+
+| Attack | Damage | Stagger | Stamina |
+|---|---|---|---|
+| Single power attack | x2 | x1 | x1 |
+| Dual-wield power (3 hits) | x1.5/hit | x1 | x0.5/hit |
+| Bash | x0.5 | x0.5 | x1 |
+| Power bash | x1.5 | x1.5 | x1 |
+| Unarmed power | x2 | x0.5 | x1 |
+
+- Power attack stamina = `(40 + weapon weight * 2) * attack cost multiplier * (1 - perk effect)`;
+  Fighting Stance = -25%. Only 1 Stamina is required to power attack (stamina does not scale damage).
+- Representative base damage: Iron Sword 9, Steel Sword 10, Daedric Sword 16, Dragonbone Sword 19;
+  Iron Dagger 2, Daedric Dagger 6; Iron Greatsword 16, Dragonbone Greatsword 27; Iron Warhammer 24,
+  Daedric Warhammer 31, Dragonbone Warhammer 33. Silver weapons: +20 flat vs undead/werewolves
+  (not scaled by skill, but scaled by perks/enchantments).
+- Difficulty multipliers (multiplied onto everything): Novice NPC x2 / player x0.5; Apprentice
+  x1.5 / x0.75; Adept x1 / x1; Expert x0.75 / x1.5; Master x0.5 / x2; Legendary x0.25 / x3. Applies
+  to followers and summons too.
+- NPC-only `Extra Damage` perks multiply NPC damage independent of skill: x1.12, 1.5, 2, 2.5, 3,
+  3.5, 4, 4.5, 5, 6 (2H column usually ~1 lower). Enemy-overhaul mods frequently edit these perk
+  records.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Weapons , https://en.uesp.net/wiki/Skyrim:Damage ,
+https://en.uesp.net/wiki/Skyrim:One-handed*
+
+**Critical hits**
+
+- Crit extra damage = typically `floor(base damage * 0.5)`, stored per-weapon in the weapon record;
+  it **bypasses armor entirely**.
+- Crit damage is NOT modified by tempering, weapon skill, Armsman/Barbarian/Overdraw, Fortify skill
+  effects, sneak attacks, power attacks, ammo type, or draw power. It scales only with base damage —
+  so perks like Bladesman are near-worthless on smithed high-base weapons (~3% expected gain at top
+  tier).
+- Deep Wounds / Bladesman / Critical Shot: rank 1 = 10% chance, rank 2 = 15% chance and
+  `floor(base*0.5)*1.25`, rank 3 = 20% chance and `floor(base*0.5)*1.5`.
+- Critical Charge / Great Critical Charge (sprinting power attack) = double crit, 100% chance =
+  `2 * floor(base * 0.5)`; stacks on top of the x2 power attack. With Bladesman/Deep Wounds taken,
+  the double crit only fires 10/15/20% of the time instead (net lower average sprinting-PA damage).
+- Sneak attacks and crits are computed separately and stack.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Damage*
+
+**Armor rating and damage reduction**
+
+```
+item rating  = CEILING[ (base rating + item quality) * (1 + 0.4 * (skill + skill effect)/100) ]
+                * (1 + Custom Fit / Well Fitted) * (1 + Matching Set) * (1 + Juggernaut / Agile Defender)
+shield rating = same but WITHOUT the armor-perk term
+displayed rating = SUM(item ratings) + shield rating + armor effects (flesh spells, Lord Stone, ...)
+DR% = displayed rating * 0.12 + 3.00 * (number of armor pieces worn, incl. shield)
+```
+- Each armor point = 0.12% reduction. Hidden bonus = **+25 per piece worn** (4 pieces + shield =
+  +125 total), not shown in the UI; the `+3.00 * pieces` term is that hidden bonus as a percentage
+  (25 * 0.12 = 3). Clothing/robes get no hidden bonus.
+- **Hard cap: 80% physical DR** (x5 effective health). Total rating needed = 667 (= 567 displayed +
+  100 hidden for 4 pieces; = 542 displayed + 125 hidden with a shield). The famous **567 displayed**
+  (no shield) / **542 displayed** (with shield) cap values.
+- Armor reduces **physical damage only**; magic is unaffected.
+- Durability scales as `100 / (100 - DR%)` — hyperbolic, so late points of rating are worth more
+  until the cap.
+- NPC armor formula uses skill coefficient **1.5 instead of 0.4**, and 1.5625 instead of 1.25 for
+  the unison perk.
+- Smithing: Legendary quality adds +10 per piece, +20 for chest (total +50 for a matched set). With
+  100 skill/perks, any tempered heavy set + shield caps; any tempered light set from Elven up +
+  shield caps.
+- `Dragonhide` = 80% flat physical ignore (armor-independent). Mage Armor perk multiplies flesh
+  spells x2 / x2.5 / x3 **only if no ArmorLight/ArmorHeavy keyword item is worn** (shields don't
+  count against it); Mage Armor boosts are "armor effects", not "skill effects" — they enter after
+  the CEILING term.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Armor , https://en.uesp.net/wiki/Skyrim:Alteration*
+
+**Armor penetration**
+
+Effective rating = `rating * (1 - penetration)`; i.e. to still hit 80% DR you need
+`total rating = 667 / (1 - penetration)`.
+
+| Source | Penetration |
+|---|---|
+| Bone Breaker (mace, 1h) rank 1/2/3 | 25% / 50% / 75% |
+| Skullcrusher (warhammer, 2h) rank 1/2/3 | 25% / 50% / 75% |
+| Enhanced Crossbow (Dawnguard) | 50% of armor ignored |
+
+- UESP's exact stated figures: vs 75% penetration you need **2,668 total rating**
+  (`667 / (1-0.75)`) = **2,268 displayed** (`567 / (1-0.75)`).
+- INFERRED (same arithmetic, UESP does not print these): vs 50% (crossbows) → 1,334 total /
+  **1,234 displayed with 4 pieces** (the commonly quoted 1234) / 1,209 with shield; vs 25% → 889
+  total / 789 displayed. The often-quoted "~860" figure does **not** appear on the UESP Armor page —
+  treat it as UNSOURCED/community; UESP's only printed penetration-adjusted numbers are 2,668 and
+  2,268.
+- Penetration is multiplicative against rating, so it counters the hidden +25/piece too.
+  Bone Breaker/Skullcrusher do nothing vs unarmored targets (dragons, animals, Dwemer constructs have
+  0 armor rating). Critical hits ignore armor outright (above) — a separate layer from penetration.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Armor , https://en.uesp.net/wiki/Skyrim:One-handed*
+
+**Blocking**
+
+```
+Blocked% = (base term) * (1 + Shield Wall perk) * (1 + sum of 4 Fortify Block enchants)
+           * (1 + Fortify Block potion) * (fBlockPowerAttackMult if power attack)
+shield base term = 45 + 0.2 * BASE (untempered) shield armor rating * (1 + BlockSkill * 1.5 / 100)
+weapon base term = 30 + 0.2 * ENEMY weapon base damage * (1 + BlockSkill * 1.5 / 100)
+fBlockPowerAttackMult = 0.66
+```
+- **Block cap 85%**; stacks multiplicatively with armor's 80% → up to **97% total physical
+  mitigation**.
+- Shield Wall actual values are 10/20/30/40/50% per rank (in-game text is wrong for ranks 1,2,4,5;
+  USSEP corrects it).
+- Weapon blocking vs creatures/unarmed enemies is flat (enemy weapon base damage = 0): 30% base,
+  45% with 5/5 Shield Wall — Block skill does nothing in that matchup. Only the *enemy's* weapon
+  base damage matters, not yours (warhammers are "easier to block" than daggers).
+- Only base shield armor rating counts for the block formula (tempering still counts for the armor
+  formula). Any shield with base rating ≥ 23.33 hits 85% vs normal attacks at 100 skill + 5/5
+  Shield Wall. Power attacks need an extra ~52% Fortify Block (from 4 enchants/potions) to still
+  reach 85%, because of the x0.66.
+- **Elemental Protection** (Block tree): blocking with a shield reduces incoming fire/frost/shock
+  **health** damage by 50%, from any direction; stacks with other spell resistances; does not reduce
+  magicka/frost-stamina drain.
+- Bashing: `weapon bash = base damage * 0.5 * [0.1 + (BlockSkill/100) * (0.5-0.1)] * 3 (power bash)
+  * 5 (Deadly Bash)`; `shield bash = base armor rating * 0.5 * [0.1 + (BlockSkill/100) *
+  (0.25-0.1)] * 3 * 5`. Enemy variants use 0.25/0.05 caps (lower). Stamina: block ~small, bash 35,
+  power bash 55. Fortify Block does NOT increase bash damage.
+- Block hitbox = 35° cone (`fCombatHitConeAngle = 35`).
+- Bugs worth knowing when patch state matters: vanilla Deflect Arrows forces 85% block vs everything
+  (fixed by Official Patch 1.5); NPC `fCombatBlockTimeMax` ≈ 10,000 s (fixed by USSEP 4.3.4 → 16 s).
+- Block skill XP scales with damage actually mitigated; shield block = 2x weapon-block XP, shield
+  bash = 5x weapon-bash XP.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Block*
+
+**Magic / elemental resistance stacking**
+
+- `Magic Resistance` reduces offensive spell damage by the displayed %; **stacks additively across
+  sources but hard-capped at 85%** (for the player; NPCs/followers with 100% are truly immune).
+- Sources: Alteration perk Magic Resistance 10/20/30% (ranks at 30/50/70 skill), plus Resist Magic
+  enchantments/potions/racial effects — all funnel into the same 85% cap.
+- Elemental resists (Resist Fire / Frost / Shock) are each **capped at 85% separately** and are
+  applied **multiplicatively after** Resist Magic: UESP's worked example — 100-pt fire spell with
+  Resist Magic 85% → 15 pts, then Resist Fire 85% → 2.25 pts = **97.75% total**. So magic resist and
+  elemental resist are two distinct layers, not one pool.
+- **Spell Absorption is rolled before Magic Resistance** and is a chance to nullify the whole spell
+  and refund its magicka (Atronach Stone/perk paths to 100% absorption). Absorption, Resistance and
+  Absorb Magicka do not stack as one mechanic — absorption just wins first when it procs.
+- Weakness to Magic (alchemy only, no disenchantable enchantment) amplifies damage from magical and
+  elemental attacks; weakness-from-poison is not re-amplified by an existing weakness on the target,
+  but potion-side-effect and enchantment sources can amplify themselves and each other; Weakness to
+  Poison amplifies Weakness to Magic.
+- **MOD SORT: any mod that raises or rewrites the 85% caps, reorders resistance application, or edits
+  the Magic Resistance perk (00053128-2a) conflicts with every other mod touching those —
+  load-order-last wins. Elemental-resist enchantment overhauls and enemy "immune to X" overhauls
+  fight the same records.**
+
+*Source: https://en.uesp.net/wiki/Skyrim:Magic_Overview , https://en.uesp.net/wiki/Skyrim:Resist_Fire ,
+https://en.uesp.net/wiki/Skyrim:Weakness_to_Magic , https://en.uesp.net/wiki/Skyrim:Alteration*
+
+**Spell cost**
+
+```
+Cost = base cost * skill multiplier * perk multiplier * equipment multiplier * dual cast multiplier
+skill multiplier = 1 - (skill / 400)^0.65        (= ~0.5939 at skill 100, i.e. -41%)
+equipment multiplier = 1 - (sum of Fortify <school> enchantment reductions)   // 4x25% = 0 cost
+dual cast = x2.8 cost for x2.2 effect (vs two single casts: 2.0 cost for 2.0 effect)
+```
+- Perk multipliers: Novice/Apprentice/Adept/Expert/Master tier perks halve cost (x0.5), stacking
+  with the skill term. Dual-cast Destruction = +10% damage for +40% magicka; Healing = +10% heal
+  rate for +40% magicka.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Magic_Overview*
+
+**Stagger**
+
+- Stagger chance = base chance x weapon stagger multiplier x attack-type multiplier. Weapon stagger
+  values: dagger 0, sword 0.75, war axe 0.85, mace 1.0, greatsword 1.1, battleaxe 1.15, warhammer
+  1.25 (Stalhrim non-dagger melee +0.1), bows 0 (Power Shot: 50% chance of 0.25), crossbows 0.75.
+- Attack-type multipliers (from the power attack table): normal/power single x1, bash x0.5, power
+  bash x1.5, unarmed power x0.5.
+- Perk/shout stagger sources: Impact (Destruction dual cast), Power Shot (Archery), Power Bash,
+  Force Without Effort (improves overall stagger %), Unrelenting Force word 3 / Cyclone / Staff of
+  Hasedoki → ragdoll instead of stagger. Stagger interrupts the current action; ragdoll adds a
+  knockdown + recovery delay.
+- UNSOURCED: the numeric *base* stagger chance per attack is not stated on these UESP pages; only
+  the multipliers above are sourced. The vanilla `stagger` column on weapon records is the
+  per-weapon multiplier.
+- **MOD SORT: stagger overhauls typically edit the weapon records' stagger values, the Power
+  Bash/Impact perks, and/or the base-chance game settings — two stagger mods stacked will
+  double-apply or overwrite; last in load order wins.**
+
+*Source: https://en.uesp.net/wiki/Skyrim:Combat , https://en.uesp.net/wiki/Skyrim:One-handed ,
+https://en.uesp.net/wiki/Skyrim:Weapons*
+
+**Where these numbers live (combat-specific; perk/MGEF FormIDs: see Vanilla Record Reference)**
+
+- Weapon damage: weapon records (DNAM base damage, stagger, speed), skill/perk records (Armsman,
+  Barbarian, Overdraw, Bone Breaker, Skullcrusher), `crExtraDamage*` NPC perks, difficulty
+  multipliers. Two damage overhauls editing the same perk record = last plugin wins; a
+  global-formula mod (e.g. one that changes `skill/200`) usually stacks multiplicatively with
+  record-level mods (different layers), but two record-level mods on the same weapon/perk conflict.
+- Armor: ARMR item ratings, the effect magnitude chain (skill coefficient 0.4/1.5, hidden +25/piece,
+  0.12%/point, 80% cap), flesh spells + Mage Armor perk, Dragonhide. Smithing-cap mods and
+  armor-rating overhauls both edit these; a "raises the armor cap" mod must edit the cap itself,
+  conflicting with any other cap mod.
+- Block: `fBlockPowerAttackMult` (0.66), `fShieldBaseFactor` (45), `fBlockWeaponBase` (30),
+  `fWeaponBash*`/`fShieldBash*`/`fStamina*Bash*` game settings, Shield Wall perk, Deflect Arrows
+  bug state (Official Patch 1.5 / USSEP dependent).
+- Resistances: 85% magic cap, 85% per-element cap, application order (absorb → magic resist →
+  elemental resist). Enchantment overhauls raising resist caps conflict with each other and with any
+  mod enforcing vanilla caps.
+- Criticals: crit damage is per-weapon record data and armor-bypassing; a mod adding "crit scales
+  with X" changes the engine-side crit path and conflicts with weapon-record crit edits.
+- General rule: game *settings* (gameSetting records) and *perk records* are single-owner — if two
+  gameplay mods touch the same one, the later plugin in load order wins the whole record, not a
+  merge; formula mods and record mods stack multiplicatively only when they touch different layers.
+
+### Crafting & Leveling Formulas
+
+Reference for judging whether crafting mods stack, overwrite, or fight. Smithing (cross-checked
+against UESP Leveling: `XP = quantity * (25 + 3*value^0.65)`; tempering
+`XP = 3.8 * Δvalue^0.5 * Δquality^0.5`) is consistent with the combat section above.
+
+**General skill-XP machinery (all skills):**
+
+```
+skill XP to next level  = SkillImproveMult * (currentlevel-1)^1.95 + SkillImproveOffset
+skill XP from one use   = SkillUseMult * baseXP + SkillUseOffset
+character XP per skillup = new skill level * fXPPerSkillRank (1.0)
+```
+
+| Skill | UseMult | ImproveMult | ImproveOffset | baseXP per craft |
+|---|---|---|---|---|
+| Alchemy | 0.75 | 1.6 | 65 | 1 per gold value created + 1 flat per successful potion |
+| Enchanting | 900 | 1 | 170 | 1 per item enchanted (flat); disenchant 1 per 400 gold of enchantment value; recharge 0.05/0.1/0.2/0.4/0.6 (Petty→Grand) |
+| Smithing | 1 | 0.25 | 300 | 25 + 3*value^0.65 per item |
+
+- Total XP 15→100: Smithing ~91,601; Enchanting ~278,852; Alchemy ~428,568. Enchanting XP is
+  completely independent of item value, enchantment, or soul size — flat per craft; Fortify
+  Enchanting potions do NOT increase Enchanting XP. Alchemy XP is dominated by the gold-cost term
+  (flat part is +1, vs Smithing's flat +25 — this is why pre-1.5 iron-dagger spam worked for
+  Smithing but Alchemy always rewarded high-value potions). XP multipliers (Mage/Thief/Warrior Stone,
+  Well Rested, etc.) stack multiplicatively on these.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Leveling , https://en.uesp.net/wiki/Skyrim:Alchemy ,
+https://en.uesp.net/wiki/Skyrim:Enchanting*
+
+**Alchemy — magnitude:**
+
+```
+magnitude = round(Base_Mag * 4 * (1 + AlchemySkill/200)
+                  * (1 + FortifyAlchemy%/100) * (1 + AlchemistPerk%/100)
+                  * (1 + PhysicianPerk%/100) * (1 + Benefactor%orPoisoner%/100)
+                  * (1 + SeekerOfShadows%/100))
+```
+- `4` = game setting `fAlchemyIngredientInitMult`; the skill term is
+  `1 + (fAlchemySkillFactor-1)*skill/100` with `fAlchemySkillFactor=1.5` (+0.5%/level, +50% at
+  100). Only ONE of Benefactor (+25, potions with beneficial effects) / Poisoner (+25, poisons) is
+  ever active; Physician (+25) only on Restore Health/Magicka/Stamina. Alchemist perk is
+  0/20/40/60/80/100. Duration-scaled effects (Invisibility, Paralysis, Slow, Waterbreathing only)
+  apply the same multiplier to `Base_Dur`; all other effects have fixed duration.
+- `Base_Mag`/`Base_Dur` come from the EFIT field of the **highest-priority ingredient** (priority =
+  effect cost in CK data), not averaged. Non-standard ingredients override: River Betty 2.5x Damage
+  Health magnitude, Crimson Nirnroot 3x, Deathbell 1.5x, Jarrin Root 100x mag / 158.5x value,
+  Nirnroot 12.6x gold value only.
+
+**Alchemy — gold value (= XP driver):**
+
+```
+gold_cost = floor(Base_Cost * max(Magnitude^1.1, 1) * (Duration>0 ? (Duration/10)^1.1 : 1))
+```
+- Multi-effect potions: cost computed per effect, total = sum. Highest-cost effect decides name and
+  potion-vs-poison classification — decided BEFORE perks are applied. Purity perk zeroes
+  opposing-sign effects, which *reduces* gold value. Hidden internal magnitudes/durations still feed
+  the cost formula (e.g. Cure Disease value rises with "magnitude" that does nothing in-game). Known
+  engine bug: many Damage Health ingredients use a 1s duration in the cost calc instead of 0s.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Alchemy , https://en.uesp.net/wiki/Skyrim:Alchemy_Effects*
+
+**Enchanting — apparel magnitude:**
+
+```
+vanilla:        net = base * soulMult * skillMult(effective skill) * (1+EnchanterPerk) * (1+specificPerk) * (1+SeekerOfSorcery)
+with USKP:      net = base * soulMult * skillMult * (1+FortifyEnchPotion) * (1+EnchanterPerk) * (1+specificPerk) * (1+SeekerOfSorcery)
+
+skillMult = 1 + (skill/100) * (skill/100 - 0.14) / 3.4     // quadratic; +25.29% at skill 100
+effective skill (vanilla) = base skill + FortifyEnchanting potion magnitude + Ahzidal's Genius(10) + Haunting Gift(10 each)
+```
+- Soul multiplier: Grand 1, Greater 2/3, Common 1/3, Lesser 1/6, Petty 1/12. Soul charge capacity:
+  3000/2000/1000/500/250. Base magnitude = value at Grand soul, 0 skill, no perks.
+- The vanilla/USKP split is real and behavioral: vanilla adds the potion into *skill* (subject to the
+  quadratic and the 200 asymptote); USKP applies it as a separate multiplier and stops
+  Necromage/Fortify-Restoration from touching enchanting. A USKP-style patch and a gameplay overhaul
+  that edits the same Fortify-X enchantment records conflict directly — patch must load after.
+- Enchanter perk +20/40/60/80/100%; Fire/Frost/Storm Enchanter and Insightful (skill enchants)/Corpus
+  (Health/Magicka/Stamina + regen) each +25%; these ADD together and also stack with Destruction
+  Augmented perks on weapons (up to x2.25 for two elements). Stalhrim: Frost/Resist Frost/Chaos +25%.
+- Weapon max magnitude uses the same formula (soul size excluded unless it would drop charges below
+  1), then x(1+Destruction perk); charges per use
+  `= 3 * (baseCost * mag/maxMag)^1.1 * (1 - sqrt(skill/200))`; net uses = soul capacity / charges per
+  use. Skill 200 = infinite charges (asymptote); 110 (Ahzidal's Genius) is the vanilla cap; Fortify
+  Enchanting is deliberately NOT skill for this reason.
+- Caps/ceilings: max natural enchant multiplier ~3.132x (100 skill, all perks, Grand soul);
+  ~4.21875x with a Fortify Enchanting potion without exploits. Enchanted-item value = base item
+  value + enchantment value (additive) — and a documented bug makes the *monetary value* of player
+  enchantments DECREASE as Enchanting skill rises (charges are recalculated at use time, not craft
+  time: a weapon enchanted under a huge potion drains fast when later used without it).
+- Disenchant: destroys item, teaches effect only (magnitude irrelevant), one-time per effect;
+  XP = enchantment gold value/400. Fortify Enchanting potion window is 30s; the item-rename screen
+  pauses the timer (standard speedrun micro-optimization).
+
+*Source: https://en.uesp.net/wiki/Skyrim:Enchanting , https://en.uesp.net/wiki/Skyrim:Enchanting_Effects*
+
+**Alchemy <-> Enchanting feedback loop:**
+
+```
+Fortify Alchemy gear -> stronger Fortify Enchanting potion -> stronger Fortify Alchemy enchantments -> ...
+```
+- Amplifiers in the loop: 5 gear slots possible only via the Falmer-helmet+circlet bug (otherwise 4);
+  Seeker of Shadows (+10% alchemy) / Seeker of Sorcery (+10% enchants) are mutually exclusive but
+  freely swappable at the Sallow Regent Black Book; Ahzidal's Genius +10 Enchanting skill; vampire
+  Necromage +25% to all self enchantments/potions (bug; USKP removes it). Fortify Restoration potions
+  re-amplify active Fortify Skill potions on re-equip — that is the famous unbounded exploit;
+  multiple same-type Fortify Skill potions do NOT stack, but Restoration boosts any of them.
+- Community/UESP stated ceilings (page carries verification-needed flags — treat as INFERRED): max
+  Fortify Enchanting potion +40% legit vanilla, +61% with falmer+circlet and Necromage; one tester
+  reached 122% after ~8 loop rounds without Necromage; USKP world: 44% max potion, 114% with Rare
+  Curios ingredients, 127% with Haunting Gift, strongest Fortify Alchemy enchant +68%, +272% total
+  across four pieces.
+- Loop has diminishing returns because each multiplier is (1+x) applied to a base that itself grew;
+  there is no hard engine cap on potion magnitude or enchant magnitude — balance is entirely a data
+  decision, which is exactly what crafting overhauls change.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Enchanting ("Maximizing Enchantment Power") ,
+https://en.uesp.net/wiki/Skyrim:Leveling (exploit section) ,
+https://en.uesp.net/wiki/Skyrim:Alchemy_Effects (stacking rules)*
+
+**MOD-SORTING implications (crafting):**
+
+- Every formula above is data-driven, not code: `fAlchemyIngredientInitMult`, `fAlchemySkillFactor`,
+  per-effect MGEF `BaseCost`/`BaseMag`/flags (`PowerAffectsMagnitude`, `NoMagnitude`,
+  `NoDuration`), per-ingredient INGR `EFIT` entries, ENCH base magnitudes/costs, and the perk records.
+  Two crafting overhauls that edit the same MGEF/INGR/ENCH/perk records do NOT merge — plain record
+  conflict, last plugin in load order wins, silently. There is no "stacking" of two magnitude
+  retunes.
+- The pivot records gameplay mods fight over: the **Fortify Alchemy / Fortify Enchanting / Fortify
+  Smithing / Fortify Restoration MGEFs and their enchantment entries** (vanilla has no obtainable
+  Fortify Enchanting enchantment — only the potion MGEF; mods adding the enchantment edit
+  MGEF+ENCH+keyword sets). A mod that retunes these changes the entire loop's balance point; load
+  order between it and USKP-style patches (which altered the vanilla Necromage/Fortify-Restoration
+  enchanting interactions) is decisive — patches after overhauls, always.
+- Enchantment slot legality is keyword-driven (which body slots accept which effect). Mods that add
+  enchantable slots or new Fortify-Skill enchantments edit KYWD+ENCH; conflicts show up as
+  "enchantment missing from station" rather than stat fights.
+- Ingredient strength multipliers (Giant's Toe 5.9x Fortify Health cost, Salmon Roe, Rare Curios
+  doubling ingredients) live on INGR records — an alchemy overhaul overriding INGRs and a mod adding
+  new ingredients both touch the same records if they edit the same ingredients; USSEP already
+  overrides many INGR/MGEF records, so any overhaul must load after it or inherit its fixes/bugs
+  unpredictably.
+- XP-rate changes (mods making crafting level slower) edit the Actor Value skill-use/improve
+  multipliers and/or game settings — global ActorValue data, so *any* two mods touching them conflict
+  even if they target different skills, depending on how they bundle (raw AV edits vs scripts).
+
+*Source: https://en.uesp.net/wiki/Skyrim:Alchemy_Effects ,
+https://en.uesp.net/wiki/Skyrim:Enchanting_Effects , https://en.uesp.net/wiki/Skyrim:Leveling
+(record-level mapping INFERRED from formula-to-CK-field correspondence)*
+
+Skipped: full per-effect Base_Cost/Base_Mag tables (389-line UESP tables — fetch
+`Skyrim:Alchemy_Effects` when exact numbers are needed). Risk: several loop-ceiling numbers (+61%,
+122%) sit on UESP pages flagged "verification needed" — treat as community-computed.
+
+### Vanilla Record Reference (FormIDs & EditorIDs)
+
+Recognize which vanilla records a gameplay mod overrides or depends on, and predict who wins.
+
+**How to read a FormID**
+
+- A FormID is **8 hex digits**: the **first 2 digits = master index byte**, the last **6 digits =
+  local ID** inside the file that owns the record. Treat it as a *local ID + load-order-dependent
+  prefix*, never an absolute address.
+- The master byte is the index of the owning master **in the referencing plugin's own master list**
+  (for Skyrim.esm records, in the game's load order). `000cb40d` and `010cb40d` are two different
+  records — the same local ID under a different prefix means a different master file.
+- Conventional prefixes (vanilla SSE/AE order): `00` = Skyrim.esm (never changes), `01` = Update.esm,
+  `02` = Dawnguard.esm, `03` = Hearthfires.esm, `04` = Dragonborn.esm. Load any plugin between them
+  and the DLC prefixes shift; always read the prefix from the actual load order.
+- `ff` = runtime/dynamically allocated (summons, script-created items) — never document, never patch.
+- `FE` = light/ESL-flagged plugins (incl. Creation Club): the master byte becomes `FE`, followed by a
+  **3-hex-digit load-order slot** (`000`–`FFF`) and a 3-hex local ID (`FE000ABC`). The slot is
+  assigned by plugin order (CC content orders alphabetically among itself), so it **varies per
+  install** — treat any `FExxxxxx` ID as "per-install, confirm with `help` or xEdit".
+- **EditorIDs are stable across load orders; FormID prefixes are not.** When diagnosing which record
+  a mod touched, match on EDID (`Enchanter00`, `CraftingSmithingForge`).
+- Conflict rule for everything below: records are **overwritten whole; field-by-field merging does
+  not exist**. The last plugin in load order that overrides a record wins *all* of it; two mods
+  touching the same record need a conflict-resolution patch (forward both changes).
+- IDs below are 6-digit local IDs under the `00` Skyrim.esm prefix. Perk IDs cross-checked against
+  Skyrim.esm (EDID → FormID); keyword/MGEF IDs likewise.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Form_ID*
+
+**Key gameplay perks (PERK records)**
+
+Most-overridden vanilla perk records. FormID = **rank 1**.
+
+| Perk (EDID) | FormID | Who typically overrides |
+|---|---|---|
+| SteelSmithing | 000cb40d | USSEP, crafting overhauls (CCO/CCOR), armor-set mods |
+| ArcaneBlacksmith | 0005218e | crafting overhauls, magical-item tempering patches |
+| DragonArmor | 00052190 | crafting overhauls, DLC-item add-ons |
+| Armsman00 (One-handed) | 000babe4 | combat overhauls (Valhalla etc.), perk overhauls |
+| Bladesman / BoneBreaker / HackAndSlash | 0005f56f / 0005f592 / 0003fffa | weapon-specialization rebalances, perk overhauls |
+| DualFlurry / DualSavagery | 00106256 / 00106258 | combat overhauls, dual-wield fixes |
+| SavageStrike / CriticalCharge / FightingStance | 0003af81 / 000cb406 / 00052d50 | combat overhauls |
+| Barbarian / Champion'sStance / DevastatingBlow / GreatCriticalCharge | 000babe8 / 00052d51 / 00052d52 / 000cb407 | combat overhauls |
+| DeepWounds / Sweep / Warmaster / Skullcrusher | 0003af83 / 0003af9e / 0003afa7 / 0003af84 | combat overhauls, bleed-mod patches |
+| ShieldWall / DeflectArrows / ElementalProtection / BlockRunner | 000bccae / 00058f68 / 00058f69 / 00106253 | combat overhauls, shield mods |
+| PowerBash / DeadlyBash / DisarmingBash / ShieldCharge / QuickReflexes | 00058f67 / 0005f594 / 00058f66 / 00058f6a / 000d8c33 | combat overhauls, VR mods (timed-block rewrites) |
+| Stealth00 / Backstab / DeadlyAim / AssassinsBlade | 000be126 / 00058210 / 001036f0 / 00058211 | stealth overhauls, sneak-damage rebalances |
+| MuffledMovement / SilentRoll / ShadowWarrior | 00058213 / 00105f24 / 00058214 | stealth overhauls |
+| Overdraw00 / CriticalShot / PowerShot / SteadyHand / Bullseye | 000babed / 00105f1c / 00058f62 / 00103ada / 00058f64 | archery overhauls, combat overhauls |
+| AugmentedFlames / AugmentedFrost / AugmentedShock | 000581e7 / 000581ea / 00058200 | magic/damage rebalance mods, perk overhauls |
+| IntenseFlames / DeepFreeze / Disintegrate | 000f392e / 000f3933 / 000f3f0e | elemental-balance mods |
+| Impact / DestructionDualCasting | 000153d2 / 000153cf | spell-cost/stagger rebalances |
+| Novice–Master tier perks (Destruction) | 000f2ca8, 000c44bf, 000c44c0, 000c44c1, 000c44c2 | spell-cost overhauls (analogous rows per school) |
+| Regeneration (Restoration) | 000581f8 | heal-rate rebalances, vampire mods, perk overhauls |
+| Necromage / Recovery / Respite / WardAbsorb | 000581e4 / 000581f4 / 000581f9 / 00068bcc | magic overhauls, undead/vampire mods |
+| Enchanter00 / InsightfulEnchanter / CorpusEnchanter / ExtraEffect | 000bee97 / 00058f7e / 00058f7d / 00058f7f | enchanting overhauls, exploit-fix patches |
+| Alchemist00 / Physician / Benefactor / Poisoner / Experimenter / Purity | 000be127 / 00058215 / 00058216 / 00058217 / 00058218 / 0005821d | alchemy overhauls (condition on KYWDs — see keyword cluster) |
+| MagicResistance / Atronach / Stability / MageArmor30 | 00053128 / 000581f7 / 000581fc / 000d7999 | magic overhauls, standing-stone mods (Atronach stone shares this perk) |
+| Juggernaut00 / WellFitted / Conditioning / MatchingSet(Heavy) / ReflectBlows | 000bcd2a / 00058f6f / 00058f6d / 00107832 / 00105f33 | armor-rating rebalances, perk overhauls |
+| AgileDefender00 / CustomFit / MatchingSet(Light) / Unhindered / WindWalker | 000be123 / 00051b1b / 00051b17 / 00051b1c / 00105f22 | armor-rating rebalances, perk overhauls |
+| Haggling00 / Merchant / Fence / Investor / MasterTrader | 000be128 / 00058f7a / 00058f79 / 00058f7b / 001090a5 | economy overhauls, merchant mods |
+| MysticBinding / OblivionBinding / Summoner / Atromancy / TwinSoulS | 000640b3 / 000d799c / 00105f30 / 000cb419 / 000d5f1c | conjuration rebalances, bound-weapon mods |
+| Unbreakable / TreasureHunter / ExtraPockets / Poisoned / PerfectTouch | 00058209 / 00105f26 / 00096590 / 00105f28 / 00058205 | thief-tree overhauls, lockpick mods |
+
+**Rank note (critical for perk overhauls):** every rank of a multi-rank perk is a **separate PERK
+record with its own FormID**, EDID = base + skill-level suffix. UESP tables list rank 1 only.
+Verified examples: `Armsman00 000babe4`, `Armsman20 00079343`, `Armsman40 00079342`,
+`Armsman60 00079344`, `Armsman80 00079345`; `Alchemist00 000be127` → `Alchemist80 000c07cd`
+(20/40/60 = 000c07ca/cb/cc); `MageArmor30/50/70 = 000d7999 / 000d799a / 000d799b`; same pattern for
+`Overdraw`, `Juggernaut`, `Stealth`, `ShieldWall`, `Barbarian`, `AgileDefender`, `Enchanter`. A mod
+that "changes Armsman" but not its 4 higher-rank records silently keeps vanilla values on ranks 2–5 —
+search by EDID prefix in xEdit, never by one FormID.
+
+**Load-order consequence:** perk records are whole-record conflicts. A perk overhaul (Ordinator,
+Vokrii, similar) overrides the vanilla PERK records it touches and must load **after** USSEP and
+after any balance patch that edits the same perk — or, if the balance patch must win, the overhaul's
+version of that whole perk record must be forwarded into a patch. A patch ordered *before* the
+overhaul silently loses every field. Condition-list edits are the usual casualty.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Smithing , https://en.uesp.net/wiki/Skyrim:One-handed ,
+https://en.uesp.net/wiki/Skyrim:Block , https://en.uesp.net/wiki/Skyrim:Sneak ,
+https://en.uesp.net/wiki/Skyrim:Archery , https://en.uesp.net/wiki/Skyrim:Destruction ,
+https://en.uesp.net/wiki/Skyrim:Restoration , https://en.uesp.net/wiki/Skyrim:Enchanting ,
+https://en.uesp.net/wiki/Skyrim:Alchemy , https://en.uesp.net/wiki/Skyrim:Alteration ,
+https://en.uesp.net/wiki/Skyrim:Heavy_Armor , https://en.uesp.net/wiki/Skyrim:Light_Armor
+(rank records cross-checked against Skyrim.esm)*
+
+**Key magic effects (MGEF records)**
+
+**The single most important fact:** vanilla keeps **three parallel MGEF records per effect** — one
+channel for spells/abilities, one prefixed `Alch` for potions/poisons, one prefixed `Ench` for gear
+enchantments. Editing one channel changes only that channel. A "potions are too strong" fix belongs
+in `Alch*`; a "this enchantment is too strong" fix in `Ench*`; they are different records and do
+**not** conflict with each other.
+
+| Effect family | Alchemy channel (potion/poison) | Enchantment channel (gear) | Spell / ability channel |
+|---|---|---|---|
+| Damage Health | AlchDamageHealth 0003eb42 | (damage-on-contact handled per weapon ENCH) | DamageHealthConcSelf 000f4995 |
+| Damage Magicka / Stamina | AlchDamageMagicka 0003a2b6 / AlchDamageStamina 0003a2c6 | EnchMagickaDamageFFContact 0005b44f / stamina-damage variant 0005b450 | — |
+| Damage Magicka/Stamina Regen (poisons) | AlchDamageMagickaRate 00073f2b / AlchDamageStaminaRate 00073f2c | AbDamageStaminaRateVisible 0001729d / AbDamageHealRateVisible 0001729b | AbDamageHealRate 000c1e8c, AbDamageStaminaRate 000c1e8d, AbDamageMagickaRate 000a1a45 |
+| Restore Health / Magicka / Stamina | AlchRestoreHealth 0003eb15, AlchRestoreStamina 0003eb16, AlchRestoreMagicka 0003eb17 | (heal-on-armor via EnchFortifyHealRate…) | RestoreHealthFFSelf 0001cea6, RestoreMagickaFFSelf 000f4996, RestoreStaminaFFSelf 0002f3ba |
+| **Regenerate** (Fortify * Rate) | AlchFortifyHealRate 0003eb06, AlchFortifyMagickaRate 0003eb07, AlchFortifyStaminaRate 0003eb08 | EnchFortifyHealRateConstantSelf 0007a0f8, …MagickaRate 0007a0fd, …StaminaRate 0007a105 | AbFortifyHealRate 00057b49, AbFortifyMagickaRate 0005312b (standing stones, race/ability) |
+| **Resist** Fire/Frost/Shock/Magic/Poison/Disease | AlchResistFire 0003eaea, AlchResistFrost 0003eaeb, AlchResistShock 0003eaec, AlchResistMagic 00039e51, AlchResistPoison 00090041 | EnchResistFireConstantSelf 00048c8b, …Frost 00048f45, …Shock 00049295 (EDID typo `ResistShockt`), …Magic 000b7a35, …Disease 00100e60, …Poison 000ff15e | AbResistFire 00024314, AbResistFrost 00024315, AbResistShock 00024318, AbResistMagic 00053124, AbResistPoison 000aa024, AbResistDisease 000e40d3, AbResistDamage 000cab90 |
+| **Absorb** Health/Magicka/Stamina | — (no vanilla absorb potions) | EnchAbsorbHealthFFContact 000aa155, …Magicka 000aa156, …Stamina 000aa157 | AbsorbHealthConcAimed 0008d5be, AbsorbMagickaConcAimed 000f1cfe, AbsorbStaminaConcAimed 000f1d01 |
+| Elemental damage (Fire/Frost/Shock) | — | EnchFireDamageFFContact 0004605a, EnchFrostDamageFFContact 0004605b, EnchShockDamageFFContact 0004605c | FireDamageFFAimed 00012f03, FrostDamageFFAimed 0001cea2, ShockDamageFFAimed 0001cea8; concentration: 00013ca9 / 00013caa / 00013cab |
+| Paralysis | AlchParalysis 00073f30 | EnchParalysisFFContact 000acbb6 | ParalysisFFContact 0006f702 |
+| Cure Disease / Poison | AlchCureDisease 000ae722, AlchCurePoison 00109add | — | CureDiseaseEffect 000fbff5 |
+| **Fortify skill** block | `AlchFortify*` **0003eb18–0003eb29** (Alchemy 0003eb18, OneHanded 0003eb19, TwoHanded 0003eb1a, Archery 0003eb1b, Block 0003eb1c, Smithing 0003eb1d, HeavyArmor 0003eb1e, LightArmor 0003eb1f, Pickpocket 0003eb20, Lockpicking 0003eb21, Sneak 0003eb22, Barter 0003eb23, Alteration 0003eb24, Conjuration 0003eb25, Destruction 0003eb26, Illusion 0003eb27, Restoration 0003eb28, Enchanting 0003eb29) | `EnchFortify*ConstantSelf` **0007a0f2–0007a106** (Block 0007a0f3, Carry 0007a0f4, Conjuration 0007a0f5, Destruction 0007a0f6, HeavyArmor 0007a0f9, LightArmor 0007a0fb, Lockpicking 0007a0fc, OneHanded 0007a0ff, Pickpocket 0007a100, Restoration 0007a101, Smithing 0007a102, Sneak 0007a103, Speechcraft 0007a104, StaminaRate 0007a105, TwoHanded 0007a106) + Alchemy 0008b65c, Health 000493aa, Magicka 00049504, Stamina 00049507, ArmorRating 00017120 | ability/race forms (e.g. AbFortify*) |
+
+**Who edits which channel, and the load-order consequence:**
+- *Alchemy/poison balance mods, ingredient overhauls* → `Alch*` MGEF (magnitude, duration, BaseCost
+  drives potion gold value).
+- *Enchanting overhauls, item enchant rebalances, Summermyst-style additions* → `Ench*` MGEF and the
+  ENCH records that reference them.
+- *Combat overhauls, magic overhauls, spell mods* → the spell-channel MGEF (and separately the SPEL
+  records — a mod can change a spell without touching its MGEF).
+- *Standing stone / race / vampire / werewolf mods* → the `Ab*` (ability) MGEF, e.g. Atronach stone
+  and `AbFortifyHealRate`.
+- *USSEP* overrides scattered MGEF across all channels.
+- Same-channel edits collide: last plugin wins the entire MGEF (magnitude, cost, flags, keyword list
+  KWDA). Different channels never collide. Because a single MGEF's KWDA drives alchemy perk logic, a
+  mod that rewrites `KWDA` on `Alch*` effects can break Physician/Benefactor/Poisoner even if
+  magnitudes look fine — check KWDA in patches.
+
+*Source: https://en.uesp.net/wiki/Skyrim:Damage_Health ,
+https://en.uesp.net/wiki/Skyrim:Fortify_One-handed , https://en.uesp.net/wiki/Skyrim:Regenerate_Health ,
+https://en.uesp.net/wiki/Skyrim:Resist_Fire , https://en.uesp.net/wiki/Skyrim:Absorb_Health ,
+https://en.uesp.net/wiki/Skyrim:Alchemy_Effects , https://en.uesp.net/wiki/Skyrim:Magical_Effects
+(channel IDs cross-checked against Skyrim.esm: UESP's `alchid` = MGEF with `Alch` prefix,
+`enchid` = MGEF with `Ench` prefix, `id` = spell-channel MGEF)*
+
+**Key keywords (KYWD records)**
+
+No UESP page lists KYWD FormIDs — IDs below verified against Skyrim.esm (EDID → FormID). Keywords are
+referenced, not overridden, by most mods: they appear in KWDA lists on items, MGEFs, perks and
+conditions.
+
+| Keyword (EDID) | FormID | Who injects / retargets it |
+|---|---|---|
+| CraftingSmithingForge | 00088105 | crafting overhauls; forge-menu condition on COBJ recipes |
+| CraftingSmithingSharpeningWheel | 00088108 | tempering distribution mods |
+| CraftingSmithingArmorTable | 000adb78 | tempering distribution mods |
+| CraftingSmithingSkyforge | 000f46ce | Skyrim content mods (Skyforge exclusives) |
+| CraftingSmelter / CraftingTanningRack / CraftingCookpot | 000a5cce / 0007866a / 000a5cb3 | station-relocation and Hearthfire-style mods |
+| WICraftingSmithing / WICraftingSmithingTempering / WICraftingAlchemy / WICraftingEnchanting | 0004f680 / 0004f6fd / 0004f6e6 / 0004f6dd | crafting-menu/requisition mods |
+| WeapTypeSword / WarAxe / Dagger / Mace / Bow / Staff | 0001e711 / 0001e712 / 0001e713 / 0001e714 / 0001e715 / 0001e716 | weapon mods (adding a weapon to a skill perk's condition), perk overhauls changing weapon-type conditions |
+| WeapTypeGreatsword / Battleaxe / Warhammer / BoundArrow | 0006d931 / 0006d932 / 0006d930 / 0010d501 | as above |
+| WeapMaterialWood / Iron / Steel / Dwarven / Elven / Glass / Orcish / Ebony / Daedric | 0001e717 / 0001e718 / 0001e719 / 0001e71a / 0001e71b / 0001e71c / 0001e71d / 0001e71e / 0001e71f | material-rank mods, tempering/leveled-list mods, perk conditions |
+| WeapMaterialImperial / Draugr / DraugrHoned / Falmer / FalmerHoned / Silver | 000c5c00 / 000c5c01 / 000c5c02 / 000c5c03 / 000c5c04 / 0010aa1a | as above |
+| ArmorHeavy / ArmorLight | 0006bbd2 / 0006bbd3 | **the** armor-type keywords (vanilla has no `ArmorTypeHeavy`); armor mods and perks (Matching Set, Conditioning) match on these |
+| ArmorCuirass / Boots / Helmet / Gauntlets / Shield / Clothing / Jewelry | 0006c0ec / 0006c0ed / 0006c0ee / 0006c0ef / 000965b2 / 0006bbe8 / 0006bbe9 | slot-assignment mods, enchant-slot restrictions |
+| ArmorMaterial* block **0006bbd4–0006bbe7** (contiguous: Daedric 0006bbd4, Dragonplate 0006bbd5, Dragonscale 0006bbd6, Dwarven 0006bbd7, Ebony 0006bbd8, Elven 0006bbd9, ElvenGilded 0006bbda, Leather 0006bbdb, Glass 0006bbdc, Hide 0006bbdd, Scaled 0006bbde, Studded 0006bbdf, ImperialLight 0006bbe0, ImperialStudded 0006bbe1, ImperialHeavy 0006bbe2, Iron 0006bbe3, IronBanded 0006bbe4, Orcish 0006bbe5, Steel 0006bbe6, SteelPlate 0006bbe7) | 0006bbd4–0006bbe7 | armorsmith mods, per-material perk conditions, craft-recipe gating |
+| VendorItemWeapon / VendorItemArmor / VendorItemJewelry / VendorItemArrow | 0008f958 / 0008f959 / 0008f95a / 000917e7 | merchant/loot-list mods |
+| MagicDisallowEnchanting | 000c27bd | mods that block/allow disenchanting or enchanting unique items |
+| MagicAlchRestoreHealth / MagicAlchRestoreMagicka / MagicAlchHarmful / MagicAlchBeneficial | 00042503 / 00042508 / 00042509 / 000f8a4e | referenced by the Physician/Benefactor/Poisoner perk conditions; alchemy overhauls edit them (UESP's published script lists 00042503 twice for restore-health and restore-stamina — treat the stamina entry as suspect, verify in xEdit) |
+| MagicEnchFortifySmithing / MagicAlchFortifySmithing (and siblings) | 00074f6e / 00065a22 | effect-tagging keywords used by perk and enchant conditions |
+
+**Load-order consequence:** a keyword lives inside its owner record's KWDA array. Two mods adding
+*different* keywords to the same vanilla item/MGEF still conflict — the later override's entire KWDA
+wins, so the earlier mod's keyword silently vanishes. Conflicts are common between (a) crafting
+overhauls and (b) armor/weapon packs both tagging the same vanilla items, and between merchant mods
+using `VendorItem*`. Resolution = a patch that unions both KWDA lists. Keyword records themselves
+(the KYWD) are rarely overridden; it is their *presence on other records* that is contested. A mod
+that adds a keyword must load before any patch that forwards record overrides containing it,
+otherwise the reference dangles.
+
+*Source: no UESP page publishes KYWD FormIDs; IDs verified from Skyrim.esm (EDID → FormID).
+Keyword semantics: https://en.uesp.net/wiki/Skyrim:Smithing and MGEF KWDA usage documented in
+https://en.uesp.net/wiki/Skyrim:Alchemy_Effects*
+
+### Vanilla Bug Catalogue (mod-sorting relevant)
+
+Mod-category key: **[USSEP]** = Unofficial Skyrim Special Edition Patch (record-overriding ESP;
+loads right after masters, conventionally first among mods; any later plugin overriding the same
+records clobbers its fix unless it forwards it). **[Official]** = fixed in a Bethesda game update
+(already present on any current SE/AE install — a mod claiming to fix one is redundant or targets
+LE 1.x). **[Fix-mod]** = dedicated community fix mod (ESP and/or SKSE plugin). **[Overhaul]** =
+gameplay overhaul that may also incidentally fix or break the bug.
+
+Load-order doctrine (applies throughout): a USSEP-style fix must load before record-touching gameplay
+mods only if those mods forward its fixes; in practice USSEP goes first and overhauls/patches that
+touch the same records load after it and must be checked with xEdit for the specific records. Two
+mods fixing the same bug via the same record = conflict; keep one (usually load the more specific
+fix after the general patch).
+
+#### Crafting / Smithing
+
+| Bug | Vanilla symptom | Fixed by | Load-order note |
+|---|---|---|---|
+| Notched Pickaxe enchantment inert | Text claims +5 Smithing; effect never applies (a flat skill bonus vanilla never grants) | [USSEP] (USKP 2.0.0) | USSEP override on the weapon record; any mod touching Notched Pickaxe loads after USSEP or forwards the fix |
+| Ancient Knowledge perk wrong | +25% armor applies to ALL armor (not just Dwarven); +15% applied as tempering boost instead of smithing XP | Altered (not fixed) by [Official] 1.9.26; truly fixed by [USSEP] 1.3.1 | USSEP's version changes Dwarven temper behavior vs official patch — armor-balance mods assuming one behavior conflict; check which the user has |
+| Steel Smithing ignores Imperial weapons | Imperial weapons (steel-made) not improvable/forgeable under the perk, though Imperial armor is | [USSEP] 2.0.7 | Record override (keyword on Imperial weapons); conflicts with mods reworking Imperial gear unless patched |
+| Ebony 1H war axe/mace value error | Bad base values: unpatched game has Daedric = Ebony (lighter) for 1H axes/maces | [USSEP] corrects the order; [Official] SE 1.6.1130 separately fixed bad values on Glass Mace/Warhammer, Honed Draugr War Axe, Ebony Mace/War Axe, most daggers | Any weapon/leveling mod reworking these records must load after Update.esm and USSEP, forwarding intended values |
+| Ebony dagger speed too slow | Wrong (slow) speed stat | [Official] 1.5.24 | Redundant on SE — ignore fix mods claiming this |
+| Arcane Blacksmith lost after Legendary reset | Making Smithing Legendary, re-leveling and re-taking Arcane Blacksmith can permanently break tempering of enchanted items | Unfixed (no fix cited on UESP) | Gameplay note; temper-fix mods are [Fix-mod]/[Overhaul], verify individually |
+| Mannequin duplication | Taking armor back from a mannequin without leaving the cell duplicates it; mannequins also "walk" | Duplication: [USSEP] 1.2.4; walking: [Official] SE 1.6.629 (MannequinRace immobile) | Mannequin-placement mods (player homes) edit mannequin refs — load after USSEP; residual dupe in CC Saints & Seducers gear |
+| Double head-slot gear | Falmer Helmet or Ancient Shrouded Cowl lets you equip a second headpiece; Gauldur Amulet a second necklace | Circlet/Cowl: [USSEP] 1.2; Gauldur: [Official] 1.8 | Record fixes; USSEP's Falmer Helm fix is widely forwarded/undone by exploit-retaining mods — an intentional conflict, user choice |
+| Matching Set / Custom Fit fail on certain pieces | Set perks not applied with some armor pieces | [Official] 1.9.26 | Armor mods must set correct armor keywords; keyword errors reintroduce the bug inside the mod's own gear (author responsibility, not load order) |
+| Weightless-stack armor exploit | Equipping one piece from a stack makes the whole stack weightless under Conditioning-like perks | Unfixed | Engine behavior; relevant to carry-weight overhauls |
+
+*Source: https://en.uesp.net/wiki/Skyrim:Smithing , https://en.uesp.net/wiki/Skyrim:Glitches ,
+https://en.uesp.net/wiki/Skyrim:Patch , https://en.uesp.net/wiki/Skyrim:Special_Edition_Patch*
+
+#### Enchanting / Alchemy
+
+| Bug | Vanilla symptom | Fixed by | Load-order note |
+|---|---|---|---|
+| Fortify Restoration loop | Fortify Restoration potions buff Fortify Alchemy gear retroactively → exponential crafting; game-breaking enchantments | [USSEP] 1.3.0 (also recomputes max Fortify Enchanting: 44% base, 114% with Rare Curios; disables Necromage/Fortify Restoration boost to enchanting) | Fundamental balance divergence: overhauls built on USSEP assume the loop is dead; two ecosystems, not load-order-solvable |
+| Necromage-vampire self-boost | Player flagged undead: all self-targeted spells/perks/potions/enchantments +25% magnitude / +50% duration | [USSEP] 1.2.3 | Vampire overhauls (Sacrosanct et al.) deliberately keep/reshape this — they load after USSEP and re-implement it; a "Necromage fix" mod conflicts with them |
+| Recovery perk magnitude frozen wrong | Both Recovery ranks permanently scaled by any Fortify Restoration effect active when the perk is taken | [USSEP] 2.1.3 (recent — older USSEP lacks it) | Version-sensitive: late USSEP fixes don't apply retroactively to taken perks without respec |
+| Corpus Enchanter miscalculation | Fortify Health/Magicka/Stamina magnitudes miscalculated | [Official] 1.1 | Redundant on SE |
+| Fortify Sneak / Lockpick miscalculate | Bonus to current skill miscalculated | [Official] 1.1 | Redundant on SE |
+| Enchanted-item value drops as skill rises | Player-enchanted items' gold value decreases with higher Enchanting (charge-consumption compensation) | Unfixed | Affects economy mods' assumptions; no standard fix |
+| Bond of Matrimony / Linwe's set disenchantable into dead effects | Effects learned but cannot be applied | [USSEP] 1.0 | Record change; enchanting-progression overhauls may load after and restore/rework |
+| Necromancer Robes wrong disenchantment | Yields Fortify Magicka, not Fortify Magicka Regen | Unfixed per UESP | — |
+| Stuck at Arcane Enchanter | Exit soft-locks player | [Official] 1.4.26 | Redundant on SE |
+| Renamed same-effect weapons collapse to one name | Equipping/unequipping renamed variants renames them all | [Official] 1.2 | Redundant on SE |
+| Myrwatch Staff Enchanter 20x XP | Enchanting XP multiplier missing (hidden 95% reduction perk not applied) | [Official] SE 1.6.318 | Redundant on current SE |
+
+*Source: https://en.uesp.net/wiki/Skyrim:Glitches , https://en.uesp.net/wiki/Skyrim:Enchanting ,
+https://en.uesp.net/wiki/Skyrim:Restoration , https://en.uesp.net/wiki/Skyrim:Special_Edition_Patch*
+
+#### Magic / Spells / Perks
+
+| Bug | Vanilla symptom | Fixed by | Load-order note |
+|---|---|---|---|
+| Grand Healing heals enemies' stamina | Healing spells restore stamina to targets that shouldn't get it (undead/daedra/automata) | [USSEP] 2.0.5 | Spell-record overrides; magic overhauls must forward |
+| Respite stamina not applied (Grand Healing, Necromantic Healing, Heal Undead) | Wrong actor/fatigue checks | [USSEP] 4.1.5 | Very recent USSEP version — old installs lack it |
+| Circle of Protection hazard visual desyncs | Visible effect disperses before spell expires | [USSEP] 2.0.8 | Minor; same doctrine |
+| Circle of Protection + Atronach = free magicka | Standing in own CoP with Atronach perk/stone recharges magicka | Unfixed | Relevant to magic-balance mods |
+| Blessing of Talos shows 0% | Active-effects display shows 0% instead of 20% | [Official] SE 1.6.1130 | Redundant on current SE |
+| Marked For Death stacks with itself | Shout stacks improperly (permanent drain) | [Official] SE 1.6.629 (undocumented) | Redundant on current SE; older fix mods obsolete |
+| Twin Souls ignores vampirism | Dead Thrall second-reanimate slot miscounts for vampires | [Official] SE 1.6.629 (undocumented) | Redundant |
+| Magic resistance miscalculation | Resistances not calculated after patch 1.2 | [Official] 1.3.7 (LE-era) | Historical — only unpatched LE 1.2; SE never affected |
+| Falling damage miscalculated on high difficulty | Excessive/incorrect fall damage at high difficulties | [Official] 1.9.26 | Redundant on SE |
+| Ebony Blade perk miscategorization | Improved by wrong-handed perks | [Official] 1.9.26 | Redundant; relevant when evaluating weapon-record mods on LE |
+| Deflect Arrows perk miscalculation | Perk doesn't calculate properly | [Official] 1.5.24 | Redundant |
+| Dragon Aspect blocks enchanting | "Insufficient charge for enchantment" while shout active | Unfixed | — |
+
+*Source: https://en.uesp.net/wiki/Skyrim:Restoration , https://en.uesp.net/wiki/Skyrim:Patch ,
+https://en.uesp.net/wiki/Skyrim:Special_Edition_Patch , https://en.uesp.net/wiki/Skyrim:Enchanting*
+
+#### Combat / Equipment / UI
+
+| Bug | Vanilla symptom | Fixed by | Load-order note |
+|---|---|---|---|
+| Bow damage calculated incorrectly | Wrong bow damage values | [Official] 1.6.87 | Redundant on SE |
+| Limbsplitter rank 3 / Headsman's Axe / Barbarian perk gaps | Battle axes (rank 3) and Headsman's Axe don't get expected perk bonuses | [Official] 1.5.24 / 1.4.15 | Redundant on SE |
+| Hotkey unbind for non-dual-wieldable weapons | Daggers/swords/greatswords un-hotkey when >1 in inventory | Unfixed | Engine/UI; hotkey-manager mods are [Fix-mod] SKSE plugins, no load-order position |
+| 3–10s weapon-switch delay in combat | Especially bow→spell or bow→dual wield | Unfixed | Engine; commonly mitigated by animation/behavior overhauls ([Overhaul], behavior-level, order vs ESP fixes irrelevant) |
+| Arrows/ice spikes stuck in bodies | Projectile meshes never removed | Arrow-in-world cleanup: [Official] 1.5.24; stuck-on-body variant unfixed | — |
+| Projectiles stuck in world never cleaned | Floating arrows accumulate | [Official] 1.5.24 | Redundant |
+| Kill-cam vs projectile mismatch | Cinematic kill plays but projectile misses/misfires | Partially addressed across [Official] 1.5.24/1.6.87 killcam fixes | Killcam-adjust mods are [Fix-mod] SKSE (INFERRED, not UESP-sourced) |
+| Essential NPCs stuck in kneel | Wounded-state essential NPCs never recover | Unfixed by patches | Stagger/behavior mods incidentally help; no load-order implication |
+| Craft-station activation dead click | Station click does nothing, third-person blip | Unfixed | — |
+| Container menu scroll jump | Inventory selection jumps a line while moving items | Unfixed; no vanilla-UI-preserving fix | Relevant to UI mods (SkyUI replaces the container menu wholesale — different mechanism) |
+
+*Source: https://en.uesp.net/wiki/Skyrim:Glitches , https://en.uesp.net/wiki/Skyrim:Patch*
+
+#### Quests
+
+| Bug | Vanilla symptom | Fixed by | Load-order note |
+|---|---|---|---|
+| Blood on the Ice trigger failures | Quest fails to start; Viola/Calixto deaths block progression | Progressive fixes in [Official] 1.4.15 and 1.5.24; residual issues persist in community reports | Dedicated quest-fix mods ([Fix-mod]) override the same quest record USSEP also fixes — load the dedicated fix after USSEP or pick one, never assume both apply. INFERRED on residual specifics |
+| Quest scripts not shutting down | Orphaned running quest scripts accumulate in save | [Official] 1.9.26 | Save-bloat class — see below; script-cleaner mods are [Fix-mod] tools run on saves, not plugins |
+| Oghma Infinium bookshelf/chest reuse | Book reusable via bookshelf placement or container exploit | Container: [Official] 1.3.7; bookshelf: [Official] 1.9.26 | Redundant on SE |
+| Generic items permanently flagged quest items | Item stacks become unusable/undroppable/unsellable | Console workaround vanilla; fixed piecemeal by [USSEP] | USSEP fixes instances, not the class — recurrence after USSEP suggests a mod reintroduced a quest-item flag |
+| Quest-start precondition breaks (class) | Clearing a location/holding an item before a radiant quest starts breaks it (White Phial, Driftshade, Knifepoint Ridge, Forbidden Legend, etc.) | Mass-fixed by [Official] 1.4.15; SE includes all | Quest-alteration mods (The Choice Is Yours, timing/delay mods) can re-introduce precondition conflicts; they load after USSEP and are prime suspects when a radiant quest won't start |
+| Companion/follower state bugs (class) | Followers over-encumbered after rehiring; Companions not equipping better gear; protected companions killable by poison | [Official] 1.9.26 / 1.4.15 | Follower overhauls ([Overhaul]) re-own these records entirely |
+
+*Source: https://en.uesp.net/wiki/Skyrim:Patch , https://en.uesp.net/wiki/Skyrim:Glitches*
+
+#### Engine / Save / Performance / World-state
+
+| Bug | Vanilla symptom | Fixed by | Load-order note |
+|---|---|---|---|
+| Save bloat from non-shutting-down scripts | Saves grow, hitches, eventual corruption risk | [Official] 1.9.26 (quest scripts); [USSEP] (record/scripted-asset corrections incl. removing buggy scripts) | Overhauls adding scripts shift bloat risk; not order-fixable — diagnosis category |
+| Ash piles never clean up | Resurrected-actor ash piles accumulate in cells | [Official] 1.9.26 | Redundant |
+| Cured diseases reappear on reload | Diseases "cured" return after load | [Official] 1.9.29 | Redundant |
+| Sabre cat / fox / snow fox spawns break spawn points | Spawning at a respawn point permanently breaks it | [USSEP] 2.0.0 | Leveled-list/encounter-zone mods must forward or conflict |
+| Harvestable plants revert on reload | Plants reset after 10 days but revert to prior harvested state on cell save/reload | Unfixed | Green Thumb / plant-harvest mods interact; no standard fix |
+| Quicksave CTD after long sessions without a proper save | Quicksave crashes; fixed by making a manual save first | Unfixed (engine) | Relevant to auto-save-tuning mods; SE memory fixes are SKSE-plugin territory (SSE Engine Fixes, Scrambled Bugs, Bug Fixes SSE — [Fix-mod] SKSE DLLs, **no load-order position**, version-pinned; UNSOURCED/community) |
+| Load-order-of-operations on cell load | Load completes before ground/key elements exist; scenery pops; interactables dead | Unfixed | Crash/hitch diagnosis class, not order-fixable |
+| Werewolf-revert / water-shader / dragon-landing / vampiric-grip crashes | Various CTDs | [Official] 1.6.87, 1.7.7, SE 1.2 | All redundant on current SE (1.6.x) |
+| Memory/stability baseline | LE 2GB limit; 4GB LAA in [Official] 1.3.10; SE is 64-bit with its own 1.6.x memory fixes | [Official] | Keep SE fully updated; on LE, LAA + SSME/SKSE memory patch were mandatory (UNSOURCED community memory, LAA mechanism page-cited) |
+| Mannequin/duplicate-reference instability; duplicate NPCs | Duplicate NPCs after load; crash on dark-brotherhood-sanctuary entry | [Official] 1.8.145, 1.9.26 | Redundant |
+| ESL record range (infrastructure, not a bug) | 1.6.1130 doubled ESL range to 4096 records | [Official] | Matters when sorting: an ESL-flagged mod's compatibility with older game versions depends on this; ESPL limits are load-order-capacity-relevant |
+
+*Source: https://en.uesp.net/wiki/Skyrim:Glitches , https://en.uesp.net/wiki/Skyrim:Patch ,
+https://en.uesp.net/wiki/Skyrim:Special_Edition_Patch ,
+https://en.uesp.net/wiki/Skyrim_Mod:Unofficial_Skyrim_Patch*
+
+**Sorting heuristics distilled**
+
+- **USSEP is the anchor**: loads immediately after masters; every record-override mod after it
+  implicitly decides per-record whether USSEP's fix survives (forwarded) or is replaced (overwritten).
+  Two mods "fixing" the same record = per-record winner by order, not coexistence.
+- **A mod that fixes a bug USSEP also fixes** is a conflict candidate only for the shared records —
+  check with xEdit `conflicts` rather than forbidding the mod wholesale.
+- **Overhauls are not fix mods** even when they incidentally fix one bug: they own whole record sets;
+  they load after USSEP and their fixes are side effects.
+- **SKSE-plugin fix mods (SSE Engine Fixes, Scrambled Bugs, Bug Fixes SSE)** never enter the ESP load
+  order; compatibility is game-version pinning, not position. (Community knowledge, not UESP-sourced.)
+- **[Official]-patch fixes are not a mod category at all on SE/AE**: any mod advertising them either
+  targets LE 1.x or pads its description — flag as redundant.
+- Version-sensitivity trap: USSEP fixes tagged with recent versions (2.1.3 Recovery, 4.1.5 Respite) are
+  absent from old USSEP copies; diagnosing "USSEP installed but bug present" requires checking the
+  USSEP version, not just its presence.
