@@ -155,6 +155,11 @@ def test_a_hung_step_fails_by_name_and_the_pool_goes_on(tmp_path, monkeypatch):
     assert pool.gate.failed == ["hung"] and pool.ended == ["hung", "after"]
 
 
+def test_the_install_path_scan_runs_on_every_push():
+    """It scans every test file, and a new test file names no path that maps to it: 14 CI jobs went red on one fixture path."""
+    assert "tests/test_no_real_install_path.py" in _gate().SENTINELS
+
+
 def test_the_real_batch_that_turned_ci_red_is_now_selected():
     """Against the real tests/ tree: the three files CI 41254615914 failed in are picked for the files that changed."""
     g = _gate()

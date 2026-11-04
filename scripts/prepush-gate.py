@@ -53,6 +53,7 @@ SENTINELS = [
     "tests/test_gen_agent_trees.py",       # agent/ -> generated files
     "tests/test_ci_leg.py",                # the CI tripwires
     "tests/test_workflows.py",             # the workflow files
+    "tests/test_no_real_install_path.py",  # scans every test file, so a push that adds one must run it (CI 41754337406)
     # NOT here: tests/test_release_build.py and test_release_payload.py build a release payload per case and ran the
     # gate past its 20-minute step limit (2026-10-31); CI's release-build job runs them on every push, and the pin
     # audits that actually went stale (thirdparty, spriggit) are above. They still run when the push changes them.
