@@ -116,7 +116,8 @@ def _append(path: Path, workspace, event: dict) -> None:
             fh.seek(-1, os.SEEK_END)
             if fh.read(1) != b"\n":            # a torn last line: end it, or this event joins it and is lost too
                 line = b"\n" + line
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0), 0o644)
+    charter._ignore_in_git(path.parent)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0), 0o600)
     try:
         os.write(fd, line)
     finally:

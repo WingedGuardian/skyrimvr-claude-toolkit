@@ -677,9 +677,14 @@ def save_lock_change(parsed) -> str:
             args = e.argv
         if args is None:
             continue
-        pos = _positionals(args)
-        if len(pos) >= 2 and pos[0] == "save-lock" and pos[1] in ("on", "off", "unlock") and not (set(args) & _HELP):
-            return "skyguard save-lock " + pos[1]
+        # Read the words themselves: an option's value or a store_true before the action must not hide it.
+        words = list(args)
+        if "save-lock" not in words or set(words) & _HELP:
+            continue
+        rest = words[words.index("save-lock") + 1:]
+        kept = [w for k, w in enumerate(rest) if not w.startswith("-") and not (k and rest[k - 1] == "--project")]
+        if kept and kept[0] in ("on", "off", "unlock"):
+            return "skyguard save-lock " + kept[0]
     return ""
 
 

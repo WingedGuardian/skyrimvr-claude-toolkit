@@ -297,3 +297,53 @@ def test_a_whitelisted_folder_climbed_out_of_is_not_whitelisted(world):
     a.raw = lambda line: None
     path = install + "/.claude/backups/../../../Docs/My Games/Skyrim VR/Saves/main.ess"
     assert write_rules.decide(path, a, roots=roots, cwd=install, env=os.environ).saves
+
+
+# ---- the review of the fixes
+@pytest.mark.parametrize("command", ["bash tools/skyguard.sh save-lock --forget-missing off", "bash tools/skyguard.sh save-lock --forget-missing on",
+                                     "bash tools/skyguard.sh save-lock --project . off"])
+def test_an_option_before_the_action_does_not_hide_it(world, command):
+    assert judge(world, command)[1] == {"S-SAVE-LOCK"}
+
+
+@pytest.mark.parametrize("command", ["gsudo -d rm -rf Data", "gsudo -i High rm -rf Data", "gsudo --integrity High rm -rf Data", "systemd-run -d rm -rf Data",
+                                     "runuser -l root -c 'rm -rf Data'"])
+def test_wrapper_options_do_not_hide_the_command(world, command):
+    assert judge(world, command)[1] == {"S-DEL-INSTALL"}
+
+
+def test_a_shift_in_a_one_line_case_arm_moves_the_arguments(world):
+    assert judge(world, 'f() { case "$1" in /tmp/x) shift ;; esac; rm -rf "$1"; }; f /tmp/x Data')[0] == "deny"
+
+
+@pytest.mark.parametrize("command", ["rsync a.ini '<C>/'", "scp host:Skyrim.ini '<C>/'"])
+def test_one_named_settings_file_is_not_a_bulk_save_change(world, command):
+    assert judge(world, command, cwd="C:/Temp")[0] == "allow"
+
+
+def test_saves_one_folder_down_still_count(tmp_path):
+    install, config = (tmp_path / "Game").as_posix(), (tmp_path / "Docs/My Games/Skyrim VR").as_posix()
+    os.makedirs(install + "/Data")
+    os.makedirs(config + "/Saves/Profile")
+    open(config + "/Saves/Profile/a.ess", "wb").close()
+    roots = paths.roots(install, "", {"SKYRIM_GAME_ROOT": install, "SKYRIM_CONFIG_DIR": config})
+    assert judge((install, config, roots), "cp -r bk/Saves '<C>/'", "bash", "C:/Temp")[1] == {"S-SAVE-APPROVAL"}
+
+
+def test_an_option_value_is_not_a_script_name():
+    with pytest.raises(ValueError):
+        shell_rules_decide = "python -X utf8 <<'EOF'\nnot python at all\nEOF"
+        writes.scan(shell_rules_decide, shellparse.parse(shell_rules_decide, "bash"), paths.roots("C:/t", "", {"SKYRIM_GAME_ROOT": "C:/t"}), cwd="C:/Temp", env=os.environ)
+
+
+def test_a_delete_and_a_rename_of_one_name_do_not_share_a_destination(world):
+    assert judge(world, "node -e \"fs.rmSync('Data/x.dll'); fs.renameSync('Data/x.dll','Data/y.dll')\"")[1] >= {"S-DEL-INSTALL"}
+
+
+@pytest.mark.parametrize("code, want", [
+    ("from pathlib import Path; Path('Data/a').replace(Path('Data/b'))", "allow"),
+    ("from pathlib import Path; Path('Data/a').replace(Path('C:/tmp/b'))", "deny"),
+])
+def test_a_path_destination_is_read_like_a_string_one(world, code, want):
+    assert judge(world, 'python -c "' + code + '"')[0] == want
+

@@ -2059,10 +2059,11 @@ _WRAPPERS = {
     "chroot": (frozenset(("--userspec", "--groups")), 1),
     "busybox": (frozenset(), 0),
     "toybox": (frozenset(), 0),
-    "gsudo": (frozenset(("-u", "--user", "-d", "--direct", "--loadProfile")), 0),
+    "gsudo": (frozenset(("-u", "--user", "-i", "--integrity")), 0),
     "pkexec": (frozenset(("--user",)), 0),
-    "runuser": (frozenset(("-u", "--user", "-g", "--group", "-G", "--supp-group", "-c", "--command", "-s", "--shell")), 0),
-    "systemd-run": (frozenset(("-u", "--unit", "-p", "--property", "-d", "--description", "--slice", "-E", "--setenv", "-H",
+    "runuser": (frozenset(("-u", "--user", "-g", "--group", "-G", "--supp-group", "-s", "--shell", "-l", "--login", "-w",
+                           "--whitelist-environment")), 0),
+    "systemd-run": (frozenset(("-u", "--unit", "-p", "--property", "--description", "--slice", "-E", "--setenv", "-H",
                                "--host", "-M", "--machine", "--uid", "--gid", "--nice", "--working-directory")), 0),
     "chrt": (frozenset(("-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline")), 1),
     "prlimit": (frozenset(("-p", "--pid", "-o", "--output")), 0),
@@ -2653,13 +2654,13 @@ class _Resolver:
                 argopts, positional = _WRAPPERS[p]
                 k += 1
                 while k < n and v[k].startswith("-") and v[k] != "--":
-                    if p == "flock" and v[k] in ("-c", "--command"):
+                    if p in ("flock", "runuser") and v[k] in ("-c", "--command"):
                         break
                     k += 2 if v[k] in argopts else 1
                 if k < n and v[k] == "--":
                     k += 1
                 k += positional
-                if p == "flock" and self._reparse_after_c(k):  # flock FILE -c CMD
+                if p in ("flock", "runuser") and self._reparse_after_c(k):  # flock FILE -c CMD, runuser -l U -c CMD
                     return self.made
                 if p == "watch":                                # watch joins its words and runs `sh -c` on them
                     if k < n:
@@ -3434,7 +3435,7 @@ _TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))   # printf
 _PLAIN_ARG = re.compile(r"[A-Za-z0-9_./:@%+,=~-]+")
 _POSITIONAL = re.compile(r"\$(?:\{([1-9])\}|([1-9])|\{?([@*])\}?)")
 # In command position only: `echo shift` moves nothing.
-_ARGS_MOVED = re.compile(r"(?:^|(?P<lead>[;&|({\n]))[ \t]*(?:(?:then|do|else|elif|builtin|command|!)[ \t]+)*(?:shift(?:[ \t]+(?:(?P<count>[0-9]+)|(?P<computed>[^\s;&|)}]+)))?"
+_ARGS_MOVED = re.compile(r"(?:^|(?P<lead>[;&|({\n)]))[ \t]*(?:(?:then|do|else|elif|builtin|command|!)[ \t]+)*(?:shift(?:[ \t]+(?:(?P<count>[0-9]+)|(?P<computed>[^\s;&|)}]+)))?"
                          r"|(?P<set>set[ \t]+--?))(?=$|[;&|)}\s])")
 _BRANCHES = re.compile(r"(?:^|[;&|({\s])(?:if|while|until|for|case|select)(?=\s)|&&|\|\|")
 

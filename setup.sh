@@ -625,7 +625,10 @@ pick_3x() {  # $1 = placeholder name, $2 = detected value -> prints the value to
         printf '%s' "$2"
     fi
 }
+TRUE_CONFIG_DIR="$CONFIG_DIR"; TRUE_LOADORDER_DIR="$LOADORDER_DIR"; TRUE_MO2_MODS="$MO2_MODS"; TRUE_MO2_OVERWRITE="$MO2_OVERWRITE"
+CARRIED_HAND_EDITED=""
 if [ -f "$MIG_ENV" ]; then
+    CARRIED_HAND_EDITED=$( set -a; . "$MIG_ENV" >/dev/null 2>&1; printf '%s' "${SKYRIM_3X_HAND_EDITED:-}" )
     echo ""
     echo "Paths carried from your 3.x install ($MIG_ENV):"
     CONFIG_DIR=$(pick_3x CONFIG_DIR "$CONFIG_DIR")
@@ -889,8 +892,12 @@ keep_hand_set() {  # $1 = key in skyrim-paths.env, $2 = detected value -> prints
     fi
 }
 _keep() {  # $1 = key, $2 = name of the variable holding the detected value
-    local detected="${!2}"
-    DETECTED_LINES="$DETECTED_LINES# detected $1=$(sq "$detected")"$'\n'
+    local detected="${!2}" recorded true_name="TRUE_$2"
+    # A 3.x path the user corrected by hand is a hand-set path from now on: the record holds what setup really found, so
+    # the next run keeps it. One setup only ever wrote itself follows detection on the next run.
+    recorded="$detected"
+    if [ "$CARRIED_HAND_EDITED" = 1 ] && [ -n "${!true_name+x}" ]; then recorded="${!true_name}"; fi
+    DETECTED_LINES="$DETECTED_LINES# detected $1=$(sq "$recorded")"$'\n'
     printf -v "$2" '%s' "$(keep_hand_set "$1" "$detected")"
 }
 _keep SKYRIM_CONFIG_DIR CONFIG_DIR
@@ -1301,7 +1308,9 @@ case "$CODEX_STATE/$AGENTS_DOC_STATE" in
     configured/*) CODEX_SUMMARY="hooks-only" ;;
     *) CODEX_SUMMARY="" ;;
 esac
-if [ "$CODEX_SUMMARY" = "both" ]; then
+if [ "$CODEX_STATE" = "incomplete" ]; then
+    echo "  Codex:       INCOMPLETE -- a file under .codex/hooks/ is missing (above), so Codex is NOT guarded. Re-extract the toolkit zip."
+elif [ "$CODEX_SUMMARY" = "both" ]; then
     echo "  Codex:       CONFIGURED -- approve the 2 hooks once in Codex's /hooks; until then Codex runs UNGUARDED."
 elif [ "$CODEX_SUMMARY" = "hooks-only" ]; then
     echo "  Codex:       hooks configured, but AGENTS.md has no paths filled in. To finish: bash setup.sh --agent codex"
@@ -1385,7 +1394,11 @@ echo ""
 echo "  House Carl   -- optional record queries and validated plugin authoring for both agents."
 echo "                  Separate setup: docs/housecarl.md (pinned backend, private environment, explicit order authority)."
 echo ""
-echo "You're ready to go! Start your agent in this folder and ask it about your mods."
+if [ -n "$SETUP_PROBLEMS" ]; then
+    echo "Setup did NOT finish: fix what is listed under Setup INCOMPLETE above, then run bash setup.sh again."
+else
+    echo "You're ready to go! Start your agent in this folder and ask it about your mods."
+fi
 
 # --- Exit status: 0, or 1 when something this run was explicitly asked to do did not happen ---
 # --agent codex names Codex alone: Codex left unconfigured means the run did nothing it was asked for.

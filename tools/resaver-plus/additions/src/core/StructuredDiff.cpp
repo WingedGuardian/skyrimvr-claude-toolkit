@@ -268,8 +268,13 @@ json::Value ChangeDifferences(const SaveFile &before, const SaveFile &after,
         const auto found = quests.find(key(before, f));
         const auto *match = found == quests.end() ? nullptr : found->second;
         if (match && (f.changeFlags != match->changeFlags ||
-                      cf::Body(f) != cf::Body(*match)))
-          j.o["changed"].a.push_back(One(before, f, after, *match));
+                      cf::Body(f) != cf::Body(*match))) {
+          // Raw bytes can differ only because a reference's table index moved; that same form is no change.
+          auto one = One(before, f, after, *match);
+          if (f.changeFlags != match->changeFlags || !one.o["completeA"].b || !one.o["completeB"].b ||
+              one.o["structured"].o["changedCount"].n != 0)
+            j.o["changed"].a.push_back(std::move(one));
+        }
         if (!match)
           j.o["removed"].a.push_back(S(Hex(key(before, f), 8)));
       }

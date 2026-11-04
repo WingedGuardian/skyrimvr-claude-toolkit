@@ -594,3 +594,23 @@ def test_mo2_update_with_a_game_root_config_does_not_stop_after_moving_the_old_f
     assert (old / "ExampleMod.esp").read_bytes() == b"new plugin"
     assert (game / "enblocal.ini").read_bytes() == b"mine\n"
 
+
+def test_mo2_update_does_not_keep_a_file_the_last_install_wrote_unchanged(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    env = env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods)
+    mine = old / "Old.ini"
+    mine.write_bytes(b"shipped\n")
+    records = tmp_path / "records"
+    records.mkdir(parents=True)
+    manifest = "{}  {}\n".format(__import__("hashlib").sha256(b"shipped\n").hexdigest(), mine)
+    (records / "ExampleMod.files.txt").write_text(manifest, encoding="utf-8")
+    r = run(archive(tmp_path, ENTRIES), "--update", "--apply", env=env)
+    assert r.returncode == 0 and not mine.exists(), r.stdout + r.stderr
+
+
+def test_mo2_update_does_not_keep_old_distribution_files(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    (old / "Foo_DISTR.ini").write_bytes(b"Spell = x\n")
+    r = run(archive(tmp_path, ENTRIES), "--update", "--apply", env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
+    assert r.returncode == 0 and not (old / "Foo_DISTR.ini").exists(), r.stdout + r.stderr
+

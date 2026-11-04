@@ -119,6 +119,22 @@ def name_problem(name: str) -> str:
 
 
 KEPT_CONFIG_SUFFIXES = (".ini", ".toml", ".yaml", ".yml", ".cfg", ".json")
+# A mod's own data in a config's clothes: an old copy left behind goes on distributing or patching against the new plugin.
+MOD_DATA_CONFIG = re.compile(r"(?i)(_distr|_kid|_swap|_flm)\.ini$|(^|/)skypatcher/|(^|/)openanimationreplacer/")
+
+
+def previous_install(manifest: Path) -> dict:
+    """{path: sha256} the last install of this mod wrote, from its record; empty when there is none."""
+    try:
+        rows = manifest.read_text(encoding="utf-8").splitlines()
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for row in rows:
+        sha256, _, path = row.partition("  ")
+        if path and re.fullmatch(r"[0-9a-f]{64}", sha256):
+            out[path] = sha256
+    return out
 
 
 def records_dir() -> Path:
@@ -475,6 +491,7 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
         if old_folder is not None:
             header.append("# UPDATE: the previous mod folder {} is kept whole at {}".format(replacing, old_folder))
         planned = ["PLANNED  {}".format(target_of(p)) for p in todo]
+        shipped_before = previous_install(manifest) if old_folder is not None else {}   # before this run's record replaces it
         record(header + ["# STATUS: in progress"] + planned, initial=True)
 
         aside, written = None, []
@@ -502,14 +519,17 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
                 planned_here = {q[1] for q in todo}
                 extra = [replacing / f.relative_to(old_folder) for f in old_folder.rglob("*")
                          if f.is_file() and f.suffix.lower() in KEPT_CONFIG_SUFFIXES
-                         and replacing / f.relative_to(old_folder) not in planned_here]
+                         and not MOD_DATA_CONFIG.search(f.relative_to(old_folder).as_posix())
+                         and replacing / f.relative_to(old_folder) not in planned_here
+                         and shipped_before.get(str(replacing / f.relative_to(old_folder))) != sha(f)]
                 for dest in keep + extra:
                     src_old = old_folder / dest.relative_to(replacing)
                     if src_old.is_file():
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(str(src_old), str(dest))
                 for dest in extra:
-                    print("  KEPT {} (your config; the new archive does not hold it)".format(triage.clean(str(dest))))
+                    print("  KEPT {} (not in the new archive, and not as the last install wrote it, so it may be yours; delete "
+                          "it if it is an old file of the mod)".format(triage.clean(str(dest))))
                     header += ["# KEPT: {}  {}".format(sha(dest), dest)]
 
             bad = 0

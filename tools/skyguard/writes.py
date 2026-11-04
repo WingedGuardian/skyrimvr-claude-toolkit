@@ -484,7 +484,7 @@ def _python_write_targets(code: str) -> List[str]:
                 out.append(parent)
             if parent is not None and func.attr in ("rename", "replace"):     # Path(x).rename(y): both change
                 out.append(_CopyWord(parent, moved=True))
-                dest = literal(node.args[0]) if node.args else None
+                dest = (literal(node.args[0]) or path_argument(node.args[0])) if node.args else None
                 out += [_CopyWord(dest, parent)] if dest else []
             if isinstance(func.value, ast.Name) and modules.get(func.value.id, func.value.id) in ("io", "builtins", "os",
                                                                                                   "shutil"):
@@ -527,7 +527,15 @@ def _script_reads_stdin(e, command: str) -> bool:
         return False
     if any(re.fullmatch(r"-[A-Za-z]*i[A-Za-z]*", w) for w in e.argv) or "PYTHONINSPECT" in command:
         return False
-    return any(not w.startswith("-") for w in e.argv)
+    k = 0
+    while k < len(e.argv):                 # past an option's value: `python -X utf8 <<EOF` names no script
+        if e.argv[k] in ("-X", "-W", "--check-hash-based-pycs"):
+            k += 2
+        elif e.argv[k].startswith("-"):
+            k += 1
+        else:
+            return True
+    return False
 
 
 def _unplaced_save(word: str) -> bool:
@@ -753,13 +761,11 @@ def _settings_hold_saves(physical: str) -> bool:
     wildcard approval could name nothing to approve. A folder that cannot be listed counts as holding some."""
     if not physical:
         return True
-    try:
-        names = os.listdir(physical.rstrip("/\\") + "/Saves")
-    except FileNotFoundError:
-        return False
-    except OSError:
-        return True
-    return any(n.lower().endswith(SAVE_EXTS) for n in names)
+    failed = []
+    for _folder, _dirs, names in os.walk(physical.rstrip("/\\") + "/Saves", onerror=failed.append):   # sLocalSavePath can
+        if any(n.lower().endswith(SAVE_EXTS) for n in names):                                            # name a folder below
+            return True
+    return any(not isinstance(e, FileNotFoundError) for e in failed)
 
 
 def _may_bring_saves(source: str) -> bool:
@@ -998,7 +1004,9 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                                  for s in named)
                 else:
                     bulk_into_saves(dst)
-            elif is_settings_folder(a_bulk, roots) and _settings_hold_saves(targets.physical_operand(e, dst, cwd, env)):
+            elif is_settings_folder(a_bulk, roots) and (
+                    e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _plain_operands(e.argv)[:-1])) and (
+                    _settings_hold_saves(targets.physical_operand(e, dst, cwd, env))):
                 bulk_into_saves(dst, "/Saves")
         for dst, srcs in copy_targets(e):
             # The destination as written AND where it resolves (`cp a.ini x.ini` run inside Data/SKSE/Plugins).

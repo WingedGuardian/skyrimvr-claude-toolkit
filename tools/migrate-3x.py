@@ -719,6 +719,8 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
     if "CLAUDE.md" in verdicts:
         paths, how = extract_paths(norm(src.files["CLAUDE.md"].read_bytes()), known, src.env)
     paths_text = paths_file(paths, how, src.label, src.env) if paths else None
+    if paths_text is not None and verdicts["CLAUDE.md"] == "edited":   # edited: a corrected path outlives this one run
+        paths_text = paths_text.rstrip("\n") + "\nSKYRIM_3X_HAND_EDITED=1\n"
     paths_new = paths_text is not None and state.get("carried_paths") != paths
 
     if not copies and not blocks and not settings_actions and not paths_new:

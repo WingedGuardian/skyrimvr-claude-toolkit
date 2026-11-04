@@ -476,8 +476,11 @@ def interpreter_removals(code: str, python: bool) -> List[Tuple[str, Optional[st
     """(literal name `code` takes away, where a move puts it or None). A move that stays in the same protected area
     is no delete, as `mv Data/a Data/b` is none: an atomic write-then-replace in the install was refused as one."""
     if not python:
-        into = {m.group(2): m.group(4) for m in _INTERP_RENAME_LIT.finditer(code)}
-        return [(m.group(2), into.get(m.group(2))) for m in _INTERP_DELETE_LIT.finditer(code)]
+        out = []
+        for m in _INTERP_DELETE_LIT.finditer(code):         # each call's own destination: a delete of the same name has none
+            renamed = _INTERP_RENAME_LIT.match(code, m.start())
+            out.append((m.group(2), renamed.group(4) if renamed else None))
+        return out
     import ast
     if len(code) > 1024 * 1024:
         return []
@@ -518,7 +521,7 @@ def interpreter_removals(code: str, python: bool) -> List[Tuple[str, Optional[st
                                              f.attr in ("rename", "replace")):
             p = path_of(f.value)                                    # Path('Data/x').unlink() / .rename('y')
             if p is not None:
-                moved = f.attr in ("rename", "replace") and node.args and literal(node.args[0])
+                moved = f.attr in ("rename", "replace") and node.args and (literal(node.args[0]) or path_of(node.args[0]))
                 out.append((p, moved or None))
                 continue
         launched = _launched_deletes(node, f, modules, names, literal)

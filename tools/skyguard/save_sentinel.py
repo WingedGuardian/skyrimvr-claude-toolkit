@@ -105,13 +105,17 @@ def marked_folders(project, depth=MARKED_DEPTH):
 
 
 def game_running():
-    command = ["tasklist", "/NH", "/FO", "CSV"] if os.name == "nt" else ["ps", "-eo", "args"]
+    command = ["tasklist", "/NH", "/FO", "CSV"] if os.name == "nt" else ["ps", "-eo", "comm"]
     try:
         out = subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=5,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout.lower()
     except (OSError, subprocess.SubprocessError):
         return False
-    return any(g.lower() in out for g in GAMES)      # off Windows the game runs under Proton: its name is in the arguments
+    # A process's own name, never one in another program's arguments: under Proton the game's process has the exe's name.
+    if os.name == "nt":
+        return any('"' + g.lower() + '"' in out for g in GAMES)
+    names = {line.strip() for line in out.splitlines()}
+    return any(g.lower() in names for g in GAMES)
 
 
 def session_end(save_folder, since):
@@ -170,7 +174,7 @@ def record_unlocked(project, paths_, now=None):
     now = time.time() if now is None else now
     path = exempt_path(project)
     rows = _exempt_rows(path, now)
-    rows.update({str(p): now + UNLOCK_LASTS for p in paths_})
+    rows.update({os.path.abspath(str(p)): now + UNLOCK_LASTS for p in paths_})   # the spelling the sentinel compares
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(rows), encoding="utf-8")
 

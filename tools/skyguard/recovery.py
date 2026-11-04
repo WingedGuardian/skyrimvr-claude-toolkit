@@ -487,6 +487,19 @@ def snapshots(store):
     return list(groups.values())
 
 
+def _unreadable_before(store, wanted):
+    """How many unreadable lines come before the `wanted`-th readable one."""
+    bad = seen = 0
+    for raw in _raw_lines(store):
+        if _parse(raw) is None:
+            bad += 1
+        else:
+            seen += 1
+            if seen == wanted:
+                break
+    return bad
+
+
 def resolve(store, sid):
     """{src: entry} -- the full state a snapshot stands for. A config snapshot holds only what changed, so its state is
     every config path's newest line up to and including that snapshot's; a save snapshot is its own files. Raises
@@ -503,9 +516,10 @@ def resolve(store, sid):
     if first["kind"] == "save":
         state = {entries[i]["src"]: entries[i] for i in mine}
     else:
-        if bad_lines:
-            raise ValueError("recovery snapshot {} cannot be rebuilt: the manifest has {} unreadable line(s), and an older copy "
-                             "would silently stand in for a lost one".format(sid, bad_lines))
+        bad_before = _unreadable_before(store, mine[-1] + 1) if bad_lines else 0
+        if bad_before:
+            raise ValueError("recovery snapshot {} cannot be rebuilt: the manifest has {} unreadable line(s) before it, and an "
+                             "older copy would silently stand in for a lost one".format(sid, bad_before))
         state = {}
         for e in entries[:mine[-1] + 1]:
             if e["kind"] == "config":

@@ -152,7 +152,7 @@ def test_a_save_the_user_unlocked_is_not_locked_again_during_the_hour(tmp_path, 
 def test_an_unlock_lasts_an_hour_then_lapses(tmp_path):
     save_sentinel.record_unlocked(tmp_path, ["C:/x/a.ess"], now=1000.0)
     path = save_sentinel.exempt_path(tmp_path)
-    assert list(save_sentinel._exempt_rows(path, 1000.0 + save_sentinel.UNLOCK_LASTS - 1)) == ["C:/x/a.ess"]
+    assert list(save_sentinel._exempt_rows(path, 1000.0 + save_sentinel.UNLOCK_LASTS - 1)) == [os.path.abspath("C:/x/a.ess")]
     assert not save_sentinel._exempt_rows(path, 1000.0 + save_sentinel.UNLOCK_LASTS + 1)
 
 
@@ -387,6 +387,46 @@ def test_the_changelog_names_the_core_the_lock_pins():
 
 # ---- 4.4, Java: base 10 unless 0x, the same as the native backend
 def test_the_java_backend_does_not_read_a_zero_padded_int_as_octal():
+    """Source text only: no CI job compiles this file. Base 10 unless the value is spelled 0x."""
     text = (REPO / "tools" / "resaver-cli" / "ResaverCLI.java").read_text(encoding="utf-8")
-    assert 'return new Variable.Int(Integer.decode(val))' not in text
+    assert 'val.matches("[+-]?0[xX].*") ? Integer.decode(val) : Integer.parseInt(val)' in text
 
+
+# ---- the review of the fixes
+def test_an_unlock_is_recorded_in_the_spelling_the_sentinel_compares(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    save_sentinel.record_unlocked(tmp_path, ["Save1.ess"], now=1000.0)
+    assert list(save_sentinel._exempt_rows(save_sentinel.exempt_path(tmp_path), 1000.0)) == [os.path.abspath("Save1.ess")]
+
+
+def test_a_corrupt_line_after_a_snapshot_does_not_refuse_it(tmp_path):
+    from skyguard import recovery as rec
+    sid = "20260101_000000-config"
+    row = json.dumps(rec._line("t", 1, "p", "a" * 64, 1, "config", sid, "", "", "", 1, ["p"]))
+    recovery, store = _store(tmp_path, [row, "{ broken"])
+    assert list(recovery.resolve(store, sid)) == ["p"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the POSIX branch")
+def test_a_game_name_in_another_programs_arguments_is_not_the_game(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(save_sentinel.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout="COMMAND\nvim\nbash\n"))
+    assert not save_sentinel.game_running()
+    monkeypatch.setattr(save_sentinel.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout="COMMAND\nSkyrimSE.exe\n"))
+    assert save_sentinel.game_running()
+
+
+def test_a_windows_process_list_matches_the_whole_image_name(monkeypatch):
+    from types import SimpleNamespace
+    if os.name != "nt":
+        pytest.skip("the Windows branch")
+    monkeypatch.setattr(save_sentinel.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout='"notskyrim.exe","1"'))
+    assert not save_sentinel.game_running()
+
+
+def test_the_ledger_folder_ignores_itself_in_git_too(tmp_path):
+    from modding_harness import ledger
+    path = ledger.path_for(tmp_path, "s1")
+    path.parent.mkdir(parents=True)
+    ledger._append(path, str(tmp_path), {"op": "add", "id": "L1", "text": "t"})
+    assert (path.parent / ".gitignore").read_bytes() == b"*\n"

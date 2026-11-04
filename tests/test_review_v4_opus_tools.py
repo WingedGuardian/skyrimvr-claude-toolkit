@@ -84,6 +84,17 @@ def test_a_carried_path_is_used_once(game, tmp_path):
     assert "SKYRIM_CONFIG_DIR='{}'".format(old.as_posix()) not in _paths(game)
 
 
+def test_a_path_corrected_by_hand_in_3x_survives_every_re_run(game, tmp_path):
+    carried = game / ".claude/backups/migrate-3x"
+    carried.mkdir(parents=True, exist_ok=True)
+    mine = tmp_path / "MyProfile"
+    mine.mkdir()
+    (carried / "carried-paths.env").write_text("SKYRIM_3X_CONFIG_DIR='{}'\nSKYRIM_3X_HAND_EDITED=1\n".format(mine.as_posix()), encoding="utf-8")
+    setup_run(game, tmp_path, "--agent", "claude")
+    setup_run(game, tmp_path, "--agent", "claude")
+    assert "SKYRIM_CONFIG_DIR='{}'".format(mine.as_posix()) in _paths(game)
+
+
 @pytest.mark.parametrize("form", ["SKYRIM_MO2_MODS={}", "export SKYRIM_MO2_MODS='{}'", "SKYRIM_MO2_MODS='{}'\r", 'SKYRIM_MO2_MODS="{}"'])
 def test_a_hand_set_path_survives_a_re_run_in_every_spelling_the_guard_reads(game, tmp_path, form):
     setup_run(game, tmp_path, "--agent", "claude")

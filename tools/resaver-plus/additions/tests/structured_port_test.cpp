@@ -188,8 +188,11 @@ int main(){
         auto c=Make();c.formIDs={0x01000456,0x01000123};c.changeForms={qa};
         auto moved=Run("changeform-diff",a,{"second","--quests"},&c);
         Check(moved.o.at("added").a.size()==1&&moved.o.at("removed").a.size()==1,"the same index naming another form is another quest");
-        auto one=Run("changeform-diff",a,{"second","00000123"},&c);
-        Check(!one.o.at("found").b||one.o.at("diff").o.count("refid"),"a single-form diff does not pair unrelated forms silently");
+        auto p=Make();p.formIDs={0x01000123};p.changeForms={qa};auto q=Make();q.formIDs={0x02000123};q.changeForms={qa};
+        auto one=Run("changeform-diff",p,{"second","00000123"},&q);
+        Check(!one.o.at("found").b&&one.o.count("reason"),"a single-form diff does not pair two forms sharing low bytes");
+        auto own=Run("changeform-diff",p,{"second","00000123"},&p);
+        Check(own.o.at("found").b,"a single-form diff still pairs the same form");
     }
     {
         auto sample=Make();bool refused=false;
